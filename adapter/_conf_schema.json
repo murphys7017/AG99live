@@ -1,0 +1,69 @@
+{
+  "persona_id": {
+    "description": "启动时使用的人格名称。留空时使用 AstrBot 当前默认人格。",
+    "type": "string",
+    "default": "",
+    "_special": "select_persona"
+  },
+  "chat_buffer_size": {
+    "description": "缓存最近多少条用户/助手文本对话。",
+    "type": "int",
+    "default": 10,
+    "hint": "用于维护桌面端最近对话缓存。"
+  },
+  "client_uid": {
+    "description": "桌面端前端在 AstrBot 中使用的用户 ID。",
+    "type": "string",
+    "default": "desktop-client"
+  },
+  "client_nickname": {
+    "description": "桌面端前端在 AstrBot 中显示的用户昵称。",
+    "type": "string",
+    "default": "DesktopUser"
+  },
+  "image_cooldown_seconds": {
+    "description": "图片输入冷却时间（秒）。在冷却时间内再次收到图片会直接丢弃，仅保留文本。",
+    "type": "int",
+    "default": 0
+  },
+  "stt_provider_id": {
+    "description": "优先使用的 AstrBot 内置语音识别 Provider。",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider_stt"
+  },
+  "vad_model": {
+    "description": "前端原始音频断句使用的 VAD 模型。",
+    "type": "string",
+    "default": "silero_vad",
+    "options": [
+      "silero_vad",
+      ""
+    ]
+  },
+  "vad_prob_threshold": {
+    "description": "VAD 语音概率阈值。",
+    "type": "float",
+    "default": 0.4
+  },
+  "vad_db_threshold": {
+    "description": "VAD 分贝阈值。",
+    "type": "int",
+    "default": 60
+  },
+  "vad_required_hits": {
+    "description": "VAD 连续命中次数。",
+    "type": "int",
+    "default": 3
+  },
+  "vad_required_misses": {
+    "description": "VAD 连续静音次数。",
+    "type": "int",
+    "default": 24
+  },
+  "vad_smoothing_window": {
+    "description": "VAD 平滑窗口大小。",
+    "type": "int",
+    "default": 5
+  }
+}

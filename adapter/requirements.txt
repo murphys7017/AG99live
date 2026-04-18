@@ -1,0 +1,4 @@
+websockets
+pydub
+numpy
+silero-vad
