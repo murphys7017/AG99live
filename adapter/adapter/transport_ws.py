@@ -6,7 +6,12 @@ from typing import Any, Awaitable, Callable
 
 from astrbot.api import logger
 
-from .payload_builder import build_error, build_control, build_full_text
+from .payload_builder import (
+    build_control_error,
+    build_control_start_mic,
+    build_system_group_update,
+    build_system_server_info,
+)
 
 
 class WebSocketTransport:
@@ -21,6 +26,7 @@ class WebSocketTransport:
         refresh_runtime_settings_async: Callable[..., Awaitable[None]],
         send_current_model_and_conf: Callable[..., Awaitable[None]],
         on_disconnect: Callable[[], Awaitable[None]],
+        session_id_getter: Callable[[], str],
     ) -> None:
         self.host = host
         self.port = port
@@ -30,6 +36,7 @@ class WebSocketTransport:
         self._refresh_runtime_settings_async = refresh_runtime_settings_async
         self._send_current_model_and_conf = send_current_model_and_conf
         self._on_disconnect = on_disconnect
+        self._session_id_getter = session_id_getter
 
         self._ws_server = None
         self._ws_client = None
@@ -52,13 +59,16 @@ class WebSocketTransport:
                 max_size=16 * 1024 * 1024,
             )
             logger.info(
-                "OLV Pet Adapter websocket listening on ws://%s:%s",
+                "AG99live websocket listening on ws://%s:%s",
                 self.host,
                 self.port,
             )
             await self._ws_server.wait_closed()
         except asyncio.CancelledError:
             logger.debug("Desktop VTuber Adapter transport cancelled")
+            await self.stop()
+            raise
+        except Exception:
             await self.stop()
             raise
 
@@ -111,7 +121,15 @@ class WebSocketTransport:
 
     async def _handle_client(self, websocket) -> None:
         if self._ws_client is not None:
-            await websocket.send(json.dumps(build_error("Only one client is supported.")))
+            await websocket.send(
+                json.dumps(
+                    build_control_error(
+                        session_id=self._session_id(),
+                        message="Only one client is supported.",
+                    ),
+                    ensure_ascii=False,
+                )
+            )
             await websocket.close()
             return
 
@@ -125,21 +143,63 @@ class WebSocketTransport:
                 try:
                     parsed = json.loads(raw_message)
                 except json.JSONDecodeError:
-                    await self.send_json(build_error("Invalid JSON payload"))
+                    await self.send_json(
+                        build_control_error(
+                            session_id=self._session_id(),
+                            message="Invalid JSON payload",
+                        )
+                    )
                     continue
-                await self._handle_message(parsed)
+                if not isinstance(parsed, dict):
+                    await self.send_json(
+                        build_control_error(
+                            session_id=self._session_id(),
+                            message="JSON payload must be an object",
+                        )
+                    )
+                    continue
+                try:
+                    await self._handle_message(parsed)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.warning("Failed to process inbound websocket payload: %s", exc)
+                    await self.send_json(
+                        build_control_error(
+                            session_id=self._session_id(),
+                            message=f"Failed to process message: {exc}",
+                        )
+                    )
         finally:
             self._ws_client = None
             await self._on_disconnect()
             logger.debug("Desktop frontend disconnected from adapter transport")
 
     async def _send_initial_messages(self) -> None:
+        session_id = self._session_id()
         await self._refresh_runtime_settings_async(
             reload_persona=True,
             reload_providers=True,
         )
-        await self.send_json(build_full_text("Connection established"))
+        await self.send_json(
+            build_system_server_info(
+                session_id=session_id,
+                ws_url=f"ws://{self.host}:{self.port}",
+                http_base_url=f"http://{self.static_server.host}:{self.static_server.port}",
+                auto_start_mic=self.auto_start_mic,
+            )
+        )
         await self._send_current_model_and_conf(force=True)
-        await self.send_json({"type": "group-update", "members": [], "is_owner": False})
+        await self.send_json(
+            build_system_group_update(
+                session_id=session_id,
+                members=[],
+                is_owner=False,
+            )
+        )
         if self.auto_start_mic:
-            await self.send_json(build_control("start-mic"))
+            await self.send_json(build_control_start_mic(session_id=session_id))
+
+    def _session_id(self) -> str:
+        session_id = self._session_id_getter()
+        return session_id or "desktop-client"

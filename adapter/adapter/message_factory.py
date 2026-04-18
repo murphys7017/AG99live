@@ -32,10 +32,10 @@ class MessageFactory:
         self.nickname = normalize_client_nickname(nickname)
 
     def convert_message(self, data: dict[str, Any]) -> AstrBotMessage:
-        inbound = normalize_inbound_message(data)
+        inbound = normalize_inbound_message(data, default_session_id=self.client_uid)
         return self.build_message_object(
             text=inbound.payload.text,
-            raw_message=data,
+            raw_message=inbound.envelope.raw,
             images=inbound.payload.images,
         )
 

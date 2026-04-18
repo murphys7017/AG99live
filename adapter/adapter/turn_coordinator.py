@@ -11,14 +11,27 @@ from astrbot.core.platform.message_type import MessageType
 from astrbot.core.utils.active_event_registry import active_event_registry
 
 from .payload_builder import (
-    build_audio_payload,
-    build_backend_synth_complete,
-    build_control,
-    build_error,
-    build_force_new_message,
-    build_full_text,
+    build_control_error,
+    build_control_interrupt,
+    build_control_synth_finished,
+    build_control_turn_finished,
+    build_control_turn_started,
+    build_output_audio,
+    build_output_image,
+    build_output_text,
 )
-from .protocol import ProtocolError
+from .protocol import (
+    TYPE_CONTROL_INTERRUPT,
+    TYPE_CONTROL_PLAYBACK_FINISHED,
+    TYPE_INPUT_AUDIO_STREAM_CHUNK,
+    TYPE_INPUT_AUDIO_STREAM_END,
+    TYPE_INPUT_AUDIO_STREAM_START,
+    TYPE_INPUT_MIC_AUDIO_DATA,
+    TYPE_INPUT_MIC_AUDIO_END,
+    TYPE_INPUT_RAW_AUDIO_DATA,
+    TYPE_INPUT_TEXT,
+    parse_inbound_message,
+)
 from .speech_ingress import SpeechIngressService
 
 
@@ -33,7 +46,7 @@ class TurnCoordinator:
         speaker_name: str,
         convert_message: Callable[[dict[str, Any]], Any],
         build_message_object: Callable[..., Any],
-        handle_frontend_compat: Callable[[dict[str, Any]], Awaitable[None]],
+        handle_frontend_compat: Callable[[Any], Awaitable[None]],
         refresh_runtime_settings: Callable[[], None],
         send_current_model_and_conf: Callable[[], Awaitable[None]],
         send_json: Callable[[dict[str, Any]], Awaitable[bool]],
@@ -66,70 +79,68 @@ class TurnCoordinator:
         self._turn_lock = asyncio.Lock()
         self._turn_timing: dict[str, Any] = {}
 
-    async def handle_msg(self, message: dict[str, Any]) -> None:
-        msg_type = message.get("type")
+    async def handle_msg(self, raw_message: dict[str, Any]) -> None:
+        message = parse_inbound_message(
+            raw_message,
+            default_session_id=self.session_state.client_uid,
+        )
 
-        if msg_type in {
-            "fetch-backgrounds",
-            "fetch-history-list",
-            "create-new-history",
-            "fetch-and-set-history",
-            "delete-history",
-            "heartbeat",
-            "audio-play-start",
-        }:
+        if message.type.startswith("system."):
             await self._handle_frontend_compat(message)
             return
 
-        if msg_type == "frontend-playback-complete":
-            success_raw = message.get("success")
+        if message.type == TYPE_CONTROL_PLAYBACK_FINISHED:
+            success_raw = message.payload.get("success", True)
             success = success_raw if isinstance(success_raw, bool) else True
-            reason_raw = message.get("reason")
+            reason_raw = message.payload.get("reason")
             reason = reason_raw.strip() if isinstance(reason_raw, str) and reason_raw.strip() else None
-            await self.finalize_turn(success=success, reason=reason)
+            await self.finalize_turn(turn_id=message.turn_id, success=success, reason=reason)
             return
 
-        if msg_type == "interrupt-signal":
-            await self._handle_interrupt_signal()
+        if message.type == TYPE_CONTROL_INTERRUPT:
+            await self._handle_interrupt_signal(message.turn_id)
             return
 
-        if msg_type == "audio-stream-start":
+        if message.type == TYPE_INPUT_AUDIO_STREAM_START:
             await self.speech_ingress.handle_audio_stream_start(message)
             return
 
-        if msg_type == "audio-stream-chunk":
+        if message.type == TYPE_INPUT_AUDIO_STREAM_CHUNK:
             await self.speech_ingress.handle_audio_stream_chunk(message)
             return
 
-        if msg_type == "audio-stream-end":
+        if message.type == TYPE_INPUT_AUDIO_STREAM_END:
             message_obj = await self.speech_ingress.handle_audio_stream_end(message)
             if message_obj is not None:
-                await self._commit_inbound_message(message_obj)
+                await self._commit_inbound_message(message_obj, turn_id=message.turn_id)
             return
 
-        if msg_type == "audio-stream-interrupt":
-            await self.speech_ingress.handle_audio_stream_interrupt(message.get("stream_id"))
-            return
-
-        if msg_type == "mic-audio-data":
+        if message.type == TYPE_INPUT_MIC_AUDIO_DATA:
             await self.speech_ingress.handle_audio_data(message)
             return
 
-        if msg_type == "raw-audio-data":
-            await self.speech_ingress.handle_raw_audio_data(message)
+        if message.type == TYPE_INPUT_RAW_AUDIO_DATA:
+            message_obj = await self.speech_ingress.handle_raw_audio_data(message)
+            if message_obj is not None:
+                await self._commit_inbound_message(message_obj, turn_id=message.turn_id)
             return
 
-        if msg_type == "mic-audio-end":
+        if message.type == TYPE_INPUT_MIC_AUDIO_END:
             await self._handle_audio_end(message)
             return
 
-        try:
-            message_obj = self._convert_message(message)
-        except ProtocolError as exc:
-            logger.debug("Ignoring unsupported message: %s", exc)
+        if message.type == TYPE_INPUT_TEXT:
+            message_obj = self._convert_message(message.raw)
+            await self._commit_inbound_message(message_obj, turn_id=message.turn_id)
             return
 
-        await self._commit_inbound_message(message_obj)
+        await self._send_json(
+            build_control_error(
+                session_id=message.session_id,
+                turn_id=message.turn_id,
+                message=f"Unhandled message type: {message.type}",
+            )
+        )
 
     async def emit_message_chain(
         self,
@@ -142,62 +153,79 @@ class TurnCoordinator:
         del inline_base_expression
         del inline_motion_id
 
+        session_id = self.session_state.client_uid
+        turn_id = self.session_state.current_turn_id
+
         self._mark_turn_timing("emit_started_at")
         texts, picture_paths, record_paths = _extract_outbound_message_parts(message_chain)
-
         reply_text = "\n".join(texts).strip()
-        has_audio_reply = bool(record_paths)
-        actions = {"pictures": picture_paths} if picture_paths else None
 
-        if reply_text and not has_audio_reply:
+        if reply_text:
             self.chat_buffer.add("assistant", reply_text)
-            await self._send_json(build_full_text(reply_text))
-
-        if has_audio_reply:
-            record_path = record_paths[0]
-            cached_audio_path, audio_url = self.media_service.cache_audio_file(record_path)
             await self._send_json(
-                build_audio_payload(
-                    audio_path=cached_audio_path,
+                build_output_text(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    text=reply_text,
+                    speaker_name=self.speaker_name,
+                    avatar="",
+                )
+            )
+
+        if picture_paths:
+            await self._send_json(
+                build_output_image(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    images=picture_paths,
+                )
+            )
+
+        if record_paths:
+            record_path = record_paths[0]
+            _, audio_url = self.media_service.cache_audio_file(record_path)
+            await self._send_json(
+                build_output_audio(
+                    session_id=session_id,
+                    turn_id=turn_id,
                     audio_url=audio_url,
                     text=reply_text,
                     speaker_name=self.speaker_name,
                     avatar="",
-                    action_mapping=actions,
                 )
             )
             self._mark_turn_timing("audio_payload_sent_at")
-            await self._send_json(build_backend_synth_complete())
+            await self._send_json(
+                build_control_synth_finished(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                )
+            )
+            self.session_state.mark_synthesizing()
             self.session_state.mark_playing()
             return
 
-        if actions:
-            await self._send_json(
-                build_audio_payload(
-                    audio_path="",
-                    audio_url=None,
-                    text=reply_text,
-                    speaker_name=self.speaker_name,
-                    avatar="",
-                    action_mapping=actions,
-                )
-            )
-            self._mark_turn_timing("audio_payload_sent_at")
+        await self._finish_turn(success=True, reason=None)
 
-        if reply_text:
-            self.session_state.reset_to_idle()
-            await self._send_json(build_backend_synth_complete())
-            await self._send_json(build_force_new_message())
-            await self._send_json(build_control("conversation-chain-end"))
-            self._mark_turn_timing("turn_completed_at")
-
-    async def finalize_turn(self, *, success: bool = True, reason: str | None = None) -> None:
+    async def finalize_turn(
+        self,
+        *,
+        turn_id: str | None,
+        success: bool = True,
+        reason: str | None = None,
+    ) -> None:
+        current_turn_id = self.session_state.current_turn_id
         if not self.session_state.waiting_for_playback_complete:
             return
+        if turn_id and current_turn_id and turn_id != current_turn_id:
+            logger.debug(
+                "Ignoring playback-finished for stale turn_id=%s current_turn_id=%s",
+                turn_id,
+                current_turn_id,
+            )
+            return
 
-        await self._send_json(build_force_new_message())
-        await self._send_json(build_control("conversation-chain-end"))
-        self.session_state.mark_playback_complete()
+        await self._finish_turn(success=success, reason=reason)
         self._mark_turn_timing("playback_completed_at")
         logger.debug(
             "Turn timing playback: turn=%s playback_ms=%.1f total_ms=%.1f success=%s reason=%s",
@@ -208,24 +236,30 @@ class TurnCoordinator:
             reason or "",
         )
 
-    async def _commit_inbound_message(self, message_obj) -> None:
+    async def _commit_inbound_message(self, message_obj, *, turn_id: str | None = None) -> None:
         async with self._turn_lock:
             if self.session_state.waiting_for_playback_complete:
-                await self.finalize_turn()
+                await self.finalize_turn(turn_id=self.session_state.current_turn_id)
 
-            self.session_state.begin_turn(message_obj.message_str)
+            current_turn_id = self.session_state.begin_turn(message_obj.message_str, turn_id=turn_id)
             self._begin_turn_timing(message_obj.message_str)
             self.chat_buffer.add("user", message_obj.message_str)
-            await self._send_json(build_control("conversation-chain-start"))
+            await self._send_json(
+                build_control_turn_started(
+                    session_id=self.session_state.client_uid,
+                    turn_id=current_turn_id,
+                )
+            )
             await self._emit_image_input_diagnostics(message_obj)
 
             event = self._build_platform_event(message_obj)
             self._commit_event(event)
             self._mark_turn_timing("event_committed_at")
             logger.debug(
-                "Turn timing start: turn=%s text_len=%d",
+                "Turn timing start: turn=%s text_len=%d turn_id=%s",
                 self._current_turn_index(),
                 len(message_obj.message_str or ""),
+                current_turn_id,
             )
 
     async def _emit_image_input_diagnostics(self, message_obj) -> None:
@@ -251,7 +285,13 @@ class TurnCoordinator:
                 f"Wait about {remaining_seconds}s, or set `image_cooldown_seconds` to 0."
             )
             logger.info("Image input diagnostics: %s", cooldown_message)
-            await self._send_json(build_error(cooldown_message))
+            await self._send_json(
+                build_control_error(
+                    session_id=self.session_state.client_uid,
+                    turn_id=self.session_state.current_turn_id,
+                    message=cooldown_message,
+                )
+            )
 
         actionable_reasons = [
             str(item.get("reason") or "").strip()
@@ -273,7 +313,13 @@ class TurnCoordinator:
         ]
         message = "Some images were ignored: " + "; ".join(parts) + "."
         logger.warning("Image input diagnostics: %s", message)
-        await self._send_json(build_error(message))
+        await self._send_json(
+            build_control_error(
+                session_id=self.session_state.client_uid,
+                turn_id=self.session_state.current_turn_id,
+                message=message,
+            )
+        )
 
     @staticmethod
     def _describe_image_input_reason(reason: str) -> str:
@@ -290,13 +336,23 @@ class TurnCoordinator:
         }
         return descriptions.get(reason, "failed validation")
 
-    async def _handle_audio_end(self, message: dict[str, Any]) -> None:
+    async def _handle_audio_end(self, message) -> None:
         message_obj = await self.speech_ingress.handle_audio_end(message)
         if message_obj is None:
             return
-        await self._commit_inbound_message(message_obj)
+        await self._commit_inbound_message(message_obj, turn_id=message.turn_id)
 
-    async def _handle_interrupt_signal(self) -> None:
+    async def _handle_interrupt_signal(self, turn_id: str | None) -> None:
+        session_id = self.session_state.client_uid
+        current_turn_id = self.session_state.current_turn_id
+        if turn_id and current_turn_id and turn_id != current_turn_id:
+            logger.debug(
+                "Ignoring interrupt for stale turn_id=%s current_turn_id=%s",
+                turn_id,
+                current_turn_id,
+            )
+            return
+
         umo = self._build_current_unified_msg_origin()
         stopped_count = 0
 
@@ -317,15 +373,41 @@ class TurnCoordinator:
             stopped_count = max(stopped_count, active_event_registry.stop_all(umo))
 
         await self.speech_ingress.handle_audio_stream_interrupt()
-        self.session_state.reset_to_idle()
         await self.media_service.clear_audio_buffer()
+        await self._send_json(
+            build_control_interrupt(
+                session_id=session_id,
+                turn_id=current_turn_id,
+            )
+        )
+        await self._finish_turn(success=False, reason="interrupted")
 
         logger.info(
-            "Processed interrupt-signal for turn=%s stopped_events=%s umo=%s",
+            "Processed control.interrupt for turn=%s stopped_events=%s umo=%s",
             self._current_turn_index(),
             stopped_count,
             umo,
         )
+
+    async def _finish_turn(self, *, success: bool, reason: str | None) -> None:
+        current_turn_id = self.session_state.current_turn_id
+        if current_turn_id is None:
+            self.session_state.reset_to_idle()
+            return
+
+        await self._send_json(
+            build_control_turn_finished(
+                session_id=self.session_state.client_uid,
+                turn_id=current_turn_id,
+                success=success,
+                reason=reason,
+            )
+        )
+        self._mark_turn_timing("turn_completed_at")
+        if self.session_state.waiting_for_playback_complete:
+            self.session_state.mark_playback_complete()
+        else:
+            self.session_state.reset_to_idle()
 
     def _current_turn_index(self) -> int:
         return int(getattr(self.session_state, "turn_index", 0) or 0)

@@ -1,17 +1,32 @@
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from typing import Awaitable, Callable
 from uuid import uuid4
 
+from .payload_builder import (
+    build_system_background_list,
+    build_system_heartbeat_ack,
+    build_system_history_created,
+    build_system_history_data,
+    build_system_history_deleted,
+    build_system_history_list,
+)
+from .protocol import (
+    TYPE_SYSTEM_BACKGROUND_LIST_REQUEST,
+    TYPE_SYSTEM_HEARTBEAT,
+    TYPE_SYSTEM_HISTORY_CREATE,
+    TYPE_SYSTEM_HISTORY_DELETE,
+    TYPE_SYSTEM_HISTORY_LIST_REQUEST,
+    TYPE_SYSTEM_HISTORY_LOAD,
+)
 
-SUPPORTED_COMPAT_MESSAGE_TYPES = {
-    "fetch-backgrounds",
-    "fetch-history-list",
-    "create-new-history",
-    "fetch-and-set-history",
-    "delete-history",
-    "heartbeat",
-    "audio-play-start",
+SUPPORTED_SYSTEM_MESSAGE_TYPES = {
+    TYPE_SYSTEM_BACKGROUND_LIST_REQUEST,
+    TYPE_SYSTEM_HISTORY_LIST_REQUEST,
+    TYPE_SYSTEM_HISTORY_CREATE,
+    TYPE_SYSTEM_HISTORY_LOAD,
+    TYPE_SYSTEM_HISTORY_DELETE,
+    TYPE_SYSTEM_HEARTBEAT,
 }
 
 
@@ -28,45 +43,65 @@ class FrontendCompatHandler:
 
     @staticmethod
     def can_handle(msg_type: str | None) -> bool:
-        return msg_type in SUPPORTED_COMPAT_MESSAGE_TYPES
+        return msg_type in SUPPORTED_SYSTEM_MESSAGE_TYPES
 
     async def handle(
         self,
-        message: dict[str, Any],
+        message,
         *,
-        send_json: Callable[[dict[str, Any]], Awaitable[bool]],
+        send_json: Callable[[dict], Awaitable[bool]],
         refresh_and_send_model: Callable[..., Awaitable[None]],
     ) -> None:
-        msg_type = message.get("type")
+        del refresh_and_send_model
 
-        if msg_type == "fetch-backgrounds":
+        msg_type = message.type
+        session_id = message.session_id
+        payload = message.payload
+
+        if msg_type == TYPE_SYSTEM_BACKGROUND_LIST_REQUEST:
             await send_json(
-                {"type": "background-files", "files": self._background_files_getter()}
+                build_system_background_list(
+                    session_id=session_id,
+                    files=self._background_files_getter(),
+                )
             )
-        elif msg_type == "fetch-history-list":
+        elif msg_type == TYPE_SYSTEM_HISTORY_LIST_REQUEST:
             histories = await self._history_bridge.list_histories()
-            await send_json({"type": "history-list", "histories": histories})
-        elif msg_type == "create-new-history":
+            await send_json(
+                build_system_history_list(
+                    session_id=session_id,
+                    histories=histories,
+                )
+            )
+        elif msg_type == TYPE_SYSTEM_HISTORY_CREATE:
             history_uid = await self._history_bridge.create_history()
             self._history_uid = history_uid or str(uuid4())
             await send_json(
-                {"type": "new-history-created", "history_uid": self._history_uid}
+                build_system_history_created(
+                    session_id=session_id,
+                    history_uid=self._history_uid,
+                )
             )
-        elif msg_type == "fetch-and-set-history":
-            history_uid = str(message.get("history_uid") or "").strip()
+        elif msg_type == TYPE_SYSTEM_HISTORY_LOAD:
+            history_uid = str(payload.get("history_uid") or "").strip()
             messages = await self._history_bridge.fetch_history(history_uid)
             if history_uid:
                 self._history_uid = history_uid
-            await send_json({"type": "history-data", "messages": messages})
-        elif msg_type == "delete-history":
-            history_uid = str(message.get("history_uid") or "").strip()
+            await send_json(
+                build_system_history_data(
+                    session_id=session_id,
+                    messages=messages,
+                )
+            )
+        elif msg_type == TYPE_SYSTEM_HISTORY_DELETE:
+            history_uid = str(payload.get("history_uid") or "").strip()
             success = await self._history_bridge.delete_history(history_uid)
             await send_json(
-                {
-                    "type": "history-deleted",
-                    "success": success,
-                    "history_uid": history_uid,
-                }
+                build_system_history_deleted(
+                    session_id=session_id,
+                    history_uid=history_uid,
+                    success=success,
+                )
             )
-        elif msg_type == "heartbeat":
-            await send_json({"type": "heartbeat-ack"})
+        elif msg_type == TYPE_SYSTEM_HEARTBEAT:
+            await send_json(build_system_heartbeat_ack(session_id=session_id))

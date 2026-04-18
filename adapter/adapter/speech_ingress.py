@@ -11,7 +11,7 @@ import numpy as np
 
 from astrbot.api import logger
 
-from .payload_builder import build_control, build_error
+from .payload_builder import build_control_error, build_control_interrupt, build_output_transcription
 
 
 @dataclass
@@ -41,20 +41,22 @@ class SpeechIngressService:
         self._build_message_object = build_message_object
         self._audio_streams: dict[str, AudioStreamState] = {}
 
-    async def handle_audio_stream_start(self, message: dict[str, Any]) -> None:
-        stream_id = self._normalize_stream_id(message.get("stream_id"))
+    async def handle_audio_stream_start(self, message) -> None:
+        payload = message.payload
+        stream_id = self._normalize_stream_id(payload.get("stream_id"))
         if not stream_id:
             return
 
         self._audio_streams[stream_id] = AudioStreamState(
             stream_id=stream_id,
-            sample_rate=max(int(message.get("sample_rate") or 16000), 1),
-            channels=max(int(message.get("channels") or 1), 1),
-            encoding=str(message.get("encoding") or "pcm16le"),
+            sample_rate=max(int(payload.get("sample_rate") or 16000), 1),
+            channels=max(int(payload.get("channels") or 1), 1),
+            encoding=str(payload.get("encoding") or "pcm16le"),
         )
 
-    async def handle_audio_stream_chunk(self, message: dict[str, Any]) -> None:
-        stream_id = self._normalize_stream_id(message.get("stream_id"))
+    async def handle_audio_stream_chunk(self, message) -> None:
+        payload = message.payload
+        stream_id = self._normalize_stream_id(payload.get("stream_id"))
         if not stream_id:
             return
 
@@ -66,11 +68,17 @@ class SpeechIngressService:
                 return
 
         if stream.encoding != "pcm16le":
-            await self._send_json(build_error(f"Unsupported audio stream encoding: {stream.encoding}"))
+            await self._send_json(
+                build_control_error(
+                    session_id=message.session_id,
+                    turn_id=message.turn_id,
+                    message=f"Unsupported audio stream encoding: {stream.encoding}",
+                )
+            )
             self._audio_streams.pop(stream_id, None)
             return
 
-        seq = int(message.get("seq") or 0)
+        seq = int(payload.get("seq") or 0)
         if seq <= stream.last_seq:
             logger.warning(
                 "Ignoring out-of-order audio stream chunk: stream_id=%s seq=%s last_seq=%s",
@@ -80,7 +88,7 @@ class SpeechIngressService:
             )
             return
 
-        audio_base64 = message.get("audio_base64")
+        audio_base64 = payload.get("audio_base64")
         if not isinstance(audio_base64, str) or not audio_base64:
             return
 
@@ -93,20 +101,23 @@ class SpeechIngressService:
         stream.chunks.append(chunk_bytes)
         stream.last_seq = seq
 
-    async def handle_audio_stream_end(self, message: dict[str, Any]):
-        stream_id = self._normalize_stream_id(message.get("stream_id"))
+    async def handle_audio_stream_end(self, message):
+        payload = message.payload
+        stream_id = self._normalize_stream_id(payload.get("stream_id"))
         if not stream_id:
             return None
 
         stream = self._audio_streams.pop(stream_id, None)
         if stream is None or not stream.chunks:
-            logger.debug("Ignoring `audio-stream-end` with empty or missing stream: %s", stream_id)
+            logger.debug("Ignoring `input.audio_stream_end` with empty or missing stream: %s", stream_id)
             return None
 
         audio_buffer = self._pcm16_bytes_to_float32(stream.chunks)
         return await self._build_message_from_audio_buffer(
             audio_buffer,
-            raw_message=message,
+            raw_message=message.raw,
+            session_id=message.session_id,
+            turn_id=message.turn_id,
             sample_rate=stream.sample_rate,
             stream_id=stream_id,
         )
@@ -119,29 +130,36 @@ class SpeechIngressService:
 
         self._audio_streams.clear()
 
-    async def handle_audio_data(self, message: dict[str, Any]) -> None:
-        audio_data = message.get("audio", [])
+    async def handle_audio_data(self, message) -> None:
+        audio_data = message.payload.get("audio", [])
         if not isinstance(audio_data, list) or not audio_data:
             return
 
         chunk = np.array(audio_data, dtype=np.float32)
         await self.media_service.append_audio_chunk(chunk)
 
-    async def handle_raw_audio_data(self, message: dict[str, Any]) -> None:
-        audio_data = message.get("audio", [])
+    async def handle_raw_audio_data(self, message):
+        audio_data = message.payload.get("audio", [])
         if not isinstance(audio_data, list) or not audio_data:
-            return
+            return None
 
         try:
             vad_engine = self._ensure_vad_engine()
         except Exception as exc:
             logger.error("Failed to initialize VAD engine: %s", exc)
-            await self._send_json(build_error(f"VAD unavailable: {exc}"))
-            return
+            await self._send_json(
+                build_control_error(
+                    session_id=message.session_id,
+                    turn_id=message.turn_id,
+                    message=f"VAD unavailable: {exc}",
+                )
+            )
+            return None
 
+        built_message = None
         for audio_bytes in vad_engine.detect_speech(audio_data):
             if audio_bytes == b"<|PAUSE|>":
-                await self._send_json(build_control("interrupt"))
+                built_message = await self._build_interrupt_message(message)
             elif audio_bytes == b"<|RESUME|>":
                 continue
             elif len(audio_bytes) > 1024:
@@ -149,22 +167,40 @@ class SpeechIngressService:
                     np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
                 )
                 await self.media_service.append_audio_chunk(chunk)
-                await self._send_json(build_control("mic-audio-end"))
+                built_message = await self.handle_audio_end(message)
 
-    async def handle_audio_end(self, message: dict[str, Any]):
+        return built_message
+
+    async def handle_audio_end(self, message):
         audio_buffer = await self.media_service.drain_audio_buffer()
 
         if audio_buffer.size == 0:
-            logger.debug("Ignoring `mic-audio-end` with empty buffer.")
+            logger.debug("Ignoring `input.mic_audio_end` with empty buffer.")
             return None
 
-        return await self._build_message_from_audio_buffer(audio_buffer, raw_message=message)
+        return await self._build_message_from_audio_buffer(
+            audio_buffer,
+            raw_message=message.raw,
+            session_id=message.session_id,
+            turn_id=message.turn_id,
+        )
+
+    async def _build_interrupt_message(self, message):
+        await self._send_json(
+            build_control_interrupt(
+                session_id=message.session_id,
+                turn_id=message.turn_id,
+            )
+        )
+        return None
 
     async def _build_message_from_audio_buffer(
         self,
         audio_buffer: np.ndarray,
         *,
         raw_message: dict[str, Any],
+        session_id: str,
+        turn_id: str | None,
         sample_rate: int = 16000,
         stream_id: str | None = None,
     ):
@@ -172,11 +208,23 @@ class SpeechIngressService:
             text = (await self._transcribe_audio(audio_buffer, sample_rate=sample_rate)).strip()
         except Exception as exc:
             logger.error("Audio transcription failed: %s", exc)
-            await self._send_json(build_error(f"Audio transcription failed: {exc}"))
+            await self._send_json(
+                build_control_error(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    message=f"Audio transcription failed: {exc}",
+                )
+            )
             return None
 
         if not text:
-            await self._send_json(build_error("The LLM can't hear you."))
+            await self._send_json(
+                build_control_error(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    message="The LLM can't hear you.",
+                )
+            )
             return None
 
         should_drop, drop_reason = should_drop_transcription(text)
@@ -184,15 +232,23 @@ class SpeechIngressService:
             logger.info("Dropped transcription `%s`: %s", text, drop_reason)
             return None
 
-        await self._send_json({"type": "user-input-transcription", "text": text})
+        await self._send_json(
+            build_output_transcription(
+                session_id=session_id,
+                turn_id=turn_id,
+                text=text,
+            )
+        )
 
-        raw_message = dict(raw_message)
-        raw_message["transcription"] = text
-        raw_message["audio_sample_count"] = int(audio_buffer.size)
+        normalized_raw_message = dict(raw_message)
+        normalized_payload = dict(normalized_raw_message.get("payload") or {})
+        normalized_payload["transcription"] = text
+        normalized_payload["audio_sample_count"] = int(audio_buffer.size)
+        normalized_payload["audio_sample_rate"] = sample_rate
         if stream_id:
-            raw_message["stream_id"] = stream_id
-        raw_message["audio_sample_rate"] = sample_rate
-        return self._build_message_object(text=text, raw_message=raw_message)
+            normalized_payload["stream_id"] = stream_id
+        normalized_raw_message["payload"] = normalized_payload
+        return self._build_message_object(text=text, raw_message=normalized_raw_message)
 
     async def _transcribe_audio(self, audio_buffer: np.ndarray, *, sample_rate: int = 16000) -> str:
         if self.runtime_state.selected_stt_provider is None:

@@ -97,6 +97,7 @@ class OLVPetPlatformAdapter(Platform):
             platform_config=self.config,
             plugin_context=self._plugin_context,
             plugin_config=self._plugin_config,
+            plugin_config_loader=get_plugin_config,
             host=self.host,
             http_port=self.http_port,
             client_uid=self.client_uid,
@@ -148,6 +149,7 @@ class OLVPetPlatformAdapter(Platform):
             refresh_runtime_settings_async=self._refresh_runtime_settings_async,
             send_current_model_and_conf=self._send_current_model_and_conf,
             on_disconnect=self._handle_transport_disconnect,
+            session_id_getter=lambda: self.client_uid,
         )
 
         self._vad_engine = None

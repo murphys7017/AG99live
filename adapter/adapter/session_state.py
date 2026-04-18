@@ -1,9 +1,10 @@
-"""Single-session state machine for the initial desktop-pet adapter."""
+"""Single-session state machine for the AG99live V2 adapter."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from uuid import uuid4
 
 
 class SessionStage(str, Enum):
@@ -22,12 +23,15 @@ class SessionState:
     turn_index: int = 0
     last_user_text: str = ""
     waiting_for_playback_complete: bool = False
+    current_turn_id: str | None = None
 
-    def begin_turn(self, text: str) -> None:
+    def begin_turn(self, text: str, *, turn_id: str | None = None) -> str:
         self.turn_index += 1
         self.last_user_text = text
         self.stage = SessionStage.THINKING
         self.waiting_for_playback_complete = False
+        self.current_turn_id = turn_id or uuid4().hex
+        return self.current_turn_id
 
     def mark_synthesizing(self) -> None:
         self.stage = SessionStage.SYNTHESIZING
@@ -39,8 +43,9 @@ class SessionState:
     def mark_playback_complete(self) -> None:
         self.waiting_for_playback_complete = False
         self.stage = SessionStage.IDLE
+        self.current_turn_id = None
 
     def reset_to_idle(self) -> None:
         self.waiting_for_playback_complete = False
         self.stage = SessionStage.IDLE
-
+        self.current_turn_id = None

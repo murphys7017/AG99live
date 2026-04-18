@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from typing import Any
+from typing import Any, Callable
 
 from astrbot.api import logger
 from astrbot.api.provider import STTProvider
@@ -13,7 +13,7 @@ from .client_profile import (
     normalize_client_nickname,
     normalize_client_uid,
 )
-from .payload_builder import build_set_model_and_conf
+from .payload_builder import build_system_model_sync
 
 
 class RuntimeState:
@@ -23,6 +23,7 @@ class RuntimeState:
         platform_config: Any,
         plugin_context: Any,
         plugin_config: Any,
+        plugin_config_loader: Callable[[], Any] | None,
         host: str,
         http_port: int,
         client_uid: str,
@@ -35,6 +36,7 @@ class RuntimeState:
 
         self.plugin_config = self._clone_plugin_config(plugin_config)
         self.plugin_context = plugin_context
+        self.plugin_config_loader = plugin_config_loader
 
         self.stt_provider_id = ""
         self.vad_model = "silero_vad"
@@ -85,7 +87,7 @@ class RuntimeState:
         logger.info("Loaded default persona: %s", self.default_persona["name"])
 
     def refresh(self) -> bool:
-        latest_plugin_config = self._load_plugin_config_from_source(self.plugin_config)
+        latest_plugin_config = self._load_latest_plugin_config()
         if latest_plugin_config is not None:
             self.plugin_config = latest_plugin_config
 
@@ -208,7 +210,8 @@ class RuntimeState:
         conf_uid: str,
         client_uid: str,
     ) -> dict[str, Any]:
-        return build_set_model_and_conf(
+        return build_system_model_sync(
+            session_id=self.client_uid,
             model_info=self.model_info,
             conf_name=conf_name,
             conf_uid=conf_uid,
@@ -237,34 +240,27 @@ class RuntimeState:
         except Exception:
             return config
 
-    @staticmethod
-    def _load_plugin_config_from_source(config: Any) -> Any:
-        if config is None:
-            return None
-
-        config_path = getattr(config, "config_path", None)
-        if not isinstance(config_path, str) or not config_path:
-            return RuntimeState._clone_plugin_config(config)
+    def _load_latest_plugin_config(self) -> Any:
+        if self.plugin_config_loader is None:
+            return self._clone_plugin_config(self.plugin_config)
 
         try:
-            with open(config_path, encoding="utf-8-sig") as f:
-                data = json.load(f)
+            latest_config = self.plugin_config_loader()
         except Exception as exc:
-            logger.error("Failed to reload plugin config from `%s`: %s", config_path, exc)
-            raise RuntimeError(
-                f"Failed to reload plugin config from `{config_path}`: {exc}"
-            ) from exc
+            logger.error("Failed to reload plugin config from plugin runtime: %s", exc)
+            raise RuntimeError(f"Failed to reload plugin config from plugin runtime: {exc}") from exc
 
-        if not isinstance(data, dict):
+        if latest_config is None:
+            return None
+
+        if not isinstance(latest_config, dict):
             logger.error(
-                "Invalid plugin config in `%s`: expected a JSON object, got `%s`.",
-                config_path,
-                type(data).__name__,
+                "Invalid plugin config from plugin runtime: expected a JSON object, got `%s`.",
+                type(latest_config).__name__,
             )
-            raise RuntimeError(
-                f"Invalid plugin config in `{config_path}`: expected a JSON object."
-            )
-        return data
+            raise RuntimeError("Invalid plugin config from plugin runtime: expected a JSON object.")
+
+        return self._clone_plugin_config(latest_config)
 
 
 def _plugin_config_get(config: Any, key: str, default: Any) -> Any:
