@@ -5,10 +5,12 @@ from pathlib import Path
 
 def build_static_routes(
     *,
+    live2ds_dir: Path,
     assets_dir: Path,
     runtime_cache_dir: Path,
 ) -> dict[str, Path]:
     return {
+        "/live2ds": live2ds_dir,
         "/bg": assets_dir / "backgrounds",
         "/avatars": assets_dir / "avatars",
         "/cache": runtime_cache_dir,

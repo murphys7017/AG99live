@@ -1,0 +1,30 @@
+{
+    "Type": "Live2D Expression",
+    "Parameters": [
+        {
+            "Id": "ExpEyeDefault",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpEyeOO",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpSurprise",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamMouthForm",
+            "Value": -0.3324597477912903,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamMouthPunkerWiden",
+            "Value": -0.702081561088562,
+            "Blend": "Add"
+        }
+    ]
+}

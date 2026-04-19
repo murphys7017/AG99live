@@ -1,0 +1,15 @@
+{
+    "Type": "Live2D Expression",
+    "Parameters": [
+        {
+            "Id": "ExpFaceBlush",
+            "Value": 0.2957596182823181,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpHappy",
+            "Value": 1.0,
+            "Blend": "Add"
+        }
+    ]
+}

@@ -1,0 +1,213 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "Mk6.moc3",
+		"Textures": [
+			"Mk6.8192/texture_00.png",
+			"Mk6.8192/texture_01.png"
+		],
+		"Physics": "Mk6.physics3.json",
+		"DisplayInfo": "Mk6.cdi3.json",
+		"Expressions": [
+			{
+				"Name": "Neutral",
+				"File": "Expressions/Neutral.exp3.json"
+			},
+			{
+				"Name": "Happy",
+				"File": "Expressions/Happy.exp3.json"
+			},
+			{
+				"Name": "Angry",
+				"File": "Expressions/Angry.exp3.json"
+			},
+			{
+				"Name": "Surprised",
+				"File": "Expressions/Surprised.exp3.json"
+			},
+			{
+				"Name": "Question",
+				"File": "Expressions/Question.exp3.json"
+			},
+			{
+				"Name": "Confused",
+				"File": "Expressions/Confused.exp3.json"
+			},
+			{
+				"Name": "Embarrassed",
+				"File": "Expressions/Embarrassed.exp3.json"
+			},
+			{
+				"Name": "Blush",
+				"File": "Expressions/Blush.exp3.json"
+			},
+			{
+				"Name": "Tired",
+				"File": "Expressions/Tired.exp3.json"
+			},
+			{
+				"Name": "ExtremelyTired",
+				"File": "Expressions/ExtremelyTired.exp3.json"
+			},
+			{
+				"Name": "Messy",
+				"File": "Expressions/Messy.exp3.json"
+			},
+			{
+				"Name": "Murderous",
+				"File": "Expressions/Murderous.exp3.json"
+			},
+			{
+				"Name": "Loading",
+				"File": "Expressions/Loading.exp3.json"
+			},
+			{
+				"Name": "Exclamation",
+				"File": "Expressions/Exclamation.exp3.json"
+			},
+			{
+				"Name": "Eyemask",
+				"File": "Expressions/Eyemask.exp3.json"
+			},
+			{
+				"Name": "Controller",
+				"File": "Expressions/Controller.exp3.json"
+			},
+			{
+				"Name": "MouseClick",
+				"File": "Expressions/MouseClick.exp3.json"
+			},
+			{
+				"Name": "Outfit",
+				"File": "Expressions/Outfit.exp3.json"
+			},
+			{
+				"Name": "JaketOFF",
+				"File": "Expressions/JaketOFF.exp3.json"
+			},
+			{
+				"Name": "Pen",
+				"File": "Expressions/Pen.exp3.json"
+			},
+			{
+				"Name": "Tablet",
+				"File": "Expressions/Tablet.exp3.json"
+			},
+			{
+				"Name": "Tracking",
+				"File": "Expressions/Tracking.exp3.json"
+			}
+		],
+		"Motions": {
+			"Idle": [
+				{
+					"File": "Motions/idle.motion3.json"
+				},
+				{
+					"File": "Motions/平和.motion3.json"
+				}
+			],
+			"Talk": [
+				{
+					"File": "Motions/温和点头.motion3.json"
+				},
+				{
+					"File": "Motions/温和摇晃.motion3.json"
+				},
+				{
+					"File": "Motions/平和.motion3.json"
+				},
+				{
+					"File": "Motions/认真说明.motion3.json"
+				}
+			],
+			"": [
+				{
+					"File": "Motions/idle.motion3.json"
+				},
+				{
+					"File": "Motions/不耐烦前倾.motion3.json"
+				},
+				{
+					"File": "Motions/伤心.motion3.json"
+				},
+				{
+					"File": "Motions/困惑歪头.motion3.json"
+				},
+				{
+					"File": "Motions/失落下垂.motion3.json"
+				},
+				{
+					"File": "Motions/害羞躲闪.motion3.json"
+				},
+				{
+					"File": "Motions/左右晃动.motion3.json"
+				},
+				{
+					"File": "Motions/平和.motion3.json"
+				},
+				{
+					"File": "Motions/开心点亮.motion3.json"
+				},
+				{
+					"File": "Motions/开心轻晃.motion3.json"
+				},
+				{
+					"File": "Motions/微笑.motion3.json"
+				},
+				{
+					"File": "Motions/微笑-左偏头.motion3.json"
+				},
+				{
+					"File": "Motions/微笑-眨眼-右.motion3.json"
+				},
+				{
+					"File": "Motions/怀疑眯眼.motion3.json"
+				},
+				{
+					"File": "Motions/思考停顿.motion3.json"
+				},
+				{
+					"File": "Motions/惊讶.motion3.json"
+				},
+				{
+					"File": "Motions/惊讶后缩.motion3.json"
+				},
+				{
+					"File": "Motions/感到舒适.motion3.json"
+				},
+				{
+					"File": "Motions/歪头坏笑.motion3.json"
+				},
+				{
+					"File": "Motions/温和摇晃.motion3.json"
+				},
+				{
+					"File": "Motions/温和点头.motion3.json"
+				},
+				{
+					"File": "Motions/生气.motion3.json"
+				},
+				{
+					"File": "Motions/疲惫哈欠.motion3.json"
+				},
+				{
+					"File": "Motions/认真说明.motion3.json"
+				}
+			]
+		}
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": []
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		}
+	],
+	"HitAreas": []
+}

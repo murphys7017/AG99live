@@ -1,0 +1,40 @@
+{
+    "Type": "Live2D Expression",
+    "Parameters": [
+        {
+            "Id": "ExpEyeHighlight",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpPupilDefault",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpIrisSize",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpFaceDark",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpFaceDarkLines",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpFaceBlush",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpEyeVibrate",
+            "Value": 0.6222050786018372,
+            "Blend": "Add"
+        }
+    ]
+}

@@ -1,0 +1,25 @@
+{
+    "Type": "Live2D Expression",
+    "Parameters": [
+        {
+            "Id": "ExpAngry",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamNoseSneer",
+            "Value": 0.8181494474411011,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamMouthForm",
+            "Value": -0.5077875852584839,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamMouthPressLipOpen",
+            "Value": -1.0,
+            "Blend": "Add"
+        }
+    ]
+}

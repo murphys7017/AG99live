@@ -95,13 +95,37 @@ if (-not $ResolvedTargetPluginRoot.StartsWith($ResolvedPluginsRoot, [System.Stri
     throw "Resolved target path escapes plugins root: $ResolvedTargetPluginRoot"
 }
 
-$PreserveDirectories = @("live2ds")
+$PreserveDirectories = @()
 $SkipDirectoryNames = @("__pycache__", ".git", ".venv")
 $SkipFilePatterns = @("*.pyc")
 $ManagedRelativeFiles = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+$ManagedRelativeDirectories = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
 Invoke-LoggedAction -Description "Ensure target plugin directory exists: $ResolvedTargetPluginRoot" -DryRun:$DryRun -Action {
     New-Item -ItemType Directory -Path $ResolvedTargetPluginRoot -Force | Out-Null
+}
+
+$sourceDirectories = Get-ChildItem -LiteralPath $SourcePluginRoot -Recurse -Directory | Where-Object {
+    $relativePath = Get-RelativePathCompat -BasePath $SourcePluginRoot -TargetPath $_.FullName
+    if ([string]::IsNullOrWhiteSpace($relativePath)) {
+        return $false
+    }
+    $segments = $relativePath -split "[\\/]+"
+    foreach ($segment in $segments) {
+        if ($SkipDirectoryNames -contains $segment) {
+            return $false
+        }
+    }
+    return $true
+}
+
+foreach ($directory in $sourceDirectories) {
+    $relativePath = Get-RelativePathCompat -BasePath $SourcePluginRoot -TargetPath $directory.FullName
+    [void]$ManagedRelativeDirectories.Add($relativePath)
+    $targetDirectory = Join-Path $ResolvedTargetPluginRoot $relativePath
+    Invoke-LoggedAction -Description "Ensure directory: $targetDirectory" -DryRun:$DryRun -Action {
+        New-Item -ItemType Directory -Path $targetDirectory -Force | Out-Null
+    }
 }
 
 $sourceFiles = Get-ChildItem -LiteralPath $SourcePluginRoot -Recurse -File | Where-Object {
@@ -175,11 +199,11 @@ if (Test-Path -LiteralPath $ResolvedTargetPluginRoot -PathType Container) {
             continue
         }
 
-        $hasChildren = @(Get-ChildItem -LiteralPath $directory.FullName -Force).Count -gt 0
-        if (-not $hasChildren) {
-            Invoke-LoggedAction -Description "Remove empty directory: $relativePath" -DryRun:$DryRun -Action {
-                Remove-Item -LiteralPath $directory.FullName -Force
+        if (-not $ManagedRelativeDirectories.Contains($relativePath)) {
+            Invoke-LoggedAction -Description "Remove stale directory: $relativePath" -DryRun:$DryRun -Action {
+                Remove-Item -LiteralPath $directory.FullName -Recurse -Force
             }
+            continue
         }
     }
 }

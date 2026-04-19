@@ -1,0 +1,35 @@
+{
+    "Type": "Live2D Expression",
+    "Parameters": [
+        {
+            "Id": "ExpEyeHighlight",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpFaceDark",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpHairSticker",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpDarkLines",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamMouthForm",
+            "Value": -0.47756290435791018,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamMouthPressLipOpen",
+            "Value": -1.0,
+            "Blend": "Add"
+        }
+    ]
+}

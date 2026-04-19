@@ -21,6 +21,11 @@
     "type": "string",
     "default": "DesktopUser"
   },
+  "live2d_model_name": {
+    "description": "优先加载的 Live2D 模型目录名。留空时默认使用扫描到的第一个模型。",
+    "type": "string",
+    "default": ""
+  },
   "image_cooldown_seconds": {
     "description": "图片输入冷却时间（秒）。在冷却时间内再次收到图片会直接丢弃，仅保留文本。",
     "type": "int",
@@ -31,6 +36,12 @@
     "type": "string",
     "default": "",
     "_special": "select_provider_stt"
+  },
+  "motion_analysis_provider_id": {
+    "description": "用于 Live2D motion 语义增强分析的聊天 Provider。留空时跟随当前 AstrBot 会话聊天模型。",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider"
   },
   "vad_model": {
     "description": "前端原始音频断句使用的 VAD 模型。",

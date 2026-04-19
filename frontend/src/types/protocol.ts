@@ -1,0 +1,299 @@
+export interface ProtocolEnvelope<TPayload = unknown> {
+  type: string;
+  version: string;
+  message_id: string;
+  timestamp: string;
+  session_id: string;
+  turn_id: string | null;
+  source: string;
+  payload: TPayload;
+}
+
+export interface StandardChannelInfo {
+  label: string;
+  available: boolean;
+  primary_parameter_id: string;
+  primary_parameter_name: string;
+  group_name: string;
+  candidate_parameter_ids: string[];
+}
+
+export interface ParameterEntry {
+  id: string;
+  name: string;
+  group_id: string;
+  group_name: string;
+  kind: string;
+  domain: string;
+  channels: string[];
+  expression_usage_count: number;
+  expression_categories: string[];
+  expression_max_abs_value: number;
+  expression_mean_abs_value: number;
+  expression_blends: string[];
+  expression_examples: string[];
+  expression_profile: string;
+}
+
+export interface ParameterScanPayload {
+  source: string;
+  total_parameters: number;
+  drivable_parameters: number;
+  physics_parameters: number;
+  expression_parameters: number;
+  groups: Array<{
+    name: string;
+    count: number;
+    dominant_domain: string;
+    domain_counts: Array<{ name: string; count: number }>;
+  }>;
+  domain_counts: Array<{ name: string; count: number }>;
+  standard_channels: Record<string, StandardChannelInfo>;
+  primary_parameters: Array<{
+    channel: string;
+    parameter_id: string;
+    parameter_name: string;
+    group_name: string;
+  }>;
+  parameters: ParameterEntry[];
+}
+
+export interface ExpressionConstraint {
+  name: string;
+  file: string;
+  category: string;
+  parameter_ids: string[];
+  parameter_count: number;
+  affects_channels: string[];
+  parameters: Array<{
+    id: string;
+    name: string;
+    group_name: string;
+    kind: string;
+    domain: string;
+    channels: string[];
+    value: number;
+    abs_value: number;
+    blend: string;
+    intensity: string;
+  }>;
+  dominant_parameters: Array<{
+    id: string;
+    value: number;
+    blend: string;
+    domain: string;
+    channels: string[];
+  }>;
+  dominant_domains: string[];
+  dominant_channels: string[];
+  blend_modes: string[];
+  intensity: string;
+  touches_non_expression_parameters: boolean;
+}
+
+export interface ExpressionScanPayload {
+  total_expressions: number;
+  category_counts: Array<{ name: string; count: number }>;
+  blend_counts: Array<{ name: string; count: number }>;
+  domain_usage: Array<{ name: string; count: number }>;
+  channel_usage: Array<{ name: string; count: number }>;
+  base_expression_names: string[];
+  special_state_names: string[];
+  expression_driven_parameters: Array<{
+    parameter_id: string;
+    parameter_name: string;
+    domain: string;
+    kind: string;
+    usage_count: number;
+    max_abs_value: number;
+    profile: string;
+  }>;
+}
+
+export interface ResourceScanPayload {
+  model3_file: string;
+  cdi3_file: string;
+  physics3_file: string;
+  texture_count: number;
+  texture_files: string[];
+  expression_count: number;
+  expression_files: string[];
+  motion_count: number;
+  motion_files: string[];
+  motion_groups: Array<{ name: string; count: number }>;
+  vtube_profile_count: number;
+  vtube_profiles: string[];
+  has_motion_catalog: boolean;
+}
+
+export interface MotionConstraint {
+  name: string;
+  file: string;
+  group: string;
+  category: string;
+  duration: number;
+  curve_count: number;
+  parameter_count: number;
+  affects_channels: string[];
+  uses_expression_parameters: boolean;
+  uses_physics_parameters: boolean;
+  catalog_label: string;
+  catalog_tags: string[];
+  catalog_intensity: string;
+  decomposition_level: string;
+  component_count: number;
+  component_ids: string[];
+  driver_component_count: number;
+  driver_component_ids: string[];
+  dominant_channels: string[];
+  dominant_domains: string[];
+  channel_weights: Array<{ name: string; count: number }>;
+  domain_weights: Array<{ name: string; count: number }>;
+  kind_counts: Array<{ name: string; count: number }>;
+  segment_types: Array<{ name: string; count: number }>;
+  timeline_profile: {
+    intro_energy: number;
+    middle_energy: number;
+    outro_energy: number;
+    peak_window: { start_ratio: number; end_ratio: number };
+    motion_trait: string;
+  };
+  motion_windows: Array<{ start_ratio: number; end_ratio: number }>;
+  loop: boolean;
+  fps: number;
+}
+
+export interface MotionResourceComponent {
+  id: string;
+  source_motion: string;
+  source_file: string;
+  source_group: string;
+  source_category: string;
+  curve_index: number;
+  parameter_id: string;
+  parameter_name: string;
+  kind: string;
+  domain: string;
+  engine_role: string;
+  channels: string[];
+  group_name: string;
+  duration: number;
+  fps: number;
+  loop: boolean;
+  strength: string;
+  trait: string;
+  segment_types: string[];
+  sample_count: number;
+  value_profile: {
+    start: number;
+    end: number;
+    min: number;
+    max: number;
+    baseline: number;
+    span: number;
+  };
+  peak_abs_value: number;
+  peak_time_ratio: number;
+  active_ratio: number;
+  energy_score: number;
+  windows: Array<{ start_ratio: number; end_ratio: number }>;
+}
+
+export interface MotionResourcePool {
+  decomposition_level: string;
+  summary: {
+    motion_count: number;
+    component_count: number;
+    driver_component_count: number;
+    overlay_component_count: number;
+    channel_pool_count: number;
+    domain_pool_count: number;
+    parameter_pool_count: number;
+  };
+  components: MotionResourceComponent[];
+  driver_components: MotionResourceComponent[];
+  channel_pool: Array<{
+    pool_type: string;
+    name: string;
+    component_count: number;
+    strength_counts: Array<{ name: string; count: number }>;
+    trait_counts: Array<{ name: string; count: number }>;
+    source_motions: string[];
+    component_ids: string[];
+  }>;
+  domain_pool: Array<{
+    pool_type: string;
+    name: string;
+    component_count: number;
+    strength_counts: Array<{ name: string; count: number }>;
+    trait_counts: Array<{ name: string; count: number }>;
+    source_motions: string[];
+    component_ids: string[];
+  }>;
+  parameter_pool: Array<{
+    pool_type: string;
+    name: string;
+    component_count: number;
+    strength_counts: Array<{ name: string; count: number }>;
+    trait_counts: Array<{ name: string; count: number }>;
+    source_motions: string[];
+    component_ids: string[];
+  }>;
+  motion_presets: Array<{
+    motion_name: string;
+    motion_file: string;
+    category: string;
+    group: string;
+    component_ids: string[];
+    dominant_channels: string[];
+    dominant_domains: string[];
+    intensity: string;
+    timeline_profile: {
+      intro_energy: number;
+      middle_energy: number;
+      outro_energy: number;
+      peak_window: { start_ratio: number; end_ratio: number };
+      motion_trait: string;
+    };
+    catalog_tags: string[];
+  }>;
+}
+
+export interface ModelSummary {
+  name: string;
+  root_path: string;
+  model_path: string;
+  model_url: string;
+  icon_url: string;
+  resource_scan: ResourceScanPayload;
+  parameter_scan: ParameterScanPayload;
+  expression_scan: ExpressionScanPayload;
+  motion_resource_pool: MotionResourcePool;
+  constraints: {
+    expressions: ExpressionConstraint[];
+    motions: MotionConstraint[];
+  };
+  engine_hints: {
+    driver_priority: string[];
+    recommended_mode: string;
+    available_channels: string[];
+    base_expression_count: number;
+    fallback_motion_count: number;
+    motion_decomposition_level: string;
+  };
+}
+
+export interface ModelSyncInfo {
+  schema_version: string;
+  driver_priority: string[];
+  selected_model: string;
+  available_models: string[];
+  models: ModelSummary[];
+}
+
+export interface SystemModelSyncPayload {
+  model_info: ModelSyncInfo;
+  conf_name: string;
+  conf_uid: string;
+  client_uid: string;
+}

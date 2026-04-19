@@ -1,0 +1,60 @@
+{
+    "Type": "Live2D Expression",
+    "Parameters": [
+        {
+            "Id": "ExpEyeHighlight",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpPupilDefault",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpPupilSpiral",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpFaceDarkLines",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpTearToon",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamMouthMode",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpDarkLines",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpExclamation",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpQuestion",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamMode2Form",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamMouthPunkerWiden",
+            "Value": -0.2720128893852234,
+            "Blend": "Add"
+        }
+    ]
+}

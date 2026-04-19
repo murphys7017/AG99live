@@ -1,0 +1,25 @@
+{
+    "Type": "Live2D Expression",
+    "Parameters": [
+        {
+            "Id": "ExpEyeHighlight",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpDarkcircle",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpMouthBlood",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpEyeVibrate",
+            "Value": 0.38905104994773867,
+            "Blend": "Add"
+        }
+    ]
+}

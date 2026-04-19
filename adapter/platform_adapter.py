@@ -101,6 +101,7 @@ class OLVPetPlatformAdapter(Platform):
             host=self.host,
             http_port=self.http_port,
             client_uid=self.client_uid,
+            live2ds_dir=LIVE2DS_DIR,
         )
         self.session_state = SessionState(client_uid=self.client_uid)
 
@@ -108,6 +109,7 @@ class OLVPetPlatformAdapter(Platform):
             host=self.host,
             port=self.http_port,
             routes=build_static_routes(
+                live2ds_dir=LIVE2DS_DIR,
                 assets_dir=ASSETS_DIR,
                 runtime_cache_dir=RUNTIME_CACHE_DIR,
             ),
@@ -207,6 +209,10 @@ class OLVPetPlatformAdapter(Platform):
     @property
     def _selected_stt_provider(self):
         return self.runtime_state.selected_stt_provider
+
+    @property
+    def _selected_motion_analysis_provider(self):
+        return self.runtime_state.selected_motion_analysis_provider
 
     async def run(self):
         try:

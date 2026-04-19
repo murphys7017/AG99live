@@ -5,7 +5,7 @@ from copy import deepcopy
 from typing import Any, Callable
 
 from astrbot.api import logger
-from astrbot.api.provider import STTProvider
+from astrbot.api.provider import Provider, STTProvider
 
 from .client_profile import (
     DEFAULT_CLIENT_NICKNAME,
@@ -13,6 +13,7 @@ from .client_profile import (
     normalize_client_nickname,
     normalize_client_uid,
 )
+from .live2d_scan import scan_live2d_models
 from .payload_builder import build_system_model_sync
 
 
@@ -27,10 +28,12 @@ class RuntimeState:
         host: str,
         http_port: int,
         client_uid: str,
+        live2ds_dir: Any,
     ) -> None:
         self.platform_config = platform_config
         self.host = host
         self.http_port = http_port
+        self.live2ds_dir = live2ds_dir
         self.client_uid = normalize_client_uid(client_uid, DEFAULT_CLIENT_UID)
         self.client_nickname = DEFAULT_CLIENT_NICKNAME
 
@@ -39,12 +42,14 @@ class RuntimeState:
         self.plugin_config_loader = plugin_config_loader
 
         self.stt_provider_id = ""
+        self.motion_analysis_provider_id = ""
         self.vad_model = "silero_vad"
         self.vad_config: dict[str, Any] = {}
         self.model_info: dict[str, Any] = {}
         self.image_cooldown_seconds = 0
         self.default_persona: dict[str, Any] | None = None
         self.selected_stt_provider: STTProvider | None = None
+        self.selected_motion_analysis_provider: Provider | None = None
         self.last_sent_model_signature: str | None = None
 
     async def load_default_persona(self) -> None:
@@ -92,6 +97,7 @@ class RuntimeState:
             self.plugin_config = latest_plugin_config
 
         previous_stt_provider_id = self.stt_provider_id
+        previous_motion_analysis_provider_id = self.motion_analysis_provider_id
         previous_vad_model = self.vad_model
         previous_vad_config = dict(self.vad_config)
 
@@ -108,6 +114,11 @@ class RuntimeState:
             DEFAULT_CLIENT_NICKNAME,
         )
         self.stt_provider_id = _plugin_config_get(self.plugin_config, "stt_provider_id", "")
+        self.motion_analysis_provider_id = _plugin_config_get(
+            self.plugin_config,
+            "motion_analysis_provider_id",
+            "",
+        )
         self.vad_model = _plugin_config_get(self.plugin_config, "vad_model", "silero_vad")
         self.vad_config = {
             "orig_sr": 16000,
@@ -132,26 +143,48 @@ class RuntimeState:
             int(_plugin_config_get(self.plugin_config, "image_cooldown_seconds", 0)),
             0,
         )
-        self.model_info = {}
-
-        logger.info(
-            "Refreshed adapter runtime settings (phase1 message-only mode, model_info=%s)",
-            self.model_info,
+        self.model_info = scan_live2d_models(
+            live2ds_dir=self.live2ds_dir,
+            base_url=f"http://{self.host}:{self.http_port}",
+            selected_model_name=str(
+                _plugin_config_get(self.plugin_config, "live2d_model_name", "")
+            ).strip(),
         )
 
-        provider_config_changed = previous_stt_provider_id != self.stt_provider_id
+        logger.info(
+            "Refreshed adapter runtime settings "
+            "(selected_model=%s, available_models=%s)",
+            self.model_info.get("selected_model", ""),
+            self.model_info.get("available_models", []),
+        )
+
+        provider_config_changed = (
+            previous_stt_provider_id != self.stt_provider_id
+            or previous_motion_analysis_provider_id != self.motion_analysis_provider_id
+        )
         provider_binding_missing = (
             (self.stt_provider_id and self.selected_stt_provider is None)
             or (not self.stt_provider_id and self.selected_stt_provider is not None)
+            or (
+                self.motion_analysis_provider_id
+                and self.selected_motion_analysis_provider is None
+            )
+            or (
+                not self.motion_analysis_provider_id
+                and self.selected_motion_analysis_provider is not None
+            )
         )
         if provider_config_changed or provider_binding_missing:
             logger.info(
-                "Provider runtime settings changed, reloading STT provider binding "
-                "(stt: %s -> %s)",
+                "Provider runtime settings changed, reloading provider bindings "
+                "(stt: %s -> %s, motion_analysis: %s -> %s)",
                 previous_stt_provider_id or "<default>",
                 self.stt_provider_id or "<default>",
+                previous_motion_analysis_provider_id or "<default>",
+                self.motion_analysis_provider_id or "<default>",
             )
             self.selected_stt_provider = None
+            self.selected_motion_analysis_provider = None
             self.load_selected_providers()
 
         return (
@@ -172,6 +205,7 @@ class RuntimeState:
 
         if reload_providers:
             self.selected_stt_provider = None
+            self.selected_motion_analysis_provider = None
             self.load_selected_providers()
 
         return vad_changed
@@ -202,6 +236,29 @@ class RuntimeState:
             if isinstance(provider, STTProvider):
                 self.selected_stt_provider = provider
                 logger.info("Using current STT provider: %s", provider.meta().id)
+
+        if self.motion_analysis_provider_id:
+            provider = self.plugin_context.get_provider_by_id(self.motion_analysis_provider_id)
+            if isinstance(provider, Provider):
+                self.selected_motion_analysis_provider = provider
+                logger.info(
+                    "Loaded motion analysis provider from plugin config: %s",
+                    self.motion_analysis_provider_id,
+                )
+            else:
+                logger.warning(
+                    "Configured motion analysis provider `%s` not found or not a chat Provider.",
+                    self.motion_analysis_provider_id,
+                )
+        else:
+            try:
+                provider = self.plugin_context.get_using_provider(umo=self.client_uid)
+            except Exception as exc:
+                logger.warning("Failed to get current chat provider: %s", exc)
+                provider = None
+            if isinstance(provider, Provider):
+                self.selected_motion_analysis_provider = provider
+                logger.info("Using current chat provider for motion analysis: %s", provider.meta().id)
 
     def build_current_model_payload(
         self,

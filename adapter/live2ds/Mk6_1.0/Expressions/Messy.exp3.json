@@ -1,0 +1,90 @@
+{
+    "Type": "Live2D Expression",
+    "Parameters": [
+        {
+            "Id": "ExpEyeDefault",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpEyeAngle",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpFaceDark",
+            "Value": 0.8445647358894348,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpFaceDarkLines",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ExpHairSticker",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamMouthMode",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamEyeLOpen",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamEyeROpen",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamNoseSneer",
+            "Value": 0.5056277513504028,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamBrowLDown",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamBrowRDown",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamBrowLOutterUp",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "BrowROutterUp",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "BrowRInnerUp",
+            "Value": 0.5742491483688355,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamBrowForm",
+            "Value": 0.2962214946746826,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamMode2Form",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamMouthPunkerWiden",
+            "Value": 0.0,
+            "Blend": "Add"
+        }
+    ]
+}
