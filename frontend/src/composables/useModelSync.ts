@@ -13,6 +13,13 @@ const state = reactive({
   modelInfo: null as ModelSyncInfo | null,
 });
 
+function resetModelSyncState(): void {
+  state.sessionId = "";
+  state.confName = "";
+  state.lastUpdated = "";
+  state.modelInfo = null;
+}
+
 function applyModelSyncMessage(
   envelope: ProtocolEnvelope<SystemModelSyncPayload>,
 ): void {
@@ -71,5 +78,6 @@ export function useModelSync() {
     selectedModel,
     applyModelSyncMessage,
     applyUnknownMessage,
+    resetModelSyncState,
   };
 }

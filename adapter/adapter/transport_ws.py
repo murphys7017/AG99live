@@ -5,6 +5,7 @@ import json
 from typing import Any, Awaitable, Callable
 
 from astrbot.api import logger
+from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
 from .payload_builder import (
     build_control_error,
@@ -170,6 +171,15 @@ class WebSocketTransport:
                             message=f"Failed to process message: {exc}",
                         )
                     )
+        except asyncio.CancelledError:
+            raise
+        except ConnectionClosedOK:
+            logger.debug("Desktop frontend websocket closed cleanly")
+        except ConnectionClosedError as exc:
+            logger.debug(
+                "Desktop frontend websocket closed without a graceful close frame: %s",
+                exc,
+            )
         finally:
             self._ws_client = None
             await self._on_disconnect()

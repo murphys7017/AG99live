@@ -2,14 +2,22 @@
 import { computed } from "vue";
 import type { ModelSummary } from "../types/protocol";
 
-const props = defineProps<{
-  draft: string;
-  micEnabled: boolean;
-  selectedModel: ModelSummary | null;
-  connectionState: string;
-  connectionLabel: string;
-  lastSentText: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    draft: string;
+    micEnabled: boolean;
+    selectedModel: ModelSummary | null;
+    connectionState: string;
+    connectionLabel: string;
+    lastSentText: string;
+    lastAssistantText: string;
+    connectionStatusMessage: string;
+    compact?: boolean;
+  }>(),
+  {
+    compact: false,
+  },
+);
 
 const emit = defineEmits<{
   "update:draft": [value: string];
@@ -24,6 +32,15 @@ const footerHint = computed(() => {
   }
   if (props.connectionState === "linked") {
     return "适配器已连通，等待模型能力同步。";
+  }
+  if (props.connectionState === "connecting") {
+    return "正在建立与 AstrBot 适配器的连接。";
+  }
+  if (props.connectionState === "error") {
+    return props.connectionStatusMessage;
+  }
+  if (props.connectionState === "disconnected") {
+    return "当前未连接适配器，请先在左上角建立连接。";
   }
   return "Pet 控件层可继续接入输入、麦克风和中断链路。";
 });
@@ -40,7 +57,7 @@ function onEnter(event: KeyboardEvent) {
 </script>
 
 <template>
-  <section class="control-dock glass-panel">
+  <section class="control-dock glass-panel" :class="{ 'control-dock--compact': compact }">
     <div class="control-dock__header">
       <div>
         <span class="control-dock__eyebrow">Pet Controls</span>
@@ -69,7 +86,11 @@ function onEnter(event: KeyboardEvent) {
     <div class="control-dock__message">
       <p class="control-dock__message-label">最近消息</p>
       <p class="control-dock__message-text">
-        {{ lastSentText || "这里会保留最近一次用户输入或后端返回的简短内容。" }}
+        {{
+          lastAssistantText ||
+          lastSentText ||
+          "这里会保留最近一次用户输入或后端返回的简短内容。"
+        }}
       </p>
     </div>
 
@@ -103,6 +124,11 @@ function onEnter(event: KeyboardEvent) {
       <button
         type="button"
         class="control-button control-button--primary"
+        :disabled="
+          connectionState === 'disconnected' ||
+          connectionState === 'connecting' ||
+          connectionState === 'error'
+        "
         @click="$emit('send')"
       >
         发送到桌宠

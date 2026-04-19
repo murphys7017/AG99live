@@ -8,9 +8,23 @@ const props = defineProps<{
   confName: string;
   lastUpdated: string;
   connectionLabel: string;
+  adapterAddress: string;
+  connectionState: string;
+  connectionStatusMessage: string;
+  serverWsUrl: string;
+  httpBaseUrl: string;
+}>();
+
+const emit = defineEmits<{
+  "update:adapter-address": [value: string];
+  connect: [];
+  disconnect: [];
 }>();
 
 const hasModel = computed(() => Boolean(props.selectedModel));
+const isConnected = computed(
+  () => props.connectionState === "connected" || props.connectionState === "connecting",
+);
 const formattedLastUpdated = computed(() => {
   if (!props.lastUpdated) {
     return "尚未收到同步";
@@ -98,5 +112,54 @@ const channelCount = computed(
         </div>
       </div>
     </template>
+
+    <div class="launch-card__connect-panel">
+      <label class="launch-card__field">
+        <span>适配器地址</span>
+        <input
+          :value="adapterAddress"
+          class="launch-card__input"
+          placeholder="ws://127.0.0.1:12396"
+          @input="
+            emit(
+              'update:adapter-address',
+              ($event.target as HTMLInputElement).value,
+            )
+          "
+        />
+      </label>
+
+      <div class="launch-card__connect-actions">
+        <button
+          v-if="!isConnected"
+          type="button"
+          class="control-button control-button--primary control-button--inline"
+          @click="$emit('connect')"
+        >
+          连接适配器
+        </button>
+        <button
+          v-else
+          type="button"
+          class="control-button control-button--ghost"
+          @click="$emit('disconnect')"
+        >
+          断开连接
+        </button>
+      </div>
+
+      <p class="launch-card__connect-hint">{{ connectionStatusMessage }}</p>
+
+      <div class="launch-card__endpoint-list">
+        <div class="launch-summary__item">
+          <span>WS</span>
+          <strong>{{ serverWsUrl || "等待后端下发" }}</strong>
+        </div>
+        <div class="launch-summary__item">
+          <span>HTTP</span>
+          <strong>{{ httpBaseUrl || "等待后端下发" }}</strong>
+        </div>
+      </div>
+    </div>
   </aside>
 </template>

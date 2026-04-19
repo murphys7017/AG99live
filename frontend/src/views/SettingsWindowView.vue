@@ -1,0 +1,155 @@
+<script setup lang="ts">
+import { computed, ref, watch } from "vue";
+import DesktopWindowPanel from "../components/DesktopWindowPanel.vue";
+import { useDesktopBridge } from "../composables/useDesktopBridge";
+
+const bridge = useDesktopBridge();
+const draftAddress = ref(bridge.state.snapshot.adapterAddress);
+
+watch(
+  () => bridge.state.snapshot.adapterAddress,
+  (nextValue) => {
+    draftAddress.value = nextValue;
+  },
+);
+
+const statusLabel = computed(() => {
+  if (bridge.state.snapshot.connectionState === "synced") {
+    return "模型已同步";
+  }
+  if (bridge.state.snapshot.connectionState === "connecting") {
+    return "连接中";
+  }
+  if (bridge.state.snapshot.connectionState === "error") {
+    return "连接异常";
+  }
+  if (bridge.state.snapshot.connectionState === "linked") {
+    return "适配器已连接";
+  }
+  return "尚未连接";
+});
+
+function applyAddress(): void {
+  bridge.sendCommand({ type: "set_address", address: draftAddress.value });
+}
+
+function connectAdapter(): void {
+  bridge.sendCommand({ type: "connect", address: draftAddress.value });
+}
+
+function disconnectAdapter(): void {
+  bridge.sendCommand({ type: "disconnect" });
+}
+
+function toggleHistoryWindow(): void {
+  window.ag99desktop?.toggleAuxWindow("history");
+}
+</script>
+
+<template>
+  <DesktopWindowPanel title="系统设置" subtitle="AG99live Desktop">
+    <section class="settings-grid">
+      <article class="settings-card">
+        <div class="settings-card__header">
+          <div>
+            <p class="settings-card__eyebrow">连接</p>
+            <h2>后端地址</h2>
+          </div>
+          <span class="settings-card__badge">{{ statusLabel }}</span>
+        </div>
+
+        <input
+          v-model="draftAddress"
+          class="settings-card__input"
+          placeholder="ws://127.0.0.1:12396"
+        />
+
+        <div class="settings-card__actions">
+          <button type="button" class="settings-card__button" @click="applyAddress">
+            保存地址
+          </button>
+          <button type="button" class="settings-card__button" @click="connectAdapter">
+            连接
+          </button>
+          <button
+            type="button"
+            class="settings-card__button settings-card__button--ghost"
+            @click="disconnectAdapter"
+          >
+            断开
+          </button>
+        </div>
+
+        <p class="settings-card__hint">{{ bridge.state.snapshot.connectionStatusMessage }}</p>
+      </article>
+
+      <article class="settings-card">
+        <div class="settings-card__header">
+          <div>
+            <p class="settings-card__eyebrow">运行状态</p>
+            <h2>{{ bridge.state.snapshot.selectedModelName || "等待模型同步" }}</h2>
+          </div>
+          <span class="settings-card__badge">
+            {{ bridge.state.snapshot.recommendedMode || "await-sync" }}
+          </span>
+        </div>
+
+        <dl class="settings-card__meta">
+          <div>
+            <dt>会话</dt>
+            <dd>{{ bridge.state.snapshot.sessionId || "未同步" }}</dd>
+          </div>
+          <div>
+            <dt>配置</dt>
+            <dd>{{ bridge.state.snapshot.confName || "未同步" }}</dd>
+          </div>
+          <div>
+            <dt>WS</dt>
+            <dd>{{ bridge.state.snapshot.serverWsUrl || "等待后端下发" }}</dd>
+          </div>
+          <div>
+            <dt>HTTP</dt>
+            <dd>{{ bridge.state.snapshot.httpBaseUrl || "等待后端下发" }}</dd>
+          </div>
+        </dl>
+      </article>
+
+      <article class="settings-card settings-card--wide">
+        <div class="settings-card__header">
+          <div>
+            <p class="settings-card__eyebrow">最近消息</p>
+            <h2>连接状态</h2>
+          </div>
+          <span class="settings-card__badge">
+            {{ bridge.state.snapshot.connectionLabel }}
+          </span>
+        </div>
+
+        <p class="settings-card__copy">{{ bridge.state.snapshot.stageMessage }}</p>
+
+        <div class="settings-card__stack">
+          <div>
+            <span>最近输入</span>
+            <strong>{{ bridge.state.snapshot.lastSentText || "暂无" }}</strong>
+          </div>
+          <div>
+            <span>最近回复</span>
+            <strong>{{ bridge.state.snapshot.lastAssistantText || "暂无" }}</strong>
+          </div>
+          <div>
+            <span>最近转写</span>
+            <strong>{{ bridge.state.snapshot.lastTranscription || "暂无" }}</strong>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          class="settings-card__button settings-card__button--ghost"
+          @click="toggleHistoryWindow"
+        >
+          打开或关闭历史窗口
+        </button>
+      </article>
+    </section>
+  </DesktopWindowPanel>
+</template>

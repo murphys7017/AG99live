@@ -9,6 +9,47 @@ export interface ProtocolEnvelope<TPayload = unknown> {
   payload: TPayload;
 }
 
+export interface SystemServerInfoPayload {
+  ws_url: string;
+  http_base_url: string;
+  auto_start_mic: boolean;
+}
+
+export interface OutputTextPayload {
+  text: string;
+  speaker_name: string;
+  avatar: string;
+}
+
+export interface OutputAudioPayload {
+  audio_url: string | null;
+  text: string;
+  speaker_name: string;
+  avatar: string;
+}
+
+export interface OutputImagePayload {
+  images: string[];
+}
+
+export interface OutputTranscriptionPayload {
+  text: string;
+}
+
+export interface ControlTurnFinishedPayload {
+  success: boolean;
+  reason?: string;
+}
+
+export interface ControlPlaybackFinishedPayload {
+  success: boolean;
+  reason?: string;
+}
+
+export interface ControlErrorPayload {
+  message: string;
+}
+
 export interface StandardChannelInfo {
   label: string;
   available: boolean;

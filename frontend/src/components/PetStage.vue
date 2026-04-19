@@ -3,12 +3,18 @@ import { computed, toRef } from "vue";
 import type { ModelSummary } from "../types/protocol";
 import { useLive2dRenderer } from "../composables/useLive2dRenderer";
 
-const props = defineProps<{
-  selectedModel: ModelSummary | null;
-  connectionLabel: string;
-  stageMessage: string;
-  lastSentText: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    selectedModel: ModelSummary | null;
+    connectionLabel: string;
+    stageMessage: string;
+    lastSentText: string;
+    compact?: boolean;
+  }>(),
+  {
+    compact: false,
+  },
+);
 
 const selectedModelRef = toRef(props, "selectedModel");
 const {
@@ -40,7 +46,7 @@ const showFallback = computed(() => {
 </script>
 
 <template>
-  <section class="pet-stage">
+  <section class="pet-stage" :class="{ 'pet-stage--compact': compact }">
     <div class="pet-stage__speech glass-panel">
       <span class="pet-stage__speech-label">{{ connectionLabel }}</span>
       <p>{{ stageMessage }}</p>
@@ -80,7 +86,7 @@ const showFallback = computed(() => {
       </div>
     </div>
 
-    <div class="pet-stage__meta glass-panel">
+    <div v-if="!compact" class="pet-stage__meta glass-panel">
       <div class="pet-stage__meta-head">
         <div>
           <p class="pet-stage__meta-kicker">Pet Stage</p>
