@@ -60,6 +60,33 @@ function setupIpc(): void {
   ipcMain.on("desktop:minimize-current-window", (event) => {
     windowManager.minimizeCurrentWindow(BrowserWindow.fromWebContents(event.sender));
   });
+
+  ipcMain.on("desktop:set-ignore-mouse-events", (event, ignore) => {
+    windowManager.setIgnoreMouseEvents(
+      BrowserWindow.fromWebContents(event.sender),
+      Boolean(ignore),
+    );
+  });
+
+  ipcMain.on("desktop:start-window-drag", (event, screenX, screenY) => {
+    windowManager.startWindowDrag(
+      BrowserWindow.fromWebContents(event.sender),
+      screenX,
+      screenY,
+    );
+  });
+
+  ipcMain.on("desktop:update-window-drag", (event, screenX, screenY) => {
+    windowManager.updateWindowDrag(
+      BrowserWindow.fromWebContents(event.sender),
+      screenX,
+      screenY,
+    );
+  });
+
+  ipcMain.on("desktop:end-window-drag", (event) => {
+    windowManager.endWindowDrag(BrowserWindow.fromWebContents(event.sender));
+  });
 }
 
 app.whenReady().then(() => {

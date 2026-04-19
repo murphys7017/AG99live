@@ -177,7 +177,6 @@ onBeforeUnmount(() => {
   >
     <DesktopPetCanvas
       :selected-model="selectedModel"
-      :status-text="connectionLabel"
       :stage-message="stageMessage"
     />
   </main>

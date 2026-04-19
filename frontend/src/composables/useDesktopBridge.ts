@@ -13,7 +13,7 @@ type BridgeMessage =
   | { kind: "command"; command: DesktopRuntimeCommand };
 
 const defaultSnapshot: DesktopRuntimeSnapshot = {
-  adapterAddress: "ws://127.0.0.1:12396",
+  adapterAddress: "127.0.0.1:12396",
   connectionState: "disconnected",
   connectionLabel: "未连接",
   connectionStatusMessage: "等待桌宠窗口启动。",

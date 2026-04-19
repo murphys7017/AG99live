@@ -31,15 +31,9 @@ const previewText = computed(() => {
   return bridge.state.snapshot.connectionStatusMessage;
 });
 
-const voiceLabel = computed(() => {
-  if (bridge.state.snapshot.audioPlaying) {
-    return "语音播放中";
-  }
-  if (bridge.state.snapshot.micRequested) {
-    return "麦克风待命";
-  }
-  return "语音待接入";
-});
+const voiceActive = computed(() =>
+  bridge.state.snapshot.micRequested || bridge.state.snapshot.audioPlaying,
+);
 
 function handleSend(): void {
   const text = draft.value.trim();
@@ -78,35 +72,60 @@ function onEnter(event: KeyboardEvent): void {
     <section class="overlay-card">
       <div class="overlay-card__grip" aria-hidden="true"></div>
 
-      <header class="overlay-card__header">
-        <div>
-          <p class="overlay-card__eyebrow">Desktop Chat</p>
-          <strong>{{ bridge.state.snapshot.selectedModelName || "AG99live" }}</strong>
+      <p
+        class="overlay-card__message"
+        :data-empty="!previewText.trim()"
+      >
+        {{ previewText.trim() || "..." }}
+      </p>
+
+      <div class="overlay-card__status-row">
+        <span class="overlay-card__status-label">{{ aiStateLabel }}</span>
+        <div class="overlay-card__icon-group">
+          <span
+            class="overlay-card__icon-pill"
+            :data-active="voiceActive"
+            :title="voiceActive ? '语音链路活跃' : '语音链路待命'"
+          >
+            <svg
+              class="overlay-card__icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M12 14a3 3 0 0 0 3-3V7a3 3 0 1 0-6 0v4a3 3 0 0 0 3 3Z" />
+              <path d="M19 11a7 7 0 0 1-14 0" />
+              <path d="M12 18v4" />
+              <path d="M8 22h8" />
+            </svg>
+          </span>
+          <button
+            type="button"
+            class="overlay-card__icon-button"
+            title="打断"
+            @click="handleInterrupt"
+          >
+            <svg
+              class="overlay-card__icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="7" y="7" width="10" height="10" rx="2" />
+            </svg>
+          </button>
         </div>
-        <span class="overlay-card__badge" :data-state="bridge.state.snapshot.aiState">
-          {{ aiStateLabel }}
-        </span>
-      </header>
-
-      <p class="overlay-card__status">{{ previewText }}</p>
-
-      <div class="overlay-card__toolbar">
-        <span
-          class="overlay-card__voice-pill"
-          :data-active="bridge.state.snapshot.micRequested || bridge.state.snapshot.audioPlaying"
-        >
-          {{ voiceLabel }}
-        </span>
-        <button
-          type="button"
-          class="overlay-card__action"
-          @click="handleInterrupt"
-        >
-          打断
-        </button>
       </div>
 
-      <div class="overlay-card__composer">
+      <form class="overlay-card__composer" @submit.prevent="handleSend">
         <input
           v-model="draft"
           class="overlay-card__input"
@@ -115,13 +134,25 @@ function onEnter(event: KeyboardEvent): void {
           @keydown="onEnter"
         />
         <button
-          type="button"
+          type="submit"
           class="overlay-card__send"
-          @click="handleSend"
+          aria-label="发送"
         >
-          发送
+          <svg
+            class="overlay-card__icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M21 3 9 15" />
+            <path d="m21 3-8.5 18-3.5-6-6-3.5L21 3Z" />
+          </svg>
         </button>
-      </div>
+      </form>
     </section>
   </main>
 </template>

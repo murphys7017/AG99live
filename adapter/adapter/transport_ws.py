@@ -180,9 +180,17 @@ class WebSocketTransport:
                 "Desktop frontend websocket closed without a graceful close frame: %s",
                 exc,
             )
+        except Exception as exc:
+            if _is_expected_disconnect_error(exc):
+                logger.debug("Desktop frontend disconnected abruptly: %s", exc)
+            else:
+                logger.warning("Desktop frontend handler aborted unexpectedly: %s", exc)
         finally:
             self._ws_client = None
-            await self._on_disconnect()
+            try:
+                await self._on_disconnect()
+            except Exception as exc:
+                logger.warning("Failed to run disconnect cleanup: %s", exc)
             logger.debug("Desktop frontend disconnected from adapter transport")
 
     async def _send_initial_messages(self) -> None:
@@ -213,3 +221,16 @@ class WebSocketTransport:
     def _session_id(self) -> str:
         session_id = self._session_id_getter()
         return session_id or "desktop-client"
+
+
+def _is_expected_disconnect_error(exc: Exception) -> bool:
+    if isinstance(exc, (ConnectionClosedError, ConnectionClosedOK, ConnectionResetError, BrokenPipeError)):
+        return True
+
+    if isinstance(exc, OSError):
+        winerror = getattr(exc, "winerror", None)
+        if winerror in {64, 10054}:
+            return True
+
+    message = str(exc).lower()
+    return "no close frame received or sent" in message or "network name is no longer available" in message

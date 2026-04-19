@@ -33,6 +33,18 @@ const api = {
   showContextMenu: () => {
     ipcRenderer.send("desktop:show-context-menu");
   },
+  setIgnoreMouseEvents: (ignore: boolean) => {
+    ipcRenderer.send("desktop:set-ignore-mouse-events", ignore);
+  },
+  startWindowDrag: (screenX: number, screenY: number) => {
+    ipcRenderer.send("desktop:start-window-drag", screenX, screenY);
+  },
+  updateWindowDrag: (screenX: number, screenY: number) => {
+    ipcRenderer.send("desktop:update-window-drag", screenX, screenY);
+  },
+  endWindowDrag: () => {
+    ipcRenderer.send("desktop:end-window-drag");
+  },
   getLocalAdapterHosts: () => {
     return listLocalAdapterHosts();
   },
@@ -65,9 +77,12 @@ const hasContextIsolation = Boolean(
 
 if (hasContextIsolation) {
   contextBridge.exposeInMainWorld("ag99desktop", api);
+  contextBridge.exposeInMainWorld("api", api);
 } else {
   const target = window as Window & {
     ag99desktop?: typeof api;
+    api?: typeof api;
   };
   target.ag99desktop = api;
+  target.api = api;
 }

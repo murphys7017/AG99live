@@ -9,11 +9,17 @@ import type {
 
 type ManagedWindowMap = Record<DesktopWindowRole, BrowserWindow | null>;
 
+interface WindowDragState {
+  targetWindow: BrowserWindow;
+  offsetX: number;
+  offsetY: number;
+}
+
 const PET_WINDOW_WIDTH = 540;
 const PET_WINDOW_HEIGHT = 820;
 const PET_WINDOW_MARGIN = 24;
-const PET_OVERLAY_WIDTH = 430;
-const PET_OVERLAY_HEIGHT = 182;
+const PET_OVERLAY_WIDTH = 440;
+const PET_OVERLAY_HEIGHT = 210;
 const PET_OVERLAY_GAP = 18;
 
 function isDevelopment(): boolean {
@@ -23,6 +29,7 @@ function isDevelopment(): boolean {
 export class WindowManager {
   private isAppQuitting = false;
   private overlayVisiblePreference = true;
+  private activeDragState: WindowDragState | null = null;
 
   private windows: ManagedWindowMap = {
     pet: null,
@@ -107,6 +114,67 @@ export class WindowManager {
     targetWindow?.minimize();
   }
 
+  setIgnoreMouseEvents(targetWindow: BrowserWindow | null, ignore: boolean): void {
+    const petWindow = this.windows.pet;
+    if (!targetWindow || !petWindow || targetWindow !== petWindow || targetWindow.isDestroyed()) {
+      return;
+    }
+
+    if (ignore) {
+      targetWindow.setIgnoreMouseEvents(true, { forward: true });
+      return;
+    }
+
+    targetWindow.setIgnoreMouseEvents(false);
+  }
+
+  startWindowDrag(
+    targetWindow: BrowserWindow | null,
+    screenX: number,
+    screenY: number,
+  ): void {
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return;
+    }
+
+    const bounds = targetWindow.getBounds();
+    this.activeDragState = {
+      targetWindow,
+      offsetX: screenX - bounds.x,
+      offsetY: screenY - bounds.y,
+    };
+    targetWindow.moveTop();
+  }
+
+  updateWindowDrag(
+    targetWindow: BrowserWindow | null,
+    screenX: number,
+    screenY: number,
+  ): void {
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return;
+    }
+
+    const activeDragState = this.activeDragState;
+    if (!activeDragState || activeDragState.targetWindow !== targetWindow) {
+      return;
+    }
+
+    const nextX = Math.round(screenX - activeDragState.offsetX);
+    const nextY = Math.round(screenY - activeDragState.offsetY);
+    targetWindow.setPosition(nextX, nextY);
+  }
+
+  endWindowDrag(targetWindow: BrowserWindow | null): void {
+    if (!targetWindow) {
+      return;
+    }
+
+    if (this.activeDragState?.targetWindow === targetWindow) {
+      this.activeDragState = null;
+    }
+  }
+
   buildWindowState(): DesktopWindowVisibilityState {
     return {
       petVisible: Boolean(this.windows.pet?.isVisible()),
@@ -127,6 +195,7 @@ export class WindowManager {
     const petWindow = new BrowserWindow({
       width: PET_WINDOW_WIDTH,
       height: PET_WINDOW_HEIGHT,
+      title: "",
       frame: false,
       transparent: true,
       show: false,
@@ -147,6 +216,7 @@ export class WindowManager {
     petWindow.setAlwaysOnTop(true, "screen-saver");
     petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     petWindow.setMenuBarVisibility(false);
+    petWindow.setIgnoreMouseEvents(true, { forward: true });
     petWindow.setPosition(
       screen.getPrimaryDisplay().workArea.x
         + screen.getPrimaryDisplay().workArea.width
@@ -159,6 +229,7 @@ export class WindowManager {
     );
 
     petWindow.on("show", () => {
+      petWindow.setIgnoreMouseEvents(true, { forward: true });
       if (this.overlayVisiblePreference) {
         this.windows.overlay?.show();
       }
@@ -176,6 +247,7 @@ export class WindowManager {
       this.positionOverlayWindow();
     });
     petWindow.on("closed", () => {
+      this.endWindowDrag(petWindow);
       this.windows.pet = null;
     });
 
@@ -189,6 +261,7 @@ export class WindowManager {
     const overlayWindow = new BrowserWindow({
       width: PET_OVERLAY_WIDTH,
       height: PET_OVERLAY_HEIGHT,
+      title: "",
       frame: false,
       transparent: true,
       show: false,
@@ -233,6 +306,7 @@ export class WindowManager {
       overlayWindow.hide();
     });
     overlayWindow.on("closed", () => {
+      this.endWindowDrag(overlayWindow);
       this.windows.overlay = null;
     });
 
@@ -273,6 +347,7 @@ export class WindowManager {
       this.broadcastWindowState();
     });
     utilityWindow.on("closed", () => {
+      this.endWindowDrag(utilityWindow);
       this.windows[role] = null;
     });
 

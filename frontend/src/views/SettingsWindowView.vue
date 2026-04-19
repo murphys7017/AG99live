@@ -61,7 +61,7 @@ function toggleHistoryWindow(): void {
         <input
           v-model="draftAddress"
           class="settings-card__input"
-          placeholder="ws://127.0.0.1:12396"
+          placeholder="127.0.0.1:12396"
         />
 
         <div class="settings-card__actions">
@@ -80,7 +80,10 @@ function toggleHistoryWindow(): void {
           </button>
         </div>
 
-        <p class="settings-card__hint">{{ bridge.state.snapshot.connectionStatusMessage }}</p>
+        <p class="settings-card__hint">
+          只需要填写一个适配器地址，WS 和 HTTP 会在内部自动派生。
+          {{ bridge.state.snapshot.connectionStatusMessage }}
+        </p>
       </article>
 
       <article class="settings-card">
@@ -104,11 +107,11 @@ function toggleHistoryWindow(): void {
             <dd>{{ bridge.state.snapshot.confName || "未同步" }}</dd>
           </div>
           <div>
-            <dt>WS</dt>
+            <dt>内部 WS</dt>
             <dd>{{ bridge.state.snapshot.serverWsUrl || "等待后端下发" }}</dd>
           </div>
           <div>
-            <dt>HTTP</dt>
+            <dt>内部 HTTP</dt>
             <dd>{{ bridge.state.snapshot.httpBaseUrl || "等待后端下发" }}</dd>
           </div>
         </dl>

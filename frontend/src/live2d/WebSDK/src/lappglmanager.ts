@@ -47,7 +47,12 @@ export class LAppGlManager {
       return;
     }
 
-     gl = canvas.getContext("webgl2");
+     gl = canvas.getContext("webgl2", {
+       alpha: true,
+       antialias: true,
+       premultipliedAlpha: true,
+       preserveDrawingBuffer: false,
+     });
 
      if (!gl) {
        // gl初期化失敗

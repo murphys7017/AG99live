@@ -66,7 +66,7 @@ const channelCount = computed(
           <strong>01</strong>
           <div>
             <h2>连接适配器</h2>
-            <p>前端只感知一个地址，等待后端同步模型能力和会话信息。</p>
+            <p>前端只感知一个适配器地址，WS 和 HTTP 由内部自动收口。</p>
           </div>
         </div>
         <div class="launch-step">
@@ -119,7 +119,7 @@ const channelCount = computed(
         <input
           :value="adapterAddress"
           class="launch-card__input"
-          placeholder="ws://127.0.0.1:12396"
+          placeholder="127.0.0.1:12396"
           @input="
             emit(
               'update:adapter-address',

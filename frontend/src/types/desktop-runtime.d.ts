@@ -5,6 +5,10 @@ import type {
 
 export interface Ag99DesktopApi {
   showContextMenu: () => void;
+  setIgnoreMouseEvents: (ignore: boolean) => void;
+  startWindowDrag: (screenX: number, screenY: number) => void;
+  updateWindowDrag: (screenX: number, screenY: number) => void;
+  endWindowDrag: () => void;
   getLocalAdapterHosts: () => string[];
   toggleAuxWindow: (target: DesktopAuxWindowRole) => void;
   closeCurrentWindow: () => void;
@@ -17,6 +21,7 @@ export interface Ag99DesktopApi {
 declare global {
   interface Window {
     ag99desktop?: Ag99DesktopApi;
+    api?: Ag99DesktopApi;
   }
 }
 

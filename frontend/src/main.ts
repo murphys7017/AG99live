@@ -4,7 +4,15 @@ import { getWindowRole } from "./composables/useWindowRole";
 import "./style.css";
 
 const role = getWindowRole();
+const roleTitles: Record<string, string> = {
+  pet: "",
+  overlay: "",
+  settings: "AG99live 设置",
+  history: "AG99live 历史",
+};
+
 document.documentElement.dataset.windowRole = role;
 document.body.dataset.windowRole = role;
+document.title = roleTitles[role] ?? "AG99live";
 
 createApp(App).mount("#app");

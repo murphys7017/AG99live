@@ -17,8 +17,9 @@ import { useModelSync } from "./useModelSync";
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
-const DEFAULT_WS_ADDRESS = "ws://127.0.0.1:12396";
-const ADDRESS_STORAGE_KEY = "ag99live.adapter.ws_address";
+const DEFAULT_ADAPTER_ADDRESS = "127.0.0.1:12396";
+const ADDRESS_STORAGE_KEY = "ag99live.adapter.address";
+const LEGACY_ADDRESS_STORAGE_KEY = "ag99live.adapter.ws_address";
 const PROTOCOL_VERSION = "v2";
 const SOURCE_FRONTEND = "frontend";
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "0.0.0.0"]);
@@ -52,9 +53,20 @@ const { applyUnknownMessage, resetModelSyncState } = useModelSync();
 
 function loadStoredAddress(): string {
   if (typeof window === "undefined") {
-    return DEFAULT_WS_ADDRESS;
+    return DEFAULT_ADAPTER_ADDRESS;
   }
-  return window.localStorage.getItem(ADDRESS_STORAGE_KEY) || DEFAULT_WS_ADDRESS;
+
+  const storedAddress = window.localStorage.getItem(ADDRESS_STORAGE_KEY);
+  if (storedAddress?.trim()) {
+    return storedAddress.trim();
+  }
+
+  const legacyAddress = window.localStorage.getItem(LEGACY_ADDRESS_STORAGE_KEY);
+  if (legacyAddress?.trim()) {
+    return legacyAddress.trim();
+  }
+
+  return DEFAULT_ADAPTER_ADDRESS;
 }
 
 function buildMessageEnvelope<TPayload>(
@@ -83,7 +95,7 @@ function createMessageId(): string {
 
 function normalizeWsAddress(raw: string): string {
   const trimmed = raw.trim();
-  const candidate = trimmed || DEFAULT_WS_ADDRESS;
+  const candidate = trimmed || DEFAULT_ADAPTER_ADDRESS;
   const prefixed = /^[a-z]+:\/\//i.test(candidate) ? candidate : `ws://${candidate}`;
   const url = new URL(prefixed);
 
@@ -174,9 +186,11 @@ function buildConnectFailureMessage(candidates: string[]): string {
 }
 
 function persistAddress(nextAddress: string): void {
-  state.address = nextAddress;
+  const normalizedAddress = nextAddress.trim() || DEFAULT_ADAPTER_ADDRESS;
+  state.address = normalizedAddress;
   if (typeof window !== "undefined") {
-    window.localStorage.setItem(ADDRESS_STORAGE_KEY, nextAddress);
+    window.localStorage.setItem(ADDRESS_STORAGE_KEY, normalizedAddress);
+    window.localStorage.removeItem(LEGACY_ADDRESS_STORAGE_KEY);
   }
 }
 
@@ -189,7 +203,7 @@ async function initialize(): Promise<void> {
     initializePromise = Promise.resolve().then(() => {
       const storedAddress = loadStoredAddress();
       if (storedAddress.trim()) {
-        state.address = storedAddress.trim();
+        persistAddress(storedAddress);
       }
     });
   }
@@ -200,7 +214,7 @@ async function initialize(): Promise<void> {
 function connect(): void {
   disconnectInternal(false);
 
-  let candidates: string[] = [DEFAULT_WS_ADDRESS];
+  let candidates: string[] = [normalizeWsAddress(DEFAULT_ADAPTER_ADDRESS)];
   try {
     candidates = buildConnectionCandidates(state.address);
   } catch (error) {
@@ -271,7 +285,7 @@ function openConnectionCandidate(
     }
 
     opened = true;
-    persistAddress(targetAddress);
+    persistAddress(state.address);
     state.activeWsAddress = targetAddress;
     state.status = "connected";
     state.statusMessage = "连接已建立，等待后端同步。";

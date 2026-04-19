@@ -3,7 +3,6 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 import os
-from pathlib import Path
 import threading
 from typing import Any
 
@@ -14,9 +13,14 @@ _state_lock = threading.RLock()
 _plugin_context: Any = None
 _plugin_config: Any = None
 _plugin_config_path: str | None = None
-_default_plugin_config_path = os.path.join(
-    get_astrbot_config_path(),
-    f"{Path(__file__).resolve().parents[1].name}_config.json",
+PLUGIN_CONFIG_BASENAME = "astrbot_plugin_ag99live_adapter_config.json"
+LEGACY_PLUGIN_CONFIG_BASENAMES = (
+    "adapter_config.json",
+    "astrbot_plugin_self_open_llm_vtuber_config.json",
+)
+_default_plugin_config_paths = tuple(
+    os.path.join(get_astrbot_config_path(), filename)
+    for filename in (PLUGIN_CONFIG_BASENAME, *LEGACY_PLUGIN_CONFIG_BASENAMES)
 )
 
 
@@ -47,10 +51,13 @@ def get_plugin_config() -> Any:
             source_label="plugin config",
         )
         if disk_config is None:
-            disk_config = _load_plugin_config_from_disk(
-                _default_plugin_config_path,
-                source_label="default plugin config",
-            )
+            for default_config_path in _default_plugin_config_paths:
+                disk_config = _load_plugin_config_from_disk(
+                    default_config_path,
+                    source_label="default plugin config",
+                )
+                if disk_config is not None:
+                    break
         if disk_config is not None:
             return disk_config
         return deepcopy(_plugin_config)
