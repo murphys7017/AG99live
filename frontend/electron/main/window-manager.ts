@@ -2,6 +2,7 @@ import { app, BrowserWindow, screen, shell } from "electron";
 import path from "node:path";
 import type { Event as ElectronEvent } from "electron";
 import type { BrowserWindowConstructorOptions } from "electron";
+import type { Rectangle } from "electron";
 import type {
   DesktopAuxWindowRole,
   DesktopWindowRole,
@@ -14,6 +15,15 @@ interface WindowDragState {
   targetWindow: BrowserWindow;
   offsetX: number;
   offsetY: number;
+}
+
+interface TransparentWindowSnapshot {
+  petBounds: Rectangle | null;
+  overlayBounds: Rectangle | null;
+  petVisible: boolean;
+  overlayVisible: boolean;
+  overlayVisiblePreference: boolean;
+  petIgnoreMouseEvents: boolean;
 }
 
 const PET_WINDOW_WIDTH = 540;
@@ -73,6 +83,38 @@ export class WindowManager {
 
   markAppQuitting(): void {
     this.isAppQuitting = true;
+  }
+
+  recoverTransparentWindows(reason: string): boolean {
+    const petWindow = this.windows.pet;
+    const overlayWindow = this.windows.overlay;
+    const hasPetWindow = Boolean(petWindow && !petWindow.isDestroyed());
+    const hasOverlayWindow = Boolean(overlayWindow && !overlayWindow.isDestroyed());
+
+    if (!hasPetWindow && !hasOverlayWindow) {
+      return false;
+    }
+
+    console.warn(`[window-recovery] Recreating transparent windows (${reason})`);
+    const snapshot = this.captureTransparentWindowSnapshot();
+
+    if (hasOverlayWindow && overlayWindow) {
+      this.endWindowDrag(overlayWindow);
+      overlayWindow.destroy();
+    }
+
+    if (hasPetWindow && petWindow) {
+      this.endWindowDrag(petWindow);
+      petWindow.destroy();
+    }
+
+    const nextPetWindow = this.createPetWindow();
+    const nextOverlayWindow = this.createOverlayWindow();
+    this.windows.pet = nextPetWindow;
+    this.windows.overlay = nextOverlayWindow;
+    this.restoreTransparentWindowSnapshot(snapshot, nextPetWindow, nextOverlayWindow);
+    this.broadcastWindowState();
+    return true;
   }
 
   toggleOverlayWindow(): void {
@@ -434,6 +476,62 @@ export class WindowManager {
 
   private resolvePreloadPath(): string {
     return path.resolve(__dirname, "../preload/index.cjs");
+  }
+
+  private captureTransparentWindowSnapshot(): TransparentWindowSnapshot {
+    const petWindow = this.windows.pet;
+    const overlayWindow = this.windows.overlay;
+
+    return {
+      petBounds: petWindow && !petWindow.isDestroyed() ? petWindow.getBounds() : null,
+      overlayBounds: overlayWindow && !overlayWindow.isDestroyed() ? overlayWindow.getBounds() : null,
+      petVisible: Boolean(petWindow?.isVisible()),
+      overlayVisible: Boolean(overlayWindow?.isVisible()),
+      overlayVisiblePreference: this.overlayVisiblePreference,
+      petIgnoreMouseEvents: this.petWindowIgnoreMouseEvents,
+    };
+  }
+
+  private restoreTransparentWindowSnapshot(
+    snapshot: TransparentWindowSnapshot,
+    petWindow: BrowserWindow,
+    overlayWindow: BrowserWindow,
+  ): void {
+    this.overlayVisiblePreference = snapshot.overlayVisiblePreference;
+    this.petWindowIgnoreMouseEvents = snapshot.petIgnoreMouseEvents;
+
+    if (snapshot.petBounds) {
+      petWindow.setBounds(snapshot.petBounds, false);
+    }
+
+    if (snapshot.overlayBounds) {
+      overlayWindow.setBounds(snapshot.overlayBounds, false);
+    } else {
+      this.positionOverlayWindow();
+    }
+
+    if (this.petWindowIgnoreMouseEvents) {
+      petWindow.setIgnoreMouseEvents(true, { forward: true });
+      this.keepPetWindowPassive(petWindow);
+    } else {
+      petWindow.setIgnoreMouseEvents(false);
+    }
+
+    if (snapshot.petVisible) {
+      petWindow.show();
+    } else {
+      petWindow.hide();
+    }
+
+    const shouldShowOverlay = snapshot.petVisible
+      && snapshot.overlayVisible
+      && snapshot.overlayVisiblePreference;
+
+    if (shouldShowOverlay) {
+      overlayWindow.show();
+    } else {
+      overlayWindow.hide();
+    }
   }
 
   private positionOverlayWindow(): void {

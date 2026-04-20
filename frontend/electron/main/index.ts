@@ -4,6 +4,8 @@ import { WindowManager } from "./window-manager";
 
 let windowManager: WindowManager;
 let menuManager: MenuManager;
+const WM_DWMCOMPOSITIONCHANGED = 0x031e;
+const WINDOW_RECOVERY_DEBOUNCE_MS = 5000;
 
 function isEnvFlagEnabled(name: string): boolean {
   const raw = process.env[name];
@@ -20,14 +22,9 @@ if (process.platform === "win32") {
     app.commandLine.appendSwitch("disable-direct-composition");
   }
 
-  // Windows transparent frameless windows can show compositor artifacts
-  // (for example, a cyan/blue strip on top). We keep GPU disabled by default
-  // and allow explicit opt-out via AG99_FORCE_GPU=1.
-  const shouldDisableGpu =
-    isEnvFlagEnabled("AG99_DISABLE_GPU")
-    || !isEnvFlagEnabled("AG99_FORCE_GPU");
-
-  if (shouldDisableGpu) {
+  // Keep GPU enabled by default to avoid heavy CPU fallback rendering.
+  // Enable this only when explicitly diagnosing transparent window artifacts.
+  if (isEnvFlagEnabled("AG99_DISABLE_GPU")) {
     app.disableHardwareAcceleration();
     app.commandLine.appendSwitch("disable-gpu");
     app.commandLine.appendSwitch("disable-gpu-compositing");
@@ -142,13 +139,87 @@ function setupIpc(): void {
   });
 }
 
+function setupTransparentWindowRecovery(): (window: BrowserWindow) => void {
+  if (
+    process.platform !== "win32"
+    || isEnvFlagEnabled("AG99_DISABLE_WINDOW_RECOVERY")
+    || isEnvFlagEnabled("AG99_DISABLE_GPU")
+  ) {
+    return () => {
+      // No-op recovery hook on unsupported platforms or when disabled by env.
+    };
+  }
+
+  let lastRecoveryAt = 0;
+  const recoverTransparentWindows = (reason: string): void => {
+    if (!windowManager) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastRecoveryAt < WINDOW_RECOVERY_DEBOUNCE_MS) {
+      return;
+    }
+
+    const didRecover = windowManager.recoverTransparentWindows(reason);
+    if (!didRecover) {
+      return;
+    }
+
+    lastRecoveryAt = now;
+    console.warn(`[window-recovery] Triggered: ${reason}`);
+  };
+
+  app.on("child-process-gone", (_event, details) => {
+    const processType = String(details?.type ?? "").toLowerCase();
+    if (!processType.includes("gpu")) {
+      return;
+    }
+    recoverTransparentWindows(`GPU process gone (${processType})`);
+  });
+
+  app.on("gpu-info-update", () => {
+    const status = app.getGPUFeatureStatus();
+    const gpuCompositingStatus = String(status.gpu_compositing ?? "").toLowerCase();
+    if (gpuCompositingStatus !== "disabled") {
+      return;
+    }
+    recoverTransparentWindows("GPU compositing disabled");
+  });
+
+  return (window: BrowserWindow) => {
+    if (window.isDestroyed()) {
+      return;
+    }
+
+    try {
+      window.hookWindowMessage(WM_DWMCOMPOSITIONCHANGED, () => {
+        recoverTransparentWindows("DWM composition changed");
+      });
+    } catch (error) {
+      console.warn("[window-recovery] Failed to hook DWM composition change", error);
+      return;
+    }
+
+    window.once("closed", () => {
+      try {
+        window.unhookWindowMessage(WM_DWMCOMPOSITIONCHANGED);
+      } catch {
+        // Ignore if the native window handle is already unavailable.
+      }
+    });
+  };
+}
+
 app.whenReady().then(() => {
   if (process.platform === "win32") {
     app.setAppUserModelId("ag99live.desktop");
   }
 
+  const attachRecoveryHook = setupTransparentWindowRecovery();
   app.on("browser-window-created", (_, window) => {
     watchWindowShortcuts(window);
+    attachRecoveryHook(window);
   });
 
   windowManager = new WindowManager();
