@@ -5,11 +5,21 @@ import { useDesktopBridge } from "../composables/useDesktopBridge";
 
 const bridge = useDesktopBridge();
 const draftAddress = ref(bridge.state.snapshot.adapterAddress);
+const desktopScreenshotOnSendEnabled = ref(
+  bridge.state.snapshot.desktopScreenshotOnSendEnabled,
+);
 
 watch(
   () => bridge.state.snapshot.adapterAddress,
   (nextValue) => {
     draftAddress.value = nextValue;
+  },
+);
+
+watch(
+  () => bridge.state.snapshot.desktopScreenshotOnSendEnabled,
+  (nextValue) => {
+    desktopScreenshotOnSendEnabled.value = nextValue;
   },
 );
 
@@ -43,6 +53,13 @@ function disconnectAdapter(): void {
 
 function toggleHistoryWindow(): void {
   window.ag99desktop?.toggleAuxWindow("history");
+}
+
+function applyDesktopScreenshotOnSend(): void {
+  bridge.sendCommand({
+    type: "set_desktop_screenshot_on_send",
+    enabled: desktopScreenshotOnSendEnabled.value,
+  });
 }
 </script>
 
@@ -115,6 +132,35 @@ function toggleHistoryWindow(): void {
             <dd>{{ bridge.state.snapshot.httpBaseUrl || "等待后端下发" }}</dd>
           </div>
         </dl>
+      </article>
+
+      <article class="settings-card">
+        <div class="settings-card__header">
+          <div>
+            <p class="settings-card__eyebrow">多模态</p>
+            <h2>发送时附带桌面截图</h2>
+          </div>
+          <span class="settings-card__badge">
+            {{ desktopScreenshotOnSendEnabled ? "enabled" : "disabled" }}
+          </span>
+        </div>
+
+        <label class="settings-toggle">
+          <input
+            v-model="desktopScreenshotOnSendEnabled"
+            class="settings-toggle__input"
+            type="checkbox"
+            @change="applyDesktopScreenshotOnSend"
+          />
+          <span class="settings-toggle__control" aria-hidden="true"></span>
+          <span class="settings-toggle__copy">
+            发送文本时自动附带一张实时桌面截图，帮助模型理解当前屏幕内容。
+          </span>
+        </label>
+
+        <p class="settings-card__hint">
+          关闭后仍然可以正常聊天，只是不再自动把当前桌面作为上下文一并发送。
+        </p>
       </article>
 
       <article class="settings-card settings-card--wide">

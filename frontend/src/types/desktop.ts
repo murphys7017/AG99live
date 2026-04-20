@@ -17,11 +17,13 @@ export interface DesktopHistoryEntry {
 
 export interface DesktopRuntimeSnapshot {
   adapterAddress: string;
+  desktopScreenshotOnSendEnabled: boolean;
   connectionState: string;
   connectionLabel: string;
   connectionStatusMessage: string;
   aiState: string;
   micRequested: boolean;
+  micCapturing: boolean;
   audioPlaying: boolean;
   sessionId: string;
   confName: string;
@@ -41,7 +43,9 @@ export interface DesktopRuntimeSnapshot {
 
 export type DesktopRuntimeCommand =
   | { type: "set_address"; address: string }
+  | { type: "set_desktop_screenshot_on_send"; enabled: boolean }
   | { type: "connect"; address?: string }
   | { type: "disconnect" }
   | { type: "send_text"; text: string }
-  | { type: "interrupt" };
+  | { type: "interrupt" }
+  | { type: "toggle_mic_capture" };

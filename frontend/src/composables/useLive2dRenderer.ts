@@ -98,6 +98,7 @@ export function useLive2dRenderer(selectedModel: Ref<ModelSummary | null>) {
   const mountedModelUrl = shallowRef("");
   const resizeLive2D = shallowRef<null | (() => void)>(null);
   let resizeObserver: ResizeObserver | null = null;
+  let disposeForceRedrawListener: (() => void) | null = null;
 
   const statusLabel = computed(() => {
     if (renderStatus.value === "ready") {
@@ -127,6 +128,16 @@ export function useLive2dRenderer(selectedModel: Ref<ModelSummary | null>) {
     canvas.height = Math.round(height * dpr);
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
+  }
+
+  function forceLive2DRedraw() {
+    syncCanvasSize();
+    resizeLive2D.value?.();
+
+    window.requestAnimationFrame(() => {
+      syncCanvasSize();
+      resizeLive2D.value?.();
+    });
   }
 
   async function loadModel(model: ModelSummary) {
@@ -172,6 +183,13 @@ export function useLive2dRenderer(selectedModel: Ref<ModelSummary | null>) {
     if (containerRef.value) {
       resizeObserver.observe(containerRef.value);
     }
+
+    disposeForceRedrawListener =
+      window.ag99desktop?.onForceRedraw(() => {
+        void nextTick().then(() => {
+          forceLive2DRedraw();
+        });
+      }) ?? null;
   });
 
   watch(
@@ -201,6 +219,8 @@ export function useLive2dRenderer(selectedModel: Ref<ModelSummary | null>) {
   onBeforeUnmount(async () => {
     resizeObserver?.disconnect();
     resizeObserver = null;
+    disposeForceRedrawListener?.();
+    disposeForceRedrawListener = null;
     mountedModelUrl.value = "";
     resizeLive2D.value = null;
 

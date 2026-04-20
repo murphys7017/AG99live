@@ -20,9 +20,22 @@ function finishWindowDrag(): void {
     return;
   }
 
+  const syncMouseIgnoreState = (
+    window as Window & {
+      __ag99SetPetMouseIgnoreState?: (ignore: boolean) => void;
+    }
+  ).__ag99SetPetMouseIgnoreState;
+
+  (window as Window & { __ag99PetDragging?: boolean }).__ag99PetDragging = false;
   activePointerId.value = null;
   isDragging.value = false;
   window.ag99desktop?.endWindowDrag();
+  if (typeof syncMouseIgnoreState === "function") {
+    syncMouseIgnoreState(true);
+    return;
+  }
+
+  window.ag99desktop?.setIgnoreMouseEvents(true);
 }
 
 function handlePointerDown(event: PointerEvent): void {
@@ -30,6 +43,8 @@ function handlePointerDown(event: PointerEvent): void {
     return;
   }
 
+  (window as Window & { __ag99PetDragging?: boolean }).__ag99PetDragging = true;
+  window.ag99desktop?.setIgnoreMouseEvents(false);
   activePointerId.value = event.pointerId;
   isDragging.value = true;
   window.ag99desktop?.startWindowDrag(event.screenX, event.screenY);

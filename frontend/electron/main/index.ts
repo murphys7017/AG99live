@@ -1,9 +1,38 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, desktopCapturer, ipcMain, screen } from "electron";
 import { MenuManager } from "./menu-manager";
 import { WindowManager } from "./window-manager";
 
 let windowManager: WindowManager;
 let menuManager: MenuManager;
+
+function isEnvFlagEnabled(name: string): boolean {
+  const raw = process.env[name];
+  if (!raw) {
+    return false;
+  }
+
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+if (process.platform === "win32") {
+  if (isEnvFlagEnabled("AG99_DISABLE_DIRECT_COMPOSITION")) {
+    app.commandLine.appendSwitch("disable-direct-composition");
+  }
+
+  // Windows transparent frameless windows can show compositor artifacts
+  // (for example, a cyan/blue strip on top). We keep GPU disabled by default
+  // and allow explicit opt-out via AG99_FORCE_GPU=1.
+  const shouldDisableGpu =
+    isEnvFlagEnabled("AG99_DISABLE_GPU")
+    || !isEnvFlagEnabled("AG99_FORCE_GPU");
+
+  if (shouldDisableGpu) {
+    app.disableHardwareAcceleration();
+    app.commandLine.appendSwitch("disable-gpu");
+    app.commandLine.appendSwitch("disable-gpu-compositing");
+  }
+}
 
 function watchWindowShortcuts(window: BrowserWindow): void {
   if (!app.isPackaged) {
@@ -86,6 +115,30 @@ function setupIpc(): void {
 
   ipcMain.on("desktop:end-window-drag", (event) => {
     windowManager.endWindowDrag(BrowserWindow.fromWebContents(event.sender));
+  });
+
+  ipcMain.handle("desktop:capture-screen-image", async () => {
+    const primaryDisplayId = String(screen.getPrimaryDisplay().id);
+    const sources = await desktopCapturer.getSources({
+      types: ["screen"],
+      thumbnailSize: { width: 1280, height: 720 },
+      fetchWindowIcons: false,
+    });
+    const selectedSource = sources.find((source) => source.display_id === primaryDisplayId)
+      ?? sources[0]
+      ?? null;
+
+    if (!selectedSource || selectedSource.thumbnail.isEmpty()) {
+      return null;
+    }
+
+    const jpegBuffer = selectedSource.thumbnail.toJPEG(76);
+    return {
+      data: `data:image/jpeg;base64,${jpegBuffer.toString("base64")}`,
+      mime_type: "image/jpeg",
+      source: "screen",
+      captured_at: new Date().toISOString(),
+    };
   });
 }
 

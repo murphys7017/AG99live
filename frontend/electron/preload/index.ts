@@ -48,6 +48,14 @@ const api = {
   getLocalAdapterHosts: () => {
     return listLocalAdapterHosts();
   },
+  captureDesktopScreenshot: () => {
+    return ipcRenderer.invoke("desktop:capture-screen-image") as Promise<{
+      data: string;
+      mime_type: "image/jpeg";
+      source: "screen";
+      captured_at: string;
+    } | null>;
+  },
   toggleAuxWindow: (target: DesktopAuxWindowRole) => {
     ipcRenderer.send("desktop:toggle-aux-window", target);
   },
@@ -67,6 +75,16 @@ const api = {
     ipcRenderer.on("desktop-window-state", handler);
     return () => {
       ipcRenderer.removeListener("desktop-window-state", handler);
+    };
+  },
+  onForceRedraw: (callback: () => void) => {
+    const handler = () => {
+      callback();
+    };
+
+    ipcRenderer.on("desktop-force-redraw", handler);
+    return () => {
+      ipcRenderer.removeListener("desktop-force-redraw", handler);
     };
   },
 };

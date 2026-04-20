@@ -20,12 +20,17 @@ type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 const DEFAULT_ADAPTER_ADDRESS = "127.0.0.1:12396";
 const ADDRESS_STORAGE_KEY = "ag99live.adapter.address";
 const LEGACY_ADDRESS_STORAGE_KEY = "ag99live.adapter.ws_address";
+const DESKTOP_SCREENSHOT_ON_SEND_STORAGE_KEY = "ag99live.desktop.capture_on_send";
 const PROTOCOL_VERSION = "v2";
 const SOURCE_FRONTEND = "frontend";
+const MIC_TARGET_SAMPLE_RATE = 16000;
+const MIC_PROCESSOR_BUFFER_SIZE = 2048;
+const MAX_MIC_SOCKET_BUFFERED_AMOUNT = 512 * 1024;
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "0.0.0.0"]);
 
 const state = reactive({
   address: loadStoredAddress(),
+  desktopScreenshotOnSendEnabled: loadDesktopScreenshotOnSendEnabled(),
   sessionId: "",
   status: "disconnected" as ConnectionStatus,
   statusMessage: "尚未连接适配器。",
@@ -37,15 +42,33 @@ const state = reactive({
   lastImageCount: 0,
   currentTurnId: null as string | null,
   micRequested: false,
+  micCapturing: false,
   isPlayingAudio: false,
   historyEntries: [] as DesktopHistoryEntry[],
 });
+
+interface MicrophoneCaptureRuntime {
+  sampleRate: number;
+  mediaStream: MediaStream;
+  audioContext: AudioContext;
+  sourceNode: MediaStreamAudioSourceNode;
+  processorNode: ScriptProcessorNode;
+  sinkGainNode: GainNode;
+}
+
+interface DesktopCaptureImagePayload {
+  data: string;
+  mime_type: "image/jpeg";
+  source: "screen";
+  captured_at: string;
+}
 
 let socket: WebSocket | null = null;
 let audioElement: HTMLAudioElement | null = null;
 let manualClose = false;
 let initializePromise: Promise<void> | null = null;
 let connectAttemptSerial = 0;
+let microphoneRuntime: MicrophoneCaptureRuntime | null = null;
 const assistantHistoryKeys: string[] = [];
 const assistantHistoryKeySet = new Set<string>();
 
@@ -67,6 +90,21 @@ function loadStoredAddress(): string {
   }
 
   return DEFAULT_ADAPTER_ADDRESS;
+}
+
+function loadDesktopScreenshotOnSendEnabled(): boolean {
+  if (typeof window === "undefined") {
+    return true;
+  }
+
+  const storedValue = window.localStorage.getItem(DESKTOP_SCREENSHOT_ON_SEND_STORAGE_KEY);
+  if (storedValue === "false") {
+    return false;
+  }
+  if (storedValue === "true") {
+    return true;
+  }
+  return true;
 }
 
 function buildMessageEnvelope<TPayload>(
@@ -91,6 +129,58 @@ function createMessageId(): string {
     return crypto.randomUUID().replace(/-/g, "");
   }
   return `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+}
+
+function downsampleAudioBuffer(
+  input: Float32Array,
+  sourceSampleRate: number,
+  targetSampleRate: number,
+): Float32Array {
+  if (!input.length || sourceSampleRate === targetSampleRate) {
+    return input;
+  }
+
+  const sampleRateRatio = sourceSampleRate / targetSampleRate;
+  const targetLength = Math.max(1, Math.round(input.length / sampleRateRatio));
+  const output = new Float32Array(targetLength);
+  let outputIndex = 0;
+  let sourceOffset = 0;
+
+  while (outputIndex < targetLength) {
+    const nextSourceOffset = Math.round((outputIndex + 1) * sampleRateRatio);
+    let accumulator = 0;
+    let count = 0;
+
+    for (let index = sourceOffset; index < Math.min(nextSourceOffset, input.length); index += 1) {
+      accumulator += input[index] ?? 0;
+      count += 1;
+    }
+
+    output[outputIndex] = count > 0 ? accumulator / count : 0;
+    outputIndex += 1;
+    sourceOffset = nextSourceOffset;
+  }
+
+  return output;
+}
+
+function serializeAudioChunk(audioBuffer: Float32Array): number[] {
+  const serialized = new Array<number>(audioBuffer.length);
+  for (let index = 0; index < audioBuffer.length; index += 1) {
+    const sample = Math.max(-1, Math.min(1, audioBuffer[index] ?? 0));
+    serialized[index] = Math.round(sample * 10000) / 10000;
+  }
+  return serialized;
+}
+
+function getAudioContextConstructor(): typeof AudioContext | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const maybeAudioContext = window.AudioContext
+    ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  return maybeAudioContext ?? null;
 }
 
 function normalizeWsAddress(raw: string): string {
@@ -194,6 +284,16 @@ function persistAddress(nextAddress: string): void {
   }
 }
 
+function setDesktopScreenshotOnSendEnabled(enabled: boolean): void {
+  state.desktopScreenshotOnSendEnabled = enabled;
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(
+      DESKTOP_SCREENSHOT_ON_SEND_STORAGE_KEY,
+      enabled ? "true" : "false",
+    );
+  }
+}
+
 function setAddress(nextAddress: string): void {
   persistAddress(nextAddress);
 }
@@ -248,6 +348,7 @@ function disconnect(): void {
 function disconnectInternal(markManualClose: boolean): void {
   manualClose = markManualClose;
   connectAttemptSerial += 1;
+  void stopMicrophoneCapture(markManualClose ? "manual_disconnect" : "connection_reset");
   stopAudioPlayback();
   if (socket) {
     const currentSocket = socket;
@@ -366,6 +467,7 @@ function openConnectionCandidate(
 }
 
 function resetConnectionRuntimeState(): void {
+  void stopMicrophoneCapture("connection_closed");
   stopAudioPlayback();
   state.isPlayingAudio = false;
   state.currentTurnId = null;
@@ -373,7 +475,215 @@ function resetConnectionRuntimeState(): void {
   state.activeWsAddress = "";
   state.sessionId = "";
   state.micRequested = false;
+  state.micCapturing = false;
   resetModelSyncState();
+}
+
+async function toggleMicrophoneCapture(): Promise<boolean> {
+  if (state.micCapturing) {
+    return stopMicrophoneCapture("manual_stop");
+  }
+
+  return startMicrophoneCapture();
+}
+
+async function startMicrophoneCapture(): Promise<boolean> {
+  if (state.micCapturing) {
+    return true;
+  }
+
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    state.lastError = "当前还没有连上适配器，无法启动麦克风。";
+    state.statusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    return false;
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    state.lastError = "当前环境不支持麦克风采集。";
+    state.statusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    return false;
+  }
+
+  const AudioContextConstructor = getAudioContextConstructor();
+  if (!AudioContextConstructor) {
+    state.lastError = "当前环境不支持 Web Audio API。";
+    state.statusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    return false;
+  }
+
+  state.statusMessage = "正在请求麦克风权限...";
+
+  let mediaStream: MediaStream | null = null;
+  let audioContext: AudioContext | null = null;
+  let sourceNode: MediaStreamAudioSourceNode | null = null;
+  let processorNode: ScriptProcessorNode | null = null;
+  let sinkGainNode: GainNode | null = null;
+
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        sampleRate: MIC_TARGET_SAMPLE_RATE,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    });
+
+    audioContext = new AudioContextConstructor({
+      latencyHint: "interactive",
+      sampleRate: MIC_TARGET_SAMPLE_RATE,
+    } as AudioContextOptions);
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+
+    sourceNode = audioContext.createMediaStreamSource(mediaStream);
+    processorNode = audioContext.createScriptProcessor(MIC_PROCESSOR_BUFFER_SIZE, 1, 1);
+    sinkGainNode = audioContext.createGain();
+    sinkGainNode.gain.value = 0;
+
+    const sampleRate = Math.max(Math.round(audioContext.sampleRate || 16000), 1);
+
+    microphoneRuntime = {
+      sampleRate,
+      mediaStream,
+      audioContext,
+      sourceNode,
+      processorNode,
+      sinkGainNode,
+    };
+
+    processorNode.onaudioprocess = (event) => {
+      const runtime = microphoneRuntime;
+      if (
+        !runtime
+        || !socket
+        || socket.readyState !== WebSocket.OPEN
+      ) {
+        return;
+      }
+
+      if (socket.bufferedAmount > MAX_MIC_SOCKET_BUFFERED_AMOUNT) {
+        return;
+      }
+
+      const inputChunk = event.inputBuffer.getChannelData(0);
+      const normalizedChunk = downsampleAudioBuffer(
+        inputChunk,
+        runtime.sampleRate,
+        MIC_TARGET_SAMPLE_RATE,
+      );
+      if (!normalizedChunk.length) {
+        return;
+      }
+
+      socket.send(
+        JSON.stringify(
+          buildMessageEnvelope("input.raw_audio_data", {
+            audio: serializeAudioChunk(normalizedChunk),
+            sample_rate: MIC_TARGET_SAMPLE_RATE,
+            channels: 1,
+          }),
+        ),
+      );
+    };
+
+    sourceNode.connect(processorNode);
+    processorNode.connect(sinkGainNode);
+    sinkGainNode.connect(audioContext.destination);
+
+    for (const track of mediaStream.getAudioTracks()) {
+      track.addEventListener(
+        "ended",
+        () => {
+          void stopMicrophoneCapture("device_ended");
+        },
+        { once: true },
+      );
+    }
+
+    state.micCapturing = true;
+    state.micRequested = true;
+    state.lastError = "";
+    state.statusMessage = "麦克风已开启，正在自动检测说话。";
+    pushHistory("system", state.statusMessage);
+    return true;
+  } catch (error) {
+    if (processorNode) {
+      processorNode.onaudioprocess = null;
+    }
+    sourceNode?.disconnect();
+    processorNode?.disconnect();
+    sinkGainNode?.disconnect();
+    mediaStream?.getTracks().forEach((track) => track.stop());
+    if (audioContext) {
+      try {
+        await audioContext.close();
+      } catch (_closeError) {
+        // Ignore cleanup failures after startup errors.
+      }
+    }
+    microphoneRuntime = null;
+    state.micCapturing = false;
+    state.lastError =
+      error instanceof Error ? error.message : "麦克风启动失败。";
+    state.statusMessage = `麦克风启动失败：${state.lastError}`;
+    pushHistory("error", state.statusMessage);
+    return false;
+  }
+}
+
+async function stopMicrophoneCapture(reason = "manual_stop"): Promise<boolean> {
+  const runtime = microphoneRuntime;
+  if (!runtime) {
+    state.micCapturing = false;
+    if (reason === "manual_stop") {
+      state.micRequested = false;
+    }
+    return false;
+  }
+
+  microphoneRuntime = null;
+  state.micCapturing = false;
+  if (reason === "manual_stop" || reason === "device_ended") {
+    state.micRequested = false;
+  }
+
+  runtime.processorNode.onaudioprocess = null;
+  runtime.sourceNode.disconnect();
+  runtime.processorNode.disconnect();
+  runtime.sinkGainNode.disconnect();
+  runtime.mediaStream.getTracks().forEach((track) => track.stop());
+
+  try {
+    await runtime.audioContext.close();
+  } catch (_error) {
+    // Ignore close failures during teardown.
+  }
+
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(
+      JSON.stringify(
+        buildMessageEnvelope("input.mic_audio_end", {
+          reason,
+        }),
+      ),
+    );
+  }
+
+  state.statusMessage =
+    reason === "manual_stop"
+      ? "麦克风已关闭。"
+      : "麦克风采集已停止。";
+  if (reason !== "connection_closed" && reason !== "connection_reset") {
+    pushHistory("system", state.statusMessage);
+  }
+  return true;
 }
 
 async function handleSocketMessage(rawData: string): Promise<void> {
@@ -438,8 +748,9 @@ async function handleSocketMessage(rawData: string): Promise<void> {
       return;
     case "control.start_mic":
       state.micRequested = true;
-      state.statusMessage = "后端请求启动麦克风，前端采集链路待接入。";
+      state.statusMessage = "后端已请求启动麦克风，准备自动收音。";
       pushHistory("system", state.statusMessage);
+      void startMicrophoneCapture();
       return;
     case "control.synth_finished":
       state.statusMessage = state.isPlayingAudio ? "语音播放中..." : "语音合成已完成。";
@@ -462,6 +773,9 @@ function applyServerInfoMessage(envelope: ProtocolEnvelope<SystemServerInfoPaylo
   state.micRequested = state.serverInfo.auto_start_mic;
   state.statusMessage = "适配器已连接，等待模型同步。";
   pushHistory("system", "收到后端运行信息。");
+  if (state.serverInfo.auto_start_mic) {
+    void startMicrophoneCapture();
+  }
 }
 
 function applyOutputText(envelope: ProtocolEnvelope<OutputTextPayload>): void {
@@ -619,7 +933,7 @@ function stopAudioPlayback(): void {
   audioElement = null;
 }
 
-function sendText(text: string): boolean {
+async function sendText(text: string): Promise<boolean> {
   const message = text.trim();
   if (!message || !socket || socket.readyState !== WebSocket.OPEN) {
     state.lastError = "当前还没有连上适配器，文本未发送。";
@@ -628,15 +942,55 @@ function sendText(text: string): boolean {
     return false;
   }
 
+  const desktopCapture = state.desktopScreenshotOnSendEnabled
+    ? await captureRealtimeDesktopScreenshot()
+    : null;
+  const outboundText = buildDesktopAwareText(message, desktopCapture);
   const envelope = buildMessageEnvelope("input.text", {
-    text: message,
-    images: [],
+    text: outboundText,
+    images: desktopCapture ? [desktopCapture] : [],
   });
   socket.send(JSON.stringify(envelope));
   state.lastError = "";
-  state.statusMessage = "文本已发送，等待后端回复。";
+  state.statusMessage = desktopCapture
+    ? "文本和实时桌面截图已发送，等待后端回复。"
+    : "文本已发送，等待后端回复。";
   pushHistory("user", message);
   return true;
+}
+
+async function captureRealtimeDesktopScreenshot(): Promise<DesktopCaptureImagePayload | null> {
+  const captureDesktopScreenshot = window.ag99desktop?.captureDesktopScreenshot;
+  if (!captureDesktopScreenshot) {
+    return null;
+  }
+
+  try {
+    return await captureDesktopScreenshot();
+  } catch (error) {
+    console.warn("[DesktopCapture] Failed to capture realtime desktop screenshot", error);
+    return null;
+  }
+}
+
+function buildDesktopAwareText(
+  message: string,
+  desktopCapture: DesktopCaptureImagePayload | null,
+): string {
+  if (!desktopCapture) {
+    return message;
+  }
+
+  return [
+    "[系统上下文]",
+    "以下附件中包含用户发送本条消息时的实时桌面截图。",
+    `截图时间：${desktopCapture.captured_at}`,
+    "请结合用户文字与截图中的桌面界面内容理解上下文，再进行回应。",
+    "[/系统上下文]",
+    "",
+    "用户消息：",
+    message,
+  ].join("\n");
 }
 
 function interruptCurrentTurn(): boolean {
@@ -780,9 +1134,11 @@ export function useAdapterConnection() {
     state: readonly(state),
     initialize,
     setAddress,
+    setDesktopScreenshotOnSendEnabled,
     connect,
     disconnect,
     sendText,
     interruptCurrentTurn,
+    toggleMicrophoneCapture,
   };
 }

@@ -10,12 +10,19 @@ export interface Ag99DesktopApi {
   updateWindowDrag: (screenX: number, screenY: number) => void;
   endWindowDrag: () => void;
   getLocalAdapterHosts: () => string[];
+  captureDesktopScreenshot: () => Promise<{
+    data: string;
+    mime_type: "image/jpeg";
+    source: "screen";
+    captured_at: string;
+  } | null>;
   toggleAuxWindow: (target: DesktopAuxWindowRole) => void;
   closeCurrentWindow: () => void;
   minimizeCurrentWindow: () => void;
   onWindowState: (
     callback: (state: DesktopWindowVisibilityState) => void,
   ) => () => void;
+  onForceRedraw: (callback: () => void) => () => void;
 }
 
 declare global {

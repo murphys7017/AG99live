@@ -1,6 +1,7 @@
 import { app, BrowserWindow, screen, shell } from "electron";
 import path from "node:path";
 import type { Event as ElectronEvent } from "electron";
+import type { BrowserWindowConstructorOptions } from "electron";
 import type {
   DesktopAuxWindowRole,
   DesktopWindowRole,
@@ -21,6 +22,13 @@ const PET_WINDOW_MARGIN = 24;
 const PET_OVERLAY_WIDTH = 440;
 const PET_OVERLAY_HEIGHT = 210;
 const PET_OVERLAY_GAP = 18;
+const WIN32_TRANSPARENT_WINDOW_COMPAT_OPTIONS: BrowserWindowConstructorOptions =
+  process.platform === "win32"
+    ? {
+        thickFrame: false,
+        roundedCorners: false,
+      }
+    : {};
 
 function isDevelopment(): boolean {
   return !app.isPackaged || Boolean(process.env.ELECTRON_RENDERER_URL);
@@ -30,6 +38,7 @@ export class WindowManager {
   private isAppQuitting = false;
   private overlayVisiblePreference = true;
   private activeDragState: WindowDragState | null = null;
+  private petWindowIgnoreMouseEvents = true;
 
   private windows: ManagedWindowMap = {
     pet: null,
@@ -120,12 +129,20 @@ export class WindowManager {
       return;
     }
 
+    if (this.petWindowIgnoreMouseEvents === ignore) {
+      return;
+    }
+
+    this.petWindowIgnoreMouseEvents = ignore;
+
     if (ignore) {
       targetWindow.setIgnoreMouseEvents(true, { forward: true });
+      this.keepPetWindowPassive(targetWindow);
       return;
     }
 
     targetWindow.setIgnoreMouseEvents(false);
+    this.keepPetWindowPassive(targetWindow);
   }
 
   startWindowDrag(
@@ -191,6 +208,14 @@ export class WindowManager {
     }
   }
 
+  private keepPetWindowPassive(targetWindow: BrowserWindow): void {
+    if (targetWindow.isDestroyed() || targetWindow.webContents.isDevToolsOpened()) {
+      return;
+    }
+
+    targetWindow.setFocusable(false);
+  }
+
   private createPetWindow(): BrowserWindow {
     const petWindow = new BrowserWindow({
       width: PET_WINDOW_WIDTH,
@@ -202,21 +227,27 @@ export class WindowManager {
       skipTaskbar: true,
       hasShadow: false,
       backgroundColor: "#00000000",
-      resizable: true,
+      resizable: false,
       maximizable: false,
       minimizable: true,
       alwaysOnTop: true,
+      focusable: false,
       webPreferences: {
         preload: this.resolvePreloadPath(),
         contextIsolation: true,
         sandbox: false,
       },
+      ...WIN32_TRANSPARENT_WINDOW_COMPAT_OPTIONS,
     });
 
     petWindow.setAlwaysOnTop(true, "screen-saver");
-    petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    if (process.platform === "darwin") {
+      petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    }
     petWindow.setMenuBarVisibility(false);
+    this.petWindowIgnoreMouseEvents = true;
     petWindow.setIgnoreMouseEvents(true, { forward: true });
+    this.keepPetWindowPassive(petWindow);
     petWindow.setPosition(
       screen.getPrimaryDisplay().workArea.x
         + screen.getPrimaryDisplay().workArea.width
@@ -229,7 +260,9 @@ export class WindowManager {
     );
 
     petWindow.on("show", () => {
+      this.petWindowIgnoreMouseEvents = true;
       petWindow.setIgnoreMouseEvents(true, { forward: true });
+      this.keepPetWindowPassive(petWindow);
       if (this.overlayVisiblePreference) {
         this.windows.overlay?.show();
       }
@@ -277,12 +310,15 @@ export class WindowManager {
         contextIsolation: true,
         sandbox: false,
       },
+      ...WIN32_TRANSPARENT_WINDOW_COMPAT_OPTIONS,
     });
 
     overlayWindow.setAlwaysOnTop(true, "screen-saver");
-    overlayWindow.setVisibleOnAllWorkspaces(true, {
-      visibleOnFullScreen: true,
-    });
+    if (process.platform === "darwin") {
+      overlayWindow.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+      });
+    }
     overlayWindow.setMenuBarVisibility(false);
     overlayWindow.setPosition(
       Math.max(workArea.x + workArea.width - PET_OVERLAY_WIDTH - PET_WINDOW_MARGIN, workArea.x + PET_WINDOW_MARGIN),

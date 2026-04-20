@@ -68,7 +68,7 @@ const aiState = computed(() => {
   if (adapter.state.currentTurnId) {
     return "thinking";
   }
-  if (adapter.state.micRequested) {
+  if (adapter.state.micCapturing) {
     return "listening";
   }
   if (adapter.state.status === "connected" || selectedModel.value) {
@@ -82,6 +82,9 @@ function handleDesktopCommand(command: DesktopRuntimeCommand): void {
     case "set_address":
       adapter.setAddress(command.address);
       return;
+    case "set_desktop_screenshot_on_send":
+      adapter.setDesktopScreenshotOnSendEnabled(command.enabled);
+      return;
     case "connect":
       if (typeof command.address === "string") {
         adapter.setAddress(command.address);
@@ -92,10 +95,13 @@ function handleDesktopCommand(command: DesktopRuntimeCommand): void {
       adapter.disconnect();
       return;
     case "send_text":
-      adapter.sendText(command.text);
+      void adapter.sendText(command.text);
       return;
     case "interrupt":
       adapter.interruptCurrentTurn();
+      return;
+    case "toggle_mic_capture":
+      void adapter.toggleMicrophoneCapture();
       return;
   }
 }
@@ -109,6 +115,7 @@ const detachBridgeListener = bridge.onCommand(handleDesktopCommand);
 watch(
   () => [
     adapter.state.address,
+    adapter.state.desktopScreenshotOnSendEnabled,
     adapter.state.status,
     adapter.state.statusMessage,
     adapter.state.sessionId,
@@ -119,6 +126,7 @@ watch(
     adapter.state.lastImageCount,
     adapter.state.currentTurnId,
     adapter.state.micRequested,
+    adapter.state.micCapturing,
     adapter.state.isPlayingAudio,
     adapter.state.historyEntries,
     state.confName,
@@ -131,11 +139,13 @@ watch(
   () => {
     bridge.publishSnapshot({
       adapterAddress: adapter.state.address,
+      desktopScreenshotOnSendEnabled: adapter.state.desktopScreenshotOnSendEnabled,
       connectionState: connectionState.value,
       connectionLabel: connectionLabel.value,
       connectionStatusMessage: adapter.state.statusMessage,
       aiState: aiState.value,
       micRequested: adapter.state.micRequested,
+      micCapturing: adapter.state.micCapturing,
       audioPlaying: adapter.state.isPlayingAudio,
       sessionId: adapter.state.sessionId || state.sessionId,
       confName: state.confName,

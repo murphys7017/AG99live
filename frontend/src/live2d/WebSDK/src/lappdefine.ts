@@ -102,11 +102,11 @@ export const RenderTargetWidth = 1900;
 export const RenderTargetHeight = 1000;
 
 export const ENABLE_LIMITED_FRAME_RATE = true;
-export let LIMITED_FRAME_RATE = 60;
+export let LIMITED_FRAME_RATE = 30;
 
 export function setLimitedFrameRate(nextFrameRate: number) {
   const normalizedFrameRate = Number.isFinite(nextFrameRate)
     ? Math.max(1, Math.min(60, Math.round(nextFrameRate)))
-    : 60;
+    : 30;
   LIMITED_FRAME_RATE = normalizedFrameRate;
 }

@@ -20,10 +20,7 @@
   line-height: 1.5;
   font-weight: 400;
   color: var(--ink-strong);
-  background:
-    radial-gradient(circle at 18% 16%, rgba(255, 205, 153, 0.85), transparent 26%),
-    radial-gradient(circle at 86% 18%, rgba(154, 196, 255, 0.72), transparent 24%),
-    linear-gradient(155deg, var(--bg-cream) 0%, #f8fbff 48%, var(--bg-blue) 100%);
+  background: transparent;
 }
 
 * {
@@ -33,7 +30,11 @@
 html,
 body,
 #app {
-  min-height: 100vh;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 body {
@@ -42,16 +43,30 @@ body {
   overflow: hidden;
 }
 
+:root[data-window-role="pet"],
+:root[data-window-role="overlay"],
 html[data-window-role="pet"],
 body[data-window-role="pet"],
 html[data-window-role="overlay"],
 body[data-window-role="overlay"] {
-  background: transparent;
+  background: transparent !important;
+  background-image: none !important;
 }
 
 body[data-window-role="pet"] #app,
 body[data-window-role="overlay"] #app {
-  background: transparent;
+  background: transparent !important;
+  background-image: none !important;
+}
+
+html[data-window-role="settings"],
+body[data-window-role="settings"],
+html[data-window-role="history"],
+body[data-window-role="history"] {
+  background:
+    radial-gradient(circle at 18% 16%, rgba(255, 205, 153, 0.85), transparent 26%),
+    radial-gradient(circle at 86% 18%, rgba(154, 196, 255, 0.72), transparent 24%),
+    linear-gradient(155deg, var(--bg-cream) 0%, #f8fbff 48%, var(--bg-blue) 100%);
 }
 
 body[data-window-role="settings"],
@@ -602,8 +617,13 @@ img {
 }
 
 .desktop-panel {
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
   padding: 24px;
+  overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(255, 209, 158, 0.42), transparent 26%),
     linear-gradient(165deg, rgba(255, 247, 235, 0.96), rgba(237, 245, 255, 0.98));
@@ -658,7 +678,10 @@ img {
 }
 
 .desktop-panel__body {
+  flex: 1;
+  min-height: 0;
   padding: 28px;
+  overflow: auto;
   border-radius: 30px;
   border: 1px solid rgba(47, 63, 97, 0.12);
   background: rgba(255, 255, 255, 0.7);
@@ -770,6 +793,59 @@ img {
   color: var(--ink-strong);
 }
 
+.settings-toggle {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(245, 249, 255, 0.92);
+  cursor: pointer;
+}
+
+.settings-toggle__input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.settings-toggle__control {
+  position: relative;
+  width: 52px;
+  height: 30px;
+  border-radius: 999px;
+  background: rgba(166, 178, 199, 0.9);
+  transition: background 160ms ease;
+}
+
+.settings-toggle__control::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 6px 18px rgba(26, 47, 80, 0.16);
+  transition: transform 160ms ease;
+}
+
+.settings-toggle__input:checked + .settings-toggle__control {
+  background: linear-gradient(135deg, #efb56e, #d78837);
+}
+
+.settings-toggle__input:checked + .settings-toggle__control::after {
+  transform: translateX(22px);
+}
+
+.settings-toggle__copy {
+  color: var(--ink-strong);
+  line-height: 1.5;
+}
+
 .history-list {
   display: grid;
   gap: 14px;
@@ -820,19 +896,22 @@ img {
 }
 
 .desktop-shell {
-  min-height: 100vh;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .desktop-shell--pet {
   width: 100%;
-  height: 100vh;
+  height: 100%;
   background: transparent;
 }
 
 .desktop-shell--overlay {
   display: flex;
   width: 100%;
-  height: 100vh;
+  height: 100%;
   align-items: flex-end;
   justify-content: flex-end;
   padding: 0;
@@ -844,7 +923,7 @@ img {
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: 100vh;
+  height: 100%;
   padding: 0;
   background: transparent;
 }
@@ -899,15 +978,25 @@ img {
   flex-direction: column;
   gap: 10px;
   width: 100%;
+  overflow: hidden;
   padding: 10px 12px 12px;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background:
-    linear-gradient(180deg, rgba(8, 8, 8, 0.8), rgba(15, 18, 25, 0.76)),
-    rgba(8, 8, 8, 0.76);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.34);
-  backdrop-filter: blur(10px);
-  -webkit-app-region: drag;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(8, 8, 8, 0.76);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4);
+  user-select: none;
+  touch-action: none;
+}
+
+.overlay-card__drag-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  cursor: grab;
+}
+
+.overlay-card--dragging .overlay-card__drag-zone {
+  cursor: grabbing;
 }
 
 .overlay-card__grip {
@@ -948,7 +1037,6 @@ img {
   gap: 8px;
   padding: 0 4px;
   color: rgba(255, 255, 255, 0.78);
-  -webkit-app-region: no-drag;
 }
 
 .overlay-card__status-label {
@@ -974,20 +1062,17 @@ img {
 }
 
 .overlay-card__icon-pill,
-.overlay-card__icon-button,
-.overlay-card__composer,
-.overlay-card__input,
-.overlay-card__send {
-  -webkit-app-region: no-drag;
-}
-
-.overlay-card__icon-pill,
 .overlay-card__icon-button {
   width: 28px;
   height: 28px;
 }
 
 .overlay-card__icon-pill[data-active="true"] {
+  background: rgba(126, 181, 255, 0.26);
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.overlay-card__icon-button--mic[data-active="true"] {
   background: rgba(126, 181, 255, 0.26);
   color: rgba(255, 255, 255, 0.96);
 }
@@ -1030,6 +1115,8 @@ img {
   background: rgba(0, 0, 0, 0.28);
   color: rgba(255, 255, 255, 0.96);
   outline: none;
+  user-select: text;
+  touch-action: auto;
 }
 
 .overlay-card__input::placeholder {

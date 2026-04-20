@@ -24,6 +24,17 @@ class AudioStreamState:
     last_seq: int = -1
 
 
+@dataclass
+class PendingTempAudioFile:
+    path: str
+    available_after_turn: int
+    failure_count: int = 0
+
+
+TEMP_AUDIO_CLEANUP_DELAY_TURNS = 3
+TEMP_AUDIO_CLEANUP_WARNING_THRESHOLD = 5
+
+
 class SpeechIngressService:
     def __init__(
         self,
@@ -40,6 +51,8 @@ class SpeechIngressService:
         self._send_json = send_json
         self._build_message_object = build_message_object
         self._audio_streams: dict[str, AudioStreamState] = {}
+        self._pending_temp_audio_files: dict[str, PendingTempAudioFile] = {}
+        self._completed_transcription_turns = 0
 
     async def handle_audio_stream_start(self, message) -> None:
         payload = message.payload
@@ -263,11 +276,40 @@ class SpeechIngressService:
         try:
             return await self.runtime_state.selected_stt_provider.get_text(temp_path)
         finally:
+            self._schedule_temp_file_cleanup(temp_path)
+
+    def _schedule_temp_file_cleanup(self, temp_path: str) -> None:
+        if not temp_path:
+            return
+
+        self._completed_transcription_turns += 1
+        self._pending_temp_audio_files[temp_path] = PendingTempAudioFile(
+            path=temp_path,
+            available_after_turn=self._completed_transcription_turns + TEMP_AUDIO_CLEANUP_DELAY_TURNS,
+        )
+        self._cleanup_pending_temp_audio_files()
+
+    def _cleanup_pending_temp_audio_files(self) -> None:
+        if not self._pending_temp_audio_files:
+            return
+
+        for temp_path, pending_file in list(self._pending_temp_audio_files.items()):
+            if self._completed_transcription_turns < pending_file.available_after_turn:
+                continue
+
             try:
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-            except Exception as exc:
-                logger.warning("Failed to remove temp STT audio file %s: %s", temp_path, exc)
+                if not os.path.exists(temp_path):
+                    self._pending_temp_audio_files.pop(temp_path, None)
+                    continue
+                os.remove(temp_path)
+                self._pending_temp_audio_files.pop(temp_path, None)
+            except FileNotFoundError:
+                self._pending_temp_audio_files.pop(temp_path, None)
+            except (PermissionError, OSError) as exc:
+                pending_file.failure_count += 1
+                pending_file.available_after_turn = self._completed_transcription_turns + TEMP_AUDIO_CLEANUP_DELAY_TURNS
+                if pending_file.failure_count == TEMP_AUDIO_CLEANUP_WARNING_THRESHOLD:
+                    logger.warning("Failed to remove temp STT audio file %s after deferred cleanup retries: %s", temp_path, exc)
 
     @staticmethod
     def _normalize_stream_id(value: Any) -> str:

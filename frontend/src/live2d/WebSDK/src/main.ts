@@ -18,6 +18,64 @@ let pendingInitializeLive2D = false;
 let boundPointerTarget: HTMLElement | null = null;
 let boundPointerMoveHandler: ((event: PointerEvent) => void) | null = null;
 let boundPointerDownHandler: ((event: PointerEvent) => void) | null = null;
+let setIgnoreMouseEventsBridge: ((ignore: boolean) => void) | null = null;
+let lastIgnoreMouseEventsValue: boolean | null = null;
+
+function getPointerModelCoordinates(event: PointerEvent): { x: number; y: number } | null {
+  const view = LAppDelegate.getInstance().getView();
+  const canvas = document.getElementById("canvas") as HTMLCanvasElement | null;
+
+  if (!view || !canvas || canvas.clientWidth <= 0 || canvas.clientHeight <= 0) {
+    return null;
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  const relativeX = event.clientX - rect.left;
+  const relativeY = event.clientY - rect.top;
+
+  if (
+    relativeX < 0
+    || relativeY < 0
+    || relativeX > rect.width
+    || relativeY > rect.height
+  ) {
+    return null;
+  }
+
+  const scale = canvas.width / canvas.clientWidth;
+  const scaledX = relativeX * scale;
+  const scaledY = relativeY * scale;
+
+  return {
+    x: view._deviceToScreen.transformX(scaledX),
+    y: view._deviceToScreen.transformY(scaledY),
+  };
+}
+
+function applyMouseIgnoreState(ignore: boolean): void {
+  if (!setIgnoreMouseEventsBridge) {
+    return;
+  }
+
+  lastIgnoreMouseEventsValue = ignore;
+  setIgnoreMouseEventsBridge(ignore);
+}
+
+function updateMouseIgnoreState(ignore: boolean): void {
+  if (!setIgnoreMouseEventsBridge) {
+    return;
+  }
+
+  if ((window as any).__ag99PetDragging) {
+    return;
+  }
+
+  if (lastIgnoreMouseEventsValue === ignore) {
+    return;
+  }
+
+  applyMouseIgnoreState(ignore);
+}
 
 function cleanupHitTestPointerHandlers(): void {
   if (boundPointerTarget && boundPointerMoveHandler) {
@@ -30,6 +88,9 @@ function cleanupHitTestPointerHandlers(): void {
   boundPointerTarget = null;
   boundPointerMoveHandler = null;
   boundPointerDownHandler = null;
+  delete (window as any).__ag99SetPetMouseIgnoreState;
+  setIgnoreMouseEventsBridge = null;
+  lastIgnoreMouseEventsValue = null;
 }
 
 /**
@@ -100,6 +161,8 @@ export function initializeLive2D(): void {
 
   const setIgnoreMouseEvents = (window as any).api?.setIgnoreMouseEvents;
   if (typeof setIgnoreMouseEvents === 'function') {
+    setIgnoreMouseEventsBridge = setIgnoreMouseEvents;
+    (window as any).__ag99SetPetMouseIgnoreState = applyMouseIgnoreState;
     const parent = document.getElementById("live2d");
 
     if (parent) {
@@ -108,28 +171,32 @@ export function initializeLive2D(): void {
 
     boundPointerMoveHandler = (e: PointerEvent) => {
       const model = LAppLive2DManager.getInstance().getModel(0);
-      const view = LAppDelegate.getInstance().getView();
+      const coordinates = getPointerModelCoordinates(e);
 
-      // Transform screen coordinates to Live2D canvas coordinates
-      const x = view?._deviceToScreen.transformX(e.x);
-      const y = view?._deviceToScreen.transformY(e.y);
+      if (!coordinates) {
+        updateMouseIgnoreState(true);
+        return;
+      }
 
       // Check if mouse is over the Live2D model
-      setIgnoreMouseEvents(!model?.anyhitTest(x, y) && !model?.isHitOnModel(x, y));
+      updateMouseIgnoreState(
+        !model?.anyhitTest(coordinates.x, coordinates.y)
+          && !model?.isHitOnModel(coordinates.x, coordinates.y),
+      );
     };
 
     // Add pointerdown event listener
     boundPointerDownHandler = (e: PointerEvent) => {
       const model = LAppLive2DManager.getInstance().getModel(0);
-      const view = LAppDelegate.getInstance().getView();
+      const coordinates = getPointerModelCoordinates(e);
 
-      // Transform screen coordinates to Live2D canvas coordinates
-      const x = view?._deviceToScreen.transformX(e.x);
-      const y = view?._deviceToScreen.transformY(e.y);
+      if (!coordinates) {
+        return;
+      }
 
       // Test hit and log result
-      const hitAreaName = model?.anyhitTest(x, y);
-      const isHit = hitAreaName !== null || model?.isHitOnModel(x, y);
+      const hitAreaName = model?.anyhitTest(coordinates.x, coordinates.y);
+      const isHit = hitAreaName !== null || model?.isHitOnModel(coordinates.x, coordinates.y);
       console.log("Model clicked:", isHit, hitAreaName ? `in area: ${hitAreaName}` : '');
     };
 

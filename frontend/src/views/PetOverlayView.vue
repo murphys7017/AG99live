@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
 
 const bridge = useDesktopBridge();
 const draft = ref("");
+const activePointerId = ref<number | null>(null);
+const isDragging = ref(false);
 
 const aiStateLabel = computed(() => {
   switch (bridge.state.snapshot.aiState) {
@@ -31,8 +33,12 @@ const previewText = computed(() => {
   return bridge.state.snapshot.connectionStatusMessage;
 });
 
+const isMicCapturing = computed(() => bridge.state.snapshot.micCapturing);
 const voiceActive = computed(() =>
-  bridge.state.snapshot.micRequested || bridge.state.snapshot.audioPlaying,
+  bridge.state.snapshot.micCapturing || bridge.state.snapshot.audioPlaying,
+);
+const micButtonTitle = computed(() =>
+  isMicCapturing.value ? "关闭常驻收音" : "开启常驻收音",
 );
 
 function handleSend(): void {
@@ -49,6 +55,10 @@ function handleInterrupt(): void {
   bridge.sendCommand({ type: "interrupt" });
 }
 
+function handleMicrophoneToggle(): void {
+  bridge.sendCommand({ type: "toggle_mic_capture" });
+}
+
 function showContextMenu(): void {
   window.ag99desktop?.showContextMenu();
 }
@@ -62,6 +72,70 @@ function onEnter(event: KeyboardEvent): void {
     handleSend();
   }
 }
+
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return Boolean(target.closest("input, button, textarea, select, a"));
+}
+
+function finishWindowDrag(): void {
+  if (activePointerId.value === null) {
+    return;
+  }
+
+  activePointerId.value = null;
+  isDragging.value = false;
+  window.ag99desktop?.endWindowDrag();
+}
+
+function handlePointerDown(event: PointerEvent): void {
+  const target = event.target;
+  const dragHandle =
+    target instanceof HTMLElement
+      ? target.closest("[data-overlay-drag]")
+      : null;
+
+  if (event.button !== 0 || isInteractiveTarget(target) || !dragHandle) {
+    return;
+  }
+
+  activePointerId.value = event.pointerId;
+  isDragging.value = true;
+  window.ag99desktop?.startWindowDrag(event.screenX, event.screenY);
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  event.preventDefault();
+}
+
+function handlePointerMove(event: PointerEvent): void {
+  if (activePointerId.value !== event.pointerId) {
+    return;
+  }
+
+  window.ag99desktop?.updateWindowDrag(event.screenX, event.screenY);
+}
+
+function handlePointerUp(event: PointerEvent): void {
+  if (activePointerId.value !== event.pointerId) {
+    return;
+  }
+
+  finishWindowDrag();
+}
+
+function handlePointerCancel(event: PointerEvent): void {
+  if (activePointerId.value !== event.pointerId) {
+    return;
+  }
+
+  finishWindowDrag();
+}
+
+onBeforeUnmount(() => {
+  finishWindowDrag();
+});
 </script>
 
 <template>
@@ -69,23 +143,35 @@ function onEnter(event: KeyboardEvent): void {
     class="desktop-shell desktop-shell--overlay"
     @contextmenu.prevent="showContextMenu"
   >
-    <section class="overlay-card">
-      <div class="overlay-card__grip" aria-hidden="true"></div>
+    <section
+      class="overlay-card"
+      :class="{ 'overlay-card--dragging': isDragging }"
+      @pointerdown="handlePointerDown"
+      @pointermove="handlePointerMove"
+      @pointerup="handlePointerUp"
+      @pointercancel="handlePointerCancel"
+      @lostpointercapture="finishWindowDrag"
+    >
+      <div class="overlay-card__drag-zone" data-overlay-drag>
+        <div class="overlay-card__grip" aria-hidden="true"></div>
 
-      <p
-        class="overlay-card__message"
-        :data-empty="!previewText.trim()"
-      >
-        {{ previewText.trim() || "..." }}
-      </p>
+        <p
+          class="overlay-card__message"
+          :data-empty="!previewText.trim()"
+        >
+          {{ previewText.trim() || "..." }}
+        </p>
+      </div>
 
       <div class="overlay-card__status-row">
         <span class="overlay-card__status-label">{{ aiStateLabel }}</span>
         <div class="overlay-card__icon-group">
-          <span
-            class="overlay-card__icon-pill"
+          <button
+            type="button"
+            class="overlay-card__icon-button overlay-card__icon-button--mic"
             :data-active="voiceActive"
-            :title="voiceActive ? '语音链路活跃' : '语音链路待命'"
+            :title="micButtonTitle"
+            @click="handleMicrophoneToggle"
           >
             <svg
               class="overlay-card__icon"
@@ -102,7 +188,7 @@ function onEnter(event: KeyboardEvent): void {
               <path d="M12 18v4" />
               <path d="M8 22h8" />
             </svg>
-          </span>
+          </button>
           <button
             type="button"
             class="overlay-card__icon-button"
