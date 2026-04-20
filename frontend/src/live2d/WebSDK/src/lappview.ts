@@ -189,9 +189,10 @@ export class LAppView {
    * @param pointY スクリーンY座標
    */
   public onTouchesBegan(pointX: number, pointY: number): void {
+    const dpr = LAppDefine.getRenderDevicePixelRatio();
     this._touchManager.touchesBegan(
-      pointX * window.devicePixelRatio,
-      pointY * window.devicePixelRatio
+      pointX * dpr,
+      pointY * dpr
     );
   }
 
@@ -202,12 +203,13 @@ export class LAppView {
    * @param pointY スクリーンY座標
    */
   public onTouchesMoved(pointX: number, pointY: number): void {
+    const dpr = LAppDefine.getRenderDevicePixelRatio();
     const viewX: number = this.transformViewX(this._touchManager.getX());
     const viewY: number = this.transformViewY(this._touchManager.getY());
 
     this._touchManager.touchesMoved(
-      pointX * window.devicePixelRatio,
-      pointY * window.devicePixelRatio
+      pointX * dpr,
+      pointY * dpr
     );
 
     const live2DManager: LAppLive2DManager = LAppLive2DManager.getInstance();
@@ -242,8 +244,8 @@ export class LAppView {
       // 歯車にタップしたか
       // if (
       //   this._gear.isHit(
-      //     pointX * window.devicePixelRatio,
-      //     pointY * window.devicePixelRatio
+      //     pointX * dpr,
+      //     pointY * dpr
       //   )
       // ) {
       //   live2DManager.nextScene();

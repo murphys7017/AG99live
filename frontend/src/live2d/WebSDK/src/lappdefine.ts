@@ -102,11 +102,36 @@ export const RenderTargetWidth = 1900;
 export const RenderTargetHeight = 1000;
 
 export const ENABLE_LIMITED_FRAME_RATE = true;
-export let LIMITED_FRAME_RATE = 30;
+export let LIMITED_FRAME_RATE = 24;
+export let BACKGROUND_FRAME_RATE = 12;
+export let MAX_RENDER_DEVICE_PIXEL_RATIO = 1.25;
 
 export function setLimitedFrameRate(nextFrameRate: number) {
   const normalizedFrameRate = Number.isFinite(nextFrameRate)
     ? Math.max(1, Math.min(60, Math.round(nextFrameRate)))
-    : 30;
+    : 24;
   LIMITED_FRAME_RATE = normalizedFrameRate;
+}
+
+export function setBackgroundFrameRate(nextFrameRate: number) {
+  const normalizedFrameRate = Number.isFinite(nextFrameRate)
+    ? Math.max(1, Math.min(60, Math.round(nextFrameRate)))
+    : 12;
+  BACKGROUND_FRAME_RATE = normalizedFrameRate;
+}
+
+export function setMaxRenderDevicePixelRatio(nextRatio: number) {
+  const normalizedRatio = Number.isFinite(nextRatio)
+    ? Math.max(1, Math.min(3, nextRatio))
+    : 1.25;
+  MAX_RENDER_DEVICE_PIXEL_RATIO = normalizedRatio;
+}
+
+export function getRenderDevicePixelRatio(): number {
+  if (typeof window === "undefined") {
+    return 1;
+  }
+
+  const raw = window.devicePixelRatio || 1;
+  return Math.max(1, Math.min(raw, MAX_RENDER_DEVICE_PIXEL_RATIO));
 }

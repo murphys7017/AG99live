@@ -13,6 +13,7 @@ import type { ModelSummary } from "../types/protocol";
 type RenderStatus = "idle" | "loading" | "ready" | "error";
 
 const LIVE2D_CORE_SCRIPT_ID = "ag99live-live2d-core";
+const LIVE2D_RENDER_DPR_CAP = 1.25;
 
 let live2dCorePromise: Promise<void> | null = null;
 
@@ -123,7 +124,7 @@ export function useLive2dRenderer(selectedModel: Ref<ModelSummary | null>) {
     const rect = container.getBoundingClientRect();
     const width = Math.max(rect.width, 1);
     const height = Math.max(rect.height, 1);
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, LIVE2D_RENDER_DPR_CAP));
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
     canvas.style.width = `${width}px`;

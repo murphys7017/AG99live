@@ -211,8 +211,17 @@ export class LAppDelegate {
 
       // 時間更新
       if (LAppDefine.ENABLE_LIMITED_FRAME_RATE) {
+        const isBackgroundTab =
+          typeof document !== "undefined" ? document.hidden : false;
+        const targetFrameRate = isBackgroundTab
+          ? Math.max(
+            1,
+            Math.min(LAppDefine.BACKGROUND_FRAME_RATE, LAppDefine.LIMITED_FRAME_RATE),
+          )
+          : LAppDefine.LIMITED_FRAME_RATE;
+
         LAppPal.updateTime(false);
-        if (LAppPal.getDeltaTime() < 1 / LAppDefine.LIMITED_FRAME_RATE) {
+        if (LAppPal.getDeltaTime() < 1 / targetFrameRate) {
           this._rafId = requestAnimationFrame(loop);
           return;
         }
@@ -377,7 +386,7 @@ export class LAppDelegate {
       console.warn("Canvas is null, skipping resize");
       return;
     }
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = LAppDefine.getRenderDevicePixelRatio();
     const targetWidth = Math.max(1, Math.round(canvas.clientWidth * dpr));
     const targetHeight = Math.max(1, Math.round(canvas.clientHeight * dpr));
 

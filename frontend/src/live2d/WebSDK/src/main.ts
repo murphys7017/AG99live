@@ -20,6 +20,8 @@ let boundPointerMoveHandler: ((event: PointerEvent) => void) | null = null;
 let boundPointerDownHandler: ((event: PointerEvent) => void) | null = null;
 let setIgnoreMouseEventsBridge: ((ignore: boolean) => void) | null = null;
 let lastIgnoreMouseEventsValue: boolean | null = null;
+let lastPointerHitTestAt = 0;
+const POINTER_HIT_TEST_INTERVAL_MS = 33;
 
 function getPointerModelCoordinates(event: PointerEvent): { x: number; y: number } | null {
   const view = LAppDelegate.getInstance().getView();
@@ -91,6 +93,7 @@ function cleanupHitTestPointerHandlers(): void {
   delete (window as any).__ag99SetPetMouseIgnoreState;
   setIgnoreMouseEventsBridge = null;
   lastIgnoreMouseEventsValue = null;
+  lastPointerHitTestAt = 0;
 }
 
 /**
@@ -170,6 +173,12 @@ export function initializeLive2D(): void {
     }
 
     boundPointerMoveHandler = (e: PointerEvent) => {
+      const now = performance.now();
+      if (now - lastPointerHitTestAt < POINTER_HIT_TEST_INTERVAL_MS) {
+        return;
+      }
+      lastPointerHitTestAt = now;
+
       const model = LAppLive2DManager.getInstance().getModel(0);
       const coordinates = getPointerModelCoordinates(e);
 
@@ -179,10 +188,13 @@ export function initializeLive2D(): void {
       }
 
       // Check if mouse is over the Live2D model
-      updateMouseIgnoreState(
-        !model?.anyhitTest(coordinates.x, coordinates.y)
-          && !model?.isHitOnModel(coordinates.x, coordinates.y),
-      );
+      const isHit = typeof model?.anyHitTestWithFallback === "function"
+        ? model.anyHitTestWithFallback(coordinates.x, coordinates.y)
+        : Boolean(
+          model?.anyhitTest(coordinates.x, coordinates.y)
+            || model?.isHitOnModel(coordinates.x, coordinates.y),
+        );
+      updateMouseIgnoreState(!isHit);
     };
 
     // Add pointerdown event listener
