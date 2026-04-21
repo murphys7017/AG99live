@@ -270,6 +270,13 @@ function handlePreviewMotionPlan(plan: unknown): void {
   adapter.sendMotionPlanPreview(plan);
 }
 
+function handleInboundMotionPlan(plan: unknown): void {
+  const localPlayed = motionPlayer.playPlan(plan, selectedModel.value);
+  if (!localPlayed) {
+    console.warn("[AG99live] Inbound motion preview playback failed to start.");
+  }
+}
+
 function handleDesktopCommand(command: DesktopRuntimeCommand): void {
   switch (command.type) {
     case "set_address":
@@ -313,6 +320,17 @@ function showContextMenu(event: MouseEvent): void {
 }
 
 const detachBridgeListener = bridge.onCommand(handleDesktopCommand);
+
+watch(
+  () => adapter.state.inboundMotionPlanNonce,
+  () => {
+    const plan = adapter.state.inboundMotionPlan;
+    if (!plan) {
+      return;
+    }
+    handleInboundMotionPlan(plan);
+  },
+);
 
 watch(
   () => [

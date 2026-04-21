@@ -3,6 +3,7 @@ from __future__ import annotations
 """AstrBot platform adapter for the AG99live desktop frontend."""
 
 import asyncio
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
 import traceback
 from typing import Any
@@ -50,6 +51,7 @@ IMAGE_CACHE_DIR = RUNTIME_CACHE_DIR / "images"
         "host": "127.0.0.1",
         "port": 12396,
         "http_port": 12397,
+        "debug_port": 12398,
         "conf_name": "AG99live Desktop",
         "conf_uid": "ag99live-desktop",
         "speaker_name": "AstrBot",
@@ -72,10 +74,12 @@ class OLVPetPlatformAdapter(Platform):
         self.host = _config_get(self.config, "host", "127.0.0.1")
         self.port = int(_config_get(self.config, "port", 12396))
         self.http_port = int(_config_get(self.config, "http_port", 12397))
+        self.debug_port = int(_config_get(self.config, "debug_port", 12398))
         self.conf_name = _config_get(self.config, "conf_name", "AG99live Desktop")
         self.conf_uid = _config_get(self.config, "conf_uid", "ag99live-desktop")
         self.speaker_name = _config_get(self.config, "speaker_name", "AstrBot")
         self.auto_start_mic = bool(_config_get(self.config, "auto_start_mic", True))
+        self._event_loop: asyncio.AbstractEventLoop | None = None
 
         self._plugin_context = get_plugin_context()
         self._plugin_config = get_plugin_config() or {}
@@ -113,6 +117,12 @@ class OLVPetPlatformAdapter(Platform):
                 assets_dir=ASSETS_DIR,
                 runtime_cache_dir=RUNTIME_CACHE_DIR,
             ),
+        )
+        self._debug_server = StaticResourceServer(
+            host=self.host,
+            port=self.debug_port,
+            routes={},
+            api_handler=self._handle_debug_api_request,
         )
         self.media_service = MediaService(
             host=self.host,
@@ -175,6 +185,7 @@ class OLVPetPlatformAdapter(Platform):
         logger.debug(
             "AG99live adapter initialized "
             f"(host={self.host}, ws_port={self.port}, http_port={self.http_port}, "
+            f"debug_port={self.debug_port}, "
             f"conf_name={self.conf_name}, conf_uid={self.conf_uid})"
         )
         self._refresh_runtime_settings()
@@ -215,7 +226,9 @@ class OLVPetPlatformAdapter(Platform):
         return self.runtime_state.selected_motion_analysis_provider
 
     async def run(self):
+        self._event_loop = asyncio.get_running_loop()
         try:
+            await asyncio.to_thread(self._debug_server.start)
             await self.transport.start()
         except asyncio.CancelledError:
             await self.terminate()
@@ -224,6 +237,9 @@ class OLVPetPlatformAdapter(Platform):
             logger.error(f"AG99live adapter failed during run(): {exc}")
             logger.error(traceback.format_exc())
             raise
+        finally:
+            await asyncio.to_thread(self._debug_server.stop)
+            self._event_loop = None
 
     async def send_by_session(self, session: MessageSesion, message_chain):
         await super().send_by_session(session, message_chain)
@@ -333,6 +349,8 @@ class OLVPetPlatformAdapter(Platform):
     async def terminate(self) -> None:
         logger.info("AG99live adapter terminate() called")
         await self.transport.stop()
+        await asyncio.to_thread(self._debug_server.stop)
+        self._event_loop = None
 
     async def _send_json(self, payload: dict[str, Any]) -> bool:
         return await self.transport.send_json(payload)
@@ -341,6 +359,58 @@ class OLVPetPlatformAdapter(Platform):
         self.session_state.reset_to_idle()
         await self.turn_coordinator.speech_ingress.handle_audio_stream_interrupt()
         await self.media_service.clear_audio_buffer()
+
+    def _handle_debug_api_request(
+        self,
+        path: str,
+        payload: dict[str, Any],
+    ) -> tuple[int, dict[str, Any]]:
+        normalized_path = path.rstrip("/")
+        if normalized_path != "/api/engine/motion_plan_preview":
+            return 404, {"ok": False, "error": "Unknown debug API endpoint."}
+
+        if not isinstance(payload, dict):
+            return 400, {"ok": False, "error": "Payload must be an object."}
+
+        plan = payload.get("plan")
+        if not isinstance(plan, dict):
+            return 400, {"ok": False, "error": "`plan` must be a JSON object."}
+
+        mode = str(payload.get("mode") or "preview").strip() or "preview"
+        source = str(payload.get("source") or "analysis.notebook").strip() or "analysis.notebook"
+
+        loop = self._event_loop
+        if loop is None:
+            return 503, {"ok": False, "error": "Adapter event loop is not ready."}
+
+        future = asyncio.run_coroutine_threadsafe(
+            self.turn_coordinator.broadcast_motion_plan_preview(
+                plan=plan,
+                mode=mode,
+                source=source,
+            ),
+            loop,
+        )
+        try:
+            sent = bool(future.result(timeout=5.0))
+        except FutureTimeoutError:
+            return 504, {"ok": False, "error": "Timed out while dispatching motion plan preview."}
+        except Exception as exc:
+            return 500, {"ok": False, "error": f"Failed to dispatch motion plan preview: {exc}"}
+
+        if not sent:
+            return 409, {
+                "ok": False,
+                "error": "No active frontend websocket connection.",
+            }
+
+        return 200, {
+            "ok": True,
+            "status": "dispatched",
+            "endpoint": normalized_path,
+            "mode": mode,
+            "source": source,
+        }
 
     def _sync_client_profile_from_runtime_state(self) -> None:
         self.client_uid = normalize_client_uid(

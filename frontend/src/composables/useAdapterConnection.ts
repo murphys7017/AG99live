@@ -45,6 +45,8 @@ const state = reactive({
   micCapturing: false,
   isPlayingAudio: false,
   historyEntries: [] as DesktopHistoryEntry[],
+  inboundMotionPlan: null as unknown | null,
+  inboundMotionPlanNonce: 0,
 });
 
 interface MicrophoneCaptureRuntime {
@@ -759,6 +761,9 @@ async function handleSocketMessage(rawData: string): Promise<void> {
     case "control.error":
       applyControlError(envelope as ProtocolEnvelope<ControlErrorPayload>);
       return;
+    case "engine.motion_plan":
+      applyInboundMotionPlan(envelope as ProtocolEnvelope<Record<string, unknown>>);
+      return;
     default:
       return;
   }
@@ -844,6 +849,31 @@ function applyControlError(envelope: ProtocolEnvelope<ControlErrorPayload>): voi
   state.lastError = envelope.payload.message;
   state.statusMessage = envelope.payload.message;
   pushHistory("error", envelope.payload.message);
+}
+
+function applyInboundMotionPlan(
+  envelope: ProtocolEnvelope<Record<string, unknown>>,
+): void {
+  const rawPayload = envelope.payload;
+  const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
+  const mode =
+    typeof payload.mode === "string" && payload.mode.trim()
+      ? payload.mode.trim()
+      : "preview";
+  const hasPlan = Object.prototype.hasOwnProperty.call(payload, "plan");
+  const plan = hasPlan ? payload.plan : payload;
+
+  if (!plan || typeof plan !== "object") {
+    state.lastError = "收到无效的 engine.motion_plan（缺少有效 plan）。";
+    state.statusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    return;
+  }
+
+  state.inboundMotionPlan = plan;
+  state.inboundMotionPlanNonce += 1;
+  state.statusMessage = `收到外部动作计划（engine.motion_plan, mode=${mode}）。`;
+  pushHistory("system", state.statusMessage);
 }
 
 function updateAssistantText(text: string, turnId: string | null): void {

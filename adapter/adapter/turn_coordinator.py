@@ -21,6 +21,7 @@ from .payload_builder import (
     build_output_text,
 )
 from .protocol import (
+    SOURCE_ENGINE,
     TYPE_CONTROL_INTERRUPT,
     TYPE_CONTROL_PLAYBACK_FINISHED,
     TYPE_ENGINE_MOTION_PLAN,
@@ -31,6 +32,7 @@ from .protocol import (
     TYPE_INPUT_MIC_AUDIO_END,
     TYPE_INPUT_RAW_AUDIO_DATA,
     TYPE_INPUT_TEXT,
+    build_message_envelope,
     parse_inbound_message,
 )
 from .speech_ingress import SpeechIngressService
@@ -413,6 +415,39 @@ class TurnCoordinator:
         # Phase-1/2 bridge stub: accept and record the preview plan so frontend
         # testing won't be blocked by protocol rejection before engine playback lands.
         return
+
+    async def broadcast_motion_plan_preview(
+        self,
+        *,
+        plan: Any,
+        mode: str = "preview",
+        source: str = "debug_port",
+    ) -> bool:
+        if not isinstance(plan, dict):
+            return False
+
+        payload = {
+            "mode": str(mode or "preview"),
+            "plan": plan,
+            "source": str(source or "debug_port"),
+        }
+        sent = await self._send_json(
+            build_message_envelope(
+                TYPE_ENGINE_MOTION_PLAN,
+                session_id=self.session_state.client_uid,
+                turn_id=self.session_state.current_turn_id,
+                source=SOURCE_ENGINE,
+                payload=payload,
+            )
+        )
+        if sent:
+            logger.info(
+                "Broadcasted engine motion plan preview from debug ingress "
+                "(mode=%s, turn_id=%s).",
+                payload["mode"],
+                self.session_state.current_turn_id or "",
+            )
+        return sent
 
     async def _finish_turn(self, *, success: bool, reason: str | None) -> None:
         current_turn_id = self.session_state.current_turn_id
