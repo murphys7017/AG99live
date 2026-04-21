@@ -65,6 +65,8 @@ const filteredAtoms = computed<DesktopBaseActionPreviewAtom[]>(() => {
       atom.semanticPolarity,
       atom.trait,
       atom.sourceMotion,
+      atom.sourceFile,
+      atom.sourceGroup,
       atom.sourceCategory,
       atom.sourceTags.join(" "),
     ]
@@ -105,32 +107,54 @@ const selectedAtoms = computed<DesktopBaseActionPreviewAtom[]>(() => {
     .map((atomId) => map.get(atomId))
     .filter((atom): atom is DesktopBaseActionPreviewAtom => Boolean(atom));
 });
+function buildPlanStep(
+  atom: DesktopBaseActionPreviewAtom,
+  startMs: number,
+): {
+  atom_id: string;
+  channel: string;
+  start_ms: number;
+  duration_ms: number;
+  intensity: number;
+  source_motion: string;
+  source_file: string;
+  source_group: string;
+  semantic_polarity: string;
+  trait: string;
+} {
+  const durationMs = Math.max(
+    80,
+    Math.round(atom.duration * 1000 * durationScale.value),
+  );
+  const baseIntensity = strengthToBaseIntensity(atom.strength);
+  const intensity = roundTo(
+    Math.min(Math.max(baseIntensity * intensityScale.value, 0), 2),
+    3,
+  );
+
+  return {
+    atom_id: atom.id,
+    channel: atom.channel,
+    start_ms: startMs,
+    duration_ms: durationMs,
+    intensity,
+    source_motion: atom.sourceMotion,
+    source_file: atom.sourceFile,
+    source_group: atom.sourceGroup,
+    semantic_polarity: atom.semanticPolarity,
+    trait: atom.trait,
+  };
+}
+
 const generatedPlan = computed(() => {
-  const steps = [];
+  const steps: Array<ReturnType<typeof buildPlanStep>> = [];
   let cursorMs = 0;
   for (const atom of selectedAtoms.value) {
-    const durationMs = Math.max(
-      80,
-      Math.round(atom.duration * 1000 * durationScale.value),
-    );
-    const baseIntensity = strengthToBaseIntensity(atom.strength);
-    const intensity = roundTo(
-      Math.min(Math.max(baseIntensity * intensityScale.value, 0), 2),
-      3,
-    );
     const startMs = planMode.value === "parallel" ? 0 : cursorMs;
-    steps.push({
-      atom_id: atom.id,
-      channel: atom.channel,
-      start_ms: startMs,
-      duration_ms: durationMs,
-      intensity,
-      source_motion: atom.sourceMotion,
-      semantic_polarity: atom.semanticPolarity,
-      trait: atom.trait,
-    });
+    const step = buildPlanStep(atom, startMs);
+    steps.push(step);
     if (planMode.value === "sequential") {
-      cursorMs += durationMs + Math.max(0, Math.round(stepGapMs.value));
+      cursorMs += step.duration_ms + Math.max(0, Math.round(stepGapMs.value));
     }
   }
 

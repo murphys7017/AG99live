@@ -75,6 +75,8 @@ export interface DesktopBaseActionPreviewAtom {
   primaryParameterMatch: boolean;
   channelPurity: number;
   sourceMotion: string;
+  sourceFile: string;
+  sourceGroup: string;
   sourceCategory: string;
   sourceTags: string[];
   duration: number;

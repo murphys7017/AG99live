@@ -4,12 +4,14 @@ import DesktopPetCanvas from "../components/DesktopPetCanvas.vue";
 import { useAdapterConnection } from "../composables/useAdapterConnection";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
 import { useModelSync } from "../composables/useModelSync";
+import { usePreviewMotionPlayer } from "../composables/usePreviewMotionPlayer";
 import type { DesktopRuntimeCommand } from "../types/desktop";
 import type { DesktopBaseActionPreview } from "../types/desktop";
 
 const { state, selectedModel } = useModelSync();
 const adapter = useAdapterConnection();
 const bridge = useDesktopBridge();
+const motionPlayer = usePreviewMotionPlayer();
 
 const connectionState = computed(() => {
   if (adapter.state.status === "connecting") {
@@ -147,6 +149,8 @@ const baseActionPreview = computed<DesktopBaseActionPreview | null>(() => {
         primaryParameterMatch: atom.primary_parameter_match,
         channelPurity: atom.channel_purity,
         sourceMotion: atom.source_motion,
+        sourceFile: atom.source_file,
+        sourceGroup: atom.source_group,
         sourceCategory: atom.source_category,
         sourceTags: [...atom.source_tags],
         duration: atom.duration,
@@ -165,6 +169,14 @@ const baseActionPreview = computed<DesktopBaseActionPreview | null>(() => {
       }),
   };
 });
+
+function handlePreviewMotionPlan(plan: unknown): void {
+  const localPlayed = motionPlayer.playPlan(plan, selectedModel.value);
+  if (!localPlayed) {
+    console.warn("[AG99live] Local motion preview playback failed to start.");
+  }
+  adapter.sendMotionPlanPreview(plan);
+}
 
 function handleDesktopCommand(command: DesktopRuntimeCommand): void {
   switch (command.type) {
@@ -187,13 +199,14 @@ function handleDesktopCommand(command: DesktopRuntimeCommand): void {
       void adapter.sendText(command.text);
       return;
     case "interrupt":
+      motionPlayer.stopPlan("interrupted");
       adapter.interruptCurrentTurn();
       return;
     case "toggle_mic_capture":
       void adapter.toggleMicrophoneCapture();
       return;
     case "preview_motion_plan":
-      adapter.sendMotionPlanPreview(command.plan);
+      handlePreviewMotionPlan(command.plan);
       return;
   }
 }
@@ -275,6 +288,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  motionPlayer.stopPlan("unmount");
   detachBridgeListener();
 });
 </script>
