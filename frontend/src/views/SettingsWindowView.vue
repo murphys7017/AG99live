@@ -55,6 +55,10 @@ function toggleHistoryWindow(): void {
   window.ag99desktop?.toggleAuxWindow("history");
 }
 
+function toggleActionLabWindow(): void {
+  window.ag99desktop?.toggleAuxWindow("action_lab");
+}
+
 function applyDesktopScreenshotOnSend(): void {
   bridge.sendCommand({
     type: "set_desktop_screenshot_on_send",
@@ -197,6 +201,13 @@ function applyDesktopScreenshotOnSend(): void {
           @click="toggleHistoryWindow"
         >
           打开或关闭历史窗口
+        </button>
+        <button
+          type="button"
+          class="settings-card__button settings-card__button--ghost"
+          @click="toggleActionLabWindow"
+        >
+          打开动作实验室
         </button>
       </article>
     </section>

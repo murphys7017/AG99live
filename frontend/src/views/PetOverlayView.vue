@@ -59,8 +59,13 @@ function handleMicrophoneToggle(): void {
   bridge.sendCommand({ type: "toggle_mic_capture" });
 }
 
-function showContextMenu(): void {
-  window.ag99desktop?.showContextMenu();
+function showContextMenu(event: MouseEvent): void {
+  window.ag99desktop?.showContextMenu({
+    x: event.clientX,
+    y: event.clientY,
+    screenX: event.screenX,
+    screenY: event.screenY,
+  });
 }
 
 function onEnter(event: KeyboardEvent): void {

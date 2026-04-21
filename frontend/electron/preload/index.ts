@@ -30,8 +30,13 @@ function listLocalAdapterHosts(): string[] {
 }
 
 const api = {
-  showContextMenu: () => {
-    ipcRenderer.send("desktop:show-context-menu");
+  showContextMenu: (position?: {
+    x?: number;
+    y?: number;
+    screenX?: number;
+    screenY?: number;
+  }) => {
+    ipcRenderer.send("desktop:show-context-menu", position ?? {});
   },
   setIgnoreMouseEvents: (ignore: boolean) => {
     ipcRenderer.send("desktop:set-ignore-mouse-events", ignore);

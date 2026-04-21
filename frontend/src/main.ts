@@ -9,6 +9,7 @@ const roleTitles: Record<string, string> = {
   overlay: "",
   settings: "AG99live 设置",
   history: "AG99live 历史",
+  action_lab: "AG99live 动作实验室",
 };
 
 document.documentElement.dataset.windowRole = role;

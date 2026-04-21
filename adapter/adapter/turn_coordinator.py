@@ -23,6 +23,7 @@ from .payload_builder import (
 from .protocol import (
     TYPE_CONTROL_INTERRUPT,
     TYPE_CONTROL_PLAYBACK_FINISHED,
+    TYPE_ENGINE_MOTION_PLAN,
     TYPE_INPUT_AUDIO_STREAM_CHUNK,
     TYPE_INPUT_AUDIO_STREAM_END,
     TYPE_INPUT_AUDIO_STREAM_START,
@@ -132,6 +133,10 @@ class TurnCoordinator:
         if message.type == TYPE_INPUT_TEXT:
             message_obj = self._convert_message(message.raw)
             await self._commit_inbound_message(message_obj, turn_id=message.turn_id)
+            return
+
+        if message.type == TYPE_ENGINE_MOTION_PLAN:
+            await self._handle_engine_motion_plan_preview(message)
             return
 
         await self._send_json(
@@ -388,6 +393,26 @@ class TurnCoordinator:
             stopped_count,
             umo,
         )
+
+    async def _handle_engine_motion_plan_preview(self, message) -> None:
+        payload = message.payload if isinstance(message.payload, dict) else {}
+        plan_payload = payload.get("plan")
+        mode = str(payload.get("mode") or "preview")
+        step_count = 0
+        if isinstance(plan_payload, dict):
+            steps = plan_payload.get("steps")
+            if isinstance(steps, list):
+                step_count = len(steps)
+
+        logger.info(
+            "Received engine motion plan preview (mode=%s, steps=%s, turn_id=%s).",
+            mode,
+            step_count,
+            message.turn_id or "",
+        )
+        # Phase-1/2 bridge stub: accept and record the preview plan so frontend
+        # testing won't be blocked by protocol rejection before engine playback lands.
+        return
 
     async def _finish_turn(self, *, success: bool, reason: str | None) -> None:
         current_turn_id = self.session_state.current_turn_id

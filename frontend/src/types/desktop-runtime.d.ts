@@ -4,7 +4,12 @@ import type {
 } from "./desktop";
 
 export interface Ag99DesktopApi {
-  showContextMenu: () => void;
+  showContextMenu: (position?: {
+    x?: number;
+    y?: number;
+    screenX?: number;
+    screenY?: number;
+  }) => void;
   setIgnoreMouseEvents: (ignore: boolean) => void;
   startWindowDrag: (screenX: number, screenY: number) => void;
   updateWindowDrag: (screenX: number, screenY: number) => void;

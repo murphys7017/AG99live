@@ -74,7 +74,7 @@ function watchWindowShortcuts(window: BrowserWindow): void {
 
 function setupIpc(): void {
   ipcMain.on("desktop:toggle-aux-window", (_event, target) => {
-    if (target === "settings" || target === "history") {
+    if (target === "settings" || target === "history" || target === "action_lab") {
       windowManager.toggleAuxWindow(target);
     }
   });

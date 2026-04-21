@@ -1011,6 +1011,27 @@ function interruptCurrentTurn(): boolean {
   return true;
 }
 
+function sendMotionPlanPreview(plan: unknown): boolean {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    state.lastError = "当前还没有连上适配器，无法发送动作测试计划。";
+    state.statusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    return false;
+  }
+
+  socket.send(
+    JSON.stringify(
+      buildMessageEnvelope("engine.motion_plan", {
+        mode: "preview",
+        plan,
+      }),
+    ),
+  );
+  state.statusMessage = "已发送动作测试计划（engine.motion_plan）。";
+  pushHistory("system", state.statusMessage);
+  return true;
+}
+
 async function sendPlaybackFinished(
   turnId: string | null,
   success: boolean,
@@ -1139,6 +1160,7 @@ export function useAdapterConnection() {
     disconnect,
     sendText,
     interruptCurrentTurn,
+    sendMotionPlanPreview,
     toggleMicrophoneCapture,
   };
 }

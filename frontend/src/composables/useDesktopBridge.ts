@@ -1,5 +1,6 @@
 import { reactive, readonly } from "vue";
 import type {
+  DesktopBaseActionPreview,
   DesktopRuntimeCommand,
   DesktopRuntimeSnapshot,
   DesktopWindowVisibilityState,
@@ -36,6 +37,7 @@ const defaultSnapshot: DesktopRuntimeSnapshot = {
   lastTranscription: "",
   lastImageCount: 0,
   historyEntries: [],
+  baseActionPreview: null,
 };
 
 const defaultWindowState: DesktopWindowVisibilityState = {
@@ -43,6 +45,7 @@ const defaultWindowState: DesktopWindowVisibilityState = {
   overlayVisible: true,
   settingsVisible: false,
   historyVisible: false,
+  actionLabVisible: false,
 };
 
 const state = reactive({
@@ -127,10 +130,43 @@ function persistSnapshot(snapshot: DesktopRuntimeSnapshot): void {
 }
 
 function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnapshot {
+  const historyEntries = Array.isArray(snapshot.historyEntries)
+    ? snapshot.historyEntries
+    : [];
   return {
     ...defaultSnapshot,
     ...snapshot,
-    historyEntries: snapshot.historyEntries.map((entry) => ({ ...entry })),
+    historyEntries: historyEntries.map((entry) => ({ ...entry })),
+    baseActionPreview: cloneBaseActionPreview(snapshot.baseActionPreview),
+  };
+}
+
+function cloneBaseActionPreview(
+  preview: DesktopBaseActionPreview | null,
+): DesktopBaseActionPreview | null {
+  if (!preview) {
+    return null;
+  }
+  return {
+    ...preview,
+    focusChannels: [...preview.focusChannels],
+    focusDomains: [...preview.focusDomains],
+    ignoredDomains: [...preview.ignoredDomains],
+    summary: { ...preview.summary },
+    analysis: { ...preview.analysis },
+    families: preview.families.map((family) => ({
+      ...family,
+      channels: [...family.channels],
+    })),
+    channels: preview.channels.map((channel) => ({
+      ...channel,
+      polarityModes: [...channel.polarityModes],
+      atomIds: [...channel.atomIds],
+    })),
+    atoms: preview.atoms.map((atom) => ({
+      ...atom,
+      sourceTags: [...atom.sourceTags],
+    })),
   };
 }
 

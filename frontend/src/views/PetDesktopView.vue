@@ -5,6 +5,7 @@ import { useAdapterConnection } from "../composables/useAdapterConnection";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
 import { useModelSync } from "../composables/useModelSync";
 import type { DesktopRuntimeCommand } from "../types/desktop";
+import type { DesktopBaseActionPreview } from "../types/desktop";
 
 const { state, selectedModel } = useModelSync();
 const adapter = useAdapterConnection();
@@ -77,6 +78,94 @@ const aiState = computed(() => {
   return "offline";
 });
 
+const baseActionPreview = computed<DesktopBaseActionPreview | null>(() => {
+  const model = selectedModel.value;
+  const library = model?.base_action_library;
+  if (!library) {
+    return null;
+  }
+
+  return {
+    schemaVersion: library.schema_version,
+    extractionMode: library.extraction_mode,
+    focusChannels: [...library.focus_channels],
+    focusDomains: [...library.focus_domains],
+    ignoredDomains: [...library.ignored_domains],
+    summary: {
+      motionCount: library.summary.motion_count,
+      availableChannelCount: library.summary.available_channel_count,
+      selectedChannelCount: library.summary.selected_channel_count,
+      candidateComponentCount: library.summary.candidate_component_count,
+      selectedAtomCount: library.summary.selected_atom_count,
+      familyCount: library.summary.family_count,
+    },
+    analysis: {
+      status: library.analysis.status,
+      mode: library.analysis.mode,
+      providerId: library.analysis.provider_id,
+      inputSignature: library.analysis.input_signature ?? "",
+      latencyMs: library.analysis.latency_ms ?? 0,
+      cacheHit: library.analysis.cache_hit ?? false,
+      selectedChannelCount: library.analysis.selected_channel_count ?? 0,
+      error: library.analysis.error ?? "",
+      fallbackReason: library.analysis.fallback_reason ?? "",
+    },
+    families: library.families.map((family) => ({
+      name: family.name,
+      label: family.label,
+      channels: [...family.channels],
+      atomCount: family.atom_count,
+    })),
+    channels: library.channels.map((channel) => ({
+      name: channel.name,
+      label: channel.label,
+      family: channel.family,
+      familyLabel: channel.family_label,
+      domain: channel.domain,
+      available: channel.available,
+      candidateComponentCount: channel.candidate_component_count,
+      selectedAtomCount: channel.selected_atom_count,
+      polarityModes: [...channel.polarity_modes],
+      atomIds: [...channel.atom_ids],
+    })),
+    atoms: library.atoms
+      .map((atom) => ({
+        id: atom.id,
+        name: atom.name,
+        label: atom.label,
+        channel: atom.channel,
+        channelLabel: atom.channel_label,
+        family: atom.family,
+        familyLabel: atom.family_label,
+        domain: atom.domain,
+        polarity: atom.polarity,
+        semanticPolarity: atom.semantic_polarity,
+        trait: atom.trait,
+        strength: atom.strength,
+        score: atom.score,
+        energyScore: atom.energy_score,
+        primaryParameterMatch: atom.primary_parameter_match,
+        channelPurity: atom.channel_purity,
+        sourceMotion: atom.source_motion,
+        sourceCategory: atom.source_category,
+        sourceTags: [...atom.source_tags],
+        duration: atom.duration,
+        fps: atom.fps,
+        loop: atom.loop,
+        intensity: atom.intensity,
+      }))
+      .sort((left, right) => {
+        if (right.score !== left.score) {
+          return right.score - left.score;
+        }
+        if (right.energyScore !== left.energyScore) {
+          return right.energyScore - left.energyScore;
+        }
+        return left.id.localeCompare(right.id);
+      }),
+  };
+});
+
 function handleDesktopCommand(command: DesktopRuntimeCommand): void {
   switch (command.type) {
     case "set_address":
@@ -103,11 +192,19 @@ function handleDesktopCommand(command: DesktopRuntimeCommand): void {
     case "toggle_mic_capture":
       void adapter.toggleMicrophoneCapture();
       return;
+    case "preview_motion_plan":
+      adapter.sendMotionPlanPreview(command.plan);
+      return;
   }
 }
 
-function showContextMenu(): void {
-  window.ag99desktop?.showContextMenu();
+function showContextMenu(event: MouseEvent): void {
+  window.ag99desktop?.showContextMenu({
+    x: event.clientX,
+    y: event.clientY,
+    screenX: event.screenX,
+    screenY: event.screenY,
+  });
 }
 
 const detachBridgeListener = bridge.onCommand(handleDesktopCommand);
@@ -134,6 +231,7 @@ watch(
     selectedModel.value?.name ?? "",
     selectedModel.value?.icon_url ?? "",
     selectedModel.value?.engine_hints.recommended_mode ?? "",
+    baseActionPreview.value,
     stageMessage.value,
   ],
   () => {
@@ -165,6 +263,7 @@ watch(
       lastTranscription: adapter.state.lastTranscription,
       lastImageCount: adapter.state.lastImageCount,
       historyEntries: [...adapter.state.historyEntries],
+      baseActionPreview: baseActionPreview.value,
     });
   },
   { deep: true, immediate: true },

@@ -55,6 +55,7 @@ export class WindowManager {
     overlay: null,
     settings: null,
     history: null,
+    action_lab: null,
   };
 
   createWindows(): void {
@@ -62,6 +63,7 @@ export class WindowManager {
     this.windows.overlay = this.createOverlayWindow();
     this.windows.settings = this.ensureAuxWindow("settings");
     this.windows.history = this.ensureAuxWindow("history");
+    this.windows.action_lab = this.ensureAuxWindow("action_lab");
     this.windows.pet?.show();
     if (this.overlayVisiblePreference) {
       this.windows.overlay?.show();
@@ -240,6 +242,7 @@ export class WindowManager {
       overlayVisible: Boolean(this.windows.overlay?.isVisible()),
       settingsVisible: Boolean(this.windows.settings?.isVisible()),
       historyVisible: Boolean(this.windows.history?.isVisible()),
+      actionLabVisible: Boolean(this.windows.action_lab?.isVisible()),
     };
   }
 
@@ -395,10 +398,16 @@ export class WindowManager {
   }
 
   private createUtilityWindow(role: DesktopAuxWindowRole): BrowserWindow {
-    const title = role === "settings" ? "AG99live Settings" : "AG99live History";
+    const title = role === "settings"
+      ? "AG99live Settings"
+      : role === "history"
+        ? "AG99live History"
+        : "AG99live Action Lab";
+    const width = role === "settings" ? 520 : role === "history" ? 480 : 940;
+    const height = role === "settings" ? 700 : role === "history" ? 680 : 760;
     const utilityWindow = new BrowserWindow({
-      width: role === "settings" ? 520 : 480,
-      height: role === "settings" ? 700 : 680,
+      width,
+      height,
       show: false,
       title,
       autoHideMenuBar: true,
