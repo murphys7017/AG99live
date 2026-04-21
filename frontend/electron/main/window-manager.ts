@@ -15,6 +15,8 @@ interface WindowDragState {
   targetWindow: BrowserWindow;
   offsetX: number;
   offsetY: number;
+  lockedWidth: number;
+  lockedHeight: number;
 }
 
 interface TransparentWindowSnapshot {
@@ -199,11 +201,36 @@ export class WindowManager {
     }
 
     const bounds = targetWindow.getBounds();
+    const role = this.findRole(targetWindow);
+    const lockedWidth = role === "pet"
+      ? PET_WINDOW_WIDTH
+      : role === "overlay"
+        ? PET_OVERLAY_WIDTH
+        : bounds.width;
+    const lockedHeight = role === "pet"
+      ? PET_WINDOW_HEIGHT
+      : role === "overlay"
+        ? PET_OVERLAY_HEIGHT
+        : bounds.height;
     this.activeDragState = {
       targetWindow,
       offsetX: screenX - bounds.x,
       offsetY: screenY - bounds.y,
+      lockedWidth,
+      lockedHeight,
     };
+
+    if (bounds.width !== lockedWidth || bounds.height !== lockedHeight) {
+      targetWindow.setBounds(
+        {
+          ...bounds,
+          width: lockedWidth,
+          height: lockedHeight,
+        },
+        false,
+      );
+    }
+
     targetWindow.moveTop();
   }
 
@@ -223,7 +250,15 @@ export class WindowManager {
 
     const nextX = Math.round(screenX - activeDragState.offsetX);
     const nextY = Math.round(screenY - activeDragState.offsetY);
-    targetWindow.setPosition(nextX, nextY);
+    targetWindow.setBounds(
+      {
+        x: nextX,
+        y: nextY,
+        width: activeDragState.lockedWidth,
+        height: activeDragState.lockedHeight,
+      },
+      false,
+    );
   }
 
   endWindowDrag(targetWindow: BrowserWindow | null): void {
@@ -232,6 +267,24 @@ export class WindowManager {
     }
 
     if (this.activeDragState?.targetWindow === targetWindow) {
+      const activeDragState = this.activeDragState;
+      const bounds = targetWindow.isDestroyed() ? null : targetWindow.getBounds();
+      if (
+        bounds
+        && (
+          bounds.width !== activeDragState.lockedWidth
+          || bounds.height !== activeDragState.lockedHeight
+        )
+      ) {
+        targetWindow.setBounds(
+          {
+            ...bounds,
+            width: activeDragState.lockedWidth,
+            height: activeDragState.lockedHeight,
+          },
+          false,
+        );
+      }
       this.activeDragState = null;
     }
   }
@@ -555,21 +608,40 @@ export class WindowManager {
     const display = screen.getDisplayMatching(petBounds);
     const workArea = display.workArea;
     const overlayBounds = overlayWindow.getBounds();
+    const overlayWidth = PET_OVERLAY_WIDTH;
+    const overlayHeight = PET_OVERLAY_HEIGHT;
 
-    let x = petBounds.x - overlayBounds.width - PET_OVERLAY_GAP;
+    let x = petBounds.x - overlayWidth - PET_OVERLAY_GAP;
     if (x < workArea.x + PET_WINDOW_MARGIN) {
       x = petBounds.x + petBounds.width + PET_OVERLAY_GAP;
     }
 
-    const maxX = workArea.x + workArea.width - overlayBounds.width - PET_WINDOW_MARGIN;
+    const maxX = workArea.x + workArea.width - overlayWidth - PET_WINDOW_MARGIN;
     const minX = workArea.x + PET_WINDOW_MARGIN;
     x = Math.min(Math.max(x, minX), maxX);
 
-    let y = petBounds.y + petBounds.height - overlayBounds.height - 28;
-    const maxY = workArea.y + workArea.height - overlayBounds.height - PET_WINDOW_MARGIN;
+    let y = petBounds.y + petBounds.height - overlayHeight - 28;
+    const maxY = workArea.y + workArea.height - overlayHeight - PET_WINDOW_MARGIN;
     const minY = workArea.y + PET_WINDOW_MARGIN;
     y = Math.min(Math.max(y, minY), maxY);
 
-    overlayWindow.setPosition(Math.round(x), Math.round(y), false);
+    const targetX = Math.round(x);
+    const targetY = Math.round(y);
+    if (
+      overlayBounds.x !== targetX
+      || overlayBounds.y !== targetY
+      || overlayBounds.width !== overlayWidth
+      || overlayBounds.height !== overlayHeight
+    ) {
+      overlayWindow.setBounds(
+        {
+          x: targetX,
+          y: targetY,
+          width: overlayWidth,
+          height: overlayHeight,
+        },
+        false,
+      );
+    }
   }
 }
