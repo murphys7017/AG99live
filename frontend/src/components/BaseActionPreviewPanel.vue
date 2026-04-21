@@ -253,7 +253,7 @@ function roundTo(value: number, digits: number): number {
     <div class="settings-card__header">
       <div>
         <p class="settings-card__eyebrow">动作拆分预览</p>
-        <h2>基础动作原子池</h2>
+        <h2>参数动作原子池</h2>
       </div>
       <span class="settings-card__badge">{{ analysisBadgeLabel }}</span>
     </div>
@@ -463,7 +463,7 @@ function roundTo(value: number, digits: number): number {
     </template>
 
     <p v-else class="history-empty">
-      还没有拿到 base action library。请先连接适配器并完成模型同步。
+      还没有拿到 parameter action library。请先连接适配器并完成模型同步。
     </p>
   </article>
 </template>

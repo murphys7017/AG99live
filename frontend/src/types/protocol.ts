@@ -392,6 +392,86 @@ export interface BaseActionLibrary {
   atoms: BaseActionAtom[];
 }
 
+export interface ParameterActionCounterEntry {
+  name: string;
+  count: number;
+}
+
+export interface ParameterActionAnalysis {
+  status: string;
+  mode: string;
+  provider_id: string;
+  error?: string;
+}
+
+export interface ParameterActionParameterEntry {
+  parameter_id: string;
+  parameter_name: string;
+  group_name: string;
+  kind: string;
+  domain: string;
+  channels: string[];
+  candidate_atom_count: number;
+  selected_atom_count: number;
+  atom_ids: string[];
+}
+
+export interface ParameterActionAtom {
+  id: string;
+  name: string;
+  label: string;
+  parameter_id: string;
+  parameter_name: string;
+  group_name: string;
+  kind: string;
+  domain: string;
+  channels: string[];
+  primary_channel: string;
+  polarity: string;
+  semantic_polarity: string;
+  trait: string;
+  strength: string;
+  score: number;
+  source_component_id: string;
+  source_motion: string;
+  source_file: string;
+  source_group: string;
+  source_category: string;
+  source_tags: string[];
+  duration: number;
+  fps: number;
+  loop: boolean;
+  energy_score: number;
+  peak_abs_value: number;
+  peak_time_ratio: number;
+  active_ratio: number;
+  intensity: string;
+  window_index: number;
+  window_start_ratio: number;
+  window_end_ratio: number;
+  window_duration_ratio: number;
+}
+
+export interface ParameterActionLibrary {
+  schema_version: string;
+  extraction_mode: string;
+  analysis: ParameterActionAnalysis;
+  summary: {
+    motion_count: number;
+    driver_component_count: number;
+    candidate_atom_count: number;
+    selected_atom_count: number;
+    candidate_parameter_count: number;
+    selected_parameter_count: number;
+    domain_count: number;
+    channel_count: number;
+  };
+  domains: ParameterActionCounterEntry[];
+  channels: ParameterActionCounterEntry[];
+  parameters: ParameterActionParameterEntry[];
+  atoms: ParameterActionAtom[];
+}
+
 export interface ModelSummary {
   name: string;
   root_path: string;
@@ -402,6 +482,7 @@ export interface ModelSummary {
   parameter_scan: ParameterScanPayload;
   expression_scan: ExpressionScanPayload;
   base_action_library: BaseActionLibrary;
+  parameter_action_library: ParameterActionLibrary;
   motion_resource_pool: MotionResourcePool;
   constraints: {
     expressions: ExpressionConstraint[];

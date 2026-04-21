@@ -80,74 +80,87 @@ const aiState = computed(() => {
   return "offline";
 });
 
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter((item) => item.trim()))];
+}
+
+function formatLabelFromKey(key: string, fallback: string): string {
+  const normalized = key.trim();
+  if (!normalized) {
+    return fallback;
+  }
+  return normalized
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function resolvePrimaryChannel(
+  primaryChannel: string,
+  channels: string[],
+): string {
+  const normalizedPrimary = primaryChannel.trim();
+  if (normalizedPrimary) {
+    return normalizedPrimary;
+  }
+  const first = channels.find((item) => item.trim());
+  return first?.trim() || "parameter";
+}
+
 const baseActionPreview = computed<DesktopBaseActionPreview | null>(() => {
   const model = selectedModel.value;
-  const library = model?.base_action_library;
+  const library = model?.parameter_action_library;
   if (!library) {
     return null;
   }
 
-  return {
-    schemaVersion: library.schema_version,
-    extractionMode: library.extraction_mode,
-    focusChannels: [...library.focus_channels],
-    focusDomains: [...library.focus_domains],
-    ignoredDomains: [...library.ignored_domains],
-    summary: {
-      motionCount: library.summary.motion_count,
-      availableChannelCount: library.summary.available_channel_count,
-      selectedChannelCount: library.summary.selected_channel_count,
-      candidateComponentCount: library.summary.candidate_component_count,
-      selectedAtomCount: library.summary.selected_atom_count,
-      familyCount: library.summary.family_count,
-    },
-    analysis: {
-      status: library.analysis.status,
-      mode: library.analysis.mode,
-      providerId: library.analysis.provider_id,
-      inputSignature: library.analysis.input_signature ?? "",
-      latencyMs: library.analysis.latency_ms ?? 0,
-      cacheHit: library.analysis.cache_hit ?? false,
-      selectedChannelCount: library.analysis.selected_channel_count ?? 0,
-      error: library.analysis.error ?? "",
-      fallbackReason: library.analysis.fallback_reason ?? "",
-    },
-    families: library.families.map((family) => ({
-      name: family.name,
-      label: family.label,
-      channels: [...family.channels],
-      atomCount: family.atom_count,
-    })),
-    channels: library.channels.map((channel) => ({
-      name: channel.name,
-      label: channel.label,
-      family: channel.family,
-      familyLabel: channel.family_label,
-      domain: channel.domain,
-      available: channel.available,
-      candidateComponentCount: channel.candidate_component_count,
-      selectedAtomCount: channel.selected_atom_count,
-      polarityModes: [...channel.polarity_modes],
-      atomIds: [...channel.atom_ids],
-    })),
-    atoms: library.atoms
-      .map((atom) => ({
+  const channelCandidateCountByName = new Map<string, number>();
+  for (const item of library.channels) {
+    channelCandidateCountByName.set(
+      item.name,
+      Number.isFinite(item.count) ? item.count : 0,
+    );
+  }
+
+  const channelAtomIdsByName = new Map<string, string[]>();
+  const channelDomainByName = new Map<string, string>();
+  const channelPolarityByName = new Map<string, Set<string>>();
+  const mappedAtoms = library.atoms
+    .map((atom) => {
+      const atomChannels = uniqueStrings([...(atom.channels ?? [])]);
+      const channel = resolvePrimaryChannel(atom.primary_channel ?? "", atomChannels);
+      const polarity = atom.polarity || "neutral";
+      const channelLabel = formatLabelFromKey(channel, "parameter");
+      const family = atom.kind || "parameter";
+      const familyLabel = formatLabelFromKey(family, "parameter");
+
+      const nextAtomIds = channelAtomIdsByName.get(channel) ?? [];
+      nextAtomIds.push(atom.id);
+      channelAtomIdsByName.set(channel, nextAtomIds);
+      if (!channelDomainByName.get(channel)) {
+        channelDomainByName.set(channel, atom.domain || "other");
+      }
+      const polarityModes = channelPolarityByName.get(channel) ?? new Set<string>();
+      polarityModes.add(polarity);
+      channelPolarityByName.set(channel, polarityModes);
+
+      return {
         id: atom.id,
         name: atom.name,
         label: atom.label,
-        channel: atom.channel,
-        channelLabel: atom.channel_label,
-        family: atom.family,
-        familyLabel: atom.family_label,
-        domain: atom.domain,
-        polarity: atom.polarity,
-        semanticPolarity: atom.semantic_polarity,
+        channel,
+        channelLabel,
+        family,
+        familyLabel,
+        domain: atom.domain || "other",
+        polarity,
+        semanticPolarity: atom.semantic_polarity || polarity,
         trait: atom.trait,
         strength: atom.strength,
         score: atom.score,
         energyScore: atom.energy_score,
-        primaryParameterMatch: atom.primary_parameter_match,
-        channelPurity: atom.channel_purity,
+        primaryParameterMatch: true,
+        channelPurity: atomChannels.length ? 1 / atomChannels.length : 1,
         sourceMotion: atom.source_motion,
         sourceFile: atom.source_file,
         sourceGroup: atom.source_group,
@@ -157,16 +170,95 @@ const baseActionPreview = computed<DesktopBaseActionPreview | null>(() => {
         fps: atom.fps,
         loop: atom.loop,
         intensity: atom.intensity,
-      }))
-      .sort((left, right) => {
-        if (right.score !== left.score) {
-          return right.score - left.score;
-        }
-        if (right.energyScore !== left.energyScore) {
-          return right.energyScore - left.energyScore;
-        }
-        return left.id.localeCompare(right.id);
-      }),
+      };
+    })
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      if (right.energyScore !== left.energyScore) {
+        return right.energyScore - left.energyScore;
+      }
+      return left.id.localeCompare(right.id);
+    });
+
+  const orderedChannelNames = uniqueStrings([
+    ...library.channels.map((item) => item.name),
+    ...[...channelAtomIdsByName.keys()],
+  ]);
+  const channels = orderedChannelNames.map((channelName) => {
+    const atomIds = channelAtomIdsByName.get(channelName) ?? [];
+    return {
+      name: channelName,
+      label: formatLabelFromKey(channelName, "parameter"),
+      family: "parameter",
+      familyLabel: "parameter",
+      domain: channelDomainByName.get(channelName) ?? "other",
+      available: true,
+      candidateComponentCount: channelCandidateCountByName.get(channelName) ?? atomIds.length,
+      selectedAtomCount: atomIds.length,
+      polarityModes: [...(channelPolarityByName.get(channelName) ?? new Set<string>())],
+      atomIds: [...atomIds],
+    };
+  });
+
+  const familyAccumulator = new Map<
+    string,
+    { channels: Set<string>; atomCount: number }
+  >();
+  for (const parameter of library.parameters) {
+    const kind = (parameter.kind || "parameter").trim() || "parameter";
+    const current = familyAccumulator.get(kind) ?? {
+      channels: new Set<string>(),
+      atomCount: 0,
+    };
+    for (const channel of parameter.channels ?? []) {
+      if (channel.trim()) {
+        current.channels.add(channel.trim());
+      }
+    }
+    current.atomCount += Number(parameter.selected_atom_count || 0);
+    familyAccumulator.set(kind, current);
+  }
+  const families = [...familyAccumulator.entries()].map(([name, value]) => ({
+    name,
+    label: formatLabelFromKey(name, "parameter"),
+    channels: [...value.channels],
+    atomCount: value.atomCount,
+  }));
+
+  const selectedChannelCount = channels.filter(
+    (channel) => channel.selectedAtomCount > 0,
+  ).length;
+
+  return {
+    schemaVersion: library.schema_version,
+    extractionMode: library.extraction_mode,
+    focusChannels: library.channels.map((item) => item.name),
+    focusDomains: library.domains.map((item) => item.name),
+    ignoredDomains: [],
+    summary: {
+      motionCount: library.summary.motion_count,
+      availableChannelCount: channels.length,
+      selectedChannelCount,
+      candidateComponentCount: library.summary.driver_component_count,
+      selectedAtomCount: library.summary.selected_atom_count,
+      familyCount: library.summary.selected_parameter_count,
+    },
+    analysis: {
+      status: library.analysis.status,
+      mode: library.analysis.mode,
+      providerId: library.analysis.provider_id,
+      inputSignature: "",
+      latencyMs: 0,
+      cacheHit: false,
+      selectedChannelCount,
+      error: library.analysis.error ?? "",
+      fallbackReason: "",
+    },
+    families,
+    channels,
+    atoms: mappedAtoms,
   };
 });
 
