@@ -300,6 +300,98 @@ export interface MotionResourcePool {
   }>;
 }
 
+export interface BaseActionAnalysis {
+  status: string;
+  mode: string;
+  provider_id: string;
+  input_signature?: string;
+  latency_ms?: number;
+  cache_hit?: boolean;
+  selected_channel_count?: number;
+  error?: string;
+  fallback_reason?: string;
+}
+
+export interface BaseActionFamily {
+  name: string;
+  label: string;
+  channels: string[];
+  atom_ids: string[];
+  atom_count: number;
+}
+
+export interface BaseActionChannel {
+  name: string;
+  label: string;
+  family: string;
+  family_label: string;
+  domain: string;
+  available: boolean;
+  primary_parameter_id: string;
+  primary_parameter_name: string;
+  candidate_parameter_ids: string[];
+  candidate_component_count: number;
+  selected_atom_count: number;
+  polarity_modes: string[];
+  atom_ids: string[];
+}
+
+export interface BaseActionAtom {
+  id: string;
+  name: string;
+  label: string;
+  channel: string;
+  channel_label: string;
+  family: string;
+  family_label: string;
+  domain: string;
+  polarity: string;
+  semantic_polarity: string;
+  trait: string;
+  strength: string;
+  score: number;
+  primary_parameter_match: boolean;
+  channel_purity: number;
+  primary_parameter_id: string;
+  parameter_id: string;
+  parameter_name: string;
+  group_name: string;
+  source_component_id: string;
+  source_motion: string;
+  source_file: string;
+  source_group: string;
+  source_category: string;
+  source_tags: string[];
+  duration: number;
+  fps: number;
+  loop: boolean;
+  energy_score: number;
+  peak_abs_value: number;
+  peak_time_ratio: number;
+  active_ratio: number;
+  intensity: string;
+}
+
+export interface BaseActionLibrary {
+  schema_version: string;
+  extraction_mode: string;
+  analysis: BaseActionAnalysis;
+  focus_channels: string[];
+  focus_domains: string[];
+  ignored_domains: string[];
+  summary: {
+    motion_count: number;
+    available_channel_count: number;
+    selected_channel_count: number;
+    candidate_component_count: number;
+    selected_atom_count: number;
+    family_count: number;
+  };
+  families: BaseActionFamily[];
+  channels: BaseActionChannel[];
+  atoms: BaseActionAtom[];
+}
+
 export interface ModelSummary {
   name: string;
   root_path: string;
@@ -309,6 +401,7 @@ export interface ModelSummary {
   resource_scan: ResourceScanPayload;
   parameter_scan: ParameterScanPayload;
   expression_scan: ExpressionScanPayload;
+  base_action_library: BaseActionLibrary;
   motion_resource_pool: MotionResourcePool;
   constraints: {
     expressions: ExpressionConstraint[];

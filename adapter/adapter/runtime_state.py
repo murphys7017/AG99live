@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 from copy import deepcopy
 from typing import Any, Callable
 
@@ -12,6 +14,15 @@ from .client_profile import (
     DEFAULT_CLIENT_UID,
     normalize_client_nickname,
     normalize_client_uid,
+)
+from .base_action_llm_filter import (
+    ACTION_FILTER_SYSTEM_PROMPT,
+    ActionFilterDecisionError,
+    apply_action_filter_selection,
+    build_action_filter_prompt,
+    build_action_filter_signature,
+    count_selected_channels,
+    parse_action_filter_decision,
 )
 from .live2d_scan import scan_live2d_models
 from .payload_builder import build_system_model_sync
@@ -43,6 +54,10 @@ class RuntimeState:
 
         self.stt_provider_id = ""
         self.motion_analysis_provider_id = ""
+        self.enable_action_llm_filter = True
+        self.action_llm_filter_timeout_seconds = 12.0
+        self.action_llm_filter_min_selected_channels = 3
+        self.action_llm_filter_max_atoms_per_channel = 2
         self.vad_model = "silero_vad"
         self.vad_config: dict[str, Any] = {}
         self.model_info: dict[str, Any] = {}
@@ -50,6 +65,7 @@ class RuntimeState:
         self.default_persona: dict[str, Any] | None = None
         self.selected_stt_provider: STTProvider | None = None
         self.selected_motion_analysis_provider: Provider | None = None
+        self._base_action_filter_cache: dict[str, dict[str, Any]] = {}
         self.last_sent_model_signature: str | None = None
 
     async def load_default_persona(self) -> None:
@@ -118,6 +134,21 @@ class RuntimeState:
             self.plugin_config,
             "motion_analysis_provider_id",
             "",
+        )
+        self.enable_action_llm_filter = bool(
+            _plugin_config_get(self.plugin_config, "enable_action_llm_filter", True)
+        )
+        self.action_llm_filter_timeout_seconds = max(
+            float(_plugin_config_get(self.plugin_config, "action_llm_filter_timeout_seconds", 12.0)),
+            2.0,
+        )
+        self.action_llm_filter_min_selected_channels = max(
+            int(_plugin_config_get(self.plugin_config, "action_llm_filter_min_selected_channels", 3)),
+            1,
+        )
+        self.action_llm_filter_max_atoms_per_channel = max(
+            int(_plugin_config_get(self.plugin_config, "action_llm_filter_max_atoms_per_channel", 2)),
+            1,
         )
         self.vad_model = _plugin_config_get(self.plugin_config, "vad_model", "silero_vad")
         self.vad_config = {
@@ -208,6 +239,8 @@ class RuntimeState:
             self.selected_motion_analysis_provider = None
             self.load_selected_providers()
 
+        await self._refresh_base_action_analysis_async()
+
         return vad_changed
 
     def load_selected_providers(self) -> None:
@@ -287,6 +320,205 @@ class RuntimeState:
             sort_keys=True,
             ensure_ascii=False,
         )
+
+    async def _refresh_base_action_analysis_async(self) -> None:
+        models = [
+            model
+            for model in self.model_info.get("models", [])
+            if isinstance(model, dict)
+        ]
+        if not models:
+            return
+
+        if not self.enable_action_llm_filter:
+            for model in models:
+                self._set_base_action_analysis(
+                    model,
+                    status="disabled",
+                    mode="rule_seed",
+                    provider_id="",
+                    input_signature="",
+                    latency_ms=0,
+                    cache_hit=False,
+                    error="",
+                    fallback_reason="disabled_by_config",
+                )
+            return
+
+        provider = self.selected_motion_analysis_provider
+        provider_id = self._get_provider_id(provider)
+        if provider is None:
+            for model in models:
+                self._set_base_action_analysis(
+                    model,
+                    status="fallback",
+                    mode="rule_seed",
+                    provider_id="",
+                    input_signature="",
+                    latency_ms=0,
+                    cache_hit=False,
+                    error="",
+                    fallback_reason="provider_unavailable",
+                )
+            return
+
+        for model in models:
+            base_action_library = model.get("base_action_library")
+            if not isinstance(base_action_library, dict):
+                continue
+
+            input_signature = build_action_filter_signature(base_action_library)
+            cache_key = (
+                f"{provider_id}:{input_signature}:"
+                f"{self.action_llm_filter_max_atoms_per_channel}"
+            )
+            cached_result = self._base_action_filter_cache.get(cache_key)
+            if cached_result is not None:
+                selected_atom_ids_by_channel = dict(
+                    cached_result.get("selected_atom_ids_by_channel") or {}
+                )
+                selected_channel_count = int(cached_result.get("selected_channel_count") or 0)
+                apply_action_filter_selection(
+                    base_action_library,
+                    selected_atom_ids_by_channel=selected_atom_ids_by_channel,
+                    analysis={
+                        "status": "filtered",
+                        "mode": "llm_strict_cached",
+                        "provider_id": provider_id,
+                        "input_signature": input_signature,
+                        "latency_ms": 0,
+                        "cache_hit": True,
+                        "selected_channel_count": selected_channel_count,
+                        "error": "",
+                        "fallback_reason": "",
+                    },
+                )
+                continue
+
+            started_at = time.perf_counter()
+            try:
+                prompt = build_action_filter_prompt(
+                    base_action_library,
+                    max_atoms_per_channel=self.action_llm_filter_max_atoms_per_channel,
+                )
+                response = await asyncio.wait_for(
+                    provider.text_chat(
+                        prompt=prompt,
+                        system_prompt=ACTION_FILTER_SYSTEM_PROMPT,
+                    ),
+                    timeout=self.action_llm_filter_timeout_seconds,
+                )
+                completion_text = str(response.completion_text or "").strip()
+                if not completion_text:
+                    raise ActionFilterDecisionError(
+                        "Motion analysis provider returned empty completion_text."
+                    )
+
+                selected_atom_ids_by_channel = parse_action_filter_decision(
+                    completion_text,
+                    base_action_library=base_action_library,
+                    max_atoms_per_channel=self.action_llm_filter_max_atoms_per_channel,
+                )
+                selected_channel_count = count_selected_channels(
+                    selected_atom_ids_by_channel
+                )
+                if selected_channel_count < self.action_llm_filter_min_selected_channels:
+                    raise ActionFilterDecisionError(
+                        "Selected channels are below configured minimum "
+                        f"({selected_channel_count} < {self.action_llm_filter_min_selected_channels})."
+                    )
+
+                latency_ms = int((time.perf_counter() - started_at) * 1000)
+                apply_action_filter_selection(
+                    base_action_library,
+                    selected_atom_ids_by_channel=selected_atom_ids_by_channel,
+                    analysis={
+                        "status": "filtered",
+                        "mode": "llm_strict",
+                        "provider_id": provider_id,
+                        "input_signature": input_signature,
+                        "latency_ms": latency_ms,
+                        "cache_hit": False,
+                        "selected_channel_count": selected_channel_count,
+                        "error": "",
+                        "fallback_reason": "",
+                    },
+                )
+                self._base_action_filter_cache[cache_key] = {
+                    "selected_atom_ids_by_channel": selected_atom_ids_by_channel,
+                    "selected_channel_count": selected_channel_count,
+                }
+            except asyncio.TimeoutError:
+                self._set_base_action_analysis(
+                    model,
+                    status="fallback",
+                    mode="rule_seed",
+                    provider_id=provider_id,
+                    input_signature=input_signature,
+                    latency_ms=int((time.perf_counter() - started_at) * 1000),
+                    cache_hit=False,
+                    error="action_filter_timeout",
+                    fallback_reason="timeout",
+                )
+            except Exception as exc:
+                self._set_base_action_analysis(
+                    model,
+                    status="fallback",
+                    mode="rule_seed",
+                    provider_id=provider_id,
+                    input_signature=input_signature,
+                    latency_ms=int((time.perf_counter() - started_at) * 1000),
+                    cache_hit=False,
+                    error=str(exc),
+                    fallback_reason="llm_filter_failed",
+                )
+                logger.warning(
+                    "Failed to apply LLM strict filter for base action library "
+                    "(model=%s, provider=%s): %s",
+                    model.get("name", "<unknown>"),
+                    provider_id or "<default>",
+                    exc,
+                )
+
+    @staticmethod
+    def _get_provider_id(provider: Provider | None) -> str:
+        if provider is None:
+            return ""
+        try:
+            meta = provider.meta()
+        except Exception:
+            return ""
+        return str(getattr(meta, "id", "") or "").strip()
+
+    def _set_base_action_analysis(
+        self,
+        model: dict[str, Any],
+        *,
+        status: str,
+        mode: str,
+        provider_id: str,
+        input_signature: str,
+        latency_ms: int,
+        cache_hit: bool,
+        error: str,
+        fallback_reason: str,
+    ) -> None:
+        base_action_library = model.get("base_action_library")
+        if not isinstance(base_action_library, dict):
+            return
+        base_action_library["analysis"] = {
+            "status": status,
+            "mode": mode,
+            "provider_id": provider_id,
+            "input_signature": input_signature,
+            "latency_ms": max(int(latency_ms), 0),
+            "cache_hit": bool(cache_hit),
+            "selected_channel_count": int(
+                base_action_library.get("summary", {}).get("selected_channel_count", 0)
+            ),
+            "error": error,
+            "fallback_reason": fallback_reason,
+        }
 
     @staticmethod
     def _clone_plugin_config(config: Any) -> Any:

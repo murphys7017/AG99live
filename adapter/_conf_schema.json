@@ -43,6 +43,26 @@
     "default": "",
     "_special": "select_provider"
   },
+  "enable_action_llm_filter": {
+    "description": "是否启用基础动作库 LLM 严格筛选。关闭后仅使用规则候选（rule seed）。",
+    "type": "bool",
+    "default": true
+  },
+  "action_llm_filter_timeout_seconds": {
+    "description": "基础动作库 LLM 筛选超时时间（秒）。",
+    "type": "float",
+    "default": 12.0
+  },
+  "action_llm_filter_min_selected_channels": {
+    "description": "LLM 筛选最少需要覆盖的通道数。低于该值将回退到规则候选。",
+    "type": "int",
+    "default": 3
+  },
+  "action_llm_filter_max_atoms_per_channel": {
+    "description": "LLM 每个通道最多保留的基础动作原子数量。",
+    "type": "int",
+    "default": 2
+  },
   "vad_model": {
     "description": "前端原始音频断句使用的 VAD 模型。",
     "type": "string",

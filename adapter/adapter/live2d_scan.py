@@ -141,6 +141,139 @@ SPECIAL_EXPRESSION_KEYWORDS = {
     "eyemask",
 }
 
+BASE_ACTION_LIBRARY_SCHEMA_VERSION = "base_action_library.v1"
+
+CORE_BASE_ACTION_CHANNEL_SPECS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "head_yaw",
+        "label": "Head Yaw",
+        "family": "head_pose",
+        "family_label": "Head Pose",
+        "domain": "head",
+        "max_atoms": 6,
+    },
+    {
+        "name": "head_pitch",
+        "label": "Head Pitch",
+        "family": "head_pose",
+        "family_label": "Head Pose",
+        "domain": "head",
+        "max_atoms": 6,
+    },
+    {
+        "name": "head_roll",
+        "label": "Head Roll",
+        "family": "head_pose",
+        "family_label": "Head Pose",
+        "domain": "head",
+        "max_atoms": 6,
+    },
+    {
+        "name": "body_yaw",
+        "label": "Body Yaw",
+        "family": "body_pose",
+        "family_label": "Body Pose",
+        "domain": "body",
+        "max_atoms": 5,
+    },
+    {
+        "name": "body_roll",
+        "label": "Body Roll",
+        "family": "body_pose",
+        "family_label": "Body Pose",
+        "domain": "body",
+        "max_atoms": 5,
+    },
+    {
+        "name": "gaze_x",
+        "label": "Gaze X",
+        "family": "gaze",
+        "family_label": "Gaze",
+        "domain": "gaze",
+        "max_atoms": 5,
+    },
+    {
+        "name": "gaze_y",
+        "label": "Gaze Y",
+        "family": "gaze",
+        "family_label": "Gaze",
+        "domain": "gaze",
+        "max_atoms": 5,
+    },
+    {
+        "name": "eye_open_left",
+        "label": "Eye Open Left",
+        "family": "eye",
+        "family_label": "Eyes",
+        "domain": "eye",
+        "max_atoms": 4,
+    },
+    {
+        "name": "eye_open_right",
+        "label": "Eye Open Right",
+        "family": "eye",
+        "family_label": "Eyes",
+        "domain": "eye",
+        "max_atoms": 4,
+    },
+    {
+        "name": "eye_smile_left",
+        "label": "Eye Smile Left",
+        "family": "eye",
+        "family_label": "Eyes",
+        "domain": "eye",
+        "max_atoms": 4,
+    },
+    {
+        "name": "eye_smile_right",
+        "label": "Eye Smile Right",
+        "family": "eye",
+        "family_label": "Eyes",
+        "domain": "eye",
+        "max_atoms": 4,
+    },
+    {
+        "name": "brow_bias",
+        "label": "Brow Bias",
+        "family": "brow",
+        "family_label": "Brows",
+        "domain": "brow",
+        "max_atoms": 5,
+    },
+    {
+        "name": "mouth_smile",
+        "label": "Mouth Smile",
+        "family": "mouth",
+        "family_label": "Mouth",
+        "domain": "mouth",
+        "max_atoms": 5,
+    },
+    {
+        "name": "mouth_open",
+        "label": "Mouth Open",
+        "family": "mouth",
+        "family_label": "Mouth",
+        "domain": "mouth",
+        "max_atoms": 5,
+    },
+    {
+        "name": "mouth_x",
+        "label": "Mouth X",
+        "family": "mouth",
+        "family_label": "Mouth",
+        "domain": "mouth",
+        "max_atoms": 4,
+    },
+    {
+        "name": "breath",
+        "label": "Breath",
+        "family": "breath",
+        "family_label": "Breath",
+        "domain": "breath",
+        "max_atoms": 3,
+    },
+)
+
 
 def scan_live2d_models(
     *,
@@ -219,6 +352,21 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
         parameter_lookup=parameter_lookup,
         motion_catalog=motion_catalog,
     )
+    try:
+        base_action_library = _build_base_action_library(
+            parameter_scan=parameter_scan,
+            motions=motions,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to build base action library for model `%s`, fallback to empty seed: %s",
+            model_dir.name,
+            exc,
+        )
+        base_action_library = _build_empty_base_action_library(
+            parameter_scan=parameter_scan,
+            error=str(exc),
+        )
     motion_resource_pool = build_motion_resource_pool(motions=motions)
     for motion in motions:
         motion.pop("components", None)
@@ -233,6 +381,7 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
         "resource_scan": resource_scan,
         "parameter_scan": parameter_scan,
         "expression_scan": expression_scan,
+        "base_action_library": base_action_library,
         "motion_resource_pool": motion_resource_pool,
         "constraints": {
             "expressions": expressions,
@@ -681,6 +830,479 @@ def _scan_motions(
             )
 
     return motions
+
+
+def _build_base_action_library(
+    *,
+    parameter_scan: dict[str, Any],
+    motions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    standard_channels = parameter_scan.get("standard_channels", {})
+    channel_entries: list[dict[str, Any]] = []
+    atoms: list[dict[str, Any]] = []
+    family_entries: dict[str, dict[str, Any]] = {}
+    channel_rank = {
+        spec["name"]: index for index, spec in enumerate(CORE_BASE_ACTION_CHANNEL_SPECS)
+    }
+    total_candidates = 0
+    selected_channel_count = 0
+
+    # Always pre-build family records from channel specs so family/channel references are closed.
+    for spec in CORE_BASE_ACTION_CHANNEL_SPECS:
+        family_payload = family_entries.setdefault(
+            str(spec["family"]),
+            {
+                "name": spec["family"],
+                "label": spec["family_label"],
+                "channels": [],
+                "atom_ids": [],
+            },
+        )
+        channel_name = str(spec["name"])
+        if channel_name not in family_payload["channels"]:
+            family_payload["channels"].append(channel_name)
+
+    for spec in CORE_BASE_ACTION_CHANNEL_SPECS:
+        channel_name = spec["name"]
+        standard_entry = standard_channels.get(channel_name, {})
+        available = bool(standard_entry.get("available"))
+        primary_parameter_id = str(standard_entry.get("primary_parameter_id") or "").strip()
+        selected_candidates: list[dict[str, Any]] = []
+        candidate_count = 0
+        atom_ids: list[str] = []
+
+        if available:
+            candidates = _collect_base_action_candidates(
+                motions=motions,
+                channel_name=channel_name,
+                primary_parameter_id=primary_parameter_id,
+                expected_domain=str(spec["domain"]),
+            )
+            candidate_count = len(candidates)
+            total_candidates += candidate_count
+            selected_candidates = _select_base_action_candidates(
+                candidates=candidates,
+                max_atoms=int(spec.get("max_atoms") or 4),
+            )
+
+        for rank, candidate in enumerate(selected_candidates, start=1):
+            atom = _build_base_action_atom(
+                spec=spec,
+                standard_entry=standard_entry,
+                candidate=candidate,
+                rank=rank,
+            )
+            atoms.append(atom)
+            atom_ids.append(atom["id"])
+
+            family_payload = family_entries.setdefault(
+                str(spec["family"]),
+                {
+                    "name": spec["family"],
+                    "label": spec["family_label"],
+                    "channels": [],
+                    "atom_ids": [],
+                },
+            )
+            family_payload["atom_ids"].append(atom["id"])
+        if atom_ids:
+            selected_channel_count += 1
+
+        polarity_modes = sorted(
+            {candidate["polarity"] for candidate in selected_candidates if candidate.get("polarity")}
+        )
+
+        channel_entries.append(
+            {
+                "name": channel_name,
+                "label": spec["label"],
+                "family": spec["family"],
+                "family_label": spec["family_label"],
+                "domain": spec["domain"],
+                "available": available,
+                "primary_parameter_id": primary_parameter_id,
+                "primary_parameter_name": str(
+                    standard_entry.get("primary_parameter_name") or ""
+                ).strip(),
+                "candidate_parameter_ids": list(
+                    standard_entry.get("candidate_parameter_ids", [])
+                ),
+                "candidate_component_count": candidate_count,
+                "selected_atom_count": len(atom_ids),
+                "polarity_modes": polarity_modes,
+                "atom_ids": atom_ids,
+            }
+        )
+
+    family_rank = {
+        spec["family"]: index for index, spec in enumerate(CORE_BASE_ACTION_CHANNEL_SPECS)
+    }
+    families = sorted(
+        (
+            {
+                "name": payload["name"],
+                "label": payload["label"],
+                "channels": sorted(
+                    payload["channels"],
+                    key=lambda channel_name: channel_rank.get(channel_name, 999),
+                ),
+                "atom_ids": payload["atom_ids"],
+                "atom_count": len(payload["atom_ids"]),
+            }
+            for payload in family_entries.values()
+        ),
+        key=lambda item: (family_rank.get(item["name"], 999), item["name"]),
+    )
+
+    return {
+        "schema_version": BASE_ACTION_LIBRARY_SCHEMA_VERSION,
+        "extraction_mode": "rule_seed",
+        "analysis": {
+            "status": "pending",
+            "mode": "rule_seed",
+            "provider_id": "",
+        },
+        "focus_channels": [spec["name"] for spec in CORE_BASE_ACTION_CHANNEL_SPECS],
+        "focus_domains": sorted({spec["domain"] for spec in CORE_BASE_ACTION_CHANNEL_SPECS}),
+        "ignored_domains": ["hair", "accessory", "limb", "physics", "marker", "other"],
+        "summary": {
+            "motion_count": len(motions),
+            "available_channel_count": len(
+                [item for item in channel_entries if item["available"]]
+            ),
+            "selected_channel_count": selected_channel_count,
+            "candidate_component_count": total_candidates,
+            "selected_atom_count": len(atoms),
+            "family_count": len(families),
+        },
+        "families": families,
+        "channels": channel_entries,
+        "atoms": atoms,
+    }
+
+
+def _build_empty_base_action_library(
+    *,
+    parameter_scan: dict[str, Any],
+    error: str,
+) -> dict[str, Any]:
+    standard_channels = parameter_scan.get("standard_channels", {})
+    channel_rank = {
+        spec["name"]: index for index, spec in enumerate(CORE_BASE_ACTION_CHANNEL_SPECS)
+    }
+    family_entries: dict[str, dict[str, Any]] = {}
+    channel_entries: list[dict[str, Any]] = []
+
+    for spec in CORE_BASE_ACTION_CHANNEL_SPECS:
+        family_payload = family_entries.setdefault(
+            str(spec["family"]),
+            {
+                "name": spec["family"],
+                "label": spec["family_label"],
+                "channels": [],
+                "atom_ids": [],
+            },
+        )
+        channel_name = str(spec["name"])
+        if channel_name not in family_payload["channels"]:
+            family_payload["channels"].append(channel_name)
+
+        standard_entry = standard_channels.get(channel_name, {})
+        channel_entries.append(
+            {
+                "name": channel_name,
+                "label": spec["label"],
+                "family": spec["family"],
+                "family_label": spec["family_label"],
+                "domain": spec["domain"],
+                "available": bool(standard_entry.get("available")),
+                "primary_parameter_id": str(
+                    standard_entry.get("primary_parameter_id") or ""
+                ).strip(),
+                "primary_parameter_name": str(
+                    standard_entry.get("primary_parameter_name") or ""
+                ).strip(),
+                "candidate_parameter_ids": list(
+                    standard_entry.get("candidate_parameter_ids", [])
+                ),
+                "candidate_component_count": 0,
+                "selected_atom_count": 0,
+                "polarity_modes": [],
+                "atom_ids": [],
+            }
+        )
+
+    family_rank = {
+        spec["family"]: index for index, spec in enumerate(CORE_BASE_ACTION_CHANNEL_SPECS)
+    }
+    families = sorted(
+        (
+            {
+                "name": payload["name"],
+                "label": payload["label"],
+                "channels": sorted(
+                    payload["channels"],
+                    key=lambda channel_name: channel_rank.get(channel_name, 999),
+                ),
+                "atom_ids": [],
+                "atom_count": 0,
+            }
+            for payload in family_entries.values()
+        ),
+        key=lambda item: (family_rank.get(item["name"], 999), item["name"]),
+    )
+
+    return {
+        "schema_version": BASE_ACTION_LIBRARY_SCHEMA_VERSION,
+        "extraction_mode": "rule_seed",
+        "analysis": {
+            "status": "failed",
+            "mode": "rule_seed",
+            "provider_id": "",
+            "error": error,
+        },
+        "focus_channels": [spec["name"] for spec in CORE_BASE_ACTION_CHANNEL_SPECS],
+        "focus_domains": sorted({spec["domain"] for spec in CORE_BASE_ACTION_CHANNEL_SPECS}),
+        "ignored_domains": ["hair", "accessory", "limb", "physics", "marker", "other"],
+        "summary": {
+            "motion_count": 0,
+            "available_channel_count": len(
+                [item for item in channel_entries if item["available"]]
+            ),
+            "selected_channel_count": 0,
+            "candidate_component_count": 0,
+            "selected_atom_count": 0,
+            "family_count": len(families),
+        },
+        "families": families,
+        "channels": channel_entries,
+        "atoms": [],
+    }
+
+
+def _collect_base_action_candidates(
+    *,
+    motions: list[dict[str, Any]],
+    channel_name: str,
+    primary_parameter_id: str,
+    expected_domain: str,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for motion in motions:
+        for component in motion.get("components", []):
+            if not isinstance(component, dict):
+                continue
+            if component.get("engine_role") != "driver":
+                continue
+            if channel_name not in component.get("channels", []):
+                continue
+            if str(component.get("domain") or "").strip() != expected_domain:
+                continue
+            if str(component.get("strength") or "").strip() == "none":
+                continue
+
+            channel_purity = 1.0 / max(len(component.get("channels", [])), 1)
+            primary_parameter_match = bool(
+                primary_parameter_id
+                and str(component.get("parameter_id") or "").strip() == primary_parameter_id
+            )
+            score = _score_base_action_candidate(
+                component=component,
+                primary_parameter_match=primary_parameter_match,
+                channel_purity=channel_purity,
+            )
+            polarity = _infer_base_action_polarity(component=component, channel_name=channel_name)
+            candidates.append(
+                {
+                    "component": component,
+                    "motion": motion,
+                    "score": score,
+                    "channel_purity": round(channel_purity, 4),
+                    "primary_parameter_match": primary_parameter_match,
+                    "polarity": polarity,
+                    "semantic_polarity": _map_semantic_polarity(
+                        channel_name=channel_name,
+                        polarity=polarity,
+                    ),
+                }
+            )
+
+    return sorted(
+        candidates,
+        key=lambda item: (
+            -float(item["score"]),
+            -float(item["component"].get("energy_score") or 0.0),
+            str(item["component"].get("id") or ""),
+        ),
+    )
+
+
+def _select_base_action_candidates(
+    *,
+    candidates: list[dict[str, Any]],
+    max_atoms: int,
+) -> list[dict[str, Any]]:
+    if not candidates or max_atoms <= 0:
+        return []
+
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for candidate in candidates:
+        component = candidate["component"]
+        grouped[(candidate["polarity"], str(component.get("trait") or "unknown"))].append(candidate)
+
+    selected: list[dict[str, Any]] = []
+    selected_ids: set[str] = set()
+    per_bucket_limit = 2 if max_atoms >= 5 else 1
+
+    for bucket in sorted(grouped.keys()):
+        for candidate in grouped[bucket][:per_bucket_limit]:
+            component_id = str(candidate["component"].get("id") or "")
+            if component_id in selected_ids:
+                continue
+            selected.append(candidate)
+            selected_ids.add(component_id)
+
+    if len(selected) < max_atoms:
+        for candidate in candidates:
+            component_id = str(candidate["component"].get("id") or "")
+            if component_id in selected_ids:
+                continue
+            selected.append(candidate)
+            selected_ids.add(component_id)
+            if len(selected) >= max_atoms:
+                break
+
+    return sorted(
+        selected[:max_atoms],
+        key=lambda item: (
+            -float(item["score"]),
+            -float(item["component"].get("energy_score") or 0.0),
+            str(item["component"].get("id") or ""),
+        ),
+    )
+
+
+def _build_base_action_atom(
+    *,
+    spec: dict[str, Any],
+    standard_entry: dict[str, Any],
+    candidate: dict[str, Any],
+    rank: int,
+) -> dict[str, Any]:
+    component = candidate["component"]
+    motion = candidate["motion"]
+    polarity = str(candidate["polarity"])
+    semantic_polarity = str(candidate["semantic_polarity"])
+    trait = str(component.get("trait") or "unknown")
+    atom_id = f"{spec['name']}.{polarity}.{trait}.{rank:02d}"
+
+    return {
+        "id": atom_id,
+        "name": f"{spec['name']}_{semantic_polarity}_{trait}",
+        "label": f"{spec['label']} {semantic_polarity} {trait}",
+        "channel": spec["name"],
+        "channel_label": spec["label"],
+        "family": spec["family"],
+        "family_label": spec["family_label"],
+        "domain": spec["domain"],
+        "polarity": polarity,
+        "semantic_polarity": semantic_polarity,
+        "trait": trait,
+        "strength": str(component.get("strength") or "none"),
+        "score": round(float(candidate["score"]), 4),
+        "primary_parameter_match": bool(candidate["primary_parameter_match"]),
+        "channel_purity": float(candidate["channel_purity"]),
+        "primary_parameter_id": str(standard_entry.get("primary_parameter_id") or "").strip(),
+        "parameter_id": str(component.get("parameter_id") or "").strip(),
+        "parameter_name": str(component.get("parameter_name") or "").strip(),
+        "group_name": str(component.get("group_name") or "").strip(),
+        "source_component_id": str(component.get("id") or "").strip(),
+        "source_motion": str(component.get("source_motion") or "").strip(),
+        "source_file": str(component.get("source_file") or "").strip(),
+        "source_group": str(component.get("source_group") or "").strip(),
+        "source_category": str(component.get("source_category") or "").strip(),
+        "source_tags": list(motion.get("catalog_tags", [])),
+        "duration": round(float(component.get("duration") or 0.0), 4),
+        "fps": round(float(component.get("fps") or 0.0), 3),
+        "loop": bool(component.get("loop")),
+        "energy_score": round(float(component.get("energy_score") or 0.0), 4),
+        "peak_abs_value": round(float(component.get("peak_abs_value") or 0.0), 4),
+        "peak_time_ratio": round(float(component.get("peak_time_ratio") or 0.0), 4),
+        "active_ratio": round(float(component.get("active_ratio") or 0.0), 4),
+        "intensity": str(motion.get("catalog_intensity") or "").strip(),
+    }
+
+
+def _score_base_action_candidate(
+    *,
+    component: dict[str, Any],
+    primary_parameter_match: bool,
+    channel_purity: float,
+) -> float:
+    strength_score = {
+        "none": 0.0,
+        "low": 0.35,
+        "medium": 0.7,
+        "high": 1.0,
+    }.get(str(component.get("strength") or "none"), 0.0)
+    trait_score = {
+        "oscillate": 1.0,
+        "sustain": 0.95,
+        "pulse": 0.82,
+        "ramp": 0.72,
+        "hold": 0.65,
+    }.get(str(component.get("trait") or "unknown"), 0.6)
+    loop_bonus = (
+        0.08
+        if bool(component.get("loop")) and str(component.get("domain") or "") == "breath"
+        else 0.0
+    )
+    return round(
+        (float(component.get("energy_score") or 0.0) * 0.45)
+        + (channel_purity * 0.2)
+        + ((1.0 if primary_parameter_match else 0.0) * 0.2)
+        + (strength_score * 0.1)
+        + (trait_score * 0.05)
+        + loop_bonus,
+        4,
+    )
+
+
+def _infer_base_action_polarity(
+    *,
+    component: dict[str, Any],
+    channel_name: str,
+) -> str:
+    if channel_name == "breath":
+        return "cyclical"
+
+    value_profile = component.get("value_profile", {})
+    baseline = float(value_profile.get("baseline") or 0.0)
+    positive_delta = max(float(value_profile.get("max") or 0.0) - baseline, 0.0)
+    negative_delta = max(baseline - float(value_profile.get("min") or 0.0), 0.0)
+
+    if positive_delta <= 0.03 and negative_delta <= 0.03:
+        return "neutral"
+    if positive_delta >= max(negative_delta * 1.25, 0.04):
+        return "positive"
+    if negative_delta >= max(positive_delta * 1.25, 0.04):
+        return "negative"
+    return "balanced"
+
+
+def _map_semantic_polarity(*, channel_name: str, polarity: str) -> str:
+    if polarity in {"neutral", "balanced", "cyclical"}:
+        return {
+            "neutral": "neutral",
+            "balanced": "balanced",
+            "cyclical": "cycle",
+        }[polarity]
+
+    if channel_name.startswith("eye_open") or channel_name == "mouth_open":
+        return "open_more" if polarity == "positive" else "close_more"
+    if channel_name.startswith("eye_smile") or channel_name == "mouth_smile":
+        return "smile_more" if polarity == "positive" else "smile_less"
+    return polarity
 
 
 def _build_engine_hints(
