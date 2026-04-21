@@ -1,53 +1,41 @@
 # AG99live
 
-AG99live 是桌宠项目的二期新项目名。
+欢迎点燃自己的历史。
 
-项目前期受到 Open-LLM-VTuber（OLV）及相关前端改造实践的启发，但 AG99live 的目标并不是继续做一个 OLV 场景化改造版本，而是在吸收已有经验后，重新建设一个更适合 AstrBot 桌面场景的本地 Live2D runtime。
+AG99live 是桌宠项目 V2。  
+项目前期受到 Open-LLM-VTuber（OLV）启发，但 V2 的目标是独立建设 `AstrBot 插件适配器 + 本地桌面 runtime`，而不是继续做 V1 的改造分支。
 
-它不再延续 V1 “在原有项目上做前端改造”的定位，而是面向以下目标重新建设：
+## 当前状态（2026-04-21）
 
-- 基于 `Electron + TypeScript + Vue` 的桌面端项目
-- 将 UI 层与 Live2D runtime 解耦
-- 建立多模型通用的参数化实时动作系统
-- 让 AstrBot 插件端回归“适配器 + 资源提供者”的角色
-- 为未来的网关子模块、桌面交互能力和本地执行能力预留结构
+已完成：
 
-## 当前阶段
+- V2 协议主链路已切换：`input / output / control / system / engine`。
+- `adapter` 已作为 AstrBot 插件根目录可运行，保留 `WebSocket` 实时链路 + `HTTP` 静态资源链路。
+- Live2D 扫描已具备参数/表情/motion 基础解析，并产出 `base_action_library`。
+- 基础动作库已接入“宽进严出”流程：规则初筛 + 可选 LLM 严格筛选 + fallback 回退。
+- `frontend` 已有桌宠窗口、设置窗口、历史窗口、动作实验室窗口（Action Lab）。
+- Action Lab 已可从扫描结果选择动作原子，生成预览计划并发送 `engine.motion_plan` 测试消息。
 
-当前仓库处于立项和架构整理阶段，优先事项不是补页面，而是先把长期边界立住：
+进行中：
 
-- 明确 V1 与 V2 的职责差异
-- 设计新的 runtime 分层
-- 规划动作系统的能力层、语义层、编排层、执行层
-- 逐步从旧项目迁移可复用模块
+- 前端真实动作引擎执行（逐帧调度、混合、时长编排）尚未接入生产路径。
+- `engine.*` 当前只落协议骨架与测试入口，尚未驱动真实 Live2D 动作播放。
 
-当前阶段的重点首先是讨论和固化具体设计，而不是直接追求页面实现速度。尤其要优先明确：
-
-- 动作系统的长期分层
-- `frontend` 与 `adapter` 的职责边界
-- 模型扫描、能力清单、动作编排各自的落点
-- 哪些能力属于 V2 启动阶段必须先做的 MVP
-
-## 目录草案
+## 目录
 
 ```text
 AG99live/
-├─ docs/                # 架构、设计、阶段文档
-├─ frontend/            # Electron + TypeScript + Vue 桌面端与 Live2D runtime
-├─ adapter/             # AstrBot 适配器、协议桥接、资源提供侧
+├─ docs/
+├─ frontend/  # Electron + Vue 桌宠客户端（pet/settings/history/action_lab）
+├─ adapter/   # AstrBot 插件（消息适配、语音链路、Live2D 扫描）
 └─ README.md
 ```
 
-## 当前最重要的文档
+## 文档入口
 
-- [二期架构方向草案](./docs/二期架构方向草案.md)
-
-## 项目判断
-
-V1 更像对既有项目的场景化改造。
-
-V2 也就是 AG99live，则是基于已有经验重新设计的新系统。它的核心不是继续堆功能，而是建设：
-
-- 本地 Live2D 实时动作引擎
-- 通用的多模型能力层
-- 可持续演进的桌面 runtime
+- [V2 当前实现状态与下一步](./docs/V2当前实现状态与下一步.md)
+- [V2 消息适配审阅与进度](./docs/V2消息适配审阅与进度.md)
+- [V2 适配器开发计划](./docs/V2适配器开发计划.md)
+- [V2 Live2D 扫描设计草案](./docs/V2%20Live2D扫描设计草案.md)
+- [V2 动作引擎设计草案](./docs/V2动作引擎设计草案.md)
+- [V2 前端开发计划](./docs/V2前端开发计划.md)
