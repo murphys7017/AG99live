@@ -142,6 +142,8 @@ SPECIAL_EXPRESSION_KEYWORDS = {
 }
 
 BASE_ACTION_LIBRARY_SCHEMA_VERSION = "base_action_library.v1"
+PARAMETER_ACTION_LIBRARY_SCHEMA_VERSION = "parameter_action_library.v1"
+PARAMETER_ACTION_MAX_ATOMS_PER_PARAMETER = 24
 
 CORE_BASE_ACTION_CHANNEL_SPECS: tuple[dict[str, Any], ...] = (
     {
@@ -367,6 +369,21 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
             parameter_scan=parameter_scan,
             error=str(exc),
         )
+    try:
+        parameter_action_library = _build_parameter_action_library(
+            parameter_scan=parameter_scan,
+            motions=motions,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to build parameter action library for model `%s`, fallback to empty seed: %s",
+            model_dir.name,
+            exc,
+        )
+        parameter_action_library = _build_empty_parameter_action_library(
+            parameter_scan=parameter_scan,
+            error=str(exc),
+        )
     motion_resource_pool = build_motion_resource_pool(motions=motions)
     for motion in motions:
         motion.pop("components", None)
@@ -382,6 +399,7 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
         "parameter_scan": parameter_scan,
         "expression_scan": expression_scan,
         "base_action_library": base_action_library,
+        "parameter_action_library": parameter_action_library,
         "motion_resource_pool": motion_resource_pool,
         "constraints": {
             "expressions": expressions,
@@ -1078,6 +1096,397 @@ def _build_empty_base_action_library(
         "channels": channel_entries,
         "atoms": [],
     }
+
+
+def _build_parameter_action_library(
+    *,
+    parameter_scan: dict[str, Any],
+    motions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    parameter_lookup = {
+        str(item.get("id") or "").strip(): item
+        for item in parameter_scan.get("parameters", [])
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    }
+    candidates_by_parameter: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    driver_component_count = 0
+    candidate_atom_count = 0
+
+    for motion in motions:
+        for component in motion.get("components", []):
+            if not isinstance(component, dict):
+                continue
+            if str(component.get("engine_role") or "").strip() != "driver":
+                continue
+            if str(component.get("strength") or "").strip() == "none":
+                continue
+
+            parameter_id = str(component.get("parameter_id") or "").strip()
+            if not parameter_id:
+                continue
+            driver_component_count += 1
+
+            channels = [
+                str(item).strip()
+                for item in component.get("channels", [])
+                if str(item).strip()
+            ]
+            primary_channel = channels[0] if channels else ""
+            polarity = _infer_base_action_polarity(
+                component=component,
+                channel_name=primary_channel or "parameter",
+            )
+            semantic_polarity = _map_semantic_polarity(
+                channel_name=primary_channel or "parameter",
+                polarity=polarity,
+            )
+            windows = _normalize_component_windows(component.get("windows"))
+
+            for window_index, window in enumerate(windows, start=1):
+                window_duration_ratio = round(
+                    max(window["end_ratio"] - window["start_ratio"], 0.0),
+                    4,
+                )
+                score = _score_parameter_action_candidate(
+                    component=component,
+                    window_duration_ratio=window_duration_ratio,
+                )
+                candidate_atom_count += 1
+                candidates_by_parameter[parameter_id].append(
+                    {
+                        "motion": motion,
+                        "component": component,
+                        "parameter_id": parameter_id,
+                        "channels": channels,
+                        "primary_channel": primary_channel,
+                        "polarity": polarity,
+                        "semantic_polarity": semantic_polarity,
+                        "trait": str(component.get("trait") or "unknown"),
+                        "strength": str(component.get("strength") or "none"),
+                        "window_index": window_index,
+                        "window_start_ratio": window["start_ratio"],
+                        "window_end_ratio": window["end_ratio"],
+                        "window_duration_ratio": window_duration_ratio,
+                        "score": score,
+                    }
+                )
+
+    atoms: list[dict[str, Any]] = []
+    parameter_entries: list[dict[str, Any]] = []
+    selected_parameter_count = 0
+
+    for parameter_id in sorted(candidates_by_parameter.keys()):
+        parameter_candidates = _select_parameter_action_candidates(
+            candidates=candidates_by_parameter[parameter_id],
+            max_atoms=PARAMETER_ACTION_MAX_ATOMS_PER_PARAMETER,
+        )
+        atom_ids: list[str] = []
+        for rank, candidate in enumerate(parameter_candidates, start=1):
+            atom = _build_parameter_action_atom(
+                candidate=candidate,
+                parameter_entry=parameter_lookup.get(parameter_id, {}),
+                rank=rank,
+            )
+            atoms.append(atom)
+            atom_ids.append(atom["id"])
+
+        if atom_ids:
+            selected_parameter_count += 1
+        parameter_entry = parameter_lookup.get(parameter_id, {})
+        parameter_entries.append(
+            {
+                "parameter_id": parameter_id,
+                "parameter_name": str(parameter_entry.get("name") or "").strip(),
+                "group_name": str(parameter_entry.get("group_name") or "").strip(),
+                "kind": str(parameter_entry.get("kind") or "unknown"),
+                "domain": str(
+                    parameter_entry.get("domain")
+                    or parameter_candidates[0]["component"].get("domain")
+                    or "other"
+                ),
+                "channels": list(parameter_entry.get("channels", []))
+                or list(parameter_candidates[0].get("channels", [])),
+                "candidate_atom_count": len(candidates_by_parameter[parameter_id]),
+                "selected_atom_count": len(atom_ids),
+                "atom_ids": atom_ids,
+            }
+        )
+
+    domain_counts = Counter(
+        str(item.get("domain") or "other")
+        for item in parameter_entries
+        if item.get("selected_atom_count", 0) > 0
+    )
+    channel_counts = Counter(
+        channel_name
+        for item in parameter_entries
+        if item.get("selected_atom_count", 0) > 0
+        for channel_name in item.get("channels", [])
+        if channel_name
+    )
+
+    return {
+        "schema_version": PARAMETER_ACTION_LIBRARY_SCHEMA_VERSION,
+        "extraction_mode": "rule_seed",
+        "analysis": {
+            "status": "seeded",
+            "mode": "parameter_track",
+            "provider_id": "",
+        },
+        "summary": {
+            "motion_count": len(motions),
+            "driver_component_count": driver_component_count,
+            "candidate_atom_count": candidate_atom_count,
+            "selected_atom_count": len(atoms),
+            "candidate_parameter_count": len(candidates_by_parameter),
+            "selected_parameter_count": selected_parameter_count,
+            "domain_count": len(domain_counts),
+            "channel_count": len(channel_counts),
+        },
+        "domains": _counter_to_ranked_list(domain_counts),
+        "channels": _counter_to_ranked_list(channel_counts),
+        "parameters": parameter_entries,
+        "atoms": atoms,
+    }
+
+
+def _build_empty_parameter_action_library(
+    *,
+    parameter_scan: dict[str, Any],
+    error: str,
+) -> dict[str, Any]:
+    domains = Counter(
+        str(item.get("domain") or "other")
+        for item in parameter_scan.get("parameters", [])
+        if isinstance(item, dict)
+    )
+    channels = Counter(
+        channel_name
+        for item in parameter_scan.get("parameters", [])
+        if isinstance(item, dict)
+        for channel_name in item.get("channels", [])
+        if channel_name
+    )
+    return {
+        "schema_version": PARAMETER_ACTION_LIBRARY_SCHEMA_VERSION,
+        "extraction_mode": "rule_seed",
+        "analysis": {
+            "status": "failed",
+            "mode": "parameter_track",
+            "provider_id": "",
+            "error": error,
+        },
+        "summary": {
+            "motion_count": 0,
+            "driver_component_count": 0,
+            "candidate_atom_count": 0,
+            "selected_atom_count": 0,
+            "candidate_parameter_count": 0,
+            "selected_parameter_count": 0,
+            "domain_count": len(domains),
+            "channel_count": len(channels),
+        },
+        "domains": _counter_to_ranked_list(domains),
+        "channels": _counter_to_ranked_list(channels),
+        "parameters": [],
+        "atoms": [],
+    }
+
+
+def _normalize_component_windows(raw_windows: Any) -> list[dict[str, float]]:
+    if not isinstance(raw_windows, list) or not raw_windows:
+        return [{"start_ratio": 0.0, "end_ratio": 1.0}]
+
+    normalized: list[dict[str, float]] = []
+    for item in raw_windows:
+        if not isinstance(item, dict):
+            continue
+        start_ratio = _clamp_ratio(item.get("start_ratio"))
+        end_ratio = _clamp_ratio(item.get("end_ratio"))
+        if end_ratio < start_ratio:
+            start_ratio, end_ratio = end_ratio, start_ratio
+        normalized.append(
+            {
+                "start_ratio": round(start_ratio, 4),
+                "end_ratio": round(end_ratio, 4),
+            }
+        )
+
+    if not normalized:
+        return [{"start_ratio": 0.0, "end_ratio": 1.0}]
+    return normalized
+
+
+def _score_parameter_action_candidate(
+    *,
+    component: dict[str, Any],
+    window_duration_ratio: float,
+) -> float:
+    strength_score = {
+        "none": 0.0,
+        "low": 0.35,
+        "medium": 0.7,
+        "high": 1.0,
+    }.get(str(component.get("strength") or "none"), 0.0)
+    trait_score = {
+        "oscillate": 1.0,
+        "sustain": 0.95,
+        "pulse": 0.82,
+        "ramp": 0.72,
+        "hold": 0.65,
+    }.get(str(component.get("trait") or "unknown"), 0.6)
+
+    return round(
+        (float(component.get("energy_score") or 0.0) * 0.55)
+        + (float(component.get("active_ratio") or 0.0) * 0.2)
+        + (window_duration_ratio * 0.1)
+        + (strength_score * 0.1)
+        + (trait_score * 0.05),
+        4,
+    )
+
+
+def _window_bucket_key(window_duration_ratio: float) -> str:
+    if window_duration_ratio >= 0.66:
+        return "long"
+    if window_duration_ratio >= 0.33:
+        return "medium"
+    return "short"
+
+
+def _select_parameter_action_candidates(
+    *,
+    candidates: list[dict[str, Any]],
+    max_atoms: int,
+) -> list[dict[str, Any]]:
+    if not candidates or max_atoms <= 0:
+        return []
+
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for candidate in candidates:
+        grouped[
+            (
+                str(candidate.get("polarity") or ""),
+                str(candidate.get("trait") or ""),
+                _window_bucket_key(float(candidate.get("window_duration_ratio") or 0.0)),
+            )
+        ].append(candidate)
+
+    selected: list[dict[str, Any]] = []
+    selected_component_windows: set[tuple[str, int]] = set()
+    per_bucket_limit = 2 if max_atoms >= 12 else 1
+
+    for bucket in sorted(grouped.keys()):
+        bucket_candidates = sorted(
+            grouped[bucket],
+            key=lambda item: (
+                -float(item.get("score") or 0.0),
+                -float(item.get("component", {}).get("energy_score") or 0.0),
+                str(item.get("component", {}).get("id") or ""),
+                int(item.get("window_index") or 0),
+            ),
+        )
+        for candidate in bucket_candidates[:per_bucket_limit]:
+            key = (
+                str(candidate.get("component", {}).get("id") or ""),
+                int(candidate.get("window_index") or 0),
+            )
+            if key in selected_component_windows:
+                continue
+            selected.append(candidate)
+            selected_component_windows.add(key)
+
+    if len(selected) < max_atoms:
+        sorted_candidates = sorted(
+            candidates,
+            key=lambda item: (
+                -float(item.get("score") or 0.0),
+                -float(item.get("component", {}).get("energy_score") or 0.0),
+                str(item.get("component", {}).get("id") or ""),
+                int(item.get("window_index") or 0),
+            ),
+        )
+        for candidate in sorted_candidates:
+            key = (
+                str(candidate.get("component", {}).get("id") or ""),
+                int(candidate.get("window_index") or 0),
+            )
+            if key in selected_component_windows:
+                continue
+            selected.append(candidate)
+            selected_component_windows.add(key)
+            if len(selected) >= max_atoms:
+                break
+
+    return sorted(
+        selected[:max_atoms],
+        key=lambda item: (
+            -float(item.get("score") or 0.0),
+            -float(item.get("component", {}).get("energy_score") or 0.0),
+            str(item.get("component", {}).get("id") or ""),
+            int(item.get("window_index") or 0),
+        ),
+    )
+
+
+def _build_parameter_action_atom(
+    *,
+    candidate: dict[str, Any],
+    parameter_entry: dict[str, Any],
+    rank: int,
+) -> dict[str, Any]:
+    component = candidate["component"]
+    motion = candidate["motion"]
+    parameter_id = str(candidate["parameter_id"])
+    trait = str(candidate.get("trait") or "unknown")
+    polarity = str(candidate.get("polarity") or "neutral")
+    window_index = int(candidate.get("window_index") or 0)
+    atom_id = f"{parameter_id}.{polarity}.{trait}.w{window_index:02d}.{rank:02d}"
+    channels = list(candidate.get("channels", []))
+
+    return {
+        "id": atom_id,
+        "name": f"{parameter_id}_{polarity}_{trait}_w{window_index:02d}",
+        "label": f"{parameter_id} {polarity} {trait} w{window_index}",
+        "parameter_id": parameter_id,
+        "parameter_name": str(parameter_entry.get("name") or component.get("parameter_name") or "").strip(),
+        "group_name": str(parameter_entry.get("group_name") or component.get("group_name") or "").strip(),
+        "kind": str(parameter_entry.get("kind") or component.get("kind") or "unknown"),
+        "domain": str(parameter_entry.get("domain") or component.get("domain") or "other"),
+        "channels": channels,
+        "primary_channel": str(candidate.get("primary_channel") or ""),
+        "polarity": polarity,
+        "semantic_polarity": str(candidate.get("semantic_polarity") or polarity),
+        "trait": trait,
+        "strength": str(candidate.get("strength") or "none"),
+        "score": round(float(candidate.get("score") or 0.0), 4),
+        "source_component_id": str(component.get("id") or "").strip(),
+        "source_motion": str(component.get("source_motion") or "").strip(),
+        "source_file": str(component.get("source_file") or "").strip(),
+        "source_group": str(component.get("source_group") or "").strip(),
+        "source_category": str(component.get("source_category") or "").strip(),
+        "source_tags": list(motion.get("catalog_tags", [])),
+        "duration": round(float(component.get("duration") or 0.0), 4),
+        "fps": round(float(component.get("fps") or 0.0), 3),
+        "loop": bool(component.get("loop")),
+        "energy_score": round(float(component.get("energy_score") or 0.0), 4),
+        "peak_abs_value": round(float(component.get("peak_abs_value") or 0.0), 4),
+        "peak_time_ratio": round(float(component.get("peak_time_ratio") or 0.0), 4),
+        "active_ratio": round(float(component.get("active_ratio") or 0.0), 4),
+        "intensity": str(motion.get("catalog_intensity") or "").strip(),
+        "window_index": window_index,
+        "window_start_ratio": round(float(candidate.get("window_start_ratio") or 0.0), 4),
+        "window_end_ratio": round(float(candidate.get("window_end_ratio") or 0.0), 4),
+        "window_duration_ratio": round(float(candidate.get("window_duration_ratio") or 0.0), 4),
+    }
+
+
+def _clamp_ratio(value: Any) -> float:
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError):
+        normalized = 0.0
+    return max(min(normalized, 1.0), 0.0)
 
 
 def _collect_base_action_candidates(

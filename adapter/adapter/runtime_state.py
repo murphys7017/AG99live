@@ -58,6 +58,8 @@ class RuntimeState:
         self.action_llm_filter_timeout_seconds = 12.0
         self.action_llm_filter_min_selected_channels = 3
         self.action_llm_filter_max_atoms_per_channel = 2
+        self.action_llm_filter_chunk_max_channels = 8
+        self.action_llm_filter_chunk_max_candidates = 96
         self.vad_model = "silero_vad"
         self.vad_config: dict[str, Any] = {}
         self.model_info: dict[str, Any] = {}
@@ -148,6 +150,14 @@ class RuntimeState:
         )
         self.action_llm_filter_max_atoms_per_channel = max(
             int(_plugin_config_get(self.plugin_config, "action_llm_filter_max_atoms_per_channel", 2)),
+            1,
+        )
+        self.action_llm_filter_chunk_max_channels = max(
+            int(_plugin_config_get(self.plugin_config, "action_llm_filter_chunk_max_channels", 8)),
+            1,
+        )
+        self.action_llm_filter_chunk_max_candidates = max(
+            int(_plugin_config_get(self.plugin_config, "action_llm_filter_chunk_max_candidates", 96)),
             1,
         )
         self.vad_model = _plugin_config_get(self.plugin_config, "vad_model", "silero_vad")
@@ -370,7 +380,9 @@ class RuntimeState:
             input_signature = build_action_filter_signature(base_action_library)
             cache_key = (
                 f"{provider_id}:{input_signature}:"
-                f"{self.action_llm_filter_max_atoms_per_channel}"
+                f"{self.action_llm_filter_max_atoms_per_channel}:"
+                f"{self.action_llm_filter_chunk_max_channels}:"
+                f"{self.action_llm_filter_chunk_max_candidates}"
             )
             cached_result = self._base_action_filter_cache.get(cache_key)
             if cached_result is not None:
@@ -378,16 +390,22 @@ class RuntimeState:
                     cached_result.get("selected_atom_ids_by_channel") or {}
                 )
                 selected_channel_count = int(cached_result.get("selected_channel_count") or 0)
+                chunk_count = max(int(cached_result.get("chunk_count") or 1), 1)
                 apply_action_filter_selection(
                     base_action_library,
                     selected_atom_ids_by_channel=selected_atom_ids_by_channel,
                     analysis={
                         "status": "filtered",
-                        "mode": "llm_strict_cached",
+                        "mode": (
+                            "llm_strict_chunked_cached"
+                            if chunk_count > 1
+                            else "llm_strict_cached"
+                        ),
                         "provider_id": provider_id,
                         "input_signature": input_signature,
                         "latency_ms": 0,
                         "cache_hit": True,
+                        "chunk_count": chunk_count,
                         "selected_channel_count": selected_channel_count,
                         "error": "",
                         "fallback_reason": "",
@@ -397,28 +415,42 @@ class RuntimeState:
 
             started_at = time.perf_counter()
             try:
-                prompt = build_action_filter_prompt(
-                    base_action_library,
-                    max_atoms_per_channel=self.action_llm_filter_max_atoms_per_channel,
-                )
-                response = await asyncio.wait_for(
-                    provider.text_chat(
-                        prompt=prompt,
-                        system_prompt=ACTION_FILTER_SYSTEM_PROMPT,
-                    ),
-                    timeout=self.action_llm_filter_timeout_seconds,
-                )
-                completion_text = str(response.completion_text or "").strip()
-                if not completion_text:
+                chunked_libraries = self._build_action_filter_chunks(base_action_library)
+                if not chunked_libraries:
                     raise ActionFilterDecisionError(
-                        "Motion analysis provider returned empty completion_text."
+                        "No candidate channels available for LLM strict filtering."
                     )
 
-                selected_atom_ids_by_channel = parse_action_filter_decision(
-                    completion_text,
-                    base_action_library=base_action_library,
-                    max_atoms_per_channel=self.action_llm_filter_max_atoms_per_channel,
-                )
+                selected_atom_ids_by_channel: dict[str, list[str]] = {}
+                for chunk_library in chunked_libraries:
+                    prompt = build_action_filter_prompt(
+                        chunk_library,
+                        max_atoms_per_channel=self.action_llm_filter_max_atoms_per_channel,
+                    )
+                    response = await asyncio.wait_for(
+                        provider.text_chat(
+                            prompt=prompt,
+                            system_prompt=ACTION_FILTER_SYSTEM_PROMPT,
+                        ),
+                        timeout=self.action_llm_filter_timeout_seconds,
+                    )
+                    completion_text = str(response.completion_text or "").strip()
+                    if not completion_text:
+                        raise ActionFilterDecisionError(
+                            "Motion analysis provider returned empty completion_text."
+                        )
+
+                    selected_chunk = parse_action_filter_decision(
+                        completion_text,
+                        base_action_library=chunk_library,
+                        max_atoms_per_channel=self.action_llm_filter_max_atoms_per_channel,
+                    )
+                    selected_atom_ids_by_channel = self._merge_selected_atom_ids_by_channel(
+                        selected_atom_ids_by_channel,
+                        selected_chunk,
+                        limit=self.action_llm_filter_max_atoms_per_channel,
+                    )
+
                 selected_channel_count = count_selected_channels(
                     selected_atom_ids_by_channel
                 )
@@ -434,11 +466,16 @@ class RuntimeState:
                     selected_atom_ids_by_channel=selected_atom_ids_by_channel,
                     analysis={
                         "status": "filtered",
-                        "mode": "llm_strict",
+                        "mode": (
+                            "llm_strict_chunked"
+                            if len(chunked_libraries) > 1
+                            else "llm_strict"
+                        ),
                         "provider_id": provider_id,
                         "input_signature": input_signature,
                         "latency_ms": latency_ms,
                         "cache_hit": False,
+                        "chunk_count": len(chunked_libraries),
                         "selected_channel_count": selected_channel_count,
                         "error": "",
                         "fallback_reason": "",
@@ -447,6 +484,7 @@ class RuntimeState:
                 self._base_action_filter_cache[cache_key] = {
                     "selected_atom_ids_by_channel": selected_atom_ids_by_channel,
                     "selected_channel_count": selected_channel_count,
+                    "chunk_count": len(chunked_libraries),
                 }
             except asyncio.TimeoutError:
                 self._set_base_action_analysis(
@@ -479,6 +517,190 @@ class RuntimeState:
                     provider_id or "<default>",
                     exc,
                 )
+
+    def _build_action_filter_chunks(
+        self,
+        base_action_library: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        channels = [
+            item
+            for item in base_action_library.get("channels", [])
+            if isinstance(item, dict)
+        ]
+        atoms = [
+            item
+            for item in base_action_library.get("atoms", [])
+            if isinstance(item, dict)
+        ]
+        atom_by_id = {
+            str(atom.get("id") or "").strip(): atom
+            for atom in atoms
+            if str(atom.get("id") or "").strip()
+        }
+        if not channels or not atom_by_id:
+            return []
+
+        max_channels = max(int(self.action_llm_filter_chunk_max_channels), 1)
+        max_candidates = max(int(self.action_llm_filter_chunk_max_candidates), 1)
+
+        channel_entries: list[tuple[str, list[str]]] = []
+        for channel in channels:
+            channel_name = str(channel.get("name") or "").strip()
+            if not channel_name:
+                continue
+            candidate_ids = self._dedupe_preserve_order(
+                [
+                    str(atom_id).strip()
+                    for atom_id in channel.get("atom_ids", [])
+                    if str(atom_id).strip() in atom_by_id
+                ]
+            )
+            if not candidate_ids:
+                continue
+            channel_entries.append((channel_name, candidate_ids))
+
+        if not channel_entries:
+            return []
+
+        chunks: list[list[str]] = []
+        current_chunk: list[str] = []
+        current_candidates = 0
+
+        for channel_name, candidate_ids in channel_entries:
+            candidate_count = len(candidate_ids)
+            should_split = bool(current_chunk) and (
+                len(current_chunk) + 1 > max_channels
+                or current_candidates + candidate_count > max_candidates
+            )
+            if should_split:
+                chunks.append(current_chunk)
+                current_chunk = []
+                current_candidates = 0
+
+            current_chunk.append(channel_name)
+            current_candidates += candidate_count
+
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        chunk_payloads: list[dict[str, Any]] = []
+        for chunk_channel_names in chunks:
+            chunk_payload = self._build_action_filter_chunk_payload(
+                base_action_library,
+                channel_names=chunk_channel_names,
+                atom_by_id=atom_by_id,
+            )
+            if chunk_payload:
+                chunk_payloads.append(chunk_payload)
+
+        return chunk_payloads
+
+    def _build_action_filter_chunk_payload(
+        self,
+        base_action_library: dict[str, Any],
+        *,
+        channel_names: list[str],
+        atom_by_id: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        wanted_channels = {str(name).strip() for name in channel_names if str(name).strip()}
+        if not wanted_channels:
+            return {}
+
+        channels = [
+            item
+            for item in base_action_library.get("channels", [])
+            if isinstance(item, dict)
+        ]
+        selected_channels: list[dict[str, Any]] = []
+        selected_atom_ids: list[str] = []
+        selected_atom_id_set: set[str] = set()
+
+        for channel in channels:
+            channel_name = str(channel.get("name") or "").strip()
+            if channel_name not in wanted_channels:
+                continue
+
+            candidate_ids = self._dedupe_preserve_order(
+                [
+                    str(atom_id).strip()
+                    for atom_id in channel.get("atom_ids", [])
+                    if str(atom_id).strip() in atom_by_id
+                ]
+            )
+            if not candidate_ids:
+                continue
+
+            channel_payload = deepcopy(channel)
+            channel_payload["atom_ids"] = candidate_ids
+            channel_payload["selected_atom_count"] = len(candidate_ids)
+            selected_channels.append(channel_payload)
+
+            for atom_id in candidate_ids:
+                if atom_id in selected_atom_id_set:
+                    continue
+                selected_atom_ids.append(atom_id)
+                selected_atom_id_set.add(atom_id)
+
+        if not selected_channels:
+            return {}
+
+        selected_atoms = [
+            deepcopy(atom_by_id[atom_id])
+            for atom_id in selected_atom_ids
+            if atom_id in atom_by_id
+        ]
+        focus_channels = [
+            str(channel.get("name") or "").strip()
+            for channel in selected_channels
+            if str(channel.get("name") or "").strip()
+        ]
+        focus_domains = sorted(
+            {
+                str(channel.get("domain") or "").strip()
+                for channel in selected_channels
+                if str(channel.get("domain") or "").strip()
+            }
+        )
+
+        return {
+            "schema_version": base_action_library.get("schema_version", ""),
+            "focus_channels": focus_channels,
+            "focus_domains": focus_domains,
+            "channels": selected_channels,
+            "atoms": selected_atoms,
+        }
+
+    @staticmethod
+    def _merge_selected_atom_ids_by_channel(
+        left: dict[str, list[str]],
+        right: dict[str, list[str]],
+        *,
+        limit: int,
+    ) -> dict[str, list[str]]:
+        merged: dict[str, list[str]] = {}
+        safe_limit = max(int(limit), 1)
+        all_channel_names = set(left.keys()) | set(right.keys())
+
+        for channel_name in all_channel_names:
+            channel = str(channel_name or "").strip()
+            if not channel:
+                continue
+            values = list(left.get(channel, [])) + list(right.get(channel, []))
+            merged[channel] = RuntimeState._dedupe_preserve_order(values)[:safe_limit]
+
+        return merged
+
+    @staticmethod
+    def _dedupe_preserve_order(values: list[str]) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            normalized = str(value or "").strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            result.append(normalized)
+        return result
 
     @staticmethod
     def _get_provider_id(provider: Provider | None) -> str:

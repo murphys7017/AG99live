@@ -63,6 +63,16 @@
     "type": "int",
     "default": 2
   },
+  "action_llm_filter_chunk_max_channels": {
+    "description": "LLM 严格筛选分片时，每片最多包含的候选通道数。",
+    "type": "int",
+    "default": 8
+  },
+  "action_llm_filter_chunk_max_candidates": {
+    "description": "LLM 严格筛选分片时，每片最多包含的候选原子数（按通道候选累计）。",
+    "type": "int",
+    "default": 96
+  },
   "vad_model": {
     "description": "前端原始音频断句使用的 VAD 模型。",
     "type": "string",
