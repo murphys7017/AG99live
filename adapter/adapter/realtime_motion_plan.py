@@ -34,6 +34,18 @@ AXIS_NAMES = [axis.name for axis in AXES]
 _ACTIVE_AXIS_THRESHOLD = 8
 _IDLE_DEADZONE_MIN = 42
 _IDLE_DEADZONE_MAX = 58
+_MIN_EXPRESSIVE_MAX_DELTA = 14
+_MIN_EXPRESSIVE_NONZERO_DELTA = 10
+
+_NEUTRAL_EMOTION_MARKERS = {
+    "neutral",
+    "calm",
+    "idle",
+    "plain",
+    "flat",
+    "steady",
+    "normal",
+}
 
 _KEY_AXIS_EXCLUDED_PARAMETER_IDS: dict[str, set[str]] = {
     "head_yaw": {"paramanglex", "param_angle_x"},
@@ -405,12 +417,108 @@ def normalize_selector_output(payload: dict[str, Any]) -> dict[str, Any]:
     duration_ms = max(400, min(6000, duration_ms))
 
     emotion = str(payload.get("emotion") or "neutral").strip() or "neutral"
+    axes = _apply_expressive_floor(
+        axes=axes,
+        emotion=emotion,
+    )
 
     return {
         "emotion": emotion,
         "mode": mode,
         "duration_ms": duration_ms,
         "axes": axes,
+    }
+
+
+def _apply_expressive_floor(
+    *,
+    axes: dict[str, int],
+    emotion: str,
+) -> dict[str, int]:
+    normalized_emotion = str(emotion or "").strip().lower()
+    if _is_neutralish_emotion(normalized_emotion):
+        return axes
+
+    deltas = {
+        axis_name: clamp_axis_value(value) - 50
+        for axis_name, value in axes.items()
+    }
+    nonzero_deltas = [abs(delta) for delta in deltas.values() if delta != 0]
+    max_abs_delta = max(nonzero_deltas) if nonzero_deltas else 0
+    if max_abs_delta >= _MIN_EXPRESSIVE_MAX_DELTA:
+        return axes
+
+    # If selector collapses to near-center but emotion is non-neutral,
+    # lift subtle deltas to a visible amplitude to avoid no-op execution.
+    if max_abs_delta == 0:
+        seeded = dict(axes)
+        seeded.update(_build_emotion_seed_axes(normalized_emotion))
+        return {
+            axis_name: clamp_axis_value(value)
+            for axis_name, value in seeded.items()
+        }
+
+    scale = _MIN_EXPRESSIVE_MAX_DELTA / float(max_abs_delta)
+    boosted: dict[str, int] = {}
+    for axis_name, base_value in axes.items():
+        delta = deltas.get(axis_name, 0)
+        if delta == 0:
+            boosted[axis_name] = clamp_axis_value(base_value)
+            continue
+        candidate_delta = int(round(delta * scale))
+        if abs(candidate_delta) < _MIN_EXPRESSIVE_NONZERO_DELTA:
+            candidate_delta = _MIN_EXPRESSIVE_NONZERO_DELTA if delta > 0 else -_MIN_EXPRESSIVE_NONZERO_DELTA
+        boosted[axis_name] = clamp_axis_value(50 + candidate_delta)
+
+    return boosted
+
+
+def _is_neutralish_emotion(emotion: str) -> bool:
+    normalized = str(emotion or "").strip().lower()
+    if not normalized:
+        return True
+    for marker in _NEUTRAL_EMOTION_MARKERS:
+        # Use word-boundary match so "abnormal" doesn't false-trigger on "normal".
+        if re.search(r"\b" + re.escape(marker) + r"\b", normalized):
+            return True
+    return False
+
+
+def _build_emotion_seed_axes(emotion: str) -> dict[str, int]:
+    mood = str(emotion or "").strip().lower()
+    if any(token in mood for token in {"happy", "joy", "playful", "smile", "excited", "surprise"}):
+        return {
+            "head_pitch": 62,
+            "eye_open_left": 64,
+            "eye_open_right": 64,
+            "mouth_open": 68,
+            "mouth_smile": 76,
+            "brow_bias": 62,
+        }
+    if any(token in mood for token in {"angry", "tense", "firm", "disgust"}):
+        return {
+            "head_pitch": 44,
+            "eye_open_left": 46,
+            "eye_open_right": 46,
+            "mouth_open": 40,
+            "mouth_smile": 28,
+            "brow_bias": 24,
+        }
+    if any(token in mood for token in {"sad", "down", "tired", "confused", "wry", "hesitant"}):
+        return {
+            "head_pitch": 42,
+            "gaze_y": 38,
+            "eye_open_left": 44,
+            "eye_open_right": 44,
+            "mouth_open": 42,
+            "mouth_smile": 34,
+            "brow_bias": 36,
+        }
+    return {
+        "head_roll": 60,
+        "head_pitch": 56,
+        "mouth_smile": 62,
+        "brow_bias": 58,
     }
 
 

@@ -882,6 +882,8 @@ function applyInboundMotionPlan(
 
   state.inboundMotionPlan = plan;
   state.inboundMotionPlanNonce += 1;
+  // Show received notice — actual playback result is reported by handleInboundMotionPlan
+  // in PetDesktopView via motionPlayer state, which propagates to the bridge snapshot.
   state.statusMessage = `收到外部动作计划（engine.motion_plan, mode=${mode}）。`;
   pushHistory("system", state.statusMessage);
 }
@@ -919,6 +921,16 @@ async function playAudioAndAcknowledge(
   state.isPlayingAudio = true;
   state.statusMessage = "收到语音回复，正在播放。";
   pushHistory("system", state.statusMessage);
+
+  // Feed audio to Live2D's wav handler for lip sync.
+  const adapter = window.getLAppAdapter?.();
+  if (adapter && typeof adapter.loadWavFileForLipSync === "function") {
+    adapter.loadWavFileForLipSync(audioUrl).then((ok) => {
+      if (!ok) {
+        pushHistory("system", "嘴型同步加载失败，音频播放将无对应张嘴动作。");
+      }
+    });
+  }
 
   const audio = new Audio(audioUrl);
   audioElement = audio;
@@ -1202,5 +1214,6 @@ export function useAdapterConnection() {
     interruptCurrentTurn,
     sendMotionPlanPreview,
     toggleMicrophoneCapture,
+    pushHistory,
   };
 }

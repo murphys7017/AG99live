@@ -273,7 +273,9 @@ function handlePreviewMotionPlan(plan: unknown): void {
 function handleInboundMotionPlan(plan: unknown): void {
   const localPlayed = motionPlayer.playPlan(plan, selectedModel.value);
   if (!localPlayed) {
-    console.warn("[AG99live] Inbound motion preview playback failed to start.");
+    const reason = motionPlayer.state.message;
+    console.warn("[AG99live] Inbound motion playback failed:", reason);
+    adapter.pushHistory("error", `动作播放失败：${reason}`);
   }
 }
 

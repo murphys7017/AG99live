@@ -87,14 +87,14 @@ export class LAppWavFileHandler {
     return true;
   }
 
-  public start(filePath: string): void {
-    // サンプル位参照位置を初期化
+  public resetPlaybackCursor(): void {
     this._sampleOffset = 0;
     this._userTimeSeconds = 0.0;
-
-    // RMS値をリセット
     this._lastRms = 0.0;
+  }
 
+  public start(filePath: string): void {
+    this.resetPlaybackCursor();
     this.loadWavFile(filePath);
   }
 

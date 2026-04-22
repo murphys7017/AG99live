@@ -190,6 +190,41 @@ def test_build_plan_from_axes_applies_selector_duration_target() -> None:
     assert plan["timing"]["blend_out_ms"] > 0
 
 
+def test_normalize_selector_output_boosts_subtle_non_neutral_axes() -> None:
+    selector = normalize_selector_output(
+        {
+            "emotion": "playful",
+            "mode": "parallel",
+            "duration_ms": 1200,
+            "axes": {
+                "head_roll": 54,
+                "head_pitch": 53,
+                "mouth_smile": 55,
+            },
+        }
+    )
+    assert selector["axes"]["head_roll"] >= 60
+    assert selector["axes"]["mouth_smile"] >= 60
+
+
+def test_normalize_selector_output_keeps_neutral_near_center_axes() -> None:
+    selector = normalize_selector_output(
+        {
+            "emotion": "neutral",
+            "mode": "parallel",
+            "duration_ms": 1200,
+            "axes": {
+                "head_roll": 54,
+                "head_pitch": 53,
+                "mouth_smile": 55,
+            },
+        }
+    )
+    assert selector["axes"]["head_roll"] == 54
+    assert selector["axes"]["head_pitch"] == 53
+    assert selector["axes"]["mouth_smile"] == 55
+
+
 def test_validate_parameter_plan_payload_rejects_invalid_key_axes() -> None:
     invalid_plan = {
         "schema_version": "engine.parameter_plan.v1",

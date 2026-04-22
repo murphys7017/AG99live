@@ -13,6 +13,7 @@ declare global {
       startDirectParameterPlan?: (plan: unknown) => boolean;
       stopDirectParameterPlan?: () => void;
       getDirectParameterPlanError?: () => string;
+      loadWavFileForLipSync?: (url: string) => Promise<boolean>;
     };
     LAppDelegate?: {
       getInstance?: () => {

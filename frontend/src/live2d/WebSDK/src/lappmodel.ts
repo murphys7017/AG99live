@@ -1460,6 +1460,17 @@ export class LAppModel extends CubismUserModel {
     return this._directParameterPlanError || "";
   }
 
+  public async loadWavFileForLipSync(url: string): Promise<boolean> {
+    try {
+      await this._wavFileHandler.loadWavFile(url);
+      this._wavFileHandler.resetPlaybackCursor();
+      return true;
+    } catch (e) {
+      console.warn("[LAppModel] Failed to load wav for lip sync:", e);
+      return false;
+    }
+  }
+
   private applyDirectParameterPlanOverlay(): string | null {
     if (!this._directParameterPlanState || !this._model) {
       return null;
