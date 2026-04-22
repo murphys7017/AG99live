@@ -71,6 +71,10 @@ export class LAppAdapter {
     this.getModel()?.stopDirectParameterPlan();
   }
 
+  public getDirectParameterPlanError(): string {
+    return this.getModel()?.getDirectParameterPlanError?.() ?? "";
+  }
+
   /* expression */
 
   public getExpressionCount(): number {

@@ -251,8 +251,13 @@ function playPlan(plan: unknown, _model: ModelSummary | null = null): boolean {
 
   const started = adapter.startDirectParameterPlan(parsed.plan);
   if (!started) {
+    const runtimeReason = typeof adapter.getDirectParameterPlanError === "function"
+      ? normalizeText(adapter.getDirectParameterPlanError())
+      : "";
     state.status = "failed";
-    state.message = "动作计划执行失败：Direct Parameter 计划被运行时拒绝。";
+    state.message = runtimeReason
+      ? `动作计划执行失败：${runtimeReason}`
+      : "动作计划执行失败：Direct Parameter 计划被运行时拒绝。";
     state.finishedAt = new Date().toISOString();
     return false;
   }

@@ -83,7 +83,13 @@ const DIRECT_PARAMETER_AXIS_MAP: Record<string, string[]> = {
   eye_open_right: ["ParamEyeROpen", "PARAM_EYE_R_OPEN"],
   mouth_open: ["ParamMouthOpenY", "PARAM_MOUTH_OPEN_Y", "ParamMouthOpen", "PARAM_MOUTH_OPEN"],
   mouth_smile: ["ParamMouthForm", "PARAM_MOUTH_FORM", "ParamMouthSmile", "PARAM_MOUTH_SMILE"],
-  brow_bias: ["ParamBrowLY", "PARAM_BROW_L_Y", "ParamBrowRY", "PARAM_BROW_R_Y"],
+  brow_bias: [
+    "ParamBrowForm",
+    "PARAM_BROW_FORM",
+    "ParamBrowLOutterUp",
+    "ParamBrowLDown",
+    "ParamBrowRDown",
+  ],
 };
 
 const DIRECT_PARAMETER_AXIS_NAMES = Object.keys(DIRECT_PARAMETER_AXIS_MAP);
@@ -1472,7 +1478,13 @@ export class LAppModel extends CubismUserModel {
       const maxValue = this._model.getParameterMaximumValue(axis.parameterIndex);
       const baseValue = this._model.getParameterValueByIndex(axis.parameterIndex);
       const targetValue = minValue + (maxValue - minValue) * (axis.axisValue / 100.0);
-      const blendedValue = baseValue + (targetValue - baseValue) * easing;
+      let blendedValue = baseValue + (targetValue - baseValue) * easing;
+
+      // Keep speech lip sync dominant on mouth opening while audio is playing.
+      if (this._lipsync && axis.axisName === "mouth_open") {
+        blendedValue = Math.max(baseValue, blendedValue);
+      }
+
       this._model.setParameterValueById(axis.parameterId, blendedValue);
     }
 
