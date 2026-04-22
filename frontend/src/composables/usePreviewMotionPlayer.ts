@@ -14,10 +14,19 @@ interface ParsedMotionPlanStep {
   sourceGroup: string;
 }
 
+interface ParsedMotionPlanParameters {
+  durationScale: number;
+  intensityScale: number;
+  sequentialGapMs: number;
+  targetDurationMs: number;
+  durationScaleApplied: boolean;
+}
+
 interface ParsedMotionPlan {
   mode: "parallel" | "sequential";
   steps: ParsedMotionPlanStep[];
   totalDurationMs: number;
+  parameters: ParsedMotionPlanParameters;
 }
 
 interface MotionIndexEntry {
@@ -76,6 +85,14 @@ function stripJsonSuffix(value: string): string {
     .replace(/\.json$/i, "");
 }
 
+function normalizeScale(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return Math.max(0.1, Math.min(parsed, 5));
+}
+
 function parseMotionPlan(plan: unknown): ParsedMotionPlan | null {
   if (!plan || typeof plan !== "object") {
     return null;
@@ -84,33 +101,98 @@ function parseMotionPlan(plan: unknown): ParsedMotionPlan | null {
   const rawPlan = plan as {
     mode?: unknown;
     steps?: unknown;
+    parameters?: unknown;
   };
   const mode = rawPlan.mode === "sequential" ? "sequential" : "parallel";
+  const rawParameters =
+    rawPlan.parameters && typeof rawPlan.parameters === "object"
+      ? (rawPlan.parameters as Record<string, unknown>)
+      : {};
+  const durationScale = normalizeScale(rawParameters.duration_scale, 1);
+  const intensityScale = normalizeScale(rawParameters.intensity_scale, 1);
+  const targetDurationMs = Math.max(
+    0,
+    Math.round(Number(rawParameters.target_duration_ms ?? 0) || 0),
+  );
+  const sequentialGapMs = Math.max(
+    0,
+    Math.round(Number(rawParameters.sequential_gap_ms ?? 0) || 0),
+  );
   const rawSteps = Array.isArray(rawPlan.steps) ? rawPlan.steps : [];
-  const steps: ParsedMotionPlanStep[] = rawSteps
+  const normalizedRawSteps = rawSteps
     .map((item) => {
       if (!item || typeof item !== "object") {
         return null;
       }
-
       const rawStep = item as Record<string, unknown>;
-      const startMs = Math.max(0, Number(rawStep.start_ms ?? 0) || 0);
-      const durationMs = Math.max(80, Math.round(Number(rawStep.duration_ms ?? 0) || 0));
-      const intensity = Number(rawStep.intensity ?? 1);
-
       return {
         atomId: normalizeText(rawStep.atom_id),
         channel: normalizeText(rawStep.channel),
-        startMs,
-        durationMs,
-        intensity: Number.isFinite(intensity) ? intensity : 1,
+        startMs: Math.max(0, Math.round(Number(rawStep.start_ms ?? 0) || 0)),
+        durationMs: Math.max(80, Math.round(Number(rawStep.duration_ms ?? 0) || 0)),
+        intensityRaw: Number(rawStep.intensity ?? 1),
         sourceMotion: normalizeText(rawStep.source_motion),
         sourceFile: normalizeText(rawStep.source_file),
         sourceGroup: normalizeText(rawStep.source_group),
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+  const rawTotalDurationMs = Math.max(
+    ...normalizedRawSteps.map((step) => step.startMs + step.durationMs),
+    0,
+  );
+
+  let applyDurationScale = durationScale !== 1;
+  if (applyDurationScale && targetDurationMs > 0 && rawTotalDurationMs > 0) {
+    const projectedDurationMs = rawTotalDurationMs * durationScale;
+    const rawDistance = Math.abs(rawTotalDurationMs - targetDurationMs);
+    const scaledDistance = Math.abs(projectedDurationMs - targetDurationMs);
+    applyDurationScale = scaledDistance + 40 < rawDistance;
+  }
+
+  const resolvedDurationScale = applyDurationScale ? durationScale : 1;
+
+  let steps: ParsedMotionPlanStep[] = normalizedRawSteps
+    .map((rawStep) => {
+      const startMs = Math.max(0, Math.round(rawStep.startMs * resolvedDurationScale));
+      const durationMs = Math.max(80, Math.round(rawStep.durationMs * resolvedDurationScale));
+      const intensity = rawStep.intensityRaw * intensityScale;
+      const normalizedIntensity = Number.isFinite(intensity)
+        ? Math.max(0.05, Math.min(intensity, 3))
+        : 1;
+
+      return {
+        atomId: rawStep.atomId,
+        channel: rawStep.channel,
+        startMs,
+        durationMs,
+        intensity: Number(normalizedIntensity.toFixed(3)),
+        sourceMotion: rawStep.sourceMotion,
+        sourceFile: rawStep.sourceFile,
+        sourceGroup: rawStep.sourceGroup,
       } satisfies ParsedMotionPlanStep;
     })
     .filter((item): item is ParsedMotionPlanStep => Boolean(item))
     .sort((left, right) => left.startMs - right.startMs);
+
+  if (mode === "sequential" && steps.length > 1 && sequentialGapMs > 0) {
+    let previousEndMs = 0;
+    steps = steps.map((step, index) => {
+      if (index === 0) {
+        previousEndMs = step.startMs + step.durationMs;
+        return step;
+      }
+
+      const minStartMs = previousEndMs + sequentialGapMs;
+      const nextStep = {
+        ...step,
+        startMs: Math.max(step.startMs, minStartMs),
+      };
+      previousEndMs = nextStep.startMs + nextStep.durationMs;
+      return nextStep;
+    });
+  }
 
   if (!steps.length) {
     return null;
@@ -125,6 +207,13 @@ function parseMotionPlan(plan: unknown): ParsedMotionPlan | null {
     mode,
     steps,
     totalDurationMs,
+    parameters: {
+      durationScale,
+      intensityScale,
+      sequentialGapMs,
+      targetDurationMs,
+      durationScaleApplied: applyDurationScale,
+    },
   };
 }
 
@@ -221,13 +310,27 @@ function resolveStepToMotion(
   return null;
 }
 
-function playMotionStep(entry: MotionIndexEntry): boolean {
+function resolveMotionPriority(intensity: number): number {
+  if (intensity >= 1.35) {
+    return 3;
+  }
+  if (intensity >= 0.75) {
+    return 2;
+  }
+  return 1;
+}
+
+function playMotionStep(entry: MotionIndexEntry, intensity: number): boolean {
   const adapter = window.getLAppAdapter?.();
   if (!adapter || typeof adapter.startMotion !== "function") {
     return false;
   }
 
-  const handle = adapter.startMotion(entry.motion.group, entry.indexInGroup, 3);
+  const handle = adapter.startMotion(
+    entry.motion.group,
+    entry.indexInGroup,
+    resolveMotionPriority(intensity),
+  );
   if (typeof handle === "number" && handle < 0) {
     return false;
   }
@@ -293,7 +396,10 @@ function playPlan(plan: unknown, model: ModelSummary | null): boolean {
   clearActiveTimers();
 
   state.status = "playing";
-  state.message = `正在执行动作计划（${parsed.mode}, ${parsed.steps.length} steps）...`;
+  const durationScaleLabel = parsed.parameters.durationScaleApplied
+    ? parsed.parameters.durationScale.toFixed(2)
+    : `${parsed.parameters.durationScale.toFixed(2)}(skip)`;
+  state.message = `正在执行动作计划（${parsed.mode}, ${parsed.steps.length} steps, duration_scale=${durationScaleLabel}, intensity_scale=${parsed.parameters.intensityScale.toFixed(2)}）...`;
   state.runningSteps = 0;
   state.totalSteps = parsed.steps.length;
   state.startedAt = new Date().toISOString();
@@ -304,7 +410,7 @@ function playPlan(plan: unknown, model: ModelSummary | null): boolean {
   for (const step of parsed.steps) {
     scheduleTimer(runId, step.startMs, () => {
       const resolved = resolveStepToMotion(step, motionIndex);
-      if (!resolved || !playMotionStep(resolved)) {
+      if (!resolved || !playMotionStep(resolved, step.intensity)) {
         failedSteps += 1;
       }
       state.runningSteps += 1;

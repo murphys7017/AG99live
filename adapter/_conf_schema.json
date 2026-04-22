@@ -88,6 +88,26 @@
     "type": "float",
     "default": 8.0
   },
+  "realtime_motion_fewshot_enabled": {
+    "description": "是否为实时动作 selector 注入 Few-shot 示例。",
+    "type": "bool",
+    "default": true
+  },
+  "realtime_motion_fewshot_count": {
+    "description": "实时动作 selector 使用的 Few-shot 示例数量（0 表示关闭）。",
+    "type": "int",
+    "default": 4
+  },
+  "realtime_motion_platform_context_enabled": {
+    "description": "是否在实时动作 selector Prompt 中注入平台交互描述。",
+    "type": "bool",
+    "default": true
+  },
+  "realtime_motion_platform_description": {
+    "description": "实时动作 selector 的自定义平台描述（留空使用内置默认描述）。",
+    "type": "string",
+    "default": ""
+  },
   "vad_model": {
     "description": "前端原始音频断句使用的 VAD 模型。",
     "type": "string",

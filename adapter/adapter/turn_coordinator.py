@@ -201,21 +201,38 @@ class TurnCoordinator:
             else:
                 logger.info(
                     "WIRING motion_plan turn_id=%s inline_anim_detected=%s inline_plan_valid=%s "
-                    "inline_mode=%s route=secondary_request",
+                    "inline_mode=%s route=inline_primary",
                     turn_id or "",
                     inline_anim_detected,
                     inline_plan is not None,
                     inline_mode or "",
                 )
 
-        schedule_text = reply_text
-        if not schedule_text and inline_anim_detected and inline_plan is None:
-            schedule_text = str(getattr(self.session_state, "last_user_text", "") or "").strip()
-        if schedule_text:
-            self._schedule_realtime_motion_plan_preview(
-                reply_text=schedule_text,
-                origin_turn_id=turn_id,
+        inline_dispatched = False
+        if isinstance(inline_plan, dict):
+            inline_mode_resolved = str(inline_mode or "inline").strip() or "inline"
+            inline_dispatched = await self.broadcast_motion_plan_preview(
+                plan=inline_plan,
+                mode=inline_mode_resolved,
+                source="engine.inline_motion_plan",
+                turn_id=turn_id,
             )
+            if not inline_dispatched:
+                logger.warning(
+                    "WIRING motion_plan turn_id=%s inline_plan_dispatch_failed=true "
+                    "route=secondary_request",
+                    turn_id or "",
+                )
+
+        if not inline_dispatched:
+            schedule_text = reply_text
+            if not schedule_text and inline_anim_detected and inline_plan is None:
+                schedule_text = str(getattr(self.session_state, "last_user_text", "") or "").strip()
+            if schedule_text:
+                self._schedule_realtime_motion_plan_preview(
+                    reply_text=schedule_text,
+                    origin_turn_id=turn_id,
+                )
 
         if picture_paths:
             await self._send_json(
@@ -482,8 +499,9 @@ class TurnCoordinator:
         )
         if sent:
             logger.info(
-                "Broadcasted engine motion plan preview from debug ingress "
-                "(mode=%s, turn_id=%s).",
+                "Broadcasted engine motion plan "
+                "(source=%s, mode=%s, turn_id=%s).",
+                payload["source"],
                 payload["mode"],
                 resolved_turn_id or "",
             )

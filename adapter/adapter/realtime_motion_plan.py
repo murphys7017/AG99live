@@ -36,6 +36,131 @@ _SYSTEM_PROMPT = (
     "Return strict JSON only."
 )
 
+_DEFAULT_SELECTOR_PLATFORM_DESCRIPTION = (
+    "Source platform: AstrBot through AG99live desktop adapter.\n"
+    "Interaction pattern: one user sends short text/voice turns and expects immediate assistant replies.\n"
+    "Avatar behavior goal: natural and readable facial/head cues that support the turn meaning.\n"
+    "Execution constraint: downstream playback is clip-based Live2D atom triggering, so avoid over-dense axes."
+)
+
+
+def _build_example_axes(**overrides: int) -> dict[str, int]:
+    axes = {axis.name: 50 for axis in AXES}
+    for key, value in overrides.items():
+        if key not in axes:
+            continue
+        try:
+            number = int(round(float(value)))
+        except (TypeError, ValueError):
+            number = 50
+        axes[key] = max(0, min(100, number))
+    return axes
+
+
+DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES: list[dict[str, Any]] = [
+    {
+        "input": (
+            "User: 嗯，我知道了。\n"
+            "Assistant: 好的，我们继续下一步。"
+        ),
+        "output": {
+            "emotion": "neutral",
+            "mode": "parallel",
+            "duration_ms": 1100,
+            "axes": _build_example_axes(
+                head_pitch=52,
+                eye_open_left=54,
+                eye_open_right=54,
+                mouth_smile=56,
+                brow_bias=52,
+            ),
+        },
+    },
+    {
+        "input": (
+            "User: 太好了！终于通过了！\n"
+            "Assistant: 真棒，我们成功了！"
+        ),
+        "output": {
+            "emotion": "joy",
+            "mode": "parallel",
+            "duration_ms": 1350,
+            "axes": _build_example_axes(
+                head_pitch=60,
+                body_roll=58,
+                gaze_y=58,
+                eye_open_left=66,
+                eye_open_right=66,
+                mouth_open=72,
+                mouth_smile=86,
+                brow_bias=68,
+            ),
+        },
+    },
+    {
+        "input": (
+            "User: 我有点难过，今天状态不太好。\n"
+            "Assistant: 没关系，我们慢慢来。"
+        ),
+        "output": {
+            "emotion": "sad",
+            "mode": "sequential",
+            "duration_ms": 1500,
+            "axes": _build_example_axes(
+                head_pitch=38,
+                body_roll=44,
+                gaze_y=34,
+                eye_open_left=40,
+                eye_open_right=40,
+                mouth_open=36,
+                mouth_smile=22,
+                brow_bias=30,
+            ),
+        },
+    },
+    {
+        "input": (
+            "User: 你这次真的有点过分了。\n"
+            "Assistant: 我理解你的不满，我来马上修正。"
+        ),
+        "output": {
+            "emotion": "tense",
+            "mode": "parallel",
+            "duration_ms": 1250,
+            "axes": _build_example_axes(
+                head_pitch=44,
+                body_yaw=55,
+                gaze_x=52,
+                eye_open_left=46,
+                eye_open_right=46,
+                mouth_open=42,
+                mouth_smile=26,
+                brow_bias=18,
+            ),
+        },
+    },
+    {
+        "input": (
+            "User: 啊？你说这个现在就能用了？\n"
+            "Assistant: 是的，现在已经可用了。"
+        ),
+        "output": {
+            "emotion": "surprised",
+            "mode": "parallel",
+            "duration_ms": 1200,
+            "axes": _build_example_axes(
+                head_pitch=62,
+                gaze_y=64,
+                eye_open_left=88,
+                eye_open_right=88,
+                mouth_open=78,
+                mouth_smile=58,
+                brow_bias=84,
+            ),
+        },
+    },
+]
+
 
 class RealtimeMotionPlanGenerator:
     def __init__(self, *, runtime_state: Any) -> None:
@@ -56,8 +181,15 @@ class RealtimeMotionPlanGenerator:
         if not isinstance(library, dict):
             return None
 
-        context_text = build_selector_context(user_text=user_text, assistant_text=assistant_text)
-        selector_raw = await self._call_astrbot_selector(context_text)
+        context_text = build_selector_context(
+            user_text=user_text,
+            assistant_text=assistant_text,
+            platform_context=build_selector_platform_context(runtime_state=self.runtime_state),
+        )
+        selector_raw = await self._call_astrbot_selector(
+            context_text,
+            few_shot_examples=resolve_selector_few_shot_examples(runtime_state=self.runtime_state),
+        )
         selector = normalize_selector_output(selector_raw)
         plan = build_plan_from_axes(selector, library=library)
         steps = plan.get("steps")
@@ -65,7 +197,12 @@ class RealtimeMotionPlanGenerator:
             return None
         return plan
 
-    async def _call_astrbot_selector(self, context_text: str) -> dict[str, Any]:
+    async def _call_astrbot_selector(
+        self,
+        context_text: str,
+        *,
+        few_shot_examples: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         provider = getattr(self.runtime_state, "selected_motion_analysis_provider", None)
         if provider is None:
             raise RuntimeError(
@@ -76,7 +213,10 @@ class RealtimeMotionPlanGenerator:
         timeout = float(getattr(self.runtime_state, "realtime_motion_timeout_seconds", 8.0) or 8.0)
         response = await asyncio.wait_for(
             provider.text_chat(
-                prompt=build_selector_user_prompt(context_text),
+                prompt=build_selector_user_prompt(
+                    context_text,
+                    few_shot_examples=few_shot_examples,
+                ),
                 system_prompt=_SYSTEM_PROMPT,
             ),
             timeout=timeout,
@@ -109,28 +249,103 @@ def resolve_selected_parameter_action_library(model_info: Any) -> dict[str, Any]
     return None
 
 
-def build_selector_context(*, user_text: str, assistant_text: str) -> str:
+def build_selector_platform_context(*, runtime_state: Any) -> str:
+    enabled = bool(getattr(runtime_state, "realtime_motion_platform_context_enabled", True))
+    if not enabled:
+        return ""
+
+    custom_description = str(
+        getattr(runtime_state, "realtime_motion_platform_description", "") or ""
+    ).strip()
+    if custom_description:
+        return _truncate_text(custom_description, 720)
+
+    platform_config = getattr(runtime_state, "platform_config", {})
+    adapter_alias = "AG99live Desktop"
+    if isinstance(platform_config, dict):
+        configured_alias = str(platform_config.get("conf_name") or "").strip()
+        if configured_alias:
+            adapter_alias = configured_alias
+
+    client_uid = str(getattr(runtime_state, "client_uid", "") or "").strip() or "desktop-client"
+    return (
+        f"{_DEFAULT_SELECTOR_PLATFORM_DESCRIPTION}\n"
+        f"Adapter alias: {adapter_alias}.\n"
+        f"Session target: {client_uid}."
+    )
+
+
+def resolve_selector_few_shot_examples(*, runtime_state: Any) -> list[dict[str, Any]]:
+    enabled = bool(getattr(runtime_state, "realtime_motion_fewshot_enabled", True))
+    if not enabled:
+        return []
+
+    max_count = len(DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES)
+    count_raw = getattr(runtime_state, "realtime_motion_fewshot_count", 4)
+    try:
+        count = int(round(float(count_raw)))
+    except (TypeError, ValueError):
+        count = 4
+    count = max(0, min(count, max_count))
+    if count == 0:
+        return []
+    return DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES[:count]
+
+
+def build_selector_context(
+    *,
+    user_text: str,
+    assistant_text: str,
+    platform_context: str = "",
+) -> str:
     user = (user_text or "").strip()
     assistant = (assistant_text or "").strip()
+    normalized_platform_context = (platform_context or "").strip()
+    prefix = ""
+    if normalized_platform_context:
+        prefix = (
+            "Platform context:\n"
+            f"{_truncate_text(normalized_platform_context, 760)}\n\n"
+        )
 
     if user and assistant:
-        return (
+        return prefix + (
             "Generate expression controls for this dialog turn.\n"
             f"User: {_truncate_text(user, 260)}\n"
             f"Assistant: {_truncate_text(assistant, 320)}"
         )
     if assistant:
-        return _truncate_text(assistant, 360)
-    return _truncate_text(user, 360)
+        return prefix + _truncate_text(assistant, 360)
+    return prefix + _truncate_text(user, 360)
 
 
-def build_selector_user_prompt(text: str) -> str:
+def build_selector_user_prompt(
+    text: str,
+    *,
+    few_shot_examples: list[dict[str, Any]] | None = None,
+) -> str:
     lines: list[str] = []
     for axis in AXES:
         lines.append(
             f"- {axis.name}: 0={axis.low_label}, 50={axis.mid_label}, 100={axis.high_label}"
         )
     axis_block = "\n".join(lines)
+    few_shot_block = ""
+    normalized_examples = [item for item in (few_shot_examples or []) if isinstance(item, dict)]
+    if normalized_examples:
+        few_shot_lines = ["Few-shot examples (style reference, do not copy literally):"]
+        for index, item in enumerate(normalized_examples, start=1):
+            input_text = _truncate_text(str(item.get("input") or "").strip(), 560)
+            output_payload = item.get("output")
+            output_json = json.dumps(
+                output_payload if isinstance(output_payload, dict) else {},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            few_shot_lines.append(f"Example {index} input:\n{input_text}")
+            few_shot_lines.append(f"Example {index} output JSON:\n{output_json}")
+        few_shot_block = "\n".join(few_shot_lines) + "\n\n"
+
     return (
         "Given text, choose axis values in [0,100] for an avatar.\n"
         f"Axes:\n{axis_block}\n\n"
@@ -146,6 +361,7 @@ def build_selector_user_prompt(text: str) -> str:
         "- Use integers only.\n"
         "- Keep subtle unless text is intense.\n"
         "- If uncertain, stay around 45~55.\n\n"
+        f"{few_shot_block}"
         f"Text: {text}"
     )
 
@@ -192,6 +408,13 @@ def build_plan_from_axes(
     atoms = [atom for atom in raw_atoms if isinstance(atom, dict)] if isinstance(raw_atoms, list) else []
     axes = selector_output.get("axes")
     axis_values = axes if isinstance(axes, dict) else {}
+    base_sequential_gap_ms = 120
+    duration_ms_raw = selector_output.get("duration_ms", 1200)
+    try:
+        target_duration_ms = int(round(float(duration_ms_raw)))
+    except (TypeError, ValueError):
+        target_duration_ms = 1200
+    target_duration_ms = max(400, min(6000, target_duration_ms))
 
     steps: list[dict[str, Any]] = []
     cursor_ms = 0
@@ -242,7 +465,7 @@ def build_plan_from_axes(
         )
 
         if mode == "sequential":
-            cursor_ms += duration_ms + 120
+            cursor_ms += duration_ms + base_sequential_gap_ms
 
     if not steps:
         fallback_atom = _pick_fallback_atom(atoms)
@@ -262,6 +485,30 @@ def build_plan_from_axes(
                 }
             )
 
+    unscaled_total_duration_ms = max([step["start_ms"] + step["duration_ms"] for step in steps] + [0])
+    if unscaled_total_duration_ms <= 0:
+        duration_scale = 1.0
+    else:
+        duration_scale = target_duration_ms / float(unscaled_total_duration_ms)
+    duration_scale = max(0.25, min(duration_scale, 3.0))
+    duration_scale = round(duration_scale, 4)
+
+    scaled_sequential_gap_ms = max(40, int(round(base_sequential_gap_ms * duration_scale)))
+    if mode == "sequential":
+        cursor_ms = 0
+        for step in steps:
+            step_duration = max(120, int(round(float(step.get("duration_ms") or 0) * duration_scale)))
+            step["start_ms"] = cursor_ms
+            step["duration_ms"] = step_duration
+            cursor_ms += step_duration + scaled_sequential_gap_ms
+    else:
+        for step in steps:
+            step["start_ms"] = max(0, int(round(float(step.get("start_ms") or 0) * duration_scale)))
+            step["duration_ms"] = max(
+                120,
+                int(round(float(step.get("duration_ms") or 0) * duration_scale)),
+            )
+
     total_duration_ms = max([step["start_ms"] + step["duration_ms"] for step in steps] + [0])
     return {
         "schema_version": "engine.motion_plan_preview.v1",
@@ -275,9 +522,10 @@ def build_plan_from_axes(
             }
         ),
         "parameters": {
-            "duration_scale": 1.0,
+            "target_duration_ms": target_duration_ms,
+            "duration_scale": duration_scale,
             "intensity_scale": 1.0,
-            "sequential_gap_ms": 120,
+            "sequential_gap_ms": scaled_sequential_gap_ms,
             "emotion_label": str(selector_output.get("emotion") or "neutral"),
         },
         "summary": {

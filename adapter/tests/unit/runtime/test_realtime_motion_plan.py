@@ -109,7 +109,80 @@ def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
     assert plan["steps"][0]["atom_id"] == "head_yaw.positive.01"
     assert provider.called is True
     assert "Given text, choose axis values in [0,100] for an avatar." in provider.last_prompt
+    assert "Platform context:" in provider.last_prompt
+    assert "Few-shot examples (style reference, do not copy literally):" in provider.last_prompt
     assert "Return strict JSON only." in provider.last_system_prompt
+
+
+def test_realtime_motion_plan_generator_prompt_switches_off_context_and_few_shot() -> None:
+    class ProviderStub:
+        def __init__(self) -> None:
+            self.last_prompt = ""
+
+        async def text_chat(self, *, prompt: str, system_prompt: str):
+            del system_prompt
+            self.last_prompt = prompt
+
+            class Response:
+                completion_text = (
+                    '{"emotion":"neutral","mode":"parallel","duration_ms":1000,'
+                    '"axes":{"head_yaw":50}}'
+                )
+
+            return Response()
+
+    provider = ProviderStub()
+
+    class RuntimeStub:
+        enable_realtime_motion_plan = True
+        model_info = {
+            "selected_model": "Model-A",
+            "models": [
+                {
+                    "name": "Model-A",
+                    "parameter_action_library": _build_seed_parameter_action_library(),
+                }
+            ],
+        }
+        selected_motion_analysis_provider = provider
+        realtime_motion_timeout_seconds = 2.0
+        realtime_motion_fewshot_enabled = False
+        realtime_motion_platform_context_enabled = False
+
+    generator = RealtimeMotionPlanGenerator(runtime_state=RuntimeStub())
+    plan = asyncio.run(
+        generator.generate(
+            user_text="好的",
+            assistant_text="明白了",
+        )
+    )
+
+    assert isinstance(plan, dict)
+    assert "Few-shot examples (style reference, do not copy literally):" not in provider.last_prompt
+    assert "Platform context:" not in provider.last_prompt
+
+
+def test_build_plan_from_axes_applies_selector_duration_target() -> None:
+    selector = normalize_selector_output(
+        {
+            "emotion": "happy",
+            "mode": "parallel",
+            "duration_ms": 2400,
+            "axes": {
+                "head_yaw": 90,
+            },
+        }
+    )
+    library = _build_seed_parameter_action_library()
+
+    plan = build_plan_from_axes(selector, library=library)
+    params = plan.get("parameters", {})
+    summary = plan.get("summary", {})
+
+    assert params.get("target_duration_ms") == 2400
+    assert isinstance(params.get("duration_scale"), float)
+    assert float(params.get("duration_scale") or 0.0) > 1.0
+    assert int(summary.get("total_duration_ms") or 0) >= 2000
 
 
 def _build_seed_parameter_action_library() -> dict:

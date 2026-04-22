@@ -63,6 +63,10 @@ class RuntimeState:
         self.enable_realtime_motion_plan = True
         self.realtime_motion_mode = "realtime"
         self.realtime_motion_timeout_seconds = 8.0
+        self.realtime_motion_fewshot_enabled = True
+        self.realtime_motion_fewshot_count = 4
+        self.realtime_motion_platform_context_enabled = True
+        self.realtime_motion_platform_description = ""
         self.vad_model = "silero_vad"
         self.vad_config: dict[str, Any] = {}
         self.model_info: dict[str, Any] = {}
@@ -173,6 +177,31 @@ class RuntimeState:
             float(_plugin_config_get(self.plugin_config, "realtime_motion_timeout_seconds", 8.0)),
             1.0,
         )
+        self.realtime_motion_fewshot_enabled = bool(
+            _plugin_config_get(self.plugin_config, "realtime_motion_fewshot_enabled", True)
+        )
+        self.realtime_motion_fewshot_count = max(
+            0,
+            min(
+                int(_plugin_config_get(self.plugin_config, "realtime_motion_fewshot_count", 4)),
+                8,
+            ),
+        )
+        self.realtime_motion_platform_context_enabled = bool(
+            _plugin_config_get(
+                self.plugin_config,
+                "realtime_motion_platform_context_enabled",
+                True,
+            )
+        )
+        self.realtime_motion_platform_description = str(
+            _plugin_config_get(
+                self.plugin_config,
+                "realtime_motion_platform_description",
+                "",
+            )
+            or ""
+        ).strip()
         self.vad_model = _plugin_config_get(self.plugin_config, "vad_model", "silero_vad")
         self.vad_config = {
             "orig_sr": 16000,
