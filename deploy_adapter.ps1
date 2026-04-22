@@ -95,7 +95,7 @@ if (-not $ResolvedTargetPluginRoot.StartsWith($ResolvedPluginsRoot, [System.Stri
     throw "Resolved target path escapes plugins root: $ResolvedTargetPluginRoot"
 }
 
-$PreserveDirectories = @()
+$PreserveDirectories = @("debug_exports")
 $SkipDirectoryNames = @("__pycache__", ".git", ".venv")
 $SkipFilePatterns = @("*.pyc")
 $ManagedRelativeFiles = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -108,6 +108,9 @@ Invoke-LoggedAction -Description "Ensure target plugin directory exists: $Resolv
 $sourceDirectories = Get-ChildItem -LiteralPath $SourcePluginRoot -Recurse -Directory | Where-Object {
     $relativePath = Get-RelativePathCompat -BasePath $SourcePluginRoot -TargetPath $_.FullName
     if ([string]::IsNullOrWhiteSpace($relativePath)) {
+        return $false
+    }
+    if (Test-ShouldSkipRelativePath -RelativePath $relativePath -PreserveDirectories $PreserveDirectories) {
         return $false
     }
     $segments = $relativePath -split "[\\/]+"

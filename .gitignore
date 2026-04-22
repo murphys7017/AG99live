@@ -15,3 +15,5 @@ __pycache__/
 *.pyc
 *.tsbuildinfo
 adapter/debug_exports/
+*.ipynb
+analysis/
