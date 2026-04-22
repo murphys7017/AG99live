@@ -63,6 +63,14 @@ export class LAppAdapter {
     return this.getModel()?.startMotion(group, no, priority, onFinishedMotionHandler) ?? InvalidMotionQueueEntryHandleValue;
   }
 
+  public startDirectParameterPlan(plan: unknown): boolean {
+    return this.getModel()?.startDirectParameterPlan(plan) ?? false;
+  }
+
+  public stopDirectParameterPlan(): void {
+    this.getModel()?.stopDirectParameterPlan();
+  }
+
   /* expression */
 
   public getExpressionCount(): number {

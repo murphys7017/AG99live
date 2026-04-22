@@ -7,6 +7,7 @@ from adapter.realtime_motion_plan import (
     build_plan_from_axes,
     normalize_selector_output,
     resolve_selected_parameter_action_library,
+    validate_parameter_plan_payload,
 )
 
 
@@ -36,14 +37,17 @@ def test_build_plan_from_axes_uses_parameter_action_library_atoms() -> None:
     library = _build_seed_parameter_action_library()
 
     plan = build_plan_from_axes(selector, library=library)
-    steps = plan.get("steps")
-    assert isinstance(steps, list)
-    assert steps
-    assert steps[0]["atom_id"] == "head_yaw.positive.01"
-    assert steps[0]["channel"] == "head_yaw"
+    valid, reason = validate_parameter_plan_payload(plan)
+    assert valid is True
+    assert reason == ""
+    assert plan["schema_version"] == "engine.parameter_plan.v1"
+    assert plan["mode"] == "expressive"
+    assert len(plan["supplementary_params"]) >= 1
+    assert plan["supplementary_params"][0]["parameter_id"] == "ParamCheek"
+    assert plan["supplementary_params"][0]["channel"] == "head_yaw"
 
 
-def test_build_plan_from_axes_falls_back_to_best_atom_when_all_axes_neutral() -> None:
+def test_build_plan_from_axes_outputs_idle_mode_when_all_axes_in_deadzone() -> None:
     selector = normalize_selector_output(
         {
             "emotion": "neutral",
@@ -54,10 +58,11 @@ def test_build_plan_from_axes_falls_back_to_best_atom_when_all_axes_neutral() ->
     library = _build_seed_parameter_action_library()
 
     plan = build_plan_from_axes(selector, library=library)
-    steps = plan.get("steps")
-    assert isinstance(steps, list)
-    assert len(steps) == 1
-    assert steps[0]["atom_id"] == "head_yaw.positive.01"
+    valid, reason = validate_parameter_plan_payload(plan)
+    assert valid is True
+    assert reason == ""
+    assert plan["mode"] == "idle"
+    assert plan["supplementary_params"] == []
 
 
 def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
@@ -105,8 +110,11 @@ def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
         )
     )
     assert isinstance(plan, dict)
-    assert len(plan.get("steps", [])) >= 1
-    assert plan["steps"][0]["atom_id"] == "head_yaw.positive.01"
+    valid, reason = validate_parameter_plan_payload(plan)
+    assert valid is True
+    assert reason == ""
+    assert plan["mode"] == "expressive"
+    assert len(plan.get("supplementary_params", [])) >= 1
     assert provider.called is True
     assert "Given text, choose axis values in [0,100] for an avatar." in provider.last_prompt
     assert "Platform context:" in provider.last_prompt
@@ -176,13 +184,63 @@ def test_build_plan_from_axes_applies_selector_duration_target() -> None:
     library = _build_seed_parameter_action_library()
 
     plan = build_plan_from_axes(selector, library=library)
-    params = plan.get("parameters", {})
-    summary = plan.get("summary", {})
+    assert plan["timing"]["duration_ms"] == 2400
+    assert plan["timing"]["blend_in_ms"] > 0
+    assert plan["timing"]["hold_ms"] > 0
+    assert plan["timing"]["blend_out_ms"] > 0
 
-    assert params.get("target_duration_ms") == 2400
-    assert isinstance(params.get("duration_scale"), float)
-    assert float(params.get("duration_scale") or 0.0) > 1.0
-    assert int(summary.get("total_duration_ms") or 0) >= 2000
+
+def test_validate_parameter_plan_payload_rejects_invalid_key_axes() -> None:
+    invalid_plan = {
+        "schema_version": "engine.parameter_plan.v1",
+        "mode": "expressive",
+        "emotion_label": "test",
+        "timing": {
+            "duration_ms": 1200,
+            "blend_in_ms": 120,
+            "hold_ms": 800,
+            "blend_out_ms": 280,
+        },
+        "key_axes": {
+            "head_yaw": {"value": 50},
+        },
+        "supplementary_params": [],
+    }
+
+    valid, reason = validate_parameter_plan_payload(invalid_plan)
+    assert valid is False
+    assert reason == "key_axes_count_mismatch"
+
+
+def test_validate_parameter_plan_payload_rejects_missing_supplementary_fields() -> None:
+    valid_plan = build_plan_from_axes(
+        normalize_selector_output(
+            {
+                "emotion": "happy",
+                "mode": "parallel",
+                "axes": {
+                    "head_yaw": 88,
+                },
+            }
+        ),
+        library=_build_seed_parameter_action_library(),
+    )
+
+    broken_plan = {
+        **valid_plan,
+        "supplementary_params": [
+            {
+                "parameter_id": "ParamCheek",
+                "target_value": 0.4,
+                "weight": 0.6,
+                "source_atom_id": "",
+                "channel": "head_yaw",
+            }
+        ],
+    }
+    valid, reason = validate_parameter_plan_payload(broken_plan)
+    assert valid is False
+    assert reason == "supplementary_source_atom_id_empty"
 
 
 def _build_seed_parameter_action_library() -> dict:
@@ -196,6 +254,7 @@ def _build_seed_parameter_action_library() -> dict:
                 "score": 4.0,
                 "energy_score": 5.0,
                 "duration": 0.7,
+                "parameter_id": "ParamCheek",
                 "source_motion": "HappyTurn",
                 "source_file": "Motions/HappyTurn.motion3.json",
                 "source_group": "Idle",
@@ -210,6 +269,7 @@ def _build_seed_parameter_action_library() -> dict:
                 "score": 3.0,
                 "energy_score": 4.0,
                 "duration": 0.6,
+                "parameter_id": "ParamCheek",
                 "source_motion": "SadTurn",
                 "source_file": "Motions/SadTurn.motion3.json",
                 "source_group": "Idle",
@@ -224,6 +284,7 @@ def _build_seed_parameter_action_library() -> dict:
                 "score": 2.5,
                 "energy_score": 2.0,
                 "duration": 0.5,
+                "parameter_id": "ParamMouthForm",
                 "source_motion": "TalkOpen",
                 "source_file": "Motions/TalkOpen.motion3.json",
                 "source_group": "Talk",

@@ -1,56 +1,63 @@
-import { reactive, readonly } from "vue";
-import type { ModelSummary, MotionConstraint } from "../types/protocol";
+﻿import { reactive, readonly } from "vue";
+import type { ModelSummary } from "../types/protocol";
 
 type PreviewPlayerStatus = "idle" | "playing" | "finished" | "failed";
 
-interface ParsedMotionPlanStep {
-  atomId: string;
+const AXIS_NAMES = [
+  "head_yaw",
+  "head_roll",
+  "head_pitch",
+  "body_yaw",
+  "body_roll",
+  "gaze_x",
+  "gaze_y",
+  "eye_open_left",
+  "eye_open_right",
+  "mouth_open",
+  "mouth_smile",
+  "brow_bias",
+] as const;
+
+type AxisName = (typeof AXIS_NAMES)[number];
+
+interface ParameterAxisValue {
+  value: number;
+}
+
+interface SupplementaryParam {
+  parameter_id: string;
+  target_value: number;
+  weight: number;
+  source_atom_id: string;
   channel: string;
-  startMs: number;
-  durationMs: number;
-  intensity: number;
-  sourceMotion: string;
-  sourceFile: string;
-  sourceGroup: string;
 }
 
-interface ParsedMotionPlanParameters {
-  durationScale: number;
-  intensityScale: number;
-  sequentialGapMs: number;
-  targetDurationMs: number;
-  durationScaleApplied: boolean;
+interface ParameterPlanTiming {
+  duration_ms: number;
+  blend_in_ms: number;
+  hold_ms: number;
+  blend_out_ms: number;
 }
 
-interface ParsedMotionPlan {
-  mode: "parallel" | "sequential";
-  steps: ParsedMotionPlanStep[];
+interface ParameterPlan {
+  schema_version: "engine.parameter_plan.v1";
+  mode: "expressive" | "idle";
+  emotion_label: string;
+  timing: ParameterPlanTiming;
+  key_axes: Record<AxisName, ParameterAxisValue>;
+  supplementary_params: SupplementaryParam[];
+}
+
+interface ParsedParameterPlan {
+  plan: ParameterPlan;
   totalDurationMs: number;
-  parameters: ParsedMotionPlanParameters;
-}
-
-interface MotionIndexEntry {
-  motion: MotionConstraint;
-  group: string;
-  indexInGroup: number;
-  normalizedFile: string;
-  normalizedFileBase: string;
-  normalizedFileStem: string;
-  normalizedName: string;
-  normalizedNameBase: string;
-  normalizedNameStem: string;
-}
-
-interface MotionIndex {
-  entries: MotionIndexEntry[];
-  byGroup: Map<string, MotionIndexEntry[]>;
 }
 
 const state = reactive({
   status: "idle" as PreviewPlayerStatus,
   message: "等待播放动作计划。",
-  runningSteps: 0,
-  totalSteps: 0,
+  keyAxesCount: 0,
+  supplementaryCount: 0,
   startedAt: "",
   finishedAt: "",
 });
@@ -62,279 +69,124 @@ function normalizeText(value: unknown): string {
   return String(value ?? "").trim();
 }
 
-function normalizePath(value: string): string {
-  return normalizeText(value).replace(/\\/g, "/").toLowerCase();
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
-function normalizeGroup(value: string): string {
-  return normalizeText(value).toLowerCase();
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function basename(pathValue: string): string {
-  const normalized = normalizePath(pathValue);
-  if (!normalized) {
-    return "";
-  }
-  const segments = normalized.split("/");
-  return segments[segments.length - 1] ?? "";
-}
-
-function stripJsonSuffix(value: string): string {
-  return normalizePath(value)
-    .replace(/\.motion3\.json$/i, "")
-    .replace(/\.json$/i, "");
-}
-
-function normalizeScale(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return fallback;
-  }
-  return Math.max(0.1, Math.min(parsed, 5));
-}
-
-function parseMotionPlan(plan: unknown): ParsedMotionPlan | null {
-  if (!plan || typeof plan !== "object") {
+function parseParameterPlan(plan: unknown): ParsedParameterPlan | null {
+  if (!isObject(plan)) {
     return null;
   }
 
-  const rawPlan = plan as {
-    mode?: unknown;
-    steps?: unknown;
-    parameters?: unknown;
-  };
-  const mode = rawPlan.mode === "sequential" ? "sequential" : "parallel";
-  const rawParameters =
-    rawPlan.parameters && typeof rawPlan.parameters === "object"
-      ? (rawPlan.parameters as Record<string, unknown>)
-      : {};
-  const durationScale = normalizeScale(rawParameters.duration_scale, 1);
-  const intensityScale = normalizeScale(rawParameters.intensity_scale, 1);
-  const targetDurationMs = Math.max(
-    0,
-    Math.round(Number(rawParameters.target_duration_ms ?? 0) || 0),
-  );
-  const sequentialGapMs = Math.max(
-    0,
-    Math.round(Number(rawParameters.sequential_gap_ms ?? 0) || 0),
-  );
-  const rawSteps = Array.isArray(rawPlan.steps) ? rawPlan.steps : [];
-  const normalizedRawSteps = rawSteps
-    .map((item) => {
-      if (!item || typeof item !== "object") {
-        return null;
-      }
-      const rawStep = item as Record<string, unknown>;
-      return {
-        atomId: normalizeText(rawStep.atom_id),
-        channel: normalizeText(rawStep.channel),
-        startMs: Math.max(0, Math.round(Number(rawStep.start_ms ?? 0) || 0)),
-        durationMs: Math.max(80, Math.round(Number(rawStep.duration_ms ?? 0) || 0)),
-        intensityRaw: Number(rawStep.intensity ?? 1),
-        sourceMotion: normalizeText(rawStep.source_motion),
-        sourceFile: normalizeText(rawStep.source_file),
-        sourceGroup: normalizeText(rawStep.source_group),
-      };
-    })
-    .filter((item): item is NonNullable<typeof item> => Boolean(item));
-
-  const rawTotalDurationMs = Math.max(
-    ...normalizedRawSteps.map((step) => step.startMs + step.durationMs),
-    0,
-  );
-
-  let applyDurationScale = durationScale !== 1;
-  if (applyDurationScale && targetDurationMs > 0 && rawTotalDurationMs > 0) {
-    const projectedDurationMs = rawTotalDurationMs * durationScale;
-    const rawDistance = Math.abs(rawTotalDurationMs - targetDurationMs);
-    const scaledDistance = Math.abs(projectedDurationMs - targetDurationMs);
-    applyDurationScale = scaledDistance + 40 < rawDistance;
+  if (normalizeText(plan.schema_version) !== "engine.parameter_plan.v1") {
+    return null;
   }
 
-  const resolvedDurationScale = applyDurationScale ? durationScale : 1;
+  const modeRaw = normalizeText(plan.mode).toLowerCase();
+  if (modeRaw !== "expressive" && modeRaw !== "idle") {
+    return null;
+  }
+  const mode = modeRaw as ParameterPlan["mode"];
 
-  let steps: ParsedMotionPlanStep[] = normalizedRawSteps
-    .map((rawStep) => {
-      const startMs = Math.max(0, Math.round(rawStep.startMs * resolvedDurationScale));
-      const durationMs = Math.max(80, Math.round(rawStep.durationMs * resolvedDurationScale));
-      const intensity = rawStep.intensityRaw * intensityScale;
-      const normalizedIntensity = Number.isFinite(intensity)
-        ? Math.max(0.05, Math.min(intensity, 3))
-        : 1;
+  const timingRaw = plan.timing;
+  if (!isObject(timingRaw)) {
+    return null;
+  }
 
-      return {
-        atomId: rawStep.atomId,
-        channel: rawStep.channel,
-        startMs,
-        durationMs,
-        intensity: Number(normalizedIntensity.toFixed(3)),
-        sourceMotion: rawStep.sourceMotion,
-        sourceFile: rawStep.sourceFile,
-        sourceGroup: rawStep.sourceGroup,
-      } satisfies ParsedMotionPlanStep;
-    })
-    .filter((item): item is ParsedMotionPlanStep => Boolean(item))
-    .sort((left, right) => left.startMs - right.startMs);
+  const durationMs = timingRaw.duration_ms;
+  const blendInMs = timingRaw.blend_in_ms;
+  const holdMs = timingRaw.hold_ms;
+  const blendOutMs = timingRaw.blend_out_ms;
+  if (
+    !isFiniteNumber(durationMs)
+    || !isFiniteNumber(blendInMs)
+    || !isFiniteNumber(holdMs)
+    || !isFiniteNumber(blendOutMs)
+  ) {
+    return null;
+  }
+  if (durationMs < 0 || blendInMs < 0 || holdMs < 0 || blendOutMs < 0) {
+    return null;
+  }
 
-  if (mode === "sequential" && steps.length > 1 && sequentialGapMs > 0) {
-    let previousEndMs = 0;
-    steps = steps.map((step, index) => {
-      if (index === 0) {
-        previousEndMs = step.startMs + step.durationMs;
-        return step;
-      }
+  const keyAxesRaw = plan.key_axes;
+  if (!isObject(keyAxesRaw)) {
+    return null;
+  }
 
-      const minStartMs = previousEndMs + sequentialGapMs;
-      const nextStep = {
-        ...step,
-        startMs: Math.max(step.startMs, minStartMs),
-      };
-      previousEndMs = nextStep.startMs + nextStep.durationMs;
-      return nextStep;
+  const keyAxes = {} as Record<AxisName, ParameterAxisValue>;
+  for (const axisName of AXIS_NAMES) {
+    const axisPayload = keyAxesRaw[axisName];
+    if (!isObject(axisPayload) || !isFiniteNumber(axisPayload.value)) {
+      return null;
+    }
+    if (axisPayload.value < 0 || axisPayload.value > 100) {
+      return null;
+    }
+    keyAxes[axisName] = { value: axisPayload.value };
+  }
+
+  const supplementaryRaw = plan.supplementary_params;
+  if (!Array.isArray(supplementaryRaw)) {
+    return null;
+  }
+
+  const supplementary: SupplementaryParam[] = [];
+  for (const item of supplementaryRaw) {
+    if (!isObject(item)) {
+      return null;
+    }
+    const parameterId = normalizeText(item.parameter_id);
+    const sourceAtomId = normalizeText(item.source_atom_id);
+    const channel = normalizeText(item.channel);
+    const targetValue = item.target_value;
+    const weight = item.weight;
+    if (!parameterId || !sourceAtomId || !channel) {
+      return null;
+    }
+    if (!isFiniteNumber(targetValue) || !isFiniteNumber(weight)) {
+      return null;
+    }
+    if (targetValue < -1 || targetValue > 1 || weight < 0 || weight > 1) {
+      return null;
+    }
+    supplementary.push({
+      parameter_id: parameterId,
+      target_value: targetValue,
+      weight,
+      source_atom_id: sourceAtomId,
+      channel,
     });
   }
 
-  if (!steps.length) {
-    return null;
-  }
-
+  const timing: ParameterPlanTiming = {
+    duration_ms: Math.round(durationMs),
+    blend_in_ms: Math.round(blendInMs),
+    hold_ms: Math.round(holdMs),
+    blend_out_ms: Math.round(blendOutMs),
+  };
   const totalDurationMs = Math.max(
-    ...steps.map((step) => step.startMs + step.durationMs),
-    0,
+    timing.duration_ms,
+    timing.blend_in_ms + timing.hold_ms + timing.blend_out_ms,
   );
+
+  const normalizedPlan: ParameterPlan = {
+    schema_version: "engine.parameter_plan.v1",
+    mode,
+    emotion_label: normalizeText(plan.emotion_label) || "neutral",
+    timing,
+    key_axes: keyAxes,
+    supplementary_params: supplementary,
+  };
 
   return {
-    mode,
-    steps,
+    plan: normalizedPlan,
     totalDurationMs,
-    parameters: {
-      durationScale,
-      intensityScale,
-      sequentialGapMs,
-      targetDurationMs,
-      durationScaleApplied: applyDurationScale,
-    },
   };
-}
-
-function buildMotionIndex(model: ModelSummary): MotionIndex {
-  const byGroup = new Map<string, MotionIndexEntry[]>();
-  const entries: MotionIndexEntry[] = [];
-  const motions = Array.isArray(model.constraints?.motions)
-    ? model.constraints.motions
-    : [];
-
-  for (const motion of motions) {
-    const normalizedGroup = normalizeGroup(motion.group);
-    const groupEntries = byGroup.get(normalizedGroup) ?? [];
-    const normalizedFile = normalizePath(motion.file);
-    const normalizedName = normalizePath(motion.name);
-    const entry: MotionIndexEntry = {
-      motion,
-      group: normalizedGroup,
-      indexInGroup: groupEntries.length,
-      normalizedFile,
-      normalizedFileBase: basename(normalizedFile),
-      normalizedFileStem: stripJsonSuffix(normalizedFile),
-      normalizedName,
-      normalizedNameBase: basename(normalizedName),
-      normalizedNameStem: stripJsonSuffix(normalizedName),
-    };
-    groupEntries.push(entry);
-    byGroup.set(normalizedGroup, groupEntries);
-    entries.push(entry);
-  }
-
-  return { entries, byGroup };
-}
-
-function matchSourceRef(entry: MotionIndexEntry, sourceRef: string): boolean {
-  const target = normalizePath(sourceRef);
-  if (!target) {
-    return false;
-  }
-
-  const targetBase = basename(target);
-  const targetStem = stripJsonSuffix(target);
-  const targetBaseStem = stripJsonSuffix(targetBase);
-
-  if (
-    entry.normalizedFile === target
-    || entry.normalizedFileBase === targetBase
-    || entry.normalizedFileStem === targetStem
-    || entry.normalizedFileStem === targetBaseStem
-  ) {
-    return true;
-  }
-
-  if (
-    entry.normalizedName === target
-    || entry.normalizedNameBase === targetBase
-    || entry.normalizedNameStem === targetStem
-    || entry.normalizedNameStem === targetBaseStem
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-function resolveStepToMotion(
-  step: ParsedMotionPlanStep,
-  motionIndex: MotionIndex,
-): MotionIndexEntry | null {
-  const sourceGroup = normalizeGroup(step.sourceGroup);
-  const scopedEntries = sourceGroup
-    ? (motionIndex.byGroup.get(sourceGroup) ?? [])
-    : motionIndex.entries;
-  const candidates = scopedEntries.length ? scopedEntries : motionIndex.entries;
-
-  if (step.sourceFile) {
-    const byFile = candidates.find((entry) => matchSourceRef(entry, step.sourceFile));
-    if (byFile) {
-      return byFile;
-    }
-  }
-
-  if (step.sourceMotion) {
-    const byMotion = candidates.find((entry) => matchSourceRef(entry, step.sourceMotion));
-    if (byMotion) {
-      return byMotion;
-    }
-  }
-
-  if (sourceGroup && scopedEntries.length) {
-    return scopedEntries[0] ?? null;
-  }
-
-  return null;
-}
-
-function resolveMotionPriority(intensity: number): number {
-  if (intensity >= 1.35) {
-    return 3;
-  }
-  if (intensity >= 0.75) {
-    return 2;
-  }
-  return 1;
-}
-
-function playMotionStep(entry: MotionIndexEntry, intensity: number): boolean {
-  const adapter = window.getLAppAdapter?.();
-  if (!adapter || typeof adapter.startMotion !== "function") {
-    return false;
-  }
-
-  const handle = adapter.startMotion(
-    entry.motion.group,
-    entry.indexInGroup,
-    resolveMotionPriority(intensity),
-  );
-  if (typeof handle === "number" && handle < 0) {
-    return false;
-  }
-  return Boolean(handle);
 }
 
 function clearActiveTimers(): void {
@@ -342,19 +194,6 @@ function clearActiveTimers(): void {
     window.clearTimeout(handle);
   }
   activeTimerHandles = [];
-}
-
-function stopPlan(reason = "stopped"): void {
-  activeRunId += 1;
-  clearActiveTimers();
-  state.runningSteps = 0;
-  if (state.status === "playing") {
-    state.status = "idle";
-    state.message = reason === "stopped"
-      ? "动作计划已停止。"
-      : `动作计划已停止（${reason}）。`;
-    state.finishedAt = new Date().toISOString();
-  }
 }
 
 function scheduleTimer(runId: number, delayMs: number, fn: () => void): void {
@@ -367,26 +206,37 @@ function scheduleTimer(runId: number, delayMs: number, fn: () => void): void {
   activeTimerHandles.push(timerHandle);
 }
 
-function playPlan(plan: unknown, model: ModelSummary | null): boolean {
-  const parsed = parseMotionPlan(plan);
+function stopPlan(reason = "stopped"): void {
+  activeRunId += 1;
+  clearActiveTimers();
+
+  const adapter = window.getLAppAdapter?.();
+  if (adapter && typeof adapter.stopDirectParameterPlan === "function") {
+    adapter.stopDirectParameterPlan();
+  }
+
+  if (state.status === "playing") {
+    state.status = "idle";
+    state.message = reason === "stopped"
+      ? "参数计划已停止。"
+      : `参数计划已停止（${reason}）。`;
+    state.finishedAt = new Date().toISOString();
+  }
+}
+
+function playPlan(plan: unknown, _model: ModelSummary | null = null): boolean {
+  const parsed = parseParameterPlan(plan);
   if (!parsed) {
     state.status = "failed";
-    state.message = "动作计划无效：缺少可用 steps。";
+    state.message = "动作计划无效：仅支持 engine.parameter_plan.v1 且必须包含完整 12 轴。";
     state.finishedAt = new Date().toISOString();
     return false;
   }
 
-  if (!model) {
+  const adapter = window.getLAppAdapter?.();
+  if (!adapter || typeof adapter.startDirectParameterPlan !== "function") {
     state.status = "failed";
-    state.message = "动作计划无法执行：当前没有已同步模型。";
-    state.finishedAt = new Date().toISOString();
-    return false;
-  }
-
-  const motionIndex = buildMotionIndex(model);
-  if (!motionIndex.entries.length) {
-    state.status = "failed";
-    state.message = "动作计划无法执行：当前模型没有可用 motion。";
+    state.message = "动作计划无法执行：Live2D 运行时未提供 Direct Parameter 接口。";
     state.finishedAt = new Date().toISOString();
     return false;
   }
@@ -395,36 +245,28 @@ function playPlan(plan: unknown, model: ModelSummary | null): boolean {
   const runId = activeRunId;
   clearActiveTimers();
 
+  if (typeof adapter.stopDirectParameterPlan === "function") {
+    adapter.stopDirectParameterPlan();
+  }
+
+  const started = adapter.startDirectParameterPlan(parsed.plan);
+  if (!started) {
+    state.status = "failed";
+    state.message = "动作计划执行失败：Direct Parameter 计划被运行时拒绝。";
+    state.finishedAt = new Date().toISOString();
+    return false;
+  }
+
   state.status = "playing";
-  const durationScaleLabel = parsed.parameters.durationScaleApplied
-    ? parsed.parameters.durationScale.toFixed(2)
-    : `${parsed.parameters.durationScale.toFixed(2)}(skip)`;
-  state.message = `正在执行动作计划（${parsed.mode}, ${parsed.steps.length} steps, duration_scale=${durationScaleLabel}, intensity_scale=${parsed.parameters.intensityScale.toFixed(2)}）...`;
-  state.runningSteps = 0;
-  state.totalSteps = parsed.steps.length;
+  state.message = `正在执行参数计划（mode=${parsed.plan.mode}, emotion=${parsed.plan.emotion_label}）...`;
+  state.keyAxesCount = AXIS_NAMES.length;
+  state.supplementaryCount = parsed.plan.supplementary_params.length;
   state.startedAt = new Date().toISOString();
   state.finishedAt = "";
 
-  let failedSteps = 0;
-
-  for (const step of parsed.steps) {
-    scheduleTimer(runId, step.startMs, () => {
-      const resolved = resolveStepToMotion(step, motionIndex);
-      if (!resolved || !playMotionStep(resolved, step.intensity)) {
-        failedSteps += 1;
-      }
-      state.runningSteps += 1;
-    });
-  }
-
-  scheduleTimer(runId, parsed.totalDurationMs + 260, () => {
-    if (failedSteps > 0) {
-      state.status = "failed";
-      state.message = `动作计划执行结束，但有 ${failedSteps} 个 step 未成功播放。`;
-    } else {
-      state.status = "finished";
-      state.message = "动作计划执行完成。";
-    }
+  scheduleTimer(runId, parsed.totalDurationMs + 40, () => {
+    state.status = "finished";
+    state.message = "参数计划执行完成。";
     state.finishedAt = new Date().toISOString();
     activeTimerHandles = [];
   });

@@ -10,6 +10,8 @@ declare global {
       getMotionGroups?: () => string[];
       getMotionCount?: (group: string) => number;
       startMotion?: (group: string, no: number, priority: number) => number;
+      startDirectParameterPlan?: (plan: unknown) => boolean;
+      stopDirectParameterPlan?: () => void;
     };
     LAppDelegate?: {
       getInstance?: () => {

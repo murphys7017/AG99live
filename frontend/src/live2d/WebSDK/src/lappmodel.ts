@@ -71,6 +71,56 @@ enum LoadStep {
   CompleteSetup,
 }
 
+const DIRECT_PARAMETER_AXIS_MAP: Record<string, string[]> = {
+  head_yaw: ["ParamAngleX", "PARAM_ANGLE_X"],
+  head_roll: ["ParamAngleZ", "PARAM_ANGLE_Z"],
+  head_pitch: ["ParamAngleY", "PARAM_ANGLE_Y"],
+  body_yaw: ["ParamBodyAngleX", "PARAM_BODY_ANGLE_X"],
+  body_roll: ["ParamBodyAngleZ", "PARAM_BODY_ANGLE_Z", "ParamBodyAngleY", "PARAM_BODY_ANGLE_Y"],
+  gaze_x: ["ParamEyeBallX", "PARAM_EYE_BALL_X"],
+  gaze_y: ["ParamEyeBallY", "PARAM_EYE_BALL_Y"],
+  eye_open_left: ["ParamEyeLOpen", "PARAM_EYE_L_OPEN"],
+  eye_open_right: ["ParamEyeROpen", "PARAM_EYE_R_OPEN"],
+  mouth_open: ["ParamMouthOpenY", "PARAM_MOUTH_OPEN_Y", "ParamMouthOpen", "PARAM_MOUTH_OPEN"],
+  mouth_smile: ["ParamMouthForm", "PARAM_MOUTH_FORM", "ParamMouthSmile", "PARAM_MOUTH_SMILE"],
+  brow_bias: ["ParamBrowLY", "PARAM_BROW_L_Y", "ParamBrowRY", "PARAM_BROW_R_Y"],
+};
+
+const DIRECT_PARAMETER_AXIS_NAMES = Object.keys(DIRECT_PARAMETER_AXIS_MAP);
+
+interface DirectParameterAxisBinding {
+  axisName: string;
+  axisValue: number;
+  parameterName: string;
+  parameterId: CubismIdHandle;
+  parameterIndex: number;
+}
+
+interface DirectSupplementaryBinding {
+  parameterIdRaw: string;
+  targetValue: number;
+  weight: number;
+  sourceAtomId: string;
+  channel: string;
+  parameterId: CubismIdHandle;
+  parameterIndex: number;
+}
+
+interface DirectParameterPlanState {
+  mode: "expressive" | "idle";
+  emotionLabel: string;
+  timing: {
+    durationMs: number;
+    blendInMs: number;
+    holdMs: number;
+    blendOutMs: number;
+    totalMs: number;
+  };
+  axisBindings: DirectParameterAxisBinding[];
+  supplementaryBindings: DirectSupplementaryBinding[];
+  startedAtMs: number;
+}
+
 /**
  * ユーザーが実際に使用するモデルの実装クラス<br>
  * モデル生成、機能コンポーネント生成、更新処理とレンダリングの呼び出しを行う。
@@ -627,6 +677,11 @@ export class LAppModel extends CubismUserModel {
     // ポーズの設定
     if (this._pose != null) {
       this._pose.updateParameters(this._model, deltaTimeSeconds);
+    }
+
+    const directPlanFailure = this.applyDirectParameterPlanOverlay();
+    if (directPlanFailure) {
+      this.stopDirectParameterPlan(directPlanFailure);
     }
 
     this._model.update();
@@ -1313,6 +1368,350 @@ export class LAppModel extends CubismUserModel {
     }
   }
 
+  public startDirectParameterPlan(plan: unknown): boolean {
+    const parsed = this.parseDirectParameterPlan(plan);
+    if (!parsed.plan) {
+      this.stopDirectParameterPlan(parsed.reason || "invalid_plan");
+      return false;
+    }
+    if (!this._model || this._state != LoadStep.CompleteSetup) {
+      this.stopDirectParameterPlan("model_not_ready");
+      return false;
+    }
+
+    const axisBindings: DirectParameterAxisBinding[] = [];
+    for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
+      const axisConfig = parsed.plan.key_axes[axisName];
+      const axisValue = Number(axisConfig?.value ?? 50);
+      const candidates = DIRECT_PARAMETER_AXIS_MAP[axisName] ?? [];
+      let resolvedBinding: DirectParameterAxisBinding | null = null;
+
+      for (const parameterName of candidates) {
+        const resolved = this.resolveWritableParameter(parameterName);
+        if (!resolved) {
+          continue;
+        }
+        resolvedBinding = {
+          axisName,
+          axisValue,
+          parameterName,
+          parameterId: resolved.parameterId,
+          parameterIndex: resolved.parameterIndex,
+        };
+        break;
+      }
+
+      if (!resolvedBinding) {
+        this.stopDirectParameterPlan(`missing_axis_parameter:${axisName}`);
+        return false;
+      }
+      axisBindings.push(resolvedBinding);
+    }
+
+    const supplementaryBindings: DirectSupplementaryBinding[] = [];
+    for (const item of parsed.plan.supplementary_params) {
+      const parameterIdRaw = String(item.parameter_id || "").trim();
+      const sourceAtomId = String(item.source_atom_id || "").trim();
+      const channel = String(item.channel || "").trim();
+      const resolved = this.resolveWritableParameter(parameterIdRaw);
+      if (!resolved) {
+        this.stopDirectParameterPlan(`missing_supplementary_parameter:${parameterIdRaw}`);
+        return false;
+      }
+
+      supplementaryBindings.push({
+        parameterIdRaw,
+        targetValue: Number(item.target_value || 0),
+        weight: Number(item.weight || 0),
+        sourceAtomId,
+        channel,
+        parameterId: resolved.parameterId,
+        parameterIndex: resolved.parameterIndex,
+      });
+    }
+
+    this._directParameterPlanState = {
+      mode: parsed.plan.mode,
+      emotionLabel: parsed.plan.emotion_label,
+      timing: parsed.timing,
+      axisBindings,
+      supplementaryBindings,
+      startedAtMs: performance.now(),
+    };
+    this._directParameterPlanError = "";
+    return true;
+  }
+
+  public stopDirectParameterPlan(reason = ""): void {
+    this._directParameterPlanState = null;
+    this._directParameterPlanError = reason ? String(reason) : "";
+    if (this._directParameterPlanError) {
+      console.error(`[APP] Direct parameter plan stopped: ${this._directParameterPlanError}`);
+    }
+  }
+
+  public getDirectParameterPlanError(): string {
+    return this._directParameterPlanError || "";
+  }
+
+  private applyDirectParameterPlanOverlay(): string | null {
+    if (!this._directParameterPlanState || !this._model) {
+      return null;
+    }
+
+    const planState = this._directParameterPlanState;
+    const elapsedMs = Math.max(0, performance.now() - planState.startedAtMs);
+    const easing = this.resolvePlanEasing(elapsedMs, planState.timing);
+
+    for (const axis of planState.axisBindings) {
+      if (!this.isParameterIndexWritable(axis.parameterIndex)) {
+        return `axis_parameter_not_writable:${axis.axisName}`;
+      }
+
+      const minValue = this._model.getParameterMinimumValue(axis.parameterIndex);
+      const maxValue = this._model.getParameterMaximumValue(axis.parameterIndex);
+      const baseValue = this._model.getParameterValueByIndex(axis.parameterIndex);
+      const targetValue = minValue + (maxValue - minValue) * (axis.axisValue / 100.0);
+      const blendedValue = baseValue + (targetValue - baseValue) * easing;
+      this._model.setParameterValueById(axis.parameterId, blendedValue);
+    }
+
+    for (const item of planState.supplementaryBindings) {
+      if (!this.isParameterIndexWritable(item.parameterIndex)) {
+        return `supplementary_parameter_not_writable:${item.parameterIdRaw}`;
+      }
+
+      const minValue = this._model.getParameterMinimumValue(item.parameterIndex);
+      const maxValue = this._model.getParameterMaximumValue(item.parameterIndex);
+      const range = maxValue - minValue;
+      const delta = item.targetValue * 0.5 * range * item.weight * easing;
+      this._model.addParameterValueById(item.parameterId, delta);
+    }
+
+    if (elapsedMs >= planState.timing.totalMs) {
+      this.stopDirectParameterPlan();
+    }
+    return null;
+  }
+
+  private resolvePlanEasing(
+    elapsedMs: number,
+    timing: DirectParameterPlanState["timing"],
+  ): number {
+    const elapsed = Math.max(0, elapsedMs);
+    const blendInMs = Math.max(0, timing.blendInMs);
+    const holdMs = Math.max(0, timing.holdMs);
+    const blendOutMs = Math.max(0, timing.blendOutMs);
+
+    if (blendInMs > 0 && elapsed < blendInMs) {
+      return this.smoothstep(elapsed / blendInMs);
+    }
+    if (elapsed < blendInMs + holdMs) {
+      return 1.0;
+    }
+    if (blendOutMs > 0 && elapsed < blendInMs + holdMs + blendOutMs) {
+      const outProgress = (elapsed - blendInMs - holdMs) / blendOutMs;
+      return this.smoothstep(Math.max(0, 1 - outProgress));
+    }
+    return 0.0;
+  }
+
+  private smoothstep(value: number): number {
+    const x = Math.max(0, Math.min(1, value));
+    return x * x * (3 - 2 * x);
+  }
+
+  private isParameterIndexWritable(parameterIndex: number): boolean {
+    if (!this._model) {
+      return false;
+    }
+    return parameterIndex >= 0 && parameterIndex < this._model.getParameterCount();
+  }
+
+  private resolveWritableParameter(parameterName: string): {
+    parameterId: CubismIdHandle;
+    parameterIndex: number;
+  } | null {
+    if (!this._model) {
+      return null;
+    }
+    const normalizedName = String(parameterName || "").trim();
+    if (!normalizedName) {
+      return null;
+    }
+    const idManager = CubismFramework.getIdManager();
+    if (!idManager) {
+      return null;
+    }
+    const parameterId = idManager.getId(normalizedName);
+    if (!parameterId) {
+      return null;
+    }
+    const parameterIndex = this._model.getParameterIndex(parameterId);
+    if (!this.isParameterIndexWritable(parameterIndex)) {
+      return null;
+    }
+    return { parameterId, parameterIndex };
+  }
+
+  private parseDirectParameterPlan(plan: unknown): {
+    plan: {
+      mode: "expressive" | "idle";
+      emotion_label: string;
+      timing: {
+        duration_ms: number;
+        blend_in_ms: number;
+        hold_ms: number;
+        blend_out_ms: number;
+      };
+      key_axes: Record<string, { value: number }>;
+      supplementary_params: Array<{
+        parameter_id: string;
+        target_value: number;
+        weight: number;
+        source_atom_id: string;
+        channel: string;
+      }>;
+    } | null;
+    timing: DirectParameterPlanState["timing"];
+    reason: string;
+  } {
+    const fail = (reason: string) => ({
+      plan: null,
+      timing: {
+        durationMs: 0,
+        blendInMs: 0,
+        holdMs: 0,
+        blendOutMs: 0,
+        totalMs: 0,
+      },
+      reason,
+    });
+
+    if (!plan || typeof plan !== "object") {
+      return fail("plan_not_object");
+    }
+
+    const payload = plan as Record<string, any>;
+    if (String(payload.schema_version || "").trim() !== "engine.parameter_plan.v1") {
+      return fail("invalid_schema_version");
+    }
+
+    const mode = String(payload.mode || "").trim().toLowerCase();
+    if (mode !== "expressive" && mode !== "idle") {
+      return fail("invalid_mode");
+    }
+
+    const timingPayload = payload.timing;
+    if (!timingPayload || typeof timingPayload !== "object") {
+      return fail("timing_not_object");
+    }
+    const durationMs = Number(timingPayload.duration_ms);
+    const blendInMs = Number(timingPayload.blend_in_ms);
+    const holdMs = Number(timingPayload.hold_ms);
+    const blendOutMs = Number(timingPayload.blend_out_ms);
+    if (
+      !Number.isFinite(durationMs)
+      || !Number.isFinite(blendInMs)
+      || !Number.isFinite(holdMs)
+      || !Number.isFinite(blendOutMs)
+    ) {
+      return fail("timing_not_number");
+    }
+    if (durationMs < 0 || blendInMs < 0 || holdMs < 0 || blendOutMs < 0) {
+      return fail("timing_negative");
+    }
+
+    const keyAxesPayload = payload.key_axes;
+    if (!keyAxesPayload || typeof keyAxesPayload !== "object") {
+      return fail("key_axes_not_object");
+    }
+    const keyAxes: Record<string, { value: number }> = {};
+    for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
+      const axisPayload = keyAxesPayload[axisName];
+      if (!axisPayload || typeof axisPayload !== "object") {
+        return fail(`missing_axis:${axisName}`);
+      }
+      const axisValue = Number(axisPayload.value);
+      if (!Number.isFinite(axisValue)) {
+        return fail(`axis_value_not_number:${axisName}`);
+      }
+      if (axisValue < 0 || axisValue > 100) {
+        return fail(`axis_value_out_of_range:${axisName}`);
+      }
+      keyAxes[axisName] = { value: axisValue };
+    }
+
+    const supplementaryPayload = payload.supplementary_params;
+    if (!Array.isArray(supplementaryPayload)) {
+      return fail("supplementary_not_list");
+    }
+    const supplementaryParams: Array<{
+      parameter_id: string;
+      target_value: number;
+      weight: number;
+      source_atom_id: string;
+      channel: string;
+    }> = [];
+    for (const item of supplementaryPayload) {
+      if (!item || typeof item !== "object") {
+        return fail("supplementary_item_not_object");
+      }
+      const parameterId = String(item.parameter_id || "").trim();
+      const sourceAtomId = String(item.source_atom_id || "").trim();
+      const channel = String(item.channel || "").trim();
+      const targetValue = Number(item.target_value);
+      const weight = Number(item.weight);
+      if (!parameterId || !sourceAtomId || !channel) {
+        return fail("supplementary_required_field_missing");
+      }
+      if (!Number.isFinite(targetValue) || !Number.isFinite(weight)) {
+        return fail("supplementary_not_number");
+      }
+      if (targetValue < -1 || targetValue > 1) {
+        return fail("supplementary_target_value_out_of_range");
+      }
+      if (weight < 0 || weight > 1) {
+        return fail("supplementary_weight_out_of_range");
+      }
+      supplementaryParams.push({
+        parameter_id: parameterId,
+        target_value: targetValue,
+        weight,
+        source_atom_id: sourceAtomId,
+        channel,
+      });
+    }
+
+    const timing = {
+      durationMs: Math.round(durationMs),
+      blendInMs: Math.round(blendInMs),
+      holdMs: Math.round(holdMs),
+      blendOutMs: Math.round(blendOutMs),
+      totalMs: Math.max(
+        Math.round(durationMs),
+        Math.round(blendInMs + holdMs + blendOutMs),
+      ),
+    };
+
+    return {
+      plan: {
+        mode,
+        emotion_label: String(payload.emotion_label || "neutral").trim() || "neutral",
+        timing: {
+          duration_ms: timing.durationMs,
+          blend_in_ms: timing.blendInMs,
+          hold_ms: timing.holdMs,
+          blend_out_ms: timing.blendOutMs,
+        },
+        key_axes: keyAxes,
+        supplementary_params: supplementaryParams,
+      },
+      timing,
+      reason: "",
+    };
+  }
+
   /**
    * コンストラクタ
    */
@@ -1374,6 +1773,8 @@ export class LAppModel extends CubismUserModel {
     this._allMotionCount = 0;
     this._wavFileHandler = new LAppWavFileHandler();
     this._consistency = false;
+    this._directParameterPlanState = null;
+    this._directParameterPlanError = "";
   }
 
   _modelSetting: ICubismModelSetting; // モデルセッティング情報
@@ -1403,4 +1804,6 @@ export class LAppModel extends CubismUserModel {
   _allMotionCount: number; // モーション総数
   _wavFileHandler: LAppWavFileHandler; //wavファイルハンドラ
   _consistency: boolean; // MOC3一貫性チェック管理用
+  _directParameterPlanState: DirectParameterPlanState | null;
+  _directParameterPlanError: string;
 }

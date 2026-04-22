@@ -38,6 +38,7 @@ from .protocol import (
     parse_inbound_message,
 )
 from .speech_ingress import SpeechIngressService
+from .realtime_motion_plan import validate_parameter_plan_payload
 
 INLINE_ANIM_TAG_PATTERN = re.compile(r"<@anim\s*\{[\s\S]*?\}>\s*", re.IGNORECASE)
 INLINE_ANIM_START_PATTERN = re.compile(r"<@anim\b", re.IGNORECASE)
@@ -455,17 +456,20 @@ class TurnCoordinator:
         payload = message.payload if isinstance(message.payload, dict) else {}
         plan_payload = payload.get("plan")
         mode = str(payload.get("mode") or "preview")
-        step_count = 0
-        if isinstance(plan_payload, dict):
-            steps = plan_payload.get("steps")
-            if isinstance(steps, list):
-                step_count = len(steps)
+        schema_version, resolved_mode, key_axes_count, supplementary_count, failure_reason = _summarize_parameter_plan(
+            plan_payload
+        )
 
         logger.info(
-            "Received engine motion plan preview (mode=%s, steps=%s, turn_id=%s).",
+            "WIRING motion_plan_ingress mode=%s turn_id=%s "
+            "plan_schema=%s plan_mode=%s key_axes_count=%s supplementary_count=%s failure_reason=%s",
             mode,
-            step_count,
             message.turn_id or "",
+            schema_version,
+            resolved_mode,
+            key_axes_count,
+            supplementary_count,
+            failure_reason,
         )
         # Phase-1/2 bridge stub: accept and record the preview plan so frontend
         # testing won't be blocked by protocol rejection before engine playback lands.
@@ -498,12 +502,20 @@ class TurnCoordinator:
             )
         )
         if sent:
+            schema_version, resolved_mode, key_axes_count, supplementary_count, failure_reason = (
+                _summarize_parameter_plan(plan)
+            )
             logger.info(
-                "Broadcasted engine motion plan "
-                "(source=%s, mode=%s, turn_id=%s).",
+                "WIRING motion_plan_egress source=%s mode=%s turn_id=%s "
+                "plan_schema=%s plan_mode=%s key_axes_count=%s supplementary_count=%s failure_reason=%s",
                 payload["source"],
                 payload["mode"],
                 resolved_turn_id or "",
+                schema_version,
+                resolved_mode,
+                key_axes_count,
+                supplementary_count,
+                failure_reason,
             )
         return sent
 
@@ -553,8 +565,13 @@ class TurnCoordinator:
         if not isinstance(plan, dict):
             return
 
-        steps = plan.get("steps")
-        if not isinstance(steps, list) or not steps:
+        valid, failure_reason = _validate_parameter_plan(plan)
+        if not valid:
+            logger.warning(
+                "WIRING motion_plan turn_id=%s route=drop failure_reason=%s",
+                origin_turn_id or "",
+                failure_reason,
+            )
             return
 
         current_turn_id = self.session_state.current_turn_id
@@ -741,11 +758,29 @@ def _normalize_inline_anim_payload(
     else:
         plan = payload
 
-    steps = plan.get("steps") if isinstance(plan, dict) else None
-    if not isinstance(steps, list) or not steps:
+    valid, _ = _validate_parameter_plan(plan)
+    if not valid:
         return None, None
 
     return plan, mode
+
+
+def _validate_parameter_plan(plan: Any) -> tuple[bool, str]:
+    return validate_parameter_plan_payload(plan)
+
+
+def _summarize_parameter_plan(plan: Any) -> tuple[str, str, int, int, str]:
+    if not isinstance(plan, dict):
+        return "", "", 0, 0, "plan_not_object"
+
+    schema_version = str(plan.get("schema_version") or "").strip()
+    mode = str(plan.get("mode") or "").strip().lower()
+    key_axes = plan.get("key_axes")
+    supplementary = plan.get("supplementary_params")
+    key_axes_count = len(key_axes) if isinstance(key_axes, dict) else 0
+    supplementary_count = len(supplementary) if isinstance(supplementary, list) else 0
+    valid, failure_reason = _validate_parameter_plan(plan)
+    return schema_version, mode, key_axes_count, supplementary_count, "" if valid else failure_reason
 
 
 def _strip_inline_anim_tags(text: str) -> str:

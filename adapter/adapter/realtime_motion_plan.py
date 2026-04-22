@@ -30,6 +30,25 @@ AXES: list[AxisSpec] = [
     AxisSpec("mouth_smile", "mouth_smile", "frown", "neutral", "smile"),
     AxisSpec("brow_bias", "brow_bias", "frown", "neutral", "raised"),
 ]
+AXIS_NAMES = [axis.name for axis in AXES]
+_ACTIVE_AXIS_THRESHOLD = 8
+_IDLE_DEADZONE_MIN = 42
+_IDLE_DEADZONE_MAX = 58
+
+_KEY_AXIS_EXCLUDED_PARAMETER_IDS: dict[str, set[str]] = {
+    "head_yaw": {"paramanglex", "param_angle_x"},
+    "head_roll": {"paramanglez", "param_angle_z"},
+    "head_pitch": {"paramangley", "param_angle_y"},
+    "body_yaw": {"parambodyanglex", "param_body_angle_x"},
+    "body_roll": {"parambodyanglez", "param_body_angle_z", "parambodyangley", "param_body_angle_y"},
+    "gaze_x": {"parameyeballx", "param_eye_ball_x"},
+    "gaze_y": {"parameyebally", "param_eye_ball_y"},
+    "eye_open_left": {"parameyelopen", "param_eye_l_open"},
+    "eye_open_right": {"parameyeropen", "param_eye_r_open"},
+    "mouth_open": {"parammouthopeny", "param_mouth_open_y", "parammouthopen", "param_mouth_open"},
+    "mouth_smile": {"parammouthsmile", "param_mouth_smile"},
+    "brow_bias": {"parambrowly", "param_brow_l_y", "parambrowry", "param_brow_r_y"},
+}
 
 _SYSTEM_PROMPT = (
     "You are a compact emotion-to-axis selector for live avatar control. "
@@ -192,8 +211,8 @@ class RealtimeMotionPlanGenerator:
         )
         selector = normalize_selector_output(selector_raw)
         plan = build_plan_from_axes(selector, library=library)
-        steps = plan.get("steps")
-        if not isinstance(steps, list) or not steps:
+        valid, _ = validate_parameter_plan_payload(plan)
+        if not valid:
             return None
         return plan
 
@@ -400,15 +419,15 @@ def build_plan_from_axes(
     *,
     library: dict[str, Any],
 ) -> dict[str, Any]:
-    mode = str(selector_output.get("mode") or "parallel").strip().lower()
-    if mode not in {"parallel", "sequential"}:
-        mode = "parallel"
-
     raw_atoms = library.get("atoms")
     atoms = [atom for atom in raw_atoms if isinstance(atom, dict)] if isinstance(raw_atoms, list) else []
     axes = selector_output.get("axes")
     axis_values = axes if isinstance(axes, dict) else {}
-    base_sequential_gap_ms = 120
+    normalized_axes = {
+        axis.name: clamp_axis_value(axis_values.get(axis.name, 50))
+        for axis in AXES
+    }
+
     duration_ms_raw = selector_output.get("duration_ms", 1200)
     try:
         target_duration_ms = int(round(float(duration_ms_raw)))
@@ -416,123 +435,30 @@ def build_plan_from_axes(
         target_duration_ms = 1200
     target_duration_ms = max(400, min(6000, target_duration_ms))
 
-    steps: list[dict[str, Any]] = []
-    cursor_ms = 0
-
-    for axis in AXES:
-        value = clamp_axis_value(axis_values.get(axis.name, 50))
-        delta = value - 50
-        normalized_strength = abs(delta) / 50.0
-        if normalized_strength < 0.18:
-            continue
-
-        polarity = "positive" if delta > 0 else "negative"
-        atom = _pick_atom_for_channel(
-            atoms,
-            channel=axis.channel,
-            polarity=polarity,
-        )
-        if not isinstance(atom, dict):
-            continue
-
-        atom_duration_ms = max(120, int(round(float(atom.get("duration") or 0.6) * 1000)))
-        duration_ms = max(120, int(round(atom_duration_ms * (0.65 + normalized_strength * 0.8))))
-        intensity = round(
-            max(
-                0.05,
-                min(
-                    _strength_to_base_intensity(str(atom.get("strength") or "")) * normalized_strength * 1.8,
-                    2.0,
-                ),
-            ),
-            3,
-        )
-        start_ms = 0 if mode == "parallel" else cursor_ms
-
-        steps.append(
-            {
-                "atom_id": str(atom.get("id") or ""),
-                "channel": str(atom.get("primary_channel") or axis.channel),
-                "start_ms": start_ms,
-                "duration_ms": duration_ms,
-                "intensity": intensity,
-                "source_motion": str(atom.get("source_motion") or ""),
-                "source_file": str(atom.get("source_file") or ""),
-                "source_group": str(atom.get("source_group") or ""),
-                "semantic_polarity": str(atom.get("semantic_polarity") or polarity),
-                "trait": str(atom.get("trait") or ""),
-            }
+    plan_mode = "idle" if _is_idle_deadzone(normalized_axes) else "expressive"
+    timing = _build_plan_timing(duration_ms=target_duration_ms, mode=plan_mode)
+    supplementary_params: list[dict[str, Any]] = []
+    if plan_mode == "expressive":
+        supplementary_params = _build_supplementary_params(
+            atoms=atoms,
+            axis_values=normalized_axes,
         )
 
-        if mode == "sequential":
-            cursor_ms += duration_ms + base_sequential_gap_ms
-
-    if not steps:
-        fallback_atom = _pick_fallback_atom(atoms)
-        if isinstance(fallback_atom, dict):
-            steps.append(
-                {
-                    "atom_id": str(fallback_atom.get("id") or ""),
-                    "channel": str(fallback_atom.get("primary_channel") or ""),
-                    "start_ms": 0,
-                    "duration_ms": max(120, int(round(float(fallback_atom.get("duration") or 0.5) * 1000))),
-                    "intensity": 0.35,
-                    "source_motion": str(fallback_atom.get("source_motion") or ""),
-                    "source_file": str(fallback_atom.get("source_file") or ""),
-                    "source_group": str(fallback_atom.get("source_group") or ""),
-                    "semantic_polarity": str(fallback_atom.get("semantic_polarity") or "positive"),
-                    "trait": str(fallback_atom.get("trait") or ""),
-                }
-            )
-
-    unscaled_total_duration_ms = max([step["start_ms"] + step["duration_ms"] for step in steps] + [0])
-    if unscaled_total_duration_ms <= 0:
-        duration_scale = 1.0
-    else:
-        duration_scale = target_duration_ms / float(unscaled_total_duration_ms)
-    duration_scale = max(0.25, min(duration_scale, 3.0))
-    duration_scale = round(duration_scale, 4)
-
-    scaled_sequential_gap_ms = max(40, int(round(base_sequential_gap_ms * duration_scale)))
-    if mode == "sequential":
-        cursor_ms = 0
-        for step in steps:
-            step_duration = max(120, int(round(float(step.get("duration_ms") or 0) * duration_scale)))
-            step["start_ms"] = cursor_ms
-            step["duration_ms"] = step_duration
-            cursor_ms += step_duration + scaled_sequential_gap_ms
-    else:
-        for step in steps:
-            step["start_ms"] = max(0, int(round(float(step.get("start_ms") or 0) * duration_scale)))
-            step["duration_ms"] = max(
-                120,
-                int(round(float(step.get("duration_ms") or 0) * duration_scale)),
-            )
-
-    total_duration_ms = max([step["start_ms"] + step["duration_ms"] for step in steps] + [0])
     return {
-        "schema_version": "engine.motion_plan_preview.v1",
-        "mode": mode,
-        "selected_atom_count": len(steps),
-        "channels": sorted(
-            {
-                str(step.get("channel") or "").strip()
-                for step in steps
-                if str(step.get("channel") or "").strip()
-            }
-        ),
-        "parameters": {
-            "target_duration_ms": target_duration_ms,
-            "duration_scale": duration_scale,
-            "intensity_scale": 1.0,
-            "sequential_gap_ms": scaled_sequential_gap_ms,
-            "emotion_label": str(selector_output.get("emotion") or "neutral"),
+        "schema_version": "engine.parameter_plan.v1",
+        "mode": plan_mode,
+        "emotion_label": str(selector_output.get("emotion") or "neutral"),
+        "timing": timing,
+        "key_axes": {
+            axis_name: {"value": axis_value}
+            for axis_name, axis_value in normalized_axes.items()
         },
+        "supplementary_params": supplementary_params,
         "summary": {
-            "total_duration_ms": total_duration_ms,
-            "step_count": len(steps),
+            "key_axes_count": len(AXIS_NAMES),
+            "supplementary_count": len(supplementary_params),
+            "target_duration_ms": target_duration_ms,
         },
-        "steps": steps,
     }
 
 
@@ -544,57 +470,224 @@ def clamp_axis_value(value: Any) -> int:
     return max(0, min(100, number))
 
 
-def _pick_atom_for_channel(
-    atoms: list[dict[str, Any]],
+def _build_plan_timing(*, duration_ms: int, mode: str) -> dict[str, int]:
+    if mode == "idle":
+        idle_duration_ms = max(480, min(duration_ms, 2200))
+        return {
+            "duration_ms": idle_duration_ms,
+            "blend_in_ms": 80,
+            "hold_ms": max(220, idle_duration_ms - 200),
+            "blend_out_ms": 120,
+        }
+
+    blend_in_ms = max(80, min(int(round(duration_ms * 0.18)), 360))
+    blend_out_ms = max(120, min(int(round(duration_ms * 0.25)), 520))
+    hold_ms = duration_ms - blend_in_ms - blend_out_ms
+
+    if hold_ms < 120:
+        shortage = 120 - hold_ms
+        reducible_out = max(blend_out_ms - 120, 0)
+        reduce_out = min(shortage, reducible_out)
+        blend_out_ms -= reduce_out
+        shortage -= reduce_out
+        blend_in_ms = max(80, blend_in_ms - shortage)
+        hold_ms = max(120, duration_ms - blend_in_ms - blend_out_ms)
+
+    return {
+        "duration_ms": duration_ms,
+        "blend_in_ms": int(blend_in_ms),
+        "hold_ms": int(hold_ms),
+        "blend_out_ms": int(blend_out_ms),
+    }
+
+
+def _is_idle_deadzone(axis_values: dict[str, int]) -> bool:
+    for axis_name in AXIS_NAMES:
+        value = clamp_axis_value(axis_values.get(axis_name, 50))
+        if value < _IDLE_DEADZONE_MIN or value > _IDLE_DEADZONE_MAX:
+            return False
+    return True
+
+
+def _build_supplementary_params(
     *,
-    channel: str,
-    polarity: str,
-) -> dict[str, Any] | None:
-    channel_atoms = [
-        atom
-        for atom in atoms
-        if str(atom.get("primary_channel") or "").strip() == channel
-    ]
-    if not channel_atoms:
-        return None
+    atoms: list[dict[str, Any]],
+    axis_values: dict[str, int],
+) -> list[dict[str, Any]]:
+    excluded_parameter_ids = {
+        parameter_id
+        for parameter_ids in _KEY_AXIS_EXCLUDED_PARAMETER_IDS.values()
+        for parameter_id in parameter_ids
+    }
+    selected_by_parameter: dict[str, dict[str, Any]] = {}
 
-    polarity_atoms = [
-        atom
-        for atom in channel_atoms
-        if str(atom.get("polarity") or "").strip() == polarity
-    ]
-    candidates = polarity_atoms if polarity_atoms else channel_atoms
-    ranked = sorted(
-        candidates,
-        key=lambda atom: (
-            -float(atom.get("score") or 0.0),
-            -float(atom.get("energy_score") or 0.0),
-            str(atom.get("id") or ""),
+    for axis in AXES:
+        axis_value = clamp_axis_value(axis_values.get(axis.name, 50))
+        delta = axis_value - 50
+        if abs(delta) < _ACTIVE_AXIS_THRESHOLD:
+            continue
+
+        polarity = "positive" if delta > 0 else "negative"
+        direction = 1.0 if delta > 0 else -1.0
+        normalized_strength = min(abs(delta) / 50.0, 1.0)
+        weight = round(max(0.15, min(0.15 + normalized_strength * 0.75, 0.9)), 4)
+        channel_atoms = [
+            atom
+            for atom in atoms
+            if str(atom.get("primary_channel") or "").strip() == axis.channel
+            and str(atom.get("polarity") or "").strip() == polarity
+        ]
+        ranked_atoms = sorted(
+            channel_atoms,
+            key=lambda atom: (
+                -float(atom.get("score") or 0.0),
+                -float(atom.get("energy_score") or 0.0),
+                str(atom.get("id") or ""),
+            ),
+        )[:2]
+
+        for atom in ranked_atoms:
+            parameter_id = str(atom.get("parameter_id") or "").strip()
+            if not parameter_id:
+                continue
+            normalized_parameter_id = _normalize_parameter_id(parameter_id)
+            if not normalized_parameter_id:
+                continue
+            if normalized_parameter_id in excluded_parameter_ids:
+                continue
+
+            strength_factor = _strength_semantic_factor(str(atom.get("strength") or ""))
+            target_value = round(
+                max(-1.0, min(direction * normalized_strength * strength_factor, 1.0)),
+                4,
+            )
+            candidate = {
+                "parameter_id": parameter_id,
+                "target_value": target_value,
+                "weight": weight,
+                "source_atom_id": str(atom.get("id") or ""),
+                "channel": axis.channel,
+                "_score": float(atom.get("score") or 0.0),
+                "_energy_score": float(atom.get("energy_score") or 0.0),
+            }
+            existing = selected_by_parameter.get(normalized_parameter_id)
+            if existing is None:
+                selected_by_parameter[normalized_parameter_id] = candidate
+                continue
+            if (
+                candidate["_score"] > existing["_score"]
+                or (
+                    candidate["_score"] == existing["_score"]
+                    and candidate["_energy_score"] > existing["_energy_score"]
+                )
+            ):
+                selected_by_parameter[normalized_parameter_id] = candidate
+
+    ordered = sorted(
+        selected_by_parameter.values(),
+        key=lambda item: (
+            -float(item.get("weight") or 0.0),
+            -float(item.get("_score") or 0.0),
+            str(item.get("parameter_id") or ""),
         ),
     )
-    return ranked[0] if ranked else None
+
+    output: list[dict[str, Any]] = []
+    for item in ordered:
+        output.append(
+            {
+                "parameter_id": str(item.get("parameter_id") or ""),
+                "target_value": float(item.get("target_value") or 0.0),
+                "weight": float(item.get("weight") or 0.0),
+                "source_atom_id": str(item.get("source_atom_id") or ""),
+                "channel": str(item.get("channel") or ""),
+            }
+        )
+    return output
 
 
-def _pick_fallback_atom(atoms: list[dict[str, Any]]) -> dict[str, Any] | None:
-    ranked = sorted(
-        atoms,
-        key=lambda atom: (
-            -float(atom.get("score") or 0.0),
-            -float(atom.get("energy_score") or 0.0),
-            str(atom.get("id") or ""),
-        ),
-    )
-    return ranked[0] if ranked else None
+def _normalize_parameter_id(parameter_id: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(parameter_id or "").strip().lower())
 
 
-def _strength_to_base_intensity(strength: str) -> float:
+def _strength_semantic_factor(strength: str) -> float:
     mapping = {
-        "none": 0.0,
-        "low": 0.35,
-        "medium": 0.7,
+        "none": 0.35,
+        "low": 0.55,
+        "medium": 0.78,
         "high": 1.0,
     }
-    return mapping.get(str(strength or "").strip(), 0.5)
+    return mapping.get(str(strength or "").strip().lower(), 0.65)
+
+
+def validate_parameter_plan_payload(plan: Any) -> tuple[bool, str]:
+    if not isinstance(plan, dict):
+        return False, "plan_not_object"
+
+    schema_version = str(plan.get("schema_version") or "").strip()
+    if schema_version != "engine.parameter_plan.v1":
+        return False, "invalid_schema_version"
+
+    mode = str(plan.get("mode") or "").strip().lower()
+    if mode not in {"expressive", "idle"}:
+        return False, "invalid_mode"
+
+    timing = plan.get("timing")
+    if not isinstance(timing, dict):
+        return False, "timing_not_object"
+    timing_keys = ("duration_ms", "blend_in_ms", "hold_ms", "blend_out_ms")
+    for key in timing_keys:
+        value = timing.get(key)
+        if not isinstance(value, (int, float)):
+            return False, f"timing_{key}_not_number"
+        if float(value) < 0:
+            return False, f"timing_{key}_negative"
+
+    key_axes = plan.get("key_axes")
+    if not isinstance(key_axes, dict):
+        return False, "key_axes_not_object"
+    if len(key_axes) != len(AXIS_NAMES):
+        return False, "key_axes_count_mismatch"
+    for axis_name in AXIS_NAMES:
+        axis_payload = key_axes.get(axis_name)
+        if not isinstance(axis_payload, dict):
+            return False, f"missing_axis_{axis_name}"
+        value = axis_payload.get("value")
+        if not isinstance(value, (int, float)):
+            return False, f"axis_{axis_name}_value_not_number"
+        if float(value) < 0 or float(value) > 100:
+            return False, f"axis_{axis_name}_value_out_of_range"
+    for axis_name in key_axes.keys():
+        if axis_name not in AXIS_NAMES:
+            return False, f"unexpected_axis_{axis_name}"
+
+    supplementary = plan.get("supplementary_params")
+    if not isinstance(supplementary, list):
+        return False, "supplementary_not_list"
+    for item in supplementary:
+        if not isinstance(item, dict):
+            return False, "supplementary_item_not_object"
+        parameter_id = str(item.get("parameter_id") or "").strip()
+        if not parameter_id:
+            return False, "supplementary_parameter_id_empty"
+        source_atom_id = str(item.get("source_atom_id") or "").strip()
+        if not source_atom_id:
+            return False, "supplementary_source_atom_id_empty"
+        channel = str(item.get("channel") or "").strip()
+        if not channel:
+            return False, "supplementary_channel_empty"
+        target_value = item.get("target_value")
+        weight = item.get("weight")
+        if not isinstance(target_value, (int, float)):
+            return False, "supplementary_target_value_not_number"
+        if float(target_value) < -1.0 or float(target_value) > 1.0:
+            return False, "supplementary_target_value_out_of_range"
+        if not isinstance(weight, (int, float)):
+            return False, "supplementary_weight_not_number"
+        if float(weight) < 0.0 or float(weight) > 1.0:
+            return False, "supplementary_weight_out_of_range"
+
+    return True, ""
 
 
 def _extract_json_object(text: str) -> dict[str, Any]:
