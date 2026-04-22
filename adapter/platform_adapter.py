@@ -29,6 +29,7 @@ from .adapter.message_factory import MessageFactory
 from .adapter.model_info import build_static_routes, list_background_files
 from .adapter.plugin_runtime import get_plugin_config, get_plugin_context
 from .adapter.runtime_state import RuntimeState
+from .adapter.realtime_motion_plan import RealtimeMotionPlanGenerator
 from .adapter.session_state import SessionState
 from .adapter.transport_ws import WebSocketTransport
 from .adapter.turn_coordinator import TurnCoordinator
@@ -107,6 +108,9 @@ class OLVPetPlatformAdapter(Platform):
             client_uid=self.client_uid,
             live2ds_dir=LIVE2DS_DIR,
         )
+        self.realtime_motion_plan_generator = RealtimeMotionPlanGenerator(
+            runtime_state=self.runtime_state,
+        )
         self.session_state = SessionState(client_uid=self.client_uid)
 
         self._static_server = StaticResourceServer(
@@ -180,6 +184,8 @@ class OLVPetPlatformAdapter(Platform):
             build_platform_event=self._build_platform_event,
             commit_event=self.commit_event,
             ensure_vad_engine=self._ensure_vad_engine,
+            generate_realtime_motion_plan=self._generate_realtime_motion_plan,
+            realtime_motion_mode_getter=lambda: self.runtime_state.realtime_motion_mode,
         )
 
         logger.debug(
@@ -354,6 +360,17 @@ class OLVPetPlatformAdapter(Platform):
 
     async def _send_json(self, payload: dict[str, Any]) -> bool:
         return await self.transport.send_json(payload)
+
+    async def _generate_realtime_motion_plan(
+        self,
+        *,
+        user_text: str,
+        assistant_text: str,
+    ) -> dict[str, Any] | None:
+        return await self.realtime_motion_plan_generator.generate(
+            user_text=user_text,
+            assistant_text=assistant_text,
+        )
 
     async def _handle_transport_disconnect(self) -> None:
         self.session_state.reset_to_idle()

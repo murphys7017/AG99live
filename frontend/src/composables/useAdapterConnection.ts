@@ -854,6 +854,16 @@ function applyControlError(envelope: ProtocolEnvelope<ControlErrorPayload>): voi
 function applyInboundMotionPlan(
   envelope: ProtocolEnvelope<Record<string, unknown>>,
 ): void {
+  if (
+    envelope.turn_id
+    && state.currentTurnId
+    && envelope.turn_id !== state.currentTurnId
+  ) {
+    state.statusMessage = `忽略过期动作计划（turn_id=${envelope.turn_id}）。`;
+    pushHistory("system", state.statusMessage);
+    return;
+  }
+
   const rawPayload = envelope.payload;
   const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
   const mode =

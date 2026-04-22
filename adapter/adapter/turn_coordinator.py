@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 import time
 from typing import Any, Awaitable, Callable
 
@@ -37,6 +39,9 @@ from .protocol import (
 )
 from .speech_ingress import SpeechIngressService
 
+INLINE_ANIM_TAG_PATTERN = re.compile(r"<@anim\s*\{[\s\S]*?\}>\s*", re.IGNORECASE)
+INLINE_ANIM_START_PATTERN = re.compile(r"<@anim\b", re.IGNORECASE)
+
 
 class TurnCoordinator:
     def __init__(
@@ -56,6 +61,8 @@ class TurnCoordinator:
         build_platform_event: Callable[[Any], Any],
         commit_event: Callable[[Any], None],
         ensure_vad_engine: Callable[[], Any],
+        generate_realtime_motion_plan: Callable[..., Awaitable[dict[str, Any] | None]] | None = None,
+        realtime_motion_mode_getter: Callable[[], str] | None = None,
     ) -> None:
         self.session_state = session_state
         self.runtime_state = runtime_state
@@ -71,6 +78,8 @@ class TurnCoordinator:
         self._build_platform_event = build_platform_event
         self._commit_event = commit_event
         self._ensure_vad_engine = ensure_vad_engine
+        self._generate_realtime_motion_plan = generate_realtime_motion_plan
+        self._realtime_motion_mode_getter = realtime_motion_mode_getter
         self.speech_ingress = SpeechIngressService(
             media_service=self.media_service,
             runtime_state=self.runtime_state,
@@ -80,6 +89,7 @@ class TurnCoordinator:
         )
 
         self._turn_lock = asyncio.Lock()
+        self._background_tasks: set[asyncio.Task[Any]] = set()
         self._turn_timing: dict[str, Any] = {}
 
     async def handle_msg(self, raw_message: dict[str, Any]) -> None:
@@ -165,7 +175,9 @@ class TurnCoordinator:
 
         self._mark_turn_timing("emit_started_at")
         texts, picture_paths, record_paths = _extract_outbound_message_parts(message_chain)
-        reply_text = "\n".join(texts).strip()
+        raw_reply_text = "\n".join(texts).strip()
+        inline_anim_detected = INLINE_ANIM_START_PATTERN.search(raw_reply_text) is not None
+        reply_text, inline_plan, inline_mode = _extract_inline_motion_plan(raw_reply_text)
 
         if reply_text:
             self.chat_buffer.add("assistant", reply_text)
@@ -177,6 +189,32 @@ class TurnCoordinator:
                     speaker_name=self.speaker_name,
                     avatar="",
                 )
+            )
+
+        if inline_anim_detected:
+            if inline_plan is None:
+                logger.warning(
+                    "WIRING motion_plan turn_id=%s inline_anim_parse_failed=true "
+                    "route=secondary_request",
+                    turn_id or "",
+                )
+            else:
+                logger.info(
+                    "WIRING motion_plan turn_id=%s inline_anim_detected=%s inline_plan_valid=%s "
+                    "inline_mode=%s route=secondary_request",
+                    turn_id or "",
+                    inline_anim_detected,
+                    inline_plan is not None,
+                    inline_mode or "",
+                )
+
+        schedule_text = reply_text
+        if not schedule_text and inline_anim_detected and inline_plan is None:
+            schedule_text = str(getattr(self.session_state, "last_user_text", "") or "").strip()
+        if schedule_text:
+            self._schedule_realtime_motion_plan_preview(
+                reply_text=schedule_text,
+                origin_turn_id=turn_id,
             )
 
         if picture_paths:
@@ -422,10 +460,12 @@ class TurnCoordinator:
         plan: Any,
         mode: str = "preview",
         source: str = "debug_port",
+        turn_id: str | None = None,
     ) -> bool:
         if not isinstance(plan, dict):
             return False
 
+        resolved_turn_id = turn_id if turn_id is not None else self.session_state.current_turn_id
         payload = {
             "mode": str(mode or "preview"),
             "plan": plan,
@@ -435,7 +475,7 @@ class TurnCoordinator:
             build_message_envelope(
                 TYPE_ENGINE_MOTION_PLAN,
                 session_id=self.session_state.client_uid,
-                turn_id=self.session_state.current_turn_id,
+                turn_id=resolved_turn_id,
                 source=SOURCE_ENGINE,
                 payload=payload,
             )
@@ -445,9 +485,96 @@ class TurnCoordinator:
                 "Broadcasted engine motion plan preview from debug ingress "
                 "(mode=%s, turn_id=%s).",
                 payload["mode"],
-                self.session_state.current_turn_id or "",
+                resolved_turn_id or "",
             )
         return sent
+
+    def _schedule_realtime_motion_plan_preview(
+        self,
+        *,
+        reply_text: str,
+        origin_turn_id: str | None = None,
+    ) -> None:
+        if self._generate_realtime_motion_plan is None:
+            return
+
+        assistant_text = (reply_text or "").strip()
+        if not assistant_text:
+            return
+
+        user_text = str(getattr(self.session_state, "last_user_text", "") or "")
+        if origin_turn_id is None:
+            origin_turn_id = self.session_state.current_turn_id
+        self._spawn_background_task(
+            self._generate_and_broadcast_realtime_motion_plan(
+                user_text=user_text,
+                assistant_text=assistant_text,
+                origin_turn_id=origin_turn_id,
+            )
+        )
+
+    async def _generate_and_broadcast_realtime_motion_plan(
+        self,
+        *,
+        user_text: str,
+        assistant_text: str,
+        origin_turn_id: str | None,
+    ) -> None:
+        if self._generate_realtime_motion_plan is None:
+            return
+
+        try:
+            plan = await self._generate_realtime_motion_plan(
+                user_text=user_text,
+                assistant_text=assistant_text,
+            )
+        except Exception as exc:
+            logger.warning("Realtime motion plan generation failed: %s", exc)
+            return
+
+        if not isinstance(plan, dict):
+            return
+
+        steps = plan.get("steps")
+        if not isinstance(steps, list) or not steps:
+            return
+
+        current_turn_id = self.session_state.current_turn_id
+        if origin_turn_id and current_turn_id and current_turn_id != origin_turn_id:
+            logger.debug(
+                "Skip realtime motion plan for stale turn_id=%s current_turn_id=%s",
+                origin_turn_id,
+                current_turn_id,
+            )
+            return
+
+        mode = "realtime"
+        if self._realtime_motion_mode_getter is not None:
+            resolved_mode = str(self._realtime_motion_mode_getter() or "").strip()
+            if resolved_mode:
+                mode = resolved_mode
+
+        await self.broadcast_motion_plan_preview(
+            plan=plan,
+            mode=mode,
+            source="engine.realtime_motion_plan",
+            turn_id=origin_turn_id,
+        )
+
+    def _spawn_background_task(self, coroutine: Awaitable[None]) -> None:
+        task = asyncio.create_task(coroutine)
+        self._background_tasks.add(task)
+
+        def _on_done(done_task: asyncio.Task[Any]) -> None:
+            self._background_tasks.discard(done_task)
+            try:
+                done_task.result()
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                logger.warning("Background task in turn coordinator failed: %s", exc)
+
+        task.add_done_callback(_on_done)
 
     async def _finish_turn(self, *, success: bool, reason: str | None) -> None:
         current_turn_id = self.session_state.current_turn_id
@@ -547,3 +674,81 @@ def _coerce_perf_counter(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     return None
+
+
+def _extract_inline_motion_plan(text: str) -> tuple[str, dict[str, Any] | None, str | None]:
+    normalized = str(text or "")
+    if not normalized:
+        return "", None, None
+
+    matches = list(INLINE_ANIM_TAG_PATTERN.finditer(normalized))
+    cleaned_text = _strip_inline_anim_tags(normalized)
+    if not matches:
+        return cleaned_text, None, None
+
+    for match in reversed(matches):
+        payload = _parse_inline_anim_tag(match.group(0))
+        if not isinstance(payload, dict):
+            continue
+        plan, mode = _normalize_inline_anim_payload(payload)
+        if isinstance(plan, dict):
+            return cleaned_text, plan, mode
+
+    return cleaned_text, None, None
+
+
+def _parse_inline_anim_tag(tag_text: str) -> dict[str, Any] | None:
+    text = str(tag_text or "")
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    payload_text = text[start : end + 1]
+    try:
+        payload = json.loads(payload_text)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _normalize_inline_anim_payload(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str | None]:
+    mode_value = payload.get("mode")
+    mode = str(mode_value).strip() if isinstance(mode_value, str) else "inline"
+    mode = mode or "inline"
+
+    if isinstance(payload.get("plan"), dict):
+        plan = payload["plan"]
+    else:
+        plan = payload
+
+    steps = plan.get("steps") if isinstance(plan, dict) else None
+    if not isinstance(steps, list) or not steps:
+        return None, None
+
+    return plan, mode
+
+
+def _strip_inline_anim_tags(text: str) -> str:
+    cleaned = INLINE_ANIM_TAG_PATTERN.sub("", str(text or ""))
+
+    while True:
+        marker = INLINE_ANIM_START_PATTERN.search(cleaned)
+        if marker is None:
+            break
+
+        start = marker.start()
+        end_gt = cleaned.find(">", start)
+        end_newline = cleaned.find("\n", start)
+
+        if end_gt != -1 and (end_newline == -1 or end_gt < end_newline):
+            end = end_gt + 1
+        elif end_newline != -1:
+            end = end_newline
+        else:
+            end = len(cleaned)
+
+        cleaned = cleaned[:start] + cleaned[end:]
+
+    return cleaned.strip()

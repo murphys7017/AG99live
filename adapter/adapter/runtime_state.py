@@ -60,6 +60,9 @@ class RuntimeState:
         self.action_llm_filter_max_atoms_per_channel = 2
         self.action_llm_filter_chunk_max_channels = 8
         self.action_llm_filter_chunk_max_candidates = 96
+        self.enable_realtime_motion_plan = True
+        self.realtime_motion_mode = "realtime"
+        self.realtime_motion_timeout_seconds = 8.0
         self.vad_model = "silero_vad"
         self.vad_config: dict[str, Any] = {}
         self.model_info: dict[str, Any] = {}
@@ -159,6 +162,16 @@ class RuntimeState:
         self.action_llm_filter_chunk_max_candidates = max(
             int(_plugin_config_get(self.plugin_config, "action_llm_filter_chunk_max_candidates", 96)),
             1,
+        )
+        self.enable_realtime_motion_plan = bool(
+            _plugin_config_get(self.plugin_config, "enable_realtime_motion_plan", True)
+        )
+        self.realtime_motion_mode = str(
+            _plugin_config_get(self.plugin_config, "realtime_motion_mode", "realtime")
+        ).strip() or "realtime"
+        self.realtime_motion_timeout_seconds = max(
+            float(_plugin_config_get(self.plugin_config, "realtime_motion_timeout_seconds", 8.0)),
+            1.0,
         )
         self.vad_model = _plugin_config_get(self.plugin_config, "vad_model", "silero_vad")
         self.vad_config = {

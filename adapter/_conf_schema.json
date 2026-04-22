@@ -73,6 +73,21 @@
     "type": "int",
     "default": 96
   },
+  "enable_realtime_motion_plan": {
+    "description": "是否启用回复后实时动作计划生成（情绪/语义 -> engine.motion_plan）。",
+    "type": "bool",
+    "default": true
+  },
+  "realtime_motion_mode": {
+    "description": "下发给前端的动作模式标识（例如 realtime、preview）。",
+    "type": "string",
+    "default": "realtime"
+  },
+  "realtime_motion_timeout_seconds": {
+    "description": "实时动作计划生成超时时间（秒，AstrBot Provider 模式）。",
+    "type": "float",
+    "default": 8.0
+  },
   "vad_model": {
     "description": "前端原始音频断句使用的 VAD 模型。",
     "type": "string",
