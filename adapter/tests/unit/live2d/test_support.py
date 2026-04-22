@@ -52,7 +52,7 @@ def _make_component(
     }
 
 
-def build_seed_inputs() -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def build_seed_inputs(*, reinforce_primary_observations: bool = False) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     standard_channels: dict[str, dict[str, Any]] = {}
     for spec in live2d_scan.CORE_BASE_ACTION_CHANNEL_SPECS:
         standard_channels[spec["name"]] = {
@@ -81,7 +81,76 @@ def build_seed_inputs() -> tuple[dict[str, Any], list[dict[str, Any]]]:
         "candidate_parameter_ids": ["ParamMouthOpenY"],
     }
 
-    parameter_scan = {"standard_channels": standard_channels}
+    parameter_scan = {
+        "schema_version": "parameter_scan.seed.v1",
+        "source": "seed",
+        "total_parameters": 3,
+        "drivable_parameters": 3,
+        "physics_parameters": 0,
+        "expression_parameters": 0,
+        "groups": [
+            {
+                "name": "Head",
+                "count": 2,
+                "dominant_domain": "head",
+                "domain_counts": [{"name": "head", "count": 2}],
+            },
+            {
+                "name": "Mouth",
+                "count": 1,
+                "dominant_domain": "mouth",
+                "domain_counts": [{"name": "mouth", "count": 1}],
+            },
+        ],
+        "domain_counts": [
+            {"name": "head", "count": 2},
+            {"name": "mouth", "count": 1},
+        ],
+        "standard_channels": standard_channels,
+        "primary_parameters": [
+            {
+                "channel": "head_yaw",
+                "parameter_id": "ParamAngleX",
+                "parameter_name": "ParamAngleX",
+                "group_name": "Head",
+            },
+            {
+                "channel": "mouth_open",
+                "parameter_id": "ParamMouthOpenY",
+                "parameter_name": "ParamMouthOpenY",
+                "group_name": "Mouth",
+            },
+        ],
+        "parameters": [
+            {
+                "id": "ParamAngleX",
+                "name": "ParamAngleX",
+                "group_id": "Head",
+                "group_name": "Head",
+                "kind": "core",
+                "domain": "head",
+                "channels": ["head_yaw"],
+            },
+            {
+                "id": "ParamHeadXAlt",
+                "name": "ParamHeadXAlt",
+                "group_id": "Head",
+                "group_name": "Head",
+                "kind": "core",
+                "domain": "head",
+                "channels": ["head_yaw"],
+            },
+            {
+                "id": "ParamMouthOpenY",
+                "name": "ParamMouthOpenY",
+                "group_id": "Mouth",
+                "group_name": "Mouth",
+                "kind": "core",
+                "domain": "mouth",
+                "channels": ["mouth_open"],
+            },
+        ],
+    }
     motions = [
         {
             "name": "head_driver",
@@ -177,6 +246,35 @@ def build_seed_inputs() -> tuple[dict[str, Any], list[dict[str, Any]]]:
             ],
         },
     ]
+    if reinforce_primary_observations:
+        motions.append(
+            {
+                "name": "head_driver_repeat",
+                "file": "Motions/head_driver_repeat.motion3.json",
+                "group": "default",
+                "category": "expressive",
+                "catalog_tags": ["demo", "head", "repeat"],
+                "timeline_profile": {
+                    "intro_energy": 0.7,
+                    "middle_energy": 0.6,
+                    "outro_energy": 0.2,
+                    "peak_window": {"start_ratio": 0.25, "end_ratio": 0.7},
+                    "motion_trait": "follow_through",
+                },
+                "components": [
+                    _make_component(
+                        component_id="head_pos_repeat",
+                        channel="head_yaw",
+                        domain="head",
+                        parameter_id="ParamAngleX",
+                        energy_score=0.82,
+                        strength="medium",
+                        trait="ramp",
+                        polarity="positive",
+                    )
+                ],
+            }
+        )
     return parameter_scan, motions
 
 
@@ -188,7 +286,61 @@ def build_seed_library() -> dict[str, Any]:
     )
 
 
+def build_seed_parameter_action_library() -> dict[str, Any]:
+    parameter_scan, motions = build_seed_inputs()
+    return live2d_scan._build_parameter_action_library(
+        parameter_scan=deepcopy(parameter_scan),
+        motions=deepcopy(motions),
+    )
+
+
+def build_seed_adaptive_parameter_profile() -> dict[str, Any]:
+    parameter_scan, motions = build_seed_inputs()
+    return live2d_scan._build_adaptive_parameter_profile(
+        parameter_scan=deepcopy(parameter_scan),
+        motions=deepcopy(motions),
+        parameter_action_library=build_seed_parameter_action_library(),
+    )
+
+
+def build_seed_calibration_profile() -> dict[str, Any]:
+    return live2d_scan._build_calibration_profile(
+        adaptive_parameter_profile=build_seed_adaptive_parameter_profile(),
+    )
+
+
 def build_seed_model_info() -> dict[str, Any]:
+    return build_seed_model_info_with_options()
+
+
+def build_seed_model_info_with_options(
+    *,
+    reinforce_primary_observations: bool = False,
+) -> dict[str, Any]:
+    parameter_scan, motions = build_seed_inputs(
+        reinforce_primary_observations=reinforce_primary_observations,
+    )
+    base_action_library = live2d_scan._build_base_action_library(
+        parameter_scan=deepcopy(parameter_scan),
+        motions=deepcopy(motions),
+    )
+    parameter_action_library = live2d_scan._build_parameter_action_library(
+        parameter_scan=deepcopy(parameter_scan),
+        motions=deepcopy(motions),
+    )
+    adaptive_parameter_profile = live2d_scan._build_adaptive_parameter_profile(
+        parameter_scan=deepcopy(parameter_scan),
+        motions=deepcopy(motions),
+        parameter_action_library=deepcopy(parameter_action_library),
+    )
+    calibration_profile = live2d_scan._build_calibration_profile(
+        adaptive_parameter_profile=deepcopy(adaptive_parameter_profile),
+    )
+    engine_hints = live2d_scan._build_engine_hints(
+        parameter_scan=deepcopy(parameter_scan),
+        expressions=[],
+        motions=deepcopy(motions),
+    )
     return {
         "schema_version": "live2d_scan.v1",
         "driver_priority": ["parameters", "expression", "motion"],
@@ -197,7 +349,27 @@ def build_seed_model_info() -> dict[str, Any]:
         "models": [
             {
                 "name": "DemoModel",
-                "base_action_library": build_seed_library(),
+                "parameter_scan": deepcopy(parameter_scan),
+                "base_action_library": base_action_library,
+                "parameter_action_library": parameter_action_library,
+                "adaptive_parameter_profile": adaptive_parameter_profile,
+                "calibration_profile": calibration_profile,
+                "summary": live2d_scan._build_model_summary(
+                    resource_scan={
+                        "texture_count": 0,
+                        "expression_count": 0,
+                        "motion_count": len(motions),
+                        "vtube_profile_count": 0,
+                    },
+                    parameter_scan=deepcopy(parameter_scan),
+                    expressions=[],
+                    motions=deepcopy(motions),
+                    base_action_library=deepcopy(base_action_library),
+                    parameter_action_library=deepcopy(parameter_action_library),
+                    adaptive_parameter_profile=deepcopy(adaptive_parameter_profile),
+                    calibration_profile=deepcopy(calibration_profile),
+                    engine_hints=engine_hints,
+                ),
             }
         ],
     }

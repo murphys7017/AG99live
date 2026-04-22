@@ -4,6 +4,7 @@ import json
 import logging
 from collections import Counter, defaultdict
 from pathlib import Path
+from statistics import median
 from typing import Any
 
 try:
@@ -143,6 +144,9 @@ SPECIAL_EXPRESSION_KEYWORDS = {
 
 BASE_ACTION_LIBRARY_SCHEMA_VERSION = "base_action_library.v1"
 PARAMETER_ACTION_LIBRARY_SCHEMA_VERSION = "parameter_action_library.v1"
+ADAPTIVE_PARAMETER_PROFILE_SCHEMA_VERSION = "adaptive_parameter_profile.v1"
+CALIBRATION_PROFILE_SCHEMA_VERSION = "direct_parameter_calibration.v1"
+MODEL_SUMMARY_SCHEMA_VERSION = "live2d_model_summary.v1"
 PARAMETER_ACTION_MAX_ATOMS_PER_PARAMETER = 24
 
 CORE_BASE_ACTION_CHANNEL_SPECS: tuple[dict[str, Any], ...] = (
@@ -384,9 +388,34 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
             parameter_scan=parameter_scan,
             error=str(exc),
         )
+    adaptive_parameter_profile = _build_adaptive_parameter_profile(
+        parameter_scan=parameter_scan,
+        motions=motions,
+        parameter_action_library=parameter_action_library,
+    )
+    calibration_profile = _build_calibration_profile(
+        adaptive_parameter_profile=adaptive_parameter_profile,
+    )
     motion_resource_pool = build_motion_resource_pool(motions=motions)
     for motion in motions:
         motion.pop("components", None)
+
+    engine_hints = _build_engine_hints(
+        parameter_scan=parameter_scan,
+        expressions=expressions,
+        motions=motions,
+    )
+    model_summary = _build_model_summary(
+        resource_scan=resource_scan,
+        parameter_scan=parameter_scan,
+        expressions=expressions,
+        motions=motions,
+        base_action_library=base_action_library,
+        parameter_action_library=parameter_action_library,
+        adaptive_parameter_profile=adaptive_parameter_profile,
+        calibration_profile=calibration_profile,
+        engine_hints=engine_hints,
+    )
 
     selected_icon = _select_icon(model_dir)
     return {
@@ -396,20 +425,19 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
         "model_url": _to_static_url(base_url, model_dir, model3_path),
         "icon_url": _to_static_url(base_url, model_dir, selected_icon) if selected_icon else "",
         "resource_scan": resource_scan,
+        "summary": model_summary,
         "parameter_scan": parameter_scan,
         "expression_scan": expression_scan,
         "base_action_library": base_action_library,
         "parameter_action_library": parameter_action_library,
+        "adaptive_parameter_profile": adaptive_parameter_profile,
+        "calibration_profile": calibration_profile,
         "motion_resource_pool": motion_resource_pool,
         "constraints": {
             "expressions": expressions,
             "motions": motions,
         },
-        "engine_hints": _build_engine_hints(
-            parameter_scan=parameter_scan,
-            expressions=expressions,
-            motions=motions,
-        ),
+        "engine_hints": engine_hints,
     }
 
 
@@ -1291,6 +1319,725 @@ def _build_empty_parameter_action_library(
         "parameters": [],
         "atoms": [],
     }
+
+
+def _build_adaptive_parameter_profile(
+    *,
+    parameter_scan: dict[str, Any],
+    motions: list[dict[str, Any]],
+    parameter_action_library: dict[str, Any],
+) -> dict[str, Any]:
+    parameter_lookup = {
+        str(item.get("id") or "").strip(): item
+        for item in parameter_scan.get("parameters", [])
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    }
+    standard_channels = {
+        str(channel_name): channel_payload
+        for channel_name, channel_payload in (parameter_scan.get("standard_channels") or {}).items()
+        if str(channel_name).strip() and isinstance(channel_payload, dict)
+    }
+    parameter_library_lookup = {
+        str(item.get("parameter_id") or "").strip(): item
+        for item in parameter_action_library.get("parameters", [])
+        if isinstance(item, dict) and str(item.get("parameter_id") or "").strip()
+    }
+    atoms_by_parameter: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    atoms_by_channel: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for atom in parameter_action_library.get("atoms", []):
+        if not isinstance(atom, dict):
+            continue
+        parameter_id = str(atom.get("parameter_id") or "").strip()
+        if parameter_id:
+            atoms_by_parameter[parameter_id].append(atom)
+        primary_channel = str(atom.get("primary_channel") or "").strip()
+        if primary_channel:
+            atoms_by_channel[primary_channel].append(atom)
+        for channel_name in atom.get("channels", []):
+            normalized_channel = str(channel_name).strip()
+            if normalized_channel and atom not in atoms_by_channel[normalized_channel]:
+                atoms_by_channel[normalized_channel].append(atom)
+
+    observations_by_parameter: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    observations_by_channel: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for motion in motions:
+        if not isinstance(motion, dict):
+            continue
+        for component in motion.get("components", []):
+            if not isinstance(component, dict):
+                continue
+            if str(component.get("engine_role") or "").strip() != "driver":
+                continue
+            if str(component.get("strength") or "").strip() == "none":
+                continue
+
+            parameter_id = str(component.get("parameter_id") or "").strip()
+            if not parameter_id:
+                continue
+            parameter_entry = parameter_lookup.get(parameter_id, {})
+            parameter_domain = str(parameter_entry.get("domain") or "").strip()
+            component_domain = str(component.get("domain") or "").strip()
+            if (
+                parameter_domain
+                and component_domain
+                and parameter_domain not in {"other", "unknown"}
+                and component_domain not in {"other", "unknown"}
+                and component_domain != parameter_domain
+            ):
+                continue
+            component_channels = [
+                str(item).strip()
+                for item in component.get("channels", [])
+                if str(item).strip()
+            ]
+            channels = sorted(
+                set(component_channels)
+                | {
+                    str(item).strip()
+                    for item in parameter_entry.get("channels", [])
+                    if str(item).strip()
+                }
+            )
+            primary_channel = component_channels[0] if component_channels else (channels[0] if channels else "")
+            value_profile = component.get("value_profile", {})
+            baseline = _coerce_float(value_profile.get("baseline"))
+            observed_min = _coerce_float(value_profile.get("min"))
+            observed_max = _coerce_float(value_profile.get("max"))
+            if observed_max < observed_min:
+                observed_min, observed_max = observed_max, observed_min
+            polarity = _infer_base_action_polarity(
+                component=component,
+                channel_name=primary_channel or "parameter",
+            )
+            observation = {
+                "parameter_id": parameter_id,
+                "channels": channels,
+                "primary_channel": primary_channel,
+                "domain": str(parameter_entry.get("domain") or component.get("domain") or "other"),
+                "baseline": round(baseline, 4),
+                "observed_min": round(observed_min, 4),
+                "observed_max": round(observed_max, 4),
+                "polarity": polarity,
+                "source_motion": str(motion.get("name") or component.get("source_motion") or "").strip(),
+                "source_component_id": str(component.get("id") or "").strip(),
+            }
+            observations_by_parameter[parameter_id].append(observation)
+            for channel_name in channels:
+                observations_by_channel[channel_name].append(observation)
+
+    parameter_ids: set[str] = set(parameter_lookup.keys())
+    parameter_ids.update(parameter_library_lookup.keys())
+    parameter_ids.update(atoms_by_parameter.keys())
+    parameter_ids.update(observations_by_parameter.keys())
+    for channel_payload in standard_channels.values():
+        parameter_ids.update(
+            str(item).strip()
+            for item in channel_payload.get("candidate_parameter_ids", [])
+            if str(item).strip()
+        )
+        primary_parameter_id = str(channel_payload.get("primary_parameter_id") or "").strip()
+        if primary_parameter_id:
+            parameter_ids.add(primary_parameter_id)
+
+    parameter_profiles: list[dict[str, Any]] = []
+    parameter_profiles_by_id: dict[str, dict[str, Any]] = {}
+    for parameter_id in sorted(parameter_ids):
+        parameter_entry = parameter_lookup.get(parameter_id, {})
+        library_entry = parameter_library_lookup.get(parameter_id, {})
+        observations = observations_by_parameter.get(parameter_id, [])
+        atoms = atoms_by_parameter.get(parameter_id, [])
+        channels = sorted(
+            set(str(item).strip() for item in parameter_entry.get("channels", []) if str(item).strip())
+            | set(str(item).strip() for item in library_entry.get("channels", []) if str(item).strip())
+            | {
+                str(channel_name).strip()
+                for observation in observations
+                for channel_name in observation.get("channels", [])
+                if str(channel_name).strip()
+            }
+        )
+        range_profile = _summarize_range_profile(
+            observations=observations,
+            fallback_baseline=0.0,
+        )
+        directionality = _build_directionality_profile(
+            component_polarities=[
+                str(item.get("polarity") or "").strip()
+                for item in observations
+                if str(item.get("polarity") or "").strip()
+            ],
+            selected_atom_polarities=[
+                str(item.get("polarity") or "").strip()
+                for item in atoms
+                if str(item.get("polarity") or "").strip()
+            ],
+        )
+        recommended_range = _build_recommended_execution_range(
+            baseline=float(range_profile["baseline"]),
+            common_range=dict(range_profile["common_range"]),
+            observed_min=float(range_profile["observed_min"]),
+            observed_max=float(range_profile["observed_max"]),
+            observation_count=len(observations),
+            selected_atom_count=len(atoms),
+            source="parameter",
+        )
+        parameter_profile = {
+            "parameter_id": parameter_id,
+            "parameter_name": str(parameter_entry.get("name") or library_entry.get("parameter_name") or "").strip(),
+            "group_name": str(parameter_entry.get("group_name") or library_entry.get("group_name") or "").strip(),
+            "kind": str(parameter_entry.get("kind") or library_entry.get("kind") or "unknown"),
+            "domain": str(parameter_entry.get("domain") or library_entry.get("domain") or "other"),
+            "channels": channels,
+            "baseline": float(range_profile["baseline"]),
+            "common_range": dict(range_profile["common_range"]),
+            "observed_min": float(range_profile["observed_min"]),
+            "observed_max": float(range_profile["observed_max"]),
+            "directionality": directionality,
+            "recommended_execution_range": recommended_range,
+            "observation_count": len(observations),
+            "source_motion_count": len(
+                {
+                    str(item.get("source_motion") or "").strip()
+                    for item in observations
+                    if str(item.get("source_motion") or "").strip()
+                }
+            ),
+            "candidate_atom_count": int(library_entry.get("candidate_atom_count") or len(observations)),
+            "selected_atom_count": len(atoms),
+        }
+        parameter_profiles.append(parameter_profile)
+        parameter_profiles_by_id[parameter_id] = parameter_profile
+
+    channel_specs = [
+        spec for spec in STANDARD_CHANNEL_SPECS if spec["name"] in standard_channels
+    ] or [
+        {"name": channel_name, "label": str(channel_payload.get("label") or channel_name)}
+        for channel_name, channel_payload in sorted(standard_channels.items())
+    ]
+    channel_profiles: list[dict[str, Any]] = []
+    for spec in channel_specs:
+        channel_name = str(spec["name"])
+        channel_payload = standard_channels.get(channel_name, {})
+        channel_observations = observations_by_channel.get(channel_name, [])
+        associated_parameter_ids = sorted(
+            set(
+                str(item).strip()
+                for item in channel_payload.get("candidate_parameter_ids", [])
+                if str(item).strip()
+            )
+            | {
+                str(item.get("parameter_id") or "").strip()
+                for item in channel_observations
+                if str(item.get("parameter_id") or "").strip()
+            }
+        )
+        range_profile = _summarize_range_profile(
+            observations=channel_observations,
+            fallback_baseline=0.0,
+        )
+        directionality = _build_directionality_profile(
+            component_polarities=[
+                str(item.get("polarity") or "").strip()
+                for item in channel_observations
+                if str(item.get("polarity") or "").strip()
+            ],
+            selected_atom_polarities=[
+                str(item.get("polarity") or "").strip()
+                for item in atoms_by_channel.get(channel_name, [])
+                if str(item.get("polarity") or "").strip()
+            ],
+        )
+        axis_range = _build_axis_execution_range(
+            channel_name=channel_name,
+            primary_parameter_id=str(channel_payload.get("primary_parameter_id") or "").strip(),
+            parameter_profiles_by_id=parameter_profiles_by_id,
+            range_profile=range_profile,
+            observation_count=len(channel_observations),
+            selected_atom_count=len(atoms_by_channel.get(channel_name, [])),
+        )
+        channel_profiles.append(
+            {
+                "channel": channel_name,
+                "label": str(channel_payload.get("label") or spec.get("label") or channel_name),
+                "available": bool(channel_payload.get("available")),
+                "primary_parameter_id": str(channel_payload.get("primary_parameter_id") or "").strip(),
+                "primary_parameter_name": str(
+                    channel_payload.get("primary_parameter_name") or ""
+                ).strip(),
+                "candidate_parameter_ids": associated_parameter_ids,
+                "baseline": float(range_profile["baseline"]),
+                "common_range": dict(range_profile["common_range"]),
+                "observed_min": float(range_profile["observed_min"]),
+                "observed_max": float(range_profile["observed_max"]),
+                "directionality": directionality,
+                "recommended_execution_range": axis_range,
+                "observation_count": len(channel_observations),
+                "selected_atom_count": len(atoms_by_channel.get(channel_name, [])),
+                "parameter_count": len(associated_parameter_ids),
+            }
+        )
+
+    key_axes = [
+        {
+            "axis": channel_profile["channel"],
+            "parameter_id": str(
+                channel_profile.get("recommended_execution_range", {}).get("parameter_id") or ""
+            ).strip(),
+            "parameter_name": str(
+                channel_profile.get("recommended_execution_range", {}).get("parameter_name") or ""
+            ).strip(),
+            "baseline": _coerce_float(
+                channel_profile.get("recommended_execution_range", {}).get(
+                    "baseline",
+                    channel_profile.get("baseline", 0.0),
+                )
+            ),
+            "recommended_execution_range": {
+                "min": _coerce_float(
+                    channel_profile.get("recommended_execution_range", {}).get(
+                        "min",
+                        channel_profile.get("baseline", 0.0),
+                    )
+                ),
+                "max": _coerce_float(
+                    channel_profile.get("recommended_execution_range", {}).get(
+                        "max",
+                        channel_profile.get("baseline", 0.0),
+                    )
+                ),
+                "confidence": str(
+                    channel_profile.get("recommended_execution_range", {}).get("confidence")
+                    or "none"
+                ),
+            },
+            "recommended": bool(
+                channel_profile.get("recommended_execution_range", {}).get("recommended", False)
+            ),
+            "safe_to_apply": bool(
+                channel_profile.get("recommended_execution_range", {}).get("safe_to_apply", False)
+            ),
+            "source": str(
+                channel_profile.get("recommended_execution_range", {}).get("source") or ""
+            ),
+            "skip_reason": str(
+                channel_profile.get("recommended_execution_range", {}).get("skip_reason") or ""
+            ),
+            "direction_preference": str(
+                channel_profile.get("directionality", {}).get("dominant") or "none"
+            ),
+        }
+        for channel_profile in channel_profiles
+        if channel_profile.get("available")
+    ]
+
+    runtime_axis_ranges = {
+        str(item["axis"]): {
+            "parameter_id": str(item["parameter_id"] or ""),
+            "parameter_name": str(item["parameter_name"] or ""),
+            "baseline": float(item["baseline"]),
+            "min": float(item["recommended_execution_range"]["min"]),
+            "max": float(item["recommended_execution_range"]["max"]),
+            "confidence": str(item["recommended_execution_range"]["confidence"]),
+            "recommended": bool(item.get("recommended", False)),
+            "safe_to_apply": bool(item.get("safe_to_apply", False)),
+            "source": str(item.get("source") or ""),
+            "skip_reason": str(item.get("skip_reason") or ""),
+        }
+        for item in key_axes
+    }
+
+    return {
+        "schema_version": ADAPTIVE_PARAMETER_PROFILE_SCHEMA_VERSION,
+        "analysis": {
+            "status": "seeded" if motions or parameter_profiles else "empty",
+            "mode": "rule_seed",
+            "source_components": [
+                "parameter_scan",
+                "motions",
+                "parameter_action_library",
+            ],
+        },
+        "summary": {
+            "profiled_parameter_count": len(parameter_profiles),
+            "observed_parameter_count": len(
+                [item for item in parameter_profiles if int(item["observation_count"]) > 0]
+            ),
+            "available_channel_count": len(
+                [item for item in channel_profiles if bool(item["available"])]
+            ),
+            "observed_channel_count": len(
+                [item for item in channel_profiles if int(item["observation_count"]) > 0]
+            ),
+            "recommended_axis_count": len(
+                [
+                    item
+                    for item in key_axes
+                    if bool(item.get("recommended"))
+                ]
+            ),
+        },
+        "channels": channel_profiles,
+        "parameters": parameter_profiles,
+        "key_axes": key_axes,
+        "runtime_summary": {
+            "axis_parameter_map": {
+                axis_name: str(axis_payload["parameter_id"])
+                for axis_name, axis_payload in runtime_axis_ranges.items()
+                if str(axis_payload["parameter_id"]).strip()
+                and bool(axis_payload.get("recommended"))
+            },
+            "axis_execution_ranges": runtime_axis_ranges,
+            "channel_direction_preferences": {
+                str(item["channel"]): str(item.get("directionality", {}).get("dominant") or "none")
+                for item in channel_profiles
+                if bool(item.get("available"))
+            },
+        },
+    }
+
+
+def _build_calibration_profile(
+    *,
+    adaptive_parameter_profile: dict[str, Any],
+) -> dict[str, Any]:
+    channels = {
+        str(item.get("channel") or "").strip(): item
+        for item in adaptive_parameter_profile.get("channels", [])
+        if isinstance(item, dict) and str(item.get("channel") or "").strip()
+    }
+    axes: dict[str, dict[str, Any]] = {}
+
+    for key_axis in adaptive_parameter_profile.get("key_axes", []):
+        if not isinstance(key_axis, dict):
+            continue
+        axis_name = str(key_axis.get("axis") or "").strip()
+        if not axis_name:
+            continue
+
+        range_payload = key_axis.get("recommended_execution_range", {})
+        if not isinstance(range_payload, dict):
+            range_payload = {}
+        channel_payload = channels.get(axis_name, {})
+        confidence = str(range_payload.get("confidence") or "none")
+        source = str(key_axis.get("source") or range_payload.get("source") or "").strip()
+        safe_to_apply = bool(
+            key_axis.get("safe_to_apply", key_axis.get("recommended", False))
+        )
+
+        calibration_axis: dict[str, Any] = {
+            "parameter_id": str(key_axis.get("parameter_id") or "").strip(),
+            "parameter_ids": [
+                str(item).strip()
+                for item in channel_payload.get("candidate_parameter_ids", [])
+                if str(item).strip()
+            ],
+            "baseline": _round_float(key_axis.get("baseline")),
+            "observed_range": {
+                "min": _round_float(channel_payload.get("observed_min")),
+                "max": _round_float(channel_payload.get("observed_max")),
+            },
+            "confidence": confidence,
+            "source": source,
+            "recommended": safe_to_apply,
+            "safe_to_apply": safe_to_apply,
+        }
+        if safe_to_apply:
+            calibration_axis["recommended_range"] = {
+                "min": _round_float(range_payload.get("min")),
+                "max": _round_float(range_payload.get("max")),
+            }
+        else:
+            skip_reason = str(key_axis.get("skip_reason") or "").strip()
+            if skip_reason:
+                calibration_axis["skip_reason"] = skip_reason
+
+        direction_preference = str(key_axis.get("direction_preference") or "").strip().lower()
+        if direction_preference == "negative":
+            calibration_axis["direction"] = -1
+        elif direction_preference == "positive":
+            calibration_axis["direction"] = 1
+
+        axes[axis_name] = calibration_axis
+
+    return {
+        "schema_version": CALIBRATION_PROFILE_SCHEMA_VERSION,
+        "axes": axes,
+    }
+
+
+def _summarize_range_profile(
+    *,
+    observations: list[dict[str, Any]],
+    fallback_baseline: float,
+) -> dict[str, Any]:
+    baselines = [_coerce_float(item.get("baseline")) for item in observations]
+    baseline = _round_float(
+        (sum(baselines) / len(baselines)) if baselines else fallback_baseline
+    )
+    observed_min = _round_float(
+        min(_coerce_float(item.get("observed_min")) for item in observations)
+        if observations
+        else baseline
+    )
+    observed_max = _round_float(
+        max(_coerce_float(item.get("observed_max")) for item in observations)
+        if observations
+        else baseline
+    )
+
+    negative_spans = sorted(
+        max(_coerce_float(item.get("baseline")) - _coerce_float(item.get("observed_min")), 0.0)
+        for item in observations
+    )
+    positive_spans = sorted(
+        max(_coerce_float(item.get("observed_max")) - _coerce_float(item.get("baseline")), 0.0)
+        for item in observations
+    )
+    common_negative = _round_float(float(median(negative_spans)) if negative_spans else 0.0)
+    common_positive = _round_float(float(median(positive_spans)) if positive_spans else 0.0)
+    common_min = _round_float(max(observed_min, baseline - common_negative))
+    common_max = _round_float(min(observed_max, baseline + common_positive))
+    if common_max < common_min:
+        common_min = baseline
+        common_max = baseline
+
+    return {
+        "baseline": baseline,
+        "common_range": {
+            "min": common_min,
+            "max": common_max,
+        },
+        "observed_min": observed_min,
+        "observed_max": observed_max,
+    }
+
+
+def _build_directionality_profile(
+    *,
+    component_polarities: list[str],
+    selected_atom_polarities: list[str],
+) -> dict[str, Any]:
+    supported_polarities = ("positive", "negative", "balanced", "neutral", "cyclical")
+    component_counter = Counter(
+        item for item in component_polarities if item in supported_polarities
+    )
+    atom_counter = Counter(
+        item for item in selected_atom_polarities if item in supported_polarities
+    )
+    combined_counter = component_counter if sum(component_counter.values()) > 0 else atom_counter
+    dominant = _resolve_direction_preference(combined_counter)
+    return {
+        "component_counts": {
+            polarity: int(component_counter.get(polarity, 0))
+            for polarity in supported_polarities
+        },
+        "selected_atom_counts": {
+            polarity: int(atom_counter.get(polarity, 0))
+            for polarity in supported_polarities
+        },
+        "dominant": dominant,
+    }
+
+
+def _resolve_direction_preference(counter: Counter[str]) -> str:
+    total = sum(counter.values())
+    if total <= 0:
+        return "none"
+
+    ranked = sorted(counter.items(), key=lambda item: (-item[1], item[0]))
+    top_name, top_count = ranked[0]
+    second_count = ranked[1][1] if len(ranked) > 1 else 0
+    if top_count <= 0:
+        return "none"
+    if second_count > 0 and top_count < max(second_count * 1.5, second_count + 1):
+        return "mixed"
+    return str(top_name)
+
+
+def _build_recommended_execution_range(
+    *,
+    baseline: float,
+    common_range: dict[str, Any],
+    observed_min: float,
+    observed_max: float,
+    observation_count: int,
+    selected_atom_count: int,
+    source: str,
+) -> dict[str, Any]:
+    confidence = _classify_range_confidence(
+        observation_count=observation_count,
+        selected_atom_count=selected_atom_count,
+    )
+    return {
+        "min": _round_float(float(common_range.get("min") or baseline)),
+        "max": _round_float(float(common_range.get("max") or baseline)),
+        "baseline": _round_float(baseline),
+        "observed_min": _round_float(observed_min),
+        "observed_max": _round_float(observed_max),
+        "confidence": confidence,
+        "source": source,
+    }
+
+
+def _classify_range_confidence(
+    *,
+    observation_count: int,
+    selected_atom_count: int,
+) -> str:
+    if observation_count >= 4 or selected_atom_count >= 4:
+        return "high"
+    if observation_count >= 2 or selected_atom_count >= 2:
+        return "medium"
+    if observation_count >= 1 or selected_atom_count >= 1:
+        return "low"
+    return "none"
+
+
+def _build_axis_execution_range(
+    *,
+    channel_name: str,
+    primary_parameter_id: str,
+    parameter_profiles_by_id: dict[str, dict[str, Any]],
+    range_profile: dict[str, Any],
+    observation_count: int,
+    selected_atom_count: int,
+) -> dict[str, Any]:
+    del channel_name
+    selected_parameter = parameter_profiles_by_id.get(primary_parameter_id, {})
+    parameter_range = selected_parameter.get("recommended_execution_range", {})
+    channel_range = _build_recommended_execution_range(
+        baseline=float(range_profile["baseline"]),
+        common_range=dict(range_profile["common_range"]),
+        observed_min=float(range_profile["observed_min"]),
+        observed_max=float(range_profile["observed_max"]),
+        observation_count=observation_count,
+        selected_atom_count=selected_atom_count,
+        source="channel_aggregate",
+    )
+    parameter_confidence = str(parameter_range.get("confidence") or "none")
+    parameter_observation_count = int(selected_parameter.get("observation_count") or 0)
+    if (
+        selected_parameter
+        and parameter_observation_count >= 2
+        and parameter_confidence in {"medium", "high"}
+    ):
+        return {
+            "parameter_id": primary_parameter_id,
+            "parameter_name": str(selected_parameter.get("parameter_name") or "").strip(),
+            "min": _round_float(float(parameter_range.get("min") or 0.0)),
+            "max": _round_float(float(parameter_range.get("max") or 0.0)),
+            "baseline": _round_float(float(parameter_range.get("baseline") or 0.0)),
+            "confidence": parameter_confidence,
+            "source": "primary_parameter",
+            "recommended": True,
+            "safe_to_apply": True,
+        }
+
+    skip_reason = "primary_parameter_insufficient_observations"
+    if not primary_parameter_id:
+        skip_reason = "missing_primary_parameter"
+    elif not selected_parameter:
+        skip_reason = "missing_primary_parameter_profile"
+    elif parameter_observation_count <= 0:
+        skip_reason = "primary_parameter_unobserved"
+
+    return {
+        "parameter_id": primary_parameter_id,
+        "parameter_name": str(
+            parameter_profiles_by_id.get(primary_parameter_id, {}).get("parameter_name") or ""
+        ).strip(),
+        "min": _round_float(float(channel_range["min"])),
+        "max": _round_float(float(channel_range["max"])),
+        "baseline": _round_float(float(channel_range["baseline"])),
+        "confidence": str(channel_range["confidence"]),
+        "source": str(channel_range["source"] or "channel_aggregate"),
+        "recommended": False,
+        "safe_to_apply": False,
+        "skip_reason": skip_reason,
+    }
+
+
+def _build_model_summary(
+    *,
+    resource_scan: dict[str, Any],
+    parameter_scan: dict[str, Any],
+    expressions: list[dict[str, Any]],
+    motions: list[dict[str, Any]],
+    base_action_library: dict[str, Any],
+    parameter_action_library: dict[str, Any],
+    adaptive_parameter_profile: dict[str, Any],
+    calibration_profile: dict[str, Any],
+    engine_hints: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema_version": MODEL_SUMMARY_SCHEMA_VERSION,
+        "resources": {
+            "texture_count": int(resource_scan.get("texture_count") or 0),
+            "expression_count": int(resource_scan.get("expression_count") or 0),
+            "motion_count": int(resource_scan.get("motion_count") or 0),
+            "vtube_profile_count": int(resource_scan.get("vtube_profile_count") or 0),
+        },
+        "parameters": {
+            "total": int(parameter_scan.get("total_parameters") or 0),
+            "drivable": int(parameter_scan.get("drivable_parameters") or 0),
+            "standard_channel_count": len(parameter_scan.get("standard_channels", {})),
+            "available_standard_channel_count": len(
+                [
+                    item
+                    for item in parameter_scan.get("standard_channels", {}).values()
+                    if isinstance(item, dict) and bool(item.get("available"))
+                ]
+            ),
+        },
+        "expressions": {
+            "count": len(expressions),
+            "base_emotion_count": len(
+                [
+                    item
+                    for item in expressions
+                    if str(item.get("category") or "") in {"base_emotion", "emotion_overlay"}
+                ]
+            ),
+        },
+        "motions": {
+            "count": len(motions),
+            "parameter_driver_component_count": int(
+                parameter_action_library.get("summary", {}).get("driver_component_count") or 0
+            ),
+            "base_action_atom_count": int(
+                base_action_library.get("summary", {}).get("selected_atom_count") or 0
+            ),
+            "parameter_action_atom_count": int(
+                parameter_action_library.get("summary", {}).get("selected_atom_count") or 0
+            ),
+        },
+        "engine": {
+            "recommended_mode": str(engine_hints.get("recommended_mode") or ""),
+            "available_channels": list(engine_hints.get("available_channels", [])),
+        },
+        "adaptive_parameter_profile": {
+            "schema_version": str(adaptive_parameter_profile.get("schema_version") or ""),
+            "summary": dict(adaptive_parameter_profile.get("summary") or {}),
+            "runtime_summary": dict(adaptive_parameter_profile.get("runtime_summary") or {}),
+        },
+        "calibration_profile": {
+            "schema_version": str(calibration_profile.get("schema_version") or ""),
+            "axis_count": len(
+                [
+                    axis_name
+                    for axis_name, payload in (calibration_profile.get("axes") or {}).items()
+                    if str(axis_name).strip() and isinstance(payload, dict)
+                ]
+            ),
+        },
+    }
+
+
+def _round_float(value: Any) -> float:
+    try:
+        return round(float(value), 4)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _normalize_component_windows(raw_windows: Any) -> list[dict[str, float]]:

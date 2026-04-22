@@ -102,6 +102,7 @@ interface DirectParameterAxisBinding {
   parameterName: string;
   parameterId: CubismIdHandle;
   parameterIndex: number;
+  calibration: DirectParameterAxisCalibration | null;
 }
 
 interface DirectSupplementaryBinding {
@@ -112,6 +113,30 @@ interface DirectSupplementaryBinding {
   channel: string;
   parameterId: CubismIdHandle;
   parameterIndex: number;
+}
+
+interface DirectParameterCalibrationRange {
+  min: number | null;
+  max: number | null;
+}
+
+interface DirectParameterAxisCalibration {
+  parameterId: string;
+  parameterIds: string[];
+  direction: number | null;
+  baseline: number | null;
+  recommendedRange: DirectParameterCalibrationRange | null;
+  observedRange: DirectParameterCalibrationRange | null;
+  confidence: string;
+  source: string;
+  recommended: boolean | null;
+  safeToApply: boolean | null;
+  skipReason: string;
+}
+
+interface DirectParameterCalibrationProfile {
+  schemaVersion: string;
+  axes: Record<string, DirectParameterAxisCalibration>;
 }
 
 interface DirectParameterPlanState {
@@ -126,6 +151,8 @@ interface DirectParameterPlanState {
   };
   axisBindings: DirectParameterAxisBinding[];
   supplementaryBindings: DirectSupplementaryBinding[];
+  usesCalibration: boolean;
+  usesBindingProfile: boolean;
   startedAtMs: number;
 }
 
@@ -1392,11 +1419,20 @@ export class LAppModel extends CubismUserModel {
       return false;
     }
 
+    const effectiveCalibrationProfile = this.mergeDirectParameterCalibrationProfiles(
+      parsed.plan.calibration_profile,
+      parsed.plan.model_calibration_profile,
+    );
     const axisBindings: DirectParameterAxisBinding[] = [];
+    let usesCalibration = false;
+    let usesBindingProfile = false;
     for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
       const axisConfig = parsed.plan.key_axes[axisName];
       const axisValue = Number(axisConfig?.value ?? 50);
-      const candidates = DIRECT_PARAMETER_AXIS_MAP[axisName] ?? [];
+      const candidates = this.resolveAxisParameterCandidates(
+        axisName,
+        effectiveCalibrationProfile,
+      );
       let resolvedBinding: DirectParameterAxisBinding | null = null;
 
       for (const parameterName of candidates) {
@@ -1410,6 +1446,11 @@ export class LAppModel extends CubismUserModel {
           parameterName,
           parameterId: resolved.parameterId,
           parameterIndex: resolved.parameterIndex,
+          calibration: this.resolveAxisCalibration(
+            axisName,
+            effectiveCalibrationProfile,
+            parameterName,
+          ),
         };
         break;
       }
@@ -1419,10 +1460,20 @@ export class LAppModel extends CubismUserModel {
         this.stopDirectParameterPlan(`missing_axis_parameter:${axisName}`);
         return false;
       }
+      if (effectiveCalibrationProfile?.axes?.[axisName]) {
+        usesBindingProfile = true;
+      }
+      if (this.axisCalibrationInfluencesExecution(resolvedBinding.calibration)) {
+        usesCalibration = true;
+      }
       axisBindings.push(resolvedBinding);
     }
 
+    const axisParameterIndices = new Set<number>(
+      axisBindings.map((binding) => binding.parameterIndex),
+    );
     const supplementaryBindings: DirectSupplementaryBinding[] = [];
+    const supplementaryParameterIndices = new Set<number>();
     for (const item of parsed.plan.supplementary_params) {
       const parameterIdRaw = String(item.parameter_id || "").trim();
       const sourceAtomId = String(item.source_atom_id || "").trim();
@@ -1433,6 +1484,17 @@ export class LAppModel extends CubismUserModel {
         this.stopDirectParameterPlan(`missing_supplementary_parameter:${parameterIdRaw}`);
         return false;
       }
+      if (axisParameterIndices.has(resolved.parameterIndex)) {
+        console.warn("[LAppModel] supplementary param overlaps axis binding:", parameterIdRaw);
+        this.stopDirectParameterPlan(`overlapping_supplementary_parameter:${parameterIdRaw}`);
+        return false;
+      }
+      if (supplementaryParameterIndices.has(resolved.parameterIndex)) {
+        console.warn("[LAppModel] duplicate supplementary param:", parameterIdRaw);
+        this.stopDirectParameterPlan(`duplicate_supplementary_parameter:${parameterIdRaw}`);
+        return false;
+      }
+      supplementaryParameterIndices.add(resolved.parameterIndex);
 
       supplementaryBindings.push({
         parameterIdRaw,
@@ -1452,6 +1514,8 @@ export class LAppModel extends CubismUserModel {
       timing: parsed.timing,
       axisBindings,
       supplementaryBindings,
+      usesCalibration,
+      usesBindingProfile,
       startedAtMs: performance.now(),
     };
     this._directParameterPlanError = "";
@@ -1490,7 +1554,7 @@ export class LAppModel extends CubismUserModel {
     const elapsedMs = Math.max(0, performance.now() - planState.startedAtMs);
     const easing = this.resolvePlanEasing(elapsedMs, planState.timing);
     if (elapsedMs === 0) {
-      console.info(`[LAppModel] applyDirectParameterPlanOverlay: mode=${planState.mode}, emotion=${planState.emotionLabel}, totalMs=${planState.timing.totalMs}, blendIn=${planState.timing.blendInMs}, hold=${planState.timing.holdMs}, blendOut=${planState.timing.blendOutMs}, axisCount=${planState.axisBindings.length}, suppCount=${planState.supplementaryBindings.length}`);
+      console.info(`[LAppModel] applyDirectParameterPlanOverlay: mode=${planState.mode}, emotion=${planState.emotionLabel}, totalMs=${planState.timing.totalMs}, blendIn=${planState.timing.blendInMs}, hold=${planState.timing.holdMs}, blendOut=${planState.timing.blendOutMs}, axisCount=${planState.axisBindings.length}, suppCount=${planState.supplementaryBindings.length}, calibrated=${planState.usesCalibration}, bindingProfile=${planState.usesBindingProfile}`);
     }
 
     for (const axis of planState.axisBindings) {
@@ -1502,8 +1566,13 @@ export class LAppModel extends CubismUserModel {
       const minValue = this._model.getParameterMinimumValue(axis.parameterIndex);
       const maxValue = this._model.getParameterMaximumValue(axis.parameterIndex);
       const baseValue = this._model.getParameterValueByIndex(axis.parameterIndex);
-      const mappedAxisValue = this.mapAxisValueForExecution(axis.axisValue, planState.mode);
-      const targetValue = minValue + (maxValue - minValue) * (mappedAxisValue / 100.0);
+      const targetValue = this.mapAxisValueForExecution(
+        axis.axisValue,
+        planState.mode,
+        axis.calibration,
+        minValue,
+        maxValue,
+      );
       let blendedValue = baseValue + (targetValue - baseValue) * easing;
 
       if (this._lipsync && axis.axisName === "mouth_open") {
@@ -1512,7 +1581,7 @@ export class LAppModel extends CubismUserModel {
 
       this._model.setParameterValueById(axis.parameterId, blendedValue);
       if (elapsedMs === 0) {
-        console.info(`[LAppModel] setParam axis=${axis.axisName} param=${axis.parameterName} axisVal=${axis.axisValue} mappedAxis=${mappedAxisValue} min=${minValue} max=${maxValue} base=${baseValue} target=${targetValue} eased=${blendedValue} easing=${easing}`);
+        console.info(`[LAppModel] setParam axis=${axis.axisName} param=${axis.parameterName} axisVal=${axis.axisValue} min=${minValue} max=${maxValue} base=${baseValue} target=${targetValue} eased=${blendedValue} easing=${easing} calibrated=${this.axisCalibrationInfluencesExecution(axis.calibration)}`);
       }
     }
 
@@ -1539,6 +1608,50 @@ export class LAppModel extends CubismUserModel {
   private mapAxisValueForExecution(
     axisValue: number,
     mode: "expressive" | "idle",
+    calibration: DirectParameterAxisCalibration | null,
+    minValue: number,
+    maxValue: number,
+  ): number {
+    const executableCalibration = this.resolveExecutableAxisCalibration(calibration);
+    const effectiveAxisValue = executableCalibration?.direction !== null && executableCalibration?.direction !== undefined && executableCalibration.direction < 0
+      ? 100.0 - axisValue
+      : axisValue;
+    const mappedAxisValue = this.applyExpressiveAxisGain(effectiveAxisValue, mode);
+
+    if (!this.hasDirectParameterExecutionRange(executableCalibration)) {
+      return minValue + (maxValue - minValue) * (mappedAxisValue / 100.0);
+    }
+
+    const baseline = this.resolveCalibratedBaseline(executableCalibration, minValue, maxValue);
+    const recommendedRange = this.resolveCalibratedRange(executableCalibration.recommendedRange, baseline, minValue, maxValue);
+    const observedRange = this.resolveCalibratedRange(executableCalibration.observedRange, baseline, minValue, maxValue);
+
+    if (Math.abs(mappedAxisValue - 50.0) <= 0.0001) {
+      return baseline;
+    }
+
+    if (mappedAxisValue < 50.0) {
+      const ratio = (50.0 - mappedAxisValue) / 50.0;
+      return this.interpolateCalibratedAxisSide(
+        ratio,
+        baseline,
+        recommendedRange?.min ?? null,
+        observedRange?.min ?? null,
+      );
+    }
+
+    const ratio = (mappedAxisValue - 50.0) / 50.0;
+    return this.interpolateCalibratedAxisSide(
+      ratio,
+      baseline,
+      recommendedRange?.max ?? null,
+      observedRange?.max ?? null,
+    );
+  }
+
+  private applyExpressiveAxisGain(
+    axisValue: number,
+    mode: "expressive" | "idle",
   ): number {
     const clamped = Math.max(0, Math.min(100, Number(axisValue)));
     if (mode !== "expressive") {
@@ -1560,6 +1673,131 @@ export class LAppModel extends CubismUserModel {
     );
     const signed = centered < 0 ? -1.0 : 1.0;
     return 50.0 + signed * boostedMagnitude * 50.0;
+  }
+
+  private axisCalibrationInfluencesExecution(
+    calibration: DirectParameterAxisCalibration | null,
+  ): boolean {
+    const executableCalibration = this.resolveExecutableAxisCalibration(calibration);
+    if (!executableCalibration) {
+      return false;
+    }
+    return executableCalibration.direction !== null || this.hasDirectParameterExecutionRange(executableCalibration);
+  }
+
+  private resolveExecutableAxisCalibration(
+    calibration: DirectParameterAxisCalibration | null,
+  ): DirectParameterAxisCalibration | null {
+    if (!calibration) {
+      return null;
+    }
+    if (calibration.safeToApply !== true) {
+      return null;
+    }
+    if (calibration.recommended === false) {
+      return null;
+    }
+    return calibration;
+  }
+
+  private hasDirectParameterExecutionRange(
+    calibration: DirectParameterAxisCalibration | null,
+  ): calibration is DirectParameterAxisCalibration {
+    if (!calibration) {
+      return false;
+    }
+    return Boolean(calibration.recommendedRange || calibration.observedRange);
+  }
+
+  private resolveCalibratedBaseline(
+    calibration: DirectParameterAxisCalibration,
+    minValue: number,
+    maxValue: number,
+  ): number {
+    const baselineCandidates = [
+      calibration.baseline,
+      this.resolveRangeMidpoint(calibration.recommendedRange),
+      this.resolveRangeMidpoint(calibration.observedRange),
+      (minValue + maxValue) * 0.5,
+    ];
+
+    for (const candidate of baselineCandidates) {
+      if (Number.isFinite(candidate)) {
+        return this.clampNumber(candidate, minValue, maxValue);
+      }
+    }
+
+    return this.clampNumber((minValue + maxValue) * 0.5, minValue, maxValue);
+  }
+
+  private resolveRangeMidpoint(
+    range: DirectParameterCalibrationRange | null,
+  ): number | null {
+    if (!range) {
+      return null;
+    }
+    if (Number.isFinite(range.min) && Number.isFinite(range.max)) {
+      return (Number(range.min) + Number(range.max)) * 0.5;
+    }
+    if (Number.isFinite(range.min)) {
+      return Number(range.min);
+    }
+    if (Number.isFinite(range.max)) {
+      return Number(range.max);
+    }
+    return null;
+  }
+
+  private resolveCalibratedRange(
+    range: DirectParameterCalibrationRange | null,
+    baseline: number,
+    minValue: number,
+    maxValue: number,
+  ): DirectParameterCalibrationRange | null {
+    if (!range) {
+      return null;
+    }
+
+    const nextMin = Number.isFinite(range.min)
+      ? this.clampNumber(Number(range.min), minValue, maxValue)
+      : baseline;
+    const nextMax = Number.isFinite(range.max)
+      ? this.clampNumber(Number(range.max), minValue, maxValue)
+      : baseline;
+
+    return nextMin <= nextMax
+      ? { min: nextMin, max: nextMax }
+      : { min: nextMax, max: nextMin };
+  }
+
+  private interpolateCalibratedAxisSide(
+    ratio: number,
+    baseline: number,
+    recommendedTarget: number | null,
+    observedTarget: number | null,
+  ): number {
+    const clampedRatio = Math.max(0, Math.min(1, ratio));
+    const hasRecommended = Number.isFinite(recommendedTarget);
+    const hasObserved = Number.isFinite(observedTarget);
+
+    if (hasRecommended && hasObserved && Math.abs(Number(observedTarget) - Number(recommendedTarget)) > 0.0001) {
+      if (clampedRatio <= 0.5) {
+        return baseline + (Number(recommendedTarget) - baseline) * (clampedRatio * 2.0);
+      }
+      return Number(recommendedTarget) + (Number(observedTarget) - Number(recommendedTarget)) * ((clampedRatio - 0.5) * 2.0);
+    }
+
+    const fallbackTarget = hasRecommended
+      ? Number(recommendedTarget)
+      : hasObserved
+        ? Number(observedTarget)
+        : baseline;
+
+    return baseline + (fallbackTarget - baseline) * clampedRatio;
+  }
+
+  private clampNumber(value: number, minValue: number, maxValue: number): number {
+    return Math.min(maxValue, Math.max(minValue, Number(value)));
   }
 
   private resolvePlanEasing(
@@ -1630,6 +1868,328 @@ export class LAppModel extends CubismUserModel {
     return { parameterId, parameterIndex };
   }
 
+  private mergeDirectParameterCalibrationProfiles(
+    planProfile: DirectParameterCalibrationProfile | null,
+    modelProfile: DirectParameterCalibrationProfile | null,
+  ): DirectParameterCalibrationProfile | null {
+    if (!planProfile && !modelProfile) {
+      return null;
+    }
+
+    const axes: Record<string, DirectParameterAxisCalibration> = {};
+    for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
+      const mergedAxis = this.mergeDirectParameterAxisCalibration(
+        planProfile?.axes?.[axisName] ?? null,
+        modelProfile?.axes?.[axisName] ?? null,
+      );
+      if (mergedAxis) {
+        axes[axisName] = mergedAxis;
+      }
+    }
+
+    if (Object.keys(axes).length === 0) {
+      return null;
+    }
+
+    return {
+      schemaVersion: String(planProfile?.schemaVersion || modelProfile?.schemaVersion || "").trim(),
+      axes,
+    };
+  }
+
+  private mergeDirectParameterAxisCalibration(
+    primary: DirectParameterAxisCalibration | null,
+    fallback: DirectParameterAxisCalibration | null,
+  ): DirectParameterAxisCalibration | null {
+    if (!primary && !fallback) {
+      return null;
+    }
+
+    const parameterId = String(primary?.parameterId || fallback?.parameterId || "").trim();
+    const parameterIds = this.collectUniqueStrings([
+      ...(primary?.parameterIds ?? []),
+      ...(fallback?.parameterIds ?? []),
+    ]);
+    const direction = primary?.direction ?? fallback?.direction ?? null;
+    const baseline = primary?.baseline ?? fallback?.baseline ?? null;
+    const recommendedRange = this.mergeDirectParameterCalibrationRange(
+      primary?.recommendedRange ?? null,
+      fallback?.recommendedRange ?? null,
+    );
+    const observedRange = this.mergeDirectParameterCalibrationRange(
+      primary?.observedRange ?? null,
+      fallback?.observedRange ?? null,
+    );
+    const confidence = String(primary?.confidence || fallback?.confidence || "").trim();
+    const source = String(primary?.source || fallback?.source || "").trim();
+    const recommended = primary?.recommended ?? fallback?.recommended ?? null;
+    const safeToApply = primary?.safeToApply ?? fallback?.safeToApply ?? null;
+    const skipReason = String(primary?.skipReason || fallback?.skipReason || "").trim();
+
+    if (
+      !parameterId
+      && parameterIds.length === 0
+      && direction === null
+      && baseline === null
+      && !recommendedRange
+      && !observedRange
+      && !confidence
+      && !source
+      && recommended === null
+      && safeToApply === null
+      && !skipReason
+    ) {
+      return null;
+    }
+
+    return {
+      parameterId,
+      parameterIds,
+      direction,
+      baseline,
+      recommendedRange,
+      observedRange,
+      confidence,
+      source,
+      recommended,
+      safeToApply,
+      skipReason,
+    };
+  }
+
+  private mergeDirectParameterCalibrationRange(
+    primary: DirectParameterCalibrationRange | null,
+    fallback: DirectParameterCalibrationRange | null,
+  ): DirectParameterCalibrationRange | null {
+    if (!primary && !fallback) {
+      return null;
+    }
+
+    const min = Number.isFinite(primary?.min)
+      ? Number(primary?.min)
+      : Number.isFinite(fallback?.min)
+        ? Number(fallback?.min)
+        : null;
+    const max = Number.isFinite(primary?.max)
+      ? Number(primary?.max)
+      : Number.isFinite(fallback?.max)
+        ? Number(fallback?.max)
+        : null;
+
+    if (min === null && max === null) {
+      return null;
+    }
+
+    if (min !== null && max !== null) {
+      return min <= max ? { min, max } : { min: max, max: min };
+    }
+
+    return { min, max };
+  }
+
+  private collectUniqueStrings(values: string[]): string[] {
+    const seen = new Set<string>();
+    const normalized: string[] = [];
+    for (const value of values) {
+      const item = String(value || "").trim();
+      if (!item) {
+        continue;
+      }
+      const key = item.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      normalized.push(item);
+    }
+    return normalized;
+  }
+
+  private resolveAxisCalibration(
+    axisName: string,
+    profile: DirectParameterCalibrationProfile | null,
+    parameterName: string,
+  ): DirectParameterAxisCalibration | null {
+    const calibration = profile?.axes?.[axisName];
+    if (!calibration) {
+      return null;
+    }
+
+    if (!calibration.parameterId && calibration.parameterIds.length === 0) {
+      return calibration;
+    }
+
+    const normalizedParameterName = String(parameterName || "").trim().toLowerCase();
+    if (!normalizedParameterName) {
+      return calibration;
+    }
+
+    const matchesPrimary = calibration.parameterId.toLowerCase() === normalizedParameterName;
+    const matchesAlias = calibration.parameterIds.some((item) => item.toLowerCase() === normalizedParameterName);
+    if (matchesPrimary || matchesAlias) {
+      return calibration;
+    }
+    return null;
+  }
+
+  private resolveAxisParameterCandidates(
+    axisName: string,
+    profile: DirectParameterCalibrationProfile | null,
+  ): string[] {
+    const candidates: string[] = [];
+    const calibration = profile?.axes?.[axisName];
+    if (calibration) {
+      if (calibration.parameterId) {
+        candidates.push(calibration.parameterId);
+      }
+      for (const parameterId of calibration.parameterIds) {
+        candidates.push(parameterId);
+      }
+    }
+    for (const fallbackName of DIRECT_PARAMETER_AXIS_MAP[axisName] ?? []) {
+      candidates.push(fallbackName);
+    }
+    return this.collectUniqueStrings(candidates);
+  }
+
+  private normalizeDirectParameterCalibrationProfile(
+    value: unknown,
+  ): DirectParameterCalibrationProfile | null {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return null;
+    }
+
+    const payload = value as Record<string, any>;
+    const axesPayload = payload.axes && typeof payload.axes === "object" && !Array.isArray(payload.axes)
+      ? payload.axes
+      : payload.axis_calibrations && typeof payload.axis_calibrations === "object" && !Array.isArray(payload.axis_calibrations)
+        ? payload.axis_calibrations
+        : payload;
+
+    const axes: Record<string, DirectParameterAxisCalibration> = {};
+    for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
+      const normalizedAxis = this.normalizeDirectParameterAxisCalibration(
+        axesPayload?.[axisName],
+      );
+      if (!normalizedAxis) {
+        continue;
+      }
+      axes[axisName] = normalizedAxis;
+    }
+
+    if (Object.keys(axes).length === 0) {
+      return null;
+    }
+
+    return {
+      schemaVersion: String(payload.schema_version || "").trim(),
+      axes,
+    };
+  }
+
+  private normalizeDirectParameterAxisCalibration(
+    value: unknown,
+  ): DirectParameterAxisCalibration | null {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return null;
+    }
+
+    const payload = value as Record<string, any>;
+    const parameterId = String(payload.parameter_id || "").trim();
+    const parameterIds = Array.isArray(payload.parameter_ids)
+      ? payload.parameter_ids
+        .map((item) => String(item || "").trim())
+        .filter((item) => item.length > 0)
+      : [];
+    const direction = this.normalizeDirectParameterDirection(payload.direction);
+    const baseline = Number.isFinite(payload.baseline)
+      ? Number(payload.baseline)
+      : null;
+    const recommendedRange = this.normalizeDirectParameterCalibrationRange(
+      payload.recommended_range ?? payload.recommended ?? payload.recommendedRange,
+    );
+    const observedRange = this.normalizeDirectParameterCalibrationRange(
+      payload.observed_range ?? payload.observed ?? payload.observedRange,
+    );
+    const confidence = String(payload.confidence || "").trim();
+    const source = String(payload.source || "").trim();
+    const recommended = typeof payload.recommended === "boolean"
+      ? payload.recommended
+      : null;
+    const safeToApply = typeof payload.safe_to_apply === "boolean"
+      ? payload.safe_to_apply
+      : null;
+    const skipReason = String(payload.skip_reason || "").trim();
+
+    if (
+      !parameterId
+      && parameterIds.length === 0
+      && direction === null
+      && baseline === null
+      && !recommendedRange
+      && !observedRange
+      && !confidence
+      && !source
+      && recommended === null
+      && safeToApply === null
+      && !skipReason
+    ) {
+      return null;
+    }
+
+    return {
+      parameterId,
+      parameterIds,
+      direction,
+      baseline,
+      recommendedRange,
+      observedRange,
+      confidence,
+      source,
+      recommended,
+      safeToApply,
+      skipReason,
+    };
+  }
+
+  private normalizeDirectParameterDirection(value: unknown): number | null {
+    if (typeof value === "number" && Number.isFinite(value) && value !== 0) {
+      return value < 0 ? -1 : 1;
+    }
+    const normalized = String(value || "").trim().toLowerCase();
+    if (!normalized) {
+      return null;
+    }
+    if (["-1", "negative", "invert", "inverted", "reverse", "reversed"].includes(normalized)) {
+      return -1;
+    }
+    if (["1", "positive", "forward", "normal"].includes(normalized)) {
+      return 1;
+    }
+    return null;
+  }
+
+  private normalizeDirectParameterCalibrationRange(
+    value: unknown,
+  ): DirectParameterCalibrationRange | null {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return null;
+    }
+
+    const payload = value as Record<string, any>;
+    const min = Number.isFinite(payload.min) ? Number(payload.min) : null;
+    const max = Number.isFinite(payload.max) ? Number(payload.max) : null;
+    if (min === null && max === null) {
+      return null;
+    }
+
+    if (min !== null && max !== null) {
+      return min <= max ? { min, max } : { min: max, max: min };
+    }
+
+    return { min, max };
+  }
+
   private parseDirectParameterPlan(plan: unknown): {
     plan: {
       mode: "expressive" | "idle";
@@ -1648,6 +2208,8 @@ export class LAppModel extends CubismUserModel {
         source_atom_id: string;
         channel: string;
       }>;
+      calibration_profile: DirectParameterCalibrationProfile | null;
+      model_calibration_profile: DirectParameterCalibrationProfile | null;
     } | null;
     timing: DirectParameterPlanState["timing"];
     reason: string;
@@ -1763,6 +2325,13 @@ export class LAppModel extends CubismUserModel {
       });
     }
 
+    const calibrationProfile = this.normalizeDirectParameterCalibrationProfile(
+      payload.calibration_profile,
+    );
+    const modelCalibrationProfile = this.normalizeDirectParameterCalibrationProfile(
+      payload.model_calibration_profile,
+    );
+
     const timing = {
       durationMs: Math.round(durationMs),
       blendInMs: Math.round(blendInMs),
@@ -1786,6 +2355,8 @@ export class LAppModel extends CubismUserModel {
         },
         key_axes: keyAxes,
         supplementary_params: supplementaryParams,
+        calibration_profile: calibrationProfile,
+        model_calibration_profile: modelCalibrationProfile,
       },
       timing,
       reason: "",

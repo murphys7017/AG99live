@@ -7,8 +7,10 @@ from adapter.realtime_motion_plan import (
     build_plan_from_axes,
     normalize_selector_output,
     resolve_selected_parameter_action_library,
+    resolve_selected_model_calibration_profile,
     validate_parameter_plan_payload,
 )
+from tests.unit.live2d.test_support import build_seed_model_info, build_seed_model_info_with_options
 
 
 def test_resolve_selected_parameter_action_library_prefers_selected_model() -> None:
@@ -22,6 +24,69 @@ def test_resolve_selected_parameter_action_library_prefers_selected_model() -> N
     library = resolve_selected_parameter_action_library(model_info)
     assert isinstance(library, dict)
     assert library["schema_version"] == "b"
+
+
+def test_resolve_selected_parameter_action_library_does_not_cross_model_fallback() -> None:
+    model_info = {
+        "selected_model": "Model-B",
+        "models": [
+            {"name": "Model-A", "parameter_action_library": {"schema_version": "a"}},
+            {"name": "Model-B"},
+        ],
+    }
+
+    library = resolve_selected_parameter_action_library(model_info)
+    assert library is None
+
+
+def test_resolve_selected_model_calibration_profile_prefers_selected_model() -> None:
+    model_info = {
+        "selected_model": "Model-B",
+        "models": [
+            {
+                "name": "Model-A",
+                "calibration_profile": {"axes": {"head_yaw": {"invert": True}}},
+            },
+            {
+                "name": "Model-B",
+                "calibration_profile": {"axes": {"head_yaw": {"output_max": 72}}},
+            },
+        ],
+    }
+
+    calibration_profile = resolve_selected_model_calibration_profile(model_info)
+    assert isinstance(calibration_profile, dict)
+    assert calibration_profile["axes"]["head_yaw"]["output_max"] == 72
+
+
+def test_resolve_selected_model_calibration_profile_accepts_scan_generated_shape() -> None:
+    model_info = build_seed_model_info()
+
+    calibration_profile = resolve_selected_model_calibration_profile(model_info)
+
+    assert isinstance(calibration_profile, dict)
+    assert calibration_profile["schema_version"] == "direct_parameter_calibration.v1"
+    assert calibration_profile["axes"]["head_yaw"]["parameter_id"] == "ParamAngleX"
+    assert calibration_profile["axes"]["head_yaw"]["recommended"] is False
+    assert calibration_profile["axes"]["head_yaw"]["safe_to_apply"] is False
+    assert calibration_profile["axes"]["head_yaw"]["parameter_ids"] == [
+        "ParamAngleX",
+        "ParamHeadXAlt",
+    ]
+    assert "recommended_range" not in calibration_profile["axes"]["mouth_open"]
+
+
+def test_resolve_selected_model_calibration_profile_keeps_safe_scan_generated_axis() -> None:
+    model_info = build_seed_model_info_with_options(reinforce_primary_observations=True)
+
+    calibration_profile = resolve_selected_model_calibration_profile(model_info)
+
+    assert isinstance(calibration_profile, dict)
+    assert calibration_profile["axes"]["head_yaw"]["recommended"] is True
+    assert calibration_profile["axes"]["head_yaw"]["recommended_range"] == {
+        "min": -0.05,
+        "max": 0.7,
+    }
 
 
 def test_build_plan_from_axes_uses_parameter_action_library_atoms() -> None:
@@ -45,6 +110,144 @@ def test_build_plan_from_axes_uses_parameter_action_library_atoms() -> None:
     assert len(plan["supplementary_params"]) >= 1
     assert plan["supplementary_params"][0]["parameter_id"] == "ParamCheek"
     assert plan["supplementary_params"][0]["channel"] == "head_yaw"
+
+
+def test_build_plan_from_axes_without_calibration_profile_keeps_legacy_direct_mapping() -> None:
+    selector = normalize_selector_output(
+        {
+            "emotion": "happy",
+            "mode": "parallel",
+            "axes": {
+                "head_yaw": 88,
+            },
+        }
+    )
+    library = _build_calibration_sensitive_parameter_action_library()
+
+    plan = build_plan_from_axes(selector, library=library)
+
+    assert plan["key_axes"]["head_yaw"]["value"] == 88
+    assert plan["supplementary_params"][0]["parameter_id"] == "ParamCheek"
+    assert plan["supplementary_params"][0]["source_atom_id"] == "head_yaw.positive.cheek"
+
+
+def test_build_plan_from_axes_applies_calibration_profile_to_axes_and_supplementary() -> None:
+    selector = normalize_selector_output(
+        {
+            "emotion": "happy",
+            "mode": "parallel",
+            "axes": {
+                "head_yaw": 88,
+            },
+        }
+    )
+    library = _build_calibration_sensitive_parameter_action_library()
+    calibration_profile = {
+        "axes": {
+            "head_yaw": {
+                "direction": -1,
+                "output_min": 18,
+                "parameter_id": "ParamJaw",
+                "recommended_range": {"min": -0.2, "max": 0.4},
+                "observed_range": {"min": -0.5, "max": 0.8},
+                "supplementary_preferred_parameter_ids": ["ParamJaw"],
+                "supplementary_max_atoms": 1,
+                "supplementary_target_scale": 0.5,
+            }
+        }
+    }
+
+    plan = build_plan_from_axes(
+        selector,
+        library=library,
+        calibration_profile=calibration_profile,
+    )
+    valid, reason = validate_parameter_plan_payload(plan)
+
+    assert valid is True
+    assert reason == ""
+    assert plan["key_axes"]["head_yaw"]["value"] == 18
+    assert plan["calibration_profile"] == {
+        "schema_version": "",
+        "axes": {
+            "head_yaw": {
+                "parameter_id": "ParamJaw",
+                "recommended_range": {"min": -0.2, "max": 0.4},
+                "observed_range": {"min": -0.5, "max": 0.8},
+            }
+        },
+    }
+    assert plan["supplementary_params"] == []
+
+
+def test_build_plan_from_axes_skips_low_data_scan_calibration_but_excludes_axis_parameters() -> None:
+    selector = normalize_selector_output(
+        {
+            "emotion": "happy",
+            "mode": "parallel",
+            "axes": {
+                "head_yaw": 88,
+            },
+        }
+    )
+    calibration_profile = resolve_selected_model_calibration_profile(build_seed_model_info())
+    library = {
+        "schema_version": "parameter_action_library.v1",
+        "atoms": [
+            {
+                "id": "head_yaw.positive.axis",
+                "primary_channel": "head_yaw",
+                "polarity": "positive",
+                "score": 5.0,
+                "energy_score": 4.0,
+                "duration": 0.7,
+                "parameter_id": "ParamAngleX",
+                "source_motion": "HappyTurn",
+                "source_file": "Motions/HappyTurn.motion3.json",
+                "source_group": "Idle",
+                "semantic_polarity": "positive",
+                "trait": "sustain",
+                "strength": "medium",
+            },
+            {
+                "id": "head_yaw.positive.cheek",
+                "primary_channel": "head_yaw",
+                "polarity": "positive",
+                "score": 4.0,
+                "energy_score": 3.5,
+                "duration": 0.6,
+                "parameter_id": "ParamCheek",
+                "source_motion": "HappyTurn",
+                "source_file": "Motions/HappyTurn.motion3.json",
+                "source_group": "Idle",
+                "semantic_polarity": "positive",
+                "trait": "sustain",
+                "strength": "medium",
+            },
+        ],
+    }
+
+    plan = build_plan_from_axes(
+        selector,
+        library=library,
+        calibration_profile=calibration_profile,
+    )
+    valid, reason = validate_parameter_plan_payload(plan)
+
+    assert valid is True
+    assert reason == ""
+    assert plan["key_axes"]["head_yaw"]["value"] == 88
+    assert plan["supplementary_params"] == [
+        {
+            "parameter_id": "ParamCheek",
+            "target_value": 0.5928,
+            "weight": 0.72,
+            "source_atom_id": "head_yaw.positive.cheek",
+            "channel": "head_yaw",
+        }
+    ]
+    assert plan["calibration_profile"]["axes"]["head_yaw"]["safe_to_apply"] is False
+    assert "recommended_range" not in plan["calibration_profile"]["axes"]["head_yaw"]
 
 
 def test_build_plan_from_axes_outputs_idle_mode_when_all_axes_in_deadzone() -> None:
@@ -326,6 +529,59 @@ def _build_seed_parameter_action_library() -> dict:
                 "semantic_polarity": "positive",
                 "trait": "pulse",
                 "strength": "low",
+            },
+        ],
+    }
+
+
+def _build_calibration_sensitive_parameter_action_library() -> dict:
+    return {
+        "schema_version": "parameter_action_library.v1",
+        "atoms": [
+            {
+                "id": "head_yaw.positive.cheek",
+                "primary_channel": "head_yaw",
+                "polarity": "positive",
+                "score": 5.0,
+                "energy_score": 4.0,
+                "duration": 0.7,
+                "parameter_id": "ParamCheek",
+                "source_motion": "HappyTurn",
+                "source_file": "Motions/HappyTurn.motion3.json",
+                "source_group": "Idle",
+                "semantic_polarity": "positive",
+                "trait": "sustain",
+                "strength": "medium",
+            },
+            {
+                "id": "head_yaw.negative.cheek",
+                "primary_channel": "head_yaw",
+                "polarity": "negative",
+                "score": 4.5,
+                "energy_score": 4.5,
+                "duration": 0.6,
+                "parameter_id": "ParamCheek",
+                "source_motion": "SadTurn",
+                "source_file": "Motions/SadTurn.motion3.json",
+                "source_group": "Idle",
+                "semantic_polarity": "negative",
+                "trait": "ramp",
+                "strength": "medium",
+            },
+            {
+                "id": "head_yaw.negative.jaw",
+                "primary_channel": "head_yaw",
+                "polarity": "negative",
+                "score": 3.5,
+                "energy_score": 3.0,
+                "duration": 0.6,
+                "parameter_id": "ParamJaw",
+                "source_motion": "CorrectedTurn",
+                "source_file": "Motions/CorrectedTurn.motion3.json",
+                "source_group": "Idle",
+                "semantic_polarity": "negative",
+                "trait": "ramp",
+                "strength": "medium",
             },
         ],
     }

@@ -212,6 +212,9 @@ class RealtimeMotionPlanGenerator:
         )
         if not isinstance(library, dict):
             return None
+        calibration_profile = resolve_selected_model_calibration_profile(
+            getattr(self.runtime_state, "model_info", {}),
+        )
 
         context_text = build_selector_context(
             user_text=user_text,
@@ -223,7 +226,11 @@ class RealtimeMotionPlanGenerator:
             few_shot_examples=resolve_selector_few_shot_examples(runtime_state=self.runtime_state),
         )
         selector = normalize_selector_output(selector_raw)
-        plan = build_plan_from_axes(selector, library=library)
+        plan = build_plan_from_axes(
+            selector,
+            library=library,
+            calibration_profile=calibration_profile,
+        )
         valid, _ = validate_parameter_plan_payload(plan)
         if not valid:
             return None
@@ -259,7 +266,7 @@ class RealtimeMotionPlanGenerator:
         return _extract_json_object(completion_text)
 
 
-def resolve_selected_parameter_action_library(model_info: Any) -> dict[str, Any] | None:
+def _resolve_selected_model_entry(model_info: Any) -> dict[str, Any] | None:
     if not isinstance(model_info, dict):
         return None
     models = [item for item in model_info.get("models", []) if isinstance(item, dict)]
@@ -270,14 +277,28 @@ def resolve_selected_parameter_action_library(model_info: Any) -> dict[str, Any]
     if selected_model_name:
         for model in models:
             if str(model.get("name") or "").strip() == selected_model_name:
-                library = model.get("parameter_action_library")
-                if isinstance(library, dict):
-                    return library
+                return model
 
-    for model in models:
-        library = model.get("parameter_action_library")
-        if isinstance(library, dict):
-            return library
+    return models[0]
+
+
+def resolve_selected_parameter_action_library(model_info: Any) -> dict[str, Any] | None:
+    selected_model = _resolve_selected_model_entry(model_info)
+    if not isinstance(selected_model, dict):
+        return None
+    library = selected_model.get("parameter_action_library")
+    if isinstance(library, dict):
+        return library
+    return None
+
+
+def resolve_selected_model_calibration_profile(model_info: Any) -> dict[str, Any] | None:
+    selected_model = _resolve_selected_model_entry(model_info)
+    if not isinstance(selected_model, dict):
+        return None
+    calibration_profile = selected_model.get("calibration_profile")
+    if isinstance(calibration_profile, dict):
+        return calibration_profile
     return None
 
 
@@ -528,6 +549,7 @@ def build_plan_from_axes(
     selector_output: dict[str, Any],
     *,
     library: dict[str, Any],
+    calibration_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     raw_atoms = library.get("atoms")
     atoms = [atom for atom in raw_atoms if isinstance(atom, dict)] if isinstance(raw_atoms, list) else []
@@ -537,6 +559,10 @@ def build_plan_from_axes(
         axis.name: clamp_axis_value(axis_values.get(axis.name, 50))
         for axis in AXES
     }
+    calibrated_axes = _apply_axis_calibration_profile(
+        axis_values=normalized_axes,
+        calibration_profile=calibration_profile,
+    )
 
     duration_ms_raw = selector_output.get("duration_ms", 1200)
     try:
@@ -545,13 +571,14 @@ def build_plan_from_axes(
         target_duration_ms = 1200
     target_duration_ms = max(400, min(6000, target_duration_ms))
 
-    plan_mode = "idle" if _is_idle_deadzone(normalized_axes) else "expressive"
+    plan_mode = "idle" if _is_idle_deadzone(calibrated_axes) else "expressive"
     timing = _build_plan_timing(duration_ms=target_duration_ms, mode=plan_mode)
     supplementary_params: list[dict[str, Any]] = []
     if plan_mode == "expressive":
         supplementary_params = _build_supplementary_params(
             atoms=atoms,
-            axis_values=normalized_axes,
+            axis_values=calibrated_axes,
+            calibration_profile=calibration_profile,
         )
 
     return {
@@ -561,9 +588,10 @@ def build_plan_from_axes(
         "timing": timing,
         "key_axes": {
             axis_name: {"value": axis_value}
-            for axis_name, axis_value in normalized_axes.items()
+            for axis_name, axis_value in calibrated_axes.items()
         },
         "supplementary_params": supplementary_params,
+        "calibration_profile": _build_execution_calibration_profile(calibration_profile),
         "summary": {
             "key_axes_count": len(AXIS_NAMES),
             "supplementary_count": len(supplementary_params),
@@ -619,16 +647,269 @@ def _is_idle_deadzone(axis_values: dict[str, int]) -> bool:
     return True
 
 
+def _apply_axis_calibration_profile(
+    *,
+    axis_values: dict[str, int],
+    calibration_profile: dict[str, Any] | None,
+) -> dict[str, int]:
+    if not isinstance(calibration_profile, dict):
+        return dict(axis_values)
+
+    calibrated: dict[str, int] = {}
+    for axis_name in AXIS_NAMES:
+        axis_profile = _resolve_axis_calibration_profile(
+            calibration_profile=calibration_profile,
+            axis_name=axis_name,
+        )
+        value = clamp_axis_value(axis_values.get(axis_name, 50))
+        if axis_profile and not _axis_profile_is_safe_to_apply(axis_profile):
+            calibrated[axis_name] = value
+            continue
+
+        # Keep calibration consumption generic: direction flip first, then clamp
+        # to the model's safe/readable operating range if one is provided.
+        if _profile_direction_sign(axis_profile) < 0 or _profile_flag(axis_profile, "invert", "reverse"):
+            value = 100 - value
+
+        lower_bound = _profile_axis_bound(axis_profile, "clip_min", "output_min", "value_min")
+        upper_bound = _profile_axis_bound(axis_profile, "clip_max", "output_max", "value_max")
+        if lower_bound is not None:
+            value = max(lower_bound, value)
+        if upper_bound is not None:
+            value = min(upper_bound, value)
+
+        calibrated[axis_name] = clamp_axis_value(value)
+
+    return calibrated
+
+
+def _resolve_axis_calibration_profile(
+    *,
+    calibration_profile: dict[str, Any] | None,
+    axis_name: str,
+) -> dict[str, Any]:
+    if not isinstance(calibration_profile, dict):
+        return {}
+    axes_profile = calibration_profile.get("axes")
+    if not isinstance(axes_profile, dict):
+        return {}
+    axis_profile = axes_profile.get(axis_name)
+    if isinstance(axis_profile, dict):
+        return axis_profile
+    return {}
+
+
+def _profile_axis_bound(
+    axis_profile: dict[str, Any],
+    *keys: str,
+) -> int | None:
+    for key in keys:
+        value = axis_profile.get(key)
+        if value is None:
+            continue
+        return clamp_axis_value(value)
+    return None
+
+
+def _profile_flag(axis_profile: dict[str, Any], *keys: str) -> bool:
+    for key in keys:
+        value = axis_profile.get(key)
+        if isinstance(value, bool):
+            if value:
+                return True
+            continue
+        text = str(value or "").strip().lower()
+        if text in {"1", "true", "yes", "on", "invert", "reverse"}:
+            return True
+    return False
+
+
+def _profile_direction_sign(axis_profile: dict[str, Any]) -> int:
+    for key in ("direction", "sign"):
+        value = axis_profile.get(key)
+        if value is None:
+            continue
+        if isinstance(value, (int, float)):
+            return -1 if float(value) < 0 else 1
+        text = str(value or "").strip().lower()
+        if text in {"-1", "negative", "inverted", "reverse", "flipped"}:
+            return -1
+        if text in {"1", "positive", "forward", "normal"}:
+            return 1
+    return 1
+
+
+def _profile_positive_int(
+    axis_profile: dict[str, Any],
+    *keys: str,
+) -> int | None:
+    for key in keys:
+        value = axis_profile.get(key)
+        if value is None:
+            continue
+        try:
+            number = int(round(float(value)))
+        except (TypeError, ValueError):
+            continue
+        if number > 0:
+            return number
+    return None
+
+
+def _profile_multiplier(
+    axis_profile: dict[str, Any],
+    *keys: str,
+) -> float | None:
+    for key in keys:
+        value = axis_profile.get(key)
+        if value is None:
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _profile_parameter_id_set(
+    axis_profile: dict[str, Any],
+    *keys: str,
+) -> set[str]:
+    normalized: set[str] = set()
+    for key in keys:
+        raw_value = axis_profile.get(key)
+        values = raw_value if isinstance(raw_value, list) else [raw_value]
+        for item in values:
+            parameter_id = _normalize_parameter_id(str(item or "").strip())
+            if parameter_id:
+                normalized.add(parameter_id)
+    return normalized
+
+
+def _profile_boolean(axis_profile: dict[str, Any], key: str) -> bool | None:
+    if key not in axis_profile:
+        return None
+    value = axis_profile.get(key)
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _axis_profile_is_safe_to_apply(axis_profile: dict[str, Any]) -> bool:
+    for key in ("safe_to_apply", "recommended"):
+        flag = _profile_boolean(axis_profile, key)
+        if flag is not None:
+            return flag
+    return True
+
+
+def _build_execution_calibration_profile(
+    calibration_profile: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(calibration_profile, dict):
+        return None
+
+    axes_payload = calibration_profile.get("axes")
+    if not isinstance(axes_payload, dict):
+        return None
+
+    sanitized_axes: dict[str, dict[str, Any]] = {}
+    for axis_name in AXIS_NAMES:
+        axis_profile = axes_payload.get(axis_name)
+        if not isinstance(axis_profile, dict):
+            continue
+
+        sanitized_axis: dict[str, Any] = {}
+        parameter_id = str(axis_profile.get("parameter_id") or "").strip()
+        if parameter_id:
+            sanitized_axis["parameter_id"] = parameter_id
+
+        parameter_ids = [
+            str(item).strip()
+            for item in axis_profile.get("parameter_ids", [])
+            if str(item).strip()
+        ] if isinstance(axis_profile.get("parameter_ids"), list) else []
+        if parameter_ids:
+            sanitized_axis["parameter_ids"] = parameter_ids
+
+        baseline = axis_profile.get("baseline")
+        if isinstance(baseline, (int, float)):
+            sanitized_axis["baseline"] = float(baseline)
+
+        for key in ("recommended", "safe_to_apply"):
+            flag = _profile_boolean(axis_profile, key)
+            if flag is not None:
+                sanitized_axis[key] = flag
+
+        for key in ("confidence", "source", "skip_reason"):
+            value = str(axis_profile.get(key) or "").strip()
+            if value:
+                sanitized_axis[key] = value
+
+        recommended_range = _sanitize_execution_range(
+            axis_profile.get("recommended_range")
+            or axis_profile.get("recommended")
+            or axis_profile.get("recommendedRange"),
+        )
+        if recommended_range is not None:
+            sanitized_axis["recommended_range"] = recommended_range
+
+        observed_range = _sanitize_execution_range(
+            axis_profile.get("observed_range")
+            or axis_profile.get("observed")
+            or axis_profile.get("observedRange"),
+        )
+        if observed_range is not None:
+            sanitized_axis["observed_range"] = observed_range
+
+        if sanitized_axis:
+            sanitized_axes[axis_name] = sanitized_axis
+
+    if not sanitized_axes:
+        return None
+
+    schema_version = str(calibration_profile.get("schema_version") or "").strip()
+    return {
+        "schema_version": schema_version,
+        "axes": sanitized_axes,
+    }
+
+
+def _sanitize_execution_range(value: Any) -> dict[str, float] | None:
+    if not isinstance(value, dict):
+        return None
+
+    sanitized: dict[str, float] = {}
+    min_value = value.get("min")
+    max_value = value.get("max")
+    if isinstance(min_value, (int, float)):
+        sanitized["min"] = float(min_value)
+    if isinstance(max_value, (int, float)):
+        sanitized["max"] = float(max_value)
+    if not sanitized:
+        return None
+    if "min" in sanitized and "max" in sanitized and sanitized["min"] > sanitized["max"]:
+        sanitized["min"], sanitized["max"] = sanitized["max"], sanitized["min"]
+    return sanitized
+
+
 def _build_supplementary_params(
     *,
     atoms: list[dict[str, Any]],
     axis_values: dict[str, int],
+    calibration_profile: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     excluded_parameter_ids = {
         parameter_id
         for parameter_ids in _KEY_AXIS_EXCLUDED_PARAMETER_IDS.values()
         for parameter_id in parameter_ids
     }
+    excluded_parameter_ids.update(_collect_calibration_parameter_ids(calibration_profile))
     selected_by_parameter: dict[str, dict[str, Any]] = {}
 
     for axis in AXES:
@@ -637,10 +918,39 @@ def _build_supplementary_params(
         if abs(delta) < _ACTIVE_AXIS_THRESHOLD:
             continue
 
+        axis_profile = _resolve_axis_calibration_profile(
+            calibration_profile=calibration_profile,
+            axis_name=axis.name,
+        )
         polarity = "positive" if delta > 0 else "negative"
         direction = 1.0 if delta > 0 else -1.0
         normalized_strength = min(abs(delta) / 50.0, 1.0)
         weight = round(max(0.15, min(0.15 + normalized_strength * 0.75, 0.9)), 4)
+        weight_scale = _profile_multiplier(axis_profile, "supplementary_weight_scale")
+        if weight_scale is not None:
+            weight = round(max(0.0, min(weight * weight_scale, 1.0)), 4)
+        target_scale = _profile_multiplier(axis_profile, "supplementary_target_scale")
+        if target_scale is None:
+            target_scale = 1.0
+        preferred_parameter_ids = _profile_parameter_id_set(
+            axis_profile,
+            "supplementary_preferred_parameter_ids",
+            "preferred_parameter_ids",
+        )
+        blocked_parameter_ids = _profile_parameter_id_set(
+            axis_profile,
+            "supplementary_blocked_parameter_ids",
+            "supplementary_excluded_parameter_ids",
+            "blocked_parameter_ids",
+        )
+        candidate_limit = _profile_positive_int(
+            axis_profile,
+            "supplementary_max_atoms",
+            "supplementary_top_k",
+        )
+        if candidate_limit is None:
+            candidate_limit = 2
+
         channel_atoms = [
             atom
             for atom in atoms
@@ -648,13 +958,22 @@ def _build_supplementary_params(
             and str(atom.get("polarity") or "").strip() == polarity
         ]
         ranked_atoms = sorted(
-            channel_atoms,
+            [
+                atom
+                for atom in channel_atoms
+                if _normalize_parameter_id(str(atom.get("parameter_id") or "").strip())
+                not in blocked_parameter_ids
+            ],
             key=lambda atom: (
+                0
+                if _normalize_parameter_id(str(atom.get("parameter_id") or "").strip())
+                in preferred_parameter_ids
+                else 1,
                 -float(atom.get("score") or 0.0),
                 -float(atom.get("energy_score") or 0.0),
                 str(atom.get("id") or ""),
             ),
-        )[:2]
+        )[:candidate_limit]
 
         for atom in ranked_atoms:
             parameter_id = str(atom.get("parameter_id") or "").strip()
@@ -668,7 +987,10 @@ def _build_supplementary_params(
 
             strength_factor = _strength_semantic_factor(str(atom.get("strength") or ""))
             target_value = round(
-                max(-1.0, min(direction * normalized_strength * strength_factor, 1.0)),
+                max(
+                    -1.0,
+                    min(direction * normalized_strength * strength_factor * target_scale, 1.0),
+                ),
                 4,
             )
             candidate = {
@@ -714,6 +1036,27 @@ def _build_supplementary_params(
             }
         )
     return output
+
+
+def _collect_calibration_parameter_ids(
+    calibration_profile: dict[str, Any] | None,
+) -> set[str]:
+    if not isinstance(calibration_profile, dict):
+        return set()
+
+    axes_payload = calibration_profile.get("axes")
+    if not isinstance(axes_payload, dict):
+        return set()
+
+    parameter_ids: set[str] = set()
+    for axis_name in AXIS_NAMES:
+        axis_profile = axes_payload.get(axis_name)
+        if not isinstance(axis_profile, dict):
+            continue
+        parameter_ids.update(
+            _profile_parameter_id_set(axis_profile, "parameter_id", "parameter_ids")
+        )
+    return parameter_ids
 
 
 def _normalize_parameter_id(parameter_id: str) -> str:

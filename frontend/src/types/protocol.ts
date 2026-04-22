@@ -472,6 +472,80 @@ export interface ParameterActionLibrary {
   atoms: ParameterActionAtom[];
 }
 
+export type DirectParameterAxisName =
+  | "head_yaw"
+  | "head_roll"
+  | "head_pitch"
+  | "body_yaw"
+  | "body_roll"
+  | "gaze_x"
+  | "gaze_y"
+  | "eye_open_left"
+  | "eye_open_right"
+  | "mouth_open"
+  | "mouth_smile"
+  | "brow_bias";
+
+export interface DirectParameterCalibrationRange {
+  min?: number | null;
+  max?: number | null;
+}
+
+export interface DirectParameterAxisCalibration {
+  parameter_id?: string;
+  parameter_ids?: string[];
+  direction?: number | string | null;
+  baseline?: number | null;
+  recommended_range?: DirectParameterCalibrationRange | null;
+  observed_range?: DirectParameterCalibrationRange | null;
+  confidence?: string | null;
+  source?: string | null;
+  recommended?: boolean | null;
+  safe_to_apply?: boolean | null;
+  skip_reason?: string | null;
+}
+
+export interface DirectParameterCalibrationProfile {
+  schema_version?: string;
+  axes?: Partial<Record<DirectParameterAxisName, DirectParameterAxisCalibration | null>>;
+  axis_calibrations?: Partial<Record<DirectParameterAxisName, DirectParameterAxisCalibration | null>>;
+}
+
+export interface DirectParameterAxisValue {
+  value: number;
+}
+
+export interface DirectParameterPlanSupplementaryParam {
+  parameter_id: string;
+  target_value: number;
+  weight: number;
+  source_atom_id: string;
+  channel: string;
+}
+
+export interface DirectParameterPlanTiming {
+  duration_ms: number;
+  blend_in_ms: number;
+  hold_ms: number;
+  blend_out_ms: number;
+}
+
+export interface DirectParameterPlan {
+  schema_version: "engine.parameter_plan.v1";
+  mode: "expressive" | "idle";
+  emotion_label: string;
+  timing: DirectParameterPlanTiming;
+  key_axes: Record<DirectParameterAxisName, DirectParameterAxisValue>;
+  supplementary_params: DirectParameterPlanSupplementaryParam[];
+  calibration_profile?: DirectParameterCalibrationProfile | null;
+  model_calibration_profile?: DirectParameterCalibrationProfile | null;
+  summary?: {
+    key_axes_count?: number;
+    supplementary_count?: number;
+    target_duration_ms?: number;
+  };
+}
+
 export interface ModelSummary {
   name: string;
   root_path: string;
@@ -488,6 +562,7 @@ export interface ModelSummary {
     expressions: ExpressionConstraint[];
     motions: MotionConstraint[];
   };
+  calibration_profile?: DirectParameterCalibrationProfile | null;
   engine_hints: {
     driver_priority: string[];
     recommended_mode: string;

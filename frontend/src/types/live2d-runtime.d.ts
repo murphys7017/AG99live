@@ -1,3 +1,5 @@
+import type { DirectParameterPlan } from "./protocol";
+
 export {};
 
 declare global {
@@ -10,7 +12,7 @@ declare global {
       getMotionGroups?: () => string[];
       getMotionCount?: (group: string) => number;
       startMotion?: (group: string, no: number, priority: number) => number;
-      startDirectParameterPlan?: (plan: unknown) => boolean;
+      startDirectParameterPlan?: (plan: DirectParameterPlan) => boolean;
       stopDirectParameterPlan?: () => void;
       getDirectParameterPlanError?: () => string;
       loadWavFileForLipSync?: (url: string) => Promise<boolean>;

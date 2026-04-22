@@ -1,5 +1,11 @@
 ﻿import { reactive, readonly } from "vue";
-import type { ModelSummary } from "../types/protocol";
+import type {
+  DirectParameterAxisCalibration,
+  DirectParameterAxisName,
+  DirectParameterCalibrationProfile,
+  DirectParameterPlan,
+  ModelSummary,
+} from "../types/protocol";
 
 type PreviewPlayerStatus = "idle" | "playing" | "finished" | "failed";
 
@@ -16,40 +22,10 @@ const AXIS_NAMES = [
   "mouth_open",
   "mouth_smile",
   "brow_bias",
-] as const;
-
-type AxisName = (typeof AXIS_NAMES)[number];
-
-interface ParameterAxisValue {
-  value: number;
-}
-
-interface SupplementaryParam {
-  parameter_id: string;
-  target_value: number;
-  weight: number;
-  source_atom_id: string;
-  channel: string;
-}
-
-interface ParameterPlanTiming {
-  duration_ms: number;
-  blend_in_ms: number;
-  hold_ms: number;
-  blend_out_ms: number;
-}
-
-interface ParameterPlan {
-  schema_version: "engine.parameter_plan.v1";
-  mode: "expressive" | "idle";
-  emotion_label: string;
-  timing: ParameterPlanTiming;
-  key_axes: Record<AxisName, ParameterAxisValue>;
-  supplementary_params: SupplementaryParam[];
-}
+] as const satisfies readonly DirectParameterAxisName[];
 
 interface ParsedParameterPlan {
-  plan: ParameterPlan;
+  plan: DirectParameterPlan;
   totalDurationMs: number;
 }
 
@@ -77,6 +53,127 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function normalizeNullableBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function normalizeRange(
+  value: unknown,
+): DirectParameterAxisCalibration["recommended_range"] {
+  if (!isObject(value)) {
+    return null;
+  }
+
+  const min = isFiniteNumber(value.min) ? value.min : null;
+  const max = isFiniteNumber(value.max) ? value.max : null;
+  if (min === null && max === null) {
+    return null;
+  }
+
+  if (min !== null && max !== null) {
+    return min <= max ? { min, max } : { min: max, max: min };
+  }
+
+  return { min, max };
+}
+
+function normalizeAxisCalibration(
+  value: unknown,
+): DirectParameterAxisCalibration | null {
+  if (!isObject(value)) {
+    return null;
+  }
+
+  const parameterId = normalizeText(value.parameter_id);
+  const parameterIds = Array.isArray(value.parameter_ids)
+    ? value.parameter_ids
+      .map((item) => normalizeText(item))
+      .filter((item) => item.length > 0)
+    : [];
+  const direction = isFiniteNumber(value.direction)
+    ? value.direction
+    : typeof value.direction === "string"
+      ? normalizeText(value.direction)
+      : null;
+  const baseline = isFiniteNumber(value.baseline) ? value.baseline : null;
+  const recommendedRange = normalizeRange(
+    value.recommended_range ?? value.recommended ?? value.recommendedRange,
+  );
+  const observedRange = normalizeRange(
+    value.observed_range ?? value.observed ?? value.observedRange,
+  );
+  const confidence = normalizeText(value.confidence);
+  const source = normalizeText(value.source);
+  const recommended = normalizeNullableBoolean(value.recommended);
+  const safeToApply = normalizeNullableBoolean(value.safe_to_apply);
+  const skipReason = normalizeText(value.skip_reason);
+
+  if (
+    !parameterId
+    && parameterIds.length === 0
+    && direction === null
+    && baseline === null
+    && !recommendedRange
+    && !observedRange
+    && !confidence
+    && !source
+    && recommended === null
+    && safeToApply === null
+    && !skipReason
+  ) {
+    return null;
+  }
+
+  return {
+    parameter_id: parameterId || undefined,
+    parameter_ids: parameterIds.length > 0 ? parameterIds : undefined,
+    direction: direction ?? undefined,
+    baseline,
+    recommended_range: recommendedRange,
+    observed_range: observedRange,
+    confidence: confidence || undefined,
+    source: source || undefined,
+    recommended: recommended ?? undefined,
+    safe_to_apply: safeToApply ?? undefined,
+    skip_reason: skipReason || undefined,
+  };
+}
+
+function normalizeCalibrationProfile(
+  value: unknown,
+): DirectParameterCalibrationProfile | null {
+  if (!isObject(value)) {
+    return null;
+  }
+
+  const axesPayload = isObject(value.axes)
+    ? value.axes
+    : isObject(value.axis_calibrations)
+      ? value.axis_calibrations
+      : value;
+
+  const axes: Partial<Record<DirectParameterAxisName, DirectParameterAxisCalibration | null>> = {};
+  let axisCount = 0;
+
+  for (const axisName of AXIS_NAMES) {
+    const normalizedAxis = normalizeAxisCalibration(axesPayload[axisName]);
+    if (!normalizedAxis) {
+      continue;
+    }
+    axes[axisName] = normalizedAxis;
+    axisCount += 1;
+  }
+
+  if (axisCount === 0) {
+    return null;
+  }
+
+  return {
+    schema_version: normalizeText(value.schema_version) || undefined,
+    axes,
+  };
+}
+
 function parseParameterPlan(plan: unknown): ParsedParameterPlan | null {
   if (!isObject(plan)) {
     return null;
@@ -90,7 +187,7 @@ function parseParameterPlan(plan: unknown): ParsedParameterPlan | null {
   if (modeRaw !== "expressive" && modeRaw !== "idle") {
     return null;
   }
-  const mode = modeRaw as ParameterPlan["mode"];
+  const mode = modeRaw as DirectParameterPlan["mode"];
 
   const timingRaw = plan.timing;
   if (!isObject(timingRaw)) {
@@ -118,7 +215,7 @@ function parseParameterPlan(plan: unknown): ParsedParameterPlan | null {
     return null;
   }
 
-  const keyAxes = {} as Record<AxisName, ParameterAxisValue>;
+  const keyAxes = {} as DirectParameterPlan["key_axes"];
   for (const axisName of AXIS_NAMES) {
     const axisPayload = keyAxesRaw[axisName];
     if (!isObject(axisPayload) || !isFiniteNumber(axisPayload.value)) {
@@ -135,7 +232,7 @@ function parseParameterPlan(plan: unknown): ParsedParameterPlan | null {
     return null;
   }
 
-  const supplementary: SupplementaryParam[] = [];
+  const supplementary: DirectParameterPlan["supplementary_params"] = [];
   for (const item of supplementaryRaw) {
     if (!isObject(item)) {
       return null;
@@ -163,7 +260,7 @@ function parseParameterPlan(plan: unknown): ParsedParameterPlan | null {
     });
   }
 
-  const timing: ParameterPlanTiming = {
+  const timing: DirectParameterPlan["timing"] = {
     duration_ms: Math.round(durationMs),
     blend_in_ms: Math.round(blendInMs),
     hold_ms: Math.round(holdMs),
@@ -174,13 +271,14 @@ function parseParameterPlan(plan: unknown): ParsedParameterPlan | null {
     timing.blend_in_ms + timing.hold_ms + timing.blend_out_ms,
   );
 
-  const normalizedPlan: ParameterPlan = {
+  const normalizedPlan: DirectParameterPlan = {
     schema_version: "engine.parameter_plan.v1",
     mode,
     emotion_label: normalizeText(plan.emotion_label) || "neutral",
     timing,
     key_axes: keyAxes,
     supplementary_params: supplementary,
+    calibration_profile: normalizeCalibrationProfile(plan.calibration_profile),
   };
 
   return {
@@ -224,7 +322,7 @@ function stopPlan(reason = "stopped"): void {
   }
 }
 
-function playPlan(plan: unknown, _model: ModelSummary | null = null): boolean {
+function playPlan(plan: unknown, model: ModelSummary | null = null): boolean {
   console.info("[MotionPlayer] playPlan called. plan type:", typeof plan, "plan:", JSON.stringify(plan)?.slice(0, 200));
 
   const parsed = parseParameterPlan(plan);
@@ -237,6 +335,20 @@ function playPlan(plan: unknown, _model: ModelSummary | null = null): boolean {
     return false;
   }
   console.info("[MotionPlayer] parse OK. mode=", parsed.plan.mode, "emotion=", parsed.plan.emotion_label, "axes=", AXIS_NAMES.length, "supplementary=", parsed.plan.supplementary_params.length);
+
+  const planCalibration = normalizeCalibrationProfile(parsed.plan.calibration_profile);
+  const modelCalibration = normalizeCalibrationProfile(model?.calibration_profile);
+
+  if (planCalibration) {
+    parsed.plan.calibration_profile = planCalibration;
+  } else {
+    delete parsed.plan.calibration_profile;
+  }
+  if (modelCalibration) {
+    parsed.plan.model_calibration_profile = modelCalibration;
+  } else {
+    delete parsed.plan.model_calibration_profile;
+  }
 
   const adapter = window.getLAppAdapter?.();
   if (!adapter || typeof adapter.startDirectParameterPlan !== "function") {
