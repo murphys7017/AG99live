@@ -93,6 +93,8 @@ const DIRECT_PARAMETER_AXIS_MAP: Record<string, string[]> = {
 };
 
 const DIRECT_PARAMETER_AXIS_NAMES = Object.keys(DIRECT_PARAMETER_AXIS_MAP);
+const DIRECT_EXPRESSIVE_AXIS_GAIN = 1.35;
+const DIRECT_EXPRESSIVE_AXIS_MIN_MAGNITUDE = 0.22;
 
 interface DirectParameterAxisBinding {
   axisName: string;
@@ -1375,12 +1377,17 @@ export class LAppModel extends CubismUserModel {
   }
 
   public startDirectParameterPlan(plan: unknown): boolean {
+    console.info("[LAppModel] startDirectParameterPlan called. plan type:", typeof plan);
     const parsed = this.parseDirectParameterPlan(plan);
     if (!parsed.plan) {
+      console.warn("[LAppModel] parseDirectParameterPlan failed:", parsed.reason);
       this.stopDirectParameterPlan(parsed.reason || "invalid_plan");
       return false;
     }
+    console.info("[LAppModel] parse OK. mode=", parsed.plan.mode, "emotion=", parsed.plan.emotion_label);
+
     if (!this._model || this._state != LoadStep.CompleteSetup) {
+      console.warn("[LAppModel] model not ready. _state=", this._state);
       this.stopDirectParameterPlan("model_not_ready");
       return false;
     }
@@ -1408,6 +1415,7 @@ export class LAppModel extends CubismUserModel {
       }
 
       if (!resolvedBinding) {
+        console.warn("[LAppModel] axis not resolvable:", axisName, "candidates=", candidates);
         this.stopDirectParameterPlan(`missing_axis_parameter:${axisName}`);
         return false;
       }
@@ -1421,6 +1429,7 @@ export class LAppModel extends CubismUserModel {
       const channel = String(item.channel || "").trim();
       const resolved = this.resolveWritableParameter(parameterIdRaw);
       if (!resolved) {
+        console.warn("[LAppModel] supplementary param not resolvable:", parameterIdRaw);
         this.stopDirectParameterPlan(`missing_supplementary_parameter:${parameterIdRaw}`);
         return false;
       }
@@ -1436,6 +1445,7 @@ export class LAppModel extends CubismUserModel {
       });
     }
 
+    console.info("[LAppModel] All axes and supplementary params resolved. Activating plan.");
     this._directParameterPlanState = {
       mode: parsed.plan.mode,
       emotionLabel: parsed.plan.emotion_label,
@@ -1479,28 +1489,36 @@ export class LAppModel extends CubismUserModel {
     const planState = this._directParameterPlanState;
     const elapsedMs = Math.max(0, performance.now() - planState.startedAtMs);
     const easing = this.resolvePlanEasing(elapsedMs, planState.timing);
+    if (elapsedMs === 0) {
+      console.info(`[LAppModel] applyDirectParameterPlanOverlay: mode=${planState.mode}, emotion=${planState.emotionLabel}, totalMs=${planState.timing.totalMs}, blendIn=${planState.timing.blendInMs}, hold=${planState.timing.holdMs}, blendOut=${planState.timing.blendOutMs}, axisCount=${planState.axisBindings.length}, suppCount=${planState.supplementaryBindings.length}`);
+    }
 
     for (const axis of planState.axisBindings) {
       if (!this.isParameterIndexWritable(axis.parameterIndex)) {
+        console.warn(`[LAppModel] applyDirectParameterPlanOverlay: axis not writable axis=${axis.axisName} param=${axis.parameterName} idx=${axis.parameterIndex}`);
         return `axis_parameter_not_writable:${axis.axisName}`;
       }
 
       const minValue = this._model.getParameterMinimumValue(axis.parameterIndex);
       const maxValue = this._model.getParameterMaximumValue(axis.parameterIndex);
       const baseValue = this._model.getParameterValueByIndex(axis.parameterIndex);
-      const targetValue = minValue + (maxValue - minValue) * (axis.axisValue / 100.0);
+      const mappedAxisValue = this.mapAxisValueForExecution(axis.axisValue, planState.mode);
+      const targetValue = minValue + (maxValue - minValue) * (mappedAxisValue / 100.0);
       let blendedValue = baseValue + (targetValue - baseValue) * easing;
 
-      // Keep speech lip sync dominant on mouth opening while audio is playing.
       if (this._lipsync && axis.axisName === "mouth_open") {
         blendedValue = Math.max(baseValue, blendedValue);
       }
 
       this._model.setParameterValueById(axis.parameterId, blendedValue);
+      if (elapsedMs === 0) {
+        console.info(`[LAppModel] setParam axis=${axis.axisName} param=${axis.parameterName} axisVal=${axis.axisValue} mappedAxis=${mappedAxisValue} min=${minValue} max=${maxValue} base=${baseValue} target=${targetValue} eased=${blendedValue} easing=${easing}`);
+      }
     }
 
     for (const item of planState.supplementaryBindings) {
       if (!this.isParameterIndexWritable(item.parameterIndex)) {
+        console.warn(`[LAppModel] applyDirectParameterPlanOverlay: supp not writable param=${item.parameterIdRaw} idx=${item.parameterIndex}`);
         return `supplementary_parameter_not_writable:${item.parameterIdRaw}`;
       }
 
@@ -1512,9 +1530,36 @@ export class LAppModel extends CubismUserModel {
     }
 
     if (elapsedMs >= planState.timing.totalMs) {
+      console.info(`[LAppModel] applyDirectParameterPlanOverlay: plan complete at ${elapsedMs}ms >= ${planState.timing.totalMs}ms, stopping.`);
       this.stopDirectParameterPlan();
     }
     return null;
+  }
+
+  private mapAxisValueForExecution(
+    axisValue: number,
+    mode: "expressive" | "idle",
+  ): number {
+    const clamped = Math.max(0, Math.min(100, Number(axisValue)));
+    if (mode !== "expressive") {
+      return clamped;
+    }
+
+    const centered = (clamped - 50.0) / 50.0;
+    const magnitude = Math.abs(centered);
+    if (magnitude <= 0.0001) {
+      return 50.0;
+    }
+
+    const boostedMagnitude = Math.min(
+      1.0,
+      Math.max(
+        magnitude * DIRECT_EXPRESSIVE_AXIS_GAIN,
+        DIRECT_EXPRESSIVE_AXIS_MIN_MAGNITUDE,
+      ),
+    );
+    const signed = centered < 0 ? -1.0 : 1.0;
+    return 50.0 + signed * boostedMagnitude * 50.0;
   }
 
   private resolvePlanEasing(
@@ -1556,23 +1601,31 @@ export class LAppModel extends CubismUserModel {
     parameterIndex: number;
   } | null {
     if (!this._model) {
+      console.warn(`[LAppModel] resolveWritableParameter('${parameterName}'): no model`);
       return null;
     }
     const normalizedName = String(parameterName || "").trim();
     if (!normalizedName) {
+      console.warn(`[LAppModel] resolveWritableParameter('${parameterName}'): empty name`);
       return null;
     }
     const idManager = CubismFramework.getIdManager();
     if (!idManager) {
+      console.warn(`[LAppModel] resolveWritableParameter('${parameterName}'): no idManager`);
       return null;
     }
     const parameterId = idManager.getId(normalizedName);
     if (!parameterId) {
+      console.warn(`[LAppModel] resolveWritableParameter('${parameterName}'): idManager.getId returned null`);
       return null;
     }
     const parameterIndex = this._model.getParameterIndex(parameterId);
     if (!this.isParameterIndexWritable(parameterIndex)) {
+      console.warn(`[LAppModel] resolveWritableParameter('${parameterName}'): index=${parameterIndex} not writable (model paramCount=${this._model.getParameterCount()})`);
       return null;
+    }
+    if (LAppDefine.DebugLogEnable) {
+      console.info(`[LAppModel] resolveWritableParameter: resolved '${normalizedName}' -> index=${parameterIndex}`);
     }
     return { parameterId, parameterIndex };
   }
@@ -1612,16 +1665,20 @@ export class LAppModel extends CubismUserModel {
     });
 
     if (!plan || typeof plan !== "object") {
+      console.warn("[LAppModel] parseDirectParameterPlan: plan_not_object");
       return fail("plan_not_object");
     }
 
     const payload = plan as Record<string, any>;
-    if (String(payload.schema_version || "").trim() !== "engine.parameter_plan.v1") {
+    const schemaVersion = String(payload.schema_version || "").trim();
+    if (schemaVersion !== "engine.parameter_plan.v1") {
+      console.warn("[LAppModel] parseDirectParameterPlan: invalid_schema_version — got:", schemaVersion);
       return fail("invalid_schema_version");
     }
 
     const mode = String(payload.mode || "").trim().toLowerCase();
     if (mode !== "expressive" && mode !== "idle") {
+      console.warn("[LAppModel] parseDirectParameterPlan: invalid_mode — got:", mode);
       return fail("invalid_mode");
     }
 

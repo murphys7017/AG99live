@@ -854,6 +854,8 @@ function applyControlError(envelope: ProtocolEnvelope<ControlErrorPayload>): voi
 function applyInboundMotionPlan(
   envelope: ProtocolEnvelope<Record<string, unknown>>,
 ): void {
+  console.info("[Connection] engine.motion_plan received. turn_id=", envelope.turn_id, "currentTurnId=", state.currentTurnId);
+
   if (
     envelope.turn_id
     && state.currentTurnId
@@ -873,6 +875,8 @@ function applyInboundMotionPlan(
   const hasPlan = Object.prototype.hasOwnProperty.call(payload, "plan");
   const plan = hasPlan ? payload.plan : payload;
 
+  console.info("[Connection] engine.motion_plan parsed. hasPlan=", hasPlan, "plan type=", typeof plan, "plan keys=", plan && typeof plan === "object" ? Object.keys(plan as object) : "N/A");
+
   if (!plan || typeof plan !== "object") {
     state.lastError = "收到无效的 engine.motion_plan（缺少有效 plan）。";
     state.statusMessage = state.lastError;
@@ -882,8 +886,7 @@ function applyInboundMotionPlan(
 
   state.inboundMotionPlan = plan;
   state.inboundMotionPlanNonce += 1;
-  // Show received notice — actual playback result is reported by handleInboundMotionPlan
-  // in PetDesktopView via motionPlayer state, which propagates to the bridge snapshot.
+  console.info("[Connection] inboundMotionPlanNonce incremented to", state.inboundMotionPlanNonce, "— watch should fire next.");
   state.statusMessage = `收到外部动作计划（engine.motion_plan, mode=${mode}）。`;
   pushHistory("system", state.statusMessage);
 }

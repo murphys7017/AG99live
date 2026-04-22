@@ -225,18 +225,25 @@ function stopPlan(reason = "stopped"): void {
 }
 
 function playPlan(plan: unknown, _model: ModelSummary | null = null): boolean {
+  console.info("[MotionPlayer] playPlan called. plan type:", typeof plan, "plan:", JSON.stringify(plan)?.slice(0, 200));
+
   const parsed = parseParameterPlan(plan);
   if (!parsed) {
+    const reason = "动作计划无效：仅支持 engine.parameter_plan.v1 且必须包含完整 12 轴。";
+    console.warn("[MotionPlayer] parse failed:", reason, "plan keys:", plan && typeof plan === "object" ? Object.keys(plan as object) : "N/A");
     state.status = "failed";
-    state.message = "动作计划无效：仅支持 engine.parameter_plan.v1 且必须包含完整 12 轴。";
+    state.message = reason;
     state.finishedAt = new Date().toISOString();
     return false;
   }
+  console.info("[MotionPlayer] parse OK. mode=", parsed.plan.mode, "emotion=", parsed.plan.emotion_label, "axes=", AXIS_NAMES.length, "supplementary=", parsed.plan.supplementary_params.length);
 
   const adapter = window.getLAppAdapter?.();
   if (!adapter || typeof adapter.startDirectParameterPlan !== "function") {
+    const reason = "动作计划无法执行：Live2D 运行时未提供 Direct Parameter 接口。";
+    console.warn("[MotionPlayer]", reason);
     state.status = "failed";
-    state.message = "动作计划无法执行：Live2D 运行时未提供 Direct Parameter 接口。";
+    state.message = reason;
     state.finishedAt = new Date().toISOString();
     return false;
   }
@@ -249,19 +256,24 @@ function playPlan(plan: unknown, _model: ModelSummary | null = null): boolean {
     adapter.stopDirectParameterPlan();
   }
 
+  console.info("[MotionPlayer] calling startDirectParameterPlan...");
   const started = adapter.startDirectParameterPlan(parsed.plan);
+  console.info("[MotionPlayer] startDirectParameterPlan returned:", started);
   if (!started) {
     const runtimeReason = typeof adapter.getDirectParameterPlanError === "function"
       ? normalizeText(adapter.getDirectParameterPlanError())
       : "";
-    state.status = "failed";
-    state.message = runtimeReason
+    const reason = runtimeReason
       ? `动作计划执行失败：${runtimeReason}`
       : "动作计划执行失败：Direct Parameter 计划被运行时拒绝。";
+    console.warn("[MotionPlayer]", reason);
+    state.status = "failed";
+    state.message = reason;
     state.finishedAt = new Date().toISOString();
     return false;
   }
 
+  console.info("[MotionPlayer] plan started successfully. totalDurationMs=", parsed.totalDurationMs);
   state.status = "playing";
   state.message = `正在执行参数计划（mode=${parsed.plan.mode}, emotion=${parsed.plan.emotion_label}）...`;
   state.keyAxesCount = AXIS_NAMES.length;

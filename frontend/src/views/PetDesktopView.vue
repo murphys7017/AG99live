@@ -271,11 +271,16 @@ function handlePreviewMotionPlan(plan: unknown): void {
 }
 
 function handleInboundMotionPlan(plan: unknown): void {
+  console.info("[PetDesktopView] handleInboundMotionPlan called. plan type:", typeof plan, "keys:", plan && typeof plan === "object" ? Object.keys(plan as object) : "N/A");
+  adapter.pushHistory("system", "正在执行动作计划...");
   const localPlayed = motionPlayer.playPlan(plan, selectedModel.value);
+  console.info("[PetDesktopView] playPlan returned:", localPlayed, "state:", motionPlayer.state.status, motionPlayer.state.message);
   if (!localPlayed) {
     const reason = motionPlayer.state.message;
-    console.warn("[AG99live] Inbound motion playback failed:", reason);
+    console.warn("[PetDesktopView] motion playback failed:", reason);
     adapter.pushHistory("error", `动作播放失败：${reason}`);
+  } else {
+    adapter.pushHistory("system", `动作计划执行中（${motionPlayer.state.message}）。`);
   }
 }
 
@@ -326,8 +331,10 @@ const detachBridgeListener = bridge.onCommand(handleDesktopCommand);
 watch(
   () => adapter.state.inboundMotionPlanNonce,
   () => {
+    console.info("[PetDesktopView] inboundMotionPlanNonce watch fired. nonce=", adapter.state.inboundMotionPlanNonce);
     const plan = adapter.state.inboundMotionPlan;
     if (!plan) {
+      console.warn("[PetDesktopView] inboundMotionPlan is null, skipping.");
       return;
     }
     handleInboundMotionPlan(plan);

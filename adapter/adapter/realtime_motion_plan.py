@@ -34,8 +34,8 @@ AXIS_NAMES = [axis.name for axis in AXES]
 _ACTIVE_AXIS_THRESHOLD = 8
 _IDLE_DEADZONE_MIN = 42
 _IDLE_DEADZONE_MAX = 58
-_MIN_EXPRESSIVE_MAX_DELTA = 14
-_MIN_EXPRESSIVE_NONZERO_DELTA = 10
+_MIN_EXPRESSIVE_MAX_DELTA = 24
+_MIN_EXPRESSIVE_NONZERO_DELTA = 16
 
 _NEUTRAL_EMOTION_MARKERS = {
     "neutral",
@@ -71,7 +71,8 @@ _DEFAULT_SELECTOR_PLATFORM_DESCRIPTION = (
     "Source platform: AstrBot through AG99live desktop adapter.\n"
     "Interaction pattern: one user sends short text/voice turns and expects immediate assistant replies.\n"
     "Avatar behavior goal: natural and readable facial/head cues that support the turn meaning.\n"
-    "Execution constraint: downstream playback is clip-based Live2D atom triggering, so avoid over-dense axes."
+    "Execution constraint: downstream playback directly writes Live2D parameters frame-by-frame.\n"
+    "Preference: when emotion is non-neutral, use clearly readable amplitudes instead of near-center no-op values."
 )
 
 
@@ -390,8 +391,9 @@ def build_selector_user_prompt(
         "Rules:\n"
         "- Include all listed axes.\n"
         "- Use integers only.\n"
-        "- Keep subtle unless text is intense.\n"
-        "- If uncertain, stay around 45~55.\n\n"
+        "- Avoid flat/no-op outputs around 50 unless the emotion is truly neutral.\n"
+        "- For non-neutral emotion, make at least 2 head/face axes visibly deviate from center.\n"
+        "- Keep values stable and readable; avoid chaotic extremes.\n\n"
         f"{few_shot_block}"
         f"Text: {text}"
     )
