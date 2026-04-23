@@ -76,7 +76,7 @@ const DIRECT_PARAMETER_AXIS_MAP: Record<string, string[]> = {
   head_roll: ["ParamAngleZ", "PARAM_ANGLE_Z"],
   head_pitch: ["ParamAngleY", "PARAM_ANGLE_Y"],
   body_yaw: ["ParamBodyAngleX", "PARAM_BODY_ANGLE_X"],
-  body_roll: ["ParamBodyAngleZ", "PARAM_BODY_ANGLE_Z", "ParamBodyAngleY", "PARAM_BODY_ANGLE_Y"],
+  body_roll: ["ParamBodyAngleZ", "PARAM_BODY_ANGLE_Z", "BodyAngleY", "BODY_ANGLE_Y"],
   gaze_x: ["ParamEyeBallX", "PARAM_EYE_BALL_X"],
   gaze_y: ["ParamEyeBallY", "PARAM_EYE_BALL_Y"],
   eye_open_left: ["ParamEyeLOpen", "PARAM_EYE_L_OPEN"],
@@ -95,6 +95,7 @@ const DIRECT_PARAMETER_AXIS_MAP: Record<string, string[]> = {
 const DIRECT_PARAMETER_AXIS_NAMES = Object.keys(DIRECT_PARAMETER_AXIS_MAP);
 const DIRECT_EXPRESSIVE_AXIS_GAIN = 1.35;
 const DIRECT_EXPRESSIVE_AXIS_MIN_MAGNITUDE = 0.22;
+const DIRECT_MAX_MISSING_AXIS_BINDINGS = 3;
 
 interface DirectParameterAxisBinding {
   axisName: string;
@@ -1437,6 +1438,7 @@ export class LAppModel extends CubismUserModel {
       parsed.plan.model_calibration_profile,
     );
     const axisBindings: DirectParameterAxisBinding[] = [];
+    const missingAxisNames: string[] = [];
     let usesCalibration = false;
     let usesBindingProfile = false;
     for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
@@ -1470,8 +1472,8 @@ export class LAppModel extends CubismUserModel {
 
       if (!resolvedBinding) {
         console.warn("[LAppModel] axis not resolvable:", axisName, "candidates=", candidates);
-        this.stopDirectParameterPlan(`missing_axis_parameter:${axisName}`);
-        return false;
+        missingAxisNames.push(axisName);
+        continue;
       }
       if (effectiveCalibrationProfile?.axes?.[axisName]) {
         usesBindingProfile = true;
@@ -1480,6 +1482,26 @@ export class LAppModel extends CubismUserModel {
         usesCalibration = true;
       }
       axisBindings.push(resolvedBinding);
+    }
+
+    if (
+      axisBindings.length === 0
+      || missingAxisNames.length > DIRECT_MAX_MISSING_AXIS_BINDINGS
+    ) {
+      const failureReason = missingAxisNames.length > 0
+        ? `missing_axis_parameter:${missingAxisNames.join(",")}`
+        : "missing_axis_parameter";
+      this.stopDirectParameterPlan(failureReason);
+      return false;
+    }
+
+    if (missingAxisNames.length > 0) {
+      console.warn(
+        "[LAppModel] startDirectParameterPlan: partial axis binding enabled. missing=",
+        missingAxisNames,
+        "resolved=",
+        axisBindings.map((item) => item.axisName),
+      );
     }
 
     const axisParameterIndices = new Set<number>(
@@ -1874,24 +1896,78 @@ export class LAppModel extends CubismUserModel {
       return null;
     }
     const idManager = CubismFramework.getIdManager();
-    if (!idManager) {
-      console.warn(`[LAppModel] resolveWritableParameter('${parameterName}'): no idManager`);
+    if (idManager) {
+      const parameterId = idManager.getId(normalizedName);
+      if (parameterId) {
+        const parameterIndex = this._model.getParameterIndex(parameterId);
+        if (this.isParameterIndexWritable(parameterIndex)) {
+          if (LAppDefine.DebugLogEnable) {
+            console.info(`[LAppModel] resolveWritableParameter: resolved '${normalizedName}' via idManager -> index=${parameterIndex}`);
+          }
+          return { parameterId, parameterIndex };
+        }
+        console.warn(`[LAppModel] resolveWritableParameter('${parameterName}'): idManager index=${parameterIndex} not writable (model paramCount=${this._model.getParameterCount()}). trying model-id fallback...`);
+      }
+    } else {
+      console.warn(`[LAppModel] resolveWritableParameter('${parameterName}'): no idManager. trying model-id fallback...`);
+    }
+
+    const fallback = this.resolveModelParameterByName(normalizedName);
+    if (fallback) {
+      if (LAppDefine.DebugLogEnable) {
+        const resolvedName = fallback.parameterId?.getString?.().s ?? "";
+        console.info(`[LAppModel] resolveWritableParameter: resolved '${normalizedName}' via model fallback -> '${resolvedName}' index=${fallback.parameterIndex}`);
+      }
+      return fallback;
+    }
+
+    console.warn(`[LAppModel] resolveWritableParameter('${parameterName}'): unresolved after fallback`);
+    return null;
+  }
+
+  private resolveModelParameterByName(parameterName: string): {
+    parameterId: CubismIdHandle;
+    parameterIndex: number;
+  } | null {
+    if (!this._model) {
       return null;
     }
-    const parameterId = idManager.getId(normalizedName);
-    if (!parameterId) {
-      console.warn(`[LAppModel] resolveWritableParameter('${parameterName}'): idManager.getId returned null`);
+
+    const exact = String(parameterName || "").trim();
+    if (!exact) {
       return null;
     }
-    const parameterIndex = this._model.getParameterIndex(parameterId);
-    if (!this.isParameterIndexWritable(parameterIndex)) {
-      console.warn(`[LAppModel] resolveWritableParameter('${parameterName}'): index=${parameterIndex} not writable (model paramCount=${this._model.getParameterCount()})`);
-      return null;
+    const exactLower = exact.toLowerCase();
+    const canonical = this.normalizeParameterKey(exact);
+    const parameterCount = this._model.getParameterCount();
+    for (let index = 0; index < parameterCount; index += 1) {
+      const parameterId = this._model.getParameterId(index);
+      const rawName = String(parameterId?.getString?.().s ?? "").trim();
+      if (!rawName) {
+        continue;
+      }
+      if (rawName === exact || rawName.toLowerCase() === exactLower) {
+        return {
+          parameterId,
+          parameterIndex: index,
+        };
+      }
+      if (canonical && this.normalizeParameterKey(rawName) === canonical) {
+        return {
+          parameterId,
+          parameterIndex: index,
+        };
+      }
     }
-    if (LAppDefine.DebugLogEnable) {
-      console.info(`[LAppModel] resolveWritableParameter: resolved '${normalizedName}' -> index=${parameterIndex}`);
-    }
-    return { parameterId, parameterIndex };
+
+    return null;
+  }
+
+  private normalizeParameterKey(value: string): string {
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "");
   }
 
   private mergeDirectParameterCalibrationProfiles(

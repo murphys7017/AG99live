@@ -29,6 +29,11 @@ interface ParsedParameterPlan {
   totalDurationMs: number;
 }
 
+interface PlayPlanOptions {
+  softHandoff?: boolean;
+  targetDurationMs?: number | null;
+}
+
 const state = reactive({
   status: "idle" as PreviewPlayerStatus,
   message: "等待播放动作计划。",
@@ -287,6 +292,54 @@ function parseParameterPlan(plan: unknown): ParsedParameterPlan | null {
   };
 }
 
+function retimePlanForPlayback(
+  parsed: ParsedParameterPlan,
+  targetDurationMs: number | null | undefined,
+): ParsedParameterPlan {
+  if (!isFiniteNumber(targetDurationMs)) {
+    return parsed;
+  }
+
+  const requestedDurationMs = Math.max(320, Math.min(15000, Math.round(targetDurationMs)));
+  if (Math.abs(requestedDurationMs - parsed.totalDurationMs) <= 80) {
+    return parsed;
+  }
+
+  const sourceTiming = parsed.plan.timing;
+  const sourceTotalMs = Math.max(
+    parsed.totalDurationMs,
+    sourceTiming.blend_in_ms + sourceTiming.hold_ms + sourceTiming.blend_out_ms,
+    1,
+  );
+  const blendInRatio = sourceTiming.blend_in_ms / sourceTotalMs;
+  const blendOutRatio = sourceTiming.blend_out_ms / sourceTotalMs;
+
+  let blendInMs = Math.max(60, Math.round(requestedDurationMs * blendInRatio));
+  let blendOutMs = Math.max(80, Math.round(requestedDurationMs * blendOutRatio));
+  let holdMs = requestedDurationMs - blendInMs - blendOutMs;
+  let durationMs = requestedDurationMs;
+
+  if (holdMs < 120) {
+    holdMs = 120;
+    durationMs = blendInMs + holdMs + blendOutMs;
+  }
+
+  const retimedPlan: DirectParameterPlan = {
+    ...parsed.plan,
+    timing: {
+      duration_ms: durationMs,
+      blend_in_ms: blendInMs,
+      hold_ms: holdMs,
+      blend_out_ms: blendOutMs,
+    },
+  };
+
+  return {
+    plan: retimedPlan,
+    totalDurationMs: durationMs,
+  };
+}
+
 function clearActiveTimers(): void {
   for (const handle of activeTimerHandles) {
     window.clearTimeout(handle);
@@ -322,7 +375,11 @@ function stopPlan(reason = "stopped"): void {
   }
 }
 
-function playPlan(plan: unknown, model: ModelSummary | null = null): boolean {
+function playPlan(
+  plan: unknown,
+  model: ModelSummary | null = null,
+  options: PlayPlanOptions = {},
+): boolean {
   console.info("[MotionPlayer] playPlan called. plan type:", typeof plan, "plan:", JSON.stringify(plan)?.slice(0, 200));
 
   const parsed = parseParameterPlan(plan);
@@ -334,20 +391,36 @@ function playPlan(plan: unknown, model: ModelSummary | null = null): boolean {
     state.finishedAt = new Date().toISOString();
     return false;
   }
-  console.info("[MotionPlayer] parse OK. mode=", parsed.plan.mode, "emotion=", parsed.plan.emotion_label, "axes=", AXIS_NAMES.length, "supplementary=", parsed.plan.supplementary_params.length);
+  const playbackPlan = retimePlanForPlayback(parsed, options.targetDurationMs);
+  console.info(
+    "[MotionPlayer] parse OK. mode=",
+    playbackPlan.plan.mode,
+    "emotion=",
+    playbackPlan.plan.emotion_label,
+    "axes=",
+    AXIS_NAMES.length,
+    "supplementary=",
+    playbackPlan.plan.supplementary_params.length,
+    "targetDurationMs=",
+    options.targetDurationMs ?? "N/A",
+    "resolvedDurationMs=",
+    playbackPlan.totalDurationMs,
+    "softHandoff=",
+    Boolean(options.softHandoff),
+  );
 
-  const planCalibration = normalizeCalibrationProfile(parsed.plan.calibration_profile);
+  const planCalibration = normalizeCalibrationProfile(playbackPlan.plan.calibration_profile);
   const modelCalibration = normalizeCalibrationProfile(model?.calibration_profile);
 
   if (planCalibration) {
-    parsed.plan.calibration_profile = planCalibration;
+    playbackPlan.plan.calibration_profile = planCalibration;
   } else {
-    delete parsed.plan.calibration_profile;
+    delete playbackPlan.plan.calibration_profile;
   }
   if (modelCalibration) {
-    parsed.plan.model_calibration_profile = modelCalibration;
+    playbackPlan.plan.model_calibration_profile = modelCalibration;
   } else {
-    delete parsed.plan.model_calibration_profile;
+    delete playbackPlan.plan.model_calibration_profile;
   }
 
   const adapter = window.getLAppAdapter?.();
@@ -364,12 +437,12 @@ function playPlan(plan: unknown, model: ModelSummary | null = null): boolean {
   const runId = activeRunId;
   clearActiveTimers();
 
-  if (typeof adapter.stopDirectParameterPlan === "function") {
+  if (!options.softHandoff && typeof adapter.stopDirectParameterPlan === "function") {
     adapter.stopDirectParameterPlan();
   }
 
   console.info("[MotionPlayer] calling startDirectParameterPlan...");
-  const started = adapter.startDirectParameterPlan(parsed.plan);
+  const started = adapter.startDirectParameterPlan(playbackPlan.plan);
   console.info("[MotionPlayer] startDirectParameterPlan returned:", started);
   if (!started) {
     const runtimeReason = typeof adapter.getDirectParameterPlanError === "function"
@@ -385,15 +458,15 @@ function playPlan(plan: unknown, model: ModelSummary | null = null): boolean {
     return false;
   }
 
-  console.info("[MotionPlayer] plan started successfully. totalDurationMs=", parsed.totalDurationMs);
+  console.info("[MotionPlayer] plan started successfully. totalDurationMs=", playbackPlan.totalDurationMs);
   state.status = "playing";
-  state.message = `正在执行参数计划（mode=${parsed.plan.mode}, emotion=${parsed.plan.emotion_label}）...`;
+  state.message = `正在执行参数计划（mode=${playbackPlan.plan.mode}, emotion=${playbackPlan.plan.emotion_label}）...`;
   state.keyAxesCount = AXIS_NAMES.length;
-  state.supplementaryCount = parsed.plan.supplementary_params.length;
+  state.supplementaryCount = playbackPlan.plan.supplementary_params.length;
   state.startedAt = new Date().toISOString();
   state.finishedAt = "";
 
-  scheduleTimer(runId, parsed.totalDurationMs + 40, () => {
+  scheduleTimer(runId, playbackPlan.totalDurationMs + 40, () => {
     state.status = "finished";
     state.message = "参数计划执行完成。";
     state.finishedAt = new Date().toISOString();
