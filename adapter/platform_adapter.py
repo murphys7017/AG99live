@@ -293,12 +293,14 @@ class OLVPetPlatformAdapter(Platform):
         unified_msg_origin: str | None = None,
         inline_base_expression: str | None = None,
         inline_motion_id: str | None = None,
+        raw_reply_text_override: str | None = None,
     ) -> None:
         await self.turn_coordinator.emit_message_chain(
             message_chain=message_chain,
             unified_msg_origin=unified_msg_origin,
             inline_base_expression=inline_base_expression,
             inline_motion_id=inline_motion_id,
+            raw_reply_text_override=raw_reply_text_override,
         )
 
     def _refresh_runtime_settings(self) -> None:

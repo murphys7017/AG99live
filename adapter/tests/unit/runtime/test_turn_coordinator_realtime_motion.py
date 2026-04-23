@@ -440,3 +440,96 @@ def test_emit_message_chain_inline_parse_fail_falls_back_to_secondary_request(
     assert called_broadcast == {}
     assert scheduled.get("origin_turn_id") == "turn-inline-fallback"
     assert str(scheduled.get("reply_text") or "").strip()
+
+
+def test_emit_message_chain_uses_raw_reply_text_override_for_inline_extraction(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("adapter.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+    Plain = module.Plain
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-inline-override",
+            "last_user_text": "fallback user text",
+        },
+    )()
+
+    class ChatBufferStub:
+        def __init__(self) -> None:
+            self.items: list[tuple[str, str]] = []
+
+        def add(self, role: str, text: str) -> None:
+            self.items.append((role, text))
+
+    coordinator.chat_buffer = ChatBufferStub()
+    coordinator.speaker_name = "assistant"
+    coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+
+    scheduled: dict[str, object] = {}
+
+    def fake_schedule_realtime_motion_plan_preview(*, reply_text: str, origin_turn_id: str | None = None):
+        scheduled["reply_text"] = reply_text
+        scheduled["origin_turn_id"] = origin_turn_id
+
+    coordinator._schedule_realtime_motion_plan_preview = fake_schedule_realtime_motion_plan_preview
+
+    inline_broadcast: dict[str, object] = {}
+
+    async def fake_broadcast_motion_plan_preview(**kwargs):
+        inline_broadcast.update(kwargs)
+        return True
+
+    coordinator.broadcast_motion_plan_preview = fake_broadcast_motion_plan_preview
+
+    async def fake_finish_turn(*, success: bool, reason: str | None):
+        del success
+        del reason
+
+    coordinator._finish_turn = fake_finish_turn
+
+    raw_reply_text = (
+        'hello <@anim {"mode":"inline","plan":{"schema_version":"engine.parameter_plan.v1",'
+        '"mode":"expressive","emotion_label":"inline","timing":{"duration_ms":900,'
+        '"blend_in_ms":120,"hold_ms":620,"blend_out_ms":160},"key_axes":{"head_yaw":{"value":61},'
+        '"head_roll":{"value":50},"head_pitch":{"value":50},"body_yaw":{"value":50},'
+        '"body_roll":{"value":50},"gaze_x":{"value":50},"gaze_y":{"value":50},'
+        '"eye_open_left":{"value":55},"eye_open_right":{"value":55},"mouth_open":{"value":52},'
+        '"mouth_smile":{"value":63},"brow_bias":{"value":58}},"supplementary_params":['
+        '{"parameter_id":"ParamCheek","target_value":0.3,"weight":0.4,'
+        '"source_atom_id":"inline.1","channel":"head_yaw"}]}}> world'
+    )
+
+    asyncio.run(
+        coordinator.emit_message_chain(
+            message_chain=[Plain("hello world")],
+            raw_reply_text_override=raw_reply_text,
+        )
+    )
+
+    assert inline_broadcast.get("source") == "engine.inline_motion_plan"
+    assert inline_broadcast.get("mode") == "inline"
+    assert inline_broadcast.get("turn_id") == "turn-inline-override"
+    assert "reply_text" not in scheduled
+    assert sent_payloads
+    output_text_payload = sent_payloads[0]
+    assert output_text_payload.get("type") == "output.text"
+    output_text = str(output_text_payload.get("payload", {}).get("text", ""))
+    assert "<@anim" not in output_text.lower()
+    assert "hello" in output_text.lower()
+    assert "world" in output_text.lower()

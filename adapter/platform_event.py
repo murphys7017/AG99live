@@ -30,6 +30,8 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         await self.adapter.emit_message_chain(
             message_chain=message,
             unified_msg_origin=self.unified_msg_origin,
+            raw_reply_text_override=str(self.get_extra("ag99live_raw_reply_text", "") or "").strip()
+            or None,
         )
         await super().send(message)
 

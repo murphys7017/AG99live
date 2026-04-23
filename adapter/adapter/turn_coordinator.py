@@ -180,6 +180,7 @@ class TurnCoordinator:
         unified_msg_origin: str | None = None,
         inline_base_expression: str | None = None,
         inline_motion_id: str | None = None,
+        raw_reply_text_override: str | None = None,
     ) -> None:
         del unified_msg_origin
         del inline_base_expression
@@ -190,7 +191,8 @@ class TurnCoordinator:
 
         self._mark_turn_timing("emit_started_at")
         texts, picture_paths, record_paths = _extract_outbound_message_parts(message_chain)
-        raw_reply_text = "\n".join(texts).strip()
+        override_text = str(raw_reply_text_override or "").strip()
+        raw_reply_text = override_text or "\n".join(texts).strip()
         inline_anim_detected = INLINE_ANIM_START_PATTERN.search(raw_reply_text) is not None
         reply_text, inline_plan, inline_mode = _extract_inline_motion_plan(raw_reply_text)
 
