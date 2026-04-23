@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, screen } from "electron";
+import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen } from "electron";
 import { MenuManager } from "./menu-manager";
 import { WindowManager } from "./window-manager";
 
@@ -62,12 +62,19 @@ function watchWindowShortcuts(window: BrowserWindow): void {
       return;
     }
 
-    if (!app.isPackaged && input.code === "F12") {
+    if (!app.isPackaged && (input.code === "F12" || (input.code === "KeyI" && input.control && input.shift))) {
+      event.preventDefault();
       if (window.webContents.isDevToolsOpened()) {
         window.webContents.closeDevTools();
       } else {
         window.webContents.openDevTools({ mode: "detach" });
       }
+      return;
+    }
+    if (!app.isPackaged && input.code === "F5") {
+      event.preventDefault();
+      window.webContents.reload();
+      return;
     }
   });
 }
@@ -227,6 +234,20 @@ app.whenReady().then(() => {
   void menuManager;
   windowManager.createWindows();
   setupIpc();
+
+  if (!app.isPackaged) {
+    globalShortcut.register("CommandOrControl+Shift+L", () => {
+      const focused = BrowserWindow.getFocusedWindow();
+      const target = focused ?? windowManager.getWindow("pet") ?? windowManager.getWindow("history");
+      if (target && !target.isDestroyed()) {
+        if (target.webContents.isDevToolsOpened()) {
+          target.webContents.closeDevTools();
+        } else {
+          target.webContents.openDevTools({ mode: "detach" });
+        }
+      }
+    });
+  }
 
   app.on("activate", () => {
     if (!windowManager.getWindow("pet")) {

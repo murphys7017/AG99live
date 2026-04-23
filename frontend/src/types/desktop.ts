@@ -101,6 +101,7 @@ export interface DesktopBaseActionPreview {
 export interface DesktopRuntimeSnapshot {
   adapterAddress: string;
   desktopScreenshotOnSendEnabled: boolean;
+  ambientMotionEnabled: boolean;
   connectionState: string;
   connectionLabel: string;
   connectionStatusMessage: string;
@@ -128,6 +129,7 @@ export interface DesktopRuntimeSnapshot {
 export type DesktopRuntimeCommand =
   | { type: "set_address"; address: string }
   | { type: "set_desktop_screenshot_on_send"; enabled: boolean }
+  | { type: "set_ambient_motion_enabled"; enabled: boolean }
   | { type: "connect"; address?: string }
   | { type: "disconnect" }
   | { type: "send_text"; text: string }

@@ -213,6 +213,7 @@ export class LAppLive2DManager {
 
     this.releaseAllModel();
     this._models.pushBack(new LAppModel());
+    this._models.at(0).setAmbientMotionEnabled(LAppDefine.AMBIENT_MOTION_ENABLED);
     this._models.at(0).loadAssets(modelPath, modelJsonName);
   }
 

@@ -5,6 +5,10 @@ import type {
   DesktopBaseActionPreview,
   DesktopBaseActionPreviewAtom,
 } from "../types/desktop";
+import type {
+  DirectParameterAxisName,
+  DirectParameterPlan,
+} from "../types/protocol";
 
 const props = defineProps<{
   preview: DesktopBaseActionPreview | null;
@@ -20,6 +24,21 @@ const planMode = ref<"parallel" | "sequential">("parallel");
 const durationScale = ref(1);
 const intensityScale = ref(1);
 const stepGapMs = ref(120);
+
+const DIRECT_PARAMETER_AXIS_NAMES: readonly DirectParameterAxisName[] = [
+  "head_yaw",
+  "head_roll",
+  "head_pitch",
+  "body_yaw",
+  "body_roll",
+  "gaze_x",
+  "gaze_y",
+  "eye_open_left",
+  "eye_open_right",
+  "mouth_open",
+  "mouth_smile",
+  "brow_bias",
+];
 
 const channelsByName = computed(() => {
   const channels = props.preview?.channels ?? [];
@@ -158,21 +177,48 @@ const generatedPlan = computed(() => {
     }
   }
 
+  const totalDurationMs =
+    planMode.value === "parallel"
+      ? Math.max(...steps.map((step) => step.duration_ms), 0)
+      : Math.max(cursorMs - Math.max(0, Math.round(stepGapMs.value)), 0);
+
+  const axisValues = buildAxisValuesFromAtoms(selectedAtoms.value);
+  const expressive = DIRECT_PARAMETER_AXIS_NAMES.some(
+    (axisName) => axisValues[axisName].value !== 50,
+  );
+  const timing = buildParameterPlanTiming(
+    expressive ? Math.max(totalDurationMs, 900) : Math.max(totalDurationMs, 480),
+    expressive ? "expressive" : "idle",
+  );
+  const plan: DirectParameterPlan = {
+    schema_version: "engine.parameter_plan.v1",
+    mode: expressive ? "expressive" : "idle",
+    emotion_label: selectedAtoms.value[0]?.semanticPolarity || "preview",
+    timing,
+    key_axes: axisValues,
+    supplementary_params: [],
+    summary: {
+      key_axes_count: DIRECT_PARAMETER_AXIS_NAMES.length,
+      supplementary_count: 0,
+      target_duration_ms: timing.duration_ms,
+    },
+  };
+
   return {
-    schema_version: "engine.motion_plan_preview.v1",
-    mode: planMode.value,
+    ...plan,
     selected_atom_count: selectedAtoms.value.length,
     channels: [...new Set(selectedAtoms.value.map((atom) => atom.channel))],
     parameters: {
       duration_scale: roundTo(durationScale.value, 3),
       intensity_scale: roundTo(intensityScale.value, 3),
       sequential_gap_ms: Math.max(0, Math.round(stepGapMs.value)),
+      combination_mode: planMode.value,
     },
     summary: {
-      total_duration_ms:
-        planMode.value === "parallel"
-          ? Math.max(...steps.map((step) => step.duration_ms), 0)
-          : Math.max(cursorMs - Math.max(0, Math.round(stepGapMs.value)), 0),
+      key_axes_count: DIRECT_PARAMETER_AXIS_NAMES.length,
+      supplementary_count: 0,
+      target_duration_ms: timing.duration_ms,
+      total_duration_ms: totalDurationMs,
       step_count: steps.length,
     },
     steps,
@@ -240,6 +286,102 @@ function strengthToBaseIntensity(strength: string): number {
     default:
       return 0.5;
   }
+}
+
+function semanticPolarityToDirection(polarity: string): number {
+  switch (polarity) {
+    case "positive":
+      return 1;
+    case "negative":
+      return -1;
+    default:
+      return 0;
+  }
+}
+
+function buildAxisValuesFromAtoms(
+  atoms: DesktopBaseActionPreviewAtom[],
+): DirectParameterPlan["key_axes"] {
+  const axisValues = Object.fromEntries(
+    DIRECT_PARAMETER_AXIS_NAMES.map((axisName) => [axisName, { value: 50 }]),
+  ) as DirectParameterPlan["key_axes"];
+
+  const strongestByChannel = new Map<string, DesktopBaseActionPreviewAtom>();
+  for (const atom of atoms) {
+    if (!DIRECT_PARAMETER_AXIS_NAMES.includes(atom.channel as DirectParameterAxisName)) {
+      continue;
+    }
+    const current = strongestByChannel.get(atom.channel);
+    if (!current) {
+      strongestByChannel.set(atom.channel, atom);
+      continue;
+    }
+    if (atom.score > current.score) {
+      strongestByChannel.set(atom.channel, atom);
+      continue;
+    }
+    if (atom.score === current.score && atom.energyScore > current.energyScore) {
+      strongestByChannel.set(atom.channel, atom);
+    }
+  }
+
+  for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
+    const atom = strongestByChannel.get(axisName);
+    if (!atom) {
+      continue;
+    }
+    const direction = semanticPolarityToDirection(atom.semanticPolarity || atom.polarity);
+    if (direction === 0) {
+      continue;
+    }
+    const baseIntensity = strengthToBaseIntensity(atom.strength);
+    const magnitude = Math.max(
+      0,
+      Math.min(45, Math.round(baseIntensity * intensityScale.value * 35)),
+    );
+    axisValues[axisName] = {
+      value: Math.max(0, Math.min(100, 50 + direction * magnitude)),
+    };
+  }
+
+  return axisValues;
+}
+
+function buildParameterPlanTiming(
+  durationMsRaw: number,
+  mode: "expressive" | "idle",
+): DirectParameterPlan["timing"] {
+  const durationMs = Math.max(400, Math.min(6000, Math.round(durationMsRaw)));
+  if (mode === "idle") {
+    const idleDurationMs = Math.max(480, Math.min(durationMs, 2200));
+    return {
+      duration_ms: idleDurationMs,
+      blend_in_ms: 80,
+      hold_ms: Math.max(220, idleDurationMs - 200),
+      blend_out_ms: 120,
+    };
+  }
+
+  let blendInMs = Math.max(80, Math.min(Math.round(durationMs * 0.18), 360));
+  let blendOutMs = Math.max(120, Math.min(Math.round(durationMs * 0.25), 520));
+  let holdMs = durationMs - blendInMs - blendOutMs;
+
+  if (holdMs < 120) {
+    let shortage = 120 - holdMs;
+    const reducibleOut = Math.max(blendOutMs - 120, 0);
+    const reduceOut = Math.min(shortage, reducibleOut);
+    blendOutMs -= reduceOut;
+    shortage -= reduceOut;
+    blendInMs = Math.max(80, blendInMs - shortage);
+    holdMs = Math.max(120, durationMs - blendInMs - blendOutMs);
+  }
+
+  return {
+    duration_ms: durationMs,
+    blend_in_ms: blendInMs,
+    hold_ms: holdMs,
+    blend_out_ms: blendOutMs,
+  };
 }
 
 function roundTo(value: number, digits: number): number {

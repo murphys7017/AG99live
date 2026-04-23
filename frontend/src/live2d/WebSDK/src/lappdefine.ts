@@ -105,6 +105,7 @@ export const ENABLE_LIMITED_FRAME_RATE = true;
 export let LIMITED_FRAME_RATE = 24;
 export let BACKGROUND_FRAME_RATE = 12;
 export let MAX_RENDER_DEVICE_PIXEL_RATIO = 1.25;
+export let AMBIENT_MOTION_ENABLED = true;
 
 export function setLimitedFrameRate(nextFrameRate: number) {
   const normalizedFrameRate = Number.isFinite(nextFrameRate)
@@ -134,4 +135,8 @@ export function getRenderDevicePixelRatio(): number {
 
   const raw = window.devicePixelRatio || 1;
   return Math.max(1, Math.min(raw, MAX_RENDER_DEVICE_PIXEL_RATIO));
+}
+
+export function setAmbientMotionEnabled(enabled: boolean) {
+  AMBIENT_MOTION_ENABLED = enabled !== false;
 }

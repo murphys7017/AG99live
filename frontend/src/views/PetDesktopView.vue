@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import DesktopPetCanvas from "../components/DesktopPetCanvas.vue";
 import { useAdapterConnection } from "../composables/useAdapterConnection";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
@@ -12,6 +12,7 @@ const { state, selectedModel } = useModelSync();
 const adapter = useAdapterConnection();
 const bridge = useDesktopBridge();
 const motionPlayer = usePreviewMotionPlayer();
+const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
 
 const connectionState = computed(() => {
   if (adapter.state.status === "connecting") {
@@ -284,6 +285,22 @@ function handleInboundMotionPlan(plan: unknown): void {
   }
 }
 
+function applyAmbientMotionPreference(attemptsRemaining = 12): void {
+  const live2dAdapter = window.getLAppAdapter?.();
+  if (live2dAdapter?.setAmbientMotionEnabled) {
+    live2dAdapter.setAmbientMotionEnabled(ambientMotionEnabled.value);
+    return;
+  }
+
+  if (attemptsRemaining <= 0) {
+    return;
+  }
+
+  window.setTimeout(() => {
+    applyAmbientMotionPreference(attemptsRemaining - 1);
+  }, 120);
+}
+
 function handleDesktopCommand(command: DesktopRuntimeCommand): void {
   switch (command.type) {
     case "set_address":
@@ -291,6 +308,10 @@ function handleDesktopCommand(command: DesktopRuntimeCommand): void {
       return;
     case "set_desktop_screenshot_on_send":
       adapter.setDesktopScreenshotOnSendEnabled(command.enabled);
+      return;
+    case "set_ambient_motion_enabled":
+      ambientMotionEnabled.value = command.enabled;
+      applyAmbientMotionPreference();
       return;
     case "connect":
       if (typeof command.address === "string") {
@@ -343,6 +364,7 @@ watch(
 
 watch(
   () => [
+    ambientMotionEnabled.value,
     adapter.state.address,
     adapter.state.desktopScreenshotOnSendEnabled,
     adapter.state.status,
@@ -370,6 +392,7 @@ watch(
     bridge.publishSnapshot({
       adapterAddress: adapter.state.address,
       desktopScreenshotOnSendEnabled: adapter.state.desktopScreenshotOnSendEnabled,
+      ambientMotionEnabled: ambientMotionEnabled.value,
       connectionState: connectionState.value,
       connectionLabel: connectionLabel.value,
       connectionStatusMessage: adapter.state.statusMessage,
@@ -401,9 +424,18 @@ watch(
   { deep: true, immediate: true },
 );
 
+watch(
+  () => [selectedModel.value?.model_url ?? "", ambientMotionEnabled.value],
+  () => {
+    applyAmbientMotionPreference();
+  },
+  { immediate: true },
+);
+
 onMounted(async () => {
   await adapter.initialize();
   adapter.connect();
+  applyAmbientMotionPreference();
 });
 
 onBeforeUnmount(() => {

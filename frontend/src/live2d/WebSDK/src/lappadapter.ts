@@ -63,6 +63,11 @@ export class LAppAdapter {
     return this.getModel()?.startMotion(group, no, priority, onFinishedMotionHandler) ?? InvalidMotionQueueEntryHandleValue;
   }
 
+  public setAmbientMotionEnabled(enabled: boolean): void {
+    LAppDefine.setAmbientMotionEnabled(enabled);
+    this.getModel()?.setAmbientMotionEnabled(enabled);
+  }
+
   public startDirectParameterPlan(plan: unknown): boolean {
     return this.getModel()?.startDirectParameterPlan(plan) ?? false;
   }
@@ -112,6 +117,7 @@ export class LAppAdapter {
 
     this.getMgr().releaseAllModel();
     this.getMgr()._models.pushBack(new LAppModel());
+    this.getMgr()._models.at(0)?.setAmbientMotionEnabled(LAppDefine.AMBIENT_MOTION_ENABLED);
     this.getMgr()._models.at(0)?.loadAssets(modelPath, modelJsonName);
   }
 

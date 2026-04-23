@@ -8,6 +8,7 @@ const draftAddress = ref(bridge.state.snapshot.adapterAddress);
 const desktopScreenshotOnSendEnabled = ref(
   bridge.state.snapshot.desktopScreenshotOnSendEnabled,
 );
+const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
 
 watch(
   () => bridge.state.snapshot.adapterAddress,
@@ -20,6 +21,13 @@ watch(
   () => bridge.state.snapshot.desktopScreenshotOnSendEnabled,
   (nextValue) => {
     desktopScreenshotOnSendEnabled.value = nextValue;
+  },
+);
+
+watch(
+  () => bridge.state.snapshot.ambientMotionEnabled,
+  (nextValue) => {
+    ambientMotionEnabled.value = nextValue;
   },
 );
 
@@ -63,6 +71,13 @@ function applyDesktopScreenshotOnSend(): void {
   bridge.sendCommand({
     type: "set_desktop_screenshot_on_send",
     enabled: desktopScreenshotOnSendEnabled.value,
+  });
+}
+
+function applyAmbientMotionEnabled(): void {
+  bridge.sendCommand({
+    type: "set_ambient_motion_enabled",
+    enabled: ambientMotionEnabled.value,
   });
 }
 </script>
@@ -164,6 +179,35 @@ function applyDesktopScreenshotOnSend(): void {
 
         <p class="settings-card__hint">
           关闭后仍然可以正常聊天，只是不再自动把当前桌面作为上下文一并发送。
+        </p>
+      </article>
+
+      <article class="settings-card">
+        <div class="settings-card__header">
+          <div>
+            <p class="settings-card__eyebrow">动作</p>
+            <h2>默认待机动作</h2>
+          </div>
+          <span class="settings-card__badge">
+            {{ ambientMotionEnabled ? "enabled" : "disabled" }}
+          </span>
+        </div>
+
+        <label class="settings-toggle">
+          <input
+            v-model="ambientMotionEnabled"
+            class="settings-toggle__input"
+            type="checkbox"
+            @change="applyAmbientMotionEnabled"
+          />
+          <span class="settings-toggle__control" aria-hidden="true"></span>
+          <span class="settings-toggle__copy">
+            控制 Live2D 的默认待机驱动。关闭后会停用自动待机动作、自动呼吸和自动眨眼，方便只观察对话触发的动作。
+          </span>
+        </label>
+
+        <p class="settings-card__hint">
+          关闭后仍然保留对话动作、动作预览、口型同步和手动触发的 motion。
         </p>
       </article>
 

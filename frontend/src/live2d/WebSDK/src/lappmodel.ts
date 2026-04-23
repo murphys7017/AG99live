@@ -154,6 +154,7 @@ interface DirectParameterPlanState {
   usesCalibration: boolean;
   usesBindingProfile: boolean;
   startedAtMs: number;
+  diagnosticFrameCount: number;
 }
 
 /**
@@ -625,6 +626,7 @@ export class LAppModel extends CubismUserModel {
 
     const deltaTimeSeconds: number = LAppPal.getDeltaTime();
     this._userTimeSeconds += deltaTimeSeconds;
+    const ambientMotionEnabled = LAppDefine.AMBIENT_MOTION_ENABLED;
 
     this._dragManager.update(deltaTimeSeconds);
     this._dragX = this._dragManager.getX();
@@ -637,10 +639,12 @@ export class LAppModel extends CubismUserModel {
     this._model.loadParameters(); // 前回セーブされた状態をロード
     if (this._motionManager.isFinished()) {
       // モーションの再生がない場合、待機モーションの中からランダムで再生する
-      this.startRandomMotion(
-        LAppDefine.MotionGroupIdle,
-        LAppDefine.PriorityIdle
-      );
+      if (ambientMotionEnabled) {
+        this.startRandomMotion(
+          LAppDefine.MotionGroupIdle,
+          LAppDefine.PriorityIdle
+        );
+      }
     } else {
       motionUpdated = this._motionManager.updateMotion(
         this._model,
@@ -651,7 +655,7 @@ export class LAppModel extends CubismUserModel {
     //--------------------------------------------------------------------------
 
     // まばたき
-    if (!motionUpdated) {
+    if (ambientMotionEnabled && !motionUpdated) {
       if (this._eyeBlink != null) {
         // メインモーションの更新がないとき
         this._eyeBlink.updateParameters(this._model, deltaTimeSeconds); // 目パチ
@@ -682,8 +686,15 @@ export class LAppModel extends CubismUserModel {
     this._model.addParameterValueById(this._idParamEyeBallY, this._dragY);
 
     // 呼吸など
-    if (this._breath != null) {
+    if (ambientMotionEnabled && this._breath != null) {
       this._breath.updateParameters(this._model, deltaTimeSeconds);
+    }
+
+    // Direct parameter overlay should run before physics so physics-driven
+    // output parameters can consume these values in the same frame.
+    const directPlanFailure = this.applyDirectParameterPlanOverlay();
+    if (directPlanFailure) {
+      this.stopDirectParameterPlan(directPlanFailure);
     }
 
     // 物理演算の設定
@@ -714,12 +725,14 @@ export class LAppModel extends CubismUserModel {
       this._pose.updateParameters(this._model, deltaTimeSeconds);
     }
 
-    const directPlanFailure = this.applyDirectParameterPlanOverlay();
-    if (directPlanFailure) {
-      this.stopDirectParameterPlan(directPlanFailure);
-    }
-
     this._model.update();
+  }
+
+  public setAmbientMotionEnabled(enabled: boolean): void {
+    LAppDefine.setAmbientMotionEnabled(enabled);
+    if (!enabled) {
+      this._motionManager.stopAllMotions();
+    }
   }
 
   /**
@@ -1517,6 +1530,7 @@ export class LAppModel extends CubismUserModel {
       usesCalibration,
       usesBindingProfile,
       startedAtMs: performance.now(),
+      diagnosticFrameCount: 0,
     };
     this._directParameterPlanError = "";
     return true;
@@ -1553,7 +1567,8 @@ export class LAppModel extends CubismUserModel {
     const planState = this._directParameterPlanState;
     const elapsedMs = Math.max(0, performance.now() - planState.startedAtMs);
     const easing = this.resolvePlanEasing(elapsedMs, planState.timing);
-    if (elapsedMs === 0) {
+    const shouldLogFrame = planState.diagnosticFrameCount < 2;
+    if (shouldLogFrame) {
       console.info(`[LAppModel] applyDirectParameterPlanOverlay: mode=${planState.mode}, emotion=${planState.emotionLabel}, totalMs=${planState.timing.totalMs}, blendIn=${planState.timing.blendInMs}, hold=${planState.timing.holdMs}, blendOut=${planState.timing.blendOutMs}, axisCount=${planState.axisBindings.length}, suppCount=${planState.supplementaryBindings.length}, calibrated=${planState.usesCalibration}, bindingProfile=${planState.usesBindingProfile}`);
     }
 
@@ -1580,8 +1595,15 @@ export class LAppModel extends CubismUserModel {
       }
 
       this._model.setParameterValueById(axis.parameterId, blendedValue);
-      if (elapsedMs === 0) {
-        console.info(`[LAppModel] setParam axis=${axis.axisName} param=${axis.parameterName} axisVal=${axis.axisValue} min=${minValue} max=${maxValue} base=${baseValue} target=${targetValue} eased=${blendedValue} easing=${easing} calibrated=${this.axisCalibrationInfluencesExecution(axis.calibration)}`);
+      const readbackValue = this._model.getParameterValueByIndex(axis.parameterIndex);
+      const writeMismatch = Math.abs(readbackValue - blendedValue) > 0.001;
+      if (writeMismatch) {
+        console.warn(
+          `[LAppModel] setParam readback mismatch axis=${axis.axisName} param=${axis.parameterName} wrote=${blendedValue} readback=${readbackValue}`,
+        );
+      }
+      if (shouldLogFrame) {
+        console.info(`[LAppModel] setParam axis=${axis.axisName} param=${axis.parameterName} axisVal=${axis.axisValue} min=${minValue} max=${maxValue} base=${baseValue} target=${targetValue} eased=${blendedValue} readback=${readbackValue} easing=${easing} calibrated=${this.axisCalibrationInfluencesExecution(axis.calibration)}`);
       }
     }
 
@@ -1596,6 +1618,10 @@ export class LAppModel extends CubismUserModel {
       const range = maxValue - minValue;
       const delta = item.targetValue * 0.5 * range * item.weight * easing;
       this._model.addParameterValueById(item.parameterId, delta);
+    }
+
+    if (shouldLogFrame) {
+      planState.diagnosticFrameCount += 1;
     }
 
     if (elapsedMs >= planState.timing.totalMs) {

@@ -12,6 +12,7 @@ declare global {
       getMotionGroups?: () => string[];
       getMotionCount?: (group: string) => number;
       startMotion?: (group: string, no: number, priority: number) => number;
+      setAmbientMotionEnabled?: (enabled: boolean) => void;
       startDirectParameterPlan?: (plan: DirectParameterPlan) => boolean;
       stopDirectParameterPlan?: () => void;
       getDirectParameterPlanError?: () => string;

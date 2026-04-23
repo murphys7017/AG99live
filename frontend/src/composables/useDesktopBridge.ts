@@ -16,6 +16,7 @@ type BridgeMessage =
 const defaultSnapshot: DesktopRuntimeSnapshot = {
   adapterAddress: "127.0.0.1:12396",
   desktopScreenshotOnSendEnabled: true,
+  ambientMotionEnabled: true,
   connectionState: "disconnected",
   connectionLabel: "未连接",
   connectionStatusMessage: "等待桌宠窗口启动。",
