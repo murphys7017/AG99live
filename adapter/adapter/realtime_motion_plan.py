@@ -212,6 +212,9 @@ class RealtimeMotionPlanGenerator:
         )
         if not isinstance(library, dict):
             return None
+        fallback_library = resolve_selected_base_action_library(
+            getattr(self.runtime_state, "model_info", {}),
+        )
         calibration_profile = resolve_selected_model_calibration_profile(
             getattr(self.runtime_state, "model_info", {}),
         )
@@ -229,6 +232,7 @@ class RealtimeMotionPlanGenerator:
         plan = build_plan_from_axes(
             selector,
             library=library,
+            fallback_library=fallback_library,
             calibration_profile=calibration_profile,
         )
         valid, _ = validate_parameter_plan_payload(plan)
@@ -287,6 +291,16 @@ def resolve_selected_parameter_action_library(model_info: Any) -> dict[str, Any]
     if not isinstance(selected_model, dict):
         return None
     library = selected_model.get("parameter_action_library")
+    if isinstance(library, dict):
+        return library
+    return None
+
+
+def resolve_selected_base_action_library(model_info: Any) -> dict[str, Any] | None:
+    selected_model = _resolve_selected_model_entry(model_info)
+    if not isinstance(selected_model, dict):
+        return None
+    library = selected_model.get("base_action_library")
     if isinstance(library, dict):
         return library
     return None
@@ -549,10 +563,11 @@ def build_plan_from_axes(
     selector_output: dict[str, Any],
     *,
     library: dict[str, Any],
+    fallback_library: dict[str, Any] | None = None,
     calibration_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    raw_atoms = library.get("atoms")
-    atoms = [atom for atom in raw_atoms if isinstance(atom, dict)] if isinstance(raw_atoms, list) else []
+    atoms = _extract_library_atoms(library)
+    fallback_atoms = _extract_library_atoms(fallback_library)
     axes = selector_output.get("axes")
     axis_values = axes if isinstance(axes, dict) else {}
     normalized_axes = {
@@ -580,6 +595,13 @@ def build_plan_from_axes(
             axis_values=calibrated_axes,
             calibration_profile=calibration_profile,
         )
+        if not supplementary_params and fallback_atoms:
+            supplementary_params = _build_supplementary_params(
+                atoms=fallback_atoms,
+                axis_values=calibrated_axes,
+                calibration_profile=calibration_profile,
+                allow_relaxed_matching=True,
+            )
 
     return {
         "schema_version": "engine.parameter_plan.v1",
@@ -898,11 +920,54 @@ def _sanitize_execution_range(value: Any) -> dict[str, float] | None:
     return sanitized
 
 
+def _extract_library_atoms(library: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(library, dict):
+        return []
+    raw_atoms = library.get("atoms")
+    if not isinstance(raw_atoms, list):
+        return []
+
+    normalized_atoms: list[dict[str, Any]] = []
+    for atom in raw_atoms:
+        if not isinstance(atom, dict):
+            continue
+        normalized_atom = _normalize_supplementary_atom(atom)
+        if normalized_atom is None:
+            continue
+        normalized_atoms.append(normalized_atom)
+    return normalized_atoms
+
+
+def _normalize_supplementary_atom(atom: dict[str, Any]) -> dict[str, Any] | None:
+    parameter_id = str(atom.get("parameter_id") or "").strip()
+    primary_channel = str(
+        atom.get("primary_channel")
+        or atom.get("channel")
+        or "",
+    ).strip()
+    polarity = str(atom.get("polarity") or "neutral").strip()
+    if not parameter_id or not primary_channel:
+        return None
+
+    normalized: dict[str, Any] = {
+        **atom,
+        "id": str(atom.get("id") or "").strip(),
+        "parameter_id": parameter_id,
+        "primary_channel": primary_channel,
+        "polarity": polarity or "neutral",
+        "score": float(atom.get("score") or 0.0),
+        "energy_score": float(atom.get("energy_score") or 0.0),
+        "strength": str(atom.get("strength") or "none"),
+    }
+    return normalized
+
+
 def _build_supplementary_params(
     *,
     atoms: list[dict[str, Any]],
     axis_values: dict[str, int],
     calibration_profile: dict[str, Any] | None = None,
+    allow_relaxed_matching: bool = False,
 ) -> list[dict[str, Any]]:
     excluded_parameter_ids = {
         parameter_id
@@ -955,16 +1020,28 @@ def _build_supplementary_params(
             atom
             for atom in atoms
             if str(atom.get("primary_channel") or "").strip() == axis.channel
-            and str(atom.get("polarity") or "").strip() == polarity
         ]
+        if not channel_atoms:
+            continue
+        polarity_matched_atoms = [
+            atom
+            for atom in channel_atoms
+            if str(atom.get("polarity") or "").strip() == polarity
+        ]
+        candidate_atoms = polarity_matched_atoms
+        if allow_relaxed_matching and not candidate_atoms:
+            candidate_atoms = channel_atoms
         ranked_atoms = sorted(
             [
                 atom
-                for atom in channel_atoms
+                for atom in candidate_atoms
                 if _normalize_parameter_id(str(atom.get("parameter_id") or "").strip())
                 not in blocked_parameter_ids
             ],
             key=lambda atom: (
+                0
+                if str(atom.get("polarity") or "").strip() == polarity
+                else 1,
                 0
                 if _normalize_parameter_id(str(atom.get("parameter_id") or "").strip())
                 in preferred_parameter_ids
@@ -986,6 +1063,7 @@ def _build_supplementary_params(
                 continue
 
             strength_factor = _strength_semantic_factor(str(atom.get("strength") or ""))
+            source_atom_id = str(atom.get("id") or "").strip() or f"{axis.channel}.{normalized_parameter_id}"
             target_value = round(
                 max(
                     -1.0,
@@ -997,7 +1075,7 @@ def _build_supplementary_params(
                 "parameter_id": parameter_id,
                 "target_value": target_value,
                 "weight": weight,
-                "source_atom_id": str(atom.get("id") or ""),
+                "source_atom_id": source_atom_id,
                 "channel": axis.channel,
                 "_score": float(atom.get("score") or 0.0),
                 "_energy_score": float(atom.get("energy_score") or 0.0),

@@ -1612,10 +1612,6 @@ export class LAppModel extends CubismUserModel {
       );
       let blendedValue = baseValue + (targetValue - baseValue) * easing;
 
-      if (this._lipsync && axis.axisName === "mouth_open") {
-        blendedValue = Math.max(baseValue, blendedValue);
-      }
-
       this._model.setParameterValueById(axis.parameterId, blendedValue);
       const readbackValue = this._model.getParameterValueByIndex(axis.parameterIndex);
       const writeMismatch = Math.abs(readbackValue - blendedValue) > 0.001;

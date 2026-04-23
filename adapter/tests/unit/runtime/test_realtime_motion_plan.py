@@ -6,6 +6,7 @@ from adapter.realtime_motion_plan import (
     RealtimeMotionPlanGenerator,
     build_plan_from_axes,
     normalize_selector_output,
+    resolve_selected_base_action_library,
     resolve_selected_parameter_action_library,
     resolve_selected_model_calibration_profile,
     validate_parameter_plan_payload,
@@ -36,6 +37,32 @@ def test_resolve_selected_parameter_action_library_does_not_cross_model_fallback
     }
 
     library = resolve_selected_parameter_action_library(model_info)
+    assert library is None
+
+
+def test_resolve_selected_base_action_library_prefers_selected_model() -> None:
+    model_info = {
+        "selected_model": "Model-B",
+        "models": [
+            {"name": "Model-A", "base_action_library": {"schema_version": "a"}},
+            {"name": "Model-B", "base_action_library": {"schema_version": "b"}},
+        ],
+    }
+    library = resolve_selected_base_action_library(model_info)
+    assert isinstance(library, dict)
+    assert library["schema_version"] == "b"
+
+
+def test_resolve_selected_base_action_library_does_not_cross_model_fallback() -> None:
+    model_info = {
+        "selected_model": "Model-B",
+        "models": [
+            {"name": "Model-A", "base_action_library": {"schema_version": "a"}},
+            {"name": "Model-B"},
+        ],
+    }
+
+    library = resolve_selected_base_action_library(model_info)
     assert library is None
 
 
@@ -110,6 +137,49 @@ def test_build_plan_from_axes_uses_parameter_action_library_atoms() -> None:
     assert len(plan["supplementary_params"]) >= 1
     assert plan["supplementary_params"][0]["parameter_id"] == "ParamCheek"
     assert plan["supplementary_params"][0]["channel"] == "head_yaw"
+
+
+def test_build_plan_from_axes_falls_back_to_base_action_library_atoms() -> None:
+    selector = normalize_selector_output(
+        {
+            "emotion": "happy",
+            "mode": "parallel",
+            "axes": {
+                "head_yaw": 88,
+            },
+        }
+    )
+    parameter_library = {
+        "schema_version": "parameter_action_library.v1",
+        "atoms": [],
+    }
+    base_action_library = {
+        "schema_version": "base_action_library.v1",
+        "atoms": [
+            {
+                "id": "base.head_yaw.positive.01",
+                "channel": "head_yaw",
+                "polarity": "positive",
+                "score": 3.4,
+                "energy_score": 2.8,
+                "parameter_id": "ParamCheek",
+                "strength": "medium",
+            },
+        ],
+    }
+
+    plan = build_plan_from_axes(
+        selector,
+        library=parameter_library,
+        fallback_library=base_action_library,
+    )
+    valid, reason = validate_parameter_plan_payload(plan)
+
+    assert valid is True
+    assert reason == ""
+    assert len(plan["supplementary_params"]) >= 1
+    assert plan["supplementary_params"][0]["parameter_id"] == "ParamCheek"
+    assert plan["supplementary_params"][0]["source_atom_id"] == "base.head_yaw.positive.01"
 
 
 def test_build_plan_from_axes_without_calibration_profile_keeps_legacy_direct_mapping() -> None:

@@ -45,6 +45,11 @@ const state = reactive({
 
 let activeRunId = 0;
 let activeTimerHandles: number[] = [];
+let lastStartedPlanSignature = "";
+let lastStartedPlanAtMs = 0;
+
+const PLAN_RESTART_DEDUP_WINDOW_MS = 700;
+const PLAN_RESTART_GUARD_MS = 180;
 
 function normalizeText(value: unknown): string {
   return String(value ?? "").trim();
@@ -340,6 +345,53 @@ function retimePlanForPlayback(
   };
 }
 
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`);
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function buildPlanSignature(plan: DirectParameterPlan): string {
+  const normalizedSupplementary = [...plan.supplementary_params]
+    .map((item) => ({
+      parameter_id: item.parameter_id,
+      target_value: Math.round(item.target_value * 10000) / 10000,
+      weight: Math.round(item.weight * 10000) / 10000,
+      source_atom_id: item.source_atom_id,
+      channel: item.channel,
+    }))
+    .sort((left, right) => {
+      if (left.parameter_id !== right.parameter_id) {
+        return left.parameter_id.localeCompare(right.parameter_id);
+      }
+      if (left.channel !== right.channel) {
+        return left.channel.localeCompare(right.channel);
+      }
+      return left.source_atom_id.localeCompare(right.source_atom_id);
+    });
+
+  const normalizedAxes: Record<string, number> = {};
+  for (const axisName of AXIS_NAMES) {
+    normalizedAxes[axisName] = Number(plan.key_axes[axisName]?.value ?? 50);
+  }
+
+  return stableStringify({
+    schema_version: plan.schema_version,
+    mode: plan.mode,
+    emotion_label: plan.emotion_label,
+    timing: plan.timing,
+    key_axes: normalizedAxes,
+    supplementary_params: normalizedSupplementary,
+  });
+}
+
 function clearActiveTimers(): void {
   for (const handle of activeTimerHandles) {
     window.clearTimeout(handle);
@@ -422,6 +474,28 @@ function playPlan(
   } else {
     delete playbackPlan.plan.model_calibration_profile;
   }
+  const planSignature = buildPlanSignature(playbackPlan.plan);
+  const nowMs = performance.now();
+  if (options.softHandoff && state.status === "playing") {
+    const elapsedSinceLastStartMs = Math.max(0, nowMs - lastStartedPlanAtMs);
+    if (
+      planSignature === lastStartedPlanSignature
+      && elapsedSinceLastStartMs <= PLAN_RESTART_DEDUP_WINDOW_MS
+    ) {
+      console.info(
+        "[MotionPlayer] skip duplicate plan restart. elapsedMs=",
+        elapsedSinceLastStartMs,
+      );
+      return true;
+    }
+    if (elapsedSinceLastStartMs <= PLAN_RESTART_GUARD_MS) {
+      console.info(
+        "[MotionPlayer] skip rapid plan restart. elapsedMs=",
+        elapsedSinceLastStartMs,
+      );
+      return true;
+    }
+  }
 
   const adapter = window.getLAppAdapter?.();
   if (!adapter || typeof adapter.startDirectParameterPlan !== "function") {
@@ -459,6 +533,8 @@ function playPlan(
   }
 
   console.info("[MotionPlayer] plan started successfully. totalDurationMs=", playbackPlan.totalDurationMs);
+  lastStartedPlanSignature = planSignature;
+  lastStartedPlanAtMs = performance.now();
   state.status = "playing";
   state.message = `正在执行参数计划（mode=${playbackPlan.plan.mode}, emotion=${playbackPlan.plan.emotion_label}）...`;
   state.keyAxesCount = AXIS_NAMES.length;
