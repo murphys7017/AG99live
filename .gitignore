@@ -17,3 +17,4 @@ __pycache__/
 adapter/debug_exports/
 *.ipynb
 analysis/
+analysis/*.ipynb
