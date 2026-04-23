@@ -347,6 +347,37 @@ def test_runtime_state_reuses_chunked_filter_cache(
     assert ChunkedCacheProvider.call_count == first_call_count
 
 
+def test_runtime_state_refresh_reads_inline_motion_contract_flag(
+    monkeypatch,
+    install_fake_astrbot,
+) -> None:
+    runtime_state, _provider_cls = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+
+    seed_model_info = build_seed_model_info()
+    monkeypatch.setattr(
+        runtime_state,
+        "scan_live2d_models",
+        lambda **kwargs: deepcopy(seed_model_info),
+    )
+
+    state = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=None,
+        plugin_config={"enable_inline_motion_contract": False},
+        plugin_config_loader=lambda: {"enable_inline_motion_contract": True},
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=Path("."),
+    )
+
+    state.refresh()
+
+    assert state.enable_inline_motion_contract is True
+
+
 def _extract_json_from_prompt(prompt: str) -> dict:
     text = str(prompt or "").strip()
     start = text.find("{")

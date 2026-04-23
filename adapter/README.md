@@ -38,3 +38,16 @@
 当前 `adapter` 目录的目标不是立刻完整，而是先明确迁移顺序：
 
 **先保留 V1 的桥接价值，再替换 V1 的模型系统。**
+
+## 动作计划链路
+
+- 主链路：`TurnCoordinator._commit_inbound_message()` 会在提交 AstrBot 事件前，把内联动作契约注入 `event.message_str`。
+- 输出格式：主模型正常回复文本后，最后一行仅输出一个 `<@anim {...}>` 标签。
+- 提取位置：`TurnCoordinator.emit_message_chain()` 会剥离 `<@anim {...}>`，文本继续走 `output.text`，动作部分转为 `engine.motion_plan`。
+- 兜底路径：主回复没有合法 `<@anim {...}>` 时，才触发 `realtime_motion_plan` 二次请求。
+
+## 相关配置
+
+- `enable_inline_motion_contract`：是否向主聊天请求注入 `<@anim ...>` 输出契约，默认 `true`。
+- `enable_realtime_motion_plan`：是否保留回复后二次动作计划生成兜底，默认 `true`。
+- `realtime_motion_timeout_seconds`：二次动作计划生成超时时间，默认 `8.0`。

@@ -42,6 +42,20 @@ from .realtime_motion_plan import validate_parameter_plan_payload
 
 INLINE_ANIM_TAG_PATTERN = re.compile(r"<@anim\s*\{[\s\S]*?\}>\s*", re.IGNORECASE)
 INLINE_ANIM_START_PATTERN = re.compile(r"<@anim\b", re.IGNORECASE)
+DIRECT_PARAMETER_AXIS_NAMES = (
+    "head_yaw",
+    "head_roll",
+    "head_pitch",
+    "body_yaw",
+    "body_roll",
+    "gaze_x",
+    "gaze_y",
+    "eye_open_left",
+    "eye_open_right",
+    "mouth_open",
+    "mouth_smile",
+    "brow_bias",
+)
 
 
 class TurnCoordinator:
@@ -208,6 +222,12 @@ class TurnCoordinator:
                     inline_plan is not None,
                     inline_mode or "",
                 )
+        else:
+            logger.info(
+                "WIRING motion_plan turn_id=%s inline_anim_detected=false "
+                "route=secondary_request",
+                turn_id or "",
+            )
 
         inline_dispatched = False
         if isinstance(inline_plan, dict):
@@ -316,6 +336,7 @@ class TurnCoordinator:
             await self._emit_image_input_diagnostics(message_obj)
 
             event = self._build_platform_event(message_obj)
+            self._apply_inline_motion_contract_to_event(event, message_obj=message_obj)
             self._commit_event(event)
             self._mark_turn_timing("event_committed_at")
             logger.debug(
@@ -324,6 +345,32 @@ class TurnCoordinator:
                 len(message_obj.message_str or ""),
                 current_turn_id,
             )
+
+    def _apply_inline_motion_contract_to_event(self, event, *, message_obj) -> None:
+        original_message_str = str(getattr(message_obj, "message_str", "") or "")
+        set_extra = getattr(event, "set_extra", None)
+        if callable(set_extra):
+            set_extra("ag99live_original_message_str", original_message_str)
+
+        prompt_text = _build_model_visible_user_text(
+            original_message_str,
+            runtime_state=self.runtime_state,
+        )
+        if prompt_text == original_message_str:
+            return
+
+        event.message_str = prompt_text
+        if callable(set_extra):
+            set_extra("ag99live_inline_motion_contract_applied", True)
+            set_extra("ag99live_inline_motion_contract_mode", "user_prompt_system_reminder")
+            set_extra("ag99live_inline_motion_contract_prompt", prompt_text)
+
+        logger.info(
+            "WIRING inline_motion_contract applied=true turn_id=%s original_len=%s prompt_len=%s",
+            getattr(self.session_state, "current_turn_id", "") or "",
+            len(original_message_str),
+            len(prompt_text),
+        )
 
     async def _emit_image_input_diagnostics(self, message_obj) -> None:
         raw_message = getattr(message_obj, "raw_message", None)
@@ -781,6 +828,70 @@ def _summarize_parameter_plan(plan: Any) -> tuple[str, str, int, int, str]:
     supplementary_count = len(supplementary) if isinstance(supplementary, list) else 0
     valid, failure_reason = _validate_parameter_plan(plan)
     return schema_version, mode, key_axes_count, supplementary_count, "" if valid else failure_reason
+
+
+def _build_model_visible_user_text(user_text: str, *, runtime_state: Any) -> str:
+    base_text = str(user_text or "").rstrip()
+    if not bool(getattr(runtime_state, "enable_inline_motion_contract", True)):
+        return base_text
+
+    contract = _build_inline_motion_contract(runtime_state=runtime_state)
+    if not contract:
+        return base_text
+
+    if base_text:
+        return f"{base_text}\n\n<system_reminder>\n{contract}\n</system_reminder>"
+    return f"<system_reminder>\n{contract}\n</system_reminder>"
+
+
+def _build_inline_motion_contract(*, runtime_state: Any) -> str:
+    template_payload = {
+        "mode": "inline",
+        "plan": _build_inline_motion_plan_template(),
+    }
+    template_tag = f"<@anim {json.dumps(template_payload, ensure_ascii=False, separators=(',', ':'))}>"
+    selected_model = ""
+    model_info = getattr(runtime_state, "model_info", {})
+    if isinstance(model_info, dict):
+        selected_model = str(model_info.get("selected_model") or "").strip()
+
+    lines = [
+        "AG99live inline motion contract:",
+        "Write your normal assistant reply first.",
+        "Then append exactly one final line containing only a single <@anim ...> tag.",
+        "Do not wrap the tag in a code block and do not explain the tag.",
+        "The JSON inside the tag must be valid JSON.",
+        "Top-level tag payload must use `mode: \"inline\"` and a `plan` object.",
+        "The `plan.schema_version` must be `engine.parameter_plan.v1`.",
+        "The `plan.mode` must be `idle` or `expressive`.",
+        "The `plan.key_axes` object must include all 12 axes with integer values from 0 to 100.",
+        "Use `supplementary_params: []` when you are unsure.",
+        "If the turn is calm or uncertain, emit a safe idle plan instead of omitting the tag.",
+    ]
+    if selected_model:
+        lines.append(f"Current Live2D model: {selected_model}.")
+    lines.append("Use this tag template structure and fill in suitable values:")
+    lines.append(template_tag)
+    return "\n".join(lines)
+
+
+def _build_inline_motion_plan_template() -> dict[str, Any]:
+    return {
+        "schema_version": "engine.parameter_plan.v1",
+        "mode": "idle",
+        "emotion_label": "neutral",
+        "timing": {
+            "duration_ms": 1200,
+            "blend_in_ms": 120,
+            "hold_ms": 840,
+            "blend_out_ms": 240,
+        },
+        "key_axes": {
+            axis_name: {"value": 50}
+            for axis_name in DIRECT_PARAMETER_AXIS_NAMES
+        },
+        "supplementary_params": [],
+    }
 
 
 def _strip_inline_anim_tags(text: str) -> str:

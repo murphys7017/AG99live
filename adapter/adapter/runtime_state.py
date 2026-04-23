@@ -60,6 +60,7 @@ class RuntimeState:
         self.action_llm_filter_max_atoms_per_channel = 2
         self.action_llm_filter_chunk_max_channels = 8
         self.action_llm_filter_chunk_max_candidates = 96
+        self.enable_inline_motion_contract = True
         self.enable_realtime_motion_plan = True
         self.realtime_motion_mode = "realtime"
         self.realtime_motion_timeout_seconds = 8.0
@@ -166,6 +167,9 @@ class RuntimeState:
         self.action_llm_filter_chunk_max_candidates = max(
             int(_plugin_config_get(self.plugin_config, "action_llm_filter_chunk_max_candidates", 96)),
             1,
+        )
+        self.enable_inline_motion_contract = bool(
+            _plugin_config_get(self.plugin_config, "enable_inline_motion_contract", True)
         )
         self.enable_realtime_motion_plan = bool(
             _plugin_config_get(self.plugin_config, "enable_realtime_motion_plan", True)

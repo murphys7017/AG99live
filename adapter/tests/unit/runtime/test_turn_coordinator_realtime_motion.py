@@ -196,6 +196,104 @@ def test_extract_inline_motion_plan_strips_malformed_tag(install_fake_astrbot, m
     assert mode is None
 
 
+def test_build_model_visible_user_text_appends_inline_contract(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("adapter.turn_coordinator")
+
+    runtime_state = type(
+        "RuntimeStateStub",
+        (),
+        {
+            "enable_inline_motion_contract": True,
+            "model_info": {"selected_model": "pet"},
+        },
+    )()
+
+    prompt_text = module._build_model_visible_user_text(
+        "你好，今天怎么样？",
+        runtime_state=runtime_state,
+    )
+
+    assert prompt_text.startswith("你好，今天怎么样？")
+    assert "<system_reminder>" in prompt_text
+    assert "AG99live inline motion contract" in prompt_text
+    assert "Current Live2D model: pet." in prompt_text
+    assert "<@anim {" in prompt_text
+    assert '"schema_version":"engine.parameter_plan.v1"' in prompt_text
+
+
+def test_build_model_visible_user_text_skips_inline_contract_when_disabled(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("adapter.turn_coordinator")
+
+    runtime_state = type(
+        "RuntimeStateStub",
+        (),
+        {
+            "enable_inline_motion_contract": False,
+            "model_info": {"selected_model": "pet"},
+        },
+    )()
+
+    prompt_text = module._build_model_visible_user_text(
+        "just the user text",
+        runtime_state=runtime_state,
+    )
+
+    assert prompt_text == "just the user text"
+    assert "<system_reminder>" not in prompt_text
+    assert "<@anim" not in prompt_text
+
+
+def test_apply_inline_motion_contract_mutates_event_message_only(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("adapter.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = type(
+        "RuntimeStateStub",
+        (),
+        {
+            "enable_inline_motion_contract": True,
+            "model_info": {"selected_model": "pet"},
+        },
+    )()
+    coordinator.session_state = type("SessionStateStub", (), {"current_turn_id": "turn-contract"})()
+
+    message_obj = type("MessageObjectStub", (), {"message_str": "原始用户消息"})()
+
+    class EventStub:
+        def __init__(self) -> None:
+            self.message_str = message_obj.message_str
+            self.extras: dict[str, object] = {}
+
+        def set_extra(self, key: str, value: object) -> None:
+            self.extras[key] = value
+
+    event = EventStub()
+
+    coordinator._apply_inline_motion_contract_to_event(event, message_obj=message_obj)
+
+    assert message_obj.message_str == "原始用户消息"
+    assert event.message_str.startswith("原始用户消息")
+    assert "<system_reminder>" in event.message_str
+    assert "<@anim {" in event.message_str
+    assert event.extras["ag99live_original_message_str"] == "原始用户消息"
+    assert event.extras["ag99live_inline_motion_contract_applied"] is True
+    assert event.extras["ag99live_inline_motion_contract_mode"] == "user_prompt_system_reminder"
+    assert "<system_reminder>" in str(event.extras["ag99live_inline_motion_contract_prompt"])
+
+
 def test_emit_message_chain_inline_plan_uses_primary_route(
     install_fake_astrbot,
     monkeypatch,
