@@ -1,53 +1,68 @@
 # adapter
 
-这里是 AG99live V2 的适配器侧目录。
+AG99live V2 的 AstrBot 插件侧实现。该目录负责协议桥接、会话调度、媒体处理、Live2D 扫描与 realtime motion plan 生成。
 
-当前阶段对 `adapter` 的执行策略已经明确：
+## 核心职责
 
-1. 先迁移 V1 中已经稳定可用的适配器底座
-2. 再单独重写模型系统
+- 接收前端 `input.*` 消息并转为 AstrBot 事件。
+- 发送 `output.* / control.* / system.* / engine.*` 消息回前端。
+- 管理 turn 生命周期，保证文本/语音/动作消息在同一轮次可追踪。
+- 扫描 Live2D 资源并产出结构化能力信息。
+- 生成 `engine.parameter_plan.v1` 动作计划（内联优先，realtime 兜底）。
 
-也就是说，V2 适配器的第一批工作不是从零写一套全新后端，而是：
+## 目录结构
 
-- 先把消息桥接、基础协议、会话状态、传输骨架迁过来
-- 先保证 V2 有一个能工作的适配器基础版本
-- 再把模型扫描、模型配置、基础能力产物生成这一部分重新设计
-
-## 当前阶段建议
-
-迁移时应分成两类内容：
-
-### 可以先迁移的
-
-- 协议桥接
-- WebSocket 传输
-- turn 协调骨架
-- 会话状态
-- 历史记录桥接
-- 媒体缓存与静态资源服务
-
-### 需要后续重写的
-
-- 模型信息系统
-- 模型扫描逻辑
-- 基础配置 / manifest 生成逻辑
-- 旧的动作 / 表情映射主路径
-
-## 当前目标
-
-当前 `adapter` 目录的目标不是立刻完整，而是先明确迁移顺序：
-
-**先保留 V1 的桥接价值，再替换 V1 的模型系统。**
+```text
+adapter/
+├─ adapter/              # 运行时核心模块（protocol/turn/runtime/motion/scan）
+├─ tests/                # 单元测试
+├─ live2ds/              # 模型资源
+├─ main.py               # AstrBot 插件入口
+├─ platform_adapter.py   # 平台适配层
+├─ static_resources.py   # 静态资源与调试接口
+└─ _conf_schema.json     # 插件配置项定义
+```
 
 ## 动作计划链路
 
-- 主链路：`TurnCoordinator._commit_inbound_message()` 会在提交 AstrBot 事件前，把内联动作契约注入 `event.message_str`。
-- 输出格式：主模型正常回复文本后，最后一行仅输出一个 `<@anim {...}>` 标签。
-- 提取位置：`TurnCoordinator.emit_message_chain()` 会剥离 `<@anim {...}>`，文本继续走 `output.text`，动作部分转为 `engine.motion_plan`。
-- 兜底路径：主回复没有合法 `<@anim {...}>` 时，才触发 `realtime_motion_plan` 二次请求。
+### 主路径（内联）
 
-## 相关配置
+- Adapter 在请求主模型前注入 `<@anim {...}>` 输出契约。
+- 主回复末尾若包含合法 `<@anim {...}>`，则直接提取并广播 `engine.motion_plan`。
 
-- `enable_inline_motion_contract`：是否向主聊天请求注入 `<@anim ...>` 输出契约，默认 `true`。
-- `enable_realtime_motion_plan`：是否保留回复后二次动作计划生成兜底，默认 `true`。
-- `realtime_motion_timeout_seconds`：二次动作计划生成超时时间，默认 `8.0`。
+### 兜底路径（realtime）
+
+- 主回复无合法内联动作时，触发 `realtime_motion_plan` 生成。
+- 产物会按 `engine.parameter_plan.v1` 校验后再下发前端。
+
+## 与前端协同的关键点
+
+- 每条消息都带 `turn_id`，用于前端做轮次 gating 与时间轴协调。
+- `engine.motion_plan` 已支持 `calibration_profile` 辅助前端安全执行。
+- supplementary 参数支持从 `parameter_action_library` 抽取，并可回退到 `base_action_library`。
+
+## 关键配置（`_conf_schema.json`）
+
+- `enable_inline_motion_contract`：是否启用主请求内联动作契约。
+- `enable_realtime_motion_plan`：是否启用无内联时的 realtime 兜底。
+- `motion_analysis_provider_id`：动作语义分析模型 Provider。
+- `realtime_motion_timeout_seconds`：realtime 生成超时（秒）。
+- `realtime_motion_fewshot_enabled`：是否启用 few-shot。
+- `realtime_motion_platform_context_enabled`：是否注入平台上下文。
+- `enable_action_llm_filter`：是否启用基础动作库 LLM 严格筛选。
+
+## 开发与验证
+
+安装依赖：
+
+```powershell
+pip install -r adapter/requirements.txt
+```
+
+运行测试：
+
+```powershell
+python -m pytest adapter/tests -q
+```
+
+当前基线：`50 passed`（2026-04-23）。

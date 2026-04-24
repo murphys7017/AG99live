@@ -1,43 +1,85 @@
 # AG99live
 
-欢迎点燃自己的历史。
+AG99live 是桌宠项目 V2：以 `AstrBot 插件适配器 + Electron 前端运行时` 组成一条可联调、可扩展的实时对话与动作链路。
 
-AG99live 是桌宠项目 V2。  
-项目前期受到 Open-LLM-VTuber（OLV）启发，但 V2 的目标是独立建设 `AstrBot 插件适配器 + 本地桌面 runtime`，而不是继续做 V1 的改造分支。
+## 项目目标
+
+- 用统一协议打通 `文本 / 语音 / 图像 / 控制 / 动作计划`。
+- 将 Live2D 扫描产物沉淀为可复用的动作知识（`base_action_library`、`parameter_action_library`）。
+- 在真实会话中完成 `语义 -> 参数计划 -> 前端执行` 的闭环。
 
 ## 当前状态（2026-04-23）
 
-已完成：
+### 已完成
 
-- V2 协议主链路已切换：`input / output / control / system / engine`。
-- `adapter` 已作为 AstrBot 插件根目录可运行，保留 `WebSocket` 实时链路 + `HTTP` 静态资源链路。
-- Live2D 扫描已具备参数/表情/motion 基础解析，并产出 `base_action_library`。
-- 基础动作库已接入“宽进严出”流程：规则初筛 + 可选 LLM 严格筛选 + fallback 回退。
-- `frontend` 已有桌宠窗口、设置窗口、历史窗口、动作实验室窗口（Action Lab）。
-- Action Lab 已可从扫描结果选择动作原子，生成预览计划并发送 `engine.motion_plan` 测试消息。
-- 主聊天链路已支持内联动作计划：adapter 会向 AstrBot 主请求注入 `<@anim ...>` 输出契约，并优先从主回复中提取 `engine.motion_plan`。
-- 回复后实时动作计划二次请求仍保留，但仅作为主回复未产出合法 `<@anim ...>` 时的兜底路径。
+- V2 协议主链路已切换完成：`input.* / output.* / control.* / system.* / engine.*`。
+- Adapter 已可作为 AstrBot 插件运行，提供 `WebSocket` 实时消息和 `HTTP` 资源服务。
+- Live2D 扫描可产出 `parameter_scan`、`base_action_library`、`parameter_action_library`、`calibration_profile`。
+- 动作计划链路支持双路径：主请求内联 `<@anim {...}>` 优先，无内联时 realtime 兜底生成。
+- 前端动作执行链路已具备 `turn_id` 级动作/音频时间轴协调、计划软衔接（soft handoff）、高频重复计划去重与重启节流。
+- 参数绑定容错已增强（含模型参数表回退匹配）。
+- 自动化验证基线已建立：`python -m pytest adapter/tests -q` -> `50 passed`，`frontend` 的 `typecheck/build` 可通过。
 
-进行中：
+### 进行中
 
-- 前端真实动作引擎执行仍在联调中，当前重点是稳定参数计划写入与卡死诊断。
-- `engine.motion_plan` 已接入主聊天提取与前端消费，仍需继续收敛真实 Live2D 执行稳定性。
+- 音频、口型、动作的体感一致性仍在持续优化（尤其是语义强度与细节层次）。
+- realtime 计划的 supplementary 仍需进一步提升“非眼部可见性”和风格稳定性。
 
-## 目录
+## 仓库结构
 
 ```text
 AG99live/
-├─ docs/
-├─ frontend/  # Electron + Vue 桌宠客户端（pet/settings/history/action_lab）
-├─ adapter/   # AstrBot 插件（消息适配、语音链路、Live2D 扫描）
-└─ README.md
+├─ adapter/   # AstrBot 插件（协议、会话、媒体、Live2D 扫描、realtime motion）
+├─ frontend/  # Electron + Vue 客户端（桌宠窗口、设置、历史、Action Lab）
+├─ docs/      # 当前状态、审阅、设计草案与计划文档
+├─ analysis/  # 本地分析实验区（默认不纳入正式文档）
+└─ deploy_adapter.ps1
 ```
+
+## 快速开始
+
+### 1) 前端开发
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+常用命令：
+
+- `npm run typecheck`
+- `npm run build:web`
+
+### 2) 后端测试
+
+```powershell
+python -m pytest adapter/tests -q
+```
+
+### 3) 部署 Adapter 到本地 AstrBot 插件目录
+
+```powershell
+.\deploy_adapter.ps1
+```
+
+可选参数：
+
+- `-PluginsRoot "<AstrBot>\data\plugins"`
+- `-DryRun`
+
+## 协议摘要
+
+- 输入：`input.text`、`input.raw_audio_data`、`input.mic_audio_end` 等
+- 输出：`output.text`、`output.audio`、`output.image`、`output.transcription`
+- 控制：`control.turn_started`、`control.turn_finished`、`control.playback_finished`、`control.error`
+- 系统：`system.server_info`、`system.model_sync`、心跳与历史
+- 动作：`engine.motion_plan`
 
 ## 文档入口
 
+- [文档索引](./docs/README.md)
 - [V2 当前实现状态与下一步](./docs/V2当前实现状态与下一步.md)
-- [V2 消息适配审阅与进度](./docs/V2消息适配审阅与进度.md)
-- [V2 适配器开发计划](./docs/V2适配器开发计划.md)
-- [V2 Live2D 扫描设计草案](./docs/V2%20Live2D扫描设计草案.md)
-- [V2 动作引擎设计草案](./docs/V2动作引擎设计草案.md)
-- [V2 前端开发计划](./docs/V2前端开发计划.md)
+- [前后端严格审阅报告](./docs/前后端严格审阅报告.md)
+- [Adapter 说明](./adapter/README.md)
+- [Frontend 说明](./frontend/README.md)
