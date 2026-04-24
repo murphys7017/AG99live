@@ -14,7 +14,7 @@ from astrbot.api.platform import register_platform_adapter
 from astrbot.core.platform.astr_message_event import MessageSesion
 from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
 
-from .adapter.audio_runtime import create_vad_engine
+from .services.audio_runtime import create_vad_engine
 from .runtime.chat_buffer import ChatBuffer
 from .runtime.client_profile import (
     DEFAULT_CLIENT_NICKNAME,
@@ -26,15 +26,15 @@ from .services.frontend_compat_service import FrontendCompatHandler
 from .services.history_service import ConversationHistoryBridge
 from .services.media_service import MediaService
 from .services.message_factory import MessageFactory
-from .adapter.model_info import build_static_routes, list_background_files
+from .transport.static_routes import build_static_routes, list_background_files
 from .runtime.plugin_runtime import get_plugin_config, get_plugin_context
-from .adapter.runtime_state import RuntimeState
-from .adapter.realtime_motion_plan import RealtimeMotionPlanGenerator
+from .runtime.state import RuntimeState
+from .motion.realtime_motion_plan import RealtimeMotionPlanGenerator
 from .runtime.session_state import SessionState
-from .adapter.transport_ws import WebSocketTransport
-from .adapter.turn_coordinator import TurnCoordinator
+from .transport.websocket_server import WebSocketTransport
+from .runtime.turn_coordinator import TurnCoordinator
 from .platform_event import OLVPetPlatformEvent
-from .static_resources import StaticResourceServer
+from .transport.static_resources import StaticResourceServer
 
 PLUGIN_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = PLUGIN_DIR / "assets"

@@ -10,13 +10,13 @@ from typing import Any, Callable
 from astrbot.api import logger
 from astrbot.api.provider import Provider, STTProvider
 
-from ..runtime.client_profile import (
+from .client_profile import (
     DEFAULT_CLIENT_NICKNAME,
     DEFAULT_CLIENT_UID,
     normalize_client_nickname,
     normalize_client_uid,
 )
-from .base_action_llm_filter import (
+from ..motion.action_llm_filter import (
     ACTION_FILTER_SYSTEM_PROMPT,
     ActionFilterDecisionError,
     apply_action_filter_selection,
@@ -30,7 +30,7 @@ from ..live2d.cache.runtime_cache import (
     load_live2d_runtime_cache,
     save_live2d_runtime_cache,
 )
-from .live2d_scan import scan_live2d_models
+from ..live2d.scanner.scan import scan_live2d_models
 from ..protocol.builder import build_system_model_sync
 
 

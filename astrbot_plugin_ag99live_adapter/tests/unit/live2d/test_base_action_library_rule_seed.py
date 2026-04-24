@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from copy import deepcopy
 
-from adapter.adapter import live2d_scan
+from astrbot_plugin_ag99live_adapter.live2d.scanner import scan as live2d_scan
 
 from .test_support import build_seed_inputs
 
@@ -101,3 +101,4 @@ def test_empty_base_action_library_stays_structurally_valid() -> None:
     family_names = {item["name"] for item in library["families"]}
     for channel in library["channels"]:
         assert channel["family"] in family_names
+

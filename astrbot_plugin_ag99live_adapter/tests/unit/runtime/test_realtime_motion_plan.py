@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 
-from adapter.adapter.realtime_motion_plan import (
+from astrbot_plugin_ag99live_adapter.motion.realtime_motion_plan import (
     RealtimeMotionPlanGenerator,
     build_plan_from_axes,
     normalize_selector_output,
@@ -11,7 +11,7 @@ from adapter.adapter.realtime_motion_plan import (
     resolve_selected_model_calibration_profile,
     validate_parameter_plan_payload,
 )
-from adapter.tests.unit.live2d.test_support import build_seed_model_info, build_seed_model_info_with_options
+from astrbot_plugin_ag99live_adapter.tests.unit.live2d.test_support import build_seed_model_info, build_seed_model_info_with_options
 
 
 def test_resolve_selected_parameter_action_library_prefers_selected_model() -> None:
@@ -655,3 +655,5 @@ def _build_calibration_sensitive_parameter_action_library() -> dict:
             },
         ],
     }
+
+

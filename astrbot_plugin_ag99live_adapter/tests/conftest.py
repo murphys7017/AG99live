@@ -8,9 +8,8 @@ import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ADAPTER_SOURCE_ROOT = REPO_ROOT / "adapter"
-if str(ADAPTER_SOURCE_ROOT) not in sys.path:
-    sys.path.insert(0, str(ADAPTER_SOURCE_ROOT))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 
 class _NoopLogger:

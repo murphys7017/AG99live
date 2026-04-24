@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from copy import deepcopy
 
-from adapter.adapter import live2d_scan
+from astrbot_plugin_ag99live_adapter.live2d.scanner import scan as live2d_scan
 
 from .test_support import build_seed_inputs, build_seed_model_info, build_seed_model_info_with_options
 
@@ -249,3 +249,4 @@ def test_adaptive_parameter_profile_returns_legal_empty_structure_with_low_data(
     assert channels["mouth_open"]["recommended_execution_range"]["safe_to_apply"] is False
     assert profile["runtime_summary"]["axis_execution_ranges"]["head_yaw"]["confidence"] == "none"
     assert profile["runtime_summary"]["axis_execution_ranges"]["mouth_open"]["confidence"] == "none"
+

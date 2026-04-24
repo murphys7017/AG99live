@@ -1,9 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from copy import deepcopy
 from typing import Any
 
-from adapter.adapter import live2d_scan
+from astrbot_plugin_ag99live_adapter.live2d.scanner import scan as live2d_scan
 
 
 def _make_component(
@@ -373,3 +373,4 @@ def build_seed_model_info_with_options(
             }
         ],
     }
+

@@ -1,6 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from adapter.motion.output_sanitizer import (
+from astrbot_plugin_ag99live_adapter.motion.output_sanitizer import (
     contains_hidden_output_markup,
     sanitize_assistant_output_text,
 )
@@ -23,3 +23,4 @@ def test_sanitize_assistant_output_text_removes_inline_anim_and_system_reminder(
 def test_contains_hidden_output_markup_detects_anim_tag() -> None:
     assert contains_hidden_output_markup('hello <@anim {"mode":"inline"}>') is True
     assert contains_hidden_output_markup("just a normal reply") is False
+

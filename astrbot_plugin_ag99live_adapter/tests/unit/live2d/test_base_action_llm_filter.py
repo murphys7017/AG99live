@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from copy import deepcopy
 
-from adapter.adapter.base_action_llm_filter import (
+from astrbot_plugin_ag99live_adapter.motion.action_llm_filter import (
     apply_action_filter_selection,
     build_action_filter_signature,
     parse_action_filter_decision,
@@ -76,3 +76,4 @@ def test_parse_action_filter_ignores_unknown_atom_ids() -> None:
         max_atoms_per_channel=2,
     )
     assert selected["head_yaw"] == []
+

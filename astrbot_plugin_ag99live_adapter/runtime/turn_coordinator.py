@@ -38,7 +38,7 @@ from ..protocol import (
     parse_inbound_message,
 )
 from ..services.speech_service import SpeechIngressService
-from .realtime_motion_plan import validate_parameter_plan_payload
+from ..motion.realtime_motion_plan import validate_parameter_plan_payload
 
 INLINE_ANIM_TAG_PATTERN = re.compile(r"<@anim\s*\{[\s\S]*?\}>\s*", re.IGNORECASE)
 INLINE_ANIM_START_PATTERN = re.compile(r"<@anim\b", re.IGNORECASE)

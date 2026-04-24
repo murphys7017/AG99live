@@ -12,7 +12,7 @@ try:
 except Exception:  # pragma: no cover - fallback for local dry runs outside AstrBot.
     logger = logging.getLogger(__name__)
 
-from .live2d_motion_scan import build_motion_resource_pool, decompose_motion
+from .motion_scan import build_motion_resource_pool, decompose_motion
 
 SCAN_SCHEMA_VERSION = "live2d_scan.v1"
 

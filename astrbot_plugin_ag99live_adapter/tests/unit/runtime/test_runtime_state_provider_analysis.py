@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import importlib
@@ -7,7 +7,7 @@ import sys
 from copy import deepcopy
 from pathlib import Path
 
-from adapter.tests.unit.live2d.test_support import build_seed_model_info
+from astrbot_plugin_ag99live_adapter.tests.unit.live2d.test_support import build_seed_model_info
 
 
 def _import_runtime_state_with_fake_astrbot(
@@ -15,8 +15,8 @@ def _import_runtime_state_with_fake_astrbot(
     install_fake_astrbot,
 ):
     provider_cls, _ = install_fake_astrbot()
-    sys.modules.pop("adapter.adapter.runtime_state", None)
-    runtime_state = importlib.import_module("adapter.adapter.runtime_state")
+    sys.modules.pop("astrbot_plugin_ag99live_adapter.runtime.state", None)
+    runtime_state = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.state")
     return runtime_state, provider_cls
 
 
@@ -550,3 +550,5 @@ def _extract_json_from_prompt(prompt: str) -> dict:
     if start == -1 or end == -1 or end <= start:
         return {}
     return json.loads(text[start : end + 1])
+
+

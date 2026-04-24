@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$PluginsRoot = "C:\Users\Administrator\Downloads\AstrBot\data\plugins",
     [switch]$DryRun
 )
@@ -69,7 +69,7 @@ function Invoke-LoggedAction {
 }
 
 $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$SourcePluginRoot = Join-Path $RepoRoot "adapter"
+$SourcePluginRoot = Join-Path $RepoRoot "astrbot_plugin_ag99live_adapter"
 $MetadataPath = Join-Path $SourcePluginRoot "metadata.yaml"
 
 if (-not (Test-Path -LiteralPath $SourcePluginRoot -PathType Container)) {
@@ -96,7 +96,7 @@ if (-not $ResolvedTargetPluginRoot.StartsWith($ResolvedPluginsRoot, [System.Stri
 }
 
 $PreserveDirectories = @("debug_exports")
-$SkipDirectoryNames = @("__pycache__", ".git", ".venv")
+$SkipDirectoryNames = @("__pycache__", ".git", ".venv", ".pytest_cache")
 $SkipFilePatterns = @("*.pyc")
 $ManagedRelativeFiles = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 $ManagedRelativeDirectories = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -136,8 +136,11 @@ $sourceFiles = Get-ChildItem -LiteralPath $SourcePluginRoot -Recurse -File | Whe
     if (Test-ShouldSkipRelativePath -RelativePath $relativePath -PreserveDirectories $PreserveDirectories) {
         return $false
     }
-    if ($SkipDirectoryNames -contains $_.Directory.Name) {
-        return $false
+    $segments = $relativePath -split "[\\/]+"
+    foreach ($segment in $segments) {
+        if ($SkipDirectoryNames -contains $segment) {
+            return $false
+        }
     }
     foreach ($pattern in $SkipFilePatterns) {
         if ($_.Name -like $pattern) {
@@ -167,6 +170,12 @@ if (Test-Path -LiteralPath $ResolvedTargetPluginRoot -PathType Container) {
         $relativePath = Get-RelativePathCompat -BasePath $ResolvedTargetPluginRoot -TargetPath $_.FullName
         if (Test-ShouldSkipRelativePath -RelativePath $relativePath -PreserveDirectories $PreserveDirectories) {
             return $false
+        }
+        $segments = $relativePath -split "[\\/]+"
+        foreach ($segment in $segments) {
+            if ($SkipDirectoryNames -contains $segment) {
+                return $false
+            }
         }
         foreach ($pattern in $SkipFilePatterns) {
             if ($_.Name -like $pattern) {
@@ -220,3 +229,4 @@ if ($DryRun) {
 } else {
     Write-Host "Mode          : Apply"
 }
+

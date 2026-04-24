@@ -14,7 +14,7 @@ coverage/
 __pycache__/
 *.pyc
 *.tsbuildinfo
-adapter/debug_exports/
+astrbot_plugin_ag99live_adapter/debug_exports/
 *.ipynb
 analysis/
 analysis/*.ipynb
