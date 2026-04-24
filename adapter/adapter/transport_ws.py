@@ -7,7 +7,7 @@ from typing import Any, Awaitable, Callable
 from astrbot.api import logger
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
-from .payload_builder import (
+from ..protocol.builder import (
     build_control_error,
     build_control_start_mic,
     build_system_group_update,

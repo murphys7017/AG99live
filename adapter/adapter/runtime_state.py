@@ -31,7 +31,7 @@ from ..live2d.cache.runtime_cache import (
     save_live2d_runtime_cache,
 )
 from .live2d_scan import scan_live2d_models
-from .payload_builder import build_system_model_sync
+from ..protocol.builder import build_system_model_sync
 
 
 class RuntimeState:

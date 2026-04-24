@@ -12,7 +12,7 @@ from astrbot.core.platform.message_session import MessageSession
 from astrbot.core.platform.message_type import MessageType
 from astrbot.core.utils.active_event_registry import active_event_registry
 
-from .payload_builder import (
+from ..protocol.builder import (
     build_control_error,
     build_control_interrupt,
     build_control_synth_finished,
@@ -22,7 +22,7 @@ from .payload_builder import (
     build_output_image,
     build_output_text,
 )
-from .protocol import (
+from ..protocol import (
     SOURCE_ENGINE,
     TYPE_CONTROL_INTERRUPT,
     TYPE_CONTROL_PLAYBACK_FINISHED,

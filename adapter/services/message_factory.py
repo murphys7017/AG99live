@@ -9,7 +9,7 @@ from astrbot.api.platform import AstrBotMessage, MessageMember, MessageType
 from astrbot.api import logger
 
 from ..runtime.client_profile import DEFAULT_CLIENT_NICKNAME, normalize_client_nickname
-from ..adapter.protocol import normalize_inbound_message
+from ..protocol.parser import normalize_inbound_message
 
 
 class MessageFactory:

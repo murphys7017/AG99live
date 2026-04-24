@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .protocol import (
+from .constants import (
     SOURCE_ADAPTER,
     TYPE_CONTROL_ERROR,
     TYPE_CONTROL_INTERRUPT,
@@ -25,8 +25,8 @@ from .protocol import (
     TYPE_SYSTEM_HISTORY_LIST,
     TYPE_SYSTEM_MODEL_SYNC,
     TYPE_SYSTEM_SERVER_INFO,
-    build_message_envelope,
 )
+from .parser import build_message_envelope
 
 
 def build_system_model_sync(

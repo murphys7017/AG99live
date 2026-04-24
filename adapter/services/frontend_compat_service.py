@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Awaitable, Callable
 from uuid import uuid4
 
-from ..adapter.payload_builder import (
+from ..protocol.builder import (
     build_system_background_list,
     build_system_heartbeat_ack,
     build_system_history_created,
@@ -11,7 +11,7 @@ from ..adapter.payload_builder import (
     build_system_history_deleted,
     build_system_history_list,
 )
-from ..adapter.protocol import (
+from ..protocol import (
     TYPE_SYSTEM_BACKGROUND_LIST_REQUEST,
     TYPE_SYSTEM_HEARTBEAT,
     TYPE_SYSTEM_HISTORY_CREATE,
