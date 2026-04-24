@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from adapter import live2d_scan
+from adapter.adapter import live2d_scan
 
 from .test_support import build_seed_inputs, build_seed_model_info, build_seed_model_info_with_options
 

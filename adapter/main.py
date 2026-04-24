@@ -5,7 +5,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star
 
-from .adapter.output_sanitizer import (
+from .motion.output_sanitizer import (
     contains_hidden_output_markup,
     sanitize_assistant_output_text,
 )
@@ -14,7 +14,7 @@ from .adapter.output_sanitizer import (
 class MyPlugin(Star):
     def __init__(self, context: Context, config: dict | None = None):
         super().__init__(context)
-        from .adapter.plugin_runtime import set_plugin_config, set_plugin_context
+        from .runtime.plugin_runtime import set_plugin_config, set_plugin_context
 
         self.context = context
         self.config = config if config is not None else {}

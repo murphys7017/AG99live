@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from adapter.output_sanitizer import (
+from adapter.motion.output_sanitizer import (
     contains_hidden_output_markup,
     sanitize_assistant_output_text,
 )

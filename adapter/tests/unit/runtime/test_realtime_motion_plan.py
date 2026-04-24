@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from adapter.realtime_motion_plan import (
+from adapter.adapter.realtime_motion_plan import (
     RealtimeMotionPlanGenerator,
     build_plan_from_axes,
     normalize_selector_output,
@@ -11,7 +11,7 @@ from adapter.realtime_motion_plan import (
     resolve_selected_model_calibration_profile,
     validate_parameter_plan_payload,
 )
-from tests.unit.live2d.test_support import build_seed_model_info, build_seed_model_info_with_options
+from adapter.tests.unit.live2d.test_support import build_seed_model_info, build_seed_model_info_with_options
 
 
 def test_resolve_selected_parameter_action_library_prefers_selected_model() -> None:

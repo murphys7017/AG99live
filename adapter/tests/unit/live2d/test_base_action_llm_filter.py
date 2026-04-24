@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from adapter.base_action_llm_filter import (
+from adapter.adapter.base_action_llm_filter import (
     apply_action_filter_selection,
     build_action_filter_signature,
     parse_action_filter_decision,

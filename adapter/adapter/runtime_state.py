@@ -10,7 +10,7 @@ from typing import Any, Callable
 from astrbot.api import logger
 from astrbot.api.provider import Provider, STTProvider
 
-from .client_profile import (
+from ..runtime.client_profile import (
     DEFAULT_CLIENT_NICKNAME,
     DEFAULT_CLIENT_UID,
     normalize_client_nickname,
@@ -25,7 +25,7 @@ from .base_action_llm_filter import (
     count_selected_channels,
     parse_action_filter_decision,
 )
-from .live2d_runtime_cache import (
+from ..live2d.cache.runtime_cache import (
     build_live2d_directory_md5,
     load_live2d_runtime_cache,
     save_live2d_runtime_cache,

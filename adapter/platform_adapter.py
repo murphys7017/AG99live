@@ -15,22 +15,22 @@ from astrbot.core.platform.astr_message_event import MessageSesion
 from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
 
 from .adapter.audio_runtime import create_vad_engine
-from .adapter.chat_buffer import ChatBuffer
-from .adapter.client_profile import (
+from .runtime.chat_buffer import ChatBuffer
+from .runtime.client_profile import (
     DEFAULT_CLIENT_NICKNAME,
     DEFAULT_CLIENT_UID,
     normalize_client_nickname,
     normalize_client_uid,
 )
-from .adapter.frontend_compat import FrontendCompatHandler
-from .adapter.history_bridge import ConversationHistoryBridge
-from .adapter.media_service import MediaService
-from .adapter.message_factory import MessageFactory
+from .services.frontend_compat_service import FrontendCompatHandler
+from .services.history_service import ConversationHistoryBridge
+from .services.media_service import MediaService
+from .services.message_factory import MessageFactory
 from .adapter.model_info import build_static_routes, list_background_files
-from .adapter.plugin_runtime import get_plugin_config, get_plugin_context
+from .runtime.plugin_runtime import get_plugin_config, get_plugin_context
 from .adapter.runtime_state import RuntimeState
 from .adapter.realtime_motion_plan import RealtimeMotionPlanGenerator
-from .adapter.session_state import SessionState
+from .runtime.session_state import SessionState
 from .adapter.transport_ws import WebSocketTransport
 from .adapter.turn_coordinator import TurnCoordinator
 from .platform_event import OLVPetPlatformEvent

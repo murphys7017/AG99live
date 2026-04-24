@@ -11,7 +11,7 @@ import numpy as np
 
 from astrbot.api import logger
 
-from .payload_builder import build_control_error, build_control_interrupt, build_output_transcription
+from ..adapter.payload_builder import build_control_error, build_control_interrupt, build_output_transcription
 
 
 @dataclass

@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from adapter import live2d_scan
+from adapter.adapter import live2d_scan
 
 
 def _make_component(
