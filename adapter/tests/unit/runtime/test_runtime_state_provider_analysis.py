@@ -378,6 +378,171 @@ def test_runtime_state_refresh_reads_inline_motion_contract_flag(
     assert state.enable_inline_motion_contract is True
 
 
+def test_runtime_state_persists_scan_and_action_filter_cache_across_instances(
+    monkeypatch,
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    runtime_state, provider_cls = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+
+    class ProviderMeta:
+        id = "runtime-llm-persisted"
+
+    class PersistentCacheProvider(provider_cls):
+        call_count = 0
+
+        def meta(self):
+            return ProviderMeta()
+
+        async def text_chat(self, *, prompt: str, system_prompt: str):
+            del system_prompt
+            PersistentCacheProvider.call_count += 1
+            payload = _extract_json_from_prompt(prompt)
+            selected_atom_ids_by_channel: dict[str, list[str]] = {}
+            for channel in payload.get("channels", []):
+                if not isinstance(channel, dict):
+                    continue
+                channel_name = str(channel.get("name") or "").strip()
+                candidates = channel.get("candidates") or []
+                first_id = ""
+                if isinstance(candidates, list) and candidates:
+                    first_id = str(candidates[0].get("id") or "").strip()
+                selected_atom_ids_by_channel[channel_name] = [first_id] if first_id else []
+
+            class Response:
+                completion_text = json.dumps(
+                    {"selected_atom_ids_by_channel": selected_atom_ids_by_channel},
+                    ensure_ascii=False,
+                )
+
+            return Response()
+
+    provider = PersistentCacheProvider()
+
+    class PluginContext:
+        def get_provider_by_id(self, provider_id: str):
+            if provider_id == "runtime-llm-persisted":
+                return provider
+            return None
+
+        def get_using_stt_provider(self, umo: str):
+            del umo
+            return None
+
+        def get_using_provider(self, umo: str):
+            del umo
+            return provider
+
+    seed_model_info = build_seed_model_info()
+    scan_call_count = 0
+
+    def fake_scan_live2d_models(**kwargs):
+        nonlocal scan_call_count
+        del kwargs
+        scan_call_count += 1
+        return deepcopy(seed_model_info)
+
+    monkeypatch.setattr(runtime_state, "scan_live2d_models", fake_scan_live2d_models)
+    monkeypatch.setattr(runtime_state, "build_live2d_directory_md5", lambda _path: "sig-persist")
+
+    state1 = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=PluginContext(),
+        plugin_config={
+            "motion_analysis_provider_id": "runtime-llm-persisted",
+            "action_llm_filter_min_selected_channels": 1,
+        },
+        plugin_config_loader=None,
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=tmp_path / "live2ds",
+        runtime_cache_dir=tmp_path / "cache",
+    )
+    asyncio.run(state1.refresh_async())
+
+    first_provider_call_count = PersistentCacheProvider.call_count
+    assert scan_call_count == 1
+    assert first_provider_call_count >= 1
+    assert (tmp_path / "cache" / "live2d_runtime_cache.json").exists()
+
+    state2 = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=PluginContext(),
+        plugin_config={
+            "motion_analysis_provider_id": "runtime-llm-persisted",
+            "action_llm_filter_min_selected_channels": 1,
+        },
+        plugin_config_loader=None,
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=tmp_path / "live2ds",
+        runtime_cache_dir=tmp_path / "cache",
+    )
+    asyncio.run(state2.refresh_async())
+
+    assert scan_call_count == 1
+    assert PersistentCacheProvider.call_count == first_provider_call_count
+    library = state2.model_info["models"][0]["base_action_library"]
+    assert library["analysis"]["cache_hit"] is True
+    assert library["analysis"]["mode"] in {"llm_strict_cached", "llm_strict_chunked_cached"}
+
+
+def test_runtime_state_rescans_when_live2d_directory_md5_changes(
+    monkeypatch,
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    runtime_state, _provider_cls = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+
+    seed_model_info = build_seed_model_info()
+    scan_call_count = 0
+
+    def fake_scan_live2d_models(**kwargs):
+        nonlocal scan_call_count
+        del kwargs
+        scan_call_count += 1
+        return deepcopy(seed_model_info)
+
+    md5_values = iter(["sig-a", "sig-b"])
+
+    monkeypatch.setattr(runtime_state, "scan_live2d_models", fake_scan_live2d_models)
+    monkeypatch.setattr(runtime_state, "build_live2d_directory_md5", lambda _path: next(md5_values))
+
+    state1 = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=None,
+        plugin_config={},
+        plugin_config_loader=None,
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=tmp_path / "live2ds",
+        runtime_cache_dir=tmp_path / "cache",
+    )
+    state1.refresh()
+
+    state2 = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=None,
+        plugin_config={},
+        plugin_config_loader=None,
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=tmp_path / "live2ds",
+        runtime_cache_dir=tmp_path / "cache",
+    )
+    state2.refresh()
+
+    assert scan_call_count == 2
+
+
 def _extract_json_from_prompt(prompt: str) -> dict:
     text = str(prompt or "").strip()
     start = text.find("{")

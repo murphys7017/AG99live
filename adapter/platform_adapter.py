@@ -107,6 +107,7 @@ class OLVPetPlatformAdapter(Platform):
             http_port=self.http_port,
             client_uid=self.client_uid,
             live2ds_dir=LIVE2DS_DIR,
+            runtime_cache_dir=RUNTIME_CACHE_DIR,
         )
         self.realtime_motion_plan_generator = RealtimeMotionPlanGenerator(
             runtime_state=self.runtime_state,

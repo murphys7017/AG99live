@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Callable
 
 from astrbot.api import logger
@@ -24,6 +25,11 @@ from .base_action_llm_filter import (
     count_selected_channels,
     parse_action_filter_decision,
 )
+from .live2d_runtime_cache import (
+    build_live2d_directory_md5,
+    load_live2d_runtime_cache,
+    save_live2d_runtime_cache,
+)
 from .live2d_scan import scan_live2d_models
 from .payload_builder import build_system_model_sync
 
@@ -40,11 +46,13 @@ class RuntimeState:
         http_port: int,
         client_uid: str,
         live2ds_dir: Any,
+        runtime_cache_dir: Path | None = None,
     ) -> None:
         self.platform_config = platform_config
         self.host = host
         self.http_port = http_port
         self.live2ds_dir = live2ds_dir
+        self.runtime_cache_dir = Path(runtime_cache_dir) if runtime_cache_dir is not None else None
         self.client_uid = normalize_client_uid(client_uid, DEFAULT_CLIENT_UID)
         self.client_nickname = DEFAULT_CLIENT_NICKNAME
 
@@ -75,7 +83,15 @@ class RuntimeState:
         self.default_persona: dict[str, Any] | None = None
         self.selected_stt_provider: STTProvider | None = None
         self.selected_motion_analysis_provider: Provider | None = None
-        self._base_action_filter_cache: dict[str, dict[str, Any]] = {}
+        self._live2d_runtime_cache_path = (
+            self.runtime_cache_dir / "live2d_runtime_cache.json"
+            if self.runtime_cache_dir is not None
+            else None
+        )
+        self._runtime_cache_payload = self._load_runtime_cache_payload()
+        self._base_action_filter_cache = self._load_action_filter_cache_from_payload(
+            self._runtime_cache_payload
+        )
         self.last_sent_model_signature: str | None = None
 
     async def load_default_persona(self) -> None:
@@ -230,13 +246,35 @@ class RuntimeState:
             int(_plugin_config_get(self.plugin_config, "image_cooldown_seconds", 0)),
             0,
         )
-        self.model_info = scan_live2d_models(
-            live2ds_dir=self.live2ds_dir,
-            base_url=f"http://{self.host}:{self.http_port}",
-            selected_model_name=str(
-                _plugin_config_get(self.plugin_config, "live2d_model_name", "")
-            ).strip(),
+        selected_model_name = str(
+            _plugin_config_get(self.plugin_config, "live2d_model_name", "")
+        ).strip()
+        base_url = f"http://{self.host}:{self.http_port}"
+        live2d_dir_md5 = build_live2d_directory_md5(Path(self.live2ds_dir))
+        cached_model_info = self._load_model_info_from_scan_cache(
+            live2d_dir_md5=live2d_dir_md5,
+            base_url=base_url,
+            selected_model_name=selected_model_name,
         )
+        if cached_model_info is not None:
+            self.model_info = cached_model_info
+            logger.info(
+                "Loaded Live2D scan result from persistent cache "
+                "(selected_model=%s, dir_md5=%s)",
+                self.model_info.get("selected_model", ""),
+                live2d_dir_md5[:12],
+            )
+        else:
+            self.model_info = scan_live2d_models(
+                live2ds_dir=self.live2ds_dir,
+                base_url=base_url,
+                selected_model_name=selected_model_name,
+            )
+            self._store_model_info_in_scan_cache(
+                live2d_dir_md5=live2d_dir_md5,
+                base_url=base_url,
+                model_info=self.model_info,
+            )
 
         logger.info(
             "Refreshed adapter runtime settings "
@@ -532,6 +570,7 @@ class RuntimeState:
                     "selected_channel_count": selected_channel_count,
                     "chunk_count": len(chunked_libraries),
                 }
+                self._persist_runtime_cache_payload()
             except asyncio.TimeoutError:
                 self._set_base_action_analysis(
                     model,
@@ -787,6 +826,112 @@ class RuntimeState:
             "error": error,
             "fallback_reason": fallback_reason,
         }
+
+    def _load_runtime_cache_payload(self) -> dict[str, Any]:
+        if self._live2d_runtime_cache_path is None:
+            return {"scan_cache": {}, "action_filter_cache": {}}
+        return load_live2d_runtime_cache(self._live2d_runtime_cache_path)
+
+    @staticmethod
+    def _load_action_filter_cache_from_payload(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        raw_cache = payload.get("action_filter_cache")
+        if not isinstance(raw_cache, dict):
+            return {}
+
+        normalized_cache: dict[str, dict[str, Any]] = {}
+        for cache_key, cache_value in raw_cache.items():
+            if not isinstance(cache_key, str) or not isinstance(cache_value, dict):
+                continue
+            selected_atom_ids_by_channel_raw = cache_value.get("selected_atom_ids_by_channel")
+            if not isinstance(selected_atom_ids_by_channel_raw, dict):
+                continue
+
+            selected_atom_ids_by_channel: dict[str, list[str]] = {}
+            for channel_name, atom_ids in selected_atom_ids_by_channel_raw.items():
+                if not isinstance(channel_name, str) or not isinstance(atom_ids, list):
+                    continue
+                selected_atom_ids_by_channel[channel_name] = [
+                    str(atom_id).strip()
+                    for atom_id in atom_ids
+                    if str(atom_id).strip()
+                ]
+
+            normalized_cache[cache_key] = {
+                "selected_atom_ids_by_channel": selected_atom_ids_by_channel,
+                "selected_channel_count": max(int(cache_value.get("selected_channel_count") or 0), 0),
+                "chunk_count": max(int(cache_value.get("chunk_count") or 1), 1),
+            }
+
+        return normalized_cache
+
+    def _load_model_info_from_scan_cache(
+        self,
+        *,
+        live2d_dir_md5: str,
+        base_url: str,
+        selected_model_name: str,
+    ) -> dict[str, Any] | None:
+        scan_cache = self._runtime_cache_payload.get("scan_cache")
+        if not isinstance(scan_cache, dict):
+            return None
+
+        cached_md5 = str(scan_cache.get("live2d_dir_md5") or "").strip()
+        cached_base_url = str(scan_cache.get("base_url") or "").strip()
+        if not cached_md5 or cached_md5 != live2d_dir_md5:
+            self._clear_persistent_caches(reset_scan_cache=True)
+            return None
+        if cached_base_url != base_url:
+            return None
+
+        model_info = scan_cache.get("model_info")
+        if not isinstance(model_info, dict):
+            return None
+
+        result = deepcopy(model_info)
+        models = [
+            model
+            for model in result.get("models", [])
+            if isinstance(model, dict) and str(model.get("name") or "").strip()
+        ]
+        if not models:
+            return result
+
+        available_models = [
+            str(model.get("name") or "").strip()
+            for model in models
+            if str(model.get("name") or "").strip()
+        ]
+        selected_model = selected_model_name if selected_model_name in available_models else available_models[0]
+        result["selected_model"] = selected_model
+        result["available_models"] = available_models
+        return result
+
+    def _store_model_info_in_scan_cache(
+        self,
+        *,
+        live2d_dir_md5: str,
+        base_url: str,
+        model_info: dict[str, Any],
+    ) -> None:
+        self._runtime_cache_payload["scan_cache"] = {
+            "live2d_dir_md5": live2d_dir_md5,
+            "base_url": base_url,
+            "model_info": deepcopy(model_info),
+        }
+        self._persist_runtime_cache_payload()
+
+    def _clear_persistent_caches(self, *, reset_scan_cache: bool) -> None:
+        if reset_scan_cache:
+            self._runtime_cache_payload["scan_cache"] = {}
+        self._runtime_cache_payload["action_filter_cache"] = {}
+        self._base_action_filter_cache = {}
+        self._persist_runtime_cache_payload()
+
+    def _persist_runtime_cache_payload(self) -> None:
+        self._runtime_cache_payload["action_filter_cache"] = deepcopy(self._base_action_filter_cache)
+        if self._live2d_runtime_cache_path is None:
+            return
+        save_live2d_runtime_cache(self._live2d_runtime_cache_path, self._runtime_cache_payload)
 
     @staticmethod
     def _clone_plugin_config(config: Any) -> Any:
