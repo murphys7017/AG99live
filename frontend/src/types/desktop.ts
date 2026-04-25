@@ -1,3 +1,5 @@
+import type { DirectParameterAxisName } from "./protocol";
+
 export type DesktopWindowRole = "pet" | "overlay" | "settings" | "history" | "action_lab";
 export type DesktopAuxWindowRole = "settings" | "history" | "action_lab";
 
@@ -98,10 +100,16 @@ export interface DesktopBaseActionPreview {
   atoms: DesktopBaseActionPreviewAtom[];
 }
 
+export interface DesktopMotionEngineSettings {
+  motionIntensityScale: number;
+  axisIntensityScale: Record<DirectParameterAxisName, number>;
+}
+
 export interface DesktopRuntimeSnapshot {
   adapterAddress: string;
   desktopScreenshotOnSendEnabled: boolean;
   ambientMotionEnabled: boolean;
+  motionEngineSettings: DesktopMotionEngineSettings;
   connectionState: string;
   connectionLabel: string;
   connectionStatusMessage: string;
@@ -130,6 +138,7 @@ export type DesktopRuntimeCommand =
   | { type: "set_address"; address: string }
   | { type: "set_desktop_screenshot_on_send"; enabled: boolean }
   | { type: "set_ambient_motion_enabled"; enabled: boolean }
+  | { type: "set_motion_engine_settings"; settings: DesktopMotionEngineSettings }
   | { type: "connect"; address?: string }
   | { type: "disconnect" }
   | { type: "send_text"; text: string }

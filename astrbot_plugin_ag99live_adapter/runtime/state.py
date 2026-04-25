@@ -32,6 +32,7 @@ from ..live2d.cache.runtime_cache import (
 )
 from ..live2d.scanner.scan import scan_live2d_models
 from ..protocol.builder import build_system_model_sync
+from ..motion.realtime_motion_plan import DEFAULT_MOTION_PROMPT_INSTRUCTION
 
 
 class RuntimeState:
@@ -76,6 +77,7 @@ class RuntimeState:
         self.realtime_motion_fewshot_count = 4
         self.realtime_motion_platform_context_enabled = True
         self.realtime_motion_platform_description = ""
+        self.motion_prompt_instruction = DEFAULT_MOTION_PROMPT_INSTRUCTION
         self.vad_model = "silero_vad"
         self.vad_config: dict[str, Any] = {}
         self.model_info: dict[str, Any] = {}
@@ -222,6 +224,13 @@ class RuntimeState:
             )
             or ""
         ).strip()
+        self.motion_prompt_instruction = _normalize_motion_prompt_instruction(
+            _plugin_config_get(
+                self.plugin_config,
+                "motion_prompt_instruction",
+                DEFAULT_MOTION_PROMPT_INSTRUCTION,
+            )
+        )
         self.vad_model = _plugin_config_get(self.plugin_config, "vad_model", "silero_vad")
         self.vad_config = {
             "orig_sr": 16000,
@@ -972,3 +981,12 @@ def _plugin_config_get(config: Any, key: str, default: Any) -> Any:
         value = config.get(key, default)
         return default if value is None else value
     return default
+
+
+def _normalize_motion_prompt_instruction(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return DEFAULT_MOTION_PROMPT_INSTRUCTION
+    if len(text) > 800:
+        return text[:800].rstrip()
+    return text

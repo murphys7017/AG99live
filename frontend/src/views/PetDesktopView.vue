@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import DesktopPetCanvas from "../components/DesktopPetCanvas.vue";
 import { useAdapterConnection } from "../composables/useAdapterConnection";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
 import { useModelSync } from "../composables/useModelSync";
+import { DIRECT_PARAMETER_AXIS_NAMES } from "../model-engine/constants";
+import {
+  cloneModelEngineSettings,
+  normalizeModelEngineSettings,
+} from "../model-engine/settings";
 import { usePreviewMotionPlayer } from "../composables/usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
 import type { DesktopRuntimeCommand } from "../types/desktop";
@@ -13,8 +18,12 @@ const { state, selectedModel } = useModelSync();
 const adapter = useAdapterConnection();
 const bridge = useDesktopBridge();
 const motionPlayer = usePreviewMotionPlayer();
+const motionEngineSettings = reactive(
+  cloneModelEngineSettings(bridge.state.snapshot.motionEngineSettings),
+);
 const modelEngine = useModelEngine({
   getSelectedModel: () => selectedModel.value,
+  getSettings: () => cloneModelEngineSettings(motionEngineSettings),
   playPlan: (plan, model, options) => motionPlayer.playPlan(plan, model, options),
   stopPlan: (reason) => motionPlayer.stopPlan(reason),
   getCurrentTurnId: () => adapter.state.currentTurnId,
@@ -27,6 +36,17 @@ const modelEngine = useModelEngine({
   getPlayerMessage: () => motionPlayer.state.message,
 });
 const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
+
+function applyMotionEngineSettingsSnapshot(nextValue: unknown): void {
+  const normalized = normalizeModelEngineSettings(nextValue);
+  motionEngineSettings.motionIntensityScale = normalized.motionIntensityScale;
+  for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
+    motionEngineSettings.axisIntensityScale[axisName] =
+      normalized.axisIntensityScale[axisName];
+  }
+}
+
+applyMotionEngineSettingsSnapshot(bridge.state.snapshot.motionEngineSettings);
 
 const connectionState = computed(() => {
   if (adapter.state.status === "connecting") {
@@ -313,6 +333,9 @@ function handleDesktopCommand(command: DesktopRuntimeCommand): void {
       ambientMotionEnabled.value = command.enabled;
       applyAmbientMotionPreference();
       return;
+    case "set_motion_engine_settings":
+      applyMotionEngineSettingsSnapshot(command.settings);
+      return;
     case "connect":
       if (typeof command.address === "string") {
         adapter.setAddress(command.address);
@@ -383,6 +406,14 @@ watch(
 );
 
 watch(
+  () => bridge.state.snapshot.motionEngineSettings,
+  (nextValue) => {
+    applyMotionEngineSettingsSnapshot(nextValue);
+  },
+  { deep: true },
+);
+
+watch(
   () => [
     ambientMotionEnabled.value,
     adapter.state.address,
@@ -407,12 +438,16 @@ watch(
     selectedModel.value?.engine_hints.recommended_mode ?? "",
     baseActionPreview.value,
     stageMessage.value,
+    motionEngineSettings.motionIntensityScale,
+    ...DIRECT_PARAMETER_AXIS_NAMES.map((axisName) =>
+      motionEngineSettings.axisIntensityScale[axisName]),
   ],
   () => {
     bridge.publishSnapshot({
       adapterAddress: adapter.state.address,
       desktopScreenshotOnSendEnabled: adapter.state.desktopScreenshotOnSendEnabled,
       ambientMotionEnabled: ambientMotionEnabled.value,
+      motionEngineSettings: cloneModelEngineSettings(motionEngineSettings),
       connectionState: connectionState.value,
       connectionLabel: connectionLabel.value,
       connectionStatusMessage: adapter.state.statusMessage,

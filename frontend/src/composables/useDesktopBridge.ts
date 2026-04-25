@@ -5,6 +5,11 @@ import type {
   DesktopRuntimeSnapshot,
   DesktopWindowVisibilityState,
 } from "../types/desktop";
+import {
+  buildDefaultModelEngineSettings,
+  cloneModelEngineSettings,
+  normalizeModelEngineSettings,
+} from "../model-engine/settings";
 
 const CHANNEL_NAME = "ag99live.desktop.runtime";
 const SNAPSHOT_STORAGE_KEY = "ag99live.desktop.snapshot";
@@ -17,6 +22,7 @@ const defaultSnapshot: DesktopRuntimeSnapshot = {
   adapterAddress: "127.0.0.1:12396",
   desktopScreenshotOnSendEnabled: true,
   ambientMotionEnabled: true,
+  motionEngineSettings: buildDefaultModelEngineSettings(),
   connectionState: "disconnected",
   connectionLabel: "未连接",
   connectionStatusMessage: "等待桌宠窗口启动。",
@@ -137,6 +143,9 @@ function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnap
   return {
     ...defaultSnapshot,
     ...snapshot,
+    motionEngineSettings: cloneModelEngineSettings(
+      normalizeModelEngineSettings(snapshot.motionEngineSettings),
+    ),
     historyEntries: historyEntries.map((entry) => ({ ...entry })),
     baseActionPreview: cloneBaseActionPreview(snapshot.baseActionPreview),
   };

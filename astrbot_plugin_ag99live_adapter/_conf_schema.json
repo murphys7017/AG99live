@@ -113,6 +113,11 @@
     "type": "string",
     "default": ""
   },
+  "motion_prompt_instruction": {
+    "description": "补充给动作 intent 生成模型的指令，用于控制动作风格和幅度。留空时使用内置默认指令。",
+    "type": "string",
+    "default": "Live2D 表现需要比真人更夸张。非中性情绪下，请让头部、眼睛、嘴部或眉毛至少 2 到 3 个轴明显偏离 50，避免输出几乎无动作的 45 到 55 区间。"
+  },
   "vad_model": {
     "description": "前端原始音频断句使用的 VAD 模型。",
     "type": "string",

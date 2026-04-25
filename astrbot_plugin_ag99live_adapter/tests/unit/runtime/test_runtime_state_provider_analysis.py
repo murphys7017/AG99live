@@ -378,6 +378,37 @@ def test_runtime_state_refresh_reads_inline_motion_contract_flag(
     assert state.enable_inline_motion_contract is True
 
 
+def test_runtime_state_refresh_reads_motion_prompt_instruction(
+    monkeypatch,
+    install_fake_astrbot,
+) -> None:
+    runtime_state, _provider_cls = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+
+    seed_model_info = build_seed_model_info()
+    monkeypatch.setattr(
+        runtime_state,
+        "scan_live2d_models",
+        lambda **kwargs: deepcopy(seed_model_info),
+    )
+
+    state = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=None,
+        plugin_config={"motion_prompt_instruction": ""},
+        plugin_config_loader=lambda: {"motion_prompt_instruction": "Use stronger mouth motion."},
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=Path("."),
+    )
+
+    state.refresh()
+
+    assert state.motion_prompt_instruction == "Use stronger mouth motion."
+
+
 def test_runtime_state_persists_scan_and_action_filter_cache_across_instances(
     monkeypatch,
     install_fake_astrbot,

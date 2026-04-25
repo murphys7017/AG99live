@@ -63,6 +63,10 @@ _DEFAULT_SELECTOR_PLATFORM_DESCRIPTION = (
     "Execution constraint: downstream playback directly writes Live2D parameters frame-by-frame.\n"
     "Preference: when emotion is non-neutral, use clearly readable amplitudes instead of near-center no-op values."
 )
+DEFAULT_MOTION_PROMPT_INSTRUCTION = (
+    "Live2D 表现需要比真人更夸张。非中性情绪下，请让头部、眼睛、嘴部或眉毛至少 2 到 3 个轴明显偏离 50，"
+    "避免输出几乎无动作的 45 到 55 区间。"
+)
 
 
 def _build_example_axes(**overrides: int) -> dict[str, int]:
@@ -204,6 +208,7 @@ class RealtimeMotionPlanGenerator:
         selector_raw = await self._call_astrbot_selector(
             context_text,
             few_shot_examples=resolve_selector_few_shot_examples(runtime_state=self.runtime_state),
+            motion_instruction=resolve_motion_prompt_instruction(runtime_state=self.runtime_state),
         )
         selector = normalize_selector_output(selector_raw)
         intent = build_intent_from_selector(selector)
@@ -221,6 +226,7 @@ class RealtimeMotionPlanGenerator:
         context_text: str,
         *,
         few_shot_examples: list[dict[str, Any]],
+        motion_instruction: str,
     ) -> dict[str, Any]:
         provider = getattr(self.runtime_state, "selected_motion_analysis_provider", None)
         if provider is None:
@@ -235,6 +241,7 @@ class RealtimeMotionPlanGenerator:
                 prompt=build_selector_user_prompt(
                     context_text,
                     few_shot_examples=few_shot_examples,
+                    motion_instruction=motion_instruction,
                 ),
                 system_prompt=_SYSTEM_PROMPT,
             ),
@@ -289,6 +296,13 @@ def resolve_selector_few_shot_examples(*, runtime_state: Any) -> list[dict[str, 
     return DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES[:count]
 
 
+def resolve_motion_prompt_instruction(*, runtime_state: Any) -> str:
+    raw_value = str(getattr(runtime_state, "motion_prompt_instruction", "") or "").strip()
+    if not raw_value:
+        return DEFAULT_MOTION_PROMPT_INSTRUCTION
+    return _truncate_text(raw_value, 800)
+
+
 def build_selector_context(
     *,
     user_text: str,
@@ -320,6 +334,7 @@ def build_selector_user_prompt(
     text: str,
     *,
     few_shot_examples: list[dict[str, Any]] | None = None,
+    motion_instruction: str = "",
 ) -> str:
     lines: list[str] = []
     for axis in AXES:
@@ -342,6 +357,13 @@ def build_selector_user_prompt(
             few_shot_lines.append(f"Example {index} input:\n{input_text}")
             few_shot_lines.append(f"Example {index} output JSON:\n{output_json}")
         few_shot_block = "\n".join(few_shot_lines) + "\n\n"
+    motion_instruction_text = str(motion_instruction or "").strip()
+    motion_instruction_block = ""
+    if motion_instruction_text:
+        motion_instruction_block = (
+            "Additional motion instruction:\n"
+            f"{_truncate_text(motion_instruction_text, 800)}\n\n"
+        )
 
     return (
         "Given text, choose axis values in [0,100] for an avatar.\n"
@@ -365,6 +387,7 @@ def build_selector_user_prompt(
         "- Avoid flat/no-op outputs around 50 unless the emotion is truly neutral.\n"
         "- For non-neutral emotion, make at least 2 head/face axes visibly deviate from center.\n"
         "- Keep values stable and readable; avoid chaotic extremes.\n\n"
+        f"{motion_instruction_block}"
         f"{few_shot_block}"
         f"Text: {text}"
     )

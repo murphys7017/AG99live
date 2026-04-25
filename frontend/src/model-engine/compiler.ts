@@ -8,6 +8,10 @@ import {
   IDLE_DEADZONE_MIN,
 } from "./constants";
 import type { CompileOptions, CompileResult, MotionIntent } from "./contracts";
+import {
+  cloneModelEngineSettings,
+  normalizeModelEngineSettings,
+} from "./settings";
 import { buildSupplementaryParams } from "./supplementary";
 import { resolveMotionTiming } from "./timing";
 
@@ -44,10 +48,46 @@ function isIdleDeadzone(axisValues: AxisValues): boolean {
   });
 }
 
+function clampAxisValue(value: number): number {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function applyExpressiveIntensity(
+  axisValues: AxisValues,
+  options: CompileOptions,
+): {
+  axisValues: AxisValues;
+  intensityApplied: boolean;
+  motionIntensityScale: number;
+  axisIntensityScale: Record<DirectParameterAxisName, number>;
+} {
+  const settings = normalizeModelEngineSettings(options.settings);
+  const nextValues = {} as AxisValues;
+  for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
+    const baseValue = Number(axisValues[axisName] ?? 50);
+    const axisScale = settings.axisIntensityScale[axisName];
+    nextValues[axisName] = clampAxisValue(
+      50 + (baseValue - 50) * settings.motionIntensityScale * axisScale,
+    );
+  }
+
+  const intensityApplied = settings.motionIntensityScale !== 1
+    || DIRECT_PARAMETER_AXIS_NAMES.some(
+      (axisName) => settings.axisIntensityScale[axisName] !== 1,
+    );
+  return {
+    axisValues: nextValues,
+    intensityApplied,
+    motionIntensityScale: settings.motionIntensityScale,
+    axisIntensityScale: cloneModelEngineSettings(settings).axisIntensityScale,
+  };
+}
+
 export function compileMotionIntent(
   intent: MotionIntent,
   options: CompileOptions,
 ): CompileResult {
+  const normalizedSettings = normalizeModelEngineSettings(options.settings);
   const validationFailure = validateIntentForCompile(intent);
   if (validationFailure) {
     return {
@@ -60,11 +100,23 @@ export function compileMotionIntent(
         timingSource: "default",
         resolvedMode: "idle",
         source: options.source,
+        intensityApplied: false,
+        motionIntensityScale: normalizedSettings.motionIntensityScale,
+        axisIntensityScale: { ...normalizedSettings.axisIntensityScale },
       },
     };
   }
 
-  const axisValues = buildAxisValues(intent);
+  const rawAxisValues = buildAxisValues(intent);
+  const expressiveIntensity = intent.mode === "expressive"
+    ? applyExpressiveIntensity(rawAxisValues, options)
+    : {
+      axisValues: rawAxisValues,
+      intensityApplied: false,
+      motionIntensityScale: normalizedSettings.motionIntensityScale,
+      axisIntensityScale: { ...normalizedSettings.axisIntensityScale },
+    };
+  const axisValues = expressiveIntensity.axisValues;
   const idleDeadzone = isIdleDeadzone(axisValues);
   if (intent.mode === "expressive" && idleDeadzone) {
     console.warn(
@@ -134,6 +186,9 @@ export function compileMotionIntent(
       timingSource: timing.timingSource,
       resolvedMode,
       source: options.source,
+      intensityApplied: expressiveIntensity.intensityApplied,
+      motionIntensityScale: expressiveIntensity.motionIntensityScale,
+      axisIntensityScale: expressiveIntensity.axisIntensityScale,
     },
   };
 }

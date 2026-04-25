@@ -6,6 +6,7 @@ import type {
   DirectParameterPlanTiming,
   ModelSummary,
 } from "../types/protocol";
+import type { ModelEngineSettings } from "./settings";
 
 export type ModelEngineStatus =
   | "idle"
@@ -53,6 +54,7 @@ export interface CompileOptions {
   model: ModelSummary;
   targetDurationMs?: number | null;
   source?: string;
+  settings?: ModelEngineSettings;
 }
 
 export interface CompileDiagnostics {
@@ -61,6 +63,9 @@ export interface CompileDiagnostics {
   timingSource: "hint" | "audio_sync" | "default";
   resolvedMode: DirectParameterPlan["mode"];
   source?: string;
+  intensityApplied: boolean;
+  motionIntensityScale: number;
+  axisIntensityScale: Record<DirectParameterAxisName, number>;
 }
 
 export interface CompileResult {
@@ -88,6 +93,7 @@ export interface PlayPlanOptions {
 
 export interface ModelEngineDependencies {
   getSelectedModel: () => ModelSummary | null;
+  getSettings: () => ModelEngineSettings;
   playPlan: (
     plan: unknown,
     model: ModelSummary | null,

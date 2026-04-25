@@ -1,7 +1,19 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import DesktopWindowPanel from "../components/DesktopWindowPanel.vue";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
+import { DIRECT_PARAMETER_AXIS_NAMES } from "../model-engine/constants";
+import {
+  AXIS_INTENSITY_SCALE_STEP,
+  MAX_AXIS_INTENSITY_SCALE,
+  MAX_MOTION_INTENSITY_SCALE,
+  MIN_AXIS_INTENSITY_SCALE,
+  MIN_MOTION_INTENSITY_SCALE,
+  MOTION_AXIS_LABELS,
+  MOTION_INTENSITY_SCALE_STEP,
+  cloneModelEngineSettings,
+  normalizeModelEngineSettings,
+} from "../model-engine/settings";
 
 const bridge = useDesktopBridge();
 const draftAddress = ref(bridge.state.snapshot.adapterAddress);
@@ -9,6 +21,9 @@ const desktopScreenshotOnSendEnabled = ref(
   bridge.state.snapshot.desktopScreenshotOnSendEnabled,
 );
 const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
+const motionEngineSettings = reactive(
+  cloneModelEngineSettings(bridge.state.snapshot.motionEngineSettings),
+);
 
 watch(
   () => bridge.state.snapshot.adapterAddress,
@@ -30,6 +45,18 @@ watch(
     ambientMotionEnabled.value = nextValue;
   },
 );
+watch(
+  () => bridge.state.snapshot.motionEngineSettings,
+  (nextValue) => {
+    const normalized = normalizeModelEngineSettings(nextValue);
+    motionEngineSettings.motionIntensityScale = normalized.motionIntensityScale;
+    for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
+      motionEngineSettings.axisIntensityScale[axisName] =
+        normalized.axisIntensityScale[axisName];
+    }
+  },
+  { deep: true },
+);
 
 const statusLabel = computed(() => {
   if (bridge.state.snapshot.connectionState === "synced") {
@@ -46,6 +73,13 @@ const statusLabel = computed(() => {
   }
   return "尚未连接";
 });
+const axisControls = computed(() =>
+  DIRECT_PARAMETER_AXIS_NAMES.map((axisName) => ({
+    axisName,
+    label: MOTION_AXIS_LABELS[axisName],
+    value: motionEngineSettings.axisIntensityScale[axisName],
+  }))
+);
 
 function applyAddress(): void {
   bridge.sendCommand({ type: "set_address", address: draftAddress.value });
@@ -79,6 +113,43 @@ function applyAmbientMotionEnabled(): void {
     type: "set_ambient_motion_enabled",
     enabled: ambientMotionEnabled.value,
   });
+}
+
+function applyMotionEngineSettings(): void {
+  bridge.sendCommand({
+    type: "set_motion_engine_settings",
+    settings: cloneModelEngineSettings(motionEngineSettings),
+  });
+}
+
+function formatScale(value: number): string {
+  return Number(value).toFixed(2);
+}
+
+function setAxisIntensity(axisName: (typeof DIRECT_PARAMETER_AXIS_NAMES)[number], value: number): void {
+  motionEngineSettings.axisIntensityScale[axisName] = value;
+  applyMotionEngineSettings();
+}
+
+function handleAxisIntensityInput(
+  axisName: (typeof DIRECT_PARAMETER_AXIS_NAMES)[number],
+  event: Event,
+): void {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) {
+    return;
+  }
+  setAxisIntensity(axisName, Number(target.value));
+}
+
+function resetMotionEngineSettings(): void {
+  const normalized = normalizeModelEngineSettings(undefined);
+  motionEngineSettings.motionIntensityScale = normalized.motionIntensityScale;
+  for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
+    motionEngineSettings.axisIntensityScale[axisName] =
+      normalized.axisIntensityScale[axisName];
+  }
+  applyMotionEngineSettings();
 }
 </script>
 
@@ -208,6 +279,80 @@ function applyAmbientMotionEnabled(): void {
 
         <p class="settings-card__hint">
           关闭后仍然保留对话动作、动作预览、口型同步和手动触发的 motion。
+        </p>
+      </article>
+
+      <article class="settings-card settings-card--wide">
+        <div class="settings-card__header">
+          <div>
+            <p class="settings-card__eyebrow">动作强度</p>
+            <h2>ModelEngine 表现倍率</h2>
+          </div>
+          <span class="settings-card__badge">
+            x{{ formatScale(motionEngineSettings.motionIntensityScale) }}
+          </span>
+        </div>
+
+        <div class="settings-slider">
+          <div class="settings-slider__header">
+            <div>
+              <strong>全局动作强度</strong>
+              <p>只对 expressive intent 生效，idle 不做放大。</p>
+            </div>
+            <span class="settings-slider__value">
+              x{{ formatScale(motionEngineSettings.motionIntensityScale) }}
+            </span>
+          </div>
+          <input
+            v-model.number="motionEngineSettings.motionIntensityScale"
+            class="settings-slider__input"
+            type="range"
+            :min="MIN_MOTION_INTENSITY_SCALE"
+            :max="MAX_MOTION_INTENSITY_SCALE"
+            :step="MOTION_INTENSITY_SCALE_STEP"
+            @input="applyMotionEngineSettings"
+          />
+        </div>
+
+        <div class="settings-slider-grid">
+          <label
+            v-for="item in axisControls"
+            :key="item.axisName"
+            class="settings-slider settings-slider--compact"
+          >
+            <div class="settings-slider__header">
+              <div>
+                <strong>{{ item.label }}</strong>
+                <p>{{ item.axisName }}</p>
+              </div>
+              <span class="settings-slider__value">
+                x{{ formatScale(item.value) }}
+              </span>
+            </div>
+            <input
+              :value="item.value"
+              class="settings-slider__input"
+              type="range"
+              :min="MIN_AXIS_INTENSITY_SCALE"
+              :max="MAX_AXIS_INTENSITY_SCALE"
+              :step="AXIS_INTENSITY_SCALE_STEP"
+              @input="handleAxisIntensityInput(item.axisName, $event)"
+            />
+          </label>
+        </div>
+
+        <div class="settings-card__actions">
+          <button
+            type="button"
+            class="settings-card__button settings-card__button--ghost"
+            @click="resetMotionEngineSettings"
+          >
+            重置为默认
+          </button>
+        </div>
+
+        <p class="settings-card__hint">
+          每个轴都以 50 为中心放大或缩小。数值为 0 时，该轴的 expressive 表现会被压到中心点。
         </p>
       </article>
 

@@ -2,6 +2,19 @@
 
 快照日期：2026-04-25
 
+## 本轮审阅结论
+
+当前 `ModelEngine` 首版实现已经承接后端旧 Model Engine 的核心执行边界：
+
+- 后端生产主路径收口到 `engine.motion_intent.v1`。
+- 前端在 `compiler.ts` 中完成 `intent -> engine.parameter_plan.v1`。
+- 前端设置层已加入全局动作强度和 12 轴倍率，并在编译阶段对 `expressive` intent 生效。
+- 底层 `lappmodel.ts` 仍只接收最终 `engine.parameter_plan.v1`，并继续做 Direct Parameter 写入。
+
+结构上合格：`settings.ts` 属于纯配置归一化，`compiler.ts` 属于纯编译，`useModelEngine.ts` 属于调度协调，`PetDesktopView.vue` 只负责桥接窗口状态和播放器依赖。没有发现把后端 plan 编译职责重新塞回 adapter 的问题。
+
+需要继续实机验证的部分：不同 Live2D 模型对倍率的体感差异、supplementary 可见性、slider 高频广播是否造成设置窗口卡顿。
+
 ## 目标
 
 在前端引入 `ModelEngine`，负责以下链路：
@@ -88,18 +101,17 @@
 
 ## 模块结构
 
-建议新增目录：
+当前目录：
 
 ```text
 frontend/src/model-engine/
 ├─ contracts.ts
 ├─ constants.ts
 ├─ normalize.ts
+├─ settings.ts
 ├─ timing.ts
 ├─ supplementary.ts
 ├─ compiler.ts
-├─ player.ts
-├─ scheduler.ts
 └─ useModelEngine.ts
 ```
 
@@ -108,12 +120,11 @@ frontend/src/model-engine/
 - `contracts.ts`：定义 `MotionIntent`、`CompileOptions`、`CompileResult`、`PlaybackJob`
 - `constants.ts`：12 轴常量、默认阈值、默认 timing 参数
 - `normalize.ts`：兼容解析 `engine.motion_intent.v1` 与 `engine.parameter_plan.v1`
+- `settings.ts`：ModelEngine 表现倍率、12 轴中文标签、设置归一化与 clone helper
 - `timing.ts`：`duration_hint_ms -> DirectParameterPlanTiming`
 - `supplementary.ts`：从 `parameter_action_library` / `base_action_library` 推 supplementary
 - `compiler.ts`：`MotionIntent -> DirectParameterPlan`
-- `player.ts`：封装现有 `usePreviewMotionPlayer` 的执行接口
-- `scheduler.ts`：pending plan、等音频起播、fallback timer、turn gating
-- `useModelEngine.ts`：前端唯一对外入口
+- `useModelEngine.ts`：pending payload、等音频起播、fallback timer、turn gating、播放器调用
 
 ## 数据契约
 
@@ -153,6 +164,7 @@ interface CompileOptions {
   model: ModelSummary;
   targetDurationMs?: number | null;
   source?: string;
+  settings?: ModelEngineSettings;
 }
 ```
 
@@ -167,6 +179,9 @@ interface CompileResult {
     usedFallbackLibrary: boolean;
     supplementaryCount: number;
     timingSource: "hint" | "audio_sync" | "default";
+    intensityApplied: boolean;
+    motionIntensityScale: number;
+    axisIntensityScale: Record<DirectParameterAxisName, number>;
   };
 }
 ```
@@ -197,6 +212,17 @@ interface CompileResult {
 - `expressive`：按比例拆分 `blend_in / hold / blend_out`
 - 播放总时长允许被音频剩余时长覆盖
 - 必须对齐旧后端 `_build_plan_timing()` 的有效时长边界，除非在代码和文档中说明新的前端策略
+
+### 2.5. 动作强度设置
+
+当前已实现：
+
+- `motionIntensityScale` 默认 `1.35`，范围 `0.5..2.5`。
+- `axisIntensityScale` 覆盖 12 轴，默认全 `1.0`，范围 `0..2.5`。
+- 强度公式：`50 + (rawValue - 50) * motionIntensityScale * axisIntensityScale[axisName]`。
+- 只对 `expressive` intent 生效，`idle` intent 不放大。
+- 强度放大发生在 idle deadzone 判定前，避免弱 expressive intent 先被判成 idle。
+- diagnostics 会记录本次是否应用强度、全局倍率和每轴倍率。
 
 ### 3. calibration 使用策略
 
@@ -382,8 +408,7 @@ modelEngine.state.lastCompileDiagnostics
 
 ### Phase 2
 
-- 实现 `scheduler.ts`
-- 实现 `useModelEngine.ts`
+- 在 `useModelEngine.ts` 内实现调度层
 - 将 `PetDesktopView.vue` 的 pending 逻辑迁入 `ModelEngine`
 - 接入音频起播、无音频超时、stale turn 丢弃
 
@@ -441,7 +466,7 @@ frontend/src/model-engine/__tests__/
 
 ## 当前建议
 
-- 第一版可以先保留 `lappmodel.ts` schema，但不能保留必填字段静默默认。
-- 第一版可以保留 legacy `engine.motion_plan` 兼容，但新主路径必须是 `engine.motion_intent`。
-- 第一版先让前端能吃 `MotionIntent`，随后立即补齐旧后端编译器迁移对照。
+- 当前可以继续保留 legacy `engine.motion_plan` 兼容，但新主路径必须是 `engine.motion_intent`。
+- 当前 `lappmodel.ts` 对 plan 必填字段已经是 warning + reject，不应再加入静默默认。
 - supplementary 不能长期停留在“结构正确 + 基础可用”，迁移完成标准是承接旧后端候选选择、回退、避让和权重计算能力。
+- 动作强度设置已落地，下一步应通过实机对 `1.0 / 1.35 / 2.0` 与单轴倍率做模型体感标定。

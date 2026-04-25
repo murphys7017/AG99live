@@ -122,6 +122,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         model: selectedModel,
         targetDurationMs: resolveMotionTargetDurationMs(context.turnId),
         source: context.startReason,
+        settings: dependencies.getSettings(),
       });
       state.lastCompileReason = compileResult.reason;
       state.lastCompileDiagnostics = compileResult.diagnostics;

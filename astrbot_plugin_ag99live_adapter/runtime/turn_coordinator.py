@@ -41,6 +41,7 @@ from ..protocol import (
 from ..services.speech_service import SpeechIngressService
 from ..motion.realtime_motion_plan import (
     normalize_motion_intent_payload,
+    resolve_motion_prompt_instruction,
     validate_motion_intent_payload,
     validate_parameter_plan_payload,
 )
@@ -1026,6 +1027,7 @@ def _build_inline_motion_contract(*, runtime_state: Any) -> str:
     model_info = getattr(runtime_state, "model_info", {})
     if isinstance(model_info, dict):
         selected_model = str(model_info.get("selected_model") or "").strip()
+    motion_instruction = resolve_motion_prompt_instruction(runtime_state=runtime_state)
 
     lines = [
         "AG99live inline motion contract:",
@@ -1040,6 +1042,8 @@ def _build_inline_motion_contract(*, runtime_state: Any) -> str:
         "The `intent.duration_hint_ms` should be a reasonable duration hint in milliseconds.",
         "If the turn is calm or uncertain, emit a safe idle intent instead of omitting the tag.",
     ]
+    if motion_instruction:
+        lines.append(f"Additional motion instruction: {motion_instruction}")
     if selected_model:
         lines.append(f"Current Live2D model: {selected_model}.")
     lines.append("Use this tag template structure and fill in suitable values:")

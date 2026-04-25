@@ -181,6 +181,7 @@ def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
         enable_realtime_motion_plan = True
         selected_motion_analysis_provider = provider
         realtime_motion_timeout_seconds = 2.0
+        motion_prompt_instruction = "Use stronger head and mouth motion."
 
     generator = RealtimeMotionPlanGenerator(runtime_state=RuntimeStub())
 
@@ -201,6 +202,8 @@ def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
     assert "Given text, choose axis values in [0,100] for an avatar." in provider.last_prompt
     assert "Platform context:" in provider.last_prompt
     assert "Few-shot examples (style reference, do not copy literally):" in provider.last_prompt
+    assert "Additional motion instruction:" in provider.last_prompt
+    assert "Use stronger head and mouth motion." in provider.last_prompt
     assert "Return strict JSON only." in provider.last_system_prompt
 
 

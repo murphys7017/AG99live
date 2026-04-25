@@ -274,6 +274,7 @@ def test_build_model_visible_user_text_appends_inline_contract(
         {
             "enable_inline_motion_contract": True,
             "model_info": {"selected_model": "pet"},
+            "motion_prompt_instruction": "Use readable exaggerated head and smile motion.",
         },
     )()
 
@@ -285,6 +286,7 @@ def test_build_model_visible_user_text_appends_inline_contract(
     assert prompt_text.startswith("你好，今天怎么样？")
     assert "<system_reminder>" in prompt_text
     assert "AG99live inline motion contract" in prompt_text
+    assert "Use readable exaggerated head and smile motion." in prompt_text
     assert "Current Live2D model: pet." in prompt_text
     assert "<@anim {" in prompt_text
     assert '"schema_version":"engine.motion_intent.v1"' in prompt_text
@@ -331,6 +333,7 @@ def test_apply_inline_motion_contract_mutates_event_message_only(
         {
             "enable_inline_motion_contract": True,
             "model_info": {"selected_model": "pet"},
+            "motion_prompt_instruction": "Use readable exaggerated head and smile motion.",
         },
     )()
     coordinator.session_state = type("SessionStateStub", (), {"current_turn_id": "turn-contract"})()
@@ -357,6 +360,9 @@ def test_apply_inline_motion_contract_mutates_event_message_only(
     assert event.extras["ag99live_inline_motion_contract_applied"] is True
     assert event.extras["ag99live_inline_motion_contract_mode"] == "user_prompt_system_reminder"
     assert "<system_reminder>" in str(event.extras["ag99live_inline_motion_contract_prompt"])
+    assert "Use readable exaggerated head and smile motion." in str(
+        event.extras["ag99live_inline_motion_contract_prompt"]
+    )
 
 
 def test_emit_message_chain_inline_plan_uses_primary_route(

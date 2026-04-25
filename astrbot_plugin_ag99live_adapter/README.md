@@ -39,6 +39,7 @@ astrbot_plugin_ag99live_adapter/
 
 - 主回复无合法内联动作时，触发 `realtime_motion_plan` 生成。
 - 当前 realtime 主路径产物为 `engine.motion_intent.v1`，前端 `ModelEngine` 在本地编译为 `engine.parameter_plan.v1` 再执行。
+- `motion_prompt_instruction` 会注入 inline contract 与 realtime selector prompt，用于影响动作风格和幅度，但不改变协议结构。
 
 ## 与前端协同的关键点
 
@@ -54,6 +55,7 @@ astrbot_plugin_ag99live_adapter/
 - `realtime_motion_timeout_seconds`：realtime 生成超时（秒）。
 - `realtime_motion_fewshot_enabled`：是否启用 few-shot。
 - `realtime_motion_platform_context_enabled`：是否注入平台上下文。
+- `motion_prompt_instruction`：动作 intent 生成的补充指令，默认要求 Live2D 表现更夸张。
 - `enable_action_llm_filter`：是否启用基础动作库 LLM 严格筛选。
 
 ## 开发与验证
@@ -70,4 +72,4 @@ pip install -r astrbot_plugin_ag99live_adapter/requirements.txt
 python -m pytest astrbot_plugin_ag99live_adapter/tests -q
 ```
 
-当前基线：`45 passed`（2026-04-25）。
+当前基线：`48 passed`（2026-04-25）。

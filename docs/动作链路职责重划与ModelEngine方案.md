@@ -17,6 +17,8 @@
 - 当前契约已经切到要求模型输出 `engine.motion_intent.v1`。
 - 主回复没有提取到合法内联动作时，后端会发起 realtime 二次请求。
 - realtime 二次请求当前主路径产物已经收口为 `engine.motion_intent.v1`。
+- 后端已新增 `motion_prompt_instruction`，作为动作意图生成阶段的用户可配置风格/幅度指令。
+- `motion_prompt_instruction` 同时进入主回复 inline contract 和 realtime selector prompt，但不改变协议结构。
 - 后端旧 plan 编译路径已从生产模块移除；以下编译内容已迁到前端 `ModelEngine`：
   - `idle/expressive` 判定
   - `timing` 生成
@@ -31,6 +33,11 @@
   - `parameter_action_library`
   - `calibration_profile`
 - 前端已经具备 plan 解析、retime、去重、soft handoff、最终执行能力。
+- 前端已新增 `ModelEngine` 表现倍率设置：
+  - 全局 `motionIntensityScale`，默认 `1.35`。
+  - 12 轴 `axisIntensityScale`，默认全 `1.0`。
+  - 设置窗口可调整，Desktop snapshot 负责持久化。
+  - 编译阶段只放大 `expressive` intent，不放大 `idle`。
 
 ## 问题定义
 
@@ -87,6 +94,7 @@
 - realtime 二次请求。
 - selector 输出解析为 `engine.motion_intent.v1`。
 - motion intent schema 校验。
+- 动作生成 prompt 指令注入。
 - TTS 前隐藏动作标记清理。
 
 ### 完成后后端必须删除或退役的动作逻辑
@@ -113,6 +121,7 @@
 
 - 接收动作意图
 - 根据当前模型的 `parameter_action_library` / `base_action_library` / `calibration_profile` 编译 plan
+- 根据用户设置的全局和单轴倍率调整 expressive intent 的实际表现幅度
 - 生成 `timing`
 - 生成 `supplementary_params`
 - 应用 calibration
@@ -167,25 +176,29 @@
 
 推荐优先做第 1 步，先改边界，再改协议名。
 
-## ModelEngine 目标结构
+## ModelEngine 当前结构
 
-建议新增前端模块：
+当前前端模块：
 
 - `frontend/src/model-engine/contracts.ts`
-- `frontend/src/model-engine/intentCompiler.ts`
+- `frontend/src/model-engine/constants.ts`
+- `frontend/src/model-engine/normalize.ts`
+- `frontend/src/model-engine/settings.ts`
+- `frontend/src/model-engine/compiler.ts`
 - `frontend/src/model-engine/timing.ts`
 - `frontend/src/model-engine/supplementary.ts`
-- `frontend/src/model-engine/calibration.ts`
-- `frontend/src/model-engine/player.ts`
+- `frontend/src/model-engine/useModelEngine.ts`
 
 职责划分：
 
 - `contracts.ts`：定义 `motion_intent` 与编译结果类型
-- `intentCompiler.ts`：`intent -> parameter_plan`
+- `constants.ts`：12 轴常量、timing 默认值、idle deadzone
+- `normalize.ts`：动作 payload 解析与开发期拒绝策略
+- `settings.ts`：全局/单轴表现倍率、中文标签、设置归一化
+- `compiler.ts`：`intent -> parameter_plan`
 - `timing.ts`：生成 blend/hold/total duration
 - `supplementary.ts`：从动作库推导 supplementary 参数
-- `calibration.ts`：执行前的 calibration 处理
-- `player.ts`：对接现有 `usePreviewMotionPlayer` 与 Live2D runtime
+- `useModelEngine.ts`：turn/audio 调度、pending 队列、调用 `usePreviewMotionPlayer`
 
 详细拆分与落地顺序见《[前端ModelEngine设计](./前端ModelEngine设计.md)》。
 
@@ -240,6 +253,7 @@
 - 前端 `ModelEngine` 对 `engine.motion_intent.v1` 编译出的 `engine.parameter_plan.v1` 包含完整 `timing/key_axes/supplementary_params/model_calibration_profile`。
 - 前端 supplementary 选择结果覆盖 parameter library 优先、base library 回退、去重、避让主轴参数、最大数量限制。
 - 前端 timing 覆盖 hint/default/audio-sync 三种来源。
+- 前端动作强度设置覆盖全局倍率、12 轴倍率、重置和持久化。
 - 前端和底层播放器对缺失 `emotion_label`、缺失轴、非法 schema 都拒绝并 warning；缺轴补 50 只能发生在后端 intent 归一化阶段，不能在前端静默补。
 - 后端旧 `build_plan_from_axes()` 不再被生产路径或测试依赖。
 - debug preview 能明确返回 invalid payload、schema mismatch、no websocket 三类不同错误。
