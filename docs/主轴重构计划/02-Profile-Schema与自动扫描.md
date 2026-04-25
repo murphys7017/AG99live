@@ -14,19 +14,36 @@
 
 ## Profile 文件位置
 
-建议保存位置：
+执行阶段必须先选定单一事实来源。当前建议：
+
+```text
+前端持久化 profile store = 运行时事实来源
+```
+
+原因：
+
+- Profile Editor 在前端。
+- ModelEngine 在前端。
+- 当前重构阶段优先保证前端编译和调参闭环。
+- 后端 prompt 读取当前 profile 时，应通过显式同步机制获取，而不是各自扫描一份。
+
+可选导出位置：
 
 ```text
 live2ds/<model_name>/ag99/semantic_axis_profile.json
 ```
 
-或前端缓存位置：
+前端持久化位置：
 
 ```text
 frontend profile cache / model profile store
 ```
 
-最终应支持随模型导出/导入。
+最终应支持：
+
+- 前端本地持久化。
+- 导出到模型目录。
+- 从模型目录导入。
 
 ## Schema 草案
 
@@ -184,6 +201,14 @@ source_hash changed -> 标记 profile 过期，提示重新扫描或手动确认
 ```
 
 不能静默覆盖用户编辑过的 profile。
+
+因此需要明确区分三种状态：
+
+| 状态 | 含义 |
+|---|---|
+| `generated` | 扫描器生成，用户未修改 |
+| `user_modified` | 用户已人工修正 |
+| `stale` | 模型文件 hash 已变化，当前 profile 可能过期 |
 
 建议 profile 增加：
 
