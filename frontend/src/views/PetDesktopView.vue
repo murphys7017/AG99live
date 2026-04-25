@@ -5,6 +5,7 @@ import { useAdapterConnection } from "../composables/useAdapterConnection";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
 import { useModelSync } from "../composables/useModelSync";
 import { usePreviewMotionPlayer } from "../composables/usePreviewMotionPlayer";
+import { useModelEngine } from "../model-engine/useModelEngine";
 import type { DesktopRuntimeCommand } from "../types/desktop";
 import type { DesktopBaseActionPreview } from "../types/desktop";
 
@@ -12,6 +13,19 @@ const { state, selectedModel } = useModelSync();
 const adapter = useAdapterConnection();
 const bridge = useDesktopBridge();
 const motionPlayer = usePreviewMotionPlayer();
+const modelEngine = useModelEngine({
+  getSelectedModel: () => selectedModel.value,
+  playPlan: (plan, model, options) => motionPlayer.playPlan(plan, model, options),
+  stopPlan: (reason) => motionPlayer.stopPlan(reason),
+  getCurrentTurnId: () => adapter.state.currentTurnId,
+  getAudioPlaybackInfo: () => ({
+    turnId: adapter.state.audioPlaybackStartedTurnId,
+    startedAtMs: adapter.state.audioPlaybackStartedAtMs,
+    durationMs: adapter.state.audioPlaybackDurationMs,
+  }),
+  pushHistory: (role, text) => adapter.pushHistory(role, text),
+  getPlayerMessage: () => motionPlayer.state.message,
+});
 const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
 
 const connectionState = computed(() => {
@@ -264,161 +278,11 @@ const baseActionPreview = computed<DesktopBaseActionPreview | null>(() => {
 });
 
 function handlePreviewMotionPlan(plan: unknown): void {
-  const localPlayed = motionPlayer.playPlan(plan, selectedModel.value, {
-    softHandoff: true,
-  });
+  const localPlayed = modelEngine.playPreviewPayload(plan);
   if (!localPlayed) {
     console.warn("[AG99live] Local motion preview playback failed to start.");
   }
-  adapter.sendMotionPlanPreview(plan);
-}
-
-const MOTION_SYNC_WAIT_FOR_AUDIO_MS = 420;
-const MOTION_MIN_REMAINING_AUDIO_MS = 260;
-
-interface PendingInboundMotionPlan {
-  plan: unknown;
-  turnId: string;
-  receivedAtMs: number;
-  fallbackTimer: number;
-}
-
-const pendingInboundMotionPlans = new Map<string, PendingInboundMotionPlan>();
-
-function clearPendingInboundMotionPlan(entry: PendingInboundMotionPlan): void {
-  window.clearTimeout(entry.fallbackTimer);
-}
-
-function clearAllPendingInboundMotionPlans(): void {
-  for (const entry of pendingInboundMotionPlans.values()) {
-    clearPendingInboundMotionPlan(entry);
-  }
-  pendingInboundMotionPlans.clear();
-}
-
-function normalizeTurnId(turnId: string | null): string | null {
-  const normalized = String(turnId ?? "").trim();
-  return normalized || null;
-}
-
-function resolveMotionTargetDurationMs(turnId: string | null): number | null {
-  const normalizedTurnId = normalizeTurnId(turnId);
-  const audioTurnId = normalizeTurnId(adapter.state.audioPlaybackStartedTurnId);
-  if (!normalizedTurnId || !audioTurnId || normalizedTurnId !== audioTurnId) {
-    return null;
-  }
-
-  const rawDuration = Number(adapter.state.audioPlaybackDurationMs ?? 0);
-  const startedAtMs = Number(adapter.state.audioPlaybackStartedAtMs ?? 0);
-  if (!Number.isFinite(rawDuration) || rawDuration <= 0 || !Number.isFinite(startedAtMs) || startedAtMs <= 0) {
-    return null;
-  }
-
-  const elapsedMs = Math.max(0, performance.now() - startedAtMs);
-  return Math.max(MOTION_MIN_REMAINING_AUDIO_MS, Math.round(rawDuration - elapsedMs));
-}
-
-function handleInboundMotionPlan(
-  plan: unknown,
-  context: { turnId: string | null; startReason: string; queuedDelayMs: number },
-): void {
-  console.info(
-    "[PetDesktopView] handleInboundMotionPlan called. turn_id=",
-    context.turnId,
-    "reason=",
-    context.startReason,
-    "queuedDelayMs=",
-    context.queuedDelayMs,
-    "plan type:",
-    typeof plan,
-    "keys:",
-    plan && typeof plan === "object" ? Object.keys(plan as object) : "N/A",
-  );
-  adapter.pushHistory("system", "正在执行动作计划...");
-  const targetDurationMs = resolveMotionTargetDurationMs(context.turnId);
-  const localPlayed = motionPlayer.playPlan(plan, selectedModel.value, {
-    softHandoff: true,
-    targetDurationMs,
-  });
-  console.info("[PetDesktopView] playPlan returned:", localPlayed, "state:", motionPlayer.state.status, motionPlayer.state.message);
-  if (!localPlayed) {
-    const reason = motionPlayer.state.message;
-    console.warn("[PetDesktopView] motion playback failed:", reason);
-    adapter.pushHistory("error", `动作播放失败：${reason}`);
-  } else {
-    adapter.pushHistory(
-      "system",
-      `动作计划执行中（${motionPlayer.state.message}，启动延迟 ${context.queuedDelayMs}ms）。`,
-    );
-  }
-}
-
-function tryStartPendingInboundMotionPlan(turnId: string, startReason: string): boolean {
-  const entry = pendingInboundMotionPlans.get(turnId);
-  if (!entry) {
-    return false;
-  }
-
-  pendingInboundMotionPlans.delete(turnId);
-  clearPendingInboundMotionPlan(entry);
-  handleInboundMotionPlan(entry.plan, {
-    turnId: entry.turnId,
-    startReason,
-    queuedDelayMs: Math.max(0, Math.round(performance.now() - entry.receivedAtMs)),
-  });
-  return true;
-}
-
-function queueInboundMotionPlan(plan: unknown, turnId: string | null, receivedAtMs: number): void {
-  const normalizedTurnId = normalizeTurnId(turnId);
-  if (!normalizedTurnId) {
-    handleInboundMotionPlan(plan, {
-      turnId: null,
-      startReason: "missing_turn_id",
-      queuedDelayMs: 0,
-    });
-    return;
-  }
-
-  const existing = pendingInboundMotionPlans.get(normalizedTurnId);
-  if (existing) {
-    clearPendingInboundMotionPlan(existing);
-    pendingInboundMotionPlans.delete(normalizedTurnId);
-  }
-
-  const entry: PendingInboundMotionPlan = {
-    plan,
-    turnId: normalizedTurnId,
-    receivedAtMs,
-    fallbackTimer: 0,
-  };
-
-  entry.fallbackTimer = window.setTimeout(() => {
-    const latest = pendingInboundMotionPlans.get(normalizedTurnId);
-    if (!latest || latest !== entry) {
-      return;
-    }
-    const currentTurnId = normalizeTurnId(adapter.state.currentTurnId);
-    if (currentTurnId && currentTurnId !== normalizedTurnId) {
-      clearPendingInboundMotionPlan(entry);
-      pendingInboundMotionPlans.delete(normalizedTurnId);
-      console.info(
-        "[PetDesktopView] drop stale pending motion plan. pendingTurnId=",
-        normalizedTurnId,
-        "currentTurnId=",
-        currentTurnId,
-      );
-      return;
-    }
-    tryStartPendingInboundMotionPlan(normalizedTurnId, "wait_audio_timeout");
-  }, MOTION_SYNC_WAIT_FOR_AUDIO_MS);
-
-  pendingInboundMotionPlans.set(normalizedTurnId, entry);
-
-  const activeAudioTurnId = normalizeTurnId(adapter.state.audioPlaybackStartedTurnId);
-  if (activeAudioTurnId && activeAudioTurnId === normalizedTurnId) {
-    tryStartPendingInboundMotionPlan(normalizedTurnId, "audio_already_playing");
-  }
+  adapter.sendMotionPayloadPreview(plan);
 }
 
 function applyAmbientMotionPreference(attemptsRemaining = 12): void {
@@ -462,8 +326,7 @@ function handleDesktopCommand(command: DesktopRuntimeCommand): void {
       void adapter.sendText(command.text);
       return;
     case "interrupt":
-      clearAllPendingInboundMotionPlans();
-      motionPlayer.stopPlan("interrupted");
+      modelEngine.stop("interrupted");
       adapter.interruptCurrentTurn();
       return;
     case "toggle_mic_capture":
@@ -471,6 +334,9 @@ function handleDesktopCommand(command: DesktopRuntimeCommand): void {
       return;
     case "preview_motion_plan":
       handlePreviewMotionPlan(command.plan);
+      return;
+    case "preview_motion_payload":
+      handlePreviewMotionPlan(command.payload);
       return;
   }
 }
@@ -495,22 +361,24 @@ watch(
       console.warn("[PetDesktopView] inboundMotionPlan is null, skipping.");
       return;
     }
-    queueInboundMotionPlan(
-      plan,
-      adapter.state.inboundMotionPlanTurnId,
-      adapter.state.inboundMotionPlanReceivedAtMs,
-    );
+    modelEngine.ingestInboundPayload(plan, {
+      turnId: adapter.state.inboundMotionPlanTurnId,
+      receivedAtMs: adapter.state.inboundMotionPlanReceivedAtMs,
+    });
   },
 );
 
 watch(
   () => adapter.state.audioPlaybackStartedNonce,
   () => {
-    const turnId = normalizeTurnId(adapter.state.audioPlaybackStartedTurnId);
-    if (!turnId) {
-      return;
-    }
-    tryStartPendingInboundMotionPlan(turnId, "audio_playing_event");
+    modelEngine.notifyAudioPlaybackStarted(adapter.state.audioPlaybackStartedTurnId);
+  },
+);
+
+watch(
+  () => adapter.state.currentTurnId,
+  (turnId) => {
+    modelEngine.notifyCurrentTurnChanged(turnId);
   },
 );
 
@@ -591,8 +459,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
-  clearAllPendingInboundMotionPlans();
-  motionPlayer.stopPlan("unmount");
+  modelEngine.stop("unmount");
   detachBridgeListener();
 });
 </script>

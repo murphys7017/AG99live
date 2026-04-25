@@ -135,4 +135,5 @@ export type DesktopRuntimeCommand =
   | { type: "send_text"; text: string }
   | { type: "interrupt" }
   | { type: "toggle_mic_capture" }
+  | { type: "preview_motion_payload"; payload: unknown }
   | { type: "preview_motion_plan"; plan: unknown };

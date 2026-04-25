@@ -1,6 +1,7 @@
 name: astrbot_plugin_ag99live_adapter
 display_name: AG99live Adapter
-description: AG99live V2 Phase 1 adapter plugin. This phase focuses on AstrBot message bridging and frontend communication compatibility.
+desc: AG99live V2 desktop platform adapter for AstrBot.
+description: AG99live AstrBot desktop adapter. Bridges AstrBot turns to the frontend and emits motion intent for frontend ModelEngine playback.
 version: 0.1.0
 author: murphys7017
 repo: https://github.com/murphys7017/AG99live

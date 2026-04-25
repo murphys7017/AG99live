@@ -5,6 +5,8 @@
 ## 当前有效（优先阅读）
 
 - [V2 当前实现状态与下一步](./V2当前实现状态与下一步.md)
+- [动作链路职责重划与 ModelEngine 方案](./动作链路职责重划与ModelEngine方案.md)
+- [前端 ModelEngine 设计](./前端ModelEngine设计.md)
 - [前后端严格审阅报告](./前后端严格审阅报告.md)
 - [根目录 README](../README.md)
 - [Adapter README](../astrbot_plugin_ag99live_adapter/README.md)

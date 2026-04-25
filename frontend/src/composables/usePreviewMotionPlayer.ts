@@ -280,11 +280,16 @@ function parseParameterPlan(plan: unknown): ParsedParameterPlan | null {
     timing.duration_ms,
     timing.blend_in_ms + timing.hold_ms + timing.blend_out_ms,
   );
+  const emotionLabel = normalizeText(plan.emotion_label);
+  if (!emotionLabel) {
+    console.warn("[MotionPlayer] parseParameterPlan: emotion_label_empty");
+    return null;
+  }
 
   const normalizedPlan: DirectParameterPlan = {
     schema_version: "engine.parameter_plan.v1",
     mode,
-    emotion_label: normalizeText(plan.emotion_label) || "neutral",
+    emotion_label: emotionLabel,
     timing,
     key_axes: keyAxes,
     supplementary_params: supplementary,

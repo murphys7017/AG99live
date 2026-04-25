@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -31,7 +34,6 @@ AXES: list[AxisSpec] = [
     AxisSpec("brow_bias", "brow_bias", "frown", "neutral", "raised"),
 ]
 AXIS_NAMES = [axis.name for axis in AXES]
-_ACTIVE_AXIS_THRESHOLD = 8
 _IDLE_DEADZONE_MIN = 42
 _IDLE_DEADZONE_MAX = 58
 _MIN_EXPRESSIVE_MAX_DELTA = 24
@@ -47,25 +49,12 @@ _NEUTRAL_EMOTION_MARKERS = {
     "normal",
 }
 
-_KEY_AXIS_EXCLUDED_PARAMETER_IDS: dict[str, set[str]] = {
-    "head_yaw": {"paramanglex", "param_angle_x"},
-    "head_roll": {"paramanglez", "param_angle_z"},
-    "head_pitch": {"paramangley", "param_angle_y"},
-    "body_yaw": {"parambodyanglex", "param_body_angle_x"},
-    "body_roll": {"parambodyanglez", "param_body_angle_z", "parambodyangley", "param_body_angle_y"},
-    "gaze_x": {"parameyeballx", "param_eye_ball_x"},
-    "gaze_y": {"parameyebally", "param_eye_ball_y"},
-    "eye_open_left": {"parameyelopen", "param_eye_l_open"},
-    "eye_open_right": {"parameyeropen", "param_eye_r_open"},
-    "mouth_open": {"parammouthopeny", "param_mouth_open_y", "parammouthopen", "param_mouth_open"},
-    "mouth_smile": {"parammouthsmile", "param_mouth_smile"},
-    "brow_bias": {"parambrowly", "param_brow_l_y", "parambrowry", "param_brow_r_y"},
-}
-
 _SYSTEM_PROMPT = (
     "You are a compact emotion-to-axis selector for live avatar control. "
     "Return strict JSON only."
 )
+MOTION_INTENT_SCHEMA_VERSION = "engine.motion_intent.v1"
+PARAMETER_PLAN_SCHEMA_VERSION = "engine.parameter_plan.v1"
 
 _DEFAULT_SELECTOR_PLATFORM_DESCRIPTION = (
     "Source platform: AstrBot through AG99live desktop adapter.\n"
@@ -207,18 +196,6 @@ class RealtimeMotionPlanGenerator:
         if not bool(getattr(self.runtime_state, "enable_realtime_motion_plan", True)):
             return None
 
-        library = resolve_selected_parameter_action_library(
-            getattr(self.runtime_state, "model_info", {}),
-        )
-        if not isinstance(library, dict):
-            return None
-        fallback_library = resolve_selected_base_action_library(
-            getattr(self.runtime_state, "model_info", {}),
-        )
-        calibration_profile = resolve_selected_model_calibration_profile(
-            getattr(self.runtime_state, "model_info", {}),
-        )
-
         context_text = build_selector_context(
             user_text=user_text,
             assistant_text=assistant_text,
@@ -229,16 +206,15 @@ class RealtimeMotionPlanGenerator:
             few_shot_examples=resolve_selector_few_shot_examples(runtime_state=self.runtime_state),
         )
         selector = normalize_selector_output(selector_raw)
-        plan = build_plan_from_axes(
-            selector,
-            library=library,
-            fallback_library=fallback_library,
-            calibration_profile=calibration_profile,
-        )
-        valid, _ = validate_parameter_plan_payload(plan)
+        intent = build_intent_from_selector(selector)
+        valid, failure_reason = validate_motion_intent_payload(intent)
         if not valid:
+            LOGGER.warning(
+                "Realtime motion intent rejected after selector normalization: %s",
+                failure_reason,
+            )
             return None
-        return plan
+        return intent
 
     async def _call_astrbot_selector(
         self,
@@ -268,52 +244,6 @@ class RealtimeMotionPlanGenerator:
         if not completion_text:
             raise RuntimeError("AstrBot motion provider returned empty completion_text.")
         return _extract_json_object(completion_text)
-
-
-def _resolve_selected_model_entry(model_info: Any) -> dict[str, Any] | None:
-    if not isinstance(model_info, dict):
-        return None
-    models = [item for item in model_info.get("models", []) if isinstance(item, dict)]
-    if not models:
-        return None
-
-    selected_model_name = str(model_info.get("selected_model") or "").strip()
-    if selected_model_name:
-        for model in models:
-            if str(model.get("name") or "").strip() == selected_model_name:
-                return model
-
-    return models[0]
-
-
-def resolve_selected_parameter_action_library(model_info: Any) -> dict[str, Any] | None:
-    selected_model = _resolve_selected_model_entry(model_info)
-    if not isinstance(selected_model, dict):
-        return None
-    library = selected_model.get("parameter_action_library")
-    if isinstance(library, dict):
-        return library
-    return None
-
-
-def resolve_selected_base_action_library(model_info: Any) -> dict[str, Any] | None:
-    selected_model = _resolve_selected_model_entry(model_info)
-    if not isinstance(selected_model, dict):
-        return None
-    library = selected_model.get("base_action_library")
-    if isinstance(library, dict):
-        return library
-    return None
-
-
-def resolve_selected_model_calibration_profile(model_info: Any) -> dict[str, Any] | None:
-    selected_model = _resolve_selected_model_entry(model_info)
-    if not isinstance(selected_model, dict):
-        return None
-    calibration_profile = selected_model.get("calibration_profile")
-    if isinstance(calibration_profile, dict):
-        return calibration_profile
-    return None
 
 
 def build_selector_platform_context(*, runtime_state: Any) -> str:
@@ -421,7 +351,13 @@ def build_selector_user_prompt(
         '  "emotion": "short-label",\n'
         '  "mode": "parallel or sequential",\n'
         '  "duration_ms": 1200,\n'
-        '  "axes": {"head_yaw": 50, "head_roll": 50}\n'
+        '  "axes": {\n'
+        '    "head_yaw": 50, "head_roll": 50, "head_pitch": 50,\n'
+        '    "body_yaw": 50, "body_roll": 50,\n'
+        '    "gaze_x": 50, "gaze_y": 50,\n'
+        '    "eye_open_left": 50, "eye_open_right": 50,\n'
+        '    "mouth_open": 50, "mouth_smile": 50, "brow_bias": 50\n'
+        '  }\n'
         "}\n"
         "Rules:\n"
         "- Include all listed axes.\n"
@@ -435,25 +371,64 @@ def build_selector_user_prompt(
 
 
 def normalize_selector_output(payload: dict[str, Any]) -> dict[str, Any]:
-    raw_axes = payload.get("axes")
-    axes_payload = raw_axes if isinstance(raw_axes, dict) else {}
-    axes = {
-        axis.name: clamp_axis_value(axes_payload.get(axis.name, 50))
-        for axis in AXES
-    }
+    if not isinstance(payload, dict):
+        raise ValueError("selector_payload_not_object")
 
-    mode = str(payload.get("mode") or "parallel").strip().lower()
-    if mode not in {"parallel", "sequential"}:
-        mode = "parallel"
+    emotion_raw = payload.get("emotion")
+    emotion = str(emotion_raw).strip() if isinstance(emotion_raw, str) else ""
+    if not emotion:
+        raise ValueError("selector_emotion_empty")
 
-    duration_ms_raw = payload.get("duration_ms", 1200)
-    try:
-        duration_ms = int(round(float(duration_ms_raw)))
-    except (TypeError, ValueError):
-        duration_ms = 1200
+    if "mode" not in payload:
+        raise ValueError("selector_mode_missing")
+    mode = str(payload.get("mode") or "").strip().lower()
+    if mode not in {"parallel", "sequential", "idle", "expressive"}:
+        raise ValueError("selector_mode_invalid")
+
+    if "duration_ms" not in payload:
+        raise ValueError("selector_duration_ms_missing")
+    duration_ms_raw = payload.get("duration_ms")
+    if not isinstance(duration_ms_raw, (int, float)):
+        raise ValueError("selector_duration_ms_not_number")
+    duration_ms = int(round(float(duration_ms_raw)))
+    if duration_ms < 0:
+        raise ValueError("selector_duration_ms_negative")
     duration_ms = max(400, min(6000, duration_ms))
 
-    emotion = str(payload.get("emotion") or "neutral").strip() or "neutral"
+    raw_axes = payload.get("axes")
+    if not isinstance(raw_axes, dict):
+        raise ValueError("selector_axes_not_object")
+
+    axes: dict[str, int] = {}
+    missing_axis_names: list[str] = []
+    for axis in AXES:
+        if axis.name not in raw_axes:
+            missing_axis_names.append(axis.name)
+            axes[axis.name] = 50
+            continue
+        axis_value = raw_axes.get(axis.name)
+        if not isinstance(axis_value, (int, float)):
+            raise ValueError(f"selector_axis_not_number:{axis.name}")
+        if float(axis_value) < 0 or float(axis_value) > 100:
+            raise ValueError(f"selector_axis_out_of_range:{axis.name}")
+        axes[axis.name] = clamp_axis_value(axis_value)
+
+    if missing_axis_names:
+        LOGGER.warning(
+            "Realtime motion selector output missing axes; defaulting to 50. missing=%s",
+            ",".join(missing_axis_names),
+        )
+
+    unexpected_axis_names: list[str] = []
+    for axis_name in raw_axes.keys():
+        if axis_name not in AXIS_NAMES:
+            unexpected_axis_names.append(str(axis_name))
+    if unexpected_axis_names:
+        LOGGER.warning(
+            "Realtime motion selector output ignored unexpected axes. unexpected=%s",
+            ",".join(unexpected_axis_names),
+        )
+
     axes = _apply_expressive_floor(
         axes=axes,
         emotion=emotion,
@@ -464,6 +439,118 @@ def normalize_selector_output(payload: dict[str, Any]) -> dict[str, Any]:
         "mode": mode,
         "duration_ms": duration_ms,
         "axes": axes,
+    }
+
+
+def build_intent_from_selector(selector_output: dict[str, Any]) -> dict[str, Any]:
+    axes = selector_output.get("axes")
+    if not isinstance(axes, dict):
+        raise ValueError("selector_axes_not_object")
+    normalized_axes = {
+        axis.name: clamp_axis_value(axes.get(axis.name))
+        for axis in AXES
+    }
+    requested_mode = str(selector_output.get("mode") or "").strip().lower()
+    mode = requested_mode if requested_mode in {"idle", "expressive"} else "expressive"
+    if mode != "idle" and _is_idle_deadzone(normalized_axes):
+        mode = "idle"
+
+    duration_ms_raw = selector_output.get("duration_ms")
+    if not isinstance(duration_ms_raw, (int, float)):
+        raise ValueError("selector_duration_ms_not_number")
+    duration_hint_ms = int(round(float(duration_ms_raw)))
+    duration_hint_ms = max(320, min(15000, duration_hint_ms))
+
+    emotion_label = str(selector_output.get("emotion") or "").strip()
+    if not emotion_label:
+        raise ValueError("selector_emotion_empty")
+
+    return {
+        "schema_version": MOTION_INTENT_SCHEMA_VERSION,
+        "mode": mode,
+        "emotion_label": emotion_label,
+        "duration_hint_ms": duration_hint_ms,
+        "key_axes": {
+            axis_name: {"value": axis_value}
+            for axis_name, axis_value in normalized_axes.items()
+        },
+        "summary": {
+            "key_axes_count": len(AXIS_NAMES),
+        },
+    }
+
+
+def normalize_motion_intent_payload(intent: Any) -> dict[str, Any]:
+    if not isinstance(intent, dict):
+        raise ValueError("intent_not_object")
+
+    schema_version = str(intent.get("schema_version") or "").strip()
+    if schema_version != MOTION_INTENT_SCHEMA_VERSION:
+        raise ValueError("invalid_schema_version")
+
+    mode = str(intent.get("mode") or "").strip().lower()
+    if mode not in {"expressive", "idle"}:
+        raise ValueError("invalid_mode")
+
+    emotion_label = str(intent.get("emotion_label") or "").strip()
+    if not emotion_label:
+        raise ValueError("emotion_label_empty")
+
+    key_axes = intent.get("key_axes")
+    if not isinstance(key_axes, dict):
+        raise ValueError("key_axes_not_object")
+
+    normalized_axes: dict[str, dict[str, int]] = {}
+    missing_axis_names: list[str] = []
+    for axis_name in AXIS_NAMES:
+        axis_payload = key_axes.get(axis_name)
+        if not isinstance(axis_payload, dict) or "value" not in axis_payload:
+            missing_axis_names.append(axis_name)
+            normalized_axes[axis_name] = {"value": 50}
+            continue
+
+        value = axis_payload.get("value")
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"axis_{axis_name}_value_not_number")
+        if float(value) < 0 or float(value) > 100:
+            raise ValueError(f"axis_{axis_name}_value_out_of_range")
+        normalized_axes[axis_name] = {"value": clamp_axis_value(value)}
+
+    if missing_axis_names:
+        LOGGER.warning(
+            "Motion intent missing axes; defaulting to 50. missing=%s",
+            ",".join(missing_axis_names),
+        )
+
+    unexpected_axis_names = [
+        str(axis_name)
+        for axis_name in key_axes.keys()
+        if axis_name not in AXIS_NAMES
+    ]
+    if unexpected_axis_names:
+        LOGGER.warning(
+            "Motion intent ignored unexpected axes. unexpected=%s",
+            ",".join(unexpected_axis_names),
+        )
+
+    duration_hint_raw = intent.get("duration_hint_ms")
+    duration_hint_ms: int | None = None
+    if duration_hint_raw is not None:
+        if not isinstance(duration_hint_raw, (int, float)):
+            raise ValueError("duration_hint_ms_not_number")
+        if float(duration_hint_raw) < 0:
+            raise ValueError("duration_hint_ms_negative")
+        duration_hint_ms = max(320, min(15000, int(round(float(duration_hint_raw)))))
+
+    return {
+        "schema_version": MOTION_INTENT_SCHEMA_VERSION,
+        "mode": mode,
+        "emotion_label": emotion_label,
+        "duration_hint_ms": duration_hint_ms,
+        "key_axes": normalized_axes,
+        "summary": {
+            "key_axes_count": len(AXIS_NAMES),
+        },
     }
 
 
@@ -559,106 +646,12 @@ def _build_emotion_seed_axes(emotion: str) -> dict[str, int]:
     }
 
 
-def build_plan_from_axes(
-    selector_output: dict[str, Any],
-    *,
-    library: dict[str, Any],
-    fallback_library: dict[str, Any] | None = None,
-    calibration_profile: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    atoms = _extract_library_atoms(library)
-    fallback_atoms = _extract_library_atoms(fallback_library)
-    axes = selector_output.get("axes")
-    axis_values = axes if isinstance(axes, dict) else {}
-    normalized_axes = {
-        axis.name: clamp_axis_value(axis_values.get(axis.name, 50))
-        for axis in AXES
-    }
-    calibrated_axes = _apply_axis_calibration_profile(
-        axis_values=normalized_axes,
-        calibration_profile=calibration_profile,
-    )
-
-    duration_ms_raw = selector_output.get("duration_ms", 1200)
-    try:
-        target_duration_ms = int(round(float(duration_ms_raw)))
-    except (TypeError, ValueError):
-        target_duration_ms = 1200
-    target_duration_ms = max(400, min(6000, target_duration_ms))
-
-    plan_mode = "idle" if _is_idle_deadzone(calibrated_axes) else "expressive"
-    timing = _build_plan_timing(duration_ms=target_duration_ms, mode=plan_mode)
-    supplementary_params: list[dict[str, Any]] = []
-    if plan_mode == "expressive":
-        supplementary_params = _build_supplementary_params(
-            atoms=atoms,
-            axis_values=calibrated_axes,
-            calibration_profile=calibration_profile,
-        )
-        if not supplementary_params and fallback_atoms:
-            supplementary_params = _build_supplementary_params(
-                atoms=fallback_atoms,
-                axis_values=calibrated_axes,
-                calibration_profile=calibration_profile,
-                allow_relaxed_matching=True,
-            )
-
-    return {
-        "schema_version": "engine.parameter_plan.v1",
-        "mode": plan_mode,
-        "emotion_label": str(selector_output.get("emotion") or "neutral"),
-        "timing": timing,
-        "key_axes": {
-            axis_name: {"value": axis_value}
-            for axis_name, axis_value in calibrated_axes.items()
-        },
-        "supplementary_params": supplementary_params,
-        "calibration_profile": _build_execution_calibration_profile(calibration_profile),
-        "summary": {
-            "key_axes_count": len(AXIS_NAMES),
-            "supplementary_count": len(supplementary_params),
-            "target_duration_ms": target_duration_ms,
-        },
-    }
-
-
 def clamp_axis_value(value: Any) -> int:
     try:
         number = int(round(float(value)))
     except (TypeError, ValueError):
         number = 50
     return max(0, min(100, number))
-
-
-def _build_plan_timing(*, duration_ms: int, mode: str) -> dict[str, int]:
-    if mode == "idle":
-        idle_duration_ms = max(480, min(duration_ms, 2200))
-        return {
-            "duration_ms": idle_duration_ms,
-            "blend_in_ms": 80,
-            "hold_ms": max(220, idle_duration_ms - 200),
-            "blend_out_ms": 120,
-        }
-
-    blend_in_ms = max(80, min(int(round(duration_ms * 0.18)), 360))
-    blend_out_ms = max(120, min(int(round(duration_ms * 0.25)), 520))
-    hold_ms = duration_ms - blend_in_ms - blend_out_ms
-
-    if hold_ms < 120:
-        shortage = 120 - hold_ms
-        reducible_out = max(blend_out_ms - 120, 0)
-        reduce_out = min(shortage, reducible_out)
-        blend_out_ms -= reduce_out
-        shortage -= reduce_out
-        blend_in_ms = max(80, blend_in_ms - shortage)
-        hold_ms = max(120, duration_ms - blend_in_ms - blend_out_ms)
-
-    return {
-        "duration_ms": duration_ms,
-        "blend_in_ms": int(blend_in_ms),
-        "hold_ms": int(hold_ms),
-        "blend_out_ms": int(blend_out_ms),
-    }
 
 
 def _is_idle_deadzone(axis_values: dict[str, int]) -> bool:
@@ -669,486 +662,12 @@ def _is_idle_deadzone(axis_values: dict[str, int]) -> bool:
     return True
 
 
-def _apply_axis_calibration_profile(
-    *,
-    axis_values: dict[str, int],
-    calibration_profile: dict[str, Any] | None,
-) -> dict[str, int]:
-    if not isinstance(calibration_profile, dict):
-        return dict(axis_values)
-
-    calibrated: dict[str, int] = {}
-    for axis_name in AXIS_NAMES:
-        axis_profile = _resolve_axis_calibration_profile(
-            calibration_profile=calibration_profile,
-            axis_name=axis_name,
-        )
-        value = clamp_axis_value(axis_values.get(axis_name, 50))
-        if axis_profile and not _axis_profile_is_safe_to_apply(axis_profile):
-            calibrated[axis_name] = value
-            continue
-
-        # Keep calibration consumption generic: direction flip first, then clamp
-        # to the model's safe/readable operating range if one is provided.
-        if _profile_direction_sign(axis_profile) < 0 or _profile_flag(axis_profile, "invert", "reverse"):
-            value = 100 - value
-
-        lower_bound = _profile_axis_bound(axis_profile, "clip_min", "output_min", "value_min")
-        upper_bound = _profile_axis_bound(axis_profile, "clip_max", "output_max", "value_max")
-        if lower_bound is not None:
-            value = max(lower_bound, value)
-        if upper_bound is not None:
-            value = min(upper_bound, value)
-
-        calibrated[axis_name] = clamp_axis_value(value)
-
-    return calibrated
-
-
-def _resolve_axis_calibration_profile(
-    *,
-    calibration_profile: dict[str, Any] | None,
-    axis_name: str,
-) -> dict[str, Any]:
-    if not isinstance(calibration_profile, dict):
-        return {}
-    axes_profile = calibration_profile.get("axes")
-    if not isinstance(axes_profile, dict):
-        return {}
-    axis_profile = axes_profile.get(axis_name)
-    if isinstance(axis_profile, dict):
-        return axis_profile
-    return {}
-
-
-def _profile_axis_bound(
-    axis_profile: dict[str, Any],
-    *keys: str,
-) -> int | None:
-    for key in keys:
-        value = axis_profile.get(key)
-        if value is None:
-            continue
-        return clamp_axis_value(value)
-    return None
-
-
-def _profile_flag(axis_profile: dict[str, Any], *keys: str) -> bool:
-    for key in keys:
-        value = axis_profile.get(key)
-        if isinstance(value, bool):
-            if value:
-                return True
-            continue
-        text = str(value or "").strip().lower()
-        if text in {"1", "true", "yes", "on", "invert", "reverse"}:
-            return True
-    return False
-
-
-def _profile_direction_sign(axis_profile: dict[str, Any]) -> int:
-    for key in ("direction", "sign"):
-        value = axis_profile.get(key)
-        if value is None:
-            continue
-        if isinstance(value, (int, float)):
-            return -1 if float(value) < 0 else 1
-        text = str(value or "").strip().lower()
-        if text in {"-1", "negative", "inverted", "reverse", "flipped"}:
-            return -1
-        if text in {"1", "positive", "forward", "normal"}:
-            return 1
-    return 1
-
-
-def _profile_positive_int(
-    axis_profile: dict[str, Any],
-    *keys: str,
-) -> int | None:
-    for key in keys:
-        value = axis_profile.get(key)
-        if value is None:
-            continue
-        try:
-            number = int(round(float(value)))
-        except (TypeError, ValueError):
-            continue
-        if number > 0:
-            return number
-    return None
-
-
-def _profile_multiplier(
-    axis_profile: dict[str, Any],
-    *keys: str,
-) -> float | None:
-    for key in keys:
-        value = axis_profile.get(key)
-        if value is None:
-            continue
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            continue
-    return None
-
-
-def _profile_parameter_id_set(
-    axis_profile: dict[str, Any],
-    *keys: str,
-) -> set[str]:
-    normalized: set[str] = set()
-    for key in keys:
-        raw_value = axis_profile.get(key)
-        values = raw_value if isinstance(raw_value, list) else [raw_value]
-        for item in values:
-            parameter_id = _normalize_parameter_id(str(item or "").strip())
-            if parameter_id:
-                normalized.add(parameter_id)
-    return normalized
-
-
-def _profile_boolean(axis_profile: dict[str, Any], key: str) -> bool | None:
-    if key not in axis_profile:
-        return None
-    value = axis_profile.get(key)
-    if isinstance(value, bool):
-        return value
-    text = str(value or "").strip().lower()
-    if text in {"1", "true", "yes", "on"}:
-        return True
-    if text in {"0", "false", "no", "off"}:
-        return False
-    return None
-
-
-def _axis_profile_is_safe_to_apply(axis_profile: dict[str, Any]) -> bool:
-    for key in ("safe_to_apply", "recommended"):
-        flag = _profile_boolean(axis_profile, key)
-        if flag is not None:
-            return flag
-    return True
-
-
-def _build_execution_calibration_profile(
-    calibration_profile: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    if not isinstance(calibration_profile, dict):
-        return None
-
-    axes_payload = calibration_profile.get("axes")
-    if not isinstance(axes_payload, dict):
-        return None
-
-    sanitized_axes: dict[str, dict[str, Any]] = {}
-    for axis_name in AXIS_NAMES:
-        axis_profile = axes_payload.get(axis_name)
-        if not isinstance(axis_profile, dict):
-            continue
-
-        sanitized_axis: dict[str, Any] = {}
-        parameter_id = str(axis_profile.get("parameter_id") or "").strip()
-        if parameter_id:
-            sanitized_axis["parameter_id"] = parameter_id
-
-        parameter_ids = [
-            str(item).strip()
-            for item in axis_profile.get("parameter_ids", [])
-            if str(item).strip()
-        ] if isinstance(axis_profile.get("parameter_ids"), list) else []
-        if parameter_ids:
-            sanitized_axis["parameter_ids"] = parameter_ids
-
-        baseline = axis_profile.get("baseline")
-        if isinstance(baseline, (int, float)):
-            sanitized_axis["baseline"] = float(baseline)
-
-        for key in ("recommended", "safe_to_apply"):
-            flag = _profile_boolean(axis_profile, key)
-            if flag is not None:
-                sanitized_axis[key] = flag
-
-        for key in ("confidence", "source", "skip_reason"):
-            value = str(axis_profile.get(key) or "").strip()
-            if value:
-                sanitized_axis[key] = value
-
-        recommended_range = _sanitize_execution_range(
-            axis_profile.get("recommended_range")
-            or axis_profile.get("recommended")
-            or axis_profile.get("recommendedRange"),
-        )
-        if recommended_range is not None:
-            sanitized_axis["recommended_range"] = recommended_range
-
-        observed_range = _sanitize_execution_range(
-            axis_profile.get("observed_range")
-            or axis_profile.get("observed")
-            or axis_profile.get("observedRange"),
-        )
-        if observed_range is not None:
-            sanitized_axis["observed_range"] = observed_range
-
-        if sanitized_axis:
-            sanitized_axes[axis_name] = sanitized_axis
-
-    if not sanitized_axes:
-        return None
-
-    schema_version = str(calibration_profile.get("schema_version") or "").strip()
-    return {
-        "schema_version": schema_version,
-        "axes": sanitized_axes,
-    }
-
-
-def _sanitize_execution_range(value: Any) -> dict[str, float] | None:
-    if not isinstance(value, dict):
-        return None
-
-    sanitized: dict[str, float] = {}
-    min_value = value.get("min")
-    max_value = value.get("max")
-    if isinstance(min_value, (int, float)):
-        sanitized["min"] = float(min_value)
-    if isinstance(max_value, (int, float)):
-        sanitized["max"] = float(max_value)
-    if not sanitized:
-        return None
-    if "min" in sanitized and "max" in sanitized and sanitized["min"] > sanitized["max"]:
-        sanitized["min"], sanitized["max"] = sanitized["max"], sanitized["min"]
-    return sanitized
-
-
-def _extract_library_atoms(library: dict[str, Any] | None) -> list[dict[str, Any]]:
-    if not isinstance(library, dict):
-        return []
-    raw_atoms = library.get("atoms")
-    if not isinstance(raw_atoms, list):
-        return []
-
-    normalized_atoms: list[dict[str, Any]] = []
-    for atom in raw_atoms:
-        if not isinstance(atom, dict):
-            continue
-        normalized_atom = _normalize_supplementary_atom(atom)
-        if normalized_atom is None:
-            continue
-        normalized_atoms.append(normalized_atom)
-    return normalized_atoms
-
-
-def _normalize_supplementary_atom(atom: dict[str, Any]) -> dict[str, Any] | None:
-    parameter_id = str(atom.get("parameter_id") or "").strip()
-    primary_channel = str(
-        atom.get("primary_channel")
-        or atom.get("channel")
-        or "",
-    ).strip()
-    polarity = str(atom.get("polarity") or "neutral").strip()
-    if not parameter_id or not primary_channel:
-        return None
-
-    normalized: dict[str, Any] = {
-        **atom,
-        "id": str(atom.get("id") or "").strip(),
-        "parameter_id": parameter_id,
-        "primary_channel": primary_channel,
-        "polarity": polarity or "neutral",
-        "score": float(atom.get("score") or 0.0),
-        "energy_score": float(atom.get("energy_score") or 0.0),
-        "strength": str(atom.get("strength") or "none"),
-    }
-    return normalized
-
-
-def _build_supplementary_params(
-    *,
-    atoms: list[dict[str, Any]],
-    axis_values: dict[str, int],
-    calibration_profile: dict[str, Any] | None = None,
-    allow_relaxed_matching: bool = False,
-) -> list[dict[str, Any]]:
-    excluded_parameter_ids = {
-        parameter_id
-        for parameter_ids in _KEY_AXIS_EXCLUDED_PARAMETER_IDS.values()
-        for parameter_id in parameter_ids
-    }
-    excluded_parameter_ids.update(_collect_calibration_parameter_ids(calibration_profile))
-    selected_by_parameter: dict[str, dict[str, Any]] = {}
-
-    for axis in AXES:
-        axis_value = clamp_axis_value(axis_values.get(axis.name, 50))
-        delta = axis_value - 50
-        if abs(delta) < _ACTIVE_AXIS_THRESHOLD:
-            continue
-
-        axis_profile = _resolve_axis_calibration_profile(
-            calibration_profile=calibration_profile,
-            axis_name=axis.name,
-        )
-        polarity = "positive" if delta > 0 else "negative"
-        direction = 1.0 if delta > 0 else -1.0
-        normalized_strength = min(abs(delta) / 50.0, 1.0)
-        weight = round(max(0.15, min(0.15 + normalized_strength * 0.75, 0.9)), 4)
-        weight_scale = _profile_multiplier(axis_profile, "supplementary_weight_scale")
-        if weight_scale is not None:
-            weight = round(max(0.0, min(weight * weight_scale, 1.0)), 4)
-        target_scale = _profile_multiplier(axis_profile, "supplementary_target_scale")
-        if target_scale is None:
-            target_scale = 1.0
-        preferred_parameter_ids = _profile_parameter_id_set(
-            axis_profile,
-            "supplementary_preferred_parameter_ids",
-            "preferred_parameter_ids",
-        )
-        blocked_parameter_ids = _profile_parameter_id_set(
-            axis_profile,
-            "supplementary_blocked_parameter_ids",
-            "supplementary_excluded_parameter_ids",
-            "blocked_parameter_ids",
-        )
-        candidate_limit = _profile_positive_int(
-            axis_profile,
-            "supplementary_max_atoms",
-            "supplementary_top_k",
-        )
-        if candidate_limit is None:
-            candidate_limit = 2
-
-        channel_atoms = [
-            atom
-            for atom in atoms
-            if str(atom.get("primary_channel") or "").strip() == axis.channel
-        ]
-        if not channel_atoms:
-            continue
-        polarity_matched_atoms = [
-            atom
-            for atom in channel_atoms
-            if str(atom.get("polarity") or "").strip() == polarity
-        ]
-        candidate_atoms = polarity_matched_atoms
-        if allow_relaxed_matching and not candidate_atoms:
-            candidate_atoms = channel_atoms
-        ranked_atoms = sorted(
-            [
-                atom
-                for atom in candidate_atoms
-                if _normalize_parameter_id(str(atom.get("parameter_id") or "").strip())
-                not in blocked_parameter_ids
-            ],
-            key=lambda atom: (
-                0
-                if str(atom.get("polarity") or "").strip() == polarity
-                else 1,
-                0
-                if _normalize_parameter_id(str(atom.get("parameter_id") or "").strip())
-                in preferred_parameter_ids
-                else 1,
-                -float(atom.get("score") or 0.0),
-                -float(atom.get("energy_score") or 0.0),
-                str(atom.get("id") or ""),
-            ),
-        )[:candidate_limit]
-
-        for atom in ranked_atoms:
-            parameter_id = str(atom.get("parameter_id") or "").strip()
-            if not parameter_id:
-                continue
-            normalized_parameter_id = _normalize_parameter_id(parameter_id)
-            if not normalized_parameter_id:
-                continue
-            if normalized_parameter_id in excluded_parameter_ids:
-                continue
-
-            strength_factor = _strength_semantic_factor(str(atom.get("strength") or ""))
-            source_atom_id = str(atom.get("id") or "").strip() or f"{axis.channel}.{normalized_parameter_id}"
-            target_value = round(
-                max(
-                    -1.0,
-                    min(direction * normalized_strength * strength_factor * target_scale, 1.0),
-                ),
-                4,
-            )
-            candidate = {
-                "parameter_id": parameter_id,
-                "target_value": target_value,
-                "weight": weight,
-                "source_atom_id": source_atom_id,
-                "channel": axis.channel,
-                "_score": float(atom.get("score") or 0.0),
-                "_energy_score": float(atom.get("energy_score") or 0.0),
-            }
-            existing = selected_by_parameter.get(normalized_parameter_id)
-            if existing is None:
-                selected_by_parameter[normalized_parameter_id] = candidate
-                continue
-            if (
-                candidate["_score"] > existing["_score"]
-                or (
-                    candidate["_score"] == existing["_score"]
-                    and candidate["_energy_score"] > existing["_energy_score"]
-                )
-            ):
-                selected_by_parameter[normalized_parameter_id] = candidate
-
-    ordered = sorted(
-        selected_by_parameter.values(),
-        key=lambda item: (
-            -float(item.get("weight") or 0.0),
-            -float(item.get("_score") or 0.0),
-            str(item.get("parameter_id") or ""),
-        ),
-    )
-
-    output: list[dict[str, Any]] = []
-    for item in ordered:
-        output.append(
-            {
-                "parameter_id": str(item.get("parameter_id") or ""),
-                "target_value": float(item.get("target_value") or 0.0),
-                "weight": float(item.get("weight") or 0.0),
-                "source_atom_id": str(item.get("source_atom_id") or ""),
-                "channel": str(item.get("channel") or ""),
-            }
-        )
-    return output
-
-
-def _collect_calibration_parameter_ids(
-    calibration_profile: dict[str, Any] | None,
-) -> set[str]:
-    if not isinstance(calibration_profile, dict):
-        return set()
-
-    axes_payload = calibration_profile.get("axes")
-    if not isinstance(axes_payload, dict):
-        return set()
-
-    parameter_ids: set[str] = set()
-    for axis_name in AXIS_NAMES:
-        axis_profile = axes_payload.get(axis_name)
-        if not isinstance(axis_profile, dict):
-            continue
-        parameter_ids.update(
-            _profile_parameter_id_set(axis_profile, "parameter_id", "parameter_ids")
-        )
-    return parameter_ids
-
-
-def _normalize_parameter_id(parameter_id: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "", str(parameter_id or "").strip().lower())
-
-
-def _strength_semantic_factor(strength: str) -> float:
-    mapping = {
-        "none": 0.35,
-        "low": 0.55,
-        "medium": 0.78,
-        "high": 1.0,
-    }
-    return mapping.get(str(strength or "").strip().lower(), 0.65)
+def validate_motion_intent_payload(intent: Any) -> tuple[bool, str]:
+    try:
+        normalize_motion_intent_payload(intent)
+    except ValueError as exc:
+        return False, str(exc)
+    return True, ""
 
 
 def validate_parameter_plan_payload(plan: Any) -> tuple[bool, str]:
@@ -1156,7 +675,7 @@ def validate_parameter_plan_payload(plan: Any) -> tuple[bool, str]:
         return False, "plan_not_object"
 
     schema_version = str(plan.get("schema_version") or "").strip()
-    if schema_version != "engine.parameter_plan.v1":
+    if schema_version != PARAMETER_PLAN_SCHEMA_VERSION:
         return False, "invalid_schema_version"
 
     mode = str(plan.get("mode") or "").strip().lower()

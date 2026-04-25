@@ -1,24 +1,25 @@
-﻿# AG99live
+# AG99live
 
 AG99live 是桌宠项目 V2：以 `AstrBot 插件适配器 + Electron 前端运行时` 组成一条可联调、可扩展的实时对话与动作链路。
 
 ## 项目目标
 
-- 用统一协议打通 `文本 / 语音 / 图像 / 控制 / 动作计划`。
+- 用统一协议打通 `文本 / 语音 / 图像 / 控制 / 动作`。
 - 将 Live2D 扫描产物沉淀为可复用的动作知识（`base_action_library`、`parameter_action_library`）。
-- 在真实会话中完成 `语义 -> 参数计划 -> 前端执行` 的闭环。
+- 在真实会话中完成 `语义 -> 动作意图 -> 前端编译参数计划 -> 执行` 的闭环。
 
-## 当前状态（2026-04-24）
+## 当前状态（2026-04-25）
 
 ### 已完成
 
 - V2 协议主链路已切换完成：`input.* / output.* / control.* / system.* / engine.*`。
 - Adapter 已可作为 AstrBot 插件运行，提供 `WebSocket` 实时消息和 `HTTP` 资源服务。
 - Live2D 扫描可产出 `parameter_scan`、`base_action_library`、`parameter_action_library`、`calibration_profile`。
-- 动作计划链路支持双路径：主请求内联 `<@anim {...}>` 优先，无内联时 realtime 兜底生成。
+- 动作链路支持双路径：主请求内联 `<@anim {...}>` 优先，无内联时 realtime 兜底生成。
+- 前端 `ModelEngine` 已能本地编译 `engine.motion_intent.v1 -> engine.parameter_plan.v1`。
 - 前端动作执行链路已具备 `turn_id` 级动作/音频时间轴协调、计划软衔接（soft handoff）、高频重复计划去重与重启节流。
 - 参数绑定容错已增强（含模型参数表回退匹配）。
-- 自动化验证基线已建立：`python -m pytest astrbot_plugin_ag99live_adapter/tests -q` -> `52 passed`，`frontend` 的 `typecheck/build` 可通过。
+- 自动化验证基线已建立：`python -m pytest astrbot_plugin_ag99live_adapter/tests -q` -> `45 passed`，`frontend` 的 `typecheck/build` 可通过。
 
 ### 进行中
 
@@ -74,7 +75,7 @@ python -m pytest astrbot_plugin_ag99live_adapter/tests -q
 - 输出：`output.text`、`output.audio`、`output.image`、`output.transcription`
 - 控制：`control.turn_started`、`control.turn_finished`、`control.playback_finished`、`control.error`
 - 系统：`system.server_info`、`system.model_sync`、心跳与历史
-- 动作：`engine.motion_plan`
+- 动作：`engine.motion_plan`、`engine.motion_intent`
 
 ## 文档入口
 
@@ -84,5 +85,4 @@ python -m pytest astrbot_plugin_ag99live_adapter/tests -q
 - [前后端严格审阅报告](./docs/前后端严格审阅报告.md)
 - [Adapter 说明](./astrbot_plugin_ag99live_adapter/README.md)
 - [Frontend 说明](./frontend/README.md)
-
 

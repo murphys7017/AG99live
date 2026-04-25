@@ -96,6 +96,7 @@ const DIRECT_PARAMETER_AXIS_NAMES = Object.keys(DIRECT_PARAMETER_AXIS_MAP);
 const DIRECT_EXPRESSIVE_AXIS_GAIN = 1.35;
 const DIRECT_EXPRESSIVE_AXIS_MIN_MAGNITUDE = 0.22;
 const DIRECT_MAX_MISSING_AXIS_BINDINGS = 3;
+const DIRECT_MAX_SUPPLEMENTARY_BINDING_FAILURES = 3;
 
 interface DirectParameterAxisBinding {
   axisName: string;
@@ -1509,25 +1510,47 @@ export class LAppModel extends CubismUserModel {
     );
     const supplementaryBindings: DirectSupplementaryBinding[] = [];
     const supplementaryParameterIndices = new Set<number>();
+    const supplementaryBindingFailures: string[] = [];
+    const recordSupplementaryBindingFailure = (reason: string): boolean => {
+      supplementaryBindingFailures.push(reason);
+      console.warn(
+        "[LAppModel] supplementary binding skipped:",
+        reason,
+        `(${supplementaryBindingFailures.length}/${DIRECT_MAX_SUPPLEMENTARY_BINDING_FAILURES})`,
+      );
+      return supplementaryBindingFailures.length > DIRECT_MAX_SUPPLEMENTARY_BINDING_FAILURES;
+    };
     for (const item of parsed.plan.supplementary_params) {
       const parameterIdRaw = String(item.parameter_id || "").trim();
       const sourceAtomId = String(item.source_atom_id || "").trim();
       const channel = String(item.channel || "").trim();
       const resolved = this.resolveWritableParameter(parameterIdRaw);
       if (!resolved) {
-        console.warn("[LAppModel] supplementary param not resolvable:", parameterIdRaw);
-        this.stopDirectParameterPlan(`missing_supplementary_parameter:${parameterIdRaw}`);
-        return false;
+        if (recordSupplementaryBindingFailure(`missing_supplementary_parameter:${parameterIdRaw}`)) {
+          this.stopDirectParameterPlan(
+            `too_many_supplementary_binding_failures:${supplementaryBindingFailures.join(",")}`,
+          );
+          return false;
+        }
+        continue;
       }
       if (axisParameterIndices.has(resolved.parameterIndex)) {
-        console.warn("[LAppModel] supplementary param overlaps axis binding:", parameterIdRaw);
-        this.stopDirectParameterPlan(`overlapping_supplementary_parameter:${parameterIdRaw}`);
-        return false;
+        if (recordSupplementaryBindingFailure(`overlapping_supplementary_parameter:${parameterIdRaw}`)) {
+          this.stopDirectParameterPlan(
+            `too_many_supplementary_binding_failures:${supplementaryBindingFailures.join(",")}`,
+          );
+          return false;
+        }
+        continue;
       }
       if (supplementaryParameterIndices.has(resolved.parameterIndex)) {
-        console.warn("[LAppModel] duplicate supplementary param:", parameterIdRaw);
-        this.stopDirectParameterPlan(`duplicate_supplementary_parameter:${parameterIdRaw}`);
-        return false;
+        if (recordSupplementaryBindingFailure(`duplicate_supplementary_parameter:${parameterIdRaw}`)) {
+          this.stopDirectParameterPlan(
+            `too_many_supplementary_binding_failures:${supplementaryBindingFailures.join(",")}`,
+          );
+          return false;
+        }
+        continue;
       }
       supplementaryParameterIndices.add(resolved.parameterIndex);
 
@@ -1541,8 +1564,16 @@ export class LAppModel extends CubismUserModel {
         parameterIndex: resolved.parameterIndex,
       });
     }
+    if (supplementaryBindingFailures.length > 0) {
+      console.warn(
+        "[LAppModel] startDirectParameterPlan: supplementary partial binding enabled. skipped=",
+        supplementaryBindingFailures,
+        "resolved=",
+        supplementaryBindings.map((item) => item.parameterIdRaw),
+      );
+    }
 
-    console.info("[LAppModel] All axes and supplementary params resolved. Activating plan.");
+    console.info("[LAppModel] Axis bindings ready and supplementary params within failure threshold. Activating plan.");
     this._directParameterPlanState = {
       mode: parsed.plan.mode,
       emotionLabel: parsed.plan.emotion_label,
@@ -2341,6 +2372,11 @@ export class LAppModel extends CubismUserModel {
       console.warn("[LAppModel] parseDirectParameterPlan: invalid_mode — got:", mode);
       return fail("invalid_mode");
     }
+    const emotionLabel = String(payload.emotion_label || "").trim();
+    if (!emotionLabel) {
+      console.warn("[LAppModel] parseDirectParameterPlan: emotion_label_empty");
+      return fail("emotion_label_empty");
+    }
 
     const timingPayload = payload.timing;
     if (!timingPayload || typeof timingPayload !== "object") {
@@ -2444,7 +2480,7 @@ export class LAppModel extends CubismUserModel {
     return {
       plan: {
         mode,
-        emotion_label: String(payload.emotion_label || "neutral").trim() || "neutral",
+        emotion_label: emotionLabel,
         timing: {
           duration_ms: timing.durationMs,
           blend_in_ms: timing.blendInMs,

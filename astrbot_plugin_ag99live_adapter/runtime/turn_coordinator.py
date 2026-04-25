@@ -26,6 +26,7 @@ from ..protocol import (
     SOURCE_ENGINE,
     TYPE_CONTROL_INTERRUPT,
     TYPE_CONTROL_PLAYBACK_FINISHED,
+    TYPE_ENGINE_MOTION_INTENT,
     TYPE_ENGINE_MOTION_PLAN,
     TYPE_INPUT_AUDIO_STREAM_CHUNK,
     TYPE_INPUT_AUDIO_STREAM_END,
@@ -38,7 +39,11 @@ from ..protocol import (
     parse_inbound_message,
 )
 from ..services.speech_service import SpeechIngressService
-from ..motion.realtime_motion_plan import validate_parameter_plan_payload
+from ..motion.realtime_motion_plan import (
+    normalize_motion_intent_payload,
+    validate_motion_intent_payload,
+    validate_parameter_plan_payload,
+)
 
 INLINE_ANIM_TAG_PATTERN = re.compile(r"<@anim\s*\{[\s\S]*?\}>\s*", re.IGNORECASE)
 INLINE_ANIM_START_PATTERN = re.compile(r"<@anim\b", re.IGNORECASE)
@@ -162,8 +167,8 @@ class TurnCoordinator:
             await self._commit_inbound_message(message_obj, turn_id=message.turn_id)
             return
 
-        if message.type == TYPE_ENGINE_MOTION_PLAN:
-            await self._handle_engine_motion_plan_preview(message)
+        if message.type in {TYPE_ENGINE_MOTION_PLAN, TYPE_ENGINE_MOTION_INTENT}:
+            await self._handle_engine_motion_payload_preview(message)
             return
 
         await self._send_json(
@@ -194,7 +199,7 @@ class TurnCoordinator:
         override_text = str(raw_reply_text_override or "").strip()
         raw_reply_text = override_text or "\n".join(texts).strip()
         inline_anim_detected = INLINE_ANIM_START_PATTERN.search(raw_reply_text) is not None
-        reply_text, inline_plan, inline_mode = _extract_inline_motion_plan(raw_reply_text)
+        reply_text, inline_payload, inline_mode = _extract_inline_motion_plan(raw_reply_text)
 
         if reply_text:
             self.chat_buffer.add("assistant", reply_text)
@@ -209,7 +214,7 @@ class TurnCoordinator:
             )
 
         if inline_anim_detected:
-            if inline_plan is None:
+            if inline_payload is None:
                 logger.warning(
                     "WIRING motion_plan turn_id=%s inline_anim_parse_failed=true "
                     "route=secondary_request",
@@ -221,7 +226,7 @@ class TurnCoordinator:
                     "inline_mode=%s route=inline_primary",
                     turn_id or "",
                     inline_anim_detected,
-                    inline_plan is not None,
+                    inline_payload is not None,
                     inline_mode or "",
                 )
         else:
@@ -232,12 +237,12 @@ class TurnCoordinator:
             )
 
         inline_dispatched = False
-        if isinstance(inline_plan, dict):
+        if isinstance(inline_payload, dict):
             inline_mode_resolved = str(inline_mode or "inline").strip() or "inline"
-            inline_dispatched = await self.broadcast_motion_plan_preview(
-                plan=inline_plan,
+            inline_dispatched = await self.broadcast_motion_payload(
+                motion_payload=inline_payload,
                 mode=inline_mode_resolved,
-                source="engine.inline_motion_plan",
+                source=_resolve_inline_motion_source(inline_payload),
                 turn_id=turn_id,
             )
             if not inline_dispatched:
@@ -249,7 +254,7 @@ class TurnCoordinator:
 
         if not inline_dispatched:
             schedule_text = reply_text
-            if not schedule_text and inline_anim_detected and inline_plan is None:
+            if not schedule_text and inline_anim_detected and inline_payload is None:
                 schedule_text = str(getattr(self.session_state, "last_user_text", "") or "").strip()
             if schedule_text:
                 self._schedule_realtime_motion_plan_preview(
@@ -501,17 +506,37 @@ class TurnCoordinator:
             umo,
         )
 
-    async def _handle_engine_motion_plan_preview(self, message) -> None:
+    async def _handle_engine_motion_payload_preview(self, message) -> None:
         payload = message.payload if isinstance(message.payload, dict) else {}
-        plan_payload = payload.get("plan")
+        motion_payload, failure_reason = _extract_message_motion_payload(
+            message.type,
+            payload,
+        )
         mode = str(payload.get("mode") or "preview")
-        schema_version, resolved_mode, key_axes_count, supplementary_count, failure_reason = _summarize_parameter_plan(
-            plan_payload
+        if failure_reason:
+            logger.warning(
+                "WIRING motion_payload_ingress rejected type=%s mode=%s turn_id=%s failure_reason=%s",
+                message.type,
+                mode,
+                message.turn_id or "",
+                failure_reason,
+            )
+            await self._send_json(
+                build_control_error(
+                    session_id=message.session_id,
+                    turn_id=message.turn_id,
+                    message=f"Invalid {message.type} payload: {failure_reason}",
+                )
+            )
+            return
+        schema_version, resolved_mode, key_axes_count, supplementary_count, failure_reason = _summarize_motion_payload(
+            motion_payload
         )
 
         logger.info(
-            "WIRING motion_plan_ingress mode=%s turn_id=%s "
+            "WIRING motion_payload_ingress type=%s mode=%s turn_id=%s "
             "plan_schema=%s plan_mode=%s key_axes_count=%s supplementary_count=%s failure_reason=%s",
+            message.type,
             mode,
             message.turn_id or "",
             schema_version,
@@ -520,30 +545,42 @@ class TurnCoordinator:
             supplementary_count,
             failure_reason,
         )
-        # Phase-1/2 bridge stub: accept and record the preview plan so frontend
-        # testing won't be blocked by protocol rejection before engine playback lands.
+        # Frontend-origin preview payloads are validated here; playback happens
+        # locally in the desktop frontend, so the adapter only records ingress.
         return
 
-    async def broadcast_motion_plan_preview(
+    async def broadcast_motion_payload(
         self,
         *,
-        plan: Any,
+        motion_payload: Any,
         mode: str = "preview",
-        source: str = "debug_port",
+        source: str = "engine.motion_payload",
         turn_id: str | None = None,
     ) -> bool:
-        if not isinstance(plan, dict):
+        if not isinstance(motion_payload, dict):
+            return False
+
+        if _resolve_motion_payload_schema_version(motion_payload) == "engine.motion_intent.v1":
+            try:
+                motion_payload = normalize_motion_intent_payload(motion_payload)
+            except ValueError as exc:
+                logger.warning("WIRING motion_payload_egress rejected: %s", exc)
+                return False
+
+        message_type = _resolve_engine_motion_message_type(motion_payload)
+        if not message_type:
             return False
 
         resolved_turn_id = turn_id if turn_id is not None else self.session_state.current_turn_id
+        payload_key = "intent" if message_type == TYPE_ENGINE_MOTION_INTENT else "plan"
         payload = {
             "mode": str(mode or "preview"),
-            "plan": plan,
-            "source": str(source or "debug_port"),
+            payload_key: motion_payload,
+            "source": str(source or "engine.motion_payload"),
         }
         sent = await self._send_json(
             build_message_envelope(
-                TYPE_ENGINE_MOTION_PLAN,
+                message_type,
                 session_id=self.session_state.client_uid,
                 turn_id=resolved_turn_id,
                 source=SOURCE_ENGINE,
@@ -552,11 +589,12 @@ class TurnCoordinator:
         )
         if sent:
             schema_version, resolved_mode, key_axes_count, supplementary_count, failure_reason = (
-                _summarize_parameter_plan(plan)
+                _summarize_motion_payload(motion_payload)
             )
             logger.info(
-                "WIRING motion_plan_egress source=%s mode=%s turn_id=%s "
+                "WIRING motion_payload_egress type=%s source=%s mode=%s turn_id=%s "
                 "plan_schema=%s plan_mode=%s key_axes_count=%s supplementary_count=%s failure_reason=%s",
+                message_type,
                 payload["source"],
                 payload["mode"],
                 resolved_turn_id or "",
@@ -601,25 +639,63 @@ class TurnCoordinator:
     ) -> None:
         if self._generate_realtime_motion_plan is None:
             return
+        runtime_state = getattr(self, "runtime_state", None)
+        if runtime_state is not None and not bool(getattr(runtime_state, "enable_realtime_motion_plan", True)):
+            logger.info(
+                "Realtime motion plan skipped because enable_realtime_motion_plan=false turn_id=%s",
+                origin_turn_id or "",
+            )
+            return
 
         try:
-            plan = await self._generate_realtime_motion_plan(
+            motion_payload = await self._generate_realtime_motion_plan(
                 user_text=user_text,
                 assistant_text=assistant_text,
             )
         except Exception as exc:
             logger.warning("Realtime motion plan generation failed: %s", exc)
+            await self._emit_realtime_motion_error(
+                turn_id=origin_turn_id,
+                failure_reason=f"exception:{exc}",
+            )
             return
 
-        if not isinstance(plan, dict):
+        if not isinstance(motion_payload, dict):
+            logger.warning(
+                "WIRING motion_plan turn_id=%s route=drop failure_reason=generator_returned_no_payload",
+                origin_turn_id or "",
+            )
+            await self._emit_realtime_motion_error(
+                turn_id=origin_turn_id,
+                failure_reason="generator_returned_no_payload",
+            )
             return
 
-        valid, failure_reason = _validate_parameter_plan(plan)
+        if _resolve_motion_payload_schema_version(motion_payload) == "engine.motion_intent.v1":
+            try:
+                motion_payload = normalize_motion_intent_payload(motion_payload)
+            except ValueError as exc:
+                logger.warning(
+                    "WIRING motion_plan turn_id=%s route=drop failure_reason=%s",
+                    origin_turn_id or "",
+                    exc,
+                )
+                await self._emit_realtime_motion_error(
+                    turn_id=origin_turn_id,
+                    failure_reason=str(exc),
+                )
+                return
+
+        valid, failure_reason = _validate_motion_payload(motion_payload)
         if not valid:
             logger.warning(
                 "WIRING motion_plan turn_id=%s route=drop failure_reason=%s",
                 origin_turn_id or "",
                 failure_reason,
+            )
+            await self._emit_realtime_motion_error(
+                turn_id=origin_turn_id,
+                failure_reason=failure_reason,
             )
             return
 
@@ -638,11 +714,25 @@ class TurnCoordinator:
             if resolved_mode:
                 mode = resolved_mode
 
-        await self.broadcast_motion_plan_preview(
-            plan=plan,
+        await self.broadcast_motion_payload(
+            motion_payload=motion_payload,
             mode=mode,
-            source="engine.realtime_motion_plan",
+            source=_resolve_realtime_motion_source(motion_payload),
             turn_id=origin_turn_id,
+        )
+
+    async def _emit_realtime_motion_error(
+        self,
+        *,
+        turn_id: str | None,
+        failure_reason: str,
+    ) -> None:
+        await self._send_json(
+            build_control_error(
+                session_id=self.session_state.client_uid,
+                turn_id=turn_id,
+                message=f"Realtime motion generation failed: {failure_reason}",
+            )
         )
 
     def _spawn_background_task(self, coroutine: Awaitable[None]) -> None:
@@ -802,13 +892,22 @@ def _normalize_inline_anim_payload(
     mode = str(mode_value).strip() if isinstance(mode_value, str) else "inline"
     mode = mode or "inline"
 
-    if isinstance(payload.get("plan"), dict):
-        plan = payload["plan"]
+    if isinstance(payload.get("intent"), dict):
+        try:
+            plan = normalize_motion_intent_payload(payload["intent"])
+        except ValueError as exc:
+            logger.warning("WIRING inline_motion payload rejected: %s", exc)
+            return None, None
+    elif isinstance(payload.get("plan"), dict):
+        logger.warning("WIRING inline_motion payload rejected: legacy_plan_field_not_supported")
+        return None, None
     else:
-        plan = payload
+        logger.warning("WIRING inline_motion payload rejected: missing_nested_intent_or_plan")
+        return None, None
 
-    valid, _ = _validate_parameter_plan(plan)
+    valid, failure_reason = _validate_motion_payload(plan)
     if not valid:
+        logger.warning("WIRING inline_motion payload rejected: %s", failure_reason)
         return None, None
 
     return plan, mode
@@ -818,7 +917,20 @@ def _validate_parameter_plan(plan: Any) -> tuple[bool, str]:
     return validate_parameter_plan_payload(plan)
 
 
-def _summarize_parameter_plan(plan: Any) -> tuple[str, str, int, int, str]:
+def _validate_motion_intent(intent: Any) -> tuple[bool, str]:
+    return validate_motion_intent_payload(intent)
+
+
+def _validate_motion_payload(payload: Any) -> tuple[bool, str]:
+    schema_version = _resolve_motion_payload_schema_version(payload)
+    if schema_version == "engine.parameter_plan.v1":
+        return _validate_parameter_plan(payload)
+    if schema_version == "engine.motion_intent.v1":
+        return _validate_motion_intent(payload)
+    return False, "unsupported_schema_version"
+
+
+def _summarize_motion_payload(plan: Any) -> tuple[str, str, int, int, str]:
     if not isinstance(plan, dict):
         return "", "", 0, 0, "plan_not_object"
 
@@ -828,8 +940,66 @@ def _summarize_parameter_plan(plan: Any) -> tuple[str, str, int, int, str]:
     supplementary = plan.get("supplementary_params")
     key_axes_count = len(key_axes) if isinstance(key_axes, dict) else 0
     supplementary_count = len(supplementary) if isinstance(supplementary, list) else 0
-    valid, failure_reason = _validate_parameter_plan(plan)
+    valid, failure_reason = _validate_motion_payload(plan)
     return schema_version, mode, key_axes_count, supplementary_count, "" if valid else failure_reason
+
+
+def _resolve_motion_payload_schema_version(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("schema_version") or "").strip()
+
+
+def _resolve_engine_motion_message_type(payload: Any) -> str:
+    schema_version = _resolve_motion_payload_schema_version(payload)
+    if schema_version == "engine.parameter_plan.v1":
+        return TYPE_ENGINE_MOTION_PLAN
+    if schema_version == "engine.motion_intent.v1":
+        return TYPE_ENGINE_MOTION_INTENT
+    return ""
+
+
+def _resolve_inline_motion_source(payload: Any) -> str:
+    message_type = _resolve_engine_motion_message_type(payload)
+    if message_type == TYPE_ENGINE_MOTION_INTENT:
+        return "engine.inline_motion_intent"
+    return "engine.inline_motion_plan"
+
+
+def _resolve_realtime_motion_source(payload: Any) -> str:
+    message_type = _resolve_engine_motion_message_type(payload)
+    if message_type == TYPE_ENGINE_MOTION_INTENT:
+        return "engine.realtime_motion_intent"
+    return "engine.realtime_motion_plan"
+
+
+def _extract_message_motion_payload(
+    message_type: str,
+    payload: Any,
+) -> tuple[dict[str, Any] | None, str]:
+    if not isinstance(payload, dict):
+        return None, "payload_not_object"
+
+    if message_type == TYPE_ENGINE_MOTION_INTENT:
+        motion_payload = payload.get("intent")
+        if not isinstance(motion_payload, dict):
+            return None, "missing_intent_object"
+        try:
+            motion_payload = normalize_motion_intent_payload(motion_payload)
+        except ValueError as exc:
+            return None, str(exc)
+    elif message_type == TYPE_ENGINE_MOTION_PLAN:
+        motion_payload = payload.get("plan")
+        if not isinstance(motion_payload, dict):
+            return None, "missing_plan_object"
+    else:
+        return None, "unsupported_message_type"
+
+    resolved_message_type = _resolve_engine_motion_message_type(motion_payload)
+    if resolved_message_type != message_type:
+        return None, "message_type_payload_schema_mismatch"
+
+    return motion_payload, ""
 
 
 def _build_model_visible_user_text(user_text: str, *, runtime_state: Any) -> str:
@@ -849,7 +1019,7 @@ def _build_model_visible_user_text(user_text: str, *, runtime_state: Any) -> str
 def _build_inline_motion_contract(*, runtime_state: Any) -> str:
     template_payload = {
         "mode": "inline",
-        "plan": _build_inline_motion_plan_template(),
+        "intent": _build_inline_motion_intent_template(),
     }
     template_tag = f"<@anim {json.dumps(template_payload, ensure_ascii=False, separators=(',', ':'))}>"
     selected_model = ""
@@ -863,12 +1033,12 @@ def _build_inline_motion_contract(*, runtime_state: Any) -> str:
         "Then append exactly one final line containing only a single <@anim ...> tag.",
         "Do not wrap the tag in a code block and do not explain the tag.",
         "The JSON inside the tag must be valid JSON.",
-        "Top-level tag payload must use `mode: \"inline\"` and a `plan` object.",
-        "The `plan.schema_version` must be `engine.parameter_plan.v1`.",
-        "The `plan.mode` must be `idle` or `expressive`.",
-        "The `plan.key_axes` object must include all 12 axes with integer values from 0 to 100.",
-        "Use `supplementary_params: []` when you are unsure.",
-        "If the turn is calm or uncertain, emit a safe idle plan instead of omitting the tag.",
+        "Top-level tag payload must use `mode: \"inline\"` and an `intent` object.",
+        "The `intent.schema_version` must be `engine.motion_intent.v1`.",
+        "The `intent.mode` must be `idle` or `expressive`.",
+        "The `intent.key_axes` object must include all 12 axes with integer values from 0 to 100.",
+        "The `intent.duration_hint_ms` should be a reasonable duration hint in milliseconds.",
+        "If the turn is calm or uncertain, emit a safe idle intent instead of omitting the tag.",
     ]
     if selected_model:
         lines.append(f"Current Live2D model: {selected_model}.")
@@ -877,22 +1047,19 @@ def _build_inline_motion_contract(*, runtime_state: Any) -> str:
     return "\n".join(lines)
 
 
-def _build_inline_motion_plan_template() -> dict[str, Any]:
+def _build_inline_motion_intent_template() -> dict[str, Any]:
     return {
-        "schema_version": "engine.parameter_plan.v1",
+        "schema_version": "engine.motion_intent.v1",
         "mode": "idle",
         "emotion_label": "neutral",
-        "timing": {
-            "duration_ms": 1200,
-            "blend_in_ms": 120,
-            "hold_ms": 840,
-            "blend_out_ms": 240,
-        },
+        "duration_hint_ms": 1200,
         "key_axes": {
             axis_name: {"value": 50}
             for axis_name in DIRECT_PARAMETER_AXIS_NAMES
         },
-        "supplementary_params": [],
+        "summary": {
+            "key_axes_count": len(DIRECT_PARAMETER_AXIS_NAMES),
+        },
     }
 
 

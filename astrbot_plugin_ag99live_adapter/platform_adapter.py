@@ -29,7 +29,13 @@ from .services.message_factory import MessageFactory
 from .transport.static_routes import build_static_routes, list_background_files
 from .runtime.plugin_runtime import get_plugin_config, get_plugin_context
 from .runtime.state import RuntimeState
-from .motion.realtime_motion_plan import RealtimeMotionPlanGenerator
+from .motion.realtime_motion_plan import (
+    RealtimeMotionPlanGenerator,
+    normalize_motion_intent_payload,
+    validate_motion_intent_payload,
+    validate_parameter_plan_payload,
+)
+from .protocol.constants import TYPE_ENGINE_MOTION_INTENT, TYPE_ENGINE_MOTION_PLAN
 from .runtime.session_state import SessionState
 from .transport.websocket_server import WebSocketTransport
 from .runtime.turn_coordinator import TurnCoordinator
@@ -386,15 +392,18 @@ class OLVPetPlatformAdapter(Platform):
         payload: dict[str, Any],
     ) -> tuple[int, dict[str, Any]]:
         normalized_path = path.rstrip("/")
-        if normalized_path != "/api/engine/motion_plan_preview":
+        if normalized_path not in {
+            "/api/engine/motion_payload_preview",
+            "/api/engine/motion_plan_preview",
+        }:
             return 404, {"ok": False, "error": "Unknown debug API endpoint."}
 
         if not isinstance(payload, dict):
             return 400, {"ok": False, "error": "Payload must be an object."}
 
-        plan = payload.get("plan")
-        if not isinstance(plan, dict):
-            return 400, {"ok": False, "error": "`plan` must be a JSON object."}
+        motion_payload, message_type, failure_reason = _extract_debug_motion_payload(payload)
+        if failure_reason:
+            return 400, {"ok": False, "error": failure_reason}
 
         mode = str(payload.get("mode") or "preview").strip() or "preview"
         source = str(payload.get("source") or "analysis.notebook").strip() or "analysis.notebook"
@@ -404,8 +413,8 @@ class OLVPetPlatformAdapter(Platform):
             return 503, {"ok": False, "error": "Adapter event loop is not ready."}
 
         future = asyncio.run_coroutine_threadsafe(
-            self.turn_coordinator.broadcast_motion_plan_preview(
-                plan=plan,
+            self.turn_coordinator.broadcast_motion_payload(
+                motion_payload=motion_payload,
                 mode=mode,
                 source=source,
             ),
@@ -414,9 +423,9 @@ class OLVPetPlatformAdapter(Platform):
         try:
             sent = bool(future.result(timeout=5.0))
         except FutureTimeoutError:
-            return 504, {"ok": False, "error": "Timed out while dispatching motion plan preview."}
+            return 504, {"ok": False, "error": "Timed out while dispatching motion payload preview."}
         except Exception as exc:
-            return 500, {"ok": False, "error": f"Failed to dispatch motion plan preview: {exc}"}
+            return 500, {"ok": False, "error": f"Failed to dispatch motion payload preview: {exc}"}
 
         if not sent:
             return 409, {
@@ -428,10 +437,10 @@ class OLVPetPlatformAdapter(Platform):
             "ok": True,
             "status": "dispatched",
             "endpoint": normalized_path,
+            "type": message_type,
             "mode": mode,
             "source": source,
         }
-
     def _sync_client_profile_from_runtime_state(self) -> None:
         self.client_uid = normalize_client_uid(
             getattr(self.runtime_state, "client_uid", self.client_uid),
@@ -447,6 +456,46 @@ class OLVPetPlatformAdapter(Platform):
             self.client_nickname,
         )
         self.history_bridge.set_client_uid(self.client_uid)
+
+
+def _extract_debug_motion_payload(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str, str]:
+    if isinstance(payload.get("intent"), dict):
+        try:
+            motion_payload = normalize_motion_intent_payload(payload["intent"])
+        except ValueError as exc:
+            return None, TYPE_ENGINE_MOTION_INTENT, f"Invalid intent payload: {exc}"
+        valid, reason = validate_motion_intent_payload(motion_payload)
+        if not valid:
+            return None, TYPE_ENGINE_MOTION_INTENT, f"Invalid intent payload: {reason}"
+        return motion_payload, TYPE_ENGINE_MOTION_INTENT, ""
+
+    if isinstance(payload.get("plan"), dict):
+        motion_payload = payload["plan"]
+        valid, reason = validate_parameter_plan_payload(motion_payload)
+        if not valid:
+            return None, TYPE_ENGINE_MOTION_PLAN, f"Invalid plan payload: {reason}"
+        return motion_payload, TYPE_ENGINE_MOTION_PLAN, ""
+
+    schema_version = str(payload.get("schema_version") or "").strip()
+    if schema_version == "engine.motion_intent.v1":
+        try:
+            motion_payload = normalize_motion_intent_payload(payload)
+        except ValueError as exc:
+            return None, TYPE_ENGINE_MOTION_INTENT, f"Invalid intent payload: {exc}"
+        valid, reason = validate_motion_intent_payload(motion_payload)
+        if not valid:
+            return None, TYPE_ENGINE_MOTION_INTENT, f"Invalid intent payload: {reason}"
+        return motion_payload, TYPE_ENGINE_MOTION_INTENT, ""
+
+    if schema_version == "engine.parameter_plan.v1":
+        valid, reason = validate_parameter_plan_payload(payload)
+        if not valid:
+            return None, TYPE_ENGINE_MOTION_PLAN, f"Invalid plan payload: {reason}"
+        return payload, TYPE_ENGINE_MOTION_PLAN, ""
+
+    return None, "", "`intent` or `plan` must be a valid motion payload object."
 
 
 def _config_get(config: Any, key: str, default: Any) -> Any:

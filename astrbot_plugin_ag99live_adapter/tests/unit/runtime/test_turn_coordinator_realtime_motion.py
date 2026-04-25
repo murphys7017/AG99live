@@ -1,7 +1,24 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import importlib
+import json
+
+
+_AXIS_NAMES = [
+    "head_yaw",
+    "head_roll",
+    "head_pitch",
+    "body_yaw",
+    "body_roll",
+    "gaze_x",
+    "gaze_y",
+    "eye_open_left",
+    "eye_open_right",
+    "mouth_open",
+    "mouth_smile",
+    "brow_bias",
+]
 
 
 def _build_valid_parameter_plan(mode: str = "expressive") -> dict:
@@ -38,6 +55,32 @@ def _build_valid_parameter_plan(mode: str = "expressive") -> dict:
                 "channel": "head_yaw",
             }
         ],
+    }
+
+
+def _build_valid_motion_intent(mode: str = "expressive") -> dict:
+    return {
+        "schema_version": "engine.motion_intent.v1",
+        "mode": mode,
+        "emotion_label": "test",
+        "duration_hint_ms": 1200,
+        "key_axes": {
+            "head_yaw": {"value": 62},
+            "head_roll": {"value": 50},
+            "head_pitch": {"value": 50},
+            "body_yaw": {"value": 50},
+            "body_roll": {"value": 50},
+            "gaze_x": {"value": 50},
+            "gaze_y": {"value": 50},
+            "eye_open_left": {"value": 52},
+            "eye_open_right": {"value": 52},
+            "mouth_open": {"value": 48},
+            "mouth_smile": {"value": 64},
+            "brow_bias": {"value": 56},
+        },
+        "summary": {
+            "key_axes_count": 12,
+        },
     }
 
 
@@ -108,13 +151,13 @@ def test_realtime_motion_plan_skips_when_turn_becomes_stale(install_fake_astrbot
 
     called: dict[str, object] = {}
 
-    async def fake_broadcast_motion_plan_preview(**kwargs):
+    async def fake_broadcast_motion_payload(**kwargs):
         called.update(kwargs)
         return True
 
     coordinator._generate_realtime_motion_plan = fake_generate_realtime_motion_plan
     coordinator._realtime_motion_mode_getter = lambda: "realtime"
-    coordinator.broadcast_motion_plan_preview = fake_broadcast_motion_plan_preview
+    coordinator.broadcast_motion_payload = fake_broadcast_motion_payload
 
     asyncio.run(
         coordinator._generate_and_broadcast_realtime_motion_plan(
@@ -145,13 +188,13 @@ def test_realtime_motion_plan_uses_origin_turn_id_when_session_is_idle(
 
     called: dict[str, object] = {}
 
-    async def fake_broadcast_motion_plan_preview(**kwargs):
+    async def fake_broadcast_motion_payload(**kwargs):
         called.update(kwargs)
         return True
 
     coordinator._generate_realtime_motion_plan = fake_generate_realtime_motion_plan
     coordinator._realtime_motion_mode_getter = lambda: "realtime"
-    coordinator.broadcast_motion_plan_preview = fake_broadcast_motion_plan_preview
+    coordinator.broadcast_motion_payload = fake_broadcast_motion_payload
 
     asyncio.run(
         coordinator._generate_and_broadcast_realtime_motion_plan(
@@ -168,16 +211,20 @@ def test_realtime_motion_plan_uses_origin_turn_id_when_session_is_idle(
 def test_extract_inline_motion_plan_strips_valid_tag(install_fake_astrbot, monkeypatch) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
     module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    tag_payload = json.dumps(
+        {"mode": "inline", "intent": _build_valid_motion_intent()},
+        separators=(",", ":"),
+    )
 
     text, plan, mode = module._extract_inline_motion_plan(
-        'hello <@anim {"mode":"inline","plan":{"schema_version":"engine.parameter_plan.v1","mode":"expressive","emotion_label":"inline","timing":{"duration_ms":900,"blend_in_ms":120,"hold_ms":620,"blend_out_ms":160},"key_axes":{"head_yaw":{"value":61},"head_roll":{"value":50},"head_pitch":{"value":50},"body_yaw":{"value":50},"body_roll":{"value":50},"gaze_x":{"value":50},"gaze_y":{"value":50},"eye_open_left":{"value":55},"eye_open_right":{"value":55},"mouth_open":{"value":52},"mouth_smile":{"value":63},"brow_bias":{"value":58}},"supplementary_params":[{"parameter_id":"ParamCheek","target_value":0.3,"weight":0.4,"source_atom_id":"inline.1","channel":"head_yaw"}]}}> world'
+        f"hello <@anim {tag_payload}> world"
     )
 
     assert "<@anim" not in text.lower()
     assert "hello" in text.lower()
     assert "world" in text.lower()
     assert isinstance(plan, dict)
-    assert plan.get("schema_version") == "engine.parameter_plan.v1"
+    assert plan.get("schema_version") == "engine.motion_intent.v1"
     assert mode == "inline"
 
 
@@ -187,6 +234,24 @@ def test_extract_inline_motion_plan_strips_malformed_tag(install_fake_astrbot, m
 
     text, plan, mode = module._extract_inline_motion_plan(
         'hello <@anim {"mode":"inline" \nworld'
+    )
+
+    assert "<@anim" not in text.lower()
+    assert "hello" in text.lower()
+    assert "world" in text.lower()
+    assert plan is None
+    assert mode is None
+
+
+def test_extract_inline_motion_plan_rejects_top_level_payload_without_nested_intent_or_plan(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+
+    text, plan, mode = module._extract_inline_motion_plan(
+        'hello <@anim {"mode":"inline","schema_version":"engine.motion_intent.v1","emotion_label":"inline","duration_hint_ms":900,"key_axes":{"head_yaw":{"value":61},"head_roll":{"value":50},"head_pitch":{"value":50},"body_yaw":{"value":50},"body_roll":{"value":50},"gaze_x":{"value":50},"gaze_y":{"value":50},"eye_open_left":{"value":55},"eye_open_right":{"value":55},"mouth_open":{"value":52},"mouth_smile":{"value":63},"brow_bias":{"value":58}}}> world'
     )
 
     assert "<@anim" not in text.lower()
@@ -222,7 +287,7 @@ def test_build_model_visible_user_text_appends_inline_contract(
     assert "AG99live inline motion contract" in prompt_text
     assert "Current Live2D model: pet." in prompt_text
     assert "<@anim {" in prompt_text
-    assert '"schema_version":"engine.parameter_plan.v1"' in prompt_text
+    assert '"schema_version":"engine.motion_intent.v1"' in prompt_text
 
 
 def test_build_model_visible_user_text_skips_inline_contract_when_disabled(
@@ -343,27 +408,32 @@ def test_emit_message_chain_inline_plan_uses_primary_route(
 
     inline_broadcast: dict[str, object] = {}
 
-    async def fake_broadcast_motion_plan_preview(**kwargs):
+    async def fake_broadcast_motion_payload(**kwargs):
         inline_broadcast.update(kwargs)
         return True
 
-    coordinator.broadcast_motion_plan_preview = fake_broadcast_motion_plan_preview
+    coordinator.broadcast_motion_payload = fake_broadcast_motion_payload
 
     async def fake_finish_turn(*, success: bool, reason: str | None):
         del success
         del reason
 
     coordinator._finish_turn = fake_finish_turn
+    tag_payload = json.dumps(
+        {"mode": "inline", "intent": _build_valid_motion_intent()},
+        separators=(",", ":"),
+    )
 
     asyncio.run(
         coordinator.emit_message_chain(
             message_chain=[
-                Plain('hello <@anim {"mode":"inline","plan":{"schema_version":"engine.parameter_plan.v1","mode":"expressive","emotion_label":"inline","timing":{"duration_ms":900,"blend_in_ms":120,"hold_ms":620,"blend_out_ms":160},"key_axes":{"head_yaw":{"value":61},"head_roll":{"value":50},"head_pitch":{"value":50},"body_yaw":{"value":50},"body_roll":{"value":50},"gaze_x":{"value":50},"gaze_y":{"value":50},"eye_open_left":{"value":55},"eye_open_right":{"value":55},"mouth_open":{"value":52},"mouth_smile":{"value":63},"brow_bias":{"value":58}},"supplementary_params":[{"parameter_id":"ParamCheek","target_value":0.3,"weight":0.4,"source_atom_id":"inline.1","channel":"head_yaw"}]}}> world')
+                Plain(f"hello <@anim {tag_payload}> world")
             ],
         )
     )
 
-    assert inline_broadcast.get("source") == "engine.inline_motion_plan"
+    assert inline_broadcast.get("source") == "engine.inline_motion_intent"
+    assert inline_broadcast.get("motion_payload") == _build_valid_motion_intent()
     assert inline_broadcast.get("mode") == "inline"
     assert inline_broadcast.get("turn_id") == "turn-inline"
     assert "reply_text" not in scheduled
@@ -417,11 +487,11 @@ def test_emit_message_chain_inline_parse_fail_falls_back_to_secondary_request(
 
     called_broadcast: dict[str, object] = {}
 
-    async def fake_broadcast_motion_plan_preview(**kwargs):
+    async def fake_broadcast_motion_payload(**kwargs):
         called_broadcast.update(kwargs)
         return True
 
-    coordinator.broadcast_motion_plan_preview = fake_broadcast_motion_plan_preview
+    coordinator.broadcast_motion_payload = fake_broadcast_motion_payload
 
     async def fake_finish_turn(*, success: bool, reason: str | None):
         del success
@@ -440,6 +510,141 @@ def test_emit_message_chain_inline_parse_fail_falls_back_to_secondary_request(
     assert called_broadcast == {}
     assert scheduled.get("origin_turn_id") == "turn-inline-fallback"
     assert str(scheduled.get("reply_text") or "").strip()
+
+
+def test_broadcast_motion_payload_uses_intent_key_for_motion_intent(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-intent",
+        },
+    )()
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+
+    sent = asyncio.run(
+        coordinator.broadcast_motion_payload(
+            motion_payload=_build_valid_motion_intent(),
+            mode="preview",
+            source="test.intent",
+            turn_id="turn-intent",
+        )
+    )
+
+    assert sent is True
+    assert sent_payloads
+    envelope = sent_payloads[0]
+    assert envelope["type"] == "engine.motion_intent"
+    assert "intent" in envelope["payload"]
+    assert "plan" not in envelope["payload"]
+
+
+def test_realtime_motion_plan_invalid_payload_emits_control_error(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-invalid",
+        },
+    )()
+
+    async def fake_generate_realtime_motion_plan(*, user_text: str, assistant_text: str):
+        del user_text
+        del assistant_text
+        return {
+            "schema_version": "engine.motion_intent.v1",
+            "mode": "expressive",
+            "emotion_label": "",
+            "duration_hint_ms": 1200,
+            "key_axes": {},
+        }
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._generate_realtime_motion_plan = fake_generate_realtime_motion_plan
+    coordinator._realtime_motion_mode_getter = lambda: "realtime"
+    coordinator._send_json = fake_send_json
+
+    asyncio.run(
+        coordinator._generate_and_broadcast_realtime_motion_plan(
+            user_text="u",
+            assistant_text="a",
+            origin_turn_id="turn-invalid",
+        )
+    )
+
+    control_errors = [
+        payload for payload in sent_payloads
+        if payload.get("type") == "control.error"
+    ]
+    assert control_errors
+    assert "Realtime motion generation failed" in str(control_errors[0]["payload"]["message"])
+
+
+def test_handle_engine_motion_payload_preview_rejects_missing_intent_key(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.session_state = type("SessionStateStub", (), {"client_uid": "desktop-client"})()
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+
+    message = type(
+        "InboundMessageStub",
+        (),
+        {
+            "type": "engine.motion_intent",
+            "payload": {"mode": "preview", "plan": _build_valid_motion_intent()},
+            "turn_id": "turn-preview",
+            "session_id": "desktop-client",
+        },
+    )()
+
+    asyncio.run(coordinator._handle_engine_motion_payload_preview(message))
+
+    assert sent_payloads
+    assert sent_payloads[0]["type"] == "control.error"
+    assert "missing_intent_object" in str(sent_payloads[0]["payload"]["message"])
 
 
 def test_emit_message_chain_uses_raw_reply_text_override_for_inline_extraction(
@@ -491,29 +696,22 @@ def test_emit_message_chain_uses_raw_reply_text_override_for_inline_extraction(
 
     inline_broadcast: dict[str, object] = {}
 
-    async def fake_broadcast_motion_plan_preview(**kwargs):
+    async def fake_broadcast_motion_payload(**kwargs):
         inline_broadcast.update(kwargs)
         return True
 
-    coordinator.broadcast_motion_plan_preview = fake_broadcast_motion_plan_preview
+    coordinator.broadcast_motion_payload = fake_broadcast_motion_payload
 
     async def fake_finish_turn(*, success: bool, reason: str | None):
         del success
         del reason
 
     coordinator._finish_turn = fake_finish_turn
-
-    raw_reply_text = (
-        'hello <@anim {"mode":"inline","plan":{"schema_version":"engine.parameter_plan.v1",'
-        '"mode":"expressive","emotion_label":"inline","timing":{"duration_ms":900,'
-        '"blend_in_ms":120,"hold_ms":620,"blend_out_ms":160},"key_axes":{"head_yaw":{"value":61},'
-        '"head_roll":{"value":50},"head_pitch":{"value":50},"body_yaw":{"value":50},'
-        '"body_roll":{"value":50},"gaze_x":{"value":50},"gaze_y":{"value":50},'
-        '"eye_open_left":{"value":55},"eye_open_right":{"value":55},"mouth_open":{"value":52},'
-        '"mouth_smile":{"value":63},"brow_bias":{"value":58}},"supplementary_params":['
-        '{"parameter_id":"ParamCheek","target_value":0.3,"weight":0.4,'
-        '"source_atom_id":"inline.1","channel":"head_yaw"}]}}> world'
+    tag_payload = json.dumps(
+        {"mode": "inline", "intent": _build_valid_motion_intent()},
+        separators=(",", ":"),
     )
+    raw_reply_text = f"hello <@anim {tag_payload}> world"
 
     asyncio.run(
         coordinator.emit_message_chain(
@@ -522,7 +720,8 @@ def test_emit_message_chain_uses_raw_reply_text_override_for_inline_extraction(
         )
     )
 
-    assert inline_broadcast.get("source") == "engine.inline_motion_plan"
+    assert inline_broadcast.get("source") == "engine.inline_motion_intent"
+    assert inline_broadcast.get("motion_payload") == _build_valid_motion_intent()
     assert inline_broadcast.get("mode") == "inline"
     assert inline_broadcast.get("turn_id") == "turn-inline-override"
     assert "reply_text" not in scheduled
@@ -533,4 +732,81 @@ def test_emit_message_chain_uses_raw_reply_text_override_for_inline_extraction(
     assert "<@anim" not in output_text.lower()
     assert "hello" in output_text.lower()
     assert "world" in output_text.lower()
+
+
+def test_emit_message_chain_inline_intent_missing_axes_is_completed(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+    Plain = module.Plain
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-inline-partial",
+            "last_user_text": "fallback user text",
+        },
+    )()
+
+    class ChatBufferStub:
+        def add(self, role: str, text: str) -> None:
+            del role
+            del text
+
+    coordinator.chat_buffer = ChatBufferStub()
+    coordinator.speaker_name = "assistant"
+    coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
+
+    async def fake_send_json(*_args, **_kwargs):
+        return True
+
+    coordinator._send_json = fake_send_json
+    coordinator._schedule_realtime_motion_plan_preview = lambda **_kwargs: None
+
+    inline_broadcast: dict[str, object] = {}
+
+    async def fake_broadcast_motion_payload(**kwargs):
+        inline_broadcast.update(kwargs)
+        return True
+
+    coordinator.broadcast_motion_payload = fake_broadcast_motion_payload
+
+    async def fake_finish_turn(*, success: bool, reason: str | None):
+        del success
+        del reason
+
+    coordinator._finish_turn = fake_finish_turn
+
+    partial_intent = {
+        "schema_version": "engine.motion_intent.v1",
+        "mode": "expressive",
+        "emotion_label": "curious",
+        "duration_hint_ms": 900,
+        "key_axes": {
+            "head_yaw": {"value": 72},
+        },
+    }
+    raw_reply_text = "hello\n<@anim " + json.dumps(
+        {"mode": "inline", "intent": partial_intent},
+        separators=(",", ":"),
+    ) + ">"
+
+    asyncio.run(
+        coordinator.emit_message_chain(
+            message_chain=[Plain("hello")],
+            raw_reply_text_override=raw_reply_text,
+        )
+    )
+
+    motion_payload = inline_broadcast.get("motion_payload")
+    assert isinstance(motion_payload, dict)
+    assert motion_payload["key_axes"]["head_yaw"]["value"] == 72
+    assert motion_payload["key_axes"]["head_roll"]["value"] == 50
+    assert len(motion_payload["key_axes"]) == len(_AXIS_NAMES)
 

@@ -496,6 +496,12 @@ export interface DirectParameterAxisCalibration {
   parameter_ids?: string[];
   direction?: number | string | null;
   baseline?: number | null;
+  clip_min?: number | null;
+  clip_max?: number | null;
+  output_min?: number | null;
+  output_max?: number | null;
+  value_min?: number | null;
+  value_max?: number | null;
   recommended_range?: DirectParameterCalibrationRange | null;
   observed_range?: DirectParameterCalibrationRange | null;
   confidence?: string | null;
@@ -503,6 +509,15 @@ export interface DirectParameterAxisCalibration {
   recommended?: boolean | null;
   safe_to_apply?: boolean | null;
   skip_reason?: string | null;
+  supplementary_preferred_parameter_ids?: string[];
+  preferred_parameter_ids?: string[];
+  supplementary_blocked_parameter_ids?: string[];
+  supplementary_excluded_parameter_ids?: string[];
+  blocked_parameter_ids?: string[];
+  supplementary_max_atoms?: number | null;
+  supplementary_top_k?: number | null;
+  supplementary_weight_scale?: number | null;
+  supplementary_target_scale?: number | null;
 }
 
 export interface DirectParameterCalibrationProfile {
@@ -513,6 +528,17 @@ export interface DirectParameterCalibrationProfile {
 
 export interface DirectParameterAxisValue {
   value: number;
+}
+
+export interface MotionIntent {
+  schema_version: "engine.motion_intent.v1";
+  mode: "expressive" | "idle";
+  emotion_label: string;
+  duration_hint_ms?: number | null;
+  key_axes: Record<DirectParameterAxisName, DirectParameterAxisValue>;
+  summary?: {
+    key_axes_count?: number;
+  };
 }
 
 export interface DirectParameterPlanSupplementaryParam {

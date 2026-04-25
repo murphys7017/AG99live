@@ -776,7 +776,8 @@ async function handleSocketMessage(rawData: string): Promise<void> {
       applyControlError(envelope as ProtocolEnvelope<ControlErrorPayload>);
       return;
     case "engine.motion_plan":
-      applyInboundMotionPlan(envelope as ProtocolEnvelope<Record<string, unknown>>);
+    case "engine.motion_intent":
+      applyInboundMotionPayload(envelope as ProtocolEnvelope<Record<string, unknown>>);
       return;
     default:
       return;
@@ -865,10 +866,17 @@ function applyControlError(envelope: ProtocolEnvelope<ControlErrorPayload>): voi
   pushHistory("error", envelope.payload.message);
 }
 
-function applyInboundMotionPlan(
+function applyInboundMotionPayload(
   envelope: ProtocolEnvelope<Record<string, unknown>>,
 ): void {
-  console.info("[Connection] engine.motion_plan received. turn_id=", envelope.turn_id, "currentTurnId=", state.currentTurnId);
+  console.info(
+    "[Connection] engine motion payload received. type=",
+    envelope.type,
+    "turn_id=",
+    envelope.turn_id,
+    "currentTurnId=",
+    state.currentTurnId,
+  );
 
   if (
     envelope.turn_id
@@ -882,17 +890,54 @@ function applyInboundMotionPlan(
 
   const rawPayload = envelope.payload;
   const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
+  const payloadKey = envelope.type === "engine.motion_intent" ? "intent" : "plan";
   const mode =
     typeof payload.mode === "string" && payload.mode.trim()
       ? payload.mode.trim()
       : "preview";
-  const hasPlan = Object.prototype.hasOwnProperty.call(payload, "plan");
-  const plan = hasPlan ? payload.plan : payload;
+  const hasMotionPayload = Object.prototype.hasOwnProperty.call(payload, payloadKey);
+  const plan = hasMotionPayload ? payload[payloadKey as keyof typeof payload] : null;
 
-  console.info("[Connection] engine.motion_plan parsed. hasPlan=", hasPlan, "plan type=", typeof plan, "plan keys=", plan && typeof plan === "object" ? Object.keys(plan as object) : "N/A");
+  console.info(
+    "[Connection] engine motion payload parsed. type=",
+    envelope.type,
+    "payloadKey=",
+    payloadKey,
+    "hasMotionPayload=",
+    hasMotionPayload,
+    "plan type=",
+    typeof plan,
+    "plan keys=",
+    plan && typeof plan === "object" ? Object.keys(plan as object) : "N/A",
+  );
 
   if (!plan || typeof plan !== "object") {
-    state.lastError = "收到无效的 engine.motion_plan（缺少有效 plan）。";
+    console.warn("[Connection] invalid motion payload envelope:", envelope);
+    state.lastError = `收到无效的 ${envelope.type}（缺少 ${payloadKey} 对象）。`;
+    state.statusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    return;
+  }
+
+  const schemaVersion =
+    typeof (plan as Record<string, unknown>).schema_version === "string"
+      ? String((plan as Record<string, unknown>).schema_version).trim()
+      : "";
+  const expectedSchemaVersion = envelope.type === "engine.motion_intent"
+    ? "engine.motion_intent.v1"
+    : "engine.parameter_plan.v1";
+  if (schemaVersion !== expectedSchemaVersion) {
+    console.warn(
+      "[Connection] motion payload schema mismatch.",
+      "type=",
+      envelope.type,
+      "expected=",
+      expectedSchemaVersion,
+      "actual=",
+      schemaVersion,
+      envelope,
+    );
+    state.lastError = `收到无效的 ${envelope.type}（schema_version=${schemaVersion || "empty"}）。`;
     state.statusMessage = state.lastError;
     pushHistory("error", state.lastError);
     return;
@@ -903,7 +948,7 @@ function applyInboundMotionPlan(
   state.inboundMotionPlanReceivedAtMs = performance.now();
   state.inboundMotionPlanNonce += 1;
   console.info("[Connection] inboundMotionPlanNonce incremented to", state.inboundMotionPlanNonce, "— watch should fire next.");
-  state.statusMessage = `收到外部动作计划（engine.motion_plan, mode=${mode}）。`;
+  state.statusMessage = `收到外部动作载荷（${envelope.type}, mode=${mode}）。`;
   pushHistory("system", state.statusMessage);
 }
 
@@ -1151,25 +1196,45 @@ function interruptCurrentTurn(): boolean {
   return true;
 }
 
-function sendMotionPlanPreview(plan: unknown): boolean {
+function sendMotionPayloadPreview(payload: unknown): boolean {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
-    state.lastError = "当前还没有连上适配器，无法发送动作测试计划。";
+    state.lastError = "当前还没有连上适配器，无法发送动作测试载荷。";
     state.statusMessage = state.lastError;
     pushHistory("error", state.lastError);
     return false;
   }
 
+  const schemaVersion = payload && typeof payload === "object"
+    ? String((payload as Record<string, unknown>).schema_version ?? "").trim()
+    : "";
+  if (schemaVersion !== "engine.motion_intent.v1" && schemaVersion !== "engine.parameter_plan.v1") {
+    state.lastError = `动作测试载荷无效：不支持 schema_version=${schemaVersion || "empty"}。`;
+    state.statusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    console.warn("[Connection] refusing invalid motion preview payload:", payload);
+    return false;
+  }
+
+  const messageType = schemaVersion === "engine.motion_intent.v1"
+    ? "engine.motion_intent"
+    : "engine.motion_plan";
+  const payloadKey = schemaVersion === "engine.motion_intent.v1" ? "intent" : "plan";
+
   socket.send(
     JSON.stringify(
-      buildMessageEnvelope("engine.motion_plan", {
+      buildMessageEnvelope(messageType, {
         mode: "preview",
-        plan,
+        [payloadKey]: payload,
       }),
     ),
   );
-  state.statusMessage = "已发送动作测试计划（engine.motion_plan）。";
+  state.statusMessage = `已发送动作测试载荷（${messageType}）。`;
   pushHistory("system", state.statusMessage);
   return true;
+}
+
+function sendMotionPlanPreview(plan: unknown): boolean {
+  return sendMotionPayloadPreview(plan);
 }
 
 async function sendPlaybackFinished(
@@ -1300,6 +1365,7 @@ export function useAdapterConnection() {
     disconnect,
     sendText,
     interruptCurrentTurn,
+    sendMotionPayloadPreview,
     sendMotionPlanPreview,
     toggleMicrophoneCapture,
     pushHistory,
