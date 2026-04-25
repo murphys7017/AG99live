@@ -122,6 +122,7 @@
 - 接收动作意图
 - 根据当前模型的 `parameter_action_library` / `base_action_library` / `calibration_profile` 编译 plan
 - 根据用户设置的全局和单轴倍率调整 expressive intent 的实际表现幅度
+- 记录最近真实执行的 plan，并在动作实验室中支持回放、手调和保存调参样本
 - 生成 `timing`
 - 生成 `supplementary_params`
 - 应用 calibration

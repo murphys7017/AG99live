@@ -1,4 +1,7 @@
-import type { DirectParameterAxisName } from "./protocol";
+import type {
+  DirectParameterAxisName,
+  DirectParameterPlan,
+} from "./protocol";
 
 export type DesktopWindowRole = "pet" | "overlay" | "settings" | "history" | "action_lab";
 export type DesktopAuxWindowRole = "settings" | "history" | "action_lab";
@@ -105,11 +108,55 @@ export interface DesktopMotionEngineSettings {
   axisIntensityScale: Record<DirectParameterAxisName, number>;
 }
 
+export interface DesktopMotionCompileDiagnostics {
+  usedFallbackLibrary: boolean;
+  supplementaryCount: number;
+  timingSource: "hint" | "audio_sync" | "default";
+  resolvedMode: DirectParameterPlan["mode"];
+  source?: string;
+  intensityApplied: boolean;
+  motionIntensityScale: number;
+  axisIntensityScale: Record<DirectParameterAxisName, number>;
+}
+
+export interface DesktopMotionPlaybackRecord {
+  id: string;
+  createdAt: string;
+  source: string;
+  payloadKind: "intent" | "plan";
+  turnId: string | null;
+  modelName: string;
+  emotionLabel: string;
+  mode: DirectParameterPlan["mode"];
+  startReason: string;
+  queuedDelayMs: number;
+  assistantText: string;
+  playerMessage: string;
+  diagnostics: DesktopMotionCompileDiagnostics | null;
+  plan: DirectParameterPlan;
+}
+
+export interface DesktopMotionTuningSample {
+  id: string;
+  createdAt: string;
+  sourceRecordId: string;
+  modelName: string;
+  emotionLabel: string;
+  assistantText: string;
+  feedback: string;
+  tags: string[];
+  originalAxes: Record<DirectParameterAxisName, number>;
+  adjustedAxes: Record<DirectParameterAxisName, number>;
+  adjustedPlan: DirectParameterPlan;
+}
+
 export interface DesktopRuntimeSnapshot {
   adapterAddress: string;
   desktopScreenshotOnSendEnabled: boolean;
   ambientMotionEnabled: boolean;
   motionEngineSettings: DesktopMotionEngineSettings;
+  motionPlaybackRecords: DesktopMotionPlaybackRecord[];
+  motionTuningSamples: DesktopMotionTuningSample[];
   connectionState: string;
   connectionLabel: string;
   connectionStatusMessage: string;
@@ -139,6 +186,8 @@ export type DesktopRuntimeCommand =
   | { type: "set_desktop_screenshot_on_send"; enabled: boolean }
   | { type: "set_ambient_motion_enabled"; enabled: boolean }
   | { type: "set_motion_engine_settings"; settings: DesktopMotionEngineSettings }
+  | { type: "save_motion_tuning_sample"; sample: DesktopMotionTuningSample }
+  | { type: "delete_motion_tuning_sample"; sampleId: string }
   | { type: "connect"; address?: string }
   | { type: "disconnect" }
   | { type: "send_text"; text: string }

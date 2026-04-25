@@ -132,10 +132,16 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         return false;
       }
 
+      let startedPlan: typeof compileResult.plan | null = null;
       const started = dependencies.playPlan(
         compileResult.plan,
         selectedModel,
-        { softHandoff: true },
+        {
+          softHandoff: true,
+          onStarted: (plan) => {
+            startedPlan = plan;
+          },
+        },
       );
       if (!started) {
         const failureReason = dependencies.getPlayerMessage?.()
@@ -147,17 +153,33 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
 
       const successMessage = dependencies.getPlayerMessage?.()
         || `动作计划执行中（启动延迟 ${context.queuedDelayMs}ms）。`;
+      if (startedPlan) {
+        dependencies.onPlanStarted?.({
+          plan: startedPlan,
+          model: selectedModel,
+          turnId: context.turnId,
+          startReason: context.startReason,
+          queuedDelayMs: context.queuedDelayMs,
+          payloadKind: "intent",
+          diagnostics: compileResult.diagnostics,
+          playerMessage: successMessage,
+        });
+      }
       setState("playing", successMessage, compileResult.diagnostics);
       pushHistory("system", `动作计划执行中（${successMessage}）。`);
       return true;
     }
 
+    let startedPlan: typeof payload.plan | null = null;
     const started = dependencies.playPlan(
       payload.plan,
       selectedModel,
       {
         softHandoff: true,
         targetDurationMs: resolveMotionTargetDurationMs(context.turnId),
+        onStarted: (plan) => {
+          startedPlan = plan;
+        },
       },
     );
     if (!started) {
@@ -171,6 +193,18 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
 
     const successMessage = dependencies.getPlayerMessage?.()
       || `动作计划执行中（启动延迟 ${context.queuedDelayMs}ms）。`;
+    if (startedPlan) {
+      dependencies.onPlanStarted?.({
+        plan: startedPlan,
+        model: selectedModel,
+        turnId: context.turnId,
+        startReason: context.startReason,
+        queuedDelayMs: context.queuedDelayMs,
+        payloadKind: "plan",
+        diagnostics: null,
+        playerMessage: successMessage,
+      });
+    }
     setState("playing", successMessage, null);
     pushHistory("system", `动作计划执行中（${successMessage}）。`);
     return true;

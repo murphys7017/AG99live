@@ -89,6 +89,18 @@ export interface AudioPlaybackInfo {
 export interface PlayPlanOptions {
   softHandoff?: boolean;
   targetDurationMs?: number | null;
+  onStarted?: (plan: DirectParameterPlan) => void;
+}
+
+export interface ModelEnginePlanStartedEvent {
+  plan: DirectParameterPlan;
+  model: ModelSummary | null;
+  turnId: string | null;
+  startReason: string;
+  queuedDelayMs: number;
+  payloadKind: NormalizedMotionPayload["kind"];
+  diagnostics: CompileDiagnostics | null;
+  playerMessage: string;
 }
 
 export interface ModelEngineDependencies {
@@ -107,4 +119,5 @@ export interface ModelEngineDependencies {
     text: string,
   ) => void;
   getPlayerMessage?: () => string;
+  onPlanStarted?: (event: ModelEnginePlanStartedEvent) => void;
 }

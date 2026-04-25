@@ -32,6 +32,7 @@ interface ParsedParameterPlan {
 interface PlayPlanOptions {
   softHandoff?: boolean;
   targetDurationMs?: number | null;
+  onStarted?: (plan: DirectParameterPlan) => void;
 }
 
 const state = reactive({
@@ -554,6 +555,7 @@ function playPlan(
     activeTimerHandles = [];
   });
 
+  options.onStarted?.(playbackPlan.plan);
   return true;
 }
 

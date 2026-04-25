@@ -11,15 +11,29 @@ import {
 } from "../model-engine/settings";
 import { usePreviewMotionPlayer } from "../composables/usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
-import type { DesktopRuntimeCommand } from "../types/desktop";
+import type {
+  DesktopMotionPlaybackRecord,
+  DesktopMotionTuningSample,
+  DesktopRuntimeCommand,
+} from "../types/desktop";
+import type { ModelEnginePlanStartedEvent } from "../model-engine/contracts";
 import type { DesktopBaseActionPreview } from "../types/desktop";
 
 const { state, selectedModel } = useModelSync();
 const adapter = useAdapterConnection();
 const bridge = useDesktopBridge();
 const motionPlayer = usePreviewMotionPlayer();
+const MAX_MOTION_PLAYBACK_RECORDS = 5;
 const motionEngineSettings = reactive(
   cloneModelEngineSettings(bridge.state.snapshot.motionEngineSettings),
+);
+const motionPlaybackRecords = ref<DesktopMotionPlaybackRecord[]>(
+  bridge.state.snapshot.motionPlaybackRecords.map((record) =>
+    cloneJson(record) as DesktopMotionPlaybackRecord),
+);
+const motionTuningSamples = ref<DesktopMotionTuningSample[]>(
+  bridge.state.snapshot.motionTuningSamples.map((sample) =>
+    cloneJson(sample) as DesktopMotionTuningSample),
 );
 const modelEngine = useModelEngine({
   getSelectedModel: () => selectedModel.value,
@@ -34,6 +48,7 @@ const modelEngine = useModelEngine({
   }),
   pushHistory: (role, text) => adapter.pushHistory(role, text),
   getPlayerMessage: () => motionPlayer.state.message,
+  onPlanStarted: (event) => recordMotionPlayback(event),
 });
 const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
 
@@ -305,6 +320,53 @@ function handlePreviewMotionPlan(plan: unknown): void {
   adapter.sendMotionPayloadPreview(plan);
 }
 
+function recordMotionPlayback(event: ModelEnginePlanStartedEvent): void {
+  const now = new Date();
+  const record: DesktopMotionPlaybackRecord = {
+    id: `motion-record-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: now.toISOString(),
+    source: event.diagnostics?.source || event.startReason,
+    payloadKind: event.payloadKind,
+    turnId: event.turnId,
+    modelName: event.model?.name ?? selectedModel.value?.name ?? "",
+    emotionLabel: event.plan.emotion_label,
+    mode: event.plan.mode,
+    startReason: event.startReason,
+    queuedDelayMs: event.queuedDelayMs,
+    assistantText: adapter.state.lastAssistantText,
+    playerMessage: event.playerMessage,
+    diagnostics: event.diagnostics
+      ? {
+        ...event.diagnostics,
+        axisIntensityScale: { ...event.diagnostics.axisIntensityScale },
+      }
+      : null,
+    plan: cloneJson(event.plan),
+  };
+  motionPlaybackRecords.value = [
+    record,
+    ...motionPlaybackRecords.value,
+  ].slice(0, MAX_MOTION_PLAYBACK_RECORDS);
+}
+
+function saveMotionTuningSample(sample: DesktopMotionTuningSample): void {
+  const normalizedSample = cloneJson(sample);
+  motionTuningSamples.value = [
+    normalizedSample,
+    ...motionTuningSamples.value.filter((item) => item.id !== normalizedSample.id),
+  ].slice(0, 50);
+}
+
+function deleteMotionTuningSample(sampleId: string): void {
+  motionTuningSamples.value = motionTuningSamples.value.filter(
+    (sample) => sample.id !== sampleId,
+  );
+}
+
+function cloneJson<TValue>(value: TValue): TValue {
+  return JSON.parse(JSON.stringify(value)) as TValue;
+}
+
 function applyAmbientMotionPreference(attemptsRemaining = 12): void {
   const live2dAdapter = window.getLAppAdapter?.();
   if (live2dAdapter?.setAmbientMotionEnabled) {
@@ -335,6 +397,12 @@ function handleDesktopCommand(command: DesktopRuntimeCommand): void {
       return;
     case "set_motion_engine_settings":
       applyMotionEngineSettingsSnapshot(command.settings);
+      return;
+    case "save_motion_tuning_sample":
+      saveMotionTuningSample(command.sample);
+      return;
+    case "delete_motion_tuning_sample":
+      deleteMotionTuningSample(command.sampleId);
       return;
     case "connect":
       if (typeof command.address === "string") {
@@ -441,6 +509,8 @@ watch(
     motionEngineSettings.motionIntensityScale,
     ...DIRECT_PARAMETER_AXIS_NAMES.map((axisName) =>
       motionEngineSettings.axisIntensityScale[axisName]),
+    motionPlaybackRecords.value,
+    motionTuningSamples.value,
   ],
   () => {
     bridge.publishSnapshot({
@@ -448,6 +518,10 @@ watch(
       desktopScreenshotOnSendEnabled: adapter.state.desktopScreenshotOnSendEnabled,
       ambientMotionEnabled: ambientMotionEnabled.value,
       motionEngineSettings: cloneModelEngineSettings(motionEngineSettings),
+      motionPlaybackRecords: motionPlaybackRecords.value.map((record) =>
+        cloneJson(record)),
+      motionTuningSamples: motionTuningSamples.value.map((sample) =>
+        cloneJson(sample)),
       connectionState: connectionState.value,
       connectionLabel: connectionLabel.value,
       connectionStatusMessage: adapter.state.statusMessage,

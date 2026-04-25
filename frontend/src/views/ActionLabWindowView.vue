@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import BaseActionPreviewPanel from "../components/BaseActionPreviewPanel.vue";
 import DesktopWindowPanel from "../components/DesktopWindowPanel.vue";
+import MotionTuningPanel from "../components/MotionTuningPanel.vue";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
 import type { DesktopBaseActionPreview } from "../types/desktop";
 
@@ -38,6 +39,7 @@ const baseActionPreview = computed<DesktopBaseActionPreview | null>(() => {
 <template>
   <DesktopWindowPanel title="动作实验室" subtitle="Motion Plan Sandbox">
     <section class="settings-grid">
+      <MotionTuningPanel />
       <BaseActionPreviewPanel
         :preview="baseActionPreview"
         :allow-play="true"
