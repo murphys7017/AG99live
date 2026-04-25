@@ -24,6 +24,7 @@ export interface Ag99DesktopApi {
   toggleAuxWindow: (target: DesktopAuxWindowRole) => void;
   closeCurrentWindow: () => void;
   minimizeCurrentWindow: () => void;
+  setOverlayContentHeight: (height: number) => void;
   onWindowState: (
     callback: (state: DesktopWindowVisibilityState) => void,
   ) => () => void;

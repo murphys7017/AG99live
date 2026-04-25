@@ -70,6 +70,9 @@ const api = {
   minimizeCurrentWindow: () => {
     ipcRenderer.send("desktop:minimize-current-window");
   },
+  setOverlayContentHeight: (height: number) => {
+    ipcRenderer.send("desktop:set-overlay-content-height", height);
+  },
   onWindowState: (
     callback: (state: DesktopWindowVisibilityState) => void,
   ) => {

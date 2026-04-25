@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
 
 const bridge = useDesktopBridge();
 const draft = ref("");
+const overlayCardRef = ref<HTMLElement | null>(null);
 const activePointerId = ref<number | null>(null);
 const isDragging = ref(false);
+let resizeObserver: ResizeObserver | null = null;
 
 const aiStateLabel = computed(() => {
   switch (bridge.state.snapshot.aiState) {
@@ -57,6 +59,14 @@ function handleInterrupt(): void {
 
 function handleMicrophoneToggle(): void {
   bridge.sendCommand({ type: "toggle_mic_capture" });
+}
+
+function syncOverlayContentHeight(): void {
+  const overlayCard = overlayCardRef.value;
+  if (!overlayCard) {
+    return;
+  }
+  window.ag99desktop?.setOverlayContentHeight(overlayCard.offsetHeight);
 }
 
 function showContextMenu(event: MouseEvent): void {
@@ -138,7 +148,21 @@ function handlePointerCancel(event: PointerEvent): void {
   finishWindowDrag();
 }
 
+onMounted(() => {
+  resizeObserver = new ResizeObserver(syncOverlayContentHeight);
+  if (overlayCardRef.value) {
+    resizeObserver.observe(overlayCardRef.value);
+  }
+  void nextTick(syncOverlayContentHeight);
+});
+
+watch(previewText, () => {
+  void nextTick(syncOverlayContentHeight);
+});
+
 onBeforeUnmount(() => {
+  resizeObserver?.disconnect();
+  resizeObserver = null;
   finishWindowDrag();
 });
 </script>
@@ -149,6 +173,7 @@ onBeforeUnmount(() => {
     @contextmenu.prevent="showContextMenu"
   >
     <section
+      ref="overlayCardRef"
       class="overlay-card"
       :class="{ 'overlay-card--dragging': isDragging }"
       @pointerdown="handlePointerDown"

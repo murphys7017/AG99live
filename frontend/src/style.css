@@ -1434,10 +1434,11 @@ img {
 .overlay-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   width: 100%;
+  height: auto;
   overflow: hidden;
-  padding: 10px 12px 12px;
+  padding: 6px 8px 8px;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(8, 8, 8, 0.76);
@@ -1449,7 +1450,7 @@ img {
 .overlay-card__drag-zone {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   cursor: grab;
 }
 
@@ -1458,8 +1459,8 @@ img {
 }
 
 .overlay-card__grip {
-  width: 52px;
-  height: 6px;
+  width: 48px;
+  height: 5px;
   margin: 0 auto;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.18);
@@ -1468,7 +1469,8 @@ img {
 
 .overlay-card__message {
   margin: 0;
-  min-height: 38px;
+  min-height: 20px;
+  max-height: 62px;
   padding: 0 4px;
   color: rgba(255, 255, 255, 0.94);
   font-size: 14px;
@@ -1476,7 +1478,7 @@ img {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
+  -webkit-line-clamp: 3;
 }
 
 .overlay-card__message[data-empty="true"] {
@@ -1521,8 +1523,8 @@ img {
 
 .overlay-card__icon-pill,
 .overlay-card__icon-button {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
 }
 
 .overlay-card__icon-pill[data-active="true"] {
@@ -1561,13 +1563,14 @@ img {
 .overlay-card__composer {
   gap: 8px;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .overlay-card__input {
   flex: 1;
   min-width: 0;
-  height: 36px;
-  padding: 0 12px;
+  height: 32px;
+  padding: 0 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.28);
@@ -1587,8 +1590,8 @@ img {
 }
 
 .overlay-card__send {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
 }
 
 .no-drag,

@@ -94,6 +94,13 @@ function setupIpc(): void {
     windowManager.minimizeCurrentWindow(BrowserWindow.fromWebContents(event.sender));
   });
 
+  ipcMain.on("desktop:set-overlay-content-height", (event, height) => {
+    windowManager.setOverlayContentHeight(
+      BrowserWindow.fromWebContents(event.sender),
+      Number(height),
+    );
+  });
+
   ipcMain.on("desktop:set-ignore-mouse-events", (event, ignore) => {
     windowManager.setIgnoreMouseEvents(
       BrowserWindow.fromWebContents(event.sender),

@@ -31,9 +31,10 @@ interface TransparentWindowSnapshot {
 const PET_WINDOW_WIDTH = 540;
 const PET_WINDOW_HEIGHT = 820;
 const PET_WINDOW_MARGIN = 24;
-const PET_OVERLAY_WIDTH = 440;
-const PET_OVERLAY_HEIGHT = 210;
-const PET_OVERLAY_GAP = 18;
+const PET_OVERLAY_WIDTH = 420;
+const PET_OVERLAY_MIN_HEIGHT = 112;
+const PET_OVERLAY_MAX_HEIGHT = 168;
+const PET_OVERLAY_GAP = 16;
 const WIN32_TRANSPARENT_WINDOW_COMPAT_OPTIONS: BrowserWindowConstructorOptions =
   process.platform === "win32"
     ? {
@@ -49,6 +50,7 @@ function isDevelopment(): boolean {
 export class WindowManager {
   private isAppQuitting = false;
   private overlayVisiblePreference = true;
+  private overlayWindowHeight = PET_OVERLAY_MIN_HEIGHT;
   private activeDragState: WindowDragState | null = null;
   private petWindowIgnoreMouseEvents = true;
 
@@ -169,6 +171,30 @@ export class WindowManager {
     targetWindow?.minimize();
   }
 
+  setOverlayContentHeight(targetWindow: BrowserWindow | null, height: number): void {
+    const overlayWindow = this.windows.overlay;
+    if (
+      !targetWindow
+      || !overlayWindow
+      || targetWindow !== overlayWindow
+      || targetWindow.isDestroyed()
+      || overlayWindow.isDestroyed()
+    ) {
+      return;
+    }
+
+    const nextHeight = Math.min(
+      PET_OVERLAY_MAX_HEIGHT,
+      Math.max(PET_OVERLAY_MIN_HEIGHT, Math.ceil(height)),
+    );
+    if (nextHeight === this.overlayWindowHeight) {
+      return;
+    }
+
+    this.overlayWindowHeight = nextHeight;
+    this.positionOverlayWindow();
+  }
+
   setIgnoreMouseEvents(targetWindow: BrowserWindow | null, ignore: boolean): void {
     const petWindow = this.windows.pet;
     if (!targetWindow || !petWindow || targetWindow !== petWindow || targetWindow.isDestroyed()) {
@@ -210,7 +236,7 @@ export class WindowManager {
     const lockedHeight = role === "pet"
       ? PET_WINDOW_HEIGHT
       : role === "overlay"
-        ? PET_OVERLAY_HEIGHT
+        ? bounds.height
         : bounds.height;
     this.activeDragState = {
       targetWindow,
@@ -391,7 +417,7 @@ export class WindowManager {
     const workArea = screen.getPrimaryDisplay().workArea;
     const overlayWindow = new BrowserWindow({
       width: PET_OVERLAY_WIDTH,
-      height: PET_OVERLAY_HEIGHT,
+      height: this.overlayWindowHeight,
       title: "",
       frame: false,
       transparent: true,
@@ -420,7 +446,7 @@ export class WindowManager {
     overlayWindow.setMenuBarVisibility(false);
     overlayWindow.setPosition(
       Math.max(workArea.x + workArea.width - PET_OVERLAY_WIDTH - PET_WINDOW_MARGIN, workArea.x + PET_WINDOW_MARGIN),
-      Math.max(workArea.y + workArea.height - PET_OVERLAY_HEIGHT - PET_WINDOW_MARGIN, workArea.y + PET_WINDOW_MARGIN),
+      Math.max(workArea.y + workArea.height - this.overlayWindowHeight - PET_WINDOW_MARGIN, workArea.y + PET_WINDOW_MARGIN),
     );
 
     overlayWindow.on("show", () => {
@@ -608,21 +634,27 @@ export class WindowManager {
     const display = screen.getDisplayMatching(petBounds);
     const workArea = display.workArea;
     const overlayBounds = overlayWindow.getBounds();
-    const overlayWidth = PET_OVERLAY_WIDTH;
-    const overlayHeight = PET_OVERLAY_HEIGHT;
+    const overlayWidth = Math.min(PET_OVERLAY_WIDTH, Math.max(320, petBounds.width - 48));
+    const overlayHeight = this.overlayWindowHeight;
 
-    let x = petBounds.x - overlayWidth - PET_OVERLAY_GAP;
-    if (x < workArea.x + PET_WINDOW_MARGIN) {
-      x = petBounds.x + petBounds.width + PET_OVERLAY_GAP;
-    }
+    let x = petBounds.x + (petBounds.width - overlayWidth) / 2;
 
     const maxX = workArea.x + workArea.width - overlayWidth - PET_WINDOW_MARGIN;
     const minX = workArea.x + PET_WINDOW_MARGIN;
     x = Math.min(Math.max(x, minX), maxX);
 
-    let y = petBounds.y + petBounds.height - overlayHeight - 28;
+    const belowY = petBounds.y + petBounds.height + PET_OVERLAY_GAP;
+    const aboveY = petBounds.y - overlayHeight - PET_OVERLAY_GAP;
+    const embeddedY = petBounds.y + petBounds.height - overlayHeight - 28;
     const maxY = workArea.y + workArea.height - overlayHeight - PET_WINDOW_MARGIN;
     const minY = workArea.y + PET_WINDOW_MARGIN;
+
+    let y = embeddedY;
+    if (belowY <= maxY) {
+      y = belowY;
+    } else if (aboveY >= minY) {
+      y = aboveY;
+    }
     y = Math.min(Math.max(y, minY), maxY);
 
     const targetX = Math.round(x);
