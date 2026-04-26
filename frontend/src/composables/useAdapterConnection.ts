@@ -934,6 +934,12 @@ function applyInboundMotionPayload(
     && state.currentTurnId
     && envelope.turn_id !== state.currentTurnId
   ) {
+    console.warn(
+      "[Connection] discarding motion payload for stale turn_id. envelope_turn_id=",
+      envelope.turn_id,
+      "current_turn_id=",
+      state.currentTurnId,
+    );
     state.statusMessage = `忽略过期动作计划（turn_id=${envelope.turn_id}）。`;
     pushHistory("system", state.statusMessage);
     return;
@@ -975,8 +981,8 @@ function applyInboundMotionPayload(
       ? String((plan as Record<string, unknown>).schema_version).trim()
       : "";
   const allowedSchemaVersions = envelope.type === "engine.motion_intent"
-    ? new Set(["engine.motion_intent.v1", "engine.motion_intent.v2"])
-    : new Set(["engine.parameter_plan.v1", "engine.parameter_plan.v2"]);
+    ? new Set(["engine.motion_intent.v2"])
+    : new Set(["engine.parameter_plan.v2"]);
   if (!allowedSchemaVersions.has(schemaVersion)) {
     console.warn(
       "[Connection] motion payload schema mismatch.",

@@ -220,6 +220,47 @@ def test_normalize_selector_output_v2_clamps_out_of_range_axis(caplog) -> None:
     assert "selector_axis_clamped:head_yaw:180->100" in caplog.text
 
 
+def test_normalize_selector_output_v2_pushes_exact_neutral_expressive_axis_past_soft_range() -> None:
+    profile = _semantic_profile()
+    selector = normalize_selector_output(
+        {
+            "emotion": "curious",
+            "mode": "expressive",
+            "duration_ms": 1200,
+            "axes": {"head_yaw": 50},
+        },
+        semantic_profile=profile,
+    )
+
+    value = selector["axes"]["head_yaw"]
+    soft_min, soft_max = profile["axes"][0]["soft_range"]
+    min_value, max_value = profile["axes"][0]["value_range"]
+
+    assert value < soft_min or value > soft_max
+    assert value != soft_min
+    assert value != soft_max
+    assert min_value <= value <= max_value
+
+
+def test_normalize_selector_output_v2_pushes_exact_neutral_axis_outside_one_sided_soft_range() -> None:
+    profile = _semantic_profile()
+    profile["axes"][0]["soft_range"] = [50, 100]
+
+    selector = normalize_selector_output(
+        {
+            "emotion": "curious",
+            "mode": "expressive",
+            "duration_ms": 1200,
+            "axes": {"head_yaw": 50},
+        },
+        semantic_profile=profile,
+    )
+
+    value = selector["axes"]["head_yaw"]
+    assert value < 50
+    assert 0 <= value <= 100
+
+
 def test_normalize_selector_output_v2_allows_axis_errors_under_threshold(caplog) -> None:
     selector = normalize_selector_output(
         {

@@ -687,7 +687,7 @@ class TurnCoordinator:
 
         current_turn_id = self.session_state.current_turn_id
         if origin_turn_id and current_turn_id and current_turn_id != origin_turn_id:
-            logger.debug(
+            logger.warning(
                 "Skip realtime motion plan for stale turn_id=%s current_turn_id=%s",
                 origin_turn_id,
                 current_turn_id,
