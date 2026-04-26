@@ -317,7 +317,7 @@ interface CompileResult {
 
 | 旧后端能力 | 旧位置 | 前端目标位置 | 验收要求 |
 | --- | --- | --- | --- |
-| intent/selector 轴校验 | `normalize_motion_intent_payload` / `validate_motion_intent_payload` | `normalize.ts` | 后端缺轴 warning 补 50；前端缺轴、越界、非法类型拒绝 |
+| intent/selector 轴校验 | `normalize_motion_intent_payload` / `validate_motion_intent_payload` | `normalize.ts` / `compiler.ts` | v2 主参数 unknown/forbidden/non-number 按 30% 错误率阈值处理；未超过阈值时忽略错误项并输出 diagnostics，超过阈值 hard fail；数值越界 clamp 到轴的 min/max 并 warning |
 | idle deadzone 判定 | `build_plan_from_axes` | `compiler.ts` | 全轴在 deadzone 内输出 idle |
 | timing 构造 | `_build_plan_timing` | `timing.ts` | hint/default/audio-sync 均覆盖 |
 | calibration 挂载 | `_build_execution_calibration_profile` | `compiler.ts` + `lappmodel.ts` | plan 携带 `model_calibration_profile` |
