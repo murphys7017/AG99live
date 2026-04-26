@@ -8,6 +8,7 @@ from typing import Any
 from astrbot.api import logger
 
 LIVE2D_RUNTIME_CACHE_SCHEMA_VERSION = "live2d_runtime_cache.v1"
+LIVE2D_MODEL_METADATA_DIRNAME = "ag99"
 
 
 def build_live2d_directory_md5(live2ds_dir: Path) -> str:
@@ -20,6 +21,11 @@ def build_live2d_directory_md5(live2ds_dir: Path) -> str:
 
     for entry in sorted(live2ds_dir.rglob("*")):
         relative_path = entry.relative_to(live2ds_dir).as_posix()
+        if (
+            f"/{LIVE2D_MODEL_METADATA_DIRNAME}/" in f"/{relative_path}/"
+            or relative_path.endswith(f"/{LIVE2D_MODEL_METADATA_DIRNAME}")
+        ):
+            continue
         digest.update(relative_path.encode("utf-8", errors="ignore"))
         if entry.is_dir():
             digest.update(b"<dir>")

@@ -127,3 +127,43 @@ def test_frontend_compat_handler_returns_control_error_on_save_failure() -> None
     assert len(sent_payloads) == 1
     assert sent_payloads[0]["type"] == "control.error"
     assert sent_payloads[0]["payload"]["message"] == "broken profile"
+
+
+def test_frontend_compat_handler_returns_control_error_on_missing_profile_file() -> None:
+    runtime_state = _RuntimeStateStub(error=FileNotFoundError("profile missing"))
+    handler = FrontendCompatHandler(
+        background_files_getter=lambda: [],
+        history_bridge=_HistoryBridgeStub(),
+        runtime_state=runtime_state,
+    )
+    sent_payloads: list[dict] = []
+    refresh_calls: list[bool] = []
+
+    async def send_json(payload: dict) -> bool:
+        sent_payloads.append(payload)
+        return True
+
+    async def refresh_and_send_model(*, force: bool = False) -> None:
+        refresh_calls.append(force)
+
+    asyncio.run(
+        handler.handle(
+            SimpleNamespace(
+                type="system.semantic_axis_profile_save",
+                session_id="session",
+                turn_id="turn",
+                payload={
+                    "model_name": "DemoModel",
+                    "expected_revision": 1,
+                    "profile": {"schema_version": "ag99.semantic_axis_profile.v1"},
+                },
+            ),
+            send_json=send_json,
+            refresh_and_send_model=refresh_and_send_model,
+        )
+    )
+
+    assert refresh_calls == []
+    assert len(sent_payloads) == 1
+    assert sent_payloads[0]["type"] == "control.error"
+    assert sent_payloads[0]["payload"]["message"] == "profile missing"

@@ -333,6 +333,7 @@ def build_default_semantic_axis_profile(
     }
 
     axes: list[SemanticAxisDefinition] = []
+    bound_parameter_ids: set[str] = set()
     for axis_id in _AXIS_ORDER:
         axis_defaults = _AXIS_DEFAULTS[axis_id]
         channel_entry = _as_mapping(standard_channels.get(axis_id))
@@ -354,6 +355,7 @@ def build_default_semantic_axis_profile(
             )
             for parameter_id in candidate_parameter_ids
         ]
+        bound_parameter_ids.update(binding["parameter_id"] for binding in parameter_bindings)
 
         axes.append(
             {
@@ -372,6 +374,47 @@ def build_default_semantic_axis_profile(
                 "parameter_bindings": parameter_bindings,
             }
         )
+
+    for parameter in _as_list(parameter_scan.get("parameters")):
+        if not isinstance(parameter, Mapping):
+            continue
+        parameter_id = str(parameter.get("id") or "").strip()
+        if not parameter_id or parameter_id in bound_parameter_ids:
+            continue
+
+        parameter_name = str(parameter.get("name") or "").strip() or parameter_id
+        semantic_group = (
+            str(parameter.get("domain") or "").strip()
+            or str(parameter.get("group_name") or "").strip()
+            or "parameter"
+        )
+        axes.append(
+            {
+                "id": parameter_id,
+                "label": parameter_name,
+                "description": f"Scanned Live2D parameter `{parameter_id}`.",
+                "semantic_group": semantic_group,
+                "control_role": "debug",
+                "neutral": 50.0,
+                "value_range": [0.0, 100.0],
+                "soft_range": [45.0, 55.0],
+                "strong_range": [35.0, 65.0],
+                "positive_semantics": [f"increase {parameter_name}"],
+                "negative_semantics": [f"decrease {parameter_name}"],
+                "usage_notes": "Auto-added from model scan. Promote this axis manually before using it in prompt/runtime.",
+                "parameter_bindings": [
+                    {
+                        "parameter_id": parameter_id,
+                        "parameter_name": parameter_name,
+                        "input_range": [0.0, 100.0],
+                        "output_range": [0.0, 1.0],
+                        "default_weight": 1.0,
+                        "invert": False,
+                    }
+                ],
+            }
+        )
+        bound_parameter_ids.add(parameter_id)
 
     axis_ids = {axis["id"] for axis in axes}
     if not axes:
@@ -507,7 +550,10 @@ def validate_semantic_axis_profile(
                     raw_binding.get("default_weight", 1.0),
                     field_name=f"{axis_id}.parameter_bindings.default_weight",
                 ),
-                "invert": bool(raw_binding.get("invert", False)),
+                "invert": _coerce_bool(
+                    raw_binding.get("invert", False),
+                    field_name=f"{axis_id}.parameter_bindings.invert",
+                ),
             }
             parameter_name = str(raw_binding.get("parameter_name") or "").strip()
             if parameter_name:

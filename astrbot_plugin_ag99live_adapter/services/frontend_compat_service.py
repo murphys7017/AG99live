@@ -119,7 +119,7 @@ class FrontendCompatHandler:
                     profile_payload=payload.get("profile"),
                     expected_revision=payload.get("expected_revision"),
                 )
-            except (SemanticAxisProfileError, SemanticAxisProfileRevisionError) as exc:
+            except (FileNotFoundError, SemanticAxisProfileError, SemanticAxisProfileRevisionError) as exc:
                 await send_json(
                     build_control_error(
                         session_id=session_id,

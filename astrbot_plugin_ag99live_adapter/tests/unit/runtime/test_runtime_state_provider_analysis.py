@@ -5,7 +5,6 @@ import importlib
 import json
 import sys
 from copy import deepcopy
-from pathlib import Path
 
 from astrbot_plugin_ag99live_adapter.tests.unit.live2d.test_support import build_seed_model_info
 
@@ -23,6 +22,7 @@ def _import_runtime_state_with_fake_astrbot(
 def test_runtime_state_updates_analysis_status_when_provider_succeeds(
     monkeypatch,
     install_fake_astrbot,
+    tmp_path,
 ) -> None:
     runtime_state, provider_cls = _import_runtime_state_with_fake_astrbot(
         install_fake_astrbot=install_fake_astrbot,
@@ -67,6 +67,8 @@ def test_runtime_state_updates_analysis_status_when_provider_succeeds(
         "scan_live2d_models",
         lambda **kwargs: deepcopy(seed_model_info),
     )
+    live2ds_dir = tmp_path / "live2ds"
+    (live2ds_dir / "DemoModel").mkdir(parents=True, exist_ok=True)
 
     state = runtime_state.RuntimeState(
         platform_config={},
@@ -79,7 +81,7 @@ def test_runtime_state_updates_analysis_status_when_provider_succeeds(
         host="127.0.0.1",
         http_port=12397,
         client_uid="desktop-client",
-        live2ds_dir=Path("."),
+        live2ds_dir=live2ds_dir,
     )
     asyncio.run(state.refresh_async())
 
@@ -94,6 +96,7 @@ def test_runtime_state_updates_analysis_status_when_provider_succeeds(
 def test_runtime_state_marks_fallback_when_provider_filter_fails(
     monkeypatch,
     install_fake_astrbot,
+    tmp_path,
 ) -> None:
     runtime_state, provider_cls = _import_runtime_state_with_fake_astrbot(
         install_fake_astrbot=install_fake_astrbot,
@@ -133,6 +136,8 @@ def test_runtime_state_marks_fallback_when_provider_filter_fails(
         "scan_live2d_models",
         lambda **kwargs: deepcopy(seed_model_info),
     )
+    live2ds_dir = tmp_path / "live2ds"
+    (live2ds_dir / "DemoModel").mkdir(parents=True, exist_ok=True)
 
     state = runtime_state.RuntimeState(
         platform_config={},
@@ -145,7 +150,7 @@ def test_runtime_state_marks_fallback_when_provider_filter_fails(
         host="127.0.0.1",
         http_port=12397,
         client_uid="desktop-client",
-        live2ds_dir=Path("."),
+        live2ds_dir=live2ds_dir,
     )
     asyncio.run(state.refresh_async())
 
@@ -160,6 +165,7 @@ def test_runtime_state_marks_fallback_when_provider_filter_fails(
 def test_runtime_state_splits_large_payload_into_llm_chunks(
     monkeypatch,
     install_fake_astrbot,
+    tmp_path,
 ) -> None:
     runtime_state, provider_cls = _import_runtime_state_with_fake_astrbot(
         install_fake_astrbot=install_fake_astrbot,
@@ -232,6 +238,8 @@ def test_runtime_state_splits_large_payload_into_llm_chunks(
         "scan_live2d_models",
         lambda **kwargs: deepcopy(seed_model_info),
     )
+    live2ds_dir = tmp_path / "live2ds"
+    (live2ds_dir / "DemoModel").mkdir(parents=True, exist_ok=True)
 
     state = runtime_state.RuntimeState(
         platform_config={},
@@ -245,7 +253,7 @@ def test_runtime_state_splits_large_payload_into_llm_chunks(
         host="127.0.0.1",
         http_port=12397,
         client_uid="desktop-client",
-        live2ds_dir=Path("."),
+        live2ds_dir=live2ds_dir,
     )
     asyncio.run(state.refresh_async())
 
@@ -262,6 +270,7 @@ def test_runtime_state_splits_large_payload_into_llm_chunks(
 def test_runtime_state_reuses_chunked_filter_cache(
     monkeypatch,
     install_fake_astrbot,
+    tmp_path,
 ) -> None:
     runtime_state, provider_cls = _import_runtime_state_with_fake_astrbot(
         install_fake_astrbot=install_fake_astrbot,
@@ -319,6 +328,8 @@ def test_runtime_state_reuses_chunked_filter_cache(
         "scan_live2d_models",
         lambda **kwargs: deepcopy(seed_model_info),
     )
+    live2ds_dir = tmp_path / "live2ds"
+    (live2ds_dir / "DemoModel").mkdir(parents=True, exist_ok=True)
 
     state = runtime_state.RuntimeState(
         platform_config={},
@@ -332,7 +343,7 @@ def test_runtime_state_reuses_chunked_filter_cache(
         host="127.0.0.1",
         http_port=12397,
         client_uid="desktop-client",
-        live2ds_dir=Path("."),
+        live2ds_dir=live2ds_dir,
     )
     asyncio.run(state.refresh_async())
     first_call_count = ChunkedCacheProvider.call_count
@@ -350,6 +361,7 @@ def test_runtime_state_reuses_chunked_filter_cache(
 def test_runtime_state_refresh_reads_inline_motion_contract_flag(
     monkeypatch,
     install_fake_astrbot,
+    tmp_path,
 ) -> None:
     runtime_state, _provider_cls = _import_runtime_state_with_fake_astrbot(
         install_fake_astrbot=install_fake_astrbot,
@@ -370,7 +382,7 @@ def test_runtime_state_refresh_reads_inline_motion_contract_flag(
         host="127.0.0.1",
         http_port=12397,
         client_uid="desktop-client",
-        live2ds_dir=Path("."),
+        live2ds_dir=tmp_path / "live2ds",
     )
 
     state.refresh()
@@ -381,6 +393,7 @@ def test_runtime_state_refresh_reads_inline_motion_contract_flag(
 def test_runtime_state_refresh_reads_motion_prompt_instruction(
     monkeypatch,
     install_fake_astrbot,
+    tmp_path,
 ) -> None:
     runtime_state, _provider_cls = _import_runtime_state_with_fake_astrbot(
         install_fake_astrbot=install_fake_astrbot,
@@ -401,7 +414,7 @@ def test_runtime_state_refresh_reads_motion_prompt_instruction(
         host="127.0.0.1",
         http_port=12397,
         client_uid="desktop-client",
-        live2ds_dir=Path("."),
+        live2ds_dir=tmp_path / "live2ds",
     )
 
     state.refresh()

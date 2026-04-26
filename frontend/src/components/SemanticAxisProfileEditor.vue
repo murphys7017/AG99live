@@ -27,6 +27,8 @@ const isDirty = ref(false);
 const saveStatusText = ref("");
 const pendingSave = ref<{
   expectedRevision: number;
+  modelId: string;
+  profileId: string;
   requestedAtMs: number;
 } | null>(null);
 
@@ -83,6 +85,8 @@ watch(
     if (
       pending
       && nextProfile
+      && nextProfile.model_id === pending.modelId
+      && nextProfile.profile_id === pending.profileId
       && nextProfile.revision > pending.expectedRevision
     ) {
       saveStatusText.value = `保存成功，已同步到 revision ${nextProfile.revision}。`;
@@ -187,6 +191,8 @@ function saveProfile(): void {
 
   pendingSave.value = {
     expectedRevision,
+    modelId: profile.model_id,
+    profileId: profile.profile_id,
     requestedAtMs: Date.now(),
   };
   saveStatusText.value = `已提交保存请求，等待 revision ${expectedRevision + 1} 的同步结果。`;

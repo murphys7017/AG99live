@@ -104,6 +104,7 @@ Prompt 的核心不再是“这里有 12 个参数”，而是：
   - `system.model_sync` 下发 `semantic_axis_profile`
   - `system.semantic_axis_profile_save` 回写闭环
   - `revision` / `source_hash` / `stale` 冲突保护
+  - 固定模板外的扫描参数先以 `debug` 轴进入 profile
 - 第二轮最小 UI 已完成：
   - Action Lab 中新增 `Profile Editor`
   - 可编辑字段：
@@ -120,6 +121,7 @@ Prompt 的核心不再是“这里有 12 个参数”，而是：
 - `couplings` 编辑器
 - `parameter_bindings` 编辑器
 - `positive_semantics / negative_semantics` 完整编辑
+- 扫描参数的批量勾选 / 新建主轴交互
 - `profile-driven prompt`
 - `ModelEngine compiler v2`
 - `parameter_plan.v2 runtime`
@@ -132,7 +134,7 @@ Prompt 的核心不再是“这里有 12 个参数”，而是：
 ```text
 动态主轴底座已落地
 -> 最小 Profile Editor 已落地
--> 下一步进入 profile-driven 执行链迁移
+-> 下一步补全 bindings/couplings 编辑，再进入 profile-driven 执行链迁移
 ```
 
 ## 暂不做的事
