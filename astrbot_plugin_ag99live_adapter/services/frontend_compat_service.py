@@ -3,7 +3,12 @@ from __future__ import annotations
 from typing import Awaitable, Callable
 from uuid import uuid4
 
+from ..live2d.semantic_axis_profile import (
+    SemanticAxisProfileError,
+    SemanticAxisProfileRevisionError,
+)
 from ..protocol.builder import (
+    build_control_error,
     build_system_background_list,
     build_system_heartbeat_ack,
     build_system_history_created,
@@ -18,6 +23,7 @@ from ..protocol import (
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HISTORY_LIST_REQUEST,
     TYPE_SYSTEM_HISTORY_LOAD,
+    TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE,
 )
 
 SUPPORTED_SYSTEM_MESSAGE_TYPES = {
@@ -27,6 +33,7 @@ SUPPORTED_SYSTEM_MESSAGE_TYPES = {
     TYPE_SYSTEM_HISTORY_LOAD,
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HEARTBEAT,
+    TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE,
 }
 
 
@@ -36,9 +43,11 @@ class FrontendCompatHandler:
         *,
         background_files_getter: Callable[[], list[str]],
         history_bridge,
+        runtime_state,
     ) -> None:
         self._background_files_getter = background_files_getter
         self._history_bridge = history_bridge
+        self._runtime_state = runtime_state
         self._history_uid = str(uuid4())
 
     @staticmethod
@@ -52,8 +61,6 @@ class FrontendCompatHandler:
         send_json: Callable[[dict], Awaitable[bool]],
         refresh_and_send_model: Callable[..., Awaitable[None]],
     ) -> None:
-        del refresh_and_send_model
-
         msg_type = message.type
         session_id = message.session_id
         payload = message.payload
@@ -105,3 +112,20 @@ class FrontendCompatHandler:
             )
         elif msg_type == TYPE_SYSTEM_HEARTBEAT:
             await send_json(build_system_heartbeat_ack(session_id=session_id))
+        elif msg_type == TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE:
+            try:
+                self._runtime_state.save_semantic_axis_profile_update(
+                    model_name=payload.get("model_name"),
+                    profile_payload=payload.get("profile"),
+                    expected_revision=payload.get("expected_revision"),
+                )
+            except (SemanticAxisProfileError, SemanticAxisProfileRevisionError) as exc:
+                await send_json(
+                    build_control_error(
+                        session_id=session_id,
+                        turn_id=message.turn_id,
+                        message=str(exc),
+                    )
+                )
+                return
+            await refresh_and_send_model(force=True)

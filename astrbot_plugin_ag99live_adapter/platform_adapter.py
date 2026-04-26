@@ -162,6 +162,7 @@ class OLVPetPlatformAdapter(Platform):
         self.frontend_compat_handler = FrontendCompatHandler(
             background_files_getter=lambda: list_background_files(ASSETS_DIR),
             history_bridge=self.history_bridge,
+            runtime_state=self.runtime_state,
         )
         self.transport = WebSocketTransport(
             host=self.host,

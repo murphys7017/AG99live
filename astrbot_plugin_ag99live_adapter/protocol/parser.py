@@ -16,6 +16,7 @@ from .constants import (
     TYPE_INPUT_TEXT,
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HISTORY_LOAD,
+    TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE,
 )
 from .models import (
     InboundMessage,
@@ -159,6 +160,24 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
         audio_base64 = payload.get("audio_base64")
         if not isinstance(audio_base64, str) or not audio_base64:
             raise ProtocolError("`input.audio_stream_chunk` requires `payload.audio_base64`.")
+        return
+
+    if message_type == TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE:
+        model_name = payload.get("model_name")
+        if not isinstance(model_name, str) or not model_name.strip():
+            raise ProtocolError(
+                "`system.semantic_axis_profile_save` requires `payload.model_name` to be a non-empty string."
+            )
+        expected_revision = payload.get("expected_revision")
+        if not isinstance(expected_revision, int) or expected_revision <= 0:
+            raise ProtocolError(
+                "`system.semantic_axis_profile_save` requires `payload.expected_revision` to be a positive integer."
+            )
+        profile = payload.get("profile")
+        if not isinstance(profile, Mapping):
+            raise ProtocolError(
+                "`system.semantic_axis_profile_save` requires `payload.profile` to be an object."
+            )
         return
 
 

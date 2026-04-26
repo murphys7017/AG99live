@@ -19,7 +19,7 @@ import type {
 import type { ModelEnginePlanStartedEvent } from "../model-engine/contracts";
 import type { DesktopBaseActionPreview } from "../types/desktop";
 
-const { state, selectedModel } = useModelSync();
+const { state, selectedModel, selectedSemanticAxisProfile } = useModelSync();
 const adapter = useAdapterConnection();
 const bridge = useDesktopBridge();
 const motionPlayer = usePreviewMotionPlayer();
@@ -398,6 +398,13 @@ function handleDesktopCommand(command: DesktopRuntimeCommand): void {
     case "set_motion_engine_settings":
       applyMotionEngineSettingsSnapshot(command.settings);
       return;
+    case "save_semantic_axis_profile":
+      adapter.sendSemanticAxisProfileSave({
+        model_name: command.modelName,
+        expected_revision: command.expectedRevision,
+        profile: cloneJson(command.profile),
+      });
+      return;
     case "save_motion_tuning_sample":
       saveMotionTuningSample(command.sample);
       return;
@@ -503,6 +510,7 @@ watch(
     state.lastUpdated,
     selectedModel.value?.name ?? "",
     selectedModel.value?.icon_url ?? "",
+    selectedSemanticAxisProfile.value,
     selectedModel.value?.engine_hints.recommended_mode ?? "",
     baseActionPreview.value,
     stageMessage.value,
@@ -548,6 +556,9 @@ watch(
       lastImageCount: adapter.state.lastImageCount,
       historyEntries: [...adapter.state.historyEntries],
       baseActionPreview: baseActionPreview.value,
+      selectedSemanticAxisProfile: selectedSemanticAxisProfile.value
+        ? cloneJson(selectedSemanticAxisProfile.value)
+        : null,
     });
   },
   { deep: true, immediate: true },

@@ -31,6 +31,13 @@ from ..live2d.cache.runtime_cache import (
     save_live2d_runtime_cache,
 )
 from ..live2d.scanner.scan import scan_live2d_models
+from ..live2d.semantic_axis_profile import (
+    SemanticAxisProfile,
+    SemanticAxisProfileError,
+    collect_known_parameter_ids,
+    ensure_semantic_axis_profile,
+    save_semantic_axis_profile,
+)
 from ..protocol.builder import build_system_model_sync
 from ..motion.realtime_motion_plan import DEFAULT_MOTION_PROMPT_INSTRUCTION
 
@@ -284,6 +291,7 @@ class RuntimeState:
                 base_url=base_url,
                 model_info=self.model_info,
             )
+        self._attach_semantic_axis_profiles()
 
         logger.info(
             "Refreshed adapter runtime settings "
@@ -409,6 +417,22 @@ class RuntimeState:
             conf_name=conf_name,
             conf_uid=conf_uid,
             client_uid=client_uid,
+        )
+
+    def save_semantic_axis_profile_update(
+        self,
+        *,
+        model_name: str,
+        profile_payload: Any,
+        expected_revision: Any,
+    ) -> SemanticAxisProfile:
+        model = self._get_model_payload_by_name(model_name)
+        return save_semantic_axis_profile(
+            model_dir=self._resolve_model_dir(model_name),
+            model_name=model_name,
+            profile_payload=profile_payload,
+            expected_revision=expected_revision,
+            known_parameter_ids=collect_known_parameter_ids(model),
         )
 
     def should_send_model_payload(self, payload: dict[str, Any], *, force: bool = False) -> bool:
@@ -935,6 +959,39 @@ class RuntimeState:
         self._runtime_cache_payload["action_filter_cache"] = {}
         self._base_action_filter_cache = {}
         self._persist_runtime_cache_payload()
+
+    def _attach_semantic_axis_profiles(self) -> None:
+        models = self.model_info.get("models", [])
+        if not isinstance(models, list):
+            return
+        for model in models:
+            if not isinstance(model, dict):
+                continue
+            model_name = str(model.get("name") or "").strip()
+            if not model_name:
+                continue
+            profile = ensure_semantic_axis_profile(
+                model_dir=self._resolve_model_dir(model_name),
+                model_payload=model,
+            )
+            model["semantic_axis_profile"] = deepcopy(profile)
+
+    def _get_model_payload_by_name(self, model_name: str) -> dict[str, Any]:
+        normalized_name = str(model_name or "").strip()
+        if not normalized_name:
+            raise SemanticAxisProfileError("`model_name` is required.")
+        for model in self.model_info.get("models", []):
+            if not isinstance(model, dict):
+                continue
+            if str(model.get("name") or "").strip() == normalized_name:
+                return model
+        raise SemanticAxisProfileError(f"Unknown Live2D model: `{normalized_name}`.")
+
+    def _resolve_model_dir(self, model_name: str) -> Path:
+        normalized_name = str(model_name or "").strip()
+        if not normalized_name:
+            raise SemanticAxisProfileError("`model_name` is required.")
+        return Path(self.live2ds_dir) / normalized_name
 
     def _persist_runtime_cache_payload(self) -> None:
         self._runtime_cache_payload["action_filter_cache"] = deepcopy(self._base_action_filter_cache)

@@ -6,8 +6,9 @@
 
 前提条件：
 
-- 后端只能消费“当前前端确认过并同步过来的 profile”。
-- 后端不能在本地自行重新扫描并生成另一份 profile。
+- 后端只能消费模型目录中的 canonical profile。
+- 前端编辑后，必须显式保存回后端，后端再基于已保存版本生成 prompt。
+- 后端不能在本地自行重新扫描并生成另一份 profile 来替代 canonical profile。
 
 否则 prompt 和前端 ModelEngine 会使用不同的语义轴集合，导致同一轮里“模型输出可控轴”和“前端可编译轴”不一致。
 
@@ -145,6 +146,8 @@ natural blink:
 Prompt generator 需要：
 
 - `semantic_axis_profile`
+- `profile_id`
+- `revision`
 - 当前模型名称和平台说明
 - 可选用户 prompt 指令
 - 可选调参样本 few-shot

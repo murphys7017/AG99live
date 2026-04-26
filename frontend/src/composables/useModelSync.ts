@@ -58,6 +58,10 @@ const selectedModel = computed<ModelSummary | null>(() => {
   );
 });
 
+const selectedSemanticAxisProfile = computed(() => {
+  return selectedModel.value?.semantic_axis_profile ?? null;
+});
+
 if (typeof window !== "undefined") {
   window.addEventListener("message", (event) => {
     applyUnknownMessage(event.data);
@@ -76,6 +80,7 @@ export function useModelSync() {
   return {
     state: readonly(state),
     selectedModel,
+    selectedSemanticAxisProfile,
     applyModelSyncMessage,
     applyUnknownMessage,
     resetModelSyncState,

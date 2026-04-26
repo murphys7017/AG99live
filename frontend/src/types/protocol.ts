@@ -1,3 +1,5 @@
+import type { SemanticAxisProfile } from "./semantic-axis-profile";
+
 export interface ProtocolEnvelope<TPayload = unknown> {
   type: string;
   version: string;
@@ -588,6 +590,7 @@ export interface ModelSummary {
     expressions: ExpressionConstraint[];
     motions: MotionConstraint[];
   };
+  semantic_axis_profile?: SemanticAxisProfile | null;
   calibration_profile?: DirectParameterCalibrationProfile | null;
   engine_hints: {
     driver_priority: string[];
@@ -612,4 +615,10 @@ export interface SystemModelSyncPayload {
   conf_name: string;
   conf_uid: string;
   client_uid: string;
+}
+
+export interface SystemSemanticAxisProfileSavePayload {
+  model_name: string;
+  expected_revision: number;
+  profile: SemanticAxisProfile;
 }

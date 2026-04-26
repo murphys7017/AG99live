@@ -10,6 +10,7 @@ import type {
   OutputTextPayload,
   OutputTranscriptionPayload,
   ProtocolEnvelope,
+  SystemSemanticAxisProfileSavePayload,
   SystemModelSyncPayload,
   SystemServerInfoPayload,
 } from "../types/protocol";
@@ -1196,6 +1197,27 @@ function interruptCurrentTurn(): boolean {
   return true;
 }
 
+function sendSemanticAxisProfileSave(
+  payload: SystemSemanticAxisProfileSavePayload,
+): boolean {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    state.lastError = "当前还没有连上适配器，无法保存主轴配置。";
+    state.statusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    return false;
+  }
+
+  socket.send(
+    JSON.stringify(
+      buildMessageEnvelope("system.semantic_axis_profile_save", payload),
+    ),
+  );
+  state.lastError = "";
+  state.statusMessage = `已提交模型 ${payload.model_name} 的主轴配置保存请求。`;
+  pushHistory("system", state.statusMessage);
+  return true;
+}
+
 function sendMotionPayloadPreview(payload: unknown): boolean {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     state.lastError = "当前还没有连上适配器，无法发送动作测试载荷。";
@@ -1365,6 +1387,7 @@ export function useAdapterConnection() {
     disconnect,
     sendText,
     interruptCurrentTurn,
+    sendSemanticAxisProfileSave,
     sendMotionPayloadPreview,
     sendMotionPlanPreview,
     toggleMicrophoneCapture,

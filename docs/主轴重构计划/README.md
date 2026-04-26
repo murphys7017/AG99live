@@ -57,9 +57,17 @@ Live2D 文件夹
 -> 参数/表情/motion 扫描
 -> 自动生成 semantic_axis_profile.json
 -> 前端 Action Lab / Profile Editor 人工校正
--> 保存 profile
+-> 保存回后端模型目录
 -> ModelEngine / prompt / runtime 使用该 profile
 ```
+
+当前事实来源明确为：
+
+```text
+后端模型目录中的 semantic_axis_profile.json
+```
+
+前端只持有编辑副本，不单独作为运行时事实来源。
 
 ### 4. 控制权必须写进 profile
 
@@ -85,6 +93,46 @@ Prompt 的核心不再是“这里有 12 个参数”，而是：
 你可以控制以下 primary semantic axes。
 每个 axis 的 50/高值/低值/推荐范围/适用场景如下。
 不要控制 runtime/ambient axes。
+```
+
+## 当前实现进度
+
+### 已完成
+
+- 第一轮基础设施已完成：
+  - 后端 canonical profile 文件落地
+  - `system.model_sync` 下发 `semantic_axis_profile`
+  - `system.semantic_axis_profile_save` 回写闭环
+  - `revision` / `source_hash` / `stale` 冲突保护
+- 第二轮最小 UI 已完成：
+  - Action Lab 中新增 `Profile Editor`
+  - 可编辑字段：
+    - `label`
+    - `control_role`
+    - `description`
+    - `usage_notes`
+    - `soft_range`
+    - `strong_range`
+  - `parameter_bindings` 当前只读展示
+
+### 尚未完成
+
+- `couplings` 编辑器
+- `parameter_bindings` 编辑器
+- `positive_semantics / negative_semantics` 完整编辑
+- `profile-driven prompt`
+- `ModelEngine compiler v2`
+- `parameter_plan.v2 runtime`
+- 固定 12 轴核心路径删除
+
+### 当前阶段判断
+
+当前已经不再处于“只做方案”的阶段，而是处于：
+
+```text
+动态主轴底座已落地
+-> 最小 Profile Editor 已落地
+-> 下一步进入 profile-driven 执行链迁移
 ```
 
 ## 暂不做的事

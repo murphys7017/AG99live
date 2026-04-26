@@ -14,36 +14,36 @@
 
 ## Profile 文件位置
 
-执行阶段必须先选定单一事实来源。当前建议：
+执行阶段必须先选定单一事实来源。当前约定：
 
 ```text
-前端持久化 profile store = 运行时事实来源
+后端模型目录中的 semantic_axis_profile.json = 运行时事实来源
 ```
 
 原因：
 
-- Profile Editor 在前端。
-- ModelEngine 在前端。
-- 当前重构阶段优先保证前端编译和调参闭环。
-- 后端 prompt 读取当前 profile 时，应通过显式同步机制获取，而不是各自扫描一份。
+- 后端 prompt 必须读取同一份 canonical profile。
+- Profile 需要和具体模型资源一起管理版本。
+- 前端可以编辑 profile，但编辑结果必须显式保存回后端。
+- 当前阶段不允许前后端各自维护一份独立事实来源。
 
-可选导出位置：
+持久化位置：
 
 ```text
 live2ds/<model_name>/ag99/semantic_axis_profile.json
 ```
 
-前端持久化位置：
+前端侧状态：
 
 ```text
-frontend profile cache / model profile store
+frontend editor working copy / profile cache
 ```
 
 最终应支持：
 
-- 前端本地持久化。
-- 导出到模型目录。
-- 从模型目录导入。
+- 从后端读取当前 canonical profile。
+- 在前端编辑 working copy。
+- 显式保存回模型目录。
 
 ## Schema 草案
 
@@ -53,6 +53,7 @@ frontend profile cache / model profile store
   "profile_id": "Mk6_1.0.semantic.v1",
   "model_id": "Mk6_1.0",
   "source_hash": "live2d-folder-md5-or-sha256",
+  "revision": 3,
   "generated_at": "2026-04-26T00:00:00+08:00",
   "axes": [
     {
@@ -142,16 +143,15 @@ frontend profile cache / model profile store
 | `MouthForm`, `MouthSmile` | mouth smile |
 | `Brow` | brow derived/hint |
 
-### Step 2：motion/表情反推语义
+### Step 2：基础映射补全
 
-从 motion 和 expression 中统计：
+第一版只要求利用现有扫描产物补全基础信息，不把复杂语义推断作为阻塞项。
 
-- 哪些参数经常随头部动作出现。
-- 哪些参数只在表情文件出现。
-- 哪些参数幅度大、影响明显。
-- 哪些参数经常和 mouth/eye/brow 同时出现。
+- 可读取 motion / expression / parameter_action_library 作为辅助证据。
+- 允许只完成“参数枚举 + 基础 group + 默认 control_role + 默认 binding 候选”。
+- 不要求第一版自动得出完整语义描述和完美 coupling。
 
-这一步用于补充参数名识别不足的问题。
+这一步用于补充参数名识别不足的问题，但不应阻塞主链路。
 
 ### Step 3：生成初始 axes
 
@@ -166,7 +166,7 @@ frontend profile cache / model profile store
 
 ### Step 4：生成联动候选
 
-根据识别结果生成基础 coupling：
+根据识别结果生成基础 coupling 候选：
 
 ```text
 head_yaw -> body_yaw
@@ -178,6 +178,8 @@ eye expression -> brow
 ```
 
 这些只是候选，前端应允许启用/禁用和调强度。
+
+第一版允许完全不自动生成 coupling，只提供空列表并由用户手动配置。
 
 ### Step 5：用户校正
 
@@ -216,7 +218,8 @@ source_hash changed -> 标记 profile 过期，提示重新扫描或手动确认
 {
   "user_modified": true,
   "source_hash": "...",
-  "last_scanned_hash": "..."
+  "last_scanned_hash": "...",
+  "revision": 3
 }
 ```
 

@@ -7,6 +7,7 @@ import type {
   DesktopRuntimeSnapshot,
   DesktopWindowVisibilityState,
 } from "../types/desktop";
+import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 import {
   buildDefaultModelEngineSettings,
   cloneModelEngineSettings,
@@ -49,6 +50,7 @@ const defaultSnapshot: DesktopRuntimeSnapshot = {
   lastImageCount: 0,
   historyEntries: [],
   baseActionPreview: null,
+  selectedSemanticAxisProfile: null,
 };
 
 const defaultWindowState: DesktopWindowVisibilityState = {
@@ -159,6 +161,9 @@ function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnap
       : [],
     historyEntries: historyEntries.map((entry) => ({ ...entry })),
     baseActionPreview: cloneBaseActionPreview(snapshot.baseActionPreview),
+    selectedSemanticAxisProfile: cloneSemanticAxisProfile(
+      snapshot.selectedSemanticAxisProfile,
+    ),
   };
 }
 
@@ -268,6 +273,31 @@ function cloneBaseActionPreview(
       ...atom,
       sourceTags: [...atom.sourceTags],
     })),
+  };
+}
+
+function cloneSemanticAxisProfile(
+  profile: SemanticAxisProfile | null | undefined,
+): SemanticAxisProfile | null {
+  if (!profile) {
+    return null;
+  }
+  return {
+    ...profile,
+    axes: profile.axes.map((axis) => ({
+      ...axis,
+      value_range: [...axis.value_range] as [number, number],
+      soft_range: [...axis.soft_range] as [number, number],
+      strong_range: [...axis.strong_range] as [number, number],
+      positive_semantics: [...axis.positive_semantics],
+      negative_semantics: [...axis.negative_semantics],
+      parameter_bindings: axis.parameter_bindings.map((binding) => ({
+        ...binding,
+        input_range: [...binding.input_range] as [number, number],
+        output_range: [...binding.output_range] as [number, number],
+      })),
+    })),
+    couplings: profile.couplings.map((coupling) => ({ ...coupling })),
   };
 }
 

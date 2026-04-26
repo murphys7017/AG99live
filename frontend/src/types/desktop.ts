@@ -2,6 +2,7 @@ import type {
   DirectParameterAxisName,
   DirectParameterPlan,
 } from "./protocol";
+import type { SemanticAxisProfile } from "./semantic-axis-profile";
 
 export type DesktopWindowRole = "pet" | "overlay" | "settings" | "history" | "action_lab";
 export type DesktopAuxWindowRole = "settings" | "history" | "action_lab";
@@ -179,6 +180,7 @@ export interface DesktopRuntimeSnapshot {
   lastImageCount: number;
   historyEntries: DesktopHistoryEntry[];
   baseActionPreview: DesktopBaseActionPreview | null;
+  selectedSemanticAxisProfile: SemanticAxisProfile | null;
 }
 
 export type DesktopRuntimeCommand =
@@ -186,6 +188,12 @@ export type DesktopRuntimeCommand =
   | { type: "set_desktop_screenshot_on_send"; enabled: boolean }
   | { type: "set_ambient_motion_enabled"; enabled: boolean }
   | { type: "set_motion_engine_settings"; settings: DesktopMotionEngineSettings }
+  | {
+    type: "save_semantic_axis_profile";
+    modelName: string;
+    expectedRevision: number;
+    profile: SemanticAxisProfile;
+  }
   | { type: "save_motion_tuning_sample"; sample: DesktopMotionTuningSample }
   | { type: "delete_motion_tuning_sample"; sampleId: string }
   | { type: "connect"; address?: string }
