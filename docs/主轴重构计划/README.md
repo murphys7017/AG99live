@@ -105,6 +105,8 @@ Prompt 的核心不再是“这里有 12 个参数”，而是：
   - `system.semantic_axis_profile_save` 回写闭环
   - `revision` / `source_hash` / `stale` 冲突保护
   - 固定模板外的扫描参数先以 `debug` 轴进入 profile
+  - 扫描参数生成稳定的 AG99live semantic axis id，Live2D 原始参数 ID 只保留在 `parameter_bindings[].parameter_id`
+  - 模型文件 hash 变化时先按 profile 自身结构读取并标记 `stale`，不因当前参数表变化提前阻断用户已编辑 profile
 - 第二轮 Profile Editor 主体能力已完成：
   - Action Lab 中新增 `Profile Editor`
   - 可编辑字段：

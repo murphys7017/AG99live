@@ -100,9 +100,51 @@ def test_ensure_semantic_axis_profile_adds_unmapped_parameters_as_debug_axes(tmp
         model_payload=model_payload,
     )
 
-    extra_axis = next(axis for axis in profile["axes"] if axis["id"] == "ParamAccessoryGlow")
+    extra_axis = next(
+        axis
+        for axis in profile["axes"]
+        if axis["parameter_bindings"][0]["parameter_id"] == "ParamAccessoryGlow"
+    )
+    assert extra_axis["id"].startswith("debug_paramaccessoryglow_")
     assert extra_axis["control_role"] == "debug"
     assert extra_axis["parameter_bindings"][0]["parameter_id"] == "ParamAccessoryGlow"
+
+
+def test_ensure_semantic_axis_profile_decouples_debug_axis_id_from_parameter_id(tmp_path) -> None:
+    model_dir = tmp_path / "DemoModel"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
+    model_payload = _build_model_payload()
+    raw_parameter_id = "01.Param-Accessory:Glow"
+    model_payload["parameter_scan"]["parameters"].append(
+        {
+            "id": raw_parameter_id,
+            "name": "Accessory Glow",
+            "group_id": "Accessory",
+            "group_name": "Accessory",
+            "kind": "core",
+            "domain": "accessory",
+            "channels": [],
+        }
+    )
+
+    profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+
+    extra_axis = next(
+        axis
+        for axis in profile["axes"]
+        if axis["parameter_bindings"][0]["parameter_id"] == raw_parameter_id
+    )
+    assert extra_axis["id"] != raw_parameter_id
+    assert extra_axis["id"].startswith("debug_param_01_param_accessory_glow_")
+    validate_semantic_axis_profile(
+        profile,
+        model_name="DemoModel",
+        known_parameter_ids={item["id"] for item in model_payload["parameter_scan"]["parameters"]},
+    )
 
 
 def test_save_semantic_axis_profile_rejects_revision_mismatch(tmp_path) -> None:
@@ -327,6 +369,53 @@ def test_ensure_semantic_axis_profile_marks_user_modified_profile_stale(tmp_path
     assert stale_profile["status"] == "stale"
     assert stale_profile["user_modified"] is True
     assert stale_profile["last_scanned_hash"] != saved_profile["last_scanned_hash"]
+
+
+def test_ensure_semantic_axis_profile_marks_stale_before_current_parameter_validation(tmp_path) -> None:
+    model_dir = tmp_path / "DemoModel"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    model_file = model_dir / "Demo.model3.json"
+    model_file.write_text("{}", encoding="utf-8")
+    model_payload = _build_model_payload()
+    model_payload["parameter_scan"]["parameters"].append(
+        {
+            "id": "ParamAccessoryGlow",
+            "name": "Accessory Glow",
+            "group_id": "Accessory",
+            "group_name": "Accessory",
+            "kind": "core",
+            "domain": "accessory",
+            "channels": [],
+        }
+    )
+
+    initial_profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+    saved_profile = save_semantic_axis_profile(
+        model_dir=model_dir,
+        model_name="DemoModel",
+        profile_payload=initial_profile,
+        expected_revision=initial_profile["revision"],
+        known_parameter_ids={item["id"] for item in model_payload["parameter_scan"]["parameters"]},
+    )
+
+    next_model_payload = _build_model_payload()
+    model_file.write_text(json.dumps({"changed": True}), encoding="utf-8")
+    stale_profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=next_model_payload,
+    )
+
+    assert stale_profile["revision"] == saved_profile["revision"]
+    assert stale_profile["status"] == "stale"
+    assert stale_profile["user_modified"] is True
+    assert any(
+        binding["parameter_id"] == "ParamAccessoryGlow"
+        for axis in stale_profile["axes"]
+        for binding in axis["parameter_bindings"]
+    )
 
 
 def test_save_semantic_axis_profile_rejects_source_hash_mismatch(tmp_path) -> None:

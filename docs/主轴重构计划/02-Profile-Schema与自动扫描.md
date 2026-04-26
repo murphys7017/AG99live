@@ -98,7 +98,7 @@ frontend editor working copy / profile cache
 
 | 字段 | 说明 |
 |---|---|
-| `id` | AG99live 内部语义轴 ID |
+| `id` | AG99live 内部语义轴 ID，不等同于 Live2D 原始参数 ID |
 | `label` | UI 展示名 |
 | `description` | prompt 和 UI 说明 |
 | `semantic_group` | head/body/eye/mouth/brow/gaze/accessory 等 |
@@ -110,6 +110,22 @@ frontend editor working copy / profile cache
 | `positive_semantics` | 高于 neutral 的语义 |
 | `negative_semantics` | 低于 neutral 的语义 |
 | `parameter_bindings` | 具体 Live2D 参数映射 |
+
+### Axis ID 与 Parameter ID 边界
+
+`axis.id` 是 AG99live 的语义控制轴标识，用于 prompt、ModelEngine、coupling 和 UI 配置。
+
+Live2D 原始参数 ID 只允许出现在：
+
+```text
+axes[].parameter_bindings[].parameter_id
+```
+
+扫描到的未知参数默认生成稳定的 `debug_*` axis id，并把原始 Live2D 参数 ID 写入 binding。这样做的目的：
+
+- 避免不同模型的参数命名规则污染语义轴协议。
+- 允许 Live2D 参数包含 `.`、`-`、冒号、数字开头等不适合作为语义轴 ID 的字符。
+- 为后续 `motion_intent.v2` 和 `parameter_plan.v2` 明确分离“语义轴”和“实际写入参数”。
 
 ## 自动扫描输入
 
@@ -203,6 +219,8 @@ source_hash changed -> 标记 profile 过期，提示重新扫描或手动确认
 ```
 
 不能静默覆盖用户编辑过的 profile。
+
+当模型文件 hash 已变化时，系统应先按 profile 自身结构读取旧 profile，再标记 `stale`。此时不能先用新的参数表严格校验旧 binding，否则模型参数改名/删除会让 profile 在进入 stale 流程前直接加载失败。
 
 因此需要明确区分三种状态：
 

@@ -379,6 +379,7 @@ def build_default_semantic_axis_profile(
             }
         )
 
+    used_axis_ids = {axis["id"] for axis in axes}
     for parameter in _as_list(parameter_scan.get("parameters")):
         if not isinstance(parameter, Mapping):
             continue
@@ -387,6 +388,10 @@ def build_default_semantic_axis_profile(
             continue
 
         parameter_name = str(parameter.get("name") or "").strip() or parameter_id
+        axis_id = _build_scanned_parameter_axis_id(
+            parameter_id=parameter_id,
+            used_axis_ids=used_axis_ids,
+        )
         semantic_group = (
             str(parameter.get("domain") or "").strip()
             or str(parameter.get("group_name") or "").strip()
@@ -394,7 +399,7 @@ def build_default_semantic_axis_profile(
         )
         axes.append(
             {
-                "id": parameter_id,
+                "id": axis_id,
                 "label": parameter_name,
                 "description": f"Scanned Live2D parameter `{parameter_id}`.",
                 "semantic_group": semantic_group,
@@ -418,6 +423,7 @@ def build_default_semantic_axis_profile(
                 ],
             }
         )
+        used_axis_ids.add(axis_id)
         bound_parameter_ids.add(parameter_id)
 
     axis_ids = {axis["id"] for axis in axes}
@@ -731,9 +737,13 @@ def ensure_semantic_axis_profile(
         current_profile = load_semantic_axis_profile(
             model_dir=model_dir,
             model_name=model_name,
-            known_parameter_ids=known_parameter_ids,
         )
         if str(current_profile["source_hash"]).strip() == current_source_hash:
+            current_profile = validate_semantic_axis_profile(
+                current_profile,
+                model_name=model_name,
+                known_parameter_ids=known_parameter_ids,
+            )
             if current_profile["status"] == "stale" and not current_profile["user_modified"]:
                 refreshed_profile: SemanticAxisProfile = {
                     **current_profile,
@@ -789,13 +799,17 @@ def save_semantic_axis_profile(
     current_profile = load_semantic_axis_profile(
         model_dir=model_dir,
         model_name=model_name,
-        known_parameter_ids=known_parameter_ids,
     )
     if str(current_profile["source_hash"]).strip() != current_source_hash:
         raise SemanticAxisProfileRevisionError(
             f"SemanticAxisProfile source_hash mismatch for `{model_name}`. "
             "The model files changed, please reload the latest profile before saving."
         )
+    current_profile = validate_semantic_axis_profile(
+        current_profile,
+        model_name=model_name,
+        known_parameter_ids=known_parameter_ids,
+    )
     current_revision = int(current_profile["revision"])
     normalized_expected_revision = _coerce_positive_int(
         expected_revision,
@@ -934,6 +948,28 @@ def _build_parameter_binding(
 
 def _build_profile_id(model_name: str) -> str:
     return f"{model_name}.semantic.v1"
+
+
+def _build_scanned_parameter_axis_id(
+    *,
+    parameter_id: str,
+    used_axis_ids: set[str],
+) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9_]+", "_", parameter_id.strip()).strip("_").lower()
+    if not normalized or not normalized[0].isalpha():
+        normalized = f"param_{normalized}" if normalized else "param"
+
+    digest = hashlib.sha1(parameter_id.encode("utf-8", errors="ignore")).hexdigest()[:8]
+    max_stem_length = AXIS_ID_MAX_LENGTH - len("debug_") - len("_") - len(digest)
+    stem = normalized[:max_stem_length].strip("_") or "param"
+    candidate = f"debug_{stem}_{digest}"
+    counter = 2
+    while candidate in used_axis_ids:
+        suffix = f"_{counter}"
+        candidate = f"debug_{stem[:max_stem_length - len(suffix)]}_{digest}{suffix}"
+        counter += 1
+    _validate_axis_id(candidate)
+    return candidate
 
 
 def _normalize_range(value: Any, *, field_name: str) -> list[float]:
