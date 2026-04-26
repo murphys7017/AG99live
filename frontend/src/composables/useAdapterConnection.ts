@@ -1,5 +1,8 @@
 import { reactive, readonly } from "vue";
-import type { DesktopHistoryEntry } from "../types/desktop";
+import type {
+  DesktopHistoryEntry,
+  DesktopMotionTuningSample,
+} from "../types/desktop";
 import type {
   ControlErrorPayload,
   ControlPlaybackFinishedPayload,
@@ -1274,6 +1277,47 @@ function sendSemanticAxisProfileSave(
   return true;
 }
 
+function sendMotionTuningExamplesSync(samples: DesktopMotionTuningSample[]): boolean {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    return false;
+  }
+
+  const examples = samples
+    .filter((sample) => sample.enabledForLlmReference)
+    .slice(0, 5)
+    .map((sample) => ({
+      id: sample.id,
+      input: [
+        sample.assistantText ? `Assistant: ${sample.assistantText}` : "",
+        sample.feedback ? `Tuning note: ${sample.feedback}` : "",
+        sample.tags.length ? `Tags: ${sample.tags.join(", ")}` : "",
+      ].filter(Boolean).join("\n"),
+      output: {
+        emotion: sample.emotionLabel || "custom",
+        mode: sample.adjustedPlan.mode,
+        duration_ms: sample.adjustedPlan.timing.duration_ms,
+        axes: { ...sample.adjustedAxes },
+      },
+      model_name: sample.modelName,
+      feedback: sample.feedback,
+      tags: [...sample.tags],
+      created_at: sample.createdAt,
+    }));
+
+  socket.send(
+    JSON.stringify(
+      buildMessageEnvelope("system.motion_tuning_examples_sync", {
+        examples,
+      }),
+    ),
+  );
+  state.statusMessage = examples.length
+    ? `已同步 ${examples.length} 个动作调参参考样本。`
+    : "已清空动作调参参考样本。";
+  pushHistory("system", state.statusMessage);
+  return true;
+}
+
 function sendMotionPayloadPreview(payload: unknown): boolean {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     state.lastError = "当前还没有连上适配器，无法发送动作测试载荷。";
@@ -1449,6 +1493,7 @@ export function useAdapterConnection() {
     sendText,
     interruptCurrentTurn,
     sendSemanticAxisProfileSave,
+    sendMotionTuningExamplesSync,
     sendMotionPayloadPreview,
     sendMotionPlanPreview,
     toggleMicrophoneCapture,

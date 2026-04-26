@@ -12,7 +12,8 @@ export function getWindowRole(): DesktopWindowRole {
     value === "overlay" ||
     value === "settings" ||
     value === "history" ||
-    value === "action_lab"
+    value === "action_lab" ||
+    value === "profile_editor"
   ) {
     return value;
   }

@@ -19,6 +19,7 @@ export class MenuManager {
         this.buildToggleItem("settings", "系统设置"),
         this.buildToggleItem("history", "对话历史"),
         this.buildToggleItem("action_lab", "动作实验室"),
+        this.buildToggleItem("profile_editor", "Profile Editor"),
         { type: "separator" },
         {
           label: "退出 AG99live",

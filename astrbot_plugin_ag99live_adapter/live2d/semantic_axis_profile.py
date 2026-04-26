@@ -347,6 +347,11 @@ def build_default_semantic_axis_profile(
             channel_entry,
             calibration_entry,
         )
+        candidate_parameter_ids = [
+            parameter_id
+            for parameter_id in candidate_parameter_ids
+            if parameter_id not in bound_parameter_ids
+        ][:1]
         if not candidate_parameter_ids:
             continue
 
@@ -918,14 +923,6 @@ def _collect_candidate_parameter_ids(
     calibration_entry: Mapping[str, Any],
 ) -> list[str]:
     candidates: list[str] = []
-    for source in (
-        calibration_entry.get("parameter_ids"),
-        calibration_entry.get("preferred_parameter_ids"),
-        channel_entry.get("candidate_parameter_ids"),
-    ):
-        if isinstance(source, list):
-            candidates.extend(str(item).strip() for item in source if str(item).strip())
-
     parameter_id = str(calibration_entry.get("parameter_id") or "").strip()
     if parameter_id:
         candidates.append(parameter_id)
@@ -938,6 +935,14 @@ def _collect_candidate_parameter_ids(
     parameter_id = str(channel_entry.get("primary_parameter_id") or "").strip()
     if parameter_id:
         candidates.append(parameter_id)
+
+    for source in (
+        calibration_entry.get("preferred_parameter_ids"),
+        calibration_entry.get("parameter_ids"),
+        channel_entry.get("candidate_parameter_ids"),
+    ):
+        if isinstance(source, list):
+            candidates.extend(str(item).strip() for item in source if str(item).strip())
 
     deduped: list[str] = []
     seen: set[str] = set()

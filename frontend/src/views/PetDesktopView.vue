@@ -358,11 +358,19 @@ function saveMotionTuningSample(sample: DesktopMotionTuningSample): void {
     normalizedSample,
     ...motionTuningSamples.value.filter((item) => item.id !== normalizedSample.id),
   ].slice(0, 50);
+  syncMotionTuningExamples();
 }
 
 function deleteMotionTuningSample(sampleId: string): void {
   motionTuningSamples.value = motionTuningSamples.value.filter(
     (sample) => sample.id !== sampleId,
+  );
+  syncMotionTuningExamples();
+}
+
+function syncMotionTuningExamples(): void {
+  adapter.sendMotionTuningExamplesSync(
+    motionTuningSamples.value.map((sample) => cloneJson(sample)),
   );
 }
 
@@ -489,6 +497,15 @@ watch(
   () => adapter.state.currentTurnId,
   (turnId) => {
     modelEngine.notifyCurrentTurnChanged(turnId);
+  },
+);
+
+watch(
+  () => adapter.state.status,
+  (status) => {
+    if (status === "connected") {
+      syncMotionTuningExamples();
+    }
   },
 );
 

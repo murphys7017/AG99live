@@ -291,6 +291,11 @@ def resolve_selector_few_shot_examples(*, runtime_state: Any) -> list[dict[str, 
     if not enabled:
         return []
 
+    user_examples = [
+        item
+        for item in getattr(runtime_state, "motion_tuning_reference_examples", [])
+        if isinstance(item, dict)
+    ][:5]
     max_count = len(DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES)
     count_raw = getattr(runtime_state, "realtime_motion_fewshot_count", 4)
     try:
@@ -298,9 +303,8 @@ def resolve_selector_few_shot_examples(*, runtime_state: Any) -> list[dict[str, 
     except (TypeError, ValueError):
         count = 4
     count = max(0, min(count, max_count))
-    if count == 0:
-        return []
-    return DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES[:count]
+    default_examples = DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES[:count] if count else []
+    return [*user_examples, *default_examples][: max(5, count)]
 
 
 def resolve_motion_prompt_instruction(*, runtime_state: Any) -> str:

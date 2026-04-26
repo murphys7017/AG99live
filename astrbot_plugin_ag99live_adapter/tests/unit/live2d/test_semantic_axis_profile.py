@@ -119,6 +119,81 @@ def test_ensure_semantic_axis_profile_adds_unmapped_parameters_as_debug_axes(tmp
     assert extra_axis["parameter_bindings"][0]["parameter_id"] == "ParamAccessoryGlow"
 
 
+def test_default_semantic_axis_profile_uses_single_preferred_binding_per_axis(tmp_path) -> None:
+    model_dir = tmp_path / "DemoModel"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
+    model_payload = _build_model_payload()
+    parameter_scan = model_payload["parameter_scan"]
+    parameter_scan["standard_channels"]["head_yaw"]["candidate_parameter_ids"] = [
+        "ParamAngleX",
+        "ParamBodyAngleX",
+    ]
+    parameter_scan["standard_channels"]["body_yaw"] = {
+        "label": "Body Yaw",
+        "available": True,
+        "primary_parameter_id": "ParamBodyAngleX",
+        "primary_parameter_name": "ParamBodyAngleX",
+        "group_name": "Body",
+        "candidate_parameter_ids": ["ParamBodyAngleX"],
+    }
+    parameter_scan["parameters"].append(
+        {
+            "id": "ParamBodyAngleX",
+            "name": "ParamBodyAngleX",
+            "group_id": "Body",
+            "group_name": "Body",
+            "kind": "core",
+            "domain": "body",
+            "channels": ["body_yaw"],
+        }
+    )
+
+    profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+
+    head_yaw = next(axis for axis in profile["axes"] if axis["id"] == "head_yaw")
+    body_yaw = next(axis for axis in profile["axes"] if axis["id"] == "body_yaw")
+    assert [binding["parameter_id"] for binding in head_yaw["parameter_bindings"]] == ["ParamAngleX"]
+    assert [binding["parameter_id"] for binding in body_yaw["parameter_bindings"]] == ["ParamBodyAngleX"]
+    validate_semantic_axis_profile(
+        profile,
+        model_name="DemoModel",
+        enforce_runtime_contracts=True,
+    )
+
+
+def test_default_semantic_axis_profile_skips_already_bound_preferred_parameter(tmp_path) -> None:
+    model_dir = tmp_path / "DemoModel"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
+    model_payload = _build_model_payload()
+    parameter_scan = model_payload["parameter_scan"]
+    parameter_scan["standard_channels"]["body_yaw"] = {
+        "label": "Body Yaw",
+        "available": True,
+        "primary_parameter_id": "ParamAngleX",
+        "primary_parameter_name": "ParamAngleX",
+        "group_name": "Body",
+        "candidate_parameter_ids": ["ParamAngleX"],
+    }
+
+    profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+
+    assert [axis["id"] for axis in profile["axes"]].count("head_yaw") == 1
+    assert all(axis["id"] != "body_yaw" for axis in profile["axes"])
+    validate_semantic_axis_profile(
+        profile,
+        model_name="DemoModel",
+        enforce_runtime_contracts=True,
+    )
+
+
 def test_ensure_semantic_axis_profile_decouples_debug_axis_id_from_parameter_id(tmp_path) -> None:
     model_dir = tmp_path / "DemoModel"
     model_dir.mkdir(parents=True, exist_ok=True)

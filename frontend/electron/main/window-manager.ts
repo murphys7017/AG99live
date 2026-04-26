@@ -60,6 +60,7 @@ export class WindowManager {
     settings: null,
     history: null,
     action_lab: null,
+    profile_editor: null,
   };
 
   createWindows(): void {
@@ -68,6 +69,7 @@ export class WindowManager {
     this.windows.settings = this.ensureAuxWindow("settings");
     this.windows.history = this.ensureAuxWindow("history");
     this.windows.action_lab = this.ensureAuxWindow("action_lab");
+    this.windows.profile_editor = this.ensureAuxWindow("profile_editor");
     this.windows.pet?.show();
     if (this.overlayVisiblePreference) {
       this.windows.overlay?.show();
@@ -322,6 +324,7 @@ export class WindowManager {
       settingsVisible: Boolean(this.windows.settings?.isVisible()),
       historyVisible: Boolean(this.windows.history?.isVisible()),
       actionLabVisible: Boolean(this.windows.action_lab?.isVisible()),
+      profileEditorVisible: Boolean(this.windows.profile_editor?.isVisible()),
     };
   }
 
@@ -481,9 +484,23 @@ export class WindowManager {
       ? "AG99live Settings"
       : role === "history"
         ? "AG99live History"
-        : "AG99live Action Lab";
-    const width = role === "settings" ? 520 : role === "history" ? 480 : 940;
-    const height = role === "settings" ? 700 : role === "history" ? 680 : 760;
+        : role === "action_lab"
+          ? "AG99live Action Lab"
+          : "AG99live Profile Editor";
+    const width = role === "settings"
+      ? 520
+      : role === "history"
+        ? 480
+        : role === "action_lab"
+          ? 940
+          : 1180;
+    const height = role === "settings"
+      ? 700
+      : role === "history"
+        ? 680
+        : role === "action_lab"
+          ? 760
+          : 860;
     const utilityWindow = new BrowserWindow({
       width,
       height,

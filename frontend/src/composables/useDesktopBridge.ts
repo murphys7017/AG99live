@@ -203,6 +203,7 @@ function cloneMotionTuningSample(
     return {
       ...sample,
       tags: [...sample.tags],
+      enabledForLlmReference: Boolean(sample.enabledForLlmReference),
       originalAxes: { ...sample.originalAxes },
       adjustedAxes: { ...sample.adjustedAxes },
       adjustedPlan: cloneDirectParameterPlan(sample.adjustedPlan),

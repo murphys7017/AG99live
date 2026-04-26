@@ -24,6 +24,7 @@ from ..protocol import (
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HISTORY_LIST_REQUEST,
     TYPE_SYSTEM_HISTORY_LOAD,
+    TYPE_SYSTEM_MOTION_TUNING_EXAMPLES_SYNC,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE,
 )
 
@@ -34,6 +35,7 @@ SUPPORTED_SYSTEM_MESSAGE_TYPES = {
     TYPE_SYSTEM_HISTORY_LOAD,
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HEARTBEAT,
+    TYPE_SYSTEM_MOTION_TUNING_EXAMPLES_SYNC,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE,
 }
 
@@ -113,6 +115,9 @@ class FrontendCompatHandler:
             )
         elif msg_type == TYPE_SYSTEM_HEARTBEAT:
             await send_json(build_system_heartbeat_ack(session_id=session_id))
+        elif msg_type == TYPE_SYSTEM_MOTION_TUNING_EXAMPLES_SYNC:
+            examples = payload.get("examples", [])
+            self._runtime_state.set_motion_tuning_reference_examples(examples)
         elif msg_type == TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE:
             request_id = str(payload.get("request_id") or "").strip()
             model_name = str(payload.get("model_name") or "").strip()

@@ -14,6 +14,8 @@ type EditableBindingRangeKey = "input_range" | "output_range";
 type EditableSemanticListKey = "positive_semantics" | "negative_semantics";
 type AxisRoleFilter = SemanticAxisControlRole | "all";
 
+const PARAMETER_EXCLUDE_KEYWORDS_STORAGE_KEY = "ag99live.parameter_exclude_keywords";
+const DEFAULT_PARAMETER_EXCLUDE_KEYWORDS = ["hair", "bind", "physics", "phy"];
 const CONTROL_ROLE_OPTIONS: SemanticAxisControlRole[] = [
   "primary",
   "hint",
@@ -65,6 +67,7 @@ const selectedAxisId = ref("");
 const selectedAxisIds = ref<string[]>([]);
 const axisRoleFilter = ref<AxisRoleFilter>("all");
 const axisSearchText = ref("");
+const excludedParameterKeywordsText = ref(loadParameterExcludeKeywords().join("\n"));
 const batchTargetRole = ref<SemanticAxisControlRole>("primary");
 const customAxisReviewRequiredIds = ref<Set<string>>(new Set());
 const isDirty = ref(false);
@@ -91,8 +94,12 @@ const draftCouplings = computed(() => draftProfile.value?.couplings ?? []);
 const filteredAxes = computed(() => {
   const roleFilter = axisRoleFilter.value;
   const query = axisSearchText.value.trim().toLowerCase();
+  const excludedKeywords = parameterExcludeKeywords.value;
   return draftAxes.value.filter((axis) => {
     if (roleFilter !== "all" && axis.control_role !== roleFilter) {
+      return false;
+    }
+    if (axisMatchesExcludedParameterKeyword(axis, excludedKeywords)) {
       return false;
     }
     if (!query) {
@@ -101,6 +108,14 @@ const filteredAxes = computed(() => {
     return axisMatchesSearch(axis, query);
   });
 });
+const parameterExcludeKeywords = computed(() =>
+  normalizeKeywordText(excludedParameterKeywordsText.value),
+);
+const excludedAxisCount = computed(() =>
+  draftAxes.value.filter((axis) =>
+    axisMatchesExcludedParameterKeyword(axis, parameterExcludeKeywords.value),
+  ).length,
+);
 const filteredAxisIds = computed(() => filteredAxes.value.map((axis) => axis.id));
 const selectedAxisCount = computed(() => selectedAxisIds.value.length);
 const allFilteredAxesSelected = computed(() => {
@@ -263,6 +278,64 @@ function axisMatchesSearch(axis: SemanticAxisDefinition, query: string): boolean
     ]),
   ].join(" ").toLowerCase();
   return searchableText.includes(query);
+}
+
+function axisMatchesExcludedParameterKeyword(
+  axis: SemanticAxisDefinition,
+  keywords: string[],
+): boolean {
+  if (!keywords.length) {
+    return false;
+  }
+  const haystack = [
+    axis.id,
+    axis.label,
+    axis.description,
+    axis.semantic_group,
+    axis.usage_notes,
+    ...axis.parameter_bindings.flatMap((binding) => [
+      binding.parameter_id,
+      binding.parameter_name ?? "",
+    ]),
+  ].join(" ").toLowerCase();
+  return keywords.some((keyword) => haystack.includes(keyword));
+}
+
+function normalizeKeywordText(value: string): string[] {
+  const seen = new Set<string>();
+  const keywords: string[] = [];
+  for (const item of value.split(/[\r\n,，]+/)) {
+    const keyword = item.trim().toLowerCase();
+    if (!keyword || seen.has(keyword)) {
+      continue;
+    }
+    seen.add(keyword);
+    keywords.push(keyword);
+  }
+  return keywords;
+}
+
+function loadParameterExcludeKeywords(): string[] {
+  if (typeof window === "undefined") {
+    return DEFAULT_PARAMETER_EXCLUDE_KEYWORDS;
+  }
+  const rawValue = window.localStorage.getItem(PARAMETER_EXCLUDE_KEYWORDS_STORAGE_KEY);
+  if (!rawValue) {
+    return DEFAULT_PARAMETER_EXCLUDE_KEYWORDS;
+  }
+  const keywords = normalizeKeywordText(rawValue);
+  return keywords.length ? keywords : DEFAULT_PARAMETER_EXCLUDE_KEYWORDS;
+}
+
+function persistParameterExcludeKeywords(): void {
+  const keywords = parameterExcludeKeywords.value;
+  excludedParameterKeywordsText.value = keywords.join("\n");
+  window.localStorage.setItem(PARAMETER_EXCLUDE_KEYWORDS_STORAGE_KEY, keywords.join("\n"));
+}
+
+function resetParameterExcludeKeywords(): void {
+  excludedParameterKeywordsText.value = DEFAULT_PARAMETER_EXCLUDE_KEYWORDS.join("\n");
+  persistParameterExcludeKeywords();
 }
 
 function resetDraft(): void {
@@ -901,6 +974,35 @@ function findCouplingCycle(edges: Map<string, string[]>): string[] | null {
                 </option>
               </select>
             </label>
+
+            <label class="action-preview__field">
+              <span>排除关键词</span>
+              <textarea
+                v-model="excludedParameterKeywordsText"
+                class="motion-tuning__textarea"
+                placeholder="hair&#10;bind&#10;physics"
+                @change="persistParameterExcludeKeywords"
+              />
+            </label>
+            <div class="profile-editor__bulk-row">
+              <button
+                type="button"
+                class="settings-card__button settings-card__button--ghost"
+                @click="persistParameterExcludeKeywords"
+              >
+                应用排除
+              </button>
+              <button
+                type="button"
+                class="settings-card__button settings-card__button--ghost"
+                @click="resetParameterExcludeKeywords"
+              >
+                默认排除
+              </button>
+            </div>
+            <p class="settings-card__hint">
+              已隐藏 {{ excludedAxisCount }} 个匹配 hair / bind / physics 等关键词的参数轴。
+            </p>
 
             <div class="profile-editor__bulk-row">
               <button

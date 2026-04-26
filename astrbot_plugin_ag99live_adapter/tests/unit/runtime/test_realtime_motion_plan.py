@@ -499,6 +499,62 @@ def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
     assert "Return strict JSON only." in provider.last_system_prompt
 
 
+def test_realtime_motion_plan_prompt_includes_user_tuned_examples_first() -> None:
+    class ProviderStub:
+        def __init__(self) -> None:
+            self.last_prompt = ""
+
+        async def text_chat(self, *, prompt: str, system_prompt: str):
+            del system_prompt
+            self.last_prompt = prompt
+
+            class Response:
+                completion_text = json.dumps(
+                    {
+                        "emotion": "joy",
+                        "mode": "expressive",
+                        "duration_ms": 1200,
+                        "axes": {"head_yaw": 76},
+                    },
+                    separators=(",", ":"),
+                )
+
+            return Response()
+
+    provider = ProviderStub()
+
+    class RuntimeStub:
+        enable_realtime_motion_plan = True
+        selected_motion_analysis_provider = provider
+        realtime_motion_timeout_seconds = 2.0
+        realtime_motion_fewshot_count = 1
+        motion_tuning_reference_examples = [
+            {
+                "input": "Assistant: tuned sample",
+                "output": {
+                        "emotion": "joy",
+                        "mode": "expressive",
+                        "duration_ms": 900,
+                        "axes": {"head_yaw": 76},
+                },
+            }
+        ]
+        model_info = _model_info()
+
+    generator = RealtimeMotionPlanGenerator(runtime_state=RuntimeStub())
+
+    intent = asyncio.run(
+        generator.generate(
+            user_text="hi",
+            assistant_text="tuned sample",
+        )
+    )
+
+    assert isinstance(intent, dict)
+    assert "Assistant: tuned sample" in provider.last_prompt
+    assert '"head_yaw":76' in provider.last_prompt
+
+
 def test_realtime_motion_plan_generator_accepts_incomplete_selector_output_with_warning(caplog) -> None:
     class ProviderStub:
         async def text_chat(self, *, prompt: str, system_prompt: str):

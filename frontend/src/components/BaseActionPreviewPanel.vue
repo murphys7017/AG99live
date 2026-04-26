@@ -15,10 +15,13 @@ const props = defineProps<{
   allowPlay?: boolean;
 }>();
 const bridge = useDesktopBridge();
+const PARAMETER_EXCLUDE_KEYWORDS_STORAGE_KEY = "ag99live.parameter_exclude_keywords";
+const DEFAULT_PARAMETER_EXCLUDE_KEYWORDS = ["hair", "bind", "physics", "phy"];
 
 const selectedChannel = ref("all");
 const selectedDomain = ref("all");
 const searchText = ref("");
+const excludedParameterKeywordsText = ref(loadParameterExcludeKeywords().join("\n"));
 const selectedAtomIds = ref<string[]>([]);
 const planMode = ref<"parallel" | "sequential">("parallel");
 const durationScale = ref(1);
@@ -67,11 +70,15 @@ const domainOptions = computed(() => {
 const filteredAtoms = computed<DesktopBaseActionPreviewAtom[]>(() => {
   const atoms = props.preview?.atoms ?? [];
   const query = searchText.value.trim().toLowerCase();
+  const excludedKeywords = parameterExcludeKeywords.value;
   return atoms.filter((atom) => {
     if (selectedChannel.value !== "all" && atom.channel !== selectedChannel.value) {
       return false;
     }
     if (selectedDomain.value !== "all" && atom.domain !== selectedDomain.value) {
+      return false;
+    }
+    if (atomMatchesExcludedParameterKeyword(atom, excludedKeywords)) {
       return false;
     }
     if (!query) {
@@ -94,6 +101,14 @@ const filteredAtoms = computed<DesktopBaseActionPreviewAtom[]>(() => {
     return haystack.includes(query);
   });
 });
+const parameterExcludeKeywords = computed(() =>
+  normalizeKeywordText(excludedParameterKeywordsText.value),
+);
+const excludedAtomCount = computed(() =>
+  (props.preview?.atoms ?? []).filter((atom) =>
+    atomMatchesExcludedParameterKeyword(atom, parameterExcludeKeywords.value),
+  ).length,
+);
 
 const groupedAtoms = computed(() => {
   const groups = new Map<string, DesktopBaseActionPreviewAtom[]>();
@@ -233,9 +248,9 @@ const playButtonEnabled = computed(
 const playStatusText = ref("");
 
 watch(
-  () => (props.preview?.atoms ?? []).map((atom) => atom.id).join("|"),
+  () => filteredAtoms.value.map((atom) => atom.id).join("|"),
   () => {
-    const allowed = new Set((props.preview?.atoms ?? []).map((atom) => atom.id));
+    const allowed = new Set(filteredAtoms.value.map((atom) => atom.id));
     selectedAtomIds.value = selectedAtomIds.value.filter((id) => allowed.has(id));
   },
   { immediate: true },
@@ -259,6 +274,68 @@ function selectFilteredAtoms(): void {
 
 function clearSelectedAtoms(): void {
   selectedAtomIds.value = [];
+}
+
+function atomMatchesExcludedParameterKeyword(
+  atom: DesktopBaseActionPreviewAtom,
+  keywords: string[],
+): boolean {
+  if (!keywords.length) {
+    return false;
+  }
+  const haystack = [
+    atom.id,
+    atom.name,
+    atom.label,
+    atom.domain,
+    atom.channel,
+    atom.channelLabel,
+    atom.family,
+    atom.familyLabel,
+    atom.sourceMotion,
+    atom.sourceFile,
+    atom.sourceGroup,
+    atom.sourceCategory,
+    atom.sourceTags.join(" "),
+  ].join(" ").toLowerCase();
+  return keywords.some((keyword) => haystack.includes(keyword));
+}
+
+function normalizeKeywordText(value: string): string[] {
+  const seen = new Set<string>();
+  const keywords: string[] = [];
+  for (const item of value.split(/[\r\n,，]+/)) {
+    const keyword = item.trim().toLowerCase();
+    if (!keyword || seen.has(keyword)) {
+      continue;
+    }
+    seen.add(keyword);
+    keywords.push(keyword);
+  }
+  return keywords;
+}
+
+function loadParameterExcludeKeywords(): string[] {
+  if (typeof window === "undefined") {
+    return DEFAULT_PARAMETER_EXCLUDE_KEYWORDS;
+  }
+  const rawValue = window.localStorage.getItem(PARAMETER_EXCLUDE_KEYWORDS_STORAGE_KEY);
+  if (!rawValue) {
+    return DEFAULT_PARAMETER_EXCLUDE_KEYWORDS;
+  }
+  const keywords = normalizeKeywordText(rawValue);
+  return keywords.length ? keywords : DEFAULT_PARAMETER_EXCLUDE_KEYWORDS;
+}
+
+function persistParameterExcludeKeywords(): void {
+  const keywords = parameterExcludeKeywords.value;
+  excludedParameterKeywordsText.value = keywords.join("\n");
+  window.localStorage.setItem(PARAMETER_EXCLUDE_KEYWORDS_STORAGE_KEY, keywords.join("\n"));
+}
+
+function resetParameterExcludeKeywords(): void {
+  excludedParameterKeywordsText.value = DEFAULT_PARAMETER_EXCLUDE_KEYWORDS.join("\n");
+  persistParameterExcludeKeywords();
 }
 
 function playPreviewPlan(): void {
@@ -464,10 +541,20 @@ function roundTo(value: number, digits: number): number {
             placeholder="按 id / source motion / trait 搜索"
           />
         </label>
+
+        <label class="action-preview__field">
+          <span>排除关键词</span>
+          <textarea
+            v-model="excludedParameterKeywordsText"
+            class="motion-tuning__textarea"
+            placeholder="hair&#10;bind&#10;physics"
+            @change="persistParameterExcludeKeywords"
+          />
+        </label>
       </div>
 
       <p class="settings-card__hint">
-        当前过滤后共有 {{ filteredAtoms.length }} 个原子动作。
+        当前过滤后共有 {{ filteredAtoms.length }} 个原子动作，已隐藏 {{ excludedAtomCount }} 个匹配排除关键词的动作。
       </p>
       <div class="action-preview__selection-actions">
         <button
@@ -483,6 +570,20 @@ function roundTo(value: number, digits: number): number {
           @click="clearSelectedAtoms"
         >
           清空选择
+        </button>
+        <button
+          type="button"
+          class="settings-card__button settings-card__button--ghost"
+          @click="persistParameterExcludeKeywords"
+        >
+          应用排除
+        </button>
+        <button
+          type="button"
+          class="settings-card__button settings-card__button--ghost"
+          @click="resetParameterExcludeKeywords"
+        >
+          默认排除
         </button>
         <span>已选 {{ selectedAtoms.length }} 个动作原子</span>
       </div>

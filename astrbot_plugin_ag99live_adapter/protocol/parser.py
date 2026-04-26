@@ -16,6 +16,7 @@ from .constants import (
     TYPE_INPUT_TEXT,
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HISTORY_LOAD,
+    TYPE_SYSTEM_MOTION_TUNING_EXAMPLES_SYNC,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE,
 )
 from .models import (
@@ -188,6 +189,36 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
             raise ProtocolError(
                 "`system.semantic_axis_profile_save` requires `payload.profile` to be an object."
             )
+        return
+
+    if message_type == TYPE_SYSTEM_MOTION_TUNING_EXAMPLES_SYNC:
+        examples = payload.get("examples", [])
+        if examples is None:
+            payload["examples"] = []
+            return
+        if not isinstance(examples, list):
+            raise ProtocolError(
+                "`system.motion_tuning_examples_sync` requires `payload.examples` to be a list."
+            )
+        if len(examples) > 5:
+            raise ProtocolError(
+                "`system.motion_tuning_examples_sync` accepts at most 5 examples."
+            )
+        for index, example in enumerate(examples):
+            if not isinstance(example, Mapping):
+                raise ProtocolError(
+                    f"`system.motion_tuning_examples_sync` example {index} must be an object."
+                )
+            output = example.get("output")
+            if not isinstance(output, Mapping):
+                raise ProtocolError(
+                    f"`system.motion_tuning_examples_sync` example {index} requires output object."
+                )
+            axes = output.get("axes")
+            if not isinstance(axes, Mapping) or not axes:
+                raise ProtocolError(
+                    f"`system.motion_tuning_examples_sync` example {index} requires output.axes object."
+                )
         return
 
 

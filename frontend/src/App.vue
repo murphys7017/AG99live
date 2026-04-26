@@ -5,6 +5,7 @@ import { getWindowRole } from "./composables/useWindowRole";
 import HistoryWindowView from "./views/HistoryWindowView.vue";
 import PetDesktopView from "./views/PetDesktopView.vue";
 import PetOverlayView from "./views/PetOverlayView.vue";
+import ProfileEditorWindowView from "./views/ProfileEditorWindowView.vue";
 import SettingsWindowView from "./views/SettingsWindowView.vue";
 
 const windowRole = computed(() => getWindowRole());
@@ -16,5 +17,6 @@ const windowRole = computed(() => getWindowRole());
   <SettingsWindowView v-else-if="windowRole === 'settings'" />
   <HistoryWindowView v-else-if="windowRole === 'history'" />
   <ActionLabWindowView v-else-if="windowRole === 'action_lab'" />
+  <ProfileEditorWindowView v-else-if="windowRole === 'profile_editor'" />
   <PetDesktopView v-else />
 </template>

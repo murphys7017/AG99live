@@ -3,8 +3,14 @@ import type {
 } from "./protocol";
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
 
-export type DesktopWindowRole = "pet" | "overlay" | "settings" | "history" | "action_lab";
-export type DesktopAuxWindowRole = "settings" | "history" | "action_lab";
+export type DesktopWindowRole =
+  | "pet"
+  | "overlay"
+  | "settings"
+  | "history"
+  | "action_lab"
+  | "profile_editor";
+export type DesktopAuxWindowRole = "settings" | "history" | "action_lab" | "profile_editor";
 
 export interface DesktopWindowVisibilityState {
   petVisible: boolean;
@@ -12,6 +18,7 @@ export interface DesktopWindowVisibilityState {
   settingsVisible: boolean;
   historyVisible: boolean;
   actionLabVisible: boolean;
+  profileEditorVisible?: boolean;
 }
 
 export interface DesktopHistoryEntry {
@@ -156,6 +163,7 @@ export interface DesktopMotionTuningSample {
   assistantText: string;
   feedback: string;
   tags: string[];
+  enabledForLlmReference?: boolean;
   originalAxes: Record<string, number>;
   adjustedAxes: Record<string, number>;
   adjustedPlan: MotionPlanPayload;

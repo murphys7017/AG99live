@@ -82,6 +82,7 @@ class RuntimeState:
         self.realtime_motion_timeout_seconds = 8.0
         self.realtime_motion_fewshot_enabled = True
         self.realtime_motion_fewshot_count = 4
+        self.motion_tuning_reference_examples: list[dict[str, Any]] = []
         self.realtime_motion_platform_context_enabled = True
         self.realtime_motion_platform_description = ""
         self.motion_prompt_instruction = DEFAULT_MOTION_PROMPT_INSTRUCTION
@@ -216,6 +217,7 @@ class RuntimeState:
                 8,
             ),
         )
+        self.motion_tuning_reference_examples = []
         self.realtime_motion_platform_context_enabled = bool(
             _plugin_config_get(
                 self.plugin_config,
@@ -434,6 +436,47 @@ class RuntimeState:
             expected_revision=expected_revision,
             known_parameter_ids=collect_known_parameter_ids(model),
         )
+
+    def set_motion_tuning_reference_examples(self, examples: Any) -> None:
+        if not isinstance(examples, list):
+            self.motion_tuning_reference_examples = []
+            return
+
+        normalized_examples: list[dict[str, Any]] = []
+        for item in examples[:5]:
+            if not isinstance(item, dict):
+                continue
+            output = item.get("output")
+            if not isinstance(output, dict):
+                continue
+            axes = output.get("axes")
+            if not isinstance(axes, dict) or not axes:
+                continue
+            normalized_examples.append(
+                {
+                    "input": str(item.get("input") or "").strip(),
+                    "output": {
+                        "emotion": str(output.get("emotion") or "custom").strip() or "custom",
+                        "mode": str(output.get("mode") or "expressive").strip() or "expressive",
+                        "duration_ms": output.get("duration_ms"),
+                        "axes": {
+                            str(axis_id).strip(): value
+                            for axis_id, value in axes.items()
+                            if str(axis_id).strip()
+                        },
+                    },
+                    "source": "desktop_motion_tuning",
+                    "feedback": str(item.get("feedback") or "").strip(),
+                    "tags": [
+                        str(tag).strip()
+                        for tag in item.get("tags", [])
+                        if str(tag).strip()
+                    ]
+                    if isinstance(item.get("tags"), list)
+                    else [],
+                }
+            )
+        self.motion_tuning_reference_examples = normalized_examples
 
     def should_send_model_payload(self, payload: dict[str, Any], *, force: bool = False) -> bool:
         signature = json.dumps(payload, sort_keys=True, ensure_ascii=False)

@@ -97,6 +97,14 @@ function toggleActionLabWindow(): void {
   window.ag99desktop?.toggleAuxWindow("action_lab");
 }
 
+function toggleProfileEditorWindow(): void {
+  window.ag99desktop?.toggleAuxWindow("profile_editor");
+}
+
+const profileEditorButtonLabel = computed(() =>
+  bridge.state.windowState.profileEditorVisible ? "关闭 Profile Editor" : "打开 Profile Editor",
+);
+
 function applyDesktopScreenshotOnSend(): void {
   bridge.sendCommand({
     type: "set_desktop_screenshot_on_send",
@@ -349,6 +357,13 @@ function resetMotionEngineSettings(): void {
           @click="toggleActionLabWindow"
         >
           打开动作实验室
+        </button>
+        <button
+          type="button"
+          class="settings-card__button settings-card__button--ghost"
+          @click="toggleProfileEditorWindow"
+        >
+          {{ profileEditorButtonLabel }}
         </button>
       </article>
     </section>

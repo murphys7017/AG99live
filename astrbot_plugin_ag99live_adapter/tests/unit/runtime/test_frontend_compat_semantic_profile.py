@@ -11,6 +11,7 @@ class _RuntimeStateStub:
     def __init__(self, *, error: Exception | None = None) -> None:
         self.error = error
         self.calls: list[dict[str, object]] = []
+        self.motion_tuning_examples: object = None
 
     def save_semantic_axis_profile_update(
         self,
@@ -35,6 +36,9 @@ class _RuntimeStateStub:
             "source_hash": "hash",
             "updated_at": "2026-04-26T00:00:00+00:00",
         }
+
+    def set_motion_tuning_reference_examples(self, examples: object) -> None:
+        self.motion_tuning_examples = examples
 
 
 class _HistoryBridgeStub:
@@ -193,3 +197,44 @@ def test_frontend_compat_handler_returns_control_error_on_missing_profile_file()
     assert sent_payloads[0]["payload"]["request_id"] == "request-3"
     assert sent_payloads[0]["payload"]["error_code"] == "profile_not_found"
     assert sent_payloads[0]["payload"]["message"] == "profile missing"
+
+
+def test_frontend_compat_handler_syncs_motion_tuning_examples() -> None:
+    runtime_state = _RuntimeStateStub()
+    handler = FrontendCompatHandler(
+        background_files_getter=lambda: [],
+        history_bridge=_HistoryBridgeStub(),
+        runtime_state=runtime_state,
+    )
+    sent_payloads: list[dict] = []
+    refresh_calls: list[bool] = []
+    examples = [
+        {
+            "input": "Assistant: 好的",
+            "output": {"emotion": "joy", "axes": {"mouth_smile": 76}},
+        }
+    ]
+
+    async def send_json(payload: dict) -> bool:
+        sent_payloads.append(payload)
+        return True
+
+    async def refresh_and_send_model(*, force: bool = False) -> None:
+        refresh_calls.append(force)
+
+    asyncio.run(
+        handler.handle(
+            SimpleNamespace(
+                type="system.motion_tuning_examples_sync",
+                session_id="session",
+                turn_id=None,
+                payload={"examples": examples},
+            ),
+            send_json=send_json,
+            refresh_and_send_model=refresh_and_send_model,
+        )
+    )
+
+    assert runtime_state.motion_tuning_examples == examples
+    assert sent_payloads == []
+    assert refresh_calls == []

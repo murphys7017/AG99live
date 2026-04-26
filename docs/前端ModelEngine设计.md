@@ -17,21 +17,20 @@
 
 ## Action Lab 调参入口
 
-当前动作实验室的主调试对象已经从“后端扫描原始库”调整为“最近真实写给 Live2D 的参数”：
+当前动作实验室的主调试对象已经从“后端扫描原始库”调整为“最近真实写给 Live2D 的语义主轴参数”：
 
-- Pet 窗口只在 `startDirectParameterPlan` 成功后记录最终 `engine.parameter_plan.v1`；去重/快速重启节流没有真正起播时不会新增记录。
-- 记录内容使用播放器实际写入 Live2D 的有效 plan，包括播放侧重定时和 calibration 注入后的结果。
+- Pet 窗口只在 v2 plan 成功起播后记录最终 `engine.parameter_plan.v2`；去重/快速重启节流没有真正起播时不会新增记录。
+- 记录内容使用播放器实际写入 Live2D 的有效 plan，包括主轴输入值、联动输出和播放定时。
 - 只保留最近 5 条播放记录，随 Desktop snapshot 同步给 Action Lab。
-- Action Lab 选中记录后显示 12 轴 slider，可直接修改最终参数。
-- 点击“播放手调结果”会回放修改后的 `engine.parameter_plan.v1`，用于观察真实体感。
-- 手调播放可选择保留或清空 `supplementary_params`，默认保留；关闭后用于隔离测试纯 12 轴效果。
+- Action Lab 选中记录后显示当前 profile 的 primary/hint 主轴 slider，可直接修改主轴值。
+- 点击“播放手调效果”会构造 `engine.motion_intent.v2` 并走本地 compiler/runtime 预览，用于观察真实体感。
 - 点击“保存为样本”会保存 `originalAxes -> adjustedAxes`、反馈说明、标签和调整后的 plan。
+- 样本可勾选“作为例子提供给大模型参考”，前端会通过 `system.motion_tuning_examples_sync` 同步给后端 realtime selector few-shot。
 
 边界说明：
 
-- 这一步刻意不接入连带参数效果测试，避免把“调参样本闭环”和“动作增强算法”混在一起。
 - 手调播放使用最终 plan，目的是观察真实 Live2D 写参效果；正式会话主链路仍然是 `motion_intent -> ModelEngine compile -> parameter_plan`。
-- 保存的样本目前仍停留在前端 snapshot，后续再接入后端 selector few-shot 或 prompt instruction。
+- 保存的样本仍由前端 snapshot 持久化；只有启用为 LLM 参考的样本会同步到后端内存态，用于后续 selector prompt。
 
 ## 目标
 
