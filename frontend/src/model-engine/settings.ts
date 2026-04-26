@@ -115,3 +115,24 @@ export function cloneModelEngineSettings(
     axisIntensityScale: { ...settings.axisIntensityScale },
   };
 }
+
+export function modelEngineSettingsEqual(
+  left: ModelEngineSettings,
+  right: ModelEngineSettings,
+): boolean {
+  if (left.motionIntensityScale !== right.motionIntensityScale) {
+    return false;
+  }
+
+  const keys = new Set([
+    ...Object.keys(left.axisIntensityScale),
+    ...Object.keys(right.axisIntensityScale),
+  ]);
+  for (const key of keys) {
+    if ((left.axisIntensityScale[key] ?? 1) !== (right.axisIntensityScale[key] ?? 1)) {
+      return false;
+    }
+  }
+
+  return true;
+}

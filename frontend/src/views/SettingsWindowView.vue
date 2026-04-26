@@ -7,6 +7,7 @@ import {
   MIN_MOTION_INTENSITY_SCALE,
   MOTION_INTENSITY_SCALE_STEP,
   cloneModelEngineSettings,
+  modelEngineSettingsEqual,
   normalizeModelEngineSettings,
 } from "../model-engine/settings";
 
@@ -22,6 +23,10 @@ const motionEngineSettings = reactive(
 
 function applyMotionEngineSettingsSnapshot(nextValue: unknown): void {
   const normalized = normalizeModelEngineSettings(nextValue);
+  const currentSettings = cloneModelEngineSettings(motionEngineSettings);
+  if (modelEngineSettingsEqual(currentSettings, normalized)) {
+    return;
+  }
   motionEngineSettings.motionIntensityScale = normalized.motionIntensityScale;
   motionEngineSettings.axisIntensityScale = {
     ...normalized.axisIntensityScale,

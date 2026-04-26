@@ -6,6 +6,7 @@ import { useDesktopBridge } from "../composables/useDesktopBridge";
 import { useModelSync } from "../composables/useModelSync";
 import {
   cloneModelEngineSettings,
+  modelEngineSettingsEqual,
   normalizeModelEngineSettings,
 } from "../model-engine/settings";
 import { usePreviewMotionPlayer } from "../composables/usePreviewMotionPlayer";
@@ -53,6 +54,10 @@ const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
 
 function applyMotionEngineSettingsSnapshot(nextValue: unknown): void {
   const normalized = normalizeModelEngineSettings(nextValue);
+  const currentSettings = cloneModelEngineSettings(motionEngineSettings);
+  if (modelEngineSettingsEqual(currentSettings, normalized)) {
+    return;
+  }
   motionEngineSettings.motionIntensityScale = normalized.motionIntensityScale;
   motionEngineSettings.axisIntensityScale = {
     ...normalized.axisIntensityScale,
@@ -485,14 +490,6 @@ watch(
   (turnId) => {
     modelEngine.notifyCurrentTurnChanged(turnId);
   },
-);
-
-watch(
-  () => bridge.state.snapshot.motionEngineSettings,
-  (nextValue) => {
-    applyMotionEngineSettingsSnapshot(nextValue);
-  },
-  { deep: true },
 );
 
 watch(
