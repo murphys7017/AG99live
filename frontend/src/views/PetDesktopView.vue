@@ -4,7 +4,6 @@ import DesktopPetCanvas from "../components/DesktopPetCanvas.vue";
 import { useAdapterConnection } from "../composables/useAdapterConnection";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
 import { useModelSync } from "../composables/useModelSync";
-import { DIRECT_PARAMETER_AXIS_NAMES } from "../model-engine/constants";
 import {
   cloneModelEngineSettings,
   normalizeModelEngineSettings,
@@ -55,10 +54,9 @@ const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
 function applyMotionEngineSettingsSnapshot(nextValue: unknown): void {
   const normalized = normalizeModelEngineSettings(nextValue);
   motionEngineSettings.motionIntensityScale = normalized.motionIntensityScale;
-  for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
-    motionEngineSettings.axisIntensityScale[axisName] =
-      normalized.axisIntensityScale[axisName];
-  }
+  motionEngineSettings.axisIntensityScale = {
+    ...normalized.axisIntensityScale,
+  };
 }
 
 applyMotionEngineSettingsSnapshot(bridge.state.snapshot.motionEngineSettings);
@@ -367,6 +365,13 @@ function cloneJson<TValue>(value: TValue): TValue {
   return JSON.parse(JSON.stringify(value)) as TValue;
 }
 
+function serializeAxisIntensityScale(axisIntensityScale: Record<string, number>): string {
+  return JSON.stringify(
+    Object.entries(axisIntensityScale).sort(([left], [right]) =>
+      left.localeCompare(right)),
+  );
+}
+
 function applyAmbientMotionPreference(attemptsRemaining = 12): void {
   const live2dAdapter = window.getLAppAdapter?.();
   if (live2dAdapter?.setAmbientMotionEnabled) {
@@ -518,8 +523,7 @@ watch(
     baseActionPreview.value,
     stageMessage.value,
     motionEngineSettings.motionIntensityScale,
-    ...DIRECT_PARAMETER_AXIS_NAMES.map((axisName) =>
-      motionEngineSettings.axisIntensityScale[axisName]),
+    serializeAxisIntensityScale(motionEngineSettings.axisIntensityScale),
     motionPlaybackRecords.value,
     motionTuningSamples.value,
   ],

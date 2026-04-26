@@ -3,6 +3,7 @@ import {
   MOTION_MIN_REMAINING_AUDIO_MS,
   MOTION_SYNC_WAIT_FOR_AUDIO_MS,
 } from "./constants";
+import type { SemanticParameterPlan } from "../types/protocol";
 import { compileMotionIntent } from "./compiler";
 import type {
   CompileDiagnostics,
@@ -109,7 +110,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     const selectedModel = dependencies.getSelectedModel();
     state.lastStartReason = context.startReason;
 
-    if (payload.kind === "intent" || payload.kind === "semantic_intent") {
+    if (payload.kind === "semantic_intent") {
       if (!selectedModel) {
         state.lastCompileReason = "missing_selected_model";
         setState("failed", "动作意图无法编译：当前未选中模型。", null);
@@ -171,7 +172,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     }
 
     const directPlanPayload = payload;
-    let startedPlan: typeof directPlanPayload.plan | null = null;
+    let startedPlan: SemanticParameterPlan | null = null;
     const started = dependencies.playPlan(
       directPlanPayload.plan,
       selectedModel,
@@ -179,7 +180,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         softHandoff: true,
         targetDurationMs: resolveMotionTargetDurationMs(context.turnId),
         onStarted: (plan) => {
-          startedPlan = plan;
+          startedPlan = plan as SemanticParameterPlan;
         },
       },
     );

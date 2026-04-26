@@ -1,9 +1,8 @@
-import type { DirectParameterAxisName } from "../types/protocol";
 import { DIRECT_PARAMETER_AXIS_NAMES } from "./constants";
 
 export interface ModelEngineSettings {
   motionIntensityScale: number;
-  axisIntensityScale: Record<DirectParameterAxisName, number>;
+  axisIntensityScale: Record<string, number>;
 }
 
 export const DEFAULT_MOTION_INTENSITY_SCALE = 1.35;
@@ -15,7 +14,7 @@ export const MIN_AXIS_INTENSITY_SCALE = 0;
 export const MAX_AXIS_INTENSITY_SCALE = 2.5;
 export const AXIS_INTENSITY_SCALE_STEP = 0.05;
 
-export const MOTION_AXIS_LABELS: Record<DirectParameterAxisName, string> = {
+export const MOTION_AXIS_LABELS: Record<string, string> = {
   head_yaw: "头部左右转向",
   head_roll: "头部左右歪斜",
   head_pitch: "头部上下俯仰",
@@ -30,13 +29,10 @@ export const MOTION_AXIS_LABELS: Record<DirectParameterAxisName, string> = {
   brow_bias: "眉毛情绪",
 };
 
-export function buildDefaultAxisIntensityScale():
-  Record<DirectParameterAxisName, number> {
-  const result = {} as Record<DirectParameterAxisName, number>;
-  for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
-    result[axisName] = 1;
-  }
-  return result;
+export function buildDefaultAxisIntensityScale(): Record<string, number> {
+  return Object.fromEntries(
+    DIRECT_PARAMETER_AXIS_NAMES.map((axisName) => [axisName, 1]),
+  );
 }
 
 export function buildDefaultModelEngineSettings(): ModelEngineSettings {
@@ -70,20 +66,32 @@ export function normalizeMotionIntensityScale(value: unknown): number {
 
 export function normalizeAxisIntensityScale(
   value: unknown,
-): Record<DirectParameterAxisName, number> {
+): Record<string, number> {
   const raw = value && typeof value === "object"
-    ? value as Partial<Record<DirectParameterAxisName, unknown>>
+    ? value as Record<string, unknown>
     : {};
-  const result = {} as Record<DirectParameterAxisName, number>;
-  for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
-    result[axisName] = normalizeScale(
-      raw[axisName],
-      1,
+  const result = buildDefaultAxisIntensityScale();
+  for (const key of Object.keys(raw)) {
+    result[key] = normalizeScale(
+      raw[key],
+      result[key] ?? 1,
       MIN_AXIS_INTENSITY_SCALE,
       MAX_AXIS_INTENSITY_SCALE,
     );
   }
   return result;
+}
+
+export function resolveAxisIntensityScaleValue(
+  axisIntensityScale: Record<string, number> | null | undefined,
+  axisName: string,
+): number {
+  return normalizeScale(
+    axisIntensityScale?.[axisName],
+    1,
+    MIN_AXIS_INTENSITY_SCALE,
+    MAX_AXIS_INTENSITY_SCALE,
+  );
 }
 
 export function normalizeModelEngineSettings(value: unknown): ModelEngineSettings {

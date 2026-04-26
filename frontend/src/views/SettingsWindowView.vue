@@ -2,14 +2,9 @@
 import { computed, reactive, ref, watch } from "vue";
 import DesktopWindowPanel from "../components/DesktopWindowPanel.vue";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
-import { DIRECT_PARAMETER_AXIS_NAMES } from "../model-engine/constants";
 import {
-  AXIS_INTENSITY_SCALE_STEP,
-  MAX_AXIS_INTENSITY_SCALE,
   MAX_MOTION_INTENSITY_SCALE,
-  MIN_AXIS_INTENSITY_SCALE,
   MIN_MOTION_INTENSITY_SCALE,
-  MOTION_AXIS_LABELS,
   MOTION_INTENSITY_SCALE_STEP,
   cloneModelEngineSettings,
   normalizeModelEngineSettings,
@@ -24,6 +19,14 @@ const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
 const motionEngineSettings = reactive(
   cloneModelEngineSettings(bridge.state.snapshot.motionEngineSettings),
 );
+
+function applyMotionEngineSettingsSnapshot(nextValue: unknown): void {
+  const normalized = normalizeModelEngineSettings(nextValue);
+  motionEngineSettings.motionIntensityScale = normalized.motionIntensityScale;
+  motionEngineSettings.axisIntensityScale = {
+    ...normalized.axisIntensityScale,
+  };
+}
 
 watch(
   () => bridge.state.snapshot.adapterAddress,
@@ -48,12 +51,7 @@ watch(
 watch(
   () => bridge.state.snapshot.motionEngineSettings,
   (nextValue) => {
-    const normalized = normalizeModelEngineSettings(nextValue);
-    motionEngineSettings.motionIntensityScale = normalized.motionIntensityScale;
-    for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
-      motionEngineSettings.axisIntensityScale[axisName] =
-        normalized.axisIntensityScale[axisName];
-    }
+    applyMotionEngineSettingsSnapshot(nextValue);
   },
   { deep: true },
 );
@@ -73,13 +71,6 @@ const statusLabel = computed(() => {
   }
   return "尚未连接";
 });
-const axisControls = computed(() =>
-  DIRECT_PARAMETER_AXIS_NAMES.map((axisName) => ({
-    axisName,
-    label: MOTION_AXIS_LABELS[axisName],
-    value: motionEngineSettings.axisIntensityScale[axisName],
-  }))
-);
 
 function applyAddress(): void {
   bridge.sendCommand({ type: "set_address", address: draftAddress.value });
@@ -122,33 +113,16 @@ function applyMotionEngineSettings(): void {
   });
 }
 
-function formatScale(value: number): string {
-  return Number(value).toFixed(2);
-}
-
-function setAxisIntensity(axisName: (typeof DIRECT_PARAMETER_AXIS_NAMES)[number], value: number): void {
-  motionEngineSettings.axisIntensityScale[axisName] = value;
-  applyMotionEngineSettings();
-}
-
-function handleAxisIntensityInput(
-  axisName: (typeof DIRECT_PARAMETER_AXIS_NAMES)[number],
-  event: Event,
-): void {
-  const target = event.target;
-  if (!(target instanceof HTMLInputElement)) {
-    return;
+function formatScale(value: unknown): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "1.00";
   }
-  setAxisIntensity(axisName, Number(target.value));
+  return numeric.toFixed(2);
 }
 
 function resetMotionEngineSettings(): void {
-  const normalized = normalizeModelEngineSettings(undefined);
-  motionEngineSettings.motionIntensityScale = normalized.motionIntensityScale;
-  for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
-    motionEngineSettings.axisIntensityScale[axisName] =
-      normalized.axisIntensityScale[axisName];
-  }
+  applyMotionEngineSettingsSnapshot(undefined);
   applyMotionEngineSettings();
 }
 </script>
@@ -314,33 +288,6 @@ function resetMotionEngineSettings(): void {
           />
         </div>
 
-        <div class="settings-slider-grid">
-          <label
-            v-for="item in axisControls"
-            :key="item.axisName"
-            class="settings-slider settings-slider--compact"
-          >
-            <div class="settings-slider__header">
-              <div>
-                <strong>{{ item.label }}</strong>
-                <p>{{ item.axisName }}</p>
-              </div>
-              <span class="settings-slider__value">
-                x{{ formatScale(item.value) }}
-              </span>
-            </div>
-            <input
-              :value="item.value"
-              class="settings-slider__input"
-              type="range"
-              :min="MIN_AXIS_INTENSITY_SCALE"
-              :max="MAX_AXIS_INTENSITY_SCALE"
-              :step="AXIS_INTENSITY_SCALE_STEP"
-              @input="handleAxisIntensityInput(item.axisName, $event)"
-            />
-          </label>
-        </div>
-
         <div class="settings-card__actions">
           <button
             type="button"
@@ -352,7 +299,7 @@ function resetMotionEngineSettings(): void {
         </div>
 
         <p class="settings-card__hint">
-          每个轴都以 50 为中心放大或缩小。数值为 0 时，该轴的 expressive 表现会被压到中心点。
+          当前只保留会真正影响动态主轴 v2 的全局强度。旧 12 轴逐轴倍率已从设置界面下线，避免出现能调但不生效的兼容项。
         </p>
       </article>
 

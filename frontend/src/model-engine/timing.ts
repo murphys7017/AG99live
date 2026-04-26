@@ -1,4 +1,3 @@
-import type { DirectParameterPlan } from "../types/protocol";
 import {
   DEFAULT_MOTION_INTENT_DURATION_MS,
   MAX_MOTION_DURATION_MS,
@@ -7,7 +6,7 @@ import {
 import type { MotionTimingResolution } from "./contracts";
 
 interface ResolveMotionTimingOptions {
-  mode: DirectParameterPlan["mode"];
+  mode: "idle" | "expressive";
   durationHintMs?: number | null;
   targetDurationMs?: number | null;
 }

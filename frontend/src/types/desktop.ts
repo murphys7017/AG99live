@@ -1,6 +1,4 @@
 import type {
-  DirectParameterAxisName,
-  DirectParameterPlan,
   MotionPlanPayload,
 } from "./protocol";
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
@@ -107,14 +105,14 @@ export interface DesktopBaseActionPreview {
 
 export interface DesktopMotionEngineSettings {
   motionIntensityScale: number;
-  axisIntensityScale: Record<DirectParameterAxisName, number>;
+  axisIntensityScale: Record<string, number>;
 }
 
 export interface DesktopMotionCompileDiagnostics {
   usedFallbackLibrary: boolean;
   supplementaryCount: number;
   timingSource: "hint" | "audio_sync" | "default";
-  resolvedMode: DirectParameterPlan["mode"];
+  resolvedMode: "idle" | "expressive";
   source?: string;
   warnings?: string[];
   primaryAxes?: string[];
@@ -129,18 +127,18 @@ export interface DesktopMotionCompileDiagnostics {
   compiledParameters?: string[];
   intensityApplied: boolean;
   motionIntensityScale: number;
-  axisIntensityScale: Record<DirectParameterAxisName, number>;
+  axisIntensityScale: Record<string, number>;
 }
 
 export interface DesktopMotionPlaybackRecord {
   id: string;
   createdAt: string;
   source: string;
-  payloadKind: "intent" | "semantic_intent" | "plan" | "semantic_plan";
+  payloadKind: "semantic_intent" | "semantic_plan";
   turnId: string | null;
   modelName: string;
   emotionLabel: string;
-  mode: DirectParameterPlan["mode"];
+  mode: "idle" | "expressive";
   startReason: string;
   queuedDelayMs: number;
   assistantText: string;
@@ -158,9 +156,9 @@ export interface DesktopMotionTuningSample {
   assistantText: string;
   feedback: string;
   tags: string[];
-  originalAxes: Record<DirectParameterAxisName, number>;
-  adjustedAxes: Record<DirectParameterAxisName, number>;
-  adjustedPlan: DirectParameterPlan;
+  originalAxes: Record<string, number>;
+  adjustedAxes: Record<string, number>;
+  adjustedPlan: MotionPlanPayload;
 }
 
 export interface DesktopSemanticAxisProfileSaveResult {

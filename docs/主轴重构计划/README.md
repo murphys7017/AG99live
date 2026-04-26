@@ -168,6 +168,12 @@ motion_intent.v2
 
 Profile Editor 的配置已经可以参与实际动作生成和播放。剩余工作是实机校准、完善测试，以及删除 v1 固定 12 轴核心路径。
 
+补充说明：
+
+- 设置页中的旧 12 轴逐轴倍率已从常规界面下线，当前只保留真正作用于 v2 的全局强度倍率。
+- `MotionTuningPanel` 已降级为遗留兼容面板，仅在存在 v1 历史记录或样本时显示，不再作为当前主调参入口。
+- `BaseActionPreviewPanel` 与 preview/player/runtime 中的 v1 兼容分支仍在，因此 Phase 8 还没有完成。
+
 ## 暂不做的事
 
 重构计划不要求第一阶段同时完成：

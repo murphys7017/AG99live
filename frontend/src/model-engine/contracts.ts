@@ -1,8 +1,5 @@
 import type { DesktopHistoryEntry } from "../types/desktop";
 import type {
-  DirectParameterAxisName,
-  DirectParameterPlan,
-  DirectParameterPlanSupplementaryParam,
   DirectParameterPlanTiming,
   ModelSummary,
   MotionPlanPayload,
@@ -18,25 +15,8 @@ export type ModelEngineStatus =
   | "playing"
   | "failed";
 
-export interface MotionIntentAxisValue {
-  value: number;
-}
-
-export interface MotionIntent {
-  schema_version: "engine.motion_intent.v1";
-  mode: "idle" | "expressive";
-  emotion_label: string;
-  duration_hint_ms?: number | null;
-  key_axes: Record<DirectParameterAxisName, MotionIntentAxisValue>;
-  summary?: {
-    key_axes_count?: number;
-  };
-}
-
 export type NormalizedMotionPayload =
-  | { kind: "intent"; intent: MotionIntent }
   | { kind: "semantic_intent"; intent: SemanticMotionIntent }
-  | { kind: "plan"; plan: DirectParameterPlan }
   | { kind: "semantic_plan"; plan: SemanticParameterPlan };
 
 export interface MotionTimingResolution {
@@ -51,7 +31,7 @@ export interface SupplementaryBuildDiagnostics {
 }
 
 export interface SupplementaryBuildResult {
-  params: DirectParameterPlanSupplementaryParam[];
+  params: { parameter_id: string; target_value: number; weight: number; source_atom_id: string; channel: string }[];
   diagnostics: SupplementaryBuildDiagnostics;
 }
 
@@ -66,7 +46,7 @@ export interface CompileDiagnostics {
   usedFallbackLibrary: boolean;
   supplementaryCount: number;
   timingSource: "hint" | "audio_sync" | "default";
-  resolvedMode: DirectParameterPlan["mode"];
+  resolvedMode: "idle" | "expressive";
   source?: string;
   warnings?: string[];
   primaryAxes?: string[];
@@ -81,7 +61,7 @@ export interface CompileDiagnostics {
   compiledParameters?: string[];
   intensityApplied: boolean;
   motionIntensityScale: number;
-  axisIntensityScale: Record<DirectParameterAxisName, number>;
+  axisIntensityScale: Record<string, number>;
 }
 
 export interface CompileResult {
