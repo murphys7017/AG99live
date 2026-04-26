@@ -547,6 +547,7 @@ function validateDraftProfile(profile: SemanticAxisProfile): string[] {
   const errors: string[] = [];
   const axisIds = new Set<string>();
   const axisIdPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+  const globalBindingOwners = new Map<string, string>();
 
   if (!profile.axes.length) {
     errors.push("profile.axes 不能为空。");
@@ -603,16 +604,27 @@ function validateDraftProfile(profile: SemanticAxisProfile): string[] {
     const bindingParameterIds = new Set<string>();
     axis.parameter_bindings.forEach((binding, bindingIndex) => {
       const bindingLabel = `${axisLabel}.parameter_bindings[${bindingIndex}]`;
-      if (!binding.parameter_id.trim()) {
+      const parameterId = binding.parameter_id.trim();
+      if (!parameterId) {
         errors.push(`${bindingLabel}: parameter_id 不能为空。`);
       }
-      if (bindingParameterIds.has(binding.parameter_id)) {
+      if (bindingParameterIds.has(parameterId)) {
         errors.push(`${bindingLabel}: parameter_id 重复。`);
       }
-      bindingParameterIds.add(binding.parameter_id);
+      bindingParameterIds.add(parameterId);
+      if (parameterId) {
+        const existingOwner = globalBindingOwners.get(parameterId);
+        if (existingOwner && existingOwner !== axisLabel) {
+          errors.push(
+            `${bindingLabel}: parameter_id 与 ${existingOwner} 重复，跨轴不能复用同一 Live2D parameter。`,
+          );
+        } else {
+          globalBindingOwners.set(parameterId, axisLabel);
+        }
+      }
       validateRange(errors, `${bindingLabel}.input_range`, binding.input_range);
       validateRange(errors, `${bindingLabel}.output_range`, binding.output_range);
-      validateFinite(errors, `${bindingLabel}.default_weight`, binding.default_weight);
+      validateUnitInterval(errors, `${bindingLabel}.default_weight`, binding.default_weight);
     });
   }
 
@@ -624,6 +636,7 @@ function validateDraftProfile(profile: SemanticAxisProfile): string[] {
 
   const couplingIds = new Set<string>();
   const couplingEdges = new Map<string, string[]>();
+  const couplingTargets = new Map<string, string>();
   for (const coupling of profile.couplings) {
     const couplingLabel = coupling.id || "<empty-coupling-id>";
     if (!coupling.id.trim()) {
@@ -642,9 +655,19 @@ function validateDraftProfile(profile: SemanticAxisProfile): string[] {
     if (coupling.source_axis_id === coupling.target_axis_id) {
       errors.push(`${couplingLabel}: source_axis_id 不能等于 target_axis_id。`);
     }
-    validateFinite(errors, `${couplingLabel}.scale`, coupling.scale);
-    validateFinite(errors, `${couplingLabel}.deadzone`, coupling.deadzone);
-    validateFinite(errors, `${couplingLabel}.max_delta`, coupling.max_delta);
+    if (coupling.target_axis_id.trim()) {
+      const existingOwner = couplingTargets.get(coupling.target_axis_id);
+      if (existingOwner && existingOwner !== couplingLabel) {
+        errors.push(
+          `${couplingLabel}: target_axis_id 与 ${existingOwner} 重复。当前实现不允许多个 coupling 指向同一 target axis。`,
+        );
+      } else {
+        couplingTargets.set(coupling.target_axis_id, couplingLabel);
+      }
+    }
+    validateNonNegativeFinite(errors, `${couplingLabel}.scale`, coupling.scale);
+    validateNonNegativeFinite(errors, `${couplingLabel}.deadzone`, coupling.deadzone);
+    validateNonNegativeFinite(errors, `${couplingLabel}.max_delta`, coupling.max_delta);
     if (axisIds.has(coupling.source_axis_id) && axisIds.has(coupling.target_axis_id)) {
       const nextTargets = couplingEdges.get(coupling.source_axis_id) ?? [];
       nextTargets.push(coupling.target_axis_id);
@@ -662,6 +685,20 @@ function validateDraftProfile(profile: SemanticAxisProfile): string[] {
 function validateFinite(errors: string[], label: string, value: number): void {
   if (!Number.isFinite(value)) {
     errors.push(`${label} 必须是有限数字。`);
+  }
+}
+
+function validateNonNegativeFinite(errors: string[], label: string, value: number): void {
+  validateFinite(errors, label, value);
+  if (Number.isFinite(value) && value < 0) {
+    errors.push(`${label} 不能为负数。`);
+  }
+}
+
+function validateUnitInterval(errors: string[], label: string, value: number): void {
+  validateFinite(errors, label, value);
+  if (Number.isFinite(value) && (value < 0 || value > 1)) {
+    errors.push(`${label} 必须位于 0..1 之间。`);
   }
 }
 
@@ -1226,6 +1263,7 @@ function findCouplingCycle(edges: Map<string, string[]>): string[] | null {
                       :value="coupling.scale"
                       class="settings-card__input"
                       type="number"
+                      min="0"
                       step="0.05"
                       @input="updateCouplingNumber(coupling, 'scale', $event)"
                     />
@@ -1236,6 +1274,7 @@ function findCouplingCycle(edges: Map<string, string[]>): string[] | null {
                       :value="coupling.deadzone"
                       class="settings-card__input"
                       type="number"
+                      min="0"
                       step="0.1"
                       @input="updateCouplingNumber(coupling, 'deadzone', $event)"
                     />
@@ -1246,6 +1285,7 @@ function findCouplingCycle(edges: Map<string, string[]>): string[] | null {
                       :value="coupling.max_delta"
                       class="settings-card__input"
                       type="number"
+                      min="0"
                       step="0.1"
                       @input="updateCouplingNumber(coupling, 'max_delta', $event)"
                     />

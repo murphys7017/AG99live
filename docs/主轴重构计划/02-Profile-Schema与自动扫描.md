@@ -54,7 +54,6 @@ frontend editor working copy / profile cache
   "type": "system.semantic_axis_profile_save",
   "payload": {
     "request_id": "uuid",
-    "model_id": "Mk6",
     "model_name": "Mk6",
     "profile_id": "Mk6.semantic.v1",
     "expected_revision": 3,
@@ -70,7 +69,6 @@ frontend editor working copy / profile cache
   "type": "system.semantic_axis_profile_saved",
   "payload": {
     "request_id": "uuid",
-    "model_id": "Mk6",
     "model_name": "Mk6",
     "profile_id": "Mk6.semantic.v1",
     "revision": 4,
@@ -87,7 +85,6 @@ frontend editor working copy / profile cache
   "type": "system.semantic_axis_profile_save_failed",
   "payload": {
     "request_id": "uuid",
-    "model_id": "Mk6",
     "model_name": "Mk6",
     "profile_id": "Mk6.semantic.v1",
     "expected_revision": 3,
@@ -96,6 +93,11 @@ frontend editor working copy / profile cache
   }
 }
 ```
+
+说明：
+
+- save/saved/save_failed 协议当前实现使用 `model_name` 路由 profile 保存目标。
+- `model_id` 仍属于 `semantic_axis_profile` 内部字段，但不是 save envelope 的必填字段。
 
 规则：
 

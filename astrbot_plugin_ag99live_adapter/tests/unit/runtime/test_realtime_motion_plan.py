@@ -311,6 +311,54 @@ def test_validate_parameter_plan_v2_rejects_invalid_source() -> None:
     assert reason == "parameter_source_invalid"
 
 
+def test_validate_parameter_plan_v2_accepts_multihop_coupling_parameters() -> None:
+    valid, reason = validate_parameter_plan_payload(
+        {
+            "schema_version": "engine.parameter_plan.v2",
+            "profile_id": "DemoModel.semantic.v1",
+            "profile_revision": 3,
+            "model_id": "DemoModel",
+            "mode": "expressive",
+            "emotion_label": "curious",
+            "timing": {
+                "duration_ms": 1200,
+                "blend_in_ms": 216,
+                "hold_ms": 684,
+                "blend_out_ms": 300,
+            },
+            "parameters": [
+                {
+                    "axis_id": "gaze_x",
+                    "parameter_id": "ParamEyeBallX",
+                    "input_value": 78.0,
+                    "target_value": 0.56,
+                    "weight": 1.0,
+                    "source": "semantic_axis",
+                },
+                {
+                    "axis_id": "head_yaw",
+                    "parameter_id": "ParamAngleX",
+                    "input_value": 78.0,
+                    "target_value": 8.4,
+                    "weight": 0.25,
+                    "source": "coupling",
+                },
+                {
+                    "axis_id": "body_yaw",
+                    "parameter_id": "ParamBodyAngleX",
+                    "input_value": 78.0,
+                    "target_value": 2.94,
+                    "weight": 0.0875,
+                    "source": "coupling",
+                },
+            ],
+        }
+    )
+
+    assert valid is True
+    assert reason == ""
+
+
 def test_normalize_selector_output_rejects_missing_emotion() -> None:
     with pytest.raises(ValueError, match="selector_emotion_empty"):
         normalize_selector_output(

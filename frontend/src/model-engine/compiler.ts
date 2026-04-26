@@ -499,36 +499,74 @@ function applySemanticCouplings(
   profile: SemanticAxisProfile,
   axisById: Map<string, SemanticAxisDefinition>,
 ): { values: DynamicAxisValues; warnings: string[] } {
+  const baseValues: DynamicAxisValues = { ...sourceValues };
+  let resolvedValues: DynamicAxisValues = { ...baseValues };
   const result: DynamicAxisValues = {};
-  const warnings: string[] = [];
-  for (const coupling of profile.couplings) {
-    const sourceAxis = axisById.get(coupling.source_axis_id);
-    const targetAxis = axisById.get(coupling.target_axis_id);
-    if (!sourceAxis || !targetAxis) {
-      throw new Error(`semantic_coupling_axis_missing:${coupling.id}`);
+  const warningSet = new Set<string>();
+  const maxPasses = Math.max(1, profile.couplings.length + 1);
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    const nextResolvedValues: DynamicAxisValues = { ...baseValues };
+    const nextDerivedValues: DynamicAxisValues = {};
+    for (const coupling of profile.couplings) {
+      const sourceAxis = axisById.get(coupling.source_axis_id);
+      const targetAxis = axisById.get(coupling.target_axis_id);
+      if (!sourceAxis || !targetAxis) {
+        throw new Error(`semantic_coupling_axis_missing:${coupling.id}`);
+      }
+      const sourceValue = resolvedValues[coupling.source_axis_id];
+      if (sourceValue === undefined) {
+        continue;
+      }
+      const sourceDelta = sourceValue - sourceAxis.neutral;
+      if (Math.abs(sourceDelta) <= coupling.deadzone) {
+        continue;
+      }
+      const direction = coupling.mode === "opposite_direction" ? -1 : 1;
+      const rawDelta = sourceDelta * coupling.scale * direction;
+      const clampedDelta = Math.max(-coupling.max_delta, Math.min(coupling.max_delta, rawDelta));
+      const [minValue, maxValue] = targetAxis.value_range;
+      const targetValue = targetAxis.neutral + clampedDelta;
+      const clampedTargetValue = Math.max(minValue, Math.min(maxValue, targetValue));
+      if (clampedTargetValue !== targetValue) {
+        warningSet.add(
+          `semantic_coupling_clamped:${coupling.id}:${targetValue}->${clampedTargetValue}`,
+        );
+      }
+      nextResolvedValues[coupling.target_axis_id] = clampedTargetValue;
+      nextDerivedValues[coupling.target_axis_id] = clampedTargetValue;
     }
-    const sourceValue = sourceValues[coupling.source_axis_id];
-    if (sourceValue === undefined) {
-      continue;
+    const changed = !dynamicAxisValuesEqual(resolvedValues, nextResolvedValues);
+    if (!changed) {
+      return { values: nextDerivedValues, warnings: [...warningSet] };
     }
-    const sourceDelta = sourceValue - sourceAxis.neutral;
-    if (Math.abs(sourceDelta) <= coupling.deadzone) {
-      continue;
-    }
-    const direction = coupling.mode === "opposite_direction" ? -1 : 1;
-    const rawDelta = sourceDelta * coupling.scale * direction;
-    const clampedDelta = Math.max(-coupling.max_delta, Math.min(coupling.max_delta, rawDelta));
-    const [minValue, maxValue] = targetAxis.value_range;
-    const targetValue = targetAxis.neutral + clampedDelta;
-    const clampedTargetValue = Math.max(minValue, Math.min(maxValue, targetValue));
-    if (clampedTargetValue !== targetValue) {
-      warnings.push(
-        `semantic_coupling_clamped:${coupling.id}:${targetValue}->${clampedTargetValue}`,
-      );
-    }
-    result[coupling.target_axis_id] = clampedTargetValue;
+    resolvedValues = nextResolvedValues;
+    Object.keys(result).forEach((axisId) => {
+      delete result[axisId];
+    });
+    Object.assign(result, nextDerivedValues);
   }
-  return { values: result, warnings };
+  throw new Error("semantic_coupling_resolution_exhausted");
+}
+
+function dynamicAxisValuesEqual(
+  left: DynamicAxisValues,
+  right: DynamicAxisValues,
+): boolean {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  for (const key of keys) {
+    const leftValue = left[key];
+    const rightValue = right[key];
+    if (leftValue === undefined || rightValue === undefined) {
+      if (leftValue !== rightValue) {
+        return false;
+      }
+      continue;
+    }
+    if (Math.abs(leftValue - rightValue) > 1e-6) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function isSemanticIdleDeadzone(

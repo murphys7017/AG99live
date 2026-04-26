@@ -467,6 +467,7 @@ def validate_semantic_axis_profile(
     *,
     model_name: str,
     known_parameter_ids: set[str] | None = None,
+    enforce_runtime_contracts: bool = False,
 ) -> SemanticAxisProfile:
     if not isinstance(profile_payload, Mapping):
         raise SemanticAxisProfileError("SemanticAxisProfile must be a JSON object.")
@@ -512,6 +513,7 @@ def validate_semantic_axis_profile(
 
     normalized_axes: list[SemanticAxisDefinition] = []
     seen_axis_ids: set[str] = set()
+    global_binding_owners: dict[str, str] = {}
     for raw_axis in raw_axes:
         if not isinstance(raw_axis, Mapping):
             raise SemanticAxisProfileError("SemanticAxisProfile axis entries must be objects.")
@@ -548,7 +550,22 @@ def validate_semantic_axis_profile(
                 raise SemanticAxisProfileError(
                     f"Semantic axis `{axis_id}` references unknown parameter_id `{parameter_id}`."
                 )
+            if enforce_runtime_contracts:
+                existing_owner = global_binding_owners.get(parameter_id)
+                if existing_owner is not None and existing_owner != axis_id:
+                    raise SemanticAxisProfileError(
+                        "SemanticAxisProfile parameter bindings must be unique across axes; "
+                        f"`{parameter_id}` is used by both `{existing_owner}` and `{axis_id}`."
+                    )
 
+            default_weight = _coerce_float(
+                raw_binding.get("default_weight", 1.0),
+                field_name=f"{axis_id}.parameter_bindings.default_weight",
+            )
+            if enforce_runtime_contracts and (default_weight < 0.0 or default_weight > 1.0):
+                raise SemanticAxisProfileError(
+                    f"`{axis_id}.parameter_bindings.default_weight` must be within [0, 1]."
+                )
             binding: SemanticAxisParameterBinding = {
                 "parameter_id": parameter_id,
                 "input_range": _normalize_range(
@@ -559,10 +576,7 @@ def validate_semantic_axis_profile(
                     raw_binding.get("output_range"),
                     field_name=f"{axis_id}.parameter_bindings.output_range",
                 ),
-                "default_weight": _coerce_float(
-                    raw_binding.get("default_weight", 1.0),
-                    field_name=f"{axis_id}.parameter_bindings.default_weight",
-                ),
+                "default_weight": default_weight,
                 "invert": _coerce_bool(
                     raw_binding.get("invert", False),
                     field_name=f"{axis_id}.parameter_bindings.invert",
@@ -572,6 +586,8 @@ def validate_semantic_axis_profile(
             if parameter_name:
                 binding["parameter_name"] = parameter_name
             normalized_bindings.append(binding)
+            if enforce_runtime_contracts:
+                global_binding_owners[parameter_id] = axis_id
 
         neutral = _coerce_float(raw_axis.get("neutral"), field_name=f"{axis_id}.neutral")
         value_range = _normalize_range(raw_axis.get("value_range"), field_name=f"{axis_id}.value_range")
@@ -642,6 +658,7 @@ def validate_semantic_axis_profile(
 
     normalized_couplings: list[SemanticAxisCoupling] = []
     seen_coupling_ids: set[str] = set()
+    coupling_target_owners: dict[str, str] = {}
     for raw_coupling in raw_couplings:
         if not isinstance(raw_coupling, Mapping):
             raise SemanticAxisProfileError("SemanticAxisProfile coupling entries must be objects.")
@@ -665,6 +682,25 @@ def validate_semantic_axis_profile(
             raise SemanticAxisProfileError(
                 f"SemanticAxisProfile coupling `{source_axis_id}->{target_axis_id}` references an unknown axis."
             )
+        if enforce_runtime_contracts:
+            existing_owner = coupling_target_owners.get(target_axis_id)
+            if existing_owner is not None and existing_owner != coupling_id:
+                raise SemanticAxisProfileError(
+                    "SemanticAxisProfile couplings must not share the same target axis under runtime "
+                    f"constraints; `{target_axis_id}` is targeted by both `{existing_owner}` and "
+                    f"`{coupling_id}`."
+                )
+        scale = _coerce_float(raw_coupling.get("scale"), field_name="coupling.scale")
+        deadzone = _coerce_float(raw_coupling.get("deadzone"), field_name="coupling.deadzone")
+        max_delta = _coerce_float(raw_coupling.get("max_delta"), field_name="coupling.max_delta")
+        if enforce_runtime_contracts:
+            for field_name, field_value in (
+                ("coupling.scale", scale),
+                ("coupling.deadzone", deadzone),
+                ("coupling.max_delta", max_delta),
+            ):
+                if field_value < 0.0:
+                    raise SemanticAxisProfileError(f"`{field_name}` must be greater than or equal to 0.")
         normalized_couplings.append(
             {
                 "id": coupling_id,
@@ -675,11 +711,13 @@ def validate_semantic_axis_profile(
                     field_name="coupling.mode",
                     allowed_values=ALLOWED_COUPLING_MODES,
                 ),
-                "scale": _coerce_float(raw_coupling.get("scale"), field_name="coupling.scale"),
-                "deadzone": _coerce_float(raw_coupling.get("deadzone"), field_name="coupling.deadzone"),
-                "max_delta": _coerce_float(raw_coupling.get("max_delta"), field_name="coupling.max_delta"),
+                "scale": scale,
+                "deadzone": deadzone,
+                "max_delta": max_delta,
             }
         )
+        if enforce_runtime_contracts:
+            coupling_target_owners[target_axis_id] = coupling_id
 
     _reject_coupling_cycles(normalized_couplings)
 
@@ -825,6 +863,7 @@ def save_semantic_axis_profile(
         profile_payload,
         model_name=model_name,
         known_parameter_ids=known_parameter_ids,
+        enforce_runtime_contracts=True,
     )
     incoming_source_hash = str(normalized_profile["source_hash"]).strip()
     if incoming_source_hash != current_source_hash:

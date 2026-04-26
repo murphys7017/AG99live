@@ -126,13 +126,13 @@ Prompt 的核心不再是“这里有 12 个参数”，而是：
   - 可批量把扫描出的 `debug` axes 提升为生产控制角色，或把已有 axes 降回 `debug`
   - 可新建自定义主轴草稿，保存前需显式补齐描述、使用说明、正/负语义、parameter binding，并确认当前轴配置
   - 前端保存前会一次性列出 profile 配置错误
-  - 后端保存层会严格拒绝非法 axis id、非法数值、非法 range、重复 binding、非法 coupling 和 coupling cycle
+  - 后端保存层会严格拒绝非法 axis id、非法数值、非法 range、跨轴重复 binding、负 `scale/deadzone/max_delta`、非法 coupling 和 coupling cycle
 - 第三轮动态主轴执行链最小闭环已完成：
   - `system.semantic_axis_profile_saved` / `system.semantic_axis_profile_save_failed` 已作为专用保存 ack/fail 协议落地
   - `system.semantic_axis_profile_save` 请求要求 `request_id/model_name/profile_id/expected_revision/profile` 必填
   - realtime selector prompt 已从当前 `semantic_axis_profile` 生成，只暴露 `primary/hint` axes
   - inline `<@anim>` contract 已切到 `engine.motion_intent.v2`
-  - 前端 `ModelEngine` 已支持 `engine.motion_intent.v2 -> engine.parameter_plan.v2`
+  - 前端 `ModelEngine` 已支持 `engine.motion_intent.v2 -> engine.parameter_plan.v2`，并按 coupling DAG 做多跳传播
   - `parameter_plan.v2` 直接携带 `parameters[].parameter_id/target_value/weight`
   - Live2D runtime 已支持按 `parameter_id` 写入 v2 plan
   - v2 路径对 unknown/forbidden/non-number axis 按 30% 主参数错误率阈值处理；超过阈值 hard fail，未超过则忽略错误项并诊断

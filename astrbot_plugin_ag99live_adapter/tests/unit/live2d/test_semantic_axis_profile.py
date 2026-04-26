@@ -32,9 +32,18 @@ def _build_valid_profile(tmp_path) -> dict:
     )
 
 
-def _expect_profile_error(profile: dict, expected_message: str) -> None:
+def _expect_profile_error(
+    profile: dict,
+    expected_message: str,
+    *,
+    enforce_runtime_contracts: bool = False,
+) -> None:
     with pytest.raises(SemanticAxisProfileError, match=expected_message):
-        validate_semantic_axis_profile(profile, model_name="DemoModel")
+        validate_semantic_axis_profile(
+            profile,
+            model_name="DemoModel",
+            enforce_runtime_contracts=enforce_runtime_contracts,
+        )
 
 
 def test_live2d_runtime_cache_hash_ignores_generated_ag99_profile(
@@ -249,6 +258,21 @@ def test_validate_semantic_axis_profile_rejects_duplicate_parameter_id_in_same_a
     _expect_profile_error(profile, "duplicate parameter_id")
 
 
+def test_validate_semantic_axis_profile_rejects_duplicate_parameter_id_across_axes_when_runtime_contracts_enforced(
+    tmp_path,
+) -> None:
+    profile = _build_valid_profile(tmp_path)
+    shared_binding = deepcopy(profile["axes"][0]["parameter_bindings"][0])
+    profile["axes"][1]["parameter_bindings"] = [shared_binding]
+
+    with pytest.raises(SemanticAxisProfileError, match="unique across axes"):
+        validate_semantic_axis_profile(
+            profile,
+            model_name="DemoModel",
+            enforce_runtime_contracts=True,
+        )
+
+
 def test_validate_semantic_axis_profile_rejects_empty_parameter_id(tmp_path) -> None:
     profile = _build_valid_profile(tmp_path)
     profile["axes"][0]["parameter_bindings"][0]["parameter_id"] = ""
@@ -312,6 +336,74 @@ def test_validate_semantic_axis_profile_rejects_invalid_coupling_references(
     ]
 
     _expect_profile_error(profile, expected_message)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "expected_message"),
+    [
+        ("scale", r"coupling\.scale"),
+        ("deadzone", r"coupling\.deadzone"),
+        ("max_delta", r"coupling\.max_delta"),
+    ],
+)
+def test_validate_semantic_axis_profile_rejects_negative_coupling_limits(
+    tmp_path,
+    field_name: str,
+    expected_message: str,
+) -> None:
+    profile = _build_valid_profile(tmp_path)
+    profile["couplings"] = [
+        {
+            "id": "negative_limit",
+            "source_axis_id": profile["axes"][0]["id"],
+            "target_axis_id": profile["axes"][1]["id"],
+            "mode": "same_direction",
+            "scale": 1.0,
+            "deadzone": 0.0,
+            "max_delta": 1.0,
+        }
+    ]
+    profile["couplings"][0][field_name] = -0.01
+
+    _expect_profile_error(
+        profile,
+        expected_message,
+        enforce_runtime_contracts=True,
+    )
+
+
+def test_validate_semantic_axis_profile_rejects_duplicate_coupling_target_when_runtime_contracts_enforced(
+    tmp_path,
+) -> None:
+    profile = _build_valid_profile(tmp_path)
+    source_axis_id = profile["axes"][0]["id"]
+    target_axis_id = profile["axes"][1]["id"]
+    profile["couplings"] = [
+        {
+            "id": "first_target",
+            "source_axis_id": source_axis_id,
+            "target_axis_id": target_axis_id,
+            "mode": "same_direction",
+            "scale": 1.0,
+            "deadzone": 0.0,
+            "max_delta": 1.0,
+        },
+        {
+            "id": "second_target",
+            "source_axis_id": source_axis_id,
+            "target_axis_id": target_axis_id,
+            "mode": "opposite_direction",
+            "scale": 1.0,
+            "deadzone": 0.0,
+            "max_delta": 1.0,
+        },
+    ]
+
+    _expect_profile_error(
+        profile,
+        "share the same target axis",
+        enforce_runtime_contracts=True,
+    )
 
 
 def test_validate_semantic_axis_profile_rejects_coupling_cycles(tmp_path) -> None:
@@ -416,6 +508,69 @@ def test_ensure_semantic_axis_profile_marks_stale_before_current_parameter_valid
         for axis in stale_profile["axes"]
         for binding in axis["parameter_bindings"]
     )
+
+
+def test_save_semantic_axis_profile_rejects_duplicate_parameter_id_across_axes(tmp_path) -> None:
+    model_dir = tmp_path / "DemoModel"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
+
+    profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=_build_model_payload(),
+    )
+    profile["axes"][1]["parameter_bindings"] = [
+        deepcopy(profile["axes"][0]["parameter_bindings"][0])
+    ]
+
+    with pytest.raises(SemanticAxisProfileError, match="unique across axes"):
+        save_semantic_axis_profile(
+            model_dir=model_dir,
+            model_name="DemoModel",
+            profile_payload=profile,
+            expected_revision=profile["revision"],
+        )
+
+
+def test_save_semantic_axis_profile_rejects_duplicate_coupling_targets(tmp_path) -> None:
+    model_dir = tmp_path / "DemoModel"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
+
+    profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=_build_model_payload(),
+    )
+    source_axis_id = profile["axes"][0]["id"]
+    target_axis_id = profile["axes"][1]["id"]
+    profile["couplings"] = [
+        {
+            "id": "first_target",
+            "source_axis_id": source_axis_id,
+            "target_axis_id": target_axis_id,
+            "mode": "same_direction",
+            "scale": 1.0,
+            "deadzone": 0.0,
+            "max_delta": 1.0,
+        },
+        {
+            "id": "second_target",
+            "source_axis_id": source_axis_id,
+            "target_axis_id": target_axis_id,
+            "mode": "opposite_direction",
+            "scale": 1.0,
+            "deadzone": 0.0,
+            "max_delta": 1.0,
+        },
+    ]
+
+    with pytest.raises(SemanticAxisProfileError, match="share the same target axis"):
+        save_semantic_axis_profile(
+            model_dir=model_dir,
+            model_name="DemoModel",
+            profile_payload=profile,
+            expected_revision=profile["revision"],
+        )
 
 
 def test_save_semantic_axis_profile_rejects_source_hash_mismatch(tmp_path) -> None:
