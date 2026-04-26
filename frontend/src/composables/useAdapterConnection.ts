@@ -11,9 +11,12 @@ import type {
   OutputTranscriptionPayload,
   ProtocolEnvelope,
   SystemSemanticAxisProfileSavePayload,
+  SystemSemanticAxisProfileSavedPayload,
+  SystemSemanticAxisProfileSaveFailedPayload,
   SystemModelSyncPayload,
   SystemServerInfoPayload,
 } from "../types/protocol";
+import type { DesktopSemanticAxisProfileSaveResult } from "../types/desktop";
 import { useModelSync } from "./useModelSync";
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
@@ -54,6 +57,7 @@ const state = reactive({
   audioPlaybackStartedTurnId: null as string | null,
   audioPlaybackStartedAtMs: 0,
   audioPlaybackDurationMs: null as number | null,
+  latestSemanticAxisProfileSaveResult: null as DesktopSemanticAxisProfileSaveResult | null,
 });
 
 interface MicrophoneCaptureRuntime {
@@ -736,6 +740,16 @@ async function handleSocketMessage(rawData: string): Promise<void> {
       state.statusMessage = "模型能力已同步。";
       pushHistory("system", state.statusMessage);
       return;
+    case "system.semantic_axis_profile_saved":
+      applySemanticAxisProfileSaved(
+        envelope as ProtocolEnvelope<SystemSemanticAxisProfileSavedPayload>,
+      );
+      return;
+    case "system.semantic_axis_profile_save_failed":
+      applySemanticAxisProfileSaveFailed(
+        envelope as ProtocolEnvelope<SystemSemanticAxisProfileSaveFailedPayload>,
+      );
+      return;
     case "output.text":
       applyOutputText(envelope as ProtocolEnvelope<OutputTextPayload>);
       return;
@@ -867,6 +881,42 @@ function applyControlError(envelope: ProtocolEnvelope<ControlErrorPayload>): voi
   pushHistory("error", envelope.payload.message);
 }
 
+function applySemanticAxisProfileSaved(
+  envelope: ProtocolEnvelope<SystemSemanticAxisProfileSavedPayload>,
+): void {
+  state.latestSemanticAxisProfileSaveResult = {
+    requestId: envelope.payload.request_id,
+    ok: true,
+    modelName: envelope.payload.model_name,
+    profileId: envelope.payload.profile_id,
+    revision: envelope.payload.revision,
+    sourceHash: envelope.payload.source_hash,
+    savedAt: envelope.payload.saved_at,
+    receivedAt: new Date().toISOString(),
+  };
+  state.lastError = "";
+  state.statusMessage = `主轴配置已保存到 revision ${envelope.payload.revision}。`;
+  pushHistory("system", state.statusMessage);
+}
+
+function applySemanticAxisProfileSaveFailed(
+  envelope: ProtocolEnvelope<SystemSemanticAxisProfileSaveFailedPayload>,
+): void {
+  state.latestSemanticAxisProfileSaveResult = {
+    requestId: envelope.payload.request_id,
+    ok: false,
+    modelName: envelope.payload.model_name,
+    profileId: envelope.payload.profile_id,
+    expectedRevision: envelope.payload.expected_revision,
+    errorCode: envelope.payload.error_code,
+    message: envelope.payload.message,
+    receivedAt: new Date().toISOString(),
+  };
+  state.lastError = envelope.payload.message;
+  state.statusMessage = `主轴配置保存失败：${envelope.payload.message}`;
+  pushHistory("error", state.statusMessage);
+}
+
 function applyInboundMotionPayload(
   envelope: ProtocolEnvelope<Record<string, unknown>>,
 ): void {
@@ -924,16 +974,16 @@ function applyInboundMotionPayload(
     typeof (plan as Record<string, unknown>).schema_version === "string"
       ? String((plan as Record<string, unknown>).schema_version).trim()
       : "";
-  const expectedSchemaVersion = envelope.type === "engine.motion_intent"
-    ? "engine.motion_intent.v1"
-    : "engine.parameter_plan.v1";
-  if (schemaVersion !== expectedSchemaVersion) {
+  const allowedSchemaVersions = envelope.type === "engine.motion_intent"
+    ? new Set(["engine.motion_intent.v1", "engine.motion_intent.v2"])
+    : new Set(["engine.parameter_plan.v1", "engine.parameter_plan.v2"]);
+  if (!allowedSchemaVersions.has(schemaVersion)) {
     console.warn(
       "[Connection] motion payload schema mismatch.",
       "type=",
       envelope.type,
       "expected=",
-      expectedSchemaVersion,
+      [...allowedSchemaVersions].join("|"),
       "actual=",
       schemaVersion,
       envelope,
@@ -1229,7 +1279,12 @@ function sendMotionPayloadPreview(payload: unknown): boolean {
   const schemaVersion = payload && typeof payload === "object"
     ? String((payload as Record<string, unknown>).schema_version ?? "").trim()
     : "";
-  if (schemaVersion !== "engine.motion_intent.v1" && schemaVersion !== "engine.parameter_plan.v1") {
+  if (
+    schemaVersion !== "engine.motion_intent.v1"
+    && schemaVersion !== "engine.motion_intent.v2"
+    && schemaVersion !== "engine.parameter_plan.v1"
+    && schemaVersion !== "engine.parameter_plan.v2"
+  ) {
     state.lastError = `动作测试载荷无效：不支持 schema_version=${schemaVersion || "empty"}。`;
     state.statusMessage = state.lastError;
     pushHistory("error", state.lastError);
@@ -1237,10 +1292,10 @@ function sendMotionPayloadPreview(payload: unknown): boolean {
     return false;
   }
 
-  const messageType = schemaVersion === "engine.motion_intent.v1"
+  const messageType = schemaVersion === "engine.motion_intent.v1" || schemaVersion === "engine.motion_intent.v2"
     ? "engine.motion_intent"
     : "engine.motion_plan";
-  const payloadKey = schemaVersion === "engine.motion_intent.v1" ? "intent" : "plan";
+  const payloadKey = messageType === "engine.motion_intent" ? "intent" : "plan";
 
   socket.send(
     JSON.stringify(

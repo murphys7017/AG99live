@@ -18,7 +18,7 @@ class _RuntimeStateStub:
         model_name: str,
         profile_payload: object,
         expected_revision: object,
-    ) -> None:
+    ) -> dict[str, object]:
         if self.error is not None:
             raise self.error
         self.calls.append(
@@ -28,6 +28,13 @@ class _RuntimeStateStub:
                 "expected_revision": expected_revision,
             }
         )
+        return {
+            "model_id": model_name,
+            "profile_id": f"{model_name}.semantic.v1",
+            "revision": 4,
+            "source_hash": "hash",
+            "updated_at": "2026-04-26T00:00:00+00:00",
+        }
 
 
 class _HistoryBridgeStub:
@@ -68,7 +75,9 @@ def test_frontend_compat_handler_saves_semantic_profile_and_refreshes() -> None:
                 session_id="session",
                 turn_id="turn",
                 payload={
+                    "request_id": "request-1",
                     "model_name": "DemoModel",
+                    "profile_id": "DemoModel.semantic.v1",
                     "expected_revision": 3,
                     "profile": {"schema_version": "ag99.semantic_axis_profile.v1"},
                 },
@@ -85,7 +94,16 @@ def test_frontend_compat_handler_saves_semantic_profile_and_refreshes() -> None:
             "expected_revision": 3,
         }
     ]
-    assert sent_payloads == []
+    assert len(sent_payloads) == 1
+    assert sent_payloads[0]["type"] == "system.semantic_axis_profile_saved"
+    assert sent_payloads[0]["payload"] == {
+        "request_id": "request-1",
+        "model_name": "DemoModel",
+        "profile_id": "DemoModel.semantic.v1",
+        "revision": 4,
+        "source_hash": "hash",
+        "saved_at": "2026-04-26T00:00:00+00:00",
+    }
     assert refresh_calls == [True]
 
 
@@ -113,7 +131,9 @@ def test_frontend_compat_handler_returns_control_error_on_save_failure() -> None
                 session_id="session",
                 turn_id="turn",
                 payload={
+                    "request_id": "request-2",
                     "model_name": "DemoModel",
+                    "profile_id": "DemoModel.semantic.v1",
                     "expected_revision": 1,
                     "profile": {"schema_version": "ag99.semantic_axis_profile.v1"},
                 },
@@ -125,7 +145,9 @@ def test_frontend_compat_handler_returns_control_error_on_save_failure() -> None
 
     assert refresh_calls == []
     assert len(sent_payloads) == 1
-    assert sent_payloads[0]["type"] == "control.error"
+    assert sent_payloads[0]["type"] == "system.semantic_axis_profile_save_failed"
+    assert sent_payloads[0]["payload"]["request_id"] == "request-2"
+    assert sent_payloads[0]["payload"]["error_code"] == "profile_validation_error"
     assert sent_payloads[0]["payload"]["message"] == "broken profile"
 
 
@@ -153,7 +175,9 @@ def test_frontend_compat_handler_returns_control_error_on_missing_profile_file()
                 session_id="session",
                 turn_id="turn",
                 payload={
+                    "request_id": "request-3",
                     "model_name": "DemoModel",
+                    "profile_id": "DemoModel.semantic.v1",
                     "expected_revision": 1,
                     "profile": {"schema_version": "ag99.semantic_axis_profile.v1"},
                 },
@@ -165,5 +189,7 @@ def test_frontend_compat_handler_returns_control_error_on_missing_profile_file()
 
     assert refresh_calls == []
     assert len(sent_payloads) == 1
-    assert sent_payloads[0]["type"] == "control.error"
+    assert sent_payloads[0]["type"] == "system.semantic_axis_profile_save_failed"
+    assert sent_payloads[0]["payload"]["request_id"] == "request-3"
+    assert sent_payloads[0]["payload"]["error_code"] == "profile_not_found"
     assert sent_payloads[0]["payload"]["message"] == "profile missing"

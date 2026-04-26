@@ -1,6 +1,7 @@
 import type {
   DirectParameterAxisName,
   DirectParameterPlan,
+  MotionPlanPayload,
 } from "./protocol";
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
 
@@ -115,6 +116,17 @@ export interface DesktopMotionCompileDiagnostics {
   timingSource: "hint" | "audio_sync" | "default";
   resolvedMode: DirectParameterPlan["mode"];
   source?: string;
+  warnings?: string[];
+  primaryAxes?: string[];
+  hintAxes?: string[];
+  derivedAxes?: string[];
+  runtimeAxes?: string[];
+  missingAxes?: string[];
+  forbiddenAxes?: string[];
+  invalidAxes?: string[];
+  axisErrorCount?: number;
+  axisErrorLimit?: number;
+  compiledParameters?: string[];
   intensityApplied: boolean;
   motionIntensityScale: number;
   axisIntensityScale: Record<DirectParameterAxisName, number>;
@@ -124,7 +136,7 @@ export interface DesktopMotionPlaybackRecord {
   id: string;
   createdAt: string;
   source: string;
-  payloadKind: "intent" | "plan";
+  payloadKind: "intent" | "semantic_intent" | "plan" | "semantic_plan";
   turnId: string | null;
   modelName: string;
   emotionLabel: string;
@@ -134,7 +146,7 @@ export interface DesktopMotionPlaybackRecord {
   assistantText: string;
   playerMessage: string;
   diagnostics: DesktopMotionCompileDiagnostics | null;
-  plan: DirectParameterPlan;
+  plan: MotionPlanPayload;
 }
 
 export interface DesktopMotionTuningSample {
@@ -149,6 +161,20 @@ export interface DesktopMotionTuningSample {
   originalAxes: Record<DirectParameterAxisName, number>;
   adjustedAxes: Record<DirectParameterAxisName, number>;
   adjustedPlan: DirectParameterPlan;
+}
+
+export interface DesktopSemanticAxisProfileSaveResult {
+  requestId: string;
+  ok: boolean;
+  modelName: string;
+  profileId: string;
+  expectedRevision?: number;
+  revision?: number;
+  sourceHash?: string;
+  savedAt?: string;
+  errorCode?: string;
+  message?: string;
+  receivedAt: string;
 }
 
 export interface DesktopRuntimeSnapshot {
@@ -181,6 +207,7 @@ export interface DesktopRuntimeSnapshot {
   historyEntries: DesktopHistoryEntry[];
   baseActionPreview: DesktopBaseActionPreview | null;
   selectedSemanticAxisProfile: SemanticAxisProfile | null;
+  latestSemanticAxisProfileSaveResult: DesktopSemanticAxisProfileSaveResult | null;
 }
 
 export type DesktopRuntimeCommand =
@@ -190,7 +217,9 @@ export type DesktopRuntimeCommand =
   | { type: "set_motion_engine_settings"; settings: DesktopMotionEngineSettings }
   | {
     type: "save_semantic_axis_profile";
+    requestId: string;
     modelName: string;
+    profileId: string;
     expectedRevision: number;
     profile: SemanticAxisProfile;
   }

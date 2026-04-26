@@ -7,6 +7,11 @@ import type {
   DesktopRuntimeSnapshot,
   DesktopWindowVisibilityState,
 } from "../types/desktop";
+import type {
+  DirectParameterPlan,
+  MotionPlanPayload,
+  SemanticParameterPlan,
+} from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 import {
   buildDefaultModelEngineSettings,
@@ -51,6 +56,7 @@ const defaultSnapshot: DesktopRuntimeSnapshot = {
   historyEntries: [],
   baseActionPreview: null,
   selectedSemanticAxisProfile: null,
+  latestSemanticAxisProfileSaveResult: null,
 };
 
 const defaultWindowState: DesktopWindowVisibilityState = {
@@ -164,6 +170,9 @@ function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnap
     selectedSemanticAxisProfile: cloneSemanticAxisProfile(
       snapshot.selectedSemanticAxisProfile,
     ),
+    latestSemanticAxisProfileSaveResult: snapshot.latestSemanticAxisProfileSaveResult
+      ? { ...snapshot.latestSemanticAxisProfileSaveResult }
+      : null,
   };
 }
 
@@ -208,9 +217,27 @@ function isPresent<TValue>(value: TValue | null): value is TValue {
   return value !== null;
 }
 
-function cloneDirectParameterPlan<TPlan extends DesktopMotionPlaybackRecord["plan"]>(
-  plan: TPlan,
-): TPlan {
+function cloneDirectParameterPlan(plan: DirectParameterPlan): DirectParameterPlan;
+function cloneDirectParameterPlan(plan: SemanticParameterPlan): SemanticParameterPlan;
+function cloneDirectParameterPlan(plan: MotionPlanPayload): MotionPlanPayload;
+function cloneDirectParameterPlan(plan: MotionPlanPayload): MotionPlanPayload {
+  if (plan.schema_version === "engine.parameter_plan.v2") {
+    return {
+      ...plan,
+      timing: { ...plan.timing },
+      parameters: plan.parameters.map((item) => ({ ...item })),
+      diagnostics: plan.diagnostics
+        ? {
+          ...plan.diagnostics,
+          warnings: plan.diagnostics.warnings
+            ? [...plan.diagnostics.warnings]
+            : undefined,
+        }
+        : undefined,
+      summary: plan.summary ? { ...plan.summary } : undefined,
+    };
+  }
+
   return {
     ...plan,
     timing: { ...plan.timing },
@@ -219,7 +246,7 @@ function cloneDirectParameterPlan<TPlan extends DesktopMotionPlaybackRecord["pla
         axisName,
         { ...axisValue },
       ]),
-    ) as TPlan["key_axes"],
+    ) as DirectParameterPlan["key_axes"],
     supplementary_params: plan.supplementary_params.map((item) => ({ ...item })),
     calibration_profile: plan.calibration_profile
       ? {
@@ -244,7 +271,7 @@ function cloneDirectParameterPlan<TPlan extends DesktopMotionPlaybackRecord["pla
       }
       : plan.model_calibration_profile,
     summary: plan.summary ? { ...plan.summary } : undefined,
-  };
+  } satisfies DirectParameterPlan;
 }
 
 function cloneBaseActionPreview(

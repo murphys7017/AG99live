@@ -34,18 +34,21 @@ astrbot_plugin_ag99live_adapter/
 
 - Adapter 在请求主模型前注入 `<@anim {...}>` 输出契约。
 - 主回复末尾若包含合法 `<@anim {...}>`，则优先提取并广播动作载荷。
+- 当前 inline contract 使用 `engine.motion_intent.v2`，字段来自当前模型的 `semantic_axis_profile`。
 
 ### 兜底路径（realtime）
 
 - 主回复无合法内联动作时，触发 `realtime_motion_plan` 生成。
-- 当前 realtime 主路径产物为 `engine.motion_intent.v1`，前端 `ModelEngine` 在本地编译为 `engine.parameter_plan.v1` 再执行。
-- `motion_prompt_instruction` 会注入 inline contract 与 realtime selector prompt，用于影响动作风格和幅度，但不改变协议结构。
+- 当前 realtime 主路径产物为 `engine.motion_intent.v2`，前端 `ModelEngine` 根据 `semantic_axis_profile` 编译为 `engine.parameter_plan.v2` 再执行。
+- `motion_prompt_instruction` 会注入 inline contract 与 realtime selector prompt，用于影响动作风格和幅度。
+- realtime prompt 只暴露 profile 中的 `primary/hint` axes，禁止输出 `derived/runtime/ambient/debug` axes。
 
 ## 与前端协同的关键点
 
 - 每条消息都带 `turn_id`，用于前端做轮次 gating 与时间轴协调。
 - 前端同时兼容 `engine.motion_plan` 与 `engine.motion_intent`，但开发期要求消息类型与 payload 字段严格对应。
-- `calibration_profile` / `parameter_action_library` / `base_action_library` 由 `system.model_sync` 下发，供前端 `ModelEngine` 本地编译执行 plan。
+- `semantic_axis_profile` / `calibration_profile` / `parameter_action_library` / `base_action_library` 由 `system.model_sync` 下发。
+- `system.semantic_axis_profile_saved` / `system.semantic_axis_profile_save_failed` 用于 Profile Editor 保存结果确认，不再依赖 `system.model_sync` 推断保存成败。
 
 ## 关键配置（`_conf_schema.json`）
 
@@ -72,4 +75,4 @@ pip install -r astrbot_plugin_ag99live_adapter/requirements.txt
 python -m pytest astrbot_plugin_ag99live_adapter/tests -q
 ```
 
-当前基线：`48 passed`（2026-04-25）。
+当前基线：`82 passed`（2026-04-26）。

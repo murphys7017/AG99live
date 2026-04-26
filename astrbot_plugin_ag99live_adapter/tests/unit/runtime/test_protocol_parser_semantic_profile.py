@@ -13,7 +13,9 @@ def test_parse_inbound_message_accepts_semantic_axis_profile_save() -> None:
             "session_id": "session",
             "source": "frontend",
             "payload": {
+                "request_id": "request-1",
                 "model_name": "DemoModel",
+                "profile_id": "DemoModel.semantic.v1",
                 "expected_revision": 3,
                 "profile": {"schema_version": "ag99.semantic_axis_profile.v1"},
             },
@@ -22,6 +24,7 @@ def test_parse_inbound_message_accepts_semantic_axis_profile_save() -> None:
     )
 
     assert envelope.type == "system.semantic_axis_profile_save"
+    assert envelope.payload["request_id"] == "request-1"
     assert envelope.payload["model_name"] == "DemoModel"
     assert envelope.payload["expected_revision"] == 3
 
@@ -34,6 +37,7 @@ def test_parse_inbound_message_rejects_invalid_semantic_axis_profile_save_payloa
                 "session_id": "session",
                 "source": "frontend",
                 "payload": {
+                    "request_id": "request-1",
                     "model_name": "DemoModel",
                     "expected_revision": "3",
                     "profile": {"schema_version": "ag99.semantic_axis_profile.v1"},

@@ -45,6 +45,64 @@ frontend editor working copy / profile cache
 - 在前端编辑 working copy。
 - 显式保存回模型目录。
 
+## Profile 保存协议草案
+
+保存请求：
+
+```json
+{
+  "type": "system.semantic_axis_profile_save",
+  "payload": {
+    "request_id": "uuid",
+    "model_id": "Mk6",
+    "model_name": "Mk6",
+    "profile_id": "Mk6.semantic.v1",
+    "expected_revision": 3,
+    "profile": {}
+  }
+}
+```
+
+保存成功：
+
+```json
+{
+  "type": "system.semantic_axis_profile_saved",
+  "payload": {
+    "request_id": "uuid",
+    "model_id": "Mk6",
+    "model_name": "Mk6",
+    "profile_id": "Mk6.semantic.v1",
+    "revision": 4,
+    "source_hash": "...",
+    "saved_at": "2026-04-26T00:00:00+08:00"
+  }
+}
+```
+
+保存失败：
+
+```json
+{
+  "type": "system.semantic_axis_profile_save_failed",
+  "payload": {
+    "request_id": "uuid",
+    "model_id": "Mk6",
+    "model_name": "Mk6",
+    "profile_id": "Mk6.semantic.v1",
+    "expected_revision": 3,
+    "error_code": "revision_conflict",
+    "message": "expected revision 3 but current revision is 4"
+  }
+}
+```
+
+规则：
+
+- `system.model_sync` 负责分发 canonical profile，不再承担保存成功 ack。
+- Profile Editor 只能用同 `request_id` 的 `saved/save_failed` 结束 pending 状态。
+- 失败必须有明确 `error_code` 和 `message`，不能通过通用 `control.error` 间接推断。
+
 ## Schema 草案
 
 ```json

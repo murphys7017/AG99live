@@ -24,6 +24,8 @@ from .constants import (
     TYPE_SYSTEM_HISTORY_DELETED,
     TYPE_SYSTEM_HISTORY_LIST,
     TYPE_SYSTEM_MODEL_SYNC,
+    TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVED,
+    TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE_FAILED,
     TYPE_SYSTEM_SERVER_INFO,
 )
 from .parser import build_message_envelope
@@ -158,6 +160,62 @@ def build_system_heartbeat_ack(
         session_id=session_id,
         source=SOURCE_ADAPTER,
         payload={},
+    )
+
+
+def build_system_semantic_axis_profile_saved(
+    *,
+    session_id: str,
+    request_id: str,
+    model_name: str,
+    profile_id: str,
+    revision: int,
+    source_hash: str,
+    saved_at: str,
+    turn_id: str | None = None,
+) -> dict[str, Any]:
+    return build_message_envelope(
+        TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVED,
+        session_id=session_id,
+        turn_id=turn_id,
+        source=SOURCE_ADAPTER,
+        payload={
+            "request_id": request_id,
+            "model_name": model_name,
+            "profile_id": profile_id,
+            "revision": revision,
+            "source_hash": source_hash,
+            "saved_at": saved_at,
+        },
+    )
+
+
+def build_system_semantic_axis_profile_save_failed(
+    *,
+    session_id: str,
+    request_id: str,
+    model_name: str,
+    profile_id: str,
+    expected_revision: int | None = None,
+    error_code: str,
+    message: str,
+    turn_id: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "request_id": request_id,
+        "model_name": model_name,
+        "profile_id": profile_id,
+        "error_code": error_code,
+        "message": message,
+    }
+    if expected_revision is not None:
+        payload["expected_revision"] = expected_revision
+    return build_message_envelope(
+        TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE_FAILED,
+        session_id=session_id,
+        turn_id=turn_id,
+        source=SOURCE_ADAPTER,
+        payload=payload,
     )
 
 

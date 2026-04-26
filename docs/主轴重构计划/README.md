@@ -90,7 +90,7 @@ Prompt 的核心不再是“这里有 12 个参数”，而是：
 
 ```text
 你正在控制一个 Live2D 模型。
-你可以控制以下 primary semantic axes。
+你可以优先控制 primary semantic axes，也可以在明确标注的情况下输出 hint axes。
 每个 axis 的 50/高值/低值/推荐范围/适用场景如下。
 不要控制 runtime/ambient axes。
 ```
@@ -99,7 +99,7 @@ Prompt 的核心不再是“这里有 12 个参数”，而是：
 
 ### 已完成
 
-- 第一轮基础设施已完成：
+- `Phase 0-4` 已完成的是动态主轴的 profile foundation/editor，不是执行链迁移：
   - 后端 canonical profile 文件落地
   - `system.model_sync` 下发 `semantic_axis_profile`
   - `system.semantic_axis_profile_save` 回写闭环
@@ -127,12 +127,22 @@ Prompt 的核心不再是“这里有 12 个参数”，而是：
   - 可新建自定义主轴草稿，保存前需显式补齐描述、使用说明、正/负语义、parameter binding，并确认当前轴配置
   - 前端保存前会一次性列出 profile 配置错误
   - 后端保存层会严格拒绝非法 axis id、非法数值、非法 range、重复 binding、非法 coupling 和 coupling cycle
+- 第三轮动态主轴执行链最小闭环已完成：
+  - `system.semantic_axis_profile_saved` / `system.semantic_axis_profile_save_failed` 已作为专用保存 ack/fail 协议落地
+  - `system.semantic_axis_profile_save` 请求要求 `request_id/model_name/profile_id/expected_revision/profile` 必填
+  - realtime selector prompt 已从当前 `semantic_axis_profile` 生成，只暴露 `primary/hint` axes
+  - inline `<@anim>` contract 已切到 `engine.motion_intent.v2`
+  - 前端 `ModelEngine` 已支持 `engine.motion_intent.v2 -> engine.parameter_plan.v2`
+  - `parameter_plan.v2` 直接携带 `parameters[].parameter_id/target_value/weight`
+  - Live2D runtime 已支持按 `parameter_id` 写入 v2 plan
+  - v2 路径对 unknown/forbidden/non-number axis 按 30% 主参数错误率阈值处理；超过阈值 hard fail，未超过则忽略错误项并诊断
+  - v2 路径对重复 parameter、非法 source、非法 weight、不可写 parameter 均 hard fail
+  - v2 路径对语义值或 target 越界会夹到对应极限值并记录 warning
 
 ### 尚未完成
 
-- `profile-driven prompt`
-- `ModelEngine compiler v2`
-- `parameter_plan.v2 runtime`
+- 真实 Live2D 模型上的 v2 动作效果实机验证与参数范围标定
+- 前端自动化测试框架
 - 固定 12 轴核心路径删除
 
 ### 当前阶段判断
@@ -142,8 +152,21 @@ Prompt 的核心不再是“这里有 12 个参数”，而是：
 ```text
 动态主轴底座已落地
 -> Profile Editor 主体编辑和批量主轴配置已落地
--> 下一步进入 profile-driven 执行链迁移
+-> profile save 专用 ack/fail 已落地
+-> profile-driven prompt / compiler / runtime v2 已完成最小闭环
+-> 下一步进入实机验证与 Phase 8 旧 12 轴核心路径清理
 ```
+
+当前固定 12 轴链路仍然存在，属于过渡期保留的 v1 兼容/调试路径。主执行链已经迁移到：
+
+```text
+motion_intent.v2
+-> profile-driven prompt
+-> profile-driven compiler
+-> parameter_plan.v2 runtime
+```
+
+Profile Editor 的配置已经可以参与实际动作生成和播放。剩余工作是实机校准、完善测试，以及删除 v1 固定 12 轴核心路径。
 
 ## 暂不做的事
 
@@ -159,6 +182,6 @@ Prompt 的核心不再是“这里有 12 个参数”，而是：
 
 ## 与现有文档关系
 
-- `ModelEngine主参数语义设计.md`：解释为什么 12 轴不是同级主控。
+- `archive/ModelEngine主参数语义设计.md`：历史设计文档，已被本重构计划取代；仅保留“12 轴不应同级主控”的分析。
 - `ModelEngine驱动系统边界与分层设计.md`：解释 ModelEngine / Runtime / 后端边界。
 - 本目录：把上述共识转成可执行重构路线。

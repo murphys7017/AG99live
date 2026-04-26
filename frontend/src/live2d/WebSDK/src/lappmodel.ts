@@ -105,6 +105,8 @@ interface DirectParameterAxisBinding {
   parameterId: CubismIdHandle;
   parameterIndex: number;
   calibration: DirectParameterAxisCalibration | null;
+  directTargetValue: number | null;
+  weight: number;
 }
 
 interface DirectSupplementaryBinding {
@@ -113,6 +115,17 @@ interface DirectSupplementaryBinding {
   weight: number;
   sourceAtomId: string;
   channel: string;
+  parameterId: CubismIdHandle;
+  parameterIndex: number;
+}
+
+interface DirectSemanticParameterBinding {
+  axisId: string;
+  parameterIdRaw: string;
+  targetValue: number;
+  weight: number;
+  inputValue: number | null;
+  source: string;
   parameterId: CubismIdHandle;
   parameterIndex: number;
 }
@@ -153,6 +166,7 @@ interface DirectParameterPlanState {
   };
   axisBindings: DirectParameterAxisBinding[];
   supplementaryBindings: DirectSupplementaryBinding[];
+  semanticBindings: DirectSemanticParameterBinding[];
   usesCalibration: boolean;
   usesBindingProfile: boolean;
   startedAtMs: number;
@@ -1434,6 +1448,10 @@ export class LAppModel extends CubismUserModel {
       return false;
     }
 
+    if (parsed.plan.schema_version === "engine.parameter_plan.v2") {
+      return this.startSemanticParameterPlan(parsed);
+    }
+
     const effectiveCalibrationProfile = this.mergeDirectParameterCalibrationProfiles(
       parsed.plan.calibration_profile,
       parsed.plan.model_calibration_profile,
@@ -1467,6 +1485,8 @@ export class LAppModel extends CubismUserModel {
             effectiveCalibrationProfile,
             parameterName,
           ),
+          directTargetValue: null,
+          weight: 1,
         };
         break;
       }
@@ -1580,6 +1600,7 @@ export class LAppModel extends CubismUserModel {
       timing: parsed.timing,
       axisBindings,
       supplementaryBindings,
+      semanticBindings: [],
       usesCalibration,
       usesBindingProfile,
       startedAtMs: performance.now(),
@@ -1599,6 +1620,76 @@ export class LAppModel extends CubismUserModel {
 
   public getDirectParameterPlanError(): string {
     return this._directParameterPlanError || "";
+  }
+
+  private startSemanticParameterPlan(parsed: {
+    plan: any;
+    timing: DirectParameterPlanState["timing"];
+    reason: string;
+  }): boolean {
+    const semanticBindings: DirectSemanticParameterBinding[] = [];
+    const seenParameterIndices = new Set<number>();
+
+    for (const item of parsed.plan.parameters) {
+      const parameterIdRaw = String(item.parameter_id || "").trim();
+      const axisId = String(item.axis_id || "").trim();
+      const resolved = this.resolveWritableParameter(parameterIdRaw);
+      if (!resolved) {
+        this.stopDirectParameterPlan(`v2_missing_parameter:${parameterIdRaw}`);
+        return false;
+      }
+      if (seenParameterIndices.has(resolved.parameterIndex)) {
+        this.stopDirectParameterPlan(`v2_duplicate_parameter:${parameterIdRaw}`);
+        return false;
+      }
+      if (!this.isParameterIndexWritable(resolved.parameterIndex)) {
+        this.stopDirectParameterPlan(`v2_parameter_not_writable:${parameterIdRaw}`);
+        return false;
+      }
+      const minValue = this._model.getParameterMinimumValue(resolved.parameterIndex);
+      const maxValue = this._model.getParameterMaximumValue(resolved.parameterIndex);
+      const targetValue = Number(item.target_value);
+      const clampedTargetValue = Math.max(minValue, Math.min(maxValue, targetValue));
+      if (clampedTargetValue !== targetValue) {
+        console.warn(`[LAppModel] v2 target clamped axis=${axisId} param=${parameterIdRaw} target=${targetValue} min=${minValue} max=${maxValue} clamped=${clampedTargetValue}`);
+      }
+      seenParameterIndices.add(resolved.parameterIndex);
+      semanticBindings.push({
+        axisId,
+        parameterIdRaw,
+        targetValue: clampedTargetValue,
+        weight: Number(item.weight),
+        inputValue: Number.isFinite(Number(item.input_value)) ? Number(item.input_value) : null,
+        source: String(item.source || "semantic_axis"),
+        parameterId: resolved.parameterId,
+        parameterIndex: resolved.parameterIndex,
+      });
+    }
+
+    if (semanticBindings.length === 0) {
+      this.stopDirectParameterPlan("v2_parameters_empty");
+      return false;
+    }
+
+    console.info("[LAppModel] Semantic parameter bindings ready. Activating v2 plan.", {
+      parameterCount: semanticBindings.length,
+      profileId: parsed.plan.profile_id,
+      profileRevision: parsed.plan.profile_revision,
+    });
+    this._directParameterPlanState = {
+      mode: parsed.plan.mode,
+      emotionLabel: parsed.plan.emotion_label,
+      timing: parsed.timing,
+      axisBindings: [],
+      supplementaryBindings: [],
+      semanticBindings,
+      usesCalibration: false,
+      usesBindingProfile: true,
+      startedAtMs: performance.now(),
+      diagnosticFrameCount: 0,
+    };
+    this._directParameterPlanError = "";
+    return true;
   }
 
   public async loadWavFileForLipSync(url: string): Promise<boolean> {
@@ -1622,7 +1713,35 @@ export class LAppModel extends CubismUserModel {
     const easing = this.resolvePlanEasing(elapsedMs, planState.timing);
     const shouldLogFrame = planState.diagnosticFrameCount < 2;
     if (shouldLogFrame) {
-      console.info(`[LAppModel] applyDirectParameterPlanOverlay: mode=${planState.mode}, emotion=${planState.emotionLabel}, totalMs=${planState.timing.totalMs}, blendIn=${planState.timing.blendInMs}, hold=${planState.timing.holdMs}, blendOut=${planState.timing.blendOutMs}, axisCount=${planState.axisBindings.length}, suppCount=${planState.supplementaryBindings.length}, calibrated=${planState.usesCalibration}, bindingProfile=${planState.usesBindingProfile}`);
+      console.info(`[LAppModel] applyDirectParameterPlanOverlay: mode=${planState.mode}, emotion=${planState.emotionLabel}, totalMs=${planState.timing.totalMs}, blendIn=${planState.timing.blendInMs}, hold=${planState.timing.holdMs}, blendOut=${planState.timing.blendOutMs}, axisCount=${planState.axisBindings.length}, semanticCount=${planState.semanticBindings.length}, suppCount=${planState.supplementaryBindings.length}, calibrated=${planState.usesCalibration}, bindingProfile=${planState.usesBindingProfile}`);
+    }
+
+    for (const item of planState.semanticBindings) {
+      if (!this.isParameterIndexWritable(item.parameterIndex)) {
+        console.warn(`[LAppModel] applyDirectParameterPlanOverlay: v2 parameter not writable axis=${item.axisId} param=${item.parameterIdRaw} idx=${item.parameterIndex}`);
+        return `v2_parameter_not_writable:${item.parameterIdRaw}`;
+      }
+
+      const minValue = this._model.getParameterMinimumValue(item.parameterIndex);
+      const maxValue = this._model.getParameterMaximumValue(item.parameterIndex);
+      const effectiveTargetValue = Math.max(minValue, Math.min(maxValue, item.targetValue));
+      if (effectiveTargetValue !== item.targetValue) {
+        console.warn(`[LAppModel] applyDirectParameterPlanOverlay: v2 target clamped axis=${item.axisId} param=${item.parameterIdRaw} target=${item.targetValue} min=${minValue} max=${maxValue} clamped=${effectiveTargetValue}`);
+      }
+
+      const baseValue = this._model.getParameterValueByIndex(item.parameterIndex);
+      const blendedValue = baseValue + (effectiveTargetValue - baseValue) * easing * item.weight;
+      this._model.setParameterValueById(item.parameterId, blendedValue);
+      const readbackValue = this._model.getParameterValueByIndex(item.parameterIndex);
+      if (Math.abs(readbackValue - blendedValue) > 0.001) {
+        console.warn(
+          `[LAppModel] v2 setParam readback mismatch axis=${item.axisId} param=${item.parameterIdRaw} wrote=${blendedValue} readback=${readbackValue}`,
+        );
+        return `v2_parameter_write_mismatch:${item.parameterIdRaw}`;
+      }
+      if (shouldLogFrame) {
+        console.info(`[LAppModel] v2 setParam axis=${item.axisId} param=${item.parameterIdRaw} input=${item.inputValue} base=${baseValue} target=${item.targetValue} weight=${item.weight} eased=${blendedValue} readback=${readbackValue} easing=${easing}`);
+      }
     }
 
     for (const axis of planState.axisBindings) {
@@ -2320,26 +2439,7 @@ export class LAppModel extends CubismUserModel {
   }
 
   private parseDirectParameterPlan(plan: unknown): {
-    plan: {
-      mode: "expressive" | "idle";
-      emotion_label: string;
-      timing: {
-        duration_ms: number;
-        blend_in_ms: number;
-        hold_ms: number;
-        blend_out_ms: number;
-      };
-      key_axes: Record<string, { value: number }>;
-      supplementary_params: Array<{
-        parameter_id: string;
-        target_value: number;
-        weight: number;
-        source_atom_id: string;
-        channel: string;
-      }>;
-      calibration_profile: DirectParameterCalibrationProfile | null;
-      model_calibration_profile: DirectParameterCalibrationProfile | null;
-    } | null;
+    plan: any | null;
     timing: DirectParameterPlanState["timing"];
     reason: string;
   } {
@@ -2362,7 +2462,7 @@ export class LAppModel extends CubismUserModel {
 
     const payload = plan as Record<string, any>;
     const schemaVersion = String(payload.schema_version || "").trim();
-    if (schemaVersion !== "engine.parameter_plan.v1") {
+    if (schemaVersion !== "engine.parameter_plan.v1" && schemaVersion !== "engine.parameter_plan.v2") {
       console.warn("[LAppModel] parseDirectParameterPlan: invalid_schema_version — got:", schemaVersion);
       return fail("invalid_schema_version");
     }
@@ -2382,12 +2482,16 @@ export class LAppModel extends CubismUserModel {
     if (!timingPayload || typeof timingPayload !== "object") {
       return fail("timing_not_object");
     }
-    const durationMs = Number(timingPayload.duration_ms);
-    const blendInMs = Number(timingPayload.blend_in_ms);
-    const holdMs = Number(timingPayload.hold_ms);
-    const blendOutMs = Number(timingPayload.blend_out_ms);
+    const durationMs = timingPayload.duration_ms;
+    const blendInMs = timingPayload.blend_in_ms;
+    const holdMs = timingPayload.hold_ms;
+    const blendOutMs = timingPayload.blend_out_ms;
     if (
-      !Number.isFinite(durationMs)
+      typeof durationMs !== "number"
+      || typeof blendInMs !== "number"
+      || typeof holdMs !== "number"
+      || typeof blendOutMs !== "number"
+      || !Number.isFinite(durationMs)
       || !Number.isFinite(blendInMs)
       || !Number.isFinite(holdMs)
       || !Number.isFinite(blendOutMs)
@@ -2396,6 +2500,106 @@ export class LAppModel extends CubismUserModel {
     }
     if (durationMs < 0 || blendInMs < 0 || holdMs < 0 || blendOutMs < 0) {
       return fail("timing_negative");
+    }
+
+    const timing = {
+      durationMs: Math.round(durationMs),
+      blendInMs: Math.round(blendInMs),
+      holdMs: Math.round(holdMs),
+      blendOutMs: Math.round(blendOutMs),
+      totalMs: Math.max(
+        Math.round(durationMs),
+        Math.round(blendInMs + holdMs + blendOutMs),
+      ),
+    };
+
+    if (schemaVersion === "engine.parameter_plan.v2") {
+      const profileId = String(payload.profile_id || "").trim();
+      const modelId = String(payload.model_id || "").trim();
+      const profileRevision = payload.profile_revision;
+      if (!profileId || !modelId) {
+        return fail("v2_profile_ref_empty");
+      }
+      if (typeof profileRevision !== "number" || !Number.isInteger(profileRevision) || profileRevision <= 0) {
+        return fail("v2_profile_revision_invalid");
+      }
+
+      const parametersPayload = payload.parameters;
+      if (!Array.isArray(parametersPayload) || parametersPayload.length === 0) {
+        return fail("v2_parameters_empty");
+      }
+
+      const parameterIds = new Set<string>();
+      const parameters: Array<{
+        axis_id: string;
+        parameter_id: string;
+        target_value: number;
+        weight: number;
+        input_value: number | null;
+        source: string;
+      }> = [];
+      for (const item of parametersPayload) {
+        if (!item || typeof item !== "object") {
+          return fail("v2_parameter_item_not_object");
+        }
+        const axisId = String(item.axis_id || "").trim();
+        const parameterId = String(item.parameter_id || "").trim();
+        const targetValue = item.target_value;
+        const weight = item.weight;
+        const inputValue = item.input_value === undefined || item.input_value === null
+          ? null
+          : item.input_value;
+        if (!axisId || !parameterId) {
+          return fail("v2_parameter_required_field_missing");
+        }
+        if (parameterIds.has(parameterId)) {
+          return fail(`v2_duplicate_parameter:${parameterId}`);
+        }
+        if (typeof targetValue !== "number" || typeof weight !== "number" || !Number.isFinite(targetValue) || !Number.isFinite(weight)) {
+          return fail("v2_parameter_not_number");
+        }
+        if (inputValue !== null && (typeof inputValue !== "number" || !Number.isFinite(inputValue))) {
+          return fail("v2_parameter_input_value_not_number");
+        }
+        if (weight < 0 || weight > 1) {
+          return fail("v2_parameter_weight_out_of_range");
+        }
+        const source = item.source === undefined || item.source === null
+          ? "semantic_axis"
+          : String(item.source || "").trim();
+        if (source !== "semantic_axis" && source !== "coupling" && source !== "manual") {
+          return fail("v2_parameter_source_invalid");
+        }
+        parameterIds.add(parameterId);
+        parameters.push({
+          axis_id: axisId,
+          parameter_id: parameterId,
+          target_value: targetValue,
+          weight,
+          input_value: inputValue,
+          source,
+        });
+      }
+
+      return {
+        plan: {
+          schema_version: "engine.parameter_plan.v2",
+          profile_id: profileId,
+          profile_revision: profileRevision,
+          model_id: modelId,
+          mode,
+          emotion_label: emotionLabel,
+          timing: {
+            duration_ms: timing.durationMs,
+            blend_in_ms: timing.blendInMs,
+            hold_ms: timing.holdMs,
+            blend_out_ms: timing.blendOutMs,
+          },
+          parameters,
+        },
+        timing,
+        reason: "",
+      };
     }
 
     const keyAxesPayload = payload.key_axes;
@@ -2466,19 +2670,9 @@ export class LAppModel extends CubismUserModel {
       payload.model_calibration_profile,
     );
 
-    const timing = {
-      durationMs: Math.round(durationMs),
-      blendInMs: Math.round(blendInMs),
-      holdMs: Math.round(holdMs),
-      blendOutMs: Math.round(blendOutMs),
-      totalMs: Math.max(
-        Math.round(durationMs),
-        Math.round(blendInMs + holdMs + blendOutMs),
-      ),
-    };
-
     return {
       plan: {
+        schema_version: "engine.parameter_plan.v1",
         mode,
         emotion_label: emotionLabel,
         timing: {

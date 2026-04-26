@@ -163,10 +163,20 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
         return
 
     if message_type == TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE:
+        request_id = payload.get("request_id")
+        if not isinstance(request_id, str) or not request_id.strip():
+            raise ProtocolError(
+                "`system.semantic_axis_profile_save` requires `payload.request_id` to be a non-empty string."
+            )
         model_name = payload.get("model_name")
         if not isinstance(model_name, str) or not model_name.strip():
             raise ProtocolError(
                 "`system.semantic_axis_profile_save` requires `payload.model_name` to be a non-empty string."
+            )
+        profile_id = payload.get("profile_id")
+        if not isinstance(profile_id, str) or not profile_id.strip():
+            raise ProtocolError(
+                "`system.semantic_axis_profile_save` requires `payload.profile_id` to be a non-empty string."
             )
         expected_revision = payload.get("expected_revision")
         if not isinstance(expected_revision, int) or expected_revision <= 0:

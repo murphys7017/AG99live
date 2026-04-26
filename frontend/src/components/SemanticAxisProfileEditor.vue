@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
-import type { DesktopHistoryEntry } from "../types/desktop";
 import type {
   SemanticAxisControlRole,
   SemanticAxisCoupling,
@@ -41,10 +40,10 @@ const isDirty = ref(false);
 const hasExternalRevisionConflict = ref(false);
 const saveStatusText = ref("");
 const pendingSave = ref<{
+  requestId: string;
   expectedRevision: number;
   modelId: string;
   profileId: string;
-  requestedAtMs: number;
 } | null>(null);
 
 const currentProfile = computed(
@@ -53,7 +52,9 @@ const currentProfile = computed(
 const selectedModelName = computed(() =>
   bridge.state.snapshot.selectedModelName.trim(),
 );
-const historyEntries = computed(() => bridge.state.snapshot.historyEntries);
+const latestSaveResult = computed(() =>
+  bridge.state.snapshot.latestSemanticAxisProfileSaveResult,
+);
 const draftAxes = computed(() => draftProfile.value?.axes ?? []);
 const draftCouplings = computed(() => draftProfile.value?.couplings ?? []);
 const filteredAxes = computed(() => {
@@ -141,21 +142,6 @@ watch(
 watch(
   currentProfile,
   (nextProfile) => {
-    const pending = pendingSave.value;
-    const saveJustConfirmed = Boolean(
-      pending
-        && nextProfile
-        && nextProfile.model_id === pending.modelId
-        && nextProfile.profile_id === pending.profileId
-        && nextProfile.revision > pending.expectedRevision,
-    );
-    if (
-      saveJustConfirmed
-    ) {
-      saveStatusText.value = `保存成功，已同步到 revision ${nextProfile?.revision}。`;
-      pendingSave.value = null;
-    }
-
     if (!nextProfile) {
       draftProfile.value = null;
       draftBaseRevision.value = null;
@@ -170,7 +156,6 @@ watch(
     if (
       draftProfile.value
       && isDirty.value
-      && !saveJustConfirmed
       && draftProfile.value.model_id === nextProfile.model_id
       && draftBaseRevision.value !== nextProfile.revision
     ) {
@@ -199,19 +184,22 @@ watch(
   { immediate: true },
 );
 
-watch(historyEntries, (entries) => {
+watch(latestSaveResult, (result) => {
   const pending = pendingSave.value;
-  if (!pending || !entries.length) {
+  if (!pending || !result || result.requestId !== pending.requestId) {
     return;
   }
 
-  const latestEntry = entries[entries.length - 1];
-  if (!isEntryAfter(latestEntry, pending.requestedAtMs)) {
+  if (result.ok) {
+    saveStatusText.value = `保存成功，已同步到 revision ${result.revision ?? pending.expectedRevision + 1}。`;
+    pendingSave.value = null;
+    isDirty.value = false;
+    hasExternalRevisionConflict.value = false;
     return;
   }
 
-  if (latestEntry.role === "error") {
-    saveStatusText.value = `保存失败：${latestEntry.text}`;
+  if (!result.ok) {
+    saveStatusText.value = `保存失败（${result.errorCode || "unknown"}）：${result.message || "后端拒绝保存请求。"}`;
     pendingSave.value = null;
   }
 });
@@ -525,16 +513,19 @@ function saveProfile(): void {
     return;
   }
 
+  const requestId = createStableId("semantic_profile_save");
   pendingSave.value = {
+    requestId,
     expectedRevision,
     modelId: profile.model_id,
     profileId: profile.profile_id,
-    requestedAtMs: Date.now(),
   };
   saveStatusText.value = `已提交保存请求，等待 revision ${expectedRevision + 1} 的同步结果。`;
   bridge.sendCommand({
     type: "save_semantic_axis_profile",
+    requestId,
     modelName,
+    profileId: profile.profile_id,
     expectedRevision,
     profile: cloneSemanticAxisProfile(profile),
   });
@@ -546,11 +537,6 @@ function formatRange(range: [number, number]): string {
 
 function formatBindingTitle(axis: SemanticAxisDefinition): string {
   return `${axis.parameter_bindings.length} bindings`;
-}
-
-function isEntryAfter(entry: DesktopHistoryEntry, timestampMs: number): boolean {
-  const entryTime = Date.parse(entry.timestamp);
-  return Number.isFinite(entryTime) ? entryTime >= timestampMs : true;
 }
 
 function cloneSemanticAxisProfile(profile: unknown): SemanticAxisProfile {

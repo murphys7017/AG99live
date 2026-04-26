@@ -3,8 +3,14 @@ import type {
   DirectParameterPlan,
   DirectParameterPlanSupplementaryParam,
   DirectParameterPlanTiming,
+  SemanticMotionIntent,
+  SemanticParameterPlan,
 } from "../types/protocol";
-import { DIRECT_PARAMETER_AXIS_NAMES } from "./constants";
+import {
+  DIRECT_PARAMETER_AXIS_NAMES,
+  MAX_MOTION_DURATION_MS,
+  MIN_MOTION_DURATION_MS,
+} from "./constants";
 import type { MotionIntent, NormalizedMotionPayload } from "./contracts";
 
 interface ParseFailure {
@@ -67,6 +73,27 @@ function normalizeKeyAxes(
   }
 
   return keyAxes;
+}
+
+function normalizeDynamicAxes(value: unknown): Record<string, { value: number }> | null {
+  if (!isObject(value)) {
+    return null;
+  }
+
+  const axes: Record<string, { value: number }> = {};
+  for (const [axisId, axisPayload] of Object.entries(value)) {
+    const normalizedAxisId = normalizeText(axisId);
+    if (!normalizedAxisId || !isObject(axisPayload) || !("value" in axisPayload)) {
+      return null;
+    }
+    const axisValue = axisPayload.value;
+    if (!isFiniteNumber(axisValue)) {
+      return null;
+    }
+    axes[normalizedAxisId] = { value: axisValue };
+  }
+
+  return Object.keys(axes).length > 0 ? axes : null;
 }
 
 function normalizeTiming(value: unknown): DirectParameterPlanTiming | null {
@@ -196,6 +223,80 @@ function parseMotionIntent(value: unknown): ParseResult<MotionIntent> {
   };
 }
 
+function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIntent> {
+  if (!isObject(value)) {
+    return { ok: false, reason: "motion_intent_v2_not_object" };
+  }
+
+  if (normalizeText(value.schema_version) !== "engine.motion_intent.v2") {
+    return { ok: false, reason: "motion_intent_v2.invalid_schema_version" };
+  }
+
+  const profileId = normalizeText(value.profile_id);
+  const modelId = normalizeText(value.model_id);
+  const profileRevision = value.profile_revision;
+  if (!profileId) {
+    return { ok: false, reason: "motion_intent_v2.profile_id_empty" };
+  }
+  if (!modelId) {
+    return { ok: false, reason: "motion_intent_v2.model_id_empty" };
+  }
+  if (!isFiniteNumber(profileRevision) || profileRevision <= 0) {
+    return { ok: false, reason: "motion_intent_v2.profile_revision_invalid" };
+  }
+
+  const modeRaw = normalizeText(value.mode).toLowerCase();
+  if (modeRaw !== "idle" && modeRaw !== "expressive") {
+    return { ok: false, reason: "motion_intent_v2.invalid_mode" };
+  }
+
+  const axes = normalizeDynamicAxes(value.axes);
+  if (!axes) {
+    return { ok: false, reason: "motion_intent_v2.invalid_axes" };
+  }
+
+  const emotionLabel = normalizeText(value.emotion_label);
+  if (!emotionLabel) {
+    return { ok: false, reason: "motion_intent_v2.emotion_label_empty" };
+  }
+
+  const durationHintRaw = value.duration_hint_ms;
+  let durationHintMs: number | null = null;
+  if (durationHintRaw !== undefined && durationHintRaw !== null) {
+    if (!isFiniteNumber(durationHintRaw)) {
+      return { ok: false, reason: "motion_intent_v2.duration_hint_ms_not_number" };
+    }
+    if (durationHintRaw < 0) {
+      return { ok: false, reason: "motion_intent_v2.duration_hint_ms_negative" };
+    }
+    durationHintMs = Math.round(durationHintRaw);
+    if (durationHintMs < MIN_MOTION_DURATION_MS || durationHintMs > MAX_MOTION_DURATION_MS) {
+      return { ok: false, reason: "motion_intent_v2.duration_hint_ms_out_of_range" };
+    }
+  }
+
+  return {
+    ok: true,
+    value: {
+      schema_version: "engine.motion_intent.v2",
+      profile_id: profileId,
+      profile_revision: Math.round(profileRevision),
+      model_id: modelId,
+      mode: modeRaw,
+      emotion_label: emotionLabel,
+      duration_hint_ms: durationHintMs,
+      axes,
+      summary: isObject(value.summary)
+        ? {
+          axis_count: isFiniteNumber(value.summary.axis_count)
+            ? Math.round(value.summary.axis_count)
+            : undefined,
+        }
+        : undefined,
+    },
+  };
+}
+
 function parseDirectParameterPlan(value: unknown): ParseResult<DirectParameterPlan> {
   if (!isObject(value)) {
     return { ok: false, reason: "parameter_plan_not_object" };
@@ -254,6 +355,121 @@ function parseDirectParameterPlan(value: unknown): ParseResult<DirectParameterPl
   };
 }
 
+function parseSemanticParameterPlan(value: unknown): ParseResult<SemanticParameterPlan> {
+  if (!isObject(value)) {
+    return { ok: false, reason: "parameter_plan_v2_not_object" };
+  }
+
+  if (normalizeText(value.schema_version) !== "engine.parameter_plan.v2") {
+    return { ok: false, reason: "parameter_plan_v2.invalid_schema_version" };
+  }
+
+  const profileId = normalizeText(value.profile_id);
+  const modelId = normalizeText(value.model_id);
+  const profileRevision = value.profile_revision;
+  if (!profileId || !modelId || !isFiniteNumber(profileRevision) || profileRevision <= 0) {
+    return { ok: false, reason: "parameter_plan_v2.invalid_profile_ref" };
+  }
+
+  const modeRaw = normalizeText(value.mode).toLowerCase();
+  if (modeRaw !== "idle" && modeRaw !== "expressive") {
+    return { ok: false, reason: "parameter_plan_v2.invalid_mode" };
+  }
+
+  const timing = normalizeTiming(value.timing);
+  if (!timing) {
+    return { ok: false, reason: "parameter_plan_v2.invalid_timing" };
+  }
+
+  const parametersRaw = value.parameters;
+  if (!Array.isArray(parametersRaw) || parametersRaw.length === 0) {
+    return { ok: false, reason: "parameter_plan_v2.parameters_empty" };
+  }
+
+  const parameterIds = new Set<string>();
+  const parameters: SemanticParameterPlan["parameters"] = [];
+  for (const item of parametersRaw) {
+    if (!isObject(item)) {
+      return { ok: false, reason: "parameter_plan_v2.parameter_not_object" };
+    }
+    const axisId = normalizeText(item.axis_id);
+    const parameterId = normalizeText(item.parameter_id);
+    const targetValue = item.target_value;
+    const weight = item.weight;
+    const inputValue = item.input_value;
+    if (!axisId || !parameterId) {
+      return { ok: false, reason: "parameter_plan_v2.parameter_id_empty" };
+    }
+    if (parameterIds.has(parameterId)) {
+      return { ok: false, reason: `parameter_plan_v2.duplicate_parameter:${parameterId}` };
+    }
+    if (!isFiniteNumber(targetValue) || !isFiniteNumber(weight)) {
+      return { ok: false, reason: "parameter_plan_v2.parameter_not_number" };
+    }
+    if (weight < 0 || weight > 1) {
+      return { ok: false, reason: "parameter_plan_v2.weight_out_of_range" };
+    }
+    if (inputValue !== undefined && !isFiniteNumber(inputValue)) {
+      return { ok: false, reason: "parameter_plan_v2.input_value_not_number" };
+    }
+    parameterIds.add(parameterId);
+    let source: SemanticParameterPlan["parameters"][number]["source"] | undefined;
+    if (item.source !== undefined) {
+      if (item.source !== "semantic_axis" && item.source !== "coupling" && item.source !== "manual") {
+        return { ok: false, reason: "parameter_plan_v2.invalid_parameter_source" };
+      }
+      source = item.source;
+    }
+    parameters.push({
+      axis_id: axisId,
+      parameter_id: parameterId,
+      target_value: targetValue,
+      weight,
+      input_value: isFiniteNumber(inputValue) ? inputValue : undefined,
+      source,
+    });
+  }
+
+  const emotionLabel = normalizeText(value.emotion_label);
+  if (!emotionLabel) {
+    return { ok: false, reason: "parameter_plan_v2.emotion_label_empty" };
+  }
+
+  return {
+    ok: true,
+    value: {
+      schema_version: "engine.parameter_plan.v2",
+      profile_id: profileId,
+      profile_revision: Math.round(profileRevision),
+      model_id: modelId,
+      mode: modeRaw,
+      emotion_label: emotionLabel,
+      timing,
+      parameters,
+      diagnostics: isObject(value.diagnostics)
+        ? {
+          warnings: Array.isArray(value.diagnostics.warnings)
+            ? value.diagnostics.warnings.map((item) => normalizeText(item)).filter(Boolean)
+            : undefined,
+        }
+        : undefined,
+      summary: isObject(value.summary)
+        ? {
+          axis_count: isFiniteNumber(value.summary.axis_count)
+            ? Math.round(value.summary.axis_count)
+            : undefined,
+          parameter_count: isFiniteNumber(value.summary.parameter_count)
+            ? Math.round(value.summary.parameter_count)
+            : undefined,
+          target_duration_ms: isFiniteNumber(value.summary.target_duration_ms)
+            ? Math.round(value.summary.target_duration_ms)
+            : undefined,
+        }
+        : undefined,
+    },
+  };
+}
+
 export function normalizeMotionPayload(
   value: unknown,
 ):
@@ -274,6 +490,15 @@ export function normalizeMotionPayload(
     return { ok: true, payload: { kind: "intent", intent: intent.value } };
   }
 
+  if (schemaVersion === "engine.motion_intent.v2") {
+    const intent = parseSemanticMotionIntent(value);
+    if (!intent.ok) {
+      warnNormalizeFailure(intent.reason, value);
+      return { ok: false, reason: intent.reason };
+    }
+    return { ok: true, payload: { kind: "semantic_intent", intent: intent.value } };
+  }
+
   if (schemaVersion === "engine.parameter_plan.v1") {
     const plan = parseDirectParameterPlan(value);
     if (!plan.ok) {
@@ -281,6 +506,15 @@ export function normalizeMotionPayload(
       return { ok: false, reason: plan.reason };
     }
     return { ok: true, payload: { kind: "plan", plan: plan.value } };
+  }
+
+  if (schemaVersion === "engine.parameter_plan.v2") {
+    const plan = parseSemanticParameterPlan(value);
+    if (!plan.ok) {
+      warnNormalizeFailure(plan.reason, value);
+      return { ok: false, reason: plan.reason };
+    }
+    return { ok: true, payload: { kind: "semantic_plan", plan: plan.value } };
   }
 
   warnNormalizeFailure(

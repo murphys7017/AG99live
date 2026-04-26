@@ -24,10 +24,15 @@ const editedAxes = reactive<Record<DirectParameterAxisName, number>>(
 );
 
 const playbackRecords = computed(() => bridge.state.snapshot.motionPlaybackRecords);
+const v1PlaybackRecords = computed(() =>
+  playbackRecords.value.filter((record): record is DesktopMotionPlaybackRecord & { plan: DirectParameterPlan } =>
+    record.plan.schema_version === "engine.parameter_plan.v1",
+  ),
+);
 const tuningSamples = computed(() => bridge.state.snapshot.motionTuningSamples);
 const selectedRecord = computed(() =>
-  playbackRecords.value.find((record) => record.id === selectedRecordId.value)
-  ?? playbackRecords.value[0]
+  v1PlaybackRecords.value.find((record) => record.id === selectedRecordId.value)
+  ?? v1PlaybackRecords.value[0]
   ?? null
 );
 const selectedRecordPlanText = computed(() =>
@@ -64,13 +69,13 @@ const axisRows = computed(() =>
 watch(
   () => playbackRecords.value.map((record) => record.id).join("|"),
   () => {
-    if (!playbackRecords.value.length) {
+    if (!v1PlaybackRecords.value.length) {
       selectedRecordId.value = "";
       resetEditedAxesToCenter();
       return;
     }
-    if (!playbackRecords.value.some((record) => record.id === selectedRecordId.value)) {
-      selectedRecordId.value = playbackRecords.value[0].id;
+    if (!v1PlaybackRecords.value.some((record) => record.id === selectedRecordId.value)) {
+      selectedRecordId.value = v1PlaybackRecords.value[0].id;
     }
   },
   { immediate: true },
@@ -276,11 +281,11 @@ function cloneJson<TValue>(value: TValue): TValue {
       </span>
     </div>
 
-    <template v-if="playbackRecords.length">
+    <template v-if="v1PlaybackRecords.length">
       <div class="motion-tuning__layout">
         <aside class="motion-tuning__records">
           <button
-            v-for="record in playbackRecords"
+            v-for="record in v1PlaybackRecords"
             :key="record.id"
             type="button"
             class="motion-tuning__record"
@@ -439,6 +444,11 @@ function cloneJson<TValue>(value: TValue): TValue {
         <p v-else class="settings-card__hint">还没有保存调参样本。</p>
       </section>
     </template>
+
+    <p v-else-if="playbackRecords.length" class="history-empty">
+      当前最近播放记录已切换为动态主轴 `engine.parameter_plan.v2`。这个调参面板只编辑旧版
+      12 轴 v1 记录；动态主轴请在语义主轴编辑器中调参和保存。
+    </p>
 
     <p v-else class="history-empty">
       暂无播放记录。先完成一次对话动作或在 Action Lab 中播放一次测试 plan。

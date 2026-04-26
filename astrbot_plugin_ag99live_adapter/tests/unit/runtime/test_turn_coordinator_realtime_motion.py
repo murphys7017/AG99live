@@ -84,6 +84,62 @@ def _build_valid_motion_intent(mode: str = "expressive") -> dict:
     }
 
 
+def _build_semantic_model_info() -> dict:
+    return {
+        "selected_model": "pet",
+        "models": [
+            {
+                "name": "pet",
+                "semantic_axis_profile": {
+                    "schema_version": "ag99.semantic_axis_profile.v1",
+                    "profile_id": "pet.semantic.v1",
+                    "model_id": "pet",
+                    "source_hash": "hash",
+                    "last_scanned_hash": "hash",
+                    "revision": 2,
+                    "status": "user_modified",
+                    "user_modified": True,
+                    "generated_at": "2026-04-26T00:00:00+00:00",
+                    "updated_at": "2026-04-26T00:00:00+00:00",
+                    "axes": [
+                        {
+                            "id": "head_yaw",
+                            "label": "Head Yaw",
+                            "description": "turn head left/right",
+                            "semantic_group": "head",
+                            "control_role": "primary",
+                            "neutral": 50,
+                            "value_range": [0, 100],
+                            "soft_range": [42, 58],
+                            "strong_range": [30, 70],
+                            "positive_semantics": ["turn right"],
+                            "negative_semantics": ["turn left"],
+                            "usage_notes": "Use for attention direction.",
+                            "parameter_bindings": [],
+                        },
+                        {
+                            "id": "debug_tail",
+                            "label": "Tail",
+                            "description": "debug only",
+                            "semantic_group": "debug",
+                            "control_role": "debug",
+                            "neutral": 50,
+                            "value_range": [0, 100],
+                            "soft_range": [45, 55],
+                            "strong_range": [35, 65],
+                            "positive_semantics": ["up"],
+                            "negative_semantics": ["down"],
+                            "usage_notes": "Do not expose.",
+                            "parameter_bindings": [],
+                        },
+                    ],
+                    "couplings": [],
+                },
+            }
+        ],
+    }
+
+
 def _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
     install_fake_astrbot()
 
@@ -273,7 +329,7 @@ def test_build_model_visible_user_text_appends_inline_contract(
         (),
         {
             "enable_inline_motion_contract": True,
-            "model_info": {"selected_model": "pet"},
+            "model_info": _build_semantic_model_info(),
             "motion_prompt_instruction": "Use readable exaggerated head and smile motion.",
         },
     )()
@@ -289,7 +345,9 @@ def test_build_model_visible_user_text_appends_inline_contract(
     assert "Use readable exaggerated head and smile motion." in prompt_text
     assert "Current Live2D model: pet." in prompt_text
     assert "<@anim {" in prompt_text
-    assert '"schema_version":"engine.motion_intent.v1"' in prompt_text
+    assert '"schema_version":"engine.motion_intent.v2"' in prompt_text
+    assert '"profile_id":"pet.semantic.v1"' in prompt_text
+    assert "debug_tail" not in prompt_text
 
 
 def test_build_model_visible_user_text_skips_inline_contract_when_disabled(
@@ -304,7 +362,7 @@ def test_build_model_visible_user_text_skips_inline_contract_when_disabled(
         (),
         {
             "enable_inline_motion_contract": False,
-            "model_info": {"selected_model": "pet"},
+            "model_info": _build_semantic_model_info(),
         },
     )()
 
@@ -332,7 +390,7 @@ def test_apply_inline_motion_contract_mutates_event_message_only(
         (),
         {
             "enable_inline_motion_contract": True,
-            "model_info": {"selected_model": "pet"},
+            "model_info": _build_semantic_model_info(),
             "motion_prompt_instruction": "Use readable exaggerated head and smile motion.",
         },
     )()

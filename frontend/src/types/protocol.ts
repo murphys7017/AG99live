@@ -52,6 +52,24 @@ export interface ControlErrorPayload {
   message: string;
 }
 
+export interface SystemSemanticAxisProfileSavedPayload {
+  request_id: string;
+  model_name: string;
+  profile_id: string;
+  revision: number;
+  source_hash: string;
+  saved_at: string;
+}
+
+export interface SystemSemanticAxisProfileSaveFailedPayload {
+  request_id: string;
+  model_name: string;
+  profile_id: string;
+  expected_revision?: number;
+  error_code: string;
+  message: string;
+}
+
 export interface StandardChannelInfo {
   label: string;
   available: boolean;
@@ -543,6 +561,24 @@ export interface MotionIntent {
   };
 }
 
+export interface SemanticMotionIntentAxisValue {
+  value: number;
+}
+
+export interface SemanticMotionIntent {
+  schema_version: "engine.motion_intent.v2";
+  profile_id: string;
+  profile_revision: number;
+  model_id: string;
+  mode: "expressive" | "idle";
+  emotion_label: string;
+  duration_hint_ms?: number | null;
+  axes: Record<string, SemanticMotionIntentAxisValue>;
+  summary?: {
+    axis_count?: number;
+  };
+}
+
 export interface DirectParameterPlanSupplementaryParam {
   parameter_id: string;
   target_value: number;
@@ -573,6 +609,37 @@ export interface DirectParameterPlan {
     target_duration_ms?: number;
   };
 }
+
+export interface SemanticParameterPlanEntry {
+  axis_id: string;
+  parameter_id: string;
+  target_value: number;
+  weight: number;
+  input_value?: number;
+  source?: "semantic_axis" | "coupling" | "manual";
+}
+
+export interface SemanticParameterPlan {
+  schema_version: "engine.parameter_plan.v2";
+  profile_id: string;
+  profile_revision: number;
+  model_id: string;
+  mode: "expressive" | "idle";
+  emotion_label: string;
+  timing: DirectParameterPlanTiming;
+  parameters: SemanticParameterPlanEntry[];
+  diagnostics?: {
+    warnings?: string[];
+  };
+  summary?: {
+    axis_count?: number;
+    parameter_count?: number;
+    target_duration_ms?: number;
+  };
+}
+
+export type MotionIntentPayload = MotionIntent | SemanticMotionIntent;
+export type MotionPlanPayload = DirectParameterPlan | SemanticParameterPlan;
 
 export interface ModelSummary {
   name: string;
@@ -618,7 +685,9 @@ export interface SystemModelSyncPayload {
 }
 
 export interface SystemSemanticAxisProfileSavePayload {
+  request_id: string;
   model_name: string;
+  profile_id: string;
   expected_revision: number;
   profile: SemanticAxisProfile;
 }

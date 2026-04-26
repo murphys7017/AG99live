@@ -4,7 +4,9 @@ import type {
   DirectParameterAxisName,
   DirectParameterCalibrationProfile,
   DirectParameterPlan,
+  MotionPlanPayload,
   ModelSummary,
+  SemanticParameterPlan,
 } from "../types/protocol";
 
 type PreviewPlayerStatus = "idle" | "playing" | "finished" | "failed";
@@ -25,14 +27,14 @@ const AXIS_NAMES = [
 ] as const satisfies readonly DirectParameterAxisName[];
 
 interface ParsedParameterPlan {
-  plan: DirectParameterPlan;
+  plan: MotionPlanPayload;
   totalDurationMs: number;
 }
 
 interface PlayPlanOptions {
   softHandoff?: boolean;
   targetDurationMs?: number | null;
-  onStarted?: (plan: DirectParameterPlan) => void;
+  onStarted?: (plan: MotionPlanPayload) => void;
 }
 
 const state = reactive({
@@ -190,7 +192,12 @@ function parseParameterPlan(plan: unknown): ParsedParameterPlan | null {
     return null;
   }
 
-  if (normalizeText(plan.schema_version) !== "engine.parameter_plan.v1") {
+  const schemaVersion = normalizeText(plan.schema_version);
+  if (schemaVersion === "engine.parameter_plan.v2") {
+    return parseSemanticParameterPlan(plan);
+  }
+
+  if (schemaVersion !== "engine.parameter_plan.v1") {
     return null;
   }
 
@@ -303,6 +310,135 @@ function parseParameterPlan(plan: unknown): ParsedParameterPlan | null {
   };
 }
 
+function parseSemanticParameterPlan(plan: Record<string, unknown>): ParsedParameterPlan | null {
+  const profileId = normalizeText(plan.profile_id);
+  const modelId = normalizeText(plan.model_id);
+  const profileRevision = plan.profile_revision;
+  if (!profileId || !modelId || !isFiniteNumber(profileRevision) || profileRevision <= 0) {
+    return null;
+  }
+
+  const modeRaw = normalizeText(plan.mode).toLowerCase();
+  if (modeRaw !== "expressive" && modeRaw !== "idle") {
+    return null;
+  }
+  const mode = modeRaw as SemanticParameterPlan["mode"];
+
+  const timingRaw = plan.timing;
+  if (!isObject(timingRaw)) {
+    return null;
+  }
+  const durationMs = timingRaw.duration_ms;
+  const blendInMs = timingRaw.blend_in_ms;
+  const holdMs = timingRaw.hold_ms;
+  const blendOutMs = timingRaw.blend_out_ms;
+  if (
+    !isFiniteNumber(durationMs)
+    || !isFiniteNumber(blendInMs)
+    || !isFiniteNumber(holdMs)
+    || !isFiniteNumber(blendOutMs)
+  ) {
+    return null;
+  }
+  if (durationMs < 0 || blendInMs < 0 || holdMs < 0 || blendOutMs < 0) {
+    return null;
+  }
+
+  const parametersRaw = plan.parameters;
+  if (!Array.isArray(parametersRaw) || parametersRaw.length === 0) {
+    return null;
+  }
+
+  const parameterIds = new Set<string>();
+  const parameters: SemanticParameterPlan["parameters"] = [];
+  for (const item of parametersRaw) {
+    if (!isObject(item)) {
+      return null;
+    }
+    const axisId = normalizeText(item.axis_id);
+    const parameterId = normalizeText(item.parameter_id);
+    const targetValue = item.target_value;
+    const weight = item.weight;
+    const inputValue = item.input_value;
+    if (!axisId || !parameterId || parameterIds.has(parameterId)) {
+      return null;
+    }
+    if (!isFiniteNumber(targetValue) || !isFiniteNumber(weight) || weight < 0 || weight > 1) {
+      return null;
+    }
+    if (inputValue !== undefined && !isFiniteNumber(inputValue)) {
+      return null;
+    }
+    parameterIds.add(parameterId);
+    let source: SemanticParameterPlan["parameters"][number]["source"] | undefined;
+    if (item.source !== undefined) {
+      if (item.source !== "semantic_axis" && item.source !== "coupling" && item.source !== "manual") {
+        return null;
+      }
+      source = item.source;
+    }
+    parameters.push({
+      axis_id: axisId,
+      parameter_id: parameterId,
+      target_value: targetValue,
+      weight,
+      input_value: isFiniteNumber(inputValue) ? inputValue : undefined,
+      source,
+    });
+  }
+
+  const emotionLabel = normalizeText(plan.emotion_label);
+  if (!emotionLabel) {
+    console.warn("[MotionPlayer] parseSemanticParameterPlan: emotion_label_empty");
+    return null;
+  }
+
+  const timing: SemanticParameterPlan["timing"] = {
+    duration_ms: Math.round(durationMs),
+    blend_in_ms: Math.round(blendInMs),
+    hold_ms: Math.round(holdMs),
+    blend_out_ms: Math.round(blendOutMs),
+  };
+  const totalDurationMs = Math.max(
+    timing.duration_ms,
+    timing.blend_in_ms + timing.hold_ms + timing.blend_out_ms,
+  );
+
+  return {
+    plan: {
+      schema_version: "engine.parameter_plan.v2",
+      profile_id: profileId,
+      profile_revision: Math.round(profileRevision),
+      model_id: modelId,
+      mode,
+      emotion_label: emotionLabel,
+      timing,
+      parameters,
+      diagnostics: isObject(plan.diagnostics)
+        ? {
+          warnings: Array.isArray(plan.diagnostics.warnings)
+            ? plan.diagnostics.warnings.map((item) => normalizeText(item)).filter(Boolean)
+            : undefined,
+        }
+        : undefined,
+      summary: isObject(plan.summary)
+        ? {
+          axis_count: isFiniteNumber(plan.summary.axis_count)
+            ? Math.round(plan.summary.axis_count)
+            : undefined,
+          parameter_count: isFiniteNumber(plan.summary.parameter_count)
+            ? Math.round(plan.summary.parameter_count)
+            : undefined,
+          target_duration_ms: isFiniteNumber(plan.summary.target_duration_ms)
+            ? Math.round(plan.summary.target_duration_ms)
+            : undefined,
+        }
+        : undefined,
+    },
+    totalDurationMs,
+  };
+}
+
 function retimePlanForPlayback(
   parsed: ParsedParameterPlan,
   targetDurationMs: number | null | undefined,
@@ -335,7 +471,7 @@ function retimePlanForPlayback(
     durationMs = blendInMs + holdMs + blendOutMs;
   }
 
-  const retimedPlan: DirectParameterPlan = {
+  const retimedPlan: MotionPlanPayload = {
     ...parsed.plan,
     timing: {
       duration_ms: durationMs,
@@ -364,7 +500,29 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function buildPlanSignature(plan: DirectParameterPlan): string {
+function buildPlanSignature(plan: MotionPlanPayload): string {
+  if (plan.schema_version === "engine.parameter_plan.v2") {
+    return stableStringify({
+      schema_version: plan.schema_version,
+      profile_id: plan.profile_id,
+      profile_revision: plan.profile_revision,
+      model_id: plan.model_id,
+      mode: plan.mode,
+      emotion_label: plan.emotion_label,
+      timing: plan.timing,
+      parameters: plan.parameters.map((item) => ({
+        axis_id: item.axis_id,
+        parameter_id: item.parameter_id,
+        target_value: Math.round(item.target_value * 10000) / 10000,
+        weight: Math.round(item.weight * 10000) / 10000,
+        input_value: item.input_value === undefined
+          ? undefined
+          : Math.round(item.input_value * 10000) / 10000,
+        source: item.source,
+      })).sort((left, right) => left.parameter_id.localeCompare(right.parameter_id)),
+    });
+  }
+
   const normalizedSupplementary = [...plan.supplementary_params]
     .map((item) => ({
       parameter_id: item.parameter_id,
@@ -442,7 +600,7 @@ function playPlan(
 
   const parsed = parseParameterPlan(plan);
   if (!parsed) {
-    const reason = "动作计划无效：仅支持 engine.parameter_plan.v1 且必须包含完整 12 轴。";
+    const reason = "动作计划无效：仅支持 engine.parameter_plan.v1 或 engine.parameter_plan.v2。";
     console.warn("[MotionPlayer] parse failed:", reason, "plan keys:", plan && typeof plan === "object" ? Object.keys(plan as object) : "N/A");
     state.status = "failed";
     state.message = reason;
@@ -455,10 +613,10 @@ function playPlan(
     playbackPlan.plan.mode,
     "emotion=",
     playbackPlan.plan.emotion_label,
-    "axes=",
-    AXIS_NAMES.length,
-    "supplementary=",
-    playbackPlan.plan.supplementary_params.length,
+    "parameters=",
+    playbackPlan.plan.schema_version === "engine.parameter_plan.v2"
+      ? playbackPlan.plan.parameters.length
+      : playbackPlan.plan.supplementary_params.length,
     "targetDurationMs=",
     options.targetDurationMs ?? "N/A",
     "resolvedDurationMs=",
@@ -467,18 +625,20 @@ function playPlan(
     Boolean(options.softHandoff),
   );
 
-  const planCalibration = normalizeCalibrationProfile(playbackPlan.plan.calibration_profile);
-  const modelCalibration = normalizeCalibrationProfile(model?.calibration_profile);
+  if (playbackPlan.plan.schema_version === "engine.parameter_plan.v1") {
+    const planCalibration = normalizeCalibrationProfile(playbackPlan.plan.calibration_profile);
+    const modelCalibration = normalizeCalibrationProfile(model?.calibration_profile);
 
-  if (planCalibration) {
-    playbackPlan.plan.calibration_profile = planCalibration;
-  } else {
-    delete playbackPlan.plan.calibration_profile;
-  }
-  if (modelCalibration) {
-    playbackPlan.plan.model_calibration_profile = modelCalibration;
-  } else {
-    delete playbackPlan.plan.model_calibration_profile;
+    if (planCalibration) {
+      playbackPlan.plan.calibration_profile = planCalibration;
+    } else {
+      delete playbackPlan.plan.calibration_profile;
+    }
+    if (modelCalibration) {
+      playbackPlan.plan.model_calibration_profile = modelCalibration;
+    } else {
+      delete playbackPlan.plan.model_calibration_profile;
+    }
   }
   const planSignature = buildPlanSignature(playbackPlan.plan);
   const nowMs = performance.now();
@@ -543,8 +703,12 @@ function playPlan(
   lastStartedPlanAtMs = performance.now();
   state.status = "playing";
   state.message = `正在执行参数计划（mode=${playbackPlan.plan.mode}, emotion=${playbackPlan.plan.emotion_label}）...`;
-  state.keyAxesCount = AXIS_NAMES.length;
-  state.supplementaryCount = playbackPlan.plan.supplementary_params.length;
+  state.keyAxesCount = playbackPlan.plan.schema_version === "engine.parameter_plan.v2"
+    ? (playbackPlan.plan.summary?.axis_count ?? playbackPlan.plan.parameters.length)
+    : AXIS_NAMES.length;
+  state.supplementaryCount = playbackPlan.plan.schema_version === "engine.parameter_plan.v2"
+    ? playbackPlan.plan.parameters.length
+    : playbackPlan.plan.supplementary_params.length;
   state.startedAt = new Date().toISOString();
   state.finishedAt = "";
 

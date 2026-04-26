@@ -9,6 +9,9 @@
 - 后端只能消费模型目录中的 canonical profile。
 - 前端编辑后，必须显式保存回后端，后端再基于已保存版本生成 prompt。
 - 后端不能在本地自行重新扫描并生成另一份 profile 来替代 canonical profile。
+- dedicated profile save ack/fail 已完成，后端能稳定确认当前使用的是已保存 revision。
+- `motion_intent.v2` parser/normalizer 已存在。
+- 前端 ModelEngine 已能消费动态 axes，至少具备 diagnostics 模式。
 
 否则 prompt 和前端 ModelEngine 会使用不同的语义轴集合，导致同一轮里“模型输出可控轴”和“前端可编译轴”不一致。
 
@@ -170,7 +173,7 @@ Prompt generator 需要：
 可先实现：
 
 ```text
-profile -> primary axes markdown/text block
+profile -> primary/hint axes markdown/text block
 profile -> allowed axis ids list
 profile -> forbidden axes note
 ```

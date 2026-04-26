@@ -109,7 +109,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     const selectedModel = dependencies.getSelectedModel();
     state.lastStartReason = context.startReason;
 
-    if (payload.kind === "intent") {
+    if (payload.kind === "intent" || payload.kind === "semantic_intent") {
       if (!selectedModel) {
         state.lastCompileReason = "missing_selected_model";
         setState("failed", "动作意图无法编译：当前未选中模型。", null);
@@ -160,7 +160,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
           turnId: context.turnId,
           startReason: context.startReason,
           queuedDelayMs: context.queuedDelayMs,
-          payloadKind: "intent",
+          payloadKind: payload.kind,
           diagnostics: compileResult.diagnostics,
           playerMessage: successMessage,
         });
@@ -170,9 +170,10 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       return true;
     }
 
-    let startedPlan: typeof payload.plan | null = null;
+    const directPlanPayload = payload;
+    let startedPlan: typeof directPlanPayload.plan | null = null;
     const started = dependencies.playPlan(
-      payload.plan,
+      directPlanPayload.plan,
       selectedModel,
       {
         softHandoff: true,
@@ -200,7 +201,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         turnId: context.turnId,
         startReason: context.startReason,
         queuedDelayMs: context.queuedDelayMs,
-        payloadKind: "plan",
+        payloadKind: directPlanPayload.kind,
         diagnostics: null,
         playerMessage: successMessage,
       });

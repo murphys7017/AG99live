@@ -400,7 +400,9 @@ function handleDesktopCommand(command: DesktopRuntimeCommand): void {
       return;
     case "save_semantic_axis_profile":
       adapter.sendSemanticAxisProfileSave({
+        request_id: command.requestId,
         model_name: command.modelName,
+        profile_id: command.profileId,
         expected_revision: command.expectedRevision,
         profile: cloneJson(command.profile),
       });
@@ -506,6 +508,7 @@ watch(
     adapter.state.micCapturing,
     adapter.state.isPlayingAudio,
     adapter.state.historyEntries,
+    adapter.state.latestSemanticAxisProfileSaveResult,
     state.confName,
     state.lastUpdated,
     selectedModel.value?.name ?? "",
@@ -558,6 +561,9 @@ watch(
       baseActionPreview: baseActionPreview.value,
       selectedSemanticAxisProfile: selectedSemanticAxisProfile.value
         ? cloneJson(selectedSemanticAxisProfile.value)
+        : null,
+      latestSemanticAxisProfileSaveResult: adapter.state.latestSemanticAxisProfileSaveResult
+        ? cloneJson(adapter.state.latestSemanticAxisProfileSaveResult)
         : null,
     });
   },

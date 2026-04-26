@@ -2,6 +2,8 @@
 
 快照日期：2026-04-26
 
+> Superseded：本文是固定 12 轴阶段的语义分层设计记录，已被 `docs/主轴重构计划/` 中的动态主轴方案替代。后续实现以 `SemanticAxisProfile`、`motion_intent.v2`、`parameter_plan.v2` 为准；本文仅保留为历史背景和语义参考。
+
 ## 目的
 
 本文件只讨论 `ModelEngine` 的“主参数语义”应该如何设计。
@@ -326,4 +328,3 @@ Runtime 驱动：
 ```
 
 最终仍输出兼容的 12 轴 plan，但每个轴的控制权必须清晰。
-

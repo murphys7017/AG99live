@@ -41,6 +41,7 @@ from ..protocol import (
 from ..services.speech_service import SpeechIngressService
 from ..motion.realtime_motion_plan import (
     normalize_motion_intent_payload,
+    resolve_selected_semantic_axis_profile,
     resolve_motion_prompt_instruction,
     validate_motion_intent_payload,
     validate_parameter_plan_payload,
@@ -48,22 +49,6 @@ from ..motion.realtime_motion_plan import (
 
 INLINE_ANIM_TAG_PATTERN = re.compile(r"<@anim\s*\{[\s\S]*?\}>\s*", re.IGNORECASE)
 INLINE_ANIM_START_PATTERN = re.compile(r"<@anim\b", re.IGNORECASE)
-DIRECT_PARAMETER_AXIS_NAMES = (
-    "head_yaw",
-    "head_roll",
-    "head_pitch",
-    "body_yaw",
-    "body_roll",
-    "gaze_x",
-    "gaze_y",
-    "eye_open_left",
-    "eye_open_right",
-    "mouth_open",
-    "mouth_smile",
-    "brow_bias",
-)
-
-
 class TurnCoordinator:
     def __init__(
         self,
@@ -561,7 +546,7 @@ class TurnCoordinator:
         if not isinstance(motion_payload, dict):
             return False
 
-        if _resolve_motion_payload_schema_version(motion_payload) == "engine.motion_intent.v1":
+        if _resolve_motion_payload_schema_version(motion_payload) in {"engine.motion_intent.v1", "engine.motion_intent.v2"}:
             try:
                 motion_payload = normalize_motion_intent_payload(motion_payload)
             except ValueError as exc:
@@ -672,7 +657,7 @@ class TurnCoordinator:
             )
             return
 
-        if _resolve_motion_payload_schema_version(motion_payload) == "engine.motion_intent.v1":
+        if _resolve_motion_payload_schema_version(motion_payload) in {"engine.motion_intent.v1", "engine.motion_intent.v2"}:
             try:
                 motion_payload = normalize_motion_intent_payload(motion_payload)
             except ValueError as exc:
@@ -924,9 +909,9 @@ def _validate_motion_intent(intent: Any) -> tuple[bool, str]:
 
 def _validate_motion_payload(payload: Any) -> tuple[bool, str]:
     schema_version = _resolve_motion_payload_schema_version(payload)
-    if schema_version == "engine.parameter_plan.v1":
+    if schema_version in {"engine.parameter_plan.v1", "engine.parameter_plan.v2"}:
         return _validate_parameter_plan(payload)
-    if schema_version == "engine.motion_intent.v1":
+    if schema_version in {"engine.motion_intent.v1", "engine.motion_intent.v2"}:
         return _validate_motion_intent(payload)
     return False, "unsupported_schema_version"
 
@@ -937,10 +922,13 @@ def _summarize_motion_payload(plan: Any) -> tuple[str, str, int, int, str]:
 
     schema_version = str(plan.get("schema_version") or "").strip()
     mode = str(plan.get("mode") or "").strip().lower()
-    key_axes = plan.get("key_axes")
+    key_axes = plan.get("key_axes") or plan.get("axes")
     supplementary = plan.get("supplementary_params")
+    parameters = plan.get("parameters")
     key_axes_count = len(key_axes) if isinstance(key_axes, dict) else 0
-    supplementary_count = len(supplementary) if isinstance(supplementary, list) else 0
+    supplementary_count = len(supplementary) if isinstance(supplementary, list) else (
+        len(parameters) if isinstance(parameters, list) else 0
+    )
     valid, failure_reason = _validate_motion_payload(plan)
     return schema_version, mode, key_axes_count, supplementary_count, "" if valid else failure_reason
 
@@ -953,9 +941,9 @@ def _resolve_motion_payload_schema_version(payload: Any) -> str:
 
 def _resolve_engine_motion_message_type(payload: Any) -> str:
     schema_version = _resolve_motion_payload_schema_version(payload)
-    if schema_version == "engine.parameter_plan.v1":
+    if schema_version in {"engine.parameter_plan.v1", "engine.parameter_plan.v2"}:
         return TYPE_ENGINE_MOTION_PLAN
-    if schema_version == "engine.motion_intent.v1":
+    if schema_version in {"engine.motion_intent.v1", "engine.motion_intent.v2"}:
         return TYPE_ENGINE_MOTION_INTENT
     return ""
 
@@ -1018,16 +1006,20 @@ def _build_model_visible_user_text(user_text: str, *, runtime_state: Any) -> str
 
 
 def _build_inline_motion_contract(*, runtime_state: Any) -> str:
+    try:
+        semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
+    except RuntimeError as exc:
+        logger.warning("Inline motion contract disabled because semantic profile is unavailable: %s", exc)
+        return ""
+
     template_payload = {
         "mode": "inline",
-        "intent": _build_inline_motion_intent_template(),
+        "intent": _build_inline_motion_intent_template(semantic_profile),
     }
     template_tag = f"<@anim {json.dumps(template_payload, ensure_ascii=False, separators=(',', ':'))}>"
-    selected_model = ""
-    model_info = getattr(runtime_state, "model_info", {})
-    if isinstance(model_info, dict):
-        selected_model = str(model_info.get("selected_model") or "").strip()
+    selected_model = str(semantic_profile.get("model_id") or "").strip()
     motion_instruction = resolve_motion_prompt_instruction(runtime_state=runtime_state)
+    prompt_axis_lines = _build_inline_motion_axis_lines(semantic_profile)
 
     lines = [
         "AG99live inline motion contract:",
@@ -1036,9 +1028,11 @@ def _build_inline_motion_contract(*, runtime_state: Any) -> str:
         "Do not wrap the tag in a code block and do not explain the tag.",
         "The JSON inside the tag must be valid JSON.",
         "Top-level tag payload must use `mode: \"inline\"` and an `intent` object.",
-        "The `intent.schema_version` must be `engine.motion_intent.v1`.",
+        "The `intent.schema_version` must be `engine.motion_intent.v2`.",
+        "The intent must include `profile_id`, `profile_revision`, and `model_id` exactly as shown in the template.",
         "The `intent.mode` must be `idle` or `expressive`.",
-        "The `intent.key_axes` object must include all 12 axes with integer values from 0 to 100.",
+        "The `intent.axes` object may only include primary/hint axes listed below.",
+        "Do not output derived/runtime/ambient/debug axes.",
         "The `intent.duration_hint_ms` should be a reasonable duration hint in milliseconds.",
         "If the turn is calm or uncertain, emit a safe idle intent instead of omitting the tag.",
     ]
@@ -1046,23 +1040,60 @@ def _build_inline_motion_contract(*, runtime_state: Any) -> str:
         lines.append(f"Additional motion instruction: {motion_instruction}")
     if selected_model:
         lines.append(f"Current Live2D model: {selected_model}.")
+    lines.append("Allowed semantic axes:")
+    lines.extend(prompt_axis_lines)
     lines.append("Use this tag template structure and fill in suitable values:")
     lines.append(template_tag)
     return "\n".join(lines)
 
 
-def _build_inline_motion_intent_template() -> dict[str, Any]:
+def _build_inline_motion_axis_lines(semantic_profile: dict[str, Any]) -> list[str]:
+    axes = semantic_profile.get("axes")
+    if not isinstance(axes, list):
+        return []
+    lines: list[str] = []
+    for axis in axes:
+        if not isinstance(axis, dict):
+            continue
+        role = str(axis.get("control_role") or "").strip()
+        if role not in {"primary", "hint"}:
+            continue
+        axis_id = str(axis.get("id") or "").strip()
+        if not axis_id:
+            continue
+        label = str(axis.get("label") or axis_id).strip()
+        negative = ", ".join(str(item).strip() for item in axis.get("negative_semantics", []) if str(item).strip())
+        positive = ", ".join(str(item).strip() for item in axis.get("positive_semantics", []) if str(item).strip())
+        lines.append(f"- {axis_id} ({label}, role={role}): low={negative or 'negative'}; high={positive or 'positive'}")
+    return lines
+
+
+def _build_inline_motion_intent_template(semantic_profile: dict[str, Any]) -> dict[str, Any]:
+    axes: dict[str, dict[str, float]] = {}
+    for axis in semantic_profile.get("axes", []):
+        if not isinstance(axis, dict):
+            continue
+        role = str(axis.get("control_role") or "").strip()
+        if role not in {"primary", "hint"}:
+            continue
+        axis_id = str(axis.get("id") or "").strip()
+        if not axis_id:
+            continue
+        neutral = axis.get("neutral", 50)
+        axes[axis_id] = {"value": float(neutral) if isinstance(neutral, (int, float)) else 50.0}
+    if not axes:
+        raise RuntimeError("SemanticAxisProfile has no primary/hint axes for inline motion contract.")
     return {
-        "schema_version": "engine.motion_intent.v1",
+        "schema_version": "engine.motion_intent.v2",
+        "profile_id": str(semantic_profile.get("profile_id") or "").strip(),
+        "profile_revision": int(semantic_profile.get("revision") or 0),
+        "model_id": str(semantic_profile.get("model_id") or "").strip(),
         "mode": "idle",
         "emotion_label": "neutral",
         "duration_hint_ms": 1200,
-        "key_axes": {
-            axis_name: {"value": 50}
-            for axis_name in DIRECT_PARAMETER_AXIS_NAMES
-        },
+        "axes": axes,
         "summary": {
-            "key_axes_count": len(DIRECT_PARAMETER_AXIS_NAMES),
+            "axis_count": len(axes),
         },
     }
 

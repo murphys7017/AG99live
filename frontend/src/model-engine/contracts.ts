@@ -5,6 +5,9 @@ import type {
   DirectParameterPlanSupplementaryParam,
   DirectParameterPlanTiming,
   ModelSummary,
+  MotionPlanPayload,
+  SemanticMotionIntent,
+  SemanticParameterPlan,
 } from "../types/protocol";
 import type { ModelEngineSettings } from "./settings";
 
@@ -32,7 +35,9 @@ export interface MotionIntent {
 
 export type NormalizedMotionPayload =
   | { kind: "intent"; intent: MotionIntent }
-  | { kind: "plan"; plan: DirectParameterPlan };
+  | { kind: "semantic_intent"; intent: SemanticMotionIntent }
+  | { kind: "plan"; plan: DirectParameterPlan }
+  | { kind: "semantic_plan"; plan: SemanticParameterPlan };
 
 export interface MotionTimingResolution {
   timing: DirectParameterPlanTiming;
@@ -63,6 +68,17 @@ export interface CompileDiagnostics {
   timingSource: "hint" | "audio_sync" | "default";
   resolvedMode: DirectParameterPlan["mode"];
   source?: string;
+  warnings?: string[];
+  primaryAxes?: string[];
+  hintAxes?: string[];
+  derivedAxes?: string[];
+  runtimeAxes?: string[];
+  missingAxes?: string[];
+  forbiddenAxes?: string[];
+  invalidAxes?: string[];
+  axisErrorCount?: number;
+  axisErrorLimit?: number;
+  compiledParameters?: string[];
   intensityApplied: boolean;
   motionIntensityScale: number;
   axisIntensityScale: Record<DirectParameterAxisName, number>;
@@ -70,7 +86,7 @@ export interface CompileDiagnostics {
 
 export interface CompileResult {
   ok: boolean;
-  plan: DirectParameterPlan | null;
+  plan: MotionPlanPayload | null;
   reason: string;
   diagnostics: CompileDiagnostics;
 }
@@ -89,11 +105,11 @@ export interface AudioPlaybackInfo {
 export interface PlayPlanOptions {
   softHandoff?: boolean;
   targetDurationMs?: number | null;
-  onStarted?: (plan: DirectParameterPlan) => void;
+  onStarted?: (plan: MotionPlanPayload) => void;
 }
 
 export interface ModelEnginePlanStartedEvent {
-  plan: DirectParameterPlan;
+  plan: MotionPlanPayload;
   model: ModelSummary | null;
   turnId: string | null;
   startReason: string;

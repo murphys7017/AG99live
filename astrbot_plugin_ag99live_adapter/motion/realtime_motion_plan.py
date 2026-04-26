@@ -38,6 +38,7 @@ _IDLE_DEADZONE_MIN = 42
 _IDLE_DEADZONE_MAX = 58
 _MIN_EXPRESSIVE_MAX_DELTA = 24
 _MIN_EXPRESSIVE_NONZERO_DELTA = 16
+_MAX_AXIS_ERROR_RATE = 0.30
 
 _NEUTRAL_EMOTION_MARKERS = {
     "neutral",
@@ -54,7 +55,9 @@ _SYSTEM_PROMPT = (
     "Return strict JSON only."
 )
 MOTION_INTENT_SCHEMA_VERSION = "engine.motion_intent.v1"
+MOTION_INTENT_V2_SCHEMA_VERSION = "engine.motion_intent.v2"
 PARAMETER_PLAN_SCHEMA_VERSION = "engine.parameter_plan.v1"
+PARAMETER_PLAN_V2_SCHEMA_VERSION = "engine.parameter_plan.v2"
 
 _DEFAULT_SELECTOR_PLATFORM_DESCRIPTION = (
     "Source platform: AstrBot through AG99live desktop adapter.\n"
@@ -205,13 +208,15 @@ class RealtimeMotionPlanGenerator:
             assistant_text=assistant_text,
             platform_context=build_selector_platform_context(runtime_state=self.runtime_state),
         )
+        semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=self.runtime_state)
         selector_raw = await self._call_astrbot_selector(
             context_text,
             few_shot_examples=resolve_selector_few_shot_examples(runtime_state=self.runtime_state),
             motion_instruction=resolve_motion_prompt_instruction(runtime_state=self.runtime_state),
+            semantic_profile=semantic_profile,
         )
-        selector = normalize_selector_output(selector_raw)
-        intent = build_intent_from_selector(selector)
+        selector = normalize_selector_output(selector_raw, semantic_profile=semantic_profile)
+        intent = build_intent_from_selector(selector, semantic_profile=semantic_profile)
         valid, failure_reason = validate_motion_intent_payload(intent)
         if not valid:
             LOGGER.warning(
@@ -227,6 +232,7 @@ class RealtimeMotionPlanGenerator:
         *,
         few_shot_examples: list[dict[str, Any]],
         motion_instruction: str,
+        semantic_profile: dict[str, Any],
     ) -> dict[str, Any]:
         provider = getattr(self.runtime_state, "selected_motion_analysis_provider", None)
         if provider is None:
@@ -242,6 +248,7 @@ class RealtimeMotionPlanGenerator:
                     context_text,
                     few_shot_examples=few_shot_examples,
                     motion_instruction=motion_instruction,
+                    semantic_profile=semantic_profile,
                 ),
                 system_prompt=_SYSTEM_PROMPT,
             ),
@@ -303,6 +310,107 @@ def resolve_motion_prompt_instruction(*, runtime_state: Any) -> str:
     return _truncate_text(raw_value, 800)
 
 
+def resolve_selected_semantic_axis_profile(*, runtime_state: Any) -> dict[str, Any]:
+    model_info = getattr(runtime_state, "model_info", {})
+    if not isinstance(model_info, dict):
+        raise RuntimeError("SemanticAxisProfile unavailable: runtime_state.model_info is not an object.")
+
+    selected_model_name = str(model_info.get("selected_model") or "").strip()
+    models = model_info.get("models")
+    if not selected_model_name or not isinstance(models, list):
+        raise RuntimeError("SemanticAxisProfile unavailable: selected model is not synchronized.")
+
+    for model in models:
+        if not isinstance(model, dict):
+            continue
+        if str(model.get("name") or "").strip() != selected_model_name:
+            continue
+        profile = model.get("semantic_axis_profile")
+        if not isinstance(profile, dict):
+            raise RuntimeError(
+                f"SemanticAxisProfile unavailable for selected model `{selected_model_name}`."
+            )
+        schema_version = str(profile.get("schema_version") or "").strip()
+        profile_id = str(profile.get("profile_id") or "").strip()
+        model_id = str(profile.get("model_id") or "").strip()
+        status = str(profile.get("status") or "").strip()
+        revision = profile.get("revision")
+        if schema_version != "ag99.semantic_axis_profile.v1":
+            raise RuntimeError("SemanticAxisProfile invalid: unsupported schema_version.")
+        if not profile_id or not model_id:
+            raise RuntimeError("SemanticAxisProfile invalid: profile_id/model_id is empty.")
+        if not isinstance(revision, int) or revision <= 0:
+            raise RuntimeError("SemanticAxisProfile invalid: revision must be a positive integer.")
+        if status == "stale":
+            raise RuntimeError("SemanticAxisProfile is stale; rescan or save the profile before motion generation.")
+        _profile_prompt_axes(profile)
+        return profile
+
+    raise RuntimeError(
+        f"SemanticAxisProfile unavailable: selected model `{selected_model_name}` is missing."
+    )
+
+
+def _profile_prompt_axes(semantic_profile: dict[str, Any]) -> list[dict[str, Any]]:
+    axes = semantic_profile.get("axes")
+    if not isinstance(axes, list):
+        raise ValueError("semantic_profile_axes_not_list")
+
+    result: list[dict[str, Any]] = []
+    for axis in axes:
+        if not isinstance(axis, dict):
+            continue
+        role = str(axis.get("control_role") or "").strip()
+        if role not in {"primary", "hint"}:
+            continue
+        axis_id = str(axis.get("id") or "").strip()
+        if not axis_id:
+            continue
+        result.append(axis)
+    if not result:
+        raise ValueError("semantic_profile_has_no_prompt_axes")
+    return result
+
+
+def _max_axis_error_count(axis_count: int) -> int:
+    return max(0, int(axis_count * _MAX_AXIS_ERROR_RATE))
+
+
+def _format_axis_semantics(values: Any) -> str:
+    if not isinstance(values, list):
+        return ""
+    return ", ".join(
+        _truncate_text(str(item).strip(), 48)
+        for item in values
+        if str(item).strip()
+    )
+
+
+def _format_profile_axis_prompt_line(axis: dict[str, Any]) -> str:
+    axis_id = str(axis.get("id") or "").strip()
+    label = str(axis.get("label") or axis_id).strip()
+    role = str(axis.get("control_role") or "").strip()
+    neutral = axis.get("neutral", 50)
+    value_range = axis.get("value_range")
+    range_text = "[0,100]"
+    if (
+        isinstance(value_range, list)
+        and len(value_range) == 2
+        and isinstance(value_range[0], (int, float))
+        and isinstance(value_range[1], (int, float))
+    ):
+        range_text = f"[{float(value_range[0]):g},{float(value_range[1]):g}]"
+    negative = _format_axis_semantics(axis.get("negative_semantics")) or "negative direction"
+    positive = _format_axis_semantics(axis.get("positive_semantics")) or "positive direction"
+    notes = _truncate_text(str(axis.get("usage_notes") or "").strip(), 160)
+    description = _truncate_text(str(axis.get("description") or "").strip(), 160)
+    suffix = f" notes={notes}" if notes else ""
+    return (
+        f"- {axis_id} ({label}, role={role}, range={range_text}, neutral={neutral}): "
+        f"low={negative}; high={positive}. {description}{suffix}"
+    ).strip()
+
+
 def build_selector_context(
     *,
     user_text: str,
@@ -335,7 +443,16 @@ def build_selector_user_prompt(
     *,
     few_shot_examples: list[dict[str, Any]] | None = None,
     motion_instruction: str = "",
+    semantic_profile: dict[str, Any] | None = None,
 ) -> str:
+    if semantic_profile is not None:
+        return build_selector_user_prompt_v2(
+            text,
+            few_shot_examples=few_shot_examples,
+            motion_instruction=motion_instruction,
+            semantic_profile=semantic_profile,
+        )
+
     lines: list[str] = []
     for axis in AXES:
         lines.append(
@@ -371,7 +488,7 @@ def build_selector_user_prompt(
         "Return JSON only with this schema:\n"
         "{\n"
         '  "emotion": "short-label",\n'
-        '  "mode": "parallel or sequential",\n'
+        '  "mode": "expressive or idle",\n'
         '  "duration_ms": 1200,\n'
         '  "axes": {\n'
         '    "head_yaw": 50, "head_roll": 50, "head_pitch": 50,\n'
@@ -393,7 +510,81 @@ def build_selector_user_prompt(
     )
 
 
-def normalize_selector_output(payload: dict[str, Any]) -> dict[str, Any]:
+def build_selector_user_prompt_v2(
+    text: str,
+    *,
+    few_shot_examples: list[dict[str, Any]] | None = None,
+    motion_instruction: str = "",
+    semantic_profile: dict[str, Any],
+) -> str:
+    prompt_axes = _profile_prompt_axes(semantic_profile)
+    axis_block = "\n".join(_format_profile_axis_prompt_line(axis) for axis in prompt_axes)
+    allowed_axis_ids = [str(axis.get("id") or "").strip() for axis in prompt_axes]
+    profile_id = str(semantic_profile.get("profile_id") or "").strip()
+    model_id = str(semantic_profile.get("model_id") or "").strip()
+    revision = semantic_profile.get("revision")
+
+    few_shot_block = ""
+    normalized_examples = [item for item in (few_shot_examples or []) if isinstance(item, dict)]
+    if normalized_examples:
+        few_shot_lines = [
+            "Few-shot examples are style references only. Convert their idea to the current axes; do not copy unknown axis names."
+        ]
+        for index, item in enumerate(normalized_examples[:3], start=1):
+            input_text = _truncate_text(str(item.get("input") or "").strip(), 420)
+            output_payload = item.get("output")
+            output_json = json.dumps(
+                output_payload if isinstance(output_payload, dict) else {},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            few_shot_lines.append(f"Example {index} input:\n{input_text}")
+            few_shot_lines.append(f"Example {index} old-style output:\n{output_json}")
+        few_shot_block = "\n".join(few_shot_lines) + "\n\n"
+
+    motion_instruction_text = str(motion_instruction or "").strip()
+    motion_instruction_block = ""
+    if motion_instruction_text:
+        motion_instruction_block = (
+            "Additional motion instruction:\n"
+            f"{_truncate_text(motion_instruction_text, 800)}\n\n"
+        )
+
+    return (
+        "Given text, choose semantic axis values for a Live2D avatar.\n"
+        f"Profile: profile_id={profile_id}, model_id={model_id}, revision={revision}.\n"
+        "Only output axes listed below. Prioritize primary axes; hint axes are optional. "
+        "Never output derived/runtime/ambient/debug axes.\n"
+        f"Axes:\n{axis_block}\n\n"
+        "Return JSON only with this schema:\n"
+        "{\n"
+        '  "emotion": "short-label",\n'
+        '  "mode": "expressive or idle",\n'
+        '  "duration_ms": 1200,\n'
+        '  "axes": {\n'
+        f'    "{allowed_axis_ids[0]}": 50\n'
+        "  }\n"
+        "}\n"
+        "Rules:\n"
+        "- Output at least one axis for non-neutral emotion.\n"
+        "- Use numbers only, inside each axis range.\n"
+        "- Avoid flat/no-op outputs around neutral unless the emotion is truly neutral.\n"
+        "- For non-neutral emotion, make at least 2 primary/hint axes visibly deviate when the profile provides enough axes.\n"
+        "- Keep values stable and readable; avoid chaotic extremes.\n\n"
+        f"{motion_instruction_block}"
+        f"{few_shot_block}"
+        f"Text: {text}"
+    )
+
+
+def normalize_selector_output(
+    payload: dict[str, Any],
+    *,
+    semantic_profile: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if semantic_profile is not None:
+        return normalize_selector_output_v2(payload, semantic_profile=semantic_profile)
+
     if not isinstance(payload, dict):
         raise ValueError("selector_payload_not_object")
 
@@ -465,7 +656,111 @@ def normalize_selector_output(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_intent_from_selector(selector_output: dict[str, Any]) -> dict[str, Any]:
+def normalize_selector_output_v2(
+    payload: dict[str, Any],
+    *,
+    semantic_profile: dict[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("selector_payload_not_object")
+
+    emotion_raw = payload.get("emotion")
+    emotion = str(emotion_raw).strip() if isinstance(emotion_raw, str) else ""
+    if not emotion:
+        raise ValueError("selector_emotion_empty")
+
+    if "mode" not in payload:
+        raise ValueError("selector_mode_missing")
+    mode = str(payload.get("mode") or "").strip().lower()
+    if mode not in {"idle", "expressive"}:
+        raise ValueError("selector_mode_invalid")
+
+    duration_ms_raw = payload.get("duration_ms")
+    if not isinstance(duration_ms_raw, (int, float)):
+        raise ValueError("selector_duration_ms_not_number")
+    duration_ms = int(round(float(duration_ms_raw)))
+    if duration_ms < 320 or duration_ms > 15000:
+        raise ValueError("selector_duration_ms_out_of_range")
+
+    raw_axes = payload.get("axes")
+    if not isinstance(raw_axes, dict):
+        raise ValueError("selector_axes_not_object")
+    if not raw_axes:
+        raise ValueError("selector_axes_empty")
+
+    prompt_axes = _profile_prompt_axes(semantic_profile)
+    allowed_axes = {str(axis.get("id") or "").strip(): axis for axis in prompt_axes}
+    allowed_axis_count = len(allowed_axes)
+    max_axis_errors = _max_axis_error_count(allowed_axis_count)
+    normalized_axes: dict[str, float] = {}
+    axis_errors: list[str] = []
+    axis_warnings: list[str] = []
+    for raw_axis_id, raw_value in raw_axes.items():
+        axis_id = str(raw_axis_id or "").strip()
+        if axis_id not in allowed_axes:
+            axis_errors.append(f"selector_axis_not_allowed:{axis_id}")
+            continue
+        if not isinstance(raw_value, (int, float)):
+            axis_errors.append(f"selector_axis_not_number:{axis_id}")
+            continue
+        axis = allowed_axes[axis_id]
+        value_range = axis.get("value_range")
+        min_value = 0.0
+        max_value = 100.0
+        if (
+            isinstance(value_range, list)
+            and len(value_range) == 2
+            and isinstance(value_range[0], (int, float))
+            and isinstance(value_range[1], (int, float))
+        ):
+            min_value = float(value_range[0])
+            max_value = float(value_range[1])
+        value = float(raw_value)
+        if value < min_value or value > max_value:
+            clamped_value = min_value if value < min_value else max_value
+            axis_warnings.append(
+                f"selector_axis_clamped:{axis_id}:{value:g}->{clamped_value:g}"
+            )
+            value = clamped_value
+        normalized_axes[axis_id] = round(value, 4)
+
+    if len(axis_errors) > max_axis_errors:
+        raise ValueError(
+            "selector_axis_error_rate_exceeded:"
+            f"{len(axis_errors)}/{allowed_axis_count}:{','.join(axis_errors)}"
+        )
+    if axis_errors:
+        LOGGER.warning(
+            "Realtime motion selector ignored invalid semantic axes within threshold. errors=%s threshold=%s/%s",
+            ",".join(axis_errors),
+            max_axis_errors,
+            allowed_axis_count,
+        )
+    if axis_warnings:
+        LOGGER.warning(
+            "Realtime motion selector clamped semantic axis values. warnings=%s",
+            ",".join(axis_warnings),
+        )
+    if not normalized_axes:
+        raise ValueError("selector_axes_empty_after_error_filter")
+
+    return {
+        "emotion": emotion,
+        "mode": mode,
+        "duration_ms": duration_ms,
+        "axes": normalized_axes,
+        "warnings": axis_warnings + axis_errors,
+    }
+
+
+def build_intent_from_selector(
+    selector_output: dict[str, Any],
+    *,
+    semantic_profile: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if semantic_profile is not None:
+        return build_intent_from_selector_v2(selector_output, semantic_profile=semantic_profile)
+
     axes = selector_output.get("axes")
     if not isinstance(axes, dict):
         raise ValueError("selector_axes_not_object")
@@ -503,11 +798,62 @@ def build_intent_from_selector(selector_output: dict[str, Any]) -> dict[str, Any
     }
 
 
+def build_intent_from_selector_v2(
+    selector_output: dict[str, Any],
+    *,
+    semantic_profile: dict[str, Any],
+) -> dict[str, Any]:
+    axes = selector_output.get("axes")
+    if not isinstance(axes, dict) or not axes:
+        raise ValueError("selector_axes_not_object")
+
+    requested_mode = str(selector_output.get("mode") or "").strip().lower()
+    if requested_mode not in {"idle", "expressive"}:
+        raise ValueError("selector_mode_invalid")
+    mode = requested_mode
+
+    duration_ms_raw = selector_output.get("duration_ms")
+    if not isinstance(duration_ms_raw, (int, float)):
+        raise ValueError("selector_duration_ms_not_number")
+    duration_hint_ms = int(round(float(duration_ms_raw)))
+    if duration_hint_ms < 320 or duration_hint_ms > 15000:
+        raise ValueError("selector_duration_ms_out_of_range")
+
+    emotion_label = str(selector_output.get("emotion") or "").strip()
+    if not emotion_label:
+        raise ValueError("selector_emotion_empty")
+
+    profile_revision_raw = semantic_profile.get("revision")
+    try:
+        profile_revision = int(profile_revision_raw)
+    except (TypeError, ValueError):
+        raise ValueError("semantic_profile_revision_invalid") from None
+
+    return {
+        "schema_version": MOTION_INTENT_V2_SCHEMA_VERSION,
+        "profile_id": str(semantic_profile.get("profile_id") or "").strip(),
+        "profile_revision": profile_revision,
+        "model_id": str(semantic_profile.get("model_id") or "").strip(),
+        "mode": mode,
+        "emotion_label": emotion_label,
+        "duration_hint_ms": duration_hint_ms,
+        "axes": {
+            str(axis_id): {"value": value}
+            for axis_id, value in axes.items()
+        },
+        "summary": {
+            "axis_count": len(axes),
+        },
+    }
+
+
 def normalize_motion_intent_payload(intent: Any) -> dict[str, Any]:
     if not isinstance(intent, dict):
         raise ValueError("intent_not_object")
 
     schema_version = str(intent.get("schema_version") or "").strip()
+    if schema_version == MOTION_INTENT_V2_SCHEMA_VERSION:
+        return normalize_motion_intent_v2_payload(intent)
     if schema_version != MOTION_INTENT_SCHEMA_VERSION:
         raise ValueError("invalid_schema_version")
 
@@ -561,9 +907,9 @@ def normalize_motion_intent_payload(intent: Any) -> dict[str, Any]:
     if duration_hint_raw is not None:
         if not isinstance(duration_hint_raw, (int, float)):
             raise ValueError("duration_hint_ms_not_number")
-        if float(duration_hint_raw) < 0:
-            raise ValueError("duration_hint_ms_negative")
-        duration_hint_ms = max(320, min(15000, int(round(float(duration_hint_raw)))))
+        duration_hint_ms = int(round(float(duration_hint_raw)))
+        if duration_hint_ms < 320 or duration_hint_ms > 15000:
+            raise ValueError("duration_hint_ms_out_of_range")
 
     return {
         "schema_version": MOTION_INTENT_SCHEMA_VERSION,
@@ -573,6 +919,74 @@ def normalize_motion_intent_payload(intent: Any) -> dict[str, Any]:
         "key_axes": normalized_axes,
         "summary": {
             "key_axes_count": len(AXIS_NAMES),
+        },
+    }
+
+
+def normalize_motion_intent_v2_payload(intent: Any) -> dict[str, Any]:
+    if not isinstance(intent, dict):
+        raise ValueError("intent_not_object")
+
+    schema_version = str(intent.get("schema_version") or "").strip()
+    if schema_version != MOTION_INTENT_V2_SCHEMA_VERSION:
+        raise ValueError("invalid_schema_version")
+
+    profile_id = str(intent.get("profile_id") or "").strip()
+    model_id = str(intent.get("model_id") or "").strip()
+    if not profile_id:
+        raise ValueError("profile_id_empty")
+    if not model_id:
+        raise ValueError("model_id_empty")
+    profile_revision_raw = intent.get("profile_revision")
+    if not isinstance(profile_revision_raw, int) or profile_revision_raw <= 0:
+        raise ValueError("profile_revision_invalid")
+
+    mode = str(intent.get("mode") or "").strip().lower()
+    if mode not in {"expressive", "idle"}:
+        raise ValueError("invalid_mode")
+
+    emotion_label = str(intent.get("emotion_label") or "").strip()
+    if not emotion_label:
+        raise ValueError("emotion_label_empty")
+
+    axes = intent.get("axes")
+    if not isinstance(axes, dict) or not axes:
+        raise ValueError("axes_not_object")
+
+    normalized_axes: dict[str, dict[str, float]] = {}
+    for axis_id_raw, axis_payload in axes.items():
+        axis_id = str(axis_id_raw or "").strip()
+        if not axis_id:
+            raise ValueError("axis_id_empty")
+        if not isinstance(axis_payload, dict) or "value" not in axis_payload:
+            raise ValueError(f"axis_payload_invalid:{axis_id}")
+        value = axis_payload.get("value")
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"axis_{axis_id}_value_not_number")
+        if not float("-inf") < float(value) < float("inf"):
+            raise ValueError(f"axis_{axis_id}_value_not_finite")
+        normalized_axes[axis_id] = {"value": round(float(value), 4)}
+
+    duration_hint_raw = intent.get("duration_hint_ms")
+    duration_hint_ms: int | None = None
+    if duration_hint_raw is not None:
+        if not isinstance(duration_hint_raw, (int, float)):
+            raise ValueError("duration_hint_ms_not_number")
+        duration_hint_ms = int(round(float(duration_hint_raw)))
+        if duration_hint_ms < 320 or duration_hint_ms > 15000:
+            raise ValueError("duration_hint_ms_out_of_range")
+
+    return {
+        "schema_version": MOTION_INTENT_V2_SCHEMA_VERSION,
+        "profile_id": profile_id,
+        "profile_revision": profile_revision_raw,
+        "model_id": model_id,
+        "mode": mode,
+        "emotion_label": emotion_label,
+        "duration_hint_ms": duration_hint_ms,
+        "axes": normalized_axes,
+        "summary": {
+            "axis_count": len(normalized_axes),
         },
     }
 
@@ -698,6 +1112,8 @@ def validate_parameter_plan_payload(plan: Any) -> tuple[bool, str]:
         return False, "plan_not_object"
 
     schema_version = str(plan.get("schema_version") or "").strip()
+    if schema_version == PARAMETER_PLAN_V2_SCHEMA_VERSION:
+        return validate_parameter_plan_v2_payload(plan)
     if schema_version != PARAMETER_PLAN_SCHEMA_VERSION:
         return False, "invalid_schema_version"
 
@@ -759,6 +1175,71 @@ def validate_parameter_plan_payload(plan: Any) -> tuple[bool, str]:
             return False, "supplementary_weight_not_number"
         if float(weight) < 0.0 or float(weight) > 1.0:
             return False, "supplementary_weight_out_of_range"
+
+    return True, ""
+
+
+def validate_parameter_plan_v2_payload(plan: Any) -> tuple[bool, str]:
+    if not isinstance(plan, dict):
+        return False, "plan_not_object"
+
+    schema_version = str(plan.get("schema_version") or "").strip()
+    if schema_version != PARAMETER_PLAN_V2_SCHEMA_VERSION:
+        return False, "invalid_schema_version"
+
+    mode = str(plan.get("mode") or "").strip().lower()
+    if mode not in {"expressive", "idle"}:
+        return False, "invalid_mode"
+
+    for key in ("profile_id", "model_id", "emotion_label"):
+        value = str(plan.get(key) or "").strip()
+        if not value:
+            return False, f"{key}_empty"
+    profile_revision = plan.get("profile_revision")
+    if not isinstance(profile_revision, int) or profile_revision <= 0:
+        return False, "profile_revision_invalid"
+
+    timing = plan.get("timing")
+    if not isinstance(timing, dict):
+        return False, "timing_not_object"
+    for key in ("duration_ms", "blend_in_ms", "hold_ms", "blend_out_ms"):
+        value = timing.get(key)
+        if not isinstance(value, (int, float)):
+            return False, f"timing_{key}_not_number"
+        if float(value) < 0:
+            return False, f"timing_{key}_negative"
+
+    parameters = plan.get("parameters")
+    if not isinstance(parameters, list) or not parameters:
+        return False, "parameters_not_list"
+    seen_parameter_ids: set[str] = set()
+    for item in parameters:
+        if not isinstance(item, dict):
+            return False, "parameter_item_not_object"
+        axis_id = str(item.get("axis_id") or "").strip()
+        parameter_id = str(item.get("parameter_id") or "").strip()
+        if not axis_id:
+            return False, "parameter_axis_id_empty"
+        if not parameter_id:
+            return False, "parameter_id_empty"
+        if parameter_id in seen_parameter_ids:
+            return False, f"duplicate_parameter_id:{parameter_id}"
+        seen_parameter_ids.add(parameter_id)
+        for key in ("target_value", "weight"):
+            value = item.get(key)
+            if not isinstance(value, (int, float)):
+                return False, f"parameter_{key}_not_number"
+            if not float("-inf") < float(value) < float("inf"):
+                return False, f"parameter_{key}_not_finite"
+        weight = float(item.get("weight"))
+        if weight < 0.0 or weight > 1.0:
+            return False, "parameter_weight_out_of_range"
+        input_value = item.get("input_value")
+        if input_value is not None and not isinstance(input_value, (int, float)):
+            return False, "parameter_input_value_not_number"
+        source = item.get("source")
+        if source is not None and source not in {"semantic_axis", "coupling", "manual"}:
+            return False, "parameter_source_invalid"
 
     return True, ""
 
