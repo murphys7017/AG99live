@@ -40,7 +40,7 @@ export interface SemanticAxisCoupling {
   id: string;
   source_axis_id: string;
   target_axis_id: string;
-  mode: string;
+  mode: "same_direction" | "opposite_direction";
   scale: number;
   deadzone: number;
   max_delta: number;

@@ -105,22 +105,24 @@ Prompt 的核心不再是“这里有 12 个参数”，而是：
   - `system.semantic_axis_profile_save` 回写闭环
   - `revision` / `source_hash` / `stale` 冲突保护
   - 固定模板外的扫描参数先以 `debug` 轴进入 profile
-- 第二轮最小 UI 已完成：
+- 第二轮 Profile Editor 主体能力已完成：
   - Action Lab 中新增 `Profile Editor`
   - 可编辑字段：
     - `label`
     - `control_role`
     - `description`
     - `usage_notes`
+    - `semantic_group`
+    - `positive_semantics`
+    - `negative_semantics`
+    - `value_range`
     - `soft_range`
     - `strong_range`
-  - `parameter_bindings` 当前只读展示
+    - `parameter_bindings`
+    - `couplings`
 
 ### 尚未完成
 
-- `couplings` 编辑器
-- `parameter_bindings` 编辑器
-- `positive_semantics / negative_semantics` 完整编辑
 - 扫描参数的批量勾选 / 新建主轴交互
 - `profile-driven prompt`
 - `ModelEngine compiler v2`
