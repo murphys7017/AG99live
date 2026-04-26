@@ -120,10 +120,14 @@ Prompt 的核心不再是“这里有 12 个参数”，而是：
     - `strong_range`
     - `parameter_bindings`
     - `couplings`
+  - 可按角色/文本筛选 axes
+  - 可批量把扫描出的 `debug` axes 提升为生产控制角色，或把已有 axes 降回 `debug`
+  - 可新建自定义主轴草稿，保存前需显式补齐描述、使用说明、正/负语义、parameter binding，并确认当前轴配置
+  - 前端保存前会一次性列出 profile 配置错误
+  - 后端保存层会严格拒绝非法 axis id、非法数值、非法 range、重复 binding、非法 coupling 和 coupling cycle
 
 ### 尚未完成
 
-- 扫描参数的批量勾选 / 新建主轴交互
 - `profile-driven prompt`
 - `ModelEngine compiler v2`
 - `parameter_plan.v2 runtime`
@@ -135,8 +139,8 @@ Prompt 的核心不再是“这里有 12 个参数”，而是：
 
 ```text
 动态主轴底座已落地
--> 最小 Profile Editor 已落地
--> 下一步补全 bindings/couplings 编辑，再进入 profile-driven 执行链迁移
+-> Profile Editor 主体编辑和批量主轴配置已落地
+-> 下一步进入 profile-driven 执行链迁移
 ```
 
 ## 暂不做的事

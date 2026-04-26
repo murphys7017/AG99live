@@ -1336,6 +1336,80 @@ img {
   gap: 8px;
 }
 
+.profile-editor__axis-tools {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(53, 73, 113, 0.1);
+  border-radius: 16px;
+  background: rgba(248, 251, 255, 0.9);
+}
+
+.profile-editor__bulk-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.profile-editor__bulk-row span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.profile-editor__validation {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(178, 69, 50, 0.24);
+  border-radius: 16px;
+  background: rgba(255, 244, 240, 0.84);
+  color: #8a2d1c;
+  font-size: 13px;
+}
+
+.profile-editor__validation ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.profile-editor__header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.profile-editor__axis-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: stretch;
+}
+
+.profile-editor__axis-row[data-selected="true"] .profile-editor__axis-button {
+  border-color: rgba(93, 134, 202, 0.56);
+  background: rgba(244, 248, 255, 0.92);
+  box-shadow: 0 0 0 2px rgba(93, 134, 202, 0.12);
+}
+
+.profile-editor__axis-check {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  border: 1px solid rgba(53, 73, 113, 0.1);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.profile-editor__axis-check input {
+  width: 16px;
+  height: 16px;
+}
+
 .profile-editor__axis-button {
   display: grid;
   gap: 4px;
@@ -1346,12 +1420,6 @@ img {
   color: var(--ink-main);
   text-align: left;
   cursor: pointer;
-}
-
-.profile-editor__axis-button[data-selected="true"] {
-  border-color: rgba(93, 134, 202, 0.56);
-  background: rgba(244, 248, 255, 0.92);
-  box-shadow: 0 0 0 2px rgba(93, 134, 202, 0.12);
 }
 
 .profile-editor__axis-button strong {

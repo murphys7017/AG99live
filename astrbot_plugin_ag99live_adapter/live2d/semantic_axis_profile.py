@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, NotRequired, TypedDict
@@ -11,6 +13,8 @@ SEMANTIC_AXIS_PROFILE_DIRNAME = "ag99"
 SEMANTIC_AXIS_PROFILE_FILENAME = "semantic_axis_profile.json"
 ALLOWED_CONTROL_ROLES = {"primary", "hint", "derived", "runtime", "ambient", "debug"}
 ALLOWED_COUPLING_MODES = {"same_direction", "opposite_direction"}
+AXIS_ID_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
+AXIS_ID_MAX_LENGTH = 64
 
 
 class SemanticAxisProfileError(ValueError):
@@ -507,8 +511,7 @@ def validate_semantic_axis_profile(
             raise SemanticAxisProfileError("SemanticAxisProfile axis entries must be objects.")
 
         axis_id = str(raw_axis.get("id") or "").strip()
-        if not axis_id:
-            raise SemanticAxisProfileError("SemanticAxisProfile axis id is required.")
+        _validate_axis_id(axis_id)
         if axis_id in seen_axis_ids:
             raise SemanticAxisProfileError(f"Duplicate semantic axis id: `{axis_id}`.")
         seen_axis_ids.add(axis_id)
@@ -530,6 +533,10 @@ def validate_semantic_axis_profile(
             if not parameter_id:
                 raise SemanticAxisProfileError(
                     f"Semantic axis `{axis_id}` contains an empty parameter_id."
+                )
+            if any(binding["parameter_id"] == parameter_id for binding in normalized_bindings):
+                raise SemanticAxisProfileError(
+                    f"Semantic axis `{axis_id}` contains duplicate parameter_id `{parameter_id}`."
                 )
             if known_parameter_ids is not None and parameter_id not in known_parameter_ids:
                 raise SemanticAxisProfileError(
@@ -560,6 +567,32 @@ def validate_semantic_axis_profile(
                 binding["parameter_name"] = parameter_name
             normalized_bindings.append(binding)
 
+        neutral = _coerce_float(raw_axis.get("neutral"), field_name=f"{axis_id}.neutral")
+        value_range = _normalize_range(raw_axis.get("value_range"), field_name=f"{axis_id}.value_range")
+        soft_range = _normalize_range(raw_axis.get("soft_range"), field_name=f"{axis_id}.soft_range")
+        strong_range = _normalize_range(
+            raw_axis.get("strong_range"),
+            field_name=f"{axis_id}.strong_range",
+        )
+        _require_value_in_range(
+            neutral,
+            value_range,
+            field_name=f"{axis_id}.neutral",
+            range_field_name=f"{axis_id}.value_range",
+        )
+        _require_range_within_range(
+            soft_range,
+            value_range,
+            field_name=f"{axis_id}.soft_range",
+            container_field_name=f"{axis_id}.value_range",
+        )
+        _require_range_within_range(
+            strong_range,
+            value_range,
+            field_name=f"{axis_id}.strong_range",
+            container_field_name=f"{axis_id}.value_range",
+        )
+
         normalized_axes.append(
             {
                 "id": axis_id,
@@ -577,13 +610,10 @@ def validate_semantic_axis_profile(
                     field_name=f"{axis_id}.control_role",
                     allowed_values=ALLOWED_CONTROL_ROLES,
                 ),
-                "neutral": _coerce_float(raw_axis.get("neutral"), field_name=f"{axis_id}.neutral"),
-                "value_range": _normalize_range(raw_axis.get("value_range"), field_name=f"{axis_id}.value_range"),
-                "soft_range": _normalize_range(raw_axis.get("soft_range"), field_name=f"{axis_id}.soft_range"),
-                "strong_range": _normalize_range(
-                    raw_axis.get("strong_range"),
-                    field_name=f"{axis_id}.strong_range",
-                ),
+                "neutral": neutral,
+                "value_range": value_range,
+                "soft_range": soft_range,
+                "strong_range": strong_range,
                 "positive_semantics": _normalize_string_list(
                     raw_axis.get("positive_semantics"),
                     field_name=f"{axis_id}.positive_semantics",
@@ -605,9 +635,14 @@ def validate_semantic_axis_profile(
         raise SemanticAxisProfileError("SemanticAxisProfile couplings must be an array.")
 
     normalized_couplings: list[SemanticAxisCoupling] = []
+    seen_coupling_ids: set[str] = set()
     for raw_coupling in raw_couplings:
         if not isinstance(raw_coupling, Mapping):
             raise SemanticAxisProfileError("SemanticAxisProfile coupling entries must be objects.")
+        coupling_id = _require_non_empty_string(raw_coupling.get("id"), field_name="coupling.id")
+        if coupling_id in seen_coupling_ids:
+            raise SemanticAxisProfileError(f"Duplicate semantic axis coupling id: `{coupling_id}`.")
+        seen_coupling_ids.add(coupling_id)
         source_axis_id = _require_non_empty_string(
             raw_coupling.get("source_axis_id"),
             field_name="coupling.source_axis_id",
@@ -616,13 +651,17 @@ def validate_semantic_axis_profile(
             raw_coupling.get("target_axis_id"),
             field_name="coupling.target_axis_id",
         )
+        if source_axis_id == target_axis_id:
+            raise SemanticAxisProfileError(
+                f"SemanticAxisProfile coupling `{coupling_id}` cannot target its source axis `{source_axis_id}`."
+            )
         if source_axis_id not in seen_axis_ids or target_axis_id not in seen_axis_ids:
             raise SemanticAxisProfileError(
                 f"SemanticAxisProfile coupling `{source_axis_id}->{target_axis_id}` references an unknown axis."
             )
         normalized_couplings.append(
             {
-                "id": _require_non_empty_string(raw_coupling.get("id"), field_name="coupling.id"),
+                "id": coupling_id,
                 "source_axis_id": source_axis_id,
                 "target_axis_id": target_axis_id,
                 "mode": _require_allowed_string(
@@ -635,6 +674,8 @@ def validate_semantic_axis_profile(
                 "max_delta": _coerce_float(raw_coupling.get("max_delta"), field_name="coupling.max_delta"),
             }
         )
+
+    _reject_coupling_cycles(normalized_couplings)
 
     return {
         "schema_version": SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION,
@@ -898,10 +939,13 @@ def _build_profile_id(model_name: str) -> str:
 def _normalize_range(value: Any, *, field_name: str) -> list[float]:
     if not isinstance(value, list) or len(value) != 2:
         raise SemanticAxisProfileError(f"`{field_name}` must be a two-item numeric array.")
-    return [
+    result = [
         _coerce_float(value[0], field_name=field_name),
         _coerce_float(value[1], field_name=field_name),
     ]
+    if result[0] > result[1]:
+        raise SemanticAxisProfileError(f"`{field_name}` minimum must be less than or equal to maximum.")
+    return result
 
 
 def _normalize_string_list(value: Any, *, field_name: str) -> list[str]:
@@ -932,9 +976,12 @@ def _coerce_positive_int(value: Any, *, field_name: str) -> int:
 
 def _coerce_float(value: Any, *, field_name: str) -> float:
     try:
-        return float(value)
+        normalized = float(value)
     except (TypeError, ValueError) as exc:
         raise SemanticAxisProfileError(f"`{field_name}` must be numeric.") from exc
+    if not math.isfinite(normalized):
+        raise SemanticAxisProfileError(f"`{field_name}` must be a finite number.")
+    return normalized
 
 
 def _utc_now_iso() -> str:
@@ -953,6 +1000,80 @@ def _require_allowed_string(value: Any, *, field_name: str, allowed_values: set[
         allowed = ", ".join(sorted(allowed_values))
         raise SemanticAxisProfileError(f"`{field_name}` must be one of: {allowed}.")
     return normalized
+
+
+def _validate_axis_id(axis_id: str) -> None:
+    if not axis_id:
+        raise SemanticAxisProfileError("SemanticAxisProfile axis id is required.")
+    if len(axis_id) > AXIS_ID_MAX_LENGTH:
+        raise SemanticAxisProfileError(
+            f"SemanticAxisProfile axis id `{axis_id}` exceeds {AXIS_ID_MAX_LENGTH} characters."
+        )
+    if not AXIS_ID_PATTERN.fullmatch(axis_id):
+        raise SemanticAxisProfileError(
+            "SemanticAxisProfile axis id must match regex "
+            f"`{AXIS_ID_PATTERN.pattern}` and be at most {AXIS_ID_MAX_LENGTH} characters."
+        )
+
+
+def _require_value_in_range(
+    value: float,
+    value_range: list[float],
+    *,
+    field_name: str,
+    range_field_name: str,
+) -> None:
+    if value < value_range[0] or value > value_range[1]:
+        raise SemanticAxisProfileError(
+            f"`{field_name}` must be within `{range_field_name}` [{value_range[0]}, {value_range[1]}]."
+        )
+
+
+def _require_range_within_range(
+    value_range: list[float],
+    container_range: list[float],
+    *,
+    field_name: str,
+    container_field_name: str,
+) -> None:
+    if value_range[0] < container_range[0] or value_range[1] > container_range[1]:
+        raise SemanticAxisProfileError(
+            f"`{field_name}` must be contained within `{container_field_name}` "
+            f"[{container_range[0]}, {container_range[1]}]."
+        )
+
+
+def _reject_coupling_cycles(couplings: list[SemanticAxisCoupling]) -> None:
+    graph: dict[str, list[str]] = {}
+    for coupling in couplings:
+        graph.setdefault(coupling["source_axis_id"], []).append(coupling["target_axis_id"])
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+    path: list[str] = []
+
+    def visit(axis_id: str) -> None:
+        if axis_id in visited:
+            return
+        if axis_id in visiting:
+            cycle_start = path.index(axis_id) if axis_id in path else 0
+            cycle_path = path[cycle_start:] + [axis_id]
+            raise SemanticAxisProfileError(
+                "SemanticAxisProfile couplings must be acyclic; detected cycle: "
+                + " -> ".join(cycle_path)
+                + "."
+            )
+
+        visiting.add(axis_id)
+        path.append(axis_id)
+        for next_axis_id in graph.get(axis_id, []):
+            visit(next_axis_id)
+        path.pop()
+        visiting.remove(axis_id)
+        visited.add(axis_id)
+
+    for axis_id in list(graph):
+        visit(axis_id)
 
 
 def _as_mapping(value: Any) -> Mapping[str, Any]:
