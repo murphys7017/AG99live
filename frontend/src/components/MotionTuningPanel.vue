@@ -11,6 +11,7 @@ import type {
 } from "../types/protocol";
 import type {
   SemanticAxisDefinition,
+  SemanticAxisParameterBinding,
   SemanticAxisProfile,
 } from "../types/semantic-axis-profile";
 
@@ -265,38 +266,59 @@ function buildAdjustedPlan(
   currentProfile: SemanticAxisProfile,
   adjustedAxes: Record<string, number>,
 ): SemanticParameterPlan {
-  const axisById = new Map(currentProfile.axes.map((axis) => [axis.id, axis]));
+  const parameters: SemanticParameterPlan["parameters"] = [];
+  const seenParameterIds = new Set<string>();
+  const promptAxisIds = new Set(promptAxes.value.map((axis) => axis.id));
+
+  for (const axis of currentProfile.axes) {
+    if (!promptAxisIds.has(axis.id)) {
+      continue;
+    }
+
+    const axisValue = adjustedAxes[axis.id];
+    if (!Number.isFinite(axisValue)) {
+      continue;
+    }
+
+    for (const binding of axis.parameter_bindings) {
+      if (seenParameterIds.has(binding.parameter_id)) {
+        continue;
+      }
+
+      seenParameterIds.add(binding.parameter_id);
+      parameters.push(buildManualPlanParameter(axis, binding, axisValue));
+    }
+  }
+
   return {
     ...basePlan,
-    parameters: basePlan.parameters.map((parameter) => {
-      const axis = axisById.get(parameter.axis_id);
-      const axisValue = adjustedAxes[parameter.axis_id];
-      if (!axis || axisValue === undefined) {
-        return { ...parameter };
-      }
-      const binding = axis.parameter_bindings.find((item) =>
-        item.parameter_id === parameter.parameter_id,
-      );
-      if (!binding) {
-        return {
-          ...parameter,
-          input_value: axisValue,
-          source: parameter.source ?? "manual",
-        };
-      }
-      return {
-        ...parameter,
-        target_value: mapBindingValue(axisValue, binding.input_range, binding.output_range, binding.invert),
-        input_value: axisValue,
-        source: "manual",
-      };
-    }),
+    parameters,
     diagnostics: {
       warnings: [
         ...(basePlan.diagnostics?.warnings ?? []),
         "manual_motion_tuning_sample",
       ],
     },
+    summary: {
+      ...(basePlan.summary ?? {}),
+      axis_count: Object.keys(adjustedAxes).length,
+      parameter_count: parameters.length,
+    },
+  };
+}
+
+function buildManualPlanParameter(
+  axis: SemanticAxisDefinition,
+  binding: SemanticAxisParameterBinding,
+  axisValue: number,
+): SemanticParameterPlan["parameters"][number] {
+  return {
+    axis_id: axis.id,
+    parameter_id: binding.parameter_id,
+    target_value: mapBindingValue(axisValue, binding.input_range, binding.output_range, binding.invert),
+    weight: binding.default_weight,
+    input_value: axisValue,
+    source: "manual",
   };
 }
 
@@ -356,7 +378,7 @@ function cloneJson<TValue>(value: TValue): TValue {
     <div class="settings-card__header">
       <div>
         <p class="settings-card__eyebrow">历史动作微调</p>
-        <h2>最近 5 次主轴参数样本</h2>
+        <h2>最近 5 次大模型控制参数样本</h2>
       </div>
       <span class="settings-card__badge">
         {{ recentSemanticRecords.length }} recent / {{ llmReferenceSampleCount }} LLM refs
@@ -364,7 +386,7 @@ function cloneJson<TValue>(value: TValue): TValue {
     </div>
 
     <p class="settings-card__copy">
-      选择最近一次真实播放过的动作，手动微调 primary / hint 主轴，点击播放观察 Live2D 效果。
+      选择最近一次真实播放过的动作，手动微调 primary / hint 轴及其绑定参数，点击播放观察 Live2D 效果。
       保存后的样本可以作为 few-shot 参考同步给后端大模型，用来约束后续动作生成风格。
     </p>
 
@@ -392,7 +414,7 @@ function cloneJson<TValue>(value: TValue): TValue {
               :key="axis.id"
               class="action-preview__field"
             >
-              <span>{{ axis.label }} / {{ axis.id }}</span>
+              <span>{{ axis.label }} / {{ axis.id }} · {{ axis.control_role }}</span>
               <input
                 :value="draftAxes[axis.id] ?? axis.neutral"
                 class="settings-card__input"

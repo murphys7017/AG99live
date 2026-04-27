@@ -429,13 +429,24 @@ class RuntimeState:
         expected_revision: Any,
     ) -> SemanticAxisProfile:
         model = self._get_model_payload_by_name(model_name)
-        return save_semantic_axis_profile(
-            model_dir=self._resolve_model_dir(model_name),
+        model_dir = self._resolve_model_dir(model_name)
+        if not model.get("semantic_axis_profile"):
+            model["semantic_axis_profile"] = deepcopy(
+                ensure_semantic_axis_profile(
+                    model_dir=model_dir,
+                    model_payload=model,
+                )
+            )
+
+        saved_profile = save_semantic_axis_profile(
+            model_dir=model_dir,
             model_name=model_name,
             profile_payload=profile_payload,
             expected_revision=expected_revision,
             known_parameter_ids=collect_known_parameter_ids(model),
         )
+        model["semantic_axis_profile"] = deepcopy(saved_profile)
+        return saved_profile
 
     def set_motion_tuning_reference_examples(self, examples: Any) -> None:
         if not isinstance(examples, list):

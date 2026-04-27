@@ -44,12 +44,12 @@ const semanticProfile = computed<SemanticAxisProfile | null>(() => {
 <template>
   <DesktopWindowPanel title="动作实验室" subtitle="Motion Plan Sandbox">
     <section class="settings-grid">
+      <MotionTuningPanel />
       <BaseActionPreviewPanel
         :preview="baseActionPreview"
         :semantic-profile="semanticProfile"
         :allow-play="true"
       />
-      <MotionTuningPanel />
     </section>
   </DesktopWindowPanel>
 </template>

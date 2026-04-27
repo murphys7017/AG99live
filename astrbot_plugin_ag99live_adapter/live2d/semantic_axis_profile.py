@@ -179,25 +179,29 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "label": "Eye Open Left",
         "description": "Controls openness of the left eye.",
         "semantic_group": "eye",
-        "control_role": "runtime",
+        "control_role": "hint",
         "positive_semantics": ["open left eye", "alert left eye"],
         "negative_semantics": ["close left eye", "wink left"],
-        "usage_notes": "Commonly shared with blink runtime.",
+        "usage_notes": "Use as a short expression hint for asymmetric wink or squint; keep high for normal open eyes.",
+        "neutral": 100.0,
         "output_range": [0.0, 1.0],
-        "soft_range": [50.0, 100.0],
+        "soft_range": [70.0, 100.0],
         "strong_range": [0.0, 100.0],
+        "invert": False,
     },
     "eye_open_right": {
         "label": "Eye Open Right",
         "description": "Controls openness of the right eye.",
         "semantic_group": "eye",
-        "control_role": "runtime",
+        "control_role": "hint",
         "positive_semantics": ["open right eye", "alert right eye"],
         "negative_semantics": ["close right eye", "wink right"],
-        "usage_notes": "Commonly shared with blink runtime.",
+        "usage_notes": "Use as a short expression hint for asymmetric wink or squint; keep high for normal open eyes.",
+        "neutral": 100.0,
         "output_range": [0.0, 1.0],
-        "soft_range": [50.0, 100.0],
+        "soft_range": [70.0, 100.0],
         "strong_range": [0.0, 100.0],
+        "invert": False,
     },
     "mouth_open": {
         "label": "Mouth Open",
@@ -216,9 +220,9 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "description": "Controls smile-vs-frown mouth form.",
         "semantic_group": "mouth",
         "control_role": "primary",
-        "positive_semantics": ["smile", "warm grin"],
-        "negative_semantics": ["frown", "tight mouth"],
-        "usage_notes": "Blend gently with speaking mouth shapes.",
+        "positive_semantics": ["smile", "warm grin", "increase smile intensity"],
+        "negative_semantics": ["frown", "tight mouth", "reduce smile intensity"],
+        "usage_notes": "Primary mouth expression control. Use higher values for visible smiles and lower values for frowns; keep mouth_open runtime-owned for lip sync.",
         "output_range": [-1.0, 1.0],
         "soft_range": [44.0, 60.0],
         "strong_range": [30.0, 75.0],
@@ -227,7 +231,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "label": "Brow Bias",
         "description": "Controls brow raise-vs-frown bias.",
         "semantic_group": "brow",
-        "control_role": "derived",
+        "control_role": "hint",
         "positive_semantics": ["raise brow", "curious brow"],
         "negative_semantics": ["furrow brow", "tense brow"],
         "usage_notes": "Best used as a secondary emotional hint.",
@@ -373,7 +377,7 @@ def build_default_semantic_axis_profile(
                 "description": str(axis_defaults["description"]),
                 "semantic_group": str(axis_defaults["semantic_group"]),
                 "control_role": str(axis_defaults["control_role"]),
-                "neutral": 50.0,
+                "neutral": float(axis_defaults.get("neutral", 50.0)),
                 "value_range": [0.0, 100.0],
                 "soft_range": [float(value) for value in axis_defaults["soft_range"]],
                 "strong_range": [float(value) for value in axis_defaults["strong_range"]],
@@ -834,35 +838,39 @@ def save_semantic_axis_profile(
     known_parameter_ids: set[str] | None = None,
 ) -> SemanticAxisProfile:
     path = build_semantic_axis_profile_path(model_dir)
-    if not path.exists():
-        raise FileNotFoundError(
-            f"SemanticAxisProfile file not found for `{model_name}` at `{path}`."
-        )
     current_source_hash = build_model_source_hash(model_dir)
-    current_profile = load_semantic_axis_profile(
-        model_dir=model_dir,
-        model_name=model_name,
-    )
-    if str(current_profile["source_hash"]).strip() != current_source_hash:
-        raise SemanticAxisProfileRevisionError(
-            f"SemanticAxisProfile source_hash mismatch for `{model_name}`. "
-            "The model files changed, please reload the latest profile before saving."
-        )
-    current_profile = validate_semantic_axis_profile(
-        current_profile,
-        model_name=model_name,
-        known_parameter_ids=known_parameter_ids,
-    )
-    current_revision = int(current_profile["revision"])
     normalized_expected_revision = _coerce_positive_int(
         expected_revision,
         field_name="expected_revision",
     )
-    if normalized_expected_revision != current_revision:
-        raise SemanticAxisProfileRevisionError(
-            f"SemanticAxisProfile revision mismatch for `{model_name}`: "
-            f"expected_revision={normalized_expected_revision}, current_revision={current_revision}."
+    if path.exists():
+        current_profile = load_semantic_axis_profile(
+            model_dir=model_dir,
+            model_name=model_name,
         )
+        if str(current_profile["source_hash"]).strip() != current_source_hash:
+            raise SemanticAxisProfileRevisionError(
+                f"SemanticAxisProfile source_hash mismatch for `{model_name}`. "
+                "The model files changed, please reload the latest profile before saving."
+            )
+        current_profile = validate_semantic_axis_profile(
+            current_profile,
+            model_name=model_name,
+            known_parameter_ids=known_parameter_ids,
+        )
+        current_revision = int(current_profile["revision"])
+        if normalized_expected_revision != current_revision:
+            raise SemanticAxisProfileRevisionError(
+                f"SemanticAxisProfile revision mismatch for `{model_name}`: "
+                f"expected_revision={normalized_expected_revision}, current_revision={current_revision}."
+            )
+    else:
+        current_profile = validate_semantic_axis_profile(
+            profile_payload,
+            model_name=model_name,
+            known_parameter_ids=known_parameter_ids,
+        )
+        current_revision = normalized_expected_revision
 
     normalized_profile = validate_semantic_axis_profile(
         profile_payload,
@@ -968,7 +976,9 @@ def _build_parameter_binding(
 
     direction = calibration_entry.get("direction")
     invert = False
-    if isinstance(direction, (int, float)):
+    if "invert" in axis_defaults:
+        invert = bool(axis_defaults["invert"])
+    elif isinstance(direction, (int, float)):
         invert = float(direction) < 0
     elif isinstance(direction, str):
         invert = direction.strip().lower() in {"-1", "negative", "invert", "reversed"}

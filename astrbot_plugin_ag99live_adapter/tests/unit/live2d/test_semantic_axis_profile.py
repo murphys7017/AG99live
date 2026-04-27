@@ -119,6 +119,64 @@ def test_ensure_semantic_axis_profile_adds_unmapped_parameters_as_debug_axes(tmp
     assert extra_axis["parameter_bindings"][0]["parameter_id"] == "ParamAccessoryGlow"
 
 
+def test_default_semantic_axis_profile_exposes_wink_and_brow_as_hints(tmp_path) -> None:
+    model_dir = tmp_path / "DemoModel"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
+    model_payload = _build_model_payload()
+    parameter_scan = model_payload["parameter_scan"]
+    parameter_specs = [
+        ("eye_open_left", "ParamEyeLOpen", "Eye", "eye"),
+        ("eye_open_right", "ParamEyeROpen", "Eye", "eye"),
+        ("brow_bias", "ParamBrowForm", "Brow", "brow"),
+        ("mouth_smile", "ParamMouthForm", "Mouth", "mouth"),
+    ]
+    for channel, parameter_id, group_name, domain in parameter_specs:
+        parameter_scan["standard_channels"][channel] = {
+            "label": channel.replace("_", " ").title(),
+            "available": True,
+            "primary_parameter_id": parameter_id,
+            "primary_parameter_name": parameter_id,
+            "group_name": group_name,
+            "candidate_parameter_ids": [parameter_id],
+        }
+        parameter_scan["primary_parameters"].append(
+            {
+                "channel": channel,
+                "parameter_id": parameter_id,
+                "parameter_name": parameter_id,
+                "group_name": group_name,
+            }
+        )
+        parameter_scan["parameters"].append(
+            {
+                "id": parameter_id,
+                "name": parameter_id,
+                "group_id": group_name,
+                "group_name": group_name,
+                "kind": "core",
+                "domain": domain,
+                "channels": [channel],
+            }
+        )
+
+    profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+    axes = {axis["id"]: axis for axis in profile["axes"]}
+
+    assert axes["eye_open_left"]["control_role"] == "hint"
+    assert axes["eye_open_left"]["neutral"] == 100.0
+    assert axes["eye_open_left"]["parameter_bindings"][0]["invert"] is False
+    assert axes["eye_open_right"]["control_role"] == "hint"
+    assert axes["eye_open_right"]["neutral"] == 100.0
+    assert axes["eye_open_right"]["parameter_bindings"][0]["invert"] is False
+    assert axes["brow_bias"]["control_role"] == "hint"
+    assert axes["mouth_smile"]["control_role"] == "primary"
+    assert axes["mouth_open"]["control_role"] == "runtime"
+
+
 def test_default_semantic_axis_profile_uses_single_preferred_binding_per_axis(tmp_path) -> None:
     model_dir = tmp_path / "DemoModel"
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -248,6 +306,29 @@ def test_save_semantic_axis_profile_rejects_revision_mismatch(tmp_path) -> None:
             profile_payload=profile,
             expected_revision=profile["revision"] + 1,
         )
+
+
+def test_save_semantic_axis_profile_recovers_missing_profile_file(tmp_path) -> None:
+    model_dir = tmp_path / "DemoModel"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
+
+    profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=_build_model_payload(),
+    )
+    build_semantic_axis_profile_path(model_dir).unlink()
+
+    saved_profile = save_semantic_axis_profile(
+        model_dir=model_dir,
+        model_name="DemoModel",
+        profile_payload=profile,
+        expected_revision=profile["revision"],
+    )
+
+    assert build_semantic_axis_profile_path(model_dir).exists()
+    assert saved_profile["revision"] == profile["revision"] + 1
+    assert saved_profile["status"] == "user_modified"
 
 
 def test_save_semantic_axis_profile_rejects_non_boolean_binding_invert(tmp_path) -> None:

@@ -33,6 +33,12 @@ function Test-ShouldSkipRelativePath {
         if (-not $prefix) {
             continue
         }
+        if ($prefix.Contains("*") -or $prefix.Contains("?")) {
+            if ($normalized -like $prefix -or $normalized -like ($prefix + "\*")) {
+                return $true
+            }
+            continue
+        }
         if ($normalized -eq $prefix -or $normalized.StartsWith($prefix + "\")) {
             return $true
         }
@@ -95,7 +101,7 @@ if (-not $ResolvedTargetPluginRoot.StartsWith($ResolvedPluginsRoot, [System.Stri
     throw "Resolved target path escapes plugins root: $ResolvedTargetPluginRoot"
 }
 
-$PreserveDirectories = @("debug_exports")
+$PreserveDirectories = @("debug_exports", "live2ds\*\ag99")
 $SkipDirectoryNames = @("__pycache__", ".git", ".venv", ".pytest_cache")
 $SkipFilePatterns = @("*.pyc")
 $ManagedRelativeFiles = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
