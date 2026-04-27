@@ -13,10 +13,13 @@ type ManagedWindowMap = Record<DesktopWindowRole, BrowserWindow | null>;
 
 interface WindowDragState {
   targetWindow: BrowserWindow;
+  role: DesktopWindowRole | null;
   offsetX: number;
   offsetY: number;
   lockedWidth: number;
   lockedHeight: number;
+  lastX: number;
+  lastY: number;
 }
 
 interface TransparentWindowSnapshot {
@@ -175,6 +178,10 @@ export class WindowManager {
 
   setOverlayContentHeight(targetWindow: BrowserWindow | null, height: number): void {
     const overlayWindow = this.windows.overlay;
+    if (!Number.isFinite(height)) {
+      return;
+    }
+
     if (
       !targetWindow
       || !overlayWindow
@@ -194,7 +201,7 @@ export class WindowManager {
     }
 
     this.overlayWindowHeight = nextHeight;
-    this.positionOverlayWindow();
+    this.resizeOverlayWindowPreservingPosition(nextHeight);
   }
 
   setIgnoreMouseEvents(targetWindow: BrowserWindow | null, ignore: boolean): void {
@@ -242,10 +249,13 @@ export class WindowManager {
         : bounds.height;
     this.activeDragState = {
       targetWindow,
+      role,
       offsetX: screenX - bounds.x,
       offsetY: screenY - bounds.y,
       lockedWidth,
       lockedHeight,
+      lastX: bounds.x,
+      lastY: bounds.y,
     };
 
     if (bounds.width !== lockedWidth || bounds.height !== lockedHeight) {
@@ -278,15 +288,20 @@ export class WindowManager {
 
     const nextX = Math.round(screenX - activeDragState.offsetX);
     const nextY = Math.round(screenY - activeDragState.offsetY);
-    targetWindow.setBounds(
-      {
-        x: nextX,
-        y: nextY,
-        width: activeDragState.lockedWidth,
-        height: activeDragState.lockedHeight,
-      },
-      false,
-    );
+    const deltaX = nextX - activeDragState.lastX;
+    const deltaY = nextY - activeDragState.lastY;
+
+    if (deltaX === 0 && deltaY === 0) {
+      return;
+    }
+
+    targetWindow.setPosition(nextX, nextY, false);
+    if (activeDragState.role === "pet") {
+      this.translateOverlayWindow(deltaX, deltaY);
+    }
+
+    activeDragState.lastX = nextX;
+    activeDragState.lastY = nextY;
   }
 
   endWindowDrag(targetWindow: BrowserWindow | null): void {
@@ -401,9 +416,15 @@ export class WindowManager {
       this.broadcastWindowState();
     });
     petWindow.on("move", () => {
+      if (this.activeDragState?.targetWindow === petWindow) {
+        return;
+      }
       this.positionOverlayWindow();
     });
     petWindow.on("resize", () => {
+      if (this.activeDragState?.targetWindow === petWindow) {
+        return;
+      }
       this.positionOverlayWindow();
     });
     petWindow.on("closed", () => {
@@ -692,5 +713,39 @@ export class WindowManager {
         false,
       );
     }
+  }
+
+  private resizeOverlayWindowPreservingPosition(nextHeight: number): void {
+    const overlayWindow = this.windows.overlay;
+    if (!overlayWindow || overlayWindow.isDestroyed()) {
+      return;
+    }
+
+    const bounds = overlayWindow.getBounds();
+    if (bounds.height === nextHeight) {
+      return;
+    }
+
+    overlayWindow.setBounds(
+      {
+        ...bounds,
+        height: nextHeight,
+      },
+      false,
+    );
+
+    if (this.activeDragState?.targetWindow === overlayWindow) {
+      this.activeDragState.lockedHeight = nextHeight;
+    }
+  }
+
+  private translateOverlayWindow(deltaX: number, deltaY: number): void {
+    const overlayWindow = this.windows.overlay;
+    if (!overlayWindow || overlayWindow.isDestroyed() || !overlayWindow.isVisible()) {
+      return;
+    }
+
+    const bounds = overlayWindow.getBounds();
+    overlayWindow.setPosition(bounds.x + deltaX, bounds.y + deltaY, false);
   }
 }

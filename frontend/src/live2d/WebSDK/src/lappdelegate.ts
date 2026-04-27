@@ -125,30 +125,21 @@ export class LAppDelegate {
    */
   public onResize(): void {
     this._resizeCanvas();
-    
-    // Ensure view is properly initialized
-    if (this._view && canvas) {
-      this._view.initialize();
-      this._view.initializeSprite();
-      
-      // Try to get and center the model
-      const manager = LAppLive2DManager.getInstance();
-      if (manager) {
-        const model = manager.getModel(0);
-        if (model) {
-          // Keep model centered in canvas
-          const width = canvas!.width;
-          const height = canvas!.height;
-          if (width > 0 && height > 0) {
-            // @ts-ignore
-            if (model.setPosition) {
-              // @ts-ignore
-              model.setPosition(width / 2, height / 2);
-            }
-          }
-        }
-      }
+
+    if (!this._view || !canvas) {
+      return;
     }
+
+    const width = canvas.width;
+    const height = canvas.height;
+    if (width === this._lastResizeWidth && height === this._lastResizeHeight) {
+      return;
+    }
+
+    this._lastResizeWidth = width;
+    this._lastResizeHeight = height;
+    this._view.initialize();
+    this._view.initializeSprite();
   }
 
   /**
@@ -352,6 +343,8 @@ export class LAppDelegate {
     this._rafId = null;
     this._boundCanvas = null;
     this._useTouchEvents = false;
+    this._lastResizeWidth = 0;
+    this._lastResizeHeight = 0;
 
     this._cubismOption = new Option();
     this._view = new LAppView();
@@ -405,6 +398,8 @@ export class LAppDelegate {
   _rafId: number | null; // requestAnimationFrame id
   _boundCanvas: HTMLCanvasElement | null; // 当前绑定监听器的 canvas
   _useTouchEvents: boolean; // 当前是否使用 touch 事件绑定
+  _lastResizeWidth: number; // last canvas width handled by onResize
+  _lastResizeHeight: number; // last canvas height handled by onResize
   _textureManager: LAppTextureManager | null; // テクスチャマネージャー // 纹理管理器
 }
 

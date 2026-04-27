@@ -100,6 +100,8 @@ export function useLive2dRenderer(selectedModel: Ref<ModelSummary | null>) {
   const resizeLive2D = shallowRef<null | (() => void)>(null);
   let resizeObserver: ResizeObserver | null = null;
   let disposeForceRedrawListener: (() => void) | null = null;
+  let lastCanvasWidth = 0;
+  let lastCanvasHeight = 0;
 
   const statusLabel = computed(() => {
     if (renderStatus.value === "ready") {
@@ -114,30 +116,52 @@ export function useLive2dRenderer(selectedModel: Ref<ModelSummary | null>) {
     return "Live2D Idle";
   });
 
-  function syncCanvasSize() {
+  function isPetWindowDragging(): boolean {
+    return Boolean(
+      (window as Window & { __ag99PetWindowDragging?: boolean }).__ag99PetWindowDragging,
+    );
+  }
+
+  function syncCanvasSize(): boolean {
     const container = containerRef.value;
     const canvas = canvasRef.value;
     if (!container || !canvas) {
-      return;
+      return false;
     }
 
     const rect = container.getBoundingClientRect();
     const width = Math.max(rect.width, 1);
     const height = Math.max(rect.height, 1);
     const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, LIVE2D_RENDER_DPR_CAP));
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(height * dpr);
+    const nextCanvasWidth = Math.round(width * dpr);
+    const nextCanvasHeight = Math.round(height * dpr);
+    const changed =
+      nextCanvasWidth !== lastCanvasWidth
+      || nextCanvasHeight !== lastCanvasHeight
+      || canvas.width !== nextCanvasWidth
+      || canvas.height !== nextCanvasHeight;
+
+    if (changed) {
+      canvas.width = nextCanvasWidth;
+      canvas.height = nextCanvasHeight;
+      lastCanvasWidth = nextCanvasWidth;
+      lastCanvasHeight = nextCanvasHeight;
+    }
+
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
+    return changed;
   }
 
   function forceLive2DRedraw() {
-    syncCanvasSize();
-    resizeLive2D.value?.();
+    if (syncCanvasSize()) {
+      resizeLive2D.value?.();
+    }
 
     window.requestAnimationFrame(() => {
-      syncCanvasSize();
-      resizeLive2D.value?.();
+      if (syncCanvasSize()) {
+        resizeLive2D.value?.();
+      }
     });
   }
 
@@ -161,9 +185,11 @@ export function useLive2dRenderer(selectedModel: Ref<ModelSummary | null>) {
       updateModelConfig(baseUrl, modelDir, modelFileName);
       initializeLive2D();
       await nextTick();
-      syncCanvasSize();
+      const didResizeCanvas = syncCanvasSize();
       resizeLive2D.value = () => LAppDelegate.getInstance().onResize();
-      resizeLive2D.value();
+      if (didResizeCanvas) {
+        resizeLive2D.value();
+      }
 
       mountedModelUrl.value = model.model_url;
       renderStatus.value = "ready";
@@ -177,8 +203,13 @@ export function useLive2dRenderer(selectedModel: Ref<ModelSummary | null>) {
 
   onMounted(() => {
     resizeObserver = new ResizeObserver(() => {
-      syncCanvasSize();
-      resizeLive2D.value?.();
+      if (isPetWindowDragging()) {
+        return;
+      }
+
+      if (syncCanvasSize()) {
+        resizeLive2D.value?.();
+      }
     });
 
     if (containerRef.value) {
@@ -224,6 +255,8 @@ export function useLive2dRenderer(selectedModel: Ref<ModelSummary | null>) {
     disposeForceRedrawListener = null;
     mountedModelUrl.value = "";
     resizeLive2D.value = null;
+    lastCanvasWidth = 0;
+    lastCanvasHeight = 0;
 
     try {
       const { LAppDelegate } = await import("@cubismsdksamples/lappdelegate");
