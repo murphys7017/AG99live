@@ -6,12 +6,14 @@ import type {
   DesktopBaseActionPreviewAtom,
 } from "../types/desktop";
 import type {
-  DirectParameterAxisName,
-  DirectParameterPlan,
+  DirectParameterPlanTiming,
+  SemanticMotionIntent,
 } from "../types/protocol";
+import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 
 const props = defineProps<{
   preview: DesktopBaseActionPreview | null;
+  semanticProfile: SemanticAxisProfile | null;
   allowPlay?: boolean;
 }>();
 const bridge = useDesktopBridge();
@@ -28,20 +30,7 @@ const durationScale = ref(1);
 const intensityScale = ref(1);
 const stepGapMs = ref(120);
 
-const DIRECT_PARAMETER_AXIS_NAMES: readonly DirectParameterAxisName[] = [
-  "head_yaw",
-  "head_roll",
-  "head_pitch",
-  "body_yaw",
-  "body_roll",
-  "gaze_x",
-  "gaze_y",
-  "eye_open_left",
-  "eye_open_right",
-  "mouth_open",
-  "mouth_smile",
-  "brow_bias",
-];
+const LLM_CONTROLLABLE_ROLES = new Set(["primary", "hint"]);
 
 const channelsByName = computed(() => {
   const channels = props.preview?.channels ?? [];
@@ -141,6 +130,13 @@ const selectedAtoms = computed<DesktopBaseActionPreviewAtom[]>(() => {
     .map((atomId) => map.get(atomId))
     .filter((atom): atom is DesktopBaseActionPreviewAtom => Boolean(atom));
 });
+const controllableAxisIds = computed(() =>
+  new Set(
+    (props.semanticProfile?.axes ?? [])
+      .filter((axis) => LLM_CONTROLLABLE_ROLES.has(axis.control_role))
+      .map((axis) => axis.id),
+  ),
+);
 function buildPlanStep(
   atom: DesktopBaseActionPreviewAtom,
   startMs: number,
@@ -197,30 +193,29 @@ const generatedPlan = computed(() => {
       ? Math.max(...steps.map((step) => step.duration_ms), 0)
       : Math.max(cursorMs - Math.max(0, Math.round(stepGapMs.value)), 0);
 
-  const axisValues = buildAxisValuesFromAtoms(selectedAtoms.value);
-  const expressive = DIRECT_PARAMETER_AXIS_NAMES.some(
-    (axisName) => axisValues[axisName].value !== 50,
-  );
+  const axisValues = buildSemanticAxisValuesFromAtoms(selectedAtoms.value);
+  const expressive = Object.values(axisValues).some((axisValue) => axisValue.value !== 50);
   const timing = buildParameterPlanTiming(
     expressive ? Math.max(totalDurationMs, 900) : Math.max(totalDurationMs, 480),
     expressive ? "expressive" : "idle",
   );
-  const plan: DirectParameterPlan = {
-    schema_version: "engine.parameter_plan.v1",
+  const profile = props.semanticProfile;
+  const intent: SemanticMotionIntent = {
+    schema_version: "engine.motion_intent.v2",
+    profile_id: profile?.profile_id ?? "",
+    profile_revision: profile?.revision ?? 0,
+    model_id: profile?.model_id ?? "",
     mode: expressive ? "expressive" : "idle",
     emotion_label: selectedAtoms.value[0]?.semanticPolarity || "preview",
-    timing,
-    key_axes: axisValues,
-    supplementary_params: [],
+    duration_hint_ms: timing.duration_ms,
+    axes: axisValues,
     summary: {
-      key_axes_count: DIRECT_PARAMETER_AXIS_NAMES.length,
-      supplementary_count: 0,
-      target_duration_ms: timing.duration_ms,
+      axis_count: Object.keys(axisValues).length,
     },
   };
 
   return {
-    ...plan,
+    ...intent,
     selected_atom_count: selectedAtoms.value.length,
     channels: [...new Set(selectedAtoms.value.map((atom) => atom.channel))],
     parameters: {
@@ -230,9 +225,7 @@ const generatedPlan = computed(() => {
       combination_mode: planMode.value,
     },
     summary: {
-      key_axes_count: DIRECT_PARAMETER_AXIS_NAMES.length,
-      supplementary_count: 0,
-      target_duration_ms: timing.duration_ms,
+      axis_count: Object.keys(axisValues).length,
       total_duration_ms: totalDurationMs,
       step_count: steps.length,
     },
@@ -243,7 +236,11 @@ const generatedPlanText = computed(() =>
   JSON.stringify(generatedPlan.value, null, 2),
 );
 const playButtonEnabled = computed(
-  () => Boolean(props.allowPlay) && selectedAtoms.value.length > 0,
+  () =>
+    Boolean(props.allowPlay)
+    && Boolean(props.semanticProfile)
+    && selectedAtoms.value.length > 0
+    && Object.keys(buildSemanticAxisValuesFromAtoms(selectedAtoms.value)).length > 0,
 );
 const playStatusText = ref("");
 
@@ -340,7 +337,9 @@ function resetParameterExcludeKeywords(): void {
 
 function playPreviewPlan(): void {
   if (!playButtonEnabled.value) {
-    playStatusText.value = "请先选择至少一个动作原子。";
+    playStatusText.value = props.semanticProfile
+      ? "请至少选择一个能映射到主轴/提示轴的动作原子。"
+      : "当前模型还没有 semantic profile，无法生成 v2 动作预览。";
     return;
   }
   bridge.sendCommand({
@@ -378,14 +377,11 @@ function semanticPolarityToDirection(polarity: string): number {
 
 function buildAxisValuesFromAtoms(
   atoms: DesktopBaseActionPreviewAtom[],
-): DirectParameterPlan["key_axes"] {
-  const axisValues = Object.fromEntries(
-    DIRECT_PARAMETER_AXIS_NAMES.map((axisName) => [axisName, { value: 50 }]),
-  ) as DirectParameterPlan["key_axes"];
-
+): SemanticMotionIntent["axes"] {
+  const axisValues: SemanticMotionIntent["axes"] = {};
   const strongestByChannel = new Map<string, DesktopBaseActionPreviewAtom>();
   for (const atom of atoms) {
-    if (!DIRECT_PARAMETER_AXIS_NAMES.includes(atom.channel as DirectParameterAxisName)) {
+    if (!controllableAxisIds.value.has(atom.channel)) {
       continue;
     }
     const current = strongestByChannel.get(atom.channel);
@@ -402,7 +398,7 @@ function buildAxisValuesFromAtoms(
     }
   }
 
-  for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
+  for (const axisName of controllableAxisIds.value) {
     const atom = strongestByChannel.get(axisName);
     if (!atom) {
       continue;
@@ -424,10 +420,16 @@ function buildAxisValuesFromAtoms(
   return axisValues;
 }
 
+function buildSemanticAxisValuesFromAtoms(
+  atoms: DesktopBaseActionPreviewAtom[],
+): SemanticMotionIntent["axes"] {
+  return buildAxisValuesFromAtoms(atoms);
+}
+
 function buildParameterPlanTiming(
   durationMsRaw: number,
   mode: "expressive" | "idle",
-): DirectParameterPlan["timing"] {
+): DirectParameterPlanTiming {
   const durationMs = Math.max(400, Math.min(6000, Math.round(durationMsRaw)));
   if (mode === "idle") {
     const idleDurationMs = Math.max(480, Math.min(durationMs, 2200));

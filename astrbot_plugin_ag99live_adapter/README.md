@@ -75,4 +75,4 @@ pip install -r astrbot_plugin_ag99live_adapter/requirements.txt
 python -m pytest astrbot_plugin_ag99live_adapter/tests -q
 ```
 
-当前基线：`82 passed`（2026-04-26）。
+当前基线：`101 passed`（2026-04-27）。

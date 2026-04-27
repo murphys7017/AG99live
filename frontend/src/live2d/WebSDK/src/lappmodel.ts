@@ -1448,166 +1448,7 @@ export class LAppModel extends CubismUserModel {
       return false;
     }
 
-    if (parsed.plan.schema_version === "engine.parameter_plan.v2") {
-      return this.startSemanticParameterPlan(parsed);
-    }
-
-    const effectiveCalibrationProfile = this.mergeDirectParameterCalibrationProfiles(
-      parsed.plan.calibration_profile,
-      parsed.plan.model_calibration_profile,
-    );
-    const axisBindings: DirectParameterAxisBinding[] = [];
-    const missingAxisNames: string[] = [];
-    let usesCalibration = false;
-    let usesBindingProfile = false;
-    for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
-      const axisConfig = parsed.plan.key_axes[axisName];
-      const axisValue = Number(axisConfig?.value ?? 50);
-      const candidates = this.resolveAxisParameterCandidates(
-        axisName,
-        effectiveCalibrationProfile,
-      );
-      let resolvedBinding: DirectParameterAxisBinding | null = null;
-
-      for (const parameterName of candidates) {
-        const resolved = this.resolveWritableParameter(parameterName);
-        if (!resolved) {
-          continue;
-        }
-        resolvedBinding = {
-          axisName,
-          axisValue,
-          parameterName,
-          parameterId: resolved.parameterId,
-          parameterIndex: resolved.parameterIndex,
-          calibration: this.resolveAxisCalibration(
-            axisName,
-            effectiveCalibrationProfile,
-            parameterName,
-          ),
-          directTargetValue: null,
-          weight: 1,
-        };
-        break;
-      }
-
-      if (!resolvedBinding) {
-        console.warn("[LAppModel] axis not resolvable:", axisName, "candidates=", candidates);
-        missingAxisNames.push(axisName);
-        continue;
-      }
-      if (effectiveCalibrationProfile?.axes?.[axisName]) {
-        usesBindingProfile = true;
-      }
-      if (this.axisCalibrationInfluencesExecution(resolvedBinding.calibration)) {
-        usesCalibration = true;
-      }
-      axisBindings.push(resolvedBinding);
-    }
-
-    if (
-      axisBindings.length === 0
-      || missingAxisNames.length > DIRECT_MAX_MISSING_AXIS_BINDINGS
-    ) {
-      const failureReason = missingAxisNames.length > 0
-        ? `missing_axis_parameter:${missingAxisNames.join(",")}`
-        : "missing_axis_parameter";
-      this.stopDirectParameterPlan(failureReason);
-      return false;
-    }
-
-    if (missingAxisNames.length > 0) {
-      console.warn(
-        "[LAppModel] startDirectParameterPlan: partial axis binding enabled. missing=",
-        missingAxisNames,
-        "resolved=",
-        axisBindings.map((item) => item.axisName),
-      );
-    }
-
-    const axisParameterIndices = new Set<number>(
-      axisBindings.map((binding) => binding.parameterIndex),
-    );
-    const supplementaryBindings: DirectSupplementaryBinding[] = [];
-    const supplementaryParameterIndices = new Set<number>();
-    const supplementaryBindingFailures: string[] = [];
-    const recordSupplementaryBindingFailure = (reason: string): boolean => {
-      supplementaryBindingFailures.push(reason);
-      console.warn(
-        "[LAppModel] supplementary binding skipped:",
-        reason,
-        `(${supplementaryBindingFailures.length}/${DIRECT_MAX_SUPPLEMENTARY_BINDING_FAILURES})`,
-      );
-      return supplementaryBindingFailures.length > DIRECT_MAX_SUPPLEMENTARY_BINDING_FAILURES;
-    };
-    for (const item of parsed.plan.supplementary_params) {
-      const parameterIdRaw = String(item.parameter_id || "").trim();
-      const sourceAtomId = String(item.source_atom_id || "").trim();
-      const channel = String(item.channel || "").trim();
-      const resolved = this.resolveWritableParameter(parameterIdRaw);
-      if (!resolved) {
-        if (recordSupplementaryBindingFailure(`missing_supplementary_parameter:${parameterIdRaw}`)) {
-          this.stopDirectParameterPlan(
-            `too_many_supplementary_binding_failures:${supplementaryBindingFailures.join(",")}`,
-          );
-          return false;
-        }
-        continue;
-      }
-      if (axisParameterIndices.has(resolved.parameterIndex)) {
-        if (recordSupplementaryBindingFailure(`overlapping_supplementary_parameter:${parameterIdRaw}`)) {
-          this.stopDirectParameterPlan(
-            `too_many_supplementary_binding_failures:${supplementaryBindingFailures.join(",")}`,
-          );
-          return false;
-        }
-        continue;
-      }
-      if (supplementaryParameterIndices.has(resolved.parameterIndex)) {
-        if (recordSupplementaryBindingFailure(`duplicate_supplementary_parameter:${parameterIdRaw}`)) {
-          this.stopDirectParameterPlan(
-            `too_many_supplementary_binding_failures:${supplementaryBindingFailures.join(",")}`,
-          );
-          return false;
-        }
-        continue;
-      }
-      supplementaryParameterIndices.add(resolved.parameterIndex);
-
-      supplementaryBindings.push({
-        parameterIdRaw,
-        targetValue: Number(item.target_value || 0),
-        weight: Number(item.weight || 0),
-        sourceAtomId,
-        channel,
-        parameterId: resolved.parameterId,
-        parameterIndex: resolved.parameterIndex,
-      });
-    }
-    if (supplementaryBindingFailures.length > 0) {
-      console.warn(
-        "[LAppModel] startDirectParameterPlan: supplementary partial binding enabled. skipped=",
-        supplementaryBindingFailures,
-        "resolved=",
-        supplementaryBindings.map((item) => item.parameterIdRaw),
-      );
-    }
-
-    console.info("[LAppModel] Axis bindings ready and supplementary params within failure threshold. Activating plan.");
-    this._directParameterPlanState = {
-      mode: parsed.plan.mode,
-      emotionLabel: parsed.plan.emotion_label,
-      timing: parsed.timing,
-      axisBindings,
-      supplementaryBindings,
-      semanticBindings: [],
-      usesCalibration,
-      usesBindingProfile,
-      startedAtMs: performance.now(),
-      diagnosticFrameCount: 0,
-    };
-    this._directParameterPlanError = "";
-    return true;
+    return this.startSemanticParameterPlan(parsed);
   }
 
   public stopDirectParameterPlan(reason = ""): void {
@@ -1742,50 +1583,6 @@ export class LAppModel extends CubismUserModel {
       if (shouldLogFrame) {
         console.info(`[LAppModel] v2 setParam axis=${item.axisId} param=${item.parameterIdRaw} input=${item.inputValue} base=${baseValue} target=${item.targetValue} weight=${item.weight} eased=${blendedValue} readback=${readbackValue} easing=${easing}`);
       }
-    }
-
-    for (const axis of planState.axisBindings) {
-      if (!this.isParameterIndexWritable(axis.parameterIndex)) {
-        console.warn(`[LAppModel] applyDirectParameterPlanOverlay: axis not writable axis=${axis.axisName} param=${axis.parameterName} idx=${axis.parameterIndex}`);
-        return `axis_parameter_not_writable:${axis.axisName}`;
-      }
-
-      const minValue = this._model.getParameterMinimumValue(axis.parameterIndex);
-      const maxValue = this._model.getParameterMaximumValue(axis.parameterIndex);
-      const baseValue = this._model.getParameterValueByIndex(axis.parameterIndex);
-      const targetValue = this.mapAxisValueForExecution(
-        axis.axisValue,
-        planState.mode,
-        axis.calibration,
-        minValue,
-        maxValue,
-      );
-      let blendedValue = baseValue + (targetValue - baseValue) * easing;
-
-      this._model.setParameterValueById(axis.parameterId, blendedValue);
-      const readbackValue = this._model.getParameterValueByIndex(axis.parameterIndex);
-      const writeMismatch = Math.abs(readbackValue - blendedValue) > 0.001;
-      if (writeMismatch) {
-        console.warn(
-          `[LAppModel] setParam readback mismatch axis=${axis.axisName} param=${axis.parameterName} wrote=${blendedValue} readback=${readbackValue}`,
-        );
-      }
-      if (shouldLogFrame) {
-        console.info(`[LAppModel] setParam axis=${axis.axisName} param=${axis.parameterName} axisVal=${axis.axisValue} min=${minValue} max=${maxValue} base=${baseValue} target=${targetValue} eased=${blendedValue} readback=${readbackValue} easing=${easing} calibrated=${this.axisCalibrationInfluencesExecution(axis.calibration)}`);
-      }
-    }
-
-    for (const item of planState.supplementaryBindings) {
-      if (!this.isParameterIndexWritable(item.parameterIndex)) {
-        console.warn(`[LAppModel] applyDirectParameterPlanOverlay: supp not writable param=${item.parameterIdRaw} idx=${item.parameterIndex}`);
-        return `supplementary_parameter_not_writable:${item.parameterIdRaw}`;
-      }
-
-      const minValue = this._model.getParameterMinimumValue(item.parameterIndex);
-      const maxValue = this._model.getParameterMaximumValue(item.parameterIndex);
-      const range = maxValue - minValue;
-      const delta = item.targetValue * 0.5 * range * item.weight * easing;
-      this._model.addParameterValueById(item.parameterId, delta);
     }
 
     if (shouldLogFrame) {
@@ -2462,7 +2259,7 @@ export class LAppModel extends CubismUserModel {
 
     const payload = plan as Record<string, any>;
     const schemaVersion = String(payload.schema_version || "").trim();
-    if (schemaVersion !== "engine.parameter_plan.v1" && schemaVersion !== "engine.parameter_plan.v2") {
+    if (schemaVersion !== "engine.parameter_plan.v2") {
       console.warn("[LAppModel] parseDirectParameterPlan: invalid_schema_version — got:", schemaVersion);
       return fail("invalid_schema_version");
     }
@@ -2513,166 +2310,79 @@ export class LAppModel extends CubismUserModel {
       ),
     };
 
-    if (schemaVersion === "engine.parameter_plan.v2") {
-      const profileId = String(payload.profile_id || "").trim();
-      const modelId = String(payload.model_id || "").trim();
-      const profileRevision = payload.profile_revision;
-      if (!profileId || !modelId) {
-        return fail("v2_profile_ref_empty");
-      }
-      if (typeof profileRevision !== "number" || !Number.isInteger(profileRevision) || profileRevision <= 0) {
-        return fail("v2_profile_revision_invalid");
-      }
-
-      const parametersPayload = payload.parameters;
-      if (!Array.isArray(parametersPayload) || parametersPayload.length === 0) {
-        return fail("v2_parameters_empty");
-      }
-
-      const parameterIds = new Set<string>();
-      const parameters: Array<{
-        axis_id: string;
-        parameter_id: string;
-        target_value: number;
-        weight: number;
-        input_value: number | null;
-        source: string;
-      }> = [];
-      for (const item of parametersPayload) {
-        if (!item || typeof item !== "object") {
-          return fail("v2_parameter_item_not_object");
-        }
-        const axisId = String(item.axis_id || "").trim();
-        const parameterId = String(item.parameter_id || "").trim();
-        const targetValue = item.target_value;
-        const weight = item.weight;
-        const inputValue = item.input_value === undefined || item.input_value === null
-          ? null
-          : item.input_value;
-        if (!axisId || !parameterId) {
-          return fail("v2_parameter_required_field_missing");
-        }
-        if (parameterIds.has(parameterId)) {
-          return fail(`v2_duplicate_parameter:${parameterId}`);
-        }
-        if (typeof targetValue !== "number" || typeof weight !== "number" || !Number.isFinite(targetValue) || !Number.isFinite(weight)) {
-          return fail("v2_parameter_not_number");
-        }
-        if (inputValue !== null && (typeof inputValue !== "number" || !Number.isFinite(inputValue))) {
-          return fail("v2_parameter_input_value_not_number");
-        }
-        if (weight < 0 || weight > 1) {
-          return fail("v2_parameter_weight_out_of_range");
-        }
-        const source = item.source === undefined || item.source === null
-          ? "semantic_axis"
-          : String(item.source || "").trim();
-        if (source !== "semantic_axis" && source !== "coupling" && source !== "manual") {
-          return fail("v2_parameter_source_invalid");
-        }
-        parameterIds.add(parameterId);
-        parameters.push({
-          axis_id: axisId,
-          parameter_id: parameterId,
-          target_value: targetValue,
-          weight,
-          input_value: inputValue,
-          source,
-        });
-      }
-
-      return {
-        plan: {
-          schema_version: "engine.parameter_plan.v2",
-          profile_id: profileId,
-          profile_revision: profileRevision,
-          model_id: modelId,
-          mode,
-          emotion_label: emotionLabel,
-          timing: {
-            duration_ms: timing.durationMs,
-            blend_in_ms: timing.blendInMs,
-            hold_ms: timing.holdMs,
-            blend_out_ms: timing.blendOutMs,
-          },
-          parameters,
-        },
-        timing,
-        reason: "",
-      };
+    const profileId = String(payload.profile_id || "").trim();
+    const modelId = String(payload.model_id || "").trim();
+    const profileRevision = payload.profile_revision;
+    if (!profileId || !modelId) {
+      return fail("v2_profile_ref_empty");
+    }
+    if (typeof profileRevision !== "number" || !Number.isInteger(profileRevision) || profileRevision <= 0) {
+      return fail("v2_profile_revision_invalid");
     }
 
-    const keyAxesPayload = payload.key_axes;
-    if (!keyAxesPayload || typeof keyAxesPayload !== "object") {
-      return fail("key_axes_not_object");
-    }
-    const keyAxes: Record<string, { value: number }> = {};
-    for (const axisName of DIRECT_PARAMETER_AXIS_NAMES) {
-      const axisPayload = keyAxesPayload[axisName];
-      if (!axisPayload || typeof axisPayload !== "object") {
-        return fail(`missing_axis:${axisName}`);
-      }
-      const axisValue = Number(axisPayload.value);
-      if (!Number.isFinite(axisValue)) {
-        return fail(`axis_value_not_number:${axisName}`);
-      }
-      if (axisValue < 0 || axisValue > 100) {
-        return fail(`axis_value_out_of_range:${axisName}`);
-      }
-      keyAxes[axisName] = { value: axisValue };
+    const parametersPayload = payload.parameters;
+    if (!Array.isArray(parametersPayload) || parametersPayload.length === 0) {
+      return fail("v2_parameters_empty");
     }
 
-    const supplementaryPayload = payload.supplementary_params;
-    if (!Array.isArray(supplementaryPayload)) {
-      return fail("supplementary_not_list");
-    }
-    const supplementaryParams: Array<{
+    const parameterIds = new Set<string>();
+    const parameters: Array<{
+      axis_id: string;
       parameter_id: string;
       target_value: number;
       weight: number;
-      source_atom_id: string;
-      channel: string;
+      input_value: number | null;
+      source: string;
     }> = [];
-    for (const item of supplementaryPayload) {
+    for (const item of parametersPayload) {
       if (!item || typeof item !== "object") {
-        return fail("supplementary_item_not_object");
+        return fail("v2_parameter_item_not_object");
       }
+      const axisId = String(item.axis_id || "").trim();
       const parameterId = String(item.parameter_id || "").trim();
-      const sourceAtomId = String(item.source_atom_id || "").trim();
-      const channel = String(item.channel || "").trim();
-      const targetValue = Number(item.target_value);
-      const weight = Number(item.weight);
-      if (!parameterId || !sourceAtomId || !channel) {
-        return fail("supplementary_required_field_missing");
+      const targetValue = item.target_value;
+      const weight = item.weight;
+      const inputValue = item.input_value === undefined || item.input_value === null
+        ? null
+        : item.input_value;
+      if (!axisId || !parameterId) {
+        return fail("v2_parameter_required_field_missing");
       }
-      if (!Number.isFinite(targetValue) || !Number.isFinite(weight)) {
-        return fail("supplementary_not_number");
+      if (parameterIds.has(parameterId)) {
+        return fail(`v2_duplicate_parameter:${parameterId}`);
       }
-      if (targetValue < -1 || targetValue > 1) {
-        return fail("supplementary_target_value_out_of_range");
+      if (typeof targetValue !== "number" || typeof weight !== "number" || !Number.isFinite(targetValue) || !Number.isFinite(weight)) {
+        return fail("v2_parameter_not_number");
+      }
+      if (inputValue !== null && (typeof inputValue !== "number" || !Number.isFinite(inputValue))) {
+        return fail("v2_parameter_input_value_not_number");
       }
       if (weight < 0 || weight > 1) {
-        return fail("supplementary_weight_out_of_range");
+        return fail("v2_parameter_weight_out_of_range");
       }
-      supplementaryParams.push({
+      const source = item.source === undefined || item.source === null
+        ? "semantic_axis"
+        : String(item.source || "").trim();
+      if (source !== "semantic_axis" && source !== "coupling" && source !== "manual") {
+        return fail("v2_parameter_source_invalid");
+      }
+      parameterIds.add(parameterId);
+      parameters.push({
+        axis_id: axisId,
         parameter_id: parameterId,
         target_value: targetValue,
         weight,
-        source_atom_id: sourceAtomId,
-        channel,
+        input_value: inputValue,
+        source,
       });
     }
 
-    const calibrationProfile = this.normalizeDirectParameterCalibrationProfile(
-      payload.calibration_profile,
-    );
-    const modelCalibrationProfile = this.normalizeDirectParameterCalibrationProfile(
-      payload.model_calibration_profile,
-    );
-
     return {
       plan: {
-        schema_version: "engine.parameter_plan.v1",
+        schema_version: "engine.parameter_plan.v2",
+        profile_id: profileId,
+        profile_revision: profileRevision,
+        model_id: modelId,
         mode,
         emotion_label: emotionLabel,
         timing: {
@@ -2681,10 +2391,7 @@ export class LAppModel extends CubismUserModel {
           hold_ms: timing.holdMs,
           blend_out_ms: timing.blendOutMs,
         },
-        key_axes: keyAxes,
-        supplementary_params: supplementaryParams,
-        calibration_profile: calibrationProfile,
-        model_calibration_profile: modelCalibrationProfile,
+        parameters,
       },
       timing,
       reason: "",

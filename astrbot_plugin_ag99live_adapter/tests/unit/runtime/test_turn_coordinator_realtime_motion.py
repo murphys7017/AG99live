@@ -23,7 +23,10 @@ _AXIS_NAMES = [
 
 def _build_valid_parameter_plan(mode: str = "expressive") -> dict:
     return {
-        "schema_version": "engine.parameter_plan.v1",
+        "schema_version": "engine.parameter_plan.v2",
+        "profile_id": "pet.semantic.v1",
+        "profile_revision": 2,
+        "model_id": "pet",
         "mode": mode,
         "emotion_label": "test",
         "timing": {
@@ -32,27 +35,14 @@ def _build_valid_parameter_plan(mode: str = "expressive") -> dict:
             "hold_ms": 840,
             "blend_out_ms": 240,
         },
-        "key_axes": {
-            "head_yaw": {"value": 62},
-            "head_roll": {"value": 50},
-            "head_pitch": {"value": 50},
-            "body_yaw": {"value": 50},
-            "body_roll": {"value": 50},
-            "gaze_x": {"value": 50},
-            "gaze_y": {"value": 50},
-            "eye_open_left": {"value": 52},
-            "eye_open_right": {"value": 52},
-            "mouth_open": {"value": 48},
-            "mouth_smile": {"value": 64},
-            "brow_bias": {"value": 56},
-        },
-        "supplementary_params": [
+        "parameters": [
             {
+                "axis_id": "head_yaw",
                 "parameter_id": "ParamCheek",
                 "target_value": 0.42,
                 "weight": 0.36,
-                "source_atom_id": "head_yaw.positive.01",
-                "channel": "head_yaw",
+                "input_value": 62,
+                "source": "semantic_axis",
             }
         ],
     }
@@ -60,26 +50,19 @@ def _build_valid_parameter_plan(mode: str = "expressive") -> dict:
 
 def _build_valid_motion_intent(mode: str = "expressive") -> dict:
     return {
-        "schema_version": "engine.motion_intent.v1",
+        "schema_version": "engine.motion_intent.v2",
+        "profile_id": "pet.semantic.v1",
+        "profile_revision": 2,
+        "model_id": "pet",
         "mode": mode,
         "emotion_label": "test",
         "duration_hint_ms": 1200,
-        "key_axes": {
+        "axes": {
             "head_yaw": {"value": 62},
-            "head_roll": {"value": 50},
-            "head_pitch": {"value": 50},
-            "body_yaw": {"value": 50},
-            "body_roll": {"value": 50},
-            "gaze_x": {"value": 50},
-            "gaze_y": {"value": 50},
-            "eye_open_left": {"value": 52},
-            "eye_open_right": {"value": 52},
-            "mouth_open": {"value": 48},
             "mouth_smile": {"value": 64},
-            "brow_bias": {"value": 56},
         },
         "summary": {
-            "key_axes_count": 12,
+            "axis_count": 2,
         },
     }
 
@@ -280,7 +263,7 @@ def test_extract_inline_motion_plan_strips_valid_tag(install_fake_astrbot, monke
     assert "hello" in text.lower()
     assert "world" in text.lower()
     assert isinstance(plan, dict)
-    assert plan.get("schema_version") == "engine.motion_intent.v1"
+    assert plan.get("schema_version") == "engine.motion_intent.v2"
     assert mode == "inline"
 
 
@@ -798,7 +781,7 @@ def test_emit_message_chain_uses_raw_reply_text_override_for_inline_extraction(
     assert "world" in output_text.lower()
 
 
-def test_emit_message_chain_inline_intent_missing_axes_is_completed(
+def test_emit_message_chain_inline_v1_intent_is_rejected(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -868,9 +851,5 @@ def test_emit_message_chain_inline_intent_missing_axes_is_completed(
         )
     )
 
-    motion_payload = inline_broadcast.get("motion_payload")
-    assert isinstance(motion_payload, dict)
-    assert motion_payload["key_axes"]["head_yaw"]["value"] == 72
-    assert motion_payload["key_axes"]["head_roll"]["value"] == 50
-    assert len(motion_payload["key_axes"]) == len(_AXIS_NAMES)
+    assert "motion_payload" not in inline_broadcast
 

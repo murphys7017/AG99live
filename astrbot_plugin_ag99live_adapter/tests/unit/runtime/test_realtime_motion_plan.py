@@ -146,7 +146,10 @@ def _selector_completion_json(
 
 def _valid_parameter_plan() -> dict:
     return {
-        "schema_version": "engine.parameter_plan.v1",
+        "schema_version": "engine.parameter_plan.v2",
+        "profile_id": "DemoModel.semantic.v1",
+        "profile_revision": 3,
+        "model_id": "DemoModel",
         "mode": "expressive",
         "emotion_label": "test",
         "timing": {
@@ -155,54 +158,65 @@ def _valid_parameter_plan() -> dict:
             "hold_ms": 684,
             "blend_out_ms": 300,
         },
-        "key_axes": {
-            axis_name: {"value": 50}
-            for axis_name in _AXIS_NAMES
-        },
-        "supplementary_params": [
+        "parameters": [
             {
+                "axis_id": "head_yaw",
                 "parameter_id": "ParamCheek",
-                "target_value": 0.4,
+                "target_value": 0.2,
                 "weight": 0.6,
-                "source_atom_id": "test.atom",
-                "channel": "head_yaw",
+                "input_value": 62,
+                "source": "semantic_axis",
             }
         ],
     }
 
 
-def test_normalize_selector_output_defaults_missing_axes_with_warning(caplog) -> None:
-    selector = normalize_selector_output(
-        {
-            "emotion": "curious",
-            "mode": "parallel",
-            "duration_ms": 1200,
-            "axes": {"head_yaw": 82},
-        }
-    )
-
-    assert selector["axes"]["head_yaw"] == 82
-    assert selector["axes"]["head_roll"] == 50
-    assert "missing axes; defaulting to 50" in caplog.text
+def test_normalize_selector_output_requires_semantic_profile() -> None:
+    with pytest.raises(ValueError, match="semantic_profile_required"):
+        normalize_selector_output(
+            {
+                "emotion": "curious",
+                "mode": "parallel",
+                "duration_ms": 1200,
+                "axes": {"head_yaw": 82},
+            }
+        )
 
 
-def test_normalize_motion_intent_payload_defaults_missing_axes_with_warning(caplog) -> None:
+def test_normalize_motion_intent_payload_rejects_v1_legacy_axes() -> None:
+    with pytest.raises(ValueError, match="invalid_schema_version"):
+        normalize_motion_intent_payload(
+            {
+                "schema_version": "engine.motion_intent.v1",
+                "mode": "expressive",
+                "emotion_label": "curious",
+                "duration_hint_ms": 900,
+                "key_axes": {
+                    "head_yaw": {"value": 72},
+                },
+            }
+        )
+
+
+def test_normalize_motion_intent_payload_accepts_v2_semantic_axes() -> None:
     intent = normalize_motion_intent_payload(
         {
-            "schema_version": "engine.motion_intent.v1",
+            "schema_version": "engine.motion_intent.v2",
+            "profile_id": "DemoModel.semantic.v1",
+            "profile_revision": 3,
+            "model_id": "DemoModel",
             "mode": "expressive",
             "emotion_label": "curious",
             "duration_hint_ms": 900,
-            "key_axes": {
+            "axes": {
                 "head_yaw": {"value": 72},
             },
         }
     )
 
-    assert intent["key_axes"]["head_yaw"]["value"] == 72
-    assert intent["key_axes"]["head_roll"]["value"] == 50
-    assert intent["summary"]["key_axes_count"] == len(_AXIS_NAMES)
-    assert "Motion intent missing axes; defaulting to 50" in caplog.text
+    assert intent["schema_version"] == "engine.motion_intent.v2"
+    assert intent["axes"]["head_yaw"]["value"] == 72
+    assert intent["summary"]["axis_count"] == 1
 
 
 def test_normalize_selector_output_v2_clamps_out_of_range_axis(caplog) -> None:
@@ -404,38 +418,38 @@ def test_normalize_selector_output_rejects_missing_emotion() -> None:
     with pytest.raises(ValueError, match="selector_emotion_empty"):
         normalize_selector_output(
             {
-                "mode": "parallel",
+                "mode": "expressive",
                 "duration_ms": 1200,
-                "axes": _complete_axes(head_yaw=82),
-            }
+                "axes": {"head_yaw": 82},
+            },
+            semantic_profile=_semantic_profile(),
         )
 
 
 def test_normalize_selector_output_boosts_subtle_non_neutral_axes() -> None:
     selector = normalize_selector_output(
-        {
-            "emotion": "playful",
-            "mode": "parallel",
-            "duration_ms": 1200,
-            "axes": _complete_axes(head_roll=54, head_pitch=53, mouth_smile=55),
-        }
-    )
-    assert selector["axes"]["head_roll"] >= 60
-    assert selector["axes"]["mouth_smile"] >= 60
+            {
+                "emotion": "playful",
+                "mode": "expressive",
+                "duration_ms": 1200,
+                "axes": {"head_yaw": 54},
+            },
+            semantic_profile=_semantic_profile(),
+        )
+    assert selector["axes"]["head_yaw"] > 58
 
 
 def test_normalize_selector_output_keeps_neutral_near_center_axes() -> None:
     selector = normalize_selector_output(
-        {
-            "emotion": "neutral",
-            "mode": "parallel",
-            "duration_ms": 1200,
-            "axes": _complete_axes(head_roll=54, head_pitch=53, mouth_smile=55),
-        }
-    )
-    assert selector["axes"]["head_roll"] == 54
-    assert selector["axes"]["head_pitch"] == 53
-    assert selector["axes"]["mouth_smile"] == 55
+            {
+                "emotion": "neutral",
+                "mode": "expressive",
+                "duration_ms": 1200,
+                "axes": {"head_yaw": 54},
+            },
+            semantic_profile=_semantic_profile(),
+        )
+    assert selector["axes"]["head_yaw"] == 54
 
 
 def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
@@ -636,28 +650,28 @@ def test_realtime_motion_plan_generator_prompt_switches_off_context_and_few_shot
     assert "Platform context:" not in provider.last_prompt
 
 
-def test_validate_parameter_plan_payload_rejects_invalid_key_axes() -> None:
+def test_validate_parameter_plan_payload_rejects_v1_key_axes() -> None:
     invalid_plan = _valid_parameter_plan()
+    invalid_plan["schema_version"] = "engine.parameter_plan.v1"
     invalid_plan["key_axes"] = {
         "head_yaw": {"value": 50},
     }
 
     valid, reason = validate_parameter_plan_payload(invalid_plan)
     assert valid is False
-    assert reason == "key_axes_count_mismatch"
+    assert reason == "invalid_schema_version"
 
 
-def test_validate_parameter_plan_payload_rejects_missing_supplementary_fields() -> None:
+def test_validate_parameter_plan_payload_rejects_missing_v2_axis_id() -> None:
     broken_plan = _valid_parameter_plan()
-    broken_plan["supplementary_params"] = [
+    broken_plan["parameters"] = [
         {
             "parameter_id": "ParamCheek",
             "target_value": 0.4,
             "weight": 0.6,
-            "source_atom_id": "",
-            "channel": "head_yaw",
+            "source": "semantic_axis",
         }
     ]
     valid, reason = validate_parameter_plan_payload(broken_plan)
     assert valid is False
-    assert reason == "supplementary_source_atom_id_empty"
+    assert reason == "parameter_axis_id_empty"

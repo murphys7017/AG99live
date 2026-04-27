@@ -480,7 +480,7 @@ def _extract_debug_motion_payload(
         return motion_payload, TYPE_ENGINE_MOTION_PLAN, ""
 
     schema_version = str(payload.get("schema_version") or "").strip()
-    if schema_version in {"engine.motion_intent.v1", "engine.motion_intent.v2"}:
+    if schema_version == "engine.motion_intent.v2":
         try:
             motion_payload = normalize_motion_intent_payload(payload)
         except ValueError as exc:
@@ -490,7 +490,7 @@ def _extract_debug_motion_payload(
             return None, TYPE_ENGINE_MOTION_INTENT, f"Invalid intent payload: {reason}"
         return motion_payload, TYPE_ENGINE_MOTION_INTENT, ""
 
-    if schema_version in {"engine.parameter_plan.v1", "engine.parameter_plan.v2"}:
+    if schema_version == "engine.parameter_plan.v2":
         valid, reason = validate_parameter_plan_payload(payload)
         if not valid:
             return None, TYPE_ENGINE_MOTION_PLAN, f"Invalid plan payload: {reason}"

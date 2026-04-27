@@ -1,5 +1,7 @@
 # 动作链路职责重划与ModelEngine方案
 
+> 状态：历史设计文档。当前运行协议已经破坏性收口到 `engine.motion_intent.v2 -> engine.parameter_plan.v2`，不再保留 v1 兼容路径。当前有效状态以 `V2当前实现状态与下一步.md` 和 `主轴重构计划/README.md` 为准。
+
 快照日期：2026-04-25
 
 ## 结论

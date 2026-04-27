@@ -5,11 +5,7 @@
 ## 当前有效（优先阅读）
 
 - [V2 当前实现状态与下一步](./V2当前实现状态与下一步.md)
-- [动作链路职责重划与 ModelEngine 方案](./动作链路职责重划与ModelEngine方案.md)
-- [前端 ModelEngine 设计](./前端ModelEngine设计.md)
-- [ModelEngine 驱动系统边界与分层设计](./ModelEngine驱动系统边界与分层设计.md)
 - [主轴重构计划](./主轴重构计划/README.md)
-- [前端动作强度设置与 Prompt 指令设计及实现状态](./前端动作强度设置计划.md)
 - [前后端严格审阅报告](./前后端严格审阅报告.md)
 - [根目录 README](../README.md)
 - [Adapter README](../astrbot_plugin_ag99live_adapter/README.md)
@@ -18,6 +14,10 @@
 
 - [归档索引](./archive/README.md)
 - [ModelEngine 主参数语义设计（历史）](./archive/ModelEngine主参数语义设计.md)
+- [动作链路职责重划与 ModelEngine 方案（v1 历史方案）](./动作链路职责重划与ModelEngine方案.md)
+- [前端 ModelEngine 设计（v1 历史方案）](./前端ModelEngine设计.md)
+- [ModelEngine 驱动系统边界与分层设计（v1 历史方案）](./ModelEngine驱动系统边界与分层设计.md)
+- [前端动作强度设置与 Prompt 指令设计（v1 历史方案）](./前端动作强度设置计划.md)
 
 ## 使用建议
 

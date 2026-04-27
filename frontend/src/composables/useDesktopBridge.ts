@@ -8,7 +8,6 @@ import type {
   DesktopWindowVisibilityState,
 } from "../types/desktop";
 import type {
-  DirectParameterPlan,
   MotionPlanPayload,
   SemanticParameterPlan,
 } from "../types/protocol";
@@ -218,61 +217,23 @@ function isPresent<TValue>(value: TValue | null): value is TValue {
   return value !== null;
 }
 
-function cloneDirectParameterPlan(plan: DirectParameterPlan): DirectParameterPlan;
 function cloneDirectParameterPlan(plan: SemanticParameterPlan): SemanticParameterPlan;
 function cloneDirectParameterPlan(plan: MotionPlanPayload): MotionPlanPayload;
 function cloneDirectParameterPlan(plan: MotionPlanPayload): MotionPlanPayload {
-  if (plan.schema_version === "engine.parameter_plan.v2") {
-    return {
-      ...plan,
-      timing: { ...plan.timing },
-      parameters: plan.parameters.map((item) => ({ ...item })),
-      diagnostics: plan.diagnostics
-        ? {
-          ...plan.diagnostics,
-          warnings: plan.diagnostics.warnings
-            ? [...plan.diagnostics.warnings]
-            : undefined,
-        }
-        : undefined,
-      summary: plan.summary ? { ...plan.summary } : undefined,
-    };
-  }
-
   return {
     ...plan,
     timing: { ...plan.timing },
-    key_axes: Object.fromEntries(
-      Object.entries(plan.key_axes).map(([axisName, axisValue]) => [
-        axisName,
-        { ...axisValue },
-      ]),
-    ) as DirectParameterPlan["key_axes"],
-    supplementary_params: plan.supplementary_params.map((item) => ({ ...item })),
-    calibration_profile: plan.calibration_profile
+    parameters: plan.parameters.map((item) => ({ ...item })),
+    diagnostics: plan.diagnostics
       ? {
-        ...plan.calibration_profile,
-        axes: plan.calibration_profile.axes
-          ? { ...plan.calibration_profile.axes }
-          : undefined,
-        axis_calibrations: plan.calibration_profile.axis_calibrations
-          ? { ...plan.calibration_profile.axis_calibrations }
+        ...plan.diagnostics,
+        warnings: plan.diagnostics.warnings
+          ? [...plan.diagnostics.warnings]
           : undefined,
       }
-      : plan.calibration_profile,
-    model_calibration_profile: plan.model_calibration_profile
-      ? {
-        ...plan.model_calibration_profile,
-        axes: plan.model_calibration_profile.axes
-          ? { ...plan.model_calibration_profile.axes }
-          : undefined,
-        axis_calibrations: plan.model_calibration_profile.axis_calibrations
-          ? { ...plan.model_calibration_profile.axis_calibrations }
-          : undefined,
-      }
-      : plan.model_calibration_profile,
+      : undefined,
     summary: plan.summary ? { ...plan.summary } : undefined,
-  } satisfies DirectParameterPlan;
+  };
 }
 
 function cloneBaseActionPreview(

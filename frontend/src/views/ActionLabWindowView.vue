@@ -5,6 +5,7 @@ import DesktopWindowPanel from "../components/DesktopWindowPanel.vue";
 import MotionTuningPanel from "../components/MotionTuningPanel.vue";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
 import type { DesktopBaseActionPreview } from "../types/desktop";
+import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 
 const bridge = useDesktopBridge();
 const baseActionPreview = computed<DesktopBaseActionPreview | null>(() => {
@@ -34,6 +35,10 @@ const baseActionPreview = computed<DesktopBaseActionPreview | null>(() => {
     })),
   };
 });
+const semanticProfile = computed<SemanticAxisProfile | null>(() => {
+  const profile = bridge.state.snapshot.selectedSemanticAxisProfile;
+  return profile ? JSON.parse(JSON.stringify(profile)) as SemanticAxisProfile : null;
+});
 </script>
 
 <template>
@@ -41,6 +46,7 @@ const baseActionPreview = computed<DesktopBaseActionPreview | null>(() => {
     <section class="settings-grid">
       <BaseActionPreviewPanel
         :preview="baseActionPreview"
+        :semantic-profile="semanticProfile"
         :allow-play="true"
       />
       <MotionTuningPanel />

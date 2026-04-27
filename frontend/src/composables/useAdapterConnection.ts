@@ -1330,9 +1330,7 @@ function sendMotionPayloadPreview(payload: unknown): boolean {
     ? String((payload as Record<string, unknown>).schema_version ?? "").trim()
     : "";
   if (
-    schemaVersion !== "engine.motion_intent.v1"
-    && schemaVersion !== "engine.motion_intent.v2"
-    && schemaVersion !== "engine.parameter_plan.v1"
+    schemaVersion !== "engine.motion_intent.v2"
     && schemaVersion !== "engine.parameter_plan.v2"
   ) {
     state.lastError = `动作测试载荷无效：不支持 schema_version=${schemaVersion || "empty"}。`;
@@ -1342,7 +1340,7 @@ function sendMotionPayloadPreview(payload: unknown): boolean {
     return false;
   }
 
-  const messageType = schemaVersion === "engine.motion_intent.v1" || schemaVersion === "engine.motion_intent.v2"
+  const messageType = schemaVersion === "engine.motion_intent.v2"
     ? "engine.motion_intent"
     : "engine.motion_plan";
   const payloadKey = messageType === "engine.motion_intent" ? "intent" : "plan";

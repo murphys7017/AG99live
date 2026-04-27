@@ -54,9 +54,9 @@ _SYSTEM_PROMPT = (
     "You are a compact emotion-to-axis selector for live avatar control. "
     "Return strict JSON only."
 )
-MOTION_INTENT_SCHEMA_VERSION = "engine.motion_intent.v1"
+MOTION_INTENT_SCHEMA_VERSION = "engine.motion_intent.v2"
 MOTION_INTENT_V2_SCHEMA_VERSION = "engine.motion_intent.v2"
-PARAMETER_PLAN_SCHEMA_VERSION = "engine.parameter_plan.v1"
+PARAMETER_PLAN_SCHEMA_VERSION = "engine.parameter_plan.v2"
 PARAMETER_PLAN_V2_SCHEMA_VERSION = "engine.parameter_plan.v2"
 
 _DEFAULT_SELECTOR_PLATFORM_DESCRIPTION = (
@@ -588,76 +588,7 @@ def normalize_selector_output(
 ) -> dict[str, Any]:
     if semantic_profile is not None:
         return normalize_selector_output_v2(payload, semantic_profile=semantic_profile)
-
-    if not isinstance(payload, dict):
-        raise ValueError("selector_payload_not_object")
-
-    emotion_raw = payload.get("emotion")
-    emotion = str(emotion_raw).strip() if isinstance(emotion_raw, str) else ""
-    if not emotion:
-        raise ValueError("selector_emotion_empty")
-
-    if "mode" not in payload:
-        raise ValueError("selector_mode_missing")
-    mode = str(payload.get("mode") or "").strip().lower()
-    if mode not in {"parallel", "sequential", "idle", "expressive"}:
-        raise ValueError("selector_mode_invalid")
-
-    if "duration_ms" not in payload:
-        raise ValueError("selector_duration_ms_missing")
-    duration_ms_raw = payload.get("duration_ms")
-    if not isinstance(duration_ms_raw, (int, float)):
-        raise ValueError("selector_duration_ms_not_number")
-    duration_ms = int(round(float(duration_ms_raw)))
-    if duration_ms < 0:
-        raise ValueError("selector_duration_ms_negative")
-    duration_ms = max(400, min(6000, duration_ms))
-
-    raw_axes = payload.get("axes")
-    if not isinstance(raw_axes, dict):
-        raise ValueError("selector_axes_not_object")
-
-    axes: dict[str, int] = {}
-    missing_axis_names: list[str] = []
-    for axis in AXES:
-        if axis.name not in raw_axes:
-            missing_axis_names.append(axis.name)
-            axes[axis.name] = 50
-            continue
-        axis_value = raw_axes.get(axis.name)
-        if not isinstance(axis_value, (int, float)):
-            raise ValueError(f"selector_axis_not_number:{axis.name}")
-        if float(axis_value) < 0 or float(axis_value) > 100:
-            raise ValueError(f"selector_axis_out_of_range:{axis.name}")
-        axes[axis.name] = clamp_axis_value(axis_value)
-
-    if missing_axis_names:
-        LOGGER.warning(
-            "Realtime motion selector output missing axes; defaulting to 50. missing=%s",
-            ",".join(missing_axis_names),
-        )
-
-    unexpected_axis_names: list[str] = []
-    for axis_name in raw_axes.keys():
-        if axis_name not in AXIS_NAMES:
-            unexpected_axis_names.append(str(axis_name))
-    if unexpected_axis_names:
-        LOGGER.warning(
-            "Realtime motion selector output ignored unexpected axes. unexpected=%s",
-            ",".join(unexpected_axis_names),
-        )
-
-    axes = _apply_expressive_floor(
-        axes=axes,
-        emotion=emotion,
-    )
-
-    return {
-        "emotion": emotion,
-        "mode": mode,
-        "duration_ms": duration_ms,
-        "axes": axes,
-    }
+    raise ValueError("semantic_profile_required")
 
 
 def normalize_selector_output_v2(
@@ -771,42 +702,7 @@ def build_intent_from_selector(
 ) -> dict[str, Any]:
     if semantic_profile is not None:
         return build_intent_from_selector_v2(selector_output, semantic_profile=semantic_profile)
-
-    axes = selector_output.get("axes")
-    if not isinstance(axes, dict):
-        raise ValueError("selector_axes_not_object")
-    normalized_axes = {
-        axis.name: clamp_axis_value(axes.get(axis.name))
-        for axis in AXES
-    }
-    requested_mode = str(selector_output.get("mode") or "").strip().lower()
-    mode = requested_mode if requested_mode in {"idle", "expressive"} else "expressive"
-    if mode != "idle" and _is_idle_deadzone(normalized_axes):
-        mode = "idle"
-
-    duration_ms_raw = selector_output.get("duration_ms")
-    if not isinstance(duration_ms_raw, (int, float)):
-        raise ValueError("selector_duration_ms_not_number")
-    duration_hint_ms = int(round(float(duration_ms_raw)))
-    duration_hint_ms = max(320, min(15000, duration_hint_ms))
-
-    emotion_label = str(selector_output.get("emotion") or "").strip()
-    if not emotion_label:
-        raise ValueError("selector_emotion_empty")
-
-    return {
-        "schema_version": MOTION_INTENT_SCHEMA_VERSION,
-        "mode": mode,
-        "emotion_label": emotion_label,
-        "duration_hint_ms": duration_hint_ms,
-        "key_axes": {
-            axis_name: {"value": axis_value}
-            for axis_name, axis_value in normalized_axes.items()
-        },
-        "summary": {
-            "key_axes_count": len(AXIS_NAMES),
-        },
-    }
+    raise ValueError("semantic_profile_required")
 
 
 def build_intent_from_selector_v2(
@@ -863,75 +759,9 @@ def normalize_motion_intent_payload(intent: Any) -> dict[str, Any]:
         raise ValueError("intent_not_object")
 
     schema_version = str(intent.get("schema_version") or "").strip()
-    if schema_version == MOTION_INTENT_V2_SCHEMA_VERSION:
-        return normalize_motion_intent_v2_payload(intent)
-    if schema_version != MOTION_INTENT_SCHEMA_VERSION:
+    if schema_version != MOTION_INTENT_V2_SCHEMA_VERSION:
         raise ValueError("invalid_schema_version")
-
-    mode = str(intent.get("mode") or "").strip().lower()
-    if mode not in {"expressive", "idle"}:
-        raise ValueError("invalid_mode")
-
-    emotion_label = str(intent.get("emotion_label") or "").strip()
-    if not emotion_label:
-        raise ValueError("emotion_label_empty")
-
-    key_axes = intent.get("key_axes")
-    if not isinstance(key_axes, dict):
-        raise ValueError("key_axes_not_object")
-
-    normalized_axes: dict[str, dict[str, int]] = {}
-    missing_axis_names: list[str] = []
-    for axis_name in AXIS_NAMES:
-        axis_payload = key_axes.get(axis_name)
-        if not isinstance(axis_payload, dict) or "value" not in axis_payload:
-            missing_axis_names.append(axis_name)
-            normalized_axes[axis_name] = {"value": 50}
-            continue
-
-        value = axis_payload.get("value")
-        if not isinstance(value, (int, float)):
-            raise ValueError(f"axis_{axis_name}_value_not_number")
-        if float(value) < 0 or float(value) > 100:
-            raise ValueError(f"axis_{axis_name}_value_out_of_range")
-        normalized_axes[axis_name] = {"value": clamp_axis_value(value)}
-
-    if missing_axis_names:
-        LOGGER.warning(
-            "Motion intent missing axes; defaulting to 50. missing=%s",
-            ",".join(missing_axis_names),
-        )
-
-    unexpected_axis_names = [
-        str(axis_name)
-        for axis_name in key_axes.keys()
-        if axis_name not in AXIS_NAMES
-    ]
-    if unexpected_axis_names:
-        LOGGER.warning(
-            "Motion intent ignored unexpected axes. unexpected=%s",
-            ",".join(unexpected_axis_names),
-        )
-
-    duration_hint_raw = intent.get("duration_hint_ms")
-    duration_hint_ms: int | None = None
-    if duration_hint_raw is not None:
-        if not isinstance(duration_hint_raw, (int, float)):
-            raise ValueError("duration_hint_ms_not_number")
-        duration_hint_ms = int(round(float(duration_hint_raw)))
-        if duration_hint_ms < 320 or duration_hint_ms > 15000:
-            raise ValueError("duration_hint_ms_out_of_range")
-
-    return {
-        "schema_version": MOTION_INTENT_SCHEMA_VERSION,
-        "mode": mode,
-        "emotion_label": emotion_label,
-        "duration_hint_ms": duration_hint_ms,
-        "key_axes": normalized_axes,
-        "summary": {
-            "key_axes_count": len(AXIS_NAMES),
-        },
-    }
+    return normalize_motion_intent_v2_payload(intent)
 
 
 def normalize_motion_intent_v2_payload(intent: Any) -> dict[str, Any]:

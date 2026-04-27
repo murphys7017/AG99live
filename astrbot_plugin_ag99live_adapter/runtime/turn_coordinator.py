@@ -546,7 +546,7 @@ class TurnCoordinator:
         if not isinstance(motion_payload, dict):
             return False
 
-        if _resolve_motion_payload_schema_version(motion_payload) in {"engine.motion_intent.v1", "engine.motion_intent.v2"}:
+        if _resolve_motion_payload_schema_version(motion_payload) == "engine.motion_intent.v2":
             try:
                 motion_payload = normalize_motion_intent_payload(motion_payload)
             except ValueError as exc:
@@ -657,7 +657,7 @@ class TurnCoordinator:
             )
             return
 
-        if _resolve_motion_payload_schema_version(motion_payload) in {"engine.motion_intent.v1", "engine.motion_intent.v2"}:
+        if _resolve_motion_payload_schema_version(motion_payload) == "engine.motion_intent.v2":
             try:
                 motion_payload = normalize_motion_intent_payload(motion_payload)
             except ValueError as exc:
@@ -909,9 +909,9 @@ def _validate_motion_intent(intent: Any) -> tuple[bool, str]:
 
 def _validate_motion_payload(payload: Any) -> tuple[bool, str]:
     schema_version = _resolve_motion_payload_schema_version(payload)
-    if schema_version in {"engine.parameter_plan.v1", "engine.parameter_plan.v2"}:
+    if schema_version == "engine.parameter_plan.v2":
         return _validate_parameter_plan(payload)
-    if schema_version in {"engine.motion_intent.v1", "engine.motion_intent.v2"}:
+    if schema_version == "engine.motion_intent.v2":
         return _validate_motion_intent(payload)
     return False, "unsupported_schema_version"
 
@@ -941,9 +941,9 @@ def _resolve_motion_payload_schema_version(payload: Any) -> str:
 
 def _resolve_engine_motion_message_type(payload: Any) -> str:
     schema_version = _resolve_motion_payload_schema_version(payload)
-    if schema_version in {"engine.parameter_plan.v1", "engine.parameter_plan.v2"}:
+    if schema_version == "engine.parameter_plan.v2":
         return TYPE_ENGINE_MOTION_PLAN
-    if schema_version in {"engine.motion_intent.v1", "engine.motion_intent.v2"}:
+    if schema_version == "engine.motion_intent.v2":
         return TYPE_ENGINE_MOTION_INTENT
     return ""
 

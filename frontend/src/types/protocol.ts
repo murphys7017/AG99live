@@ -546,21 +546,6 @@ export interface DirectParameterCalibrationProfile {
   axis_calibrations?: Partial<Record<DirectParameterAxisName, DirectParameterAxisCalibration | null>>;
 }
 
-export interface DirectParameterAxisValue {
-  value: number;
-}
-
-export interface MotionIntent {
-  schema_version: "engine.motion_intent.v1";
-  mode: "expressive" | "idle";
-  emotion_label: string;
-  duration_hint_ms?: number | null;
-  key_axes: Record<DirectParameterAxisName, DirectParameterAxisValue>;
-  summary?: {
-    key_axes_count?: number;
-  };
-}
-
 export interface SemanticMotionIntentAxisValue {
   value: number;
 }
@@ -579,35 +564,11 @@ export interface SemanticMotionIntent {
   };
 }
 
-export interface DirectParameterPlanSupplementaryParam {
-  parameter_id: string;
-  target_value: number;
-  weight: number;
-  source_atom_id: string;
-  channel: string;
-}
-
 export interface DirectParameterPlanTiming {
   duration_ms: number;
   blend_in_ms: number;
   hold_ms: number;
   blend_out_ms: number;
-}
-
-export interface DirectParameterPlan {
-  schema_version: "engine.parameter_plan.v1";
-  mode: "expressive" | "idle";
-  emotion_label: string;
-  timing: DirectParameterPlanTiming;
-  key_axes: Record<DirectParameterAxisName, DirectParameterAxisValue>;
-  supplementary_params: DirectParameterPlanSupplementaryParam[];
-  calibration_profile?: DirectParameterCalibrationProfile | null;
-  model_calibration_profile?: DirectParameterCalibrationProfile | null;
-  summary?: {
-    key_axes_count?: number;
-    supplementary_count?: number;
-    target_duration_ms?: number;
-  };
 }
 
 export interface SemanticParameterPlanEntry {
@@ -638,8 +599,8 @@ export interface SemanticParameterPlan {
   };
 }
 
-export type MotionIntentPayload = MotionIntent | SemanticMotionIntent;
-export type MotionPlanPayload = DirectParameterPlan | SemanticParameterPlan;
+export type MotionIntentPayload = SemanticMotionIntent;
+export type MotionPlanPayload = SemanticParameterPlan;
 
 export interface ModelSummary {
   name: string;

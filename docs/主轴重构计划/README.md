@@ -143,7 +143,7 @@ Prompt 的核心不再是“这里有 12 个参数”，而是：
 
 - 真实 Live2D 模型上的 v2 动作效果实机验证与参数范围标定
 - 前端自动化测试框架
-- 固定 12 轴核心路径删除
+- 历史命名与非执行辅助代码中残留的固定 12 轴措辞清理
 
 ### 当前阶段判断
 
@@ -154,10 +154,11 @@ Prompt 的核心不再是“这里有 12 个参数”，而是：
 -> Profile Editor 主体编辑和批量主轴配置已落地
 -> profile save 专用 ack/fail 已落地
 -> profile-driven prompt / compiler / runtime v2 已完成最小闭环
--> 下一步进入实机验证与 Phase 8 旧 12 轴核心路径清理
+-> 旧 v1 固定 12 轴运行协议已从主执行入口移除
+-> 下一步进入实机验证、参数校准与剩余命名清理
 ```
 
-当前固定 12 轴链路仍然存在，属于过渡期保留的 v1 兼容/调试路径。主执行链已经迁移到：
+当前主执行链已经迁移到：
 
 ```text
 motion_intent.v2
@@ -166,13 +167,13 @@ motion_intent.v2
 -> parameter_plan.v2 runtime
 ```
 
-Profile Editor 的配置已经可以参与实际动作生成和播放。剩余工作是实机校准、完善测试，以及删除 v1 固定 12 轴核心路径。
+Profile Editor 的配置已经可以参与实际动作生成和播放。前后端运行时入口不再接受 `engine.motion_intent.v1` 或 `engine.parameter_plan.v1` 作为兼容路径。剩余工作是实机校准、完善测试，以及把历史命名和非执行辅助代码继续清到一致。
 
 补充说明：
 
 - 设置页中的旧 12 轴逐轴倍率已从常规界面下线，当前只保留真正作用于 v2 的全局强度倍率。
 - `MotionTuningPanel` 已恢复为当前 v2 历史动作微调入口：最近 5 次播放记录可手调主轴、播放预览、保存样本，并可同步给后端 selector few-shot。
-- `BaseActionPreviewPanel` 与 preview/player/runtime 中的 v1 兼容分支仍在，因此 Phase 8 还没有完成。
+- `BaseActionPreviewPanel` 已改为从当前 semantic profile 生成 `engine.motion_intent.v2`；preview player、Live2D runtime 和后端入口均按 v2-only 校验。
 
 ## 暂不做的事
 
