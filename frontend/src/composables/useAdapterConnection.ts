@@ -32,6 +32,27 @@ const PROTOCOL_VERSION = "v2";
 const SOURCE_FRONTEND = "frontend";
 const MIC_TARGET_SAMPLE_RATE = 16000;
 const MIC_PROCESSOR_BUFFER_SIZE = 2048;
+const MIC_AUDIO_WORKLET_PROCESSOR_NAME = "ag99live-microphone-capture";
+const MIC_AUDIO_WORKLET_SOURCE = `
+class Ag99liveMicrophoneCaptureProcessor extends AudioWorkletProcessor {
+  process(inputs, outputs) {
+    const input = inputs[0] && inputs[0][0];
+    if (input && input.length > 0) {
+      const chunk = new Float32Array(input.length);
+      chunk.set(input);
+      this.port.postMessage(chunk, [chunk.buffer]);
+    }
+
+    const output = outputs[0] && outputs[0][0];
+    if (output) {
+      output.fill(0);
+    }
+    return true;
+  }
+}
+
+registerProcessor("${MIC_AUDIO_WORKLET_PROCESSOR_NAME}", Ag99liveMicrophoneCaptureProcessor);
+`;
 const MAX_MIC_SOCKET_BUFFERED_AMOUNT = 512 * 1024;
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "0.0.0.0"]);
 
@@ -68,7 +89,7 @@ interface MicrophoneCaptureRuntime {
   mediaStream: MediaStream;
   audioContext: AudioContext;
   sourceNode: MediaStreamAudioSourceNode;
-  processorNode: ScriptProcessorNode;
+  processorNode: AudioWorkletNode | ScriptProcessorNode;
   sinkGainNode: GainNode;
 }
 
@@ -187,6 +208,108 @@ function serializeAudioChunk(audioBuffer: Float32Array): number[] {
     serialized[index] = Math.round(sample * 10000) / 10000;
   }
   return serialized;
+}
+
+function sendMicrophoneAudioChunk(inputChunk: Float32Array, sourceSampleRate: number): void {
+  if (
+    !socket
+    || socket.readyState !== WebSocket.OPEN
+    || socket.bufferedAmount > MAX_MIC_SOCKET_BUFFERED_AMOUNT
+  ) {
+    return;
+  }
+
+  const normalizedChunk = downsampleAudioBuffer(
+    inputChunk,
+    sourceSampleRate,
+    MIC_TARGET_SAMPLE_RATE,
+  );
+  if (!normalizedChunk.length) {
+    return;
+  }
+
+  socket.send(
+    JSON.stringify(
+      buildMessageEnvelope("input.raw_audio_data", {
+        audio: serializeAudioChunk(normalizedChunk),
+        sample_rate: MIC_TARGET_SAMPLE_RATE,
+        channels: 1,
+      }),
+    ),
+  );
+}
+
+function isAudioWorkletNode(node: AudioNode): node is AudioWorkletNode {
+  return "port" in node;
+}
+
+async function createMicrophoneProcessorNode(
+  audioContext: AudioContext,
+  onChunk: (inputChunk: Float32Array) => void,
+): Promise<AudioWorkletNode | ScriptProcessorNode> {
+  if (audioContext.audioWorklet && typeof AudioWorkletNode !== "undefined") {
+    let moduleUrl = "";
+    try {
+      moduleUrl = URL.createObjectURL(
+        new Blob([MIC_AUDIO_WORKLET_SOURCE], { type: "application/javascript" }),
+      );
+      await audioContext.audioWorklet.addModule(moduleUrl);
+      const workletNode = new AudioWorkletNode(
+        audioContext,
+        MIC_AUDIO_WORKLET_PROCESSOR_NAME,
+        {
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          outputChannelCount: [1],
+        },
+      );
+      workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
+        if (event.data instanceof Float32Array) {
+          onChunk(event.data);
+        }
+      };
+      workletNode.port.onmessageerror = (event) => {
+        console.warn("[Connection] microphone AudioWorklet message rejected.", event);
+      };
+      return workletNode;
+    } catch (error) {
+      console.warn(
+        "[Connection] microphone AudioWorklet unavailable; falling back to deprecated ScriptProcessorNode.",
+        error,
+      );
+    } finally {
+      if (moduleUrl) {
+        URL.revokeObjectURL(moduleUrl);
+      }
+    }
+  }
+
+  const scriptProcessorNode = audioContext.createScriptProcessor(
+    MIC_PROCESSOR_BUFFER_SIZE,
+    1,
+    1,
+  );
+  scriptProcessorNode.onaudioprocess = (event) => {
+    onChunk(event.inputBuffer.getChannelData(0));
+  };
+  return scriptProcessorNode;
+}
+
+function disconnectMicrophoneProcessorNode(
+  processorNode: AudioWorkletNode | ScriptProcessorNode | null,
+): void {
+  if (!processorNode) {
+    return;
+  }
+
+  if (isAudioWorkletNode(processorNode)) {
+    processorNode.port.onmessage = null;
+    processorNode.port.onmessageerror = null;
+    processorNode.port.close();
+  } else {
+    processorNode.onaudioprocess = null;
+  }
+  processorNode.disconnect();
 }
 
 function getAudioContextConstructor(): typeof AudioContext | null {
@@ -543,7 +666,7 @@ async function startMicrophoneCapture(): Promise<boolean> {
   let mediaStream: MediaStream | null = null;
   let audioContext: AudioContext | null = null;
   let sourceNode: MediaStreamAudioSourceNode | null = null;
-  let processorNode: ScriptProcessorNode | null = null;
+  let processorNode: AudioWorkletNode | ScriptProcessorNode | null = null;
   let sinkGainNode: GainNode | null = null;
 
   try {
@@ -567,11 +690,20 @@ async function startMicrophoneCapture(): Promise<boolean> {
     }
 
     sourceNode = audioContext.createMediaStreamSource(mediaStream);
-    processorNode = audioContext.createScriptProcessor(MIC_PROCESSOR_BUFFER_SIZE, 1, 1);
     sinkGainNode = audioContext.createGain();
     sinkGainNode.gain.value = 0;
 
     const sampleRate = Math.max(Math.round(audioContext.sampleRate || 16000), 1);
+    processorNode = await createMicrophoneProcessorNode(
+      audioContext,
+      (inputChunk) => {
+        const runtime = microphoneRuntime;
+        if (!runtime) {
+          return;
+        }
+        sendMicrophoneAudioChunk(inputChunk, runtime.sampleRate);
+      },
+    );
 
     microphoneRuntime = {
       sampleRate,
@@ -580,41 +712,6 @@ async function startMicrophoneCapture(): Promise<boolean> {
       sourceNode,
       processorNode,
       sinkGainNode,
-    };
-
-    processorNode.onaudioprocess = (event) => {
-      const runtime = microphoneRuntime;
-      if (
-        !runtime
-        || !socket
-        || socket.readyState !== WebSocket.OPEN
-      ) {
-        return;
-      }
-
-      if (socket.bufferedAmount > MAX_MIC_SOCKET_BUFFERED_AMOUNT) {
-        return;
-      }
-
-      const inputChunk = event.inputBuffer.getChannelData(0);
-      const normalizedChunk = downsampleAudioBuffer(
-        inputChunk,
-        runtime.sampleRate,
-        MIC_TARGET_SAMPLE_RATE,
-      );
-      if (!normalizedChunk.length) {
-        return;
-      }
-
-      socket.send(
-        JSON.stringify(
-          buildMessageEnvelope("input.raw_audio_data", {
-            audio: serializeAudioChunk(normalizedChunk),
-            sample_rate: MIC_TARGET_SAMPLE_RATE,
-            channels: 1,
-          }),
-        ),
-      );
     };
 
     sourceNode.connect(processorNode);
@@ -638,11 +735,8 @@ async function startMicrophoneCapture(): Promise<boolean> {
     pushHistory("system", state.statusMessage);
     return true;
   } catch (error) {
-    if (processorNode) {
-      processorNode.onaudioprocess = null;
-    }
     sourceNode?.disconnect();
-    processorNode?.disconnect();
+    disconnectMicrophoneProcessorNode(processorNode);
     sinkGainNode?.disconnect();
     mediaStream?.getTracks().forEach((track) => track.stop());
     if (audioContext) {
@@ -678,9 +772,8 @@ async function stopMicrophoneCapture(reason = "manual_stop"): Promise<boolean> {
     state.micRequested = false;
   }
 
-  runtime.processorNode.onaudioprocess = null;
   runtime.sourceNode.disconnect();
-  runtime.processorNode.disconnect();
+  disconnectMicrophoneProcessorNode(runtime.processorNode);
   runtime.sinkGainNode.disconnect();
   runtime.mediaStream.getTracks().forEach((track) => track.stop());
 

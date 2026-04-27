@@ -15,6 +15,15 @@ const { containerRef, canvasRef, renderError } =
 const activePointerId = ref<number | null>(null);
 const isDragging = ref(false);
 
+function setPetWindowDragging(dragging: boolean): void {
+  const targetWindow = window as Window & {
+    __ag99PetDragging?: boolean;
+    __ag99PetWindowDragging?: boolean;
+  };
+  targetWindow.__ag99PetDragging = dragging;
+  targetWindow.__ag99PetWindowDragging = dragging;
+}
+
 function finishWindowDrag(): void {
   if (activePointerId.value === null) {
     return;
@@ -26,7 +35,7 @@ function finishWindowDrag(): void {
     }
   ).__ag99SetPetMouseIgnoreState;
 
-  (window as Window & { __ag99PetDragging?: boolean }).__ag99PetDragging = false;
+  setPetWindowDragging(false);
   activePointerId.value = null;
   isDragging.value = false;
   window.ag99desktop?.endWindowDrag();
@@ -43,7 +52,7 @@ function handlePointerDown(event: PointerEvent): void {
     return;
   }
 
-  (window as Window & { __ag99PetDragging?: boolean }).__ag99PetDragging = true;
+  setPetWindowDragging(true);
   window.ag99desktop?.setIgnoreMouseEvents(false);
   activePointerId.value = event.pointerId;
   isDragging.value = true;

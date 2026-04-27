@@ -32,7 +32,6 @@ let lastStartedPlanSignature = "";
 let lastStartedPlanAtMs = 0;
 
 const PLAN_RESTART_DEDUP_WINDOW_MS = 700;
-const PLAN_RESTART_GUARD_MS = 180;
 
 function normalizeText(value: unknown): string {
   return String(value ?? "").trim();
@@ -340,13 +339,6 @@ function playPlan(
     ) {
       console.info(
         "[MotionPlayer] skip duplicate plan restart. elapsedMs=",
-        elapsedSinceLastStartMs,
-      );
-      return true;
-    }
-    if (elapsedSinceLastStartMs <= PLAN_RESTART_GUARD_MS) {
-      console.info(
-        "[MotionPlayer] skip rapid plan restart. elapsedMs=",
         elapsedSinceLastStartMs,
       );
       return true;

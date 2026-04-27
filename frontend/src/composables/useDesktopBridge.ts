@@ -8,7 +8,6 @@ import type {
   DesktopWindowVisibilityState,
 } from "../types/desktop";
 import type {
-  MotionPlanPayload,
   SemanticParameterPlan,
 } from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
@@ -91,7 +90,10 @@ function ensureInitialized(): void {
       }
 
       if (payload.kind === "snapshot") {
-        const nextSnapshot = normalizeSnapshot(payload.snapshot);
+        const nextSnapshot = safeNormalizeSnapshot(payload.snapshot, "broadcast");
+        if (!nextSnapshot) {
+          return;
+        }
         state.snapshot = nextSnapshot;
         persistSnapshot(nextSnapshot);
         return;
@@ -134,9 +136,15 @@ function loadSnapshot(): DesktopRuntimeSnapshot {
   }
 
   try {
-    return normalizeSnapshot(JSON.parse(rawValue) as DesktopRuntimeSnapshot);
+    const nextSnapshot = safeNormalizeSnapshot(JSON.parse(rawValue), "storage");
+    if (nextSnapshot) {
+      return nextSnapshot;
+    }
+    window.localStorage.removeItem(SNAPSHOT_STORAGE_KEY);
+    return defaultSnapshot;
   } catch (error) {
     console.warn("[DesktopBridge] persisted snapshot rejected; using defaults.", error);
+    window.localStorage.removeItem(SNAPSHOT_STORAGE_KEY);
     return defaultSnapshot;
   }
 }
@@ -146,6 +154,33 @@ function persistSnapshot(snapshot: DesktopRuntimeSnapshot): void {
     return;
   }
   window.localStorage.setItem(SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshot));
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeText(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function safeNormalizeSnapshot(
+  snapshot: unknown,
+  source: string,
+): DesktopRuntimeSnapshot | null {
+  try {
+    if (!isObject(snapshot)) {
+      throw new Error("snapshot_not_object");
+    }
+    return normalizeSnapshot(snapshot as unknown as DesktopRuntimeSnapshot);
+  } catch (error) {
+    console.warn(`[DesktopBridge] ${source} snapshot rejected.`, error);
+    return null;
+  }
 }
 
 function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnapshot {
@@ -176,19 +211,34 @@ function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnap
 }
 
 function cloneMotionPlaybackRecord(
-  record: DesktopMotionPlaybackRecord,
+  record: unknown,
 ): DesktopMotionPlaybackRecord | null {
   try {
+    if (!isObject(record)) {
+      return null;
+    }
+    const plan = cloneSemanticParameterPlan(record.plan);
+    if (!plan) {
+      console.warn("[DesktopBridge] legacy or invalid motion playback record ignored.", {
+        schemaVersion: isObject(record.plan)
+          ? normalizeText(record.plan.schema_version)
+          : "",
+      });
+      return null;
+    }
+    const diagnostics = isObject(record.diagnostics)
+      ? {
+        ...record.diagnostics,
+        axisIntensityScale: isObject(record.diagnostics.axisIntensityScale)
+          ? { ...record.diagnostics.axisIntensityScale }
+          : {},
+      }
+      : null;
     return {
-      ...record,
-      diagnostics: record.diagnostics
-        ? {
-          ...record.diagnostics,
-          axisIntensityScale: { ...record.diagnostics.axisIntensityScale },
-        }
-        : null,
-      plan: cloneDirectParameterPlan(record.plan),
-    };
+      ...(record as unknown as DesktopMotionPlaybackRecord),
+      diagnostics: diagnostics as DesktopMotionPlaybackRecord["diagnostics"],
+      plan,
+    } satisfies DesktopMotionPlaybackRecord;
   } catch (error) {
     console.warn("[DesktopBridge] motion playback record rejected.", error, record);
     return null;
@@ -196,17 +246,31 @@ function cloneMotionPlaybackRecord(
 }
 
 function cloneMotionTuningSample(
-  sample: DesktopMotionTuningSample,
+  sample: unknown,
 ): DesktopMotionTuningSample | null {
   try {
+    if (!isObject(sample)) {
+      return null;
+    }
+    const adjustedPlan = cloneSemanticParameterPlan(sample.adjustedPlan);
+    if (!adjustedPlan) {
+      console.warn("[DesktopBridge] legacy or invalid motion tuning sample ignored.", {
+        schemaVersion: isObject(sample.adjustedPlan)
+          ? normalizeText(sample.adjustedPlan.schema_version)
+          : "",
+      });
+      return null;
+    }
     return {
-      ...sample,
-      tags: [...sample.tags],
+      ...(sample as unknown as DesktopMotionTuningSample),
+      tags: Array.isArray(sample.tags)
+        ? sample.tags.map((item) => normalizeText(item)).filter(Boolean)
+        : [],
       enabledForLlmReference: Boolean(sample.enabledForLlmReference),
-      originalAxes: { ...sample.originalAxes },
-      adjustedAxes: { ...sample.adjustedAxes },
-      adjustedPlan: cloneDirectParameterPlan(sample.adjustedPlan),
-    };
+      originalAxes: cloneNumericRecord(sample.originalAxes),
+      adjustedAxes: cloneNumericRecord(sample.adjustedAxes),
+      adjustedPlan,
+    } satisfies DesktopMotionTuningSample;
   } catch (error) {
     console.warn("[DesktopBridge] motion tuning sample rejected.", error, sample);
     return null;
@@ -217,22 +281,113 @@ function isPresent<TValue>(value: TValue | null): value is TValue {
   return value !== null;
 }
 
-function cloneDirectParameterPlan(plan: SemanticParameterPlan): SemanticParameterPlan;
-function cloneDirectParameterPlan(plan: MotionPlanPayload): MotionPlanPayload;
-function cloneDirectParameterPlan(plan: MotionPlanPayload): MotionPlanPayload {
+function cloneNumericRecord(value: unknown): Record<string, number> {
+  if (!isObject(value)) {
+    return {};
+  }
+  const result: Record<string, number> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (isFiniteNumber(item)) {
+      result[key] = item;
+    }
+  }
+  return result;
+}
+
+function cloneSemanticParameterPlan(plan: unknown): SemanticParameterPlan | null {
+  if (!isObject(plan) || normalizeText(plan.schema_version) !== "engine.parameter_plan.v2") {
+    return null;
+  }
+  if (!Array.isArray(plan.parameters) || !isObject(plan.timing)) {
+    return null;
+  }
+  const profileId = normalizeText(plan.profile_id);
+  const modelId = normalizeText(plan.model_id);
+  const profileRevision = plan.profile_revision;
+  const mode = normalizeText(plan.mode);
+  const emotionLabel = normalizeText(plan.emotion_label);
+  if (
+    !profileId
+    || !modelId
+    || !isFiniteNumber(profileRevision)
+    || profileRevision <= 0
+    || (mode !== "idle" && mode !== "expressive")
+    || !emotionLabel
+  ) {
+    return null;
+  }
+  const durationMs = plan.timing.duration_ms;
+  const blendInMs = plan.timing.blend_in_ms;
+  const holdMs = plan.timing.hold_ms;
+  const blendOutMs = plan.timing.blend_out_ms;
+  if (
+    !isFiniteNumber(durationMs)
+    || !isFiniteNumber(blendInMs)
+    || !isFiniteNumber(holdMs)
+    || !isFiniteNumber(blendOutMs)
+    || durationMs < 0
+    || blendInMs < 0
+    || holdMs < 0
+    || blendOutMs < 0
+  ) {
+    return null;
+  }
+  const parameters: SemanticParameterPlan["parameters"] = [];
+  for (const item of plan.parameters) {
+    if (!isObject(item)) {
+      return null;
+    }
+    const axisId = normalizeText(item.axis_id);
+    const parameterId = normalizeText(item.parameter_id);
+    const targetValue = item.target_value;
+    const weight = item.weight;
+    if (!axisId || !parameterId || !isFiniteNumber(targetValue) || !isFiniteNumber(weight)) {
+      return null;
+    }
+    if (weight < 0 || weight > 1) {
+      return null;
+    }
+    const inputValue = isFiniteNumber(item.input_value) ? item.input_value : undefined;
+    const source = item.source === "semantic_axis" || item.source === "coupling" || item.source === "manual"
+      ? item.source
+      : undefined;
+    parameters.push({
+      axis_id: axisId,
+      parameter_id: parameterId,
+      target_value: targetValue,
+      weight,
+      input_value: inputValue,
+      source,
+    });
+  }
+  if (!parameters.length) {
+    return null;
+  }
+
   return {
     ...plan,
-    timing: { ...plan.timing },
-    parameters: plan.parameters.map((item) => ({ ...item })),
-    diagnostics: plan.diagnostics
+    schema_version: "engine.parameter_plan.v2",
+    profile_id: profileId,
+    profile_revision: Math.round(profileRevision),
+    model_id: modelId,
+    mode,
+    emotion_label: emotionLabel,
+    timing: {
+      duration_ms: Math.round(durationMs),
+      blend_in_ms: Math.round(blendInMs),
+      hold_ms: Math.round(holdMs),
+      blend_out_ms: Math.round(blendOutMs),
+    },
+    parameters,
+    diagnostics: isObject(plan.diagnostics)
       ? {
         ...plan.diagnostics,
-        warnings: plan.diagnostics.warnings
-          ? [...plan.diagnostics.warnings]
+        warnings: Array.isArray(plan.diagnostics.warnings)
+          ? plan.diagnostics.warnings.map((item) => normalizeText(item)).filter(Boolean)
           : undefined,
       }
       : undefined,
-    summary: plan.summary ? { ...plan.summary } : undefined,
+    summary: isObject(plan.summary) ? { ...plan.summary } : undefined,
   };
 }
 
@@ -294,7 +449,7 @@ export function useDesktopBridge() {
   ensureInitialized();
 
   function publishSnapshot(snapshot: DesktopRuntimeSnapshot): void {
-    const nextSnapshot = normalizeSnapshot(snapshot);
+    const nextSnapshot = safeNormalizeSnapshot(snapshot, "publish") ?? defaultSnapshot;
     state.snapshot = nextSnapshot;
     persistSnapshot(nextSnapshot);
     channel?.postMessage({

@@ -413,6 +413,9 @@ export class LAppDelegate {
  * 当单击时调用。
  */
 function onClickBegan(e: MouseEvent): void {
+  if ((window as Window & { __ag99PetWindowDragging?: boolean }).__ag99PetWindowDragging) {
+    return;
+  }
   if (!LAppDelegate.getInstance()._view) {
     LAppPal.printMessage('view notfound');
     return;
@@ -429,6 +432,9 @@ function onClickBegan(e: MouseEvent): void {
  * マウスポインタが動いたら呼ばれる。
  */
 function onMouseMoved(e: MouseEvent): void {
+  if ((window as Window & { __ag99PetWindowDragging?: boolean }).__ag99PetWindowDragging) {
+    return;
+  }
   if (!LAppDelegate.getInstance()._captured) {
     return;
   }
@@ -449,6 +455,11 @@ function onMouseMoved(e: MouseEvent): void {
  * クリックが終了したら呼ばれる。
  */
 function onClickEnded(e: MouseEvent): void {
+  if ((window as Window & { __ag99PetWindowDragging?: boolean }).__ag99PetWindowDragging) {
+    LAppDelegate.getInstance()._captured = false;
+    LAppDelegate.getInstance()._view?.onTouchesEnded(0, 0);
+    return;
+  }
   LAppDelegate.getInstance()._captured = false;
   if (!LAppDelegate.getInstance()._view) {
     LAppPal.printMessage('view notfound');
@@ -466,6 +477,9 @@ function onClickEnded(e: MouseEvent): void {
  * タッチしたときに呼ばれる。
  */
 function onTouchBegan(e: TouchEvent): void {
+  if ((window as Window & { __ag99PetWindowDragging?: boolean }).__ag99PetWindowDragging) {
+    return;
+  }
   if (!LAppDelegate.getInstance()._view) {
     LAppPal.printMessage('view notfound');
     return;
@@ -483,6 +497,9 @@ function onTouchBegan(e: TouchEvent): void {
  * スワイプすると呼ばれる。
  */
 function onTouchMoved(e: TouchEvent): void {
+  if ((window as Window & { __ag99PetWindowDragging?: boolean }).__ag99PetWindowDragging) {
+    return;
+  }
   if (!LAppDelegate.getInstance()._captured) {
     return;
   }
@@ -504,6 +521,11 @@ function onTouchMoved(e: TouchEvent): void {
  * タッチが終了したら呼ばれる。
  */
 function onTouchEnded(e: TouchEvent): void {
+  if ((window as Window & { __ag99PetWindowDragging?: boolean }).__ag99PetWindowDragging) {
+    LAppDelegate.getInstance()._captured = false;
+    LAppDelegate.getInstance()._view?.onTouchesEnded(0, 0);
+    return;
+  }
   LAppDelegate.getInstance()._captured = false;
 
   if (!LAppDelegate.getInstance()._view) {

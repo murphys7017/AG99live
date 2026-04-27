@@ -109,6 +109,12 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   ): boolean {
     const selectedModel = dependencies.getSelectedModel();
     state.lastStartReason = context.startReason;
+    console.info("[ModelEngine] starting motion payload.", {
+      kind: payload.kind,
+      turnId: context.turnId,
+      startReason: context.startReason,
+      queuedDelayMs: context.queuedDelayMs,
+    });
 
     if (payload.kind === "semantic_intent") {
       if (!selectedModel) {
@@ -128,10 +134,18 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       state.lastCompileReason = compileResult.reason;
       state.lastCompileDiagnostics = compileResult.diagnostics;
       if (!compileResult.ok || !compileResult.plan) {
+        console.warn("[ModelEngine] semantic intent compile failed.", {
+          reason: compileResult.reason,
+          diagnostics: compileResult.diagnostics,
+        });
         setState("failed", `动作意图编译失败：${compileResult.reason}`, compileResult.diagnostics);
         pushHistory("error", state.message);
         return false;
       }
+      console.info("[ModelEngine] semantic intent compiled.", {
+        parameterCount: compileResult.plan.parameters.length,
+        diagnostics: compileResult.diagnostics,
+      });
 
       let startedPlan: typeof compileResult.plan | null = null;
       const started = dependencies.playPlan(
@@ -244,6 +258,9 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
 
     const existing = pendingInboundMotionPayloads.get(normalizedTurnId);
     if (existing) {
+      console.info("[ModelEngine] replacing pending motion payload for turn.", {
+        turnId: normalizedTurnId,
+      });
       clearPendingPayload(existing);
       pendingInboundMotionPayloads.delete(normalizedTurnId);
     }
@@ -275,6 +292,11 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     pendingInboundMotionPayloads.set(normalizedTurnId, entry);
     syncPendingState();
     setState("pending", "动作已排队，等待音频起播。", null);
+    console.info("[ModelEngine] queued motion payload.", {
+      kind: payload.kind,
+      turnId: normalizedTurnId,
+      pendingCount: pendingInboundMotionPayloads.size,
+    });
 
     const activeAudioTurnId = normalizeTurnId(dependencies.getAudioPlaybackInfo().turnId);
     if (activeAudioTurnId && activeAudioTurnId === normalizedTurnId) {
@@ -299,7 +321,12 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     if (!normalizedTurnId) {
       return;
     }
-    tryStartPendingPayload(normalizedTurnId, "audio_playing_event");
+    const started = tryStartPendingPayload(normalizedTurnId, "audio_playing_event");
+    console.info("[ModelEngine] audio playback start notification handled.", {
+      turnId: normalizedTurnId,
+      started,
+      pendingCount: pendingInboundMotionPayloads.size,
+    });
   }
 
   function notifyCurrentTurnChanged(turnId: string | null): void {

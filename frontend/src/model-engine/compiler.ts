@@ -106,12 +106,22 @@ export function compileMotionIntent(
       });
     }
   }
+  const missingAxes: string[] = [];
+  for (const axis of semanticProfile.axes) {
+    if (axis.control_role !== "primary" || axis.id in controlledValues) {
+      continue;
+    }
+    missingAxes.push(axis.id);
+    warnings.push(`semantic_primary_axis_missing_ignored:${axis.id}`);
+  }
+
   const axisErrorCount = invalidAxes.length + forbiddenAxes.length;
   if (axisErrorCount > maxAxisErrors) {
     return failSemanticCompile(`semantic_axis_error_rate_exceeded:${axisErrorCount}/${roleAxisIds.primaryAxes.length + roleAxisIds.hintAxes.length}`, {
       ...baseDiagnostics,
       ...roleAxisIds,
       warnings,
+      missingAxes,
       forbiddenAxes,
       invalidAxes,
       axisErrorCount,
@@ -121,22 +131,10 @@ export function compileMotionIntent(
   if (axisErrorCount > 0) {
     console.warn("[ModelEngine] semantic axes ignored within error threshold.", {
       invalidAxes,
+      missingAxes,
       forbiddenAxes,
       axisErrorCount,
       axisErrorLimit: maxAxisErrors,
-    });
-  }
-  const missingAxes: string[] = [];
-  for (const axis of semanticProfile.axes) {
-    if (axis.control_role !== "primary" || axis.id in controlledValues) {
-      continue;
-    }
-    controlledValues[axis.id] = axis.neutral;
-    missingAxes.push(axis.id);
-    warnings.push(`semantic_primary_axis_missing_neutral:${axis.id}`);
-    console.warn("[ModelEngine] semantic primary axis missing; using neutral.", {
-      axisId: axis.id,
-      neutral: axis.neutral,
     });
   }
 
@@ -181,6 +179,13 @@ export function compileMotionIntent(
       ...baseDiagnostics,
       timingSource: timing.timingSource,
       resolvedMode,
+      warnings,
+      ...roleAxisIds,
+      missingAxes,
+      forbiddenAxes,
+      invalidAxes,
+      axisErrorCount,
+      axisErrorLimit: maxAxisErrors,
     });
   }
 
