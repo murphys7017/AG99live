@@ -4,36 +4,21 @@ import asyncio
 import json
 import logging
 import re
-from dataclasses import dataclass
 from typing import Any
 
+from ..prompts.motion_selector import (
+    AXIS_NAMES,
+    MOTION_SELECTOR_SYSTEM_PROMPT,
+    build_selector_context,
+    build_selector_platform_context,
+    build_selector_user_prompt,
+    profile_prompt_axes,
+    resolve_motion_prompt_instruction,
+    resolve_selector_few_shot_examples,
+)
+
 LOGGER = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class AxisSpec:
-    name: str
-    channel: str
-    low_label: str
-    mid_label: str
-    high_label: str
-
-
-AXES: list[AxisSpec] = [
-    AxisSpec("head_yaw", "head_yaw", "turn left", "center", "turn right"),
-    AxisSpec("head_roll", "head_roll", "tilt left", "center", "tilt right"),
-    AxisSpec("head_pitch", "head_pitch", "look down", "center", "look up"),
-    AxisSpec("body_yaw", "body_yaw", "twist left", "center", "twist right"),
-    AxisSpec("body_roll", "body_roll", "lean left", "center", "lean right"),
-    AxisSpec("gaze_x", "gaze_x", "look left", "center", "look right"),
-    AxisSpec("gaze_y", "gaze_y", "look down", "center", "look up"),
-    AxisSpec("eye_open_left", "eye_open_left", "closed", "normal", "wide open"),
-    AxisSpec("eye_open_right", "eye_open_right", "closed", "normal", "wide open"),
-    AxisSpec("mouth_open", "mouth_open", "closed", "normal", "open"),
-    AxisSpec("mouth_smile", "mouth_smile", "frown", "neutral", "smile"),
-    AxisSpec("brow_bias", "brow_bias", "frown", "neutral", "raised"),
-]
-AXIS_NAMES = [axis.name for axis in AXES]
+_SYSTEM_PROMPT = MOTION_SELECTOR_SYSTEM_PROMPT
 _IDLE_DEADZONE_MIN = 42
 _IDLE_DEADZONE_MAX = 58
 _MIN_EXPRESSIVE_MAX_DELTA = 24
@@ -49,145 +34,10 @@ _NEUTRAL_EMOTION_MARKERS = {
     "steady",
     "normal",
 }
-
-_SYSTEM_PROMPT = (
-    "You are a compact emotion-to-axis selector for live avatar control. "
-    "Return strict JSON only."
-)
 MOTION_INTENT_SCHEMA_VERSION = "engine.motion_intent.v2"
 MOTION_INTENT_V2_SCHEMA_VERSION = "engine.motion_intent.v2"
 PARAMETER_PLAN_SCHEMA_VERSION = "engine.parameter_plan.v2"
 PARAMETER_PLAN_V2_SCHEMA_VERSION = "engine.parameter_plan.v2"
-
-_DEFAULT_SELECTOR_PLATFORM_DESCRIPTION = (
-    "Source platform: AstrBot through AG99live desktop adapter.\n"
-    "Interaction pattern: one user sends short text/voice turns and expects immediate assistant replies.\n"
-    "Avatar behavior goal: natural and readable facial/head cues that support the turn meaning.\n"
-    "Execution constraint: downstream playback directly writes Live2D parameters frame-by-frame.\n"
-    "Preference: when emotion is non-neutral, use clearly readable amplitudes instead of near-center no-op values."
-)
-DEFAULT_MOTION_PROMPT_INSTRUCTION = (
-    "Live2D 表现需要比真人更夸张。非中性情绪下，请让头部、眼睛、嘴部或眉毛至少 2 到 3 个轴明显偏离 50，"
-    "避免输出几乎无动作的 45 到 55 区间。"
-)
-
-
-def _build_example_axes(**overrides: int) -> dict[str, int]:
-    axes = {axis.name: 50 for axis in AXES}
-    for key, value in overrides.items():
-        if key not in axes:
-            continue
-        try:
-            number = int(round(float(value)))
-        except (TypeError, ValueError):
-            number = 50
-        axes[key] = max(0, min(100, number))
-    return axes
-
-
-DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES: list[dict[str, Any]] = [
-    {
-        "input": (
-            "User: 嗯，我知道了。\n"
-            "Assistant: 好的，我们继续下一步。"
-        ),
-        "output": {
-            "emotion": "neutral",
-            "mode": "parallel",
-            "duration_ms": 1100,
-            "axes": _build_example_axes(
-                head_pitch=52,
-                eye_open_left=54,
-                eye_open_right=54,
-                mouth_smile=56,
-                brow_bias=52,
-            ),
-        },
-    },
-    {
-        "input": (
-            "User: 太好了！终于通过了！\n"
-            "Assistant: 真棒，我们成功了！"
-        ),
-        "output": {
-            "emotion": "joy",
-            "mode": "parallel",
-            "duration_ms": 1350,
-            "axes": _build_example_axes(
-                head_pitch=60,
-                body_roll=58,
-                gaze_y=58,
-                eye_open_left=66,
-                eye_open_right=66,
-                mouth_open=72,
-                mouth_smile=86,
-                brow_bias=68,
-            ),
-        },
-    },
-    {
-        "input": (
-            "User: 我有点难过，今天状态不太好。\n"
-            "Assistant: 没关系，我们慢慢来。"
-        ),
-        "output": {
-            "emotion": "sad",
-            "mode": "sequential",
-            "duration_ms": 1500,
-            "axes": _build_example_axes(
-                head_pitch=38,
-                body_roll=44,
-                gaze_y=34,
-                eye_open_left=40,
-                eye_open_right=40,
-                mouth_open=36,
-                mouth_smile=22,
-                brow_bias=30,
-            ),
-        },
-    },
-    {
-        "input": (
-            "User: 你这次真的有点过分了。\n"
-            "Assistant: 我理解你的不满，我来马上修正。"
-        ),
-        "output": {
-            "emotion": "tense",
-            "mode": "parallel",
-            "duration_ms": 1250,
-            "axes": _build_example_axes(
-                head_pitch=44,
-                body_yaw=55,
-                gaze_x=52,
-                eye_open_left=46,
-                eye_open_right=46,
-                mouth_open=42,
-                mouth_smile=26,
-                brow_bias=18,
-            ),
-        },
-    },
-    {
-        "input": (
-            "User: 啊？你说这个现在就能用了？\n"
-            "Assistant: 是的，现在已经可用了。"
-        ),
-        "output": {
-            "emotion": "surprised",
-            "mode": "parallel",
-            "duration_ms": 1200,
-            "axes": _build_example_axes(
-                head_pitch=62,
-                gaze_y=64,
-                eye_open_left=88,
-                eye_open_right=88,
-                mouth_open=78,
-                mouth_smile=58,
-                brow_bias=84,
-            ),
-        },
-    },
-]
 
 
 class RealtimeMotionPlanGenerator:
@@ -260,60 +110,6 @@ class RealtimeMotionPlanGenerator:
         return _extract_json_object(completion_text)
 
 
-def build_selector_platform_context(*, runtime_state: Any) -> str:
-    enabled = bool(getattr(runtime_state, "realtime_motion_platform_context_enabled", True))
-    if not enabled:
-        return ""
-
-    custom_description = str(
-        getattr(runtime_state, "realtime_motion_platform_description", "") or ""
-    ).strip()
-    if custom_description:
-        return _truncate_text(custom_description, 720)
-
-    platform_config = getattr(runtime_state, "platform_config", {})
-    adapter_alias = "AG99live Desktop"
-    if isinstance(platform_config, dict):
-        configured_alias = str(platform_config.get("conf_name") or "").strip()
-        if configured_alias:
-            adapter_alias = configured_alias
-
-    client_uid = str(getattr(runtime_state, "client_uid", "") or "").strip() or "desktop-client"
-    return (
-        f"{_DEFAULT_SELECTOR_PLATFORM_DESCRIPTION}\n"
-        f"Adapter alias: {adapter_alias}.\n"
-        f"Session target: {client_uid}."
-    )
-
-
-def resolve_selector_few_shot_examples(*, runtime_state: Any) -> list[dict[str, Any]]:
-    enabled = bool(getattr(runtime_state, "realtime_motion_fewshot_enabled", True))
-    if not enabled:
-        return []
-
-    user_examples = [
-        item
-        for item in getattr(runtime_state, "motion_tuning_reference_examples", [])
-        if isinstance(item, dict)
-    ][:5]
-    max_count = len(DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES)
-    count_raw = getattr(runtime_state, "realtime_motion_fewshot_count", 4)
-    try:
-        count = int(round(float(count_raw)))
-    except (TypeError, ValueError):
-        count = 4
-    count = max(0, min(count, max_count))
-    default_examples = DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES[:count] if count else []
-    return [*user_examples, *default_examples][: max(5, count)]
-
-
-def resolve_motion_prompt_instruction(*, runtime_state: Any) -> str:
-    raw_value = str(getattr(runtime_state, "motion_prompt_instruction", "") or "").strip()
-    if not raw_value:
-        return DEFAULT_MOTION_PROMPT_INSTRUCTION
-    return _truncate_text(raw_value, 800)
-
-
 def resolve_selected_semantic_axis_profile(*, runtime_state: Any) -> dict[str, Any]:
     model_info = getattr(runtime_state, "model_info", {})
     if not isinstance(model_info, dict):
@@ -347,7 +143,7 @@ def resolve_selected_semantic_axis_profile(*, runtime_state: Any) -> dict[str, A
             raise RuntimeError("SemanticAxisProfile invalid: revision must be a positive integer.")
         if status == "stale":
             raise RuntimeError("SemanticAxisProfile is stale; rescan or save the profile before motion generation.")
-        _profile_prompt_axes(profile)
+        profile_prompt_axes(profile)
         return profile
 
     raise RuntimeError(
@@ -355,230 +151,8 @@ def resolve_selected_semantic_axis_profile(*, runtime_state: Any) -> dict[str, A
     )
 
 
-def _profile_prompt_axes(semantic_profile: dict[str, Any]) -> list[dict[str, Any]]:
-    axes = semantic_profile.get("axes")
-    if not isinstance(axes, list):
-        raise ValueError("semantic_profile_axes_not_list")
-
-    result: list[dict[str, Any]] = []
-    for axis in axes:
-        if not isinstance(axis, dict):
-            continue
-        role = str(axis.get("control_role") or "").strip()
-        if role not in {"primary", "hint"}:
-            continue
-        axis_id = str(axis.get("id") or "").strip()
-        if not axis_id:
-            continue
-        result.append(axis)
-    if not result:
-        raise ValueError("semantic_profile_has_no_prompt_axes")
-    return result
-
-
 def _max_axis_error_count(axis_count: int) -> int:
     return max(0, int(axis_count * _MAX_AXIS_ERROR_RATE))
-
-
-def _format_axis_semantics(values: Any) -> str:
-    if not isinstance(values, list):
-        return ""
-    return ", ".join(
-        _truncate_text(str(item).strip(), 48)
-        for item in values
-        if str(item).strip()
-    )
-
-
-def _format_profile_axis_prompt_line(axis: dict[str, Any]) -> str:
-    axis_id = str(axis.get("id") or "").strip()
-    label = str(axis.get("label") or axis_id).strip()
-    role = str(axis.get("control_role") or "").strip()
-    neutral = axis.get("neutral", 50)
-    value_range = axis.get("value_range")
-    range_text = "[0,100]"
-    if (
-        isinstance(value_range, list)
-        and len(value_range) == 2
-        and isinstance(value_range[0], (int, float))
-        and isinstance(value_range[1], (int, float))
-    ):
-        range_text = f"[{float(value_range[0]):g},{float(value_range[1]):g}]"
-    negative = _format_axis_semantics(axis.get("negative_semantics")) or "negative direction"
-    positive = _format_axis_semantics(axis.get("positive_semantics")) or "positive direction"
-    notes = _truncate_text(str(axis.get("usage_notes") or "").strip(), 160)
-    description = _truncate_text(str(axis.get("description") or "").strip(), 160)
-    suffix = f" notes={notes}" if notes else ""
-    return (
-        f"- {axis_id} ({label}, role={role}, range={range_text}, neutral={neutral}): "
-        f"low={negative}; high={positive}. {description}{suffix}"
-    ).strip()
-
-
-def build_selector_context(
-    *,
-    user_text: str,
-    assistant_text: str,
-    platform_context: str = "",
-) -> str:
-    user = (user_text or "").strip()
-    assistant = (assistant_text or "").strip()
-    normalized_platform_context = (platform_context or "").strip()
-    prefix = ""
-    if normalized_platform_context:
-        prefix = (
-            "Platform context:\n"
-            f"{_truncate_text(normalized_platform_context, 760)}\n\n"
-        )
-
-    if user and assistant:
-        return prefix + (
-            "Generate expression controls for this dialog turn.\n"
-            f"User: {_truncate_text(user, 260)}\n"
-            f"Assistant: {_truncate_text(assistant, 320)}"
-        )
-    if assistant:
-        return prefix + _truncate_text(assistant, 360)
-    return prefix + _truncate_text(user, 360)
-
-
-def build_selector_user_prompt(
-    text: str,
-    *,
-    few_shot_examples: list[dict[str, Any]] | None = None,
-    motion_instruction: str = "",
-    semantic_profile: dict[str, Any] | None = None,
-) -> str:
-    if semantic_profile is not None:
-        return build_selector_user_prompt_v2(
-            text,
-            few_shot_examples=few_shot_examples,
-            motion_instruction=motion_instruction,
-            semantic_profile=semantic_profile,
-        )
-
-    lines: list[str] = []
-    for axis in AXES:
-        lines.append(
-            f"- {axis.name}: 0={axis.low_label}, 50={axis.mid_label}, 100={axis.high_label}"
-        )
-    axis_block = "\n".join(lines)
-    few_shot_block = ""
-    normalized_examples = [item for item in (few_shot_examples or []) if isinstance(item, dict)]
-    if normalized_examples:
-        few_shot_lines = ["Few-shot examples (style reference, do not copy literally):"]
-        for index, item in enumerate(normalized_examples, start=1):
-            input_text = _truncate_text(str(item.get("input") or "").strip(), 560)
-            output_payload = item.get("output")
-            output_json = json.dumps(
-                output_payload if isinstance(output_payload, dict) else {},
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-            few_shot_lines.append(f"Example {index} input:\n{input_text}")
-            few_shot_lines.append(f"Example {index} output JSON:\n{output_json}")
-        few_shot_block = "\n".join(few_shot_lines) + "\n\n"
-    motion_instruction_text = str(motion_instruction or "").strip()
-    motion_instruction_block = ""
-    if motion_instruction_text:
-        motion_instruction_block = (
-            "Additional motion instruction:\n"
-            f"{_truncate_text(motion_instruction_text, 800)}\n\n"
-        )
-
-    return (
-        "Given text, choose axis values in [0,100] for an avatar.\n"
-        f"Axes:\n{axis_block}\n\n"
-        "Return JSON only with this schema:\n"
-        "{\n"
-        '  "emotion": "short-label",\n'
-        '  "mode": "expressive or idle",\n'
-        '  "duration_ms": 1200,\n'
-        '  "axes": {\n'
-        '    "head_yaw": 50, "head_roll": 50, "head_pitch": 50,\n'
-        '    "body_yaw": 50, "body_roll": 50,\n'
-        '    "gaze_x": 50, "gaze_y": 50,\n'
-        '    "eye_open_left": 50, "eye_open_right": 50,\n'
-        '    "mouth_open": 50, "mouth_smile": 50, "brow_bias": 50\n'
-        '  }\n'
-        "}\n"
-        "Rules:\n"
-        "- Include all listed axes.\n"
-        "- Use integers only.\n"
-        "- Avoid flat/no-op outputs around 50 unless the emotion is truly neutral.\n"
-        "- For non-neutral emotion, make at least 2 head/face axes visibly deviate from center.\n"
-        "- Keep values stable and readable; avoid chaotic extremes.\n\n"
-        f"{motion_instruction_block}"
-        f"{few_shot_block}"
-        f"Text: {text}"
-    )
-
-
-def build_selector_user_prompt_v2(
-    text: str,
-    *,
-    few_shot_examples: list[dict[str, Any]] | None = None,
-    motion_instruction: str = "",
-    semantic_profile: dict[str, Any],
-) -> str:
-    prompt_axes = _profile_prompt_axes(semantic_profile)
-    axis_block = "\n".join(_format_profile_axis_prompt_line(axis) for axis in prompt_axes)
-    allowed_axis_ids = [str(axis.get("id") or "").strip() for axis in prompt_axes]
-    profile_id = str(semantic_profile.get("profile_id") or "").strip()
-    model_id = str(semantic_profile.get("model_id") or "").strip()
-    revision = semantic_profile.get("revision")
-
-    few_shot_block = ""
-    normalized_examples = [item for item in (few_shot_examples or []) if isinstance(item, dict)]
-    if normalized_examples:
-        few_shot_lines = [
-            "Few-shot examples are style references only. Convert their idea to the current axes; do not copy unknown axis names."
-        ]
-        for index, item in enumerate(normalized_examples[:3], start=1):
-            input_text = _truncate_text(str(item.get("input") or "").strip(), 420)
-            output_payload = item.get("output")
-            output_json = json.dumps(
-                output_payload if isinstance(output_payload, dict) else {},
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-            few_shot_lines.append(f"Example {index} input:\n{input_text}")
-            few_shot_lines.append(f"Example {index} old-style output:\n{output_json}")
-        few_shot_block = "\n".join(few_shot_lines) + "\n\n"
-
-    motion_instruction_text = str(motion_instruction or "").strip()
-    motion_instruction_block = ""
-    if motion_instruction_text:
-        motion_instruction_block = (
-            "Additional motion instruction:\n"
-            f"{_truncate_text(motion_instruction_text, 800)}\n\n"
-        )
-
-    return (
-        "Given text, choose semantic axis values for a Live2D avatar.\n"
-        f"Profile: profile_id={profile_id}, model_id={model_id}, revision={revision}.\n"
-        "Only output axes listed below. Prioritize primary axes; hint axes are optional. "
-        "Never output derived/runtime/ambient/debug axes.\n"
-        f"Axes:\n{axis_block}\n\n"
-        "Return JSON only with this schema:\n"
-        "{\n"
-        '  "emotion": "short-label",\n'
-        '  "mode": "expressive or idle",\n'
-        '  "duration_ms": 1200,\n'
-        '  "axes": {\n'
-        f'    "{allowed_axis_ids[0]}": 50\n'
-        "  }\n"
-        "}\n"
-        "Rules:\n"
-        "- Output at least one axis for non-neutral emotion.\n"
-        "- Use numbers only, inside each axis range.\n"
-        "- Avoid flat/no-op outputs around neutral unless the emotion is truly neutral.\n"
-        "- For non-neutral emotion, make at least 2 primary/hint axes visibly deviate when the profile provides enough axes.\n"
-        "- Keep values stable and readable; avoid chaotic extremes.\n\n"
-        f"{motion_instruction_block}"
-        f"{few_shot_block}"
-        f"Text: {text}"
-    )
 
 
 def normalize_selector_output(
@@ -623,7 +197,7 @@ def normalize_selector_output_v2(
     if not raw_axes:
         raise ValueError("selector_axes_empty")
 
-    prompt_axes = _profile_prompt_axes(semantic_profile)
+    prompt_axes = profile_prompt_axes(semantic_profile)
     allowed_axes = {str(axis.get("id") or "").strip(): axis for axis in prompt_axes}
     allowed_axis_count = len(allowed_axes)
     max_axis_errors = _max_axis_error_count(allowed_axis_count)
@@ -1200,10 +774,3 @@ def _extract_json_object(text: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("Selector payload is not a JSON object.")
     return payload
-
-
-def _truncate_text(value: str, max_chars: int) -> str:
-    text = str(value or "").strip()
-    if len(text) <= max_chars:
-        return text
-    return text[: max_chars - 3].rstrip() + "..."

@@ -73,13 +73,23 @@
     "type": "int",
     "default": 96
   },
+  "motion_generation_mode": {
+    "description": "动作生成链路。split_after_reply：主模型只回复文本，回复完成后用动作模型生成 Live2D 参数；inline_first：旧链路，向主模型注入 `<@anim>` 契约并优先解析内联动作；text_only：不生成动作。",
+    "type": "string",
+    "default": "split_after_reply",
+    "options": [
+      "split_after_reply",
+      "inline_first",
+      "text_only"
+    ]
+  },
   "enable_inline_motion_contract": {
-    "description": "是否把 `<@anim ...>` 输出契约注入主聊天请求，并优先从主回复中内联提取动作计划。",
+    "description": "inline_first 模式下，是否把 `<@anim ...>` 输出契约注入主聊天请求，并优先从主回复中内联提取动作计划。",
     "type": "bool",
     "default": true
   },
   "enable_realtime_motion_plan": {
-    "description": "是否启用回复后实时动作计划二次生成兜底（当主回复未内联产出 `<@anim ...>` 时使用）。",
+    "description": "是否启用回复后实时动作计划二次生成。split_after_reply 模式下这是主动作链路；inline_first 模式下这是内联失败后的兜底。",
     "type": "bool",
     "default": true
   },

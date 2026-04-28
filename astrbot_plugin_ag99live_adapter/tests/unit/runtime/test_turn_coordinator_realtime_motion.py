@@ -123,6 +123,32 @@ def _build_semantic_model_info() -> dict:
     }
 
 
+def _runtime_state_stub(
+    *,
+    mode: str = "inline_first",
+    enable_inline_motion_contract: bool = True,
+):
+    return type(
+        "RuntimeStateStub",
+        (),
+        {
+            "motion_generation_mode": mode,
+            "enable_inline_motion_contract": enable_inline_motion_contract,
+            "enable_realtime_motion_plan": True,
+            "model_info": _build_semantic_model_info(),
+            "motion_prompt_instruction": "Use readable exaggerated head and smile motion.",
+        },
+    )()
+
+
+async def _noop_async():
+    return None
+
+
+async def _return_true_async():
+    return True
+
+
 def _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
     install_fake_astrbot()
 
@@ -247,6 +273,44 @@ def test_realtime_motion_plan_uses_origin_turn_id_when_session_is_idle(
     assert called.get("source") == "engine.realtime_motion_plan"
 
 
+def test_schedule_motion_after_reply_dedupes_by_turn_id(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "current_turn_id": "turn-dedupe",
+            "last_user_text": "user text",
+        },
+    )()
+    coordinator._generate_realtime_motion_plan = lambda **_kwargs: None
+    coordinator._motion_plan_scheduled_turn_ids = set()
+
+    spawned: list[object] = []
+    coordinator._spawn_background_task = lambda coroutine: spawned.append(coroutine)
+
+    assert coordinator.schedule_motion_after_reply(
+        assistant_text="assistant text",
+        origin_turn_id="turn-dedupe",
+        source="first",
+    )
+    assert not coordinator.schedule_motion_after_reply(
+        assistant_text="assistant text again",
+        origin_turn_id="turn-dedupe",
+        source="second",
+    )
+    assert len(spawned) == 1
+    spawned[0].close()
+
+
 def test_extract_inline_motion_plan_strips_valid_tag(install_fake_astrbot, monkeypatch) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
     module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
@@ -307,15 +371,7 @@ def test_build_model_visible_user_text_appends_inline_contract(
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
     module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
 
-    runtime_state = type(
-        "RuntimeStateStub",
-        (),
-        {
-            "enable_inline_motion_contract": True,
-            "model_info": _build_semantic_model_info(),
-            "motion_prompt_instruction": "Use readable exaggerated head and smile motion.",
-        },
-    )()
+    runtime_state = _runtime_state_stub(mode="inline_first")
 
     prompt_text = module._build_model_visible_user_text(
         "你好，今天怎么样？",
@@ -340,18 +396,31 @@ def test_build_model_visible_user_text_skips_inline_contract_when_disabled(
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
     module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
 
-    runtime_state = type(
-        "RuntimeStateStub",
-        (),
-        {
-            "enable_inline_motion_contract": False,
-            "model_info": _build_semantic_model_info(),
-        },
-    )()
+    runtime_state = _runtime_state_stub(
+        mode="inline_first",
+        enable_inline_motion_contract=False,
+    )
 
     prompt_text = module._build_model_visible_user_text(
         "just the user text",
         runtime_state=runtime_state,
+    )
+
+    assert prompt_text == "just the user text"
+    assert "<system_reminder>" not in prompt_text
+    assert "<@anim" not in prompt_text
+
+
+def test_build_model_visible_user_text_skips_inline_contract_in_split_mode(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+
+    prompt_text = module._build_model_visible_user_text(
+        "just the user text",
+        runtime_state=_runtime_state_stub(mode="split_after_reply"),
     )
 
     assert prompt_text == "just the user text"
@@ -368,15 +437,7 @@ def test_apply_inline_motion_contract_mutates_event_message_only(
     TurnCoordinator = module.TurnCoordinator
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
-    coordinator.runtime_state = type(
-        "RuntimeStateStub",
-        (),
-        {
-            "enable_inline_motion_contract": True,
-            "model_info": _build_semantic_model_info(),
-            "motion_prompt_instruction": "Use readable exaggerated head and smile motion.",
-        },
-    )()
+    coordinator.runtime_state = _runtime_state_stub(mode="inline_first")
     coordinator.session_state = type("SessionStateStub", (), {"current_turn_id": "turn-contract"})()
 
     message_obj = type("MessageObjectStub", (), {"message_str": "原始用户消息"})()
@@ -406,6 +467,62 @@ def test_apply_inline_motion_contract_mutates_event_message_only(
     )
 
 
+def test_commit_inbound_message_disables_streaming_in_split_mode(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
+    coordinator._turn_lock = asyncio.Lock()
+    coordinator._motion_plan_scheduled_turn_ids = set()
+
+    class SessionStateStub:
+        client_uid = "desktop-client"
+        current_turn_id = None
+        waiting_for_playback_complete = False
+
+        def begin_turn(self, _message_str: str, *, turn_id: str | None = None) -> str:
+            self.current_turn_id = turn_id or "turn-split"
+            return self.current_turn_id
+
+    coordinator.session_state = SessionStateStub()
+    coordinator.chat_buffer = type(
+        "ChatBufferStub",
+        (),
+        {"add": lambda self, role, text: None},
+    )()
+    coordinator._begin_turn_timing = lambda *_args, **_kwargs: None
+    coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
+    coordinator._emit_image_input_diagnostics = lambda _message_obj: _noop_async()
+    coordinator._send_json = lambda _payload: _return_true_async()
+
+    class EventStub:
+        def __init__(self) -> None:
+            self.message_str = "hello"
+            self.extras: dict[str, object] = {}
+
+        def set_extra(self, key: str, value: object) -> None:
+            self.extras[key] = value
+
+    event = EventStub()
+    coordinator._build_platform_event = lambda _message_obj: event
+    committed: list[object] = []
+    coordinator._commit_event = lambda committed_event: committed.append(committed_event)
+
+    message_obj = type("MessageObjectStub", (), {"message_str": "hello"})()
+    asyncio.run(coordinator._commit_inbound_message(message_obj, turn_id="turn-split"))
+
+    assert committed == [event]
+    assert event.message_str == "hello"
+    assert event.extras["enable_streaming"] is False
+    assert event.extras["ag99live_motion_generation_mode"] == "split_after_reply"
+    assert "ag99live_inline_motion_contract_applied" not in event.extras
+
+
 def test_emit_message_chain_inline_plan_uses_primary_route(
     install_fake_astrbot,
     monkeypatch,
@@ -416,6 +533,7 @@ def test_emit_message_chain_inline_plan_uses_primary_route(
     Plain = module.Plain
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="inline_first")
     coordinator.session_state = type(
         "SessionStateStub",
         (),
@@ -447,11 +565,18 @@ def test_emit_message_chain_inline_plan_uses_primary_route(
 
     scheduled: dict[str, object] = {}
 
-    def fake_schedule_realtime_motion_plan_preview(*, reply_text: str, origin_turn_id: str | None = None):
-        scheduled["reply_text"] = reply_text
+    def fake_schedule_motion_after_reply(
+        *,
+        assistant_text: str,
+        origin_turn_id: str | None = None,
+        source: str = "reply_final",
+    ):
+        del source
+        scheduled["reply_text"] = assistant_text
         scheduled["origin_turn_id"] = origin_turn_id
+        return True
 
-    coordinator._schedule_realtime_motion_plan_preview = fake_schedule_realtime_motion_plan_preview
+    coordinator.schedule_motion_after_reply = fake_schedule_motion_after_reply
 
     inline_broadcast: dict[str, object] = {}
 
@@ -490,6 +615,79 @@ def test_emit_message_chain_inline_plan_uses_primary_route(
     assert "<@anim" not in str(output_text_payload.get("payload", {}).get("text", "")).lower()
 
 
+def test_emit_message_chain_split_mode_ignores_inline_payload(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+    Plain = module.Plain
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-split",
+            "last_user_text": "user text",
+        },
+    )()
+
+    class ChatBufferStub:
+        def add(self, role: str, text: str) -> None:
+            del role
+            del text
+
+    coordinator.chat_buffer = ChatBufferStub()
+    coordinator.speaker_name = "assistant"
+    coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+    coordinator.schedule_motion_after_reply = lambda **_kwargs: (_ for _ in ()).throw(
+        AssertionError("split mode scheduling belongs to on_llm_response")
+    )
+
+    inline_broadcast: dict[str, object] = {}
+
+    async def fake_broadcast_motion_payload(**kwargs):
+        inline_broadcast.update(kwargs)
+        return True
+
+    coordinator.broadcast_motion_payload = fake_broadcast_motion_payload
+
+    async def fake_finish_turn(*, success: bool, reason: str | None):
+        del success
+        del reason
+
+    coordinator._finish_turn = fake_finish_turn
+    tag_payload = json.dumps(
+        {"mode": "inline", "intent": _build_valid_motion_intent()},
+        separators=(",", ":"),
+    )
+
+    asyncio.run(
+        coordinator.emit_message_chain(
+            message_chain=[Plain(f"hello <@anim {tag_payload}> world")],
+        )
+    )
+
+    assert inline_broadcast == {}
+    assert sent_payloads
+    output_text = str(sent_payloads[0].get("payload", {}).get("text", ""))
+    assert "<@anim" not in output_text.lower()
+    assert "hello" in output_text.lower()
+    assert "world" in output_text.lower()
+
+
 def test_emit_message_chain_inline_parse_fail_falls_back_to_secondary_request(
     install_fake_astrbot,
     monkeypatch,
@@ -500,6 +698,7 @@ def test_emit_message_chain_inline_parse_fail_falls_back_to_secondary_request(
     Plain = module.Plain
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="inline_first")
     coordinator.session_state = type(
         "SessionStateStub",
         (),
@@ -526,11 +725,18 @@ def test_emit_message_chain_inline_parse_fail_falls_back_to_secondary_request(
 
     scheduled: dict[str, object] = {}
 
-    def fake_schedule_realtime_motion_plan_preview(*, reply_text: str, origin_turn_id: str | None = None):
-        scheduled["reply_text"] = reply_text
+    def fake_schedule_motion_after_reply(
+        *,
+        assistant_text: str,
+        origin_turn_id: str | None = None,
+        source: str = "reply_final",
+    ):
+        del source
+        scheduled["reply_text"] = assistant_text
         scheduled["origin_turn_id"] = origin_turn_id
+        return True
 
-    coordinator._schedule_realtime_motion_plan_preview = fake_schedule_realtime_motion_plan_preview
+    coordinator.schedule_motion_after_reply = fake_schedule_motion_after_reply
 
     called_broadcast: dict[str, object] = {}
 
@@ -704,6 +910,7 @@ def test_emit_message_chain_uses_raw_reply_text_override_for_inline_extraction(
     Plain = module.Plain
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="inline_first")
     coordinator.session_state = type(
         "SessionStateStub",
         (),
@@ -791,6 +998,7 @@ def test_emit_message_chain_inline_v1_intent_is_rejected(
     Plain = module.Plain
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="inline_first")
     coordinator.session_state = type(
         "SessionStateStub",
         (),
@@ -814,7 +1022,7 @@ def test_emit_message_chain_inline_v1_intent_is_rejected(
         return True
 
     coordinator._send_json = fake_send_json
-    coordinator._schedule_realtime_motion_plan_preview = lambda **_kwargs: None
+    coordinator.schedule_motion_after_reply = lambda **_kwargs: True
 
     inline_broadcast: dict[str, object] = {}
 

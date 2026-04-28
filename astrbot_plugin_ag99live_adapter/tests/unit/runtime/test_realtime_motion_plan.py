@@ -510,7 +510,8 @@ def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
     assert "Few-shot examples are style references only." in provider.last_prompt
     assert "Additional motion instruction:" in provider.last_prompt
     assert "Use stronger head and mouth motion." in provider.last_prompt
-    assert "Return strict JSON only." in provider.last_system_prompt
+    assert "Live2D motion intent selector" in provider.last_system_prompt
+    assert "Do not answer the user" in provider.last_system_prompt
 
 
 def test_realtime_motion_plan_prompt_includes_user_tuned_examples_first() -> None:

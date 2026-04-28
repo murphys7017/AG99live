@@ -39,7 +39,7 @@ from ..live2d.semantic_axis_profile import (
     save_semantic_axis_profile,
 )
 from ..protocol.builder import build_system_model_sync
-from ..motion.realtime_motion_plan import DEFAULT_MOTION_PROMPT_INSTRUCTION
+from ..prompts.motion_selector import DEFAULT_MOTION_PROMPT_INSTRUCTION
 
 
 class RuntimeState:
@@ -76,6 +76,7 @@ class RuntimeState:
         self.action_llm_filter_max_atoms_per_channel = 2
         self.action_llm_filter_chunk_max_channels = 8
         self.action_llm_filter_chunk_max_candidates = 96
+        self.motion_generation_mode = "split_after_reply"
         self.enable_inline_motion_contract = True
         self.enable_realtime_motion_plan = True
         self.realtime_motion_mode = "realtime"
@@ -193,6 +194,13 @@ class RuntimeState:
         self.action_llm_filter_chunk_max_candidates = max(
             int(_plugin_config_get(self.plugin_config, "action_llm_filter_chunk_max_candidates", 96)),
             1,
+        )
+        self.motion_generation_mode = _normalize_motion_generation_mode(
+            _plugin_config_get(
+                self.plugin_config,
+                "motion_generation_mode",
+                "split_after_reply",
+            )
         )
         self.enable_inline_motion_contract = bool(
             _plugin_config_get(self.plugin_config, "enable_inline_motion_contract", True)
@@ -1101,3 +1109,10 @@ def _normalize_motion_prompt_instruction(value: Any) -> str:
     if len(text) > 800:
         return text[:800].rstrip()
     return text
+
+
+def _normalize_motion_generation_mode(value: Any) -> str:
+    mode = str(value or "").strip()
+    if mode in {"inline_first", "split_after_reply", "text_only"}:
+        return mode
+    return "split_after_reply"

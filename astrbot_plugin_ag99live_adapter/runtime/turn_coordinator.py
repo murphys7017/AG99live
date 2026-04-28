@@ -42,10 +42,12 @@ from ..services.speech_service import SpeechIngressService
 from ..motion.realtime_motion_plan import (
     normalize_motion_intent_payload,
     resolve_selected_semantic_axis_profile,
-    resolve_motion_prompt_instruction,
     validate_motion_intent_payload,
     validate_parameter_plan_payload,
 )
+from ..prompts.inline_motion_contract import build_inline_motion_contract
+from ..prompts.main_reply import build_main_llm_user_text
+from ..prompts.motion_selector import resolve_motion_prompt_instruction
 
 INLINE_ANIM_TAG_PATTERN = re.compile(r"<@anim\s*\{[\s\S]*?\}>\s*", re.IGNORECASE)
 INLINE_ANIM_START_PATTERN = re.compile(r"<@anim\b", re.IGNORECASE)
@@ -97,6 +99,7 @@ class TurnCoordinator:
         self._turn_lock = asyncio.Lock()
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._turn_timing: dict[str, Any] = {}
+        self._motion_plan_scheduled_turn_ids: set[str] = set()
 
     async def handle_msg(self, raw_message: dict[str, Any]) -> None:
         message = parse_inbound_message(
@@ -184,6 +187,7 @@ class TurnCoordinator:
         texts, picture_paths, record_paths = _extract_outbound_message_parts(message_chain)
         override_text = str(raw_reply_text_override or "").strip()
         raw_reply_text = override_text or "\n".join(texts).strip()
+        motion_generation_mode = _resolve_motion_generation_mode(self.runtime_state)
         inline_anim_detected = INLINE_ANIM_START_PATTERN.search(raw_reply_text) is not None
         reply_text, inline_payload, inline_mode = _extract_inline_motion_plan(raw_reply_text)
 
@@ -199,7 +203,19 @@ class TurnCoordinator:
                 )
             )
 
-        if inline_anim_detected:
+        if motion_generation_mode == "text_only":
+            logger.info(
+                "WIRING motion_plan turn_id=%s route=text_only inline_anim_detected=%s",
+                turn_id or "",
+                inline_anim_detected,
+            )
+        elif motion_generation_mode == "split_after_reply":
+            logger.info(
+                "WIRING motion_plan turn_id=%s inline_anim_detected=%s route=split_after_reply",
+                turn_id or "",
+                inline_anim_detected,
+            )
+        elif inline_anim_detected:
             if inline_payload is None:
                 logger.warning(
                     "WIRING motion_plan turn_id=%s inline_anim_parse_failed=true "
@@ -223,7 +239,7 @@ class TurnCoordinator:
             )
 
         inline_dispatched = False
-        if isinstance(inline_payload, dict):
+        if motion_generation_mode == "inline_first" and isinstance(inline_payload, dict):
             inline_mode_resolved = str(inline_mode or "inline").strip() or "inline"
             inline_dispatched = await self.broadcast_motion_payload(
                 motion_payload=inline_payload,
@@ -238,14 +254,15 @@ class TurnCoordinator:
                     turn_id or "",
                 )
 
-        if not inline_dispatched:
+        if motion_generation_mode == "inline_first" and not inline_dispatched:
             schedule_text = reply_text
             if not schedule_text and inline_anim_detected and inline_payload is None:
                 schedule_text = str(getattr(self.session_state, "last_user_text", "") or "").strip()
             if schedule_text:
-                self._schedule_realtime_motion_plan_preview(
-                    reply_text=schedule_text,
+                self.schedule_motion_after_reply(
+                    assistant_text=schedule_text,
                     origin_turn_id=turn_id,
+                    source="emit_message_chain_inline_fallback",
                 )
 
         if picture_paths:
@@ -318,6 +335,7 @@ class TurnCoordinator:
                 await self.finalize_turn(turn_id=self.session_state.current_turn_id)
 
             current_turn_id = self.session_state.begin_turn(message_obj.message_str, turn_id=turn_id)
+            self._motion_plan_scheduled_turn_ids = set()
             self._begin_turn_timing(message_obj.message_str)
             self.chat_buffer.add("user", message_obj.message_str)
             await self._send_json(
@@ -329,7 +347,14 @@ class TurnCoordinator:
             await self._emit_image_input_diagnostics(message_obj)
 
             event = self._build_platform_event(message_obj)
-            self._apply_inline_motion_contract_to_event(event, message_obj=message_obj)
+            motion_generation_mode = _resolve_motion_generation_mode(self.runtime_state)
+            if motion_generation_mode == "split_after_reply":
+                set_extra = getattr(event, "set_extra", None)
+                if callable(set_extra):
+                    set_extra("enable_streaming", False)
+                    set_extra("ag99live_motion_generation_mode", motion_generation_mode)
+            if motion_generation_mode == "inline_first":
+                self._apply_inline_motion_contract_to_event(event, message_obj=message_obj)
             self._commit_event(event)
             self._mark_turn_timing("event_committed_at")
             logger.debug(
@@ -592,28 +617,67 @@ class TurnCoordinator:
             )
         return sent
 
+    def schedule_motion_after_reply(
+        self,
+        *,
+        assistant_text: str,
+        origin_turn_id: str | None = None,
+        source: str = "reply_final",
+    ) -> bool:
+        if self._generate_realtime_motion_plan is None:
+            return False
+
+        if _resolve_motion_generation_mode(self.runtime_state) == "text_only":
+            return False
+
+        normalized_assistant_text = (assistant_text or "").strip()
+        if not normalized_assistant_text:
+            return False
+
+        user_text = str(getattr(self.session_state, "last_user_text", "") or "")
+        if origin_turn_id is None:
+            origin_turn_id = self.session_state.current_turn_id
+
+        turn_key = str(origin_turn_id or "").strip()
+        scheduled_turn_ids = getattr(self, "_motion_plan_scheduled_turn_ids", None)
+        if not isinstance(scheduled_turn_ids, set):
+            scheduled_turn_ids = set()
+            self._motion_plan_scheduled_turn_ids = scheduled_turn_ids
+        if turn_key and turn_key in scheduled_turn_ids:
+            logger.info(
+                "Realtime motion plan skipped because already scheduled turn_id=%s source=%s",
+                turn_key,
+                source,
+            )
+            return False
+        if turn_key:
+            scheduled_turn_ids.add(turn_key)
+
+        logger.info(
+            "Realtime motion plan scheduled turn_id=%s source=%s assistant_len=%s",
+            turn_key,
+            source,
+            len(normalized_assistant_text),
+        )
+        self._spawn_background_task(
+            self._generate_and_broadcast_realtime_motion_plan(
+                user_text=user_text,
+                assistant_text=normalized_assistant_text,
+                origin_turn_id=origin_turn_id,
+            )
+        )
+        return True
+
     def _schedule_realtime_motion_plan_preview(
         self,
         *,
         reply_text: str,
         origin_turn_id: str | None = None,
     ) -> None:
-        if self._generate_realtime_motion_plan is None:
-            return
-
-        assistant_text = (reply_text or "").strip()
-        if not assistant_text:
-            return
-
-        user_text = str(getattr(self.session_state, "last_user_text", "") or "")
-        if origin_turn_id is None:
-            origin_turn_id = self.session_state.current_turn_id
-        self._spawn_background_task(
-            self._generate_and_broadcast_realtime_motion_plan(
-                user_text=user_text,
-                assistant_text=assistant_text,
-                origin_turn_id=origin_turn_id,
-            )
+        self.schedule_motion_after_reply(
+            assistant_text=reply_text,
+            origin_turn_id=origin_turn_id,
+            source="legacy_preview",
         )
 
     async def _generate_and_broadcast_realtime_motion_plan(
@@ -992,11 +1056,13 @@ def _extract_message_motion_payload(
 
 
 def _build_model_visible_user_text(user_text: str, *, runtime_state: Any) -> str:
-    base_text = str(user_text or "").rstrip()
+    base_text = build_main_llm_user_text(user_text)
+    if _resolve_motion_generation_mode(runtime_state) != "inline_first":
+        return base_text
     if not bool(getattr(runtime_state, "enable_inline_motion_contract", True)):
         return base_text
 
-    contract = _build_inline_motion_contract(runtime_state=runtime_state)
+    contract = _build_inline_motion_contract_for_runtime(runtime_state=runtime_state)
     if not contract:
         return base_text
 
@@ -1005,97 +1071,27 @@ def _build_model_visible_user_text(user_text: str, *, runtime_state: Any) -> str
     return f"<system_reminder>\n{contract}\n</system_reminder>"
 
 
-def _build_inline_motion_contract(*, runtime_state: Any) -> str:
+def _resolve_motion_generation_mode(runtime_state: Any) -> str:
+    if runtime_state is None:
+        return "split_after_reply"
+    mode = str(getattr(runtime_state, "motion_generation_mode", "split_after_reply") or "").strip()
+    if mode in {"inline_first", "split_after_reply", "text_only"}:
+        return mode
+    return "split_after_reply"
+
+
+def _build_inline_motion_contract_for_runtime(*, runtime_state: Any) -> str:
     try:
         semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
     except RuntimeError as exc:
         logger.warning("Inline motion contract disabled because semantic profile is unavailable: %s", exc)
         return ""
 
-    template_payload = {
-        "mode": "inline",
-        "intent": _build_inline_motion_intent_template(semantic_profile),
-    }
-    template_tag = f"<@anim {json.dumps(template_payload, ensure_ascii=False, separators=(',', ':'))}>"
-    selected_model = str(semantic_profile.get("model_id") or "").strip()
     motion_instruction = resolve_motion_prompt_instruction(runtime_state=runtime_state)
-    prompt_axis_lines = _build_inline_motion_axis_lines(semantic_profile)
-
-    lines = [
-        "AG99live inline motion contract:",
-        "Write your normal assistant reply first.",
-        "Then append exactly one final line containing only a single <@anim ...> tag.",
-        "Do not wrap the tag in a code block and do not explain the tag.",
-        "The JSON inside the tag must be valid JSON.",
-        "Top-level tag payload must use `mode: \"inline\"` and an `intent` object.",
-        "The `intent.schema_version` must be `engine.motion_intent.v2`.",
-        "The intent must include `profile_id`, `profile_revision`, and `model_id` exactly as shown in the template.",
-        "The `intent.mode` must be `idle` or `expressive`.",
-        "The `intent.axes` object may only include primary/hint axes listed below.",
-        "Do not output derived/runtime/ambient/debug axes.",
-        "The `intent.duration_hint_ms` should be a reasonable duration hint in milliseconds.",
-        "If the turn is calm or uncertain, emit a safe idle intent instead of omitting the tag.",
-    ]
-    if motion_instruction:
-        lines.append(f"Additional motion instruction: {motion_instruction}")
-    if selected_model:
-        lines.append(f"Current Live2D model: {selected_model}.")
-    lines.append("Allowed semantic axes:")
-    lines.extend(prompt_axis_lines)
-    lines.append("Use this tag template structure and fill in suitable values:")
-    lines.append(template_tag)
-    return "\n".join(lines)
-
-
-def _build_inline_motion_axis_lines(semantic_profile: dict[str, Any]) -> list[str]:
-    axes = semantic_profile.get("axes")
-    if not isinstance(axes, list):
-        return []
-    lines: list[str] = []
-    for axis in axes:
-        if not isinstance(axis, dict):
-            continue
-        role = str(axis.get("control_role") or "").strip()
-        if role not in {"primary", "hint"}:
-            continue
-        axis_id = str(axis.get("id") or "").strip()
-        if not axis_id:
-            continue
-        label = str(axis.get("label") or axis_id).strip()
-        negative = ", ".join(str(item).strip() for item in axis.get("negative_semantics", []) if str(item).strip())
-        positive = ", ".join(str(item).strip() for item in axis.get("positive_semantics", []) if str(item).strip())
-        lines.append(f"- {axis_id} ({label}, role={role}): low={negative or 'negative'}; high={positive or 'positive'}")
-    return lines
-
-
-def _build_inline_motion_intent_template(semantic_profile: dict[str, Any]) -> dict[str, Any]:
-    axes: dict[str, dict[str, float]] = {}
-    for axis in semantic_profile.get("axes", []):
-        if not isinstance(axis, dict):
-            continue
-        role = str(axis.get("control_role") or "").strip()
-        if role not in {"primary", "hint"}:
-            continue
-        axis_id = str(axis.get("id") or "").strip()
-        if not axis_id:
-            continue
-        neutral = axis.get("neutral", 50)
-        axes[axis_id] = {"value": float(neutral) if isinstance(neutral, (int, float)) else 50.0}
-    if not axes:
-        raise RuntimeError("SemanticAxisProfile has no primary/hint axes for inline motion contract.")
-    return {
-        "schema_version": "engine.motion_intent.v2",
-        "profile_id": str(semantic_profile.get("profile_id") or "").strip(),
-        "profile_revision": int(semantic_profile.get("revision") or 0),
-        "model_id": str(semantic_profile.get("model_id") or "").strip(),
-        "mode": "idle",
-        "emotion_label": "neutral",
-        "duration_hint_ms": 1200,
-        "axes": axes,
-        "summary": {
-            "axis_count": len(axes),
-        },
-    }
+    return build_inline_motion_contract(
+        semantic_profile=semantic_profile,
+        motion_instruction=motion_instruction,
+    )
 
 
 def _strip_inline_anim_tags(text: str) -> str:
