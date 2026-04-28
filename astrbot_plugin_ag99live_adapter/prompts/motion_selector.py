@@ -15,33 +15,33 @@ class AxisSpec:
 
 
 AXES: list[AxisSpec] = [
-    AxisSpec("head_yaw", "head_yaw", "turn left", "center", "turn right"),
-    AxisSpec("head_roll", "head_roll", "tilt left", "center", "tilt right"),
-    AxisSpec("head_pitch", "head_pitch", "look down", "center", "look up"),
-    AxisSpec("body_yaw", "body_yaw", "twist left", "center", "twist right"),
-    AxisSpec("body_roll", "body_roll", "lean left", "center", "lean right"),
-    AxisSpec("gaze_x", "gaze_x", "look left", "center", "look right"),
-    AxisSpec("gaze_y", "gaze_y", "look down", "center", "look up"),
-    AxisSpec("eye_open_left", "eye_open_left", "closed", "normal", "wide open"),
-    AxisSpec("eye_open_right", "eye_open_right", "closed", "normal", "wide open"),
-    AxisSpec("mouth_open", "mouth_open", "closed", "normal", "open"),
-    AxisSpec("mouth_smile", "mouth_smile", "frown", "neutral", "smile"),
-    AxisSpec("brow_bias", "brow_bias", "frown", "neutral", "raised"),
+    AxisSpec("head_yaw", "head_yaw", "向左转头", "居中", "向右转头"),
+    AxisSpec("head_roll", "head_roll", "向左歪头", "居中", "向右歪头"),
+    AxisSpec("head_pitch", "head_pitch", "低头", "居中", "抬头"),
+    AxisSpec("body_yaw", "body_yaw", "身体向左转", "居中", "身体向右转"),
+    AxisSpec("body_roll", "body_roll", "身体左倾", "居中", "身体右倾"),
+    AxisSpec("gaze_x", "gaze_x", "看向左侧", "居中", "看向右侧"),
+    AxisSpec("gaze_y", "gaze_y", "看向下方", "居中", "看向上方"),
+    AxisSpec("eye_open_left", "eye_open_left", "闭眼", "正常睁眼", "睁大"),
+    AxisSpec("eye_open_right", "eye_open_right", "闭眼", "正常睁眼", "睁大"),
+    AxisSpec("mouth_open", "mouth_open", "闭嘴", "正常", "张嘴"),
+    AxisSpec("mouth_smile", "mouth_smile", "不开心/嘴角下压", "中性", "微笑"),
+    AxisSpec("brow_bias", "brow_bias", "皱眉/压眉", "中性", "挑眉/抬眉"),
 ]
 AXIS_NAMES = [axis.name for axis in AXES]
 
 MOTION_SELECTOR_SYSTEM_PROMPT = (
-    "You are a Live2D motion intent selector, not a chat assistant. "
-    "Read the finished dialog turn and return one strict JSON object only. "
-    "Do not answer the user, do not add Markdown, and do not explain."
+    "你是 Live2D 表情动作参数生成器，不是聊天助手。"
+    "阅读已经完成的本轮对话，只返回一个严格 JSON 对象。"
+    "不要回复用户，不要输出 Markdown，不要解释。"
 )
 
 DEFAULT_SELECTOR_PLATFORM_DESCRIPTION = (
-    "Source platform: AstrBot through AG99live desktop adapter.\n"
-    "Interaction pattern: one user sends short text/voice turns and expects immediate assistant replies.\n"
-    "Avatar behavior goal: natural and readable facial/head cues that support the turn meaning.\n"
-    "Execution constraint: downstream playback directly writes Live2D parameters frame-by-frame.\n"
-    "Preference: when emotion is non-neutral, use clearly readable amplitudes instead of near-center no-op values."
+    "场景：用户正在和一个由 Live2D 角色承载的助手对话。\n"
+    "交互模式：用户以短文本或语音进行单轮输入，并期待助手快速回应。\n"
+    "角色表现目标：用自然、可读的面部、头部和视线变化支撑回复语气。\n"
+    "播放方式：你输出的数值会直接用于驱动角色动作，所以要稳定、克制、可理解。\n"
+    "偏好：当情绪不是中性时，使用清晰可见的幅度，避免接近中位的无效动作。"
 )
 
 DEFAULT_MOTION_PROMPT_INSTRUCTION = (
@@ -65,7 +65,7 @@ def _build_example_axes(**overrides: int) -> dict[str, int]:
 
 DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES: list[dict[str, Any]] = [
     {
-        "input": "User: 嗯，我知道了。\nAssistant: 好的，我们继续下一步。",
+        "input": "用户：嗯，我知道了。\n助手：好的，我们继续下一步。",
         "output": {
             "emotion": "neutral",
             "mode": "idle",
@@ -74,7 +74,7 @@ DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES: list[dict[str, Any]] = [
         },
     },
     {
-        "input": "User: 太好了！终于通过了！\nAssistant: 真棒，我们成功了！",
+        "input": "用户：太好了！终于通过了！\n助手：真棒，我们成功了！",
         "output": {
             "emotion": "joy",
             "mode": "expressive",
@@ -88,7 +88,7 @@ DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES: list[dict[str, Any]] = [
         },
     },
     {
-        "input": "User: 我有点难过，今天状态不太好。\nAssistant: 没关系，我们慢慢来。",
+        "input": "用户：我有点难过，今天状态不太好。\n助手：没关系，我们慢慢来。",
         "output": {
             "emotion": "sad",
             "mode": "expressive",
@@ -104,7 +104,7 @@ DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES: list[dict[str, Any]] = [
         },
     },
     {
-        "input": "User: 你能对我眨一下眼吗？\nAssistant: 当然可以，给你一个小小的 wink。",
+        "input": "用户：你能对我眨一下眼吗？\n助手：当然可以，给你一个小小的 wink。",
         "output": {
             "emotion": "playful_wink",
             "mode": "expressive",
@@ -120,7 +120,7 @@ DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES: list[dict[str, Any]] = [
         },
     },
     {
-        "input": "User: 啊？你说这个现在就能用了？\nAssistant: 是的，现在已经可用了。",
+        "input": "用户：啊？你说这个现在就能用了？\n助手：是的，现在已经可用了。",
         "output": {
             "emotion": "surprised",
             "mode": "expressive",
@@ -149,19 +149,7 @@ def build_selector_platform_context(*, runtime_state: Any) -> str:
     if custom_description:
         return truncate_prompt_text(custom_description, 720)
 
-    platform_config = getattr(runtime_state, "platform_config", {})
-    adapter_alias = "AG99live Desktop"
-    if isinstance(platform_config, dict):
-        configured_alias = str(platform_config.get("conf_name") or "").strip()
-        if configured_alias:
-            adapter_alias = configured_alias
-
-    client_uid = str(getattr(runtime_state, "client_uid", "") or "").strip() or "desktop-client"
-    return (
-        f"{DEFAULT_SELECTOR_PLATFORM_DESCRIPTION}\n"
-        f"Adapter alias: {adapter_alias}.\n"
-        f"Session target: {client_uid}."
-    )
+    return DEFAULT_SELECTOR_PLATFORM_DESCRIPTION
 
 
 def resolve_selector_few_shot_examples(*, runtime_state: Any) -> list[dict[str, Any]]:
@@ -225,15 +213,15 @@ def build_selector_context(
     prefix = ""
     if normalized_platform_context:
         prefix = (
-            "Platform context:\n"
+            "平台上下文：\n"
             f"{truncate_prompt_text(normalized_platform_context, 760)}\n\n"
         )
 
     if user and assistant:
         return prefix + (
-            "Generate expression controls for this dialog turn.\n"
-            f"User: {truncate_prompt_text(user, 260)}\n"
-            f"Assistant: {truncate_prompt_text(assistant, 320)}"
+            "请为本轮对话生成角色表情和动作控制参数。\n"
+            f"用户：{truncate_prompt_text(user, 260)}\n"
+            f"助手：{truncate_prompt_text(assistant, 320)}"
         )
     if assistant:
         return prefix + truncate_prompt_text(assistant, 360)
@@ -264,20 +252,20 @@ def build_selector_user_prompt(
     few_shot_block = _build_few_shot_block(
         few_shot_examples=few_shot_examples,
         input_limit=560,
-        header="Few-shot examples (style reference, do not copy literally):",
-        output_label="output JSON",
+        header="少量示例（仅作为风格参考，不要机械照抄）：",
+        output_label="输出 JSON",
     )
     motion_instruction_block = _build_motion_instruction_block(motion_instruction)
 
     return (
-        "Given text, choose axis values in [0,100] for an avatar.\n"
-        "Platform and task:\n"
-        "- AG99live drives a Live2D avatar during an AstrBot chat turn.\n"
-        "- Your job is to select expression/control values that support the finished assistant reply.\n"
-        "- Do not generate chat text; only generate the control JSON.\n\n"
-        f"Available parameters:\n{axis_block}\n\n"
-        "Return requirement:\n"
-        "Return one JSON object only with this schema:\n"
+        "请根据文本为 Live2D 角色选择 [0,100] 范围内的动作轴数值。\n"
+        "平台与任务：\n"
+        "- AG99live 会在 AstrBot 对话过程中驱动 Live2D 角色。\n"
+        "- 你的任务是选择能支撑助手回复语气的表情和控制参数。\n"
+        "- 不要生成聊天文本，只生成控制 JSON。\n\n"
+        f"可用参数：\n{axis_block}\n\n"
+        "返回要求：\n"
+        "只返回一个符合以下结构的 JSON 对象：\n"
         "{\n"
         '  "emotion": "short-label",\n'
         '  "mode": "idle or expressive",\n'
@@ -290,15 +278,15 @@ def build_selector_user_prompt(
         '    "mouth_open": 50, "mouth_smile": 50, "brow_bias": 50\n'
         '  }\n'
         "}\n"
-        "Generation rules:\n"
-        "- Include all listed axes.\n"
-        "- Use integers only.\n"
-        "- Use mode=idle for neutral, explanatory, or low-affect replies; use mode=expressive for clear emotion or intentional gesture.\n"
-        "- Choose values by semantic fit, not by matching a fixed action list.\n"
-        "- Keep values stable and readable; avoid chaotic extremes.\n\n"
+        "生成规则：\n"
+        "- 包含所有列出的轴。\n"
+        "- 只使用整数。\n"
+        "- 中性、说明性、低情绪回复使用 mode=idle；明确情绪或明确姿态使用 mode=expressive。\n"
+        "- 按语义匹配选择数值，不要按固定动作列表套模板。\n"
+        "- 数值要稳定、可读，避免混乱的极端值。\n\n"
         f"{motion_instruction_block}"
         f"{few_shot_block}"
-        f"Text: {text}"
+        f"文本：{text}"
     )
 
 
@@ -312,37 +300,35 @@ def build_selector_user_prompt_v2(
     prompt_axes = profile_prompt_axes(semantic_profile)
     axis_block = "\n".join(_format_profile_axis_prompt_line(axis) for axis in prompt_axes)
     allowed_axis_ids = [str(axis.get("id") or "").strip() for axis in prompt_axes]
-    profile_id = str(semantic_profile.get("profile_id") or "").strip()
-    model_id = str(semantic_profile.get("model_id") or "").strip()
-    revision = semantic_profile.get("revision")
 
     few_shot_block = _build_few_shot_block(
         few_shot_examples=few_shot_examples,
         input_limit=420,
         header=(
-            "Few-shot examples are style references only. Convert their idea to the current axes; "
-            "do not copy unknown axis names."
+            "少量示例仅作为风格参考。请把示例表达意图转换到当前可用轴；"
+            "不要复制未知轴名。"
         ),
-        output_label="reference output",
+        output_label="参考输出",
         limit=3,
     )
     motion_instruction_block = _build_motion_instruction_block(motion_instruction)
 
     return (
-        "Given text, choose semantic axis values for a Live2D avatar.\n"
-        "Platform and task:\n"
-        "- AG99live drives a Live2D avatar during an AstrBot chat turn.\n"
-        "- The main LLM has already produced the assistant reply; your job is to translate the turn into semantic control parameters.\n"
-        "- Do not generate chat text, explanations, Markdown, or extra fields.\n\n"
-        f"Profile: profile_id={profile_id}, model_id={model_id}, revision={revision}.\n"
-        "Available parameters:\n"
-        "- Only output axes listed below.\n"
-        "- Each parameter line includes id, label, role, numeric range, neutral value, direction semantics, and usage notes.\n"
-        "- Use primary axes for core expression; use hint axes for details such as asymmetric eye openness, brow nuance, or small accents.\n"
-        "- Never output derived/runtime/ambient/debug axes, and do not invent axis names.\n"
+        "请根据文本为 Live2D 角色选择语义动作轴数值。\n"
+        "平台与任务：\n"
+        "- AG99live 会在 AstrBot 对话过程中驱动 Live2D 角色。\n"
+        "- 主 LLM 已经完成助手回复；你的任务是把本轮对话转换成语义控制参数。\n"
+        "- 不要生成聊天文本、解释、Markdown 或额外字段。\n\n"
+        "可控制参数：\n"
+        "- 你只能使用下面列出的参数，不要编造参数名。\n"
+        "- 每个参数都有取值范围、中性值、低值含义、高值含义和使用说明。\n"
+        "- 参数分为主要控制参数和辅助细节参数。\n"
+        "- 主要控制参数用于决定本次动作的核心表现，例如头部方向、视线、笑意、眉眼状态。\n"
+        "- 辅助细节参数用于补充细节，例如单侧眼睛开合、眉毛细微变化、轻微口型修饰。\n"
+        "- 输出时优先选择最能表达本轮语气的少数参数；不要为了凑数量而输出无关参数。\n"
         f"{axis_block}\n\n"
-        "Return requirement:\n"
-        "Return one JSON object only with this schema:\n"
+        "返回要求：\n"
+        "只返回一个符合以下结构的 JSON 对象：\n"
         "{\n"
         '  "emotion": "short-label",\n'
         '  "mode": "idle or expressive",\n'
@@ -351,18 +337,18 @@ def build_selector_user_prompt_v2(
         f'    "{allowed_axis_ids[0]}": 50\n'
         "  }\n"
         "}\n"
-        "Generation rules:\n"
-        "- Use mode=idle for neutral, explanatory, or low-affect replies; use mode=expressive only when the assistant text carries a clear emotion or intentional gesture.\n"
-        "- Output 1 to 4 relevant axes in normal cases; fewer is better than unrelated motion.\n"
-        "- Use numbers only, inside each axis range.\n"
-        "- Choose parameters by interpreting the parameter meanings and the dialog context; do not treat examples or named gestures as a closed set of choices.\n"
-        "- Smile intensity should mainly use mouth_smile when available: slight smile roughly 58-68, clear happy smile roughly 72-88, playful/teasing smile roughly 65-82 with optional head/gaze/brow nuance.\n"
-        "- Wink or asymmetric eye details may use eye_open axes when available, but infer the side and strength from dialog meaning, head/gaze direction, and examples instead of following a fixed template.\n"
-        "- mouth_open is optional and secondary when available; use it only for small expression/lip-shape adjustment, not as primary speech animation.\n"
-        "- Keep values stable and readable; avoid chaotic extremes.\n\n"
+        "生成规则：\n"
+        "- 中性、说明性、低情绪回复使用 mode=idle；只有当助手文本带有明确情绪或明确姿态时才使用 mode=expressive。\n"
+        "- 通常输出 1 到 4 个相关轴；宁可少输出，也不要输出无关动作。\n"
+        "- 只使用数字，并保持在每个轴自己的范围内。\n"
+        "- 通过理解参数含义和对话上下文来选择参数；不要把示例或动作名当成封闭选项。\n"
+        "- 如果存在 mouth_smile，笑意强度主要由 mouth_smile 表达：轻微微笑约 58-68，明显开心约 72-88，调皮或逗趣约 65-82，并可搭配头部、视线、眉毛细节。\n"
+        "- 如果存在 eye_open 轴，可以用于 wink 或不对称眼部细节；侧向和强度应从对话语义、头部/视线方向和示例中推断，不要固定套模板。\n"
+        "- 如果存在 mouth_open，它只是可选的次要口型微调；不要把它当成主要说话口型动画。\n"
+        "- 数值要稳定、可读，避免混乱的极端值。\n\n"
         f"{motion_instruction_block}"
         f"{few_shot_block}"
-        f"Text: {text}"
+        f"文本：{text}"
     )
 
 
@@ -389,8 +375,8 @@ def _build_few_shot_block(
             ensure_ascii=False,
             separators=(",", ":"),
         )
-        few_shot_lines.append(f"Example {index} input:\n{input_text}")
-        few_shot_lines.append(f"Example {index} {output_label}:\n{output_json}")
+        few_shot_lines.append(f"示例 {index} 输入：\n{input_text}")
+        few_shot_lines.append(f"示例 {index} {output_label}：\n{output_json}")
     return "\n".join(few_shot_lines) + "\n\n"
 
 
@@ -399,7 +385,7 @@ def _build_motion_instruction_block(motion_instruction: str) -> str:
     if not motion_instruction_text:
         return ""
     return (
-        "Additional motion instruction:\n"
+        "补充动作指令：\n"
         f"{truncate_prompt_text(motion_instruction_text, 800)}\n\n"
     )
 
@@ -418,6 +404,7 @@ def _format_profile_axis_prompt_line(axis: dict[str, Any]) -> str:
     axis_id = str(axis.get("id") or "").strip()
     label = str(axis.get("label") or axis_id).strip()
     role = str(axis.get("control_role") or "").strip()
+    role_label = _format_control_role_label(role)
     neutral = axis.get("neutral", 50)
     value_range = axis.get("value_range")
     range_text = "[0,100]"
@@ -428,15 +415,23 @@ def _format_profile_axis_prompt_line(axis: dict[str, Any]) -> str:
         and isinstance(value_range[1], (int, float))
     ):
         range_text = f"[{float(value_range[0]):g},{float(value_range[1]):g}]"
-    negative = _format_axis_semantics(axis.get("negative_semantics")) or "negative direction"
-    positive = _format_axis_semantics(axis.get("positive_semantics")) or "positive direction"
+    negative = _format_axis_semantics(axis.get("negative_semantics")) or "负方向"
+    positive = _format_axis_semantics(axis.get("positive_semantics")) or "正方向"
     notes = truncate_prompt_text(str(axis.get("usage_notes") or "").strip(), 160)
     description = truncate_prompt_text(str(axis.get("description") or "").strip(), 160)
-    suffix = f" notes={notes}" if notes else ""
+    suffix = f" 使用说明={notes}" if notes else ""
     return (
-        f"- {axis_id} ({label}, role={role}, range={range_text}, neutral={neutral}): "
-        f"low={negative}; high={positive}. {description}{suffix}"
+        f"- {axis_id}（{label}，{role_label}，范围 {range_text}，中性值 {neutral}）："
+        f"低值={negative}；高值={positive}。{description}{suffix}"
     ).strip()
+
+
+def _format_control_role_label(role: str) -> str:
+    if role == "primary":
+        return "主要控制参数"
+    if role == "hint":
+        return "辅助细节参数"
+    return "可控制参数"
 
 
 def truncate_prompt_text(value: str, max_chars: int) -> str:

@@ -504,14 +504,14 @@ def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
     assert intent["profile_id"] == "DemoModel.semantic.v1"
     assert intent["axes"]["head_yaw"]["value"] == 82
     assert provider.called is True
-    assert "Given text, choose semantic axis values for a Live2D avatar." in provider.last_prompt
+    assert "请根据文本为 Live2D 角色选择语义动作轴数值。" in provider.last_prompt
     assert "debug_tail" not in provider.last_prompt
-    assert "Platform context:" in provider.last_prompt
-    assert "Few-shot examples are style references only." in provider.last_prompt
-    assert "Additional motion instruction:" in provider.last_prompt
+    assert "平台上下文：" in provider.last_prompt
+    assert "少量示例仅作为风格参考。" in provider.last_prompt
+    assert "补充动作指令：" in provider.last_prompt
     assert "Use stronger head and mouth motion." in provider.last_prompt
-    assert "Live2D motion intent selector" in provider.last_system_prompt
-    assert "Do not answer the user" in provider.last_system_prompt
+    assert "Live2D 表情动作参数生成器" in provider.last_system_prompt
+    assert "不要回复用户" in provider.last_system_prompt
 
 
 def test_realtime_motion_plan_prompt_includes_user_tuned_examples_first() -> None:
@@ -647,8 +647,8 @@ def test_realtime_motion_plan_generator_prompt_switches_off_context_and_few_shot
     valid, reason = validate_motion_intent_payload(intent)
     assert valid is True
     assert reason == ""
-    assert "Few-shot examples (style reference, do not copy literally):" not in provider.last_prompt
-    assert "Platform context:" not in provider.last_prompt
+    assert "少量示例（仅作为风格参考，不要机械照抄）：" not in provider.last_prompt
+    assert "平台上下文：" not in provider.last_prompt
 
 
 def test_validate_parameter_plan_payload_rejects_v1_key_axes() -> None:

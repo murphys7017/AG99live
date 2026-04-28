@@ -380,9 +380,9 @@ def test_build_model_visible_user_text_appends_inline_contract(
 
     assert prompt_text.startswith("你好，今天怎么样？")
     assert "<system_reminder>" in prompt_text
-    assert "AG99live inline motion contract" in prompt_text
+    assert "AG99live 内联动作契约" in prompt_text
     assert "Use readable exaggerated head and smile motion." in prompt_text
-    assert "Current Live2D model: pet." in prompt_text
+    assert "当前 Live2D 模型：pet。" in prompt_text
     assert "<@anim {" in prompt_text
     assert '"schema_version":"engine.motion_intent.v2"' in prompt_text
     assert '"profile_id":"pet.semantic.v1"' in prompt_text
