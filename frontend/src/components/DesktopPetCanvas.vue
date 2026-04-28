@@ -17,10 +17,8 @@ const isDragging = ref(false);
 
 function setPetWindowDragging(dragging: boolean): void {
   const targetWindow = window as Window & {
-    __ag99PetDragging?: boolean;
     __ag99PetWindowDragging?: boolean;
   };
-  targetWindow.__ag99PetDragging = dragging;
   targetWindow.__ag99PetWindowDragging = dragging;
 }
 

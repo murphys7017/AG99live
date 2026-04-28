@@ -91,23 +91,37 @@ class RealtimeMotionPlanGenerator:
                 "Configure `motion_analysis_provider_id` or set a current chat provider."
             )
 
-        timeout = float(getattr(self.runtime_state, "realtime_motion_timeout_seconds", 8.0) or 8.0)
-        response = await asyncio.wait_for(
-            provider.text_chat(
-                prompt=build_selector_user_prompt(
-                    context_text,
-                    few_shot_examples=few_shot_examples,
-                    motion_instruction=motion_instruction,
-                    semantic_profile=semantic_profile,
+        timeout = _resolve_motion_provider_timeout(self.runtime_state)
+        try:
+            response = await asyncio.wait_for(
+                provider.text_chat(
+                    prompt=build_selector_user_prompt(
+                        context_text,
+                        few_shot_examples=few_shot_examples,
+                        motion_instruction=motion_instruction,
+                        semantic_profile=semantic_profile,
+                    ),
+                    system_prompt=_SYSTEM_PROMPT,
                 ),
-                system_prompt=_SYSTEM_PROMPT,
-            ),
-            timeout=timeout,
-        )
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(f"AstrBot motion provider timed out after {timeout:g}s.") from exc
         completion_text = str(getattr(response, "completion_text", "") or "").strip()
         if not completion_text:
             raise RuntimeError("AstrBot motion provider returned empty completion_text.")
         return _extract_json_object(completion_text)
+
+
+def _resolve_motion_provider_timeout(runtime_state: Any) -> float:
+    raw_timeout = getattr(runtime_state, "realtime_motion_timeout_seconds", 20.0)
+    try:
+        timeout = float(raw_timeout)
+    except (TypeError, ValueError):
+        timeout = 20.0
+    if not float("-inf") < timeout < float("inf"):
+        return 20.0
+    return max(20.0, timeout)
 
 
 def resolve_selected_semantic_axis_profile(*, runtime_state: Any) -> dict[str, Any]:

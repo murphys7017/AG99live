@@ -703,10 +703,15 @@ class TurnCoordinator:
                 assistant_text=assistant_text,
             )
         except Exception as exc:
-            logger.warning("Realtime motion plan generation failed: %s", exc)
+            failure_reason = _format_exception_for_log(exc)
+            logger.warning(
+                "Realtime motion plan generation failed: %s",
+                failure_reason,
+                exc_info=True,
+            )
             await self._emit_realtime_motion_error(
                 turn_id=origin_turn_id,
-                failure_reason=f"exception:{exc}",
+                failure_reason=f"exception:{failure_reason}",
             )
             return
 
@@ -1078,6 +1083,13 @@ def _resolve_motion_generation_mode(runtime_state: Any) -> str:
     if mode in {"inline_first", "split_after_reply", "text_only"}:
         return mode
     return "split_after_reply"
+
+
+def _format_exception_for_log(exc: Exception) -> str:
+    message = str(exc).strip()
+    if message:
+        return f"{exc.__class__.__name__}:{message}"
+    return exc.__class__.__name__
 
 
 def _build_inline_motion_contract_for_runtime(*, runtime_state: Any) -> str:

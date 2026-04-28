@@ -55,6 +55,7 @@ export class WindowManager {
   private overlayVisiblePreference = true;
   private overlayWindowHeight = PET_OVERLAY_MIN_HEIGHT;
   private activeDragState: WindowDragState | null = null;
+  private pendingTransparentWindowRecoveryReason: string | null = null;
   private petWindowIgnoreMouseEvents = true;
 
   private windows: ManagedWindowMap = {
@@ -97,6 +98,14 @@ export class WindowManager {
   }
 
   recoverTransparentWindows(reason: string): boolean {
+    if (this.activeDragState) {
+      this.pendingTransparentWindowRecoveryReason = reason;
+      console.warn(
+        `[window-recovery] Deferred while dragging transparent window (${reason})`,
+      );
+      return false;
+    }
+
     const petWindow = this.windows.pet;
     const overlayWindow = this.windows.overlay;
     const hasPetWindow = Boolean(petWindow && !petWindow.isDestroyed());
@@ -235,8 +244,9 @@ export class WindowManager {
       return;
     }
 
-    const bounds = targetWindow.getBounds();
     const role = this.findRole(targetWindow);
+    this.normalizeTransparentWindowSize(targetWindow, role);
+    const bounds = targetWindow.getBounds();
     const lockedWidth = role === "pet"
       ? PET_WINDOW_WIDTH
       : role === "overlay"
@@ -244,9 +254,7 @@ export class WindowManager {
         : bounds.width;
     const lockedHeight = role === "pet"
       ? PET_WINDOW_HEIGHT
-      : role === "overlay"
-        ? bounds.height
-        : bounds.height;
+      : bounds.height;
     this.activeDragState = {
       targetWindow,
       role,
@@ -295,7 +303,15 @@ export class WindowManager {
       return;
     }
 
-    targetWindow.setPosition(nextX, nextY, false);
+    targetWindow.setBounds(
+      {
+        x: nextX,
+        y: nextY,
+        width: activeDragState.lockedWidth,
+        height: activeDragState.lockedHeight,
+      },
+      false,
+    );
     if (activeDragState.role === "pet") {
       this.translateOverlayWindow(deltaX, deltaY);
     }
@@ -329,6 +345,7 @@ export class WindowManager {
         );
       }
       this.activeDragState = null;
+      this.flushDeferredTransparentWindowRecovery();
     }
   }
 
@@ -422,6 +439,7 @@ export class WindowManager {
       this.positionOverlayWindow();
     });
     petWindow.on("resize", () => {
+      this.normalizeTransparentWindowSize(petWindow, "pet");
       if (this.activeDragState?.targetWindow === petWindow) {
         return;
       }
@@ -488,6 +506,13 @@ export class WindowManager {
       event.preventDefault();
       this.overlayVisiblePreference = false;
       overlayWindow.hide();
+    });
+    overlayWindow.on("resize", () => {
+      this.normalizeTransparentWindowSize(overlayWindow, "overlay");
+      if (this.activeDragState?.targetWindow === overlayWindow) {
+        return;
+      }
+      this.positionOverlayWindow();
     });
     overlayWindow.on("closed", () => {
       this.endWindowDrag(overlayWindow);
@@ -629,12 +654,14 @@ export class WindowManager {
     if (snapshot.petBounds) {
       petWindow.setBounds(snapshot.petBounds, false);
     }
+    this.normalizeTransparentWindowSize(petWindow, "pet");
 
     if (snapshot.overlayBounds) {
       overlayWindow.setBounds(snapshot.overlayBounds, false);
     } else {
       this.positionOverlayWindow();
     }
+    this.normalizeTransparentWindowSize(overlayWindow, "overlay");
 
     if (this.petWindowIgnoreMouseEvents) {
       petWindow.setIgnoreMouseEvents(true, { forward: true });
@@ -672,7 +699,7 @@ export class WindowManager {
     const display = screen.getDisplayMatching(petBounds);
     const workArea = display.workArea;
     const overlayBounds = overlayWindow.getBounds();
-    const overlayWidth = Math.min(PET_OVERLAY_WIDTH, Math.max(320, petBounds.width - 48));
+    const overlayWidth = PET_OVERLAY_WIDTH;
     const overlayHeight = this.overlayWindowHeight;
 
     let x = petBounds.x + (petBounds.width - overlayWidth) / 2;
@@ -736,7 +763,10 @@ export class WindowManager {
 
     if (this.activeDragState?.targetWindow === overlayWindow) {
       this.activeDragState.lockedHeight = nextHeight;
+      return;
     }
+
+    this.positionOverlayWindow();
   }
 
   private translateOverlayWindow(deltaX: number, deltaY: number): void {
@@ -746,6 +776,63 @@ export class WindowManager {
     }
 
     const bounds = overlayWindow.getBounds();
-    overlayWindow.setPosition(bounds.x + deltaX, bounds.y + deltaY, false);
+    overlayWindow.setBounds(
+      {
+        x: bounds.x + deltaX,
+        y: bounds.y + deltaY,
+        width: bounds.width,
+        height: bounds.height,
+      },
+      false,
+    );
+  }
+
+  private normalizeTransparentWindowSize(
+    targetWindow: BrowserWindow,
+    role: DesktopWindowRole | null,
+  ): boolean {
+    if (targetWindow.isDestroyed() || (role !== "pet" && role !== "overlay")) {
+      return false;
+    }
+
+    const bounds = targetWindow.getBounds();
+    const expectedWidth = role === "pet" ? PET_WINDOW_WIDTH : PET_OVERLAY_WIDTH;
+    const expectedHeight = role === "pet" ? PET_WINDOW_HEIGHT : this.overlayWindowHeight;
+
+    if (bounds.width === expectedWidth && bounds.height === expectedHeight) {
+      return false;
+    }
+
+    targetWindow.setBounds(
+      {
+        ...bounds,
+        width: expectedWidth,
+        height: expectedHeight,
+      },
+      false,
+    );
+
+    if (this.activeDragState?.targetWindow === targetWindow) {
+      this.activeDragState.lockedWidth = expectedWidth;
+      this.activeDragState.lockedHeight = expectedHeight;
+    }
+
+    return true;
+  }
+
+  private flushDeferredTransparentWindowRecovery(): void {
+    const reason = this.pendingTransparentWindowRecoveryReason;
+    if (!reason) {
+      return;
+    }
+
+    this.pendingTransparentWindowRecoveryReason = null;
+    queueMicrotask(() => {
+      if (this.activeDragState) {
+        this.pendingTransparentWindowRecoveryReason = reason;
+        return;
+      }
+      this.recoverTransparentWindows(`deferred after drag: ${reason}`);
+    });
   }
 }

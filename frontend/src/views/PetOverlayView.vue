@@ -62,6 +62,10 @@ function handleMicrophoneToggle(): void {
 }
 
 function syncOverlayContentHeight(): void {
+  if (isDragging.value) {
+    return;
+  }
+
   const overlayCard = overlayCardRef.value;
   if (!overlayCard) {
     return;
@@ -104,6 +108,7 @@ function finishWindowDrag(): void {
   activePointerId.value = null;
   isDragging.value = false;
   window.ag99desktop?.endWindowDrag();
+  void nextTick(syncOverlayContentHeight);
 }
 
 function handlePointerDown(event: PointerEvent): void {

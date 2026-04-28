@@ -68,7 +68,7 @@ function updateMouseIgnoreState(ignore: boolean): void {
     return;
   }
 
-  if ((window as any).__ag99PetDragging) {
+  if ((window as Window & { __ag99PetWindowDragging?: boolean }).__ag99PetWindowDragging) {
     return;
   }
 
