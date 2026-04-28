@@ -1,5 +1,7 @@
 import { reactive, readonly } from "vue";
 import type {
+  DesktopBackendHistoryMessage,
+  DesktopBackendHistorySummary,
   DesktopBaseActionPreview,
   DesktopMotionPlaybackRecord,
   DesktopMotionTuningSample,
@@ -52,6 +54,11 @@ const defaultSnapshot: DesktopRuntimeSnapshot = {
   lastTranscription: "",
   lastImageCount: 0,
   historyEntries: [],
+  backendHistorySummaries: [],
+  backendHistoryEntries: [],
+  activeBackendHistoryUid: "",
+  backendHistoryLoading: false,
+  backendHistoryStatusMessage: "等待桌宠窗口同步后端历史。",
   baseActionPreview: null,
   selectedSemanticAxisProfile: null,
   latestSemanticAxisProfileSaveResult: null,
@@ -187,6 +194,12 @@ function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnap
   const historyEntries = Array.isArray(snapshot.historyEntries)
     ? snapshot.historyEntries
     : [];
+  const backendHistorySummaries = Array.isArray(snapshot.backendHistorySummaries)
+    ? snapshot.backendHistorySummaries
+    : [];
+  const backendHistoryEntries = Array.isArray(snapshot.backendHistoryEntries)
+    ? snapshot.backendHistoryEntries
+    : [];
   return {
     ...defaultSnapshot,
     ...snapshot,
@@ -200,6 +213,15 @@ function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnap
       ? snapshot.motionTuningSamples.map(cloneMotionTuningSample).filter(isPresent)
       : [],
     historyEntries: historyEntries.map((entry) => ({ ...entry })),
+    backendHistorySummaries: backendHistorySummaries
+      .map(cloneBackendHistorySummary)
+      .filter(isPresent),
+    backendHistoryEntries: backendHistoryEntries
+      .map(cloneBackendHistoryMessage)
+      .filter(isPresent),
+    activeBackendHistoryUid: normalizeText(snapshot.activeBackendHistoryUid),
+    backendHistoryLoading: Boolean(snapshot.backendHistoryLoading),
+    backendHistoryStatusMessage: normalizeText(snapshot.backendHistoryStatusMessage),
     baseActionPreview: cloneBaseActionPreview(snapshot.baseActionPreview),
     selectedSemanticAxisProfile: cloneSemanticAxisProfile(
       snapshot.selectedSemanticAxisProfile,
@@ -243,6 +265,94 @@ function cloneMotionPlaybackRecord(
     console.warn("[DesktopBridge] motion playback record rejected.", error, record);
     return null;
   }
+}
+
+function cloneBackendHistorySummary(
+  summary: unknown,
+): DesktopBackendHistorySummary | null {
+  if (!isObject(summary)) {
+    return null;
+  }
+
+  const uid = normalizeText(summary.uid);
+  if (!uid) {
+    return null;
+  }
+
+  const latestMessage = isObject(summary.latestMessage)
+    ? cloneBackendHistorySummaryMessage(summary.latestMessage)
+    : null;
+  const timestamp = normalizeText(summary.timestamp)
+    || latestMessage?.timestamp
+    || "";
+
+  return {
+    uid,
+    latestMessage,
+    timestamp,
+  } satisfies DesktopBackendHistorySummary;
+}
+
+function cloneBackendHistorySummaryMessage(
+  message: unknown,
+): DesktopBackendHistorySummary["latestMessage"] {
+  if (!isObject(message)) {
+    return null;
+  }
+
+  const content = normalizeText(message.content);
+  const timestamp = normalizeText(message.timestamp);
+  const role = normalizeBackendHistoryRole(message.role);
+  if (!content && !timestamp) {
+    return null;
+  }
+
+  return {
+    role,
+    timestamp,
+    content,
+  };
+}
+
+function cloneBackendHistoryMessage(
+  message: unknown,
+): DesktopBackendHistoryMessage | null {
+  if (!isObject(message)) {
+    return null;
+  }
+
+  const id = normalizeText(message.id);
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id,
+    role: normalizeBackendHistoryRole(message.role),
+    type: normalizeText(message.type) || "text",
+    content: normalizeText(message.content),
+    timestamp: normalizeText(message.timestamp),
+    name: normalizeOptionalText(message.name),
+    toolId: normalizeOptionalText(message.toolId),
+    toolName: normalizeOptionalText(message.toolName),
+    status: normalizeOptionalText(message.status),
+    avatar: normalizeOptionalText(message.avatar),
+  } satisfies DesktopBackendHistoryMessage;
+}
+
+function normalizeBackendHistoryRole(
+  value: unknown,
+): DesktopBackendHistoryMessage["role"] {
+  const role = normalizeText(value).toLowerCase();
+  if (role === "human" || role === "ai") {
+    return role;
+  }
+  return "system";
+}
+
+function normalizeOptionalText(value: unknown): string | undefined {
+  const normalized = normalizeText(value);
+  return normalized || undefined;
 }
 
 function cloneMotionTuningSample(

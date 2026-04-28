@@ -225,7 +225,6 @@ class RuntimeState:
                 8,
             ),
         )
-        self.motion_tuning_reference_examples = []
         self.realtime_motion_platform_context_enabled = bool(
             _plugin_config_get(
                 self.plugin_config,

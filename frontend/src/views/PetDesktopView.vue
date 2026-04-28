@@ -431,6 +431,18 @@ function handleDesktopCommand(command: DesktopRuntimeCommand): void {
     case "delete_motion_tuning_sample":
       deleteMotionTuningSample(command.sampleId);
       return;
+    case "request_history_list":
+      adapter.requestHistoryList();
+      return;
+    case "create_history":
+      adapter.createHistory();
+      return;
+    case "load_history":
+      adapter.loadHistory(command.historyUid);
+      return;
+    case "delete_history":
+      adapter.deleteHistory(command.historyUid);
+      return;
     case "connect":
       if (typeof command.address === "string") {
         adapter.setAddress(command.address);
@@ -527,6 +539,11 @@ watch(
     adapter.state.micCapturing,
     adapter.state.isPlayingAudio,
     adapter.state.historyEntries,
+    adapter.state.backendHistorySummaries,
+    adapter.state.backendHistoryEntries,
+    adapter.state.activeBackendHistoryUid,
+    adapter.state.backendHistoryLoading,
+    adapter.state.backendHistoryStatusMessage,
     adapter.state.latestSemanticAxisProfileSaveResult,
     state.confName,
     state.lastUpdated,
@@ -576,6 +593,13 @@ watch(
       lastTranscription: adapter.state.lastTranscription,
       lastImageCount: adapter.state.lastImageCount,
       historyEntries: [...adapter.state.historyEntries],
+      backendHistorySummaries: adapter.state.backendHistorySummaries.map((summary) =>
+        cloneJson(summary)),
+      backendHistoryEntries: adapter.state.backendHistoryEntries.map((entry) =>
+        cloneJson(entry)),
+      activeBackendHistoryUid: adapter.state.activeBackendHistoryUid,
+      backendHistoryLoading: adapter.state.backendHistoryLoading,
+      backendHistoryStatusMessage: adapter.state.backendHistoryStatusMessage,
       baseActionPreview: baseActionPreview.value,
       selectedSemanticAxisProfile: selectedSemanticAxisProfile.value
         ? cloneJson(selectedSemanticAxisProfile.value)

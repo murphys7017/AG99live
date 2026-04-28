@@ -1,6 +1,9 @@
 import { reactive, readonly } from "vue";
 import type {
+  DesktopBackendHistoryMessage,
+  DesktopBackendHistorySummary,
   DesktopHistoryEntry,
+  DesktopSemanticAxisProfileSaveResult,
   DesktopMotionTuningSample,
 } from "../types/desktop";
 import type {
@@ -19,7 +22,6 @@ import type {
   SystemModelSyncPayload,
   SystemServerInfoPayload,
 } from "../types/protocol";
-import type { DesktopSemanticAxisProfileSaveResult } from "../types/desktop";
 import { useModelSync } from "./useModelSync";
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
@@ -73,6 +75,11 @@ const state = reactive({
   micCapturing: false,
   isPlayingAudio: false,
   historyEntries: [] as DesktopHistoryEntry[],
+  backendHistorySummaries: [] as DesktopBackendHistorySummary[],
+  backendHistoryEntries: [] as DesktopBackendHistoryMessage[],
+  activeBackendHistoryUid: "",
+  backendHistoryLoading: false,
+  backendHistoryStatusMessage: "等待历史窗口请求后端历史。",
   inboundMotionPlan: null as unknown | null,
   inboundMotionPlanNonce: 0,
   inboundMotionPlanTurnId: null as string | null,
@@ -100,14 +107,33 @@ interface DesktopCaptureImagePayload {
   captured_at: string;
 }
 
+interface SystemHistoryListPayload {
+  histories: unknown[];
+}
+
+interface SystemHistoryCreatedPayload {
+  history_uid: string;
+}
+
+interface SystemHistoryDataPayload {
+  messages: unknown[];
+}
+
+interface SystemHistoryDeletedPayload {
+  history_uid: string;
+  success: boolean;
+}
+
 let socket: WebSocket | null = null;
 let audioElement: HTMLAudioElement | null = null;
 let manualClose = false;
 let initializePromise: Promise<void> | null = null;
 let connectAttemptSerial = 0;
 let microphoneRuntime: MicrophoneCaptureRuntime | null = null;
+let pendingHistoryLoadUid: string | null = null;
 const assistantHistoryKeys: string[] = [];
 const assistantHistoryKeySet = new Set<string>();
+const reportedProtocolWarnings = new Set<string>();
 
 const { applyUnknownMessage, resetModelSyncState } = useModelSync();
 
@@ -608,6 +634,7 @@ function openConnectionCandidate(
 function resetConnectionRuntimeState(): void {
   void stopMicrophoneCapture("connection_closed");
   stopAudioPlayback();
+  pendingHistoryLoadUid = null;
   state.isPlayingAudio = false;
   state.currentTurnId = null;
   state.serverInfo = null;
@@ -623,6 +650,7 @@ function resetConnectionRuntimeState(): void {
   state.audioPlaybackStartedTurnId = null;
   state.audioPlaybackStartedAtMs = 0;
   state.audioPlaybackDurationMs = null;
+  state.backendHistoryLoading = false;
   resetModelSyncState();
 }
 
@@ -821,6 +849,19 @@ async function handleSocketMessage(rawData: string): Promise<void> {
     return;
   }
 
+  const messageVersion =
+    typeof envelope.version === "string"
+      ? envelope.version.trim()
+      : "";
+  if (messageVersion !== PROTOCOL_VERSION) {
+    reportProtocolError(
+      `version:${messageVersion || "empty"}`,
+      `收到协议版本不匹配的消息（expected=${PROTOCOL_VERSION}, actual=${messageVersion || "empty"}）。`,
+      envelope,
+    );
+    return;
+  }
+
   if (typeof envelope.session_id === "string" && envelope.session_id.trim()) {
     state.sessionId = envelope.session_id.trim();
   }
@@ -845,6 +886,18 @@ async function handleSocketMessage(rawData: string): Promise<void> {
       applySemanticAxisProfileSaveFailed(
         envelope as ProtocolEnvelope<SystemSemanticAxisProfileSaveFailedPayload>,
       );
+      return;
+    case "system.history_list":
+      applyHistoryList(envelope as ProtocolEnvelope<SystemHistoryListPayload>);
+      return;
+    case "system.history_created":
+      applyHistoryCreated(envelope as ProtocolEnvelope<SystemHistoryCreatedPayload>);
+      return;
+    case "system.history_data":
+      applyHistoryData(envelope as ProtocolEnvelope<SystemHistoryDataPayload>);
+      return;
+    case "system.history_deleted":
+      applyHistoryDeleted(envelope as ProtocolEnvelope<SystemHistoryDeletedPayload>);
       return;
     case "output.text":
       applyOutputText(envelope as ProtocolEnvelope<OutputTextPayload>);
@@ -891,6 +944,7 @@ async function handleSocketMessage(rawData: string): Promise<void> {
       applyInboundMotionPayload(envelope as ProtocolEnvelope<Record<string, unknown>>);
       return;
     default:
+      reportUnhandledInboundEnvelope(envelope);
       return;
   }
 }
@@ -1011,6 +1065,139 @@ function applySemanticAxisProfileSaveFailed(
   state.lastError = envelope.payload.message;
   state.statusMessage = `主轴配置保存失败：${envelope.payload.message}`;
   pushHistory("error", state.statusMessage);
+}
+
+function applyHistoryList(
+  envelope: ProtocolEnvelope<SystemHistoryListPayload>,
+): void {
+  state.backendHistorySummaries = normalizeBackendHistorySummaries(
+    envelope.payload.histories,
+  );
+  state.backendHistoryLoading = false;
+  state.lastError = "";
+
+  const hasActiveHistory = state.backendHistorySummaries.some(
+    (summary) => summary.uid === state.activeBackendHistoryUid,
+  );
+  if (!hasActiveHistory && state.activeBackendHistoryUid) {
+    state.activeBackendHistoryUid = "";
+    state.backendHistoryEntries = [];
+  }
+
+  state.backendHistoryStatusMessage = state.backendHistorySummaries.length
+    ? `已同步 ${state.backendHistorySummaries.length} 条后端会话索引。`
+    : "后端当前没有可用的对话历史。";
+  state.statusMessage = state.backendHistoryStatusMessage;
+  pushHistory("system", state.statusMessage);
+
+  if (!state.activeBackendHistoryUid && state.backendHistorySummaries.length > 0) {
+    void loadHistory(state.backendHistorySummaries[0].uid, { announce: false });
+  }
+}
+
+function applyHistoryCreated(
+  envelope: ProtocolEnvelope<SystemHistoryCreatedPayload>,
+): void {
+  const historyUid = envelope.payload.history_uid.trim();
+  pendingHistoryLoadUid = null;
+  state.backendHistoryLoading = false;
+  state.activeBackendHistoryUid = historyUid;
+  state.backendHistoryEntries = [];
+  state.lastError = "";
+  state.backendHistoryStatusMessage = historyUid
+    ? `已创建新会话 ${historyUid}。`
+    : "后端已创建新会话。";
+  state.statusMessage = state.backendHistoryStatusMessage;
+  pushHistory("system", state.statusMessage);
+
+  if (historyUid) {
+    const placeholderSummary: DesktopBackendHistorySummary = {
+      uid: historyUid,
+      latestMessage: null,
+      timestamp: new Date().toISOString(),
+    };
+    state.backendHistorySummaries = [
+      placeholderSummary,
+      ...state.backendHistorySummaries.filter((summary) => summary.uid !== historyUid),
+    ];
+  }
+}
+
+function applyHistoryData(
+  envelope: ProtocolEnvelope<SystemHistoryDataPayload>,
+): void {
+  state.backendHistoryEntries = normalizeBackendHistoryMessages(envelope.payload.messages);
+  if (pendingHistoryLoadUid) {
+    state.activeBackendHistoryUid = pendingHistoryLoadUid;
+  }
+  pendingHistoryLoadUid = null;
+  state.backendHistoryLoading = false;
+  state.lastError = "";
+  state.backendHistoryStatusMessage = state.backendHistoryEntries.length
+    ? `已载入 ${state.backendHistoryEntries.length} 条后端历史消息。`
+    : "当前后端会话还没有历史消息。";
+  state.statusMessage = state.backendHistoryStatusMessage;
+  pushHistory("system", state.statusMessage);
+}
+
+function applyHistoryDeleted(
+  envelope: ProtocolEnvelope<SystemHistoryDeletedPayload>,
+): void {
+  const historyUid = envelope.payload.history_uid.trim();
+  state.backendHistoryLoading = false;
+
+  if (!envelope.payload.success) {
+    state.lastError = historyUid
+      ? `删除会话 ${historyUid} 失败。`
+      : "删除会话失败。";
+    state.statusMessage = state.lastError;
+    state.backendHistoryStatusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    return;
+  }
+
+  state.backendHistorySummaries = state.backendHistorySummaries.filter(
+    (summary) => summary.uid !== historyUid,
+  );
+  if (state.activeBackendHistoryUid === historyUid) {
+    state.activeBackendHistoryUid = "";
+    state.backendHistoryEntries = [];
+  }
+  state.lastError = "";
+  state.backendHistoryStatusMessage = historyUid
+    ? `已删除会话 ${historyUid}。`
+    : "已删除当前会话。";
+  state.statusMessage = state.backendHistoryStatusMessage;
+  pushHistory("system", state.statusMessage);
+  requestHistoryList({ announce: false });
+}
+
+function reportProtocolError(
+  key: string,
+  message: string,
+  envelope?: ProtocolEnvelope<unknown>,
+): void {
+  state.lastError = message;
+  state.statusMessage = message;
+  if (!reportedProtocolWarnings.has(key)) {
+    pushHistory("error", message);
+    reportedProtocolWarnings.add(key);
+  }
+  console.warn("[Connection] protocol error.", message, envelope);
+}
+
+function reportUnhandledInboundEnvelope(
+  envelope: ProtocolEnvelope<unknown>,
+): void {
+  const key = `type:${envelope.type}`;
+  const message = `收到未接入的协议消息 ${envelope.type}。`;
+  state.lastError = "";
+  state.statusMessage = message;
+  if (!reportedProtocolWarnings.has(key)) {
+    pushHistory("system", message);
+    reportedProtocolWarnings.add(key);
+  }
+  console.warn("[Connection] unhandled inbound protocol message.", envelope.type, envelope);
 }
 
 function applyInboundMotionPayload(
@@ -1370,6 +1557,134 @@ function sendSemanticAxisProfileSave(
   return true;
 }
 
+function requestHistoryList(
+  options: { announce?: boolean } = {},
+): boolean {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    state.lastError = "当前还没有连上适配器，无法读取对话历史。";
+    state.statusMessage = state.lastError;
+    state.backendHistoryStatusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    return false;
+  }
+
+  state.backendHistoryLoading = true;
+  socket.send(
+    JSON.stringify(
+      buildMessageEnvelope("system.history_list_request", {}),
+    ),
+  );
+  state.lastError = "";
+  state.backendHistoryStatusMessage = "正在向后端请求对话历史列表。";
+  state.statusMessage = state.backendHistoryStatusMessage;
+  if (options.announce !== false) {
+    pushHistory("system", state.statusMessage);
+  }
+  return true;
+}
+
+function createHistory(
+  options: { announce?: boolean } = {},
+): boolean {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    state.lastError = "当前还没有连上适配器，无法新建对话历史。";
+    state.statusMessage = state.lastError;
+    state.backendHistoryStatusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    return false;
+  }
+
+  state.backendHistoryLoading = true;
+  pendingHistoryLoadUid = null;
+  socket.send(
+    JSON.stringify(
+      buildMessageEnvelope("system.history_create", {}),
+    ),
+  );
+  state.lastError = "";
+  state.backendHistoryStatusMessage = "正在请求新建后端会话。";
+  state.statusMessage = state.backendHistoryStatusMessage;
+  if (options.announce !== false) {
+    pushHistory("system", state.statusMessage);
+  }
+  return true;
+}
+
+function loadHistory(
+  historyUid: string,
+  options: { announce?: boolean } = {},
+): boolean {
+  const normalizedUid = historyUid.trim();
+  if (!normalizedUid) {
+    state.lastError = "历史会话 UID 为空，无法载入。";
+    state.statusMessage = state.lastError;
+    state.backendHistoryStatusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    return false;
+  }
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    state.lastError = "当前还没有连上适配器，无法载入对话历史。";
+    state.statusMessage = state.lastError;
+    state.backendHistoryStatusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    return false;
+  }
+
+  state.backendHistoryLoading = true;
+  pendingHistoryLoadUid = normalizedUid;
+  socket.send(
+    JSON.stringify(
+      buildMessageEnvelope("system.history_load", {
+        history_uid: normalizedUid,
+      }),
+    ),
+  );
+  state.lastError = "";
+  state.backendHistoryStatusMessage = `正在载入会话 ${normalizedUid}。`;
+  state.statusMessage = state.backendHistoryStatusMessage;
+  if (options.announce !== false) {
+    pushHistory("system", state.statusMessage);
+  }
+  return true;
+}
+
+function deleteHistory(
+  historyUid: string,
+  options: { announce?: boolean } = {},
+): boolean {
+  const normalizedUid = historyUid.trim();
+  if (!normalizedUid) {
+    state.lastError = "历史会话 UID 为空，无法删除。";
+    state.statusMessage = state.lastError;
+    state.backendHistoryStatusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    return false;
+  }
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    state.lastError = "当前还没有连上适配器，无法删除对话历史。";
+    state.statusMessage = state.lastError;
+    state.backendHistoryStatusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    return false;
+  }
+
+  state.backendHistoryLoading = true;
+  socket.send(
+    JSON.stringify(
+      buildMessageEnvelope("system.history_delete", {
+        history_uid: normalizedUid,
+      }),
+    ),
+  );
+  state.lastError = "";
+  state.backendHistoryStatusMessage = `正在删除会话 ${normalizedUid}。`;
+  state.statusMessage = state.backendHistoryStatusMessage;
+  if (options.announce !== false) {
+    pushHistory("system", state.statusMessage);
+  }
+  return true;
+}
+
 function sendMotionTuningExamplesSync(samples: DesktopMotionTuningSample[]): boolean {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     return false;
@@ -1555,6 +1870,123 @@ function parseUrlSafely(rawUrl: string): URL | null {
   }
 }
 
+function normalizeBackendHistorySummaries(
+  histories: unknown,
+): DesktopBackendHistorySummary[] {
+  if (!Array.isArray(histories)) {
+    return [];
+  }
+
+  const normalized: DesktopBackendHistorySummary[] = [];
+  for (const history of histories) {
+    if (!history || typeof history !== "object") {
+      continue;
+    }
+
+    const candidate = history as Record<string, unknown>;
+    const uid = typeof candidate.uid === "string" ? candidate.uid.trim() : "";
+    if (!uid) {
+      continue;
+    }
+
+    const latestMessage = normalizeBackendHistorySummaryMessage(candidate.latest_message);
+    const timestamp = typeof candidate.timestamp === "string"
+      ? candidate.timestamp.trim()
+      : latestMessage?.timestamp ?? "";
+
+    normalized.push({
+      uid,
+      latestMessage,
+      timestamp,
+    });
+  }
+
+  return normalized;
+}
+
+function normalizeBackendHistorySummaryMessage(
+  message: unknown,
+): DesktopBackendHistorySummary["latestMessage"] {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+
+  const candidate = message as Record<string, unknown>;
+  const content = typeof candidate.content === "string" ? candidate.content.trim() : "";
+  const timestamp = typeof candidate.timestamp === "string" ? candidate.timestamp.trim() : "";
+  const role = normalizeBackendHistoryRole(candidate.role);
+  if (!content && !timestamp) {
+    return null;
+  }
+
+  return {
+    role,
+    timestamp,
+    content,
+  };
+}
+
+function normalizeBackendHistoryMessages(
+  messages: unknown,
+): DesktopBackendHistoryMessage[] {
+  if (!Array.isArray(messages)) {
+    return [];
+  }
+
+  const normalized: DesktopBackendHistoryMessage[] = [];
+  for (const message of messages) {
+    if (!message || typeof message !== "object") {
+      continue;
+    }
+
+    const candidate = message as Record<string, unknown>;
+    const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
+    if (!id) {
+      continue;
+    }
+
+    normalized.push({
+      id,
+      role: normalizeBackendHistoryRole(candidate.role),
+      type: typeof candidate.type === "string" && candidate.type.trim()
+        ? candidate.type.trim()
+        : "text",
+      content: typeof candidate.content === "string" ? candidate.content.trim() : "",
+      timestamp: typeof candidate.timestamp === "string" ? candidate.timestamp.trim() : "",
+      name: typeof candidate.name === "string" && candidate.name.trim()
+        ? candidate.name.trim()
+        : undefined,
+      toolId: typeof candidate.tool_id === "string" && candidate.tool_id.trim()
+        ? candidate.tool_id.trim()
+        : undefined,
+      toolName: typeof candidate.tool_name === "string" && candidate.tool_name.trim()
+        ? candidate.tool_name.trim()
+        : undefined,
+      status: typeof candidate.status === "string" && candidate.status.trim()
+        ? candidate.status.trim()
+        : undefined,
+      avatar: typeof candidate.avatar === "string" && candidate.avatar.trim()
+        ? candidate.avatar.trim()
+        : undefined,
+    });
+  }
+
+  return normalized;
+}
+
+function normalizeBackendHistoryRole(
+  role: unknown,
+): DesktopBackendHistoryMessage["role"] {
+  if (typeof role !== "string") {
+    return "system";
+  }
+  const normalizedRole = role.trim().toLowerCase();
+  if (normalizedRole === "human" || normalizedRole === "ai") {
+    return normalizedRole;
+  }
+  return "system";
+}
+
 function pushHistory(role: DesktopHistoryEntry["role"], text: string): void {
   const normalizedText = text.trim();
   if (!normalizedText) {
@@ -1584,6 +2016,10 @@ export function useAdapterConnection() {
     sendText,
     interruptCurrentTurn,
     sendSemanticAxisProfileSave,
+    requestHistoryList,
+    createHistory,
+    loadHistory,
+    deleteHistory,
     sendMotionTuningExamplesSync,
     sendMotionPayloadPreview,
     sendMotionPlanPreview,

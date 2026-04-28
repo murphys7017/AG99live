@@ -28,6 +28,31 @@ export interface DesktopHistoryEntry {
   timestamp: string;
 }
 
+export interface DesktopBackendHistorySummaryMessage {
+  role: "human" | "ai" | "system";
+  timestamp: string;
+  content: string;
+}
+
+export interface DesktopBackendHistorySummary {
+  uid: string;
+  latestMessage: DesktopBackendHistorySummaryMessage | null;
+  timestamp: string;
+}
+
+export interface DesktopBackendHistoryMessage {
+  id: string;
+  role: "human" | "ai" | "system";
+  type: string;
+  content: string;
+  timestamp: string;
+  name?: string;
+  toolId?: string;
+  toolName?: string;
+  status?: string;
+  avatar?: string;
+}
+
 export interface DesktopBaseActionPreviewAnalysis {
   status: string;
   mode: string;
@@ -211,6 +236,11 @@ export interface DesktopRuntimeSnapshot {
   lastTranscription: string;
   lastImageCount: number;
   historyEntries: DesktopHistoryEntry[];
+  backendHistorySummaries: DesktopBackendHistorySummary[];
+  backendHistoryEntries: DesktopBackendHistoryMessage[];
+  activeBackendHistoryUid: string;
+  backendHistoryLoading: boolean;
+  backendHistoryStatusMessage: string;
   baseActionPreview: DesktopBaseActionPreview | null;
   selectedSemanticAxisProfile: SemanticAxisProfile | null;
   latestSemanticAxisProfileSaveResult: DesktopSemanticAxisProfileSaveResult | null;
@@ -231,6 +261,10 @@ export type DesktopRuntimeCommand =
   }
   | { type: "save_motion_tuning_sample"; sample: DesktopMotionTuningSample }
   | { type: "delete_motion_tuning_sample"; sampleId: string }
+  | { type: "request_history_list" }
+  | { type: "create_history" }
+  | { type: "load_history"; historyUid: string }
+  | { type: "delete_history"; historyUid: string }
   | { type: "connect"; address?: string }
   | { type: "disconnect" }
   | { type: "send_text"; text: string }

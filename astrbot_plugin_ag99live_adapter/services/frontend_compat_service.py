@@ -51,7 +51,7 @@ class FrontendCompatHandler:
         self._background_files_getter = background_files_getter
         self._history_bridge = history_bridge
         self._runtime_state = runtime_state
-        self._history_uid = str(uuid4())
+        self._history_uid = ""
 
     @staticmethod
     def can_handle(msg_type: str | None) -> bool:
@@ -77,6 +77,13 @@ class FrontendCompatHandler:
             )
         elif msg_type == TYPE_SYSTEM_HISTORY_LIST_REQUEST:
             histories = await self._history_bridge.list_histories()
+            known_history_uids = {
+                str(item.get("uid") or "").strip()
+                for item in histories
+                if isinstance(item, dict)
+            }
+            if self._history_uid not in known_history_uids:
+                self._history_uid = next(iter(known_history_uids), "")
             await send_json(
                 build_system_history_list(
                     session_id=session_id,
@@ -106,6 +113,8 @@ class FrontendCompatHandler:
         elif msg_type == TYPE_SYSTEM_HISTORY_DELETE:
             history_uid = str(payload.get("history_uid") or "").strip()
             success = await self._history_bridge.delete_history(history_uid)
+            if success and history_uid == self._history_uid:
+                self._history_uid = ""
             await send_json(
                 build_system_history_deleted(
                     session_id=session_id,
