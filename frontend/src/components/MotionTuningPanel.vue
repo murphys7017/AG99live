@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
+import {
+  matchesPinnedProfileScope,
+} from "../types/desktop";
 import type {
   DesktopMotionPlaybackRecord,
   DesktopMotionTuningSample,
@@ -284,19 +287,7 @@ function matchesCurrentProfileSample(
   sample: MotionTuningSampleSnapshot,
   currentProfile: SemanticAxisProfile | null,
 ): boolean {
-  if (!currentProfile) {
-    return false;
-  }
-  if (
-    sample.profileId
-    && Number.isFinite(sample.profileRevision)
-  ) {
-    return (
-      sample.profileId === currentProfile.profile_id
-      && sample.profileRevision === currentProfile.revision
-    );
-  }
-  return sample.modelName === currentProfile.model_id;
+  return matchesPinnedProfileScope(sample, currentProfile);
 }
 
 function normalizeDraftAxes(currentProfile: SemanticAxisProfile): Record<string, number> {

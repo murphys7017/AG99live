@@ -196,6 +196,34 @@ export interface DesktopMotionTuningSample {
   adjustedPlan: MotionPlanPayload;
 }
 
+export function hasPinnedProfileScope(
+  sample: Pick<DesktopMotionTuningSample, "profileId" | "profileRevision">,
+): sample is Pick<DesktopMotionTuningSample, "profileId" | "profileRevision"> & {
+  profileId: string;
+  profileRevision: number;
+} {
+  return (
+    typeof sample.profileId === "string"
+    && sample.profileId.trim().length > 0
+    && typeof sample.profileRevision === "number"
+    && Number.isFinite(sample.profileRevision)
+    && sample.profileRevision > 0
+  );
+}
+
+export function matchesPinnedProfileScope(
+  sample: Pick<DesktopMotionTuningSample, "profileId" | "profileRevision">,
+  profile: Pick<SemanticAxisProfile, "profile_id" | "revision"> | null | undefined,
+): boolean {
+  if (!profile || !hasPinnedProfileScope(sample)) {
+    return false;
+  }
+  return (
+    sample.profileId === profile.profile_id
+    && sample.profileRevision === profile.revision
+  );
+}
+
 export interface DesktopSemanticAxisProfileSaveResult {
   requestId: string;
   ok: boolean;

@@ -1,4 +1,5 @@
 import { reactive, readonly } from "vue";
+import { matchesPinnedProfileScope } from "../types/desktop";
 import type {
   DesktopBackendHistoryMessage,
   DesktopBackendHistorySummary,
@@ -6,6 +7,7 @@ import type {
   DesktopSemanticAxisProfileSaveResult,
   DesktopMotionTuningSample,
 } from "../types/desktop";
+import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 import type {
   ControlErrorPayload,
   ControlPlaybackFinishedPayload,
@@ -1685,13 +1687,18 @@ function deleteHistory(
   return true;
 }
 
-function sendMotionTuningExamplesSync(samples: DesktopMotionTuningSample[]): boolean {
+function sendMotionTuningExamplesSync(
+  samples: DesktopMotionTuningSample[],
+  currentProfile: Pick<SemanticAxisProfile, "profile_id" | "revision"> | null = null,
+): boolean {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     return false;
   }
 
   const examples = samples
-    .filter((sample) => sample.enabledForLlmReference)
+    .filter((sample) =>
+      sample.enabledForLlmReference
+      && matchesPinnedProfileScope(sample, currentProfile))
     .slice(0, 5)
     .map((sample) => ({
       id: sample.id,

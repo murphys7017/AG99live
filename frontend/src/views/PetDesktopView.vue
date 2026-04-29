@@ -17,6 +17,7 @@ import type {
   DesktopMotionTuningSample,
   DesktopRuntimeCommand,
 } from "../types/desktop";
+import { matchesPinnedProfileScope } from "../types/desktop";
 import type { ModelEnginePlanStartedEvent } from "../model-engine/contracts";
 import type { DesktopBaseActionPreview } from "../types/desktop";
 
@@ -370,37 +371,20 @@ function deleteMotionTuningSample(sampleId: string): void {
 }
 
 function matchesCurrentRuntimeProfileSample(sample: DesktopMotionTuningSample): boolean {
-  const currentProfile = selectedSemanticAxisProfile.value;
-  if (currentProfile) {
-    if (
-      sample.profileId
-      && Number.isFinite(sample.profileRevision)
-    ) {
-      return (
-        sample.profileId === currentProfile.profile_id
-        && sample.profileRevision === currentProfile.revision
-      );
-    }
-    return sample.modelName === currentProfile.model_id;
-  }
-
-  const currentModelName = selectedModel.value?.name ?? "";
-  if (!currentModelName) {
-    return false;
-  }
-  return sample.modelName === currentModelName;
+  return matchesPinnedProfileScope(sample, selectedSemanticAxisProfile.value);
 }
 
 function syncMotionTuningExamples(): void {
   const currentProfile = selectedSemanticAxisProfile.value;
-  const currentModelName = selectedModel.value?.name ?? "";
-  if (!currentProfile && !currentModelName) {
+  if (!currentProfile) {
+    adapter.sendMotionTuningExamplesSync([]);
     return;
   }
   adapter.sendMotionTuningExamplesSync(
     motionTuningSamples.value
       .filter((sample) => matchesCurrentRuntimeProfileSample(sample))
       .map((sample) => cloneJson(sample)),
+    currentProfile,
   );
 }
 

@@ -515,15 +515,18 @@ function cloneMotionTuningSample(
       });
       return null;
     }
+    // Treat the embedded adjusted plan as the canonical identity for upgraded samples.
+    const modelName = adjustedPlan.model_id;
+    const profileId = adjustedPlan.profile_id;
+    const profileRevision = Math.round(adjustedPlan.profile_revision);
     return {
       ...(sample as unknown as DesktopMotionTuningSample),
+      modelName,
       tags: Array.isArray(sample.tags)
         ? sample.tags.map((item) => normalizeText(item)).filter(Boolean)
         : [],
-      profileId: normalizeOptionalText(sample.profileId),
-      profileRevision: isFiniteNumber(sample.profileRevision)
-        ? Math.round(sample.profileRevision)
-        : undefined,
+      profileId,
+      profileRevision,
       enabledForLlmReference: Boolean(sample.enabledForLlmReference),
       originalAxes: cloneNumericRecord(sample.originalAxes),
       adjustedAxes: cloneNumericRecord(sample.adjustedAxes),
