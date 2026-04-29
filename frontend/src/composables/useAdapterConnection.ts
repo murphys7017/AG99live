@@ -1,5 +1,4 @@
 import { reactive, readonly } from "vue";
-import { matchesPinnedProfileScope } from "../types/desktop";
 import type {
   DesktopBackendHistoryMessage,
   DesktopBackendHistorySummary,
@@ -7,12 +6,12 @@ import type {
   DesktopSemanticAxisProfileSaveResult,
   DesktopMotionTuningSample,
 } from "../types/desktop";
-import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 import type {
   ControlErrorPayload,
   ControlPlaybackFinishedPayload,
   ControlTurnFinishedPayload,
   ModelSyncInfo,
+  MotionTuningSampleProtocolPayload,
   OutputAudioPayload,
   OutputImagePayload,
   OutputTextPayload,
@@ -21,6 +20,9 @@ import type {
   SystemSemanticAxisProfileSavePayload,
   SystemSemanticAxisProfileSavedPayload,
   SystemSemanticAxisProfileSaveFailedPayload,
+  SystemMotionTuningSampleDeletePayload,
+  SystemMotionTuningSampleSavePayload,
+  SystemMotionTuningSamplesStatePayload,
   SystemModelSyncPayload,
   SystemServerInfoPayload,
 } from "../types/protocol";
@@ -91,6 +93,7 @@ const state = reactive({
   audioPlaybackStartedAtMs: 0,
   audioPlaybackDurationMs: null as number | null,
   latestSemanticAxisProfileSaveResult: null as DesktopSemanticAxisProfileSaveResult | null,
+  motionTuningSamples: [] as DesktopMotionTuningSample[],
 });
 
 interface MicrophoneCaptureRuntime {
@@ -889,6 +892,11 @@ async function handleSocketMessage(rawData: string): Promise<void> {
         envelope as ProtocolEnvelope<SystemSemanticAxisProfileSaveFailedPayload>,
       );
       return;
+    case "system.motion_tuning_samples_state":
+      applyMotionTuningSamplesState(
+        envelope as ProtocolEnvelope<SystemMotionTuningSamplesStatePayload>,
+      );
+      return;
     case "system.history_list":
       applyHistoryList(envelope as ProtocolEnvelope<SystemHistoryListPayload>);
       return;
@@ -1067,6 +1075,21 @@ function applySemanticAxisProfileSaveFailed(
   state.lastError = envelope.payload.message;
   state.statusMessage = `主轴配置保存失败：${envelope.payload.message}`;
   pushHistory("error", state.statusMessage);
+}
+
+function applyMotionTuningSamplesState(
+  envelope: ProtocolEnvelope<SystemMotionTuningSamplesStatePayload>,
+): void {
+  const samples = Array.isArray(envelope.payload.samples)
+    ? envelope.payload.samples
+      .map((sample) => normalizeMotionTuningSamplePayload(sample))
+      .filter((sample): sample is DesktopMotionTuningSample => sample !== null)
+    : [];
+  state.motionTuningSamples = samples;
+  state.lastError = "";
+  state.statusMessage = samples.length
+    ? `已同步 ${samples.length} 个后端动作调参样本。`
+    : "后端当前没有已保存的动作调参样本。";
 }
 
 function applyHistoryList(
@@ -1687,48 +1710,152 @@ function deleteHistory(
   return true;
 }
 
-function sendMotionTuningExamplesSync(
-  samples: DesktopMotionTuningSample[],
-  currentProfile: Pick<SemanticAxisProfile, "profile_id" | "revision"> | null = null,
-): boolean {
+function serializeMotionTuningSample(
+  sample: DesktopMotionTuningSample,
+): MotionTuningSampleProtocolPayload {
+  return {
+    id: sample.id,
+    created_at: sample.createdAt,
+    source_record_id: sample.sourceRecordId,
+    model_name: sample.modelName,
+    profile_id: sample.profileId ?? "",
+    profile_revision: sample.profileRevision ?? 0,
+    emotion_label: sample.emotionLabel,
+    assistant_text: sample.assistantText,
+    feedback: sample.feedback,
+    tags: [...sample.tags],
+    enabled_for_llm_reference: Boolean(sample.enabledForLlmReference),
+    original_axes: { ...sample.originalAxes },
+    adjusted_axes: { ...sample.adjustedAxes },
+    adjusted_plan: JSON.parse(JSON.stringify(sample.adjustedPlan)) as DesktopMotionTuningSample["adjustedPlan"],
+  };
+}
+
+function normalizeMotionTuningSamplePayload(
+  sample: MotionTuningSampleProtocolPayload | unknown,
+): DesktopMotionTuningSample | null {
+  if (!sample || typeof sample !== "object") {
+    return null;
+  }
+
+  const candidate = sample as Partial<MotionTuningSampleProtocolPayload>;
+  const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
+  const createdAt = typeof candidate.created_at === "string" ? candidate.created_at.trim() : "";
+  const sourceRecordId = typeof candidate.source_record_id === "string"
+    ? candidate.source_record_id.trim()
+    : "";
+  const modelName = typeof candidate.model_name === "string" ? candidate.model_name.trim() : "";
+  const profileId = typeof candidate.profile_id === "string" ? candidate.profile_id.trim() : "";
+  const profileRevision = typeof candidate.profile_revision === "number"
+    && Number.isFinite(candidate.profile_revision)
+    && candidate.profile_revision > 0
+    ? Math.round(candidate.profile_revision)
+    : 0;
+  if (!id || !createdAt || !sourceRecordId || !modelName || !profileId || profileRevision <= 0) {
+    return null;
+  }
+
+  const adjustedPlan = candidate.adjusted_plan;
+  if (
+    !adjustedPlan
+    || typeof adjustedPlan !== "object"
+    || adjustedPlan.schema_version !== "engine.parameter_plan.v2"
+  ) {
+    return null;
+  }
+
+  return {
+    id,
+    createdAt,
+    sourceRecordId,
+    modelName,
+    profileId,
+    profileRevision,
+    emotionLabel: typeof candidate.emotion_label === "string" && candidate.emotion_label.trim()
+      ? candidate.emotion_label.trim()
+      : "manual_tuning",
+    assistantText: typeof candidate.assistant_text === "string"
+      ? candidate.assistant_text.trim()
+      : "",
+    feedback: typeof candidate.feedback === "string" ? candidate.feedback.trim() : "",
+    tags: Array.isArray(candidate.tags)
+      ? candidate.tags.map((tag) => String(tag).trim()).filter(Boolean)
+      : [],
+    enabledForLlmReference: Boolean(candidate.enabled_for_llm_reference),
+    originalAxes: normalizeMotionTuningAxisRecord(candidate.original_axes),
+    adjustedAxes: normalizeMotionTuningAxisRecord(candidate.adjusted_axes),
+    adjustedPlan: JSON.parse(JSON.stringify(adjustedPlan)) as DesktopMotionTuningSample["adjustedPlan"],
+  };
+}
+
+function normalizeMotionTuningAxisRecord(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const result: Record<string, number> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof key !== "string" || !key.trim()) {
+      continue;
+    }
+    if (typeof item !== "number" || !Number.isFinite(item)) {
+      continue;
+    }
+    result[key.trim()] = item;
+  }
+  return result;
+}
+
+function saveMotionTuningSample(sample: DesktopMotionTuningSample): boolean {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
+    state.lastError = "当前还没有连上适配器，无法保存动作调参样本。";
+    state.statusMessage = state.lastError;
+    pushHistory("error", state.lastError);
     return false;
   }
 
-  const examples = samples
-    .filter((sample) =>
-      sample.enabledForLlmReference
-      && matchesPinnedProfileScope(sample, currentProfile))
-    .slice(0, 5)
-    .map((sample) => ({
-      id: sample.id,
-      input: [
-        sample.assistantText ? `Assistant: ${sample.assistantText}` : "",
-        sample.feedback ? `Tuning note: ${sample.feedback}` : "",
-        sample.tags.length ? `Tags: ${sample.tags.join(", ")}` : "",
-      ].filter(Boolean).join("\n"),
-      output: {
-        emotion: sample.emotionLabel || "custom",
-        mode: sample.adjustedPlan.mode,
-        duration_ms: sample.adjustedPlan.timing.duration_ms,
-        axes: { ...sample.adjustedAxes },
-      },
-      model_name: sample.modelName,
-      feedback: sample.feedback,
-      tags: [...sample.tags],
-      created_at: sample.createdAt,
-    }));
+  socket.send(
+    JSON.stringify(
+      buildMessageEnvelope<SystemMotionTuningSampleSavePayload>(
+        "system.motion_tuning_sample_save",
+        {
+          sample: serializeMotionTuningSample(sample),
+        },
+      ),
+    ),
+  );
+  state.lastError = "";
+  state.statusMessage = `已提交动作调参样本保存请求：${sample.id}`;
+  pushHistory("system", state.statusMessage);
+  return true;
+}
+
+function deleteMotionTuningSample(sampleId: string): boolean {
+  const normalizedSampleId = sampleId.trim();
+  if (!normalizedSampleId) {
+    state.lastError = "动作调参样本 ID 为空，无法删除。";
+    state.statusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    return false;
+  }
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    state.lastError = "当前还没有连上适配器，无法删除动作调参样本。";
+    state.statusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    return false;
+  }
 
   socket.send(
     JSON.stringify(
-      buildMessageEnvelope("system.motion_tuning_examples_sync", {
-        examples,
-      }),
+      buildMessageEnvelope<SystemMotionTuningSampleDeletePayload>(
+        "system.motion_tuning_sample_delete",
+        {
+          sample_id: normalizedSampleId,
+        },
+      ),
     ),
   );
-  state.statusMessage = examples.length
-    ? `已同步 ${examples.length} 个动作调参参考样本。`
-    : "已清空动作调参参考样本。";
+  state.lastError = "";
+  state.statusMessage = `已提交动作调参样本删除请求：${normalizedSampleId}`;
   pushHistory("system", state.statusMessage);
   return true;
 }
@@ -2027,7 +2154,8 @@ export function useAdapterConnection() {
     createHistory,
     loadHistory,
     deleteHistory,
-    sendMotionTuningExamplesSync,
+    saveMotionTuningSample,
+    deleteMotionTuningSample,
     sendMotionPayloadPreview,
     sendMotionPlanPreview,
     toggleMicrophoneCapture,

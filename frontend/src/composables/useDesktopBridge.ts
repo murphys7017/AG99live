@@ -212,7 +212,11 @@ function loadRuntimeSnapshot(): DesktopRuntimeSnapshot {
   try {
     const nextSnapshot = safeNormalizeSnapshot(JSON.parse(rawValue), "storage");
     if (nextSnapshot) {
-      return nextSnapshot;
+      return {
+        ...nextSnapshot,
+        // Motion tuning samples are backend-owned; wait for the runtime window to resync them.
+        motionTuningSamples: [],
+      };
     }
     window.localStorage.removeItem(RUNTIME_SNAPSHOT_STORAGE_KEY);
     return defaultSnapshot;

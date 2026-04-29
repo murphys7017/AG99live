@@ -652,3 +652,32 @@ export interface SystemSemanticAxisProfileSavePayload {
   expected_revision: number;
   profile: SemanticAxisProfile;
 }
+
+export interface MotionTuningSampleProtocolPayload {
+  id: string;
+  created_at: string;
+  source_record_id: string;
+  model_name: string;
+  profile_id: string;
+  profile_revision: number;
+  emotion_label: string;
+  assistant_text: string;
+  feedback: string;
+  tags: string[];
+  enabled_for_llm_reference?: boolean;
+  original_axes: Record<string, number>;
+  adjusted_axes: Record<string, number>;
+  adjusted_plan: MotionPlanPayload;
+}
+
+export interface SystemMotionTuningSampleSavePayload {
+  sample: MotionTuningSampleProtocolPayload;
+}
+
+export interface SystemMotionTuningSampleDeletePayload {
+  sample_id: string;
+}
+
+export interface SystemMotionTuningSamplesStatePayload {
+  samples: MotionTuningSampleProtocolPayload[];
+}

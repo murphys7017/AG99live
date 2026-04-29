@@ -16,7 +16,8 @@ from .constants import (
     TYPE_INPUT_TEXT,
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HISTORY_LOAD,
-    TYPE_SYSTEM_MOTION_TUNING_EXAMPLES_SYNC,
+    TYPE_SYSTEM_MOTION_TUNING_SAMPLE_DELETE,
+    TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE,
 )
 from .models import (
@@ -191,34 +192,45 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
             )
         return
 
-    if message_type == TYPE_SYSTEM_MOTION_TUNING_EXAMPLES_SYNC:
-        examples = payload.get("examples", [])
-        if examples is None:
-            payload["examples"] = []
-            return
-        if not isinstance(examples, list):
+    if message_type == TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE:
+        sample = payload.get("sample")
+        if not isinstance(sample, Mapping):
             raise ProtocolError(
-                "`system.motion_tuning_examples_sync` requires `payload.examples` to be a list."
+                "`system.motion_tuning_sample_save` requires `payload.sample` to be an object."
             )
-        if len(examples) > 5:
+        sample_id = sample.get("id")
+        if not isinstance(sample_id, str) or not sample_id.strip():
             raise ProtocolError(
-                "`system.motion_tuning_examples_sync` accepts at most 5 examples."
+                "`system.motion_tuning_sample_save` requires `payload.sample.id` to be a non-empty string."
             )
-        for index, example in enumerate(examples):
-            if not isinstance(example, Mapping):
-                raise ProtocolError(
-                    f"`system.motion_tuning_examples_sync` example {index} must be an object."
-                )
-            output = example.get("output")
-            if not isinstance(output, Mapping):
-                raise ProtocolError(
-                    f"`system.motion_tuning_examples_sync` example {index} requires output object."
-                )
-            axes = output.get("axes")
-            if not isinstance(axes, Mapping) or not axes:
-                raise ProtocolError(
-                    f"`system.motion_tuning_examples_sync` example {index} requires output.axes object."
-                )
+        profile_id = sample.get("profile_id")
+        if not isinstance(profile_id, str) or not profile_id.strip():
+            raise ProtocolError(
+                "`system.motion_tuning_sample_save` requires `payload.sample.profile_id` to be a non-empty string."
+            )
+        profile_revision = sample.get("profile_revision")
+        if not isinstance(profile_revision, int) or profile_revision <= 0:
+            raise ProtocolError(
+                "`system.motion_tuning_sample_save` requires `payload.sample.profile_revision` to be a positive integer."
+            )
+        adjusted_plan = sample.get("adjusted_plan")
+        if not isinstance(adjusted_plan, Mapping):
+            raise ProtocolError(
+                "`system.motion_tuning_sample_save` requires `payload.sample.adjusted_plan` to be an object."
+            )
+        adjusted_axes = sample.get("adjusted_axes")
+        if not isinstance(adjusted_axes, Mapping):
+            raise ProtocolError(
+                "`system.motion_tuning_sample_save` requires `payload.sample.adjusted_axes` to be an object."
+            )
+        return
+
+    if message_type == TYPE_SYSTEM_MOTION_TUNING_SAMPLE_DELETE:
+        sample_id = payload.get("sample_id")
+        if not isinstance(sample_id, str) or not sample_id.strip():
+            raise ProtocolError(
+                "`system.motion_tuning_sample_delete` requires `payload.sample_id` to be a non-empty string."
+            )
         return
 
 

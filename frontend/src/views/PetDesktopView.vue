@@ -17,7 +17,6 @@ import type {
   DesktopMotionTuningSample,
   DesktopRuntimeCommand,
 } from "../types/desktop";
-import { matchesPinnedProfileScope } from "../types/desktop";
 import type { ModelEnginePlanStartedEvent } from "../model-engine/contracts";
 import type { DesktopBaseActionPreview } from "../types/desktop";
 
@@ -33,10 +32,7 @@ const motionPlaybackRecords = ref<DesktopMotionPlaybackRecord[]>(
   bridge.state.snapshot.motionPlaybackRecords.map((record) =>
     cloneJson(record) as DesktopMotionPlaybackRecord),
 );
-const motionTuningSamples = ref<DesktopMotionTuningSample[]>(
-  bridge.state.snapshot.motionTuningSamples.map((sample) =>
-    cloneJson(sample) as DesktopMotionTuningSample),
-);
+const motionTuningSamples = ref<DesktopMotionTuningSample[]>([]);
 const modelEngine = useModelEngine({
   getSelectedModel: () => selectedModel.value,
   getSettings: () => cloneModelEngineSettings(motionEngineSettings),
@@ -355,37 +351,11 @@ function recordMotionPlayback(event: ModelEnginePlanStartedEvent): void {
 }
 
 function saveMotionTuningSample(sample: DesktopMotionTuningSample): void {
-  const normalizedSample = cloneJson(sample);
-  motionTuningSamples.value = [
-    normalizedSample,
-    ...motionTuningSamples.value.filter((item) => item.id !== normalizedSample.id),
-  ].slice(0, 50);
-  syncMotionTuningExamples();
+  adapter.saveMotionTuningSample(cloneJson(sample));
 }
 
 function deleteMotionTuningSample(sampleId: string): void {
-  motionTuningSamples.value = motionTuningSamples.value.filter(
-    (sample) => sample.id !== sampleId,
-  );
-  syncMotionTuningExamples();
-}
-
-function matchesCurrentRuntimeProfileSample(sample: DesktopMotionTuningSample): boolean {
-  return matchesPinnedProfileScope(sample, selectedSemanticAxisProfile.value);
-}
-
-function syncMotionTuningExamples(): void {
-  const currentProfile = selectedSemanticAxisProfile.value;
-  if (!currentProfile) {
-    adapter.sendMotionTuningExamplesSync([]);
-    return;
-  }
-  adapter.sendMotionTuningExamplesSync(
-    motionTuningSamples.value
-      .filter((sample) => matchesCurrentRuntimeProfileSample(sample))
-      .map((sample) => cloneJson(sample)),
-    currentProfile,
-  );
+  adapter.deleteMotionTuningSample(sampleId);
 }
 
 function cloneJson<TValue>(value: TValue): TValue {
@@ -537,25 +507,12 @@ watch(
 );
 
 watch(
-  () => adapter.state.status,
-  (status) => {
-    if (status === "connected") {
-      syncMotionTuningExamples();
-    }
+  () => adapter.state.motionTuningSamples,
+  (samples) => {
+    motionTuningSamples.value = samples.map((sample) =>
+      cloneJson(sample) as DesktopMotionTuningSample);
   },
-);
-
-watch(
-  () => [
-    selectedModel.value?.name ?? "",
-    selectedSemanticAxisProfile.value?.profile_id ?? "",
-    selectedSemanticAxisProfile.value?.revision ?? 0,
-  ],
-  () => {
-    if (adapter.state.status === "connected") {
-      syncMotionTuningExamples();
-    }
-  },
+  { deep: true, immediate: true },
 );
 
 watch(

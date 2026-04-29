@@ -27,12 +27,12 @@
 - Action Lab 选中记录后显示当前 profile 的 primary/hint 主轴 slider，可直接修改主轴值。
 - 点击“播放手调效果”会构造 `engine.motion_intent.v2` 并走本地 compiler/runtime 预览，用于观察真实体感。
 - 点击“保存为样本”会保存 `originalAxes -> adjustedAxes`、反馈说明、标签和调整后的 plan。
-- 样本可勾选“作为例子提供给大模型参考”，前端会通过 `system.motion_tuning_examples_sync` 同步给后端 realtime selector few-shot。
+- 样本可勾选“作为例子提供给大模型参考”，前端会通过 `system.motion_tuning_sample_save/delete` 写入后端样本库，再由后端派生 realtime selector few-shot。
 
 边界说明：
 
 - 手调播放使用最终 plan，目的是观察真实 Live2D 写参效果；正式会话主链路仍然是 `motion_intent -> ModelEngine compile -> parameter_plan`。
-- 保存的样本仍由前端 snapshot 持久化；只有启用为 LLM 参考的样本会同步到后端内存态，用于后续 selector prompt。
+- 保存的样本以后端样本库为准；前端 snapshot 只保留运行时投影，few-shot 参考也由后端基于已保存样本派生。
 
 ## 目标
 

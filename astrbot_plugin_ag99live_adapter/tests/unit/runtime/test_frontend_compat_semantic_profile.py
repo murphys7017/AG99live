@@ -11,7 +11,9 @@ class _RuntimeStateStub:
     def __init__(self, *, error: Exception | None = None) -> None:
         self.error = error
         self.calls: list[dict[str, object]] = []
-        self.motion_tuning_examples: object = None
+        self.saved_motion_tuning_sample: object = None
+        self.deleted_motion_tuning_sample_id: object = None
+        self.motion_tuning_samples: list[dict[str, object]] = []
 
     def save_semantic_axis_profile_update(
         self,
@@ -37,8 +39,21 @@ class _RuntimeStateStub:
             "updated_at": "2026-04-26T00:00:00+00:00",
         }
 
-    def set_motion_tuning_reference_examples(self, examples: object) -> None:
-        self.motion_tuning_examples = examples
+    def save_motion_tuning_sample(self, sample: object) -> dict[str, object]:
+        self.saved_motion_tuning_sample = sample
+        if isinstance(sample, dict):
+            self.motion_tuning_samples = [sample]
+        return sample if isinstance(sample, dict) else {}
+
+    def delete_motion_tuning_sample(self, sample_id: object) -> bool:
+        self.deleted_motion_tuning_sample_id = sample_id
+        if not any(item.get("id") == sample_id for item in self.motion_tuning_samples):
+            raise ValueError(f"motion_tuning_sample_not_found: {sample_id}")
+        self.motion_tuning_samples = []
+        return True
+
+    def list_motion_tuning_samples(self) -> list[dict[str, object]]:
+        return list(self.motion_tuning_samples)
 
 
 class _HistoryBridgeStub:
@@ -199,7 +214,7 @@ def test_frontend_compat_handler_returns_control_error_on_missing_profile_file()
     assert sent_payloads[0]["payload"]["message"] == "profile missing"
 
 
-def test_frontend_compat_handler_syncs_motion_tuning_examples() -> None:
+def test_frontend_compat_handler_saves_motion_tuning_sample_and_pushes_state() -> None:
     runtime_state = _RuntimeStateStub()
     handler = FrontendCompatHandler(
         background_files_getter=lambda: [],
@@ -207,34 +222,140 @@ def test_frontend_compat_handler_syncs_motion_tuning_examples() -> None:
         runtime_state=runtime_state,
     )
     sent_payloads: list[dict] = []
-    refresh_calls: list[bool] = []
-    examples = [
-        {
-            "input": "Assistant: 好的",
-            "output": {"emotion": "joy", "axes": {"mouth_smile": 76}},
-        }
-    ]
+
+    sample = {
+        "id": "sample-1",
+        "created_at": "2026-04-29T00:00:00+00:00",
+        "source_record_id": "record-1",
+        "model_name": "DemoModel",
+        "profile_id": "DemoModel.semantic.v1",
+        "profile_revision": 3,
+        "emotion_label": "joy",
+        "assistant_text": "好的",
+        "feedback": "嘴角再明显一点",
+        "tags": ["smile"],
+        "enabled_for_llm_reference": True,
+        "original_axes": {"mouth_smile": 0.6},
+        "adjusted_axes": {"mouth_smile": 0.8},
+        "adjusted_plan": {
+            "schema_version": "engine.parameter_plan.v2",
+            "profile_id": "DemoModel.semantic.v1",
+            "profile_revision": 3,
+            "model_id": "DemoModel",
+            "mode": "expressive",
+            "emotion_label": "joy",
+            "timing": {
+                "duration_ms": 1200,
+                "blend_in_ms": 120,
+                "hold_ms": 800,
+                "blend_out_ms": 280,
+            },
+            "parameters": [
+                {
+                    "axis_id": "mouth_smile",
+                    "parameter_id": "ParamMouthSmile",
+                    "target_value": 0.8,
+                    "weight": 1.0,
+                    "input_value": 0.8,
+                    "source": "manual",
+                }
+            ],
+        },
+    }
 
     async def send_json(payload: dict) -> bool:
         sent_payloads.append(payload)
         return True
 
     async def refresh_and_send_model(*, force: bool = False) -> None:
-        refresh_calls.append(force)
+        raise AssertionError("should not refresh model sync for motion tuning sample save")
 
     asyncio.run(
         handler.handle(
             SimpleNamespace(
-                type="system.motion_tuning_examples_sync",
+                type="system.motion_tuning_sample_save",
                 session_id="session",
-                turn_id=None,
-                payload={"examples": examples},
+                turn_id="turn",
+                payload={"sample": sample},
             ),
             send_json=send_json,
             refresh_and_send_model=refresh_and_send_model,
         )
     )
 
-    assert runtime_state.motion_tuning_examples == examples
-    assert sent_payloads == []
-    assert refresh_calls == []
+    assert runtime_state.saved_motion_tuning_sample == sample
+    assert len(sent_payloads) == 1
+    assert sent_payloads[0]["type"] == "system.motion_tuning_samples_state"
+    assert sent_payloads[0]["payload"]["samples"] == [sample]
+
+
+def test_frontend_compat_handler_deletes_motion_tuning_sample_and_pushes_state() -> None:
+    runtime_state = _RuntimeStateStub()
+    runtime_state.motion_tuning_samples = [{"id": "sample-1"}]
+    handler = FrontendCompatHandler(
+        background_files_getter=lambda: [],
+        history_bridge=_HistoryBridgeStub(),
+        runtime_state=runtime_state,
+    )
+    sent_payloads: list[dict] = []
+
+    async def send_json(payload: dict) -> bool:
+        sent_payloads.append(payload)
+        return True
+
+    async def refresh_and_send_model(*, force: bool = False) -> None:
+        raise AssertionError("should not refresh model sync for motion tuning sample delete")
+
+    asyncio.run(
+        handler.handle(
+            SimpleNamespace(
+                type="system.motion_tuning_sample_delete",
+                session_id="session",
+                turn_id=None,
+                payload={"sample_id": "sample-1"},
+            ),
+            send_json=send_json,
+            refresh_and_send_model=refresh_and_send_model,
+        )
+    )
+
+    assert runtime_state.deleted_motion_tuning_sample_id == "sample-1"
+    assert len(sent_payloads) == 1
+    assert sent_payloads[0]["type"] == "system.motion_tuning_samples_state"
+    assert sent_payloads[0]["payload"]["samples"] == []
+
+
+def test_frontend_compat_handler_delete_missing_motion_tuning_sample_fails() -> None:
+    runtime_state = _RuntimeStateStub()
+    handler = FrontendCompatHandler(
+        background_files_getter=lambda: [],
+        history_bridge=_HistoryBridgeStub(),
+        runtime_state=runtime_state,
+    )
+    sent_payloads: list[dict] = []
+
+    async def send_json(payload: dict) -> bool:
+        sent_payloads.append(payload)
+        return True
+
+    async def refresh_and_send_model(*, force: bool = False) -> None:
+        raise AssertionError("should not refresh model sync for motion tuning sample delete")
+
+    asyncio.run(
+        handler.handle(
+            SimpleNamespace(
+                type="system.motion_tuning_sample_delete",
+                session_id="session",
+                turn_id="turn-delete-missing",
+                payload={"sample_id": "missing-sample"},
+            ),
+            send_json=send_json,
+            refresh_and_send_model=refresh_and_send_model,
+        )
+    )
+
+    assert runtime_state.deleted_motion_tuning_sample_id == "missing-sample"
+    assert len(sent_payloads) == 1
+    assert sent_payloads[0]["type"] == "control.error"
+    assert sent_payloads[0]["turn_id"] == "turn-delete-missing"
+    assert sent_payloads[0]["payload"]["message"] == "motion_tuning_sample_not_found: missing-sample"

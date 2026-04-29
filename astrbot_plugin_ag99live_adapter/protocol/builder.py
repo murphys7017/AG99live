@@ -24,6 +24,7 @@ from .constants import (
     TYPE_SYSTEM_HISTORY_DELETED,
     TYPE_SYSTEM_HISTORY_LIST,
     TYPE_SYSTEM_MODEL_SYNC,
+    TYPE_SYSTEM_MOTION_TUNING_SAMPLES_STATE,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVED,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE_FAILED,
     TYPE_SYSTEM_SERVER_INFO,
@@ -216,6 +217,23 @@ def build_system_semantic_axis_profile_save_failed(
         turn_id=turn_id,
         source=SOURCE_ADAPTER,
         payload=payload,
+    )
+
+
+def build_system_motion_tuning_samples_state(
+    *,
+    session_id: str,
+    samples: list[dict[str, Any]],
+    turn_id: str | None = None,
+) -> dict[str, Any]:
+    return build_message_envelope(
+        TYPE_SYSTEM_MOTION_TUNING_SAMPLES_STATE,
+        session_id=session_id,
+        turn_id=turn_id,
+        source=SOURCE_ADAPTER,
+        payload={
+            "samples": samples,
+        },
     )
 
 

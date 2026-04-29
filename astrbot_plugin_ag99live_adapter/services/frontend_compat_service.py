@@ -8,12 +8,14 @@ from ..live2d.semantic_axis_profile import (
     SemanticAxisProfileRevisionError,
 )
 from ..protocol.builder import (
+    build_control_error,
     build_system_background_list,
     build_system_heartbeat_ack,
     build_system_history_created,
     build_system_history_data,
     build_system_history_deleted,
     build_system_history_list,
+    build_system_motion_tuning_samples_state,
     build_system_semantic_axis_profile_save_failed,
     build_system_semantic_axis_profile_saved,
 )
@@ -24,7 +26,8 @@ from ..protocol import (
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HISTORY_LIST_REQUEST,
     TYPE_SYSTEM_HISTORY_LOAD,
-    TYPE_SYSTEM_MOTION_TUNING_EXAMPLES_SYNC,
+    TYPE_SYSTEM_MOTION_TUNING_SAMPLE_DELETE,
+    TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE,
 )
 
@@ -35,7 +38,8 @@ SUPPORTED_SYSTEM_MESSAGE_TYPES = {
     TYPE_SYSTEM_HISTORY_LOAD,
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HEARTBEAT,
-    TYPE_SYSTEM_MOTION_TUNING_EXAMPLES_SYNC,
+    TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE,
+    TYPE_SYSTEM_MOTION_TUNING_SAMPLE_DELETE,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE,
 }
 
@@ -124,9 +128,36 @@ class FrontendCompatHandler:
             )
         elif msg_type == TYPE_SYSTEM_HEARTBEAT:
             await send_json(build_system_heartbeat_ack(session_id=session_id))
-        elif msg_type == TYPE_SYSTEM_MOTION_TUNING_EXAMPLES_SYNC:
-            examples = payload.get("examples", [])
-            self._runtime_state.set_motion_tuning_reference_examples(examples)
+        elif msg_type == TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE:
+            sample = payload.get("sample")
+            self._runtime_state.save_motion_tuning_sample(sample)
+            await send_json(
+                build_system_motion_tuning_samples_state(
+                    session_id=session_id,
+                    turn_id=message.turn_id,
+                    samples=self._runtime_state.list_motion_tuning_samples(),
+                )
+            )
+        elif msg_type == TYPE_SYSTEM_MOTION_TUNING_SAMPLE_DELETE:
+            sample_id = payload.get("sample_id")
+            try:
+                self._runtime_state.delete_motion_tuning_sample(sample_id)
+            except ValueError as exc:
+                await send_json(
+                    build_control_error(
+                        session_id=session_id,
+                        turn_id=message.turn_id,
+                        message=str(exc),
+                    )
+                )
+                return
+            await send_json(
+                build_system_motion_tuning_samples_state(
+                    session_id=session_id,
+                    turn_id=message.turn_id,
+                    samples=self._runtime_state.list_motion_tuning_samples(),
+                )
+            )
         elif msg_type == TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE:
             request_id = str(payload.get("request_id") or "").strip()
             model_name = str(payload.get("model_name") or "").strip()

@@ -249,8 +249,8 @@ function saveSample(): void {
     sample,
   });
   saveStatusText.value = sample.enabledForLlmReference
-    ? "样本已保存，并会同步给大模型作为动作参考例子。"
-    : "样本已保存，但暂不作为大模型参考例子。";
+    ? "样本保存请求已提交到后端，保存后会进入后端 few-shot 参考池。"
+    : "样本保存请求已提交到后端，但暂不作为大模型参考例子。";
 }
 
 function toggleSampleReference(sample: MotionTuningSampleSnapshot, enabled: boolean): void {

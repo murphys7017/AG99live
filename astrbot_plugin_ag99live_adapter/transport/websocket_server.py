@@ -26,6 +26,7 @@ class WebSocketTransport:
         handle_message: Callable[[dict[str, Any]], Awaitable[None]],
         refresh_runtime_settings_async: Callable[..., Awaitable[None]],
         send_current_model_and_conf: Callable[..., Awaitable[None]],
+        send_motion_tuning_samples_state: Callable[..., Awaitable[None]],
         on_disconnect: Callable[[], Awaitable[None]],
         session_id_getter: Callable[[], str],
     ) -> None:
@@ -36,6 +37,7 @@ class WebSocketTransport:
         self._handle_message = handle_message
         self._refresh_runtime_settings_async = refresh_runtime_settings_async
         self._send_current_model_and_conf = send_current_model_and_conf
+        self._send_motion_tuning_samples_state = send_motion_tuning_samples_state
         self._on_disconnect = on_disconnect
         self._session_id_getter = session_id_getter
 
@@ -208,6 +210,7 @@ class WebSocketTransport:
             )
         )
         await self._send_current_model_and_conf(force=True)
+        await self._send_motion_tuning_samples_state()
         await self.send_json(
             build_system_group_update(
                 session_id=session_id,

@@ -84,6 +84,7 @@ class RuntimeState:
         self.realtime_motion_fewshot_enabled = True
         self.realtime_motion_fewshot_count = 4
         self.motion_tuning_reference_examples: list[dict[str, Any]] = []
+        self.motion_tuning_samples: list[dict[str, Any]] = []
         self.realtime_motion_platform_context_enabled = True
         self.realtime_motion_platform_description = ""
         self.motion_prompt_instruction = DEFAULT_MOTION_PROMPT_INSTRUCTION
@@ -101,6 +102,9 @@ class RuntimeState:
         )
         self._runtime_cache_payload = self._load_runtime_cache_payload()
         self._base_action_filter_cache = self._load_action_filter_cache_from_payload(
+            self._runtime_cache_payload
+        )
+        self.motion_tuning_samples = self._load_motion_tuning_samples_from_payload(
             self._runtime_cache_payload
         )
         self.last_sent_model_signature: str | None = None
@@ -301,6 +305,7 @@ class RuntimeState:
                 model_info=self.model_info,
             )
         self._attach_semantic_axis_profiles()
+        self._refresh_motion_tuning_reference_examples_from_samples()
 
         logger.info(
             "Refreshed adapter runtime settings "
@@ -455,45 +460,104 @@ class RuntimeState:
         model["semantic_axis_profile"] = deepcopy(saved_profile)
         return saved_profile
 
-    def set_motion_tuning_reference_examples(self, examples: Any) -> None:
-        if not isinstance(examples, list):
+    def list_motion_tuning_samples(self) -> list[dict[str, Any]]:
+        return deepcopy(self.motion_tuning_samples)
+
+    def save_motion_tuning_sample(self, sample_payload: Any) -> dict[str, Any]:
+        normalized_sample = self._normalize_motion_tuning_sample(sample_payload)
+        self.motion_tuning_samples = [
+            deepcopy(normalized_sample),
+            *[
+                deepcopy(item)
+                for item in self.motion_tuning_samples
+                if str(item.get("id") or "").strip() != normalized_sample["id"]
+            ],
+        ][:200]
+        self._runtime_cache_payload["motion_tuning_samples"] = deepcopy(
+            self.motion_tuning_samples
+        )
+        self._persist_runtime_cache_payload()
+        self._refresh_motion_tuning_reference_examples_from_samples()
+        return deepcopy(normalized_sample)
+
+    def delete_motion_tuning_sample(self, sample_id: Any) -> bool:
+        normalized_sample_id = str(sample_id or "").strip()
+        if not normalized_sample_id:
+            raise ValueError("`sample_id` is required.")
+        remaining_samples = [
+            deepcopy(item)
+            for item in self.motion_tuning_samples
+            if str(item.get("id") or "").strip() != normalized_sample_id
+        ]
+        if len(remaining_samples) == len(self.motion_tuning_samples):
+            raise ValueError(f"motion_tuning_sample_not_found: {normalized_sample_id}")
+        self.motion_tuning_samples = remaining_samples
+        self._runtime_cache_payload["motion_tuning_samples"] = deepcopy(
+            self.motion_tuning_samples
+        )
+        self._persist_runtime_cache_payload()
+        self._refresh_motion_tuning_reference_examples_from_samples()
+        return True
+
+    def _refresh_motion_tuning_reference_examples_from_samples(self) -> None:
+        profile = self._get_selected_semantic_axis_profile()
+        if not isinstance(profile, dict):
+            self.motion_tuning_reference_examples = []
+            return
+
+        profile_id = str(profile.get("profile_id") or "").strip()
+        profile_revision = profile.get("revision")
+        if not profile_id or not isinstance(profile_revision, int) or profile_revision <= 0:
             self.motion_tuning_reference_examples = []
             return
 
         normalized_examples: list[dict[str, Any]] = []
-        for item in examples[:5]:
-            if not isinstance(item, dict):
+        for sample in self.motion_tuning_samples:
+            if not isinstance(sample, dict):
                 continue
-            output = item.get("output")
-            if not isinstance(output, dict):
+            if not bool(sample.get("enabled_for_llm_reference")):
                 continue
-            axes = output.get("axes")
-            if not isinstance(axes, dict) or not axes:
+            if str(sample.get("profile_id") or "").strip() != profile_id:
                 continue
+            if int(sample.get("profile_revision") or 0) != profile_revision:
+                continue
+            adjusted_axes = sample.get("adjusted_axes")
+            if not isinstance(adjusted_axes, dict) or not adjusted_axes:
+                continue
+            adjusted_plan = sample.get("adjusted_plan")
+            duration_ms = None
+            mode = "expressive"
+            if isinstance(adjusted_plan, dict):
+                mode = str(adjusted_plan.get("mode") or "expressive").strip() or "expressive"
+                timing = adjusted_plan.get("timing")
+                if isinstance(timing, dict):
+                    duration_ms = timing.get("duration_ms")
             normalized_examples.append(
                 {
-                    "input": str(item.get("input") or "").strip(),
+                    "input": self._build_motion_tuning_sample_input_text(sample),
                     "output": {
-                        "emotion": str(output.get("emotion") or "custom").strip() or "custom",
-                        "mode": str(output.get("mode") or "expressive").strip() or "expressive",
-                        "duration_ms": output.get("duration_ms"),
+                        "emotion": str(sample.get("emotion_label") or "custom").strip() or "custom",
+                        "mode": mode,
+                        "duration_ms": duration_ms,
                         "axes": {
                             str(axis_id).strip(): value
-                            for axis_id, value in axes.items()
+                            for axis_id, value in adjusted_axes.items()
                             if str(axis_id).strip()
                         },
                     },
-                    "source": "desktop_motion_tuning",
-                    "feedback": str(item.get("feedback") or "").strip(),
+                    "source": "desktop_motion_tuning_sample_store",
+                    "feedback": str(sample.get("feedback") or "").strip(),
                     "tags": [
                         str(tag).strip()
-                        for tag in item.get("tags", [])
+                        for tag in sample.get("tags", [])
                         if str(tag).strip()
                     ]
-                    if isinstance(item.get("tags"), list)
+                    if isinstance(sample.get("tags"), list)
                     else [],
                 }
             )
+            if len(normalized_examples) >= 5:
+                break
         self.motion_tuning_reference_examples = normalized_examples
 
     def should_send_model_payload(self, payload: dict[str, Any], *, force: bool = False) -> bool:
@@ -1054,11 +1118,293 @@ class RuntimeState:
             raise SemanticAxisProfileError("`model_name` is required.")
         return Path(self.live2ds_dir) / normalized_name
 
+    def _get_selected_semantic_axis_profile(self) -> dict[str, Any] | None:
+        selected_model_name = str(self.model_info.get("selected_model") or "").strip()
+        if not selected_model_name:
+            return None
+        for model in self.model_info.get("models", []):
+            if not isinstance(model, dict):
+                continue
+            if str(model.get("name") or "").strip() != selected_model_name:
+                continue
+            profile = model.get("semantic_axis_profile")
+            if isinstance(profile, dict):
+                return profile
+            return None
+        return None
+
     def _persist_runtime_cache_payload(self) -> None:
         self._runtime_cache_payload["action_filter_cache"] = deepcopy(self._base_action_filter_cache)
+        self._runtime_cache_payload["motion_tuning_samples"] = deepcopy(
+            self.motion_tuning_samples
+        )
         if self._live2d_runtime_cache_path is None:
             return
         save_live2d_runtime_cache(self._live2d_runtime_cache_path, self._runtime_cache_payload)
+
+    def _load_motion_tuning_samples_from_payload(
+        self,
+        payload: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        raw_samples = payload.get("motion_tuning_samples")
+        if not isinstance(raw_samples, list):
+            return []
+
+        normalized_samples: list[dict[str, Any]] = []
+        for sample in raw_samples:
+            try:
+                normalized_samples.append(self._normalize_motion_tuning_sample(sample))
+            except ValueError as exc:
+                logger.warning("Ignoring invalid persisted motion tuning sample: %s", exc)
+        return normalized_samples[:200]
+
+    def _normalize_motion_tuning_sample(self, sample_payload: Any) -> dict[str, Any]:
+        if not isinstance(sample_payload, dict):
+            raise ValueError("motion_tuning_sample_not_object")
+
+        sample_id = str(sample_payload.get("id") or "").strip()
+        if not sample_id:
+            raise ValueError("motion_tuning_sample_id_required")
+
+        created_at = str(sample_payload.get("created_at") or "").strip()
+        if not created_at:
+            raise ValueError("motion_tuning_sample_created_at_required")
+
+        source_record_id = str(sample_payload.get("source_record_id") or "").strip()
+        if not source_record_id:
+            raise ValueError("motion_tuning_sample_source_record_id_required")
+
+        model_name = str(sample_payload.get("model_name") or "").strip()
+        if not model_name:
+            raise ValueError("motion_tuning_sample_model_name_required")
+
+        profile_id = str(sample_payload.get("profile_id") or "").strip()
+        if not profile_id:
+            raise ValueError("motion_tuning_sample_profile_id_required")
+
+        profile_revision_raw = sample_payload.get("profile_revision")
+        if isinstance(profile_revision_raw, bool):
+            raise ValueError("motion_tuning_sample_profile_revision_invalid")
+        try:
+            profile_revision = int(profile_revision_raw)
+        except (TypeError, ValueError):
+            raise ValueError("motion_tuning_sample_profile_revision_invalid") from None
+        if profile_revision <= 0:
+            raise ValueError("motion_tuning_sample_profile_revision_invalid")
+
+        adjusted_axes = self._normalize_motion_tuning_axes(
+            sample_payload.get("adjusted_axes"),
+            field_name="adjusted_axes",
+            require_non_empty=True,
+        )
+        original_axes = self._normalize_motion_tuning_axes(
+            sample_payload.get("original_axes"),
+            field_name="original_axes",
+            require_non_empty=False,
+        )
+        adjusted_plan = self._normalize_motion_tuning_adjusted_plan(
+            sample_payload.get("adjusted_plan"),
+            model_name=model_name,
+            profile_id=profile_id,
+            profile_revision=profile_revision,
+        )
+
+        tags = self._normalize_motion_tuning_tags(sample_payload.get("tags"))
+        emotion_label = str(sample_payload.get("emotion_label") or "").strip() or "manual_tuning"
+
+        return {
+            "id": sample_id,
+            "created_at": created_at,
+            "source_record_id": source_record_id,
+            "model_name": model_name,
+            "profile_id": profile_id,
+            "profile_revision": profile_revision,
+            "emotion_label": emotion_label,
+            "assistant_text": str(sample_payload.get("assistant_text") or "").strip(),
+            "feedback": str(sample_payload.get("feedback") or "").strip(),
+            "tags": tags,
+            "enabled_for_llm_reference": bool(
+                sample_payload.get("enabled_for_llm_reference")
+            ),
+            "original_axes": original_axes,
+            "adjusted_axes": adjusted_axes,
+            "adjusted_plan": adjusted_plan,
+        }
+
+    def _normalize_motion_tuning_adjusted_plan(
+        self,
+        plan_payload: Any,
+        *,
+        model_name: str,
+        profile_id: str,
+        profile_revision: int,
+    ) -> dict[str, Any]:
+        if not isinstance(plan_payload, dict):
+            raise ValueError("motion_tuning_sample_adjusted_plan_not_object")
+        if str(plan_payload.get("schema_version") or "").strip() != "engine.parameter_plan.v2":
+            raise ValueError("motion_tuning_sample_adjusted_plan_schema_invalid")
+        if str(plan_payload.get("model_id") or "").strip() != model_name:
+            raise ValueError("motion_tuning_sample_adjusted_plan_model_mismatch")
+        if str(plan_payload.get("profile_id") or "").strip() != profile_id:
+            raise ValueError("motion_tuning_sample_adjusted_plan_profile_mismatch")
+
+        plan_profile_revision_raw = plan_payload.get("profile_revision")
+        if isinstance(plan_profile_revision_raw, bool):
+            raise ValueError("motion_tuning_sample_adjusted_plan_revision_invalid")
+        try:
+            plan_profile_revision = int(plan_profile_revision_raw)
+        except (TypeError, ValueError):
+            raise ValueError("motion_tuning_sample_adjusted_plan_revision_invalid") from None
+        if plan_profile_revision != profile_revision:
+            raise ValueError("motion_tuning_sample_adjusted_plan_revision_mismatch")
+
+        mode = str(plan_payload.get("mode") or "").strip()
+        if mode not in {"idle", "expressive"}:
+            raise ValueError("motion_tuning_sample_adjusted_plan_mode_invalid")
+
+        emotion_label = str(plan_payload.get("emotion_label") or "").strip() or "manual_tuning"
+        timing_payload = plan_payload.get("timing")
+        if not isinstance(timing_payload, dict):
+            raise ValueError("motion_tuning_sample_adjusted_plan_timing_invalid")
+
+        timing: dict[str, int] = {}
+        for key in ("duration_ms", "blend_in_ms", "hold_ms", "blend_out_ms"):
+            raw_value = timing_payload.get(key)
+            if isinstance(raw_value, bool):
+                raise ValueError(f"motion_tuning_sample_adjusted_plan_{key}_invalid")
+            try:
+                normalized_value = int(raw_value)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"motion_tuning_sample_adjusted_plan_{key}_invalid"
+                ) from None
+            if normalized_value < 0:
+                raise ValueError(f"motion_tuning_sample_adjusted_plan_{key}_invalid")
+            timing[key] = normalized_value
+
+        raw_parameters = plan_payload.get("parameters")
+        if not isinstance(raw_parameters, list) or not raw_parameters:
+            raise ValueError("motion_tuning_sample_adjusted_plan_parameters_invalid")
+
+        parameters: list[dict[str, Any]] = []
+        for parameter in raw_parameters:
+            if not isinstance(parameter, dict):
+                raise ValueError("motion_tuning_sample_adjusted_plan_parameter_not_object")
+            axis_id = str(parameter.get("axis_id") or "").strip()
+            parameter_id = str(parameter.get("parameter_id") or "").strip()
+            target_value = _coerce_finite_number(parameter.get("target_value"))
+            weight = _coerce_finite_number(parameter.get("weight"))
+            if (
+                not axis_id
+                or not parameter_id
+                or target_value is None
+                or weight is None
+                or weight < 0
+                or weight > 1
+            ):
+                raise ValueError("motion_tuning_sample_adjusted_plan_parameter_invalid")
+            input_value_raw = parameter.get("input_value")
+            input_value = _coerce_finite_number(input_value_raw)
+            if input_value_raw is not None and input_value is None:
+                raise ValueError("motion_tuning_sample_adjusted_plan_input_value_invalid")
+            source = str(parameter.get("source") or "").strip()
+            normalized_parameter = {
+                "axis_id": axis_id,
+                "parameter_id": parameter_id,
+                "target_value": target_value,
+                "weight": weight,
+            }
+            if input_value is not None:
+                normalized_parameter["input_value"] = input_value
+            if source in {"semantic_axis", "coupling", "manual"}:
+                normalized_parameter["source"] = source
+            parameters.append(normalized_parameter)
+
+        normalized_plan: dict[str, Any] = {
+            "schema_version": "engine.parameter_plan.v2",
+            "profile_id": profile_id,
+            "profile_revision": profile_revision,
+            "model_id": model_name,
+            "mode": mode,
+            "emotion_label": emotion_label,
+            "timing": timing,
+            "parameters": parameters,
+        }
+        diagnostics = plan_payload.get("diagnostics")
+        if isinstance(diagnostics, dict):
+            warnings = diagnostics.get("warnings")
+            normalized_diagnostics: dict[str, Any] = {}
+            if isinstance(warnings, list):
+                normalized_diagnostics["warnings"] = [
+                    str(item).strip() for item in warnings if str(item).strip()
+                ]
+            if normalized_diagnostics:
+                normalized_plan["diagnostics"] = normalized_diagnostics
+        summary = plan_payload.get("summary")
+        if isinstance(summary, dict):
+            normalized_summary: dict[str, Any] = {}
+            for key in ("axis_count", "parameter_count", "target_duration_ms"):
+                raw_value = summary.get(key)
+                if isinstance(raw_value, bool):
+                    continue
+                try:
+                    normalized_value = int(raw_value)
+                except (TypeError, ValueError):
+                    continue
+                normalized_summary[key] = normalized_value
+            if normalized_summary:
+                normalized_plan["summary"] = normalized_summary
+        return normalized_plan
+
+    @staticmethod
+    def _normalize_motion_tuning_axes(
+        axes_payload: Any,
+        *,
+        field_name: str,
+        require_non_empty: bool,
+    ) -> dict[str, float]:
+        if not isinstance(axes_payload, dict):
+            raise ValueError(f"motion_tuning_sample_{field_name}_not_object")
+        result: dict[str, float] = {}
+        for axis_id, raw_value in axes_payload.items():
+            normalized_axis_id = str(axis_id or "").strip()
+            normalized_value = _coerce_finite_number(raw_value)
+            if not normalized_axis_id or normalized_value is None:
+                continue
+            result[normalized_axis_id] = normalized_value
+        if require_non_empty and not result:
+            raise ValueError(f"motion_tuning_sample_{field_name}_empty")
+        return result
+
+    @staticmethod
+    def _normalize_motion_tuning_tags(tags_payload: Any) -> list[str]:
+        if not isinstance(tags_payload, list):
+            return []
+        result: list[str] = []
+        seen: set[str] = set()
+        for tag in tags_payload:
+            normalized_tag = str(tag or "").strip()
+            if not normalized_tag or normalized_tag in seen:
+                continue
+            seen.add(normalized_tag)
+            result.append(normalized_tag)
+        return result
+
+    @staticmethod
+    def _build_motion_tuning_sample_input_text(sample: dict[str, Any]) -> str:
+        lines: list[str] = []
+        assistant_text = str(sample.get("assistant_text") or "").strip()
+        feedback = str(sample.get("feedback") or "").strip()
+        tags = sample.get("tags")
+        if assistant_text:
+            lines.append(f"Assistant: {assistant_text}")
+        if feedback:
+            lines.append(f"Tuning note: {feedback}")
+        if isinstance(tags, list):
+            normalized_tags = [str(tag).strip() for tag in tags if str(tag).strip()]
+            if normalized_tags:
+                lines.append(f"Tags: {', '.join(normalized_tags)}")
+        return "\n".join(lines)
 
     @staticmethod
     def _clone_plugin_config(config: Any) -> Any:
@@ -1115,3 +1461,13 @@ def _normalize_motion_generation_mode(value: Any) -> str:
     if mode in {"inline_first", "split_after_reply", "text_only"}:
         return mode
     return "split_after_reply"
+
+
+def _coerce_finite_number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        if value != value or value in {float("inf"), float("-inf")}:
+            return None
+        return float(value)
+    return None

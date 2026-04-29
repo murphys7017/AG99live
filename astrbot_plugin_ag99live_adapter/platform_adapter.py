@@ -35,6 +35,7 @@ from .motion.realtime_motion_plan import (
     validate_motion_intent_payload,
     validate_parameter_plan_payload,
 )
+from .protocol.builder import build_system_motion_tuning_samples_state
 from .protocol.constants import TYPE_ENGINE_MOTION_INTENT, TYPE_ENGINE_MOTION_PLAN
 from .runtime.session_state import SessionState
 from .transport.websocket_server import WebSocketTransport
@@ -172,6 +173,7 @@ class OLVPetPlatformAdapter(Platform):
             handle_message=self.handle_msg,
             refresh_runtime_settings_async=self._refresh_runtime_settings_async,
             send_current_model_and_conf=self._send_current_model_and_conf,
+            send_motion_tuning_samples_state=self._send_motion_tuning_samples_state,
             on_disconnect=self._handle_transport_disconnect,
             session_id_getter=lambda: self.client_uid,
         )
@@ -354,6 +356,13 @@ class OLVPetPlatformAdapter(Platform):
     async def _refresh_and_send_current_model_and_conf(self, *, force: bool = False) -> None:
         self._refresh_runtime_settings()
         await self._send_current_model_and_conf(force=force)
+
+    async def _send_motion_tuning_samples_state(self) -> None:
+        payload = build_system_motion_tuning_samples_state(
+            session_id=self.client_uid,
+            samples=self.runtime_state.list_motion_tuning_samples(),
+        )
+        await self._send_json(payload)
 
     async def _handle_frontend_compat(self, message: dict[str, Any]) -> None:
         await self.frontend_compat_handler.handle(
