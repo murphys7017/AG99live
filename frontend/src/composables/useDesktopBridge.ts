@@ -4,6 +4,8 @@ import type {
   DesktopBackendHistorySummary,
   DesktopBaseActionPreview,
   DesktopMotionPlaybackRecord,
+  DesktopProfileAuthoringCommand,
+  DesktopProfileAuthoringSnapshot,
   DesktopMotionTuningSample,
   DesktopRuntimeCommand,
   DesktopRuntimeSnapshot,
@@ -19,12 +21,24 @@ import {
   normalizeModelEngineSettings,
 } from "../model-engine/settings";
 
-const CHANNEL_NAME = "ag99live.desktop.runtime";
-const SNAPSHOT_STORAGE_KEY = "ag99live.desktop.snapshot";
+const RUNTIME_CHANNEL_NAME = "ag99live.desktop.runtime";
+const PROFILE_AUTHORING_CHANNEL_NAME = "ag99live.desktop.profile_authoring";
+const RUNTIME_SNAPSHOT_STORAGE_KEY = "ag99live.desktop.snapshot";
+const PROFILE_AUTHORING_SNAPSHOT_STORAGE_KEY = "ag99live.desktop.profile_authoring.snapshot";
 
-type BridgeMessage =
+type RuntimeBridgeMessage =
   | { kind: "snapshot"; snapshot: DesktopRuntimeSnapshot }
   | { kind: "command"; command: DesktopRuntimeCommand };
+
+type ProfileAuthoringBridgeMessage =
+  | {
+    kind: "profile_authoring_snapshot";
+    snapshot: DesktopProfileAuthoringSnapshot;
+  }
+  | {
+    kind: "profile_authoring_command";
+    command: DesktopProfileAuthoringCommand;
+  };
 
 const defaultSnapshot: DesktopRuntimeSnapshot = {
   adapterAddress: "127.0.0.1:12396",
@@ -61,6 +75,11 @@ const defaultSnapshot: DesktopRuntimeSnapshot = {
   backendHistoryStatusMessage: "等待桌宠窗口同步后端历史。",
   baseActionPreview: null,
   selectedSemanticAxisProfile: null,
+};
+
+const defaultProfileAuthoringSnapshot: DesktopProfileAuthoringSnapshot = {
+  selectedModelName: "",
+  selectedSemanticAxisProfile: null,
   latestSemanticAxisProfileSaveResult: null,
 };
 
@@ -73,13 +92,18 @@ const defaultWindowState: DesktopWindowVisibilityState = {
 };
 
 const state = reactive({
-  snapshot: loadSnapshot(),
+  snapshot: loadRuntimeSnapshot(),
+  profileAuthoringSnapshot: loadProfileAuthoringSnapshot(),
   windowState: defaultWindowState,
 });
 
 let initialized = false;
-let channel: BroadcastChannel | null = null;
+let runtimeChannel: BroadcastChannel | null = null;
+let profileAuthoringChannel: BroadcastChannel | null = null;
 const commandListeners = new Set<(command: DesktopRuntimeCommand) => void>();
+const profileAuthoringCommandListeners = new Set<
+  (command: DesktopProfileAuthoringCommand) => void
+>();
 
 function ensureInitialized(): void {
   if (initialized || typeof window === "undefined") {
@@ -89,8 +113,8 @@ function ensureInitialized(): void {
   initialized = true;
 
   if ("BroadcastChannel" in window) {
-    channel = new BroadcastChannel(CHANNEL_NAME);
-    channel.addEventListener("message", (event: MessageEvent<BridgeMessage>) => {
+    runtimeChannel = new BroadcastChannel(RUNTIME_CHANNEL_NAME);
+    runtimeChannel.addEventListener("message", (event: MessageEvent<RuntimeBridgeMessage>) => {
       const payload = event.data;
       if (!payload || typeof payload !== "object") {
         return;
@@ -102,7 +126,7 @@ function ensureInitialized(): void {
           return;
         }
         state.snapshot = nextSnapshot;
-        persistSnapshot(nextSnapshot);
+        persistRuntimeSnapshot(nextSnapshot);
         return;
       }
 
@@ -112,18 +136,63 @@ function ensureInitialized(): void {
         }
       }
     });
+
+    profileAuthoringChannel = new BroadcastChannel(PROFILE_AUTHORING_CHANNEL_NAME);
+    profileAuthoringChannel.addEventListener(
+      "message",
+      (event: MessageEvent<ProfileAuthoringBridgeMessage>) => {
+        const payload = event.data;
+        if (!payload || typeof payload !== "object") {
+          return;
+        }
+
+        if (payload.kind === "profile_authoring_command") {
+          for (const listener of profileAuthoringCommandListeners) {
+            listener(payload.command);
+          }
+          return;
+        }
+
+        if (payload.kind !== "profile_authoring_snapshot") {
+          return;
+        }
+
+        const nextSnapshot = safeNormalizeProfileAuthoringSnapshot(
+          payload.snapshot,
+          "broadcast",
+        );
+        if (!nextSnapshot) {
+          return;
+        }
+        state.profileAuthoringSnapshot = nextSnapshot;
+        persistProfileAuthoringSnapshot(nextSnapshot);
+      },
+    );
   }
 
   window.addEventListener("storage", (event) => {
-    if (event.key !== SNAPSHOT_STORAGE_KEY || !event.newValue) {
+    if (event.key === RUNTIME_SNAPSHOT_STORAGE_KEY && event.newValue) {
+      try {
+        state.snapshot = normalizeSnapshot(
+          JSON.parse(event.newValue) as DesktopRuntimeSnapshot,
+        );
+      } catch (error) {
+        console.warn("[DesktopBridge] malformed cross-window snapshot rejected.", error);
+      }
       return;
     }
-    try {
-      state.snapshot = normalizeSnapshot(
-        JSON.parse(event.newValue) as DesktopRuntimeSnapshot,
-      );
-    } catch (error) {
-      console.warn("[DesktopBridge] malformed cross-window snapshot rejected.", error);
+
+    if (event.key === PROFILE_AUTHORING_SNAPSHOT_STORAGE_KEY && event.newValue) {
+      try {
+        state.profileAuthoringSnapshot = normalizeProfileAuthoringSnapshot(
+          JSON.parse(event.newValue) as DesktopProfileAuthoringSnapshot,
+        );
+      } catch (error) {
+        console.warn(
+          "[DesktopBridge] malformed cross-window profile authoring snapshot rejected.",
+          error,
+        );
+      }
     }
   });
 
@@ -132,12 +201,12 @@ function ensureInitialized(): void {
   });
 }
 
-function loadSnapshot(): DesktopRuntimeSnapshot {
+function loadRuntimeSnapshot(): DesktopRuntimeSnapshot {
   if (typeof window === "undefined") {
     return defaultSnapshot;
   }
 
-  const rawValue = window.localStorage.getItem(SNAPSHOT_STORAGE_KEY);
+  const rawValue = window.localStorage.getItem(RUNTIME_SNAPSHOT_STORAGE_KEY);
   if (!rawValue) {
     return defaultSnapshot;
   }
@@ -147,20 +216,62 @@ function loadSnapshot(): DesktopRuntimeSnapshot {
     if (nextSnapshot) {
       return nextSnapshot;
     }
-    window.localStorage.removeItem(SNAPSHOT_STORAGE_KEY);
+    window.localStorage.removeItem(RUNTIME_SNAPSHOT_STORAGE_KEY);
     return defaultSnapshot;
   } catch (error) {
     console.warn("[DesktopBridge] persisted snapshot rejected; using defaults.", error);
-    window.localStorage.removeItem(SNAPSHOT_STORAGE_KEY);
+    window.localStorage.removeItem(RUNTIME_SNAPSHOT_STORAGE_KEY);
     return defaultSnapshot;
   }
 }
 
-function persistSnapshot(snapshot: DesktopRuntimeSnapshot): void {
+function loadProfileAuthoringSnapshot(): DesktopProfileAuthoringSnapshot {
+  if (typeof window === "undefined") {
+    return defaultProfileAuthoringSnapshot;
+  }
+
+  const rawValue = window.localStorage.getItem(PROFILE_AUTHORING_SNAPSHOT_STORAGE_KEY);
+  if (!rawValue) {
+    return defaultProfileAuthoringSnapshot;
+  }
+
+  try {
+    const nextSnapshot = safeNormalizeProfileAuthoringSnapshot(
+      JSON.parse(rawValue),
+      "storage",
+    );
+    if (nextSnapshot) {
+      return nextSnapshot;
+    }
+    window.localStorage.removeItem(PROFILE_AUTHORING_SNAPSHOT_STORAGE_KEY);
+    return defaultProfileAuthoringSnapshot;
+  } catch (error) {
+    console.warn(
+      "[DesktopBridge] persisted profile authoring snapshot rejected; using defaults.",
+      error,
+    );
+    window.localStorage.removeItem(PROFILE_AUTHORING_SNAPSHOT_STORAGE_KEY);
+    return defaultProfileAuthoringSnapshot;
+  }
+}
+
+function persistRuntimeSnapshot(snapshot: DesktopRuntimeSnapshot): void {
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.setItem(SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshot));
+  window.localStorage.setItem(RUNTIME_SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshot));
+}
+
+function persistProfileAuthoringSnapshot(
+  snapshot: DesktopProfileAuthoringSnapshot,
+): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(
+    PROFILE_AUTHORING_SNAPSHOT_STORAGE_KEY,
+    JSON.stringify(snapshot),
+  );
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -186,6 +297,26 @@ function safeNormalizeSnapshot(
     return normalizeSnapshot(snapshot as unknown as DesktopRuntimeSnapshot);
   } catch (error) {
     console.warn(`[DesktopBridge] ${source} snapshot rejected.`, error);
+    return null;
+  }
+}
+
+function safeNormalizeProfileAuthoringSnapshot(
+  snapshot: unknown,
+  source: string,
+): DesktopProfileAuthoringSnapshot | null {
+  try {
+    if (!isObject(snapshot)) {
+      throw new Error("profile_authoring_snapshot_not_object");
+    }
+    return normalizeProfileAuthoringSnapshot(
+      snapshot as unknown as DesktopProfileAuthoringSnapshot,
+    );
+  } catch (error) {
+    console.warn(
+      `[DesktopBridge] ${source} profile authoring snapshot rejected.`,
+      error,
+    );
     return null;
   }
 }
@@ -223,6 +354,19 @@ function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnap
     backendHistoryLoading: Boolean(snapshot.backendHistoryLoading),
     backendHistoryStatusMessage: normalizeText(snapshot.backendHistoryStatusMessage),
     baseActionPreview: cloneBaseActionPreview(snapshot.baseActionPreview),
+    selectedSemanticAxisProfile: cloneSemanticAxisProfile(
+      snapshot.selectedSemanticAxisProfile,
+    ),
+  };
+}
+
+function normalizeProfileAuthoringSnapshot(
+  snapshot: DesktopProfileAuthoringSnapshot,
+): DesktopProfileAuthoringSnapshot {
+  return {
+    ...defaultProfileAuthoringSnapshot,
+    ...snapshot,
+    selectedModelName: normalizeText(snapshot.selectedModelName),
     selectedSemanticAxisProfile: cloneSemanticAxisProfile(
       snapshot.selectedSemanticAxisProfile,
     ),
@@ -561,15 +705,41 @@ export function useDesktopBridge() {
   function publishSnapshot(snapshot: DesktopRuntimeSnapshot): void {
     const nextSnapshot = safeNormalizeSnapshot(snapshot, "publish") ?? defaultSnapshot;
     state.snapshot = nextSnapshot;
-    persistSnapshot(nextSnapshot);
-    channel?.postMessage({
+    persistRuntimeSnapshot(nextSnapshot);
+    runtimeChannel?.postMessage({
       kind: "snapshot",
       snapshot: nextSnapshot,
-    } satisfies BridgeMessage);
+    } satisfies RuntimeBridgeMessage);
+  }
+
+  function publishProfileAuthoringSnapshot(
+    snapshot: DesktopProfileAuthoringSnapshot,
+  ): void {
+    const nextSnapshot =
+      safeNormalizeProfileAuthoringSnapshot(snapshot, "publish")
+      ?? defaultProfileAuthoringSnapshot;
+    state.profileAuthoringSnapshot = nextSnapshot;
+    persistProfileAuthoringSnapshot(nextSnapshot);
+    profileAuthoringChannel?.postMessage({
+      kind: "profile_authoring_snapshot",
+      snapshot: nextSnapshot,
+    } satisfies ProfileAuthoringBridgeMessage);
   }
 
   function sendCommand(command: DesktopRuntimeCommand): void {
-    channel?.postMessage({ kind: "command", command } satisfies BridgeMessage);
+    runtimeChannel?.postMessage({
+      kind: "command",
+      command,
+    } satisfies RuntimeBridgeMessage);
+  }
+
+  function sendProfileAuthoringCommand(
+    command: DesktopProfileAuthoringCommand,
+  ): void {
+    profileAuthoringChannel?.postMessage({
+      kind: "profile_authoring_command",
+      command,
+    } satisfies ProfileAuthoringBridgeMessage);
   }
 
   function onCommand(callback: (command: DesktopRuntimeCommand) => void): () => void {
@@ -579,10 +749,22 @@ export function useDesktopBridge() {
     };
   }
 
+  function onProfileAuthoringCommand(
+    callback: (command: DesktopProfileAuthoringCommand) => void,
+  ): () => void {
+    profileAuthoringCommandListeners.add(callback);
+    return () => {
+      profileAuthoringCommandListeners.delete(callback);
+    };
+  }
+
   return {
     state: readonly(state),
     publishSnapshot,
+    publishProfileAuthoringSnapshot,
     sendCommand,
+    sendProfileAuthoringCommand,
     onCommand,
+    onProfileAuthoringCommand,
   };
 }

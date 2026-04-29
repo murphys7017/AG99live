@@ -208,6 +208,21 @@ export interface DesktopSemanticAxisProfileSaveResult {
   receivedAt: string;
 }
 
+export interface DesktopProfileAuthoringSnapshot {
+  selectedModelName: string;
+  selectedSemanticAxisProfile: SemanticAxisProfile | null;
+  latestSemanticAxisProfileSaveResult: DesktopSemanticAxisProfileSaveResult | null;
+}
+
+export type DesktopProfileAuthoringCommand = {
+  type: "save_semantic_axis_profile";
+  requestId: string;
+  modelName: string;
+  profileId: string;
+  expectedRevision: number;
+  profile: SemanticAxisProfile;
+};
+
 export interface DesktopRuntimeSnapshot {
   adapterAddress: string;
   desktopScreenshotOnSendEnabled: boolean;
@@ -243,7 +258,6 @@ export interface DesktopRuntimeSnapshot {
   backendHistoryStatusMessage: string;
   baseActionPreview: DesktopBaseActionPreview | null;
   selectedSemanticAxisProfile: SemanticAxisProfile | null;
-  latestSemanticAxisProfileSaveResult: DesktopSemanticAxisProfileSaveResult | null;
 }
 
 export type DesktopRuntimeCommand =
@@ -251,14 +265,6 @@ export type DesktopRuntimeCommand =
   | { type: "set_desktop_screenshot_on_send"; enabled: boolean }
   | { type: "set_ambient_motion_enabled"; enabled: boolean }
   | { type: "set_motion_engine_settings"; settings: DesktopMotionEngineSettings }
-  | {
-    type: "save_semantic_axis_profile";
-    requestId: string;
-    modelName: string;
-    profileId: string;
-    expectedRevision: number;
-    profile: SemanticAxisProfile;
-  }
   | { type: "save_motion_tuning_sample"; sample: DesktopMotionTuningSample }
   | { type: "delete_motion_tuning_sample"; sampleId: string }
   | { type: "request_history_list" }

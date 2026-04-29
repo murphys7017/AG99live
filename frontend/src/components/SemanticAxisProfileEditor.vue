@@ -81,13 +81,13 @@ const pendingSave = ref<{
 } | null>(null);
 
 const currentProfile = computed(
-  () => bridge.state.snapshot.selectedSemanticAxisProfile,
+  () => bridge.state.profileAuthoringSnapshot.selectedSemanticAxisProfile,
 );
 const selectedModelName = computed(() =>
-  bridge.state.snapshot.selectedModelName.trim(),
+  bridge.state.profileAuthoringSnapshot.selectedModelName.trim(),
 );
 const latestSaveResult = computed(() =>
-  bridge.state.snapshot.latestSemanticAxisProfileSaveResult,
+  bridge.state.profileAuthoringSnapshot.latestSemanticAxisProfileSaveResult,
 );
 const draftAxes = computed(() => draftProfile.value?.axes ?? []);
 const draftCouplings = computed(() => draftProfile.value?.couplings ?? []);
@@ -625,7 +625,7 @@ function saveProfile(): void {
     profileId: profile.profile_id,
   };
   saveStatusText.value = `已提交保存请求，等待 revision ${expectedRevision + 1} 的同步结果。`;
-  bridge.sendCommand({
+  bridge.sendProfileAuthoringCommand({
     type: "save_semantic_axis_profile",
     requestId,
     modelName,

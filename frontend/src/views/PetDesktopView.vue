@@ -13,6 +13,7 @@ import { usePreviewMotionPlayer } from "../composables/usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
 import type {
   DesktopMotionPlaybackRecord,
+  DesktopProfileAuthoringCommand,
   DesktopMotionTuningSample,
   DesktopRuntimeCommand,
 } from "../types/desktop";
@@ -416,15 +417,6 @@ function handleDesktopCommand(command: DesktopRuntimeCommand): void {
     case "set_motion_engine_settings":
       applyMotionEngineSettingsSnapshot(command.settings);
       return;
-    case "save_semantic_axis_profile":
-      adapter.sendSemanticAxisProfileSave({
-        request_id: command.requestId,
-        model_name: command.modelName,
-        profile_id: command.profileId,
-        expected_revision: command.expectedRevision,
-        profile: cloneJson(command.profile),
-      });
-      return;
     case "save_motion_tuning_sample":
       saveMotionTuningSample(command.sample);
       return;
@@ -471,6 +463,22 @@ function handleDesktopCommand(command: DesktopRuntimeCommand): void {
   }
 }
 
+function handleProfileAuthoringCommand(
+  command: DesktopProfileAuthoringCommand,
+): void {
+  if (command.type !== "save_semantic_axis_profile") {
+    return;
+  }
+
+  adapter.sendSemanticAxisProfileSave({
+    request_id: command.requestId,
+    model_name: command.modelName,
+    profile_id: command.profileId,
+    expected_revision: command.expectedRevision,
+    profile: cloneJson(command.profile),
+  });
+}
+
 function showContextMenu(event: MouseEvent): void {
   window.ag99desktop?.showContextMenu({
     x: event.clientX,
@@ -481,6 +489,9 @@ function showContextMenu(event: MouseEvent): void {
 }
 
 const detachBridgeListener = bridge.onCommand(handleDesktopCommand);
+const detachProfileAuthoringBridgeListener = bridge.onProfileAuthoringCommand(
+  handleProfileAuthoringCommand,
+);
 
 watch(
   () => adapter.state.inboundMotionPlanNonce,
@@ -544,7 +555,6 @@ watch(
     adapter.state.activeBackendHistoryUid,
     adapter.state.backendHistoryLoading,
     adapter.state.backendHistoryStatusMessage,
-    adapter.state.latestSemanticAxisProfileSaveResult,
     state.confName,
     state.lastUpdated,
     selectedModel.value?.name ?? "",
@@ -604,6 +614,23 @@ watch(
       selectedSemanticAxisProfile: selectedSemanticAxisProfile.value
         ? cloneJson(selectedSemanticAxisProfile.value)
         : null,
+    });
+  },
+  { deep: true, immediate: true },
+);
+
+watch(
+  () => [
+    selectedModel.value?.name ?? "",
+    selectedSemanticAxisProfile.value,
+    adapter.state.latestSemanticAxisProfileSaveResult,
+  ],
+  () => {
+    bridge.publishProfileAuthoringSnapshot({
+      selectedModelName: selectedModel.value?.name ?? "",
+      selectedSemanticAxisProfile: selectedSemanticAxisProfile.value
+        ? cloneJson(selectedSemanticAxisProfile.value)
+        : null,
       latestSemanticAxisProfileSaveResult: adapter.state.latestSemanticAxisProfileSaveResult
         ? cloneJson(adapter.state.latestSemanticAxisProfileSaveResult)
         : null,
@@ -629,6 +656,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   modelEngine.stop("unmount");
   detachBridgeListener();
+  detachProfileAuthoringBridgeListener();
 });
 </script>
 
