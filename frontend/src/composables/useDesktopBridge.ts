@@ -28,6 +28,7 @@ const PROFILE_AUTHORING_SNAPSHOT_STORAGE_KEY = "ag99live.desktop.profile_authori
 
 type RuntimeBridgeMessage =
   | { kind: "snapshot"; snapshot: DesktopRuntimeSnapshot }
+  | { kind: "motion_tuning_samples"; samples: DesktopMotionTuningSample[] }
   | { kind: "command"; command: DesktopRuntimeCommand };
 
 type ProfileAuthoringBridgeMessage =
@@ -46,7 +47,6 @@ const defaultSnapshot: DesktopRuntimeSnapshot = {
   ambientMotionEnabled: true,
   motionEngineSettings: buildDefaultModelEngineSettings(),
   motionPlaybackRecords: [],
-  motionTuningSamples: [],
   connectionState: "disconnected",
   connectionLabel: "未连接",
   connectionStatusMessage: "等待桌宠窗口启动。",
@@ -91,6 +91,7 @@ const defaultWindowState: DesktopWindowVisibilityState = {
 
 const state = reactive({
   snapshot: loadRuntimeSnapshot(),
+  motionTuningSamples: [] as DesktopMotionTuningSample[],
   profileAuthoringSnapshot: loadProfileAuthoringSnapshot(),
   windowState: defaultWindowState,
 });
@@ -125,6 +126,11 @@ function ensureInitialized(): void {
         }
         state.snapshot = nextSnapshot;
         persistRuntimeSnapshot(nextSnapshot);
+        return;
+      }
+
+      if (payload.kind === "motion_tuning_samples") {
+        state.motionTuningSamples = normalizeMotionTuningSamples(payload.samples);
         return;
       }
 
@@ -212,11 +218,7 @@ function loadRuntimeSnapshot(): DesktopRuntimeSnapshot {
   try {
     const nextSnapshot = safeNormalizeSnapshot(JSON.parse(rawValue), "storage");
     if (nextSnapshot) {
-      return {
-        ...nextSnapshot,
-        // Motion tuning samples are backend-owned; wait for the runtime window to resync them.
-        motionTuningSamples: [],
-      };
+      return nextSnapshot;
     }
     window.localStorage.removeItem(RUNTIME_SNAPSHOT_STORAGE_KEY);
     return defaultSnapshot;
@@ -328,10 +330,12 @@ function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnap
     ...(snapshot as DesktopRuntimeSnapshot & {
       selectedSemanticAxisProfile?: SemanticAxisProfile | null;
       latestSemanticAxisProfileSaveResult?: unknown;
+      motionTuningSamples?: unknown;
     }),
   };
   delete snapshotWithoutLegacyProfile.selectedSemanticAxisProfile;
   delete snapshotWithoutLegacyProfile.latestSemanticAxisProfileSaveResult;
+  delete snapshotWithoutLegacyProfile.motionTuningSamples;
   const historyEntries = Array.isArray(snapshot.historyEntries)
     ? snapshot.historyEntries
     : [];
@@ -350,9 +354,6 @@ function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnap
     motionPlaybackRecords: Array.isArray(snapshot.motionPlaybackRecords)
       ? snapshot.motionPlaybackRecords.map(cloneMotionPlaybackRecord).filter(isPresent)
       : [],
-    motionTuningSamples: Array.isArray(snapshot.motionTuningSamples)
-      ? snapshot.motionTuningSamples.map(cloneMotionTuningSample).filter(isPresent)
-      : [],
     historyEntries: historyEntries.map((entry) => ({ ...entry })),
     backendHistorySummaries: backendHistorySummaries
       .map(cloneBackendHistorySummary)
@@ -368,6 +369,15 @@ function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnap
     ),
     baseActionPreview: cloneBaseActionPreview(snapshot.baseActionPreview),
   };
+}
+
+function normalizeMotionTuningSamples(
+  samples: unknown,
+): DesktopMotionTuningSample[] {
+  if (!Array.isArray(samples)) {
+    return [];
+  }
+  return samples.map(cloneMotionTuningSample).filter(isPresent);
 }
 
 function normalizeProfileAuthoringSnapshot(
@@ -723,6 +733,17 @@ export function useDesktopBridge() {
     } satisfies RuntimeBridgeMessage);
   }
 
+  function publishMotionTuningSamples(
+    samples: unknown,
+  ): void {
+    const nextSamples = normalizeMotionTuningSamples(samples);
+    state.motionTuningSamples = nextSamples;
+    runtimeChannel?.postMessage({
+      kind: "motion_tuning_samples",
+      samples: nextSamples,
+    } satisfies RuntimeBridgeMessage);
+  }
+
   function publishProfileAuthoringSnapshot(
     snapshot: DesktopProfileAuthoringSnapshot,
   ): void {
@@ -772,6 +793,7 @@ export function useDesktopBridge() {
   return {
     state: readonly(state),
     publishSnapshot,
+    publishMotionTuningSamples,
     publishProfileAuthoringSnapshot,
     sendCommand,
     sendProfileAuthoringCommand,

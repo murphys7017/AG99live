@@ -8,8 +8,14 @@ from astrbot_plugin_ag99live_adapter.services.frontend_compat_service import Fro
 
 
 class _RuntimeStateStub:
-    def __init__(self, *, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        error: Exception | None = None,
+        motion_tuning_sample_error: Exception | None = None,
+    ) -> None:
         self.error = error
+        self.motion_tuning_sample_error = motion_tuning_sample_error
         self.calls: list[dict[str, object]] = []
         self.saved_motion_tuning_sample: object = None
         self.deleted_motion_tuning_sample_id: object = None
@@ -40,6 +46,8 @@ class _RuntimeStateStub:
         }
 
     def save_motion_tuning_sample(self, sample: object) -> dict[str, object]:
+        if self.motion_tuning_sample_error is not None:
+            raise self.motion_tuning_sample_error
         self.saved_motion_tuning_sample = sample
         if isinstance(sample, dict):
             self.motion_tuning_samples = [sample]
@@ -287,6 +295,75 @@ def test_frontend_compat_handler_saves_motion_tuning_sample_and_pushes_state() -
     assert len(sent_payloads) == 1
     assert sent_payloads[0]["type"] == "system.motion_tuning_samples_state"
     assert sent_payloads[0]["payload"]["samples"] == [sample]
+
+
+def test_frontend_compat_handler_save_missing_motion_tuning_sample_field_returns_control_error() -> None:
+    runtime_state = _RuntimeStateStub(
+        motion_tuning_sample_error=ValueError("motion_tuning_sample_profile_id_required")
+    )
+    handler = FrontendCompatHandler(
+        background_files_getter=lambda: [],
+        history_bridge=_HistoryBridgeStub(),
+        runtime_state=runtime_state,
+    )
+    sent_payloads: list[dict] = []
+
+    sample = {
+        "id": "sample-1",
+        "created_at": "2026-04-29T00:00:00+00:00",
+        "source_record_id": "record-1",
+        "model_name": "DemoModel",
+        "profile_id": "",
+        "profile_revision": 3,
+        "emotion_label": "joy",
+        "assistant_text": "好的",
+        "feedback": "",
+        "tags": [],
+        "enabled_for_llm_reference": False,
+        "original_axes": {"mouth_smile": 0.6},
+        "adjusted_axes": {"mouth_smile": 0.8},
+        "adjusted_plan": {
+            "schema_version": "engine.parameter_plan.v2",
+            "profile_id": "DemoModel.semantic.v1",
+            "profile_revision": 3,
+            "model_id": "DemoModel",
+            "mode": "expressive",
+            "emotion_label": "joy",
+            "timing": {
+                "duration_ms": 1200,
+                "blend_in_ms": 120,
+                "hold_ms": 800,
+                "blend_out_ms": 280,
+            },
+            "parameters": [],
+        },
+    }
+
+    async def send_json(payload: dict) -> bool:
+        sent_payloads.append(payload)
+        return True
+
+    async def refresh_and_send_model(*, force: bool = False) -> None:
+        raise AssertionError("should not refresh model sync for invalid motion tuning sample save")
+
+    asyncio.run(
+        handler.handle(
+            SimpleNamespace(
+                type="system.motion_tuning_sample_save",
+                session_id="session",
+                turn_id="turn-save-invalid-sample",
+                payload={"sample": sample},
+            ),
+            send_json=send_json,
+            refresh_and_send_model=refresh_and_send_model,
+        )
+    )
+
+    assert runtime_state.saved_motion_tuning_sample is None
+    assert len(sent_payloads) == 1
+    assert sent_payloads[0]["type"] == "control.error"
+    assert sent_payloads[0]["turn_id"] == "turn-save-invalid-sample"
+    assert sent_payloads[0]["payload"]["message"] == "motion_tuning_sample_profile_id_required"
 
 
 def test_frontend_compat_handler_deletes_motion_tuning_sample_and_pushes_state() -> None:

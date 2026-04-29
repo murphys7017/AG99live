@@ -257,7 +257,6 @@ export interface DesktopRuntimeSnapshot {
   ambientMotionEnabled: boolean;
   motionEngineSettings: DesktopMotionEngineSettings;
   motionPlaybackRecords: DesktopMotionPlaybackRecord[];
-  motionTuningSamples: DesktopMotionTuningSample[];
   connectionState: string;
   connectionLabel: string;
   connectionStatusMessage: string;
@@ -293,6 +292,7 @@ export type DesktopRuntimeCommand =
   | { type: "set_desktop_screenshot_on_send"; enabled: boolean }
   | { type: "set_ambient_motion_enabled"; enabled: boolean }
   | { type: "set_motion_engine_settings"; settings: DesktopMotionEngineSettings }
+  | { type: "request_motion_tuning_samples_sync" }
   | { type: "save_motion_tuning_sample"; sample: DesktopMotionTuningSample }
   | { type: "delete_motion_tuning_sample"; sampleId: string }
   | { type: "request_history_list" }

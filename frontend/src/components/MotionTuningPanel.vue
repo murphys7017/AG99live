@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
 import {
   matchesPinnedProfileScope,
@@ -78,13 +78,17 @@ const selectedRecord = computed(() =>
     ?? null,
 );
 const llmReferenceSampleCount = computed(() =>
-  bridge.state.snapshot.motionTuningSamples.filter((sample) =>
+  bridge.state.motionTuningSamples.filter((sample) =>
     matchesCurrentProfileSample(sample, mutableProfile.value) && sample.enabledForLlmReference).length,
 );
 const savedSamples = computed(() =>
-  bridge.state.snapshot.motionTuningSamples.filter((sample) =>
+  bridge.state.motionTuningSamples.filter((sample) =>
     matchesCurrentProfileSample(sample, mutableProfile.value)),
 );
+
+onMounted(() => {
+  bridge.sendCommand({ type: "request_motion_tuning_samples_sync" });
+});
 
 watch(
   recentSemanticRecords,

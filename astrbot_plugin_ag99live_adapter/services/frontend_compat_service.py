@@ -130,7 +130,17 @@ class FrontendCompatHandler:
             await send_json(build_system_heartbeat_ack(session_id=session_id))
         elif msg_type == TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE:
             sample = payload.get("sample")
-            self._runtime_state.save_motion_tuning_sample(sample)
+            try:
+                self._runtime_state.save_motion_tuning_sample(sample)
+            except ValueError as exc:
+                await send_json(
+                    build_control_error(
+                        session_id=session_id,
+                        turn_id=message.turn_id,
+                        message=str(exc),
+                    )
+                )
+                return
             await send_json(
                 build_system_motion_tuning_samples_state(
                     session_id=session_id,

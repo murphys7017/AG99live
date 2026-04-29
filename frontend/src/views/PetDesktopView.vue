@@ -32,7 +32,6 @@ const motionPlaybackRecords = ref<DesktopMotionPlaybackRecord[]>(
   bridge.state.snapshot.motionPlaybackRecords.map((record) =>
     cloneJson(record) as DesktopMotionPlaybackRecord),
 );
-const motionTuningSamples = ref<DesktopMotionTuningSample[]>([]);
 const modelEngine = useModelEngine({
   getSelectedModel: () => selectedModel.value,
   getSettings: () => cloneModelEngineSettings(motionEngineSettings),
@@ -400,6 +399,9 @@ function handleDesktopCommand(command: DesktopRuntimeCommand): void {
     case "set_motion_engine_settings":
       applyMotionEngineSettingsSnapshot(command.settings);
       return;
+    case "request_motion_tuning_samples_sync":
+      bridge.publishMotionTuningSamples(adapter.state.motionTuningSamples);
+      return;
     case "save_motion_tuning_sample":
       saveMotionTuningSample(command.sample);
       return;
@@ -509,10 +511,9 @@ watch(
 watch(
   () => adapter.state.motionTuningSamples,
   (samples) => {
-    motionTuningSamples.value = samples.map((sample) =>
-      cloneJson(sample) as DesktopMotionTuningSample);
+    bridge.publishMotionTuningSamples(samples);
   },
-  { deep: true, immediate: true },
+  { immediate: true },
 );
 
 watch(
@@ -548,7 +549,6 @@ watch(
     motionEngineSettings.motionIntensityScale,
     serializeAxisIntensityScale(motionEngineSettings.axisIntensityScale),
     motionPlaybackRecords.value,
-    motionTuningSamples.value,
     selectedSemanticAxisProfile.value,
   ],
   () => {
@@ -559,8 +559,6 @@ watch(
       motionEngineSettings: cloneModelEngineSettings(motionEngineSettings),
       motionPlaybackRecords: motionPlaybackRecords.value.map((record) =>
         cloneJson(record)),
-      motionTuningSamples: motionTuningSamples.value.map((sample) =>
-        cloneJson(sample)),
       connectionState: connectionState.value,
       connectionLabel: connectionLabel.value,
       connectionStatusMessage: adapter.state.statusMessage,
