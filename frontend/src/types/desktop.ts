@@ -257,7 +257,6 @@ export interface DesktopRuntimeSnapshot {
   backendHistoryLoading: boolean;
   backendHistoryStatusMessage: string;
   baseActionPreview: DesktopBaseActionPreview | null;
-  selectedSemanticAxisProfile: SemanticAxisProfile | null;
 }
 
 export type DesktopRuntimeCommand =

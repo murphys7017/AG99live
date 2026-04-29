@@ -74,7 +74,6 @@ const defaultSnapshot: DesktopRuntimeSnapshot = {
   backendHistoryLoading: false,
   backendHistoryStatusMessage: "等待桌宠窗口同步后端历史。",
   baseActionPreview: null,
-  selectedSemanticAxisProfile: null,
 };
 
 const defaultProfileAuthoringSnapshot: DesktopProfileAuthoringSnapshot = {
@@ -322,6 +321,14 @@ function safeNormalizeProfileAuthoringSnapshot(
 }
 
 function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnapshot {
+  const snapshotWithoutLegacyProfile = {
+    ...(snapshot as DesktopRuntimeSnapshot & {
+      selectedSemanticAxisProfile?: SemanticAxisProfile | null;
+      latestSemanticAxisProfileSaveResult?: unknown;
+    }),
+  };
+  delete snapshotWithoutLegacyProfile.selectedSemanticAxisProfile;
+  delete snapshotWithoutLegacyProfile.latestSemanticAxisProfileSaveResult;
   const historyEntries = Array.isArray(snapshot.historyEntries)
     ? snapshot.historyEntries
     : [];
@@ -333,7 +340,7 @@ function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnap
     : [];
   return {
     ...defaultSnapshot,
-    ...snapshot,
+    ...snapshotWithoutLegacyProfile,
     motionEngineSettings: cloneModelEngineSettings(
       normalizeModelEngineSettings(snapshot.motionEngineSettings),
     ),
@@ -354,9 +361,6 @@ function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnap
     backendHistoryLoading: Boolean(snapshot.backendHistoryLoading),
     backendHistoryStatusMessage: normalizeText(snapshot.backendHistoryStatusMessage),
     baseActionPreview: cloneBaseActionPreview(snapshot.baseActionPreview),
-    selectedSemanticAxisProfile: cloneSemanticAxisProfile(
-      snapshot.selectedSemanticAxisProfile,
-    ),
   };
 }
 

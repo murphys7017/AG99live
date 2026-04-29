@@ -36,7 +36,12 @@ const baseActionPreview = computed<DesktopBaseActionPreview | null>(() => {
   };
 });
 const semanticProfile = computed<SemanticAxisProfile | null>(() => {
-  const profile = bridge.state.snapshot.selectedSemanticAxisProfile;
+  const runtimeModelName = bridge.state.snapshot.selectedModelName.trim();
+  const authoringModelName = bridge.state.profileAuthoringSnapshot.selectedModelName.trim();
+  if (runtimeModelName !== authoringModelName) {
+    return null;
+  }
+  const profile = bridge.state.profileAuthoringSnapshot.selectedSemanticAxisProfile;
   return profile ? JSON.parse(JSON.stringify(profile)) as SemanticAxisProfile : null;
 });
 </script>

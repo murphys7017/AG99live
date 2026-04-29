@@ -39,7 +39,7 @@ type MotionTuningSampleSnapshot = Readonly<{
   adjustedPlan: unknown;
 }>;
 
-const profile = computed(() => bridge.state.snapshot.selectedSemanticAxisProfile);
+const profile = computed(() => bridge.state.profileAuthoringSnapshot.selectedSemanticAxisProfile);
 const mutableProfile = computed<SemanticAxisProfile | null>(() =>
   profile.value ? cloneJson(profile.value) as SemanticAxisProfile : null,
 );
@@ -53,11 +53,18 @@ const promptAxes = computed(() => {
   );
 });
 const recentSemanticRecords = computed(() =>
-  bridge.state.snapshot.motionPlaybackRecords
-    .filter((record): record is DesktopMotionPlaybackRecord & { plan: SemanticParameterPlan } =>
+  {
+    const currentProfile = mutableProfile.value;
+    if (!currentProfile) {
+      return [];
+    }
+    return bridge.state.snapshot.motionPlaybackRecords
+      .filter((record): record is DesktopMotionPlaybackRecord & { plan: SemanticParameterPlan } =>
       record.plan.schema_version === "engine.parameter_plan.v2",
-    )
-    .slice(0, RECENT_RECORD_LIMIT),
+      )
+      .filter((record) => record.plan.model_id === currentProfile.model_id)
+      .slice(0, RECENT_RECORD_LIMIT);
+  },
 );
 const selectedRecord = computed(() =>
   recentSemanticRecords.value.find((record) => record.id === selectedRecordId.value)
@@ -95,6 +102,21 @@ watch(
     saveStatusText.value = "";
   },
   { immediate: true },
+);
+
+watch(
+  () => {
+    const currentProfile = mutableProfile.value;
+    if (!currentProfile) {
+      return "";
+    }
+    return `${currentProfile.model_id}:${currentProfile.revision}`;
+  },
+  () => {
+    resetDraftAxes(selectedRecord.value);
+    playStatusText.value = "";
+    saveStatusText.value = "";
+  },
 );
 
 function resetDraftAxes(record: DesktopMotionPlaybackRecord | null): void {

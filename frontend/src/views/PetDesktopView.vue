@@ -559,7 +559,6 @@ watch(
     state.lastUpdated,
     selectedModel.value?.name ?? "",
     selectedModel.value?.icon_url ?? "",
-    selectedSemanticAxisProfile.value,
     selectedModel.value?.engine_hints.recommended_mode ?? "",
     baseActionPreview.value,
     stageMessage.value,
@@ -611,9 +610,6 @@ watch(
       backendHistoryLoading: adapter.state.backendHistoryLoading,
       backendHistoryStatusMessage: adapter.state.backendHistoryStatusMessage,
       baseActionPreview: baseActionPreview.value,
-      selectedSemanticAxisProfile: selectedSemanticAxisProfile.value
-        ? cloneJson(selectedSemanticAxisProfile.value)
-        : null,
     });
   },
   { deep: true, immediate: true },
