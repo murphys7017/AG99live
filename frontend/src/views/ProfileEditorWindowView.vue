@@ -6,7 +6,7 @@ import { useDesktopBridge } from "../composables/useDesktopBridge";
 
 const bridge = useDesktopBridge();
 const subtitle = computed(() => {
-  const modelName = bridge.state.profileAuthoringSnapshot.selectedModelName.trim();
+  const modelName = bridge.state.snapshot.selectedModelName.trim();
   return modelName ? `${modelName} Semantic Axis Profile` : "Semantic Axis Profile";
 });
 </script>

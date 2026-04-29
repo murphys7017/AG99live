@@ -184,6 +184,8 @@ export interface DesktopMotionTuningSample {
   createdAt: string;
   sourceRecordId: string;
   modelName: string;
+  profileId?: string;
+  profileRevision?: number;
   emotionLabel: string;
   assistantText: string;
   feedback: string;
@@ -209,8 +211,6 @@ export interface DesktopSemanticAxisProfileSaveResult {
 }
 
 export interface DesktopProfileAuthoringSnapshot {
-  selectedModelName: string;
-  selectedSemanticAxisProfile: SemanticAxisProfile | null;
   latestSemanticAxisProfileSaveResult: DesktopSemanticAxisProfileSaveResult | null;
 }
 
@@ -256,6 +256,7 @@ export interface DesktopRuntimeSnapshot {
   activeBackendHistoryUid: string;
   backendHistoryLoading: boolean;
   backendHistoryStatusMessage: string;
+  runtimeSemanticAxisProfile: SemanticAxisProfile | null;
   baseActionPreview: DesktopBaseActionPreview | null;
 }
 

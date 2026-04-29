@@ -29,6 +29,8 @@ type MotionTuningSampleSnapshot = Readonly<{
   createdAt: string;
   sourceRecordId: string;
   modelName: string;
+  profileId?: string;
+  profileRevision?: number;
   emotionLabel: string;
   assistantText: string;
   feedback: string;
@@ -39,7 +41,7 @@ type MotionTuningSampleSnapshot = Readonly<{
   adjustedPlan: unknown;
 }>;
 
-const profile = computed(() => bridge.state.profileAuthoringSnapshot.selectedSemanticAxisProfile);
+const profile = computed(() => bridge.state.snapshot.runtimeSemanticAxisProfile);
 const mutableProfile = computed<SemanticAxisProfile | null>(() =>
   profile.value ? cloneJson(profile.value) as SemanticAxisProfile : null,
 );
@@ -63,6 +65,7 @@ const recentSemanticRecords = computed(() =>
       record.plan.schema_version === "engine.parameter_plan.v2",
       )
       .filter((record) => record.plan.model_id === currentProfile.model_id)
+      .filter((record) => record.plan.profile_revision === currentProfile.revision)
       .slice(0, RECENT_RECORD_LIMIT);
   },
 );
@@ -72,9 +75,13 @@ const selectedRecord = computed(() =>
     ?? null,
 );
 const llmReferenceSampleCount = computed(() =>
-  bridge.state.snapshot.motionTuningSamples.filter((sample) => sample.enabledForLlmReference).length,
+  bridge.state.snapshot.motionTuningSamples.filter((sample) =>
+    matchesCurrentProfileSample(sample, mutableProfile.value) && sample.enabledForLlmReference).length,
 );
-const savedSamples = computed(() => bridge.state.snapshot.motionTuningSamples);
+const savedSamples = computed(() =>
+  bridge.state.snapshot.motionTuningSamples.filter((sample) =>
+    matchesCurrentProfileSample(sample, mutableProfile.value)),
+);
 
 watch(
   recentSemanticRecords,
@@ -221,7 +228,9 @@ function saveSample(): void {
     id: `motion-sample-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
     createdAt: now.toISOString(),
     sourceRecordId: record.id,
-    modelName: record.modelName,
+    modelName: currentProfile.model_id,
+    profileId: currentProfile.profile_id,
+    profileRevision: currentProfile.revision,
     emotionLabel: record.emotionLabel || "manual_tuning",
     assistantText: record.assistantText,
     feedback: feedbackText.value.trim(),
@@ -269,6 +278,25 @@ function deleteSample(sampleId: string): void {
     type: "delete_motion_tuning_sample",
     sampleId,
   });
+}
+
+function matchesCurrentProfileSample(
+  sample: MotionTuningSampleSnapshot,
+  currentProfile: SemanticAxisProfile | null,
+): boolean {
+  if (!currentProfile) {
+    return false;
+  }
+  if (
+    sample.profileId
+    && Number.isFinite(sample.profileRevision)
+  ) {
+    return (
+      sample.profileId === currentProfile.profile_id
+      && sample.profileRevision === currentProfile.revision
+    );
+  }
+  return sample.modelName === currentProfile.model_id;
 }
 
 function normalizeDraftAxes(currentProfile: SemanticAxisProfile): Record<string, number> {

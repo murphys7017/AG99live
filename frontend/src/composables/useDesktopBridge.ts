@@ -73,12 +73,11 @@ const defaultSnapshot: DesktopRuntimeSnapshot = {
   activeBackendHistoryUid: "",
   backendHistoryLoading: false,
   backendHistoryStatusMessage: "等待桌宠窗口同步后端历史。",
+  runtimeSemanticAxisProfile: null,
   baseActionPreview: null,
 };
 
 const defaultProfileAuthoringSnapshot: DesktopProfileAuthoringSnapshot = {
-  selectedModelName: "",
-  selectedSemanticAxisProfile: null,
   latestSemanticAxisProfileSaveResult: null,
 };
 
@@ -360,6 +359,9 @@ function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnap
     activeBackendHistoryUid: normalizeText(snapshot.activeBackendHistoryUid),
     backendHistoryLoading: Boolean(snapshot.backendHistoryLoading),
     backendHistoryStatusMessage: normalizeText(snapshot.backendHistoryStatusMessage),
+    runtimeSemanticAxisProfile: cloneSemanticAxisProfile(
+      snapshot.runtimeSemanticAxisProfile,
+    ),
     baseActionPreview: cloneBaseActionPreview(snapshot.baseActionPreview),
   };
 }
@@ -368,12 +370,6 @@ function normalizeProfileAuthoringSnapshot(
   snapshot: DesktopProfileAuthoringSnapshot,
 ): DesktopProfileAuthoringSnapshot {
   return {
-    ...defaultProfileAuthoringSnapshot,
-    ...snapshot,
-    selectedModelName: normalizeText(snapshot.selectedModelName),
-    selectedSemanticAxisProfile: cloneSemanticAxisProfile(
-      snapshot.selectedSemanticAxisProfile,
-    ),
     latestSemanticAxisProfileSaveResult: snapshot.latestSemanticAxisProfileSaveResult
       ? { ...snapshot.latestSemanticAxisProfileSaveResult }
       : null,
@@ -524,6 +520,10 @@ function cloneMotionTuningSample(
       tags: Array.isArray(sample.tags)
         ? sample.tags.map((item) => normalizeText(item)).filter(Boolean)
         : [],
+      profileId: normalizeOptionalText(sample.profileId),
+      profileRevision: isFiniteNumber(sample.profileRevision)
+        ? Math.round(sample.profileRevision)
+        : undefined,
       enabledForLlmReference: Boolean(sample.enabledForLlmReference),
       originalAxes: cloneNumericRecord(sample.originalAxes),
       adjustedAxes: cloneNumericRecord(sample.adjustedAxes),

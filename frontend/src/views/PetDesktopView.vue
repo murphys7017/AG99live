@@ -369,9 +369,38 @@ function deleteMotionTuningSample(sampleId: string): void {
   syncMotionTuningExamples();
 }
 
+function matchesCurrentRuntimeProfileSample(sample: DesktopMotionTuningSample): boolean {
+  const currentProfile = selectedSemanticAxisProfile.value;
+  if (currentProfile) {
+    if (
+      sample.profileId
+      && Number.isFinite(sample.profileRevision)
+    ) {
+      return (
+        sample.profileId === currentProfile.profile_id
+        && sample.profileRevision === currentProfile.revision
+      );
+    }
+    return sample.modelName === currentProfile.model_id;
+  }
+
+  const currentModelName = selectedModel.value?.name ?? "";
+  if (!currentModelName) {
+    return false;
+  }
+  return sample.modelName === currentModelName;
+}
+
 function syncMotionTuningExamples(): void {
+  const currentProfile = selectedSemanticAxisProfile.value;
+  const currentModelName = selectedModel.value?.name ?? "";
+  if (!currentProfile && !currentModelName) {
+    return;
+  }
   adapter.sendMotionTuningExamplesSync(
-    motionTuningSamples.value.map((sample) => cloneJson(sample)),
+    motionTuningSamples.value
+      .filter((sample) => matchesCurrentRuntimeProfileSample(sample))
+      .map((sample) => cloneJson(sample)),
   );
 }
 
@@ -534,6 +563,19 @@ watch(
 
 watch(
   () => [
+    selectedModel.value?.name ?? "",
+    selectedSemanticAxisProfile.value?.profile_id ?? "",
+    selectedSemanticAxisProfile.value?.revision ?? 0,
+  ],
+  () => {
+    if (adapter.state.status === "connected") {
+      syncMotionTuningExamples();
+    }
+  },
+);
+
+watch(
+  () => [
     ambientMotionEnabled.value,
     adapter.state.address,
     adapter.state.desktopScreenshotOnSendEnabled,
@@ -566,6 +608,7 @@ watch(
     serializeAxisIntensityScale(motionEngineSettings.axisIntensityScale),
     motionPlaybackRecords.value,
     motionTuningSamples.value,
+    selectedSemanticAxisProfile.value,
   ],
   () => {
     bridge.publishSnapshot({
@@ -609,6 +652,9 @@ watch(
       activeBackendHistoryUid: adapter.state.activeBackendHistoryUid,
       backendHistoryLoading: adapter.state.backendHistoryLoading,
       backendHistoryStatusMessage: adapter.state.backendHistoryStatusMessage,
+      runtimeSemanticAxisProfile: selectedSemanticAxisProfile.value
+        ? cloneJson(selectedSemanticAxisProfile.value)
+        : null,
       baseActionPreview: baseActionPreview.value,
     });
   },
@@ -616,17 +662,9 @@ watch(
 );
 
 watch(
-  () => [
-    selectedModel.value?.name ?? "",
-    selectedSemanticAxisProfile.value,
-    adapter.state.latestSemanticAxisProfileSaveResult,
-  ],
+  () => adapter.state.latestSemanticAxisProfileSaveResult,
   () => {
     bridge.publishProfileAuthoringSnapshot({
-      selectedModelName: selectedModel.value?.name ?? "",
-      selectedSemanticAxisProfile: selectedSemanticAxisProfile.value
-        ? cloneJson(selectedSemanticAxisProfile.value)
-        : null,
       latestSemanticAxisProfileSaveResult: adapter.state.latestSemanticAxisProfileSaveResult
         ? cloneJson(adapter.state.latestSemanticAxisProfileSaveResult)
         : null,
