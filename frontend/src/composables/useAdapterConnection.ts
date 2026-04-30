@@ -45,6 +45,10 @@ import {
   type MicrophoneAudioChunk,
 } from "../adapter-connection/microphoneCapture";
 import {
+  startAudioPlayback,
+  stopAudioPlaybackRuntime,
+} from "../adapter-connection/audioPlayback";
+import {
   buildConnectFailureMessage,
   buildConnectionCandidates,
   DEFAULT_ADAPTER_ADDRESS,
@@ -127,7 +131,6 @@ interface SystemHistoryDeletedPayload {
 }
 
 let socket: WebSocket | null = null;
-let audioElement: HTMLAudioElement | null = null;
 let manualClose = false;
 let initializePromise: Promise<void> | null = null;
 let connectAttemptSerial = 0;
@@ -1041,112 +1044,45 @@ async function playAudioAndAcknowledge(
   state.statusMessage = "收到语音回复，正在播放。";
   pushHistory("system", state.statusMessage);
 
-  // Feed audio to Live2D's wav handler for lip sync first so the mouth curve
-  // is primed before HTMLAudioElement enters playback.
-  const adapter = window.getLAppAdapter?.();
-  if (adapter && typeof adapter.loadWavFileForLipSync === "function") {
-    try {
-      const lipSyncReady = await Promise.race<boolean | null>([
-        adapter.loadWavFileForLipSync(audioUrl),
-        new Promise<null>((resolve) => {
-          window.setTimeout(() => resolve(null), 480);
-        }),
-      ]);
-      if (lipSyncReady === false) {
-        pushHistory("system", "嘴型同步加载失败，音频播放将无对应张嘴动作。");
-      }
-    } catch (_error) {
-      pushHistory("system", "嘴型同步加载失败，音频播放将无对应张嘴动作。");
-    }
-  }
-
-  const audio = new Audio(audioUrl);
-  audioElement = audio;
-  let resolvedDurationMs: number | null = null;
-  let playbackStartNotified = false;
-
-  const cleanup = () => {
-    if (audioElement === audio) {
-      audioElement = null;
-    }
-  };
-
-  const syncDurationFromElement = () => {
-    const durationSeconds = Number(audio.duration);
-    if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
-      resolvedDurationMs = Math.round(durationSeconds * 1000);
-      state.audioPlaybackDurationMs = resolvedDurationMs;
-    }
-  };
-
-  const markPlaybackStarted = () => {
-    if (playbackStartNotified || audioElement !== audio) {
-      return;
-    }
-    playbackStartNotified = true;
-    syncDurationFromElement();
-    state.audioPlaybackStartedTurnId = turnId;
-    state.audioPlaybackStartedAtMs = performance.now();
-    state.audioPlaybackStartedNonce += 1;
-    console.info(
-      "[Connection] audio playback started. turn_id=",
-      turnId,
-      "duration_ms=",
-      state.audioPlaybackDurationMs,
-      "nonce=",
-      state.audioPlaybackStartedNonce,
-    );
-  };
-
-  audio.addEventListener(
-    "loadedmetadata",
-    () => {
-      syncDurationFromElement();
-    },
-    { once: true },
-  );
-
-  audio.addEventListener(
-    "playing",
-    () => {
-      markPlaybackStarted();
-    },
-    { once: true },
-  );
-
-  audio.addEventListener(
-    "ended",
-    () => {
-      cleanup();
-      state.isPlayingAudio = false;
-      state.audioPlaybackStartedTurnId = null;
-      state.audioPlaybackStartedAtMs = 0;
-      state.audioPlaybackDurationMs = null;
-      state.currentTurnId = null;
-      void sendPlaybackFinished(turnId, true);
-    },
-    { once: true },
-  );
-
-  audio.addEventListener(
-    "error",
-    () => {
-      cleanup();
-      state.isPlayingAudio = false;
-      state.audioPlaybackStartedTurnId = null;
-      state.audioPlaybackStartedAtMs = 0;
-      state.audioPlaybackDurationMs = null;
-      pushHistory("error", "音频播放失败。");
-      void sendPlaybackFinished(turnId, false, "audio_playback_error");
-    },
-    { once: true },
-  );
-
   try {
-    await audio.play();
-    markPlaybackStarted();
+    await startAudioPlayback(audioUrl, {
+      onLipSyncUnavailable: () => {
+        pushHistory("system", "嘴型同步加载失败，音频播放将无对应张嘴动作。");
+      },
+      onDurationChanged: (durationMs) => {
+        state.audioPlaybackDurationMs = durationMs;
+      },
+      onPlaybackStarted: (event) => {
+        state.audioPlaybackStartedTurnId = turnId;
+        state.audioPlaybackStartedAtMs = event.startedAtMs;
+        state.audioPlaybackStartedNonce += 1;
+        console.info(
+          "[Connection] audio playback started. turn_id=",
+          turnId,
+          "duration_ms=",
+          state.audioPlaybackDurationMs,
+          "nonce=",
+          state.audioPlaybackStartedNonce,
+        );
+      },
+      onEnded: () => {
+        state.isPlayingAudio = false;
+        state.audioPlaybackStartedTurnId = null;
+        state.audioPlaybackStartedAtMs = 0;
+        state.audioPlaybackDurationMs = null;
+        state.currentTurnId = null;
+        void sendPlaybackFinished(turnId, true);
+      },
+      onError: () => {
+        state.isPlayingAudio = false;
+        state.audioPlaybackStartedTurnId = null;
+        state.audioPlaybackStartedAtMs = 0;
+        state.audioPlaybackDurationMs = null;
+        pushHistory("error", "音频播放失败。");
+        void sendPlaybackFinished(turnId, false, "audio_playback_error");
+      },
+    });
   } catch (error) {
-    cleanup();
     state.isPlayingAudio = false;
     state.audioPlaybackStartedTurnId = null;
     state.audioPlaybackStartedAtMs = 0;
@@ -1160,11 +1096,7 @@ async function playAudioAndAcknowledge(
 }
 
 function stopAudioPlayback(): void {
-  if (audioElement) {
-    audioElement.pause();
-    audioElement.currentTime = 0;
-  }
-  audioElement = null;
+  stopAudioPlaybackRuntime();
   state.audioPlaybackStartedTurnId = null;
   state.audioPlaybackStartedAtMs = 0;
   state.audioPlaybackDurationMs = null;
