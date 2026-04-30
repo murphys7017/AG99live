@@ -45,10 +45,8 @@ import { useModelSync } from "./useModelSync";
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
 const ADDRESS_STORAGE_KEY = "ag99live.adapter.address";
-const LEGACY_ADDRESS_STORAGE_KEY = "ag99live.adapter.ws_address";
 const DESKTOP_SCREENSHOT_ON_SEND_STORAGE_KEY = "ag99live.desktop.capture_on_send";
 const MIC_TARGET_SAMPLE_RATE = 16000;
-const MIC_PROCESSOR_BUFFER_SIZE = 2048;
 const MIC_AUDIO_WORKLET_PROCESSOR_NAME = "ag99live-microphone-capture";
 const MIC_AUDIO_WORKLET_SOURCE = `
 class Ag99liveMicrophoneCaptureProcessor extends AudioWorkletProcessor {
@@ -115,7 +113,7 @@ interface MicrophoneCaptureRuntime {
   mediaStream: MediaStream;
   audioContext: AudioContext;
   sourceNode: MediaStreamAudioSourceNode;
-  processorNode: AudioWorkletNode | ScriptProcessorNode;
+  processorNode: AudioWorkletNode;
   sinkGainNode: GainNode;
 }
 
@@ -164,11 +162,6 @@ function loadStoredAddress(): string {
   const storedAddress = window.localStorage.getItem(ADDRESS_STORAGE_KEY);
   if (storedAddress?.trim()) {
     return storedAddress.trim();
-  }
-
-  const legacyAddress = window.localStorage.getItem(LEGACY_ADDRESS_STORAGE_KEY);
-  if (legacyAddress?.trim()) {
-    return legacyAddress.trim();
   }
 
   return DEFAULT_ADAPTER_ADDRESS;
@@ -268,76 +261,55 @@ function sendMicrophoneAudioChunk(inputChunk: Float32Array, sourceSampleRate: nu
   );
 }
 
-function isAudioWorkletNode(node: AudioNode): node is AudioWorkletNode {
-  return "port" in node;
-}
-
 async function createMicrophoneProcessorNode(
   audioContext: AudioContext,
   onChunk: (inputChunk: Float32Array) => void,
-): Promise<AudioWorkletNode | ScriptProcessorNode> {
-  if (audioContext.audioWorklet && typeof AudioWorkletNode !== "undefined") {
-    let moduleUrl = "";
-    try {
-      moduleUrl = URL.createObjectURL(
-        new Blob([MIC_AUDIO_WORKLET_SOURCE], { type: "application/javascript" }),
-      );
-      await audioContext.audioWorklet.addModule(moduleUrl);
-      const workletNode = new AudioWorkletNode(
-        audioContext,
-        MIC_AUDIO_WORKLET_PROCESSOR_NAME,
-        {
-          numberOfInputs: 1,
-          numberOfOutputs: 1,
-          outputChannelCount: [1],
-        },
-      );
-      workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
-        if (event.data instanceof Float32Array) {
-          onChunk(event.data);
-        }
-      };
-      workletNode.port.onmessageerror = (event) => {
-        console.warn("[Connection] microphone AudioWorklet message rejected.", event);
-      };
-      return workletNode;
-    } catch (error) {
-      console.warn(
-        "[Connection] microphone AudioWorklet unavailable; falling back to deprecated ScriptProcessorNode.",
-        error,
-      );
-    } finally {
-      if (moduleUrl) {
-        URL.revokeObjectURL(moduleUrl);
-      }
-    }
+): Promise<AudioWorkletNode> {
+  if (!audioContext.audioWorklet || typeof AudioWorkletNode === "undefined") {
+    throw new Error("当前环境不支持 AudioWorklet，麦克风采集已停止。");
   }
 
-  const scriptProcessorNode = audioContext.createScriptProcessor(
-    MIC_PROCESSOR_BUFFER_SIZE,
-    1,
-    1,
-  );
-  scriptProcessorNode.onaudioprocess = (event) => {
-    onChunk(event.inputBuffer.getChannelData(0));
-  };
-  return scriptProcessorNode;
+  let moduleUrl = "";
+  try {
+    moduleUrl = URL.createObjectURL(
+      new Blob([MIC_AUDIO_WORKLET_SOURCE], { type: "application/javascript" }),
+    );
+    await audioContext.audioWorklet.addModule(moduleUrl);
+    const workletNode = new AudioWorkletNode(
+      audioContext,
+      MIC_AUDIO_WORKLET_PROCESSOR_NAME,
+      {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+      },
+    );
+    workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
+      if (event.data instanceof Float32Array) {
+        onChunk(event.data);
+      }
+    };
+    workletNode.port.onmessageerror = (event) => {
+      console.warn("[Connection] microphone AudioWorklet message rejected.", event);
+    };
+    return workletNode;
+  } finally {
+    if (moduleUrl) {
+      URL.revokeObjectURL(moduleUrl);
+    }
+  }
 }
 
 function disconnectMicrophoneProcessorNode(
-  processorNode: AudioWorkletNode | ScriptProcessorNode | null,
+  processorNode: AudioWorkletNode | null,
 ): void {
   if (!processorNode) {
     return;
   }
 
-  if (isAudioWorkletNode(processorNode)) {
-    processorNode.port.onmessage = null;
-    processorNode.port.onmessageerror = null;
-    processorNode.port.close();
-  } else {
-    processorNode.onaudioprocess = null;
-  }
+  processorNode.port.onmessage = null;
+  processorNode.port.onmessageerror = null;
+  processorNode.port.close();
   processorNode.disconnect();
 }
 
@@ -356,7 +328,6 @@ function persistAddress(nextAddress: string): void {
   state.address = normalizedAddress;
   if (typeof window !== "undefined") {
     window.localStorage.setItem(ADDRESS_STORAGE_KEY, normalizedAddress);
-    window.localStorage.removeItem(LEGACY_ADDRESS_STORAGE_KEY);
   }
 }
 
@@ -605,7 +576,7 @@ async function startMicrophoneCapture(): Promise<boolean> {
   let mediaStream: MediaStream | null = null;
   let audioContext: AudioContext | null = null;
   let sourceNode: MediaStreamAudioSourceNode | null = null;
-  let processorNode: AudioWorkletNode | ScriptProcessorNode | null = null;
+  let processorNode: AudioWorkletNode | null = null;
   let sinkGainNode: GainNode | null = null;
 
   try {

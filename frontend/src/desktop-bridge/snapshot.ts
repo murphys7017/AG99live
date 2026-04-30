@@ -118,16 +118,7 @@ export function safeNormalizeProfileAuthoringSnapshot(
 }
 
 export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnapshot {
-  const snapshotWithoutLegacyProfile = {
-    ...(snapshot as DesktopRuntimeSnapshot & {
-      selectedSemanticAxisProfile?: SemanticAxisProfile | null;
-      latestSemanticAxisProfileSaveResult?: unknown;
-      motionTuningSamples?: unknown;
-    }),
-  };
-  delete snapshotWithoutLegacyProfile.selectedSemanticAxisProfile;
-  delete snapshotWithoutLegacyProfile.latestSemanticAxisProfileSaveResult;
-  delete snapshotWithoutLegacyProfile.motionTuningSamples;
+  rejectUnsupportedRuntimeSnapshotFields(snapshot);
   const historyEntries = Array.isArray(snapshot.historyEntries)
     ? snapshot.historyEntries
     : [];
@@ -139,7 +130,7 @@ export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRunt
     : [];
   return {
     ...defaultSnapshot,
-    ...snapshotWithoutLegacyProfile,
+    ...snapshot,
     motionEngineSettings: cloneModelEngineSettings(
       normalizeModelEngineSettings(snapshot.motionEngineSettings),
     ),
@@ -161,6 +152,19 @@ export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRunt
     ),
     baseActionPreview: cloneBaseActionPreview(snapshot.baseActionPreview),
   };
+}
+
+function rejectUnsupportedRuntimeSnapshotFields(snapshot: DesktopRuntimeSnapshot): void {
+  const unsupportedFields = [
+    "selectedSemanticAxisProfile",
+    "latestSemanticAxisProfileSaveResult",
+    "motionTuningSamples",
+  ].filter((field) => field in (snapshot as unknown as Record<string, unknown>));
+  if (unsupportedFields.length) {
+    throw new Error(
+      `unsupported_runtime_snapshot_fields:${unsupportedFields.join(",")}`,
+    );
+  }
 }
 
 export function normalizeMotionTuningSamples(
@@ -203,7 +207,7 @@ function cloneMotionPlaybackRecord(
     }
     const plan = cloneSemanticParameterPlan(record.plan);
     if (!plan) {
-      console.warn("[DesktopBridge] legacy or invalid motion playback record ignored.", {
+      console.warn("[DesktopBridge] invalid motion playback record ignored.", {
         schemaVersion: isObject(record.plan)
           ? normalizeText(record.plan.schema_version)
           : "",
@@ -260,11 +264,7 @@ function normalizeCompiledParameterCount(
   if (isFiniteNumber(diagnostics.compiledParameterCount)) {
     return Math.max(0, Math.round(diagnostics.compiledParameterCount));
   }
-  // Legacy snapshots used supplementaryCount before ModelEngine stopped using action-library fallback.
-  const legacySupplementaryCount = Number(diagnostics.supplementaryCount ?? 0);
-  return Number.isFinite(legacySupplementaryCount)
-    ? Math.max(0, Math.round(legacySupplementaryCount))
-    : 0;
+  return 0;
 }
 
 function cloneBackendHistorySummary(
@@ -397,7 +397,7 @@ function cloneMotionTuningSample(
     }
     const adjustedPlan = cloneSemanticParameterPlan(sample.adjustedPlan);
     if (!adjustedPlan) {
-      console.warn("[DesktopBridge] legacy or invalid motion tuning sample ignored.", {
+      console.warn("[DesktopBridge] invalid motion tuning sample ignored.", {
         schemaVersion: isObject(sample.adjustedPlan)
           ? normalizeText(sample.adjustedPlan.schema_version)
           : "",

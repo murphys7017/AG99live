@@ -250,7 +250,10 @@ export function useDesktopBridge() {
   ensureInitialized();
 
   function publishSnapshot(snapshot: DesktopRuntimeSnapshot): void {
-    const nextSnapshot = safeNormalizeSnapshot(snapshot, "publish") ?? defaultSnapshot;
+    const nextSnapshot = safeNormalizeSnapshot(snapshot, "publish");
+    if (!nextSnapshot) {
+      throw new Error("[DesktopBridge] publish snapshot rejected.");
+    }
     state.snapshot = nextSnapshot;
     persistRuntimeSnapshot(nextSnapshot);
     runtimeChannel?.postMessage({
@@ -277,9 +280,10 @@ export function useDesktopBridge() {
   function publishProfileAuthoringSnapshot(
     snapshot: DesktopProfileAuthoringSnapshot,
   ): void {
-    const nextSnapshot =
-      safeNormalizeProfileAuthoringSnapshot(snapshot, "publish")
-      ?? defaultProfileAuthoringSnapshot;
+    const nextSnapshot = safeNormalizeProfileAuthoringSnapshot(snapshot, "publish");
+    if (!nextSnapshot) {
+      throw new Error("[DesktopBridge] publish profile authoring snapshot rejected.");
+    }
     state.profileAuthoringSnapshot = nextSnapshot;
     persistProfileAuthoringSnapshot(nextSnapshot);
     profileAuthoringChannel?.postMessage({
