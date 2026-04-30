@@ -11,14 +11,11 @@ import type {
   ControlErrorPayload,
   ControlPlaybackFinishedPayload,
   ControlTurnFinishedPayload,
-  ModelSyncInfo,
-  MotionTuningSampleProtocolPayload,
   OutputAudioPayload,
   OutputImagePayload,
   OutputTextPayload,
   OutputTranscriptionPayload,
   ProtocolEnvelope,
-  RuntimeCacheErrorsPayload,
   SystemSemanticAxisProfileSavePayload,
   SystemSemanticAxisProfileSavedPayload,
   SystemSemanticAxisProfileSaveFailedPayload,
@@ -28,6 +25,19 @@ import type {
   SystemModelSyncPayload,
   SystemServerInfoPayload,
 } from "../types/protocol";
+import {
+  normalizeBackendHistoryMessages,
+  normalizeBackendHistorySummaries,
+} from "../adapter-connection/historyPayload";
+import {
+  normalizeMotionTuningSamplePayload,
+  serializeMotionTuningSample,
+} from "../adapter-connection/motionTuningPayload";
+import {
+  rewriteHttpUrl as rewriteHttpUrlWithActiveHost,
+  rewriteModelSyncEnvelope as rewriteModelSyncEnvelopeWithActiveHost,
+  rewriteSocketUrl as rewriteSocketUrlWithActiveHost,
+} from "../adapter-connection/modelSyncRewrite";
 import {
   buildConnectFailureMessage,
   buildConnectionCandidates,
@@ -1615,101 +1625,6 @@ function deleteHistory(
   return true;
 }
 
-function serializeMotionTuningSample(
-  sample: DesktopMotionTuningSample,
-): MotionTuningSampleProtocolPayload {
-  return {
-    id: sample.id,
-    created_at: sample.createdAt,
-    source_record_id: sample.sourceRecordId,
-    model_name: sample.modelName,
-    profile_id: sample.profileId ?? "",
-    profile_revision: sample.profileRevision ?? 0,
-    emotion_label: sample.emotionLabel,
-    assistant_text: sample.assistantText,
-    feedback: sample.feedback,
-    tags: [...sample.tags],
-    enabled_for_llm_reference: Boolean(sample.enabledForLlmReference),
-    original_axes: { ...sample.originalAxes },
-    adjusted_axes: { ...sample.adjustedAxes },
-    adjusted_plan: JSON.parse(JSON.stringify(sample.adjustedPlan)) as DesktopMotionTuningSample["adjustedPlan"],
-  };
-}
-
-function normalizeMotionTuningSamplePayload(
-  sample: MotionTuningSampleProtocolPayload | unknown,
-): DesktopMotionTuningSample | null {
-  if (!sample || typeof sample !== "object") {
-    return null;
-  }
-
-  const candidate = sample as Partial<MotionTuningSampleProtocolPayload>;
-  const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
-  const createdAt = typeof candidate.created_at === "string" ? candidate.created_at.trim() : "";
-  const sourceRecordId = typeof candidate.source_record_id === "string"
-    ? candidate.source_record_id.trim()
-    : "";
-  const modelName = typeof candidate.model_name === "string" ? candidate.model_name.trim() : "";
-  const profileId = typeof candidate.profile_id === "string" ? candidate.profile_id.trim() : "";
-  const profileRevision = typeof candidate.profile_revision === "number"
-    && Number.isFinite(candidate.profile_revision)
-    && candidate.profile_revision > 0
-    ? Math.round(candidate.profile_revision)
-    : 0;
-  if (!id || !createdAt || !sourceRecordId || !modelName || !profileId || profileRevision <= 0) {
-    return null;
-  }
-
-  const adjustedPlan = candidate.adjusted_plan;
-  if (
-    !adjustedPlan
-    || typeof adjustedPlan !== "object"
-    || adjustedPlan.schema_version !== "engine.parameter_plan.v2"
-  ) {
-    return null;
-  }
-
-  return {
-    id,
-    createdAt,
-    sourceRecordId,
-    modelName,
-    profileId,
-    profileRevision,
-    emotionLabel: typeof candidate.emotion_label === "string" && candidate.emotion_label.trim()
-      ? candidate.emotion_label.trim()
-      : "manual_tuning",
-    assistantText: typeof candidate.assistant_text === "string"
-      ? candidate.assistant_text.trim()
-      : "",
-    feedback: typeof candidate.feedback === "string" ? candidate.feedback.trim() : "",
-    tags: Array.isArray(candidate.tags)
-      ? candidate.tags.map((tag) => String(tag).trim()).filter(Boolean)
-      : [],
-    enabledForLlmReference: Boolean(candidate.enabled_for_llm_reference),
-    originalAxes: normalizeMotionTuningAxisRecord(candidate.original_axes),
-    adjustedAxes: normalizeMotionTuningAxisRecord(candidate.adjusted_axes),
-    adjustedPlan: JSON.parse(JSON.stringify(adjustedPlan)) as DesktopMotionTuningSample["adjustedPlan"],
-  };
-}
-
-function normalizeMotionTuningAxisRecord(value: unknown): Record<string, number> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-  const result: Record<string, number> = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (typeof key !== "string" || !key.trim()) {
-      continue;
-    }
-    if (typeof item !== "number" || !Number.isFinite(item)) {
-      continue;
-    }
-    result[key.trim()] = item;
-  }
-  return result;
-}
-
 function saveMotionTuningSample(sample: DesktopMotionTuningSample): boolean {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     state.lastError = "当前还没有连上适配器，无法保存动作调参样本。";
@@ -1831,238 +1746,15 @@ async function sendPlaybackFinished(
 function rewriteModelSyncEnvelope(
   envelope: ProtocolEnvelope<SystemModelSyncPayload>,
 ): ProtocolEnvelope<SystemModelSyncPayload> {
-  const modelInfo = rewriteModelInfo(envelope.payload.model_info);
-  const runtimeCacheErrors = normalizeRuntimeCacheErrors(
-    envelope.payload.runtime_cache_errors ?? modelInfo.runtime_cache_errors,
-  );
-  const modelInfoWithRuntimeCacheErrors: ModelSyncInfo = {
-    ...modelInfo,
-    runtime_cache_errors: runtimeCacheErrors,
-  };
-  return {
-    ...envelope,
-    payload: {
-      ...envelope.payload,
-      model_info: modelInfoWithRuntimeCacheErrors,
-      runtime_cache_errors: runtimeCacheErrors,
-    },
-  };
-}
-
-function rewriteModelInfo(modelInfo: ModelSyncInfo): ModelSyncInfo {
-  return {
-    ...modelInfo,
-    runtime_cache_errors: normalizeRuntimeCacheErrors(modelInfo.runtime_cache_errors),
-    models: modelInfo.models.map((model) => ({
-      ...model,
-      model_url: rewriteHttpUrl(model.model_url),
-      icon_url: rewriteHttpUrl(model.icon_url),
-    })),
-  };
-}
-
-function normalizeRuntimeCacheErrors(
-  value: RuntimeCacheErrorsPayload | undefined,
-): RuntimeCacheErrorsPayload | undefined {
-  if (!value) {
-    return undefined;
-  }
-  const normalized: RuntimeCacheErrorsPayload = {};
-  const root = typeof value.root === "string" ? value.root.trim() : "";
-  const scanCache = typeof value.scan_cache === "string" ? value.scan_cache.trim() : "";
-  const actionFilterCache = typeof value.action_filter_cache === "string"
-    ? value.action_filter_cache.trim()
-    : "";
-  const motionTuningSamples = typeof value.motion_tuning_samples === "string"
-    ? value.motion_tuning_samples.trim()
-    : "";
-  if (root) {
-    normalized.root = root;
-  }
-  if (scanCache) {
-    normalized.scan_cache = scanCache;
-  }
-  if (actionFilterCache) {
-    normalized.action_filter_cache = actionFilterCache;
-  }
-  if (motionTuningSamples) {
-    normalized.motion_tuning_samples = motionTuningSamples;
-  }
-  return Object.keys(normalized).length ? normalized : undefined;
+  return rewriteModelSyncEnvelopeWithActiveHost(envelope, state.activeWsAddress);
 }
 
 function rewriteSocketUrl(rawUrl: string): string {
-  return rewriteUrlWithConnectedHost(rawUrl, "ws");
+  return rewriteSocketUrlWithActiveHost(rawUrl, state.activeWsAddress);
 }
 
 function rewriteHttpUrl(rawUrl: string | null): string {
-  if (!rawUrl) {
-    return "";
-  }
-  return rewriteUrlWithConnectedHost(rawUrl, "http");
-}
-
-function rewriteUrlWithConnectedHost(
-  rawUrl: string,
-  family: "http" | "ws",
-): string {
-  const trimmed = rawUrl.trim();
-  if (!trimmed) {
-    return trimmed;
-  }
-
-  const activeUrl = parseUrlSafely(state.activeWsAddress);
-  const targetUrl = parseUrlSafely(trimmed);
-  if (!activeUrl || !targetUrl) {
-    return trimmed;
-  }
-
-  const rewritten = new URL(targetUrl.toString());
-  rewritten.hostname = activeUrl.hostname;
-  rewritten.protocol =
-    family === "http"
-      ? activeUrl.protocol === "wss:"
-        ? "https:"
-        : "http:"
-      : activeUrl.protocol === "https:"
-        ? "wss:"
-        : activeUrl.protocol === "http:"
-          ? "ws:"
-          : activeUrl.protocol;
-
-  if (activeUrl.username) {
-    rewritten.username = activeUrl.username;
-  }
-  if (activeUrl.password) {
-    rewritten.password = activeUrl.password;
-  }
-
-  return rewritten.toString().replace(/\/$/, "");
-}
-
-function parseUrlSafely(rawUrl: string): URL | null {
-  try {
-    return new URL(rawUrl);
-  } catch (_error) {
-    return null;
-  }
-}
-
-function normalizeBackendHistorySummaries(
-  histories: unknown,
-): DesktopBackendHistorySummary[] {
-  if (!Array.isArray(histories)) {
-    return [];
-  }
-
-  const normalized: DesktopBackendHistorySummary[] = [];
-  for (const history of histories) {
-    if (!history || typeof history !== "object") {
-      continue;
-    }
-
-    const candidate = history as Record<string, unknown>;
-    const uid = typeof candidate.uid === "string" ? candidate.uid.trim() : "";
-    if (!uid) {
-      continue;
-    }
-
-    const latestMessage = normalizeBackendHistorySummaryMessage(candidate.latest_message);
-    const timestamp = typeof candidate.timestamp === "string"
-      ? candidate.timestamp.trim()
-      : latestMessage?.timestamp ?? "";
-
-    normalized.push({
-      uid,
-      latestMessage,
-      timestamp,
-    });
-  }
-
-  return normalized;
-}
-
-function normalizeBackendHistorySummaryMessage(
-  message: unknown,
-): DesktopBackendHistorySummary["latestMessage"] {
-  if (!message || typeof message !== "object") {
-    return null;
-  }
-
-  const candidate = message as Record<string, unknown>;
-  const content = typeof candidate.content === "string" ? candidate.content.trim() : "";
-  const timestamp = typeof candidate.timestamp === "string" ? candidate.timestamp.trim() : "";
-  const role = normalizeBackendHistoryRole(candidate.role);
-  if (!content && !timestamp) {
-    return null;
-  }
-
-  return {
-    role,
-    timestamp,
-    content,
-  };
-}
-
-function normalizeBackendHistoryMessages(
-  messages: unknown,
-): DesktopBackendHistoryMessage[] {
-  if (!Array.isArray(messages)) {
-    return [];
-  }
-
-  const normalized: DesktopBackendHistoryMessage[] = [];
-  for (const message of messages) {
-    if (!message || typeof message !== "object") {
-      continue;
-    }
-
-    const candidate = message as Record<string, unknown>;
-    const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
-    if (!id) {
-      continue;
-    }
-
-    normalized.push({
-      id,
-      role: normalizeBackendHistoryRole(candidate.role),
-      type: typeof candidate.type === "string" && candidate.type.trim()
-        ? candidate.type.trim()
-        : "text",
-      content: typeof candidate.content === "string" ? candidate.content.trim() : "",
-      timestamp: typeof candidate.timestamp === "string" ? candidate.timestamp.trim() : "",
-      name: typeof candidate.name === "string" && candidate.name.trim()
-        ? candidate.name.trim()
-        : undefined,
-      toolId: typeof candidate.tool_id === "string" && candidate.tool_id.trim()
-        ? candidate.tool_id.trim()
-        : undefined,
-      toolName: typeof candidate.tool_name === "string" && candidate.tool_name.trim()
-        ? candidate.tool_name.trim()
-        : undefined,
-      status: typeof candidate.status === "string" && candidate.status.trim()
-        ? candidate.status.trim()
-        : undefined,
-      avatar: typeof candidate.avatar === "string" && candidate.avatar.trim()
-        ? candidate.avatar.trim()
-        : undefined,
-    });
-  }
-
-  return normalized;
-}
-
-function normalizeBackendHistoryRole(
-  role: unknown,
-): DesktopBackendHistoryMessage["role"] {
-  if (typeof role !== "string") {
-    return "system";
-  }
-  const normalizedRole = role.trim().toLowerCase();
-  if (normalizedRole === "human" || normalizedRole === "ai") {
-    return normalizedRole;
-  }
-  return "system";
+  return rewriteHttpUrlWithActiveHost(rawUrl, state.activeWsAddress);
 }
 
 function pushHistory(role: DesktopHistoryEntry["role"], text: string): void {
