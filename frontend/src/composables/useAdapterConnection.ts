@@ -60,15 +60,20 @@ import {
   createMessageId,
   PROTOCOL_VERSION,
 } from "../adapter-connection/envelope";
+import {
+  loadDesktopScreenshotOnSendEnabled,
+  loadStoredAdapterAddress,
+  normalizeAdapterAddressSetting,
+  saveDesktopScreenshotOnSendEnabled,
+  saveStoredAdapterAddress,
+} from "../adapter-connection/preferences";
 import { useModelSync } from "./useModelSync";
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
-const ADDRESS_STORAGE_KEY = "ag99live.adapter.address";
-const DESKTOP_SCREENSHOT_ON_SEND_STORAGE_KEY = "ag99live.desktop.capture_on_send";
 const MAX_MIC_SOCKET_BUFFERED_AMOUNT = 512 * 1024;
 const state = reactive({
-  address: loadStoredAddress(),
+  address: loadStoredAdapterAddress(),
   desktopScreenshotOnSendEnabled: loadDesktopScreenshotOnSendEnabled(),
   sessionId: "",
   status: "disconnected" as ConnectionStatus,
@@ -141,34 +146,6 @@ const reportedProtocolWarnings = new Set<string>();
 
 const { applyUnknownMessage, resetModelSyncState } = useModelSync();
 
-function loadStoredAddress(): string {
-  if (typeof window === "undefined") {
-    return DEFAULT_ADAPTER_ADDRESS;
-  }
-
-  const storedAddress = window.localStorage.getItem(ADDRESS_STORAGE_KEY);
-  if (storedAddress?.trim()) {
-    return storedAddress.trim();
-  }
-
-  return DEFAULT_ADAPTER_ADDRESS;
-}
-
-function loadDesktopScreenshotOnSendEnabled(): boolean {
-  if (typeof window === "undefined") {
-    return true;
-  }
-
-  const storedValue = window.localStorage.getItem(DESKTOP_SCREENSHOT_ON_SEND_STORAGE_KEY);
-  if (storedValue === "false") {
-    return false;
-  }
-  if (storedValue === "true") {
-    return true;
-  }
-  return true;
-}
-
 function buildMessageEnvelope<TPayload>(
   type: string,
   payload: TPayload,
@@ -202,21 +179,14 @@ function sendMicrophoneAudioChunk(chunk: MicrophoneAudioChunk): void {
 }
 
 function persistAddress(nextAddress: string): void {
-  const normalizedAddress = nextAddress.trim() || DEFAULT_ADAPTER_ADDRESS;
+  const normalizedAddress = normalizeAdapterAddressSetting(nextAddress);
   state.address = normalizedAddress;
-  if (typeof window !== "undefined") {
-    window.localStorage.setItem(ADDRESS_STORAGE_KEY, normalizedAddress);
-  }
+  saveStoredAdapterAddress(normalizedAddress);
 }
 
 function setDesktopScreenshotOnSendEnabled(enabled: boolean): void {
   state.desktopScreenshotOnSendEnabled = enabled;
-  if (typeof window !== "undefined") {
-    window.localStorage.setItem(
-      DESKTOP_SCREENSHOT_ON_SEND_STORAGE_KEY,
-      enabled ? "true" : "false",
-    );
-  }
+  saveDesktopScreenshotOnSendEnabled(enabled);
 }
 
 function setAddress(nextAddress: string): void {
@@ -226,7 +196,7 @@ function setAddress(nextAddress: string): void {
 async function initialize(): Promise<void> {
   if (!initializePromise) {
     initializePromise = Promise.resolve().then(() => {
-      const storedAddress = loadStoredAddress();
+      const storedAddress = loadStoredAdapterAddress();
       if (storedAddress.trim()) {
         persistAddress(storedAddress);
       }
