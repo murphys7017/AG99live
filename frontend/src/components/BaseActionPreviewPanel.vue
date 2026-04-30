@@ -122,6 +122,8 @@ const analysisBadgeLabel = computed(() => {
   }
   return `${analysis.status}/${analysis.mode}`;
 });
+const actionLibraryFailed = computed(() => props.preview?.analysis.status === "failed");
+const actionLibraryReady = computed(() => Boolean(props.preview) && !actionLibraryFailed.value);
 
 const selectedAtomIdSet = computed(() => new Set(selectedAtomIds.value));
 const selectedAtoms = computed<DesktopBaseActionPreviewAtom[]>(() => {
@@ -238,6 +240,7 @@ const generatedPlanText = computed(() =>
 const playButtonEnabled = computed(
   () =>
     Boolean(props.allowPlay)
+    && actionLibraryReady.value
     && Boolean(props.semanticProfile)
     && selectedAtoms.value.length > 0
     && Object.keys(buildSemanticAxisValuesFromAtoms(selectedAtoms.value)).length > 0,
@@ -262,6 +265,9 @@ function toggleAtomSelection(atomId: string): void {
 }
 
 function selectFilteredAtoms(): void {
+  if (!actionLibraryReady.value) {
+    return;
+  }
   const merged = new Set(selectedAtomIds.value);
   for (const atom of filteredAtoms.value) {
     merged.add(atom.id);
@@ -337,7 +343,9 @@ function resetParameterExcludeKeywords(): void {
 
 function playPreviewPlan(): void {
   if (!playButtonEnabled.value) {
-    playStatusText.value = props.semanticProfile
+    playStatusText.value = actionLibraryFailed.value
+      ? "动作库构建失败，请先处理上方错误后再测试播放。"
+      : props.semanticProfile
       ? "请至少选择一个能映射到主轴/提示轴的动作原子。"
       : "当前模型还没有 semantic profile，无法生成 v2 动作预览。";
     return;
@@ -509,6 +517,9 @@ function roundTo(value: number, digits: number): number {
       <p v-if="preview.analysis.error" class="action-preview__error">
         {{ preview.analysis.error }}
       </p>
+      <p v-if="actionLibraryFailed" class="settings-card__hint action-preview__failure-hint">
+        动作库处于 failed 状态，当前参数动作池不可用于筛选或测试播放。
+      </p>
 
       <div class="action-preview__filters">
         <label class="action-preview__field">
@@ -562,6 +573,7 @@ function roundTo(value: number, digits: number): number {
         <button
           type="button"
           class="settings-card__button settings-card__button--ghost"
+          :disabled="!actionLibraryReady"
           @click="selectFilteredAtoms"
         >
           选中当前筛选
@@ -569,6 +581,7 @@ function roundTo(value: number, digits: number): number {
         <button
           type="button"
           class="settings-card__button settings-card__button--ghost"
+          :disabled="!actionLibraryReady"
           @click="clearSelectedAtoms"
         >
           清空选择

@@ -8,7 +8,7 @@ import type { DesktopBaseActionPreview } from "../types/desktop";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 
 const bridge = useDesktopBridge();
-const baseActionPreview = computed<DesktopBaseActionPreview | null>(() => {
+const parameterActionPreview = computed<DesktopBaseActionPreview | null>(() => {
   const preview = bridge.state.snapshot.baseActionPreview;
   if (!preview) {
     return null;
@@ -46,7 +46,7 @@ const semanticProfile = computed<SemanticAxisProfile | null>(() => {
     <section class="settings-grid">
       <MotionTuningPanel />
       <BaseActionPreviewPanel
-        :preview="baseActionPreview"
+        :preview="parameterActionPreview"
         :semantic-profile="semanticProfile"
         :allow-play="true"
       />

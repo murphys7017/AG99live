@@ -751,6 +751,11 @@ img {
   cursor: pointer;
 }
 
+.settings-card__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
 .settings-card__button--ghost {
   background: rgba(241, 246, 255, 0.95);
   color: #37598e;

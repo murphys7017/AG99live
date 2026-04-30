@@ -157,7 +157,7 @@ function resolvePrimaryChannel(
   return first?.trim() || "parameter";
 }
 
-const baseActionPreview = computed<DesktopBaseActionPreview | null>(() => {
+const parameterActionPreview = computed<DesktopBaseActionPreview | null>(() => {
   const model = selectedModel.value;
   const library = model?.parameter_action_library;
   if (!library) {
@@ -559,7 +559,7 @@ watch(
     selectedModel.value?.name ?? "",
     selectedModel.value?.icon_url ?? "",
     selectedModel.value?.engine_hints.recommended_mode ?? "",
-    baseActionPreview.value,
+    parameterActionPreview.value,
     stageMessage.value,
     motionEngineSettings.motionIntensityScale,
     serializeAxisIntensityScale(motionEngineSettings.axisIntensityScale),
@@ -609,7 +609,7 @@ watch(
       runtimeSemanticAxisProfile: selectedSemanticAxisProfile.value
         ? cloneJson(selectedSemanticAxisProfile.value)
         : null,
-      baseActionPreview: baseActionPreview.value,
+      baseActionPreview: parameterActionPreview.value,
     });
   },
   { deep: true, immediate: true },
