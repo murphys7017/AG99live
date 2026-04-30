@@ -439,14 +439,7 @@ function cloneMotionPlaybackRecord(
       });
       return null;
     }
-    const diagnostics = isObject(record.diagnostics)
-      ? {
-        ...record.diagnostics,
-        axisIntensityScale: isObject(record.diagnostics.axisIntensityScale)
-          ? { ...record.diagnostics.axisIntensityScale }
-          : {},
-      }
-      : null;
+    const diagnostics = cloneMotionCompileDiagnostics(record.diagnostics);
     return {
       ...(record as unknown as DesktopMotionPlaybackRecord),
       diagnostics: diagnostics as DesktopMotionPlaybackRecord["diagnostics"],
@@ -456,6 +449,51 @@ function cloneMotionPlaybackRecord(
     console.warn("[DesktopBridge] motion playback record rejected.", error, record);
     return null;
   }
+}
+
+function cloneMotionCompileDiagnostics(
+  diagnostics: unknown,
+): DesktopMotionPlaybackRecord["diagnostics"] {
+  if (!isObject(diagnostics)) {
+    return null;
+  }
+  const compiledParameterCount = normalizeCompiledParameterCount(diagnostics);
+  return {
+    usedActionLibrary: Boolean(diagnostics.usedActionLibrary),
+    compiledParameterCount,
+    timingSource: normalizeTimingSource(diagnostics.timingSource),
+    resolvedMode: normalizeMotionMode(diagnostics.resolvedMode),
+    source: normalizeOptionalText(diagnostics.source),
+    warnings: normalizeStringArray(diagnostics.warnings),
+    primaryAxes: normalizeStringArray(diagnostics.primaryAxes),
+    hintAxes: normalizeStringArray(diagnostics.hintAxes),
+    derivedAxes: normalizeStringArray(diagnostics.derivedAxes),
+    runtimeAxes: normalizeStringArray(diagnostics.runtimeAxes),
+    missingAxes: normalizeStringArray(diagnostics.missingAxes),
+    forbiddenAxes: normalizeStringArray(diagnostics.forbiddenAxes),
+    invalidAxes: normalizeStringArray(diagnostics.invalidAxes),
+    axisErrorCount: normalizeOptionalInteger(diagnostics.axisErrorCount),
+    axisErrorLimit: normalizeOptionalInteger(diagnostics.axisErrorLimit),
+    compiledParameters: normalizeStringArray(diagnostics.compiledParameters),
+    intensityApplied: Boolean(diagnostics.intensityApplied),
+    motionIntensityScale: isFiniteNumber(diagnostics.motionIntensityScale)
+      ? diagnostics.motionIntensityScale
+      : 1,
+    axisIntensityScale: cloneNumericRecord(diagnostics.axisIntensityScale),
+  };
+}
+
+function normalizeCompiledParameterCount(
+  diagnostics: Record<string, unknown>,
+): number {
+  if (isFiniteNumber(diagnostics.compiledParameterCount)) {
+    return Math.max(0, Math.round(diagnostics.compiledParameterCount));
+  }
+  // Legacy snapshots used supplementaryCount before ModelEngine stopped using action-library fallback.
+  const legacySupplementaryCount = Number(diagnostics.supplementaryCount ?? 0);
+  return Number.isFinite(legacySupplementaryCount)
+    ? Math.max(0, Math.round(legacySupplementaryCount))
+    : 0;
 }
 
 function cloneBackendHistorySummary(
@@ -544,6 +582,39 @@ function normalizeBackendHistoryRole(
 function normalizeOptionalText(value: unknown): string | undefined {
   const normalized = normalizeText(value);
   return normalized || undefined;
+}
+
+function normalizeStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const normalized = value.map((item) => normalizeText(item)).filter(Boolean);
+  return normalized.length ? normalized : undefined;
+}
+
+function normalizeOptionalInteger(value: unknown): number | undefined {
+  if (!isFiniteNumber(value)) {
+    return undefined;
+  }
+  return Math.max(0, Math.round(value));
+}
+
+function normalizeTimingSource(
+  value: unknown,
+): NonNullable<DesktopMotionPlaybackRecord["diagnostics"]>["timingSource"] {
+  const normalized = normalizeText(value);
+  if (normalized === "hint" || normalized === "audio_sync") {
+    return normalized;
+  }
+  return "default";
+}
+
+function normalizeMotionMode(value: unknown): DesktopMotionPlaybackRecord["mode"] {
+  const normalized = normalizeText(value);
+  if (normalized === "expressive") {
+    return "expressive";
+  }
+  return "idle";
 }
 
 function cloneMotionTuningSample(

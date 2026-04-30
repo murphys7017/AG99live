@@ -21,7 +21,7 @@ const state = reactive({
   status: "idle" as PreviewPlayerStatus,
   message: "等待播放动作计划。",
   keyAxesCount: 0,
-  supplementaryCount: 0,
+  parameterCount: 0,
   startedAt: "",
   finishedAt: "",
 });
@@ -386,7 +386,7 @@ function playPlan(
   state.status = "playing";
   state.message = `正在执行参数计划（mode=${playbackPlan.plan.mode}, emotion=${playbackPlan.plan.emotion_label}）...`;
   state.keyAxesCount = playbackPlan.plan.summary?.axis_count ?? playbackPlan.plan.parameters.length;
-  state.supplementaryCount = playbackPlan.plan.parameters.length;
+  state.parameterCount = playbackPlan.plan.parameters.length;
   state.startedAt = new Date().toISOString();
   state.finishedAt = "";
 

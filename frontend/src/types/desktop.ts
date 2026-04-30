@@ -141,8 +141,8 @@ export interface DesktopMotionEngineSettings {
 }
 
 export interface DesktopMotionCompileDiagnostics {
-  usedFallbackLibrary: boolean;
-  supplementaryCount: number;
+  usedActionLibrary: boolean;
+  compiledParameterCount: number;
   timingSource: "hint" | "audio_sync" | "default";
   resolvedMode: "idle" | "expressive";
   source?: string;

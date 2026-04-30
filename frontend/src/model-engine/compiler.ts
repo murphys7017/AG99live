@@ -22,8 +22,8 @@ export function compileMotionIntent(
 ): CompileResult {
   const normalizedSettings = normalizeModelEngineSettings(options.settings);
   const baseDiagnostics = {
-    usedFallbackLibrary: false,
-    supplementaryCount: 0,
+    usedActionLibrary: false,
+    compiledParameterCount: 0,
     timingSource: "default" as const,
     resolvedMode: "idle" as const,
     source: options.source,
@@ -223,7 +223,7 @@ export function compileMotionIntent(
       timingSource: timing.timingSource,
       resolvedMode,
       intensityApplied,
-      supplementaryCount: parameterResult.parameters.length,
+      compiledParameterCount: parameterResult.parameters.length,
       warnings: plan.diagnostics?.warnings ?? [],
       ...roleAxisIds,
       missingAxes,

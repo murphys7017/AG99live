@@ -26,7 +26,7 @@ export interface MotionTimingResolution {
 }
 
 export interface SupplementaryBuildDiagnostics {
-  usedFallbackLibrary: boolean;
+  usedActionLibrary: boolean;
   selectedFrom: "parameter_action_library" | "base_action_library" | "none";
 }
 
@@ -43,8 +43,8 @@ export interface CompileOptions {
 }
 
 export interface CompileDiagnostics {
-  usedFallbackLibrary: boolean;
-  supplementaryCount: number;
+  usedActionLibrary: boolean;
+  compiledParameterCount: number;
   timingSource: "hint" | "audio_sync" | "default";
   resolvedMode: "idle" | "expressive";
   source?: string;
