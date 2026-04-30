@@ -85,6 +85,10 @@ class RuntimeState:
         self.realtime_motion_fewshot_count = 4
         self.motion_tuning_reference_examples: list[dict[str, Any]] = []
         self.motion_tuning_samples: list[dict[str, Any]] = []
+        self.runtime_cache_root_error = ""
+        self.runtime_cache_segment_errors: dict[str, str] = {}
+        self.motion_tuning_samples_load_error = ""
+        self.motion_tuning_fewshot_diagnostics: list[str] = []
         self.realtime_motion_platform_context_enabled = True
         self.realtime_motion_platform_description = ""
         self.motion_prompt_instruction = DEFAULT_MOTION_PROMPT_INSTRUCTION
@@ -224,10 +228,7 @@ class RuntimeState:
         )
         self.realtime_motion_fewshot_count = max(
             0,
-            min(
-                int(_plugin_config_get(self.plugin_config, "realtime_motion_fewshot_count", 4)),
-                8,
-            ),
+            int(_plugin_config_get(self.plugin_config, "realtime_motion_fewshot_count", 4)),
         )
         self.realtime_motion_platform_context_enabled = bool(
             _plugin_config_get(
@@ -425,9 +426,13 @@ class RuntimeState:
         conf_uid: str,
         client_uid: str,
     ) -> dict[str, Any]:
+        runtime_cache_errors = self._build_runtime_cache_error_payload()
+        model_info_payload = deepcopy(self.model_info)
+        model_info_payload["runtime_cache_errors"] = runtime_cache_errors
         return build_system_model_sync(
             session_id=self.client_uid,
-            model_info=self.model_info,
+            model_info=model_info_payload,
+            runtime_cache_errors=runtime_cache_errors,
             conf_name=conf_name,
             conf_uid=conf_uid,
             client_uid=client_uid,
@@ -463,8 +468,22 @@ class RuntimeState:
     def list_motion_tuning_samples(self) -> list[dict[str, Any]]:
         return deepcopy(self.motion_tuning_samples)
 
+    def get_motion_tuning_samples_load_error(self) -> str:
+        return self.motion_tuning_samples_load_error
+
+    def get_runtime_cache_root_error(self) -> str:
+        return self.runtime_cache_root_error
+
+    def list_runtime_cache_segment_errors(self) -> dict[str, str]:
+        return dict(self.runtime_cache_segment_errors)
+
+    def list_motion_tuning_fewshot_diagnostics(self) -> list[str]:
+        return list(self.motion_tuning_fewshot_diagnostics)
+
     def save_motion_tuning_sample(self, sample_payload: Any) -> dict[str, Any]:
+        self._raise_if_runtime_cache_error_active()
         normalized_sample = self._normalize_motion_tuning_sample(sample_payload)
+        self.motion_tuning_samples_load_error = ""
         self.motion_tuning_samples = [
             deepcopy(normalized_sample),
             *[
@@ -472,7 +491,7 @@ class RuntimeState:
                 for item in self.motion_tuning_samples
                 if str(item.get("id") or "").strip() != normalized_sample["id"]
             ],
-        ][:200]
+        ]
         self._runtime_cache_payload["motion_tuning_samples"] = deepcopy(
             self.motion_tuning_samples
         )
@@ -481,6 +500,7 @@ class RuntimeState:
         return deepcopy(normalized_sample)
 
     def delete_motion_tuning_sample(self, sample_id: Any) -> bool:
+        self._raise_if_runtime_cache_error_active()
         normalized_sample_id = str(sample_id or "").strip()
         if not normalized_sample_id:
             raise ValueError("`sample_id` is required.")
@@ -491,6 +511,7 @@ class RuntimeState:
         ]
         if len(remaining_samples) == len(self.motion_tuning_samples):
             raise ValueError(f"motion_tuning_sample_not_found: {normalized_sample_id}")
+        self.motion_tuning_samples_load_error = ""
         self.motion_tuning_samples = remaining_samples
         self._runtime_cache_payload["motion_tuning_samples"] = deepcopy(
             self.motion_tuning_samples
@@ -500,6 +521,7 @@ class RuntimeState:
         return True
 
     def _refresh_motion_tuning_reference_examples_from_samples(self) -> None:
+        self.motion_tuning_fewshot_diagnostics = []
         profile = self._get_selected_semantic_axis_profile()
         if not isinstance(profile, dict):
             self.motion_tuning_reference_examples = []
@@ -556,8 +578,6 @@ class RuntimeState:
                     else [],
                 }
             )
-            if len(normalized_examples) >= 5:
-                break
         self.motion_tuning_reference_examples = normalized_examples
 
     def should_send_model_payload(self, payload: dict[str, Any], *, force: bool = False) -> bool:
@@ -593,7 +613,7 @@ class RuntimeState:
                     latency_ms=0,
                     cache_hit=False,
                     error="",
-                    fallback_reason="disabled_by_config",
+                    fallback_reason="",
                 )
             return
 
@@ -603,14 +623,36 @@ class RuntimeState:
             for model in models:
                 self._set_base_action_analysis(
                     model,
-                    status="fallback",
-                    mode="rule_seed",
+                    status="failed",
+                    mode="llm_strict",
                     provider_id="",
                     input_signature="",
                     latency_ms=0,
                     cache_hit=False,
-                    error="",
-                    fallback_reason="provider_unavailable",
+                    error=(
+                        "motion_analysis_provider_unavailable: "
+                        "configure `motion_analysis_provider_id` or set a current chat provider"
+                    ),
+                    fallback_reason="",
+                )
+            return
+
+        runtime_cache_blocking_error = self._get_runtime_cache_blocking_error()
+        if runtime_cache_blocking_error:
+            for model in models:
+                self._set_base_action_analysis(
+                    model,
+                    status="failed",
+                    mode="llm_strict",
+                    provider_id=provider_id,
+                    input_signature="",
+                    latency_ms=0,
+                    cache_hit=False,
+                    error=(
+                        "runtime_cache_error_active: "
+                        f"{runtime_cache_blocking_error}"
+                    ),
+                    fallback_reason="",
                 )
             return
 
@@ -656,8 +698,14 @@ class RuntimeState:
                 continue
 
             started_at = time.perf_counter()
+            filter_mode = "llm_strict"
             try:
                 chunked_libraries = self._build_action_filter_chunks(base_action_library)
+                filter_mode = (
+                    "llm_strict_chunked"
+                    if len(chunked_libraries) > 1
+                    else "llm_strict"
+                )
                 if not chunked_libraries:
                     raise ActionFilterDecisionError(
                         "No candidate channels available for LLM strict filtering."
@@ -732,26 +780,26 @@ class RuntimeState:
             except asyncio.TimeoutError:
                 self._set_base_action_analysis(
                     model,
-                    status="fallback",
-                    mode="rule_seed",
+                    status="failed",
+                    mode=filter_mode,
                     provider_id=provider_id,
                     input_signature=input_signature,
                     latency_ms=int((time.perf_counter() - started_at) * 1000),
                     cache_hit=False,
                     error="action_filter_timeout",
-                    fallback_reason="timeout",
+                    fallback_reason="",
                 )
             except Exception as exc:
                 self._set_base_action_analysis(
                     model,
-                    status="fallback",
-                    mode="rule_seed",
+                    status="failed",
+                    mode=filter_mode,
                     provider_id=provider_id,
                     input_signature=input_signature,
                     latency_ms=int((time.perf_counter() - started_at) * 1000),
                     cache_hit=False,
                     error=str(exc),
-                    fallback_reason="llm_filter_failed",
+                    fallback_reason="",
                 )
                 logger.warning(
                     "Failed to apply LLM strict filter for base action library "
@@ -988,7 +1036,17 @@ class RuntimeState:
     def _load_runtime_cache_payload(self) -> dict[str, Any]:
         if self._live2d_runtime_cache_path is None:
             return {"scan_cache": {}, "action_filter_cache": {}}
-        return load_live2d_runtime_cache(self._live2d_runtime_cache_path)
+        payload, load_errors = load_live2d_runtime_cache(self._live2d_runtime_cache_path)
+        self.runtime_cache_root_error = str(load_errors.get("root") or "").strip()
+        self.runtime_cache_segment_errors = {
+            key: str(value).strip()
+            for key, value in load_errors.items()
+            if key != "root" and str(value).strip()
+        }
+        self.motion_tuning_samples_load_error = str(
+            load_errors.get("motion_tuning_samples") or ""
+        ).strip()
+        return payload
 
     @staticmethod
     def _load_action_filter_cache_from_payload(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -1134,6 +1192,18 @@ class RuntimeState:
         return None
 
     def _persist_runtime_cache_payload(self) -> None:
+        if self.runtime_cache_root_error:
+            logger.warning(
+                "Skip persisting runtime cache while root cache error is active: %s",
+                self.runtime_cache_root_error,
+            )
+            return
+        if self.runtime_cache_segment_errors:
+            logger.warning(
+                "Skip persisting runtime cache while segment cache errors are active: %s",
+                self.runtime_cache_segment_errors,
+            )
+            return
         self._runtime_cache_payload["action_filter_cache"] = deepcopy(self._base_action_filter_cache)
         self._runtime_cache_payload["motion_tuning_samples"] = deepcopy(
             self.motion_tuning_samples
@@ -1141,6 +1211,29 @@ class RuntimeState:
         if self._live2d_runtime_cache_path is None:
             return
         save_live2d_runtime_cache(self._live2d_runtime_cache_path, self._runtime_cache_payload)
+
+    def _build_runtime_cache_error_payload(self) -> dict[str, str]:
+        payload = {
+            key: value
+            for key, value in self.runtime_cache_segment_errors.items()
+            if str(key).strip() and str(value).strip()
+        }
+        if self.runtime_cache_root_error:
+            payload["root"] = self.runtime_cache_root_error
+        if self.motion_tuning_samples_load_error:
+            payload["motion_tuning_samples"] = self.motion_tuning_samples_load_error
+        return payload
+
+    def _get_runtime_cache_blocking_error(self) -> str:
+        if self.runtime_cache_root_error:
+            return f"root={self.runtime_cache_root_error}"
+        if self.runtime_cache_segment_errors:
+            return "; ".join(
+                f"{key}={value}"
+                for key, value in sorted(self.runtime_cache_segment_errors.items())
+                if str(key).strip() and str(value).strip()
+            )
+        return ""
 
     def _load_motion_tuning_samples_from_payload(
         self,
@@ -1155,8 +1248,30 @@ class RuntimeState:
             try:
                 normalized_samples.append(self._normalize_motion_tuning_sample(sample))
             except ValueError as exc:
-                logger.warning("Ignoring invalid persisted motion tuning sample: %s", exc)
-        return normalized_samples[:200]
+                self.motion_tuning_samples_load_error = (
+                    "motion_tuning_samples_invalid_persisted_sample"
+                    f": {exc}"
+                )
+                self.motion_tuning_reference_examples = []
+                return []
+        return normalized_samples
+
+    def _raise_if_runtime_cache_error_active(self) -> None:
+        if self.runtime_cache_root_error:
+            raise ValueError(
+                "runtime_cache_root_error_active: "
+                f"{self.runtime_cache_root_error}"
+            )
+        if self.runtime_cache_segment_errors:
+            joined_errors = "; ".join(
+                f"{key}={value}"
+                for key, value in sorted(self.runtime_cache_segment_errors.items())
+                if str(key).strip() and str(value).strip()
+            )
+            raise ValueError(
+                "runtime_cache_segment_error_active: "
+                f"{joined_errors}"
+            )
 
     def _normalize_motion_tuning_sample(self, sample_payload: Any) -> dict[str, Any]:
         if not isinstance(sample_payload, dict):

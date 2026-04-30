@@ -163,6 +163,15 @@ const baseActionPreview = computed<DesktopBaseActionPreview | null>(() => {
   if (!library) {
     return null;
   }
+  const runtimeCacheErrors = state.modelInfo?.runtime_cache_errors;
+  const runtimeCacheDiagnostics = [
+    runtimeCacheErrors?.scan_cache
+      ? `runtime cache scan_cache 异常：${runtimeCacheErrors.scan_cache}`
+      : "",
+    runtimeCacheErrors?.action_filter_cache
+      ? `runtime cache action_filter_cache 异常：${runtimeCacheErrors.action_filter_cache}`
+      : "",
+  ].filter(Boolean).join(" | ");
 
   const channelCandidateCountByName = new Map<string, number>();
   for (const item of library.channels) {
@@ -303,7 +312,7 @@ const baseActionPreview = computed<DesktopBaseActionPreview | null>(() => {
       latencyMs: 0,
       cacheHit: false,
       selectedChannelCount,
-      error: library.analysis.error ?? "",
+      error: [library.analysis.error ?? "", runtimeCacheDiagnostics].filter(Boolean).join(" | "),
       fallbackReason: "",
     },
     families,
@@ -400,7 +409,10 @@ function handleDesktopCommand(command: DesktopRuntimeCommand): void {
       applyMotionEngineSettingsSnapshot(command.settings);
       return;
     case "request_motion_tuning_samples_sync":
-      bridge.publishMotionTuningSamples(adapter.state.motionTuningSamples);
+      bridge.publishMotionTuningSamples(
+        adapter.state.motionTuningSamples,
+        adapter.state.motionTuningSamplesStatus,
+      );
       return;
     case "save_motion_tuning_sample":
       saveMotionTuningSample(command.sample);
@@ -509,11 +521,14 @@ watch(
 );
 
 watch(
-  () => adapter.state.motionTuningSamples,
-  (samples) => {
-    bridge.publishMotionTuningSamples(samples);
+  () => ({
+    samples: adapter.state.motionTuningSamples,
+    status: adapter.state.motionTuningSamplesStatus,
+  }),
+  ({ samples, status }) => {
+    bridge.publishMotionTuningSamples(samples, status);
   },
-  { immediate: true },
+  { deep: true, immediate: true },
 );
 
 watch(

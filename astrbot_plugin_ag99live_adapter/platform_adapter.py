@@ -361,6 +361,9 @@ class OLVPetPlatformAdapter(Platform):
         payload = build_system_motion_tuning_samples_state(
             session_id=self.client_uid,
             samples=self.runtime_state.list_motion_tuning_samples(),
+            root_error=self.runtime_state.get_runtime_cache_root_error(),
+            load_error=self.runtime_state.get_motion_tuning_samples_load_error(),
+            diagnostics=self.runtime_state.list_motion_tuning_fewshot_diagnostics(),
         )
         await self._send_json(payload)
 

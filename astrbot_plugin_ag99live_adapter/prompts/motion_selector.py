@@ -155,22 +155,46 @@ def build_selector_platform_context(*, runtime_state: Any) -> str:
 def resolve_selector_few_shot_examples(*, runtime_state: Any) -> list[dict[str, Any]]:
     enabled = bool(getattr(runtime_state, "realtime_motion_fewshot_enabled", True))
     if not enabled:
+        if hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
+            runtime_state.motion_tuning_fewshot_diagnostics = []
+        return []
+
+    count = int(getattr(runtime_state, "realtime_motion_fewshot_count", 4))
+    count = max(0, count)
+    if count == 0:
+        if hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
+            runtime_state.motion_tuning_fewshot_diagnostics = []
         return []
 
     user_examples = [
         item
         for item in getattr(runtime_state, "motion_tuning_reference_examples", [])
         if isinstance(item, dict)
-    ][:5]
-    max_count = len(DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES)
-    count_raw = getattr(runtime_state, "realtime_motion_fewshot_count", 4)
-    try:
-        count = int(round(float(count_raw)))
-    except (TypeError, ValueError):
-        count = 4
-    count = max(0, min(count, max_count))
-    default_examples = DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES[:count] if count else []
-    return [*user_examples, *default_examples][: max(5, count)]
+    ]
+    selected_user_examples = user_examples[:count]
+    default_count = max(0, count - len(selected_user_examples))
+    default_examples = DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES[:default_count]
+    resolved_examples = [*selected_user_examples, *default_examples]
+
+    diagnostics: list[str] = []
+    if len(selected_user_examples) < count:
+        diagnostics.append(
+            "motion_tuning_user_samples_insufficient:"
+            f"requested={count}:user_available={len(selected_user_examples)}"
+        )
+    if default_examples:
+        diagnostics.append(
+            "motion_tuning_default_backfill_applied:"
+            f"count={len(default_examples)}"
+        )
+    if len(resolved_examples) < count:
+        diagnostics.append(
+            "motion_tuning_fewshot_final_shortage:"
+            f"requested={count}:final_count={len(resolved_examples)}"
+        )
+    if hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
+        runtime_state.motion_tuning_fewshot_diagnostics = diagnostics
+    return resolved_examples
 
 
 def resolve_motion_prompt_instruction(*, runtime_state: Any) -> str:

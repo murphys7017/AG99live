@@ -81,6 +81,9 @@ const llmReferenceSampleCount = computed(() =>
   bridge.state.motionTuningSamples.filter((sample) =>
     matchesCurrentProfileSample(sample, mutableProfile.value) && sample.enabledForLlmReference).length,
 );
+const motionTuningLoadError = computed(() => bridge.state.motionTuningSamplesStatus.loadError.trim());
+const motionTuningRootError = computed(() => bridge.state.motionTuningSamplesStatus.rootError.trim());
+const motionTuningDiagnostics = computed(() => bridge.state.motionTuningSamplesStatus.diagnostics);
 const savedSamples = computed(() =>
   bridge.state.motionTuningSamples.filter((sample) =>
     matchesCurrentProfileSample(sample, mutableProfile.value)),
@@ -434,6 +437,27 @@ function cloneJson<TValue>(value: TValue): TValue {
       选择最近一次真实播放过的动作，手动微调 primary / hint 轴及其绑定参数，点击播放观察 Live2D 效果。
       保存后的样本可以作为 few-shot 参考同步给后端大模型，用来约束后续动作生成风格。
     </p>
+
+    <p v-if="motionTuningRootError" class="history-empty">
+      后端 runtime cache 根状态异常：{{ motionTuningRootError }}
+    </p>
+
+    <p v-else-if="motionTuningLoadError" class="history-empty">
+      后端动作调参样本池加载失败：{{ motionTuningLoadError }}
+    </p>
+
+    <ul v-else-if="motionTuningDiagnostics.length" class="motion-tuning__sample-list">
+      <li
+        v-for="diagnostic in motionTuningDiagnostics"
+        :key="diagnostic"
+        class="motion-tuning__sample-item"
+      >
+        <div>
+          <strong>few-shot 诊断</strong>
+          <p>{{ diagnostic }}</p>
+        </div>
+      </li>
+    </ul>
 
     <template v-if="mutableProfile && recentSemanticRecords.length">
       <div class="motion-tuning__layout">

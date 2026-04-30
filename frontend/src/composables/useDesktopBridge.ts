@@ -7,6 +7,7 @@ import type {
   DesktopProfileAuthoringCommand,
   DesktopProfileAuthoringSnapshot,
   DesktopMotionTuningSample,
+  DesktopMotionTuningSamplesStatus,
   DesktopRuntimeCommand,
   DesktopRuntimeSnapshot,
   DesktopWindowVisibilityState,
@@ -28,7 +29,11 @@ const PROFILE_AUTHORING_SNAPSHOT_STORAGE_KEY = "ag99live.desktop.profile_authori
 
 type RuntimeBridgeMessage =
   | { kind: "snapshot"; snapshot: DesktopRuntimeSnapshot }
-  | { kind: "motion_tuning_samples"; samples: DesktopMotionTuningSample[] }
+  | {
+    kind: "motion_tuning_samples";
+    samples: DesktopMotionTuningSample[];
+    status?: DesktopMotionTuningSamplesStatus;
+  }
   | { kind: "command"; command: DesktopRuntimeCommand };
 
 type ProfileAuthoringBridgeMessage =
@@ -92,6 +97,11 @@ const defaultWindowState: DesktopWindowVisibilityState = {
 const state = reactive({
   snapshot: loadRuntimeSnapshot(),
   motionTuningSamples: [] as DesktopMotionTuningSample[],
+  motionTuningSamplesStatus: {
+    rootError: "",
+    loadError: "",
+    diagnostics: [],
+  } as DesktopMotionTuningSamplesStatus,
   profileAuthoringSnapshot: loadProfileAuthoringSnapshot(),
   windowState: defaultWindowState,
 });
@@ -131,6 +141,7 @@ function ensureInitialized(): void {
 
       if (payload.kind === "motion_tuning_samples") {
         state.motionTuningSamples = normalizeMotionTuningSamples(payload.samples);
+        state.motionTuningSamplesStatus = normalizeMotionTuningSamplesStatus(payload.status);
         return;
       }
 
@@ -227,6 +238,28 @@ function loadRuntimeSnapshot(): DesktopRuntimeSnapshot {
     window.localStorage.removeItem(RUNTIME_SNAPSHOT_STORAGE_KEY);
     return defaultSnapshot;
   }
+}
+
+function normalizeMotionTuningSamplesStatus(value: unknown): DesktopMotionTuningSamplesStatus {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      rootError: "",
+      loadError: "",
+      diagnostics: [],
+    };
+  }
+  const candidate = value as {
+    rootError?: unknown;
+    loadError?: unknown;
+    diagnostics?: unknown;
+  };
+  return {
+    rootError: normalizeText(candidate.rootError),
+    loadError: normalizeText(candidate.loadError),
+    diagnostics: Array.isArray(candidate.diagnostics)
+      ? candidate.diagnostics.map((item) => normalizeText(item)).filter(Boolean)
+      : [],
+  };
 }
 
 function loadProfileAuthoringSnapshot(): DesktopProfileAuthoringSnapshot {
@@ -735,12 +768,16 @@ export function useDesktopBridge() {
 
   function publishMotionTuningSamples(
     samples: unknown,
+    status?: DesktopMotionTuningSamplesStatus,
   ): void {
     const nextSamples = normalizeMotionTuningSamples(samples);
+    const nextStatus = normalizeMotionTuningSamplesStatus(status);
     state.motionTuningSamples = nextSamples;
+    state.motionTuningSamplesStatus = nextStatus;
     runtimeChannel?.postMessage({
       kind: "motion_tuning_samples",
       samples: nextSamples,
+      status: nextStatus,
     } satisfies RuntimeBridgeMessage);
   }
 

@@ -287,6 +287,12 @@ export interface DesktopRuntimeSnapshot {
   baseActionPreview: DesktopBaseActionPreview | null;
 }
 
+export interface DesktopMotionTuningSamplesStatus {
+  rootError: string;
+  loadError: string;
+  diagnostics: readonly string[];
+}
+
 export type DesktopRuntimeCommand =
   | { type: "set_address"; address: string }
   | { type: "set_desktop_screenshot_on_send"; enabled: boolean }

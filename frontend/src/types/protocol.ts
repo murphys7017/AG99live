@@ -630,16 +630,25 @@ export interface ModelSummary {
   };
 }
 
+export interface RuntimeCacheErrorsPayload {
+  root?: string;
+  scan_cache?: string;
+  action_filter_cache?: string;
+  motion_tuning_samples?: string;
+}
+
 export interface ModelSyncInfo {
   schema_version: string;
   driver_priority: string[];
   selected_model: string;
   available_models: string[];
   models: ModelSummary[];
+  runtime_cache_errors?: RuntimeCacheErrorsPayload;
 }
 
 export interface SystemModelSyncPayload {
   model_info: ModelSyncInfo;
+  runtime_cache_errors?: RuntimeCacheErrorsPayload;
   conf_name: string;
   conf_uid: string;
   client_uid: string;
@@ -679,5 +688,8 @@ export interface SystemMotionTuningSampleDeletePayload {
 }
 
 export interface SystemMotionTuningSamplesStatePayload {
+  root_error?: string;
   samples: MotionTuningSampleProtocolPayload[];
+  load_error?: string;
+  diagnostics?: string[];
 }

@@ -93,7 +93,7 @@ def test_runtime_state_updates_analysis_status_when_provider_succeeds(
     assert state.selected_motion_analysis_provider is provider
 
 
-def test_runtime_state_marks_fallback_when_provider_filter_fails(
+def test_runtime_state_marks_failed_when_provider_filter_fails(
     monkeypatch,
     install_fake_astrbot,
     tmp_path,
@@ -155,11 +155,49 @@ def test_runtime_state_marks_fallback_when_provider_filter_fails(
     asyncio.run(state.refresh_async())
 
     library = state.model_info["models"][0]["base_action_library"]
-    assert library["analysis"]["status"] == "fallback"
-    assert library["analysis"]["mode"] == "rule_seed"
+    assert library["analysis"]["status"] == "failed"
+    assert library["analysis"]["mode"] == "llm_strict"
     assert library["analysis"]["provider_id"] == "runtime-llm-fail"
     assert "runtime filter failed" in library["analysis"]["error"]
+    assert library["analysis"]["fallback_reason"] == ""
     assert [item["id"] for item in library["atoms"]] == before_atom_ids
+
+
+def test_runtime_state_marks_failed_when_motion_analysis_provider_is_unavailable(
+    monkeypatch,
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    runtime_state, _provider_cls = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+
+    seed_model_info = build_seed_model_info()
+    monkeypatch.setattr(
+        runtime_state,
+        "scan_live2d_models",
+        lambda **kwargs: deepcopy(seed_model_info),
+    )
+    live2ds_dir = tmp_path / "live2ds"
+    (live2ds_dir / "DemoModel").mkdir(parents=True, exist_ok=True)
+
+    state = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=None,
+        plugin_config={"motion_analysis_provider_id": "missing-provider"},
+        plugin_config_loader=None,
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=live2ds_dir,
+    )
+    asyncio.run(state.refresh_async())
+
+    library = state.model_info["models"][0]["base_action_library"]
+    assert library["analysis"]["status"] == "failed"
+    assert library["analysis"]["mode"] == "llm_strict"
+    assert "motion_analysis_provider_unavailable" in library["analysis"]["error"]
+    assert library["analysis"]["fallback_reason"] == ""
 
 
 def test_runtime_state_splits_large_payload_into_llm_chunks(
@@ -356,6 +394,182 @@ def test_runtime_state_reuses_chunked_filter_cache(
     assert library["analysis"]["mode"] == "llm_strict_chunked_cached"
     assert int(library["analysis"]["chunk_count"]) == 2
     assert ChunkedCacheProvider.call_count == first_call_count
+
+
+def test_runtime_state_blocks_action_filter_when_action_filter_cache_segment_is_invalid(
+    monkeypatch,
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    runtime_state, provider_cls = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+
+    class ProviderMeta:
+        id = "runtime-llm-blocked-by-cache-error"
+
+    class ProviderShouldNotRun(provider_cls):
+        call_count = 0
+
+        def meta(self):
+            return ProviderMeta()
+
+        async def text_chat(self, *, prompt: str, system_prompt: str):
+            del prompt, system_prompt
+            ProviderShouldNotRun.call_count += 1
+
+            class Response:
+                completion_text = "{}"
+
+            return Response()
+
+    provider = ProviderShouldNotRun()
+
+    class PluginContext:
+        def get_provider_by_id(self, provider_id: str):
+            if provider_id == "runtime-llm-blocked-by-cache-error":
+                return provider
+            return None
+
+        def get_using_stt_provider(self, umo: str):
+            del umo
+            return None
+
+        def get_using_provider(self, umo: str):
+            del umo
+            return provider
+
+    seed_model_info = build_seed_model_info()
+    monkeypatch.setattr(
+        runtime_state,
+        "scan_live2d_models",
+        lambda **kwargs: deepcopy(seed_model_info),
+    )
+    live2ds_dir = tmp_path / "live2ds"
+    (live2ds_dir / "DemoModel").mkdir(parents=True, exist_ok=True)
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "live2d_runtime_cache.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "live2d_runtime_cache.v1",
+                "scan_cache": {},
+                "action_filter_cache": [],
+                "motion_tuning_samples": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    state = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=PluginContext(),
+        plugin_config={
+            "motion_analysis_provider_id": "runtime-llm-blocked-by-cache-error",
+            "action_llm_filter_min_selected_channels": 1,
+        },
+        plugin_config_loader=None,
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=live2ds_dir,
+        runtime_cache_dir=cache_dir,
+    )
+    asyncio.run(state.refresh_async())
+
+    library = state.model_info["models"][0]["base_action_library"]
+    assert library["analysis"]["status"] == "failed"
+    assert library["analysis"]["mode"] == "llm_strict"
+    assert "runtime_cache_error_active" in library["analysis"]["error"]
+    assert "action_filter_cache=live2d_runtime_cache_action_filter_cache_invalid" in (
+        library["analysis"]["error"]
+    )
+    assert library["analysis"]["fallback_reason"] == ""
+    assert ProviderShouldNotRun.call_count == 0
+
+
+def test_runtime_state_blocks_action_filter_when_runtime_cache_root_is_invalid(
+    monkeypatch,
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    runtime_state, provider_cls = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+
+    class ProviderMeta:
+        id = "runtime-llm-blocked-by-root-cache-error"
+
+    class ProviderShouldNotRun(provider_cls):
+        call_count = 0
+
+        def meta(self):
+            return ProviderMeta()
+
+        async def text_chat(self, *, prompt: str, system_prompt: str):
+            del prompt, system_prompt
+            ProviderShouldNotRun.call_count += 1
+
+            class Response:
+                completion_text = "{}"
+
+            return Response()
+
+    provider = ProviderShouldNotRun()
+
+    class PluginContext:
+        def get_provider_by_id(self, provider_id: str):
+            if provider_id == "runtime-llm-blocked-by-root-cache-error":
+                return provider
+            return None
+
+        def get_using_stt_provider(self, umo: str):
+            del umo
+            return None
+
+        def get_using_provider(self, umo: str):
+            del umo
+            return provider
+
+    seed_model_info = build_seed_model_info()
+    monkeypatch.setattr(
+        runtime_state,
+        "scan_live2d_models",
+        lambda **kwargs: deepcopy(seed_model_info),
+    )
+    live2ds_dir = tmp_path / "live2ds"
+    (live2ds_dir / "DemoModel").mkdir(parents=True, exist_ok=True)
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "live2d_runtime_cache.json").write_text(
+        "{broken json",
+        encoding="utf-8",
+    )
+
+    state = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=PluginContext(),
+        plugin_config={
+            "motion_analysis_provider_id": "runtime-llm-blocked-by-root-cache-error",
+            "action_llm_filter_min_selected_channels": 1,
+        },
+        plugin_config_loader=None,
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=live2ds_dir,
+        runtime_cache_dir=cache_dir,
+    )
+    asyncio.run(state.refresh_async())
+
+    library = state.model_info["models"][0]["base_action_library"]
+    assert library["analysis"]["status"] == "failed"
+    assert library["analysis"]["mode"] == "llm_strict"
+    assert "runtime_cache_error_active" in library["analysis"]["error"]
+    assert "root=live2d_runtime_cache_load_failed" in library["analysis"]["error"]
+    assert library["analysis"]["fallback_reason"] == ""
+    assert ProviderShouldNotRun.call_count == 0
 
 
 def test_runtime_state_refresh_reads_inline_motion_contract_flag(

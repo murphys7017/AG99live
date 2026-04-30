@@ -3,6 +3,7 @@ import type {
   DesktopBackendHistoryMessage,
   DesktopBackendHistorySummary,
   DesktopHistoryEntry,
+  DesktopMotionTuningSamplesStatus,
   DesktopSemanticAxisProfileSaveResult,
   DesktopMotionTuningSample,
 } from "../types/desktop";
@@ -17,6 +18,7 @@ import type {
   OutputTextPayload,
   OutputTranscriptionPayload,
   ProtocolEnvelope,
+  RuntimeCacheErrorsPayload,
   SystemSemanticAxisProfileSavePayload,
   SystemSemanticAxisProfileSavedPayload,
   SystemSemanticAxisProfileSaveFailedPayload,
@@ -94,6 +96,11 @@ const state = reactive({
   audioPlaybackDurationMs: null as number | null,
   latestSemanticAxisProfileSaveResult: null as DesktopSemanticAxisProfileSaveResult | null,
   motionTuningSamples: [] as DesktopMotionTuningSample[],
+  motionTuningSamplesStatus: {
+    rootError: "",
+    loadError: "",
+    diagnostics: [],
+  } as DesktopMotionTuningSamplesStatus,
 });
 
 interface MicrophoneCaptureRuntime {
@@ -1085,7 +1092,35 @@ function applyMotionTuningSamplesState(
       .map((sample) => normalizeMotionTuningSamplePayload(sample))
       .filter((sample): sample is DesktopMotionTuningSample => sample !== null)
     : [];
+  const rootError = typeof envelope.payload.root_error === "string"
+    ? envelope.payload.root_error.trim()
+    : "";
+  const loadError = typeof envelope.payload.load_error === "string"
+    ? envelope.payload.load_error.trim()
+    : "";
+  const diagnostics = Array.isArray(envelope.payload.diagnostics)
+    ? envelope.payload.diagnostics
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter(Boolean)
+    : [];
   state.motionTuningSamples = samples;
+  state.motionTuningSamplesStatus = {
+    rootError,
+    loadError,
+    diagnostics,
+  };
+  if (rootError) {
+    state.lastError = rootError;
+    state.statusMessage = `后端 runtime cache 根状态异常：${rootError}`;
+    pushHistory("error", state.statusMessage);
+    return;
+  }
+  if (loadError) {
+    state.lastError = loadError;
+    state.statusMessage = `后端动作调参样本池加载失败：${loadError}`;
+    pushHistory("error", state.statusMessage);
+    return;
+  }
   state.lastError = "";
   state.statusMessage = samples.length
     ? `已同步 ${samples.length} 个后端动作调参样本。`
@@ -1927,11 +1962,19 @@ function rewriteModelSyncEnvelope(
   envelope: ProtocolEnvelope<SystemModelSyncPayload>,
 ): ProtocolEnvelope<SystemModelSyncPayload> {
   const modelInfo = rewriteModelInfo(envelope.payload.model_info);
+  const runtimeCacheErrors = normalizeRuntimeCacheErrors(
+    envelope.payload.runtime_cache_errors ?? modelInfo.runtime_cache_errors,
+  );
+  const modelInfoWithRuntimeCacheErrors: ModelSyncInfo = {
+    ...modelInfo,
+    runtime_cache_errors: runtimeCacheErrors,
+  };
   return {
     ...envelope,
     payload: {
       ...envelope.payload,
-      model_info: modelInfo,
+      model_info: modelInfoWithRuntimeCacheErrors,
+      runtime_cache_errors: runtimeCacheErrors,
     },
   };
 }
@@ -1939,12 +1982,43 @@ function rewriteModelSyncEnvelope(
 function rewriteModelInfo(modelInfo: ModelSyncInfo): ModelSyncInfo {
   return {
     ...modelInfo,
+    runtime_cache_errors: normalizeRuntimeCacheErrors(modelInfo.runtime_cache_errors),
     models: modelInfo.models.map((model) => ({
       ...model,
       model_url: rewriteHttpUrl(model.model_url),
       icon_url: rewriteHttpUrl(model.icon_url),
     })),
   };
+}
+
+function normalizeRuntimeCacheErrors(
+  value: RuntimeCacheErrorsPayload | undefined,
+): RuntimeCacheErrorsPayload | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const normalized: RuntimeCacheErrorsPayload = {};
+  const root = typeof value.root === "string" ? value.root.trim() : "";
+  const scanCache = typeof value.scan_cache === "string" ? value.scan_cache.trim() : "";
+  const actionFilterCache = typeof value.action_filter_cache === "string"
+    ? value.action_filter_cache.trim()
+    : "";
+  const motionTuningSamples = typeof value.motion_tuning_samples === "string"
+    ? value.motion_tuning_samples.trim()
+    : "";
+  if (root) {
+    normalized.root = root;
+  }
+  if (scanCache) {
+    normalized.scan_cache = scanCache;
+  }
+  if (actionFilterCache) {
+    normalized.action_filter_cache = actionFilterCache;
+  }
+  if (motionTuningSamples) {
+    normalized.motion_tuning_samples = motionTuningSamples;
+  }
+  return Object.keys(normalized).length ? normalized : undefined;
 }
 
 function rewriteSocketUrl(rawUrl: string): string {

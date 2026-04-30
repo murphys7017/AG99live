@@ -146,6 +146,9 @@ class FrontendCompatHandler:
                     session_id=session_id,
                     turn_id=message.turn_id,
                     samples=self._runtime_state.list_motion_tuning_samples(),
+                    root_error=self._runtime_state.get_runtime_cache_root_error(),
+                    load_error=self._runtime_state.get_motion_tuning_samples_load_error(),
+                    diagnostics=self._runtime_state.list_motion_tuning_fewshot_diagnostics(),
                 )
             )
         elif msg_type == TYPE_SYSTEM_MOTION_TUNING_SAMPLE_DELETE:
@@ -166,6 +169,9 @@ class FrontendCompatHandler:
                     session_id=session_id,
                     turn_id=message.turn_id,
                     samples=self._runtime_state.list_motion_tuning_samples(),
+                    root_error=self._runtime_state.get_runtime_cache_root_error(),
+                    load_error=self._runtime_state.get_motion_tuning_samples_load_error(),
+                    diagnostics=self._runtime_state.list_motion_tuning_fewshot_diagnostics(),
                 )
             )
         elif msg_type == TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE:

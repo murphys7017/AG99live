@@ -36,6 +36,7 @@ def build_system_model_sync(
     *,
     session_id: str,
     model_info: dict[str, Any],
+    runtime_cache_errors: dict[str, str] | None = None,
     conf_name: str,
     conf_uid: str,
     client_uid: str,
@@ -46,6 +47,11 @@ def build_system_model_sync(
         source=SOURCE_ADAPTER,
         payload={
             "model_info": model_info,
+            "runtime_cache_errors": {
+                str(key).strip(): str(value).strip()
+                for key, value in (runtime_cache_errors or {}).items()
+                if str(key).strip() and str(value).strip()
+            },
             "conf_name": conf_name,
             "conf_uid": conf_uid,
             "client_uid": client_uid,
@@ -224,6 +230,9 @@ def build_system_motion_tuning_samples_state(
     *,
     session_id: str,
     samples: list[dict[str, Any]],
+    root_error: str = "",
+    load_error: str = "",
+    diagnostics: list[str] | None = None,
     turn_id: str | None = None,
 ) -> dict[str, Any]:
     return build_message_envelope(
@@ -232,7 +241,14 @@ def build_system_motion_tuning_samples_state(
         turn_id=turn_id,
         source=SOURCE_ADAPTER,
         payload={
+            "root_error": str(root_error or "").strip(),
             "samples": samples,
+            "load_error": str(load_error or "").strip(),
+            "diagnostics": [
+                str(item).strip()
+                for item in (diagnostics or [])
+                if str(item).strip()
+            ],
         },
     )
 

@@ -20,6 +20,9 @@ class _RuntimeStateStub:
         self.saved_motion_tuning_sample: object = None
         self.deleted_motion_tuning_sample_id: object = None
         self.motion_tuning_samples: list[dict[str, object]] = []
+        self.motion_tuning_samples_load_error = ""
+        self.motion_tuning_fewshot_diagnostics: list[str] = []
+        self.runtime_cache_root_error = ""
 
     def save_semantic_axis_profile_update(
         self,
@@ -62,6 +65,15 @@ class _RuntimeStateStub:
 
     def list_motion_tuning_samples(self) -> list[dict[str, object]]:
         return list(self.motion_tuning_samples)
+
+    def get_motion_tuning_samples_load_error(self) -> str:
+        return self.motion_tuning_samples_load_error
+
+    def get_runtime_cache_root_error(self) -> str:
+        return self.runtime_cache_root_error
+
+    def list_motion_tuning_fewshot_diagnostics(self) -> list[str]:
+        return list(self.motion_tuning_fewshot_diagnostics)
 
 
 class _HistoryBridgeStub:
@@ -295,6 +307,9 @@ def test_frontend_compat_handler_saves_motion_tuning_sample_and_pushes_state() -
     assert len(sent_payloads) == 1
     assert sent_payloads[0]["type"] == "system.motion_tuning_samples_state"
     assert sent_payloads[0]["payload"]["samples"] == [sample]
+    assert sent_payloads[0]["payload"]["root_error"] == ""
+    assert sent_payloads[0]["payload"]["load_error"] == ""
+    assert sent_payloads[0]["payload"]["diagnostics"] == []
 
 
 def test_frontend_compat_handler_save_missing_motion_tuning_sample_field_returns_control_error() -> None:
@@ -400,6 +415,55 @@ def test_frontend_compat_handler_deletes_motion_tuning_sample_and_pushes_state()
     assert len(sent_payloads) == 1
     assert sent_payloads[0]["type"] == "system.motion_tuning_samples_state"
     assert sent_payloads[0]["payload"]["samples"] == []
+    assert sent_payloads[0]["payload"]["root_error"] == ""
+    assert sent_payloads[0]["payload"]["load_error"] == ""
+    assert sent_payloads[0]["payload"]["diagnostics"] == []
+
+
+def test_frontend_compat_handler_pushes_motion_tuning_sample_state_with_load_error_and_diagnostics() -> None:
+    runtime_state = _RuntimeStateStub()
+    runtime_state.motion_tuning_samples = [{"id": "sample-1"}]
+    runtime_state.runtime_cache_root_error = "live2d_runtime_cache_load_failed: broken json"
+    runtime_state.motion_tuning_samples_load_error = "motion_tuning_samples_invalid_persisted_sample"
+    runtime_state.motion_tuning_fewshot_diagnostics = [
+        "motion_tuning_user_samples_insufficient:requested=3:user_available=1",
+        "motion_tuning_default_backfill_applied:count=2",
+    ]
+    handler = FrontendCompatHandler(
+        background_files_getter=lambda: [],
+        history_bridge=_HistoryBridgeStub(),
+        runtime_state=runtime_state,
+    )
+    sent_payloads: list[dict] = []
+
+    async def send_json(payload: dict) -> bool:
+        sent_payloads.append(payload)
+        return True
+
+    async def refresh_and_send_model(*, force: bool = False) -> None:
+        raise AssertionError("should not refresh model sync for motion tuning sample save")
+
+    asyncio.run(
+        handler.handle(
+            SimpleNamespace(
+                type="system.motion_tuning_sample_save",
+                session_id="session",
+                turn_id="turn",
+                payload={"sample": runtime_state.motion_tuning_samples[0]},
+            ),
+            send_json=send_json,
+            refresh_and_send_model=refresh_and_send_model,
+        )
+    )
+
+    assert len(sent_payloads) == 1
+    assert sent_payloads[0]["type"] == "system.motion_tuning_samples_state"
+    assert sent_payloads[0]["payload"]["root_error"] == "live2d_runtime_cache_load_failed: broken json"
+    assert sent_payloads[0]["payload"]["load_error"] == "motion_tuning_samples_invalid_persisted_sample"
+    assert sent_payloads[0]["payload"]["diagnostics"] == [
+        "motion_tuning_user_samples_insufficient:requested=3:user_available=1",
+        "motion_tuning_default_backfill_applied:count=2",
+    ]
 
 
 def test_frontend_compat_handler_delete_missing_motion_tuning_sample_fails() -> None:

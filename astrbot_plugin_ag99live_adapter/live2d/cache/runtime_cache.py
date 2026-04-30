@@ -45,32 +45,52 @@ def build_live2d_directory_md5(live2ds_dir: Path) -> str:
     return digest.hexdigest()
 
 
-def load_live2d_runtime_cache(cache_path: Path) -> dict[str, Any]:
+def load_live2d_runtime_cache(cache_path: Path) -> tuple[dict[str, Any], dict[str, str]]:
     if not cache_path.exists():
-        return _build_empty_cache_payload()
+        return _build_empty_cache_payload(), {}
 
     try:
         payload = json.loads(cache_path.read_text(encoding="utf-8"))
     except Exception as exc:
         logger.warning("Failed to load Live2D runtime cache `%s`: %s", cache_path, exc)
-        return _build_empty_cache_payload()
+        return _build_empty_cache_payload(), {
+            "root": f"live2d_runtime_cache_load_failed: {exc}"
+        }
 
     if not isinstance(payload, dict):
-        return _build_empty_cache_payload()
+        return _build_empty_cache_payload(), {
+            "root": "live2d_runtime_cache_invalid_payload"
+        }
     if str(payload.get("schema_version") or "") != LIVE2D_RUNTIME_CACHE_SCHEMA_VERSION:
-        return _build_empty_cache_payload()
+        return _build_empty_cache_payload(), {
+            "root": "live2d_runtime_cache_schema_version_mismatch"
+        }
 
     scan_cache = payload.get("scan_cache")
     action_filter_cache = payload.get("action_filter_cache")
     motion_tuning_samples = payload.get("motion_tuning_samples")
-    return {
-        "schema_version": LIVE2D_RUNTIME_CACHE_SCHEMA_VERSION,
-        "scan_cache": scan_cache if isinstance(scan_cache, dict) else {},
-        "action_filter_cache": action_filter_cache if isinstance(action_filter_cache, dict) else {},
-        "motion_tuning_samples": (
-            motion_tuning_samples if isinstance(motion_tuning_samples, list) else []
-        ),
-    }
+
+    errors: dict[str, str] = {}
+    normalized_scan_cache = scan_cache if isinstance(scan_cache, dict) else {}
+    normalized_action_filter_cache = action_filter_cache if isinstance(action_filter_cache, dict) else {}
+    normalized_motion_tuning_samples = (
+        motion_tuning_samples if isinstance(motion_tuning_samples, list) else []
+    )
+    if not isinstance(scan_cache, dict):
+        errors["scan_cache"] = "live2d_runtime_cache_scan_cache_invalid"
+    if not isinstance(action_filter_cache, dict):
+        errors["action_filter_cache"] = "live2d_runtime_cache_action_filter_cache_invalid"
+    if not isinstance(motion_tuning_samples, list):
+        errors["motion_tuning_samples"] = "live2d_runtime_cache_motion_tuning_samples_invalid"
+    return (
+        {
+            "schema_version": LIVE2D_RUNTIME_CACHE_SCHEMA_VERSION,
+            "scan_cache": normalized_scan_cache,
+            "action_filter_cache": normalized_action_filter_cache,
+            "motion_tuning_samples": normalized_motion_tuning_samples,
+        },
+        errors,
+    )
 
 
 def save_live2d_runtime_cache(cache_path: Path, payload: dict[str, Any]) -> None:

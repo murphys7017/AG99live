@@ -12,6 +12,10 @@ from astrbot_plugin_ag99live_adapter.motion.realtime_motion_plan import (
     validate_motion_intent_payload,
     validate_parameter_plan_payload,
 )
+from astrbot_plugin_ag99live_adapter.prompts.motion_selector import (
+    DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES,
+    resolve_selector_few_shot_examples,
+)
 
 
 _AXIS_NAMES = [
@@ -568,6 +572,115 @@ def test_realtime_motion_plan_prompt_includes_user_tuned_examples_first() -> Non
     assert isinstance(intent, dict)
     assert "Assistant: tuned sample" in provider.last_prompt
     assert '"head_yaw":76' in provider.last_prompt
+
+
+def test_resolve_selector_few_shot_examples_respects_configured_count() -> None:
+    class RuntimeStub:
+        realtime_motion_fewshot_enabled = True
+        realtime_motion_fewshot_count = 6
+        motion_tuning_reference_examples = [
+            {
+                "input": f"Assistant: tuned sample {index}",
+                "output": {
+                    "emotion": "joy",
+                    "mode": "expressive",
+                    "duration_ms": 900 + index,
+                    "axes": {"head_yaw": 70 + index},
+                },
+            }
+            for index in range(6)
+        ]
+
+    runtime_state = RuntimeStub()
+    resolved = resolve_selector_few_shot_examples(runtime_state=runtime_state)
+
+    assert len(resolved) == 6
+    assert [item["input"] for item in resolved] == [
+        f"Assistant: tuned sample {index}" for index in range(6)
+    ]
+
+
+def test_resolve_selector_few_shot_examples_backfills_defaults_up_to_configured_count() -> None:
+    user_example = {
+        "input": "Assistant: tuned sample",
+        "output": {
+            "emotion": "joy",
+            "mode": "expressive",
+            "duration_ms": 900,
+            "axes": {"head_yaw": 76},
+        },
+    }
+
+    class RuntimeStub:
+        realtime_motion_fewshot_enabled = True
+        realtime_motion_fewshot_count = 3
+        motion_tuning_reference_examples = [user_example]
+        motion_tuning_fewshot_diagnostics: list[str] = []
+
+    runtime_state = RuntimeStub()
+    resolved = resolve_selector_few_shot_examples(runtime_state=runtime_state)
+
+    assert resolved == [
+        user_example,
+        *DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES[:2],
+    ]
+    assert runtime_state.motion_tuning_fewshot_diagnostics == [
+        "motion_tuning_user_samples_insufficient:requested=3:user_available=1",
+        "motion_tuning_default_backfill_applied:count=2",
+    ]
+
+
+def test_resolve_selector_few_shot_examples_uses_unbounded_configured_count() -> None:
+    class RuntimeStub:
+        realtime_motion_fewshot_enabled = True
+        realtime_motion_fewshot_count = 12
+        motion_tuning_reference_examples = [
+            {
+                "input": f"Assistant: tuned sample {index}",
+                "output": {
+                    "emotion": "joy",
+                    "mode": "expressive",
+                    "duration_ms": 900 + index,
+                    "axes": {"head_yaw": 70 + index},
+                },
+            }
+            for index in range(12)
+        ]
+        motion_tuning_fewshot_diagnostics: list[str] = []
+
+    runtime_state = RuntimeStub()
+    resolved = resolve_selector_few_shot_examples(runtime_state=runtime_state)
+
+    assert len(resolved) == 12
+    assert resolved[-1]["input"] == "Assistant: tuned sample 11"
+
+
+def test_resolve_selector_few_shot_examples_reports_final_shortage_after_default_backfill() -> None:
+    class RuntimeStub:
+        realtime_motion_fewshot_enabled = True
+        realtime_motion_fewshot_count = 20
+        motion_tuning_reference_examples = [
+            {
+                "input": "Assistant: tuned sample",
+                "output": {
+                    "emotion": "joy",
+                    "mode": "expressive",
+                    "duration_ms": 900,
+                    "axes": {"head_yaw": 76},
+                },
+            }
+        ]
+        motion_tuning_fewshot_diagnostics: list[str] = []
+
+    runtime_state = RuntimeStub()
+    resolved = resolve_selector_few_shot_examples(runtime_state=runtime_state)
+
+    assert len(resolved) == 1 + len(DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES)
+    assert runtime_state.motion_tuning_fewshot_diagnostics == [
+        "motion_tuning_user_samples_insufficient:requested=20:user_available=1",
+        f"motion_tuning_default_backfill_applied:count={len(DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES)}",
+        f"motion_tuning_fewshot_final_shortage:requested=20:final_count={1 + len(DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES)}",
+    ]
 
 
 def test_realtime_motion_plan_generator_accepts_incomplete_selector_output_with_warning(caplog) -> None:

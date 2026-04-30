@@ -54,7 +54,7 @@
     "default": 12.0
   },
   "action_llm_filter_min_selected_channels": {
-    "description": "LLM 筛选最少需要覆盖的通道数。低于该值将回退到规则候选。",
+    "description": "LLM 筛选最少需要覆盖的通道数。低于该值将标记筛选失败。",
     "type": "int",
     "default": 3
   },
