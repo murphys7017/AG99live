@@ -5,59 +5,14 @@ import type {
   SemanticAxisControlRole,
   SemanticAxisCoupling,
   SemanticAxisDefinition,
-  SemanticAxisParameterBinding,
   SemanticAxisProfile,
 } from "../types/semantic-axis-profile";
 import { useParameterExcludeKeywords } from "../composables/useParameterExcludeKeywords";
+import { CONTROL_ROLE_OPTIONS } from "../data/profileEditorGuide";
+import ProfileGuideHelp from "./ProfileGuideHelp.vue";
+import AxisDetailForm from "./AxisDetailForm.vue";
 
-type EditableAxisRangeKey = "value_range" | "soft_range" | "strong_range";
-type EditableBindingRangeKey = "input_range" | "output_range";
-type EditableSemanticListKey = "positive_semantics" | "negative_semantics";
 type AxisRoleFilter = SemanticAxisControlRole | "all";
-
-const CONTROL_ROLE_OPTIONS: SemanticAxisControlRole[] = [
-  "primary",
-  "hint",
-  "derived",
-  "runtime",
-  "ambient",
-  "debug",
-];
-const COUPLING_MODE_OPTIONS: SemanticAxisCoupling["mode"][] = [
-  "same_direction",
-  "opposite_direction",
-];
-const PROFILE_QUICK_START = [
-  "Axis 是语义控制槽，不是直接写进模型的 ParamXXX。先定义动作语义，再决定映射到哪些真实参数。",
-  "Binding 负责把 axis 的 0~100 语义值映射到 Live2D 参数真实范围；一个真实参数只能归属一条 axis。",
-  "Coupling 是轴间联动，只适合做从属跟随，不适合拿来替代主控输入。",
-];
-const PROFILE_ROLE_GUIDE: Array<{ role: string; description: string }> = [
-  { role: "primary", description: "给 LLM 直接控制的主表达轴，优先放最重要、最直观的动作。" },
-  { role: "hint", description: "也允许 LLM 直接控制，但优先级低于 primary，适合补充细节。" },
-  { role: "derived", description: "通常由 coupling 派生，不建议直接让 LLM 主控。" },
-  { role: "runtime", description: "更适合运行时驱动，例如眨眼、口型、实时状态。" },
-  { role: "ambient", description: "环境/待机相关轴，通常不进入当前回复动作主链路。" },
-  { role: "debug", description: "调试或实验轴，正式链路尽量不要依赖。" },
-];
-const PROFILE_FIELD_GUIDE: Array<{ label: string; description: string }> = [
-  { label: "Neutral", description: "静止中心点。没有明显动作时，轴值应尽量靠近这里。" },
-  { label: "Value Range", description: "这个 axis 的完整合法范围；soft/strong 都必须落在它里面。" },
-  { label: "Soft Range", description: "轻微活动区。如果 expressive 输出仍全部落在 soft_range 内，前端可能判回 idle。" },
-  { label: "Strong Range", description: "强表达参考区，主要给提示词和调参参考，不是硬阈值。" },
-  { label: "Positive / Negative Semantics", description: "分别描述轴值变大、变小时代表什么语义，用来帮 LLM 理解方向。" },
-];
-const PROFILE_BINDING_GUIDE = [
-  "Parameter ID 填模型里真实存在的参数名，例如 ParamAngleX、ParamMouthForm。",
-  "Input Range 一般与这个 axis 的语义输入区间一致，默认通常对齐 value_range。",
-  "Output Range 填模型参数真实输出范围；如果方向相反，优先用 invert，不要把区间反着写。",
-  "Weight 是该 binding 的默认强度，先从 1 开始，只有明显过强时再下调。",
-];
-const PROFILE_COUPLING_GUIDE = [
-  "Source Axis 是驱动方，Target Axis 是被带动方。",
-  "Scale 控制跟随比例；Deadzone 控制多小的动作直接忽略；Max Delta 限制最多带动多少。",
-  "优先保留少量、单向、好理解的 coupling，避免把 profile 配成难以预测的联动网。",
-];
 
 const bridge = useDesktopBridge();
 const draftProfile = ref<SemanticAxisProfile | null>(null);
@@ -123,12 +78,6 @@ const allFilteredAxesSelected = computed(() => {
   const ids = filteredAxisIds.value;
   return ids.length > 0 && ids.every((id) => selectedAxisIds.value.includes(id));
 });
-const axisOptions = computed(() =>
-  draftAxes.value.map((axis) => ({
-    id: axis.id,
-    label: axis.label || axis.id,
-  })),
-);
 const selectedAxis = computed<SemanticAxisDefinition | null>(() => {
   const axes = draftAxes.value;
   if (!axes.length) {
@@ -423,76 +372,6 @@ function confirmSelectedAxisConfiguration(): void {
   saveStatusText.value = `已确认 ${axis.id} 的当前配置。`;
 }
 
-function updateRange(
-  targetRangeOwner: Pick<SemanticAxisDefinition, EditableAxisRangeKey>,
-  rangeKey: EditableAxisRangeKey,
-  index: 0 | 1,
-  event: Event,
-): void {
-  const value = readFiniteNumber(event);
-  if (value === null) {
-    return;
-  }
-  targetRangeOwner[rangeKey][index] = value;
-  markDirty();
-}
-
-function updateBindingRange(
-  binding: SemanticAxisParameterBinding,
-  rangeKey: EditableBindingRangeKey,
-  index: 0 | 1,
-  event: Event,
-): void {
-  const value = readFiniteNumber(event);
-  if (value === null) {
-    return;
-  }
-  binding[rangeKey][index] = value;
-  markDirty();
-}
-
-function updateBindingWeight(binding: SemanticAxisParameterBinding, event: Event): void {
-  const value = readFiniteNumber(event);
-  if (value === null) {
-    return;
-  }
-  binding.default_weight = value;
-  markDirty();
-}
-
-function updateCouplingNumber(
-  coupling: SemanticAxisCoupling,
-  key: "scale" | "deadzone" | "max_delta",
-  event: Event,
-): void {
-  const value = readFiniteNumber(event);
-  if (value === null) {
-    return;
-  }
-  coupling[key] = value;
-  markDirty();
-}
-
-function updateStringListFromText(
-  axis: SemanticAxisDefinition,
-  key: EditableSemanticListKey,
-  event: Event,
-): void {
-  const target = event.target;
-  if (!(target instanceof HTMLTextAreaElement)) {
-    return;
-  }
-  axis[key] = target.value
-    .split(/\r?\n/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-  markDirty();
-}
-
-function formatStringListInput(values: string[]): string {
-  return values.join("\n");
-}
-
 function addBinding(axis: SemanticAxisDefinition): void {
   axis.parameter_bindings.push({
     parameter_id: "",
@@ -542,19 +421,6 @@ function removeCoupling(index: number): void {
   markDirty();
 }
 
-function readFiniteNumber(event: Event): number | null {
-  const target = event.target;
-  if (!(target instanceof HTMLInputElement)) {
-    return null;
-  }
-  const value = Number(target.value);
-  if (!Number.isFinite(value)) {
-    saveStatusText.value = `数值输入无效：${target.value || "<empty>"}`;
-    return null;
-  }
-  return value;
-}
-
 function saveProfile(): void {
   const profile = draftProfile.value;
   const expectedRevision = draftBaseRevision.value;
@@ -597,10 +463,6 @@ function saveProfile(): void {
     expectedRevision,
     profile: cloneSemanticAxisProfile(profile),
   });
-}
-
-function formatRange(range: [number, number]): string {
-  return `${range[0]} .. ${range[1]}`;
 }
 
 function formatBindingTitle(axis: SemanticAxisDefinition): string {
@@ -855,43 +717,7 @@ function findCouplingCycle(edges: Map<string, string[]>): string[] | null {
         当前可编辑轴语义、数值范围、parameter bindings 和 couplings；前端保存前会列出配置错误，后端 schema 仍是最终严格校验。
       </p>
 
-      <section class="profile-editor__help">
-        <div class="profile-editor__help-block">
-          <strong>先看这三个概念</strong>
-          <ul class="profile-editor__help-list">
-            <li
-              v-for="item in PROFILE_QUICK_START"
-              :key="item"
-            >
-              {{ item }}
-            </li>
-          </ul>
-        </div>
-
-        <div class="profile-editor__help-block">
-          <strong>Control Role 怎么选</strong>
-          <ul class="profile-editor__help-list">
-            <li
-              v-for="item in PROFILE_ROLE_GUIDE"
-              :key="item.role"
-            >
-              <code>{{ item.role }}</code>：{{ item.description }}
-            </li>
-          </ul>
-        </div>
-
-        <div class="profile-editor__help-block">
-          <strong>字段含义</strong>
-          <ul class="profile-editor__help-list">
-            <li
-              v-for="item in PROFILE_FIELD_GUIDE"
-              :key="item.label"
-            >
-              <code>{{ item.label }}</code>：{{ item.description }}
-            </li>
-          </ul>
-        </div>
-      </section>
+      <ProfileGuideHelp />
 
       <p v-if="currentProfile.status === 'stale'" class="action-preview__error">
         当前 profile 已标记为 stale。保存仍会走 revision 校验；如果模型文件已经变化，请先重新同步最新 profile。
@@ -1042,430 +868,26 @@ function findCouplingCycle(edges: Map<string, string[]>): string[] | null {
           </div>
         </aside>
 
-        <section v-if="selectedAxis" class="profile-editor__editor">
+        <template v-if="selectedAxis">
           <p
             v-if="!selectedAxisMatchesCurrentFilter"
             class="action-preview__error"
           >
             当前正在编辑的 axis 不匹配左侧筛选条件；清空筛选或选择左侧可见 axis 可避免误编辑。
           </p>
-
-          <div class="profile-editor__summary">
-            <span>{{ selectedAxis.id }}</span>
-            <span>{{ selectedAxis.semantic_group }}</span>
-            <span>neutral {{ selectedAxis.neutral }}</span>
-            <span>value {{ formatRange(selectedAxis.value_range) }}</span>
-          </div>
-
-          <div class="profile-editor__help-block profile-editor__help-block--compact">
-            <strong>当前 axis 的推荐配置顺序</strong>
-            <ul class="profile-editor__help-list">
-              <li>先写 `Description / Positive / Negative Semantics`，把这个轴的大方向语义讲清楚。</li>
-              <li>再定 `Neutral / Value Range / Soft Range / Strong Range`，决定它的中心点和强弱边界。</li>
-              <li>最后配置 `Parameter Bindings`，把这个语义轴映射到真实 Live2D 参数。</li>
-            </ul>
-          </div>
-
-          <div class="profile-editor__form">
-            <label class="action-preview__field">
-              <span>Axis Label（显示名）</span>
-              <input
-                v-model="selectedAxis.label"
-                class="settings-card__input"
-                type="text"
-                @input="markDirty"
-              />
-            </label>
-
-            <label class="action-preview__field">
-              <span>Control Role（控制来源）</span>
-              <select
-                v-model="selectedAxis.control_role"
-                class="settings-card__input action-preview__select"
-                @change="markDirty"
-              >
-                <option
-                  v-for="role in CONTROL_ROLE_OPTIONS"
-                  :key="role"
-                  :value="role"
-                >
-                  {{ role }}
-                </option>
-              </select>
-            </label>
-
-            <label class="action-preview__field profile-editor__field--full">
-              <span>Description（给 LLM 的主语义说明）</span>
-              <textarea
-                v-model="selectedAxis.description"
-                class="motion-tuning__textarea"
-                @input="markDirty"
-              />
-            </label>
-
-            <label class="action-preview__field profile-editor__field--full">
-              <span>Usage Notes（使用限制 / 习惯）</span>
-              <textarea
-                v-model="selectedAxis.usage_notes"
-                class="motion-tuning__textarea"
-                @input="markDirty"
-              />
-            </label>
-
-            <label class="action-preview__field">
-              <span>Semantic Group（分组）</span>
-              <input
-                v-model="selectedAxis.semantic_group"
-                class="settings-card__input"
-                type="text"
-                @input="markDirty"
-              />
-            </label>
-
-            <label class="action-preview__field">
-              <span>Neutral（静止中心）</span>
-              <input
-                v-model.number="selectedAxis.neutral"
-                class="settings-card__input"
-                type="number"
-                step="0.1"
-                @input="markDirty"
-              />
-            </label>
-
-            <label class="action-preview__field">
-              <span>Value Range（合法总范围）</span>
-              <div class="profile-editor__range-row">
-                <input
-                  :value="selectedAxis.value_range[0]"
-                  class="settings-card__input"
-                  type="number"
-                  step="0.1"
-                  @input="updateRange(selectedAxis, 'value_range', 0, $event)"
-                />
-                <input
-                  :value="selectedAxis.value_range[1]"
-                  class="settings-card__input"
-                  type="number"
-                  step="0.1"
-                  @input="updateRange(selectedAxis, 'value_range', 1, $event)"
-                />
-              </div>
-            </label>
-
-            <label class="action-preview__field">
-              <span>Soft Range（轻微活动区）</span>
-              <div class="profile-editor__range-row">
-                <input
-                  :value="selectedAxis.soft_range[0]"
-                  class="settings-card__input"
-                  type="number"
-                  step="0.1"
-                  @input="updateRange(selectedAxis, 'soft_range', 0, $event)"
-                />
-                <input
-                  :value="selectedAxis.soft_range[1]"
-                  class="settings-card__input"
-                  type="number"
-                  step="0.1"
-                  @input="updateRange(selectedAxis, 'soft_range', 1, $event)"
-                />
-              </div>
-            </label>
-
-            <label class="action-preview__field">
-              <span>Strong Range（强表达参考区）</span>
-              <div class="profile-editor__range-row">
-                <input
-                  :value="selectedAxis.strong_range[0]"
-                  class="settings-card__input"
-                  type="number"
-                  step="0.1"
-                  @input="updateRange(selectedAxis, 'strong_range', 0, $event)"
-                />
-                <input
-                  :value="selectedAxis.strong_range[1]"
-                  class="settings-card__input"
-                  type="number"
-                  step="0.1"
-                  @input="updateRange(selectedAxis, 'strong_range', 1, $event)"
-                />
-              </div>
-            </label>
-
-            <label class="action-preview__field profile-editor__field--full">
-              <span>Positive Semantics（值变大代表什么）</span>
-              <textarea
-                :value="formatStringListInput(selectedAxis.positive_semantics)"
-                class="motion-tuning__textarea"
-                @input="updateStringListFromText(selectedAxis, 'positive_semantics', $event)"
-              />
-            </label>
-
-            <label class="action-preview__field profile-editor__field--full">
-              <span>Negative Semantics（值变小代表什么）</span>
-              <textarea
-                :value="formatStringListInput(selectedAxis.negative_semantics)"
-                class="motion-tuning__textarea"
-                @input="updateStringListFromText(selectedAxis, 'negative_semantics', $event)"
-              />
-            </label>
-          </div>
-
-          <section class="profile-editor__section">
-            <header class="action-preview__group-header">
-              <strong>Parameter Bindings（映射到真实 Live2D 参数）</strong>
-              <div class="profile-editor__header-actions">
-                <button
-                  v-if="customAxisReviewRequiredIds.has(selectedAxis.id)"
-                  type="button"
-                  class="settings-card__button"
-                  @click="confirmSelectedAxisConfiguration"
-                >
-                  确认当前主轴配置
-                </button>
-                <button
-                  type="button"
-                  class="settings-card__button settings-card__button--ghost"
-                  @click="addBinding(selectedAxis)"
-                >
-                  新增 Binding
-                </button>
-              </div>
-            </header>
-            <div class="profile-editor__help-block profile-editor__help-block--compact">
-              <ul class="profile-editor__help-list">
-                <li
-                  v-for="item in PROFILE_BINDING_GUIDE"
-                  :key="item"
-                >
-                  {{ item }}
-                </li>
-              </ul>
-            </div>
-            <ul class="profile-editor__binding-list">
-              <li
-                v-for="(binding, bindingIndex) in selectedAxis.parameter_bindings"
-                :key="`${selectedAxis.id}:${bindingIndex}:${binding.parameter_id}`"
-                class="profile-editor__binding-item"
-              >
-                <div class="profile-editor__binding-form">
-                  <label class="action-preview__field">
-                    <span>Parameter ID（模型参数名）</span>
-                    <input
-                      v-model="binding.parameter_id"
-                      class="settings-card__input"
-                      type="text"
-                      @input="markDirty"
-                    />
-                  </label>
-                  <label class="action-preview__field">
-                    <span>Parameter Name（备注名）</span>
-                    <input
-                      v-model="binding.parameter_name"
-                      class="settings-card__input"
-                      type="text"
-                      @input="markDirty"
-                    />
-                  </label>
-                  <label class="action-preview__field">
-                    <span>Input Range（轴值输入区间）</span>
-                    <div class="profile-editor__range-row">
-                      <input
-                        :value="binding.input_range[0]"
-                        class="settings-card__input"
-                        type="number"
-                        step="0.1"
-                        @input="updateBindingRange(binding, 'input_range', 0, $event)"
-                      />
-                      <input
-                        :value="binding.input_range[1]"
-                        class="settings-card__input"
-                        type="number"
-                        step="0.1"
-                        @input="updateBindingRange(binding, 'input_range', 1, $event)"
-                      />
-                    </div>
-                  </label>
-                  <label class="action-preview__field">
-                    <span>Output Range（参数输出区间）</span>
-                    <div class="profile-editor__range-row">
-                      <input
-                        :value="binding.output_range[0]"
-                        class="settings-card__input"
-                        type="number"
-                        step="0.1"
-                        @input="updateBindingRange(binding, 'output_range', 0, $event)"
-                      />
-                      <input
-                        :value="binding.output_range[1]"
-                        class="settings-card__input"
-                        type="number"
-                        step="0.1"
-                        @input="updateBindingRange(binding, 'output_range', 1, $event)"
-                      />
-                    </div>
-                  </label>
-                  <label class="action-preview__field">
-                    <span>Weight（默认强度）</span>
-                    <input
-                      :value="binding.default_weight"
-                      class="settings-card__input"
-                      type="number"
-                      step="0.05"
-                      @input="updateBindingWeight(binding, $event)"
-                    />
-                  </label>
-                  <label class="profile-editor__toggle">
-                    <input
-                      v-model="binding.invert"
-                      type="checkbox"
-                      @change="markDirty"
-                    />
-                    <span>invert</span>
-                  </label>
-                  <button
-                    type="button"
-                    class="settings-card__button settings-card__button--ghost"
-                    @click="removeBinding(selectedAxis, bindingIndex)"
-                  >
-                    删除 Binding
-                  </button>
-                </div>
-              </li>
-            </ul>
-          </section>
-
-          <section class="profile-editor__section">
-            <header class="action-preview__group-header">
-              <strong>Couplings（轴间联动）</strong>
-              <button
-                type="button"
-                class="settings-card__button settings-card__button--ghost"
-                @click="addCoupling"
-              >
-                新增 Coupling
-              </button>
-            </header>
-            <div class="profile-editor__help-block profile-editor__help-block--compact">
-              <ul class="profile-editor__help-list">
-                <li
-                  v-for="item in PROFILE_COUPLING_GUIDE"
-                  :key="item"
-                >
-                  {{ item }}
-                </li>
-              </ul>
-            </div>
-            <ul class="profile-editor__binding-list">
-              <li
-                v-for="(coupling, couplingIndex) in draftCouplings"
-                :key="`${coupling.id}:${couplingIndex}`"
-                class="profile-editor__coupling-item"
-              >
-                <div class="profile-editor__binding-form">
-                  <label class="action-preview__field">
-                    <span>ID（联动名）</span>
-                    <input
-                      v-model="coupling.id"
-                      class="settings-card__input"
-                      type="text"
-                      @input="markDirty"
-                    />
-                  </label>
-                  <label class="action-preview__field">
-                    <span>Source Axis（驱动方）</span>
-                    <select
-                      v-model="coupling.source_axis_id"
-                      class="settings-card__input action-preview__select"
-                      @change="markDirty"
-                    >
-                      <option
-                        v-for="axis in axisOptions"
-                        :key="`source:${coupling.id}:${axis.id}`"
-                        :value="axis.id"
-                      >
-                        {{ axis.label }} / {{ axis.id }}
-                      </option>
-                    </select>
-                  </label>
-                  <label class="action-preview__field">
-                    <span>Target Axis（被带动方）</span>
-                    <select
-                      v-model="coupling.target_axis_id"
-                      class="settings-card__input action-preview__select"
-                      @change="markDirty"
-                    >
-                      <option
-                        v-for="axis in axisOptions"
-                        :key="`target:${coupling.id}:${axis.id}`"
-                        :value="axis.id"
-                      >
-                        {{ axis.label }} / {{ axis.id }}
-                      </option>
-                    </select>
-                  </label>
-                  <label class="action-preview__field">
-                    <span>Mode（同向 / 反向）</span>
-                    <select
-                      v-model="coupling.mode"
-                      class="settings-card__input action-preview__select"
-                      @change="markDirty"
-                    >
-                      <option
-                        v-for="mode in COUPLING_MODE_OPTIONS"
-                        :key="mode"
-                        :value="mode"
-                      >
-                        {{ mode }}
-                      </option>
-                    </select>
-                  </label>
-                  <label class="action-preview__field">
-                    <span>Scale（跟随比例）</span>
-                    <input
-                      :value="coupling.scale"
-                      class="settings-card__input"
-                      type="number"
-                      min="0"
-                      step="0.05"
-                      @input="updateCouplingNumber(coupling, 'scale', $event)"
-                    />
-                  </label>
-                  <label class="action-preview__field">
-                    <span>Deadzone（忽略阈值）</span>
-                    <input
-                      :value="coupling.deadzone"
-                      class="settings-card__input"
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      @input="updateCouplingNumber(coupling, 'deadzone', $event)"
-                    />
-                  </label>
-                  <label class="action-preview__field">
-                    <span>Max Delta（最大联动幅度）</span>
-                    <input
-                      :value="coupling.max_delta"
-                      class="settings-card__input"
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      @input="updateCouplingNumber(coupling, 'max_delta', $event)"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    class="settings-card__button settings-card__button--ghost"
-                    @click="removeCoupling(couplingIndex)"
-                  >
-                    删除 Coupling
-                  </button>
-                </div>
-              </li>
-            </ul>
-          </section>
-        </section>
+          <AxisDetailForm
+            :axis="selectedAxis"
+            :draft-axes="draftAxes"
+            :draft-couplings="draftCouplings"
+            :custom-axis-review-required-ids="customAxisReviewRequiredIds"
+            @mark-dirty="markDirty"
+            @add-coupling="addCoupling"
+            @remove-coupling="removeCoupling"
+            @confirm-selected-axis="confirmSelectedAxisConfiguration"
+            @add-binding="addBinding"
+            @remove-binding="removeBinding"
+          />
+        </template>
       </div>
 
       <div class="settings-card__actions">

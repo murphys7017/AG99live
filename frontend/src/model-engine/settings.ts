@@ -1,4 +1,17 @@
-import { DIRECT_PARAMETER_AXIS_NAMES } from "./constants";
+const DIRECT_PARAMETER_AXIS_NAMES = [
+  "head_yaw",
+  "head_roll",
+  "head_pitch",
+  "body_yaw",
+  "body_roll",
+  "gaze_x",
+  "gaze_y",
+  "eye_open_left",
+  "eye_open_right",
+  "mouth_open",
+  "mouth_smile",
+  "brow_bias",
+] as const;
 
 export interface ModelEngineSettings {
   motionIntensityScale: number;
@@ -12,22 +25,6 @@ export const MOTION_INTENSITY_SCALE_STEP = 0.05;
 
 export const MIN_AXIS_INTENSITY_SCALE = 0;
 export const MAX_AXIS_INTENSITY_SCALE = 2.5;
-export const AXIS_INTENSITY_SCALE_STEP = 0.05;
-
-export const MOTION_AXIS_LABELS: Record<string, string> = {
-  head_yaw: "头部左右转向",
-  head_roll: "头部左右歪斜",
-  head_pitch: "头部上下俯仰",
-  body_yaw: "身体左右转向",
-  body_roll: "身体侧倾摆动",
-  gaze_x: "视线左右",
-  gaze_y: "视线上下",
-  eye_open_left: "左眼开合",
-  eye_open_right: "右眼开合",
-  mouth_open: "嘴巴张合",
-  mouth_smile: "微笑幅度",
-  brow_bias: "眉毛情绪",
-};
 
 export function buildDefaultAxisIntensityScale(): Record<string, number> {
   return Object.fromEntries(
@@ -80,18 +77,6 @@ export function normalizeAxisIntensityScale(
     );
   }
   return result;
-}
-
-export function resolveAxisIntensityScaleValue(
-  axisIntensityScale: Record<string, number> | null | undefined,
-  axisName: string,
-): number {
-  return normalizeScale(
-    axisIntensityScale?.[axisName],
-    1,
-    MIN_AXIS_INTENSITY_SCALE,
-    MAX_AXIS_INTENSITY_SCALE,
-  );
 }
 
 export function normalizeModelEngineSettings(value: unknown): ModelEngineSettings {

@@ -1,8 +1,8 @@
 import type { ProtocolEnvelope } from "../types/protocol";
 
 export const PROTOCOL_VERSION = "v2";
-export const SOURCE_FRONTEND = "frontend";
-export const DEFAULT_SESSION_ID = "desktop-client";
+const SOURCE_FRONTEND = "frontend";
+const DEFAULT_SESSION_ID = "desktop-client";
 
 export function buildMessageEnvelope<TPayload>(
   type: string,

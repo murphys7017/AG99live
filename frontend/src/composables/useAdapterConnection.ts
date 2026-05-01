@@ -9,7 +9,6 @@ import type {
 } from "../types/desktop";
 import type {
   ControlErrorPayload,
-  ControlPlaybackFinishedPayload,
   ControlTurnFinishedPayload,
   OutputAudioPayload,
   OutputImagePayload,
@@ -26,6 +25,15 @@ import {
   SCHEMA_MOTION_INTENT_V2,
   SCHEMA_PARAMETER_PLAN_V2,
 } from "../types/protocol";
+import { applyInboundMotionPayload } from "../adapter-connection/inboundMotion";
+import {
+  clearPlaybackGroupContext as clearPlaybackGroup,
+  interruptCurrentTurn as sendInterrupt,
+  sendMotionPayloadPreview as sendMotionPreview,
+  sendPlaybackFinished as sendPlaybackFinishedAction,
+  sendSemanticAxisProfileSave as sendProfileSave,
+  sendText as sendTextAction,
+} from "../adapter-connection/outboundActions";
 import { useAdapterMotionTuning } from "./useAdapterMotionTuning";
 import {
   rewriteHttpUrl as rewriteHttpUrlWithActiveHost,
@@ -123,13 +131,6 @@ const state = reactive({
   } as DesktopMotionTuningSamplesStatus,
 });
 
-interface DesktopCaptureImagePayload {
-  data: string;
-  mime_type: "image/jpeg";
-  source: "screen";
-  captured_at: string;
-}
-
 let socket: WebSocket | null = null;
 let manualClose = false;
 let initializePromise: Promise<void> | null = null;
@@ -165,6 +166,18 @@ function normalizeOrchestrationId(value: unknown): string | null {
   const normalized = value.trim();
   return normalized || null;
 }
+
+const outboundCtx = {
+  get state() {
+    return state;
+  },
+  getSocket: () => socket,
+  buildEnvelope: buildMessageEnvelope as (typeof buildMessageEnvelope),
+  pushHistory: pushHistory as (role: string, text: string) => void,
+  stopAudio: () => stopAudioPlayback(),
+  resetAudioPlaybackTerminal,
+  createMessageId,
+};
 
 function markAudioPlaybackTerminal(
   terminalState: Exclude<AudioPlaybackTerminalState, "idle">,
@@ -646,7 +659,7 @@ async function handleSocketMessage(rawData: string): Promise<void> {
       return;
     case "engine.motion_plan":
     case "engine.motion_intent":
-      applyInboundMotionPayload(envelope as ProtocolEnvelope<Record<string, unknown>>);
+      applyInboundMotionPayload({ state, pushHistory }, envelope as ProtocolEnvelope<Record<string, unknown>>);
       return;
     default:
       reportUnhandledInboundEnvelope(envelope);
@@ -830,187 +843,6 @@ function reportUnhandledInboundEnvelope(
   console.warn("[Connection] unhandled inbound protocol message.", envelope.type, envelope);
 }
 
-function normalizeTurnIdForComparison(turnId: string | null | undefined): string {
-  return typeof turnId === "string" ? turnId.trim() : "";
-}
-
-function applyInboundMotionPayload(
-  envelope: ProtocolEnvelope<Record<string, unknown>>,
-): void {
-  const envelopeTurnId = normalizeTurnIdForComparison(envelope.turn_id);
-  const envelopeOrchestrationId = normalizeOrchestrationId(envelope.orchestration_id);
-  const currentTurnId = normalizeTurnIdForComparison(state.currentTurnId);
-  const currentOrchestrationId = normalizeOrchestrationId(state.currentOrchestrationId);
-  const activeAudioTurnId = normalizeTurnIdForComparison(state.audioPlaybackStartedTurnId);
-  const activeAudioOrchestrationId = normalizeOrchestrationId(state.audioPlaybackStartedOrchestrationId);
-  console.info(
-    "[Connection] engine motion payload received. type=",
-    envelope.type,
-    "turn_id=",
-    envelopeTurnId,
-    "currentTurnId=",
-    currentTurnId,
-    "orchestrationId=",
-    envelopeOrchestrationId,
-    "currentOrchestrationId=",
-    currentOrchestrationId,
-    "audioPlaybackStartedTurnId=",
-    activeAudioTurnId,
-    "audioPlaybackStartedOrchestrationId=",
-    activeAudioOrchestrationId,
-  );
-
-  const matchesCurrentTurn = Boolean(
-    envelopeTurnId
-    && currentTurnId
-    && envelopeTurnId === currentTurnId,
-  );
-  const matchesCurrentOrchestration = Boolean(
-    envelopeOrchestrationId
-    && currentOrchestrationId
-    && envelopeOrchestrationId === currentOrchestrationId,
-  );
-  const matchesActiveAudioTurn = Boolean(
-    envelopeTurnId
-    && activeAudioTurnId
-    && envelopeTurnId === activeAudioTurnId,
-  );
-  const matchesActiveAudioOrchestration = Boolean(
-    envelopeOrchestrationId
-    && activeAudioOrchestrationId
-    && envelopeOrchestrationId === activeAudioOrchestrationId,
-  );
-
-  if (
-    envelopeOrchestrationId
-    && currentOrchestrationId
-    && envelopeOrchestrationId !== currentOrchestrationId
-    && !matchesActiveAudioOrchestration
-  ) {
-    console.warn(
-      "[Connection] discarding motion payload for stale orchestration_id. envelope_orchestration_id=",
-      envelopeOrchestrationId,
-      "current_orchestration_id=",
-      currentOrchestrationId,
-    );
-    state.statusMessage = `忽略过期动作计划（orchestration_id=${envelopeOrchestrationId}）。`;
-    pushHistory("system", state.statusMessage);
-    return;
-  }
-
-  if (
-    envelopeTurnId
-    && currentTurnId
-    && envelopeTurnId !== currentTurnId
-  ) {
-    if (
-      matchesActiveAudioTurn
-      || matchesCurrentOrchestration
-      || matchesActiveAudioOrchestration
-    ) {
-      console.info(
-        "[Connection] accepting late motion payload for active turn/orchestration. envelope_turn_id=",
-        envelopeTurnId,
-        "current_turn_id=",
-        currentTurnId,
-      );
-    } else {
-    console.warn(
-      "[Connection] discarding motion payload for stale turn_id. envelope_turn_id=",
-      envelopeTurnId,
-      "current_turn_id=",
-      currentTurnId,
-    );
-      state.statusMessage = `忽略过期动作计划（turn_id=${envelopeTurnId}）。`;
-      pushHistory("system", state.statusMessage);
-      return;
-    }
-  }
-
-  if (
-    !matchesCurrentTurn
-    && !matchesCurrentOrchestration
-    && !matchesActiveAudioTurn
-    && !matchesActiveAudioOrchestration
-    && !currentTurnId
-    && !currentOrchestrationId
-    && !activeAudioTurnId
-    && !activeAudioOrchestrationId
-  ) {
-    console.warn(
-      "[Connection] discarding orphan motion payload with no active turn/orchestration context.",
-      envelope,
-    );
-    state.statusMessage = "忽略孤立动作计划（当前无活跃文本/音频编排上下文）。";
-    pushHistory("system", state.statusMessage);
-    return;
-  }
-
-  const rawPayload = envelope.payload;
-  const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
-  const payloadKey = envelope.type === "engine.motion_intent" ? "intent" : "plan";
-  const mode =
-    typeof payload.mode === "string" && payload.mode.trim()
-      ? payload.mode.trim()
-      : "preview";
-  const hasMotionPayload = Object.prototype.hasOwnProperty.call(payload, payloadKey);
-  const plan = hasMotionPayload ? payload[payloadKey as keyof typeof payload] : null;
-
-  console.info(
-    "[Connection] engine motion payload parsed. type=",
-    envelope.type,
-    "payloadKey=",
-    payloadKey,
-    "hasMotionPayload=",
-    hasMotionPayload,
-    "plan type=",
-    typeof plan,
-    "plan keys=",
-    plan && typeof plan === "object" ? Object.keys(plan as object) : "N/A",
-  );
-
-  if (!plan || typeof plan !== "object") {
-    console.warn("[Connection] invalid motion payload envelope:", envelope);
-    state.lastError = `收到无效的 ${envelope.type}（缺少 ${payloadKey} 对象）。`;
-    state.statusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return;
-  }
-
-  const schemaVersion =
-    typeof (plan as Record<string, unknown>).schema_version === "string"
-      ? String((plan as Record<string, unknown>).schema_version).trim()
-      : "";
-  const allowedSchemaVersions = envelope.type === "engine.motion_intent"
-    ? new Set([SCHEMA_MOTION_INTENT_V2])
-    : new Set([SCHEMA_PARAMETER_PLAN_V2]);
-  if (!allowedSchemaVersions.has(schemaVersion)) {
-    console.warn(
-      "[Connection] motion payload schema mismatch.",
-      "type=",
-      envelope.type,
-      "expected=",
-      [...allowedSchemaVersions].join("|"),
-      "actual=",
-      schemaVersion,
-      envelope,
-    );
-    state.lastError = `收到无效的 ${envelope.type}（schema_version=${schemaVersion || "empty"}）。`;
-    state.statusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return;
-  }
-
-  state.inboundMotionPlan = plan;
-  state.inboundMotionPlanTurnId = envelopeTurnId || null;
-  state.inboundMotionPlanOrchestrationId = envelopeOrchestrationId;
-  state.inboundMotionPlanReceivedAtMs = performance.now();
-  state.inboundMotionPlanNonce += 1;
-  console.info("[Connection] inboundMotionPlanNonce incremented to", state.inboundMotionPlanNonce, "— watch should fire next.");
-  state.statusMessage = `收到外部动作载荷（${envelope.type}, mode=${mode}）。`;
-  pushHistory("system", state.statusMessage);
-}
-
 function updateAssistantText(text: string, turnId: string | null): void {
   state.lastAssistantText = text;
 
@@ -1136,105 +968,17 @@ function stopAudioPlayback(): void {
 }
 
 async function sendText(text: string): Promise<boolean> {
-  const message = text.trim();
-  if (!message || !socket || socket.readyState !== WebSocket.OPEN) {
-    state.lastError = "当前还没有连上适配器，文本未发送。";
-    state.statusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return false;
-  }
-
-  state.currentOrchestrationId = createMessageId();
-  state.currentTurnId = null;
-  resetAudioPlaybackTerminal();
-  const desktopCapture = state.desktopScreenshotOnSendEnabled
-    ? await captureRealtimeDesktopScreenshot()
-    : null;
-  const outboundText = buildDesktopAwareText(message, desktopCapture);
-  const envelope = buildMessageEnvelope("input.text", {
-    text: outboundText,
-    images: desktopCapture ? [desktopCapture] : [],
-  }, null, state.currentOrchestrationId);
-  socket.send(JSON.stringify(envelope));
-  state.lastError = "";
-  state.statusMessage = desktopCapture
-    ? "文本和实时桌面截图已发送，等待后端回复。"
-    : "文本已发送，等待后端回复。";
-  pushHistory("user", message);
-  return true;
-}
-
-async function captureRealtimeDesktopScreenshot(): Promise<DesktopCaptureImagePayload | null> {
-  const captureDesktopScreenshot = window.ag99desktop?.captureDesktopScreenshot;
-  if (!captureDesktopScreenshot) {
-    return null;
-  }
-
-  try {
-    return await captureDesktopScreenshot();
-  } catch (error) {
-    console.warn("[DesktopCapture] Failed to capture realtime desktop screenshot", error);
-    return null;
-  }
-}
-
-function buildDesktopAwareText(
-  message: string,
-  desktopCapture: DesktopCaptureImagePayload | null,
-): string {
-  if (!desktopCapture) {
-    return message;
-  }
-
-  return [
-    "[系统上下文]",
-    "以下附件中包含用户发送本条消息时的实时桌面截图。",
-    `截图时间：${desktopCapture.captured_at}`,
-    "请结合用户文字与截图中的桌面界面内容理解上下文，再进行回应。",
-    "[/系统上下文]",
-    "",
-    "用户消息：",
-    message,
-  ].join("\n");
+  return sendTextAction(outboundCtx, text);
 }
 
 function interruptCurrentTurn(): boolean {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    state.lastError = "当前还没有连上适配器，无法发送中断。";
-    state.statusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return false;
-  }
-
-  stopAudioPlayback();
-  resetAudioPlaybackTerminal();
-
-  const envelope = buildMessageEnvelope("control.interrupt", {}, state.currentTurnId);
-  socket.send(JSON.stringify(envelope));
-  state.statusMessage = "已发送中断请求。";
-  pushHistory("system", state.statusMessage);
-  return true;
+  return sendInterrupt(outboundCtx);
 }
 
 function sendSemanticAxisProfileSave(
   payload: SystemSemanticAxisProfileSavePayload,
 ): boolean {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    state.lastError = "当前还没有连上适配器，无法保存主轴配置。";
-    state.statusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return false;
-  }
-
-  socket.send(
-    JSON.stringify(
-      buildMessageEnvelope("system.semantic_axis_profile_save", payload),
-    ),
-  );
-  state.lastError = "";
-  state.statusMessage = `已提交模型 ${payload.model_name} 的主轴配置保存请求。`;
-  pushHistory("system", state.statusMessage);
-  return true;
+  return sendProfileSave(outboundCtx, payload);
 }
 
 function requestHistoryList(options: { announce?: boolean } = {}): boolean {
@@ -1262,47 +1006,11 @@ function deleteMotionTuningSample(sampleId: string): boolean {
 }
 
 function sendMotionPayloadPreview(payload: unknown): boolean {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    state.lastError = "当前还没有连上适配器，无法发送动作测试载荷。";
-    state.statusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return false;
-  }
-
-  const schemaVersion = payload && typeof payload === "object"
-    ? String((payload as Record<string, unknown>).schema_version ?? "").trim()
-    : "";
-  if (
-    schemaVersion !== SCHEMA_MOTION_INTENT_V2
-    && schemaVersion !== SCHEMA_PARAMETER_PLAN_V2
-  ) {
-    state.lastError = `动作测试载荷无效：不支持 schema_version=${schemaVersion || "empty"}。`;
-    state.statusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    console.warn("[Connection] refusing invalid motion preview payload:", payload);
-    return false;
-  }
-
-  const messageType = schemaVersion === SCHEMA_MOTION_INTENT_V2
-    ? "engine.motion_intent"
-    : "engine.motion_plan";
-  const payloadKey = messageType === "engine.motion_intent" ? "intent" : "plan";
-
-  socket.send(
-    JSON.stringify(
-      buildMessageEnvelope(messageType, {
-        mode: "preview",
-        [payloadKey]: payload,
-      }),
-    ),
-  );
-  state.statusMessage = `已发送动作测试载荷（${messageType}）。`;
-  pushHistory("system", state.statusMessage);
-  return true;
+  return sendMotionPreview(outboundCtx, payload, SCHEMA_MOTION_INTENT_V2, SCHEMA_PARAMETER_PLAN_V2);
 }
 
 function sendMotionPlanPreview(plan: unknown): boolean {
-  return sendMotionPayloadPreview(plan);
+  return sendMotionPreview(outboundCtx, plan, SCHEMA_MOTION_INTENT_V2, SCHEMA_PARAMETER_PLAN_V2);
 }
 
 async function sendPlaybackFinished(
@@ -1311,50 +1019,14 @@ async function sendPlaybackFinished(
   success: boolean,
   reason?: string,
 ): Promise<void> {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    return;
-  }
-
-  const payload: ControlPlaybackFinishedPayload = { success };
-  if (reason) {
-    payload.reason = reason;
-  }
-
-  socket.send(
-    JSON.stringify(
-      buildMessageEnvelope("control.playback_finished", payload, turnId, orchestrationId),
-    ),
-  );
+  sendPlaybackFinishedAction(outboundCtx, turnId, orchestrationId, success, reason);
 }
 
 function clearPlaybackGroupContext(
   turnId: string | null,
   orchestrationId: string | null,
 ): void {
-  const normalizedTurnId = normalizeTurnIdForComparison(turnId);
-  const normalizedCurrentTurnId = normalizeTurnIdForComparison(state.currentTurnId);
-  const normalizedOrchestrationId = normalizeOrchestrationId(orchestrationId);
-  const currentOrchestrationId = normalizeOrchestrationId(state.currentOrchestrationId);
-
-  const matchesTurn = normalizedTurnId && normalizedCurrentTurnId && normalizedTurnId === normalizedCurrentTurnId;
-  const matchesOrchestration =
-    normalizedOrchestrationId
-    && currentOrchestrationId
-    && normalizedOrchestrationId === currentOrchestrationId;
-
-  if (matchesTurn || matchesOrchestration) {
-    state.currentTurnId = null;
-    state.currentOrchestrationId = null;
-  }
-
-  if (
-    normalizeTurnIdForComparison(state.audioPlaybackStartedTurnId) === normalizedTurnId
-    || normalizeOrchestrationId(state.audioPlaybackStartedOrchestrationId) === normalizedOrchestrationId
-  ) {
-    stopAudioPlayback();
-  }
-
-  resetAudioPlaybackTerminal();
+  clearPlaybackGroup(outboundCtx, turnId, orchestrationId);
 }
 
 function rewriteModelSyncEnvelope(
