@@ -183,7 +183,7 @@ class TurnCoordinator:
 
         session_id = self.session_state.client_uid
         turn_id = self.session_state.current_turn_id
-        orchestration_id = self.session_state.current_orchestration_id
+        orchestration_id = getattr(self.session_state, "current_orchestration_id", None)
 
         self._mark_turn_timing("emit_started_at")
         texts, picture_paths, record_paths = _extract_outbound_message_parts(message_chain)
@@ -340,11 +340,22 @@ class TurnCoordinator:
             if self.session_state.waiting_for_playback_complete:
                 await self.finalize_turn(turn_id=self.session_state.current_turn_id)
 
-            current_turn_id = self.session_state.begin_turn(
-                message_obj.message_str,
-                turn_id=turn_id,
-                orchestration_id=message_obj.raw_message.get("orchestration_id"),
+            inbound_orchestration_id = (
+                message_obj.raw_message.get("orchestration_id")
+                if isinstance(getattr(message_obj, "raw_message", None), dict)
+                else None
             )
+            try:
+                current_turn_id = self.session_state.begin_turn(
+                    message_obj.message_str,
+                    turn_id=turn_id,
+                    orchestration_id=inbound_orchestration_id,
+                )
+            except TypeError:
+                current_turn_id = self.session_state.begin_turn(
+                    message_obj.message_str,
+                    turn_id=turn_id,
+                )
             self._motion_plan_scheduled_turn_ids = set()
             self._begin_turn_timing(message_obj.message_str)
             self.chat_buffer.add("user", message_obj.message_str)
@@ -352,7 +363,7 @@ class TurnCoordinator:
                 build_control_turn_started(
                     session_id=self.session_state.client_uid,
                     turn_id=current_turn_id,
-                    orchestration_id=self.session_state.current_orchestration_id,
+                    orchestration_id=getattr(self.session_state, "current_orchestration_id", None),
                 )
             )
             await self._emit_image_input_diagnostics(message_obj)
@@ -605,7 +616,7 @@ class TurnCoordinator:
                 message_type,
                 session_id=self.session_state.client_uid,
                 turn_id=resolved_turn_id,
-                orchestration_id=self.session_state.current_orchestration_id,
+                orchestration_id=getattr(self.session_state, "current_orchestration_id", None),
                 source=SOURCE_ENGINE,
                 payload=payload,
             )
@@ -798,7 +809,7 @@ class TurnCoordinator:
             build_control_error(
                 session_id=self.session_state.client_uid,
                 turn_id=turn_id,
-                orchestration_id=self.session_state.current_orchestration_id,
+                orchestration_id=getattr(self.session_state, "current_orchestration_id", None),
                 message=f"Realtime motion generation failed: {failure_reason}",
             )
         )

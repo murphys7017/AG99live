@@ -30,18 +30,18 @@ astrbot_plugin_ag99live_adapter/
 
 ## 动作链路
 
-### 默认主路径（split_after_reply）
+### 默认主路径（inline_first）
+
+- Adapter 在请求主模型前注入 `<@anim {...}>` 输出契约。
+- 主回复末尾若包含合法 `<@anim {...}>`，则优先提取并广播动作载荷。
+- 当前 inline contract 使用 `engine.motion_intent.v2`，字段来自当前模型的 `semantic_axis_profile`。
+
+### 备选路径（split_after_reply）
 
 - 主聊天模型只负责正常回复文本，不注入 `<@anim {...}>` 契约。
 - `on_llm_response` 拿到最终 assistant 文本后，调度动作 selector 的二次请求。
 - 动作 selector 使用 AstrBot Provider（`motion_analysis_provider_id`，留空则跟随当前聊天 Provider）。
 - AstrBot 后续 ResultDecorate/TTS 流程继续执行；动作请求与 TTS 并行推进。
-
-### 旧路径（inline_first）
-
-- Adapter 在请求主模型前注入 `<@anim {...}>` 输出契约。
-- 主回复末尾若包含合法 `<@anim {...}>`，则优先提取并广播动作载荷。
-- 当前 inline contract 使用 `engine.motion_intent.v2`，字段来自当前模型的 `semantic_axis_profile`。
 
 ### 动作 selector 输出
 
@@ -58,7 +58,7 @@ astrbot_plugin_ag99live_adapter/
 
 ## 关键配置（`_conf_schema.json`）
 
-- `motion_generation_mode`：动作生成链路，默认 `split_after_reply`；可选 `inline_first` 或 `text_only`。
+- `motion_generation_mode`：动作生成链路，默认 `inline_first`；可选 `split_after_reply` 或 `text_only`。
 - `enable_inline_motion_contract`：`inline_first` 模式下是否启用主请求内联动作契约。
 - `enable_realtime_motion_plan`：是否启用回复后实时动作生成；在 `split_after_reply` 中是主链路，在 `inline_first` 中是兜底。
 - `motion_analysis_provider_id`：动作语义分析模型 Provider。
