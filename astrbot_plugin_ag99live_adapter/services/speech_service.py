@@ -203,6 +203,7 @@ class SpeechIngressService:
             build_control_interrupt(
                 session_id=message.session_id,
                 turn_id=message.turn_id,
+                orchestration_id=getattr(message, "orchestration_id", None),
             )
         )
         return None
@@ -225,6 +226,7 @@ class SpeechIngressService:
                 build_control_error(
                     session_id=session_id,
                     turn_id=turn_id,
+                    orchestration_id=raw_message.get("orchestration_id"),
                     message=f"Audio transcription failed: {exc}",
                 )
             )
@@ -235,6 +237,7 @@ class SpeechIngressService:
                 build_control_error(
                     session_id=session_id,
                     turn_id=turn_id,
+                    orchestration_id=raw_message.get("orchestration_id"),
                     message="The LLM can't hear you.",
                 )
             )
@@ -249,6 +252,7 @@ class SpeechIngressService:
             build_output_transcription(
                 session_id=session_id,
                 turn_id=turn_id,
+                orchestration_id=raw_message.get("orchestration_id"),
                 text=text,
             )
         )

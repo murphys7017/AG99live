@@ -9,6 +9,7 @@ export function buildMessageEnvelope<TPayload>(
   payload: TPayload,
   sessionId: string,
   turnId: string | null = null,
+  orchestrationId: string | null = null,
 ): ProtocolEnvelope<TPayload> {
   return {
     type,
@@ -17,6 +18,7 @@ export function buildMessageEnvelope<TPayload>(
     timestamp: new Date().toISOString(),
     session_id: sessionId || DEFAULT_SESSION_ID,
     turn_id: turnId,
+    orchestration_id: orchestrationId,
     source: SOURCE_FRONTEND,
     payload,
   };

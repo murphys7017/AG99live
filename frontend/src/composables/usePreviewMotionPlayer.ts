@@ -341,6 +341,7 @@ function playPlan(
         "[MotionPlayer] skip duplicate plan restart. elapsedMs=",
         elapsedSinceLastStartMs,
       );
+      state.message = `复用当前参数计划（mode=${playbackPlan.plan.mode}, emotion=${playbackPlan.plan.emotion_label}）...`;
       return true;
     }
   }

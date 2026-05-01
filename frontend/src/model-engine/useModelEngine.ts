@@ -17,12 +17,14 @@ import { normalizeMotionPayload, normalizeTurnId } from "./normalize";
 interface PendingInboundMotionPayload {
   payload: NormalizedMotionPayload;
   turnId: string;
+  orchestrationId: string | null;
   receivedAtMs: number;
   fallbackTimer: number;
 }
 
 interface StartPayloadContext {
   turnId: string | null;
+  orchestrationId: string | null;
   startReason: string;
   queuedDelayMs: number;
 }
@@ -109,9 +111,10 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   ): boolean {
     const selectedModel = dependencies.getSelectedModel();
     state.lastStartReason = context.startReason;
-    console.info("[ModelEngine] starting motion payload.", {
+      console.info("[ModelEngine] starting motion payload.", {
       kind: payload.kind,
       turnId: context.turnId,
+      orchestrationId: context.orchestrationId,
       startReason: context.startReason,
       queuedDelayMs: context.queuedDelayMs,
     });
@@ -173,6 +176,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
           plan: startedPlan,
           model: selectedModel,
           turnId: context.turnId,
+          orchestrationId: context.orchestrationId,
           startReason: context.startReason,
           queuedDelayMs: context.queuedDelayMs,
           payloadKind: payload.kind,
@@ -211,11 +215,12 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       || `动作计划执行中（启动延迟 ${context.queuedDelayMs}ms）。`;
     if (startedPlan) {
       dependencies.onPlanStarted?.({
-        plan: startedPlan,
-        model: selectedModel,
-        turnId: context.turnId,
-        startReason: context.startReason,
-        queuedDelayMs: context.queuedDelayMs,
+          plan: startedPlan,
+          model: selectedModel,
+          turnId: context.turnId,
+          orchestrationId: context.orchestrationId,
+          startReason: context.startReason,
+          queuedDelayMs: context.queuedDelayMs,
         payloadKind: directPlanPayload.kind,
         diagnostics: null,
         playerMessage: successMessage,
@@ -237,6 +242,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     syncPendingState();
     return startPayload(entry.payload, {
       turnId: entry.turnId,
+      orchestrationId: entry.orchestrationId,
       startReason,
       queuedDelayMs: Math.max(0, Math.round(performance.now() - entry.receivedAtMs)),
     });
@@ -250,6 +256,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     if (!normalizedTurnId) {
       startPayload(payload, {
         turnId: null,
+        orchestrationId: context.orchestrationId ?? null,
         startReason: "missing_turn_id",
         queuedDelayMs: 0,
       });
@@ -268,6 +275,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     const entry: PendingInboundMotionPayload = {
       payload,
       turnId: normalizedTurnId,
+      orchestrationId: context.orchestrationId ?? null,
       receivedAtMs: context.receivedAtMs,
       fallbackTimer: 0,
     };
@@ -279,7 +287,17 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       }
 
       const currentTurnId = normalizeTurnId(dependencies.getCurrentTurnId());
+      const currentOrchestrationId = dependencies.getCurrentOrchestrationId?.() ?? null;
+      const audioOrchestrationId = dependencies.getAudioPlaybackInfo().orchestrationId ?? null;
       if (currentTurnId && currentTurnId !== normalizedTurnId) {
+        if (
+          entry.orchestrationId
+          && (entry.orchestrationId === currentOrchestrationId
+            || entry.orchestrationId === audioOrchestrationId)
+        ) {
+          tryStartPendingPayload(normalizedTurnId, "wait_audio_timeout_orchestration_match");
+          return;
+        }
         clearPendingPayload(entry);
         pendingInboundMotionPayloads.delete(normalizedTurnId);
         syncPendingState();
@@ -299,7 +317,11 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     });
 
     const activeAudioTurnId = normalizeTurnId(dependencies.getAudioPlaybackInfo().turnId);
-    if (activeAudioTurnId && activeAudioTurnId === normalizedTurnId) {
+    const activeAudioOrchestrationId = dependencies.getAudioPlaybackInfo().orchestrationId ?? null;
+    if (
+      (activeAudioTurnId && activeAudioTurnId === normalizedTurnId)
+      || (entry.orchestrationId && activeAudioOrchestrationId === entry.orchestrationId)
+    ) {
       tryStartPendingPayload(normalizedTurnId, "audio_already_playing");
     }
   }
@@ -354,6 +376,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
 
     return startPayload(normalized.payload, {
       turnId: null,
+      orchestrationId: null,
       startReason: "preview",
       queuedDelayMs: 0,
     });

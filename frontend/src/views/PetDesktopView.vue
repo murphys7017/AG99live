@@ -25,6 +25,7 @@ const adapter = useAdapterConnection();
 const bridge = useDesktopBridge();
 const motionPlayer = usePreviewMotionPlayer();
 const MAX_MOTION_PLAYBACK_RECORDS = 5;
+const PLAYBACK_SETTLEMENT_WINDOW_MS = 900;
 const motionEngineSettings = reactive(
   cloneModelEngineSettings(bridge.state.snapshot.motionEngineSettings),
 );
@@ -38,8 +39,10 @@ const modelEngine = useModelEngine({
   playPlan: (plan, model, options) => motionPlayer.playPlan(plan, model, options),
   stopPlan: (reason) => motionPlayer.stopPlan(reason),
   getCurrentTurnId: () => adapter.state.currentTurnId,
+  getCurrentOrchestrationId: () => adapter.state.currentOrchestrationId,
   getAudioPlaybackInfo: () => ({
     turnId: adapter.state.audioPlaybackStartedTurnId,
+    orchestrationId: adapter.state.audioPlaybackStartedOrchestrationId,
     startedAtMs: adapter.state.audioPlaybackStartedAtMs,
     durationMs: adapter.state.audioPlaybackDurationMs,
   }),
@@ -48,6 +51,22 @@ const modelEngine = useModelEngine({
   onPlanStarted: (event) => recordMotionPlayback(event),
 });
 const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
+const playbackCoordination = reactive({
+  activeTurnId: null as string | null,
+  activeOrchestrationId: null as string | null,
+  textDelivered: false,
+  audioObserved: false,
+  audioCompleted: false,
+  audioFailed: false,
+  motionStarted: false,
+  motionCompleted: false,
+  motionExpected: false,
+  awaitingLateMotion: false,
+  turnFinishedObserved: false,
+  turnFinishedSuccess: true,
+  completionSent: false,
+  settlementTimer: 0,
+});
 
 function applyMotionEngineSettingsSnapshot(nextValue: unknown): void {
   const normalized = normalizeModelEngineSettings(nextValue);
@@ -145,7 +164,128 @@ function handlePreviewMotionPlan(plan: unknown): void {
   adapter.sendMotionPayloadPreview(plan);
 }
 
+function clearPlaybackSettlementTimer(): void {
+  if (playbackCoordination.settlementTimer) {
+    window.clearTimeout(playbackCoordination.settlementTimer);
+    playbackCoordination.settlementTimer = 0;
+  }
+}
+
+function resetPlaybackCoordination(): void {
+  clearPlaybackSettlementTimer();
+  playbackCoordination.activeTurnId = null;
+  playbackCoordination.activeOrchestrationId = null;
+  playbackCoordination.textDelivered = false;
+  playbackCoordination.audioObserved = false;
+  playbackCoordination.audioCompleted = false;
+  playbackCoordination.audioFailed = false;
+  playbackCoordination.motionStarted = false;
+  playbackCoordination.motionCompleted = false;
+  playbackCoordination.motionExpected = false;
+  playbackCoordination.awaitingLateMotion = false;
+  playbackCoordination.turnFinishedObserved = false;
+  playbackCoordination.turnFinishedSuccess = true;
+  playbackCoordination.completionSent = false;
+}
+
+function ensurePlaybackCoordination(
+  turnId: string | null,
+  orchestrationId: string | null,
+): void {
+  const turnChanged = playbackCoordination.activeTurnId !== turnId;
+  const orchestrationChanged =
+    playbackCoordination.activeOrchestrationId !== orchestrationId;
+  if (turnChanged || orchestrationChanged) {
+    resetPlaybackCoordination();
+    playbackCoordination.activeTurnId = turnId;
+    playbackCoordination.activeOrchestrationId = orchestrationId;
+  }
+}
+
+function shouldSendPlaybackFinished(): boolean {
+  if (playbackCoordination.completionSent) {
+    return false;
+  }
+  if (!playbackCoordination.textDelivered) {
+    return false;
+  }
+  if (!playbackCoordination.audioObserved) {
+    return false;
+  }
+  if (!playbackCoordination.audioCompleted && !playbackCoordination.audioFailed) {
+    return false;
+  }
+  if (playbackCoordination.awaitingLateMotion) {
+    return false;
+  }
+  if (!playbackCoordination.motionExpected) {
+    return true;
+  }
+  if (!playbackCoordination.motionStarted) {
+    return false;
+  }
+  return playbackCoordination.motionCompleted;
+}
+
+function isPlaybackAckRequired(): boolean {
+  const terminalState = adapter.state.audioPlaybackTerminalState;
+  return terminalState === "completed" || terminalState === "failed";
+}
+
+function finalizePlaybackCoordination(): void {
+  const turnId = playbackCoordination.activeTurnId;
+  const orchestrationId = playbackCoordination.activeOrchestrationId;
+  adapter.clearPlaybackGroupContext(turnId, orchestrationId);
+  resetPlaybackCoordination();
+}
+
+function maybeFlushPlaybackCompletion(reason?: string): void {
+  if (!shouldSendPlaybackFinished()) {
+    return;
+  }
+  if (!isPlaybackAckRequired()) {
+    if (playbackCoordination.turnFinishedObserved) {
+      finalizePlaybackCoordination();
+    }
+    return;
+  }
+  if (!playbackCoordination.completionSent) {
+    const turnId = playbackCoordination.activeTurnId;
+    const orchestrationId = playbackCoordination.activeOrchestrationId;
+    const success = !playbackCoordination.audioFailed;
+    playbackCoordination.completionSent = true;
+    void adapter.sendPlaybackFinishedForCurrentGroup(
+      turnId,
+      orchestrationId,
+      success,
+      reason,
+    );
+    return;
+  }
+  if (playbackCoordination.turnFinishedObserved) {
+    finalizePlaybackCoordination();
+  }
+}
+
+function schedulePlaybackSettlementWindow(): void {
+  clearPlaybackSettlementTimer();
+  playbackCoordination.awaitingLateMotion = true;
+  playbackCoordination.settlementTimer = window.setTimeout(() => {
+    playbackCoordination.awaitingLateMotion = false;
+    if (!playbackCoordination.motionStarted) {
+      playbackCoordination.motionExpected = false;
+    }
+    maybeFlushPlaybackCompletion("audio_and_motion_settled");
+  }, PLAYBACK_SETTLEMENT_WINDOW_MS);
+}
+
 function recordMotionPlayback(event: ModelEnginePlanStartedEvent): void {
+  ensurePlaybackCoordination(event.turnId, event.orchestrationId);
+  playbackCoordination.motionExpected = true;
+  playbackCoordination.motionStarted = true;
+  playbackCoordination.motionCompleted = false;
+  playbackCoordination.awaitingLateMotion = false;
+  clearPlaybackSettlementTimer();
   const now = new Date();
   const record: DesktopMotionPlaybackRecord = {
     id: `motion-record-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -153,6 +293,7 @@ function recordMotionPlayback(event: ModelEnginePlanStartedEvent): void {
     source: event.diagnostics?.source || event.startReason,
     payloadKind: event.payloadKind,
     turnId: event.turnId,
+    orchestrationId: event.orchestrationId,
     modelName: event.model?.name ?? selectedModel.value?.name ?? "",
     emotionLabel: event.plan.emotion_label,
     mode: event.plan.mode,
@@ -317,6 +458,7 @@ watch(
     }
     modelEngine.ingestInboundPayload(plan, {
       turnId: adapter.state.inboundMotionPlanTurnId,
+      orchestrationId: adapter.state.inboundMotionPlanOrchestrationId,
       receivedAtMs: adapter.state.inboundMotionPlanReceivedAtMs,
     });
   },
@@ -325,7 +467,78 @@ watch(
 watch(
   () => adapter.state.audioPlaybackStartedNonce,
   () => {
+    ensurePlaybackCoordination(
+      adapter.state.audioPlaybackStartedTurnId,
+      adapter.state.audioPlaybackStartedOrchestrationId,
+    );
+    playbackCoordination.audioObserved = true;
+    playbackCoordination.audioFailed = false;
+    playbackCoordination.audioCompleted = false;
     modelEngine.notifyAudioPlaybackStarted(adapter.state.audioPlaybackStartedTurnId);
+  },
+);
+
+watch(
+  () => adapter.state.assistantTextDeliveryNonce,
+  () => {
+    ensurePlaybackCoordination(
+      adapter.state.assistantTextDeliveryTurnId,
+      adapter.state.assistantTextDeliveryOrchestrationId,
+    );
+    playbackCoordination.textDelivered = true;
+    maybeFlushPlaybackCompletion("text_audio_motion_completed");
+  },
+);
+
+watch(
+  () => adapter.state.audioPlaybackTerminalNonce,
+  () => {
+    ensurePlaybackCoordination(
+      adapter.state.audioPlaybackTerminalTurnId,
+      adapter.state.audioPlaybackTerminalOrchestrationId,
+    );
+    const terminalState = adapter.state.audioPlaybackTerminalState;
+    if (terminalState === "idle") {
+      return;
+    }
+    playbackCoordination.audioObserved = true;
+    playbackCoordination.audioCompleted =
+      terminalState === "completed" || terminalState === "not_requested";
+    playbackCoordination.audioFailed = terminalState === "failed";
+    if (!playbackCoordination.motionStarted || playbackCoordination.motionCompleted) {
+      schedulePlaybackSettlementWindow();
+      return;
+    }
+    maybeFlushPlaybackCompletion(adapter.state.audioPlaybackTerminalReason || "audio_terminal");
+  },
+);
+
+watch(
+  () => motionPlayer.state.status,
+  (status, previousStatus) => {
+    if (status !== "finished") {
+      return;
+    }
+    if (previousStatus !== "playing") {
+      return;
+    }
+    playbackCoordination.motionCompleted = true;
+    if (playbackCoordination.audioObserved) {
+      maybeFlushPlaybackCompletion("motion_completed_after_audio");
+    }
+  },
+);
+
+watch(
+  () => adapter.state.turnFinishedNonce,
+  () => {
+    ensurePlaybackCoordination(
+      adapter.state.turnFinishedTurnId,
+      adapter.state.turnFinishedOrchestrationId,
+    );
+    playbackCoordination.turnFinishedObserved = true;
+    playbackCoordination.turnFinishedSuccess = adapter.state.turnFinishedSuccess;
+    maybeFlushPlaybackCompletion(adapter.state.turnFinishedReason || "turn_finished");
   },
 );
 
@@ -458,6 +671,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  resetPlaybackCoordination();
   modelEngine.stop("unmount");
   detachBridgeListener();
   detachProfileAuthoringBridgeListener();

@@ -160,13 +160,14 @@ class TurnCoordinator:
             await self._handle_engine_motion_payload_preview(message)
             return
 
-        await self._send_json(
-            build_control_error(
-                session_id=message.session_id,
-                turn_id=message.turn_id,
-                message=f"Unhandled message type: {message.type}",
+            await self._send_json(
+                build_control_error(
+                    session_id=message.session_id,
+                    turn_id=message.turn_id,
+                    orchestration_id=message.orchestration_id,
+                    message=f"Unhandled message type: {message.type}",
+                )
             )
-        )
 
     async def emit_message_chain(
         self,
@@ -182,6 +183,7 @@ class TurnCoordinator:
 
         session_id = self.session_state.client_uid
         turn_id = self.session_state.current_turn_id
+        orchestration_id = self.session_state.current_orchestration_id
 
         self._mark_turn_timing("emit_started_at")
         texts, picture_paths, record_paths = _extract_outbound_message_parts(message_chain)
@@ -197,6 +199,7 @@ class TurnCoordinator:
                 build_output_text(
                     session_id=session_id,
                     turn_id=turn_id,
+                    orchestration_id=orchestration_id,
                     text=reply_text,
                     speaker_name=self.speaker_name,
                     avatar="",
@@ -270,6 +273,7 @@ class TurnCoordinator:
                 build_output_image(
                     session_id=session_id,
                     turn_id=turn_id,
+                    orchestration_id=orchestration_id,
                     images=picture_paths,
                 )
             )
@@ -281,6 +285,7 @@ class TurnCoordinator:
                 build_output_audio(
                     session_id=session_id,
                     turn_id=turn_id,
+                    orchestration_id=orchestration_id,
                     audio_url=audio_url,
                     text=reply_text,
                     speaker_name=self.speaker_name,
@@ -292,6 +297,7 @@ class TurnCoordinator:
                 build_control_synth_finished(
                     session_id=session_id,
                     turn_id=turn_id,
+                    orchestration_id=orchestration_id,
                 )
             )
             self.session_state.mark_synthesizing()
@@ -334,7 +340,11 @@ class TurnCoordinator:
             if self.session_state.waiting_for_playback_complete:
                 await self.finalize_turn(turn_id=self.session_state.current_turn_id)
 
-            current_turn_id = self.session_state.begin_turn(message_obj.message_str, turn_id=turn_id)
+            current_turn_id = self.session_state.begin_turn(
+                message_obj.message_str,
+                turn_id=turn_id,
+                orchestration_id=message_obj.raw_message.get("orchestration_id"),
+            )
             self._motion_plan_scheduled_turn_ids = set()
             self._begin_turn_timing(message_obj.message_str)
             self.chat_buffer.add("user", message_obj.message_str)
@@ -342,6 +352,7 @@ class TurnCoordinator:
                 build_control_turn_started(
                     session_id=self.session_state.client_uid,
                     turn_id=current_turn_id,
+                    orchestration_id=self.session_state.current_orchestration_id,
                 )
             )
             await self._emit_image_input_diagnostics(message_obj)
@@ -594,6 +605,7 @@ class TurnCoordinator:
                 message_type,
                 session_id=self.session_state.client_uid,
                 turn_id=resolved_turn_id,
+                orchestration_id=self.session_state.current_orchestration_id,
                 source=SOURCE_ENGINE,
                 payload=payload,
             )
@@ -786,6 +798,7 @@ class TurnCoordinator:
             build_control_error(
                 session_id=self.session_state.client_uid,
                 turn_id=turn_id,
+                orchestration_id=self.session_state.current_orchestration_id,
                 message=f"Realtime motion generation failed: {failure_reason}",
             )
         )
@@ -815,6 +828,7 @@ class TurnCoordinator:
             build_control_turn_finished(
                 session_id=self.session_state.client_uid,
                 turn_id=current_turn_id,
+                orchestration_id=self.session_state.current_orchestration_id,
                 success=success,
                 reason=reason,
             )

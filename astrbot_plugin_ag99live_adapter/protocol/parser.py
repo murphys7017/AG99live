@@ -51,6 +51,7 @@ def parse_inbound_message(
     payload = dict(payload_raw)
     session_id = _normalize_session_id(raw.get("session_id"), default_session_id)
     turn_id = _normalize_optional_string(raw.get("turn_id"))
+    orchestration_id = _normalize_optional_string(raw.get("orchestration_id"))
     source = _normalize_source(raw.get("source"), SOURCE_FRONTEND)
     version = _normalize_optional_string(raw.get("version")) or PROTOCOL_VERSION
     message_id = _normalize_optional_string(raw.get("message_id")) or uuid4().hex
@@ -65,6 +66,7 @@ def parse_inbound_message(
         "timestamp": timestamp,
         "session_id": session_id,
         "turn_id": turn_id,
+        "orchestration_id": orchestration_id,
         "source": source,
         "payload": payload,
     }
@@ -75,6 +77,7 @@ def parse_inbound_message(
         timestamp=timestamp,
         session_id=session_id,
         turn_id=turn_id,
+        orchestration_id=orchestration_id,
         source=source,
         payload=payload,
         raw=normalized_raw,
@@ -107,6 +110,7 @@ def build_message_envelope(
     source: str,
     payload: Mapping[str, Any] | None = None,
     turn_id: str | None = None,
+    orchestration_id: str | None = None,
     version: str = PROTOCOL_VERSION,
     message_id: str | None = None,
     timestamp: str | None = None,
@@ -122,6 +126,7 @@ def build_message_envelope(
         "timestamp": timestamp or _utc_now_iso(),
         "session_id": session_id,
         "turn_id": turn_id,
+        "orchestration_id": orchestration_id,
         "source": source,
         "payload": payload_dict,
     }

@@ -18,6 +18,7 @@ class ProtocolMessage:
     timestamp: str
     session_id: str
     turn_id: str | None
+    orchestration_id: str | None
     source: str
     payload: dict[str, Any]
     raw: dict[str, Any]

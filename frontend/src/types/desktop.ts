@@ -168,6 +168,7 @@ export interface DesktopMotionPlaybackRecord {
   source: string;
   payloadKind: "semantic_intent" | "semantic_plan";
   turnId: string | null;
+  orchestrationId: string | null;
   modelName: string;
   emotionLabel: string;
   mode: "idle" | "expressive";

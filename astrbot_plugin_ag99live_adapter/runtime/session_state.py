@@ -24,13 +24,21 @@ class SessionState:
     last_user_text: str = ""
     waiting_for_playback_complete: bool = False
     current_turn_id: str | None = None
+    current_orchestration_id: str | None = None
 
-    def begin_turn(self, text: str, *, turn_id: str | None = None) -> str:
+    def begin_turn(
+        self,
+        text: str,
+        *,
+        turn_id: str | None = None,
+        orchestration_id: str | None = None,
+    ) -> str:
         self.turn_index += 1
         self.last_user_text = text
         self.stage = SessionStage.THINKING
         self.waiting_for_playback_complete = False
         self.current_turn_id = turn_id or uuid4().hex
+        self.current_orchestration_id = orchestration_id or uuid4().hex
         return self.current_turn_id
 
     def mark_synthesizing(self) -> None:
@@ -44,8 +52,10 @@ class SessionState:
         self.waiting_for_playback_complete = False
         self.stage = SessionStage.IDLE
         self.current_turn_id = None
+        self.current_orchestration_id = None
 
     def reset_to_idle(self) -> None:
         self.waiting_for_playback_complete = False
         self.stage = SessionStage.IDLE
         self.current_turn_id = None
+        self.current_orchestration_id = None

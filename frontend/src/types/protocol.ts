@@ -7,6 +7,7 @@ export interface ProtocolEnvelope<TPayload = unknown> {
   timestamp: string;
   session_id: string;
   turn_id: string | null;
+  orchestration_id?: string | null;
   source: string;
   payload: TPayload;
 }

@@ -257,6 +257,7 @@ def build_output_text(
     *,
     session_id: str,
     turn_id: str | None,
+    orchestration_id: str | None = None,
     text: str,
     speaker_name: str,
     avatar: str,
@@ -265,6 +266,7 @@ def build_output_text(
         TYPE_OUTPUT_TEXT,
         session_id=session_id,
         turn_id=turn_id,
+        orchestration_id=orchestration_id,
         source=SOURCE_ADAPTER,
         payload={
             "text": text,
@@ -278,6 +280,7 @@ def build_output_audio(
     *,
     session_id: str,
     turn_id: str | None,
+    orchestration_id: str | None = None,
     audio_url: str | None,
     text: str,
     speaker_name: str,
@@ -287,6 +290,7 @@ def build_output_audio(
         TYPE_OUTPUT_AUDIO,
         session_id=session_id,
         turn_id=turn_id,
+        orchestration_id=orchestration_id,
         source=SOURCE_ADAPTER,
         payload={
             "audio_url": audio_url,
@@ -301,12 +305,14 @@ def build_output_image(
     *,
     session_id: str,
     turn_id: str | None,
+    orchestration_id: str | None = None,
     images: list[str],
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_OUTPUT_IMAGE,
         session_id=session_id,
         turn_id=turn_id,
+        orchestration_id=orchestration_id,
         source=SOURCE_ADAPTER,
         payload={"images": images},
     )
@@ -316,12 +322,14 @@ def build_output_transcription(
     *,
     session_id: str,
     turn_id: str | None,
+    orchestration_id: str | None = None,
     text: str,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_OUTPUT_TRANSCRIPTION,
         session_id=session_id,
         turn_id=turn_id,
+        orchestration_id=orchestration_id,
         source=SOURCE_ADAPTER,
         payload={"text": text},
     )
@@ -331,11 +339,13 @@ def build_control_turn_started(
     *,
     session_id: str,
     turn_id: str,
+    orchestration_id: str | None = None,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_CONTROL_TURN_STARTED,
         session_id=session_id,
         turn_id=turn_id,
+        orchestration_id=orchestration_id,
         source=SOURCE_ADAPTER,
         payload={},
     )
@@ -345,6 +355,7 @@ def build_control_turn_finished(
     *,
     session_id: str,
     turn_id: str | None,
+    orchestration_id: str | None = None,
     success: bool = True,
     reason: str | None = None,
 ) -> dict[str, Any]:
@@ -355,6 +366,7 @@ def build_control_turn_finished(
         TYPE_CONTROL_TURN_FINISHED,
         session_id=session_id,
         turn_id=turn_id,
+        orchestration_id=orchestration_id,
         source=SOURCE_ADAPTER,
         payload=payload,
     )
@@ -376,11 +388,13 @@ def build_control_interrupt(
     *,
     session_id: str,
     turn_id: str | None,
+    orchestration_id: str | None = None,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_CONTROL_INTERRUPT,
         session_id=session_id,
         turn_id=turn_id,
+        orchestration_id=orchestration_id,
         source=SOURCE_ADAPTER,
         payload={},
     )
@@ -390,11 +404,13 @@ def build_control_synth_finished(
     *,
     session_id: str,
     turn_id: str | None,
+    orchestration_id: str | None = None,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_CONTROL_SYNTH_FINISHED,
         session_id=session_id,
         turn_id=turn_id,
+        orchestration_id=orchestration_id,
         source=SOURCE_ADAPTER,
         payload={},
     )
@@ -405,11 +421,13 @@ def build_control_error(
     session_id: str,
     message: str,
     turn_id: str | None = None,
+    orchestration_id: str | None = None,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_CONTROL_ERROR,
         session_id=session_id,
         turn_id=turn_id,
+        orchestration_id=orchestration_id,
         source=SOURCE_ADAPTER,
         payload={"message": message},
     )
