@@ -8,18 +8,24 @@ import type {
   DesktopProfileAuthoringSnapshot,
   DesktopRuntimeSnapshot,
 } from "../types/desktop";
-import type {
-  SemanticParameterPlan,
-} from "../types/protocol";
-import { parseSemanticParameterPlan} from "../model-engine/planParser";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 import {
   buildDefaultModelEngineSettings,
   cloneModelEngineSettings,
   normalizeModelEngineSettings,
 } from "../model-engine/settings";
+import { cloneSemanticParameterPlan } from "../model-engine/planParser";
 import { DEFAULT_ADAPTER_ADDRESS } from "../adapter-connection/address";
-import { isFiniteNumber, isObject, normalizeText } from "../utils/guards";
+import {
+  cloneNumericRecord,
+  isFiniteNumber,
+  isObject,
+  isPresent,
+  normalizeOptionalInteger,
+  normalizeOptionalText,
+  normalizeStringArray,
+  normalizeText,
+} from "../utils/guards";
 
 export const defaultSnapshot: DesktopRuntimeSnapshot = {
   adapterAddress: DEFAULT_ADAPTER_ADDRESS,
@@ -341,26 +347,6 @@ function normalizeBackendHistoryRole(
   return "system";
 }
 
-function normalizeOptionalText(value: unknown): string | undefined {
-  const normalized = normalizeText(value);
-  return normalized || undefined;
-}
-
-function normalizeStringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-  const normalized = value.map((item) => normalizeText(item)).filter(Boolean);
-  return normalized.length ? normalized : undefined;
-}
-
-function normalizeOptionalInteger(value: unknown): number | undefined {
-  if (!isFiniteNumber(value)) {
-    return undefined;
-  }
-  return Math.max(0, Math.round(value));
-}
-
 function normalizeTimingSource(
   value: unknown,
 ): NonNullable<DesktopMotionPlaybackRecord["diagnostics"]>["timingSource"] {
@@ -416,49 +402,6 @@ function cloneMotionTuningSample(
     console.warn("[DesktopBridge] motion tuning sample rejected.", error, sample);
     return null;
   }
-}
-
-function isPresent<TValue>(value: TValue | null): value is TValue {
-  return value !== null;
-}
-
-function cloneNumericRecord(value: unknown): Record<string, number> {
-  if (!isObject(value)) {
-    return {};
-  }
-  const result: Record<string, number> = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (isFiniteNumber(item)) {
-      result[key] = item;
-    }
-  }
-  return result;
-}
-
-function cloneSemanticParameterPlan(plan: unknown): SemanticParameterPlan | null {
-  const result = parseSemanticParameterPlan(plan);
-  if (!result.ok) {
-    return null;
-  }
-  const parsed = result.value;
-  const planObj = plan as Record<string, unknown>;
-  return {
-    ...planObj,
-    schema_version: parsed.schema_version,
-    profile_id: parsed.profile_id,
-    profile_revision: parsed.profile_revision,
-    model_id: parsed.model_id,
-    mode: parsed.mode,
-    emotion_label: parsed.emotion_label,
-    timing: parsed.timing,
-    parameters: parsed.parameters,
-    diagnostics: isObject(planObj.diagnostics)
-      ? { ...planObj.diagnostics, warnings: parsed.diagnostics?.warnings }
-      : parsed.diagnostics,
-    summary: isObject(planObj.summary)
-      ? { ...planObj.summary, ...parsed.summary }
-      : parsed.summary,
-  } as SemanticParameterPlan;
 }
 
 function cloneBaseActionPreview(

@@ -1,144 +1,31 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
 import DesktopWindowPanel from "../components/DesktopWindowPanel.vue";
-import { useDesktopBridge } from "../composables/useDesktopBridge";
-import { DEFAULT_ADAPTER_ADDRESS } from "../adapter-connection/address";
-import {
-  MAX_MOTION_INTENSITY_SCALE,
-  MIN_MOTION_INTENSITY_SCALE,
-  MOTION_INTENSITY_SCALE_STEP,
-  cloneModelEngineSettings,
-  modelEngineSettingsEqual,
-  normalizeModelEngineSettings,
-} from "../model-engine/settings";
+import { useSettingsWindow } from "../composables/useSettingsWindow";
 
-const bridge = useDesktopBridge();
-const draftAddress = ref(bridge.state.snapshot.adapterAddress);
-const desktopScreenshotOnSendEnabled = ref(
-  bridge.state.snapshot.desktopScreenshotOnSendEnabled,
-);
-const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
-const motionEngineSettings = reactive(
-  cloneModelEngineSettings(bridge.state.snapshot.motionEngineSettings),
-);
-
-function applyMotionEngineSettingsSnapshot(nextValue: unknown): void {
-  const normalized = normalizeModelEngineSettings(nextValue);
-  const currentSettings = cloneModelEngineSettings(motionEngineSettings);
-  if (modelEngineSettingsEqual(currentSettings, normalized)) {
-    return;
-  }
-  motionEngineSettings.motionIntensityScale = normalized.motionIntensityScale;
-  motionEngineSettings.axisIntensityScale = {
-    ...normalized.axisIntensityScale,
-  };
-}
-
-watch(
-  () => bridge.state.snapshot.adapterAddress,
-  (nextValue) => {
-    draftAddress.value = nextValue;
-  },
-);
-
-watch(
-  () => bridge.state.snapshot.desktopScreenshotOnSendEnabled,
-  (nextValue) => {
-    desktopScreenshotOnSendEnabled.value = nextValue;
-  },
-);
-
-watch(
-  () => bridge.state.snapshot.ambientMotionEnabled,
-  (nextValue) => {
-    ambientMotionEnabled.value = nextValue;
-  },
-);
-watch(
-  () => bridge.state.snapshot.motionEngineSettings,
-  (nextValue) => {
-    applyMotionEngineSettingsSnapshot(nextValue);
-  },
-  { deep: true },
-);
-
-const statusLabel = computed(() => {
-  if (bridge.state.snapshot.connectionState === "synced") {
-    return "模型已同步";
-  }
-  if (bridge.state.snapshot.connectionState === "connecting") {
-    return "连接中";
-  }
-  if (bridge.state.snapshot.connectionState === "error") {
-    return "连接异常";
-  }
-  if (bridge.state.snapshot.connectionState === "linked") {
-    return "适配器已连接";
-  }
-  return "尚未连接";
-});
-
-function applyAddress(): void {
-  bridge.sendCommand({ type: "set_address", address: draftAddress.value });
-}
-
-function connectAdapter(): void {
-  bridge.sendCommand({ type: "connect", address: draftAddress.value });
-}
-
-function disconnectAdapter(): void {
-  bridge.sendCommand({ type: "disconnect" });
-}
-
-function toggleHistoryWindow(): void {
-  window.ag99desktop?.toggleAuxWindow("history");
-}
-
-function toggleActionLabWindow(): void {
-  window.ag99desktop?.toggleAuxWindow("action_lab");
-}
-
-function toggleProfileEditorWindow(): void {
-  window.ag99desktop?.toggleAuxWindow("profile_editor");
-}
-
-const profileEditorButtonLabel = computed(() =>
-  bridge.state.windowState.profileEditorVisible ? "关闭 Profile Editor" : "打开 Profile Editor",
-);
-
-function applyDesktopScreenshotOnSend(): void {
-  bridge.sendCommand({
-    type: "set_desktop_screenshot_on_send",
-    enabled: desktopScreenshotOnSendEnabled.value,
-  });
-}
-
-function applyAmbientMotionEnabled(): void {
-  bridge.sendCommand({
-    type: "set_ambient_motion_enabled",
-    enabled: ambientMotionEnabled.value,
-  });
-}
-
-function applyMotionEngineSettings(): void {
-  bridge.sendCommand({
-    type: "set_motion_engine_settings",
-    settings: cloneModelEngineSettings(motionEngineSettings),
-  });
-}
-
-function formatScale(value: unknown): string {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) {
-    return "1.00";
-  }
-  return numeric.toFixed(2);
-}
-
-function resetMotionEngineSettings(): void {
-  applyMotionEngineSettingsSnapshot(undefined);
-  applyMotionEngineSettings();
-}
+const {
+  bridgeState,
+  draftAddress,
+  desktopScreenshotOnSendEnabled,
+  ambientMotionEnabled,
+  motionEngineSettings,
+  statusLabel,
+  profileEditorButtonLabel,
+  defaultAdapterAddress,
+  motionIntensityMin,
+  motionIntensityMax,
+  motionIntensityStep,
+  applyAddress,
+  connectAdapter,
+  disconnectAdapter,
+  toggleHistoryWindow,
+  toggleActionLabWindow,
+  toggleProfileEditorWindow,
+  applyDesktopScreenshotOnSend,
+  applyAmbientMotionEnabled,
+  applyMotionEngineSettings,
+  resetMotionEngineSettings,
+  formatScale,
+} = useSettingsWindow();
 </script>
 
 <template>
@@ -156,7 +43,7 @@ function resetMotionEngineSettings(): void {
         <input
           v-model="draftAddress"
           class="settings-card__input"
-          :placeholder="DEFAULT_ADAPTER_ADDRESS"
+          :placeholder="defaultAdapterAddress"
         />
 
         <div class="settings-card__actions">
@@ -177,7 +64,7 @@ function resetMotionEngineSettings(): void {
 
         <p class="settings-card__hint">
           只需要填写一个适配器地址，WS 和 HTTP 会在内部自动派生。
-          {{ bridge.state.snapshot.connectionStatusMessage }}
+          {{ bridgeState.snapshot.connectionStatusMessage }}
         </p>
       </article>
 
@@ -185,29 +72,29 @@ function resetMotionEngineSettings(): void {
         <div class="settings-card__header">
           <div>
             <p class="settings-card__eyebrow">运行状态</p>
-            <h2>{{ bridge.state.snapshot.selectedModelName || "等待模型同步" }}</h2>
+            <h2>{{ bridgeState.snapshot.selectedModelName || "等待模型同步" }}</h2>
           </div>
           <span class="settings-card__badge">
-            {{ bridge.state.snapshot.recommendedMode || "await-sync" }}
+            {{ bridgeState.snapshot.recommendedMode || "await-sync" }}
           </span>
         </div>
 
         <dl class="settings-card__meta">
           <div>
             <dt>会话</dt>
-            <dd>{{ bridge.state.snapshot.sessionId || "未同步" }}</dd>
+            <dd>{{ bridgeState.snapshot.sessionId || "未同步" }}</dd>
           </div>
           <div>
             <dt>配置</dt>
-            <dd>{{ bridge.state.snapshot.confName || "未同步" }}</dd>
+            <dd>{{ bridgeState.snapshot.confName || "未同步" }}</dd>
           </div>
           <div>
             <dt>内部 WS</dt>
-            <dd>{{ bridge.state.snapshot.serverWsUrl || "等待后端下发" }}</dd>
+            <dd>{{ bridgeState.snapshot.serverWsUrl || "等待后端下发" }}</dd>
           </div>
           <div>
             <dt>内部 HTTP</dt>
-            <dd>{{ bridge.state.snapshot.httpBaseUrl || "等待后端下发" }}</dd>
+            <dd>{{ bridgeState.snapshot.httpBaseUrl || "等待后端下发" }}</dd>
           </div>
         </dl>
       </article>
@@ -295,9 +182,9 @@ function resetMotionEngineSettings(): void {
             v-model.number="motionEngineSettings.motionIntensityScale"
             class="settings-slider__input"
             type="range"
-            :min="MIN_MOTION_INTENSITY_SCALE"
-            :max="MAX_MOTION_INTENSITY_SCALE"
-            :step="MOTION_INTENSITY_SCALE_STEP"
+            :min="motionIntensityMin"
+            :max="motionIntensityMax"
+            :step="motionIntensityStep"
             @input="applyMotionEngineSettings"
           />
         </div>
@@ -324,24 +211,24 @@ function resetMotionEngineSettings(): void {
             <h2>连接状态</h2>
           </div>
           <span class="settings-card__badge">
-            {{ bridge.state.snapshot.connectionLabel }}
+            {{ bridgeState.snapshot.connectionLabel }}
           </span>
         </div>
 
-        <p class="settings-card__copy">{{ bridge.state.snapshot.stageMessage }}</p>
+        <p class="settings-card__copy">{{ bridgeState.snapshot.stageMessage }}</p>
 
         <div class="settings-card__stack">
           <div>
             <span>最近输入</span>
-            <strong>{{ bridge.state.snapshot.lastSentText || "暂无" }}</strong>
+            <strong>{{ bridgeState.snapshot.lastSentText || "暂无" }}</strong>
           </div>
           <div>
             <span>最近回复</span>
-            <strong>{{ bridge.state.snapshot.lastAssistantText || "暂无" }}</strong>
+            <strong>{{ bridgeState.snapshot.lastAssistantText || "暂无" }}</strong>
           </div>
           <div>
             <span>最近转写</span>
-            <strong>{{ bridge.state.snapshot.lastTranscription || "暂无" }}</strong>
+            <strong>{{ bridgeState.snapshot.lastTranscription || "暂无" }}</strong>
           </div>
         </div>
 

@@ -163,3 +163,29 @@ export function parseSemanticParameterPlan(
     },
   };
 }
+
+export function cloneSemanticParameterPlan(plan: unknown): SemanticParameterPlan | null {
+  const result = parseSemanticParameterPlan(plan);
+  if (!result.ok) {
+    return null;
+  }
+  const parsed = result.value;
+  const planObj = plan as Record<string, unknown>;
+  return {
+    ...planObj,
+    schema_version: parsed.schema_version,
+    profile_id: parsed.profile_id,
+    profile_revision: parsed.profile_revision,
+    model_id: parsed.model_id,
+    mode: parsed.mode,
+    emotion_label: parsed.emotion_label,
+    timing: parsed.timing,
+    parameters: parsed.parameters,
+    diagnostics: isObject(planObj.diagnostics)
+      ? { ...planObj.diagnostics, warnings: parsed.diagnostics?.warnings }
+      : parsed.diagnostics,
+    summary: isObject(planObj.summary)
+      ? { ...planObj.summary, ...parsed.summary }
+      : parsed.summary,
+  } as SemanticParameterPlan;
+}

@@ -6,13 +6,12 @@ import type {
   DesktopBaseActionPreviewAtom,
 } from "../types/desktop";
 import type {
-  DirectParameterPlanTiming,
   SemanticMotionIntent,
 } from "../types/protocol";
 import { SCHEMA_MOTION_INTENT_V2 } from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 import { useParameterExcludeKeywords } from "../composables/useParameterExcludeKeywords";
-import { resolveMotionTiming } from "../model-engine/timing";
+import { buildParameterPlanTiming } from "../model-engine/timing";
 
 const props = defineProps<{
   preview: DesktopBaseActionPreview | null;
@@ -398,14 +397,6 @@ function buildSemanticAxisValuesFromAtoms(
   atoms: DesktopBaseActionPreviewAtom[],
 ): SemanticMotionIntent["axes"] {
   return buildAxisValuesFromAtoms(atoms);
-}
-
-function buildParameterPlanTiming(
-  durationMsRaw: number,
-  mode: "expressive" | "idle",
-): DirectParameterPlanTiming {
-  const clampedDurationMs = Math.max(400, Math.min(6000, Math.round(durationMsRaw)));
-  return resolveMotionTiming({ mode, durationHintMs: clampedDurationMs }).timing;
 }
 
 function roundTo(value: number, digits: number): number {

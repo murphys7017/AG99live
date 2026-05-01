@@ -1,3 +1,4 @@
+import type { DirectParameterPlanTiming } from "../types/protocol";
 import {
   DEFAULT_MOTION_INTENT_DURATION_MS,
   MAX_MOTION_DURATION_MS,
@@ -19,6 +20,14 @@ function coerceDuration(value: number | null | undefined): number | null {
     MIN_MOTION_DURATION_MS,
     Math.min(MAX_MOTION_DURATION_MS, Math.round(value)),
   );
+}
+
+export function buildParameterPlanTiming(
+  durationMsRaw: number,
+  mode: "expressive" | "idle",
+): DirectParameterPlanTiming {
+  const clampedDurationMs = Math.max(400, Math.min(6000, Math.round(durationMsRaw)));
+  return resolveMotionTiming({ mode, durationHintMs: clampedDurationMs }).timing;
 }
 
 export function resolveMotionTiming(
