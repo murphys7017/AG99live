@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { ModelSummary } from "../types/protocol";
+import { DEFAULT_ADAPTER_ADDRESS } from "../adapter-connection/address";
 
 const props = defineProps<{
   selectedModel: ModelSummary | null;
@@ -119,7 +120,7 @@ const channelCount = computed(
         <input
           :value="adapterAddress"
           class="launch-card__input"
-          placeholder="127.0.0.1:12396"
+          :placeholder="DEFAULT_ADAPTER_ADDRESS"
           @input="
             emit(
               'update:adapter-address',

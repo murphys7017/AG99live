@@ -9,7 +9,9 @@ import type {
   DirectParameterPlanTiming,
   SemanticMotionIntent,
 } from "../types/protocol";
+import { SCHEMA_MOTION_INTENT_V2 } from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
+import { useParameterExcludeKeywords } from "../composables/useParameterExcludeKeywords";
 
 const props = defineProps<{
   preview: DesktopBaseActionPreview | null;
@@ -17,13 +19,16 @@ const props = defineProps<{
   allowPlay?: boolean;
 }>();
 const bridge = useDesktopBridge();
-const PARAMETER_EXCLUDE_KEYWORDS_STORAGE_KEY = "ag99live.parameter_exclude_keywords";
-const DEFAULT_PARAMETER_EXCLUDE_KEYWORDS = ["hair", "bind", "physics", "phy"];
 
 const selectedChannel = ref("all");
 const selectedDomain = ref("all");
 const searchText = ref("");
-const excludedParameterKeywordsText = ref(loadParameterExcludeKeywords().join("\n"));
+const {
+  excludedParameterKeywordsText,
+  parameterExcludeKeywords,
+  persistParameterExcludeKeywords,
+  resetParameterExcludeKeywords,
+} = useParameterExcludeKeywords();
 const selectedAtomIds = ref<string[]>([]);
 const planMode = ref<"parallel" | "sequential">("parallel");
 const durationScale = ref(1);
@@ -90,9 +95,6 @@ const filteredAtoms = computed<DesktopBaseActionPreviewAtom[]>(() => {
     return haystack.includes(query);
   });
 });
-const parameterExcludeKeywords = computed(() =>
-  normalizeKeywordText(excludedParameterKeywordsText.value),
-);
 const excludedAtomCount = computed(() =>
   (props.preview?.atoms ?? []).filter((atom) =>
     atomMatchesExcludedParameterKeyword(atom, parameterExcludeKeywords.value),
@@ -203,7 +205,7 @@ const generatedPlan = computed(() => {
   );
   const profile = props.semanticProfile;
   const intent: SemanticMotionIntent = {
-    schema_version: "engine.motion_intent.v2",
+    schema_version: SCHEMA_MOTION_INTENT_V2,
     profile_id: profile?.profile_id ?? "",
     profile_revision: profile?.revision ?? 0,
     model_id: profile?.model_id ?? "",
@@ -302,43 +304,6 @@ function atomMatchesExcludedParameterKeyword(
     atom.sourceTags.join(" "),
   ].join(" ").toLowerCase();
   return keywords.some((keyword) => haystack.includes(keyword));
-}
-
-function normalizeKeywordText(value: string): string[] {
-  const seen = new Set<string>();
-  const keywords: string[] = [];
-  for (const item of value.split(/[\r\n,，]+/)) {
-    const keyword = item.trim().toLowerCase();
-    if (!keyword || seen.has(keyword)) {
-      continue;
-    }
-    seen.add(keyword);
-    keywords.push(keyword);
-  }
-  return keywords;
-}
-
-function loadParameterExcludeKeywords(): string[] {
-  if (typeof window === "undefined") {
-    return DEFAULT_PARAMETER_EXCLUDE_KEYWORDS;
-  }
-  const rawValue = window.localStorage.getItem(PARAMETER_EXCLUDE_KEYWORDS_STORAGE_KEY);
-  if (!rawValue) {
-    return DEFAULT_PARAMETER_EXCLUDE_KEYWORDS;
-  }
-  const keywords = normalizeKeywordText(rawValue);
-  return keywords.length ? keywords : DEFAULT_PARAMETER_EXCLUDE_KEYWORDS;
-}
-
-function persistParameterExcludeKeywords(): void {
-  const keywords = parameterExcludeKeywords.value;
-  excludedParameterKeywordsText.value = keywords.join("\n");
-  window.localStorage.setItem(PARAMETER_EXCLUDE_KEYWORDS_STORAGE_KEY, keywords.join("\n"));
-}
-
-function resetParameterExcludeKeywords(): void {
-  excludedParameterKeywordsText.value = DEFAULT_PARAMETER_EXCLUDE_KEYWORDS.join("\n");
-  persistParameterExcludeKeywords();
 }
 
 function playPreviewPlan(): void {

@@ -8,14 +8,13 @@ import type {
   SemanticAxisParameterBinding,
   SemanticAxisProfile,
 } from "../types/semantic-axis-profile";
+import { useParameterExcludeKeywords } from "../composables/useParameterExcludeKeywords";
 
 type EditableAxisRangeKey = "value_range" | "soft_range" | "strong_range";
 type EditableBindingRangeKey = "input_range" | "output_range";
 type EditableSemanticListKey = "positive_semantics" | "negative_semantics";
 type AxisRoleFilter = SemanticAxisControlRole | "all";
 
-const PARAMETER_EXCLUDE_KEYWORDS_STORAGE_KEY = "ag99live.parameter_exclude_keywords";
-const DEFAULT_PARAMETER_EXCLUDE_KEYWORDS = ["hair", "bind", "physics", "phy"];
 const CONTROL_ROLE_OPTIONS: SemanticAxisControlRole[] = [
   "primary",
   "hint",
@@ -67,7 +66,6 @@ const selectedAxisId = ref("");
 const selectedAxisIds = ref<string[]>([]);
 const axisRoleFilter = ref<AxisRoleFilter>("all");
 const axisSearchText = ref("");
-const excludedParameterKeywordsText = ref(loadParameterExcludeKeywords().join("\n"));
 const batchTargetRole = ref<SemanticAxisControlRole>("primary");
 const customAxisReviewRequiredIds = ref<Set<string>>(new Set());
 const isDirty = ref(false);
@@ -108,9 +106,12 @@ const filteredAxes = computed(() => {
     return axisMatchesSearch(axis, query);
   });
 });
-const parameterExcludeKeywords = computed(() =>
-  normalizeKeywordText(excludedParameterKeywordsText.value),
-);
+const {
+  excludedParameterKeywordsText,
+  parameterExcludeKeywords,
+  persistParameterExcludeKeywords,
+  resetParameterExcludeKeywords,
+} = useParameterExcludeKeywords();
 const excludedAxisCount = computed(() =>
   draftAxes.value.filter((axis) =>
     axisMatchesExcludedParameterKeyword(axis, parameterExcludeKeywords.value),
@@ -299,43 +300,6 @@ function axisMatchesExcludedParameterKeyword(
     ]),
   ].join(" ").toLowerCase();
   return keywords.some((keyword) => haystack.includes(keyword));
-}
-
-function normalizeKeywordText(value: string): string[] {
-  const seen = new Set<string>();
-  const keywords: string[] = [];
-  for (const item of value.split(/[\r\n,，]+/)) {
-    const keyword = item.trim().toLowerCase();
-    if (!keyword || seen.has(keyword)) {
-      continue;
-    }
-    seen.add(keyword);
-    keywords.push(keyword);
-  }
-  return keywords;
-}
-
-function loadParameterExcludeKeywords(): string[] {
-  if (typeof window === "undefined") {
-    return DEFAULT_PARAMETER_EXCLUDE_KEYWORDS;
-  }
-  const rawValue = window.localStorage.getItem(PARAMETER_EXCLUDE_KEYWORDS_STORAGE_KEY);
-  if (!rawValue) {
-    return DEFAULT_PARAMETER_EXCLUDE_KEYWORDS;
-  }
-  const keywords = normalizeKeywordText(rawValue);
-  return keywords.length ? keywords : DEFAULT_PARAMETER_EXCLUDE_KEYWORDS;
-}
-
-function persistParameterExcludeKeywords(): void {
-  const keywords = parameterExcludeKeywords.value;
-  excludedParameterKeywordsText.value = keywords.join("\n");
-  window.localStorage.setItem(PARAMETER_EXCLUDE_KEYWORDS_STORAGE_KEY, keywords.join("\n"));
-}
-
-function resetParameterExcludeKeywords(): void {
-  excludedParameterKeywordsText.value = DEFAULT_PARAMETER_EXCLUDE_KEYWORDS.join("\n");
-  persistParameterExcludeKeywords();
 }
 
 function resetDraft(): void {

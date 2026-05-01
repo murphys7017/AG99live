@@ -11,15 +11,18 @@ import type {
 import type {
   SemanticParameterPlan,
 } from "../types/protocol";
+import { parseSemanticParameterPlan} from "../model-engine/planParser";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 import {
   buildDefaultModelEngineSettings,
   cloneModelEngineSettings,
   normalizeModelEngineSettings,
 } from "../model-engine/settings";
+import { DEFAULT_ADAPTER_ADDRESS } from "../adapter-connection/address";
+import { isFiniteNumber, isObject, normalizeText } from "../utils/guards";
 
 export const defaultSnapshot: DesktopRuntimeSnapshot = {
-  adapterAddress: "127.0.0.1:12396",
+  adapterAddress: DEFAULT_ADAPTER_ADDRESS,
   desktopScreenshotOnSendEnabled: true,
   ambientMotionEnabled: true,
   motionEngineSettings: buildDefaultModelEngineSettings(),
@@ -184,18 +187,6 @@ export function normalizeProfileAuthoringSnapshot(
       ? { ...snapshot.latestSemanticAxisProfileSaveResult }
       : null,
   };
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function normalizeText(value: unknown): string {
-  return String(value ?? "").trim();
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
 }
 
 function cloneMotionPlaybackRecord(
@@ -445,100 +436,29 @@ function cloneNumericRecord(value: unknown): Record<string, number> {
 }
 
 function cloneSemanticParameterPlan(plan: unknown): SemanticParameterPlan | null {
-  if (!isObject(plan) || normalizeText(plan.schema_version) !== "engine.parameter_plan.v2") {
+  const result = parseSemanticParameterPlan(plan);
+  if (!result.ok) {
     return null;
   }
-  if (!Array.isArray(plan.parameters) || !isObject(plan.timing)) {
-    return null;
-  }
-  const profileId = normalizeText(plan.profile_id);
-  const modelId = normalizeText(plan.model_id);
-  const profileRevision = plan.profile_revision;
-  const mode = normalizeText(plan.mode);
-  const emotionLabel = normalizeText(plan.emotion_label);
-  if (
-    !profileId
-    || !modelId
-    || !isFiniteNumber(profileRevision)
-    || profileRevision <= 0
-    || (mode !== "idle" && mode !== "expressive")
-    || !emotionLabel
-  ) {
-    return null;
-  }
-  const durationMs = plan.timing.duration_ms;
-  const blendInMs = plan.timing.blend_in_ms;
-  const holdMs = plan.timing.hold_ms;
-  const blendOutMs = plan.timing.blend_out_ms;
-  if (
-    !isFiniteNumber(durationMs)
-    || !isFiniteNumber(blendInMs)
-    || !isFiniteNumber(holdMs)
-    || !isFiniteNumber(blendOutMs)
-    || durationMs < 0
-    || blendInMs < 0
-    || holdMs < 0
-    || blendOutMs < 0
-  ) {
-    return null;
-  }
-  const parameters: SemanticParameterPlan["parameters"] = [];
-  for (const item of plan.parameters) {
-    if (!isObject(item)) {
-      return null;
-    }
-    const axisId = normalizeText(item.axis_id);
-    const parameterId = normalizeText(item.parameter_id);
-    const targetValue = item.target_value;
-    const weight = item.weight;
-    if (!axisId || !parameterId || !isFiniteNumber(targetValue) || !isFiniteNumber(weight)) {
-      return null;
-    }
-    if (weight < 0 || weight > 1) {
-      return null;
-    }
-    const inputValue = isFiniteNumber(item.input_value) ? item.input_value : undefined;
-    const source = item.source === "semantic_axis" || item.source === "coupling" || item.source === "manual"
-      ? item.source
-      : undefined;
-    parameters.push({
-      axis_id: axisId,
-      parameter_id: parameterId,
-      target_value: targetValue,
-      weight,
-      input_value: inputValue,
-      source,
-    });
-  }
-  if (!parameters.length) {
-    return null;
-  }
-
+  const parsed = result.value;
+  const planObj = plan as Record<string, unknown>;
   return {
-    ...plan,
-    schema_version: "engine.parameter_plan.v2",
-    profile_id: profileId,
-    profile_revision: Math.round(profileRevision),
-    model_id: modelId,
-    mode,
-    emotion_label: emotionLabel,
-    timing: {
-      duration_ms: Math.round(durationMs),
-      blend_in_ms: Math.round(blendInMs),
-      hold_ms: Math.round(holdMs),
-      blend_out_ms: Math.round(blendOutMs),
-    },
-    parameters,
-    diagnostics: isObject(plan.diagnostics)
-      ? {
-        ...plan.diagnostics,
-        warnings: Array.isArray(plan.diagnostics.warnings)
-          ? plan.diagnostics.warnings.map((item) => normalizeText(item)).filter(Boolean)
-          : undefined,
-      }
-      : undefined,
-    summary: isObject(plan.summary) ? { ...plan.summary } : undefined,
-  };
+    ...planObj,
+    schema_version: parsed.schema_version,
+    profile_id: parsed.profile_id,
+    profile_revision: parsed.profile_revision,
+    model_id: parsed.model_id,
+    mode: parsed.mode,
+    emotion_label: parsed.emotion_label,
+    timing: parsed.timing,
+    parameters: parsed.parameters,
+    diagnostics: isObject(planObj.diagnostics)
+      ? { ...planObj.diagnostics, warnings: parsed.diagnostics?.warnings }
+      : parsed.diagnostics,
+    summary: isObject(planObj.summary)
+      ? { ...planObj.summary, ...parsed.summary }
+      : parsed.summary,
+  } as SemanticParameterPlan;
 }
 
 function cloneBaseActionPreview(

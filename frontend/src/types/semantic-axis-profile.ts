@@ -1,3 +1,5 @@
+export const SCHEMA_SEMANTIC_AXIS_PROFILE_V1 = "ag99.semantic_axis_profile.v1";
+
 export type SemanticAxisControlRole =
   | "primary"
   | "hint"
@@ -47,7 +49,7 @@ export interface SemanticAxisCoupling {
 }
 
 export interface SemanticAxisProfile {
-  schema_version: "ag99.semantic_axis_profile.v1";
+  schema_version: typeof SCHEMA_SEMANTIC_AXIS_PROFILE_V1;
   profile_id: string;
   model_id: string;
   source_hash: string;

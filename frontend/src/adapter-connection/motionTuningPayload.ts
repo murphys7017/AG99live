@@ -1,5 +1,7 @@
+import { cloneJson } from "../utils/cloneJson";
 import type { DesktopMotionTuningSample } from "../types/desktop";
 import type { MotionTuningSampleProtocolPayload } from "../types/protocol";
+import { SCHEMA_PARAMETER_PLAN_V2 } from "../types/protocol";
 
 export function serializeMotionTuningSample(
   sample: DesktopMotionTuningSample,
@@ -50,7 +52,7 @@ export function normalizeMotionTuningSamplePayload(
   if (
     !adjustedPlan
     || typeof adjustedPlan !== "object"
-    || adjustedPlan.schema_version !== "engine.parameter_plan.v2"
+    || adjustedPlan.schema_version !== SCHEMA_PARAMETER_PLAN_V2
   ) {
     return null;
   }
@@ -96,6 +98,3 @@ function normalizeMotionTuningAxisRecord(value: unknown): Record<string, number>
   return result;
 }
 
-function cloneJson<TValue>(value: TValue): TValue {
-  return JSON.parse(JSON.stringify(value)) as TValue;
-}

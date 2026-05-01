@@ -1,4 +1,4 @@
-import { computed, reactive, readonly } from "vue";
+import { computed, onScopeDispose, reactive, readonly } from "vue";
 import type {
   ModelSummary,
   ModelSyncInfo,
@@ -12,6 +12,8 @@ const state = reactive({
   lastUpdated: "",
   modelInfo: null as ModelSyncInfo | null,
 });
+
+let initialized = false;
 
 function resetModelSyncState(): void {
   state.sessionId = "";
@@ -62,21 +64,43 @@ const selectedSemanticAxisProfile = computed(() => {
   return selectedModel.value?.semantic_axis_profile ?? null;
 });
 
-if (typeof window !== "undefined") {
-  window.addEventListener("message", (event) => {
-    applyUnknownMessage(event.data);
-  });
+function ensureInitialized(): () => void {
+  if (initialized) {
+    return () => {};
+  }
+  initialized = true;
 
-  (
-    window as Window & {
-      __AG99LIVE_DEVTOOLS__?: { pushProtocolMessage: (payload: unknown) => void };
-    }
-  ).__AG99LIVE_DEVTOOLS__ = {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  function onWindowMessage(event: MessageEvent): void {
+    applyUnknownMessage(event.data);
+  }
+
+  window.addEventListener("message", onWindowMessage);
+
+  const devtoolsMount = window as Window & {
+    __AG99LIVE_DEVTOOLS__?: { pushProtocolMessage: (payload: unknown) => void };
+  };
+  devtoolsMount.__AG99LIVE_DEVTOOLS__ = {
     pushProtocolMessage: applyUnknownMessage,
+  };
+
+  return () => {
+    window.removeEventListener("message", onWindowMessage);
+    delete devtoolsMount.__AG99LIVE_DEVTOOLS__;
+    initialized = false;
   };
 }
 
 export function useModelSync() {
+  const cleanup = ensureInitialized();
+
+  onScopeDispose(() => {
+    cleanup();
+  });
+
   return {
     state: readonly(state),
     selectedModel,

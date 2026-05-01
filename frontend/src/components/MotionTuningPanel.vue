@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
+import { cloneJson } from "../utils/cloneJson";
 import {
   matchesPinnedProfileScope,
 } from "../types/desktop";
@@ -11,6 +12,10 @@ import type {
 import type {
   SemanticMotionIntent,
   SemanticParameterPlan,
+} from "../types/protocol";
+import {
+  SCHEMA_MOTION_INTENT_V2,
+  SCHEMA_PARAMETER_PLAN_V2,
 } from "../types/protocol";
 import type {
   SemanticAxisDefinition,
@@ -65,7 +70,7 @@ const recentSemanticRecords = computed(() =>
     }
     return bridge.state.snapshot.motionPlaybackRecords
       .filter((record): record is DesktopMotionPlaybackRecord & { plan: SemanticParameterPlan } =>
-      record.plan.schema_version === "engine.parameter_plan.v2",
+      record.plan.schema_version === SCHEMA_PARAMETER_PLAN_V2,
       )
       .filter((record) => record.plan.model_id === currentProfile.model_id)
       .filter((record) => record.plan.profile_revision === currentProfile.revision)
@@ -140,7 +145,7 @@ function resetDraftAxes(record: DesktopMotionPlaybackRecord | null): void {
   for (const key of Object.keys(draftAxes)) {
     delete draftAxes[key];
   }
-  if (!record || record.plan.schema_version !== "engine.parameter_plan.v2") {
+  if (!record || record.plan.schema_version !== SCHEMA_PARAMETER_PLAN_V2) {
     return;
   }
 
@@ -196,7 +201,7 @@ function buildAdjustedIntent(): SemanticMotionIntent | null {
   }
 
   return {
-    schema_version: "engine.motion_intent.v2",
+    schema_version: SCHEMA_MOTION_INTENT_V2,
     profile_id: currentProfile.profile_id,
     profile_revision: currentProfile.revision,
     model_id: currentProfile.model_id,
@@ -416,9 +421,6 @@ function roundTo(value: number, digits: number): number {
   return Math.round(value * scale) / scale;
 }
 
-function cloneJson<TValue>(value: TValue): TValue {
-  return JSON.parse(JSON.stringify(value)) as TValue;
-}
 </script>
 
 <template>

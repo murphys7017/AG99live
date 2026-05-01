@@ -19,20 +19,14 @@ import type {
   SystemSemanticAxisProfileSavePayload,
   SystemSemanticAxisProfileSavedPayload,
   SystemSemanticAxisProfileSaveFailedPayload,
-  SystemMotionTuningSampleDeletePayload,
-  SystemMotionTuningSampleSavePayload,
-  SystemMotionTuningSamplesStatePayload,
   SystemModelSyncPayload,
   SystemServerInfoPayload,
 } from "../types/protocol";
 import {
-  normalizeBackendHistoryMessages,
-  normalizeBackendHistorySummaries,
-} from "../adapter-connection/historyPayload";
-import {
-  normalizeMotionTuningSamplePayload,
-  serializeMotionTuningSample,
-} from "../adapter-connection/motionTuningPayload";
+  SCHEMA_MOTION_INTENT_V2,
+  SCHEMA_PARAMETER_PLAN_V2,
+} from "../types/protocol";
+import { useAdapterMotionTuning } from "./useAdapterMotionTuning";
 import {
   rewriteHttpUrl as rewriteHttpUrlWithActiveHost,
   rewriteModelSyncEnvelope as rewriteModelSyncEnvelopeWithActiveHost,
@@ -68,6 +62,7 @@ import {
   saveStoredAdapterAddress,
 } from "../adapter-connection/preferences";
 import { useModelSync } from "./useModelSync";
+import { useAdapterHistory } from "./useAdapterHistory";
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "not_requested";
@@ -135,31 +130,16 @@ interface DesktopCaptureImagePayload {
   captured_at: string;
 }
 
-interface SystemHistoryListPayload {
-  histories: unknown[];
-}
-
-interface SystemHistoryCreatedPayload {
-  history_uid: string;
-}
-
-interface SystemHistoryDataPayload {
-  messages: unknown[];
-}
-
-interface SystemHistoryDeletedPayload {
-  history_uid: string;
-  success: boolean;
-}
-
 let socket: WebSocket | null = null;
 let manualClose = false;
 let initializePromise: Promise<void> | null = null;
 let connectAttemptSerial = 0;
-let pendingHistoryLoadUid: string | null = null;
 const assistantHistoryKeys: string[] = [];
 const assistantHistoryKeySet = new Set<string>();
 const reportedProtocolWarnings = new Set<string>();
+
+let historyAdapter: ReturnType<typeof useAdapterHistory> | null = null;
+let motionTuningAdapter: ReturnType<typeof useAdapterMotionTuning> | null = null;
 
 const { applyUnknownMessage, resetModelSyncState } = useModelSync();
 
@@ -342,7 +322,9 @@ function openConnectionCandidate(
   });
 
   nextSocket.addEventListener("message", (event) => {
-    void handleSocketMessage(event.data);
+    handleSocketMessage(event.data as string).catch((error) => {
+      console.warn("[useAdapterConnection] unhandled error in message handler:", error);
+    });
   });
 
   nextSocket.addEventListener("error", () => {
@@ -416,7 +398,7 @@ function openConnectionCandidate(
 function resetConnectionRuntimeState(): void {
   void stopMicrophoneCapture("connection_closed");
   stopAudioPlayback();
-  pendingHistoryLoadUid = null;
+  historyAdapter?.resetHistoryState();
   state.isPlayingAudio = false;
   state.currentTurnId = null;
   state.currentOrchestrationId = null;
@@ -444,7 +426,7 @@ function resetConnectionRuntimeState(): void {
   state.turnFinishedOrchestrationId = null;
   state.turnFinishedSuccess = true;
   state.turnFinishedReason = "";
-  state.backendHistoryLoading = false;
+  state.latestSemanticAxisProfileSaveResult = null;
   resetModelSyncState();
 }
 
@@ -589,21 +571,19 @@ async function handleSocketMessage(rawData: string): Promise<void> {
       );
       return;
     case "system.motion_tuning_samples_state":
-      applyMotionTuningSamplesState(
-        envelope as ProtocolEnvelope<SystemMotionTuningSamplesStatePayload>,
-      );
+      motionTuningAdapter?.applyMotionTuningSamplesState(envelope);
       return;
     case "system.history_list":
-      applyHistoryList(envelope as ProtocolEnvelope<SystemHistoryListPayload>);
+      historyAdapter?.applyHistoryList(envelope as ProtocolEnvelope<Record<string, unknown>>);
       return;
     case "system.history_created":
-      applyHistoryCreated(envelope as ProtocolEnvelope<SystemHistoryCreatedPayload>);
+      historyAdapter?.applyHistoryCreated(envelope as ProtocolEnvelope<Record<string, unknown>>);
       return;
     case "system.history_data":
-      applyHistoryData(envelope as ProtocolEnvelope<SystemHistoryDataPayload>);
+      historyAdapter?.applyHistoryData(envelope as ProtocolEnvelope<Record<string, unknown>>);
       return;
     case "system.history_deleted":
-      applyHistoryDeleted(envelope as ProtocolEnvelope<SystemHistoryDeletedPayload>);
+      historyAdapter?.applyHistoryDeleted(envelope as ProtocolEnvelope<Record<string, unknown>>);
       return;
     case "output.text":
       applyOutputText(envelope as ProtocolEnvelope<OutputTextPayload>);
@@ -822,154 +802,6 @@ function applySemanticAxisProfileSaveFailed(
   pushHistory("error", state.statusMessage);
 }
 
-function applyMotionTuningSamplesState(
-  envelope: ProtocolEnvelope<SystemMotionTuningSamplesStatePayload>,
-): void {
-  const samples = Array.isArray(envelope.payload.samples)
-    ? envelope.payload.samples
-      .map((sample) => normalizeMotionTuningSamplePayload(sample))
-      .filter((sample): sample is DesktopMotionTuningSample => sample !== null)
-    : [];
-  const rootError = typeof envelope.payload.root_error === "string"
-    ? envelope.payload.root_error.trim()
-    : "";
-  const loadError = typeof envelope.payload.load_error === "string"
-    ? envelope.payload.load_error.trim()
-    : "";
-  const diagnostics = Array.isArray(envelope.payload.diagnostics)
-    ? envelope.payload.diagnostics
-      .map((item) => (typeof item === "string" ? item.trim() : ""))
-      .filter(Boolean)
-    : [];
-  state.motionTuningSamples = samples;
-  state.motionTuningSamplesStatus = {
-    rootError,
-    loadError,
-    diagnostics,
-  };
-  if (rootError) {
-    state.lastError = rootError;
-    state.statusMessage = `后端 runtime cache 根状态异常：${rootError}`;
-    pushHistory("error", state.statusMessage);
-    return;
-  }
-  if (loadError) {
-    state.lastError = loadError;
-    state.statusMessage = `后端动作调参样本池加载失败：${loadError}`;
-    pushHistory("error", state.statusMessage);
-    return;
-  }
-  state.lastError = "";
-  state.statusMessage = samples.length
-    ? `已同步 ${samples.length} 个后端动作调参样本。`
-    : "后端当前没有已保存的动作调参样本。";
-}
-
-function applyHistoryList(
-  envelope: ProtocolEnvelope<SystemHistoryListPayload>,
-): void {
-  state.backendHistorySummaries = normalizeBackendHistorySummaries(
-    envelope.payload.histories,
-  );
-  state.backendHistoryLoading = false;
-  state.lastError = "";
-
-  const hasActiveHistory = state.backendHistorySummaries.some(
-    (summary) => summary.uid === state.activeBackendHistoryUid,
-  );
-  if (!hasActiveHistory && state.activeBackendHistoryUid) {
-    state.activeBackendHistoryUid = "";
-    state.backendHistoryEntries = [];
-  }
-
-  state.backendHistoryStatusMessage = state.backendHistorySummaries.length
-    ? `已同步 ${state.backendHistorySummaries.length} 条后端会话索引。`
-    : "后端当前没有可用的对话历史。";
-  state.statusMessage = state.backendHistoryStatusMessage;
-  pushHistory("system", state.statusMessage);
-
-  if (!state.activeBackendHistoryUid && state.backendHistorySummaries.length > 0) {
-    void loadHistory(state.backendHistorySummaries[0].uid, { announce: false });
-  }
-}
-
-function applyHistoryCreated(
-  envelope: ProtocolEnvelope<SystemHistoryCreatedPayload>,
-): void {
-  const historyUid = envelope.payload.history_uid.trim();
-  pendingHistoryLoadUid = null;
-  state.backendHistoryLoading = false;
-  state.activeBackendHistoryUid = historyUid;
-  state.backendHistoryEntries = [];
-  state.lastError = "";
-  state.backendHistoryStatusMessage = historyUid
-    ? `已创建新会话 ${historyUid}。`
-    : "后端已创建新会话。";
-  state.statusMessage = state.backendHistoryStatusMessage;
-  pushHistory("system", state.statusMessage);
-
-  if (historyUid) {
-    const placeholderSummary: DesktopBackendHistorySummary = {
-      uid: historyUid,
-      latestMessage: null,
-      timestamp: new Date().toISOString(),
-    };
-    state.backendHistorySummaries = [
-      placeholderSummary,
-      ...state.backendHistorySummaries.filter((summary) => summary.uid !== historyUid),
-    ];
-  }
-}
-
-function applyHistoryData(
-  envelope: ProtocolEnvelope<SystemHistoryDataPayload>,
-): void {
-  state.backendHistoryEntries = normalizeBackendHistoryMessages(envelope.payload.messages);
-  if (pendingHistoryLoadUid) {
-    state.activeBackendHistoryUid = pendingHistoryLoadUid;
-  }
-  pendingHistoryLoadUid = null;
-  state.backendHistoryLoading = false;
-  state.lastError = "";
-  state.backendHistoryStatusMessage = state.backendHistoryEntries.length
-    ? `已载入 ${state.backendHistoryEntries.length} 条后端历史消息。`
-    : "当前后端会话还没有历史消息。";
-  state.statusMessage = state.backendHistoryStatusMessage;
-  pushHistory("system", state.statusMessage);
-}
-
-function applyHistoryDeleted(
-  envelope: ProtocolEnvelope<SystemHistoryDeletedPayload>,
-): void {
-  const historyUid = envelope.payload.history_uid.trim();
-  state.backendHistoryLoading = false;
-
-  if (!envelope.payload.success) {
-    state.lastError = historyUid
-      ? `删除会话 ${historyUid} 失败。`
-      : "删除会话失败。";
-    state.statusMessage = state.lastError;
-    state.backendHistoryStatusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return;
-  }
-
-  state.backendHistorySummaries = state.backendHistorySummaries.filter(
-    (summary) => summary.uid !== historyUid,
-  );
-  if (state.activeBackendHistoryUid === historyUid) {
-    state.activeBackendHistoryUid = "";
-    state.backendHistoryEntries = [];
-  }
-  state.lastError = "";
-  state.backendHistoryStatusMessage = historyUid
-    ? `已删除会话 ${historyUid}。`
-    : "已删除当前会话。";
-  state.statusMessage = state.backendHistoryStatusMessage;
-  pushHistory("system", state.statusMessage);
-  requestHistoryList({ announce: false });
-}
-
 function reportProtocolError(
   key: string,
   message: string,
@@ -1150,8 +982,8 @@ function applyInboundMotionPayload(
       ? String((plan as Record<string, unknown>).schema_version).trim()
       : "";
   const allowedSchemaVersions = envelope.type === "engine.motion_intent"
-    ? new Set(["engine.motion_intent.v2"])
-    : new Set(["engine.parameter_plan.v2"]);
+    ? new Set([SCHEMA_MOTION_INTENT_V2])
+    : new Set([SCHEMA_PARAMETER_PLAN_V2]);
   if (!allowedSchemaVersions.has(schemaVersion)) {
     console.warn(
       "[Connection] motion payload schema mismatch.",
@@ -1405,187 +1237,28 @@ function sendSemanticAxisProfileSave(
   return true;
 }
 
-function requestHistoryList(
-  options: { announce?: boolean } = {},
-): boolean {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    state.lastError = "当前还没有连上适配器，无法读取对话历史。";
-    state.statusMessage = state.lastError;
-    state.backendHistoryStatusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return false;
-  }
-
-  state.backendHistoryLoading = true;
-  socket.send(
-    JSON.stringify(
-      buildMessageEnvelope("system.history_list_request", {}),
-    ),
-  );
-  state.lastError = "";
-  state.backendHistoryStatusMessage = "正在向后端请求对话历史列表。";
-  state.statusMessage = state.backendHistoryStatusMessage;
-  if (options.announce !== false) {
-    pushHistory("system", state.statusMessage);
-  }
-  return true;
+function requestHistoryList(options: { announce?: boolean } = {}): boolean {
+  return historyAdapter?.requestHistoryList(options) ?? false;
 }
 
-function createHistory(
-  options: { announce?: boolean } = {},
-): boolean {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    state.lastError = "当前还没有连上适配器，无法新建对话历史。";
-    state.statusMessage = state.lastError;
-    state.backendHistoryStatusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return false;
-  }
-
-  state.backendHistoryLoading = true;
-  pendingHistoryLoadUid = null;
-  socket.send(
-    JSON.stringify(
-      buildMessageEnvelope("system.history_create", {}),
-    ),
-  );
-  state.lastError = "";
-  state.backendHistoryStatusMessage = "正在请求新建后端会话。";
-  state.statusMessage = state.backendHistoryStatusMessage;
-  if (options.announce !== false) {
-    pushHistory("system", state.statusMessage);
-  }
-  return true;
+function createHistory(options: { announce?: boolean } = {}): boolean {
+  return historyAdapter?.createHistory(options) ?? false;
 }
 
-function loadHistory(
-  historyUid: string,
-  options: { announce?: boolean } = {},
-): boolean {
-  const normalizedUid = historyUid.trim();
-  if (!normalizedUid) {
-    state.lastError = "历史会话 UID 为空，无法载入。";
-    state.statusMessage = state.lastError;
-    state.backendHistoryStatusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return false;
-  }
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    state.lastError = "当前还没有连上适配器，无法载入对话历史。";
-    state.statusMessage = state.lastError;
-    state.backendHistoryStatusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return false;
-  }
-
-  state.backendHistoryLoading = true;
-  pendingHistoryLoadUid = normalizedUid;
-  socket.send(
-    JSON.stringify(
-      buildMessageEnvelope("system.history_load", {
-        history_uid: normalizedUid,
-      }),
-    ),
-  );
-  state.lastError = "";
-  state.backendHistoryStatusMessage = `正在载入会话 ${normalizedUid}。`;
-  state.statusMessage = state.backendHistoryStatusMessage;
-  if (options.announce !== false) {
-    pushHistory("system", state.statusMessage);
-  }
-  return true;
+function loadHistory(historyUid: string, options: { announce?: boolean } = {}): boolean {
+  return historyAdapter?.loadHistory(historyUid, options) ?? false;
 }
 
-function deleteHistory(
-  historyUid: string,
-  options: { announce?: boolean } = {},
-): boolean {
-  const normalizedUid = historyUid.trim();
-  if (!normalizedUid) {
-    state.lastError = "历史会话 UID 为空，无法删除。";
-    state.statusMessage = state.lastError;
-    state.backendHistoryStatusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return false;
-  }
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    state.lastError = "当前还没有连上适配器，无法删除对话历史。";
-    state.statusMessage = state.lastError;
-    state.backendHistoryStatusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return false;
-  }
-
-  state.backendHistoryLoading = true;
-  socket.send(
-    JSON.stringify(
-      buildMessageEnvelope("system.history_delete", {
-        history_uid: normalizedUid,
-      }),
-    ),
-  );
-  state.lastError = "";
-  state.backendHistoryStatusMessage = `正在删除会话 ${normalizedUid}。`;
-  state.statusMessage = state.backendHistoryStatusMessage;
-  if (options.announce !== false) {
-    pushHistory("system", state.statusMessage);
-  }
-  return true;
+function deleteHistory(historyUid: string, options: { announce?: boolean } = {}): boolean {
+  return historyAdapter?.deleteHistory(historyUid, options) ?? false;
 }
 
 function saveMotionTuningSample(sample: DesktopMotionTuningSample): boolean {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    state.lastError = "当前还没有连上适配器，无法保存动作调参样本。";
-    state.statusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return false;
-  }
-
-  socket.send(
-    JSON.stringify(
-      buildMessageEnvelope<SystemMotionTuningSampleSavePayload>(
-        "system.motion_tuning_sample_save",
-        {
-          sample: serializeMotionTuningSample(sample),
-        },
-      ),
-    ),
-  );
-  state.lastError = "";
-  state.statusMessage = `已提交动作调参样本保存请求：${sample.id}`;
-  pushHistory("system", state.statusMessage);
-  return true;
+  return motionTuningAdapter?.saveMotionTuningSample(sample) ?? false;
 }
 
 function deleteMotionTuningSample(sampleId: string): boolean {
-  const normalizedSampleId = sampleId.trim();
-  if (!normalizedSampleId) {
-    state.lastError = "动作调参样本 ID 为空，无法删除。";
-    state.statusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return false;
-  }
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    state.lastError = "当前还没有连上适配器，无法删除动作调参样本。";
-    state.statusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return false;
-  }
-
-  socket.send(
-    JSON.stringify(
-      buildMessageEnvelope<SystemMotionTuningSampleDeletePayload>(
-        "system.motion_tuning_sample_delete",
-        {
-          sample_id: normalizedSampleId,
-        },
-      ),
-    ),
-  );
-  state.lastError = "";
-  state.statusMessage = `已提交动作调参样本删除请求：${normalizedSampleId}`;
-  pushHistory("system", state.statusMessage);
-  return true;
+  return motionTuningAdapter?.deleteMotionTuningSample(sampleId) ?? false;
 }
 
 function sendMotionPayloadPreview(payload: unknown): boolean {
@@ -1600,8 +1273,8 @@ function sendMotionPayloadPreview(payload: unknown): boolean {
     ? String((payload as Record<string, unknown>).schema_version ?? "").trim()
     : "";
   if (
-    schemaVersion !== "engine.motion_intent.v2"
-    && schemaVersion !== "engine.parameter_plan.v2"
+    schemaVersion !== SCHEMA_MOTION_INTENT_V2
+    && schemaVersion !== SCHEMA_PARAMETER_PLAN_V2
   ) {
     state.lastError = `动作测试载荷无效：不支持 schema_version=${schemaVersion || "empty"}。`;
     state.statusMessage = state.lastError;
@@ -1610,7 +1283,7 @@ function sendMotionPayloadPreview(payload: unknown): boolean {
     return false;
   }
 
-  const messageType = schemaVersion === "engine.motion_intent.v2"
+  const messageType = schemaVersion === SCHEMA_MOTION_INTENT_V2
     ? "engine.motion_intent"
     : "engine.motion_plan";
   const payloadKey = messageType === "engine.motion_intent" ? "intent" : "plan";
@@ -1717,6 +1390,38 @@ function pushHistory(role: DesktopHistoryEntry["role"], text: string): void {
 }
 
 export function useAdapterConnection() {
+  historyAdapter = useAdapterHistory(
+    state,
+    {
+      getSocket: () => socket,
+      buildMessageEnvelope,
+      pushHistory,
+      setLastError: (message: string) => {
+        state.lastError = message;
+        state.statusMessage = message;
+      },
+      setStatusMessage: (message: string) => {
+        state.statusMessage = message;
+      },
+    },
+  );
+
+  motionTuningAdapter = useAdapterMotionTuning(
+    state,
+    {
+      getSocket: () => socket,
+      buildMessageEnvelope,
+      pushHistory,
+      setLastError: (message: string) => {
+        state.lastError = message;
+        state.statusMessage = message;
+      },
+      setStatusMessage: (message: string) => {
+        state.statusMessage = message;
+      },
+    },
+  );
+
   return {
     state: readonly(state),
     initialize,

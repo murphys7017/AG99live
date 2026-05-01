@@ -1,4 +1,5 @@
-export const DEFAULT_ADAPTER_ADDRESS = "127.0.0.1:12396";
+export const DEFAULT_ADAPTER_PORT = "12396";
+export const DEFAULT_ADAPTER_ADDRESS = `127.0.0.1:${DEFAULT_ADAPTER_PORT}`;
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "0.0.0.0"]);
 
@@ -17,7 +18,7 @@ export function normalizeWsAddress(raw: string): string {
   }
 
   if (!url.port) {
-    url.port = "12396";
+    url.port = DEFAULT_ADAPTER_PORT;
   }
 
   if (url.pathname === "/") {

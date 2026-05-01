@@ -2,6 +2,9 @@ import type {
   SemanticMotionIntent,
   SemanticParameterPlan,
 } from "../types/protocol";
+import {
+  SCHEMA_PARAMETER_PLAN_V2,
+} from "../types/protocol";
 import type {
   SemanticAxisDefinition,
   SemanticAxisParameterBinding,
@@ -191,7 +194,7 @@ export function compileMotionIntent(
 
   const intensityApplied = intent.mode === "expressive" && normalizedSettings.motionIntensityScale !== 1;
   const plan: SemanticParameterPlan = {
-    schema_version: "engine.parameter_plan.v2",
+    schema_version: SCHEMA_PARAMETER_PLAN_V2,
     profile_id: semanticProfile.profile_id,
     profile_revision: semanticProfile.revision,
     model_id: semanticProfile.model_id,

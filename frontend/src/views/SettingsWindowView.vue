@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from "vue";
 import DesktopWindowPanel from "../components/DesktopWindowPanel.vue";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
+import { DEFAULT_ADAPTER_ADDRESS } from "../adapter-connection/address";
 import {
   MAX_MOTION_INTENSITY_SCALE,
   MIN_MOTION_INTENSITY_SCALE,
@@ -155,7 +156,7 @@ function resetMotionEngineSettings(): void {
         <input
           v-model="draftAddress"
           class="settings-card__input"
-          placeholder="127.0.0.1:12396"
+          :placeholder="DEFAULT_ADAPTER_ADDRESS"
         />
 
         <div class="settings-card__actions">

@@ -1,5 +1,8 @@
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
 
+export const SCHEMA_MOTION_INTENT_V2 = "engine.motion_intent.v2";
+export const SCHEMA_PARAMETER_PLAN_V2 = "engine.parameter_plan.v2";
+
 export interface ProtocolEnvelope<TPayload = unknown> {
   type: string;
   version: string;
@@ -552,7 +555,7 @@ export interface SemanticMotionIntentAxisValue {
 }
 
 export interface SemanticMotionIntent {
-  schema_version: "engine.motion_intent.v2";
+  schema_version: typeof SCHEMA_MOTION_INTENT_V2;
   profile_id: string;
   profile_revision: number;
   model_id: string;
@@ -582,7 +585,7 @@ export interface SemanticParameterPlanEntry {
 }
 
 export interface SemanticParameterPlan {
-  schema_version: "engine.parameter_plan.v2";
+  schema_version: typeof SCHEMA_PARAMETER_PLAN_V2;
   profile_id: string;
   profile_revision: number;
   model_id: string;
@@ -693,4 +696,21 @@ export interface SystemMotionTuningSamplesStatePayload {
   samples: MotionTuningSampleProtocolPayload[];
   load_error?: string;
   diagnostics?: string[];
+}
+
+export interface SystemHistoryListPayload {
+  histories: unknown[];
+}
+
+export interface SystemHistoryCreatedPayload {
+  history_uid: string;
+}
+
+export interface SystemHistoryDataPayload {
+  messages: unknown[];
+}
+
+export interface SystemHistoryDeletedPayload {
+  history_uid: string;
+  success: boolean;
 }
