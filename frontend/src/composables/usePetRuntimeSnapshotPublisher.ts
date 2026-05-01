@@ -25,7 +25,7 @@ interface PetRuntimeSnapshotPublisherOptions {
   selectedSemanticAxisProfile: Ref<SemanticAxisProfile | null>;
   ambientMotionEnabled: Ref<boolean>;
   motionEngineSettings: ModelEngineSettings;
-  motionPlaybackRecords: Ref<DesktopMotionPlaybackRecord[]>;
+  motionPlaybackRecords: { readonly value: readonly DesktopMotionPlaybackRecord[] };
   parameterActionPreview: ComputedRef<DesktopBaseActionPreview | null>;
   connectionState: ComputedRef<string>;
   connectionLabel: ComputedRef<string>;

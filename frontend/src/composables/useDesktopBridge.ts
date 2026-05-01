@@ -231,7 +231,11 @@ function persistRuntimeSnapshot(snapshot: DesktopRuntimeSnapshot): void {
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.setItem(RUNTIME_SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshot));
+  try {
+    window.localStorage.setItem(RUNTIME_SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshot));
+  } catch (error) {
+    console.warn("[DesktopBridge] Failed to persist runtime snapshot.", error);
+  }
 }
 
 function persistProfileAuthoringSnapshot(
@@ -240,10 +244,14 @@ function persistProfileAuthoringSnapshot(
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.setItem(
-    PROFILE_AUTHORING_SNAPSHOT_STORAGE_KEY,
-    JSON.stringify(snapshot),
-  );
+  try {
+    window.localStorage.setItem(
+      PROFILE_AUTHORING_SNAPSHOT_STORAGE_KEY,
+      JSON.stringify(snapshot),
+    );
+  } catch (error) {
+    console.warn("[DesktopBridge] Failed to persist profile authoring snapshot.", error);
+  }
 }
 
 export function useDesktopBridge() {

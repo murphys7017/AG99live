@@ -1,4 +1,4 @@
-import { reactive, ref, watch, type Ref } from "vue";
+import { reactive, shallowReadonly, ref, watch, type Ref } from "vue";
 import type { ModelEnginePlanStartedEvent } from "../model-engine/contracts";
 import type { DesktopMotionPlaybackRecord } from "../types/desktop";
 import type { ModelSummary } from "../types/protocol";
@@ -276,7 +276,7 @@ export function usePlaybackCompletionCoordinator(
   );
 
   return {
-    motionPlaybackRecords,
+    motionPlaybackRecords: shallowReadonly(motionPlaybackRecords),
     recordMotionPlayback,
     resetPlaybackCoordination,
   };

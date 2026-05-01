@@ -12,6 +12,7 @@ import type {
 import { SCHEMA_MOTION_INTENT_V2 } from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 import { useParameterExcludeKeywords } from "../composables/useParameterExcludeKeywords";
+import { resolveMotionTiming } from "../model-engine/timing";
 
 const props = defineProps<{
   preview: DesktopBaseActionPreview | null;
@@ -403,37 +404,8 @@ function buildParameterPlanTiming(
   durationMsRaw: number,
   mode: "expressive" | "idle",
 ): DirectParameterPlanTiming {
-  const durationMs = Math.max(400, Math.min(6000, Math.round(durationMsRaw)));
-  if (mode === "idle") {
-    const idleDurationMs = Math.max(480, Math.min(durationMs, 2200));
-    return {
-      duration_ms: idleDurationMs,
-      blend_in_ms: 80,
-      hold_ms: Math.max(220, idleDurationMs - 200),
-      blend_out_ms: 120,
-    };
-  }
-
-  let blendInMs = Math.max(80, Math.min(Math.round(durationMs * 0.18), 360));
-  let blendOutMs = Math.max(120, Math.min(Math.round(durationMs * 0.25), 520));
-  let holdMs = durationMs - blendInMs - blendOutMs;
-
-  if (holdMs < 120) {
-    let shortage = 120 - holdMs;
-    const reducibleOut = Math.max(blendOutMs - 120, 0);
-    const reduceOut = Math.min(shortage, reducibleOut);
-    blendOutMs -= reduceOut;
-    shortage -= reduceOut;
-    blendInMs = Math.max(80, blendInMs - shortage);
-    holdMs = Math.max(120, durationMs - blendInMs - blendOutMs);
-  }
-
-  return {
-    duration_ms: durationMs,
-    blend_in_ms: blendInMs,
-    hold_ms: holdMs,
-    blend_out_ms: blendOutMs,
-  };
+  const clampedDurationMs = Math.max(400, Math.min(6000, Math.round(durationMsRaw)));
+  return resolveMotionTiming({ mode, durationHintMs: clampedDurationMs }).timing;
 }
 
 function roundTo(value: number, digits: number): number {

@@ -34,6 +34,10 @@ import {
   sendSemanticAxisProfileSave as sendProfileSave,
   sendText as sendTextAction,
 } from "../adapter-connection/outboundActions";
+import {
+  playAudioAndAcknowledge as playAudioAction,
+  stopAudioPlayback as stopAudioAction,
+} from "../adapter-connection/audioPlaybackActions";
 import { useAdapterMotionTuning } from "./useAdapterMotionTuning";
 import {
   rewriteHttpUrl as rewriteHttpUrlWithActiveHost,
@@ -177,6 +181,17 @@ const outboundCtx = {
   stopAudio: () => stopAudioPlayback(),
   resetAudioPlaybackTerminal,
   createMessageId,
+};
+
+const audioPlaybackCtx = {
+  get state() {
+    return state;
+  },
+  startAudio: startAudioPlayback,
+  stopAudioRuntime: stopAudioPlaybackRuntime,
+  pushHistory: pushHistory as (role: string, text: string) => void,
+  markTerminal: markAudioPlaybackTerminal,
+  resetTerminal: resetAudioPlaybackTerminal,
 };
 
 function markAudioPlaybackTerminal(
@@ -872,99 +887,11 @@ async function playAudioAndAcknowledge(
   audioUrl: string,
   turnId: string | null,
 ): Promise<void> {
-  stopAudioPlayback();
-  resetAudioPlaybackTerminal();
-  state.isPlayingAudio = true;
-  state.audioPlaybackStartedTurnId = null;
-  state.audioPlaybackStartedOrchestrationId = null;
-  state.audioPlaybackStartedAtMs = 0;
-  state.audioPlaybackDurationMs = null;
-  state.statusMessage = "收到语音回复，正在播放。";
-  pushHistory("system", state.statusMessage);
-
-  try {
-    await startAudioPlayback(audioUrl, {
-      onLipSyncUnavailable: () => {
-        pushHistory("system", "嘴型同步加载失败，音频播放将无对应张嘴动作。");
-      },
-      onDurationChanged: (durationMs) => {
-        state.audioPlaybackDurationMs = durationMs;
-      },
-      onPlaybackStarted: (event) => {
-        state.audioPlaybackStartedTurnId = turnId;
-        state.audioPlaybackStartedOrchestrationId = state.currentOrchestrationId;
-        state.audioPlaybackStartedAtMs = event.startedAtMs;
-        state.audioPlaybackStartedNonce += 1;
-        console.info(
-          "[Connection] audio playback started. turn_id=",
-          turnId,
-          "duration_ms=",
-          state.audioPlaybackDurationMs,
-          "nonce=",
-          state.audioPlaybackStartedNonce,
-        );
-      },
-      onEnded: () => {
-        const completedTurnId = state.audioPlaybackStartedTurnId ?? turnId;
-        const completedOrchestrationId =
-          state.audioPlaybackStartedOrchestrationId ?? state.currentOrchestrationId;
-        state.isPlayingAudio = false;
-        state.audioPlaybackStartedTurnId = null;
-        state.audioPlaybackStartedOrchestrationId = null;
-        state.audioPlaybackStartedAtMs = 0;
-        state.audioPlaybackDurationMs = null;
-        markAudioPlaybackTerminal(
-          "completed",
-          completedTurnId,
-          completedOrchestrationId,
-          "audio_playback_completed",
-        );
-      },
-      onError: () => {
-        const failedTurnId = state.audioPlaybackStartedTurnId ?? turnId;
-        const failedOrchestrationId =
-          state.audioPlaybackStartedOrchestrationId ?? state.currentOrchestrationId;
-        state.isPlayingAudio = false;
-        state.audioPlaybackStartedTurnId = null;
-        state.audioPlaybackStartedOrchestrationId = null;
-        state.audioPlaybackStartedAtMs = 0;
-        state.audioPlaybackDurationMs = null;
-        pushHistory("error", "音频播放失败。");
-        markAudioPlaybackTerminal(
-          "failed",
-          failedTurnId,
-          failedOrchestrationId,
-          "audio_playback_error",
-        );
-      },
-    });
-  } catch (error) {
-    const failedOrchestrationId = state.currentOrchestrationId;
-    state.isPlayingAudio = false;
-    state.audioPlaybackStartedTurnId = null;
-    state.audioPlaybackStartedOrchestrationId = null;
-    state.audioPlaybackStartedAtMs = 0;
-    state.audioPlaybackDurationMs = null;
-    state.lastError =
-      error instanceof Error ? error.message : "浏览器拒绝自动播放语音。";
-    state.statusMessage = "语音播放失败，已回传结束状态。";
-    pushHistory("error", state.statusMessage);
-    markAudioPlaybackTerminal(
-      "failed",
-      turnId,
-      failedOrchestrationId,
-      "audio_autoplay_blocked",
-    );
-  }
+  return playAudioAction(audioPlaybackCtx, audioUrl, turnId);
 }
 
 function stopAudioPlayback(): void {
-  stopAudioPlaybackRuntime();
-  state.isPlayingAudio = false;
-  state.audioPlaybackStartedTurnId = null;
-  state.audioPlaybackStartedOrchestrationId = null;
-  state.audioPlaybackStartedAtMs = 0;
-  state.audioPlaybackDurationMs = null;
+  stopAudioAction(audioPlaybackCtx);
 }
 
 async function sendText(text: string): Promise<boolean> {
