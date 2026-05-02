@@ -160,14 +160,14 @@ class TurnCoordinator:
             await self._handle_engine_motion_payload_preview(message)
             return
 
-            await self._send_json(
-                build_control_error(
-                    session_id=message.session_id,
-                    turn_id=message.turn_id,
-                    orchestration_id=message.orchestration_id,
-                    message=f"Unhandled message type: {message.type}",
-                )
+        await self._send_json(
+            build_control_error(
+                session_id=message.session_id,
+                turn_id=message.turn_id,
+                orchestration_id=message.orchestration_id,
+                message=f"Unhandled message type: {message.type}",
             )
+        )
 
     async def emit_message_chain(
         self,

@@ -5,6 +5,8 @@ export interface OutboundActionState {
   currentOrchestrationId: string | null;
   audioPlaybackStartedTurnId: string | null;
   audioPlaybackStartedOrchestrationId: string | null;
+  audioPlaybackTerminalTurnId: string | null;
+  audioPlaybackTerminalOrchestrationId: string | null;
   desktopScreenshotOnSendEnabled: boolean;
   lastError: string;
   statusMessage: string;
@@ -236,18 +238,30 @@ export function clearPlaybackGroupContext(
     normalizedOrchestrationId
     && currentOrchestrationId
     && normalizedOrchestrationId === currentOrchestrationId;
+  const matchesActiveGroup = Boolean(matchesTurn || matchesOrchestration);
 
-  if (matchesTurn || matchesOrchestration) {
+  if (matchesActiveGroup) {
     ctx.state.currentTurnId = null;
     ctx.state.currentOrchestrationId = null;
   }
 
-  if (
+  const matchesStartedAudio =
     normalizeTurnIdForComparison(ctx.state.audioPlaybackStartedTurnId) === normalizedTurnId
-    || normalizeOrchestrationId(ctx.state.audioPlaybackStartedOrchestrationId) === normalizedOrchestrationId
-  ) {
+    || Boolean(
+      normalizedOrchestrationId
+      && normalizeOrchestrationId(ctx.state.audioPlaybackStartedOrchestrationId) === normalizedOrchestrationId,
+    );
+  if (matchesStartedAudio) {
     ctx.stopAudio();
   }
 
-  ctx.resetAudioPlaybackTerminal();
+  const matchesTerminalAudio =
+    normalizeTurnIdForComparison(ctx.state.audioPlaybackTerminalTurnId) === normalizedTurnId
+    || Boolean(
+      normalizedOrchestrationId
+      && normalizeOrchestrationId(ctx.state.audioPlaybackTerminalOrchestrationId) === normalizedOrchestrationId,
+    );
+  if (matchesTerminalAudio || matchesStartedAudio || matchesActiveGroup) {
+    ctx.resetAudioPlaybackTerminal();
+  }
 }

@@ -123,6 +123,12 @@ export function usePlaybackCompletionCoordinator(
   }
 
   function maybeFlushPlaybackCompletion(reason?: string): void {
+    if (playbackCoordination.completionSent) {
+      if (playbackCoordination.turnFinishedObserved) {
+        finalizePlaybackCoordination();
+      }
+      return;
+    }
     if (!shouldSendPlaybackFinished()) {
       return;
     }
@@ -132,22 +138,16 @@ export function usePlaybackCompletionCoordinator(
       }
       return;
     }
-    if (!playbackCoordination.completionSent) {
-      const turnId = playbackCoordination.activeTurnId;
-      const orchestrationId = playbackCoordination.activeOrchestrationId;
-      const success = !playbackCoordination.audioFailed;
-      playbackCoordination.completionSent = true;
-      void options.adapter.sendPlaybackFinishedForCurrentGroup(
-        turnId,
-        orchestrationId,
-        success,
-        reason,
-      );
-      return;
-    }
-    if (playbackCoordination.turnFinishedObserved) {
-      finalizePlaybackCoordination();
-    }
+    const turnId = playbackCoordination.activeTurnId;
+    const orchestrationId = playbackCoordination.activeOrchestrationId;
+    const success = !playbackCoordination.audioFailed;
+    playbackCoordination.completionSent = true;
+    void options.adapter.sendPlaybackFinishedForCurrentGroup(
+      turnId,
+      orchestrationId,
+      success,
+      reason,
+    );
   }
 
   function schedulePlaybackSettlementWindow(): void {

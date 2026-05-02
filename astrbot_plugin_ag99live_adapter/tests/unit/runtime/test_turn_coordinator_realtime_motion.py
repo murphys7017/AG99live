@@ -1061,3 +1061,75 @@ def test_emit_message_chain_inline_v1_intent_is_rejected(
 
     assert "motion_payload" not in inline_broadcast
 
+
+def test_handle_msg_emits_control_error_for_unhandled_allowed_message_type(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    constants = importlib.import_module("astrbot_plugin_ag99live_adapter.protocol.constants")
+    TurnCoordinator = module.TurnCoordinator
+
+    monkeypatch.setattr(
+        constants,
+        "INBOUND_ALLOWED_TYPES",
+        set(constants.INBOUND_ALLOWED_TYPES) | {constants.TYPE_OUTPUT_TEXT},
+    )
+    parser_module = importlib.import_module("astrbot_plugin_ag99live_adapter.protocol.parser")
+    monkeypatch.setattr(
+        parser_module,
+        "INBOUND_ALLOWED_TYPES",
+        set(parser_module.INBOUND_ALLOWED_TYPES) | {constants.TYPE_OUTPUT_TEXT},
+    )
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.session_state = type("SessionStateStub", (), {"client_uid": "desktop-client"})()
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+    coordinator._handle_frontend_compat = _noop_async
+    coordinator.finalize_turn = _noop_async
+    coordinator._handle_interrupt_signal = _noop_async
+    coordinator._commit_inbound_message = _noop_async
+    coordinator._handle_engine_motion_payload_preview = _noop_async
+    coordinator.speech_ingress = type(
+        "SpeechIngressStub",
+        (),
+        {
+            "handle_audio_stream_start": _noop_async,
+            "handle_audio_stream_chunk": _noop_async,
+            "handle_audio_stream_end": _noop_async,
+            "handle_audio_data": _noop_async,
+            "handle_raw_audio_data": _noop_async,
+        },
+    )()
+    coordinator._handle_audio_end = _noop_async
+    coordinator._convert_message = lambda raw: raw
+
+    asyncio.run(
+        coordinator.handle_msg(
+            {
+                "type": constants.TYPE_OUTPUT_TEXT,
+                "version": constants.PROTOCOL_VERSION,
+                "session_id": "desktop-client",
+                "turn_id": "turn-unhandled",
+                "orchestration_id": "orch-unhandled",
+                "source": constants.SOURCE_FRONTEND,
+                "payload": {},
+            }
+        )
+    )
+
+    assert sent_payloads
+    payload = sent_payloads[0]
+    assert payload["type"] == constants.TYPE_CONTROL_ERROR
+    assert payload["turn_id"] == "turn-unhandled"
+    assert payload["orchestration_id"] == "orch-unhandled"
+    assert "Unhandled message type" in str(payload["payload"]["message"])
+
