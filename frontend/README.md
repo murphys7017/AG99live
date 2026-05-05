@@ -27,8 +27,9 @@ npm run dev
 
 ## 当前动作播放特性
 
-- `turn_id` 级动作/音频同步
-- 音频 `playing` 触发动作起播，无音频时超时兜底
+- `turn_id + orchestration_id` 级文本 / 音频 / 动作软同步起播
+- 文本、音频、动作先进入 pending 队列，再由 `useTurnPlaybackOrchestrator` 统一释放
+- 音频 `playing` 仍会通知 `ModelEngine` 贴近音频起播动作；无音频和动作晚到场景有超时兜底
 - 计划软衔接（soft handoff）
 - 高频重复计划去重与重启节流
 - 设置窗口支持 ModelEngine 表现倍率：全局强度倍率参与 v2 编译

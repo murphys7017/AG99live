@@ -85,10 +85,10 @@ python -m pytest astrbot_plugin_ag99live_adapter/tests -q
 
 ## 文档入口
 
-- [文档索引](./docs/README.md)
-- [归档文档索引](./docs/archive/README.md)
+- [docs/README](./docs/README.md)
 - [V2 当前实现状态与下一步](./docs/V2当前实现状态与下一步.md)
-- [前后端严格审阅报告](./docs/前后端严格审阅报告.md)
-- [Adapter 说明](./astrbot_plugin_ag99live_adapter/README.md)
-- [Frontend 说明](./frontend/README.md)
+- [当前前后端动作链路结构说明](./docs/当前前后端动作链路结构说明.md)
+- [文本语音动作同步播放编排设计](./docs/文本语音动作同步播放编排设计.md)
+- [astrbot_plugin_ag99live_adapter/README](./astrbot_plugin_ag99live_adapter/README.md)
+- [frontend/README](./frontend/README.md)
 

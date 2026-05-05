@@ -2,7 +2,7 @@
 
 快照日期：2026-04-26
 
-> Superseded：本文是固定 12 轴阶段的语义分层设计记录，已被 `docs/主轴重构计划/` 中的动态主轴方案替代。后续实现以 `SemanticAxisProfile`、`motion_intent.v2`、`parameter_plan.v2` 为准；本文仅保留为历史背景和语义参考。
+> Superseded：本文是固定 12 轴阶段的语义分层设计记录，已被 `主轴重构计划/` 中的动态主轴方案替代。后续实现以 `SemanticAxisProfile`、`motion_intent.v2`、`parameter_plan.v2` 为准；本文仅保留为历史背景和语义参考。
 
 ## 目的
 
