@@ -5,6 +5,7 @@ import { useDesktopBridge } from "./useDesktopBridge";
 import { useModelSync } from "./useModelSync";
 import { usePetRuntimeSnapshotPublisher } from "./usePetRuntimeSnapshotPublisher";
 import { usePlaybackCompletionCoordinator } from "./usePlaybackCompletionCoordinator";
+import { useTurnPlaybackOrchestrator } from "./useTurnPlaybackOrchestrator";
 import {
   cloneModelEngineSettings,
   modelEngineSettingsEqual,
@@ -57,6 +58,10 @@ export function usePetDesktopController() {
     pushHistory: (role, text) => adapter.pushHistory(role, text),
     getPlayerMessage: () => motionPlayer.state.message,
     onPlanStarted: playbackCoordinator.recordMotionPlayback,
+  });
+  useTurnPlaybackOrchestrator({
+    adapter,
+    modelEngine,
   });
 
   function applyMotionEngineSettingsSnapshot(nextValue: unknown): void {
@@ -265,28 +270,6 @@ export function usePetDesktopController() {
   const detachBridgeListener = bridge.onCommand(handleDesktopCommand);
   const detachProfileAuthoringBridgeListener = bridge.onProfileAuthoringCommand(
     handleProfileAuthoringCommand,
-  );
-
-  watch(
-    () => adapter.state.inboundMotionPlanNonce,
-    () => {
-      const plan = adapter.state.inboundMotionPlan;
-      if (!plan) {
-        return;
-      }
-      modelEngine.ingestInboundPayload(plan, {
-        turnId: adapter.state.inboundMotionPlanTurnId,
-        orchestrationId: adapter.state.inboundMotionPlanOrchestrationId,
-        receivedAtMs: adapter.state.inboundMotionPlanReceivedAtMs,
-      });
-    },
-  );
-
-  watch(
-    () => adapter.state.currentTurnId,
-    (turnId) => {
-      modelEngine.notifyCurrentTurnChanged(turnId);
-    },
   );
 
   usePetRuntimeSnapshotPublisher({

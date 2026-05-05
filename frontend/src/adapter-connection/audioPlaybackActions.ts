@@ -30,6 +30,7 @@ export async function playAudioAndAcknowledge(
   ctx: AudioPlaybackContext,
   audioUrl: string,
   turnId: string | null,
+  orchestrationId: string | null = ctx.state.currentOrchestrationId,
 ): Promise<void> {
   stopAudioPlayback(ctx);
   ctx.resetTerminal();
@@ -51,7 +52,7 @@ export async function playAudioAndAcknowledge(
       },
       onPlaybackStarted: (event) => {
         ctx.state.audioPlaybackStartedTurnId = turnId;
-        ctx.state.audioPlaybackStartedOrchestrationId = ctx.state.currentOrchestrationId;
+        ctx.state.audioPlaybackStartedOrchestrationId = orchestrationId;
         ctx.state.audioPlaybackStartedAtMs = event.startedAtMs;
         ctx.state.audioPlaybackStartedNonce += 1;
         console.info(
@@ -66,7 +67,7 @@ export async function playAudioAndAcknowledge(
       onEnded: () => {
         const completedTurnId = ctx.state.audioPlaybackStartedTurnId ?? turnId;
         const completedOrchestrationId =
-          ctx.state.audioPlaybackStartedOrchestrationId ?? ctx.state.currentOrchestrationId;
+          ctx.state.audioPlaybackStartedOrchestrationId ?? orchestrationId;
         ctx.state.isPlayingAudio = false;
         ctx.state.audioPlaybackStartedTurnId = null;
         ctx.state.audioPlaybackStartedOrchestrationId = null;
@@ -82,7 +83,7 @@ export async function playAudioAndAcknowledge(
       onError: () => {
         const failedTurnId = ctx.state.audioPlaybackStartedTurnId ?? turnId;
         const failedOrchestrationId =
-          ctx.state.audioPlaybackStartedOrchestrationId ?? ctx.state.currentOrchestrationId;
+          ctx.state.audioPlaybackStartedOrchestrationId ?? orchestrationId;
         ctx.state.isPlayingAudio = false;
         ctx.state.audioPlaybackStartedTurnId = null;
         ctx.state.audioPlaybackStartedOrchestrationId = null;
@@ -98,7 +99,7 @@ export async function playAudioAndAcknowledge(
       },
     });
   } catch (error) {
-    const failedOrchestrationId = ctx.state.currentOrchestrationId;
+    const failedOrchestrationId = orchestrationId;
     ctx.state.isPlayingAudio = false;
     ctx.state.audioPlaybackStartedTurnId = null;
     ctx.state.audioPlaybackStartedOrchestrationId = null;
