@@ -28,7 +28,13 @@ interface TransparentWindowSnapshot {
   petVisible: boolean;
   overlayVisible: boolean;
   overlayVisiblePreference: boolean;
+  overlayFollowsPet?: boolean;
   petIgnoreMouseEvents: boolean;
+}
+
+interface OverlayDragOrigin {
+  x: number;
+  y: number;
 }
 
 const PET_WINDOW_WIDTH = 540;
@@ -38,6 +44,7 @@ const PET_OVERLAY_WIDTH = 420;
 const PET_OVERLAY_MIN_HEIGHT = 112;
 const PET_OVERLAY_MAX_HEIGHT = 168;
 const PET_OVERLAY_GAP = 16;
+const OVERLAY_DRAG_DETACH_THRESHOLD_PX = 12;
 const WIN32_TRANSPARENT_WINDOW_COMPAT_OPTIONS: BrowserWindowConstructorOptions =
   process.platform === "win32"
     ? {
@@ -54,6 +61,9 @@ export class WindowManager {
   private isAppQuitting = false;
   private overlayVisiblePreference = true;
   private overlayWindowHeight = PET_OVERLAY_MIN_HEIGHT;
+  private overlayFollowsPet = true;
+  private overlayResizeManagedByHeightSync = false;
+  private overlayDragOrigin: OverlayDragOrigin | null = null;
   private activeDragState: WindowDragState | null = null;
   private pendingTransparentWindowRecoveryReason: string | null = null;
   private petWindowIgnoreMouseEvents = true;
@@ -146,7 +156,9 @@ export class WindowManager {
       target.hide();
     } else {
       this.overlayVisiblePreference = true;
-      this.positionOverlayWindow();
+      if (this.overlayFollowsPet) {
+        this.positionOverlayWindow();
+      }
       target.show();
       target.focus();
     }
@@ -266,6 +278,13 @@ export class WindowManager {
       lastY: bounds.y,
     };
 
+    if (role === "overlay") {
+      this.overlayDragOrigin = {
+        x: bounds.x,
+        y: bounds.y,
+      };
+    }
+
     if (bounds.width !== lockedWidth || bounds.height !== lockedHeight) {
       targetWindow.setBounds(
         {
@@ -314,6 +333,18 @@ export class WindowManager {
     );
     if (activeDragState.role === "pet") {
       this.translateOverlayWindow(deltaX, deltaY);
+    } else if (
+      activeDragState.role === "overlay"
+      && this.overlayDragOrigin
+      && this.overlayFollowsPet
+    ) {
+      const movedDistance = Math.hypot(
+        nextX - this.overlayDragOrigin.x,
+        nextY - this.overlayDragOrigin.y,
+      );
+      if (movedDistance >= OVERLAY_DRAG_DETACH_THRESHOLD_PX) {
+        this.overlayFollowsPet = false;
+      }
     }
 
     activeDragState.lastX = nextX;
@@ -345,6 +376,7 @@ export class WindowManager {
         );
       }
       this.activeDragState = null;
+      this.overlayDragOrigin = null;
       this.flushDeferredTransparentWindowRecovery();
     }
   }
@@ -425,7 +457,9 @@ export class WindowManager {
       if (this.overlayVisiblePreference) {
         this.windows.overlay?.show();
       }
-      this.positionOverlayWindow();
+      if (this.overlayFollowsPet) {
+        this.positionOverlayWindow();
+      }
       this.broadcastWindowState();
     });
     petWindow.on("hide", () => {
@@ -436,14 +470,18 @@ export class WindowManager {
       if (this.activeDragState?.targetWindow === petWindow) {
         return;
       }
-      this.positionOverlayWindow();
+      if (this.overlayFollowsPet) {
+        this.positionOverlayWindow();
+      }
     });
     petWindow.on("resize", () => {
       this.normalizeTransparentWindowSize(petWindow, "pet");
       if (this.activeDragState?.targetWindow === petWindow) {
         return;
       }
-      this.positionOverlayWindow();
+      if (this.overlayFollowsPet) {
+        this.positionOverlayWindow();
+      }
     });
     petWindow.on("closed", () => {
       this.endWindowDrag(petWindow);
@@ -512,7 +550,12 @@ export class WindowManager {
       if (this.activeDragState?.targetWindow === overlayWindow) {
         return;
       }
-      this.positionOverlayWindow();
+      if (this.overlayResizeManagedByHeightSync) {
+        return;
+      }
+      if (this.overlayFollowsPet) {
+        this.positionOverlayWindow();
+      }
     });
     overlayWindow.on("closed", () => {
       this.endWindowDrag(overlayWindow);
@@ -639,6 +682,7 @@ export class WindowManager {
       petVisible: Boolean(petWindow?.isVisible()),
       overlayVisible: Boolean(overlayWindow?.isVisible()),
       overlayVisiblePreference: this.overlayVisiblePreference,
+      overlayFollowsPet: this.overlayFollowsPet,
       petIgnoreMouseEvents: this.petWindowIgnoreMouseEvents,
     };
   }
@@ -649,6 +693,7 @@ export class WindowManager {
     overlayWindow: BrowserWindow,
   ): void {
     this.overlayVisiblePreference = snapshot.overlayVisiblePreference;
+    this.overlayFollowsPet = snapshot.overlayFollowsPet ?? true;
     this.petWindowIgnoreMouseEvents = snapshot.petIgnoreMouseEvents;
 
     if (snapshot.petBounds) {
@@ -658,7 +703,7 @@ export class WindowManager {
 
     if (snapshot.overlayBounds) {
       overlayWindow.setBounds(snapshot.overlayBounds, false);
-    } else {
+    } else if (this.overlayFollowsPet) {
       this.positionOverlayWindow();
     }
     this.normalizeTransparentWindowSize(overlayWindow, "overlay");
@@ -753,25 +798,37 @@ export class WindowManager {
       return;
     }
 
-    overlayWindow.setBounds(
-      {
-        ...bounds,
-        height: nextHeight,
-      },
-      false,
-    );
+    this.overlayResizeManagedByHeightSync = true;
+    try {
+      overlayWindow.setBounds(
+        {
+          ...bounds,
+          height: nextHeight,
+        },
+        false,
+      );
+    } finally {
+      this.overlayResizeManagedByHeightSync = false;
+    }
 
     if (this.activeDragState?.targetWindow === overlayWindow) {
       this.activeDragState.lockedHeight = nextHeight;
       return;
     }
 
-    this.positionOverlayWindow();
+    if (this.overlayFollowsPet) {
+      this.positionOverlayWindow();
+    }
   }
 
   private translateOverlayWindow(deltaX: number, deltaY: number): void {
     const overlayWindow = this.windows.overlay;
-    if (!overlayWindow || overlayWindow.isDestroyed() || !overlayWindow.isVisible()) {
+    if (
+      !this.overlayFollowsPet
+      || !overlayWindow
+      || overlayWindow.isDestroyed()
+      || !overlayWindow.isVisible()
+    ) {
       return;
     }
 
@@ -834,5 +891,10 @@ export class WindowManager {
       }
       this.recoverTransparentWindows(`deferred after drag: ${reason}`);
     });
+  }
+
+  resetOverlayFollowMode(): void {
+    this.overlayFollowsPet = true;
+    this.positionOverlayWindow();
   }
 }

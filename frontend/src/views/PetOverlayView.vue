@@ -7,7 +7,10 @@ const draft = ref("");
 const overlayCardRef = ref<HTMLElement | null>(null);
 const activePointerId = ref<number | null>(null);
 const isDragging = ref(false);
+const isPointerInteracting = ref(false);
 let resizeObserver: ResizeObserver | null = null;
+let heightSyncFrameId = 0;
+let lastSyncedOverlayHeight = 0;
 
 const aiStateLabel = computed(() => {
   switch (bridge.state.snapshot.aiState) {
@@ -62,7 +65,7 @@ function handleMicrophoneToggle(): void {
 }
 
 function syncOverlayContentHeight(): void {
-  if (isDragging.value) {
+  if (isDragging.value || isPointerInteracting.value) {
     return;
   }
 
@@ -70,7 +73,25 @@ function syncOverlayContentHeight(): void {
   if (!overlayCard) {
     return;
   }
-  window.ag99desktop?.setOverlayContentHeight(overlayCard.offsetHeight);
+
+  const nextHeight = Math.ceil(overlayCard.offsetHeight);
+  if (!Number.isFinite(nextHeight) || nextHeight <= 0 || nextHeight === lastSyncedOverlayHeight) {
+    return;
+  }
+
+  lastSyncedOverlayHeight = nextHeight;
+  window.ag99desktop?.setOverlayContentHeight(nextHeight);
+}
+
+function scheduleOverlayContentHeightSync(): void {
+  if (heightSyncFrameId) {
+    return;
+  }
+
+  heightSyncFrameId = window.requestAnimationFrame(() => {
+    heightSyncFrameId = 0;
+    syncOverlayContentHeight();
+  });
 }
 
 function showContextMenu(event: MouseEvent): void {
@@ -101,6 +122,7 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
 }
 
 function finishWindowDrag(): void {
+  isPointerInteracting.value = false;
   if (activePointerId.value === null) {
     return;
   }
@@ -108,10 +130,11 @@ function finishWindowDrag(): void {
   activePointerId.value = null;
   isDragging.value = false;
   window.ag99desktop?.endWindowDrag();
-  void nextTick(syncOverlayContentHeight);
+  void nextTick(scheduleOverlayContentHeightSync);
 }
 
 function handlePointerDown(event: PointerEvent): void {
+  isPointerInteracting.value = true;
   const target = event.target;
   const dragHandle =
     target instanceof HTMLElement
@@ -138,7 +161,9 @@ function handlePointerMove(event: PointerEvent): void {
 }
 
 function handlePointerUp(event: PointerEvent): void {
+  isPointerInteracting.value = false;
   if (activePointerId.value !== event.pointerId) {
+    void nextTick(scheduleOverlayContentHeightSync);
     return;
   }
 
@@ -146,7 +171,9 @@ function handlePointerUp(event: PointerEvent): void {
 }
 
 function handlePointerCancel(event: PointerEvent): void {
+  isPointerInteracting.value = false;
   if (activePointerId.value !== event.pointerId) {
+    void nextTick(scheduleOverlayContentHeightSync);
     return;
   }
 
@@ -154,20 +181,26 @@ function handlePointerCancel(event: PointerEvent): void {
 }
 
 onMounted(() => {
-  resizeObserver = new ResizeObserver(syncOverlayContentHeight);
+  resizeObserver = new ResizeObserver(() => {
+    scheduleOverlayContentHeightSync();
+  });
   if (overlayCardRef.value) {
     resizeObserver.observe(overlayCardRef.value);
   }
-  void nextTick(syncOverlayContentHeight);
+  void nextTick(scheduleOverlayContentHeightSync);
 });
 
 watch(previewText, () => {
-  void nextTick(syncOverlayContentHeight);
+  void nextTick(scheduleOverlayContentHeightSync);
 });
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect();
   resizeObserver = null;
+  if (heightSyncFrameId) {
+    window.cancelAnimationFrame(heightSyncFrameId);
+    heightSyncFrameId = 0;
+  }
   finishWindowDrag();
 });
 </script>

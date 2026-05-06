@@ -16,6 +16,7 @@ export class MenuManager {
 
       const menu = Menu.buildFromTemplate([
         this.buildOverlayToggleItem(),
+        this.buildOverlayReattachItem(),
         this.buildToggleItem("settings", "系统设置"),
         this.buildToggleItem("history", "对话历史"),
         this.buildToggleItem("action_lab", "动作实验室"),
@@ -93,6 +94,15 @@ export class MenuManager {
       label: visible ? "关闭输入框" : "打开输入框",
       click: () => {
         this.windowManager.toggleOverlayWindow();
+      },
+    };
+  }
+
+  private buildOverlayReattachItem() {
+    return {
+      label: "输入框恢复跟随",
+      click: () => {
+        this.windowManager.resetOverlayFollowMode();
       },
     };
   }
