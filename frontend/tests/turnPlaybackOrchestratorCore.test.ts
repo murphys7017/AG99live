@@ -178,6 +178,20 @@ function testDifferentOrchestrationGroupsDoNotCrossRelease(): void {
   assert.deepEqual(harness.events, []);
 }
 
+function testMissingIdentifiersDoNotShareUnknownGroup(): void {
+  const harness = createHarness();
+
+  harness.core.markTextReady(null, null);
+  harness.core.markAudioReady(null, null);
+  harness.core.markMotionReady(null, null, "motion-anonymous", 10);
+
+  assert.deepEqual(harness.events, []);
+  assert.equal(harness.pendingTasks().length, 1);
+
+  harness.advanceTo(TEXT_ONLY_RELEASE_WAIT_MS);
+  assert.deepEqual(harness.events, ["text::"]);
+}
+
 function run(): void {
   testTextAudioMotionReadyReleaseTogether();
   testAudioWaitsForLateMotionWithinWindow();
@@ -186,6 +200,7 @@ function run(): void {
   testTextOnlyReleasesAfterShortWait();
   testNoAudioWithMotionReleasesTextAndMotion();
   testDifferentOrchestrationGroupsDoNotCrossRelease();
+  testMissingIdentifiersDoNotShareUnknownGroup();
   console.log("turnPlaybackOrchestratorCore tests passed");
 }
 

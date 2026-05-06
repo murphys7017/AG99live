@@ -1,7 +1,11 @@
+// Orchestrator startup window: once text/audio are present, keep a wider window
+// for a late motion plan to join the same playback group before releasing.
 export const AUDIO_MOTION_SYNC_WAIT_MS = 820;
 export const TEXT_ONLY_RELEASE_WAIT_MS = 260;
 
 export interface PendingTurnPlaybackGroup {
+  key: string;
+  ephemeral: boolean;
   turnId: string | null;
   orchestrationId: string | null;
   firstReadyAtMs: number;
@@ -30,6 +34,7 @@ export interface TurnPlaybackOrchestratorCoreOptions {
   releaseAudio: (turnId: string | null, orchestrationId: string | null) => void;
   releaseMotion: (payload: unknown, context: TurnPlaybackReleaseContext) => void;
   log?: (message: string, details: Record<string, unknown>) => void;
+  createEphemeralGroupKey?: () => string;
 }
 
 function normalizeId(value: unknown): string {
@@ -48,31 +53,46 @@ export function resolveTurnPlaybackGroupKey(
   if (normalizedTurnId) {
     return `turn:${normalizedTurnId}`;
   }
-  return "unknown";
+  return "";
 }
 
 export function createTurnPlaybackOrchestratorCore(
   options: TurnPlaybackOrchestratorCoreOptions,
 ) {
   const groups = new Map<string, PendingTurnPlaybackGroup>();
+  let ephemeralGroupSerial = 0;
 
   function log(message: string, details: Record<string, unknown>): void {
     options.log?.(message, details);
+  }
+
+  function createEphemeralGroupKey(): string {
+    if (options.createEphemeralGroupKey) {
+      return options.createEphemeralGroupKey();
+    }
+    ephemeralGroupSerial += 1;
+    return `ephemeral:${ephemeralGroupSerial}`;
   }
 
   function getOrCreateGroup(
     turnId: string | null,
     orchestrationId: string | null,
   ): PendingTurnPlaybackGroup {
-    const key = resolveTurnPlaybackGroupKey(turnId, orchestrationId);
-    const existing = groups.get(key);
-    if (existing) {
-      existing.turnId = existing.turnId ?? turnId;
-      existing.orchestrationId = existing.orchestrationId ?? orchestrationId;
-      return existing;
+    const resolvedKey = resolveTurnPlaybackGroupKey(turnId, orchestrationId);
+    if (resolvedKey) {
+      const existing = groups.get(resolvedKey);
+      if (existing) {
+        existing.turnId = existing.turnId ?? turnId;
+        existing.orchestrationId = existing.orchestrationId ?? orchestrationId;
+        return existing;
+      }
     }
 
+    const ephemeral = !resolvedKey;
+    const key = resolvedKey || createEphemeralGroupKey();
     const group: PendingTurnPlaybackGroup = {
+      key,
+      ephemeral,
       turnId,
       orchestrationId,
       firstReadyAtMs: options.now(),
@@ -88,6 +108,10 @@ export function createTurnPlaybackOrchestratorCore(
     };
     groups.set(key, group);
     return group;
+  }
+
+  function deleteGroup(group: PendingTurnPlaybackGroup): void {
+    groups.delete(group.key);
   }
 
   function clearReleaseTimer(group: PendingTurnPlaybackGroup): void {
@@ -147,6 +171,9 @@ export function createTurnPlaybackOrchestratorCore(
       audioReady: group.audioReady,
       noAudioConfirmed: group.noAudioConfirmed,
     });
+    if (group.ephemeral) {
+      deleteGroup(group);
+    }
   }
 
   function releaseTextOnly(group: PendingTurnPlaybackGroup, reason: string): void {
@@ -173,6 +200,9 @@ export function createTurnPlaybackOrchestratorCore(
     if (group.released) {
       if (group.motionReady) {
         releaseMotion(group, `late_motion_after_${reason}`);
+      }
+      if (group.ephemeral) {
+        deleteGroup(group);
       }
       return;
     }

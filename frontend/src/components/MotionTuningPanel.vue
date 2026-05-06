@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useDesktopBridge } from "../composables/useDesktopBridge";
 import { cloneJson } from "../utils/cloneJson";
+import { roundTo } from "../utils/number";
 import {
   matchesPinnedProfileScope,
 } from "../types/desktop";
@@ -416,11 +417,6 @@ function formatRecordTime(record: { createdAt: string }): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
-}
-
-function roundTo(value: number, digits: number): number {
-  const scale = 10 ** digits;
-  return Math.round(value * scale) / scale;
 }
 
 </script>

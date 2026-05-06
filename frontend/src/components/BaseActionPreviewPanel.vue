@@ -12,6 +12,7 @@ import { SCHEMA_MOTION_INTENT_V2 } from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 import { useParameterExcludeKeywords } from "../composables/useParameterExcludeKeywords";
 import { buildParameterPlanTiming } from "../model-engine/timing";
+import { roundTo } from "../utils/number";
 
 const props = defineProps<{
   preview: DesktopBaseActionPreview | null;
@@ -399,10 +400,6 @@ function buildSemanticAxisValuesFromAtoms(
   return buildAxisValuesFromAtoms(atoms);
 }
 
-function roundTo(value: number, digits: number): number {
-  const scale = 10 ** digits;
-  return Math.round(value * scale) / scale;
-}
 </script>
 
 <template>

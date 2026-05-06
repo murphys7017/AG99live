@@ -73,6 +73,7 @@ import {
   saveDesktopScreenshotOnSendEnabled,
   saveStoredAdapterAddress,
 } from "../adapter-connection/preferences";
+import { normalizeOrchestrationId } from "../adapter-connection/orchestrationIds";
 import { useModelSync } from "./useModelSync";
 import { useAdapterHistory } from "./useAdapterHistory";
 
@@ -171,14 +172,6 @@ function buildMessageEnvelope<TPayload>(
     turnId,
     orchestrationId,
   );
-}
-
-function normalizeOrchestrationId(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim();
-  return normalized || null;
 }
 
 const outboundCtx = {
@@ -290,7 +283,6 @@ function connect(): void {
     return;
   }
 
-  manualClose = false;
   state.status = "connecting";
   state.statusMessage = "正在连接适配器...";
   state.lastError = "";

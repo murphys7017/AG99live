@@ -8,12 +8,11 @@ import { usePlaybackCompletionCoordinator } from "./usePlaybackCompletionCoordin
 import { useTurnPlaybackOrchestrator } from "./useTurnPlaybackOrchestrator";
 import {
   cloneModelEngineSettings,
-  modelEngineSettingsEqual,
-  normalizeModelEngineSettings,
 } from "../model-engine/settings";
 import { usePreviewMotionPlayer } from "./usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
 import { cloneJson } from "../utils/cloneJson";
+import { applyMotionEngineSettingsSnapshot } from "./motionEngineSettingsSnapshot";
 import type {
   DesktopMotionPlaybackRecord,
   DesktopProfileAuthoringCommand,
@@ -64,19 +63,7 @@ export function usePetDesktopController() {
     modelEngine,
   });
 
-  function applyMotionEngineSettingsSnapshot(nextValue: unknown): void {
-    const normalized = normalizeModelEngineSettings(nextValue);
-    const currentSettings = cloneModelEngineSettings(motionEngineSettings);
-    if (modelEngineSettingsEqual(currentSettings, normalized)) {
-      return;
-    }
-    motionEngineSettings.motionIntensityScale = normalized.motionIntensityScale;
-    motionEngineSettings.axisIntensityScale = {
-      ...normalized.axisIntensityScale,
-    };
-  }
-
-  applyMotionEngineSettingsSnapshot(bridge.state.snapshot.motionEngineSettings);
+  applyMotionEngineSettingsSnapshot(motionEngineSettings, bridge.state.snapshot.motionEngineSettings);
 
   const connectionState = computed(() => {
     if (adapter.state.status === "connecting") {
@@ -197,7 +184,7 @@ export function usePetDesktopController() {
         applyAmbientMotionPreference();
         return;
       case "set_motion_engine_settings":
-        applyMotionEngineSettingsSnapshot(command.settings);
+        applyMotionEngineSettingsSnapshot(motionEngineSettings, command.settings);
         return;
       case "request_model_projection_sync":
         snapshotPublisher.publishModelProjectionSnapshot();

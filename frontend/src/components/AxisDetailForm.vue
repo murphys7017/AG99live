@@ -103,10 +103,6 @@ function formatRange(range: [number, number]): string {
   return `${range[0]} .. ${range[1]}`;
 }
 
-function formatBindingTitle(axis: SemanticAxisDefinition): string {
-  return `${axis.parameter_bindings.length} bindings`;
-}
-
 function onAddBinding(): void {
   emit("addBinding", props.axis);
 }

@@ -1,5 +1,9 @@
 import type { ProtocolEnvelope } from "../types/protocol";
 import { SCHEMA_MOTION_INTENT_V2, SCHEMA_PARAMETER_PLAN_V2 } from "../types/protocol";
+import {
+  normalizeOrchestrationId,
+  normalizeTurnIdForComparison,
+} from "./orchestrationIds";
 
 export interface InboundMotionState {
   currentTurnId: string | null;
@@ -18,18 +22,6 @@ export interface InboundMotionState {
 export interface InboundMotionContext {
   state: InboundMotionState;
   pushHistory: (role: "system" | "error", text: string) => void;
-}
-
-function normalizeTurnIdForComparison(turnId: string | null | undefined): string {
-  return typeof turnId === "string" ? turnId.trim() : "";
-}
-
-function normalizeOrchestrationId(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim();
-  return normalized || null;
 }
 
 export function applyInboundMotionPayload(

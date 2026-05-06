@@ -6,9 +6,8 @@ import {
   MIN_MOTION_INTENSITY_SCALE,
   MOTION_INTENSITY_SCALE_STEP,
   cloneModelEngineSettings,
-  modelEngineSettingsEqual,
-  normalizeModelEngineSettings,
 } from "../model-engine/settings";
+import { applyMotionEngineSettingsSnapshot } from "./motionEngineSettingsSnapshot";
 
 export function useSettingsWindow() {
   const bridge = useDesktopBridge();
@@ -20,18 +19,6 @@ export function useSettingsWindow() {
   const motionEngineSettings = reactive(
     cloneModelEngineSettings(bridge.state.snapshot.motionEngineSettings),
   );
-
-  function applyMotionEngineSettingsSnapshot(nextValue: unknown): void {
-    const normalized = normalizeModelEngineSettings(nextValue);
-    const currentSettings = cloneModelEngineSettings(motionEngineSettings);
-    if (modelEngineSettingsEqual(currentSettings, normalized)) {
-      return;
-    }
-    motionEngineSettings.motionIntensityScale = normalized.motionIntensityScale;
-    motionEngineSettings.axisIntensityScale = {
-      ...normalized.axisIntensityScale,
-    };
-  }
 
   watch(
     () => bridge.state.snapshot.adapterAddress,
@@ -57,7 +44,7 @@ export function useSettingsWindow() {
   watch(
     () => bridge.state.snapshot.motionEngineSettings,
     (nextValue) => {
-      applyMotionEngineSettingsSnapshot(nextValue);
+      applyMotionEngineSettingsSnapshot(motionEngineSettings, nextValue);
     },
     { deep: true },
   );
@@ -142,7 +129,7 @@ export function useSettingsWindow() {
   }
 
   function resetMotionEngineSettings(): void {
-    applyMotionEngineSettingsSnapshot(undefined);
+    applyMotionEngineSettingsSnapshot(motionEngineSettings, undefined);
     applyMotionEngineSettings();
   }
 
