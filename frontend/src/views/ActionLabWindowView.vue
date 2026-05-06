@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted } from "vue";
 import BaseActionPreviewPanel from "../components/BaseActionPreviewPanel.vue";
 import DesktopWindowPanel from "../components/DesktopWindowPanel.vue";
 import MotionTuningPanel from "../components/MotionTuningPanel.vue";
@@ -9,7 +9,7 @@ import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 
 const bridge = useDesktopBridge();
 const parameterActionPreview = computed<DesktopBaseActionPreview | null>(() => {
-  const preview = bridge.state.snapshot.baseActionPreview;
+  const preview = bridge.state.modelProjectionSnapshot.baseActionPreview;
   if (!preview) {
     return null;
   }
@@ -36,8 +36,12 @@ const parameterActionPreview = computed<DesktopBaseActionPreview | null>(() => {
   };
 });
 const semanticProfile = computed<SemanticAxisProfile | null>(() => {
-  const profile = bridge.state.snapshot.runtimeSemanticAxisProfile;
+  const profile = bridge.state.modelProjectionSnapshot.runtimeSemanticAxisProfile;
   return profile ? JSON.parse(JSON.stringify(profile)) as SemanticAxisProfile : null;
+});
+
+onMounted(() => {
+  bridge.sendCommand({ type: "request_model_projection_sync" });
 });
 </script>
 

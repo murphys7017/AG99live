@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onMounted } from "vue";
 import DesktopWindowPanel from "../components/DesktopWindowPanel.vue";
 import { useSettingsWindow } from "../composables/useSettingsWindow";
 
@@ -24,8 +25,13 @@ const {
   applyAmbientMotionEnabled,
   applyMotionEngineSettings,
   resetMotionEngineSettings,
+  requestModelProjectionSync,
   formatScale,
 } = useSettingsWindow();
+
+onMounted(() => {
+  requestModelProjectionSync();
+});
 </script>
 
 <template>
@@ -72,10 +78,10 @@ const {
         <div class="settings-card__header">
           <div>
             <p class="settings-card__eyebrow">运行状态</p>
-            <h2>{{ bridgeState.snapshot.selectedModelName || "等待模型同步" }}</h2>
+            <h2>{{ bridgeState.modelProjectionSnapshot.selectedModelName || "等待模型同步" }}</h2>
           </div>
           <span class="settings-card__badge">
-            {{ bridgeState.snapshot.recommendedMode || "await-sync" }}
+            {{ bridgeState.modelProjectionSnapshot.recommendedMode || "await-sync" }}
           </span>
         </div>
 

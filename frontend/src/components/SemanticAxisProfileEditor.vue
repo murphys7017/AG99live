@@ -34,10 +34,10 @@ const pendingSave = ref<{
 } | null>(null);
 
 const currentProfile = computed(
-  () => bridge.state.snapshot.runtimeSemanticAxisProfile,
+  () => bridge.state.modelProjectionSnapshot.runtimeSemanticAxisProfile,
 );
 const selectedModelName = computed(() =>
-  bridge.state.snapshot.selectedModelName.trim(),
+  bridge.state.modelProjectionSnapshot.selectedModelName.trim(),
 );
 const latestSaveResult = computed(() =>
   bridge.state.profileAuthoringSnapshot.latestSemanticAxisProfileSaveResult,

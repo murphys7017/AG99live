@@ -199,6 +199,9 @@ export function usePetDesktopController() {
       case "set_motion_engine_settings":
         applyMotionEngineSettingsSnapshot(command.settings);
         return;
+      case "request_model_projection_sync":
+        snapshotPublisher.publishModelProjectionSnapshot();
+        return;
       case "request_motion_tuning_samples_sync":
         bridge.publishMotionTuningSamples(
           adapter.state.motionTuningSamples,
@@ -267,12 +270,7 @@ export function usePetDesktopController() {
     });
   }
 
-  const detachBridgeListener = bridge.onCommand(handleDesktopCommand);
-  const detachProfileAuthoringBridgeListener = bridge.onProfileAuthoringCommand(
-    handleProfileAuthoringCommand,
-  );
-
-  usePetRuntimeSnapshotPublisher({
+  const snapshotPublisher = usePetRuntimeSnapshotPublisher({
     adapter,
     bridge,
     modelSyncState: state,
@@ -287,6 +285,11 @@ export function usePetDesktopController() {
     stageMessage,
     aiState,
   });
+
+  const detachBridgeListener = bridge.onCommand(handleDesktopCommand);
+  const detachProfileAuthoringBridgeListener = bridge.onProfileAuthoringCommand(
+    handleProfileAuthoringCommand,
+  );
 
   watch(
     () => [selectedModel.value?.model_url ?? "", ambientMotionEnabled.value],

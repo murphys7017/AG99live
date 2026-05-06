@@ -102,6 +102,10 @@ export function useSettingsWindow() {
     window.ag99desktop?.toggleAuxWindow("profile_editor");
   }
 
+  function requestModelProjectionSync(): void {
+    bridge.sendCommand({ type: "request_model_projection_sync" });
+  }
+
   const profileEditorButtonLabel = computed(() =>
     bridge.state.windowState.profileEditorVisible
       ? "关闭 Profile Editor"
@@ -164,6 +168,7 @@ export function useSettingsWindow() {
     applyAmbientMotionEnabled,
     applyMotionEngineSettings,
     resetMotionEngineSettings,
+    requestModelProjectionSync,
     formatScale,
   };
 }

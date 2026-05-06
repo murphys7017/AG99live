@@ -1,5 +1,6 @@
 import { reactive, readonly } from "vue";
 import type {
+  DesktopModelProjectionSnapshot,
   DesktopProfileAuthoringCommand,
   DesktopProfileAuthoringSnapshot,
   DesktopMotionTuningSample,
@@ -9,12 +10,15 @@ import type {
   DesktopWindowVisibilityState,
 } from "../types/desktop";
 import {
+  defaultModelProjectionSnapshot,
   defaultProfileAuthoringSnapshot,
   defaultSnapshot,
+  normalizeModelProjectionSnapshot,
   normalizeMotionTuningSamples,
   normalizeMotionTuningSamplesStatus,
   normalizeProfileAuthoringSnapshot,
   normalizeSnapshot,
+  safeNormalizeModelProjectionSnapshot,
   safeNormalizeProfileAuthoringSnapshot,
   safeNormalizeSnapshot,
 } from "../desktop-bridge/snapshot";
@@ -26,6 +30,7 @@ const PROFILE_AUTHORING_SNAPSHOT_STORAGE_KEY = "ag99live.desktop.profile_authori
 
 type RuntimeBridgeMessage =
   | { kind: "snapshot"; snapshot: DesktopRuntimeSnapshot }
+  | { kind: "model_projection"; snapshot: DesktopModelProjectionSnapshot }
   | {
     kind: "motion_tuning_samples";
     samples: DesktopMotionTuningSample[];
@@ -53,6 +58,7 @@ const defaultWindowState: DesktopWindowVisibilityState = {
 
 const state = reactive({
   snapshot: loadRuntimeSnapshot(),
+  modelProjectionSnapshot: loadModelProjectionSnapshot(),
   motionTuningSamples: [] as DesktopMotionTuningSample[],
   motionTuningSamplesStatus: {
     rootError: "",
@@ -93,6 +99,18 @@ function ensureInitialized(): void {
         }
         state.snapshot = nextSnapshot;
         persistRuntimeSnapshot(nextSnapshot);
+        return;
+      }
+
+      if (payload.kind === "model_projection") {
+        const nextSnapshot = safeNormalizeModelProjectionSnapshot(
+          payload.snapshot,
+          "broadcast",
+        );
+        if (!nextSnapshot) {
+          return;
+        }
+        state.modelProjectionSnapshot = nextSnapshot;
         return;
       }
 
@@ -197,6 +215,10 @@ function loadRuntimeSnapshot(): DesktopRuntimeSnapshot {
   }
 }
 
+function loadModelProjectionSnapshot(): DesktopModelProjectionSnapshot {
+  return normalizeModelProjectionSnapshot(defaultModelProjectionSnapshot);
+}
+
 function loadProfileAuthoringSnapshot(): DesktopProfileAuthoringSnapshot {
   if (typeof window === "undefined") {
     return defaultProfileAuthoringSnapshot;
@@ -270,6 +292,20 @@ export function useDesktopBridge() {
     } satisfies RuntimeBridgeMessage);
   }
 
+  function publishModelProjectionSnapshot(
+    snapshot: DesktopModelProjectionSnapshot,
+  ): void {
+    const nextSnapshot = safeNormalizeModelProjectionSnapshot(snapshot, "publish");
+    if (!nextSnapshot) {
+      throw new Error("[DesktopBridge] publish model projection snapshot rejected.");
+    }
+    state.modelProjectionSnapshot = nextSnapshot;
+    runtimeChannel?.postMessage({
+      kind: "model_projection",
+      snapshot: nextSnapshot,
+    } satisfies RuntimeBridgeMessage);
+  }
+
   function publishMotionTuningSamples(
     samples: unknown,
     status?: DesktopMotionTuningSamplesStatus,
@@ -335,6 +371,7 @@ export function useDesktopBridge() {
   return {
     state: readonly(state),
     publishSnapshot,
+    publishModelProjectionSnapshot,
     publishMotionTuningSamples,
     publishProfileAuthoringSnapshot,
     sendCommand,

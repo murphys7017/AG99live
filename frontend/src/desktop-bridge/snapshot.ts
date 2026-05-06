@@ -2,6 +2,7 @@ import type {
   DesktopBackendHistoryMessage,
   DesktopBackendHistorySummary,
   DesktopBaseActionPreview,
+  DesktopModelProjectionSnapshot,
   DesktopMotionPlaybackRecord,
   DesktopMotionTuningSample,
   DesktopMotionTuningSamplesStatus,
@@ -43,9 +44,6 @@ export const defaultSnapshot: DesktopRuntimeSnapshot = {
   sessionId: "",
   confName: "",
   lastUpdated: "",
-  selectedModelName: "",
-  selectedModelIconUrl: "",
-  recommendedMode: "",
   serverWsUrl: "",
   httpBaseUrl: "",
   stageMessage: "等待桌宠窗口同步当前运行状态。",
@@ -59,6 +57,14 @@ export const defaultSnapshot: DesktopRuntimeSnapshot = {
   activeBackendHistoryUid: "",
   backendHistoryLoading: false,
   backendHistoryStatusMessage: "等待桌宠窗口同步后端历史。",
+};
+
+export const defaultModelProjectionSnapshot: DesktopModelProjectionSnapshot = {
+  selectedModelName: "",
+  selectedModelIconUrl: "",
+  recommendedMode: "",
+  confName: "",
+  lastUpdated: "",
   runtimeSemanticAxisProfile: null,
   baseActionPreview: null,
 };
@@ -126,8 +132,42 @@ export function safeNormalizeProfileAuthoringSnapshot(
   }
 }
 
+export function safeNormalizeModelProjectionSnapshot(
+  snapshot: unknown,
+  source: string,
+): DesktopModelProjectionSnapshot | null {
+  try {
+    if (!isObject(snapshot)) {
+      throw new Error("model_projection_snapshot_not_object");
+    }
+    return normalizeModelProjectionSnapshot(
+      snapshot as unknown as DesktopModelProjectionSnapshot,
+    );
+  } catch (error) {
+    console.warn(
+      `[DesktopBridge] ${source} model projection snapshot rejected.`,
+      error,
+    );
+    return null;
+  }
+}
+
 export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnapshot {
   rejectUnsupportedRuntimeSnapshotFields(snapshot);
+  const {
+    selectedModelName: _selectedModelName,
+    selectedModelIconUrl: _selectedModelIconUrl,
+    recommendedMode: _recommendedMode,
+    runtimeSemanticAxisProfile: _runtimeSemanticAxisProfile,
+    baseActionPreview: _baseActionPreview,
+    ...runtimeSnapshot
+  } = snapshot as DesktopRuntimeSnapshot & {
+    selectedModelName?: unknown;
+    selectedModelIconUrl?: unknown;
+    recommendedMode?: unknown;
+    runtimeSemanticAxisProfile?: unknown;
+    baseActionPreview?: unknown;
+  };
   const historyEntries = Array.isArray(snapshot.historyEntries)
     ? snapshot.historyEntries
     : [];
@@ -139,7 +179,7 @@ export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRunt
     : [];
   return {
     ...defaultSnapshot,
-    ...snapshot,
+    ...runtimeSnapshot,
     motionEngineSettings: cloneModelEngineSettings(
       normalizeModelEngineSettings(snapshot.motionEngineSettings),
     ),
@@ -156,10 +196,6 @@ export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRunt
     activeBackendHistoryUid: normalizeText(snapshot.activeBackendHistoryUid),
     backendHistoryLoading: Boolean(snapshot.backendHistoryLoading),
     backendHistoryStatusMessage: normalizeText(snapshot.backendHistoryStatusMessage),
-    runtimeSemanticAxisProfile: cloneSemanticAxisProfile(
-      snapshot.runtimeSemanticAxisProfile,
-    ),
-    baseActionPreview: cloneBaseActionPreview(snapshot.baseActionPreview),
   };
 }
 
@@ -192,6 +228,24 @@ export function normalizeProfileAuthoringSnapshot(
     latestSemanticAxisProfileSaveResult: snapshot.latestSemanticAxisProfileSaveResult
       ? { ...snapshot.latestSemanticAxisProfileSaveResult }
       : null,
+  };
+}
+
+export function normalizeModelProjectionSnapshot(
+  snapshot: DesktopModelProjectionSnapshot,
+): DesktopModelProjectionSnapshot {
+  return {
+    ...defaultModelProjectionSnapshot,
+    ...snapshot,
+    selectedModelName: normalizeText(snapshot.selectedModelName),
+    selectedModelIconUrl: normalizeText(snapshot.selectedModelIconUrl),
+    recommendedMode: normalizeText(snapshot.recommendedMode),
+    confName: normalizeText(snapshot.confName),
+    lastUpdated: normalizeText(snapshot.lastUpdated),
+    runtimeSemanticAxisProfile: cloneSemanticAxisProfile(
+      snapshot.runtimeSemanticAxisProfile,
+    ),
+    baseActionPreview: cloneBaseActionPreview(snapshot.baseActionPreview),
   };
 }
 

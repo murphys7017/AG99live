@@ -49,7 +49,9 @@ type MotionTuningSampleSnapshot = Readonly<{
   adjustedPlan: unknown;
 }>;
 
-const profile = computed(() => bridge.state.snapshot.runtimeSemanticAxisProfile);
+const profile = computed(() =>
+  bridge.state.modelProjectionSnapshot.runtimeSemanticAxisProfile,
+);
 const mutableProfile = computed<SemanticAxisProfile | null>(() =>
   profile.value ? cloneJson(profile.value) as SemanticAxisProfile : null,
 );

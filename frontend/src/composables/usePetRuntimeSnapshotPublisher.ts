@@ -3,6 +3,7 @@ import { cloneModelEngineSettings, type ModelEngineSettings } from "../model-eng
 import { cloneJson } from "../utils/cloneJson";
 import type {
   DesktopBaseActionPreview,
+  DesktopModelProjectionSnapshot,
   DesktopMotionPlaybackRecord,
 } from "../types/desktop";
 import type { ModelSummary } from "../types/protocol";
@@ -84,9 +85,30 @@ function createTrailingDebounce(): {
 
 export function usePetRuntimeSnapshotPublisher(
   options: PetRuntimeSnapshotPublisherOptions,
-): void {
+): { publishModelProjectionSnapshot: () => void } {
   const snapshotDebounce = createTrailingDebounce();
+  const modelProjectionDebounce = createTrailingDebounce();
   const profileDebounce = createTrailingDebounce();
+
+  function buildModelProjectionSnapshot(): DesktopModelProjectionSnapshot {
+    return {
+      selectedModelName: options.selectedModel.value?.name ?? "",
+      selectedModelIconUrl: options.selectedModel.value?.icon_url ?? "",
+      recommendedMode:
+        options.selectedModel.value?.engine_hints.recommended_mode ?? "",
+      confName: options.modelSyncState.confName,
+      lastUpdated: options.modelSyncState.lastUpdated,
+      runtimeSemanticAxisProfile: options.selectedSemanticAxisProfile.value
+        ? cloneJson(options.selectedSemanticAxisProfile.value)
+        : null,
+      baseActionPreview: options.parameterActionPreview.value,
+    };
+  }
+
+  function publishModelProjectionSnapshot(): void {
+    modelProjectionDebounce.flush();
+    options.bridge.publishModelProjectionSnapshot(buildModelProjectionSnapshot());
+  }
 
   watch(
     () => ({
@@ -126,15 +148,10 @@ export function usePetRuntimeSnapshotPublisher(
       options.adapter.state.backendHistoryStatusMessage,
       options.modelSyncState.confName,
       options.modelSyncState.lastUpdated,
-      options.selectedModel.value?.name ?? "",
-      options.selectedModel.value?.icon_url ?? "",
-      options.selectedModel.value?.engine_hints.recommended_mode ?? "",
-      options.parameterActionPreview.value,
       options.stageMessage.value,
       options.motionEngineSettings.motionIntensityScale,
       serializeAxisIntensityScale(options.motionEngineSettings.axisIntensityScale),
       options.motionPlaybackRecords.value,
-      options.selectedSemanticAxisProfile.value,
     ],
     () => {
       snapshotDebounce.schedule(() => {
@@ -155,10 +172,6 @@ export function usePetRuntimeSnapshotPublisher(
           sessionId: options.adapter.state.sessionId || options.modelSyncState.sessionId,
           confName: options.modelSyncState.confName,
           lastUpdated: options.modelSyncState.lastUpdated,
-          selectedModelName: options.selectedModel.value?.name ?? "",
-          selectedModelIconUrl: options.selectedModel.value?.icon_url ?? "",
-          recommendedMode:
-            options.selectedModel.value?.engine_hints.recommended_mode ?? "",
           serverWsUrl: options.adapter.state.serverInfo?.ws_url ?? "",
           httpBaseUrl: options.adapter.state.serverInfo?.http_base_url ?? "",
           stageMessage: options.stageMessage.value,
@@ -177,11 +190,25 @@ export function usePetRuntimeSnapshotPublisher(
           activeBackendHistoryUid: options.adapter.state.activeBackendHistoryUid,
           backendHistoryLoading: options.adapter.state.backendHistoryLoading,
           backendHistoryStatusMessage: options.adapter.state.backendHistoryStatusMessage,
-          runtimeSemanticAxisProfile: options.selectedSemanticAxisProfile.value
-            ? cloneJson(options.selectedSemanticAxisProfile.value)
-            : null,
-          baseActionPreview: options.parameterActionPreview.value,
         });
+      });
+    },
+    { deep: true, immediate: true },
+  );
+
+  watch(
+    () => [
+      options.modelSyncState.confName,
+      options.modelSyncState.lastUpdated,
+      options.selectedModel.value?.name ?? "",
+      options.selectedModel.value?.icon_url ?? "",
+      options.selectedModel.value?.engine_hints.recommended_mode ?? "",
+      options.parameterActionPreview.value,
+      options.selectedSemanticAxisProfile.value,
+    ],
+    () => {
+      modelProjectionDebounce.schedule(() => {
+        options.bridge.publishModelProjectionSnapshot(buildModelProjectionSnapshot());
       });
     },
     { deep: true, immediate: true },
@@ -203,6 +230,11 @@ export function usePetRuntimeSnapshotPublisher(
 
   onScopeDispose(() => {
     snapshotDebounce.flush();
+    modelProjectionDebounce.flush();
     profileDebounce.flush();
   });
+
+  return {
+    publishModelProjectionSnapshot,
+  };
 }

@@ -243,6 +243,16 @@ export interface DesktopProfileAuthoringSnapshot {
   latestSemanticAxisProfileSaveResult: DesktopSemanticAxisProfileSaveResult | null;
 }
 
+export interface DesktopModelProjectionSnapshot {
+  selectedModelName: string;
+  selectedModelIconUrl: string;
+  recommendedMode: string;
+  confName: string;
+  lastUpdated: string;
+  runtimeSemanticAxisProfile: SemanticAxisProfile | null;
+  baseActionPreview: DesktopBaseActionPreview | null;
+}
+
 export type DesktopProfileAuthoringCommand = {
   type: "save_semantic_axis_profile";
   requestId: string;
@@ -268,9 +278,6 @@ export interface DesktopRuntimeSnapshot {
   sessionId: string;
   confName: string;
   lastUpdated: string;
-  selectedModelName: string;
-  selectedModelIconUrl: string;
-  recommendedMode: string;
   serverWsUrl: string;
   httpBaseUrl: string;
   stageMessage: string;
@@ -284,8 +291,6 @@ export interface DesktopRuntimeSnapshot {
   activeBackendHistoryUid: string;
   backendHistoryLoading: boolean;
   backendHistoryStatusMessage: string;
-  runtimeSemanticAxisProfile: SemanticAxisProfile | null;
-  baseActionPreview: DesktopBaseActionPreview | null;
 }
 
 export interface DesktopMotionTuningSamplesStatus {
@@ -299,6 +304,7 @@ export type DesktopRuntimeCommand =
   | { type: "set_desktop_screenshot_on_send"; enabled: boolean }
   | { type: "set_ambient_motion_enabled"; enabled: boolean }
   | { type: "set_motion_engine_settings"; settings: DesktopMotionEngineSettings }
+  | { type: "request_model_projection_sync" }
   | { type: "request_motion_tuning_samples_sync" }
   | { type: "save_motion_tuning_sample"; sample: DesktopMotionTuningSample }
   | { type: "delete_motion_tuning_sample"; sampleId: string }
