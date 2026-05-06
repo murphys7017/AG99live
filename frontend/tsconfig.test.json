@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": ".test-out",
+    "rootDir": ".",
+    "types": ["node"],
+    "noEmit": false
+  },
+  "include": [
+    "tests/**/*.ts",
+    "src/composables/turnPlaybackOrchestratorCore.ts"
+  ]
+}

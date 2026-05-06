@@ -11,6 +11,7 @@
     "typecheck": "npm run typecheck:renderer && npm run typecheck:node",
     "typecheck:renderer": "vue-tsc --noEmit -p tsconfig.json",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "test:orchestration": "node -e \"fs.rmSync('.test-out', { recursive: true, force: true })\" && tsc -p tsconfig.test.json && node .test-out/tests/turnPlaybackOrchestratorCore.test.js",
     "build": "npm run typecheck && electron-vite build",
     "build:web": "vue-tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview"

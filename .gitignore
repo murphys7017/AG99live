@@ -8,6 +8,7 @@ release/
 Thumbs.db
 *.log
 coverage/
+frontend/.test-out/
 .env
 .env.*
 !.env.example
