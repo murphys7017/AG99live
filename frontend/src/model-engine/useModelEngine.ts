@@ -13,6 +13,7 @@ import type {
   NormalizedMotionPayload,
 } from "./contracts";
 import { normalizeMotionPayload, normalizeTurnId } from "./normalize";
+import { orchestrationIdFromSessionId } from "../turn-playback/session.js";
 
 interface PendingInboundMotionPayload {
   payload: NormalizedMotionPayload;
@@ -77,7 +78,32 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   }
 
   function resolveMotionTargetDurationMs(turnId: string | null): number | null {
+    // Prefer session as the single source of truth for audio timing
+    const activeSession = dependencies.sessionStore?.getActiveSession();
+    const audioStartedAtMs = activeSession?.audio.startedAtMs;
+    const audioDurationMs = activeSession?.audio.durationMs;
+    const sessionTurnId = activeSession?.turnId;
+
     const normalizedTurnId = normalizeTurnId(turnId);
+    const normalizedSessionTurnId = normalizeTurnId(sessionTurnId ?? null);
+
+    // If session has valid audio timing data, use it
+    if (
+      normalizedTurnId
+      && normalizedSessionTurnId
+      && normalizedTurnId === normalizedSessionTurnId
+      && audioStartedAtMs
+      && audioDurationMs
+      && Number.isFinite(audioStartedAtMs)
+      && audioStartedAtMs > 0
+      && Number.isFinite(audioDurationMs)
+      && audioDurationMs > 0
+    ) {
+      const elapsedMs = Math.max(0, performance.now() - audioStartedAtMs);
+      return Math.max(MOTION_MIN_REMAINING_AUDIO_MS, Math.round(audioDurationMs - elapsedMs));
+    }
+
+    // Fallback to dependency callback for backward compatibility
     const audioPlayback = dependencies.getAudioPlaybackInfo();
     const audioTurnId = normalizeTurnId(audioPlayback.turnId);
     if (!normalizedTurnId || !audioTurnId || normalizedTurnId !== audioTurnId) {
@@ -286,9 +312,20 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         return;
       }
 
-      const currentTurnId = normalizeTurnId(dependencies.getCurrentTurnId());
-      const currentOrchestrationId = dependencies.getCurrentOrchestrationId?.() ?? null;
-      const audioOrchestrationId = dependencies.getAudioPlaybackInfo().orchestrationId ?? null;
+      // Read current turn/audio context from session (single source of truth)
+      const activeSession = dependencies.sessionStore?.getActiveSession();
+      const currentTurnId = normalizeTurnId(
+        activeSession?.turnId ?? dependencies.getCurrentTurnId(),
+      );
+      const currentOrchestrationId =
+        orchestrationIdFromSessionId(activeSession?.id ?? "")
+        ?? dependencies.getCurrentOrchestrationId?.()
+        ?? null;
+      const audioOrchestrationId =
+        orchestrationIdFromSessionId(activeSession?.id ?? "")
+        ?? dependencies.getAudioPlaybackInfo().orchestrationId
+        ?? null;
+
       if (currentTurnId && currentTurnId !== normalizedTurnId) {
         if (
           entry.orchestrationId
@@ -316,8 +353,18 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       pendingCount: pendingInboundMotionPayloads.size,
     });
 
-    const activeAudioTurnId = normalizeTurnId(dependencies.getAudioPlaybackInfo().turnId);
-    const activeAudioOrchestrationId = dependencies.getAudioPlaybackInfo().orchestrationId ?? null;
+    // Check if audio is already playing — prefer session, fallback to dependency
+    const activeSession = dependencies.sessionStore?.getActiveSession();
+    const activeAudioTurnId = normalizeTurnId(
+      activeSession?.audio.started ? activeSession?.turnId : null,
+    ) || normalizeTurnId(dependencies.getAudioPlaybackInfo().turnId);
+    const activeAudioOrchestrationId =
+      (activeSession?.audio.started
+        ? orchestrationIdFromSessionId(activeSession.id)
+        : null)
+      ?? dependencies.getAudioPlaybackInfo().orchestrationId
+      ?? null;
+
     if (
       (activeAudioTurnId && activeAudioTurnId === normalizedTurnId)
       || (entry.orchestrationId && activeAudioOrchestrationId === entry.orchestrationId)
@@ -336,6 +383,13 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       return;
     }
     queueInboundPayload(normalized.payload, context);
+  }
+
+  function ingestNormalizedPayload(
+    payload: NormalizedMotionPayload,
+    context: InboundPayloadContext,
+  ): void {
+    queueInboundPayload(payload, context);
   }
 
   function notifyAudioPlaybackStarted(turnId: string | null): void {
@@ -398,6 +452,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   return {
     state: readonly(state),
     ingestInboundPayload,
+    ingestNormalizedPayload,
     notifyAudioPlaybackStarted,
     notifyCurrentTurnChanged,
     playPreviewPayload,

@@ -6,10 +6,17 @@ export interface AudioPlaybackState {
   audioPlaybackStartedOrchestrationId: string | null;
   audioPlaybackStartedAtMs: number;
   audioPlaybackDurationMs: number | null;
-  audioPlaybackStartedNonce: number;
   statusMessage: string;
   currentOrchestrationId: string | null;
   lastError: string;
+}
+
+export interface AudioPlaybackSessionStore {
+  markAudioStarted: (
+    orchestrationId: string | null,
+    turnId: string | null,
+    durationMs?: number | null,
+  ) => void;
 }
 
 export interface AudioPlaybackContext {
@@ -24,6 +31,7 @@ export interface AudioPlaybackContext {
     reason?: string,
   ) => void;
   resetTerminal: () => void;
+  sessionStore?: AudioPlaybackSessionStore;
 }
 
 export async function playAudioAndAcknowledge(
@@ -54,14 +62,16 @@ export async function playAudioAndAcknowledge(
         ctx.state.audioPlaybackStartedTurnId = turnId;
         ctx.state.audioPlaybackStartedOrchestrationId = orchestrationId;
         ctx.state.audioPlaybackStartedAtMs = event.startedAtMs;
-        ctx.state.audioPlaybackStartedNonce += 1;
+        ctx.sessionStore?.markAudioStarted(
+          orchestrationId,
+          turnId,
+          ctx.state.audioPlaybackDurationMs,
+        );
         console.info(
           "[Connection] audio playback started. turn_id=",
           turnId,
           "duration_ms=",
           ctx.state.audioPlaybackDurationMs,
-          "nonce=",
-          ctx.state.audioPlaybackStartedNonce,
         );
       },
       onEnded: () => {

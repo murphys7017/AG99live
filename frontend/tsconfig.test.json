@@ -1,15 +1,27 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "outDir": ".test-out",
     "rootDir": ".",
-    "types": ["node"],
+    "types": ["node", "vite/client"],
     "noEmit": false
   },
   "include": [
     "tests/**/*.ts",
-    "src/composables/turnPlaybackOrchestratorCore.ts"
+    "src/composables/turnPlaybackOrchestratorCore.ts",
+    "src/turn-playback/session.ts",
+    "src/turn-playback/selectors.ts",
+    "src/composables/useTurnPlaybackSessionStore.ts",
+    "src/model-engine/contracts.ts",
+    "src/model-engine/settings.ts",
+    "src/types/desktop.ts",
+    "src/types/protocol.ts",
+    "src/types/semantic-axis-profile.ts",
+    "src/utils/cloneJson.ts",
+    "src/composables/usePlaybackCompletionCoordinator.ts",
+    "src/composables/usePreviewMotionPlayer.ts",
+    "src/composables/useAdapterConnection.ts"
   ]
 }

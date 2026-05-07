@@ -120,4 +120,15 @@ export interface ModelEngineDependencies {
   ) => void;
   getPlayerMessage?: () => string;
   onPlanStarted?: (event: ModelEnginePlanStartedEvent) => void;
+  sessionStore?: {
+    getActiveSession: () => {
+      id: string;
+      turnId: string | null;
+      audio: {
+        started: boolean;
+        startedAtMs: number | null;
+        durationMs: number | null;
+      };
+    } | undefined;
+  };
 }

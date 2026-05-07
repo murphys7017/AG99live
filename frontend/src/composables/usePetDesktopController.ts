@@ -6,6 +6,7 @@ import { useModelSync } from "./useModelSync";
 import { usePetRuntimeSnapshotPublisher } from "./usePetRuntimeSnapshotPublisher";
 import { usePlaybackCompletionCoordinator } from "./usePlaybackCompletionCoordinator";
 import { useTurnPlaybackOrchestrator } from "./useTurnPlaybackOrchestrator";
+import { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
 import {
   cloneModelEngineSettings,
 } from "../model-engine/settings";
@@ -22,7 +23,8 @@ import type {
 
 export function usePetDesktopController() {
   const { state, selectedModel, selectedSemanticAxisProfile } = useModelSync();
-  const adapter = useAdapterConnection();
+  const sessionStore = useTurnPlaybackSessionStore();
+  const adapter = useAdapterConnection(sessionStore);
   const bridge = useDesktopBridge();
   const motionPlayer = usePreviewMotionPlayer();
   const motionEngineSettings = reactive(
@@ -33,6 +35,7 @@ export function usePetDesktopController() {
       cloneJson(record) as DesktopMotionPlaybackRecord);
   const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
   const playbackCoordinator = usePlaybackCompletionCoordinator({
+    sessionStore,
     adapter,
     motionPlayer,
     selectedModel,
@@ -57,8 +60,12 @@ export function usePetDesktopController() {
     pushHistory: (role, text) => adapter.pushHistory(role, text),
     getPlayerMessage: () => motionPlayer.state.message,
     onPlanStarted: playbackCoordinator.recordMotionPlayback,
+    sessionStore: {
+      getActiveSession: () => sessionStore.getActiveSession(),
+    },
   });
   useTurnPlaybackOrchestrator({
+    sessionStore,
     adapter,
     modelEngine,
   });
@@ -271,6 +278,7 @@ export function usePetDesktopController() {
     connectionLabel,
     stageMessage,
     aiState,
+    sessionStore,
   });
 
   const detachBridgeListener = bridge.onCommand(handleDesktopCommand);
@@ -309,6 +317,7 @@ export function usePetDesktopController() {
   }
 
   return {
+    sessionStore,
     selectedModel,
     stageMessage,
     showContextMenu,

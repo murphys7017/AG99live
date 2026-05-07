@@ -291,6 +291,13 @@ export interface DesktopRuntimeSnapshot {
   activeBackendHistoryUid: string;
   backendHistoryLoading: boolean;
   backendHistoryStatusMessage: string;
+  activeSessionId: string | null;
+  activeSessionPhase: string;
+  activeSessionTextReady: boolean;
+  activeSessionAudioTerminal: string;
+  activeSessionMotionStarted: boolean;
+  activeSessionMotionCompleted: boolean;
+  activeSessionTurnFinished: boolean;
 }
 
 export interface DesktopMotionTuningSamplesStatus {

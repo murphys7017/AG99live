@@ -16,7 +16,6 @@ export interface InboundMotionState {
   inboundMotionPlanTurnId: string | null;
   inboundMotionPlanOrchestrationId: string | null;
   inboundMotionPlanReceivedAtMs: number;
-  inboundMotionPlanNonce: number;
 }
 
 export interface InboundMotionContext {
@@ -197,8 +196,6 @@ export function applyInboundMotionPayload(
   state.inboundMotionPlanTurnId = envelopeTurnId || null;
   state.inboundMotionPlanOrchestrationId = envelopeOrchestrationId;
   state.inboundMotionPlanReceivedAtMs = performance.now();
-  state.inboundMotionPlanNonce += 1;
-  console.info("[Connection] inboundMotionPlanNonce incremented to", state.inboundMotionPlanNonce, "— watch should fire next.");
   state.statusMessage = `收到外部动作载荷（${envelope.type}, mode=${mode}）。`;
   ctx.pushHistory("system", state.statusMessage);
 }

@@ -57,6 +57,13 @@ export const defaultSnapshot: DesktopRuntimeSnapshot = {
   activeBackendHistoryUid: "",
   backendHistoryLoading: false,
   backendHistoryStatusMessage: "等待桌宠窗口同步后端历史。",
+  activeSessionId: null,
+  activeSessionPhase: "",
+  activeSessionTextReady: false,
+  activeSessionAudioTerminal: "idle",
+  activeSessionMotionStarted: false,
+  activeSessionMotionCompleted: false,
+  activeSessionTurnFinished: false,
 };
 
 export const defaultModelProjectionSnapshot: DesktopModelProjectionSnapshot = {

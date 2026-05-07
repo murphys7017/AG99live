@@ -12,6 +12,9 @@
     "typecheck:renderer": "vue-tsc --noEmit -p tsconfig.json",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "test:orchestration": "node -e \"fs.rmSync('.test-out', { recursive: true, force: true })\" && tsc -p tsconfig.test.json && node .test-out/tests/turnPlaybackOrchestratorCore.test.js",
+    "test:session": "node -e \"fs.rmSync('.test-out', { recursive: true, force: true })\" && tsc -p tsconfig.test.json && node .test-out/tests/turnPlaybackSessionStore.test.js",
+    "test:coordinator": "node -e \"fs.rmSync('.test-out', { recursive: true, force: true })\" && tsc -p tsconfig.test.json && node .test-out/tests/playbackCompletionCoordinator.test.js",
+    "test": "npm run test:orchestration && npm run test:session && npm run test:coordinator",
     "build": "npm run typecheck && electron-vite build",
     "build:web": "vue-tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview"

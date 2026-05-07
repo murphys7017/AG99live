@@ -11,6 +11,7 @@ import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 import type { useAdapterConnection } from "./useAdapterConnection";
 import type { useDesktopBridge } from "./useDesktopBridge";
 import type { useModelSync } from "./useModelSync";
+import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
 
 type AdapterConnection = ReturnType<typeof useAdapterConnection>;
 type DesktopBridge = ReturnType<typeof useDesktopBridge>;
@@ -32,6 +33,7 @@ interface PetRuntimeSnapshotPublisherOptions {
   connectionLabel: ComputedRef<string>;
   stageMessage: ComputedRef<string>;
   aiState: ComputedRef<string>;
+  sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>;
 }
 
 function serializeAxisIntensityScale(axisIntensityScale: Record<string, number>): string {
@@ -152,6 +154,13 @@ export function usePetRuntimeSnapshotPublisher(
       options.motionEngineSettings.motionIntensityScale,
       serializeAxisIntensityScale(options.motionEngineSettings.axisIntensityScale),
       options.motionPlaybackRecords.value,
+      options.sessionStore.state.activeSessionId,
+      options.sessionStore.getActiveSession()?.phase,
+      options.sessionStore.getActiveSession()?.text.content,
+      options.sessionStore.getActiveSession()?.audio.terminal,
+      options.sessionStore.getActiveSession()?.motion.started,
+      options.sessionStore.getActiveSession()?.motion.completed,
+      options.sessionStore.getActiveSession()?.backend.turnFinished,
     ],
     () => {
       snapshotDebounce.schedule(() => {
@@ -190,6 +199,13 @@ export function usePetRuntimeSnapshotPublisher(
           activeBackendHistoryUid: options.adapter.state.activeBackendHistoryUid,
           backendHistoryLoading: options.adapter.state.backendHistoryLoading,
           backendHistoryStatusMessage: options.adapter.state.backendHistoryStatusMessage,
+          activeSessionId: options.sessionStore.state.activeSessionId,
+          activeSessionPhase: options.sessionStore.getActiveSession()?.phase ?? "",
+          activeSessionTextReady: options.sessionStore.getActiveSession()?.text.content !== null,
+          activeSessionAudioTerminal: options.sessionStore.getActiveSession()?.audio.terminal ?? "idle",
+          activeSessionMotionStarted: options.sessionStore.getActiveSession()?.motion.started ?? false,
+          activeSessionMotionCompleted: options.sessionStore.getActiveSession()?.motion.completed ?? false,
+          activeSessionTurnFinished: options.sessionStore.getActiveSession()?.backend.turnFinished ?? false,
         });
       });
     },
