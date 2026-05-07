@@ -32,7 +32,7 @@ export function canReleaseAudio(session: TurnPlaybackSession): boolean {
  * Motion must have a payload and must not already be started.
  */
 export function canReleaseMotion(session: TurnPlaybackSession): boolean {
-  return session.motion.payload !== null && !session.motion.started;
+  return session.motion.payload !== null && !session.motion.released;
 }
 
 /**
@@ -46,7 +46,10 @@ export function shouldWaitForLateMotion(
   session: TurnPlaybackSession,
   _nowMs: number,
 ): boolean {
-  if (session.motion.started || session.motion.completed) {
+  if (session.motion.absent) {
+    return false;
+  }
+  if (session.motion.released || session.motion.completed) {
     return false;
   }
   return session.motion.payload !== null;
@@ -71,7 +74,7 @@ export function isReadyToAckPlaybackFinished(
   if (terminal !== "completed" && terminal !== "failed" && terminal !== "absent") {
     return false;
   }
-  if (session.motion.payload !== null && !session.motion.completed) {
+  if (!session.motion.absent && !session.motion.completed) {
     return false;
   }
   if (!session.backend.turnFinished) {

@@ -8,6 +8,11 @@ import {
   type TurnPlaybackReleaseContext,
 } from "./turnPlaybackOrchestratorCore";
 import { orchestrationIdFromSessionId } from "../turn-playback/session.js";
+import {
+  canReleaseAudio,
+  canReleaseMotion,
+  canReleaseText,
+} from "../turn-playback/selectors.js";
 
 type AdapterConnection = ReturnType<typeof useAdapterConnection>;
 type ModelEngine = ReturnType<typeof useModelEngine>;
@@ -43,13 +48,13 @@ export function useTurnPlaybackOrchestrator(
       void options.adapter.releaseAudioForPlayback(turnId, orchestrationId);
     },
     releaseMotion: (payload: unknown, context: TurnPlaybackReleaseContext) => {
+      options.sessionStore.markMotionReleased(
+        context.orchestrationId,
+        context.turnId,
+      );
       options.modelEngine.ingestNormalizedPayload(
         payload as NormalizedMotionPayload,
         context,
-      );
-      options.sessionStore.markMotionStarted(
-        context.orchestrationId,
-        context.turnId,
       );
       options.sessionStore.markPhase(
         context.orchestrationId,
@@ -64,105 +69,58 @@ export function useTurnPlaybackOrchestrator(
 
   // ── Watch session state and feed to core ────────────────────────
 
-  // Text: when content appears and not yet released
   watch(
+    () => options.sessionStore.getSessions().map((session) => ({
+      id: session.id,
+      turnId: session.turnId,
+      phase: session.phase,
+      textContent: session.text.content,
+      textReleased: session.text.released,
+      audioUrl: session.audio.url,
+      audioTerminal: session.audio.terminal,
+      motionReceivedAtMs: session.motion.receivedAtMs,
+      motionReleased: session.motion.released,
+      hasMotionPayload: session.motion.payload !== null,
+      backendTurnFinished: session.backend.turnFinished,
+    })),
     () => {
-      const s = options.sessionStore.getActiveSession();
-      if (!s) return null;
-      return `${s.id}|${s.text.content ?? "__nil__"}|${s.text.released}`;
-    },
-    (key) => {
-      if (!key) return;
-      const s = options.sessionStore.getActiveSession();
-      if (!s || !s.text.content || s.text.released) return;
-      core.markTextReady(
-        s.turnId,
-        orchestrationIdFromSessionId(s.id),
-      );
-    },
-  );
+      for (const session of options.sessionStore.getSessions()) {
+        const orchestrationId = orchestrationIdFromSessionId(session.id);
 
-  // Audio: when url appears
-  watch(
-    () => {
-      const s = options.sessionStore.getActiveSession();
-      if (!s) return null;
-      return s.audio.url ? `${s.id}|${s.audio.url}` : null;
-    },
-    (key) => {
-      if (!key) return;
-      const s = options.sessionStore.getActiveSession();
-      if (!s) return;
-      core.markAudioReady(
-        s.turnId,
-        orchestrationIdFromSessionId(s.id),
-      );
-    },
-  );
+        if (
+          session.phase === "collecting"
+          && session.text.content
+        ) {
+          options.sessionStore.markPhase(orchestrationId, session.turnId, "ready");
+        }
 
-  // Audio absent: when terminal becomes "absent"
-  watch(
-    () => {
-      const s = options.sessionStore.getActiveSession();
-      if (!s) return null;
-      return s.audio.terminal === "absent" ? `${s.id}|absent` : null;
-    },
-    (key) => {
-      if (!key) return;
-      const s = options.sessionStore.getActiveSession();
-      if (!s) return;
-      core.markNoAudioConfirmed(
-        s.turnId,
-        orchestrationIdFromSessionId(s.id),
-      );
-    },
-  );
+        if (canReleaseText(session)) {
+          core.markTextReady(session.turnId, orchestrationId);
+        }
 
-  // Motion: when payload appears and not yet started
-  watch(
-    () => {
-      const s = options.sessionStore.getActiveSession();
-      if (!s || !s.motion.payload || s.motion.started) return null;
-      return `${s.id}|${s.motion.receivedAtMs}`;
-    },
-    (key) => {
-      if (!key) return;
-      const s = options.sessionStore.getActiveSession();
-      if (!s) return;
-      core.markMotionReady(
-        s.turnId,
-        orchestrationIdFromSessionId(s.id),
-        s.motion.payload,
-        s.motion.receivedAtMs ?? performance.now(),
-      );
-    },
-  );
+        if (canReleaseAudio(session)) {
+          core.markAudioReady(session.turnId, orchestrationId);
+        }
 
-  // Backend turn_finished
-  watch(
-    () => {
-      const s = options.sessionStore.getActiveSession();
-      if (!s || !s.backend.turnFinished) return null;
-      return `${s.id}|finished`;
-    },
-    (key) => {
-      if (!key) return;
-      const s = options.sessionStore.getActiveSession();
-      if (!s) return;
-      core.markTurnFinished(
-        s.turnId,
-        orchestrationIdFromSessionId(s.id),
-      );
+        if (session.audio.terminal === "absent") {
+          core.markNoAudioConfirmed(session.turnId, orchestrationId);
+        }
 
-      // Auto-advance phase: collecting → ready when text is present
-      if (s.text.content && s.phase === "collecting") {
-        options.sessionStore.markPhase(
-          orchestrationIdFromSessionId(s.id),
-          s.turnId,
-          "ready",
-        );
+        if (canReleaseMotion(session) && session.motion.payload) {
+          core.markMotionReady(
+            session.turnId,
+            orchestrationId,
+            session.motion.payload,
+            session.motion.receivedAtMs ?? performance.now(),
+          );
+        }
+
+        if (session.backend.turnFinished) {
+          core.markTurnFinished(session.turnId, orchestrationId);
+        }
       }
     },
+    { deep: true },
   );
 
   // Active session changed → flush stale groups

@@ -30,6 +30,19 @@ interface StartPayloadContext {
   queuedDelayMs: number;
 }
 
+function resolveSessionKey(
+  orchestrationId: string | null,
+  turnId: string | null,
+): string | null {
+  if (typeof orchestrationId === "string" && orchestrationId.trim()) {
+    return `orch:${orchestrationId.trim()}`;
+  }
+  if (typeof turnId === "string" && turnId.trim()) {
+    return `turn:${turnId.trim()}`;
+  }
+  return null;
+}
+
 const state = reactive({
   status: "idle" as ModelEngineStatus,
   message: "等待动作输入。",
@@ -125,6 +138,38 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     return Math.max(MOTION_MIN_REMAINING_AUDIO_MS, Math.round(rawDuration - elapsedMs));
   }
 
+  function resolveMotionTargetDurationMsForContext(
+    turnId: string | null,
+    orchestrationId: string | null,
+  ): number | null {
+    const sessionKey = resolveSessionKey(orchestrationId, turnId);
+    const session = sessionKey
+      ? dependencies.sessionStore?.getSessionById?.(sessionKey)
+      : dependencies.sessionStore?.getActiveSession();
+    const audioStartedAtMs = session?.audio.startedAtMs;
+    const audioDurationMs = session?.audio.durationMs;
+    const sessionTurnId = session?.turnId;
+    const normalizedTurnId = normalizeTurnId(turnId);
+    const normalizedSessionTurnId = normalizeTurnId(sessionTurnId ?? null);
+
+    if (
+      normalizedTurnId
+      && normalizedSessionTurnId
+      && normalizedTurnId === normalizedSessionTurnId
+      && audioStartedAtMs
+      && audioDurationMs
+      && Number.isFinite(audioStartedAtMs)
+      && audioStartedAtMs > 0
+      && Number.isFinite(audioDurationMs)
+      && audioDurationMs > 0
+    ) {
+      const elapsedMs = Math.max(0, performance.now() - audioStartedAtMs);
+      return Math.max(MOTION_MIN_REMAINING_AUDIO_MS, Math.round(audioDurationMs - elapsedMs));
+    }
+
+    return resolveMotionTargetDurationMs(turnId);
+  }
+
   function reportInvalidPayload(reason: string): void {
     state.lastCompileReason = reason;
     setState("failed", `动作载荷无效：${reason}`, null);
@@ -156,7 +201,10 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       setState("compiling", "正在编译动作意图...", null);
       const compileResult = compileMotionIntent(payload.intent, {
         model: selectedModel,
-        targetDurationMs: resolveMotionTargetDurationMs(context.turnId),
+        targetDurationMs: resolveMotionTargetDurationMsForContext(
+          context.turnId,
+          context.orchestrationId,
+        ),
         source: context.startReason,
         settings: dependencies.getSettings(),
       });
@@ -222,7 +270,10 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       selectedModel,
       {
         softHandoff: true,
-        targetDurationMs: resolveMotionTargetDurationMs(context.turnId),
+        targetDurationMs: resolveMotionTargetDurationMsForContext(
+          context.turnId,
+          context.orchestrationId,
+        ),
         onStarted: (plan) => {
           startedPlan = plan as SemanticParameterPlan;
         },

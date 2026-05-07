@@ -62,6 +62,7 @@ export function usePetDesktopController() {
     onPlanStarted: playbackCoordinator.recordMotionPlayback,
     sessionStore: {
       getActiveSession: () => sessionStore.getActiveSession(),
+      getSessionById: (sessionId) => sessionStore.getSessionById(sessionId),
     },
   });
   useTurnPlaybackOrchestrator({

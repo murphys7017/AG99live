@@ -15,6 +15,7 @@ export interface AudioPlaybackSessionStore {
   markAudioStarted: (
     orchestrationId: string | null,
     turnId: string | null,
+    startedAtMs?: number | null,
     durationMs?: number | null,
   ) => void;
 }
@@ -65,6 +66,7 @@ export async function playAudioAndAcknowledge(
         ctx.sessionStore?.markAudioStarted(
           orchestrationId,
           turnId,
+          event.startedAtMs,
           ctx.state.audioPlaybackDurationMs,
         );
         console.info(

@@ -130,5 +130,16 @@ export interface ModelEngineDependencies {
         durationMs: number | null;
       };
     } | undefined;
+    getSessionById?: (
+      sessionId: string | null,
+    ) => {
+      id: string;
+      turnId: string | null;
+      audio: {
+        started: boolean;
+        startedAtMs: number | null;
+        durationMs: number | null;
+      };
+    } | undefined;
   };
 }

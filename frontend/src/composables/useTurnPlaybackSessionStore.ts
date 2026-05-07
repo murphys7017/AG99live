@@ -90,12 +90,27 @@ export function useTurnPlaybackSessionStore() {
     return state.sessions.get(state.activeSessionId);
   }
 
-  function setActiveSession(orchestrationId: string | null): void {
-    if (!orchestrationId) {
+  function getSessionById(sessionId: string | null): TurnPlaybackSession | undefined {
+    if (!sessionId) {
+      return undefined;
+    }
+    return state.sessions.get(sessionId);
+  }
+
+  function getSessions(): TurnPlaybackSession[] {
+    return Array.from(state.sessions.values());
+  }
+
+  function setActiveSession(
+    orchestrationId: string | null,
+    turnId: string | null = null,
+  ): void {
+    const key = resolveSessionId(orchestrationId, turnId);
+    if (!key) {
       state.activeSessionId = null;
       return;
     }
-    const session = ensureSession(orchestrationId, null);
+    const session = ensureSession(orchestrationId, turnId);
     state.activeSessionId = session.id;
   }
 
@@ -165,11 +180,15 @@ export function useTurnPlaybackSessionStore() {
   function markAudioStarted(
     orchestrationId: string | null,
     turnId: string | null,
+    startedAtMs?: number | null,
     durationMs?: number | null,
   ): void {
     const session = ensureSession(orchestrationId, turnId);
     session.audio.started = true;
-    session.audio.startedAtMs = performance.now();
+    session.audio.startedAtMs =
+      typeof startedAtMs === "number" && Number.isFinite(startedAtMs)
+        ? startedAtMs
+        : performance.now();
     session.audio.durationMs =
       typeof durationMs === "number" && Number.isFinite(durationMs)
         ? durationMs
@@ -200,8 +219,32 @@ export function useTurnPlaybackSessionStore() {
     const session = ensureSession(orchestrationId, turnId);
     session.motion.payload = payload;
     session.motion.receivedAtMs = performance.now();
+    session.motion.absent = false;
+    session.motion.released = false;
     session.motion.started = false;
     session.motion.completed = false;
+  }
+
+  function markMotionAbsent(
+    orchestrationId: string | null,
+    turnId: string | null,
+  ): void {
+    const session = ensureSession(orchestrationId, turnId);
+    session.motion.payload = null;
+    session.motion.receivedAtMs = null;
+    session.motion.absent = true;
+    session.motion.released = false;
+    session.motion.started = false;
+    session.motion.completed = true;
+  }
+
+  function markMotionReleased(
+    orchestrationId: string | null,
+    turnId: string | null,
+  ): void {
+    const session = ensureSession(orchestrationId, turnId);
+    session.motion.absent = false;
+    session.motion.released = true;
   }
 
   function markMotionStarted(
@@ -209,6 +252,8 @@ export function useTurnPlaybackSessionStore() {
     turnId: string | null,
   ): void {
     const session = ensureSession(orchestrationId, turnId);
+    session.motion.absent = false;
+    session.motion.released = true;
     session.motion.started = true;
   }
 
@@ -217,6 +262,8 @@ export function useTurnPlaybackSessionStore() {
     turnId: string | null,
   ): void {
     const session = ensureSession(orchestrationId, turnId);
+    session.motion.absent = false;
+    session.motion.released = true;
     session.motion.completed = true;
   }
 
@@ -359,6 +406,8 @@ export function useTurnPlaybackSessionStore() {
     state: readonly(state),
     ensureSession,
     getSession,
+    getSessionById,
+    getSessions,
     getActiveSession,
     setActiveSession,
     markTextReceived,
@@ -368,6 +417,8 @@ export function useTurnPlaybackSessionStore() {
     markAudioStarted,
     markAudioTerminal,
     markMotionReceived,
+    markMotionAbsent,
+    markMotionReleased,
     markMotionStarted,
     markMotionCompleted,
     markTurnStarted,

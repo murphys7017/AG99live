@@ -46,8 +46,10 @@ function makeTextDeliveredSession(): TurnPlaybackSession {
     motion: {
       payload: null,
       receivedAtMs: null,
+      released: false,
       started: false,
       completed: false,
+      absent: true,
     },
     backend: {
       turnStarted: true,
@@ -133,7 +135,9 @@ function testCreateTurnPlaybackSessionDefaults(): void {
   assert.equal(s.audio.terminal, "idle");
   assert.equal(s.audio.url, null);
   assert.equal(s.motion.payload, null);
+  assert.equal(s.motion.released, false);
   assert.equal(s.motion.started, false);
+  assert.equal(s.motion.absent, false);
   assert.equal(s.backend.turnStarted, false);
   assert.equal(s.backend.turnFinished, false);
 }
@@ -152,11 +156,15 @@ function testCreateSessionEphemeral(): void {
 
 function testIsSessionReadyForRelease(): void {
   assert.equal(
-    isSessionReadyForRelease(makeSession({ text: { content: "hi", receivedAtMs: 1, receiveMode: "replace", released: false, delivered: false } })),
+    isSessionReadyForRelease(makeSession({
+      text: { content: "hi", receivedAtMs: 1, receiveMode: "replace", released: false, delivered: false },
+    })),
     true,
   );
   assert.equal(
-    isSessionReadyForRelease(makeSession({ text: { content: null, receivedAtMs: null, receiveMode: "replace", released: false, delivered: false } })),
+    isSessionReadyForRelease(makeSession({
+      text: { content: null, receivedAtMs: null, receiveMode: "replace", released: false, delivered: false },
+    })),
     false,
   );
   assert.equal(
@@ -200,29 +208,43 @@ function testCanReleaseAudio(): void {
 
 function testCanReleaseMotion(): void {
   const s = makeSession({
-    motion: { payload: { kind: "semantic_intent", intent: {} } as never, receivedAtMs: 100, started: false, completed: false },
+    motion: {
+      payload: { kind: "semantic_intent", intent: {} } as never,
+      receivedAtMs: 100,
+      released: false,
+      started: false,
+      completed: false,
+      absent: false,
+    },
   });
   assert.equal(canReleaseMotion(s), true);
 
-  s.motion.started = true;
+  s.motion.released = true;
   assert.equal(canReleaseMotion(s), false);
 
-  s.motion.started = false;
+  s.motion.released = false;
   s.motion.payload = null;
   assert.equal(canReleaseMotion(s), false);
 }
 
 function testShouldWaitForLateMotion(): void {
   const s = makeSession({
-    motion: { payload: { kind: "semantic_intent" } as never, receivedAtMs: 100, started: false, completed: false },
+    motion: {
+      payload: { kind: "semantic_intent" } as never,
+      receivedAtMs: 100,
+      released: false,
+      started: false,
+      completed: false,
+      absent: false,
+    },
   });
   assert.equal(shouldWaitForLateMotion(s, 0), true);
 
-  s.motion.started = true;
+  s.motion.released = true;
   assert.equal(shouldWaitForLateMotion(s, 0), false);
 
-  s.motion.started = false;
-  s.motion.completed = true;
+  s.motion.released = false;
+  s.motion.absent = true;
   assert.equal(shouldWaitForLateMotion(s, 0), false);
 }
 
@@ -252,8 +274,10 @@ function testIsReadyToAckPlaybackFinished(): void {
   sMotionPending.motion = {
     payload: { kind: "semantic_intent" } as never,
     receivedAtMs: 200,
+    released: true,
     started: true,
     completed: false,
+    absent: false,
   };
   assert.equal(isReadyToAckPlaybackFinished(sMotionPending), false);
 
@@ -322,9 +346,10 @@ function testStoreAudioFlow(): void {
   assert.equal(s.audio.url, "http://localhost/audio.wav");
   assert.equal(s.audio.terminal, "idle");
 
-  store.markAudioStarted("orch-1", "turn-1", 5000);
+  store.markAudioStarted("orch-1", "turn-1", 1234, 5000);
   s = store.getSession("orch-1")!;
   assert.equal(s.audio.started, true);
+  assert.equal(s.audio.startedAtMs, 1234);
   assert.equal(s.audio.durationMs, 5000);
 
   store.markAudioTerminal("orch-1", "turn-1", "completed");
@@ -361,8 +386,15 @@ function testStoreMotionFlow(): void {
   store.markMotionReceived("orch-1", "turn-1", payload);
   let s = store.getSession("orch-1")!;
   assert.deepStrictEqual(s.motion.payload, payload);
+  assert.equal(s.motion.released, false);
   assert.equal(s.motion.started, false);
   assert.equal(s.motion.completed, false);
+  assert.equal(s.motion.absent, false);
+
+  store.markMotionReleased("orch-1", "turn-1");
+  s = store.getSession("orch-1")!;
+  assert.equal(s.motion.released, true);
+  assert.equal(s.motion.started, false);
 
   store.markMotionStarted("orch-1", "turn-1");
   s = store.getSession("orch-1")!;
@@ -371,6 +403,17 @@ function testStoreMotionFlow(): void {
   store.markMotionCompleted("orch-1", "turn-1");
   s = store.getSession("orch-1")!;
   assert.equal(s.motion.completed, true);
+}
+
+function testStoreMotionAbsent(): void {
+  const store = useTurnPlaybackSessionStore();
+
+  store.markMotionAbsent("orch-1", "turn-1");
+  const s = store.getSession("orch-1")!;
+  assert.equal(s.motion.payload, null);
+  assert.equal(s.motion.absent, true);
+  assert.equal(s.motion.completed, true);
+  assert.equal(s.motion.started, false);
 }
 
 // ── store: backend scenarios ──────────────────────────────────────
@@ -524,6 +567,14 @@ function testStoreActiveSession(): void {
   assert.equal(store.getActiveSession(), undefined);
 }
 
+function testStoreActiveSessionTurnFallback(): void {
+  const store = useTurnPlaybackSessionStore();
+
+  store.setActiveSession(null, "turn-only-1");
+  assert.equal(store.state.activeSessionId, "turn:turn-only-1");
+  assert.equal(store.getActiveSession()?.turnId, "turn-only-1");
+}
+
 // ── store: missing orchestrationId fallback ───────────────────────
 
 function testStoreMissingOrchIdFallback(): void {
@@ -611,6 +662,7 @@ function run(): void {
 
   // Store: motion
   testStoreMotionFlow();
+  testStoreMotionAbsent();
 
   // Store: backend
   testStoreBackendFlow();
@@ -629,6 +681,7 @@ function run(): void {
   // Store: pruning & active session
   testStorePruneSessions();
   testStoreActiveSession();
+  testStoreActiveSessionTurnFallback();
 
   // Store: edge cases
   testStoreMissingOrchIdFallback();

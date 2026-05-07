@@ -69,8 +69,10 @@ export interface TurnPlaybackSessionAudio {
 export interface TurnPlaybackSessionMotion {
   payload: NormalizedMotionPayload | null;
   receivedAtMs: number | null;
+  released: boolean;
   started: boolean;
   completed: boolean;
+  absent: boolean;
 }
 
 export interface TurnPlaybackSessionBackend {
@@ -162,8 +164,10 @@ export function createTurnPlaybackSession(
     motion: {
       payload: null,
       receivedAtMs: null,
+      released: false,
       started: false,
       completed: false,
+      absent: false,
     },
     backend: {
       turnStarted: false,

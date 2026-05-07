@@ -197,8 +197,14 @@ const audioPlaybackCtx = {
           markAudioStarted: (
             orchestrationId: string | null,
             turnId: string | null,
+            startedAtMs?: number | null,
             durationMs?: number | null,
-          ) => sessionStore?.markAudioStarted(orchestrationId, turnId, durationMs),
+          ) => sessionStore?.markAudioStarted(
+            orchestrationId,
+            turnId,
+            startedAtMs,
+            durationMs,
+          ),
         }
       : undefined;
   },
@@ -645,7 +651,7 @@ async function handleSocketMessage(rawData: string): Promise<void> {
     case "control.turn_started":
       state.currentTurnId = envelope.turn_id;
       state.currentOrchestrationId = normalizeOrchestrationId(envelope.orchestration_id);
-      sessionStore?.setActiveSession(state.currentOrchestrationId);
+      sessionStore?.setActiveSession(state.currentOrchestrationId, state.currentTurnId);
       sessionStore?.markTurnStarted(state.currentOrchestrationId, state.currentTurnId);
       resetAudioPlaybackTerminal();
       state.pendingAssistantText = "";

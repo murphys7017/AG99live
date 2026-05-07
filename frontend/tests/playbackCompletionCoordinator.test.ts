@@ -98,8 +98,10 @@ async function testFullCompletion(): Promise<void> {
 
   // Motion already completed (avoids settlement window)
   s.motion.payload = { kind: "semantic_intent" as const, intent: {} as never };
+  s.motion.released = true;
   s.motion.started = true;
   s.motion.completed = true;
+  s.motion.absent = false;
   await h.flush();
 
   // Audio completed
@@ -131,8 +133,10 @@ async function testAudioFailedStillAcks(): Promise<void> {
   s.text.delivered = true;
   s.text.released = true;
   s.motion.payload = { kind: "semantic_intent" as const, intent: {} as never };
+  s.motion.released = true;
   s.motion.started = true;
   s.motion.completed = true;
+  s.motion.absent = false;
   s.audio.terminal = "failed";
   s.audio.reason = "decode_error";
   await h.flush();
@@ -154,8 +158,10 @@ async function testNoAudioWithMotion(): Promise<void> {
   s.text.delivered = true;
   s.text.released = true;
   s.motion.payload = { kind: "semantic_intent" as const, intent: {} as never };
+  s.motion.released = true;
   s.motion.started = true;
   s.motion.completed = true;
+  s.motion.absent = false;
   s.audio.terminal = "absent";
   await h.flush();
 
@@ -174,6 +180,8 @@ async function testNoAudioNoMotion(): Promise<void> {
   s.text.content = "Text only";
   s.text.delivered = true;
   s.text.released = true;
+  s.motion.absent = true;
+  s.motion.completed = true;
   s.audio.terminal = "absent";
   s.backend.turnFinished = true;
   await h.flush();
@@ -213,7 +221,8 @@ async function testTurnSwitchResetsCompletion(): Promise<void> {
   s2.text.delivered = true;
   s2.text.released = true;
   s2.audio.terminal = "completed";
-  s2.motion.payload = null;
+  s2.motion.absent = true;
+  s2.motion.completed = true;
   s2.backend.turnFinished = true;
   await h.flush();
 
@@ -233,7 +242,8 @@ async function testCompletionNotSentTwice(): Promise<void> {
   s.text.content = "Hello";
   s.text.delivered = true;
   s.text.released = true;
-  s.motion.payload = null;
+  s.motion.absent = true;
+  s.motion.completed = true;
   s.audio.terminal = "absent";
   s.backend.turnFinished = true;
   await h.flush();
@@ -247,6 +257,50 @@ async function testCompletionNotSentTwice(): Promise<void> {
   assert.equal(h.playbackFinishedCalls.length, 1, "should not send duplicate playback_finished");
 }
 
+async function testTextOnlyTurnWaitsForExplicitMotionAbsence(): Promise<void> {
+  const h = createHarness();
+  const s = setupActiveSession(h.sessionStore, "orch-1", "turn-1");
+
+  s.text.content = "Text only";
+  s.text.delivered = true;
+  s.text.released = true;
+  s.audio.terminal = "absent";
+  s.backend.turnFinished = true;
+  await h.flush();
+
+  assert.equal(h.playbackFinishedCalls.length, 0, "should not ack before motion is explicitly absent");
+
+  s.motion.absent = true;
+  s.motion.completed = true;
+  await h.flush();
+
+  assert.equal(h.playbackFinishedCalls.length, 1, "should ack after motion absence is explicit");
+}
+
+async function testOldSessionCanAckAfterActiveSwitch(): Promise<void> {
+  const h = createHarness();
+  const s1 = setupActiveSession(h.sessionStore, "orch-1", "turn-1");
+  s1.text.content = "Turn 1";
+  s1.text.delivered = true;
+  s1.text.released = true;
+  s1.motion.absent = true;
+  s1.motion.completed = true;
+  s1.audio.terminal = "completed";
+  await h.flush();
+
+  const s2 = setupActiveSession(h.sessionStore, "orch-2", "turn-2");
+  s2.text.content = "Turn 2";
+  s2.text.delivered = true;
+  s2.text.released = true;
+  await h.flush();
+
+  s1.backend.turnFinished = true;
+  await h.flush();
+
+  assert.equal(h.playbackFinishedCalls.length, 1, "old session should still ack after active switch");
+  assert.equal(h.playbackFinishedCalls[0].turnId, "turn-1");
+}
+
 // ── Run ───────────────────────────────────────────────────────────
 
 async function run(): Promise<void> {
@@ -257,6 +311,8 @@ async function run(): Promise<void> {
   await testAudioStartedNotifiesModelEngine();
   await testTurnSwitchResetsCompletion();
   await testCompletionNotSentTwice();
+  await testTextOnlyTurnWaitsForExplicitMotionAbsence();
+  await testOldSessionCanAckAfterActiveSwitch();
 
   console.log("playbackCompletionCoordinator tests passed");
 }

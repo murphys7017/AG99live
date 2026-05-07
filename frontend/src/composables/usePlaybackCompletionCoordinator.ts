@@ -37,8 +37,9 @@ export function usePlaybackCompletionCoordinator(
     options.maxMotionPlaybackRecords ?? DEFAULT_MAX_MOTION_PLAYBACK_RECORDS;
 
   // Lightweight internal state — session is the single source of truth
-  let completionSent = false;
-  let settlementTimer = 0;
+  const settlementTimers = new Map<string, number>();
+  const notifiedAudioStartedSessions = new Set<string>();
+  let currentMotionSessionId: string | null = null;
 
   // ── helpers ─────────────────────────────────────────────────────
 
@@ -46,47 +47,62 @@ export function usePlaybackCompletionCoordinator(
     return options.sessionStore.getActiveSession();
   }
 
-  function clearSettlementTimer(): void {
-    if (settlementTimer) {
-      window.clearTimeout(settlementTimer);
-      settlementTimer = 0;
+  function getSession(sessionId: string | null) {
+    return sessionId ? options.sessionStore.getSessionById(sessionId) : undefined;
+  }
+
+  function clearSettlementTimer(sessionId: string): void {
+    const timer = settlementTimers.get(sessionId);
+    if (timer) {
+      window.clearTimeout(timer);
+      settlementTimers.delete(sessionId);
     }
   }
 
   function resetPlaybackCoordination(): void {
-    clearSettlementTimer();
-    completionSent = false;
+    for (const sessionId of settlementTimers.keys()) {
+      clearSettlementTimer(sessionId);
+    }
+    notifiedAudioStartedSessions.clear();
+    currentMotionSessionId = null;
   }
 
-  function isPlaybackAckRequired(): boolean {
-    const s = getActiveSession();
+  function isPlaybackAckRequired(sessionId: string): boolean {
+    const s = getSession(sessionId);
     if (!s) return false;
     return s.audio.terminal !== "idle";
   }
 
-  function finalizeCompletion(): void {
-    const s = getActiveSession();
+  function finalizeCompletion(sessionId: string): void {
+    const s = getSession(sessionId);
     if (!s) return;
+    clearSettlementTimer(sessionId);
     const orchId = orchestrationIdFromSessionId(s.id);
     options.adapter.clearPlaybackGroupContext(s.turnId, orchId);
     options.sessionStore.markPhase(orchId, s.turnId, "completed");
-    resetPlaybackCoordination();
   }
 
-  function maybeFlushPlaybackCompletion(reason?: string): void {
-    if (completionSent) {
-      const s = getActiveSession();
-      if (s?.backend.turnFinished) {
-        finalizeCompletion();
-      }
-      return;
-    }
-
-    const s = getActiveSession();
+  function maybeFlushPlaybackCompletion(
+    sessionId: string,
+    reason?: string,
+  ): void {
+    const s = getSession(sessionId);
     if (!s) return;
 
     // Never re-ack a session that already reached a terminal phase
     if (s.phase === "completed" || s.phase === "failed") {
+      clearSettlementTimer(sessionId);
+      return;
+    }
+
+    if (
+      s.audio.terminal !== "idle"
+      && s.text.delivered
+      && !s.motion.absent
+      && !s.motion.started
+      && !s.motion.completed
+    ) {
+      schedulePlaybackSettlementWindow(sessionId);
       return;
     }
 
@@ -94,16 +110,16 @@ export function usePlaybackCompletionCoordinator(
       return;
     }
 
-    if (!isPlaybackAckRequired()) {
+    if (!isPlaybackAckRequired(sessionId)) {
       if (s.backend.turnFinished) {
-        finalizeCompletion();
+        finalizeCompletion(sessionId);
       }
       return;
     }
 
     const orchId = orchestrationIdFromSessionId(s.id);
     const success = s.audio.terminal !== "failed";
-    completionSent = true;
+    clearSettlementTimer(sessionId);
     options.sessionStore.markPhase(orchId, s.turnId, "settling");
     void options.adapter.sendPlaybackFinishedForCurrentGroup(
       s.turnId,
@@ -111,31 +127,40 @@ export function usePlaybackCompletionCoordinator(
       success,
       reason,
     );
-    // If turn_finished was already observed before the ack was sent,
-    // finalize immediately — no further watcher will fire.
-    if (s.backend.turnFinished) {
-      finalizeCompletion();
-    }
+    finalizeCompletion(sessionId);
   }
 
-  function schedulePlaybackSettlementWindow(): void {
-    clearSettlementTimer();
-    settlementTimer = window.setTimeout(() => {
-      // If motion payload exists but never started (orchestrator chose not to
-      // wait for it), mark it as completed so the ack can proceed.
-      const s = getActiveSession();
-      if (s && s.motion.payload && !s.motion.started) {
-        options.sessionStore.markMotionCompleted(
-          orchestrationIdFromSessionId(s.id),
-          s.turnId,
+  function schedulePlaybackSettlementWindow(sessionId: string): void {
+    if (settlementTimers.has(sessionId)) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      settlementTimers.delete(sessionId);
+      const session = getSession(sessionId);
+      if (
+        session
+        && session.audio.terminal !== "idle"
+        && !session.motion.started
+        && !session.motion.completed
+        && session.motion.payload === null
+      ) {
+        options.sessionStore.markMotionAbsent(
+          orchestrationIdFromSessionId(session.id),
+          session.turnId,
         );
       }
-      maybeFlushPlaybackCompletion("audio_and_motion_settled");
+      maybeFlushPlaybackCompletion(sessionId, "audio_and_motion_settled");
     }, PLAYBACK_SETTLEMENT_WINDOW_MS);
+    settlementTimers.set(sessionId, timer);
   }
 
   function recordMotionPlayback(event: ModelEnginePlanStartedEvent): void {
-    clearSettlementTimer();
+    currentMotionSessionId =
+      typeof event.orchestrationId === "string" && event.orchestrationId.trim()
+        ? `orch:${event.orchestrationId.trim()}`
+        : typeof event.turnId === "string" && event.turnId.trim()
+          ? `turn:${event.turnId.trim()}`
+          : null;
 
     // Write to session
     options.sessionStore.markMotionStarted(event.orchestrationId, event.turnId);
@@ -171,63 +196,48 @@ export function usePlaybackCompletionCoordinator(
 
   // ── watchers: observe session, write back on completion ─────────
 
-  // Reset when active session changes
   watch(
-    () => options.sessionStore.state.activeSessionId,
+    () => options.sessionStore.getSessions().map((session) => ({
+      id: session.id,
+      turnId: session.turnId,
+      audioStarted: session.audio.started,
+      audioStartedAtMs: session.audio.startedAtMs,
+    })),
     () => {
-      resetPlaybackCoordination();
+      for (const session of options.sessionStore.getSessions()) {
+        if (!session.audio.started || notifiedAudioStartedSessions.has(session.id)) {
+          continue;
+        }
+        notifiedAudioStartedSessions.add(session.id);
+        options.onAudioPlaybackStarted(session.turnId);
+      }
     },
-  );
-
-  // Audio started → notify model engine
-  watch(
-    () => {
-      const s = getActiveSession();
-      return s?.audio.started ? `${s.id}|audio_started` : null;
-    },
-    (key) => {
-      if (!key) return;
-      const s = getActiveSession();
-      if (!s) return;
-      options.onAudioPlaybackStarted(s.turnId);
-    },
+    { deep: true },
   );
 
   // Text delivered → try flush
   watch(
+    () => options.sessionStore.getSessions().map((session) => ({
+      id: session.id,
+      textDelivered: session.text.delivered,
+      audioTerminal: session.audio.terminal,
+      motionAbsent: session.motion.absent,
+      motionStarted: session.motion.started,
+      motionCompleted: session.motion.completed,
+      backendTurnFinished: session.backend.turnFinished,
+      phase: session.phase,
+    })),
     () => {
-      const s = getActiveSession();
-      return s?.text.delivered ? `${s.id}|text_delivered` : null;
-    },
-    (key) => {
-      if (!key) return;
-      maybeFlushPlaybackCompletion("text_delivered");
-    },
-  );
-
-  // Audio terminal → schedule settlement or flush
-  watch(
-    () => {
-      const s = getActiveSession();
-      if (!s || s.audio.terminal === "idle") return null;
-      return `${s.id}|${s.audio.terminal}`;
-    },
-    (key) => {
-      if (!key) return;
-      const s = getActiveSession();
-      if (!s) return;
-
-      if (!s.motion.started || s.motion.completed) {
-        // Motion already done or never started — wait for late motion via settlement window
-        schedulePlaybackSettlementWindow();
-        return;
+      for (const session of options.sessionStore.getSessions()) {
+        if (session.phase === "completed" || session.phase === "failed") {
+          continue;
+        }
+        if (session.text.delivered) {
+          maybeFlushPlaybackCompletion(session.id, "text_delivered");
+        }
       }
-
-      // Motion is still playing — wait for it
-      maybeFlushPlaybackCompletion(
-        s.audio.reason || "audio_terminal",
-      );
     },
+    { deep: true },
   );
 
   // Motion completed (from motion player) → write to session, try flush
@@ -237,29 +247,18 @@ export function usePlaybackCompletionCoordinator(
       if (status !== "finished" || previousStatus !== "playing") {
         return;
       }
-      const s = getActiveSession();
+      const s = getSession(currentMotionSessionId);
       if (!s) return;
 
       options.sessionStore.markMotionCompleted(
         orchestrationIdFromSessionId(s.id),
         s.turnId,
       );
+      currentMotionSessionId = null;
 
       if (s.audio.terminal !== "idle") {
-        maybeFlushPlaybackCompletion("motion_completed_after_audio");
+        maybeFlushPlaybackCompletion(s.id, "motion_completed_after_audio");
       }
-    },
-  );
-
-  // Backend turn_finished → try flush
-  watch(
-    () => {
-      const s = getActiveSession();
-      return s?.backend.turnFinished ? `${s.id}|turn_finished` : null;
-    },
-    (key) => {
-      if (!key) return;
-      maybeFlushPlaybackCompletion("turn_finished");
     },
   );
 
