@@ -24,7 +24,7 @@
 - `assistantTextDelivery*`
 - `turnFinished*`
 - `playbackCoordination.*`
-- `pendingInboundMotionPayloads`
+- `pendingInboundMotionPayloads`（位于 `useModelEngine.ts`，不属于 adapter 字段）
 
 结果是：
 
@@ -88,7 +88,7 @@
 
 ### 5.1 Session 主键
 
-前端播放轮次的主键统一使用：
+前端播放轮次的主键优先使用：
 
 ```text
 orchestrationId
@@ -100,7 +100,23 @@ orchestrationId
 - 它不参与大模型判断
 - 但它足够稳定，可以贯穿文本、音频、动作和播放完成回执
 
-`turnId` 仍保留，但作为后端轮次补充字段，不作为前端 session 主键。
+`turnId` 仍保留，但作为后端轮次补充字段，不作为第一优先主键。
+
+为避免实现阶段出现歧义，这里明确 session id 解析优先级：
+
+1. `orchestrationId` 存在  
+   -> `session.id = orch:<orchestrationId>`
+2. `orchestrationId` 不存在，但 `turnId` 存在  
+   -> `session.id = turn:<turnId>`
+3. 两者都不存在  
+   -> `session.id = ephemeral:<serial>`
+
+补充约束：
+
+- `ephemeral session` 只用于本地短生命周期兜底
+- 它不作为长期可回溯的轮次标识
+- 第一版不做 `ephemeral -> named session` 的升级迁移
+- 一旦 session 以某种 id 创建，当前轮次内保持不变
 
 ### 5.2 建议类型
 
@@ -124,10 +140,12 @@ export type TurnPlaybackPhase =
 export interface TurnPlaybackSession {
   id: string;
   turnId: string | null;
+  interrupted: boolean;
 
   text: {
     content: string | null;
     receivedAtMs: number | null;
+    receiveMode: "replace" | "append";
     released: boolean;
     delivered: boolean;
   };
@@ -143,7 +161,7 @@ export interface TurnPlaybackSession {
   };
 
   motion: {
-    payload: unknown | null;
+    payload: NormalizedMotionPayload | null;
     receivedAtMs: number | null;
     started: boolean;
     completed: boolean;
@@ -168,10 +186,71 @@ export interface TurnPlaybackSession {
 - 不再让 `not_requested` 同时承担“没排到 / 没有音频 / 可当终态”三种语义
 - `backend.turnFinished` 只表示“后端这一轮输出已收口”
 - 不再让它同时承担前端播放完成含义
+- `interrupted = true` 表示本轮被中断，且这是一个显式终止原因，不与普通失败混写
+
+### 5.4 流式文本累积规则
+
+当前前端的 `pendingAssistantText` 更接近“当前轮次最新完整文本快照”，而不是逐 chunk 的纯增量缓冲。
+
+因此第一版 `TurnPlaybackSession` 规定：
+
+- `text.content` 保存当前轮次的最新文本值
+- `markTextReceived(text, mode)` 支持两种模式：
+  - `replace`
+  - `append`
+- 当前默认实现使用：
+  - `replace`
+
+也就是说：
+
+- 如果收到多次 `output.text`
+- 默认按“最新完整文本快照覆盖旧值”处理
+- 不默认做盲目 append
+
+后续只有在后端明确切换为增量文本流协议时，才启用 `append` 路径。
+
+### 5.5 中断规则
+
+`control.interrupt` 必须在 session 语义中有明确含义。
+
+规则如下：
+
+1. interrupt 不负责创建新 session
+2. 当前 active session 在收到 interrupt 时：
+   - `interrupted = true`
+   - `backend.reason = "interrupted"`
+   - `phase = "failed"`
+3. 新 session 只在以下情况创建：
+   - 新的 `orchestrationId` 出现
+   - 或命中 `turnId / ephemeral` 兜底策略
+
+### 5.6 Phase 合法迁移
+
+主路径：
+
+```text
+collecting -> ready -> playing -> settling -> completed
+```
+
+允许的失败路径：
+
+```text
+collecting -> failed
+ready -> failed
+playing -> failed
+settling -> failed
+```
+
+补充约束：
+
+- `completed`、`failed` 为终态
+- 不允许从终态回退到中间态
+- `interrupt` 默认进入 `failed`
+- `markPhase()` 必须拒绝非法回退
 
 ## 6. 新增模块
 
-## 6.1 `session.ts`
+### 6.1 `session.ts`
 
 职责：
 
@@ -185,7 +264,7 @@ export interface TurnPlaybackSession {
 - `isSessionReadyForRelease(session)`
 - `isSessionPlaybackComplete(session)`
 
-## 6.2 `useTurnPlaybackSessionStore.ts`
+### 6.2 `useTurnPlaybackSessionStore.ts`
 
 建议新增：
 
@@ -204,7 +283,7 @@ frontend/src/composables/useTurnPlaybackSessionStore.ts
 - `ensureSession(orchestrationId, turnId?)`
 - `getSession(orchestrationId)`
 - `setActiveSession(orchestrationId)`
-- `markTextReceived(...)`
+- `markTextReceived(text, mode?)`
 - `markTextReleased(...)`
 - `markTextDelivered(...)`
 - `markAudioReceived(...)`
@@ -219,7 +298,13 @@ frontend/src/composables/useTurnPlaybackSessionStore.ts
 - `finalizeSession(...)`
 - `pruneSessions(...)`
 
-## 6.3 `turnPlaybackSessionSelectors.ts`
+store 设计约束：
+
+- 更新函数必须幂等
+- 同一个事件重复写入不能破坏 session
+- 相邻事件顺序不同，只要协议语义等价，最终 session 状态应一致
+
+### 6.3 `turnPlaybackSessionSelectors.ts`
 
 建议新增一组纯函数：
 
@@ -256,6 +341,15 @@ frontend/src/turn-playback/selectors.ts
 - `frontend/src/turn-playback/selectors.ts`
 - `frontend/src/composables/useTurnPlaybackSessionStore.ts`
 
+同时更新：
+
+- `frontend/src/composables/usePetDesktopController.ts`
+
+阶段 1 中 `usePetDesktopController.ts` 的职责仅为：
+
+- 初始化并注入 `sessionStore`
+- 不改变现有起播 / 完成逻辑
+
 ### 输出
 
 - 有明确的类型
@@ -276,6 +370,7 @@ frontend/src/turn-playback/selectors.ts
 ### 主要改动文件
 
 - [frontend/src/composables/useAdapterConnection.ts](/c:/Users/Administrator/Documents/GitHub/AG99live/frontend/src/composables/useAdapterConnection.ts)
+- [frontend/src/composables/usePetDesktopController.ts](/c:/Users/Administrator/Documents/GitHub/AG99live/frontend/src/composables/usePetDesktopController.ts)
 
 ### 处理方式
 
@@ -295,6 +390,16 @@ frontend/src/turn-playback/selectors.ts
 
 - 旧字段继续保留
 - 同时调用 session store 更新对应状态
+
+这里必须明确三条规则：
+
+1. `control.interrupt`
+   - 不创建新 session
+   - 只标记当前 active session 为 interrupted / failed
+2. `output.text`
+   - 第一版默认按 `replace` 模式写入 `session.text.content`
+3. `session.id`
+   - 严格遵循 5.1 节的 `orch -> turn -> ephemeral` 优先级
 
 ### 重点
 
@@ -322,6 +427,7 @@ frontend/src/turn-playback/selectors.ts
 
 - [frontend/src/composables/useTurnPlaybackOrchestrator.ts](/c:/Users/Administrator/Documents/GitHub/AG99live/frontend/src/composables/useTurnPlaybackOrchestrator.ts)
 - [frontend/src/composables/turnPlaybackOrchestratorCore.ts](/c:/Users/Administrator/Documents/GitHub/AG99live/frontend/src/composables/turnPlaybackOrchestratorCore.ts)
+- [frontend/src/composables/usePetDesktopController.ts](/c:/Users/Administrator/Documents/GitHub/AG99live/frontend/src/composables/usePetDesktopController.ts)
 
 ### 调整方向
 
@@ -366,6 +472,7 @@ frontend/src/turn-playback/selectors.ts
 ### 主要改动文件
 
 - [frontend/src/composables/usePlaybackCompletionCoordinator.ts](/c:/Users/Administrator/Documents/GitHub/AG99live/frontend/src/composables/usePlaybackCompletionCoordinator.ts)
+- [frontend/src/composables/usePetDesktopController.ts](/c:/Users/Administrator/Documents/GitHub/AG99live/frontend/src/composables/usePetDesktopController.ts)
 
 ### 调整方向
 
@@ -399,6 +506,7 @@ frontend/src/turn-playback/selectors.ts
 
 - [frontend/src/model-engine/useModelEngine.ts](/c:/Users/Administrator/Documents/GitHub/AG99live/frontend/src/model-engine/useModelEngine.ts)
 - [frontend/src/model-engine/contracts.ts](/c:/Users/Administrator/Documents/GitHub/AG99live/frontend/src/model-engine/contracts.ts)
+- [frontend/src/composables/usePetDesktopController.ts](/c:/Users/Administrator/Documents/GitHub/AG99live/frontend/src/composables/usePetDesktopController.ts)
 
 ### 当前问题
 
@@ -420,6 +528,13 @@ frontend/src/turn-playback/selectors.ts
 - orchestrator 决定何时把 payload 交给 engine
 - engine 只负责编译和执行
 - engine 的等待音频兜底逻辑如果还保留，也应依赖 session，而不是自带另一张 turn map
+
+这里额外明确：
+
+- 第一版不强行把 `MOTION_SYNC_WAIT_FOR_AUDIO_MS` 整体挪到 orchestrator
+- orchestrator 的职责仍然是“决定何时 release”
+- engine fallback 的职责仍然是“payload 已进入 engine 后，等待音频多久再启动”
+- 但它读取的事实来源应改成 session，而不再是 engine 自己的平行 turn 语义
 
 ### 验收
 
@@ -459,6 +574,7 @@ frontend/src/turn-playback/selectors.ts
 
 - [frontend/src/composables/usePetRuntimeSnapshotPublisher.ts](/c:/Users/Administrator/Documents/GitHub/AG99live/frontend/src/composables/usePetRuntimeSnapshotPublisher.ts)
 - [frontend/src/types/desktop.ts](/c:/Users/Administrator/Documents/GitHub/AG99live/frontend/src/types/desktop.ts)
+- [frontend/src/composables/usePetDesktopController.ts](/c:/Users/Administrator/Documents/GitHub/AG99live/frontend/src/composables/usePetDesktopController.ts)
 - 当前链路说明文档
 
 ### 调整方向
@@ -518,6 +634,9 @@ frontend/src/turn-playback/selectors.ts
 8. 缺失 `turnId`，但有 `orchestrationId`
 9. 缺失 `orchestrationId` 的兜底策略
 10. 中断和新一轮覆盖旧一轮
+11. `replace` 模式下多次 `output.text` 覆盖行为
+12. 相邻事件顺序不同但最终状态一致
+13. 非法 phase 回退被拒绝
 
 ## 9.2 手工联调
 
