@@ -5,7 +5,7 @@ import type { ModelSummary } from "../types/protocol";
 import type { useAdapterConnection } from "./useAdapterConnection";
 import type { usePreviewMotionPlayer } from "./usePreviewMotionPlayer";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
-import { isReadyToAckPlaybackFinished } from "../turn-playback/selectors.js";
+import { isPlaybackLocallySettled } from "../turn-playback/selectors.js";
 import { orchestrationIdFromSessionId } from "../turn-playback/session.js";
 import { cloneJson } from "../utils/cloneJson.js";
 
@@ -39,6 +39,7 @@ export function usePlaybackCompletionCoordinator(
   // Lightweight internal state — session is the single source of truth
   const settlementTimers = new Map<string, number>();
   const notifiedAudioStartedSessions = new Set<string>();
+  const ackedSessions = new Set<string>();
   let currentMotionSessionId: string | null = null;
 
   // ── helpers ─────────────────────────────────────────────────────
@@ -64,6 +65,7 @@ export function usePlaybackCompletionCoordinator(
       clearSettlementTimer(sessionId);
     }
     notifiedAudioStartedSessions.clear();
+    ackedSessions.clear();
     currentMotionSessionId = null;
   }
 
@@ -106,14 +108,23 @@ export function usePlaybackCompletionCoordinator(
       return;
     }
 
-    if (!isReadyToAckPlaybackFinished(s)) {
+    if (!isPlaybackLocallySettled(s)) {
       return;
     }
 
     if (!isPlaybackAckRequired(sessionId)) {
-      if (s.backend.turnFinished) {
-        finalizeCompletion(sessionId);
+      if (!s.backend.turnFinished) {
+        return;
       }
+      finalizeCompletion(sessionId);
+      return;
+    }
+
+    if (ackedSessions.has(sessionId)) {
+      if (!s.backend.turnFinished) {
+        return;
+      }
+      finalizeCompletion(sessionId);
       return;
     }
 
@@ -121,13 +132,13 @@ export function usePlaybackCompletionCoordinator(
     const success = s.audio.terminal !== "failed";
     clearSettlementTimer(sessionId);
     options.sessionStore.markPhase(orchId, s.turnId, "settling");
+    ackedSessions.add(sessionId);
     void options.adapter.sendPlaybackFinishedForCurrentGroup(
       s.turnId,
       orchId,
       success,
       reason,
     );
-    finalizeCompletion(sessionId);
   }
 
   function schedulePlaybackSettlementWindow(sessionId: string): void {

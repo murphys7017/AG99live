@@ -14,7 +14,7 @@ import {
   canReleaseAudio,
   canReleaseMotion,
   shouldWaitForLateMotion,
-  isReadyToAckPlaybackFinished,
+  isPlaybackLocallySettled,
 } from "../src/turn-playback/selectors.js";
 import { useTurnPlaybackSessionStore } from "../src/composables/useTurnPlaybackSessionStore.js";
 
@@ -248,26 +248,26 @@ function testShouldWaitForLateMotion(): void {
   assert.equal(shouldWaitForLateMotion(s, 0), false);
 }
 
-function testIsReadyToAckPlaybackFinished(): void {
+function testIsPlaybackLocallySettled(): void {
   // Full readiness
   const s = makeTextDeliveredSession();
-  assert.equal(isReadyToAckPlaybackFinished(s), true);
+  assert.equal(isPlaybackLocallySettled(s), true);
 
   // Missing text.delivered
   const sNoText = makeTextDeliveredSession();
   sNoText.text.delivered = false;
-  assert.equal(isReadyToAckPlaybackFinished(sNoText), false);
+  assert.equal(isPlaybackLocallySettled(sNoText), false);
 
   // Audio still idle
   const sAudioIdle = makeTextDeliveredSession();
   sAudioIdle.audio.terminal = "idle";
-  assert.equal(isReadyToAckPlaybackFinished(sAudioIdle), false);
+  assert.equal(isPlaybackLocallySettled(sAudioIdle), false);
 
   // Audio failed — still ack-able
   const sAudioFailed = makeTextDeliveredSession();
   sAudioFailed.audio.terminal = "failed";
   sAudioFailed.audio.reason = "decode_error";
-  assert.equal(isReadyToAckPlaybackFinished(sAudioFailed), true);
+  assert.equal(isPlaybackLocallySettled(sAudioFailed), true);
 
   // Motion payload exists but not completed
   const sMotionPending = makeTextDeliveredSession();
@@ -279,16 +279,11 @@ function testIsReadyToAckPlaybackFinished(): void {
     completed: false,
     absent: false,
   };
-  assert.equal(isReadyToAckPlaybackFinished(sMotionPending), false);
+  assert.equal(isPlaybackLocallySettled(sMotionPending), false);
 
   // Motion completed — ack-able
   sMotionPending.motion.completed = true;
-  assert.equal(isReadyToAckPlaybackFinished(sMotionPending), true);
-
-  // Missing backend.turnFinished
-  const sNoTurnFinished = makeTextDeliveredSession();
-  sNoTurnFinished.backend.turnFinished = false;
-  assert.equal(isReadyToAckPlaybackFinished(sNoTurnFinished), false);
+  assert.equal(isPlaybackLocallySettled(sMotionPending), true);
 }
 
 // ── store: text scenarios ─────────────────────────────────────────
@@ -648,7 +643,7 @@ function run(): void {
   testCanReleaseAudio();
   testCanReleaseMotion();
   testShouldWaitForLateMotion();
-  testIsReadyToAckPlaybackFinished();
+  testIsPlaybackLocallySettled();
 
   // Store: text
   testStoreTextReplaceMode();

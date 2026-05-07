@@ -110,17 +110,20 @@ async function testFullCompletion(): Promise<void> {
   s.audio.terminal = "completed";
   await h.flush();
 
+  assert.equal(h.playbackFinishedCalls.length, 1, "should send playback_finished after local playback settles");
+  assert.equal(s.phase, "settling");
+  assert.equal(h.clearContextCalls.length, 0, "should wait for turn_finished before cleanup");
+
   // Backend turn finished — this should trigger the ack
   s.backend.turnFinished = true;
   s.backend.success = true;
   await h.flush();
 
-  assert.equal(h.playbackFinishedCalls.length, 1, "should send playback_finished");
+  assert.equal(h.playbackFinishedCalls.length, 1, "should not send duplicate playback_finished");
   assert.equal(h.playbackFinishedCalls[0].success, true);
   assert.equal(h.playbackFinishedCalls[0].turnId, "turn-1");
 
   // Phase should be "completed"
-  const orchId = orchestrationIdFromSessionId(s.id);
   assert.equal(s.phase, "completed");
   assert.equal(h.clearContextCalls.length, 1);
 }
@@ -141,11 +144,14 @@ async function testAudioFailedStillAcks(): Promise<void> {
   s.audio.reason = "decode_error";
   await h.flush();
 
+  assert.equal(h.playbackFinishedCalls.length, 1, "should ack once playback settles locally");
+  assert.equal(s.phase, "settling");
+
   s.backend.turnFinished = true;
   s.backend.success = true;
   await h.flush();
 
-  assert.equal(h.playbackFinishedCalls.length, 1, "should send playback_finished even on audio failure");
+  assert.equal(h.playbackFinishedCalls.length, 1, "should not send duplicate playback_finished even on audio failure");
   assert.equal(h.playbackFinishedCalls[0].success, false, "should report success=false on audio failure");
   assert.equal(s.phase, "completed");
 }
@@ -165,10 +171,13 @@ async function testNoAudioWithMotion(): Promise<void> {
   s.audio.terminal = "absent";
   await h.flush();
 
+  assert.equal(h.playbackFinishedCalls.length, 1, "should send playback_finished after local no-audio playback settles");
+  assert.equal(s.phase, "settling");
+
   s.backend.turnFinished = true;
   await h.flush();
 
-  assert.equal(h.playbackFinishedCalls.length, 1, "should send playback_finished for no-audio turn");
+  assert.equal(h.playbackFinishedCalls.length, 1, "should not send duplicate playback_finished for no-audio turn");
   assert.equal(s.phase, "completed");
 }
 
@@ -183,10 +192,15 @@ async function testNoAudioNoMotion(): Promise<void> {
   s.motion.absent = true;
   s.motion.completed = true;
   s.audio.terminal = "absent";
+  await h.flush();
+
+  assert.equal(h.playbackFinishedCalls.length, 1, "text-only turn should still ack when locally settled");
+  assert.equal(s.phase, "settling");
+
   s.backend.turnFinished = true;
   await h.flush();
 
-  assert.equal(h.playbackFinishedCalls.length, 1, "text-only turn should still ack");
+  assert.equal(h.playbackFinishedCalls.length, 1, "text-only turn should not duplicate ack");
   assert.equal(s.phase, "completed");
 }
 
@@ -292,12 +306,18 @@ async function testOldSessionCanAckAfterActiveSwitch(): Promise<void> {
   s2.text.content = "Turn 2";
   s2.text.delivered = true;
   s2.text.released = true;
+  s2.motion.absent = true;
+  s2.motion.completed = true;
+  s2.audio.terminal = "absent";
   await h.flush();
+
+  assert.equal(h.playbackFinishedCalls.length, 2, "both sessions can ack locally before backend turn_finished");
 
   s1.backend.turnFinished = true;
   await h.flush();
 
-  assert.equal(h.playbackFinishedCalls.length, 1, "old session should still ack after active switch");
+  assert.equal(s1.phase, "completed", "old session should complete after backend turn_finished");
+  assert.equal(s2.phase, "settling", "newer session should stay settling until its own turn_finished");
   assert.equal(h.playbackFinishedCalls[0].turnId, "turn-1");
 }
 

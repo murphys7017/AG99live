@@ -56,15 +56,17 @@ export function shouldWaitForLateMotion(
 }
 
 /**
- * Whether all conditions are met to ack playback_finished to the backend.
+ * Whether local playback has fully settled on the frontend side.
  *
  * Requires:
  *   - text delivered
  *   - audio terminal (completed / failed / absent)
- *   - motion completed (or no motion payload at all)
- *   - backend turn_finished observed
+ *   - motion completed, or motion explicitly marked absent
+ *
+ * This does not include backend `turn_finished`.
+ * Backend turn completion is a separate protocol step.
  */
-export function isReadyToAckPlaybackFinished(
+export function isPlaybackLocallySettled(
   session: TurnPlaybackSession,
 ): boolean {
   if (!session.text.delivered) {
@@ -75,9 +77,6 @@ export function isReadyToAckPlaybackFinished(
     return false;
   }
   if (!session.motion.absent && !session.motion.completed) {
-    return false;
-  }
-  if (!session.backend.turnFinished) {
     return false;
   }
   return true;
