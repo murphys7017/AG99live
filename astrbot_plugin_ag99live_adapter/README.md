@@ -8,7 +8,7 @@ AG99live V2 的 AstrBot 插件侧实现。该目录负责协议桥接、会话�
 - 发送 `output.* / control.* / system.* / engine.*` 消息回前端。
 - 管理 turn 生命周期，保证文本/语音/动作消息在同一轮次可追踪。
 - 扫描 Live2D 资源并产出结构化能力信息。
-- 生成并下发动作意图；默认在主回复完成后用 AstrBot Provider 发起独立动作生成请求，不再负责长期持有前端执行 plan 的编译职责。
+- 生成并下发动作意图；默认使用 `inline_first`，必要时可回落到 reply 后独立动作生成，不再负责前端执行 plan 的长期编译职责。
 
 ## 目录结构
 
@@ -51,10 +51,11 @@ astrbot_plugin_ag99live_adapter/
 
 ## 与前端协同的关键点
 
-- 每条消息都带 `turn_id`，用于前端做轮次 gating 与时间轴协调。
+- 每条消息都带 `turn_id`，并尽量贯穿 `orchestration_id`，用于前端做 session 级轮次协调。
 - 前端同时兼容 `engine.motion_plan` 与 `engine.motion_intent`，但开发期要求消息类型与 payload 字段严格对应。
 - `semantic_axis_profile` / `calibration_profile` / `parameter_action_library` / `base_action_library` 由 `system.model_sync` 下发。
 - `system.semantic_axis_profile_saved` / `system.semantic_axis_profile_save_failed` 用于 Profile Editor 保存结果确认，不再依赖 `system.model_sync` 推断保存成败。
+- 有音频的轮次当前协议顺序为：`output.* -> control.synth_finished -> 前端播放 -> control.playback_finished -> control.turn_finished`。
 
 ## 关键配置（`_conf_schema.json`）
 
@@ -82,4 +83,4 @@ pip install -r astrbot_plugin_ag99live_adapter/requirements.txt
 python -m pytest astrbot_plugin_ag99live_adapter/tests -q
 ```
 
-当前基线：`101 passed`（2026-04-27）。
+当前基线：`135 passed`（2026-05-08）。

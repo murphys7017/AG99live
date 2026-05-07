@@ -5,6 +5,8 @@
 
 ## 已归档文档
 
+- [前端Turn Playback Session收口计划](./前端Turn%20Playback%20Session收口计划.md)
+  说明：前端播放轮次从散装状态收口到 `TurnPlaybackSession` 的实施计划。当前主要阶段已经落地，现行行为以根目录链路文档和源码为准。
 - [前后端严格审阅报告](./前后端严格审阅报告.md)
   说明：阶段性代码审阅结论，后续问题处理和结构说明已被当前文档覆盖。
 - [动作链路职责重划与ModelEngine方案](./动作链路职责重划与ModelEngine方案.md)
