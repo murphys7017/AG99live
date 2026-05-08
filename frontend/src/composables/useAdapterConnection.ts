@@ -74,6 +74,11 @@ import {
   saveStoredAdapterAddress,
 } from "../adapter-connection/preferences.js";
 import { parseInboundEnvelope } from "../adapter-connection/inboundProtocol.js";
+import {
+  mapInboundEnvelopeToEvent,
+  type InboundAdapterEvent,
+  type InboundEventMappingContext,
+} from "../adapter-connection/inboundEvents.js";
 import { normalizeOrchestrationId } from "../adapter-connection/orchestrationIds.js";
 import { useModelSync } from "./useModelSync.js";
 import { useAdapterHistory } from "./useAdapterHistory.js";
@@ -589,63 +594,69 @@ async function handleSocketMessage(rawData: string): Promise<void> {
     state.sessionId = envelope.session_id.trim();
   }
 
-  await dispatchInboundEnvelope(envelope);
+  const event = mapInboundEnvelopeToEvent(envelope, buildInboundEventContext());
+  await dispatchInboundEvent(event);
 }
 
-async function dispatchInboundEnvelope(
-  envelope: ProtocolEnvelope<unknown>,
+function buildInboundEventContext(): InboundEventMappingContext {
+  return {
+    currentTurnId: state.currentTurnId,
+    currentOrchestrationId: state.currentOrchestrationId,
+    audioPlaybackStartedTurnId: state.audioPlaybackStartedTurnId,
+    audioPlaybackStartedOrchestrationId: state.audioPlaybackStartedOrchestrationId,
+  };
+}
+
+async function dispatchInboundEvent(
+  event: InboundAdapterEvent,
 ): Promise<void> {
-  switch (envelope.type) {
-    case "system.server_info":
-      applyServerInfoMessage(envelope as ProtocolEnvelope<SystemServerInfoPayload>);
+  switch (event.kind) {
+    case "server_info":
+      applyServerInfoMessage(event.envelope);
       return;
-    case "system.model_sync":
+    case "model_sync":
       applyUnknownMessage(
-        rewriteModelSyncEnvelope(envelope as ProtocolEnvelope<SystemModelSyncPayload>),
+        rewriteModelSyncEnvelope(event.envelope),
       );
       state.statusMessage = "模型能力已同步。";
       pushHistory("system", state.statusMessage);
       return;
-    case "system.semantic_axis_profile_saved":
-      applySemanticAxisProfileSaved(
-        envelope as ProtocolEnvelope<SystemSemanticAxisProfileSavedPayload>,
-      );
+    case "semantic_axis_profile_saved":
+      applySemanticAxisProfileSaved(event.envelope);
       return;
-    case "system.semantic_axis_profile_save_failed":
-      applySemanticAxisProfileSaveFailed(
-        envelope as ProtocolEnvelope<SystemSemanticAxisProfileSaveFailedPayload>,
-      );
+    case "semantic_axis_profile_save_failed":
+      applySemanticAxisProfileSaveFailed(event.envelope);
       return;
-    case "system.motion_tuning_samples_state":
-      motionTuningAdapter?.applyMotionTuningSamplesState(envelope);
+    case "motion_tuning_samples_state":
+      motionTuningAdapter?.applyMotionTuningSamplesState(event.envelope);
       return;
-    case "system.history_list":
-      historyAdapter?.applyHistoryList(envelope as ProtocolEnvelope<Record<string, unknown>>);
+    case "history_list":
+      historyAdapter?.applyHistoryList(event.envelope);
       return;
-    case "system.history_created":
-      historyAdapter?.applyHistoryCreated(envelope as ProtocolEnvelope<Record<string, unknown>>);
+    case "history_created":
+      historyAdapter?.applyHistoryCreated(event.envelope);
       return;
-    case "system.history_data":
-      historyAdapter?.applyHistoryData(envelope as ProtocolEnvelope<Record<string, unknown>>);
+    case "history_data":
+      historyAdapter?.applyHistoryData(event.envelope);
       return;
-    case "system.history_deleted":
-      historyAdapter?.applyHistoryDeleted(envelope as ProtocolEnvelope<Record<string, unknown>>);
+    case "history_deleted":
+      historyAdapter?.applyHistoryDeleted(event.envelope);
       return;
-    case "output.text":
-      applyOutputText(envelope as ProtocolEnvelope<OutputTextPayload>);
+    case "output_text":
+      applyOutputText(event);
       return;
-    case "output.audio":
-      await applyOutputAudio(envelope as ProtocolEnvelope<OutputAudioPayload>);
+    case "output_audio":
+      await applyOutputAudio(event);
       return;
-    case "output.image":
-      applyOutputImage(envelope as ProtocolEnvelope<OutputImagePayload>);
+    case "output_image":
+      applyOutputImage(event.envelope);
       return;
-    case "output.transcription":
-      applyOutputTranscription(envelope as ProtocolEnvelope<OutputTranscriptionPayload>);
+    case "output_transcription":
+      applyOutputTranscription(event.envelope);
       return;
-    case "control.turn_started":
-      state.currentTurnId = envelope.turn_id;
-      state.currentOrchestrationId = normalizeOrchestrationId(envelope.orchestration_id);
+    case "turn_started":
+      state.currentTurnId = event.turnId;
+      state.currentOrchestrationId = event.orchestrationId;
       sessionStore?.setActiveSession(state.currentOrchestrationId, state.currentTurnId);
       sessionStore?.markTurnStarted(state.currentOrchestrationId, state.currentTurnId);
       resetAudioPlaybackTerminal();
@@ -666,30 +677,30 @@ async function dispatchInboundEnvelope(
       state.statusMessage = "后端正在处理这一轮对话。";
       pushHistory("system", state.statusMessage);
       return;
-    case "control.turn_finished":
-      applyTurnFinished(envelope as ProtocolEnvelope<ControlTurnFinishedPayload>);
+    case "turn_finished":
+      applyTurnFinished(event);
       return;
-    case "control.interrupt":
+    case "interrupt":
       stopAudioPlayback();
       resetAudioPlaybackTerminal();
-      sessionStore?.markInterrupt(state.currentOrchestrationId, state.currentTurnId);
+      sessionStore?.markInterrupt(event.orchestrationId, event.turnId);
       state.currentTurnId = null;
       state.currentOrchestrationId = null;
       state.statusMessage = "当前轮次已中断。";
       pushHistory("system", state.statusMessage);
       return;
-    case "control.start_mic":
+    case "start_mic":
       state.micRequested = true;
       state.statusMessage = "后端已请求启动麦克风，准备自动收音。";
       pushHistory("system", state.statusMessage);
       void startMicrophoneCapture();
       return;
-    case "control.synth_finished":
+    case "synth_finished":
       if (!state.isPlayingAudio && !state.pendingAudioUrl.trim()) {
         markAudioPlaybackTerminal(
           "not_requested",
-          envelope.turn_id ?? state.currentTurnId,
-          normalizeOrchestrationId(envelope.orchestration_id) ?? state.currentOrchestrationId,
+          event.turnId,
+          event.orchestrationId,
           "synth_finished_without_audio_playback",
         );
       }
@@ -699,28 +710,26 @@ async function dispatchInboundEnvelope(
           : "语音合成已完成。";
       pushHistory("system", state.statusMessage);
       return;
-    case "control.error":
-      applyControlError(envelope as ProtocolEnvelope<ControlErrorPayload>);
+    case "control_error":
+      applyControlError(event.envelope);
       return;
-    case "engine.motion_plan":
-    case "engine.motion_intent":
-      applyInboundMotionPayload({ state, pushHistory }, envelope as ProtocolEnvelope<Record<string, unknown>>);
-      // Dual-write to session: normalize and store motion payload
-      {
-        const plan = state.inboundMotionPlan;
-        if (plan) {
-          const normalized = normalizeMotionPayload(plan);
-          if (normalized.ok) {
-            const motionOrchId =
-              normalizeOrchestrationId(envelope.orchestration_id) ?? state.inboundMotionPlanOrchestrationId;
-            const motionTurnId = envelope.turn_id ?? state.inboundMotionPlanTurnId;
-            sessionStore?.markMotionReceived(motionOrchId, motionTurnId, normalized.payload);
-          }
-        }
+    case "engine_motion_payload": {
+      const result = applyInboundMotionPayload({ state, pushHistory }, event.envelope);
+      if (!result.accepted) {
+        return;
+      }
+      const normalized = normalizeMotionPayload(result.rawPlan);
+      if (normalized.ok) {
+        sessionStore?.markMotionReceived(
+          event.orchestrationId,
+          event.turnId,
+          normalized.payload,
+        );
       }
       return;
-    default:
-      reportUnhandledInboundEnvelope(envelope);
+    }
+    case "unhandled":
+      reportUnhandledInboundEnvelope(event.envelope);
       return;
   }
 }
@@ -739,58 +748,57 @@ function applyServerInfoMessage(envelope: ProtocolEnvelope<SystemServerInfoPaylo
   }
 }
 
-function applyOutputText(envelope: ProtocolEnvelope<OutputTextPayload>): void {
-  const orchestrationId =
-    normalizeOrchestrationId(envelope.orchestration_id) ?? state.currentOrchestrationId;
-  state.currentTurnId = envelope.turn_id ?? state.currentTurnId;
-  state.currentOrchestrationId = orchestrationId;
-  const text = envelope.payload.text.trim();
+function applyOutputText(
+  event: Extract<InboundAdapterEvent, { kind: "output_text" }>,
+): void {
+  state.currentTurnId = event.turnId;
+  state.currentOrchestrationId = event.orchestrationId;
+  const text = event.text;
   if (text) {
     queueAssistantTextForPlayback(
       text,
-      envelope.turn_id ?? state.currentTurnId,
-      orchestrationId,
+      event.turnId,
+      event.orchestrationId,
     );
-    sessionStore?.markTextReceived(orchestrationId, envelope.turn_id ?? state.currentTurnId, text);
+    sessionStore?.markTextReceived(event.orchestrationId, event.turnId, text);
   }
   state.lastError = "";
   state.statusMessage = text ? "已收到文本回复，等待同步播放。" : "已收到空文本回复。";
 }
 
-async function applyOutputAudio(envelope: ProtocolEnvelope<OutputAudioPayload>): Promise<void> {
-  const orchestrationId =
-    normalizeOrchestrationId(envelope.orchestration_id) ?? state.currentOrchestrationId;
-  state.currentTurnId = envelope.turn_id ?? state.currentTurnId;
-  state.currentOrchestrationId = orchestrationId;
-  const { text, audio_url: audioUrl } = envelope.payload;
-  if (text.trim()) {
+async function applyOutputAudio(
+  event: Extract<InboundAdapterEvent, { kind: "output_audio" }>,
+): Promise<void> {
+  state.currentTurnId = event.turnId;
+  state.currentOrchestrationId = event.orchestrationId;
+  if (event.text) {
     queueAssistantTextForPlayback(
-      text.trim(),
-      envelope.turn_id ?? state.currentTurnId,
-      orchestrationId,
+      event.text,
+      event.turnId,
+      event.orchestrationId,
     );
-    sessionStore?.markTextReceived(orchestrationId, envelope.turn_id ?? state.currentTurnId, text.trim());
+    sessionStore?.markTextReceived(event.orchestrationId, event.turnId, event.text);
   }
 
-  if (!audioUrl) {
+  if (!event.audioUrl) {
     state.statusMessage = "收到音频回复占位，未提供可播放地址。";
     pushHistory("system", state.statusMessage);
     markAudioPlaybackTerminal(
       "failed",
-      envelope.turn_id ?? state.currentTurnId,
-      orchestrationId,
+      event.turnId,
+      event.orchestrationId,
       "missing_audio_url",
     );
     return;
   }
 
-  const resolvedUrl = rewriteHttpUrl(audioUrl);
+  const resolvedUrl = rewriteHttpUrl(event.audioUrl);
   queueAudioForPlayback(
     resolvedUrl,
-    envelope.turn_id ?? state.currentTurnId,
-    orchestrationId,
+    event.turnId,
+    event.orchestrationId,
   );
-  sessionStore?.markAudioReceived(orchestrationId, envelope.turn_id ?? state.currentTurnId, resolvedUrl);
+  sessionStore?.markAudioReceived(event.orchestrationId, event.turnId, resolvedUrl);
 }
 
 function applyOutputImage(envelope: ProtocolEnvelope<OutputImagePayload>): void {
@@ -811,13 +819,12 @@ function applyOutputTranscription(
 }
 
 function applyTurnFinished(
-  envelope: ProtocolEnvelope<ControlTurnFinishedPayload>,
+  event: Extract<InboundAdapterEvent, { kind: "turn_finished" }>,
 ): void {
-  state.turnFinishedTurnId = envelope.turn_id ?? state.currentTurnId;
-  state.turnFinishedOrchestrationId =
-    normalizeOrchestrationId(envelope.orchestration_id) ?? state.currentOrchestrationId;
-  state.turnFinishedSuccess = Boolean(envelope.payload.success);
-  state.turnFinishedReason = envelope.payload.reason?.trim() ?? "";
+  state.turnFinishedTurnId = event.turnId;
+  state.turnFinishedOrchestrationId = event.orchestrationId;
+  state.turnFinishedSuccess = event.success;
+  state.turnFinishedReason = event.reason;
   sessionStore?.markTurnFinished(
     state.turnFinishedOrchestrationId,
     state.turnFinishedTurnId,
@@ -833,15 +840,15 @@ function applyTurnFinished(
     );
   }
 
-  if (envelope.payload.success) {
+  if (event.success) {
     state.statusMessage = "本轮对话已完成。";
     state.lastError = "";
     pushHistory("system", state.statusMessage);
     return;
   }
 
-  state.statusMessage = envelope.payload.reason
-    ? `本轮结束：${envelope.payload.reason}`
+  state.statusMessage = event.reason
+    ? `本轮结束：${event.reason}`
     : "本轮对话未正常完成。";
   pushHistory("system", state.statusMessage);
 }

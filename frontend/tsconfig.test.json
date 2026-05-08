@@ -23,6 +23,8 @@
     "src/composables/usePlaybackCompletionCoordinator.ts",
     "src/composables/usePreviewMotionPlayer.ts",
     "src/composables/useAdapterConnection.ts",
-    "src/adapter-connection/inboundProtocol.ts"
+    "src/adapter-connection/inboundProtocol.ts",
+    "src/adapter-connection/inboundEvents.ts",
+    "src/adapter-connection/inboundMotion.ts"
   ]
 }

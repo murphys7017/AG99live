@@ -23,10 +23,14 @@ export interface InboundMotionContext {
   pushHistory: (role: "system" | "error", text: string) => void;
 }
 
+export type InboundMotionApplyResult =
+  | { accepted: false }
+  | { accepted: true; rawPlan: Record<string, unknown> };
+
 export function applyInboundMotionPayload(
   ctx: InboundMotionContext,
   envelope: ProtocolEnvelope<Record<string, unknown>>,
-): void {
+): InboundMotionApplyResult {
   const state = ctx.state;
   const envelopeTurnId = normalizeTurnIdForComparison(envelope.turn_id);
   const envelopeOrchestrationId = normalizeOrchestrationId(envelope.orchestration_id);
@@ -86,7 +90,7 @@ export function applyInboundMotionPayload(
     );
     state.statusMessage = `忽略过期动作计划（orchestration_id=${envelopeOrchestrationId}）。`;
     ctx.pushHistory("system", state.statusMessage);
-    return;
+    return { accepted: false };
   }
 
   if (
@@ -106,15 +110,15 @@ export function applyInboundMotionPayload(
         currentTurnId,
       );
     } else {
-    console.warn(
-      "[Connection] discarding motion payload for stale turn_id. envelope_turn_id=",
-      envelopeTurnId,
-      "current_turn_id=",
-      currentTurnId,
-    );
+      console.warn(
+        "[Connection] discarding motion payload for stale turn_id. envelope_turn_id=",
+        envelopeTurnId,
+        "current_turn_id=",
+        currentTurnId,
+      );
       state.statusMessage = `忽略过期动作计划（turn_id=${envelopeTurnId}）。`;
       ctx.pushHistory("system", state.statusMessage);
-      return;
+      return { accepted: false };
     }
   }
 
@@ -134,7 +138,7 @@ export function applyInboundMotionPayload(
     );
     state.statusMessage = "忽略孤立动作计划（当前无活跃文本/音频编排上下文）。";
     ctx.pushHistory("system", state.statusMessage);
-    return;
+    return { accepted: false };
   }
 
   const rawPayload = envelope.payload;
@@ -165,7 +169,7 @@ export function applyInboundMotionPayload(
     state.lastError = `收到无效的 ${envelope.type}（缺少 ${payloadKey} 对象）。`;
     state.statusMessage = state.lastError;
     ctx.pushHistory("error", state.lastError);
-    return;
+    return { accepted: false };
   }
 
   const schemaVersion =
@@ -189,7 +193,7 @@ export function applyInboundMotionPayload(
     state.lastError = `收到无效的 ${envelope.type}（schema_version=${schemaVersion || "empty"}）。`;
     state.statusMessage = state.lastError;
     ctx.pushHistory("error", state.lastError);
-    return;
+    return { accepted: false };
   }
 
   state.inboundMotionPlan = plan;
@@ -198,4 +202,5 @@ export function applyInboundMotionPayload(
   state.inboundMotionPlanReceivedAtMs = performance.now();
   state.statusMessage = `收到外部动作载荷（${envelope.type}, mode=${mode}）。`;
   ctx.pushHistory("system", state.statusMessage);
+  return { accepted: true, rawPlan: plan as Record<string, unknown> };
 }
