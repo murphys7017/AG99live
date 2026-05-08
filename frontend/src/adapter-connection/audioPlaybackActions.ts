@@ -1,4 +1,4 @@
-import type { StartAudioPlaybackOptions } from "./audioPlayback";
+import type { StartAudioPlaybackOptions } from "./audioPlayback.js";
 
 export interface AudioPlaybackState {
   isPlayingAudio: boolean;

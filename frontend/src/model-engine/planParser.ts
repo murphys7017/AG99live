@@ -1,9 +1,9 @@
 import type {
   DirectParameterPlanTiming,
   SemanticParameterPlan,
-} from "../types/protocol";
-import { SCHEMA_PARAMETER_PLAN_V2 } from "../types/protocol";
-import { isFiniteNumber, isObject, normalizeText } from "../utils/guards";
+} from "../types/protocol.js";
+import { SCHEMA_PARAMETER_PLAN_V2 } from "../types/protocol.js";
+import { isFiniteNumber, isObject, normalizeText } from "../utils/guards.js";
 
 interface ParseFailure {
   ok: false;

@@ -24,8 +24,8 @@ import type {
 import {
   SCHEMA_MOTION_INTENT_V2,
   SCHEMA_PARAMETER_PLAN_V2,
-} from "../types/protocol";
-import { applyInboundMotionPayload } from "../adapter-connection/inboundMotion";
+} from "../types/protocol.js";
+import { applyInboundMotionPayload } from "../adapter-connection/inboundMotion.js";
 import {
   clearPlaybackGroupContext as clearPlaybackGroup,
   interruptCurrentTurn as sendInterrupt,
@@ -33,51 +33,52 @@ import {
   sendPlaybackFinished as sendPlaybackFinishedAction,
   sendSemanticAxisProfileSave as sendProfileSave,
   sendText as sendTextAction,
-} from "../adapter-connection/outboundActions";
+} from "../adapter-connection/outboundActions.js";
 import {
   playAudioAndAcknowledge as playAudioAction,
   stopAudioPlayback as stopAudioAction,
-} from "../adapter-connection/audioPlaybackActions";
-import { useAdapterMotionTuning } from "./useAdapterMotionTuning";
+} from "../adapter-connection/audioPlaybackActions.js";
+import { useAdapterMotionTuning } from "./useAdapterMotionTuning.js";
 import {
   rewriteHttpUrl as rewriteHttpUrlWithActiveHost,
   rewriteModelSyncEnvelope as rewriteModelSyncEnvelopeWithActiveHost,
   rewriteSocketUrl as rewriteSocketUrlWithActiveHost,
-} from "../adapter-connection/modelSyncRewrite";
+} from "../adapter-connection/modelSyncRewrite.js";
 import {
   isMicrophoneCaptureRuntimeActive,
   startMicrophoneCaptureRuntime,
   stopMicrophoneCaptureRuntime,
   type MicrophoneAudioChunk,
-} from "../adapter-connection/microphoneCapture";
+} from "../adapter-connection/microphoneCapture.js";
 import {
   startAudioPlayback,
   stopAudioPlaybackRuntime,
-} from "../adapter-connection/audioPlayback";
+} from "../adapter-connection/audioPlayback.js";
 import {
   buildConnectFailureMessage,
   buildConnectionCandidates,
   DEFAULT_ADAPTER_ADDRESS,
   formatAddressHost,
   normalizeWsAddress,
-} from "../adapter-connection/address";
+} from "../adapter-connection/address.js";
 import {
   buildMessageEnvelope as buildProtocolMessageEnvelope,
   createMessageId,
   PROTOCOL_VERSION,
-} from "../adapter-connection/envelope";
+} from "../adapter-connection/envelope.js";
 import {
   loadDesktopScreenshotOnSendEnabled,
   loadStoredAdapterAddress,
   normalizeAdapterAddressSetting,
   saveDesktopScreenshotOnSendEnabled,
   saveStoredAdapterAddress,
-} from "../adapter-connection/preferences";
-import { normalizeOrchestrationId } from "../adapter-connection/orchestrationIds";
-import { useModelSync } from "./useModelSync";
-import { useAdapterHistory } from "./useAdapterHistory";
-import { normalizeMotionPayload } from "../model-engine/normalize";
-import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
+} from "../adapter-connection/preferences.js";
+import { parseInboundEnvelope } from "../adapter-connection/inboundProtocol.js";
+import { normalizeOrchestrationId } from "../adapter-connection/orchestrationIds.js";
+import { useModelSync } from "./useModelSync.js";
+import { useAdapterHistory } from "./useAdapterHistory.js";
+import { normalizeMotionPayload } from "../model-engine/normalize.js";
+import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore.js";
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "not_requested";
@@ -566,40 +567,34 @@ async function stopMicrophoneCapture(reason = "manual_stop"): Promise<boolean> {
 }
 
 async function handleSocketMessage(rawData: string): Promise<void> {
-  let envelope: ProtocolEnvelope<unknown>;
-  try {
-    envelope = JSON.parse(rawData) as ProtocolEnvelope<unknown>;
-  } catch (_error) {
-    state.lastError = "收到无法解析的后端消息。";
-    state.statusMessage = state.lastError;
-    pushHistory("error", state.lastError);
+  const parsed = parseInboundEnvelope(rawData);
+  if (!parsed.ok) {
+    if (parsed.code === "version_mismatch") {
+      reportProtocolError(
+        parsed.warningKey ?? "version:empty",
+        parsed.message,
+        parsed.envelope,
+      );
+      return;
+    }
+
+    state.lastError = parsed.message;
+    state.statusMessage = parsed.message;
+    pushHistory("error", parsed.message);
     return;
   }
 
-  if (!envelope || typeof envelope !== "object" || typeof envelope.type !== "string") {
-    state.lastError = "收到非法协议消息。";
-    state.statusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return;
-  }
-
-  const messageVersion =
-    typeof envelope.version === "string"
-      ? envelope.version.trim()
-      : "";
-  if (messageVersion !== PROTOCOL_VERSION) {
-    reportProtocolError(
-      `version:${messageVersion || "empty"}`,
-      `收到协议版本不匹配的消息（expected=${PROTOCOL_VERSION}, actual=${messageVersion || "empty"}）。`,
-      envelope,
-    );
-    return;
-  }
-
+  const envelope = parsed.envelope;
   if (typeof envelope.session_id === "string" && envelope.session_id.trim()) {
     state.sessionId = envelope.session_id.trim();
   }
 
+  await dispatchInboundEnvelope(envelope);
+}
+
+async function dispatchInboundEnvelope(
+  envelope: ProtocolEnvelope<unknown>,
+): Promise<void> {
   switch (envelope.type) {
     case "system.server_info":
       applyServerInfoMessage(envelope as ProtocolEnvelope<SystemServerInfoPayload>);

@@ -1,4 +1,4 @@
-import type { ProtocolEnvelope } from "../types/protocol";
+import type { ProtocolEnvelope } from "../types/protocol.js";
 
 export const PROTOCOL_VERSION = "v2";
 const SOURCE_FRONTEND = "frontend";

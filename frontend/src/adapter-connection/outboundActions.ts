@@ -1,8 +1,8 @@
-import type { ProtocolEnvelope, SystemSemanticAxisProfileSavePayload } from "../types/protocol";
+import type { ProtocolEnvelope, SystemSemanticAxisProfileSavePayload } from "../types/protocol.js";
 import {
   normalizeOrchestrationId,
   normalizeTurnIdForComparison,
-} from "./orchestrationIds";
+} from "./orchestrationIds.js";
 
 export interface OutboundActionState {
   currentTurnId: string | null;

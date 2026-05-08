@@ -2,18 +2,18 @@ import type {
   DirectParameterPlanTiming,
   SemanticMotionIntent,
   SemanticParameterPlan,
-} from "../types/protocol";
+} from "../types/protocol.js";
 import {
   SCHEMA_MOTION_INTENT_V2,
   SCHEMA_PARAMETER_PLAN_V2,
-} from "../types/protocol";
+} from "../types/protocol.js";
 import {
   MAX_MOTION_DURATION_MS,
   MIN_MOTION_DURATION_MS,
-} from "./constants";
-import type { NormalizedMotionPayload } from "./contracts";
-import { parseSemanticParameterPlan, type ParseResult } from "./planParser";
-import { isFiniteNumber, isObject, normalizeText } from "../utils/guards";
+} from "./constants.js";
+import type { NormalizedMotionPayload } from "./contracts.js";
+import { parseSemanticParameterPlan, type ParseResult } from "./planParser.js";
+import { isFiniteNumber, isObject, normalizeText } from "../utils/guards.js";
 
 function normalizeDynamicAxes(value: unknown): Record<string, { value: number }> | null {
   if (!isObject(value)) {

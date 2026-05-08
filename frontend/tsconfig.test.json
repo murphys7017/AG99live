@@ -22,6 +22,7 @@
     "src/utils/cloneJson.ts",
     "src/composables/usePlaybackCompletionCoordinator.ts",
     "src/composables/usePreviewMotionPlayer.ts",
-    "src/composables/useAdapterConnection.ts"
+    "src/composables/useAdapterConnection.ts",
+    "src/adapter-connection/inboundProtocol.ts"
   ]
 }

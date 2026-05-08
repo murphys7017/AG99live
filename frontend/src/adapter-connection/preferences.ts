@@ -1,4 +1,4 @@
-import { DEFAULT_ADAPTER_ADDRESS } from "./address";
+import { DEFAULT_ADAPTER_ADDRESS } from "./address.js";
 
 const ADDRESS_STORAGE_KEY = "ag99live.adapter.address";
 const DESKTOP_SCREENSHOT_ON_SEND_STORAGE_KEY = "ag99live.desktop.capture_on_send";
