@@ -11,7 +11,7 @@
   - 与最新代码状态相符：动作链路以 `inline_first` 为默认主路径，运行时协议以 v2 为主。
 - [astrbot_plugin_ag99live_adapter/README](../astrbot_plugin_ag99live_adapter/README.md)
   - AstrBot adapter 的当前配置、协议和动作生成模式说明。
-  - 与最新代码状态相符：`motion_generation_mode` 配置默认值为 `inline_first`，可切 `split_after_reply` / `text_only`。
+  - 与最新代码状态相符：`motion_generation_mode` 配置默认值为 `inline_first`，可切 `split_after_reply`。
 - [V2 当前实现状态与下一步](./V2当前实现状态与下一步.md)
   - 当前 v2 实现快照、已完成项、剩余工作。
   - 需要与当前代码一起阅读：它是现状快照，不是永久真理。

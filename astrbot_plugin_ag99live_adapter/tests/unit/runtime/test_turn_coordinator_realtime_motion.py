@@ -615,6 +615,82 @@ def test_emit_message_chain_inline_plan_uses_primary_route(
     assert "<@anim" not in str(output_text_payload.get("payload", {}).get("text", "")).lower()
 
 
+def test_emit_message_chain_reuses_platform_visible_message_id_for_segment_outputs(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+    Plain = module.Plain
+    Record = module.Record
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="inline_first")
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-segment",
+            "current_orchestration_id": "orch-segment",
+            "last_user_text": "user text",
+            "mark_synthesizing": lambda self: None,
+            "mark_playing": lambda self: None,
+        },
+    )()
+
+    class ChatBufferStub:
+        def add(self, role: str, text: str) -> None:
+            del role
+            del text
+
+    class MediaServiceStub:
+        def cache_audio_file(self, path: str):
+            return path, "/cache/audio.wav"
+
+    coordinator.chat_buffer = ChatBufferStub()
+    coordinator.media_service = MediaServiceStub()
+    coordinator.speaker_name = "assistant"
+    coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+    coordinator.schedule_motion_after_reply = lambda **_kwargs: (_ for _ in ()).throw(
+        AssertionError("platform motion client object should satisfy inline motion")
+    )
+
+    asyncio.run(
+        coordinator.emit_message_chain(
+            message_chain=[Plain("hello"), Record(file="voice.wav")],
+            platform_extras={
+                "visible_message_id": "visible-msg-1",
+                "client_objects": [
+                    {
+                        "type": "ag99live.motion_payload",
+                        "motion_payload": _build_valid_motion_intent(),
+                        "mode": "preview",
+                        "source": "plugin_hints",
+                    }
+                ],
+            },
+        )
+    )
+
+    by_type = {str(payload.get("type")): payload for payload in sent_payloads}
+    assert by_type["output.text"]["message_id"] == "visible-msg-1"
+    assert by_type["engine.motion_intent"]["message_id"] == "visible-msg-1"
+    assert by_type["output.audio"]["message_id"] == "visible-msg-1"
+    assert by_type["output.text"]["turn_id"] == "turn-segment"
+    assert by_type["engine.motion_intent"]["turn_id"] == "turn-segment"
+    assert by_type["output.audio"]["turn_id"] == "turn-segment"
+
+
 def test_emit_message_chain_split_mode_ignores_inline_payload(
     install_fake_astrbot,
     monkeypatch,

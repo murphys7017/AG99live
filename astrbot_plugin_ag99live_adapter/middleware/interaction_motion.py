@@ -16,11 +16,11 @@ from ..prompts.motion_selector import (
 try:
     from astrbot.core.interaction import (
         InteractionResultContribution,
-        get_interaction_decision,
+        get_interaction_decision as get_interaction_reply_plan,
     )
 except Exception:  # pragma: no cover - compatibility with older AstrBot builds
     InteractionResultContribution = None
-    get_interaction_decision = None
+    get_interaction_reply_plan = None
 
 try:
     from astrbot.core.prompt import PromptExtension
@@ -55,7 +55,7 @@ class _FrontendIdentitySnapshot:
 
 
 @dataclass(slots=True)
-class _InteractionDecisionSnapshot:
+class _InteractionReplyPlanSnapshot:
     route_mode: str | None
     should_emit_immediate_reply: bool | None
     source: str
@@ -78,13 +78,14 @@ class _MotionScheduleAttempt:
     event_frontend_orchestration_id: str | None
     active_frontend_turn_id: str | None
     active_frontend_orchestration_id: str | None
-    decision_route_mode: str | None
-    decision_should_emit_immediate_reply: bool | None
-    decision_source: str | None
+    reply_plan_route_mode: str | None
+    reply_plan_should_emit_immediate_reply: bool | None
+    reply_plan_source: str | None
     motion_generation_mode: str
     scheduled: bool
     reason: str
     assistant_text: str
+    plugin_hints_motion_payload: dict[str, Any] | None = None
 
     def to_metadata(self) -> dict[str, Any]:
         return {
@@ -96,9 +97,9 @@ class _MotionScheduleAttempt:
             "event_frontend_orchestration_id": self.event_frontend_orchestration_id,
             "active_frontend_turn_id": self.active_frontend_turn_id,
             "active_frontend_orchestration_id": self.active_frontend_orchestration_id,
-            "decision_route_mode": self.decision_route_mode,
-            "decision_should_emit_immediate_reply": self.decision_should_emit_immediate_reply,
-            "decision_source": self.decision_source,
+            "reply_plan_route_mode": self.reply_plan_route_mode,
+            "reply_plan_should_emit_immediate_reply": self.reply_plan_should_emit_immediate_reply,
+            "reply_plan_source": self.reply_plan_source,
             "motion_generation_mode": self.motion_generation_mode,
             "scheduled": self.scheduled,
             "reason": self.reason,
@@ -166,8 +167,19 @@ class AG99liveMotionResultContributor:
         if attempt is None or InteractionResultContribution is None:
             return None
 
+        client_objects = []
+        if attempt.plugin_hints_motion_payload is not None:
+            client_objects.append(
+                {
+                    "type": "ag99live.motion_payload",
+                    "motion_payload": attempt.plugin_hints_motion_payload,
+                    "mode": "preview",
+                    "source": "plugin_hints",
+                }
+            )
         return InteractionResultContribution(
             plugin_id=self.plugin_id,
+            client_objects=client_objects,
             metadata={"ag99live_motion_schedule": attempt.to_metadata()},
             priority=self.priority,
         )
@@ -226,44 +238,177 @@ def _resolve_motion_runtime_bundle(event: Any) -> _MotionRuntimeBundle | None:
     )
 
 
+def _resolve_plugin_hints_motion_payload(
+    event: Any,
+    runtime_state: Any,
+) -> dict[str, Any] | None:
+    hints = _call_event_method(event, "get_extra", "_interaction_plugin_hints")
+    if not isinstance(hints, dict):
+        return None
+
+    motion_hint = hints.get("ag99live_motion")
+    if not isinstance(motion_hint, dict):
+        return None
+
+    mode = str(motion_hint.get("mode") or "").strip()
+    if mode not in {"idle", "expressive"}:
+        return None
+
+    try:
+        semantic_profile = resolve_selected_semantic_axis_profile(
+            runtime_state=runtime_state
+        )
+    except Exception:
+        return None
+
+    axes = motion_hint.get("axes")
+    validated_axes = _normalize_plugin_hint_axes(axes, semantic_profile)
+    if not validated_axes:
+        return None
+
+    profile_id = str(semantic_profile.get("profile_id") or "").strip()
+    if not profile_id:
+        return None
+
+    emotion_label = str(motion_hint.get("emotion_label") or "").strip()
+    if not emotion_label:
+        emotion_label = "neutral"
+
+    duration_hint_ms = motion_hint.get("duration_hint_ms")
+    if duration_hint_ms is not None:
+        try:
+            duration_hint_ms = int(duration_hint_ms)
+            duration_hint_ms = max(320, min(15000, duration_hint_ms))
+        except (TypeError, ValueError):
+            duration_hint_ms = None
+
+    return {
+        "schema_version": "engine.motion_intent.v2",
+        "profile_id": profile_id,
+        "profile_revision": int(semantic_profile.get("revision") or 0),
+        "model_id": str(semantic_profile.get("model_id") or "").strip(),
+        "mode": mode,
+        "emotion_label": emotion_label,
+        "duration_hint_ms": duration_hint_ms,
+        "axes": validated_axes,
+        "summary": {"axis_count": len(validated_axes)},
+    }
+
+
+def _normalize_plugin_hint_axes(
+    axes: Any,
+    semantic_profile: dict[str, Any],
+) -> dict[str, dict[str, float]] | None:
+    if not isinstance(axes, dict) or not axes:
+        return None
+
+    prompt_axes = profile_prompt_axes(semantic_profile)
+    axis_by_id = {
+        str(axis.get("id") or "").strip(): axis
+        for axis in prompt_axes
+        if str(axis.get("id") or "").strip()
+    }
+    if not axis_by_id:
+        return None
+
+    normalized_axes: dict[str, dict[str, float]] = {}
+    for axis_id_raw, axis_value in axes.items():
+        axis_id = str(axis_id_raw or "").strip()
+        if not axis_id:
+            continue
+        axis = axis_by_id.get(axis_id)
+        if axis is None:
+            continue
+        if not isinstance(axis_value, dict):
+            continue
+        raw_value = axis_value.get("value")
+        if not isinstance(raw_value, (int, float)):
+            continue
+
+        value = _coerce_plugin_hint_axis_value(float(raw_value), axis)
+        normalized_axes[axis_id] = {"value": value}
+
+    return normalized_axes or None
+
+
+def _coerce_plugin_hint_axis_value(raw_value: float, axis: dict[str, Any]) -> float:
+    min_value, max_value = _resolve_axis_value_range(axis)
+
+    # Backward-compatible form: 0..1 values are treated as normalized range
+    # positions because the first middleware hint format used 0.5 as neutral.
+    if 0.0 <= raw_value <= 1.0:
+        value = min_value + (max_value - min_value) * raw_value
+    else:
+        value = raw_value
+
+    clamped = max(min_value, min(max_value, value))
+    return round(clamped, 4)
+
+
+def _resolve_axis_value_range(axis: dict[str, Any]) -> tuple[float, float]:
+    value_range = axis.get("value_range")
+    if (
+        isinstance(value_range, list)
+        and len(value_range) == 2
+        and isinstance(value_range[0], (int, float))
+        and isinstance(value_range[1], (int, float))
+        and float(value_range[0]) < float(value_range[1])
+    ):
+        return float(value_range[0]), float(value_range[1])
+    return 0.0, 100.0
+
+
 def _build_motion_capability_payload(runtime_state: Any) -> dict[str, Any]:
     motion_generation_mode = _resolve_motion_generation_mode(runtime_state)
     capability_payload: dict[str, Any] = {
-        "motion_output_supported": True,
         "configured_generation_mode": motion_generation_mode,
-        "supported_generation_modes": [
-            "inline_first",
-            "split_after_reply",
-            "text_only",
-        ],
-        "default_motion_schema": "engine.motion_intent.v2",
-        "supported_engine_message_types": [
-            "engine.motion_intent",
-            "engine.motion_plan",
-        ],
         "inline_contract_supported": bool(
             getattr(runtime_state, "enable_inline_motion_contract", True)
-        ),
-        "realtime_motion_enabled": bool(
-            getattr(runtime_state, "enable_realtime_motion_plan", True)
         ),
         "motion_instruction": resolve_motion_prompt_instruction(
             runtime_state=runtime_state
         ),
     }
 
-    selected_model = _resolve_selected_model_name(runtime_state)
-    if selected_model:
-        capability_payload["selected_model"] = selected_model
-
-    profile_payload, profile_error = _summarize_semantic_profile(runtime_state)
-    capability_payload["profile_available"] = profile_payload is not None
+    profile_payload, _profile_error = _summarize_semantic_profile(runtime_state)
     if profile_payload is not None:
         capability_payload["semantic_profile"] = profile_payload
-    if profile_error:
-        capability_payload["profile_error"] = profile_error
+        capability_payload["plugin_hints_format"] = _build_plugin_hints_motion_format(profile_payload)
 
     return capability_payload
+
+
+def _build_plugin_hints_motion_format(profile_payload: dict[str, Any]) -> dict[str, Any]:
+    prompt_axes = profile_payload.get("prompt_axes")
+    if not isinstance(prompt_axes, list) or not prompt_axes:
+        return {}
+
+    axis_schema: dict[str, Any] = {}
+    for axis in prompt_axes:
+        if not isinstance(axis, dict):
+            continue
+        axis_id = str(axis.get("id") or "").strip()
+        if not axis_id:
+            continue
+        axis_schema[axis_id] = {"value": _resolve_axis_neutral_value(axis)}
+
+    return {
+        "ag99live_motion": {
+            "mode": "idle | expressive",
+            "emotion_label": "neutral",
+            "duration_hint_ms": 1500,
+            "axes": axis_schema,
+        },
+    }
+
+
+def _resolve_axis_neutral_value(axis: dict[str, Any]) -> float:
+    neutral = axis.get("neutral")
+    if isinstance(neutral, (int, float)):
+        min_value, max_value = _resolve_axis_value_range(axis)
+        return round(max(min_value, min(max_value, float(neutral))), 4)
+    min_value, max_value = _resolve_axis_value_range(axis)
+    return round((min_value + max_value) / 2.0, 4)
 
 
 def _build_motion_runtime_payload(
@@ -273,24 +418,10 @@ def _build_motion_runtime_payload(
     *,
     view: Any,
 ) -> dict[str, Any]:
-    identity = _resolve_frontend_identity_snapshot(event, turn_coordinator)
-    runtime_payload: dict[str, Any] = {
-        "interaction_turn_id": _normalize_optional_string(getattr(view, "turn_id", None)),
-        "event_frontend_turn_id": identity.event_frontend_turn_id,
-        "event_frontend_orchestration_id": identity.event_frontend_orchestration_id,
-        "active_frontend_turn_id": identity.active_frontend_turn_id,
-        "active_frontend_orchestration_id": identity.active_frontend_orchestration_id,
+    del event, turn_coordinator, view
+    return {
         "configured_generation_mode": _resolve_motion_generation_mode(runtime_state),
-        "realtime_motion_enabled": bool(
-            getattr(runtime_state, "enable_realtime_motion_plan", True)
-        ),
     }
-
-    selected_model = _resolve_selected_model_name(runtime_state)
-    if selected_model:
-        runtime_payload["selected_model"] = selected_model
-
-    return {key: value for key, value in runtime_payload.items() if value is not None}
 
 
 def _summarize_semantic_profile(
@@ -333,34 +464,39 @@ def _schedule_motion_from_interaction_result(
     phase = _resolve_result_phase(view)
     assistant_text = _extract_assistant_text(view)
     identity = _resolve_frontend_identity_snapshot(event, bundle.turn_coordinator)
-    decision = _resolve_interaction_decision_snapshot(event, view)
-    policy = _resolve_motion_schedule_policy(
-        event,
-        phase=phase,
-        motion_generation_mode=motion_generation_mode,
-        decision=decision,
-    )
+    reply_plan = _resolve_interaction_reply_plan_snapshot(event, view)
 
-    if motion_generation_mode == "text_only":
+    plugin_hints_payload = _resolve_plugin_hints_motion_payload(
+        event, bundle.runtime_state
+    )
+    if plugin_hints_payload is not None:
         return _MotionScheduleAttempt(
             phase=phase,
-            source=None,
+            source="plugin_hints",
             scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
             scheduled_frontend_orchestration_id=identity.scheduled_frontend_orchestration_id,
             event_frontend_turn_id=identity.event_frontend_turn_id,
             event_frontend_orchestration_id=identity.event_frontend_orchestration_id,
             active_frontend_turn_id=identity.active_frontend_turn_id,
             active_frontend_orchestration_id=identity.active_frontend_orchestration_id,
-            decision_route_mode=decision.route_mode if decision is not None else None,
-            decision_should_emit_immediate_reply=(
-                decision.should_emit_immediate_reply if decision is not None else None
+            reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
+            reply_plan_should_emit_immediate_reply=(
+                reply_plan.should_emit_immediate_reply if reply_plan is not None else None
             ),
-            decision_source=decision.source if decision is not None else None,
+            reply_plan_source=reply_plan.source if reply_plan is not None else None,
             motion_generation_mode=motion_generation_mode,
-            scheduled=False,
-            reason="motion_generation_disabled",
+            scheduled=True,
+            reason="plugin_hints_motion_client_object",
             assistant_text=assistant_text,
+            plugin_hints_motion_payload=plugin_hints_payload,
         )
+
+    policy = _resolve_motion_schedule_policy(
+        event,
+        phase=phase,
+        motion_generation_mode=motion_generation_mode,
+        reply_plan=reply_plan,
+    )
 
     if not assistant_text:
         return _MotionScheduleAttempt(
@@ -372,11 +508,11 @@ def _schedule_motion_from_interaction_result(
             event_frontend_orchestration_id=identity.event_frontend_orchestration_id,
             active_frontend_turn_id=identity.active_frontend_turn_id,
             active_frontend_orchestration_id=identity.active_frontend_orchestration_id,
-            decision_route_mode=decision.route_mode if decision is not None else None,
-            decision_should_emit_immediate_reply=(
-                decision.should_emit_immediate_reply if decision is not None else None
+            reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
+            reply_plan_should_emit_immediate_reply=(
+                reply_plan.should_emit_immediate_reply if reply_plan is not None else None
             ),
-            decision_source=decision.source if decision is not None else None,
+            reply_plan_source=reply_plan.source if reply_plan is not None else None,
             motion_generation_mode=motion_generation_mode,
             scheduled=False,
             reason="assistant_text_empty",
@@ -393,11 +529,11 @@ def _schedule_motion_from_interaction_result(
             event_frontend_orchestration_id=identity.event_frontend_orchestration_id,
             active_frontend_turn_id=identity.active_frontend_turn_id,
             active_frontend_orchestration_id=identity.active_frontend_orchestration_id,
-            decision_route_mode=decision.route_mode if decision is not None else None,
-            decision_should_emit_immediate_reply=(
-                decision.should_emit_immediate_reply if decision is not None else None
+            reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
+            reply_plan_should_emit_immediate_reply=(
+                reply_plan.should_emit_immediate_reply if reply_plan is not None else None
             ),
-            decision_source=decision.source if decision is not None else None,
+            reply_plan_source=reply_plan.source if reply_plan is not None else None,
             motion_generation_mode=motion_generation_mode,
             scheduled=False,
             reason=policy.reason,
@@ -423,11 +559,11 @@ def _schedule_motion_from_interaction_result(
         event_frontend_orchestration_id=identity.event_frontend_orchestration_id,
         active_frontend_turn_id=identity.active_frontend_turn_id,
         active_frontend_orchestration_id=identity.active_frontend_orchestration_id,
-        decision_route_mode=decision.route_mode if decision is not None else None,
-        decision_should_emit_immediate_reply=(
-            decision.should_emit_immediate_reply if decision is not None else None
+        reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
+        reply_plan_should_emit_immediate_reply=(
+            reply_plan.should_emit_immediate_reply if reply_plan is not None else None
         ),
-        decision_source=decision.source if decision is not None else None,
+        reply_plan_source=reply_plan.source if reply_plan is not None else None,
         motion_generation_mode=motion_generation_mode,
         scheduled=scheduled,
         reason="scheduled" if scheduled else "deduped_or_rejected",
@@ -447,18 +583,11 @@ def _extract_assistant_text(view: Any) -> str:
     return ""
 
 
-def _resolve_selected_model_name(runtime_state: Any) -> str | None:
-    model_info = getattr(runtime_state, "model_info", None)
-    if not isinstance(model_info, dict):
-        return None
-    return _normalize_optional_string(model_info.get("selected_model"))
-
-
 def _resolve_motion_generation_mode(runtime_state: Any) -> str:
     raw_mode = str(
         getattr(runtime_state, "motion_generation_mode", "split_after_reply") or ""
     ).strip()
-    if raw_mode in {"inline_first", "split_after_reply", "text_only"}:
+    if raw_mode in {"inline_first", "split_after_reply"}:
         return raw_mode
     return "split_after_reply"
 
@@ -478,15 +607,15 @@ def _resolve_motion_schedule_policy(
     *,
     phase: str,
     motion_generation_mode: str,
-    decision: _InteractionDecisionSnapshot | None,
+    reply_plan: _InteractionReplyPlanSnapshot | None,
 ) -> _MotionSchedulePolicy:
     if phase == "immediate":
-        return _resolve_immediate_phase_policy(decision)
+        return _resolve_immediate_phase_policy(reply_plan)
     if phase == "final":
         return _resolve_final_phase_policy(
             event,
             motion_generation_mode=motion_generation_mode,
-            decision=decision,
+            reply_plan=reply_plan,
         )
     return _MotionSchedulePolicy(
         should_schedule=False,
@@ -496,27 +625,27 @@ def _resolve_motion_schedule_policy(
 
 
 def _resolve_immediate_phase_policy(
-    decision: _InteractionDecisionSnapshot | None,
+    reply_plan: _InteractionReplyPlanSnapshot | None,
 ) -> _MotionSchedulePolicy:
-    if decision is None:
+    if reply_plan is None:
         return _MotionSchedulePolicy(
             should_schedule=False,
             source=None,
-            reason="immediate_phase_decision_unresolved",
+            reason="immediate_phase_reply_plan_unresolved",
         )
-    if decision.route_mode == "self_reply":
+    if reply_plan.route_mode == "self_reply":
         return _MotionSchedulePolicy(
             should_schedule=True,
             source="interaction_result_immediate",
             reason="schedule_self_reply_immediate",
         )
-    if decision.route_mode in {"hybrid", "delegate_to_core"}:
+    if reply_plan.route_mode in {"hybrid", "delegate_to_core"}:
         return _MotionSchedulePolicy(
             should_schedule=False,
             source=None,
             reason="immediate_phase_waits_for_core_reply",
         )
-    if decision.route_mode:
+    if reply_plan.route_mode:
         return _MotionSchedulePolicy(
             should_schedule=False,
             source=None,
@@ -525,7 +654,7 @@ def _resolve_immediate_phase_policy(
     return _MotionSchedulePolicy(
         should_schedule=False,
         source=None,
-        reason="immediate_phase_decision_unresolved",
+        reason="immediate_phase_reply_plan_unresolved",
     )
 
 
@@ -533,9 +662,9 @@ def _resolve_final_phase_policy(
     event: Any,
     *,
     motion_generation_mode: str,
-    decision: _InteractionDecisionSnapshot | None,
+    reply_plan: _InteractionReplyPlanSnapshot | None,
 ) -> _MotionSchedulePolicy:
-    if decision is not None and decision.route_mode == "self_reply":
+    if reply_plan is not None and reply_plan.route_mode == "self_reply":
         return _MotionSchedulePolicy(
             should_schedule=False,
             source=None,
@@ -560,40 +689,40 @@ def _resolve_final_phase_policy(
     )
 
 
-def _resolve_interaction_decision_snapshot(
+def _resolve_interaction_reply_plan_snapshot(
     event: Any,
     view: Any,
-) -> _InteractionDecisionSnapshot | None:
-    if callable(get_interaction_decision):
+) -> _InteractionReplyPlanSnapshot | None:
+    if callable(get_interaction_reply_plan):
         try:
-            decision = get_interaction_decision(event)
+            reply_plan = get_interaction_reply_plan(event)
         except Exception:  # pragma: no cover - compatibility fallback
-            decision = None
-        snapshot = _coerce_interaction_decision_snapshot(
-            decision,
+            reply_plan = None
+        snapshot = _coerce_interaction_reply_plan_snapshot(
+            reply_plan,
             source="event_turn_state",
         )
         if snapshot is not None:
             return snapshot
 
-    snapshot = _coerce_interaction_decision_snapshot(
+    snapshot = _coerce_interaction_reply_plan_snapshot(
         _call_event_method(event, "get_extra", "_interaction_decision", None),
         source="event_extra",
     )
     if snapshot is not None:
         return snapshot
 
-    return _coerce_interaction_decision_snapshot(
+    return _coerce_interaction_reply_plan_snapshot(
         getattr(view, "decision", None),
         source="view",
     )
 
 
-def _coerce_interaction_decision_snapshot(
+def _coerce_interaction_reply_plan_snapshot(
     value: Any,
     *,
     source: str,
-) -> _InteractionDecisionSnapshot | None:
+) -> _InteractionReplyPlanSnapshot | None:
     if value is None:
         return None
 
@@ -614,7 +743,7 @@ def _coerce_interaction_decision_snapshot(
     )
     if route_mode is None and should_emit_immediate_reply is None:
         return None
-    return _InteractionDecisionSnapshot(
+    return _InteractionReplyPlanSnapshot(
         route_mode=route_mode,
         should_emit_immediate_reply=should_emit_immediate_reply,
         source=source,

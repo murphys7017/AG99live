@@ -1573,7 +1573,7 @@ def _normalize_motion_prompt_instruction(value: Any) -> str:
 
 def _normalize_motion_generation_mode(value: Any) -> str:
     mode = str(value or "").strip()
-    if mode in {"inline_first", "split_after_reply", "text_only"}:
+    if mode in {"inline_first", "split_after_reply"}:
         return mode
     return "split_after_reply"
 

@@ -258,6 +258,7 @@ def build_output_text(
     session_id: str,
     turn_id: str | None,
     orchestration_id: str | None = None,
+    message_id: str | None = None,
     text: str,
     speaker_name: str,
     avatar: str,
@@ -267,6 +268,7 @@ def build_output_text(
         session_id=session_id,
         turn_id=turn_id,
         orchestration_id=orchestration_id,
+        message_id=message_id,
         source=SOURCE_ADAPTER,
         payload={
             "text": text,
@@ -281,6 +283,7 @@ def build_output_audio(
     session_id: str,
     turn_id: str | None,
     orchestration_id: str | None = None,
+    message_id: str | None = None,
     audio_url: str | None,
     text: str,
     speaker_name: str,
@@ -291,6 +294,7 @@ def build_output_audio(
         session_id=session_id,
         turn_id=turn_id,
         orchestration_id=orchestration_id,
+        message_id=message_id,
         source=SOURCE_ADAPTER,
         payload={
             "audio_url": audio_url,

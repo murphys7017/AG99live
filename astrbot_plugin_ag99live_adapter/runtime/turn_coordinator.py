@@ -5,6 +5,7 @@ import json
 import re
 import time
 from typing import Any, Awaitable, Callable
+from uuid import uuid4
 
 from astrbot.api import logger
 from astrbot.api.message_components import Image, Plain, Record
@@ -176,6 +177,7 @@ class TurnCoordinator:
         inline_base_expression: str | None = None,
         inline_motion_id: str | None = None,
         raw_reply_text_override: str | None = None,
+        platform_extras: dict[str, Any] | None = None,
     ) -> None:
         del unified_msg_origin
         del inline_base_expression
@@ -184,6 +186,8 @@ class TurnCoordinator:
         session_id = self.session_state.client_uid
         turn_id = self.session_state.current_turn_id
         orchestration_id = getattr(self.session_state, "current_orchestration_id", None)
+        platform_extras_dict = platform_extras if isinstance(platform_extras, dict) else {}
+        segment_message_id = _resolve_platform_segment_message_id(platform_extras_dict)
 
         self._mark_turn_timing("emit_started_at")
         texts, picture_paths, record_paths = _extract_outbound_message_parts(message_chain)
@@ -200,19 +204,14 @@ class TurnCoordinator:
                     session_id=session_id,
                     turn_id=turn_id,
                     orchestration_id=orchestration_id,
+                    message_id=segment_message_id,
                     text=reply_text,
                     speaker_name=self.speaker_name,
                     avatar="",
                 )
             )
 
-        if motion_generation_mode == "text_only":
-            logger.info(
-                "WIRING motion_plan turn_id=%s route=text_only inline_anim_detected=%s",
-                turn_id or "",
-                inline_anim_detected,
-            )
-        elif motion_generation_mode == "split_after_reply":
+        if motion_generation_mode == "split_after_reply":
             logger.info(
                 "WIRING motion_plan turn_id=%s inline_anim_detected=%s route=split_after_reply",
                 turn_id or "",
@@ -242,13 +241,26 @@ class TurnCoordinator:
             )
 
         inline_dispatched = False
-        if motion_generation_mode == "inline_first" and isinstance(inline_payload, dict):
+        platform_motion_dispatched = await self._broadcast_platform_motion_client_objects(
+            platform_extras=platform_extras_dict,
+            turn_id=turn_id,
+            message_id=segment_message_id,
+        )
+        if platform_motion_dispatched:
+            inline_dispatched = True
+
+        if (
+            motion_generation_mode == "inline_first"
+            and not inline_dispatched
+            and isinstance(inline_payload, dict)
+        ):
             inline_mode_resolved = str(inline_mode or "inline").strip() or "inline"
             inline_dispatched = await self.broadcast_motion_payload(
                 motion_payload=inline_payload,
                 mode=inline_mode_resolved,
                 source=_resolve_inline_motion_source(inline_payload),
                 turn_id=turn_id,
+                message_id=segment_message_id,
             )
             if not inline_dispatched:
                 logger.warning(
@@ -286,6 +298,7 @@ class TurnCoordinator:
                     session_id=session_id,
                     turn_id=turn_id,
                     orchestration_id=orchestration_id,
+                    message_id=segment_message_id,
                     audio_url=audio_url,
                     text=reply_text,
                     speaker_name=self.speaker_name,
@@ -589,6 +602,7 @@ class TurnCoordinator:
         mode: str = "preview",
         source: str = "engine.motion_payload",
         turn_id: str | None = None,
+        message_id: str | None = None,
     ) -> bool:
         if not isinstance(motion_payload, dict):
             return False
@@ -617,6 +631,7 @@ class TurnCoordinator:
                 session_id=self.session_state.client_uid,
                 turn_id=resolved_turn_id,
                 orchestration_id=getattr(self.session_state, "current_orchestration_id", None),
+                message_id=message_id,
                 source=SOURCE_ENGINE,
                 payload=payload,
             )
@@ -640,6 +655,33 @@ class TurnCoordinator:
             )
         return sent
 
+    async def _broadcast_platform_motion_client_objects(
+        self,
+        *,
+        platform_extras: dict[str, Any],
+        turn_id: str | None,
+        message_id: str,
+    ) -> bool:
+        dispatched = False
+        for motion_object in _iter_platform_motion_client_objects(platform_extras):
+            motion_payload = motion_object.get("motion_payload")
+            if not isinstance(motion_payload, dict):
+                motion_payload = motion_object.get("intent")
+            if not isinstance(motion_payload, dict):
+                motion_payload = motion_object.get("plan")
+            if not isinstance(motion_payload, dict):
+                continue
+
+            sent = await self.broadcast_motion_payload(
+                motion_payload=motion_payload,
+                mode=str(motion_object.get("mode") or "preview"),
+                source=str(motion_object.get("source") or "platform_extras"),
+                turn_id=turn_id,
+                message_id=message_id,
+            )
+            dispatched = dispatched or sent
+        return dispatched
+
     def schedule_motion_after_reply(
         self,
         *,
@@ -648,9 +690,6 @@ class TurnCoordinator:
         source: str = "reply_final",
     ) -> bool:
         if self._generate_realtime_motion_plan is None:
-            return False
-
-        if _resolve_motion_generation_mode(self.runtime_state) == "text_only":
             return False
 
         normalized_assistant_text = (assistant_text or "").strip()
@@ -886,6 +925,38 @@ class TurnCoordinator:
         return max((end_value - start_value) * 1000.0, 0.0)
 
 
+def _resolve_platform_segment_message_id(platform_extras: dict[str, Any]) -> str:
+    for key in ("visible_message_id", "composite_message_id", "message_id"):
+        value = platform_extras.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return uuid4().hex
+
+
+def _iter_platform_motion_client_objects(
+    platform_extras: dict[str, Any],
+) -> list[dict[str, Any]]:
+    client_objects = platform_extras.get("client_objects")
+    if not isinstance(client_objects, list):
+        return []
+
+    motion_objects: list[dict[str, Any]] = []
+    for item in client_objects:
+        if not isinstance(item, dict):
+            continue
+        object_type = str(item.get("type") or "").strip()
+        if object_type not in {
+            "ag99live.motion_payload",
+            "engine.motion_intent",
+            "engine.motion_plan",
+            "motion_intent",
+            "motion_plan",
+        }:
+            continue
+        motion_objects.append(item)
+    return motion_objects
+
+
 def _iter_message_chain(message_chain) -> list[Any]:
     if message_chain is None:
         return []
@@ -1105,7 +1176,7 @@ def _resolve_motion_generation_mode(runtime_state: Any) -> str:
     if runtime_state is None:
         return "split_after_reply"
     mode = str(getattr(runtime_state, "motion_generation_mode", "split_after_reply") or "").strip()
-    if mode in {"inline_first", "split_after_reply", "text_only"}:
+    if mode in {"inline_first", "split_after_reply"}:
         return mode
     return "split_after_reply"
 

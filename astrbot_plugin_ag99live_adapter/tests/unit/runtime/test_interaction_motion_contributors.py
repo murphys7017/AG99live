@@ -265,17 +265,92 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     capability = next(item for item in extensions if item.mount == "capability")
     runtime = next(item for item in extensions if item.mount == "context")
     assert capability.value["configured_generation_mode"] == "inline_first"
-    assert capability.value["profile_available"] is True
     assert capability.value["semantic_profile"]["profile_id"] == "pet.semantic.v1"
     prompt_axis_ids = [
         item["id"] for item in capability.value["semantic_profile"]["prompt_axes"]
     ]
     assert prompt_axis_ids == ["head_yaw", "eye_open_left"]
-    assert runtime.value["interaction_turn_id"] == "interaction-turn"
-    assert runtime.value["event_frontend_turn_id"] == "front-turn"
-    assert runtime.value["event_frontend_orchestration_id"] == "raw-orch"
-    assert runtime.value["active_frontend_turn_id"] == "session-turn"
-    assert runtime.value["active_frontend_orchestration_id"] == "session-orch"
+    assert (
+        capability.value["plugin_hints_format"]["ag99live_motion"]["axes"]["head_yaw"]["value"]
+        == 50
+    )
+    assert runtime.value["configured_generation_mode"] == "inline_first"
+
+
+def test_plugin_hints_motion_payload_uses_profile_axis_value_range(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event(mode="inline_first")
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "mode": "expressive",
+                "emotion_label": "playful",
+                "duration_hint_ms": 1200,
+                "axes": {
+                    "head_yaw": {"value": 0.5},
+                    "eye_open_left": {"value": 72},
+                    "debug_tail": {"value": 100},
+                    "unknown_axis": {"value": 60},
+                },
+            }
+        },
+    )
+
+    payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
+
+    assert payload is not None
+    assert payload["axes"]["head_yaw"]["value"] == 50
+    assert payload["axes"]["eye_open_left"]["value"] == 72
+    assert "debug_tail" not in payload["axes"]
+    assert "unknown_axis" not in payload["axes"]
+
+
+def test_result_contributor_returns_plugin_hint_motion_as_client_object(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(mode="inline_first", raw_turn_id="raw-turn")
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "mode": "expressive",
+                "emotion_label": "happy",
+                "axes": {"head_yaw": {"value": 50}},
+            }
+        },
+    )
+    view = _build_view(
+        phase="immediate",
+        route_mode="self_reply",
+        final_result="你好呀",
+        immediate_reply="你好呀",
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == []
+    assert len(contribution.client_objects) == 1
+    client_object = contribution.client_objects[0]
+    assert client_object["type"] == "ag99live.motion_payload"
+    assert client_object["source"] == "plugin_hints"
+    assert client_object["motion_payload"]["schema_version"] == "engine.motion_intent.v2"
+    assert (
+        contribution.metadata["ag99live_motion_schedule"]["reason"]
+        == "plugin_hints_motion_client_object"
+    )
 
 
 def test_result_contributor_schedules_motion_for_immediate_reply(
@@ -395,7 +470,7 @@ def test_result_contributor_skips_immediate_phase_for_hybrid_reply(
     )
 
 
-def test_result_contributor_uses_event_turn_state_decision_when_view_decision_missing(
+def test_result_contributor_uses_event_turn_state_reply_plan_when_view_plan_missing(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -429,12 +504,12 @@ def test_result_contributor_uses_event_turn_state_decision_when_view_decision_mi
         }
     ]
     metadata = contribution.metadata["ag99live_motion_schedule"]
-    assert metadata["decision_source"] == "event_turn_state"
-    assert metadata["decision_route_mode"] == "self_reply"
+    assert metadata["reply_plan_source"] == "event_turn_state"
+    assert metadata["reply_plan_route_mode"] == "self_reply"
     assert metadata["reason"] == "scheduled"
 
 
-def test_result_contributor_does_not_silently_schedule_immediate_phase_without_decision(
+def test_result_contributor_does_not_silently_schedule_immediate_phase_without_reply_plan(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -456,7 +531,7 @@ def test_result_contributor_does_not_silently_schedule_immediate_phase_without_d
     assert scheduled_calls == []
     assert (
         contribution.metadata["ag99live_motion_schedule"]["reason"]
-        == "immediate_phase_decision_unresolved"
+        == "immediate_phase_reply_plan_unresolved"
     )
 
 

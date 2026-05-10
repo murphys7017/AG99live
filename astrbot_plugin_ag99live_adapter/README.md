@@ -59,7 +59,7 @@ astrbot_plugin_ag99live_adapter/
 
 ## 关键配置（`_conf_schema.json`）
 
-- `motion_generation_mode`：动作生成链路，默认 `inline_first`；可选 `split_after_reply` 或 `text_only`。
+- `motion_generation_mode`：动作生成链路，默认 `inline_first`；可选 `split_after_reply`。
 - `enable_inline_motion_contract`：`inline_first` 模式下是否启用主请求内联动作契约。
 - `enable_realtime_motion_plan`：是否启用回复后实时动作生成；在 `split_after_reply` 中是主链路，在 `inline_first` 中是兜底。
 - `motion_analysis_provider_id`：动作语义分析模型 Provider。

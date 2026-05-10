@@ -35,6 +35,25 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         )
         await super().send(message)
 
+    async def send_interaction_message(
+        self,
+        message,
+        *,
+        platform_extras: dict[str, Any] | None = None,
+        record_send_operation: bool = True,
+    ) -> None:
+        previous_has_send_oper = self._has_send_oper
+        await self.adapter.emit_message_chain(
+            message_chain=message,
+            unified_msg_origin=self.unified_msg_origin,
+            raw_reply_text_override=str(self.get_extra("ag99live_raw_reply_text", "") or "").strip()
+            or None,
+            platform_extras=platform_extras,
+        )
+        await super().send(message)
+        if not record_send_operation:
+            self._has_send_oper = previous_has_send_oper
+
     def _attach_prompt_annotations(self, *, message_obj: Any) -> None:
         annotations: dict[str, dict[str, str]] = {
             INPUT_TEXT_ANNOTATION_KEY: {

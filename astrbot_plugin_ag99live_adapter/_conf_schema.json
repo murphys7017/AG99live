@@ -74,13 +74,12 @@
     "default": 96
   },
   "motion_generation_mode": {
-    "description": "动作生成链路。inline_first：向主模型注入 `<@anim>` 契约并优先解析内联动作；split_after_reply：主模型只回复文本，回复完成后用动作模型生成 Live2D 参数；text_only：不生成动作。",
+    "description": "动作生成链路。inline_first：向主模型注入 `<@anim>` 契约并优先解析内联动作；split_after_reply：主模型只回复文本，回复完成后用动作模型生成 Live2D 参数。",
     "type": "string",
     "default": "inline_first",
     "options": [
       "split_after_reply",
-      "inline_first",
-      "text_only"
+      "inline_first"
     ]
   },
   "enable_inline_motion_contract": {

@@ -304,6 +304,7 @@ class OLVPetPlatformAdapter(Platform):
         inline_base_expression: str | None = None,
         inline_motion_id: str | None = None,
         raw_reply_text_override: str | None = None,
+        platform_extras: dict[str, Any] | None = None,
     ) -> None:
         await self.turn_coordinator.emit_message_chain(
             message_chain=message_chain,
@@ -311,6 +312,7 @@ class OLVPetPlatformAdapter(Platform):
             inline_base_expression=inline_base_expression,
             inline_motion_id=inline_motion_id,
             raw_reply_text_override=raw_reply_text_override,
+            platform_extras=platform_extras,
         )
 
     def _refresh_runtime_settings(self) -> None:
