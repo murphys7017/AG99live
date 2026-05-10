@@ -5,6 +5,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star
 
+from .middleware import register_ag99live_interaction_contributors
 from .motion.output_sanitizer import (
     contains_hidden_output_markup,
     sanitize_assistant_output_text,
@@ -25,6 +26,8 @@ class MyPlugin(Star):
 
         # Import solely for side effect: the class decorator registers the adapter.
         from .platform_adapter import OLVPetPlatformAdapter  # noqa: F401
+
+        register_ag99live_interaction_contributors(context)
 
     @filter.on_llm_response()
     async def schedule_split_motion_after_llm_response(

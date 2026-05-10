@@ -1,0 +1,483 @@
+from __future__ import annotations
+
+import asyncio
+import importlib
+import sys
+import types
+
+
+def _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
+    install_fake_astrbot()
+
+    prompt_module = types.ModuleType("astrbot.core.prompt")
+
+    class PromptExtension:
+        def __init__(
+            self,
+            *,
+            plugin_id: str,
+            mount: str,
+            title: str | None = None,
+            value=None,
+            value_kind: str = "mapping",
+            order: int = 100,
+            meta: dict | None = None,
+        ) -> None:
+            self.plugin_id = plugin_id
+            self.mount = mount
+            self.title = title
+            self.value = value
+            self.value_kind = value_kind
+            self.order = order
+            self.meta = meta or {}
+
+    prompt_module.PromptExtension = PromptExtension
+    monkeypatch.setitem(sys.modules, "astrbot.core.prompt", prompt_module)
+
+    interaction_module = types.ModuleType("astrbot.core.interaction")
+
+    class InteractionResultContribution:
+        def __init__(
+            self,
+            *,
+            plugin_id: str,
+            platform_extras: dict | None = None,
+            client_objects: list | None = None,
+            final_text_override: str | None = None,
+            metadata: dict | None = None,
+            priority: int = 100,
+        ) -> None:
+            self.plugin_id = plugin_id
+            self.platform_extras = platform_extras or {}
+            self.client_objects = client_objects or []
+            self.final_text_override = final_text_override
+            self.metadata = metadata or {}
+            self.priority = priority
+
+    interaction_module.InteractionResultContribution = InteractionResultContribution
+    interaction_module.get_interaction_decision = (
+        lambda event: event.get_extra("_interaction_decision", None)
+    )
+    monkeypatch.setitem(sys.modules, "astrbot.core.interaction", interaction_module)
+
+
+def _load_interaction_motion_module():
+    module = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion"
+    )
+    return importlib.reload(module)
+
+
+def _build_semantic_model_info() -> dict:
+    return {
+        "selected_model": "pet",
+        "models": [
+            {
+                "name": "pet",
+                "semantic_axis_profile": {
+                    "schema_version": "ag99.semantic_axis_profile.v1",
+                    "profile_id": "pet.semantic.v1",
+                    "model_id": "pet",
+                    "source_hash": "hash",
+                    "last_scanned_hash": "hash",
+                    "revision": 2,
+                    "status": "user_modified",
+                    "user_modified": True,
+                    "generated_at": "2026-04-26T00:00:00+00:00",
+                    "updated_at": "2026-04-26T00:00:00+00:00",
+                    "axes": [
+                        {
+                            "id": "head_yaw",
+                            "label": "Head Yaw",
+                            "description": "turn head left/right",
+                            "semantic_group": "head",
+                            "control_role": "primary",
+                            "neutral": 50,
+                            "value_range": [0, 100],
+                            "soft_range": [42, 58],
+                            "strong_range": [30, 70],
+                            "positive_semantics": ["turn right"],
+                            "negative_semantics": ["turn left"],
+                            "usage_notes": "Use for attention direction.",
+                            "parameter_bindings": [],
+                        },
+                        {
+                            "id": "eye_open_left",
+                            "label": "Eye Open Left",
+                            "description": "left eye openness",
+                            "semantic_group": "eye",
+                            "control_role": "hint",
+                            "neutral": 50,
+                            "value_range": [0, 100],
+                            "soft_range": [42, 58],
+                            "strong_range": [30, 70],
+                            "positive_semantics": ["open"],
+                            "negative_semantics": ["close"],
+                            "usage_notes": "Use for wink details.",
+                            "parameter_bindings": [],
+                        },
+                        {
+                            "id": "debug_tail",
+                            "label": "Tail",
+                            "description": "debug only",
+                            "semantic_group": "debug",
+                            "control_role": "debug",
+                            "neutral": 50,
+                            "value_range": [0, 100],
+                            "soft_range": [45, 55],
+                            "strong_range": [35, 65],
+                            "positive_semantics": ["up"],
+                            "negative_semantics": ["down"],
+                            "usage_notes": "Do not expose.",
+                            "parameter_bindings": [],
+                        },
+                    ],
+                    "couplings": [],
+                },
+            }
+        ],
+    }
+
+
+def _build_runtime_state(*, mode: str = "inline_first"):
+    return type(
+        "RuntimeStateStub",
+        (),
+        {
+            "motion_generation_mode": mode,
+            "enable_inline_motion_contract": True,
+            "enable_realtime_motion_plan": True,
+            "motion_prompt_instruction": "Use readable exaggerated head and smile motion.",
+            "model_info": _build_semantic_model_info(),
+        },
+    )()
+
+
+def _build_event(*, mode: str = "inline_first", raw_turn_id: str = "front-turn"):
+    scheduled_calls: list[dict[str, object]] = []
+    runtime_state = _build_runtime_state(mode=mode)
+
+    def schedule_motion_after_reply(*, assistant_text: str, origin_turn_id: str | None = None, source: str = "reply_final"):
+        scheduled_calls.append(
+            {
+                "assistant_text": assistant_text,
+                "origin_turn_id": origin_turn_id,
+                "source": source,
+            }
+        )
+        return True
+
+    turn_coordinator = type(
+        "TurnCoordinatorStub",
+        (),
+        {
+            "runtime_state": runtime_state,
+            "session_state": type(
+                "SessionStateStub",
+                (),
+                {
+                    "current_turn_id": "session-turn",
+                    "current_orchestration_id": "session-orch",
+                },
+            )(),
+            "schedule_motion_after_reply": staticmethod(schedule_motion_after_reply),
+        },
+    )()
+
+    adapter = type("AdapterStub", (), {"turn_coordinator": turn_coordinator})()
+
+    class EventStub:
+        def __init__(self) -> None:
+            self.adapter = adapter
+            self.message_obj = type(
+                "MessageObjectStub",
+                (),
+                {
+                    "raw_message": {
+                        "turn_id": raw_turn_id,
+                        "orchestration_id": "raw-orch",
+                    }
+                },
+            )()
+            self._extras: dict[str, object] = {}
+
+        def get_platform_id(self) -> str:
+            return "olv_pet_adapter"
+
+        def get_platform_name(self) -> str:
+            return "olv_pet_adapter"
+
+        def get_extra(self, key: str, default=None):
+            return self._extras.get(key, default)
+
+        def set_extra(self, key: str, value: object) -> None:
+            self._extras[key] = value
+
+    return EventStub(), scheduled_calls
+
+
+def _build_view(
+    *,
+    phase: str,
+    route_mode: str | None = "self_reply",
+    should_emit_immediate_reply: bool | None = None,
+    final_result: str | None = None,
+    core_result: str | None = None,
+    immediate_reply: str | None = None,
+):
+    decision = None
+    if route_mode is not None or should_emit_immediate_reply is not None:
+        decision = {}
+        if route_mode is not None:
+            decision["route_mode"] = route_mode
+        if should_emit_immediate_reply is not None:
+            decision["should_emit_immediate_reply"] = should_emit_immediate_reply
+    return type(
+        "ResultViewStub",
+        (),
+        {
+            "turn_id": "interaction-turn",
+            "session_id": "olv_pet_adapter:friend_message:desktop-client",
+            "decision": decision,
+            "final_result": final_result,
+            "core_result": core_result,
+            "immediate_reply": immediate_reply,
+            "metadata": {"phase": phase},
+        },
+    )()
+
+
+def test_prompt_contributor_returns_capability_and_runtime_extensions(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionPromptContributor()
+    event, _scheduled_calls = _build_event(mode="inline_first")
+    view = _build_view(phase="decision", route_mode="delegate_to_core")
+
+    extensions = asyncio.run(contributor.collect(event, None, view))
+
+    assert isinstance(extensions, list)
+    assert len(extensions) == 2
+    capability = next(item for item in extensions if item.mount == "capability")
+    runtime = next(item for item in extensions if item.mount == "context")
+    assert capability.value["configured_generation_mode"] == "inline_first"
+    assert capability.value["profile_available"] is True
+    assert capability.value["semantic_profile"]["profile_id"] == "pet.semantic.v1"
+    prompt_axis_ids = [
+        item["id"] for item in capability.value["semantic_profile"]["prompt_axes"]
+    ]
+    assert prompt_axis_ids == ["head_yaw", "eye_open_left"]
+    assert runtime.value["interaction_turn_id"] == "interaction-turn"
+    assert runtime.value["event_frontend_turn_id"] == "front-turn"
+    assert runtime.value["event_frontend_orchestration_id"] == "raw-orch"
+    assert runtime.value["active_frontend_turn_id"] == "session-turn"
+    assert runtime.value["active_frontend_orchestration_id"] == "session-orch"
+
+
+def test_result_contributor_schedules_motion_for_immediate_reply(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(mode="inline_first", raw_turn_id="raw-turn")
+    view = _build_view(
+        phase="immediate",
+        final_result='你好呀 <@anim {"mode":"inline"}>',
+        immediate_reply='你好呀 <@anim {"mode":"inline"}>',
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == [
+        {
+            "assistant_text": "你好呀",
+            "origin_turn_id": "raw-turn",
+            "source": "interaction_result_immediate",
+        }
+    ]
+    assert (
+        contribution.metadata["ag99live_motion_schedule"]["reason"] == "scheduled"
+    )
+    assert (
+        contribution.metadata["ag99live_motion_schedule"]["scheduled_frontend_turn_id"]
+        == "raw-turn"
+    )
+    assert (
+        contribution.metadata["ag99live_motion_schedule"]["active_frontend_turn_id"]
+        == "session-turn"
+    )
+
+
+def test_result_contributor_uses_final_phase_as_split_mode_fallback(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(mode="split_after_reply", raw_turn_id="raw-turn")
+    view = _build_view(
+        phase="final",
+        route_mode="delegate_to_core",
+        final_result="最终回复文本",
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == [
+        {
+            "assistant_text": "最终回复文本",
+            "origin_turn_id": "raw-turn",
+            "source": "interaction_result_final_fallback",
+        }
+    ]
+    assert event.get_extra("ag99live_split_motion_scheduled") is True
+
+
+def test_result_contributor_skips_final_phase_in_inline_mode(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(mode="inline_first", raw_turn_id="raw-turn")
+    view = _build_view(
+        phase="final",
+        route_mode="delegate_to_core",
+        final_result="最终回复文本",
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == []
+    assert (
+        contribution.metadata["ag99live_motion_schedule"]["reason"]
+        == "final_phase_managed_by_primary_reply_chain"
+    )
+
+
+def test_result_contributor_skips_immediate_phase_for_hybrid_reply(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(mode="split_after_reply", raw_turn_id="raw-turn")
+    view = _build_view(
+        phase="immediate",
+        route_mode="hybrid",
+        final_result="先给你一句过渡回复",
+        immediate_reply="先给你一句过渡回复",
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == []
+    assert (
+        contribution.metadata["ag99live_motion_schedule"]["reason"]
+        == "immediate_phase_waits_for_core_reply"
+    )
+
+
+def test_result_contributor_uses_event_turn_state_decision_when_view_decision_missing(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(mode="inline_first", raw_turn_id="raw-turn")
+    event.set_extra(
+        "_interaction_decision",
+        {
+            "route_mode": "self_reply",
+            "should_emit_immediate_reply": True,
+        },
+    )
+    view = _build_view(
+        phase="immediate",
+        route_mode=None,
+        final_result="你好呀",
+        immediate_reply="你好呀",
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == [
+        {
+            "assistant_text": "你好呀",
+            "origin_turn_id": "raw-turn",
+            "source": "interaction_result_immediate",
+        }
+    ]
+    metadata = contribution.metadata["ag99live_motion_schedule"]
+    assert metadata["decision_source"] == "event_turn_state"
+    assert metadata["decision_route_mode"] == "self_reply"
+    assert metadata["reason"] == "scheduled"
+
+
+def test_result_contributor_does_not_silently_schedule_immediate_phase_without_decision(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(mode="inline_first", raw_turn_id="raw-turn")
+    view = _build_view(
+        phase="immediate",
+        route_mode=None,
+        final_result="你好呀",
+        immediate_reply="你好呀",
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == []
+    assert (
+        contribution.metadata["ag99live_motion_schedule"]["reason"]
+        == "immediate_phase_decision_unresolved"
+    )
+
+
+def test_register_interaction_contributors_uses_available_hooks(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    prompt_contributors: list[object] = []
+    result_contributors: list[object] = []
+
+    class ContextStub:
+        def register_interaction_prompt_contributor(self, contributor) -> None:
+            prompt_contributors.append(contributor)
+
+        def register_interaction_result_contributor(self, contributor) -> None:
+            result_contributors.append(contributor)
+
+    module.register_ag99live_interaction_contributors(ContextStub())
+
+    assert len(prompt_contributors) == 1
+    assert len(result_contributors) == 1
