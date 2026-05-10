@@ -39,8 +39,8 @@ export function usePetDesktopController() {
     adapter,
     motionPlayer,
     selectedModel,
-    onAudioPlaybackStarted: (turnId) => {
-      modelEngine.notifyAudioPlaybackStarted(turnId);
+    onAudioPlaybackStarted: (turnId, messageId) => {
+      modelEngine.notifyAudioPlaybackStarted(turnId, messageId);
     },
     initialMotionPlaybackRecords,
   });
@@ -52,6 +52,7 @@ export function usePetDesktopController() {
     getCurrentTurnId: () => adapter.state.currentTurnId,
     getCurrentOrchestrationId: () => adapter.state.currentOrchestrationId,
     getAudioPlaybackInfo: () => ({
+      messageId: adapter.state.audioPlaybackStartedMessageId,
       turnId: adapter.state.audioPlaybackStartedTurnId,
       orchestrationId: adapter.state.audioPlaybackStartedOrchestrationId,
       startedAtMs: adapter.state.audioPlaybackStartedAtMs,

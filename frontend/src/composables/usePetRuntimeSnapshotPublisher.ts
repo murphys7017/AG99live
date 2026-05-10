@@ -12,6 +12,7 @@ import type { useAdapterConnection } from "./useAdapterConnection";
 import type { useDesktopBridge } from "./useDesktopBridge";
 import type { useModelSync } from "./useModelSync";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
+import { getActivePlaybackSegment } from "../turn-playback/selectors";
 
 type AdapterConnection = ReturnType<typeof useAdapterConnection>;
 type DesktopBridge = ReturnType<typeof useDesktopBridge>;
@@ -85,6 +86,29 @@ function createTrailingDebounce(): {
   return { schedule, flush, cancel };
 }
 
+function getActiveSegmentSnapshot(
+  sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>,
+) {
+  const activeSession = sessionStore.getActiveSession();
+  if (!activeSession) {
+    return null;
+  }
+  const segment =
+    getActivePlaybackSegment(activeSession)
+    ?? activeSession.segmentOrder
+      .map((segmentId) => activeSession.segments.get(segmentId))
+      .find(Boolean)
+    ?? null;
+  return segment
+    ? {
+        textReady: segment.text.content !== null,
+        audioTerminal: segment.audio.terminal,
+        motionStarted: segment.motion.started,
+        motionCompleted: segment.motion.completed,
+      }
+    : null;
+}
+
 export function usePetRuntimeSnapshotPublisher(
   options: PetRuntimeSnapshotPublisherOptions,
 ): { publishModelProjectionSnapshot: () => void } {
@@ -127,6 +151,7 @@ export function usePetRuntimeSnapshotPublisher(
 
   watch(
     () => [
+      getActiveSegmentSnapshot(options.sessionStore),
       options.ambientMotionEnabled.value,
       options.adapter.state.address,
       options.adapter.state.desktopScreenshotOnSendEnabled,
@@ -156,14 +181,11 @@ export function usePetRuntimeSnapshotPublisher(
       options.motionPlaybackRecords.value,
       options.sessionStore.state.activeSessionId,
       options.sessionStore.getActiveSession()?.phase,
-      options.sessionStore.getActiveSession()?.text.content,
-      options.sessionStore.getActiveSession()?.audio.terminal,
-      options.sessionStore.getActiveSession()?.motion.started,
-      options.sessionStore.getActiveSession()?.motion.completed,
       options.sessionStore.getActiveSession()?.backend.turnFinished,
     ],
     () => {
       snapshotDebounce.schedule(() => {
+        const activeSegmentSnapshot = getActiveSegmentSnapshot(options.sessionStore);
         options.bridge.publishSnapshot({
           adapterAddress: options.adapter.state.address,
           desktopScreenshotOnSendEnabled: options.adapter.state.desktopScreenshotOnSendEnabled,
@@ -201,10 +223,14 @@ export function usePetRuntimeSnapshotPublisher(
           backendHistoryStatusMessage: options.adapter.state.backendHistoryStatusMessage,
           activeSessionId: options.sessionStore.state.activeSessionId,
           activeSessionPhase: options.sessionStore.getActiveSession()?.phase ?? "",
-          activeSessionTextReady: options.sessionStore.getActiveSession()?.text.content !== null,
-          activeSessionAudioTerminal: options.sessionStore.getActiveSession()?.audio.terminal ?? "idle",
-          activeSessionMotionStarted: options.sessionStore.getActiveSession()?.motion.started ?? false,
-          activeSessionMotionCompleted: options.sessionStore.getActiveSession()?.motion.completed ?? false,
+          activeSessionTextReady:
+            activeSegmentSnapshot?.textReady ?? false,
+          activeSessionAudioTerminal:
+            activeSegmentSnapshot?.audioTerminal ?? "idle",
+          activeSessionMotionStarted:
+            activeSegmentSnapshot?.motionStarted ?? false,
+          activeSessionMotionCompleted:
+            activeSegmentSnapshot?.motionCompleted ?? false,
           activeSessionTurnFinished: options.sessionStore.getActiveSession()?.backend.turnFinished ?? false,
         });
       });

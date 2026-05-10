@@ -59,6 +59,7 @@ export interface TurnPlaybackSessionText {
 export interface TurnPlaybackSessionAudio {
   url: string | null;
   receivedAtMs: number | null;
+  released: boolean;
   started: boolean;
   startedAtMs: number | null;
   durationMs: number | null;
@@ -82,13 +83,22 @@ export interface TurnPlaybackSessionBackend {
   reason: string;
 }
 
+export interface TurnPlaybackSegment {
+  id: string;
+  messageId: string;
+  turnId: string | null;
+  orchestrationId: string | null;
+  text: TurnPlaybackSessionText;
+  audio: TurnPlaybackSessionAudio;
+  motion: TurnPlaybackSessionMotion;
+}
+
 export interface TurnPlaybackSession {
   id: string;
   turnId: string | null;
   interrupted: boolean;
-  text: TurnPlaybackSessionText;
-  audio: TurnPlaybackSessionAudio;
-  motion: TurnPlaybackSessionMotion;
+  segments: Map<string, TurnPlaybackSegment>;
+  segmentOrder: string[];
   backend: TurnPlaybackSessionBackend;
   phase: TurnPlaybackPhase;
 }
@@ -135,6 +145,56 @@ export function orchestrationIdFromSessionId(sessionId: string): string | null {
 
 // ── Constructors ───────────────────────────────────────────────────
 
+export function createEmptyTextState(): TurnPlaybackSessionText {
+  return {
+    content: null,
+    receivedAtMs: null,
+    receiveMode: "replace",
+    released: false,
+    delivered: false,
+  };
+}
+
+export function createEmptyAudioState(): TurnPlaybackSessionAudio {
+  return {
+    url: null,
+    receivedAtMs: null,
+    released: false,
+    started: false,
+    startedAtMs: null,
+    durationMs: null,
+    terminal: "idle",
+    reason: "",
+  };
+}
+
+export function createEmptyMotionState(): TurnPlaybackSessionMotion {
+  return {
+    payload: null,
+    receivedAtMs: null,
+    released: false,
+    started: false,
+    completed: false,
+    absent: false,
+  };
+}
+
+export function createTurnPlaybackSegment(
+  messageId: string,
+  orchestrationId: string | null,
+  turnId: string | null,
+): TurnPlaybackSegment {
+  return {
+    id: messageId,
+    messageId,
+    turnId,
+    orchestrationId,
+    text: createEmptyTextState(),
+    audio: createEmptyAudioState(),
+    motion: createEmptyMotionState(),
+  };
+}
+
 export function createTurnPlaybackSession(
   orchestrationId: string | null,
   turnId: string | null = null,
@@ -145,30 +205,8 @@ export function createTurnPlaybackSession(
     id: sessionId,
     turnId,
     interrupted: false,
-    text: {
-      content: null,
-      receivedAtMs: null,
-      receiveMode: "replace",
-      released: false,
-      delivered: false,
-    },
-    audio: {
-      url: null,
-      receivedAtMs: null,
-      started: false,
-      startedAtMs: null,
-      durationMs: null,
-      terminal: "idle",
-      reason: "",
-    },
-    motion: {
-      payload: null,
-      receivedAtMs: null,
-      released: false,
-      started: false,
-      completed: false,
-      absent: false,
-    },
+    segments: new Map(),
+    segmentOrder: [],
     backend: {
       turnStarted: false,
       turnFinished: false,
@@ -181,10 +219,20 @@ export function createTurnPlaybackSession(
 
 // ── Utilities ──────────────────────────────────────────────────────
 
-export function isSessionReadyForRelease(session: TurnPlaybackSession): boolean {
-  return session.text.content !== null && session.phase !== "failed";
-}
-
 export function isSessionPlaybackComplete(session: TurnPlaybackSession): boolean {
   return session.phase === "completed";
+}
+
+export function isSegmentLocallySettled(segment: TurnPlaybackSegment): boolean {
+  if (!segment.text.delivered) {
+    return false;
+  }
+  const terminal = segment.audio.terminal;
+  if (terminal !== "completed" && terminal !== "failed" && terminal !== "absent") {
+    return false;
+  }
+  if (!segment.motion.absent && !segment.motion.completed) {
+    return false;
+  }
+  return true;
 }

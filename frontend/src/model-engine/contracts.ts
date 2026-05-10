@@ -72,12 +72,14 @@ export interface CompileResult {
 }
 
 export interface InboundPayloadContext {
+  messageId: string;
   turnId: string | null;
   orchestrationId?: string | null;
   receivedAtMs: number;
 }
 
 export interface AudioPlaybackInfo {
+  messageId: string | null;
   turnId: string | null;
   orchestrationId?: string | null;
   startedAtMs: number;
@@ -93,6 +95,7 @@ export interface PlayPlanOptions {
 export interface ModelEnginePlanStartedEvent {
   plan: MotionPlanPayload;
   model: ModelSummary | null;
+  messageId: string;
   turnId: string | null;
   orchestrationId: string | null;
   startReason: string;
@@ -124,22 +127,36 @@ export interface ModelEngineDependencies {
     getActiveSession: () => {
       id: string;
       turnId: string | null;
-      audio: {
-        started: boolean;
-        startedAtMs: number | null;
-        durationMs: number | null;
-      };
+      segmentOrder: string[];
+      segments: Map<string, {
+        messageId: string;
+        turnId: string | null;
+        orchestrationId: string | null;
+        audio: {
+          released: boolean;
+          started: boolean;
+          startedAtMs: number | null;
+          durationMs: number | null;
+        };
+      }>;
     } | undefined;
     getSessionById?: (
       sessionId: string | null,
     ) => {
       id: string;
       turnId: string | null;
-      audio: {
-        started: boolean;
-        startedAtMs: number | null;
-        durationMs: number | null;
-      };
+      segmentOrder: string[];
+      segments: Map<string, {
+        messageId: string;
+        turnId: string | null;
+        orchestrationId: string | null;
+        audio: {
+          released: boolean;
+          started: boolean;
+          startedAtMs: number | null;
+          durationMs: number | null;
+        };
+      }>;
     } | undefined;
   };
 }

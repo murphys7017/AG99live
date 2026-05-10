@@ -87,6 +87,21 @@ import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore.
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "not_requested";
+interface PendingAssistantTextItem {
+  text: string;
+  turnId: string | null;
+  orchestrationId: string | null;
+  messageId: string;
+  receivedAtMs: number;
+}
+
+interface PendingAudioItem {
+  audioUrl: string;
+  turnId: string | null;
+  orchestrationId: string | null;
+  messageId: string;
+  receivedAtMs: number;
+}
 
 const MAX_MIC_SOCKET_BUFFERED_AMOUNT = 512 * 1024;
 const state = reactive({
@@ -116,16 +131,11 @@ const state = reactive({
   inboundMotionPlanTurnId: null as string | null,
   inboundMotionPlanOrchestrationId: null as string | null,
   inboundMotionPlanReceivedAtMs: 0,
-  pendingAssistantText: "",
-  pendingAssistantTextTurnId: null as string | null,
-  pendingAssistantTextOrchestrationId: null as string | null,
-  pendingAssistantTextReceivedAtMs: 0,
-  pendingAudioUrl: "",
-  pendingAudioTurnId: null as string | null,
-  pendingAudioOrchestrationId: null as string | null,
-  pendingAudioReceivedAtMs: 0,
+  pendingAssistantTexts: new Map<string, PendingAssistantTextItem>(),
+  pendingAudios: new Map<string, PendingAudioItem>(),
   audioPlaybackStartedTurnId: null as string | null,
   audioPlaybackStartedOrchestrationId: null as string | null,
+  audioPlaybackStartedMessageId: null as string | null,
   audioPlaybackStartedAtMs: 0,
   audioPlaybackDurationMs: null as number | null,
   audioPlaybackTerminalState: "idle" as AudioPlaybackTerminalState,
@@ -157,9 +167,8 @@ const reportedProtocolWarnings = new Set<string>();
 
 let historyAdapter: ReturnType<typeof useAdapterHistory> | null = null;
 let motionTuningAdapter: ReturnType<typeof useAdapterMotionTuning> | null = null;
+let modelSyncAdapter: ReturnType<typeof useModelSync> | null = null;
 let sessionStore: ReturnType<typeof useTurnPlaybackSessionStore> | undefined;
-
-const { applyUnknownMessage, resetModelSyncState } = useModelSync();
 
 function buildMessageEnvelope<TPayload>(
   type: string,
@@ -203,11 +212,13 @@ const audioPlaybackCtx = {
           markAudioStarted: (
             orchestrationId: string | null,
             turnId: string | null,
+            messageId: string,
             startedAtMs?: number | null,
             durationMs?: number | null,
           ) => sessionStore?.markAudioStarted(
             orchestrationId,
             turnId,
+            messageId,
             startedAtMs,
             durationMs,
           ),
@@ -221,16 +232,26 @@ function markAudioPlaybackTerminal(
   turnId: string | null,
   orchestrationId: string | null,
   reason = "",
+  messageId: string | null = null,
 ): void {
   state.audioPlaybackTerminalState = terminalState;
   state.audioPlaybackTerminalTurnId = turnId;
   state.audioPlaybackTerminalOrchestrationId = orchestrationId;
   state.audioPlaybackTerminalReason = reason;
 
-  // Dual-write to session store: map old "not_requested" → new "absent"
+  if (!messageId) {
+    return;
+  }
+
   const sessionTerminal: "completed" | "failed" | "absent" =
     terminalState === "not_requested" ? "absent" : terminalState;
-  sessionStore?.markAudioTerminal(orchestrationId, turnId, sessionTerminal, reason);
+  sessionStore?.markAudioTerminal(
+    orchestrationId,
+    turnId,
+    sessionTerminal,
+    messageId,
+    reason,
+  );
 }
 
 function resetAudioPlaybackTerminal(): void {
@@ -464,16 +485,11 @@ function resetConnectionRuntimeState(): void {
   state.inboundMotionPlanTurnId = null;
   state.inboundMotionPlanOrchestrationId = null;
   state.inboundMotionPlanReceivedAtMs = 0;
-  state.pendingAssistantText = "";
-  state.pendingAssistantTextTurnId = null;
-  state.pendingAssistantTextOrchestrationId = null;
-  state.pendingAssistantTextReceivedAtMs = 0;
-  state.pendingAudioUrl = "";
-  state.pendingAudioTurnId = null;
-  state.pendingAudioOrchestrationId = null;
-  state.pendingAudioReceivedAtMs = 0;
+  state.pendingAssistantTexts.clear();
+  state.pendingAudios.clear();
   state.audioPlaybackStartedTurnId = null;
   state.audioPlaybackStartedOrchestrationId = null;
+  state.audioPlaybackStartedMessageId = null;
   state.audioPlaybackStartedAtMs = 0;
   state.audioPlaybackDurationMs = null;
   resetAudioPlaybackTerminal();
@@ -484,7 +500,7 @@ function resetConnectionRuntimeState(): void {
   state.turnFinishedSuccess = true;
   state.turnFinishedReason = "";
   state.latestSemanticAxisProfileSaveResult = null;
-  resetModelSyncState();
+  modelSyncAdapter?.resetModelSyncState();
 }
 
 async function toggleMicrophoneCapture(): Promise<boolean> {
@@ -615,7 +631,7 @@ async function dispatchInboundEvent(
       applyServerInfoMessage(event.envelope);
       return;
     case "model_sync":
-      applyUnknownMessage(
+      modelSyncAdapter?.applyUnknownMessage(
         rewriteModelSyncEnvelope(event.envelope),
       );
       state.statusMessage = "模型能力已同步。";
@@ -660,14 +676,8 @@ async function dispatchInboundEvent(
       sessionStore?.setActiveSession(state.currentOrchestrationId, state.currentTurnId);
       sessionStore?.markTurnStarted(state.currentOrchestrationId, state.currentTurnId);
       resetAudioPlaybackTerminal();
-      state.pendingAssistantText = "";
-      state.pendingAssistantTextTurnId = null;
-      state.pendingAssistantTextOrchestrationId = null;
-      state.pendingAssistantTextReceivedAtMs = 0;
-      state.pendingAudioUrl = "";
-      state.pendingAudioTurnId = null;
-      state.pendingAudioOrchestrationId = null;
-      state.pendingAudioReceivedAtMs = 0;
+      state.pendingAssistantTexts.clear();
+      state.pendingAudios.clear();
       state.assistantTextDeliveryTurnId = null;
       state.assistantTextDeliveryOrchestrationId = null;
       state.turnFinishedTurnId = null;
@@ -696,22 +706,26 @@ async function dispatchInboundEvent(
       void startMicrophoneCapture();
       return;
     case "synth_finished":
-      if (!state.isPlayingAudio && !state.pendingAudioUrl.trim()) {
-        markAudioPlaybackTerminal(
-          "not_requested",
-          event.turnId,
-          event.orchestrationId,
-          "synth_finished_without_audio_playback",
-        );
-      }
+      markMissingAudiosForTurn(
+        event.turnId,
+        event.orchestrationId,
+        "synth_finished_without_audio_playback",
+      );
       state.statusMessage =
-        state.isPlayingAudio || state.pendingAudioUrl.trim()
+        state.isPlayingAudio || hasPendingAudioForTurn(event.turnId, event.orchestrationId)
           ? "语音已准备同步播放。"
           : "语音合成已完成。";
       pushHistory("system", state.statusMessage);
       return;
     case "control_error":
       applyControlError(event.envelope);
+      return;
+    case "protocol_error":
+      reportProtocolError(
+        event.warningKey,
+        event.error.message,
+        event.envelope,
+      );
       return;
     case "engine_motion_payload": {
       const result = applyInboundMotionPayload({ state, pushHistory }, event.envelope);
@@ -724,6 +738,7 @@ async function dispatchInboundEvent(
           event.orchestrationId,
           event.turnId,
           normalized.payload,
+          event.messageId,
         );
       }
       return;
@@ -759,8 +774,15 @@ function applyOutputText(
       text,
       event.turnId,
       event.orchestrationId,
+      event.messageId,
     );
-    sessionStore?.markTextReceived(event.orchestrationId, event.turnId, text);
+    sessionStore?.markTextReceived(
+      event.orchestrationId,
+      event.turnId,
+      text,
+      event.messageId,
+      "replace",
+    );
   }
   state.lastError = "";
   state.statusMessage = text ? "已收到文本回复，等待同步播放。" : "已收到空文本回复。";
@@ -772,12 +794,24 @@ async function applyOutputAudio(
   state.currentTurnId = event.turnId;
   state.currentOrchestrationId = event.orchestrationId;
   if (event.text) {
-    queueAssistantTextForPlayback(
-      event.text,
-      event.turnId,
-      event.orchestrationId,
-    );
-    sessionStore?.markTextReceived(event.orchestrationId, event.turnId, event.text);
+    const existingText = sessionStore
+      ?.ensureSegment(event.orchestrationId, event.turnId, event.messageId)
+      .text.content;
+    if (!existingText) {
+      queueAssistantTextForPlayback(
+        event.text,
+        event.turnId,
+        event.orchestrationId,
+        event.messageId,
+      );
+      sessionStore?.markTextReceived(
+        event.orchestrationId,
+        event.turnId,
+        event.text,
+        event.messageId,
+        "replace",
+      );
+    }
   }
 
   if (!event.audioUrl) {
@@ -788,6 +822,7 @@ async function applyOutputAudio(
       event.turnId,
       event.orchestrationId,
       "missing_audio_url",
+      event.messageId,
     );
     return;
   }
@@ -797,8 +832,9 @@ async function applyOutputAudio(
     resolvedUrl,
     event.turnId,
     event.orchestrationId,
+    event.messageId,
   );
-  sessionStore?.markAudioReceived(event.orchestrationId, event.turnId, resolvedUrl);
+  sessionStore?.markAudioReceived(event.orchestrationId, event.turnId, resolvedUrl, event.messageId);
 }
 
 function applyOutputImage(envelope: ProtocolEnvelope<OutputImagePayload>): void {
@@ -831,14 +867,11 @@ function applyTurnFinished(
     state.turnFinishedSuccess,
     state.turnFinishedReason,
   );
-  if (state.audioPlaybackTerminalState === "idle" && !state.isPlayingAudio) {
-    markAudioPlaybackTerminal(
-      "not_requested",
-      state.turnFinishedTurnId,
-      state.turnFinishedOrchestrationId,
-      "turn_finished_without_audio_playback",
-    );
-  }
+  markMissingAudiosForTurn(
+    state.turnFinishedTurnId,
+    state.turnFinishedOrchestrationId,
+    "turn_finished_without_audio_playback",
+  );
 
   if (event.success) {
     state.statusMessage = "本轮对话已完成。";
@@ -952,39 +985,46 @@ function queueAssistantTextForPlayback(
   text: string,
   turnId: string | null,
   orchestrationId: string | null,
+  messageId: string,
 ): void {
-  state.pendingAssistantText = text;
-  state.pendingAssistantTextTurnId = turnId;
-  state.pendingAssistantTextOrchestrationId = orchestrationId;
-  state.pendingAssistantTextReceivedAtMs = performance.now();
+  state.pendingAssistantTexts.set(messageId, {
+    text,
+    turnId,
+    orchestrationId,
+    messageId,
+    receivedAtMs: performance.now(),
+  });
 }
 
 function releaseAssistantTextForPlayback(
+  messageId: string,
   turnId: string | null,
   orchestrationId: string | null,
 ): boolean {
-  const text = state.pendingAssistantText.trim();
+  const item = state.pendingAssistantTexts.get(messageId);
+  if (!item) {
+    return false;
+  }
+  const text = item.text.trim();
   if (!text) {
     return false;
   }
   if (!matchesPlaybackGroup(
-    state.pendingAssistantTextTurnId,
-    state.pendingAssistantTextOrchestrationId,
+    item.turnId,
+    item.orchestrationId,
     turnId,
     orchestrationId,
   )) {
     return false;
   }
 
-  const releasedTurnId = state.pendingAssistantTextTurnId ?? turnId;
-  const releasedOrchestrationId = state.pendingAssistantTextOrchestrationId ?? orchestrationId;
-  state.pendingAssistantText = "";
-  state.pendingAssistantTextTurnId = null;
-  state.pendingAssistantTextOrchestrationId = null;
+  const releasedTurnId = item.turnId ?? turnId;
+  const releasedOrchestrationId = item.orchestrationId ?? orchestrationId;
+  state.pendingAssistantTexts.delete(messageId);
   updateAssistantText(text, releasedTurnId);
   state.assistantTextDeliveryTurnId = releasedTurnId;
   state.assistantTextDeliveryOrchestrationId = releasedOrchestrationId;
-  sessionStore?.markTextDelivered(releasedOrchestrationId, releasedTurnId);
+  sessionStore?.markTextDelivered(releasedOrchestrationId, releasedTurnId, messageId);
   state.statusMessage = "文本回复已进入同步播放。";
   return true;
 }
@@ -993,11 +1033,15 @@ function queueAudioForPlayback(
   audioUrl: string,
   turnId: string | null,
   orchestrationId: string | null,
+  messageId: string,
 ): void {
-  state.pendingAudioUrl = audioUrl;
-  state.pendingAudioTurnId = turnId;
-  state.pendingAudioOrchestrationId = orchestrationId;
-  state.pendingAudioReceivedAtMs = performance.now();
+  state.pendingAudios.set(messageId, {
+    audioUrl,
+    turnId,
+    orchestrationId,
+    messageId,
+    receivedAtMs: performance.now(),
+  });
   state.statusMessage = "收到语音回复，等待同步播放。";
   pushHistory("system", state.statusMessage);
 }
@@ -1006,33 +1050,81 @@ async function playAudioAndAcknowledge(
   audioUrl: string,
   turnId: string | null,
   orchestrationId: string | null = state.currentOrchestrationId,
+  messageId: string,
 ): Promise<void> {
-  return playAudioAction(audioPlaybackCtx, audioUrl, turnId, orchestrationId);
+  return playAudioAction(audioPlaybackCtx, audioUrl, turnId, orchestrationId, messageId);
 }
 
 async function releaseAudioForPlayback(
+  messageId: string,
   turnId: string | null,
   orchestrationId: string | null,
 ): Promise<boolean> {
-  const audioUrl = state.pendingAudioUrl.trim();
+  const item = state.pendingAudios.get(messageId);
+  if (!item) {
+    return false;
+  }
+  const audioUrl = item.audioUrl.trim();
   if (!audioUrl) {
     return false;
   }
   if (!matchesPlaybackGroup(
-    state.pendingAudioTurnId,
-    state.pendingAudioOrchestrationId,
+    item.turnId,
+    item.orchestrationId,
     turnId,
     orchestrationId,
   )) {
     return false;
   }
-  const releasedTurnId = state.pendingAudioTurnId ?? turnId;
-  const releasedOrchestrationId = state.pendingAudioOrchestrationId ?? orchestrationId;
-  state.pendingAudioUrl = "";
-  state.pendingAudioTurnId = null;
-  state.pendingAudioOrchestrationId = null;
-  await playAudioAndAcknowledge(audioUrl, releasedTurnId, releasedOrchestrationId);
+  const releasedTurnId = item.turnId ?? turnId;
+  const releasedOrchestrationId = item.orchestrationId ?? orchestrationId;
+  state.pendingAudios.delete(messageId);
+  await playAudioAndAcknowledge(
+    audioUrl,
+    releasedTurnId,
+    releasedOrchestrationId,
+    messageId,
+  );
   return true;
+}
+
+function hasPendingAudioForTurn(
+  turnId: string | null,
+  orchestrationId: string | null,
+): boolean {
+  for (const item of state.pendingAudios.values()) {
+    if (matchesPlaybackGroup(item.turnId, item.orchestrationId, turnId, orchestrationId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function markMissingAudiosForTurn(
+  turnId: string | null,
+  orchestrationId: string | null,
+  reason: string,
+): void {
+  const sessions = sessionStore?.getSessions() ?? [];
+  for (const session of sessions) {
+    for (const segmentId of session.segmentOrder) {
+      const segment = session.segments.get(segmentId);
+      if (
+        segment
+        && segment.audio.terminal === "idle"
+        && !state.pendingAudios.has(segment.messageId)
+        && matchesPlaybackGroup(segment.turnId, segment.orchestrationId, turnId, orchestrationId)
+      ) {
+        markAudioPlaybackTerminal(
+          "not_requested",
+          segment.turnId,
+          segment.orchestrationId,
+          reason,
+          segment.messageId,
+        );
+      }
+    }
+  }
 }
 
 function stopAudioPlayback(): void {
@@ -1157,6 +1249,7 @@ export function useAdapterConnection(
   sessionStoreParam?: ReturnType<typeof useTurnPlaybackSessionStore>,
 ) {
   sessionStore = sessionStoreParam;
+  modelSyncAdapter = useModelSync();
   historyAdapter = useAdapterHistory(
     state,
     {

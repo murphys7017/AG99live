@@ -13,10 +13,10 @@ import type {
   NormalizedMotionPayload,
 } from "./contracts";
 import { normalizeMotionPayload, normalizeTurnId } from "./normalize";
-import { orchestrationIdFromSessionId } from "../turn-playback/session.js";
 
 interface PendingInboundMotionPayload {
   payload: NormalizedMotionPayload;
+  messageId: string;
   turnId: string;
   orchestrationId: string | null;
   receivedAtMs: number;
@@ -24,6 +24,7 @@ interface PendingInboundMotionPayload {
 }
 
 interface StartPayloadContext {
+  messageId: string;
   turnId: string | null;
   orchestrationId: string | null;
   startReason: string;
@@ -46,7 +47,7 @@ function resolveSessionKey(
 const state = reactive({
   status: "idle" as ModelEngineStatus,
   message: "等待动作输入。",
-  pendingTurnId: "" as string,
+  pendingMessageId: "" as string,
   pendingCount: 0,
   lastCompileReason: "",
   lastCompileDiagnostics: null as CompileDiagnostics | null,
@@ -75,7 +76,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
 
   function syncPendingState(): void {
     state.pendingCount = pendingInboundMotionPayloads.size;
-    state.pendingTurnId = pendingInboundMotionPayloads.keys().next().value ?? "";
+    state.pendingMessageId = pendingInboundMotionPayloads.keys().next().value ?? "";
   }
 
   function clearPendingPayload(entry: PendingInboundMotionPayload): void {
@@ -90,21 +91,66 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     syncPendingState();
   }
 
-  function resolveMotionTargetDurationMs(turnId: string | null): number | null {
-    // Prefer session as the single source of truth for audio timing
-    const activeSession = dependencies.sessionStore?.getActiveSession();
-    const audioStartedAtMs = activeSession?.audio.startedAtMs;
-    const audioDurationMs = activeSession?.audio.durationMs;
-    const sessionTurnId = activeSession?.turnId;
+  function findStartedSegment(
+    messageId: string | null,
+    turnId: string | null,
+    orchestrationId: string | null = null,
+  ) {
+    const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
+    const normalizedTurnId = normalizeTurnId(turnId);
+    const normalizedOrchestrationId =
+      typeof orchestrationId === "string" && orchestrationId.trim()
+        ? orchestrationId.trim()
+        : null;
+
+    for (const session of [
+      dependencies.sessionStore?.getActiveSession(),
+      resolveSessionKey(orchestrationId, turnId)
+        ? dependencies.sessionStore?.getSessionById?.(resolveSessionKey(orchestrationId, turnId))
+        : undefined,
+    ]) {
+      if (!session) {
+        continue;
+      }
+      for (const segmentId of session.segmentOrder) {
+        const segment = session.segments.get(segmentId);
+        if (!segment || !segment.audio.started) {
+          continue;
+        }
+        if (normalizedMessageId) {
+          if (segment.messageId === normalizedMessageId) {
+            return segment;
+          }
+          continue;
+        }
+        const segmentTurnId = normalizeTurnId(segment.turnId);
+        if (normalizedTurnId && segmentTurnId === normalizedTurnId) {
+          return segment;
+        }
+        if (normalizedOrchestrationId && segment.orchestrationId === normalizedOrchestrationId) {
+          return segment;
+        }
+      }
+    }
+    return null;
+  }
+
+  function resolveMotionTargetDurationMs(
+    messageId: string | null,
+    turnId: string | null,
+    orchestrationId: string | null = null,
+  ): number | null {
+    const startedSegment = findStartedSegment(messageId, turnId, orchestrationId);
+    const audioStartedAtMs = startedSegment?.audio.startedAtMs;
+    const audioDurationMs = startedSegment?.audio.durationMs;
+    const sessionTurnId = startedSegment?.turnId;
 
     const normalizedTurnId = normalizeTurnId(turnId);
     const normalizedSessionTurnId = normalizeTurnId(sessionTurnId ?? null);
 
     // If session has valid audio timing data, use it
     if (
-      normalizedTurnId
-      && normalizedSessionTurnId
-      && normalizedTurnId === normalizedSessionTurnId
+      (!normalizedTurnId || !normalizedSessionTurnId || normalizedTurnId === normalizedSessionTurnId)
       && audioStartedAtMs
       && audioDurationMs
       && Number.isFinite(audioStartedAtMs)
@@ -119,7 +165,26 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     // Fallback to dependency callback for backward compatibility
     const audioPlayback = dependencies.getAudioPlaybackInfo();
     const audioTurnId = normalizeTurnId(audioPlayback.turnId);
-    if (!normalizedTurnId || !audioTurnId || normalizedTurnId !== audioTurnId) {
+    const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
+    const audioMessageId =
+      typeof audioPlayback.messageId === "string" ? audioPlayback.messageId.trim() : "";
+    const audioOrchestrationId =
+      typeof audioPlayback.orchestrationId === "string"
+        ? audioPlayback.orchestrationId.trim()
+        : "";
+    const normalizedOrchestrationId =
+      typeof orchestrationId === "string" ? orchestrationId.trim() : "";
+    const matchesAudio = normalizedMessageId
+      ? audioMessageId === normalizedMessageId
+      : (
+        (normalizedTurnId && audioTurnId && normalizedTurnId === audioTurnId)
+        || (
+          normalizedOrchestrationId
+          && audioOrchestrationId
+          && normalizedOrchestrationId === audioOrchestrationId
+        )
+      );
+    if (!matchesAudio) {
       return null;
     }
 
@@ -139,35 +204,11 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   }
 
   function resolveMotionTargetDurationMsForContext(
+    messageId: string,
     turnId: string | null,
     orchestrationId: string | null,
   ): number | null {
-    const sessionKey = resolveSessionKey(orchestrationId, turnId);
-    const session = sessionKey
-      ? dependencies.sessionStore?.getSessionById?.(sessionKey)
-      : dependencies.sessionStore?.getActiveSession();
-    const audioStartedAtMs = session?.audio.startedAtMs;
-    const audioDurationMs = session?.audio.durationMs;
-    const sessionTurnId = session?.turnId;
-    const normalizedTurnId = normalizeTurnId(turnId);
-    const normalizedSessionTurnId = normalizeTurnId(sessionTurnId ?? null);
-
-    if (
-      normalizedTurnId
-      && normalizedSessionTurnId
-      && normalizedTurnId === normalizedSessionTurnId
-      && audioStartedAtMs
-      && audioDurationMs
-      && Number.isFinite(audioStartedAtMs)
-      && audioStartedAtMs > 0
-      && Number.isFinite(audioDurationMs)
-      && audioDurationMs > 0
-    ) {
-      const elapsedMs = Math.max(0, performance.now() - audioStartedAtMs);
-      return Math.max(MOTION_MIN_REMAINING_AUDIO_MS, Math.round(audioDurationMs - elapsedMs));
-    }
-
-    return resolveMotionTargetDurationMs(turnId);
+    return resolveMotionTargetDurationMs(messageId, turnId, orchestrationId);
   }
 
   function reportInvalidPayload(reason: string): void {
@@ -184,6 +225,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     state.lastStartReason = context.startReason;
       console.info("[ModelEngine] starting motion payload.", {
       kind: payload.kind,
+      messageId: context.messageId,
       turnId: context.turnId,
       orchestrationId: context.orchestrationId,
       startReason: context.startReason,
@@ -202,6 +244,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       const compileResult = compileMotionIntent(payload.intent, {
         model: selectedModel,
         targetDurationMs: resolveMotionTargetDurationMsForContext(
+          context.messageId,
           context.turnId,
           context.orchestrationId,
         ),
@@ -249,6 +292,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         dependencies.onPlanStarted?.({
           plan: startedPlan,
           model: selectedModel,
+          messageId: context.messageId,
           turnId: context.turnId,
           orchestrationId: context.orchestrationId,
           startReason: context.startReason,
@@ -271,6 +315,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       {
         softHandoff: true,
         targetDurationMs: resolveMotionTargetDurationMsForContext(
+          context.messageId,
           context.turnId,
           context.orchestrationId,
         ),
@@ -294,6 +339,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       dependencies.onPlanStarted?.({
           plan: startedPlan,
           model: selectedModel,
+          messageId: context.messageId,
           turnId: context.turnId,
           orchestrationId: context.orchestrationId,
           startReason: context.startReason,
@@ -308,18 +354,19 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     return true;
   }
 
-  function tryStartPendingPayload(turnId: string, startReason: string): boolean {
-    const entry = pendingInboundMotionPayloads.get(turnId);
+  function tryStartPendingPayload(messageId: string, startReason: string): boolean {
+    const entry = pendingInboundMotionPayloads.get(messageId);
     if (!entry) {
       return false;
     }
 
-    pendingInboundMotionPayloads.delete(turnId);
+    pendingInboundMotionPayloads.delete(messageId);
     clearPendingPayload(entry);
     syncPendingState();
     return startPayload(entry.payload, {
       turnId: entry.turnId,
       orchestrationId: entry.orchestrationId,
+      messageId: entry.messageId,
       startReason,
       queuedDelayMs: Math.max(0, Math.round(performance.now() - entry.receivedAtMs)),
     });
@@ -332,6 +379,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     const normalizedTurnId = normalizeTurnId(context.turnId);
     if (!normalizedTurnId) {
       startPayload(payload, {
+        messageId: context.messageId,
         turnId: null,
         orchestrationId: context.orchestrationId ?? null,
         startReason: "missing_turn_id",
@@ -340,17 +388,19 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       return;
     }
 
-    const existing = pendingInboundMotionPayloads.get(normalizedTurnId);
+    const existing = pendingInboundMotionPayloads.get(context.messageId);
     if (existing) {
       console.info("[ModelEngine] replacing pending motion payload for turn.", {
         turnId: normalizedTurnId,
+        messageId: context.messageId,
       });
       clearPendingPayload(existing);
-      pendingInboundMotionPayloads.delete(normalizedTurnId);
+      pendingInboundMotionPayloads.delete(context.messageId);
     }
 
     const entry: PendingInboundMotionPayload = {
       payload,
+      messageId: context.messageId,
       turnId: normalizedTurnId,
       orchestrationId: context.orchestrationId ?? null,
       receivedAtMs: context.receivedAtMs,
@@ -358,22 +408,19 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     };
 
     entry.fallbackTimer = window.setTimeout(() => {
-      const latest = pendingInboundMotionPayloads.get(normalizedTurnId);
+      const latest = pendingInboundMotionPayloads.get(context.messageId);
       if (!latest || latest !== entry) {
         return;
       }
 
-      // Read current turn/audio context from session (single source of truth)
       const activeSession = dependencies.sessionStore?.getActiveSession();
       const currentTurnId = normalizeTurnId(
         activeSession?.turnId ?? dependencies.getCurrentTurnId(),
       );
       const currentOrchestrationId =
-        orchestrationIdFromSessionId(activeSession?.id ?? "")
-        ?? dependencies.getCurrentOrchestrationId?.()
-        ?? null;
+        dependencies.getCurrentOrchestrationId?.() ?? null;
       const audioOrchestrationId =
-        orchestrationIdFromSessionId(activeSession?.id ?? "")
+        findStartedSegment(entry.messageId, entry.turnId, entry.orchestrationId)?.orchestrationId
         ?? dependencies.getAudioPlaybackInfo().orchestrationId
         ?? null;
 
@@ -383,44 +430,41 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
           && (entry.orchestrationId === currentOrchestrationId
             || entry.orchestrationId === audioOrchestrationId)
         ) {
-          tryStartPendingPayload(normalizedTurnId, "wait_audio_timeout_orchestration_match");
+          tryStartPendingPayload(context.messageId, "wait_audio_timeout_orchestration_match");
           return;
         }
         clearPendingPayload(entry);
-        pendingInboundMotionPayloads.delete(normalizedTurnId);
+        pendingInboundMotionPayloads.delete(context.messageId);
         syncPendingState();
         return;
       }
 
-      tryStartPendingPayload(normalizedTurnId, "wait_audio_timeout");
+      tryStartPendingPayload(context.messageId, "wait_audio_timeout");
     }, MOTION_SYNC_WAIT_FOR_AUDIO_MS);
 
-    pendingInboundMotionPayloads.set(normalizedTurnId, entry);
+    pendingInboundMotionPayloads.set(context.messageId, entry);
     syncPendingState();
     setState("pending", "动作已排队，等待音频起播。", null);
     console.info("[ModelEngine] queued motion payload.", {
       kind: payload.kind,
       turnId: normalizedTurnId,
+      messageId: context.messageId,
       pendingCount: pendingInboundMotionPayloads.size,
     });
 
-    // Check if audio is already playing — prefer session, fallback to dependency
-    const activeSession = dependencies.sessionStore?.getActiveSession();
-    const activeAudioTurnId = normalizeTurnId(
-      activeSession?.audio.started ? activeSession?.turnId : null,
-    ) || normalizeTurnId(dependencies.getAudioPlaybackInfo().turnId);
-    const activeAudioOrchestrationId =
-      (activeSession?.audio.started
-        ? orchestrationIdFromSessionId(activeSession.id)
-        : null)
-      ?? dependencies.getAudioPlaybackInfo().orchestrationId
+    const startedSegment = findStartedSegment(
+      context.messageId,
+      normalizedTurnId,
+      entry.orchestrationId,
+    );
+    const audioPlayback = dependencies.getAudioPlaybackInfo();
+    const activeAudioMessageId =
+      startedSegment?.messageId
+      ?? audioPlayback.messageId
       ?? null;
 
-    if (
-      (activeAudioTurnId && activeAudioTurnId === normalizedTurnId)
-      || (entry.orchestrationId && activeAudioOrchestrationId === entry.orchestrationId)
-    ) {
-      tryStartPendingPayload(normalizedTurnId, "audio_already_playing");
+    if (activeAudioMessageId === context.messageId) {
+      tryStartPendingPayload(context.messageId, "audio_already_playing");
     }
   }
 
@@ -443,12 +487,31 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     queueInboundPayload(payload, context);
   }
 
-  function notifyAudioPlaybackStarted(turnId: string | null): void {
+  function notifyAudioPlaybackStarted(
+    turnId: string | null,
+    messageId: string | null = null,
+  ): void {
+    const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
+    if (normalizedMessageId) {
+      const started = tryStartPendingPayload(normalizedMessageId, "audio_playing_event");
+      console.info("[ModelEngine] audio playback start notification handled.", {
+        turnId,
+        messageId: normalizedMessageId,
+        started,
+        pendingCount: pendingInboundMotionPayloads.size,
+      });
+      return;
+    }
     const normalizedTurnId = normalizeTurnId(turnId);
     if (!normalizedTurnId) {
       return;
     }
-    const started = tryStartPendingPayload(normalizedTurnId, "audio_playing_event");
+    let started = false;
+    for (const entry of Array.from(pendingInboundMotionPayloads.values())) {
+      if (entry.turnId === normalizedTurnId) {
+        started = tryStartPendingPayload(entry.messageId, "audio_playing_event") || started;
+      }
+    }
     console.info("[ModelEngine] audio playback start notification handled.", {
       turnId: normalizedTurnId,
       started,
@@ -462,12 +525,12 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       return;
     }
 
-    for (const [pendingTurnId, entry] of pendingInboundMotionPayloads.entries()) {
-      if (pendingTurnId === currentTurnId) {
+    for (const [messageId, entry] of pendingInboundMotionPayloads.entries()) {
+      if (entry.turnId === currentTurnId) {
         continue;
       }
       clearPendingPayload(entry);
-      pendingInboundMotionPayloads.delete(pendingTurnId);
+      pendingInboundMotionPayloads.delete(messageId);
     }
     syncPendingState();
   }
@@ -480,6 +543,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     }
 
     return startPayload(normalized.payload, {
+      messageId: "preview",
       turnId: null,
       orchestrationId: null,
       startReason: "preview",

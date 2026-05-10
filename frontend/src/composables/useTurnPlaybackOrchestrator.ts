@@ -6,13 +6,14 @@ import type { NormalizedMotionPayload } from "../model-engine/contracts";
 import {
   createTurnPlaybackOrchestratorCore,
   type TurnPlaybackReleaseContext,
-} from "./turnPlaybackOrchestratorCore";
-import { orchestrationIdFromSessionId } from "../turn-playback/session.js";
+} from "./turnPlaybackOrchestratorCore.js";
 import {
   canReleaseAudio,
   canReleaseMotion,
   canReleaseText,
+  getActivePlaybackSegment,
 } from "../turn-playback/selectors.js";
+import { isSegmentLocallySettled } from "../turn-playback/session.js";
 
 type AdapterConnection = ReturnType<typeof useAdapterConnection>;
 type ModelEngine = ReturnType<typeof useModelEngine>;
@@ -33,24 +34,27 @@ export function useTurnPlaybackOrchestrator(
     clearSchedule: (timer) => {
       window.clearTimeout(timer as number);
     },
-    releaseText: (turnId, orchestrationId) => {
+    releaseText: (messageId, turnId, orchestrationId) => {
       const released = options.adapter.releaseAssistantTextForPlayback(
+        messageId,
         turnId,
         orchestrationId,
       );
       if (released) {
-        options.sessionStore.markTextReleased(orchestrationId, turnId);
+        options.sessionStore.markTextReleased(orchestrationId, turnId, messageId);
         options.sessionStore.markPhase(orchestrationId, turnId, "playing");
       }
       return released;
     },
-    releaseAudio: (turnId, orchestrationId) => {
-      void options.adapter.releaseAudioForPlayback(turnId, orchestrationId);
+    releaseAudio: (messageId, turnId, orchestrationId) => {
+      options.sessionStore.markAudioReleased(orchestrationId, turnId, messageId);
+      void options.adapter.releaseAudioForPlayback(messageId, turnId, orchestrationId);
     },
     releaseMotion: (payload: unknown, context: TurnPlaybackReleaseContext) => {
       options.sessionStore.markMotionReleased(
         context.orchestrationId,
         context.turnId,
+        context.messageId,
       );
       options.modelEngine.ingestNormalizedPayload(
         payload as NormalizedMotionPayload,
@@ -70,53 +74,86 @@ export function useTurnPlaybackOrchestrator(
   // ── Watch session state and feed to core ────────────────────────
 
   watch(
-    () => options.sessionStore.getSessions().map((session) => ({
-      id: session.id,
-      turnId: session.turnId,
-      phase: session.phase,
-      textContent: session.text.content,
-      textReleased: session.text.released,
-      audioUrl: session.audio.url,
-      audioTerminal: session.audio.terminal,
-      motionReceivedAtMs: session.motion.receivedAtMs,
-      motionReleased: session.motion.released,
-      hasMotionPayload: session.motion.payload !== null,
-      backendTurnFinished: session.backend.turnFinished,
-    })),
+    () => options.sessionStore.getSessions().flatMap((session) =>
+      session.segmentOrder.map((segmentId) => {
+        const segment = session.segments.get(segmentId);
+        const activeSegment = getActivePlaybackSegment(session);
+        return {
+          sessionId: session.id,
+          sessionPhase: session.phase,
+          backendTurnFinished: session.backend.turnFinished,
+          activeSegmentId: activeSegment?.messageId ?? null,
+          segmentId,
+          turnId: segment?.turnId ?? null,
+          orchestrationId: segment?.orchestrationId ?? null,
+          textContent: segment?.text.content ?? null,
+          textReleased: segment?.text.released ?? false,
+          textDelivered: segment?.text.delivered ?? false,
+          audioUrl: segment?.audio.url ?? null,
+          audioReleased: segment?.audio.released ?? false,
+          audioTerminal: segment?.audio.terminal ?? "idle",
+          motionReceivedAtMs: segment?.motion.receivedAtMs ?? null,
+          motionReleased: segment?.motion.released ?? false,
+          motionCompleted: segment?.motion.completed ?? false,
+          motionAbsent: segment?.motion.absent ?? false,
+          hasMotionPayload: segment?.motion.payload !== null,
+        };
+      }),
+    ),
     () => {
       for (const session of options.sessionStore.getSessions()) {
-        const orchestrationId = orchestrationIdFromSessionId(session.id);
-
-        if (
-          session.phase === "collecting"
-          && session.text.content
-        ) {
-          options.sessionStore.markPhase(orchestrationId, session.turnId, "ready");
+        for (const segmentId of session.segmentOrder) {
+          const candidate = session.segments.get(segmentId);
+          if (candidate && isSegmentLocallySettled(candidate)) {
+            core.clearSegment(candidate.messageId);
+          }
         }
 
-        if (canReleaseText(session)) {
-          core.markTextReady(session.turnId, orchestrationId);
+        const segment = getActivePlaybackSegment(session);
+        if (!segment) {
+          continue;
         }
 
-        if (canReleaseAudio(session)) {
-          core.markAudioReady(session.turnId, orchestrationId);
+        if (session.phase === "collecting" && segment.text.content) {
+          options.sessionStore.markPhase(
+            segment.orchestrationId,
+            segment.turnId,
+            "ready",
+          );
         }
 
-        if (session.audio.terminal === "absent") {
-          core.markNoAudioConfirmed(session.turnId, orchestrationId);
+        if (canReleaseText(segment)) {
+          core.markTextReady(segment.messageId, segment.turnId, segment.orchestrationId);
         }
 
-        if (canReleaseMotion(session) && session.motion.payload) {
+        if (canReleaseAudio(segment)) {
+          core.markAudioReady(segment.messageId, segment.turnId, segment.orchestrationId);
+        }
+
+        if (segment.audio.terminal === "absent") {
+          core.markNoAudioConfirmed(
+            segment.messageId,
+            segment.turnId,
+            segment.orchestrationId,
+          );
+        }
+
+        if (canReleaseMotion(segment) && segment.motion.payload) {
           core.markMotionReady(
-            session.turnId,
-            orchestrationId,
-            session.motion.payload,
-            session.motion.receivedAtMs ?? performance.now(),
+            segment.messageId,
+            segment.turnId,
+            segment.orchestrationId,
+            segment.motion.payload,
+            segment.motion.receivedAtMs ?? performance.now(),
           );
         }
 
         if (session.backend.turnFinished) {
-          core.markTurnFinished(session.turnId, orchestrationId);
+          core.markTurnFinished(
+            segment.messageId,
+            segment.turnId,
+            segment.orchestrationId,
+          );
         }
       }
     },

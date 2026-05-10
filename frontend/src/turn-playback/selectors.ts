@@ -1,15 +1,28 @@
-import type { TurnPlaybackSession } from "./session.js";
+import type { TurnPlaybackSegment, TurnPlaybackSession } from "./session.js";
+import { isSegmentLocallySettled } from "./session.js";
+
+export function getActivePlaybackSegment(
+  session: TurnPlaybackSession,
+): TurnPlaybackSegment | null {
+  for (const segmentId of session.segmentOrder) {
+    const segment = session.segments.get(segmentId);
+    if (segment && !isSegmentLocallySettled(segment)) {
+      return segment;
+    }
+  }
+  return null;
+}
 
 /**
  * Whether the session's text can be released (pushed to display).
  *
  * Text must not already be released and must have non-empty content.
  */
-export function canReleaseText(session: TurnPlaybackSession): boolean {
-  if (session.text.released) {
+export function canReleaseText(segment: TurnPlaybackSegment): boolean {
+  if (segment.text.released) {
     return false;
   }
-  const content = session.text.content;
+  const content = segment.text.content;
   return typeof content === "string" && content.trim().length > 0;
 }
 
@@ -18,11 +31,12 @@ export function canReleaseText(session: TurnPlaybackSession): boolean {
  *
  * Audio must have a url and must not already have reached a terminal state.
  */
-export function canReleaseAudio(session: TurnPlaybackSession): boolean {
+export function canReleaseAudio(segment: TurnPlaybackSegment): boolean {
   return (
-    typeof session.audio.url === "string"
-    && session.audio.url.trim().length > 0
-    && session.audio.terminal === "idle"
+    typeof segment.audio.url === "string"
+    && segment.audio.url.trim().length > 0
+    && !segment.audio.released
+    && segment.audio.terminal === "idle"
   );
 }
 
@@ -31,8 +45,8 @@ export function canReleaseAudio(session: TurnPlaybackSession): boolean {
  *
  * Motion must have a payload and must not already be started.
  */
-export function canReleaseMotion(session: TurnPlaybackSession): boolean {
-  return session.motion.payload !== null && !session.motion.released;
+export function canReleaseMotion(segment: TurnPlaybackSegment): boolean {
+  return segment.motion.payload !== null && !segment.motion.released;
 }
 
 /**
@@ -43,16 +57,16 @@ export function canReleaseMotion(session: TurnPlaybackSession): boolean {
  * started or completed — the group should wait.
  */
 export function shouldWaitForLateMotion(
-  session: TurnPlaybackSession,
+  segment: TurnPlaybackSegment,
   _nowMs: number,
 ): boolean {
-  if (session.motion.absent) {
+  if (segment.motion.absent) {
     return false;
   }
-  if (session.motion.released || session.motion.completed) {
+  if (segment.motion.released || segment.motion.completed) {
     return false;
   }
-  return session.motion.payload !== null;
+  return segment.motion.payload !== null;
 }
 
 /**
@@ -69,15 +83,11 @@ export function shouldWaitForLateMotion(
 export function isPlaybackLocallySettled(
   session: TurnPlaybackSession,
 ): boolean {
-  if (!session.text.delivered) {
+  if (session.segmentOrder.length === 0) {
     return false;
   }
-  const terminal = session.audio.terminal;
-  if (terminal !== "completed" && terminal !== "failed" && terminal !== "absent") {
-    return false;
-  }
-  if (!session.motion.absent && !session.motion.completed) {
-    return false;
-  }
-  return true;
+  return session.segmentOrder.every((segmentId) => {
+    const segment = session.segments.get(segmentId);
+    return Boolean(segment && isSegmentLocallySettled(segment));
+  });
 }

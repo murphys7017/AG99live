@@ -5,7 +5,7 @@ export const TEXT_ONLY_RELEASE_WAIT_MS = 260;
 
 export interface PendingTurnPlaybackGroup {
   key: string;
-  ephemeral: boolean;
+  messageId: string;
   turnId: string | null;
   orchestrationId: string | null;
   firstReadyAtMs: number;
@@ -21,6 +21,7 @@ export interface PendingTurnPlaybackGroup {
 }
 
 export interface TurnPlaybackReleaseContext {
+  messageId: string;
   turnId: string | null;
   orchestrationId: string | null;
   receivedAtMs: number;
@@ -30,69 +31,55 @@ export interface TurnPlaybackOrchestratorCoreOptions {
   now: () => number;
   schedule: (delayMs: number, fn: () => void) => unknown;
   clearSchedule: (timer: unknown) => void;
-  releaseText: (turnId: string | null, orchestrationId: string | null) => boolean;
-  releaseAudio: (turnId: string | null, orchestrationId: string | null) => void;
+  releaseText: (
+    messageId: string,
+    turnId: string | null,
+    orchestrationId: string | null,
+  ) => boolean;
+  releaseAudio: (
+    messageId: string,
+    turnId: string | null,
+    orchestrationId: string | null,
+  ) => void;
   releaseMotion: (payload: unknown, context: TurnPlaybackReleaseContext) => void;
   log?: (message: string, details: Record<string, unknown>) => void;
-  createEphemeralGroupKey?: () => string;
-}
-
-function normalizeId(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
 }
 
 export function resolveTurnPlaybackGroupKey(
-  turnId: string | null,
-  orchestrationId: string | null,
+  messageId: string,
 ): string {
-  const normalizedOrchestrationId = normalizeId(orchestrationId);
-  if (normalizedOrchestrationId) {
-    return `orch:${normalizedOrchestrationId}`;
+  const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
+  if (!normalizedMessageId) {
+    throw new Error("Turn playback group requires a non-empty messageId.");
   }
-  const normalizedTurnId = normalizeId(turnId);
-  if (normalizedTurnId) {
-    return `turn:${normalizedTurnId}`;
-  }
-  return "";
+  return `segment:${normalizedMessageId}`;
 }
 
 export function createTurnPlaybackOrchestratorCore(
   options: TurnPlaybackOrchestratorCoreOptions,
 ) {
   const groups = new Map<string, PendingTurnPlaybackGroup>();
-  let ephemeralGroupSerial = 0;
 
   function log(message: string, details: Record<string, unknown>): void {
     options.log?.(message, details);
   }
 
-  function createEphemeralGroupKey(): string {
-    if (options.createEphemeralGroupKey) {
-      return options.createEphemeralGroupKey();
-    }
-    ephemeralGroupSerial += 1;
-    return `ephemeral:${ephemeralGroupSerial}`;
-  }
-
   function getOrCreateGroup(
+    messageId: string,
     turnId: string | null,
     orchestrationId: string | null,
   ): PendingTurnPlaybackGroup {
-    const resolvedKey = resolveTurnPlaybackGroupKey(turnId, orchestrationId);
-    if (resolvedKey) {
-      const existing = groups.get(resolvedKey);
-      if (existing) {
-        existing.turnId = existing.turnId ?? turnId;
-        existing.orchestrationId = existing.orchestrationId ?? orchestrationId;
-        return existing;
-      }
+    const key = resolveTurnPlaybackGroupKey(messageId);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.turnId = existing.turnId ?? turnId;
+      existing.orchestrationId = existing.orchestrationId ?? orchestrationId;
+      return existing;
     }
 
-    const ephemeral = !resolvedKey;
-    const key = resolvedKey || createEphemeralGroupKey();
     const group: PendingTurnPlaybackGroup = {
       key,
-      ephemeral,
+      messageId,
       turnId,
       orchestrationId,
       firstReadyAtMs: options.now(),
@@ -143,8 +130,10 @@ export function createTurnPlaybackOrchestratorCore(
       turnId: group.turnId,
       orchestrationId: group.orchestrationId,
       receivedAtMs: group.motionReceivedAtMs || options.now(),
+      messageId: group.messageId,
     });
     log("motion released", {
+      messageId: group.messageId,
       turnId: group.turnId,
       orchestrationId: group.orchestrationId,
       reason,
@@ -155,15 +144,18 @@ export function createTurnPlaybackOrchestratorCore(
     clearReleaseTimer(group);
     group.released = true;
     const releasedText = options.releaseText(
+      group.messageId,
       group.turnId,
       group.orchestrationId,
     );
     group.textReleased = group.textReleased || releasedText;
     releaseMotion(group, reason);
     if (group.audioReady) {
-      options.releaseAudio(group.turnId, group.orchestrationId);
+      options.releaseAudio(group.messageId, group.turnId, group.orchestrationId);
+      group.audioReady = false;
     }
     log("group released", {
+      messageId: group.messageId,
       turnId: group.turnId,
       orchestrationId: group.orchestrationId,
       reason,
@@ -171,9 +163,6 @@ export function createTurnPlaybackOrchestratorCore(
       audioReady: group.audioReady,
       noAudioConfirmed: group.noAudioConfirmed,
     });
-    if (group.ephemeral) {
-      deleteGroup(group);
-    }
   }
 
   function releaseTextOnly(group: PendingTurnPlaybackGroup, reason: string): void {
@@ -181,11 +170,13 @@ export function createTurnPlaybackOrchestratorCore(
       return;
     }
     const releasedText = options.releaseText(
+      group.messageId,
       group.turnId,
       group.orchestrationId,
     );
     group.textReleased = group.textReleased || releasedText;
     log("text released before audio", {
+      messageId: group.messageId,
       turnId: group.turnId,
       orchestrationId: group.orchestrationId,
       reason,
@@ -201,8 +192,9 @@ export function createTurnPlaybackOrchestratorCore(
       if (group.motionReady) {
         releaseMotion(group, `late_motion_after_${reason}`);
       }
-      if (group.ephemeral) {
-        deleteGroup(group);
+      if (group.audioReady) {
+        options.releaseAudio(group.messageId, group.turnId, group.orchestrationId);
+        group.audioReady = false;
       }
       return;
     }
@@ -252,17 +244,26 @@ export function createTurnPlaybackOrchestratorCore(
   }
 
   return {
-    markTextReady: (turnId: string | null, orchestrationId: string | null) => {
-      const group = getOrCreateGroup(turnId, orchestrationId);
+    markTextReady: (
+      messageId: string,
+      turnId: string | null,
+      orchestrationId: string | null,
+    ) => {
+      const group = getOrCreateGroup(messageId, turnId, orchestrationId);
       group.textReady = true;
       evaluateGroup(group, "text_ready");
     },
-    markAudioReady: (turnId: string | null, orchestrationId: string | null) => {
-      const group = getOrCreateGroup(turnId, orchestrationId);
+    markAudioReady: (
+      messageId: string,
+      turnId: string | null,
+      orchestrationId: string | null,
+    ) => {
+      const group = getOrCreateGroup(messageId, turnId, orchestrationId);
       group.audioReady = true;
       evaluateGroup(group, "audio_ready");
     },
     markMotionReady: (
+      messageId: string,
       turnId: string | null,
       orchestrationId: string | null,
       payload: unknown,
@@ -271,25 +272,27 @@ export function createTurnPlaybackOrchestratorCore(
       if (!payload) {
         return;
       }
-      const group = getOrCreateGroup(turnId, orchestrationId);
+      const group = getOrCreateGroup(messageId, turnId, orchestrationId);
       group.motionReady = true;
       group.motionPayload = payload;
       group.motionReceivedAtMs = receivedAtMs;
       evaluateGroup(group, "motion_ready");
     },
     markNoAudioConfirmed: (
+      messageId: string,
       turnId: string | null,
       orchestrationId: string | null,
     ) => {
-      const group = getOrCreateGroup(turnId, orchestrationId);
+      const group = getOrCreateGroup(messageId, turnId, orchestrationId);
       group.noAudioConfirmed = true;
       evaluateGroup(group, "no_audio_terminal");
     },
     markTurnFinished: (
+      messageId: string,
       turnId: string | null,
       orchestrationId: string | null,
     ) => {
-      const group = getOrCreateGroup(turnId, orchestrationId);
+      const group = getOrCreateGroup(messageId, turnId, orchestrationId);
       group.noAudioConfirmed = group.noAudioConfirmed || !group.audioReady;
       evaluateGroup(group, "turn_finished");
     },
@@ -297,6 +300,14 @@ export function createTurnPlaybackOrchestratorCore(
       for (const group of groups.values()) {
         evaluateGroup(group, "manual_flush");
       }
+    },
+    clearSegment: (messageId: string) => {
+      const group = groups.get(resolveTurnPlaybackGroupKey(messageId));
+      if (!group) {
+        return;
+      }
+      clearReleaseTimer(group);
+      deleteGroup(group);
     },
     clear: clearGroups,
     getGroupCount: () => groups.size,

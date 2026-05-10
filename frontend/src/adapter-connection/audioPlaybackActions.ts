@@ -4,6 +4,7 @@ export interface AudioPlaybackState {
   isPlayingAudio: boolean;
   audioPlaybackStartedTurnId: string | null;
   audioPlaybackStartedOrchestrationId: string | null;
+  audioPlaybackStartedMessageId: string | null;
   audioPlaybackStartedAtMs: number;
   audioPlaybackDurationMs: number | null;
   statusMessage: string;
@@ -15,6 +16,7 @@ export interface AudioPlaybackSessionStore {
   markAudioStarted: (
     orchestrationId: string | null,
     turnId: string | null,
+    messageId: string,
     startedAtMs?: number | null,
     durationMs?: number | null,
   ) => void;
@@ -30,6 +32,7 @@ export interface AudioPlaybackContext {
     turnId: string | null,
     orchestrationId: string | null,
     reason?: string,
+    messageId?: string | null,
   ) => void;
   resetTerminal: () => void;
   sessionStore?: AudioPlaybackSessionStore;
@@ -40,12 +43,14 @@ export async function playAudioAndAcknowledge(
   audioUrl: string,
   turnId: string | null,
   orchestrationId: string | null = ctx.state.currentOrchestrationId,
+  messageId: string,
 ): Promise<void> {
   stopAudioPlayback(ctx);
   ctx.resetTerminal();
   ctx.state.isPlayingAudio = true;
   ctx.state.audioPlaybackStartedTurnId = null;
   ctx.state.audioPlaybackStartedOrchestrationId = null;
+  ctx.state.audioPlaybackStartedMessageId = null;
   ctx.state.audioPlaybackStartedAtMs = 0;
   ctx.state.audioPlaybackDurationMs = null;
   ctx.state.statusMessage = "收到语音回复，正在播放。";
@@ -62,10 +67,12 @@ export async function playAudioAndAcknowledge(
       onPlaybackStarted: (event) => {
         ctx.state.audioPlaybackStartedTurnId = turnId;
         ctx.state.audioPlaybackStartedOrchestrationId = orchestrationId;
+        ctx.state.audioPlaybackStartedMessageId = messageId;
         ctx.state.audioPlaybackStartedAtMs = event.startedAtMs;
         ctx.sessionStore?.markAudioStarted(
           orchestrationId,
           turnId,
+          messageId,
           event.startedAtMs,
           ctx.state.audioPlaybackDurationMs,
         );
@@ -80,9 +87,11 @@ export async function playAudioAndAcknowledge(
         const completedTurnId = ctx.state.audioPlaybackStartedTurnId ?? turnId;
         const completedOrchestrationId =
           ctx.state.audioPlaybackStartedOrchestrationId ?? orchestrationId;
+        const completedMessageId = ctx.state.audioPlaybackStartedMessageId ?? messageId;
         ctx.state.isPlayingAudio = false;
         ctx.state.audioPlaybackStartedTurnId = null;
         ctx.state.audioPlaybackStartedOrchestrationId = null;
+        ctx.state.audioPlaybackStartedMessageId = null;
         ctx.state.audioPlaybackStartedAtMs = 0;
         ctx.state.audioPlaybackDurationMs = null;
         ctx.markTerminal(
@@ -90,15 +99,18 @@ export async function playAudioAndAcknowledge(
           completedTurnId,
           completedOrchestrationId,
           "audio_playback_completed",
+          completedMessageId,
         );
       },
       onError: () => {
         const failedTurnId = ctx.state.audioPlaybackStartedTurnId ?? turnId;
         const failedOrchestrationId =
           ctx.state.audioPlaybackStartedOrchestrationId ?? orchestrationId;
+        const failedMessageId = ctx.state.audioPlaybackStartedMessageId ?? messageId;
         ctx.state.isPlayingAudio = false;
         ctx.state.audioPlaybackStartedTurnId = null;
         ctx.state.audioPlaybackStartedOrchestrationId = null;
+        ctx.state.audioPlaybackStartedMessageId = null;
         ctx.state.audioPlaybackStartedAtMs = 0;
         ctx.state.audioPlaybackDurationMs = null;
         ctx.pushHistory("error", "音频播放失败。");
@@ -107,6 +119,7 @@ export async function playAudioAndAcknowledge(
           failedTurnId,
           failedOrchestrationId,
           "audio_playback_error",
+          failedMessageId,
         );
       },
     });
@@ -115,6 +128,7 @@ export async function playAudioAndAcknowledge(
     ctx.state.isPlayingAudio = false;
     ctx.state.audioPlaybackStartedTurnId = null;
     ctx.state.audioPlaybackStartedOrchestrationId = null;
+    ctx.state.audioPlaybackStartedMessageId = null;
     ctx.state.audioPlaybackStartedAtMs = 0;
     ctx.state.audioPlaybackDurationMs = null;
     ctx.state.lastError =
@@ -126,6 +140,7 @@ export async function playAudioAndAcknowledge(
       turnId,
       failedOrchestrationId,
       "audio_autoplay_blocked",
+      messageId,
     );
   }
 }
@@ -135,6 +150,7 @@ export function stopAudioPlayback(ctx: AudioPlaybackContext): void {
   ctx.state.isPlayingAudio = false;
   ctx.state.audioPlaybackStartedTurnId = null;
   ctx.state.audioPlaybackStartedOrchestrationId = null;
+  ctx.state.audioPlaybackStartedMessageId = null;
   ctx.state.audioPlaybackStartedAtMs = 0;
   ctx.state.audioPlaybackDurationMs = null;
 }

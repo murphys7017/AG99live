@@ -4,12 +4,16 @@ import type {
   TurnPlaybackPhase,
   TextReceiveMode,
   AudioTerminalState,
+  TurnPlaybackSegment,
 } from "../turn-playback/session.js";
 import {
   createTurnPlaybackSession,
+  createTurnPlaybackSegment,
   resolveSessionId,
   isValidPhaseTransition,
+  isSegmentLocallySettled,
 } from "../turn-playback/session.js";
+import { getActivePlaybackSegment } from "../turn-playback/selectors.js";
 import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
 
 // ── Store state ────────────────────────────────────────────────────
@@ -38,6 +42,14 @@ export function useTurnPlaybackSessionStore() {
 
   function log(message: string, details?: Record<string, unknown>): void {
     console.info(`[TurnPlaybackSessionStore] ${message}.`, details ?? {});
+  }
+
+  function normalizeRequiredMessageId(messageId: string): string {
+    const normalized = messageId.trim();
+    if (!normalized) {
+      throw new Error("Turn playback segment requires a non-empty messageId.");
+    }
+    return normalized;
   }
 
   // ── session lookup / creation ───────────────────────────────────
@@ -114,26 +126,109 @@ export function useTurnPlaybackSessionStore() {
     state.activeSessionId = session.id;
   }
 
+  // ── segments ────────────────────────────────────────────────────
+
+  function ensureSegment(
+    orchestrationId: string | null,
+    turnId: string | null,
+    messageId: string,
+  ): TurnPlaybackSegment {
+    const session = ensureSession(orchestrationId, turnId);
+    return ensureSegmentForSession(session, orchestrationId, turnId, messageId);
+  }
+
+  function ensureSegmentForSession(
+    session: TurnPlaybackSession,
+    orchestrationId: string | null,
+    turnId: string | null,
+    messageId: string,
+  ): TurnPlaybackSegment {
+    const segmentId = normalizeRequiredMessageId(messageId);
+    const existing = session.segments.get(segmentId);
+    if (existing) {
+      if (!existing.turnId && turnId) {
+        existing.turnId = turnId;
+      }
+      if (!existing.orchestrationId && orchestrationId) {
+        existing.orchestrationId = orchestrationId;
+      }
+      return existing;
+    }
+
+    const segment = createTurnPlaybackSegment(segmentId, orchestrationId, turnId);
+    session.segments.set(segmentId, segment);
+    session.segmentOrder.push(segmentId);
+    log("segment created", {
+      sessionId: session.id,
+      messageId: segmentId,
+      orchestrationId,
+      turnId,
+    });
+    return segment;
+  }
+
+  function getSegmentSession(
+    orchestrationId: string | null,
+    turnId: string | null,
+    messageId: string,
+  ): { session: TurnPlaybackSession; segment: TurnPlaybackSegment } {
+    const session = ensureSession(orchestrationId, turnId);
+    const segment = ensureSegmentForSession(session, orchestrationId, turnId, messageId);
+    return { session, segment };
+  }
+
+  function getSegment(
+    sessionId: string | null,
+    messageId: string,
+  ): TurnPlaybackSegment | undefined {
+    const segmentId = normalizeRequiredMessageId(messageId);
+    return getSessionById(sessionId)?.segments.get(segmentId);
+  }
+
+  function getUnsettledSegments(): TurnPlaybackSegment[] {
+    const unsettled: TurnPlaybackSegment[] = [];
+    for (const session of state.sessions.values()) {
+      for (const segmentId of session.segmentOrder) {
+        const segment = session.segments.get(segmentId);
+        if (segment && !isSegmentLocallySettled(segment)) {
+          unsettled.push(segment);
+        }
+      }
+    }
+    return unsettled;
+  }
+
+  function isSegmentSettled(sessionId: string | null, messageId: string): boolean {
+    const segment = getSegment(sessionId, messageId);
+    return Boolean(segment && isSegmentLocallySettled(segment));
+  }
+
+  function getActiveSegment(sessionId: string | null): TurnPlaybackSegment | null {
+    const session = getSessionById(sessionId);
+    return session ? getActivePlaybackSegment(session) : null;
+  }
+
   // ── text ────────────────────────────────────────────────────────
 
   function markTextReceived(
     orchestrationId: string | null,
     turnId: string | null,
     text: string,
+    messageId: string,
     mode: TextReceiveMode = "replace",
   ): void {
     const trimmed = text.trim();
     if (!trimmed) {
       return;
     }
-    const session = ensureSession(orchestrationId, turnId);
-    if (mode === "append" && session.text.content) {
-      session.text.content = session.text.content + trimmed;
+    const { session, segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    if (mode === "append" && segment.text.content) {
+      segment.text.content = segment.text.content + trimmed;
     } else {
-      session.text.content = trimmed;
+      segment.text.content = trimmed;
     }
-    session.text.receiveMode = mode;
-    session.text.receivedAtMs = performance.now();
+    segment.text.receiveMode = mode;
+    segment.text.receivedAtMs = performance.now();
     if (!session.backend.turnStarted) {
       session.backend.turnStarted = true;
     }
@@ -142,18 +237,20 @@ export function useTurnPlaybackSessionStore() {
   function markTextReleased(
     orchestrationId: string | null,
     turnId: string | null,
+    messageId: string,
   ): void {
-    const session = ensureSession(orchestrationId, turnId);
-    session.text.released = true;
+    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    segment.text.released = true;
   }
 
   function markTextDelivered(
     orchestrationId: string | null,
     turnId: string | null,
+    messageId: string,
   ): void {
-    const session = ensureSession(orchestrationId, turnId);
-    session.text.delivered = true;
-    session.text.released = true; // delivery implies release
+    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    segment.text.delivered = true;
+    segment.text.released = true; // delivery implies release
   }
 
   // ── audio ───────────────────────────────────────────────────────
@@ -162,34 +259,38 @@ export function useTurnPlaybackSessionStore() {
     orchestrationId: string | null,
     turnId: string | null,
     url: string,
+    messageId: string,
   ): void {
     const trimmed = url.trim();
     if (!trimmed) {
       return;
     }
-    const session = ensureSession(orchestrationId, turnId);
-    session.audio.url = trimmed;
-    session.audio.receivedAtMs = performance.now();
-    session.audio.terminal = "idle";
-    session.audio.reason = "";
-    session.audio.started = false;
-    session.audio.startedAtMs = null;
-    session.audio.durationMs = null;
+    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    segment.audio.url = trimmed;
+    segment.audio.receivedAtMs = performance.now();
+    segment.audio.released = false;
+    segment.audio.terminal = "idle";
+    segment.audio.reason = "";
+    segment.audio.started = false;
+    segment.audio.startedAtMs = null;
+    segment.audio.durationMs = null;
   }
 
   function markAudioStarted(
     orchestrationId: string | null,
     turnId: string | null,
+    messageId: string,
     startedAtMs?: number | null,
     durationMs?: number | null,
   ): void {
-    const session = ensureSession(orchestrationId, turnId);
-    session.audio.started = true;
-    session.audio.startedAtMs =
+    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    segment.audio.released = true;
+    segment.audio.started = true;
+    segment.audio.startedAtMs =
       typeof startedAtMs === "number" && Number.isFinite(startedAtMs)
         ? startedAtMs
         : performance.now();
-    session.audio.durationMs =
+    segment.audio.durationMs =
       typeof durationMs === "number" && Number.isFinite(durationMs)
         ? durationMs
         : null;
@@ -199,11 +300,22 @@ export function useTurnPlaybackSessionStore() {
     orchestrationId: string | null,
     turnId: string | null,
     terminal: Exclude<AudioTerminalState, "idle">,
+    messageId: string,
     reason = "",
   ): void {
-    const session = ensureSession(orchestrationId, turnId);
-    session.audio.terminal = terminal;
-    session.audio.reason = reason || session.audio.reason;
+    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    segment.audio.released = true;
+    segment.audio.terminal = terminal;
+    segment.audio.reason = reason || segment.audio.reason;
+  }
+
+  function markAudioReleased(
+    orchestrationId: string | null,
+    turnId: string | null,
+    messageId: string,
+  ): void {
+    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    segment.audio.released = true;
   }
 
   // ── motion ──────────────────────────────────────────────────────
@@ -212,59 +324,64 @@ export function useTurnPlaybackSessionStore() {
     orchestrationId: string | null,
     turnId: string | null,
     payload: NormalizedMotionPayload,
+    messageId: string,
   ): void {
     if (!payload) {
       return;
     }
-    const session = ensureSession(orchestrationId, turnId);
-    session.motion.payload = payload;
-    session.motion.receivedAtMs = performance.now();
-    session.motion.absent = false;
-    session.motion.released = false;
-    session.motion.started = false;
-    session.motion.completed = false;
+    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    segment.motion.payload = payload;
+    segment.motion.receivedAtMs = performance.now();
+    segment.motion.absent = false;
+    segment.motion.released = false;
+    segment.motion.started = false;
+    segment.motion.completed = false;
   }
 
   function markMotionAbsent(
     orchestrationId: string | null,
     turnId: string | null,
+    messageId: string,
   ): void {
-    const session = ensureSession(orchestrationId, turnId);
-    session.motion.payload = null;
-    session.motion.receivedAtMs = null;
-    session.motion.absent = true;
-    session.motion.released = false;
-    session.motion.started = false;
-    session.motion.completed = true;
+    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    segment.motion.payload = null;
+    segment.motion.receivedAtMs = null;
+    segment.motion.absent = true;
+    segment.motion.released = false;
+    segment.motion.started = false;
+    segment.motion.completed = true;
   }
 
   function markMotionReleased(
     orchestrationId: string | null,
     turnId: string | null,
+    messageId: string,
   ): void {
-    const session = ensureSession(orchestrationId, turnId);
-    session.motion.absent = false;
-    session.motion.released = true;
+    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    segment.motion.absent = false;
+    segment.motion.released = true;
   }
 
   function markMotionStarted(
     orchestrationId: string | null,
     turnId: string | null,
+    messageId: string,
   ): void {
-    const session = ensureSession(orchestrationId, turnId);
-    session.motion.absent = false;
-    session.motion.released = true;
-    session.motion.started = true;
+    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    segment.motion.absent = false;
+    segment.motion.released = true;
+    segment.motion.started = true;
   }
 
   function markMotionCompleted(
     orchestrationId: string | null,
     turnId: string | null,
+    messageId: string,
   ): void {
-    const session = ensureSession(orchestrationId, turnId);
-    session.motion.absent = false;
-    session.motion.released = true;
-    session.motion.completed = true;
+    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    segment.motion.absent = false;
+    segment.motion.released = true;
+    segment.motion.completed = true;
   }
 
   // ── backend ─────────────────────────────────────────────────────
@@ -405,8 +522,13 @@ export function useTurnPlaybackSessionStore() {
   return {
     state: readonly(state),
     ensureSession,
+    ensureSegment,
     getSession,
     getSessionById,
+    getSegment,
+    getActiveSegment,
+    getUnsettledSegments,
+    isSegmentSettled,
     getSessions,
     getActiveSession,
     setActiveSession,
@@ -414,6 +536,7 @@ export function useTurnPlaybackSessionStore() {
     markTextReleased,
     markTextDelivered,
     markAudioReceived,
+    markAudioReleased,
     markAudioStarted,
     markAudioTerminal,
     markMotionReceived,

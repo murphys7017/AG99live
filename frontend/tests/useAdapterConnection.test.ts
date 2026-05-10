@@ -2,6 +2,7 @@
 (globalThis as Record<string, unknown>).window = globalThis;
 
 import assert from "node:assert/strict";
+import { effectScope } from "vue";
 import { useAdapterConnection } from "../src/composables/useAdapterConnection.js";
 import { useTurnPlaybackSessionStore } from "../src/composables/useTurnPlaybackSessionStore.js";
 
@@ -68,6 +69,8 @@ function installWindowStubs(): void {
       removeItem: (key: string) => void;
       clear: () => void;
     };
+    addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
+    removeEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
     ag99desktop?: { getLocalAdapterHosts?: () => string[] };
   }).localStorage = {
     getItem: (key: string) => storage.get(key) ?? null,
@@ -81,6 +84,8 @@ function installWindowStubs(): void {
       storage.clear();
     },
   };
+  window.addEventListener = () => {};
+  window.removeEventListener = () => {};
   window.ag99desktop = {
     getLocalAdapterHosts: () => ["127.0.0.1"],
   };
@@ -92,243 +97,66 @@ function installWebSocketStub(): void {
   });
 }
 
-function lastHistoryText(adapter: ReturnType<typeof useAdapterConnection>): string {
-  const entries = adapter.state.historyEntries;
-  return entries[entries.length - 1]?.text ?? "";
-}
-
 function createConnectedAdapter() {
   FakeWebSocket.instances.length = 0;
   const sessionStore = useTurnPlaybackSessionStore();
-  const adapter = useAdapterConnection(sessionStore);
+  const scope = effectScope();
+  const adapter = scope.run(() => useAdapterConnection(sessionStore));
+  if (!adapter) {
+    throw new Error("expected adapter instance");
+  }
   adapter.connect();
   const socket = FakeWebSocket.instances[0];
   if (!socket) {
     throw new Error("expected fake websocket instance");
   }
   socket.emitOpen();
-  return { adapter, socket, sessionStore };
+  return { adapter, socket, sessionStore, scope };
 }
 
-function testInvalidJsonMessage(): void {
-  const { adapter, socket } = createConnectedAdapter();
-  const initialHistoryLength = adapter.state.historyEntries.length;
-  socket.emitMessage("{");
-  assert.equal(adapter.state.lastError, "收到无法解析的后端消息。");
-  assert.equal(adapter.state.statusMessage, "收到无法解析的后端消息。");
-  assert.equal(adapter.state.historyEntries.length, initialHistoryLength + 1);
-  assert.equal(lastHistoryText(adapter), "收到无法解析的后端消息。");
+function withConnectedAdapter(
+  fn: (harness: {
+    adapter: ReturnType<typeof useAdapterConnection>;
+    socket: FakeWebSocket;
+    sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>;
+  }) => void,
+): void {
+  const harness = createConnectedAdapter();
+  try {
+    fn(harness);
+  } finally {
+    harness.scope.stop();
+  }
 }
 
-function testVersionMismatchMessageDedupesHistory(): void {
-  const { adapter, socket } = createConnectedAdapter();
-  const payload = JSON.stringify({
-    type: "output.text",
-    version: "wrong",
-    message_id: "m-1",
+function lastHistoryText(adapter: ReturnType<typeof useAdapterConnection>): string {
+  const entries = adapter.state.historyEntries;
+  return entries[entries.length - 1]?.text ?? "";
+}
+
+function sendTurnStarted(socket: FakeWebSocket, turnId = "turn-1", orchestrationId = "orch-1"): void {
+  socket.emitMessage(JSON.stringify({
+    type: "control.turn_started",
+    version: "v2",
+    message_id: `start-${turnId}`,
     timestamp: "2026-05-08T00:00:00.000Z",
     session_id: "session-1",
-    turn_id: "turn-1",
-    source: "backend",
-    payload: { text: "hello", speaker_name: "", avatar: "" },
-  });
-  const initialHistoryLength = adapter.state.historyEntries.length;
-  socket.emitMessage(payload);
-  socket.emitMessage(payload);
-  assert.equal(
-    adapter.state.lastError,
-    "收到协议版本不匹配的消息（expected=v2, actual=wrong）。",
-  );
-  assert.equal(adapter.state.historyEntries.length, initialHistoryLength + 1);
-  assert.equal(lastHistoryText(adapter), "收到协议版本不匹配的消息（expected=v2, actual=wrong）。");
-}
-
-function testOutputTextMessageQueuesPendingText(): void {
-  const { adapter, socket } = createConnectedAdapter();
-  socket.emitMessage(JSON.stringify({
-    type: "output.text",
-    version: "v2",
-    message_id: "m-2",
-    timestamp: "2026-05-08T00:00:00.000Z",
-    session_id: "session-2",
-    turn_id: "turn-2",
-    orchestration_id: "orch-2",
-    source: "backend",
-    payload: {
-      text: " hello ",
-      speaker_name: "assistant",
-      avatar: "",
-    },
-  }));
-  assert.equal(adapter.state.pendingAssistantText, "hello");
-  assert.equal(adapter.state.pendingAssistantTextTurnId, "turn-2");
-  assert.equal(adapter.state.pendingAssistantTextOrchestrationId, "orch-2");
-  assert.equal(adapter.state.statusMessage, "已收到文本回复，等待同步播放。");
-}
-
-function testOutputTextFallsBackToCurrentSessionIdentity(): void {
-  const { adapter, socket, sessionStore } = createConnectedAdapter();
-  socket.emitMessage(JSON.stringify({
-    type: "control.turn_started",
-    version: "v2",
-    message_id: "m-turn-start-text",
-    timestamp: "2026-05-08T00:00:00.000Z",
-    session_id: "session-text-fallback",
-    turn_id: "turn-text-fallback",
-    orchestration_id: "orch-text-fallback",
+    turn_id: turnId,
+    orchestration_id: orchestrationId,
     source: "backend",
     payload: {},
   }));
-  socket.emitMessage(JSON.stringify({
-    type: "output.text",
-    version: "v2",
-    message_id: "m-text-fallback",
-    timestamp: "2026-05-08T00:00:01.000Z",
-    session_id: "session-text-fallback",
-    turn_id: "turn-text-fallback",
-    source: "backend",
-    payload: {
-      text: " fallback text ",
-      speaker_name: "assistant",
-      avatar: "",
-    },
-  }));
-
-  assert.equal(adapter.state.pendingAssistantText, "fallback text");
-  assert.equal(adapter.state.pendingAssistantTextTurnId, "turn-text-fallback");
-  assert.equal(adapter.state.pendingAssistantTextOrchestrationId, "orch-text-fallback");
-  const session = sessionStore.getSession("orch-text-fallback");
-  assert.ok(session);
-  assert.equal(session?.text.content, "fallback text");
 }
 
-function testOutputAudioFallsBackToCurrentSessionIdentity(): void {
-  const { adapter, socket, sessionStore } = createConnectedAdapter();
-  socket.emitMessage(JSON.stringify({
-    type: "control.turn_started",
-    version: "v2",
-    message_id: "m-turn-start-audio",
-    timestamp: "2026-05-08T00:00:00.000Z",
-    session_id: "session-audio-fallback",
-    turn_id: "turn-audio-fallback",
-    orchestration_id: "orch-audio-fallback",
-    source: "backend",
-    payload: {},
-  }));
-  socket.emitMessage(JSON.stringify({
-    type: "output.audio",
-    version: "v2",
-    message_id: "m-audio-fallback",
-    timestamp: "2026-05-08T00:00:01.000Z",
-    session_id: "session-audio-fallback",
-    turn_id: null,
-    orchestration_id: null,
-    source: "backend",
-    payload: {
-      text: " audio text ",
-      audio_url: "http://localhost/audio-fallback.wav",
-      speaker_name: "assistant",
-      avatar: "",
-    },
-  }));
-
-  assert.equal(adapter.state.pendingAudioUrl, "http://127.0.0.1/audio-fallback.wav");
-  assert.equal(adapter.state.pendingAudioTurnId, "turn-audio-fallback");
-  assert.equal(adapter.state.pendingAudioOrchestrationId, "orch-audio-fallback");
-  const session = sessionStore.getSession("orch-audio-fallback");
-  assert.ok(session);
-  assert.equal(session?.audio.url, "http://127.0.0.1/audio-fallback.wav");
-}
-
-function testTurnStartedResetsPendingState(): void {
-  const { adapter, socket } = createConnectedAdapter();
-  socket.emitMessage(JSON.stringify({
-    type: "output.text",
-    version: "v2",
-    message_id: "m-3",
-    timestamp: "2026-05-08T00:00:00.000Z",
-    session_id: "session-3",
-    turn_id: "turn-3",
-    orchestration_id: "orch-3",
-    source: "backend",
-    payload: {
-      text: "queued",
-      speaker_name: "assistant",
-      avatar: "",
-    },
-  }));
-  socket.emitMessage(JSON.stringify({
-    type: "control.turn_started",
-    version: "v2",
-    message_id: "m-4",
-    timestamp: "2026-05-08T00:00:01.000Z",
-    session_id: "session-3",
-    turn_id: "turn-4",
-    orchestration_id: "orch-4",
-    source: "backend",
-    payload: {},
-  }));
-  assert.equal(adapter.state.currentTurnId, "turn-4");
-  assert.equal(adapter.state.currentOrchestrationId, "orch-4");
-  assert.equal(adapter.state.pendingAssistantText, "");
-  assert.equal(adapter.state.pendingAudioUrl, "");
-  assert.equal(adapter.state.statusMessage, "后端正在处理这一轮对话。");
-}
-
-function testTurnFinishedFallbackMarksAbsentAudio(): void {
-  const { adapter, socket, sessionStore } = createConnectedAdapter();
-  socket.emitMessage(JSON.stringify({
-    type: "control.turn_started",
-    version: "v2",
-    message_id: "m-turn-start-finished",
-    timestamp: "2026-05-08T00:00:00.000Z",
-    session_id: "session-turn-finished",
-    turn_id: "turn-finished",
-    orchestration_id: "orch-finished",
-    source: "backend",
-    payload: {},
-  }));
-  socket.emitMessage(JSON.stringify({
-    type: "control.turn_finished",
-    version: "v2",
-    message_id: "m-turn-finished",
-    timestamp: "2026-05-08T00:00:01.000Z",
-    session_id: "session-turn-finished",
-    turn_id: null,
-    orchestration_id: null,
-    source: "backend",
-    payload: {
-      success: true,
-    },
-  }));
-
-  const session = sessionStore.getSession("orch-finished");
-  assert.ok(session);
-  assert.equal(session?.backend.turnFinished, true);
-  assert.equal(session?.audio.terminal, "absent");
-}
-
-function testMotionIntentFallsBackToCurrentSessionWithoutAnonymousSession(): void {
-  const { socket, sessionStore } = createConnectedAdapter();
-  socket.emitMessage(JSON.stringify({
-    type: "control.turn_started",
-    version: "v2",
-    message_id: "m-turn-start-motion",
-    timestamp: "2026-05-08T00:00:00.000Z",
-    session_id: "session-motion",
-    turn_id: "turn-motion",
-    orchestration_id: "orch-motion",
-    source: "backend",
-    payload: {},
-  }));
-  socket.emitMessage(JSON.stringify({
+function motionIntentEnvelope(messageId: string, turnId: string | null, orchestrationId: string | null) {
+  return {
     type: "engine.motion_intent",
     version: "v2",
-    message_id: "m-motion-valid",
-    timestamp: "2026-05-08T00:00:01.000Z",
-    session_id: "session-motion",
-    turn_id: null,
-    orchestration_id: null,
+    message_id: messageId,
+    timestamp: "2026-05-08T00:00:03.000Z",
+    session_id: "session-1",
+    turn_id: turnId,
+    orchestration_id: orchestrationId,
     source: "backend",
     payload: {
       mode: "preview",
@@ -344,77 +172,267 @@ function testMotionIntentFallsBackToCurrentSessionWithoutAnonymousSession(): voi
         },
       },
     },
-  }));
-
-  const session = sessionStore.getSession("orch-motion");
-  assert.ok(session);
-  assert.equal(session?.motion.payload?.kind, "semantic_intent");
-  assert.equal(
-    sessionStore.getSessions().some((item) => item.id.startsWith("ephemeral:")),
-    false,
-  );
+  };
 }
 
-function testInvalidMotionDoesNotRewritePreviousSessionMotion(): void {
-  const { socket, sessionStore } = createConnectedAdapter();
-  socket.emitMessage(JSON.stringify({
-    type: "control.turn_started",
-    version: "v2",
-    message_id: "m-turn-start-motion-old",
-    timestamp: "2026-05-08T00:00:00.000Z",
-    session_id: "session-motion-old",
-    turn_id: "turn-motion-old",
-    orchestration_id: "orch-motion-old",
-    source: "backend",
-    payload: {},
-  }));
-  socket.emitMessage(JSON.stringify({
-    type: "engine.motion_intent",
-    version: "v2",
-    message_id: "m-motion-old-valid",
-    timestamp: "2026-05-08T00:00:01.000Z",
-    session_id: "session-motion-old",
-    turn_id: null,
-    orchestration_id: null,
-    source: "backend",
-    payload: {
-      mode: "preview",
-      intent: {
-        schema_version: "engine.motion_intent.v2",
-        profile_id: "profile-2",
-        profile_revision: 2,
-        model_id: "model-2",
-        mode: "expressive",
-        emotion_label: "calm",
-        axes: {
-          smile: { value: 0.2 },
-        },
+function testInvalidJsonMessage(): void {
+  withConnectedAdapter(({ adapter, socket }) => {
+    const initialHistoryLength = adapter.state.historyEntries.length;
+    socket.emitMessage("{");
+    assert.equal(adapter.state.lastError, "收到无法解析的后端消息。");
+    assert.equal(adapter.state.statusMessage, "收到无法解析的后端消息。");
+    assert.equal(adapter.state.historyEntries.length, initialHistoryLength + 1);
+    assert.equal(lastHistoryText(adapter), "收到无法解析的后端消息。");
+  });
+}
+
+function testVersionMismatchMessageDedupesHistory(): void {
+  withConnectedAdapter(({ adapter, socket }) => {
+    const payload = JSON.stringify({
+      type: "output.text",
+      version: "wrong",
+      message_id: "m-1",
+      timestamp: "2026-05-08T00:00:00.000Z",
+      session_id: "session-1",
+      turn_id: "turn-1",
+      source: "backend",
+      payload: { text: "hello", speaker_name: "", avatar: "" },
+    });
+    const initialHistoryLength = adapter.state.historyEntries.length;
+    socket.emitMessage(payload);
+    socket.emitMessage(payload);
+    assert.equal(
+      adapter.state.lastError,
+      "收到协议版本不匹配的消息（expected=v2, actual=wrong）。",
+    );
+    assert.equal(adapter.state.historyEntries.length, initialHistoryLength + 1);
+  });
+}
+
+function testInvalidPayloadDoesNotEnterPlaybackState(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-invalid-payload", "orch-invalid-payload");
+    const initialHistoryLength = adapter.state.historyEntries.length;
+    socket.emitMessage(JSON.stringify({
+      type: "output.text",
+      version: "v2",
+      message_id: "m-invalid-payload",
+      timestamp: "2026-05-08T00:00:01.000Z",
+      session_id: "session-invalid",
+      turn_id: "turn-invalid-payload",
+      orchestration_id: "orch-invalid-payload",
+      source: "backend",
+      payload: { text: 123 },
+    }));
+
+    assert.equal(
+      adapter.state.lastError,
+      "收到非法协议载荷（type=output.text, path=payload.text, expected=string）。",
+    );
+    assert.equal(adapter.state.pendingAssistantTexts.has("m-invalid-payload"), false);
+    assert.equal(
+      sessionStore.getSession("orch-invalid-payload")?.segments.has("m-invalid-payload"),
+      false,
+    );
+    assert.equal(adapter.state.historyEntries.length, initialHistoryLength + 1);
+  });
+}
+
+function testTextAudioMotionWithSameMessageIdShareSegment(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-segment", "orch-segment");
+    socket.emitMessage(JSON.stringify({
+      type: "output.text",
+      version: "v2",
+      message_id: "m-segment-1",
+      timestamp: "2026-05-08T00:00:01.000Z",
+      session_id: "session-segment",
+      turn_id: "turn-segment",
+      orchestration_id: "orch-segment",
+      source: "backend",
+      payload: { text: " segment text ", speaker_name: "assistant", avatar: "" },
+    }));
+    socket.emitMessage(JSON.stringify({
+      type: "output.audio",
+      version: "v2",
+      message_id: "m-segment-1",
+      timestamp: "2026-05-08T00:00:02.000Z",
+      session_id: "session-segment",
+      turn_id: "turn-segment",
+      orchestration_id: "orch-segment",
+      source: "backend",
+      payload: {
+        text: " audio fallback should not overwrite ",
+        audio_url: "http://localhost/segment.wav",
+        speaker_name: "assistant",
+        avatar: "",
       },
-    },
-  }));
+    }));
+    socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-segment-1", "turn-segment", "orch-segment")));
 
-  const beforeSessionCount = sessionStore.getSessions().length;
-  const previousPayload = sessionStore.getSession("orch-motion-old")?.motion.payload;
+    assert.equal(adapter.state.pendingAssistantTexts.get("m-segment-1")?.text, "segment text");
+    assert.equal(
+      adapter.state.pendingAudios.get("m-segment-1")?.audioUrl,
+      "http://127.0.0.1/segment.wav",
+    );
 
-  socket.emitMessage(JSON.stringify({
-    type: "engine.motion_intent",
-    version: "v2",
-    message_id: "m-motion-invalid",
-    timestamp: "2026-05-08T00:00:02.000Z",
-    session_id: "session-motion-old",
-    turn_id: null,
-    orchestration_id: null,
-    source: "backend",
-    payload: {
-      mode: "preview",
-      intent: {
-        schema_version: "engine.motion_intent.v1",
+    const session = sessionStore.getSession("orch-segment");
+    assert.ok(session);
+    assert.equal(session?.segments.size, 1);
+    assert.deepEqual(session?.segmentOrder, ["m-segment-1"]);
+    const segment = session?.segments.get("m-segment-1");
+    assert.equal(segment?.text.content, "segment text");
+    assert.equal(segment?.audio.url, "http://127.0.0.1/segment.wav");
+    assert.equal(segment?.motion.payload?.kind, "semantic_intent");
+  });
+}
+
+function testMultipleMessageIdsDoNotOverwritePendingItems(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-multi", "orch-multi");
+    for (const [messageId, text] of [["m-a", "First"], ["m-b", "Second"]] as const) {
+      socket.emitMessage(JSON.stringify({
+        type: "output.text",
+        version: "v2",
+        message_id: messageId,
+        timestamp: "2026-05-08T00:00:01.000Z",
+        session_id: "session-multi",
+        turn_id: "turn-multi",
+        orchestration_id: "orch-multi",
+        source: "backend",
+        payload: { text, speaker_name: "assistant", avatar: "" },
+      }));
+    }
+
+    assert.equal(adapter.state.pendingAssistantTexts.get("m-a")?.text, "First");
+    assert.equal(adapter.state.pendingAssistantTexts.get("m-b")?.text, "Second");
+    assert.deepEqual(sessionStore.getSession("orch-multi")?.segmentOrder, ["m-a", "m-b"]);
+  });
+}
+
+function testFallbackIdentityWritesCurrentSessionSegment(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-fallback", "orch-fallback");
+    socket.emitMessage(JSON.stringify({
+      type: "output.audio",
+      version: "v2",
+      message_id: "m-audio-fallback",
+      timestamp: "2026-05-08T00:00:01.000Z",
+      session_id: "session-fallback",
+      turn_id: null,
+      orchestration_id: null,
+      source: "backend",
+      payload: {
+        text: " audio text ",
+        audio_url: "http://localhost/audio-fallback.wav",
+        speaker_name: "assistant",
+        avatar: "",
       },
-    },
-  }));
+    }));
 
-  assert.deepEqual(sessionStore.getSession("orch-motion-old")?.motion.payload, previousPayload);
-  assert.equal(sessionStore.getSessions().length, beforeSessionCount);
+    assert.equal(adapter.state.pendingAudios.get("m-audio-fallback")?.turnId, "turn-fallback");
+    assert.equal(adapter.state.pendingAudios.get("m-audio-fallback")?.orchestrationId, "orch-fallback");
+    const segment = sessionStore.getSession("orch-fallback")?.segments.get("m-audio-fallback");
+    assert.equal(segment?.audio.url, "http://127.0.0.1/audio-fallback.wav");
+    assert.equal(segment?.text.content, "audio text");
+  });
+}
+
+function testTurnStartedResetsPendingMaps(): void {
+  withConnectedAdapter(({ adapter, socket }) => {
+    socket.emitMessage(JSON.stringify({
+      type: "output.text",
+      version: "v2",
+      message_id: "m-old",
+      timestamp: "2026-05-08T00:00:00.000Z",
+      session_id: "session-old",
+      turn_id: "turn-old",
+      orchestration_id: "orch-old",
+      source: "backend",
+      payload: { text: "queued", speaker_name: "assistant", avatar: "" },
+    }));
+    sendTurnStarted(socket, "turn-new", "orch-new");
+    assert.equal(adapter.state.currentTurnId, "turn-new");
+    assert.equal(adapter.state.currentOrchestrationId, "orch-new");
+    assert.equal(adapter.state.pendingAssistantTexts.size, 0);
+    assert.equal(adapter.state.pendingAudios.size, 0);
+  });
+}
+
+function testTurnFinishedMarksMissingSegmentAudioAbsent(): void {
+  withConnectedAdapter(({ socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-finished", "orch-finished");
+    socket.emitMessage(JSON.stringify({
+      type: "output.text",
+      version: "v2",
+      message_id: "m-no-audio",
+      timestamp: "2026-05-08T00:00:01.000Z",
+      session_id: "session-finished",
+      turn_id: "turn-finished",
+      orchestration_id: "orch-finished",
+      source: "backend",
+      payload: { text: "no audio", speaker_name: "assistant", avatar: "" },
+    }));
+    socket.emitMessage(JSON.stringify({
+      type: "control.turn_finished",
+      version: "v2",
+      message_id: "m-turn-finished",
+      timestamp: "2026-05-08T00:00:02.000Z",
+      session_id: "session-finished",
+      turn_id: null,
+      orchestration_id: null,
+      source: "backend",
+      payload: { success: true },
+    }));
+
+    const session = sessionStore.getSession("orch-finished");
+    assert.equal(session?.backend.turnFinished, true);
+    assert.equal(session?.segments.get("m-no-audio")?.audio.terminal, "absent");
+  });
+}
+
+function testMotionFallbackDoesNotCreateAnonymousSession(): void {
+  withConnectedAdapter(({ socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-motion", "orch-motion");
+    socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-motion", null, null)));
+
+    const session = sessionStore.getSession("orch-motion");
+    assert.ok(session);
+    assert.equal(session?.segments.get("m-motion")?.motion.payload?.kind, "semantic_intent");
+    assert.equal(sessionStore.getSessions().some((item) => item.id.startsWith("ephemeral:")), false);
+  });
+}
+
+function testInvalidMotionDoesNotRewritePreviousSegment(): void {
+  withConnectedAdapter(({ socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-motion-old", "orch-motion-old");
+    socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-motion-valid", null, null)));
+
+    const beforeSessionCount = sessionStore.getSessions().length;
+    const previousPayload =
+      sessionStore.getSession("orch-motion-old")?.segments.get("m-motion-valid")?.motion.payload;
+
+    socket.emitMessage(JSON.stringify({
+      type: "engine.motion_intent",
+      version: "v2",
+      message_id: "m-motion-invalid",
+      timestamp: "2026-05-08T00:00:04.000Z",
+      session_id: "session-1",
+      turn_id: null,
+      orchestration_id: null,
+      source: "backend",
+      payload: {
+        mode: "preview",
+        intent: { schema_version: "engine.motion_intent.v1" },
+      },
+    }));
+
+    assert.deepEqual(
+      sessionStore.getSession("orch-motion-old")?.segments.get("m-motion-valid")?.motion.payload,
+      previousPayload,
+    );
+    assert.equal(sessionStore.getSessions().length, beforeSessionCount);
+  });
 }
 
 function run(): void {
@@ -423,13 +441,14 @@ function run(): void {
 
   testInvalidJsonMessage();
   testVersionMismatchMessageDedupesHistory();
-  testOutputTextMessageQueuesPendingText();
-  testOutputTextFallsBackToCurrentSessionIdentity();
-  testOutputAudioFallsBackToCurrentSessionIdentity();
-  testTurnStartedResetsPendingState();
-  testTurnFinishedFallbackMarksAbsentAudio();
-  testMotionIntentFallsBackToCurrentSessionWithoutAnonymousSession();
-  testInvalidMotionDoesNotRewritePreviousSessionMotion();
+  testInvalidPayloadDoesNotEnterPlaybackState();
+  testTextAudioMotionWithSameMessageIdShareSegment();
+  testMultipleMessageIdsDoNotOverwritePendingItems();
+  testFallbackIdentityWritesCurrentSessionSegment();
+  testTurnStartedResetsPendingMaps();
+  testTurnFinishedMarksMissingSegmentAudioAbsent();
+  testMotionFallbackDoesNotCreateAnonymousSession();
+  testInvalidMotionDoesNotRewritePreviousSegment();
 
   console.log("useAdapterConnection tests passed");
 }

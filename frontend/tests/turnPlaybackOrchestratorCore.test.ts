@@ -39,24 +39,26 @@ function createHarness() {
       }
     },
     releaseText: (
+      messageId: string,
       turnId: string | null,
       orchestrationId: string | null,
     ): boolean => {
-      events.push(`text:${turnId ?? ""}:${orchestrationId ?? ""}`);
+      events.push(`text:${messageId}:${turnId ?? ""}:${orchestrationId ?? ""}`);
       return true;
     },
     releaseAudio: (
+      messageId: string,
       turnId: string | null,
       orchestrationId: string | null,
     ): void => {
-      events.push(`audio:${turnId ?? ""}:${orchestrationId ?? ""}`);
+      events.push(`audio:${messageId}:${turnId ?? ""}:${orchestrationId ?? ""}`);
     },
     releaseMotion: (
       payload: unknown,
       context: TurnPlaybackReleaseContext,
     ): void => {
       events.push(
-        `motion:${String(payload)}:${context.turnId ?? ""}:${context.orchestrationId ?? ""}`,
+        `motion:${String(payload)}:${context.messageId}:${context.turnId ?? ""}:${context.orchestrationId ?? ""}`,
       );
     },
   });
@@ -87,22 +89,22 @@ function createHarness() {
 function testTextAudioMotionReadyReleaseTogether(): void {
   const harness = createHarness();
 
-  harness.core.markTextReady("turn-1", "orch-1");
-  harness.core.markAudioReady("turn-1", "orch-1");
-  harness.core.markMotionReady("turn-1", "orch-1", "motion-1", 42);
+  harness.core.markTextReady("msg-1", "turn-1", "orch-1");
+  harness.core.markAudioReady("msg-1", "turn-1", "orch-1");
+  harness.core.markMotionReady("msg-1", "turn-1", "orch-1", "motion-1", 42);
 
   assert.deepEqual(harness.events, [
-    "text:turn-1:orch-1",
-    "motion:motion-1:turn-1:orch-1",
-    "audio:turn-1:orch-1",
+    "text:msg-1:turn-1:orch-1",
+    "motion:motion-1:msg-1:turn-1:orch-1",
+    "audio:msg-1:turn-1:orch-1",
   ]);
 }
 
 function testAudioWaitsForLateMotionWithinWindow(): void {
   const harness = createHarness();
 
-  harness.core.markTextReady("turn-1", "orch-1");
-  harness.core.markAudioReady("turn-1", "orch-1");
+  harness.core.markTextReady("msg-1", "turn-1", "orch-1");
+  harness.core.markAudioReady("msg-1", "turn-1", "orch-1");
 
   assert.deepEqual(harness.events, []);
   assert.equal(harness.pendingTasks().length, 1);
@@ -110,70 +112,70 @@ function testAudioWaitsForLateMotionWithinWindow(): void {
   harness.advanceTo(AUDIO_MOTION_SYNC_WAIT_MS - 1);
   assert.deepEqual(harness.events, []);
 
-  harness.core.markMotionReady("turn-1", "orch-1", "motion-1", 100);
+  harness.core.markMotionReady("msg-1", "turn-1", "orch-1", "motion-1", 100);
   assert.deepEqual(harness.events, [
-    "text:turn-1:orch-1",
-    "motion:motion-1:turn-1:orch-1",
-    "audio:turn-1:orch-1",
+    "text:msg-1:turn-1:orch-1",
+    "motion:motion-1:msg-1:turn-1:orch-1",
+    "audio:msg-1:turn-1:orch-1",
   ]);
 }
 
 function testAudioMotionWaitTimeoutReleasesTextAndAudio(): void {
   const harness = createHarness();
 
-  harness.core.markTextReady("turn-1", "orch-1");
-  harness.core.markAudioReady("turn-1", "orch-1");
+  harness.core.markTextReady("msg-1", "turn-1", "orch-1");
+  harness.core.markAudioReady("msg-1", "turn-1", "orch-1");
   harness.advanceTo(AUDIO_MOTION_SYNC_WAIT_MS);
 
   assert.deepEqual(harness.events, [
-    "text:turn-1:orch-1",
-    "audio:turn-1:orch-1",
+    "text:msg-1:turn-1:orch-1",
+    "audio:msg-1:turn-1:orch-1",
   ]);
 }
 
 function testLateMotionAfterReleaseIsForwarded(): void {
   const harness = createHarness();
 
-  harness.core.markTextReady("turn-1", "orch-1");
-  harness.core.markAudioReady("turn-1", "orch-1");
+  harness.core.markTextReady("msg-1", "turn-1", "orch-1");
+  harness.core.markAudioReady("msg-1", "turn-1", "orch-1");
   harness.advanceTo(AUDIO_MOTION_SYNC_WAIT_MS);
-  harness.core.markMotionReady("turn-1", "orch-1", "motion-1", 900);
+  harness.core.markMotionReady("msg-1", "turn-1", "orch-1", "motion-1", 900);
 
   assert.deepEqual(harness.events, [
-    "text:turn-1:orch-1",
-    "audio:turn-1:orch-1",
-    "motion:motion-1:turn-1:orch-1",
+    "text:msg-1:turn-1:orch-1",
+    "audio:msg-1:turn-1:orch-1",
+    "motion:motion-1:msg-1:turn-1:orch-1",
   ]);
 }
 
 function testTextOnlyReleasesAfterShortWait(): void {
   const harness = createHarness();
 
-  harness.core.markTextReady("turn-1", "orch-1");
+  harness.core.markTextReady("msg-1", "turn-1", "orch-1");
   harness.advanceTo(TEXT_ONLY_RELEASE_WAIT_MS);
 
-  assert.deepEqual(harness.events, ["text:turn-1:orch-1"]);
+  assert.deepEqual(harness.events, ["text:msg-1:turn-1:orch-1"]);
 }
 
 function testNoAudioWithMotionReleasesTextAndMotion(): void {
   const harness = createHarness();
 
-  harness.core.markTextReady("turn-1", "orch-1");
-  harness.core.markMotionReady("turn-1", "orch-1", "motion-1", 20);
-  harness.core.markNoAudioConfirmed("turn-1", "orch-1");
+  harness.core.markTextReady("msg-1", "turn-1", "orch-1");
+  harness.core.markMotionReady("msg-1", "turn-1", "orch-1", "motion-1", 20);
+  harness.core.markNoAudioConfirmed("msg-1", "turn-1", "orch-1");
 
   assert.deepEqual(harness.events, [
-    "text:turn-1:orch-1",
-    "motion:motion-1:turn-1:orch-1",
+    "text:msg-1:turn-1:orch-1",
+    "motion:motion-1:msg-1:turn-1:orch-1",
   ]);
 }
 
 function testDifferentOrchestrationGroupsDoNotCrossRelease(): void {
   const harness = createHarness();
 
-  harness.core.markTextReady("turn-1", "orch-1");
-  harness.core.markAudioReady("turn-1", "orch-2");
-  harness.core.markMotionReady("turn-1", "orch-2", "motion-2", 10);
+  harness.core.markTextReady("msg-1", "turn-1", "orch-1");
+  harness.core.markAudioReady("msg-2", "turn-1", "orch-2");
+  harness.core.markMotionReady("msg-2", "turn-1", "orch-2", "motion-2", 10);
 
   assert.deepEqual(harness.events, []);
 }
@@ -181,15 +183,28 @@ function testDifferentOrchestrationGroupsDoNotCrossRelease(): void {
 function testMissingIdentifiersDoNotShareUnknownGroup(): void {
   const harness = createHarness();
 
-  harness.core.markTextReady(null, null);
-  harness.core.markAudioReady(null, null);
-  harness.core.markMotionReady(null, null, "motion-anonymous", 10);
+  harness.core.markTextReady("msg-text", null, null);
+  harness.core.markAudioReady("msg-audio", null, null);
+  harness.core.markMotionReady("msg-motion", null, null, "motion-anonymous", 10);
 
   assert.deepEqual(harness.events, []);
   assert.equal(harness.pendingTasks().length, 1);
 
   harness.advanceTo(TEXT_ONLY_RELEASE_WAIT_MS);
-  assert.deepEqual(harness.events, ["text::"]);
+  assert.deepEqual(harness.events, ["text:msg-text::"]);
+}
+
+function testClearSegmentRemovesReleasedGroup(): void {
+  const harness = createHarness();
+
+  harness.core.markTextReady("msg-1", "turn-1", "orch-1");
+  assert.equal(harness.core.getGroupCount(), 1);
+
+  harness.core.clearSegment("msg-1");
+  assert.equal(harness.core.getGroupCount(), 0);
+
+  harness.advanceTo(TEXT_ONLY_RELEASE_WAIT_MS);
+  assert.deepEqual(harness.events, []);
 }
 
 function run(): void {
@@ -201,6 +216,7 @@ function run(): void {
   testNoAudioWithMotionReleasesTextAndMotion();
   testDifferentOrchestrationGroupsDoNotCrossRelease();
   testMissingIdentifiersDoNotShareUnknownGroup();
+  testClearSegmentRemovesReleasedGroup();
   console.log("turnPlaybackOrchestratorCore tests passed");
 }
 

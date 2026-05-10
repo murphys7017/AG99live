@@ -53,6 +53,7 @@ function testOutputTextUsesEnvelopeIdentity(): void {
   }
   assert.equal(event.turnId, "turn-1");
   assert.equal(event.orchestrationId, "orch-1");
+  assert.equal(event.messageId, "m-1");
   assert.equal(event.text, "hello");
 }
 
@@ -76,6 +77,7 @@ function testOutputAudioFallsBackToCurrentOrchestration(): void {
   }
   assert.equal(event.turnId, "turn-2");
   assert.equal(event.orchestrationId, "current-orch");
+  assert.equal(event.messageId, "m-1");
   assert.equal(event.text, "hi");
   assert.equal(event.audioUrl, "https://example.com/a.wav");
 }
@@ -161,6 +163,41 @@ function testEngineMotionFallsBackCurrentThenAudio(): void {
   }
   assert.equal(event.turnId, "current-turn");
   assert.equal(event.orchestrationId, "audio-orch");
+  assert.equal(event.messageId, "m-1");
+}
+
+function testMissingMessageIdUsesUniqueLegacySegmentIds(): void {
+  const envelopeA = makeEnvelope("output.text", {
+    text: " first ",
+    speaker_name: "assistant",
+    avatar: "",
+  }, {
+    turnId: "turn-legacy",
+    orchestrationId: "orch-legacy",
+  });
+  const envelopeB = makeEnvelope("engine.motion_intent", {
+    mode: "preview",
+    intent: {
+      schema_version: "engine.motion_intent.v2",
+    },
+  }, {
+    turnId: "turn-legacy",
+    orchestrationId: "orch-legacy",
+  });
+  envelopeA.message_id = "";
+  envelopeB.message_id = "";
+
+  const eventA = mapInboundEnvelopeToEvent(envelopeA, defaultContext());
+  const eventB = mapInboundEnvelopeToEvent(envelopeB, defaultContext());
+
+  assert.equal(eventA.kind, "output_text");
+  assert.equal(eventB.kind, "engine_motion_payload");
+  if (eventA.kind !== "output_text" || eventB.kind !== "engine_motion_payload") {
+    throw new Error("expected segment events");
+  }
+  assert.match(eventA.messageId, /^legacy:output_text:orch-legacy:/);
+  assert.match(eventB.messageId, /^legacy:engine_motion_payload:orch-legacy:/);
+  assert.notEqual(eventA.messageId, eventB.messageId);
 }
 
 function testUnhandledTypeReturnsUnhandled(): void {
@@ -172,6 +209,54 @@ function testUnhandledTypeReturnsUnhandled(): void {
   assert.equal(event.kind, "unhandled");
 }
 
+function testInvalidOutputTextPayloadReturnsProtocolError(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("output.text", {
+      text: 123,
+    }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
+  }
+  assert.equal(event.error.code, "invalid_payload");
+  assert.equal(event.error.path, "payload.text");
+  assert.equal(event.warningKey, "payload:output.text:payload.text");
+}
+
+function testInvalidTurnFinishedReasonReturnsProtocolError(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("control.turn_finished", {
+      success: true,
+      reason: 123,
+    }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
+  }
+  assert.equal(event.error.path, "payload.reason");
+}
+
+function testInvalidHistoryCreatedPayloadReturnsProtocolError(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.history_created", {
+      history_uid: null,
+    }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
+  }
+  assert.equal(event.error.path, "payload.history_uid");
+}
+
 function run(): void {
   testOutputTextUsesEnvelopeIdentity();
   testOutputAudioFallsBackToCurrentOrchestration();
@@ -179,7 +264,11 @@ function run(): void {
   testTurnStartedDoesNotInheritCurrentIdentity();
   testInterruptUsesCurrentIdentity();
   testEngineMotionFallsBackCurrentThenAudio();
+  testMissingMessageIdUsesUniqueLegacySegmentIds();
   testUnhandledTypeReturnsUnhandled();
+  testInvalidOutputTextPayloadReturnsProtocolError();
+  testInvalidTurnFinishedReasonReturnsProtocolError();
+  testInvalidHistoryCreatedPayloadReturnsProtocolError();
 
   console.log("inboundEvents tests passed");
 }

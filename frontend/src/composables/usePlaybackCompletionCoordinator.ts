@@ -6,7 +6,7 @@ import type { useAdapterConnection } from "./useAdapterConnection";
 import type { usePreviewMotionPlayer } from "./usePreviewMotionPlayer";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
 import { isPlaybackLocallySettled } from "../turn-playback/selectors.js";
-import { orchestrationIdFromSessionId } from "../turn-playback/session.js";
+import type { TurnPlaybackSegment, TurnPlaybackSession } from "../turn-playback/session.js";
 import { cloneJson } from "../utils/cloneJson.js";
 
 type AdapterConnection = ReturnType<typeof useAdapterConnection>;
@@ -21,7 +21,7 @@ interface PlaybackCompletionCoordinatorOptions {
   adapter: AdapterConnection;
   motionPlayer: PreviewMotionPlayer;
   selectedModel: Ref<ModelSummary | null>;
-  onAudioPlaybackStarted: (turnId: string | null) => void;
+  onAudioPlaybackStarted: (turnId: string | null, messageId: string) => void;
   initialMotionPlaybackRecords?: readonly DesktopMotionPlaybackRecord[];
   maxMotionPlaybackRecords?: number;
 }
@@ -38,54 +38,79 @@ export function usePlaybackCompletionCoordinator(
 
   // Lightweight internal state — session is the single source of truth
   const settlementTimers = new Map<string, number>();
-  const notifiedAudioStartedSessions = new Set<string>();
+  const notifiedAudioStartedSegments = new Set<string>();
   const ackedSessions = new Set<string>();
-  let currentMotionSessionId: string | null = null;
+  const activeMotionSegments = new Set<string>();
 
   // ── helpers ─────────────────────────────────────────────────────
-
-  function getActiveSession() {
-    return options.sessionStore.getActiveSession();
-  }
 
   function getSession(sessionId: string | null) {
     return sessionId ? options.sessionStore.getSessionById(sessionId) : undefined;
   }
 
-  function clearSettlementTimer(sessionId: string): void {
-    const timer = settlementTimers.get(sessionId);
+  function segmentKey(sessionId: string, messageId: string): string {
+    return `${sessionId}::${messageId}`;
+  }
+
+  function findSegmentByKey(key: string | null): {
+    session: TurnPlaybackSession;
+    segment: TurnPlaybackSegment;
+  } | null {
+    if (!key) {
+      return null;
+    }
+    const delimiterIndex = key.indexOf("::");
+    if (delimiterIndex < 0) {
+      return null;
+    }
+    const sessionId = key.slice(0, delimiterIndex);
+    const messageId = key.slice(delimiterIndex + 2);
+    const session = getSession(sessionId);
+    const segment = session?.segments.get(messageId);
+    return session && segment ? { session, segment } : null;
+  }
+
+  function clearSettlementTimer(key: string): void {
+    const timer = settlementTimers.get(key);
     if (timer) {
       window.clearTimeout(timer);
-      settlementTimers.delete(sessionId);
+      settlementTimers.delete(key);
     }
   }
 
   function resetPlaybackCoordination(): void {
-    for (const sessionId of settlementTimers.keys()) {
-      clearSettlementTimer(sessionId);
+    for (const key of settlementTimers.keys()) {
+      clearSettlementTimer(key);
     }
-    notifiedAudioStartedSessions.clear();
+    notifiedAudioStartedSegments.clear();
     ackedSessions.clear();
-    currentMotionSessionId = null;
+    activeMotionSegments.clear();
   }
 
-  function isPlaybackAckRequired(sessionId: string): boolean {
-    const s = getSession(sessionId);
-    if (!s) return false;
-    return s.audio.terminal !== "idle";
+  function isPlaybackAckRequired(session: TurnPlaybackSession): boolean {
+    return session.segmentOrder.some((segmentId) => {
+      const segment = session.segments.get(segmentId);
+      return segment ? segment.audio.terminal !== "idle" : false;
+    });
   }
 
   function finalizeCompletion(sessionId: string): void {
     const s = getSession(sessionId);
     if (!s) return;
-    clearSettlementTimer(sessionId);
-    const orchId = orchestrationIdFromSessionId(s.id);
+    for (const segmentId of s.segmentOrder) {
+      clearSettlementTimer(segmentKey(sessionId, segmentId));
+    }
+    const firstSegment = s.segmentOrder
+      .map((id) => s.segments.get(id))
+      .find(Boolean);
+    const orchId = firstSegment?.orchestrationId ?? null;
     options.adapter.clearPlaybackGroupContext(s.turnId, orchId);
     options.sessionStore.markPhase(orchId, s.turnId, "completed");
   }
 
   function maybeFlushPlaybackCompletion(
     sessionId: string,
+    messageId: string | null = null,
     reason?: string,
   ): void {
     const s = getSession(sessionId);
@@ -93,44 +118,56 @@ export function usePlaybackCompletionCoordinator(
 
     // Never re-ack a session that already reached a terminal phase
     if (s.phase === "completed" || s.phase === "failed") {
-      clearSettlementTimer(sessionId);
+      if (messageId) {
+        clearSettlementTimer(segmentKey(sessionId, messageId));
+      }
       return;
     }
 
-    if (
-      s.audio.terminal !== "idle"
-      && s.text.delivered
-      && !s.motion.absent
-      && !s.motion.started
-      && !s.motion.completed
-    ) {
-      schedulePlaybackSettlementWindow(sessionId);
-      return;
+    if (messageId) {
+      const segment = s.segments.get(messageId);
+      if (
+        segment
+        && segment.audio.terminal !== "idle"
+        && segment.text.delivered
+        && !segment.motion.absent
+        && !segment.motion.started
+        && !segment.motion.completed
+      ) {
+        schedulePlaybackSettlementWindow(sessionId, messageId);
+        return;
+      }
     }
 
     if (!isPlaybackLocallySettled(s)) {
       return;
     }
 
-    if (!isPlaybackAckRequired(sessionId)) {
-      if (!s.backend.turnFinished) {
-        return;
-      }
+    if (!s.backend.turnFinished) {
+      return;
+    }
+
+    if (!isPlaybackAckRequired(s)) {
       finalizeCompletion(sessionId);
       return;
     }
 
     if (ackedSessions.has(sessionId)) {
-      if (!s.backend.turnFinished) {
-        return;
-      }
       finalizeCompletion(sessionId);
       return;
     }
 
-    const orchId = orchestrationIdFromSessionId(s.id);
-    const success = s.audio.terminal !== "failed";
-    clearSettlementTimer(sessionId);
+    const firstSegment = s.segmentOrder
+      .map((id) => s.segments.get(id))
+      .find(Boolean);
+    const orchId = firstSegment?.orchestrationId ?? null;
+    const success = s.segmentOrder.every((segmentId) => {
+      const segment = s.segments.get(segmentId);
+      return segment ? segment.audio.terminal !== "failed" : true;
+    });
+    for (const segmentId of s.segmentOrder) {
+      clearSettlementTimer(segmentKey(sessionId, segmentId));
+    }
     options.sessionStore.markPhase(orchId, s.turnId, "settling");
     ackedSessions.add(sessionId);
     void options.adapter.sendPlaybackFinishedForCurrentGroup(
@@ -139,42 +176,51 @@ export function usePlaybackCompletionCoordinator(
       success,
       reason,
     );
+    finalizeCompletion(sessionId);
   }
 
-  function schedulePlaybackSettlementWindow(sessionId: string): void {
-    if (settlementTimers.has(sessionId)) {
+  function schedulePlaybackSettlementWindow(sessionId: string, messageId: string): void {
+    const key = segmentKey(sessionId, messageId);
+    if (settlementTimers.has(key)) {
       return;
     }
     const timer = window.setTimeout(() => {
-      settlementTimers.delete(sessionId);
+      settlementTimers.delete(key);
       const session = getSession(sessionId);
+      const segment = session?.segments.get(messageId);
       if (
         session
-        && session.audio.terminal !== "idle"
-        && !session.motion.started
-        && !session.motion.completed
-        && session.motion.payload === null
+        && segment
+        && segment.audio.terminal !== "idle"
+        && !segment.motion.started
+        && !segment.motion.completed
+        && segment.motion.payload === null
       ) {
         options.sessionStore.markMotionAbsent(
-          orchestrationIdFromSessionId(session.id),
-          session.turnId,
+          segment.orchestrationId,
+          segment.turnId,
+          segment.messageId,
         );
       }
-      maybeFlushPlaybackCompletion(sessionId, "audio_and_motion_settled");
+      maybeFlushPlaybackCompletion(sessionId, messageId, "audio_and_motion_settled");
     }, PLAYBACK_SETTLEMENT_WINDOW_MS);
-    settlementTimers.set(sessionId, timer);
+    settlementTimers.set(key, timer);
   }
 
   function recordMotionPlayback(event: ModelEnginePlanStartedEvent): void {
-    currentMotionSessionId =
-      typeof event.orchestrationId === "string" && event.orchestrationId.trim()
-        ? `orch:${event.orchestrationId.trim()}`
-        : typeof event.turnId === "string" && event.turnId.trim()
-          ? `turn:${event.turnId.trim()}`
-          : null;
+    const session =
+      options.sessionStore.getSessions().find((candidate) =>
+        candidate.segmentOrder.some((segmentId) => segmentId === event.messageId),
+      );
+    if (session) {
+      activeMotionSegments.add(segmentKey(session.id, event.messageId));
+    }
 
-    // Write to session
-    options.sessionStore.markMotionStarted(event.orchestrationId, event.turnId);
+    options.sessionStore.markMotionStarted(
+      event.orchestrationId,
+      event.turnId,
+      event.messageId,
+    );
 
     const now = new Date();
     const record: DesktopMotionPlaybackRecord = {
@@ -211,16 +257,27 @@ export function usePlaybackCompletionCoordinator(
     () => options.sessionStore.getSessions().map((session) => ({
       id: session.id,
       turnId: session.turnId,
-      audioStarted: session.audio.started,
-      audioStartedAtMs: session.audio.startedAtMs,
+      segments: session.segmentOrder.map((segmentId) => {
+        const segment = session.segments.get(segmentId);
+        return {
+          messageId: segmentId,
+          turnId: segment?.turnId ?? null,
+          audioStarted: segment?.audio.started ?? false,
+          audioStartedAtMs: segment?.audio.startedAtMs ?? null,
+        };
+      }),
     })),
     () => {
       for (const session of options.sessionStore.getSessions()) {
-        if (!session.audio.started || notifiedAudioStartedSessions.has(session.id)) {
-          continue;
+        for (const segmentId of session.segmentOrder) {
+          const segment = session.segments.get(segmentId);
+          const key = segmentKey(session.id, segmentId);
+          if (!segment?.audio.started || notifiedAudioStartedSegments.has(key)) {
+            continue;
+          }
+          notifiedAudioStartedSegments.add(key);
+          options.onAudioPlaybackStarted(segment.turnId, segment.messageId);
         }
-        notifiedAudioStartedSessions.add(session.id);
-        options.onAudioPlaybackStarted(session.turnId);
       }
     },
     { deep: true },
@@ -230,11 +287,17 @@ export function usePlaybackCompletionCoordinator(
   watch(
     () => options.sessionStore.getSessions().map((session) => ({
       id: session.id,
-      textDelivered: session.text.delivered,
-      audioTerminal: session.audio.terminal,
-      motionAbsent: session.motion.absent,
-      motionStarted: session.motion.started,
-      motionCompleted: session.motion.completed,
+      segments: session.segmentOrder.map((segmentId) => {
+        const segment = session.segments.get(segmentId);
+        return {
+          messageId: segmentId,
+          textDelivered: segment?.text.delivered ?? false,
+          audioTerminal: segment?.audio.terminal ?? "idle",
+          motionAbsent: segment?.motion.absent ?? false,
+          motionStarted: segment?.motion.started ?? false,
+          motionCompleted: segment?.motion.completed ?? false,
+        };
+      }),
       backendTurnFinished: session.backend.turnFinished,
       phase: session.phase,
     })),
@@ -243,8 +306,11 @@ export function usePlaybackCompletionCoordinator(
         if (session.phase === "completed" || session.phase === "failed") {
           continue;
         }
-        if (session.text.delivered) {
-          maybeFlushPlaybackCompletion(session.id, "text_delivered");
+        for (const segmentId of session.segmentOrder) {
+          const segment = session.segments.get(segmentId);
+          if (segment?.text.delivered) {
+            maybeFlushPlaybackCompletion(session.id, segment.messageId, "text_delivered");
+          }
         }
       }
     },
@@ -258,17 +324,25 @@ export function usePlaybackCompletionCoordinator(
       if (status !== "finished" || previousStatus !== "playing") {
         return;
       }
-      const s = getSession(currentMotionSessionId);
-      if (!s) return;
+      const nextKey = activeMotionSegments.values().next().value as string | undefined;
+      const found = findSegmentByKey(nextKey ?? null);
+      if (!found) return;
 
       options.sessionStore.markMotionCompleted(
-        orchestrationIdFromSessionId(s.id),
-        s.turnId,
+        found.segment.orchestrationId,
+        found.segment.turnId,
+        found.segment.messageId,
       );
-      currentMotionSessionId = null;
+      if (nextKey) {
+        activeMotionSegments.delete(nextKey);
+      }
 
-      if (s.audio.terminal !== "idle") {
-        maybeFlushPlaybackCompletion(s.id, "motion_completed_after_audio");
+      if (found.segment.audio.terminal !== "idle") {
+        maybeFlushPlaybackCompletion(
+          found.session.id,
+          found.segment.messageId,
+          "motion_completed_after_audio",
+        );
       }
     },
   );
