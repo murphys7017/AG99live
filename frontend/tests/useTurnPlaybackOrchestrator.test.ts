@@ -31,9 +31,9 @@ function createHarness() {
       messageId: string,
       turnId: string | null,
       orchestrationId: string | null,
-    ): Promise<boolean> {
+    ): boolean {
       released.push(`audio:${messageId}:${turnId ?? ""}:${orchestrationId ?? ""}`);
-      return Promise.resolve(true);
+      return true;
     },
   };
 

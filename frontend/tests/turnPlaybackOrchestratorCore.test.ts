@@ -50,8 +50,9 @@ function createHarness() {
       messageId: string,
       turnId: string | null,
       orchestrationId: string | null,
-    ): void => {
+    ): boolean => {
       events.push(`audio:${messageId}:${turnId ?? ""}:${orchestrationId ?? ""}`);
+      return true;
     },
     releaseMotion: (
       payload: unknown,
@@ -148,6 +149,37 @@ function testLateMotionAfterReleaseIsForwarded(): void {
   ]);
 }
 
+function testAudioReleaseFailureKeepsGroupRetryable(): void {
+  let nowMs = 0;
+  const events: string[] = [];
+  const core = createTurnPlaybackOrchestratorCore({
+    now: () => nowMs,
+    schedule: () => 1,
+    clearSchedule: () => {},
+    releaseText: (messageId) => {
+      events.push(`text:${messageId}`);
+      return true;
+    },
+    releaseAudio: (messageId) => {
+      events.push(`audio:${messageId}`);
+      return false;
+    },
+    releaseMotion: () => {},
+  });
+
+  core.markTextReady("msg-1", "turn-1", "orch-1");
+  core.markAudioReady("msg-1", "turn-1", "orch-1");
+  nowMs = AUDIO_MOTION_SYNC_WAIT_MS;
+  core.flush();
+  core.flush();
+
+  assert.deepEqual(events, [
+    "text:msg-1",
+    "audio:msg-1",
+    "audio:msg-1",
+  ]);
+}
+
 function testTextOnlyReleasesAfterShortWait(): void {
   const harness = createHarness();
 
@@ -212,6 +244,7 @@ function run(): void {
   testAudioWaitsForLateMotionWithinWindow();
   testAudioMotionWaitTimeoutReleasesTextAndAudio();
   testLateMotionAfterReleaseIsForwarded();
+  testAudioReleaseFailureKeepsGroupRetryable();
   testTextOnlyReleasesAfterShortWait();
   testNoAudioWithMotionReleasesTextAndMotion();
   testDifferentOrchestrationGroupsDoNotCrossRelease();

@@ -73,6 +73,29 @@ export function useTurnPlaybackSessionStore() {
       return existing;
     }
 
+    const turnOnlyKey = resolveSessionId(null, turnId);
+    if (orchestrationId && turnOnlyKey && turnOnlyKey !== key) {
+      const turnOnlySession = state.sessions.get(turnOnlyKey);
+      if (turnOnlySession) {
+        state.sessions.delete(turnOnlyKey);
+        turnOnlySession.id = key;
+        state.sessions.set(key, turnOnlySession);
+        if (state.activeSessionId === turnOnlyKey) {
+          state.activeSessionId = key;
+        }
+        for (const segment of turnOnlySession.segments.values()) {
+          segment.orchestrationId = segment.orchestrationId ?? orchestrationId;
+        }
+        log("session promoted to orchestration id", {
+          previousId: turnOnlyKey,
+          id: key,
+          orchestrationId,
+          turnId,
+        });
+        return turnOnlySession;
+      }
+    }
+
     const session = createTurnPlaybackSession(orchestrationId, turnId, key);
     state.sessions.set(key, session);
     log("session created", {

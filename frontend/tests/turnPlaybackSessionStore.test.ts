@@ -121,6 +121,30 @@ function testRequiredMessageIdIsEnforced(): void {
   );
 }
 
+function testTurnOnlySessionPromotesToOrchestrationSession(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.setActiveSession(null, "turn-1");
+  store.markTextReceived(null, "turn-1", "Early", "msg-1");
+
+  const turnOnlySession = store.getSessionById("turn:turn-1");
+  assert.ok(turnOnlySession);
+
+  store.markAudioReceived("orch-1", "turn-1", "http://localhost/audio.wav", "msg-1");
+
+  assert.equal(store.getSessionById("turn:turn-1"), undefined);
+  const promotedSession = store.getSession("orch-1");
+  assert.ok(promotedSession);
+  assert.equal(promotedSession, turnOnlySession);
+  assert.equal(promotedSession.id, "orch:orch-1");
+  assert.equal(store.state.activeSessionId, "orch:orch-1");
+  assert.equal(promotedSession.segments.get("msg-1")?.text.content, "Early");
+  assert.equal(
+    promotedSession.segments.get("msg-1")?.audio.url,
+    "http://localhost/audio.wav",
+  );
+  assert.equal(promotedSession.segments.get("msg-1")?.orchestrationId, "orch-1");
+}
+
 function testGetUnsettledSegmentsReturnsOnlyUnsettledSegments(): void {
   const store = useTurnPlaybackSessionStore();
   store.markTextReceived("orch-1", "turn-1", "First", "msg-1");
@@ -142,6 +166,7 @@ function run(): void {
   testSelectorsOperateOnSegments();
   testSegmentSettlementAndTurnSettlement();
   testRequiredMessageIdIsEnforced();
+  testTurnOnlySessionPromotesToOrchestrationSession();
   testGetUnsettledSegmentsReturnsOnlyUnsettledSegments();
   console.log("turnPlaybackSessionStore tests passed");
 }

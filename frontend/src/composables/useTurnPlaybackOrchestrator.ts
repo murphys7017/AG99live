@@ -47,8 +47,15 @@ export function useTurnPlaybackOrchestrator(
       return released;
     },
     releaseAudio: (messageId, turnId, orchestrationId) => {
-      options.sessionStore.markAudioReleased(orchestrationId, turnId, messageId);
-      void options.adapter.releaseAudioForPlayback(messageId, turnId, orchestrationId);
+      const released = options.adapter.releaseAudioForPlayback(
+        messageId,
+        turnId,
+        orchestrationId,
+      );
+      if (released) {
+        options.sessionStore.markAudioReleased(orchestrationId, turnId, messageId);
+      }
+      return released;
     },
     releaseMotion: (payload: unknown, context: TurnPlaybackReleaseContext) => {
       options.sessionStore.markMotionReleased(

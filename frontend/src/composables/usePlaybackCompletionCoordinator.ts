@@ -214,13 +214,12 @@ export function usePlaybackCompletionCoordinator(
       );
     if (session) {
       activeMotionSegments.add(segmentKey(session.id, event.messageId));
+      options.sessionStore.markMotionStarted(
+        event.orchestrationId,
+        event.turnId,
+        event.messageId,
+      );
     }
-
-    options.sessionStore.markMotionStarted(
-      event.orchestrationId,
-      event.turnId,
-      event.messageId,
-    );
 
     const now = new Date();
     const record: DesktopMotionPlaybackRecord = {

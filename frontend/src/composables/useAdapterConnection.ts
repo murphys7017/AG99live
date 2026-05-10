@@ -1055,11 +1055,11 @@ async function playAudioAndAcknowledge(
   return playAudioAction(audioPlaybackCtx, audioUrl, turnId, orchestrationId, messageId);
 }
 
-async function releaseAudioForPlayback(
+function releaseAudioForPlayback(
   messageId: string,
   turnId: string | null,
   orchestrationId: string | null,
-): Promise<boolean> {
+): boolean {
   const item = state.pendingAudios.get(messageId);
   if (!item) {
     return false;
@@ -1079,7 +1079,7 @@ async function releaseAudioForPlayback(
   const releasedTurnId = item.turnId ?? turnId;
   const releasedOrchestrationId = item.orchestrationId ?? orchestrationId;
   state.pendingAudios.delete(messageId);
-  await playAudioAndAcknowledge(
+  void playAudioAndAcknowledge(
     audioUrl,
     releasedTurnId,
     releasedOrchestrationId,

@@ -165,11 +165,45 @@ async function testMotionCompletionWritesCorrectSegment(): Promise<void> {
   assert.equal(session?.segments.get("msg-b")?.motion.completed, true);
 }
 
+async function testPreviewMotionPlaybackDoesNotCreateSessionSegment(): Promise<void> {
+  const h = createHarness();
+  const beforeSessionCount = h.sessionStore.getSessions().length;
+
+  h.coordinator.recordMotionPlayback({
+    messageId: "preview",
+    turnId: null,
+    orchestrationId: null,
+    model: null,
+    payloadKind: "semantic_plan",
+    startReason: "preview",
+    queuedDelayMs: 0,
+    diagnostics: null,
+    playerMessage: "preview playing",
+    plan: {
+      schema_version: "semantic_parameter_plan.v1",
+      parameters: [],
+      mode: "idle",
+      emotion_label: "",
+      timing: { duration_ms: 1000 },
+    } as never,
+  });
+
+  await h.flush();
+
+  assert.equal(h.sessionStore.getSessions().length, beforeSessionCount);
+  assert.equal(
+    h.sessionStore.getSessions().some((session) => session.segments.has("preview")),
+    false,
+  );
+  assert.equal(h.coordinator.motionPlaybackRecords.value[0]?.startReason, "preview");
+}
+
 async function run(): Promise<void> {
   await testSegmentCompletionDoesNotFinishTurnEarly();
   await testAllSegmentsAndBackendFinishedAckOnce();
   await testAudioStartedNotificationIsSegmentScoped();
   await testMotionCompletionWritesCorrectSegment();
+  await testPreviewMotionPlaybackDoesNotCreateSessionSegment();
   console.log("playbackCompletionCoordinator tests passed");
 }
 

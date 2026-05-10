@@ -40,7 +40,7 @@ export interface TurnPlaybackOrchestratorCoreOptions {
     messageId: string,
     turnId: string | null,
     orchestrationId: string | null,
-  ) => void;
+  ) => boolean;
   releaseMotion: (payload: unknown, context: TurnPlaybackReleaseContext) => void;
   log?: (message: string, details: Record<string, unknown>) => void;
 }
@@ -151,8 +151,12 @@ export function createTurnPlaybackOrchestratorCore(
     group.textReleased = group.textReleased || releasedText;
     releaseMotion(group, reason);
     if (group.audioReady) {
-      options.releaseAudio(group.messageId, group.turnId, group.orchestrationId);
-      group.audioReady = false;
+      const releasedAudio = options.releaseAudio(
+        group.messageId,
+        group.turnId,
+        group.orchestrationId,
+      );
+      group.audioReady = !releasedAudio;
     }
     log("group released", {
       messageId: group.messageId,
@@ -193,8 +197,12 @@ export function createTurnPlaybackOrchestratorCore(
         releaseMotion(group, `late_motion_after_${reason}`);
       }
       if (group.audioReady) {
-        options.releaseAudio(group.messageId, group.turnId, group.orchestrationId);
-        group.audioReady = false;
+        const releasedAudio = options.releaseAudio(
+          group.messageId,
+          group.turnId,
+          group.orchestrationId,
+        );
+        group.audioReady = !releasedAudio;
       }
       return;
     }
