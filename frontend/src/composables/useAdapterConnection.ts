@@ -611,12 +611,34 @@ async function handleSocketMessage(rawData: string): Promise<void> {
 }
 
 function buildInboundEventContext(): InboundEventMappingContext {
+  const activeAudioSegment = findActiveAudioSegment();
   return {
     currentTurnId: state.currentTurnId,
     currentOrchestrationId: state.currentOrchestrationId,
-    audioPlaybackStartedTurnId: state.audioPlaybackStartedTurnId,
-    audioPlaybackStartedOrchestrationId: state.audioPlaybackStartedOrchestrationId,
+    activeAudioTurnId: activeAudioSegment?.turnId ?? null,
+    activeAudioOrchestrationId: activeAudioSegment?.orchestrationId ?? null,
   };
+}
+
+function findActiveAudioSegment(): {
+  turnId: string | null;
+  orchestrationId: string | null;
+  messageId: string;
+} | null {
+  const sessions = sessionStore?.getSessions() ?? [];
+  for (const session of sessions) {
+    for (const segmentId of session.segmentOrder) {
+      const segment = session.segments.get(segmentId);
+      if (segment?.audio.started && segment.audio.terminal === "idle") {
+        return {
+          turnId: segment.turnId,
+          orchestrationId: segment.orchestrationId,
+          messageId: segment.messageId,
+        };
+      }
+    }
+  }
+  return null;
 }
 
 async function dispatchInboundEvent(
@@ -725,7 +747,13 @@ async function dispatchInboundEvent(
       );
       return;
     case "engine_motion_payload": {
-      const result = applyInboundMotionPayload({ state, pushHistory }, event.envelope);
+      const activeAudioSegment = findActiveAudioSegment();
+      const result = applyInboundMotionPayload({
+        state,
+        activeAudioTurnId: activeAudioSegment?.turnId ?? null,
+        activeAudioOrchestrationId: activeAudioSegment?.orchestrationId ?? null,
+        pushHistory,
+      }, event.envelope);
       if (!result.accepted) {
         return;
       }

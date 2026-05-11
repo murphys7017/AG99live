@@ -42,6 +42,7 @@ export function usePlaybackCompletionCoordinator(
   const notifiedAudioStartedSegments = new Set<string>();
   const ackedSessions = new Set<string>();
   const activeMotionSegments = new Set<string>();
+  let currentMotionSegmentKey: string | null = null;
 
   // ── helpers ─────────────────────────────────────────────────────
 
@@ -86,6 +87,34 @@ export function usePlaybackCompletionCoordinator(
     notifiedAudioStartedSegments.clear();
     ackedSessions.clear();
     activeMotionSegments.clear();
+    currentMotionSegmentKey = null;
+  }
+
+  function completeMotionSegmentByKey(
+    key: string | null,
+    reason: string,
+  ): void {
+    const found = findSegmentByKey(key);
+    if (!found) {
+      return;
+    }
+
+    options.sessionStore.markMotionCompleted(
+      found.segment.orchestrationId,
+      found.segment.turnId,
+      found.segment.messageId,
+    );
+    if (key) {
+      activeMotionSegments.delete(key);
+    }
+
+    if (found.segment.audio.terminal !== "idle") {
+      maybeFlushPlaybackCompletion(
+        found.session.id,
+        found.segment.messageId,
+        reason,
+      );
+    }
   }
 
   function finalizeCompletion(sessionId: string): void {
@@ -206,7 +235,12 @@ export function usePlaybackCompletionCoordinator(
         candidate.segmentOrder.some((segmentId) => segmentId === event.messageId),
       );
     if (session) {
-      activeMotionSegments.add(segmentKey(session.id, event.messageId));
+      const key = segmentKey(session.id, event.messageId);
+      if (currentMotionSegmentKey && currentMotionSegmentKey !== key) {
+        completeMotionSegmentByKey(currentMotionSegmentKey, "motion_handed_off");
+      }
+      currentMotionSegmentKey = key;
+      activeMotionSegments.add(key);
       options.sessionStore.markMotionStarted(
         event.orchestrationId,
         event.turnId,
@@ -317,26 +351,8 @@ export function usePlaybackCompletionCoordinator(
       if (status !== "finished" || previousStatus !== "playing") {
         return;
       }
-      const nextKey = activeMotionSegments.values().next().value as string | undefined;
-      const found = findSegmentByKey(nextKey ?? null);
-      if (!found) return;
-
-      options.sessionStore.markMotionCompleted(
-        found.segment.orchestrationId,
-        found.segment.turnId,
-        found.segment.messageId,
-      );
-      if (nextKey) {
-        activeMotionSegments.delete(nextKey);
-      }
-
-      if (found.segment.audio.terminal !== "idle") {
-        maybeFlushPlaybackCompletion(
-          found.session.id,
-          found.segment.messageId,
-          "motion_completed_after_audio",
-        );
-      }
+      completeMotionSegmentByKey(currentMotionSegmentKey, "motion_completed_after_audio");
+      currentMotionSegmentKey = null;
     },
   );
 

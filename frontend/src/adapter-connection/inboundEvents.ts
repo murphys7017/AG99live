@@ -37,8 +37,8 @@ import {
 export interface InboundEventMappingContext {
   currentTurnId: string | null;
   currentOrchestrationId: string | null;
-  audioPlaybackStartedTurnId: string | null;
-  audioPlaybackStartedOrchestrationId: string | null;
+  activeAudioTurnId: string | null;
+  activeAudioOrchestrationId: string | null;
 }
 
 function normalizeTurnId(value: unknown): string | null {
@@ -389,11 +389,11 @@ export function mapInboundEnvelopeToEvent(
       const turnId =
         normalizeTurnId(envelope.turn_id)
         ?? ctx.currentTurnId
-        ?? ctx.audioPlaybackStartedTurnId;
+        ?? ctx.activeAudioTurnId;
       const orchestrationId =
         normalizeOrchestrationId(envelope.orchestration_id)
         ?? ctx.currentOrchestrationId
-        ?? ctx.audioPlaybackStartedOrchestrationId;
+        ?? ctx.activeAudioOrchestrationId;
       const messageId = requireSegmentMessageId(envelope);
       if (!messageId.ok) {
         return messageId.event;

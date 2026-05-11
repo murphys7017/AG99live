@@ -8,8 +8,6 @@ import {
 export interface InboundMotionState {
   currentTurnId: string | null;
   currentOrchestrationId: string | null;
-  audioPlaybackStartedTurnId: string | null;
-  audioPlaybackStartedOrchestrationId: string | null;
   statusMessage: string;
   lastError: string;
   inboundMotionPlan: unknown;
@@ -20,6 +18,8 @@ export interface InboundMotionState {
 
 export interface InboundMotionContext {
   state: InboundMotionState;
+  activeAudioTurnId: string | null;
+  activeAudioOrchestrationId: string | null;
   pushHistory: (role: "system" | "error", text: string) => void;
 }
 
@@ -36,8 +36,8 @@ export function applyInboundMotionPayload(
   const envelopeOrchestrationId = normalizeOrchestrationId(envelope.orchestration_id);
   const currentTurnId = normalizeTurnIdForComparison(state.currentTurnId);
   const currentOrchestrationId = normalizeOrchestrationId(state.currentOrchestrationId);
-  const activeAudioTurnId = normalizeTurnIdForComparison(state.audioPlaybackStartedTurnId);
-  const activeAudioOrchestrationId = normalizeOrchestrationId(state.audioPlaybackStartedOrchestrationId);
+  const activeAudioTurnId = normalizeTurnIdForComparison(ctx.activeAudioTurnId);
+  const activeAudioOrchestrationId = normalizeOrchestrationId(ctx.activeAudioOrchestrationId);
   console.info(
     "[Connection] engine motion payload received. type=",
     envelope.type,
@@ -49,9 +49,9 @@ export function applyInboundMotionPayload(
     envelopeOrchestrationId,
     "currentOrchestrationId=",
     currentOrchestrationId,
-    "audioPlaybackStartedTurnId=",
+    "activeAudioTurnId=",
     activeAudioTurnId,
-    "audioPlaybackStartedOrchestrationId=",
+    "activeAudioOrchestrationId=",
     activeAudioOrchestrationId,
   );
 

@@ -195,6 +195,55 @@ async function testMotionCompletionWritesCorrectSegment(): Promise<void> {
   assert.equal(session?.segments.get("msg-b")?.motion.completed, true);
 }
 
+async function testMotionHandoffCompletesPreviousSegmentAndFinishesCurrent(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.markTextReceived("orch-1", "turn-1", "A", "msg-a");
+  h.sessionStore.markTextReceived("orch-1", "turn-1", "B", "msg-b");
+  h.sessionStore.markMotionReceived(
+    "orch-1",
+    "turn-1",
+    { kind: "semantic_intent", intent: {} as never },
+    "msg-a",
+  );
+  h.sessionStore.markMotionReceived(
+    "orch-1",
+    "turn-1",
+    { kind: "semantic_intent", intent: {} as never },
+    "msg-b",
+  );
+
+  const baseEvent = {
+    turnId: "turn-1",
+    orchestrationId: "orch-1",
+    model: null,
+    payloadKind: "semantic_intent" as const,
+    startReason: "test",
+    queuedDelayMs: 0,
+    diagnostics: null,
+    playerMessage: "playing",
+    plan: {
+      schema_version: "semantic_parameter_plan.v1",
+      parameters: [],
+      mode: "idle",
+      emotion_label: "",
+      timing: { duration_ms: 1000 },
+    } as never,
+  };
+
+  h.coordinator.recordMotionPlayback({ ...baseEvent, messageId: "msg-a" });
+  h.mockMotionPlayer.state.status = "playing";
+  await h.flush();
+
+  h.coordinator.recordMotionPlayback({ ...baseEvent, messageId: "msg-b" });
+  await h.flush();
+  assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-a")?.motion.completed, true);
+  assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-b")?.motion.completed, false);
+
+  h.mockMotionPlayer.state.status = "finished";
+  await h.flush();
+  assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-b")?.motion.completed, true);
+}
+
 async function testPreviewMotionPlaybackDoesNotCreateSessionSegment(): Promise<void> {
   const h = createHarness();
   const beforeSessionCount = h.sessionStore.getSessions().length;
@@ -234,6 +283,7 @@ async function run(): Promise<void> {
   await testTurnFinishedBeforeSynthFinishedDoesNotAck();
   await testAudioStartedNotificationIsSegmentScoped();
   await testMotionCompletionWritesCorrectSegment();
+  await testMotionHandoffCompletesPreviousSegmentAndFinishesCurrent();
   await testPreviewMotionPlaybackDoesNotCreateSessionSegment();
   console.log("playbackCompletionCoordinator tests passed");
 }

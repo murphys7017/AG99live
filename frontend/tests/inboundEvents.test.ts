@@ -29,8 +29,8 @@ function defaultContext() {
   return {
     currentTurnId: "current-turn",
     currentOrchestrationId: "current-orch",
-    audioPlaybackStartedTurnId: "audio-turn",
-    audioPlaybackStartedOrchestrationId: "audio-orch",
+    activeAudioTurnId: "audio-turn",
+    activeAudioOrchestrationId: "audio-orch",
   };
 }
 
@@ -141,8 +141,8 @@ function testEngineMotionFallsBackCurrentThenAudio(): void {
   const currentContext = {
     currentTurnId: "current-turn",
     currentOrchestrationId: null,
-    audioPlaybackStartedTurnId: "audio-turn",
-    audioPlaybackStartedOrchestrationId: "audio-orch",
+    activeAudioTurnId: "audio-turn",
+    activeAudioOrchestrationId: "audio-orch",
   };
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("engine.motion_intent", {
