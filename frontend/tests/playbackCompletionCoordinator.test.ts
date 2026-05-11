@@ -2,7 +2,7 @@
 (globalThis as Record<string, unknown>).window = globalThis;
 
 import assert from "node:assert/strict";
-import { reactive, nextTick } from "vue";
+import { reactive, nextTick, ref } from "vue";
 import { useTurnPlaybackSessionStore } from "../src/composables/useTurnPlaybackSessionStore.js";
 import { usePlaybackCompletionCoordinator } from "../src/composables/usePlaybackCompletionCoordinator.js";
 
@@ -44,9 +44,16 @@ function createHarness() {
 
   const coordinator = usePlaybackCompletionCoordinator({
     sessionStore,
-    adapter: mockAdapter as never,
+    playbackAck: {
+      sendPlaybackFinishedForCurrentGroup:
+        mockAdapter.sendPlaybackFinishedForCurrentGroup,
+      clearPlaybackGroupContext: mockAdapter.clearPlaybackGroupContext,
+    },
+    motionRecord: {
+      getLastAssistantText: () => mockAdapter.state.lastAssistantText,
+      getSelectedModel: () => ref(null),
+    },
     motionPlayer: mockMotionPlayer as never,
-    selectedModel: { value: null } as never,
     onAudioPlaybackStarted: (turnId, messageId) => {
       audioStarted.push({ turnId, messageId });
     },

@@ -1,15 +1,16 @@
-import { shallowReadonly, ref, watch, type Ref } from "vue";
+import { shallowReadonly, ref, watch } from "vue";
 import type { ModelEnginePlanStartedEvent } from "../model-engine/contracts";
 import type { DesktopMotionPlaybackRecord } from "../types/desktop";
-import type { ModelSummary } from "../types/protocol";
-import type { useAdapterConnection } from "./useAdapterConnection";
 import type { usePreviewMotionPlayer } from "./usePreviewMotionPlayer";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
 import { isPlaybackLocallySettled } from "../turn-playback/selectors.js";
 import type { TurnPlaybackSegment, TurnPlaybackSession } from "../turn-playback/session.js";
 import { cloneJson } from "../utils/cloneJson.js";
+import type {
+  MotionPlaybackRecordPort,
+  PlaybackAckPort,
+} from "../turn-playback/ports.js";
 
-type AdapterConnection = ReturnType<typeof useAdapterConnection>;
 type PreviewMotionPlayer = ReturnType<typeof usePreviewMotionPlayer>;
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 
@@ -18,9 +19,9 @@ const PLAYBACK_SETTLEMENT_WINDOW_MS = 900;
 
 interface PlaybackCompletionCoordinatorOptions {
   sessionStore: SessionStore;
-  adapter: AdapterConnection;
+  playbackAck: PlaybackAckPort;
+  motionRecord: MotionPlaybackRecordPort;
   motionPlayer: PreviewMotionPlayer;
-  selectedModel: Ref<ModelSummary | null>;
   onAudioPlaybackStarted: (turnId: string | null, messageId: string) => void;
   initialMotionPlaybackRecords?: readonly DesktopMotionPlaybackRecord[];
   maxMotionPlaybackRecords?: number;
@@ -97,7 +98,7 @@ export function usePlaybackCompletionCoordinator(
       .map((id) => s.segments.get(id))
       .find(Boolean);
     const orchId = firstSegment?.orchestrationId ?? null;
-    options.adapter.clearPlaybackGroupContext(s.turnId, orchId);
+    options.playbackAck.clearPlaybackGroupContext(s.turnId, orchId);
     options.sessionStore.markPhase(orchId, s.turnId, "completed");
   }
 
@@ -160,7 +161,7 @@ export function usePlaybackCompletionCoordinator(
     }
     options.sessionStore.markPhase(orchId, s.turnId, "settling");
     ackedSessions.add(sessionId);
-    void options.adapter.sendPlaybackFinishedForCurrentGroup(
+    void options.playbackAck.sendPlaybackFinishedForCurrentGroup(
       s.turnId,
       orchId,
       success,
@@ -221,12 +222,12 @@ export function usePlaybackCompletionCoordinator(
       payloadKind: event.payloadKind,
       turnId: event.turnId,
       orchestrationId: event.orchestrationId,
-      modelName: event.model?.name ?? options.selectedModel.value?.name ?? "",
+      modelName: event.model?.name ?? options.motionRecord.getSelectedModel().value?.name ?? "",
       emotionLabel: event.plan.emotion_label,
       mode: event.plan.mode,
       startReason: event.startReason,
       queuedDelayMs: event.queuedDelayMs,
-      assistantText: options.adapter.state.lastAssistantText,
+      assistantText: options.motionRecord.getLastAssistantText(),
       playerMessage: event.playerMessage,
       diagnostics: event.diagnostics
         ? {

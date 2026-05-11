@@ -306,18 +306,44 @@ class TurnCoordinator:
                 )
             )
             self._mark_turn_timing("audio_payload_sent_at")
-            await self._send_json(
-                build_control_synth_finished(
-                    session_id=session_id,
-                    turn_id=turn_id,
-                    orchestration_id=orchestration_id,
-                )
-            )
-            self.session_state.mark_synthesizing()
-            self.session_state.mark_playing()
+            self._mark_turn_synthesizing()
+            self._mark_turn_playing()
             return
 
-        await self._finish_turn(success=True, reason=None)
+        self._mark_turn_playing()
+
+    async def close_turn_output_queue(self) -> None:
+        current_turn_id = self.session_state.current_turn_id
+        if current_turn_id is None:
+            return
+
+        mark_closed = getattr(self.session_state, "mark_output_queue_closed", None)
+        if callable(mark_closed):
+            if not mark_closed():
+                return
+        else:
+            if bool(getattr(self.session_state, "output_queue_closed", False)):
+                return
+            setattr(self.session_state, "output_queue_closed", True)
+
+        await self._send_json(
+            build_control_synth_finished(
+                session_id=self.session_state.client_uid,
+                turn_id=current_turn_id,
+                orchestration_id=getattr(self.session_state, "current_orchestration_id", None),
+            )
+        )
+        self._mark_turn_playing()
+
+    def _mark_turn_synthesizing(self) -> None:
+        mark_synthesizing = getattr(self.session_state, "mark_synthesizing", None)
+        if callable(mark_synthesizing):
+            mark_synthesizing()
+
+    def _mark_turn_playing(self) -> None:
+        mark_playing = getattr(self.session_state, "mark_playing", None)
+        if callable(mark_playing):
+            mark_playing()
 
     async def finalize_turn(
         self,

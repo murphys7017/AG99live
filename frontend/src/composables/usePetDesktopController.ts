@@ -34,11 +34,19 @@ export function usePetDesktopController() {
     bridge.state.snapshot.motionPlaybackRecords.map((record) =>
       cloneJson(record) as DesktopMotionPlaybackRecord);
   const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
+  const playbackAck = {
+    sendPlaybackFinishedForCurrentGroup: adapter.sendPlaybackFinishedForCurrentGroup,
+    clearPlaybackGroupContext: adapter.clearPlaybackGroupContext,
+  };
+  const motionRecord = {
+    getLastAssistantText: () => adapter.state.lastAssistantText,
+    getSelectedModel: () => selectedModel,
+  };
   const playbackCoordinator = usePlaybackCompletionCoordinator({
     sessionStore,
-    adapter,
+    playbackAck,
+    motionRecord,
     motionPlayer,
-    selectedModel,
     onAudioPlaybackStarted: (turnId, messageId) => {
       modelEngine.notifyAudioPlaybackStarted(turnId, messageId);
     },
@@ -68,8 +76,14 @@ export function usePetDesktopController() {
   });
   useTurnPlaybackOrchestrator({
     sessionStore,
-    adapter,
-    modelEngine,
+    playbackRelease: {
+      releaseAssistantTextForPlayback: adapter.releaseAssistantTextForPlayback,
+      releaseAudioForPlayback: adapter.releaseAudioForPlayback,
+    },
+    motionPayload: {
+      ingestNormalizedPayload: modelEngine.ingestNormalizedPayload,
+      notifyCurrentTurnChanged: modelEngine.notifyCurrentTurnChanged,
+    },
   });
 
   applyMotionEngineSettingsSnapshot(motionEngineSettings, bridge.state.snapshot.motionEngineSettings);

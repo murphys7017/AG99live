@@ -1,6 +1,4 @@
 import { onScopeDispose, watch } from "vue";
-import type { useAdapterConnection } from "./useAdapterConnection";
-import type { useModelEngine } from "../model-engine/useModelEngine";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
 import type { NormalizedMotionPayload } from "../model-engine/contracts";
 import {
@@ -14,15 +12,17 @@ import {
   getActivePlaybackSegment,
 } from "../turn-playback/selectors.js";
 import { isSegmentLocallySettled } from "../turn-playback/session.js";
+import type {
+  MotionPayloadPort,
+  PlaybackReleasePort,
+} from "../turn-playback/ports.js";
 
-type AdapterConnection = ReturnType<typeof useAdapterConnection>;
-type ModelEngine = ReturnType<typeof useModelEngine>;
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 
 interface TurnPlaybackOrchestratorOptions {
   sessionStore: SessionStore;
-  adapter: AdapterConnection;
-  modelEngine: ModelEngine;
+  playbackRelease: PlaybackReleasePort;
+  motionPayload: MotionPayloadPort;
 }
 
 export function useTurnPlaybackOrchestrator(
@@ -35,7 +35,7 @@ export function useTurnPlaybackOrchestrator(
       window.clearTimeout(timer as number);
     },
     releaseText: (messageId, turnId, orchestrationId) => {
-      const released = options.adapter.releaseAssistantTextForPlayback(
+      const released = options.playbackRelease.releaseAssistantTextForPlayback(
         messageId,
         turnId,
         orchestrationId,
@@ -47,7 +47,7 @@ export function useTurnPlaybackOrchestrator(
       return released;
     },
     releaseAudio: (messageId, turnId, orchestrationId) => {
-      const released = options.adapter.releaseAudioForPlayback(
+      const released = options.playbackRelease.releaseAudioForPlayback(
         messageId,
         turnId,
         orchestrationId,
@@ -63,7 +63,7 @@ export function useTurnPlaybackOrchestrator(
         context.turnId,
         context.messageId,
       );
-      options.modelEngine.ingestNormalizedPayload(
+      options.motionPayload.ingestNormalizedPayload(
         payload as NormalizedMotionPayload,
         context,
       );
@@ -182,7 +182,7 @@ export function useTurnPlaybackOrchestrator(
       const s = sessionId
         ? options.sessionStore.state.sessions.get(sessionId)
         : undefined;
-      options.modelEngine.notifyCurrentTurnChanged(s?.turnId ?? null);
+      options.motionPayload.notifyCurrentTurnChanged(s?.turnId ?? null);
     },
   );
 

@@ -23,6 +23,7 @@ class SessionState:
     turn_index: int = 0
     last_user_text: str = ""
     waiting_for_playback_complete: bool = False
+    output_queue_closed: bool = False
     current_turn_id: str | None = None
     current_orchestration_id: str | None = None
 
@@ -37,6 +38,7 @@ class SessionState:
         self.last_user_text = text
         self.stage = SessionStage.THINKING
         self.waiting_for_playback_complete = False
+        self.output_queue_closed = False
         self.current_turn_id = turn_id or uuid4().hex
         self.current_orchestration_id = orchestration_id or uuid4().hex
         return self.current_turn_id
@@ -48,14 +50,22 @@ class SessionState:
         self.stage = SessionStage.PLAYING
         self.waiting_for_playback_complete = True
 
+    def mark_output_queue_closed(self) -> bool:
+        if self.output_queue_closed:
+            return False
+        self.output_queue_closed = True
+        return True
+
     def mark_playback_complete(self) -> None:
         self.waiting_for_playback_complete = False
+        self.output_queue_closed = False
         self.stage = SessionStage.IDLE
         self.current_turn_id = None
         self.current_orchestration_id = None
 
     def reset_to_idle(self) -> None:
         self.waiting_for_playback_complete = False
+        self.output_queue_closed = False
         self.stage = SessionStage.IDLE
         self.current_turn_id = None
         self.current_orchestration_id = None

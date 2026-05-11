@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 from astrbot.api.event import AstrMessageEvent
@@ -34,6 +35,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             or None,
         )
         await super().send(message)
+        await self._close_frontend_turn_output_queue()
 
     async def send_interaction_message(
         self,
@@ -53,6 +55,20 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         await super().send(message)
         if not record_send_operation:
             self._has_send_oper = previous_has_send_oper
+
+    async def complete_visible_turn(self) -> None:
+        base_complete = getattr(super(), "complete_visible_turn", None)
+        if callable(base_complete):
+            result = base_complete()
+            if inspect.isawaitable(result):
+                await result
+        await self._close_frontend_turn_output_queue()
+
+    async def _close_frontend_turn_output_queue(self) -> None:
+        turn_coordinator = getattr(self.adapter, "turn_coordinator", None)
+        close_queue = getattr(turn_coordinator, "close_turn_output_queue", None)
+        if callable(close_queue):
+            await close_queue()
 
     def _attach_prompt_annotations(self, *, message_obj: Any) -> None:
         annotations: dict[str, dict[str, str]] = {

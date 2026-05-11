@@ -79,7 +79,13 @@ import {
   type InboundAdapterEvent,
   type InboundEventMappingContext,
 } from "../adapter-connection/inboundEvents.js";
-import { normalizeOrchestrationId } from "../adapter-connection/orchestrationIds.js";
+import {
+  matchesPlaybackGroup,
+  queueAssistantTextForPlayback as queuePendingAssistantTextForPlayback,
+  queueAudioForPlayback as queuePendingAudioForPlayback,
+  type PendingAssistantTextItem,
+  type PendingAudioItem,
+} from "../adapter-connection/playbackReleaseQueue.js";
 import { useModelSync } from "./useModelSync.js";
 import { useAdapterHistory } from "./useAdapterHistory.js";
 import { normalizeMotionPayload } from "../model-engine/normalize.js";
@@ -87,21 +93,6 @@ import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore.
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "not_requested";
-interface PendingAssistantTextItem {
-  text: string;
-  turnId: string | null;
-  orchestrationId: string | null;
-  messageId: string;
-  receivedAtMs: number;
-}
-
-interface PendingAudioItem {
-  audioUrl: string;
-  turnId: string | null;
-  orchestrationId: string | null;
-  messageId: string;
-  receivedAtMs: number;
-}
 
 const MAX_MIC_SOCKET_BUFFERED_AMOUNT = 512 * 1024;
 const state = reactive({
@@ -983,13 +974,13 @@ function queueAssistantTextForPlayback(
   orchestrationId: string | null,
   messageId: string,
 ): void {
-  state.pendingAssistantTexts.set(messageId, {
+  queuePendingAssistantTextForPlayback(
+    state.pendingAssistantTexts,
     text,
     turnId,
     orchestrationId,
     messageId,
-    receivedAtMs: performance.now(),
-  });
+  );
 }
 
 function releaseAssistantTextForPlayback(
@@ -1031,13 +1022,13 @@ function queueAudioForPlayback(
   orchestrationId: string | null,
   messageId: string,
 ): void {
-  state.pendingAudios.set(messageId, {
+  queuePendingAudioForPlayback(
+    state.pendingAudios,
     audioUrl,
     turnId,
     orchestrationId,
     messageId,
-    receivedAtMs: performance.now(),
-  });
+  );
   state.statusMessage = "收到语音回复，等待同步播放。";
   pushHistory("system", state.statusMessage);
 }
@@ -1219,26 +1210,6 @@ function pushHistory(role: DesktopHistoryEntry["role"], text: string): void {
   if (state.historyEntries.length > 80) {
     state.historyEntries.splice(0, state.historyEntries.length - 80);
   }
-}
-
-function matchesPlaybackGroup(
-  itemTurnId: string | null,
-  itemOrchestrationId: string | null,
-  targetTurnId: string | null,
-  targetOrchestrationId: string | null,
-): boolean {
-  const normalizedItemTurnId = typeof itemTurnId === "string" ? itemTurnId.trim() : "";
-  const normalizedTargetTurnId = typeof targetTurnId === "string" ? targetTurnId.trim() : "";
-  if (normalizedItemTurnId && normalizedTargetTurnId && normalizedItemTurnId === normalizedTargetTurnId) {
-    return true;
-  }
-  const normalizedItemOrchestrationId = normalizeOrchestrationId(itemOrchestrationId);
-  const normalizedTargetOrchestrationId = normalizeOrchestrationId(targetOrchestrationId);
-  return Boolean(
-    normalizedItemOrchestrationId
-    && normalizedTargetOrchestrationId
-    && normalizedItemOrchestrationId === normalizedTargetOrchestrationId,
-  );
 }
 
 export function useAdapterConnection(

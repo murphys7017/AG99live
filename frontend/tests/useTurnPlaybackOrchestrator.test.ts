@@ -54,8 +54,8 @@ function createHarness() {
   scope.run(() => {
     useTurnPlaybackOrchestrator({
       sessionStore,
-      adapter: adapter as never,
-      modelEngine: modelEngine as never,
+      playbackRelease: adapter,
+      motionPayload: modelEngine,
     });
   });
 
