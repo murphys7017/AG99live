@@ -5,6 +5,10 @@
 
 ## 已归档文档
 
+- [useAdapterConnection收口实施计划](./useAdapterConnection收口实施计划.md)
+  说明：前端协议接入层阶段 1/2 施工计划。核心 parse、event mapping、segment identity 已落地，后续结构优化以当前路线图为准。
+- [中间件防御性编程审阅与整改计划](./中间件防御性编程审阅与整改计划.md)
+  说明：阶段性中间层审阅底稿。当前下一步优先级已收束到结构优化路线图，不再作为当前入口。
 - [前端Turn Playback Session收口计划](./前端Turn%20Playback%20Session收口计划.md)
   说明：前端播放轮次从散装状态收口到 `TurnPlaybackSession` 的实施计划。当前主要阶段已经落地，现行行为以根目录链路文档和源码为准。
 - [前后端严格审阅报告](./前后端严格审阅报告.md)

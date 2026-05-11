@@ -78,6 +78,7 @@ export interface TurnPlaybackSessionMotion {
 
 export interface TurnPlaybackSessionBackend {
   turnStarted: boolean;
+  synthFinished: boolean;
   turnFinished: boolean;
   success: boolean | null;
   reason: string;
@@ -209,6 +210,7 @@ export function createTurnPlaybackSession(
     segmentOrder: [],
     backend: {
       turnStarted: false,
+      synthFinished: false,
       turnFinished: false,
       success: null,
       reason: "",

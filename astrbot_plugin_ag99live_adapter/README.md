@@ -55,7 +55,15 @@ astrbot_plugin_ag99live_adapter/
 - 前端同时兼容 `engine.motion_plan` 与 `engine.motion_intent`，但开发期要求消息类型与 payload 字段严格对应。
 - `semantic_axis_profile` / `calibration_profile` / `parameter_action_library` / `base_action_library` 由 `system.model_sync` 下发。
 - `system.semantic_axis_profile_saved` / `system.semantic_axis_profile_save_failed` 用于 Profile Editor 保存结果确认，不再依赖 `system.model_sync` 推断保存成败。
-- 有音频的轮次当前协议顺序为：`output.* -> control.synth_finished -> 前端播放 -> control.playback_finished -> control.turn_finished`。
+- 一个 user input 对应一个 turn，但一个 turn 内可能输出多个 assistant segment。
+- `control.synth_finished` 表示该 turn 的输出队列关闭，不会再追加新的 `output.*` / `engine.motion_*` segment；它不要求早于所有前端播放完成。
+- 前端在 `synth_finished` 已到且所有 segment 播放完成后回传 `control.playback_finished`；后端收到后再发 `control.turn_finished`。
+
+当前结构注意点：
+
+- 文档语义要求 `synth_finished` 是 turn 级输出队列关闭信号。
+- 如果同一 turn 内会多次输出 assistant segment，后端必须确保最后一个 segment 之后才发送 `synth_finished`。
+- 这不是单条音频生成完成信号，也不是整轮完成信号。
 
 ## 关键配置（`_conf_schema.json`）
 
@@ -83,4 +91,4 @@ pip install -r astrbot_plugin_ag99live_adapter/requirements.txt
 python -m pytest astrbot_plugin_ag99live_adapter/tests -q
 ```
 
-当前基线：`135 passed`（2026-05-08）。
+当前基线：`146 passed`（2026-05-12）。

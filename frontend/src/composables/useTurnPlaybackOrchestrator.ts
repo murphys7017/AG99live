@@ -88,7 +88,7 @@ export function useTurnPlaybackOrchestrator(
         return {
           sessionId: session.id,
           sessionPhase: session.phase,
-          backendTurnFinished: session.backend.turnFinished,
+          backendSynthFinished: session.backend.synthFinished,
           activeSegmentId: activeSegment?.messageId ?? null,
           segmentId,
           turnId: segment?.turnId ?? null,
@@ -155,8 +155,8 @@ export function useTurnPlaybackOrchestrator(
           );
         }
 
-        if (session.backend.turnFinished) {
-          core.markTurnFinished(
+        if (session.backend.synthFinished) {
+          core.markOutputQueueClosed(
             segment.messageId,
             segment.turnId,
             segment.orchestrationId,

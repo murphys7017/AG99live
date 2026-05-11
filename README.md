@@ -10,7 +10,7 @@ AG99live 是桌宠项目 V2：以 `AstrBot 插件适配器 + Electron 前端运�
 - 将 Live2D 扫描产物沉淀为可复用的动作知识（`base_action_library`、`parameter_action_library`）。
 - 在真实会话中完成 `语义 -> 动作意图 -> 前端编译参数计划 -> 执行` 的闭环。
 
-## 当前状态（2026-05-08）
+## 当前状态（2026-05-12）
 
 ### 已完成
 
@@ -19,14 +19,14 @@ AG99live 是桌宠项目 V2：以 `AstrBot 插件适配器 + Electron 前端运�
 - Live2D 扫描可产出 `parameter_scan`、`base_action_library`、`parameter_action_library`、`calibration_profile`。
 - 动作链路支持双路径：主请求内联 `<@anim {...}>` 优先，无内联时 realtime 兜底生成，运行协议已收口到 `engine.motion_intent.v2`。
 - 前端 `ModelEngine` 已能本地编译 `engine.motion_intent.v2 -> engine.parameter_plan.v2`。
-- 前端播放轮次已收口为 `TurnPlaybackSession`，文本 / 音频 / 动作的起播与完成判定已围绕 session 协作。
+- 前端播放轮次已收口为 `TurnPlaybackSession -> TurnPlaybackSegment`，文本 / 音频 / 动作按 `message_id` 组织为 segment queue。
 - 前端已提供 ModelEngine 表现倍率设置：全局强度默认 `1.35`，参与 v2 semantic axis 编译。
 - 动作实验室已支持最近真实 v2 播放参数回放、主轴手调、保存调参样本，并可同步给后端作为大模型 few-shot 参考。
 - Profile Editor 已拆为独立辅助窗口，当前模型的 `semantic_axis_profile` 是主轴配置事实来源。
 - 旧 `engine.motion_intent.v1` / `engine.parameter_plan.v1` 运行兼容入口已移除。
 - 前端动作执行链路已具备 session 级文本 / 音频 / 动作软同步起播、计划软衔接（soft handoff）、高频重复计划去重与重启节流。
 - 参数绑定容错已增强（含模型参数表回退匹配）。
-- 自动化验证基线已建立：后端 `135 passed`，前端 `npm run typecheck`、`npm run test` 可通过。
+- 自动化验证基线已建立：后端 `146 passed`，前端 `npm run typecheck`、`npm run test` 可通过。
 
 ### 进行中
 
@@ -81,7 +81,7 @@ python -m pytest astrbot_plugin_ag99live_adapter/tests -q
 
 - 输入：`input.text`、`input.raw_audio_data`、`input.mic_audio_end` 等
 - 输出：`output.text`、`output.audio`、`output.image`、`output.transcription`
-- 控制：`control.turn_started`、`control.turn_finished`、`control.playback_finished`、`control.error`
+- 控制：`control.turn_started`、`control.synth_finished`、`control.playback_finished`、`control.turn_finished`、`control.error`
 - 系统：`system.server_info`、`system.model_sync`、心跳与历史
 - 动作：`engine.motion_plan`、`engine.motion_intent`
 
@@ -89,6 +89,7 @@ python -m pytest astrbot_plugin_ag99live_adapter/tests -q
 
 - [docs/README](./docs/README.md)
 - [V2 当前实现状态与下一步](./docs/V2当前实现状态与下一步.md)
+- [项目结构优化路线图](./docs/项目结构优化路线图.md)
 - [当前前后端动作链路结构说明](./docs/当前前后端动作链路结构说明.md)
 - [文本语音动作同步播放编排设计](./docs/文本语音动作同步播放编排设计.md)
 - [astrbot_plugin_ag99live_adapter/README](./astrbot_plugin_ag99live_adapter/README.md)

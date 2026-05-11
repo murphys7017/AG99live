@@ -63,6 +63,7 @@ export const defaultSnapshot: DesktopRuntimeSnapshot = {
   activeSessionAudioTerminal: "idle",
   activeSessionMotionStarted: false,
   activeSessionMotionCompleted: false,
+  activeSessionSynthFinished: false,
   activeSessionTurnFinished: false,
 };
 

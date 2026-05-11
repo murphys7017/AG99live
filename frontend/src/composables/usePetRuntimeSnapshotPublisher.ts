@@ -181,6 +181,7 @@ export function usePetRuntimeSnapshotPublisher(
       options.motionPlaybackRecords.value,
       options.sessionStore.state.activeSessionId,
       options.sessionStore.getActiveSession()?.phase,
+      options.sessionStore.getActiveSession()?.backend.synthFinished,
       options.sessionStore.getActiveSession()?.backend.turnFinished,
     ],
     () => {
@@ -231,6 +232,7 @@ export function usePetRuntimeSnapshotPublisher(
             activeSegmentSnapshot?.motionStarted ?? false,
           activeSessionMotionCompleted:
             activeSegmentSnapshot?.motionCompleted ?? false,
+          activeSessionSynthFinished: options.sessionStore.getActiveSession()?.backend.synthFinished ?? false,
           activeSessionTurnFinished: options.sessionStore.getActiveSession()?.backend.turnFinished ?? false,
         });
       });

@@ -295,14 +295,14 @@ export function createTurnPlaybackOrchestratorCore(
       group.noAudioConfirmed = true;
       evaluateGroup(group, "no_audio_terminal");
     },
-    markTurnFinished: (
+    markOutputQueueClosed: (
       messageId: string,
       turnId: string | null,
       orchestrationId: string | null,
     ) => {
       const group = getOrCreateGroup(messageId, turnId, orchestrationId);
       group.noAudioConfirmed = group.noAudioConfirmed || !group.audioReady;
-      evaluateGroup(group, "turn_finished");
+      evaluateGroup(group, "output_queue_closed");
     },
     flush: () => {
       for (const group of groups.values()) {

@@ -706,6 +706,7 @@ async function dispatchInboundEvent(
       void startMicrophoneCapture();
       return;
     case "synth_finished":
+      sessionStore?.markSynthFinished(event.orchestrationId, event.turnId);
       markMissingAudiosForTurn(
         event.turnId,
         event.orchestrationId,
@@ -866,11 +867,6 @@ function applyTurnFinished(
     state.turnFinishedTurnId,
     state.turnFinishedSuccess,
     state.turnFinishedReason,
-  );
-  markMissingAudiosForTurn(
-    state.turnFinishedTurnId,
-    state.turnFinishedOrchestrationId,
-    "turn_finished_without_audio_playback",
   );
 
   if (event.success) {

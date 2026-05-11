@@ -39,6 +39,7 @@ function testSessionStartsWithoutTurnLevelPlaybackSlots(): void {
   assert.equal(session.turnId, "turn-1");
   assert.equal(session.segments.size, 0);
   assert.deepEqual(session.segmentOrder, []);
+  assert.equal(session.backend.synthFinished, false);
   assert.equal("text" in session, false);
   assert.equal("audio" in session, false);
   assert.equal("motion" in session, false);
@@ -113,6 +114,24 @@ function testSegmentSettlementAndTurnSettlement(): void {
   assert.equal(isPlaybackLocallySettled(session), true);
 }
 
+function testBackendCompletionSignalsAreSeparate(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.markTurnStarted("orch-1", "turn-1");
+  let session = getOnlySession(store);
+  assert.equal(session.backend.turnStarted, true);
+  assert.equal(session.backend.synthFinished, false);
+  assert.equal(session.backend.turnFinished, false);
+
+  store.markSynthFinished("orch-1", "turn-1");
+  session = getOnlySession(store);
+  assert.equal(session.backend.synthFinished, true);
+  assert.equal(session.backend.turnFinished, false);
+
+  store.markTurnFinished("orch-1", "turn-1", true);
+  assert.equal(session.backend.turnFinished, true);
+  assert.equal(session.backend.success, true);
+}
+
 function testRequiredMessageIdIsEnforced(): void {
   const store = useTurnPlaybackSessionStore();
   assert.throws(
@@ -165,6 +184,7 @@ function run(): void {
   testMultipleMessageIdsKeepArrivalOrder();
   testSelectorsOperateOnSegments();
   testSegmentSettlementAndTurnSettlement();
+  testBackendCompletionSignalsAreSeparate();
   testRequiredMessageIdIsEnforced();
   testTurnOnlySessionPromotesToOrchestrationSession();
   testGetUnsettledSegmentsReturnsOnlyUnsettledSegments();

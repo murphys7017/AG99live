@@ -359,13 +359,46 @@ function testTurnStartedResetsPendingMaps(): void {
   });
 }
 
-function testTurnFinishedMarksMissingSegmentAudioAbsent(): void {
+function testSynthFinishedMarksMissingSegmentAudioAbsent(): void {
+  withConnectedAdapter(({ socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-synth-finished", "orch-synth-finished");
+    socket.emitMessage(JSON.stringify({
+      type: "output.text",
+      version: "v2",
+      message_id: "m-no-audio",
+      timestamp: "2026-05-08T00:00:01.000Z",
+      session_id: "session-synth-finished",
+      turn_id: "turn-synth-finished",
+      orchestration_id: "orch-synth-finished",
+      source: "backend",
+      payload: { text: "no audio", speaker_name: "assistant", avatar: "" },
+    }));
+    socket.emitMessage(JSON.stringify({
+      type: "control.synth_finished",
+      version: "v2",
+      message_id: "m-synth-finished",
+      timestamp: "2026-05-08T00:00:02.000Z",
+      session_id: "session-synth-finished",
+      turn_id: null,
+      orchestration_id: null,
+      source: "backend",
+      payload: {},
+    }));
+
+    const session = sessionStore.getSession("orch-synth-finished");
+    assert.equal(session?.backend.synthFinished, true);
+    assert.equal(session?.backend.turnFinished, false);
+    assert.equal(session?.segments.get("m-no-audio")?.audio.terminal, "absent");
+  });
+}
+
+function testTurnFinishedDoesNotMarkMissingSegmentAudioAbsent(): void {
   withConnectedAdapter(({ socket, sessionStore }) => {
     sendTurnStarted(socket, "turn-finished", "orch-finished");
     socket.emitMessage(JSON.stringify({
       type: "output.text",
       version: "v2",
-      message_id: "m-no-audio",
+      message_id: "m-no-audio-turn-finished",
       timestamp: "2026-05-08T00:00:01.000Z",
       session_id: "session-finished",
       turn_id: "turn-finished",
@@ -387,7 +420,10 @@ function testTurnFinishedMarksMissingSegmentAudioAbsent(): void {
 
     const session = sessionStore.getSession("orch-finished");
     assert.equal(session?.backend.turnFinished, true);
-    assert.equal(session?.segments.get("m-no-audio")?.audio.terminal, "absent");
+    assert.equal(
+      session?.segments.get("m-no-audio-turn-finished")?.audio.terminal,
+      "idle",
+    );
   });
 }
 
@@ -446,7 +482,8 @@ function run(): void {
   testMultipleMessageIdsDoNotOverwritePendingItems();
   testFallbackIdentityWritesCurrentSessionSegment();
   testTurnStartedResetsPendingMaps();
-  testTurnFinishedMarksMissingSegmentAudioAbsent();
+  testSynthFinishedMarksMissingSegmentAudioAbsent();
+  testTurnFinishedDoesNotMarkMissingSegmentAudioAbsent();
   testMotionFallbackDoesNotCreateAnonymousSession();
   testInvalidMotionDoesNotRewritePreviousSegment();
 

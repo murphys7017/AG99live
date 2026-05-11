@@ -417,6 +417,14 @@ export function useTurnPlaybackSessionStore() {
     session.backend.turnStarted = true;
   }
 
+  function markSynthFinished(
+    orchestrationId: string | null,
+    turnId: string | null,
+  ): void {
+    const session = ensureSession(orchestrationId, turnId);
+    session.backend.synthFinished = true;
+  }
+
   function markTurnFinished(
     orchestrationId: string | null,
     turnId: string | null,
@@ -568,6 +576,7 @@ export function useTurnPlaybackSessionStore() {
     markMotionStarted,
     markMotionCompleted,
     markTurnStarted,
+    markSynthFinished,
     markTurnFinished,
     markInterrupt,
     markPhase,

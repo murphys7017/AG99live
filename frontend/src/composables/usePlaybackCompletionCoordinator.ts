@@ -87,13 +87,6 @@ export function usePlaybackCompletionCoordinator(
     activeMotionSegments.clear();
   }
 
-  function isPlaybackAckRequired(session: TurnPlaybackSession): boolean {
-    return session.segmentOrder.some((segmentId) => {
-      const segment = session.segments.get(segmentId);
-      return segment ? segment.audio.terminal !== "idle" : false;
-    });
-  }
-
   function finalizeCompletion(sessionId: string): void {
     const s = getSession(sessionId);
     if (!s) return;
@@ -143,17 +136,14 @@ export function usePlaybackCompletionCoordinator(
       return;
     }
 
-    if (!s.backend.turnFinished) {
-      return;
-    }
-
-    if (!isPlaybackAckRequired(s)) {
-      finalizeCompletion(sessionId);
+    if (!s.backend.synthFinished) {
       return;
     }
 
     if (ackedSessions.has(sessionId)) {
-      finalizeCompletion(sessionId);
+      if (s.backend.turnFinished) {
+        finalizeCompletion(sessionId);
+      }
       return;
     }
 
@@ -176,7 +166,9 @@ export function usePlaybackCompletionCoordinator(
       success,
       reason,
     );
-    finalizeCompletion(sessionId);
+    if (s.backend.turnFinished) {
+      finalizeCompletion(sessionId);
+    }
   }
 
   function schedulePlaybackSettlementWindow(sessionId: string, messageId: string): void {
@@ -297,6 +289,7 @@ export function usePlaybackCompletionCoordinator(
           motionCompleted: segment?.motion.completed ?? false,
         };
       }),
+      backendSynthFinished: session.backend.synthFinished,
       backendTurnFinished: session.backend.turnFinished,
       phase: session.phase,
     })),

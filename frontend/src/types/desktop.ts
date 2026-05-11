@@ -297,6 +297,7 @@ export interface DesktopRuntimeSnapshot {
   activeSessionAudioTerminal: string;
   activeSessionMotionStarted: boolean;
   activeSessionMotionCompleted: boolean;
+  activeSessionSynthFinished: boolean;
   activeSessionTurnFinished: boolean;
 }
 
