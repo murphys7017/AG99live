@@ -4,7 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 from astrbot_plugin_ag99live_adapter.live2d.semantic_axis_profile import SemanticAxisProfileError
-from astrbot_plugin_ag99live_adapter.services.frontend_compat_service import FrontendCompatHandler
+from astrbot_plugin_ag99live_adapter.services.frontend_system_service import FrontendSystemCommandHandler
 
 
 class _RuntimeStateStub:
@@ -90,9 +90,9 @@ class _HistoryBridgeStub:
         return True
 
 
-def test_frontend_compat_handler_saves_semantic_profile_and_refreshes() -> None:
+def test_frontend_system_handler_saves_semantic_profile_and_refreshes() -> None:
     runtime_state = _RuntimeStateStub()
-    handler = FrontendCompatHandler(
+    handler = FrontendSystemCommandHandler(
         background_files_getter=lambda: [],
         history_bridge=_HistoryBridgeStub(),
         runtime_state=runtime_state,
@@ -146,9 +146,9 @@ def test_frontend_compat_handler_saves_semantic_profile_and_refreshes() -> None:
     assert refresh_calls == [True]
 
 
-def test_frontend_compat_handler_returns_control_error_on_save_failure() -> None:
+def test_frontend_system_handler_returns_control_error_on_save_failure() -> None:
     runtime_state = _RuntimeStateStub(error=SemanticAxisProfileError("broken profile"))
-    handler = FrontendCompatHandler(
+    handler = FrontendSystemCommandHandler(
         background_files_getter=lambda: [],
         history_bridge=_HistoryBridgeStub(),
         runtime_state=runtime_state,
@@ -190,9 +190,9 @@ def test_frontend_compat_handler_returns_control_error_on_save_failure() -> None
     assert sent_payloads[0]["payload"]["message"] == "broken profile"
 
 
-def test_frontend_compat_handler_returns_control_error_on_missing_profile_file() -> None:
+def test_frontend_system_handler_returns_control_error_on_missing_profile_file() -> None:
     runtime_state = _RuntimeStateStub(error=FileNotFoundError("profile missing"))
-    handler = FrontendCompatHandler(
+    handler = FrontendSystemCommandHandler(
         background_files_getter=lambda: [],
         history_bridge=_HistoryBridgeStub(),
         runtime_state=runtime_state,
@@ -234,9 +234,9 @@ def test_frontend_compat_handler_returns_control_error_on_missing_profile_file()
     assert sent_payloads[0]["payload"]["message"] == "profile missing"
 
 
-def test_frontend_compat_handler_saves_motion_tuning_sample_and_pushes_state() -> None:
+def test_frontend_system_handler_saves_motion_tuning_sample_and_pushes_state() -> None:
     runtime_state = _RuntimeStateStub()
-    handler = FrontendCompatHandler(
+    handler = FrontendSystemCommandHandler(
         background_files_getter=lambda: [],
         history_bridge=_HistoryBridgeStub(),
         runtime_state=runtime_state,
@@ -312,11 +312,11 @@ def test_frontend_compat_handler_saves_motion_tuning_sample_and_pushes_state() -
     assert sent_payloads[0]["payload"]["diagnostics"] == []
 
 
-def test_frontend_compat_handler_save_missing_motion_tuning_sample_field_returns_control_error() -> None:
+def test_frontend_system_handler_save_missing_motion_tuning_sample_field_returns_control_error() -> None:
     runtime_state = _RuntimeStateStub(
         motion_tuning_sample_error=ValueError("motion_tuning_sample_profile_id_required")
     )
-    handler = FrontendCompatHandler(
+    handler = FrontendSystemCommandHandler(
         background_files_getter=lambda: [],
         history_bridge=_HistoryBridgeStub(),
         runtime_state=runtime_state,
@@ -381,10 +381,10 @@ def test_frontend_compat_handler_save_missing_motion_tuning_sample_field_returns
     assert sent_payloads[0]["payload"]["message"] == "motion_tuning_sample_profile_id_required"
 
 
-def test_frontend_compat_handler_deletes_motion_tuning_sample_and_pushes_state() -> None:
+def test_frontend_system_handler_deletes_motion_tuning_sample_and_pushes_state() -> None:
     runtime_state = _RuntimeStateStub()
     runtime_state.motion_tuning_samples = [{"id": "sample-1"}]
-    handler = FrontendCompatHandler(
+    handler = FrontendSystemCommandHandler(
         background_files_getter=lambda: [],
         history_bridge=_HistoryBridgeStub(),
         runtime_state=runtime_state,
@@ -420,7 +420,7 @@ def test_frontend_compat_handler_deletes_motion_tuning_sample_and_pushes_state()
     assert sent_payloads[0]["payload"]["diagnostics"] == []
 
 
-def test_frontend_compat_handler_pushes_motion_tuning_sample_state_with_load_error_and_diagnostics() -> None:
+def test_frontend_system_handler_pushes_motion_tuning_sample_state_with_load_error_and_diagnostics() -> None:
     runtime_state = _RuntimeStateStub()
     runtime_state.motion_tuning_samples = [{"id": "sample-1"}]
     runtime_state.runtime_cache_root_error = "live2d_runtime_cache_load_failed: broken json"
@@ -429,7 +429,7 @@ def test_frontend_compat_handler_pushes_motion_tuning_sample_state_with_load_err
         "motion_tuning_user_samples_insufficient:requested=3:user_available=1",
         "motion_tuning_default_backfill_applied:count=2",
     ]
-    handler = FrontendCompatHandler(
+    handler = FrontendSystemCommandHandler(
         background_files_getter=lambda: [],
         history_bridge=_HistoryBridgeStub(),
         runtime_state=runtime_state,
@@ -466,9 +466,9 @@ def test_frontend_compat_handler_pushes_motion_tuning_sample_state_with_load_err
     ]
 
 
-def test_frontend_compat_handler_delete_missing_motion_tuning_sample_fails() -> None:
+def test_frontend_system_handler_delete_missing_motion_tuning_sample_fails() -> None:
     runtime_state = _RuntimeStateStub()
-    handler = FrontendCompatHandler(
+    handler = FrontendSystemCommandHandler(
         background_files_getter=lambda: [],
         history_bridge=_HistoryBridgeStub(),
         runtime_state=runtime_state,

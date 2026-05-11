@@ -22,7 +22,7 @@ from .runtime.client_profile import (
     normalize_client_nickname,
     normalize_client_uid,
 )
-from .services.frontend_compat_service import FrontendCompatHandler
+from .services.frontend_system_service import FrontendSystemCommandHandler
 from .services.history_service import ConversationHistoryBridge
 from .services.media_service import MediaService
 from .services.message_factory import MessageFactory
@@ -160,7 +160,7 @@ class OLVPetPlatformAdapter(Platform):
             speaker_name=self.speaker_name,
             chat_buffer=self.chat_buffer,
         )
-        self.frontend_compat_handler = FrontendCompatHandler(
+        self.frontend_system_handler = FrontendSystemCommandHandler(
             background_files_getter=lambda: list_background_files(ASSETS_DIR),
             history_bridge=self.history_bridge,
             runtime_state=self.runtime_state,
@@ -187,7 +187,7 @@ class OLVPetPlatformAdapter(Platform):
             speaker_name=self.speaker_name,
             convert_message=self.message_factory.convert_message,
             build_message_object=self.message_factory.build_message_object,
-            handle_frontend_compat=self._handle_frontend_compat,
+            handle_frontend_system=self._handle_frontend_system,
             refresh_runtime_settings=self._refresh_runtime_settings,
             send_current_model_and_conf=self._send_current_model_and_conf,
             send_json=self.transport.send_json,
@@ -369,8 +369,8 @@ class OLVPetPlatformAdapter(Platform):
         )
         await self._send_json(payload)
 
-    async def _handle_frontend_compat(self, message: dict[str, Any]) -> None:
-        await self.frontend_compat_handler.handle(
+    async def _handle_frontend_system(self, message: dict[str, Any]) -> None:
+        await self.frontend_system_handler.handle(
             message,
             send_json=self._send_json,
             refresh_and_send_model=self._refresh_and_send_current_model_and_conf,

@@ -53,8 +53,8 @@ def parse_inbound_message(
     turn_id = _normalize_optional_string(raw.get("turn_id"))
     orchestration_id = _normalize_optional_string(raw.get("orchestration_id"))
     source = _normalize_source(raw.get("source"), SOURCE_FRONTEND)
-    version = _normalize_optional_string(raw.get("version")) or PROTOCOL_VERSION
-    message_id = _normalize_optional_string(raw.get("message_id")) or uuid4().hex
+    version = _require_protocol_version(raw.get("version"))
+    message_id = _require_message_id(raw.get("message_id"))
     timestamp = _normalize_optional_string(raw.get("timestamp")) or _utc_now_iso()
 
     _validate_payload(message_type, payload)
@@ -243,6 +243,22 @@ def _require_message_type(value: Any) -> str:
     normalized = _normalize_optional_string(value)
     if not normalized:
         raise ProtocolError("`type` is required.")
+    return normalized
+
+
+def _require_protocol_version(value: Any) -> str:
+    normalized = _normalize_optional_string(value)
+    if normalized != PROTOCOL_VERSION:
+        raise ProtocolError(
+            f"`version` must be `{PROTOCOL_VERSION}`, got `{normalized or 'empty'}`."
+        )
+    return normalized
+
+
+def _require_message_id(value: Any) -> str:
+    normalized = _normalize_optional_string(value)
+    if not normalized:
+        raise ProtocolError("`message_id` is required.")
     return normalized
 
 

@@ -166,7 +166,7 @@ function testEngineMotionFallsBackCurrentThenAudio(): void {
   assert.equal(event.messageId, "m-1");
 }
 
-function testMissingMessageIdUsesUniqueLegacySegmentIds(): void {
+function testMissingSegmentMessageIdReturnsProtocolError(): void {
   const envelopeA = makeEnvelope("output.text", {
     text: " first ",
     speaker_name: "assistant",
@@ -190,14 +190,13 @@ function testMissingMessageIdUsesUniqueLegacySegmentIds(): void {
   const eventA = mapInboundEnvelopeToEvent(envelopeA, defaultContext());
   const eventB = mapInboundEnvelopeToEvent(envelopeB, defaultContext());
 
-  assert.equal(eventA.kind, "output_text");
-  assert.equal(eventB.kind, "engine_motion_payload");
-  if (eventA.kind !== "output_text" || eventB.kind !== "engine_motion_payload") {
-    throw new Error("expected segment events");
+  assert.equal(eventA.kind, "protocol_error");
+  assert.equal(eventB.kind, "protocol_error");
+  if (eventA.kind !== "protocol_error" || eventB.kind !== "protocol_error") {
+    throw new Error("expected protocol_error events");
   }
-  assert.match(eventA.messageId, /^legacy:output_text:orch-legacy:/);
-  assert.match(eventB.messageId, /^legacy:engine_motion_payload:orch-legacy:/);
-  assert.notEqual(eventA.messageId, eventB.messageId);
+  assert.equal(eventA.error.path, "message_id");
+  assert.equal(eventB.error.path, "message_id");
 }
 
 function testUnhandledTypeReturnsUnhandled(): void {
@@ -264,7 +263,7 @@ function run(): void {
   testTurnStartedDoesNotInheritCurrentIdentity();
   testInterruptUsesCurrentIdentity();
   testEngineMotionFallsBackCurrentThenAudio();
-  testMissingMessageIdUsesUniqueLegacySegmentIds();
+  testMissingSegmentMessageIdReturnsProtocolError();
   testUnhandledTypeReturnsUnhandled();
   testInvalidOutputTextPayloadReturnsProtocolError();
   testInvalidTurnFinishedReasonReturnsProtocolError();

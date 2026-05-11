@@ -63,7 +63,7 @@ class TurnCoordinator:
         speaker_name: str,
         convert_message: Callable[[dict[str, Any]], Any],
         build_message_object: Callable[..., Any],
-        handle_frontend_compat: Callable[[Any], Awaitable[None]],
+        handle_frontend_system: Callable[[Any], Awaitable[None]],
         refresh_runtime_settings: Callable[[], None],
         send_current_model_and_conf: Callable[[], Awaitable[None]],
         send_json: Callable[[dict[str, Any]], Awaitable[bool]],
@@ -80,7 +80,7 @@ class TurnCoordinator:
         self.speaker_name = speaker_name
         self._convert_message = convert_message
         self._build_message_object = build_message_object
-        self._handle_frontend_compat = handle_frontend_compat
+        self._handle_frontend_system = handle_frontend_system
         self._refresh_runtime_settings = refresh_runtime_settings
         self._send_current_model_and_conf = send_current_model_and_conf
         self._send_json = send_json
@@ -109,7 +109,7 @@ class TurnCoordinator:
         )
 
         if message.type.startswith("system."):
-            await self._handle_frontend_compat(message)
+            await self._handle_frontend_system(message)
             return
 
         if message.type == TYPE_CONTROL_PLAYBACK_FINISHED:

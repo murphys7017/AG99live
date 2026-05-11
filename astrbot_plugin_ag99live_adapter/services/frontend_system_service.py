@@ -44,7 +44,7 @@ SUPPORTED_SYSTEM_MESSAGE_TYPES = {
 }
 
 
-class FrontendCompatHandler:
+class FrontendSystemCommandHandler:
     def __init__(
         self,
         *,

@@ -63,8 +63,6 @@ function resolveCurrentOrchestrationIdentity(
   return normalizeOrchestrationId(value) ?? fallback;
 }
 
-let legacySegmentSerial = 0;
-
 function normalizeMessageId(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
@@ -73,19 +71,21 @@ function normalizeMessageId(value: unknown): string | null {
   return normalized || null;
 }
 
-function resolveMessageId(
+function requireSegmentMessageId(
   envelope: ProtocolEnvelope<unknown>,
-  eventKind: string,
-  turnId: string | null,
-  orchestrationId: string | null,
-): string {
+): { ok: true; messageId: string } | { ok: false; event: InboundAdapterEvent } {
   const messageId = normalizeMessageId(envelope.message_id);
   if (messageId) {
-    return messageId;
+    return { ok: true, messageId };
   }
-  legacySegmentSerial += 1;
-  const groupId = orchestrationId || turnId || "anonymous";
-  return `legacy:${eventKind}:${groupId}:${legacySegmentSerial}`;
+  return {
+    ok: false,
+    event: protocolPayloadError(envelope, {
+      code: "invalid_payload",
+      path: "message_id",
+      message: `收到非法协议载荷（type=${envelope.type}, path=message_id, expected=non-empty string）。`,
+    }),
+  };
 }
 
 type InboundPassthroughEvent =
@@ -265,9 +265,13 @@ export function mapInboundEnvelopeToEvent(
         envelope.orchestration_id,
         ctx.currentOrchestrationId,
       );
+      const messageId = requireSegmentMessageId(envelope);
+      if (!messageId.ok) {
+        return messageId.event;
+      }
       return {
         kind: "output_text",
-        messageId: resolveMessageId(envelope, "output_text", turnId, orchestrationId),
+        messageId: messageId.messageId,
         turnId,
         orchestrationId,
         text: payload.text.trim(),
@@ -289,9 +293,13 @@ export function mapInboundEnvelopeToEvent(
         envelope.orchestration_id,
         ctx.currentOrchestrationId,
       );
+      const messageId = requireSegmentMessageId(envelope);
+      if (!messageId.ok) {
+        return messageId.event;
+      }
       return {
         kind: "output_audio",
-        messageId: resolveMessageId(envelope, "output_audio", turnId, orchestrationId),
+        messageId: messageId.messageId,
         turnId,
         orchestrationId,
         text: payload.text.trim(),
@@ -386,9 +394,13 @@ export function mapInboundEnvelopeToEvent(
         normalizeOrchestrationId(envelope.orchestration_id)
         ?? ctx.currentOrchestrationId
         ?? ctx.audioPlaybackStartedOrchestrationId;
+      const messageId = requireSegmentMessageId(envelope);
+      if (!messageId.ok) {
+        return messageId.event;
+      }
       return {
         kind: "engine_motion_payload",
-        messageId: resolveMessageId(envelope, "engine_motion_payload", turnId, orchestrationId),
+        messageId: messageId.messageId,
         turnId,
         orchestrationId,
         envelope: envelope as ProtocolEnvelope<Record<string, unknown>>,

@@ -92,7 +92,7 @@ import { normalizeMotionPayload } from "../model-engine/normalize.js";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore.js";
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
-type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "not_requested";
+type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "absent";
 
 const MAX_MIC_SOCKET_BUFFERED_AMOUNT = 512 * 1024;
 const state = reactive({
@@ -234,12 +234,10 @@ function markAudioPlaybackTerminal(
     return;
   }
 
-  const sessionTerminal: "completed" | "failed" | "absent" =
-    terminalState === "not_requested" ? "absent" : terminalState;
   sessionStore?.markAudioTerminal(
     orchestrationId,
     turnId,
-    sessionTerminal,
+    terminalState,
     messageId,
     reason,
   );
@@ -1103,7 +1101,7 @@ function markMissingAudiosForTurn(
         && matchesPlaybackGroup(segment.turnId, segment.orchestrationId, turnId, orchestrationId)
       ) {
         markAudioPlaybackTerminal(
-          "not_requested",
+          "absent",
           segment.turnId,
           segment.orchestrationId,
           reason,

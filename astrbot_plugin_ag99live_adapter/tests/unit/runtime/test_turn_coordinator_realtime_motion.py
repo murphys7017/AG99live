@@ -1169,7 +1169,7 @@ def test_handle_msg_emits_control_error_for_unhandled_allowed_message_type(
         return True
 
     coordinator._send_json = fake_send_json
-    coordinator._handle_frontend_compat = _noop_async
+    coordinator._handle_frontend_system = _noop_async
     coordinator.finalize_turn = _noop_async
     coordinator._handle_interrupt_signal = _noop_async
     coordinator._commit_inbound_message = _noop_async
@@ -1190,11 +1190,12 @@ def test_handle_msg_emits_control_error_for_unhandled_allowed_message_type(
 
     asyncio.run(
         coordinator.handle_msg(
-            {
-                "type": constants.TYPE_OUTPUT_TEXT,
-                "version": constants.PROTOCOL_VERSION,
-                "session_id": "desktop-client",
-                "turn_id": "turn-unhandled",
+                {
+                    "type": constants.TYPE_OUTPUT_TEXT,
+                    "version": constants.PROTOCOL_VERSION,
+                    "message_id": "message-unhandled",
+                    "session_id": "desktop-client",
+                    "turn_id": "turn-unhandled",
                 "orchestration_id": "orch-unhandled",
                 "source": constants.SOURCE_FRONTEND,
                 "payload": {},

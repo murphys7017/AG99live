@@ -6,20 +6,29 @@ from astrbot_plugin_ag99live_adapter.protocol.parser import parse_inbound_messag
 from astrbot_plugin_ag99live_adapter.protocol.models import ProtocolError
 
 
+def _message(message_type: str, payload: dict) -> dict:
+    return {
+        "type": message_type,
+        "version": "v2",
+        "message_id": f"test-{message_type}",
+        "session_id": "session",
+        "source": "frontend",
+        "payload": payload,
+    }
+
+
 def test_parse_inbound_message_accepts_semantic_axis_profile_save() -> None:
     envelope = parse_inbound_message(
-        {
-            "type": "system.semantic_axis_profile_save",
-            "session_id": "session",
-            "source": "frontend",
-            "payload": {
+        _message(
+            "system.semantic_axis_profile_save",
+            {
                 "request_id": "request-1",
                 "model_name": "DemoModel",
                 "profile_id": "DemoModel.semantic.v1",
                 "expected_revision": 3,
                 "profile": {"schema_version": "ag99.semantic_axis_profile.v1"},
             },
-        },
+        ),
         default_session_id="fallback-session",
     )
 
@@ -32,28 +41,24 @@ def test_parse_inbound_message_accepts_semantic_axis_profile_save() -> None:
 def test_parse_inbound_message_rejects_invalid_semantic_axis_profile_save_payload() -> None:
     with pytest.raises(ProtocolError):
         parse_inbound_message(
-            {
-                "type": "system.semantic_axis_profile_save",
-                "session_id": "session",
-                "source": "frontend",
-                "payload": {
+            _message(
+                "system.semantic_axis_profile_save",
+                {
                     "request_id": "request-1",
                     "model_name": "DemoModel",
                     "expected_revision": "3",
                     "profile": {"schema_version": "ag99.semantic_axis_profile.v1"},
                 },
-            },
+            ),
             default_session_id="fallback-session",
         )
 
 
 def test_parse_inbound_message_accepts_motion_tuning_sample_save() -> None:
     envelope = parse_inbound_message(
-        {
-            "type": "system.motion_tuning_sample_save",
-            "session_id": "session",
-            "source": "frontend",
-            "payload": {
+        _message(
+            "system.motion_tuning_sample_save",
+            {
                 "sample": {
                     "id": "sample-1",
                     "created_at": "2026-04-29T00:00:00+00:00",
@@ -94,7 +99,7 @@ def test_parse_inbound_message_accepts_motion_tuning_sample_save() -> None:
                     },
                 },
             },
-        },
+        ),
         default_session_id="fallback-session",
     )
 
@@ -104,14 +109,12 @@ def test_parse_inbound_message_accepts_motion_tuning_sample_save() -> None:
 
 def test_parse_inbound_message_accepts_motion_tuning_sample_delete() -> None:
     envelope = parse_inbound_message(
-        {
-            "type": "system.motion_tuning_sample_delete",
-            "session_id": "session",
-            "source": "frontend",
-            "payload": {
+        _message(
+            "system.motion_tuning_sample_delete",
+            {
                 "sample_id": "sample-1",
             },
-        },
+        ),
         default_session_id="fallback-session",
     )
 
@@ -122,11 +125,6 @@ def test_parse_inbound_message_accepts_motion_tuning_sample_delete() -> None:
 def test_parse_inbound_message_rejects_removed_motion_tuning_examples_sync() -> None:
     with pytest.raises(ProtocolError, match="Unsupported message type"):
         parse_inbound_message(
-            {
-                "type": "system.motion_tuning_examples_sync",
-                "session_id": "session",
-                "source": "frontend",
-                "payload": {"examples": []},
-            },
+            _message("system.motion_tuning_examples_sync", {"examples": []}),
             default_session_id="fallback-session",
         )

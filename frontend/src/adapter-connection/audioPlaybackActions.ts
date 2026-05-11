@@ -28,7 +28,7 @@ export interface AudioPlaybackContext {
   stopAudioRuntime: () => void;
   pushHistory: (role: string, text: string) => void;
   markTerminal: (
-    terminalState: "completed" | "failed" | "not_requested",
+    terminalState: "completed" | "failed" | "absent",
     turnId: string | null,
     orchestrationId: string | null,
     reason?: string,
