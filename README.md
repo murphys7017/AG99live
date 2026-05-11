@@ -1,97 +1,56 @@
 # AG99live
 
-AG99live 是桌宠项目 V2：以 `AstrBot 插件适配器 + Electron 前端运行时` 组成一条可联调、可扩展的实时对话与动作链路。
+你的桌面 AI 宠物——一个会听、会说、会动的 Live2D 虚拟形象。
+
+输入文字，它会开口说话、做出动作、表达情绪，一切同步进行，就像一个真实的小助手在陪伴你。
 
 ![AG99live 预览](./docs/images/image.png)
 
-## 项目目标
+## 能做什么
 
-- 用统一协议打通 `文本 / 语音 / 图像 / 控制 / 动作`。
-- 将 Live2D 扫描产物沉淀为可复用的动作知识（`base_action_library`、`parameter_action_library`）。
-- 在真实会话中完成 `语义 -> 动作意图 -> 前端编译参数计划 -> 执行` 的闭环。
+**对话交互**
+输入文字，桌宠会用语音回应，同时配合对应的表情和动作（点头、摇头、挥手、歪头等）。支持文本和语音两种输入方式。
 
-## 当前状态（2026-05-12）
+**动作实验室**
+在动作实验室里预览 AI 生成的动作效果，你可以手动调整动作参数（开心程度、头部倾斜角度等），保存你喜欢的调参样本，让 AI 后续生成更符合你偏好的动作。
 
-### 已完成
+**主轴配置**
+配置桌宠的"情绪主轴"——定义哪些维度影响动作表现。绑定语义参数到 Live2D 模型的实际参数，塑造独特的桌宠性格。
 
-- V2 协议主链路已切换完成：`input.* / output.* / control.* / system.* / engine.*`。
-- Adapter 已可作为 AstrBot 插件运行，提供 `WebSocket` 实时消息和 `HTTP` 资源服务。
-- Live2D 扫描可产出 `parameter_scan`、`base_action_library`、`parameter_action_library`、`calibration_profile`。
-- 动作链路支持双路径：主请求内联 `<@anim {...}>` 优先，无内联时 realtime 兜底生成，运行协议已收口到 `engine.motion_intent.v2`。
-- 前端 `ModelEngine` 已能本地编译 `engine.motion_intent.v2 -> engine.parameter_plan.v2`。
-- 前端播放轮次已收口为 `TurnPlaybackSession -> TurnPlaybackSegment`，文本 / 音频 / 动作按 `message_id` 组织为 segment queue。
-- 前端已提供 ModelEngine 表现倍率设置：全局强度默认 `1.35`，参与 v2 semantic axis 编译。
-- 动作实验室已支持最近真实 v2 播放参数回放、主轴手调、保存调参样本，并可同步给后端作为大模型 few-shot 参考。
-- Profile Editor 已拆为独立辅助窗口，当前模型的 `semantic_axis_profile` 是主轴配置事实来源。
-- 旧 `engine.motion_intent.v1` / `engine.parameter_plan.v1` 运行兼容入口已移除。
-- 前端动作执行链路已具备 session 级文本 / 音频 / 动作软同步起播、计划软衔接（soft handoff）、高频重复计划去重与重启节流。
-- 参数绑定容错已增强（含模型参数表回退匹配）。
-- 自动化验证基线已建立：后端 `146 passed`，前端 `npm run typecheck`、`npm run test` 可通过。
+**设置与历史**
+配置后端连接、调节动作强度、开关待机自动动作、查看对话历史。
 
-### 进行中
+## 技术特点
 
-- 音频、口型、动作的体感一致性仍在持续优化（尤其是语义强度与细节层次）。
-- 真实 Live2D 模型上的 semantic profile 参数范围、权重与动作体感仍需继续校准。
-
-## 仓库结构
-
-```text
-AG99live/
-├─ astrbot_plugin_ag99live_adapter/   # AstrBot 插件（协议、会话、媒体、Live2D 扫描、realtime motion）
-├─ frontend/  # Electron + Vue 客户端（桌宠窗口、设置、历史、Action Lab）
-├─ docs/      # 当前有效文档与归档索引
-├─ analysis/  # 本地分析实验区（默认不纳入正式文档）
-└─ deploy_adapter.ps1
-```
+| 特点 | 说明 |
+|------|------|
+| 语义驱动的动作合成 | AI 理解"开心/惊讶/难过"等情绪，实时转换为具体的动作参数 |
+| 多模态同步 | 语音、文本、动作在同一时刻一起发生 |
+| Live2D 动作库 | 自动扫描模型动作库，沉淀可复用的动作知识 |
+| 个性化调参 | 手动调整动作风格，样本可同步给 AI 学习 |
 
 ## 快速开始
 
-### 1) 前端开发
+详细开发文档见 [docs/README](./docs/README.md)
 
 ```powershell
-cd frontend
-npm install
-npm run dev
-```
+# 前端开发
+cd frontend && npm install && npm run dev
 
-常用命令：
-
-- `npm run typecheck`
-- `npm run test`
-- `npm run build:web`
-
-### 2) 后端测试
-
-```powershell
+# 后端测试
 python -m pytest astrbot_plugin_ag99live_adapter/tests -q
-```
 
-### 3) 部署 Adapter 到本地 AstrBot 插件目录
-
-```powershell
+# 部署到 AstrBot
 .\deploy_adapter.ps1
 ```
 
-可选参数：
+## 项目结构
 
-- `-PluginsRoot "<AstrBot>\data\plugins"`
-- `-DryRun`
-
-## 协议摘要
-
-- 输入：`input.text`、`input.raw_audio_data`、`input.mic_audio_end` 等
-- 输出：`output.text`、`output.audio`、`output.image`、`output.transcription`
-- 控制：`control.turn_started`、`control.synth_finished`、`control.playback_finished`、`control.turn_finished`、`control.error`
-- 系统：`system.server_info`、`system.model_sync`、心跳与历史
-- 动作：`engine.motion_plan`、`engine.motion_intent`
-
-## 文档入口
-
-- [docs/README](./docs/README.md)
-- [V2 当前实现状态与下一步](./docs/V2当前实现状态与下一步.md)
-- [项目结构优化路线图](./docs/项目结构优化路线图.md)
-- [当前前后端动作链路结构说明](./docs/当前前后端动作链路结构说明.md)
-- [文本语音动作同步播放编排设计](./docs/文本语音动作同步播放编排设计.md)
-- [astrbot_plugin_ag99live_adapter/README](./astrbot_plugin_ag99live_adapter/README.md)
-- [frontend/README](./frontend/README.md)
+```
+AG99live/
+├─ frontend/                          # Electron + Vue 客户端（桌宠窗口、设置、历史、动作实验室）
+├─ astrbot_plugin_ag99live_adapter/   # AstrBot 插件后端
+├─ docs/                              # 开发文档
+└─ deploy_adapter.ps1
+```
 
