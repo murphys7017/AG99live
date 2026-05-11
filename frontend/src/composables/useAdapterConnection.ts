@@ -61,6 +61,7 @@ import {
   formatAddressHost,
   normalizeWsAddress,
 } from "../adapter-connection/address.js";
+import { openAdapterConnectionTransport } from "../adapter-connection/transport.js";
 import {
   buildMessageEnvelope as buildProtocolMessageEnvelope,
   createMessageId,
@@ -211,6 +212,17 @@ const audioPlaybackCtx = {
             turnId,
             messageId,
             startedAtMs,
+            durationMs,
+          ),
+          markAudioDuration: (
+            orchestrationId: string | null,
+            turnId: string | null,
+            messageId: string,
+            durationMs: number | null,
+          ) => sessionStore?.markAudioDuration(
+            orchestrationId,
+            turnId,
+            messageId,
             durationMs,
           ),
         }
@@ -365,97 +377,92 @@ function openConnectionCandidate(
       ? `正在连接适配器 (${index + 1}/${total})...`
       : "正在连接适配器...";
 
-  const nextSocket = new WebSocket(targetAddress);
-  let opened = false;
-  socket = nextSocket;
-
-  nextSocket.addEventListener("open", () => {
-    if (socket !== nextSocket || attemptSerial !== connectAttemptSerial) {
-      nextSocket.close();
-      return;
-    }
-
-    opened = true;
-    persistAddress(state.address);
-    state.activeWsAddress = targetAddress;
-    state.status = "connected";
-    state.statusMessage = "连接已建立，等待后端同步。";
-    state.lastError = "";
-    pushHistory("system", `已连接 ${targetAddress}`);
-  });
-
-  nextSocket.addEventListener("message", (event) => {
-    handleSocketMessage(event.data as string).catch((error) => {
-      console.warn("[useAdapterConnection] unhandled error in message handler:", error);
-    });
-  });
-
-  nextSocket.addEventListener("error", () => {
-    if (socket !== nextSocket || attemptSerial !== connectAttemptSerial) {
-      return;
-    }
-
-    if (!opened && index < candidates.length - 1) {
-      state.statusMessage = `连接 ${formatAddressHost(targetAddress)} 失败，尝试下一个地址...`;
-      socket = null;
-      nextSocket.close();
-      openConnectionCandidate(candidates, index + 1, attemptSerial);
-      return;
-    }
-
-    state.status = "error";
-    state.lastError = opened
-      ? "WebSocket 连接异常，请检查地址和 AstrBot 插件状态。"
-      : buildConnectFailureMessage(candidates);
-    state.statusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-  });
-
-  nextSocket.addEventListener("close", () => {
-    const isCurrentSocket = socket === nextSocket;
-    const shouldHandleClose = isCurrentSocket || (socket === null && manualClose);
-    if (!shouldHandleClose) {
-      return;
-    }
-
-    if (isCurrentSocket) {
-      socket = null;
-    }
-
-    if (
-      !opened
-      && !manualClose
-      && attemptSerial === connectAttemptSerial
-      && index < candidates.length - 1
-    ) {
-      openConnectionCandidate(candidates, index + 1, attemptSerial);
-      return;
-    }
-
-    resetConnectionRuntimeState();
-
-    if (manualClose) {
-      state.status = "disconnected";
-      state.statusMessage = "已断开适配器连接。";
-      return;
-    }
-
-    if (!opened) {
-      if (state.status !== "error") {
-        state.status = "error";
-        state.lastError = buildConnectFailureMessage(candidates);
-        state.statusMessage = state.lastError;
-        pushHistory("error", state.lastError);
+  const transport = openAdapterConnectionTransport(targetAddress, {
+    onOpen: (nextSocket) => {
+      if (socket !== nextSocket || attemptSerial !== connectAttemptSerial) {
+        nextSocket.close();
+        return;
       }
-      return;
-    }
 
-    if (state.status !== "error") {
-      state.status = "disconnected";
-      state.statusMessage = "连接已关闭。";
-      pushHistory("system", state.statusMessage);
-    }
+      persistAddress(state.address);
+      state.activeWsAddress = targetAddress;
+      state.status = "connected";
+      state.statusMessage = "连接已建立，等待后端同步。";
+      state.lastError = "";
+      pushHistory("system", `已连接 ${targetAddress}`);
+    },
+    onMessage: (rawData) => {
+      handleSocketMessage(rawData).catch((error) => {
+        console.warn("[useAdapterConnection] unhandled error in message handler:", error);
+      });
+    },
+    onError: (nextSocket, opened) => {
+      if (socket !== nextSocket || attemptSerial !== connectAttemptSerial) {
+        return;
+      }
+
+      if (!opened && index < candidates.length - 1) {
+        state.statusMessage = `连接 ${formatAddressHost(targetAddress)} 失败，尝试下一个地址...`;
+        socket = null;
+        nextSocket.close();
+        openConnectionCandidate(candidates, index + 1, attemptSerial);
+        return;
+      }
+
+      state.status = "error";
+      state.lastError = opened
+        ? "WebSocket 连接异常，请检查地址和 AstrBot 插件状态。"
+        : buildConnectFailureMessage(candidates);
+      state.statusMessage = state.lastError;
+      pushHistory("error", state.lastError);
+    },
+    onClose: (nextSocket, opened) => {
+      const isCurrentSocket = socket === nextSocket;
+      const shouldHandleClose = isCurrentSocket || (socket === null && manualClose);
+      if (!shouldHandleClose) {
+        return;
+      }
+
+      if (isCurrentSocket) {
+        socket = null;
+      }
+
+      if (
+        !opened
+        && !manualClose
+        && attemptSerial === connectAttemptSerial
+        && index < candidates.length - 1
+      ) {
+        openConnectionCandidate(candidates, index + 1, attemptSerial);
+        return;
+      }
+
+      resetConnectionRuntimeState();
+
+      if (manualClose) {
+        state.status = "disconnected";
+        state.statusMessage = "已断开适配器连接。";
+        return;
+      }
+
+      if (!opened) {
+        if (state.status !== "error") {
+          state.status = "error";
+          state.lastError = buildConnectFailureMessage(candidates);
+          state.statusMessage = state.lastError;
+          pushHistory("error", state.lastError);
+        }
+        return;
+      }
+
+      if (state.status !== "error") {
+        state.status = "disconnected";
+        state.statusMessage = "连接已关闭。";
+        pushHistory("system", state.statusMessage);
+      }
+    },
   });
+  socket = transport.socket;
 }
 
 function resetConnectionRuntimeState(): void {

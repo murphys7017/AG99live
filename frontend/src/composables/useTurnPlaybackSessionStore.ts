@@ -319,6 +319,19 @@ export function useTurnPlaybackSessionStore() {
         : null;
   }
 
+  function markAudioDuration(
+    orchestrationId: string | null,
+    turnId: string | null,
+    messageId: string,
+    durationMs: number | null,
+  ): void {
+    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    segment.audio.durationMs =
+      typeof durationMs === "number" && Number.isFinite(durationMs) && durationMs > 0
+        ? durationMs
+        : null;
+  }
+
   function markAudioTerminal(
     orchestrationId: string | null,
     turnId: string | null,
@@ -569,6 +582,7 @@ export function useTurnPlaybackSessionStore() {
     markAudioReceived,
     markAudioReleased,
     markAudioStarted,
+    markAudioDuration,
     markAudioTerminal,
     markMotionReceived,
     markMotionAbsent,

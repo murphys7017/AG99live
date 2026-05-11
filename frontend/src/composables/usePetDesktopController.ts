@@ -59,13 +59,6 @@ export function usePetDesktopController() {
     stopPlan: (reason) => motionPlayer.stopPlan(reason),
     getCurrentTurnId: () => adapter.state.currentTurnId,
     getCurrentOrchestrationId: () => adapter.state.currentOrchestrationId,
-    getAudioPlaybackInfo: () => ({
-      messageId: adapter.state.audioPlaybackStartedMessageId,
-      turnId: adapter.state.audioPlaybackStartedTurnId,
-      orchestrationId: adapter.state.audioPlaybackStartedOrchestrationId,
-      startedAtMs: adapter.state.audioPlaybackStartedAtMs,
-      durationMs: adapter.state.audioPlaybackDurationMs,
-    }),
     pushHistory: (role, text) => adapter.pushHistory(role, text),
     getPlayerMessage: () => motionPlayer.state.message,
     onPlanStarted: playbackCoordinator.recordMotionPlayback,

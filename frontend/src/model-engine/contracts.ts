@@ -78,14 +78,6 @@ export interface InboundPayloadContext {
   receivedAtMs: number;
 }
 
-export interface AudioPlaybackInfo {
-  messageId: string | null;
-  turnId: string | null;
-  orchestrationId?: string | null;
-  startedAtMs: number;
-  durationMs: number | null;
-}
-
 export interface PlayPlanOptions {
   softHandoff?: boolean;
   targetDurationMs?: number | null;
@@ -116,7 +108,6 @@ export interface ModelEngineDependencies {
   stopPlan: (reason?: string) => void;
   getCurrentTurnId: () => string | null;
   getCurrentOrchestrationId?: () => string | null;
-  getAudioPlaybackInfo: () => AudioPlaybackInfo;
   pushHistory?: (
     role: Extract<DesktopHistoryEntry["role"], "system" | "error">,
     text: string,

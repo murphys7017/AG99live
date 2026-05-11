@@ -27,6 +27,7 @@
     "src/adapter-connection/inboundEvents.ts",
     "src/adapter-connection/inboundPayloads.ts",
     "src/adapter-connection/protocolMessageTypes.ts",
-    "src/adapter-connection/inboundMotion.ts"
+    "src/adapter-connection/inboundMotion.ts",
+    "src/adapter-connection/transport.ts"
   ]
 }

@@ -20,6 +20,12 @@ export interface AudioPlaybackSessionStore {
     startedAtMs?: number | null,
     durationMs?: number | null,
   ) => void;
+  markAudioDuration: (
+    orchestrationId: string | null,
+    turnId: string | null,
+    messageId: string,
+    durationMs: number | null,
+  ) => void;
 }
 
 export interface AudioPlaybackContext {
@@ -63,6 +69,12 @@ export async function playAudioAndAcknowledge(
       },
       onDurationChanged: (durationMs) => {
         ctx.state.audioPlaybackDurationMs = durationMs;
+        ctx.sessionStore?.markAudioDuration(
+          orchestrationId,
+          turnId,
+          messageId,
+          durationMs,
+        );
       },
       onPlaybackStarted: (event) => {
         ctx.state.audioPlaybackStartedTurnId = turnId;

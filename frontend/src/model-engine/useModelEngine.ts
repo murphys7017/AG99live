@@ -162,45 +162,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       return Math.max(MOTION_MIN_REMAINING_AUDIO_MS, Math.round(audioDurationMs - elapsedMs));
     }
 
-    // Fallback to dependency callback for backward compatibility
-    const audioPlayback = dependencies.getAudioPlaybackInfo();
-    const audioTurnId = normalizeTurnId(audioPlayback.turnId);
-    const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
-    const audioMessageId =
-      typeof audioPlayback.messageId === "string" ? audioPlayback.messageId.trim() : "";
-    const audioOrchestrationId =
-      typeof audioPlayback.orchestrationId === "string"
-        ? audioPlayback.orchestrationId.trim()
-        : "";
-    const normalizedOrchestrationId =
-      typeof orchestrationId === "string" ? orchestrationId.trim() : "";
-    const matchesAudio = normalizedMessageId
-      ? audioMessageId === normalizedMessageId
-      : (
-        (normalizedTurnId && audioTurnId && normalizedTurnId === audioTurnId)
-        || (
-          normalizedOrchestrationId
-          && audioOrchestrationId
-          && normalizedOrchestrationId === audioOrchestrationId
-        )
-      );
-    if (!matchesAudio) {
-      return null;
-    }
-
-    const rawDuration = Number(audioPlayback.durationMs ?? 0);
-    const startedAtMs = Number(audioPlayback.startedAtMs ?? 0);
-    if (
-      !Number.isFinite(rawDuration)
-      || rawDuration <= 0
-      || !Number.isFinite(startedAtMs)
-      || startedAtMs <= 0
-    ) {
-      return null;
-    }
-
-    const elapsedMs = Math.max(0, performance.now() - startedAtMs);
-    return Math.max(MOTION_MIN_REMAINING_AUDIO_MS, Math.round(rawDuration - elapsedMs));
+    return null;
   }
 
   function resolveMotionTargetDurationMsForContext(
@@ -421,7 +383,6 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         dependencies.getCurrentOrchestrationId?.() ?? null;
       const audioOrchestrationId =
         findStartedSegment(entry.messageId, entry.turnId, entry.orchestrationId)?.orchestrationId
-        ?? dependencies.getAudioPlaybackInfo().orchestrationId
         ?? null;
 
       if (currentTurnId && currentTurnId !== normalizedTurnId) {
@@ -457,10 +418,8 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       normalizedTurnId,
       entry.orchestrationId,
     );
-    const audioPlayback = dependencies.getAudioPlaybackInfo();
     const activeAudioMessageId =
       startedSegment?.messageId
-      ?? audioPlayback.messageId
       ?? null;
 
     if (activeAudioMessageId === context.messageId) {
