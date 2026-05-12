@@ -388,7 +388,6 @@ class TurnCoordinator:
                     message_obj.message_str,
                     turn_id=turn_id,
                 )
-            self._motion_plan_scheduled_turn_ids = set()
             self._begin_turn_timing(message_obj.message_str)
             self.chat_buffer.add("user", message_obj.message_str)
             await self._send_json(
