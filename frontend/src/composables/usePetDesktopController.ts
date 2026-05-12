@@ -14,11 +14,10 @@ import { usePreviewMotionPlayer } from "./usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
 import { cloneJson } from "../utils/cloneJson";
 import { applyMotionEngineSettingsSnapshot } from "./motionEngineSettingsSnapshot";
+import { createDesktopRuntimeCommandHandler } from "./useDesktopRuntimeCommandHandler";
 import type {
   DesktopMotionPlaybackRecord,
-  DesktopProfileAuthoringCommand,
   DesktopMotionTuningSample,
-  DesktopRuntimeCommand,
 } from "../types/desktop";
 
 export function usePetDesktopController() {
@@ -187,92 +186,6 @@ export function usePetDesktopController() {
     adapter.deleteMotionTuningSample(sampleId);
   }
 
-  function handleDesktopCommand(command: DesktopRuntimeCommand): void {
-    switch (command.type) {
-      case "set_address":
-        adapter.setAddress(command.address);
-        return;
-      case "set_desktop_screenshot_on_send":
-        adapter.setDesktopScreenshotOnSendEnabled(command.enabled);
-        return;
-      case "set_ambient_motion_enabled":
-        ambientMotionEnabled.value = command.enabled;
-        applyAmbientMotionPreference();
-        return;
-      case "set_motion_engine_settings":
-        applyMotionEngineSettingsSnapshot(motionEngineSettings, command.settings);
-        return;
-      case "request_model_projection_sync":
-        snapshotPublisher.publishModelProjectionSnapshot();
-        return;
-      case "request_motion_tuning_samples_sync":
-        bridge.publishMotionTuningSamples(
-          adapter.state.motionTuningSamples,
-          adapter.state.motionTuningSamplesStatus,
-        );
-        return;
-      case "save_motion_tuning_sample":
-        saveMotionTuningSample(command.sample);
-        return;
-      case "delete_motion_tuning_sample":
-        deleteMotionTuningSample(command.sampleId);
-        return;
-      case "request_history_list":
-        adapter.requestHistoryList();
-        return;
-      case "create_history":
-        adapter.createHistory();
-        return;
-      case "load_history":
-        adapter.loadHistory(command.historyUid);
-        return;
-      case "delete_history":
-        adapter.deleteHistory(command.historyUid);
-        return;
-      case "connect":
-        if (typeof command.address === "string") {
-          adapter.setAddress(command.address);
-        }
-        adapter.connect();
-        return;
-      case "disconnect":
-        adapter.disconnect();
-        return;
-      case "send_text":
-        void adapter.sendText(command.text);
-        return;
-      case "interrupt":
-        modelEngine.stop("interrupted");
-        adapter.interruptCurrentTurn();
-        return;
-      case "toggle_mic_capture":
-        void adapter.toggleMicrophoneCapture();
-        return;
-      case "preview_motion_plan":
-        handlePreviewMotionPlan(command.plan);
-        return;
-      case "preview_motion_payload":
-        handlePreviewMotionPlan(command.payload);
-        return;
-    }
-  }
-
-  function handleProfileAuthoringCommand(
-    command: DesktopProfileAuthoringCommand,
-  ): void {
-    if (command.type !== "save_semantic_axis_profile") {
-      return;
-    }
-
-    adapter.sendSemanticAxisProfileSave({
-      request_id: command.requestId,
-      model_name: command.modelName,
-      profile_id: command.profileId,
-      expected_revision: command.expectedRevision,
-      profile: cloneJson(command.profile),
-    });
-  }
-
   const snapshotPublisher = usePetRuntimeSnapshotPublisher({
     adapter,
     bridge,
@@ -290,9 +203,25 @@ export function usePetDesktopController() {
     sessionStore,
   });
 
-  const detachBridgeListener = bridge.onCommand(handleDesktopCommand);
+  const commandHandler = createDesktopRuntimeCommandHandler({
+    adapter,
+    bridge,
+    ambientMotionEnabled,
+    motionEngineSettings,
+    modelEngine: {
+      stop: (reason) => modelEngine.stop(reason),
+      playPreviewPayload: (plan) => modelEngine.playPreviewPayload(plan),
+    },
+    snapshotPublisher,
+    saveMotionTuningSample,
+    deleteMotionTuningSample,
+    handlePreviewMotionPlan,
+    applyAmbientMotionPreference,
+  });
+
+  const detachBridgeListener = bridge.onCommand(commandHandler.handleCommand);
   const detachProfileAuthoringBridgeListener = bridge.onProfileAuthoringCommand(
-    handleProfileAuthoringCommand,
+    commandHandler.handleProfileAuthoringCommand,
   );
 
   watch(
