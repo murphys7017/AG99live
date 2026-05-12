@@ -512,16 +512,6 @@ def _schedule_motion_from_interaction_result(
             assistant_text=assistant_text,
         )
 
-    scheduled = bool(
-        bundle.turn_coordinator.schedule_motion_after_reply(
-            assistant_text=assistant_text,
-            origin_turn_id=identity.scheduled_frontend_turn_id,
-            source=policy.source,
-        )
-    )
-    if scheduled and motion_generation_mode == "split_after_reply":
-        _call_event_method(event, "set_extra", "ag99live_split_motion_scheduled", True)
-
     return _MotionScheduleAttempt(
         phase=phase,
         source=policy.source,
@@ -537,8 +527,8 @@ def _schedule_motion_from_interaction_result(
         ),
         reply_plan_source=reply_plan.source if reply_plan is not None else None,
         motion_generation_mode=motion_generation_mode,
-        scheduled=scheduled,
-        reason="scheduled" if scheduled else "deduped_or_rejected",
+        scheduled=False,
+        reason=policy.reason,
         assistant_text=assistant_text,
     )
 
@@ -582,7 +572,7 @@ def _resolve_motion_schedule_policy(
     reply_plan: _InteractionReplyPlanSnapshot | None,
 ) -> _MotionSchedulePolicy:
     if phase == "immediate":
-        return _resolve_immediate_phase_policy(reply_plan)
+        return _resolve_immediate_phase_policy(reply_plan, motion_generation_mode=motion_generation_mode)
     if phase == "final":
         return _resolve_final_phase_policy(
             event,
@@ -598,6 +588,8 @@ def _resolve_motion_schedule_policy(
 
 def _resolve_immediate_phase_policy(
     reply_plan: _InteractionReplyPlanSnapshot | None,
+    *,
+    motion_generation_mode: str,
 ) -> _MotionSchedulePolicy:
     if reply_plan is None:
         return _MotionSchedulePolicy(
@@ -606,6 +598,12 @@ def _resolve_immediate_phase_policy(
             reason="immediate_phase_reply_plan_unresolved",
         )
     if reply_plan.route_mode == "self_reply":
+        if motion_generation_mode == "inline_first":
+            return _MotionSchedulePolicy(
+                should_schedule=False,
+                source=None,
+                reason="self_reply_managed_by_inline_contract",
+            )
         return _MotionSchedulePolicy(
             should_schedule=True,
             source="interaction_result_immediate",

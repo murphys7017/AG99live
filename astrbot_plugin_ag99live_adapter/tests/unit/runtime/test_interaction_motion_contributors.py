@@ -361,7 +361,7 @@ def test_result_contributor_schedules_motion_for_immediate_reply(
     module = _load_interaction_motion_module()
 
     contributor = module.AG99liveMotionResultContributor()
-    event, scheduled_calls = _build_event(mode="inline_first", raw_turn_id="raw-turn")
+    event, scheduled_calls = _build_event(mode="split_after_reply", raw_turn_id="raw-turn")
     view = _build_view(
         phase="immediate",
         final_result='你好呀 <@anim {"mode":"inline"}>',
@@ -371,16 +371,8 @@ def test_result_contributor_schedules_motion_for_immediate_reply(
     contribution = asyncio.run(contributor.collect(event, None, view))
 
     assert contribution is not None
-    assert scheduled_calls == [
-        {
-            "assistant_text": "你好呀",
-            "origin_turn_id": "raw-turn",
-            "source": "interaction_result_immediate",
-        }
-    ]
-    assert (
-        contribution.metadata["ag99live_motion_schedule"]["reason"] == "scheduled"
-    )
+    # Secondary motion scheduling is disabled; inline contract handles it
+    assert scheduled_calls == []
     assert (
         contribution.metadata["ag99live_motion_schedule"]["scheduled_frontend_turn_id"]
         == "raw-turn"
@@ -409,14 +401,9 @@ def test_result_contributor_uses_final_phase_as_split_mode_fallback(
     contribution = asyncio.run(contributor.collect(event, None, view))
 
     assert contribution is not None
-    assert scheduled_calls == [
-        {
-            "assistant_text": "最终回复文本",
-            "origin_turn_id": "raw-turn",
-            "source": "interaction_result_final_fallback",
-        }
-    ]
-    assert event.get_extra("ag99live_split_motion_scheduled") is True
+    # Secondary motion scheduling is disabled across all modes
+    assert scheduled_calls == []
+
 
 
 def test_result_contributor_skips_final_phase_in_inline_mode(
@@ -478,7 +465,7 @@ def test_result_contributor_uses_event_turn_state_reply_plan_when_view_plan_miss
     module = _load_interaction_motion_module()
 
     contributor = module.AG99liveMotionResultContributor()
-    event, scheduled_calls = _build_event(mode="inline_first", raw_turn_id="raw-turn")
+    event, scheduled_calls = _build_event(mode="split_after_reply", raw_turn_id="raw-turn")
     event.set_extra(
         "_interaction_decision",
         {
@@ -496,17 +483,12 @@ def test_result_contributor_uses_event_turn_state_reply_plan_when_view_plan_miss
     contribution = asyncio.run(contributor.collect(event, None, view))
 
     assert contribution is not None
-    assert scheduled_calls == [
-        {
-            "assistant_text": "你好呀",
-            "origin_turn_id": "raw-turn",
-            "source": "interaction_result_immediate",
-        }
-    ]
+    # Secondary motion scheduling is disabled across all modes
+    assert scheduled_calls == []
     metadata = contribution.metadata["ag99live_motion_schedule"]
     assert metadata["reply_plan_source"] == "event_turn_state"
     assert metadata["reply_plan_route_mode"] == "self_reply"
-    assert metadata["reason"] == "scheduled"
+    assert metadata["reason"] == "schedule_self_reply_immediate"
 
 
 def test_result_contributor_does_not_silently_schedule_immediate_phase_without_reply_plan(
@@ -532,6 +514,32 @@ def test_result_contributor_does_not_silently_schedule_immediate_phase_without_r
     assert (
         contribution.metadata["ag99live_motion_schedule"]["reason"]
         == "immediate_phase_reply_plan_unresolved"
+    )
+
+
+def test_result_contributor_skips_self_reply_in_inline_first_mode(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(mode="inline_first", raw_turn_id="raw-turn")
+    view = _build_view(
+        phase="immediate",
+        route_mode="self_reply",
+        final_result="你好呀",
+        immediate_reply="你好呀",
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == []
+    assert (
+        contribution.metadata["ag99live_motion_schedule"]["reason"]
+        == "self_reply_managed_by_inline_contract"
     )
 
 

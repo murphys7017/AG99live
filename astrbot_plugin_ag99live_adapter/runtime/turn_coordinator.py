@@ -49,7 +49,6 @@ from ..motion.inline_motion import (
     resolve_inline_motion_source as _resolve_inline_motion_source,
     resolve_motion_generation_mode as _resolve_motion_generation_mode,
     resolve_motion_payload_schema_version as _resolve_motion_payload_schema_version,
-    resolve_realtime_motion_source as _resolve_realtime_motion_source,
     summarize_motion_payload as _summarize_motion_payload,
     validate_motion_payload as _validate_motion_payload,
 )
@@ -80,8 +79,6 @@ class TurnCoordinator:
         build_platform_event: Callable[[Any], Any],
         commit_event: Callable[[Any], None],
         ensure_vad_engine: Callable[[], Any],
-        generate_realtime_motion_plan: Callable[..., Awaitable[dict[str, Any] | None]] | None = None,
-        realtime_motion_mode_getter: Callable[[], str] | None = None,
     ) -> None:
         self.session_state = session_state
         self.runtime_state = runtime_state
@@ -97,8 +94,6 @@ class TurnCoordinator:
         self._build_platform_event = build_platform_event
         self._commit_event = commit_event
         self._ensure_vad_engine = ensure_vad_engine
-        self._generate_realtime_motion_plan = generate_realtime_motion_plan
-        self._realtime_motion_mode_getter = realtime_motion_mode_getter
         self.speech_ingress = SpeechIngressService(
             media_service=self.media_service,
             runtime_state=self.runtime_state,
@@ -110,7 +105,6 @@ class TurnCoordinator:
         self._turn_lock = asyncio.Lock()
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._turn_timing: dict[str, Any] = {}
-        self._motion_plan_scheduled_turn_ids: set[str] = set()
 
     async def handle_msg(self, raw_message: dict[str, Any]) -> None:
         message = parse_inbound_message(
@@ -277,17 +271,6 @@ class TurnCoordinator:
                     "WIRING motion_plan turn_id=%s inline_plan_dispatch_failed=true "
                     "route=secondary_request",
                     turn_id or "",
-                )
-
-        if motion_generation_mode == "inline_first" and not inline_dispatched:
-            schedule_text = reply_text
-            if not schedule_text and inline_anim_detected and inline_payload is None:
-                schedule_text = str(getattr(self.session_state, "last_user_text", "") or "").strip()
-            if schedule_text:
-                self.schedule_motion_after_reply(
-                    assistant_text=schedule_text,
-                    origin_turn_id=turn_id,
-                    source="emit_message_chain_inline_fallback",
                 )
 
         if picture_paths:
@@ -652,165 +635,6 @@ class TurnCoordinator:
             dispatched = dispatched or sent
         return dispatched
 
-    def schedule_motion_after_reply(
-        self,
-        *,
-        assistant_text: str,
-        origin_turn_id: str | None = None,
-        source: str = "reply_final",
-    ) -> bool:
-        if self._generate_realtime_motion_plan is None:
-            return False
-
-        normalized_assistant_text = (assistant_text or "").strip()
-        if not normalized_assistant_text:
-            return False
-
-        user_text = str(getattr(self.session_state, "last_user_text", "") or "")
-        if origin_turn_id is None:
-            origin_turn_id = self.session_state.current_turn_id
-
-        turn_key = str(origin_turn_id or "").strip()
-        scheduled_turn_ids = getattr(self, "_motion_plan_scheduled_turn_ids", None)
-        if not isinstance(scheduled_turn_ids, set):
-            scheduled_turn_ids = set()
-            self._motion_plan_scheduled_turn_ids = scheduled_turn_ids
-        if turn_key and turn_key in scheduled_turn_ids:
-            logger.info(
-                "Realtime motion plan skipped because already scheduled turn_id=%s source=%s",
-                turn_key,
-                source,
-            )
-            return False
-        if turn_key:
-            scheduled_turn_ids.add(turn_key)
-
-        logger.info(
-            "Realtime motion plan scheduled turn_id=%s source=%s assistant_len=%s",
-            turn_key,
-            source,
-            len(normalized_assistant_text),
-        )
-        self._spawn_background_task(
-            self._generate_and_broadcast_realtime_motion_plan(
-                user_text=user_text,
-                assistant_text=normalized_assistant_text,
-                origin_turn_id=origin_turn_id,
-            )
-        )
-        return True
-
-    async def _generate_and_broadcast_realtime_motion_plan(
-        self,
-        *,
-        user_text: str,
-        assistant_text: str,
-        origin_turn_id: str | None,
-    ) -> None:
-        if self._generate_realtime_motion_plan is None:
-            return
-        runtime_state = getattr(self, "runtime_state", None)
-        if runtime_state is not None and not bool(getattr(runtime_state, "enable_realtime_motion_plan", True)):
-            logger.info(
-                "Realtime motion plan skipped because enable_realtime_motion_plan=false turn_id=%s",
-                origin_turn_id or "",
-            )
-            return
-
-        try:
-            motion_payload = await self._generate_realtime_motion_plan(
-                user_text=user_text,
-                assistant_text=assistant_text,
-            )
-        except Exception as exc:
-            failure_reason = _format_exception_for_log(exc)
-            logger.warning(
-                "Realtime motion plan generation failed: %s",
-                failure_reason,
-                exc_info=True,
-            )
-            await self._emit_realtime_motion_error(
-                turn_id=origin_turn_id,
-                failure_reason=f"exception:{failure_reason}",
-            )
-            return
-
-        if not isinstance(motion_payload, dict):
-            logger.warning(
-                "WIRING motion_plan turn_id=%s route=drop failure_reason=generator_returned_no_payload",
-                origin_turn_id or "",
-            )
-            await self._emit_realtime_motion_error(
-                turn_id=origin_turn_id,
-                failure_reason="generator_returned_no_payload",
-            )
-            return
-
-        if _resolve_motion_payload_schema_version(motion_payload) == "engine.motion_intent.v2":
-            try:
-                motion_payload = normalize_motion_intent_payload(motion_payload)
-            except ValueError as exc:
-                logger.warning(
-                    "WIRING motion_plan turn_id=%s route=drop failure_reason=%s",
-                    origin_turn_id or "",
-                    exc,
-                )
-                await self._emit_realtime_motion_error(
-                    turn_id=origin_turn_id,
-                    failure_reason=str(exc),
-                )
-                return
-
-        valid, failure_reason = _validate_motion_payload(motion_payload)
-        if not valid:
-            logger.warning(
-                "WIRING motion_plan turn_id=%s route=drop failure_reason=%s",
-                origin_turn_id or "",
-                failure_reason,
-            )
-            await self._emit_realtime_motion_error(
-                turn_id=origin_turn_id,
-                failure_reason=failure_reason,
-            )
-            return
-
-        current_turn_id = self.session_state.current_turn_id
-        if origin_turn_id and current_turn_id and current_turn_id != origin_turn_id:
-            logger.warning(
-                "Skip realtime motion plan for stale turn_id=%s current_turn_id=%s",
-                origin_turn_id,
-                current_turn_id,
-            )
-            return
-
-        mode = "realtime"
-        if self._realtime_motion_mode_getter is not None:
-            resolved_mode = str(self._realtime_motion_mode_getter() or "").strip()
-            if resolved_mode:
-                mode = resolved_mode
-
-        await self.broadcast_motion_payload(
-            motion_payload=motion_payload,
-            mode=mode,
-            source=_resolve_realtime_motion_source(motion_payload),
-            turn_id=origin_turn_id,
-        )
-
-    async def _emit_realtime_motion_error(
-        self,
-        *,
-        turn_id: str | None,
-        failure_reason: str,
-    ) -> None:
-        await self._send_json(
-            build_control_error(
-                session_id=self.session_state.client_uid,
-                turn_id=turn_id,
-                orchestration_id=getattr(self.session_state, "current_orchestration_id", None),
-                message=f"Realtime motion generation failed: {failure_reason}",
-            )
-        )
-
     def _spawn_background_task(self, coroutine: Awaitable[None]) -> None:
         task = asyncio.create_task(coroutine)
         self._background_tasks.add(task)
@@ -887,10 +711,3 @@ def _coerce_perf_counter(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     return None
-
-
-def _format_exception_for_log(exc: Exception) -> str:
-    message = str(exc).strip()
-    if message:
-        return f"{exc.__class__.__name__}:{message}"
-    return exc.__class__.__name__
