@@ -1,0 +1,43 @@
+name: correctness
+version: 0.1.0
+purpose: Define correctness boundaries for root-cause fixes and fallback behavior.
+rules:
+  - id: root_cause_over_masking
+    severity: high
+    category: correctness
+    description: Fix defects at the point where they are introduced instead of masking them downstream.
+    applies_to:
+      - bugfix
+      - review
+      - behavior_affecting_change
+      - medium_risk_task
+      - high_risk_task
+    enforcement: require_root_cause_evidence
+    exceptions:
+      - temporary_boundary_protection_with_explicit_follow_up
+
+  - id: fallback_not_correctness_proof
+    severity: high
+    category: validation
+    description: Do not treat fallback paths, defaults, retries, or swallowed errors as proof that the primary path is correct.
+    applies_to:
+      - bugfix
+      - review
+      - validation
+      - behavior_affecting_change
+    enforcement: require_primary_path_validation
+    exceptions:
+      - explicitly_user_accepted_degraded_mode
+
+  - id: observable_failure_paths
+    severity: medium
+    category: observability
+    description: Fallbacks and degraded paths must preserve the fact of primary path failure through logs, diagnostics, or evaluation output.
+    applies_to:
+      - fallback
+      - error_handling
+      - validation
+      - high_risk_task
+    enforcement: require_failure_observability
+    exceptions:
+      - no_available_logging_surface

@@ -1,0 +1,36 @@
+name: runtime
+version: 0.1.0
+purpose: Define baseline runtime behavior for AI coding agents.
+rules:
+  - id: closed_loop_execution
+    severity: high
+    category: execution_control
+    description: Important changes should follow analyze, plan, implement, review, validate, and correct.
+    applies_to:
+      - medium_risk_task
+      - high_risk_task
+      - behavior_affecting_change
+    enforcement: require_workflow_loop
+    exceptions:
+      - trivial_low_risk_task
+
+  - id: bounded_context_loading
+    severity: medium
+    category: context_control
+    description: Load only governance material relevant to the current task.
+    applies_to:
+      - all_tasks
+    enforcement: load_by_router_rules
+    exceptions:
+      - user_explicitly_requests_full_context
+
+  - id: explicit_assumptions
+    severity: medium
+    category: observability
+    description: State meaningful assumptions when they affect implementation decisions.
+    applies_to:
+      - uncertain_context
+      - medium_risk_task
+      - high_risk_task
+    enforcement: surface_in_plan_or_summary
+    exceptions: []

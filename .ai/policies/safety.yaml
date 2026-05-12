@@ -1,0 +1,40 @@
+name: safety
+version: 0.1.0
+purpose: Define safety boundaries for project modification.
+rules:
+  - id: no_unrelated_rewrites
+    severity: high
+    category: scope_control
+    description: Avoid unrelated rewrites, formatting sweeps, or broad refactors.
+    applies_to:
+      - implementation
+      - refactor
+      - bugfix
+      - repository_maintenance
+    enforcement: reject_scope_expansion
+    exceptions:
+      - user_explicitly_requests_broad_rewrite
+
+  - id: protect_user_changes
+    severity: critical
+    category: change_safety
+    description: Never revert user changes unless explicitly requested.
+    applies_to:
+      - all_file_modifications
+      - git_operations
+    enforcement: require_explicit_user_approval
+    exceptions: []
+
+  - id: verify_when_possible
+    severity: medium
+    category: validation
+    description: Run relevant validation when available and practical.
+    applies_to:
+      - behavior_affecting_change
+      - release
+      - medium_risk_task
+      - high_risk_task
+    enforcement: run_or_report_validation_gap
+    exceptions:
+      - no_available_validation
+      - user_requests_skip_validation

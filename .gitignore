@@ -20,5 +20,3 @@ astrbot_plugin_ag99live_adapter/debug_exports/
 analysis/
 analysis/*.ipynb
 deepseek-tui-windows-x64.exe
-.ai
-docs/runtime

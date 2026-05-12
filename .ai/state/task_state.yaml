@@ -1,0 +1,6 @@
+current_task:
+  type: unknown
+  scope: unknown
+  risk: unknown
+  phase: not_started
+  owner: agent

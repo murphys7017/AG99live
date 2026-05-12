@@ -1,0 +1,6 @@
+architecture:
+  stability: unknown
+  pending_breaking_change: false
+  boundary_changes: []
+  notes:
+    - Initial project governance structure is being established.
