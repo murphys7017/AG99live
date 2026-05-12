@@ -1,10 +1,11 @@
 import { onScopeDispose, watch, type ComputedRef, type Ref } from "vue";
 import { cloneModelEngineSettings, type ModelEngineSettings } from "../model-engine/settings";
-import { cloneJson } from "../utils/cloneJson";
 import type {
   DesktopBaseActionPreview,
   DesktopModelProjectionSnapshot,
   DesktopMotionPlaybackRecord,
+  DesktopMotionTuningSamplesStatus,
+  DesktopMotionTuningSample,
 } from "../types/desktop";
 import type { ModelSummary } from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
@@ -12,7 +13,13 @@ import type { useAdapterConnection } from "./useAdapterConnection";
 import type { useDesktopBridge } from "./useDesktopBridge";
 import type { useModelSync } from "./useModelSync";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
-import { getActivePlaybackSegment } from "../turn-playback/selectors";
+import {
+  buildDesktopRuntimeSnapshot,
+  getActiveSegmentSnapshot,
+  type AdapterRuntimeProjectionInput,
+  type SessionProjectionInput,
+} from "../desktop-bridge/projection.js";
+import { cloneJson } from "../utils/cloneJson.js";
 
 type AdapterConnection = ReturnType<typeof useAdapterConnection>;
 type DesktopBridge = ReturnType<typeof useDesktopBridge>;
@@ -37,14 +44,7 @@ interface PetRuntimeSnapshotPublisherOptions {
   sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>;
 }
 
-function serializeAxisIntensityScale(axisIntensityScale: Record<string, number>): string {
-  return JSON.stringify(
-    Object.entries(axisIntensityScale).sort(([left], [right]) =>
-      left.localeCompare(right)),
-  );
-}
-
-function createTrailingDebounce(): {
+function createDebounce(): {
   schedule(fn: () => void): void;
   flush(): void;
   cancel(): void;
@@ -86,35 +86,99 @@ function createTrailingDebounce(): {
   return { schedule, flush, cancel };
 }
 
-function getActiveSegmentSnapshot(
-  sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>,
-) {
-  const activeSession = sessionStore.getActiveSession();
-  if (!activeSession) {
-    return null;
-  }
-  const segment =
-    getActivePlaybackSegment(activeSession)
-    ?? activeSession.segmentOrder
-      .map((segmentId) => activeSession.segments.get(segmentId))
-      .find(Boolean)
-    ?? null;
-  return segment
-    ? {
-        textReady: segment.text.content !== null,
-        audioTerminal: segment.audio.terminal,
-        motionStarted: segment.motion.started,
-        motionCompleted: segment.motion.completed,
-      }
-    : null;
-}
-
 export function usePetRuntimeSnapshotPublisher(
   options: PetRuntimeSnapshotPublisherOptions,
 ): { publishModelProjectionSnapshot: () => void } {
-  const snapshotDebounce = createTrailingDebounce();
-  const modelProjectionDebounce = createTrailingDebounce();
-  const profileDebounce = createTrailingDebounce();
+  const snapshotDebounce = createDebounce();
+  const modelProjectionDebounce = createDebounce();
+  const profileDebounce = createDebounce();
+
+  // ── Runtime snapshot ────────────────────────────────────────────
+  // Build adapter + session projections from source state,
+  // then assemble the final snapshot.
+
+  watch(
+    () => {
+      const a = options.adapter.state;
+      const adapterProjection: AdapterRuntimeProjectionInput = {
+        address: a.address,
+        desktopScreenshotOnSendEnabled: a.desktopScreenshotOnSendEnabled,
+        statusMessage: a.statusMessage,
+        sessionId: a.sessionId || options.modelSyncState.sessionId,
+        serverWsUrl: a.serverInfo?.ws_url ?? "",
+        httpBaseUrl: a.serverInfo?.http_base_url ?? "",
+        lastAssistantText: a.lastAssistantText,
+        lastTranscription: a.lastTranscription,
+        lastImageCount: a.lastImageCount,
+        currentTurnId: a.currentTurnId,
+        micRequested: a.micRequested,
+        micCapturing: a.micCapturing,
+        isPlayingAudio: a.isPlayingAudio,
+        historyEntries: [...a.historyEntries],
+        backendHistorySummaries: [...a.backendHistorySummaries],
+        backendHistoryEntries: [...a.backendHistoryEntries],
+        activeBackendHistoryUid: a.activeBackendHistoryUid,
+        backendHistoryLoading: a.backendHistoryLoading,
+        backendHistoryStatusMessage: a.backendHistoryStatusMessage,
+        motionTuningSamples: a.motionTuningSamples.map((s) =>
+          cloneJson(s),
+        ) as DesktopMotionTuningSample[],
+        motionTuningSamplesStatus: a.motionTuningSamplesStatus,
+      };
+
+      const activeSession = options.sessionStore.getActiveSession();
+      const segmentSnapshot = getActiveSegmentSnapshot(activeSession);
+      const sessionProjection: SessionProjectionInput = {
+        activeSessionId: options.sessionStore.state.activeSessionId,
+        activeSessionPhase: activeSession?.phase ?? "",
+        activeSessionTextReady: segmentSnapshot?.textReady ?? false,
+        activeSessionAudioTerminal: segmentSnapshot?.audioTerminal ?? "idle",
+        activeSessionMotionStarted: segmentSnapshot?.motionStarted ?? false,
+        activeSessionMotionCompleted: segmentSnapshot?.motionCompleted ?? false,
+        activeSessionSynthFinished: activeSession?.backend.synthFinished ?? false,
+        activeSessionTurnFinished: activeSession?.backend.turnFinished ?? false,
+      };
+
+      return {
+        adapter: adapterProjection,
+        session: sessionProjection,
+        ambientMotionEnabled: options.ambientMotionEnabled.value,
+        motionEngineSettings: cloneModelEngineSettings(options.motionEngineSettings),
+        motionPlaybackRecords: options.motionPlaybackRecords.value,
+        connectionState: options.connectionState.value,
+        connectionLabel: options.connectionLabel.value,
+        stageMessage: options.stageMessage.value,
+        aiState: options.aiState.value,
+        confName: options.modelSyncState.confName,
+        lastUpdated: options.modelSyncState.lastUpdated,
+      };
+    },
+    (input) => {
+      snapshotDebounce.schedule(() => {
+        options.bridge.publishSnapshot(
+          buildDesktopRuntimeSnapshot(input),
+        );
+      });
+    },
+    { deep: true, immediate: true },
+  );
+
+  // ── Motion tuning projection ────────────────────────────────────
+
+  watch(
+    () => ({
+      samples: options.adapter.state.motionTuningSamples,
+      status: options.adapter.state.motionTuningSamplesStatus,
+    }),
+    ({ samples, status }) => {
+      snapshotDebounce.schedule(() => {
+        options.bridge.publishMotionTuningSamples(samples, status);
+      });
+    },
+    { deep: true, immediate: true },
+  );
+
+  // ── Model projection snapshot ────────────────────────────────────
 
   function buildModelProjectionSnapshot(): DesktopModelProjectionSnapshot {
     return {
@@ -137,110 +201,6 @@ export function usePetRuntimeSnapshotPublisher(
   }
 
   watch(
-    () => ({
-      samples: options.adapter.state.motionTuningSamples,
-      status: options.adapter.state.motionTuningSamplesStatus,
-    }),
-    ({ samples, status }) => {
-      snapshotDebounce.schedule(() => {
-        options.bridge.publishMotionTuningSamples(samples, status);
-      });
-    },
-    { deep: true, immediate: true },
-  );
-
-  watch(
-    () => [
-      getActiveSegmentSnapshot(options.sessionStore),
-      options.ambientMotionEnabled.value,
-      options.adapter.state.address,
-      options.adapter.state.desktopScreenshotOnSendEnabled,
-      options.adapter.state.status,
-      options.adapter.state.statusMessage,
-      options.adapter.state.sessionId,
-      options.adapter.state.serverInfo?.ws_url ?? "",
-      options.adapter.state.serverInfo?.http_base_url ?? "",
-      options.adapter.state.lastAssistantText,
-      options.adapter.state.lastTranscription,
-      options.adapter.state.lastImageCount,
-      options.adapter.state.currentTurnId,
-      options.adapter.state.micRequested,
-      options.adapter.state.micCapturing,
-      options.adapter.state.isPlayingAudio,
-      options.adapter.state.historyEntries,
-      options.adapter.state.backendHistorySummaries,
-      options.adapter.state.backendHistoryEntries,
-      options.adapter.state.activeBackendHistoryUid,
-      options.adapter.state.backendHistoryLoading,
-      options.adapter.state.backendHistoryStatusMessage,
-      options.modelSyncState.confName,
-      options.modelSyncState.lastUpdated,
-      options.stageMessage.value,
-      options.motionEngineSettings.motionIntensityScale,
-      serializeAxisIntensityScale(options.motionEngineSettings.axisIntensityScale),
-      options.motionPlaybackRecords.value,
-      options.sessionStore.state.activeSessionId,
-      options.sessionStore.getActiveSession()?.phase,
-      options.sessionStore.getActiveSession()?.backend.synthFinished,
-      options.sessionStore.getActiveSession()?.backend.turnFinished,
-    ],
-    () => {
-      snapshotDebounce.schedule(() => {
-        const activeSegmentSnapshot = getActiveSegmentSnapshot(options.sessionStore);
-        options.bridge.publishSnapshot({
-          adapterAddress: options.adapter.state.address,
-          desktopScreenshotOnSendEnabled: options.adapter.state.desktopScreenshotOnSendEnabled,
-          ambientMotionEnabled: options.ambientMotionEnabled.value,
-          motionEngineSettings: cloneModelEngineSettings(options.motionEngineSettings),
-          motionPlaybackRecords: options.motionPlaybackRecords.value.map((record) =>
-            cloneJson(record)),
-          connectionState: options.connectionState.value,
-          connectionLabel: options.connectionLabel.value,
-          connectionStatusMessage: options.adapter.state.statusMessage,
-          aiState: options.aiState.value,
-          micRequested: options.adapter.state.micRequested,
-          micCapturing: options.adapter.state.micCapturing,
-          audioPlaying: options.adapter.state.isPlayingAudio,
-          sessionId: options.adapter.state.sessionId || options.modelSyncState.sessionId,
-          confName: options.modelSyncState.confName,
-          lastUpdated: options.modelSyncState.lastUpdated,
-          serverWsUrl: options.adapter.state.serverInfo?.ws_url ?? "",
-          httpBaseUrl: options.adapter.state.serverInfo?.http_base_url ?? "",
-          stageMessage: options.stageMessage.value,
-          lastSentText: options.adapter.state.historyEntries
-            .slice()
-            .reverse()
-            .find((entry) => entry.role === "user")?.text ?? "",
-          lastAssistantText: options.adapter.state.lastAssistantText,
-          lastTranscription: options.adapter.state.lastTranscription,
-          lastImageCount: options.adapter.state.lastImageCount,
-          historyEntries: [...options.adapter.state.historyEntries],
-          backendHistorySummaries: options.adapter.state.backendHistorySummaries.map((summary) =>
-            cloneJson(summary)),
-          backendHistoryEntries: options.adapter.state.backendHistoryEntries.map((entry) =>
-            cloneJson(entry)),
-          activeBackendHistoryUid: options.adapter.state.activeBackendHistoryUid,
-          backendHistoryLoading: options.adapter.state.backendHistoryLoading,
-          backendHistoryStatusMessage: options.adapter.state.backendHistoryStatusMessage,
-          activeSessionId: options.sessionStore.state.activeSessionId,
-          activeSessionPhase: options.sessionStore.getActiveSession()?.phase ?? "",
-          activeSessionTextReady:
-            activeSegmentSnapshot?.textReady ?? false,
-          activeSessionAudioTerminal:
-            activeSegmentSnapshot?.audioTerminal ?? "idle",
-          activeSessionMotionStarted:
-            activeSegmentSnapshot?.motionStarted ?? false,
-          activeSessionMotionCompleted:
-            activeSegmentSnapshot?.motionCompleted ?? false,
-          activeSessionSynthFinished: options.sessionStore.getActiveSession()?.backend.synthFinished ?? false,
-          activeSessionTurnFinished: options.sessionStore.getActiveSession()?.backend.turnFinished ?? false,
-        });
-      });
-    },
-    { deep: true, immediate: true },
-  );
-
-  watch(
     () => [
       options.modelSyncState.confName,
       options.modelSyncState.lastUpdated,
@@ -257,6 +217,8 @@ export function usePetRuntimeSnapshotPublisher(
     },
     { deep: true, immediate: true },
   );
+
+  // ── Profile authoring snapshot ───────────────────────────────────
 
   watch(
     () => options.adapter.state.latestSemanticAxisProfileSaveResult,
