@@ -95,6 +95,13 @@ import {
   dispatchInboundEvent as dispatchInboundEventToDeps,
   type InboundDispatchDeps,
 } from "../adapter-connection/inboundDispatcher.js";
+import {
+  hasPendingAudioForTurn as hasPendingAudioForTurnBridge,
+  markAudioPlaybackTerminal as markAudioTerminalBridge,
+  markMissingAudiosForTurn as markMissingAudiosForTurnBridge,
+  resetAudioPlaybackTerminal as resetAudioTerminalBridge,
+  type AudioBridgeDeps,
+} from "../adapter-connection/adapterAudioBridge.js";
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "absent";
@@ -234,6 +241,26 @@ const audioPlaybackCtx = {
   },
 };
 
+const audioBridge = {
+  get state() {
+    return state;
+  },
+  get sessionStore() {
+    return sessionStore
+      ? {
+          markAudioTerminal: (
+            orchestrationId: string | null,
+            turnId: string | null,
+            terminal: "completed" | "failed" | "absent",
+            messageId: string,
+            reason?: string,
+          ) => sessionStore?.markAudioTerminal(orchestrationId, turnId, terminal, messageId, reason),
+          getSessions: () => sessionStore?.getSessions() ?? [],
+        }
+      : undefined;
+  },
+} satisfies AudioBridgeDeps;
+
 function markAudioPlaybackTerminal(
   terminalState: Exclude<AudioPlaybackTerminalState, "idle">,
   turnId: string | null,
@@ -241,29 +268,11 @@ function markAudioPlaybackTerminal(
   reason = "",
   messageId: string | null = null,
 ): void {
-  state.audioPlaybackTerminalState = terminalState;
-  state.audioPlaybackTerminalTurnId = turnId;
-  state.audioPlaybackTerminalOrchestrationId = orchestrationId;
-  state.audioPlaybackTerminalReason = reason;
-
-  if (!messageId) {
-    return;
-  }
-
-  sessionStore?.markAudioTerminal(
-    orchestrationId,
-    turnId,
-    terminalState,
-    messageId,
-    reason,
-  );
+  markAudioTerminalBridge(audioBridge, terminalState, turnId, orchestrationId, reason, messageId);
 }
 
 function resetAudioPlaybackTerminal(): void {
-  state.audioPlaybackTerminalState = "idle";
-  state.audioPlaybackTerminalTurnId = null;
-  state.audioPlaybackTerminalOrchestrationId = null;
-  state.audioPlaybackTerminalReason = "";
+  resetAudioTerminalBridge(audioBridge);
 }
 
 function sendMicrophoneAudioChunk(chunk: MicrophoneAudioChunk): void {
@@ -859,12 +868,7 @@ function hasPendingAudioForTurn(
   turnId: string | null,
   orchestrationId: string | null,
 ): boolean {
-  for (const item of state.pendingAudios.values()) {
-    if (matchesPlaybackGroup(item.turnId, item.orchestrationId, turnId, orchestrationId)) {
-      return true;
-    }
-  }
-  return false;
+  return hasPendingAudioForTurnBridge(audioBridge, turnId, orchestrationId);
 }
 
 function markMissingAudiosForTurn(
@@ -872,26 +876,7 @@ function markMissingAudiosForTurn(
   orchestrationId: string | null,
   reason: string,
 ): void {
-  const sessions = sessionStore?.getSessions() ?? [];
-  for (const session of sessions) {
-    for (const segmentId of session.segmentOrder) {
-      const segment = session.segments.get(segmentId);
-      if (
-        segment
-        && segment.audio.terminal === "idle"
-        && !state.pendingAudios.has(segment.messageId)
-        && matchesPlaybackGroup(segment.turnId, segment.orchestrationId, turnId, orchestrationId)
-      ) {
-        markAudioPlaybackTerminal(
-          "absent",
-          segment.turnId,
-          segment.orchestrationId,
-          reason,
-          segment.messageId,
-        );
-      }
-    }
-  }
+  markMissingAudiosForTurnBridge(audioBridge, turnId, orchestrationId, reason);
 }
 
 function stopAudioPlayback(): void {
