@@ -76,6 +76,15 @@ const api = {
   setPttMode: (enabled: boolean) => {
     ipcRenderer.send("desktop:set-ptt-mode", enabled);
   },
+  onIpc: (channel: string, callback: () => void) => {
+    const handler = () => {
+      callback();
+    };
+    ipcRenderer.on(channel, handler);
+    return () => {
+      ipcRenderer.removeListener(channel, handler);
+    };
+  },
   onWindowState: (
     callback: (state: DesktopWindowVisibilityState) => void,
   ) => {

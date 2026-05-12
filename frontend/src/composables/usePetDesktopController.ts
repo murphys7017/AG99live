@@ -237,10 +237,12 @@ export function usePetDesktopController() {
     adapter.connect();
     applyAmbientMotionPreference();
     installPttKeyboardListeners();
+    installPttIpcListeners();
   });
 
   onBeforeUnmount(() => {
     removePttKeyboardListeners();
+    removePttIpcListeners();
     playbackCoordinator.resetPlaybackCoordination();
     modelEngine.stop("unmount");
     detachBridgeListener();
@@ -285,6 +287,33 @@ export function usePetDesktopController() {
     document.removeEventListener("keyup", onPttKeyUp);
     window.removeEventListener("keydown", onPttKeyDown);
     window.removeEventListener("keyup", onPttKeyUp);
+  }
+
+  // ── PTT via IPC (global keyboard hook from main process) ──────────
+
+  function onPttIpcKeyDown(): void {
+    if (!adapter.state.pttModeEnabled) {
+      return;
+    }
+    console.info("[PTT] IPC keydown");
+    void adapter.startPttCapture();
+  }
+
+  function onPttIpcKeyUp(): void {
+    if (!adapter.state.pttModeEnabled) {
+      return;
+    }
+    console.info("[PTT] IPC keyup");
+    void adapter.stopPttCapture();
+  }
+
+  function installPttIpcListeners(): void {
+    window.ag99desktop?.onIpc?.("desktop:ptt-keydown", onPttIpcKeyDown);
+    window.ag99desktop?.onIpc?.("desktop:ptt-keyup", onPttIpcKeyUp);
+  }
+
+  function removePttIpcListeners(): void {
+    // Electron IPC listeners are auto-cleaned on window close
   }
 
   function showContextMenu(event: MouseEvent): void {

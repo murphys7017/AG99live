@@ -7,6 +7,68 @@ let menuManager: MenuManager;
 const WM_DWMCOMPOSITIONCHANGED = 0x031e;
 const WINDOW_RECOVERY_DEBOUNCE_MS = 5000;
 
+// ── Global keyboard hook for PTT ───────────────────────────────────
+
+let uiohookModule: Record<string, unknown> | null = null;
+let globalPttEnabled = false;
+
+function loadUiohook(): Record<string, unknown> | null {
+  if (uiohookModule) {
+    return uiohookModule;
+  }
+  try {
+    uiohookModule = require("uiohook-napi");
+  } catch (err) {
+    console.warn("[PTT] uiohook-napi unavailable, global PTT disabled.", err);
+    uiohookModule = null;
+  }
+  return uiohookModule;
+}
+
+function startGlobalPttHook(): void {
+  const uiohook = loadUiohook();
+  if (!uiohook) {
+    return;
+  }
+  globalPttEnabled = true;
+  const hook = uiohook.uIOhook as {
+    on: (event: string, callback: (event: { keycode: number }) => void) => void;
+    start: () => void;
+    stop: () => void;
+  };
+  hook.on("keydown", (event) => {
+    if (!globalPttEnabled) return;
+    if (event.keycode === 29) {
+      const pet = windowManager?.getWindow("pet");
+      pet?.webContents.send("desktop:ptt-keydown");
+    }
+  });
+  hook.on("keyup", (event) => {
+    if (!globalPttEnabled) return;
+    if (event.keycode === 29) {
+      const pet = windowManager?.getWindow("pet");
+      pet?.webContents.send("desktop:ptt-keyup");
+    }
+  });
+  hook.start();
+  console.info("[PTT] global keyboard hook started");
+}
+
+function stopGlobalPttHook(): void {
+  const uiohook = loadUiohook();
+  if (!uiohook) {
+    return;
+  }
+  globalPttEnabled = false;
+  try {
+    const hook = uiohook.uIOhook as { stop: () => void };
+    hook.stop();
+  } catch (err) {
+    console.warn("[PTT] failed to stop global keyboard hook.", err);
+  }
+  console.info("[PTT] global keyboard hook stopped");
+}
+
 function isEnvFlagEnabled(name: string): boolean {
   const raw = process.env[name];
   if (!raw) {
@@ -135,6 +197,11 @@ function setupIpc(): void {
 
   ipcMain.on("desktop:set-ptt-mode", (_event, enabled: boolean) => {
     windowManager.setPetWindowFocusEnabled(enabled);
+    if (enabled) {
+      startGlobalPttHook();
+    } else {
+      stopGlobalPttHook();
+    }
   });
 
   ipcMain.handle("desktop:capture-screen-image", async () => {
