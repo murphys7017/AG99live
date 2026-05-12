@@ -16,8 +16,9 @@ For any non-trivial task, load governance in this order:
 6. `.ai/router/task_classification.md`
 7. `.ai/router/risk_levels.md`
 8. `.ai/router/disturbance_model.md`
-9. `.ai/router/loading_rules.md`
-10. Task-specific files selected by the router
+9. `.ai/runtime/continuity.md`
+10. `.ai/router/loading_rules.md`
+11. Task-specific files selected by the router
 
 Do not bypass task classification, risk estimation, or loading rules.
 
@@ -28,6 +29,7 @@ Do not bypass task classification, risk estimation, or loading rules.
 | Constitution | `constitution/` | Stable philosophy and long-term control principles. |
 | Invariants | `invariants/` | Rules that must not be violated during execution. |
 | Policies | `policies/` | Structured operational constraints and permissions. |
+| Runtime | `runtime/` | Continuity rules for long-running, multi-turn, interrupted, or resumed work. |
 | Router | `router/` | Task classification, risk estimation, disturbance awareness, and loading selection. |
 | Workflows | `workflows/` | Task-specific execution loops and exit conditions. |
 | Skills | `skills/` | Reusable operational procedures. |
@@ -75,6 +77,9 @@ The router is the control selection layer.
 
 Before final response, an agent should know:
 
+- task objective
+- success criteria or acceptance conditions
+- non-goals or scope boundaries
 - task class
 - risk level
 - selected workflow
@@ -85,6 +90,27 @@ Before final response, an agent should know:
 - whether correction remains required
 
 If any of these are unknown for a medium or high-risk task, report the gap explicitly.
+
+## Continuity Discipline
+
+For long-running, multi-turn, interrupted, or resumed tasks:
+
+- use `runtime/continuity.md` to run governance checkpoints
+- use `checklists/continuity.md` before continuing after major task changes or before final response on medium/high-risk work
+- re-check task class, risk, disturbances, selected workflow, validation gaps, and correction state
+
+The agent must not assume the initial governance load remains valid after scope, risk, context, or user intent changes.
+
+## Objective Discipline
+
+Before implementing or claiming completion:
+
+- use `policies/objective.yaml` to keep work aligned to the requested outcome
+- use `checklists/objective_satisfaction.md` when the task objective, success criteria, or non-goals affect correctness
+- distinguish objective satisfaction from merely completing adjacent cleanup
+- report partial satisfaction, tradeoffs, or unmet success criteria explicitly
+
+The agent must not treat activity, validation success, or checklist completion as proof that the user's objective was satisfied.
 
 ## Correctness Discipline
 

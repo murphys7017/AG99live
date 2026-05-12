@@ -14,9 +14,12 @@ Use `docs/runtime/agent_execution_protocol.md` as the shared execution protocol.
 6. `.ai/router/task_classification.md`
 7. `.ai/router/risk_levels.md`
 8. `.ai/router/disturbance_model.md`
-9. `.ai/router/loading_rules.md`
-10. task-specific policies, workflow, skills, checklists, evaluation, and state files selected by the router
+9. `.ai/runtime/continuity.md`
+10. `.ai/router/loading_rules.md`
+11. task-specific policies, workflow, skills, checklists, evaluation, and state files selected by the router
 
 ## Adapter Rule
 
 Do not bypass the router layer. Codex-compatible instructions should classify the task and estimate risk before selecting workflow material.
+
+For long-running, multi-turn, interrupted, or resumed tasks, run continuity checkpoints instead of assuming the initial load remains valid.

@@ -1,0 +1,45 @@
+name: objective
+version: 0.1.0
+purpose: Define objective and quality criteria discipline for bounded agent execution.
+rules:
+  - id: objective_before_execution
+    severity: high
+    category: objective_control
+    description: Identify the requested objective, success criteria, and non-goals before making behavior-affecting or multi-file changes.
+    applies_to:
+      - feature_development
+      - bugfix
+      - refactor
+      - release
+      - medium_risk_task
+      - high_risk_task
+    enforcement: require_objective_statement
+    exceptions:
+      - trivial_single_file_documentation
+
+  - id: quality_criteria_before_completion
+    severity: high
+    category: quality_control
+    description: Evaluate whether the delivered result satisfies the task objective and relevant quality criteria before claiming completion.
+    applies_to:
+      - implementation
+      - documentation
+      - review
+      - release
+      - validation
+    enforcement: require_objective_satisfaction_check
+    exceptions:
+      - read_only_exploration_without_completion_claim
+
+  - id: non_goals_limit_scope
+    severity: medium
+    category: scope_control
+    description: Treat explicit and inferred non-goals as scope boundaries unless the user approves expansion.
+    applies_to:
+      - implementation
+      - refactor
+      - repository_maintenance
+      - governance_change
+    enforcement: prevent_unapproved_scope_expansion
+    exceptions:
+      - user_explicitly_expands_scope

@@ -10,6 +10,7 @@ Evaluation closes the governance loop after implementation or review.
 
 It answers:
 
+- Was the requested objective satisfied?
 - Was the work executionally sound?
 - Was architecture stability preserved?
 - Was the intended governance path actually followed?
@@ -21,6 +22,7 @@ Use this logical output structure when an evaluation is performed:
 
 ```yaml
 evaluation:
+  objective_satisfaction: pass | partial | fail | not_applicable
   execution_quality: pass | partial | fail | not_applicable
   architecture_stability: pass | partial | fail | not_applicable
   governance_compliance: pass | partial | fail | not_applicable
@@ -42,6 +44,23 @@ evaluation:
 This schema does not need to be materialized as a file for every task, but the evaluation summary should be compatible with it.
 
 ## Evaluation Dimensions
+
+### Objective Satisfaction
+
+Use to assess whether the delivered result satisfies the user's requested outcome, known success criteria, and relevant non-goals.
+
+Normally applicable to:
+
+- feature development
+- bugfix
+- refactor
+- documentation with a specific audience or purpose
+- release
+
+May be `not_applicable` for:
+
+- exploratory review without a completion claim
+- trivial read-only questions
 
 ### Execution Quality
 

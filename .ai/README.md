@@ -11,7 +11,8 @@ Agents should read `index.md` as the map for this governance runtime after loadi
 - `index.md` - agent-readable map of the governance runtime.
 - `constitution/` - stable philosophy and long-term principles.
 - `invariants/` - rules that must not be violated.
-- `policies/` - operational constraints and permissions.
+- `policies/` - operational constraints, objective discipline, and permissions.
+- `runtime/` - runtime continuity and long-running execution control.
 - `router/` - task classification, risk levels, and loading rules.
 - `skills/` - reusable operational procedures.
 - `workflows/` - task-specific execution loops.

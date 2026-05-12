@@ -12,11 +12,12 @@ Use this workflow when the primary output is structural improvement while preser
 ## Required Loop
 
 1. Confirm refactor necessity.
-2. Define behavior that must remain unchanged.
-3. Limit the affected scope.
+2. Define refactor objective, success criteria, and behavior that must remain unchanged.
+3. Limit the affected scope and non-goals.
 4. Refactor incrementally.
-5. Validate behavior preservation.
+5. Validate behavior preservation and objective satisfaction.
 6. Stop before unrelated redesign.
+7. For long-running or multi-turn work, run a continuity checkpoint before continuing after major changes and before completion.
 
 ## Default Skills
 
@@ -32,11 +33,13 @@ Required:
 
 - `checklists/implementation.md`
 - `checklists/review.md`
+- `checklists/objective_satisfaction.md`
 - `checklists/architecture.md`
 
 Optional based on risk:
 
 - `checklists/safety.md`
+- `checklists/continuity.md`
 
 ## Evaluation Binding
 
@@ -58,6 +61,7 @@ Optional based on risk:
 ## Exit Conditions
 
 - intended behavior remains preserved
+- refactor objective is satisfied or remaining tradeoffs are explicit
 - affected scope stayed bounded
 - architecture checklist was applied
 - validation status is known

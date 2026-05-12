@@ -11,11 +11,12 @@ Use this workflow when the primary output is new behavior, new capability, or an
 ## Required Loop
 
 1. Analyze current architecture and nearby patterns.
-2. Define bounded scope.
+2. Define objective, success criteria, and bounded scope.
 3. Implement the smallest complete change.
-4. Review for drift, coupling, and safety.
+4. Review for objective satisfaction, drift, coupling, and safety.
 5. Validate with available checks.
 6. Correct issues before completion.
+7. For long-running or multi-turn work, run a continuity checkpoint before continuing after major changes and before completion.
 
 ## Default Skills
 
@@ -30,11 +31,13 @@ Required:
 
 - `checklists/implementation.md`
 - `checklists/review.md`
+- `checklists/objective_satisfaction.md`
 
 Optional based on risk:
 
 - `checklists/architecture.md`
 - `checklists/safety.md`
+- `checklists/continuity.md`
 
 ## Evaluation Binding
 
@@ -56,6 +59,7 @@ Optional based on risk:
 ## Exit Conditions
 
 - requested feature scope is implemented or intentionally bounded
+- objective satisfaction was checked against success criteria
 - implementation and review checklists have been applied
 - validation status is known
 - remaining gaps or risks are explicit

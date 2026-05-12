@@ -8,6 +8,9 @@ The release package includes:
 
 - `AGENTS.md`
 - `.ai/`
+- `.ai/runtime/continuity.md`
+- `.ai/policies/objective.yaml`
+- `.ai/checklists/objective_satisfaction.md`
 - `docs/runtime/README.md`
 - `docs/runtime/agent_execution_protocol.md`
 - `docs/runtime/release_package.md`
@@ -15,7 +18,7 @@ The release package includes:
 - `tools/validate_runtime.py`
 - `INSTALL.md`
 
-The package does not include `README.md`, `references/`, or `ai_governance_runtime_overview_manifest.md` by default. Those files are conceptual background for this repository, or would conflict with files that commonly already exist in a target project.
+The package does not include `README.md`, `examples/`, `references/`, or `ai_governance_runtime_overview_manifest.md` by default. Those files are repository-level documentation, regression samples, conceptual background, or would conflict with files that commonly already exist in a target project.
 
 ## Installation
 

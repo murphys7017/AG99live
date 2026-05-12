@@ -30,11 +30,13 @@ For any non-trivial task, the agent should run this loop:
    - Read `.ai/index.md`.
    - Read `.ai/constitution/core.md`.
    - Read `.ai/invariants/core.md`.
+   - Read `.ai/runtime/continuity.md` for long-running, multi-turn, interrupted, or resumed work.
 
 2. Route the task.
    - Classify the task with `.ai/router/task_classification.md`.
    - Estimate risk with `.ai/router/risk_levels.md` and `.ai/router/disturbance_model.md`.
    - Select governance material using `.ai/router/loading_rules.md`.
+   - Identify the task objective, success criteria, and non-goals when they affect execution.
 
 3. Load only the selected material.
    - Load the selected policies, workflow, skills, checklists, evaluation files, and state files.
@@ -44,6 +46,7 @@ For any non-trivial task, the agent should run this loop:
    - Follow the workflow's required loop.
    - Keep the change bounded to the requested task.
    - Preserve architecture and user changes unless explicitly instructed otherwise.
+   - Run a continuity checkpoint when scope, risk, context, validation status, or user intent changes.
 
 5. Maintain explicit state when required.
    - Review the state files selected by the router.
@@ -52,6 +55,8 @@ For any non-trivial task, the agent should run this loop:
 
 6. Apply checklists and evaluation.
    - Apply required checklists before completion.
+   - Apply `checklists/objective_satisfaction.md` when the requested objective, success criteria, or non-goals affect completion.
+   - Apply `checklists/continuity.md` when execution has been long-running, multi-turn, interrupted, or resumed.
    - Use the evaluation schema when evaluation is required or useful.
    - Report validation gaps honestly instead of implying full verification.
 
@@ -87,6 +92,7 @@ If an agent cannot perform part of the protocol, it should degrade explicitly:
 
 A task is complete only when:
 
+- the requested objective is satisfied or the remaining gap is explicit
 - the selected workflow exit conditions are satisfied or the unresolved boundary is explicit
 - required checklists have been applied
 - validation status is known

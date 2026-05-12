@@ -11,10 +11,12 @@ Use this workflow when the primary output is explanatory, descriptive, or govern
 ## Required Loop
 
 1. Identify the document purpose and audience.
-2. Inspect nearby terminology and structure.
-3. Make the smallest clear documentation change.
-4. Review for accuracy, duplication, and scope drift.
-5. Validate links, paths, or examples when practical.
+2. Define success criteria and scope boundaries when they are not trivial.
+3. Inspect nearby terminology and structure.
+4. Make the smallest clear documentation change.
+5. Review for accuracy, duplication, objective satisfaction, and scope drift.
+6. Validate links, paths, or examples when practical.
+7. For multi-turn documentation work, run a continuity checkpoint before completion.
 
 ## Default Skills
 
@@ -31,7 +33,9 @@ Required:
 Optional based on impact:
 
 - `checklists/implementation.md`
+- `checklists/objective_satisfaction.md`
 - `checklists/architecture.md`
+- `checklists/continuity.md`
 
 ## Evaluation Binding
 
@@ -52,6 +56,7 @@ Required when documentation changes governance behavior:
 ## Exit Conditions
 
 - documentation change is scoped to the requested purpose
+- objective satisfaction is checked when success criteria are non-trivial
 - terminology is consistent with nearby files
 - examples, paths, or references were checked when practical
 - remaining uncertainty is explicit
