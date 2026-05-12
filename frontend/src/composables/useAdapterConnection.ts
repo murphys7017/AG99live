@@ -622,6 +622,8 @@ async function stopMicrophoneCaptureRuntimeOnly(): Promise<boolean> {
 
 function setPttMode(enabled: boolean): void {
   state.pttModeEnabled = enabled;
+  // Notify main process to toggle window focus
+  window.ag99desktop?.setPttMode?.(enabled);
   if (enabled) {
     // When PTT mode activates, stop mic if currently capturing
     if (state.micCapturing || isMicrophoneCaptureRuntimeActive()) {

@@ -247,6 +247,24 @@ export class WindowManager {
     this.keepPetWindowPassive(targetWindow);
   }
 
+  setPetWindowFocusEnabled(enabled: boolean): void {
+    const petWindow = this.windows.pet;
+    if (!petWindow || petWindow.isDestroyed()) {
+      return;
+    }
+
+    if (enabled) {
+      // PTT mode: allow clicks and focus so keyboard events fire
+      petWindow.setIgnoreMouseEvents(false);
+      petWindow.setFocusable(true);
+      petWindow.moveTop();
+    } else {
+      // Normal mode: transparent to mouse, no focus
+      petWindow.setIgnoreMouseEvents(true, { forward: true });
+      this.keepPetWindowPassive(petWindow);
+    }
+  }
+
   startWindowDrag(
     targetWindow: BrowserWindow | null,
     screenX: number,

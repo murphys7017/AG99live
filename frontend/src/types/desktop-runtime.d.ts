@@ -25,6 +25,7 @@ export interface Ag99DesktopApi {
   closeCurrentWindow: () => void;
   minimizeCurrentWindow: () => void;
   setOverlayContentHeight: (height: number) => void;
+  setPttMode: (enabled: boolean) => void;
   onWindowState: (
     callback: (state: DesktopWindowVisibilityState) => void,
   ) => () => void;

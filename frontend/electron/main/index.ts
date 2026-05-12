@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen } from "electron";
+import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen, session } from "electron";
 import { MenuManager } from "./menu-manager";
 import { WindowManager } from "./window-manager";
 
@@ -133,6 +133,10 @@ function setupIpc(): void {
     windowManager.endWindowDrag(BrowserWindow.fromWebContents(event.sender));
   });
 
+  ipcMain.on("desktop:set-ptt-mode", (_event, enabled: boolean) => {
+    windowManager.setPetWindowFocusEnabled(enabled);
+  });
+
   ipcMain.handle("desktop:capture-screen-image", async () => {
     const primaryDisplayId = String(screen.getPrimaryDisplay().id);
     const sources = await desktopCapturer.getSources({
@@ -156,6 +160,37 @@ function setupIpc(): void {
       captured_at: new Date().toISOString(),
     };
   });
+}
+
+function setupMediaPermissions(): void {
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission, _origin, details) => {
+    if (permission !== "media") {
+      return false;
+    }
+
+    return details.mediaType === "audio";
+  });
+
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
+    if (permission !== "media") {
+      callback(false);
+      return;
+    }
+
+    const mediaTypes = getRequestedMediaTypes(details);
+    callback(mediaTypes.includes("audio") && !mediaTypes.includes("video"));
+  });
+}
+
+function getRequestedMediaTypes(details: unknown): string[] {
+  if (!details || typeof details !== "object") {
+    return [];
+  }
+
+  const mediaTypes = (details as { mediaTypes?: unknown }).mediaTypes;
+  return Array.isArray(mediaTypes)
+    ? mediaTypes.filter((item): item is string => typeof item === "string")
+    : [];
 }
 
 function setupTransparentWindowRecovery(): (window: BrowserWindow) => void {
@@ -236,6 +271,7 @@ app.whenReady().then(() => {
   }
 
   const attachRecoveryHook = setupTransparentWindowRecovery();
+  setupMediaPermissions();
   app.on("browser-window-created", (_, window) => {
     watchWindowShortcuts(window);
     attachRecoveryHook(window);

@@ -73,6 +73,9 @@ const api = {
   setOverlayContentHeight: (height: number) => {
     ipcRenderer.send("desktop:set-overlay-content-height", height);
   },
+  setPttMode: (enabled: boolean) => {
+    ipcRenderer.send("desktop:set-ptt-mode", enabled);
+  },
   onWindowState: (
     callback: (state: DesktopWindowVisibilityState) => void,
   ) => {

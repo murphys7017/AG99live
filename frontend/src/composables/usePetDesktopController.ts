@@ -250,30 +250,39 @@ export function usePetDesktopController() {
   // ── Push-to-talk keyboard listener ────────────────────────────────
 
   function onPttKeyDown(event: KeyboardEvent): void {
+    console.info("[PTT] keydown key=%s repeat=%s pttMode=%s", event.key, event.repeat, adapter.state.pttModeEnabled);
     if (!adapter.state.pttModeEnabled) {
       return;
     }
     // Ctrl activates PTT (ignores on repeated keydown)
     if (event.key === "Control" && !event.repeat) {
+      console.info("[PTT] starting mic capture");
       void adapter.startPttCapture();
     }
   }
 
   function onPttKeyUp(event: KeyboardEvent): void {
+    console.info("[PTT] keyup key=%s pttMode=%s", event.key, adapter.state.pttModeEnabled);
     if (!adapter.state.pttModeEnabled) {
       return;
     }
     if (event.key === "Control") {
+      console.info("[PTT] stopping mic capture");
       void adapter.stopPttCapture();
     }
   }
 
   function installPttKeyboardListeners(): void {
-    window.addEventListener("keydown", onPttKeyDown, { passive: true });
-    window.addEventListener("keyup", onPttKeyUp, { passive: true });
+    document.addEventListener("keydown", onPttKeyDown);
+    document.addEventListener("keyup", onPttKeyUp);
+    window.addEventListener("keydown", onPttKeyDown);
+    window.addEventListener("keyup", onPttKeyUp);
+    console.info("[PTT] keyboard listeners installed (document + window)");
   }
 
   function removePttKeyboardListeners(): void {
+    document.removeEventListener("keydown", onPttKeyDown);
+    document.removeEventListener("keyup", onPttKeyUp);
     window.removeEventListener("keydown", onPttKeyDown);
     window.removeEventListener("keyup", onPttKeyUp);
   }
