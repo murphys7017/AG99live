@@ -178,6 +178,65 @@ function testGetUnsettledSegmentsReturnsOnlyUnsettledSegments(): void {
   );
 }
 
+function testIllegalPhaseTransitionIsRejected(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.setActiveSession("orch-1", "turn-1");
+  store.markTurnStarted("orch-1", "turn-1");
+  // transition through valid phases to completed
+  store.markPhase("orch-1", "turn-1", "ready");
+  store.markPhase("orch-1", "turn-1", "playing");
+  store.markPhase("orch-1", "turn-1", "settling");
+  store.markPhase("orch-1", "turn-1", "completed");
+  assert.equal(store.getActiveSession()?.phase, "completed");
+  // completed -> playing is illegal
+  const result = store.markPhase("orch-1", "turn-1", "playing");
+  assert.equal(result, false);
+  assert.equal(store.getActiveSession()?.phase, "completed");
+}
+
+function testFailedSessionCannotTransition(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.setActiveSession("orch-1", "turn-1");
+  store.markTurnStarted("orch-1", "turn-1");
+  store.markPhase("orch-1", "turn-1", "failed");
+  assert.equal(store.getActiveSession()?.phase, "failed");
+  assert.equal(store.markPhase("orch-1", "turn-1", "completed"), false);
+  assert.equal(store.getActiveSession()?.phase, "failed");
+}
+
+function testInterruptMarksSessionFailed(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.setActiveSession("orch-1", "turn-1");
+  store.markTurnStarted("orch-1", "turn-1");
+  store.markPhase("orch-1", "turn-1", "playing");
+  store.markInterrupt("orch-1", "turn-1");
+
+  const session = store.getActiveSession();
+  assert.ok(session);
+  assert.equal(session.interrupted, true);
+  assert.equal(session.phase, "failed");
+  assert.equal(session.backend.reason, "interrupted");
+}
+
+function testInterruptDoesNotCreateNewSession(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.markInterrupt("orch-nonexistent", "turn-nonexistent");
+  assert.equal(store.getSessions().length, 0);
+}
+
+function testAudioTerminalHandlesAllStates(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.setActiveSession("orch-1", "turn-1");
+  store.markTextReceived("orch-1", "turn-1", "Hello", "msg-1");
+
+  store.markAudioTerminal("orch-1", "turn-1", "completed", "msg-1", "ok");
+  assert.equal(store.getSession("orch-1")?.segments.get("msg-1")?.audio.terminal, "completed");
+
+  store.markAudioTerminal("orch-1", "turn-1", "failed", "msg-1", "error");
+  assert.equal(store.getSession("orch-1")?.segments.get("msg-1")?.audio.terminal, "failed");
+  assert.equal(store.getSession("orch-1")?.segments.get("msg-1")?.audio.reason, "error");
+}
+
 function run(): void {
   testSessionStartsWithoutTurnLevelPlaybackSlots();
   testSameMessageIdGroupsTextAudioMotion();
@@ -188,6 +247,11 @@ function run(): void {
   testRequiredMessageIdIsEnforced();
   testTurnOnlySessionPromotesToOrchestrationSession();
   testGetUnsettledSegmentsReturnsOnlyUnsettledSegments();
+  testIllegalPhaseTransitionIsRejected();
+  testFailedSessionCannotTransition();
+  testInterruptMarksSessionFailed();
+  testInterruptDoesNotCreateNewSession();
+  testAudioTerminalHandlesAllStates();
   console.log("turnPlaybackSessionStore tests passed");
 }
 

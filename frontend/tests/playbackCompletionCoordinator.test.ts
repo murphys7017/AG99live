@@ -277,6 +277,102 @@ async function testPreviewMotionPlaybackDoesNotCreateSessionSegment(): Promise<v
   assert.equal(h.coordinator.motionPlaybackRecords.value[0]?.startReason, "preview");
 }
 
+async function testMixedAudioStatesRequireAllSettled(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.markTextReceived("orch-1", "turn-1", "A", "msg-a");
+  h.sessionStore.markTextReceived("orch-1", "turn-1", "B", "msg-b");
+
+  // msg-a: has audio, completed
+  h.sessionStore.markTextDelivered("orch-1", "turn-1", "msg-a");
+  h.sessionStore.markAudioTerminal("orch-1", "turn-1", "completed", "msg-a", "ok");
+  h.sessionStore.markMotionAbsent("orch-1", "turn-1", "msg-a");
+
+  // msg-b: no audio, still idle
+  h.sessionStore.markTextDelivered("orch-1", "turn-1", "msg-b");
+  h.sessionStore.markMotionAbsent("orch-1", "turn-1", "msg-b");
+
+  h.sessionStore.markSynthFinished("orch-1", "turn-1");
+  await h.flush();
+  // msg-b audio still idle, should NOT ack
+  assert.equal(h.playbackFinishedCalls.length, 0);
+
+  h.sessionStore.markAudioTerminal("orch-1", "turn-1", "absent", "msg-b", "no_audio");
+  await h.flush();
+  await h.flush();
+  assert.equal(h.playbackFinishedCalls.length, 1);
+  assert.equal(h.sessionStore.getActiveSession()?.phase, "settling");
+}
+
+async function testSegmentWithAudioFailureStillSettles(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.markTextReceived("orch-1", "turn-1", "A", "msg-a");
+  h.sessionStore.markTextDelivered("orch-1", "turn-1", "msg-a");
+  h.sessionStore.markAudioTerminal("orch-1", "turn-1", "failed", "msg-a", "playback_error");
+  h.sessionStore.markMotionAbsent("orch-1", "turn-1", "msg-a");
+  h.sessionStore.markSynthFinished("orch-1", "turn-1");
+  await h.flush();
+  await h.flush();
+
+  assert.equal(h.playbackFinishedCalls.length, 1);
+  // audio failure sets success=false
+  assert.equal(h.playbackFinishedCalls[0].success, false);
+}
+
+async function testSynthFinishedAfterTurnFinishedStillAcks(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.markTextReceived("orch-1", "turn-1", "A", "msg-a");
+  h.sessionStore.markTextDelivered("orch-1", "turn-1", "msg-a");
+  h.sessionStore.markAudioTerminal("orch-1", "turn-1", "absent", "msg-a", "no_audio");
+  h.sessionStore.markMotionAbsent("orch-1", "turn-1", "msg-a");
+
+  // turn_finished before synth_finished (out-of-order delivery)
+  h.sessionStore.markTurnFinished("orch-1", "turn-1", true);
+  await h.flush();
+  assert.equal(h.playbackFinishedCalls.length, 0);
+
+  h.sessionStore.markSynthFinished("orch-1", "turn-1");
+  await h.flush();
+  await h.flush();
+  assert.equal(h.playbackFinishedCalls.length, 1);
+  // should go straight to completed since turn_finished already arrived
+  assert.equal(h.sessionStore.getActiveSession()?.phase, "completed");
+}
+
+async function testCompletionCoordinatorIgnoresStaleSession(): Promise<void> {
+  const h = createHarness();
+
+  // Create and settle session A
+  h.sessionStore.markTextReceived("orch-1", "turn-1", "A", "msg-a");
+  h.sessionStore.markTextDelivered("orch-1", "turn-1", "msg-a");
+  h.sessionStore.markAudioTerminal("orch-1", "turn-1", "absent", "msg-a", "no_audio");
+  h.sessionStore.markMotionAbsent("orch-1", "turn-1", "msg-a");
+  h.sessionStore.markSynthFinished("orch-1", "turn-1");
+  await h.flush();
+  await h.flush();
+  assert.equal(h.playbackFinishedCalls.length, 1);
+
+  h.sessionStore.markTurnFinished("orch-1", "turn-1", true);
+  await h.flush();
+  assert.equal(h.sessionStore.getActiveSession()?.phase, "completed");
+
+  // Start new session B
+  h.sessionStore.setActiveSession("orch-2", "turn-2");
+  h.sessionStore.markTurnStarted("orch-2", "turn-2");
+  h.sessionStore.markPhase("orch-2", "turn-2", "ready");
+  h.sessionStore.markPhase("orch-2", "turn-2", "playing");
+  h.sessionStore.markTextReceived("orch-2", "turn-2", "B", "msg-b");
+  h.sessionStore.markTextDelivered("orch-2", "turn-2", "msg-b");
+  h.sessionStore.markAudioTerminal("orch-2", "turn-2", "absent", "msg-b", "no_audio");
+  h.sessionStore.markMotionAbsent("orch-2", "turn-2", "msg-b");
+  h.sessionStore.markSynthFinished("orch-2", "turn-2");
+  await h.flush();
+  await h.flush();
+
+  // Should ack session B, not re-ack session A
+  assert.equal(h.playbackFinishedCalls.length, 2);
+  assert.equal(h.playbackFinishedCalls[1].turnId, "turn-2");
+}
+
 async function run(): Promise<void> {
   await testSegmentCompletionDoesNotFinishTurnEarly();
   await testAllSegmentsAndSynthFinishedAckOnce();
@@ -285,6 +381,10 @@ async function run(): Promise<void> {
   await testMotionCompletionWritesCorrectSegment();
   await testMotionHandoffCompletesPreviousSegmentAndFinishesCurrent();
   await testPreviewMotionPlaybackDoesNotCreateSessionSegment();
+  await testMixedAudioStatesRequireAllSettled();
+  await testSegmentWithAudioFailureStillSettles();
+  await testSynthFinishedAfterTurnFinishedStillAcks();
+  await testCompletionCoordinatorIgnoresStaleSession();
   console.log("playbackCompletionCoordinator tests passed");
 }
 

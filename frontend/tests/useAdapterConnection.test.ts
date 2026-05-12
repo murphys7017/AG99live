@@ -471,6 +471,61 @@ function testInvalidMotionDoesNotRewritePreviousSegment(): void {
   });
 }
 
+function testBackToBackTurnsDoNotSharePendingState(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    // Turn A
+    sendTurnStarted(socket, "turn-a", "orch-a");
+    socket.emitMessage(JSON.stringify({
+      type: "output.text",
+      version: "v2",
+      message_id: "m-a",
+      timestamp: "2026-05-08T00:00:01.000Z",
+      session_id: "session-1",
+      turn_id: "turn-a",
+      orchestration_id: "orch-a",
+      source: "backend",
+      payload: { text: "text a", speaker_name: "assistant", avatar: "" },
+    }));
+
+    assert.ok(adapter.state.pendingAssistantTexts.has("m-a"));
+
+    // Turn B starts, should clear Turn A's pending state
+    sendTurnStarted(socket, "turn-b", "orch-b");
+    assert.equal(adapter.state.currentTurnId, "turn-b");
+    assert.equal(adapter.state.currentOrchestrationId, "orch-b");
+    assert.equal(adapter.state.pendingAssistantTexts.size, 0);
+    assert.equal(adapter.state.pendingAudios.size, 0);
+
+    // Turn A's session should still exist for diagnostics
+    assert.ok(sessionStore.getSession("orch-a"));
+  });
+}
+
+function testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-current", "orch-current");
+
+    // Send turn_finished for a DIFFERENT turn_id
+    socket.emitMessage(JSON.stringify({
+      type: "control.turn_finished",
+      version: "v2",
+      message_id: "m-stale",
+      timestamp: "2026-05-08T00:00:02.000Z",
+      session_id: "session-1",
+      turn_id: "turn-other",
+      orchestration_id: "orch-other",
+      source: "backend",
+      payload: { success: true },
+    }));
+
+    // Current turn should NOT be marked as finished
+    const session = sessionStore.getSession("orch-current");
+    assert.ok(session);
+    // The stale turn_finished created a separate session, not affecting current
+    assert.equal(session.backend.turnFinished, false);
+  });
+}
+
 function run(): void {
   installWindowStubs();
   installWebSocketStub();
@@ -486,6 +541,8 @@ function run(): void {
   testTurnFinishedDoesNotMarkMissingSegmentAudioAbsent();
   testMotionFallbackDoesNotCreateAnonymousSession();
   testInvalidMotionDoesNotRewritePreviousSegment();
+  testBackToBackTurnsDoNotSharePendingState();
+  testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted();
 
   console.log("useAdapterConnection tests passed");
 }
