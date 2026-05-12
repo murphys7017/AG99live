@@ -1,6 +1,15 @@
 architecture:
-  stability: unknown
+  stability: stable
   pending_breaking_change: false
-  boundary_changes: []
+  boundary_changes:
+    - completed: extract inboundDispatcher.ts from useAdapterConnection.ts
+    - completed: extract projection.ts from usePetRuntimeSnapshotPublisher
+    - completed: extract useDesktopRuntimeCommandHandler from usePetDesktopController
+    - completed: remove legacy compatibility paths (ephemeral session, old AstrBot imports, legacy preview, 0..1 hint)
   notes:
-    - Initial project governance structure is being established.
+    - VibeEngineeringCybernetics v0.1.2 governance runtime deployed under .ai/
+    - VEC replaces older agent.md with AGENTS.md entry point
+    - docs structure reorganized with architecture/ design/ api/ runtime/ subdirectories
+    - all frontend (7 suites) and backend (146) tests pass
+    - adapter-connection/ now has inboundDispatcher.ts (dispatch + 11 handlers, 472 lines)
+    - useAdapterConnection.ts reduced from ~1310 to ~1042 lines

@@ -1,5 +1,15 @@
 context:
-  confidence: unknown
-  required_files_loaded: []
-  assumptions: []
+  confidence: high
+  required_files_loaded:
+    - AGENTS.md
+    - .ai/ (governance runtime)
+    - frontend/src/turn-playback/ + composables/ + adapter-connection/
+    - astrbot_plugin_ag99live_adapter/
+    - docs/ (current project docs)
+    - docs/runtime/agent_execution_protocol.md
+  assumptions:
+    - VEC governance runtime is deployed and active
+    - Frontend refactor completed: 4 new modules extracted, tests pass
+    - Backend unchanged since compatibility cleanup
+    - V2 protocol is the only active protocol path
   unresolved_questions: []

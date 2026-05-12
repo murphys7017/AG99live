@@ -1,5 +1,5 @@
 execution:
-  phase: not_started
-  validation_passed: false
-  review_completed: false
+  phase: completed
+  validation_passed: true
+  review_completed: true
   correction_required: false
