@@ -1,6 +1,6 @@
 current_task:
   type: review
-  scope: governance compliance audit + dataflow review of TurnCoordinator extraction
+  scope: final audit of 9-commit optimization session
   risk: medium
   phase: completed
   owner: agent
