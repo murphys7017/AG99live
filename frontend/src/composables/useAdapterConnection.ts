@@ -51,6 +51,10 @@ import {
   type MicrophoneAudioChunk,
 } from "../adapter-connection/microphoneCapture.js";
 import {
+  listMicrophoneInputDevices,
+  type MicrophoneDeviceInfo,
+} from "../adapter-connection/microphoneDevices.js";
+import {
   startAudioPlayback,
   stopAudioPlaybackRuntime,
 } from "../adapter-connection/audioPlayback.js";
@@ -69,9 +73,12 @@ import {
 } from "../adapter-connection/envelope.js";
 import {
   loadDesktopScreenshotOnSendEnabled,
+  loadStoredMicrophoneDeviceId,
   loadStoredAdapterAddress,
   normalizeAdapterAddressSetting,
+  normalizeMicrophoneDeviceId,
   saveDesktopScreenshotOnSendEnabled,
+  saveStoredMicrophoneDeviceId,
   saveStoredAdapterAddress,
 } from "../adapter-connection/preferences.js";
 import { parseInboundEnvelope } from "../adapter-connection/inboundProtocol.js";
@@ -113,6 +120,8 @@ const MAX_MIC_SOCKET_BUFFERED_AMOUNT = 512 * 1024;
 const state = reactive({
   address: loadStoredAdapterAddress(),
   desktopScreenshotOnSendEnabled: loadDesktopScreenshotOnSendEnabled(),
+  microphoneDeviceId: loadStoredMicrophoneDeviceId(),
+  microphoneDevices: [] as MicrophoneDeviceInfo[],
   sessionId: "",
   status: "disconnected" as ConnectionStatus,
   statusMessage: "尚未连接适配器。",
@@ -126,6 +135,7 @@ const state = reactive({
   currentOrchestrationId: null as string | null,
   micRequested: false,
   micCapturing: false,
+  pttModeEnabled: false,
   isPlayingAudio: false,
   historyEntries: [] as DesktopHistoryEntry[],
   backendHistorySummaries: [] as DesktopBackendHistorySummary[],
@@ -313,6 +323,40 @@ function setDesktopScreenshotOnSendEnabled(enabled: boolean): void {
   saveDesktopScreenshotOnSendEnabled(enabled);
 }
 
+function setMicrophoneDevice(deviceId: string): void {
+  const normalized = normalizeMicrophoneDeviceId(deviceId);
+  if (normalized === state.microphoneDeviceId) {
+    return;
+  }
+
+  const shouldRestartCapture = state.micCapturing || isMicrophoneCaptureRuntimeActive();
+  state.microphoneDeviceId = normalized;
+  saveStoredMicrophoneDeviceId(normalized);
+  if (shouldRestartCapture) {
+    void restartMicrophoneCaptureAfterDeviceChange();
+  }
+}
+
+function setMicrophoneDevices(devices: readonly MicrophoneDeviceInfo[]): void {
+  const normalizedDevices = devices
+    .map((device, index) => ({
+      deviceId: normalizeMicrophoneDeviceId(device.deviceId),
+      label: typeof device.label === "string" && device.label.trim()
+        ? device.label.trim()
+        : `麦克风 ${index + 1}`,
+    }))
+    .filter((device) => device.deviceId);
+
+  state.microphoneDevices = normalizedDevices;
+  if (
+    normalizedDevices.length > 0
+    && state.microphoneDeviceId
+    && !normalizedDevices.some((device) => device.deviceId === state.microphoneDeviceId)
+  ) {
+    setMicrophoneDevice("");
+  }
+}
+
 function setAddress(nextAddress: string): void {
   persistAddress(nextAddress);
 }
@@ -324,6 +368,7 @@ async function initialize(): Promise<void> {
       if (storedAddress.trim()) {
         persistAddress(storedAddress);
       }
+      void refreshMicrophoneDevices({ requestPermission: false });
     });
   }
 
@@ -516,6 +561,7 @@ async function startMicrophoneCapture(): Promise<boolean> {
 
   try {
     await startMicrophoneCaptureRuntime({
+      deviceId: state.microphoneDeviceId || null,
       onChunk: (chunk) => {
         sendMicrophoneAudioChunk(chunk);
       },
@@ -528,6 +574,7 @@ async function startMicrophoneCapture(): Promise<boolean> {
     state.micRequested = true;
     state.lastError = "";
     state.statusMessage = "麦克风已开启，正在自动检测说话。";
+    void refreshMicrophoneDevices({ requestPermission: false });
     pushHistory("system", state.statusMessage);
     return true;
   } catch (error) {
@@ -538,6 +585,71 @@ async function startMicrophoneCapture(): Promise<boolean> {
     pushHistory("error", state.statusMessage);
     return false;
   }
+}
+
+async function refreshMicrophoneDevices(
+  options: { requestPermission?: boolean } = {},
+): Promise<void> {
+  try {
+    const devices = await listMicrophoneInputDevices({
+      requestPermission: options.requestPermission ?? true,
+    });
+    setMicrophoneDevices(devices);
+  } catch (error) {
+    console.warn("[Connection] failed to enumerate microphone devices.", error);
+  }
+}
+
+async function restartMicrophoneCaptureAfterDeviceChange(): Promise<void> {
+  await stopMicrophoneCaptureRuntimeOnly();
+  const started = await startMicrophoneCapture();
+  if (!started) {
+    state.micRequested = false;
+  }
+}
+
+async function stopMicrophoneCaptureRuntimeOnly(): Promise<boolean> {
+  if (!isMicrophoneCaptureRuntimeActive()) {
+    state.micCapturing = false;
+    return false;
+  }
+
+  state.micCapturing = false;
+  return stopMicrophoneCaptureRuntime();
+}
+
+// ── Push-to-talk ───────────────────────────────────────────────────
+
+function setPttMode(enabled: boolean): void {
+  state.pttModeEnabled = enabled;
+  if (enabled) {
+    // When PTT mode activates, stop mic if currently capturing
+    if (state.micCapturing || isMicrophoneCaptureRuntimeActive()) {
+      void stopMicrophoneCapture("ptt_mode_enabled");
+    }
+  }
+}
+
+async function startPttCapture(): Promise<void> {
+  if (!state.pttModeEnabled) {
+    return;
+  }
+  if (state.micCapturing) {
+    return; // already capturing (possibly via auto-mic)
+  }
+  await startMicrophoneCapture();
+}
+
+async function stopPttCapture(): Promise<void> {
+  if (!state.pttModeEnabled) {
+    return;
+  }
+  if (!state.micCapturing) {
+    return;
+  }
+  // Only stop if mic was started by PTT — preserves manual mic-on state
+  void stopMicrophoneCaptureRuntime();
+  state.micCapturing = false;
 }
 
 async function stopMicrophoneCapture(reason = "manual_stop"): Promise<boolean> {
@@ -998,6 +1110,9 @@ export function useAdapterConnection(
     initialize,
     setAddress,
     setDesktopScreenshotOnSendEnabled,
+    setMicrophoneDevice,
+    setMicrophoneDevices,
+    refreshMicrophoneDevices,
     connect,
     disconnect,
     sendText,
@@ -1016,6 +1131,9 @@ export function useAdapterConnection(
     releaseAssistantTextForPlayback,
     releaseAudioForPlayback,
     toggleMicrophoneCapture,
+    setPttMode,
+    startPttCapture,
+    stopPttCapture,
     pushHistory,
   };
 }

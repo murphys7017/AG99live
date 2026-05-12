@@ -31,6 +31,8 @@ import {
 export const defaultSnapshot: DesktopRuntimeSnapshot = {
   adapterAddress: DEFAULT_ADAPTER_ADDRESS,
   desktopScreenshotOnSendEnabled: true,
+  microphoneDeviceId: "",
+  microphoneDevices: [],
   ambientMotionEnabled: true,
   motionEngineSettings: buildDefaultModelEngineSettings(),
   motionPlaybackRecords: [],
@@ -40,6 +42,7 @@ export const defaultSnapshot: DesktopRuntimeSnapshot = {
   aiState: "offline",
   micRequested: false,
   micCapturing: false,
+  pttModeEnabled: false,
   audioPlaying: false,
   sessionId: "",
   confName: "",

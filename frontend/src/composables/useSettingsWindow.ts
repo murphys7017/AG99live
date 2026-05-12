@@ -1,4 +1,5 @@
 import { computed, reactive, ref, watch } from "vue";
+import { listMicrophoneInputDevices } from "../adapter-connection/microphoneDevices";
 import { useDesktopBridge } from "./useDesktopBridge";
 import { DEFAULT_ADAPTER_ADDRESS } from "../adapter-connection/address";
 import {
@@ -15,7 +16,10 @@ export function useSettingsWindow() {
   const desktopScreenshotOnSendEnabled = ref(
     bridge.state.snapshot.desktopScreenshotOnSendEnabled,
   );
+  const microphoneDeviceId = ref(bridge.state.snapshot.microphoneDeviceId);
+  const microphoneDeviceStatus = ref("");
   const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
+  const pttModeEnabled = ref(bridge.state.snapshot.pttModeEnabled);
   const motionEngineSettings = reactive(
     cloneModelEngineSettings(bridge.state.snapshot.motionEngineSettings),
   );
@@ -35,9 +39,23 @@ export function useSettingsWindow() {
   );
 
   watch(
+    () => bridge.state.snapshot.microphoneDeviceId,
+    (nextValue) => {
+      microphoneDeviceId.value = nextValue;
+    },
+  );
+
+  watch(
     () => bridge.state.snapshot.ambientMotionEnabled,
     (nextValue) => {
       ambientMotionEnabled.value = nextValue;
+    },
+  );
+
+  watch(
+    () => bridge.state.snapshot.pttModeEnabled,
+    (nextValue) => {
+      pttModeEnabled.value = nextValue;
     },
   );
 
@@ -106,10 +124,39 @@ export function useSettingsWindow() {
     });
   }
 
+  function applyMicrophoneDevice(): void {
+    bridge.sendCommand({
+      type: "set_microphone_device",
+      deviceId: microphoneDeviceId.value,
+    });
+  }
+
+  async function refreshMicrophoneDevices(): Promise<void> {
+    microphoneDeviceStatus.value = "正在刷新麦克风设备...";
+    try {
+      const devices = await listMicrophoneInputDevices({ requestPermission: true });
+      bridge.sendCommand({ type: "set_microphone_devices", devices });
+      microphoneDeviceStatus.value = devices.length
+        ? `已发现 ${devices.length} 个麦克风设备。`
+        : "没有发现可用的麦克风设备。";
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "麦克风设备刷新失败。";
+      microphoneDeviceStatus.value = `麦克风设备刷新失败：${message}`;
+      console.warn("[SettingsWindow] failed to refresh microphone devices.", error);
+    }
+  }
+
   function applyAmbientMotionEnabled(): void {
     bridge.sendCommand({
       type: "set_ambient_motion_enabled",
       enabled: ambientMotionEnabled.value,
+    });
+  }
+
+  function applyPttModeEnabled(): void {
+    bridge.sendCommand({
+      type: "set_ptt_mode",
+      enabled: pttModeEnabled.value,
     });
   }
 
@@ -137,7 +184,10 @@ export function useSettingsWindow() {
     bridgeState: bridge.state,
     draftAddress,
     desktopScreenshotOnSendEnabled,
+    microphoneDeviceId,
+    microphoneDeviceStatus,
     ambientMotionEnabled,
+    pttModeEnabled,
     motionEngineSettings,
     statusLabel,
     profileEditorButtonLabel,
@@ -152,7 +202,10 @@ export function useSettingsWindow() {
     toggleActionLabWindow,
     toggleProfileEditorWindow,
     applyDesktopScreenshotOnSend,
+    applyMicrophoneDevice,
+    refreshMicrophoneDevices,
     applyAmbientMotionEnabled,
+    applyPttModeEnabled,
     applyMotionEngineSettings,
     resetMotionEngineSettings,
     requestModelProjectionSync,

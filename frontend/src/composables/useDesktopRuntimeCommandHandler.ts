@@ -41,6 +41,15 @@ export function createDesktopRuntimeCommandHandler(
       case "set_desktop_screenshot_on_send":
         deps.adapter.setDesktopScreenshotOnSendEnabled(command.enabled);
         return;
+      case "set_microphone_device":
+        deps.adapter.setMicrophoneDevice(command.deviceId);
+        return;
+      case "set_microphone_devices":
+        deps.adapter.setMicrophoneDevices(command.devices);
+        return;
+      case "refresh_microphone_devices":
+        void deps.adapter.refreshMicrophoneDevices();
+        return;
       case "set_ambient_motion_enabled":
         deps.ambientMotionEnabled.value = command.enabled;
         deps.applyAmbientMotionPreference();
@@ -93,6 +102,9 @@ export function createDesktopRuntimeCommandHandler(
         return;
       case "toggle_mic_capture":
         void deps.adapter.toggleMicrophoneCapture();
+        return;
+      case "set_ptt_mode":
+        deps.adapter.setPttMode(command.enabled);
         return;
       case "preview_motion_plan":
         deps.handlePreviewMotionPlan(command.plan);

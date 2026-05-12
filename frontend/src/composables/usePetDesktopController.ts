@@ -236,14 +236,47 @@ export function usePetDesktopController() {
     await adapter.initialize();
     adapter.connect();
     applyAmbientMotionPreference();
+    installPttKeyboardListeners();
   });
 
   onBeforeUnmount(() => {
+    removePttKeyboardListeners();
     playbackCoordinator.resetPlaybackCoordination();
     modelEngine.stop("unmount");
     detachBridgeListener();
     detachProfileAuthoringBridgeListener();
   });
+
+  // ── Push-to-talk keyboard listener ────────────────────────────────
+
+  function onPttKeyDown(event: KeyboardEvent): void {
+    if (!adapter.state.pttModeEnabled) {
+      return;
+    }
+    // Ctrl activates PTT (ignores on repeated keydown)
+    if (event.key === "Control" && !event.repeat) {
+      void adapter.startPttCapture();
+    }
+  }
+
+  function onPttKeyUp(event: KeyboardEvent): void {
+    if (!adapter.state.pttModeEnabled) {
+      return;
+    }
+    if (event.key === "Control") {
+      void adapter.stopPttCapture();
+    }
+  }
+
+  function installPttKeyboardListeners(): void {
+    window.addEventListener("keydown", onPttKeyDown, { passive: true });
+    window.addEventListener("keyup", onPttKeyUp, { passive: true });
+  }
+
+  function removePttKeyboardListeners(): void {
+    window.removeEventListener("keydown", onPttKeyDown);
+    window.removeEventListener("keyup", onPttKeyUp);
+  }
 
   function showContextMenu(event: MouseEvent): void {
     window.ag99desktop?.showContextMenu({

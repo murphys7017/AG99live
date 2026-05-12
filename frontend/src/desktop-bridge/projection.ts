@@ -3,6 +3,7 @@ import type {
   DesktopBackendHistoryMessage,
   DesktopBackendHistorySummary,
   DesktopHistoryEntry,
+  DesktopMicrophoneDevice,
   DesktopMotionPlaybackRecord,
   DesktopMotionTuningSamplesStatus,
   DesktopMotionTuningSample,
@@ -15,6 +16,8 @@ import type { TurnPlaybackSegment } from "../turn-playback/session.js";
 export interface AdapterRuntimeProjection {
   adapterAddress: string;
   desktopScreenshotOnSendEnabled: boolean;
+  microphoneDeviceId: string;
+  microphoneDevices: DesktopMicrophoneDevice[];
   connectionStatusMessage: string;
   sessionId: string;
   serverWsUrl: string;
@@ -25,6 +28,7 @@ export interface AdapterRuntimeProjection {
   currentTurnId: string | null;
   micRequested: boolean;
   micCapturing: boolean;
+  pttModeEnabled: boolean;
   audioPlaying: boolean;
   historyEntries: DesktopHistoryEntry[];
   backendHistorySummaries: DesktopBackendHistorySummary[];
@@ -39,6 +43,8 @@ export interface AdapterRuntimeProjection {
 export interface AdapterRuntimeProjectionInput {
   address: string;
   desktopScreenshotOnSendEnabled: boolean;
+  microphoneDeviceId: string;
+  microphoneDevices: DesktopMicrophoneDevice[];
   statusMessage: string;
   sessionId: string;
   serverWsUrl: string;
@@ -49,6 +55,7 @@ export interface AdapterRuntimeProjectionInput {
   currentTurnId: string | null;
   micRequested: boolean;
   micCapturing: boolean;
+  pttModeEnabled: boolean;
   isPlayingAudio: boolean;
   historyEntries: DesktopHistoryEntry[];
   backendHistorySummaries: DesktopBackendHistorySummary[];
@@ -88,6 +95,8 @@ export interface DesktopRuntimeSnapshotInput {
 export interface DesktopRuntimeSnapshotOutput {
   adapterAddress: string;
   desktopScreenshotOnSendEnabled: boolean;
+  microphoneDeviceId: string;
+  microphoneDevices: DesktopMicrophoneDevice[];
   ambientMotionEnabled: boolean;
   motionEngineSettings: ModelEngineSettings;
   motionPlaybackRecords: DesktopMotionPlaybackRecord[];
@@ -97,6 +106,7 @@ export interface DesktopRuntimeSnapshotOutput {
   aiState: string;
   micRequested: boolean;
   micCapturing: boolean;
+  pttModeEnabled: boolean;
   audioPlaying: boolean;
   sessionId: string;
   confName: string;
@@ -132,6 +142,8 @@ export function buildAdapterRuntimeProjection(
   return {
     adapterAddress: input.address,
     desktopScreenshotOnSendEnabled: input.desktopScreenshotOnSendEnabled,
+    microphoneDeviceId: input.microphoneDeviceId,
+    microphoneDevices: input.microphoneDevices.map((device) => ({ ...device })),
     connectionStatusMessage: input.statusMessage,
     sessionId: input.sessionId,
     serverWsUrl: input.serverWsUrl,
@@ -143,6 +155,7 @@ export function buildAdapterRuntimeProjection(
     micRequested: input.micRequested,
     micCapturing: input.micCapturing,
     audioPlaying: input.isPlayingAudio,
+    pttModeEnabled: input.pttModeEnabled,
     historyEntries: [...input.historyEntries],
     backendHistorySummaries: input.backendHistorySummaries.map((s) =>
       cloneJson(s),
@@ -220,6 +233,8 @@ export function buildDesktopRuntimeSnapshot(
   return {
     adapterAddress: p.adapterAddress,
     desktopScreenshotOnSendEnabled: p.desktopScreenshotOnSendEnabled,
+    microphoneDeviceId: p.microphoneDeviceId,
+    microphoneDevices: p.microphoneDevices.map((device) => ({ ...device })),
     ambientMotionEnabled: input.ambientMotionEnabled,
     motionEngineSettings: cloneModelEngineSettings(input.motionEngineSettings),
     motionPlaybackRecords: input.motionPlaybackRecords.map((r) =>
@@ -232,6 +247,7 @@ export function buildDesktopRuntimeSnapshot(
     micRequested: p.micRequested,
     micCapturing: p.micCapturing,
     audioPlaying: p.audioPlaying,
+    pttModeEnabled: p.pttModeEnabled,
     sessionId: p.sessionId,
     confName: input.confName,
     lastUpdated: input.lastUpdated,

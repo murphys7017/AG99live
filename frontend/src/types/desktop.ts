@@ -265,6 +265,8 @@ export type DesktopProfileAuthoringCommand = {
 export interface DesktopRuntimeSnapshot {
   adapterAddress: string;
   desktopScreenshotOnSendEnabled: boolean;
+  microphoneDeviceId: string;
+  microphoneDevices: DesktopMicrophoneDevice[];
   ambientMotionEnabled: boolean;
   motionEngineSettings: DesktopMotionEngineSettings;
   motionPlaybackRecords: DesktopMotionPlaybackRecord[];
@@ -274,6 +276,7 @@ export interface DesktopRuntimeSnapshot {
   aiState: string;
   micRequested: boolean;
   micCapturing: boolean;
+  pttModeEnabled: boolean;
   audioPlaying: boolean;
   sessionId: string;
   confName: string;
@@ -301,6 +304,11 @@ export interface DesktopRuntimeSnapshot {
   activeSessionTurnFinished: boolean;
 }
 
+export interface DesktopMicrophoneDevice {
+  deviceId: string;
+  label: string;
+}
+
 export interface DesktopMotionTuningSamplesStatus {
   rootError: string;
   loadError: string;
@@ -310,6 +318,9 @@ export interface DesktopMotionTuningSamplesStatus {
 export type DesktopRuntimeCommand =
   | { type: "set_address"; address: string }
   | { type: "set_desktop_screenshot_on_send"; enabled: boolean }
+  | { type: "set_microphone_device"; deviceId: string }
+  | { type: "set_microphone_devices"; devices: DesktopMicrophoneDevice[] }
+  | { type: "refresh_microphone_devices" }
   | { type: "set_ambient_motion_enabled"; enabled: boolean }
   | { type: "set_motion_engine_settings"; settings: DesktopMotionEngineSettings }
   | { type: "request_model_projection_sync" }
@@ -325,5 +336,6 @@ export type DesktopRuntimeCommand =
   | { type: "send_text"; text: string }
   | { type: "interrupt" }
   | { type: "toggle_mic_capture" }
+  | { type: "set_ptt_mode"; enabled: boolean }
   | { type: "preview_motion_payload"; payload: unknown }
   | { type: "preview_motion_plan"; plan: unknown };

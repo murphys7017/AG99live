@@ -7,7 +7,10 @@ const {
   bridgeState,
   draftAddress,
   desktopScreenshotOnSendEnabled,
+  microphoneDeviceId,
+  microphoneDeviceStatus,
   ambientMotionEnabled,
+  pttModeEnabled,
   motionEngineSettings,
   statusLabel,
   profileEditorButtonLabel,
@@ -22,7 +25,10 @@ const {
   toggleActionLabWindow,
   toggleProfileEditorWindow,
   applyDesktopScreenshotOnSend,
+  applyMicrophoneDevice,
+  refreshMicrophoneDevices,
   applyAmbientMotionEnabled,
+  applyPttModeEnabled,
   applyMotionEngineSettings,
   resetMotionEngineSettings,
   requestModelProjectionSync,
@@ -71,6 +77,46 @@ onMounted(() => {
         <p class="settings-card__hint">
           只需要填写一个适配器地址，WS 和 HTTP 会在内部自动派生。
           {{ bridgeState.snapshot.connectionStatusMessage }}
+        </p>
+      </article>
+
+      <article class="settings-card">
+        <div class="settings-card__header">
+          <div>
+            <p class="settings-card__eyebrow">语音输入</p>
+            <h2>麦克风设备</h2>
+          </div>
+          <span class="settings-card__badge">
+            {{ bridgeState.snapshot.micCapturing ? "active" : "idle" }}
+          </span>
+        </div>
+
+        <select
+          v-model="microphoneDeviceId"
+          class="settings-card__input action-preview__select"
+          @change="applyMicrophoneDevice"
+        >
+          <option value="">系统默认麦克风</option>
+          <option
+            v-for="device in bridgeState.snapshot.microphoneDevices"
+            :key="device.deviceId"
+            :value="device.deviceId"
+          >
+            {{ device.label }}
+          </option>
+        </select>
+
+        <div class="settings-card__actions">
+          <button
+            type="button"
+            class="settings-card__button settings-card__button--ghost"
+            @click="void refreshMicrophoneDevices()"
+          >
+            刷新设备
+          </button>
+        </div>
+        <p v-if="microphoneDeviceStatus" class="settings-card__hint">
+          {{ microphoneDeviceStatus }}
         </p>
       </article>
 
@@ -160,6 +206,35 @@ onMounted(() => {
 
         <p class="settings-card__hint">
           关闭后仍然保留对话动作、动作预览、口型同步和手动触发的 motion。
+        </p>
+      </article>
+
+      <article class="settings-card">
+        <div class="settings-card__header">
+          <div>
+            <p class="settings-card__eyebrow">收音</p>
+            <h2>按键说话模式</h2>
+          </div>
+          <span class="settings-card__badge">
+            {{ pttModeEnabled ? "enabled" : "disabled" }}
+          </span>
+        </div>
+
+        <label class="settings-toggle">
+          <input
+            v-model="pttModeEnabled"
+            class="settings-toggle__input"
+            type="checkbox"
+            @change="applyPttModeEnabled"
+          />
+          <span class="settings-toggle__control" aria-hidden="true"></span>
+          <span class="settings-toggle__copy">
+            开启后麦克风默认关闭。长按 Ctrl 键开始收音，松开 Ctrl 停止收音。关闭后恢复手动开关麦克风。
+          </span>
+        </label>
+
+        <p class="settings-card__hint">
+          按键说话模式下，"开始/停止麦克风"按钮仍可手动接管。切换模式会关闭当前收音。
         </p>
       </article>
 

@@ -104,6 +104,8 @@ export function usePetRuntimeSnapshotPublisher(
       const adapterProjection = buildAdapterRuntimeProjection({
         address: a.address,
         desktopScreenshotOnSendEnabled: a.desktopScreenshotOnSendEnabled,
+        microphoneDeviceId: a.microphoneDeviceId,
+        microphoneDevices: a.microphoneDevices.map((device) => ({ ...device })),
         statusMessage: a.statusMessage,
         sessionId: a.sessionId || options.modelSyncState.sessionId,
         serverWsUrl: a.serverInfo?.ws_url ?? "",
@@ -115,6 +117,7 @@ export function usePetRuntimeSnapshotPublisher(
         micRequested: a.micRequested,
         micCapturing: a.micCapturing,
         isPlayingAudio: a.isPlayingAudio,
+        pttModeEnabled: a.pttModeEnabled,
         historyEntries: [...a.historyEntries],
         backendHistorySummaries: [...a.backendHistorySummaries],
         backendHistoryEntries: [...a.backendHistoryEntries],
