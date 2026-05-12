@@ -24,7 +24,12 @@ export interface AudioBridgeSessionStore {
         messageId: string;
         turnId: string | null;
         orchestrationId: string | null;
-        audio: { terminal: string };
+        audio: {
+          url: string | null;
+          released: boolean;
+          started: boolean;
+          terminal: string;
+        };
       }
     >;
   }>;
@@ -94,7 +99,9 @@ export function markMissingAudiosForTurn(
       if (
         segment
         && segment.audio.terminal === "idle"
-        && !deps.state.pendingAudios.has(segment.messageId)
+        && !segment.audio.url
+        && !segment.audio.released
+        && !segment.audio.started
         && matchesPlaybackGroup(segment.turnId, segment.orchestrationId, turnId, orchestrationId)
       ) {
         markAudioPlaybackTerminal(

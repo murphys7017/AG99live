@@ -704,8 +704,7 @@ function buildDispatchDeps(): InboundDispatchDeps {
     findActiveAudioSegment: () => findActiveAudioSegment(),
     normalizeMotionPayload: (payload) => normalizeMotionPayload(payload),
     applyInboundMotionPayload: (ctx, envelope) =>
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      applyInboundMotionPayload(ctx as any, envelope),
+      applyInboundMotionPayload(ctx, envelope),
     startMicrophoneCapture: () => startMicrophoneCapture(),
     reportedProtocolWarnings,
     buildInboundEventContext: () => buildInboundEventContext(),

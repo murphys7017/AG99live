@@ -392,6 +392,43 @@ function testSynthFinishedMarksMissingSegmentAudioAbsent(): void {
   });
 }
 
+function testSynthFinishedDoesNotMarkReleasedAudioAbsent(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-released-audio", "orch-released-audio");
+    sessionStore.markAudioReceived(
+      "orch-released-audio",
+      "turn-released-audio",
+      "http://localhost/audio.wav",
+      "m-released-audio",
+    );
+    sessionStore.markAudioStarted(
+      "orch-released-audio",
+      "turn-released-audio",
+      "m-released-audio",
+      100,
+      1000,
+    );
+    assert.equal(adapter.state.pendingAudios.size, 0);
+
+    socket.emitMessage(JSON.stringify({
+      type: "control.synth_finished",
+      version: "v2",
+      message_id: "m-synth-finished-released-audio",
+      timestamp: "2026-05-08T00:00:02.000Z",
+      session_id: "session-released-audio",
+      turn_id: "turn-released-audio",
+      orchestration_id: "orch-released-audio",
+      source: "backend",
+      payload: {},
+    }));
+
+    const session = sessionStore.getSession("orch-released-audio");
+    const segment = session?.segments.get("m-released-audio");
+    assert.equal(segment?.audio.released, true);
+    assert.notEqual(segment?.audio.terminal, "absent");
+  });
+}
+
 function testTurnFinishedDoesNotMarkMissingSegmentAudioAbsent(): void {
   withConnectedAdapter(({ socket, sessionStore }) => {
     sendTurnStarted(socket, "turn-finished", "orch-finished");
@@ -538,6 +575,7 @@ function run(): void {
   testFallbackIdentityWritesCurrentSessionSegment();
   testTurnStartedResetsPendingMaps();
   testSynthFinishedMarksMissingSegmentAudioAbsent();
+  testSynthFinishedDoesNotMarkReleasedAudioAbsent();
   testTurnFinishedDoesNotMarkMissingSegmentAudioAbsent();
   testMotionFallbackDoesNotCreateAnonymousSession();
   testInvalidMotionDoesNotRewritePreviousSegment();

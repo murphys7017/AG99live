@@ -12,7 +12,10 @@ import type {
 } from "../types/protocol.js";
 import type { InboundAdapterEvent, InboundEventMappingContext } from "./inboundEvents.js";
 import { mapInboundEnvelopeToEvent } from "./inboundEvents.js";
-import type { InboundMotionApplyResult } from "./inboundMotion.js";
+import type {
+  InboundMotionApplyResult,
+  InboundMotionContext,
+} from "./inboundMotion.js";
 import type { PendingAssistantTextItem, PendingAudioItem } from "./playbackReleaseQueue.js";
 import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
 
@@ -92,7 +95,10 @@ export interface InboundDispatchDeps {
   // motion
   findActiveAudioSegment: () => { turnId: string | null; orchestrationId: string | null; messageId: string } | null;
   normalizeMotionPayload: (payload: unknown) => { ok: true; payload: NormalizedMotionPayload } | { ok: false };
-  applyInboundMotionPayload: (ctx: Record<string, unknown>, envelope: ProtocolEnvelope<Record<string, unknown>>) => InboundMotionApplyResult;
+  applyInboundMotionPayload: (
+    ctx: InboundMotionContext,
+    envelope: ProtocolEnvelope<Record<string, unknown>>,
+  ) => InboundMotionApplyResult;
   // mic
   startMicrophoneCapture: () => Promise<boolean>;
   // protocol warnings
@@ -445,13 +451,12 @@ export async function dispatchInboundEvent(
       return;
     case "engine_motion_payload": {
       const activeAudioSegment = deps.findActiveAudioSegment();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = deps.applyInboundMotionPayload({
         state: deps.state,
         activeAudioTurnId: activeAudioSegment?.turnId ?? null,
         activeAudioOrchestrationId: activeAudioSegment?.orchestrationId ?? null,
         pushHistory: deps.pushHistory,
-      } as any, event.envelope);
+      }, event.envelope);
       if (!result.accepted) {
         return;
       }
