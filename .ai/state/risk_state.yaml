@@ -1,5 +1,5 @@
 risk:
-  current_level: unknown
+  current_level: low
   scope_expansion_detected: false
   architecture_risk_detected: false
   destructive_action_pending: false

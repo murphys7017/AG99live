@@ -2,14 +2,12 @@ architecture:
   stability: stable
   pending_breaking_change: false
   boundary_changes:
-    - completed: extract inboundDispatcher.ts from useAdapterConnection.ts
-    - completed: extract projection.ts from usePetRuntimeSnapshotPublisher
-    - completed: extract useDesktopRuntimeCommandHandler from usePetDesktopController
-    - completed: remove legacy compatibility paths (ephemeral session, old AstrBot imports, legacy preview, 0..1 hint)
+    - completed: extract inline motion parsing/validation from TurnCoordinator to motion/inline_motion.py
+    - completed: TurnCoordinator reduced from ~1237 to ~1026 lines
+    - completed: dataflow review of extraction confirms all 4 paths equivalent
+    - completed: governance compliance audit confirms no violations
   notes:
-    - VibeEngineeringCybernetics v0.1.2 governance runtime deployed under .ai/
-    - VEC replaces older agent.md with AGENTS.md entry point
-    - docs structure reorganized with architecture/ design/ api/ runtime/ subdirectories
-    - all frontend (7 suites) and backend (146) tests pass
-    - adapter-connection/ now has inboundDispatcher.ts (dispatch + 11 handlers, 472 lines)
-    - useAdapterConnection.ts reduced from ~1310 to ~1042 lines
+    - Backend motion/ module now contains inline_motion.py (inline animation parsing, schema validation, contract building)
+    - TurnCoordinator retains core turn lifecycle (handle_msg, emit_message_chain, close_turn_output_queue, finalize_turn)
+    - All extracted functions are pure functions with no class state dependency
+    - 146 tests pass, no regression

@@ -1,6 +1,6 @@
 current_task:
   type: review
-  scope: post-refactor health check and VEC governance integration
-  risk: low
+  scope: governance compliance audit + dataflow review of TurnCoordinator extraction
+  risk: medium
   phase: completed
   owner: agent
