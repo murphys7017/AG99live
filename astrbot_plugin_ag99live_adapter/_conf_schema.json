@@ -38,7 +38,7 @@
     "_special": "select_provider_stt"
   },
   "motion_analysis_provider_id": {
-    "description": "用于 Live2D motion 语义增强分析的聊天 Provider。留空时跟随当前 AstrBot 会话聊天模型。",
+    "description": "基础动作库 LLM 严格筛选使用的聊天 Provider。留空时跟随当前 AstrBot 会话聊天模型。注意：独立的回复后实时动作生成已移除，动作仅由内联 <@anim> 标签和交互中间件提供。",
     "type": "string",
     "default": "",
     "_special": "select_provider"
@@ -74,7 +74,7 @@
     "default": 96
   },
   "motion_generation_mode": {
-    "description": "动作生成链路。inline_first：向主模型注入 `<@anim>` 契约并优先解析内联动作；split_after_reply：主模型只回复文本，回复完成后用动作模型生成 Live2D 参数。",
+    "description": "动作生成链路。inline_first：向主模型注入 `<@anim>` 契约并优先解析内联动作；split_after_reply：主模型只回复文本，动作需由交互中间件 client_objects 提供。注：独立回复后二次 motion 生成已移除。",
     "type": "string",
     "default": "inline_first",
     "options": [

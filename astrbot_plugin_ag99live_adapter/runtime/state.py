@@ -78,9 +78,6 @@ class RuntimeState:
         self.action_llm_filter_chunk_max_candidates = 96
         self.motion_generation_mode = "inline_first"
         self.enable_inline_motion_contract = True
-        self.enable_realtime_motion_plan = True
-        self.realtime_motion_mode = "realtime"
-        self.realtime_motion_timeout_seconds = 8.0
         self.realtime_motion_fewshot_enabled = True
         self.realtime_motion_fewshot_count = 4
         self.motion_tuning_reference_examples: list[dict[str, Any]] = []
@@ -212,16 +209,6 @@ class RuntimeState:
         )
         self.enable_inline_motion_contract = bool(
             _plugin_config_get(self.plugin_config, "enable_inline_motion_contract", True)
-        )
-        self.enable_realtime_motion_plan = bool(
-            _plugin_config_get(self.plugin_config, "enable_realtime_motion_plan", True)
-        )
-        self.realtime_motion_mode = str(
-            _plugin_config_get(self.plugin_config, "realtime_motion_mode", "realtime")
-        ).strip() or "realtime"
-        self.realtime_motion_timeout_seconds = max(
-            float(_plugin_config_get(self.plugin_config, "realtime_motion_timeout_seconds", 8.0)),
-            1.0,
         )
         self.realtime_motion_fewshot_enabled = bool(
             _plugin_config_get(self.plugin_config, "realtime_motion_fewshot_enabled", True)
