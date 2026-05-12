@@ -91,6 +91,10 @@ import { useModelSync } from "./useModelSync.js";
 import { useAdapterHistory } from "./useAdapterHistory.js";
 import { normalizeMotionPayload } from "../model-engine/normalize.js";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore.js";
+import {
+  dispatchInboundEvent as dispatchInboundEventToDeps,
+  type InboundDispatchDeps,
+} from "../adapter-connection/inboundDispatcher.js";
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "absent";
@@ -583,11 +587,25 @@ async function stopMicrophoneCapture(reason = "manual_stop"): Promise<boolean> {
   return true;
 }
 
+function logProtocolError(
+  key: string,
+  message: string,
+  envelope?: ProtocolEnvelope<unknown>,
+): void {
+  state.lastError = message;
+  state.statusMessage = message;
+  if (!reportedProtocolWarnings.has(key)) {
+    pushHistory("error", message);
+    reportedProtocolWarnings.add(key);
+  }
+  console.warn("[Connection] protocol error.", message, envelope);
+}
+
 async function handleSocketMessage(rawData: string): Promise<void> {
   const parsed = parseInboundEnvelope(rawData);
   if (!parsed.ok) {
     if (parsed.code === "version_mismatch") {
-      reportProtocolError(
+      logProtocolError(
         parsed.warningKey ?? "version:empty",
         parsed.message,
         parsed.envelope,
@@ -644,336 +662,65 @@ function findActiveAudioSegment(): {
 async function dispatchInboundEvent(
   event: InboundAdapterEvent,
 ): Promise<void> {
-  switch (event.kind) {
-    case "server_info":
-      applyServerInfoMessage(event.envelope);
-      return;
-    case "model_sync":
-      modelSyncAdapter?.applyUnknownMessage(
-        rewriteModelSyncEnvelope(event.envelope),
-      );
-      state.statusMessage = "模型能力已同步。";
-      pushHistory("system", state.statusMessage);
-      return;
-    case "semantic_axis_profile_saved":
-      applySemanticAxisProfileSaved(event.envelope);
-      return;
-    case "semantic_axis_profile_save_failed":
-      applySemanticAxisProfileSaveFailed(event.envelope);
-      return;
-    case "motion_tuning_samples_state":
-      motionTuningAdapter?.applyMotionTuningSamplesState(event.envelope);
-      return;
-    case "history_list":
-      historyAdapter?.applyHistoryList(event.envelope);
-      return;
-    case "history_created":
-      historyAdapter?.applyHistoryCreated(event.envelope);
-      return;
-    case "history_data":
-      historyAdapter?.applyHistoryData(event.envelope);
-      return;
-    case "history_deleted":
-      historyAdapter?.applyHistoryDeleted(event.envelope);
-      return;
-    case "output_text":
-      applyOutputText(event);
-      return;
-    case "output_audio":
-      await applyOutputAudio(event);
-      return;
-    case "output_image":
-      applyOutputImage(event.envelope);
-      return;
-    case "output_transcription":
-      applyOutputTranscription(event.envelope);
-      return;
-    case "turn_started":
-      state.currentTurnId = event.turnId;
-      state.currentOrchestrationId = event.orchestrationId;
-      sessionStore?.setActiveSession(state.currentOrchestrationId, state.currentTurnId);
-      sessionStore?.markTurnStarted(state.currentOrchestrationId, state.currentTurnId);
-      resetAudioPlaybackTerminal();
-      state.pendingAssistantTexts.clear();
-      state.pendingAudios.clear();
-      state.assistantTextDeliveryTurnId = null;
-      state.assistantTextDeliveryOrchestrationId = null;
-      state.turnFinishedTurnId = null;
-      state.turnFinishedOrchestrationId = null;
-      state.turnFinishedSuccess = true;
-      state.turnFinishedReason = "";
-      state.statusMessage = "后端正在处理这一轮对话。";
-      pushHistory("system", state.statusMessage);
-      return;
-    case "turn_finished":
-      applyTurnFinished(event);
-      return;
-    case "interrupt":
-      stopAudioPlayback();
-      resetAudioPlaybackTerminal();
-      sessionStore?.markInterrupt(event.orchestrationId, event.turnId);
-      state.currentTurnId = null;
-      state.currentOrchestrationId = null;
-      state.statusMessage = "当前轮次已中断。";
-      pushHistory("system", state.statusMessage);
-      return;
-    case "start_mic":
-      state.micRequested = true;
-      state.statusMessage = "后端已请求启动麦克风，准备自动收音。";
-      pushHistory("system", state.statusMessage);
-      void startMicrophoneCapture();
-      return;
-    case "synth_finished":
-      sessionStore?.markSynthFinished(event.orchestrationId, event.turnId);
-      markMissingAudiosForTurn(
-        event.turnId,
-        event.orchestrationId,
-        "synth_finished_without_audio_playback",
-      );
-      state.statusMessage =
-        state.isPlayingAudio || hasPendingAudioForTurn(event.turnId, event.orchestrationId)
-          ? "语音已准备同步播放。"
-          : "语音合成已完成。";
-      pushHistory("system", state.statusMessage);
-      return;
-    case "control_error":
-      applyControlError(event.envelope);
-      return;
-    case "protocol_error":
-      reportProtocolError(
-        event.warningKey,
-        event.error.message,
-        event.envelope,
-      );
-      return;
-    case "engine_motion_payload": {
-      const activeAudioSegment = findActiveAudioSegment();
-      const result = applyInboundMotionPayload({
-        state,
-        activeAudioTurnId: activeAudioSegment?.turnId ?? null,
-        activeAudioOrchestrationId: activeAudioSegment?.orchestrationId ?? null,
-        pushHistory,
-      }, event.envelope);
-      if (!result.accepted) {
-        return;
-      }
-      const normalized = normalizeMotionPayload(result.rawPlan);
-      if (normalized.ok) {
-        sessionStore?.markMotionReceived(
-          event.orchestrationId,
-          event.turnId,
-          normalized.payload,
-          event.messageId,
-        );
-      }
-      return;
-    }
-    case "unhandled":
-      reportUnhandledInboundEnvelope(event.envelope);
-      return;
-  }
+  await dispatchInboundEventToDeps(buildDispatchDeps(), event);
 }
 
-function applyServerInfoMessage(envelope: ProtocolEnvelope<SystemServerInfoPayload>): void {
-  state.serverInfo = {
-    ...envelope.payload,
-    ws_url: rewriteSocketUrl(envelope.payload.ws_url),
-    http_base_url: rewriteHttpUrl(envelope.payload.http_base_url),
+function buildDispatchDeps(): InboundDispatchDeps {
+  return {
+    state,
+    sessionStore: sessionStore
+      ? {
+          setActiveSession: (orchId, tId) => sessionStore?.setActiveSession(orchId, tId),
+          markTurnStarted: (orchId, tId) => sessionStore?.markTurnStarted(orchId, tId),
+          markSynthFinished: (orchId, tId) => sessionStore?.markSynthFinished(orchId, tId),
+          markTurnFinished: (orchId, tId, success, reason) => sessionStore?.markTurnFinished(orchId, tId, success, reason),
+          markInterrupt: (orchId, tId) => sessionStore?.markInterrupt(orchId, tId),
+          markTextReceived: (orchId, tId, text, msgId, mode) => sessionStore?.markTextReceived(orchId, tId, text, msgId, mode as "replace" | "append"),
+          markTextDelivered: (orchId, tId, msgId) => sessionStore?.markTextDelivered(orchId, tId, msgId),
+          markAudioReceived: (orchId, tId, url, msgId) => sessionStore?.markAudioReceived(orchId, tId, url, msgId),
+          markAudioTerminal: (orchId, tId, terminal, msgId, reason) => sessionStore?.markAudioTerminal(orchId, tId, terminal as "completed" | "failed" | "absent", msgId, reason),
+          markMotionReceived: (orchId, tId, payload, msgId) => sessionStore?.markMotionReceived(orchId, tId, payload, msgId),
+          ensureSegment: (orchId, tId, msgId) => sessionStore!.ensureSegment(orchId, tId, msgId),
+          getSessions: () => sessionStore?.getSessions() ?? [],
+        }
+      : undefined,
+    pushHistory: pushHistory as (role: string, text: string) => void,
+    modelSyncAdapter: modelSyncAdapter
+      ? { applyUnknownMessage: (env) => modelSyncAdapter!.applyUnknownMessage(env) }
+      : null,
+    historyAdapter: historyAdapter
+      ? {
+          applyHistoryList: (env) => historyAdapter!.applyHistoryList(env),
+          applyHistoryCreated: (env) => historyAdapter!.applyHistoryCreated(env),
+          applyHistoryData: (env) => historyAdapter!.applyHistoryData(env),
+          applyHistoryDeleted: (env) => historyAdapter!.applyHistoryDeleted(env),
+        }
+      : null,
+    motionTuningAdapter: motionTuningAdapter
+      ? { applyMotionTuningSamplesState: (env) => motionTuningAdapter!.applyMotionTuningSamplesState(env) }
+      : null,
+    rewriteModelSyncEnvelope: (env) => rewriteModelSyncEnvelopeWithActiveHost(env as Parameters<typeof rewriteModelSyncEnvelopeWithActiveHost>[0], state.activeWsAddress),
+    rewriteSocketUrl: (url) => rewriteSocketUrlWithActiveHost(url, state.activeWsAddress),
+    rewriteHttpUrl: (url) => rewriteHttpUrlWithActiveHost(url, state.activeWsAddress),
+    stopAudioPlayback: () => stopAudioPlayback(),
+    resetAudioPlaybackTerminal: () => resetAudioPlaybackTerminal(),
+    markAudioPlaybackTerminal: (terminalState, turnId, orchestrationId, reason, messageId) =>
+      markAudioPlaybackTerminal(terminalState as "completed" | "failed" | "absent", turnId, orchestrationId, reason, messageId),
+    hasPendingAudioForTurn: (turnId, orchestrationId) => hasPendingAudioForTurn(turnId, orchestrationId),
+    markMissingAudiosForTurn: (turnId, orchestrationId, reason) => markMissingAudiosForTurn(turnId, orchestrationId, reason),
+    queuePendingAssistantTextForPlayback: (map, text, turnId, orchestrationId, messageId) =>
+      queuePendingAssistantTextForPlayback(map, text, turnId, orchestrationId, messageId),
+    queuePendingAudioForPlayback: (map, url, turnId, orchestrationId, messageId) =>
+      queuePendingAudioForPlayback(map, url, turnId, orchestrationId, messageId),
+    findActiveAudioSegment: () => findActiveAudioSegment(),
+    normalizeMotionPayload: (payload) => normalizeMotionPayload(payload),
+    applyInboundMotionPayload: (ctx, envelope) =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      applyInboundMotionPayload(ctx as any, envelope),
+    startMicrophoneCapture: () => startMicrophoneCapture(),
+    reportedProtocolWarnings,
+    buildInboundEventContext: () => buildInboundEventContext(),
   };
-  state.micRequested = state.serverInfo.auto_start_mic;
-  state.statusMessage = "适配器已连接，等待模型同步。";
-  pushHistory("system", "收到后端运行信息。");
-  if (state.serverInfo.auto_start_mic) {
-    void startMicrophoneCapture();
-  }
-}
-
-function applyOutputText(
-  event: Extract<InboundAdapterEvent, { kind: "output_text" }>,
-): void {
-  state.currentTurnId = event.turnId;
-  state.currentOrchestrationId = event.orchestrationId;
-  const text = event.text;
-  if (text) {
-    queueAssistantTextForPlayback(
-      text,
-      event.turnId,
-      event.orchestrationId,
-      event.messageId,
-    );
-    sessionStore?.markTextReceived(
-      event.orchestrationId,
-      event.turnId,
-      text,
-      event.messageId,
-      "replace",
-    );
-  }
-  state.lastError = "";
-  state.statusMessage = text ? "已收到文本回复，等待同步播放。" : "已收到空文本回复。";
-}
-
-async function applyOutputAudio(
-  event: Extract<InboundAdapterEvent, { kind: "output_audio" }>,
-): Promise<void> {
-  state.currentTurnId = event.turnId;
-  state.currentOrchestrationId = event.orchestrationId;
-  if (event.text) {
-    const existingText = sessionStore
-      ?.ensureSegment(event.orchestrationId, event.turnId, event.messageId)
-      .text.content;
-    if (!existingText) {
-      queueAssistantTextForPlayback(
-        event.text,
-        event.turnId,
-        event.orchestrationId,
-        event.messageId,
-      );
-      sessionStore?.markTextReceived(
-        event.orchestrationId,
-        event.turnId,
-        event.text,
-        event.messageId,
-        "replace",
-      );
-    }
-  }
-
-  if (!event.audioUrl) {
-    state.statusMessage = "收到音频回复占位，未提供可播放地址。";
-    pushHistory("system", state.statusMessage);
-    markAudioPlaybackTerminal(
-      "failed",
-      event.turnId,
-      event.orchestrationId,
-      "missing_audio_url",
-      event.messageId,
-    );
-    return;
-  }
-
-  const resolvedUrl = rewriteHttpUrl(event.audioUrl);
-  queueAudioForPlayback(
-    resolvedUrl,
-    event.turnId,
-    event.orchestrationId,
-    event.messageId,
-  );
-  sessionStore?.markAudioReceived(event.orchestrationId, event.turnId, resolvedUrl, event.messageId);
-}
-
-function applyOutputImage(envelope: ProtocolEnvelope<OutputImagePayload>): void {
-  state.lastImageCount = envelope.payload.images.length;
-  state.statusMessage = `收到 ${envelope.payload.images.length} 张图片回复。`;
-  pushHistory("system", state.statusMessage);
-}
-
-function applyOutputTranscription(
-  envelope: ProtocolEnvelope<OutputTranscriptionPayload>,
-): void {
-  const text = envelope.payload.text.trim();
-  if (text) {
-    state.lastTranscription = text;
-    state.statusMessage = "已收到语音转写。";
-    pushHistory("transcription", text);
-  }
-}
-
-function applyTurnFinished(
-  event: Extract<InboundAdapterEvent, { kind: "turn_finished" }>,
-): void {
-  state.turnFinishedTurnId = event.turnId;
-  state.turnFinishedOrchestrationId = event.orchestrationId;
-  state.turnFinishedSuccess = event.success;
-  state.turnFinishedReason = event.reason;
-  sessionStore?.markTurnFinished(
-    state.turnFinishedOrchestrationId,
-    state.turnFinishedTurnId,
-    state.turnFinishedSuccess,
-    state.turnFinishedReason,
-  );
-
-  if (event.success) {
-    state.statusMessage = "本轮对话已完成。";
-    state.lastError = "";
-    pushHistory("system", state.statusMessage);
-    return;
-  }
-
-  state.statusMessage = event.reason
-    ? `本轮结束：${event.reason}`
-    : "本轮对话未正常完成。";
-  pushHistory("system", state.statusMessage);
-}
-
-function applyControlError(envelope: ProtocolEnvelope<ControlErrorPayload>): void {
-  state.lastError = envelope.payload.message;
-  state.statusMessage = envelope.payload.message;
-  pushHistory("error", envelope.payload.message);
-}
-
-function applySemanticAxisProfileSaved(
-  envelope: ProtocolEnvelope<SystemSemanticAxisProfileSavedPayload>,
-): void {
-  state.latestSemanticAxisProfileSaveResult = {
-    requestId: envelope.payload.request_id,
-    ok: true,
-    modelName: envelope.payload.model_name,
-    profileId: envelope.payload.profile_id,
-    revision: envelope.payload.revision,
-    sourceHash: envelope.payload.source_hash,
-    savedAt: envelope.payload.saved_at,
-    receivedAt: new Date().toISOString(),
-  };
-  state.lastError = "";
-  state.statusMessage = `主轴配置已保存到 revision ${envelope.payload.revision}。`;
-  pushHistory("system", state.statusMessage);
-}
-
-function applySemanticAxisProfileSaveFailed(
-  envelope: ProtocolEnvelope<SystemSemanticAxisProfileSaveFailedPayload>,
-): void {
-  state.latestSemanticAxisProfileSaveResult = {
-    requestId: envelope.payload.request_id,
-    ok: false,
-    modelName: envelope.payload.model_name,
-    profileId: envelope.payload.profile_id,
-    expectedRevision: envelope.payload.expected_revision,
-    errorCode: envelope.payload.error_code,
-    message: envelope.payload.message,
-    receivedAt: new Date().toISOString(),
-  };
-  state.lastError = envelope.payload.message;
-  state.statusMessage = `主轴配置保存失败：${envelope.payload.message}`;
-  pushHistory("error", state.statusMessage);
-}
-
-function reportProtocolError(
-  key: string,
-  message: string,
-  envelope?: ProtocolEnvelope<unknown>,
-): void {
-  state.lastError = message;
-  state.statusMessage = message;
-  if (!reportedProtocolWarnings.has(key)) {
-    pushHistory("error", message);
-    reportedProtocolWarnings.add(key);
-  }
-  console.warn("[Connection] protocol error.", message, envelope);
-}
-
-function reportUnhandledInboundEnvelope(
-  envelope: ProtocolEnvelope<unknown>,
-): void {
-  const key = `type:${envelope.type}`;
-  const message = `收到未接入的协议消息 ${envelope.type}。`;
-  state.lastError = "";
-  state.statusMessage = message;
-  if (!reportedProtocolWarnings.has(key)) {
-    pushHistory("system", message);
-    reportedProtocolWarnings.add(key);
-  }
-  console.warn("[Connection] unhandled inbound protocol message.", envelope.type, envelope);
 }
 
 function updateAssistantText(text: string, turnId: string | null): void {
