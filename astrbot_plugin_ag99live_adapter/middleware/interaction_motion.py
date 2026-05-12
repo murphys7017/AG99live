@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from astrbot.api import logger
+from astrbot.core.interaction import (
+    InteractionResultContribution,
+    get_interaction_decision as get_interaction_reply_plan,
+)
+from astrbot.core.prompt import PromptExtension
 
 from ..motion.output_sanitizer import sanitize_assistant_output_text
 from ..motion.realtime_motion_plan import resolve_selected_semantic_axis_profile
@@ -12,21 +17,6 @@ from ..prompts.motion_selector import (
     profile_prompt_axes,
     resolve_motion_prompt_instruction,
 )
-
-try:
-    from astrbot.core.interaction import (
-        InteractionResultContribution,
-        get_interaction_decision as get_interaction_reply_plan,
-    )
-except Exception:  # pragma: no cover - compatibility with older AstrBot builds
-    InteractionResultContribution = None
-    get_interaction_reply_plan = None
-
-try:
-    from astrbot.core.prompt import PromptExtension
-except Exception:  # pragma: no cover - compatibility with older AstrBot builds
-    PromptExtension = None
-
 
 @dataclass(slots=True)
 class _MotionRuntimeBundle:
@@ -113,9 +103,6 @@ class AG99liveMotionPromptContributor:
     async def collect(self, event, plugin_context, view):
         del plugin_context
 
-        if PromptExtension is None:
-            return None
-
         bundle = _resolve_motion_runtime_bundle(event)
         if bundle is None:
             return None
@@ -164,7 +151,7 @@ class AG99liveMotionResultContributor:
         del plugin_context
 
         attempt = _schedule_motion_from_interaction_result(event, view)
-        if attempt is None or InteractionResultContribution is None:
+        if attempt is None:
             return None
 
         client_objects = []
@@ -203,20 +190,12 @@ def register_ag99live_interaction_contributors(context: Any) -> None:
         remove_result("astrbot_plugin_ag99live_adapter.middleware")
 
     register_prompt = getattr(context, "register_interaction_prompt_contributor", None)
-    if callable(register_prompt) and PromptExtension is not None:
+    if callable(register_prompt):
         register_prompt(AG99liveMotionPromptContributor())
-    elif callable(register_prompt):
-        logger.warning(
-            "AG99live interaction prompt contributor skipped because PromptExtension is unavailable."
-        )
 
     register_result = getattr(context, "register_interaction_result_contributor", None)
-    if callable(register_result) and InteractionResultContribution is not None:
+    if callable(register_result):
         register_result(AG99liveMotionResultContributor())
-    elif callable(register_result):
-        logger.warning(
-            "AG99live interaction result contributor skipped because InteractionResultContribution is unavailable."
-        )
 
 
 def _resolve_motion_runtime_bundle(event: Any) -> _MotionRuntimeBundle | None:
@@ -334,14 +313,7 @@ def _normalize_plugin_hint_axes(
 def _coerce_plugin_hint_axis_value(raw_value: float, axis: dict[str, Any]) -> float:
     min_value, max_value = _resolve_axis_value_range(axis)
 
-    # Backward-compatible form: 0..1 values are treated as normalized range
-    # positions because the first middleware hint format used 0.5 as neutral.
-    if 0.0 <= raw_value <= 1.0:
-        value = min_value + (max_value - min_value) * raw_value
-    else:
-        value = raw_value
-
-    clamped = max(min_value, min(max_value, value))
+    clamped = max(min_value, min(max_value, raw_value))
     return round(clamped, 4)
 
 
@@ -693,17 +665,12 @@ def _resolve_interaction_reply_plan_snapshot(
     event: Any,
     view: Any,
 ) -> _InteractionReplyPlanSnapshot | None:
-    if callable(get_interaction_reply_plan):
-        try:
-            reply_plan = get_interaction_reply_plan(event)
-        except Exception:  # pragma: no cover - compatibility fallback
-            reply_plan = None
-        snapshot = _coerce_interaction_reply_plan_snapshot(
-            reply_plan,
-            source="event_turn_state",
-        )
-        if snapshot is not None:
-            return snapshot
+    snapshot = _coerce_interaction_reply_plan_snapshot(
+        get_interaction_reply_plan(event),
+        source="event_turn_state",
+    )
+    if snapshot is not None:
+        return snapshot
 
     snapshot = _coerce_interaction_reply_plan_snapshot(
         _call_event_method(event, "get_extra", "_interaction_decision", None),

@@ -1016,14 +1016,6 @@ def test_emit_message_chain_uses_raw_reply_text_override_for_inline_extraction(
 
     coordinator._send_json = fake_send_json
 
-    scheduled: dict[str, object] = {}
-
-    def fake_schedule_realtime_motion_plan_preview(*, reply_text: str, origin_turn_id: str | None = None):
-        scheduled["reply_text"] = reply_text
-        scheduled["origin_turn_id"] = origin_turn_id
-
-    coordinator._schedule_realtime_motion_plan_preview = fake_schedule_realtime_motion_plan_preview
-
     inline_broadcast: dict[str, object] = {}
 
     async def fake_broadcast_motion_payload(**kwargs):
@@ -1054,7 +1046,6 @@ def test_emit_message_chain_uses_raw_reply_text_override_for_inline_extraction(
     assert inline_broadcast.get("motion_payload") == _build_valid_motion_intent()
     assert inline_broadcast.get("mode") == "inline"
     assert inline_broadcast.get("turn_id") == "turn-inline-override"
-    assert "reply_text" not in scheduled
     assert sent_payloads
     output_text_payload = sent_payloads[0]
     assert output_text_payload.get("type") == "output.text"

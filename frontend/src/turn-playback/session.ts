@@ -116,7 +116,6 @@ function normalizeId(value: unknown): string {
  * Priority:
  *   1. orch:<orchestrationId>
  *   2. turn:<turnId>
- *   3. ""  (caller must supply an ephemeral id)
  */
 export function resolveSessionId(
   orchestrationId: string | null,
@@ -135,7 +134,7 @@ export function resolveSessionId(
 
 /**
  * Derive the orchestrationId portion from a resolved session id.
- * Returns null for ephemeral or turn-only ids.
+ * Returns null for turn-only ids.
  */
 export function orchestrationIdFromSessionId(sessionId: string): string | null {
   if (sessionId.startsWith("orch:")) {
@@ -199,9 +198,11 @@ export function createTurnPlaybackSegment(
 export function createTurnPlaybackSession(
   orchestrationId: string | null,
   turnId: string | null = null,
-  id?: string,
 ): TurnPlaybackSession {
-  const sessionId = id ?? resolveSessionId(orchestrationId, turnId);
+  const sessionId = resolveSessionId(orchestrationId, turnId);
+  if (!sessionId) {
+    throw new Error("Turn playback session requires orchestrationId or turnId.");
+  }
   return {
     id: sessionId,
     turnId,

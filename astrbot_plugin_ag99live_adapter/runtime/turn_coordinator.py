@@ -756,18 +756,6 @@ class TurnCoordinator:
         )
         return True
 
-    def _schedule_realtime_motion_plan_preview(
-        self,
-        *,
-        reply_text: str,
-        origin_turn_id: str | None = None,
-    ) -> None:
-        self.schedule_motion_after_reply(
-            assistant_text=reply_text,
-            origin_turn_id=origin_turn_id,
-            source="legacy_preview",
-        )
-
     async def _generate_and_broadcast_realtime_motion_plan(
         self,
         *,
@@ -1075,11 +1063,8 @@ def _normalize_inline_anim_payload(
         except ValueError as exc:
             logger.warning("WIRING inline_motion payload rejected: %s", exc)
             return None, None
-    elif isinstance(payload.get("plan"), dict):
-        logger.warning("WIRING inline_motion payload rejected: legacy_plan_field_not_supported")
-        return None, None
     else:
-        logger.warning("WIRING inline_motion payload rejected: missing_nested_intent_or_plan")
+        logger.warning("WIRING inline_motion payload rejected: missing_nested_intent")
         return None, None
 
     valid, failure_reason = _validate_motion_payload(plan)

@@ -294,7 +294,7 @@ def test_plugin_hints_motion_payload_uses_profile_axis_value_range(
                 "emotion_label": "playful",
                 "duration_hint_ms": 1200,
                 "axes": {
-                    "head_yaw": {"value": 0.5},
+                    "head_yaw": {"value": 48},
                     "eye_open_left": {"value": 72},
                     "debug_tail": {"value": 100},
                     "unknown_axis": {"value": 60},
@@ -306,7 +306,7 @@ def test_plugin_hints_motion_payload_uses_profile_axis_value_range(
     payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
 
     assert payload is not None
-    assert payload["axes"]["head_yaw"]["value"] == 50
+    assert payload["axes"]["head_yaw"]["value"] == 48
     assert payload["axes"]["eye_open_left"]["value"] == 72
     assert "debug_tail" not in payload["axes"]
     assert "unknown_axis" not in payload["axes"]

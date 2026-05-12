@@ -26,19 +26,12 @@ interface SessionStoreState {
 // ── Store ──────────────────────────────────────────────────────────
 
 export function useTurnPlaybackSessionStore() {
-  let ephemeralSerial = 0;
-
   const state = reactive<SessionStoreState>({
     sessions: new Map(),
     activeSessionId: null,
   });
 
   // ── helpers ─────────────────────────────────────────────────────
-
-  function nextEphemeralId(): string {
-    ephemeralSerial += 1;
-    return `ephemeral:${ephemeralSerial}`;
-  }
 
   function log(message: string, details?: Record<string, unknown>): void {
     console.info(`[TurnPlaybackSessionStore] ${message}.`, details ?? {});
@@ -59,7 +52,10 @@ export function useTurnPlaybackSessionStore() {
     turnId: string | null = null,
   ): TurnPlaybackSession {
     const resolvedKey = resolveSessionId(orchestrationId, turnId);
-    const key = resolvedKey || nextEphemeralId();
+    if (!resolvedKey) {
+      throw new Error("Turn playback session requires orchestrationId or turnId.");
+    }
+    const key = resolvedKey;
 
     const existing = state.sessions.get(key);
     if (existing) {
@@ -96,13 +92,12 @@ export function useTurnPlaybackSessionStore() {
       }
     }
 
-    const session = createTurnPlaybackSession(orchestrationId, turnId, key);
+    const session = createTurnPlaybackSession(orchestrationId, turnId);
     state.sessions.set(key, session);
     log("session created", {
       id: session.id,
       orchestrationId: orchestrationId ?? null,
       turnId: turnId ?? null,
-      ephemeral: !resolvedKey,
     });
     return session;
   }
@@ -543,8 +538,7 @@ export function useTurnPlaybackSessionStore() {
       }
     }
 
-    // Keep the most recent terminal sessions (sorted by id stability —
-    // ephemeral serials increase, orch/turn ids are stable).
+    // Keep the most recent terminal sessions in insertion order.
     // A simple approach: drop oldest first.
     const deleteCount = Math.max(0, terminalSessions.length - keepRecent);
     for (let i = 0; i < deleteCount; i++) {
