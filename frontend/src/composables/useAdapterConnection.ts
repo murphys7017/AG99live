@@ -102,6 +102,9 @@ import {
   resetAudioPlaybackTerminal as resetAudioTerminalBridge,
   type AudioBridgeDeps,
 } from "../adapter-connection/adapterAudioBridge.js";
+import {
+  resetConnectionRuntimeState as resetConnectionRuntime,
+} from "../adapter-connection/connectionRuntimeState.js";
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "absent";
@@ -479,37 +482,14 @@ function openConnectionCandidate(
 }
 
 function resetConnectionRuntimeState(): void {
-  void stopMicrophoneCapture("connection_closed");
-  stopAudioPlayback();
-  historyAdapter?.resetHistoryState();
-  state.isPlayingAudio = false;
-  state.currentTurnId = null;
-  state.currentOrchestrationId = null;
-  state.serverInfo = null;
-  state.activeWsAddress = "";
-  state.sessionId = "";
-  state.micRequested = false;
-  state.micCapturing = false;
-  state.inboundMotionPlan = null;
-  state.inboundMotionPlanTurnId = null;
-  state.inboundMotionPlanOrchestrationId = null;
-  state.inboundMotionPlanReceivedAtMs = 0;
-  state.pendingAssistantTexts.clear();
-  state.pendingAudios.clear();
-  state.audioPlaybackStartedTurnId = null;
-  state.audioPlaybackStartedOrchestrationId = null;
-  state.audioPlaybackStartedMessageId = null;
-  state.audioPlaybackStartedAtMs = 0;
-  state.audioPlaybackDurationMs = null;
-  resetAudioPlaybackTerminal();
-  state.assistantTextDeliveryTurnId = null;
-  state.assistantTextDeliveryOrchestrationId = null;
-  state.turnFinishedTurnId = null;
-  state.turnFinishedOrchestrationId = null;
-  state.turnFinishedSuccess = true;
-  state.turnFinishedReason = "";
-  state.latestSemanticAxisProfileSaveResult = null;
-  modelSyncAdapter?.resetModelSyncState();
+  resetConnectionRuntime({
+    state,
+    stopMicrophoneCapture,
+    stopAudioPlayback,
+    historyAdapter,
+    modelSyncAdapter,
+    resetAudioPlaybackTerminal,
+  });
 }
 
 async function toggleMicrophoneCapture(): Promise<boolean> {
