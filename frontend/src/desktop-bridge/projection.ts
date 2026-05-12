@@ -72,7 +72,7 @@ export interface SessionProjectionInput {
 }
 
 export interface DesktopRuntimeSnapshotInput {
-  adapter: AdapterRuntimeProjectionInput;
+  adapter: AdapterRuntimeProjection;
   session: SessionProjectionInput;
   ambientMotionEnabled: boolean;
   motionEngineSettings: ModelEngineSettings;
@@ -211,15 +211,15 @@ function isLocallySettled(segment: TurnPlaybackSegment): boolean {
 export function buildDesktopRuntimeSnapshot(
   input: DesktopRuntimeSnapshotInput,
 ): DesktopRuntimeSnapshotOutput {
-  const history = input.adapter.historyEntries;
-  const lastSent = history
+  const p = input.adapter;
+  const lastSent = p.historyEntries
     .slice()
     .reverse()
     .find((entry) => entry.role === "user")?.text ?? "";
 
   return {
-    adapterAddress: input.adapter.address,
-    desktopScreenshotOnSendEnabled: input.adapter.desktopScreenshotOnSendEnabled,
+    adapterAddress: p.adapterAddress,
+    desktopScreenshotOnSendEnabled: p.desktopScreenshotOnSendEnabled,
     ambientMotionEnabled: input.ambientMotionEnabled,
     motionEngineSettings: cloneModelEngineSettings(input.motionEngineSettings),
     motionPlaybackRecords: input.motionPlaybackRecords.map((r) =>
@@ -227,31 +227,31 @@ export function buildDesktopRuntimeSnapshot(
     ),
     connectionState: input.connectionState,
     connectionLabel: input.connectionLabel,
-    connectionStatusMessage: input.adapter.statusMessage,
+    connectionStatusMessage: p.connectionStatusMessage,
     aiState: input.aiState,
-    micRequested: input.adapter.micRequested,
-    micCapturing: input.adapter.micCapturing,
-    audioPlaying: input.adapter.isPlayingAudio,
-    sessionId: input.adapter.sessionId,
+    micRequested: p.micRequested,
+    micCapturing: p.micCapturing,
+    audioPlaying: p.audioPlaying,
+    sessionId: p.sessionId,
     confName: input.confName,
     lastUpdated: input.lastUpdated,
-    serverWsUrl: input.adapter.serverWsUrl,
-    httpBaseUrl: input.adapter.httpBaseUrl,
+    serverWsUrl: p.serverWsUrl,
+    httpBaseUrl: p.httpBaseUrl,
     stageMessage: input.stageMessage,
     lastSentText: lastSent,
-    lastAssistantText: input.adapter.lastAssistantText,
-    lastTranscription: input.adapter.lastTranscription,
-    lastImageCount: input.adapter.lastImageCount,
-    historyEntries: [...input.adapter.historyEntries],
-    backendHistorySummaries: input.adapter.backendHistorySummaries.map((s) =>
+    lastAssistantText: p.lastAssistantText,
+    lastTranscription: p.lastTranscription,
+    lastImageCount: p.lastImageCount,
+    historyEntries: [...p.historyEntries],
+    backendHistorySummaries: p.backendHistorySummaries.map((s: DesktopBackendHistorySummary) =>
       cloneJson(s),
     ),
-    backendHistoryEntries: input.adapter.backendHistoryEntries.map((e) =>
+    backendHistoryEntries: p.backendHistoryEntries.map((e: DesktopBackendHistoryMessage) =>
       cloneJson(e),
     ),
-    activeBackendHistoryUid: input.adapter.activeBackendHistoryUid,
-    backendHistoryLoading: input.adapter.backendHistoryLoading,
-    backendHistoryStatusMessage: input.adapter.backendHistoryStatusMessage,
+    activeBackendHistoryUid: p.activeBackendHistoryUid,
+    backendHistoryLoading: p.backendHistoryLoading,
+    backendHistoryStatusMessage: p.backendHistoryStatusMessage,
     activeSessionId: input.session.activeSessionId,
     activeSessionPhase: input.session.activeSessionPhase,
     activeSessionTextReady: input.session.activeSessionTextReady,

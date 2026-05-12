@@ -1,3 +1,3 @@
 # API Documentation
 
-Documents public interfaces, schemas, adapter contracts, and integration surfaces.
+- `protocol.md` - AG99live WebSocket protocol contract (message types, ID contract, completion signals, schemas)

@@ -14,6 +14,7 @@ import type { useDesktopBridge } from "./useDesktopBridge";
 import type { useModelSync } from "./useModelSync";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
 import {
+  buildAdapterRuntimeProjection,
   buildDesktopRuntimeSnapshot,
   getActiveSegmentSnapshot,
   type AdapterRuntimeProjectionInput,
@@ -100,7 +101,7 @@ export function usePetRuntimeSnapshotPublisher(
   watch(
     () => {
       const a = options.adapter.state;
-      const adapterProjection: AdapterRuntimeProjectionInput = {
+      const adapterProjection = buildAdapterRuntimeProjection({
         address: a.address,
         desktopScreenshotOnSendEnabled: a.desktopScreenshotOnSendEnabled,
         statusMessage: a.statusMessage,
@@ -124,7 +125,7 @@ export function usePetRuntimeSnapshotPublisher(
           cloneJson(s),
         ) as DesktopMotionTuningSample[],
         motionTuningSamplesStatus: a.motionTuningSamplesStatus,
-      };
+      });
 
       const activeSession = options.sessionStore.getActiveSession();
       const segmentSnapshot = getActiveSegmentSnapshot(activeSession);
