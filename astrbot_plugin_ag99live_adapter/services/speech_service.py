@@ -149,7 +149,10 @@ class SpeechIngressService:
             return
 
         chunk = np.array(audio_data, dtype=np.float32)
-        await self.media_service.append_audio_chunk(chunk)
+        await self.media_service.append_audio_chunk(
+            chunk,
+            segment_id=self._resolve_audio_segment_id(message),
+        )
 
     async def handle_raw_audio_data(self, message):
         audio_data = message.payload.get("audio", [])
@@ -170,6 +173,7 @@ class SpeechIngressService:
             return None
 
         built_message = None
+        segment_id = self._resolve_audio_segment_id(message)
         for audio_bytes in vad_engine.detect_speech(audio_data):
             if audio_bytes == b"<|PAUSE|>":
                 built_message = await self._build_interrupt_message(message)
@@ -179,15 +183,16 @@ class SpeechIngressService:
                 chunk = (
                     np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
                 )
-                await self.media_service.append_audio_chunk(chunk)
+                await self.media_service.append_audio_chunk(chunk, segment_id=segment_id)
                 built_message = await self.handle_audio_end(message)
 
         return built_message
 
     async def handle_audio_end(self, message):
+        segment_id = self._resolve_audio_segment_id(message)
         dropped = bool(message.payload.get("dropped", False))
         if dropped:
-            await self.media_service.clear_audio_buffer()
+            await self.media_service.clear_audio_buffer(segment_id=segment_id)
             logger.warning("Dropping microphone audio segment because frontend reported chunk loss.")
             await self._send_json(
                 build_control_error(
@@ -199,7 +204,7 @@ class SpeechIngressService:
             )
             return None
 
-        audio_buffer = await self.media_service.drain_audio_buffer()
+        audio_buffer = await self.media_service.drain_audio_buffer(segment_id=segment_id)
 
         if audio_buffer.size == 0:
             logger.debug("Ignoring `input.mic_audio_end` with empty buffer.")
@@ -280,6 +285,14 @@ class SpeechIngressService:
             normalized_payload["stream_id"] = stream_id
         normalized_raw_message["payload"] = normalized_payload
         return self._build_message_object(text=text, raw_message=normalized_raw_message)
+
+    def _resolve_audio_segment_id(self, message) -> str | None:
+        segment_id = getattr(message, "orchestration_id", None)
+        if isinstance(segment_id, str):
+            normalized = segment_id.strip()
+            if normalized:
+                return normalized
+        return None
 
     async def _transcribe_audio(self, audio_buffer: np.ndarray, *, sample_rate: int = 16000) -> str:
         if self.runtime_state.selected_stt_provider is None:

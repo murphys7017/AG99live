@@ -48,35 +48,44 @@ class MediaService:
         self.olv_dir = olv_dir
         self.audio_cache_dir = audio_cache_dir
         self.image_cache_dir = image_cache_dir
-        self._audio_buffer_chunks: list[np.ndarray] = []
+        self._audio_buffer_chunks_by_segment: dict[str, list[np.ndarray]] = {}
         self._audio_buffer_lock = asyncio.Lock()
 
         self._prepare_audio_cache_dir()
         self._cleanup_audio_cache()
 
-    async def append_audio_chunk(self, chunk: np.ndarray) -> None:
+    async def append_audio_chunk(self, chunk: np.ndarray, segment_id: str | None = None) -> None:
         if chunk.size == 0:
             return
 
+        buffer_key = self._normalize_audio_segment_id(segment_id)
         async with self._audio_buffer_lock:
-            self._audio_buffer_chunks.append(chunk)
+            self._audio_buffer_chunks_by_segment.setdefault(buffer_key, []).append(chunk)
 
-    async def drain_audio_buffer(self) -> np.ndarray:
+    async def drain_audio_buffer(self, segment_id: str | None = None) -> np.ndarray:
+        buffer_key = self._normalize_audio_segment_id(segment_id)
         async with self._audio_buffer_lock:
-            if not self._audio_buffer_chunks:
+            chunks = self._audio_buffer_chunks_by_segment.pop(buffer_key, [])
+            if not chunks:
                 return np.array([], dtype=np.float32)
-
-            chunks = self._audio_buffer_chunks
-            self._audio_buffer_chunks = []
 
         if len(chunks) == 1:
             return chunks[0].copy()
 
         return np.concatenate(chunks).astype(np.float32, copy=False)
 
-    async def clear_audio_buffer(self) -> None:
+    async def clear_audio_buffer(self, segment_id: str | None = None) -> None:
         async with self._audio_buffer_lock:
-            self._audio_buffer_chunks = []
+            if segment_id is None:
+                self._audio_buffer_chunks_by_segment = {}
+                return
+
+            buffer_key = self._normalize_audio_segment_id(segment_id)
+            self._audio_buffer_chunks_by_segment.pop(buffer_key, None)
+
+    def _normalize_audio_segment_id(self, segment_id: str | None) -> str:
+        normalized = str(segment_id or "").strip()
+        return normalized or "__default__"
 
     def cache_audio_file(self, source_audio_path: str) -> tuple[str, str]:
         self._cleanup_audio_cache()

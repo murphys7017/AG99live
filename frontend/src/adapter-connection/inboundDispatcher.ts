@@ -40,6 +40,9 @@ export interface InboundDispatchState {
   micRequested: boolean;
   // audio io
   isPlayingAudio: boolean;
+  audioPlaybackStartedTurnId: string | null;
+  audioPlaybackStartedOrchestrationId: string | null;
+  audioPlaybackStartedMessageId: string | null;
   // server info
   serverInfo: SystemServerInfoPayload | null;
   // profile save result
@@ -411,8 +414,19 @@ export async function dispatchInboundEvent(
       applyTurnFinished(deps, event);
       return;
     case "interrupt":
+      if (s.audioPlaybackStartedMessageId) {
+        deps.markAudioPlaybackTerminal(
+          "failed",
+          s.audioPlaybackStartedTurnId,
+          s.audioPlaybackStartedOrchestrationId,
+          "audio_playback_interrupted",
+          s.audioPlaybackStartedMessageId,
+        );
+      }
       deps.stopAudioPlayback();
       deps.resetAudioPlaybackTerminal();
+      s.pendingAssistantTexts.clear();
+      s.pendingAudios.clear();
       deps.sessionStore?.markInterrupt(event.orchestrationId, event.turnId);
       s.currentTurnId = null;
       s.currentOrchestrationId = null;

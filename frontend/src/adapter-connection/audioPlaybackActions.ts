@@ -54,9 +54,9 @@ export async function playAudioAndAcknowledge(
   stopAudioPlayback(ctx);
   ctx.resetTerminal();
   ctx.state.isPlayingAudio = true;
-  ctx.state.audioPlaybackStartedTurnId = null;
-  ctx.state.audioPlaybackStartedOrchestrationId = null;
-  ctx.state.audioPlaybackStartedMessageId = null;
+  ctx.state.audioPlaybackStartedTurnId = turnId;
+  ctx.state.audioPlaybackStartedOrchestrationId = orchestrationId;
+  ctx.state.audioPlaybackStartedMessageId = messageId;
   ctx.state.audioPlaybackStartedAtMs = 0;
   ctx.state.audioPlaybackDurationMs = null;
   ctx.state.statusMessage = "收到语音回复，正在播放。";

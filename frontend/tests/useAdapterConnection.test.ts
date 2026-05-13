@@ -101,6 +101,43 @@ class FakeAudioWorkletNode {
   }
 }
 
+class FakeAudio {
+  static instances: FakeAudio[] = [];
+  static nextPlayShouldStall = false;
+
+  currentTime = 0;
+  duration = 1.25;
+  private listeners = new Map<string, Array<() => void>>();
+
+  constructor(_src: string) {
+    FakeAudio.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: () => void): void {
+    const bucket = this.listeners.get(type) ?? [];
+    bucket.push(listener);
+    this.listeners.set(type, bucket);
+  }
+
+  async play(): Promise<void> {
+    if (FakeAudio.nextPlayShouldStall) {
+      FakeAudio.nextPlayShouldStall = false;
+      return new Promise<void>(() => {});
+    }
+    await Promise.resolve();
+    this.emit("loadedmetadata");
+    this.emit("playing");
+  }
+
+  pause(): void {}
+
+  emit(type: string): void {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener();
+    }
+  }
+}
+
 function installWindowStubs(): void {
   const storage = new Map<string, string>();
   const nativeUrl = globalThis.URL;
@@ -142,6 +179,7 @@ function installWindowStubs(): void {
   });
   Object.assign(globalThis, {
     AudioWorkletNode: FakeAudioWorkletNode,
+    Audio: FakeAudio,
   });
   window.AudioContext = class {
     state = "running";
@@ -184,6 +222,8 @@ function installWebSocketStub(): void {
 function createConnectedAdapter() {
   FakeWebSocket.instances.length = 0;
   FakeAudioWorkletNode.instances.length = 0;
+  FakeAudio.instances.length = 0;
+  FakeAudio.nextPlayShouldStall = false;
   const sessionStore = useTurnPlaybackSessionStore();
   const scope = effectScope();
   const adapter = scope.run(() => useAdapterConnection(sessionStore));
@@ -776,6 +816,173 @@ async function testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd(): Promis
   }
 }
 
+async function testDeviceChangeEndsPreviousMicSegmentBeforeRestart(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket } = harness;
+    adapter.setMicrophoneDevices([
+      { deviceId: "mic-a", label: "Mic A" },
+      { deviceId: "mic-b", label: "Mic B" },
+    ]);
+    adapter.setMicrophoneDevice("mic-a");
+
+    const started = await adapter.toggleMicrophoneCapture();
+    assert.equal(started, true);
+    const firstWorklet = FakeAudioWorkletNode.instances[0];
+    assert.ok(firstWorklet);
+
+    socket.sent.length = 0;
+    firstWorklet.emitChunk(new Float32Array([0.1, 0.2]));
+    await flushMicrotasks();
+
+    const firstRawMessage = socket.sent
+      .map((item) => JSON.parse(item) as Record<string, unknown>)
+      .find((item) => item.type === "input.raw_audio_data");
+    assert.ok(firstRawMessage);
+    const firstOrchestrationId = String(firstRawMessage?.orchestration_id ?? "");
+    assert.match(firstOrchestrationId, /^input:/);
+
+    socket.sent.length = 0;
+    adapter.setMicrophoneDevice("mic-b");
+    await flushMicrotasks();
+
+    const restartEndMessage = socket.sent
+      .map((item) => JSON.parse(item) as Record<string, unknown>)
+      .find((item) => item.type === "input.mic_audio_end");
+    assert.ok(restartEndMessage);
+    assert.equal(restartEndMessage?.orchestration_id, firstOrchestrationId);
+    assert.deepEqual(restartEndMessage?.payload, {
+      reason: "device_change",
+      dropped: false,
+    });
+
+    const secondWorklet = FakeAudioWorkletNode.instances.at(-1);
+    assert.ok(secondWorklet);
+    assert.notEqual(secondWorklet, firstWorklet);
+
+    secondWorklet?.emitChunk(new Float32Array([0.4, -0.4]));
+    await flushMicrotasks();
+    const latestRawMessage = socket.sent
+      .map((item) => JSON.parse(item) as Record<string, unknown>)
+      .reverse()
+      .find((item) => item.type === "input.raw_audio_data");
+    assert.ok(latestRawMessage);
+    assert.notEqual(latestRawMessage?.orchestration_id, firstOrchestrationId);
+    assert.match(String(latestRawMessage?.orchestration_id), /^input:/);
+  } finally {
+    harness.scope.stop();
+  }
+}
+
+async function testInterruptMarksPlayingAudioSegmentFailed(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket, sessionStore } = harness;
+    sendTurnStarted(socket, "turn-interrupt", "orch-interrupt");
+    socket.emitMessage(JSON.stringify({
+      type: "output.audio",
+      version: "v2",
+      message_id: "msg-interrupt-audio",
+      timestamp: "2026-05-08T00:00:20.000Z",
+      session_id: "session-1",
+      turn_id: "turn-interrupt",
+      orchestration_id: "orch-interrupt",
+      source: "backend",
+      payload: {
+        audio_url: "http://127.0.0.1:12397/cache/audio/test.wav",
+        text: "hello",
+        speaker_name: "Alice",
+        avatar: "",
+      },
+    }));
+
+    const released = adapter.releaseAudioForPlayback(
+      "msg-interrupt-audio",
+      "turn-interrupt",
+      "orch-interrupt",
+    );
+    assert.equal(released, true);
+    await flushMicrotasks();
+
+    const sessionBeforeInterrupt = sessionStore.getSession("orch-interrupt");
+    const segmentBeforeInterrupt = sessionBeforeInterrupt?.segments.get("msg-interrupt-audio");
+    assert.equal(segmentBeforeInterrupt?.audio.started, true);
+    assert.equal(adapter.state.isPlayingAudio, true);
+
+    socket.emitMessage(JSON.stringify({
+      type: "control.interrupt",
+      version: "v2",
+      message_id: "interrupt-1",
+      timestamp: "2026-05-08T00:00:21.000Z",
+      session_id: "session-1",
+      turn_id: "turn-interrupt",
+      orchestration_id: "orch-interrupt",
+      source: "backend",
+      payload: {},
+    }));
+
+    const sessionAfterInterrupt = sessionStore.getSession("orch-interrupt");
+    const segmentAfterInterrupt = sessionAfterInterrupt?.segments.get("msg-interrupt-audio");
+    assert.equal(adapter.state.isPlayingAudio, false);
+    assert.equal(segmentAfterInterrupt?.audio.terminal, "failed");
+    assert.equal(segmentAfterInterrupt?.audio.reason, "audio_playback_interrupted");
+  } finally {
+    harness.scope.stop();
+  }
+}
+
+async function testInterruptMarksPendingAudioSegmentFailedBeforePlaybackStart(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket, sessionStore } = harness;
+    sendTurnStarted(socket, "turn-interrupt-pending", "orch-interrupt-pending");
+    socket.emitMessage(JSON.stringify({
+      type: "output.audio",
+      version: "v2",
+      message_id: "msg-interrupt-pending-audio",
+      timestamp: "2026-05-08T00:00:22.000Z",
+      session_id: "session-1",
+      turn_id: "turn-interrupt-pending",
+      orchestration_id: "orch-interrupt-pending",
+      source: "backend",
+      payload: {
+        audio_url: "http://127.0.0.1:12397/cache/audio/test-pending.wav",
+        text: "hello pending",
+        speaker_name: "Alice",
+        avatar: "",
+      },
+    }));
+
+    FakeAudio.nextPlayShouldStall = true;
+    const released = adapter.releaseAudioForPlayback(
+      "msg-interrupt-pending-audio",
+      "turn-interrupt-pending",
+      "orch-interrupt-pending",
+    );
+    assert.equal(released, true);
+
+    socket.emitMessage(JSON.stringify({
+      type: "control.interrupt",
+      version: "v2",
+      message_id: "interrupt-pending-1",
+      timestamp: "2026-05-08T00:00:23.000Z",
+      session_id: "session-1",
+      turn_id: "turn-interrupt-pending",
+      orchestration_id: "orch-interrupt-pending",
+      source: "backend",
+      payload: {},
+    }));
+
+    const sessionAfterInterrupt = sessionStore.getSession("orch-interrupt-pending");
+    const segmentAfterInterrupt = sessionAfterInterrupt?.segments.get("msg-interrupt-pending-audio");
+    assert.equal(adapter.state.isPlayingAudio, false);
+    assert.equal(segmentAfterInterrupt?.audio.terminal, "failed");
+    assert.equal(segmentAfterInterrupt?.audio.reason, "audio_playback_interrupted");
+  } finally {
+    harness.scope.stop();
+  }
+}
+
 async function run(): Promise<void> {
   installWindowStubs();
   installWebSocketStub();
@@ -797,6 +1004,9 @@ async function run(): Promise<void> {
   await testAutoStartMicDoesNotDuplicateCaptureStart();
   await testMicAudioUsesFreshInputOrchestrationAcrossChunkAndEnd();
   await testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd();
+  await testDeviceChangeEndsPreviousMicSegmentBeforeRestart();
+  await testInterruptMarksPlayingAudioSegmentFailed();
+  await testInterruptMarksPendingAudioSegmentFailedBeforePlaybackStart();
 
   console.log("useAdapterConnection tests passed");
 }

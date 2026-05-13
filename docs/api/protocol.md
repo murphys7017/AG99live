@@ -75,6 +75,14 @@ The backend sends `turn_finished` only AFTER receiving `playback_finished`.
 | `input.raw_audio_data` | `{ audio: number[], sample_rate: number, channels: 1 }` |
 | `input.mic_audio_end` | `{ reason: string, dropped?: boolean }` |
 
+Input audio segment rules:
+
+- A single microphone capture segment uses one fresh `input:*` `orchestration_id`.
+- All `input.raw_audio_data` chunks of that capture segment and its final `input.mic_audio_end` must carry the same `orchestration_id`.
+- Backend STT ingress treats this input `orchestration_id` as the microphone segment buffer key.
+- If `input.mic_audio_end.payload.dropped === true`, backend must discard that segment buffer and must not transcribe it.
+- If microphone device switching ends one capture segment and starts another, frontend must close the old segment first, then start sending chunks for the new one.
+
 ### output.* (Backend → Frontend)
 
 | Type | Payload | message_id required |
@@ -95,6 +103,10 @@ The backend sends `turn_finished` only AFTER receiving `playback_finished`.
 | `control.interrupt` | Bidirectional | `{}` |
 | `control.start_mic` | Backend → Frontend | `{}` |
 | `control.error` | Backend → Frontend | `{ message: string }` |
+
+Interrupt audio rule:
+
+- If a segment audio has already been released for local playback, frontend interrupt handling must write that segment audio to a terminal state (`failed`) before clearing playback runtime state.
 
 ### system.* (Bidirectional)
 

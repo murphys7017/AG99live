@@ -641,7 +641,7 @@ async function refreshMicrophoneDevices(
 
 async function restartMicrophoneCaptureAfterDeviceChange(): Promise<void> {
   const previousOrigin = micCaptureOrigin ?? "manual";
-  await stopMicrophoneCaptureRuntimeOnly();
+  await stopMicrophoneCapture("device_change");
   const started = await startMicrophoneCapture(previousOrigin);
   if (!started) {
     state.micRequested = false;
@@ -729,6 +729,10 @@ async function stopMicrophoneCapture(reason = "manual_stop"): Promise<boolean> {
     );
   }
   clearMicCaptureSession();
+
+  if (reason === "device_change") {
+    return true;
+  }
 
   state.statusMessage =
     reason === "manual_stop"
@@ -886,7 +890,7 @@ function buildDispatchDeps(): InboundDispatchDeps {
     normalizeMotionPayload: (payload) => normalizeMotionPayload(payload),
     applyInboundMotionPayload: (ctx, envelope) =>
       applyInboundMotionPayload(ctx, envelope),
-    startMicrophoneCapture: () => startMicrophoneCapture(),
+    startMicrophoneCapture: (origin) => startMicrophoneCapture(origin),
     reportedProtocolWarnings,
     buildInboundEventContext: () => buildInboundEventContext(),
   };
