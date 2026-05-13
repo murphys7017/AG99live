@@ -35,14 +35,14 @@ astrbot_plugin_ag99live_adapter/
 - Adapter 在请求主模型前注入 `<@anim {...}>` 输出契约。
 - 主回复末尾若包含合法 `<@anim {...}>`，则优先提取并广播动作载荷。
 - 当前 inline contract 使用 `engine.motion_intent.v2`，字段来自当前模型的 `semantic_axis_profile`。
-- 如果中间件在 result contributor 阶段返回 `client_objects` 动作载荷，则优先广播这些结构化动作对象。
+- 如果中间件在 result contributor 阶段返回 `client_objects` / plugin hints 动作载荷，则后端优先广播这些结构化动作对象。
 
 ### 备选路径（split_after_reply）
 
 - 主聊天模型只负责正常回复文本，不要求内联 `<@anim {...}>`。
 - 交互中间件在 prompt contributor 中注入动作能力/运行态上下文，在 result contributor 中返回 `client_objects` 或 plugin hints。
 - 后端从 `platform_extras` / `client_objects` 中读取动作载荷，并与文本、音频一起广播到前端。
-- 如果当前 runtime 明确启用了 dedicated realtime motion generator，它仍可作为 `split_after_reply` 下的后备生成路径。
+- 当前文档主线不再把“回复完成后再单独发起一次 motion-only 请求”描述为正式默认路径；若 runtime 内部明确启用了额外 fallback 组件，它的结果也必须回到同一条 `engine.motion_*` 协议链路和同一 segment identity。
 
 ### 动作 selector 输出
 
@@ -53,7 +53,7 @@ astrbot_plugin_ag99live_adapter/
 ## 与前端协同的关键点
 
 - 每条消息都带 `turn_id`，并尽量贯穿 `orchestration_id`，用于前端做 session 级轮次协调。
-- 每个 assistant segment 都必须携带非空 `message_id`；前端用它把 `output.text / output.audio / engine.motion_*` 聚合到同一个 `TurnPlaybackSegment`。
+- 每个 assistant segment 的 `output.text / output.audio / engine.motion_*` 都必须携带非空 `message_id`；前端用它把这些消息聚合到同一个 `TurnPlaybackSegment`。
 - 前端同时兼容 `engine.motion_plan` 与 `engine.motion_intent`，但开发期要求消息类型与 payload 字段严格对应。
 - `semantic_axis_profile` / `calibration_profile` / `parameter_action_library` / `base_action_library` 由 `system.model_sync` 下发。
 - `system.semantic_axis_profile_saved` / `system.semantic_axis_profile_save_failed` 用于 Profile Editor 保存结果确认，不再依赖 `system.model_sync` 推断保存成败。
@@ -74,7 +74,7 @@ astrbot_plugin_ag99live_adapter/
 
 - `motion_generation_mode`：动作生成链路，默认 `inline_first`；可选 `split_after_reply`。
 - `enable_inline_motion_contract`：`inline_first` 模式下是否启用主请求内联动作契约。
-- `enable_realtime_motion_plan`：是否启用 dedicated realtime motion generator；在 `split_after_reply` 中可作为后备动作生成路径，在 `inline_first` 中作为内联失败后的兜底。
+- `enable_realtime_motion_plan`：是否启用 runtime 内部的 realtime motion fallback 组件；如果该组件被明确调用，产物仍必须回到同一条 `engine.motion_*` 协议链路和同一 segment identity。
 - `motion_analysis_provider_id`：动作分析 / realtime motion selector 使用的 Provider。
 - `realtime_motion_timeout_seconds`：realtime 生成超时（秒）。
 - `realtime_motion_fewshot_enabled`：是否启用 few-shot。
@@ -96,4 +96,4 @@ pip install -r astrbot_plugin_ag99live_adapter/requirements.txt
 python -m pytest astrbot_plugin_ag99live_adapter/tests -q
 ```
 
-当前基线：`146 passed`（2026-05-12）。
+最近一次完整测试记录：`146 passed`（2026-05-12）。

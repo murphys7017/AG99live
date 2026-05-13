@@ -25,7 +25,7 @@ All messages follow the V2 envelope:
 
 | ID | Level | Owner | Purpose | Required |
 |---|---|---|---|---|
-| `message_id` | Segment | Protocol | Binds text/audio/motion for one assistant segment | **Always** |
+| `message_id` | Segment | Protocol | Binds text/audio/motion for one assistant segment | Envelope field is present on current protocol messages; semantically required on segment-bearing assistant outputs and `engine.motion_*` |
 | `turn_id` | Turn lifecycle | Backend | Connects turn_started / synth_finished / turn_finished / interrupt | On all turn-scoped messages |
 | `orchestration_id` | Playback group | Frontend | Groups segments among the same playback session; preferred session key | When available |
 
@@ -37,6 +37,16 @@ turn:<turn_id>          →  fallback when orchestration_id missing
 ```
 
 When a turn-first session later receives an `orchestration_id`, the session promotes from `turn:<id>` to `orch:<id>` — no duplicate sessions.
+
+`message_id` needs one more distinction:
+
+- current backend/frontend envelopes still carry a `message_id` field broadly
+- frontend segment playback logic only treats it as a required segment key for:
+  - `output.text`
+  - `output.audio`
+  - `engine.motion_intent`
+  - `engine.motion_plan`
+- messages such as `output.image`, `output.transcription`, most `control.*`, and most `system.*` do not use `message_id` for segment binding
 
 ## Completion Signal Semantics
 
@@ -129,22 +139,22 @@ Interrupt audio rule:
 
 ## Motion Generation Paths
 
-Current backend motion generation has only two valid paths:
+Current backend motion broadcast on the main protocol path has two stable sources:
 
 1. `inline_first`
    - The main chat model reply includes inline `<@anim {...}>`.
    - Backend extracts the nested `intent` and broadcasts `engine.motion_intent` directly.
 
-2. Middleware `client_objects`
-   - Interaction middleware returns motion payloads via `client_objects`.
-   - Backend reads them from `platform_extras` and broadcasts them directly.
+2. Middleware structured motion objects
+   - Interaction middleware returns motion payloads via `client_objects` / plugin hints.
+   - Backend reads them from `platform_extras` and broadcasts them directly on the matching segment.
 
 There is no longer any legacy plugin hook that schedules a second motion-only request after the main reply has completed.
 
 `split_after_reply` now means:
 - the main model only replies with text
-- motion must be provided by middleware `client_objects`
-- backend may still use the dedicated realtime motion generator module where the runtime path explicitly invokes it
+- the preferred motion source is middleware `client_objects` / plugin hints
+- if a runtime-internal fallback module is explicitly invoked, its result must still be emitted back onto the same `engine.motion_*` protocol path and segment identity
 
 ## Schema Versions
 

@@ -74,7 +74,7 @@
     "default": 96
   },
   "motion_generation_mode": {
-    "description": "动作生成链路。inline_first：向主模型注入 `<@anim>` 契约并优先解析内联动作；split_after_reply：主模型只回复文本，动作优先由交互中间件 client_objects 提供，必要时可回落到 dedicated realtime motion generator。",
+    "description": "动作生成链路。inline_first：向主模型注入 `<@anim>` 契约并优先解析内联动作；split_after_reply：主模型只回复文本，动作优先由交互中间件的结构化结果（如 client_objects / plugin hints）提供。若 runtime 内部 fallback 组件被显式调用，其产物仍需回到同一条 `engine.motion_*` 协议链路与同一 segment identity。",
     "type": "string",
     "default": "inline_first",
     "options": [
@@ -88,7 +88,7 @@
     "default": true
   },
   "enable_realtime_motion_plan": {
-    "description": "是否启用 dedicated realtime motion generator。split_after_reply 模式下它可作为后备动作生成路径；inline_first 模式下它是内联动作提取失败后的兜底。",
+    "description": "是否启用 runtime 内部的 realtime motion fallback 组件。该组件不是当前文档主线里的默认动作来源；如果被显式调用，产物仍必须回到同一条 `engine.motion_*` 协议链路与同一 segment identity。",
     "type": "bool",
     "default": true
   },
