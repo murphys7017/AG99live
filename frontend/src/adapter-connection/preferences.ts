@@ -2,6 +2,7 @@ import { DEFAULT_ADAPTER_ADDRESS } from "./address.js";
 
 const ADDRESS_STORAGE_KEY = "ag99live.adapter.address";
 const DESKTOP_SCREENSHOT_ON_SEND_STORAGE_KEY = "ag99live.desktop.capture_on_send";
+const MICROPHONE_DEVICE_ID_STORAGE_KEY = "ag99live.microphone.device_id";
 
 export function normalizeAdapterAddressSetting(nextAddress: string): string {
   return nextAddress.trim() || DEFAULT_ADAPTER_ADDRESS;
@@ -65,5 +66,40 @@ export function saveDesktopScreenshotOnSendEnabled(enabled: boolean): void {
     );
   } catch (error) {
     console.warn("[AdapterPreferences] Failed to persist desktop screenshot preference.", error);
+  }
+}
+
+export function normalizeMicrophoneDeviceId(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function loadStoredMicrophoneDeviceId(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  try {
+    return normalizeMicrophoneDeviceId(
+      window.localStorage.getItem(MICROPHONE_DEVICE_ID_STORAGE_KEY),
+    );
+  } catch (error) {
+    console.warn("[AdapterPreferences] Failed to load microphone device preference.", error);
+    return "";
+  }
+}
+
+export function saveStoredMicrophoneDeviceId(deviceId: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    const normalized = normalizeMicrophoneDeviceId(deviceId);
+    if (normalized) {
+      window.localStorage.setItem(MICROPHONE_DEVICE_ID_STORAGE_KEY, normalized);
+    } else {
+      window.localStorage.removeItem(MICROPHONE_DEVICE_ID_STORAGE_KEY);
+    }
+  } catch (error) {
+    console.warn("[AdapterPreferences] Failed to persist microphone device preference.", error);
   }
 }

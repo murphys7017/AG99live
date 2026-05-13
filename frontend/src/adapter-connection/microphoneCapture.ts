@@ -5,6 +5,7 @@ export interface MicrophoneAudioChunk {
 }
 
 export interface StartMicrophoneCaptureOptions {
+  deviceId: string | null;
   onChunk: (chunk: MicrophoneAudioChunk) => void;
   onDeviceEnded: () => void;
 }
@@ -54,7 +55,7 @@ export async function startMicrophoneCaptureRuntime(
     return;
   }
 
-  if (!navigator.mediaDevices?.getUserMedia) {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
     throw new Error("当前环境不支持麦克风采集。");
   }
 
@@ -70,14 +71,20 @@ export async function startMicrophoneCaptureRuntime(
   let sinkGainNode: GainNode | null = null;
 
   try {
+    const selectedDeviceId = normalizeMicrophoneDeviceId(options.deviceId);
+    const audioConstraints: MediaTrackConstraints = {
+      channelCount: 1,
+      sampleRate: MIC_TARGET_SAMPLE_RATE,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    };
+    if (selectedDeviceId) {
+      audioConstraints.deviceId = { exact: selectedDeviceId };
+    }
+
     mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        sampleRate: MIC_TARGET_SAMPLE_RATE,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
+      audio: audioConstraints,
       video: false,
     });
 
@@ -142,6 +149,10 @@ export async function startMicrophoneCaptureRuntime(
     microphoneRuntime = null;
     throw error;
   }
+}
+
+function normalizeMicrophoneDeviceId(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 export async function stopMicrophoneCaptureRuntime(): Promise<boolean> {

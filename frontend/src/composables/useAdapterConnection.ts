@@ -117,6 +117,7 @@ type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "absent";
 
 const MAX_MIC_SOCKET_BUFFERED_AMOUNT = 512 * 1024;
+const ROOT_INPUT_ORCHESTRATION_PREFIX = "input:";
 const state = reactive({
   address: loadStoredAdapterAddress(),
   desktopScreenshotOnSendEnabled: loadDesktopScreenshotOnSendEnabled(),
@@ -177,6 +178,10 @@ let socket: WebSocket | null = null;
 let manualClose = false;
 let initializePromise: Promise<void> | null = null;
 let connectAttemptSerial = 0;
+let micStartPromise: Promise<boolean> | null = null;
+let audioSequenceBroken = false;
+let activeMicInputOrchestrationId: string | null = null;
+let micCaptureOrigin: "manual" | "ptt" | "auto" | null = null;
 const assistantHistoryKeys: string[] = [];
 const assistantHistoryKeySet = new Set<string>();
 const reportedProtocolWarnings = new Set<string>();
@@ -292,8 +297,20 @@ function sendMicrophoneAudioChunk(chunk: MicrophoneAudioChunk): void {
   if (
     !socket
     || socket.readyState !== WebSocket.OPEN
-    || socket.bufferedAmount > MAX_MIC_SOCKET_BUFFERED_AMOUNT
   ) {
+    if (isMicrophoneCaptureRuntimeActive()) {
+      audioSequenceBroken = true;
+    }
+    return;
+  }
+
+  if (socket.bufferedAmount > MAX_MIC_SOCKET_BUFFERED_AMOUNT) {
+    if (!audioSequenceBroken) {
+      audioSequenceBroken = true;
+      state.lastError = "麦克风音频发送积压，本段收音已丢弃。";
+      state.statusMessage = state.lastError;
+      pushHistory("error", state.lastError);
+    }
     return;
   }
 
@@ -303,11 +320,16 @@ function sendMicrophoneAudioChunk(chunk: MicrophoneAudioChunk): void {
 
   socket.send(
     JSON.stringify(
-      buildMessageEnvelope("input.raw_audio_data", {
-        audio: chunk.audio,
-        sample_rate: chunk.sampleRate,
-        channels: chunk.channels,
-      }),
+      buildMessageEnvelope(
+        "input.raw_audio_data",
+        {
+          audio: chunk.audio,
+          sample_rate: chunk.sampleRate,
+          channels: chunk.channels,
+        },
+        null,
+        getOrCreateActiveMicInputOrchestrationId(),
+      ),
     ),
   );
 }
@@ -411,6 +433,7 @@ function disconnect(): void {
 function disconnectInternal(markManualClose: boolean): void {
   manualClose = markManualClose;
   connectAttemptSerial += 1;
+  micStartPromise = null;
   void stopMicrophoneCapture(markManualClose ? "manual_disconnect" : "connection_reset");
   stopAudioPlayback();
   if (socket) {
@@ -542,10 +565,15 @@ async function toggleMicrophoneCapture(): Promise<boolean> {
     return stopMicrophoneCapture("manual_stop");
   }
 
-  return startMicrophoneCapture();
+  return startMicrophoneCapture("manual");
 }
 
-async function startMicrophoneCapture(): Promise<boolean> {
+async function startMicrophoneCapture(
+  origin: "manual" | "ptt" | "auto" = "manual",
+): Promise<boolean> {
+  if (micStartPromise) {
+    return micStartPromise;
+  }
   if (state.micCapturing) {
     return true;
   }
@@ -559,32 +587,43 @@ async function startMicrophoneCapture(): Promise<boolean> {
 
   state.statusMessage = "正在请求麦克风权限...";
 
-  try {
-    await startMicrophoneCaptureRuntime({
-      deviceId: state.microphoneDeviceId || null,
-      onChunk: (chunk) => {
-        sendMicrophoneAudioChunk(chunk);
-      },
-      onDeviceEnded: () => {
-        void stopMicrophoneCapture("device_ended");
-      },
-    });
+  micStartPromise = (async () => {
+    try {
+      audioSequenceBroken = false;
+      activeMicInputOrchestrationId = createRootInputOrchestrationId();
+      micCaptureOrigin = origin;
+      await startMicrophoneCaptureRuntime({
+        deviceId: state.microphoneDeviceId || null,
+        onChunk: (chunk) => {
+          sendMicrophoneAudioChunk(chunk);
+        },
+        onDeviceEnded: () => {
+          void stopMicrophoneCapture("device_ended");
+        },
+      });
 
-    state.micCapturing = true;
-    state.micRequested = true;
-    state.lastError = "";
-    state.statusMessage = "麦克风已开启，正在自动检测说话。";
-    void refreshMicrophoneDevices({ requestPermission: false });
-    pushHistory("system", state.statusMessage);
-    return true;
-  } catch (error) {
-    state.micCapturing = false;
-    state.lastError =
-      error instanceof Error ? error.message : "麦克风启动失败。";
-    state.statusMessage = `麦克风启动失败：${state.lastError}`;
-    pushHistory("error", state.statusMessage);
-    return false;
-  }
+      state.micCapturing = true;
+      state.micRequested = true;
+      state.lastError = "";
+      state.statusMessage = "麦克风已开启，正在自动检测说话。";
+      void refreshMicrophoneDevices({ requestPermission: false });
+      pushHistory("system", state.statusMessage);
+      return true;
+    } catch (error) {
+      state.micCapturing = false;
+      activeMicInputOrchestrationId = null;
+      micCaptureOrigin = null;
+      state.lastError =
+        error instanceof Error ? error.message : "麦克风启动失败。";
+      state.statusMessage = `麦克风启动失败：${state.lastError}`;
+      pushHistory("error", state.statusMessage);
+      return false;
+    } finally {
+      micStartPromise = null;
+    }
+  })();
+
+  return micStartPromise;
 }
 
 async function refreshMicrophoneDevices(
@@ -601,8 +640,9 @@ async function refreshMicrophoneDevices(
 }
 
 async function restartMicrophoneCaptureAfterDeviceChange(): Promise<void> {
+  const previousOrigin = micCaptureOrigin ?? "manual";
   await stopMicrophoneCaptureRuntimeOnly();
-  const started = await startMicrophoneCapture();
+  const started = await startMicrophoneCapture(previousOrigin);
   if (!started) {
     state.micRequested = false;
   }
@@ -637,9 +677,9 @@ async function startPttCapture(): Promise<void> {
     return;
   }
   if (state.micCapturing) {
-    return; // already capturing (possibly via auto-mic)
+    return;
   }
-  await startMicrophoneCapture();
+  await startMicrophoneCapture("ptt");
 }
 
 async function stopPttCapture(): Promise<void> {
@@ -649,9 +689,10 @@ async function stopPttCapture(): Promise<void> {
   if (!state.micCapturing) {
     return;
   }
-  // Only stop if mic was started by PTT — preserves manual mic-on state
-  void stopMicrophoneCaptureRuntime();
-  state.micCapturing = false;
+  if (micCaptureOrigin !== "ptt") {
+    return;
+  }
+  await stopMicrophoneCapture("ptt_release");
 }
 
 async function stopMicrophoneCapture(reason = "manual_stop"): Promise<boolean> {
@@ -660,25 +701,34 @@ async function stopMicrophoneCapture(reason = "manual_stop"): Promise<boolean> {
     if (reason === "manual_stop") {
       state.micRequested = false;
     }
+    clearMicCaptureSession();
     return false;
   }
 
   state.micCapturing = false;
-  if (reason === "manual_stop" || reason === "device_ended") {
+  if (reason === "manual_stop" || reason === "device_ended" || reason === "ptt_release") {
     state.micRequested = false;
   }
 
   await stopMicrophoneCaptureRuntime();
 
+  const inputOrchestrationId = activeMicInputOrchestrationId ?? createRootInputOrchestrationId();
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(
       JSON.stringify(
-        buildMessageEnvelope("input.mic_audio_end", {
-          reason,
-        }),
+        buildMessageEnvelope(
+          "input.mic_audio_end",
+          {
+            reason,
+            dropped: audioSequenceBroken,
+          },
+          null,
+          inputOrchestrationId,
+        ),
       ),
     );
   }
+  clearMicCaptureSession();
 
   state.statusMessage =
     reason === "manual_stop"
@@ -729,6 +779,23 @@ async function handleSocketMessage(rawData: string): Promise<void> {
 
   const event = mapInboundEnvelopeToEvent(envelope, buildInboundEventContext());
   await dispatchInboundEvent(event);
+}
+
+function createRootInputOrchestrationId(): string {
+  return `${ROOT_INPUT_ORCHESTRATION_PREFIX}${createMessageId()}`;
+}
+
+function getOrCreateActiveMicInputOrchestrationId(): string {
+  if (!activeMicInputOrchestrationId) {
+    activeMicInputOrchestrationId = createRootInputOrchestrationId();
+  }
+  return activeMicInputOrchestrationId;
+}
+
+function clearMicCaptureSession(): void {
+  activeMicInputOrchestrationId = null;
+  micCaptureOrigin = null;
+  audioSequenceBroken = false;
 }
 
 function buildInboundEventContext(): InboundEventMappingContext {

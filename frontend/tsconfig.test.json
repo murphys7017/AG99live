@@ -28,6 +28,8 @@
     "src/adapter-connection/inboundPayloads.ts",
     "src/adapter-connection/protocolMessageTypes.ts",
     "src/adapter-connection/inboundMotion.ts",
+    "src/adapter-connection/microphoneDevices.ts",
+    "src/adapter-connection/preferences.ts",
     "src/adapter-connection/transport.ts"
   ]
 }

@@ -1,6 +1,6 @@
 # astrbot_plugin_ag99live_adapter
 
-AG99live V2 的 AstrBot 插件侧实现。该目录负责协议桥接、会话调度、媒体处理、Live2D 扫描与 realtime motion intent 生成。
+AG99live V2 的 AstrBot 插件侧实现。该目录负责协议桥接、turn 生命周期、媒体处理、Live2D 扫描，以及把中间件/主回复产生的动作载荷广播给前端。
 
 ## 核心职责
 
@@ -8,7 +8,7 @@ AG99live V2 的 AstrBot 插件侧实现。该目录负责协议桥接、会话�
 - 发送 `output.* / control.* / system.* / engine.*` 消息回前端。
 - 管理 turn 生命周期，保证文本/语音/动作消息在同一轮次可追踪。
 - 扫描 Live2D 资源并产出结构化能力信息。
-- 生成并下发动作意图；默认使用 `inline_first`，必要时可回落到 reply 后独立动作生成，不再负责前端执行 plan 的长期编译职责。
+- 生成并下发动作用载荷；默认优先走 `inline_first` 内联动作链路，也支持 `split_after_reply` 下由交互中间件 `client_objects` 提供动作。
 
 ## 目录结构
 
@@ -35,29 +35,32 @@ astrbot_plugin_ag99live_adapter/
 - Adapter 在请求主模型前注入 `<@anim {...}>` 输出契约。
 - 主回复末尾若包含合法 `<@anim {...}>`，则优先提取并广播动作载荷。
 - 当前 inline contract 使用 `engine.motion_intent.v2`，字段来自当前模型的 `semantic_axis_profile`。
+- 如果中间件在 result contributor 阶段返回 `client_objects` 动作载荷，则优先广播这些结构化动作对象。
 
 ### 备选路径（split_after_reply）
 
-- 主聊天模型只负责正常回复文本，不注入 `<@anim {...}>` 契约。
-- `on_llm_response` 拿到最终 assistant 文本后，调度动作 selector 的二次请求。
-- 动作 selector 使用 AstrBot Provider（`motion_analysis_provider_id`，留空则跟随当前聊天 Provider）。
-- AstrBot 后续 ResultDecorate/TTS 流程继续执行；动作请求与 TTS 并行推进。
+- 主聊天模型只负责正常回复文本，不要求内联 `<@anim {...}>`。
+- 交互中间件在 prompt contributor 中注入动作能力/运行态上下文，在 result contributor 中返回 `client_objects` 或 plugin hints。
+- 后端从 `platform_extras` / `client_objects` 中读取动作载荷，并与文本、音频一起广播到前端。
+- 如果当前 runtime 明确启用了 dedicated realtime motion generator，它仍可作为 `split_after_reply` 下的后备生成路径。
 
 ### 动作 selector 输出
 
-- 当前 realtime 主路径产物为 `engine.motion_intent.v2`，前端 `ModelEngine` 根据 `semantic_axis_profile` 编译为 `engine.parameter_plan.v2` 再执行。
-- `motion_prompt_instruction` 会注入 selector prompt，用于影响动作风格和幅度；在 `inline_first` 模式下也会注入 inline contract。
-- realtime prompt 只暴露 profile 中的 `primary/hint` axes，禁止输出 `derived/runtime/ambient/debug` axes。
+- 当前主动作载荷为 `engine.motion_intent.v2`，前端 `ModelEngine` 根据 `semantic_axis_profile` 编译为 `engine.parameter_plan.v2` 再执行。
+- `motion_prompt_instruction` 会注入中间件动作上下文或 selector prompt，用于影响动作风格和幅度；在 `inline_first` 模式下也会注入 inline contract。
+- 中间件 prompt 只暴露 profile 中的 `primary/hint` axes，禁止输出 `derived/runtime/ambient/debug` axes。
 
 ## 与前端协同的关键点
 
 - 每条消息都带 `turn_id`，并尽量贯穿 `orchestration_id`，用于前端做 session 级轮次协调。
+- 每个 assistant segment 都必须携带非空 `message_id`；前端用它把 `output.text / output.audio / engine.motion_*` 聚合到同一个 `TurnPlaybackSegment`。
 - 前端同时兼容 `engine.motion_plan` 与 `engine.motion_intent`，但开发期要求消息类型与 payload 字段严格对应。
 - `semantic_axis_profile` / `calibration_profile` / `parameter_action_library` / `base_action_library` 由 `system.model_sync` 下发。
 - `system.semantic_axis_profile_saved` / `system.semantic_axis_profile_save_failed` 用于 Profile Editor 保存结果确认，不再依赖 `system.model_sync` 推断保存成败。
 - 一个 user input 对应一个 turn，但一个 turn 内可能输出多个 assistant segment。
 - `control.synth_finished` 表示该 turn 的输出队列关闭，不会再追加新的 `output.*` / `engine.motion_*` segment；它不要求早于所有前端播放完成。
 - 前端在 `synth_finished` 已到且所有 segment 播放完成后回传 `control.playback_finished`；后端收到后再发 `control.turn_finished`。
+- 麦克风输入现在按“单段录音”组织：一段采集内的 `input.raw_audio_data` 与 `input.mic_audio_end` 共享同一个新的 `input:*` orchestration id；若前端检测到发送积压，会在 `input.mic_audio_end` 中带上 `dropped: true`，后端直接丢弃该段转写。
 
 当前结构注意点：
 
@@ -69,8 +72,8 @@ astrbot_plugin_ag99live_adapter/
 
 - `motion_generation_mode`：动作生成链路，默认 `inline_first`；可选 `split_after_reply`。
 - `enable_inline_motion_contract`：`inline_first` 模式下是否启用主请求内联动作契约。
-- `enable_realtime_motion_plan`：是否启用回复后实时动作生成；在 `split_after_reply` 中是主链路，在 `inline_first` 中是兜底。
-- `motion_analysis_provider_id`：动作语义分析模型 Provider。
+- `enable_realtime_motion_plan`：是否启用 dedicated realtime motion generator；在 `split_after_reply` 中可作为后备动作生成路径，在 `inline_first` 中作为内联失败后的兜底。
+- `motion_analysis_provider_id`：动作分析 / realtime motion selector 使用的 Provider。
 - `realtime_motion_timeout_seconds`：realtime 生成超时（秒）。
 - `realtime_motion_fewshot_enabled`：是否启用 few-shot。
 - `realtime_motion_platform_context_enabled`：是否注入平台上下文。

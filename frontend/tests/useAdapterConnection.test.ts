@@ -60,8 +60,50 @@ class FakeWebSocket {
   }
 }
 
+class FakeAudioTrack {
+  stopped = false;
+  addEventListener(_type: string, _listener: () => void, _options?: unknown): void {}
+  stop(): void {
+    this.stopped = true;
+  }
+}
+
+class FakeMediaStream {
+  readonly audioTracks = [new FakeAudioTrack()];
+
+  getAudioTracks(): FakeAudioTrack[] {
+    return this.audioTracks;
+  }
+
+  getTracks(): FakeAudioTrack[] {
+    return this.audioTracks;
+  }
+}
+
+class FakeAudioWorkletNode {
+  static instances: FakeAudioWorkletNode[] = [];
+
+  readonly port = {
+    onmessage: null as ((event: MessageEvent<Float32Array>) => void) | null,
+    onmessageerror: null as ((event: Event) => void) | null,
+    close() {},
+  };
+
+  constructor() {
+    FakeAudioWorkletNode.instances.push(this);
+  }
+
+  disconnect(): void {}
+  connect(): void {}
+
+  emitChunk(chunk: Float32Array): void {
+    this.port.onmessage?.({ data: chunk } as MessageEvent<Float32Array>);
+  }
+}
+
 function installWindowStubs(): void {
   const storage = new Map<string, string>();
+  const nativeUrl = globalThis.URL;
   (window as unknown as {
     localStorage: {
       getItem: (key: string) => string | null;
@@ -89,6 +131,48 @@ function installWindowStubs(): void {
   window.ag99desktop = {
     getLocalAdapterHosts: () => ["127.0.0.1"],
   };
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      mediaDevices: {
+        getUserMedia: async () => new FakeMediaStream(),
+        enumerateDevices: async () => [],
+      },
+    },
+  });
+  Object.assign(globalThis, {
+    AudioWorkletNode: FakeAudioWorkletNode,
+  });
+  window.AudioContext = class {
+    state = "running";
+    sampleRate = 16000;
+    audioWorklet = {
+      addModule: async () => {},
+    };
+    destination = {};
+    async resume(): Promise<void> {}
+    createMediaStreamSource() {
+      return {
+        connect() {},
+        disconnect() {},
+      };
+    }
+    createGain() {
+      return {
+        gain: { value: 0 },
+        connect() {},
+        disconnect() {},
+      };
+    }
+    async close(): Promise<void> {}
+  } as unknown as typeof AudioContext;
+  Object.assign(globalThis, {
+    Blob: class {},
+  });
+  Object.assign(nativeUrl, {
+    createObjectURL: () => "blob:test",
+    revokeObjectURL: () => {},
+  });
 }
 
 function installWebSocketStub(): void {
@@ -99,6 +183,7 @@ function installWebSocketStub(): void {
 
 function createConnectedAdapter() {
   FakeWebSocket.instances.length = 0;
+  FakeAudioWorkletNode.instances.length = 0;
   const sessionStore = useTurnPlaybackSessionStore();
   const scope = effectScope();
   const adapter = scope.run(() => useAdapterConnection(sessionStore));
@@ -146,6 +231,12 @@ function sendTurnStarted(socket: FakeWebSocket, turnId = "turn-1", orchestration
     source: "backend",
     payload: {},
   }));
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function motionIntentEnvelope(messageId: string, turnId: string | null, orchestrationId: string | null) {
@@ -563,7 +654,129 @@ function testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted(): void {
   });
 }
 
-function run(): void {
+async function testAutoStartMicDoesNotDuplicateCaptureStart(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket } = harness;
+    socket.emitMessage(JSON.stringify({
+      type: "system.server_info",
+      version: "v2",
+      message_id: "server-info-1",
+      timestamp: "2026-05-08T00:00:00.000Z",
+      session_id: "session-1",
+      turn_id: null,
+      orchestration_id: null,
+      source: "adapter",
+      payload: {
+        ws_url: "ws://127.0.0.1:12396",
+        http_base_url: "http://127.0.0.1:12397",
+        auto_start_mic: true,
+      },
+    }));
+    socket.emitMessage(JSON.stringify({
+      type: "control.start_mic",
+      version: "v2",
+      message_id: "start-mic-1",
+      timestamp: "2026-05-08T00:00:00.001Z",
+      session_id: "session-1",
+      turn_id: null,
+      orchestration_id: null,
+      source: "adapter",
+      payload: {},
+    }));
+
+    await flushMicrotasks();
+
+    assert.equal(adapter.state.micCapturing, true);
+    const openMicLogs = adapter.state.historyEntries.filter((entry) =>
+      entry.text === "麦克风已开启，正在自动检测说话。"
+    );
+    assert.equal(openMicLogs.length, 1);
+  } finally {
+    harness.scope.stop();
+  }
+}
+
+async function testMicAudioUsesFreshInputOrchestrationAcrossChunkAndEnd(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket } = harness;
+    sendTurnStarted(socket, "turn-playback", "orch-playback-old");
+
+    const started = await adapter.toggleMicrophoneCapture();
+    assert.equal(started, true);
+    const worklet = FakeAudioWorkletNode.instances[0];
+    assert.ok(worklet);
+
+    socket.sent.length = 0;
+    worklet.emitChunk(new Float32Array([0.2, -0.1, 0.05]));
+    await flushMicrotasks();
+    await adapter.toggleMicrophoneCapture();
+
+    const rawAudioMessage = socket.sent
+      .map((item) => JSON.parse(item) as Record<string, unknown>)
+      .find((item) => item.type === "input.raw_audio_data");
+    const micEndMessage = socket.sent
+      .map((item) => JSON.parse(item) as Record<string, unknown>)
+      .find((item) => item.type === "input.mic_audio_end");
+
+    assert.ok(rawAudioMessage);
+    assert.ok(micEndMessage);
+    assert.equal(typeof rawAudioMessage?.orchestration_id, "string");
+    assert.equal(rawAudioMessage?.orchestration_id, micEndMessage?.orchestration_id);
+    assert.notEqual(rawAudioMessage?.orchestration_id, "orch-playback-old");
+    assert.match(String(rawAudioMessage?.orchestration_id), /^input:/);
+    assert.deepEqual(micEndMessage?.payload, {
+      reason: "manual_stop",
+      dropped: false,
+    });
+  } finally {
+    harness.scope.stop();
+  }
+}
+
+async function testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket } = harness;
+    const started = await adapter.toggleMicrophoneCapture();
+    assert.equal(started, true);
+    const worklet = FakeAudioWorkletNode.instances[0];
+    assert.ok(worklet);
+
+    socket.sent.length = 0;
+    socket.bufferedAmount = 600 * 1024;
+    worklet.emitChunk(new Float32Array([0.3, 0.1, -0.2]));
+    await flushMicrotasks();
+
+    assert.equal(adapter.state.lastError, "麦克风音频发送积压，本段收音已丢弃。");
+    assert.equal(adapter.state.statusMessage, "麦克风音频发送积压，本段收音已丢弃。");
+    assert.equal(
+      adapter.state.historyEntries.some((entry) => entry.text === "麦克风音频发送积压，本段收音已丢弃。"),
+      true,
+    );
+    assert.equal(
+      socket.sent.some((item) => item.includes("\"input.raw_audio_data\"")),
+      false,
+    );
+
+    socket.bufferedAmount = 0;
+    await adapter.toggleMicrophoneCapture();
+
+    const micEndMessage = socket.sent
+      .map((item) => JSON.parse(item) as Record<string, unknown>)
+      .find((item) => item.type === "input.mic_audio_end");
+    assert.ok(micEndMessage);
+    assert.deepEqual(micEndMessage?.payload, {
+      reason: "manual_stop",
+      dropped: true,
+    });
+  } finally {
+    harness.scope.stop();
+  }
+}
+
+async function run(): Promise<void> {
   installWindowStubs();
   installWebSocketStub();
 
@@ -581,8 +794,11 @@ function run(): void {
   testInvalidMotionDoesNotRewritePreviousSegment();
   testBackToBackTurnsDoNotSharePendingState();
   testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted();
+  await testAutoStartMicDoesNotDuplicateCaptureStart();
+  await testMicAudioUsesFreshInputOrchestrationAcrossChunkAndEnd();
+  await testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd();
 
   console.log("useAdapterConnection tests passed");
 }
 
-run();
+void run();

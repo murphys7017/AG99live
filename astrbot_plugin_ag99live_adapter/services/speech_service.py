@@ -185,6 +185,20 @@ class SpeechIngressService:
         return built_message
 
     async def handle_audio_end(self, message):
+        dropped = bool(message.payload.get("dropped", False))
+        if dropped:
+            await self.media_service.clear_audio_buffer()
+            logger.warning("Dropping microphone audio segment because frontend reported chunk loss.")
+            await self._send_json(
+                build_control_error(
+                    session_id=message.session_id,
+                    turn_id=message.turn_id,
+                    orchestration_id=message.orchestration_id,
+                    message="Microphone audio segment dropped before transcription.",
+                )
+            )
+            return None
+
         audio_buffer = await self.media_service.drain_audio_buffer()
 
         if audio_buffer.size == 0:

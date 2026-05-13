@@ -9,6 +9,7 @@ This directory contains human-facing project documentation.
 | `V2当前实现状态与下一步.md` | V2 当前实现快照、已完成项、剩余工作 |
 | `项目结构优化路线图.md` | 下一阶段结构优化入口 |
 | `后端主导数据边界与执行计划.md` | 长期数据归属边界和结构收口方向 |
+| `api/protocol.md` | 当前唯一有效的 WebSocket 协议契约 |
 
 ## Architecture
 

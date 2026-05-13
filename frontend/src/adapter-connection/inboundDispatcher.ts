@@ -100,7 +100,7 @@ export interface InboundDispatchDeps {
     envelope: ProtocolEnvelope<Record<string, unknown>>,
   ) => InboundMotionApplyResult;
   // mic
-  startMicrophoneCapture: () => Promise<boolean>;
+  startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
   // protocol warnings
   reportedProtocolWarnings: Set<string>;
   // build context
@@ -123,7 +123,7 @@ function applyServerInfoMessage(
   s.statusMessage = "适配器已连接，等待模型同步。";
   deps.pushHistory("system", "收到后端运行信息。");
   if (s.serverInfo.auto_start_mic) {
-    void deps.startMicrophoneCapture();
+    void deps.startMicrophoneCapture("auto");
   }
 }
 
@@ -423,7 +423,7 @@ export async function dispatchInboundEvent(
       s.micRequested = true;
       s.statusMessage = "后端已请求启动麦克风，准备自动收音。";
       deps.pushHistory("system", s.statusMessage);
-      void deps.startMicrophoneCapture();
+      void deps.startMicrophoneCapture("auto");
       return;
     case "synth_finished":
       deps.sessionStore?.markSynthFinished(event.orchestrationId, event.turnId);

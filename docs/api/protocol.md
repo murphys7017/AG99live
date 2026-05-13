@@ -15,7 +15,7 @@ All messages follow the V2 envelope:
   "session_id": "<string>",
   "turn_id": "<string | null>",
   "orchestration_id": "<string | null>",
-  "source": "backend" | "frontend",
+  "source": "adapter" | "frontend" | "astrbot" | "engine",
   "timestamp": "<ISO 8601>",
   "payload": { ... }
 }
@@ -72,15 +72,15 @@ The backend sends `turn_finished` only AFTER receiving `playback_finished`.
 | Type | Payload |
 |---|---|
 | `input.text` | `{ text: string, images: ImagePayload[] }` |
-| `input.raw_audio_data` | `{ audio: string, sample_rate: number, channels: number }` |
-| `input.mic_audio_end` | `{ reason: string }` |
+| `input.raw_audio_data` | `{ audio: number[], sample_rate: number, channels: 1 }` |
+| `input.mic_audio_end` | `{ reason: string, dropped?: boolean }` |
 
 ### output.* (Backend → Frontend)
 
 | Type | Payload | message_id required |
 |---|---|---|
 | `output.text` | `{ text: string, speaker_name: string, avatar: string }` | **yes** |
-| `output.audio` | `{ text: string, audio_url: string, speaker_name: string, avatar: string }` | **yes** |
+| `output.audio` | `{ text: string, audio_url: string | null, speaker_name: string, avatar: string }` | **yes** |
 | `output.image` | `{ images: string[] }` | no |
 | `output.transcription` | `{ text: string }` | no |
 
@@ -114,6 +114,25 @@ The backend sends `turn_finished` only AFTER receiving `playback_finished`.
 |---|---|---|
 | `engine.motion_intent` | Bidirectional | `engine.motion_intent.v2` |
 | `engine.motion_plan` | Bidirectional | `engine.parameter_plan.v2` |
+
+## Motion Generation Paths
+
+Current backend motion generation has only two valid paths:
+
+1. `inline_first`
+   - The main chat model reply includes inline `<@anim {...}>`.
+   - Backend extracts the nested `intent` and broadcasts `engine.motion_intent` directly.
+
+2. Middleware `client_objects`
+   - Interaction middleware returns motion payloads via `client_objects`.
+   - Backend reads them from `platform_extras` and broadcasts them directly.
+
+There is no longer any legacy plugin hook that schedules a second motion-only request after the main reply has completed.
+
+`split_after_reply` now means:
+- the main model only replies with text
+- motion must be provided by middleware `client_objects`
+- backend may still use the dedicated realtime motion generator module where the runtime path explicitly invokes it
 
 ## Schema Versions
 

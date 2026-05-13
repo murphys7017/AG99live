@@ -88,6 +88,7 @@ def test_main_plugin_sanitizes_hidden_output_markup_before_tts(
         platform_adapter_module,
     )
 
+    sys.modules.pop("astrbot_plugin_ag99live_adapter.main", None)
     module = importlib.import_module("astrbot_plugin_ag99live_adapter.main")
     Plain = module.Plain
     MyPlugin = module.MyPlugin
@@ -114,3 +115,45 @@ def test_main_plugin_sanitizes_hidden_output_markup_before_tts(
     asyncio.run(plugin.sanitize_hidden_output_markup_before_tts(event))
 
     assert extras.get("ag99live_raw_reply_text") == 'hello <@anim {"mode":"inline","intent":{}}>'
+
+
+def test_main_plugin_registers_interaction_contributors_during_init(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch)
+
+    plugin_runtime = types.ModuleType("astrbot_plugin_ag99live_adapter.runtime.plugin_runtime")
+    plugin_runtime.set_plugin_config = lambda _config: None
+    plugin_runtime.set_plugin_context = lambda _context: None
+    monkeypatch.setitem(
+        sys.modules,
+        "astrbot_plugin_ag99live_adapter.runtime.plugin_runtime",
+        plugin_runtime,
+    )
+
+    registered_contexts: list[object] = []
+    middleware_module = types.ModuleType("astrbot_plugin_ag99live_adapter.middleware")
+    middleware_module.register_ag99live_interaction_contributors = (
+        lambda context: registered_contexts.append(context)
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "astrbot_plugin_ag99live_adapter.middleware",
+        middleware_module,
+    )
+
+    platform_adapter_module = types.ModuleType("astrbot_plugin_ag99live_adapter.platform_adapter")
+    platform_adapter_module.OLVPetPlatformAdapter = object
+    monkeypatch.setitem(
+        sys.modules,
+        "astrbot_plugin_ag99live_adapter.platform_adapter",
+        platform_adapter_module,
+    )
+
+    sys.modules.pop("astrbot_plugin_ag99live_adapter.main", None)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.main")
+    context = module.Context()
+    module.MyPlugin(context=context, config={})
+
+    assert registered_contexts == [context]
