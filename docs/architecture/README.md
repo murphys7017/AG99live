@@ -4,6 +4,8 @@ Documents system architecture, boundaries, layers, and long-term structural deci
 
 ## Core Architecture Docs
 
+- `项目结构与模块职责总览.md` - Long-lived repo structure and module responsibility index
+- `前端适配器拆分与优化方案.md` - Adapter split and optimization plan for data/runtime/facade boundaries
 - `当前前后端动作链路结构说明.md` - Text/audio/motion pipeline from user input to turn completion
 - `前端系统模块架构说明.md` - Frontend module boundaries, dependency direction, consolidation priorities
 - `文本语音动作同步播放编排设计.md` - Soft-sync startup strategy for text/audio/motion
