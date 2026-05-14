@@ -1,6 +1,0 @@
-runtime:
-  governance_mode: manual_v1
-  adaptive_routing_enabled: false
-  self_modifying_governance_enabled: false
-  notes:
-    - v1 prioritizes stable structure over automation.

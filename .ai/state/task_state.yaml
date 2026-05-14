@@ -1,6 +1,0 @@
-current_task:
-  type: review
-  scope: final audit of 9-commit optimization session
-  risk: medium
-  phase: completed
-  owner: agent

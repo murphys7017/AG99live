@@ -1,9 +1,8 @@
 # Runtime Documentation
 
-Documents runtime behavior, governance execution, routing, state modeling, and feedback loops.
+Minimal AI agent runtime docs.
 
-## Documents
-
-- `agent_execution_protocol.md` - shared execution protocol for Codex, OpenCode, Claude Code, Cursor, and similar coding agents.
-- `.ai/runtime/continuity.md` - runtime continuity rules for long-running, multi-turn, interrupted, or resumed agent work.
-- `release_package.md` - describes the release package contents and installation steps.
+- `agent_execution_protocol.md` - shared execution loop.
+- `release_package.md` - package contents and install notes.
+- `.ai/index.md` - active operating guide.
+- `.ai/state.yaml` - optional explicit state.

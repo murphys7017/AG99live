@@ -1,38 +1,23 @@
 # Agent Entry Point
 
-This project uses `.ai/` as the runtime governance directory for AI coding agents.
+Use `.ai/index.md` as the project AI operating guide.
 
-Agents should not treat this file as the full governance system. This file is only the entry point and loading guide.
+Default loop:
 
-For the shared Codex/OpenCode/Claude Code/Cursor execution protocol, read `docs/runtime/agent_execution_protocol.md`.
+1. Understand the task objective, success criteria, and non-goals when relevant.
+2. Classify: documentation, feature, bugfix, refactor, review, release, or maintenance.
+3. Estimate risk: low, medium, or high.
+4. Inspect relevant files before editing.
+5. Make the smallest correct change.
+6. Review, validate when practical, correct issues, and report gaps.
 
-## Governance Philosophy
+Escalate governance for medium/high risk, architecture or public-interface impact, destructive/release actions, failed or missing validation, ambiguous scope, dirty relevant files, long-running/multi-turn/resumed work, or governance edits.
 
-This project treats AI coding agents as non-deterministic runtime systems. Reliability is a control problem, not a prompt problem.
+Rules:
 
-Prefer policy-driven execution over prompt-driven behavior: classify the task, estimate risk, load only relevant governance, follow a bounded workflow, apply checklists and evaluation, and update explicit state when required.
-
-## Default Loading Order
-
-1. Read `.ai/README.md`.
-2. Read `.ai/index.md`.
-3. Read `.ai/constitution/core.md`.
-4. Read `.ai/invariants/core.md`.
-5. Classify the task using `.ai/router/task_classification.md`.
-6. Estimate risk using `.ai/router/risk_levels.md` and `.ai/router/disturbance_model.md`.
-7. Read `.ai/runtime/continuity.md` for long-running, multi-turn, interrupted, or resumed work.
-8. Load relevant policies, workflows, skills, checklists, evaluation, and state files using `.ai/router/loading_rules.md`.
-
-## Core Behavior
-
-- Follow a closed execution loop: analyze, plan, implement, review, validate, correct.
-- Make the task objective, success criteria, and non-goals explicit when they affect execution.
-- Prefer stable constrained execution over unconstrained changes.
-- Build context before editing files.
-- Make the smallest correct change that solves the task.
-- Preserve architecture and user changes unless explicitly instructed otherwise.
-- Keep important assumptions, state, and risks observable.
-- Apply checklists and report evaluation results when applicable.
-- Validate changes when practical and report gaps honestly.
-- Update explicit state when the router path requires or recommends it.
-- Create commits only when explicitly requested.
+- Do not expand scope without approval.
+- Do not rewrite unrelated modules.
+- Preserve architecture and user changes unless asked otherwise.
+- Validate practical checks and report skipped/failed validation.
+- Update `.ai/state.yaml` only when scope, risk, architecture impact, assumptions, or validation status would otherwise be hidden.
+- Commit only when explicitly requested.

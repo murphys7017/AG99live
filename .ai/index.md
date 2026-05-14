@@ -1,123 +1,54 @@
-# Agent Governance Map
+# AI Operating Guide
 
-This file is the agent-readable map of the `.ai/` governance runtime.
+## Fast Path
 
-Use it to understand where to look, not as a replacement for the router.
+For low-risk local work: inspect relevant files, make the smallest correct change, review, validate when practical, and report gaps.
 
-## Entry Flow
+## Route
 
-For any non-trivial task, load governance in this order:
+Task class:
 
-1. `AGENTS.md`
-2. `.ai/README.md`
-3. `.ai/index.md`
-4. `.ai/constitution/core.md`
-5. `.ai/invariants/core.md`
-6. `.ai/router/task_classification.md`
-7. `.ai/router/risk_levels.md`
-8. `.ai/router/disturbance_model.md`
-9. `.ai/runtime/continuity.md`
-10. `.ai/router/loading_rules.md`
-11. Task-specific files selected by the router
+- documentation: docs/comments/governance text
+- feature: new behavior or capability
+- bugfix: faulty behavior correction
+- refactor: structure change preserving behavior
+- review: findings only
+- release: packaging, versioning, publishing
+- maintenance: repo setup or housekeeping
 
-Do not bypass task classification, risk estimation, or loading rules.
+Risk:
 
-## Layer Map
+- low: local/docs-only/easy inspection/no public or architecture impact
+- medium: bounded behavior change, multi-file local edit, partial validation, relevant dirty files
+- high: architecture boundary, public interface, release/destructive action, broad refactor, low context confidence
 
-| Layer | Path | Purpose |
-| --- | --- | --- |
-| Constitution | `constitution/` | Stable philosophy and long-term control principles. |
-| Invariants | `invariants/` | Rules that must not be violated during execution. |
-| Policies | `policies/` | Structured operational constraints and permissions. |
-| Runtime | `runtime/` | Continuity rules for long-running, multi-turn, interrupted, or resumed work. |
-| Router | `router/` | Task classification, risk estimation, disturbance awareness, and loading selection. |
-| Workflows | `workflows/` | Task-specific execution loops and exit conditions. |
-| Skills | `skills/` | Reusable operational procedures. |
-| Checklists | `checklists/` | Completion checks and attention recall mechanisms. |
-| Evaluation | `evaluation/` | Feedback criteria and result semantics. |
-| State | `state/` | Explicit observable runtime state. |
-| Adapters | `adapters/` | Runtime-specific guidance for Codex, OpenCode, Claude Code, Cursor, and similar agents. |
+Escalate when uncertain.
 
-## Router Files
+## Execute
 
-The router is the control selection layer.
+1. State objective, success criteria, and non-goals when they affect correctness.
+2. Inspect before editing.
+3. Preserve user changes and architecture.
+4. Patch the source of the issue; do not mask defects with fallback behavior.
+5. Keep changes scoped.
+6. Validate the primary path when behavior changes.
+7. Review for regressions, scope drift, and missing tests.
+8. Report validation status and residual risk.
 
-- `router/task_classification.md` defines task classes.
-- `router/risk_levels.md` defines governance intensity.
-- `router/disturbance_model.md` defines common destabilizing conditions.
-- `router/loading_rules.md` maps task class and risk to files that should be loaded.
+## Checklists
 
-## Typical Paths
+- implementation: scoped, style preserved, assumptions visible, unrelated files untouched
+- review: correctness, regressions, validation gaps, architecture boundaries, severity order
+- bugfix: root cause checked, primary path validated, fallback not treated as proof
+- refactor: behavior preserved, boundaries stable, rollback safe
+- safety: no secrets, no unapproved destructive/public action, user work preserved
 
-### Low-risk documentation
+## Continuity
 
-1. Classify as `documentation`.
-2. Estimate risk as `low`.
-3. Load `workflows/documentation.md`.
-4. Apply `checklists/review.md`.
-5. Skip state updates unless an assumption or persistent decision must be recorded.
+Re-check task class, risk, scope, workflow, assumptions, validation, and correction state after user changes, validation failure, context resume, unexpected worktree changes, or major implementation phases.
 
-### Medium bugfix
+## State
 
-1. Classify as `bugfix`.
-2. Estimate risk as `medium`.
-3. Load runtime, workflow, safety, debugging, implementation, review, and state materials selected by `loading_rules.md`.
-4. Reproduce or reason from evidence.
-5. Validate and report remaining gaps.
+Update `.ai/state.yaml` for medium/high-risk work when useful, and for high-risk work when required to keep assumptions visible. Ask before recording long-lived architecture decisions or persistent project risks.
 
-### High-risk refactor or release
-
-1. Classify the primary task.
-2. Estimate risk as `high`.
-3. Load the full selected governance path, including safety and architecture review.
-4. Review and update relevant state when required.
-5. Do not perform destructive, irreversible, or publication actions without explicit user approval.
-
-## Agent Completion Expectations
-
-Before final response, an agent should know:
-
-- task objective
-- success criteria or acceptance conditions
-- non-goals or scope boundaries
-- task class
-- risk level
-- selected workflow
-- files or state inspected
-- validation performed or skipped
-- checklist or evaluation result when applicable
-- residual risk
-- whether correction remains required
-
-If any of these are unknown for a medium or high-risk task, report the gap explicitly.
-
-## Continuity Discipline
-
-For long-running, multi-turn, interrupted, or resumed tasks:
-
-- use `runtime/continuity.md` to run governance checkpoints
-- use `checklists/continuity.md` before continuing after major task changes or before final response on medium/high-risk work
-- re-check task class, risk, disturbances, selected workflow, validation gaps, and correction state
-
-The agent must not assume the initial governance load remains valid after scope, risk, context, or user intent changes.
-
-## Objective Discipline
-
-Before implementing or claiming completion:
-
-- use `policies/objective.yaml` to keep work aligned to the requested outcome
-- use `checklists/objective_satisfaction.md` when the task objective, success criteria, or non-goals affect correctness
-- distinguish objective satisfaction from merely completing adjacent cleanup
-- report partial satisfaction, tradeoffs, or unmet success criteria explicitly
-
-The agent must not treat activity, validation success, or checklist completion as proof that the user's objective was satisfied.
-
-## Correctness Discipline
-
-When reviewing or fixing behavior:
-
-- use `policies/correctness.yaml` to distinguish root-cause fixes from downstream masking
-- use `skills/dataflow_review.md` when correctness crosses multiple boundaries
-- use `checklists/root_cause.md` for bugfixes, fallback-heavy paths, and degraded behavior
-
-Fallback, default values, retries, or swallowed errors are not proof that the primary path is correct.
+Do not update state performatively.

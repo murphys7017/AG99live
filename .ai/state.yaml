@@ -1,0 +1,18 @@
+task:
+  class: unknown
+  risk: unknown
+  phase: idle
+  scope: unknown
+context:
+  confidence: unknown
+  assumptions: []
+  unresolved_questions: []
+architecture:
+  stability: stable
+  boundary_changes: []
+verification:
+  checks_run: []
+  checks_failed: []
+  validation_gap: unknown
+runtime:
+  mode: minimal_v1
