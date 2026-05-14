@@ -1,8 +1,9 @@
-import type { ProtocolEnvelope, SystemSemanticAxisProfileSavePayload } from "../../types/protocol.js";
+import type { SystemSemanticAxisProfileSavePayload } from "../../types/protocol.js";
 import {
   normalizeOrchestrationId,
   normalizeTurnIdForComparison,
 } from "../core/orchestrationIds.js";
+import type { AdapterOutboundClient } from "./outboundClient.js";
 
 export interface OutboundActionState {
   currentTurnId: string | null;
@@ -18,13 +19,7 @@ export interface OutboundActionState {
 
 export interface OutboundActionContext {
   state: OutboundActionState;
-  getSocket: () => WebSocket | null;
-  buildEnvelope: <TPayload>(
-    type: string,
-    payload: TPayload,
-    turnId?: string | null,
-    orchestrationId?: string | null,
-  ) => ProtocolEnvelope<TPayload>;
+  outboundClient: AdapterOutboundClient;
   pushHistory: (role: string, text: string) => void;
   stopAudio: () => void;
   resetAudioPlaybackTerminal: () => void;
@@ -40,8 +35,7 @@ interface DesktopCaptureImagePayload {
 
 export async function sendText(ctx: OutboundActionContext, text: string): Promise<boolean> {
   const message = text.trim();
-  const socket = ctx.getSocket();
-  if (!message || !socket || socket.readyState !== WebSocket.OPEN) {
+  if (!message || !ctx.outboundClient.canSend()) {
     ctx.state.lastError = "当前还没有连上适配器，文本未发送。";
     ctx.state.statusMessage = ctx.state.lastError;
     ctx.pushHistory("error", ctx.state.lastError);
@@ -55,11 +49,16 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
     ? await captureRealtimeDesktopScreenshot()
     : null;
   const outboundText = buildDesktopAwareText(message, desktopCapture);
-  const envelope = ctx.buildEnvelope("input.text", {
+  const sent = ctx.outboundClient.send("input.text", {
     text: outboundText,
     images: desktopCapture ? [desktopCapture] : [],
   }, null, ctx.state.currentOrchestrationId);
-  socket.send(JSON.stringify(envelope));
+  if (!sent) {
+    ctx.state.lastError = "当前还没有连上适配器，文本未发送。";
+    ctx.state.statusMessage = ctx.state.lastError;
+    ctx.pushHistory("error", ctx.state.lastError);
+    return false;
+  }
   ctx.state.lastError = "";
   ctx.state.statusMessage = desktopCapture
     ? "文本和实时桌面截图已发送，等待后端回复。"
@@ -104,8 +103,7 @@ function buildDesktopAwareText(
 }
 
 export function interruptCurrentTurn(ctx: OutboundActionContext): boolean {
-  const socket = ctx.getSocket();
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
+  if (!ctx.outboundClient.canSend()) {
     ctx.state.lastError = "当前还没有连上适配器，无法发送中断。";
     ctx.state.statusMessage = ctx.state.lastError;
     ctx.pushHistory("error", ctx.state.lastError);
@@ -115,8 +113,12 @@ export function interruptCurrentTurn(ctx: OutboundActionContext): boolean {
   ctx.stopAudio();
   ctx.resetAudioPlaybackTerminal();
 
-  const envelope = ctx.buildEnvelope("control.interrupt", {}, ctx.state.currentTurnId);
-  socket.send(JSON.stringify(envelope));
+  if (!ctx.outboundClient.send("control.interrupt", {}, ctx.state.currentTurnId)) {
+    ctx.state.lastError = "当前还没有连上适配器，无法发送中断。";
+    ctx.state.statusMessage = ctx.state.lastError;
+    ctx.pushHistory("error", ctx.state.lastError);
+    return false;
+  }
   ctx.state.statusMessage = "已发送中断请求。";
   ctx.pushHistory("system", ctx.state.statusMessage);
   return true;
@@ -126,19 +128,19 @@ export function sendSemanticAxisProfileSave(
   ctx: OutboundActionContext,
   payload: SystemSemanticAxisProfileSavePayload,
 ): boolean {
-  const socket = ctx.getSocket();
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
+  if (!ctx.outboundClient.canSend()) {
     ctx.state.lastError = "当前还没有连上适配器，无法保存主轴配置。";
     ctx.state.statusMessage = ctx.state.lastError;
     ctx.pushHistory("error", ctx.state.lastError);
     return false;
   }
 
-  socket.send(
-    JSON.stringify(
-      ctx.buildEnvelope("system.semantic_axis_profile_save", payload),
-    ),
-  );
+  if (!ctx.outboundClient.send("system.semantic_axis_profile_save", payload)) {
+    ctx.state.lastError = "当前还没有连上适配器，无法保存主轴配置。";
+    ctx.state.statusMessage = ctx.state.lastError;
+    ctx.pushHistory("error", ctx.state.lastError);
+    return false;
+  }
   ctx.state.lastError = "";
   ctx.state.statusMessage = `已提交模型 ${payload.model_name} 的主轴配置保存请求。`;
   ctx.pushHistory("system", ctx.state.statusMessage);
@@ -151,8 +153,7 @@ export function sendMotionPayloadPreview(
   schemaMotionIntentV2: string,
   schemaParameterPlanV2: string,
 ): boolean {
-  const socket = ctx.getSocket();
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
+  if (!ctx.outboundClient.canSend()) {
     ctx.state.lastError = "当前还没有连上适配器，无法发送动作测试载荷。";
     ctx.state.statusMessage = ctx.state.lastError;
     ctx.pushHistory("error", ctx.state.lastError);
@@ -178,14 +179,15 @@ export function sendMotionPayloadPreview(
     : "engine.motion_plan";
   const payloadKey = messageType === "engine.motion_intent" ? "intent" : "plan";
 
-  socket.send(
-    JSON.stringify(
-      ctx.buildEnvelope(messageType, {
-        mode: "preview",
-        [payloadKey]: payload,
-      }),
-    ),
-  );
+  if (!ctx.outboundClient.send(messageType, {
+    mode: "preview",
+    [payloadKey]: payload,
+  })) {
+    ctx.state.lastError = "当前还没有连上适配器，无法发送动作测试载荷。";
+    ctx.state.statusMessage = ctx.state.lastError;
+    ctx.pushHistory("error", ctx.state.lastError);
+    return false;
+  }
   ctx.state.statusMessage = `已发送动作测试载荷（${messageType}）。`;
   ctx.pushHistory("system", ctx.state.statusMessage);
   return true;
@@ -198,21 +200,12 @@ export function sendPlaybackFinished(
   success: boolean,
   reason?: string,
 ): void {
-  const socket = ctx.getSocket();
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    return;
-  }
-
   const payload: { success: boolean; reason?: string } = { success };
   if (reason) {
     payload.reason = reason;
   }
 
-  socket.send(
-    JSON.stringify(
-      ctx.buildEnvelope("control.playback_finished", payload, turnId, orchestrationId),
-    ),
-  );
+  ctx.outboundClient.send("control.playback_finished", payload, turnId, orchestrationId);
 }
 
 export function clearPlaybackGroupContext(

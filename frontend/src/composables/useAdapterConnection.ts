@@ -34,6 +34,7 @@ import {
   sendSemanticAxisProfileSave as sendProfileSave,
   sendText as sendTextAction,
 } from "../adapter-connection/outbound/outboundActions.js";
+import { createAdapterOutboundClient } from "../adapter-connection/outbound/outboundClient.js";
 import {
   createAdapterAudioRuntime,
   type AudioPlaybackTerminalState,
@@ -227,12 +228,16 @@ const {
   findActiveAudioSegment,
 } = audioRuntime;
 
+const outboundClient = createAdapterOutboundClient({
+  getSocket: () => socket,
+  buildEnvelope: buildMessageEnvelope as (typeof buildMessageEnvelope),
+});
+
 const outboundCtx = {
   get state() {
     return state;
   },
-  getSocket: () => socket,
-  buildEnvelope: buildMessageEnvelope as (typeof buildMessageEnvelope),
+  outboundClient,
   pushHistory: pushHistory as (role: string, text: string) => void,
   stopAudio: () => stopAudioPlayback(),
   resetAudioPlaybackTerminal,

@@ -694,6 +694,67 @@ function testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted(): void {
   });
 }
 
+async function testSendTextUsesOutboundProtocolEnvelope(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket } = harness;
+    socket.sent.length = 0;
+
+    const sent = await adapter.sendText(" hello outbound ");
+
+    assert.equal(sent, true);
+    assert.equal(socket.sent.length, 1);
+    const message = JSON.parse(socket.sent[0]) as Record<string, unknown>;
+    assert.equal(message.type, "input.text");
+    assert.equal(message.version, "v2");
+    assert.equal(typeof message.message_id, "string");
+    assert.equal(typeof message.orchestration_id, "string");
+    assert.deepEqual(message.payload, {
+      text: "hello outbound",
+      images: [],
+    });
+    assert.equal(adapter.state.lastError, "");
+    assert.equal(adapter.state.statusMessage, "文本已发送，等待后端回复。");
+  } finally {
+    harness.scope.stop();
+  }
+}
+
+function testSendMotionPreviewUsesOutboundProtocolEnvelope(): void {
+  withConnectedAdapter(({ adapter, socket }) => {
+    socket.sent.length = 0;
+
+    const sent = adapter.sendMotionPayloadPreview({
+      schema_version: "engine.motion_intent.v2",
+      profile_id: "profile-1",
+      profile_revision: 1,
+      model_id: "model-1",
+      mode: "expressive",
+      emotion_label: "happy",
+      axes: {},
+    });
+
+    assert.equal(sent, true);
+    assert.equal(socket.sent.length, 1);
+    const message = JSON.parse(socket.sent[0]) as Record<string, unknown>;
+    assert.equal(message.type, "engine.motion_intent");
+    assert.equal(message.version, "v2");
+    assert.deepEqual(message.payload, {
+      mode: "preview",
+      intent: {
+        schema_version: "engine.motion_intent.v2",
+        profile_id: "profile-1",
+        profile_revision: 1,
+        model_id: "model-1",
+        mode: "expressive",
+        emotion_label: "happy",
+        axes: {},
+      },
+    });
+    assert.equal(adapter.state.statusMessage, "已发送动作测试载荷（engine.motion_intent）。");
+  });
+}
+
 async function testAutoStartMicDoesNotDuplicateCaptureStart(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
@@ -1001,6 +1062,8 @@ async function run(): Promise<void> {
   testInvalidMotionDoesNotRewritePreviousSegment();
   testBackToBackTurnsDoNotSharePendingState();
   testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted();
+  await testSendTextUsesOutboundProtocolEnvelope();
+  testSendMotionPreviewUsesOutboundProtocolEnvelope();
   await testAutoStartMicDoesNotDuplicateCaptureStart();
   await testMicAudioUsesFreshInputOrchestrationAcrossChunkAndEnd();
   await testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd();
