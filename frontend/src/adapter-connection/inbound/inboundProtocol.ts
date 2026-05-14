@@ -1,5 +1,5 @@
-import type { ProtocolEnvelope } from "../types/protocol.js";
-import { PROTOCOL_VERSION } from "./envelope.js";
+import type { ProtocolEnvelope } from "../../types/protocol.js";
+import { PROTOCOL_VERSION } from "../core/envelope.js";
 
 export type ParsedInboundEnvelope =
   | { ok: true; envelope: ProtocolEnvelope<unknown> }

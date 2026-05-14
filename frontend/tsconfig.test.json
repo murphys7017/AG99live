@@ -23,13 +23,19 @@
     "src/composables/usePlaybackCompletionCoordinator.ts",
     "src/composables/usePreviewMotionPlayer.ts",
     "src/composables/useAdapterConnection.ts",
-    "src/adapter-connection/inboundProtocol.ts",
-    "src/adapter-connection/inboundEvents.ts",
-    "src/adapter-connection/inboundPayloads.ts",
-    "src/adapter-connection/protocolMessageTypes.ts",
-    "src/adapter-connection/inboundMotion.ts",
-    "src/adapter-connection/microphoneDevices.ts",
-    "src/adapter-connection/preferences.ts",
-    "src/adapter-connection/transport.ts"
+    "src/adapter-connection/inbound/inboundProtocol.ts",
+    "src/adapter-connection/inbound/inboundConnectionDispatcher.ts",
+    "src/adapter-connection/inbound/inboundEvents.ts",
+    "src/adapter-connection/inbound/inboundFeatureDispatcher.ts",
+    "src/adapter-connection/inbound/inboundOutputDispatcher.ts",
+    "src/adapter-connection/inbound/inboundRuntimeDispatcher.ts",
+    "src/adapter-connection/inbound/inboundPayloads.ts",
+    "src/adapter-connection/inbound/inboundProtocolDiagnostics.ts",
+    "src/adapter-connection/core/protocolMessageTypes.ts",
+    "src/adapter-connection/inbound/inboundMotion.ts",
+    "src/adapter-connection/inbound/inboundMotionDispatcher.ts",
+    "src/adapter-connection/runtime/microphoneDevices.ts",
+    "src/adapter-connection/core/preferences.ts",
+    "src/adapter-connection/core/transport.ts"
   ]
 }

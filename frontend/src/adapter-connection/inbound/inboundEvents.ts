@@ -14,9 +14,9 @@ import type {
   SystemSemanticAxisProfileSavedPayload,
   SystemSemanticAxisProfileSaveFailedPayload,
   SystemServerInfoPayload,
-} from "../types/protocol.js";
-import { normalizeOrchestrationId } from "./orchestrationIds.js";
-import { INBOUND_MESSAGE_TYPES } from "./protocolMessageTypes.js";
+} from "../../types/protocol.js";
+import { normalizeOrchestrationId } from "../core/orchestrationIds.js";
+import { INBOUND_MESSAGE_TYPES } from "../core/protocolMessageTypes.js";
 import {
   type PayloadParseError,
   parseControlErrorPayload,

@@ -1,18 +1,23 @@
 task:
-  class: unknown
-  risk: unknown
-  phase: idle
-  scope: unknown
+  class: refactor
+  risk: medium
+  phase: completed
+  scope: frontend adapter-connection structure
 context:
-  confidence: unknown
-  assumptions: []
+  confidence: high
+  assumptions:
+    - Adapter external APIs should remain stable while implementation folders are reorganized.
+    - Motion engine and action library are out of scope for the current structural pass.
   unresolved_questions: []
 architecture:
   stability: stable
-  boundary_changes: []
+  boundary_changes:
+    - frontend/src/adapter-connection split into core, inbound, outbound, runtime, and features.
 verification:
-  checks_run: []
+  checks_run:
+    - frontend npm run typecheck
+    - frontend npm test
   checks_failed: []
-  validation_gap: unknown
+  validation_gap: none known
 runtime:
   mode: minimal_v1

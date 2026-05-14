@@ -25,7 +25,7 @@ import {
   SCHEMA_MOTION_INTENT_V2,
   SCHEMA_PARAMETER_PLAN_V2,
 } from "../types/protocol.js";
-import { applyInboundMotionPayload } from "../adapter-connection/inboundMotion.js";
+import { applyInboundMotionPayload } from "../adapter-connection/inbound/inboundMotion.js";
 import {
   clearPlaybackGroupContext as clearPlaybackGroup,
   interruptCurrentTurn as sendInterrupt,
@@ -33,67 +33,58 @@ import {
   sendPlaybackFinished as sendPlaybackFinishedAction,
   sendSemanticAxisProfileSave as sendProfileSave,
   sendText as sendTextAction,
-} from "../adapter-connection/outboundActions.js";
+} from "../adapter-connection/outbound/outboundActions.js";
 import {
-  playAudioAndAcknowledge as playAudioAction,
-  stopAudioPlayback as stopAudioAction,
-} from "../adapter-connection/audioPlaybackActions.js";
+  createAdapterAudioRuntime,
+  type AudioPlaybackTerminalState,
+} from "../adapter-connection/runtime/audioRuntime.js";
 import { useAdapterMotionTuning } from "./useAdapterMotionTuning.js";
 import {
   rewriteHttpUrl as rewriteHttpUrlWithActiveHost,
   rewriteModelSyncEnvelope as rewriteModelSyncEnvelopeWithActiveHost,
   rewriteSocketUrl as rewriteSocketUrlWithActiveHost,
-} from "../adapter-connection/modelSyncRewrite.js";
+} from "../adapter-connection/features/modelSyncRewrite.js";
 import {
-  isMicrophoneCaptureRuntimeActive,
-  startMicrophoneCaptureRuntime,
-  stopMicrophoneCaptureRuntime,
-  type MicrophoneAudioChunk,
-} from "../adapter-connection/microphoneCapture.js";
-import {
-  listMicrophoneInputDevices,
-  type MicrophoneDeviceInfo,
-} from "../adapter-connection/microphoneDevices.js";
+  createAdapterMicrophoneRuntime,
+} from "../adapter-connection/runtime/microphoneRuntime.js";
+import type { MicrophoneDeviceInfo } from "../adapter-connection/runtime/microphoneDevices.js";
 import {
   startAudioPlayback,
   stopAudioPlaybackRuntime,
-} from "../adapter-connection/audioPlayback.js";
+} from "../adapter-connection/runtime/audioPlayback.js";
 import {
   buildConnectFailureMessage,
   buildConnectionCandidates,
   DEFAULT_ADAPTER_ADDRESS,
   formatAddressHost,
   normalizeWsAddress,
-} from "../adapter-connection/address.js";
-import { openAdapterConnectionTransport } from "../adapter-connection/transport.js";
+} from "../adapter-connection/core/address.js";
+import { openAdapterConnectionTransport } from "../adapter-connection/core/transport.js";
 import {
   buildMessageEnvelope as buildProtocolMessageEnvelope,
   createMessageId,
   PROTOCOL_VERSION,
-} from "../adapter-connection/envelope.js";
+} from "../adapter-connection/core/envelope.js";
 import {
   loadDesktopScreenshotOnSendEnabled,
   loadStoredMicrophoneDeviceId,
   loadStoredAdapterAddress,
   normalizeAdapterAddressSetting,
-  normalizeMicrophoneDeviceId,
   saveDesktopScreenshotOnSendEnabled,
-  saveStoredMicrophoneDeviceId,
   saveStoredAdapterAddress,
-} from "../adapter-connection/preferences.js";
-import { parseInboundEnvelope } from "../adapter-connection/inboundProtocol.js";
+} from "../adapter-connection/core/preferences.js";
+import { parseInboundEnvelope } from "../adapter-connection/inbound/inboundProtocol.js";
 import {
   mapInboundEnvelopeToEvent,
   type InboundAdapterEvent,
   type InboundEventMappingContext,
-} from "../adapter-connection/inboundEvents.js";
+} from "../adapter-connection/inbound/inboundEvents.js";
 import {
   matchesPlaybackGroup,
   queueAssistantTextForPlayback as queuePendingAssistantTextForPlayback,
-  queueAudioForPlayback as queuePendingAudioForPlayback,
   type PendingAssistantTextItem,
   type PendingAudioItem,
-} from "../adapter-connection/playbackReleaseQueue.js";
+} from "../adapter-connection/runtime/playbackReleaseQueue.js";
 import { useModelSync } from "./useModelSync.js";
 import { useAdapterHistory } from "./useAdapterHistory.js";
 import { normalizeMotionPayload } from "../model-engine/normalize.js";
@@ -101,23 +92,13 @@ import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore.
 import {
   dispatchInboundEvent as dispatchInboundEventToDeps,
   type InboundDispatchDeps,
-} from "../adapter-connection/inboundDispatcher.js";
-import {
-  hasPendingAudioForTurn as hasPendingAudioForTurnBridge,
-  markAudioPlaybackTerminal as markAudioTerminalBridge,
-  markMissingAudiosForTurn as markMissingAudiosForTurnBridge,
-  resetAudioPlaybackTerminal as resetAudioTerminalBridge,
-  type AudioBridgeDeps,
-} from "../adapter-connection/adapterAudioBridge.js";
+} from "../adapter-connection/inbound/inboundDispatcher.js";
 import {
   resetConnectionRuntimeState as resetConnectionRuntime,
-} from "../adapter-connection/connectionRuntimeState.js";
+} from "../adapter-connection/runtime/connectionRuntimeState.js";
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
-type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "absent";
 
-const MAX_MIC_SOCKET_BUFFERED_AMOUNT = 512 * 1024;
-const ROOT_INPUT_ORCHESTRATION_PREFIX = "input:";
 const state = reactive({
   address: loadStoredAdapterAddress(),
   desktopScreenshotOnSendEnabled: loadDesktopScreenshotOnSendEnabled(),
@@ -178,10 +159,6 @@ let socket: WebSocket | null = null;
 let manualClose = false;
 let initializePromise: Promise<void> | null = null;
 let connectAttemptSerial = 0;
-let micStartPromise: Promise<boolean> | null = null;
-let audioSequenceBroken = false;
-let activeMicInputOrchestrationId: string | null = null;
-let micCaptureOrigin: "manual" | "ptt" | "auto" | null = null;
 const assistantHistoryKeys: string[] = [];
 const assistantHistoryKeySet = new Set<string>();
 const reportedProtocolWarnings = new Set<string>();
@@ -206,6 +183,50 @@ function buildMessageEnvelope<TPayload>(
   );
 }
 
+const microphoneRuntime = createAdapterMicrophoneRuntime({
+  state,
+  getSocket: () => socket,
+  buildEnvelope: buildMessageEnvelope as (typeof buildMessageEnvelope),
+  pushHistory: pushHistory as (role: "system" | "error", text: string) => void,
+  createMessageId,
+  setDesktopPttMode: (enabled) => {
+    if (typeof window !== "undefined") {
+      window.ag99desktop?.setPttMode?.(enabled);
+    }
+  },
+});
+
+const {
+  setMicrophoneDevice,
+  setMicrophoneDevices,
+  refreshMicrophoneDevices,
+  toggleMicrophoneCapture,
+  startMicrophoneCapture,
+  stopMicrophoneCapture,
+  setPttMode,
+  startPttCapture,
+  stopPttCapture,
+} = microphoneRuntime;
+
+const audioRuntime = createAdapterAudioRuntime({
+  state,
+  startAudio: startAudioPlayback,
+  stopAudioRuntime: stopAudioPlaybackRuntime,
+  pushHistory: pushHistory as (role: string, text: string) => void,
+  getSessionStore: () => sessionStore,
+});
+
+const {
+  queueAudioForPlayback,
+  releaseAudioForPlayback,
+  hasPendingAudioForTurn,
+  markMissingAudiosForTurn,
+  markAudioPlaybackTerminal,
+  resetAudioPlaybackTerminal,
+  stopAudioPlayback,
+  findActiveAudioSegment,
+} = audioRuntime;
+
 const outboundCtx = {
   get state() {
     return state;
@@ -218,122 +239,6 @@ const outboundCtx = {
   createMessageId,
 };
 
-const audioPlaybackCtx = {
-  get state() {
-    return state;
-  },
-  startAudio: startAudioPlayback,
-  stopAudioRuntime: stopAudioPlaybackRuntime,
-  pushHistory: pushHistory as (role: string, text: string) => void,
-  markTerminal: markAudioPlaybackTerminal,
-  resetTerminal: resetAudioPlaybackTerminal,
-  get sessionStore() {
-    return sessionStore
-      ? {
-          markAudioStarted: (
-            orchestrationId: string | null,
-            turnId: string | null,
-            messageId: string,
-            startedAtMs?: number | null,
-            durationMs?: number | null,
-          ) => sessionStore?.markAudioStarted(
-            orchestrationId,
-            turnId,
-            messageId,
-            startedAtMs,
-            durationMs,
-          ),
-          markAudioDuration: (
-            orchestrationId: string | null,
-            turnId: string | null,
-            messageId: string,
-            durationMs: number | null,
-          ) => sessionStore?.markAudioDuration(
-            orchestrationId,
-            turnId,
-            messageId,
-            durationMs,
-          ),
-        }
-      : undefined;
-  },
-};
-
-const audioBridge = {
-  get state() {
-    return state;
-  },
-  get sessionStore() {
-    return sessionStore
-      ? {
-          markAudioTerminal: (
-            orchestrationId: string | null,
-            turnId: string | null,
-            terminal: "completed" | "failed" | "absent",
-            messageId: string,
-            reason?: string,
-          ) => sessionStore?.markAudioTerminal(orchestrationId, turnId, terminal, messageId, reason),
-          getSessions: () => sessionStore?.getSessions() ?? [],
-        }
-      : undefined;
-  },
-} satisfies AudioBridgeDeps;
-
-function markAudioPlaybackTerminal(
-  terminalState: Exclude<AudioPlaybackTerminalState, "idle">,
-  turnId: string | null,
-  orchestrationId: string | null,
-  reason = "",
-  messageId: string | null = null,
-): void {
-  markAudioTerminalBridge(audioBridge, terminalState, turnId, orchestrationId, reason, messageId);
-}
-
-function resetAudioPlaybackTerminal(): void {
-  resetAudioTerminalBridge(audioBridge);
-}
-
-function sendMicrophoneAudioChunk(chunk: MicrophoneAudioChunk): void {
-  if (
-    !socket
-    || socket.readyState !== WebSocket.OPEN
-  ) {
-    if (isMicrophoneCaptureRuntimeActive()) {
-      audioSequenceBroken = true;
-    }
-    return;
-  }
-
-  if (socket.bufferedAmount > MAX_MIC_SOCKET_BUFFERED_AMOUNT) {
-    if (!audioSequenceBroken) {
-      audioSequenceBroken = true;
-      state.lastError = "麦克风音频发送积压，本段收音已丢弃。";
-      state.statusMessage = state.lastError;
-      pushHistory("error", state.lastError);
-    }
-    return;
-  }
-
-  if (!chunk.audio.length) {
-    return;
-  }
-
-  socket.send(
-    JSON.stringify(
-      buildMessageEnvelope(
-        "input.raw_audio_data",
-        {
-          audio: chunk.audio,
-          sample_rate: chunk.sampleRate,
-          channels: chunk.channels,
-        },
-        null,
-        getOrCreateActiveMicInputOrchestrationId(),
-      ),
-    ),
-  );
-}
-
 function persistAddress(nextAddress: string): void {
   const normalizedAddress = normalizeAdapterAddressSetting(nextAddress);
   state.address = normalizedAddress;
@@ -343,40 +248,6 @@ function persistAddress(nextAddress: string): void {
 function setDesktopScreenshotOnSendEnabled(enabled: boolean): void {
   state.desktopScreenshotOnSendEnabled = enabled;
   saveDesktopScreenshotOnSendEnabled(enabled);
-}
-
-function setMicrophoneDevice(deviceId: string): void {
-  const normalized = normalizeMicrophoneDeviceId(deviceId);
-  if (normalized === state.microphoneDeviceId) {
-    return;
-  }
-
-  const shouldRestartCapture = state.micCapturing || isMicrophoneCaptureRuntimeActive();
-  state.microphoneDeviceId = normalized;
-  saveStoredMicrophoneDeviceId(normalized);
-  if (shouldRestartCapture) {
-    void restartMicrophoneCaptureAfterDeviceChange();
-  }
-}
-
-function setMicrophoneDevices(devices: readonly MicrophoneDeviceInfo[]): void {
-  const normalizedDevices = devices
-    .map((device, index) => ({
-      deviceId: normalizeMicrophoneDeviceId(device.deviceId),
-      label: typeof device.label === "string" && device.label.trim()
-        ? device.label.trim()
-        : `麦克风 ${index + 1}`,
-    }))
-    .filter((device) => device.deviceId);
-
-  state.microphoneDevices = normalizedDevices;
-  if (
-    normalizedDevices.length > 0
-    && state.microphoneDeviceId
-    && !normalizedDevices.some((device) => device.deviceId === state.microphoneDeviceId)
-  ) {
-    setMicrophoneDevice("");
-  }
 }
 
 function setAddress(nextAddress: string): void {
@@ -433,7 +304,7 @@ function disconnect(): void {
 function disconnectInternal(markManualClose: boolean): void {
   manualClose = markManualClose;
   connectAttemptSerial += 1;
-  micStartPromise = null;
+  microphoneRuntime.clearPendingStart();
   void stopMicrophoneCapture(markManualClose ? "manual_disconnect" : "connection_reset");
   stopAudioPlayback();
   if (socket) {
@@ -560,190 +431,6 @@ function resetConnectionRuntimeState(): void {
   });
 }
 
-async function toggleMicrophoneCapture(): Promise<boolean> {
-  if (state.micCapturing) {
-    return stopMicrophoneCapture("manual_stop");
-  }
-
-  return startMicrophoneCapture("manual");
-}
-
-async function startMicrophoneCapture(
-  origin: "manual" | "ptt" | "auto" = "manual",
-): Promise<boolean> {
-  if (micStartPromise) {
-    return micStartPromise;
-  }
-  if (state.micCapturing) {
-    return true;
-  }
-
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    state.lastError = "当前还没有连上适配器，无法启动麦克风。";
-    state.statusMessage = state.lastError;
-    pushHistory("error", state.lastError);
-    return false;
-  }
-
-  state.statusMessage = "正在请求麦克风权限...";
-
-  micStartPromise = (async () => {
-    try {
-      audioSequenceBroken = false;
-      activeMicInputOrchestrationId = createRootInputOrchestrationId();
-      micCaptureOrigin = origin;
-      await startMicrophoneCaptureRuntime({
-        deviceId: state.microphoneDeviceId || null,
-        onChunk: (chunk) => {
-          sendMicrophoneAudioChunk(chunk);
-        },
-        onDeviceEnded: () => {
-          void stopMicrophoneCapture("device_ended");
-        },
-      });
-
-      state.micCapturing = true;
-      state.micRequested = true;
-      state.lastError = "";
-      state.statusMessage = "麦克风已开启，正在自动检测说话。";
-      void refreshMicrophoneDevices({ requestPermission: false });
-      pushHistory("system", state.statusMessage);
-      return true;
-    } catch (error) {
-      state.micCapturing = false;
-      activeMicInputOrchestrationId = null;
-      micCaptureOrigin = null;
-      state.lastError =
-        error instanceof Error ? error.message : "麦克风启动失败。";
-      state.statusMessage = `麦克风启动失败：${state.lastError}`;
-      pushHistory("error", state.statusMessage);
-      return false;
-    } finally {
-      micStartPromise = null;
-    }
-  })();
-
-  return micStartPromise;
-}
-
-async function refreshMicrophoneDevices(
-  options: { requestPermission?: boolean } = {},
-): Promise<void> {
-  try {
-    const devices = await listMicrophoneInputDevices({
-      requestPermission: options.requestPermission ?? true,
-    });
-    setMicrophoneDevices(devices);
-  } catch (error) {
-    console.warn("[Connection] failed to enumerate microphone devices.", error);
-  }
-}
-
-async function restartMicrophoneCaptureAfterDeviceChange(): Promise<void> {
-  const previousOrigin = micCaptureOrigin ?? "manual";
-  await stopMicrophoneCapture("device_change");
-  const started = await startMicrophoneCapture(previousOrigin);
-  if (!started) {
-    state.micRequested = false;
-  }
-}
-
-async function stopMicrophoneCaptureRuntimeOnly(): Promise<boolean> {
-  if (!isMicrophoneCaptureRuntimeActive()) {
-    state.micCapturing = false;
-    return false;
-  }
-
-  state.micCapturing = false;
-  return stopMicrophoneCaptureRuntime();
-}
-
-// ── Push-to-talk ───────────────────────────────────────────────────
-
-function setPttMode(enabled: boolean): void {
-  state.pttModeEnabled = enabled;
-  // Notify main process to toggle window focus
-  window.ag99desktop?.setPttMode?.(enabled);
-  if (enabled) {
-    // When PTT mode activates, stop mic if currently capturing
-    if (state.micCapturing || isMicrophoneCaptureRuntimeActive()) {
-      void stopMicrophoneCapture("ptt_mode_enabled");
-    }
-  }
-}
-
-async function startPttCapture(): Promise<void> {
-  if (!state.pttModeEnabled) {
-    return;
-  }
-  if (state.micCapturing) {
-    return;
-  }
-  await startMicrophoneCapture("ptt");
-}
-
-async function stopPttCapture(): Promise<void> {
-  if (!state.pttModeEnabled) {
-    return;
-  }
-  if (!state.micCapturing) {
-    return;
-  }
-  if (micCaptureOrigin !== "ptt") {
-    return;
-  }
-  await stopMicrophoneCapture("ptt_release");
-}
-
-async function stopMicrophoneCapture(reason = "manual_stop"): Promise<boolean> {
-  if (!isMicrophoneCaptureRuntimeActive()) {
-    state.micCapturing = false;
-    if (reason === "manual_stop") {
-      state.micRequested = false;
-    }
-    clearMicCaptureSession();
-    return false;
-  }
-
-  state.micCapturing = false;
-  if (reason === "manual_stop" || reason === "device_ended" || reason === "ptt_release") {
-    state.micRequested = false;
-  }
-
-  await stopMicrophoneCaptureRuntime();
-
-  const inputOrchestrationId = activeMicInputOrchestrationId ?? createRootInputOrchestrationId();
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(
-      JSON.stringify(
-        buildMessageEnvelope(
-          "input.mic_audio_end",
-          {
-            reason,
-            dropped: audioSequenceBroken,
-          },
-          null,
-          inputOrchestrationId,
-        ),
-      ),
-    );
-  }
-  clearMicCaptureSession();
-
-  if (reason === "device_change") {
-    return true;
-  }
-
-  state.statusMessage =
-    reason === "manual_stop"
-      ? "麦克风已关闭。"
-      : "麦克风采集已停止。";
-  if (reason !== "connection_closed" && reason !== "connection_reset") {
-    pushHistory("system", state.statusMessage);
-  }
-  return true;
-}
-
 function logProtocolError(
   key: string,
   message: string,
@@ -785,23 +472,6 @@ async function handleSocketMessage(rawData: string): Promise<void> {
   await dispatchInboundEvent(event);
 }
 
-function createRootInputOrchestrationId(): string {
-  return `${ROOT_INPUT_ORCHESTRATION_PREFIX}${createMessageId()}`;
-}
-
-function getOrCreateActiveMicInputOrchestrationId(): string {
-  if (!activeMicInputOrchestrationId) {
-    activeMicInputOrchestrationId = createRootInputOrchestrationId();
-  }
-  return activeMicInputOrchestrationId;
-}
-
-function clearMicCaptureSession(): void {
-  activeMicInputOrchestrationId = null;
-  micCaptureOrigin = null;
-  audioSequenceBroken = false;
-}
-
 function buildInboundEventContext(): InboundEventMappingContext {
   const activeAudioSegment = findActiveAudioSegment();
   return {
@@ -810,27 +480,6 @@ function buildInboundEventContext(): InboundEventMappingContext {
     activeAudioTurnId: activeAudioSegment?.turnId ?? null,
     activeAudioOrchestrationId: activeAudioSegment?.orchestrationId ?? null,
   };
-}
-
-function findActiveAudioSegment(): {
-  turnId: string | null;
-  orchestrationId: string | null;
-  messageId: string;
-} | null {
-  const sessions = sessionStore?.getSessions() ?? [];
-  for (const session of sessions) {
-    for (const segmentId of session.segmentOrder) {
-      const segment = session.segments.get(segmentId);
-      if (segment?.audio.started && segment.audio.terminal === "idle") {
-        return {
-          turnId: segment.turnId,
-          orchestrationId: segment.orchestrationId,
-          messageId: segment.messageId,
-        };
-      }
-    }
-  }
-  return null;
 }
 
 async function dispatchInboundEvent(
@@ -884,8 +533,19 @@ function buildDispatchDeps(): InboundDispatchDeps {
     markMissingAudiosForTurn: (turnId, orchestrationId, reason) => markMissingAudiosForTurn(turnId, orchestrationId, reason),
     queuePendingAssistantTextForPlayback: (map, text, turnId, orchestrationId, messageId) =>
       queuePendingAssistantTextForPlayback(map, text, turnId, orchestrationId, messageId),
-    queuePendingAudioForPlayback: (map, url, turnId, orchestrationId, messageId) =>
-      queuePendingAudioForPlayback(map, url, turnId, orchestrationId, messageId),
+    queuePendingAudioForPlayback: (map, url, turnId, orchestrationId, messageId) => {
+      if (map === state.pendingAudios) {
+        queueAudioForPlayback(url, turnId, orchestrationId, messageId);
+        return;
+      }
+      map.set(messageId, {
+        audioUrl: url,
+        turnId,
+        orchestrationId,
+        messageId,
+        receivedAtMs: performance.now(),
+      });
+    },
     findActiveAudioSegment: () => findActiveAudioSegment(),
     normalizeMotionPayload: (payload) => normalizeMotionPayload(payload),
     applyInboundMotionPayload: (ctx, envelope) =>
@@ -967,84 +627,6 @@ function releaseAssistantTextForPlayback(
   sessionStore?.markTextDelivered(releasedOrchestrationId, releasedTurnId, messageId);
   state.statusMessage = "文本回复已进入同步播放。";
   return true;
-}
-
-function queueAudioForPlayback(
-  audioUrl: string,
-  turnId: string | null,
-  orchestrationId: string | null,
-  messageId: string,
-): void {
-  queuePendingAudioForPlayback(
-    state.pendingAudios,
-    audioUrl,
-    turnId,
-    orchestrationId,
-    messageId,
-  );
-  state.statusMessage = "收到语音回复，等待同步播放。";
-  pushHistory("system", state.statusMessage);
-}
-
-async function playAudioAndAcknowledge(
-  audioUrl: string,
-  turnId: string | null,
-  orchestrationId: string | null = state.currentOrchestrationId,
-  messageId: string,
-): Promise<void> {
-  return playAudioAction(audioPlaybackCtx, audioUrl, turnId, orchestrationId, messageId);
-}
-
-function releaseAudioForPlayback(
-  messageId: string,
-  turnId: string | null,
-  orchestrationId: string | null,
-): boolean {
-  const item = state.pendingAudios.get(messageId);
-  if (!item) {
-    return false;
-  }
-  const audioUrl = item.audioUrl.trim();
-  if (!audioUrl) {
-    return false;
-  }
-  if (!matchesPlaybackGroup(
-    item.turnId,
-    item.orchestrationId,
-    turnId,
-    orchestrationId,
-  )) {
-    return false;
-  }
-  const releasedTurnId = item.turnId ?? turnId;
-  const releasedOrchestrationId = item.orchestrationId ?? orchestrationId;
-  state.pendingAudios.delete(messageId);
-  void playAudioAndAcknowledge(
-    audioUrl,
-    releasedTurnId,
-    releasedOrchestrationId,
-    messageId,
-  );
-  return true;
-}
-
-function hasPendingAudioForTurn(
-  turnId: string | null,
-  orchestrationId: string | null,
-): boolean {
-  return hasPendingAudioForTurnBridge(audioBridge, turnId, orchestrationId);
-}
-
-function markMissingAudiosForTurn(
-  turnId: string | null,
-  orchestrationId: string | null,
-  reason: string,
-): void {
-  markMissingAudiosForTurnBridge(audioBridge, turnId, orchestrationId, reason);
-}
-
-function stopAudioPlayback(): void {
-  stopAudioAction(audioPlaybackCtx);
 }
 
 async function sendText(text: string): Promise<boolean> {

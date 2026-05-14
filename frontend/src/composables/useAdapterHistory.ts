@@ -13,7 +13,7 @@ import type {
 import {
   normalizeBackendHistoryMessages,
   normalizeBackendHistorySummaries,
-} from "../adapter-connection/historyPayload.js";
+} from "../adapter-connection/features/historyPayload.js";
 
 export interface AdapterHistoryState {
   backendHistorySummaries: DesktopBackendHistorySummary[];

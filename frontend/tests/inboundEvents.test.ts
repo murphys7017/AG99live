@@ -1,7 +1,7 @@
 (globalThis as Record<string, unknown>).window = globalThis;
 
 import assert from "node:assert/strict";
-import { mapInboundEnvelopeToEvent } from "../src/adapter-connection/inboundEvents.js";
+import { mapInboundEnvelopeToEvent } from "../src/adapter-connection/inbound/inboundEvents.js";
 import type { ProtocolEnvelope } from "../src/types/protocol.js";
 
 function makeEnvelope<TPayload>(

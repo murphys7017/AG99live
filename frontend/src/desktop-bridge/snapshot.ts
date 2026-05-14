@@ -16,7 +16,7 @@ import {
   normalizeModelEngineSettings,
 } from "../model-engine/settings";
 import { cloneSemanticParameterPlan } from "../model-engine/planParser";
-import { DEFAULT_ADAPTER_ADDRESS } from "../adapter-connection/address";
+import { DEFAULT_ADAPTER_ADDRESS } from "../adapter-connection/core/address";
 import {
   cloneNumericRecord,
   isFiniteNumber,

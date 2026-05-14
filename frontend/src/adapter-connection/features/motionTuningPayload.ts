@@ -1,7 +1,7 @@
-import { cloneJson } from "../utils/cloneJson.js";
-import type { DesktopMotionTuningSample } from "../types/desktop.js";
-import type { MotionTuningSampleProtocolPayload } from "../types/protocol.js";
-import { SCHEMA_PARAMETER_PLAN_V2 } from "../types/protocol.js";
+import { cloneJson } from "../../utils/cloneJson.js";
+import type { DesktopMotionTuningSample } from "../../types/desktop.js";
+import type { MotionTuningSampleProtocolPayload } from "../../types/protocol.js";
+import { SCHEMA_PARAMETER_PLAN_V2 } from "../../types/protocol.js";
 
 export function serializeMotionTuningSample(
   sample: DesktopMotionTuningSample,

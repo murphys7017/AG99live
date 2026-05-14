@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { parseInboundEnvelope } from "../src/adapter-connection/inboundProtocol.js";
+import { parseInboundEnvelope } from "../src/adapter-connection/inbound/inboundProtocol.js";
 
 function testInvalidJson(): void {
   const result = parseInboundEnvelope("{");

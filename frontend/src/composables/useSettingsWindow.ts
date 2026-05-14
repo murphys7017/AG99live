@@ -1,7 +1,7 @@
 import { computed, reactive, ref, watch } from "vue";
-import { listMicrophoneInputDevices } from "../adapter-connection/microphoneDevices";
+import { listMicrophoneInputDevices } from "../adapter-connection/runtime/microphoneDevices";
 import { useDesktopBridge } from "./useDesktopBridge";
-import { DEFAULT_ADAPTER_ADDRESS } from "../adapter-connection/address";
+import { DEFAULT_ADAPTER_ADDRESS } from "../adapter-connection/core/address";
 import {
   MAX_MOTION_INTENSITY_SCALE,
   MIN_MOTION_INTENSITY_SCALE,

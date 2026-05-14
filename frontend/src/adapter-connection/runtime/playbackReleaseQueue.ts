@@ -1,4 +1,4 @@
-import { normalizeOrchestrationId } from "./orchestrationIds.js";
+import { normalizeOrchestrationId } from "../core/orchestrationIds.js";
 
 export interface PendingPlaybackItem {
   turnId: string | null;

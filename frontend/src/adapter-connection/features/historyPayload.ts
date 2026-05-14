@@ -1,7 +1,7 @@
 import type {
   DesktopBackendHistoryMessage,
   DesktopBackendHistorySummary,
-} from "../types/desktop";
+} from "../../types/desktop";
 
 export function normalizeBackendHistorySummaries(
   histories: unknown,

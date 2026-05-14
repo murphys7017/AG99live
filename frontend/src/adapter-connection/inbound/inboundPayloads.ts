@@ -13,7 +13,7 @@ import type {
   SystemSemanticAxisProfileSavedPayload,
   SystemSemanticAxisProfileSaveFailedPayload,
   SystemServerInfoPayload,
-} from "../types/protocol.js";
+} from "../../types/protocol.js";
 
 export interface PayloadParseError {
   code: "invalid_payload";

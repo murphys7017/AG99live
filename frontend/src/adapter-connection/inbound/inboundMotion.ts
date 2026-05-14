@@ -1,9 +1,9 @@
-import type { ProtocolEnvelope } from "../types/protocol.js";
-import { SCHEMA_MOTION_INTENT_V2, SCHEMA_PARAMETER_PLAN_V2 } from "../types/protocol.js";
+import type { ProtocolEnvelope } from "../../types/protocol.js";
+import { SCHEMA_MOTION_INTENT_V2, SCHEMA_PARAMETER_PLAN_V2 } from "../../types/protocol.js";
 import {
   normalizeOrchestrationId,
   normalizeTurnIdForComparison,
-} from "./orchestrationIds.js";
+} from "../core/orchestrationIds.js";
 
 export interface InboundMotionState {
   currentTurnId: string | null;

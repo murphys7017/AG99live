@@ -11,7 +11,7 @@ import type {
 import {
   normalizeMotionTuningSamplePayload,
   serializeMotionTuningSample,
-} from "../adapter-connection/motionTuningPayload.js";
+} from "../adapter-connection/features/motionTuningPayload.js";
 
 export interface AdapterMotionTuningState {
   motionTuningSamples: DesktopMotionTuningSample[];

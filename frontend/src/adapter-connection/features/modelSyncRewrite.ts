@@ -3,7 +3,7 @@ import type {
   ProtocolEnvelope,
   RuntimeCacheErrorsPayload,
   SystemModelSyncPayload,
-} from "../types/protocol.js";
+} from "../../types/protocol.js";
 
 export function rewriteModelSyncEnvelope(
   envelope: ProtocolEnvelope<SystemModelSyncPayload>,
