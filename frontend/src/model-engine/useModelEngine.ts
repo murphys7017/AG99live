@@ -20,7 +20,7 @@ interface PendingInboundMotionPayload {
   turnId: string;
   orchestrationId: string | null;
   receivedAtMs: number;
-  fallbackTimer: number;
+  audioWaitTimer: number;
 }
 
 interface StartPayloadContext {
@@ -80,7 +80,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   }
 
   function clearPendingPayload(entry: PendingInboundMotionPayload): void {
-    window.clearTimeout(entry.fallbackTimer);
+    window.clearTimeout(entry.audioWaitTimer);
   }
 
   function clearAllPendingPayloads(): void {
@@ -366,10 +366,10 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       turnId: normalizedTurnId,
       orchestrationId: context.orchestrationId ?? null,
       receivedAtMs: context.receivedAtMs,
-      fallbackTimer: 0,
+      audioWaitTimer: 0,
     };
 
-    entry.fallbackTimer = window.setTimeout(() => {
+    entry.audioWaitTimer = window.setTimeout(() => {
       const latest = pendingInboundMotionPayloads.get(context.messageId);
       if (!latest || latest !== entry) {
         return;

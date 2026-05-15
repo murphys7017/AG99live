@@ -221,5 +221,5 @@ few-shot 正式参考样本 -> 后端
 ## 与现有文档关系
 
 - `archive/ModelEngine主参数语义设计.md`：历史设计文档，已被本重构计划取代；仅保留“12 轴不应同级主控”的分析。
-- `ModelEngine驱动系统边界与分层设计.md`：解释 ModelEngine / Runtime / 后端边界。
+- `../../ModelEngine驱动系统边界与分层设计.md`：当前前端 ModelEngine 边界与模块化分层方案入口。
 - 本目录：把上述共识转成可执行重构路线。

@@ -1,18 +1,3 @@
-const DIRECT_PARAMETER_AXIS_NAMES = [
-  "head_yaw",
-  "head_roll",
-  "head_pitch",
-  "body_yaw",
-  "body_roll",
-  "gaze_x",
-  "gaze_y",
-  "eye_open_left",
-  "eye_open_right",
-  "mouth_open",
-  "mouth_smile",
-  "brow_bias",
-] as const;
-
 export interface ModelEngineSettings {
   motionIntensityScale: number;
   axisIntensityScale: Record<string, number>;
@@ -27,9 +12,7 @@ export const MIN_AXIS_INTENSITY_SCALE = 0;
 export const MAX_AXIS_INTENSITY_SCALE = 2.5;
 
 export function buildDefaultAxisIntensityScale(): Record<string, number> {
-  return Object.fromEntries(
-    DIRECT_PARAMETER_AXIS_NAMES.map((axisName) => [axisName, 1]),
-  );
+  return {};
 }
 
 export function buildDefaultModelEngineSettings(): ModelEngineSettings {
@@ -67,11 +50,11 @@ export function normalizeAxisIntensityScale(
   const raw = value && typeof value === "object"
     ? value as Record<string, unknown>
     : {};
-  const result = buildDefaultAxisIntensityScale();
+  const result: Record<string, number> = {};
   for (const key of Object.keys(raw)) {
     result[key] = normalizeScale(
       raw[key],
-      result[key] ?? 1,
+      1,
       MIN_AXIS_INTENSITY_SCALE,
       MAX_AXIS_INTENSITY_SCALE,
     );

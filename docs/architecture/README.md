@@ -9,13 +9,14 @@ Documents system architecture, boundaries, layers, and long-term structural deci
 - `当前前后端动作链路结构说明.md` - Text/audio/motion pipeline from user input to turn completion
 - `前端系统模块架构说明.md` - Frontend module boundaries, dependency direction, consolidation priorities
 - `文本语音动作同步播放编排设计.md` - Soft-sync startup strategy for text/audio/motion
+- `../ModelEngine驱动系统边界与分层设计.md` - Current frontend ModelEngine boundary and modular layering plan
 
 ## Key Concepts
 
 - **TurnPlaybackSession** → Frontend playback truth source, one per turn, contains multiple segments
 - **Three-signal completion** → `synth_finished` (queue closed) → `playback_finished` (local settled) → `turn_finished` (backend confirmed)
-- **ModelEngine** → Compiles `engine.motion_intent.v2` into `engine.parameter_plan.v2`, not a protocol handler
-- **AdapterProtocol** → V2 WebSocket, envelope validation at boundary, session-aware context
+- **ModelEngine** → Compiles `engine.motion_intent.v2` into `engine.parameter_plan.v2`; current next focus is its internal boundary review
+- **AdapterProtocol** → V2 WebSocket, envelope validation at boundary, session-aware context; first-round split is clear enough for engine work
 
 ## Related
 
