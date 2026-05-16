@@ -4,9 +4,9 @@
 
 推荐阅读顺序：
 
-1. [项目总览与模块职责](./docs/01-architecture/01-project-overview.md)
-2. [WebSocket 协议契约](./docs/01-architecture/02-protocol.md)
-3. [前后端动作链路结构](./docs/01-architecture/03-playback-linkage.md)
+1. [项目总览与模块职责](./docs/01-架构与结构/01-项目总览与模块职责.md)
+2. [WebSocket 协议契约](./docs/01-架构与结构/02-WebSocket协议契约.md)
+3. [前后端动作链路结构](./docs/01-架构与结构/03-前后端动作链路结构.md)
 
 历史计划、阶段进度和旧方案统一放在 [docs/archive/README.md](./docs/archive/README.md)。
 

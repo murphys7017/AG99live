@@ -2,7 +2,7 @@
 
 > 状态：当前主设计文档。本文是前端动作引擎结构方案的维护入口。
 
-更新时间：2026-05-15
+更新时间：2026-05-17
 
 ## 1. 当前结论
 
@@ -95,6 +95,14 @@ ModelEngine 不负责：
 - 后端 history / motion tuning 样本存储。
 
 动作库 / 调参面板可以向 ModelEngine 发测试请求，但不绕开引擎直接改运行时事实。
+
+表情冷启动示例的边界：
+
+- 来源是后端模型扫描阶段产出的模型能力事实。
+- 数据形态是语义化表情示例，不是原始 `exp3.json` 参数表。
+- 不并入 `motion_tuning_samples`。
+- 不通过 Adapter 新增专用表情协议。
+- 只作为 compile 时的补充参考，不直接写 Live2D 原始参数。
 
 ## 4. 当前代码分层
 
@@ -351,6 +359,23 @@ mode
 - `emotion_label`
 - 当前 semantic axes
 - 最近 assistant text / user text 的轻量上下文
+- 当前模型提供的表情冷启动示例库
+
+表情冷启动示例规则：
+
+- 示例来源分层为 `user` -> `model_native` -> `default`。
+- 优先使用用户确认过的动作/表情样本。
+- 当用户样本为空，或核心类别覆盖不足时，按缺失类别补入模型冷启动示例。
+- 补齐是补缺，不覆盖已有用户样本。
+- 最小可用覆盖优先保证 `neutral`、`happy`、`angry`、`surprised` 和一个补充情绪类。
+
+表情冷启动示例的抽象规则：
+
+- 先从模型原生 expression 扫描结果抽取候选信息。
+- 再映射到 `SemanticAxisProfile` 认可的 semantic axes。
+- 只进入 `primary` 和可接受的 `hint` 轴。
+- `derived`、`runtime`、`ambient`、`debug` 不作为示例主输入。
+- `mouth_open` 这类 runtime-owned 轴不作为静态表情示例主控制项。
 
 ### 6.6 ContinuityStage
 

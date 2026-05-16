@@ -4,10 +4,10 @@
 
 新开发者推荐阅读顺序：
 
-1. **[项目总览与模块职责](./01-architecture/01-project-overview.md)** — 仓库结构、模块职责、依赖方向总览
-2. **[WebSocket 协议契约](./01-architecture/02-protocol.md)** — 前后端通信协议
-3. **[前后端动作链路结构](./01-architecture/03-playback-linkage.md)** — Turn 播放从收到播的完整流程
-4. **[播放同步编排设计](./01-architecture/04-playback-orchestration.md)** — 文本/音频/动作同步起播策略
+1. **[项目总览与模块职责](./01-架构与结构/01-项目总览与模块职责.md)** — 仓库结构、模块职责、依赖方向总览
+2. **[WebSocket 协议契约](./01-架构与结构/02-WebSocket协议契约.md)** — 前后端通信协议
+3. **[前后端动作链路结构](./01-架构与结构/03-前后端动作链路结构.md)** — Turn 播放从收到播的完整流程
+4. **[播放同步编排设计](./01-架构与结构/04-播放同步编排设计.md)** — 文本/音频/动作同步起播策略
 
 ## 文档结构
 
@@ -15,19 +15,19 @@
 docs/
   README.md                              # 本文件，文档入口
 
-  01-architecture/                       # 架构与结构
-    01-project-overview.md               # 项目总览与模块职责
-    02-protocol.md                       # WebSocket 协议契约
-    03-playback-linkage.md               # 前后端动作链路结构
-    04-playback-orchestration.md         # 播放同步编排设计
+  01-架构与结构/                         # 架构与结构
+    01-项目总览与模块职责.md             # 项目总览与模块职责
+    02-WebSocket协议契约.md              # WebSocket 协议契约
+    03-前后端动作链路结构.md             # 前后端动作链路结构
+    04-播放同步编排设计.md               # 播放同步编排设计
 
-  02-design/                             # 设计文档
-    01-model-engine-boundary.md          # ModelEngine 边界与分层设计
-    02-engineering-cybernetics.md        # 工程控制论对齐
+  02-设计文档/                           # 设计文档
+    01-ModelEngine边界与分层设计.md      # ModelEngine 边界与分层设计
+    02-工程控制论对齐.md                 # 工程控制论对齐
 
-  03-runtime/                            # 运行时与运维
-    01-agent-execution-protocol.md       # AI 运行协议
-    02-release-package.md                # 打包与发布说明
+  03-运行时与运维/                       # 运行时与运维
+    01-AI运行协议.md                     # AI 运行协议
+    02-打包与发布说明.md                 # 打包与发布说明
 
   archive/                               # 历史文档（阶段性计划、旧方案）
     README.md                            # 归档索引
