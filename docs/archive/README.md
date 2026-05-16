@@ -1,9 +1,32 @@
 # 归档文档索引
 
-这些文档保留的是阶段性计划、设计草案和可行性评估快照。
+这些文档保留的是阶段性计划、设计草案、可行性评估快照和旧版架构文档。
 它们不再作为当前实现说明使用，但仍可用于回溯当时的设计判断。
 
-## 已归档文档
+## 旧版架构文档（已被新结构取代）
+
+以下文档的内容已合并或迁移至 `docs/01-architecture/` 和 `docs/02-design/`：
+
+- [旧版-项目结构与模块职责总览](./旧版-项目结构与模块职责总览.md)
+  说明：已合并到 `01-architecture/01-project-overview.md`
+- [旧版-前端系统模块架构说明](./旧版-前端系统模块架构说明.md)
+  说明：已合并到 `01-architecture/01-project-overview.md`
+- [旧版-当前前后端动作链路结构说明](./旧版-当前前后端动作链路结构说明.md)
+  说明：已迁移到 `01-architecture/03-playback-linkage.md`
+- [旧版-文本语音动作同步播放编排设计](./旧版-文本语音动作同步播放编排设计.md)
+  说明：已迁移到 `01-architecture/04-playback-orchestration.md`
+- [旧版-protocol](./旧版-protocol.md)
+  说明：已迁移到 `01-architecture/02-protocol.md`
+- [旧版-ModelEngine驱动系统边界与分层设计](./旧版-ModelEngine驱动系统边界与分层设计.md)
+  说明：已迁移到 `02-design/01-model-engine-boundary.md`
+- [旧版-engineering_cybernetics_alignment](./旧版-engineering_cybernetics_alignment.md)
+  说明：已迁移到 `02-design/02-engineering-cybernetics.md`
+- [旧版-agent_execution_protocol](./旧版-agent_execution_protocol.md)
+  说明：已迁移到 `03-runtime/01-agent-execution-protocol.md`
+- [旧版-release_package](./旧版-release_package.md)
+  说明：已迁移到 `03-runtime/02-release-package.md`
+
+## 阶段性计划与设计草案
 
 - [useAdapterConnection收口实施计划](./useAdapterConnection收口实施计划.md)
   说明：前端协议接入层阶段 1/2 施工计划。核心 parse、event mapping、segment identity 已落地。
@@ -18,19 +41,17 @@
 - [前端适配器拆分与优化方案](./前端适配器拆分与优化方案.md)
   说明：适配器拆分施工方案，当前结构状态已由现行架构文档覆盖。
 - [前端Turn Playback Session收口计划](./前端Turn%20Playback%20Session收口计划.md)
-  说明：前端播放轮次从散装状态收口到 `TurnPlaybackSession` 的实施计划。当前主要阶段已经落地，现行行为以根目录链路文档和源码为准。
+  说明：前端播放轮次从散装状态收口到 `TurnPlaybackSession` 的实施计划。当前主要阶段已经落地。
 - [前后端严格审阅报告](./前后端严格审阅报告.md)
   说明：阶段性代码审阅结论，后续问题处理和结构说明已被当前文档覆盖。
 - [动作链路职责重划与ModelEngine方案](./动作链路职责重划与ModelEngine方案.md)
   说明：动作链路职责迁移阶段的设计记录，当前实现已进入 v2-only 和同步编排阶段。
 - [前端ModelEngine设计](./前端ModelEngine设计.md)
   说明：前端 ModelEngine 早期模块拆分设计，当前缺少最新起播编排层和后端数据收口状态。
-- [ModelEngine驱动系统边界与分层设计](../ModelEngine驱动系统边界与分层设计.md)
-  说明：已从归档移回当前文档区，作为前端 ModelEngine 边界与模块化分层方案的维护入口。
 - [前端动作强度设置计划](./前端动作强度设置计划.md)
   说明：动作强度设置早期计划，旧 12 轴逐轴倍率已从常规界面下线。
 - [主轴重构计划/README](./主轴重构计划/README.md)
-  说明：动态主轴从固定 12 轴迁移到 semantic axis profile 的完整计划集，当前实现状态以根目录当前文档为准。
+  说明：动态主轴从固定 12 轴迁移到 semantic axis profile 的完整计划集。
 - [V2消息适配审阅与进度](./V2消息适配审阅与进度.md)
   说明：消息适配阶段性审阅，结论已被后续实现覆盖。
 - [V2适配器开发计划](./V2适配器开发计划.md)
@@ -46,7 +67,7 @@
 - [动作分析并入单次请求可行性评估](./动作分析并入单次请求可行性评估.md)
   说明：主请求注入与提取方案评估，当前已落地为历史记录。
 - [ModelEngine主参数语义设计](./ModelEngine主参数语义设计.md)
-  说明：固定 12 轴阶段的语义分层设计，已被动态主轴重构计划取代，仅保留为历史背景。
+  说明：固定 12 轴阶段的语义分层设计，已被动态主轴重构计划取代。
 
 ## 归档说明
 

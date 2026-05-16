@@ -1,53 +1,51 @@
-# 文档索引
+# AG99live 文档
 
-`docs/` 只保留当前有效的结构、协议和设计文档。
+## 快速开始
 
-阶段性计划、进度记录、旧方案和历史判断统一放在 `docs/archive/`，不作为当前工作入口。
+新开发者推荐阅读顺序：
 
-## 当前工作入口
+1. **[项目总览与模块职责](./01-architecture/01-project-overview.md)** — 仓库结构、模块职责、依赖方向总览
+2. **[WebSocket 协议契约](./01-architecture/02-protocol.md)** — 前后端通信协议
+3. **[前后端动作链路结构](./01-architecture/03-playback-linkage.md)** — Turn 播放从收到播的完整流程
+4. **[播放同步编排设计](./01-architecture/04-playback-orchestration.md)** — 文本/音频/动作同步起播策略
 
-建议按下面顺序阅读：
+## 文档结构
 
-1. `architecture/项目结构与模块职责总览.md`
-2. `api/protocol.md`
-3. `ModelEngine驱动系统边界与分层设计.md`
+```
+docs/
+  README.md                              # 本文件，文档入口
 
-如果要看更细的前端结构，再继续读：
+  01-architecture/                       # 架构与结构
+    01-project-overview.md               # 项目总览与模块职责
+    02-protocol.md                       # WebSocket 协议契约
+    03-playback-linkage.md               # 前后端动作链路结构
+    04-playback-orchestration.md         # 播放同步编排设计
 
-- `architecture/前端系统模块架构说明.md`
-- `architecture/当前前后端动作链路结构说明.md`
-- `architecture/文本语音动作同步播放编排设计.md`
+  02-design/                             # 设计文档
+    01-model-engine-boundary.md          # ModelEngine 边界与分层设计
+    02-engineering-cybernetics.md        # 工程控制论对齐
 
-## 当前有效文档
+  03-runtime/                            # 运行时与运维
+    01-agent-execution-protocol.md       # AI 运行协议
+    02-release-package.md                # 打包与发布说明
 
-### 总览与结构
+  archive/                               # 历史文档（阶段性计划、旧方案）
+    README.md                            # 归档索引
+```
 
-| 文件 | 作用 |
-| --- | --- |
-| `architecture/项目结构与模块职责总览.md` | 仓库结构、模块职责和维护边界总览 |
-| `architecture/前端系统模块架构说明.md` | 前端一级模块、依赖方向和当前边界 |
-| `architecture/当前前后端动作链路结构说明.md` | 文本、音频、动作主链路的当前结构 |
-| `architecture/文本语音动作同步播放编排设计.md` | Turn 内文本、音频、动作的同步起播策略 |
+## 按角色查找
 
-### 协议与引擎
-
-| 文件 | 作用 |
-| --- | --- |
-| `api/protocol.md` | 当前唯一有效的 WebSocket 协议契约 |
-| `ModelEngine驱动系统边界与分层设计.md` | 前端动作引擎的边界、分层和扩展设计 |
-
-### 其他
-
-| 文件 | 作用 |
-| --- | --- |
-| `archive/README.md` | 历史文档索引 |
-| `design/engineering_cybernetics_alignment.md` | AI 治理与设计理念说明 |
-| `runtime/agent_execution_protocol.md` | AI 运行协议 |
-| `runtime/release_package.md` | 打包与发布说明 |
+| 角色 | 入口文档 |
+|---|---|
+| **新开发者** | 项目总览 → 协议契约 → 动作链路 |
+| **前端开发** | 项目总览 §4 → 动作链路 → ModelEngine 设计 |
+| **后端开发** | 项目总览 §5 → 协议契约 → AI 运行协议 |
+| **协议修改** | 协议契约（修改后需同步前后端类型） |
+| **播放调优** | 播放同步编排设计 → 动作链路结构 |
 
 ## 维护规则
 
-- 当前文档只写现在真实成立的结构和边界。
-- 新的阶段计划、施工记录、审阅底稿默认放到 `docs/archive/`。
-- 当前文档里不保留“以前怎么样、现在改成怎么样”的叙述。
-- 如果一个文档不再适合作为当前入口，就移到 `docs/archive/`。
+- 当前文档只写现在真实成立的结构和边界
+- 阶段性计划、施工记录、旧方案放到 `archive/`
+- 当前文档里不保留"以前怎么样、现在改成怎么样"的叙述
+- 如果一个文档不再适合作为当前入口，就移到 `archive/`
