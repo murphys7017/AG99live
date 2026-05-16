@@ -25,7 +25,6 @@ This directory contains human-facing project documentation.
 - `api/` - protocol contract (`protocol.md`)
 - `design/` - design rationale (VEC governance alignment)
 - `runtime/` - agent execution protocol
-- `archive/` - historical design documents
 - `images/` - project screenshots and diagrams
 
 ## Reading Guide
@@ -36,4 +35,3 @@ This directory contains human-facing project documentation.
 - Playback pipeline: `architecture/当前前后端动作链路结构说明.md` + `architecture/文本语音动作同步播放编排设计.md`
 - Data ownership: `后端主导数据边界与执行计划.md`
 - Protocol contract: `api/protocol.md`
-- Historical context: `archive/`

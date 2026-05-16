@@ -17,7 +17,7 @@ astrbot_plugin_ag99live_adapter/
 ├─ protocol/             # 协议常量、模型、解析与构造
 ├─ transport/            # WebSocket、静态资源与路由
 ├─ runtime/              # runtime state、turn 协调、session/chat 状态
-├─ services/             # 媒体、消息、语音、兼容层服务
+├─ services/             # 媒体、消息、语音服务
 ├─ motion/               # 动作意图生成与输出清洗
 ├─ live2d/               # 扫描、缓存与分析
 ├─ tests/                # 单元测试
@@ -42,7 +42,7 @@ astrbot_plugin_ag99live_adapter/
 - 主聊天模型只负责正常回复文本，不要求内联 `<@anim {...}>`。
 - 交互中间件在 prompt contributor 中注入动作能力/运行态上下文，在 result contributor 中返回 `client_objects` 或 plugin hints。
 - 后端从 `platform_extras` / `client_objects` 中读取动作载荷，并与文本、音频一起广播到前端。
-- 当前文档主线不再把“回复完成后再单独发起一次 motion-only 请求”描述为正式默认路径；若 runtime 内部明确启用了额外 fallback 组件，它的结果也必须回到同一条 `engine.motion_*` 协议链路和同一 segment identity。
+- 若 runtime 内部明确启用了额外 fallback 组件，它的结果也必须回到同一条 `engine.motion_*` 协议链路和同一 segment identity。
 
 ### 动作 selector 输出
 

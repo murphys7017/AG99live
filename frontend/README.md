@@ -36,4 +36,4 @@ npm run dev
 - 高频重复计划去重与重启节流
 - 设置窗口支持 ModelEngine 表现倍率：全局强度倍率参与 v2 编译
 - 动作实验室支持最近 5 次真实 v2 播放 plan 回放、主轴手动调参、保存调参样本
-- Action Lab 参数动作原子池基于当前 semantic profile 生成 `engine.motion_intent.v2` 预览，不再生成旧 v1 plan
+- Action Lab 参数动作原子池基于当前 semantic profile 生成 `engine.motion_intent.v2` 预览

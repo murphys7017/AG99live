@@ -317,8 +317,8 @@ function playPreviewPlan(): void {
     return;
   }
   bridge.sendCommand({
-    type: "preview_motion_plan",
-    plan: generatedPlan.value,
+    type: "preview_motion_payload",
+    payload: generatedPlan.value,
   });
   playStatusText.value = `已发送测试播放计划（${selectedAtoms.value.length} steps）`;
 }

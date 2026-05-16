@@ -19,7 +19,6 @@ export const INBOUND_MESSAGE_TYPES = {
   CONTROL_SYNTH_FINISHED: "control.synth_finished",
   CONTROL_ERROR: "control.error",
   ENGINE_PARAMETER_PLAN: "engine.parameter_plan",
-  ENGINE_MOTION_PLAN: "engine.motion_plan",
   ENGINE_MOTION_INTENT: "engine.motion_intent",
 } as const;
 
@@ -37,7 +36,6 @@ export const OUTBOUND_MESSAGE_TYPES = {
   SYSTEM_MOTION_TUNING_SAMPLE_SAVE: "system.motion_tuning_sample_save",
   SYSTEM_MOTION_TUNING_SAMPLE_DELETE: "system.motion_tuning_sample_delete",
   ENGINE_PARAMETER_PLAN: "engine.parameter_plan",
-  ENGINE_MOTION_PLAN: "engine.motion_plan",
   ENGINE_MOTION_INTENT: "engine.motion_intent",
 } as const;
 

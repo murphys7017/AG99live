@@ -337,5 +337,4 @@ export type DesktopRuntimeCommand =
   | { type: "interrupt" }
   | { type: "toggle_mic_capture" }
   | { type: "set_ptt_mode"; enabled: boolean }
-  | { type: "preview_motion_payload"; payload: unknown }
-  | { type: "preview_motion_plan"; plan: unknown };
+  | { type: "preview_motion_payload"; payload: unknown };

@@ -149,8 +149,6 @@ Current backend motion broadcast on the main protocol path has two stable source
    - Interaction middleware returns motion payloads via `client_objects` / plugin hints.
    - Backend reads them from `platform_extras` and broadcasts them directly on the matching segment.
 
-There is no longer any legacy plugin hook that schedules a second motion-only request after the main reply has completed.
-
 `split_after_reply` now means:
 - the main model only replies with text
 - the preferred motion source is middleware `client_objects` / plugin hints

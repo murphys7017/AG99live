@@ -106,9 +106,6 @@ export function createDesktopRuntimeCommandHandler(
       case "set_ptt_mode":
         deps.adapter.setPttMode(command.enabled);
         return;
-      case "preview_motion_plan":
-        deps.handlePreviewMotionPlan(command.plan);
-        return;
       case "preview_motion_payload":
         deps.handlePreviewMotionPlan(command.payload);
         return;
