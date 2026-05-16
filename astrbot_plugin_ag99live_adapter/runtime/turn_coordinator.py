@@ -25,7 +25,7 @@ from ..protocol import (
     TYPE_CONTROL_INTERRUPT,
     TYPE_CONTROL_PLAYBACK_FINISHED,
     TYPE_ENGINE_MOTION_INTENT,
-    TYPE_ENGINE_MOTION_PLAN,
+    TYPE_ENGINE_PARAMETER_PLAN,
     TYPE_INPUT_AUDIO_STREAM_CHUNK,
     TYPE_INPUT_AUDIO_STREAM_END,
     TYPE_INPUT_AUDIO_STREAM_START,
@@ -161,7 +161,7 @@ class TurnCoordinator:
             await self._commit_inbound_message(message_obj, turn_id=message.turn_id)
             return
 
-        if message.type in {TYPE_ENGINE_MOTION_PLAN, TYPE_ENGINE_MOTION_INTENT}:
+        if message.type in {TYPE_ENGINE_MOTION_INTENT, TYPE_ENGINE_PARAMETER_PLAN}:
             await self._handle_engine_motion_payload_preview(message)
             return
 

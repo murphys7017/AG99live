@@ -1,20 +1,20 @@
 import type {
   SemanticMotionIntent,
   SemanticParameterPlan,
-} from "../types/protocol";
+} from "../types/protocol.js";
 import {
   SCHEMA_PARAMETER_PLAN_V2,
-} from "../types/protocol";
+} from "../types/protocol.js";
 import type {
   SemanticAxisDefinition,
   SemanticAxisParameterBinding,
   SemanticAxisProfile,
-} from "../types/semantic-axis-profile";
-import type { CompileOptions, CompileResult } from "./contracts";
+} from "../types/semantic-axis-profile.js";
+import type { CompileOptions, CompileResult } from "./contracts.js";
 import {
   normalizeModelEngineSettings,
-} from "./settings";
-import { resolveMotionTiming } from "./timing";
+} from "./settings.js";
+import { resolveMotionTiming } from "./timing.js";
 
 type DynamicAxisValues = Record<string, number>;
 const MAX_SEMANTIC_AXIS_ERROR_RATE = 0.30;
@@ -98,6 +98,7 @@ export function compileMotionIntent(
       axis,
       intent.mode,
       normalizedSettings.motionIntensityScale,
+      normalizedSettings.axisIntensityScale[axisId] ?? 1,
     );
     controlledValues[axisId] = intensityResult.value;
     if (intensityResult.warning) {
@@ -296,12 +297,13 @@ function applySemanticIntensity(
   axis: SemanticAxisDefinition,
   mode: SemanticMotionIntent["mode"],
   motionIntensityScale: number,
+  axisIntensityScale: number,
 ): { value: number; warning: string } {
   if (mode !== "expressive") {
     return { value, warning: "" };
   }
   const [minValue, maxValue] = axis.value_range;
-  const scaled = axis.neutral + (value - axis.neutral) * motionIntensityScale;
+  const scaled = axis.neutral + (value - axis.neutral) * motionIntensityScale * axisIntensityScale;
   if (scaled < minValue || scaled > maxValue) {
     const clampedValue = Math.max(minValue, Math.min(maxValue, scaled));
     return {
@@ -333,6 +335,10 @@ function applySemanticCouplings(
       }
       const sourceValue = resolvedValues[coupling.source_axis_id];
       if (sourceValue === undefined) {
+        continue;
+      }
+      if (baseValues[coupling.target_axis_id] !== undefined) {
+        warningSet.add(`semantic_coupling_skipped_explicit_target:${coupling.id}:${coupling.target_axis_id}`);
         continue;
       }
       const sourceDelta = sourceValue - sourceAxis.neutral;

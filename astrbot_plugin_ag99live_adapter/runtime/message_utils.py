@@ -29,9 +29,7 @@ def iter_platform_motion_client_objects(
         if object_type not in {
             "ag99live.motion_payload",
             "engine.motion_intent",
-            "engine.motion_plan",
             "motion_intent",
-            "motion_plan",
         }:
             continue
         motion_objects.append(item)

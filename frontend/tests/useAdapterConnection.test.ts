@@ -755,6 +755,44 @@ function testSendMotionPreviewUsesOutboundProtocolEnvelope(): void {
   });
 }
 
+function testSendParameterPlanPreviewUsesParameterPlanEnvelope(): void {
+  withConnectedAdapter(({ adapter, socket }) => {
+    socket.sent.length = 0;
+
+    const sent = adapter.sendMotionPayloadPreview({
+      schema_version: "engine.parameter_plan.v2",
+      profile_id: "profile-1",
+      profile_revision: 1,
+      model_id: "model-1",
+      mode: "expressive",
+      emotion_label: "happy",
+      timing: {
+        duration_ms: 1200,
+        blend_in_ms: 180,
+        hold_ms: 760,
+        blend_out_ms: 260,
+      },
+      parameters: [
+        {
+          axis_id: "head_yaw",
+          parameter_id: "ParamAngleX",
+          target_value: 12,
+          weight: 1,
+          input_value: 70,
+          source: "semantic_axis",
+        },
+      ],
+    });
+
+    assert.equal(sent, true);
+    assert.equal(socket.sent.length, 1);
+    const message = JSON.parse(socket.sent[0]) as Record<string, unknown>;
+    assert.equal(message.type, "engine.parameter_plan");
+    assert.equal(message.version, "v2");
+    assert.equal(adapter.state.statusMessage, "已发送动作测试载荷（engine.parameter_plan）。");
+  });
+}
+
 async function testAutoStartMicDoesNotDuplicateCaptureStart(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
@@ -1064,6 +1102,7 @@ async function run(): Promise<void> {
   testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted();
   await testSendTextUsesOutboundProtocolEnvelope();
   testSendMotionPreviewUsesOutboundProtocolEnvelope();
+  testSendParameterPlanPreviewUsesParameterPlanEnvelope();
   await testAutoStartMicDoesNotDuplicateCaptureStart();
   await testMicAudioUsesFreshInputOrchestrationAcrossChunkAndEnd();
   await testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd();

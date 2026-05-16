@@ -45,7 +45,7 @@ When a turn-first session later receives an `orchestration_id`, the session prom
   - `output.text`
   - `output.audio`
   - `engine.motion_intent`
-  - `engine.motion_plan`
+  - `engine.parameter_plan`
 - messages such as `output.image`, `output.transcription`, most `control.*`, and most `system.*` do not use `message_id` for segment binding
 
 ## Completion Signal Semantics
@@ -135,7 +135,7 @@ Interrupt audio rule:
 | Type | Direction | Schema |
 |---|---|---|
 | `engine.motion_intent` | Bidirectional | `engine.motion_intent.v2` |
-| `engine.motion_plan` | Bidirectional | `engine.parameter_plan.v2` |
+| `engine.parameter_plan` | Bidirectional | `engine.parameter_plan.v2` |
 
 ## Motion Generation Paths
 
@@ -161,7 +161,7 @@ There is no longer any legacy plugin hook that schedules a second motion-only re
 | Schema | Current | Purpose |
 |---|---|---|
 | `engine.motion_intent.v2` | active | Semantic axis intent from backend → frontend compiles to parameter_plan.v2 |
-| `engine.parameter_plan.v2` | active | Compiled parameter plan executed by frontend ModelEngine |
+| `engine.parameter_plan.v2` | active | Frontend-compiled parameter plan executed by ModelEngine |
 | `ag99.semantic_axis_profile.v1` | active | Canonical semantic axis profile stored by backend |
 | `live2d_runtime_cache.v1` | active | Backend-side Live2D scan cache |
 

@@ -32,10 +32,9 @@ from .runtime.state import RuntimeState
 from .motion.realtime_motion_plan import (
     normalize_motion_intent_payload,
     validate_motion_intent_payload,
-    validate_parameter_plan_payload,
 )
 from .protocol.builder import build_system_motion_tuning_samples_state
-from .protocol.constants import TYPE_ENGINE_MOTION_INTENT, TYPE_ENGINE_MOTION_PLAN
+from .protocol.constants import TYPE_ENGINE_MOTION_INTENT
 from .runtime.session_state import SessionState
 from .transport.websocket_server import WebSocketTransport
 from .runtime.turn_coordinator import TurnCoordinator
@@ -392,7 +391,6 @@ class OLVPetPlatformAdapter(Platform):
         normalized_path = path.rstrip("/")
         if normalized_path not in {
             "/api/engine/motion_payload_preview",
-            "/api/engine/motion_plan_preview",
         }:
             return 404, {"ok": False, "error": "Unknown debug API endpoint."}
 
@@ -469,13 +467,6 @@ def _extract_debug_motion_payload(
             return None, TYPE_ENGINE_MOTION_INTENT, f"Invalid intent payload: {reason}"
         return motion_payload, TYPE_ENGINE_MOTION_INTENT, ""
 
-    if isinstance(payload.get("plan"), dict):
-        motion_payload = payload["plan"]
-        valid, reason = validate_parameter_plan_payload(motion_payload)
-        if not valid:
-            return None, TYPE_ENGINE_MOTION_PLAN, f"Invalid plan payload: {reason}"
-        return motion_payload, TYPE_ENGINE_MOTION_PLAN, ""
-
     schema_version = str(payload.get("schema_version") or "").strip()
     if schema_version == "engine.motion_intent.v2":
         try:
@@ -487,13 +478,7 @@ def _extract_debug_motion_payload(
             return None, TYPE_ENGINE_MOTION_INTENT, f"Invalid intent payload: {reason}"
         return motion_payload, TYPE_ENGINE_MOTION_INTENT, ""
 
-    if schema_version == "engine.parameter_plan.v2":
-        valid, reason = validate_parameter_plan_payload(payload)
-        if not valid:
-            return None, TYPE_ENGINE_MOTION_PLAN, f"Invalid plan payload: {reason}"
-        return payload, TYPE_ENGINE_MOTION_PLAN, ""
-
-    return None, "", "`intent` or `plan` must be a valid motion payload object."
+    return None, "", "`intent` must be a valid motion payload object."
 
 
 def _config_get(config: Any, key: str, default: Any) -> Any:

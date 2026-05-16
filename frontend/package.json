@@ -17,8 +17,9 @@
     "test:coordinator": "tsc -p tsconfig.test.json --outDir .test-out-coordinator && node --experimental-specifier-resolution=node .test-out-coordinator/tests/playbackCompletionCoordinator.test.js",
     "test:inbound-protocol": "tsc -p tsconfig.test.json --outDir .test-out-inbound-protocol && node --experimental-specifier-resolution=node .test-out-inbound-protocol/tests/inboundProtocol.test.js",
     "test:inbound-events": "tsc -p tsconfig.test.json --outDir .test-out-inbound-events && node --experimental-specifier-resolution=node .test-out-inbound-events/tests/inboundEvents.test.js",
+    "test:model-engine": "tsc -p tsconfig.test.json --outDir .test-out-model-engine && node --experimental-specifier-resolution=node .test-out-model-engine/tests/modelEngineCompiler.test.js",
     "test:adapter-connection": "tsc -p tsconfig.test.json --outDir .test-out-adapter-connection && node --experimental-specifier-resolution=node .test-out-adapter-connection/tests/useAdapterConnection.test.js",
-    "test": "npm run test:orchestration && npm run test:session && npm run test:turn-orchestrator && npm run test:coordinator && npm run test:inbound-protocol && npm run test:inbound-events && npm run test:adapter-connection",
+    "test": "npm run test:orchestration && npm run test:session && npm run test:turn-orchestrator && npm run test:coordinator && npm run test:inbound-protocol && npm run test:inbound-events && npm run test:model-engine && npm run test:adapter-connection",
     "build": "npm run typecheck && electron-vite build",
     "build:web": "vue-tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview"

@@ -122,6 +122,45 @@ def test_parse_inbound_message_accepts_motion_tuning_sample_delete() -> None:
     assert envelope.payload["sample_id"] == "sample-1"
 
 
+def test_parse_inbound_message_accepts_engine_parameter_plan_preview() -> None:
+    envelope = parse_inbound_message(
+        _message(
+            "engine.parameter_plan",
+            {
+                "mode": "preview",
+                "plan": {
+                    "schema_version": "engine.parameter_plan.v2",
+                    "profile_id": "DemoModel.semantic.v1",
+                    "profile_revision": 3,
+                    "model_id": "DemoModel",
+                    "mode": "expressive",
+                    "emotion_label": "joy",
+                    "timing": {
+                        "duration_ms": 1200,
+                        "blend_in_ms": 120,
+                        "hold_ms": 800,
+                        "blend_out_ms": 280,
+                    },
+                    "parameters": [
+                        {
+                            "axis_id": "head_yaw",
+                            "parameter_id": "ParamAngleX",
+                            "target_value": 0.8,
+                            "weight": 1.0,
+                            "input_value": 0.8,
+                            "source": "manual",
+                        }
+                    ],
+                },
+            },
+        ),
+        default_session_id="fallback-session",
+    )
+
+    assert envelope.type == "engine.parameter_plan"
+    assert envelope.payload["plan"]["schema_version"] == "engine.parameter_plan.v2"
+
+
 def test_parse_inbound_message_rejects_removed_motion_tuning_examples_sync() -> None:
     with pytest.raises(ProtocolError, match="Unsupported message type"):
         parse_inbound_message(

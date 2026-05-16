@@ -166,6 +166,29 @@ function testEngineMotionFallsBackCurrentThenAudio(): void {
   assert.equal(event.messageId, "m-1");
 }
 
+function testEngineParameterPlanMapsToMotionPayloadEvent(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("engine.parameter_plan", {
+      mode: "preview",
+      plan: {
+        schema_version: "engine.parameter_plan.v2",
+      },
+    }, {
+      turnId: "turn-plan",
+      orchestrationId: "orch-plan",
+    }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "engine_motion_payload");
+  if (event.kind !== "engine_motion_payload") {
+    throw new Error("expected engine_motion_payload event");
+  }
+  assert.equal(event.turnId, "turn-plan");
+  assert.equal(event.orchestrationId, "orch-plan");
+  assert.equal(event.messageId, "m-1");
+}
+
 function testMissingSegmentMessageIdReturnsProtocolError(): void {
   const envelopeA = makeEnvelope("output.text", {
     text: " first ",
@@ -263,6 +286,7 @@ function run(): void {
   testTurnStartedDoesNotInheritCurrentIdentity();
   testInterruptUsesCurrentIdentity();
   testEngineMotionFallsBackCurrentThenAudio();
+  testEngineParameterPlanMapsToMotionPayloadEvent();
   testMissingSegmentMessageIdReturnsProtocolError();
   testUnhandledTypeReturnsUnhandled();
   testInvalidOutputTextPayloadReturnsProtocolError();

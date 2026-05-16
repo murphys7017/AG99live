@@ -12,7 +12,10 @@ from astrbot.core.interaction import (
 from astrbot.core.prompt import PromptExtension
 
 from ..motion.output_sanitizer import sanitize_assistant_output_text
-from ..motion.realtime_motion_plan import resolve_selected_semantic_axis_profile
+from ..motion.realtime_motion_plan import (
+    _apply_expressive_floor_v2,
+    resolve_selected_semantic_axis_profile,
+)
 from ..prompts.motion_selector import (
     profile_prompt_axes,
     resolve_motion_prompt_instruction,
@@ -241,7 +244,12 @@ def _resolve_plugin_hints_motion_payload(
         return None
 
     axes = motion_hint.get("axes")
-    validated_axes = _normalize_plugin_hint_axes(axes, semantic_profile)
+    validated_axes = _normalize_plugin_hint_axes(
+        axes,
+        semantic_profile,
+        mode=mode,
+        emotion_label=str(motion_hint.get("emotion_label") or "").strip() or "neutral",
+    )
     if not validated_axes:
         return None
 
@@ -277,6 +285,9 @@ def _resolve_plugin_hints_motion_payload(
 def _normalize_plugin_hint_axes(
     axes: Any,
     semantic_profile: dict[str, Any],
+    *,
+    mode: str,
+    emotion_label: str,
 ) -> dict[str, dict[str, float]] | None:
     if not isinstance(axes, dict) or not axes:
         return None
@@ -307,7 +318,21 @@ def _normalize_plugin_hint_axes(
         value = _coerce_plugin_hint_axis_value(float(raw_value), axis)
         normalized_axes[axis_id] = {"value": value}
 
-    return normalized_axes or None
+    if not normalized_axes:
+        return None
+
+    if mode == "expressive":
+        expressive_axes = _apply_expressive_floor_v2(
+            axes={axis_id: axis_payload["value"] for axis_id, axis_payload in normalized_axes.items()},
+            emotion=emotion_label,
+            semantic_profile=semantic_profile,
+        )
+        normalized_axes = {
+            axis_id: {"value": value}
+            for axis_id, value in expressive_axes.items()
+        }
+
+    return normalized_axes
 
 
 def _coerce_plugin_hint_axis_value(raw_value: float, axis: dict[str, Any]) -> float:

@@ -176,7 +176,7 @@ export function sendMotionPayloadPreview(
 
   const messageType = schemaVersion === schemaMotionIntentV2
     ? "engine.motion_intent"
-    : "engine.motion_plan";
+    : "engine.parameter_plan";
   const payloadKey = messageType === "engine.motion_intent" ? "intent" : "plan";
 
   if (!ctx.outboundClient.send(messageType, {

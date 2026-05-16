@@ -3,8 +3,8 @@ import {
   DEFAULT_MOTION_INTENT_DURATION_MS,
   MAX_MOTION_DURATION_MS,
   MIN_MOTION_DURATION_MS,
-} from "./constants";
-import type { MotionTimingResolution } from "./contracts";
+} from "./constants.js";
+import type { MotionTimingResolution } from "./contracts.js";
 
 interface ResolveMotionTimingOptions {
   mode: "idle" | "expressive";

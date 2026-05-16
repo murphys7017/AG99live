@@ -312,6 +312,35 @@ def test_plugin_hints_motion_payload_uses_profile_axis_value_range(
     assert "unknown_axis" not in payload["axes"]
 
 
+def test_plugin_hints_expressive_payload_is_pushed_out_of_idle_deadzone(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event(mode="inline_first")
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "mode": "expressive",
+                "emotion_label": "playful",
+                "duration_hint_ms": 1200,
+                "axes": {
+                    "head_yaw": {"value": 50},
+                },
+            }
+        },
+    )
+
+    payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
+
+    assert payload is not None
+    assert payload["axes"]["head_yaw"]["value"] > 58
+
+
 def test_result_contributor_returns_plugin_hint_motion_as_client_object(
     install_fake_astrbot,
     monkeypatch,

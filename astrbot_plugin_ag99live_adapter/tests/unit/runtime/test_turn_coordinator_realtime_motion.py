@@ -697,6 +697,49 @@ def test_broadcast_motion_payload_uses_intent_key_for_motion_intent(
     assert "plan" not in envelope["payload"]
 
 
+def test_broadcast_motion_payload_uses_plan_key_for_parameter_plan(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-plan",
+        },
+    )()
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+
+    sent = asyncio.run(
+        coordinator.broadcast_motion_payload(
+            motion_payload=_build_valid_parameter_plan(),
+            mode="preview",
+            source="test.plan",
+            turn_id="turn-plan",
+        )
+    )
+
+    assert sent is True
+    assert sent_payloads
+    envelope = sent_payloads[0]
+    assert envelope["type"] == "engine.parameter_plan"
+    assert "plan" in envelope["payload"]
+    assert "intent" not in envelope["payload"]
+
+
 def test_handle_engine_motion_payload_preview_rejects_missing_intent_key(
     install_fake_astrbot,
     monkeypatch,
@@ -732,6 +775,41 @@ def test_handle_engine_motion_payload_preview_rejects_missing_intent_key(
     assert sent_payloads
     assert sent_payloads[0]["type"] == "control.error"
     assert "missing_intent_object" in str(sent_payloads[0]["payload"]["message"])
+
+
+def test_handle_engine_motion_payload_preview_accepts_parameter_plan(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.session_state = type("SessionStateStub", (), {"client_uid": "desktop-client"})()
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+
+    message = type(
+        "InboundMessageStub",
+        (),
+        {
+            "type": "engine.parameter_plan",
+            "payload": {"mode": "preview", "plan": _build_valid_parameter_plan()},
+            "turn_id": "turn-preview-plan",
+            "session_id": "desktop-client",
+        },
+    )()
+
+    asyncio.run(coordinator._handle_engine_motion_payload_preview(message))
+
+    assert sent_payloads == []
 
 
 def test_emit_message_chain_uses_raw_reply_text_override_for_inline_extraction(

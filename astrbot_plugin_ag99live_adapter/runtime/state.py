@@ -39,7 +39,10 @@ from ..live2d.semantic_axis_profile import (
     save_semantic_axis_profile,
 )
 from ..protocol.builder import build_system_model_sync
-from ..prompts.motion_selector import DEFAULT_MOTION_PROMPT_INSTRUCTION
+from ..prompts.motion_selector import (
+    DEFAULT_MOTION_PROMPT_INSTRUCTION,
+    profile_prompt_axes,
+)
 
 
 class RuntimeState:
@@ -519,6 +522,18 @@ class RuntimeState:
         if not profile_id or not isinstance(profile_revision, int) or profile_revision <= 0:
             self.motion_tuning_reference_examples = []
             return
+        try:
+            prompt_axis_ids = {
+                str(axis.get("id") or "").strip()
+                for axis in profile_prompt_axes(profile)
+                if str(axis.get("id") or "").strip()
+            }
+        except Exception:
+            self.motion_tuning_reference_examples = []
+            return
+        if not prompt_axis_ids:
+            self.motion_tuning_reference_examples = []
+            return
 
         normalized_examples: list[dict[str, Any]] = []
         for sample in self.motion_tuning_samples:
@@ -534,6 +549,17 @@ class RuntimeState:
             if not isinstance(adjusted_axes, dict) or not adjusted_axes:
                 continue
             adjusted_plan = sample.get("adjusted_plan")
+            filtered_axes = self._filter_motion_tuning_example_axes(
+                adjusted_axes,
+                allowed_axis_ids=prompt_axis_ids,
+            )
+            if not filtered_axes:
+                continue
+            if not self._motion_tuning_example_matches_adjusted_plan(
+                filtered_axes,
+                adjusted_plan,
+            ):
+                continue
             duration_ms = None
             mode = "expressive"
             if isinstance(adjusted_plan, dict):
@@ -548,11 +574,7 @@ class RuntimeState:
                         "emotion": str(sample.get("emotion_label") or "custom").strip() or "custom",
                         "mode": mode,
                         "duration_ms": duration_ms,
-                        "axes": {
-                            str(axis_id).strip(): value
-                            for axis_id, value in adjusted_axes.items()
-                            if str(axis_id).strip()
-                        },
+                        "axes": filtered_axes,
                     },
                     "source": "desktop_motion_tuning_sample_store",
                     "feedback": str(sample.get("feedback") or "").strip(),
@@ -566,6 +588,42 @@ class RuntimeState:
                 }
             )
         self.motion_tuning_reference_examples = normalized_examples
+
+    @staticmethod
+    def _filter_motion_tuning_example_axes(
+        adjusted_axes: dict[str, Any],
+        *,
+        allowed_axis_ids: set[str],
+    ) -> dict[str, float]:
+        result: dict[str, float] = {}
+        for axis_id, raw_value in adjusted_axes.items():
+            normalized_axis_id = str(axis_id or "").strip()
+            if not normalized_axis_id or normalized_axis_id not in allowed_axis_ids:
+                continue
+            normalized_value = _coerce_finite_number(raw_value)
+            if normalized_value is None:
+                continue
+            result[normalized_axis_id] = normalized_value
+        return result
+
+    @staticmethod
+    def _motion_tuning_example_matches_adjusted_plan(
+        filtered_axes: dict[str, float],
+        adjusted_plan: Any,
+    ) -> bool:
+        if not isinstance(adjusted_plan, dict):
+            return False
+        raw_parameters = adjusted_plan.get("parameters")
+        if not isinstance(raw_parameters, list) or not raw_parameters:
+            return False
+        plan_axis_ids = {
+            str(parameter.get("axis_id") or "").strip()
+            for parameter in raw_parameters
+            if isinstance(parameter, dict) and str(parameter.get("axis_id") or "").strip()
+        }
+        if not plan_axis_ids:
+            return False
+        return set(filtered_axes.keys()).issubset(plan_axis_ids)
 
     def should_send_model_payload(self, payload: dict[str, Any], *, force: bool = False) -> bool:
         signature = json.dumps(payload, sort_keys=True, ensure_ascii=False)

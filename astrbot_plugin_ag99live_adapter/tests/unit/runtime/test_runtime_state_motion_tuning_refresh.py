@@ -36,11 +36,11 @@ def _build_motion_tuning_sample(
         "profile_revision": profile_revision,
         "emotion_label": "joy",
         "assistant_text": f"好的 {sample_id}",
-        "feedback": "嘴角再明显一点",
-        "tags": ["smile"],
+        "feedback": "头部偏转再明显一点",
+        "tags": ["head_turn"],
         "enabled_for_llm_reference": True,
-        "original_axes": {"mouth_smile": 0.6},
-        "adjusted_axes": {"mouth_smile": 0.8},
+        "original_axes": {"head_yaw": 60.0},
+        "adjusted_axes": {"head_yaw": 80.0},
         "adjusted_plan": {
             "schema_version": "engine.parameter_plan.v2",
             "profile_id": "DemoModel.semantic.v1",
@@ -56,11 +56,11 @@ def _build_motion_tuning_sample(
             },
             "parameters": [
                 {
-                    "axis_id": "mouth_smile",
-                    "parameter_id": "ParamMouthSmile",
-                    "target_value": 0.8,
+                    "axis_id": "head_yaw",
+                    "parameter_id": "ParamAngleX",
+                    "target_value": 18.0,
                     "weight": 1.0,
-                    "input_value": 0.8,
+                    "input_value": 80.0,
                     "source": "manual",
                 }
             ],
@@ -107,12 +107,12 @@ def test_runtime_state_persists_motion_tuning_samples_across_refresh_and_rebuild
     )
 
     assert state.list_motion_tuning_samples() == [saved_sample]
-    assert state.motion_tuning_reference_examples[0]["output"]["axes"]["mouth_smile"] == 0.8
+    assert state.motion_tuning_reference_examples[0]["output"]["axes"]["head_yaw"] == 80.0
 
     state.refresh()
 
     assert state.list_motion_tuning_samples() == [saved_sample]
-    assert state.motion_tuning_reference_examples[0]["output"]["axes"]["mouth_smile"] == 0.8
+    assert state.motion_tuning_reference_examples[0]["output"]["axes"]["head_yaw"] == 80.0
 
     reloaded_state = runtime_state.RuntimeState(
         platform_config={},
@@ -133,7 +133,7 @@ def test_runtime_state_persists_motion_tuning_samples_across_refresh_and_rebuild
     reloaded_state.refresh()
 
     assert reloaded_state.list_motion_tuning_samples() == [saved_sample]
-    assert reloaded_state.motion_tuning_reference_examples[0]["output"]["axes"]["mouth_smile"] == 0.8
+    assert reloaded_state.motion_tuning_reference_examples[0]["output"]["axes"]["head_yaw"] == 80.0
 
 
 def test_runtime_state_filters_few_shot_examples_by_current_profile_revision(
@@ -180,7 +180,107 @@ def test_runtime_state_filters_few_shot_examples_by_current_profile_revision(
 
     assert len(state.list_motion_tuning_samples()) == 2
     assert len(state.motion_tuning_reference_examples) == 1
-    assert state.motion_tuning_reference_examples[0]["output"]["axes"]["mouth_smile"] == 0.8
+    assert state.motion_tuning_reference_examples[0]["output"]["axes"]["head_yaw"] == 80.0
+
+
+def test_runtime_state_filters_few_shot_axes_to_current_prompt_axes(
+    monkeypatch,
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    runtime_state = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+    seed_model_info = build_seed_model_info()
+    monkeypatch.setattr(
+        runtime_state,
+        "scan_live2d_models",
+        lambda **kwargs: deepcopy(seed_model_info),
+    )
+    live2ds_dir = tmp_path / "live2ds"
+    (live2ds_dir / "DemoModel").mkdir(parents=True, exist_ok=True)
+
+    state = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=None,
+        plugin_config={"live2d_model_name": "DemoModel"},
+        plugin_config_loader=None,
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=live2ds_dir,
+    )
+    state.refresh()
+    current_revision = int(
+        state.model_info["models"][0]["semantic_axis_profile"]["revision"]
+    )
+
+    sample = _build_motion_tuning_sample(profile_revision=current_revision)
+    sample["adjusted_axes"] = {
+        "head_yaw": 80.0,
+        "mouth_open": 0.4,
+    }
+    sample["adjusted_plan"]["parameters"].append(
+        {
+            "axis_id": "mouth_open",
+            "parameter_id": "ParamMouthOpen",
+            "target_value": 0.4,
+            "weight": 1.0,
+            "input_value": 0.4,
+            "source": "manual",
+        }
+    )
+
+    state.save_motion_tuning_sample(sample)
+
+    assert len(state.motion_tuning_reference_examples) == 1
+    assert state.motion_tuning_reference_examples[0]["output"]["axes"] == {
+        "head_yaw": 80.0
+    }
+
+
+def test_runtime_state_skips_few_shot_example_when_adjusted_axes_and_plan_disagree(
+    monkeypatch,
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    runtime_state = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+    seed_model_info = build_seed_model_info()
+    monkeypatch.setattr(
+        runtime_state,
+        "scan_live2d_models",
+        lambda **kwargs: deepcopy(seed_model_info),
+    )
+    live2ds_dir = tmp_path / "live2ds"
+    (live2ds_dir / "DemoModel").mkdir(parents=True, exist_ok=True)
+
+    state = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=None,
+        plugin_config={"live2d_model_name": "DemoModel"},
+        plugin_config_loader=None,
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=live2ds_dir,
+    )
+    state.refresh()
+    current_revision = int(
+        state.model_info["models"][0]["semantic_axis_profile"]["revision"]
+    )
+
+    sample = _build_motion_tuning_sample(profile_revision=current_revision)
+    sample["adjusted_axes"] = {
+        "head_yaw": 80.0,
+    }
+    sample["adjusted_plan"]["parameters"][0]["axis_id"] = "mismatched_axis"
+
+    state.save_motion_tuning_sample(sample)
+
+    assert state.list_motion_tuning_samples()
+    assert state.motion_tuning_reference_examples == []
 
 
 def test_runtime_state_does_not_silently_truncate_motion_tuning_samples(
