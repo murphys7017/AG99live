@@ -1,23 +1,23 @@
 task:
-  class: refactor
+  class: documentation
   risk: medium
   phase: completed
-  scope: motion preview ingress cleanup across adapter and frontend
+  scope: current documentation cleanup and archive consolidation
 context:
   confidence: high
   assumptions:
-    - Adapter preview ingress should accept only engine.motion_intent for external motion payload testing.
-    - Frontend ModelEngine and runtime state continue to own engine.parameter_plan.v2 generation and execution locally.
+    - Current work docs should describe only active structure, protocol, and design boundaries.
+    - Stage plans, route maps, and historical implementation snapshots belong in docs/archive.
   unresolved_questions: []
 architecture:
   stability: stable
   boundary_changes:
-    - Adapter inbound preview protocol now exposes only engine.motion_intent for motion payload testing.
+    - docs root now keeps only current structure, protocol, and ModelEngine design documents as active entry points.
+    - staged plans and obsolete progress/status docs moved into docs/archive.
 verification:
   checks_run:
-    - frontend npm run test:adapter-connection
-    - pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_protocol_parser_semantic_profile.py astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_turn_coordinator_realtime_motion.py
-    - pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_realtime_motion_plan.py
+    - document index and link search via rg
+    - manual review of active docs for outdated protocol and archive references
   checks_failed: []
   validation_gap: none known
 runtime:

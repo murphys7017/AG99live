@@ -45,12 +45,12 @@ engine.motion_intent.v2 / engine.parameter_plan.v2
 
 ## 2. 协议与代码清理原则
 
-当前支持的动作协议：
+当前涉及的动作 schema：
 
 | Payload | Schema |
 | --- | --- |
-| Motion intent | `engine.motion_intent.v2` |
-| Parameter plan | `engine.parameter_plan.v2` |
+| Adapter 外部动作载荷 | `engine.motion_intent.v2` |
+| 前端内部执行计划 | `engine.parameter_plan.v2` |
 
 边界规则：
 
@@ -79,7 +79,7 @@ engine.motion_intent.v2 / engine.parameter_plan.v2
 ModelEngine 负责：
 
 - 接收已经归一化的动作 payload。
-- 校验 motion intent / parameter plan。
+- 校验 `engine.motion_intent.v2` 和 `engine.parameter_plan.v2`。
 - 根据当前模型和 `SemanticAxisProfile` 生成可执行 parameter plan。
 - 按音频和 turn 上下文决定动作启动时机。
 - 组织动作增强、动作优化、连贯优化等模块。
@@ -184,7 +184,7 @@ interface MotionRuntimeScheduler {
 职责：
 
 - `engine.motion_intent.v2` parse 为 `SemanticMotionIntent`。
-- `engine.parameter_plan.v2` parse 为 `SemanticParameterPlan`。
+- 前端内部执行使用的 `engine.parameter_plan.v2` parse 为 `SemanticParameterPlan`。
 - 对未知 schema 明确拒绝。
 
 目标文件：
@@ -461,7 +461,7 @@ Avatar Runtime 不负责：
 
 验收：
 
-- 当前协议、边界、分层、下一步清晰。
+- 当前协议、边界和分层清晰。
 - 文档只描述当前事实和目标结构。
 
 ### Phase 1：协议边界与冗余清理

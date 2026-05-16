@@ -1,37 +1,53 @@
-# Documentation
+# 文档索引
 
-This directory contains human-facing project documentation.
+`docs/` 只保留当前有效的结构、协议和设计文档。
 
-## Current Docs
+阶段性计划、进度记录、旧方案和历史判断统一放在 `docs/archive/`，不作为当前工作入口。
 
-| File | Purpose |
-|---|---|
-| `V2当前实现状态与下一步.md` | V2 当前实现快照、已完成项、剩余工作 |
-| `项目结构优化路线图.md` | 下一阶段结构优化入口 |
-| `后端主导数据边界与执行计划.md` | 长期数据归属边界和结构收口方向 |
+## 当前工作入口
+
+建议按下面顺序阅读：
+
+1. `architecture/项目结构与模块职责总览.md`
+2. `api/protocol.md`
+3. `ModelEngine驱动系统边界与分层设计.md`
+
+如果要看更细的前端结构，再继续读：
+
+- `architecture/前端系统模块架构说明.md`
+- `architecture/当前前后端动作链路结构说明.md`
+- `architecture/文本语音动作同步播放编排设计.md`
+
+## 当前有效文档
+
+### 总览与结构
+
+| 文件 | 作用 |
+| --- | --- |
+| `architecture/项目结构与模块职责总览.md` | 仓库结构、模块职责和维护边界总览 |
+| `architecture/前端系统模块架构说明.md` | 前端一级模块、依赖方向和当前边界 |
+| `architecture/当前前后端动作链路结构说明.md` | 文本、音频、动作主链路的当前结构 |
+| `architecture/文本语音动作同步播放编排设计.md` | Turn 内文本、音频、动作的同步起播策略 |
+
+### 协议与引擎
+
+| 文件 | 作用 |
+| --- | --- |
 | `api/protocol.md` | 当前唯一有效的 WebSocket 协议契约 |
+| `ModelEngine驱动系统边界与分层设计.md` | 前端动作引擎的边界、分层和扩展设计 |
 
-## Architecture
+### 其他
 
-| File | Purpose |
-|---|---|
-| `architecture/当前前后端动作链路结构说明.md` | 文本 / 音频 / 动作链路的结构手册 |
-| `architecture/前端系统模块架构说明.md` | 前端模块边界、依赖方向和收口优先级 |
-| `architecture/文本语音动作同步播放编排设计.md` | 文本 / 音频 / 动作软同步起播方案 |
+| 文件 | 作用 |
+| --- | --- |
+| `archive/README.md` | 历史文档索引 |
+| `design/engineering_cybernetics_alignment.md` | AI 治理与设计理念说明 |
+| `runtime/agent_execution_protocol.md` | AI 运行协议 |
+| `runtime/release_package.md` | 打包与发布说明 |
 
-## Subdirectories
+## 维护规则
 
-- `architecture/` - system architecture docs
-- `api/` - protocol contract (`protocol.md`)
-- `design/` - design rationale (VEC governance alignment)
-- `runtime/` - agent execution protocol
-- `images/` - project screenshots and diagrams
-
-## Reading Guide
-
-- Quick overview: root `README.md`, then `V2当前实现状态与下一步.md`
-- Structure optimization: `项目结构优化路线图.md`
-- Frontend architecture: `architecture/前端系统模块架构说明.md`
-- Playback pipeline: `architecture/当前前后端动作链路结构说明.md` + `architecture/文本语音动作同步播放编排设计.md`
-- Data ownership: `后端主导数据边界与执行计划.md`
-- Protocol contract: `api/protocol.md`
+- 当前文档只写现在真实成立的结构和边界。
+- 新的阶段计划、施工记录、审阅底稿默认放到 `docs/archive/`。
+- 当前文档里不保留“以前怎么样、现在改成怎么样”的叙述。
+- 如果一个文档不再适合作为当前入口，就移到 `docs/archive/`。

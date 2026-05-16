@@ -1,26 +1,29 @@
-# Architecture Documentation
+# 架构文档
 
-Documents system architecture, boundaries, layers, and long-term structural decisions.
+这里存放当前仍有效的结构与边界文档。
 
-## Core Architecture Docs
+## 推荐阅读顺序
 
-- `项目结构与模块职责总览.md` - Long-lived repo structure and module responsibility index
-- `前端适配器拆分与优化方案.md` - Adapter split and optimization plan for data/runtime/facade boundaries
-- `当前前后端动作链路结构说明.md` - Text/audio/motion pipeline from user input to turn completion
-- `前端系统模块架构说明.md` - Frontend module boundaries, dependency direction, consolidation priorities
-- `文本语音动作同步播放编排设计.md` - Soft-sync startup strategy for text/audio/motion
-- `../ModelEngine驱动系统边界与分层设计.md` - Current frontend ModelEngine boundary and modular layering plan
+1. `项目结构与模块职责总览.md`
+2. `前端系统模块架构说明.md`
+3. `当前前后端动作链路结构说明.md`
+4. `文本语音动作同步播放编排设计.md`
+5. `../ModelEngine驱动系统边界与分层设计.md`
 
-## Key Concepts
+## 文档说明
 
-- **TurnPlaybackSession** → Frontend playback truth source, one per turn, contains multiple segments
-- **Three-signal completion** → `synth_finished` (queue closed) → `playback_finished` (local settled) → `turn_finished` (backend confirmed)
-- **ModelEngine** → Compiles `engine.motion_intent.v2` into `engine.parameter_plan.v2`; current next focus is its internal boundary review
-- **AdapterProtocol** → V2 WebSocket, envelope validation at boundary, session-aware context; first-round split is clear enough for engine work
+- `项目结构与模块职责总览.md`
+  - 仓库级结构和模块职责总览
+- `前端系统模块架构说明.md`
+  - 前端一级模块边界、依赖方向、当前职责
+- `当前前后端动作链路结构说明.md`
+  - 当前文本、音频、动作主链路
+- `文本语音动作同步播放编排设计.md`
+  - 当前同步起播和播放完成编排
+- `../ModelEngine驱动系统边界与分层设计.md`
+  - 动作引擎边界、分层和扩展方向
 
-## Related
+## 维护规则
 
-- `docs/api/protocol.md` - Protocol contract (message types, ID contract, schemas)
-- `docs/design/engineering_cybernetics_alignment.md` - VEC governance philosophy
-- `docs/项目结构优化路线图.md` - Structure optimization roadmap
-- `docs/后端主导数据边界与执行计划.md` - Long-term data ownership boundaries
+- 这里只保留当前有效的结构说明。
+- 阶段性拆分方案、施工计划、路线图统一移到 `../archive/`。
