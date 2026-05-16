@@ -8,12 +8,10 @@ from astrbot.api import logger
 
 from ..protocol import (
     TYPE_ENGINE_MOTION_INTENT,
-    TYPE_ENGINE_PARAMETER_PLAN,
 )
 from .realtime_motion_plan import (
     normalize_motion_intent_payload,
     resolve_selected_semantic_axis_profile,
-    validate_parameter_plan_payload,
     validate_motion_intent_payload,
 )
 from ..prompts.inline_motion_contract import build_inline_motion_contract
@@ -92,8 +90,6 @@ def validate_motion_payload(payload: Any) -> tuple[bool, str]:
     schema_version = resolve_motion_payload_schema_version(payload)
     if schema_version == "engine.motion_intent.v2":
         return validate_motion_intent_payload(payload)
-    if schema_version == "engine.parameter_plan.v2":
-        return validate_parameter_plan_payload(payload)
     return False, "unsupported_schema_version"
 
 
@@ -109,8 +105,6 @@ def resolve_engine_motion_message_type(payload: Any) -> str:
     schema_version = resolve_motion_payload_schema_version(payload)
     if schema_version == "engine.motion_intent.v2":
         return TYPE_ENGINE_MOTION_INTENT
-    if schema_version == "engine.parameter_plan.v2":
-        return TYPE_ENGINE_PARAMETER_PLAN
     return ""
 
 
@@ -154,10 +148,6 @@ def extract_message_motion_payload(
             motion_payload = normalize_motion_intent_payload(motion_payload)
         except ValueError as exc:
             return None, str(exc)
-    elif message_type == TYPE_ENGINE_PARAMETER_PLAN:
-        motion_payload = payload.get("plan")
-        if not isinstance(motion_payload, dict):
-            return None, "missing_plan_object"
     else:
         return None, "unsupported_message_type"
 

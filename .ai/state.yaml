@@ -2,21 +2,22 @@ task:
   class: refactor
   risk: medium
   phase: completed
-  scope: frontend adapter-connection structure
+  scope: motion preview ingress cleanup across adapter and frontend
 context:
   confidence: high
   assumptions:
-    - Adapter external APIs should remain stable while implementation folders are reorganized.
-    - Motion engine and action library are out of scope for the current structural pass.
+    - Adapter preview ingress should accept only engine.motion_intent for external motion payload testing.
+    - Frontend ModelEngine and runtime state continue to own engine.parameter_plan.v2 generation and execution locally.
   unresolved_questions: []
 architecture:
   stability: stable
   boundary_changes:
-    - frontend/src/adapter-connection split into core, inbound, outbound, runtime, and features.
+    - Adapter inbound preview protocol now exposes only engine.motion_intent for motion payload testing.
 verification:
   checks_run:
-    - frontend npm run typecheck
-    - frontend npm test
+    - frontend npm run test:adapter-connection
+    - pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_protocol_parser_semantic_profile.py astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_turn_coordinator_realtime_motion.py
+    - pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_realtime_motion_plan.py
   checks_failed: []
   validation_gap: none known
 runtime:

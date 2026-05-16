@@ -23,7 +23,6 @@ import type {
 } from "../types/protocol";
 import {
   SCHEMA_MOTION_INTENT_V2,
-  SCHEMA_PARAMETER_PLAN_V2,
 } from "../types/protocol.js";
 import { applyInboundMotionPayload } from "../adapter-connection/inbound/inboundMotion.js";
 import {
@@ -673,11 +672,7 @@ function deleteMotionTuningSample(sampleId: string): boolean {
 }
 
 function sendMotionPayloadPreview(payload: unknown): boolean {
-  return sendMotionPreview(outboundCtx, payload, SCHEMA_MOTION_INTENT_V2, SCHEMA_PARAMETER_PLAN_V2);
-}
-
-function sendMotionPlanPreview(plan: unknown): boolean {
-  return sendMotionPreview(outboundCtx, plan, SCHEMA_MOTION_INTENT_V2, SCHEMA_PARAMETER_PLAN_V2);
+  return sendMotionPreview(outboundCtx, payload, SCHEMA_MOTION_INTENT_V2);
 }
 
 async function sendPlaybackFinished(
@@ -785,7 +780,6 @@ export function useAdapterConnection(
     saveMotionTuningSample,
     deleteMotionTuningSample,
     sendMotionPayloadPreview,
-    sendMotionPlanPreview,
     sendPlaybackFinishedForCurrentGroup: sendPlaybackFinished,
     clearPlaybackGroupContext,
     releaseAssistantTextForPlayback,

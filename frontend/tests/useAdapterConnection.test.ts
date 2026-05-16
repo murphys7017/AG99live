@@ -755,7 +755,7 @@ function testSendMotionPreviewUsesOutboundProtocolEnvelope(): void {
   });
 }
 
-function testSendParameterPlanPreviewUsesParameterPlanEnvelope(): void {
+function testSendParameterPlanPayloadPreviewIsRejected(): void {
   withConnectedAdapter(({ adapter, socket }) => {
     socket.sent.length = 0;
 
@@ -784,12 +784,9 @@ function testSendParameterPlanPreviewUsesParameterPlanEnvelope(): void {
       ],
     });
 
-    assert.equal(sent, true);
-    assert.equal(socket.sent.length, 1);
-    const message = JSON.parse(socket.sent[0]) as Record<string, unknown>;
-    assert.equal(message.type, "engine.parameter_plan");
-    assert.equal(message.version, "v2");
-    assert.equal(adapter.state.statusMessage, "已发送动作测试载荷（engine.parameter_plan）。");
+    assert.equal(sent, false);
+    assert.equal(socket.sent.length, 0);
+    assert.match(adapter.state.statusMessage, /不支持 schema_version=engine\.parameter_plan\.v2/);
   });
 }
 
@@ -1102,7 +1099,7 @@ async function run(): Promise<void> {
   testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted();
   await testSendTextUsesOutboundProtocolEnvelope();
   testSendMotionPreviewUsesOutboundProtocolEnvelope();
-  testSendParameterPlanPreviewUsesParameterPlanEnvelope();
+  testSendParameterPlanPayloadPreviewIsRejected();
   await testAutoStartMicDoesNotDuplicateCaptureStart();
   await testMicAudioUsesFreshInputOrchestrationAcrossChunkAndEnd();
   await testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd();

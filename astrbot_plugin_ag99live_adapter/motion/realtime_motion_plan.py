@@ -36,7 +36,6 @@ _NEUTRAL_EMOTION_MARKERS = {
 }
 MOTION_INTENT_SCHEMA_VERSION = "engine.motion_intent.v2"
 MOTION_INTENT_V2_SCHEMA_VERSION = "engine.motion_intent.v2"
-PARAMETER_PLAN_SCHEMA_VERSION = "engine.parameter_plan.v2"
 PARAMETER_PLAN_V2_SCHEMA_VERSION = "engine.parameter_plan.v2"
 
 
@@ -632,75 +631,7 @@ def validate_motion_intent_payload(intent: Any) -> tuple[bool, str]:
 
 
 def validate_parameter_plan_payload(plan: Any) -> tuple[bool, str]:
-    if not isinstance(plan, dict):
-        return False, "plan_not_object"
-
-    schema_version = str(plan.get("schema_version") or "").strip()
-    if schema_version == PARAMETER_PLAN_V2_SCHEMA_VERSION:
-        return validate_parameter_plan_v2_payload(plan)
-    if schema_version != PARAMETER_PLAN_SCHEMA_VERSION:
-        return False, "invalid_schema_version"
-
-    mode = str(plan.get("mode") or "").strip().lower()
-    if mode not in {"expressive", "idle"}:
-        return False, "invalid_mode"
-
-    timing = plan.get("timing")
-    if not isinstance(timing, dict):
-        return False, "timing_not_object"
-    timing_keys = ("duration_ms", "blend_in_ms", "hold_ms", "blend_out_ms")
-    for key in timing_keys:
-        value = timing.get(key)
-        if not isinstance(value, (int, float)):
-            return False, f"timing_{key}_not_number"
-        if float(value) < 0:
-            return False, f"timing_{key}_negative"
-
-    key_axes = plan.get("key_axes")
-    if not isinstance(key_axes, dict):
-        return False, "key_axes_not_object"
-    if len(key_axes) != len(AXIS_NAMES):
-        return False, "key_axes_count_mismatch"
-    for axis_name in AXIS_NAMES:
-        axis_payload = key_axes.get(axis_name)
-        if not isinstance(axis_payload, dict):
-            return False, f"missing_axis_{axis_name}"
-        value = axis_payload.get("value")
-        if not isinstance(value, (int, float)):
-            return False, f"axis_{axis_name}_value_not_number"
-        if float(value) < 0 or float(value) > 100:
-            return False, f"axis_{axis_name}_value_out_of_range"
-    for axis_name in key_axes.keys():
-        if axis_name not in AXIS_NAMES:
-            return False, f"unexpected_axis_{axis_name}"
-
-    supplementary = plan.get("supplementary_params")
-    if not isinstance(supplementary, list):
-        return False, "supplementary_not_list"
-    for item in supplementary:
-        if not isinstance(item, dict):
-            return False, "supplementary_item_not_object"
-        parameter_id = str(item.get("parameter_id") or "").strip()
-        if not parameter_id:
-            return False, "supplementary_parameter_id_empty"
-        source_atom_id = str(item.get("source_atom_id") or "").strip()
-        if not source_atom_id:
-            return False, "supplementary_source_atom_id_empty"
-        channel = str(item.get("channel") or "").strip()
-        if not channel:
-            return False, "supplementary_channel_empty"
-        target_value = item.get("target_value")
-        weight = item.get("weight")
-        if not isinstance(target_value, (int, float)):
-            return False, "supplementary_target_value_not_number"
-        if float(target_value) < -1.0 or float(target_value) > 1.0:
-            return False, "supplementary_target_value_out_of_range"
-        if not isinstance(weight, (int, float)):
-            return False, "supplementary_weight_not_number"
-        if float(weight) < 0.0 or float(weight) > 1.0:
-            return False, "supplementary_weight_out_of_range"
-
-    return True, ""
+    return validate_parameter_plan_v2_payload(plan)
 
 
 def validate_parameter_plan_v2_payload(plan: Any) -> tuple[bool, str]:

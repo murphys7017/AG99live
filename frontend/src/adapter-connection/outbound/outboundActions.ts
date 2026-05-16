@@ -151,7 +151,6 @@ export function sendMotionPayloadPreview(
   ctx: OutboundActionContext,
   payload: unknown,
   schemaMotionIntentV2: string,
-  schemaParameterPlanV2: string,
 ): boolean {
   if (!ctx.outboundClient.canSend()) {
     ctx.state.lastError = "当前还没有连上适配器，无法发送动作测试载荷。";
@@ -163,10 +162,7 @@ export function sendMotionPayloadPreview(
   const schemaVersion = payload && typeof payload === "object"
     ? String((payload as Record<string, unknown>).schema_version ?? "").trim()
     : "";
-  if (
-    schemaVersion !== schemaMotionIntentV2
-    && schemaVersion !== schemaParameterPlanV2
-  ) {
+  if (schemaVersion !== schemaMotionIntentV2) {
     ctx.state.lastError = `动作测试载荷无效：不支持 schema_version=${schemaVersion || "empty"}。`;
     ctx.state.statusMessage = ctx.state.lastError;
     ctx.pushHistory("error", ctx.state.lastError);
@@ -174,21 +170,16 @@ export function sendMotionPayloadPreview(
     return false;
   }
 
-  const messageType = schemaVersion === schemaMotionIntentV2
-    ? "engine.motion_intent"
-    : "engine.parameter_plan";
-  const payloadKey = messageType === "engine.motion_intent" ? "intent" : "plan";
-
-  if (!ctx.outboundClient.send(messageType, {
+  if (!ctx.outboundClient.send("engine.motion_intent", {
     mode: "preview",
-    [payloadKey]: payload,
+    intent: payload,
   })) {
     ctx.state.lastError = "当前还没有连上适配器，无法发送动作测试载荷。";
     ctx.state.statusMessage = ctx.state.lastError;
     ctx.pushHistory("error", ctx.state.lastError);
     return false;
   }
-  ctx.state.statusMessage = `已发送动作测试载荷（${messageType}）。`;
+  ctx.state.statusMessage = "已发送动作测试载荷（engine.motion_intent）。";
   ctx.pushHistory("system", ctx.state.statusMessage);
   return true;
 }
