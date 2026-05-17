@@ -25,6 +25,7 @@ docs/
     01-ModelEngine边界与分层设计.md      # ModelEngine 边界与分层设计
     02-工程控制论对齐.md                 # 工程控制论对齐
     03-协议ID收口修改计划书.md           # 协议 ID 收口结果与维护规则
+    04-ModelEngine第一轮拆分实施方案.md  # ModelEngine 第一轮代码级拆分方案
 
   03-运行时与运维/                       # 运行时与运维
     01-AI运行协议.md                     # AI 运行协议
