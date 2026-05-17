@@ -9,7 +9,6 @@ import type {
 } from "../../types/semantic-axis-profile.js";
 import type { CompileOptions, CompileResult } from "../contracts.js";
 import { normalizeModelEngineSettings } from "../settings.js";
-import { resolveMotionTiming } from "../timing.js";
 import { buildBaseCompileDiagnostics, finalizeCompileDiagnostics } from "./diagnostics.js";
 import {
   createInitialCompileState,
@@ -23,6 +22,7 @@ import { axisResolverStage } from "./stages/axisResolver.js";
 import { couplingStage } from "./stages/couplingStage.js";
 import { intensityStage } from "./stages/intensityStage.js";
 import { modeResolverStage } from "./stages/modeResolverStage.js";
+import { timingStage } from "./stages/timingStage.js";
 
 export function compileMotionIntent(
   intent: SemanticMotionIntent,
@@ -52,6 +52,7 @@ function buildDefaultCompileStages(): MotionCompileStage[] {
     intensityStage,
     couplingStage,
     modeResolverStage,
+    timingStage,
   ];
 }
 
@@ -70,7 +71,7 @@ function failCompile(
 function continueLegacyCompile(
   context: MotionCompileContext,
 ): CompileResult {
-  const { intent, options, settings, baseDiagnostics, state } = context;
+  const { intent, settings, baseDiagnostics, state } = context;
   const semanticProfile = state.profile;
   if (!semanticProfile) {
     return failCompile("semantic_profile_missing", context);
@@ -88,11 +89,10 @@ function continueLegacyCompile(
   const maxAxisErrors = state.axisErrorLimit;
   const axisErrorCount = state.axisErrorCount;
   const resolvedMode: SemanticParameterPlan["mode"] = state.resolvedMode;
-  const timing = resolveMotionTiming({
-    mode: resolvedMode,
-    durationHintMs: intent.duration_hint_ms ?? null,
-    targetDurationMs: options.targetDurationMs ?? null,
-  });
+  const timing = state.timing;
+  if (!timing) {
+    return failCompile("compile_pipeline_missing_required_state", context);
+  }
 
   const parameterResult = buildSemanticPlanParameters(
     allAxisValues,
@@ -131,7 +131,6 @@ function continueLegacyCompile(
   state.axisErrorLimit = maxAxisErrors;
   state.warnings = warnings;
   state.resolvedMode = resolvedMode;
-  state.timing = timing;
   state.parameters = parameterResult.parameters;
 
   return buildSuccessResultFromContext(context, {
