@@ -14,7 +14,6 @@ from ..prompts.motion_selector import (
     build_selector_user_prompt,
     profile_prompt_axes,
     resolve_motion_prompt_instruction,
-    resolve_selector_few_shot_examples,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -60,7 +59,7 @@ class RealtimeMotionPlanGenerator:
         semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=self.runtime_state)
         selector_raw = await self._call_astrbot_selector(
             context_text,
-            few_shot_examples=resolve_selector_few_shot_examples(runtime_state=self.runtime_state),
+            few_shot_examples=self.runtime_state.list_effective_motion_tuning_examples(),
             motion_instruction=resolve_motion_prompt_instruction(runtime_state=self.runtime_state),
             semantic_profile=semantic_profile,
         )

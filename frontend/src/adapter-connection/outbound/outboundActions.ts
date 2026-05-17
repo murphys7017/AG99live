@@ -1,17 +1,13 @@
 import type { SystemSemanticAxisProfileSavePayload } from "../../types/protocol.js";
 import {
-  normalizeOrchestrationId,
   normalizeTurnIdForComparison,
 } from "../core/orchestrationIds.js";
 import type { AdapterOutboundClient } from "./outboundClient.js";
 
 export interface OutboundActionState {
   currentTurnId: string | null;
-  currentOrchestrationId: string | null;
   audioPlaybackStartedTurnId: string | null;
-  audioPlaybackStartedOrchestrationId: string | null;
   audioPlaybackTerminalTurnId: string | null;
-  audioPlaybackTerminalOrchestrationId: string | null;
   desktopScreenshotOnSendEnabled: boolean;
   lastError: string;
   statusMessage: string;
@@ -42,8 +38,7 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
     return false;
   }
 
-  ctx.state.currentOrchestrationId = ctx.createMessageId();
-  ctx.state.currentTurnId = null;
+  ctx.state.currentTurnId = ctx.createMessageId();
   ctx.resetAudioPlaybackTerminal();
   const desktopCapture = ctx.state.desktopScreenshotOnSendEnabled
     ? await captureRealtimeDesktopScreenshot()
@@ -52,7 +47,7 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
   const sent = ctx.outboundClient.send("input.text", {
     text: outboundText,
     images: desktopCapture ? [desktopCapture] : [],
-  }, null, ctx.state.currentOrchestrationId);
+  }, ctx.state.currentTurnId);
   if (!sent) {
     ctx.state.lastError = "当前还没有连上适配器，文本未发送。";
     ctx.state.statusMessage = ctx.state.lastError;
@@ -187,7 +182,6 @@ export function sendMotionPayloadPreview(
 export function sendPlaybackFinished(
   ctx: OutboundActionContext,
   turnId: string | null,
-  orchestrationId: string | null,
   success: boolean,
   reason?: string,
 ): void {
@@ -196,47 +190,32 @@ export function sendPlaybackFinished(
     payload.reason = reason;
   }
 
-  ctx.outboundClient.send("control.playback_finished", payload, turnId, orchestrationId);
+  ctx.outboundClient.send("control.playback_finished", payload, turnId);
 }
 
 export function clearPlaybackGroupContext(
   ctx: OutboundActionContext,
   turnId: string | null,
-  orchestrationId: string | null,
 ): void {
   const normalizedTurnId = normalizeTurnIdForComparison(turnId);
   const normalizedCurrentTurnId = normalizeTurnIdForComparison(ctx.state.currentTurnId);
-  const normalizedOrchestrationId = normalizeOrchestrationId(orchestrationId);
-  const currentOrchestrationId = normalizeOrchestrationId(ctx.state.currentOrchestrationId);
-
-  const matchesTurn = normalizedTurnId && normalizedCurrentTurnId && normalizedTurnId === normalizedCurrentTurnId;
-  const matchesOrchestration =
-    normalizedOrchestrationId
-    && currentOrchestrationId
-    && normalizedOrchestrationId === currentOrchestrationId;
-  const matchesActiveGroup = Boolean(matchesTurn || matchesOrchestration);
+  const matchesActiveGroup = Boolean(
+    normalizedTurnId
+    && normalizedCurrentTurnId
+    && normalizedTurnId === normalizedCurrentTurnId,
+  );
 
   if (matchesActiveGroup) {
     ctx.state.currentTurnId = null;
-    ctx.state.currentOrchestrationId = null;
   }
 
-  const matchesStartedAudio =
-    normalizeTurnIdForComparison(ctx.state.audioPlaybackStartedTurnId) === normalizedTurnId
-    || Boolean(
-      normalizedOrchestrationId
-      && normalizeOrchestrationId(ctx.state.audioPlaybackStartedOrchestrationId) === normalizedOrchestrationId,
-    );
+  const matchesStartedAudio = normalizeTurnIdForComparison(ctx.state.audioPlaybackStartedTurnId) === normalizedTurnId;
   if (matchesStartedAudio) {
     ctx.stopAudio();
   }
 
   const matchesTerminalAudio =
-    normalizeTurnIdForComparison(ctx.state.audioPlaybackTerminalTurnId) === normalizedTurnId
-    || Boolean(
-      normalizedOrchestrationId
-      && normalizeOrchestrationId(ctx.state.audioPlaybackTerminalOrchestrationId) === normalizedOrchestrationId,
-    );
+    normalizeTurnIdForComparison(ctx.state.audioPlaybackTerminalTurnId) === normalizedTurnId;
   if (matchesTerminalAudio || matchesStartedAudio || matchesActiveGroup) {
     ctx.resetAudioPlaybackTerminal();
   }

@@ -15,7 +15,6 @@ import type {
   SystemSemanticAxisProfileSaveFailedPayload,
   SystemServerInfoPayload,
 } from "../../types/protocol.js";
-import { normalizeOrchestrationId } from "../core/orchestrationIds.js";
 import { INBOUND_MESSAGE_TYPES } from "../core/protocolMessageTypes.js";
 import {
   type PayloadParseError,
@@ -36,9 +35,7 @@ import {
 
 export interface InboundEventMappingContext {
   currentTurnId: string | null;
-  currentOrchestrationId: string | null;
   activeAudioTurnId: string | null;
-  activeAudioOrchestrationId: string | null;
 }
 
 function normalizeTurnId(value: unknown): string | null {
@@ -54,13 +51,6 @@ function resolveCurrentTurnIdentity(
   fallback: string | null,
 ): string | null {
   return normalizeTurnId(value) ?? fallback;
-}
-
-function resolveCurrentOrchestrationIdentity(
-  value: unknown,
-  fallback: string | null,
-): string | null {
-  return normalizeOrchestrationId(value) ?? fallback;
 }
 
 function normalizeMessageId(value: unknown): string | null {
@@ -122,7 +112,6 @@ export type InboundAdapterEvent =
     kind: "output_text";
     messageId: string;
     turnId: string | null;
-    orchestrationId: string | null;
     text: string;
     envelope: ProtocolEnvelope<OutputTextPayload>;
   }
@@ -130,7 +119,6 @@ export type InboundAdapterEvent =
     kind: "output_audio";
     messageId: string;
     turnId: string | null;
-    orchestrationId: string | null;
     text: string;
     audioUrl: string | null;
     envelope: ProtocolEnvelope<OutputAudioPayload>;
@@ -138,13 +126,11 @@ export type InboundAdapterEvent =
   | {
     kind: "turn_started";
     turnId: string | null;
-    orchestrationId: string | null;
     envelope: ProtocolEnvelope<unknown>;
   }
   | {
     kind: "turn_finished";
     turnId: string | null;
-    orchestrationId: string | null;
     success: boolean;
     reason: string;
     envelope: ProtocolEnvelope<ControlTurnFinishedPayload>;
@@ -152,20 +138,17 @@ export type InboundAdapterEvent =
   | {
     kind: "interrupt";
     turnId: string | null;
-    orchestrationId: string | null;
     envelope: ProtocolEnvelope<unknown>;
   }
   | {
     kind: "synth_finished";
     turnId: string | null;
-    orchestrationId: string | null;
     envelope: ProtocolEnvelope<unknown>;
   }
   | {
     kind: "engine_motion_payload";
     messageId: string;
     turnId: string | null;
-    orchestrationId: string | null;
     envelope: ProtocolEnvelope<Record<string, unknown>>;
   };
 
@@ -261,10 +244,6 @@ export function mapInboundEnvelopeToEvent(
       }
       const payload = parsed.payload;
       const turnId = resolveCurrentTurnIdentity(envelope.turn_id, ctx.currentTurnId);
-      const orchestrationId = resolveCurrentOrchestrationIdentity(
-        envelope.orchestration_id,
-        ctx.currentOrchestrationId,
-      );
       const messageId = requireSegmentMessageId(envelope);
       if (!messageId.ok) {
         return messageId.event;
@@ -273,7 +252,6 @@ export function mapInboundEnvelopeToEvent(
         kind: "output_text",
         messageId: messageId.messageId,
         turnId,
-        orchestrationId,
         text: payload.text.trim(),
         envelope: withPayload(envelope, payload),
       };
@@ -289,10 +267,6 @@ export function mapInboundEnvelopeToEvent(
           ? payload.audio_url.trim()
           : null;
       const turnId = resolveCurrentTurnIdentity(envelope.turn_id, ctx.currentTurnId);
-      const orchestrationId = resolveCurrentOrchestrationIdentity(
-        envelope.orchestration_id,
-        ctx.currentOrchestrationId,
-      );
       const messageId = requireSegmentMessageId(envelope);
       if (!messageId.ok) {
         return messageId.event;
@@ -301,7 +275,6 @@ export function mapInboundEnvelopeToEvent(
         kind: "output_audio",
         messageId: messageId.messageId,
         turnId,
-        orchestrationId,
         text: payload.text.trim(),
         audioUrl: normalizedAudioUrl,
         envelope: withPayload(envelope, payload),
@@ -331,7 +304,6 @@ export function mapInboundEnvelopeToEvent(
       return {
         kind: "turn_started",
         turnId: normalizeTurnId(envelope.turn_id),
-        orchestrationId: normalizeOrchestrationId(envelope.orchestration_id),
         envelope,
       };
     case INBOUND_MESSAGE_TYPES.CONTROL_TURN_FINISHED: {
@@ -343,10 +315,6 @@ export function mapInboundEnvelopeToEvent(
       return {
         kind: "turn_finished",
         turnId: resolveCurrentTurnIdentity(envelope.turn_id, ctx.currentTurnId),
-        orchestrationId: resolveCurrentOrchestrationIdentity(
-          envelope.orchestration_id,
-          ctx.currentOrchestrationId,
-        ),
         success: Boolean(payload.success),
         reason: payload.reason?.trim() ?? "",
         envelope: withPayload(envelope, payload),
@@ -356,7 +324,6 @@ export function mapInboundEnvelopeToEvent(
       return {
         kind: "interrupt",
         turnId: ctx.currentTurnId,
-        orchestrationId: ctx.currentOrchestrationId,
         envelope,
       };
     case INBOUND_MESSAGE_TYPES.CONTROL_START_MIC:
@@ -368,10 +335,6 @@ export function mapInboundEnvelopeToEvent(
       return {
         kind: "synth_finished",
         turnId: resolveCurrentTurnIdentity(envelope.turn_id, ctx.currentTurnId),
-        orchestrationId: resolveCurrentOrchestrationIdentity(
-          envelope.orchestration_id,
-          ctx.currentOrchestrationId,
-        ),
         envelope,
       };
     case INBOUND_MESSAGE_TYPES.CONTROL_ERROR: {
@@ -389,10 +352,6 @@ export function mapInboundEnvelopeToEvent(
         normalizeTurnId(envelope.turn_id)
         ?? ctx.currentTurnId
         ?? ctx.activeAudioTurnId;
-      const orchestrationId =
-        normalizeOrchestrationId(envelope.orchestration_id)
-        ?? ctx.currentOrchestrationId
-        ?? ctx.activeAudioOrchestrationId;
       const messageId = requireSegmentMessageId(envelope);
       if (!messageId.ok) {
         return messageId.event;
@@ -401,7 +360,6 @@ export function mapInboundEnvelopeToEvent(
         kind: "engine_motion_payload",
         messageId: messageId.messageId,
         turnId,
-        orchestrationId,
         envelope: envelope as ProtocolEnvelope<Record<string, unknown>>,
       };
     }

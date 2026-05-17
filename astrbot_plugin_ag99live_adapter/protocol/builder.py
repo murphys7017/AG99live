@@ -34,16 +34,14 @@ from .parser import build_message_envelope
 
 def build_system_model_sync(
     *,
-    session_id: str,
     model_info: dict[str, Any],
     runtime_cache_errors: dict[str, str] | None = None,
     conf_name: str,
     conf_uid: str,
     client_uid: str,
-) -> dict[str, Any]:
+    ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_SYSTEM_MODEL_SYNC,
-        session_id=session_id,
         source=SOURCE_ADAPTER,
         payload={
             "model_info": model_info,
@@ -61,14 +59,12 @@ def build_system_model_sync(
 
 def build_system_server_info(
     *,
-    session_id: str,
     ws_url: str,
     http_base_url: str,
     auto_start_mic: bool,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_SYSTEM_SERVER_INFO,
-        session_id=session_id,
         source=SOURCE_ADAPTER,
         payload={
             "ws_url": ws_url,
@@ -80,13 +76,11 @@ def build_system_server_info(
 
 def build_system_group_update(
     *,
-    session_id: str,
     members: list[dict[str, Any]] | list[Any],
     is_owner: bool,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_SYSTEM_GROUP_UPDATE,
-        session_id=session_id,
         source=SOURCE_ADAPTER,
         payload={"members": members, "is_owner": is_owner},
     )
@@ -94,12 +88,10 @@ def build_system_group_update(
 
 def build_system_background_list(
     *,
-    session_id: str,
     files: list[str],
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_SYSTEM_BACKGROUND_LIST,
-        session_id=session_id,
         source=SOURCE_ADAPTER,
         payload={"files": files},
     )
@@ -107,12 +99,10 @@ def build_system_background_list(
 
 def build_system_history_list(
     *,
-    session_id: str,
     histories: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_SYSTEM_HISTORY_LIST,
-        session_id=session_id,
         source=SOURCE_ADAPTER,
         payload={"histories": histories},
     )
@@ -120,12 +110,10 @@ def build_system_history_list(
 
 def build_system_history_created(
     *,
-    session_id: str,
     history_uid: str,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_SYSTEM_HISTORY_CREATED,
-        session_id=session_id,
         source=SOURCE_ADAPTER,
         payload={"history_uid": history_uid},
     )
@@ -133,12 +121,10 @@ def build_system_history_created(
 
 def build_system_history_data(
     *,
-    session_id: str,
     messages: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_SYSTEM_HISTORY_DATA,
-        session_id=session_id,
         source=SOURCE_ADAPTER,
         payload={"messages": messages},
     )
@@ -146,25 +132,20 @@ def build_system_history_data(
 
 def build_system_history_deleted(
     *,
-    session_id: str,
     history_uid: str,
     success: bool,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_SYSTEM_HISTORY_DELETED,
-        session_id=session_id,
         source=SOURCE_ADAPTER,
         payload={"history_uid": history_uid, "success": success},
     )
 
 
 def build_system_heartbeat_ack(
-    *,
-    session_id: str,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_SYSTEM_HEARTBEAT_ACK,
-        session_id=session_id,
         source=SOURCE_ADAPTER,
         payload={},
     )
@@ -172,7 +153,6 @@ def build_system_heartbeat_ack(
 
 def build_system_semantic_axis_profile_saved(
     *,
-    session_id: str,
     request_id: str,
     model_name: str,
     profile_id: str,
@@ -183,7 +163,6 @@ def build_system_semantic_axis_profile_saved(
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVED,
-        session_id=session_id,
         turn_id=turn_id,
         source=SOURCE_ADAPTER,
         payload={
@@ -199,7 +178,6 @@ def build_system_semantic_axis_profile_saved(
 
 def build_system_semantic_axis_profile_save_failed(
     *,
-    session_id: str,
     request_id: str,
     model_name: str,
     profile_id: str,
@@ -219,7 +197,6 @@ def build_system_semantic_axis_profile_save_failed(
         payload["expected_revision"] = expected_revision
     return build_message_envelope(
         TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE_FAILED,
-        session_id=session_id,
         turn_id=turn_id,
         source=SOURCE_ADAPTER,
         payload=payload,
@@ -228,16 +205,15 @@ def build_system_semantic_axis_profile_save_failed(
 
 def build_system_motion_tuning_samples_state(
     *,
-    session_id: str,
     samples: list[dict[str, Any]],
     root_error: str = "",
     load_error: str = "",
     diagnostics: list[str] | None = None,
+    effective_examples: list[dict[str, Any]] | None = None,
     turn_id: str | None = None,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_SYSTEM_MOTION_TUNING_SAMPLES_STATE,
-        session_id=session_id,
         turn_id=turn_id,
         source=SOURCE_ADAPTER,
         payload={
@@ -249,15 +225,18 @@ def build_system_motion_tuning_samples_state(
                 for item in (diagnostics or [])
                 if str(item).strip()
             ],
+            "effective_examples": [
+                item
+                for item in (effective_examples or [])
+                if isinstance(item, dict)
+            ],
         },
     )
 
 
 def build_output_text(
     *,
-    session_id: str,
     turn_id: str | None,
-    orchestration_id: str | None = None,
     message_id: str | None = None,
     text: str,
     speaker_name: str,
@@ -265,9 +244,7 @@ def build_output_text(
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_OUTPUT_TEXT,
-        session_id=session_id,
         turn_id=turn_id,
-        orchestration_id=orchestration_id,
         message_id=message_id,
         source=SOURCE_ADAPTER,
         payload={
@@ -280,9 +257,7 @@ def build_output_text(
 
 def build_output_audio(
     *,
-    session_id: str,
     turn_id: str | None,
-    orchestration_id: str | None = None,
     message_id: str | None = None,
     audio_url: str | None,
     text: str,
@@ -291,9 +266,7 @@ def build_output_audio(
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_OUTPUT_AUDIO,
-        session_id=session_id,
         turn_id=turn_id,
-        orchestration_id=orchestration_id,
         message_id=message_id,
         source=SOURCE_ADAPTER,
         payload={
@@ -307,16 +280,12 @@ def build_output_audio(
 
 def build_output_image(
     *,
-    session_id: str,
     turn_id: str | None,
-    orchestration_id: str | None = None,
     images: list[str],
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_OUTPUT_IMAGE,
-        session_id=session_id,
         turn_id=turn_id,
-        orchestration_id=orchestration_id,
         source=SOURCE_ADAPTER,
         payload={"images": images},
     )
@@ -324,16 +293,12 @@ def build_output_image(
 
 def build_output_transcription(
     *,
-    session_id: str,
     turn_id: str | None,
-    orchestration_id: str | None = None,
     text: str,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_OUTPUT_TRANSCRIPTION,
-        session_id=session_id,
         turn_id=turn_id,
-        orchestration_id=orchestration_id,
         source=SOURCE_ADAPTER,
         payload={"text": text},
     )
@@ -341,15 +306,11 @@ def build_output_transcription(
 
 def build_control_turn_started(
     *,
-    session_id: str,
     turn_id: str,
-    orchestration_id: str | None = None,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_CONTROL_TURN_STARTED,
-        session_id=session_id,
         turn_id=turn_id,
-        orchestration_id=orchestration_id,
         source=SOURCE_ADAPTER,
         payload={},
     )
@@ -357,9 +318,7 @@ def build_control_turn_started(
 
 def build_control_turn_finished(
     *,
-    session_id: str,
     turn_id: str | None,
-    orchestration_id: str | None = None,
     success: bool = True,
     reason: str | None = None,
 ) -> dict[str, Any]:
@@ -368,21 +327,15 @@ def build_control_turn_finished(
         payload["reason"] = reason
     return build_message_envelope(
         TYPE_CONTROL_TURN_FINISHED,
-        session_id=session_id,
         turn_id=turn_id,
-        orchestration_id=orchestration_id,
         source=SOURCE_ADAPTER,
         payload=payload,
     )
 
 
-def build_control_start_mic(
-    *,
-    session_id: str,
-) -> dict[str, Any]:
+def build_control_start_mic() -> dict[str, Any]:
     return build_message_envelope(
         TYPE_CONTROL_START_MIC,
-        session_id=session_id,
         source=SOURCE_ADAPTER,
         payload={},
     )
@@ -390,15 +343,11 @@ def build_control_start_mic(
 
 def build_control_interrupt(
     *,
-    session_id: str,
     turn_id: str | None,
-    orchestration_id: str | None = None,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_CONTROL_INTERRUPT,
-        session_id=session_id,
         turn_id=turn_id,
-        orchestration_id=orchestration_id,
         source=SOURCE_ADAPTER,
         payload={},
     )
@@ -406,15 +355,11 @@ def build_control_interrupt(
 
 def build_control_synth_finished(
     *,
-    session_id: str,
     turn_id: str | None,
-    orchestration_id: str | None = None,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_CONTROL_SYNTH_FINISHED,
-        session_id=session_id,
         turn_id=turn_id,
-        orchestration_id=orchestration_id,
         source=SOURCE_ADAPTER,
         payload={},
     )
@@ -422,16 +367,12 @@ def build_control_synth_finished(
 
 def build_control_error(
     *,
-    session_id: str,
     message: str,
     turn_id: str | None = None,
-    orchestration_id: str | None = None,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_CONTROL_ERROR,
-        session_id=session_id,
         turn_id=turn_id,
-        orchestration_id=orchestration_id,
         source=SOURCE_ADAPTER,
         payload={"message": message},
     )

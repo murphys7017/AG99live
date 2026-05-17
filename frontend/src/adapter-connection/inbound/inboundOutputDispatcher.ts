@@ -8,7 +8,6 @@ import type { PendingAssistantTextItem, PendingAudioItem } from "../runtime/play
 
 export interface InboundOutputDispatchState {
   currentTurnId: string | null;
-  currentOrchestrationId: string | null;
   statusMessage: string;
   lastError: string;
   lastTranscription: string;
@@ -21,20 +20,17 @@ export interface InboundOutputDispatchDeps {
   state: InboundOutputDispatchState;
   sessionStore: {
     markTextReceived: (
-      orchId: string | null,
       turnId: string | null,
       text: string,
       messageId: string,
       mode?: string,
     ) => void;
     markAudioReceived: (
-      orchId: string | null,
       turnId: string | null,
       url: string,
       messageId: string,
     ) => void;
     ensureSegment: (
-      orchId: string | null,
       turnId: string | null,
       messageId: string,
     ) => { text: { content: string | null } };
@@ -44,7 +40,6 @@ export interface InboundOutputDispatchDeps {
   markAudioPlaybackTerminal: (
     terminalState: string,
     turnId: string | null,
-    orchestrationId: string | null,
     reason?: string,
     messageId?: string | null,
   ) => void;
@@ -52,14 +47,12 @@ export interface InboundOutputDispatchDeps {
     map: Map<string, PendingAssistantTextItem>,
     text: string,
     turnId: string | null,
-    orchestrationId: string | null,
     messageId: string,
   ) => void;
   queuePendingAudioForPlayback: (
     map: Map<string, PendingAudioItem>,
     url: string,
     turnId: string | null,
-    orchestrationId: string | null,
     messageId: string,
   ) => void;
 }
@@ -98,18 +91,15 @@ function applyOutputText(
 ): void {
   const s = deps.state;
   s.currentTurnId = event.turnId;
-  s.currentOrchestrationId = event.orchestrationId;
   const text = event.text;
   if (text) {
     deps.queuePendingAssistantTextForPlayback(
       s.pendingAssistantTexts,
       text,
       event.turnId,
-      event.orchestrationId,
       event.messageId,
     );
     deps.sessionStore?.markTextReceived(
-      event.orchestrationId,
       event.turnId,
       text,
       event.messageId,
@@ -126,21 +116,18 @@ async function applyOutputAudio(
 ): Promise<void> {
   const s = deps.state;
   s.currentTurnId = event.turnId;
-  s.currentOrchestrationId = event.orchestrationId;
   if (event.text) {
     const existingText = deps.sessionStore
-      ?.ensureSegment(event.orchestrationId, event.turnId, event.messageId)
+      ?.ensureSegment(event.turnId, event.messageId)
       .text.content;
     if (!existingText) {
       deps.queuePendingAssistantTextForPlayback(
         s.pendingAssistantTexts,
         event.text,
         event.turnId,
-        event.orchestrationId,
         event.messageId,
       );
       deps.sessionStore?.markTextReceived(
-        event.orchestrationId,
         event.turnId,
         event.text,
         event.messageId,
@@ -155,7 +142,6 @@ async function applyOutputAudio(
     deps.markAudioPlaybackTerminal(
       "failed",
       event.turnId,
-      event.orchestrationId,
       "missing_audio_url",
       event.messageId,
     );
@@ -167,10 +153,9 @@ async function applyOutputAudio(
     s.pendingAudios,
     resolvedUrl,
     event.turnId,
-    event.orchestrationId,
     event.messageId,
   );
-  deps.sessionStore?.markAudioReceived(event.orchestrationId, event.turnId, resolvedUrl, event.messageId);
+  deps.sessionStore?.markAudioReceived(event.turnId, resolvedUrl, event.messageId);
 }
 
 function applyOutputImage(

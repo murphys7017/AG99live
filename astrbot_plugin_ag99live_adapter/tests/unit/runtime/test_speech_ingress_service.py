@@ -36,13 +36,11 @@ class SttProviderStub:
 
 
 class MessageStub:
-    def __init__(self, *, dropped: bool = True, orchestration_id: str = "input:segment-1") -> None:
+    def __init__(self, *, dropped: bool = True, turn_id: str = "input:segment-1") -> None:
         self.payload = {"dropped": dropped}
-        self.session_id = "session-1"
-        self.turn_id = "turn-1"
-        self.orchestration_id = orchestration_id
+        self.turn_id = turn_id
         self.raw = {
-            "orchestration_id": self.orchestration_id,
+            "turn_id": self.turn_id,
             "payload": dict(self.payload),
         }
 
@@ -73,10 +71,12 @@ def test_handle_audio_end_dropped_segment_clears_buffer_and_reports_error(
     assert service.media_service.clear_calls == 1
     assert service.media_service.clear_segment_ids == ["input:segment-1"]
     assert build_calls == []
-    assert len(sent_messages) == 1
+    assert len(sent_messages) == 2
     assert sent_messages[0]["type"] == "control.error"
     assert sent_messages[0]["payload"]["message"] == "Microphone audio segment dropped before transcription."
-    assert sent_messages[0]["orchestration_id"] == "input:segment-1"
+    assert sent_messages[0]["turn_id"] == "input:segment-1"
+    assert sent_messages[1]["type"] == "control.turn_finished"
+    assert sent_messages[1]["turn_id"] == "input:segment-1"
 
 
 def test_handle_audio_data_appends_to_matching_segment_buffer(
@@ -103,7 +103,7 @@ def test_handle_audio_data_appends_to_matching_segment_buffer(
 
     message = SimpleNamespace(
         payload={"audio": [0.1, -0.2, 0.3]},
-        orchestration_id="input:segment-append",
+        turn_id="input:segment-append",
     )
 
     asyncio.run(service.handle_audio_data(message))
@@ -138,11 +138,11 @@ def test_handle_audio_end_drains_matching_segment_buffer(
         },
     )
 
-    result = asyncio.run(service.handle_audio_end(MessageStub(dropped=False, orchestration_id="input:segment-drain")))
+    result = asyncio.run(service.handle_audio_end(MessageStub(dropped=False, turn_id="input:segment-drain")))
 
     assert media_service.drain_calls == ["input:segment-drain"]
     assert result["text"] == "hello from stt"
-    assert result["raw_message"]["orchestration_id"] == "input:segment-drain"
+    assert result["raw_message"]["turn_id"] == "input:segment-drain"
     assert result["raw_message"]["payload"]["transcription"] == "hello from stt"
     assert sent_messages[0]["type"] == "output.transcription"
-    assert sent_messages[0]["orchestration_id"] == "input:segment-drain"
+    assert sent_messages[0]["turn_id"] == "input:segment-drain"

@@ -458,6 +458,58 @@ def test_runtime_state_exposes_fewshot_shortage_diagnostics(
         "motion_tuning_user_samples_insufficient:requested=3:user_available=1",
         "motion_tuning_default_backfill_applied:count=2",
     ]
+    assert state.list_effective_motion_tuning_examples() == resolved_examples
+
+
+def test_runtime_state_effective_examples_query_is_read_only(
+    monkeypatch,
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    runtime_state = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+    seed_model_info = build_seed_model_info()
+    monkeypatch.setattr(
+        runtime_state,
+        "scan_live2d_models",
+        lambda **kwargs: deepcopy(seed_model_info),
+    )
+    live2ds_dir = tmp_path / "live2ds"
+    (live2ds_dir / "DemoModel").mkdir(parents=True, exist_ok=True)
+
+    state = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=None,
+        plugin_config={
+            "live2d_model_name": "DemoModel",
+            "realtime_motion_fewshot_count": 3,
+        },
+        plugin_config_loader=None,
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=live2ds_dir,
+    )
+    state.refresh()
+    current_revision = int(
+        state.model_info["models"][0]["semantic_axis_profile"]["revision"]
+    )
+    state.save_motion_tuning_sample(
+        _build_motion_tuning_sample(profile_revision=current_revision)
+    )
+
+    cached_before = state.list_effective_motion_tuning_examples()
+    diagnostics_before = state.list_motion_tuning_fewshot_diagnostics()
+    state.motion_tuning_fewshot_diagnostics = ["sentinel"]
+    state.motion_tuning_effective_examples = [{"input": "sentinel", "output": {"emotion": "neutral"}}]
+
+    assert state.list_motion_tuning_fewshot_diagnostics() == ["sentinel"]
+    assert state.list_effective_motion_tuning_examples() == [
+        {"input": "sentinel", "output": {"emotion": "neutral"}}
+    ]
+    assert cached_before != state.list_effective_motion_tuning_examples()
+    assert diagnostics_before != state.list_motion_tuning_fewshot_diagnostics()
 
 
 def test_runtime_state_preserves_motion_tuning_samples_when_scan_cache_segment_is_invalid(

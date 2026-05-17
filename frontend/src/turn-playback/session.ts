@@ -88,7 +88,6 @@ export interface TurnPlaybackSegment {
   id: string;
   messageId: string;
   turnId: string | null;
-  orchestrationId: string | null;
   text: TurnPlaybackSessionText;
   audio: TurnPlaybackSessionAudio;
   motion: TurnPlaybackSessionMotion;
@@ -111,36 +110,14 @@ function normalizeId(value: unknown): string {
 }
 
 /**
- * Resolve a stable session id from orchestrationId / turnId.
- *
- * Priority:
- *   1. orch:<orchestrationId>
- *   2. turn:<turnId>
+ * Resolve a stable session id from turnId.
  */
-export function resolveSessionId(
-  orchestrationId: string | null,
-  turnId: string | null,
-): string {
-  const normalizedOrch = normalizeId(orchestrationId);
-  if (normalizedOrch) {
-    return `orch:${normalizedOrch}`;
-  }
+export function resolveSessionId(turnId: string | null): string {
   const normalizedTurn = normalizeId(turnId);
   if (normalizedTurn) {
     return `turn:${normalizedTurn}`;
   }
   return "";
-}
-
-/**
- * Derive the orchestrationId portion from a resolved session id.
- * Returns null for turn-only ids.
- */
-export function orchestrationIdFromSessionId(sessionId: string): string | null {
-  if (sessionId.startsWith("orch:")) {
-    return sessionId.slice(5);
-  }
-  return null;
 }
 
 // ── Constructors ───────────────────────────────────────────────────
@@ -181,14 +158,12 @@ export function createEmptyMotionState(): TurnPlaybackSessionMotion {
 
 export function createTurnPlaybackSegment(
   messageId: string,
-  orchestrationId: string | null,
   turnId: string | null,
 ): TurnPlaybackSegment {
   return {
     id: messageId,
     messageId,
     turnId,
-    orchestrationId,
     text: createEmptyTextState(),
     audio: createEmptyAudioState(),
     motion: createEmptyMotionState(),
@@ -196,12 +171,11 @@ export function createTurnPlaybackSegment(
 }
 
 export function createTurnPlaybackSession(
-  orchestrationId: string | null,
   turnId: string | null = null,
 ): TurnPlaybackSession {
-  const sessionId = resolveSessionId(orchestrationId, turnId);
+  const sessionId = resolveSessionId(turnId);
   if (!sessionId) {
-    throw new Error("Turn playback session requires orchestrationId or turnId.");
+    throw new Error("Turn playback session requires turnId.");
   }
   return {
     id: sessionId,

@@ -52,7 +52,7 @@ astrbot_plugin_ag99live_adapter/
 
 ## 与前端协同的关键点
 
-- 每条消息都带 `turn_id`，并尽量贯穿 `orchestration_id`，用于前端做 session 级轮次协调。
+- 每条交互消息都带 `turn_id`，前后端只按这一个轮次 ID 做会话协调。
 - 每个 assistant segment 的 `output.text / output.audio / engine.motion_*` 都必须携带非空 `message_id`；前端用它把这些消息聚合到同一个 `TurnPlaybackSegment`。
 - 当前后端主链路只广播 `engine.motion_intent`；前端负责把 intent 编译为 `engine.parameter_plan.v2` 后执行。
 - `semantic_axis_profile` / `calibration_profile` / `parameter_action_library` / `base_action_library` 由 `system.model_sync` 下发。
@@ -60,7 +60,7 @@ astrbot_plugin_ag99live_adapter/
 - 一个 user input 对应一个 turn，但一个 turn 内可能输出多个 assistant segment。
 - `control.synth_finished` 表示该 turn 的输出队列关闭，不会再追加新的 `output.*` / `engine.motion_*` segment；它不要求早于所有前端播放完成。
 - 前端在 `synth_finished` 已到且所有 segment 播放完成后回传 `control.playback_finished`；后端收到后再发 `control.turn_finished`。
-- 麦克风输入现在按“单段录音”组织：一段采集内的 `input.raw_audio_data` 与 `input.mic_audio_end` 共享同一个新的 `input:*` orchestration id；后端 STT ingress 也按这个输入 `orchestration_id` 分桶缓冲，不再把不同输入段混到一个全局缓冲。
+- 麦克风输入现在按“单段录音”组织：一段采集内的 `input.raw_audio_data` 与 `input.mic_audio_end` 共享同一个新的 `turn_id`；后端 STT ingress 也按这个 `turn_id` 分桶缓冲，不再把不同输入段混到一个全局缓冲。
 - 若前端检测到发送积压，会在 `input.mic_audio_end` 中带上 `dropped: true`，后端直接丢弃该段转写。
 - 切换麦克风设备时，前端会先正常结束旧输入段，再启动新输入段；收到 `control.interrupt` 时，前端会把已释放的 segment 音频写成失败终态后再清理播放 runtime。
 

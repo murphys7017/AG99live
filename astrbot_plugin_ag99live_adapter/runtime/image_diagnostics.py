@@ -38,7 +38,6 @@ async def emit_image_input_diagnostics(
         logger.info("Image input diagnostics: %s", cooldown_message)
         await send_json(
             build_control_error(
-                session_id=client_uid,
                 turn_id=current_turn_id,
                 message=cooldown_message,
             )
@@ -66,7 +65,6 @@ async def emit_image_input_diagnostics(
     logger.warning("Image input diagnostics: %s", message)
     await send_json(
         build_control_error(
-            session_id=client_uid,
             turn_id=current_turn_id,
             message=message,
         )

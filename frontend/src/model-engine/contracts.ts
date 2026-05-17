@@ -122,7 +122,7 @@ export interface ModelEngineDependencies {
       segments: Map<string, {
         messageId: string;
         turnId: string | null;
-        orchestrationId: string | null;
+        orchestrationId?: string | null;
         audio: {
           released: boolean;
           started: boolean;
@@ -140,7 +140,7 @@ export interface ModelEngineDependencies {
       segments: Map<string, {
         messageId: string;
         turnId: string | null;
-        orchestrationId: string | null;
+        orchestrationId?: string | null;
         audio: {
           released: boolean;
           started: boolean;

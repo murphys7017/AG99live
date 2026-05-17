@@ -64,6 +64,7 @@ const state = reactive({
     rootError: "",
     loadError: "",
     diagnostics: [],
+    effectiveExamples: [],
   } as DesktopMotionTuningSamplesStatus,
   profileAuthoringSnapshot: loadProfileAuthoringSnapshot(),
   windowState: defaultWindowState,

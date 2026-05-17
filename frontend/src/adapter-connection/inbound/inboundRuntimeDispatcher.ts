@@ -4,17 +4,14 @@ import type { PendingAssistantTextItem, PendingAudioItem } from "../runtime/play
 
 export interface InboundRuntimeDispatchState {
   currentTurnId: string | null;
-  currentOrchestrationId: string | null;
   statusMessage: string;
   lastError: string;
   turnFinishedTurnId: string | null;
-  turnFinishedOrchestrationId: string | null;
   turnFinishedSuccess: boolean;
   turnFinishedReason: string;
   micRequested: boolean;
   isPlayingAudio: boolean;
   audioPlaybackStartedTurnId: string | null;
-  audioPlaybackStartedOrchestrationId: string | null;
   audioPlaybackStartedMessageId: string | null;
   pendingAssistantTexts: Map<string, PendingAssistantTextItem>;
   pendingAudios: Map<string, PendingAudioItem>;
@@ -23,11 +20,11 @@ export interface InboundRuntimeDispatchState {
 export interface InboundRuntimeDispatchDeps {
   state: InboundRuntimeDispatchState;
   sessionStore: {
-    setActiveSession: (orchestrationId: string | null, turnId: string | null) => void;
-    markTurnStarted: (orchestrationId: string | null, turnId: string | null) => void;
-    markSynthFinished: (orchestrationId: string | null, turnId: string | null) => void;
-    markTurnFinished: (orchestrationId: string | null, turnId: string | null, success: boolean, reason?: string) => void;
-    markInterrupt: (orchestrationId: string | null, turnId: string | null) => void;
+    setActiveSession: (turnId: string | null) => void;
+    markTurnStarted: (turnId: string | null) => void;
+    markSynthFinished: (turnId: string | null) => void;
+    markTurnFinished: (turnId: string | null, success: boolean, reason?: string) => void;
+    markInterrupt: (turnId: string | null) => void;
   } | undefined;
   pushHistory: (role: string, text: string) => void;
   stopAudioPlayback: () => void;
@@ -35,14 +32,12 @@ export interface InboundRuntimeDispatchDeps {
   markAudioPlaybackTerminal: (
     terminalState: string,
     turnId: string | null,
-    orchestrationId: string | null,
     reason?: string,
     messageId?: string | null,
   ) => void;
-  hasPendingAudioForTurn: (turnId: string | null, orchestrationId: string | null) => boolean;
+  hasPendingAudioForTurn: (turnId: string | null) => boolean;
   markMissingAudiosForTurn: (
     turnId: string | null,
-    orchestrationId: string | null,
     reason: string,
   ) => void;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
@@ -90,14 +85,12 @@ function applyTurnStarted(
 ): void {
   const s = deps.state;
   s.currentTurnId = event.turnId;
-  s.currentOrchestrationId = event.orchestrationId;
-  deps.sessionStore?.setActiveSession(s.currentOrchestrationId, s.currentTurnId);
-  deps.sessionStore?.markTurnStarted(s.currentOrchestrationId, s.currentTurnId);
+  deps.sessionStore?.setActiveSession(s.currentTurnId);
+  deps.sessionStore?.markTurnStarted(s.currentTurnId);
   deps.resetAudioPlaybackTerminal();
   s.pendingAssistantTexts.clear();
   s.pendingAudios.clear();
   s.turnFinishedTurnId = null;
-  s.turnFinishedOrchestrationId = null;
   s.turnFinishedSuccess = true;
   s.turnFinishedReason = "";
   s.statusMessage = "后端正在处理这一轮对话。";
@@ -110,11 +103,9 @@ function applyTurnFinished(
 ): void {
   const s = deps.state;
   s.turnFinishedTurnId = event.turnId;
-  s.turnFinishedOrchestrationId = event.orchestrationId;
   s.turnFinishedSuccess = event.success;
   s.turnFinishedReason = event.reason;
   deps.sessionStore?.markTurnFinished(
-    s.turnFinishedOrchestrationId,
     s.turnFinishedTurnId,
     s.turnFinishedSuccess,
     s.turnFinishedReason,
@@ -139,21 +130,19 @@ function applyInterrupt(
 ): void {
   const s = deps.state;
   if (s.audioPlaybackStartedMessageId) {
-    deps.markAudioPlaybackTerminal(
-      "failed",
-      s.audioPlaybackStartedTurnId,
-      s.audioPlaybackStartedOrchestrationId,
-      "audio_playback_interrupted",
-      s.audioPlaybackStartedMessageId,
-    );
+      deps.markAudioPlaybackTerminal(
+        "failed",
+        s.audioPlaybackStartedTurnId,
+        "audio_playback_interrupted",
+        s.audioPlaybackStartedMessageId,
+      );
   }
   deps.stopAudioPlayback();
   deps.resetAudioPlaybackTerminal();
   s.pendingAssistantTexts.clear();
   s.pendingAudios.clear();
-  deps.sessionStore?.markInterrupt(event.orchestrationId, event.turnId);
+  deps.sessionStore?.markInterrupt(event.turnId);
   s.currentTurnId = null;
-  s.currentOrchestrationId = null;
   s.statusMessage = "当前轮次已中断。";
   deps.pushHistory("system", s.statusMessage);
 }
@@ -171,14 +160,13 @@ function applySynthFinished(
   event: Extract<InboundAdapterEvent, { kind: "synth_finished" }>,
 ): void {
   const s = deps.state;
-  deps.sessionStore?.markSynthFinished(event.orchestrationId, event.turnId);
+  deps.sessionStore?.markSynthFinished(event.turnId);
   deps.markMissingAudiosForTurn(
     event.turnId,
-    event.orchestrationId,
     "synth_finished_without_audio_playback",
   );
   s.statusMessage =
-    s.isPlayingAudio || deps.hasPendingAudioForTurn(event.turnId, event.orchestrationId)
+    s.isPlayingAudio || deps.hasPendingAudioForTurn(event.turnId)
       ? "语音已准备同步播放。"
       : "语音合成已完成。";
   deps.pushHistory("system", s.statusMessage);

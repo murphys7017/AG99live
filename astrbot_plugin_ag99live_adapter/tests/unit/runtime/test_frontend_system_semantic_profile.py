@@ -22,6 +22,7 @@ class _RuntimeStateStub:
         self.motion_tuning_samples: list[dict[str, object]] = []
         self.motion_tuning_samples_load_error = ""
         self.motion_tuning_fewshot_diagnostics: list[str] = []
+        self.motion_tuning_effective_examples: list[dict[str, object]] = []
         self.runtime_cache_root_error = ""
 
     def save_semantic_axis_profile_update(
@@ -74,6 +75,9 @@ class _RuntimeStateStub:
 
     def list_motion_tuning_fewshot_diagnostics(self) -> list[str]:
         return list(self.motion_tuning_fewshot_diagnostics)
+
+    def list_effective_motion_tuning_examples(self) -> list[dict[str, object]]:
+        return list(self.motion_tuning_effective_examples)
 
 
 class _HistoryBridgeStub:

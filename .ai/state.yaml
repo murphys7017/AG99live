@@ -1,24 +1,35 @@
 task:
-  class: documentation
-  risk: medium
+  class: refactor
+  risk: high
   phase: completed
-  scope: current documentation cleanup and archive consolidation
+  scope: protocol turn-id single-track cutover across backend runtime, frontend adapter flow, playback routing, and targeted docs/tests
 context:
-  confidence: high
+  confidence: medium
   assumptions:
-    - Current work docs should describe only active structure, protocol, and design boundaries.
-    - Stage plans, route maps, and historical implementation snapshots belong in docs/archive.
-  unresolved_questions: []
+    - External frontend/backend protocol no longer needs `session_id` or `orchestration_id`.
+    - Frontend-created `turn_id` is now the only external interaction identity for text, audio, motion, interrupt, and playback completion.
+    - AstrBot internal turn identity is not yet exposed at a stable binding point, so the new turn map is currently a container and lifecycle shell.
+  unresolved_questions:
+    - A future pass is still needed to bind real `astrbot_turn_id` values into `TurnIdentityMap` once a stable source is available.
 architecture:
-  stability: stable
+  stability: evolving
   boundary_changes:
-    - docs root now keeps only current structure, protocol, and ModelEngine design documents as active entry points.
-    - staged plans and obsolete progress/status docs moved into docs/archive.
+    - Protocol envelope is now single-track on `turn_id` for all interactive messages.
+    - SessionState no longer tracks protocol orchestration identity.
+    - Speech ingress, turn lifecycle, frontend outbound creation, and playback ack routing now key on `turn_id`.
+    - Frontend still contains limited orchestration-named compatibility aliases internally, but they mirror `turn_id` and are no longer part of the external contract.
 verification:
   checks_run:
-    - document index and link search via rg
-    - manual review of active docs for outdated protocol and archive references
+    - python -m compileall astrbot_plugin_ag99live_adapter
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_protocol_parser_semantic_profile.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_speech_ingress_service.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_completion.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_frontend_system_semantic_profile.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py -q
+    - npm run typecheck:renderer
+    - npm run build
   checks_failed: []
-  validation_gap: none known
+  validation_gap: No live end-to-end manual websocket session with a real AstrBot turn binding source was exercised in this pass.
 runtime:
   mode: minimal_v1

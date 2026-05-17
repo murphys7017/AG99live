@@ -7,7 +7,6 @@ import type {
 } from "../types/protocol.js";
 
 const state = reactive({
-  sessionId: "",
   confName: "",
   lastUpdated: "",
   modelInfo: null as ModelSyncInfo | null,
@@ -16,7 +15,6 @@ const state = reactive({
 let initialized = false;
 
 function resetModelSyncState(): void {
-  state.sessionId = "";
   state.confName = "";
   state.lastUpdated = "";
   state.modelInfo = null;
@@ -29,7 +27,6 @@ function applyModelSyncMessage(
     return;
   }
 
-  state.sessionId = envelope.session_id;
   state.confName = envelope.payload.conf_name;
   state.lastUpdated = envelope.timestamp;
   state.modelInfo = envelope.payload.model_info;

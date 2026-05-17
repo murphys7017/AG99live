@@ -10,12 +10,10 @@ export interface PlaybackReleasePort {
   releaseAssistantTextForPlayback(
     messageId: string,
     turnId: string | null,
-    orchestrationId: string | null,
   ): boolean;
   releaseAudioForPlayback(
     messageId: string,
     turnId: string | null,
-    orchestrationId: string | null,
   ): boolean;
 }
 
@@ -30,13 +28,11 @@ export interface MotionPayloadPort {
 export interface PlaybackAckPort {
   sendPlaybackFinishedForCurrentGroup(
     turnId: string | null,
-    orchestrationId: string | null,
     success: boolean,
     reason?: string,
   ): Promise<void>;
   clearPlaybackGroupContext(
     turnId: string | null,
-    orchestrationId: string | null,
   ): void;
 }
 

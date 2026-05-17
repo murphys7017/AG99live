@@ -36,6 +36,7 @@ from .motion.realtime_motion_plan import (
 from .protocol.builder import build_system_motion_tuning_samples_state
 from .protocol.constants import TYPE_ENGINE_MOTION_INTENT
 from .runtime.session_state import SessionState
+from .runtime.turn_identity_map import TurnIdentityMap
 from .transport.websocket_server import WebSocketTransport
 from .runtime.turn_coordinator import TurnCoordinator
 from .platform_event import OLVPetPlatformEvent
@@ -115,6 +116,7 @@ class OLVPetPlatformAdapter(Platform):
             runtime_cache_dir=RUNTIME_CACHE_DIR,
         )
         self.session_state = SessionState(client_uid=self.client_uid)
+        self.turn_identity_map = TurnIdentityMap()
 
         self._static_server = StaticResourceServer(
             host=self.host,
@@ -170,12 +172,12 @@ class OLVPetPlatformAdapter(Platform):
             send_current_model_and_conf=self._send_current_model_and_conf,
             send_motion_tuning_samples_state=self._send_motion_tuning_samples_state,
             on_disconnect=self._handle_transport_disconnect,
-            session_id_getter=lambda: self.client_uid,
         )
 
         self._vad_engine = None
         self.turn_coordinator = TurnCoordinator(
             session_state=self.session_state,
+            turn_identity_map=self.turn_identity_map,
             runtime_state=self.runtime_state,
             media_service=self.media_service,
             chat_buffer=self.chat_buffer,
@@ -354,11 +356,11 @@ class OLVPetPlatformAdapter(Platform):
 
     async def _send_motion_tuning_samples_state(self) -> None:
         payload = build_system_motion_tuning_samples_state(
-            session_id=self.client_uid,
             samples=self.runtime_state.list_motion_tuning_samples(),
             root_error=self.runtime_state.get_runtime_cache_root_error(),
             load_error=self.runtime_state.get_motion_tuning_samples_load_error(),
             diagnostics=self.runtime_state.list_motion_tuning_fewshot_diagnostics(),
+            effective_examples=self.runtime_state.list_effective_motion_tuning_examples(),
         )
         await self._send_json(payload)
 
@@ -380,6 +382,7 @@ class OLVPetPlatformAdapter(Platform):
 
     async def _handle_transport_disconnect(self) -> None:
         self.session_state.reset_to_idle()
+        self.turn_identity_map.clear_all()
         await self.turn_coordinator.speech_ingress.handle_audio_stream_interrupt()
         await self.media_service.clear_audio_buffer()
 

@@ -1,4 +1,5 @@
 import type {
+  DesktopMotionTuningEffectiveExample,
   DesktopMotionTuningSample,
   DesktopMotionTuningSamplesStatus,
 } from "../types/desktop.js";
@@ -24,7 +25,6 @@ export interface AdapterMotionTuningDependencies {
     type: string,
     payload: TPayload,
     turnId?: string | null,
-    orchestrationId?: string | null,
   ) => ProtocolEnvelope<TPayload>;
   pushHistory: (role: "system" | "error", text: string) => void;
   setLastError: (message: string) => void;
@@ -67,11 +67,17 @@ export function useAdapterMotionTuning(
         .map((item) => (typeof item === "string" ? item.trim() : ""))
         .filter(Boolean)
       : [];
+    const effectiveExamples = Array.isArray(payload.effective_examples)
+      ? payload.effective_examples
+        .map((item) => normalizeEffectiveExamplePayload(item))
+        .filter((item): item is DesktopMotionTuningEffectiveExample => item !== null)
+      : [];
     state.motionTuningSamples = samples;
     state.motionTuningSamplesStatus = {
       rootError,
       loadError,
       diagnostics,
+      effectiveExamples,
     };
     if (rootError) {
       deps.setLastError(rootError);
@@ -146,4 +152,56 @@ export function useAdapterMotionTuning(
     saveMotionTuningSample,
     deleteMotionTuningSample,
   };
+}
+
+function normalizeEffectiveExamplePayload(
+  value: unknown,
+): DesktopMotionTuningEffectiveExample | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as {
+    input?: unknown;
+    output?: unknown;
+    source?: unknown;
+    tags?: unknown;
+  };
+  if (!candidate.output || typeof candidate.output !== "object") {
+    return null;
+  }
+  const output = candidate.output as {
+    emotion?: unknown;
+    mode?: unknown;
+    duration_ms?: unknown;
+    axes?: unknown;
+  };
+  return {
+    input: typeof candidate.input === "string" ? candidate.input.trim() : "",
+    output: {
+      emotion: typeof output.emotion === "string" ? output.emotion.trim() : "",
+      mode: typeof output.mode === "string" ? output.mode.trim() : "",
+      durationMs: typeof output.duration_ms === "number" && Number.isFinite(output.duration_ms)
+        ? output.duration_ms
+        : null,
+      axes: normalizeMotionTuningAxisRecord(output.axes),
+    },
+    source: typeof candidate.source === "string" ? candidate.source.trim() : "",
+    tags: Array.isArray(candidate.tags)
+      ? candidate.tags.map((tag: unknown) => String(tag).trim()).filter(Boolean)
+      : [],
+  };
+}
+
+function normalizeMotionTuningAxisRecord(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const result: Record<string, number> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (!key.trim() || typeof item !== "number" || !Number.isFinite(item)) {
+      continue;
+    }
+    result[key.trim()] = item;
+  }
+  return result;
 }

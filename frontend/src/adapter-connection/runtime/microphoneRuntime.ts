@@ -34,7 +34,6 @@ export interface AdapterMicrophoneRuntimeDeps {
     type: string,
     payload: TPayload,
     turnId?: string | null,
-    orchestrationId?: string | null,
   ) => ProtocolEnvelope<TPayload>;
   pushHistory: (role: Extract<DesktopHistoryEntry["role"], "system" | "error">, text: string) => void;
   createMessageId: () => string;
@@ -59,14 +58,14 @@ export interface AdapterMicrophoneRuntime {
 }
 
 const MAX_MIC_SOCKET_BUFFERED_AMOUNT = 512 * 1024;
-const ROOT_INPUT_ORCHESTRATION_PREFIX = "input:";
+const ROOT_INPUT_TURN_PREFIX = "input:";
 
 export function createAdapterMicrophoneRuntime(
   deps: AdapterMicrophoneRuntimeDeps,
 ): AdapterMicrophoneRuntime {
   let micStartPromise: Promise<boolean> | null = null;
   let audioSequenceBroken = false;
-  let activeMicInputOrchestrationId: string | null = null;
+  let activeMicTurnId: string | null = null;
   let micCaptureOrigin: MicrophoneCaptureOrigin | null = null;
 
   function sendMicrophoneAudioChunk(chunk: MicrophoneAudioChunk): void {
@@ -104,8 +103,7 @@ export function createAdapterMicrophoneRuntime(
             sample_rate: chunk.sampleRate,
             channels: chunk.channels,
           },
-          null,
-          getOrCreateActiveMicInputOrchestrationId(),
+          getOrCreateActiveMicTurnId(),
         ),
       ),
     );
@@ -189,7 +187,7 @@ export function createAdapterMicrophoneRuntime(
     micStartPromise = (async () => {
       try {
         audioSequenceBroken = false;
-        activeMicInputOrchestrationId = createRootInputOrchestrationId();
+        activeMicTurnId = createRootInputTurnId();
         micCaptureOrigin = origin;
         await startMicrophoneCaptureRuntime({
           deviceId: deps.state.microphoneDeviceId || null,
@@ -210,7 +208,7 @@ export function createAdapterMicrophoneRuntime(
         return true;
       } catch (error) {
         deps.state.micCapturing = false;
-        activeMicInputOrchestrationId = null;
+        activeMicTurnId = null;
         micCaptureOrigin = null;
         deps.state.lastError =
           error instanceof Error ? error.message : "麦克风启动失败。";
@@ -284,7 +282,7 @@ export function createAdapterMicrophoneRuntime(
 
     await stopMicrophoneCaptureRuntime();
 
-    const inputOrchestrationId = activeMicInputOrchestrationId ?? createRootInputOrchestrationId();
+    const inputTurnId = activeMicTurnId ?? createRootInputTurnId();
     const socket = deps.getSocket();
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(
@@ -295,8 +293,7 @@ export function createAdapterMicrophoneRuntime(
               reason,
               dropped: audioSequenceBroken,
             },
-            null,
-            inputOrchestrationId,
+            inputTurnId,
           ),
         ),
       );
@@ -321,19 +318,19 @@ export function createAdapterMicrophoneRuntime(
     micStartPromise = null;
   }
 
-  function createRootInputOrchestrationId(): string {
-    return `${ROOT_INPUT_ORCHESTRATION_PREFIX}${deps.createMessageId()}`;
+  function createRootInputTurnId(): string {
+    return `${ROOT_INPUT_TURN_PREFIX}${deps.createMessageId()}`;
   }
 
-  function getOrCreateActiveMicInputOrchestrationId(): string {
-    if (!activeMicInputOrchestrationId) {
-      activeMicInputOrchestrationId = createRootInputOrchestrationId();
+  function getOrCreateActiveMicTurnId(): string {
+    if (!activeMicTurnId) {
+      activeMicTurnId = createRootInputTurnId();
     }
-    return activeMicInputOrchestrationId;
+    return activeMicTurnId;
   }
 
   function clearMicCaptureSession(): void {
-    activeMicInputOrchestrationId = null;
+    activeMicTurnId = null;
     micCaptureOrigin = null;
     audioSequenceBroken = false;
   }

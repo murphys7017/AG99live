@@ -197,6 +197,18 @@ export interface DesktopMotionTuningSample {
   adjustedPlan: MotionPlanPayload;
 }
 
+export interface DesktopMotionTuningEffectiveExample {
+  input: string;
+  output: {
+    emotion: string;
+    mode: string;
+    durationMs: number | null;
+    axes: Record<string, number>;
+  };
+  source: string;
+  tags: readonly string[];
+}
+
 export function hasPinnedProfileScope(
   sample: Pick<DesktopMotionTuningSample, "profileId" | "profileRevision">,
 ): sample is Pick<DesktopMotionTuningSample, "profileId" | "profileRevision"> & {
@@ -251,6 +263,7 @@ export interface DesktopModelProjectionSnapshot {
   lastUpdated: string;
   runtimeSemanticAxisProfile: SemanticAxisProfile | null;
   baseActionPreview: DesktopBaseActionPreview | null;
+  motionTuningEffectiveExamples: DesktopMotionTuningEffectiveExample[];
 }
 
 export type DesktopProfileAuthoringCommand = {
@@ -313,6 +326,7 @@ export interface DesktopMotionTuningSamplesStatus {
   rootError: string;
   loadError: string;
   diagnostics: readonly string[];
+  effectiveExamples: readonly DesktopMotionTuningEffectiveExample[];
 }
 
 export type DesktopRuntimeCommand =

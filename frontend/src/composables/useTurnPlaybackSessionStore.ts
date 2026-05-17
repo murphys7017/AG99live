@@ -48,12 +48,11 @@ export function useTurnPlaybackSessionStore() {
   // ── session lookup / creation ───────────────────────────────────
 
   function ensureSession(
-    orchestrationId: string | null,
     turnId: string | null = null,
   ): TurnPlaybackSession {
-    const resolvedKey = resolveSessionId(orchestrationId, turnId);
+    const resolvedKey = resolveSessionId(turnId);
     if (!resolvedKey) {
-      throw new Error("Turn playback session requires orchestrationId or turnId.");
+      throw new Error("Turn playback session requires turnId.");
     }
     const key = resolvedKey;
 
@@ -69,48 +68,18 @@ export function useTurnPlaybackSessionStore() {
       return existing;
     }
 
-    const turnOnlyKey = resolveSessionId(null, turnId);
-    if (orchestrationId && turnOnlyKey && turnOnlyKey !== key) {
-      const turnOnlySession = state.sessions.get(turnOnlyKey);
-      if (turnOnlySession) {
-        state.sessions.delete(turnOnlyKey);
-        turnOnlySession.id = key;
-        state.sessions.set(key, turnOnlySession);
-        if (state.activeSessionId === turnOnlyKey) {
-          state.activeSessionId = key;
-        }
-        for (const segment of turnOnlySession.segments.values()) {
-          segment.orchestrationId = segment.orchestrationId ?? orchestrationId;
-        }
-        log("session promoted to orchestration id", {
-          previousId: turnOnlyKey,
-          id: key,
-          orchestrationId,
-          turnId,
-        });
-        return turnOnlySession;
-      }
-    }
-
-    const session = createTurnPlaybackSession(orchestrationId, turnId);
+    const session = createTurnPlaybackSession(turnId);
     state.sessions.set(key, session);
     log("session created", {
       id: session.id,
-      orchestrationId: orchestrationId ?? null,
       turnId: turnId ?? null,
     });
     return session;
   }
 
-  function getSession(orchestrationId: string | null): TurnPlaybackSession | undefined {
-    if (!orchestrationId) {
-      return undefined;
-    }
-    const key = resolveSessionId(orchestrationId, null);
-    if (!key) {
-      return undefined;
-    }
-    return state.sessions.get(key);
+  function getSession(turnId: string | null): TurnPlaybackSession | undefined {
+    const sessionId = resolveSessionId(turnId);
+    return sessionId ? state.sessions.get(sessionId) : undefined;
   }
 
   function getActiveSession(): TurnPlaybackSession | undefined {
@@ -132,32 +101,29 @@ export function useTurnPlaybackSessionStore() {
   }
 
   function setActiveSession(
-    orchestrationId: string | null,
     turnId: string | null = null,
   ): void {
-    const key = resolveSessionId(orchestrationId, turnId);
+    const key = resolveSessionId(turnId);
     if (!key) {
       state.activeSessionId = null;
       return;
     }
-    const session = ensureSession(orchestrationId, turnId);
+    const session = ensureSession(turnId);
     state.activeSessionId = session.id;
   }
 
   // ── segments ────────────────────────────────────────────────────
 
   function ensureSegment(
-    orchestrationId: string | null,
     turnId: string | null,
     messageId: string,
   ): TurnPlaybackSegment {
-    const session = ensureSession(orchestrationId, turnId);
-    return ensureSegmentForSession(session, orchestrationId, turnId, messageId);
+    const session = ensureSession(turnId);
+    return ensureSegmentForSession(session, turnId, messageId);
   }
 
   function ensureSegmentForSession(
     session: TurnPlaybackSession,
-    orchestrationId: string | null,
     turnId: string | null,
     messageId: string,
   ): TurnPlaybackSegment {
@@ -167,31 +133,26 @@ export function useTurnPlaybackSessionStore() {
       if (!existing.turnId && turnId) {
         existing.turnId = turnId;
       }
-      if (!existing.orchestrationId && orchestrationId) {
-        existing.orchestrationId = orchestrationId;
-      }
       return existing;
     }
 
-    const segment = createTurnPlaybackSegment(segmentId, orchestrationId, turnId);
+    const segment = createTurnPlaybackSegment(segmentId, turnId);
     session.segments.set(segmentId, segment);
     session.segmentOrder.push(segmentId);
     log("segment created", {
       sessionId: session.id,
       messageId: segmentId,
-      orchestrationId,
       turnId,
     });
     return segment;
   }
 
   function getSegmentSession(
-    orchestrationId: string | null,
     turnId: string | null,
     messageId: string,
   ): { session: TurnPlaybackSession; segment: TurnPlaybackSegment } {
-    const session = ensureSession(orchestrationId, turnId);
-    const segment = ensureSegmentForSession(session, orchestrationId, turnId, messageId);
+    const session = ensureSession(turnId);
+    const segment = ensureSegmentForSession(session, turnId, messageId);
     return { session, segment };
   }
 
@@ -229,7 +190,6 @@ export function useTurnPlaybackSessionStore() {
   // ── text ────────────────────────────────────────────────────────
 
   function markTextReceived(
-    orchestrationId: string | null,
     turnId: string | null,
     text: string,
     messageId: string,
@@ -239,7 +199,7 @@ export function useTurnPlaybackSessionStore() {
     if (!trimmed) {
       return;
     }
-    const { session, segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    const { session, segment } = getSegmentSession(turnId, messageId);
     if (mode === "append" && segment.text.content) {
       segment.text.content = segment.text.content + trimmed;
     } else {
@@ -253,20 +213,18 @@ export function useTurnPlaybackSessionStore() {
   }
 
   function markTextReleased(
-    orchestrationId: string | null,
     turnId: string | null,
     messageId: string,
   ): void {
-    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    const { segment } = getSegmentSession(turnId, messageId);
     segment.text.released = true;
   }
 
   function markTextDelivered(
-    orchestrationId: string | null,
     turnId: string | null,
     messageId: string,
   ): void {
-    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    const { segment } = getSegmentSession(turnId, messageId);
     segment.text.delivered = true;
     segment.text.released = true; // delivery implies release
   }
@@ -274,7 +232,6 @@ export function useTurnPlaybackSessionStore() {
   // ── audio ───────────────────────────────────────────────────────
 
   function markAudioReceived(
-    orchestrationId: string | null,
     turnId: string | null,
     url: string,
     messageId: string,
@@ -283,7 +240,7 @@ export function useTurnPlaybackSessionStore() {
     if (!trimmed) {
       return;
     }
-    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    const { segment } = getSegmentSession(turnId, messageId);
     segment.audio.url = trimmed;
     segment.audio.receivedAtMs = performance.now();
     segment.audio.released = false;
@@ -295,13 +252,12 @@ export function useTurnPlaybackSessionStore() {
   }
 
   function markAudioStarted(
-    orchestrationId: string | null,
     turnId: string | null,
     messageId: string,
     startedAtMs?: number | null,
     durationMs?: number | null,
   ): void {
-    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    const { segment } = getSegmentSession(turnId, messageId);
     segment.audio.released = true;
     segment.audio.started = true;
     segment.audio.startedAtMs =
@@ -315,12 +271,11 @@ export function useTurnPlaybackSessionStore() {
   }
 
   function markAudioDuration(
-    orchestrationId: string | null,
     turnId: string | null,
     messageId: string,
     durationMs: number | null,
   ): void {
-    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    const { segment } = getSegmentSession(turnId, messageId);
     segment.audio.durationMs =
       typeof durationMs === "number" && Number.isFinite(durationMs) && durationMs > 0
         ? durationMs
@@ -328,31 +283,28 @@ export function useTurnPlaybackSessionStore() {
   }
 
   function markAudioTerminal(
-    orchestrationId: string | null,
     turnId: string | null,
     terminal: Exclude<AudioTerminalState, "idle">,
     messageId: string,
     reason = "",
   ): void {
-    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    const { segment } = getSegmentSession(turnId, messageId);
     segment.audio.released = true;
     segment.audio.terminal = terminal;
     segment.audio.reason = reason || segment.audio.reason;
   }
 
   function markAudioReleased(
-    orchestrationId: string | null,
     turnId: string | null,
     messageId: string,
   ): void {
-    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    const { segment } = getSegmentSession(turnId, messageId);
     segment.audio.released = true;
   }
 
   // ── motion ──────────────────────────────────────────────────────
 
   function markMotionReceived(
-    orchestrationId: string | null,
     turnId: string | null,
     payload: NormalizedMotionPayload,
     messageId: string,
@@ -360,7 +312,7 @@ export function useTurnPlaybackSessionStore() {
     if (!payload) {
       return;
     }
-    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    const { segment } = getSegmentSession(turnId, messageId);
     segment.motion.payload = payload;
     segment.motion.receivedAtMs = performance.now();
     segment.motion.absent = false;
@@ -370,11 +322,10 @@ export function useTurnPlaybackSessionStore() {
   }
 
   function markMotionAbsent(
-    orchestrationId: string | null,
     turnId: string | null,
     messageId: string,
   ): void {
-    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    const { segment } = getSegmentSession(turnId, messageId);
     segment.motion.payload = null;
     segment.motion.receivedAtMs = null;
     segment.motion.absent = true;
@@ -384,32 +335,29 @@ export function useTurnPlaybackSessionStore() {
   }
 
   function markMotionReleased(
-    orchestrationId: string | null,
     turnId: string | null,
     messageId: string,
   ): void {
-    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    const { segment } = getSegmentSession(turnId, messageId);
     segment.motion.absent = false;
     segment.motion.released = true;
   }
 
   function markMotionStarted(
-    orchestrationId: string | null,
     turnId: string | null,
     messageId: string,
   ): void {
-    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    const { segment } = getSegmentSession(turnId, messageId);
     segment.motion.absent = false;
     segment.motion.released = true;
     segment.motion.started = true;
   }
 
   function markMotionCompleted(
-    orchestrationId: string | null,
     turnId: string | null,
     messageId: string,
   ): void {
-    const { segment } = getSegmentSession(orchestrationId, turnId, messageId);
+    const { segment } = getSegmentSession(turnId, messageId);
     segment.motion.absent = false;
     segment.motion.released = true;
     segment.motion.completed = true;
@@ -418,28 +366,25 @@ export function useTurnPlaybackSessionStore() {
   // ── backend ─────────────────────────────────────────────────────
 
   function markTurnStarted(
-    orchestrationId: string | null,
     turnId: string | null,
   ): void {
-    const session = ensureSession(orchestrationId, turnId);
+    const session = ensureSession(turnId);
     session.backend.turnStarted = true;
   }
 
   function markSynthFinished(
-    orchestrationId: string | null,
     turnId: string | null,
   ): void {
-    const session = ensureSession(orchestrationId, turnId);
+    const session = ensureSession(turnId);
     session.backend.synthFinished = true;
   }
 
   function markTurnFinished(
-    orchestrationId: string | null,
     turnId: string | null,
     success: boolean,
     reason = "",
   ): void {
-    const session = ensureSession(orchestrationId, turnId);
+    const session = ensureSession(turnId);
     session.backend.turnFinished = true;
     session.backend.success = success;
     session.backend.reason = reason || session.backend.reason;
@@ -456,9 +401,9 @@ export function useTurnPlaybackSessionStore() {
    *   - Falls back to ensureSession if no active session
    */
   function markInterrupt(
-    orchestrationId: string | null,
     turnId: string | null,
   ): void {
+    void turnId;
     // Interrupt must not create a new session — only operate on the active one
     const session = getActiveSession();
     if (!session) {
@@ -494,11 +439,10 @@ export function useTurnPlaybackSessionStore() {
   }
 
   function markPhase(
-    orchestrationId: string | null,
     turnId: string | null,
     phase: TurnPlaybackPhase,
   ): boolean {
-    const session = ensureSession(orchestrationId, turnId);
+    const session = ensureSession(turnId);
     return markPhaseInternal(session, phase);
   }
 
@@ -513,10 +457,9 @@ export function useTurnPlaybackSessionStore() {
    * the phase transition rules.
    */
   function finalizeSession(
-    orchestrationId: string | null,
     turnId: string | null,
   ): boolean {
-    const session = ensureSession(orchestrationId, turnId);
+    const session = ensureSession(turnId);
     return markPhaseInternal(session, "completed");
   }
 

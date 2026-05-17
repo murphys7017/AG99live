@@ -20,37 +20,32 @@ export type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "abse
 
 export interface AdapterAudioRuntimeState {
   isPlayingAudio: boolean;
-  currentOrchestrationId: string | null;
+  currentTurnId: string | null;
   statusMessage: string;
   lastError: string;
   pendingAudios: Map<string, PendingAudioItem>;
   audioPlaybackStartedTurnId: string | null;
-  audioPlaybackStartedOrchestrationId: string | null;
   audioPlaybackStartedMessageId: string | null;
   audioPlaybackStartedAtMs: number;
   audioPlaybackDurationMs: number | null;
   audioPlaybackTerminalState: AudioPlaybackTerminalState;
   audioPlaybackTerminalTurnId: string | null;
-  audioPlaybackTerminalOrchestrationId: string | null;
   audioPlaybackTerminalReason: string;
 }
 
 export interface AdapterAudioRuntimeSessionStore {
   markAudioStarted: (
-    orchestrationId: string | null,
     turnId: string | null,
     messageId: string,
     startedAtMs?: number | null,
     durationMs?: number | null,
   ) => void;
   markAudioDuration: (
-    orchestrationId: string | null,
     turnId: string | null,
     messageId: string,
     durationMs: number | null,
   ) => void;
   markAudioTerminal: (
-    orchestrationId: string | null,
     turnId: string | null,
     terminal: Exclude<AudioPlaybackTerminalState, "idle">,
     messageId: string,
@@ -63,7 +58,6 @@ export interface AdapterAudioRuntimeSessionStore {
       {
         messageId: string;
         turnId: string | null;
-        orchestrationId: string | null;
         audio: {
           url: string | null;
           released: boolean;
@@ -85,7 +79,6 @@ export interface AdapterAudioRuntimeDeps {
 
 export interface ActiveAudioSegment {
   turnId: string | null;
-  orchestrationId: string | null;
   messageId: string;
 }
 
@@ -93,30 +86,25 @@ export interface AdapterAudioRuntime {
   queueAudioForPlayback: (
     audioUrl: string,
     turnId: string | null,
-    orchestrationId: string | null,
     messageId: string,
   ) => void;
   playAudioAndAcknowledge: (
     audioUrl: string,
     turnId: string | null,
-    orchestrationId: string | null,
     messageId: string,
   ) => Promise<void>;
   releaseAudioForPlayback: (
     messageId: string,
     turnId: string | null,
-    orchestrationId: string | null,
   ) => boolean;
-  hasPendingAudioForTurn: (turnId: string | null, orchestrationId: string | null) => boolean;
+  hasPendingAudioForTurn: (turnId: string | null) => boolean;
   markMissingAudiosForTurn: (
     turnId: string | null,
-    orchestrationId: string | null,
     reason: string,
   ) => void;
   markAudioPlaybackTerminal: (
     terminalState: Exclude<AudioPlaybackTerminalState, "idle">,
     turnId: string | null,
-    orchestrationId: string | null,
     reason?: string,
     messageId?: string | null,
   ) => void;
@@ -137,12 +125,11 @@ export function createAdapterAudioRuntime(
       return sessionStore
         ? {
             markAudioTerminal: (
-              orchestrationId: string | null,
               turnId: string | null,
               terminal: "completed" | "failed" | "absent",
               messageId: string,
               reason?: string,
-            ) => sessionStore.markAudioTerminal(orchestrationId, turnId, terminal, messageId, reason),
+            ) => sessionStore.markAudioTerminal(turnId, terminal, messageId, reason),
             getSessions: () => sessionStore.getSessions(),
           }
         : undefined;
@@ -163,25 +150,21 @@ export function createAdapterAudioRuntime(
       return sessionStore
         ? {
             markAudioStarted: (
-              orchestrationId: string | null,
               turnId: string | null,
               messageId: string,
               startedAtMs?: number | null,
               durationMs?: number | null,
             ) => sessionStore.markAudioStarted(
-              orchestrationId,
               turnId,
               messageId,
               startedAtMs,
               durationMs,
             ),
             markAudioDuration: (
-              orchestrationId: string | null,
               turnId: string | null,
               messageId: string,
               durationMs: number | null,
             ) => sessionStore.markAudioDuration(
-              orchestrationId,
               turnId,
               messageId,
               durationMs,
@@ -194,11 +177,10 @@ export function createAdapterAudioRuntime(
   function markAudioPlaybackTerminal(
     terminalState: Exclude<AudioPlaybackTerminalState, "idle">,
     turnId: string | null,
-    orchestrationId: string | null,
     reason = "",
     messageId: string | null = null,
   ): void {
-    markAudioTerminalBridge(audioBridge, terminalState, turnId, orchestrationId, reason, messageId);
+    markAudioTerminalBridge(audioBridge, terminalState, turnId, reason, messageId);
   }
 
   function resetAudioPlaybackTerminal(): void {
@@ -208,14 +190,12 @@ export function createAdapterAudioRuntime(
   function queueAudioForPlayback(
     audioUrl: string,
     turnId: string | null,
-    orchestrationId: string | null,
     messageId: string,
   ): void {
     queuePendingAudioForPlayback(
       deps.state.pendingAudios,
       audioUrl,
       turnId,
-      orchestrationId,
       messageId,
     );
     deps.state.statusMessage = "收到语音回复，等待同步播放。";
@@ -225,16 +205,14 @@ export function createAdapterAudioRuntime(
   async function playAudioAndAcknowledge(
     audioUrl: string,
     turnId: string | null,
-    orchestrationId: string | null = deps.state.currentOrchestrationId,
     messageId: string,
   ): Promise<void> {
-    return playAudioAction(audioPlaybackCtx, audioUrl, turnId, orchestrationId, messageId);
+    return playAudioAction(audioPlaybackCtx, audioUrl, turnId, messageId);
   }
 
   function releaseAudioForPlayback(
     messageId: string,
     turnId: string | null,
-    orchestrationId: string | null,
   ): boolean {
     const item = deps.state.pendingAudios.get(messageId);
     if (!item) {
@@ -244,39 +222,28 @@ export function createAdapterAudioRuntime(
     if (!audioUrl) {
       return false;
     }
-    if (!matchesPlaybackGroup(
-      item.turnId,
-      item.orchestrationId,
-      turnId,
-      orchestrationId,
-    )) {
+    if (!matchesPlaybackGroup(item.turnId, turnId)) {
       return false;
     }
     const releasedTurnId = item.turnId ?? turnId;
-    const releasedOrchestrationId = item.orchestrationId ?? orchestrationId;
     deps.state.pendingAudios.delete(messageId);
     void playAudioAndAcknowledge(
       audioUrl,
       releasedTurnId,
-      releasedOrchestrationId,
       messageId,
     );
     return true;
   }
 
-  function hasPendingAudioForTurn(
-    turnId: string | null,
-    orchestrationId: string | null,
-  ): boolean {
-    return hasPendingAudioForTurnBridge(audioBridge, turnId, orchestrationId);
+  function hasPendingAudioForTurn(turnId: string | null): boolean {
+    return hasPendingAudioForTurnBridge(audioBridge, turnId);
   }
 
   function markMissingAudiosForTurn(
     turnId: string | null,
-    orchestrationId: string | null,
     reason: string,
   ): void {
-    markMissingAudiosForTurnBridge(audioBridge, turnId, orchestrationId, reason);
+    markMissingAudiosForTurnBridge(audioBridge, turnId, reason);
   }
 
   function stopAudioPlayback(): void {
@@ -291,7 +258,6 @@ export function createAdapterAudioRuntime(
         if (segment?.audio.started && segment.audio.terminal === "idle") {
           return {
             turnId: segment.turnId,
-            orchestrationId: segment.orchestrationId,
             messageId: segment.messageId,
           };
         }

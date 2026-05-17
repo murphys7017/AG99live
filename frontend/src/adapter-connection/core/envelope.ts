@@ -2,23 +2,18 @@ import type { ProtocolEnvelope } from "../../types/protocol.js";
 
 export const PROTOCOL_VERSION = "v2";
 const SOURCE_FRONTEND = "frontend";
-const DEFAULT_SESSION_ID = "desktop-client";
 
 export function buildMessageEnvelope<TPayload>(
   type: string,
   payload: TPayload,
-  sessionId: string,
   turnId: string | null = null,
-  orchestrationId: string | null = null,
 ): ProtocolEnvelope<TPayload> {
   return {
     type,
     version: PROTOCOL_VERSION,
     message_id: createMessageId(),
     timestamp: new Date().toISOString(),
-    session_id: sessionId || DEFAULT_SESSION_ID,
     turn_id: turnId,
-    orchestration_id: orchestrationId,
     source: SOURCE_FRONTEND,
     payload,
   };

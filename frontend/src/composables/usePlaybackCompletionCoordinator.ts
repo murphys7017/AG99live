@@ -100,7 +100,6 @@ export function usePlaybackCompletionCoordinator(
     }
 
     options.sessionStore.markMotionCompleted(
-      found.segment.orchestrationId,
       found.segment.turnId,
       found.segment.messageId,
     );
@@ -126,9 +125,9 @@ export function usePlaybackCompletionCoordinator(
     const firstSegment = s.segmentOrder
       .map((id) => s.segments.get(id))
       .find(Boolean);
-    const orchId = firstSegment?.orchestrationId ?? null;
-    options.playbackAck.clearPlaybackGroupContext(s.turnId, orchId);
-    options.sessionStore.markPhase(orchId, s.turnId, "completed");
+    void firstSegment;
+    options.playbackAck.clearPlaybackGroupContext(s.turnId);
+    options.sessionStore.markPhase(s.turnId, "completed");
   }
 
   function maybeFlushPlaybackCompletion(
@@ -180,7 +179,7 @@ export function usePlaybackCompletionCoordinator(
     const firstSegment = s.segmentOrder
       .map((id) => s.segments.get(id))
       .find(Boolean);
-    const orchId = firstSegment?.orchestrationId ?? null;
+    void firstSegment;
     const success = s.segmentOrder.every((segmentId) => {
       const segment = s.segments.get(segmentId);
       return segment ? segment.audio.terminal !== "failed" : true;
@@ -188,11 +187,10 @@ export function usePlaybackCompletionCoordinator(
     for (const segmentId of s.segmentOrder) {
       clearSettlementTimer(segmentKey(sessionId, segmentId));
     }
-    options.sessionStore.markPhase(orchId, s.turnId, "settling");
+    options.sessionStore.markPhase(s.turnId, "settling");
     ackedSessions.add(sessionId);
     void options.playbackAck.sendPlaybackFinishedForCurrentGroup(
       s.turnId,
-      orchId,
       success,
       reason,
     );
@@ -219,7 +217,6 @@ export function usePlaybackCompletionCoordinator(
         && segment.motion.payload === null
       ) {
         options.sessionStore.markMotionAbsent(
-          segment.orchestrationId,
           segment.turnId,
           segment.messageId,
         );
@@ -242,7 +239,6 @@ export function usePlaybackCompletionCoordinator(
       currentMotionSegmentKey = key;
       activeMotionSegments.add(key);
       options.sessionStore.markMotionStarted(
-        event.orchestrationId,
         event.turnId,
         event.messageId,
       );
@@ -255,7 +251,7 @@ export function usePlaybackCompletionCoordinator(
       source: event.diagnostics?.source || event.startReason,
       payloadKind: event.payloadKind,
       turnId: event.turnId,
-      orchestrationId: event.orchestrationId,
+      orchestrationId: event.turnId,
       modelName: event.model?.name ?? options.motionRecord.getSelectedModel().value?.name ?? "",
       emotionLabel: event.plan.emotion_label,
       mode: event.plan.mode,

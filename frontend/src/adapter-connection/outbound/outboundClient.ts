@@ -6,7 +6,6 @@ export interface AdapterOutboundClient {
     type: string,
     payload: TPayload,
     turnId?: string | null,
-    orchestrationId?: string | null,
   ) => boolean;
 }
 
@@ -16,7 +15,6 @@ export interface AdapterOutboundClientDeps {
     type: string,
     payload: TPayload,
     turnId?: string | null,
-    orchestrationId?: string | null,
   ) => ProtocolEnvelope<TPayload>;
 }
 
@@ -32,7 +30,6 @@ export function createAdapterOutboundClient(
     type: string,
     payload: TPayload,
     turnId?: string | null,
-    orchestrationId?: string | null,
   ): boolean {
     const socket = deps.getSocket();
     if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -42,7 +39,7 @@ export function createAdapterOutboundClient(
     try {
       socket.send(
         JSON.stringify(
-          deps.buildEnvelope(type, payload, turnId, orchestrationId),
+          deps.buildEnvelope(type, payload, turnId),
         ),
       );
       return true;

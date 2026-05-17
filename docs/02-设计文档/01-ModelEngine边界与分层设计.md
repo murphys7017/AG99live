@@ -335,7 +335,7 @@ model-engine/stages/couplingStage.ts
 ```text
 messageId
 turnId
-orchestrationId
+playbackTurnId
 targetDurationMs
 payloadKind
 mode
@@ -368,6 +368,7 @@ mode
 - 当用户样本为空，或核心类别覆盖不足时，按缺失类别补入模型冷启动示例。
 - 补齐是补缺，不覆盖已有用户样本。
 - 最小可用覆盖优先保证 `neutral`、`happy`、`angry`、`surprised` 和一个补充情绪类。
+- Action Lab 显示的 few-shot 有效示例预览应直接反映后端当前实际解析结果，而不是前端独立重算的平行结果。
 
 表情冷启动示例的抽象规则：
 

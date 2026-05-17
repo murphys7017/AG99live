@@ -65,6 +65,7 @@ class TurnCoordinator:
         self,
         *,
         session_state,
+        turn_identity_map,
         runtime_state,
         media_service,
         chat_buffer,
@@ -80,6 +81,7 @@ class TurnCoordinator:
         ensure_vad_engine: Callable[[], Any],
     ) -> None:
         self.session_state = session_state
+        self.turn_identity_map = turn_identity_map
         self.runtime_state = runtime_state
         self.media_service = media_service
         self.chat_buffer = chat_buffer
@@ -106,25 +108,24 @@ class TurnCoordinator:
         self._turn_timing: dict[str, Any] = {}
 
     async def handle_msg(self, raw_message: dict[str, Any]) -> None:
-        message = parse_inbound_message(
-            raw_message,
-            default_session_id=self.session_state.client_uid,
-        )
+        message = parse_inbound_message(raw_message)
 
         if message.type.startswith("system."):
             await self._handle_frontend_system(message)
             return
+
+        turn_id = self._require_interactive_turn_id(message)
 
         if message.type == TYPE_CONTROL_PLAYBACK_FINISHED:
             success_raw = message.payload.get("success", True)
             success = success_raw if isinstance(success_raw, bool) else True
             reason_raw = message.payload.get("reason")
             reason = reason_raw.strip() if isinstance(reason_raw, str) and reason_raw.strip() else None
-            await self.finalize_turn(turn_id=message.turn_id, success=success, reason=reason)
+            await self.finalize_turn(turn_id=turn_id, success=success, reason=reason)
             return
 
         if message.type == TYPE_CONTROL_INTERRUPT:
-            await self._handle_interrupt_signal(message.turn_id)
+            await self._handle_interrupt_signal(turn_id)
             return
 
         if message.type == TYPE_INPUT_AUDIO_STREAM_START:
@@ -138,7 +139,7 @@ class TurnCoordinator:
         if message.type == TYPE_INPUT_AUDIO_STREAM_END:
             message_obj = await self.speech_ingress.handle_audio_stream_end(message)
             if message_obj is not None:
-                await self._commit_inbound_message(message_obj, turn_id=message.turn_id)
+                await self._commit_inbound_message(message_obj, turn_id=turn_id)
             return
 
         if message.type == TYPE_INPUT_MIC_AUDIO_DATA:
@@ -148,7 +149,7 @@ class TurnCoordinator:
         if message.type == TYPE_INPUT_RAW_AUDIO_DATA:
             message_obj = await self.speech_ingress.handle_raw_audio_data(message)
             if message_obj is not None:
-                await self._commit_inbound_message(message_obj, turn_id=message.turn_id)
+                await self._commit_inbound_message(message_obj, turn_id=turn_id)
             return
 
         if message.type == TYPE_INPUT_MIC_AUDIO_END:
@@ -157,7 +158,7 @@ class TurnCoordinator:
 
         if message.type == TYPE_INPUT_TEXT:
             message_obj = self._convert_message(message.raw)
-            await self._commit_inbound_message(message_obj, turn_id=message.turn_id)
+            await self._commit_inbound_message(message_obj, turn_id=turn_id)
             return
 
         if message.type == TYPE_ENGINE_MOTION_INTENT:
@@ -166,9 +167,7 @@ class TurnCoordinator:
 
         await self._send_json(
             build_control_error(
-                session_id=message.session_id,
-                turn_id=message.turn_id,
-                orchestration_id=message.orchestration_id,
+                turn_id=turn_id,
                 message=f"Unhandled message type: {message.type}",
             )
         )
@@ -186,9 +185,7 @@ class TurnCoordinator:
         del inline_base_expression
         del inline_motion_id
 
-        session_id = self.session_state.client_uid
         turn_id = self.session_state.current_turn_id
-        orchestration_id = getattr(self.session_state, "current_orchestration_id", None)
         platform_extras_dict = platform_extras if isinstance(platform_extras, dict) else {}
         segment_message_id = _resolve_platform_segment_message_id(platform_extras_dict)
 
@@ -204,9 +201,7 @@ class TurnCoordinator:
             self.chat_buffer.add("assistant", reply_text)
             await self._send_json(
                 build_output_text(
-                    session_id=session_id,
                     turn_id=turn_id,
-                    orchestration_id=orchestration_id,
                     message_id=segment_message_id,
                     text=reply_text,
                     speaker_name=self.speaker_name,
@@ -275,9 +270,7 @@ class TurnCoordinator:
         if picture_paths:
             await self._send_json(
                 build_output_image(
-                    session_id=session_id,
                     turn_id=turn_id,
-                    orchestration_id=orchestration_id,
                     images=picture_paths,
                 )
             )
@@ -287,9 +280,7 @@ class TurnCoordinator:
             _, audio_url = self.media_service.cache_audio_file(record_path)
             await self._send_json(
                 build_output_audio(
-                    session_id=session_id,
                     turn_id=turn_id,
-                    orchestration_id=orchestration_id,
                     message_id=segment_message_id,
                     audio_url=audio_url,
                     text=reply_text,
@@ -320,9 +311,7 @@ class TurnCoordinator:
 
         await self._send_json(
             build_control_synth_finished(
-                session_id=self.session_state.client_uid,
                 turn_id=current_turn_id,
-                orchestration_id=getattr(self.session_state, "current_orchestration_id", None),
             )
         )
         self._mark_turn_playing()
@@ -347,7 +336,8 @@ class TurnCoordinator:
         current_turn_id = self.session_state.current_turn_id
         if not self.session_state.waiting_for_playback_complete:
             return
-        if turn_id and current_turn_id and turn_id != current_turn_id:
+        resolved_turn_id = self._resolve_frontend_turn_id(turn_id) if turn_id else None
+        if resolved_turn_id and current_turn_id and resolved_turn_id != current_turn_id:
             logger.debug(
                 "Ignoring playback-finished for stale turn_id=%s current_turn_id=%s",
                 turn_id,
@@ -371,29 +361,23 @@ class TurnCoordinator:
             if self.session_state.waiting_for_playback_complete:
                 await self.finalize_turn(turn_id=self.session_state.current_turn_id)
 
-            inbound_orchestration_id = (
-                message_obj.raw_message.get("orchestration_id")
-                if isinstance(getattr(message_obj, "raw_message", None), dict)
-                else None
+            normalized_turn_id = self._require_turn_id_value(turn_id)
+            backend_turn_id = self._resolve_backend_turn_id(message_obj, frontend_turn_id=normalized_turn_id)
+            turn_identity_map = getattr(self, "turn_identity_map", None)
+            if turn_identity_map is not None:
+                turn_identity_map.register_bound_turn(
+                    frontend_turn_id=normalized_turn_id,
+                    backend_turn_id=backend_turn_id,
+                )
+            current_turn_id = self.session_state.begin_turn(
+                message_obj.message_str,
+                turn_id=normalized_turn_id,
             )
-            try:
-                current_turn_id = self.session_state.begin_turn(
-                    message_obj.message_str,
-                    turn_id=turn_id,
-                    orchestration_id=inbound_orchestration_id,
-                )
-            except TypeError:
-                current_turn_id = self.session_state.begin_turn(
-                    message_obj.message_str,
-                    turn_id=turn_id,
-                )
             self._begin_turn_timing(message_obj.message_str)
             self.chat_buffer.add("user", message_obj.message_str)
             await self._send_json(
                 build_control_turn_started(
-                    session_id=self.session_state.client_uid,
                     turn_id=current_turn_id,
-                    orchestration_id=getattr(self.session_state, "current_orchestration_id", None),
                 )
             )
             await self._emit_image_input_diagnostics(message_obj)
@@ -457,9 +441,9 @@ class TurnCoordinator:
         await self._commit_inbound_message(message_obj, turn_id=message.turn_id)
 
     async def _handle_interrupt_signal(self, turn_id: str | None) -> None:
-        session_id = self.session_state.client_uid
         current_turn_id = self.session_state.current_turn_id
-        if turn_id and current_turn_id and turn_id != current_turn_id:
+        resolved_turn_id = self._resolve_frontend_turn_id(turn_id) if turn_id else None
+        if resolved_turn_id and current_turn_id and resolved_turn_id != current_turn_id:
             logger.debug(
                 "Ignoring interrupt for stale turn_id=%s current_turn_id=%s",
                 turn_id,
@@ -490,7 +474,6 @@ class TurnCoordinator:
         await self.media_service.clear_audio_buffer()
         await self._send_json(
             build_control_interrupt(
-                session_id=session_id,
                 turn_id=current_turn_id,
             )
         )
@@ -520,7 +503,6 @@ class TurnCoordinator:
             )
             await self._send_json(
                 build_control_error(
-                    session_id=message.session_id,
                     turn_id=message.turn_id,
                     message=f"Invalid {message.type} payload: {failure_reason}",
                 )
@@ -579,9 +561,7 @@ class TurnCoordinator:
         sent = await self._send_json(
             build_message_envelope(
                 message_type,
-                session_id=self.session_state.client_uid,
                 turn_id=resolved_turn_id,
-                orchestration_id=getattr(self.session_state, "current_orchestration_id", None),
                 message_id=message_id,
                 source=SOURCE_ENGINE,
                 payload=payload,
@@ -656,18 +636,60 @@ class TurnCoordinator:
 
         await self._send_json(
             build_control_turn_finished(
-                session_id=self.session_state.client_uid,
                 turn_id=current_turn_id,
-                orchestration_id=self.session_state.current_orchestration_id,
                 success=success,
                 reason=reason,
             )
         )
         self._mark_turn_timing("turn_completed_at")
+        turn_identity_map = getattr(self, "turn_identity_map", None)
+        if turn_identity_map is not None:
+            turn_identity_map.clear_frontend_turn(current_turn_id)
         if self.session_state.waiting_for_playback_complete:
             self.session_state.mark_playback_complete()
         else:
             self.session_state.reset_to_idle()
+
+    def _resolve_backend_turn_id(
+        self,
+        message_obj,
+        *,
+        frontend_turn_id: str,
+    ) -> str:
+        candidates = [
+            getattr(message_obj, "message_id", None),
+        ]
+        raw_message = getattr(message_obj, "raw_message", None)
+        if isinstance(raw_message, dict):
+            candidates.extend(
+                [
+                    raw_message.get("backend_turn_id"),
+                    raw_message.get("request_id"),
+                    raw_message.get("input_id"),
+                ]
+            )
+        for candidate in candidates:
+            normalized = self._normalize_optional_turn_value(candidate)
+            if normalized:
+                return normalized
+        return frontend_turn_id
+
+    def _resolve_frontend_turn_id(self, frontend_turn_id: str | None) -> str | None:
+        normalized = self._normalize_optional_turn_value(frontend_turn_id)
+        if not normalized:
+            return None
+        turn_identity_map = getattr(self, "turn_identity_map", None)
+        if turn_identity_map is None:
+            return normalized
+        resolved = turn_identity_map.resolve_frontend_turn(normalized)
+        return resolved or normalized
+
+    @staticmethod
+    def _normalize_optional_turn_value(value: object) -> str | None:
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip()
+        return normalized or None
 
     def _current_turn_index(self) -> int:
         return int(getattr(self.session_state, "turn_index", 0) or 0)
@@ -703,6 +725,18 @@ class TurnCoordinator:
         if start_value is None or end_value is None:
             return -1.0
         return max((end_value - start_value) * 1000.0, 0.0)
+
+    def _require_interactive_turn_id(self, message) -> str:
+        if message.type.startswith("system."):
+            raise ValueError("System messages should not require interactive turn ids.")
+        return self._require_turn_id_value(message.turn_id)
+
+    @staticmethod
+    def _require_turn_id_value(turn_id: str | None) -> str:
+        normalized = str(turn_id or "").strip()
+        if not normalized:
+            raise ValueError("Interactive protocol messages require a non-empty turn_id.")
+        return normalized
 
 
 def _coerce_perf_counter(value: Any) -> float | None:

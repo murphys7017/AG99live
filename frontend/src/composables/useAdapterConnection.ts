@@ -104,7 +104,6 @@ const state = reactive({
   desktopScreenshotOnSendEnabled: loadDesktopScreenshotOnSendEnabled(),
   microphoneDeviceId: loadStoredMicrophoneDeviceId(),
   microphoneDevices: [] as MicrophoneDeviceInfo[],
-  sessionId: "",
   status: "disconnected" as ConnectionStatus,
   statusMessage: "尚未连接适配器。",
   serverInfo: null as SystemServerInfoPayload | null,
@@ -114,7 +113,6 @@ const state = reactive({
   lastTranscription: "",
   lastImageCount: 0,
   currentTurnId: null as string | null,
-  currentOrchestrationId: null as string | null,
   micRequested: false,
   micCapturing: false,
   pttModeEnabled: false,
@@ -127,23 +125,18 @@ const state = reactive({
   backendHistoryStatusMessage: "等待历史窗口请求后端历史。",
   inboundMotionPlan: null as unknown | null,
   inboundMotionPlanTurnId: null as string | null,
-  inboundMotionPlanOrchestrationId: null as string | null,
   inboundMotionPlanReceivedAtMs: 0,
   pendingAssistantTexts: new Map<string, PendingAssistantTextItem>(),
   pendingAudios: new Map<string, PendingAudioItem>(),
   audioPlaybackStartedTurnId: null as string | null,
-  audioPlaybackStartedOrchestrationId: null as string | null,
   audioPlaybackStartedMessageId: null as string | null,
   audioPlaybackStartedAtMs: 0,
   audioPlaybackDurationMs: null as number | null,
   audioPlaybackTerminalState: "idle" as AudioPlaybackTerminalState,
   audioPlaybackTerminalTurnId: null as string | null,
-  audioPlaybackTerminalOrchestrationId: null as string | null,
   audioPlaybackTerminalReason: "",
   assistantTextDeliveryTurnId: null as string | null,
-  assistantTextDeliveryOrchestrationId: null as string | null,
   turnFinishedTurnId: null as string | null,
-  turnFinishedOrchestrationId: null as string | null,
   turnFinishedSuccess: true,
   turnFinishedReason: "",
   latestSemanticAxisProfileSaveResult: null as DesktopSemanticAxisProfileSaveResult | null,
@@ -152,6 +145,7 @@ const state = reactive({
     rootError: "",
     loadError: "",
     diagnostics: [],
+    effectiveExamples: [],
   } as DesktopMotionTuningSamplesStatus,
 });
 
@@ -172,15 +166,8 @@ function buildMessageEnvelope<TPayload>(
   type: string,
   payload: TPayload,
   turnId: string | null = null,
-  orchestrationId: string | null = state.currentOrchestrationId,
 ): ProtocolEnvelope<TPayload> {
-  return buildProtocolMessageEnvelope(
-    type,
-    payload,
-    state.sessionId,
-    turnId,
-    orchestrationId,
-  );
+  return buildProtocolMessageEnvelope(type, payload, turnId);
 }
 
 const microphoneRuntime = createAdapterMicrophoneRuntime({
@@ -468,10 +455,6 @@ async function handleSocketMessage(rawData: string): Promise<void> {
   }
 
   const envelope = parsed.envelope;
-  if (typeof envelope.session_id === "string" && envelope.session_id.trim()) {
-    state.sessionId = envelope.session_id.trim();
-  }
-
   const event = mapInboundEnvelopeToEvent(envelope, buildInboundEventContext());
   await dispatchInboundEvent(event);
 }
@@ -480,9 +463,7 @@ function buildInboundEventContext(): InboundEventMappingContext {
   const activeAudioSegment = findActiveAudioSegment();
   return {
     currentTurnId: state.currentTurnId,
-    currentOrchestrationId: state.currentOrchestrationId,
     activeAudioTurnId: activeAudioSegment?.turnId ?? null,
-    activeAudioOrchestrationId: activeAudioSegment?.orchestrationId ?? null,
   };
 }
 
@@ -497,17 +478,17 @@ function buildDispatchDeps(): InboundDispatchDeps {
     state,
     sessionStore: sessionStore
       ? {
-          setActiveSession: (orchId, tId) => sessionStore?.setActiveSession(orchId, tId),
-          markTurnStarted: (orchId, tId) => sessionStore?.markTurnStarted(orchId, tId),
-          markSynthFinished: (orchId, tId) => sessionStore?.markSynthFinished(orchId, tId),
-          markTurnFinished: (orchId, tId, success, reason) => sessionStore?.markTurnFinished(orchId, tId, success, reason),
-          markInterrupt: (orchId, tId) => sessionStore?.markInterrupt(orchId, tId),
-          markTextReceived: (orchId, tId, text, msgId, mode) => sessionStore?.markTextReceived(orchId, tId, text, msgId, mode as "replace" | "append"),
-          markTextDelivered: (orchId, tId, msgId) => sessionStore?.markTextDelivered(orchId, tId, msgId),
-          markAudioReceived: (orchId, tId, url, msgId) => sessionStore?.markAudioReceived(orchId, tId, url, msgId),
-          markAudioTerminal: (orchId, tId, terminal, msgId, reason) => sessionStore?.markAudioTerminal(orchId, tId, terminal as "completed" | "failed" | "absent", msgId, reason),
-          markMotionReceived: (orchId, tId, payload, msgId) => sessionStore?.markMotionReceived(orchId, tId, payload, msgId),
-          ensureSegment: (orchId, tId, msgId) => sessionStore!.ensureSegment(orchId, tId, msgId),
+          setActiveSession: (tId) => sessionStore?.setActiveSession(tId),
+          markTurnStarted: (tId) => sessionStore?.markTurnStarted(tId),
+          markSynthFinished: (tId) => sessionStore?.markSynthFinished(tId),
+          markTurnFinished: (tId, success, reason) => sessionStore?.markTurnFinished(tId, success, reason),
+          markInterrupt: (tId) => sessionStore?.markInterrupt(tId),
+          markTextReceived: (tId, text, msgId, mode) => sessionStore?.markTextReceived(tId, text, msgId, mode as "replace" | "append"),
+          markTextDelivered: (tId, msgId) => sessionStore?.markTextDelivered(tId, msgId),
+          markAudioReceived: (tId, url, msgId) => sessionStore?.markAudioReceived(tId, url, msgId),
+          markAudioTerminal: (tId, terminal, msgId, reason) => sessionStore?.markAudioTerminal(tId, terminal as "completed" | "failed" | "absent", msgId, reason),
+          markMotionReceived: (tId, payload, msgId) => sessionStore?.markMotionReceived(tId, payload, msgId),
+          ensureSegment: (tId, msgId) => sessionStore!.ensureSegment(tId, msgId),
           getSessions: () => sessionStore?.getSessions() ?? [],
         }
       : undefined,
@@ -531,21 +512,20 @@ function buildDispatchDeps(): InboundDispatchDeps {
     rewriteHttpUrl: (url) => rewriteHttpUrlWithActiveHost(url, state.activeWsAddress),
     stopAudioPlayback: () => stopAudioPlayback(),
     resetAudioPlaybackTerminal: () => resetAudioPlaybackTerminal(),
-    markAudioPlaybackTerminal: (terminalState, turnId, orchestrationId, reason, messageId) =>
-      markAudioPlaybackTerminal(terminalState as "completed" | "failed" | "absent", turnId, orchestrationId, reason, messageId),
-    hasPendingAudioForTurn: (turnId, orchestrationId) => hasPendingAudioForTurn(turnId, orchestrationId),
-    markMissingAudiosForTurn: (turnId, orchestrationId, reason) => markMissingAudiosForTurn(turnId, orchestrationId, reason),
-    queuePendingAssistantTextForPlayback: (map, text, turnId, orchestrationId, messageId) =>
-      queuePendingAssistantTextForPlayback(map, text, turnId, orchestrationId, messageId),
-    queuePendingAudioForPlayback: (map, url, turnId, orchestrationId, messageId) => {
+    markAudioPlaybackTerminal: (terminalState, turnId, reason, messageId) =>
+      markAudioPlaybackTerminal(terminalState as "completed" | "failed" | "absent", turnId, reason, messageId),
+    hasPendingAudioForTurn: (turnId) => hasPendingAudioForTurn(turnId),
+    markMissingAudiosForTurn: (turnId, reason) => markMissingAudiosForTurn(turnId, reason),
+    queuePendingAssistantTextForPlayback: (map, text, turnId, messageId) =>
+      queuePendingAssistantTextForPlayback(map, text, turnId, messageId),
+    queuePendingAudioForPlayback: (map, url, turnId, messageId) => {
       if (map === state.pendingAudios) {
-        queueAudioForPlayback(url, turnId, orchestrationId, messageId);
+        queueAudioForPlayback(url, turnId, messageId);
         return;
       }
       map.set(messageId, {
         audioUrl: url,
         turnId,
-        orchestrationId,
         messageId,
         receivedAtMs: performance.now(),
       });
@@ -588,14 +568,12 @@ function updateAssistantText(text: string, turnId: string | null): void {
 function queueAssistantTextForPlayback(
   text: string,
   turnId: string | null,
-  orchestrationId: string | null,
   messageId: string,
 ): void {
   queuePendingAssistantTextForPlayback(
     state.pendingAssistantTexts,
     text,
     turnId,
-    orchestrationId,
     messageId,
   );
 }
@@ -603,7 +581,6 @@ function queueAssistantTextForPlayback(
 function releaseAssistantTextForPlayback(
   messageId: string,
   turnId: string | null,
-  orchestrationId: string | null,
 ): boolean {
   const item = state.pendingAssistantTexts.get(messageId);
   if (!item) {
@@ -613,22 +590,15 @@ function releaseAssistantTextForPlayback(
   if (!text) {
     return false;
   }
-  if (!matchesPlaybackGroup(
-    item.turnId,
-    item.orchestrationId,
-    turnId,
-    orchestrationId,
-  )) {
+  if (!matchesPlaybackGroup(item.turnId, turnId)) {
     return false;
   }
 
   const releasedTurnId = item.turnId ?? turnId;
-  const releasedOrchestrationId = item.orchestrationId ?? orchestrationId;
   state.pendingAssistantTexts.delete(messageId);
   updateAssistantText(text, releasedTurnId);
   state.assistantTextDeliveryTurnId = releasedTurnId;
-  state.assistantTextDeliveryOrchestrationId = releasedOrchestrationId;
-  sessionStore?.markTextDelivered(releasedOrchestrationId, releasedTurnId, messageId);
+  sessionStore?.markTextDelivered(releasedTurnId, messageId);
   state.statusMessage = "文本回复已进入同步播放。";
   return true;
 }
@@ -677,18 +647,16 @@ function sendMotionPayloadPreview(payload: unknown): boolean {
 
 async function sendPlaybackFinished(
   turnId: string | null,
-  orchestrationId: string | null,
   success: boolean,
   reason?: string,
 ): Promise<void> {
-  sendPlaybackFinishedAction(outboundCtx, turnId, orchestrationId, success, reason);
+  sendPlaybackFinishedAction(outboundCtx, turnId, success, reason);
 }
 
 function clearPlaybackGroupContext(
   turnId: string | null,
-  orchestrationId: string | null,
 ): void {
-  clearPlaybackGroup(outboundCtx, turnId, orchestrationId);
+  clearPlaybackGroup(outboundCtx, turnId);
 }
 
 function rewriteModelSyncEnvelope(

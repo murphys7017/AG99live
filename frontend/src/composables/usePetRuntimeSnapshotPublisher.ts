@@ -107,7 +107,7 @@ export function usePetRuntimeSnapshotPublisher(
         microphoneDeviceId: a.microphoneDeviceId,
         microphoneDevices: a.microphoneDevices.map((device) => ({ ...device })),
         statusMessage: a.statusMessage,
-        sessionId: a.sessionId || options.modelSyncState.sessionId,
+        sessionId: options.modelSyncState.confName || "",
         serverWsUrl: a.serverInfo?.ws_url ?? "",
         httpBaseUrl: a.serverInfo?.http_base_url ?? "",
         lastAssistantText: a.lastAssistantText,
@@ -196,6 +196,8 @@ export function usePetRuntimeSnapshotPublisher(
         ? cloneJson(options.selectedSemanticAxisProfile.value)
         : null,
       baseActionPreview: options.parameterActionPreview.value,
+      motionTuningEffectiveExamples: options.adapter.state.motionTuningSamplesStatus.effectiveExamples
+        .map((example) => cloneJson(example)),
     };
   }
 
@@ -213,6 +215,7 @@ export function usePetRuntimeSnapshotPublisher(
       options.selectedModel.value?.engine_hints.recommended_mode ?? "",
       options.parameterActionPreview.value,
       options.selectedSemanticAxisProfile.value,
+      options.adapter.state.motionTuningSamplesStatus.effectiveExamples,
     ],
     () => {
       modelProjectionDebounce.schedule(() => {

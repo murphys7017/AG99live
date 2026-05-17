@@ -29,7 +29,6 @@ export interface AdapterHistoryDependencies {
     type: string,
     payload: TPayload,
     turnId?: string | null,
-    orchestrationId?: string | null,
   ) => ProtocolEnvelope<TPayload>;
   pushHistory: (role: DesktopHistoryEntry["role"], text: string) => void;
   setLastError: (message: string) => void;

@@ -31,20 +31,11 @@ class _MotionRuntimeBundle:
 @dataclass(slots=True)
 class _FrontendIdentitySnapshot:
     event_frontend_turn_id: str | None
-    event_frontend_orchestration_id: str | None
     active_frontend_turn_id: str | None
-    active_frontend_orchestration_id: str | None
 
     @property
     def scheduled_frontend_turn_id(self) -> str | None:
         return self.event_frontend_turn_id or self.active_frontend_turn_id
-
-    @property
-    def scheduled_frontend_orchestration_id(self) -> str | None:
-        return (
-            self.event_frontend_orchestration_id
-            or self.active_frontend_orchestration_id
-        )
 
 
 @dataclass(slots=True)
@@ -66,11 +57,8 @@ class _MotionScheduleAttempt:
     phase: str
     source: str | None
     scheduled_frontend_turn_id: str | None
-    scheduled_frontend_orchestration_id: str | None
     event_frontend_turn_id: str | None
-    event_frontend_orchestration_id: str | None
     active_frontend_turn_id: str | None
-    active_frontend_orchestration_id: str | None
     reply_plan_route_mode: str | None
     reply_plan_should_emit_immediate_reply: bool | None
     reply_plan_source: str | None
@@ -85,11 +73,8 @@ class _MotionScheduleAttempt:
             "phase": self.phase,
             "source": self.source,
             "scheduled_frontend_turn_id": self.scheduled_frontend_turn_id,
-            "scheduled_frontend_orchestration_id": self.scheduled_frontend_orchestration_id,
             "event_frontend_turn_id": self.event_frontend_turn_id,
-            "event_frontend_orchestration_id": self.event_frontend_orchestration_id,
             "active_frontend_turn_id": self.active_frontend_turn_id,
-            "active_frontend_orchestration_id": self.active_frontend_orchestration_id,
             "reply_plan_route_mode": self.reply_plan_route_mode,
             "reply_plan_should_emit_immediate_reply": self.reply_plan_should_emit_immediate_reply,
             "reply_plan_source": self.reply_plan_source,
@@ -471,11 +456,8 @@ def _schedule_motion_from_interaction_result(
             phase=phase,
             source="plugin_hints",
             scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
-            scheduled_frontend_orchestration_id=identity.scheduled_frontend_orchestration_id,
             event_frontend_turn_id=identity.event_frontend_turn_id,
-            event_frontend_orchestration_id=identity.event_frontend_orchestration_id,
             active_frontend_turn_id=identity.active_frontend_turn_id,
-            active_frontend_orchestration_id=identity.active_frontend_orchestration_id,
             reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
             reply_plan_should_emit_immediate_reply=(
                 reply_plan.should_emit_immediate_reply if reply_plan is not None else None
@@ -500,11 +482,8 @@ def _schedule_motion_from_interaction_result(
             phase=phase,
             source=None,
             scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
-            scheduled_frontend_orchestration_id=identity.scheduled_frontend_orchestration_id,
             event_frontend_turn_id=identity.event_frontend_turn_id,
-            event_frontend_orchestration_id=identity.event_frontend_orchestration_id,
             active_frontend_turn_id=identity.active_frontend_turn_id,
-            active_frontend_orchestration_id=identity.active_frontend_orchestration_id,
             reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
             reply_plan_should_emit_immediate_reply=(
                 reply_plan.should_emit_immediate_reply if reply_plan is not None else None
@@ -521,11 +500,8 @@ def _schedule_motion_from_interaction_result(
             phase=phase,
             source=None,
             scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
-            scheduled_frontend_orchestration_id=identity.scheduled_frontend_orchestration_id,
             event_frontend_turn_id=identity.event_frontend_turn_id,
-            event_frontend_orchestration_id=identity.event_frontend_orchestration_id,
             active_frontend_turn_id=identity.active_frontend_turn_id,
-            active_frontend_orchestration_id=identity.active_frontend_orchestration_id,
             reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
             reply_plan_should_emit_immediate_reply=(
                 reply_plan.should_emit_immediate_reply if reply_plan is not None else None
@@ -541,11 +517,8 @@ def _schedule_motion_from_interaction_result(
         phase=phase,
         source=policy.source,
         scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
-        scheduled_frontend_orchestration_id=identity.scheduled_frontend_orchestration_id,
         event_frontend_turn_id=identity.event_frontend_turn_id,
-        event_frontend_orchestration_id=identity.event_frontend_orchestration_id,
         active_frontend_turn_id=identity.active_frontend_turn_id,
-        active_frontend_orchestration_id=identity.active_frontend_orchestration_id,
         reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
         reply_plan_should_emit_immediate_reply=(
             reply_plan.should_emit_immediate_reply if reply_plan is not None else None
@@ -746,21 +719,13 @@ def _resolve_frontend_identity_snapshot(
 ) -> _FrontendIdentitySnapshot:
     raw_message = getattr(getattr(event, "message_obj", None), "raw_message", None)
     event_frontend_turn_id = None
-    event_frontend_orchestration_id = None
     if isinstance(raw_message, dict):
         event_frontend_turn_id = _normalize_optional_string(raw_message.get("turn_id"))
-        event_frontend_orchestration_id = _normalize_optional_string(
-            raw_message.get("orchestration_id")
-        )
     session_state = getattr(turn_coordinator, "session_state", None)
     return _FrontendIdentitySnapshot(
         event_frontend_turn_id=event_frontend_turn_id,
-        event_frontend_orchestration_id=event_frontend_orchestration_id,
         active_frontend_turn_id=_normalize_optional_string(
             getattr(session_state, "current_turn_id", None)
-        ),
-        active_frontend_orchestration_id=_normalize_optional_string(
-            getattr(session_state, "current_orchestration_id", None)
         ),
     )
 

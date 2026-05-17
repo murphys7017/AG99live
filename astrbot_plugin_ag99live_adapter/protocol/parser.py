@@ -30,8 +30,6 @@ from .models import (
 
 def parse_inbound_message(
     raw: Mapping[str, Any],
-    *,
-    default_session_id: str,
 ) -> ProtocolMessage:
     if not isinstance(raw, Mapping):
         raise ProtocolError("Protocol payload must be an object.")
@@ -49,9 +47,7 @@ def parse_inbound_message(
         raise ProtocolError("`payload` must be an object.")
 
     payload = dict(payload_raw)
-    session_id = _normalize_session_id(raw.get("session_id"), default_session_id)
     turn_id = _normalize_optional_string(raw.get("turn_id"))
-    orchestration_id = _normalize_optional_string(raw.get("orchestration_id"))
     source = _normalize_source(raw.get("source"), SOURCE_FRONTEND)
     version = _require_protocol_version(raw.get("version"))
     message_id = _require_message_id(raw.get("message_id"))
@@ -64,9 +60,7 @@ def parse_inbound_message(
         "version": version,
         "message_id": message_id,
         "timestamp": timestamp,
-        "session_id": session_id,
         "turn_id": turn_id,
-        "orchestration_id": orchestration_id,
         "source": source,
         "payload": payload,
     }
@@ -75,9 +69,7 @@ def parse_inbound_message(
         version=version,
         message_id=message_id,
         timestamp=timestamp,
-        session_id=session_id,
         turn_id=turn_id,
-        orchestration_id=orchestration_id,
         source=source,
         payload=payload,
         raw=normalized_raw,
@@ -86,10 +78,8 @@ def parse_inbound_message(
 
 def normalize_inbound_message(
     raw: Mapping[str, Any],
-    *,
-    default_session_id: str,
 ) -> InboundMessage:
-    envelope = parse_inbound_message(raw, default_session_id=default_session_id)
+    envelope = parse_inbound_message(raw)
     if envelope.type != TYPE_INPUT_TEXT:
         raise ProtocolError(f"Expected `{TYPE_INPUT_TEXT}`, got `{envelope.type}`")
 
@@ -106,11 +96,9 @@ def normalize_inbound_message(
 def build_message_envelope(
     message_type: str,
     *,
-    session_id: str,
     source: str,
     payload: Mapping[str, Any] | None = None,
     turn_id: str | None = None,
-    orchestration_id: str | None = None,
     version: str = PROTOCOL_VERSION,
     message_id: str | None = None,
     timestamp: str | None = None,
@@ -124,9 +112,7 @@ def build_message_envelope(
         "version": version,
         "message_id": message_id or uuid4().hex,
         "timestamp": timestamp or _utc_now_iso(),
-        "session_id": session_id,
         "turn_id": turn_id,
-        "orchestration_id": orchestration_id,
         "source": source,
         "payload": payload_dict,
     }
@@ -260,11 +246,6 @@ def _require_message_id(value: Any) -> str:
     if not normalized:
         raise ProtocolError("`message_id` is required.")
     return normalized
-
-
-def _normalize_session_id(value: Any, default: str) -> str:
-    normalized = _normalize_optional_string(value)
-    return normalized or default
 
 
 def _normalize_source(value: Any, default: str) -> str:

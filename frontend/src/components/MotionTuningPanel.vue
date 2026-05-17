@@ -7,6 +7,7 @@ import {
   matchesPinnedProfileScope,
 } from "../types/desktop";
 import type {
+  DesktopMotionTuningEffectiveExample,
   DesktopMotionPlaybackRecord,
   DesktopMotionTuningSample,
 } from "../types/desktop";
@@ -92,6 +93,41 @@ const llmReferenceSampleCount = computed(() =>
 const motionTuningLoadError = computed(() => bridge.state.motionTuningSamplesStatus.loadError.trim());
 const motionTuningRootError = computed(() => bridge.state.motionTuningSamplesStatus.rootError.trim());
 const motionTuningDiagnostics = computed(() => bridge.state.motionTuningSamplesStatus.diagnostics);
+const effectiveExamples = computed(() => bridge.state.modelProjectionSnapshot.motionTuningEffectiveExamples);
+const effectiveExampleCoverage = computed(() => {
+  const groups = [
+    { label: "neutral", keys: ["neutral"] },
+    { label: "happy", keys: ["happy", "joy"] },
+    { label: "angry", keys: ["angry"] },
+    { label: "surprised", keys: ["surprised"] },
+    { label: "confused / embarrassed", keys: ["confused", "embarrassed", "blush", "question"] },
+  ];
+  return groups.map((group) => {
+    const matchedExample = effectiveExamples.value.find((example) =>
+      group.keys.includes(normalizeEmotionKey(example.output.emotion)),
+    );
+    return {
+      label: group.label,
+      covered: Boolean(matchedExample),
+      source: matchedExample ? formatEffectiveExampleSource(matchedExample) : "",
+    };
+  });
+});
+const effectiveExampleGroups = computed(() => {
+  const groups = [
+    { key: "user", label: "用户样本" },
+    { key: "model_native", label: "模型补齐" },
+    { key: "default", label: "默认兜底" },
+  ];
+  return groups
+    .map((group) => ({
+      ...group,
+      examples: effectiveExamples.value.filter((example) =>
+        formatEffectiveExampleSource(example) === group.key,
+      ),
+    }))
+    .filter((group) => group.examples.length > 0);
+});
 const savedSamples = computed(() =>
   bridge.state.motionTuningSamples.filter((sample) =>
     matchesCurrentProfileSample(sample, mutableProfile.value)),
@@ -419,6 +455,24 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+function formatEffectiveExampleSource(example: DesktopMotionTuningEffectiveExample): string {
+  if (example.source === "desktop_motion_tuning_sample_store") {
+    return "user";
+  }
+  if (example.source === "model_native_expression_example_library") {
+    return "model_native";
+  }
+  return example.source || "default";
+}
+
+function formatEffectiveExampleAxes(example: DesktopMotionTuningEffectiveExample): string {
+  return Object.keys(example.output.axes).join(", ");
+}
+
+function normalizeEmotionKey(value: string): string {
+  return String(value || "").trim().toLowerCase();
+}
+
 </script>
 
 <template>
@@ -437,6 +491,45 @@ function clamp(value: number, min: number, max: number): number {
       选择最近一次真实播放过的动作，手动微调 primary / hint 轴及其绑定参数，点击播放观察 Live2D 效果。
       保存后的样本可以作为 few-shot 参考同步给后端大模型，用来约束后续动作生成风格。
     </p>
+
+    <details v-if="effectiveExamples.length" class="motion-tuning__details">
+      <summary>当前 few-shot 有效示例</summary>
+      <div class="motion-tuning__coverage-grid">
+        <div
+          v-for="item in effectiveExampleCoverage"
+          :key="item.label"
+          class="motion-tuning__coverage-item"
+          :data-covered="item.covered"
+        >
+          <strong>{{ item.label }}</strong>
+          <small>{{ item.covered ? item.source : "missing" }}</small>
+        </div>
+      </div>
+      <ul class="motion-tuning__sample-list">
+        <template
+          v-for="group in effectiveExampleGroups"
+          :key="group.key"
+        >
+          <li class="motion-tuning__sample-group">
+            <strong>{{ group.label }}</strong>
+          </li>
+          <li
+            v-for="(example, index) in group.examples"
+            :key="`${group.key}-${example.output.emotion}-${index}`"
+            class="motion-tuning__sample-item"
+          >
+            <div>
+              <strong>{{ example.output.emotion || "unknown" }}</strong>
+              <p>{{ example.input || "无示例文本" }}</p>
+              <small>{{ formatEffectiveExampleAxes(example) || "no axes" }}</small>
+            </div>
+            <span class="settings-card__badge">
+              {{ formatEffectiveExampleSource(example) }}
+            </span>
+          </li>
+        </template>
+      </ul>
+    </details>
 
     <p v-if="motionTuningRootError" class="history-empty">
       后端 runtime cache 根状态异常：{{ motionTuningRootError }}
@@ -619,6 +712,28 @@ function clamp(value: number, min: number, max: number): number {
   padding: 12px;
   border: 1px solid rgba(148, 163, 184, 0.25);
   border-radius: 12px;
+}
+
+.motion-tuning__coverage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.motion-tuning__coverage-item,
+.motion-tuning__sample-group {
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 12px;
+}
+
+.motion-tuning__coverage-item[data-covered="true"] {
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.motion-tuning__sample-group {
+  background: rgba(148, 163, 184, 0.08);
 }
 
 @media (max-width: 820px) {

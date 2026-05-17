@@ -11,7 +11,12 @@ import numpy as np
 
 from astrbot.api import logger
 
-from ..protocol.builder import build_control_error, build_control_interrupt, build_output_transcription
+from ..protocol.builder import (
+    build_control_error,
+    build_control_interrupt,
+    build_control_turn_finished,
+    build_output_transcription,
+)
 
 
 @dataclass
@@ -83,7 +88,6 @@ class SpeechIngressService:
         if stream.encoding != "pcm16le":
             await self._send_json(
                 build_control_error(
-                    session_id=message.session_id,
                     turn_id=message.turn_id,
                     message=f"Unsupported audio stream encoding: {stream.encoding}",
                 )
@@ -129,7 +133,6 @@ class SpeechIngressService:
         return await self._build_message_from_audio_buffer(
             audio_buffer,
             raw_message=message.raw,
-            session_id=message.session_id,
             turn_id=message.turn_id,
             sample_rate=stream.sample_rate,
             stream_id=stream_id,
@@ -165,7 +168,6 @@ class SpeechIngressService:
             logger.error("Failed to initialize VAD engine: %s", exc)
             await self._send_json(
                 build_control_error(
-                    session_id=message.session_id,
                     turn_id=message.turn_id,
                     message=f"VAD unavailable: {exc}",
                 )
@@ -194,13 +196,10 @@ class SpeechIngressService:
         if dropped:
             await self.media_service.clear_audio_buffer(segment_id=segment_id)
             logger.warning("Dropping microphone audio segment because frontend reported chunk loss.")
-            await self._send_json(
-                build_control_error(
-                    session_id=message.session_id,
-                    turn_id=message.turn_id,
-                    orchestration_id=message.orchestration_id,
-                    message="Microphone audio segment dropped before transcription.",
-                )
+            await self._emit_terminal_turn_signal(
+                turn_id=message.turn_id,
+                reason="microphone_audio_dropped",
+                error_message="Microphone audio segment dropped before transcription.",
             )
             return None
 
@@ -208,21 +207,23 @@ class SpeechIngressService:
 
         if audio_buffer.size == 0:
             logger.debug("Ignoring `input.mic_audio_end` with empty buffer.")
+            await self._emit_terminal_turn_signal(
+                turn_id=message.turn_id,
+                reason="microphone_audio_empty",
+                error_message="Microphone audio segment was empty before transcription.",
+            )
             return None
 
         return await self._build_message_from_audio_buffer(
             audio_buffer,
             raw_message=message.raw,
-            session_id=message.session_id,
             turn_id=message.turn_id,
         )
 
     async def _build_interrupt_message(self, message):
         await self._send_json(
             build_control_interrupt(
-                session_id=message.session_id,
                 turn_id=message.turn_id,
-                orchestration_id=getattr(message, "orchestration_id", None),
             )
         )
         return None
@@ -232,7 +233,6 @@ class SpeechIngressService:
         audio_buffer: np.ndarray,
         *,
         raw_message: dict[str, Any],
-        session_id: str,
         turn_id: str | None,
         sample_rate: int = 16000,
         stream_id: str | None = None,
@@ -241,37 +241,34 @@ class SpeechIngressService:
             text = (await self._transcribe_audio(audio_buffer, sample_rate=sample_rate)).strip()
         except Exception as exc:
             logger.error("Audio transcription failed: %s", exc)
-            await self._send_json(
-                build_control_error(
-                    session_id=session_id,
-                    turn_id=turn_id,
-                    orchestration_id=raw_message.get("orchestration_id"),
-                    message=f"Audio transcription failed: {exc}",
-                )
+            await self._emit_terminal_turn_signal(
+                turn_id=turn_id,
+                reason="audio_transcription_failed",
+                error_message=f"Audio transcription failed: {exc}",
             )
             return None
 
         if not text:
-            await self._send_json(
-                build_control_error(
-                    session_id=session_id,
-                    turn_id=turn_id,
-                    orchestration_id=raw_message.get("orchestration_id"),
-                    message="The LLM can't hear you.",
-                )
+            await self._emit_terminal_turn_signal(
+                turn_id=turn_id,
+                reason="audio_transcription_empty",
+                error_message="The LLM can't hear you.",
             )
             return None
 
         should_drop, drop_reason = should_drop_transcription(text)
         if should_drop:
             logger.info("Dropped transcription `%s`: %s", text, drop_reason)
+            await self._emit_terminal_turn_signal(
+                turn_id=turn_id,
+                reason=f"audio_transcription_dropped:{drop_reason}",
+                error_message=f"Audio transcription dropped: {drop_reason}",
+            )
             return None
 
         await self._send_json(
             build_output_transcription(
-                session_id=session_id,
                 turn_id=turn_id,
-                orchestration_id=raw_message.get("orchestration_id"),
                 text=text,
             )
         )
@@ -287,12 +284,33 @@ class SpeechIngressService:
         return self._build_message_object(text=text, raw_message=normalized_raw_message)
 
     def _resolve_audio_segment_id(self, message) -> str | None:
-        segment_id = getattr(message, "orchestration_id", None)
+        segment_id = getattr(message, "turn_id", None)
         if isinstance(segment_id, str):
             normalized = segment_id.strip()
             if normalized:
                 return normalized
         return None
+
+    async def _emit_terminal_turn_signal(
+        self,
+        *,
+        turn_id: str | None,
+        reason: str,
+        error_message: str,
+    ) -> None:
+        await self._send_json(
+            build_control_error(
+                turn_id=turn_id,
+                message=error_message,
+            )
+        )
+        await self._send_json(
+            build_control_turn_finished(
+                turn_id=turn_id,
+                success=False,
+                reason=reason,
+            )
+        )
 
     async def _transcribe_audio(self, audio_buffer: np.ndarray, *, sample_rate: int = 16000) -> str:
         if self.runtime_state.selected_stt_provider is None:

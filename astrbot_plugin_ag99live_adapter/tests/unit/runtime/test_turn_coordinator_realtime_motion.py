@@ -369,6 +369,7 @@ def test_commit_inbound_message_disables_streaming_in_split_mode(
     coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
     coordinator._turn_lock = asyncio.Lock()
     coordinator._motion_plan_scheduled_turn_ids = set()
+    coordinator.turn_identity_map = None
 
     class SessionStateStub:
         client_uid = "desktop-client"
@@ -523,7 +524,6 @@ def test_emit_message_chain_reuses_platform_visible_message_id_for_segment_outpu
         {
             "client_uid": "desktop-client",
             "current_turn_id": "turn-segment",
-            "current_orchestration_id": "orch-segment",
             "last_user_text": "user text",
             "mark_synthesizing": lambda self: None,
             "mark_playing": lambda self: None,
@@ -943,12 +943,10 @@ def test_handle_msg_emits_control_error_for_unhandled_allowed_message_type(
                     "type": constants.TYPE_OUTPUT_TEXT,
                     "version": constants.PROTOCOL_VERSION,
                     "message_id": "message-unhandled",
-                    "session_id": "desktop-client",
                     "turn_id": "turn-unhandled",
-                "orchestration_id": "orch-unhandled",
-                "source": constants.SOURCE_FRONTEND,
-                "payload": {},
-            }
+                    "source": constants.SOURCE_FRONTEND,
+                    "payload": {},
+                }
         )
     )
 
@@ -956,6 +954,5 @@ def test_handle_msg_emits_control_error_for_unhandled_allowed_message_type(
     payload = sent_payloads[0]
     assert payload["type"] == constants.TYPE_CONTROL_ERROR
     assert payload["turn_id"] == "turn-unhandled"
-    assert payload["orchestration_id"] == "orch-unhandled"
     assert "Unhandled message type" in str(payload["payload"]["message"])
 

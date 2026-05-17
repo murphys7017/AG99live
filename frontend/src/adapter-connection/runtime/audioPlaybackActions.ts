@@ -3,25 +3,21 @@ import type { StartAudioPlaybackOptions } from "./audioPlayback.js";
 export interface AudioPlaybackState {
   isPlayingAudio: boolean;
   audioPlaybackStartedTurnId: string | null;
-  audioPlaybackStartedOrchestrationId: string | null;
   audioPlaybackStartedMessageId: string | null;
   audioPlaybackStartedAtMs: number;
   audioPlaybackDurationMs: number | null;
   statusMessage: string;
-  currentOrchestrationId: string | null;
   lastError: string;
 }
 
 export interface AudioPlaybackSessionStore {
   markAudioStarted: (
-    orchestrationId: string | null,
     turnId: string | null,
     messageId: string,
     startedAtMs?: number | null,
     durationMs?: number | null,
   ) => void;
   markAudioDuration: (
-    orchestrationId: string | null,
     turnId: string | null,
     messageId: string,
     durationMs: number | null,
@@ -36,7 +32,6 @@ export interface AudioPlaybackContext {
   markTerminal: (
     terminalState: "completed" | "failed" | "absent",
     turnId: string | null,
-    orchestrationId: string | null,
     reason?: string,
     messageId?: string | null,
   ) => void;
@@ -48,14 +43,12 @@ export async function playAudioAndAcknowledge(
   ctx: AudioPlaybackContext,
   audioUrl: string,
   turnId: string | null,
-  orchestrationId: string | null = ctx.state.currentOrchestrationId,
   messageId: string,
 ): Promise<void> {
   stopAudioPlayback(ctx);
   ctx.resetTerminal();
   ctx.state.isPlayingAudio = true;
   ctx.state.audioPlaybackStartedTurnId = turnId;
-  ctx.state.audioPlaybackStartedOrchestrationId = orchestrationId;
   ctx.state.audioPlaybackStartedMessageId = messageId;
   ctx.state.audioPlaybackStartedAtMs = 0;
   ctx.state.audioPlaybackDurationMs = null;
@@ -70,7 +63,6 @@ export async function playAudioAndAcknowledge(
       onDurationChanged: (durationMs) => {
         ctx.state.audioPlaybackDurationMs = durationMs;
         ctx.sessionStore?.markAudioDuration(
-          orchestrationId,
           turnId,
           messageId,
           durationMs,
@@ -78,11 +70,9 @@ export async function playAudioAndAcknowledge(
       },
       onPlaybackStarted: (event) => {
         ctx.state.audioPlaybackStartedTurnId = turnId;
-        ctx.state.audioPlaybackStartedOrchestrationId = orchestrationId;
         ctx.state.audioPlaybackStartedMessageId = messageId;
         ctx.state.audioPlaybackStartedAtMs = event.startedAtMs;
         ctx.sessionStore?.markAudioStarted(
-          orchestrationId,
           turnId,
           messageId,
           event.startedAtMs,
@@ -97,31 +87,24 @@ export async function playAudioAndAcknowledge(
       },
       onEnded: () => {
         const completedTurnId = ctx.state.audioPlaybackStartedTurnId ?? turnId;
-        const completedOrchestrationId =
-          ctx.state.audioPlaybackStartedOrchestrationId ?? orchestrationId;
         const completedMessageId = ctx.state.audioPlaybackStartedMessageId ?? messageId;
         ctx.state.isPlayingAudio = false;
         ctx.state.audioPlaybackStartedTurnId = null;
-        ctx.state.audioPlaybackStartedOrchestrationId = null;
         ctx.state.audioPlaybackStartedMessageId = null;
         ctx.state.audioPlaybackStartedAtMs = 0;
         ctx.state.audioPlaybackDurationMs = null;
         ctx.markTerminal(
           "completed",
           completedTurnId,
-          completedOrchestrationId,
           "audio_playback_completed",
           completedMessageId,
         );
       },
       onError: () => {
         const failedTurnId = ctx.state.audioPlaybackStartedTurnId ?? turnId;
-        const failedOrchestrationId =
-          ctx.state.audioPlaybackStartedOrchestrationId ?? orchestrationId;
         const failedMessageId = ctx.state.audioPlaybackStartedMessageId ?? messageId;
         ctx.state.isPlayingAudio = false;
         ctx.state.audioPlaybackStartedTurnId = null;
-        ctx.state.audioPlaybackStartedOrchestrationId = null;
         ctx.state.audioPlaybackStartedMessageId = null;
         ctx.state.audioPlaybackStartedAtMs = 0;
         ctx.state.audioPlaybackDurationMs = null;
@@ -129,17 +112,14 @@ export async function playAudioAndAcknowledge(
         ctx.markTerminal(
           "failed",
           failedTurnId,
-          failedOrchestrationId,
           "audio_playback_error",
           failedMessageId,
         );
       },
     });
   } catch (error) {
-    const failedOrchestrationId = orchestrationId;
     ctx.state.isPlayingAudio = false;
     ctx.state.audioPlaybackStartedTurnId = null;
-    ctx.state.audioPlaybackStartedOrchestrationId = null;
     ctx.state.audioPlaybackStartedMessageId = null;
     ctx.state.audioPlaybackStartedAtMs = 0;
     ctx.state.audioPlaybackDurationMs = null;
@@ -150,7 +130,6 @@ export async function playAudioAndAcknowledge(
     ctx.markTerminal(
       "failed",
       turnId,
-      failedOrchestrationId,
       "audio_autoplay_blocked",
       messageId,
     );
@@ -161,7 +140,6 @@ export function stopAudioPlayback(ctx: AudioPlaybackContext): void {
   ctx.stopAudioRuntime();
   ctx.state.isPlayingAudio = false;
   ctx.state.audioPlaybackStartedTurnId = null;
-  ctx.state.audioPlaybackStartedOrchestrationId = null;
   ctx.state.audioPlaybackStartedMessageId = null;
   ctx.state.audioPlaybackStartedAtMs = 0;
   ctx.state.audioPlaybackDurationMs = null;

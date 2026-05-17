@@ -42,6 +42,7 @@ from ..protocol.builder import build_system_model_sync
 from ..prompts.motion_selector import (
     DEFAULT_MOTION_PROMPT_INSTRUCTION,
     profile_prompt_axes,
+    resolve_selector_few_shot_examples,
 )
 
 
@@ -89,6 +90,7 @@ class RuntimeState:
         self.runtime_cache_segment_errors: dict[str, str] = {}
         self.motion_tuning_samples_load_error = ""
         self.motion_tuning_fewshot_diagnostics: list[str] = []
+        self.motion_tuning_effective_examples: list[dict[str, Any]] = []
         self.realtime_motion_platform_context_enabled = True
         self.realtime_motion_platform_description = ""
         self.motion_prompt_instruction = DEFAULT_MOTION_PROMPT_INSTRUCTION
@@ -420,7 +422,6 @@ class RuntimeState:
         model_info_payload = deepcopy(self.model_info)
         model_info_payload["runtime_cache_errors"] = runtime_cache_errors
         return build_system_model_sync(
-            session_id=self.client_uid,
             model_info=model_info_payload,
             runtime_cache_errors=runtime_cache_errors,
             conf_name=conf_name,
@@ -453,6 +454,11 @@ class RuntimeState:
             known_parameter_ids=collect_known_parameter_ids(model),
         )
         model["semantic_axis_profile"] = deepcopy(saved_profile)
+        model["expression_example_library"] = self._build_expression_example_library(
+            model=model,
+            profile=saved_profile,
+        )
+        self._refresh_motion_tuning_reference_examples_from_samples()
         return saved_profile
 
     def list_motion_tuning_samples(self) -> list[dict[str, Any]]:
@@ -469,6 +475,9 @@ class RuntimeState:
 
     def list_motion_tuning_fewshot_diagnostics(self) -> list[str]:
         return list(self.motion_tuning_fewshot_diagnostics)
+
+    def list_effective_motion_tuning_examples(self) -> list[dict[str, Any]]:
+        return deepcopy(self.motion_tuning_effective_examples)
 
     def save_motion_tuning_sample(self, sample_payload: Any) -> dict[str, Any]:
         self._raise_if_runtime_cache_error_active()
@@ -512,15 +521,18 @@ class RuntimeState:
 
     def _refresh_motion_tuning_reference_examples_from_samples(self) -> None:
         self.motion_tuning_fewshot_diagnostics = []
+        self.motion_tuning_effective_examples = []
         profile = self._get_selected_semantic_axis_profile()
         if not isinstance(profile, dict):
             self.motion_tuning_reference_examples = []
+            self._refresh_effective_motion_tuning_examples()
             return
 
         profile_id = str(profile.get("profile_id") or "").strip()
         profile_revision = profile.get("revision")
         if not profile_id or not isinstance(profile_revision, int) or profile_revision <= 0:
             self.motion_tuning_reference_examples = []
+            self._refresh_effective_motion_tuning_examples()
             return
         try:
             prompt_axis_ids = {
@@ -530,9 +542,11 @@ class RuntimeState:
             }
         except Exception:
             self.motion_tuning_reference_examples = []
+            self._refresh_effective_motion_tuning_examples()
             return
         if not prompt_axis_ids:
             self.motion_tuning_reference_examples = []
+            self._refresh_effective_motion_tuning_examples()
             return
 
         normalized_examples: list[dict[str, Any]] = []
@@ -588,6 +602,15 @@ class RuntimeState:
                 }
             )
         self.motion_tuning_reference_examples = normalized_examples
+        self._refresh_effective_motion_tuning_examples()
+
+    def _refresh_effective_motion_tuning_examples(self) -> None:
+        self.motion_tuning_effective_examples = deepcopy(
+            resolve_selector_few_shot_examples(
+                runtime_state=self,
+                update_runtime_state=True,
+            )
+        )
 
     @staticmethod
     def _filter_motion_tuning_example_axes(
@@ -1203,6 +1226,10 @@ class RuntimeState:
                 model_payload=model,
             )
             model["semantic_axis_profile"] = deepcopy(profile)
+            model["expression_example_library"] = self._build_expression_example_library(
+                model=model,
+                profile=profile,
+            )
 
     def _get_model_payload_by_name(self, model_name: str) -> dict[str, Any]:
         normalized_name = str(model_name or "").strip()
@@ -1233,8 +1260,175 @@ class RuntimeState:
             profile = model.get("semantic_axis_profile")
             if isinstance(profile, dict):
                 return profile
-            return None
         return None
+
+    @staticmethod
+    def _build_expression_example_library(
+        *,
+        model: dict[str, Any],
+        profile: dict[str, Any],
+    ) -> dict[str, Any]:
+        axes = profile.get("axes")
+        if not isinstance(axes, list):
+            return {"source": "model_native", "examples": []}
+
+        axis_bindings: dict[str, dict[str, Any]] = {}
+        parameter_to_axis: dict[str, str] = {}
+        allowed_axis_ids: set[str] = set()
+        for axis in axes:
+            if not isinstance(axis, dict):
+                continue
+            axis_id = str(axis.get("id") or "").strip()
+            control_role = str(axis.get("control_role") or "").strip()
+            if not axis_id or control_role not in {"primary", "hint"}:
+                continue
+            if axis_id == "mouth_open":
+                continue
+            bindings = axis.get("parameter_bindings")
+            if not isinstance(bindings, list) or not bindings:
+                continue
+            axis_bindings[axis_id] = axis
+            allowed_axis_ids.add(axis_id)
+            for binding in bindings:
+                if not isinstance(binding, dict):
+                    continue
+                parameter_id = str(binding.get("parameter_id") or "").strip()
+                if parameter_id:
+                    parameter_to_axis[parameter_id] = axis_id
+
+        expression_entries = []
+        constraints = model.get("constraints")
+        if isinstance(constraints, dict):
+            raw_expressions = constraints.get("expressions")
+            if isinstance(raw_expressions, list):
+                expression_entries = raw_expressions
+
+        examples: list[dict[str, Any]] = []
+        for expression in expression_entries:
+            if not isinstance(expression, dict):
+                continue
+            category = str(expression.get("category") or "").strip()
+            if category not in {"base_emotion", "emotion_overlay"}:
+                continue
+
+            name = str(expression.get("name") or "").strip()
+            normalized_name = RuntimeState._normalize_expression_example_name(name)
+            if not normalized_name:
+                continue
+
+            example_axes: dict[str, float] = {}
+            parameter_examples = expression.get("parameters")
+            if not isinstance(parameter_examples, list):
+                continue
+            for parameter_entry in parameter_examples:
+                if not isinstance(parameter_entry, dict):
+                    continue
+                parameter_id = str(parameter_entry.get("id") or "").strip()
+                axis_id = parameter_to_axis.get(parameter_id)
+                if not axis_id or axis_id not in allowed_axis_ids:
+                    continue
+                value = RuntimeState._normalize_expression_parameter_value(
+                    axis=axis_bindings.get(axis_id, {}),
+                    raw_value=parameter_entry.get("value"),
+                    blend=parameter_entry.get("blend"),
+                )
+                if value is None:
+                    continue
+                current = example_axes.get(axis_id)
+                if current is None or abs(value - 50.0) > abs(current - 50.0):
+                    example_axes[axis_id] = value
+
+            if not example_axes:
+                continue
+
+            examples.append(
+                {
+                    "id": normalized_name,
+                    "name": name or normalized_name,
+                    "category": category,
+                    "source_file": str(expression.get("file") or "").strip(),
+                    "emotion_label": normalized_name,
+                    "tags": [category, "model_native", "cold_start"],
+                    "axes": example_axes,
+                }
+            )
+
+        return {
+            "source": "model_native",
+            "examples": examples,
+        }
+
+    @staticmethod
+    def _normalize_expression_example_name(name: str) -> str:
+        normalized = "".join(
+            char.lower() for char in str(name or "").strip() if char.isalnum()
+        )
+        if normalized in {"neutral", "happy", "angry", "surprised", "question", "confused", "embarrassed", "blush", "tired", "extremelytired"}:
+            return normalized
+        return ""
+
+    @staticmethod
+    def _normalize_expression_parameter_value(
+        *,
+        axis: dict[str, Any],
+        raw_value: Any,
+        blend: Any,
+    ) -> float | None:
+        try:
+            scalar = float(raw_value)
+        except (TypeError, ValueError):
+            return None
+
+        bindings = axis.get("parameter_bindings")
+        if not isinstance(bindings, list) or not bindings:
+            return None
+        binding = bindings[0]
+        if not isinstance(binding, dict):
+            return None
+
+        output_range = binding.get("output_range")
+        if (
+            not isinstance(output_range, list)
+            or len(output_range) != 2
+            or not all(isinstance(item, (int, float)) for item in output_range)
+        ):
+            return None
+        output_min = float(output_range[0])
+        output_max = float(output_range[1])
+        if output_max == output_min:
+            return None
+
+        axis_neutral = _coerce_finite_number(axis.get("neutral"))
+        if axis_neutral is None:
+            axis_neutral = 50.0
+        axis_neutral = max(0.0, min(100.0, axis_neutral))
+        axis_span = abs(output_max - output_min)
+        if axis_span <= 0.0:
+            return None
+
+        blend_name = str(blend or "Add").strip().lower() or "add"
+        invert = bool(binding.get("invert", False))
+        if invert:
+            scalar = -scalar
+
+        if blend_name == "overwrite":
+            normalized = (scalar - output_min) / (output_max - output_min)
+            normalized = max(0.0, min(1.0, normalized))
+            return round(normalized * 100.0, 4)
+
+        if blend_name == "add":
+            delta_ratio = max(-1.0, min(1.0, scalar / axis_span))
+            return round(max(0.0, min(100.0, axis_neutral + delta_ratio * 50.0)), 4)
+
+        if blend_name == "multiply":
+            multiplier = max(0.0, min(2.0, scalar))
+            centered = axis_neutral - 50.0
+            scaled = 50.0 + centered * multiplier
+            return round(max(0.0, min(100.0, scaled)), 4)
+
+        normalized = (scalar - output_min) / (output_max - output_min)
+        normalized = max(0.0, min(1.0, normalized))
+        return round(normalized * 100.0, 4)
 
     def _persist_runtime_cache_payload(self) -> None:
         if self.runtime_cache_root_error:

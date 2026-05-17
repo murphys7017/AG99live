@@ -7,7 +7,6 @@ export interface PendingTurnPlaybackGroup {
   key: string;
   messageId: string;
   turnId: string | null;
-  orchestrationId: string | null;
   firstReadyAtMs: number;
   textReady: boolean;
   audioReady: boolean;
@@ -23,7 +22,6 @@ export interface PendingTurnPlaybackGroup {
 export interface TurnPlaybackReleaseContext {
   messageId: string;
   turnId: string | null;
-  orchestrationId: string | null;
   receivedAtMs: number;
 }
 
@@ -34,12 +32,10 @@ export interface TurnPlaybackOrchestratorCoreOptions {
   releaseText: (
     messageId: string,
     turnId: string | null,
-    orchestrationId: string | null,
   ) => boolean;
   releaseAudio: (
     messageId: string,
     turnId: string | null,
-    orchestrationId: string | null,
   ) => boolean;
   releaseMotion: (payload: unknown, context: TurnPlaybackReleaseContext) => void;
   log?: (message: string, details: Record<string, unknown>) => void;
@@ -67,13 +63,11 @@ export function createTurnPlaybackOrchestratorCore(
   function getOrCreateGroup(
     messageId: string,
     turnId: string | null,
-    orchestrationId: string | null,
   ): PendingTurnPlaybackGroup {
     const key = resolveTurnPlaybackGroupKey(messageId);
     const existing = groups.get(key);
     if (existing) {
       existing.turnId = existing.turnId ?? turnId;
-      existing.orchestrationId = existing.orchestrationId ?? orchestrationId;
       return existing;
     }
 
@@ -81,7 +75,6 @@ export function createTurnPlaybackOrchestratorCore(
       key,
       messageId,
       turnId,
-      orchestrationId,
       firstReadyAtMs: options.now(),
       textReady: false,
       audioReady: false,
@@ -128,14 +121,12 @@ export function createTurnPlaybackOrchestratorCore(
     group.motionReady = false;
     options.releaseMotion(payload, {
       turnId: group.turnId,
-      orchestrationId: group.orchestrationId,
       receivedAtMs: group.motionReceivedAtMs || options.now(),
       messageId: group.messageId,
     });
     log("motion released", {
       messageId: group.messageId,
       turnId: group.turnId,
-      orchestrationId: group.orchestrationId,
       reason,
     });
   }
@@ -146,7 +137,6 @@ export function createTurnPlaybackOrchestratorCore(
     const releasedText = options.releaseText(
       group.messageId,
       group.turnId,
-      group.orchestrationId,
     );
     group.textReleased = group.textReleased || releasedText;
     releaseMotion(group, reason);
@@ -154,14 +144,12 @@ export function createTurnPlaybackOrchestratorCore(
       const releasedAudio = options.releaseAudio(
         group.messageId,
         group.turnId,
-        group.orchestrationId,
       );
       group.audioReady = !releasedAudio;
     }
     log("group released", {
       messageId: group.messageId,
       turnId: group.turnId,
-      orchestrationId: group.orchestrationId,
       reason,
       releasedText,
       audioReady: group.audioReady,
@@ -176,13 +164,11 @@ export function createTurnPlaybackOrchestratorCore(
     const releasedText = options.releaseText(
       group.messageId,
       group.turnId,
-      group.orchestrationId,
     );
     group.textReleased = group.textReleased || releasedText;
     log("text released before audio", {
       messageId: group.messageId,
       turnId: group.turnId,
-      orchestrationId: group.orchestrationId,
       reason,
       releasedText,
     });
@@ -200,7 +186,6 @@ export function createTurnPlaybackOrchestratorCore(
         const releasedAudio = options.releaseAudio(
           group.messageId,
           group.turnId,
-          group.orchestrationId,
         );
         group.audioReady = !releasedAudio;
       }
@@ -255,32 +240,29 @@ export function createTurnPlaybackOrchestratorCore(
     markTextReady: (
       messageId: string,
       turnId: string | null,
-      orchestrationId: string | null,
     ) => {
-      const group = getOrCreateGroup(messageId, turnId, orchestrationId);
+      const group = getOrCreateGroup(messageId, turnId);
       group.textReady = true;
       evaluateGroup(group, "text_ready");
     },
     markAudioReady: (
       messageId: string,
       turnId: string | null,
-      orchestrationId: string | null,
     ) => {
-      const group = getOrCreateGroup(messageId, turnId, orchestrationId);
+      const group = getOrCreateGroup(messageId, turnId);
       group.audioReady = true;
       evaluateGroup(group, "audio_ready");
     },
     markMotionReady: (
       messageId: string,
       turnId: string | null,
-      orchestrationId: string | null,
       payload: unknown,
       receivedAtMs: number,
     ) => {
       if (!payload) {
         return;
       }
-      const group = getOrCreateGroup(messageId, turnId, orchestrationId);
+      const group = getOrCreateGroup(messageId, turnId);
       group.motionReady = true;
       group.motionPayload = payload;
       group.motionReceivedAtMs = receivedAtMs;
@@ -289,18 +271,16 @@ export function createTurnPlaybackOrchestratorCore(
     markNoAudioConfirmed: (
       messageId: string,
       turnId: string | null,
-      orchestrationId: string | null,
     ) => {
-      const group = getOrCreateGroup(messageId, turnId, orchestrationId);
+      const group = getOrCreateGroup(messageId, turnId);
       group.noAudioConfirmed = true;
       evaluateGroup(group, "no_audio_terminal");
     },
     markOutputQueueClosed: (
       messageId: string,
       turnId: string | null,
-      orchestrationId: string | null,
     ) => {
-      const group = getOrCreateGroup(messageId, turnId, orchestrationId);
+      const group = getOrCreateGroup(messageId, turnId);
       group.noAudioConfirmed = group.noAudioConfirmed || !group.audioReady;
       evaluateGroup(group, "output_queue_closed");
     },

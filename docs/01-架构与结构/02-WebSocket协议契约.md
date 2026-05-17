@@ -1,8 +1,8 @@
 # AG99live 协议契约
 
-本文档定义了当前 AG99live 的 WebSocket 协议。
+本文档定义当前 AG99live 的 WebSocket 外部协议。
 
-它仅描述前端和后端之间当前活跃的外部协议。
+它只描述前端和后端之间当前活跃的协议事实，不描述 AstrBot 内部消息身份。
 
 ## 信封结构
 
@@ -13,9 +13,7 @@
   "type": "<消息类型>",
   "version": "v2",
   "message_id": "<非空字符串>",
-  "session_id": "<字符串>",
   "turn_id": "<字符串 | null>",
-  "orchestration_id": "<字符串 | null>",
   "source": "adapter" | "frontend" | "astrbot" | "engine",
   "timestamp": "<ISO 8601 时间戳>",
   "payload": { ... }
@@ -26,44 +24,31 @@
 
 | 标识符 | 层级 | 所有者 | 作用 | 是否必须 |
 | --- | --- | --- | --- | --- |
-| `message_id` | 片段 | 协议 | 绑定一个助手回复片段 | 在携带片段的助手输出和 `engine.motion_intent` 中必须 |
-| `turn_id` | 轮次生命周期 | 后端 | 连接 `turn_started` / `synth_finished` / `turn_finished` / `interrupt` | 在轮次范围内的消息中必须 |
-| `orchestration_id` | 播放组 | 前端 | 前端首选的会话聚合键 | 可用时存在 |
+| `message_id` | 片段 | 协议 | 绑定一个助手回复片段 | `output.text`、`output.audio`、`engine.motion_intent` 中必须 |
+| `turn_id` | 轮次 | 前端创建，后后端回传 | 贯穿输入、输出、动作、打断、播放完成、轮次结束 | 所有交互链路消息必须；纯 `system.*` 可为 `null` |
 
-前端会话解析顺序：
+约束：
 
-```text
-orch:<orchestration_id>
-turn:<turn_id>
-```
-
-`message_id` 作为片段键用于：
-
-- `output.text`
-- `output.audio`
-- `engine.motion_intent`
-
-它不作为以下消息的片段键：
-
-- `output.image`
-- `output.transcription`
-- 大多数 `control.*`
-- 大多数 `system.*`
+- `turn_id` 是前后端唯一轮次主 ID。
+- 外部协议已移除 `session_id`。
+- 外部协议已移除 `orchestration_id`。
+- 前端在文本发送前、麦克风开始采集前主动创建 `turn_id`。
+- 一次语音输入如果最终 dropped、空转写或失败，该 `turn_id` 立即终结且不可复用。
 
 ## 完成信号
 
 ```text
 control.synth_finished
 = 后端输出队列关闭
-= 此轮次不再有 output.* 或 engine.motion_intent 片段
+= 此轮次不再有新的 output.* 或 engine.motion_intent
 
 control.playback_finished
 = 前端本地播放已稳定
-= 收到 synth_finished 且所有片段本地已稳定
+= 收到 synth_finished 且该 turn 的本地片段都已 settled
 
 control.turn_finished
 = 后端轮次关闭
-= 在后端收到 playback_finished 后发出
+= 后端收到 playback_finished 后发出
 ```
 
 ## 消息类型
@@ -78,10 +63,10 @@ control.turn_finished
 
 麦克风输入规则：
 
-- 一段采集期使用一个新的 `input:*` `orchestration_id`。
-- 该采集期的所有原始音频块和最后的 `input.mic_audio_end` 共享同一个 `orchestration_id`。
-- 后端语音转文字入口使用该 `orchestration_id` 作为缓冲键。
-- 如果 `dropped === true`，后端丢弃该片段且不进行转写。
+- 一段采集期只使用一个新的 `turn_id`。
+- 该采集期的所有 `input.raw_audio_data` 和最后的 `input.mic_audio_end` 共享同一个 `turn_id`。
+- 后端语音转文字入口使用该 `turn_id` 作为音频缓冲键。
+- 如果 `dropped === true`，后端丢弃该 turn 的本次音频并立即终结该 turn。
 
 ### output.* （后端 -> 前端）
 
@@ -91,6 +76,8 @@ control.turn_finished
 | `output.audio` | `{ text: string, audio_url: string \| null, speaker_name: string, avatar: string }` | 是 |
 | `output.image` | `{ images: string[] }` | 否 |
 | `output.transcription` | `{ text: string }` | 否 |
+
+同一回复片段的 `output.text`、`output.audio`、`engine.motion_intent` 必须共享同一个 `turn_id`，并各自带独立 `message_id`。
 
 ### control.* （双向）
 
@@ -116,6 +103,8 @@ control.turn_finished
 | `system.history_*` | 双向 | 历史记录增删改查 |
 | `system.motion_tuning_sample_*` | 双向 | 动作调参样本增删改查 |
 
+纯 `system.*` 消息允许 `turn_id = null`。
+
 ### engine.* （双向）
 
 | 类型 | 方向 | 模式 |
@@ -135,25 +124,17 @@ control.turn_finished
 
 后端主路径仅广播 `engine.motion_intent`。
 
-如果显式调用后端运行时内部的回退机制，其结果仍必须返回到相同的 `engine.motion_intent` 路径和相同的片段标识。
+## 后端内部映射
 
-## 模式版本
+外部协议只暴露 `turn_id`。
 
-### 外部协议模式
+后端内部保留独立映射表：
 
-| 模式 | 状态 | 作用 |
-| --- | --- | --- |
-| `engine.motion_intent.v2` | 活跃 | 后端到前端的语义动作载荷 |
-| `ag99.semantic_axis_profile.v1` | 活跃 | 标准语义轴档案 |
-| `live2d_runtime_cache.v1` | 活跃 | 后端 Live2D 扫描缓存 |
+```text
+frontend_turn_id <-> astrbot_turn_id
+```
 
-### 前端内部执行模式
-
-| 模式 | 状态 | 作用 |
-| --- | --- | --- |
-| `engine.parameter_plan.v2` | 活跃 | 前端动作引擎编译后的执行计划 |
-
-`engine.parameter_plan.v2` 是前端内部执行模式。它不是适配器预览的活跃入口类型。
+AstrBot 内部 turn 身份不对前端暴露。
 
 ## 实现文件
 
@@ -161,12 +142,12 @@ control.turn_finished
 | --- | --- |
 | 后端常量 | `astrbot_plugin_ag99live_adapter/protocol/constants.py` |
 | 后端解析器 | `astrbot_plugin_ag99live_adapter/protocol/parser.py` |
+| 后端 turn 映射 | `astrbot_plugin_ag99live_adapter/runtime/turn_identity_map.py` |
 | 前端类型 | `frontend/src/types/protocol.ts` |
-| 前端消息类型 | `frontend/src/adapter-connection/core/protocolMessageTypes.ts` |
 | 前端入站映射 | `frontend/src/adapter-connection/inbound/inboundEvents.ts` |
 
 ## 变更规则
 
 - 在前端和后端同时添加或删除协议消息类型。
-- 在更新契约时同步更新模式校验。
-- 除非适配器边界实际接受，否则不要将前端内部执行模式描述为外部协议消息类型。
+- 所有新的交互链路消息默认必须带 `turn_id`。
+- 不再新增任何依赖 `session_id` 或 `orchestration_id` 的外部协议路径。

@@ -314,9 +314,7 @@ def test_handle_msg_routes_playback_finished_to_finalize_turn(
         "type": "control.playback_finished",
         "version": "v2",
         "message_id": "msg-1",
-        "session_id": "test-client",
         "turn_id": "turn-1",
-        "orchestration_id": "orch-1",
         "source": "frontend",
         "payload": {"success": True, "reason": "text_delivered"},
     }
@@ -356,9 +354,7 @@ def test_handle_msg_playback_finished_respects_not_waiting(
         "type": "control.playback_finished",
         "version": "v2",
         "message_id": "msg-2",
-        "session_id": "test-client",
         "turn_id": "turn-1",
-        "orchestration_id": "orch-1",
         "source": "frontend",
         "payload": {"success": True},
     }

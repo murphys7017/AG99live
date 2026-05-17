@@ -69,13 +69,11 @@ class FrontendSystemCommandHandler:
         refresh_and_send_model: Callable[..., Awaitable[None]],
     ) -> None:
         msg_type = message.type
-        session_id = message.session_id
         payload = message.payload
 
         if msg_type == TYPE_SYSTEM_BACKGROUND_LIST_REQUEST:
             await send_json(
                 build_system_background_list(
-                    session_id=session_id,
                     files=self._background_files_getter(),
                 )
             )
@@ -90,7 +88,6 @@ class FrontendSystemCommandHandler:
                 self._history_uid = next(iter(known_history_uids), "")
             await send_json(
                 build_system_history_list(
-                    session_id=session_id,
                     histories=histories,
                 )
             )
@@ -99,7 +96,6 @@ class FrontendSystemCommandHandler:
             self._history_uid = history_uid or str(uuid4())
             await send_json(
                 build_system_history_created(
-                    session_id=session_id,
                     history_uid=self._history_uid,
                 )
             )
@@ -110,7 +106,6 @@ class FrontendSystemCommandHandler:
                 self._history_uid = history_uid
             await send_json(
                 build_system_history_data(
-                    session_id=session_id,
                     messages=messages,
                 )
             )
@@ -121,13 +116,12 @@ class FrontendSystemCommandHandler:
                 self._history_uid = ""
             await send_json(
                 build_system_history_deleted(
-                    session_id=session_id,
                     history_uid=history_uid,
                     success=success,
                 )
             )
         elif msg_type == TYPE_SYSTEM_HEARTBEAT:
-            await send_json(build_system_heartbeat_ack(session_id=session_id))
+            await send_json(build_system_heartbeat_ack())
         elif msg_type == TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE:
             sample = payload.get("sample")
             try:
@@ -135,7 +129,6 @@ class FrontendSystemCommandHandler:
             except ValueError as exc:
                 await send_json(
                     build_control_error(
-                        session_id=session_id,
                         turn_id=message.turn_id,
                         message=str(exc),
                     )
@@ -143,12 +136,12 @@ class FrontendSystemCommandHandler:
                 return
             await send_json(
                 build_system_motion_tuning_samples_state(
-                    session_id=session_id,
                     turn_id=message.turn_id,
                     samples=self._runtime_state.list_motion_tuning_samples(),
                     root_error=self._runtime_state.get_runtime_cache_root_error(),
                     load_error=self._runtime_state.get_motion_tuning_samples_load_error(),
                     diagnostics=self._runtime_state.list_motion_tuning_fewshot_diagnostics(),
+                    effective_examples=self._runtime_state.list_effective_motion_tuning_examples(),
                 )
             )
         elif msg_type == TYPE_SYSTEM_MOTION_TUNING_SAMPLE_DELETE:
@@ -158,7 +151,6 @@ class FrontendSystemCommandHandler:
             except ValueError as exc:
                 await send_json(
                     build_control_error(
-                        session_id=session_id,
                         turn_id=message.turn_id,
                         message=str(exc),
                     )
@@ -166,12 +158,12 @@ class FrontendSystemCommandHandler:
                 return
             await send_json(
                 build_system_motion_tuning_samples_state(
-                    session_id=session_id,
                     turn_id=message.turn_id,
                     samples=self._runtime_state.list_motion_tuning_samples(),
                     root_error=self._runtime_state.get_runtime_cache_root_error(),
                     load_error=self._runtime_state.get_motion_tuning_samples_load_error(),
                     diagnostics=self._runtime_state.list_motion_tuning_fewshot_diagnostics(),
+                    effective_examples=self._runtime_state.list_effective_motion_tuning_examples(),
                 )
             )
         elif msg_type == TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE:
@@ -189,7 +181,6 @@ class FrontendSystemCommandHandler:
                 error_code = _semantic_profile_error_code(exc)
                 await send_json(
                     build_system_semantic_axis_profile_save_failed(
-                        session_id=session_id,
                         turn_id=message.turn_id,
                         request_id=request_id,
                         model_name=model_name,
@@ -202,7 +193,6 @@ class FrontendSystemCommandHandler:
                 return
             await send_json(
                 build_system_semantic_axis_profile_saved(
-                    session_id=session_id,
                     turn_id=message.turn_id,
                     request_id=request_id,
                     model_name=model_name,

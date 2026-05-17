@@ -11,7 +11,7 @@ def _message(message_type: str, payload: dict) -> dict:
         "type": message_type,
         "version": "v2",
         "message_id": f"test-{message_type}",
-        "session_id": "session",
+        "turn_id": "turn-test",
         "source": "frontend",
         "payload": payload,
     }
@@ -29,7 +29,6 @@ def test_parse_inbound_message_accepts_semantic_axis_profile_save() -> None:
                 "profile": {"schema_version": "ag99.semantic_axis_profile.v1"},
             },
         ),
-        default_session_id="fallback-session",
     )
 
     assert envelope.type == "system.semantic_axis_profile_save"
@@ -50,7 +49,6 @@ def test_parse_inbound_message_rejects_invalid_semantic_axis_profile_save_payloa
                     "profile": {"schema_version": "ag99.semantic_axis_profile.v1"},
                 },
             ),
-            default_session_id="fallback-session",
         )
 
 
@@ -100,7 +98,6 @@ def test_parse_inbound_message_accepts_motion_tuning_sample_save() -> None:
                 },
             },
         ),
-        default_session_id="fallback-session",
     )
 
     assert envelope.type == "system.motion_tuning_sample_save"
@@ -115,7 +112,6 @@ def test_parse_inbound_message_accepts_motion_tuning_sample_delete() -> None:
                 "sample_id": "sample-1",
             },
         ),
-        default_session_id="fallback-session",
     )
 
     assert envelope.type == "system.motion_tuning_sample_delete"
@@ -134,7 +130,6 @@ def test_parse_inbound_message_rejects_engine_parameter_plan_preview() -> None:
                     },
                 },
             ),
-            default_session_id="fallback-session",
         )
 
 
@@ -142,5 +137,4 @@ def test_parse_inbound_message_rejects_removed_motion_tuning_examples_sync() -> 
     with pytest.raises(ProtocolError, match="Unsupported message type"):
         parse_inbound_message(
             _message("system.motion_tuning_examples_sync", {"examples": []}),
-            default_session_id="fallback-session",
         )

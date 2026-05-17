@@ -8,9 +8,7 @@ export interface ProtocolEnvelope<TPayload = unknown> {
   version: string;
   message_id: string;
   timestamp: string;
-  session_id: string;
   turn_id: string | null;
-  orchestration_id?: string | null;
   source: string;
   payload: TPayload;
 }
@@ -622,6 +620,18 @@ export interface ModelSummary {
     expressions: ExpressionConstraint[];
     motions: MotionConstraint[];
   };
+  expression_example_library?: {
+    source: string;
+    examples: Array<{
+      id: string;
+      name: string;
+      category: string;
+      source_file: string;
+      emotion_label: string;
+      tags: string[];
+      axes: Record<string, number>;
+    }>;
+  } | null;
   semantic_axis_profile?: SemanticAxisProfile | null;
   calibration_profile?: DirectParameterCalibrationProfile | null;
   engine_hints: {
@@ -696,6 +706,17 @@ export interface SystemMotionTuningSamplesStatePayload {
   samples: MotionTuningSampleProtocolPayload[];
   load_error?: string;
   diagnostics?: string[];
+  effective_examples?: Array<{
+    input: string;
+    output: {
+      emotion: string;
+      mode: string;
+      duration_ms?: number | null;
+      axes: Record<string, number>;
+    };
+    source?: string;
+    tags?: string[];
+  }>;
 }
 
 export interface SystemHistoryListPayload {

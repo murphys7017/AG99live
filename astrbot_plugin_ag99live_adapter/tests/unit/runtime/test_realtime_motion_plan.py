@@ -490,6 +490,9 @@ def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
         motion_prompt_instruction = "Use stronger head and mouth motion."
         model_info = _model_info()
 
+        def list_effective_motion_tuning_examples(self) -> list[dict]:
+            return list(DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES)
+
     generator = RealtimeMotionPlanGenerator(runtime_state=RuntimeStub())
 
     intent = asyncio.run(
@@ -560,6 +563,9 @@ def test_realtime_motion_plan_prompt_includes_user_tuned_examples_first() -> Non
         ]
         model_info = _model_info()
 
+        def list_effective_motion_tuning_examples(self) -> list[dict]:
+            return list(self.motion_tuning_reference_examples)
+
     generator = RealtimeMotionPlanGenerator(runtime_state=RuntimeStub())
 
     intent = asyncio.run(
@@ -620,12 +626,114 @@ def test_resolve_selector_few_shot_examples_backfills_defaults_up_to_configured_
     runtime_state = RuntimeStub()
     resolved = resolve_selector_few_shot_examples(runtime_state=runtime_state)
 
-    assert resolved == [
-        user_example,
-        *DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES[:2],
+    assert [item["output"]["emotion"] for item in resolved] == [
+        "joy",
+        "neutral",
+        "surprised",
     ]
     assert runtime_state.motion_tuning_fewshot_diagnostics == [
         "motion_tuning_user_samples_insufficient:requested=3:user_available=1",
+        "motion_tuning_default_backfill_applied:count=2",
+    ]
+
+
+def test_resolve_selector_few_shot_examples_backfills_missing_categories_from_model_native_library() -> None:
+    user_example = {
+        "input": "Assistant: tuned sample",
+        "output": {
+            "emotion": "happy",
+            "mode": "expressive",
+            "duration_ms": 900,
+            "axes": {"head_yaw": 76},
+        },
+    }
+
+    class RuntimeStub:
+        realtime_motion_fewshot_enabled = True
+        realtime_motion_fewshot_count = 4
+        motion_tuning_reference_examples = [user_example]
+        motion_tuning_fewshot_diagnostics: list[str] = []
+        model_info = {
+            "selected_model": "DemoModel",
+            "models": [
+                {
+                    "name": "DemoModel",
+                    "expression_example_library": {
+                        "source": "model_native",
+                        "examples": [
+                            {
+                                "id": "neutral",
+                                "emotion_label": "neutral",
+                                "axes": {"mouth_smile": 52},
+                                "tags": ["model_native"],
+                            },
+                            {
+                                "id": "angry",
+                                "emotion_label": "angry",
+                                "axes": {"brow_bias": 24},
+                                "tags": ["model_native"],
+                            },
+                            {
+                                "id": "surprised",
+                                "emotion_label": "surprised",
+                                "axes": {"gaze_y": 80},
+                                "tags": ["model_native"],
+                            },
+                        ],
+                    },
+                }
+            ],
+        }
+
+    runtime_state = RuntimeStub()
+    resolved = resolve_selector_few_shot_examples(runtime_state=runtime_state)
+
+    assert [item["output"]["emotion"] for item in resolved] == [
+        "happy",
+        "neutral",
+        "angry",
+        "surprised",
+    ]
+    assert runtime_state.motion_tuning_fewshot_diagnostics == [
+        "motion_tuning_user_samples_insufficient:requested=4:user_available=1",
+        "motion_tuning_model_native_backfill_applied:count=3",
+    ]
+
+
+def test_resolve_selector_few_shot_examples_uses_default_after_model_native_category_backfill() -> None:
+    class RuntimeStub:
+        realtime_motion_fewshot_enabled = True
+        realtime_motion_fewshot_count = 3
+        motion_tuning_reference_examples = []
+        motion_tuning_fewshot_diagnostics: list[str] = []
+        model_info = {
+            "selected_model": "DemoModel",
+            "models": [
+                {
+                    "name": "DemoModel",
+                    "expression_example_library": {
+                        "source": "model_native",
+                        "examples": [
+                            {
+                                "id": "neutral",
+                                "emotion_label": "neutral",
+                                "axes": {"mouth_smile": 52},
+                                "tags": ["model_native"],
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+
+    runtime_state = RuntimeStub()
+    resolved = resolve_selector_few_shot_examples(runtime_state=runtime_state)
+
+    assert resolved[0]["output"]["emotion"] == "neutral"
+    assert len(resolved) == 3
+    assert runtime_state.motion_tuning_fewshot_diagnostics == [
+        "motion_tuning_user_samples_insufficient:requested=3:user_available=0",
+        "motion_tuning_model_native_backfill_applied:count=1",
         "motion_tuning_default_backfill_applied:count=2",
     ]
 
@@ -675,11 +783,16 @@ def test_resolve_selector_few_shot_examples_reports_final_shortage_after_default
     runtime_state = RuntimeStub()
     resolved = resolve_selector_few_shot_examples(runtime_state=runtime_state)
 
-    assert len(resolved) == 1 + len(DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES)
+    assert [item["output"]["emotion"] for item in resolved] == [
+        "joy",
+        "neutral",
+        "surprised",
+        "sad",
+    ]
     assert runtime_state.motion_tuning_fewshot_diagnostics == [
         "motion_tuning_user_samples_insufficient:requested=20:user_available=1",
-        f"motion_tuning_default_backfill_applied:count={len(DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES)}",
-        f"motion_tuning_fewshot_final_shortage:requested=20:final_count={1 + len(DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES)}",
+        "motion_tuning_default_backfill_applied:count=3",
+        "motion_tuning_fewshot_final_shortage:requested=20:final_count=4",
     ]
 
 
@@ -702,6 +815,9 @@ def test_realtime_motion_plan_generator_accepts_incomplete_selector_output_with_
         selected_motion_analysis_provider = ProviderStub()
         realtime_motion_timeout_seconds = 2.0
         model_info = _model_info()
+
+        def list_effective_motion_tuning_examples(self) -> list[dict]:
+            return []
 
     generator = RealtimeMotionPlanGenerator(runtime_state=RuntimeStub())
 
@@ -747,6 +863,9 @@ def test_realtime_motion_plan_generator_prompt_switches_off_context_and_few_shot
         realtime_motion_fewshot_enabled = False
         realtime_motion_platform_context_enabled = False
         model_info = _model_info()
+
+        def list_effective_motion_tuning_examples(self) -> list[dict]:
+            return []
 
     generator = RealtimeMotionPlanGenerator(runtime_state=RuntimeStub())
     intent = asyncio.run(

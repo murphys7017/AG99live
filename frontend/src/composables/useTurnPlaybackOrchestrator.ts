@@ -34,32 +34,29 @@ export function useTurnPlaybackOrchestrator(
     clearSchedule: (timer) => {
       window.clearTimeout(timer as number);
     },
-    releaseText: (messageId, turnId, orchestrationId) => {
+    releaseText: (messageId, turnId) => {
       const released = options.playbackRelease.releaseAssistantTextForPlayback(
         messageId,
         turnId,
-        orchestrationId,
       );
       if (released) {
-        options.sessionStore.markTextReleased(orchestrationId, turnId, messageId);
-        options.sessionStore.markPhase(orchestrationId, turnId, "playing");
+        options.sessionStore.markTextReleased(turnId, messageId);
+        options.sessionStore.markPhase(turnId, "playing");
       }
       return released;
     },
-    releaseAudio: (messageId, turnId, orchestrationId) => {
+    releaseAudio: (messageId, turnId) => {
       const released = options.playbackRelease.releaseAudioForPlayback(
         messageId,
         turnId,
-        orchestrationId,
       );
       if (released) {
-        options.sessionStore.markAudioReleased(orchestrationId, turnId, messageId);
+        options.sessionStore.markAudioReleased(turnId, messageId);
       }
       return released;
     },
     releaseMotion: (payload: unknown, context: TurnPlaybackReleaseContext) => {
       options.sessionStore.markMotionReleased(
-        context.orchestrationId,
         context.turnId,
         context.messageId,
       );
@@ -68,7 +65,6 @@ export function useTurnPlaybackOrchestrator(
         context,
       );
       options.sessionStore.markPhase(
-        context.orchestrationId,
         context.turnId,
         "playing",
       );
@@ -92,7 +88,6 @@ export function useTurnPlaybackOrchestrator(
           activeSegmentId: activeSegment?.messageId ?? null,
           segmentId,
           turnId: segment?.turnId ?? null,
-          orchestrationId: segment?.orchestrationId ?? null,
           textContent: segment?.text.content ?? null,
           textReleased: segment?.text.released ?? false,
           textDelivered: segment?.text.delivered ?? false,
@@ -129,26 +124,21 @@ export function useTurnPlaybackOrchestrator(
         }
 
         if (session.phase === "collecting" && segment.text.content) {
-          options.sessionStore.markPhase(
-            segment.orchestrationId,
-            segment.turnId,
-            "ready",
-          );
+          options.sessionStore.markPhase(segment.turnId, "ready");
         }
 
         if (canReleaseText(segment)) {
-          core.markTextReady(segment.messageId, segment.turnId, segment.orchestrationId);
+          core.markTextReady(segment.messageId, segment.turnId);
         }
 
         if (canReleaseAudio(segment)) {
-          core.markAudioReady(segment.messageId, segment.turnId, segment.orchestrationId);
+          core.markAudioReady(segment.messageId, segment.turnId);
         }
 
         if (segment.audio.terminal === "absent") {
           core.markNoAudioConfirmed(
             segment.messageId,
             segment.turnId,
-            segment.orchestrationId,
           );
         }
 
@@ -156,7 +146,6 @@ export function useTurnPlaybackOrchestrator(
           core.markMotionReady(
             segment.messageId,
             segment.turnId,
-            segment.orchestrationId,
             segment.motion.payload,
             segment.motion.receivedAtMs ?? performance.now(),
           );
@@ -166,7 +155,6 @@ export function useTurnPlaybackOrchestrator(
           core.markOutputQueueClosed(
             segment.messageId,
             segment.turnId,
-            segment.orchestrationId,
           );
         }
       }

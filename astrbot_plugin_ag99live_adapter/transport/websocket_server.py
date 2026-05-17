@@ -28,7 +28,6 @@ class WebSocketTransport:
         send_current_model_and_conf: Callable[..., Awaitable[None]],
         send_motion_tuning_samples_state: Callable[..., Awaitable[None]],
         on_disconnect: Callable[[], Awaitable[None]],
-        session_id_getter: Callable[[], str],
     ) -> None:
         self.host = host
         self.port = port
@@ -39,7 +38,6 @@ class WebSocketTransport:
         self._send_current_model_and_conf = send_current_model_and_conf
         self._send_motion_tuning_samples_state = send_motion_tuning_samples_state
         self._on_disconnect = on_disconnect
-        self._session_id_getter = session_id_getter
 
         self._ws_server = None
         self._ws_client = None
@@ -127,7 +125,6 @@ class WebSocketTransport:
             await websocket.send(
                 json.dumps(
                     build_control_error(
-                        session_id=self._session_id(),
                         message="Only one client is supported.",
                     ),
                     ensure_ascii=False,
@@ -148,7 +145,6 @@ class WebSocketTransport:
                 except json.JSONDecodeError:
                     await self.send_json(
                         build_control_error(
-                            session_id=self._session_id(),
                             message="Invalid JSON payload",
                         )
                     )
@@ -156,7 +152,6 @@ class WebSocketTransport:
                 if not isinstance(parsed, dict):
                     await self.send_json(
                         build_control_error(
-                            session_id=self._session_id(),
                             message="JSON payload must be an object",
                         )
                     )
@@ -169,7 +164,6 @@ class WebSocketTransport:
                     logger.warning("Failed to process inbound websocket payload: %s", exc)
                     await self.send_json(
                         build_control_error(
-                            session_id=self._session_id(),
                             message=f"Failed to process message: {exc}",
                         )
                     )
@@ -196,14 +190,12 @@ class WebSocketTransport:
             logger.debug("Desktop frontend disconnected from adapter transport")
 
     async def _send_initial_messages(self) -> None:
-        session_id = self._session_id()
         await self._refresh_runtime_settings_async(
             reload_persona=True,
             reload_providers=True,
         )
         await self.send_json(
             build_system_server_info(
-                session_id=session_id,
                 ws_url=f"ws://{self.host}:{self.port}",
                 http_base_url=f"http://{self.static_server.host}:{self.static_server.port}",
                 auto_start_mic=self.auto_start_mic,
@@ -213,17 +205,12 @@ class WebSocketTransport:
         await self._send_motion_tuning_samples_state()
         await self.send_json(
             build_system_group_update(
-                session_id=session_id,
                 members=[],
                 is_owner=False,
             )
         )
         if self.auto_start_mic:
-            await self.send_json(build_control_start_mic(session_id=session_id))
-
-    def _session_id(self) -> str:
-        session_id = self._session_id_getter()
-        return session_id or "desktop-client"
+            await self.send_json(build_control_start_mic())
 
 
 def _is_expected_disconnect_error(exc: Exception) -> bool:

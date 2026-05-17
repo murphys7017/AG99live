@@ -137,6 +137,67 @@ DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES: list[dict[str, Any]] = [
     },
 ]
 
+_CORE_EXPRESSION_CATEGORY_GROUPS: list[tuple[str, ...]] = [
+    ("neutral",),
+    ("happy",),
+    ("angry",),
+    ("surprised",),
+    ("confused", "embarrassed"),
+]
+
+_MODEL_NATIVE_EXPRESSION_TEMPLATES: dict[str, dict[str, Any]] = {
+    "neutral": {
+        "input": "用户：嗯，我知道了。\n助手：好的，我们继续下一步。",
+        "mode": "idle",
+        "duration_ms": 1100,
+    },
+    "happy": {
+        "input": "用户：太好了！终于通过了！\n助手：真棒，我们成功了！",
+        "mode": "expressive",
+        "duration_ms": 1350,
+    },
+    "angry": {
+        "input": "用户：这也太气人了吧？\n助手：这确实让人有点生气。",
+        "mode": "expressive",
+        "duration_ms": 1250,
+    },
+    "surprised": {
+        "input": "用户：啊？你说这个现在就能用了？\n助手：是的，现在已经可用了。",
+        "mode": "expressive",
+        "duration_ms": 1200,
+    },
+    "confused": {
+        "input": "用户：嗯？这个地方是什么意思？\n助手：我也先确认一下，这里有点疑惑。",
+        "mode": "expressive",
+        "duration_ms": 1150,
+    },
+    "embarrassed": {
+        "input": "用户：哎呀，被你发现了。\n助手：有点不好意思。",
+        "mode": "expressive",
+        "duration_ms": 1100,
+    },
+    "blush": {
+        "input": "用户：你这话说得我都不好意思了。\n助手：咳，有点害羞。",
+        "mode": "expressive",
+        "duration_ms": 1100,
+    },
+    "question": {
+        "input": "用户：你是在问我吗？\n助手：嗯，我是在确认这个点。",
+        "mode": "expressive",
+        "duration_ms": 1050,
+    },
+    "tired": {
+        "input": "用户：今天好累啊。\n助手：是啊，稍微有点疲惫。",
+        "mode": "idle",
+        "duration_ms": 1200,
+    },
+    "extremelytired": {
+        "input": "用户：感觉已经没电了。\n助手：嗯，状态真的很疲惫。",
+        "mode": "idle",
+        "duration_ms": 1250,
+    },
+}
+
 
 def build_selector_platform_context(*, runtime_state: Any) -> str:
     enabled = bool(getattr(runtime_state, "realtime_motion_platform_context_enabled", True))
@@ -152,18 +213,26 @@ def build_selector_platform_context(*, runtime_state: Any) -> str:
     return DEFAULT_SELECTOR_PLATFORM_DESCRIPTION
 
 
-def resolve_selector_few_shot_examples(*, runtime_state: Any) -> list[dict[str, Any]]:
+def resolve_selector_few_shot_examples(
+    *,
+    runtime_state: Any,
+    update_runtime_state: bool = True,
+) -> list[dict[str, Any]]:
     enabled = bool(getattr(runtime_state, "realtime_motion_fewshot_enabled", True))
     if not enabled:
-        if hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
+        if update_runtime_state and hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
             runtime_state.motion_tuning_fewshot_diagnostics = []
+        if update_runtime_state and hasattr(runtime_state, "motion_tuning_effective_examples"):
+            runtime_state.motion_tuning_effective_examples = []
         return []
 
     count = int(getattr(runtime_state, "realtime_motion_fewshot_count", 4))
     count = max(0, count)
     if count == 0:
-        if hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
+        if update_runtime_state and hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
             runtime_state.motion_tuning_fewshot_diagnostics = []
+        if update_runtime_state and hasattr(runtime_state, "motion_tuning_effective_examples"):
+            runtime_state.motion_tuning_effective_examples = []
         return []
 
     user_examples = [
@@ -172,15 +241,51 @@ def resolve_selector_few_shot_examples(*, runtime_state: Any) -> list[dict[str, 
         if isinstance(item, dict)
     ]
     selected_user_examples = user_examples[:count]
-    default_count = max(0, count - len(selected_user_examples))
-    default_examples = DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES[:default_count]
-    resolved_examples = [*selected_user_examples, *default_examples]
+
+    model_native_examples: list[dict[str, Any]] = []
+    if len(selected_user_examples) < min(5, count):
+        model_native_examples = _resolve_model_native_expression_examples(
+            runtime_state=runtime_state,
+        )
+
+    resolved_examples = list(selected_user_examples)
+    seen_categories = {
+        _normalize_expression_category_key(item)
+        for item in resolved_examples
+        if _normalize_expression_category_key(item)
+    }
+    remaining = max(0, count - len(resolved_examples))
+
+    model_native_backfill = _select_category_backfill_examples(
+        candidates=model_native_examples,
+        count=remaining,
+        seen_categories=seen_categories,
+    )
+    resolved_examples.extend(model_native_backfill)
+    seen_categories.update(
+        _normalize_expression_category_key(item)
+        for item in model_native_backfill
+        if _normalize_expression_category_key(item)
+    )
+
+    remaining = max(0, count - len(resolved_examples))
+    default_examples = _select_category_backfill_examples(
+        candidates=DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES,
+        count=remaining,
+        seen_categories=seen_categories,
+    )
+    resolved_examples.extend(default_examples)
 
     diagnostics: list[str] = []
     if len(selected_user_examples) < count:
         diagnostics.append(
             "motion_tuning_user_samples_insufficient:"
             f"requested={count}:user_available={len(selected_user_examples)}"
+        )
+    if model_native_backfill:
+        diagnostics.append(
+            "motion_tuning_model_native_backfill_applied:"
+            f"count={len(model_native_backfill)}"
         )
     if default_examples:
         diagnostics.append(
@@ -192,9 +297,142 @@ def resolve_selector_few_shot_examples(*, runtime_state: Any) -> list[dict[str, 
             "motion_tuning_fewshot_final_shortage:"
             f"requested={count}:final_count={len(resolved_examples)}"
         )
-    if hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
+    if update_runtime_state and hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
         runtime_state.motion_tuning_fewshot_diagnostics = diagnostics
+    if update_runtime_state and hasattr(runtime_state, "motion_tuning_effective_examples"):
+        runtime_state.motion_tuning_effective_examples = list(resolved_examples)
     return resolved_examples
+
+
+def _resolve_model_native_expression_examples(*, runtime_state: Any) -> list[dict[str, Any]]:
+    model_info = getattr(runtime_state, "model_info", None)
+    if not isinstance(model_info, dict):
+        return []
+    selected_model = str(model_info.get("selected_model") or "").strip()
+    models = model_info.get("models")
+    if not selected_model or not isinstance(models, list):
+        return []
+
+    model_payload = next(
+        (
+            item
+            for item in models
+            if isinstance(item, dict) and str(item.get("name") or "").strip() == selected_model
+        ),
+        None,
+    )
+    if not isinstance(model_payload, dict):
+        return []
+
+    library = model_payload.get("expression_example_library")
+    if not isinstance(library, dict):
+        return []
+    examples = library.get("examples")
+    if not isinstance(examples, list):
+        return []
+
+    normalized_examples: list[dict[str, Any]] = []
+    for item in examples:
+        if not isinstance(item, dict):
+            continue
+        emotion_label = str(item.get("emotion_label") or item.get("id") or "").strip()
+        normalized_key = _normalize_emotion_key(emotion_label)
+        template = _MODEL_NATIVE_EXPRESSION_TEMPLATES.get(normalized_key)
+        axes = item.get("axes")
+        if not normalized_key or template is None or not isinstance(axes, dict) or not axes:
+            continue
+        normalized_examples.append(
+            {
+                "input": template["input"],
+                "output": {
+                    "emotion": normalized_key,
+                    "mode": str(template["mode"]),
+                    "duration_ms": int(template["duration_ms"]),
+                    "axes": {
+                        str(axis_id).strip(): value
+                        for axis_id, value in axes.items()
+                        if str(axis_id).strip()
+                    },
+                },
+                "source": "model_native_expression_example_library",
+                "tags": [
+                    str(tag).strip()
+                    for tag in item.get("tags", [])
+                    if str(tag).strip()
+                ]
+                if isinstance(item.get("tags"), list)
+                else [],
+            }
+        )
+    return normalized_examples
+
+
+def _select_category_backfill_examples(
+    *,
+    candidates: list[dict[str, Any]],
+    count: int,
+    seen_categories: set[str],
+) -> list[dict[str, Any]]:
+    if count <= 0:
+        return []
+
+    normalized_candidates = [item for item in candidates if isinstance(item, dict)]
+    selected: list[dict[str, Any]] = []
+    local_seen = set(seen_categories)
+    used_indexes: set[int] = set()
+
+    for group in _CORE_EXPRESSION_CATEGORY_GROUPS:
+        if len(selected) >= count:
+            break
+        if any(category in local_seen for category in group):
+            continue
+        for index, item in enumerate(normalized_candidates):
+            if index in used_indexes:
+                continue
+            category = _normalize_expression_category_key(item)
+            if category in group:
+                selected.append(item)
+                used_indexes.add(index)
+                if category:
+                    local_seen.add(category)
+                break
+
+    if len(selected) >= count:
+        return selected[:count]
+
+    for index, item in enumerate(normalized_candidates):
+        if index in used_indexes:
+            continue
+        category = _normalize_expression_category_key(item)
+        if category and category in local_seen:
+            continue
+        selected.append(item)
+        used_indexes.add(index)
+        if category:
+            local_seen.add(category)
+        if len(selected) >= count:
+            break
+    return selected[:count]
+
+
+def _normalize_expression_category_key(example: dict[str, Any]) -> str:
+    output = example.get("output")
+    if not isinstance(output, dict):
+        return ""
+    return _normalize_emotion_key(str(output.get("emotion") or "").strip())
+
+
+def _normalize_emotion_key(value: str) -> str:
+    normalized = "".join(char.lower() for char in str(value or "").strip() if char.isalnum() or char == "_")
+    aliases = {
+        "joy": "happy",
+        "question": "confused",
+        "playfulwink": "happy",
+        "playful_wink": "happy",
+        "extremelytired": "tired",
+        "blush": "embarrassed",
+    }
+    return aliases.get(normalized, normalized)
 
 
 def resolve_motion_prompt_instruction(*, runtime_state: Any) -> str:

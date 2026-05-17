@@ -3,6 +3,7 @@ import type {
   DesktopBackendHistorySummary,
   DesktopBaseActionPreview,
   DesktopModelProjectionSnapshot,
+  DesktopMotionTuningEffectiveExample,
   DesktopMotionPlaybackRecord,
   DesktopMotionTuningSample,
   DesktopMotionTuningSamplesStatus,
@@ -78,6 +79,7 @@ export const defaultModelProjectionSnapshot: DesktopModelProjectionSnapshot = {
   lastUpdated: "",
   runtimeSemanticAxisProfile: null,
   baseActionPreview: null,
+  motionTuningEffectiveExamples: [],
 };
 
 export const defaultProfileAuthoringSnapshot: DesktopProfileAuthoringSnapshot = {
@@ -92,18 +94,23 @@ export function normalizeMotionTuningSamplesStatus(
       rootError: "",
       loadError: "",
       diagnostics: [],
+      effectiveExamples: [],
     };
   }
   const candidate = value as {
     rootError?: unknown;
     loadError?: unknown;
     diagnostics?: unknown;
+    effectiveExamples?: unknown;
   };
   return {
     rootError: normalizeText(candidate.rootError),
     loadError: normalizeText(candidate.loadError),
     diagnostics: Array.isArray(candidate.diagnostics)
       ? candidate.diagnostics.map((item) => normalizeText(item)).filter(Boolean)
+      : [],
+    effectiveExamples: Array.isArray(candidate.effectiveExamples)
+      ? candidate.effectiveExamples.map(cloneMotionTuningEffectiveExample).filter(isPresent)
       : [],
   };
 }
@@ -257,6 +264,11 @@ export function normalizeModelProjectionSnapshot(
       snapshot.runtimeSemanticAxisProfile,
     ),
     baseActionPreview: cloneBaseActionPreview(snapshot.baseActionPreview),
+    motionTuningEffectiveExamples: Array.isArray(snapshot.motionTuningEffectiveExamples)
+      ? snapshot.motionTuningEffectiveExamples
+        .map(cloneMotionTuningEffectiveExample)
+        .filter(isPresent)
+      : [],
   };
 }
 
@@ -286,6 +298,27 @@ function cloneMotionPlaybackRecord(
     console.warn("[DesktopBridge] motion playback record rejected.", error, record);
     return null;
   }
+}
+
+function cloneMotionTuningEffectiveExample(
+  example: unknown,
+): DesktopMotionTuningEffectiveExample | null {
+  if (!isObject(example) || !isObject(example.output)) {
+    return null;
+  }
+  return {
+    input: normalizeText(example.input),
+    output: {
+      emotion: normalizeText(example.output.emotion),
+      mode: normalizeText(example.output.mode),
+      durationMs: typeof example.output.durationMs === "number" && Number.isFinite(example.output.durationMs)
+        ? example.output.durationMs
+        : null,
+      axes: cloneNumericRecord(example.output.axes),
+    },
+    source: normalizeText(example.source),
+    tags: normalizeStringArray(example.tags) ?? [],
+  };
 }
 
 function cloneMotionCompileDiagnostics(

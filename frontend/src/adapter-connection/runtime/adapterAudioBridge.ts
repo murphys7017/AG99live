@@ -3,14 +3,12 @@ import { matchesPlaybackGroup, type PendingAudioItem } from "./playbackReleaseQu
 export interface AudioBridgeState {
   audioPlaybackTerminalState: "idle" | "completed" | "failed" | "absent";
   audioPlaybackTerminalTurnId: string | null;
-  audioPlaybackTerminalOrchestrationId: string | null;
   audioPlaybackTerminalReason: string;
   pendingAudios: Map<string, PendingAudioItem>;
 }
 
 export interface AudioBridgeSessionStore {
   markAudioTerminal: (
-    orchestrationId: string | null,
     turnId: string | null,
     terminal: "completed" | "failed" | "absent",
     messageId: string,
@@ -23,7 +21,6 @@ export interface AudioBridgeSessionStore {
       {
         messageId: string;
         turnId: string | null;
-        orchestrationId: string | null;
         audio: {
           url: string | null;
           released: boolean;
@@ -44,13 +41,11 @@ export function markAudioPlaybackTerminal(
   deps: AudioBridgeDeps,
   terminalState: "completed" | "failed" | "absent",
   turnId: string | null,
-  orchestrationId: string | null,
   reason = "",
   messageId: string | null = null,
 ): void {
   deps.state.audioPlaybackTerminalState = terminalState;
   deps.state.audioPlaybackTerminalTurnId = turnId;
-  deps.state.audioPlaybackTerminalOrchestrationId = orchestrationId;
   deps.state.audioPlaybackTerminalReason = reason;
 
   if (!messageId) {
@@ -58,7 +53,6 @@ export function markAudioPlaybackTerminal(
   }
 
   deps.sessionStore?.markAudioTerminal(
-    orchestrationId,
     turnId,
     terminalState,
     messageId,
@@ -69,17 +63,15 @@ export function markAudioPlaybackTerminal(
 export function resetAudioPlaybackTerminal(deps: AudioBridgeDeps): void {
   deps.state.audioPlaybackTerminalState = "idle";
   deps.state.audioPlaybackTerminalTurnId = null;
-  deps.state.audioPlaybackTerminalOrchestrationId = null;
   deps.state.audioPlaybackTerminalReason = "";
 }
 
 export function hasPendingAudioForTurn(
   deps: AudioBridgeDeps,
   turnId: string | null,
-  orchestrationId: string | null,
 ): boolean {
   for (const item of deps.state.pendingAudios.values()) {
-    if (matchesPlaybackGroup(item.turnId, item.orchestrationId, turnId, orchestrationId)) {
+    if (matchesPlaybackGroup(item.turnId, turnId)) {
       return true;
     }
   }
@@ -89,7 +81,6 @@ export function hasPendingAudioForTurn(
 export function markMissingAudiosForTurn(
   deps: AudioBridgeDeps,
   turnId: string | null,
-  orchestrationId: string | null,
   reason: string,
 ): void {
   const sessions = deps.sessionStore?.getSessions() ?? [];
@@ -102,13 +93,12 @@ export function markMissingAudiosForTurn(
         && !segment.audio.url
         && !segment.audio.released
         && !segment.audio.started
-        && matchesPlaybackGroup(segment.turnId, segment.orchestrationId, turnId, orchestrationId)
+        && matchesPlaybackGroup(segment.turnId, turnId)
       ) {
         markAudioPlaybackTerminal(
           deps,
           "absent",
           segment.turnId,
-          segment.orchestrationId,
           reason,
           segment.messageId,
         );

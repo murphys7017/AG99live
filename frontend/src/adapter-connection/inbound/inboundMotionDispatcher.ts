@@ -8,12 +8,10 @@ import type {
 
 export interface InboundMotionDispatchState {
   currentTurnId: string | null;
-  currentOrchestrationId: string | null;
   statusMessage: string;
   lastError: string;
   inboundMotionPlan: unknown;
   inboundMotionPlanTurnId: string | null;
-  inboundMotionPlanOrchestrationId: string | null;
   inboundMotionPlanReceivedAtMs: number;
 }
 
@@ -21,7 +19,6 @@ export interface InboundMotionDispatchDeps {
   state: InboundMotionDispatchState;
   sessionStore: {
     markMotionReceived: (
-      orchId: string | null,
       turnId: string | null,
       payload: NormalizedMotionPayload,
       messageId: string,
@@ -30,7 +27,6 @@ export interface InboundMotionDispatchDeps {
   pushHistory: (role: string, text: string) => void;
   findActiveAudioSegment: () => {
     turnId: string | null;
-    orchestrationId: string | null;
     messageId: string;
   } | null;
   normalizeMotionPayload: (payload: unknown) =>
@@ -55,7 +51,6 @@ export function dispatchInboundMotionEvent(
   const result = deps.applyInboundMotionPayload({
     state: deps.state,
     activeAudioTurnId: activeAudioSegment?.turnId ?? null,
-    activeAudioOrchestrationId: activeAudioSegment?.orchestrationId ?? null,
     pushHistory: deps.pushHistory as (role: "system" | "error", text: string) => void,
   }, event.envelope);
   if (!result.accepted) {
@@ -64,7 +59,6 @@ export function dispatchInboundMotionEvent(
   const normalized = deps.normalizeMotionPayload(result.rawPlan);
   if (normalized.ok) {
     deps.sessionStore?.markMotionReceived(
-      event.orchestrationId,
       event.turnId,
       normalized.payload,
       event.messageId,

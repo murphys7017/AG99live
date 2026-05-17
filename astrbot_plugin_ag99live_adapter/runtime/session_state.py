@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from uuid import uuid4
 
 
 class SessionStage(str, Enum):
@@ -25,22 +24,22 @@ class SessionState:
     waiting_for_playback_complete: bool = False
     output_queue_closed: bool = False
     current_turn_id: str | None = None
-    current_orchestration_id: str | None = None
 
     def begin_turn(
         self,
         text: str,
         *,
-        turn_id: str | None = None,
-        orchestration_id: str | None = None,
+        turn_id: str,
     ) -> str:
+        normalized_turn_id = str(turn_id or "").strip()
+        if not normalized_turn_id:
+            raise ValueError("turn_id is required when beginning a turn.")
         self.turn_index += 1
         self.last_user_text = text
         self.stage = SessionStage.THINKING
         self.waiting_for_playback_complete = False
         self.output_queue_closed = False
-        self.current_turn_id = turn_id or uuid4().hex
-        self.current_orchestration_id = orchestration_id or uuid4().hex
+        self.current_turn_id = normalized_turn_id
         return self.current_turn_id
 
     def mark_synthesizing(self) -> None:
@@ -61,11 +60,9 @@ class SessionState:
         self.output_queue_closed = False
         self.stage = SessionStage.IDLE
         self.current_turn_id = None
-        self.current_orchestration_id = None
 
     def reset_to_idle(self) -> None:
         self.waiting_for_playback_complete = False
         self.output_queue_closed = False
         self.stage = SessionStage.IDLE
         self.current_turn_id = None
-        self.current_orchestration_id = None
