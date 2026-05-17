@@ -2,7 +2,7 @@
 
 > 状态：当前主设计文档。本文是前端动作引擎结构方案的维护入口。
 
-更新时间：2026-05-17
+更新时间：2026-05-18
 
 ## 1. 当前结论
 
@@ -29,16 +29,28 @@ engine.motion_intent.v2 / engine.parameter_plan.v2
 当前结构判断：
 
 - `useModelEngine.ts` 同时承担入站队列、音频同步、编译、播放、状态、history，适合作为 facade，不适合继续承载细节。
-- `compiler.ts` 同时承担参数生成、强度处理、coupling、mode/timing、plan build，需要拆成 pipeline stages。
+- `compiler.ts` 已经收口为转发入口，真正的编译逻辑已经进入 `compiler/` 目录下的静态 pipeline stages。
 - `settings.ts` 的设置模型需要面向 `SemanticAxisProfile`。
 - `CompileDiagnostics` 需要按 stage 聚合。
 - 新增表情判断、说话姿态、动作优化、连贯优化时，应通过 stage / registry 挂载。
+
+当前已经落地的 compile 主链：
+
+```text
+IntentValidator
+-> AxisResolver
+-> IntensityStage
+-> CouplingStage
+-> ModeResolverStage
+-> TimingStage
+-> PlanBuilder
+```
 
 下一阶段主目标：
 
 ```text
 设计并整理前端 ModelEngine 结构
--> 拆出 compile pipeline
+-> 继续拆 runtime scheduler
 -> 建立 stage / registry 扩展入口
 -> 为 speech pose、expression、continuity 等能力预留稳定位置
 ```
@@ -113,7 +125,12 @@ ModelEngine 不负责：
 | `useModelEngine.ts` | 引擎 facade/runtime：排队、等待音频、编译、播放、状态 | 拆薄，保留为组合入口 |
 | `normalize.ts` | `motion_intent.v2` 和 `parameter_plan.v2` 入站归一化 | 保留为边界 parser |
 | `planParser.ts` | `parameter_plan.v2` parser / clone | 归入 contracts/parsers |
-| `compiler.ts` | intent -> plan 编译核心 | 拆成 pipeline stages |
+| `compiler.ts` | 对外兼容转发入口 | 保留稳定 import 路径 |
+| `compiler/compileMotionIntent.ts` | compile 主入口，负责装配 pipeline 和收口结果 | 保持为 compiler facade |
+| `compiler/compileContext.ts` | compile 共享上下文与 state 定义 | 保持为 stage 公共协议 |
+| `compiler/pipeline.ts` | stage 顺序执行器 | 保持轻量 |
+| `compiler/diagnostics.ts` | compile diagnostics 构造与收口 | 按 stage 聚合 |
+| `compiler/stages/*.ts` | 各阶段编译逻辑 | 保持单一职责 |
 | `timing.ts` | timing resolution，支持 hint/audio_sync/default | 作为 timing stage |
 | `settings.ts` | 强度倍率设置 | 改为 profile-aware settings |
 | `contracts.ts` | 引擎类型和依赖端口 | 拆分 runtime ports / compiler contracts / diagnostics |
@@ -236,22 +253,38 @@ stage 形态：
 ```ts
 interface MotionCompileStage {
   id: string;
-  order: number;
   run(context: MotionCompileContext): MotionCompileStageResult;
 }
 ```
 
 stage 规则：
 
+- 第一轮使用静态顺序，不引入 `order`
 - 不播放动作。
 - 不访问 WebSocket。
 - 不直接写 UI 状态。
 - 所有派生结果进入 compile context。
 - 所有调整输出 diagnostics。
 
+compile state 值层约束：
+
+| 字段 | 含义 | 谁可以写 |
+| --- | --- | --- |
+| `controlledValues` | 用户/LLM 直控输入层，表示原始 intent 在通过 profile 过滤和强度处理后的可控轴值 | `AxisResolver`、`IntensityStage` |
+| `derivedValues` | 引擎派生层，表示 coupling、speech pose、expression、continuity 等 stage 追加出来的派生轴值 | 派生型 stage |
+| `allAxisValues` | 最终编译输入层，表示进入 mode/timing/plan build 的最终轴值全集 | 负责汇总的 stage |
+
+约束规则：
+
+- `controlledValues` 不允许被派生型 stage 回写。
+- `SpeechPoseStage`、`ExpressionStage`、`ContinuityStage` 这类增强 stage 默认只产生派生值。
+- `allAxisValues` 是最终消费层，不是原始输入层。
+- 后续新增 stage 时，必须先明确自己写的是 `controlledValues`、`derivedValues` 还是 `allAxisValues`。
+- 如果一个 stage 不是“解释用户原始输入”，就不应该改写 `controlledValues`。
+
 ### 5.5 ExtensionRegistry
 
-ExtensionRegistry 是能力挂载入口。
+ExtensionRegistry 是第二轮之后的能力挂载入口。
 
 建议先做静态 registry：
 
@@ -270,6 +303,7 @@ intentValidator
 axisResolver
 intensity
 coupling
+modeResolver
 timing
 planBuilder
 ```
@@ -419,6 +453,12 @@ compile pipeline / speech pose / continuity
 - Avatar runtime 可以写 `runtime/ambient`，但需要和当前 plan 有优先级协调。
 - 所有非原始 intent 的修改都要有 diagnostics。
 
+compile state 和参数所有权的对应关系：
+
+- `controlledValues` 对应当前动作里由 LLM / 用户直控进入的 `primary`、`hint` 层。
+- `derivedValues` 对应当前动作里由引擎内部模块补出来的 `derived` 层。
+- `allAxisValues` 是 parameter plan 编译前的最终汇总视图，不单独代表新的所有权层。
+
 ## 8. 和外部模块的边界
 
 ### Adapter
@@ -516,14 +556,23 @@ Avatar Runtime 不负责：
 model-engine/compiler/
   compileMotionIntent.ts
   compileContext.ts
+  diagnostics.ts
+  pipeline.ts
   stages/
     intentValidator.ts
     axisResolver.ts
     intensityStage.ts
     couplingStage.ts
+    modeResolverStage.ts
     timingStage.ts
     planBuilder.ts
 ```
+
+当前状态：
+
+- 本阶段已经完成
+- compiler 对外入口保持不变
+- 现有 compile 相关验证已经通过
 
 ### Phase 3：引入 ExtensionRegistry
 

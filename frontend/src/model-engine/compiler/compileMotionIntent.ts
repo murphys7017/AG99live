@@ -84,9 +84,22 @@ function continueLegacyCompile(
   }
 
   return buildSuccessResultFromContext(context, {
-    intensityApplied:
-      intent.mode === "expressive" && settings.motionIntensityScale !== 1,
+    intensityApplied: hasAppliedEffectiveIntensity(context),
   });
+}
+
+function hasAppliedEffectiveIntensity(
+  context: MotionCompileContext,
+): boolean {
+  if (context.intent.mode !== "expressive") {
+    return false;
+  }
+  if (context.settings.motionIntensityScale !== 1) {
+    return true;
+  }
+  return Object.keys(context.state.controlledValues).some(
+    (axisId) => (context.settings.axisIntensityScale[axisId] ?? 1) !== 1,
+  );
 }
 
 function buildSuccessResultFromContext(

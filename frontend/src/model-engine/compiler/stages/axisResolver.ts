@@ -9,6 +9,7 @@ import type {
   MotionStageResult,
   ResolvedAxisRoleBuckets,
 } from "../compileContext.js";
+import { replaceControlledAxisValues } from "../compileContext.js";
 
 const MAX_SEMANTIC_AXIS_ERROR_RATE = 0.30;
 const ALLOWED_LLM_ROLES = new Set(["primary", "hint"]);
@@ -59,7 +60,7 @@ export function runAxisResolver(
     resolvedAxes.invalidAxes.length + resolvedAxes.forbiddenAxes.length;
 
   context.state.roleAxisIds = roleAxisIds;
-  context.state.controlledValues = resolvedAxes.controlledValues;
+  replaceControlledAxisValues(context.state, resolvedAxes.controlledValues);
   context.state.missingAxes = missingAxes;
   context.state.forbiddenAxes = resolvedAxes.forbiddenAxes;
   context.state.invalidAxes = resolvedAxes.invalidAxes;

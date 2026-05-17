@@ -5,6 +5,7 @@ import type {
   MotionCompileStage,
   MotionStageResult,
 } from "../compileContext.js";
+import { mergeDerivedAxisValues, refreshAllAxisValues } from "../compileContext.js";
 
 // Reads:
 // - context.state.profile
@@ -60,11 +61,8 @@ export function runCouplingStage(
     );
   }
 
-  context.state.derivedValues = couplingResult.values;
-  context.state.allAxisValues = {
-    ...context.state.controlledValues,
-    ...couplingResult.values,
-  };
+  mergeDerivedAxisValues(context.state, couplingResult.values, "coupling");
+  refreshAllAxisValues(context.state);
 
   return { ok: true };
 }

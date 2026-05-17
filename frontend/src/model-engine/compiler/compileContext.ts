@@ -14,6 +14,8 @@ import type {
 import type { ModelEngineSettings } from "../settings.js";
 
 export type DynamicAxisValues = Record<string, number>;
+export type MotionAxisValueSource = "semantic_axis" | "coupling";
+export type MotionAxisValueSourceMap = Record<string, MotionAxisValueSource>;
 
 export interface ResolvedAxisRoleBuckets {
   primaryAxes: string[];
@@ -31,6 +33,7 @@ export interface MotionCompileMutableState {
   controlledValues: DynamicAxisValues;
   derivedValues: DynamicAxisValues;
   allAxisValues: DynamicAxisValues;
+  axisValueSources: MotionAxisValueSourceMap;
 
   missingAxes: string[];
   forbiddenAxes: string[];
@@ -78,6 +81,7 @@ export function createInitialCompileState(): MotionCompileMutableState {
     controlledValues: {},
     derivedValues: {},
     allAxisValues: {},
+    axisValueSources: {},
     missingAxes: [],
     forbiddenAxes: [],
     invalidAxes: [],
@@ -87,5 +91,41 @@ export function createInitialCompileState(): MotionCompileMutableState {
     resolvedMode: "idle",
     timing: null,
     parameters: [],
+  };
+}
+
+export function replaceControlledAxisValues(
+  state: MotionCompileMutableState,
+  nextControlledValues: DynamicAxisValues,
+): void {
+  state.controlledValues = nextControlledValues;
+  state.axisValueSources = Object.fromEntries(
+    Object.keys(nextControlledValues).map((axisId) => [axisId, "semantic_axis"]),
+  );
+}
+
+export function mergeDerivedAxisValues(
+  state: MotionCompileMutableState,
+  nextDerivedValues: DynamicAxisValues,
+  source: MotionAxisValueSource,
+): void {
+  state.derivedValues = {
+    ...state.derivedValues,
+    ...nextDerivedValues,
+  };
+  state.axisValueSources = {
+    ...state.axisValueSources,
+    ...Object.fromEntries(
+      Object.keys(nextDerivedValues).map((axisId) => [axisId, source]),
+    ),
+  };
+}
+
+export function refreshAllAxisValues(
+  state: MotionCompileMutableState,
+): void {
+  state.allAxisValues = {
+    ...state.controlledValues,
+    ...state.derivedValues,
   };
 }

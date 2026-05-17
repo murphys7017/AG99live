@@ -7,6 +7,7 @@ import type {
   DynamicAxisValues,
   MotionCompileContext,
   MotionCompileStage,
+  MotionAxisValueSourceMap,
   MotionStageResult,
 } from "../compileContext.js";
 
@@ -39,7 +40,7 @@ export function runPlanBuilderStage(
     context.state.allAxisValues,
     profile,
     context.state.axisById,
-    new Set(Object.keys(context.state.controlledValues)),
+    context.state.axisValueSources,
   );
   if (!parameterResult.ok) {
     return parameterResult;
@@ -53,7 +54,7 @@ function buildSemanticPlanParameters(
   axisValues: DynamicAxisValues,
   profile: NonNullable<MotionCompileContext["state"]["profile"]>,
   axisById: Map<string, SemanticAxisDefinition>,
-  controlledAxisIds: Set<string>,
+  axisValueSources: MotionAxisValueSourceMap,
 ):
   | { ok: true; parameters: SemanticParameterPlan["parameters"] }
   | { ok: false; reason: string } {
@@ -88,7 +89,7 @@ function buildSemanticPlanParameters(
         target_value: parameter.targetValue,
         weight: binding.default_weight,
         input_value: value,
-        source: controlledAxisIds.has(axisId) ? "semantic_axis" : "coupling",
+        source: axisValueSources[axisId] ?? "coupling",
       });
     }
   }

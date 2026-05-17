@@ -330,6 +330,8 @@ function testAxisIntensityScaleAffectsOnlyTargetAxis(): void {
   assert.equal(baselineSmile?.input_value, 60);
   assert.equal(scaledSmile?.input_value, 70);
   assert.ok((scaledSmile?.target_value ?? 0) > (baselineSmile?.target_value ?? 0));
+  assert.equal(baseline.diagnostics.intensityApplied, false);
+  assert.equal(scaled.diagnostics.intensityApplied, true);
 }
 
 function run(): void {

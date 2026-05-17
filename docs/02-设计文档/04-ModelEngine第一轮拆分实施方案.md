@@ -47,6 +47,57 @@
 - 每个 stage 文件都要明确写出“读取哪些 state 字段、修改哪些 state 字段”
 - 第一轮不增加新的 stage 粒度，优先在 stage 文件内部拆 helper 函数
 
+### 1.1 当前落地状态
+
+当前 `compiler/` 第一轮主链已经落地，实际静态顺序是：
+
+```text
+IntentValidator
+-> AxisResolver
+-> IntensityStage
+-> CouplingStage
+-> ModeResolverStage
+-> TimingStage
+-> PlanBuilder
+```
+
+当前已经存在的文件：
+
+```text
+frontend/src/model-engine/compiler/
+  compileMotionIntent.ts
+  compileContext.ts
+  diagnostics.ts
+  pipeline.ts
+  stages/
+    intentValidator.ts
+    axisResolver.ts
+    intensityStage.ts
+    couplingStage.ts
+    modeResolverStage.ts
+    timingStage.ts
+    planBuilder.ts
+```
+
+当前兼容入口也已经收口为：
+
+```text
+frontend/src/model-engine/compiler.ts
+```
+
+其职责只是转发：
+
+```ts
+export { compileMotionIntent } from "./compiler/compileMotionIntent.js";
+```
+
+当前已完成验证：
+
+- `npm run typecheck:renderer`
+- `npm run test:model-engine`
+
+下一步重点不是继续扩 compiler，而是进入 `useModelEngine.ts` 的 runtime 拆分。
+
 ---
 
 ## 2. 当前代码与目标结构映射
@@ -72,7 +123,7 @@
 
 ## 3. 目标目录结构
 
-第一轮拆分完成后，前端动作引擎目录目标如下：
+第一轮 compiler 拆分完成后，前端动作引擎目录当前结构如下：
 
 ```text
 frontend/src/model-engine/
@@ -103,7 +154,11 @@ frontend/src/model-engine/
     motionStart.ts
 ```
 
-第一轮如果想降低改动面，也可以先不立即创建 `runtime/` 目录，先完成 `compiler/` 拆分，再拆运行时调度。
+当前状态说明：
+
+- `compiler/` 目录已经按上面的主链落地
+- `runtime/` 目录还没有开始创建
+- 下一步工作集中在 `useModelEngine.ts` runtime 拆分
 
 ---
 
@@ -203,6 +258,26 @@ export interface MotionCompileMutableState {
 - 这是 compile 过程中的“运行时状态容器”
 - 各 stage 只读写自己需要的部分
 - 第一轮不追求严格不可变，先保证结构清晰
+
+第一轮值层规则：
+
+- `controlledValues` 是用户/LLM 直控层。
+- `derivedValues` 是引擎派生层。
+- `allAxisValues` 是最终编译输入层。
+
+第一轮写入边界：
+
+- `AxisResolver` 负责初始化 `controlledValues`
+- `IntensityStage` 只允许继续修改 `controlledValues`
+- `CouplingStage` 负责生成 `derivedValues` 并汇总为 `allAxisValues`
+- 后续新增 `SpeechPoseStage`、`ExpressionStage`、`ContinuityStage` 时，默认只允许写 `derivedValues` 或新的派生汇总结果
+- `PlanBuilder` 只读取 `allAxisValues`，不回写前面三层的语义
+
+硬约束：
+
+- 非“原始输入解释”类 stage 不允许回写 `controlledValues`
+- 任何新增 stage 在实现前都要先标明自己修改的是哪一层值表
+- `allAxisValues` 不能被当成新的原始输入来源反向覆盖前面层
 
 维护要求：
 
@@ -1083,9 +1158,9 @@ compiler/extensions.ts
 
 ## 22. 第一轮实施顺序
 
-建议严格按下面顺序进行。
+当前执行顺序仍按下面的边界推进，但 compiler 部分已经完成。
 
-### Step 1
+### Step 1（已完成）
 
 创建基础文件：
 
@@ -1095,7 +1170,7 @@ compiler/extensions.ts
 
 此时不改业务逻辑，只先建立公共结构。
 
-### Step 2
+### Step 2（已完成）
 
 创建：
 
@@ -1103,7 +1178,7 @@ compiler/extensions.ts
 
 把 `validateProfileForIntent` 迁入。
 
-### Step 3
+### Step 3（已完成）
 
 创建：
 
@@ -1118,7 +1193,7 @@ compiler/extensions.ts
 - `normalizeSemanticAxisValue`
 - missing primary 收集
 
-### Step 4
+### Step 4（已完成）
 
 创建：
 
@@ -1128,7 +1203,7 @@ compiler/extensions.ts
 
 - `applySemanticIntensity`
 
-### Step 5
+### Step 5（已完成）
 
 创建：
 
@@ -1139,7 +1214,7 @@ compiler/extensions.ts
 - `applySemanticCouplings`
 - `dynamicAxisValuesEqual`
 
-### Step 6
+### Step 6（已完成）
 
 创建：
 
@@ -1149,7 +1224,7 @@ compiler/extensions.ts
 
 - `isSemanticIdleDeadzone`
 
-### Step 7
+### Step 7（已完成）
 
 创建：
 
@@ -1159,7 +1234,7 @@ compiler/extensions.ts
 
 - `resolveMotionTiming`
 
-### Step 8
+### Step 8（已完成）
 
 创建：
 
@@ -1170,7 +1245,7 @@ compiler/extensions.ts
 - `buildSemanticPlanParameters`
 - `mapSemanticBindingValue`
 
-### Step 9
+### Step 9（已完成）
 
 创建：
 
@@ -1178,19 +1253,19 @@ compiler/extensions.ts
 
 完成新入口装配，并让旧 `compiler.ts` 仅做转发。
 
-### Step 10
+### Step 10（当前下一步）
 
 开始拆 `useModelEngine.ts`：
 
 - 先迁 runtime scheduler
 - 再迁 payload start
 
-执行检查点：
+当前检查点：
 
-- Step 3 完成后：应已建立 `IntentValidator + AxisResolver` 主骨架
-- Step 8 完成后：compile 主链的各 stage 应已完整落位
-- Step 9 完成后：外部仍通过 `frontend/src/model-engine/compiler.ts` 获取 `compileMotionIntent`
-- Step 10 前：必须先完成一轮 compile 相关验证
+- `IntentValidator + AxisResolver` 主骨架已完成
+- compile 主链各 stage 已完整落位
+- 外部仍通过 `frontend/src/model-engine/compiler.ts` 获取 `compileMotionIntent`
+- compiler 相关验证已通过，当前可以进入 runtime 拆分
 
 ---
 

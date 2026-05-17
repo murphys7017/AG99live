@@ -5,6 +5,7 @@ import type {
   MotionCompileStage,
   MotionStageResult,
 } from "../compileContext.js";
+import { refreshAllAxisValues, replaceControlledAxisValues } from "../compileContext.js";
 
 // Reads:
 // - context.intent.mode
@@ -63,7 +64,8 @@ export function runIntensityStage(
     }
   }
 
-  context.state.controlledValues = nextControlledValues;
+  replaceControlledAxisValues(context.state, nextControlledValues);
+  refreshAllAxisValues(context.state);
   context.state.warnings = nextWarnings;
 
   return { ok: true };
