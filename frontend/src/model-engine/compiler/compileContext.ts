@@ -10,7 +10,7 @@ import type {
   CompileDiagnostics,
   CompileOptions,
   MotionTimingResolution,
-} from "../contracts.js";
+} from "./contracts.js";
 import type { ModelEngineSettings } from "../settings.js";
 
 export type DynamicAxisValues = Record<string, number>;

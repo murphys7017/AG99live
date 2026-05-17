@@ -3,10 +3,12 @@ import {
   MOTION_SYNC_WAIT_FOR_AUDIO_MS,
 } from "../constants.js";
 import type {
-  InboundPayloadContext,
   NormalizedMotionPayload,
 } from "../contracts.js";
-import type { MotionRuntimeSchedulerDependencies } from "./contracts.js";
+import type {
+  InboundPayloadContext,
+  MotionRuntimeSchedulerDependencies,
+} from "./contracts.js";
 import { normalizeTurnId } from "../normalize.js";
 
 export interface PendingInboundMotionPayload {

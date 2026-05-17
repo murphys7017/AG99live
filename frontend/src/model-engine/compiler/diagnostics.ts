@@ -1,4 +1,4 @@
-import type { CompileDiagnostics, CompileOptions } from "../contracts.js";
+import type { CompileDiagnostics, CompileOptions } from "./contracts.js";
 import type { MotionCompileContext } from "./compileContext.js";
 import type { ModelEngineSettings } from "../settings.js";
 

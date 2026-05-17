@@ -1,11 +1,9 @@
 import { compileMotionIntent } from "../compiler/compileMotionIntent.js";
-import type {
-  CompileDiagnostics,
-  ModelEngineStatus,
-  NormalizedMotionPayload,
-} from "../contracts.js";
+import type { NormalizedMotionPayload } from "../contracts.js";
+import type { CompileDiagnostics } from "../compiler/contracts.js";
 import type { MotionPlanPayload } from "../../types/protocol.js";
 import type {
+  ModelEngineStatus,
   MotionRuntimeStateController,
   MotionStartDependencies,
 } from "./contracts.js";

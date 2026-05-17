@@ -3,15 +3,12 @@ import {
   createMotionRuntimeScheduler,
   type StartPayloadContext,
 } from "./runtime/motionRuntimeScheduler";
-import type {
-  CompileDiagnostics,
-  InboundPayloadContext,
-  ModelEngineStatus,
-  NormalizedMotionPayload,
-} from "./contracts";
+import type { InboundPayloadContext, NormalizedMotionPayload } from "./contracts";
+import type { CompileDiagnostics } from "./compiler/contracts";
 import type {
   ModelEngineDependencies,
   ModelEngineHistoryRole,
+  ModelEngineStatus,
   MotionRuntimeSchedulerDependencies,
   MotionStartDependencies,
 } from "./runtime/contracts";

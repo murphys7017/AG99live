@@ -7,7 +7,7 @@ import type {
   SemanticAxisDefinition,
   SemanticAxisParameterBinding,
 } from "../../types/semantic-axis-profile.js";
-import type { CompileOptions, CompileResult } from "../contracts.js";
+import type { CompileOptions, CompileResult } from "./contracts.js";
 import { normalizeModelEngineSettings } from "../settings.js";
 import { buildBaseCompileDiagnostics, finalizeCompileDiagnostics } from "./diagnostics.js";
 import {

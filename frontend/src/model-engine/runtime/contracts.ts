@@ -3,12 +3,21 @@ import type {
   ModelSummary,
   MotionPlanPayload,
 } from "../../types/protocol.js";
-import type { ModelEngineSettings } from "../settings.js";
 import type {
-  CompileDiagnostics,
-  ModelEngineStatus,
+  InboundPayloadContext,
   NormalizedMotionPayload,
 } from "../contracts.js";
+import type {
+  CompileDiagnostics,
+} from "../compiler/contracts.js";
+import type { ModelEngineSettings } from "../settings.js";
+
+export type ModelEngineStatus =
+  | "idle"
+  | "pending"
+  | "compiling"
+  | "playing"
+  | "failed";
 
 export interface PlayPlanOptions {
   softHandoff?: boolean;
@@ -97,3 +106,5 @@ export interface ModelEngineDependencies
     text: string,
   ) => void;
 }
+
+export type { InboundPayloadContext };
