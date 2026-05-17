@@ -22,6 +22,7 @@ import { intentValidatorStage } from "./stages/intentValidator.js";
 import { axisResolverStage } from "./stages/axisResolver.js";
 import { couplingStage } from "./stages/couplingStage.js";
 import { intensityStage } from "./stages/intensityStage.js";
+import { modeResolverStage } from "./stages/modeResolverStage.js";
 
 export function compileMotionIntent(
   intent: SemanticMotionIntent,
@@ -50,6 +51,7 @@ function buildDefaultCompileStages(): MotionCompileStage[] {
     axisResolverStage,
     intensityStage,
     couplingStage,
+    modeResolverStage,
   ];
 }
 
@@ -85,14 +87,7 @@ function continueLegacyCompile(
   const missingAxes = [...state.missingAxes];
   const maxAxisErrors = state.axisErrorLimit;
   const axisErrorCount = state.axisErrorCount;
-
-  const idleDeadzone = isSemanticIdleDeadzone(allAxisValues, axisById);
-  const resolvedMode: SemanticParameterPlan["mode"] =
-    intent.mode === "idle"
-      ? "idle"
-      : idleDeadzone
-        ? "idle"
-        : "expressive";
+  const resolvedMode: SemanticParameterPlan["mode"] = state.resolvedMode;
   const timing = resolveMotionTiming({
     mode: resolvedMode,
     durationHintMs: intent.duration_hint_ms ?? null,
@@ -134,12 +129,7 @@ function continueLegacyCompile(
   state.invalidAxes = invalidAxes;
   state.axisErrorCount = axisErrorCount;
   state.axisErrorLimit = maxAxisErrors;
-  state.warnings = [
-    ...warnings,
-    ...(idleDeadzone && intent.mode === "expressive"
-      ? ["expressive_intent_resolved_to_idle_deadzone"]
-      : []),
-  ];
+  state.warnings = warnings;
   state.resolvedMode = resolvedMode;
   state.timing = timing;
   state.parameters = parameterResult.parameters;
@@ -148,23 +138,6 @@ function continueLegacyCompile(
     intensityApplied:
       intent.mode === "expressive" && settings.motionIntensityScale !== 1,
   });
-}
-
-function isSemanticIdleDeadzone(
-  axisValues: DynamicAxisValues,
-  axisById: Map<string, SemanticAxisDefinition>,
-): boolean {
-  for (const [axisId, value] of Object.entries(axisValues)) {
-    const axis = axisById.get(axisId);
-    if (!axis) {
-      return false;
-    }
-    const [minSoft, maxSoft] = axis.soft_range;
-    if (value < minSoft || value > maxSoft) {
-      return false;
-    }
-  }
-  return true;
 }
 
 function buildSemanticPlanParameters(
