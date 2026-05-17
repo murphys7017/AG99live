@@ -20,6 +20,7 @@ import {
 import { runCompilePipeline } from "./pipeline.js";
 import { intentValidatorStage } from "./stages/intentValidator.js";
 import { axisResolverStage } from "./stages/axisResolver.js";
+import { intensityStage } from "./stages/intensityStage.js";
 
 export function compileMotionIntent(
   intent: SemanticMotionIntent,
@@ -46,6 +47,7 @@ function buildDefaultCompileStages(): MotionCompileStage[] {
   return [
     intentValidatorStage,
     axisResolverStage,
+    intensityStage,
   ];
 }
 
@@ -73,39 +75,12 @@ function continueLegacyCompile(
   const axisById = state.axisById;
   const roleAxisIds = state.roleAxisIds;
   const warnings = [...state.warnings];
-  const controlledValues: DynamicAxisValues = {};
+  const controlledValues: DynamicAxisValues = { ...state.controlledValues };
   const forbiddenAxes = [...state.forbiddenAxes];
   const invalidAxes = [...state.invalidAxes];
   const missingAxes = [...state.missingAxes];
   const maxAxisErrors = state.axisErrorLimit;
   const axisErrorCount = state.axisErrorCount;
-
-  for (const [axisId, rawValue] of Object.entries(state.controlledValues)) {
-    const axis = axisById.get(axisId);
-    if (!axis) {
-      continue;
-    }
-    const intensityResult = applySemanticIntensity(
-      rawValue,
-      axis,
-      intent.mode,
-      settings.motionIntensityScale,
-      settings.axisIntensityScale[axisId] ?? 1,
-    );
-    controlledValues[axisId] = intensityResult.value;
-    if (intensityResult.warning) {
-      warnings.push(intensityResult.warning);
-      console.warn(
-        "[ModelEngine] semantic intensity adjusted:",
-        intensityResult.warning,
-        {
-          axisId,
-          inputValue: rawValue,
-          outputValue: intensityResult.value,
-        },
-      );
-    }
-  }
 
   let couplingResult: { values: DynamicAxisValues; warnings: string[] };
   try {
@@ -194,28 +169,6 @@ function continueLegacyCompile(
     intensityApplied:
       intent.mode === "expressive" && settings.motionIntensityScale !== 1,
   });
-}
-function applySemanticIntensity(
-  value: number,
-  axis: SemanticAxisDefinition,
-  mode: SemanticMotionIntent["mode"],
-  motionIntensityScale: number,
-  axisIntensityScale: number,
-): { value: number; warning: string } {
-  if (mode !== "expressive") {
-    return { value, warning: "" };
-  }
-  const [minValue, maxValue] = axis.value_range;
-  const scaled =
-    axis.neutral + (value - axis.neutral) * motionIntensityScale * axisIntensityScale;
-  if (scaled < minValue || scaled > maxValue) {
-    const clampedValue = Math.max(minValue, Math.min(maxValue, scaled));
-    return {
-      value: clampedValue,
-      warning: `semantic_intensity_clamped:${axis.id}:${scaled}->${clampedValue}`,
-    };
-  }
-  return { value: scaled, warning: "" };
 }
 
 function applySemanticCouplings(
