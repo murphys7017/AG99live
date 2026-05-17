@@ -1,6 +1,6 @@
 import type { Ref } from "vue";
+import type { ModelEnginePlanStartedEvent } from "../model-engine/runtime/contracts.js";
 import type {
-  ModelEnginePlanStartedEvent,
   NormalizedMotionPayload,
 } from "../model-engine/contracts.js";
 import type { ModelSummary } from "../types/protocol.js";

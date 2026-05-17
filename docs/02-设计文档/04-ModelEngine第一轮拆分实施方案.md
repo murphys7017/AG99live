@@ -14,7 +14,7 @@
 
 本轮只做两件事：
 
-1. 把 `compiler.ts` 从单体函数拆成明确的 compile pipeline
+1. 把 compile 主链从单体函数拆成明确的 compile pipeline
 2. 把 `useModelEngine.ts` 从大而全的运行时入口，收敛成 facade + runtime scheduler 结构
 
 本轮不做：
@@ -79,16 +79,10 @@ frontend/src/model-engine/compiler/
     planBuilder.ts
 ```
 
-当前兼容入口也已经收口为：
+当前 compile 主入口为：
 
 ```text
-frontend/src/model-engine/compiler.ts
-```
-
-其职责只是转发：
-
-```ts
-export { compileMotionIntent } from "./compiler/compileMotionIntent.js";
+frontend/src/model-engine/compiler/compileMotionIntent.ts
 ```
 
 当前已完成验证：
@@ -102,7 +96,7 @@ export { compileMotionIntent } from "./compiler/compileMotionIntent.js";
 
 ## 2. 当前代码与目标结构映射
 
-当前 `frontend/src/model-engine/compiler.ts` 中已经包含了后续 stage 所需的大部分逻辑，只是还没有按模块拆开。
+当前 compile 主链所需的大部分逻辑已经拆入 `frontend/src/model-engine/compiler/` 目录。
 
 ### 2.1 当前函数到目标文件映射
 
@@ -948,21 +942,15 @@ function mapSemanticBindingValue(
 
 ---
 
-## 16. `compiler.ts` 的兼容处理
+## 16. Compile 主入口
 
-第一轮为了降低改动面，建议保留现有 `frontend/src/model-engine/compiler.ts` 文件，但把它变成一个转发入口。
+当前 compile 主入口直接使用：
 
-### 推荐做法
-
-```ts
-export { compileMotionIntent } from "./compiler/compileMotionIntent";
+```text
+frontend/src/model-engine/compiler/compileMotionIntent.ts
 ```
 
-这样可以保证：
-
-- 外部 import 路径不变
-- 内部逻辑已经迁移到新结构
-- 后续再决定是否彻底删除旧文件
+不保留额外转发入口。
 
 ---
 
@@ -1251,7 +1239,7 @@ compiler/extensions.ts
 
 - `compiler/compileMotionIntent.ts`
 
-完成新入口装配，并让旧 `compiler.ts` 仅做转发。
+完成 compile 主入口装配。
 
 ### Step 10（已完成）
 
@@ -1264,7 +1252,7 @@ compiler/extensions.ts
 
 - `IntentValidator + AxisResolver` 主骨架已完成
 - compile 主链各 stage 已完整落位
-- 外部仍通过 `frontend/src/model-engine/compiler.ts` 获取 `compileMotionIntent`
+- compile 主入口为 `frontend/src/model-engine/compiler/compileMotionIntent.ts`
 - compiler 相关验证已通过
 - runtime scheduler 已迁入 `runtime/motionRuntimeScheduler.ts`
 - payload start 已迁入 `runtime/motionStart.ts`
@@ -1305,7 +1293,7 @@ compiler/extensions.ts
 
 ### 23.3 代码结构
 
-- `compiler.ts` 不再承担全部 compile 逻辑
+- compile 主入口不再承担全部 compile 逻辑
 - stage 文件职责单一
 - `useModelEngine.ts` 明显变薄
 
@@ -1322,7 +1310,7 @@ compiler/extensions.ts
 
 1. 完成 `IntentValidator + AxisResolver` 后，先跑一轮 compile 相关单测
 2. 完成 `Intensity + Coupling + ModeResolver + Timing + PlanBuilder` 后，再跑一轮 compile 相关单测
-3. `compiler.ts` 切换成转发入口后，跑一轮更完整的 `model-engine` / `turn-playback` 相关测试
+3. compile 主入口切换完成后，跑一轮更完整的 `model-engine` / `turn-playback` 相关测试
 4. 进入 `useModelEngine.ts` runtime 拆分前，再做一次当前行为基线验证
 5. runtime 拆分完成后，再跑一轮包含 preview / playback / turn orchestration 的验证
 

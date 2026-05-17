@@ -1,4 +1,4 @@
-import { compileMotionIntent } from "../compiler.js";
+import { compileMotionIntent } from "../compiler/compileMotionIntent.js";
 import type {
   CompileDiagnostics,
   ModelEngineStatus,

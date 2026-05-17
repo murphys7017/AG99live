@@ -1,5 +1,5 @@
 import { shallowReadonly, ref, watch } from "vue";
-import type { ModelEnginePlanStartedEvent } from "../model-engine/contracts";
+import type { ModelEnginePlanStartedEvent } from "../model-engine/runtime/contracts";
 import type { DesktopMotionPlaybackRecord } from "../types/desktop";
 import type { usePreviewMotionPlayer } from "./usePreviewMotionPlayer";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";

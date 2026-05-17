@@ -33,7 +33,7 @@ engine.motion_intent.v2 / engine.parameter_plan.v2
 - `useModelEngine.ts` 已经开始收口为 facade，当前主要负责状态持有、runtime 装配和对外 API。
 - `motionRuntimeScheduler.ts` 已承担 pending queue、音频起播等待、turn 过期清理和启动时机决策。
 - `motionStart.ts` 已承担 payload 启动、semantic compile 触发、direct plan 启动和失败状态写回。
-- `compiler.ts` 已经收口为转发入口，真正的编译逻辑已经进入 `compiler/` 目录下的静态 pipeline stages。
+- `compileMotionIntent.ts` 是当前 compile 主入口，真正的编译逻辑已经进入 `compiler/` 目录下的静态 pipeline stages。
 - `settings.ts` 的设置模型需要面向 `SemanticAxisProfile`。
 - `CompileDiagnostics` 需要按 stage 聚合。
 - 新增表情判断、说话姿态、动作优化、连贯优化时，应通过 stage / registry 挂载。
@@ -131,7 +131,7 @@ ModelEngine 不负责：
 | `runtime/motionStart.ts` | payload 启动、compile 触发、playPlan 调用、启动结果写回 | 保持为 runtime start boundary |
 | `normalize.ts` | `motion_intent.v2` 和 `parameter_plan.v2` 入站归一化 | 保留为边界 parser |
 | `planParser.ts` | `parameter_plan.v2` parser / clone | 归入 contracts/parsers |
-| `compiler.ts` | 对外兼容转发入口 | 保留稳定 import 路径 |
+| `compiler/compileMotionIntent.ts` | compile 主入口，负责装配 pipeline 和收口结果 | 保持为 compiler 主入口 |
 | `compiler/compileMotionIntent.ts` | compile 主入口，负责装配 pipeline 和收口结果 | 保持为 compiler facade |
 | `compiler/compileContext.ts` | compile 共享上下文与 state 定义 | 保持为 stage 公共协议 |
 | `compiler/pipeline.ts` | stage 顺序执行器 | 保持轻量 |
@@ -560,7 +560,7 @@ Avatar Runtime 不负责：
 
 目标：
 
-- 把 `compiler.ts` 拆成 stage。
+- 把 compile 主链拆成 stage。
 - 先拆纯函数，不改变行为。
 
 建议文件：
@@ -629,7 +629,7 @@ model-engine/compiler/
 下一次进入代码前，优先看这些点：
 
 1. `useModelEngine.ts` 的 runtime scheduler 拆分边界。
-2. `compiler.ts` 的 pipeline stage 拆分边界。
+2. `compile pipeline` 的 stage 拆分边界。
 3. `settings.ts` 的 profile-aware settings 形态。
 4. `CompileDiagnostics` 的 stage 聚合结构。
 5. `ingestInboundPayload` 的公开 API 必要性。

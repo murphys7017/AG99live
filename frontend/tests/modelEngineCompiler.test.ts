@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { compileMotionIntent } from "../src/model-engine/compiler.js";
+import { compileMotionIntent } from "../src/model-engine/compiler/compileMotionIntent.js";
 import type { ModelSummary, SemanticMotionIntent } from "../src/types/protocol.js";
 import type { SemanticAxisProfile } from "../src/types/semantic-axis-profile.js";
 
