@@ -22,17 +22,15 @@ function createHarness() {
     releaseAssistantTextForPlayback(
       messageId: string,
       turnId: string | null,
-      orchestrationId: string | null,
     ): boolean {
-      released.push(`text:${messageId}:${turnId ?? ""}:${orchestrationId ?? ""}`);
+      released.push(`text:${messageId}:${turnId ?? ""}`);
       return true;
     },
     releaseAudioForPlayback(
       messageId: string,
       turnId: string | null,
-      orchestrationId: string | null,
     ): boolean {
-      released.push(`audio:${messageId}:${turnId ?? ""}:${orchestrationId ?? ""}`);
+      released.push(`audio:${messageId}:${turnId ?? ""}`);
       return true;
     },
   };
@@ -40,11 +38,9 @@ function createHarness() {
   const modelEngine = {
     ingestNormalizedPayload(
       _payload: NormalizedMotionPayload,
-      context: { messageId: string; turnId: string | null; orchestrationId?: string | null },
+      context: { messageId: string; turnId: string | null },
     ): void {
-      released.push(
-        `motion:${context.messageId}:${context.turnId ?? ""}:${context.orchestrationId ?? ""}`,
-      );
+      released.push(`motion:${context.messageId}:${context.turnId ?? ""}`);
     },
     notifyCurrentTurnChanged(turnId: string | null): void {
       turnChanges.push(turnId);
@@ -70,40 +66,40 @@ function createHarness() {
 
 async function testSegmentsReleaseSequentiallyWithinTurn(): Promise<void> {
   const h = createHarness();
-  h.sessionStore.setActiveSession("orch-1", "turn-1");
-  h.sessionStore.markTurnStarted("orch-1", "turn-1");
+  h.sessionStore.setActiveSession("turn-1");
+  h.sessionStore.markTurnStarted("turn-1");
 
-  h.sessionStore.markTextReceived("orch-1", "turn-1", "A", "msg-a");
-  h.sessionStore.markAudioReceived("orch-1", "turn-1", "http://localhost/a.wav", "msg-a");
-  h.sessionStore.markMotionReceived("orch-1", "turn-1", motionPayload, "msg-a");
+  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
+  h.sessionStore.markAudioReceived("turn-1", "http://localhost/a.wav", "msg-a");
+  h.sessionStore.markMotionReceived("turn-1", motionPayload, "msg-a");
 
-  h.sessionStore.markTextReceived("orch-1", "turn-1", "B", "msg-b");
-  h.sessionStore.markAudioReceived("orch-1", "turn-1", "http://localhost/b.wav", "msg-b");
-  h.sessionStore.markMotionReceived("orch-1", "turn-1", motionPayload, "msg-b");
+  h.sessionStore.markTextReceived("turn-1", "B", "msg-b");
+  h.sessionStore.markAudioReceived("turn-1", "http://localhost/b.wav", "msg-b");
+  h.sessionStore.markMotionReceived("turn-1", motionPayload, "msg-b");
 
   await h.flush();
   await h.flush();
 
   assert.deepEqual(h.released, [
-    "text:msg-a:turn-1:orch-1",
-    "motion:msg-a:turn-1:orch-1",
-    "audio:msg-a:turn-1:orch-1",
+    "text:msg-a:turn-1",
+    "motion:msg-a:turn-1",
+    "audio:msg-a:turn-1",
   ]);
 
-  h.sessionStore.markTextDelivered("orch-1", "turn-1", "msg-a");
-  h.sessionStore.markAudioTerminal("orch-1", "turn-1", "completed", "msg-a");
-  h.sessionStore.markMotionCompleted("orch-1", "turn-1", "msg-a");
+  h.sessionStore.markTextDelivered("turn-1", "msg-a");
+  h.sessionStore.markAudioTerminal("turn-1", "completed", "msg-a");
+  h.sessionStore.markMotionCompleted("turn-1", "msg-a");
 
   await h.flush();
   await h.flush();
 
   assert.deepEqual(h.released, [
-    "text:msg-a:turn-1:orch-1",
-    "motion:msg-a:turn-1:orch-1",
-    "audio:msg-a:turn-1:orch-1",
-    "text:msg-b:turn-1:orch-1",
-    "motion:msg-b:turn-1:orch-1",
-    "audio:msg-b:turn-1:orch-1",
+    "text:msg-a:turn-1",
+    "motion:msg-a:turn-1",
+    "audio:msg-a:turn-1",
+    "text:msg-b:turn-1",
+    "motion:msg-b:turn-1",
+    "audio:msg-b:turn-1",
   ]);
   h.stop();
 }

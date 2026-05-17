@@ -62,7 +62,6 @@ def _create_session_state_stub(
     client_uid: str = "test-client",
     current_turn_id: str | None = "turn-1",
     waiting_for_playback_complete: bool = False,
-    orchestrration_id: str | None = "orch-1",
 ):
     st = type(
         "SessionStateStub",
@@ -71,7 +70,6 @@ def _create_session_state_stub(
             "client_uid": client_uid,
             "current_turn_id": current_turn_id,
             "waiting_for_playback_complete": waiting_for_playback_complete,
-            "current_orchestration_id": orchestrration_id,
         },
     )()
     st.mark_playback_complete = lambda: setattr(st, "waiting_for_playback_complete", False)

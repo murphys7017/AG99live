@@ -9,7 +9,6 @@ function makeEnvelope<TPayload>(
   payload: TPayload,
   options: {
     turnId?: string | null;
-    orchestrationId?: string | null;
   } = {},
 ): ProtocolEnvelope<TPayload> {
   return {
@@ -17,9 +16,7 @@ function makeEnvelope<TPayload>(
     version: "v2",
     message_id: "m-1",
     timestamp: "2026-05-08T00:00:00.000Z",
-    session_id: "session-1",
     turn_id: options.turnId ?? null,
-    orchestration_id: options.orchestrationId ?? null,
     source: "backend",
     payload,
   };
@@ -28,9 +25,7 @@ function makeEnvelope<TPayload>(
 function defaultContext() {
   return {
     currentTurnId: "current-turn",
-    currentOrchestrationId: "current-orch",
     activeAudioTurnId: "audio-turn",
-    activeAudioOrchestrationId: "audio-orch",
   };
 }
 
@@ -42,7 +37,6 @@ function testOutputTextUsesEnvelopeIdentity(): void {
       avatar: "",
     }, {
       turnId: "turn-1",
-      orchestrationId: "orch-1",
     }),
     defaultContext(),
   );
@@ -52,12 +46,11 @@ function testOutputTextUsesEnvelopeIdentity(): void {
     throw new Error("expected output_text event");
   }
   assert.equal(event.turnId, "turn-1");
-  assert.equal(event.orchestrationId, "orch-1");
   assert.equal(event.messageId, "m-1");
   assert.equal(event.text, "hello");
 }
 
-function testOutputAudioFallsBackToCurrentOrchestration(): void {
+function testOutputAudioFallsBackToCurrentTurn(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("output.audio", {
       text: " hi ",
@@ -66,7 +59,6 @@ function testOutputAudioFallsBackToCurrentOrchestration(): void {
       avatar: "",
     }, {
       turnId: "turn-2",
-      orchestrationId: null,
     }),
     defaultContext(),
   );
@@ -76,7 +68,6 @@ function testOutputAudioFallsBackToCurrentOrchestration(): void {
     throw new Error("expected output_audio event");
   }
   assert.equal(event.turnId, "turn-2");
-  assert.equal(event.orchestrationId, "current-orch");
   assert.equal(event.messageId, "m-1");
   assert.equal(event.text, "hi");
   assert.equal(event.audioUrl, "https://example.com/a.wav");
@@ -89,7 +80,6 @@ function testTurnFinishedFallsBackToActiveIdentity(): void {
       reason: " done ",
     }, {
       turnId: null,
-      orchestrationId: null,
     }),
     defaultContext(),
   );
@@ -99,7 +89,6 @@ function testTurnFinishedFallsBackToActiveIdentity(): void {
     throw new Error("expected turn_finished event");
   }
   assert.equal(event.turnId, "current-turn");
-  assert.equal(event.orchestrationId, "current-orch");
   assert.equal(event.reason, "done");
 }
 
@@ -107,7 +96,6 @@ function testTurnStartedDoesNotInheritCurrentIdentity(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("control.turn_started", {}, {
       turnId: null,
-      orchestrationId: null,
     }),
     defaultContext(),
   );
@@ -117,14 +105,12 @@ function testTurnStartedDoesNotInheritCurrentIdentity(): void {
     throw new Error("expected turn_started event");
   }
   assert.equal(event.turnId, null);
-  assert.equal(event.orchestrationId, null);
 }
 
 function testInterruptUsesCurrentIdentity(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("control.interrupt", {}, {
       turnId: "stale-turn",
-      orchestrationId: "stale-orch",
     }),
     defaultContext(),
   );
@@ -134,15 +120,12 @@ function testInterruptUsesCurrentIdentity(): void {
     throw new Error("expected interrupt event");
   }
   assert.equal(event.turnId, "current-turn");
-  assert.equal(event.orchestrationId, "current-orch");
 }
 
-function testEngineMotionFallsBackCurrentThenAudio(): void {
+function testEngineMotionFallsBackCurrentThenAudioTurn(): void {
   const currentContext = {
     currentTurnId: "current-turn",
-    currentOrchestrationId: null,
     activeAudioTurnId: "audio-turn",
-    activeAudioOrchestrationId: "audio-orch",
   };
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("engine.motion_intent", {
@@ -152,7 +135,6 @@ function testEngineMotionFallsBackCurrentThenAudio(): void {
       },
     }, {
       turnId: null,
-      orchestrationId: null,
     }),
     currentContext,
   );
@@ -162,7 +144,6 @@ function testEngineMotionFallsBackCurrentThenAudio(): void {
     throw new Error("expected engine_motion_payload event");
   }
   assert.equal(event.turnId, "current-turn");
-  assert.equal(event.orchestrationId, "audio-orch");
   assert.equal(event.messageId, "m-1");
 }
 
@@ -173,7 +154,6 @@ function testMissingSegmentMessageIdReturnsProtocolError(): void {
     avatar: "",
   }, {
     turnId: "turn-legacy",
-    orchestrationId: "orch-legacy",
   });
   const envelopeB = makeEnvelope("engine.motion_intent", {
     mode: "preview",
@@ -182,7 +162,6 @@ function testMissingSegmentMessageIdReturnsProtocolError(): void {
     },
   }, {
     turnId: "turn-legacy",
-    orchestrationId: "orch-legacy",
   });
   envelopeA.message_id = "";
   envelopeB.message_id = "";
@@ -258,11 +237,11 @@ function testInvalidHistoryCreatedPayloadReturnsProtocolError(): void {
 
 function run(): void {
   testOutputTextUsesEnvelopeIdentity();
-  testOutputAudioFallsBackToCurrentOrchestration();
+  testOutputAudioFallsBackToCurrentTurn();
   testTurnFinishedFallsBackToActiveIdentity();
   testTurnStartedDoesNotInheritCurrentIdentity();
   testInterruptUsesCurrentIdentity();
-  testEngineMotionFallsBackCurrentThenAudio();
+  testEngineMotionFallsBackCurrentThenAudioTurn();
   testMissingSegmentMessageIdReturnsProtocolError();
   testUnhandledTypeReturnsUnhandled();
   testInvalidOutputTextPayloadReturnsProtocolError();

@@ -289,8 +289,13 @@ function cloneMotionPlaybackRecord(
       return null;
     }
     const diagnostics = cloneMotionCompileDiagnostics(record.diagnostics);
+    const playbackTurnId =
+      normalizeOptionalText((record as Record<string, unknown>).playbackTurnId)
+      ?? normalizeOptionalText((record as Record<string, unknown>).turnId)
+      ?? null;
     return {
       ...(record as unknown as DesktopMotionPlaybackRecord),
+      playbackTurnId,
       diagnostics: diagnostics as DesktopMotionPlaybackRecord["diagnostics"],
       plan,
     } satisfies DesktopMotionPlaybackRecord;

@@ -27,7 +27,6 @@ function testVersionMismatch(): void {
     version: "wrong",
     message_id: "m-1",
     timestamp: "2026-05-08T00:00:00.000Z",
-    session_id: "session-1",
     turn_id: "turn-1",
     source: "backend",
     payload: {},
@@ -50,9 +49,7 @@ function testValidEnvelope(): void {
     version: "v2",
     message_id: "m-1",
     timestamp: "2026-05-08T00:00:00.000Z",
-    session_id: "session-1",
     turn_id: "turn-1",
-    orchestration_id: "orch-1",
     source: "backend",
     payload: { text: "hello" },
   }));

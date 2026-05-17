@@ -2,7 +2,7 @@ import type { ProtocolEnvelope } from "../../types/protocol.js";
 import { SCHEMA_MOTION_INTENT_V2 } from "../../types/protocol.js";
 import {
   normalizeTurnIdForComparison,
-} from "../core/orchestrationIds.js";
+} from "../core/turnIds.js";
 
 export interface InboundMotionState {
   currentTurnId: string | null;

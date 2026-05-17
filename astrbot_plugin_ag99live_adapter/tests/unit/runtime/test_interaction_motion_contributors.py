@@ -177,7 +177,6 @@ def _build_event(*, mode: str = "inline_first", raw_turn_id: str = "front-turn")
                 (),
                 {
                     "current_turn_id": "session-turn",
-                    "current_orchestration_id": "session-orch",
                 },
             )(),
             "schedule_motion_after_reply": staticmethod(schedule_motion_after_reply),
@@ -195,7 +194,6 @@ def _build_event(*, mode: str = "inline_first", raw_turn_id: str = "front-turn")
                 {
                     "raw_message": {
                         "turn_id": raw_turn_id,
-                        "orchestration_id": "raw-orch",
                     }
                 },
             )()

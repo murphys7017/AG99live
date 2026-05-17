@@ -251,7 +251,7 @@ export function usePlaybackCompletionCoordinator(
       source: event.diagnostics?.source || event.startReason,
       payloadKind: event.payloadKind,
       turnId: event.turnId,
-      orchestrationId: event.turnId,
+      playbackTurnId: event.playbackTurnId,
       modelName: event.model?.name ?? options.motionRecord.getSelectedModel().value?.name ?? "",
       emotionLabel: event.plan.emotion_label,
       mode: event.plan.mode,

@@ -247,7 +247,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
           model: selectedModel,
           messageId: context.messageId,
           turnId: context.turnId,
-          orchestrationId: context.playbackTurnId,
+          playbackTurnId: context.playbackTurnId,
           startReason: context.startReason,
           queuedDelayMs: context.queuedDelayMs,
           payloadKind: payload.kind,
@@ -294,7 +294,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
           model: selectedModel,
           messageId: context.messageId,
           turnId: context.turnId,
-          orchestrationId: context.playbackTurnId,
+          playbackTurnId: context.playbackTurnId,
           startReason: context.startReason,
           queuedDelayMs: context.queuedDelayMs,
         payloadKind: directPlanPayload.kind,
@@ -334,7 +334,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       startPayload(payload, {
         messageId: context.messageId,
         turnId: null,
-        playbackTurnId: context.orchestrationId ?? context.turnId ?? null,
+        playbackTurnId: context.playbackTurnId ?? context.turnId ?? null,
         startReason: "missing_turn_id",
         queuedDelayMs: 0,
       });
@@ -355,7 +355,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       payload,
       messageId: context.messageId,
       turnId: normalizedTurnId,
-      playbackTurnId: context.orchestrationId ?? context.turnId ?? null,
+      playbackTurnId: context.playbackTurnId ?? context.turnId ?? null,
       receivedAtMs: context.receivedAtMs,
       audioWaitTimer: 0,
     };
@@ -370,8 +370,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       const currentTurnId = normalizeTurnId(
         activeSession?.turnId ?? dependencies.getCurrentTurnId(),
       );
-      const currentPlaybackTurnId =
-        normalizeTurnId(dependencies.getCurrentOrchestrationId?.() ?? currentTurnId);
+      const currentPlaybackTurnId = currentTurnId;
       const audioPlaybackTurnId =
         normalizeTurnId(
           findStartedSegment(entry.messageId, entry.turnId, entry.playbackTurnId)?.turnId ?? null,

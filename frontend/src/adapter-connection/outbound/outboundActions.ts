@@ -1,7 +1,7 @@
 import type { SystemSemanticAxisProfileSavePayload } from "../../types/protocol.js";
 import {
   normalizeTurnIdForComparison,
-} from "../core/orchestrationIds.js";
+} from "../core/turnIds.js";
 import type { AdapterOutboundClient } from "./outboundClient.js";
 
 export interface OutboundActionState {

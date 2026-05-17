@@ -74,7 +74,7 @@ export interface CompileResult {
 export interface InboundPayloadContext {
   messageId: string;
   turnId: string | null;
-  orchestrationId?: string | null;
+  playbackTurnId?: string | null;
   receivedAtMs: number;
 }
 
@@ -89,7 +89,7 @@ export interface ModelEnginePlanStartedEvent {
   model: ModelSummary | null;
   messageId: string;
   turnId: string | null;
-  orchestrationId: string | null;
+  playbackTurnId: string | null;
   startReason: string;
   queuedDelayMs: number;
   payloadKind: NormalizedMotionPayload["kind"];
@@ -107,7 +107,6 @@ export interface ModelEngineDependencies {
   ) => boolean;
   stopPlan: (reason?: string) => void;
   getCurrentTurnId: () => string | null;
-  getCurrentOrchestrationId?: () => string | null;
   pushHistory?: (
     role: Extract<DesktopHistoryEntry["role"], "system" | "error">,
     text: string,
@@ -122,7 +121,6 @@ export interface ModelEngineDependencies {
       segments: Map<string, {
         messageId: string;
         turnId: string | null;
-        orchestrationId?: string | null;
         audio: {
           released: boolean;
           started: boolean;
@@ -140,7 +138,6 @@ export interface ModelEngineDependencies {
       segments: Map<string, {
         messageId: string;
         turnId: string | null;
-        orchestrationId?: string | null;
         audio: {
           released: boolean;
           started: boolean;

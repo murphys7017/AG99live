@@ -259,15 +259,13 @@ function lastHistoryText(adapter: ReturnType<typeof useAdapterConnection>): stri
   return entries[entries.length - 1]?.text ?? "";
 }
 
-function sendTurnStarted(socket: FakeWebSocket, turnId = "turn-1", orchestrationId = "orch-1"): void {
+function sendTurnStarted(socket: FakeWebSocket, turnId = "turn-1"): void {
   socket.emitMessage(JSON.stringify({
     type: "control.turn_started",
     version: "v2",
     message_id: `start-${turnId}`,
     timestamp: "2026-05-08T00:00:00.000Z",
-    session_id: "session-1",
     turn_id: turnId,
-    orchestration_id: orchestrationId,
     source: "backend",
     payload: {},
   }));
@@ -279,15 +277,13 @@ async function flushMicrotasks(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-function motionIntentEnvelope(messageId: string, turnId: string | null, orchestrationId: string | null) {
+function motionIntentEnvelope(messageId: string, turnId: string | null) {
   return {
     type: "engine.motion_intent",
     version: "v2",
     message_id: messageId,
     timestamp: "2026-05-08T00:00:03.000Z",
-    session_id: "session-1",
     turn_id: turnId,
-    orchestration_id: orchestrationId,
     source: "backend",
     payload: {
       mode: "preview",
@@ -324,7 +320,6 @@ function testVersionMismatchMessageDedupesHistory(): void {
       version: "wrong",
       message_id: "m-1",
       timestamp: "2026-05-08T00:00:00.000Z",
-      session_id: "session-1",
       turn_id: "turn-1",
       source: "backend",
       payload: { text: "hello", speaker_name: "", avatar: "" },
@@ -342,16 +337,14 @@ function testVersionMismatchMessageDedupesHistory(): void {
 
 function testInvalidPayloadDoesNotEnterPlaybackState(): void {
   withConnectedAdapter(({ adapter, socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-invalid-payload", "orch-invalid-payload");
+    sendTurnStarted(socket, "turn-invalid-payload");
     const initialHistoryLength = adapter.state.historyEntries.length;
     socket.emitMessage(JSON.stringify({
       type: "output.text",
       version: "v2",
       message_id: "m-invalid-payload",
       timestamp: "2026-05-08T00:00:01.000Z",
-      session_id: "session-invalid",
       turn_id: "turn-invalid-payload",
-      orchestration_id: "orch-invalid-payload",
       source: "backend",
       payload: { text: 123 },
     }));
@@ -362,7 +355,7 @@ function testInvalidPayloadDoesNotEnterPlaybackState(): void {
     );
     assert.equal(adapter.state.pendingAssistantTexts.has("m-invalid-payload"), false);
     assert.equal(
-      sessionStore.getSession("orch-invalid-payload")?.segments.has("m-invalid-payload"),
+      sessionStore.getSession("turn-invalid-payload")?.segments.has("m-invalid-payload"),
       false,
     );
     assert.equal(adapter.state.historyEntries.length, initialHistoryLength + 1);
@@ -371,15 +364,13 @@ function testInvalidPayloadDoesNotEnterPlaybackState(): void {
 
 function testTextAudioMotionWithSameMessageIdShareSegment(): void {
   withConnectedAdapter(({ adapter, socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-segment", "orch-segment");
+    sendTurnStarted(socket, "turn-segment");
     socket.emitMessage(JSON.stringify({
       type: "output.text",
       version: "v2",
       message_id: "m-segment-1",
       timestamp: "2026-05-08T00:00:01.000Z",
-      session_id: "session-segment",
       turn_id: "turn-segment",
-      orchestration_id: "orch-segment",
       source: "backend",
       payload: { text: " segment text ", speaker_name: "assistant", avatar: "" },
     }));
@@ -388,9 +379,7 @@ function testTextAudioMotionWithSameMessageIdShareSegment(): void {
       version: "v2",
       message_id: "m-segment-1",
       timestamp: "2026-05-08T00:00:02.000Z",
-      session_id: "session-segment",
       turn_id: "turn-segment",
-      orchestration_id: "orch-segment",
       source: "backend",
       payload: {
         text: " audio fallback should not overwrite ",
@@ -399,7 +388,7 @@ function testTextAudioMotionWithSameMessageIdShareSegment(): void {
         avatar: "",
       },
     }));
-    socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-segment-1", "turn-segment", "orch-segment")));
+    socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-segment-1", "turn-segment")));
 
     assert.equal(adapter.state.pendingAssistantTexts.get("m-segment-1")?.text, "segment text");
     assert.equal(
@@ -407,7 +396,7 @@ function testTextAudioMotionWithSameMessageIdShareSegment(): void {
       "http://127.0.0.1/segment.wav",
     );
 
-    const session = sessionStore.getSession("orch-segment");
+    const session = sessionStore.getSession("turn-segment");
     assert.ok(session);
     assert.equal(session?.segments.size, 1);
     assert.deepEqual(session?.segmentOrder, ["m-segment-1"]);
@@ -420,16 +409,14 @@ function testTextAudioMotionWithSameMessageIdShareSegment(): void {
 
 function testMultipleMessageIdsDoNotOverwritePendingItems(): void {
   withConnectedAdapter(({ adapter, socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-multi", "orch-multi");
+    sendTurnStarted(socket, "turn-multi");
     for (const [messageId, text] of [["m-a", "First"], ["m-b", "Second"]] as const) {
       socket.emitMessage(JSON.stringify({
         type: "output.text",
         version: "v2",
         message_id: messageId,
         timestamp: "2026-05-08T00:00:01.000Z",
-        session_id: "session-multi",
         turn_id: "turn-multi",
-        orchestration_id: "orch-multi",
         source: "backend",
         payload: { text, speaker_name: "assistant", avatar: "" },
       }));
@@ -437,21 +424,19 @@ function testMultipleMessageIdsDoNotOverwritePendingItems(): void {
 
     assert.equal(adapter.state.pendingAssistantTexts.get("m-a")?.text, "First");
     assert.equal(adapter.state.pendingAssistantTexts.get("m-b")?.text, "Second");
-    assert.deepEqual(sessionStore.getSession("orch-multi")?.segmentOrder, ["m-a", "m-b"]);
+    assert.deepEqual(sessionStore.getSession("turn-multi")?.segmentOrder, ["m-a", "m-b"]);
   });
 }
 
 function testFallbackIdentityWritesCurrentSessionSegment(): void {
   withConnectedAdapter(({ adapter, socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-fallback", "orch-fallback");
+    sendTurnStarted(socket, "turn-fallback");
     socket.emitMessage(JSON.stringify({
       type: "output.audio",
       version: "v2",
       message_id: "m-audio-fallback",
       timestamp: "2026-05-08T00:00:01.000Z",
-      session_id: "session-fallback",
       turn_id: null,
-      orchestration_id: null,
       source: "backend",
       payload: {
         text: " audio text ",
@@ -462,8 +447,7 @@ function testFallbackIdentityWritesCurrentSessionSegment(): void {
     }));
 
     assert.equal(adapter.state.pendingAudios.get("m-audio-fallback")?.turnId, "turn-fallback");
-    assert.equal(adapter.state.pendingAudios.get("m-audio-fallback")?.orchestrationId, "orch-fallback");
-    const segment = sessionStore.getSession("orch-fallback")?.segments.get("m-audio-fallback");
+    const segment = sessionStore.getSession("turn-fallback")?.segments.get("m-audio-fallback");
     assert.equal(segment?.audio.url, "http://127.0.0.1/audio-fallback.wav");
     assert.equal(segment?.text.content, "audio text");
   });
@@ -476,15 +460,12 @@ function testTurnStartedResetsPendingMaps(): void {
       version: "v2",
       message_id: "m-old",
       timestamp: "2026-05-08T00:00:00.000Z",
-      session_id: "session-old",
       turn_id: "turn-old",
-      orchestration_id: "orch-old",
       source: "backend",
       payload: { text: "queued", speaker_name: "assistant", avatar: "" },
     }));
-    sendTurnStarted(socket, "turn-new", "orch-new");
+    sendTurnStarted(socket, "turn-new");
     assert.equal(adapter.state.currentTurnId, "turn-new");
-    assert.equal(adapter.state.currentOrchestrationId, "orch-new");
     assert.equal(adapter.state.pendingAssistantTexts.size, 0);
     assert.equal(adapter.state.pendingAudios.size, 0);
   });
@@ -492,15 +473,13 @@ function testTurnStartedResetsPendingMaps(): void {
 
 function testSynthFinishedMarksMissingSegmentAudioAbsent(): void {
   withConnectedAdapter(({ socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-synth-finished", "orch-synth-finished");
+    sendTurnStarted(socket, "turn-synth-finished");
     socket.emitMessage(JSON.stringify({
       type: "output.text",
       version: "v2",
       message_id: "m-no-audio",
       timestamp: "2026-05-08T00:00:01.000Z",
-      session_id: "session-synth-finished",
       turn_id: "turn-synth-finished",
-      orchestration_id: "orch-synth-finished",
       source: "backend",
       payload: { text: "no audio", speaker_name: "assistant", avatar: "" },
     }));
@@ -509,14 +488,12 @@ function testSynthFinishedMarksMissingSegmentAudioAbsent(): void {
       version: "v2",
       message_id: "m-synth-finished",
       timestamp: "2026-05-08T00:00:02.000Z",
-      session_id: "session-synth-finished",
       turn_id: null,
-      orchestration_id: null,
       source: "backend",
       payload: {},
     }));
 
-    const session = sessionStore.getSession("orch-synth-finished");
+    const session = sessionStore.getSession("turn-synth-finished");
     assert.equal(session?.backend.synthFinished, true);
     assert.equal(session?.backend.turnFinished, false);
     assert.equal(session?.segments.get("m-no-audio")?.audio.terminal, "absent");
@@ -525,15 +502,13 @@ function testSynthFinishedMarksMissingSegmentAudioAbsent(): void {
 
 function testSynthFinishedDoesNotMarkReleasedAudioAbsent(): void {
   withConnectedAdapter(({ adapter, socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-released-audio", "orch-released-audio");
+    sendTurnStarted(socket, "turn-released-audio");
     sessionStore.markAudioReceived(
-      "orch-released-audio",
       "turn-released-audio",
       "http://localhost/audio.wav",
       "m-released-audio",
     );
     sessionStore.markAudioStarted(
-      "orch-released-audio",
       "turn-released-audio",
       "m-released-audio",
       100,
@@ -546,14 +521,12 @@ function testSynthFinishedDoesNotMarkReleasedAudioAbsent(): void {
       version: "v2",
       message_id: "m-synth-finished-released-audio",
       timestamp: "2026-05-08T00:00:02.000Z",
-      session_id: "session-released-audio",
       turn_id: "turn-released-audio",
-      orchestration_id: "orch-released-audio",
       source: "backend",
       payload: {},
     }));
 
-    const session = sessionStore.getSession("orch-released-audio");
+    const session = sessionStore.getSession("turn-released-audio");
     const segment = session?.segments.get("m-released-audio");
     assert.equal(segment?.audio.released, true);
     assert.notEqual(segment?.audio.terminal, "absent");
@@ -562,15 +535,13 @@ function testSynthFinishedDoesNotMarkReleasedAudioAbsent(): void {
 
 function testTurnFinishedDoesNotMarkMissingSegmentAudioAbsent(): void {
   withConnectedAdapter(({ socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-finished", "orch-finished");
+    sendTurnStarted(socket, "turn-finished");
     socket.emitMessage(JSON.stringify({
       type: "output.text",
       version: "v2",
       message_id: "m-no-audio-turn-finished",
       timestamp: "2026-05-08T00:00:01.000Z",
-      session_id: "session-finished",
       turn_id: "turn-finished",
-      orchestration_id: "orch-finished",
       source: "backend",
       payload: { text: "no audio", speaker_name: "assistant", avatar: "" },
     }));
@@ -579,14 +550,12 @@ function testTurnFinishedDoesNotMarkMissingSegmentAudioAbsent(): void {
       version: "v2",
       message_id: "m-turn-finished",
       timestamp: "2026-05-08T00:00:02.000Z",
-      session_id: "session-finished",
       turn_id: null,
-      orchestration_id: null,
       source: "backend",
       payload: { success: true },
     }));
 
-    const session = sessionStore.getSession("orch-finished");
+    const session = sessionStore.getSession("turn-finished");
     assert.equal(session?.backend.turnFinished, true);
     assert.equal(
       session?.segments.get("m-no-audio-turn-finished")?.audio.terminal,
@@ -597,33 +566,31 @@ function testTurnFinishedDoesNotMarkMissingSegmentAudioAbsent(): void {
 
 function testMotionFallbackDoesNotCreateAnonymousSession(): void {
   withConnectedAdapter(({ socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-motion", "orch-motion");
-    socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-motion", null, null)));
+    sendTurnStarted(socket, "turn-motion");
+    socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-motion", null)));
 
-    const session = sessionStore.getSession("orch-motion");
+    const session = sessionStore.getSession("turn-motion");
     assert.ok(session);
     assert.equal(session?.segments.get("m-motion")?.motion.payload?.kind, "semantic_intent");
-    assert.equal(sessionStore.getSessions().some((item) => item.id.startsWith("ephemeral:")), false);
+    assert.equal(sessionStore.getSessions().some((item) => item.id === "turn:turn-motion"), true);
   });
 }
 
 function testInvalidMotionDoesNotRewritePreviousSegment(): void {
   withConnectedAdapter(({ socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-motion-old", "orch-motion-old");
-    socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-motion-valid", null, null)));
+    sendTurnStarted(socket, "turn-motion-old");
+    socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-motion-valid", null)));
 
     const beforeSessionCount = sessionStore.getSessions().length;
     const previousPayload =
-      sessionStore.getSession("orch-motion-old")?.segments.get("m-motion-valid")?.motion.payload;
+      sessionStore.getSession("turn-motion-old")?.segments.get("m-motion-valid")?.motion.payload;
 
     socket.emitMessage(JSON.stringify({
       type: "engine.motion_intent",
       version: "v2",
       message_id: "m-motion-invalid",
       timestamp: "2026-05-08T00:00:04.000Z",
-      session_id: "session-1",
       turn_id: null,
-      orchestration_id: null,
       source: "backend",
       payload: {
         mode: "preview",
@@ -632,7 +599,7 @@ function testInvalidMotionDoesNotRewritePreviousSegment(): void {
     }));
 
     assert.deepEqual(
-      sessionStore.getSession("orch-motion-old")?.segments.get("m-motion-valid")?.motion.payload,
+      sessionStore.getSession("turn-motion-old")?.segments.get("m-motion-valid")?.motion.payload,
       previousPayload,
     );
     assert.equal(sessionStore.getSessions().length, beforeSessionCount);
@@ -642,15 +609,13 @@ function testInvalidMotionDoesNotRewritePreviousSegment(): void {
 function testBackToBackTurnsDoNotSharePendingState(): void {
   withConnectedAdapter(({ adapter, socket, sessionStore }) => {
     // Turn A
-    sendTurnStarted(socket, "turn-a", "orch-a");
+    sendTurnStarted(socket, "turn-a");
     socket.emitMessage(JSON.stringify({
       type: "output.text",
       version: "v2",
       message_id: "m-a",
       timestamp: "2026-05-08T00:00:01.000Z",
-      session_id: "session-1",
       turn_id: "turn-a",
-      orchestration_id: "orch-a",
       source: "backend",
       payload: { text: "text a", speaker_name: "assistant", avatar: "" },
     }));
@@ -658,20 +623,19 @@ function testBackToBackTurnsDoNotSharePendingState(): void {
     assert.ok(adapter.state.pendingAssistantTexts.has("m-a"));
 
     // Turn B starts, should clear Turn A's pending state
-    sendTurnStarted(socket, "turn-b", "orch-b");
+    sendTurnStarted(socket, "turn-b");
     assert.equal(adapter.state.currentTurnId, "turn-b");
-    assert.equal(adapter.state.currentOrchestrationId, "orch-b");
     assert.equal(adapter.state.pendingAssistantTexts.size, 0);
     assert.equal(adapter.state.pendingAudios.size, 0);
 
     // Turn A's session should still exist for diagnostics
-    assert.ok(sessionStore.getSession("orch-a"));
+    assert.ok(sessionStore.getSession("turn-a"));
   });
 }
 
 function testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted(): void {
   withConnectedAdapter(({ adapter, socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-current", "orch-current");
+    sendTurnStarted(socket, "turn-current");
 
     // Send turn_finished for a DIFFERENT turn_id
     socket.emitMessage(JSON.stringify({
@@ -679,15 +643,13 @@ function testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted(): void {
       version: "v2",
       message_id: "m-stale",
       timestamp: "2026-05-08T00:00:02.000Z",
-      session_id: "session-1",
       turn_id: "turn-other",
-      orchestration_id: "orch-other",
       source: "backend",
       payload: { success: true },
     }));
 
     // Current turn should NOT be marked as finished
-    const session = sessionStore.getSession("orch-current");
+    const session = sessionStore.getSession("turn-current");
     assert.ok(session);
     // The stale turn_finished created a separate session, not affecting current
     assert.equal(session.backend.turnFinished, false);
@@ -708,7 +670,7 @@ async function testSendTextUsesOutboundProtocolEnvelope(): Promise<void> {
     assert.equal(message.type, "input.text");
     assert.equal(message.version, "v2");
     assert.equal(typeof message.message_id, "string");
-    assert.equal(typeof message.orchestration_id, "string");
+    assert.equal(typeof message.turn_id, "string");
     assert.deepEqual(message.payload, {
       text: "hello outbound",
       images: [],
@@ -799,9 +761,7 @@ async function testAutoStartMicDoesNotDuplicateCaptureStart(): Promise<void> {
       version: "v2",
       message_id: "server-info-1",
       timestamp: "2026-05-08T00:00:00.000Z",
-      session_id: "session-1",
       turn_id: null,
-      orchestration_id: null,
       source: "adapter",
       payload: {
         ws_url: "ws://127.0.0.1:12396",
@@ -814,9 +774,7 @@ async function testAutoStartMicDoesNotDuplicateCaptureStart(): Promise<void> {
       version: "v2",
       message_id: "start-mic-1",
       timestamp: "2026-05-08T00:00:00.001Z",
-      session_id: "session-1",
       turn_id: null,
-      orchestration_id: null,
       source: "adapter",
       payload: {},
     }));
@@ -833,11 +791,11 @@ async function testAutoStartMicDoesNotDuplicateCaptureStart(): Promise<void> {
   }
 }
 
-async function testMicAudioUsesFreshInputOrchestrationAcrossChunkAndEnd(): Promise<void> {
+async function testMicAudioUsesFreshInputTurnAcrossChunkAndEnd(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
     const { adapter, socket } = harness;
-    sendTurnStarted(socket, "turn-playback", "orch-playback-old");
+    sendTurnStarted(socket, "turn-playback");
 
     const started = await adapter.toggleMicrophoneCapture();
     assert.equal(started, true);
@@ -858,10 +816,10 @@ async function testMicAudioUsesFreshInputOrchestrationAcrossChunkAndEnd(): Promi
 
     assert.ok(rawAudioMessage);
     assert.ok(micEndMessage);
-    assert.equal(typeof rawAudioMessage?.orchestration_id, "string");
-    assert.equal(rawAudioMessage?.orchestration_id, micEndMessage?.orchestration_id);
-    assert.notEqual(rawAudioMessage?.orchestration_id, "orch-playback-old");
-    assert.match(String(rawAudioMessage?.orchestration_id), /^input:/);
+    assert.equal(typeof rawAudioMessage?.turn_id, "string");
+    assert.equal(rawAudioMessage?.turn_id, micEndMessage?.turn_id);
+    assert.notEqual(rawAudioMessage?.turn_id, "turn-playback");
+    assert.match(String(rawAudioMessage?.turn_id), /^input:/);
     assert.deepEqual(micEndMessage?.payload, {
       reason: "manual_stop",
       dropped: false,
@@ -935,8 +893,8 @@ async function testDeviceChangeEndsPreviousMicSegmentBeforeRestart(): Promise<vo
       .map((item) => JSON.parse(item) as Record<string, unknown>)
       .find((item) => item.type === "input.raw_audio_data");
     assert.ok(firstRawMessage);
-    const firstOrchestrationId = String(firstRawMessage?.orchestration_id ?? "");
-    assert.match(firstOrchestrationId, /^input:/);
+    const firstTurnId = String(firstRawMessage?.turn_id ?? "");
+    assert.match(firstTurnId, /^input:/);
 
     socket.sent.length = 0;
     adapter.setMicrophoneDevice("mic-b");
@@ -946,7 +904,7 @@ async function testDeviceChangeEndsPreviousMicSegmentBeforeRestart(): Promise<vo
       .map((item) => JSON.parse(item) as Record<string, unknown>)
       .find((item) => item.type === "input.mic_audio_end");
     assert.ok(restartEndMessage);
-    assert.equal(restartEndMessage?.orchestration_id, firstOrchestrationId);
+    assert.equal(restartEndMessage?.turn_id, firstTurnId);
     assert.deepEqual(restartEndMessage?.payload, {
       reason: "device_change",
       dropped: false,
@@ -963,8 +921,8 @@ async function testDeviceChangeEndsPreviousMicSegmentBeforeRestart(): Promise<vo
       .reverse()
       .find((item) => item.type === "input.raw_audio_data");
     assert.ok(latestRawMessage);
-    assert.notEqual(latestRawMessage?.orchestration_id, firstOrchestrationId);
-    assert.match(String(latestRawMessage?.orchestration_id), /^input:/);
+    assert.notEqual(latestRawMessage?.turn_id, firstTurnId);
+    assert.match(String(latestRawMessage?.turn_id), /^input:/);
   } finally {
     harness.scope.stop();
   }
@@ -974,15 +932,13 @@ async function testInterruptMarksPlayingAudioSegmentFailed(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
     const { adapter, socket, sessionStore } = harness;
-    sendTurnStarted(socket, "turn-interrupt", "orch-interrupt");
+    sendTurnStarted(socket, "turn-interrupt");
     socket.emitMessage(JSON.stringify({
       type: "output.audio",
       version: "v2",
       message_id: "msg-interrupt-audio",
       timestamp: "2026-05-08T00:00:20.000Z",
-      session_id: "session-1",
       turn_id: "turn-interrupt",
-      orchestration_id: "orch-interrupt",
       source: "backend",
       payload: {
         audio_url: "http://127.0.0.1:12397/cache/audio/test.wav",
@@ -995,12 +951,11 @@ async function testInterruptMarksPlayingAudioSegmentFailed(): Promise<void> {
     const released = adapter.releaseAudioForPlayback(
       "msg-interrupt-audio",
       "turn-interrupt",
-      "orch-interrupt",
     );
     assert.equal(released, true);
     await flushMicrotasks();
 
-    const sessionBeforeInterrupt = sessionStore.getSession("orch-interrupt");
+    const sessionBeforeInterrupt = sessionStore.getSession("turn-interrupt");
     const segmentBeforeInterrupt = sessionBeforeInterrupt?.segments.get("msg-interrupt-audio");
     assert.equal(segmentBeforeInterrupt?.audio.started, true);
     assert.equal(adapter.state.isPlayingAudio, true);
@@ -1010,14 +965,12 @@ async function testInterruptMarksPlayingAudioSegmentFailed(): Promise<void> {
       version: "v2",
       message_id: "interrupt-1",
       timestamp: "2026-05-08T00:00:21.000Z",
-      session_id: "session-1",
       turn_id: "turn-interrupt",
-      orchestration_id: "orch-interrupt",
       source: "backend",
       payload: {},
     }));
 
-    const sessionAfterInterrupt = sessionStore.getSession("orch-interrupt");
+    const sessionAfterInterrupt = sessionStore.getSession("turn-interrupt");
     const segmentAfterInterrupt = sessionAfterInterrupt?.segments.get("msg-interrupt-audio");
     assert.equal(adapter.state.isPlayingAudio, false);
     assert.equal(segmentAfterInterrupt?.audio.terminal, "failed");
@@ -1031,15 +984,13 @@ async function testInterruptMarksPendingAudioSegmentFailedBeforePlaybackStart():
   const harness = createConnectedAdapter();
   try {
     const { adapter, socket, sessionStore } = harness;
-    sendTurnStarted(socket, "turn-interrupt-pending", "orch-interrupt-pending");
+    sendTurnStarted(socket, "turn-interrupt-pending");
     socket.emitMessage(JSON.stringify({
       type: "output.audio",
       version: "v2",
       message_id: "msg-interrupt-pending-audio",
       timestamp: "2026-05-08T00:00:22.000Z",
-      session_id: "session-1",
       turn_id: "turn-interrupt-pending",
-      orchestration_id: "orch-interrupt-pending",
       source: "backend",
       payload: {
         audio_url: "http://127.0.0.1:12397/cache/audio/test-pending.wav",
@@ -1053,7 +1004,6 @@ async function testInterruptMarksPendingAudioSegmentFailedBeforePlaybackStart():
     const released = adapter.releaseAudioForPlayback(
       "msg-interrupt-pending-audio",
       "turn-interrupt-pending",
-      "orch-interrupt-pending",
     );
     assert.equal(released, true);
 
@@ -1062,14 +1012,12 @@ async function testInterruptMarksPendingAudioSegmentFailedBeforePlaybackStart():
       version: "v2",
       message_id: "interrupt-pending-1",
       timestamp: "2026-05-08T00:00:23.000Z",
-      session_id: "session-1",
       turn_id: "turn-interrupt-pending",
-      orchestration_id: "orch-interrupt-pending",
       source: "backend",
       payload: {},
     }));
 
-    const sessionAfterInterrupt = sessionStore.getSession("orch-interrupt-pending");
+    const sessionAfterInterrupt = sessionStore.getSession("turn-interrupt-pending");
     const segmentAfterInterrupt = sessionAfterInterrupt?.segments.get("msg-interrupt-pending-audio");
     assert.equal(adapter.state.isPlayingAudio, false);
     assert.equal(segmentAfterInterrupt?.audio.terminal, "failed");
@@ -1101,7 +1049,7 @@ async function run(): Promise<void> {
   testSendMotionPreviewUsesOutboundProtocolEnvelope();
   testSendParameterPlanPayloadPreviewIsRejected();
   await testAutoStartMicDoesNotDuplicateCaptureStart();
-  await testMicAudioUsesFreshInputOrchestrationAcrossChunkAndEnd();
+  await testMicAudioUsesFreshInputTurnAcrossChunkAndEnd();
   await testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd();
   await testDeviceChangeEndsPreviousMicSegmentBeforeRestart();
   await testInterruptMarksPlayingAudioSegmentFailed();
