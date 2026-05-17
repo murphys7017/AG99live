@@ -157,8 +157,8 @@ frontend/src/model-engine/
 当前状态说明：
 
 - `compiler/` 目录已经按上面的主链落地
-- `runtime/` 目录还没有开始创建
-- 下一步工作集中在 `useModelEngine.ts` runtime 拆分
+- `runtime/` 目录已经落地 `motionRuntimeScheduler.ts` 和 `motionStart.ts`
+- 当前下一步是继续收窄 `useModelEngine.ts` 和 `contracts.ts` 的 runtime 边界
 
 ---
 
@@ -1253,7 +1253,7 @@ compiler/extensions.ts
 
 完成新入口装配，并让旧 `compiler.ts` 仅做转发。
 
-### Step 10（当前下一步）
+### Step 10（已完成）
 
 开始拆 `useModelEngine.ts`：
 
@@ -1265,7 +1265,24 @@ compiler/extensions.ts
 - `IntentValidator + AxisResolver` 主骨架已完成
 - compile 主链各 stage 已完整落位
 - 外部仍通过 `frontend/src/model-engine/compiler.ts` 获取 `compileMotionIntent`
-- compiler 相关验证已通过，当前可以进入 runtime 拆分
+- compiler 相关验证已通过
+- runtime scheduler 已迁入 `runtime/motionRuntimeScheduler.ts`
+- payload start 已迁入 `runtime/motionStart.ts`
+
+当前已完成验证：
+
+- `npm run typecheck:renderer`
+- `npm run test:model-engine`
+- `npm run test:turn-orchestrator`
+- `npm run test:coordinator`
+
+### Step 11（当前下一步）
+
+继续收口 runtime 外部边界：
+
+- 评估 `contracts.ts` 是否需要拆分成更窄的 runtime ports
+- 评估 `useModelEngine.ts` 是否还保留了不该继续停留在 facade 的实现细节
+- 为后续 `ExtensionRegistry` 和增强 stage 预留更清晰的 runtime/compile 连接点
 
 ---
 

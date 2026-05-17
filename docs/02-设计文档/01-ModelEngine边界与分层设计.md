@@ -13,7 +13,9 @@
 ```text
 engine.motion_intent.v2 / engine.parameter_plan.v2
 -> normalizeMotionPayload / parseSemanticParameterPlan
--> useModelEngine queue + audio sync start gate
+-> useModelEngine facade
+-> motionRuntimeScheduler
+-> motionStart
 -> compileMotionIntent
 -> motionPlayer.playPlan
 -> Live2D runtime
@@ -28,7 +30,9 @@ engine.motion_intent.v2 / engine.parameter_plan.v2
 
 当前结构判断：
 
-- `useModelEngine.ts` 同时承担入站队列、音频同步、编译、播放、状态、history，适合作为 facade，不适合继续承载细节。
+- `useModelEngine.ts` 已经开始收口为 facade，当前主要负责状态持有、runtime 装配和对外 API。
+- `motionRuntimeScheduler.ts` 已承担 pending queue、音频起播等待、turn 过期清理和启动时机决策。
+- `motionStart.ts` 已承担 payload 启动、semantic compile 触发、direct plan 启动和失败状态写回。
 - `compiler.ts` 已经收口为转发入口，真正的编译逻辑已经进入 `compiler/` 目录下的静态 pipeline stages。
 - `settings.ts` 的设置模型需要面向 `SemanticAxisProfile`。
 - `CompileDiagnostics` 需要按 stage 聚合。
@@ -50,7 +54,7 @@ IntentValidator
 
 ```text
 设计并整理前端 ModelEngine 结构
--> 继续拆 runtime scheduler
+-> 收窄 runtime ports / contracts
 -> 建立 stage / registry 扩展入口
 -> 为 speech pose、expression、continuity 等能力预留稳定位置
 ```
@@ -123,6 +127,8 @@ ModelEngine 不负责：
 | 文件 | 当前职责 | 结构方向 |
 | --- | --- | --- |
 | `useModelEngine.ts` | 引擎 facade/runtime：排队、等待音频、编译、播放、状态 | 拆薄，保留为组合入口 |
+| `runtime/motionRuntimeScheduler.ts` | pending queue、等待音频起播、过期清理、启动时机调度 | 保持为 runtime scheduler |
+| `runtime/motionStart.ts` | payload 启动、compile 触发、playPlan 调用、启动结果写回 | 保持为 runtime start boundary |
 | `normalize.ts` | `motion_intent.v2` 和 `parameter_plan.v2` 入站归一化 | 保留为边界 parser |
 | `planParser.ts` | `parameter_plan.v2` parser / clone | 归入 contracts/parsers |
 | `compiler.ts` | 对外兼容转发入口 | 保留稳定 import 路径 |
@@ -192,6 +198,13 @@ frontend/src/model-engine/useModelEngine.ts
 - 等待音频起播或超时启动。
 - 根据 turn/message/playbackTurn 上下文取消过期 payload。
 - 触发 play plan。
+
+当前落地：
+
+```text
+runtime/motionRuntimeScheduler.ts
+runtime/motionStart.ts
+```
 
 目标接口：
 
