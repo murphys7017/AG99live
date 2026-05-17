@@ -6,8 +6,11 @@ import {
 import type {
   CompileDiagnostics,
   InboundPayloadContext,
+  ModelEngineHistoryRole,
   ModelEngineDependencies,
   ModelEngineStatus,
+  MotionRuntimeSchedulerDependencies,
+  MotionStartDependencies,
   NormalizedMotionPayload,
 } from "./contracts";
 import { normalizeMotionPayload } from "./normalize";
@@ -38,11 +41,24 @@ function setState(
 
 export function useModelEngine(dependencies: ModelEngineDependencies) {
   function pushHistory(
-    role: "system" | "error",
+    role: ModelEngineHistoryRole,
     text: string,
   ): void {
     dependencies.pushHistory?.(role, text);
   }
+
+  const runtimeSchedulerDependencies: MotionRuntimeSchedulerDependencies = {
+    getCurrentTurnId: dependencies.getCurrentTurnId,
+    sessionStore: dependencies.sessionStore,
+  };
+
+  const motionStartDependencies: MotionStartDependencies = {
+    getSelectedModel: dependencies.getSelectedModel,
+    getSettings: dependencies.getSettings,
+    playPlan: dependencies.playPlan,
+    getPlayerMessage: dependencies.getPlayerMessage,
+    onPlanStarted: dependencies.onPlanStarted,
+  };
 
   const runtimeStateController = {
     setState,
@@ -58,7 +74,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     pushHistory,
   };
 
-  const runtimeScheduler = createMotionRuntimeScheduler(dependencies, {
+  const runtimeScheduler = createMotionRuntimeScheduler(runtimeSchedulerDependencies, {
     onPendingStateChanged: (pendingCount, pendingMessageId) => {
       state.pendingCount = pendingCount;
       state.pendingMessageId = pendingMessageId;
@@ -70,7 +86,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       startNormalizedMotionPayload(
         payload,
         context,
-        dependencies,
+        motionStartDependencies,
         {
           resolveMotionTargetDurationMs: runtimeScheduler.resolveMotionTargetDurationMs,
         },
@@ -124,7 +140,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         startReason: "preview",
         queuedDelayMs: 0,
       },
-      dependencies,
+      motionStartDependencies,
       {
         resolveMotionTargetDurationMs: runtimeScheduler.resolveMotionTargetDurationMs,
       },

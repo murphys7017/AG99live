@@ -97,7 +97,40 @@ export interface ModelEnginePlanStartedEvent {
   playerMessage: string;
 }
 
-export interface ModelEngineDependencies {
+export type ModelEngineHistoryRole =
+  Extract<DesktopHistoryEntry["role"], "system" | "error">;
+
+export interface ModelEnginePlaybackSegment {
+  messageId: string;
+  turnId: string | null;
+  audio: {
+    released: boolean;
+    started: boolean;
+    startedAtMs: number | null;
+    durationMs: number | null;
+  };
+}
+
+export interface ModelEnginePlaybackSession {
+  id: string;
+  turnId: string | null;
+  segmentOrder: string[];
+  segments: Map<string, ModelEnginePlaybackSegment>;
+}
+
+export interface ModelEngineSessionStorePort {
+  getActiveSession: () => ModelEnginePlaybackSession | undefined;
+  getSessionById?: (
+    playbackSessionId: string | null,
+  ) => ModelEnginePlaybackSession | undefined;
+}
+
+export interface MotionRuntimeSchedulerDependencies {
+  getCurrentTurnId: () => string | null;
+  sessionStore?: ModelEngineSessionStorePort;
+}
+
+export interface MotionStartDependencies {
   getSelectedModel: () => ModelSummary | null;
   getSettings: () => ModelEngineSettings;
   playPlan: (
@@ -105,46 +138,15 @@ export interface ModelEngineDependencies {
     model: ModelSummary | null,
     options: PlayPlanOptions,
   ) => boolean;
-  stopPlan: (reason?: string) => void;
-  getCurrentTurnId: () => string | null;
-  pushHistory?: (
-    role: Extract<DesktopHistoryEntry["role"], "system" | "error">,
-    text: string,
-  ) => void;
   getPlayerMessage?: () => string;
   onPlanStarted?: (event: ModelEnginePlanStartedEvent) => void;
-  sessionStore?: {
-    getActiveSession: () => {
-      id: string;
-      turnId: string | null;
-      segmentOrder: string[];
-      segments: Map<string, {
-        messageId: string;
-        turnId: string | null;
-        audio: {
-          released: boolean;
-          started: boolean;
-          startedAtMs: number | null;
-          durationMs: number | null;
-        };
-      }>;
-    } | undefined;
-    getSessionById?: (
-      playbackSessionId: string | null,
-    ) => {
-      id: string;
-      turnId: string | null;
-      segmentOrder: string[];
-      segments: Map<string, {
-        messageId: string;
-        turnId: string | null;
-        audio: {
-          released: boolean;
-          started: boolean;
-          startedAtMs: number | null;
-          durationMs: number | null;
-        };
-      }>;
-    } | undefined;
-  };
+}
+
+export interface ModelEngineDependencies
+  extends MotionRuntimeSchedulerDependencies, MotionStartDependencies {
+  stopPlan: (reason?: string) => void;
+  pushHistory?: (
+    role: ModelEngineHistoryRole,
+    text: string,
+  ) => void;
 }

@@ -1,8 +1,8 @@
 import { compileMotionIntent } from "../compiler.js";
 import type {
   CompileDiagnostics,
-  ModelEngineDependencies,
   ModelEngineStatus,
+  MotionStartDependencies,
   NormalizedMotionPayload,
 } from "../contracts.js";
 import type { MotionPlanPayload } from "../../types/protocol.js";
@@ -43,7 +43,7 @@ export function reportInvalidMotionPayload(
 export function startNormalizedMotionPayload(
   payload: NormalizedMotionPayload,
   context: StartPayloadContext,
-  dependencies: ModelEngineDependencies,
+  dependencies: MotionStartDependencies,
   runtime: MotionStartRuntimeAccess,
   state: MotionRuntimeStateController,
 ): boolean {
@@ -67,7 +67,7 @@ export function startNormalizedMotionPayload(
 function startSemanticIntentPayload(
   payload: Extract<NormalizedMotionPayload, { kind: "semantic_intent" }>,
   context: StartPayloadContext,
-  dependencies: ModelEngineDependencies,
+  dependencies: MotionStartDependencies,
   runtime: MotionStartRuntimeAccess,
   state: MotionRuntimeStateController,
 ): boolean {
@@ -154,7 +154,7 @@ function startSemanticIntentPayload(
 function startDirectPlanPayload(
   payload: Extract<NormalizedMotionPayload, { kind: "semantic_plan" }>,
   context: StartPayloadContext,
-  dependencies: ModelEngineDependencies,
+  dependencies: MotionStartDependencies,
   runtime: MotionStartRuntimeAccess,
   state: MotionRuntimeStateController,
 ): boolean {
@@ -208,7 +208,7 @@ function startDirectPlanPayload(
 
 function buildSuccessMessage(
   context: StartPayloadContext,
-  dependencies: ModelEngineDependencies,
+  dependencies: MotionStartDependencies,
 ): string {
   return dependencies.getPlayerMessage?.()
     || `动作计划执行中（启动延迟 ${context.queuedDelayMs}ms）。`;

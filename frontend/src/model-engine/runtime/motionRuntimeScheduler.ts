@@ -4,7 +4,7 @@ import {
 } from "../constants.js";
 import type {
   InboundPayloadContext,
-  ModelEngineDependencies,
+  MotionRuntimeSchedulerDependencies,
   NormalizedMotionPayload,
 } from "../contracts.js";
 import { normalizeTurnId } from "../normalize.js";
@@ -43,7 +43,7 @@ function resolveSessionKey(turnId: string | null): string | null {
 }
 
 export function createMotionRuntimeScheduler(
-  dependencies: ModelEngineDependencies,
+  dependencies: MotionRuntimeSchedulerDependencies,
   hooks: MotionRuntimeSchedulerHooks,
 ) {
   const pendingInboundMotionPayloads = new Map<string, PendingInboundMotionPayload>();
