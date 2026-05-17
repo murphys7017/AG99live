@@ -291,7 +291,6 @@ export interface DesktopRuntimeSnapshot {
   micCapturing: boolean;
   pttModeEnabled: boolean;
   audioPlaying: boolean;
-  sessionId: string;
   confName: string;
   lastUpdated: string;
   serverWsUrl: string;

@@ -30,8 +30,8 @@
 约束：
 
 - `turn_id` 是前后端唯一轮次主 ID。
-- 外部协议已移除 `session_id`。
-- 外部协议已移除 `orchestration_id`。
+- 当前外部协议信封不存在 `session_id`。
+- 当前外部协议信封不存在 `orchestration_id`。
 - 前端在文本发送前、麦克风开始采集前主动创建 `turn_id`。
 - 一次语音输入如果最终 dropped、空转写或失败，该 `turn_id` 立即终结且不可复用。
 
@@ -150,4 +150,4 @@ AstrBot 内部 turn 身份不对前端暴露。
 
 - 在前端和后端同时添加或删除协议消息类型。
 - 所有新的交互链路消息默认必须带 `turn_id`。
-- 不再新增任何依赖 `session_id` 或 `orchestration_id` 的外部协议路径。
+- 当前仓库只维护 `turn_id` 单轨协议，不提供 `session_id` 或 `orchestration_id` 兼容路径。

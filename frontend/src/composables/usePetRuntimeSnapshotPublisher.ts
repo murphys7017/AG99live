@@ -107,7 +107,6 @@ export function usePetRuntimeSnapshotPublisher(
         microphoneDeviceId: a.microphoneDeviceId,
         microphoneDevices: a.microphoneDevices.map((device) => ({ ...device })),
         statusMessage: a.statusMessage,
-        sessionId: options.modelSyncState.confName || "",
         serverWsUrl: a.serverInfo?.ws_url ?? "",
         httpBaseUrl: a.serverInfo?.http_base_url ?? "",
         lastAssistantText: a.lastAssistantText,

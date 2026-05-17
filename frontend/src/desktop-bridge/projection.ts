@@ -19,7 +19,6 @@ export interface AdapterRuntimeProjection {
   microphoneDeviceId: string;
   microphoneDevices: DesktopMicrophoneDevice[];
   connectionStatusMessage: string;
-  sessionId: string;
   serverWsUrl: string;
   httpBaseUrl: string;
   lastAssistantText: string;
@@ -46,7 +45,6 @@ export interface AdapterRuntimeProjectionInput {
   microphoneDeviceId: string;
   microphoneDevices: DesktopMicrophoneDevice[];
   statusMessage: string;
-  sessionId: string;
   serverWsUrl: string;
   httpBaseUrl: string;
   lastAssistantText: string;
@@ -108,7 +106,6 @@ export interface DesktopRuntimeSnapshotOutput {
   micCapturing: boolean;
   pttModeEnabled: boolean;
   audioPlaying: boolean;
-  sessionId: string;
   confName: string;
   lastUpdated: string;
   serverWsUrl: string;
@@ -145,7 +142,6 @@ export function buildAdapterRuntimeProjection(
     microphoneDeviceId: input.microphoneDeviceId,
     microphoneDevices: input.microphoneDevices.map((device) => ({ ...device })),
     connectionStatusMessage: input.statusMessage,
-    sessionId: input.sessionId,
     serverWsUrl: input.serverWsUrl,
     httpBaseUrl: input.httpBaseUrl,
     lastAssistantText: input.lastAssistantText,
@@ -248,7 +244,6 @@ export function buildDesktopRuntimeSnapshot(
     micCapturing: p.micCapturing,
     audioPlaying: p.audioPlaying,
     pttModeEnabled: p.pttModeEnabled,
-    sessionId: p.sessionId,
     confName: input.confName,
     lastUpdated: input.lastUpdated,
     serverWsUrl: p.serverWsUrl,

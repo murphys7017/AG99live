@@ -56,7 +56,7 @@ engine.motion_intent.v2 / engine.parameter_plan.v2
 
 - 未列入当前 schema 的 payload 直接拒绝。
 - 不添加隐式 payload 修复逻辑。
-- 不添加多版本兼容路径。
+- 不添加多版本或旧协议回退路径。
 - 不添加服务于废弃入口的防御性代码。
 - 边界 parser 可以接收 `unknown`，内部类型必须收窄为当前协议类型。
 
@@ -65,13 +65,13 @@ engine.motion_intent.v2 / engine.parameter_plan.v2
 - `schema_version` 严格校验。
 - 动作 payload 等待音频起播的短等待窗口。
 - preview 入口的 runtime parse。
-- turn/message/orchestration 上下文过期清理。
+- turn/message/playbackTurn 上下文过期清理。
 
 清理判断标准：
 
 ```text
 服务当前 v2 主路径稳定性的保护保留。
-服务非主路径静默运行的兼容分支清理。
+服务废弃入口静默运行的回退分支清理。
 ```
 
 ## 3. 目标边界
@@ -173,7 +173,7 @@ frontend/src/model-engine/useModelEngine.ts
 
 - 管理 pending motion payload。
 - 等待音频起播或超时启动。
-- 根据 turn/message/orchestration 上下文取消过期 payload。
+- 根据 turn/message/playbackTurn 上下文取消过期 payload。
 - 触发 play plan。
 
 目标接口：
@@ -482,7 +482,7 @@ Avatar Runtime 不负责：
 目标：
 
 - 确认 `model-engine/` 主路径。
-- 标记非主路径兼容分支和冗余命名。
+- 标记废弃入口残留和冗余命名。
 - 建立本文件作为主设计入口。
 
 验收：
@@ -495,7 +495,7 @@ Avatar Runtime 不负责：
 目标：
 
 - 搜索 `legacy`、`compat`、多版本 fallback、非主路径 payload。
-- 删除服务非主路径的兼容逻辑。
+- 删除服务废弃入口的旧回退逻辑。
 - 保留当前同步策略和边界校验。
 
 注意：
@@ -576,7 +576,7 @@ model-engine/compiler/
 ## 11. 设计原则
 
 - 当前只支持 v2 主路径。
-- 非主路径兼容分支不进入工作文档主叙述。
+- 废弃入口回退分支不进入工作文档主叙述。
 - 模块先按职责拆，不先追求复杂插件系统。
 - 扩展通过 stage / registry 挂载。
 - 每个 stage 都要有明确输入、输出、diagnostics。

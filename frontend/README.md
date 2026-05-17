@@ -28,7 +28,7 @@ npm run dev
 ## 当前动作播放特性
 
 - `TurnPlaybackSession` 作为前端播放轮次真源
-- `orchestration_id` 优先的文本 / 音频 / 动作软同步起播
+- 基于 `turn_id + message_id` 的文本 / 音频 / 动作软同步起播
 - 协议事件先写入 session，再由 `useTurnPlaybackOrchestrator` 统一释放
 - 音频 `playing` 仍会通知 `ModelEngine` 贴近音频起播动作；无音频和动作晚到场景有超时兜底
 - 本地播放完成与后端 `turn_finished` 已分离：先 `playback_finished`，再等后端收口

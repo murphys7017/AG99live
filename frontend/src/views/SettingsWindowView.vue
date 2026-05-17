@@ -133,10 +133,6 @@ onMounted(() => {
 
         <dl class="settings-card__meta">
           <div>
-            <dt>会话</dt>
-            <dd>{{ bridgeState.snapshot.sessionId || "未同步" }}</dd>
-          </div>
-          <div>
             <dt>配置</dt>
             <dd>{{ bridgeState.snapshot.confName || "未同步" }}</dd>
           </div>

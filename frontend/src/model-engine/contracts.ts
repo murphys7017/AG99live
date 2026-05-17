@@ -130,7 +130,7 @@ export interface ModelEngineDependencies {
       }>;
     } | undefined;
     getSessionById?: (
-      sessionId: string | null,
+      playbackSessionId: string | null,
     ) => {
       id: string;
       turnId: string | null;

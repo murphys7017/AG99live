@@ -8,6 +8,4 @@
 2. [WebSocket 协议契约](./docs/01-架构与结构/02-WebSocket协议契约.md)
 3. [前后端动作链路结构](./docs/01-架构与结构/03-前后端动作链路结构.md)
 
-历史计划、阶段进度和旧方案统一放在 [docs/archive/README.md](./docs/archive/README.md)。
-
 Agent-facing guide: `.ai/index.md`

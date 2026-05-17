@@ -45,7 +45,6 @@ export const defaultSnapshot: DesktopRuntimeSnapshot = {
   micCapturing: false,
   pttModeEnabled: false,
   audioPlaying: false,
-  sessionId: "",
   confName: "",
   lastUpdated: "",
   serverWsUrl: "",
