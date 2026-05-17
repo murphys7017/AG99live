@@ -1,4 +1,3 @@
-import type { DesktopHistoryEntry } from "../types/desktop";
 import type {
   DirectParameterPlanTiming,
   ModelSummary,
@@ -7,6 +6,17 @@ import type {
   SemanticParameterPlan,
 } from "../types/protocol";
 import type { ModelEngineSettings } from "./settings";
+export type {
+  ModelEngineDependencies,
+  ModelEngineHistoryRole,
+  ModelEnginePlanStartedEvent,
+  ModelEnginePlaybackSegment,
+  ModelEnginePlaybackSession,
+  ModelEngineSessionStorePort,
+  MotionRuntimeSchedulerDependencies,
+  MotionStartDependencies,
+  PlayPlanOptions,
+} from "./runtime/contracts.js";
 
 export type ModelEngineStatus =
   | "idle"
@@ -76,77 +86,4 @@ export interface InboundPayloadContext {
   turnId: string | null;
   playbackTurnId?: string | null;
   receivedAtMs: number;
-}
-
-export interface PlayPlanOptions {
-  softHandoff?: boolean;
-  targetDurationMs?: number | null;
-  onStarted?: (plan: MotionPlanPayload) => void;
-}
-
-export interface ModelEnginePlanStartedEvent {
-  plan: MotionPlanPayload;
-  model: ModelSummary | null;
-  messageId: string;
-  turnId: string | null;
-  playbackTurnId: string | null;
-  startReason: string;
-  queuedDelayMs: number;
-  payloadKind: NormalizedMotionPayload["kind"];
-  diagnostics: CompileDiagnostics | null;
-  playerMessage: string;
-}
-
-export type ModelEngineHistoryRole =
-  Extract<DesktopHistoryEntry["role"], "system" | "error">;
-
-export interface ModelEnginePlaybackSegment {
-  messageId: string;
-  turnId: string | null;
-  audio: {
-    released: boolean;
-    started: boolean;
-    startedAtMs: number | null;
-    durationMs: number | null;
-  };
-}
-
-export interface ModelEnginePlaybackSession {
-  id: string;
-  turnId: string | null;
-  segmentOrder: string[];
-  segments: Map<string, ModelEnginePlaybackSegment>;
-}
-
-export interface ModelEngineSessionStorePort {
-  getActiveSession: () => ModelEnginePlaybackSession | undefined;
-  getSessionById?: (
-    playbackSessionId: string | null,
-  ) => ModelEnginePlaybackSession | undefined;
-}
-
-export interface MotionRuntimeSchedulerDependencies {
-  getCurrentTurnId: () => string | null;
-  sessionStore?: ModelEngineSessionStorePort;
-}
-
-export interface MotionStartDependencies {
-  getSelectedModel: () => ModelSummary | null;
-  getSettings: () => ModelEngineSettings;
-  playPlan: (
-    plan: unknown,
-    model: ModelSummary | null,
-    options: PlayPlanOptions,
-  ) => boolean;
-  getPlayerMessage?: () => string;
-  onPlanStarted?: (event: ModelEnginePlanStartedEvent) => void;
-}
-
-export interface ModelEngineDependencies
-  extends MotionRuntimeSchedulerDependencies, MotionStartDependencies {
-  stopPlan: (reason?: string) => void;
-  pushHistory?: (
-    role: ModelEngineHistoryRole,
-    text: string,
-  ) => void;
 }

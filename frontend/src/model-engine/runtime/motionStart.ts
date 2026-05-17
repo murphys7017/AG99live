@@ -2,10 +2,13 @@ import { compileMotionIntent } from "../compiler.js";
 import type {
   CompileDiagnostics,
   ModelEngineStatus,
-  MotionStartDependencies,
   NormalizedMotionPayload,
 } from "../contracts.js";
 import type { MotionPlanPayload } from "../../types/protocol.js";
+import type {
+  MotionRuntimeStateController,
+  MotionStartDependencies,
+} from "./contracts.js";
 import type { StartPayloadContext } from "./motionRuntimeScheduler.js";
 
 export interface MotionStartRuntimeAccess {
@@ -14,21 +17,6 @@ export interface MotionStartRuntimeAccess {
     turnId: string | null,
     playbackTurnId?: string | null,
   ) => number | null;
-}
-
-export interface MotionRuntimeStateController {
-  setState: (
-    status: ModelEngineStatus,
-    message: string,
-    diagnostics?: CompileDiagnostics | null,
-  ) => void;
-  setLastCompileReason: (reason: string) => void;
-  setLastCompileDiagnostics: (diagnostics: CompileDiagnostics | null) => void;
-  setLastStartReason: (reason: string) => void;
-  pushHistory: (
-    role: "system" | "error",
-    text: string,
-  ) => void;
 }
 
 export function reportInvalidMotionPayload(

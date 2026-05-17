@@ -4,9 +4,9 @@ import {
 } from "../constants.js";
 import type {
   InboundPayloadContext,
-  MotionRuntimeSchedulerDependencies,
   NormalizedMotionPayload,
 } from "../contracts.js";
+import type { MotionRuntimeSchedulerDependencies } from "./contracts.js";
 import { normalizeTurnId } from "../normalize.js";
 
 export interface PendingInboundMotionPayload {

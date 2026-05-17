@@ -6,13 +6,15 @@ import {
 import type {
   CompileDiagnostics,
   InboundPayloadContext,
-  ModelEngineHistoryRole,
-  ModelEngineDependencies,
   ModelEngineStatus,
-  MotionRuntimeSchedulerDependencies,
-  MotionStartDependencies,
   NormalizedMotionPayload,
 } from "./contracts";
+import type {
+  ModelEngineDependencies,
+  ModelEngineHistoryRole,
+  MotionRuntimeSchedulerDependencies,
+  MotionStartDependencies,
+} from "./runtime/contracts";
 import { normalizeMotionPayload } from "./normalize";
 import {
   reportInvalidMotionPayload,
