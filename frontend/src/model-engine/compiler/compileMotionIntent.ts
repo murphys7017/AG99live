@@ -19,8 +19,7 @@ import {
 } from "./compileContext.js";
 import { runCompilePipeline } from "./pipeline.js";
 import { intentValidatorStage } from "./stages/intentValidator.js";
-
-const MAX_SEMANTIC_AXIS_ERROR_RATE = 0.30;
+import { axisResolverStage } from "./stages/axisResolver.js";
 
 export function compileMotionIntent(
   intent: SemanticMotionIntent,
@@ -46,6 +45,7 @@ export function compileMotionIntent(
 function buildDefaultCompileStages(): MotionCompileStage[] {
   return [
     intentValidatorStage,
+    axisResolverStage,
   ];
 }
 
@@ -71,73 +71,22 @@ function continueLegacyCompile(
   }
 
   const axisById = state.axisById;
-  const roleAxisIds = {
-    primaryAxes: semanticProfile.axes
-      .filter((axis) => axis.control_role === "primary")
-      .map((axis) => axis.id),
-    hintAxes: semanticProfile.axes
-      .filter((axis) => axis.control_role === "hint")
-      .map((axis) => axis.id),
-    derivedAxes: semanticProfile.axes
-      .filter((axis) => axis.control_role === "derived")
-      .map((axis) => axis.id),
-    runtimeAxes: semanticProfile.axes
-      .filter(
-        (axis) =>
-          axis.control_role === "runtime"
-          || axis.control_role === "ambient"
-          || axis.control_role === "debug",
-      )
-      .map((axis) => axis.id),
-  };
-  const allowedLlmRoles = new Set(["primary", "hint"]);
+  const roleAxisIds = state.roleAxisIds;
+  const warnings = [...state.warnings];
   const controlledValues: DynamicAxisValues = {};
-  const warnings: string[] = [];
-  const forbiddenAxes: string[] = [];
-  const invalidAxes: string[] = [];
-  const maxAxisErrors = Math.max(
-    0,
-    Math.floor(
-      (roleAxisIds.primaryAxes.length + roleAxisIds.hintAxes.length)
-        * MAX_SEMANTIC_AXIS_ERROR_RATE,
-    ),
-  );
+  const forbiddenAxes = [...state.forbiddenAxes];
+  const invalidAxes = [...state.invalidAxes];
+  const missingAxes = [...state.missingAxes];
+  const maxAxisErrors = state.axisErrorLimit;
+  const axisErrorCount = state.axisErrorCount;
 
-  for (const [axisId, axisValuePayload] of Object.entries(intent.axes)) {
+  for (const [axisId, rawValue] of Object.entries(state.controlledValues)) {
     const axis = axisById.get(axisId);
     if (!axis) {
-      invalidAxes.push(axisId);
-      warnings.push(`semantic_axis_ignored_unknown:${axisId}`);
       continue;
-    }
-    if (!allowedLlmRoles.has(axis.control_role)) {
-      forbiddenAxes.push(axisId);
-      warnings.push(
-        `semantic_axis_ignored_forbidden_role:${axisId}:${axis.control_role}`,
-      );
-      continue;
-    }
-    const value = axisValuePayload.value as unknown;
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-      invalidAxes.push(axisId);
-      warnings.push(`semantic_axis_ignored_not_number:${axisId}`);
-      continue;
-    }
-    const rangeResult = normalizeSemanticAxisValue(axis, value);
-    if (rangeResult.warning) {
-      warnings.push(rangeResult.warning);
-      console.warn(
-        "[ModelEngine] semantic axis value clamped:",
-        rangeResult.warning,
-        {
-          axisId,
-          inputValue: value,
-          outputValue: rangeResult.value,
-        },
-      );
     }
     const intensityResult = applySemanticIntensity(
-      rangeResult.value,
+      rawValue,
       axis,
       intent.mode,
       settings.motionIntensityScale,
@@ -151,49 +100,11 @@ function continueLegacyCompile(
         intensityResult.warning,
         {
           axisId,
-          inputValue: value,
+          inputValue: rawValue,
           outputValue: intensityResult.value,
         },
       );
     }
-  }
-
-  const missingAxes: string[] = [];
-  for (const axis of semanticProfile.axes) {
-    if (axis.control_role !== "primary" || axis.id in controlledValues) {
-      continue;
-    }
-    missingAxes.push(axis.id);
-    warnings.push(`semantic_primary_axis_missing_ignored:${axis.id}`);
-  }
-
-  const axisErrorCount = invalidAxes.length + forbiddenAxes.length;
-  if (axisErrorCount > maxAxisErrors) {
-    return {
-      ok: false,
-      plan: null,
-      reason:
-        `semantic_axis_error_rate_exceeded:${axisErrorCount}/${roleAxisIds.primaryAxes.length + roleAxisIds.hintAxes.length}`,
-      diagnostics: {
-        ...baseDiagnostics,
-        ...roleAxisIds,
-        warnings,
-        missingAxes,
-        forbiddenAxes,
-        invalidAxes,
-        axisErrorCount,
-        axisErrorLimit: maxAxisErrors,
-      },
-    };
-  }
-  if (axisErrorCount > 0) {
-    console.warn("[ModelEngine] semantic axes ignored within error threshold.", {
-      invalidAxes,
-      missingAxes,
-      forbiddenAxes,
-      axisErrorCount,
-      axisErrorLimit: maxAxisErrors,
-    });
   }
 
   let couplingResult: { values: DynamicAxisValues; warnings: string[] };
@@ -284,22 +195,6 @@ function continueLegacyCompile(
       intent.mode === "expressive" && settings.motionIntensityScale !== 1,
   });
 }
-
-function normalizeSemanticAxisValue(
-  axis: SemanticAxisDefinition,
-  value: number,
-): { value: number; warning: string } {
-  const [minValue, maxValue] = axis.value_range;
-  if (value < minValue || value > maxValue) {
-    const clampedValue = value < minValue ? minValue : maxValue;
-    return {
-      value: clampedValue,
-      warning: `semantic_axis_value_clamped:${axis.id}:${value}->${clampedValue}`,
-    };
-  }
-  return { value, warning: "" };
-}
-
 function applySemanticIntensity(
   value: number,
   axis: SemanticAxisDefinition,
