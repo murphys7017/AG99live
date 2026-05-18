@@ -579,7 +579,13 @@ export interface SemanticParameterPlanEntry {
   target_value: number;
   weight: number;
   input_value?: number;
-  source?: "semantic_axis" | "coupling" | "manual";
+  source?:
+    | "semantic_axis"
+    | "coupling"
+    | "speech_pose"
+    | "expression"
+    | "continuity"
+    | "manual";
 }
 
 export interface SemanticParameterPlan {

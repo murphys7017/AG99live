@@ -3,16 +3,11 @@ import type {
   SemanticParameterPlan,
 } from "../../types/protocol.js";
 import { SCHEMA_PARAMETER_PLAN_V2 } from "../../types/protocol.js";
-import type {
-  SemanticAxisDefinition,
-  SemanticAxisParameterBinding,
-} from "../../types/semantic-axis-profile.js";
 import type { CompileOptions, CompileResult } from "./contracts.js";
 import { normalizeModelEngineSettings } from "../settings.js";
 import { buildBaseCompileDiagnostics, finalizeCompileDiagnostics } from "./diagnostics.js";
 import {
   createInitialCompileState,
-  type DynamicAxisValues,
   type MotionCompileContext,
   type MotionCompileStage,
 } from "./compileContext.js";

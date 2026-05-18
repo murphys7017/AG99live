@@ -14,7 +14,12 @@ import type {
 import type { ModelEngineSettings } from "../settings.js";
 
 export type DynamicAxisValues = Record<string, number>;
-export type MotionAxisValueSource = "semantic_axis" | "coupling";
+export type MotionAxisValueSource =
+  | "semantic_axis"
+  | "coupling"
+  | "speech_pose"
+  | "expression"
+  | "continuity";
 export type MotionAxisValueSourceMap = Record<string, MotionAxisValueSource>;
 
 export interface ResolvedAxisRoleBuckets {
