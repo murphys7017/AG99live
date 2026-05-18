@@ -90,7 +90,7 @@ frontend/src/model-engine/compiler/compileMotionIntent.ts
 - `npm run typecheck:renderer`
 - `npm run test:model-engine`
 
-下一步重点不是继续扩 compiler，而是进入 `useModelEngine.ts` 的 runtime 拆分。
+第一轮 compiler / runtime 拆分已经完成。下一步重点是进入扩展入口和增强 stage 的设计与实现准备。
 
 ---
 
@@ -1272,13 +1272,23 @@ compiler/extensions.ts
 - `npm run test:turn-orchestrator`
 - `npm run test:coordinator`
 
-### Step 11（当前下一步）
+### Step 11（已完成）
 
-继续收口 facade 与 runtime 的剩余边界：
+收口 facade 与 runtime 的剩余边界：
 
-- 评估 `useModelEngine.ts` 是否还保留了不该继续停留在 facade 的实现细节
-- 评估 runtime state 控制是否需要继续下沉为更窄的状态控制模块
-- 为后续 `ExtensionRegistry` 和增强 stage 预留更清晰的 runtime/compile 连接点
+- `useModelEngine.ts` 当前只保留状态持有、依赖装配和对外 API
+- runtime scheduler 已承接 pending queue、音频等待和过期清理
+- motion start 已承接 payload 启动、compile 触发和播放结果写回
+- 后续如果继续下沉 runtime state controller，应作为小型整理，不作为进入增强 stage 的阻塞项
+
+### Step 12（当前下一步）
+
+进入第二轮前的扩展入口设计：
+
+- 明确 `ExtensionRegistry` 先采用静态注册
+- 明确新增 stage 的输入、输出、开关和 diagnostics 形态
+- 优先为 `SpeechPoseStage`、`ExpressionStage`、`ContinuityStage` 预留稳定挂载点
+- 不先做复杂插件市场、动态加载或跨端扩展协议
 
 ---
 

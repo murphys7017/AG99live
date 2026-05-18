@@ -30,7 +30,7 @@ engine.motion_intent.v2 / engine.parameter_plan.v2
 
 当前结构判断：
 
-- `useModelEngine.ts` 已经开始收口为 facade，当前主要负责状态持有、runtime 装配和对外 API。
+- `useModelEngine.ts` 已经收口为 facade，当前主要负责状态持有、runtime 装配和对外 API。
 - `motionRuntimeScheduler.ts` 已承担 pending queue、音频起播等待、turn 过期清理和启动时机决策。
 - `motionStart.ts` 已承担 payload 启动、semantic compile 触发、direct plan 启动和失败状态写回。
 - `compileMotionIntent.ts` 是当前 compile 主入口，真正的编译逻辑已经进入 `compiler/` 目录下的静态 pipeline stages。
@@ -54,9 +54,9 @@ IntentValidator
 
 ```text
 设计并整理前端 ModelEngine 结构
--> 继续收口 facade 和 runtime state 边界
+-> 第一轮 compiler / runtime 拆分已经完成
 -> 建立 stage / registry 扩展入口
--> 为 speech pose、expression、continuity 等能力预留稳定位置
+-> 按 SpeechPoseStage、ExpressionStage、ContinuityStage 的顺序补动作增强能力
 ```
 
 ## 2. 协议与代码清理原则
@@ -637,12 +637,12 @@ model-engine/compiler/
 
 下一次进入代码前，优先看这些点：
 
-1. `useModelEngine.ts` 的 runtime scheduler 拆分边界。
-2. `compile pipeline` 的 stage 拆分边界。
-3. `settings.ts` 的 profile-aware settings 形态。
-4. `CompileDiagnostics` 的 stage 聚合结构。
-5. `ingestInboundPayload` 的公开 API 必要性。
-6. `sessionStore` 端口是否继续收窄为更专用的 audio timing / playback lookup port。
+1. `ExtensionRegistry` 是否先做静态注册，不急着做复杂插件系统。
+2. 新增 stage 如何声明自己的输入、输出、开关和 diagnostics。
+3. `SpeechPoseStage` 第一版只做 plan 级轻量说话姿态，不碰逐帧口型。
+4. `ExpressionStage` 如何消费 emotion、语义轴和表情冷启动示例。
+5. `ContinuityStage` 如何拿到上一段 plan / 播放上下文，避免直接耦合 runtime 内部结构。
+6. `settings.ts` 是否需要增加面向增强 stage 的开关和强度参数。
 
 ## 11. 设计原则
 
