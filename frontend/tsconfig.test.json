@@ -15,7 +15,7 @@
     "src/turn-playback/selectors.ts",
     "src/composables/useTurnPlaybackSessionStore.ts",
     "src/model-engine/contracts.ts",
-    "src/model-engine/compiler.ts",
+    "src/model-engine/compiler/**/*.ts",
     "src/model-engine/constants.ts",
     "src/model-engine/normalize.ts",
     "src/model-engine/planParser.ts",
