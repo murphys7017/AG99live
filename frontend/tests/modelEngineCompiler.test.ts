@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { compileMotionIntent } from "../src/model-engine/compiler/compileMotionIntent.js";
+import { listCompileStageRegistrations } from "../src/model-engine/compiler/registry.js";
 import type { ModelSummary, SemanticMotionIntent } from "../src/types/protocol.js";
 import type { SemanticAxisProfile } from "../src/types/semantic-axis-profile.js";
 
@@ -334,7 +335,39 @@ function testAxisIntensityScaleAffectsOnlyTargetAxis(): void {
   assert.equal(scaled.diagnostics.intensityApplied, true);
 }
 
+function testRegistryCoreStageOrder(): void {
+  const registrations = listCompileStageRegistrations();
+  const coreStages = registrations.filter((r) => r.kind === "core");
+
+  assert.equal(coreStages.length, 7);
+
+  const expectedOrder = [
+    "intentValidator",
+    "axisResolver",
+    "intensity",
+    "coupling",
+    "modeResolver",
+    "timing",
+    "planBuilder",
+  ];
+
+  const actualOrder = coreStages.map((r) => r.id);
+  assert.deepEqual(actualOrder, expectedOrder);
+
+  for (let i = 1; i < coreStages.length; i++) {
+    assert.ok(
+      coreStages[i].order > coreStages[i - 1].order,
+      `stage ${coreStages[i].id} order (${coreStages[i].order}) should be greater than ${coreStages[i - 1].id} order (${coreStages[i - 1].order})`,
+    );
+  }
+
+  for (const reg of coreStages) {
+    assert.equal(reg.enabled({} as any), true, `core stage ${reg.id} should always be enabled`);
+  }
+}
+
 function run(): void {
+  testRegistryCoreStageOrder();
   testExplicitPrimaryAxisIsNotOverwrittenByCoupling();
   testAxisIntensityScaleAffectsOnlyTargetAxis();
   console.log("modelEngineCompiler tests passed");

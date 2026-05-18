@@ -9,16 +9,9 @@ import { buildBaseCompileDiagnostics, finalizeCompileDiagnostics } from "./diagn
 import {
   createInitialCompileState,
   type MotionCompileContext,
-  type MotionCompileStage,
 } from "./compileContext.js";
 import { runCompilePipeline } from "./pipeline.js";
-import { intentValidatorStage } from "./stages/intentValidator.js";
-import { axisResolverStage } from "./stages/axisResolver.js";
-import { couplingStage } from "./stages/couplingStage.js";
-import { intensityStage } from "./stages/intensityStage.js";
-import { modeResolverStage } from "./stages/modeResolverStage.js";
-import { planBuilderStage } from "./stages/planBuilder.js";
-import { timingStage } from "./stages/timingStage.js";
+import { resolveCompileStages } from "./registry.js";
 
 export function compileMotionIntent(
   intent: SemanticMotionIntent,
@@ -33,24 +26,12 @@ export function compileMotionIntent(
     state: createInitialCompileState(),
   };
 
-  const pipelineResult = runCompilePipeline(context, buildDefaultCompileStages());
+  const pipelineResult = runCompilePipeline(context, resolveCompileStages(context));
   if (!pipelineResult.ok) {
     return failCompile(pipelineResult.reason, context);
   }
 
   return buildSuccessCompileResult(context);
-}
-
-function buildDefaultCompileStages(): MotionCompileStage[] {
-  return [
-    intentValidatorStage,
-    axisResolverStage,
-    intensityStage,
-    couplingStage,
-    modeResolverStage,
-    timingStage,
-    planBuilderStage,
-  ];
 }
 
 function failCompile(
