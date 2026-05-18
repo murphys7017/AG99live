@@ -36,6 +36,7 @@ import {
   CubismLogError,
   CubismLogInfo,
 } from "@framework/utils/cubismdebug";
+import { isSemanticParameterPlanSource } from "../../../types/protocol";
 
 import * as LAppDefine from "./lappdefine";
 import { frameBuffer, LAppDelegate } from "./lappdelegate";
@@ -2363,7 +2364,7 @@ export class LAppModel extends CubismUserModel {
       const source = item.source === undefined || item.source === null
         ? "semantic_axis"
         : String(item.source || "").trim();
-      if (source !== "semantic_axis" && source !== "coupling" && source !== "manual") {
+      if (!isSemanticParameterPlanSource(source)) {
         return fail("v2_parameter_source_invalid");
       }
       parameterIds.add(parameterId);

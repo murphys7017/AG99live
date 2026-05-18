@@ -36,6 +36,14 @@ _NEUTRAL_EMOTION_MARKERS = {
 MOTION_INTENT_SCHEMA_VERSION = "engine.motion_intent.v2"
 MOTION_INTENT_V2_SCHEMA_VERSION = "engine.motion_intent.v2"
 PARAMETER_PLAN_V2_SCHEMA_VERSION = "engine.parameter_plan.v2"
+PARAMETER_PLAN_SOURCES = {
+    "semantic_axis",
+    "coupling",
+    "speech_pose",
+    "expression",
+    "continuity",
+    "manual",
+}
 
 
 class RealtimeMotionPlanGenerator:
@@ -692,7 +700,7 @@ def validate_parameter_plan_v2_payload(plan: Any) -> tuple[bool, str]:
         if input_value is not None and not isinstance(input_value, (int, float)):
             return False, "parameter_input_value_not_number"
         source = item.get("source")
-        if source is not None and source not in {"semantic_axis", "coupling", "manual"}:
+        if source is not None and source not in PARAMETER_PLAN_SOURCES:
             return False, "parameter_source_invalid"
 
     return True, ""

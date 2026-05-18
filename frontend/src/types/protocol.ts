@@ -579,13 +579,26 @@ export interface SemanticParameterPlanEntry {
   target_value: number;
   weight: number;
   input_value?: number;
-  source?:
-    | "semantic_axis"
-    | "coupling"
-    | "speech_pose"
-    | "expression"
-    | "continuity"
-    | "manual";
+  source?: SemanticParameterPlanSource;
+}
+
+export const SEMANTIC_PARAMETER_PLAN_SOURCES = [
+  "semantic_axis",
+  "coupling",
+  "speech_pose",
+  "expression",
+  "continuity",
+  "manual",
+] as const;
+
+export type SemanticParameterPlanSource =
+  typeof SEMANTIC_PARAMETER_PLAN_SOURCES[number];
+
+export function isSemanticParameterPlanSource(
+  value: unknown,
+): value is SemanticParameterPlanSource {
+  return typeof value === "string"
+    && (SEMANTIC_PARAMETER_PLAN_SOURCES as readonly string[]).includes(value);
 }
 
 export interface SemanticParameterPlan {

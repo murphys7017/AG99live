@@ -2,7 +2,10 @@ import type {
   DirectParameterPlanTiming,
   SemanticParameterPlan,
 } from "../types/protocol.js";
-import { SCHEMA_PARAMETER_PLAN_V2 } from "../types/protocol.js";
+import {
+  SCHEMA_PARAMETER_PLAN_V2,
+  isSemanticParameterPlanSource,
+} from "../types/protocol.js";
 import { isFiniteNumber, isObject, normalizeText } from "../utils/guards.js";
 
 interface ParseFailure {
@@ -109,7 +112,7 @@ export function parseSemanticParameterPlan(
     parameterIds.add(parameterId);
     let source: SemanticParameterPlan["parameters"][number]["source"] | undefined;
     if (item.source !== undefined) {
-      if (item.source !== "semantic_axis" && item.source !== "coupling" && item.source !== "manual") {
+      if (!isSemanticParameterPlanSource(item.source)) {
         return { ok: false, reason: "parameter_plan_v2.invalid_parameter_source" };
       }
       source = item.source;

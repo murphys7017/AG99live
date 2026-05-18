@@ -25,6 +25,7 @@ from ..motion.action_llm_filter import (
     count_selected_channels,
     parse_action_filter_decision,
 )
+from ..motion.realtime_motion_plan import PARAMETER_PLAN_SOURCES
 from ..live2d.cache.runtime_cache import (
     build_live2d_directory_md5,
     load_live2d_runtime_cache,
@@ -1670,7 +1671,7 @@ class RuntimeState:
             }
             if input_value is not None:
                 normalized_parameter["input_value"] = input_value
-            if source in {"semantic_axis", "coupling", "manual"}:
+            if source in PARAMETER_PLAN_SOURCES:
                 normalized_parameter["source"] = source
             parameters.append(normalized_parameter)
 
