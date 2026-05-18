@@ -475,6 +475,12 @@ compile state 和参数所有权的对应关系：
 - `derivedValues` 对应当前动作里由引擎内部模块补出来的 `derived` 层。
 - `allAxisValues` 是 parameter plan 编译前的最终汇总视图，不单独代表新的所有权层。
 
+compile diagnostics 中 derived 轴字段的语义：
+
+- `availableDerivedAxes` 表示当前 profile 静态定义的 `derived` 轴。
+- `appliedDerivedAxes` 表示本次编译实际由 stage 写入的 `derived` 轴。
+- `derivedAxes` 保留为当前实际应用的 derived 轴列表，语义等同于 `appliedDerivedAxes`。
+
 ## 8. 和外部模块的边界
 
 ### Adapter

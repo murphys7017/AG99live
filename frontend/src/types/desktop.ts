@@ -150,6 +150,8 @@ export interface DesktopMotionCompileDiagnostics {
   primaryAxes?: string[];
   hintAxes?: string[];
   derivedAxes?: string[];
+  availableDerivedAxes?: string[];
+  appliedDerivedAxes?: string[];
   runtimeAxes?: string[];
   missingAxes?: string[];
   forbiddenAxes?: string[];

@@ -25,6 +25,7 @@ export function finalizeCompileDiagnostics(
 ): CompileDiagnostics {
   const { baseDiagnostics, state } = context;
   const compiledParameters = state.parameters.map((item) => item.parameter_id);
+  const appliedDerivedAxes = [...state.appliedDerivedAxes];
 
   return {
     ...baseDiagnostics,
@@ -34,7 +35,9 @@ export function finalizeCompileDiagnostics(
     warnings: [...state.warnings],
     primaryAxes: [...state.roleAxisIds.primaryAxes],
     hintAxes: [...state.roleAxisIds.hintAxes],
-    derivedAxes: [...state.roleAxisIds.derivedAxes],
+    derivedAxes: appliedDerivedAxes,
+    availableDerivedAxes: [...state.roleAxisIds.derivedAxes],
+    appliedDerivedAxes,
     runtimeAxes: [...state.roleAxisIds.runtimeAxes],
     missingAxes: [...state.missingAxes],
     forbiddenAxes: [...state.forbiddenAxes],

@@ -342,6 +342,8 @@ function cloneMotionCompileDiagnostics(
     primaryAxes: normalizeStringArray(diagnostics.primaryAxes),
     hintAxes: normalizeStringArray(diagnostics.hintAxes),
     derivedAxes: normalizeStringArray(diagnostics.derivedAxes),
+    availableDerivedAxes: normalizeStringArray(diagnostics.availableDerivedAxes),
+    appliedDerivedAxes: normalizeStringArray(diagnostics.appliedDerivedAxes),
     runtimeAxes: normalizeStringArray(diagnostics.runtimeAxes),
     missingAxes: normalizeStringArray(diagnostics.missingAxes),
     forbiddenAxes: normalizeStringArray(diagnostics.forbiddenAxes),

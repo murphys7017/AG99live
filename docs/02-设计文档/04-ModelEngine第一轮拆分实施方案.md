@@ -234,6 +234,7 @@ export interface MotionCompileMutableState {
   controlledValues: DynamicAxisValues;
   derivedValues: DynamicAxisValues;
   allAxisValues: DynamicAxisValues;
+  appliedDerivedAxes: string[];
 
   missingAxes: string[];
   forbiddenAxes: string[];
@@ -348,6 +349,7 @@ export function createInitialCompileState(): MotionCompileMutableState
 - 初始化空 `axisById`
 - 初始化空 role buckets
 - 初始化空值表
+- 初始化空 `appliedDerivedAxes`
 - 初始化空 warnings
 - 初始化默认 mode 为 `idle`
 - 初始化 `timing = null`
@@ -409,7 +411,9 @@ export function finalizeCompileDiagnostics(
 - `warnings`
 - `primaryAxes`
 - `hintAxes`
-- `derivedAxes`
+- `availableDerivedAxes`
+- `appliedDerivedAxes`
+- `derivedAxes`，语义等同于 `appliedDerivedAxes`
 - `runtimeAxes`
 - `missingAxes`
 - `forbiddenAxes`

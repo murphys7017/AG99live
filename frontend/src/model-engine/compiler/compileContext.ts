@@ -34,6 +34,7 @@ export interface MotionCompileMutableState {
   derivedValues: DynamicAxisValues;
   allAxisValues: DynamicAxisValues;
   axisValueSources: MotionAxisValueSourceMap;
+  appliedDerivedAxes: string[];
 
   missingAxes: string[];
   forbiddenAxes: string[];
@@ -82,6 +83,7 @@ export function createInitialCompileState(): MotionCompileMutableState {
     derivedValues: {},
     allAxisValues: {},
     axisValueSources: {},
+    appliedDerivedAxes: [],
     missingAxes: [],
     forbiddenAxes: [],
     invalidAxes: [],
@@ -109,6 +111,7 @@ export function mergeDerivedAxisValues(
   nextDerivedValues: DynamicAxisValues,
   source: MotionAxisValueSource,
 ): void {
+  const appliedAxisIds = Object.keys(nextDerivedValues);
   state.derivedValues = {
     ...state.derivedValues,
     ...nextDerivedValues,
@@ -116,9 +119,12 @@ export function mergeDerivedAxisValues(
   state.axisValueSources = {
     ...state.axisValueSources,
     ...Object.fromEntries(
-      Object.keys(nextDerivedValues).map((axisId) => [axisId, source]),
+      appliedAxisIds.map((axisId) => [axisId, source]),
     ),
   };
+  state.appliedDerivedAxes = Array.from(
+    new Set([...state.appliedDerivedAxes, ...appliedAxisIds]),
+  );
 }
 
 export function refreshAllAxisValues(
