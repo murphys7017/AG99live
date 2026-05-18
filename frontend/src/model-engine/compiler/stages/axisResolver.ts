@@ -125,6 +125,10 @@ function resolveAllowedLlmAxisValues(
   const warnings: string[] = [];
   const forbiddenAxes: string[] = [];
   const invalidAxes: string[] = [];
+  console.debug("[ModelEngine] received semantic axis payload.", {
+    axisIds: Object.keys(context.intent.axes),
+    axes: context.intent.axes,
+  });
 
   for (const [axisId, axisValuePayload] of Object.entries(context.intent.axes)) {
     const axis = context.state.axisById.get(axisId);

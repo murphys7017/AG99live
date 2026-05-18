@@ -38,7 +38,6 @@ export function runPlanBuilderStage(
 
   const parameterResult = buildSemanticPlanParameters(
     context.state.allAxisValues,
-    profile,
     context.state.axisById,
     context.state.axisValueSources,
   );
@@ -52,7 +51,6 @@ export function runPlanBuilderStage(
 
 function buildSemanticPlanParameters(
   axisValues: DynamicAxisValues,
-  profile: NonNullable<MotionCompileContext["state"]["profile"]>,
   axisById: Map<string, SemanticAxisDefinition>,
   axisValueSources: MotionAxisValueSourceMap,
 ):
@@ -97,8 +95,6 @@ function buildSemanticPlanParameters(
   if (!parameters.length) {
     return { ok: false, reason: "semantic_plan_parameters_empty" };
   }
-
-  void profile;
   return { ok: true, parameters };
 }
 

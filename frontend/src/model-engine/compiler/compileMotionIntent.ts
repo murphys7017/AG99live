@@ -43,7 +43,7 @@ export function compileMotionIntent(
     return failCompile(pipelineResult.reason, context);
   }
 
-  return continueLegacyCompile(context);
+  return buildSuccessCompileResult(context);
 }
 
 function buildDefaultCompileStages(): MotionCompileStage[] {
@@ -70,7 +70,7 @@ function failCompile(
   };
 }
 
-function continueLegacyCompile(
+function buildSuccessCompileResult(
   context: MotionCompileContext,
 ): CompileResult {
   const { intent, settings, state } = context;

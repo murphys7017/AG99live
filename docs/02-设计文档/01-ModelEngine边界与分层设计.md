@@ -54,7 +54,7 @@ IntentValidator
 
 ```text
 设计并整理前端 ModelEngine 结构
--> 收窄 runtime ports / contracts
+-> 继续收口 facade 和 runtime state 边界
 -> 建立 stage / registry 扩展入口
 -> 为 speech pose、expression、continuity 等能力预留稳定位置
 ```
@@ -126,20 +126,21 @@ ModelEngine 不负责：
 
 | 文件 | 当前职责 | 结构方向 |
 | --- | --- | --- |
-| `useModelEngine.ts` | 引擎 facade/runtime：排队、等待音频、编译、播放、状态 | 拆薄，保留为组合入口 |
+| `useModelEngine.ts` | 引擎 facade：持有状态、装配 runtime 与 start 依赖、暴露对外 API | 保持为组合入口 |
 | `runtime/motionRuntimeScheduler.ts` | pending queue、等待音频起播、过期清理、启动时机调度 | 保持为 runtime scheduler |
 | `runtime/motionStart.ts` | payload 启动、compile 触发、playPlan 调用、启动结果写回 | 保持为 runtime start boundary |
 | `normalize.ts` | `motion_intent.v2` 和 `parameter_plan.v2` 入站归一化 | 保留为边界 parser |
 | `planParser.ts` | `parameter_plan.v2` parser / clone | 归入 contracts/parsers |
 | `compiler/compileMotionIntent.ts` | compile 主入口，负责装配 pipeline 和收口结果 | 保持为 compiler 主入口 |
-| `compiler/compileMotionIntent.ts` | compile 主入口，负责装配 pipeline 和收口结果 | 保持为 compiler facade |
 | `compiler/compileContext.ts` | compile 共享上下文与 state 定义 | 保持为 stage 公共协议 |
+| `compiler/contracts.ts` | compile 输入输出契约、timing/diagnostics/result 类型 | 保持为 compile 契约层 |
 | `compiler/pipeline.ts` | stage 顺序执行器 | 保持轻量 |
 | `compiler/diagnostics.ts` | compile diagnostics 构造与收口 | 按 stage 聚合 |
 | `compiler/stages/*.ts` | 各阶段编译逻辑 | 保持单一职责 |
+| `runtime/contracts.ts` | runtime 调度、启动、状态控制、依赖端口类型；session 查询端口按 `turnId` 暴露 | 保持为 runtime 契约层 |
 | `timing.ts` | timing resolution，支持 hint/audio_sync/default | 作为 timing stage |
 | `settings.ts` | 强度倍率设置 | 改为 profile-aware settings |
-| `contracts.ts` | 引擎类型和依赖端口 | 拆分 runtime ports / compiler contracts / diagnostics |
+| `contracts.ts` | 入站动作 payload 归一化后的边界类型 | 保持为 payload boundary 契约层 |
 | `constants.ts` | 默认时长、等待窗口、参数轴常量 | 拆分协议常量和 runtime 策略常量 |
 
 ## 5. 目标分层方案
@@ -283,7 +284,7 @@ compile state 值层约束：
 
 | 字段 | 含义 | 谁可以写 |
 | --- | --- | --- |
-| `controlledValues` | 用户/LLM 直控输入层，表示原始 intent 在通过 profile 过滤和强度处理后的可控轴值 | `AxisResolver`、`IntensityStage` |
+| `controlledValues` | 用户/LLM 直控输入层，表示原始 intent 在通过 profile 过滤、保护性归一化和强度处理后的可控轴值 | `AxisResolver`、`IntensityStage` |
 | `derivedValues` | 引擎派生层，表示 coupling、speech pose、expression、continuity 等 stage 追加出来的派生轴值 | 派生型 stage |
 | `allAxisValues` | 最终编译输入层，表示进入 mode/timing/plan build 的最终轴值全集 | 负责汇总的 stage |
 
@@ -339,6 +340,7 @@ lipSync
 - 根据 `SemanticAxisProfile.axes` 判断哪些轴允许 LLM 控制。
 - `primary` / `hint` 可以从 intent 进入。
 - `derived` / `runtime` / `ambient` / `debug` 不由 LLM 直接写入。
+- 对原始轴值做第一轮保护性归一化，包括有限数校验和按轴范围 clamp。
 
 ### 6.2 IntensityStage
 
@@ -348,6 +350,7 @@ lipSync
 - 应用单轴强度。
 - 处理 expressive / idle 模式差异。
 - 从 profile axes 派生可调轴列表。
+- 对强度缩放后的结果做第二轮范围保护，避免缩放后越界。
 
 ### 6.3 CouplingStage
 
@@ -633,7 +636,7 @@ model-engine/compiler/
 3. `settings.ts` 的 profile-aware settings 形态。
 4. `CompileDiagnostics` 的 stage 聚合结构。
 5. `ingestInboundPayload` 的公开 API 必要性。
-6. `sessionStore` 依赖是否可替换为更窄的 audio timing port。
+6. `sessionStore` 端口是否继续收窄为更专用的 audio timing / playback lookup port。
 
 ## 11. 设计原则
 

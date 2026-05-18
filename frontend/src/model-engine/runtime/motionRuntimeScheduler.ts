@@ -37,13 +37,6 @@ interface MotionRuntimeSchedulerHooks {
   ) => boolean;
 }
 
-function resolveSessionKey(turnId: string | null): string | null {
-  if (typeof turnId === "string" && turnId.trim()) {
-    return `turn:${turnId.trim()}`;
-  }
-  return null;
-}
-
 export function createMotionRuntimeScheduler(
   dependencies: MotionRuntimeSchedulerDependencies,
   hooks: MotionRuntimeSchedulerHooks,
@@ -80,9 +73,7 @@ export function createMotionRuntimeScheduler(
 
     for (const session of [
       dependencies.sessionStore?.getActiveSession(),
-      resolveSessionKey(turnId)
-        ? dependencies.sessionStore?.getSessionById?.(resolveSessionKey(turnId))
-        : undefined,
+      dependencies.sessionStore?.getSessionByTurnId?.(turnId),
     ]) {
       if (!session) {
         continue;

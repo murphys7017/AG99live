@@ -132,6 +132,7 @@ frontend/src/model-engine/
   compiler/
     compileMotionIntent.ts
     compileContext.ts
+    contracts.ts
     pipeline.ts
     diagnostics.ts
     stages/
@@ -144,6 +145,7 @@ frontend/src/model-engine/
       planBuilder.ts
 
   runtime/
+    contracts.ts
     motionRuntimeScheduler.ts
     motionStart.ts
 ```
@@ -152,7 +154,9 @@ frontend/src/model-engine/
 
 - `compiler/` 目录已经按上面的主链落地
 - `runtime/` 目录已经落地 `motionRuntimeScheduler.ts` 和 `motionStart.ts`
-- 当前下一步是继续收窄 `useModelEngine.ts` 和 `contracts.ts` 的 runtime 边界
+- `contracts.ts` 已经收口为 payload boundary 类型
+- `compiler/contracts.ts` 与 `runtime/contracts.ts` 已分别承接 compile 和 runtime 契约
+- 当前下一步是继续评估 `useModelEngine.ts` 是否还存在可以迁出的 facade 以外实现细节
 
 ---
 
@@ -1266,10 +1270,10 @@ compiler/extensions.ts
 
 ### Step 11（当前下一步）
 
-继续收口 runtime 外部边界：
+继续收口 facade 与 runtime 的剩余边界：
 
-- 评估 `contracts.ts` 是否需要拆分成更窄的 runtime ports
 - 评估 `useModelEngine.ts` 是否还保留了不该继续停留在 facade 的实现细节
+- 评估 runtime state 控制是否需要继续下沉为更窄的状态控制模块
 - 为后续 `ExtensionRegistry` 和增强 stage 预留更清晰的 runtime/compile 连接点
 
 ---

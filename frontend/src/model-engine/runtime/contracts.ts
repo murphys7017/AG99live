@@ -61,8 +61,8 @@ export interface ModelEnginePlaybackSession {
 
 export interface ModelEngineSessionStorePort {
   getActiveSession: () => ModelEnginePlaybackSession | undefined;
-  getSessionById?: (
-    playbackSessionId: string | null,
+  getSessionByTurnId?: (
+    turnId: string | null,
   ) => ModelEnginePlaybackSession | undefined;
 }
 
