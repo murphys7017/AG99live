@@ -23,6 +23,8 @@ interface PlaybackCompletionCoordinatorOptions {
   motionRecord: MotionPlaybackRecordPort;
   motionPlayer: PreviewMotionPlayer;
   onAudioPlaybackStarted: (turnId: string | null, messageId: string) => void;
+  schedule?: (delayMs: number, fn: () => void) => unknown;
+  clearSchedule?: (timer: unknown) => void;
   initialMotionPlaybackRecords?: readonly DesktopMotionPlaybackRecord[];
   maxMotionPlaybackRecords?: number;
 }
@@ -36,9 +38,13 @@ export function usePlaybackCompletionCoordinator(
   );
   const maxMotionPlaybackRecords =
     options.maxMotionPlaybackRecords ?? DEFAULT_MAX_MOTION_PLAYBACK_RECORDS;
+  const schedule = options.schedule ?? ((delayMs, fn) => window.setTimeout(fn, delayMs));
+  const clearSchedule = options.clearSchedule ?? ((timer) => {
+    window.clearTimeout(timer as number);
+  });
 
   // Lightweight internal state — session is the single source of truth
-  const settlementTimers = new Map<string, number>();
+  const settlementTimers = new Map<string, unknown>();
   const notifiedAudioStartedSegments = new Set<string>();
   const ackedSessions = new Set<string>();
   const activeMotionSegments = new Set<string>();
@@ -73,9 +79,8 @@ export function usePlaybackCompletionCoordinator(
   }
 
   function clearSettlementTimer(key: string): void {
-    const timer = settlementTimers.get(key);
-    if (timer) {
-      window.clearTimeout(timer);
+    if (settlementTimers.has(key)) {
+      clearSchedule(settlementTimers.get(key));
       settlementTimers.delete(key);
     }
   }
@@ -204,7 +209,7 @@ export function usePlaybackCompletionCoordinator(
     if (settlementTimers.has(key)) {
       return;
     }
-    const timer = window.setTimeout(() => {
+    const timer = schedule(PLAYBACK_SETTLEMENT_WINDOW_MS, () => {
       settlementTimers.delete(key);
       const session = getSession(sessionId);
       const segment = session?.segments.get(messageId);
@@ -222,7 +227,7 @@ export function usePlaybackCompletionCoordinator(
         );
       }
       maybeFlushPlaybackCompletion(sessionId, messageId, "audio_and_motion_settled");
-    }, PLAYBACK_SETTLEMENT_WINDOW_MS);
+    });
     settlementTimers.set(key, timer);
   }
 

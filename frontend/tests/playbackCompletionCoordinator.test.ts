@@ -17,6 +17,8 @@ function createHarness() {
   const playbackFinishedCalls: PlaybackFinishedCall[] = [];
   const clearContextCalls: Array<{ turnId: string | null }> = [];
   const audioStarted: Array<{ turnId: string | null; messageId: string }> = [];
+  const scheduledTimers = new Map<number, () => void>();
+  let nextTimerId = 1;
 
   const mockMotionPlayer = {
     state: reactive({ status: "idle" as string }),
@@ -54,6 +56,14 @@ function createHarness() {
     onAudioPlaybackStarted: (turnId, messageId) => {
       audioStarted.push({ turnId, messageId });
     },
+    schedule: (_delayMs, fn) => {
+      const timerId = nextTimerId++;
+      scheduledTimers.set(timerId, fn);
+      return timerId;
+    },
+    clearSchedule: (timer) => {
+      scheduledTimers.delete(timer as number);
+    },
     initialMotionPlaybackRecords: [],
   });
 
@@ -69,6 +79,13 @@ function createHarness() {
     playbackFinishedCalls,
     clearContextCalls,
     audioStarted,
+    scheduledTimers,
+    runScheduledTimer: (timerId: number) => {
+      const fn = scheduledTimers.get(timerId);
+      assert.ok(fn, `timer ${timerId} should exist`);
+      scheduledTimers.delete(timerId);
+      fn();
+    },
     flush: () => nextTick(),
   };
 }
@@ -366,6 +383,26 @@ async function testCompletionCoordinatorIgnoresStaleSession(): Promise<void> {
   assert.equal(h.playbackFinishedCalls[1].turnId, "turn-2");
 }
 
+async function testSettlementWindowUsesInjectedTimer(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
+  h.sessionStore.markTextDelivered("turn-1", "msg-a");
+  h.sessionStore.markAudioTerminal("turn-1", "completed", "msg-a", "ok");
+  h.sessionStore.markSynthFinished("turn-1");
+  await h.flush();
+
+  assert.equal(h.playbackFinishedCalls.length, 0);
+  assert.equal(h.scheduledTimers.size, 1);
+
+  h.runScheduledTimer(1);
+  await h.flush();
+
+  assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-a")?.motion.absent, true);
+  assert.equal(h.playbackFinishedCalls.length, 1);
+  assert.equal(h.playbackFinishedCalls[0].reason, "audio_and_motion_settled");
+  assert.equal(h.scheduledTimers.size, 0);
+}
+
 async function run(): Promise<void> {
   await testSegmentCompletionDoesNotFinishTurnEarly();
   await testAllSegmentsAndSynthFinishedAckOnce();
@@ -378,6 +415,7 @@ async function run(): Promise<void> {
   await testSegmentWithAudioFailureStillSettles();
   await testSynthFinishedAfterTurnFinishedStillAcks();
   await testCompletionCoordinatorIgnoresStaleSession();
+  await testSettlementWindowUsesInjectedTimer();
   console.log("playbackCompletionCoordinator tests passed");
 }
 

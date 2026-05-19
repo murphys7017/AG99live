@@ -26,6 +26,8 @@ docs/
     02-工程控制论对齐.md                 # 工程控制论对齐
     03-协议ID收口修改计划书.md           # 协议 ID 收口结果与维护规则
     04-ModelEngine第一轮拆分实施方案.md  # ModelEngine 第一轮代码级拆分方案
+    05-SpeechPoseStage实施计划.md        # SpeechPoseStage 第一版实施计划
+    05-前端结构改进计划.md               # 前端结构改进项清单
 
   03-运行时与运维/                       # 运行时与运维
     01-AI运行协议.md                     # AI 运行协议
