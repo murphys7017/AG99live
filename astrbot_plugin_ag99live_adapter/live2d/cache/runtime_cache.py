@@ -49,25 +49,46 @@ def _normalize_expression_example_overrides(
     raw: Any,
 ) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
-        return []
+        raise ValueError("expression_example_overrides_not_list")
     normalized: list[dict[str, Any]] = []
-    for item in raw:
+    for index, item in enumerate(raw):
         if not isinstance(item, dict):
-            continue
+            raise ValueError(f"expression_example_override_not_object:index={index}")
+        model_name = str(item.get("model_name") or "").strip()
+        if not model_name:
+            raise ValueError(f"expression_example_override_model_name_required:index={index}")
         example_id = str(item.get("example_id") or "").strip()
         if not example_id:
-            continue
+            raise ValueError(f"expression_example_override_example_id_required:index={index}")
+        enabled = item.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise ValueError(f"expression_example_override_enabled_must_be_boolean:index={index}")
+        feedback = item.get("feedback", "")
+        if not isinstance(feedback, str):
+            raise ValueError(f"expression_example_override_feedback_must_be_string:index={index}")
+        tags = item.get("tags", [])
+        if not isinstance(tags, list):
+            raise ValueError(f"expression_example_override_tags_must_be_list:index={index}")
+        normalized_tags: list[str] = []
+        for tag_index, tag in enumerate(tags):
+            if not isinstance(tag, str):
+                raise ValueError(
+                    "expression_example_override_tag_must_be_string"
+                    f":index={index}:tag_index={tag_index}"
+                )
+            normalized_tag = tag.strip()
+            if normalized_tag:
+                normalized_tags.append(normalized_tag)
+        updated_at = item.get("updated_at", "")
+        if not isinstance(updated_at, str):
+            raise ValueError(f"expression_example_override_updated_at_must_be_string:index={index}")
         normalized.append({
-            "model_name": str(item.get("model_name") or "").strip(),
+            "model_name": model_name,
             "example_id": example_id,
-            "enabled": bool(item.get("enabled", True)),
-            "feedback": str(item.get("feedback") or "").strip(),
-            "tags": [
-                str(tag).strip()
-                for tag in (item.get("tags") if isinstance(item.get("tags"), list) else [])
-                if str(tag).strip()
-            ],
-            "updated_at": str(item.get("updated_at") or "").strip(),
+            "enabled": enabled,
+            "feedback": feedback.strip(),
+            "tags": normalized_tags,
+            "updated_at": updated_at.strip(),
         })
     return normalized
 
@@ -104,14 +125,22 @@ def load_live2d_runtime_cache(cache_path: Path) -> tuple[dict[str, Any], dict[st
     normalized_motion_tuning_samples = (
         motion_tuning_samples if isinstance(motion_tuning_samples, list) else []
     )
-    normalized_expression_example_overrides = _normalize_expression_example_overrides(
-        expression_example_overrides_raw
-    )
+    normalized_expression_example_overrides: list[dict[str, Any]] = []
+    if "expression_example_overrides" in payload:
+        try:
+            normalized_expression_example_overrides = _normalize_expression_example_overrides(
+                expression_example_overrides_raw
+            )
+        except ValueError as exc:
+            errors["expression_example_overrides"] = (
+                "live2d_runtime_cache_expression_example_overrides_invalid"
+                f": {exc}"
+            )
     if not isinstance(scan_cache, dict):
         errors["scan_cache"] = "live2d_runtime_cache_scan_cache_invalid"
     if not isinstance(action_filter_cache, dict):
         errors["action_filter_cache"] = "live2d_runtime_cache_action_filter_cache_invalid"
-    if not isinstance(motion_tuning_samples, list):
+    if "motion_tuning_samples" in payload and not isinstance(motion_tuning_samples, list):
         errors["motion_tuning_samples"] = "live2d_runtime_cache_motion_tuning_samples_invalid"
     return (
         {
@@ -141,7 +170,7 @@ def save_live2d_runtime_cache(cache_path: Path, payload: dict[str, Any]) -> None
             else []
         ),
         "expression_example_overrides": _normalize_expression_example_overrides(
-            payload.get("expression_example_overrides")
+            payload.get("expression_example_overrides", [])
         ),
     }
     temp_path = cache_path.with_suffix(f"{cache_path.suffix}.tmp")
