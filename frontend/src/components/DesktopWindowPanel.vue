@@ -1,16 +1,12 @@
 <script setup lang="ts">
+import { useDesktopWindowActions } from "../desktop-bridge/useDesktopWindowActions";
+
 defineProps<{
   title: string;
   subtitle: string;
 }>();
 
-function minimizeWindow(): void {
-  window.ag99desktop?.minimizeCurrentWindow();
-}
-
-function closeWindow(): void {
-  window.ag99desktop?.closeCurrentWindow();
-}
+const { minimizeWindow, closeWindow } = useDesktopWindowActions();
 </script>
 
 <template>

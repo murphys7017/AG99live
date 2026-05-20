@@ -2,35 +2,76 @@ import { onScopeDispose, watch, type ComputedRef, type Ref } from "vue";
 import { cloneModelEngineSettings, type ModelEngineSettings } from "../model-engine/settings";
 import type {
   DesktopBaseActionPreview,
+  DesktopBackendHistoryMessage,
+  DesktopBackendHistorySummary,
+  DesktopHistoryEntry,
+  DesktopMicrophoneDevice,
   DesktopModelProjectionSnapshot,
   DesktopMotionPlaybackRecord,
+  DesktopSemanticAxisProfileSaveResult,
   DesktopMotionTuningSamplesStatus,
   DesktopMotionTuningSample,
 } from "../types/desktop";
-import type { ModelSummary } from "../types/protocol";
+import type { ModelSummary, SystemServerInfoPayload } from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
-import type { useAdapterConnection } from "../adapter-connection/useAdapterConnection";
-import type { useDesktopBridge } from "./useDesktopBridge";
 import type { useModelSync } from "../adapter-connection/model-sync/useModelSync";
 import type { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore";
 import {
   buildAdapterRuntimeProjection,
   buildDesktopRuntimeSnapshot,
   getActiveSegmentSnapshot,
-  type AdapterRuntimeProjectionInput,
   type SessionProjectionInput,
 } from "./projection.js";
 import { cloneJson } from "../utils/cloneJson.js";
 
-type AdapterConnection = ReturnType<typeof useAdapterConnection>;
-type DesktopBridge = ReturnType<typeof useDesktopBridge>;
 type ModelSync = ReturnType<typeof useModelSync>;
 
 const SNAPSHOT_DEBOUNCE_MS = 60;
 
+interface PetRuntimeSnapshotAdapterPort {
+  readonly state: {
+    readonly address: string;
+    readonly desktopScreenshotOnSendEnabled: boolean;
+    readonly microphoneDeviceId: string;
+    readonly microphoneDevices: readonly DesktopMicrophoneDevice[];
+    readonly statusMessage: string;
+    readonly serverInfo: SystemServerInfoPayload | null;
+    readonly lastAssistantText: string;
+    readonly lastTranscription: string;
+    readonly lastImageCount: number;
+    readonly currentTurnId: string | null;
+    readonly micRequested: boolean;
+    readonly micCapturing: boolean;
+    readonly isPlayingAudio: boolean;
+    readonly pttModeEnabled: boolean;
+    readonly historyEntries: readonly DesktopHistoryEntry[];
+    readonly backendHistorySummaries: readonly DesktopBackendHistorySummary[];
+    readonly backendHistoryEntries: readonly DesktopBackendHistoryMessage[];
+    readonly activeBackendHistoryUid: string;
+    readonly backendHistoryLoading: boolean;
+    readonly backendHistoryStatusMessage: string;
+    readonly motionTuningSamples: readonly unknown[];
+    readonly motionTuningSamplesStatus: DesktopMotionTuningSamplesStatus;
+    readonly expressionExampleOverridesRevision: number;
+    readonly latestSemanticAxisProfileSaveResult: DesktopSemanticAxisProfileSaveResult | null;
+  };
+}
+
+interface PetRuntimeSnapshotBridgePort {
+  publishSnapshot: (snapshot: ReturnType<typeof buildDesktopRuntimeSnapshot>) => void;
+  publishMotionTuningSamples: (
+    samples: unknown,
+    status: DesktopMotionTuningSamplesStatus,
+  ) => void;
+  publishModelProjectionSnapshot: (snapshot: DesktopModelProjectionSnapshot) => void;
+  publishProfileAuthoringSnapshot: (snapshot: {
+    latestSemanticAxisProfileSaveResult: DesktopSemanticAxisProfileSaveResult | null;
+  }) => void;
+}
+
 interface PetRuntimeSnapshotPublisherOptions {
-  adapter: AdapterConnection;
-  bridge: DesktopBridge;
+  adapter: PetRuntimeSnapshotAdapterPort;
+  bridge: PetRuntimeSnapshotBridgePort;
   modelSyncState: ModelSync["state"];
   selectedModel: Ref<ModelSummary | null>;
   selectedSemanticAxisProfile: Ref<SemanticAxisProfile | null>;
@@ -126,7 +167,7 @@ export function usePetRuntimeSnapshotPublisher(
         motionTuningSamples: a.motionTuningSamples.map((s) =>
           cloneJson(s),
         ) as DesktopMotionTuningSample[],
-        motionTuningSamplesStatus: a.motionTuningSamplesStatus,
+        motionTuningSamplesStatus: cloneJson(a.motionTuningSamplesStatus) as DesktopMotionTuningSamplesStatus,
       });
 
       const activeSession = options.sessionStore.getActiveSession();
@@ -175,7 +216,10 @@ export function usePetRuntimeSnapshotPublisher(
     }),
     ({ samples, status }) => {
       snapshotDebounce.schedule(() => {
-        options.bridge.publishMotionTuningSamples(samples, status);
+      options.bridge.publishMotionTuningSamples(
+        samples.map((sample) => cloneJson(sample)),
+        cloneJson(status) as DesktopMotionTuningSamplesStatus,
+      );
       });
     },
     { deep: true, immediate: true },

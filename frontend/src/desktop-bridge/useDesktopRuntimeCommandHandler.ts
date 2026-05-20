@@ -1,26 +1,60 @@
 import type { Ref } from "vue";
 import type {
+  DesktopMicrophoneDevice,
   DesktopMotionTuningSample,
+  DesktopMotionTuningSamplesStatus,
   DesktopProfileAuthoringCommand,
   DesktopRuntimeCommand,
 } from "../types/desktop.js";
+import type { SystemSemanticAxisProfileSavePayload } from "../types/protocol.js";
 import { cloneJson } from "../utils/cloneJson.js";
-import type { useAdapterConnection } from "../adapter-connection/useAdapterConnection.js";
-import type { useDesktopBridge } from "./useDesktopBridge.js";
-import type { usePetRuntimeSnapshotPublisher } from "./usePetRuntimeSnapshotPublisher.js";
 import { applyMotionEngineSettingsSnapshot } from "../app/motionEngineSettingsSnapshot.js";
 import type { ModelEngineSettings } from "../model-engine/settings.js";
 
+interface DesktopRuntimeCommandAdapterPort {
+  readonly state: {
+    readonly motionTuningSamples: readonly unknown[];
+    readonly motionTuningSamplesStatus: DesktopMotionTuningSamplesStatus;
+  };
+  setAddress: (address: string) => void;
+  setDesktopScreenshotOnSendEnabled: (enabled: boolean) => void;
+  setMicrophoneDevice: (deviceId: string) => void;
+  setMicrophoneDevices: (devices: DesktopMicrophoneDevice[]) => void;
+  refreshMicrophoneDevices: () => Promise<void>;
+  requestHistoryList: () => boolean;
+  createHistory: () => boolean;
+  loadHistory: (historyUid: string) => boolean;
+  deleteHistory: (historyUid: string) => boolean;
+  connect: () => void;
+  disconnect: () => void;
+  sendText: (text: string) => Promise<boolean>;
+  interruptCurrentTurn: () => boolean;
+  toggleMicrophoneCapture: () => Promise<unknown>;
+  setPttMode: (enabled: boolean) => void;
+  sendSemanticAxisProfileSave: (payload: SystemSemanticAxisProfileSavePayload) => boolean;
+}
+
+interface DesktopRuntimeCommandBridgePort {
+  publishMotionTuningSamples: (
+    samples: unknown,
+    status: DesktopMotionTuningSamplesStatus,
+  ) => void;
+}
+
+interface DesktopRuntimeSnapshotPublisherPort {
+  publishModelProjectionSnapshot: () => void;
+}
+
 export interface DesktopRuntimeCommandDeps {
-  adapter: ReturnType<typeof useAdapterConnection>;
-  bridge: ReturnType<typeof useDesktopBridge>;
+  adapter: DesktopRuntimeCommandAdapterPort;
+  bridge: DesktopRuntimeCommandBridgePort;
   ambientMotionEnabled: Ref<boolean>;
   motionEngineSettings: ModelEngineSettings;
   modelEngine: {
     stop: (reason: string) => void;
     playPreviewPayload: (plan: unknown) => boolean;
   };
-  snapshotPublisher: ReturnType<typeof usePetRuntimeSnapshotPublisher>;
+  snapshotPublisher: DesktopRuntimeSnapshotPublisherPort;
   saveMotionTuningSample: (sample: DesktopMotionTuningSample) => void;
   deleteMotionTuningSample: (sampleId: string) => void;
   saveExpressionExampleOverride: (modelName: string, exampleId: string, enabled: boolean, feedback: string, tags: string[]) => void;
@@ -64,8 +98,8 @@ export function createDesktopRuntimeCommandHandler(
         return;
       case "request_motion_tuning_samples_sync":
         deps.bridge.publishMotionTuningSamples(
-          deps.adapter.state.motionTuningSamples,
-          deps.adapter.state.motionTuningSamplesStatus,
+          cloneJson(deps.adapter.state.motionTuningSamples),
+          cloneJson(deps.adapter.state.motionTuningSamplesStatus),
         );
         return;
       case "save_motion_tuning_sample":
