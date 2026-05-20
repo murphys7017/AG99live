@@ -90,6 +90,7 @@ class RuntimeState:
         self.runtime_cache_root_error = ""
         self.runtime_cache_segment_errors: dict[str, str] = {}
         self.motion_tuning_samples_load_error = ""
+        self.expression_example_overrides_load_error = ""
         self.motion_tuning_fewshot_diagnostics: list[str] = []
         self.motion_tuning_effective_examples: list[dict[str, Any]] = []
         self.realtime_motion_platform_context_enabled = True
@@ -112,6 +113,9 @@ class RuntimeState:
             self._runtime_cache_payload
         )
         self.motion_tuning_samples = self._load_motion_tuning_samples_from_payload(
+            self._runtime_cache_payload
+        )
+        self.expression_example_overrides = self._load_expression_example_overrides_from_payload(
             self._runtime_cache_payload
         )
         self.last_sent_model_signature: str | None = None
@@ -299,6 +303,7 @@ class RuntimeState:
                 model_info=self.model_info,
             )
         self._attach_semantic_axis_profiles()
+        self._apply_expression_example_overrides(self.model_info)
         self._refresh_motion_tuning_reference_examples_from_samples()
 
         logger.info(
@@ -422,6 +427,7 @@ class RuntimeState:
         runtime_cache_errors = self._build_runtime_cache_error_payload()
         model_info_payload = deepcopy(self.model_info)
         model_info_payload["runtime_cache_errors"] = runtime_cache_errors
+        self._apply_expression_example_overrides(model_info_payload)
         return build_system_model_sync(
             model_info=model_info_payload,
             runtime_cache_errors=runtime_cache_errors,
@@ -519,6 +525,129 @@ class RuntimeState:
         self._persist_runtime_cache_payload()
         self._refresh_motion_tuning_reference_examples_from_samples()
         return True
+
+    def save_expression_example_override(self, payload: Any) -> dict[str, Any]:
+        self._raise_if_runtime_cache_error_active()
+        normalized = self._normalize_expression_example_override(payload)
+        model_name = normalized["model_name"]
+        example_id = normalized["example_id"]
+        self.expression_example_overrides = [
+            deepcopy(normalized),
+            *[
+                deepcopy(item)
+                for item in self.expression_example_overrides
+                if (
+                    str(item.get("model_name") or "").strip(),
+                    str(item.get("example_id") or "").strip(),
+                ) != (model_name, example_id)
+            ],
+        ]
+        self._runtime_cache_payload["expression_example_overrides"] = deepcopy(
+            self.expression_example_overrides
+        )
+        self._persist_runtime_cache_payload()
+        self._apply_expression_example_overrides(self.model_info)
+        return deepcopy(normalized)
+
+    def delete_expression_example_override(self, payload: Any) -> bool:
+        self._raise_if_runtime_cache_error_active()
+        if not isinstance(payload, dict):
+            raise ValueError("expression_example_override_delete_payload_required")
+        model_name = str(payload.get("model_name") or "").strip()
+        example_id = str(payload.get("example_id") or "").strip()
+        if not model_name:
+            raise ValueError("expression_example_override_model_name_required")
+        if not example_id:
+            raise ValueError("expression_example_override_example_id_required")
+        remaining = [
+            deepcopy(item)
+            for item in self.expression_example_overrides
+            if (
+                str(item.get("model_name") or "").strip(),
+                str(item.get("example_id") or "").strip(),
+            ) != (model_name, example_id)
+        ]
+        if len(remaining) == len(self.expression_example_overrides):
+            return False
+        self.expression_example_overrides = remaining
+        self._runtime_cache_payload["expression_example_overrides"] = deepcopy(
+            self.expression_example_overrides
+        )
+        self._persist_runtime_cache_payload()
+        self._apply_expression_example_overrides(self.model_info)
+        return True
+
+    def list_expression_example_overrides(self) -> list[dict[str, Any]]:
+        return deepcopy(self.expression_example_overrides)
+
+    @staticmethod
+    def _normalize_expression_example_override(raw: Any) -> dict[str, Any]:
+        if not isinstance(raw, dict):
+            raise ValueError("expression_example_override_not_object")
+        model_name = str(raw.get("model_name") or "").strip()
+        if not model_name:
+            raise ValueError("expression_example_override_model_name_required")
+        example_id = str(raw.get("example_id") or "").strip()
+        if not example_id:
+            raise ValueError("expression_example_override_example_id_required")
+        from datetime import datetime, timezone
+        return {
+            "model_name": model_name,
+            "example_id": example_id,
+            "enabled": bool(raw.get("enabled", True)),
+            "feedback": str(raw.get("feedback") or "").strip(),
+            "tags": [
+                str(tag).strip()
+                for tag in (raw.get("tags") if isinstance(raw.get("tags"), list) else [])
+                if str(tag).strip()
+            ],
+            "updated_at": str(raw.get("updated_at") or datetime.now(timezone.utc).isoformat()),
+        }
+
+    def _apply_expression_example_overrides(self, model_info_payload: dict[str, Any]) -> None:
+        models = model_info_payload.get("models")
+        if not isinstance(models, list):
+            return
+        from ..live2d.cache.runtime_cache import _normalize_expression_example_overrides
+        overrides_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+        for override in _normalize_expression_example_overrides(self.expression_example_overrides):
+            model_name = str(override.get("model_name") or "").strip()
+            example_id = str(override.get("example_id") or "").strip()
+            if model_name and example_id:
+                overrides_by_key[(model_name, example_id)] = override
+        for model in models:
+            if not isinstance(model, dict):
+                continue
+            model_name = str(model.get("name") or "").strip()
+            if not model_name:
+                continue
+            library = model.get("expression_example_library")
+            if not isinstance(library, dict):
+                continue
+            examples = library.get("examples")
+            if not isinstance(examples, list):
+                continue
+            for example in examples:
+                if not isinstance(example, dict):
+                    continue
+                example_id = str(example.get("id") or "").strip()
+                if not example_id:
+                    continue
+                override = overrides_by_key.get((model_name, example_id))
+                if override is not None:
+                    example["enabled"] = bool(override.get("enabled", True))
+                    user_feedback = str(override.get("feedback") or "").strip()
+                    example["user_feedback"] = user_feedback
+                    user_tags = [
+                        str(tag).strip()
+                        for tag in (override.get("tags") if isinstance(override.get("tags"), list) else [])
+                        if str(tag).strip()
+                    ]
+                    example["user_tags"] = user_tags
+                else:
+                    example.pop("enabled", None)
+                    example.pop("user_feedback", None)
+                    example.pop("user_tags", None)
 
     def _refresh_motion_tuning_reference_examples_from_samples(self) -> None:
         self.motion_tuning_fewshot_diagnostics = []
@@ -1115,6 +1244,9 @@ class RuntimeState:
         self.motion_tuning_samples_load_error = str(
             load_errors.get("motion_tuning_samples") or ""
         ).strip()
+        self.expression_example_overrides_load_error = str(
+            load_errors.get("expression_example_overrides") or ""
+        ).strip()
         return payload
 
     @staticmethod
@@ -1448,6 +1580,9 @@ class RuntimeState:
         self._runtime_cache_payload["motion_tuning_samples"] = deepcopy(
             self.motion_tuning_samples
         )
+        self._runtime_cache_payload["expression_example_overrides"] = deepcopy(
+            self.expression_example_overrides
+        )
         if self._live2d_runtime_cache_path is None:
             return
         save_live2d_runtime_cache(self._live2d_runtime_cache_path, self._runtime_cache_payload)
@@ -1462,6 +1597,8 @@ class RuntimeState:
             payload["root"] = self.runtime_cache_root_error
         if self.motion_tuning_samples_load_error:
             payload["motion_tuning_samples"] = self.motion_tuning_samples_load_error
+        if self.expression_example_overrides_load_error:
+            payload["expression_example_overrides"] = self.expression_example_overrides_load_error
         return payload
 
     def _get_runtime_cache_blocking_error(self) -> str:
@@ -1495,6 +1632,16 @@ class RuntimeState:
                 self.motion_tuning_reference_examples = []
                 return []
         return normalized_samples
+
+    @staticmethod
+    def _load_expression_example_overrides_from_payload(
+        payload: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        from ..live2d.cache.runtime_cache import _normalize_expression_example_overrides
+        raw = payload.get("expression_example_overrides")
+        if not isinstance(raw, list):
+            return []
+        return _normalize_expression_example_overrides(raw)
 
     def _raise_if_runtime_cache_error_active(self) -> None:
         if self.runtime_cache_root_error:

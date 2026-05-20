@@ -94,6 +94,10 @@ const motionTuningLoadError = computed(() => bridge.state.motionTuningSamplesSta
 const motionTuningRootError = computed(() => bridge.state.motionTuningSamplesStatus.rootError.trim());
 const motionTuningDiagnostics = computed(() => bridge.state.motionTuningSamplesStatus.diagnostics);
 const effectiveExamples = computed(() => bridge.state.modelProjectionSnapshot.motionTuningEffectiveExamples);
+const expressionExamples = computed(() =>
+  bridge.state.modelProjectionSnapshot.expressionExamples ?? []
+);
+
 const effectiveExampleCoverage = computed(() => {
   const groups = [
     { label: "neutral", keys: ["neutral"] },
@@ -469,6 +473,33 @@ function formatEffectiveExampleAxes(example: DesktopMotionTuningEffectiveExample
   return Object.keys(example.output.axes).join(", ");
 }
 
+function toggleExpressionExample(
+  example: {
+    readonly modelName: string;
+    readonly id: string;
+    readonly feedback: string;
+    readonly tags: readonly string[];
+  },
+  enabled: boolean,
+): void {
+  if (enabled) {
+    bridge.sendCommand({
+      type: "delete_expression_example_override",
+      modelName: example.modelName,
+      exampleId: example.id,
+    });
+    return;
+  }
+  bridge.sendCommand({
+    type: "save_expression_example_override",
+    modelName: example.modelName,
+    exampleId: example.id,
+    enabled: false,
+    feedback: example.feedback,
+    tags: [...example.tags],
+  });
+}
+
 function normalizeEmotionKey(value: string): string {
   return String(value || "").trim().toLowerCase();
 }
@@ -673,6 +704,31 @@ function normalizeEmotionKey(value: string): string {
           >
             删除
           </button>
+        </li>
+      </ul>
+    </details>
+
+    <details v-if="expressionExamples.length" class="motion-tuning__details">
+      <summary>扫描表达式参考（{{ expressionExamples.length }} 个）</summary>
+      <ul class="motion-tuning__sample-list">
+        <li
+          v-for="ex in expressionExamples"
+          :key="ex.id"
+          class="motion-tuning__sample-item"
+        >
+          <div>
+            <strong>{{ ex.name || ex.id }}</strong>
+            <p>{{ ex.feedback || "未填写说明" }}</p>
+            <small>{{ Object.keys(ex.axes).join(", ") }}</small>
+          </div>
+          <label class="profile-editor__toggle">
+            <input
+              type="checkbox"
+              :checked="ex.enabled"
+              @change="toggleExpressionExample(ex, ($event.target as HTMLInputElement).checked)"
+            />
+            <span>LLM 参考</span>
+          </label>
         </li>
       </ul>
     </details>

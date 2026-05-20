@@ -649,6 +649,9 @@ export interface ModelSummary {
       emotion_label: string;
       tags: string[];
       axes: Record<string, number>;
+      enabled?: boolean;
+      user_feedback?: string;
+      user_tags?: string[];
     }>;
   } | null;
   semantic_axis_profile?: SemanticAxisProfile | null;
@@ -668,6 +671,7 @@ export interface RuntimeCacheErrorsPayload {
   scan_cache?: string;
   action_filter_cache?: string;
   motion_tuning_samples?: string;
+  expression_example_overrides?: string;
 }
 
 export interface ModelSyncInfo {
@@ -736,6 +740,32 @@ export interface SystemMotionTuningSamplesStatePayload {
     source?: string;
     tags?: string[];
   }>;
+}
+
+export interface SystemExpressionExampleOverrideSavePayload {
+  model_name: string;
+  example_id: string;
+  enabled?: boolean;
+  feedback?: string;
+  tags?: string[];
+}
+
+export interface SystemExpressionExampleOverrideDeletePayload {
+  model_name: string;
+  example_id: string;
+}
+
+export interface SystemExpressionExampleOverviewPayload {
+  model_name: string;
+  example_id: string;
+  enabled: boolean;
+  feedback: string;
+  tags: string[];
+  updated_at: string;
+}
+
+export interface SystemExpressionExampleOverridesStatePayload {
+  overrides: SystemExpressionExampleOverviewPayload[];
 }
 
 export interface SystemHistoryListPayload {

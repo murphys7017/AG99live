@@ -23,6 +23,8 @@ export interface DesktopRuntimeCommandDeps {
   snapshotPublisher: ReturnType<typeof usePetRuntimeSnapshotPublisher>;
   saveMotionTuningSample: (sample: DesktopMotionTuningSample) => void;
   deleteMotionTuningSample: (sampleId: string) => void;
+  saveExpressionExampleOverride: (modelName: string, exampleId: string, enabled: boolean, feedback: string, tags: string[]) => void;
+  deleteExpressionExampleOverride: (modelName: string, exampleId: string) => void;
   handlePreviewMotionPlan: (plan: unknown) => void;
   applyAmbientMotionPreference: () => void;
 }
@@ -71,6 +73,15 @@ export function createDesktopRuntimeCommandHandler(
         return;
       case "delete_motion_tuning_sample":
         deps.deleteMotionTuningSample(command.sampleId);
+        return;
+      case "save_expression_example_override":
+        deps.saveExpressionExampleOverride(command.modelName, command.exampleId, command.enabled, command.feedback, command.tags);
+        return;
+      case "delete_expression_example_override":
+        deps.deleteExpressionExampleOverride(command.modelName, command.exampleId);
+        return;
+      case "request_expression_example_sync":
+        deps.snapshotPublisher.publishModelProjectionSnapshot();
         return;
       case "request_history_list":
         deps.adapter.requestHistoryList();

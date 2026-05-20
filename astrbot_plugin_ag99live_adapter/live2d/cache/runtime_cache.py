@@ -45,6 +45,33 @@ def build_live2d_directory_md5(live2ds_dir: Path) -> str:
     return digest.hexdigest()
 
 
+def _normalize_expression_example_overrides(
+    raw: Any,
+) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    normalized: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        example_id = str(item.get("example_id") or "").strip()
+        if not example_id:
+            continue
+        normalized.append({
+            "model_name": str(item.get("model_name") or "").strip(),
+            "example_id": example_id,
+            "enabled": bool(item.get("enabled", True)),
+            "feedback": str(item.get("feedback") or "").strip(),
+            "tags": [
+                str(tag).strip()
+                for tag in (item.get("tags") if isinstance(item.get("tags"), list) else [])
+                if str(tag).strip()
+            ],
+            "updated_at": str(item.get("updated_at") or "").strip(),
+        })
+    return normalized
+
+
 def load_live2d_runtime_cache(cache_path: Path) -> tuple[dict[str, Any], dict[str, str]]:
     if not cache_path.exists():
         return _build_empty_cache_payload(), {}
@@ -69,12 +96,16 @@ def load_live2d_runtime_cache(cache_path: Path) -> tuple[dict[str, Any], dict[st
     scan_cache = payload.get("scan_cache")
     action_filter_cache = payload.get("action_filter_cache")
     motion_tuning_samples = payload.get("motion_tuning_samples")
+    expression_example_overrides_raw = payload.get("expression_example_overrides")
 
     errors: dict[str, str] = {}
     normalized_scan_cache = scan_cache if isinstance(scan_cache, dict) else {}
     normalized_action_filter_cache = action_filter_cache if isinstance(action_filter_cache, dict) else {}
     normalized_motion_tuning_samples = (
         motion_tuning_samples if isinstance(motion_tuning_samples, list) else []
+    )
+    normalized_expression_example_overrides = _normalize_expression_example_overrides(
+        expression_example_overrides_raw
     )
     if not isinstance(scan_cache, dict):
         errors["scan_cache"] = "live2d_runtime_cache_scan_cache_invalid"
@@ -88,6 +119,7 @@ def load_live2d_runtime_cache(cache_path: Path) -> tuple[dict[str, Any], dict[st
             "scan_cache": normalized_scan_cache,
             "action_filter_cache": normalized_action_filter_cache,
             "motion_tuning_samples": normalized_motion_tuning_samples,
+            "expression_example_overrides": normalized_expression_example_overrides,
         },
         errors,
     )
@@ -108,6 +140,9 @@ def save_live2d_runtime_cache(cache_path: Path, payload: dict[str, Any]) -> None
             if isinstance(payload.get("motion_tuning_samples"), list)
             else []
         ),
+        "expression_example_overrides": _normalize_expression_example_overrides(
+            payload.get("expression_example_overrides")
+        ),
     }
     temp_path = cache_path.with_suffix(f"{cache_path.suffix}.tmp")
     temp_path.write_text(
@@ -123,4 +158,5 @@ def _build_empty_cache_payload() -> dict[str, Any]:
         "scan_cache": {},
         "action_filter_cache": {},
         "motion_tuning_samples": [],
+        "expression_example_overrides": [],
     }

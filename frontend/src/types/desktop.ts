@@ -257,6 +257,20 @@ export interface DesktopProfileAuthoringSnapshot {
   latestSemanticAxisProfileSaveResult: DesktopSemanticAxisProfileSaveResult | null;
 }
 
+export interface DesktopExpressionExample {
+  modelName: string;
+  id: string;
+  name: string;
+  category: string;
+  source_file: string;
+  emotion_label: string;
+  tags: string[];
+  axes: Record<string, number>;
+  enabled: boolean;
+  feedback: string;
+  source: "model_native" | "user";
+}
+
 export interface DesktopModelProjectionSnapshot {
   selectedModelName: string;
   selectedModelIconUrl: string;
@@ -266,6 +280,7 @@ export interface DesktopModelProjectionSnapshot {
   runtimeSemanticAxisProfile: SemanticAxisProfile | null;
   baseActionPreview: DesktopBaseActionPreview | null;
   motionTuningEffectiveExamples: DesktopMotionTuningEffectiveExample[];
+  expressionExamples: DesktopExpressionExample[];
 }
 
 export type DesktopProfileAuthoringCommand = {
@@ -342,6 +357,9 @@ export type DesktopRuntimeCommand =
   | { type: "request_motion_tuning_samples_sync" }
   | { type: "save_motion_tuning_sample"; sample: DesktopMotionTuningSample }
   | { type: "delete_motion_tuning_sample"; sampleId: string }
+  | { type: "save_expression_example_override"; modelName: string; exampleId: string; enabled: boolean; feedback: string; tags: string[] }
+  | { type: "delete_expression_example_override"; modelName: string; exampleId: string }
+  | { type: "request_expression_example_sync" }
   | { type: "request_history_list" }
   | { type: "create_history" }
   | { type: "load_history"; historyUid: string }

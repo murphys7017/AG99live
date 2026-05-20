@@ -23,6 +23,7 @@ export interface InboundFeatureDispatchDeps {
     applyHistoryDeleted: (envelope: ProtocolEnvelope<unknown>) => void;
   } | null;
   motionTuningAdapter: { applyMotionTuningSamplesState: (envelope: ProtocolEnvelope<unknown>) => void } | null;
+  expressionExampleAdapter: { applyExpressionExampleOverridesState: (envelope: ProtocolEnvelope<unknown>) => void } | null;
   rewriteModelSyncEnvelope: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => ProtocolEnvelope<SystemModelSyncPayload>;
 }
 
@@ -32,6 +33,7 @@ type InboundFeatureEvent = Extract<
   | { kind: "semantic_axis_profile_saved" }
   | { kind: "semantic_axis_profile_save_failed" }
   | { kind: "motion_tuning_samples_state" }
+  | { kind: "expression_example_overrides_state" }
   | { kind: "history_list" }
   | { kind: "history_created" }
   | { kind: "history_data" }
@@ -58,6 +60,9 @@ export function dispatchInboundFeatureEvent(
       return;
     case "motion_tuning_samples_state":
       deps.motionTuningAdapter?.applyMotionTuningSamplesState(event.envelope);
+      return;
+    case "expression_example_overrides_state":
+      deps.expressionExampleAdapter?.applyExpressionExampleOverridesState(event.envelope);
       return;
     case "history_list":
       deps.historyAdapter?.applyHistoryList(event.envelope);

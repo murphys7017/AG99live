@@ -184,11 +184,13 @@ export function usePetRuntimeSnapshotPublisher(
   // ── Model projection snapshot ────────────────────────────────────
 
   function buildModelProjectionSnapshot(): DesktopModelProjectionSnapshot {
+    const model = options.selectedModel.value;
+    const rawExamples = model?.expression_example_library?.examples ?? [];
     return {
-      selectedModelName: options.selectedModel.value?.name ?? "",
-      selectedModelIconUrl: options.selectedModel.value?.icon_url ?? "",
+      selectedModelName: model?.name ?? "",
+      selectedModelIconUrl: model?.icon_url ?? "",
       recommendedMode:
-        options.selectedModel.value?.engine_hints.recommended_mode ?? "",
+        model?.engine_hints.recommended_mode ?? "",
       confName: options.modelSyncState.confName,
       lastUpdated: options.modelSyncState.lastUpdated,
       runtimeSemanticAxisProfile: options.selectedSemanticAxisProfile.value
@@ -197,6 +199,19 @@ export function usePetRuntimeSnapshotPublisher(
       baseActionPreview: options.parameterActionPreview.value,
       motionTuningEffectiveExamples: options.adapter.state.motionTuningSamplesStatus.effectiveExamples
         .map((example) => cloneJson(example)),
+      expressionExamples: rawExamples.map((ex: Record<string, unknown>) => ({
+        modelName: model?.name ?? "",
+        id: String(ex.id ?? ""),
+        name: String(ex.name ?? ""),
+        category: String(ex.category ?? ""),
+        source_file: String(ex.source_file ?? ""),
+        emotion_label: String(ex.emotion_label ?? ""),
+        tags: Array.isArray(ex.tags) ? ex.tags.map(String) : [],
+        axes: (ex.axes && typeof ex.axes === "object" ? ex.axes : {}) as Record<string, number>,
+        enabled: ex.enabled !== false,
+        feedback: String(ex.user_feedback ?? ""),
+        source: "model_native" as const,
+      })),
     };
   }
 
@@ -215,6 +230,7 @@ export function usePetRuntimeSnapshotPublisher(
       options.parameterActionPreview.value,
       options.selectedSemanticAxisProfile.value,
       options.adapter.state.motionTuningSamplesStatus.effectiveExamples,
+      options.adapter.state.expressionExampleOverridesRevision,
     ],
     () => {
       modelProjectionDebounce.schedule(() => {

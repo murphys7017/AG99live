@@ -420,6 +420,15 @@ mode
 - 最小可用覆盖优先保证 `neutral`、`happy`、`angry`、`surprised` 和一个补充情绪类。
 - Action Lab 显示的 few-shot 有效示例预览应直接反映后端当前实际解析结果，而不是前端独立重算的平行结果。
 
+LLM prompt 表情参考：
+
+- 后端动作 selector prompt 先提供表情关键词参考动作，再提供 few-shot 示例。
+- 表情关键词参考动作由关键词组、心情态度、实际动作表现和参考轴值组成。
+- 参考轴值是 0-100 语义轴空间里的动作草图，用于帮助 LLM 理解动作倾向，不是硬约束，也不是需要计算的差值。
+- 轴的真实含义以当前 `SemanticAxisProfile` 的用户可编辑说明为准；如果参考动作包含当前不可控制的轴，LLM 应忽略该轴。
+- few-shot 示例仍按 `user` -> `model_native` -> `default` 补齐顺序选择。
+- 表情关键词参考动作不写入 `motion_tuning_samples`，也不改变动作协议。
+
 表情冷启动示例的抽象规则：
 
 - 先从模型原生 expression 扫描结果抽取候选信息。

@@ -18,6 +18,8 @@ from .constants import (
     TYPE_SYSTEM_HISTORY_LOAD,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_DELETE,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE,
+    TYPE_SYSTEM_EXPRESSION_EXAMPLE_OVERRIDE_SAVE,
+    TYPE_SYSTEM_EXPRESSION_EXAMPLE_OVERRIDE_DELETE,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE,
 )
 from .models import (
@@ -221,6 +223,32 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
         if not isinstance(sample_id, str) or not sample_id.strip():
             raise ProtocolError(
                 "`system.motion_tuning_sample_delete` requires `payload.sample_id` to be a non-empty string."
+            )
+        return
+
+    if message_type == TYPE_SYSTEM_EXPRESSION_EXAMPLE_OVERRIDE_SAVE:
+        model_name = payload.get("model_name")
+        if not isinstance(model_name, str) or not model_name.strip():
+            raise ProtocolError(
+                "`system.expression_example_override_save` requires `payload.model_name` to be a non-empty string."
+            )
+        example_id = payload.get("example_id")
+        if not isinstance(example_id, str) or not example_id.strip():
+            raise ProtocolError(
+                "`system.expression_example_override_save` requires `payload.example_id` to be a non-empty string."
+            )
+        return
+
+    if message_type == TYPE_SYSTEM_EXPRESSION_EXAMPLE_OVERRIDE_DELETE:
+        model_name = payload.get("model_name")
+        if not isinstance(model_name, str) or not model_name.strip():
+            raise ProtocolError(
+                "`system.expression_example_override_delete` requires `payload.model_name` to be a non-empty string."
+            )
+        example_id = payload.get("example_id")
+        if not isinstance(example_id, str) or not example_id.strip():
+            raise ProtocolError(
+                "`system.expression_example_override_delete` requires `payload.example_id` to be a non-empty string."
             )
         return
 

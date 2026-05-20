@@ -147,6 +147,7 @@ const state = reactive({
     diagnostics: [],
     effectiveExamples: [],
   } as DesktopMotionTuningSamplesStatus,
+  expressionExampleOverridesRevision: 0,
 });
 
 let socket: WebSocket | null = null;
@@ -507,6 +508,12 @@ function buildDispatchDeps(): InboundDispatchDeps {
     motionTuningAdapter: motionTuningAdapter
       ? { applyMotionTuningSamplesState: (env) => motionTuningAdapter!.applyMotionTuningSamplesState(env) }
       : null,
+    expressionExampleAdapter: {
+      applyExpressionExampleOverridesState: () => {
+        state.expressionExampleOverridesRevision += 1;
+        state.statusMessage = "表达式参考设置已更新，等待模型投影刷新。";
+      },
+    },
     rewriteModelSyncEnvelope: (env) => rewriteModelSyncEnvelopeWithActiveHost(env as Parameters<typeof rewriteModelSyncEnvelopeWithActiveHost>[0], state.activeWsAddress),
     rewriteSocketUrl: (url) => rewriteSocketUrlWithActiveHost(url, state.activeWsAddress),
     rewriteHttpUrl: (url) => rewriteHttpUrlWithActiveHost(url, state.activeWsAddress),
@@ -641,6 +648,33 @@ function deleteMotionTuningSample(sampleId: string): boolean {
   return motionTuningAdapter?.deleteMotionTuningSample(sampleId) ?? false;
 }
 
+function saveExpressionExampleOverride(modelName: string, exampleId: string, enabled: boolean, feedback: string, tags: string[]): void {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  socket.send(JSON.stringify({
+    type: "system.expression_example_override_save",
+    version: "v2",
+    message_id: createMessageId(),
+    source: "frontend",
+    payload: { model_name: modelName, example_id: exampleId, enabled, feedback, tags },
+  }));
+}
+
+function deleteExpressionExampleOverride(modelName: string, exampleId: string): void {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  socket.send(JSON.stringify({
+    type: "system.expression_example_override_delete",
+    version: "v2",
+    message_id: createMessageId(),
+    source: "frontend",
+    payload: { model_name: modelName, example_id: exampleId },
+  }));
+}
+
+
 function sendMotionPayloadPreview(payload: unknown): boolean {
   return sendMotionPreview(outboundCtx, payload, SCHEMA_MOTION_INTENT_V2);
 }
@@ -747,6 +781,8 @@ export function useAdapterConnection(
     deleteHistory,
     saveMotionTuningSample,
     deleteMotionTuningSample,
+    saveExpressionExampleOverride,
+    deleteExpressionExampleOverride,
     sendMotionPayloadPreview,
     sendPlaybackFinishedForCurrentGroup: sendPlaybackFinished,
     clearPlaybackGroupContext,
