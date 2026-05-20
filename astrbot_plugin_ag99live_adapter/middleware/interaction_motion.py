@@ -17,9 +17,9 @@ from ..motion.realtime_motion_plan import (
     resolve_selected_semantic_axis_profile,
 )
 from ..prompts.motion_selector import (
-    profile_prompt_axes,
     resolve_motion_prompt_instruction,
 )
+from ..prompts.semantic_axis_prompt import profile_prompt_axes
 
 @dataclass(slots=True)
 class _MotionRuntimeBundle:

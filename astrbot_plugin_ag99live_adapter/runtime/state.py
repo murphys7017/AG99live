@@ -42,9 +42,9 @@ from ..live2d.semantic_axis_profile import (
 from ..protocol.builder import build_system_model_sync
 from ..prompts.motion_selector import (
     DEFAULT_MOTION_PROMPT_INSTRUCTION,
-    profile_prompt_axes,
     resolve_selector_few_shot_examples,
 )
+from ..prompts.semantic_axis_prompt import profile_prompt_axes
 
 
 class RuntimeState:

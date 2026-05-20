@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { buildParameterActionPreview } from "../action-lab/parameterActionPreview";
 import { useAdapterConnection } from "../adapter-connection/useAdapterConnection";
 import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
@@ -15,6 +15,9 @@ import { useModelEngine } from "../model-engine/useModelEngine";
 import { cloneJson } from "../utils/cloneJson";
 import { applyMotionEngineSettingsSnapshot } from "./motionEngineSettingsSnapshot";
 import { createDesktopRuntimeCommandHandler } from "../desktop-bridge/useDesktopRuntimeCommandHandler";
+import { useAmbientMotionPreference } from "./useAmbientMotionPreference";
+import { useDesktopContextMenu } from "./useDesktopContextMenu";
+import { usePushToTalkController } from "./usePushToTalkController";
 import type {
   DesktopMotionPlaybackRecord,
   DesktopMotionTuningSample,
@@ -33,6 +36,7 @@ export function usePetDesktopController() {
     bridge.state.snapshot.motionPlaybackRecords.map((record) =>
       cloneJson(record) as DesktopMotionPlaybackRecord);
   const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
+  const { showContextMenu } = useDesktopContextMenu();
   const playbackAck = {
     sendPlaybackFinishedForCurrentGroup: adapter.sendPlaybackFinishedForCurrentGroup,
     clearPlaybackGroupContext: adapter.clearPlaybackGroupContext,
@@ -152,22 +156,13 @@ export function usePetDesktopController() {
       state.modelInfo?.runtime_cache_errors,
     ),
   );
-
-  function applyAmbientMotionPreference(attemptsRemaining = 12): void {
-    const live2dAdapter = window.getLAppAdapter?.();
-    if (live2dAdapter?.setAmbientMotionEnabled) {
-      live2dAdapter.setAmbientMotionEnabled(ambientMotionEnabled.value);
-      return;
-    }
-
-    if (attemptsRemaining <= 0) {
-      return;
-    }
-
-    window.setTimeout(() => {
-      applyAmbientMotionPreference(attemptsRemaining - 1);
-    }, 120);
-  }
+  const { applyAmbientMotionPreference } = useAmbientMotionPreference(
+    ambientMotionEnabled,
+    {
+      getModelUrl: () => selectedModel.value?.model_url ?? "",
+    },
+  );
+  const pushToTalk = usePushToTalkController(adapter);
 
   function handlePreviewMotionPlan(plan: unknown): void {
     const localPlayed = modelEngine.playPreviewPayload(plan);
@@ -233,106 +228,20 @@ export function usePetDesktopController() {
     commandHandler.handleProfileAuthoringCommand,
   );
 
-  watch(
-    () => [selectedModel.value?.model_url ?? "", ambientMotionEnabled.value],
-    () => {
-      applyAmbientMotionPreference();
-    },
-    { immediate: true },
-  );
-
   onMounted(async () => {
     await adapter.initialize();
     adapter.connect();
     applyAmbientMotionPreference();
-    installPttKeyboardListeners();
-    installPttIpcListeners();
+    pushToTalk.install();
   });
 
   onBeforeUnmount(() => {
-    removePttKeyboardListeners();
-    removePttIpcListeners();
+    pushToTalk.dispose();
     playbackCoordinator.resetPlaybackCoordination();
     modelEngine.stop("unmount");
     detachBridgeListener();
     detachProfileAuthoringBridgeListener();
   });
-
-  // ── Push-to-talk keyboard listener ────────────────────────────────
-
-  function onPttKeyDown(event: KeyboardEvent): void {
-    console.info("[PTT] keydown key=%s repeat=%s pttMode=%s", event.key, event.repeat, adapter.state.pttModeEnabled);
-    if (!adapter.state.pttModeEnabled) {
-      return;
-    }
-    // Ctrl activates PTT (ignores on repeated keydown)
-    if (event.key === "Control" && !event.repeat) {
-      console.info("[PTT] starting mic capture");
-      void adapter.startPttCapture();
-    }
-  }
-
-  function onPttKeyUp(event: KeyboardEvent): void {
-    console.info("[PTT] keyup key=%s pttMode=%s", event.key, adapter.state.pttModeEnabled);
-    if (!adapter.state.pttModeEnabled) {
-      return;
-    }
-    if (event.key === "Control") {
-      console.info("[PTT] stopping mic capture");
-      void adapter.stopPttCapture();
-    }
-  }
-
-  function installPttKeyboardListeners(): void {
-    document.addEventListener("keydown", onPttKeyDown);
-    document.addEventListener("keyup", onPttKeyUp);
-    window.addEventListener("keydown", onPttKeyDown);
-    window.addEventListener("keyup", onPttKeyUp);
-    console.info("[PTT] keyboard listeners installed (document + window)");
-  }
-
-  function removePttKeyboardListeners(): void {
-    document.removeEventListener("keydown", onPttKeyDown);
-    document.removeEventListener("keyup", onPttKeyUp);
-    window.removeEventListener("keydown", onPttKeyDown);
-    window.removeEventListener("keyup", onPttKeyUp);
-  }
-
-  // ── PTT via IPC (global keyboard hook from main process) ──────────
-
-  function onPttIpcKeyDown(): void {
-    if (!adapter.state.pttModeEnabled) {
-      return;
-    }
-    console.info("[PTT] IPC keydown");
-    void adapter.startPttCapture();
-  }
-
-  function onPttIpcKeyUp(): void {
-    if (!adapter.state.pttModeEnabled) {
-      return;
-    }
-    console.info("[PTT] IPC keyup");
-    void adapter.stopPttCapture();
-  }
-
-  function installPttIpcListeners(): void {
-    window.ag99desktop?.onIpc?.("desktop:ptt-keydown", onPttIpcKeyDown);
-    window.ag99desktop?.onIpc?.("desktop:ptt-keyup", onPttIpcKeyUp);
-  }
-
-  function removePttIpcListeners(): void {
-    // Electron IPC listeners are auto-cleaned on window close
-  }
-
-  function showContextMenu(event: MouseEvent): void {
-    window.ag99desktop?.showContextMenu({
-      x: event.clientX,
-      y: event.clientY,
-      screenX: event.screenX,
-      screenY: event.screenY,
-    });
-  }
 
   return {
     sessionStore,

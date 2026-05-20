@@ -4,6 +4,13 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from .expression_references import build_expression_keyword_reference_block
+from .motion_selector_examples import (
+    create_default_selector_few_shot_examples,
+    resolve_selector_few_shot_examples as _resolve_selector_few_shot_examples,
+)
+from .semantic_axis_prompt import build_profile_axis_prompt_block
+
 
 @dataclass(frozen=True)
 class AxisSpec:
@@ -50,244 +57,7 @@ DEFAULT_MOTION_PROMPT_INSTRUCTION = (
 )
 
 
-def _build_example_axes(**overrides: int) -> dict[str, int]:
-    axes: dict[str, int] = {}
-    for key, value in overrides.items():
-        if key not in AXIS_NAMES:
-            continue
-        try:
-            number = int(round(float(value)))
-        except (TypeError, ValueError):
-            number = 50
-        axes[key] = max(0, min(100, number))
-    return axes
-
-
-DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES: list[dict[str, Any]] = [
-    {
-        "input": "用户：嗯，我知道了。\n助手：好的，我们继续下一步。",
-        "output": {
-            "emotion": "neutral",
-            "mode": "idle",
-            "duration_ms": 1100,
-            "axes": _build_example_axes(head_pitch=51, mouth_smile=52),
-        },
-    },
-    {
-        "input": "用户：太好了！终于通过了！\n助手：真棒，我们成功了！",
-        "output": {
-            "emotion": "joy",
-            "mode": "expressive",
-            "duration_ms": 1350,
-            "axes": _build_example_axes(
-                head_pitch=60,
-                gaze_y=58,
-                mouth_smile=86,
-                brow_bias=68,
-            ),
-        },
-    },
-    {
-        "input": "用户：我有点难过，今天状态不太好。\n助手：没关系，我们慢慢来。",
-        "output": {
-            "emotion": "sad",
-            "mode": "expressive",
-            "duration_ms": 1500,
-            "axes": _build_example_axes(
-                head_pitch=38,
-                gaze_y=34,
-                eye_open_left=40,
-                eye_open_right=40,
-                mouth_smile=22,
-                brow_bias=30,
-            ),
-        },
-    },
-    {
-        "input": "用户：你能对我眨一下眼吗？\n助手：当然可以，给你一个小小的 wink。",
-        "output": {
-            "emotion": "playful_wink",
-            "mode": "expressive",
-            "duration_ms": 900,
-            "axes": _build_example_axes(
-                head_roll=62,
-                gaze_x=56,
-                eye_open_left=18,
-                eye_open_right=100,
-                mouth_smile=78,
-                brow_bias=58,
-            ),
-        },
-    },
-    {
-        "input": "用户：啊？你说这个现在就能用了？\n助手：是的，现在已经可用了。",
-        "output": {
-            "emotion": "surprised",
-            "mode": "expressive",
-            "duration_ms": 1200,
-            "axes": _build_example_axes(
-                head_pitch=62,
-                gaze_y=64,
-                eye_open_left=100,
-                eye_open_right=100,
-                mouth_smile=58,
-                brow_bias=84,
-            ),
-        },
-    },
-]
-
-EXPRESSION_KEYWORD_REFERENCES: list[dict[str, Any]] = [
-    {
-        "id": "calm_continue",
-        "keywords": ["平静", "说明", "确认", "继续"],
-        "attitude": "稳定自然",
-        "visual": ["轻微点头", "弱笑", "视线稳定"],
-        "reference_axes": {
-            "head_pitch": 52,
-            "gaze_y": 50,
-            "mouth_smile": 54,
-            "brow_bias": 50,
-        },
-    },
-    {
-        "id": "positive_encouragement",
-        "keywords": ["开心", "鼓励", "赞同", "成功"],
-        "attitude": "积极亲近",
-        "visual": ["明显笑意", "眼神明亮", "头部略抬"],
-        "reference_axes": {
-            "head_pitch": 60,
-            "gaze_y": 58,
-            "mouth_smile": 78,
-            "brow_bias": 64,
-        },
-    },
-    {
-        "id": "serious_dissatisfied",
-        "keywords": ["生气", "不满", "严肃", "反驳"],
-        "attitude": "克制但有压迫感",
-        "visual": ["压眉", "笑意降低", "头部略低"],
-        "reference_axes": {
-            "head_pitch": 45,
-            "gaze_y": 48,
-            "mouth_smile": 24,
-            "brow_bias": 28,
-        },
-    },
-    {
-        "id": "surprise_discovery",
-        "keywords": ["惊讶", "意外", "突然", "发现"],
-        "attitude": "短促明显",
-        "visual": ["睁眼", "挑眉", "抬头"],
-        "reference_axes": {
-            "head_pitch": 62,
-            "gaze_y": 64,
-            "eye_open_left": 92,
-            "eye_open_right": 92,
-            "brow_bias": 82,
-        },
-    },
-    {
-        "id": "doubt_thinking",
-        "keywords": ["疑惑", "不确定", "确认", "思考"],
-        "attitude": "迟疑求证",
-        "visual": ["轻微歪头", "视线偏移", "疑惑眉"],
-        "reference_axes": {
-            "head_roll": 58,
-            "gaze_x": 56,
-            "gaze_y": 47,
-            "mouth_smile": 42,
-            "brow_bias": 44,
-        },
-    },
-    {
-        "id": "shy_soft_avoidance",
-        "keywords": ["害羞", "不好意思", "尴尬", "被夸"],
-        "attitude": "柔和回避",
-        "visual": ["低头", "视线躲闪", "弱笑"],
-        "reference_axes": {
-            "head_pitch": 40,
-            "gaze_y": 42,
-            "gaze_x": 58,
-            "mouth_smile": 58,
-            "brow_bias": 47,
-        },
-    },
-    {
-        "id": "tired_low_energy",
-        "keywords": ["疲惫", "无力", "困", "低能量"],
-        "attitude": "低能量",
-        "visual": ["眼半闭", "头部下垂", "笑意降低"],
-        "reference_axes": {
-            "head_pitch": 35,
-            "gaze_y": 36,
-            "eye_open_left": 38,
-            "eye_open_right": 38,
-            "mouth_smile": 32,
-        },
-    },
-]
-
-_CORE_EXPRESSION_CATEGORY_GROUPS: list[tuple[str, ...]] = [
-    ("neutral",),
-    ("happy",),
-    ("angry",),
-    ("surprised",),
-    ("confused", "embarrassed"),
-]
-
-_MODEL_NATIVE_EXPRESSION_TEMPLATES: dict[str, dict[str, Any]] = {
-    "neutral": {
-        "input": "用户：嗯，我知道了。\n助手：好的，我们继续下一步。",
-        "mode": "idle",
-        "duration_ms": 1100,
-    },
-    "happy": {
-        "input": "用户：太好了！终于通过了！\n助手：真棒，我们成功了！",
-        "mode": "expressive",
-        "duration_ms": 1350,
-    },
-    "angry": {
-        "input": "用户：这也太气人了吧？\n助手：这确实让人有点生气。",
-        "mode": "expressive",
-        "duration_ms": 1250,
-    },
-    "surprised": {
-        "input": "用户：啊？你说这个现在就能用了？\n助手：是的，现在已经可用了。",
-        "mode": "expressive",
-        "duration_ms": 1200,
-    },
-    "confused": {
-        "input": "用户：嗯？这个地方是什么意思？\n助手：我也先确认一下，这里有点疑惑。",
-        "mode": "expressive",
-        "duration_ms": 1150,
-    },
-    "embarrassed": {
-        "input": "用户：哎呀，被你发现了。\n助手：有点不好意思。",
-        "mode": "expressive",
-        "duration_ms": 1100,
-    },
-    "blush": {
-        "input": "用户：你这话说得我都不好意思了。\n助手：咳，有点害羞。",
-        "mode": "expressive",
-        "duration_ms": 1100,
-    },
-    "question": {
-        "input": "用户：你是在问我吗？\n助手：嗯，我是在确认这个点。",
-        "mode": "expressive",
-        "duration_ms": 1050,
-    },
-    "tired": {
-        "input": "用户：今天好累啊。\n助手：是啊，稍微有点疲惫。",
-        "mode": "idle",
-        "duration_ms": 1200,
-    },
-    "extremelytired": {
-        "input": "用户：感觉已经没电了。\n助手：嗯，状态真的很疲惫。",
-        "mode": "idle",
-        "duration_ms": 1250,
-    },
-}
+DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES = create_default_selector_few_shot_examples(AXIS_NAMES)
 
 
 def build_selector_platform_context(*, runtime_state: Any) -> str:
@@ -309,210 +79,12 @@ def resolve_selector_few_shot_examples(
     runtime_state: Any,
     update_runtime_state: bool = True,
 ) -> list[dict[str, Any]]:
-    enabled = bool(getattr(runtime_state, "realtime_motion_fewshot_enabled", True))
-    if not enabled:
-        if update_runtime_state and hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
-            runtime_state.motion_tuning_fewshot_diagnostics = []
-        if update_runtime_state and hasattr(runtime_state, "motion_tuning_effective_examples"):
-            runtime_state.motion_tuning_effective_examples = []
-        return []
-
-    count = int(getattr(runtime_state, "realtime_motion_fewshot_count", 4))
-    count = max(0, count)
-    if count == 0:
-        if update_runtime_state and hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
-            runtime_state.motion_tuning_fewshot_diagnostics = []
-        if update_runtime_state and hasattr(runtime_state, "motion_tuning_effective_examples"):
-            runtime_state.motion_tuning_effective_examples = []
-        return []
-
-    user_examples = [
-        item
-        for item in getattr(runtime_state, "motion_tuning_reference_examples", [])
-        if isinstance(item, dict)
-    ]
-    selected_user_examples = user_examples[:count]
-
-    model_native_examples: list[dict[str, Any]] = []
-    if len(selected_user_examples) < min(5, count):
-        model_native_examples = _resolve_model_native_expression_examples(
-            runtime_state=runtime_state,
-        )
-
-    resolved_examples = list(selected_user_examples)
-    seen_categories = {
-        _normalize_expression_category_key(item)
-        for item in resolved_examples
-        if _normalize_expression_category_key(item)
-    }
-    remaining = max(0, count - len(resolved_examples))
-
-    model_native_backfill = _select_category_backfill_examples(
-        candidates=model_native_examples,
-        count=remaining,
-        seen_categories=seen_categories,
+    return _resolve_selector_few_shot_examples(
+        runtime_state=runtime_state,
+        default_examples=DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES,
+        normalize_emotion_key=_normalize_emotion_key,
+        update_runtime_state=update_runtime_state,
     )
-    resolved_examples.extend(model_native_backfill)
-    seen_categories.update(
-        _normalize_expression_category_key(item)
-        for item in model_native_backfill
-        if _normalize_expression_category_key(item)
-    )
-
-    remaining = max(0, count - len(resolved_examples))
-    default_examples = _select_category_backfill_examples(
-        candidates=DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES,
-        count=remaining,
-        seen_categories=seen_categories,
-    )
-    resolved_examples.extend(default_examples)
-
-    diagnostics: list[str] = []
-    if len(selected_user_examples) < count:
-        diagnostics.append(
-            "motion_tuning_user_samples_insufficient:"
-            f"requested={count}:user_available={len(selected_user_examples)}"
-        )
-    if model_native_backfill:
-        diagnostics.append(
-            "motion_tuning_model_native_backfill_applied:"
-            f"count={len(model_native_backfill)}"
-        )
-    if default_examples:
-        diagnostics.append(
-            "motion_tuning_default_backfill_applied:"
-            f"count={len(default_examples)}"
-        )
-    if len(resolved_examples) < count:
-        diagnostics.append(
-            "motion_tuning_fewshot_final_shortage:"
-            f"requested={count}:final_count={len(resolved_examples)}"
-        )
-    if update_runtime_state and hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
-        runtime_state.motion_tuning_fewshot_diagnostics = diagnostics
-    if update_runtime_state and hasattr(runtime_state, "motion_tuning_effective_examples"):
-        runtime_state.motion_tuning_effective_examples = list(resolved_examples)
-    return resolved_examples
-
-
-def _resolve_model_native_expression_examples(*, runtime_state: Any) -> list[dict[str, Any]]:
-    model_info = getattr(runtime_state, "model_info", None)
-    if not isinstance(model_info, dict):
-        return []
-    selected_model = str(model_info.get("selected_model") or "").strip()
-    models = model_info.get("models")
-    if not selected_model or not isinstance(models, list):
-        return []
-
-    model_payload = next(
-        (
-            item
-            for item in models
-            if isinstance(item, dict) and str(item.get("name") or "").strip() == selected_model
-        ),
-        None,
-    )
-    if not isinstance(model_payload, dict):
-        return []
-
-    library = model_payload.get("expression_example_library")
-    if not isinstance(library, dict):
-        return []
-    examples = library.get("examples")
-    if not isinstance(examples, list):
-        return []
-
-    normalized_examples: list[dict[str, Any]] = []
-    for item in examples:
-        if not isinstance(item, dict):
-            continue
-        if not item.get("enabled", True):
-            continue
-        emotion_label = str(item.get("emotion_label") or item.get("id") or "").strip()
-        normalized_key = _normalize_emotion_key(emotion_label)
-        template = _MODEL_NATIVE_EXPRESSION_TEMPLATES.get(normalized_key)
-        axes = item.get("axes")
-        if not normalized_key or template is None or not isinstance(axes, dict) or not axes:
-            continue
-        normalized_examples.append(
-            {
-                "input": template["input"],
-                "output": {
-                    "emotion": normalized_key,
-                    "mode": str(template["mode"]),
-                    "duration_ms": int(template["duration_ms"]),
-                    "axes": {
-                        str(axis_id).strip(): value
-                        for axis_id, value in axes.items()
-                        if str(axis_id).strip()
-                    },
-                },
-                "source": "model_native_expression_example_library",
-                "tags": [
-                    str(tag).strip()
-                    for tag in item.get("tags", [])
-                    if str(tag).strip()
-                ]
-                if isinstance(item.get("tags"), list)
-                else [],
-            }
-        )
-    return normalized_examples
-
-
-def _select_category_backfill_examples(
-    *,
-    candidates: list[dict[str, Any]],
-    count: int,
-    seen_categories: set[str],
-) -> list[dict[str, Any]]:
-    if count <= 0:
-        return []
-
-    normalized_candidates = [item for item in candidates if isinstance(item, dict)]
-    selected: list[dict[str, Any]] = []
-    local_seen = set(seen_categories)
-    used_indexes: set[int] = set()
-
-    for group in _CORE_EXPRESSION_CATEGORY_GROUPS:
-        if len(selected) >= count:
-            break
-        if any(category in local_seen for category in group):
-            continue
-        for index, item in enumerate(normalized_candidates):
-            if index in used_indexes:
-                continue
-            category = _normalize_expression_category_key(item)
-            if category in group:
-                selected.append(item)
-                used_indexes.add(index)
-                if category:
-                    local_seen.add(category)
-                break
-
-    if len(selected) >= count:
-        return selected[:count]
-
-    for index, item in enumerate(normalized_candidates):
-        if index in used_indexes:
-            continue
-        category = _normalize_expression_category_key(item)
-        if category and category in local_seen:
-            continue
-        selected.append(item)
-        used_indexes.add(index)
-        if category:
-            local_seen.add(category)
-        if len(selected) >= count:
-            break
-    return selected[:count]
-
-
-def _normalize_expression_category_key(example: dict[str, Any]) -> str:
-    output = example.get("output")
-    if not isinstance(output, dict):
-        return ""
-    return _normalize_emotion_key(str(output.get("emotion") or "").strip())
 
 
 def _normalize_emotion_key(value: str) -> str:
@@ -533,27 +105,6 @@ def resolve_motion_prompt_instruction(*, runtime_state: Any) -> str:
     if not raw_value:
         return DEFAULT_MOTION_PROMPT_INSTRUCTION
     return truncate_prompt_text(raw_value, 800)
-
-
-def profile_prompt_axes(semantic_profile: dict[str, Any]) -> list[dict[str, Any]]:
-    axes = semantic_profile.get("axes")
-    if not isinstance(axes, list):
-        raise ValueError("semantic_profile_axes_not_list")
-
-    result: list[dict[str, Any]] = []
-    for axis in axes:
-        if not isinstance(axis, dict):
-            continue
-        role = str(axis.get("control_role") or "").strip()
-        if role not in {"primary", "hint"}:
-            continue
-        axis_id = str(axis.get("id") or "").strip()
-        if not axis_id:
-            continue
-        result.append(axis)
-    if not result:
-        raise ValueError("semantic_profile_has_no_prompt_axes")
-    return result
 
 
 def build_selector_context(
@@ -652,9 +203,10 @@ def build_selector_user_prompt_v2(
     motion_instruction: str = "",
     semantic_profile: dict[str, Any],
 ) -> str:
-    prompt_axes = profile_prompt_axes(semantic_profile)
-    axis_block = "\n".join(_format_profile_axis_prompt_line(axis) for axis in prompt_axes)
-    allowed_axis_ids = [str(axis.get("id") or "").strip() for axis in prompt_axes]
+    axis_block, allowed_axis_ids = build_profile_axis_prompt_block(
+        semantic_profile,
+        truncate_text=truncate_prompt_text,
+    )
 
     few_shot_block = _build_few_shot_block(
         few_shot_examples=few_shot_examples,
@@ -737,37 +289,6 @@ def _build_few_shot_block(
     return "\n".join(few_shot_lines) + "\n\n"
 
 
-def build_expression_keyword_reference_block() -> str:
-    lines = [
-        "表情关键词参考动作：",
-        "参考轴值是 0-100 语义轴空间里的动作草图，不是必须照抄的硬约束，也不是 +/- 差值。",
-        "只输出当前可控制参数中存在的轴；如果参考轴不存在，就忽略它。",
-        "根据当前语气轻重在参考值附近调整；如果用户编辑了轴解释，以当前可控制参数说明为准。",
-    ]
-    for reference in EXPRESSION_KEYWORD_REFERENCES:
-        keywords = "/".join(
-            str(item).strip()
-            for item in reference.get("keywords", [])
-            if str(item).strip()
-        )
-        attitude = str(reference.get("attitude") or "").strip()
-        visual = "、".join(
-            str(item).strip()
-            for item in reference.get("visual", [])
-            if str(item).strip()
-        )
-        reference_axes = reference.get("reference_axes")
-        reference_axes_json = json.dumps(
-            reference_axes if isinstance(reference_axes, dict) else {},
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
-        lines.append(
-            f"- {keywords}：态度={attitude}；表现={visual}；参考轴值={reference_axes_json}"
-        )
-    return "\n".join(lines) + "\n\n"
-
-
 def _build_motion_instruction_block(motion_instruction: str) -> str:
     motion_instruction_text = str(motion_instruction or "").strip()
     if not motion_instruction_text:
@@ -776,50 +297,6 @@ def _build_motion_instruction_block(motion_instruction: str) -> str:
         "补充动作指令：\n"
         f"{truncate_prompt_text(motion_instruction_text, 800)}\n\n"
     )
-
-
-def _format_axis_semantics(values: Any) -> str:
-    if not isinstance(values, list):
-        return ""
-    return ", ".join(
-        truncate_prompt_text(str(item).strip(), 48)
-        for item in values
-        if str(item).strip()
-    )
-
-
-def _format_profile_axis_prompt_line(axis: dict[str, Any]) -> str:
-    axis_id = str(axis.get("id") or "").strip()
-    label = str(axis.get("label") or axis_id).strip()
-    role = str(axis.get("control_role") or "").strip()
-    role_label = _format_control_role_label(role)
-    neutral = axis.get("neutral", 50)
-    value_range = axis.get("value_range")
-    range_text = "[0,100]"
-    if (
-        isinstance(value_range, list)
-        and len(value_range) == 2
-        and isinstance(value_range[0], (int, float))
-        and isinstance(value_range[1], (int, float))
-    ):
-        range_text = f"[{float(value_range[0]):g},{float(value_range[1]):g}]"
-    negative = _format_axis_semantics(axis.get("negative_semantics")) or "负方向"
-    positive = _format_axis_semantics(axis.get("positive_semantics")) or "正方向"
-    notes = truncate_prompt_text(str(axis.get("usage_notes") or "").strip(), 160)
-    description = truncate_prompt_text(str(axis.get("description") or "").strip(), 160)
-    suffix = f" 使用说明={notes}" if notes else ""
-    return (
-        f"- {axis_id}（{label}，{role_label}，范围 {range_text}，中性值 {neutral}）："
-        f"低值={negative}；高值={positive}。{description}{suffix}"
-    ).strip()
-
-
-def _format_control_role_label(role: str) -> str:
-    if role == "primary":
-        return "主要控制参数"
-    if role == "hint":
-        return "辅助细节参数"
-    return "可控制参数"
 
 
 def truncate_prompt_text(value: str, max_chars: int) -> str:

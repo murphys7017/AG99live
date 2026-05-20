@@ -12,9 +12,9 @@ from ..prompts.motion_selector import (
     build_selector_context,
     build_selector_platform_context,
     build_selector_user_prompt,
-    profile_prompt_axes,
     resolve_motion_prompt_instruction,
 )
+from ..prompts.semantic_axis_prompt import profile_prompt_axes
 
 LOGGER = logging.getLogger(__name__)
 _SYSTEM_PROMPT = MOTION_SELECTOR_SYSTEM_PROMPT
