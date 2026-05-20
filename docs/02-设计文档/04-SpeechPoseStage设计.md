@@ -1,6 +1,4 @@
-# SpeechPoseStage 实施计划
-
-更新时间：2026-05-19
+# SpeechPoseStage 设计
 
 ## 1. 目标
 
@@ -178,7 +176,7 @@ npm run typecheck:renderer
 npm run test:model-engine
 ```
 
-## 8. 验收标准
+## 8. 维护标准
 
 - 当前已有 compile 行为不回退
 - `SpeechPoseStage` 只通过 registry 接入

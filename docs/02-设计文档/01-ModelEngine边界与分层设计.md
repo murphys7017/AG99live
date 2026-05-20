@@ -1,8 +1,6 @@
 # ModelEngine 驱动系统边界与分层设计
 
-> 状态：当前主设计文档。本文是前端动作引擎结构方案的维护入口。
-
-更新时间：2026-05-18
+本文是前端动作引擎结构方案的维护入口。
 
 ## 1. 当前结论
 
@@ -556,121 +554,28 @@ Avatar Runtime 不负责：
 - 判断表情语义。
 - 连接后端。
 
-## 9. 推荐实施顺序
+## 9. 扩展路线
 
-### Phase 0：文档与代码审阅
+当前 ModelEngine 的结构入口已经稳定：payload boundary、compile pipeline、static registry、runtime scheduler、motion start 和 facade 各自有明确职责。
 
-目标：
+后续增强能力按以下顺序接入：
 
-- 确认 `model-engine/` 主路径。
-- 标记废弃入口残留和冗余命名。
-- 建立本文件作为主设计入口。
+| 能力 | 入口 | 当前边界 |
+|---|---|---|
+| SpeechPoseStage | compile registry extension | 只做 plan 级轻量说话姿态，不做逐帧口型 |
+| ExpressionStage | compile registry extension | 根据 emotion、语义轴和表达式参考生成表情倾向，不直接写 Live2D 原始参数 |
+| ContinuityStage | compile registry extension 或 runtime start 前置优化 | 根据上一段计划和当前播放上下文做 soft handoff |
+| LipSyncStage | avatar runtime / audio runtime 协同 | 处理 RMS、phoneme、viseme 与参数计划的优先级 |
 
-验收：
+新增 stage 必须满足：
 
-- 当前协议、边界和分层清晰。
-- 文档只描述当前事实和目标结构。
+1. 通过静态 registry 挂载。
+2. 明确 `id`、`kind`、`order` 和 `enabled(context)`。
+3. 文件顶部声明读取字段、写入字段和不负责的边界。
+4. 默认写入 `derivedValues` 或专属派生结果，不覆盖 `controlledValues`。
+5. diagnostics 明确区分可用能力和本次实际应用能力。
 
-### Phase 1：协议边界与冗余清理
-
-目标：
-
-- 搜索 `legacy`、`compat`、多版本 fallback、非主路径 payload。
-- 删除服务废弃入口的旧回退逻辑。
-- 保留当前同步策略和边界校验。
-
-注意：
-
-- audio wait fallback 属于当前同步策略。
-- runtime parser 属于当前边界保护。
-
-### Phase 2：拆 Compiler Pipeline
-
-目标：
-
-- 把 compile 主链拆成 stage。
-- 先拆纯函数，不改变行为。
-
-建议文件：
-
-```text
-model-engine/compiler/
-  compileMotionIntent.ts
-  compileContext.ts
-  diagnostics.ts
-  pipeline.ts
-  stages/
-    intentValidator.ts
-    axisResolver.ts
-    intensityStage.ts
-    couplingStage.ts
-    modeResolverStage.ts
-    timingStage.ts
-    planBuilder.ts
-```
-
-当前状态：
-
-- 本阶段已经完成
-- compiler 对外入口保持不变
-- 现有 compile 相关验证已经通过
-
-### Phase 3：引入 ExtensionRegistry
-
-当前状态：
-
-- 静态 compile stage registry 已落地。
-- `compileMotionIntent` 通过 `resolveCompileStages(context)` 获取执行列表。
-- 当前 7 个已有 stage 均注册为 `core`。
-- registry 提供 `ModelEngineCompileStageRegistration`、`resolveCompileStages(context)`、`listCompileStageRegistrations()`。
-
-下一步目标：
-
-- 通过已落地的 registry 挂载第一个 extension stage。
-- 新增 stage 必须声明 id、顺序、开关、输入输出边界和 diagnostics 归属。
-- 为 speech pose、expression、continuity 保留清晰插槽。
-
-### Phase 4：SpeechPoseStage
-
-目标：
-
-- 先做轻量说话姿态。
-- 只影响当前 plan，不做逐帧口型。
-- 输出可调参数和 diagnostics。
-
-### Phase 5：ExpressionStage
-
-目标：
-
-- 根据对话和 emotion 判断当前面部表情倾向。
-- 先输出 semantic axis / expression hint，不直接写 Live2D 参数。
-
-### Phase 6：ContinuityStage
-
-目标：
-
-- 基于上一段动作记录做 soft handoff 优化。
-- 减少连续回复中的动作跳变。
-
-### Phase 7：LipSyncStage
-
-目标：
-
-- 研究 RMS / phoneme / viseme。
-- 建立实时口型和 plan 参数的优先级关系。
-
-## 10. 当前优先审阅点
-
-下一次进入代码前，优先看这些点：
-
-1. 新增 stage 是否通过已落地的静态 registry 挂载，不引入复杂动态插件系统。
-2. 新增 stage 如何声明自己的输入、输出、开关和 diagnostics。
-3. `SpeechPoseStage` 第一版只做 plan 级轻量说话姿态，不碰逐帧口型。
-4. `ExpressionStage` 如何消费 emotion、语义轴和表情冷启动示例。
-5. `ContinuityStage` 如何拿到上一段 plan / 播放上下文，避免直接耦合 runtime 内部结构。
-6. `settings.ts` 是否需要增加面向增强 stage 的开关和强度参数。
-
-## 11. 设计原则
+## 10. 设计原则
 
 - 当前只支持 v2 主路径。
 - 废弃入口回退分支不进入工作文档主叙述。

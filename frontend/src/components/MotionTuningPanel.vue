@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import { cloneJson } from "../utils/cloneJson";
 import { roundTo } from "../utils/number";
 import {
   matchesPinnedProfileScope,
 } from "../types/desktop";
 import type {
+  DesktopExpressionExample,
   DesktopMotionTuningEffectiveExample,
   DesktopMotionPlaybackRecord,
   DesktopMotionTuningSample,
+  DesktopMotionTuningSamplesStatus,
 } from "../types/desktop";
 import type {
   SemanticMotionIntent,
@@ -26,7 +27,28 @@ import type {
 } from "../types/semantic-axis-profile";
 
 const RECENT_RECORD_LIMIT = 5;
-const bridge = useDesktopBridge();
+const props = defineProps<{
+  semanticProfile: SemanticAxisProfile | null;
+  motionPlaybackRecords: readonly DesktopMotionPlaybackRecord[];
+  motionTuningSamples: readonly DesktopMotionTuningSample[];
+  motionTuningSamplesStatus: DesktopMotionTuningSamplesStatus;
+  effectiveExamples: readonly DesktopMotionTuningEffectiveExample[];
+  expressionExamples: readonly DesktopExpressionExample[];
+}>();
+const emit = defineEmits<{
+  requestMotionTuningSamplesSync: [];
+  previewMotionPayload: [payload: unknown];
+  saveMotionTuningSample: [sample: DesktopMotionTuningSample];
+  deleteMotionTuningSample: [sampleId: string];
+  saveExpressionExampleOverride: [
+    modelName: string,
+    exampleId: string,
+    enabled: boolean,
+    feedback: string,
+    tags: string[],
+  ];
+  deleteExpressionExampleOverride: [modelName: string, exampleId: string];
+}>();
 const selectedRecordId = ref("");
 const feedbackText = ref("");
 const tagsText = ref("");
@@ -51,11 +73,8 @@ type MotionTuningSampleSnapshot = Readonly<{
   adjustedPlan: unknown;
 }>;
 
-const profile = computed(() =>
-  bridge.state.modelProjectionSnapshot.runtimeSemanticAxisProfile,
-);
 const mutableProfile = computed<SemanticAxisProfile | null>(() =>
-  profile.value ? cloneJson(profile.value) as SemanticAxisProfile : null,
+  props.semanticProfile ? cloneJson(props.semanticProfile) as SemanticAxisProfile : null,
 );
 const promptAxes = computed(() => {
   const currentProfile = mutableProfile.value;
@@ -72,7 +91,7 @@ const recentSemanticRecords = computed(() =>
     if (!currentProfile) {
       return [];
     }
-    return bridge.state.snapshot.motionPlaybackRecords
+    return props.motionPlaybackRecords
       .filter((record): record is DesktopMotionPlaybackRecord & { plan: SemanticParameterPlan } =>
       record.plan.schema_version === SCHEMA_PARAMETER_PLAN_V2,
       )
@@ -87,16 +106,14 @@ const selectedRecord = computed(() =>
     ?? null,
 );
 const llmReferenceSampleCount = computed(() =>
-  bridge.state.motionTuningSamples.filter((sample) =>
+  props.motionTuningSamples.filter((sample) =>
     matchesCurrentProfileSample(sample, mutableProfile.value) && sample.enabledForLlmReference).length,
 );
-const motionTuningLoadError = computed(() => bridge.state.motionTuningSamplesStatus.loadError.trim());
-const motionTuningRootError = computed(() => bridge.state.motionTuningSamplesStatus.rootError.trim());
-const motionTuningDiagnostics = computed(() => bridge.state.motionTuningSamplesStatus.diagnostics);
-const effectiveExamples = computed(() => bridge.state.modelProjectionSnapshot.motionTuningEffectiveExamples);
-const expressionExamples = computed(() =>
-  bridge.state.modelProjectionSnapshot.expressionExamples ?? []
-);
+const motionTuningLoadError = computed(() => props.motionTuningSamplesStatus.loadError.trim());
+const motionTuningRootError = computed(() => props.motionTuningSamplesStatus.rootError.trim());
+const motionTuningDiagnostics = computed(() => props.motionTuningSamplesStatus.diagnostics);
+const effectiveExamples = computed(() => props.effectiveExamples);
+const expressionExamples = computed(() => props.expressionExamples);
 
 const effectiveExampleCoverage = computed(() => {
   const groups = [
@@ -133,12 +150,12 @@ const effectiveExampleGroups = computed(() => {
     .filter((group) => group.examples.length > 0);
 });
 const savedSamples = computed(() =>
-  bridge.state.motionTuningSamples.filter((sample) =>
+  props.motionTuningSamples.filter((sample) =>
     matchesCurrentProfileSample(sample, mutableProfile.value)),
 );
 
 onMounted(() => {
-  bridge.sendCommand({ type: "request_motion_tuning_samples_sync" });
+  emit("requestMotionTuningSamplesSync");
 });
 
 watch(
@@ -265,10 +282,7 @@ function playAdjustedIntent(): void {
     return;
   }
 
-  bridge.sendCommand({
-    type: "preview_motion_payload",
-    payload: intent,
-  });
+  emit("previewMotionPayload", intent);
   playStatusText.value = "已发送手调主轴预览，请观察 Live2D 效果。";
 }
 
@@ -299,10 +313,7 @@ function saveSample(): void {
     adjustedPlan: buildAdjustedPlan(record.plan, currentProfile, adjustedAxes),
   };
 
-  bridge.sendCommand({
-    type: "save_motion_tuning_sample",
-    sample,
-  });
+  emit("saveMotionTuningSample", sample);
   saveStatusText.value = sample.enabledForLlmReference
     ? "样本保存请求已提交到后端，保存后会进入后端 few-shot 参考池。"
     : "样本保存请求已提交到后端，但暂不作为大模型参考例子。";
@@ -310,9 +321,9 @@ function saveSample(): void {
 
 function toggleSampleReference(sample: MotionTuningSampleSnapshot, enabled: boolean): void {
   const mutableSample = cloneJson(sample) as DesktopMotionTuningSample;
-  bridge.sendCommand({
-    type: "save_motion_tuning_sample",
-    sample: {
+  emit(
+    "saveMotionTuningSample",
+    {
       ...mutableSample,
       tags: [...mutableSample.tags],
       originalAxes: { ...mutableSample.originalAxes },
@@ -320,7 +331,7 @@ function toggleSampleReference(sample: MotionTuningSampleSnapshot, enabled: bool
       adjustedPlan: cloneJson(mutableSample.adjustedPlan),
       enabledForLlmReference: enabled,
     },
-  });
+  );
 }
 
 function handleSampleReferenceToggle(sample: MotionTuningSampleSnapshot, event: Event): void {
@@ -332,10 +343,7 @@ function handleSampleReferenceToggle(sample: MotionTuningSampleSnapshot, event: 
 }
 
 function deleteSample(sampleId: string): void {
-  bridge.sendCommand({
-    type: "delete_motion_tuning_sample",
-    sampleId,
-  });
+  emit("deleteMotionTuningSample", sampleId);
 }
 
 function matchesCurrentProfileSample(
@@ -483,21 +491,17 @@ function toggleExpressionExample(
   enabled: boolean,
 ): void {
   if (enabled) {
-    bridge.sendCommand({
-      type: "delete_expression_example_override",
-      modelName: example.modelName,
-      exampleId: example.id,
-    });
+    emit("deleteExpressionExampleOverride", example.modelName, example.id);
     return;
   }
-  bridge.sendCommand({
-    type: "save_expression_example_override",
-    modelName: example.modelName,
-    exampleId: example.id,
-    enabled: false,
-    feedback: example.feedback,
-    tags: [...example.tags],
-  });
+  emit(
+    "saveExpressionExampleOverride",
+    example.modelName,
+    example.id,
+    false,
+    example.feedback,
+    [...example.tags],
+  );
 }
 
 function normalizeEmotionKey(value: string): string {

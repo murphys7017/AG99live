@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
+import type { DesktopSemanticAxisProfileSaveResult } from "../types/desktop";
 import type {
   SemanticAxisControlRole,
   SemanticAxisCoupling,
@@ -14,7 +14,22 @@ import AxisDetailForm from "./AxisDetailForm.vue";
 
 type AxisRoleFilter = SemanticAxisControlRole | "all";
 
-const bridge = useDesktopBridge();
+const props = defineProps<{
+  currentProfile: SemanticAxisProfile | null;
+  selectedModelName: string;
+  latestSaveResult: DesktopSemanticAxisProfileSaveResult | null;
+}>();
+const emit = defineEmits<{
+  saveSemanticAxisProfile: [
+    payload: {
+      requestId: string;
+      modelName: string;
+      profileId: string;
+      expectedRevision: number;
+      profile: SemanticAxisProfile;
+    },
+  ];
+}>();
 const draftProfile = ref<SemanticAxisProfile | null>(null);
 const draftBaseRevision = ref<number | null>(null);
 const selectedAxisId = ref("");
@@ -33,15 +48,9 @@ const pendingSave = ref<{
   profileId: string;
 } | null>(null);
 
-const currentProfile = computed(
-  () => bridge.state.modelProjectionSnapshot.runtimeSemanticAxisProfile,
-);
-const selectedModelName = computed(() =>
-  bridge.state.modelProjectionSnapshot.selectedModelName.trim(),
-);
-const latestSaveResult = computed(() =>
-  bridge.state.profileAuthoringSnapshot.latestSemanticAxisProfileSaveResult,
-);
+const currentProfile = computed(() => props.currentProfile);
+const selectedModelName = computed(() => props.selectedModelName.trim());
+const latestSaveResult = computed(() => props.latestSaveResult);
 const draftAxes = computed(() => draftProfile.value?.axes ?? []);
 const draftCouplings = computed(() => draftProfile.value?.couplings ?? []);
 const filteredAxes = computed(() => {
@@ -455,8 +464,7 @@ function saveProfile(): void {
     profileId: profile.profile_id,
   };
   saveStatusText.value = `已提交保存请求，等待 revision ${expectedRevision + 1} 的同步结果。`;
-  bridge.sendProfileAuthoringCommand({
-    type: "save_semantic_axis_profile",
+  emit("saveSemanticAxisProfile", {
     requestId,
     modelName,
     profileId: profile.profile_id,

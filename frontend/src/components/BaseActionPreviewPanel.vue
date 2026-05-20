@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import type {
   DesktopBaseActionPreview,
   DesktopBaseActionPreviewAtom,
@@ -19,7 +18,9 @@ const props = defineProps<{
   semanticProfile: SemanticAxisProfile | null;
   allowPlay?: boolean;
 }>();
-const bridge = useDesktopBridge();
+const emit = defineEmits<{
+  previewMotionPayload: [payload: unknown];
+}>();
 
 const selectedChannel = ref("all");
 const selectedDomain = ref("all");
@@ -316,10 +317,7 @@ function playPreviewPlan(): void {
       : "当前模型还没有 semantic profile，无法生成 v2 动作预览。";
     return;
   }
-  bridge.sendCommand({
-    type: "preview_motion_payload",
-    payload: generatedPlan.value,
-  });
+  emit("previewMotionPayload", generatedPlan.value);
   playStatusText.value = `已发送测试播放计划（${selectedAtoms.value.length} steps）`;
 }
 
