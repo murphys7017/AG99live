@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { useDesktopBridge } from "../composables/useDesktopBridge";
+import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import type {
   DesktopBaseActionPreview,
   DesktopBaseActionPreviewAtom,
@@ -10,7 +10,7 @@ import type {
 } from "../types/protocol";
 import { SCHEMA_MOTION_INTENT_V2 } from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
-import { useParameterExcludeKeywords } from "../composables/useParameterExcludeKeywords";
+import { useParameterExcludeKeywords } from "../action-lab/parameterExcludeKeywords";
 import { buildParameterPlanTiming } from "../model-engine/timing";
 import { roundTo } from "../utils/number";
 

@@ -5,15 +5,15 @@ import type {
   TextReceiveMode,
   AudioTerminalState,
   TurnPlaybackSegment,
-} from "../turn-playback/session.js";
+} from "./session.js";
 import {
   createTurnPlaybackSession,
   createTurnPlaybackSegment,
   resolveSessionId,
   isValidPhaseTransition,
   isSegmentLocallySettled,
-} from "../turn-playback/session.js";
-import { getActivePlaybackSegment } from "../turn-playback/selectors.js";
+} from "./session.js";
+import { getActivePlaybackSegment } from "./selectors.js";
 import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
 
 // ── Store state ────────────────────────────────────────────────────

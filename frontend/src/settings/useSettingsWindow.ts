@@ -1,6 +1,6 @@
 import { computed, reactive, ref, watch } from "vue";
 import { listMicrophoneInputDevices } from "../adapter-connection/runtime/microphoneDevices";
-import { useDesktopBridge } from "./useDesktopBridge";
+import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import { DEFAULT_ADAPTER_ADDRESS } from "../adapter-connection/core/address";
 import {
   MAX_MOTION_INTENSITY_SCALE,
@@ -8,7 +8,7 @@ import {
   MOTION_INTENSITY_SCALE_STEP,
   cloneModelEngineSettings,
 } from "../model-engine/settings";
-import { applyMotionEngineSettingsSnapshot } from "./motionEngineSettingsSnapshot";
+import { applyMotionEngineSettingsSnapshot } from "../app/motionEngineSettingsSnapshot";
 
 export function useSettingsWindow() {
   const bridge = useDesktopBridge();

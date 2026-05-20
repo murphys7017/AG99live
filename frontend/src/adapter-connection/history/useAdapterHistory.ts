@@ -2,18 +2,18 @@ import type {
   DesktopBackendHistoryMessage,
   DesktopBackendHistorySummary,
   DesktopHistoryEntry,
-} from "../types/desktop.js";
+} from "../../types/desktop.js";
 import type {
   ProtocolEnvelope,
   SystemHistoryCreatedPayload,
   SystemHistoryDataPayload,
   SystemHistoryDeletedPayload,
   SystemHistoryListPayload,
-} from "../types/protocol.js";
+} from "../../types/protocol.js";
 import {
   normalizeBackendHistoryMessages,
   normalizeBackendHistorySummaries,
-} from "../adapter-connection/features/historyPayload.js";
+} from "../features/historyPayload.js";
 
 export interface AdapterHistoryState {
   backendHistorySummaries: DesktopBackendHistorySummary[];

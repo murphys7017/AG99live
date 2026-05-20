@@ -3,8 +3,8 @@
 
 import assert from "node:assert/strict";
 import { effectScope } from "vue";
-import { useAdapterConnection } from "../src/composables/useAdapterConnection.js";
-import { useTurnPlaybackSessionStore } from "../src/composables/useTurnPlaybackSessionStore.js";
+import { useAdapterConnection } from "../src/adapter-connection/useAdapterConnection.js";
+import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
 
 interface ListenerMap {
   open?: Array<() => void>;

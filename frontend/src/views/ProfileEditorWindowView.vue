@@ -2,7 +2,7 @@
 import { computed, onMounted } from "vue";
 import DesktopWindowPanel from "../components/DesktopWindowPanel.vue";
 import SemanticAxisProfileEditor from "../components/SemanticAxisProfileEditor.vue";
-import { useDesktopBridge } from "../composables/useDesktopBridge";
+import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 
 const bridge = useDesktopBridge();
 const subtitle = computed(() => {

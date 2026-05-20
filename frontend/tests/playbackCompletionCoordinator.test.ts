@@ -3,8 +3,8 @@
 
 import assert from "node:assert/strict";
 import { reactive, nextTick, ref } from "vue";
-import { useTurnPlaybackSessionStore } from "../src/composables/useTurnPlaybackSessionStore.js";
-import { usePlaybackCompletionCoordinator } from "../src/composables/usePlaybackCompletionCoordinator.js";
+import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
+import { usePlaybackCompletionCoordinator } from "../src/turn-playback/usePlaybackCompletionCoordinator.js";
 
 interface PlaybackFinishedCall {
   turnId: string | null;

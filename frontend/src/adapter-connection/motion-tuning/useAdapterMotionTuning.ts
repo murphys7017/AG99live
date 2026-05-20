@@ -2,17 +2,17 @@ import type {
   DesktopMotionTuningEffectiveExample,
   DesktopMotionTuningSample,
   DesktopMotionTuningSamplesStatus,
-} from "../types/desktop.js";
+} from "../../types/desktop.js";
 import type {
   ProtocolEnvelope,
   SystemMotionTuningSampleDeletePayload,
   SystemMotionTuningSampleSavePayload,
   SystemMotionTuningSamplesStatePayload,
-} from "../types/protocol.js";
+} from "../../types/protocol.js";
 import {
   normalizeMotionTuningSamplePayload,
   serializeMotionTuningSample,
-} from "../adapter-connection/features/motionTuningPayload.js";
+} from "../features/motionTuningPayload.js";
 
 export interface AdapterMotionTuningState {
   motionTuningSamples: DesktopMotionTuningSample[];

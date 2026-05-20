@@ -3,7 +3,7 @@ import { computed, onMounted } from "vue";
 import BaseActionPreviewPanel from "../components/BaseActionPreviewPanel.vue";
 import DesktopWindowPanel from "../components/DesktopWindowPanel.vue";
 import MotionTuningPanel from "../components/MotionTuningPanel.vue";
-import { useDesktopBridge } from "../composables/useDesktopBridge";
+import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import type { DesktopBaseActionPreview } from "../types/desktop";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 

@@ -55,7 +55,8 @@ IntentValidator
 ```text
 设计并整理前端 ModelEngine 结构
 -> 第一轮 compiler / runtime 拆分已经完成
--> 建立 stage / registry 扩展入口
+-> 静态 stage registry 已落地
+-> 挂载第一个 extension stage
 -> 按 SpeechPoseStage、ExpressionStage、ContinuityStage 的顺序补动作增强能力
 ```
 
@@ -298,19 +299,28 @@ compile state 值层约束：
 
 ### 5.5 ExtensionRegistry
 
-ExtensionRegistry 是第二轮之后的能力挂载入口。
+ExtensionRegistry 是当前 compile stage 的静态注册入口。
 
-建议先做静态 registry：
+它负责把 compiler stages 收口为可注册、可排序、可开关的装配结构，不负责动态加载、不读取外部插件配置、不改变动作协议。
 
 ```ts
-interface ModelEngineExtension {
+interface ModelEngineCompileStageRegistration {
   id: string;
-  kind: "compile_stage" | "runtime_stage" | "diagnostic";
-  enabled(settings, model): boolean;
+  stage: MotionCompileStage;
+  order: number;
+  kind: "core" | "extension";
+  enabled(context: MotionCompileContext): boolean;
 }
 ```
 
-核心 stages：
+当前 registry 提供：
+
+```text
+resolveCompileStages(context)
+listCompileStageRegistrations()
+```
+
+当前 core stages：
 
 ```text
 intentValidator
@@ -607,11 +617,18 @@ model-engine/compiler/
 
 ### Phase 3：引入 ExtensionRegistry
 
-目标：
+当前状态：
 
-- 支持静态注册 compile stages。
-- 每个 stage 有 id、顺序、开关、diagnostics。
-- 为 speech pose、expression、continuity 预留插槽。
+- 静态 compile stage registry 已落地。
+- `compileMotionIntent` 通过 `resolveCompileStages(context)` 获取执行列表。
+- 当前 7 个已有 stage 均注册为 `core`。
+- registry 提供 `ModelEngineCompileStageRegistration`、`resolveCompileStages(context)`、`listCompileStageRegistrations()`。
+
+下一步目标：
+
+- 通过已落地的 registry 挂载第一个 extension stage。
+- 新增 stage 必须声明 id、顺序、开关、输入输出边界和 diagnostics 归属。
+- 为 speech pose、expression、continuity 保留清晰插槽。
 
 ### Phase 4：SpeechPoseStage
 
@@ -646,7 +663,7 @@ model-engine/compiler/
 
 下一次进入代码前，优先看这些点：
 
-1. `ExtensionRegistry` 是否先做静态注册，不急着做复杂插件系统。
+1. 新增 stage 是否通过已落地的静态 registry 挂载，不引入复杂动态插件系统。
 2. 新增 stage 如何声明自己的输入、输出、开关和 diagnostics。
 3. `SpeechPoseStage` 第一版只做 plan 级轻量说话姿态，不碰逐帧口型。
 4. `ExpressionStage` 如何消费 emotion、语义轴和表情冷启动示例。

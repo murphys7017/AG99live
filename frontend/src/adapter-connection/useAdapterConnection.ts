@@ -1,30 +1,15 @@
-import { reactive, readonly } from "vue";
+import { readonly } from "vue";
 import type {
-  DesktopBackendHistoryMessage,
-  DesktopBackendHistorySummary,
   DesktopHistoryEntry,
-  DesktopMotionTuningSamplesStatus,
-  DesktopSemanticAxisProfileSaveResult,
   DesktopMotionTuningSample,
 } from "../types/desktop";
 import type {
-  ControlErrorPayload,
-  ControlTurnFinishedPayload,
-  OutputAudioPayload,
-  OutputImagePayload,
-  OutputTextPayload,
-  OutputTranscriptionPayload,
   ProtocolEnvelope,
   SystemSemanticAxisProfileSavePayload,
-  SystemSemanticAxisProfileSavedPayload,
-  SystemSemanticAxisProfileSaveFailedPayload,
-  SystemModelSyncPayload,
-  SystemServerInfoPayload,
 } from "../types/protocol";
 import {
   SCHEMA_MOTION_INTENT_V2,
 } from "../types/protocol.js";
-import { applyInboundMotionPayload } from "../adapter-connection/inbound/inboundMotion.js";
 import {
   clearPlaybackGroupContext as clearPlaybackGroup,
   interruptCurrentTurn as sendInterrupt,
@@ -32,123 +17,55 @@ import {
   sendPlaybackFinished as sendPlaybackFinishedAction,
   sendSemanticAxisProfileSave as sendProfileSave,
   sendText as sendTextAction,
-} from "../adapter-connection/outbound/outboundActions.js";
-import { createAdapterOutboundClient } from "../adapter-connection/outbound/outboundClient.js";
+} from "./outbound/outboundActions.js";
+import {
+  sendExpressionExampleOverrideDelete,
+  sendExpressionExampleOverrideSave,
+} from "./outbound/expressionExampleActions.js";
+import { createAdapterOutboundClient } from "./outbound/outboundClient.js";
 import {
   createAdapterAudioRuntime,
-  type AudioPlaybackTerminalState,
-} from "../adapter-connection/runtime/audioRuntime.js";
-import { useAdapterMotionTuning } from "./useAdapterMotionTuning.js";
-import {
-  rewriteHttpUrl as rewriteHttpUrlWithActiveHost,
-  rewriteModelSyncEnvelope as rewriteModelSyncEnvelopeWithActiveHost,
-  rewriteSocketUrl as rewriteSocketUrlWithActiveHost,
-} from "../adapter-connection/features/modelSyncRewrite.js";
+} from "./runtime/audioRuntime.js";
+import { useAdapterMotionTuning } from "./motion-tuning/useAdapterMotionTuning.js";
 import {
   createAdapterMicrophoneRuntime,
-} from "../adapter-connection/runtime/microphoneRuntime.js";
-import type { MicrophoneDeviceInfo } from "../adapter-connection/runtime/microphoneDevices.js";
+} from "./runtime/microphoneRuntime.js";
 import {
   startAudioPlayback,
   stopAudioPlaybackRuntime,
-} from "../adapter-connection/runtime/audioPlayback.js";
+} from "./runtime/audioPlayback.js";
 import {
   buildConnectFailureMessage,
   buildConnectionCandidates,
   DEFAULT_ADAPTER_ADDRESS,
   formatAddressHost,
   normalizeWsAddress,
-} from "../adapter-connection/core/address.js";
-import { openAdapterConnectionTransport } from "../adapter-connection/core/transport.js";
+} from "./core/address.js";
+import { openAdapterConnectionTransport } from "./core/transport.js";
 import {
   buildMessageEnvelope as buildProtocolMessageEnvelope,
   createMessageId,
-  PROTOCOL_VERSION,
-} from "../adapter-connection/core/envelope.js";
+} from "./core/envelope.js";
 import {
-  loadDesktopScreenshotOnSendEnabled,
-  loadStoredMicrophoneDeviceId,
   loadStoredAdapterAddress,
   normalizeAdapterAddressSetting,
   saveDesktopScreenshotOnSendEnabled,
   saveStoredAdapterAddress,
-} from "../adapter-connection/core/preferences.js";
-import { parseInboundEnvelope } from "../adapter-connection/inbound/inboundProtocol.js";
-import {
-  mapInboundEnvelopeToEvent,
-  type InboundAdapterEvent,
-  type InboundEventMappingContext,
-} from "../adapter-connection/inbound/inboundEvents.js";
+} from "./core/preferences.js";
 import {
   matchesPlaybackGroup,
   queueAssistantTextForPlayback as queuePendingAssistantTextForPlayback,
-  type PendingAssistantTextItem,
-  type PendingAudioItem,
-} from "../adapter-connection/runtime/playbackReleaseQueue.js";
-import { useModelSync } from "./useModelSync.js";
-import { useAdapterHistory } from "./useAdapterHistory.js";
-import { normalizeMotionPayload } from "../model-engine/normalize.js";
-import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore.js";
-import {
-  dispatchInboundEvent as dispatchInboundEventToDeps,
-  type InboundDispatchDeps,
-} from "../adapter-connection/inbound/inboundDispatcher.js";
+} from "./runtime/playbackReleaseQueue.js";
+import { useModelSync } from "./model-sync/useModelSync.js";
+import { useAdapterHistory } from "./history/useAdapterHistory.js";
+import type { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore.js";
 import {
   resetConnectionRuntimeState as resetConnectionRuntime,
-} from "../adapter-connection/runtime/connectionRuntimeState.js";
+} from "./runtime/connectionRuntimeState.js";
+import { createAdapterConnectionState } from "./state/adapterConnectionState.js";
+import { createAdapterInboundRuntime } from "./inbound/adapterInboundRuntime.js";
 
-type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
-
-const state = reactive({
-  address: loadStoredAdapterAddress(),
-  desktopScreenshotOnSendEnabled: loadDesktopScreenshotOnSendEnabled(),
-  microphoneDeviceId: loadStoredMicrophoneDeviceId(),
-  microphoneDevices: [] as MicrophoneDeviceInfo[],
-  status: "disconnected" as ConnectionStatus,
-  statusMessage: "尚未连接适配器。",
-  serverInfo: null as SystemServerInfoPayload | null,
-  activeWsAddress: "",
-  lastError: "",
-  lastAssistantText: "",
-  lastTranscription: "",
-  lastImageCount: 0,
-  currentTurnId: null as string | null,
-  micRequested: false,
-  micCapturing: false,
-  pttModeEnabled: false,
-  isPlayingAudio: false,
-  historyEntries: [] as DesktopHistoryEntry[],
-  backendHistorySummaries: [] as DesktopBackendHistorySummary[],
-  backendHistoryEntries: [] as DesktopBackendHistoryMessage[],
-  activeBackendHistoryUid: "",
-  backendHistoryLoading: false,
-  backendHistoryStatusMessage: "等待历史窗口请求后端历史。",
-  inboundMotionPlan: null as unknown | null,
-  inboundMotionPlanTurnId: null as string | null,
-  inboundMotionPlanReceivedAtMs: 0,
-  pendingAssistantTexts: new Map<string, PendingAssistantTextItem>(),
-  pendingAudios: new Map<string, PendingAudioItem>(),
-  audioPlaybackStartedTurnId: null as string | null,
-  audioPlaybackStartedMessageId: null as string | null,
-  audioPlaybackStartedAtMs: 0,
-  audioPlaybackDurationMs: null as number | null,
-  audioPlaybackTerminalState: "idle" as AudioPlaybackTerminalState,
-  audioPlaybackTerminalTurnId: null as string | null,
-  audioPlaybackTerminalReason: "",
-  assistantTextDeliveryTurnId: null as string | null,
-  turnFinishedTurnId: null as string | null,
-  turnFinishedSuccess: true,
-  turnFinishedReason: "",
-  latestSemanticAxisProfileSaveResult: null as DesktopSemanticAxisProfileSaveResult | null,
-  motionTuningSamples: [] as DesktopMotionTuningSample[],
-  motionTuningSamplesStatus: {
-    rootError: "",
-    loadError: "",
-    diagnostics: [],
-    effectiveExamples: [],
-  } as DesktopMotionTuningSamplesStatus,
-  expressionExampleOverridesRevision: 0,
-});
+const state = createAdapterConnectionState();
 
 let socket: WebSocket | null = null;
 let manualClose = false;
@@ -156,7 +73,6 @@ let initializePromise: Promise<void> | null = null;
 let connectAttemptSerial = 0;
 const assistantHistoryKeys: string[] = [];
 const assistantHistoryKeySet = new Set<string>();
-const reportedProtocolWarnings = new Set<string>();
 
 let historyAdapter: ReturnType<typeof useAdapterHistory> | null = null;
 let motionTuningAdapter: ReturnType<typeof useAdapterMotionTuning> | null = null;
@@ -214,6 +130,25 @@ const {
   stopAudioPlayback,
   findActiveAudioSegment,
 } = audioRuntime;
+
+const inboundRuntime = createAdapterInboundRuntime({
+  state,
+  getSessionStore: () => sessionStore,
+  getHistoryAdapter: () => historyAdapter,
+  getMotionTuningAdapter: () => motionTuningAdapter,
+  getModelSyncAdapter: () => modelSyncAdapter,
+  pushHistory: pushHistory as (role: string, text: string) => void,
+  stopAudioPlayback: () => stopAudioPlayback(),
+  resetAudioPlaybackTerminal: () => resetAudioPlaybackTerminal(),
+  markAudioPlaybackTerminal: (terminalState, turnId, reason, messageId) =>
+    markAudioPlaybackTerminal(terminalState, turnId, reason, messageId),
+  hasPendingAudioForTurn: (turnId) => hasPendingAudioForTurn(turnId),
+  markMissingAudiosForTurn: (turnId, reason) => markMissingAudiosForTurn(turnId, reason),
+  queueAudioForPlayback: (url, turnId, messageId) =>
+    queueAudioForPlayback(url, turnId, messageId),
+  findActiveAudioSegment: () => findActiveAudioSegment(),
+  startMicrophoneCapture: (origin) => startMicrophoneCapture(origin),
+});
 
 const outboundClient = createAdapterOutboundClient({
   getSocket: () => socket,
@@ -339,7 +274,7 @@ function openConnectionCandidate(
       pushHistory("system", `已连接 ${targetAddress}`);
     },
     onMessage: (rawData) => {
-      handleSocketMessage(rawData).catch((error) => {
+      inboundRuntime.handleSocketMessage(rawData).catch((error) => {
         console.warn("[useAdapterConnection] unhandled error in message handler:", error);
       });
     },
@@ -421,130 +356,6 @@ function resetConnectionRuntimeState(): void {
     modelSyncAdapter,
     resetAudioPlaybackTerminal,
   });
-}
-
-function logProtocolError(
-  key: string,
-  message: string,
-  envelope?: ProtocolEnvelope<unknown>,
-): void {
-  state.lastError = message;
-  state.statusMessage = message;
-  if (!reportedProtocolWarnings.has(key)) {
-    pushHistory("error", message);
-    reportedProtocolWarnings.add(key);
-  }
-  console.warn("[Connection] protocol error.", message, envelope);
-}
-
-async function handleSocketMessage(rawData: string): Promise<void> {
-  const parsed = parseInboundEnvelope(rawData);
-  if (!parsed.ok) {
-    if (parsed.code === "version_mismatch") {
-      logProtocolError(
-        parsed.warningKey ?? "version:empty",
-        parsed.message,
-        parsed.envelope,
-      );
-      return;
-    }
-
-    state.lastError = parsed.message;
-    state.statusMessage = parsed.message;
-    pushHistory("error", parsed.message);
-    return;
-  }
-
-  const envelope = parsed.envelope;
-  const event = mapInboundEnvelopeToEvent(envelope, buildInboundEventContext());
-  await dispatchInboundEvent(event);
-}
-
-function buildInboundEventContext(): InboundEventMappingContext {
-  const activeAudioSegment = findActiveAudioSegment();
-  return {
-    currentTurnId: state.currentTurnId,
-    activeAudioTurnId: activeAudioSegment?.turnId ?? null,
-  };
-}
-
-async function dispatchInboundEvent(
-  event: InboundAdapterEvent,
-): Promise<void> {
-  await dispatchInboundEventToDeps(buildDispatchDeps(), event);
-}
-
-function buildDispatchDeps(): InboundDispatchDeps {
-  return {
-    state,
-    sessionStore: sessionStore
-      ? {
-          setActiveSession: (tId) => sessionStore?.setActiveSession(tId),
-          markTurnStarted: (tId) => sessionStore?.markTurnStarted(tId),
-          markSynthFinished: (tId) => sessionStore?.markSynthFinished(tId),
-          markTurnFinished: (tId, success, reason) => sessionStore?.markTurnFinished(tId, success, reason),
-          markInterrupt: (tId) => sessionStore?.markInterrupt(tId),
-          markTextReceived: (tId, text, msgId, mode) => sessionStore?.markTextReceived(tId, text, msgId, mode as "replace" | "append"),
-          markTextDelivered: (tId, msgId) => sessionStore?.markTextDelivered(tId, msgId),
-          markAudioReceived: (tId, url, msgId) => sessionStore?.markAudioReceived(tId, url, msgId),
-          markAudioTerminal: (tId, terminal, msgId, reason) => sessionStore?.markAudioTerminal(tId, terminal as "completed" | "failed" | "absent", msgId, reason),
-          markMotionReceived: (tId, payload, msgId) => sessionStore?.markMotionReceived(tId, payload, msgId),
-          ensureSegment: (tId, msgId) => sessionStore!.ensureSegment(tId, msgId),
-          getSessions: () => sessionStore?.getSessions() ?? [],
-        }
-      : undefined,
-    pushHistory: pushHistory as (role: string, text: string) => void,
-    modelSyncAdapter: modelSyncAdapter
-      ? { applyUnknownMessage: (env) => modelSyncAdapter!.applyUnknownMessage(env) }
-      : null,
-    historyAdapter: historyAdapter
-      ? {
-          applyHistoryList: (env) => historyAdapter!.applyHistoryList(env),
-          applyHistoryCreated: (env) => historyAdapter!.applyHistoryCreated(env),
-          applyHistoryData: (env) => historyAdapter!.applyHistoryData(env),
-          applyHistoryDeleted: (env) => historyAdapter!.applyHistoryDeleted(env),
-        }
-      : null,
-    motionTuningAdapter: motionTuningAdapter
-      ? { applyMotionTuningSamplesState: (env) => motionTuningAdapter!.applyMotionTuningSamplesState(env) }
-      : null,
-    expressionExampleAdapter: {
-      applyExpressionExampleOverridesState: () => {
-        state.expressionExampleOverridesRevision += 1;
-        state.statusMessage = "表达式参考设置已更新，等待模型投影刷新。";
-      },
-    },
-    rewriteModelSyncEnvelope: (env) => rewriteModelSyncEnvelopeWithActiveHost(env as Parameters<typeof rewriteModelSyncEnvelopeWithActiveHost>[0], state.activeWsAddress),
-    rewriteSocketUrl: (url) => rewriteSocketUrlWithActiveHost(url, state.activeWsAddress),
-    rewriteHttpUrl: (url) => rewriteHttpUrlWithActiveHost(url, state.activeWsAddress),
-    stopAudioPlayback: () => stopAudioPlayback(),
-    resetAudioPlaybackTerminal: () => resetAudioPlaybackTerminal(),
-    markAudioPlaybackTerminal: (terminalState, turnId, reason, messageId) =>
-      markAudioPlaybackTerminal(terminalState as "completed" | "failed" | "absent", turnId, reason, messageId),
-    hasPendingAudioForTurn: (turnId) => hasPendingAudioForTurn(turnId),
-    markMissingAudiosForTurn: (turnId, reason) => markMissingAudiosForTurn(turnId, reason),
-    queuePendingAssistantTextForPlayback: (map, text, turnId, messageId) =>
-      queuePendingAssistantTextForPlayback(map, text, turnId, messageId),
-    queuePendingAudioForPlayback: (map, url, turnId, messageId) => {
-      if (map === state.pendingAudios) {
-        queueAudioForPlayback(url, turnId, messageId);
-        return;
-      }
-      map.set(messageId, {
-        audioUrl: url,
-        turnId,
-        messageId,
-        receivedAtMs: performance.now(),
-      });
-    },
-    findActiveAudioSegment: () => findActiveAudioSegment(),
-    normalizeMotionPayload: (payload) => normalizeMotionPayload(payload),
-    applyInboundMotionPayload: (ctx, envelope) =>
-      applyInboundMotionPayload(ctx, envelope),
-    startMicrophoneCapture: (origin) => startMicrophoneCapture(origin),
-    reportedProtocolWarnings,
-    buildInboundEventContext: () => buildInboundEventContext(),
-  };
 }
 
 function updateAssistantText(text: string, turnId: string | null): void {
@@ -649,29 +460,20 @@ function deleteMotionTuningSample(sampleId: string): boolean {
 }
 
 function saveExpressionExampleOverride(modelName: string, exampleId: string, enabled: boolean, feedback: string, tags: string[]): void {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    return;
-  }
-  socket.send(JSON.stringify({
-    type: "system.expression_example_override_save",
-    version: "v2",
-    message_id: createMessageId(),
-    source: "frontend",
-    payload: { model_name: modelName, example_id: exampleId, enabled, feedback, tags },
-  }));
+  sendExpressionExampleOverrideSave(outboundCtx, {
+    model_name: modelName,
+    example_id: exampleId,
+    enabled,
+    feedback,
+    tags,
+  });
 }
 
 function deleteExpressionExampleOverride(modelName: string, exampleId: string): void {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    return;
-  }
-  socket.send(JSON.stringify({
-    type: "system.expression_example_override_delete",
-    version: "v2",
-    message_id: createMessageId(),
-    source: "frontend",
-    payload: { model_name: modelName, example_id: exampleId },
-  }));
+  sendExpressionExampleOverrideDelete(outboundCtx, {
+    model_name: modelName,
+    example_id: exampleId,
+  });
 }
 
 
@@ -691,20 +493,6 @@ function clearPlaybackGroupContext(
   turnId: string | null,
 ): void {
   clearPlaybackGroup(outboundCtx, turnId);
-}
-
-function rewriteModelSyncEnvelope(
-  envelope: ProtocolEnvelope<SystemModelSyncPayload>,
-): ProtocolEnvelope<SystemModelSyncPayload> {
-  return rewriteModelSyncEnvelopeWithActiveHost(envelope, state.activeWsAddress);
-}
-
-function rewriteSocketUrl(rawUrl: string): string {
-  return rewriteSocketUrlWithActiveHost(rawUrl, state.activeWsAddress);
-}
-
-function rewriteHttpUrl(rawUrl: string | null): string {
-  return rewriteHttpUrlWithActiveHost(rawUrl, state.activeWsAddress);
 }
 
 function pushHistory(role: DesktopHistoryEntry["role"], text: string): void {

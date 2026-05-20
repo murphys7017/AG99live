@@ -10,12 +10,12 @@ import {
   canReleaseMotion,
   canReleaseText,
   getActivePlaybackSegment,
-} from "../turn-playback/selectors.js";
-import { isSegmentLocallySettled } from "../turn-playback/session.js";
+} from "./selectors.js";
+import { isSegmentLocallySettled } from "./session.js";
 import type {
   MotionPayloadPort,
   PlaybackReleasePort,
-} from "../turn-playback/ports.js";
+} from "./ports.js";
 
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 

@@ -1,15 +1,15 @@
 import { shallowReadonly, ref, watch } from "vue";
 import type { ModelEnginePlanStartedEvent } from "../model-engine/runtime/contracts";
 import type { DesktopMotionPlaybackRecord } from "../types/desktop";
-import type { usePreviewMotionPlayer } from "./usePreviewMotionPlayer";
+import type { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
-import { isPlaybackLocallySettled } from "../turn-playback/selectors.js";
-import type { TurnPlaybackSegment, TurnPlaybackSession } from "../turn-playback/session.js";
+import { isPlaybackLocallySettled } from "./selectors.js";
+import type { TurnPlaybackSegment, TurnPlaybackSession } from "./session.js";
 import { cloneJson } from "../utils/cloneJson.js";
 import type {
   MotionPlaybackRecordPort,
   PlaybackAckPort,
-} from "../turn-playback/ports.js";
+} from "./ports.js";
 
 type PreviewMotionPlayer = ReturnType<typeof usePreviewMotionPlayer>;
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;

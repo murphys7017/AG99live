@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import DesktopPetCanvas from "../components/DesktopPetCanvas.vue";
-import { usePetDesktopController } from "../composables/usePetDesktopController";
+import { usePetDesktopController } from "../app/usePetDesktopController";
 
 const { selectedModel, stageMessage, showContextMenu } = usePetDesktopController();
 </script>

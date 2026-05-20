@@ -4,7 +4,7 @@ import {
   TEXT_ONLY_RELEASE_WAIT_MS,
   createTurnPlaybackOrchestratorCore,
   type TurnPlaybackReleaseContext,
-} from "../src/composables/turnPlaybackOrchestratorCore.js";
+} from "../src/turn-playback/turnPlaybackOrchestratorCore.js";
 
 interface ScheduledTask {
   id: number;

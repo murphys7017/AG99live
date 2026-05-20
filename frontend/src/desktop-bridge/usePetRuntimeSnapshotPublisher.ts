@@ -9,17 +9,17 @@ import type {
 } from "../types/desktop";
 import type { ModelSummary } from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
-import type { useAdapterConnection } from "./useAdapterConnection";
+import type { useAdapterConnection } from "../adapter-connection/useAdapterConnection";
 import type { useDesktopBridge } from "./useDesktopBridge";
-import type { useModelSync } from "./useModelSync";
-import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
+import type { useModelSync } from "../adapter-connection/model-sync/useModelSync";
+import type { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore";
 import {
   buildAdapterRuntimeProjection,
   buildDesktopRuntimeSnapshot,
   getActiveSegmentSnapshot,
   type AdapterRuntimeProjectionInput,
   type SessionProjectionInput,
-} from "../desktop-bridge/projection.js";
+} from "./projection.js";
 import { cloneJson } from "../utils/cloneJson.js";
 
 type AdapterConnection = ReturnType<typeof useAdapterConnection>;

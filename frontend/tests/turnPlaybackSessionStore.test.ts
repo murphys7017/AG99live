@@ -9,7 +9,7 @@ import {
   canReleaseText,
   isPlaybackLocallySettled,
 } from "../src/turn-playback/selectors.js";
-import { useTurnPlaybackSessionStore } from "../src/composables/useTurnPlaybackSessionStore.js";
+import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
 import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
 
 const motionPayload: NormalizedMotionPayload = {

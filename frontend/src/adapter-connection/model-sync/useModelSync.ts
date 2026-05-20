@@ -4,7 +4,7 @@ import type {
   ModelSyncInfo,
   ProtocolEnvelope,
   SystemModelSyncPayload,
-} from "../types/protocol.js";
+} from "../../types/protocol.js";
 
 const state = reactive({
   confName: "",

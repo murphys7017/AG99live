@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { useDesktopBridge } from "../composables/useDesktopBridge";
+import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import { cloneJson } from "../utils/cloneJson";
 import { roundTo } from "../utils/number";
 import {

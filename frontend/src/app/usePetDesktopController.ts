@@ -1,20 +1,20 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { buildParameterActionPreview } from "../action-lab/parameterActionPreview";
-import { useAdapterConnection } from "./useAdapterConnection";
-import { useDesktopBridge } from "./useDesktopBridge";
-import { useModelSync } from "./useModelSync";
-import { usePetRuntimeSnapshotPublisher } from "./usePetRuntimeSnapshotPublisher";
-import { usePlaybackCompletionCoordinator } from "./usePlaybackCompletionCoordinator";
-import { useTurnPlaybackOrchestrator } from "./useTurnPlaybackOrchestrator";
-import { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
+import { useAdapterConnection } from "../adapter-connection/useAdapterConnection";
+import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
+import { useModelSync } from "../adapter-connection/model-sync/useModelSync";
+import { usePetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRuntimeSnapshotPublisher";
+import { usePlaybackCompletionCoordinator } from "../turn-playback/usePlaybackCompletionCoordinator";
+import { useTurnPlaybackOrchestrator } from "../turn-playback/useTurnPlaybackOrchestrator";
+import { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore";
 import {
   cloneModelEngineSettings,
 } from "../model-engine/settings";
-import { usePreviewMotionPlayer } from "./usePreviewMotionPlayer";
+import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
 import { cloneJson } from "../utils/cloneJson";
 import { applyMotionEngineSettingsSnapshot } from "./motionEngineSettingsSnapshot";
-import { createDesktopRuntimeCommandHandler } from "./useDesktopRuntimeCommandHandler";
+import { createDesktopRuntimeCommandHandler } from "../desktop-bridge/useDesktopRuntimeCommandHandler";
 import type {
   DesktopMotionPlaybackRecord,
   DesktopMotionTuningSample,

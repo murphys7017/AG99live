@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, watch } from "vue";
 import DesktopWindowPanel from "../components/DesktopWindowPanel.vue";
-import { useDesktopBridge } from "../composables/useDesktopBridge";
+import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import type {
   DesktopBackendHistoryMessage,
   DesktopBackendHistorySummary,

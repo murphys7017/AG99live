@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import ActionLabWindowView from "./views/ActionLabWindowView.vue";
-import { getWindowRole } from "./composables/useWindowRole";
+import { getWindowRole } from "./app/useWindowRole";
 import HistoryWindowView from "./views/HistoryWindowView.vue";
 import PetDesktopView from "./views/PetDesktopView.vue";
 import PetOverlayView from "./views/PetOverlayView.vue";

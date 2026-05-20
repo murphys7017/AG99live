@@ -3,8 +3,8 @@
 
 import assert from "node:assert/strict";
 import { effectScope, nextTick } from "vue";
-import { useTurnPlaybackSessionStore } from "../src/composables/useTurnPlaybackSessionStore.js";
-import { useTurnPlaybackOrchestrator } from "../src/composables/useTurnPlaybackOrchestrator.js";
+import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
+import { useTurnPlaybackOrchestrator } from "../src/turn-playback/useTurnPlaybackOrchestrator.js";
 import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
 
 const motionPayload: NormalizedMotionPayload = {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted } from "vue";
 import DesktopWindowPanel from "../components/DesktopWindowPanel.vue";
-import { useSettingsWindow } from "../composables/useSettingsWindow";
+import { useSettingsWindow } from "../settings/useSettingsWindow";
 
 const {
   bridgeState,

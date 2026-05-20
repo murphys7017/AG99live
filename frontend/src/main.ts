@@ -1,6 +1,6 @@
 import { createApp } from "vue";
 import App from "./App.vue";
-import { getWindowRole } from "./composables/useWindowRole";
+import { getWindowRole } from "./app/useWindowRole";
 import "./style.css";
 
 const role = getWindowRole();

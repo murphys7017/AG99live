@@ -5,10 +5,10 @@ import type {
   DesktopRuntimeCommand,
 } from "../types/desktop.js";
 import { cloneJson } from "../utils/cloneJson.js";
-import type { useAdapterConnection } from "./useAdapterConnection.js";
+import type { useAdapterConnection } from "../adapter-connection/useAdapterConnection.js";
 import type { useDesktopBridge } from "./useDesktopBridge.js";
 import type { usePetRuntimeSnapshotPublisher } from "./usePetRuntimeSnapshotPublisher.js";
-import { applyMotionEngineSettingsSnapshot } from "./motionEngineSettingsSnapshot.js";
+import { applyMotionEngineSettingsSnapshot } from "../app/motionEngineSettingsSnapshot.js";
 import type { ModelEngineSettings } from "../model-engine/settings.js";
 
 export interface DesktopRuntimeCommandDeps {

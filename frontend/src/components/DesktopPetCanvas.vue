@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, toRef } from "vue";
 import type { ModelSummary } from "../types/protocol";
-import { useLive2dRenderer } from "../composables/useLive2dRenderer";
+import { useLive2dRenderer } from "../live2d-renderer/useLive2dRenderer";
 
 const props = defineProps<{
   selectedModel: ModelSummary | null;

@@ -21,7 +21,7 @@ import {
   safeNormalizeModelProjectionSnapshot,
   safeNormalizeProfileAuthoringSnapshot,
   safeNormalizeSnapshot,
-} from "../desktop-bridge/snapshot";
+} from "./snapshot";
 
 const RUNTIME_CHANNEL_NAME = "ag99live.desktop.runtime";
 const PROFILE_AUTHORING_CHANNEL_NAME = "ag99live.desktop.profile_authoring";

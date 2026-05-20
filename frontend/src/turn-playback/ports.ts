@@ -4,7 +4,7 @@ import type {
   NormalizedMotionPayload,
 } from "../model-engine/contracts.js";
 import type { ModelSummary } from "../types/protocol.js";
-import type { TurnPlaybackReleaseContext } from "../composables/turnPlaybackOrchestratorCore.js";
+import type { TurnPlaybackReleaseContext } from "./turnPlaybackOrchestratorCore.js";
 
 export interface PlaybackReleasePort {
   releaseAssistantTextForPlayback(
