@@ -25,7 +25,6 @@ from .constants import (
     TYPE_SYSTEM_HISTORY_LIST,
     TYPE_SYSTEM_MODEL_SYNC,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLES_STATE,
-    TYPE_SYSTEM_EXPRESSION_EXAMPLE_OVERRIDES_STATE,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVED,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE_FAILED,
     TYPE_SYSTEM_SERVER_INFO,
@@ -230,36 +229,6 @@ def build_system_motion_tuning_samples_state(
                 item
                 for item in (effective_examples or [])
                 if isinstance(item, dict)
-            ],
-        },
-    )
-
-
-def build_system_expression_example_overrides_state(
-    *,
-    overrides: list[dict[str, Any]],
-    turn_id: str | None = None,
-) -> dict[str, Any]:
-    return build_message_envelope(
-        TYPE_SYSTEM_EXPRESSION_EXAMPLE_OVERRIDES_STATE,
-        turn_id=turn_id,
-        source=SOURCE_ADAPTER,
-        payload={
-            "overrides": [
-                {
-                    "model_name": str(item.get("model_name") or "").strip(),
-                    "example_id": str(item.get("example_id") or "").strip(),
-                    "enabled": bool(item.get("enabled", True)),
-                    "feedback": str(item.get("feedback") or "").strip(),
-                    "tags": [
-                        str(tag).strip()
-                        for tag in (item.get("tags") if isinstance(item.get("tags"), list) else [])
-                        if str(tag).strip()
-                    ],
-                    "updated_at": str(item.get("updated_at") or "").strip(),
-                }
-                for item in overrides
-                if isinstance(item, dict) and str(item.get("example_id") or "").strip()
             ],
         },
     )

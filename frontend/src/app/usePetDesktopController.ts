@@ -176,14 +176,6 @@ export function usePetDesktopController() {
     adapter.saveMotionTuningSample(cloneJson(sample));
   }
 
-  function saveExpressionExampleOverride(modelName: string, exampleId: string, enabled: boolean, feedback: string, tags: string[]): void {
-    adapter.saveExpressionExampleOverride(modelName, exampleId, enabled, feedback, tags);
-  }
-
-  function deleteExpressionExampleOverride(modelName: string, exampleId: string): void {
-    adapter.deleteExpressionExampleOverride(modelName, exampleId);
-  }
-
   function deleteMotionTuningSample(sampleId: string): void {
     adapter.deleteMotionTuningSample(sampleId);
   }
@@ -217,8 +209,6 @@ export function usePetDesktopController() {
     snapshotPublisher,
     saveMotionTuningSample,
     deleteMotionTuningSample,
-    saveExpressionExampleOverride,
-    deleteExpressionExampleOverride,
     handlePreviewMotionPlan,
     applyAmbientMotionPreference,
   });

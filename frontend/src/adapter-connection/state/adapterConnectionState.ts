@@ -73,6 +73,5 @@ export function createAdapterConnectionState() {
       diagnostics: [],
       effectiveExamples: [],
     } as DesktopMotionTuningSamplesStatus,
-    expressionExampleOverridesRevision: 0,
   });
 }

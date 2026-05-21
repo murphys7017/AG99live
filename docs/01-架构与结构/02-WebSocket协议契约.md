@@ -102,21 +102,8 @@ control.turn_finished
 | `system.semantic_axis_profile_save_failed` | 后端 -> 前端 | 档案保存失败 |
 | `system.history_*` | 双向 | 历史记录增删改查 |
 | `system.motion_tuning_sample_*` | 双向 | 动作调参样本增删改查 |
-| `system.expression_example_override_save` | 前端 -> 后端 | 保存模型原生表达式参考覆盖项 |
-| `system.expression_example_override_delete` | 前端 -> 后端 | 删除模型原生表达式参考覆盖项，恢复模型默认状态 |
-| `system.expression_example_overrides_state` | 后端 -> 前端 | 推送当前表达式参考覆盖状态 |
 
 纯 `system.*` 消息允许 `turn_id = null`。
-
-表达式参考覆盖载荷：
-
-| 类型 | 载荷 |
-| --- | --- |
-| `system.expression_example_override_save` | `{ model_name: string, example_id: string, enabled?: boolean, feedback?: string, tags?: string[] }` |
-| `system.expression_example_override_delete` | `{ model_name: string, example_id: string }` |
-| `system.expression_example_overrides_state` | `{ overrides: { model_name: string, example_id: string, enabled: boolean, feedback: string, tags: string[], updated_at: string }[] }` |
-
-表达式参考覆盖项以 `model_name + example_id` 为定位键。后端保存或删除覆盖项后，会推送 `system.expression_example_overrides_state`，并重新发送 `system.model_sync`，让前端以模型同步结果作为当前有效表达式参考库。
 
 ### engine.* （双向）
 

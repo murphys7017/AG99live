@@ -79,7 +79,6 @@ export interface InboundDispatchDeps {
     applyHistoryDeleted: (envelope: ProtocolEnvelope<unknown>) => void;
   } | null;
   motionTuningAdapter: { applyMotionTuningSamplesState: (envelope: ProtocolEnvelope<unknown>) => void } | null;
-  expressionExampleAdapter: { applyExpressionExampleOverridesState: (envelope: ProtocolEnvelope<unknown>) => void } | null;
   // url rewriting
   rewriteModelSyncEnvelope: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => ProtocolEnvelope<SystemModelSyncPayload>;
   rewriteSocketUrl: (rawUrl: string) => string;

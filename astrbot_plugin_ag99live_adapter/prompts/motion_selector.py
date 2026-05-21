@@ -4,7 +4,6 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from .expression_references import build_expression_keyword_reference_block
 from .motion_selector_examples import (
     create_default_selector_few_shot_examples,
     resolve_selector_few_shot_examples as _resolve_selector_few_shot_examples,
@@ -219,7 +218,6 @@ def build_selector_user_prompt_v2(
         limit=3,
     )
     motion_instruction_block = _build_motion_instruction_block(motion_instruction)
-    expression_reference_block = build_expression_keyword_reference_block()
 
     return (
         "请根据文本为 Live2D 角色选择语义动作轴数值。\n"
@@ -255,7 +253,6 @@ def build_selector_user_prompt_v2(
         "- 如果存在 mouth_open，它只是可选的次要口型微调；不要把它当成主要说话口型动画。\n"
         "- 数值要稳定、可读，避免混乱的极端值。\n\n"
         f"{motion_instruction_block}"
-        f"{expression_reference_block}"
         f"{few_shot_block}"
         f"文本：{text}"
     )

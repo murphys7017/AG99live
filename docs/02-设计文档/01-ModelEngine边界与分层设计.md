@@ -44,7 +44,7 @@ ModelEngine 不负责：
 - WebSocket 收发。
 - Adapter envelope 构造。
 - 文本和音频 release 决策。
-- 后端历史、动作调参样本和表达式参考存储。
+- 后端历史和动作调参样本存储。
 - Live2D SDK 渲染细节。
 - 动作库编辑器 UI。
 
@@ -216,7 +216,6 @@ registry 规则：
 | 能力 | 入口 | 边界 |
 | --- | --- | --- |
 | `SpeechPoseStage` | compile registry extension | plan 级轻量说话姿态，不做逐帧口型 |
-| `ExpressionStage` | compile registry extension | 根据 emotion、语义轴和表达式参考生成表情倾向，不直接写 Live2D 原始参数 |
 | `ContinuityStage` | compile registry extension 或 runtime start 前置优化 | 根据上一段 plan 和当前播放上下文做 soft handoff |
 | `LipSyncStage` | avatar runtime / audio runtime 协同 | 处理 RMS、phoneme、viseme 与参数计划的优先级 |
 
@@ -250,25 +249,16 @@ order: 45
 
 详细规则维护在 [SpeechPoseStage 设计](./04-SpeechPoseStage设计.md)。
 
-## 11. ExpressionStage
+## 11. 表情与 Expressions 边界
 
-`ExpressionStage` 负责把对话、emotion label、语义轴和表达式参考转为表情倾向。
+表情表现由语义轴和 Live2D 参数计划表达，不从 `Expressions/*.exp3.json` 生成主轴、prompt 示例或动作参考池。
 
-边界：
+当前规则：
 
-- 不放进 Adapter。
-- 不让 LLM 直接控制 Live2D 原始参数。
-- 作为 ModelEngine compile extension 挂载。
-- 输出语义轴或 expression hint，而不是写 `exp3.json` 参数。
-
-表达式参考规则：
-
-- 后端动作 selector prompt 提供表情关键词参考动作和 few-shot 示例。
-- 表情关键词参考动作包含关键词组、心情态度、动作表现和参考轴值。
-- 参考轴值是 0-100 语义轴空间中的动作草图，不是硬约束。
-- 轴的真实含义以当前 `SemanticAxisProfile` 的用户可编辑说明为准。
-- few-shot 来源顺序为 `user -> model_native -> default`。
-- 表达式参考不写入 `motion_tuning_samples`，也不改变动作协议。
+- LLM 只面向当前 `SemanticAxisProfile` 中允许控制的语义轴。
+- 表情类表现通过 `mouth_smile`、`brow_bias`、`gaze_y`、`head_pitch` 等语义轴组合表达。
+- `Expressions/*.exp3.json` 属于模型作者预制的触发或叠加效果，不进入 ModelEngine compile pipeline。
+- 后续如果需要重新接入原生 expression，必须作为独立能力重新设计，不能混入主轴来源。
 
 ## 12. ContinuityStage
 
@@ -297,7 +287,7 @@ Turn Playback 不编译动作参数。
 
 ### Action Lab / 调参工具
 
-Action Lab 展示动作库、semantic profile、couplings、expression examples 和 diagnostics，并发起 preview。
+Action Lab 展示动作库、semantic profile、couplings 和 diagnostics，并发起 preview。
 
 Action Lab 不绕开 ModelEngine 改主运行时事实。
 

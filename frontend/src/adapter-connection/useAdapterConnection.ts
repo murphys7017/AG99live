@@ -18,10 +18,6 @@ import {
   sendSemanticAxisProfileSave as sendProfileSave,
   sendText as sendTextAction,
 } from "./outbound/outboundActions.js";
-import {
-  sendExpressionExampleOverrideDelete,
-  sendExpressionExampleOverrideSave,
-} from "./outbound/expressionExampleActions.js";
 import { createAdapterOutboundClient } from "./outbound/outboundClient.js";
 import {
   createAdapterAudioRuntime,
@@ -459,24 +455,6 @@ function deleteMotionTuningSample(sampleId: string): boolean {
   return motionTuningAdapter?.deleteMotionTuningSample(sampleId) ?? false;
 }
 
-function saveExpressionExampleOverride(modelName: string, exampleId: string, enabled: boolean, feedback: string, tags: string[]): void {
-  sendExpressionExampleOverrideSave(outboundCtx, {
-    model_name: modelName,
-    example_id: exampleId,
-    enabled,
-    feedback,
-    tags,
-  });
-}
-
-function deleteExpressionExampleOverride(modelName: string, exampleId: string): void {
-  sendExpressionExampleOverrideDelete(outboundCtx, {
-    model_name: modelName,
-    example_id: exampleId,
-  });
-}
-
-
 function sendMotionPayloadPreview(payload: unknown): boolean {
   return sendMotionPreview(outboundCtx, payload, SCHEMA_MOTION_INTENT_V2);
 }
@@ -569,8 +547,6 @@ export function useAdapterConnection(
     deleteHistory,
     saveMotionTuningSample,
     deleteMotionTuningSample,
-    saveExpressionExampleOverride,
-    deleteExpressionExampleOverride,
     sendMotionPayloadPreview,
     sendPlaybackFinishedForCurrentGroup: sendPlaybackFinished,
     clearPlaybackGroupContext,

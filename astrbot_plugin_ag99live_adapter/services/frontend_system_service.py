@@ -16,7 +16,6 @@ from ..protocol.builder import (
     build_system_history_deleted,
     build_system_history_list,
     build_system_motion_tuning_samples_state,
-    build_system_expression_example_overrides_state,
     build_system_semantic_axis_profile_save_failed,
     build_system_semantic_axis_profile_saved,
 )
@@ -29,8 +28,6 @@ from ..protocol import (
     TYPE_SYSTEM_HISTORY_LOAD,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_DELETE,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE,
-    TYPE_SYSTEM_EXPRESSION_EXAMPLE_OVERRIDE_SAVE,
-    TYPE_SYSTEM_EXPRESSION_EXAMPLE_OVERRIDE_DELETE,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE,
 )
 
@@ -43,8 +40,6 @@ SUPPORTED_SYSTEM_MESSAGE_TYPES = {
     TYPE_SYSTEM_HEARTBEAT,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_DELETE,
-    TYPE_SYSTEM_EXPRESSION_EXAMPLE_OVERRIDE_SAVE,
-    TYPE_SYSTEM_EXPRESSION_EXAMPLE_OVERRIDE_DELETE,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE,
 }
 
@@ -171,42 +166,6 @@ class FrontendSystemCommandHandler:
                     effective_examples=self._runtime_state.list_effective_motion_tuning_examples(),
                 )
             )
-        elif msg_type == TYPE_SYSTEM_EXPRESSION_EXAMPLE_OVERRIDE_SAVE:
-            try:
-                self._runtime_state.save_expression_example_override(payload)
-            except ValueError as exc:
-                await send_json(
-                    build_control_error(
-                        turn_id=message.turn_id,
-                        message=str(exc),
-                    )
-                )
-                return
-            await send_json(
-                build_system_expression_example_overrides_state(
-                    turn_id=message.turn_id,
-                    overrides=self._runtime_state.list_expression_example_overrides(),
-                )
-            )
-            await refresh_and_send_model(force=True)
-        elif msg_type == TYPE_SYSTEM_EXPRESSION_EXAMPLE_OVERRIDE_DELETE:
-            try:
-                self._runtime_state.delete_expression_example_override(payload)
-            except ValueError as exc:
-                await send_json(
-                    build_control_error(
-                        turn_id=message.turn_id,
-                        message=str(exc),
-                    )
-                )
-                return
-            await send_json(
-                build_system_expression_example_overrides_state(
-                    turn_id=message.turn_id,
-                    overrides=self._runtime_state.list_expression_example_overrides(),
-                )
-            )
-            await refresh_and_send_model(force=True)
         elif msg_type == TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE:
             request_id = str(payload.get("request_id") or "").strip()
             model_name = str(payload.get("model_name") or "").strip()

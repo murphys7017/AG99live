@@ -90,7 +90,6 @@ type InboundPassthroughEvent =
     envelope: ProtocolEnvelope<SystemSemanticAxisProfileSaveFailedPayload>;
   }
   | { kind: "motion_tuning_samples_state"; envelope: ProtocolEnvelope<unknown> }
-  | { kind: "expression_example_overrides_state"; envelope: ProtocolEnvelope<unknown> }
   | { kind: "history_list"; envelope: ProtocolEnvelope<SystemHistoryListPayload> }
   | { kind: "history_created"; envelope: ProtocolEnvelope<SystemHistoryCreatedPayload> }
   | { kind: "history_data"; envelope: ProtocolEnvelope<SystemHistoryDataPayload> }
@@ -196,11 +195,6 @@ export function mapInboundEnvelopeToEvent(
     case INBOUND_MESSAGE_TYPES.SYSTEM_MOTION_TUNING_SAMPLES_STATE:
       return {
         kind: "motion_tuning_samples_state",
-        envelope,
-      };
-    case INBOUND_MESSAGE_TYPES.SYSTEM_EXPRESSION_EXAMPLE_OVERRIDES_STATE:
-      return {
-        kind: "expression_example_overrides_state",
         envelope,
       };
     case INBOUND_MESSAGE_TYPES.SYSTEM_HISTORY_LIST: {

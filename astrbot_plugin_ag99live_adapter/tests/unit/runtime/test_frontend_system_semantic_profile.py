@@ -19,10 +19,7 @@ class _RuntimeStateStub:
         self.calls: list[dict[str, object]] = []
         self.saved_motion_tuning_sample: object = None
         self.deleted_motion_tuning_sample_id: object = None
-        self.saved_expression_example_override: object = None
-        self.deleted_expression_example_override: object = None
         self.motion_tuning_samples: list[dict[str, object]] = []
-        self.expression_example_overrides: list[dict[str, object]] = []
         self.motion_tuning_samples_load_error = ""
         self.motion_tuning_fewshot_diagnostics: list[str] = []
         self.motion_tuning_effective_examples: list[dict[str, object]] = []
@@ -82,20 +79,6 @@ class _RuntimeStateStub:
     def list_effective_motion_tuning_examples(self) -> list[dict[str, object]]:
         return list(self.motion_tuning_effective_examples)
 
-    def save_expression_example_override(self, payload: object) -> dict[str, object]:
-        self.saved_expression_example_override = payload
-        if isinstance(payload, dict):
-            self.expression_example_overrides = [payload]
-            return payload
-        return {}
-
-    def delete_expression_example_override(self, payload: object) -> bool:
-        self.deleted_expression_example_override = payload
-        self.expression_example_overrides = []
-        return True
-
-    def list_expression_example_overrides(self) -> list[dict[str, object]]:
-        return list(self.expression_example_overrides)
 
 
 class _HistoryBridgeStub:
@@ -522,91 +505,3 @@ def test_frontend_system_handler_delete_missing_motion_tuning_sample_fails() -> 
     assert sent_payloads[0]["type"] == "control.error"
     assert sent_payloads[0]["turn_id"] == "turn-delete-missing"
     assert sent_payloads[0]["payload"]["message"] == "motion_tuning_sample_not_found: missing-sample"
-
-
-def test_frontend_system_handler_saves_expression_override_and_refreshes_model_sync() -> None:
-    runtime_state = _RuntimeStateStub()
-    handler = FrontendSystemCommandHandler(
-        background_files_getter=lambda: [],
-        history_bridge=_HistoryBridgeStub(),
-        runtime_state=runtime_state,
-    )
-    sent_payloads: list[dict] = []
-    refresh_calls: list[bool] = []
-    payload = {
-        "model_name": "DemoModel",
-        "example_id": "happy",
-        "enabled": False,
-        "feedback": "too much",
-        "tags": ["disabled"],
-    }
-
-    async def send_json(message: dict) -> bool:
-        sent_payloads.append(message)
-        return True
-
-    async def refresh_and_send_model(*, force: bool = False) -> None:
-        refresh_calls.append(force)
-
-    asyncio.run(
-        handler.handle(
-            SimpleNamespace(
-                type="system.expression_example_override_save",
-                session_id="session",
-                turn_id="turn-expression-save",
-                payload=payload,
-            ),
-            send_json=send_json,
-            refresh_and_send_model=refresh_and_send_model,
-        )
-    )
-
-    assert runtime_state.saved_expression_example_override == payload
-    assert sent_payloads[0]["type"] == "system.expression_example_overrides_state"
-    assert sent_payloads[0]["payload"]["overrides"] == [
-        {
-            **payload,
-            "updated_at": "",
-        }
-    ]
-    assert refresh_calls == [True]
-
-
-def test_frontend_system_handler_deletes_expression_override_and_refreshes_model_sync() -> None:
-    runtime_state = _RuntimeStateStub()
-    runtime_state.expression_example_overrides = [
-        {"model_name": "DemoModel", "example_id": "happy", "enabled": False}
-    ]
-    handler = FrontendSystemCommandHandler(
-        background_files_getter=lambda: [],
-        history_bridge=_HistoryBridgeStub(),
-        runtime_state=runtime_state,
-    )
-    sent_payloads: list[dict] = []
-    refresh_calls: list[bool] = []
-    payload = {"model_name": "DemoModel", "example_id": "happy"}
-
-    async def send_json(message: dict) -> bool:
-        sent_payloads.append(message)
-        return True
-
-    async def refresh_and_send_model(*, force: bool = False) -> None:
-        refresh_calls.append(force)
-
-    asyncio.run(
-        handler.handle(
-            SimpleNamespace(
-                type="system.expression_example_override_delete",
-                session_id="session",
-                turn_id="turn-expression-delete",
-                payload=payload,
-            ),
-            send_json=send_json,
-            refresh_and_send_model=refresh_and_send_model,
-        )
-    )
-
-    assert runtime_state.deleted_expression_example_override == payload
-    assert sent_payloads[0]["type"] == "system.expression_example_overrides_state"
-    assert sent_payloads[0]["payload"]["overrides"] == []
-    assert refresh_calls == [True]

@@ -145,12 +145,6 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       motionTuningAdapter: motionTuningAdapter
         ? { applyMotionTuningSamplesState: (env) => motionTuningAdapter.applyMotionTuningSamplesState(env) }
         : null,
-      expressionExampleAdapter: {
-        applyExpressionExampleOverridesState: () => {
-          deps.state.expressionExampleOverridesRevision += 1;
-          deps.state.statusMessage = "表达式参考设置已更新，等待模型投影刷新。";
-        },
-      },
       rewriteModelSyncEnvelope: (env) => rewriteModelSyncEnvelope(env),
       rewriteSocketUrl: (url) => rewriteSocketUrl(url),
       rewriteHttpUrl: (url) => rewriteHttpUrl(url),

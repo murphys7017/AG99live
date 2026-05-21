@@ -56,13 +56,6 @@ const motionTuningSamplesStatus = computed(() => bridge.state.motionTuningSample
 const effectiveExamples = computed(() =>
   bridge.state.modelProjectionSnapshot.motionTuningEffectiveExamples,
 );
-const expressionExamples = computed(() =>
-  (bridge.state.modelProjectionSnapshot.expressionExamples ?? []).map((example) => ({
-    ...example,
-    tags: [...example.tags],
-    axes: { ...example.axes },
-  })),
-);
 
 function sendRuntimeCommand(type: "request_model_projection_sync" | "request_motion_tuning_samples_sync"): void {
   bridge.sendCommand({ type });
@@ -89,31 +82,6 @@ function deleteMotionTuningSample(sampleId: string): void {
   });
 }
 
-function saveExpressionExampleOverride(
-  modelName: string,
-  exampleId: string,
-  enabled: boolean,
-  feedback: string,
-  tags: string[],
-): void {
-  bridge.sendCommand({
-    type: "save_expression_example_override",
-    modelName,
-    exampleId,
-    enabled,
-    feedback,
-    tags,
-  });
-}
-
-function deleteExpressionExampleOverride(modelName: string, exampleId: string): void {
-  bridge.sendCommand({
-    type: "delete_expression_example_override",
-    modelName,
-    exampleId,
-  });
-}
-
 onMounted(() => {
   sendRuntimeCommand("request_model_projection_sync");
 });
@@ -128,13 +96,10 @@ onMounted(() => {
         :motion-tuning-samples="motionTuningSamples"
         :motion-tuning-samples-status="motionTuningSamplesStatus"
         :effective-examples="effectiveExamples"
-        :expression-examples="expressionExamples"
         @request-motion-tuning-samples-sync="sendRuntimeCommand('request_motion_tuning_samples_sync')"
         @preview-motion-payload="previewMotionPayload"
         @save-motion-tuning-sample="saveMotionTuningSample"
         @delete-motion-tuning-sample="deleteMotionTuningSample"
-        @save-expression-example-override="saveExpressionExampleOverride"
-        @delete-expression-example-override="deleteExpressionExampleOverride"
       />
       <BaseActionPreviewPanel
         :preview="parameterActionPreview"

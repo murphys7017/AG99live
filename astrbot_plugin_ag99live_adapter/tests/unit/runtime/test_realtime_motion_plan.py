@@ -515,19 +515,7 @@ def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
     assert "debug_tail" not in provider.last_prompt
     assert "平台上下文：" in provider.last_prompt
     assert "少量示例仅作为风格参考。" in provider.last_prompt
-    assert "表情关键词参考动作：" in provider.last_prompt
-    assert "参考轴值是 0-100 语义轴空间里的动作草图" in provider.last_prompt
-    assert "只输出当前可控制参数中存在的轴" in provider.last_prompt
-    assert "如果用户编辑了轴解释，以当前可控制参数说明为准" in provider.last_prompt
-    assert "- 开心/鼓励/赞同/成功：态度=积极亲近" in provider.last_prompt
-    assert "- 疑惑/不确定/确认/思考：态度=迟疑求证" in provider.last_prompt
-    assert "- 害羞/不好意思/尴尬/被夸：态度=柔和回避" in provider.last_prompt
-    assert '"head_pitch":40' in provider.last_prompt
-    assert '"gaze_y":42' in provider.last_prompt
-    assert '"mouth_smile":58' in provider.last_prompt
-    assert "- 疲惫/无力/困/低能量：态度=低能量" in provider.last_prompt
-    assert "- happy：" not in provider.last_prompt
-    assert "- joy：" not in provider.last_prompt
+    assert "表情关键词参考动作：" not in provider.last_prompt
     assert "补充动作指令：" in provider.last_prompt
     assert "Use stronger head and mouth motion." in provider.last_prompt
     assert "Live2D 表情动作参数生成器" in provider.last_system_prompt
@@ -650,7 +638,7 @@ def test_resolve_selector_few_shot_examples_backfills_defaults_up_to_configured_
     ]
 
 
-def test_resolve_selector_few_shot_examples_backfills_missing_categories_from_model_native_library() -> None:
+def test_resolve_selector_few_shot_examples_ignores_model_native_expression_library() -> None:
     user_example = {
         "input": "Assistant: tuned sample",
         "output": {
@@ -674,24 +662,8 @@ def test_resolve_selector_few_shot_examples_backfills_missing_categories_from_mo
                     "expression_example_library": {
                         "source": "model_native",
                         "examples": [
-                            {
-                                "id": "neutral",
-                                "emotion_label": "neutral",
-                                "axes": {"mouth_smile": 52},
-                                "tags": ["model_native"],
-                            },
-                            {
-                                "id": "angry",
-                                "emotion_label": "angry",
-                                "axes": {"brow_bias": 24},
-                                "tags": ["model_native"],
-                            },
-                            {
-                                "id": "surprised",
-                                "emotion_label": "surprised",
-                                "axes": {"gaze_y": 80},
-                                "tags": ["model_native"],
-                            },
+                            {"id": "neutral", "emotion_label": "neutral", "axes": {"mouth_smile": 52}},
+                            {"id": "angry", "emotion_label": "angry", "axes": {"brow_bias": 24}},
                         ],
                     },
                 }
@@ -704,94 +676,12 @@ def test_resolve_selector_few_shot_examples_backfills_missing_categories_from_mo
     assert [item["output"]["emotion"] for item in resolved] == [
         "happy",
         "neutral",
-        "angry",
         "surprised",
+        "sad",
     ]
     assert runtime_state.motion_tuning_fewshot_diagnostics == [
         "motion_tuning_user_samples_insufficient:requested=4:user_available=1",
-        "motion_tuning_model_native_backfill_applied:count=3",
-    ]
-
-
-def test_resolve_selector_few_shot_examples_skips_disabled_model_native_examples() -> None:
-    class RuntimeStub:
-        realtime_motion_fewshot_enabled = True
-        realtime_motion_fewshot_count = 2
-        motion_tuning_reference_examples: list[dict] = []
-        motion_tuning_fewshot_diagnostics: list[str] = []
-        model_info = {
-            "selected_model": "DemoModel",
-            "models": [
-                {
-                    "name": "DemoModel",
-                    "expression_example_library": {
-                        "source": "model_native",
-                        "examples": [
-                            {
-                                "id": "happy",
-                                "emotion_label": "happy",
-                                "enabled": False,
-                                "axes": {"mouth_smile": 82},
-                                "tags": ["model_native"],
-                            },
-                            {
-                                "id": "neutral",
-                                "emotion_label": "neutral",
-                                "axes": {"mouth_smile": 52},
-                                "tags": ["model_native"],
-                            },
-                        ],
-                    },
-                }
-            ],
-        }
-
-    runtime_state = RuntimeStub()
-    resolved = resolve_selector_few_shot_examples(runtime_state=runtime_state)
-
-    assert [item["output"]["emotion"] for item in resolved] == ["neutral", "joy"]
-    assert runtime_state.motion_tuning_fewshot_diagnostics == [
-        "motion_tuning_user_samples_insufficient:requested=2:user_available=0",
-        "motion_tuning_model_native_backfill_applied:count=1",
-        "motion_tuning_default_backfill_applied:count=1",
-    ]
-
-
-def test_resolve_selector_few_shot_examples_uses_default_after_model_native_category_backfill() -> None:
-    class RuntimeStub:
-        realtime_motion_fewshot_enabled = True
-        realtime_motion_fewshot_count = 3
-        motion_tuning_reference_examples = []
-        motion_tuning_fewshot_diagnostics: list[str] = []
-        model_info = {
-            "selected_model": "DemoModel",
-            "models": [
-                {
-                    "name": "DemoModel",
-                    "expression_example_library": {
-                        "source": "model_native",
-                        "examples": [
-                            {
-                                "id": "neutral",
-                                "emotion_label": "neutral",
-                                "axes": {"mouth_smile": 52},
-                                "tags": ["model_native"],
-                            }
-                        ],
-                    },
-                }
-            ],
-        }
-
-    runtime_state = RuntimeStub()
-    resolved = resolve_selector_few_shot_examples(runtime_state=runtime_state)
-
-    assert resolved[0]["output"]["emotion"] == "neutral"
-    assert len(resolved) == 3
-    assert runtime_state.motion_tuning_fewshot_diagnostics == [
-        "motion_tuning_user_samples_insufficient:requested=3:user_available=0",
-        "motion_tuning_model_native_backfill_applied:count=1",
-        "motion_tuning_default_backfill_applied:count=2",
+        "motion_tuning_default_backfill_applied:count=3",
     ]
 
 
@@ -937,12 +827,7 @@ def test_realtime_motion_plan_generator_prompt_switches_off_context_and_few_shot
     assert valid is True
     assert reason == ""
     assert "少量示例（仅作为风格参考，不要机械照抄）：" not in provider.last_prompt
-    assert "表情关键词参考动作：" in provider.last_prompt
-    assert "- 开心/鼓励/赞同/成功：态度=积极亲近" in provider.last_prompt
-    assert "参考轴值是 0-100 语义轴空间里的动作草图" in provider.last_prompt
-    assert "只输出当前可控制参数中存在的轴" in provider.last_prompt
-    assert "- happy：" not in provider.last_prompt
-    assert "- joy：" not in provider.last_prompt
+    assert "表情关键词参考动作：" not in provider.last_prompt
     assert "平台上下文：" not in provider.last_prompt
 
 

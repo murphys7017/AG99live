@@ -6,7 +6,6 @@ import {
   matchesPinnedProfileScope,
 } from "../types/desktop";
 import type {
-  DesktopExpressionExample,
   DesktopMotionTuningEffectiveExample,
   DesktopMotionPlaybackRecord,
   DesktopMotionTuningSample,
@@ -33,21 +32,12 @@ const props = defineProps<{
   motionTuningSamples: readonly DesktopMotionTuningSample[];
   motionTuningSamplesStatus: DesktopMotionTuningSamplesStatus;
   effectiveExamples: readonly DesktopMotionTuningEffectiveExample[];
-  expressionExamples: readonly DesktopExpressionExample[];
 }>();
 const emit = defineEmits<{
   requestMotionTuningSamplesSync: [];
   previewMotionPayload: [payload: unknown];
   saveMotionTuningSample: [sample: DesktopMotionTuningSample];
   deleteMotionTuningSample: [sampleId: string];
-  saveExpressionExampleOverride: [
-    modelName: string,
-    exampleId: string,
-    enabled: boolean,
-    feedback: string,
-    tags: string[],
-  ];
-  deleteExpressionExampleOverride: [modelName: string, exampleId: string];
 }>();
 const selectedRecordId = ref("");
 const selectedReferenceId = ref("");
@@ -84,7 +74,6 @@ type LlmReferenceEntry = Readonly<{
   sourceLabel: string;
   enabled: boolean;
   sample?: DesktopMotionTuningSample;
-  expressionExample?: DesktopExpressionExample;
 }>;
 type MotionDraftSource = Readonly<{
   id: string;
@@ -97,7 +86,6 @@ type MotionDraftSource = Readonly<{
   durationMs: number;
   record?: DesktopMotionPlaybackRecord & { plan: SemanticParameterPlan };
   sample?: DesktopMotionTuningSample;
-  expressionExample?: DesktopExpressionExample;
 }>;
 
 const mutableProfile = computed<SemanticAxisProfile | null>(() =>
@@ -152,10 +140,8 @@ const motionTuningLoadError = computed(() => props.motionTuningSamplesStatus.loa
 const motionTuningRootError = computed(() => props.motionTuningSamplesStatus.rootError.trim());
 const motionTuningDiagnostics = computed(() => props.motionTuningSamplesStatus.diagnostics);
 const effectiveExamples = computed(() => props.effectiveExamples);
-const expressionExamples = computed(() => props.expressionExamples);
 const llmReferenceEntries = computed<LlmReferenceEntry[]>(() => {
   const entries: LlmReferenceEntry[] = [];
-  const currentProfile = mutableProfile.value;
 
   for (const sample of savedSamples.value) {
     entries.push({
@@ -174,25 +160,6 @@ const llmReferenceEntries = computed<LlmReferenceEntry[]>(() => {
   const knownEntryKeys = new Set(
     entries.map((entry) => normalizeEmotionKey(entry.title)),
   );
-
-  for (const expression of expressionExamples.value) {
-    const emotionKey = normalizeEmotionKey(expression.emotion_label || expression.id || expression.name);
-    if (knownEntryKeys.has(emotionKey)) {
-      continue;
-    }
-    entries.push({
-      id: `expression:${expression.id}`,
-      title: expression.name || expression.id,
-      subtitle: expression.source_file || expression.category || "扫描表达式",
-      description: expression.feedback || buildExpressionExampleDescription(expression, currentProfile),
-      axes: { ...expression.axes },
-      tags: expression.tags,
-      sourceLabel: "扫描表达式",
-      enabled: expression.enabled,
-      expressionExample: expression,
-    });
-    knownEntryKeys.add(emotionKey);
-  }
 
   for (const example of effectiveExamples.value) {
     if (formatEffectiveExampleSource(example) !== "default") {
@@ -228,7 +195,6 @@ const savedDraftSources = computed<MotionDraftSource[]>(() =>
     axes: { ...entry.axes },
     durationMs: 1200,
     sample: entry.sample,
-    expressionExample: entry.expressionExample,
   })),
 );
 const selectedSavedSource = computed(() =>
@@ -623,9 +589,6 @@ function formatEffectiveExampleSource(example: DesktopMotionTuningEffectiveExamp
   if (example.source === "desktop_motion_tuning_sample_store") {
     return "user";
   }
-  if (example.source === "model_native_expression_example_library") {
-    return "model_native";
-  }
   return example.source || "default";
 }
 
@@ -633,53 +596,11 @@ function formatAxisList(axes: Record<string, number>): string {
   return Object.keys(axes).join(", ");
 }
 
-function buildExpressionExampleDescription(
-  example: DesktopExpressionExample,
-  profile: SemanticAxisProfile | null,
-): string {
-  const axisIds = Object.keys(example.axes);
-  if (!axisIds.length) {
-    return "暂无语义轴映射";
-  }
-  const axisLabels = axisIds.map((axisId) => {
-    const axis = profile?.axes.find((candidate) => candidate.id === axisId);
-    return axis?.label || axisId;
-  });
-  return `模型表达式参考：${axisLabels.join(", ")}`;
-}
-
 function toggleDraftSourceReference(source: MotionDraftSource, event: Event): void {
   const enabled = (event.target as HTMLInputElement).checked;
   if (source.sample) {
     toggleSampleReference(source.sample, enabled);
-    return;
   }
-  if (source.expressionExample) {
-    toggleExpressionExample(source.expressionExample, enabled);
-  }
-}
-
-function toggleExpressionExample(
-  example: {
-    readonly modelName: string;
-    readonly id: string;
-    readonly feedback: string;
-    readonly tags: readonly string[];
-  },
-  enabled: boolean,
-): void {
-  if (enabled) {
-    emit("deleteExpressionExampleOverride", example.modelName, example.id);
-    return;
-  }
-  emit(
-    "saveExpressionExampleOverride",
-    example.modelName,
-    example.id,
-    false,
-    example.feedback,
-    [...example.tags],
-  );
 }
 
 function normalizeEmotionKey(value: string): string {
@@ -801,12 +722,12 @@ function normalizeEmotionKey(value: string): string {
             <div class="motion-tuning__sample-actions">
               <span class="settings-card__badge">{{ selectedDraftSource.sourceLabel }}</span>
               <label
-                v-if="selectedDraftSource.sample || selectedDraftSource.expressionExample"
+                v-if="selectedDraftSource.sample"
                 class="profile-editor__toggle"
               >
                 <input
                   type="checkbox"
-                  :checked="selectedDraftSource.sample ? Boolean(selectedDraftSource.sample.enabledForLlmReference) : selectedDraftSource.expressionExample?.enabled"
+                  :checked="Boolean(selectedDraftSource.sample.enabledForLlmReference)"
                   @change="toggleDraftSourceReference(selectedDraftSource, $event)"
                 />
                 <span>LLM 参考</span>

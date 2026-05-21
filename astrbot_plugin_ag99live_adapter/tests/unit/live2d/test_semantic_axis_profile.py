@@ -91,46 +91,6 @@ def test_live2d_runtime_cache_treats_missing_motion_tuning_samples_as_empty(
 
     assert errors == {}
     assert payload["motion_tuning_samples"] == []
-    assert payload["expression_example_overrides"] == []
-
-
-def test_live2d_runtime_cache_reports_invalid_expression_example_overrides(
-    tmp_path,
-    install_fake_astrbot,
-) -> None:
-    install_fake_astrbot()
-    runtime_cache = importlib.import_module(
-        "astrbot_plugin_ag99live_adapter.live2d.cache.runtime_cache"
-    )
-    cache_path = tmp_path / "live2d_runtime_cache.json"
-    cache_path.write_text(
-        json.dumps(
-            {
-                "schema_version": "live2d_runtime_cache.v1",
-                "scan_cache": {},
-                "action_filter_cache": {},
-                "motion_tuning_samples": [],
-                "expression_example_overrides": [
-                    {
-                        "model_name": "DemoModel",
-                        "example_id": "",
-                        "enabled": False,
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    payload, errors = runtime_cache.load_live2d_runtime_cache(cache_path)
-
-    assert payload["expression_example_overrides"] == []
-    assert errors == {
-        "expression_example_overrides": (
-            "live2d_runtime_cache_expression_example_overrides_invalid: "
-            "expression_example_override_example_id_required:index=0"
-        )
-    }
 
 
 def test_ensure_semantic_axis_profile_creates_backend_owned_profile_file(tmp_path) -> None:
