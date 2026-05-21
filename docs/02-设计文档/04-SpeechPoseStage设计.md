@@ -6,6 +6,8 @@
 
 目标是让角色在说话时拥有轻量的头部和身体姿态变化，避免动作只停留在嘴部、眼神或单一表情上。
 
+当前主轴口径下，头部偏转、身体扭转/摇晃和眼睛开闭都属于动作骨架。`SpeechPoseStage` 不负责重新选择这些主轴，只在当前动作缺少说话姿态时补充轻量派生姿态。
+
 当前设计只做 plan 级增强：
 
 - 不做逐帧口型。
@@ -86,6 +88,7 @@ id: "speechPose"
 - `intent.mode === "expressive"`
 - 当前 profile 中存在可用的头部或身体 derived 轴
 - 当前动作不是明显空动作
+- 当前动作没有已经通过主轴表达出足够明确的头部或身体姿态
 
 目标轴选择：
 
@@ -93,6 +96,7 @@ id: "speechPose"
 - 只选择 `semantic_group` 属于 `head`、`body`、`torso`、`shoulder` 的轴
 - 不选择 `runtime`、`ambient`、`debug` 轴
 - 不选择 `mouth_open` 这类 runtime-owned 口型轴
+- 不把表情辅轴当作说话姿态补偿目标，例如 `mouth_smile`、`brow_bias`、`gaze_x`、`gaze_y`
 
 输出原则：
 
@@ -100,6 +104,18 @@ id: "speechPose"
 - 如果 coupling 已经写入同一个 derived 轴，当前 stage 不覆盖 coupling
 - 输出值围绕 neutral 做轻量偏移
 - 输出后必须按 axis value range clamp
+
+## 4.1 与主轴/辅轴设计的关系
+
+当前整体设计把动作轴分成：
+
+| 类型 | 说明 |
+| --- | --- |
+| 动作主轴 | 头部偏转、身体扭转/摇晃、眼睛开闭等动作骨架 |
+| 表情辅轴 | 嘴角笑意、眉毛、视线偏移等表情态度微调 |
+| 运行时轴 | 嘴巴开闭、呼吸等由音频或运行时驱动的轴 |
+
+`SpeechPoseStage` 只处理说话场景下缺失的轻量姿态补偿。身体动作已经是主轴体系的一部分，因此后续如果 profile 允许 LLM 或用户直接表达身体扭转/摇晃，`SpeechPoseStage` 不能覆盖这些主轴表达。
 
 ## 5. 建议内部函数
 

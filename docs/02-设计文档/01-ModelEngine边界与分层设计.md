@@ -142,6 +142,30 @@ compile state 是 stage 之间共享的中间状态。新增 stage 必须先明�
 - Avatar runtime 可以写 `runtime/ambient`，但需要和当前 plan 的优先级协调。
 - 所有非直控输入产生的修改都需要进入 diagnostics 或 warnings。
 
+### 6.1 主轴与辅轴设计口径
+
+当前语义轴选择以 Live2D `Motions/*.motion3.json` 的真实参数曲线作为主要参考。
+
+motion 的角色是帮助判断这个模型真实依赖哪些参数形成动作，不直接作为 LLM prompt 示例池，也不要求 LLM 直接触发 motion 文件。ModelEngine 仍然编译语义轴，最终输出 parameter plan。
+
+当前口径：
+
+| 类型 | 含义 | 典型轴 |
+| --- | --- | --- |
+| 动作主轴 | 构成姿态和动作骨架，决定角色整体动作轮廓和情绪强弱 | `head_yaw`、`head_pitch`、`head_roll`、`body_yaw`、`body_roll`、`eye_open_left`、`eye_open_right` |
+| 表情辅轴 | 在动作骨架上补充面部表情、态度和细节质感 | `mouth_smile`、`brow_bias`、`gaze_x`、`gaze_y` |
+| 运行时轴 | 由音频、口型、呼吸或运行时持续驱动 | `mouth_open`、`breath` |
+| 派生/候选轴 | 由引擎根据主轴、说话状态或后续 stage 推导 | `body_pitch`、`body_lift`、`body_depth` 等候选 |
+
+当前判断：
+
+- 头部三轴是 Mk6 motion 中最稳定、最强的动作骨架。
+- 身体扭转、倾斜和摇晃应进入动作主轴体系，用于表达情绪强弱、前倾压迫、后缩惊讶、疲惫下垂等整体姿态。
+- 眼睛开闭是动作主轴的一部分，尤其影响惊讶、疲惫、害羞、眨眼等动作是否成立。
+- 嘴巴开闭属于重要动作轴，但说话场景下主要由 runtime/lip sync 管理，避免和音频口型冲突。
+- 嘴角笑意、眉毛和视线偏移主要承担表情态度微调，不应和头身姿态同等主导动作骨架。
+- `Anim*`、`Exp*`、`Phy*` 参数只作为 motion 分析材料，不直接进入 LLM 主控轴。
+
 ## 7. Diagnostics
 
 `CompileDiagnostics` 是动作编译调试入口。
@@ -256,11 +280,31 @@ order: 45
 当前规则：
 
 - LLM 只面向当前 `SemanticAxisProfile` 中允许控制的语义轴。
-- 表情类表现通过 `mouth_smile`、`brow_bias`、`gaze_y`、`head_pitch` 等语义轴组合表达。
+- 表情态度主要通过 `mouth_smile`、`brow_bias`、`gaze_x`、`gaze_y` 等辅轴表达；需要姿态配合时再组合头部和身体主轴。
 - `Expressions/*.exp3.json` 属于模型作者预制的触发或叠加效果，不进入 ModelEngine compile pipeline。
 - 后续如果需要重新接入原生 expression，必须作为独立能力重新设计，不能混入主轴来源。
 
-## 12. ContinuityStage
+## 12. Motion 与主轴选择边界
+
+Live2D `Motions/*.motion3.json` 是当前选择动作主轴的重要参考来源。
+
+当前使用原则：
+
+- motion 用于观察真实参数曲线、幅度、方向、持续时间和联动关系。
+- motion 用于辅助判断哪些参数适合作为动作主轴、表情辅轴、运行时轴或候选派生轴。
+- motion 不直接替代 ModelEngine 的语义轴编译，不作为协议载荷，不作为 LLM 必须输出的动作名称。
+- motion 中的物理、动画、表达式开关类参数不直接暴露给 LLM 主控。
+- 后续优化默认 profile 时，应优先根据 motion 统计校准轴角色，再调整 prompt 和调参工具展示。
+
+当前 Mk6 观察结论：
+
+- `ParamAngleX/Y/Z` 是最可靠的头部动作主干。
+- `ParamBodyAngleX/Z` 是身体扭转和摇晃的重要依据。
+- `BodyAngleY`、`PhyBodyPositionY`、`PhyBodyUpperY` 等参数提示后续可能需要身体上下/前后感候选轴。
+- `ParamEyeLOpen`、`ParamEyeROpen` 对动作成立有明确贡献，应归入动作主轴体系。
+- `ParamMouthForm`、`ParamBrowForm`、眼球偏移更适合作为表情和态度辅轴。
+
+## 13. ContinuityStage
 
 `ContinuityStage` 负责减少连续多段回复之间的动作跳变。
 
@@ -271,7 +315,7 @@ order: 45
 - 不改变 Adapter 协议。
 - 不让 ModelEngine 成为播放事实源。
 
-## 13. 外部边界
+## 14. 外部边界
 
 ### Adapter
 
@@ -297,11 +341,12 @@ Avatar Runtime 执行 parameter plan、Live2D 写参、物理响应、ambient �
 
 Avatar Runtime 不理解语义轴，也不判断表情语义。
 
-## 14. 维护原则
+## 15. 维护原则
 
 - 当前只支持 v2 主路径。
 - 废弃协议回退分支不进入主代码和主文档。
 - 模块按职责维护，扩展通过 stage / registry 挂载。
 - plan 级增强先于逐帧 runtime 增强。
 - 默认参数保守，先保证自然，再追求表现力。
+- 主轴选择优先服从 motion 观察到的真实动作骨架，不凭 expression 文件或名称猜测。
 - 文档只写当前事实和当前有效设计，不保留历史迁移叙述。
