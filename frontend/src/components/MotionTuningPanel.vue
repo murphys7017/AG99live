@@ -50,6 +50,8 @@ const emit = defineEmits<{
   deleteExpressionExampleOverride: [modelName: string, exampleId: string];
 }>();
 const selectedRecordId = ref("");
+const selectedReferenceId = ref("");
+const activeSourceTab = ref<"history" | "saved">("history");
 const feedbackText = ref("");
 const tagsText = ref("");
 const enabledForLlmReference = ref(true);
@@ -71,6 +73,31 @@ type MotionTuningSampleSnapshot = Readonly<{
   originalAxes: Readonly<Record<string, number>>;
   adjustedAxes: Readonly<Record<string, number>>;
   adjustedPlan: unknown;
+}>;
+type LlmReferenceEntry = Readonly<{
+  id: string;
+  title: string;
+  subtitle: string;
+  description: string;
+  axes: Record<string, number>;
+  tags: readonly string[];
+  sourceLabel: string;
+  enabled: boolean;
+  sample?: DesktopMotionTuningSample;
+  expressionExample?: DesktopExpressionExample;
+}>;
+type MotionDraftSource = Readonly<{
+  id: string;
+  mode: "expressive" | "idle";
+  emotionLabel: string;
+  assistantText: string;
+  createdAt: string;
+  sourceLabel: string;
+  axes: Record<string, number>;
+  durationMs: number;
+  record?: DesktopMotionPlaybackRecord & { plan: SemanticParameterPlan };
+  sample?: DesktopMotionTuningSample;
+  expressionExample?: DesktopExpressionExample;
 }>;
 
 const mutableProfile = computed<SemanticAxisProfile | null>(() =>
@@ -100,20 +127,135 @@ const recentSemanticRecords = computed(() =>
       .slice(0, RECENT_RECORD_LIMIT);
   },
 );
+const historyDraftSources = computed<MotionDraftSource[]>(() =>
+  recentSemanticRecords.value.map((record) => ({
+    id: `record:${record.id}`,
+    mode: record.mode,
+    emotionLabel: record.emotionLabel || "motion",
+    assistantText: record.assistantText || record.startReason,
+    createdAt: record.createdAt,
+    sourceLabel: "历史动作",
+    axes: extractPlanAxisValues(record.plan),
+    durationMs: record.plan.timing.duration_ms,
+    record,
+  })),
+);
 const selectedRecord = computed(() =>
-  recentSemanticRecords.value.find((record) => record.id === selectedRecordId.value)
+  recentSemanticRecords.value.find((record) => `record:${record.id}` === selectedRecordId.value)
     ?? recentSemanticRecords.value[0]
     ?? null,
 );
 const llmReferenceSampleCount = computed(() =>
-  props.motionTuningSamples.filter((sample) =>
-    matchesCurrentProfileSample(sample, mutableProfile.value) && sample.enabledForLlmReference).length,
+  llmReferenceEntries.value.filter((entry) => entry.enabled).length,
 );
 const motionTuningLoadError = computed(() => props.motionTuningSamplesStatus.loadError.trim());
 const motionTuningRootError = computed(() => props.motionTuningSamplesStatus.rootError.trim());
 const motionTuningDiagnostics = computed(() => props.motionTuningSamplesStatus.diagnostics);
 const effectiveExamples = computed(() => props.effectiveExamples);
 const expressionExamples = computed(() => props.expressionExamples);
+const llmReferenceEntries = computed<LlmReferenceEntry[]>(() => {
+  const entries: LlmReferenceEntry[] = [];
+  const currentProfile = mutableProfile.value;
+
+  for (const sample of savedSamples.value) {
+    entries.push({
+      id: `sample:${sample.id}`,
+      title: sample.emotionLabel || "用户样本",
+      subtitle: sample.modelName || "unknown model",
+      description: sample.feedback || sample.assistantText || "暂无说明",
+      axes: { ...sample.adjustedAxes },
+      tags: sample.tags,
+      sourceLabel: "用户样本",
+      enabled: Boolean(sample.enabledForLlmReference),
+      sample,
+    });
+  }
+
+  const knownEntryKeys = new Set(
+    entries.map((entry) => normalizeEmotionKey(entry.title)),
+  );
+
+  for (const expression of expressionExamples.value) {
+    const emotionKey = normalizeEmotionKey(expression.emotion_label || expression.id || expression.name);
+    if (knownEntryKeys.has(emotionKey)) {
+      continue;
+    }
+    entries.push({
+      id: `expression:${expression.id}`,
+      title: expression.name || expression.id,
+      subtitle: expression.source_file || expression.category || "扫描表达式",
+      description: expression.feedback || buildExpressionExampleDescription(expression, currentProfile),
+      axes: { ...expression.axes },
+      tags: expression.tags,
+      sourceLabel: "扫描表达式",
+      enabled: expression.enabled,
+      expressionExample: expression,
+    });
+    knownEntryKeys.add(emotionKey);
+  }
+
+  for (const example of effectiveExamples.value) {
+    if (formatEffectiveExampleSource(example) !== "default") {
+      continue;
+    }
+    const emotionKey = normalizeEmotionKey(example.output.emotion);
+    if (knownEntryKeys.has(emotionKey)) {
+      continue;
+    }
+    entries.push({
+      id: `effective:default:${emotionKey}:${entries.length}`,
+      title: example.output.emotion || "默认参考",
+      subtitle: "默认兜底",
+      description: example.input || "默认关键词参考",
+      axes: { ...example.output.axes },
+      tags: example.tags,
+      sourceLabel: "默认参考",
+      enabled: true,
+    });
+    knownEntryKeys.add(emotionKey);
+  }
+
+  return entries;
+});
+const savedDraftSources = computed<MotionDraftSource[]>(() =>
+  llmReferenceEntries.value.map((entry) => ({
+    id: entry.id,
+    mode: "expressive",
+    emotionLabel: entry.title || "reference",
+    assistantText: entry.description,
+    createdAt: "",
+    sourceLabel: entry.sourceLabel,
+    axes: { ...entry.axes },
+    durationMs: 1200,
+    sample: entry.sample,
+    expressionExample: entry.expressionExample,
+  })),
+);
+const selectedSavedSource = computed(() =>
+  savedDraftSources.value.find((source) => source.id === selectedReferenceId.value)
+    ?? savedDraftSources.value[0]
+    ?? null,
+);
+const selectedDraftSource = computed<MotionDraftSource | null>(() => {
+  if (activeSourceTab.value === "saved") {
+    return selectedSavedSource.value;
+  }
+  const record = selectedRecord.value;
+  if (!record || record.plan.schema_version !== SCHEMA_PARAMETER_PLAN_V2) {
+    return null;
+  }
+  return {
+    id: `record:${record.id}`,
+    mode: record.mode,
+    emotionLabel: record.emotionLabel || "motion",
+    assistantText: record.assistantText || record.startReason,
+    createdAt: record.createdAt,
+    sourceLabel: "历史动作",
+    axes: extractPlanAxisValues(record.plan),
+    durationMs: record.plan.timing.duration_ms,
+    record,
+  };
+});
 
 const effectiveExampleCoverage = computed(() => {
   const groups = [
@@ -134,21 +276,6 @@ const effectiveExampleCoverage = computed(() => {
     };
   });
 });
-const effectiveExampleGroups = computed(() => {
-  const groups = [
-    { key: "user", label: "用户样本" },
-    { key: "model_native", label: "模型补齐" },
-    { key: "default", label: "默认兜底" },
-  ];
-  return groups
-    .map((group) => ({
-      ...group,
-      examples: effectiveExamples.value.filter((example) =>
-        formatEffectiveExampleSource(example) === group.key,
-      ),
-    }))
-    .filter((group) => group.examples.length > 0);
-});
 const savedSamples = computed(() =>
   props.motionTuningSamples.filter((sample) =>
     matchesCurrentProfileSample(sample, mutableProfile.value)),
@@ -159,27 +286,42 @@ onMounted(() => {
 });
 
 watch(
-  recentSemanticRecords,
-  (records) => {
-    if (!records.length) {
+  historyDraftSources,
+  (sources) => {
+    if (!sources.length) {
       selectedRecordId.value = "";
-      resetDraftAxes(null);
       return;
     }
-    if (!records.some((record) => record.id === selectedRecordId.value)) {
-      selectedRecordId.value = records[0].id;
+    if (!sources.some((source) => source.id === selectedRecordId.value)) {
+      selectedRecordId.value = sources[0].id;
     }
   },
   { immediate: true },
 );
 
 watch(
-  selectedRecord,
-  (record) => {
-    resetDraftAxes(record);
+  savedDraftSources,
+  (sources) => {
+    if (!sources.length) {
+      selectedReferenceId.value = "";
+      return;
+    }
+    if (!sources.some((source) => source.id === selectedReferenceId.value)) {
+      selectedReferenceId.value = sources[0].id;
+    }
+  },
+  { immediate: true },
+);
+
+watch(
+  selectedDraftSource,
+  (source) => {
+    resetDraftAxes(source);
     feedbackText.value = "";
     tagsText.value = "";
-    enabledForLlmReference.value = true;
+    enabledForLlmReference.value = source?.sample
+      ? Boolean(source.sample.enabledForLlmReference)
+      : true;
     playStatusText.value = "";
     saveStatusText.value = "";
   },
@@ -195,23 +337,22 @@ watch(
     return `${currentProfile.model_id}:${currentProfile.revision}`;
   },
   () => {
-    resetDraftAxes(selectedRecord.value);
+    resetDraftAxes(selectedDraftSource.value);
     playStatusText.value = "";
     saveStatusText.value = "";
   },
 );
 
-function resetDraftAxes(record: DesktopMotionPlaybackRecord | null): void {
+function resetDraftAxes(source: MotionDraftSource | null): void {
   for (const key of Object.keys(draftAxes)) {
     delete draftAxes[key];
   }
-  if (!record || record.plan.schema_version !== SCHEMA_PARAMETER_PLAN_V2) {
+  if (!source) {
     return;
   }
 
-  const recordedValues = extractPlanAxisValues(record.plan);
   for (const axis of promptAxes.value) {
-    draftAxes[axis.id] = recordedValues[axis.id] ?? axis.neutral;
+    draftAxes[axis.id] = source.axes[axis.id] ?? axis.neutral;
   }
 }
 
@@ -240,8 +381,8 @@ function updateAxisValue(axis: SemanticAxisDefinition, event: Event): void {
 
 function buildAdjustedIntent(): SemanticMotionIntent | null {
   const currentProfile = mutableProfile.value;
-  const record = selectedRecord.value;
-  if (!currentProfile || !record) {
+  const source = selectedDraftSource.value;
+  if (!currentProfile || !source) {
     return null;
   }
 
@@ -265,9 +406,9 @@ function buildAdjustedIntent(): SemanticMotionIntent | null {
     profile_id: currentProfile.profile_id,
     profile_revision: currentProfile.revision,
     model_id: currentProfile.model_id,
-    mode: record.mode,
-    emotion_label: record.emotionLabel || "manual_tuning",
-    duration_hint_ms: record.plan.timing.duration_ms,
+    mode: source.mode,
+    emotion_label: source.emotionLabel || "manual_tuning",
+    duration_hint_ms: source.durationMs,
     axes,
     summary: {
       axis_count: Object.keys(axes).length,
@@ -287,10 +428,10 @@ function playAdjustedIntent(): void {
 }
 
 function saveSample(): void {
-  const record = selectedRecord.value;
+  const source = selectedDraftSource.value;
   const currentProfile = mutableProfile.value;
-  if (!record || !currentProfile) {
-    saveStatusText.value = "当前没有可保存的动作记录或主轴 profile。";
+  if (!source || !currentProfile) {
+    saveStatusText.value = "当前没有可保存的动作参考或主轴 profile。";
     return;
   }
 
@@ -299,18 +440,18 @@ function saveSample(): void {
   const sample: DesktopMotionTuningSample = {
     id: `motion-sample-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
     createdAt: now.toISOString(),
-    sourceRecordId: record.id,
+    sourceRecordId: source.id,
     modelName: currentProfile.model_id,
     profileId: currentProfile.profile_id,
     profileRevision: currentProfile.revision,
-    emotionLabel: record.emotionLabel || "manual_tuning",
-    assistantText: record.assistantText,
+    emotionLabel: source.emotionLabel || "manual_tuning",
+    assistantText: source.assistantText,
     feedback: feedbackText.value.trim(),
     tags: parseTags(tagsText.value),
     enabledForLlmReference: enabledForLlmReference.value,
-    originalAxes: extractPlanAxisValues(record.plan),
+    originalAxes: { ...source.axes },
     adjustedAxes,
-    adjustedPlan: buildAdjustedPlan(record.plan, currentProfile, adjustedAxes),
+    adjustedPlan: buildAdjustedPlan(source, currentProfile, adjustedAxes),
   };
 
   emit("saveMotionTuningSample", sample);
@@ -332,14 +473,6 @@ function toggleSampleReference(sample: MotionTuningSampleSnapshot, enabled: bool
       enabledForLlmReference: enabled,
     },
   );
-}
-
-function handleSampleReferenceToggle(sample: MotionTuningSampleSnapshot, event: Event): void {
-  const target = event.target;
-  if (!(target instanceof HTMLInputElement)) {
-    return;
-  }
-  toggleSampleReference(sample, target.checked);
 }
 
 function deleteSample(sampleId: string): void {
@@ -366,7 +499,7 @@ function normalizeDraftAxes(currentProfile: SemanticAxisProfile): Record<string,
 }
 
 function buildAdjustedPlan(
-  basePlan: SemanticParameterPlan,
+  source: MotionDraftSource,
   currentProfile: SemanticAxisProfile,
   adjustedAxes: Record<string, number>,
 ): SemanticParameterPlan {
@@ -394,20 +527,39 @@ function buildAdjustedPlan(
     }
   }
 
+  const basePlan = source.record?.plan ?? null;
   return {
-    ...basePlan,
+    schema_version: SCHEMA_PARAMETER_PLAN_V2,
+    profile_id: currentProfile.profile_id,
+    profile_revision: currentProfile.revision,
+    model_id: currentProfile.model_id,
+    mode: source.mode,
+    emotion_label: source.emotionLabel,
+    timing: basePlan ? cloneJson(basePlan.timing) : buildDefaultDraftTiming(source.durationMs),
     parameters,
     diagnostics: {
       warnings: [
-        ...(basePlan.diagnostics?.warnings ?? []),
+        ...(basePlan?.diagnostics?.warnings ?? []),
         "manual_motion_tuning_sample",
       ],
     },
     summary: {
-      ...(basePlan.summary ?? {}),
+      ...(basePlan?.summary ?? {}),
       axis_count: Object.keys(adjustedAxes).length,
       parameter_count: parameters.length,
     },
+  };
+}
+
+function buildDefaultDraftTiming(durationMs: number): SemanticParameterPlan["timing"] {
+  const safeDurationMs = Math.max(500, Math.round(durationMs || 1200));
+  const blendInMs = Math.min(180, Math.round(safeDurationMs * 0.2));
+  const blendOutMs = Math.min(260, Math.round(safeDurationMs * 0.25));
+  return {
+    duration_ms: safeDurationMs,
+    blend_in_ms: blendInMs,
+    hold_ms: Math.max(0, safeDurationMs - blendInMs - blendOutMs),
+    blend_out_ms: blendOutMs,
   };
 }
 
@@ -477,8 +629,34 @@ function formatEffectiveExampleSource(example: DesktopMotionTuningEffectiveExamp
   return example.source || "default";
 }
 
-function formatEffectiveExampleAxes(example: DesktopMotionTuningEffectiveExample): string {
-  return Object.keys(example.output.axes).join(", ");
+function formatAxisList(axes: Record<string, number>): string {
+  return Object.keys(axes).join(", ");
+}
+
+function buildExpressionExampleDescription(
+  example: DesktopExpressionExample,
+  profile: SemanticAxisProfile | null,
+): string {
+  const axisIds = Object.keys(example.axes);
+  if (!axisIds.length) {
+    return "暂无语义轴映射";
+  }
+  const axisLabels = axisIds.map((axisId) => {
+    const axis = profile?.axes.find((candidate) => candidate.id === axisId);
+    return axis?.label || axisId;
+  });
+  return `模型表达式参考：${axisLabels.join(", ")}`;
+}
+
+function toggleDraftSourceReference(source: MotionDraftSource, event: Event): void {
+  const enabled = (event.target as HTMLInputElement).checked;
+  if (source.sample) {
+    toggleSampleReference(source.sample, enabled);
+    return;
+  }
+  if (source.expressionExample) {
+    toggleExpressionExample(source.expressionExample, enabled);
+  }
 }
 
 function toggleExpressionExample(
@@ -527,8 +705,8 @@ function normalizeEmotionKey(value: string): string {
       保存后的样本可以作为 few-shot 参考同步给后端大模型，用来约束后续动作生成风格。
     </p>
 
-    <details v-if="effectiveExamples.length" class="motion-tuning__details">
-      <summary>当前 few-shot 有效示例</summary>
+    <details v-if="llmReferenceEntries.length" class="motion-tuning__details">
+      <summary>LLM 参考覆盖</summary>
       <div class="motion-tuning__coverage-grid">
         <div
           v-for="item in effectiveExampleCoverage"
@@ -540,30 +718,6 @@ function normalizeEmotionKey(value: string): string {
           <small>{{ item.covered ? item.source : "missing" }}</small>
         </div>
       </div>
-      <ul class="motion-tuning__sample-list">
-        <template
-          v-for="group in effectiveExampleGroups"
-          :key="group.key"
-        >
-          <li class="motion-tuning__sample-group">
-            <strong>{{ group.label }}</strong>
-          </li>
-          <li
-            v-for="(example, index) in group.examples"
-            :key="`${group.key}-${example.output.emotion}-${index}`"
-            class="motion-tuning__sample-item"
-          >
-            <div>
-              <strong>{{ example.output.emotion || "unknown" }}</strong>
-              <p>{{ example.input || "无示例文本" }}</p>
-              <small>{{ formatEffectiveExampleAxes(example) || "no axes" }}</small>
-            </div>
-            <span class="settings-card__badge">
-              {{ formatEffectiveExampleSource(example) }}
-            </span>
-          </li>
-        </template>
-      </ul>
     </details>
 
     <p v-if="motionTuningRootError" class="history-empty">
@@ -587,24 +741,86 @@ function normalizeEmotionKey(value: string): string {
       </li>
     </ul>
 
-    <template v-if="mutableProfile && recentSemanticRecords.length">
+    <template v-if="mutableProfile && (historyDraftSources.length || savedDraftSources.length)">
       <div class="motion-tuning__layout">
         <aside class="motion-tuning__records">
-          <button
-            v-for="record in recentSemanticRecords"
-            :key="record.id"
-            type="button"
-            class="profile-editor__axis-button"
-            :data-selected="record.id === selectedRecord?.id"
-            @click="selectedRecordId = record.id"
-          >
-            <strong>{{ record.emotionLabel || "motion" }}</strong>
-            <span>{{ record.mode }} · {{ formatRecordTime(record) }}</span>
-            <small>{{ record.assistantText || record.startReason }}</small>
-          </button>
+          <div class="motion-tuning__tabs" role="tablist" aria-label="动作样本来源">
+            <button
+              type="button"
+              class="motion-tuning__tab"
+              :data-active="activeSourceTab === 'history'"
+              @click="activeSourceTab = 'history'"
+            >
+              历史动作 {{ historyDraftSources.length }}
+            </button>
+            <button
+              type="button"
+              class="motion-tuning__tab"
+              :data-active="activeSourceTab === 'saved'"
+              @click="activeSourceTab = 'saved'"
+            >
+              已保存 {{ savedDraftSources.length }}
+            </button>
+          </div>
+          <template v-if="activeSourceTab === 'history'">
+            <button
+              v-for="source in historyDraftSources"
+              :key="source.id"
+              type="button"
+              class="profile-editor__axis-button"
+              :data-selected="source.id === selectedDraftSource?.id"
+              @click="selectedRecordId = source.id"
+            >
+              <strong>{{ source.emotionLabel }}</strong>
+              <span>{{ source.mode }} · {{ formatRecordTime(source) }}</span>
+              <small>{{ source.assistantText }}</small>
+            </button>
+          </template>
+          <template v-else>
+            <button
+              v-for="source in savedDraftSources"
+              :key="source.id"
+              type="button"
+              class="profile-editor__axis-button"
+              :data-selected="source.id === selectedDraftSource?.id"
+              @click="selectedReferenceId = source.id"
+            >
+              <strong>{{ source.emotionLabel }}</strong>
+              <span>{{ source.sourceLabel }}</span>
+              <small>{{ formatAxisList(source.axes) || "暂无语义轴映射" }}</small>
+            </button>
+          </template>
         </aside>
 
         <section class="motion-tuning__editor">
+          <div v-if="selectedDraftSource" class="motion-tuning__source-header">
+            <div>
+              <strong>{{ selectedDraftSource.emotionLabel }}</strong>
+              <p>{{ selectedDraftSource.assistantText || selectedDraftSource.sourceLabel }}</p>
+            </div>
+            <div class="motion-tuning__sample-actions">
+              <span class="settings-card__badge">{{ selectedDraftSource.sourceLabel }}</span>
+              <label
+                v-if="selectedDraftSource.sample || selectedDraftSource.expressionExample"
+                class="profile-editor__toggle"
+              >
+                <input
+                  type="checkbox"
+                  :checked="selectedDraftSource.sample ? Boolean(selectedDraftSource.sample.enabledForLlmReference) : selectedDraftSource.expressionExample?.enabled"
+                  @change="toggleDraftSourceReference(selectedDraftSource, $event)"
+                />
+                <span>LLM 参考</span>
+              </label>
+              <button
+                v-if="selectedDraftSource.sample"
+                type="button"
+                class="settings-card__button settings-card__button--ghost"
+                @click="deleteSample(selectedDraftSource.sample.id)"
+              >
+                删除
+              </button>
+            </div>
+          </div>
           <div class="motion-tuning__axis-grid">
             <label
               v-for="axis in promptAxes"
@@ -677,65 +893,9 @@ function normalizeEmotionKey(value: string): string {
     </template>
 
     <p v-else class="history-empty">
-      还没有可微调的 v2 动作记录。完成一次对话动作播放后，这里会显示最近 5 次历史动作。
+      还没有可微调的动作参考。完成一次对话动作播放，或等待模型同步扫描表情后，这里会显示可编辑样本。
     </p>
 
-    <details v-if="savedSamples.length" class="motion-tuning__details">
-      <summary>已保存样本（可切换是否作为大模型参考）</summary>
-      <ul class="motion-tuning__sample-list">
-        <li
-          v-for="sample in savedSamples"
-          :key="sample.id"
-          class="motion-tuning__sample-item"
-        >
-          <div>
-            <strong>{{ sample.emotionLabel }} · {{ sample.modelName || "unknown model" }}</strong>
-            <p>{{ sample.feedback || "未填写反馈说明" }}</p>
-            <small>{{ sample.tags.join(", ") || "no tags" }}</small>
-          </div>
-          <label class="profile-editor__toggle">
-            <input
-              type="checkbox"
-              :checked="Boolean(sample.enabledForLlmReference)"
-              @change="handleSampleReferenceToggle(sample, $event)"
-            />
-            <span>LLM 参考</span>
-          </label>
-          <button
-            type="button"
-            class="settings-card__button settings-card__button--ghost"
-            @click="deleteSample(sample.id)"
-          >
-            删除
-          </button>
-        </li>
-      </ul>
-    </details>
-
-    <details v-if="expressionExamples.length" class="motion-tuning__details">
-      <summary>扫描表达式参考（{{ expressionExamples.length }} 个）</summary>
-      <ul class="motion-tuning__sample-list">
-        <li
-          v-for="ex in expressionExamples"
-          :key="ex.id"
-          class="motion-tuning__sample-item"
-        >
-          <div>
-            <strong>{{ ex.name || ex.id }}</strong>
-            <p>{{ ex.feedback || "未填写说明" }}</p>
-            <small>{{ Object.keys(ex.axes).join(", ") }}</small>
-          </div>
-          <label class="profile-editor__toggle">
-            <input
-              type="checkbox"
-              :checked="ex.enabled"
-              @change="toggleExpressionExample(ex, ($event.target as HTMLInputElement).checked)"
-            />
-            <span>LLM 参考</span>
-          </label>
-        </li>
-      </ul>
-    </details>
   </article>
 </template>
 
@@ -757,6 +917,17 @@ function normalizeEmotionKey(value: string): string {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
+.motion-tuning__source-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.06);
+}
+
 .motion-tuning__sample-list {
   display: grid;
   gap: 10px;
@@ -766,12 +937,41 @@ function normalizeEmotionKey(value: string): string {
 
 .motion-tuning__sample-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
   padding: 12px;
   border: 1px solid rgba(148, 163, 184, 0.25);
   border-radius: 12px;
+}
+
+.motion-tuning__sample-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.motion-tuning__tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+.motion-tuning__tab {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(148, 163, 184, 0.08);
+  color: inherit;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.motion-tuning__tab[data-active="true"] {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.12);
 }
 
 .motion-tuning__coverage-grid {

@@ -734,6 +734,45 @@ def test_handle_engine_motion_payload_preview_rejects_missing_intent_key(
     assert "missing_intent_object" in str(sent_payloads[0]["payload"]["message"])
 
 
+def test_handle_msg_accepts_motion_intent_preview_without_turn_id(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    constants = importlib.import_module("astrbot_plugin_ag99live_adapter.protocol.constants")
+    TurnCoordinator = module.TurnCoordinator
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.session_state = type("SessionStateStub", (), {"client_uid": "desktop-client"})()
+    handled_messages = []
+
+    async def fake_handle_preview(message):
+        handled_messages.append(message)
+
+    coordinator._handle_frontend_system = _noop_async
+    coordinator._handle_engine_motion_payload_preview = fake_handle_preview
+
+    asyncio.run(
+        coordinator.handle_msg(
+            {
+                "type": constants.TYPE_ENGINE_MOTION_INTENT,
+                "version": constants.PROTOCOL_VERSION,
+                "message_id": "message-preview",
+                "turn_id": None,
+                "source": constants.SOURCE_FRONTEND,
+                "payload": {
+                    "mode": "preview",
+                    "intent": _build_valid_motion_intent(),
+                },
+            }
+        )
+    )
+
+    assert len(handled_messages) == 1
+    assert handled_messages[0].turn_id is None
+
+
 def test_emit_message_chain_uses_raw_reply_text_override_for_inline_extraction(
     install_fake_astrbot,
     monkeypatch,

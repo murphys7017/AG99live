@@ -114,6 +114,10 @@ class TurnCoordinator:
             await self._handle_frontend_system(message)
             return
 
+        if message.type == TYPE_ENGINE_MOTION_INTENT:
+            await self._handle_engine_motion_payload_preview(message)
+            return
+
         turn_id = self._require_interactive_turn_id(message)
 
         if message.type == TYPE_CONTROL_PLAYBACK_FINISHED:
@@ -159,10 +163,6 @@ class TurnCoordinator:
         if message.type == TYPE_INPUT_TEXT:
             message_obj = self._convert_message(message.raw)
             await self._commit_inbound_message(message_obj, turn_id=turn_id)
-            return
-
-        if message.type == TYPE_ENGINE_MOTION_INTENT:
-            await self._handle_engine_motion_payload_preview(message)
             return
 
         await self._send_json(

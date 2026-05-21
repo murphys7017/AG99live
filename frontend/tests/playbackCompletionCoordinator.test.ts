@@ -254,9 +254,10 @@ async function testMotionHandoffCompletesPreviousSegmentAndFinishesCurrent(): Pr
   assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-b")?.motion.completed, true);
 }
 
-async function testPreviewMotionPlaybackDoesNotCreateSessionSegment(): Promise<void> {
+async function testPreviewMotionPlaybackDoesNotCreateSessionSegmentOrHistory(): Promise<void> {
   const h = createHarness();
   const beforeSessionCount = h.sessionStore.getSessions().length;
+  const beforeRecordCount = h.coordinator.motionPlaybackRecords.value.length;
 
   h.coordinator.recordMotionPlayback({
     messageId: "preview",
@@ -284,7 +285,7 @@ async function testPreviewMotionPlaybackDoesNotCreateSessionSegment(): Promise<v
     h.sessionStore.getSessions().some((session) => session.segments.has("preview")),
     false,
   );
-  assert.equal(h.coordinator.motionPlaybackRecords.value[0]?.startReason, "preview");
+  assert.equal(h.coordinator.motionPlaybackRecords.value.length, beforeRecordCount);
 }
 
 async function testMixedAudioStatesRequireAllSettled(): Promise<void> {
@@ -410,7 +411,7 @@ async function run(): Promise<void> {
   await testAudioStartedNotificationIsSegmentScoped();
   await testMotionCompletionWritesCorrectSegment();
   await testMotionHandoffCompletesPreviousSegmentAndFinishesCurrent();
-  await testPreviewMotionPlaybackDoesNotCreateSessionSegment();
+  await testPreviewMotionPlaybackDoesNotCreateSessionSegmentOrHistory();
   await testMixedAudioStatesRequireAllSettled();
   await testSegmentWithAudioFailureStillSettles();
   await testSynthFinishedAfterTurnFinishedStillAcks();

@@ -232,6 +232,10 @@ export function usePlaybackCompletionCoordinator(
   }
 
   function recordMotionPlayback(event: ModelEnginePlanStartedEvent): void {
+    if (event.startReason === "preview") {
+      return;
+    }
+
     const session =
       options.sessionStore.getSessions().find((candidate) =>
         candidate.segmentOrder.some((segmentId) => segmentId === event.messageId),
