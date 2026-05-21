@@ -1,17 +1,19 @@
-# ModelEngine 驱动系统边界与分层设计
+# ModelEngine 边界与分层设计
 
-本文是前端动作引擎结构方案的维护入口。
+本文是前端动作引擎的当前维护入口，只描述现在成立的边界、结构和扩展规则。
 
-## 1. 当前结论
+## 1. 定位
 
-前端 ModelEngine 的目标形态是“可挂载能力模块”的动作引擎。
+ModelEngine 是前端的动作语义编译与启动模块。
 
-当前主链路：
+它接收当前协议中的动作载荷，将 `engine.motion_intent.v2` 编译为 `engine.parameter_plan.v2`，再把参数计划交给 Live2D 参数播放器执行。
+
+主链路：
 
 ```text
 engine.motion_intent.v2 / engine.parameter_plan.v2
 -> normalizeMotionPayload / parseSemanticParameterPlan
--> useModelEngine facade
+-> useModelEngine
 -> motionRuntimeScheduler
 -> motionStart
 -> compileMotionIntent
@@ -19,24 +21,62 @@ engine.motion_intent.v2 / engine.parameter_plan.v2
 -> Live2D runtime
 ```
 
-当前有效主路径：
+有效动作协议：
 
-- `engine.motion_intent.v2 -> engine.parameter_plan.v2`
-- `SemanticAxisProfile -> semantic axes -> parameter bindings -> parameter plan`
-- `profile.couplings -> derived semantic axes`
-- `motionPlayer.playPlan -> Live2D parameter write`
+| Payload | Schema | 说明 |
+| --- | --- | --- |
+| 动作意图 | `engine.motion_intent.v2` | 由语义轴表达动作意图，前端编译为参数计划 |
+| 参数计划 | `engine.parameter_plan.v2` | 前端可直接执行的 Live2D 参数计划 |
 
-当前结构判断：
+## 2. 负责什么
 
-- `useModelEngine.ts` 已经收口为 facade，当前主要负责状态持有、runtime 装配和对外 API。
-- `motionRuntimeScheduler.ts` 已承担 pending queue、音频起播等待、turn 过期清理和启动时机决策。
-- `motionStart.ts` 已承担 payload 启动、semantic compile 触发、direct plan 启动和失败状态写回。
-- `compileMotionIntent.ts` 是当前 compile 主入口，真正的编译逻辑已经进入 `compiler/` 目录下的静态 pipeline stages。
-- `settings.ts` 的设置模型需要面向 `SemanticAxisProfile`。
-- `CompileDiagnostics` 需要按 stage 聚合。
-- 新增表情判断、说话姿态、动作优化、连贯优化时，应通过 stage / registry 挂载。
+ModelEngine 负责：
 
-当前已经落地的 compile 主链：
+- 接收已经进入前端运行时的动作 payload。
+- 归一化并校验动作意图和参数计划。
+- 根据当前模型的 `SemanticAxisProfile` 编译参数计划。
+- 根据音频和 turn 上下文决定动作启动时机。
+- 通过静态 stage registry 挂载动作增强能力。
+- 输出 compile diagnostics，支撑调参、测试和定位问题。
+
+ModelEngine 不负责：
+
+- WebSocket 收发。
+- Adapter envelope 构造。
+- 文本和音频 release 决策。
+- 后端历史、动作调参样本和表达式参考存储。
+- Live2D SDK 渲染细节。
+- 动作库编辑器 UI。
+
+动作库和调参面板可以向 ModelEngine 发送 preview 请求，但不绕过 ModelEngine 直接改主运行时事实。
+
+## 3. 当前代码分层
+
+当前 `frontend/src/model-engine/` 的文件职责如下：
+
+| 文件 | 当前职责 |
+| --- | --- |
+| `useModelEngine.ts` | 引擎 facade：持有状态、装配 runtime/start 依赖、暴露对外 API |
+| `contracts.ts` | 入站动作 payload 归一化后的边界类型 |
+| `normalize.ts` | `engine.motion_intent.v2` 和 `engine.parameter_plan.v2` 入站归一化 |
+| `planParser.ts` | `engine.parameter_plan.v2` parser 与 clone |
+| `settings.ts` | 动作强度和单轴强度设置 |
+| `timing.ts` | motion timing resolution，支持 hint/audio_sync/default |
+| `constants.ts` | 默认时长、同步等待窗口和参数轴常量 |
+| `runtime/contracts.ts` | runtime 调度、启动、状态控制和依赖端口类型 |
+| `runtime/motionRuntimeScheduler.ts` | pending queue、音频起播等待、turn 过期清理和启动时机调度 |
+| `runtime/motionStart.ts` | payload 启动、compile 触发、playPlan 调用和启动结果写回 |
+| `compiler/contracts.ts` | compile 输入输出契约、timing、diagnostics 和 result 类型 |
+| `compiler/compileContext.ts` | compile 共享上下文、中间 state 和 state 写入辅助函数 |
+| `compiler/compileMotionIntent.ts` | compile 主入口，创建 context、执行 pipeline、收口结果 |
+| `compiler/diagnostics.ts` | compile diagnostics 构造与收口 |
+| `compiler/pipeline.ts` | stage 顺序执行器 |
+| `compiler/registry.ts` | 静态 compile stage 注册、排序和启用入口 |
+| `compiler/stages/*.ts` | 各 compile stage 的具体逻辑 |
+
+## 4. 当前 Compile Pipeline
+
+当前 core pipeline：
 
 ```text
 IntentValidator
@@ -48,258 +88,85 @@ IntentValidator
 -> PlanBuilder
 ```
 
-下一阶段主目标：
+各 stage 职责：
 
-```text
-设计并整理前端 ModelEngine 结构
--> 第一轮 compiler / runtime 拆分已经完成
--> 静态 stage registry 已落地
--> 挂载第一个 extension stage
--> 按 SpeechPoseStage、ExpressionStage、ContinuityStage 的顺序补动作增强能力
-```
-
-## 2. 协议与代码清理原则
-
-当前涉及的动作 schema：
-
-| Payload | Schema |
+| Stage | 职责 |
 | --- | --- |
-| Adapter 外部动作载荷 | `engine.motion_intent.v2` |
-| 前端内部执行计划 | `engine.parameter_plan.v2` |
+| `IntentValidator` | 校验 intent 与当前模型 profile 是否匹配，写入 profile 和 axis map |
+| `AxisResolver` | 解析可由 LLM 控制的 primary/hint 轴，过滤 unknown/forbidden/invalid 轴，并做保护性 range clamp |
+| `IntensityStage` | 对 expressive 动作应用整体强度和单轴强度，并对缩放后的值再次 clamp |
+| `CouplingStage` | 根据 profile couplings 生成 derived 轴值 |
+| `ModeResolverStage` | 根据 intent mode 和 idle deadzone 决定最终 `idle/expressive` |
+| `TimingStage` | 根据 duration hint、音频剩余时长和默认值解析 timing |
+| `PlanBuilder` | 将最终语义轴值映射为 `engine.parameter_plan.v2` 参数列表 |
 
-边界规则：
+## 5. Compile State
 
-- 未列入当前 schema 的 payload 直接拒绝。
-- 不添加隐式 payload 修复逻辑。
-- 不添加多版本或旧协议回退路径。
-- 不添加服务于废弃入口的防御性代码。
-- 边界 parser 可以接收 `unknown`，内部类型必须收窄为当前协议类型。
+compile state 是 stage 之间共享的中间状态。新增 stage 必须先明确自己读取和写入哪些字段。
 
-需要保留的运行时保护：
+核心值层：
 
-- `schema_version` 严格校验。
-- 动作 payload 等待音频起播的短等待窗口。
-- preview 入口的 runtime parse。
-- turn/message/playbackTurn 上下文过期清理。
-
-清理判断标准：
-
-```text
-服务当前 v2 主路径稳定性的保护保留。
-服务废弃入口静默运行的回退分支清理。
-```
-
-## 3. 目标边界
-
-ModelEngine 负责：
-
-- 接收已经归一化的动作 payload。
-- 校验 `engine.motion_intent.v2` 和 `engine.parameter_plan.v2`。
-- 根据当前模型和 `SemanticAxisProfile` 生成可执行 parameter plan。
-- 按音频和 turn 上下文决定动作启动时机。
-- 组织动作增强、动作优化、连贯优化等模块。
-- 输出 diagnostics，帮助调参和定位问题。
-
-ModelEngine 不负责：
-
-- WebSocket 协议收发。
-- Adapter envelope 构造。
-- 文本和音频 release 决策。
-- Live2D SDK 渲染细节。
-- 动作库编辑器 UI。
-- 后端 history / motion tuning 样本存储。
-
-动作库 / 调参面板可以向 ModelEngine 发测试请求，但不绕开引擎直接改运行时事实。
-
-表情冷启动示例的边界：
-
-- 来源是后端模型扫描阶段产出的模型能力事实。
-- 数据形态是语义化表情示例，不是原始 `exp3.json` 参数表。
-- 不并入 `motion_tuning_samples`。
-- 不通过 Adapter 新增专用表情协议。
-- 只作为 compile 时的补充参考，不直接写 Live2D 原始参数。
-
-## 4. 当前代码分层
-
-当前 `frontend/src/model-engine/` 文件职责如下：
-
-| 文件 | 当前职责 | 结构方向 |
+| 字段 | 含义 | 写入者 |
 | --- | --- | --- |
-| `useModelEngine.ts` | 引擎 facade：持有状态、装配 runtime 与 start 依赖、暴露对外 API | 保持为组合入口 |
-| `runtime/motionRuntimeScheduler.ts` | pending queue、等待音频起播、过期清理、启动时机调度 | 保持为 runtime scheduler |
-| `runtime/motionStart.ts` | payload 启动、compile 触发、playPlan 调用、启动结果写回 | 保持为 runtime start boundary |
-| `normalize.ts` | `motion_intent.v2` 和 `parameter_plan.v2` 入站归一化 | 保留为边界 parser |
-| `planParser.ts` | `parameter_plan.v2` parser / clone | 归入 contracts/parsers |
-| `compiler/compileMotionIntent.ts` | compile 主入口，负责装配 pipeline 和收口结果 | 保持为 compiler 主入口 |
-| `compiler/compileContext.ts` | compile 共享上下文与 state 定义 | 保持为 stage 公共协议 |
-| `compiler/contracts.ts` | compile 输入输出契约、timing/diagnostics/result 类型 | 保持为 compile 契约层 |
-| `compiler/pipeline.ts` | stage 顺序执行器 | 保持轻量 |
-| `compiler/diagnostics.ts` | compile diagnostics 构造与收口 | 按 stage 聚合 |
-| `compiler/stages/*.ts` | 各阶段编译逻辑 | 保持单一职责 |
-| `runtime/contracts.ts` | runtime 调度、启动、状态控制、依赖端口类型；session 查询端口按 `turnId` 暴露 | 保持为 runtime 契约层 |
-| `timing.ts` | timing resolution，支持 hint/audio_sync/default | 作为 timing stage |
-| `settings.ts` | 强度倍率设置 | 改为 profile-aware settings |
-| `contracts.ts` | 入站动作 payload 归一化后的边界类型 | 保持为 payload boundary 契约层 |
-| `constants.ts` | 默认时长、等待窗口、参数轴常量 | 拆分协议常量和 runtime 策略常量 |
+| `controlledValues` | LLM/用户直控输入层，来自 primary/hint 轴，经过 profile 过滤、保护性归一化和强度处理 | `AxisResolver`、`IntensityStage` |
+| `derivedValues` | 引擎派生层，由 coupling、speech pose、expression、continuity 等 stage 追加 | 派生型 stage |
+| `allAxisValues` | 进入 mode/timing/plan build 的最终汇总视图 | 汇总型 stage |
+| `axisValueSources` | 每个轴值的来源，用于 plan parameter source 和 diagnostics | 写入轴值的 stage |
+| `appliedDerivedAxes` | 本次编译实际写入的 derived 轴 | `mergeDerivedAxisValues()` |
 
-## 5. 目标分层方案
+约束：
 
-前端 ModelEngine 分为下面几层：
+- `controlledValues` 只表示当前 intent 的直控语义，不由派生型 stage 改写。
+- `derivedValues` 用于引擎内部补偿和增强。
+- `allAxisValues` 是最终编译输入视图，不代表新的所有权层。
+- `mergeDerivedAxisValues()` 会同步更新 `derivedValues`、`axisValueSources` 和 `appliedDerivedAxes`。
+- `refreshAllAxisValues()` 负责把 `controlledValues + derivedValues` 汇总为 `allAxisValues`。
 
-```text
-ModelEngine
-  EngineFacade
-  EngineRuntime
-  PayloadBoundary
-  CompilePipeline
-    IntentValidator
-    AxisResolver
-    IntensityStage
-    CouplingStage
-    SpeechPoseStage
-    ExpressionStage
-    ContinuityStage
-    TimingStage
-    PlanBuilder
-  ExtensionRegistry
-  Diagnostics
+## 6. 参数所有权
 
-AvatarRuntime
-  ParameterPlanPlayer
-  AmbientRuntime
-  CubismPhysics
-```
+长期参数所有权按 semantic axis role 划分：
 
-### 5.1 EngineFacade
-
-目标位置：
-
-```text
-frontend/src/model-engine/useModelEngine.ts
-```
-
-职责：
-
-- 对 `usePetDesktopController` 暴露稳定 API。
-- 组合 runtime、compiler、player、settings。
-- 维护引擎状态 projection。
-
-不负责：
-
-- 编译细节。
-- session segment 结构细节。
-- 具体动作增强模块实现。
-
-### 5.2 EngineRuntime
-
-职责：
-
-- 管理 pending motion payload。
-- 等待音频起播或超时启动。
-- 根据 turn/message/playbackTurn 上下文取消过期 payload。
-- 触发 play plan。
-
-当前落地：
-
-```text
-runtime/motionRuntimeScheduler.ts
-runtime/motionStart.ts
-```
-
-目标接口：
-
-```ts
-interface MotionRuntimeScheduler {
-  enqueue(payload, context): void;
-  notifyAudioStarted(context): void;
-  notifyTurnChanged(turnId): void;
-  stop(reason): void;
-}
-```
-
-### 5.3 PayloadBoundary
-
-职责：
-
-- `engine.motion_intent.v2` parse 为 `SemanticMotionIntent`。
-- 前端内部执行使用的 `engine.parameter_plan.v2` parse 为 `SemanticParameterPlan`。
-- 对未知 schema 明确拒绝。
-
-目标文件：
-
-```text
-model-engine/payload/
-  normalizeMotionPayload.ts
-  parseParameterPlan.ts
-```
-
-原则：
-
-- 入站边界接收 `unknown`。
-- 内部 pipeline 只接收已归一化类型。
-- parser 不做动作语义决策。
-
-### 5.4 CompilePipeline
-
-职责：
-
-把 `SemanticMotionIntent` 编译为 `SemanticParameterPlan`。
-
-目标 pipeline：
-
-```text
-SemanticMotionIntent
--> IntentValidator
--> AxisResolver
--> IntensityStage
--> CouplingStage
--> SpeechPoseStage
--> ExpressionStage
--> ContinuityStage
--> TimingStage
--> PlanBuilder
--> SemanticParameterPlan
-```
-
-stage 形态：
-
-```ts
-interface MotionCompileStage {
-  id: string;
-  run(context: MotionCompileContext): MotionCompileStageResult;
-}
-```
-
-stage 规则：
-
-- 第一轮使用静态顺序，不引入 `order`
-- 不播放动作。
-- 不访问 WebSocket。
-- 不直接写 UI 状态。
-- 所有派生结果进入 compile context。
-- 所有调整输出 diagnostics。
-
-compile state 值层约束：
-
-| 字段 | 含义 | 谁可以写 |
+| 角色 | 主导方 | 说明 |
 | --- | --- | --- |
-| `controlledValues` | 用户/LLM 直控输入层，表示原始 intent 在通过 profile 过滤、保护性归一化和强度处理后的可控轴值 | `AxisResolver`、`IntensityStage` |
-| `derivedValues` | 引擎派生层，表示 coupling、speech pose、expression、continuity 等 stage 追加出来的派生轴值 | 派生型 stage |
-| `allAxisValues` | 最终编译输入层，表示进入 mode/timing/plan build 的最终轴值全集 | 负责汇总的 stage |
+| `primary` | LLM intent | 当前动作的主要语义表达 |
+| `hint` | LLM intent | 可选提示，不保证完整 |
+| `derived` | Engine stage | coupling / speech pose / expression / continuity 等派生 |
+| `runtime` | Avatar runtime | lip sync、blink、物理响应等运行时写参 |
+| `ambient` | Ambient runtime | 待机、呼吸、空闲动作 |
+| `debug` | 工具/诊断 | 不进入主播放链路 |
 
-约束规则：
+规则：
 
-- `controlledValues` 不允许被派生型 stage 回写。
-- `SpeechPoseStage`、`ExpressionStage`、`ContinuityStage` 这类增强 stage 默认只产生派生值。
-- `allAxisValues` 是最终消费层，不是原始输入层。
-- 后续新增 stage 时，必须先明确自己写的是 `controlledValues`、`derivedValues` 还是 `allAxisValues`。
-- 如果一个 stage 不是“解释用户原始输入”，就不应该改写 `controlledValues`。
+- LLM 不直接写 `derived/runtime/ambient/debug`。
+- Engine 可以生成 `derived`。
+- Avatar runtime 可以写 `runtime/ambient`，但需要和当前 plan 的优先级协调。
+- 所有非直控输入产生的修改都需要进入 diagnostics 或 warnings。
 
-### 5.5 ExtensionRegistry
+## 7. Diagnostics
 
-ExtensionRegistry 是当前 compile stage 的静态注册入口。
+`CompileDiagnostics` 是动作编译调试入口。
 
-它负责把 compiler stages 收口为可注册、可排序、可开关的装配结构，不负责动态加载、不读取外部插件配置、不改变动作协议。
+当前关键字段：
+
+| 字段 | 含义 |
+| --- | --- |
+| `primaryAxes` | 当前 profile 中可由 LLM 主控的轴 |
+| `hintAxes` | 当前 profile 中可由 LLM 提示控制的轴 |
+| `availableDerivedAxes` | 当前 profile 静态定义的 derived 轴 |
+| `appliedDerivedAxes` | 本次编译实际由 stage 写入的 derived 轴 |
+| `derivedAxes` | 当前实际应用的 derived 轴，语义等同于 `appliedDerivedAxes` |
+| `runtimeAxes` | 当前 profile 中 runtime/ambient/debug 轴 |
+| `missingAxes` | 未提供的 primary 轴 |
+| `forbiddenAxes` | LLM 尝试写入但角色不允许的轴 |
+| `invalidAxes` | 未知或非法值的轴 |
+| `compiledParameters` | 本次 plan 生成的参数 ID |
+| `intensityApplied` | 本次 expressive 动作是否实际应用强度缩放 |
+
+## 8. 静态 Stage Registry
+
+`compiler/registry.ts` 是当前 compile stage 的唯一装配入口。
+
+注册项：
 
 ```ts
 interface ModelEngineCompileStageRegistration {
@@ -311,277 +178,140 @@ interface ModelEngineCompileStageRegistration {
 }
 ```
 
-当前 registry 提供：
+当前注册的 core stages：
 
 ```text
-resolveCompileStages(context)
-listCompileStageRegistrations()
+intentValidator  order 10
+axisResolver     order 20
+intensity        order 30
+coupling         order 40
+modeResolver     order 50
+timing           order 60
+planBuilder      order 70
 ```
 
-当前 core stages：
+registry 规则：
 
-```text
-intentValidator
-axisResolver
-intensity
-coupling
-modeResolver
-timing
-planBuilder
-```
+- `compileMotionIntent()` 只调用 `resolveCompileStages(context)`，不直接 import 各 stage。
+- `pipeline.ts` 只负责按顺序执行 stage 和失败短路。
+- `MotionCompileStage` 不携带 registry metadata。
+- extension stage 通过 `kind: "extension"` 和独立 `order` 接入。
+- `enabled(context)` 是静态开关入口，当前 core stage 始终启用。
+- 不做动态插件加载，不读取外部插件配置，不新增协议字段。
 
-可选 stages：
+## 9. 扩展 Stage 规则
 
-```text
-speechPose
-expressionFromDialogue
-continuity
-lipSync
-```
+新增 stage 必须满足：
 
-## 6. 关键能力模块
+1. 通过 `compiler/registry.ts` 注册。
+2. 明确 `id`、`kind`、`order` 和 `enabled(context)`。
+3. 文件顶部声明 Reads / Writes / Does not own。
+4. 不播放动作，不访问 WebSocket，不直接写 UI 状态。
+5. 默认写入 `derivedValues` 或专属派生结果，不覆盖 `controlledValues`。
+6. 输出 diagnostics 或 warnings，让调试者知道能力是否应用。
+7. 不改变 `compileMotionIntent()` 对外接口。
 
-### 6.1 AxisResolver
+当前扩展顺序：
 
-职责：
+| 能力 | 入口 | 边界 |
+| --- | --- | --- |
+| `SpeechPoseStage` | compile registry extension | plan 级轻量说话姿态，不做逐帧口型 |
+| `ExpressionStage` | compile registry extension | 根据 emotion、语义轴和表达式参考生成表情倾向，不直接写 Live2D 原始参数 |
+| `ContinuityStage` | compile registry extension 或 runtime start 前置优化 | 根据上一段 plan 和当前播放上下文做 soft handoff |
+| `LipSyncStage` | avatar runtime / audio runtime 协同 | 处理 RMS、phoneme、viseme 与参数计划的优先级 |
 
-- 根据 `SemanticAxisProfile.axes` 判断哪些轴允许 LLM 控制。
-- `primary` / `hint` 可以从 intent 进入。
-- `derived` / `runtime` / `ambient` / `debug` 不由 LLM 直接写入。
-- 对原始轴值做第一轮保护性归一化，包括有限数校验和按轴范围 clamp。
+## 10. SpeechPoseStage
 
-### 6.2 IntensityStage
+`SpeechPoseStage` 是当前最适合作为第一个 extension 的能力。
 
-职责：
+目标：
 
-- 应用整体动作强度。
-- 应用单轴强度。
-- 处理 expressive / idle 模式差异。
-- 从 profile axes 派生可调轴列表。
-- 对强度缩放后的结果做第二轮范围保护，避免缩放后越界。
-
-### 6.3 CouplingStage
-
-职责：
-
-- 根据 profile couplings 做语义轴联动。
-- 只做当前动作的参数补偿。
-- 输出触发、clamp、跳过原因。
-
-目标文件：
-
-```text
-model-engine/stages/couplingStage.ts
-```
-
-### 6.4 SpeechPoseStage
-
-职责：
-
-- 让说话时人物不只动嘴和头。
-- 根据音频时长、turn 状态、动作 mode，为头部和身体提供轻量说话姿态。
-
-第一阶段范围：
-
+- 让说话时人物拥有轻量的头部、身体或肩部姿态。
 - 只做 plan 级增强。
-- 不做音频 RMS。
-- 不做 phoneme / viseme。
-- 不做逐帧口型。
+- 不做音频 RMS、phoneme、viseme 或逐帧口型。
+- 不直接写 Live2D 原始参数。
+- 不修改 `controlledValues`。
 
-输入：
+接入位置：
 
 ```text
-messageId
-turnId
-playbackTurnId
-targetDurationMs
-payloadKind
-mode
+CouplingStage
+-> SpeechPoseStage
+-> ModeResolverStage
 ```
 
-### 6.5 ExpressionStage
+建议注册：
 
-职责：
+```text
+id: "speechPose"
+kind: "extension"
+order: 45
+```
 
-- 根据用户对话、assistant 回复、emotion_label、semantic axes 判断面部表情倾向。
-- 输出表情相关 semantic axis 或 expression hint。
+详细规则维护在 [SpeechPoseStage 设计](./04-SpeechPoseStage设计.md)。
+
+## 11. ExpressionStage
+
+`ExpressionStage` 负责把对话、emotion label、语义轴和表达式参考转为表情倾向。
 
 边界：
 
 - 不放进 Adapter。
-- 不让 LLM 直接控制 Live2D 参数。
-- 作为 ModelEngine 可选 compile stage。
+- 不让 LLM 直接控制 Live2D 原始参数。
+- 作为 ModelEngine compile extension 挂载。
+- 输出语义轴或 expression hint，而不是写 `exp3.json` 参数。
 
-初期输入：
+表达式参考规则：
 
-- `emotion_label`
-- 当前 semantic axes
-- 最近 assistant text / user text 的轻量上下文
-- 当前模型提供的表情冷启动示例库
+- 后端动作 selector prompt 提供表情关键词参考动作和 few-shot 示例。
+- 表情关键词参考动作包含关键词组、心情态度、动作表现和参考轴值。
+- 参考轴值是 0-100 语义轴空间中的动作草图，不是硬约束。
+- 轴的真实含义以当前 `SemanticAxisProfile` 的用户可编辑说明为准。
+- few-shot 来源顺序为 `user -> model_native -> default`。
+- 表达式参考不写入 `motion_tuning_samples`，也不改变动作协议。
 
-表情冷启动示例规则：
+## 12. ContinuityStage
 
-- 示例来源分层为 `user` -> `model_native` -> `default`。
-- 优先使用用户确认过的动作/表情样本。
-- 当用户样本为空，或核心类别覆盖不足时，按缺失类别补入模型冷启动示例。
-- 补齐是补缺，不覆盖已有用户样本。
-- 最小可用覆盖优先保证 `neutral`、`happy`、`angry`、`surprised` 和一个补充情绪类。
-- Action Lab 显示的 few-shot 有效示例预览应直接反映后端当前实际解析结果，而不是前端独立重算的平行结果。
+`ContinuityStage` 负责减少连续多段回复之间的动作跳变。
 
-LLM prompt 表情参考：
+边界：
 
-- 后端动作 selector prompt 先提供表情关键词参考动作，再提供 few-shot 示例。
-- 表情关键词参考动作由关键词组、心情态度、实际动作表现和参考轴值组成。
-- 参考轴值是 0-100 语义轴空间里的动作草图，用于帮助 LLM 理解动作倾向，不是硬约束，也不是需要计算的差值。
-- 轴的真实含义以当前 `SemanticAxisProfile` 的用户可编辑说明为准；如果参考动作包含当前不可控制的轴，LLM 应忽略该轴。
-- few-shot 示例仍按 `user` -> `model_native` -> `default` 补齐顺序选择。
-- 表情关键词参考动作不写入 `motion_tuning_samples`，也不改变动作协议。
+- 读取上一段 plan、当前 plan 和播放上下文。
+- 输出 soft handoff 策略、派生轴补偿或 diagnostics。
+- 不改变 Adapter 协议。
+- 不让 ModelEngine 成为播放事实源。
 
-表情冷启动示例的抽象规则：
-
-- 先从模型原生 expression 扫描结果抽取候选信息。
-- 再映射到 `SemanticAxisProfile` 认可的 semantic axes。
-- 只进入 `primary` 和可接受的 `hint` 轴。
-- `derived`、`runtime`、`ambient`、`debug` 不作为示例主输入。
-- `mouth_open` 这类 runtime-owned 轴不作为静态表情示例主控制项。
-
-### 6.6 ContinuityStage
-
-职责：
-
-- 解决连续多段回复之间动作跳变。
-- 根据上一段 plan、当前 plan、音频剩余时间做 soft handoff 优化。
-- 输出 handoff 策略和 diagnostics。
-
-### 6.7 LipSyncStage
-
-职责：
-
-- 把口型从静态 plan 中拆出，交给实时口型层。
-
-执行顺序：
-
-```text
-compile pipeline / speech pose / continuity
--> lip sync runtime
-```
-
-## 7. 参数所有权
-
-长期所有权按 axis role 划分：
-
-| 角色 | 谁主导 | 说明 |
-| --- | --- | --- |
-| `primary` | LLM intent | 当前动作的主要语义表达 |
-| `hint` | LLM intent | 可选提示，不保证完整 |
-| `derived` | Engine stage | coupling / speech pose / expression 等派生 |
-| `runtime` | Avatar runtime | blink、lip sync、物理响应等运行时写参 |
-| `ambient` | Ambient runtime | 待机、呼吸、空闲动作 |
-| `debug` | 工具/诊断 | 不进入主播放链路 |
-
-原则：
-
-- LLM 不直接写 `derived/runtime/ambient/debug`。
-- Engine 可以生成 `derived`。
-- Avatar runtime 可以写 `runtime/ambient`，但需要和当前 plan 有优先级协调。
-- 所有非原始 intent 的修改都要有 diagnostics。
-
-compile state 和参数所有权的对应关系：
-
-- `controlledValues` 对应当前动作里由 LLM / 用户直控进入的 `primary`、`hint` 层。
-- `derivedValues` 对应当前动作里由引擎内部模块补出来的 `derived` 层。
-- `allAxisValues` 是 parameter plan 编译前的最终汇总视图，不单独代表新的所有权层。
-
-compile diagnostics 中 derived 轴字段的语义：
-
-- `availableDerivedAxes` 表示当前 profile 静态定义的 `derived` 轴。
-- `appliedDerivedAxes` 表示本次编译实际由 stage 写入的 `derived` 轴。
-- `derivedAxes` 保留为当前实际应用的 derived 轴列表，语义等同于 `appliedDerivedAxes`。
-
-## 8. 和外部模块的边界
+## 13. 外部边界
 
 ### Adapter
 
-Adapter 负责：
+Adapter 负责协议收发、信封校验、入站事件分发和出站消息构建。
 
-- 收协议。
-- 校验 envelope。
-- 归一化 payload。
-- 把 motion payload 交给 Turn Playback / ModelEngine。
-
-Adapter 不负责：
-
-- 选择动作效果。
-- 编译 semantic axis。
-- 判断表情。
+Adapter 不负责编译动作计划，不判断动作语义。
 
 ### Turn Playback
 
-Turn Playback 负责：
+Turn Playback 负责把文本、音频和动作挂到同一 segment，并决定何时 release 给 ModelEngine。
 
-- 文本、音频、动作挂到同一 segment。
-- 决定什么时候释放 motion payload 给 ModelEngine。
-
-Turn Playback 不负责：
-
-- 编译动作计划。
-- 优化动作参数。
+Turn Playback 不编译动作参数。
 
 ### Action Lab / 调参工具
 
-工具层负责：
+Action Lab 展示动作库、semantic profile、couplings、expression examples 和 diagnostics，并发起 preview。
 
-- 展示动作库、semantic profile、couplings、diagnostics。
-- 发起 preview。
-- 辅助调参。
-
-工具层不负责：
-
-- 绕开 ModelEngine 直接变更主运行时事实。
+Action Lab 不绕开 ModelEngine 改主运行时事实。
 
 ### Avatar Runtime
 
-Avatar Runtime 负责：
+Avatar Runtime 执行 parameter plan、Live2D 写参、物理响应、ambient 和 idle。
 
-- 执行 parameter plan。
-- Live2D 参数写入。
-- Cubism physics。
-- ambient / idle。
+Avatar Runtime 不理解语义轴，也不判断表情语义。
 
-Avatar Runtime 不负责：
-
-- 理解语义轴。
-- 判断表情语义。
-- 连接后端。
-
-## 9. 扩展路线
-
-当前 ModelEngine 的结构入口已经稳定：payload boundary、compile pipeline、static registry、runtime scheduler、motion start 和 facade 各自有明确职责。
-
-后续增强能力按以下顺序接入：
-
-| 能力 | 入口 | 当前边界 |
-|---|---|---|
-| SpeechPoseStage | compile registry extension | 只做 plan 级轻量说话姿态，不做逐帧口型 |
-| ExpressionStage | compile registry extension | 根据 emotion、语义轴和表达式参考生成表情倾向，不直接写 Live2D 原始参数 |
-| ContinuityStage | compile registry extension 或 runtime start 前置优化 | 根据上一段计划和当前播放上下文做 soft handoff |
-| LipSyncStage | avatar runtime / audio runtime 协同 | 处理 RMS、phoneme、viseme 与参数计划的优先级 |
-
-新增 stage 必须满足：
-
-1. 通过静态 registry 挂载。
-2. 明确 `id`、`kind`、`order` 和 `enabled(context)`。
-3. 文件顶部声明读取字段、写入字段和不负责的边界。
-4. 默认写入 `derivedValues` 或专属派生结果，不覆盖 `controlledValues`。
-5. diagnostics 明确区分可用能力和本次实际应用能力。
-
-## 10. 设计原则
+## 14. 维护原则
 
 - 当前只支持 v2 主路径。
-- 废弃入口回退分支不进入工作文档主叙述。
-- 模块先按职责拆，不先追求复杂插件系统。
-- 扩展通过 stage / registry 挂载。
-- 每个 stage 都要有明确输入、输出、diagnostics。
-- 不让 Adapter、Turn Playback、Avatar Runtime 承担引擎语义。
-- 先做 plan 级增强，再做逐帧 runtime 增强。
+- 废弃协议回退分支不进入主代码和主文档。
+- 模块按职责维护，扩展通过 stage / registry 挂载。
+- plan 级增强先于逐帧 runtime 增强。
 - 默认参数保守，先保证自然，再追求表现力。
+- 文档只写当前事实和当前有效设计，不保留历史迁移叙述。

@@ -2,11 +2,11 @@
 
 ## 1. 目标
 
-`SpeechPoseStage` 是 ModelEngine 第二轮增强 stage 的第一步。
+`SpeechPoseStage` 是 ModelEngine 当前扩展路线中的第一个增强 stage。
 
 目标是让角色在说话时拥有轻量的头部和身体姿态变化，避免动作只停留在嘴部、眼神或单一表情上。
 
-第一版只做 plan 级增强：
+当前设计只做 plan 级增强：
 
 - 不做逐帧口型。
 - 不做音频 RMS / phoneme / viseme。
@@ -16,7 +16,7 @@
 
 ## 2. 放置位置
 
-新增文件：
+目标文件：
 
 ```text
 frontend/src/model-engine/compiler/stages/speechPoseStage.ts
@@ -77,9 +77,9 @@ id: "speechPose"
 - 不构建 parameter plan
 - 不访问 runtime、WebSocket、播放器或 UI
 
-## 4. 第一版规则
+## 4. 当前规则
 
-第一版使用保守规则，不引入复杂配置。
+当前规则保持保守，不引入复杂配置。
 
 触发条件：
 
@@ -97,7 +97,7 @@ id: "speechPose"
 输出原则：
 
 - 如果用户或 LLM 已经直接控制了相同语义方向的轴，不覆盖它
-- 如果 coupling 已经写入同一个 derived 轴，第一版不覆盖 coupling
+- 如果 coupling 已经写入同一个 derived 轴，当前 stage 不覆盖 coupling
 - 输出值围绕 neutral 做轻量偏移
 - 输出后必须按 axis value range clamp
 
@@ -135,7 +135,7 @@ function resolveSpeechPoseOffset(
 
 ## 6. Diagnostics
 
-第一版不新增 `CompileDiagnostics` 顶层字段，先复用现有 diagnostics：
+当前设计不新增 `CompileDiagnostics` 顶层字段，先复用现有 diagnostics：
 
 - `appliedDerivedAxes`
 - `derivedAxes`
