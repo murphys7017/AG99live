@@ -2,10 +2,10 @@ import { onScopeDispose, reactive, readonly } from "vue";
 import type {
   ModelSummary,
   SemanticParameterPlan,
-} from "../types/protocol";
-import { SCHEMA_PARAMETER_PLAN_V2 } from "../types/protocol";
-import { isFiniteNumber, isObject, normalizeText } from "../utils/guards";
-import { parseSemanticParameterPlan } from "../model-engine/planParser";
+} from "../types/protocol.js";
+import { SCHEMA_PARAMETER_PLAN_V2 } from "../types/protocol.js";
+import { isFiniteNumber, isObject, normalizeText } from "../utils/guards.js";
+import { parseSemanticParameterPlan } from "../model-engine/planParser.js";
 
 type PreviewPlayerStatus = "idle" | "playing" | "finished" | "failed";
 
@@ -220,6 +220,7 @@ export function usePreviewMotionPlayer() {
           elapsedSinceLastStartMs,
         );
         state.message = `复用当前参数计划（mode=${playbackPlan.plan.mode}, emotion=${playbackPlan.plan.emotion_label}）...`;
+        options.onStarted?.(playbackPlan.plan);
         return true;
       }
     }

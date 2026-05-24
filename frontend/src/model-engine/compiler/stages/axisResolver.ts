@@ -66,7 +66,10 @@ export function runAxisResolver(
   context.state.invalidAxes = resolvedAxes.invalidAxes;
   context.state.axisErrorCount = axisErrorCount;
   context.state.axisErrorLimit = maxAxisErrors;
-  context.state.warnings = [...resolvedAxes.warnings];
+  context.state.warnings = [
+    ...context.state.warnings,
+    ...resolvedAxes.warnings,
+  ];
 
   if (axisErrorCount > maxAxisErrors) {
     return {

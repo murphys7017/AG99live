@@ -239,6 +239,20 @@ export function matchesPinnedProfileScope(
   );
 }
 
+export function matchesProfileIdentityScope(
+  sample: Pick<DesktopMotionTuningSample, "profileId">,
+  profile: Pick<SemanticAxisProfile, "profile_id"> | null | undefined,
+): boolean {
+  if (!profile) {
+    return false;
+  }
+  return (
+    typeof sample.profileId === "string"
+    && sample.profileId.trim().length > 0
+    && sample.profileId === profile.profile_id
+  );
+}
+
 export interface DesktopSemanticAxisProfileSaveResult {
   requestId: string;
   ok: boolean;

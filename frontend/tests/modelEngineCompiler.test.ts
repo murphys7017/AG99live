@@ -335,6 +335,29 @@ function testAxisIntensityScaleAffectsOnlyTargetAxis(): void {
   assert.equal(scaled.diagnostics.intensityApplied, true);
 }
 
+function testRevisionMismatchBecomesWarningInsteadOfCompileFailure(): void {
+  const profile = buildProfile();
+  const result = compileMotionIntent(buildIntent({
+    profile_revision: profile.revision + 2,
+  }), {
+    model: buildModel(profile),
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(result.plan);
+  assert.equal(result.plan?.profile_revision, profile.revision);
+  assert.equal(
+    result.diagnostics.warnings?.includes(
+      `semantic_profile_revision_mismatch:${profile.revision + 2}:${profile.revision}`,
+    ),
+    true,
+  );
+}
+
 function testRegistryCoreStageOrder(): void {
   const registrations = listCompileStageRegistrations();
   const coreStages = registrations.filter((r) => r.kind === "core");
@@ -370,6 +393,7 @@ function run(): void {
   testRegistryCoreStageOrder();
   testExplicitPrimaryAxisIsNotOverwrittenByCoupling();
   testAxisIntensityScaleAffectsOnlyTargetAxis();
+  testRevisionMismatchBecomesWarningInsteadOfCompileFailure();
   console.log("modelEngineCompiler tests passed");
 }
 

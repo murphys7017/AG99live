@@ -152,19 +152,23 @@ motion 的角色是帮助判断这个模型真实依赖哪些参数形成动作�
 
 | 类型 | 含义 | 典型轴 |
 | --- | --- | --- |
-| 动作主轴 | 构成姿态和动作骨架，决定角色整体动作轮廓和情绪强弱 | `head_yaw`、`head_pitch`、`head_roll`、`body_yaw`、`body_roll`、`eye_open_left`、`eye_open_right` |
-| 表情辅轴 | 在动作骨架上补充面部表情、态度和细节质感 | `mouth_smile`、`brow_bias`、`gaze_x`、`gaze_y` |
+| 动作主轴 | 构成姿态和动作骨架，决定角色整体动作轮廓和情绪强弱 | `head_yaw`、`head_pitch`、`head_roll`、`body_yaw`、`body_roll`、`body_pitch`、`eye_open_left`、`eye_open_right`、`eye_smile_left`、`eye_smile_right`、`gaze_x`、`gaze_y` |
+| 表情辅轴 | 在动作骨架上补充面部表情、态度和细节质感 | `mouth_smile`、`mouth_x`、`brow_bias`、`brow_left_detail`、`brow_right_detail` |
 | 运行时轴 | 由音频、口型、呼吸或运行时持续驱动 | `mouth_open`、`breath` |
-| 派生/候选轴 | 由引擎根据主轴、说话状态或后续 stage 推导 | `body_pitch`、`body_lift`、`body_depth` 等候选 |
+| 暂缓候选轴 | 先作为 motion 观察材料，不进入第一版主控 | `body_lift`、`body_depth`、`PhyBodyPositionY` 等候选 |
 
 当前判断：
 
 - 头部三轴是 Mk6 motion 中最稳定、最强的动作骨架。
 - 身体扭转、倾斜和摇晃应进入动作主轴体系，用于表达情绪强弱、前倾压迫、后缩惊讶、疲惫下垂等整体姿态。
+- 第一版用 `body_pitch` 承接身体前倾、后缩、下沉和挺起，优先验证 `BodyAngleY`，不同时暴露多个 `PhyBody*Y` 参数。
 - 眼睛开闭是动作主轴的一部分，尤其影响惊讶、疲惫、害羞、眨眼等动作是否成立。
+- 眼睛笑意和视线方向第一版也归入动作主轴，用来表达眯眼、笑眼、观察、躲闪和注意力转移。
 - 嘴巴开闭属于重要动作轴，但说话场景下主要由 runtime/lip sync 管理，避免和音频口型冲突。
-- 嘴角笑意、眉毛和视线偏移主要承担表情态度微调，不应和头身姿态同等主导动作骨架。
+- 嘴角笑意和眉毛主要承担表情态度微调，不应和头身姿态同等主导动作骨架。
 - `Anim*`、`Exp*`、`Phy*` 参数只作为 motion 分析材料，不直接进入 LLM 主控轴。
+
+第一版名单维护在 [Motion 主轴/辅轴候选评估表](./06-Motion主轴辅轴候选评估.md)。
 
 ## 7. Diagnostics
 
@@ -300,9 +304,10 @@ Live2D `Motions/*.motion3.json` 是当前选择动作主轴的重要参考来源
 
 - `ParamAngleX/Y/Z` 是最可靠的头部动作主干。
 - `ParamBodyAngleX/Z` 是身体扭转和摇晃的重要依据。
-- `BodyAngleY`、`PhyBodyPositionY`、`PhyBodyUpperY` 等参数提示后续可能需要身体上下/前后感候选轴。
-- `ParamEyeLOpen`、`ParamEyeROpen` 对动作成立有明确贡献，应归入动作主轴体系。
-- `ParamMouthForm`、`ParamBrowForm`、眼球偏移更适合作为表情和态度辅轴。
+- `BodyAngleY` 是第一版 `body_pitch` 的优先验证参数；`PhyBodyPositionY`、`PhyBodyUpperY` 等暂作为观察材料。
+- `ParamEyeLOpen`、`ParamEyeROpen`、`ParamEyeLSmile`、`ParamEyeRSmile` 对眼部动作成立有明确贡献，应归入动作主轴体系。
+- `ParamEyeBallX/Y` 第一版作为注意力方向主轴，后续可根据生成效果再调整。
+- `ParamMouthForm`、`ParamMouthX`、眉毛细节参数更适合作为表情和态度辅轴。
 
 ## 13. ContinuityStage
 

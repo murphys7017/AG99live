@@ -27,6 +27,7 @@ docs/
     03-协议ID契约维护规则.md             # 协议 ID 契约与维护规则
     04-SpeechPoseStage设计.md            # SpeechPoseStage 设计
     05-前端结构维护清单.md               # 前端结构维护清单
+    06-Motion主轴辅轴候选评估.md         # Motion 主轴/辅轴候选评估
 
   03-运行时与运维/                       # 运行时与运维
     01-AI运行协议.md                     # AI 运行协议

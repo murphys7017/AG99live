@@ -38,6 +38,12 @@ export function runIntentValidator(
   context.state.axisById = new Map(
     resolvedProfile.axes.map((axis) => [axis.id, axis]),
   );
+  if (resolvedProfile.revision !== context.intent.profile_revision) {
+    context.state.warnings = [
+      ...context.state.warnings,
+      `semantic_profile_revision_mismatch:${context.intent.profile_revision}:${resolvedProfile.revision}`,
+    ];
+  }
 
   return { ok: true };
 }
@@ -54,9 +60,6 @@ function validateProfileForIntent(
   }
   if (profile.model_id !== intent.model_id) {
     return `semantic_profile_model_mismatch:${intent.model_id}`;
-  }
-  if (profile.revision !== intent.profile_revision) {
-    return `semantic_profile_revision_mismatch:${intent.profile_revision}:${profile.revision}`;
   }
   if (!intent.emotion_label.trim()) {
     return "emotion_label_empty";

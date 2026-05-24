@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { cloneJson } from "../utils/cloneJson";
 import { roundTo } from "../utils/number";
 import {
-  matchesPinnedProfileScope,
+  matchesProfileIdentityScope,
 } from "../types/desktop";
 import type {
   DesktopMotionTuningEffectiveExample,
@@ -111,7 +111,7 @@ const recentSemanticRecords = computed(() =>
       record.plan.schema_version === SCHEMA_PARAMETER_PLAN_V2,
       )
       .filter((record) => record.plan.model_id === currentProfile.model_id)
-      .filter((record) => record.plan.profile_revision === currentProfile.revision)
+      .filter((record) => record.plan.profile_id === currentProfile.profile_id)
       .slice(0, RECENT_RECORD_LIMIT);
   },
 );
@@ -449,7 +449,7 @@ function matchesCurrentProfileSample(
   sample: MotionTuningSampleSnapshot,
   currentProfile: SemanticAxisProfile | null,
 ): boolean {
-  return matchesPinnedProfileScope(sample, currentProfile);
+  return matchesProfileIdentityScope(sample, currentProfile);
 }
 
 function normalizeDraftAxes(currentProfile: SemanticAxisProfile): Record<string, number> {
