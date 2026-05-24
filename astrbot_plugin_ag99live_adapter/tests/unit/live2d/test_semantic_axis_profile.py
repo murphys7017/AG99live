@@ -283,7 +283,7 @@ def test_ensure_semantic_axis_profile_migrates_old_generated_default_design(tmp_
     assert "eye_smile_right" in axes
 
 
-def test_ensure_semantic_axis_profile_marks_user_modified_old_default_design_stale(tmp_path) -> None:
+def test_ensure_semantic_axis_profile_refreshes_stale_user_modified_old_default_design(tmp_path) -> None:
     model_dir = tmp_path / "DemoModel"
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
@@ -321,11 +321,16 @@ def test_ensure_semantic_axis_profile_marks_user_modified_old_default_design_sta
     assert "body_pitch" not in axes
     assert axes["mouth_smile"]["control_role"] == "primary"
 
-    unchanged_stale_profile = ensure_semantic_axis_profile(
+    refreshed_profile = ensure_semantic_axis_profile(
         model_dir=model_dir,
         model_payload=model_payload,
     )
-    assert unchanged_stale_profile == stale_profile
+    refreshed_axes = {axis["id"]: axis for axis in refreshed_profile["axes"]}
+    assert refreshed_profile["revision"] == stale_profile["revision"] + 1
+    assert refreshed_profile["status"] == "generated"
+    assert refreshed_profile["user_modified"] is False
+    assert "body_pitch" in refreshed_axes
+    assert refreshed_axes["mouth_smile"]["control_role"] == "hint"
 
 
 def test_default_semantic_axis_profile_uses_single_preferred_binding_per_axis(tmp_path) -> None:

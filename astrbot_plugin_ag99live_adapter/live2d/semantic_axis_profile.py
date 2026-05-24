@@ -896,6 +896,16 @@ def ensure_semantic_axis_profile(
                 expected_profile=expected_profile,
             ):
                 if current_profile["user_modified"]:
+                    if (
+                        current_profile["status"] == "stale"
+                        and str(current_profile["last_scanned_hash"]).strip() == current_source_hash
+                    ):
+                        migrated_profile = _migrate_generated_profile_to_default_design(
+                            current_profile=current_profile,
+                            expected_profile=expected_profile,
+                        )
+                        _write_profile(path, migrated_profile)
+                        return migrated_profile
                     return _mark_profile_stale_if_needed(
                         path=path,
                         current_profile=current_profile,
