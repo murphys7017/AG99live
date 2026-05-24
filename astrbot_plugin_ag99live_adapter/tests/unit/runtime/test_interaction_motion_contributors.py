@@ -139,7 +139,7 @@ def _build_semantic_model_info() -> dict:
     }
 
 
-def _build_runtime_state(*, mode: str = "inline_first"):
+def _build_runtime_state(*, mode: str = "split_after_reply"):
     return type(
         "RuntimeStateStub",
         (),
@@ -153,7 +153,7 @@ def _build_runtime_state(*, mode: str = "inline_first"):
     )()
 
 
-def _build_event(*, mode: str = "inline_first", raw_turn_id: str = "front-turn"):
+def _build_event(*, mode: str = "split_after_reply", raw_turn_id: str = "front-turn"):
     scheduled_calls: list[dict[str, object]] = []
     runtime_state = _build_runtime_state(mode=mode)
 
@@ -253,7 +253,7 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     module = _load_interaction_motion_module()
 
     contributor = module.AG99liveMotionPromptContributor()
-    event, _scheduled_calls = _build_event(mode="inline_first")
+    event, _scheduled_calls = _build_event()
     view = _build_view(phase="decision", route_mode="delegate_to_core")
 
     extensions = asyncio.run(contributor.collect(event, None, view))
@@ -262,7 +262,7 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert len(extensions) == 2
     capability = next(item for item in extensions if item.mount == "capability")
     runtime = next(item for item in extensions if item.mount == "context")
-    assert capability.value["configured_generation_mode"] == "inline_first"
+    assert capability.value["configured_generation_mode"] == "split_after_reply"
     assert capability.value["semantic_profile"]["profile_id"] == "pet.semantic.v1"
     prompt_axis_ids = [
         item["id"] for item in capability.value["semantic_profile"]["prompt_axes"]
@@ -272,7 +272,7 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
         capability.value["plugin_hints_format"]["ag99live_motion"]["axes"]["head_yaw"]["value"]
         == 50
     )
-    assert runtime.value["configured_generation_mode"] == "inline_first"
+    assert runtime.value["configured_generation_mode"] == "split_after_reply"
 
 
 def test_plugin_hints_motion_payload_uses_profile_axis_value_range(
@@ -282,7 +282,7 @@ def test_plugin_hints_motion_payload_uses_profile_axis_value_range(
     _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
     module = _load_interaction_motion_module()
 
-    event, _scheduled_calls = _build_event(mode="inline_first")
+    event, _scheduled_calls = _build_event()
     runtime_state = event.adapter.turn_coordinator.runtime_state
     event.set_extra(
         "_interaction_plugin_hints",
@@ -317,7 +317,7 @@ def test_plugin_hints_expressive_payload_is_pushed_out_of_idle_deadzone(
     _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
     module = _load_interaction_motion_module()
 
-    event, _scheduled_calls = _build_event(mode="inline_first")
+    event, _scheduled_calls = _build_event()
     runtime_state = event.adapter.turn_coordinator.runtime_state
     event.set_extra(
         "_interaction_plugin_hints",
@@ -347,7 +347,7 @@ def test_result_contributor_returns_plugin_hint_motion_as_client_object(
     module = _load_interaction_motion_module()
 
     contributor = module.AG99liveMotionResultContributor()
-    event, scheduled_calls = _build_event(mode="inline_first", raw_turn_id="raw-turn")
+    event, scheduled_calls = _build_event(raw_turn_id="raw-turn")
     event.set_extra(
         "_interaction_plugin_hints",
         {
@@ -454,7 +454,7 @@ def test_result_contributor_skips_final_phase_in_inline_mode(
     assert scheduled_calls == []
     assert (
         contribution.metadata["ag99live_motion_schedule"]["reason"]
-        == "final_phase_managed_by_primary_reply_chain"
+        == "final_phase_managed_by_inline_compat"
     )
 
 
@@ -566,7 +566,7 @@ def test_result_contributor_skips_self_reply_in_inline_first_mode(
     assert scheduled_calls == []
     assert (
         contribution.metadata["ag99live_motion_schedule"]["reason"]
-        == "self_reply_managed_by_inline_contract"
+        == "self_reply_managed_by_inline_compat"
     )
 
 

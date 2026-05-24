@@ -74,16 +74,16 @@
     "default": 96
   },
   "motion_generation_mode": {
-    "description": "动作生成链路。inline_first：向主模型注入 `<@anim>` 契约并优先解析内联动作；split_after_reply：主模型只回复文本，动作优先由交互中间件的结构化结果（如 client_objects / plugin hints）提供。若 runtime 内部 fallback 组件被显式调用，其产物仍需回到同一条 `engine.motion_*` 协议链路与同一 segment identity。",
+    "description": "动作生成链路。split_after_reply：默认中间件主路径，主模型只回复文本，动作优先由交互中间件的结构化结果（如 client_objects / plugin hints）提供；inline_first：兼容路径，向主模型注入 `<@anim>` 契约并优先解析内联动作。若 runtime 内部 fallback 组件被显式调用，其产物仍需回到同一条 `engine.motion_*` 协议链路与同一 segment identity。",
     "type": "string",
-    "default": "inline_first",
+    "default": "split_after_reply",
     "options": [
       "split_after_reply",
       "inline_first"
     ]
   },
   "enable_inline_motion_contract": {
-    "description": "inline_first 模式下，是否把 `<@anim ...>` 输出契约注入主聊天请求，并优先从主回复中内联提取动作计划。",
+    "description": "兼容开关。仅在 motion_generation_mode=inline_first 时，是否把 `<@anim ...>` 输出契约注入主聊天请求，并优先从主回复中内联提取动作计划。",
     "type": "bool",
     "default": true
   },

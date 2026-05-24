@@ -600,7 +600,7 @@ def _resolve_immediate_phase_policy(
             return _MotionSchedulePolicy(
                 should_schedule=False,
                 source=None,
-                reason="self_reply_managed_by_inline_contract",
+                reason="self_reply_managed_by_inline_compat",
             )
         return _MotionSchedulePolicy(
             should_schedule=True,
@@ -642,13 +642,13 @@ def _resolve_final_phase_policy(
         return _MotionSchedulePolicy(
             should_schedule=False,
             source=None,
-            reason="final_phase_managed_by_primary_reply_chain",
+            reason="final_phase_managed_by_inline_compat",
         )
     if bool(_call_event_method(event, "get_extra", "ag99live_split_motion_scheduled", False)):
         return _MotionSchedulePolicy(
             should_schedule=False,
             source=None,
-            reason="already_scheduled_by_primary_reply_chain",
+            reason="already_scheduled_by_motion_pipeline",
         )
     return _MotionSchedulePolicy(
         should_schedule=True,

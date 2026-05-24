@@ -132,7 +132,7 @@ def _build_semantic_model_info() -> dict:
 
 def _runtime_state_stub(
     *,
-    mode: str = "inline_first",
+    mode: str = "split_after_reply",
     enable_inline_motion_contract: bool = True,
 ):
     return type(

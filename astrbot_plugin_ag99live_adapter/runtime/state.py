@@ -81,7 +81,7 @@ class RuntimeState:
         self.action_llm_filter_max_atoms_per_channel = 2
         self.action_llm_filter_chunk_max_channels = 8
         self.action_llm_filter_chunk_max_candidates = 96
-        self.motion_generation_mode = "inline_first"
+        self.motion_generation_mode = "split_after_reply"
         self.enable_inline_motion_contract = True
         self.realtime_motion_fewshot_enabled = True
         self.realtime_motion_fewshot_count = 4
@@ -210,7 +210,7 @@ class RuntimeState:
             _plugin_config_get(
                 self.plugin_config,
                 "motion_generation_mode",
-                "inline_first",
+                "split_after_reply",
             )
         )
         self.enable_inline_motion_contract = bool(

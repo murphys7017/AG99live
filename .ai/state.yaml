@@ -2,7 +2,7 @@ task:
   class: feature
   risk: medium
   phase: implemented
-  scope: Mk6 SemanticAxisProfile default design migration and old motion/profile wording cleanup
+  scope: Mk6 SemanticAxisProfile migration and AstrBot middleware-first motion prompt default
 context:
   confidence: medium
   assumptions:
@@ -13,6 +13,7 @@ context:
     - Existing generated semantic profiles should auto-migrate to the current default design even when model source hash is unchanged.
     - User-modified semantic profiles should not be overwritten during default-design migration; they are marked stale for manual review.
     - Legacy motion `key_axes` references in tests remain as rejection coverage, and `adaptive_parameter_profile.v1.key_axes` remains a scanner schema field outside this migration.
+    - AstrBot interaction middleware is the default motion prompt path; inline `<@anim>` prompt injection is retained only as an explicit compatibility mode.
   unresolved_questions:
     - Body pitch and brow detail axes still need real Mk6 visual preview before treating their default ranges as final.
 architecture:
@@ -24,15 +25,14 @@ architecture:
     - Frontend direct parameter axis typing/constants now include the expanded axis set.
     - Realtime motion prompt and default examples now prefer action skeleton axes before expression detail axes.
     - Runtime motion ingress/egress logs now report semantic `axis_count` instead of legacy `key_axes_count`.
+    - Default `motion_generation_mode` is `split_after_reply` / middleware-first; `inline_first` remains available as a compatibility path.
 verification:
   checks_run:
     - python -m compileall astrbot_plugin_ag99live_adapter
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\live2d\test_semantic_axis_profile.py -q
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_realtime_motion_plan.py -q
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py -q
-    - npm run typecheck:renderer (from frontend)
-    - npm run test:model-engine (from frontend)
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_runtime_state_provider_analysis.py -q
   checks_failed: []
-  validation_gap: No live Mk6 visual preview, real AstrBot websocket session, frontend node typecheck, or full frontend npm test suite was exercised in this pass.
+  validation_gap: No live Mk6 visual preview, real AstrBot websocket session, frontend checks, or full backend suite was exercised in this pass.
 runtime:
   mode: minimal_v1

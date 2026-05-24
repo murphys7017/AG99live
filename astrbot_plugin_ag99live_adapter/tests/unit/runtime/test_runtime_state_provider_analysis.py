@@ -636,6 +636,38 @@ def test_runtime_state_refresh_reads_motion_generation_mode(
     assert state.motion_generation_mode == "split_after_reply"
 
 
+def test_runtime_state_defaults_to_middleware_first_motion_generation(
+    monkeypatch,
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    runtime_state, _provider_cls = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+
+    seed_model_info = build_seed_model_info()
+    monkeypatch.setattr(
+        runtime_state,
+        "scan_live2d_models",
+        lambda **kwargs: deepcopy(seed_model_info),
+    )
+
+    state = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=None,
+        plugin_config={},
+        plugin_config_loader=lambda: {},
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=tmp_path / "live2ds",
+    )
+
+    state.refresh()
+
+    assert state.motion_generation_mode == "split_after_reply"
+
+
 def test_runtime_state_refresh_reads_motion_prompt_instruction(
     monkeypatch,
     install_fake_astrbot,

@@ -8,7 +8,7 @@ AG99live V2 的 AstrBot 插件侧实现。该目录负责协议桥接、turn 生
 - 发送 `output.* / control.* / system.* / engine.*` 消息回前端。
 - 管理 turn 生命周期，保证文本/语音/动作消息在同一轮次可追踪。
 - 扫描 Live2D 资源并产出结构化能力信息。
-- 生成并下发动作用载荷；默认优先走 `inline_first` 内联动作链路，也支持 `split_after_reply` 下由交互中间件 `client_objects` 提供动作。
+- 生成并下发动作用载荷；默认走 AstrBot 交互中间件主链路，由 `client_objects` / plugin hints 提供动作；`inline_first` 内联动作链路仅作为显式兼容路径保留。
 
 ## 目录结构
 
@@ -30,24 +30,24 @@ astrbot_plugin_ag99live_adapter/
 
 ## 动作链路
 
-### 默认主路径（inline_first）
-
-- Adapter 在请求主模型前注入 `<@anim {...}>` 输出契约。
-- 主回复末尾若包含合法 `<@anim {...}>`，则优先提取并广播动作载荷。
-- 当前 inline contract 使用 `engine.motion_intent.v2`，字段来自当前模型的 `semantic_axis_profile`。
-- 如果中间件在 result contributor 阶段返回 `client_objects` / plugin hints 动作载荷，则后端优先广播这些结构化动作对象。
-
-### 备选路径（split_after_reply）
+### 默认主路径（split_after_reply / middleware-first）
 
 - 主聊天模型只负责正常回复文本，不要求内联 `<@anim {...}>`。
 - 交互中间件在 prompt contributor 中注入动作能力/运行态上下文，在 result contributor 中返回 `client_objects` 或 plugin hints。
 - 后端从 `platform_extras` / `client_objects` 中读取动作载荷，并与文本、音频一起广播到前端。
 - 若 runtime 内部明确启用了额外 fallback 组件，它的结果也必须回到同一条 `engine.motion_*` 协议链路和同一 segment identity。
 
+### 兼容路径（inline_first）
+
+- Adapter 在请求主模型前注入 `<@anim {...}>` 输出契约。
+- 主回复末尾若包含合法 `<@anim {...}>`，则优先提取并广播动作载荷。
+- 当前 inline contract 使用 `engine.motion_intent.v2`，字段来自当前模型的 `semantic_axis_profile`。
+- 如果中间件在 result contributor 阶段返回 `client_objects` / plugin hints 动作载荷，则后端优先广播这些结构化动作对象。
+
 ### 动作 selector 输出
 
 - 当前主动作载荷为 `engine.motion_intent.v2`，前端 `ModelEngine` 根据 `semantic_axis_profile` 编译为 `engine.parameter_plan.v2` 再执行。
-- `motion_prompt_instruction` 会注入中间件动作上下文或 selector prompt，用于影响动作风格和幅度；在 `inline_first` 模式下也会注入 inline contract。
+- `motion_prompt_instruction` 会注入中间件动作上下文或 selector prompt，用于影响动作风格和幅度；只有显式启用 `inline_first` 时才会注入 inline contract。
 - 中间件 prompt 只暴露 profile 中的 `primary/hint` axes，禁止输出 `derived/runtime/ambient/debug` axes。
 
 ## 与前端协同的关键点
@@ -72,8 +72,8 @@ astrbot_plugin_ag99live_adapter/
 
 ## 关键配置（`_conf_schema.json`）
 
-- `motion_generation_mode`：动作生成链路，默认 `inline_first`；可选 `split_after_reply`。
-- `enable_inline_motion_contract`：`inline_first` 模式下是否启用主请求内联动作契约。
+- `motion_generation_mode`：动作生成链路，默认 `split_after_reply`（middleware-first）；可选 `inline_first` 兼容路径。
+- `enable_inline_motion_contract`：兼容开关，`inline_first` 模式下是否启用主请求内联动作契约。
 - `enable_realtime_motion_plan`：是否启用 runtime 内部的 realtime motion fallback 组件；如果该组件被明确调用，产物仍必须回到同一条 `engine.motion_*` 协议链路和同一 segment identity。
 - `motion_analysis_provider_id`：动作分析 / realtime motion selector 使用的 Provider。
 - `realtime_motion_timeout_seconds`：realtime 生成超时（秒）。
