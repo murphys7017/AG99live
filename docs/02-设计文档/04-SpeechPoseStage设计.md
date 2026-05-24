@@ -16,6 +16,12 @@
 - 不改变 LLM 原始 `controlledValues`。
 - 只通过 `derivedValues` 补充语义轴。
 
+当前待办定位：
+
+- `SpeechPoseStage` 仍然保留，负责“说话时随动”的 plan 级补偿。
+- 连续多段之间的 soft handoff、不硬切、残留和惯性，不再由独立 `ContinuityStage` 负责。
+- 这些连续性职责后续由 SDK 侧 `ParameterPresentationLayer` 统一承接。
+
 ## 2. 放置位置
 
 目标文件：
@@ -202,3 +208,23 @@ npm run test:model-engine
 - 不新增 runtime 依赖
 - 不新增 UI 控件
 - 不改变 `compileMotionIntent()` 对外接口
+
+## 9. 与连续表现层的关系
+
+`SpeechPoseStage` 和后续 `ParameterPresentationLayer` 的边界必须保持清楚：
+
+- `SpeechPoseStage`：
+  - 负责当前段说话姿态“应该往哪里偏一点”
+  - 只产出 plan 级 derived 轴
+  - 不维护逐帧状态
+
+- `ParameterPresentationLayer`：
+  - 负责这些姿态“怎样连续地表现出来”
+  - 维护逐帧状态、惯性、衰减、残留和层间混合
+  - 处理连续多段之间的 handoff
+
+因此当前顺序是：
+
+1. 先做 `SpeechPoseStage`
+2. 再做 `ParameterPresentationLayer`
+3. 不再单独推进独立 `ContinuityStage`

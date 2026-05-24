@@ -244,7 +244,7 @@ registry 规则：
 | 能力 | 入口 | 边界 |
 | --- | --- | --- |
 | `SpeechPoseStage` | compile registry extension | plan 级轻量说话姿态，不做逐帧口型 |
-| `ContinuityStage` | compile registry extension 或 runtime start 前置优化 | 根据上一段 plan 和当前播放上下文做 soft handoff |
+| `ParameterPresentationLayer` | Live2D Web SDK / avatar runtime 侧连续表现层 | 持续运行，负责惯性、衰减、残留、soft handoff、层间混合和逐帧输出 |
 | `LipSyncStage` | avatar runtime / audio runtime 协同 | 处理 RMS、phoneme、viseme 与参数计划的优先级 |
 
 ## 10. SpeechPoseStage
@@ -309,16 +309,35 @@ Live2D `Motions/*.motion3.json` 是当前选择动作主轴的重要参考来源
 - `ParamEyeBallX/Y` 第一版作为注意力方向主轴，后续可根据生成效果再调整。
 - `ParamMouthForm`、`ParamMouthX`、眉毛细节参数更适合作为表情和态度辅轴。
 
-## 13. ContinuityStage
+## 13. ParameterPresentationLayer
 
-`ContinuityStage` 负责减少连续多段回复之间的动作跳变。
+当前待办方向已从独立 `ContinuityStage` 调整为 SDK 侧的 `ParameterPresentationLayer`。
 
-边界：
+原因：
 
-- 读取上一段 plan、当前 plan 和播放上下文。
-- 输出 soft handoff 策略、派生轴补偿或 diagnostics。
-- 不改变 Adapter 协议。
-- 不让 ModelEngine 成为播放事实源。
+- 连续性不是 compile 结果本身，而是逐帧运行时事实。
+- soft handoff、惯性、衰减、残留和层间混合更适合由 Live2D Web SDK / avatar runtime 侧持续状态处理。
+- compile stage 只能看到单次 plan；持续表现层可以读取上一帧真实参数状态和当前运行态上下文。
+
+当前判断：
+
+- 不再把 `ContinuityStage` 作为独立主目标推进。
+- 连续性需求保留，但由 `ParameterPresentationLayer` 吸收。
+- ModelEngine compile 侧只保留必要的 hint 能力，例如目标时长、优先级、是否允许覆盖上一段残留等；这些 hint 不改变现有协议主结构。
+
+`ParameterPresentationLayer` 的目标边界：
+
+- 输入：`engine.parameter_plan.v2`、运行时说话状态、当前 active plan、上一帧表现状态。
+- 输出：交给 Live2D runtime 的逐帧连续参数值或增量值。
+- 负责：惯性、衰减、残留、soft handoff、idle/talk/action 层混合、必要的参数平滑。
+- 不负责：文本理解、动作选择、协议收发、compile pipeline 决策。
+
+当前待办顺序：
+
+1. 先完成 `SpeechPoseStage`，补齐说话时的 plan 级轻量姿态。
+2. 再实现 `ParameterPresentationLayer`，承接连续性和逐帧表现。
+3. 随后明确参数所有权与层间混合规则，收口 `plan / talk / runtime / ambient / physics` 的叠加边界。
+4. 最后补 diagnostics 和高价值时序测试。
 
 ## 14. 外部边界
 
@@ -352,6 +371,7 @@ Avatar Runtime 不理解语义轴，也不判断表情语义。
 - 废弃协议回退分支不进入主代码和主文档。
 - 模块按职责维护，扩展通过 stage / registry 挂载。
 - plan 级增强先于逐帧 runtime 增强。
+- 连续性主实现优先放在 `ParameterPresentationLayer`，而不是 compile 阶段做静态补丁。
 - 默认参数保守，先保证自然，再追求表现力。
 - 主轴选择优先服从 motion 观察到的真实动作骨架，不凭 expression 文件或名称猜测。
 - 文档只写当前事实和当前有效设计，不保留历史迁移叙述。
