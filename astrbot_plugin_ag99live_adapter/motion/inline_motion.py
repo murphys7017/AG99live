@@ -122,15 +122,17 @@ def summarize_motion_payload(plan: Any) -> tuple[str, str, int, int, str]:
 
     schema_version = str(plan.get("schema_version") or "").strip()
     mode = str(plan.get("mode") or "").strip().lower()
-    key_axes = plan.get("key_axes") or plan.get("axes")
+    axes = plan.get("axes")
+    if axes is None:
+        axes = plan.get("key_axes")
     supplementary = plan.get("supplementary_params")
     parameters = plan.get("parameters")
-    key_axes_count = len(key_axes) if isinstance(key_axes, dict) else 0
+    axis_count = len(axes) if isinstance(axes, dict) else 0
     supplementary_count = len(supplementary) if isinstance(supplementary, list) else (
         len(parameters) if isinstance(parameters, list) else 0
     )
     valid, failure_reason = validate_motion_payload(plan)
-    return schema_version, mode, key_axes_count, supplementary_count, "" if valid else failure_reason
+    return schema_version, mode, axis_count, supplementary_count, "" if valid else failure_reason
 
 
 def extract_message_motion_payload(

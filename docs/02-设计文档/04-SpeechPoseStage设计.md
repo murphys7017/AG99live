@@ -4,9 +4,9 @@
 
 `SpeechPoseStage` 是 ModelEngine 当前扩展路线中的第一个增强 stage。
 
-目标是让角色在说话时拥有轻量的头部和身体姿态变化，避免动作只停留在嘴部、眼神或单一表情上。
+目标是在 profile 明确提供说话姿态派生轴时，让角色说话时拥有轻量的头部和身体姿态变化，避免动作只停留在嘴部、眼神或单一表情上。
 
-当前主轴口径下，头部偏转、身体扭转/摇晃和眼睛开闭都属于动作骨架。`SpeechPoseStage` 不负责重新选择这些主轴，只在当前动作缺少说话姿态时补充轻量派生姿态。
+当前 Mk6 主轴口径下，头部偏转、身体扭转/摇晃、眼睛开闭和视线都属于动作骨架，并由 LLM 可见的 primary/hint 轴表达。`SpeechPoseStage` 不负责重新选择这些主轴，也不能把默认主轴当作派生目标；它只在 profile 额外提供 dedicated derived 轴时，补充轻量说话姿态。
 
 当前设计只做 plan 级增强：
 
@@ -86,15 +86,15 @@ id: "speechPose"
 触发条件：
 
 - `intent.mode === "expressive"`
-- 当前 profile 中存在可用的头部或身体 derived 轴
+- 当前 profile 中存在可用的、专门用于说话姿态补偿的头部或身体 derived 轴
 - 当前动作不是明显空动作
 - 当前动作没有已经通过主轴表达出足够明确的头部或身体姿态
 
 目标轴选择：
 
-- 优先选择 `control_role === "derived"` 的轴
+- 只选择 `control_role === "derived"` 的轴
 - 只选择 `semantic_group` 属于 `head`、`body`、`torso`、`shoulder` 的轴
-- 不选择 `runtime`、`ambient`、`debug` 轴
+- 不选择 `primary`、`hint`、`runtime`、`ambient`、`debug` 轴
 - 不选择 `mouth_open` 这类 runtime-owned 口型轴
 - 不把表情辅轴当作说话姿态补偿目标，例如 `mouth_smile`、`brow_bias`、`gaze_x`、`gaze_y`
 
@@ -115,7 +115,7 @@ id: "speechPose"
 | 表情辅轴 | 嘴角笑意、眉毛、视线偏移等表情态度微调 |
 | 运行时轴 | 嘴巴开闭、呼吸等由音频或运行时驱动的轴 |
 
-`SpeechPoseStage` 只处理说话场景下缺失的轻量姿态补偿。身体动作已经是主轴体系的一部分，因此后续如果 profile 允许 LLM 或用户直接表达身体扭转/摇晃，`SpeechPoseStage` 不能覆盖这些主轴表达。
+`SpeechPoseStage` 只处理说话场景下缺失的轻量姿态补偿。身体动作已经是主轴体系的一部分，因此默认 Mk6 profile 没有 dedicated derived 轴时，当前 stage 应直接跳过；如果后续 profile 额外定义说话姿态派生轴，`SpeechPoseStage` 也不能覆盖 LLM 或用户已经直接表达的主轴/辅轴动作。
 
 ## 5. 建议内部函数
 
@@ -178,7 +178,8 @@ frontend/tests/modelEngineCompiler.test.ts
 
 需要覆盖：
 
-- expressive 动作会通过 SpeechPoseStage 生成 derived 轴
+- profile 提供 dedicated derived 轴时，expressive 动作会通过 SpeechPoseStage 生成 derived 轴
+- 默认 Mk6 profile 未提供 dedicated derived 轴时，SpeechPoseStage 会跳过
 - idle 动作不会生成 speech pose 派生轴
 - SpeechPoseStage 不覆盖已有 coupling 派生轴
 - SpeechPoseStage 输出参数的 `source` 为 `speech_pose`

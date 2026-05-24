@@ -32,6 +32,67 @@ def _build_valid_profile(tmp_path) -> dict:
     )
 
 
+def _add_motion_axis_parameters(model_payload: dict) -> None:
+    parameter_scan = model_payload["parameter_scan"]
+    parameter_specs = [
+        ("body_yaw", "ParamBodyAngleX", "Body", "body"),
+        ("body_roll", "ParamBodyAngleZ", "Body", "body"),
+        ("body_pitch", "BodyAngleY", "Body", "body"),
+        ("eye_open_left", "ParamEyeLOpen", "Eye", "eye"),
+        ("eye_open_right", "ParamEyeROpen", "Eye", "eye"),
+        ("eye_smile_left", "ParamEyeLSmile", "Eye", "eye"),
+        ("eye_smile_right", "ParamEyeRSmile", "Eye", "eye"),
+        ("mouth_smile", "ParamMouthForm", "Mouth", "mouth"),
+        ("mouth_x", "ParamMouthX", "Mouth", "mouth"),
+        ("brow_bias", "ParamBrowForm", "Brow", "brow"),
+        ("brow_left_detail", "ParamBrowLDown", "Brow", "brow"),
+        ("brow_right_detail", "ParamBrowRDown", "Brow", "brow"),
+        ("breath", "ParamBreath", "Breath", "breath"),
+    ]
+    existing_parameter_ids = {
+        str(item.get("id") or "").strip()
+        for item in parameter_scan["parameters"]
+        if isinstance(item, dict)
+    }
+    existing_primary_channels = {
+        str(item.get("channel") or "").strip()
+        for item in parameter_scan["primary_parameters"]
+        if isinstance(item, dict)
+    }
+    for channel, parameter_id, group_name, domain in parameter_specs:
+        parameter_scan["standard_channels"][channel] = {
+            "label": channel.replace("_", " ").title(),
+            "available": True,
+            "primary_parameter_id": parameter_id,
+            "primary_parameter_name": parameter_id,
+            "group_name": group_name,
+            "candidate_parameter_ids": [parameter_id],
+        }
+        if channel not in existing_primary_channels:
+            parameter_scan["primary_parameters"].append(
+                {
+                    "channel": channel,
+                    "parameter_id": parameter_id,
+                    "parameter_name": parameter_id,
+                    "group_name": group_name,
+                }
+            )
+            existing_primary_channels.add(channel)
+        if parameter_id not in existing_parameter_ids:
+            parameter_scan["parameters"].append(
+                {
+                    "id": parameter_id,
+                    "name": parameter_id,
+                    "group_id": group_name,
+                    "group_name": group_name,
+                    "kind": "core",
+                    "domain": domain,
+                    "channels": [channel],
+                }
+            )
+            existing_parameter_ids.add(parameter_id)
+
+
 def _expect_profile_error(
     profile: dict,
     expected_message: str,
@@ -150,50 +211,7 @@ def test_default_semantic_axis_profile_uses_motion_axis_roles(tmp_path) -> None:
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
     model_payload = _build_model_payload()
-    parameter_scan = model_payload["parameter_scan"]
-    parameter_specs = [
-        ("body_yaw", "ParamBodyAngleX", "Body", "body"),
-        ("body_roll", "ParamBodyAngleZ", "Body", "body"),
-        ("body_pitch", "BodyAngleY", "Body", "body"),
-        ("eye_open_left", "ParamEyeLOpen", "Eye", "eye"),
-        ("eye_open_right", "ParamEyeROpen", "Eye", "eye"),
-        ("eye_smile_left", "ParamEyeLSmile", "Eye", "eye"),
-        ("eye_smile_right", "ParamEyeRSmile", "Eye", "eye"),
-        ("mouth_smile", "ParamMouthForm", "Mouth", "mouth"),
-        ("mouth_x", "ParamMouthX", "Mouth", "mouth"),
-        ("brow_bias", "ParamBrowForm", "Brow", "brow"),
-        ("brow_left_detail", "ParamBrowLDown", "Brow", "brow"),
-        ("brow_right_detail", "ParamBrowRDown", "Brow", "brow"),
-        ("breath", "ParamBreath", "Breath", "breath"),
-    ]
-    for channel, parameter_id, group_name, domain in parameter_specs:
-        parameter_scan["standard_channels"][channel] = {
-            "label": channel.replace("_", " ").title(),
-            "available": True,
-            "primary_parameter_id": parameter_id,
-            "primary_parameter_name": parameter_id,
-            "group_name": group_name,
-            "candidate_parameter_ids": [parameter_id],
-        }
-        parameter_scan["primary_parameters"].append(
-            {
-                "channel": channel,
-                "parameter_id": parameter_id,
-                "parameter_name": parameter_id,
-                "group_name": group_name,
-            }
-        )
-        parameter_scan["parameters"].append(
-            {
-                "id": parameter_id,
-                "name": parameter_id,
-                "group_id": group_name,
-                "group_name": group_name,
-                "kind": "core",
-                "domain": domain,
-                "channels": [channel],
-            }
-        )
+    _add_motion_axis_parameters(model_payload)
 
     profile = ensure_semantic_axis_profile(
         model_dir=model_dir,
@@ -220,6 +238,94 @@ def test_default_semantic_axis_profile_uses_motion_axis_roles(tmp_path) -> None:
     assert axes["brow_right_detail"]["control_role"] == "hint"
     assert axes["mouth_open"]["control_role"] == "runtime"
     assert axes["breath"]["control_role"] == "ambient"
+
+
+def test_ensure_semantic_axis_profile_migrates_old_generated_default_design(tmp_path) -> None:
+    model_dir = tmp_path / "DemoModel"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
+    model_payload = _build_model_payload()
+    _add_motion_axis_parameters(model_payload)
+
+    old_profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+    old_profile["axes"] = [
+        axis
+        for axis in old_profile["axes"]
+        if axis["id"] not in {"body_pitch", "eye_smile_left", "eye_smile_right"}
+    ]
+    for axis in old_profile["axes"]:
+        if axis["id"] in {"body_yaw", "body_roll"}:
+            axis["control_role"] = "derived"
+        if axis["id"] == "mouth_smile":
+            axis["control_role"] = "primary"
+    build_semantic_axis_profile_path(model_dir).write_text(
+        json.dumps(old_profile, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    migrated_profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+    axes = {axis["id"]: axis for axis in migrated_profile["axes"]}
+
+    assert migrated_profile["revision"] == old_profile["revision"] + 1
+    assert migrated_profile["status"] == "generated"
+    assert migrated_profile["user_modified"] is False
+    assert axes["body_yaw"]["control_role"] == "primary"
+    assert axes["body_roll"]["control_role"] == "primary"
+    assert axes["mouth_smile"]["control_role"] == "hint"
+    assert "body_pitch" in axes
+    assert "eye_smile_left" in axes
+    assert "eye_smile_right" in axes
+
+
+def test_ensure_semantic_axis_profile_marks_user_modified_old_default_design_stale(tmp_path) -> None:
+    model_dir = tmp_path / "DemoModel"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
+    model_payload = _build_model_payload()
+    _add_motion_axis_parameters(model_payload)
+
+    old_profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+    old_profile["status"] = "user_modified"
+    old_profile["user_modified"] = True
+    old_profile["axes"] = [
+        axis
+        for axis in old_profile["axes"]
+        if axis["id"] != "body_pitch"
+    ]
+    for axis in old_profile["axes"]:
+        if axis["id"] == "mouth_smile":
+            axis["control_role"] = "primary"
+    build_semantic_axis_profile_path(model_dir).write_text(
+        json.dumps(old_profile, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    stale_profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+    axes = {axis["id"]: axis for axis in stale_profile["axes"]}
+
+    assert stale_profile["revision"] == old_profile["revision"]
+    assert stale_profile["status"] == "stale"
+    assert stale_profile["user_modified"] is True
+    assert "body_pitch" not in axes
+    assert axes["mouth_smile"]["control_role"] == "primary"
+
+    unchanged_stale_profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+    assert unchanged_stale_profile == stale_profile
 
 
 def test_default_semantic_axis_profile_uses_single_preferred_binding_per_axis(tmp_path) -> None:

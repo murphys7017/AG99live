@@ -2,7 +2,7 @@ task:
   class: feature
   risk: medium
   phase: implemented
-  scope: default SemanticAxisProfile and realtime motion prompt alignment with first-version motion primary/secondary axis design
+  scope: Mk6 SemanticAxisProfile default design migration and old motion/profile wording cleanup
 context:
   confidence: medium
   assumptions:
@@ -10,6 +10,9 @@ context:
     - Mouth smile, mouth X, and brow detail axes are expression/detail hint axes.
     - Mouth open and breath should remain runtime/ambient-owned by default and should not be emphasized in realtime motion prompts.
     - BodyAngleY is the preferred first-version binding for `body_pitch`; PhyBodyPositionY remains observation material.
+    - Existing generated semantic profiles should auto-migrate to the current default design even when model source hash is unchanged.
+    - User-modified semantic profiles should not be overwritten during default-design migration; they are marked stale for manual review.
+    - Legacy motion `key_axes` references in tests remain as rejection coverage, and `adaptive_parameter_profile.v1.key_axes` remains a scanner schema field outside this migration.
   unresolved_questions:
     - Body pitch and brow detail axes still need real Mk6 visual preview before treating their default ranges as final.
 architecture:
@@ -17,18 +20,19 @@ architecture:
   boundary_changes:
     - Live2D scanner standard channels now include `body_pitch`, `brow_left_detail`, and `brow_right_detail`.
     - Default generated SemanticAxisProfile now exposes the first-version motion primary axes and hint/runtime roles described in the motion-axis design docs.
+    - ensure_semantic_axis_profile now detects old generated default designs under the same source hash and rebuilds backend-owned profiles; user-modified profiles become stale instead.
     - Frontend direct parameter axis typing/constants now include the expanded axis set.
     - Realtime motion prompt and default examples now prefer action skeleton axes before expression detail axes.
+    - Runtime motion ingress/egress logs now report semantic `axis_count` instead of legacy `key_axes_count`.
 verification:
   checks_run:
     - python -m compileall astrbot_plugin_ag99live_adapter
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\live2d\test_semantic_axis_profile.py -q
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_realtime_motion_plan.py -q
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py -q
-    - npm run typecheck:renderer
-    - npm run test:model-engine
-    - npm run test
+    - npm run typecheck:renderer (from frontend)
+    - npm run test:model-engine (from frontend)
   checks_failed: []
-  validation_gap: No live Mk6 visual preview or real AstrBot websocket session was exercised in this pass.
+  validation_gap: No live Mk6 visual preview, real AstrBot websocket session, frontend node typecheck, or full frontend npm test suite was exercised in this pass.
 runtime:
   mode: minimal_v1

@@ -24,7 +24,7 @@ export const PROFILE_ROLE_GUIDE: Array<{ role: string; description: string }> = 
   { role: "primary", description: "给 LLM 直接控制的主表达轴，优先放最重要、最直观的动作。" },
   { role: "hint", description: "也允许 LLM 直接控制，但优先级低于 primary，适合补充细节。" },
   { role: "derived", description: "通常由 coupling 派生，不建议直接让 LLM 主控。" },
-  { role: "runtime", description: "更适合运行时驱动，例如眨眼、口型、实时状态。" },
+  { role: "runtime", description: "更适合运行时驱动，例如口型、呼吸、实时状态。" },
   { role: "ambient", description: "环境/待机相关轴，通常不进入当前回复动作主链路。" },
   { role: "debug", description: "调试或实验轴，正式链路尽量不要依赖。" },
 ];

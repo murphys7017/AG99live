@@ -508,19 +508,19 @@ class TurnCoordinator:
                 )
             )
             return
-        schema_version, resolved_mode, key_axes_count, supplementary_count, failure_reason = _summarize_motion_payload(
+        schema_version, resolved_mode, axis_count, supplementary_count, failure_reason = _summarize_motion_payload(
             motion_payload
         )
 
         logger.info(
             "WIRING motion_payload_ingress type=%s mode=%s turn_id=%s "
-            "plan_schema=%s plan_mode=%s key_axes_count=%s supplementary_count=%s failure_reason=%s",
+            "plan_schema=%s plan_mode=%s axis_count=%s supplementary_count=%s failure_reason=%s",
             message.type,
             mode,
             message.turn_id or "",
             schema_version,
             resolved_mode,
-            key_axes_count,
+            axis_count,
             supplementary_count,
             failure_reason,
         )
@@ -568,19 +568,19 @@ class TurnCoordinator:
             )
         )
         if sent:
-            schema_version, resolved_mode, key_axes_count, supplementary_count, failure_reason = (
+            schema_version, resolved_mode, axis_count, supplementary_count, failure_reason = (
                 _summarize_motion_payload(motion_payload)
             )
             logger.info(
                 "WIRING motion_payload_egress type=%s source=%s mode=%s turn_id=%s "
-                "plan_schema=%s plan_mode=%s key_axes_count=%s supplementary_count=%s failure_reason=%s",
+                "plan_schema=%s plan_mode=%s axis_count=%s supplementary_count=%s failure_reason=%s",
                 message_type,
                 payload["source"],
                 payload["mode"],
                 resolved_turn_id or "",
                 schema_version,
                 resolved_mode,
-                key_axes_count,
+                axis_count,
                 supplementary_count,
                 failure_reason,
             )
