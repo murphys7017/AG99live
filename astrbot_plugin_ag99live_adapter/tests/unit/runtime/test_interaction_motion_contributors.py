@@ -374,6 +374,7 @@ def test_result_contributor_returns_plugin_hint_motion_as_client_object(
     assert client_object["type"] == "ag99live.motion_payload"
     assert client_object["source"] == "plugin_hints"
     assert client_object["motion_payload"]["schema_version"] == "engine.motion_intent.v2"
+    assert contribution.platform_extras["client_objects"] == contribution.client_objects
     assert (
         contribution.metadata["ag99live_motion_schedule"]["reason"]
         == "plugin_hints_motion_client_object"

@@ -152,8 +152,10 @@ class AG99liveMotionResultContributor:
                     "source": "plugin_hints",
                 }
             )
+        platform_extras = {"client_objects": client_objects} if client_objects else {}
         return InteractionResultContribution(
             plugin_id=self.plugin_id,
+            platform_extras=platform_extras,
             client_objects=client_objects,
             metadata={"ag99live_motion_schedule": attempt.to_metadata()},
             priority=self.priority,

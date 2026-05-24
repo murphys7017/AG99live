@@ -83,9 +83,12 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             }
         }
 
+        desktop_snapshot_indexes = _resolve_desktop_snapshot_component_indexes(message_obj)
         components = getattr(message_obj, "message", [])
         if isinstance(components, list) and callable(build_message_annotation_key):
             for index, component in enumerate(components):
+                if index not in desktop_snapshot_indexes:
+                    continue
                 component_type = str(type(component).__name__).lower()
                 if component_type != "image":
                     continue
@@ -99,3 +102,25 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                 }
 
         self.set_extra(INPUT_ITEM_ANNOTATIONS_EXTRA_KEY, annotations)
+
+
+def _resolve_desktop_snapshot_component_indexes(message_obj: Any) -> set[int]:
+    raw_message = getattr(message_obj, "raw_message", None)
+    if not isinstance(raw_message, dict):
+        return set()
+
+    payload = raw_message.get("payload")
+    if not isinstance(payload, dict):
+        return set()
+
+    images = payload.get("images")
+    if not isinstance(images, list):
+        return set()
+
+    indexes: set[int] = set()
+    component_index = 1
+    for image in images:
+        if isinstance(image, dict) and str(image.get("source") or "").strip() == "screen":
+            indexes.add(component_index)
+        component_index += 1
+    return indexes
