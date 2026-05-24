@@ -104,8 +104,34 @@ async function testSegmentsReleaseSequentiallyWithinTurn(): Promise<void> {
   h.stop();
 }
 
+async function testTextAndMotionReleaseWhenAudioIsAbsent(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.setActiveSession("turn-text-motion");
+  h.sessionStore.markTurnStarted("turn-text-motion");
+
+  h.sessionStore.markTextReceived("turn-text-motion", "hello", "msg-text-motion");
+  h.sessionStore.markMotionReceived("turn-text-motion", motionPayload, "msg-text-motion");
+  h.sessionStore.markSynthFinished("turn-text-motion");
+  h.sessionStore.markAudioTerminal(
+    "turn-text-motion",
+    "absent",
+    "msg-text-motion",
+    "synth_finished_without_audio_playback",
+  );
+
+  await h.flush();
+  await h.flush();
+
+  assert.deepEqual(h.released, [
+    "text:msg-text-motion:turn-text-motion",
+    "motion:msg-text-motion:turn-text-motion",
+  ]);
+  h.stop();
+}
+
 async function run(): Promise<void> {
   await testSegmentsReleaseSequentiallyWithinTurn();
+  await testTextAndMotionReleaseWhenAudioIsAbsent();
   console.log("useTurnPlaybackOrchestrator tests passed");
 }
 

@@ -259,9 +259,13 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     extensions = asyncio.run(contributor.collect(event, None, view))
 
     assert isinstance(extensions, list)
-    assert len(extensions) == 2
+    assert len(extensions) == 3
+    system = next(item for item in extensions if item.mount == "system")
     capability = next(item for item in extensions if item.mount == "capability")
     runtime = next(item for item in extensions if item.mount == "context")
+    assert "AG99live Motion 是当前桌宠前端的主动作通道" in system.value
+    assert '"plugin_hints":{"ag99live_motion"' in system.value
+    assert "immediate_spoken_reply" in system.value
     assert capability.value["configured_generation_mode"] == "split_after_reply"
     assert capability.value["semantic_profile"]["profile_id"] == "pet.semantic.v1"
     prompt_axis_ids = [
@@ -411,7 +415,7 @@ def test_result_contributor_schedules_motion_for_immediate_reply(
     )
 
 
-def test_result_contributor_uses_final_phase_as_split_mode_fallback(
+def test_result_contributor_reports_missing_plugin_hints_in_split_final_phase(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -429,9 +433,11 @@ def test_result_contributor_uses_final_phase_as_split_mode_fallback(
     contribution = asyncio.run(contributor.collect(event, None, view))
 
     assert contribution is not None
-    # Secondary motion scheduling is disabled across all modes
     assert scheduled_calls == []
-
+    assert (
+        contribution.metadata["ag99live_motion_schedule"]["reason"]
+        == "plugin_hints_motion_missing"
+    )
 
 
 def test_result_contributor_skips_final_phase_in_inline_mode(

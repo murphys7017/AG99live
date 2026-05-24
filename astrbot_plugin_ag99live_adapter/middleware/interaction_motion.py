@@ -106,6 +106,18 @@ class AG99liveMotionPromptContributor:
         return [
             PromptExtension(
                 plugin_id=self.plugin_id,
+                mount="system",
+                title="AG99live Motion Decision Contract",
+                value_kind="text",
+                value=_build_motion_decision_contract_text(capability_payload),
+                order=39,
+                meta={
+                    "scope": "dynamic",
+                    "node_type": "ag99live_motion_decision_contract",
+                },
+            ),
+            PromptExtension(
+                plugin_id=self.plugin_id,
                 mount="capability",
                 title="AG99live Motion Capability",
                 value_kind="mapping",
@@ -360,6 +372,29 @@ def _build_motion_capability_payload(runtime_state: Any) -> dict[str, Any]:
         capability_payload["plugin_hints_format"] = _build_plugin_hints_motion_format(profile_payload)
 
     return capability_payload
+
+
+def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> str:
+    plugin_hints_format = capability_payload.get("plugin_hints_format")
+    format_json = "{}"
+    if isinstance(plugin_hints_format, dict) and plugin_hints_format:
+        import json
+
+        format_json = json.dumps(
+            {"plugin_hints": plugin_hints_format},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+    return (
+        "AG99live Motion 是当前桌宠前端的主动作通道。"
+        "每次 interaction decision 都必须在 JSON 输出的 plugin_hints 中写入 ag99live_motion；"
+        "不要把动作写进 immediate_spoken_reply、core_task_spec 或普通文本。"
+        "ag99live_motion.mode 只能是 idle 或 expressive；axes 只能使用下方 schema 中已有的轴 id，"
+        "每个轴值必须写成 {\"value\": number}。"
+        "如果用户只是普通说话，也要给一个轻量 idle 或 expressive 动作。"
+        f" 输出形状示例：{format_json}"
+    )
 
 
 def _build_plugin_hints_motion_format(profile_payload: dict[str, Any]) -> dict[str, Any]:
@@ -653,9 +688,9 @@ def _resolve_final_phase_policy(
             reason="already_scheduled_by_motion_pipeline",
         )
     return _MotionSchedulePolicy(
-        should_schedule=True,
-        source="interaction_result_final_fallback",
-        reason="schedule_split_reply_fallback",
+        should_schedule=False,
+        source=None,
+        reason="plugin_hints_motion_missing",
     )
 
 
