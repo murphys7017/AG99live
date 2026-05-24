@@ -145,17 +145,26 @@ def test_ensure_semantic_axis_profile_adds_unmapped_parameters_as_debug_axes(tmp
     assert extra_axis["parameter_bindings"][0]["parameter_id"] == "ParamAccessoryGlow"
 
 
-def test_default_semantic_axis_profile_exposes_wink_and_brow_as_hints(tmp_path) -> None:
+def test_default_semantic_axis_profile_uses_motion_axis_roles(tmp_path) -> None:
     model_dir = tmp_path / "DemoModel"
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
     model_payload = _build_model_payload()
     parameter_scan = model_payload["parameter_scan"]
     parameter_specs = [
+        ("body_yaw", "ParamBodyAngleX", "Body", "body"),
+        ("body_roll", "ParamBodyAngleZ", "Body", "body"),
+        ("body_pitch", "BodyAngleY", "Body", "body"),
         ("eye_open_left", "ParamEyeLOpen", "Eye", "eye"),
         ("eye_open_right", "ParamEyeROpen", "Eye", "eye"),
-        ("brow_bias", "ParamBrowForm", "Brow", "brow"),
+        ("eye_smile_left", "ParamEyeLSmile", "Eye", "eye"),
+        ("eye_smile_right", "ParamEyeRSmile", "Eye", "eye"),
         ("mouth_smile", "ParamMouthForm", "Mouth", "mouth"),
+        ("mouth_x", "ParamMouthX", "Mouth", "mouth"),
+        ("brow_bias", "ParamBrowForm", "Brow", "brow"),
+        ("brow_left_detail", "ParamBrowLDown", "Brow", "brow"),
+        ("brow_right_detail", "ParamBrowRDown", "Brow", "brow"),
+        ("breath", "ParamBreath", "Breath", "breath"),
     ]
     for channel, parameter_id, group_name, domain in parameter_specs:
         parameter_scan["standard_channels"][channel] = {
@@ -192,15 +201,25 @@ def test_default_semantic_axis_profile_exposes_wink_and_brow_as_hints(tmp_path) 
     )
     axes = {axis["id"]: axis for axis in profile["axes"]}
 
-    assert axes["eye_open_left"]["control_role"] == "hint"
+    assert axes["body_yaw"]["control_role"] == "primary"
+    assert axes["body_roll"]["control_role"] == "primary"
+    assert axes["body_pitch"]["control_role"] == "primary"
+    assert axes["body_pitch"]["parameter_bindings"][0]["parameter_id"] == "BodyAngleY"
+    assert axes["eye_open_left"]["control_role"] == "primary"
     assert axes["eye_open_left"]["neutral"] == 100.0
     assert axes["eye_open_left"]["parameter_bindings"][0]["invert"] is False
-    assert axes["eye_open_right"]["control_role"] == "hint"
+    assert axes["eye_open_right"]["control_role"] == "primary"
     assert axes["eye_open_right"]["neutral"] == 100.0
     assert axes["eye_open_right"]["parameter_bindings"][0]["invert"] is False
+    assert axes["eye_smile_left"]["control_role"] == "primary"
+    assert axes["eye_smile_right"]["control_role"] == "primary"
+    assert axes["mouth_smile"]["control_role"] == "hint"
+    assert axes["mouth_x"]["control_role"] == "hint"
     assert axes["brow_bias"]["control_role"] == "hint"
-    assert axes["mouth_smile"]["control_role"] == "primary"
+    assert axes["brow_left_detail"]["control_role"] == "hint"
+    assert axes["brow_right_detail"]["control_role"] == "hint"
     assert axes["mouth_open"]["control_role"] == "runtime"
+    assert axes["breath"]["control_role"] == "ambient"
 
 
 def test_default_semantic_axis_profile_uses_single_preferred_binding_per_axis(tmp_path) -> None:

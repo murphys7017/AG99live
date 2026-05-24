@@ -24,13 +24,20 @@ _AXIS_NAMES = [
     "head_pitch",
     "body_yaw",
     "body_roll",
-    "gaze_x",
-    "gaze_y",
+    "body_pitch",
     "eye_open_left",
     "eye_open_right",
-    "mouth_open",
+    "eye_smile_left",
+    "eye_smile_right",
+    "gaze_x",
+    "gaze_y",
     "mouth_smile",
+    "mouth_x",
     "brow_bias",
+    "brow_left_detail",
+    "brow_right_detail",
+    "mouth_open",
+    "breath",
 ]
 
 

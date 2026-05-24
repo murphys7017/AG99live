@@ -580,18 +580,20 @@ def _build_emotion_seed_axes(emotion: str) -> dict[str, int]:
     if any(token in mood for token in {"happy", "joy", "playful", "smile", "excited", "surprise"}):
         return {
             "head_pitch": 62,
+            "body_pitch": 58,
             "eye_open_left": 64,
             "eye_open_right": 64,
-            "mouth_open": 68,
+            "eye_smile_left": 70,
+            "eye_smile_right": 70,
             "mouth_smile": 76,
             "brow_bias": 62,
         }
     if any(token in mood for token in {"angry", "tense", "firm", "disgust"}):
         return {
             "head_pitch": 44,
+            "body_pitch": 42,
             "eye_open_left": 46,
             "eye_open_right": 46,
-            "mouth_open": 40,
             "mouth_smile": 28,
             "brow_bias": 24,
         }
@@ -601,7 +603,6 @@ def _build_emotion_seed_axes(emotion: str) -> dict[str, int]:
             "gaze_y": 38,
             "eye_open_left": 44,
             "eye_open_right": 44,
-            "mouth_open": 42,
             "mouth_smile": 34,
             "brow_bias": 36,
         }

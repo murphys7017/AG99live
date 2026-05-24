@@ -48,6 +48,12 @@ STANDARD_CHANNEL_SPECS: tuple[dict[str, Any], ...] = (
         "tokens": ("bodyanglez", "bodyz"),
     },
     {
+        "name": "body_pitch",
+        "label": "Body Pitch",
+        "exact_ids": ("BodyAngleY",),
+        "tokens": ("bodyangley", "bodypitch", "bodyy"),
+    },
+    {
         "name": "gaze_x",
         "label": "Gaze X",
         "exact_ids": ("ParamEyeBallX",),
@@ -88,6 +94,18 @@ STANDARD_CHANNEL_SPECS: tuple[dict[str, Any], ...] = (
         "label": "Brow Bias",
         "exact_ids": ("ParamBrowForm",),
         "tokens": ("browform", "brow"),
+    },
+    {
+        "name": "brow_left_detail",
+        "label": "Brow Left Detail",
+        "exact_ids": ("ParamBrowLDown",),
+        "tokens": ("browldown", "browleftdown"),
+    },
+    {
+        "name": "brow_right_detail",
+        "label": "Brow Right Detail",
+        "exact_ids": ("ParamBrowRDown",),
+        "tokens": ("browrdown", "browrightdown"),
     },
     {
         "name": "mouth_smile",
@@ -191,6 +209,14 @@ CORE_BASE_ACTION_CHANNEL_SPECS: tuple[dict[str, Any], ...] = (
         "max_atoms": 5,
     },
     {
+        "name": "body_pitch",
+        "label": "Body Pitch",
+        "family": "body_pose",
+        "family_label": "Body Pose",
+        "domain": "body",
+        "max_atoms": 5,
+    },
+    {
         "name": "gaze_x",
         "label": "Gaze X",
         "family": "gaze",
@@ -245,6 +271,22 @@ CORE_BASE_ACTION_CHANNEL_SPECS: tuple[dict[str, Any], ...] = (
         "family_label": "Brows",
         "domain": "brow",
         "max_atoms": 5,
+    },
+    {
+        "name": "brow_left_detail",
+        "label": "Brow Left Detail",
+        "family": "brow",
+        "family_label": "Brows",
+        "domain": "brow",
+        "max_atoms": 4,
+    },
+    {
+        "name": "brow_right_detail",
+        "label": "Brow Right Detail",
+        "family": "brow",
+        "family_label": "Brows",
+        "domain": "brow",
+        "max_atoms": 4,
     },
     {
         "name": "mouth_smile",

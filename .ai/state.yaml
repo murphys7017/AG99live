@@ -1,35 +1,34 @@
 task:
-  class: refactor
-  risk: high
-  phase: completed
-  scope: protocol turn-id single-track cutover across backend runtime, frontend adapter flow, playback routing, and targeted docs/tests
+  class: feature
+  risk: medium
+  phase: implemented
+  scope: default SemanticAxisProfile and realtime motion prompt alignment with first-version motion primary/secondary axis design
 context:
   confidence: medium
   assumptions:
-    - External frontend/backend protocol no longer needs `session_id` or `orchestration_id`.
-    - Frontend-created `turn_id` is now the only external interaction identity for text, audio, motion, interrupt, and playback completion.
-    - AstrBot internal turn identity is not yet exposed at a stable binding point, so the new turn map is currently a container and lifecycle shell.
+    - Mk6 first-version motion axis design treats head/body/eye-open/eye-smile/gaze axes as action primary axes.
+    - Mouth smile, mouth X, and brow detail axes are expression/detail hint axes.
+    - Mouth open and breath should remain runtime/ambient-owned by default and should not be emphasized in realtime motion prompts.
+    - BodyAngleY is the preferred first-version binding for `body_pitch`; PhyBodyPositionY remains observation material.
   unresolved_questions:
-    - A future pass is still needed to bind real `astrbot_turn_id` values into `TurnIdentityMap` once a stable source is available.
+    - Body pitch and brow detail axes still need real Mk6 visual preview before treating their default ranges as final.
 architecture:
   stability: evolving
   boundary_changes:
-    - Protocol envelope is now single-track on `turn_id` for all interactive messages.
-    - SessionState no longer tracks protocol orchestration identity.
-    - Speech ingress, turn lifecycle, frontend outbound creation, and playback ack routing now key on `turn_id`.
-    - Frontend still contains limited orchestration-named compatibility aliases internally, but they mirror `turn_id` and are no longer part of the external contract.
+    - Live2D scanner standard channels now include `body_pitch`, `brow_left_detail`, and `brow_right_detail`.
+    - Default generated SemanticAxisProfile now exposes the first-version motion primary axes and hint/runtime roles described in the motion-axis design docs.
+    - Frontend direct parameter axis typing/constants now include the expanded axis set.
+    - Realtime motion prompt and default examples now prefer action skeleton axes before expression detail axes.
 verification:
   checks_run:
     - python -m compileall astrbot_plugin_ag99live_adapter
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_protocol_parser_semantic_profile.py -q
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_speech_ingress_service.py -q
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_completion.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\live2d\test_semantic_axis_profile.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_realtime_motion_plan.py -q
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py -q
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_frontend_system_semantic_profile.py -q
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py -q
     - npm run typecheck:renderer
-    - npm run build
+    - npm run test:model-engine
+    - npm run test
   checks_failed: []
-  validation_gap: No live end-to-end manual websocket session with a real AstrBot turn binding source was exercised in this pass.
+  validation_gap: No live Mk6 visual preview or real AstrBot websocket session was exercised in this pass.
 runtime:
   mode: minimal_v1

@@ -26,13 +26,20 @@ AXES: list[AxisSpec] = [
     AxisSpec("head_pitch", "head_pitch", "低头", "居中", "抬头"),
     AxisSpec("body_yaw", "body_yaw", "身体向左转", "居中", "身体向右转"),
     AxisSpec("body_roll", "body_roll", "身体左倾", "居中", "身体右倾"),
-    AxisSpec("gaze_x", "gaze_x", "看向左侧", "居中", "看向右侧"),
-    AxisSpec("gaze_y", "gaze_y", "看向下方", "居中", "看向上方"),
+    AxisSpec("body_pitch", "body_pitch", "前倾/下沉", "居中", "后缩/挺起"),
     AxisSpec("eye_open_left", "eye_open_left", "闭眼", "正常睁眼", "睁大"),
     AxisSpec("eye_open_right", "eye_open_right", "闭眼", "正常睁眼", "睁大"),
-    AxisSpec("mouth_open", "mouth_open", "闭嘴", "正常", "张嘴"),
+    AxisSpec("eye_smile_left", "eye_smile_left", "放松", "中性", "笑眼/眯眼"),
+    AxisSpec("eye_smile_right", "eye_smile_right", "放松", "中性", "笑眼/眯眼"),
+    AxisSpec("gaze_x", "gaze_x", "看向左侧", "居中", "看向右侧"),
+    AxisSpec("gaze_y", "gaze_y", "看向下方", "居中", "看向上方"),
     AxisSpec("mouth_smile", "mouth_smile", "不开心/嘴角下压", "中性", "微笑"),
+    AxisSpec("mouth_x", "mouth_x", "嘴向左偏", "中性", "嘴向右偏"),
     AxisSpec("brow_bias", "brow_bias", "皱眉/压眉", "中性", "挑眉/抬眉"),
+    AxisSpec("brow_left_detail", "brow_left_detail", "左眉下压", "中性", "左眉上扬"),
+    AxisSpec("brow_right_detail", "brow_right_detail", "右眉下压", "中性", "右眉上扬"),
+    AxisSpec("mouth_open", "mouth_open", "闭嘴", "正常", "张嘴"),
+    AxisSpec("breath", "breath", "呼吸更弱", "中性", "呼吸更强"),
 ]
 AXIS_NAMES = [axis.name for axis in AXES]
 
@@ -45,14 +52,14 @@ MOTION_SELECTOR_SYSTEM_PROMPT = (
 DEFAULT_SELECTOR_PLATFORM_DESCRIPTION = (
     "场景：用户正在和一个由 Live2D 角色承载的助手对话。\n"
     "交互模式：用户以短文本或语音进行单轮输入，并期待助手快速回应。\n"
-    "角色表现目标：用自然、可读的面部、头部和视线变化支撑回复语气。\n"
+    "角色表现目标：用自然、可读的头部、身体、眼部、视线和少量面部细节支撑回复语气。\n"
     "播放方式：你输出的数值会直接用于驱动角色动作，所以要稳定、克制、可理解。\n"
     "偏好：当情绪不是中性时，使用清晰可见的幅度，避免接近中位的无效动作。"
 )
 
 DEFAULT_MOTION_PROMPT_INSTRUCTION = (
     "根据主回复的真实语气选择动作。中性、说明性回复可以使用 idle 或小幅动作；开心、惊讶、撒娇、调侃、道歉等明确情绪再使用 expressive。"
-    "优先控制头部、视线、wink、嘴部笑意和眉毛；mouth_open 只作为可选的口型微调，不要替代运行时口型同步。"
+    "优先用头部、身体、眼睛开闭/笑眼和视线建立动作骨架；再少量使用嘴角、嘴偏和眉毛补表情细节。mouth_open 和 breath 属于运行时/环境轴，不要当成主要说话动作。"
 )
 
 
@@ -177,10 +184,12 @@ def build_selector_user_prompt(
         '  "duration_ms": 1200,\n'
         '  "axes": {\n'
         '    "head_yaw": 50, "head_roll": 50, "head_pitch": 50,\n'
-        '    "body_yaw": 50, "body_roll": 50,\n'
-        '    "gaze_x": 50, "gaze_y": 50,\n'
+        '    "body_yaw": 50, "body_roll": 50, "body_pitch": 50,\n'
         '    "eye_open_left": 50, "eye_open_right": 50,\n'
-        '    "mouth_open": 50, "mouth_smile": 50, "brow_bias": 50\n'
+        '    "eye_smile_left": 50, "eye_smile_right": 50,\n'
+        '    "gaze_x": 50, "gaze_y": 50,\n'
+        '    "mouth_smile": 50, "mouth_x": 50, "brow_bias": 50,\n'
+        '    "brow_left_detail": 50, "brow_right_detail": 50\n'
         '  }\n'
         "}\n"
         "生成规则：\n"
@@ -229,8 +238,8 @@ def build_selector_user_prompt_v2(
         "- 你只能使用下面列出的参数，不要编造参数名。\n"
         "- 每个参数都有取值范围、中性值、低值含义、高值含义和使用说明。\n"
         "- 参数分为主要控制参数和辅助细节参数。\n"
-        "- 主要控制参数用于决定本次动作的核心表现，例如头部方向、视线、笑意、眉眼状态。\n"
-        "- 辅助细节参数用于补充细节，例如单侧眼睛开合、眉毛细微变化、轻微口型修饰。\n"
+        "- 主要控制参数用于决定本次动作骨架，例如头部、身体、眼睛开闭/笑眼和视线。\n"
+        "- 辅助细节参数用于补充嘴角、嘴部偏移和眉毛细节。\n"
         "- 输出时优先选择最能表达本轮语气的少数参数；不要为了凑数量而输出无关参数。\n"
         f"{axis_block}\n\n"
         "返回要求：\n"
@@ -248,9 +257,10 @@ def build_selector_user_prompt_v2(
         "- 通常输出 1 到 4 个相关轴；宁可少输出，也不要输出无关动作。\n"
         "- 只使用数字，并保持在每个轴自己的范围内。\n"
         "- 通过理解参数含义和对话上下文来选择参数；不要把示例或动作名当成封闭选项。\n"
-        "- 如果存在 mouth_smile，笑意强度主要由 mouth_smile 表达：轻微微笑约 58-68，明显开心约 72-88，调皮或逗趣约 65-82，并可搭配头部、视线、眉毛细节。\n"
-        "- 如果存在 eye_open 轴，可以用于 wink 或不对称眼部细节；侧向和强度应从对话语义、头部/视线方向和示例中推断，不要固定套模板。\n"
-        "- 如果存在 mouth_open，它只是可选的次要口型微调；不要把它当成主要说话口型动画。\n"
+        "- 如果存在 body_yaw/body_roll/body_pitch，可用较小幅度补充前倾、后缩、下沉、摇晃和情绪强弱。\n"
+        "- 如果存在 eye_open 或 eye_smile 轴，可以用于眨眼、疲惫、惊讶、眯眼、笑眼；侧向和强度应从语义、头部/视线方向和示例推断。\n"
+        "- 如果存在 mouth_smile/mouth_x/brow_*，它们是表情辅轴，用于少量补充嘴角、歪嘴和眉毛细节，不要盖过头身眼动作。\n"
+        "- 如果存在 mouth_open 或 breath，它们通常由运行时控制；除非文本明确需要哈欠、惊讶张嘴或呼吸状态，否则不要输出。\n"
         "- 数值要稳定、可读，避免混乱的极端值。\n\n"
         f"{motion_instruction_block}"
         f"{few_shot_block}"
