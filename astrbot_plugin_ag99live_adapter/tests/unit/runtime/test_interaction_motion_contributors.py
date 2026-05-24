@@ -343,6 +343,91 @@ def test_plugin_hints_expressive_payload_is_pushed_out_of_idle_deadzone(
     assert payload["axes"]["head_yaw"]["value"] > 58
 
 
+def test_plugin_hints_motion_payload_accepts_head_roll_and_mouth_smile(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    runtime_state.model_info = {
+        "selected_model": "pet",
+        "models": [
+            {
+                "name": "pet",
+                "semantic_axis_profile": {
+                    "schema_version": "ag99.semantic_axis_profile.v1",
+                    "profile_id": "Mk6_1.0.semantic.v1",
+                    "model_id": "Mk6_1.0",
+                    "source_hash": "hash",
+                    "last_scanned_hash": "hash",
+                    "revision": 3,
+                    "status": "generated_default",
+                    "user_modified": False,
+                    "generated_at": "2026-04-26T00:00:00+00:00",
+                    "updated_at": "2026-04-26T00:00:00+00:00",
+                    "axes": [
+                        {
+                            "id": "head_roll",
+                            "label": "Head Roll",
+                            "description": "tilt head left/right",
+                            "semantic_group": "head",
+                            "control_role": "primary",
+                            "neutral": 50,
+                            "value_range": [0, 100],
+                            "soft_range": [42, 58],
+                            "strong_range": [30, 70],
+                            "positive_semantics": ["tilt right"],
+                            "negative_semantics": ["tilt left"],
+                            "usage_notes": "Use for head tilt.",
+                            "parameter_bindings": [],
+                        },
+                        {
+                            "id": "mouth_smile",
+                            "label": "Mouth Smile",
+                            "description": "smile amount",
+                            "semantic_group": "mouth",
+                            "control_role": "hint",
+                            "neutral": 50,
+                            "value_range": [0, 100],
+                            "soft_range": [42, 58],
+                            "strong_range": [30, 70],
+                            "positive_semantics": ["smile"],
+                            "negative_semantics": ["frown"],
+                            "usage_notes": "Use for mouth detail.",
+                            "parameter_bindings": [],
+                        },
+                    ],
+                    "couplings": [],
+                },
+            }
+        ],
+    }
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "mode": "expressive",
+                "emotion_label": "neutral",
+                "axes": {
+                    "head_roll": {"value": 40},
+                    "mouth_smile": {"value": 65},
+                },
+            }
+        },
+    )
+
+    payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
+
+    assert payload is not None
+    assert payload["profile_id"] == "Mk6_1.0.semantic.v1"
+    assert payload["profile_revision"] == 3
+    assert payload["model_id"] == "Mk6_1.0"
+    assert set(payload["axes"]) == {"head_roll", "mouth_smile"}
+
+
 def test_result_contributor_returns_plugin_hint_motion_as_client_object(
     install_fake_astrbot,
     monkeypatch,

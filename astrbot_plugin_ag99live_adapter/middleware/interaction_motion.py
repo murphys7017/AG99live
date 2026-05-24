@@ -67,9 +67,10 @@ class _MotionScheduleAttempt:
     reason: str
     assistant_text: str
     plugin_hints_motion_payload: dict[str, Any] | None = None
+    plugin_hints_resolution_reason: str | None = None
 
     def to_metadata(self) -> dict[str, Any]:
-        return {
+        metadata = {
             "phase": self.phase,
             "source": self.source,
             "scheduled_frontend_turn_id": self.scheduled_frontend_turn_id,
@@ -82,6 +83,9 @@ class _MotionScheduleAttempt:
             "scheduled": self.scheduled,
             "reason": self.reason,
         }
+        if self.plugin_hints_resolution_reason:
+            metadata["plugin_hints_resolution_reason"] = self.plugin_hints_resolution_reason
+        return metadata
 
 
 class AG99liveMotionPromptContributor:
@@ -223,24 +227,35 @@ def _resolve_plugin_hints_motion_payload(
     event: Any,
     runtime_state: Any,
 ) -> dict[str, Any] | None:
+    payload, _reason = _resolve_plugin_hints_motion_payload_with_reason(
+        event,
+        runtime_state,
+    )
+    return payload
+
+
+def _resolve_plugin_hints_motion_payload_with_reason(
+    event: Any,
+    runtime_state: Any,
+) -> tuple[dict[str, Any] | None, str]:
     hints = _call_event_method(event, "get_extra", "_interaction_plugin_hints")
     if not isinstance(hints, dict):
-        return None
+        return None, "plugin_hints_missing"
 
     motion_hint = hints.get("ag99live_motion")
     if not isinstance(motion_hint, dict):
-        return None
+        return None, "ag99live_motion_missing"
 
     mode = str(motion_hint.get("mode") or "").strip()
     if mode not in {"idle", "expressive"}:
-        return None
+        return None, f"invalid_mode:{mode or '<empty>'}"
 
     try:
         semantic_profile = resolve_selected_semantic_axis_profile(
             runtime_state=runtime_state
         )
-    except Exception:
-        return None
+    except Exception as exc:  # noqa: BLE001
+        return None, f"semantic_profile_unresolved:{exc}"
 
     axes = motion_hint.get("axes")
     validated_axes = _normalize_plugin_hint_axes(
@@ -250,11 +265,11 @@ def _resolve_plugin_hints_motion_payload(
         emotion_label=str(motion_hint.get("emotion_label") or "").strip() or "neutral",
     )
     if not validated_axes:
-        return None
+        return None, "axes_empty_or_invalid"
 
     profile_id = str(semantic_profile.get("profile_id") or "").strip()
     if not profile_id:
-        return None
+        return None, "profile_id_empty"
 
     emotion_label = str(motion_hint.get("emotion_label") or "").strip()
     if not emotion_label:
@@ -278,7 +293,7 @@ def _resolve_plugin_hints_motion_payload(
         "duration_hint_ms": duration_hint_ms,
         "axes": validated_axes,
         "summary": {"axis_count": len(validated_axes)},
-    }
+    }, "ok"
 
 
 def _normalize_plugin_hint_axes(
@@ -485,8 +500,14 @@ def _schedule_motion_from_interaction_result(
     identity = _resolve_frontend_identity_snapshot(event, bundle.turn_coordinator)
     reply_plan = _resolve_interaction_reply_plan_snapshot(event, view)
 
-    plugin_hints_payload = _resolve_plugin_hints_motion_payload(
+    plugin_hints_payload, plugin_hints_reason = _resolve_plugin_hints_motion_payload_with_reason(
         event, bundle.runtime_state
+    )
+    _log_plugin_hints_motion_resolution(
+        event,
+        phase=phase,
+        payload=plugin_hints_payload,
+        reason=plugin_hints_reason,
     )
     if plugin_hints_payload is not None:
         return _MotionScheduleAttempt(
@@ -505,6 +526,7 @@ def _schedule_motion_from_interaction_result(
             reason="plugin_hints_motion_client_object",
             assistant_text=assistant_text,
             plugin_hints_motion_payload=plugin_hints_payload,
+            plugin_hints_resolution_reason=plugin_hints_reason,
         )
 
     policy = _resolve_motion_schedule_policy(
@@ -530,6 +552,7 @@ def _schedule_motion_from_interaction_result(
             scheduled=False,
             reason="assistant_text_empty",
             assistant_text=assistant_text,
+            plugin_hints_resolution_reason=plugin_hints_reason,
         )
 
     if not policy.should_schedule or policy.source is None:
@@ -548,6 +571,7 @@ def _schedule_motion_from_interaction_result(
             scheduled=False,
             reason=policy.reason,
             assistant_text=assistant_text,
+            plugin_hints_resolution_reason=plugin_hints_reason,
         )
 
     return _MotionScheduleAttempt(
@@ -565,6 +589,43 @@ def _schedule_motion_from_interaction_result(
         scheduled=False,
         reason=policy.reason,
         assistant_text=assistant_text,
+        plugin_hints_resolution_reason=plugin_hints_reason,
+    )
+
+
+def _log_plugin_hints_motion_resolution(
+    event: Any,
+    *,
+    phase: str,
+    payload: dict[str, Any] | None,
+    reason: str,
+) -> None:
+    hints = _call_event_method(event, "get_extra", "_interaction_plugin_hints")
+    hint_keys: list[str] = []
+    motion_axes_keys: list[str] = []
+    if isinstance(hints, dict):
+        hint_keys = sorted(
+            str(key).strip()
+            for key in hints.keys()
+            if str(key).strip()
+        )
+        motion_hint = hints.get("ag99live_motion")
+        if isinstance(motion_hint, dict):
+            axes = motion_hint.get("axes")
+            if isinstance(axes, dict):
+                motion_axes_keys = sorted(
+                    str(key).strip()
+                    for key in axes.keys()
+                    if str(key).strip()
+                )
+
+    logger.info(
+        "WIRING plugin_hints_motion phase=%s payload_present=%s reason=%s hint_keys=%s motion_axes=%s",
+        phase or "",
+        payload is not None,
+        reason,
+        ",".join(hint_keys),
+        ",".join(motion_axes_keys),
     )
 
 
