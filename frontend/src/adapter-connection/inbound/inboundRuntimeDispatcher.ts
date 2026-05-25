@@ -41,6 +41,7 @@ export interface InboundRuntimeDispatchDeps {
     reason: string,
   ) => void;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
+  reportRuntimeProtocolViolation: (message: string) => void;
 }
 
 type InboundRuntimeEvent = Extract<
@@ -105,11 +106,18 @@ function applyTurnFinished(
   s.turnFinishedTurnId = event.turnId;
   s.turnFinishedSuccess = event.success;
   s.turnFinishedReason = event.reason;
-  deps.sessionStore?.markTurnFinished(
-    s.turnFinishedTurnId,
-    s.turnFinishedSuccess,
-    s.turnFinishedReason,
-  );
+  try {
+    deps.sessionStore?.markTurnFinished(
+      s.turnFinishedTurnId,
+      s.turnFinishedSuccess,
+      s.turnFinishedReason,
+    );
+  } catch (error) {
+    deps.reportRuntimeProtocolViolation(
+      error instanceof Error ? error.message : "turn_finished arrived for unknown session.",
+    );
+    return;
+  }
 
   if (event.success) {
     s.statusMessage = "本轮对话已完成。";
@@ -160,7 +168,14 @@ function applySynthFinished(
   event: Extract<InboundAdapterEvent, { kind: "synth_finished" }>,
 ): void {
   const s = deps.state;
-  deps.sessionStore?.markSynthFinished(event.turnId);
+  try {
+    deps.sessionStore?.markSynthFinished(event.turnId);
+  } catch (error) {
+    deps.reportRuntimeProtocolViolation(
+      error instanceof Error ? error.message : "synth_finished arrived for unknown session.",
+    );
+    return;
+  }
   deps.markMissingAudiosForTurn(
     event.turnId,
     "synth_finished_without_audio_playback",

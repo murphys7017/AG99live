@@ -89,6 +89,7 @@ export interface InboundDispatchDeps {
   markAudioPlaybackTerminal: (terminalState: string, turnId: string | null, reason?: string, messageId?: string | null) => void;
   hasPendingAudioForTurn: (turnId: string | null) => boolean;
   markMissingAudiosForTurn: (turnId: string | null, reason: string) => void;
+  reportRuntimeProtocolViolation: (message: string) => void;
   // text / audio queue
   queuePendingAssistantTextForPlayback: (map: Map<string, PendingAssistantTextItem>, text: string, turnId: string | null, messageId: string) => void;
   queuePendingAudioForPlayback: (map: Map<string, PendingAudioItem>, url: string, turnId: string | null, messageId: string) => void;

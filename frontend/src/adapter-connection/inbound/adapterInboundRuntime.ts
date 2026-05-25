@@ -69,6 +69,13 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     console.warn("[Connection] protocol error.", message, envelope);
   }
 
+  function reportRuntimeProtocolViolation(message: string): void {
+    deps.state.lastError = message;
+    deps.state.statusMessage = message;
+    deps.pushHistory("error", message);
+    console.warn("[Connection] runtime protocol violation.", message);
+  }
+
   async function handleSocketMessage(rawData: string): Promise<void> {
     const parsed = parseInboundEnvelope(rawData);
     if (!parsed.ok) {
@@ -159,6 +166,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
         ),
       hasPendingAudioForTurn: (turnId) => deps.hasPendingAudioForTurn(turnId),
       markMissingAudiosForTurn: (turnId, reason) => deps.markMissingAudiosForTurn(turnId, reason),
+      reportRuntimeProtocolViolation,
       queuePendingAssistantTextForPlayback: (map, text, turnId, messageId) =>
         queuePendingAssistantTextForPlayback(map, text, turnId, messageId),
       queuePendingAudioForPlayback: (map, url, turnId, messageId) => {

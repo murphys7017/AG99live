@@ -576,6 +576,24 @@ function testMotionFallbackDoesNotCreateAnonymousSession(): void {
   });
 }
 
+function testStaleSynthFinishedReportsProtocolViolation(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-current");
+    socket.emitMessage(JSON.stringify({
+      type: "control.synth_finished",
+      version: "v2",
+      message_id: "m-stale-synth",
+      timestamp: "2026-05-08T00:00:02.000Z",
+      turn_id: "turn-other",
+      source: "backend",
+      payload: {},
+    }));
+
+    assert.match(adapter.state.lastError, /does not exist/);
+    assert.equal(sessionStore.getSession("turn-other"), undefined);
+  });
+}
+
 function testInvalidMotionDoesNotRewritePreviousSegment(): void {
   withConnectedAdapter(({ socket, sessionStore }) => {
     sendTurnStarted(socket, "turn-motion-old");
@@ -651,8 +669,9 @@ function testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted(): void {
     // Current turn should NOT be marked as finished
     const session = sessionStore.getSession("turn-current");
     assert.ok(session);
-    // The stale turn_finished created a separate session, not affecting current
     assert.equal(session.backend.turnFinished, false);
+    assert.equal(sessionStore.getSession("turn-other"), undefined);
+    assert.match(adapter.state.lastError, /does not exist/);
   });
 }
 
@@ -1041,6 +1060,7 @@ async function run(): Promise<void> {
   testSynthFinishedMarksMissingSegmentAudioAbsent();
   testSynthFinishedDoesNotMarkReleasedAudioAbsent();
   testTurnFinishedDoesNotMarkMissingSegmentAudioAbsent();
+  testStaleSynthFinishedReportsProtocolViolation();
   testMotionFallbackDoesNotCreateAnonymousSession();
   testInvalidMotionDoesNotRewritePreviousSegment();
   testBackToBackTurnsDoNotSharePendingState();

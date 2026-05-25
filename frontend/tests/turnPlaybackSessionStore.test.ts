@@ -132,6 +132,22 @@ function testBackendCompletionSignalsAreSeparate(): void {
   assert.equal(session.backend.success, true);
 }
 
+function testSynthFinishedRequiresExistingSession(): void {
+  const store = useTurnPlaybackSessionStore();
+  assert.throws(
+    () => store.markSynthFinished("turn-missing"),
+    /does not exist/,
+  );
+}
+
+function testTurnFinishedRequiresExistingSession(): void {
+  const store = useTurnPlaybackSessionStore();
+  assert.throws(
+    () => store.markTurnFinished("turn-missing", true),
+    /does not exist/,
+  );
+}
+
 function testRequiredMessageIdIsEnforced(): void {
   const store = useTurnPlaybackSessionStore();
   assert.throws(
@@ -237,6 +253,8 @@ function run(): void {
   testSelectorsOperateOnSegments();
   testSegmentSettlementAndTurnSettlement();
   testBackendCompletionSignalsAreSeparate();
+  testSynthFinishedRequiresExistingSession();
+  testTurnFinishedRequiresExistingSession();
   testRequiredMessageIdIsEnforced();
   testTurnOnlySessionRemainsTurnScoped();
   testGetUnsettledSegmentsReturnsOnlyUnsettledSegments();

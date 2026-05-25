@@ -82,6 +82,14 @@ export function useTurnPlaybackSessionStore() {
     return sessionId ? state.sessions.get(sessionId) : undefined;
   }
 
+  function requireSession(turnId: string | null): TurnPlaybackSession {
+    const session = getSession(turnId);
+    if (session) {
+      return session;
+    }
+    throw new Error(`Turn playback session does not exist for turnId=${turnId ?? "null"}.`);
+  }
+
   function getActiveSession(): TurnPlaybackSession | undefined {
     if (!state.activeSessionId) {
       return undefined;
@@ -375,7 +383,7 @@ export function useTurnPlaybackSessionStore() {
   function markSynthFinished(
     turnId: string | null,
   ): void {
-    const session = ensureSession(turnId);
+    const session = requireSession(turnId);
     session.backend.synthFinished = true;
   }
 
@@ -384,7 +392,7 @@ export function useTurnPlaybackSessionStore() {
     success: boolean,
     reason = "",
   ): void {
-    const session = ensureSession(turnId);
+    const session = requireSession(turnId);
     session.backend.turnFinished = true;
     session.backend.success = success;
     session.backend.reason = reason || session.backend.reason;
@@ -442,7 +450,7 @@ export function useTurnPlaybackSessionStore() {
     turnId: string | null,
     phase: TurnPlaybackPhase,
   ): boolean {
-    const session = ensureSession(turnId);
+    const session = requireSession(turnId);
     return markPhaseInternal(session, phase);
   }
 
@@ -459,7 +467,7 @@ export function useTurnPlaybackSessionStore() {
   function finalizeSession(
     turnId: string | null,
   ): boolean {
-    const session = ensureSession(turnId);
+    const session = requireSession(turnId);
     return markPhaseInternal(session, "completed");
   }
 
@@ -503,6 +511,7 @@ export function useTurnPlaybackSessionStore() {
   return {
     state: readonly(state),
     ensureSession,
+    requireSession,
     ensureSegment,
     getSession,
     getSessionById,
