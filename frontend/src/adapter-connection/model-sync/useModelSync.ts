@@ -1,101 +1,83 @@
 import { computed, onScopeDispose, reactive, readonly } from "vue";
 import type {
+  ComputedRef,
+  DeepReadonly,
+} from "vue";
+import type {
   ModelSummary,
   ModelSyncInfo,
   ProtocolEnvelope,
   SystemModelSyncPayload,
 } from "../../types/protocol.js";
+import type { SemanticAxisProfile } from "../../types/semantic-axis-profile.js";
 
-const state = reactive({
-  confName: "",
-  lastUpdated: "",
-  modelInfo: null as ModelSyncInfo | null,
-});
-
-let initialized = false;
-
-function resetModelSyncState(): void {
-  state.confName = "";
-  state.lastUpdated = "";
-  state.modelInfo = null;
+interface ModelSyncState {
+  confName: string;
+  lastUpdated: string;
+  modelInfo: ModelSyncInfo | null;
 }
 
-function applyModelSyncMessage(
-  envelope: ProtocolEnvelope<SystemModelSyncPayload>,
-): void {
-  if (envelope.type !== "system.model_sync") {
-    return;
-  }
-
-  state.confName = envelope.payload.conf_name;
-  state.lastUpdated = envelope.timestamp;
-  state.modelInfo = envelope.payload.model_info;
+export interface ModelSyncInstance {
+  state: DeepReadonly<ModelSyncState>;
+  selectedModel: ComputedRef<ModelSummary | null>;
+  selectedSemanticAxisProfile: ComputedRef<SemanticAxisProfile | null>;
+  applyModelSyncMessage: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => void;
+  applyUnknownMessage: (raw: unknown) => void;
+  resetModelSyncState: () => void;
 }
 
-function applyUnknownMessage(raw: unknown): void {
-  if (!raw || typeof raw !== "object") {
-    return;
+export function createModelSync(): ModelSyncInstance {
+  const state = reactive<ModelSyncState>({
+    confName: "",
+    lastUpdated: "",
+    modelInfo: null,
+  });
+
+  function resetModelSyncState(): void {
+    state.confName = "";
+    state.lastUpdated = "";
+    state.modelInfo = null;
   }
 
-  const candidate = raw as Partial<ProtocolEnvelope<SystemModelSyncPayload>>;
-  if (candidate.type !== "system.model_sync" || !candidate.payload) {
-    return;
+  function applyModelSyncMessage(
+    envelope: ProtocolEnvelope<SystemModelSyncPayload>,
+  ): void {
+    if (envelope.type !== "system.model_sync") {
+      return;
+    }
+
+    state.confName = envelope.payload.conf_name;
+    state.lastUpdated = envelope.timestamp;
+    state.modelInfo = envelope.payload.model_info;
   }
 
-  applyModelSyncMessage(candidate as ProtocolEnvelope<SystemModelSyncPayload>);
-}
+  function applyUnknownMessage(raw: unknown): void {
+    if (!raw || typeof raw !== "object") {
+      return;
+    }
 
-const selectedModel = computed<ModelSummary | null>(() => {
-  const modelInfo = state.modelInfo;
-  if (!modelInfo) {
-    return null;
-  }
-  return (
-    modelInfo.models.find((item) => item.name === modelInfo.selected_model) ??
-    modelInfo.models[0] ??
-    null
-  );
-});
+    const candidate = raw as Partial<ProtocolEnvelope<SystemModelSyncPayload>>;
+    if (candidate.type !== "system.model_sync" || !candidate.payload) {
+      return;
+    }
 
-const selectedSemanticAxisProfile = computed(() => {
-  return selectedModel.value?.semantic_axis_profile ?? null;
-});
-
-function ensureInitialized(): () => void {
-  if (initialized) {
-    return () => {};
-  }
-  initialized = true;
-
-  if (typeof window === "undefined") {
-    return () => {};
+    applyModelSyncMessage(candidate as ProtocolEnvelope<SystemModelSyncPayload>);
   }
 
-  function onWindowMessage(event: MessageEvent): void {
-    applyUnknownMessage(event.data);
-  }
+  const selectedModel = computed<ModelSummary | null>(() => {
+    const modelInfo = state.modelInfo;
+    if (!modelInfo) {
+      return null;
+    }
+    return (
+      modelInfo.models.find((item) => item.name === modelInfo.selected_model) ??
+      modelInfo.models[0] ??
+      null
+    );
+  });
 
-  window.addEventListener("message", onWindowMessage);
-
-  const devtoolsMount = window as Window & {
-    __AG99LIVE_DEVTOOLS__?: { pushProtocolMessage: (payload: unknown) => void };
-  };
-  devtoolsMount.__AG99LIVE_DEVTOOLS__ = {
-    pushProtocolMessage: applyUnknownMessage,
-  };
-
-  return () => {
-    window.removeEventListener("message", onWindowMessage);
-    delete devtoolsMount.__AG99LIVE_DEVTOOLS__;
-    initialized = false;
-  };
-}
-
-export function useModelSync() {
-  const cleanup = ensureInitialized();
-
-  onScopeDispose(() => {
-    cleanup();
+  const selectedSemanticAxisProfile = computed(() => {
+    return selectedModel.value?.semantic_axis_profile ?? null;
   });
 
   return {
@@ -106,4 +88,38 @@ export function useModelSync() {
     applyUnknownMessage,
     resetModelSyncState,
   };
+}
+
+export function attachModelSyncWindowBridge(modelSync: ModelSyncInstance): () => void {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  function onWindowMessage(event: MessageEvent): void {
+    modelSync.applyUnknownMessage(event.data);
+  }
+
+  window.addEventListener("message", onWindowMessage);
+
+  const devtoolsMount = window as Window & {
+    __AG99LIVE_DEVTOOLS__?: { pushProtocolMessage: (payload: unknown) => void };
+  };
+  devtoolsMount.__AG99LIVE_DEVTOOLS__ = {
+    pushProtocolMessage: modelSync.applyUnknownMessage,
+  };
+
+  return () => {
+    window.removeEventListener("message", onWindowMessage);
+    delete devtoolsMount.__AG99LIVE_DEVTOOLS__;
+  };
+}
+
+export function useModelSync(modelSync: ModelSyncInstance): ModelSyncInstance {
+  const cleanup = attachModelSyncWindowBridge(modelSync);
+
+  onScopeDispose(() => {
+    cleanup();
+  });
+
+  return modelSync;
 }

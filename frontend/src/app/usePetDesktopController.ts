@@ -2,7 +2,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { buildParameterActionPreview } from "../action-lab/parameterActionPreview";
 import { useAdapterConnection } from "../adapter-connection/useAdapterConnection";
 import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
-import { useModelSync } from "../adapter-connection/model-sync/useModelSync";
+import { createModelSync, useModelSync } from "../adapter-connection/model-sync/useModelSync";
 import { usePetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRuntimeSnapshotPublisher";
 import { usePlaybackCompletionCoordinator } from "../turn-playback/usePlaybackCompletionCoordinator";
 import { useTurnPlaybackOrchestrator } from "../turn-playback/useTurnPlaybackOrchestrator";
@@ -24,9 +24,10 @@ import type {
 } from "../types/desktop";
 
 export function usePetDesktopController() {
-  const { state, selectedModel, selectedSemanticAxisProfile } = useModelSync();
   const sessionStore = useTurnPlaybackSessionStore();
-  const adapter = useAdapterConnection(sessionStore);
+  const modelSync = useModelSync(createModelSync());
+  const { state, selectedModel, selectedSemanticAxisProfile } = modelSync;
+  const adapter = useAdapterConnection(sessionStore, modelSync);
   const bridge = useDesktopBridge();
   const motionPlayer = usePreviewMotionPlayer();
   const motionEngineSettings = reactive(
