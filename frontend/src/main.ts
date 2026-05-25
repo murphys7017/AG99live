@@ -20,10 +20,20 @@ document.title = roleTitles[role] ?? "AG99live";
 
 const app = createApp(App);
 const desktopBridge = createDesktopBridge();
+let disposed = false;
+
+function disposeAppRuntime(): void {
+  if (disposed) {
+    return;
+  }
+  disposed = true;
+  desktopBridge.dispose();
+}
+
 desktopBridge.start();
 app.provide(desktopBridgeKey, desktopBridge);
 app.mount("#app");
 
 window.addEventListener("beforeunload", () => {
-  desktopBridge.dispose();
+  disposeAppRuntime();
 }, { once: true });

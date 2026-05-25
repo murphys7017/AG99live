@@ -675,6 +675,19 @@ function testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted(): void {
   });
 }
 
+function testScopeDisposeDisconnectsAdapterRuntime(): void {
+  const harness = createConnectedAdapter();
+  const { adapter, socket, scope } = harness;
+  assert.equal(adapter.state.status, "connected");
+  assert.equal(socket.readyState, FakeWebSocket.OPEN);
+
+  scope.stop();
+
+  assert.equal(adapter.state.status, "disconnected");
+  assert.equal(adapter.state.statusMessage, "已断开适配器连接。");
+  assert.equal(socket.readyState, FakeWebSocket.CLOSED);
+}
+
 async function testSendTextUsesOutboundProtocolEnvelope(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
@@ -1065,6 +1078,7 @@ async function run(): Promise<void> {
   testInvalidMotionDoesNotRewritePreviousSegment();
   testBackToBackTurnsDoNotSharePendingState();
   testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted();
+  testScopeDisposeDisconnectsAdapterRuntime();
   await testSendTextUsesOutboundProtocolEnvelope();
   testSendMotionPreviewUsesOutboundProtocolEnvelope();
   testSendParameterPlanPayloadPreviewIsRejected();

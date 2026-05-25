@@ -1,4 +1,4 @@
-import { readonly } from "vue";
+import { onScopeDispose, readonly } from "vue";
 import type {
   DeepReadonly,
 } from "vue";
@@ -75,6 +75,7 @@ export interface AdapterConnectionInstance {
   readonly state: DeepReadonly<ReturnType<typeof createAdapterConnectionState>>;
   readonly modelSync: ModelSyncInstance;
   initialize: () => Promise<void>;
+  dispose: () => void;
   setAddress: (nextAddress: string) => void;
   setDesktopScreenshotOnSendEnabled: (enabled: boolean) => void;
   setMicrophoneDevice: (deviceId: string) => void;
@@ -121,6 +122,7 @@ export function createAdapterConnection(
   let manualClose = false;
   let initializePromise: Promise<void> | null = null;
   let connectAttemptSerial = 0;
+  let disposed = false;
   const assistantHistoryKeys: string[] = [];
   const assistantHistoryKeySet = new Set<string>();
 
@@ -250,6 +252,9 @@ export function createAdapterConnection(
   }
 
   async function initialize(): Promise<void> {
+    if (disposed) {
+      throw new Error("Adapter connection runtime has been disposed.");
+    }
     if (!initializePromise) {
       initializePromise = Promise.resolve().then(() => {
         const storedAddress = loadStoredAdapterAddress();
@@ -264,6 +269,9 @@ export function createAdapterConnection(
   }
 
   function connect(): void {
+    if (disposed) {
+      throw new Error("Adapter connection runtime has been disposed.");
+    }
     disconnectInternal(false);
 
     let candidates: string[] = [normalizeWsAddress(DEFAULT_ADAPTER_ADDRESS)];
@@ -307,6 +315,18 @@ export function createAdapterConnection(
       socket = null;
       currentSocket.close();
     }
+  }
+
+  function dispose(): void {
+    if (disposed) {
+      return;
+    }
+    disposed = true;
+    disconnectInternal(true);
+    resetConnectionRuntimeState();
+    state.status = "disconnected";
+    state.statusMessage = "已断开适配器连接。";
+    state.lastError = "";
   }
 
   function openConnectionCandidate(
@@ -568,6 +588,7 @@ export function createAdapterConnection(
     state: readonly(state),
     modelSync,
     initialize,
+    dispose,
     setAddress,
     setDesktopScreenshotOnSendEnabled,
     setMicrophoneDevice,
@@ -601,8 +622,14 @@ export function useAdapterConnection(
   sessionStore?: SessionStore,
   modelSync?: ModelSyncInstance,
 ): AdapterConnectionInstance {
-  return createAdapterConnection({
+  const connection = createAdapterConnection({
     sessionStore,
     modelSync,
   });
+
+  onScopeDispose(() => {
+    connection.dispose();
+  });
+
+  return connection;
 }
