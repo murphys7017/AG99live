@@ -56,7 +56,6 @@ import {
   queueAssistantTextForPlayback as queuePendingAssistantTextForPlayback,
 } from "./runtime/playbackReleaseQueue.js";
 import {
-  createModelSync,
   type ModelSyncInstance,
 } from "./model-sync/useModelSync.js";
 import { useAdapterHistory } from "./history/useAdapterHistory.js";
@@ -110,11 +109,11 @@ export interface AdapterConnectionInstance {
 
 interface CreateAdapterConnectionOptions {
   sessionStore?: SessionStore;
-  modelSync?: ModelSyncInstance;
+  modelSync: ModelSyncInstance;
 }
 
 export function createAdapterConnection(
-  options: CreateAdapterConnectionOptions = {},
+  options: CreateAdapterConnectionOptions,
 ): AdapterConnectionInstance {
   const state = createAdapterConnectionState();
 
@@ -126,7 +125,7 @@ export function createAdapterConnection(
   const assistantHistoryKeys: string[] = [];
   const assistantHistoryKeySet = new Set<string>();
 
-  const modelSync = options.modelSync ?? createModelSync();
+  const modelSync = options.modelSync;
   const sessionStore = options.sessionStore;
   let historyAdapter: AdapterHistory | null = null;
   let motionTuningAdapter: AdapterMotionTuning | null = null;
@@ -619,8 +618,8 @@ export function createAdapterConnection(
 }
 
 export function useAdapterConnection(
-  sessionStore?: SessionStore,
-  modelSync?: ModelSyncInstance,
+  sessionStore: SessionStore | undefined,
+  modelSync: ModelSyncInstance,
 ): AdapterConnectionInstance {
   const connection = createAdapterConnection({
     sessionStore,

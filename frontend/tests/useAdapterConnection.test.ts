@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { effectScope } from "vue";
 import { useAdapterConnection } from "../src/adapter-connection/useAdapterConnection.js";
+import { createModelSync } from "../src/adapter-connection/model-sync/useModelSync.js";
 import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
 
 interface ListenerMap {
@@ -225,8 +226,9 @@ function createConnectedAdapter() {
   FakeAudio.instances.length = 0;
   FakeAudio.nextPlayShouldStall = false;
   const sessionStore = useTurnPlaybackSessionStore();
+  const modelSync = createModelSync();
   const scope = effectScope();
-  const adapter = scope.run(() => useAdapterConnection(sessionStore));
+  const adapter = scope.run(() => useAdapterConnection(sessionStore, modelSync));
   if (!adapter) {
     throw new Error("expected adapter instance");
   }
