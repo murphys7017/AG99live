@@ -13,7 +13,7 @@ import { buildParameterActionPreview } from "../action-lab/parameterActionPrevie
 import { useAdapterConnection } from "../adapter-connection/useAdapterConnection";
 import { createModelSync, useModelSync } from "../adapter-connection/model-sync/useModelSync";
 import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
-import { usePetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRuntimeSnapshotPublisher";
+import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRuntimeSnapshotPublisher";
 import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
 import { cloneModelEngineSettings } from "../model-engine/settings";
@@ -200,7 +200,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     adapter.deleteMotionTuningSample(sampleId);
   }
 
-  const snapshotPublisher = usePetRuntimeSnapshotPublisher({
+  const snapshotPublisher = createPetRuntimeSnapshotPublisher({
     adapter,
     bridge,
     modelSyncState: state,
@@ -219,7 +219,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
 
   const commandHandler = createDesktopRuntimeCommandHandler({
     adapter,
-    bridge,
     ambientMotionEnabled,
     motionEngineSettings,
     modelEngine: {
@@ -251,6 +250,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     modelEngine.stop("unmount");
     detachBridgeListener();
     detachProfileAuthoringBridgeListener();
+    snapshotPublisher.dispose();
   });
 
   const runtime: PetDesktopRuntime = {

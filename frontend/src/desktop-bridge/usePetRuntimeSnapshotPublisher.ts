@@ -1,4 +1,4 @@
-import { onScopeDispose, watch, type ComputedRef, type Ref } from "vue";
+import { watch, type ComputedRef, type Ref } from "vue";
 import { cloneModelEngineSettings, type ModelEngineSettings } from "../model-engine/settings";
 import type {
   DesktopBaseActionPreview,
@@ -127,18 +127,19 @@ function createDebounce(): {
   return { schedule, flush, cancel };
 }
 
-export function usePetRuntimeSnapshotPublisher(
+export interface PetRuntimeSnapshotPublisher {
+  publishMotionTuningSamples: () => void;
+  publishModelProjectionSnapshot: () => void;
+  dispose: () => void;
+}
+
+export function createPetRuntimeSnapshotPublisher(
   options: PetRuntimeSnapshotPublisherOptions,
-): { publishModelProjectionSnapshot: () => void } {
+): PetRuntimeSnapshotPublisher {
   const snapshotDebounce = createDebounce();
   const modelProjectionDebounce = createDebounce();
   const profileDebounce = createDebounce();
-
-  // ── Runtime snapshot ────────────────────────────────────────────
-  // Build adapter + session projections from source state,
-  // then assemble the final snapshot.
-
-  watch(
+  const stopRuntimeSnapshotWatch = watch(
     () => {
       const a = options.adapter.state;
       const adapterProjection = buildAdapterRuntimeProjection({
@@ -206,19 +207,27 @@ export function usePetRuntimeSnapshotPublisher(
     { deep: true, immediate: true },
   );
 
+  function publishMotionTuningSamples(): void {
+    options.bridge.publishMotionTuningSamples(
+      options.adapter.state.motionTuningSamples.map((sample) => cloneJson(sample)),
+      cloneJson(options.adapter.state.motionTuningSamplesStatus) as DesktopMotionTuningSamplesStatus,
+    );
+  }
+
+  // ── Runtime snapshot ────────────────────────────────────────────
+  // Build adapter + session projections from source state,
+  // then assemble the final snapshot.
+
   // ── Motion tuning projection ────────────────────────────────────
 
-  watch(
+  const stopMotionTuningWatch = watch(
     () => ({
       samples: options.adapter.state.motionTuningSamples,
       status: options.adapter.state.motionTuningSamplesStatus,
     }),
-    ({ samples, status }) => {
+    () => {
       snapshotDebounce.schedule(() => {
-      options.bridge.publishMotionTuningSamples(
-        samples.map((sample) => cloneJson(sample)),
-        cloneJson(status) as DesktopMotionTuningSamplesStatus,
-      );
+        publishMotionTuningSamples();
       });
     },
     { deep: true, immediate: true },
@@ -249,7 +258,7 @@ export function usePetRuntimeSnapshotPublisher(
     options.bridge.publishModelProjectionSnapshot(buildModelProjectionSnapshot());
   }
 
-  watch(
+  const stopModelProjectionWatch = watch(
     () => [
       options.modelSyncState.confName,
       options.modelSyncState.lastUpdated,
@@ -270,7 +279,7 @@ export function usePetRuntimeSnapshotPublisher(
 
   // ── Profile authoring snapshot ───────────────────────────────────
 
-  watch(
+  const stopProfileWatch = watch(
     () => options.adapter.state.latestSemanticAxisProfileSaveResult,
     () => {
       profileDebounce.schedule(() => {
@@ -284,13 +293,19 @@ export function usePetRuntimeSnapshotPublisher(
     { deep: true, immediate: true },
   );
 
-  onScopeDispose(() => {
+  function dispose(): void {
+    stopRuntimeSnapshotWatch();
+    stopMotionTuningWatch();
+    stopModelProjectionWatch();
+    stopProfileWatch();
     snapshotDebounce.flush();
     modelProjectionDebounce.flush();
     profileDebounce.flush();
-  });
+  }
 
   return {
+    publishMotionTuningSamples,
     publishModelProjectionSnapshot,
+    dispose,
   };
 }

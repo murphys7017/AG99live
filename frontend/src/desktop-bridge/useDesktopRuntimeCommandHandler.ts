@@ -34,20 +34,13 @@ interface DesktopRuntimeCommandAdapterPort {
   sendSemanticAxisProfileSave: (payload: SystemSemanticAxisProfileSavePayload) => boolean;
 }
 
-interface DesktopRuntimeCommandBridgePort {
-  publishMotionTuningSamples: (
-    samples: unknown,
-    status: DesktopMotionTuningSamplesStatus,
-  ) => void;
-}
-
 interface DesktopRuntimeSnapshotPublisherPort {
+  publishMotionTuningSamples: () => void;
   publishModelProjectionSnapshot: () => void;
 }
 
 export interface DesktopRuntimeCommandDeps {
   adapter: DesktopRuntimeCommandAdapterPort;
-  bridge: DesktopRuntimeCommandBridgePort;
   ambientMotionEnabled: Ref<boolean>;
   motionEngineSettings: ModelEngineSettings;
   modelEngine: {
@@ -95,10 +88,7 @@ export function createDesktopRuntimeCommandHandler(
         deps.snapshotPublisher.publishModelProjectionSnapshot();
         return;
       case "request_motion_tuning_samples_sync":
-        deps.bridge.publishMotionTuningSamples(
-          cloneJson(deps.adapter.state.motionTuningSamples),
-          cloneJson(deps.adapter.state.motionTuningSamplesStatus),
-        );
+        deps.snapshotPublisher.publishMotionTuningSamples();
         return;
       case "save_motion_tuning_sample":
         deps.saveMotionTuningSample(command.sample);
