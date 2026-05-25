@@ -18,9 +18,8 @@
 
 当前待办定位：
 
-- `SpeechPoseStage` 仍然保留，负责“说话时随动”的 plan 级补偿。
-- 连续多段之间的 soft handoff、不硬切、残留和惯性，不再由独立 `ContinuityStage` 负责。
-- 这些连续性职责后续由 SDK 侧 `ParameterPresentationLayer` 统一承接。
+- `SpeechPoseStage` 负责“说话时随动”的 plan 级补偿。
+- 连续多段之间的 soft handoff、不硬切、残留和惯性由 SDK 侧 `ParameterPresentationLayer` 统一承接。
 
 ## 2. 放置位置
 
@@ -227,4 +226,4 @@ npm run test:model-engine
 
 1. 先做 `SpeechPoseStage`
 2. 再做 `ParameterPresentationLayer`
-3. 不再单独推进独立 `ContinuityStage`
+3. 连续表现统一由 `ParameterPresentationLayer` 承接

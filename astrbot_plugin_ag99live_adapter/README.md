@@ -10,6 +10,13 @@ AG99live V2 的 AstrBot 插件侧实现。该目录负责协议桥接、turn 生
 - 扫描 Live2D 资源并产出结构化能力信息。
 - 生成并下发动作用载荷；默认走 AstrBot 交互中间件主链路，由 `client_objects` / plugin hints 提供动作；`inline_first` 内联动作链路仅作为显式兼容路径保留。
 
+## 当前路线说明
+
+- 后端当前主职责是产出结构化动作意图 `engine.motion_intent.v2`，并通过 middleware-first 链路稳定送到前端。
+- 前端 `ModelEngine` 负责把 intent 编译为 `engine.parameter_plan.v2`。
+- 说话时的 plan 级补偿由前端 compile 侧 `SpeechPoseStage` 承接。
+- 连续多段之间的惯性、衰减、残留、soft handoff 和层间混合由前端 Live2D runtime 侧 `ParameterPresentationLayer` 承接，而不是放回后端动作生成链路。
+
 ## 目录结构
 
 ```text
@@ -63,6 +70,7 @@ astrbot_plugin_ag99live_adapter/
 - 麦克风输入现在按“单段录音”组织：一段采集内的 `input.raw_audio_data` 与 `input.mic_audio_end` 共享同一个新的 `turn_id`；后端 STT ingress 也按这个 `turn_id` 分桶缓冲，不再把不同输入段混到一个全局缓冲。
 - 若前端检测到发送积压，会在 `input.mic_audio_end` 中带上 `dropped: true`，后端直接丢弃该段转写。
 - 切换麦克风设备时，前端会先正常结束旧输入段，再启动新输入段；收到 `control.interrupt` 时，前端会把已释放的 segment 音频写成失败终态后再清理播放 runtime。
+- `semantic_axis_profile` 在默认设计升级时会自动刷新 backend-owned profile；用户修改过的 profile 如果只是旧默认设计残留，在重新匹配当前模型 hash 后也会自动刷新到新默认，否则保持 `stale` 等待人工处理。
 
 当前结构注意点：
 

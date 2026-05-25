@@ -109,7 +109,7 @@ compile state 是 stage 之间共享的中间状态。新增 stage 必须先明�
 | 字段 | 含义 | 写入者 |
 | --- | --- | --- |
 | `controlledValues` | LLM/用户直控输入层，来自 primary/hint 轴，经过 profile 过滤、保护性归一化和强度处理 | `AxisResolver`、`IntensityStage` |
-| `derivedValues` | 引擎派生层，由 coupling、speech pose、expression、continuity 等 stage 追加 | 派生型 stage |
+| `derivedValues` | 引擎派生层，由 coupling、speech pose、expression 等 compile stage 追加 | 派生型 stage |
 | `allAxisValues` | 进入 mode/timing/plan build 的最终汇总视图 | 汇总型 stage |
 | `axisValueSources` | 每个轴值的来源，用于 plan parameter source 和 diagnostics | 写入轴值的 stage |
 | `appliedDerivedAxes` | 本次编译实际写入的 derived 轴 | `mergeDerivedAxisValues()` |
@@ -130,7 +130,7 @@ compile state 是 stage 之间共享的中间状态。新增 stage 必须先明�
 | --- | --- | --- |
 | `primary` | LLM intent | 当前动作的主要语义表达 |
 | `hint` | LLM intent | 可选提示，不保证完整 |
-| `derived` | Engine stage | coupling / speech pose / expression / continuity 等派生 |
+| `derived` | Engine stage | coupling / speech pose / expression 等 compile 派生 |
 | `runtime` | Avatar runtime | lip sync、blink、物理响应等运行时写参 |
 | `ambient` | Ambient runtime | 待机、呼吸、空闲动作 |
 | `debug` | 工具/诊断 | 不进入主播放链路 |
@@ -311,7 +311,7 @@ Live2D `Motions/*.motion3.json` 是当前选择动作主轴的重要参考来源
 
 ## 13. ParameterPresentationLayer
 
-当前待办方向已从独立 `ContinuityStage` 调整为 SDK 侧的 `ParameterPresentationLayer`。
+连续表现层由 SDK 侧 `ParameterPresentationLayer` 承担。
 
 原因：
 
@@ -321,8 +321,7 @@ Live2D `Motions/*.motion3.json` 是当前选择动作主轴的重要参考来源
 
 当前判断：
 
-- 不再把 `ContinuityStage` 作为独立主目标推进。
-- 连续性需求保留，但由 `ParameterPresentationLayer` 吸收。
+- `ParameterPresentationLayer` 是连续性主承载层。
 - ModelEngine compile 侧只保留必要的 hint 能力，例如目标时长、优先级、是否允许覆盖上一段残留等；这些 hint 不改变现有协议主结构。
 
 `ParameterPresentationLayer` 的目标边界：
