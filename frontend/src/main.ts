@@ -1,6 +1,7 @@
 import { createApp } from "vue";
 import App from "./App.vue";
 import { getWindowRole } from "./app/useWindowRole";
+import { createDesktopBridge, desktopBridgeKey } from "./desktop-bridge/useDesktopBridge";
 import "./style.css";
 
 const role = getWindowRole();
@@ -17,4 +18,12 @@ document.documentElement.dataset.windowRole = role;
 document.body.dataset.windowRole = role;
 document.title = roleTitles[role] ?? "AG99live";
 
-createApp(App).mount("#app");
+const app = createApp(App);
+const desktopBridge = createDesktopBridge();
+desktopBridge.start();
+app.provide(desktopBridgeKey, desktopBridge);
+app.mount("#app");
+
+window.addEventListener("beforeunload", () => {
+  desktopBridge.dispose();
+}, { once: true });
