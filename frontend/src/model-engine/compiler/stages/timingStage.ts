@@ -8,6 +8,7 @@ import type {
 // Reads:
 // - context.intent.duration_hint_ms
 // - context.options.targetDurationMs
+// - context.options.speechActive
 // - context.state.resolvedMode
 //
 // Writes:
@@ -27,6 +28,7 @@ export function runTimingStage(
     mode: context.state.resolvedMode,
     durationHintMs: context.intent.duration_hint_ms ?? null,
     targetDurationMs: context.options.targetDurationMs ?? null,
+    speechActive: context.options.speechActive === true,
   });
 
   return { ok: true };

@@ -4,7 +4,7 @@
 
 `SpeechPoseStage` 是 ModelEngine 当前扩展路线中的第一个增强 stage。
 
-目标是在 profile 明确提供说话姿态派生轴时，让角色说话时拥有轻量的头部和身体姿态变化，避免动作只停留在嘴部、眼神或单一表情上。
+目标是在音频开始播放且 profile 明确提供说话姿态派生轴时，让角色说话时拥有轻量的头部和身体姿态变化，避免 TTS 播放期间只停留在嘴部、眼神或单一表情上。
 
 当前 Mk6 主轴口径下，头部偏转、身体扭转/摇晃、眼睛开闭和视线都属于动作骨架，并由 LLM 可见的 primary/hint 轴表达。`SpeechPoseStage` 不负责重新选择这些主轴，也不能把默认主轴当作派生目标；它只在 profile 额外提供 dedicated derived 轴时，补充轻量说话姿态。
 
@@ -19,6 +19,7 @@
 当前待办定位：
 
 - `SpeechPoseStage` 负责“说话时随动”的 plan 级补偿。
+- 说话随动属于 speaking idle：它由运行时音频 started 事实触发，不要求 `intent.mode === "expressive"`，也不把 `resolvedMode` 强行提升为 `expressive`。
 - 连续多段之间的 soft handoff、不硬切、残留和惯性由 SDK 侧 `ParameterPresentationLayer` 统一承接。
 
 ## 2. 放置位置
@@ -61,6 +62,7 @@ id: "speechPose"
 
 - `context.intent.mode`
 - `context.intent.emotion_label`
+- `context.options.speechActive`
 - `context.state.profile`
 - `context.state.axisById`
 - `context.state.controlledValues`
@@ -90,15 +92,16 @@ id: "speechPose"
 
 触发条件：
 
-- `intent.mode === "expressive"`
+- `context.options.speechActive === true`，即当前消息或 turn 的音频已经 started
 - 当前 profile 中存在可用的、专门用于说话姿态补偿的头部或身体 derived 轴
-- 当前动作不是明显空动作
-- 当前动作没有已经通过主轴表达出足够明确的头部或身体姿态
+- 允许 `intent.mode === "idle"`，说话随动属于 speaking idle
+- 允许空 `axes` 的 speaking idle 意图进入 compile pipeline，由 `SpeechPoseStage` 补出 plan 级 derived 轴
 
 目标轴选择：
 
 - 只选择 `control_role === "derived"` 的轴
 - 只选择 `semantic_group` 属于 `head`、`body`、`torso`、`shoulder` 的轴
+- 只选择明确标注为 speech/talk/speaking/voice 或中文说话语义的 dedicated 轴，避免把普通 coupling derived 轴误当说话姿态轴
 - 不选择 `primary`、`hint`、`runtime`、`ambient`、`debug` 轴
 - 不选择 `mouth_open` 这类 runtime-owned 口型轴
 - 不把表情辅轴当作说话姿态补偿目标，例如 `mouth_smile`、`brow_bias`、`gaze_x`、`gaze_y`
@@ -121,6 +124,8 @@ id: "speechPose"
 | 运行时轴 | 嘴巴开闭、呼吸等由音频或运行时驱动的轴 |
 
 `SpeechPoseStage` 只处理说话场景下缺失的轻量姿态补偿。身体动作已经是主轴体系的一部分，因此默认 Mk6 profile 没有 dedicated derived 轴时，当前 stage 应直接跳过；如果后续 profile 额外定义说话姿态派生轴，`SpeechPoseStage` 也不能覆盖 LLM 或用户已经直接表达的主轴/辅轴动作。
+
+`idle` 在这里表示基础状态或轻量持续表现，不等于完全静止。说话随动作为 speaking idle 层存在；明确动作表演仍由 `expressive` 和 LLM 控制的主轴/辅轴表达。
 
 ## 5. 建议内部函数
 
@@ -156,8 +161,9 @@ function resolveSpeechPoseOffset(
 
 ## 6. Diagnostics
 
-当前设计不新增 `CompileDiagnostics` 顶层字段，先复用现有 diagnostics：
+当前 diagnostics 需要暴露运行时触发事实和 stage 结果：
 
+- `speechActive`
 - `appliedDerivedAxes`
 - `derivedAxes`
 - `compiledParameters`
@@ -167,7 +173,6 @@ function resolveSpeechPoseOffset(
 
 ```text
 speech_pose_skipped_no_profile
-speech_pose_skipped_idle
 speech_pose_skipped_no_candidate_axis
 speech_pose_skipped_existing_axis:<axisId>
 speech_pose_applied:<axisId>
@@ -183,11 +188,12 @@ frontend/tests/modelEngineCompiler.test.ts
 
 需要覆盖：
 
-- profile 提供 dedicated derived 轴时，expressive 动作会通过 SpeechPoseStage 生成 derived 轴
+- profile 提供 dedicated derived 轴且音频 started 时，idle 动作也会通过 SpeechPoseStage 生成 derived 轴
+- 非 speechActive 场景不会生成 speech pose 派生轴
 - 默认 Mk6 profile 未提供 dedicated derived 轴时，SpeechPoseStage 会跳过
-- idle 动作不会生成 speech pose 派生轴
 - SpeechPoseStage 不覆盖已有 coupling 派生轴
 - SpeechPoseStage 输出参数的 `source` 为 `speech_pose`
+- speaking idle 的 audio_sync timing 不被普通 idle 的 2200ms 上限截断
 - diagnostics 的 `appliedDerivedAxes` 包含实际写入的 speech pose 轴
 - registry 中 `speechPose` 位于 `coupling` 之后、`modeResolver` 之前
 
@@ -207,6 +213,7 @@ npm run test:model-engine
 - 不新增 runtime 依赖
 - 不新增 UI 控件
 - 不改变 `compileMotionIntent()` 对外接口
+- `speechActive` 是前端 compiler option，不是 `engine.motion_intent.v2` 协议字段
 
 ## 9. 与连续表现层的关系
 

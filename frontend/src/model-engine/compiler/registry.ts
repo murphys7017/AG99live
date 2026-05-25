@@ -3,6 +3,7 @@ import { intentValidatorStage } from "./stages/intentValidator.js";
 import { axisResolverStage } from "./stages/axisResolver.js";
 import { intensityStage } from "./stages/intensityStage.js";
 import { couplingStage } from "./stages/couplingStage.js";
+import { speechPoseStage } from "./stages/speechPoseStage.js";
 import { modeResolverStage } from "./stages/modeResolverStage.js";
 import { timingStage } from "./stages/timingStage.js";
 import { planBuilderStage } from "./stages/planBuilder.js";
@@ -44,6 +45,13 @@ const registrations: ModelEngineCompileStageRegistration[] = [
     stage: couplingStage,
     order: 40,
     kind: "core",
+    enabled: () => true,
+  },
+  {
+    id: "speechPose",
+    stage: speechPoseStage,
+    order: 45,
+    kind: "extension",
     enabled: () => true,
   },
   {

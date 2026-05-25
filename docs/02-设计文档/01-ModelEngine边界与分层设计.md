@@ -254,10 +254,12 @@ registry 规则：
 目标：
 
 - 让说话时人物拥有轻量的头部、身体或肩部姿态。
+- 由运行时音频 started 事实触发，作为 speaking idle 的 plan 级补偿，不要求 `intent.mode === "expressive"`。
 - 只做 plan 级增强。
 - 不做音频 RMS、phoneme、viseme 或逐帧口型。
 - 不直接写 Live2D 原始参数。
 - 不修改 `controlledValues`。
+- 不强行把 `resolvedMode` 从 `idle` 提升为 `expressive`。
 
 接入位置：
 

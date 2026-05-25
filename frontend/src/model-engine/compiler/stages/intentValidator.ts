@@ -9,6 +9,7 @@ import type {
 // Reads:
 // - context.intent
 // - context.options.model.semantic_axis_profile
+// - context.options.speechActive
 //
 // Writes:
 // - context.state.profile
@@ -28,7 +29,11 @@ export function runIntentValidator(
   context: MotionCompileContext,
 ): MotionStageResult {
   const profile = context.options.model.semantic_axis_profile;
-  const failureReason = validateProfileForIntent(context.intent, profile);
+  const failureReason = validateProfileForIntent(
+    context.intent,
+    profile,
+    context.options.speechActive === true,
+  );
   if (failureReason) {
     return { ok: false, reason: failureReason };
   }
@@ -51,6 +56,7 @@ export function runIntentValidator(
 function validateProfileForIntent(
   intent: SemanticMotionIntent,
   profile: SemanticAxisProfile | null | undefined,
+  speechActive: boolean,
 ): string {
   if (!profile) {
     return "semantic_profile_missing";
@@ -64,7 +70,7 @@ function validateProfileForIntent(
   if (!intent.emotion_label.trim()) {
     return "emotion_label_empty";
   }
-  if (!Object.keys(intent.axes).length) {
+  if (!speechActive && !Object.keys(intent.axes).length) {
     return "semantic_intent_axes_empty";
   }
   return "";

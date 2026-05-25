@@ -11,6 +11,7 @@ export function buildBaseCompileDiagnostics(
     compiledParameterCount: 0,
     timingSource: "default",
     resolvedMode: "idle",
+    speechActive: options.speechActive === true,
     source: options.source,
     intensityApplied: false,
     motionIntensityScale: settings.motionIntensityScale,

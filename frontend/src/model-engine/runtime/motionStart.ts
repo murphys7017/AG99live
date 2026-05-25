@@ -15,6 +15,11 @@ export interface MotionStartRuntimeAccess {
     turnId: string | null,
     playbackTurnId?: string | null,
   ) => number | null;
+  isSpeechActiveForPayload: (
+    messageId: string | null,
+    turnId: string | null,
+    playbackTurnId?: string | null,
+  ) => boolean;
 }
 
 export function reportInvalidMotionPayload(
@@ -66,9 +71,15 @@ function startSemanticIntentPayload(
   }
 
   state.setState("compiling", "正在编译动作意图...", null);
+  const targetDurationMs = runtime.resolveMotionTargetDurationMs(
+    context.messageId,
+    context.turnId,
+    context.playbackTurnId,
+  );
   const compileResult = compileMotionIntent(payload.intent, {
     model: selectedModel,
-    targetDurationMs: runtime.resolveMotionTargetDurationMs(
+    targetDurationMs,
+    speechActive: runtime.isSpeechActiveForPayload(
       context.messageId,
       context.turnId,
       context.playbackTurnId,

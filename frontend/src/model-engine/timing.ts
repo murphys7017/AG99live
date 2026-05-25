@@ -10,6 +10,7 @@ interface ResolveMotionTimingOptions {
   mode: "idle" | "expressive";
   durationHintMs?: number | null;
   targetDurationMs?: number | null;
+  speechActive?: boolean;
 }
 
 function coerceDuration(value: number | null | undefined): number | null {
@@ -47,7 +48,10 @@ export function resolveMotionTiming(
   }
 
   if (options.mode === "idle") {
-    const idleDurationMs = Math.max(480, Math.min(resolvedDurationMs, 2200));
+    const idleDurationMs =
+      options.speechActive === true && syncedDuration !== null
+        ? resolvedDurationMs
+        : Math.max(480, Math.min(resolvedDurationMs, 2200));
     return {
       timing: {
         duration_ms: idleDurationMs,

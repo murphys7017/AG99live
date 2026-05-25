@@ -130,6 +130,14 @@ export function createMotionRuntimeScheduler(
     return null;
   }
 
+  function isSpeechActiveForPayload(
+    messageId: string | null,
+    turnId: string | null,
+    playbackTurnId: string | null = null,
+  ): boolean {
+    return findStartedSegment(messageId, turnId, playbackTurnId) !== null;
+  }
+
   function tryStartPendingPayload(messageId: string, startReason: string): boolean {
     const entry = pendingInboundMotionPayloads.get(messageId);
     if (!entry) {
@@ -295,5 +303,6 @@ export function createMotionRuntimeScheduler(
     notifyCurrentTurnChanged,
     clearAllPendingPayloads,
     resolveMotionTargetDurationMs,
+    isSpeechActiveForPayload,
   };
 }

@@ -88,6 +88,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         motionStartDependencies,
         {
           resolveMotionTargetDurationMs: runtimeScheduler.resolveMotionTargetDurationMs,
+          isSpeechActiveForPayload: runtimeScheduler.isSpeechActiveForPayload,
         },
         runtimeStateController,
       ),
@@ -142,6 +143,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       motionStartDependencies,
       {
         resolveMotionTargetDurationMs: runtimeScheduler.resolveMotionTargetDurationMs,
+        isSpeechActiveForPayload: runtimeScheduler.isSpeechActiveForPayload,
       },
       runtimeStateController,
     );

@@ -24,6 +24,7 @@ export interface SupplementaryBuildResult {
 export interface CompileOptions {
   model: ModelSummary;
   targetDurationMs?: number | null;
+  speechActive?: boolean;
   source?: string;
   settings?: ModelEngineSettings;
 }
@@ -33,6 +34,7 @@ export interface CompileDiagnostics {
   compiledParameterCount: number;
   timingSource: "hint" | "audio_sync" | "default";
   resolvedMode: "idle" | "expressive";
+  speechActive?: boolean;
   source?: string;
   warnings?: string[];
   primaryAxes?: string[];

@@ -87,6 +87,29 @@ function buildProfile(): SemanticAxisProfile {
         ],
       },
       {
+        id: "speech_head_sway",
+        label: "Speech Head Sway",
+        description: "Light head sway while speaking",
+        semantic_group: "head",
+        control_role: "derived",
+        neutral: 50,
+        value_range: [0, 100],
+        soft_range: [46, 54],
+        strong_range: [36, 64],
+        positive_semantics: ["speaking head motion"],
+        negative_semantics: ["speaking head motion opposite"],
+        usage_notes: "Dedicated speech pose compensation axis.",
+        parameter_bindings: [
+          {
+            parameter_id: "ParamSpeechHeadSway",
+            input_range: [0, 100],
+            output_range: [-8, 8],
+            default_weight: 1,
+            invert: false,
+          },
+        ],
+      },
+      {
         id: "mouth_smile",
         label: "Mouth Smile",
         description: "Smile amount",
@@ -358,11 +381,143 @@ function testRevisionMismatchBecomesWarningInsteadOfCompileFailure(): void {
   );
 }
 
+function testSpeechPoseAppliesForSpeechLinkedIdleIntent(): void {
+  const profile = buildProfile();
+  const result = compileMotionIntent(buildIntent({
+    mode: "idle",
+    axes: {},
+  }), {
+    model: buildModel(profile),
+    targetDurationMs: 5000,
+    speechActive: true,
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(result.plan);
+  assert.equal(result.plan?.mode, "idle");
+  assert.equal(result.plan?.timing.duration_ms, 5000);
+  assert.equal(result.diagnostics.speechActive, true);
+  assert.equal(result.diagnostics.timingSource, "audio_sync");
+  assert.equal(
+    result.diagnostics.appliedDerivedAxes?.includes("speech_head_sway"),
+    true,
+  );
+
+  const speechPose = result.plan?.parameters.find(
+    (item) => item.parameter_id === "ParamSpeechHeadSway",
+  );
+  assert.ok(speechPose);
+  assert.equal(speechPose?.source, "speech_pose");
+  assert.notEqual(speechPose?.input_value, 50);
+  assert.equal(
+    result.diagnostics.warnings?.includes("speech_pose_applied:speech_head_sway"),
+    true,
+  );
+}
+
+function testSpeechPoseDoesNotApplyWithoutSpeechActive(): void {
+  const profile = buildProfile();
+  const result = compileMotionIntent(buildIntent({
+    mode: "idle",
+    axes: {
+      mouth_smile: { value: 62 },
+    },
+  }), {
+    model: buildModel(profile),
+    targetDurationMs: 5000,
+    speechActive: false,
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.diagnostics.speechActive, false);
+  assert.equal(
+    result.diagnostics.warnings?.includes("speech_pose_skipped_inactive"),
+    false,
+  );
+  assert.equal(
+    result.diagnostics.appliedDerivedAxes?.includes("speech_head_sway"),
+    false,
+  );
+}
+
+function testSpeechPoseDoesNotUseGenericDerivedAxis(): void {
+  const profile = buildProfile();
+  profile.axes = profile.axes.filter((axis) => axis.id !== "speech_head_sway");
+  const result = compileMotionIntent(buildIntent({
+    mode: "idle",
+    axes: {},
+  }), {
+    model: buildModel(profile),
+    targetDurationMs: 5000,
+    speechActive: true,
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "semantic_plan_parameters_empty");
+  assert.equal(
+    result.diagnostics.warnings?.includes("speech_pose_skipped_no_candidate_axis"),
+    true,
+  );
+}
+
+function testSpeechPoseDoesNotOverwriteCouplingDerivedAxis(): void {
+  const profile = buildProfile();
+  profile.axes = profile.axes.map((axis) =>
+    axis.id === "body_yaw"
+      ? {
+        ...axis,
+        label: "Speech Body Yaw",
+        description: "Dedicated speaking body motion",
+        usage_notes: "Dedicated speech pose compensation axis.",
+        positive_semantics: ["speaking body right"],
+        negative_semantics: ["speaking body left"],
+      }
+      : axis,
+  );
+
+  const result = compileMotionIntent(buildIntent({
+    axes: {
+      head_yaw: { value: 80 },
+    },
+  }), {
+    model: buildModel(profile),
+    targetDurationMs: 1600,
+    speechActive: true,
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  const bodyYaw = result.plan?.parameters.find((item) => item.parameter_id === "ParamBodyAngleX");
+  assert.ok(bodyYaw);
+  assert.equal(bodyYaw?.source, "coupling");
+  assert.equal(
+    result.diagnostics.warnings?.includes("speech_pose_skipped_existing_axis:body_yaw"),
+    true,
+  );
+}
+
 function testRegistryCoreStageOrder(): void {
   const registrations = listCompileStageRegistrations();
   const coreStages = registrations.filter((r) => r.kind === "core");
+  const extensionStages = registrations.filter((r) => r.kind === "extension");
 
   assert.equal(coreStages.length, 7);
+  assert.equal(extensionStages.length, 1);
 
   const expectedOrder = [
     "intentValidator",
@@ -376,6 +531,16 @@ function testRegistryCoreStageOrder(): void {
 
   const actualOrder = coreStages.map((r) => r.id);
   assert.deepEqual(actualOrder, expectedOrder);
+  assert.equal(extensionStages[0].id, "speechPose");
+  assert.equal(extensionStages[0].order, 45);
+  assert.ok(
+    registrations.find((r) => r.id === "coupling")!.order
+      < extensionStages[0].order,
+  );
+  assert.ok(
+    extensionStages[0].order
+      < registrations.find((r) => r.id === "modeResolver")!.order,
+  );
 
   for (let i = 1; i < coreStages.length; i++) {
     assert.ok(
@@ -394,6 +559,10 @@ function run(): void {
   testExplicitPrimaryAxisIsNotOverwrittenByCoupling();
   testAxisIntensityScaleAffectsOnlyTargetAxis();
   testRevisionMismatchBecomesWarningInsteadOfCompileFailure();
+  testSpeechPoseAppliesForSpeechLinkedIdleIntent();
+  testSpeechPoseDoesNotApplyWithoutSpeechActive();
+  testSpeechPoseDoesNotUseGenericDerivedAxis();
+  testSpeechPoseDoesNotOverwriteCouplingDerivedAxis();
   console.log("modelEngineCompiler tests passed");
 }
 
