@@ -62,7 +62,7 @@ astrbot_plugin_ag99live_adapter/
 - 每条交互消息都带 `turn_id`，前后端只按这一个轮次 ID 做会话协调。
 - 每个 assistant segment 的 `output.text / output.audio / engine.motion_*` 都必须携带非空 `message_id`；前端用它把这些消息聚合到同一个 `TurnPlaybackSegment`。
 - 当前后端主链路只广播 `engine.motion_intent`；前端负责把 intent 编译为 `engine.parameter_plan.v2` 后执行。
-- `semantic_axis_profile` / `calibration_profile` / `parameter_action_library` / `base_action_library` 由 `system.model_sync` 下发。
+- `semantic_axis_profile` / `calibration_profile` / `voice_following_profile` / `parameter_action_library` / `base_action_library` 由 `system.model_sync` 下发。
 - `system.semantic_axis_profile_saved` / `system.semantic_axis_profile_save_failed` 用于 Profile Editor 保存结果确认，不再依赖 `system.model_sync` 推断保存成败。
 - 一个 user input 对应一个 turn，但一个 turn 内可能输出多个 assistant segment。
 - `control.synth_finished` 表示该 turn 的输出队列关闭，不会再追加新的 `output.*` / `engine.motion_*` segment；它不要求早于所有前端播放完成。

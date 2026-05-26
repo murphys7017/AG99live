@@ -164,8 +164,54 @@ BASE_ACTION_LIBRARY_SCHEMA_VERSION = "base_action_library.v1"
 PARAMETER_ACTION_LIBRARY_SCHEMA_VERSION = "parameter_action_library.v1"
 ADAPTIVE_PARAMETER_PROFILE_SCHEMA_VERSION = "adaptive_parameter_profile.v1"
 CALIBRATION_PROFILE_SCHEMA_VERSION = "direct_parameter_calibration.v1"
+VOICE_FOLLOWING_PROFILE_SCHEMA_VERSION = "ag99.voice_following_profile.v1"
 MODEL_SUMMARY_SCHEMA_VERSION = "live2d_model_summary.v1"
 PARAMETER_ACTION_MAX_ATOMS_PER_PARAMETER = 24
+
+VOICE_FOLLOWING_CHANNEL_SPECS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "head_yaw",
+        "layer": "head",
+        "amplitude": 4.5,
+        "weight": 1.0,
+        "phase": 0.0,
+    },
+    {
+        "name": "head_pitch",
+        "layer": "head",
+        "amplitude": 3.0,
+        "weight": 0.75,
+        "phase": 0.35,
+    },
+    {
+        "name": "head_roll",
+        "layer": "head",
+        "amplitude": 5.0,
+        "weight": 1.0,
+        "phase": 0.7,
+    },
+    {
+        "name": "body_yaw",
+        "layer": "body",
+        "amplitude": 2.2,
+        "weight": 0.55,
+        "phase": 0.2,
+    },
+    {
+        "name": "body_pitch",
+        "layer": "body",
+        "amplitude": 1.8,
+        "weight": 0.45,
+        "phase": 0.55,
+    },
+    {
+        "name": "body_roll",
+        "layer": "body",
+        "amplitude": 2.8,
+        "weight": 0.65,
+        "phase": 0.85,
+    },
+)
 
 CORE_BASE_ACTION_CHANNEL_SPECS: tuple[dict[str, Any], ...] = (
     {
@@ -438,6 +484,11 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
     calibration_profile = _build_calibration_profile(
         adaptive_parameter_profile=adaptive_parameter_profile,
     )
+    voice_following_profile = _build_voice_following_profile(
+        model_id=model_dir.name,
+        parameter_scan=parameter_scan,
+        calibration_profile=calibration_profile,
+    )
     motion_resource_pool = build_motion_resource_pool(motions=motions)
     for motion in motions:
         motion.pop("components", None)
@@ -456,6 +507,7 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
         parameter_action_library=parameter_action_library,
         adaptive_parameter_profile=adaptive_parameter_profile,
         calibration_profile=calibration_profile,
+        voice_following_profile=voice_following_profile,
         engine_hints=engine_hints,
     )
 
@@ -474,6 +526,7 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
         "parameter_action_library": parameter_action_library,
         "adaptive_parameter_profile": adaptive_parameter_profile,
         "calibration_profile": calibration_profile,
+        "voice_following_profile": voice_following_profile,
         "motion_resource_pool": motion_resource_pool,
         "constraints": {
             "expressions": expressions,
@@ -1807,6 +1860,87 @@ def _build_calibration_profile(
     }
 
 
+def _build_voice_following_profile(
+    *,
+    model_id: str,
+    parameter_scan: dict[str, Any],
+    calibration_profile: dict[str, Any],
+) -> dict[str, Any]:
+    standard_channels = parameter_scan.get("standard_channels", {})
+    calibration_axes = calibration_profile.get("axes", {})
+    channels: dict[str, dict[str, Any]] = {}
+
+    for spec in VOICE_FOLLOWING_CHANNEL_SPECS:
+        channel_name = str(spec["name"])
+        channel_payload = standard_channels.get(channel_name, {})
+        if not isinstance(channel_payload, dict) or not channel_payload.get("available"):
+            continue
+
+        parameter_id = str(channel_payload.get("primary_parameter_id") or "").strip()
+        if not parameter_id:
+            continue
+
+        calibration_axis = calibration_axes.get(channel_name, {})
+        if not isinstance(calibration_axis, dict):
+            calibration_axis = {}
+
+        output_range = _resolve_voice_following_output_range(
+            channel_name=channel_name,
+            calibration_axis=calibration_axis,
+            amplitude=float(spec["amplitude"]),
+        )
+        channels[channel_name] = {
+            "channel": channel_name,
+            "parameter_id": parameter_id,
+            "parameter_name": str(
+                channel_payload.get("primary_parameter_name") or parameter_id
+            ).strip(),
+            "layer": str(spec["layer"]),
+            "neutral": _round_float(calibration_axis.get("baseline", 0.0)),
+            "output_range": output_range,
+            "amplitude": _round_float(spec["amplitude"]),
+            "weight": _round_float(spec["weight"]),
+            "phase": _round_float(spec["phase"]),
+        }
+
+    return {
+        "schema_version": VOICE_FOLLOWING_PROFILE_SCHEMA_VERSION,
+        "model_id": model_id,
+        "revision": 1,
+        "channels": channels,
+        "summary": {
+            "channel_count": len(channels),
+            "available_channels": list(channels.keys()),
+        },
+    }
+
+
+def _resolve_voice_following_output_range(
+    *,
+    channel_name: str,
+    calibration_axis: dict[str, Any],
+    amplitude: float,
+) -> dict[str, float]:
+    recommended_range = calibration_axis.get("recommended_range", {})
+    if isinstance(recommended_range, dict) and calibration_axis.get("safe_to_apply"):
+        min_value = _coerce_float(recommended_range.get("min"))
+        max_value = _coerce_float(recommended_range.get("max"))
+        if min_value < max_value:
+            return {
+                "min": _round_float(min_value),
+                "max": _round_float(max_value),
+            }
+
+    if channel_name.startswith("head_"):
+        limit = max(amplitude * 2.0, 8.0)
+    else:
+        limit = max(amplitude * 2.0, 4.0)
+    return {
+        "min": _round_float(-limit),
+        "max": _round_float(limit),
+    }
+
+
 def _summarize_range_profile(
     *,
     observations: list[dict[str, Any]],
@@ -2009,6 +2143,7 @@ def _build_model_summary(
     parameter_action_library: dict[str, Any],
     adaptive_parameter_profile: dict[str, Any],
     calibration_profile: dict[str, Any],
+    voice_following_profile: dict[str, Any],
     engine_hints: dict[str, Any],
 ) -> dict[str, Any]:
     return {
@@ -2070,6 +2205,15 @@ def _build_model_summary(
                     for axis_name, payload in (calibration_profile.get("axes") or {}).items()
                     if str(axis_name).strip() and isinstance(payload, dict)
                 ]
+            ),
+        },
+        "voice_following_profile": {
+            "schema_version": str(voice_following_profile.get("schema_version") or ""),
+            "channel_count": int(
+                voice_following_profile.get("summary", {}).get("channel_count") or 0
+            ),
+            "available_channels": list(
+                voice_following_profile.get("summary", {}).get("available_channels") or []
             ),
         },
     }

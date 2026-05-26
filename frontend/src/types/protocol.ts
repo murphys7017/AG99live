@@ -121,6 +121,32 @@ export interface ParameterScanPayload {
   parameters: ParameterEntry[];
 }
 
+export interface VoiceFollowingChannelProfile {
+  channel: string;
+  parameter_id: string;
+  parameter_name?: string;
+  layer: "head" | "body" | string;
+  neutral: number;
+  output_range: {
+    min: number;
+    max: number;
+  };
+  amplitude: number;
+  weight: number;
+  phase: number;
+}
+
+export interface VoiceFollowingProfile {
+  schema_version: "ag99.voice_following_profile.v1";
+  model_id: string;
+  revision: number;
+  channels: Record<string, VoiceFollowingChannelProfile>;
+  summary?: {
+    channel_count?: number;
+    available_channels?: string[];
+  };
+}
+
 export interface ExpressionConstraint {
   name: string;
   file: string;
@@ -648,6 +674,7 @@ export interface ModelSummary {
   };
   semantic_axis_profile?: SemanticAxisProfile | null;
   calibration_profile?: DirectParameterCalibrationProfile | null;
+  voice_following_profile?: VoiceFollowingProfile | null;
   engine_hints: {
     driver_priority: string[];
     recommended_mode: string;

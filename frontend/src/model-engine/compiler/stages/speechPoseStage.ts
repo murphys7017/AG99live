@@ -1,4 +1,5 @@
 import type { SemanticAxisDefinition } from "../../../types/semantic-axis-profile.js";
+import type { SemanticParameterPlan, VoiceFollowingChannelProfile } from "../../../types/protocol.js";
 import type {
   DynamicAxisValues,
   MotionCompileContext,
@@ -21,6 +22,7 @@ const SPEECH_POSE_KEYWORDS = [
 
 // Reads:
 // - context.options.speechActive
+// - context.options.model.voice_following_profile
 // - context.state.profile
 // - context.state.axisById
 // - context.state.controlledValues
@@ -33,13 +35,13 @@ const SPEECH_POSE_KEYWORDS = [
 // - context.state.axisValueSources
 // - context.state.appliedDerivedAxes
 // - context.state.allAxisValues
+// - context.state.parameters
 // - context.state.warnings
 //
 // Does not own:
 // - controlled axis values
 // - mode resolution
 // - timing
-// - parameter generation
 export const speechPoseStage: MotionCompileStage = {
   id: "speechPose",
   run: runSpeechPoseStage,
@@ -55,6 +57,19 @@ export function runSpeechPoseStage(
   const profile = context.state.profile;
   if (!profile) {
     return { ok: false, reason: "semantic_profile_missing" };
+  }
+
+  const directParameters = buildVoiceFollowingParameters(context);
+  if (directParameters.length > 0) {
+    context.state.parameters = [
+      ...context.state.parameters,
+      ...directParameters,
+    ];
+    context.state.warnings = [
+      ...context.state.warnings,
+      ...directParameters.map((item) => `speech_pose_applied:${item.parameter_id}`),
+    ];
+    return { ok: true };
   }
 
   const candidateAxes = selectSpeechPoseAxes(context);
@@ -80,6 +95,94 @@ export function runSpeechPoseStage(
   ];
 
   return { ok: true };
+}
+
+function buildVoiceFollowingParameters(
+  context: MotionCompileContext,
+): SemanticParameterPlan["parameters"] {
+  const profile = context.options.model.voice_following_profile;
+  if (!profile || profile.schema_version !== "ag99.voice_following_profile.v1") {
+    return [];
+  }
+
+  const parameters: SemanticParameterPlan["parameters"] = [];
+  const existingParameterIds = new Set(
+    context.state.parameters.map((item) => item.parameter_id),
+  );
+  const controlledParameterIds = collectControlledParameterIds(context);
+  for (const channel of Object.values(profile.channels ?? {})) {
+    if (!isUsableVoiceFollowingChannel(channel)) {
+      continue;
+    }
+    if (
+      existingParameterIds.has(channel.parameter_id)
+      || controlledParameterIds.has(channel.parameter_id)
+    ) {
+      context.state.warnings = [
+        ...context.state.warnings,
+        `speech_pose_skipped_existing_parameter:${channel.parameter_id}`,
+      ];
+      continue;
+    }
+
+    const targetValue = resolveVoiceFollowingTargetValue(channel);
+    parameters.push({
+      axis_id: `voice_following.${channel.channel}`,
+      parameter_id: channel.parameter_id,
+      target_value: targetValue,
+      weight: channel.weight,
+      input_value: targetValue,
+      source: "speech_pose",
+    });
+    existingParameterIds.add(channel.parameter_id);
+  }
+  return parameters;
+}
+
+function collectControlledParameterIds(
+  context: MotionCompileContext,
+): Set<string> {
+  const parameterIds = new Set<string>();
+  for (const axisId of Object.keys(context.state.allAxisValues)) {
+    const axis = context.state.axisById.get(axisId);
+    if (!axis) {
+      continue;
+    }
+    for (const binding of axis.parameter_bindings) {
+      parameterIds.add(binding.parameter_id);
+    }
+  }
+  return parameterIds;
+}
+
+function isUsableVoiceFollowingChannel(
+  channel: VoiceFollowingChannelProfile,
+): boolean {
+  return Boolean(
+    channel
+    && typeof channel.channel === "string"
+    && channel.channel.trim()
+    && typeof channel.parameter_id === "string"
+    && channel.parameter_id.trim()
+    && typeof channel.neutral === "number"
+    && Number.isFinite(channel.neutral)
+    && typeof channel.amplitude === "number"
+    && Number.isFinite(channel.amplitude)
+    && channel.amplitude > 0
+    && typeof channel.weight === "number"
+    && Number.isFinite(channel.weight)
+    && channel.weight > 0,
+  );
+}
+
+function resolveVoiceFollowingTargetValue(
+  channel: VoiceFollowingChannelProfile,
+): number {
+  const minValue = channel.output_range.min;
+  const maxValue = channel.output_range.max;
+  const direction = stableAxisDirection(channel.channel);
+  const rawTarget = channel.neutral + direction * channel.amplitude * channel.weight;
+  return Math.max(minValue, Math.min(maxValue, rawTarget));
 }
 
 function selectSpeechPoseAxes(

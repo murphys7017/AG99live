@@ -336,6 +336,11 @@ def build_seed_model_info_with_options(
     calibration_profile = live2d_scan._build_calibration_profile(
         adaptive_parameter_profile=deepcopy(adaptive_parameter_profile),
     )
+    voice_following_profile = live2d_scan._build_voice_following_profile(
+        model_id="DemoModel",
+        parameter_scan=deepcopy(parameter_scan),
+        calibration_profile=deepcopy(calibration_profile),
+    )
     engine_hints = live2d_scan._build_engine_hints(
         parameter_scan=deepcopy(parameter_scan),
         expressions=[],
@@ -354,6 +359,7 @@ def build_seed_model_info_with_options(
                 "parameter_action_library": parameter_action_library,
                 "adaptive_parameter_profile": adaptive_parameter_profile,
                 "calibration_profile": calibration_profile,
+                "voice_following_profile": voice_following_profile,
                 "summary": live2d_scan._build_model_summary(
                     resource_scan={
                         "texture_count": 0,
@@ -368,6 +374,7 @@ def build_seed_model_info_with_options(
                     parameter_action_library=deepcopy(parameter_action_library),
                     adaptive_parameter_profile=deepcopy(adaptive_parameter_profile),
                     calibration_profile=deepcopy(calibration_profile),
+                    voice_following_profile=deepcopy(voice_following_profile),
                     engine_hints=engine_hints,
                 ),
             }

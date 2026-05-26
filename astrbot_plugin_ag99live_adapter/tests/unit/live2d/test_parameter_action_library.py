@@ -193,6 +193,20 @@ def test_seed_model_info_summary_embeds_adaptive_parameter_profile() -> None:
     ]
     assert model["calibration_profile"]["axes"]["head_yaw"]["recommended"] is False
     assert "recommended_range" not in model["calibration_profile"]["axes"]["head_yaw"]
+    assert model["voice_following_profile"]["schema_version"] == (
+        live2d_scan.VOICE_FOLLOWING_PROFILE_SCHEMA_VERSION
+    )
+    assert model["voice_following_profile"]["channels"]["head_yaw"] == {
+        "channel": "head_yaw",
+        "parameter_id": "ParamAngleX",
+        "parameter_name": "ParamAngleX",
+        "layer": "head",
+        "neutral": 0.0,
+        "output_range": {"min": -9.0, "max": 9.0},
+        "amplitude": 4.5,
+        "weight": 1.0,
+        "phase": 0.0,
+    }
     assert model["summary"]["schema_version"] == live2d_scan.MODEL_SUMMARY_SCHEMA_VERSION
     assert model["summary"]["adaptive_parameter_profile"]["schema_version"] == (
         live2d_scan.ADAPTIVE_PARAMETER_PROFILE_SCHEMA_VERSION
@@ -200,6 +214,11 @@ def test_seed_model_info_summary_embeds_adaptive_parameter_profile() -> None:
     assert model["summary"]["calibration_profile"] == {
         "schema_version": live2d_scan.CALIBRATION_PROFILE_SCHEMA_VERSION,
         "axis_count": 2,
+    }
+    assert model["summary"]["voice_following_profile"] == {
+        "schema_version": live2d_scan.VOICE_FOLLOWING_PROFILE_SCHEMA_VERSION,
+        "channel_count": 1,
+        "available_channels": ["head_yaw"],
     }
     assert model["summary"]["adaptive_parameter_profile"]["summary"] == (
         model["adaptive_parameter_profile"]["summary"]

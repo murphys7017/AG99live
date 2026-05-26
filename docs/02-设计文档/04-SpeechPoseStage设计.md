@@ -4,9 +4,9 @@
 
 `SpeechPoseStage` 是 ModelEngine 当前扩展路线中的第一个增强 stage。
 
-目标是在音频开始播放且 profile 明确提供说话姿态派生轴时，让角色说话时拥有轻量的头部和身体姿态变化，避免 TTS 播放期间只停留在嘴部、眼神或单一表情上。
+目标是在音频开始播放且模型提供 `VoiceFollowingProfile` 时，让角色说话时拥有轻量的头部和身体姿态变化，避免 TTS 播放期间只停留在嘴部、眼神或单一表情上。
 
-当前 Mk6 主轴口径下，头部偏转、身体扭转/摇晃、眼睛开闭和视线都属于动作骨架，并由 LLM 可见的 primary/hint 轴表达。`SpeechPoseStage` 不负责重新选择这些主轴，也不能把默认主轴当作派生目标；它只在 profile 额外提供 dedicated derived 轴时，补充轻量说话姿态。
+当前 Mk6 主轴口径下，头部偏转、身体扭转/摇晃、眼睛开闭和视线都属于动作骨架，并由 LLM 可见的 primary/hint 轴表达。`SpeechPoseStage` 不负责重新选择这些主轴；说话随动优先使用模型扫描生成的 `VoiceFollowingProfile`，旧的 dedicated derived 轴只作为兼容 fallback。
 
 当前设计只做 plan 级增强：
 
@@ -14,7 +14,7 @@
 - 不做音频 RMS / phoneme / viseme。
 - 不直接写 Live2D 原始参数。
 - 不改变 LLM 原始 `controlledValues`。
-- 只通过 `derivedValues` 补充语义轴。
+- 优先通过 `VoiceFollowingProfile` 生成 `source=speech_pose` 的 plan parameters；没有该 profile 时才通过 `derivedValues` 补充语义轴。
 
 当前待办定位：
 
@@ -63,6 +63,7 @@ id: "speechPose"
 - `context.intent.mode`
 - `context.intent.emotion_label`
 - `context.options.speechActive`
+- `context.options.model.voice_following_profile`
 - `context.state.profile`
 - `context.state.axisById`
 - `context.state.controlledValues`
@@ -76,6 +77,7 @@ id: "speechPose"
 - `context.state.axisValueSources`
 - `context.state.appliedDerivedAxes`
 - `context.state.allAxisValues`
+- `context.state.parameters`
 - `context.state.warnings`
 
 不负责：
@@ -83,7 +85,6 @@ id: "speechPose"
 - 不修改 `controlledValues`
 - 不决定最终 `resolvedMode`
 - 不解析 timing
-- 不构建 parameter plan
 - 不访问 runtime、WebSocket、播放器或 UI
 
 ## 4. 当前规则
@@ -93,11 +94,17 @@ id: "speechPose"
 触发条件：
 
 - `context.options.speechActive === true`，即当前消息或 turn 的音频已经 started
-- 当前 profile 中存在可用的、专门用于说话姿态补偿的头部或身体 derived 轴
+- 当前模型存在可用的 `VoiceFollowingProfile` channel；或旧 profile 中存在可用的、专门用于说话姿态补偿的头部或身体 derived 轴
 - 允许 `intent.mode === "idle"`，说话随动属于 speaking idle
-- 允许空 `axes` 的 speaking idle 意图进入 compile pipeline，由 `SpeechPoseStage` 补出 plan 级 derived 轴
+- 允许空 `axes` 的 speaking idle 意图进入 compile pipeline，由 `SpeechPoseStage` 补出 plan 级 speech pose 参数
 
-目标轴选择：
+`VoiceFollowingProfile` channel 选择：
+
+- 由模型扫描侧根据标准 Live2D 头部/身体 channel 生成，例如 `head_yaw/head_pitch/head_roll/body_yaw/body_pitch/body_roll`
+- 每个 channel 直接绑定一个 Live2D parameter、neutral、output_range、amplitude、weight 和 phase
+- 如果目标 parameter 已经由语义轴或前置 plan 参数占用，当前 stage 跳过该 channel
+
+legacy derived 轴 fallback：
 
 - 只选择 `control_role === "derived"` 的轴
 - 只选择 `semantic_group` 属于 `head`、`body`、`torso`、`shoulder` 的轴
@@ -108,7 +115,9 @@ id: "speechPose"
 
 输出原则：
 
-- 如果用户或 LLM 已经直接控制了相同语义方向的轴，不覆盖它
+- `VoiceFollowingProfile` 输出直接追加为 `source=speech_pose` 的 plan parameters
+- legacy derived fallback 输出到 `derivedValues`
+- 如果用户或 LLM 已经直接控制了同一个参数或相同语义方向的轴，不覆盖它
 - 如果 coupling 已经写入同一个 derived 轴，当前 stage 不覆盖 coupling
 - 输出值围绕 neutral 做轻量偏移
 - 输出后必须按 axis value range clamp
@@ -123,7 +132,7 @@ id: "speechPose"
 | 表情辅轴 | 嘴角笑意、眉毛、视线偏移等表情态度微调 |
 | 运行时轴 | 嘴巴开闭、呼吸等由音频或运行时驱动的轴 |
 
-`SpeechPoseStage` 只处理说话场景下缺失的轻量姿态补偿。身体动作已经是主轴体系的一部分，因此默认 Mk6 profile 没有 dedicated derived 轴时，当前 stage 应直接跳过；如果后续 profile 额外定义说话姿态派生轴，`SpeechPoseStage` 也不能覆盖 LLM 或用户已经直接表达的主轴/辅轴动作。
+`SpeechPoseStage` 只处理说话场景下缺失的轻量姿态补偿。身体动作已经是主轴体系的一部分，因此说话随动不进入 `SemanticAxisProfile` 的 LLM 可见主轴设计。`VoiceFollowingProfile` 是模型能力 profile；如果后续 profile 额外定义说话姿态派生轴，`SpeechPoseStage` 也不能覆盖 LLM 或用户已经直接表达的主轴/辅轴动作。
 
 `idle` 在这里表示基础状态或轻量持续表现，不等于完全静止。说话随动作为 speaking idle 层存在；明确动作表演仍由 `expressive` 和 LLM 控制的主轴/辅轴表达。
 
@@ -175,7 +184,9 @@ function resolveSpeechPoseOffset(
 speech_pose_skipped_no_profile
 speech_pose_skipped_no_candidate_axis
 speech_pose_skipped_existing_axis:<axisId>
+speech_pose_skipped_existing_parameter:<parameterId>
 speech_pose_applied:<axisId>
+speech_pose_applied:<parameterId>
 ```
 
 ## 7. 测试
@@ -188,7 +199,8 @@ frontend/tests/modelEngineCompiler.test.ts
 
 需要覆盖：
 
-- profile 提供 dedicated derived 轴且音频 started 时，idle 动作也会通过 SpeechPoseStage 生成 derived 轴
+- 模型提供 `VoiceFollowingProfile` 且音频 started 时，idle 动作会通过 SpeechPoseStage 生成 `speech_pose` 参数
+- legacy profile 提供 dedicated derived 轴且音频 started 时，idle 动作也会通过 SpeechPoseStage 生成 derived 轴
 - 非 speechActive 场景不会生成 speech pose 派生轴
 - 默认 Mk6 profile 未提供 dedicated derived 轴时，SpeechPoseStage 会跳过
 - SpeechPoseStage 不覆盖已有 coupling 派生轴

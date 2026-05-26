@@ -262,6 +262,7 @@ function buildModel(profile: SemanticAxisProfile): ModelSummary {
     },
     semantic_axis_profile: profile,
     calibration_profile: null,
+    voice_following_profile: null,
     engine_hints: {
       driver_priority: [],
       recommended_mode: "",
@@ -271,6 +272,44 @@ function buildModel(profile: SemanticAxisProfile): ModelSummary {
       motion_decomposition_level: "",
     },
   };
+}
+
+function buildModelWithVoiceFollowingProfile(profile: SemanticAxisProfile): ModelSummary {
+  const model = buildModel(profile);
+  model.voice_following_profile = {
+    schema_version: "ag99.voice_following_profile.v1",
+    model_id: "model-1",
+    revision: 1,
+    channels: {
+      head_roll: {
+        channel: "head_roll",
+        parameter_id: "ParamAngleZ",
+        parameter_name: "ParamAngleZ",
+        layer: "head",
+        neutral: 0,
+        output_range: { min: -30, max: 30 },
+        amplitude: 6,
+        weight: 1,
+        phase: 0,
+      },
+      body_roll: {
+        channel: "body_roll",
+        parameter_id: "ParamBodyAngleZ",
+        parameter_name: "ParamBodyAngleZ",
+        layer: "body",
+        neutral: 0,
+        output_range: { min: -10, max: 10 },
+        amplitude: 3,
+        weight: 0.7,
+        phase: 0.5,
+      },
+    },
+    summary: {
+      channel_count: 2,
+      available_channels: ["head_roll", "body_roll"],
+    },
+  };
+  return model;
 }
 
 function buildIntent(overrides?: Partial<SemanticMotionIntent>): SemanticMotionIntent {
@@ -419,6 +458,65 @@ function testSpeechPoseAppliesForSpeechLinkedIdleIntent(): void {
   );
 }
 
+function testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes(): void {
+  const profile = buildProfile();
+  const result = compileMotionIntent(buildIntent({
+    mode: "idle",
+    axes: {},
+  }), {
+    model: buildModelWithVoiceFollowingProfile(profile),
+    targetDurationMs: 5000,
+    speechActive: true,
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(result.plan);
+  const headRoll = result.plan?.parameters.find((item) => item.parameter_id === "ParamAngleZ");
+  const bodyRoll = result.plan?.parameters.find((item) => item.parameter_id === "ParamBodyAngleZ");
+  const legacySpeechAxis = result.plan?.parameters.find(
+    (item) => item.parameter_id === "ParamSpeechHeadSway",
+  );
+
+  assert.ok(headRoll);
+  assert.ok(bodyRoll);
+  assert.equal(headRoll?.source, "speech_pose");
+  assert.equal(bodyRoll?.source, "speech_pose");
+  assert.equal(legacySpeechAxis, undefined);
+  assert.equal(
+    result.diagnostics.warnings?.includes("speech_pose_applied:ParamAngleZ"),
+    true,
+  );
+}
+
+function testSpeechPoseSkipsVoiceFollowingParameterAlreadyControlledBySemanticAxis(): void {
+  const profile = buildProfile();
+  const result = compileMotionIntent(buildIntent({
+    axes: {
+      head_yaw: { value: 80 },
+    },
+  }), {
+    model: buildModelWithVoiceFollowingProfile(profile),
+    targetDurationMs: 1600,
+    speechActive: true,
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  const semanticHeadYaw = result.plan?.parameters.find((item) => item.parameter_id === "ParamAngleX");
+  const voiceHeadRoll = result.plan?.parameters.find((item) => item.parameter_id === "ParamAngleZ");
+  assert.ok(semanticHeadYaw);
+  assert.ok(voiceHeadRoll);
+  assert.equal(semanticHeadYaw?.source, "semantic_axis");
+  assert.equal(voiceHeadRoll?.source, "speech_pose");
+}
+
 function testSpeechPoseDoesNotApplyWithoutSpeechActive(): void {
   const profile = buildProfile();
   const result = compileMotionIntent(buildIntent({
@@ -560,6 +658,8 @@ function run(): void {
   testAxisIntensityScaleAffectsOnlyTargetAxis();
   testRevisionMismatchBecomesWarningInsteadOfCompileFailure();
   testSpeechPoseAppliesForSpeechLinkedIdleIntent();
+  testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes();
+  testSpeechPoseSkipsVoiceFollowingParameterAlreadyControlledBySemanticAxis();
   testSpeechPoseDoesNotApplyWithoutSpeechActive();
   testSpeechPoseDoesNotUseGenericDerivedAxis();
   testSpeechPoseDoesNotOverwriteCouplingDerivedAxis();

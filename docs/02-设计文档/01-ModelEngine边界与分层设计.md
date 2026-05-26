@@ -255,6 +255,7 @@ registry 规则：
 
 - 让说话时人物拥有轻量的头部、身体或肩部姿态。
 - 由运行时音频 started 事实触发，作为 speaking idle 的 plan 级补偿，不要求 `intent.mode === "expressive"`。
+- 优先使用模型扫描生成的 `VoiceFollowingProfile`；legacy dedicated derived 轴只作为兼容 fallback。
 - 只做 plan 级增强。
 - 不做音频 RMS、phoneme、viseme 或逐帧口型。
 - 不直接写 Live2D 原始参数。

@@ -16,6 +16,7 @@ import type {
 // - context.state.axisById
 // - context.state.allAxisValues
 // - context.state.controlledValues
+// - context.state.parameters
 //
 // Writes:
 // - context.state.parameters
@@ -42,10 +43,32 @@ export function runPlanBuilderStage(
     context.state.axisValueSources,
   );
   if (!parameterResult.ok) {
+    if (
+      parameterResult.reason === "semantic_plan_parameters_empty"
+      && context.state.parameters.length > 0
+    ) {
+      return { ok: true };
+    }
     return parameterResult;
   }
 
-  context.state.parameters = parameterResult.parameters;
+  const existingParameterIds = new Set(
+    context.state.parameters.map((item) => item.parameter_id),
+  );
+  for (const parameter of parameterResult.parameters) {
+    if (existingParameterIds.has(parameter.parameter_id)) {
+      return {
+        ok: false,
+        reason: `duplicate_parameter_binding:${parameter.parameter_id}`,
+      };
+    }
+    existingParameterIds.add(parameter.parameter_id);
+  }
+
+  context.state.parameters = [
+    ...context.state.parameters,
+    ...parameterResult.parameters,
+  ];
   return { ok: true };
 }
 
