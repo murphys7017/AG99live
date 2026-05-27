@@ -613,6 +613,12 @@ export interface SemanticParameterPlanEntry {
   weight: number;
   input_value?: number;
   source?: SemanticParameterPlanSource;
+  modulation?: {
+    kind: "speech_pose_cycle";
+    neutral: number;
+    amplitude: number;
+    phase: number;
+  };
 }
 
 export const SEMANTIC_PARAMETER_PLAN_SOURCES = [

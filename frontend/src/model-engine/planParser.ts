@@ -124,6 +124,18 @@ export function parseSemanticParameterPlan(
       weight,
       input_value: isFiniteNumber(inputValue) ? inputValue : undefined,
       source,
+      modulation: isObject(item.modulation)
+        && normalizeText(item.modulation.kind) === "speech_pose_cycle"
+        && isFiniteNumber(item.modulation.neutral)
+        && isFiniteNumber(item.modulation.amplitude)
+        && isFiniteNumber(item.modulation.phase)
+        ? {
+          kind: "speech_pose_cycle",
+          neutral: Number(item.modulation.neutral),
+          amplitude: Number(item.modulation.amplitude),
+          phase: Number(item.modulation.phase),
+        }
+        : undefined,
     });
   }
 

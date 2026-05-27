@@ -485,11 +485,42 @@ function testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes(): void {
   assert.ok(bodyRoll);
   assert.equal(headRoll?.source, "speech_pose");
   assert.equal(bodyRoll?.source, "speech_pose");
+  assert.equal(headRoll?.input_value, 0);
+  assert.equal(bodyRoll?.input_value, 0);
+  assert.equal(headRoll?.axis_id, "voice_following.head_roll");
+  assert.deepEqual(headRoll?.modulation, {
+    kind: "speech_pose_cycle",
+    neutral: 0,
+    amplitude: 6,
+    phase: 0,
+  });
   assert.equal(legacySpeechAxis, undefined);
   assert.equal(
     result.diagnostics.warnings?.includes("speech_pose_applied:ParamAngleZ"),
     true,
   );
+}
+
+function testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight(): void {
+  const profile = buildProfile();
+  const result = compileMotionIntent(buildIntent({
+    mode: "idle",
+    axes: {},
+  }), {
+    model: buildModelWithVoiceFollowingProfile(profile),
+    targetDurationMs: 2200,
+    speechActive: true,
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  const bodyRoll = result.plan?.parameters.find((item) => item.parameter_id === "ParamBodyAngleZ");
+  assert.ok(bodyRoll);
+  assert.equal(bodyRoll?.target_value, 3);
+  assert.equal(bodyRoll?.weight, 0.7);
 }
 
 function testSpeechPoseSkipsVoiceFollowingParameterAlreadyControlledBySemanticAxis(): void {
@@ -659,6 +690,7 @@ function run(): void {
   testRevisionMismatchBecomesWarningInsteadOfCompileFailure();
   testSpeechPoseAppliesForSpeechLinkedIdleIntent();
   testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes();
+  testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight();
   testSpeechPoseSkipsVoiceFollowingParameterAlreadyControlledBySemanticAxis();
   testSpeechPoseDoesNotApplyWithoutSpeechActive();
   testSpeechPoseDoesNotUseGenericDerivedAxis();

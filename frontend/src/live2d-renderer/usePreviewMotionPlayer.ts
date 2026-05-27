@@ -51,6 +51,14 @@ function buildPlanSignature(plan: SemanticParameterPlan): string {
         ? undefined
         : Math.round(item.input_value * 10000) / 10000,
       source: item.source,
+      modulation: item.modulation
+        ? {
+          kind: item.modulation.kind,
+          neutral: Math.round(item.modulation.neutral * 10000) / 10000,
+          amplitude: Math.round(item.modulation.amplitude * 10000) / 10000,
+          phase: Math.round(item.modulation.phase * 10000) / 10000,
+        }
+        : undefined,
     })).sort((left, right) => left.parameter_id.localeCompare(right.parameter_id)),
   });
 }

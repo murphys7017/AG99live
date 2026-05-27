@@ -127,6 +127,15 @@ interface DirectSemanticParameterBinding {
   weight: number;
   inputValue: number | null;
   source: string;
+  modulationPhase: number;
+  modulationAmplitude: number;
+  neutralValue: number;
+  modulation: {
+    kind: string;
+    neutral: number | null;
+    amplitude: number | null;
+    phase: number | null;
+  } | null;
   parameterId: CubismIdHandle;
   parameterIndex: number;
 }
@@ -1503,6 +1512,23 @@ export class LAppModel extends CubismUserModel {
         weight: Number(item.weight),
         inputValue: Number.isFinite(Number(item.input_value)) ? Number(item.input_value) : null,
         source: String(item.source || "semantic_axis"),
+        modulationPhase: this.resolveSpeechPosePhase(axisId),
+        modulationAmplitude: 0,
+        neutralValue: clampedTargetValue,
+        modulation: item.modulation && typeof item.modulation === "object"
+          ? {
+            kind: String(item.modulation.kind || "").trim(),
+            neutral: Number.isFinite(item.modulation.neutral)
+              ? Number(item.modulation.neutral)
+              : null,
+            amplitude: Number.isFinite(item.modulation.amplitude)
+              ? Number(item.modulation.amplitude)
+              : null,
+            phase: Number.isFinite(item.modulation.phase)
+              ? Number(item.modulation.phase)
+              : null,
+          }
+          : null,
         parameterId: resolved.parameterId,
         parameterIndex: resolved.parameterIndex,
       });
@@ -1511,6 +1537,16 @@ export class LAppModel extends CubismUserModel {
     if (semanticBindings.length === 0) {
       this.stopDirectParameterPlan("v2_parameters_empty");
       return false;
+    }
+
+    for (const item of semanticBindings) {
+      if (!item.source.startsWith("speech_pose")) {
+        continue;
+      }
+      const modulation = this.resolveSpeechPoseModulation(item);
+      item.modulationAmplitude = modulation.amplitude;
+      item.modulationPhase = modulation.phase;
+      item.neutralValue = modulation.neutralValue;
     }
 
     console.info("[LAppModel] Semantic parameter bindings ready. Activating v2 plan.", {
@@ -1572,7 +1608,14 @@ export class LAppModel extends CubismUserModel {
       }
 
       const baseValue = this._model.getParameterValueByIndex(item.parameterIndex);
-      const blendedValue = baseValue + (effectiveTargetValue - baseValue) * easing * item.weight;
+      const frameTargetValue = this.resolveSemanticBindingFrameTarget(
+        item,
+        elapsedMs,
+        effectiveTargetValue,
+        minValue,
+        maxValue,
+      );
+      const blendedValue = baseValue + (frameTargetValue - baseValue) * easing;
       this._model.setParameterValueById(item.parameterId, blendedValue);
       const readbackValue = this._model.getParameterValueByIndex(item.parameterIndex);
       if (Math.abs(readbackValue - blendedValue) > 0.001) {
@@ -1582,7 +1625,7 @@ export class LAppModel extends CubismUserModel {
         return `v2_parameter_write_mismatch:${item.parameterIdRaw}`;
       }
       if (shouldLogFrame) {
-        console.info(`[LAppModel] v2 setParam axis=${item.axisId} param=${item.parameterIdRaw} input=${item.inputValue} base=${baseValue} target=${item.targetValue} weight=${item.weight} eased=${blendedValue} readback=${readbackValue} easing=${easing}`);
+        console.info(`[LAppModel] v2 setParam axis=${item.axisId} param=${item.parameterIdRaw} input=${item.inputValue} base=${baseValue} target=${frameTargetValue} weight=${item.weight} eased=${blendedValue} readback=${readbackValue} easing=${easing}`);
       }
     }
 
@@ -1817,6 +1860,86 @@ export class LAppModel extends CubismUserModel {
   private smoothstep(value: number): number {
     const x = Math.max(0, Math.min(1, value));
     return x * x * (3 - 2 * x);
+  }
+
+  private resolveSemanticBindingFrameTarget(
+    item: DirectSemanticParameterBinding,
+    elapsedMs: number,
+    fallbackTargetValue: number,
+    minValue: number,
+    maxValue: number,
+  ): number {
+    if (
+      !item.source.startsWith("speech_pose")
+      || item.modulationAmplitude <= 0
+    ) {
+      return fallbackTargetValue;
+    }
+
+    const cycleRadians = ((elapsedMs / 1000) * 2.8 * Math.PI * 2) + item.modulationPhase;
+    const modulatedValue =
+      item.neutralValue + Math.sin(cycleRadians) * item.modulationAmplitude;
+    return Math.max(minValue, Math.min(maxValue, modulatedValue));
+  }
+
+  private resolveSpeechPoseModulation(
+    item: DirectSemanticParameterBinding,
+  ): {
+    amplitude: number;
+    phase: number;
+    neutralValue: number;
+  } {
+    const modulation = this.parseSpeechPoseModulation(item);
+    const neutralValue = modulation.neutralValue ?? this.inputValueOr(item, item.targetValue);
+    const amplitude = Math.max(
+      0,
+      (modulation.amplitude ?? Math.abs(item.targetValue - neutralValue)) * item.weight,
+    );
+    return {
+      amplitude,
+      phase: modulation.phase ?? item.modulationPhase,
+      neutralValue,
+    };
+  }
+
+  private resolveSpeechPosePhase(axisId: string): number {
+    const channelName = axisId.startsWith("voice_following.")
+      ? axisId.slice("voice_following.".length).split("|")[0]
+      : axisId;
+
+    let hash = 0;
+    for (let index = 0; index < channelName.length; index += 1) {
+      hash = (hash + channelName.charCodeAt(index)) % 360;
+    }
+    return (hash / 180) * Math.PI;
+  }
+
+  private inputValueOr(
+    item: DirectSemanticParameterBinding,
+    fallbackValue: number,
+  ): number {
+    return item.inputValue !== null ? item.inputValue : fallbackValue;
+  }
+
+  private parseSpeechPoseModulation(item: DirectSemanticParameterBinding): {
+    phase: number | null;
+    neutralValue: number | null;
+    amplitude: number | null;
+  } {
+    const modulation = item.modulation;
+    if (!modulation || modulation.kind !== "speech_pose_cycle") {
+      return {
+        phase: null,
+        neutralValue: null,
+        amplitude: null,
+      };
+    }
+
+    return {
+      phase: modulation.phase !== null ? modulation.phase * Math.PI * 2 : null,
+      neutralValue: modulation.neutral,
+      amplitude: modulation.amplitude,
+    };
   }
 
   private isParameterIndexWritable(parameterIndex: number): boolean {

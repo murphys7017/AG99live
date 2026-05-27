@@ -131,8 +131,14 @@ function buildVoiceFollowingParameters(
       parameter_id: channel.parameter_id,
       target_value: targetValue,
       weight: channel.weight,
-      input_value: targetValue,
+      input_value: channel.neutral,
       source: "speech_pose",
+      modulation: {
+        kind: "speech_pose_cycle",
+        neutral: channel.neutral,
+        amplitude: channel.amplitude,
+        phase: channel.phase,
+      },
     });
     existingParameterIds.add(channel.parameter_id);
   }
@@ -181,7 +187,7 @@ function resolveVoiceFollowingTargetValue(
   const minValue = channel.output_range.min;
   const maxValue = channel.output_range.max;
   const direction = stableAxisDirection(channel.channel);
-  const rawTarget = channel.neutral + direction * channel.amplitude * channel.weight;
+  const rawTarget = channel.neutral + direction * channel.amplitude;
   return Math.max(minValue, Math.min(maxValue, rawTarget));
 }
 

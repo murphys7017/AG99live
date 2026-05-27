@@ -8,13 +8,18 @@
 
 当前 Mk6 主轴口径下，头部偏转、身体扭转/摇晃、眼睛开闭和视线都属于动作骨架，并由 LLM 可见的 primary/hint 轴表达。`SpeechPoseStage` 不负责重新选择这些主轴；说话随动优先使用模型扫描生成的 `VoiceFollowingProfile`，旧的 dedicated derived 轴只作为兼容 fallback。
 
-当前设计只做 plan 级增强：
+当前设计分两层：
 
-- 不做逐帧口型。
-- 不做音频 RMS / phoneme / viseme。
-- 不直接写 Live2D 原始参数。
-- 不改变 LLM 原始 `controlledValues`。
-- 优先通过 `VoiceFollowingProfile` 生成 `source=speech_pose` 的 plan parameters；没有该 profile 时才通过 `derivedValues` 补充语义轴。
+- `SpeechPoseStage` 只做 plan 级增强：
+  - 不做逐帧口型。
+  - 不做音频 RMS / phoneme / viseme。
+  - 不直接写 Live2D 原始参数。
+  - 不改变 LLM 原始 `controlledValues`。
+  - 优先通过 `VoiceFollowingProfile` 生成 `source=speech_pose` 的 plan parameters；没有该 profile 时才通过 `derivedValues` 补充语义轴。
+- SDK 执行层负责 `speech_pose` 的逐帧调制：
+  - `voice_following_profile` 的 `phase / neutral / amplitude / weight` 会进入前端执行层
+  - 说话期间头身参数围绕 neutral 做连续振荡，而不是整段只缓到一个静态 target
+  - 仍然不引入 RMS / phoneme / viseme
 
 当前待办定位：
 
@@ -119,7 +124,7 @@ legacy derived 轴 fallback：
 - legacy derived fallback 输出到 `derivedValues`
 - 如果用户或 LLM 已经直接控制了同一个参数或相同语义方向的轴，不覆盖它
 - 如果 coupling 已经写入同一个 derived 轴，当前 stage 不覆盖 coupling
-- 输出值围绕 neutral 做轻量偏移
+- 输出 plan 会在参数条目的独立 modulation 字段里保留 `neutral / amplitude / phase` 元信息，供 SDK 执行层做逐帧调制
 - 输出后必须按 axis value range clamp
 
 ## 4.1 与主轴/辅轴设计的关系
