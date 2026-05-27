@@ -20,7 +20,7 @@ def build_example_axes(axis_names: list[str], **overrides: int) -> dict[str, int
 def create_default_selector_few_shot_examples(axis_names: list[str]) -> list[dict[str, Any]]:
     return [
         {
-            "input": "用户：嗯，我知道了。\n助手：好的，我们继续下一步。",
+            "input": "场景：用户确认收到信息，助手简短确认并继续。",
             "output": {
                 "emotion": "neutral",
                 "mode": "idle",
@@ -29,76 +29,77 @@ def create_default_selector_few_shot_examples(axis_names: list[str]) -> list[dic
             },
         },
         {
-            "input": "用户：太好了！终于通过了！\n助手：真棒，我们成功了！",
+            "input": "场景：助手在平静解释或说明，不需要明显情绪，只要有轻微朝向和关注感。",
             "output": {
-                "emotion": "joy",
-                "mode": "expressive",
-                "duration_ms": 1350,
+                "emotion": "explain",
+                "mode": "idle",
+                "duration_ms": 1250,
                 "axes": build_example_axes(
                     axis_names,
-                    head_pitch=60,
-                    body_pitch=58,
-                    gaze_y=58,
-                    eye_smile_left=82,
-                    eye_smile_right=82,
-                    mouth_smile=86,
-                    brow_bias=68,
+                    head_pitch=54,
+                    gaze_y=53,
+                    mouth_smile=54,
                 ),
             },
         },
         {
-            "input": "用户：我有点难过，今天状态不太好。\n助手：没关系，我们慢慢来。",
+            "input": "场景：助手温和安抚用户，语气柔和，动作应收敛但可见。",
             "output": {
-                "emotion": "sad",
+                "emotion": "soothe",
                 "mode": "expressive",
-                "duration_ms": 1500,
+                "duration_ms": 1400,
                 "axes": build_example_axes(
                     axis_names,
-                    head_pitch=38,
-                    gaze_y=34,
-                    eye_open_left=40,
-                    eye_open_right=40,
-                    body_pitch=40,
-                    mouth_smile=22,
-                    brow_bias=30,
+                    head_pitch=42,
+                    body_pitch=44,
+                    gaze_y=40,
+                    mouth_smile=58,
                 ),
             },
         },
         {
-            "input": "用户：你能对我眨一下眼吗？\n助手：当然可以，给你一个小小的 wink。",
+            "input": "场景：助手对当前说法略带疑惑或追问，应以头部和视线表达轻微困惑。",
             "output": {
-                "emotion": "playful_wink",
+                "emotion": "confused",
                 "mode": "expressive",
-                "duration_ms": 900,
+                "duration_ms": 1050,
                 "axes": build_example_axes(
                     axis_names,
-                    head_roll=62,
-                    gaze_x=56,
-                    eye_open_left=18,
-                    eye_open_right=100,
-                    eye_smile_right=72,
-                    mouth_smile=78,
-                    mouth_x=58,
+                    head_roll=60,
+                    gaze_x=42,
                     brow_bias=58,
                 ),
             },
         },
         {
-            "input": "用户：啊？你说这个现在就能用了？\n助手：是的，现在已经可用了。",
+            "input": "场景：助手明确强调结果、表达开心反馈或明显惊讶时，动作可以更清晰。",
             "output": {
-                "emotion": "surprised",
+                "emotion": "happy",
                 "mode": "expressive",
                 "duration_ms": 1200,
                 "axes": build_example_axes(
                     axis_names,
                     head_pitch=62,
-                    body_pitch=60,
+                    body_pitch=58,
+                    eye_smile_left=78,
+                    eye_smile_right=78,
+                    mouth_smile=84,
+                ),
+            },
+        },
+        {
+            "input": "场景：助手对结果感到明显惊讶或强调“现在就可以”，动作应更开、更抬、更醒目。",
+            "output": {
+                "emotion": "surprised",
+                "mode": "expressive",
+                "duration_ms": 1150,
+                "axes": build_example_axes(
+                    axis_names,
+                    head_pitch=63,
                     gaze_y=64,
-                    eye_open_left=100,
-                    eye_open_right=100,
-                    eye_smile_left=18,
-                    eye_smile_right=18,
-                    brow_bias=84,
+                    eye_open_left=88,
+                    eye_open_right=88,
+                    brow_bias=76,
                 ),
             },
         },
@@ -107,10 +108,11 @@ def create_default_selector_few_shot_examples(axis_names: list[str]) -> list[dic
 
 CORE_EXAMPLE_CATEGORY_GROUPS: list[tuple[str, ...]] = [
     ("neutral",),
+    ("explain",),
+    ("soothe",),
+    ("confused",),
     ("happy",),
-    ("angry",),
     ("surprised",),
-    ("confused", "embarrassed"),
 ]
 
 
@@ -129,7 +131,7 @@ def resolve_selector_few_shot_examples(
             runtime_state.motion_tuning_effective_examples = []
         return []
 
-    count = int(getattr(runtime_state, "realtime_motion_fewshot_count", 4))
+    count = int(getattr(runtime_state, "realtime_motion_fewshot_count", 2))
     count = max(0, count)
     if count == 0:
         if update_runtime_state and hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
@@ -138,12 +140,14 @@ def resolve_selector_few_shot_examples(
             runtime_state.motion_tuning_effective_examples = []
         return []
 
-    user_examples = [
+    raw_user_examples = [
         item
         for item in getattr(runtime_state, "motion_tuning_reference_examples", [])
         if isinstance(item, dict)
     ]
-    selected_user_examples = user_examples[:count]
+    user_example_count = int(getattr(runtime_state, "realtime_motion_user_fewshot_count", 0))
+    user_example_count = max(0, min(count, user_example_count))
+    selected_user_examples = raw_user_examples[:user_example_count]
 
     resolved_examples = list(selected_user_examples)
     seen_categories = {
@@ -165,7 +169,8 @@ def resolve_selector_few_shot_examples(
     if len(selected_user_examples) < count:
         diagnostics.append(
             "motion_tuning_user_samples_insufficient:"
-            f"requested={count}:user_available={len(selected_user_examples)}"
+            f"requested={count}:user_available={len(raw_user_examples)}:"
+            f"user_selected={len(selected_user_examples)}"
         )
     if default_backfill:
         diagnostics.append(

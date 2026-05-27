@@ -500,6 +500,9 @@ def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
         def list_effective_motion_tuning_examples(self) -> list[dict]:
             return list(DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES)
 
+        def build_motion_tuning_style_prompt(self) -> str:
+            return "中性时偏少轴；开心时优先笑眼和嘴角。"
+
     generator = RealtimeMotionPlanGenerator(runtime_state=RuntimeStub())
 
     intent = asyncio.run(
@@ -522,6 +525,8 @@ def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
     assert "debug_tail" not in provider.last_prompt
     assert "平台上下文：" in provider.last_prompt
     assert "少量示例仅作为风格参考。" in provider.last_prompt
+    assert "角色风格偏好：" in provider.last_prompt
+    assert "中性时偏少轴" in provider.last_prompt
     assert "表情关键词参考动作：" not in provider.last_prompt
     assert "补充动作指令：" in provider.last_prompt
     assert "Use stronger head and mouth motion." in provider.last_prompt
@@ -558,6 +563,7 @@ def test_realtime_motion_plan_prompt_includes_user_tuned_examples_first() -> Non
         selected_motion_analysis_provider = provider
         realtime_motion_timeout_seconds = 2.0
         realtime_motion_fewshot_count = 1
+        realtime_motion_user_fewshot_count = 1
         motion_tuning_reference_examples = [
             {
                 "input": "Assistant: tuned sample",
@@ -573,6 +579,9 @@ def test_realtime_motion_plan_prompt_includes_user_tuned_examples_first() -> Non
 
         def list_effective_motion_tuning_examples(self) -> list[dict]:
             return list(self.motion_tuning_reference_examples)
+
+        def build_motion_tuning_style_prompt(self) -> str:
+            return ""
 
     generator = RealtimeMotionPlanGenerator(runtime_state=RuntimeStub())
 
@@ -592,6 +601,7 @@ def test_resolve_selector_few_shot_examples_respects_configured_count() -> None:
     class RuntimeStub:
         realtime_motion_fewshot_enabled = True
         realtime_motion_fewshot_count = 6
+        realtime_motion_user_fewshot_count = 6
         motion_tuning_reference_examples = [
             {
                 "input": f"Assistant: tuned sample {index}",
@@ -635,13 +645,13 @@ def test_resolve_selector_few_shot_examples_backfills_defaults_up_to_configured_
     resolved = resolve_selector_few_shot_examples(runtime_state=runtime_state)
 
     assert [item["output"]["emotion"] for item in resolved] == [
-        "joy",
         "neutral",
-        "surprised",
+        "explain",
+        "soothe",
     ]
     assert runtime_state.motion_tuning_fewshot_diagnostics == [
-        "motion_tuning_user_samples_insufficient:requested=3:user_available=1",
-        "motion_tuning_default_backfill_applied:count=2",
+        "motion_tuning_user_samples_insufficient:requested=3:user_available=1:user_selected=0",
+        "motion_tuning_default_backfill_applied:count=3",
     ]
 
 
@@ -681,14 +691,14 @@ def test_resolve_selector_few_shot_examples_ignores_model_native_expression_libr
     resolved = resolve_selector_few_shot_examples(runtime_state=runtime_state)
 
     assert [item["output"]["emotion"] for item in resolved] == [
-        "happy",
         "neutral",
-        "surprised",
-        "sad",
+        "explain",
+        "soothe",
+        "confused",
     ]
     assert runtime_state.motion_tuning_fewshot_diagnostics == [
-        "motion_tuning_user_samples_insufficient:requested=4:user_available=1",
-        "motion_tuning_default_backfill_applied:count=3",
+        "motion_tuning_user_samples_insufficient:requested=4:user_available=1:user_selected=0",
+        "motion_tuning_default_backfill_applied:count=4",
     ]
 
 
@@ -696,6 +706,7 @@ def test_resolve_selector_few_shot_examples_uses_unbounded_configured_count() ->
     class RuntimeStub:
         realtime_motion_fewshot_enabled = True
         realtime_motion_fewshot_count = 12
+        realtime_motion_user_fewshot_count = 12
         motion_tuning_reference_examples = [
             {
                 "input": f"Assistant: tuned sample {index}",
@@ -715,6 +726,34 @@ def test_resolve_selector_few_shot_examples_uses_unbounded_configured_count() ->
 
     assert len(resolved) == 12
     assert resolved[-1]["input"] == "Assistant: tuned sample 11"
+
+
+def test_resolve_selector_few_shot_examples_does_not_use_user_samples_by_default() -> None:
+    class RuntimeStub:
+        realtime_motion_fewshot_enabled = True
+        realtime_motion_fewshot_count = 2
+        motion_tuning_reference_examples = [
+            {
+                "input": "Assistant: tuned sample",
+                "output": {
+                    "emotion": "joy",
+                    "mode": "expressive",
+                    "duration_ms": 900,
+                    "axes": {"head_yaw": 76},
+                },
+            }
+        ]
+        motion_tuning_fewshot_diagnostics: list[str] = []
+
+    runtime_state = RuntimeStub()
+    resolved = resolve_selector_few_shot_examples(runtime_state=runtime_state)
+
+    assert "Assistant: tuned sample" not in [item["input"] for item in resolved]
+    assert [item["output"]["emotion"] for item in resolved] == ["neutral", "explain"]
+    assert runtime_state.motion_tuning_fewshot_diagnostics == [
+        "motion_tuning_user_samples_insufficient:requested=2:user_available=1:user_selected=0",
+        "motion_tuning_default_backfill_applied:count=2",
+    ]
 
 
 def test_resolve_selector_few_shot_examples_reports_final_shortage_after_default_backfill() -> None:
@@ -738,15 +777,17 @@ def test_resolve_selector_few_shot_examples_reports_final_shortage_after_default
     resolved = resolve_selector_few_shot_examples(runtime_state=runtime_state)
 
     assert [item["output"]["emotion"] for item in resolved] == [
-        "joy",
         "neutral",
+        "explain",
+        "soothe",
+        "confused",
+        "happy",
         "surprised",
-        "sad",
     ]
     assert runtime_state.motion_tuning_fewshot_diagnostics == [
-        "motion_tuning_user_samples_insufficient:requested=20:user_available=1",
-        "motion_tuning_default_backfill_applied:count=3",
-        "motion_tuning_fewshot_final_shortage:requested=20:final_count=4",
+        "motion_tuning_user_samples_insufficient:requested=20:user_available=1:user_selected=0",
+        "motion_tuning_default_backfill_applied:count=6",
+        "motion_tuning_fewshot_final_shortage:requested=20:final_count=6",
     ]
 
 
@@ -772,6 +813,9 @@ def test_realtime_motion_plan_generator_accepts_incomplete_selector_output_with_
 
         def list_effective_motion_tuning_examples(self) -> list[dict]:
             return []
+
+        def build_motion_tuning_style_prompt(self) -> str:
+            return ""
 
     generator = RealtimeMotionPlanGenerator(runtime_state=RuntimeStub())
 
@@ -821,6 +865,9 @@ def test_realtime_motion_plan_generator_prompt_switches_off_context_and_few_shot
         def list_effective_motion_tuning_examples(self) -> list[dict]:
             return []
 
+        def build_motion_tuning_style_prompt(self) -> str:
+            return ""
+
     generator = RealtimeMotionPlanGenerator(runtime_state=RuntimeStub())
     intent = asyncio.run(
         generator.generate(
@@ -836,6 +883,25 @@ def test_realtime_motion_plan_generator_prompt_switches_off_context_and_few_shot
     assert "少量示例（仅作为风格参考，不要机械照抄）：" not in provider.last_prompt
     assert "表情关键词参考动作：" not in provider.last_prompt
     assert "平台上下文：" not in provider.last_prompt
+
+
+def test_resolve_selector_few_shot_examples_defaults_to_two_examples() -> None:
+    class RuntimeStub:
+        realtime_motion_fewshot_enabled = True
+        motion_tuning_reference_examples: list[dict[str, object]] = []
+        motion_tuning_fewshot_diagnostics: list[str] = []
+
+    runtime_state = RuntimeStub()
+    resolved = resolve_selector_few_shot_examples(runtime_state=runtime_state)
+
+    assert [item["output"]["emotion"] for item in resolved] == [
+        "neutral",
+        "explain",
+    ]
+    assert runtime_state.motion_tuning_fewshot_diagnostics == [
+        "motion_tuning_user_samples_insufficient:requested=2:user_available=0:user_selected=0",
+        "motion_tuning_default_backfill_applied:count=2",
+    ]
 
 
 def test_validate_parameter_plan_payload_rejects_v1_key_axes() -> None:

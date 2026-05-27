@@ -110,7 +110,12 @@
   "realtime_motion_fewshot_count": {
     "description": "实时动作 selector 使用的 Few-shot 示例数量（0 表示关闭）。",
     "type": "int",
-    "default": 4
+    "default": 2
+  },
+  "realtime_motion_user_fewshot_count": {
+    "description": "允许用户调参样本直接作为 Few-shot 示例的数量。默认 0，用户样本主要汇总为角色风格偏好，避免形成固定动作模板。",
+    "type": "int",
+    "default": 0
   },
   "realtime_motion_platform_context_enabled": {
     "description": "是否在实时动作 selector Prompt 中注入平台交互描述。",

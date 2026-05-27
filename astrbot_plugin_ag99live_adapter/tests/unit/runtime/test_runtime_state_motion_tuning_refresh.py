@@ -455,10 +455,12 @@ def test_runtime_state_exposes_fewshot_shortage_diagnostics(
     resolved_examples = resolve_selector_few_shot_examples(runtime_state=state)
     assert len(resolved_examples) == 3
     assert state.list_motion_tuning_fewshot_diagnostics() == [
-        "motion_tuning_user_samples_insufficient:requested=3:user_available=1",
-        "motion_tuning_default_backfill_applied:count=2",
+        "motion_tuning_user_samples_insufficient:requested=3:user_available=1:user_selected=0",
+        "motion_tuning_default_backfill_applied:count=3",
     ]
     assert state.list_effective_motion_tuning_examples() == resolved_examples
+    assert "这个角色更常用这些轴来组织动作" in state.build_motion_tuning_style_prompt()
+    assert "已记录的调参偏好" in state.build_motion_tuning_style_prompt()
 
 
 def test_runtime_state_effective_examples_query_is_read_only(
@@ -510,6 +512,38 @@ def test_runtime_state_effective_examples_query_is_read_only(
     ]
     assert cached_before != state.list_effective_motion_tuning_examples()
     assert diagnostics_before != state.list_motion_tuning_fewshot_diagnostics()
+
+
+def test_runtime_state_builds_empty_style_prompt_without_matching_samples(
+    monkeypatch,
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    runtime_state = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+    seed_model_info = build_seed_model_info()
+    monkeypatch.setattr(
+        runtime_state,
+        "scan_live2d_models",
+        lambda **kwargs: deepcopy(seed_model_info),
+    )
+    live2ds_dir = tmp_path / "live2ds"
+    (live2ds_dir / "DemoModel").mkdir(parents=True, exist_ok=True)
+
+    state = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=None,
+        plugin_config={"live2d_model_name": "DemoModel"},
+        plugin_config_loader=None,
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=live2ds_dir,
+    )
+    state.refresh()
+
+    assert state.build_motion_tuning_style_prompt() == ""
 
 
 def test_runtime_state_preserves_motion_tuning_samples_when_scan_cache_segment_is_invalid(

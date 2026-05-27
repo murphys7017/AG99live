@@ -84,8 +84,10 @@ class RuntimeState:
         self.motion_generation_mode = "split_after_reply"
         self.enable_inline_motion_contract = True
         self.realtime_motion_fewshot_enabled = True
-        self.realtime_motion_fewshot_count = 4
+        self.realtime_motion_fewshot_count = 2
+        self.realtime_motion_user_fewshot_count = 0
         self.motion_tuning_reference_examples: list[dict[str, Any]] = []
+        self.motion_tuning_style_prompt = ""
         self.motion_tuning_samples: list[dict[str, Any]] = []
         self.runtime_cache_root_error = ""
         self.runtime_cache_segment_errors: dict[str, str] = {}
@@ -221,7 +223,11 @@ class RuntimeState:
         )
         self.realtime_motion_fewshot_count = max(
             0,
-            int(_plugin_config_get(self.plugin_config, "realtime_motion_fewshot_count", 4)),
+            int(_plugin_config_get(self.plugin_config, "realtime_motion_fewshot_count", 2)),
+        )
+        self.realtime_motion_user_fewshot_count = max(
+            0,
+            int(_plugin_config_get(self.plugin_config, "realtime_motion_user_fewshot_count", 0)),
         )
         self.realtime_motion_platform_context_enabled = bool(
             _plugin_config_get(
@@ -476,6 +482,9 @@ class RuntimeState:
     def list_effective_motion_tuning_examples(self) -> list[dict[str, Any]]:
         return deepcopy(self.motion_tuning_effective_examples)
 
+    def build_motion_tuning_style_prompt(self) -> str:
+        return str(self.motion_tuning_style_prompt or "")
+
     def save_motion_tuning_sample(self, sample_payload: Any) -> dict[str, Any]:
         self._raise_if_runtime_cache_error_active()
         normalized_sample = self._normalize_motion_tuning_sample(sample_payload)
@@ -519,6 +528,7 @@ class RuntimeState:
     def _refresh_motion_tuning_reference_examples_from_samples(self) -> None:
         self.motion_tuning_fewshot_diagnostics = []
         self.motion_tuning_effective_examples = []
+        self.motion_tuning_style_prompt = ""
         profile = self._get_selected_semantic_axis_profile()
         if not isinstance(profile, dict):
             self.motion_tuning_reference_examples = []
@@ -547,6 +557,7 @@ class RuntimeState:
             return
 
         normalized_examples: list[dict[str, Any]] = []
+        style_samples: list[dict[str, Any]] = []
         for sample in self.motion_tuning_samples:
             if not isinstance(sample, dict):
                 continue
@@ -571,6 +582,23 @@ class RuntimeState:
                 adjusted_plan,
             ):
                 continue
+            style_samples.append(
+                {
+                    "emotion_label": str(sample.get("emotion_label") or "").strip(),
+                    "feedback": str(sample.get("feedback") or "").strip(),
+                    "tags": [
+                        str(tag).strip()
+                        for tag in sample.get("tags", [])
+                        if str(tag).strip()
+                    ]
+                    if isinstance(sample.get("tags"), list)
+                    else [],
+                    "mode": str(adjusted_plan.get("mode") or "expressive").strip() or "expressive"
+                    if isinstance(adjusted_plan, dict)
+                    else "expressive",
+                    "axes": dict(filtered_axes),
+                }
+            )
             duration_ms = None
             mode = "expressive"
             if isinstance(adjusted_plan, dict):
@@ -599,6 +627,9 @@ class RuntimeState:
                 }
             )
         self.motion_tuning_reference_examples = normalized_examples
+        self.motion_tuning_style_prompt = self._build_motion_tuning_style_prompt(
+            style_samples
+        )
         self._refresh_effective_motion_tuning_examples()
 
     def _refresh_effective_motion_tuning_examples(self) -> None:
@@ -644,6 +675,105 @@ class RuntimeState:
         if not plan_axis_ids:
             return False
         return set(filtered_axes.keys()).issubset(plan_axis_ids)
+
+    @staticmethod
+    def _build_motion_tuning_style_prompt(samples: list[dict[str, Any]]) -> str:
+        if not samples:
+            return ""
+
+        axis_frequency: dict[str, int] = {}
+        idle_axis_counts: list[int] = []
+        expressive_axis_counts: list[int] = []
+        emotion_preferences: dict[str, list[str]] = {}
+
+        for sample in samples:
+            axes = sample.get("axes")
+            if not isinstance(axes, dict) or not axes:
+                continue
+            mode = str(sample.get("mode") or "expressive").strip().lower()
+            axis_ids = [str(axis_id).strip() for axis_id in axes.keys() if str(axis_id).strip()]
+            if not axis_ids:
+                continue
+            for axis_id in axis_ids:
+                axis_frequency[axis_id] = axis_frequency.get(axis_id, 0) + 1
+            if mode == "idle":
+                idle_axis_counts.append(len(axis_ids))
+            else:
+                expressive_axis_counts.append(len(axis_ids))
+
+            emotion_label = str(sample.get("emotion_label") or "").strip().lower()
+            if emotion_label:
+                preferred_axes = sorted(
+                    axis_ids,
+                    key=lambda axis_id: (
+                        -abs(float(axes.get(axis_id, 0.0)) - 50.0),
+                        axis_id,
+                    ),
+                )[:3]
+                if preferred_axes:
+                    emotion_preferences.setdefault(emotion_label, [])
+                    for axis_id in preferred_axes:
+                        if axis_id not in emotion_preferences[emotion_label]:
+                            emotion_preferences[emotion_label].append(axis_id)
+
+        if not axis_frequency:
+            return ""
+
+        top_axes = [
+            axis_id
+            for axis_id, _ in sorted(
+                axis_frequency.items(),
+                key=lambda item: (-item[1], item[0]),
+            )[:5]
+        ]
+
+        lines: list[str] = []
+        lines.append(
+            "优先保持当前角色已经调出来的表演习惯，不要把少量示例当成固定模板。"
+        )
+        if top_axes:
+            lines.append(
+                "这个角色更常用这些轴来组织动作："
+                + ", ".join(top_axes)
+                + "。"
+            )
+        if idle_axis_counts:
+            average_idle_axes = sum(idle_axis_counts) / len(idle_axis_counts)
+            if average_idle_axes <= 2.4:
+                lines.append("中性或说明性回复时，尽量少轴、收敛，优先用头部或视线轻微表达。")
+            else:
+                lines.append("中性或说明性回复时，可以保留少量细节轴，但不要把动作堆满。")
+        if expressive_axis_counts:
+            average_expressive_axes = sum(expressive_axis_counts) / len(expressive_axis_counts)
+            if average_expressive_axes <= 3.2:
+                lines.append("明确情绪时，也优先使用少量关键轴建立骨架，不要把每个细节轴都拉开。")
+            else:
+                lines.append("明确情绪时可以增加细节轴，但要让头身眼仍然是主骨架。")
+
+        summarized_emotions = 0
+        for emotion_label, preferred_axes in sorted(emotion_preferences.items()):
+            if summarized_emotions >= 3 or not preferred_axes:
+                break
+            lines.append(
+                f"{emotion_label} 这类语气下，可优先考虑 {', '.join(preferred_axes[:3])}。"
+            )
+            summarized_emotions += 1
+
+        feedback_lines: list[str] = []
+        seen_feedback: set[str] = set()
+        for sample in samples:
+            feedback = str(sample.get("feedback") or "").strip()
+            if not feedback or feedback in seen_feedback:
+                continue
+            seen_feedback.add(feedback)
+            feedback_lines.append(feedback)
+            if len(feedback_lines) >= 2:
+                break
+        if feedback_lines:
+            lines.append("已记录的调参偏好：" + "；".join(feedback_lines) + "。")
+
+        lines.append("每次仍应先理解这轮对话语气，再在上述风格范围内自由生成。")
+        return "\n".join(lines)
 
     def should_send_model_payload(self, payload: dict[str, Any], *, force: bool = False) -> bool:
         signature = json.dumps(payload, sort_keys=True, ensure_ascii=False)

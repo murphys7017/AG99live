@@ -140,7 +140,7 @@ def _build_semantic_model_info() -> dict:
 
 
 def _build_runtime_state(*, mode: str = "split_after_reply"):
-    return type(
+    state = type(
         "RuntimeStateStub",
         (),
         {
@@ -151,6 +151,10 @@ def _build_runtime_state(*, mode: str = "split_after_reply"):
             "model_info": _build_semantic_model_info(),
         },
     )()
+    state.build_motion_tuning_style_prompt = lambda: (
+        "中性时偏少轴，开心时优先笑眼和嘴角。"
+    )
+    return state
 
 
 def _build_event(*, mode: str = "split_after_reply", raw_turn_id: str = "front-turn"):
@@ -266,7 +270,10 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "AG99live Motion 是当前桌宠前端的主动作通道" in system.value
     assert '"plugin_hints":{"ag99live_motion"' in system.value
     assert "immediate_spoken_reply" in system.value
+    assert "角色风格偏好" in system.value
+    assert "中性时偏少轴" in system.value
     assert capability.value["configured_generation_mode"] == "split_after_reply"
+    assert capability.value["motion_style_prompt"] == "中性时偏少轴，开心时优先笑眼和嘴角。"
     assert capability.value["semantic_profile"]["profile_id"] == "pet.semantic.v1"
     prompt_axis_ids = [
         item["id"] for item in capability.value["semantic_profile"]["prompt_axes"]

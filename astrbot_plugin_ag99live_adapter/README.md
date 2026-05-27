@@ -86,9 +86,16 @@ astrbot_plugin_ag99live_adapter/
 - `motion_analysis_provider_id`：动作分析 / realtime motion selector 使用的 Provider。
 - `realtime_motion_timeout_seconds`：realtime 生成超时（秒）。
 - `realtime_motion_fewshot_enabled`：是否启用 few-shot。
+- `realtime_motion_fewshot_count`：few-shot 默认只注入 2 条，避免 selector 过度贴近固定模板。
+- `realtime_motion_user_fewshot_count`：用户调参样本直接作为 few-shot 的数量，默认 0；样本主要汇总成角色风格偏好。
 - `realtime_motion_platform_context_enabled`：是否注入平台上下文。
 - `motion_prompt_instruction`：动作 intent 生成的补充指令，默认要求 Live2D 表现更夸张。
 - `enable_action_llm_filter`：是否启用基础动作库 LLM 严格筛选。
+
+当前 realtime motion selector 的参考策略：
+
+- 默认 few-shot 不再按固定“表情卡”组织，而是按语气锚点组织，避免把少量样例当成动作模板。
+- 用户保存的 motion tuning 样本默认不直接进入 few-shot，而是汇总成角色风格偏好文本，注入 selector prompt 和 middleware-first 主链路动作契约，约束角色习惯而不是强推固定输出。
 
 ## 开发与验证
 

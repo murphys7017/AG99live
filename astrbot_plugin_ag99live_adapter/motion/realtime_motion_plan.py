@@ -68,6 +68,7 @@ class RealtimeMotionPlanGenerator:
         selector_raw = await self._call_astrbot_selector(
             context_text,
             few_shot_examples=self.runtime_state.list_effective_motion_tuning_examples(),
+            style_prompt=self.runtime_state.build_motion_tuning_style_prompt(),
             motion_instruction=resolve_motion_prompt_instruction(runtime_state=self.runtime_state),
             semantic_profile=semantic_profile,
         )
@@ -87,6 +88,7 @@ class RealtimeMotionPlanGenerator:
         context_text: str,
         *,
         few_shot_examples: list[dict[str, Any]],
+        style_prompt: str,
         motion_instruction: str,
         semantic_profile: dict[str, Any],
     ) -> dict[str, Any]:
@@ -104,6 +106,7 @@ class RealtimeMotionPlanGenerator:
                     prompt=build_selector_user_prompt(
                         context_text,
                         few_shot_examples=few_shot_examples,
+                        style_prompt=style_prompt,
                         motion_instruction=motion_instruction,
                         semantic_profile=semantic_profile,
                     ),

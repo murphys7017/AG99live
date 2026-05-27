@@ -380,6 +380,11 @@ def _build_motion_capability_payload(runtime_state: Any) -> dict[str, Any]:
             runtime_state=runtime_state
         ),
     }
+    build_style_prompt = getattr(runtime_state, "build_motion_tuning_style_prompt", None)
+    if callable(build_style_prompt):
+        style_prompt = str(build_style_prompt() or "").strip()
+        if style_prompt:
+            capability_payload["motion_style_prompt"] = style_prompt
 
     profile_payload, _profile_error = _summarize_semantic_profile(runtime_state)
     if profile_payload is not None:
@@ -401,6 +406,15 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
             separators=(",", ":"),
         )
 
+    motion_style_prompt = str(capability_payload.get("motion_style_prompt") or "").strip()
+    style_text = ""
+    if motion_style_prompt:
+        style_text = (
+            "角色风格偏好："
+            f"{motion_style_prompt}"
+            "这些偏好来自用户手调样本，用于约束角色表演习惯，不是固定动作模板。"
+        )
+
     return (
         "AG99live Motion 是当前桌宠前端的主动作通道。"
         "每次 interaction decision 都必须在 JSON 输出的 plugin_hints 中写入 ag99live_motion；"
@@ -408,6 +422,8 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         "ag99live_motion.mode 只能是 idle 或 expressive；axes 只能使用下方 schema 中已有的轴 id，"
         "每个轴值必须写成 {\"value\": number}。"
         "如果用户只是普通说话，也要给一个轻量 idle 或 expressive 动作。"
+        "不要把参考示例或情绪名称当成封闭动作模板；先理解本轮对话语气，再自由组合少量相关轴。"
+        f"{style_text}"
         f" 输出形状示例：{format_json}"
     )
 

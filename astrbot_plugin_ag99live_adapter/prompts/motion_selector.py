@@ -144,6 +144,7 @@ def build_selector_user_prompt(
     text: str,
     *,
     few_shot_examples: list[dict[str, Any]] | None = None,
+    style_prompt: str = "",
     motion_instruction: str = "",
     semantic_profile: dict[str, Any] | None = None,
 ) -> str:
@@ -151,6 +152,7 @@ def build_selector_user_prompt(
         return build_selector_user_prompt_v2(
             text,
             few_shot_examples=few_shot_examples,
+            style_prompt=style_prompt,
             motion_instruction=motion_instruction,
             semantic_profile=semantic_profile,
         )
@@ -208,6 +210,7 @@ def build_selector_user_prompt_v2(
     text: str,
     *,
     few_shot_examples: list[dict[str, Any]] | None = None,
+    style_prompt: str = "",
     motion_instruction: str = "",
     semantic_profile: dict[str, Any],
 ) -> str:
@@ -227,6 +230,7 @@ def build_selector_user_prompt_v2(
         limit=3,
     )
     motion_instruction_block = _build_motion_instruction_block(motion_instruction)
+    style_prompt_block = _build_style_prompt_block(style_prompt)
 
     return (
         "请根据文本为 Live2D 角色选择语义动作轴数值。\n"
@@ -257,11 +261,13 @@ def build_selector_user_prompt_v2(
         "- 通常输出 1 到 4 个相关轴；宁可少输出，也不要输出无关动作。\n"
         "- 只使用数字，并保持在每个轴自己的范围内。\n"
         "- 通过理解参数含义和对话上下文来选择参数；不要把示例或动作名当成封闭选项。\n"
+        "- 示例只是语气锚点，不是模板答案；不要机械复用示例中的固定组合。\n"
         "- 如果存在 body_yaw/body_roll/body_pitch，可用较小幅度补充前倾、后缩、下沉、摇晃和情绪强弱。\n"
         "- 如果存在 eye_open 或 eye_smile 轴，可以用于眨眼、疲惫、惊讶、眯眼、笑眼；侧向和强度应从语义、头部/视线方向和示例推断。\n"
         "- 如果存在 mouth_smile/mouth_x/brow_*，它们是表情辅轴，用于少量补充嘴角、歪嘴和眉毛细节，不要盖过头身眼动作。\n"
         "- 如果存在 mouth_open 或 breath，它们通常由运行时控制；除非文本明确需要哈欠、惊讶张嘴或呼吸状态，否则不要输出。\n"
         "- 数值要稳定、可读，避免混乱的极端值。\n\n"
+        f"{style_prompt_block}"
         f"{motion_instruction_block}"
         f"{few_shot_block}"
         f"文本：{text}"
@@ -303,6 +309,16 @@ def _build_motion_instruction_block(motion_instruction: str) -> str:
     return (
         "补充动作指令：\n"
         f"{truncate_prompt_text(motion_instruction_text, 800)}\n\n"
+    )
+
+
+def _build_style_prompt_block(style_prompt: str) -> str:
+    style_prompt_text = str(style_prompt or "").strip()
+    if not style_prompt_text:
+        return ""
+    return (
+        "角色风格偏好：\n"
+        f"{truncate_prompt_text(style_prompt_text, 1200)}\n\n"
     )
 
 
