@@ -6,6 +6,7 @@ import MotionTuningPanel from "../components/MotionTuningPanel.vue";
 import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import type {
   DesktopBaseActionPreview,
+  DesktopMotionPlaybackRecord,
   DesktopMotionTuningSample,
 } from "../types/desktop";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
@@ -13,44 +14,17 @@ import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 const bridge = useDesktopBridge();
 const parameterActionPreview = computed<DesktopBaseActionPreview | null>(() => {
   const preview = bridge.state.modelProjectionSnapshot.baseActionPreview;
-  if (!preview) {
-    return null;
-  }
-  return {
-    ...preview,
-    focusChannels: [...preview.focusChannels],
-    focusDomains: [...preview.focusDomains],
-    ignoredDomains: [...preview.ignoredDomains],
-    summary: { ...preview.summary },
-    analysis: { ...preview.analysis },
-    families: preview.families.map((family) => ({
-      ...family,
-      channels: [...family.channels],
-    })),
-    channels: preview.channels.map((channel) => ({
-      ...channel,
-      polarityModes: [...channel.polarityModes],
-      atomIds: [...channel.atomIds],
-    })),
-    atoms: preview.atoms.map((atom) => ({
-      ...atom,
-      sourceTags: [...atom.sourceTags],
-    })),
-  };
+  return preview as unknown as DesktopBaseActionPreview | null;
 });
 const semanticProfile = computed<SemanticAxisProfile | null>(() => {
   const profile = bridge.state.modelProjectionSnapshot.runtimeSemanticAxisProfile;
-  return profile ? JSON.parse(JSON.stringify(profile)) as SemanticAxisProfile : null;
+  return profile as unknown as SemanticAxisProfile | null;
 });
 const motionPlaybackRecords = computed(() =>
-  bridge.state.snapshot.motionPlaybackRecords.map((record) =>
-    JSON.parse(JSON.stringify(record)),
-  ),
+  bridge.state.snapshot.motionPlaybackRecords as unknown as readonly DesktopMotionPlaybackRecord[],
 );
 const motionTuningSamples = computed(() =>
-  bridge.state.motionTuningSamples.map((sample) =>
-    JSON.parse(JSON.stringify(sample)) as DesktopMotionTuningSample,
-  ),
+  bridge.state.motionTuningSamples as unknown as readonly DesktopMotionTuningSample[],
 );
 const motionTuningSamplesStatus = computed(() => bridge.state.motionTuningSamplesStatus);
 const effectiveExamples = computed(() =>

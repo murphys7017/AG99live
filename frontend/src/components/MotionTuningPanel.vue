@@ -42,6 +42,7 @@ const emit = defineEmits<{
 const selectedRecordId = ref("");
 const selectedReferenceId = ref("");
 const activeSourceTab = ref<"history" | "saved">("history");
+const emotionLabelText = ref("");
 const feedbackText = ref("");
 const tagsText = ref("");
 const enabledForLlmReference = ref(true);
@@ -283,8 +284,9 @@ watch(
   selectedDraftSource,
   (source) => {
     resetDraftAxes(source);
-    feedbackText.value = "";
-    tagsText.value = "";
+    emotionLabelText.value = source?.emotionLabel ?? "";
+    feedbackText.value = source?.sample?.feedback ?? "";
+    tagsText.value = source?.sample?.tags.join(", ") ?? "";
     enabledForLlmReference.value = source?.sample
       ? Boolean(source.sample.enabledForLlmReference)
       : true;
@@ -373,7 +375,7 @@ function buildAdjustedIntent(): SemanticMotionIntent | null {
     profile_revision: currentProfile.revision,
     model_id: currentProfile.model_id,
     mode: source.mode,
-    emotion_label: source.emotionLabel || "manual_tuning",
+    emotion_label: normalizeEmotionLabel(emotionLabelText.value, source.emotionLabel),
     duration_hint_ms: source.durationMs,
     axes,
     summary: {
@@ -403,6 +405,7 @@ function saveSample(): void {
 
   const adjustedAxes = normalizeDraftAxes(currentProfile);
   const now = new Date();
+  const emotionLabel = normalizeEmotionLabel(emotionLabelText.value, source.emotionLabel);
   const sample: DesktopMotionTuningSample = {
     id: `motion-sample-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
     createdAt: now.toISOString(),
@@ -410,14 +413,14 @@ function saveSample(): void {
     modelName: currentProfile.model_id,
     profileId: currentProfile.profile_id,
     profileRevision: currentProfile.revision,
-    emotionLabel: source.emotionLabel || "manual_tuning",
+    emotionLabel,
     assistantText: source.assistantText,
     feedback: feedbackText.value.trim(),
     tags: parseTags(tagsText.value),
     enabledForLlmReference: enabledForLlmReference.value,
     originalAxes: { ...source.axes },
     adjustedAxes,
-    adjustedPlan: buildAdjustedPlan(source, currentProfile, adjustedAxes),
+    adjustedPlan: buildAdjustedPlan(source, currentProfile, adjustedAxes, emotionLabel),
   };
 
   emit("saveMotionTuningSample", sample);
@@ -468,6 +471,7 @@ function buildAdjustedPlan(
   source: MotionDraftSource,
   currentProfile: SemanticAxisProfile,
   adjustedAxes: Record<string, number>,
+  emotionLabel: string,
 ): SemanticParameterPlan {
   const parameters: SemanticParameterPlan["parameters"] = [];
   const seenParameterIds = new Set<string>();
@@ -500,7 +504,7 @@ function buildAdjustedPlan(
     profile_revision: currentProfile.revision,
     model_id: currentProfile.model_id,
     mode: source.mode,
-    emotion_label: source.emotionLabel,
+    emotion_label: emotionLabel,
     timing: basePlan ? cloneJson(basePlan.timing) : buildDefaultDraftTiming(source.durationMs),
     parameters,
     diagnostics: {
@@ -594,6 +598,10 @@ function formatEffectiveExampleSource(example: DesktopMotionTuningEffectiveExamp
 
 function formatAxisList(axes: Record<string, number>): string {
   return Object.keys(axes).join(", ");
+}
+
+function normalizeEmotionLabel(value: string, fallback: string): string {
+  return value.trim().slice(0, 80) || fallback.trim() || "manual_tuning";
 }
 
 function toggleDraftSourceReference(source: MotionDraftSource, event: Event): void {
@@ -769,6 +777,16 @@ function normalizeEmotionKey(value: string): string {
               />
             </label>
           </div>
+
+          <label class="action-preview__field profile-editor__field--full">
+            <span>Emotion label / 表情标签</span>
+            <input
+              v-model="emotionLabelText"
+              class="settings-card__input"
+              maxlength="80"
+              placeholder="例如：happy, confused, wink, shy"
+            />
+          </label>
 
           <label class="action-preview__field profile-editor__field--full">
             <span>样本说明 / 调参反馈</span>
