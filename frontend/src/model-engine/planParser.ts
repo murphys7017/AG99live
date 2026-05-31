@@ -134,6 +134,10 @@ export function parseSemanticParameterPlan(
           neutral: Number(item.modulation.neutral),
           amplitude: Number(item.modulation.amplitude),
           phase: Number(item.modulation.phase),
+          frequency_hz: isFiniteNumber(item.modulation.frequency_hz)
+            && item.modulation.frequency_hz > 0
+            ? Number(item.modulation.frequency_hz)
+            : undefined,
         }
         : undefined,
     });

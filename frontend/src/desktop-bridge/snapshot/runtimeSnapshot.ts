@@ -4,6 +4,7 @@ import type {
   DesktopRuntimeSnapshot,
   DesktopMotionPlaybackRecord,
 } from "../../types/desktop";
+import type { CatalogMotionPayload } from "../../types/protocol";
 import {
   buildDefaultModelEngineSettings,
   cloneModelEngineSettings,
@@ -11,6 +12,7 @@ import {
 } from "../../model-engine/settings";
 import { cloneSemanticParameterPlan } from "../../model-engine/planParser";
 import { DEFAULT_ADAPTER_ADDRESS } from "../../adapter-connection/core/address";
+import { SCHEMA_CATALOG_MOTION_V1 } from "../../types/protocol";
 import {
   cloneNumericRecord,
   isFiniteNumber,
@@ -145,6 +147,32 @@ function cloneMotionPlaybackRecord(
     if (!isObject(record)) {
       return null;
     }
+    const diagnostics = cloneMotionCompileDiagnostics(record.diagnostics);
+    const playbackTurnId =
+      normalizeOptionalText((record as Record<string, unknown>).playbackTurnId)
+      ?? normalizeOptionalText((record as Record<string, unknown>).turnId)
+      ?? null;
+    if (normalizeText(record.payloadKind) === "catalog_motion") {
+      const motion = cloneCatalogMotionPayload(record.motion);
+      if (!motion) {
+        console.warn("[DesktopBridge] invalid catalog motion playback record ignored.", {
+          schemaVersion: isObject(record.motion)
+            ? normalizeText(record.motion.schema_version)
+            : "",
+        });
+        return null;
+      }
+      return {
+        ...(record as unknown as DesktopMotionPlaybackRecord),
+        payloadKind: "catalog_motion",
+        playbackTurnId,
+        emotionLabel: normalizeText(record.emotionLabel) || motion.emotion_label || motion.label || motion.motion_id,
+        mode: "expressive",
+        diagnostics: diagnostics as DesktopMotionPlaybackRecord["diagnostics"],
+        motion,
+        plan: null,
+      } satisfies DesktopMotionPlaybackRecord;
+    }
     const plan = cloneSemanticParameterPlan(record.plan);
     if (!plan) {
       console.warn("[DesktopBridge] invalid motion playback record ignored.", {
@@ -154,21 +182,69 @@ function cloneMotionPlaybackRecord(
       });
       return null;
     }
-    const diagnostics = cloneMotionCompileDiagnostics(record.diagnostics);
-    const playbackTurnId =
-      normalizeOptionalText((record as Record<string, unknown>).playbackTurnId)
-      ?? normalizeOptionalText((record as Record<string, unknown>).turnId)
-      ?? null;
     return {
       ...(record as unknown as DesktopMotionPlaybackRecord),
+      payloadKind: normalizeText(record.payloadKind) === "semantic_plan"
+        ? "semantic_plan"
+        : "semantic_intent",
       playbackTurnId,
+      emotionLabel: normalizeText(record.emotionLabel) || plan.emotion_label,
+      mode: plan.mode,
       diagnostics: diagnostics as DesktopMotionPlaybackRecord["diagnostics"],
       plan,
+      motion: null,
     } satisfies DesktopMotionPlaybackRecord;
   } catch (error) {
     console.warn("[DesktopBridge] motion playback record rejected.", error, record);
     return null;
   }
+}
+
+function cloneCatalogMotionPayload(payload: unknown): CatalogMotionPayload | null {
+  if (!isObject(payload) || normalizeText(payload.schema_version) !== SCHEMA_CATALOG_MOTION_V1) {
+    return null;
+  }
+  const modelId = normalizeText(payload.model_id);
+  const motionId = normalizeText(payload.motion_id);
+  const group = normalizeText(payload.group);
+  const file = normalizeText(payload.file);
+  const index = normalizeRequiredInteger(payload.index);
+  const priority = normalizeRequiredInteger(payload.priority);
+  if (!modelId || !motionId || !group || !file || index === null || priority === null) {
+    return null;
+  }
+  return {
+    schema_version: SCHEMA_CATALOG_MOTION_V1,
+    model_id: modelId,
+    motion_id: motionId,
+    group,
+    index,
+    file,
+    label: normalizeText(payload.label),
+    emotion_label: normalizeText(payload.emotion_label),
+    duration_ms: normalizeNullableInteger(payload.duration_ms),
+    priority,
+    summary: isObject(payload.summary)
+      ? { source: normalizeOptionalText(payload.summary.source) ?? undefined }
+      : undefined,
+  };
+}
+
+function normalizeRequiredInteger(value: unknown): number | null {
+  if (!isFiniteNumber(value)) {
+    return null;
+  }
+  return Math.max(0, Math.round(value));
+}
+
+function normalizeNullableInteger(value: unknown): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (!isFiniteNumber(value)) {
+    return null;
+  }
+  return Math.max(0, Math.round(value));
 }
 
 function cloneMotionCompileDiagnostics(

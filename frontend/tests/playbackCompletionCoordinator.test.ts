@@ -254,6 +254,65 @@ async function testMotionHandoffCompletesPreviousSegmentAndFinishesCurrent(): Pr
   assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-b")?.motion.completed, true);
 }
 
+async function testCatalogMotionCompletionWritesSegmentAndHistory(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
+  h.sessionStore.markMotionReceived(
+    "turn-1",
+    {
+      kind: "catalog_motion",
+      motion: {
+        schema_version: "engine.catalog_motion.v1",
+        model_id: "model-1",
+        motion_id: "serious_explain",
+        group: "TapBody",
+        index: 0,
+        file: "Motions/serious.motion3.json",
+        label: "认真说明",
+        emotion_label: "explain",
+        duration_ms: 3000,
+        priority: 3,
+      },
+    },
+    "msg-a",
+  );
+
+  h.coordinator.recordMotionPlayback({
+    messageId: "msg-a",
+    turnId: "turn-1",
+    playbackTurnId: "turn-1",
+    model: null,
+    payloadKind: "catalog_motion",
+    startReason: "test",
+    queuedDelayMs: 0,
+    diagnostics: null,
+    playerMessage: "playing",
+    motion: {
+      schema_version: "engine.catalog_motion.v1",
+      model_id: "model-1",
+      motion_id: "serious_explain",
+      group: "TapBody",
+      index: 0,
+      file: "Motions/serious.motion3.json",
+      label: "认真说明",
+      emotion_label: "explain",
+      duration_ms: 3000,
+      priority: 3,
+    },
+  });
+
+  h.mockMotionPlayer.state.status = "playing";
+  await h.flush();
+  h.mockMotionPlayer.state.status = "finished";
+  await h.flush();
+
+  const segment = h.sessionStore.getActiveSession()?.segments.get("msg-a");
+  assert.equal(segment?.motion.started, true);
+  assert.equal(segment?.motion.completed, true);
+  assert.equal(h.coordinator.motionPlaybackRecords.value[0]?.payloadKind, "catalog_motion");
+  assert.equal(h.coordinator.motionPlaybackRecords.value[0]?.emotionLabel, "explain");
+}
+
 async function testPreviewMotionPlaybackDoesNotCreateSessionSegmentOrHistory(): Promise<void> {
   const h = createHarness();
   const beforeSessionCount = h.sessionStore.getSessions().length;
@@ -411,6 +470,7 @@ async function run(): Promise<void> {
   await testAudioStartedNotificationIsSegmentScoped();
   await testMotionCompletionWritesCorrectSegment();
   await testMotionHandoffCompletesPreviousSegmentAndFinishesCurrent();
+  await testCatalogMotionCompletionWritesSegmentAndHistory();
   await testPreviewMotionPlaybackDoesNotCreateSessionSegmentOrHistory();
   await testMixedAudioStatesRequireAllSettled();
   await testSegmentWithAudioFailureStillSettles();

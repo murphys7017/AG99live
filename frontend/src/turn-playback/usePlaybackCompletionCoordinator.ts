@@ -254,7 +254,7 @@ export function usePlaybackCompletionCoordinator(
     }
 
     const now = new Date();
-    const record: DesktopMotionPlaybackRecord = {
+    const baseRecord = {
       id: `motion-record-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
       createdAt: now.toISOString(),
       source: event.diagnostics?.source || event.startReason,
@@ -262,8 +262,6 @@ export function usePlaybackCompletionCoordinator(
       turnId: event.turnId,
       playbackTurnId: event.playbackTurnId,
       modelName: event.model?.name ?? options.motionRecord.getSelectedModel().value?.name ?? "",
-      emotionLabel: event.plan.emotion_label,
-      mode: event.plan.mode,
       startReason: event.startReason,
       queuedDelayMs: event.queuedDelayMs,
       assistantText: options.motionRecord.getLastAssistantText(),
@@ -274,8 +272,22 @@ export function usePlaybackCompletionCoordinator(
             axisIntensityScale: { ...event.diagnostics.axisIntensityScale },
           }
         : null,
-      plan: cloneJson(event.plan),
     };
+    const record: DesktopMotionPlaybackRecord = event.payloadKind === "catalog_motion"
+      ? {
+          ...baseRecord,
+          payloadKind: "catalog_motion",
+          emotionLabel: event.motion.emotion_label || event.motion.label || event.motion.motion_id,
+          mode: "expressive",
+          motion: cloneJson(event.motion),
+        }
+      : {
+          ...baseRecord,
+          payloadKind: event.payloadKind,
+          emotionLabel: event.plan.emotion_label,
+          mode: event.plan.mode,
+          plan: cloneJson(event.plan),
+        };
     motionPlaybackRecords.value = [
       record,
       ...motionPlaybackRecords.value,

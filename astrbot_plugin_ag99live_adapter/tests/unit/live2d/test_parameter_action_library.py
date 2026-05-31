@@ -202,10 +202,11 @@ def test_seed_model_info_summary_embeds_adaptive_parameter_profile() -> None:
         "parameter_name": "ParamAngleX",
         "layer": "head",
         "neutral": 0.0,
-        "output_range": {"min": -9.0, "max": 9.0},
-        "amplitude": 4.5,
+        "output_range": {"min": -10.4, "max": 10.4},
+        "amplitude": 5.2,
         "weight": 1.0,
         "phase": 0.0,
+        "frequency_hz": 1.35,
     }
     assert model["summary"]["schema_version"] == live2d_scan.MODEL_SUMMARY_SCHEMA_VERSION
     assert model["summary"]["adaptive_parameter_profile"]["schema_version"] == (

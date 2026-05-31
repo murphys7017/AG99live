@@ -156,6 +156,7 @@ def _model_info() -> dict:
                             "name": "serious",
                             "file": "Motions/serious.motion3.json",
                             "group": "TapBody",
+                            "catalog_id": "serious_explain",
                             "catalog_label": "认真说明",
                             "catalog_description": "姿态更稳定、更像进入解释状态。",
                             "catalog_intensity": "medium",
@@ -599,7 +600,7 @@ def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
     assert "角色风格偏好：" in provider.last_prompt
     assert "中性时偏少轴" in provider.last_prompt
     assert "可复用的现成 motion3 动画" in provider.last_prompt
-    assert "motion_id=认真说明" in provider.last_prompt
+    assert "motion_id=serious_explain" in provider.last_prompt
     assert "旧表情参考模板" in provider.last_prompt
     assert "[动作]" not in provider.last_prompt
     assert "head_yaw" in provider.last_prompt
@@ -616,14 +617,14 @@ def test_realtime_motion_plan_generator_can_return_catalog_motion() -> None:
     class ProviderStub:
         async def text_chat(self, *, prompt: str, system_prompt: str):
             assert "可复用的现成 motion3 动画" in prompt
-            assert "motion_id=认真说明" in prompt
+            assert "motion_id=serious_explain" in prompt
             del system_prompt
 
             class Response:
                 completion_text = json.dumps(
                     {
                         "choice": "catalog",
-                        "motion_id": "认真说明",
+                        "motion_id": "serious_explain",
                         "emotion": "explain",
                     },
                     separators=(",", ":"),
@@ -654,7 +655,7 @@ def test_realtime_motion_plan_generator_can_return_catalog_motion() -> None:
 
     assert isinstance(payload, dict)
     assert payload["schema_version"] == "engine.catalog_motion.v1"
-    assert payload["motion_id"] == "认真说明"
+    assert payload["motion_id"] == "serious_explain"
     assert payload["group"] == "TapBody"
     assert payload["index"] == 0
     assert payload["emotion_label"] == "explain"

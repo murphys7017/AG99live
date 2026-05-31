@@ -172,44 +172,50 @@ VOICE_FOLLOWING_CHANNEL_SPECS: tuple[dict[str, Any], ...] = (
     {
         "name": "head_yaw",
         "layer": "head",
-        "amplitude": 4.5,
+        "amplitude": 5.2,
         "weight": 1.0,
         "phase": 0.0,
+        "frequency_hz": 1.35,
     },
     {
         "name": "head_pitch",
         "layer": "head",
-        "amplitude": 3.0,
-        "weight": 0.75,
+        "amplitude": 1.2,
+        "weight": 0.35,
         "phase": 0.35,
+        "frequency_hz": 0.68,
     },
     {
         "name": "head_roll",
         "layer": "head",
-        "amplitude": 5.0,
+        "amplitude": 4.8,
         "weight": 1.0,
         "phase": 0.7,
+        "frequency_hz": 1.45,
     },
     {
         "name": "body_yaw",
         "layer": "body",
-        "amplitude": 2.2,
-        "weight": 0.55,
+        "amplitude": 3.2,
+        "weight": 0.7,
         "phase": 0.2,
+        "frequency_hz": 1.15,
     },
     {
         "name": "body_pitch",
         "layer": "body",
-        "amplitude": 1.8,
-        "weight": 0.45,
+        "amplitude": 0.8,
+        "weight": 0.25,
         "phase": 0.55,
+        "frequency_hz": 0.55,
     },
     {
         "name": "body_roll",
         "layer": "body",
-        "amplitude": 2.8,
-        "weight": 0.65,
+        "amplitude": 3.0,
+        "weight": 0.7,
         "phase": 0.85,
+        "frequency_hz": 1.2,
     },
 )
 
@@ -944,6 +950,7 @@ def _scan_motions(
                         parameter_lookup.get(parameter_id, {}).get("kind") == "physics"
                         for parameter_id in parameter_ids
                     ),
+                    "catalog_id": str(catalog_entry.get("id") or "").strip(),
                     "catalog_label": str(catalog_entry.get("label") or "").strip(),
                     "catalog_description": str(catalog_entry.get("description") or "").strip(),
                     "catalog_tags": [
@@ -1917,6 +1924,7 @@ def _build_voice_following_profile(
             "amplitude": _round_float(spec["amplitude"]),
             "weight": _round_float(spec["weight"]),
             "phase": _round_float(spec["phase"]),
+            "frequency_hz": _round_float(spec["frequency_hz"]),
         }
 
     return {

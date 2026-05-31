@@ -168,6 +168,9 @@ def _resolve_selected_model_payload(runtime_state: Any) -> dict[str, Any] | None
 
 
 def _resolve_motion_id(motion: dict[str, Any], *, file_value: str) -> str:
+    catalog_id = str(motion.get("catalog_id") or "").strip()
+    if catalog_id:
+        return catalog_id
     label = str(motion.get("catalog_label") or motion.get("name") or "").strip()
     if label:
         return _slugify_motion_id(label)

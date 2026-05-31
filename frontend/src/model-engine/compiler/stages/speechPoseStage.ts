@@ -138,6 +138,7 @@ function buildVoiceFollowingParameters(
         neutral: channel.neutral,
         amplitude: channel.amplitude,
         phase: channel.phase,
+        frequency_hz: resolveVoiceFollowingFrequencyHz(channel),
       },
     });
     existingParameterIds.add(channel.parameter_id);
@@ -179,6 +180,38 @@ function isUsableVoiceFollowingChannel(
     && Number.isFinite(channel.weight)
     && channel.weight > 0,
   );
+}
+
+function resolveVoiceFollowingFrequencyHz(
+  channel: VoiceFollowingChannelProfile,
+): number {
+  if (
+    typeof channel.frequency_hz === "number"
+    && Number.isFinite(channel.frequency_hz)
+    && channel.frequency_hz > 0
+  ) {
+    return channel.frequency_hz;
+  }
+  return defaultVoiceFollowingFrequencyHz(channel.channel);
+}
+
+function defaultVoiceFollowingFrequencyHz(channelName: string): number {
+  switch (channelName) {
+    case "head_pitch":
+      return 0.68;
+    case "body_pitch":
+      return 0.55;
+    case "head_yaw":
+      return 1.35;
+    case "head_roll":
+      return 1.45;
+    case "body_yaw":
+      return 1.15;
+    case "body_roll":
+      return 1.2;
+    default:
+      return 1.2;
+  }
 }
 
 function resolveVoiceFollowingTargetValue(

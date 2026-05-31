@@ -11,7 +11,12 @@ declare global {
       setModelPosition?: (x: number, y: number) => void;
       getMotionGroups?: () => string[];
       getMotionCount?: (group: string) => number;
-      startMotion?: (group: string, no: number, priority: number) => number;
+      startMotion?: (
+        group: string,
+        no: number,
+        priority: number,
+        onFinishedMotionHandler?: () => void,
+      ) => number;
       setAmbientMotionEnabled?: (enabled: boolean) => void;
       startDirectParameterPlan?: (plan: MotionPlanPayload) => boolean;
       stopDirectParameterPlan?: () => void;

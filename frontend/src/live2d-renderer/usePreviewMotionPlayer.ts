@@ -58,6 +58,9 @@ function buildPlanSignature(plan: SemanticParameterPlan): string {
           neutral: Math.round(item.modulation.neutral * 10000) / 10000,
           amplitude: Math.round(item.modulation.amplitude * 10000) / 10000,
           phase: Math.round(item.modulation.phase * 10000) / 10000,
+          frequency_hz: item.modulation.frequency_hz === undefined
+            ? undefined
+            : Math.round(item.modulation.frequency_hz * 10000) / 10000,
         }
         : undefined,
     })).sort((left, right) => left.parameter_id.localeCompare(right.parameter_id)),
@@ -315,8 +318,17 @@ export function usePreviewMotionPlayer() {
       motion.group,
       motion.index,
       motion.priority || 3,
+      () => {
+        if (activeRunId !== runId) {
+          return;
+        }
+        state.status = "finished";
+        state.message = "现成 motion 执行完成。";
+        state.finishedAt = new Date().toISOString();
+        activeTimerHandles = [];
+      },
     );
-    if (handle === -1) {
+    if (handle === -1 && motion.duration_ms === null) {
       const reason = `现成 motion 执行失败：${motion.motion_id}。`;
       console.warn("[MotionPlayer]", reason);
       state.status = "failed";

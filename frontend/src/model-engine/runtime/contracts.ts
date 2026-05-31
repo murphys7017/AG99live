@@ -26,8 +26,7 @@ export interface PlayPlanOptions {
   onStarted?: (plan: MotionPlanPayload) => void;
 }
 
-export interface ModelEnginePlanStartedEvent {
-  plan: MotionPlanPayload;
+interface ModelEnginePlanStartedEventBase {
   model: ModelSummary | null;
   messageId: string;
   turnId: string | null;
@@ -38,6 +37,18 @@ export interface ModelEnginePlanStartedEvent {
   diagnostics: CompileDiagnostics | null;
   playerMessage: string;
 }
+
+export type ModelEnginePlanStartedEvent =
+  | (ModelEnginePlanStartedEventBase & {
+    payloadKind: "semantic_intent" | "semantic_plan";
+    plan: MotionPlanPayload;
+    motion?: null;
+  })
+  | (ModelEnginePlanStartedEventBase & {
+    payloadKind: "catalog_motion";
+    motion: CatalogMotionPayload;
+    plan?: null;
+  });
 
 export type ModelEngineHistoryRole =
   Extract<DesktopHistoryEntry["role"], "system" | "error">;

@@ -89,6 +89,11 @@ type MotionDraftSource = Readonly<{
   sample?: DesktopMotionTuningSample;
 }>;
 
+type SemanticMotionPlaybackRecord = DesktopMotionPlaybackRecord & {
+  payloadKind: "semantic_intent" | "semantic_plan";
+  plan: SemanticParameterPlan;
+};
+
 const mutableProfile = computed<SemanticAxisProfile | null>(() =>
   props.semanticProfile ? cloneJson(props.semanticProfile) as SemanticAxisProfile : null,
 );
@@ -108,9 +113,7 @@ const recentSemanticRecords = computed(() =>
       return [];
     }
     return props.motionPlaybackRecords
-      .filter((record): record is DesktopMotionPlaybackRecord & { plan: SemanticParameterPlan } =>
-      record.plan.schema_version === SCHEMA_PARAMETER_PLAN_V2,
-      )
+      .filter(isSemanticMotionPlaybackRecord)
       .filter((record) => record.plan.model_id === currentProfile.model_id)
       .filter((record) => record.plan.profile_id === currentProfile.profile_id)
       .slice(0, RECENT_RECORD_LIMIT);
@@ -333,6 +336,16 @@ function extractPlanAxisValues(plan: SemanticParameterPlan): Record<string, numb
     values[parameter.axis_id] = parameter.input_value;
   }
   return values;
+}
+
+function isSemanticMotionPlaybackRecord(
+  record: DesktopMotionPlaybackRecord,
+): record is SemanticMotionPlaybackRecord {
+  return (
+    record.payloadKind !== "catalog_motion"
+    && Boolean(record.plan)
+    && record.plan.schema_version === SCHEMA_PARAMETER_PLAN_V2
+  );
 }
 
 function updateAxisValue(axis: SemanticAxisDefinition, event: Event): void {

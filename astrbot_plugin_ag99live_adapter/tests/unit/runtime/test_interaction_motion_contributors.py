@@ -219,6 +219,7 @@ def _build_semantic_model_info() -> dict:
                             "file": "Motions/认真说明.motion3.json",
                             "group": "TapBody",
                             "duration": 3.0,
+                            "catalog_id": "serious_explain",
                             "catalog_label": "认真说明",
                             "catalog_description": "姿态更稳定、更像进入解释状态。",
                             "catalog_intensity": "medium",
@@ -418,7 +419,7 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "使用说明=Use for attention direction." in capability.value["semantic_profile"]["axis_prompt"]
     assert "低值=turn left；高值=turn right" in system.value
     assert "可复用的现成 motion3 动画" in system.value
-    assert "motion_id=认真说明" in system.value
+    assert "motion_id=serious_explain" in system.value
     assert "旧表情参考模板" in system.value
     assert "[动作]" not in system.value
     assert "head_yaw" in system.value
@@ -527,7 +528,7 @@ def test_plugin_hints_catalog_motion_payload_uses_catalog_option(
         {
             "ag99live_motion": {
                 "choice": "catalog",
-                "motion_id": "认真说明",
+                "motion_id": "serious_explain",
                 "emotion_label": "explain",
             }
         },
@@ -537,7 +538,7 @@ def test_plugin_hints_catalog_motion_payload_uses_catalog_option(
 
     assert payload is not None
     assert payload["schema_version"] == "engine.catalog_motion.v1"
-    assert payload["motion_id"] == "认真说明"
+    assert payload["motion_id"] == "serious_explain"
     assert payload["group"] == "TapBody"
     assert payload["index"] == 0
     assert payload["emotion_label"] == "explain"

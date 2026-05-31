@@ -76,6 +76,18 @@ function startCatalogMotionPayload(
   }
 
   const successMessage = buildSuccessMessage(context, dependencies);
+  dependencies.onPlanStarted?.({
+    motion: payload.motion,
+    model: selectedModel,
+    messageId: context.messageId,
+    turnId: context.turnId,
+    playbackTurnId: context.playbackTurnId,
+    startReason: context.startReason,
+    queuedDelayMs: context.queuedDelayMs,
+    payloadKind: payload.kind,
+    diagnostics: null,
+    playerMessage: successMessage,
+  });
   state.setState("playing", successMessage, null);
   state.pushHistory("system", `现成 motion 执行中（${successMessage}）。`);
   return true;

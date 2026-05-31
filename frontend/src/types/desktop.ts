@@ -1,4 +1,5 @@
 import type {
+  CatalogMotionPayload,
   MotionPlanPayload,
 } from "./protocol";
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
@@ -164,7 +165,7 @@ export interface DesktopMotionCompileDiagnostics {
   axisIntensityScale: Record<string, number>;
 }
 
-export interface DesktopMotionPlaybackRecord {
+interface DesktopMotionPlaybackRecordBase {
   id: string;
   createdAt: string;
   source: string;
@@ -179,8 +180,19 @@ export interface DesktopMotionPlaybackRecord {
   assistantText: string;
   playerMessage: string;
   diagnostics: DesktopMotionCompileDiagnostics | null;
-  plan: MotionPlanPayload;
 }
+
+export type DesktopMotionPlaybackRecord =
+  | (DesktopMotionPlaybackRecordBase & {
+    payloadKind: "semantic_intent" | "semantic_plan";
+    plan: MotionPlanPayload;
+    motion?: null;
+  })
+  | (DesktopMotionPlaybackRecordBase & {
+    payloadKind: "catalog_motion";
+    motion: CatalogMotionPayload;
+    plan?: null;
+  });
 
 export interface DesktopMotionTuningSample {
   id: string;

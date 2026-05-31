@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { effectScope } from "vue";
 import { usePreviewMotionPlayer } from "../src/live2d-renderer/usePreviewMotionPlayer.js";
-import type { SemanticParameterPlan } from "../src/types/protocol.js";
+import type { CatalogMotionPayload, SemanticParameterPlan } from "../src/types/protocol.js";
 
 let mockNowMs = 1000;
 
@@ -45,6 +45,21 @@ function buildPlan(): SemanticParameterPlan {
   };
 }
 
+function buildCatalogMotion(durationMs: number | null = 3000): CatalogMotionPayload {
+  return {
+    schema_version: "engine.catalog_motion.v1",
+    model_id: "model-1",
+    motion_id: "serious_explain",
+    group: "TapBody",
+    index: 0,
+    file: "Motions/serious.motion3.json",
+    label: "认真说明",
+    emotion_label: "explain",
+    duration_ms: durationMs,
+    priority: 3,
+  };
+}
+
 function installMockAdapter(): { startCount: () => number } {
   let startDirectParameterPlanCount = 0;
   (globalThis as typeof globalThis & {
@@ -63,6 +78,25 @@ function installMockAdapter(): { startCount: () => number } {
   });
   return {
     startCount: () => startDirectParameterPlanCount,
+  };
+}
+
+function installCatalogMockAdapter(startMotionResult: number): { startMotionCount: () => number } {
+  let startMotionCount = 0;
+  (globalThis as typeof globalThis & {
+    getLAppAdapter?: () => {
+      startMotion: (group: string, no: number, priority: number, onFinished?: () => void) => number;
+      stopDirectParameterPlan: () => void;
+    };
+  }).getLAppAdapter = () => ({
+    startMotion: () => {
+      startMotionCount += 1;
+      return startMotionResult;
+    },
+    stopDirectParameterPlan: () => {},
+  });
+  return {
+    startMotionCount: () => startMotionCount,
   };
 }
 
@@ -96,8 +130,33 @@ async function testSoftHandoffDuplicateStillReportsStarted(): Promise<void> {
   scope.stop();
 }
 
+async function testCatalogMotionAsyncHandleWithDurationIsAccepted(): Promise<void> {
+  const adapter = installCatalogMockAdapter(-1);
+  const scope = effectScope();
+  const player = scope.run(() => usePreviewMotionPlayer());
+  assert.ok(player);
+
+  assert.equal(player.playCatalogMotion(buildCatalogMotion(3000), null), true);
+  assert.equal(adapter.startMotionCount(), 1);
+  assert.equal(player.state.status, "playing");
+  scope.stop();
+}
+
+async function testCatalogMotionInvalidHandleWithoutDurationStillFails(): Promise<void> {
+  installCatalogMockAdapter(-1);
+  const scope = effectScope();
+  const player = scope.run(() => usePreviewMotionPlayer());
+  assert.ok(player);
+
+  assert.equal(player.playCatalogMotion(buildCatalogMotion(null), null), false);
+  assert.equal(player.state.status, "failed");
+  scope.stop();
+}
+
 async function run(): Promise<void> {
   await testSoftHandoffDuplicateStillReportsStarted();
+  await testCatalogMotionAsyncHandleWithDurationIsAccepted();
+  await testCatalogMotionInvalidHandleWithoutDurationStillFails();
   console.log("previewMotionPlayer tests passed");
 }
 

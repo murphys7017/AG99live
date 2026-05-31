@@ -135,6 +135,7 @@ export interface VoiceFollowingChannelProfile {
   amplitude: number;
   weight: number;
   phase: number;
+  frequency_hz?: number;
 }
 
 export interface VoiceFollowingProfile {
@@ -619,6 +620,7 @@ export interface SemanticParameterPlanEntry {
     neutral: number;
     amplitude: number;
     phase: number;
+    frequency_hz?: number;
   };
 }
 

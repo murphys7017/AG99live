@@ -139,6 +139,7 @@ interface DirectSemanticParameterBinding {
   source: string;
   modulationPhase: number;
   modulationAmplitude: number;
+  modulationFrequencyHz: number;
   neutralValue: number;
   lifeMotionPhase: number;
   lifeMotionAmplitude: number;
@@ -148,6 +149,7 @@ interface DirectSemanticParameterBinding {
     neutral: number | null;
     amplitude: number | null;
     phase: number | null;
+    frequencyHz: number | null;
   } | null;
   parameterId: CubismIdHandle;
   parameterIndex: number;
@@ -854,6 +856,7 @@ export class LAppModel extends CubismUserModel {
           }
 
           motion.setEffectIds(this._eyeBlinkIds, this._lipSyncIds);
+          motion.setFinishedMotionHandler(onFinishedMotionHandler);
           autoDelete = true; // 終了時にメモリから削除
 
           // Start the motion *after* it's loaded (moved from outside)
@@ -1530,6 +1533,7 @@ export class LAppModel extends CubismUserModel {
         source: String(item.source || "semantic_axis"),
         modulationPhase: this.resolveSpeechPosePhase(axisId),
         modulationAmplitude: 0,
+        modulationFrequencyHz: this.resolveSpeechPoseFrequency(axisId),
         neutralValue: clampedTargetValue,
         lifeMotionPhase: this.resolveLifeMotionPhase(axisId, parameterIdRaw),
         lifeMotionAmplitude: 0,
@@ -1545,6 +1549,9 @@ export class LAppModel extends CubismUserModel {
               : null,
             phase: Number.isFinite(item.modulation.phase)
               ? Number(item.modulation.phase)
+              : null,
+            frequencyHz: Number.isFinite(item.modulation.frequency_hz)
+              ? Number(item.modulation.frequency_hz)
               : null,
           }
           : null,
@@ -1578,6 +1585,7 @@ export class LAppModel extends CubismUserModel {
       const modulation = this.resolveSpeechPoseModulation(item);
       item.modulationAmplitude = modulation.amplitude;
       item.modulationPhase = modulation.phase;
+      item.modulationFrequencyHz = modulation.frequencyHz;
       item.neutralValue = modulation.neutralValue;
     }
 
@@ -1918,7 +1926,10 @@ export class LAppModel extends CubismUserModel {
       return fallbackTargetValue;
     }
 
-    const cycleRadians = ((elapsedMs / 1000) * 2.8 * Math.PI * 2) + item.modulationPhase;
+    const frequencyHz = item.modulationFrequencyHz > 0
+      ? item.modulationFrequencyHz
+      : this.resolveSpeechPoseFrequency(item.axisId);
+    const cycleRadians = ((elapsedMs / 1000) * frequencyHz * Math.PI * 2) + item.modulationPhase;
     const modulatedValue =
       item.neutralValue + Math.sin(cycleRadians) * item.modulationAmplitude;
     return Math.max(minValue, Math.min(maxValue, modulatedValue));
@@ -1958,6 +1969,7 @@ export class LAppModel extends CubismUserModel {
   ): {
     amplitude: number;
     phase: number;
+    frequencyHz: number;
     neutralValue: number;
   } {
     const modulation = this.parseSpeechPoseModulation(item);
@@ -1969,6 +1981,7 @@ export class LAppModel extends CubismUserModel {
     return {
       amplitude,
       phase: modulation.phase ?? item.modulationPhase,
+      frequencyHz: modulation.frequencyHz ?? item.modulationFrequencyHz,
       neutralValue,
     };
   }
@@ -1983,6 +1996,28 @@ export class LAppModel extends CubismUserModel {
       hash = (hash + channelName.charCodeAt(index)) % 360;
     }
     return (hash / 180) * Math.PI;
+  }
+
+  private resolveSpeechPoseFrequency(axisId: string): number {
+    const channelName = axisId.startsWith("voice_following.")
+      ? axisId.slice("voice_following.".length).split("|")[0]
+      : axisId;
+    switch (channelName) {
+      case "head_pitch":
+      case "pitch":
+      case "body_pitch":
+        return channelName === "body_pitch" ? 0.55 : 0.68;
+      case "head_yaw":
+        return 1.35;
+      case "head_roll":
+        return 1.45;
+      case "body_yaw":
+        return 1.15;
+      case "body_roll":
+        return 1.2;
+      default:
+        return axisId.toLowerCase().includes("pitch") ? 0.65 : 1.2;
+    }
   }
 
   private resolveLifeMotionPhase(axisId: string, parameterId: string): number {
@@ -2005,6 +2040,7 @@ export class LAppModel extends CubismUserModel {
     phase: number | null;
     neutralValue: number | null;
     amplitude: number | null;
+    frequencyHz: number | null;
   } {
     const modulation = item.modulation;
     if (!modulation || modulation.kind !== "speech_pose_cycle") {
@@ -2012,6 +2048,7 @@ export class LAppModel extends CubismUserModel {
         phase: null,
         neutralValue: null,
         amplitude: null,
+        frequencyHz: null,
       };
     }
 
@@ -2019,6 +2056,9 @@ export class LAppModel extends CubismUserModel {
       phase: modulation.phase !== null ? modulation.phase * Math.PI * 2 : null,
       neutralValue: modulation.neutral,
       amplitude: modulation.amplitude,
+      frequencyHz: modulation.frequencyHz !== null && modulation.frequencyHz > 0
+        ? modulation.frequencyHz
+        : null,
     };
   }
 
