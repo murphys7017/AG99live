@@ -19,6 +19,10 @@ from ..motion.realtime_motion_plan import (
 from ..prompts.motion_selector import (
     resolve_motion_prompt_instruction,
 )
+from ..prompts.motion_reference_templates import (
+    format_motion_reference_templates,
+    resolve_motion_reference_templates,
+)
 from ..prompts.semantic_axis_prompt import (
     format_profile_axis_prompt_line,
     profile_prompt_axes,
@@ -391,8 +395,17 @@ def _build_motion_capability_payload(runtime_state: Any) -> dict[str, Any]:
 
     profile_payload, _profile_error = _summarize_semantic_profile(runtime_state)
     if profile_payload is not None:
+        raw_profile = profile_payload.pop("raw_profile", None)
         capability_payload["semantic_profile"] = profile_payload
         capability_payload["plugin_hints_format"] = _build_plugin_hints_motion_format(profile_payload)
+        if isinstance(raw_profile, dict):
+            reference_templates = resolve_motion_reference_templates(
+                runtime_state=runtime_state,
+                semantic_profile=raw_profile,
+                limit=None,
+            )
+            if reference_templates:
+                capability_payload["motion_reference_templates"] = reference_templates
 
     return capability_payload
 
@@ -422,6 +435,16 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     if isinstance(semantic_profile, dict):
         axis_prompt = str(semantic_profile.get("axis_prompt") or "").strip()
     axis_prompt_text = f"可用动作轴语义：\n{axis_prompt}\n" if axis_prompt else ""
+    reference_template_text = ""
+    reference_templates = capability_payload.get("motion_reference_templates")
+    if isinstance(reference_templates, list):
+        formatted_templates = format_motion_reference_templates(
+            reference_templates,
+            truncate_text=_truncate_text,
+            limit=None,
+        )
+        if formatted_templates:
+            reference_template_text = f"{formatted_templates}\n"
 
     return (
         "AG99live Motion 是当前桌宠前端的主动作通道。"
@@ -437,6 +460,7 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         "输出形状示例只展示 JSON 结构和可用轴，里面的中位值不是推荐动作；实际输出应删掉无关轴，只保留本轮需要的轴。"
         f"{style_text}"
         f"{axis_prompt_text}"
+        f"{reference_template_text}"
         f" 输出形状示例：{format_json}"
     )
 
@@ -501,6 +525,7 @@ def _summarize_semantic_profile(
             "profile_revision": int(semantic_profile.get("revision") or 0),
             "model_id": str(semantic_profile.get("model_id") or "").strip(),
             "axis_count": len(prompt_axes),
+            "raw_profile": semantic_profile,
             "prompt_axes": [
                 {
                     "id": str(axis.get("id") or "").strip(),

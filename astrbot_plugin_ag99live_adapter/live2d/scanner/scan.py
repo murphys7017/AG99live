@@ -945,12 +945,28 @@ def _scan_motions(
                         for parameter_id in parameter_ids
                     ),
                     "catalog_label": str(catalog_entry.get("label") or "").strip(),
+                    "catalog_description": str(catalog_entry.get("description") or "").strip(),
                     "catalog_tags": [
                         str(tag).strip()
                         for tag in catalog_entry.get("tags", [])
                         if str(tag).strip()
                     ],
+                    "catalog_emotion_bias": [
+                        str(item).strip()
+                        for item in catalog_entry.get("emotion_bias", [])
+                        if str(item).strip()
+                    ],
                     "catalog_intensity": str(catalog_entry.get("intensity") or "").strip(),
+                    "catalog_exclusive_with": [
+                        str(item).strip()
+                        for item in catalog_entry.get("exclusive_with", [])
+                        if str(item).strip()
+                    ],
+                    "recommended_scenarios": [
+                        str(item).strip()
+                        for item in catalog_entry.get("recommended_scenarios", [])
+                        if str(item).strip()
+                    ],
                     "decomposition_level": decomposition["decomposition_level"],
                     "component_count": decomposition["component_count"],
                     "component_ids": decomposition["component_ids"],

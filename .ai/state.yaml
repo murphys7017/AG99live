@@ -2,7 +2,7 @@ task:
   class: feature
   risk: medium
   phase: implemented
-  scope: Broaden Mk6 head/body motion expressiveness, middleware axis semantics, and partial motion-plan salvage
+  scope: Abstract legacy Mk6 motion/expression assets into semantic-axis prompt templates
 context:
   confidence: medium
   assumptions:
@@ -16,6 +16,10 @@ context:
     - AstrBot interaction middleware is the default motion prompt path; inline `<@anim>` prompt injection is retained only as an explicit compatibility mode.
     - The current adjustment should make body_yaw/body_roll/body_pitch more visible through prompt language, default few-shot anchors, and generated head-to-body coupling, without raising global motion intensity.
     - Motion intent/plan parameter-level faults should preserve usable axes/parameters where the schema/profile/timing contract is otherwise valid, so Action Lab history can still capture playable partial motions.
+    - Legacy motion3 curves and exp3 expressions should be reused as reference material by abstracting them into semantic-axis templates, not by asking the LLM to output raw Live2D parameter IDs.
+    - Prompt size is not the main constraint for this workflow, so all valuable mapped motion/expression templates can be included after filtering non-semantic parameters.
+    - Pure expression switches can inform emotion_label and intent selection, but must not be represented as output axes unless they map to current SemanticAxisProfile prompt axes.
+    - Built-in fixed selector few-shot examples should be fallback material only when legacy reference templates are unavailable, unless explicitly re-enabled by config.
   unresolved_questions:
     - Body pitch and brow detail axes still need real Mk6 visual preview before treating their default ranges as final.
 architecture:
@@ -33,6 +37,9 @@ architecture:
     - Middleware motion prompt capability now includes per-axis semantics, value ranges, neutral values, and usage notes for prompt-visible axes.
     - Frontend ModelEngine and Live2D direct plan startup now salvage valid axes/parameters from partially invalid payloads instead of failing the entire motion when possible.
     - Frontend semantic parameter playback adds bounded secondary life motion for head/body/gaze axes so a plan does not hold a perfectly static target through the whole duration.
+    - Middleware and fallback realtime motion prompts now include filtered legacy motion/expression reference templates built from SemanticAxisProfile parameter bindings.
+    - Live2D motion scan payload now keeps catalog description, emotion bias, recommended scenarios, and exclusivity metadata for prompt template abstraction.
+    - Fallback realtime motion selector no longer injects built-in fixed few-shot examples when legacy motion/expression reference templates are available by default.
 verification:
   checks_run:
     - python -m compileall astrbot_plugin_ag99live_adapter
@@ -44,7 +51,14 @@ verification:
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_runtime_state_motion_tuning_refresh.py -q
     - npm run test:model-engine
     - npm run typecheck
+    - python -m compileall astrbot_plugin_ag99live_adapter
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_realtime_motion_plan.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_runtime_state_semantic_profile.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_runtime_state_motion_tuning_refresh.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime -q
+    - git diff --check
   checks_failed: []
-  validation_gap: No live Mk6 visual preview, real AstrBot websocket session, or end-to-end Action Lab history observation has confirmed whether partial salvage and secondary life motion feel natural.
+  validation_gap: No live Mk6 visual preview or real AstrBot websocket session has confirmed whether the expanded prompt templates improve generated motion feel.
 runtime:
   mode: minimal_v1

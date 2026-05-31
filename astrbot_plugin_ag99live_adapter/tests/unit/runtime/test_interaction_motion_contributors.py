@@ -99,7 +99,16 @@ def _build_semantic_model_info() -> dict:
                             "positive_semantics": ["turn right"],
                             "negative_semantics": ["turn left"],
                             "usage_notes": "Use for attention direction.",
-                            "parameter_bindings": [],
+                            "parameter_bindings": [
+                                {
+                                    "parameter_id": "ParamAngleX",
+                                    "parameter_name": "Angle X",
+                                    "input_range": [0, 100],
+                                    "output_range": [-30, 30],
+                                    "default_weight": 1,
+                                    "invert": False,
+                                }
+                            ],
                         },
                         {
                             "id": "eye_open_left",
@@ -114,7 +123,16 @@ def _build_semantic_model_info() -> dict:
                             "positive_semantics": ["open"],
                             "negative_semantics": ["close"],
                             "usage_notes": "Use for wink details.",
-                            "parameter_bindings": [],
+                            "parameter_bindings": [
+                                {
+                                    "parameter_id": "ParamEyeLOpen",
+                                    "parameter_name": "Eye L Open",
+                                    "input_range": [0, 100],
+                                    "output_range": [0, 1],
+                                    "default_weight": 1,
+                                    "invert": False,
+                                }
+                            ],
                         },
                         {
                             "id": "debug_tail",
@@ -133,6 +151,119 @@ def _build_semantic_model_info() -> dict:
                         },
                     ],
                     "couplings": [],
+                },
+                "motion_resource_pool": {
+                    "driver_components": [
+                        {
+                            "id": "Motions/认真说明.motion3.json#ParamAngleX",
+                            "source_motion": "认真说明",
+                            "source_file": "Motions/认真说明.motion3.json",
+                            "parameter_id": "ParamAngleX",
+                            "engine_role": "driver",
+                            "strength": "medium",
+                            "trait": "sustain",
+                            "energy_score": 0.7,
+                            "peak_time_ratio": 0.42,
+                            "value_profile": {
+                                "baseline": 0,
+                                "min": 0,
+                                "max": 18,
+                            },
+                        },
+                        {
+                            "id": "Motions/认真说明.motion3.json#ParamHairX",
+                            "source_motion": "认真说明",
+                            "source_file": "Motions/认真说明.motion3.json",
+                            "parameter_id": "ParamHairX",
+                            "engine_role": "driver",
+                            "strength": "high",
+                            "trait": "oscillate",
+                            "energy_score": 5,
+                            "peak_time_ratio": 0.5,
+                            "value_profile": {
+                                "baseline": 0,
+                                "min": -1,
+                                "max": 1,
+                            },
+                        },
+                        {
+                            "id": "Motions/认真说明.motion3.json#ParamPhysicsX",
+                            "source_motion": "认真说明",
+                            "source_file": "Motions/认真说明.motion3.json",
+                            "parameter_id": "ParamAngleX",
+                            "engine_role": "secondary",
+                            "strength": "high",
+                            "trait": "oscillate",
+                            "energy_score": 6,
+                            "peak_time_ratio": 0.5,
+                            "value_profile": {
+                                "baseline": 0,
+                                "min": -1,
+                                "max": 1,
+                            },
+                        },
+                    ],
+                    "motion_presets": [
+                        {
+                            "motion_name": "认真说明",
+                            "motion_file": "Motions/认真说明.motion3.json",
+                            "intensity": "medium",
+                            "catalog_tags": ["serious", "explain"],
+                        }
+                    ],
+                },
+                "constraints": {
+                    "motions": [
+                        {
+                            "name": "认真说明",
+                            "file": "Motions/认真说明.motion3.json",
+                            "catalog_label": "认真说明",
+                            "catalog_intensity": "medium",
+                            "catalog_tags": ["serious", "explain"],
+                            "recommended_scenarios": ["说明问题", "认真解释"],
+                        }
+                    ],
+                    "expressions": [
+                        {
+                            "name": "Surprised",
+                            "file": "Expressions/Surprised.exp3.json",
+                            "category": "base_emotion",
+                            "intensity": "high",
+                            "parameters": [
+                                {
+                                    "id": "ParamEyeLOpen",
+                                    "value": 1.0,
+                                    "blend": "Add",
+                                    "intensity": "high",
+                                },
+                                {
+                                    "id": "ParamHairX",
+                                    "value": 1.0,
+                                    "blend": "Add",
+                                    "intensity": "high",
+                                },
+                            ],
+                            "dominant_parameters": [
+                                {"id": "ParamEyeLOpen"},
+                                {"id": "ParamHairX"},
+                            ],
+                        },
+                        {
+                            "name": "Tablet",
+                            "file": "Expressions/Tablet.exp3.json",
+                            "category": "special_state",
+                            "intensity": "high",
+                            "parameters": [
+                                {
+                                    "id": "ParamEyeLOpen",
+                                    "value": 1.0,
+                                    "blend": "Add",
+                                    "intensity": "high",
+                                }
+                            ],
+                            "dominant_parameters": [{"id": "ParamEyeLOpen"}],
+                        },
+                    ],
                 },
             }
         ],
@@ -280,6 +411,15 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "低值=turn left；高值=turn right" in capability.value["semantic_profile"]["axis_prompt"]
     assert "使用说明=Use for attention direction." in capability.value["semantic_profile"]["axis_prompt"]
     assert "低值=turn left；高值=turn right" in system.value
+    assert "旧动作/表情参考模板" in system.value
+    assert "[动作] 认真说明" in system.value
+    assert "head_yaw" in system.value
+    assert "[表情] Surprised" in system.value
+    assert "eye_open_left" in system.value
+    assert "ParamHairX" not in system.value
+    assert "ParamPhysicsX" not in system.value
+    assert "Tablet" not in system.value
+    assert "motion_reference_templates" in capability.value
     prompt_axis_ids = [
         item["id"] for item in capability.value["semantic_profile"]["prompt_axes"]
     ]

@@ -8,6 +8,10 @@ from .motion_selector_examples import (
     create_default_selector_few_shot_examples,
     resolve_selector_few_shot_examples as _resolve_selector_few_shot_examples,
 )
+from .motion_reference_templates import (
+    format_motion_reference_templates,
+    resolve_motion_reference_templates,
+)
 from .semantic_axis_prompt import build_profile_axis_prompt_block
 
 
@@ -148,6 +152,7 @@ def build_selector_user_prompt(
     style_prompt: str = "",
     motion_instruction: str = "",
     semantic_profile: dict[str, Any] | None = None,
+    motion_reference_templates: list[dict[str, Any]] | None = None,
 ) -> str:
     if semantic_profile is not None:
         return build_selector_user_prompt_v2(
@@ -156,6 +161,7 @@ def build_selector_user_prompt(
             style_prompt=style_prompt,
             motion_instruction=motion_instruction,
             semantic_profile=semantic_profile,
+            motion_reference_templates=motion_reference_templates,
         )
 
     lines: list[str] = []
@@ -214,6 +220,7 @@ def build_selector_user_prompt_v2(
     style_prompt: str = "",
     motion_instruction: str = "",
     semantic_profile: dict[str, Any],
+    motion_reference_templates: list[dict[str, Any]] | None = None,
 ) -> str:
     axis_block, allowed_axis_ids = build_profile_axis_prompt_block(
         semantic_profile,
@@ -232,6 +239,9 @@ def build_selector_user_prompt_v2(
     )
     motion_instruction_block = _build_motion_instruction_block(motion_instruction)
     style_prompt_block = _build_style_prompt_block(style_prompt)
+    reference_template_block = _build_motion_reference_template_block(
+        motion_reference_templates
+    )
 
     return (
         "请根据文本为 Live2D 角色选择语义动作轴数值。\n"
@@ -270,6 +280,7 @@ def build_selector_user_prompt_v2(
         "- 数值要稳定、可读，避免混乱的极端值。\n\n"
         f"{style_prompt_block}"
         f"{motion_instruction_block}"
+        f"{reference_template_block}"
         f"{few_shot_block}"
         f"文本：{text}"
     )
@@ -320,6 +331,31 @@ def _build_style_prompt_block(style_prompt: str) -> str:
     return (
         "角色风格偏好：\n"
         f"{truncate_prompt_text(style_prompt_text, 1200)}\n\n"
+    )
+
+
+def _build_motion_reference_template_block(
+    motion_reference_templates: list[dict[str, Any]] | None,
+) -> str:
+    block = format_motion_reference_templates(
+        motion_reference_templates or [],
+        truncate_text=truncate_prompt_text,
+        limit=None,
+    )
+    if not block:
+        return ""
+    return f"{block}\n\n"
+
+
+def resolve_selector_motion_reference_templates(
+    *,
+    runtime_state: Any,
+    semantic_profile: dict[str, Any],
+) -> list[dict[str, Any]]:
+    return resolve_motion_reference_templates(
+        runtime_state=runtime_state,
+        semantic_profile=semantic_profile,
+        limit=None,
     )
 
 

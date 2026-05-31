@@ -117,6 +117,11 @@
     "type": "int",
     "default": 0
   },
+  "realtime_motion_fixed_fewshot_with_reference_templates": {
+    "description": "当旧动作/表情参考模板可用时，是否仍向 realtime motion fallback selector 注入内置固定 Few-shot。默认关闭，避免固定示例压过真实模板；模板为空时固定 Few-shot 仍会作为 fallback。",
+    "type": "bool",
+    "default": false
+  },
   "realtime_motion_platform_context_enabled": {
     "description": "是否在实时动作 selector Prompt 中注入平台交互描述。",
     "type": "bool",

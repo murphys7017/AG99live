@@ -46,6 +46,8 @@ from ..prompts.motion_selector import (
 )
 from ..prompts.semantic_axis_prompt import profile_prompt_axes
 
+LIVE2D_SCAN_CACHE_VERSION = "motion_reference_templates.v1"
+
 
 class RuntimeState:
     def __init__(
@@ -86,6 +88,7 @@ class RuntimeState:
         self.realtime_motion_fewshot_enabled = True
         self.realtime_motion_fewshot_count = 2
         self.realtime_motion_user_fewshot_count = 0
+        self.realtime_motion_fixed_fewshot_with_reference_templates = False
         self.motion_tuning_reference_examples: list[dict[str, Any]] = []
         self.motion_tuning_style_prompt = ""
         self.motion_tuning_samples: list[dict[str, Any]] = []
@@ -228,6 +231,13 @@ class RuntimeState:
         self.realtime_motion_user_fewshot_count = max(
             0,
             int(_plugin_config_get(self.plugin_config, "realtime_motion_user_fewshot_count", 0)),
+        )
+        self.realtime_motion_fixed_fewshot_with_reference_templates = bool(
+            _plugin_config_get(
+                self.plugin_config,
+                "realtime_motion_fixed_fewshot_with_reference_templates",
+                False,
+            )
         )
         self.realtime_motion_platform_context_enabled = bool(
             _plugin_config_get(
@@ -1286,6 +1296,11 @@ class RuntimeState:
         if not isinstance(scan_cache, dict):
             return None
 
+        cache_version = str(scan_cache.get("cache_version") or "").strip()
+        if cache_version != LIVE2D_SCAN_CACHE_VERSION:
+            self._clear_persistent_caches(reset_scan_cache=True)
+            return None
+
         cached_md5 = str(scan_cache.get("live2d_dir_md5") or "").strip()
         cached_base_url = str(scan_cache.get("base_url") or "").strip()
         if not cached_md5 or cached_md5 != live2d_dir_md5:
@@ -1325,6 +1340,7 @@ class RuntimeState:
         model_info: dict[str, Any],
     ) -> None:
         self._runtime_cache_payload["scan_cache"] = {
+            "cache_version": LIVE2D_SCAN_CACHE_VERSION,
             "live2d_dir_md5": live2d_dir_md5,
             "base_url": base_url,
             "model_info": deepcopy(model_info),

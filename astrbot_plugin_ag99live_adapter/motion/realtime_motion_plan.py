@@ -8,11 +8,13 @@ from typing import Any
 
 from ..prompts.motion_selector import (
     AXIS_NAMES,
+    DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES,
     MOTION_SELECTOR_SYSTEM_PROMPT,
     build_selector_context,
     build_selector_platform_context,
     build_selector_user_prompt,
     resolve_motion_prompt_instruction,
+    resolve_selector_motion_reference_templates,
 )
 from ..prompts.semantic_axis_prompt import profile_prompt_axes
 
@@ -23,6 +25,15 @@ _IDLE_DEADZONE_MAX = 58
 _MIN_EXPRESSIVE_MAX_DELTA = 24
 _MIN_EXPRESSIVE_NONZERO_DELTA = 16
 _MAX_AXIS_ERROR_RATE = 0.30
+_DEFAULT_SELECTOR_FEW_SHOT_SIGNATURES = {
+    json.dumps(
+        item,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    for item in DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES
+}
 
 _NEUTRAL_EMOTION_MARKERS = {
     "neutral",
@@ -65,12 +76,19 @@ class RealtimeMotionPlanGenerator:
             platform_context=build_selector_platform_context(runtime_state=self.runtime_state),
         )
         semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=self.runtime_state)
+        motion_reference_templates = resolve_selector_motion_reference_templates(
+            runtime_state=self.runtime_state,
+            semantic_profile=semantic_profile,
+        )
         selector_raw = await self._call_astrbot_selector(
             context_text,
-            few_shot_examples=self.runtime_state.list_effective_motion_tuning_examples(),
+            few_shot_examples=self._resolve_prompt_few_shot_examples(
+                motion_reference_templates=motion_reference_templates,
+            ),
             style_prompt=self.runtime_state.build_motion_tuning_style_prompt(),
             motion_instruction=resolve_motion_prompt_instruction(runtime_state=self.runtime_state),
             semantic_profile=semantic_profile,
+            motion_reference_templates=motion_reference_templates,
         )
         selector = normalize_selector_output(selector_raw, semantic_profile=semantic_profile)
         intent = build_intent_from_selector(selector, semantic_profile=semantic_profile)
@@ -83,6 +101,38 @@ class RealtimeMotionPlanGenerator:
             return None
         return intent
 
+    def _resolve_prompt_few_shot_examples(
+        self,
+        *,
+        motion_reference_templates: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        examples = [
+            item
+            for item in self.runtime_state.list_effective_motion_tuning_examples()
+            if isinstance(item, dict)
+        ]
+        if not examples:
+            return []
+
+        if not motion_reference_templates:
+            return examples
+
+        keep_fixed = bool(
+            getattr(
+                self.runtime_state,
+                "realtime_motion_fixed_fewshot_with_reference_templates",
+                False,
+            )
+        )
+        if keep_fixed:
+            return examples
+
+        return [
+            item
+            for item in examples
+            if not _is_default_selector_few_shot_example(item)
+        ]
+
     async def _call_astrbot_selector(
         self,
         context_text: str,
@@ -91,6 +141,7 @@ class RealtimeMotionPlanGenerator:
         style_prompt: str,
         motion_instruction: str,
         semantic_profile: dict[str, Any],
+        motion_reference_templates: list[dict[str, Any]],
     ) -> dict[str, Any]:
         provider = getattr(self.runtime_state, "selected_motion_analysis_provider", None)
         if provider is None:
@@ -109,6 +160,7 @@ class RealtimeMotionPlanGenerator:
                         style_prompt=style_prompt,
                         motion_instruction=motion_instruction,
                         semantic_profile=semantic_profile,
+                        motion_reference_templates=motion_reference_templates,
                     ),
                     system_prompt=_SYSTEM_PROMPT,
                 ),
@@ -131,6 +183,18 @@ def _resolve_motion_provider_timeout(runtime_state: Any) -> float:
     if not float("-inf") < timeout < float("inf"):
         return 20.0
     return max(20.0, timeout)
+
+
+def _is_default_selector_few_shot_example(example: dict[str, Any]) -> bool:
+    return (
+        json.dumps(
+            example,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        in _DEFAULT_SELECTOR_FEW_SHOT_SIGNATURES
+    )
 
 
 def resolve_selected_semantic_axis_profile(*, runtime_state: Any) -> dict[str, Any]:

@@ -112,3 +112,64 @@ def test_runtime_state_exposes_runtime_cache_segment_errors_in_model_sync(
         "scan_cache": "live2d_runtime_cache_scan_cache_invalid",
         "action_filter_cache": "live2d_runtime_cache_action_filter_cache_invalid",
     }
+
+
+def test_runtime_state_invalidates_old_scan_cache_version(
+    monkeypatch,
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    runtime_state = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+    seed_model_info = build_seed_model_info()
+    scan_calls = 0
+
+    def scan_stub(**kwargs):
+        nonlocal scan_calls
+        scan_calls += 1
+        return deepcopy(seed_model_info)
+
+    monkeypatch.setattr(runtime_state, "scan_live2d_models", scan_stub)
+
+    model_dir = tmp_path / "live2ds" / "DemoModel"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / "live2d_runtime_cache.json"
+    cache_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "live2d_runtime_cache.v1",
+                "scan_cache": {
+                    "live2d_dir_md5": "stale",
+                    "base_url": "http://127.0.0.1:12397",
+                    "model_info": {"selected_model": "CachedOnly", "models": []},
+                },
+                "action_filter_cache": {"keep": True},
+                "motion_tuning_samples": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    state = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=None,
+        plugin_config={},
+        plugin_config_loader=None,
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=tmp_path / "live2ds",
+        runtime_cache_dir=cache_dir,
+    )
+    asyncio.run(state.refresh_async())
+
+    assert scan_calls == 1
+    assert state.model_info["selected_model"] == "DemoModel"
+    persisted_payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert persisted_payload["scan_cache"]["cache_version"] == runtime_state.LIVE2D_SCAN_CACHE_VERSION
+    assert persisted_payload["scan_cache"]["model_info"]["selected_model"] == "DemoModel"

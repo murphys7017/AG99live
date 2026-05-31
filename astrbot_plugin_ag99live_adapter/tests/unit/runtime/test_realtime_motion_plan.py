@@ -106,6 +106,72 @@ def _model_info() -> dict:
             {
                 "name": "DemoModel",
                 "semantic_axis_profile": profile,
+                "motion_resource_pool": {
+                    "driver_components": [
+                        {
+                            "id": "Motions/serious.motion3.json#ParamAngleX",
+                            "source_motion": "serious",
+                            "source_file": "Motions/serious.motion3.json",
+                            "parameter_id": "ParamAngleX",
+                            "engine_role": "driver",
+                            "strength": "medium",
+                            "trait": "sustain",
+                            "energy_score": 0.6,
+                            "peak_time_ratio": 0.4,
+                            "value_profile": {
+                                "baseline": 0,
+                                "min": 0,
+                                "max": 20,
+                            },
+                        },
+                        {
+                            "id": "Motions/serious.motion3.json#ParamHairX",
+                            "source_motion": "serious",
+                            "source_file": "Motions/serious.motion3.json",
+                            "parameter_id": "ParamHairX",
+                            "engine_role": "driver",
+                            "strength": "high",
+                            "trait": "oscillate",
+                            "energy_score": 4,
+                            "peak_time_ratio": 0.5,
+                            "value_profile": {
+                                "baseline": 0,
+                                "min": -1,
+                                "max": 1,
+                            },
+                        },
+                    ],
+                    "motion_presets": [
+                        {
+                            "motion_name": "serious",
+                            "motion_file": "Motions/serious.motion3.json",
+                            "intensity": "medium",
+                            "catalog_tags": ["serious", "explain"],
+                        }
+                    ],
+                },
+                "constraints": {
+                    "motions": [
+                        {
+                            "name": "serious",
+                            "file": "Motions/serious.motion3.json",
+                            "catalog_label": "认真说明",
+                            "catalog_intensity": "medium",
+                            "catalog_tags": ["serious", "explain"],
+                            "recommended_scenarios": ["说明问题"],
+                        }
+                    ],
+                    "expressions": [
+                        {
+                            "name": "Question",
+                            "file": "Expressions/Question.exp3.json",
+                            "category": "base_emotion",
+                            "intensity": "medium",
+                            "parameters": [],
+                            "dominant_parameters": [{"id": "ExpQuestion"}],
+                        }
+                    ],
+                },
             }
         ],
     }
@@ -524,14 +590,119 @@ def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
     assert "请根据文本为 Live2D 角色选择语义动作轴数值。" in provider.last_prompt
     assert "debug_tail" not in provider.last_prompt
     assert "平台上下文：" in provider.last_prompt
-    assert "少量示例仅作为风格参考。" in provider.last_prompt
+    assert "少量示例仅作为风格参考。" not in provider.last_prompt
+    assert "场景：用户确认收到信息" not in provider.last_prompt
     assert "角色风格偏好：" in provider.last_prompt
     assert "中性时偏少轴" in provider.last_prompt
+    assert "旧动作/表情参考模板" in provider.last_prompt
+    assert "[动作] 认真说明/serious" in provider.last_prompt
+    assert "head_yaw" in provider.last_prompt
+    assert "[表情] Question" in provider.last_prompt
+    assert "ParamHairX" not in provider.last_prompt
     assert "表情关键词参考动作：" not in provider.last_prompt
     assert "补充动作指令：" in provider.last_prompt
     assert "Use stronger head and mouth motion." in provider.last_prompt
     assert "Live2D 表情动作参数生成器" in provider.last_system_prompt
     assert "不要回复用户" in provider.last_system_prompt
+
+
+def test_realtime_motion_plan_prompt_keeps_fixed_few_shot_when_reference_templates_empty() -> None:
+    class ProviderStub:
+        def __init__(self) -> None:
+            self.last_prompt = ""
+
+        async def text_chat(self, *, prompt: str, system_prompt: str):
+            del system_prompt
+            self.last_prompt = prompt
+
+            class Response:
+                completion_text = json.dumps(
+                    {
+                        "emotion": "neutral",
+                        "mode": "idle",
+                        "duration_ms": 900,
+                        "axes": {"head_yaw": 50},
+                    },
+                    separators=(",", ":"),
+                )
+
+            return Response()
+
+    provider = ProviderStub()
+
+    class RuntimeStub:
+        enable_realtime_motion_plan = True
+        selected_motion_analysis_provider = provider
+        realtime_motion_timeout_seconds = 2.0
+        model_info = {
+            "selected_model": "DemoModel",
+            "models": [
+                {
+                    "name": "DemoModel",
+                    "semantic_axis_profile": _semantic_profile(),
+                }
+            ],
+        }
+
+        def list_effective_motion_tuning_examples(self) -> list[dict]:
+            return list(DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES[:1])
+
+        def build_motion_tuning_style_prompt(self) -> str:
+            return ""
+
+    generator = RealtimeMotionPlanGenerator(runtime_state=RuntimeStub())
+    intent = asyncio.run(generator.generate(user_text="ok", assistant_text="ok"))
+
+    assert isinstance(intent, dict)
+    assert "旧动作/表情参考模板" not in provider.last_prompt
+    assert "少量示例仅作为风格参考。" in provider.last_prompt
+    assert "场景：用户确认收到信息" in provider.last_prompt
+
+
+def test_realtime_motion_plan_prompt_can_keep_fixed_few_shot_with_reference_templates() -> None:
+    class ProviderStub:
+        def __init__(self) -> None:
+            self.last_prompt = ""
+
+        async def text_chat(self, *, prompt: str, system_prompt: str):
+            del system_prompt
+            self.last_prompt = prompt
+
+            class Response:
+                completion_text = json.dumps(
+                    {
+                        "emotion": "curious",
+                        "mode": "expressive",
+                        "duration_ms": 1200,
+                        "axes": {"head_yaw": 82},
+                    },
+                    separators=(",", ":"),
+                )
+
+            return Response()
+
+    provider = ProviderStub()
+
+    class RuntimeStub:
+        enable_realtime_motion_plan = True
+        selected_motion_analysis_provider = provider
+        realtime_motion_timeout_seconds = 2.0
+        realtime_motion_fixed_fewshot_with_reference_templates = True
+        model_info = _model_info()
+
+        def list_effective_motion_tuning_examples(self) -> list[dict]:
+            return list(DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES[:1])
+
+        def build_motion_tuning_style_prompt(self) -> str:
+            return ""
+
+    generator = RealtimeMotionPlanGenerator(runtime_state=RuntimeStub())
+    intent = asyncio.run(generator.generate(user_text="why", assistant_text="let me explain"))
+
+    assert isinstance(intent, dict)
+    assert "旧动作/表情参考模板" in provider.last_prompt
+    assert "少量示例仅作为风格参考。" in provider.last_prompt
+    assert "场景：用户确认收到信息" in provider.last_prompt
 
 
 def test_realtime_motion_plan_prompt_includes_user_tuned_examples_first() -> None:

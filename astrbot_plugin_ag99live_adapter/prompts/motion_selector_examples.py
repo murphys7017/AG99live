@@ -20,32 +20,49 @@ def build_example_axes(axis_names: list[str], **overrides: int) -> dict[str, int
 def create_default_selector_few_shot_examples(axis_names: list[str]) -> list[dict[str, Any]]:
     return [
         {
-            "input": "场景：用户确认收到信息，助手简短确认并继续。",
+            "input": (
+                "场景：用户确认收到信息，助手只做短确认。参考旧动作：默认待机/平和。"
+                "抽象方式：剔除呼吸、物理、头发和附件曲线，只保留接近中性的头部轻点与嘴角轻微友好；"
+                "不要把 idle 误做成完全静止。"
+            ),
             "output": {
                 "emotion": "neutral",
                 "mode": "idle",
                 "duration_ms": 1100,
-                "axes": build_example_axes(axis_names, head_pitch=51, mouth_smile=52),
+                "axes": build_example_axes(
+                    axis_names,
+                    head_pitch=52,
+                    gaze_y=51,
+                    mouth_smile=52,
+                ),
             },
         },
         {
-            "input": "场景：助手在平静解释或说明，不需要明显情绪，但要有轻微朝向、身体跟随和关注感。",
+            "input": (
+                "场景：助手认真说明一件事，语气稳定但不是无动作。参考旧动作：认真说明/温和点头。"
+                "抽象方式：保留头部朝向、轻微点头、上身随头部同向的可读骨架；剔除手、头发、物理和口型运行时曲线。"
+                "说明类动作应像进入解释状态，而不是随便给几个接近 50 的表情数。"
+            ),
             "output": {
                 "emotion": "explain",
                 "mode": "idle",
                 "duration_ms": 1250,
                 "axes": build_example_axes(
                     axis_names,
-                    head_pitch=54,
-                    head_yaw=56,
-                    body_yaw=54,
-                    gaze_y=53,
-                    mouth_smile=54,
+                    head_yaw=58,
+                    head_pitch=55,
+                    body_yaw=56,
+                    body_pitch=53,
+                    gaze_x=55,
                 ),
             },
         },
         {
-            "input": "场景：助手温和安抚用户，语气柔和，头身动作应收敛但清楚可见。",
+            "input": (
+                "场景：助手安抚用户或表示理解。参考旧动作：温和点头/感到舒适/温和摇晃。"
+                "抽象方式：保留下沉的头部、柔和侧倾和身体跟随，嘴角只作为温和细节；"
+                "不要混入强开心、惊讶后缩或生气前倾这类互斥动作。"
+            ),
             "output": {
                 "emotion": "soothe",
                 "mode": "expressive",
@@ -62,7 +79,11 @@ def create_default_selector_few_shot_examples(axis_names: list[str]) -> list[dic
             },
         },
         {
-            "input": "场景：助手对当前说法略带疑惑或追问，应以歪头、身体侧倾和视线表达困惑。",
+            "input": (
+                "场景：助手没听懂、怀疑前提或追问。参考旧动作：困惑歪头/左右晃动/怀疑眯眼。"
+                "抽象方式：保留歪头、躯体侧倾、侧向视线和眉眼审视；"
+                "不要把疑惑简化成单个 brow 数值，也不要复用开心轻晃的节奏。"
+            ),
             "output": {
                 "emotion": "confused",
                 "mode": "expressive",
@@ -77,7 +98,11 @@ def create_default_selector_few_shot_examples(axis_names: list[str]) -> list[dic
             },
         },
         {
-            "input": "场景：助手明确强调结果、表达开心反馈或明显惊讶时，动作可以更清晰。",
+            "input": (
+                "场景：助手给出正向反馈、满意或轻松调侃。参考旧动作：微笑/开心轻晃/微笑左偏头/歪头坏笑。"
+                "抽象方式：保留抬头、身体轻晃或偏头、笑眼和嘴角；调侃时可加一点非对称头身倾斜。"
+                "开心不是只提高 mouth_smile，头身也要承担动作骨架。"
+            ),
             "output": {
                 "emotion": "happy",
                 "mode": "expressive",
@@ -95,7 +120,11 @@ def create_default_selector_few_shot_examples(axis_names: list[str]) -> list[dic
             },
         },
         {
-            "input": "场景：助手对结果感到明显惊讶或强调“现在就可以”，动作应更开、更抬、更醒目。",
+            "input": (
+                "场景：助手被意外消息打断、突然反应或强调结果很出乎意料。参考旧动作：惊讶/惊讶后缩。"
+                "抽象方式：保留抬头、睁眼、视线上扬和身体后缩/挺起；"
+                "不要同时混入温和点头或舒适放松，因为它们和惊讶后缩在语义上互斥。"
+            ),
             "output": {
                 "emotion": "surprised",
                 "mode": "expressive",
