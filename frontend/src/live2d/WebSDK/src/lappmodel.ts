@@ -108,6 +108,12 @@ const DIRECT_LIFE_MOTION_AXIS_CONFIG: Record<string, { amplitudeRatio: number; m
   gaze_x: { amplitudeRatio: 0.08, minAmplitude: 0.08, maxAmplitude: 0.45, frequencyHz: 0.75 },
   gaze_y: { amplitudeRatio: 0.08, minAmplitude: 0.08, maxAmplitude: 0.45, frequencyHz: 0.68 },
 };
+const SPEECH_AUDIO_ENVELOPE_ATTACK_PER_SECOND = 12.0;
+const SPEECH_AUDIO_ENVELOPE_RELEASE_PER_SECOND = 4.5;
+const SPEECH_AUDIO_GAIN_FLOOR = 0.35;
+const SPEECH_AUDIO_GAIN_SPAN = 0.9;
+const SPEECH_AUDIO_GAIN_MAX = 1.25;
+const SPEECH_AUDIO_PITCH_GAIN_MAX = 0.85;
 
 interface DirectParameterAxisBinding {
   axisName: string;
@@ -672,6 +678,12 @@ export class LAppModel extends CubismUserModel {
     this._dragManager.update(deltaTimeSeconds);
     this._dragX = this._dragManager.getX();
     this._dragY = this._dragManager.getY();
+    let lipSyncValue = 0.0;
+    if (this._lipsync) {
+      this._wavFileHandler.update(deltaTimeSeconds);
+      lipSyncValue = Math.min(1.0, this._wavFileHandler.getRms() * 1.5);
+    }
+    this.updateSpeechAudioEnvelope(lipSyncValue, deltaTimeSeconds);
 
     // モーションによるパラメータ更新の有無
     let motionUpdated = false;
@@ -745,17 +757,12 @@ export class LAppModel extends CubismUserModel {
 
     // Lip sync settings
     if (this._lipsync) {
-      let value = 0.0;
-      this._wavFileHandler.update(deltaTimeSeconds);
-      value = this._wavFileHandler.getRms();
-      value = Math.min(1.0, value * 1.5);
-
       const lipSyncWeight = 4.0;
 
       for (let i = 0; i < this._lipSyncIds.getSize(); ++i) {
         this._model.addParameterValueById(
           this._lipSyncIds.at(i),
-          value,
+          lipSyncValue,
           lipSyncWeight
         );
       }
@@ -1902,6 +1909,34 @@ export class LAppModel extends CubismUserModel {
     return x * x * (3 - 2 * x);
   }
 
+  private updateSpeechAudioEnvelope(
+    lipSyncValue: number,
+    deltaTimeSeconds: number,
+  ): void {
+    const target = this.smoothstep(Math.max(0, Math.min(1, lipSyncValue)));
+    const rate = target > this._speechAudioEnvelope
+      ? SPEECH_AUDIO_ENVELOPE_ATTACK_PER_SECOND
+      : SPEECH_AUDIO_ENVELOPE_RELEASE_PER_SECOND;
+    const blend = 1 - Math.exp(-Math.max(0, deltaTimeSeconds) * rate);
+    this._speechAudioEnvelope += (target - this._speechAudioEnvelope) * blend;
+    if (this._speechAudioEnvelope < 0.001) {
+      this._speechAudioEnvelope = 0;
+    }
+  }
+
+  private resolveSpeechAudioGain(item: DirectSemanticParameterBinding): number {
+    const channelName = item.axisId.startsWith("voice_following.")
+      ? item.axisId.slice("voice_following.".length).split("|")[0]
+      : item.axisId;
+    const rawGain = Math.min(
+      SPEECH_AUDIO_GAIN_MAX,
+      SPEECH_AUDIO_GAIN_FLOOR + this._speechAudioEnvelope * SPEECH_AUDIO_GAIN_SPAN,
+    );
+    return channelName.includes("pitch")
+      ? Math.min(SPEECH_AUDIO_PITCH_GAIN_MAX, rawGain)
+      : rawGain;
+  }
+
   private resolveSemanticBindingFrameTarget(
     item: DirectSemanticParameterBinding,
     elapsedMs: number,
@@ -1930,8 +1965,9 @@ export class LAppModel extends CubismUserModel {
       ? item.modulationFrequencyHz
       : this.resolveSpeechPoseFrequency(item.axisId);
     const cycleRadians = ((elapsedMs / 1000) * frequencyHz * Math.PI * 2) + item.modulationPhase;
+    const audioGain = this.resolveSpeechAudioGain(item);
     const modulatedValue =
-      item.neutralValue + Math.sin(cycleRadians) * item.modulationAmplitude;
+      item.neutralValue + Math.sin(cycleRadians) * item.modulationAmplitude * audioGain;
     return Math.max(minValue, Math.min(maxValue, modulatedValue));
   }
 
@@ -2724,6 +2760,7 @@ export class LAppModel extends CubismUserModel {
     this._consistency = false;
     this._directParameterPlanState = null;
     this._directParameterPlanError = "";
+    this._speechAudioEnvelope = 0.0;
   }
 
   _modelSetting: ICubismModelSetting; // モデルセッティング情報
@@ -2755,4 +2792,5 @@ export class LAppModel extends CubismUserModel {
   _consistency: boolean; // MOC3一貫性チェック管理用
   _directParameterPlanState: DirectParameterPlanState | null;
   _directParameterPlanError: string;
+  _speechAudioEnvelope: number;
 }
