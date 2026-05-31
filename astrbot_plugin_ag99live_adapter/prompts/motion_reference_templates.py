@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from typing import Any
 
 from .semantic_axis_prompt import profile_prompt_axes
@@ -42,22 +41,15 @@ def build_motion_reference_templates(
 ) -> list[dict[str, Any]]:
     parameter_axis_map = _build_parameter_axis_map(semantic_profile)
 
-    templates = _build_motion_curve_templates(
+    templates = _build_expression_templates(
         model_payload=model_payload,
         parameter_axis_map=parameter_axis_map,
-    )
-    templates.extend(
-        _build_expression_templates(
-            model_payload=model_payload,
-            parameter_axis_map=parameter_axis_map,
-        )
     )
 
     templates.sort(
         key=lambda item: (
-            _source_sort_rank(str(item.get("source_type") or "")),
             -float(item.get("score") or 0.0),
-            str(item.get("label") or item.get("motion_name") or item.get("expression_name") or ""),
+            str(item.get("label") or item.get("expression_name") or ""),
         )
     )
     if limit is None:
@@ -76,22 +68,21 @@ def format_motion_reference_templates(
         return ""
 
     lines = [
-        "旧动作/表情参考模板（已过滤为语义轴，仅作动作原型，不是固定答案）：",
-        "- 来源是模型内旧 motion 曲线和 exp3 表情；这里优先保留能映射到 prompt 语义轴的参数。",
+        "旧表情参考模板（已过滤为语义轴，仅作表情姿态参考，不是固定答案）：",
+        "- 来源是模型内 exp3 表情；这里优先保留能映射到 prompt 语义轴的参数。",
         "- 物理演算、头发、手臂、附件、marker、服装/控制器开关、未映射参数和纯运行时轴已经过滤，不要把它们写进输出。",
         "- 纯表情开关如果有语义价值，会作为 emotion_label/意图参考保留；它们不是可输出轴，不能伪造成参数。",
-        "- 使用这些模板学习动作结构：先选头身/视线/眼部骨架，再少量补嘴角和眉毛；不要照抄整组轴和值。",
+        "- 使用这些模板学习表情姿态：优先判断眼部、嘴角和眉毛的表情含义；不要照抄整组轴和值。",
     ]
     selected = normalized if limit is None else normalized[: max(0, limit)]
     for template in selected:
-        source_type = str(template.get("source_type") or "motion").strip()
-        label = truncate_text(str(template.get("label") or template.get("motion_name") or "").strip(), 32)
+        label = truncate_text(str(template.get("label") or "").strip(), 32)
         name = truncate_text(
-            str(template.get("motion_name") or template.get("expression_name") or "").strip(),
+            str(template.get("expression_name") or "").strip(),
             32,
         )
         name_suffix = f"/{name}" if name and name != label else ""
-        source_label = "表情" if source_type == "expression" else "动作"
+        source_label = "表情"
         intensity = str(template.get("intensity") or "").strip()
         tags = ", ".join(_text_list(template.get("tags"), limit=4))
         emotion_bias = ", ".join(_text_list(template.get("emotion_bias"), limit=4))
@@ -118,7 +109,7 @@ def format_motion_reference_templates(
         if axis_text:
             lines.append(f"- [{source_label}] {label}{name_suffix}{context_text}{intent_suffix}；保留语义轴={axis_text}")
             continue
-        if source_type == "expression" and intent_text:
+        if intent_text:
             lines.append(f"- [{source_label}] {label}{name_suffix}{context_text}{intent_suffix}；无可输出语义轴，仅用于 emotion_label 和语气判断")
     return "\n".join(lines)
 
@@ -158,113 +149,6 @@ def _build_parameter_axis_map(semantic_profile: dict[str, Any]) -> dict[str, str
             parameter_id = str(binding.get("parameter_id") or "").strip()
             if parameter_id:
                 result[parameter_id] = axis_id
-    return result
-
-
-def _build_motion_curve_templates(
-    *,
-    model_payload: dict[str, Any],
-    parameter_axis_map: dict[str, str],
-) -> list[dict[str, Any]]:
-    motion_pool = model_payload.get("motion_resource_pool")
-    if not isinstance(motion_pool, dict):
-        return []
-
-    raw_components = motion_pool.get("driver_components")
-    if not isinstance(raw_components, list):
-        raw_components = motion_pool.get("components")
-    if not isinstance(raw_components, list):
-        return []
-
-    metadata_by_file = _build_motion_metadata_by_file(model_payload, motion_pool)
-    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for component in raw_components:
-        if not isinstance(component, dict):
-            continue
-        if str(component.get("engine_role") or "driver").strip() != "driver":
-            continue
-        parameter_id = str(component.get("parameter_id") or "").strip()
-        axis_id = parameter_axis_map.get(parameter_id)
-        if not axis_id:
-            continue
-        source_file = str(component.get("source_file") or "").strip()
-        source_motion = str(component.get("source_motion") or "").strip()
-        if not source_file and not source_motion:
-            continue
-        normalized = dict(component)
-        normalized["axis_id"] = axis_id
-        grouped[source_file or source_motion].append(normalized)
-
-    templates: list[dict[str, Any]] = []
-    for source_key, components in grouped.items():
-        metadata = metadata_by_file.get(source_key, {})
-        axes = _summarize_template_axes(components)
-        if not axes:
-            continue
-        source_motion = str(components[0].get("source_motion") or "").strip()
-        motion_name = str(metadata.get("motion_name") or source_motion or source_key).strip()
-        label = str(metadata.get("label") or metadata.get("catalog_label") or motion_name).strip()
-        templates.append(
-            {
-                "source_type": "motion",
-                "motion_name": motion_name,
-                "label": label,
-                "file": str(metadata.get("file") or source_key).strip(),
-                "intensity": str(metadata.get("intensity") or "").strip(),
-                "description": str(metadata.get("description") or "").strip(),
-                "tags": _text_list(metadata.get("tags") or metadata.get("catalog_tags"), limit=8),
-                "emotion_bias": _text_list(metadata.get("emotion_bias"), limit=6),
-                "scenarios": _text_list(metadata.get("recommended_scenarios"), limit=6),
-                "exclusive_with": _text_list(metadata.get("exclusive_with"), limit=8),
-                "axes": axes,
-                "score": round(sum(float(item.get("energy_score") or 0.0) for item in components), 4),
-            }
-        )
-    return templates
-
-
-def _build_motion_metadata_by_file(
-    model_payload: dict[str, Any],
-    motion_pool: dict[str, Any],
-) -> dict[str, dict[str, Any]]:
-    result: dict[str, dict[str, Any]] = {}
-    presets = motion_pool.get("motion_presets")
-    if isinstance(presets, list):
-        for preset in presets:
-            if not isinstance(preset, dict):
-                continue
-            motion_file = str(preset.get("motion_file") or "").strip()
-            if not motion_file:
-                continue
-            result[motion_file] = {
-                "file": motion_file,
-                "motion_name": str(preset.get("motion_name") or "").strip(),
-                "intensity": str(preset.get("intensity") or "").strip(),
-                "tags": _text_list(preset.get("catalog_tags"), limit=8),
-            }
-
-    constraints = model_payload.get("constraints")
-    motions = constraints.get("motions") if isinstance(constraints, dict) else None
-    if isinstance(motions, list):
-        for motion in motions:
-            if not isinstance(motion, dict):
-                continue
-            motion_file = str(motion.get("file") or "").strip()
-            if not motion_file:
-                continue
-            current = result.setdefault(motion_file, {"file": motion_file})
-            current.update(
-                {
-                    "motion_name": str(motion.get("name") or current.get("motion_name") or "").strip(),
-                    "label": str(motion.get("catalog_label") or current.get("label") or "").strip(),
-                    "description": str(motion.get("catalog_description") or current.get("description") or "").strip(),
-                    "intensity": str(motion.get("catalog_intensity") or current.get("intensity") or "").strip(),
-                    "tags": _text_list(motion.get("catalog_tags") or current.get("tags"), limit=8),
-                    "emotion_bias": _text_list(motion.get("catalog_emotion_bias") or current.get("emotion_bias"), limit=6),
-                    "recommended_scenarios": _text_list(motion.get("recommended_scenarios"), limit=6),
-                    "exclusive_with": _text_list(motion.get("catalog_exclusive_with") or current.get("exclusive_with"), limit=8),
-                }
-            )
     return result
 
 
@@ -389,55 +273,6 @@ def _expression_template_score(expression: dict[str, Any], axes: list[dict[str, 
     return 0.05
 
 
-def _summarize_template_axes(components: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    best_by_axis: dict[str, dict[str, Any]] = {}
-    for component in components:
-        axis_id = str(component.get("axis_id") or "").strip()
-        if not axis_id:
-            continue
-        current = best_by_axis.get(axis_id)
-        if current is None or float(component.get("energy_score") or 0.0) > float(current.get("energy_score") or 0.0):
-            best_by_axis[axis_id] = component
-
-    axes: list[dict[str, Any]] = []
-    for axis_id, component in best_by_axis.items():
-        axes.append(
-            {
-                "axis_id": axis_id,
-                "trait": str(component.get("trait") or "motion").strip(),
-                "strength": str(component.get("strength") or "").strip(),
-                "direction": _infer_component_direction(component),
-                "peak_time_ratio": _round_optional(component.get("peak_time_ratio")),
-                "energy_score": _round_optional(component.get("energy_score")),
-            }
-        )
-    axes.sort(
-        key=lambda item: (
-            -float(item.get("energy_score") or 0.0),
-            str(item.get("axis_id") or ""),
-        )
-    )
-    return axes[:5]
-
-
-def _infer_component_direction(component: dict[str, Any]) -> str:
-    value_profile = component.get("value_profile")
-    if not isinstance(value_profile, dict):
-        return "curve"
-    baseline = _coerce_float(value_profile.get("baseline"))
-    min_value = _coerce_float(value_profile.get("min"))
-    max_value = _coerce_float(value_profile.get("max"))
-    high_delta = abs(max_value - baseline)
-    low_delta = abs(baseline - min_value)
-    if high_delta < 0.001 and low_delta < 0.001:
-        return "near_neutral"
-    if high_delta >= low_delta * 1.2:
-        return "high"
-    if low_delta >= high_delta * 1.2:
-        return "low"
-    return "bidirectional"
-
-
 def _format_template_axis_summary(value: Any, *, truncate_text: Any) -> str:
     if not isinstance(value, list):
         return ""
@@ -470,14 +305,6 @@ def _direction_label(value: str) -> str:
     return labels.get(value, value)
 
 
-def _source_sort_rank(value: str) -> int:
-    if value == "motion":
-        return 0
-    if value == "expression":
-        return 1
-    return 2
-
-
 def _text_list(value: Any, *, limit: int) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -490,12 +317,6 @@ def _text_list(value: Any, *, limit: int) -> list[str]:
         if len(result) >= limit:
             break
     return result
-
-
-def _round_optional(value: Any) -> float | None:
-    if not isinstance(value, (int, float)):
-        return None
-    return round(float(value), 4)
 
 
 def _coerce_float(value: Any) -> float:

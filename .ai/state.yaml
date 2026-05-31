@@ -16,7 +16,8 @@ context:
     - AstrBot interaction middleware is the default motion prompt path; inline `<@anim>` prompt injection is retained only as an explicit compatibility mode.
     - The current adjustment should make body_yaw/body_roll/body_pitch more visible through prompt language, default few-shot anchors, and generated head-to-body coupling, without raising global motion intensity.
     - Motion intent/plan parameter-level faults should preserve usable axes/parameters where the schema/profile/timing contract is otherwise valid, so Action Lab history can still capture playable partial motions.
-    - Legacy motion3 curves and exp3 expressions should be reused as reference material by abstracting them into semantic-axis templates, not by asking the LLM to output raw Live2D parameter IDs.
+    - Legacy exp3 expressions should be reused as semantic-axis expression reference material, but legacy motion3 curves should not be abstracted into generated axis examples because that can bias the model toward oscillatory output.
+    - Existing motion3 files from motion_catalog.json should be exposed as selectable catalog animations; when none fit, the LLM should generate a single-frame semantic pose target instead of a motion3-style animation curve.
     - Prompt size is not the main constraint for this workflow, so all valuable mapped motion/expression templates can be included after filtering non-semantic parameters.
     - Pure expression switches can inform emotion_label and intent selection, but must not be represented as output axes unless they map to current SemanticAxisProfile prompt axes.
     - Built-in fixed selector few-shot examples should be fallback material only when legacy reference templates are unavailable, unless explicitly re-enabled by config.
@@ -37,7 +38,9 @@ architecture:
     - Middleware motion prompt capability now includes per-axis semantics, value ranges, neutral values, and usage notes for prompt-visible axes.
     - Frontend ModelEngine and Live2D direct plan startup now salvage valid axes/parameters from partially invalid payloads instead of failing the entire motion when possible.
     - Frontend semantic parameter playback adds bounded secondary life motion for head/body/gaze axes so a plan does not hold a perfectly static target through the whole duration.
-    - Middleware and fallback realtime motion prompts now include filtered legacy motion/expression reference templates built from SemanticAxisProfile parameter bindings.
+    - Middleware and fallback realtime motion prompts now include filtered legacy expression reference templates built from SemanticAxisProfile parameter bindings.
+    - Middleware and fallback realtime motion prompts now expose motion_catalog options as complete reusable motion3 animations via `choice=catalog`; generated semantic-axis output is explicitly a single-frame pose target via `choice=generate`.
+    - Frontend and adapter protocol now accept `engine.catalog_motion` / `engine.catalog_motion.v1` payloads and play them through the existing Live2D `startMotion(group,index,priority)` runtime path.
     - Live2D motion scan payload now keeps catalog description, emotion bias, recommended scenarios, and exclusivity metadata for prompt template abstraction.
     - Fallback realtime motion selector no longer injects built-in fixed few-shot examples when legacy motion/expression reference templates are available by default.
 verification:

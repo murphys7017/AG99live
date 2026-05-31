@@ -35,6 +35,10 @@ from .motion.realtime_motion_plan import (
 )
 from .protocol.builder import build_system_motion_tuning_samples_state
 from .protocol.constants import TYPE_ENGINE_MOTION_INTENT
+from .motion.catalog_motion import (
+    normalize_catalog_motion_payload,
+    validate_catalog_motion_payload,
+)
 from .runtime.session_state import SessionState
 from .runtime.turn_identity_map import TurnIdentityMap
 from .transport.websocket_server import WebSocketTransport
@@ -480,6 +484,18 @@ def _extract_debug_motion_payload(
         if not valid:
             return None, TYPE_ENGINE_MOTION_INTENT, f"Invalid intent payload: {reason}"
         return motion_payload, TYPE_ENGINE_MOTION_INTENT, ""
+
+    if schema_version == "engine.catalog_motion.v1":
+        from .protocol.constants import TYPE_ENGINE_CATALOG_MOTION
+
+        try:
+            motion_payload = normalize_catalog_motion_payload(payload)
+        except ValueError as exc:
+            return None, TYPE_ENGINE_CATALOG_MOTION, f"Invalid catalog motion payload: {exc}"
+        valid, reason = validate_catalog_motion_payload(motion_payload)
+        if not valid:
+            return None, TYPE_ENGINE_CATALOG_MOTION, f"Invalid catalog motion payload: {reason}"
+        return motion_payload, TYPE_ENGINE_CATALOG_MOTION, ""
 
     return None, "", "`intent` must be a valid motion payload object."
 

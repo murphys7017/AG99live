@@ -217,9 +217,14 @@ def _build_semantic_model_info() -> dict:
                         {
                             "name": "认真说明",
                             "file": "Motions/认真说明.motion3.json",
+                            "group": "TapBody",
+                            "duration": 3.0,
                             "catalog_label": "认真说明",
+                            "catalog_description": "姿态更稳定、更像进入解释状态。",
                             "catalog_intensity": "medium",
                             "catalog_tags": ["serious", "explain"],
+                            "catalog_emotion_bias": ["neutral", "thinking"],
+                            "catalog_exclusive_with": ["happy_burst"],
                             "recommended_scenarios": ["说明问题", "认真解释"],
                         }
                     ],
@@ -400,6 +405,7 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     runtime = next(item for item in extensions if item.mount == "context")
     assert "AG99live Motion 是当前桌宠前端的主动作通道" in system.value
     assert '"plugin_hints":{"ag99live_motion"' in system.value
+    assert '"choice":"generate | catalog"' in system.value
     assert "immediate_spoken_reply" in system.value
     assert "避免连续复用同一组轴和值" in system.value
     assert "中位值不是推荐动作" in system.value
@@ -411,8 +417,10 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "低值=turn left；高值=turn right" in capability.value["semantic_profile"]["axis_prompt"]
     assert "使用说明=Use for attention direction." in capability.value["semantic_profile"]["axis_prompt"]
     assert "低值=turn left；高值=turn right" in system.value
-    assert "旧动作/表情参考模板" in system.value
-    assert "[动作] 认真说明" in system.value
+    assert "可复用的现成 motion3 动画" in system.value
+    assert "motion_id=认真说明" in system.value
+    assert "旧表情参考模板" in system.value
+    assert "[动作]" not in system.value
     assert "head_yaw" in system.value
     assert "[表情] Surprised" in system.value
     assert "eye_open_left" in system.value
@@ -420,6 +428,7 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "ParamPhysicsX" not in system.value
     assert "Tablet" not in system.value
     assert "motion_reference_templates" in capability.value
+    assert "motion_catalog_options" in capability.value
     prompt_axis_ids = [
         item["id"] for item in capability.value["semantic_profile"]["prompt_axes"]
     ]
@@ -502,6 +511,36 @@ def test_plugin_hints_expressive_payload_is_pushed_out_of_idle_deadzone(
 
     assert payload is not None
     assert payload["axes"]["head_yaw"]["value"] > 58
+
+
+def test_plugin_hints_catalog_motion_payload_uses_catalog_option(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "choice": "catalog",
+                "motion_id": "认真说明",
+                "emotion_label": "explain",
+            }
+        },
+    )
+
+    payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
+
+    assert payload is not None
+    assert payload["schema_version"] == "engine.catalog_motion.v1"
+    assert payload["motion_id"] == "认真说明"
+    assert payload["group"] == "TapBody"
+    assert payload["index"] == 0
+    assert payload["emotion_label"] == "explain"
 
 
 def test_plugin_hints_motion_payload_accepts_head_roll_and_mouth_smile(

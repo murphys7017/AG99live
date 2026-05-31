@@ -22,6 +22,7 @@ from ..protocol.builder import (
 )
 from ..protocol import (
     SOURCE_ENGINE,
+    TYPE_ENGINE_CATALOG_MOTION,
     TYPE_CONTROL_INTERRUPT,
     TYPE_CONTROL_PLAYBACK_FINISHED,
     TYPE_ENGINE_MOTION_INTENT,
@@ -114,7 +115,7 @@ class TurnCoordinator:
             await self._handle_frontend_system(message)
             return
 
-        if message.type == TYPE_ENGINE_MOTION_INTENT:
+        if message.type in {TYPE_ENGINE_MOTION_INTENT, TYPE_ENGINE_CATALOG_MOTION}:
             await self._handle_engine_motion_payload_preview(message)
             return
 
@@ -552,7 +553,12 @@ class TurnCoordinator:
             return False
 
         resolved_turn_id = turn_id if turn_id is not None else self.session_state.current_turn_id
-        payload_key = "intent" if message_type == TYPE_ENGINE_MOTION_INTENT else "plan"
+        if message_type == TYPE_ENGINE_MOTION_INTENT:
+            payload_key = "intent"
+        elif message_type == TYPE_ENGINE_CATALOG_MOTION:
+            payload_key = "motion"
+        else:
+            payload_key = "plan"
         payload = {
             "mode": str(mode or "preview"),
             payload_key: motion_payload,

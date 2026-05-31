@@ -17,6 +17,22 @@ const motionPayload: NormalizedMotionPayload = {
   intent: {} as never,
 };
 
+const catalogMotionPayload: NormalizedMotionPayload = {
+  kind: "catalog_motion",
+  motion: {
+    schema_version: "engine.catalog_motion.v1",
+    model_id: "model-1",
+    motion_id: "happy_smile",
+    group: "TapBody",
+    index: 0,
+    file: "Motions/微笑.motion3.json",
+    label: "微笑",
+    emotion_label: "happy",
+    duration_ms: 3000,
+    priority: 3,
+  },
+};
+
 function getOnlySession(store: ReturnType<typeof useTurnPlaybackSessionStore>) {
   const session = store.getSessions()[0];
   assert.ok(session);
@@ -60,6 +76,14 @@ function testSameMessageIdGroupsTextAudioMotion(): void {
   assert.equal(segment.text.content, "Hello");
   assert.equal(segment.audio.url, "http://localhost/a.wav");
   assert.deepEqual(segment.motion.payload, motionPayload);
+}
+
+function testCatalogMotionPayloadCanBeStored(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.markMotionReceived("turn-1", catalogMotionPayload, "msg-1");
+
+  const segment = getSegment(store, "msg-1");
+  assert.equal(segment.motion.payload?.kind, "catalog_motion");
 }
 
 function testMultipleMessageIdsKeepArrivalOrder(): void {
@@ -249,6 +273,7 @@ function testAudioTerminalHandlesAllStates(): void {
 function run(): void {
   testSessionStartsWithoutTurnLevelPlaybackSlots();
   testSameMessageIdGroupsTextAudioMotion();
+  testCatalogMotionPayloadCanBeStored();
   testMultipleMessageIdsKeepArrivalOrder();
   testSelectorsOperateOnSegments();
   testSegmentSettlementAndTurnSettlement();

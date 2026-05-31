@@ -51,8 +51,34 @@ export function startNormalizedMotionPayload(
   if (payload.kind === "semantic_intent") {
     return startSemanticIntentPayload(payload, context, dependencies, runtime, state);
   }
+  if (payload.kind === "catalog_motion") {
+    return startCatalogMotionPayload(payload, context, dependencies, state);
+  }
 
   return startDirectPlanPayload(payload, context, dependencies, runtime, state);
+}
+
+function startCatalogMotionPayload(
+  payload: Extract<NormalizedMotionPayload, { kind: "catalog_motion" }>,
+  context: StartPayloadContext,
+  dependencies: MotionStartDependencies,
+  state: MotionRuntimeStateController,
+): boolean {
+  const selectedModel = dependencies.getSelectedModel();
+  const started = dependencies.playCatalogMotion(payload.motion, selectedModel);
+  if (!started) {
+    const failureReason = dependencies.getPlayerMessage?.()
+      || "现成 motion 被运行时拒绝执行。";
+    state.setLastCompileReason(failureReason);
+    state.setState("failed", failureReason, null);
+    state.pushHistory("error", `动作播放失败：${failureReason}`);
+    return false;
+  }
+
+  const successMessage = buildSuccessMessage(context, dependencies);
+  state.setState("playing", successMessage, null);
+  state.pushHistory("system", `现成 motion 执行中（${successMessage}）。`);
+  return true;
 }
 
 function startSemanticIntentPayload(

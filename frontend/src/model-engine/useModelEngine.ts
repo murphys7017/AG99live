@@ -55,6 +55,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     getSelectedModel: dependencies.getSelectedModel,
     getSettings: dependencies.getSettings,
     playPlan: dependencies.playPlan,
+    playCatalogMotion: dependencies.playCatalogMotion,
     getPlayerMessage: dependencies.getPlayerMessage,
     onPlanStarted: dependencies.onPlanStarted,
   };

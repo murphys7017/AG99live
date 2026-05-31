@@ -1,6 +1,7 @@
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
 
 export const SCHEMA_MOTION_INTENT_V2 = "engine.motion_intent.v2";
+export const SCHEMA_CATALOG_MOTION_V1 = "engine.catalog_motion.v1";
 export const SCHEMA_PARAMETER_PLAN_V2 = "engine.parameter_plan.v2";
 
 export interface ProtocolEnvelope<TPayload = unknown> {
@@ -661,6 +662,22 @@ export interface SemanticParameterPlan {
 
 export type MotionIntentPayload = SemanticMotionIntent;
 export type MotionPlanPayload = SemanticParameterPlan;
+
+export interface CatalogMotionPayload {
+  schema_version: typeof SCHEMA_CATALOG_MOTION_V1;
+  model_id: string;
+  motion_id: string;
+  group: string;
+  index: number;
+  file: string;
+  label: string;
+  emotion_label: string;
+  duration_ms: number | null;
+  priority: number;
+  summary?: {
+    source?: string;
+  };
+}
 
 export interface ModelSummary {
   name: string;

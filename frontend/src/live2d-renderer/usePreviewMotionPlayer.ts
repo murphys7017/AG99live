@@ -1,5 +1,6 @@
 import { onScopeDispose, reactive, readonly } from "vue";
 import type {
+  CatalogMotionPayload,
   ModelSummary,
   SemanticParameterPlan,
 } from "../types/protocol.js";
@@ -289,6 +290,58 @@ export function usePreviewMotionPlayer() {
     return true;
   }
 
+  function playCatalogMotion(
+    motion: CatalogMotionPayload,
+    _model: ModelSummary | null = null,
+  ): boolean {
+    const adapter = window.getLAppAdapter?.();
+    if (!adapter || typeof adapter.startMotion !== "function") {
+      const reason = "现成 motion 无法执行：Live2D 运行时未提供 startMotion 接口。";
+      console.warn("[MotionPlayer]", reason);
+      state.status = "failed";
+      state.message = reason;
+      state.finishedAt = new Date().toISOString();
+      return false;
+    }
+
+    activeRunId += 1;
+    const runId = activeRunId;
+    clearActiveTimers();
+    if (typeof adapter.stopDirectParameterPlan === "function") {
+      adapter.stopDirectParameterPlan();
+    }
+
+    const handle = adapter.startMotion(
+      motion.group,
+      motion.index,
+      motion.priority || 3,
+    );
+    if (handle === -1) {
+      const reason = `现成 motion 执行失败：${motion.motion_id}。`;
+      console.warn("[MotionPlayer]", reason);
+      state.status = "failed";
+      state.message = reason;
+      state.finishedAt = new Date().toISOString();
+      return false;
+    }
+
+    const durationMs = motion.duration_ms ?? 3000;
+    state.status = "playing";
+    state.message = `正在执行现成 motion（${motion.label || motion.motion_id}）...`;
+    state.keyAxesCount = 0;
+    state.parameterCount = 0;
+    state.startedAt = new Date().toISOString();
+    state.finishedAt = "";
+
+    scheduleTimer(runId, durationMs + 40, () => {
+      state.status = "finished";
+      state.message = "现成 motion 执行完成。";
+      state.finishedAt = new Date().toISOString();
+      activeTimerHandles = [];
+    });
+    return true;
+  }
+
   onScopeDispose(() => {
     stopPlan("unmount");
   });
@@ -296,6 +349,7 @@ export function usePreviewMotionPlayer() {
   return {
     state: readonly(state),
     playPlan,
+    playCatalogMotion,
     stopPlan,
   };
 }

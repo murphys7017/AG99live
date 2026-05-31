@@ -347,7 +347,8 @@ export function mapInboundEnvelopeToEvent(
         envelope: withPayload(envelope, parsed.payload),
       };
     }
-    case INBOUND_MESSAGE_TYPES.ENGINE_MOTION_INTENT: {
+    case INBOUND_MESSAGE_TYPES.ENGINE_MOTION_INTENT:
+    case INBOUND_MESSAGE_TYPES.ENGINE_CATALOG_MOTION: {
       const turnId =
         normalizeTurnId(envelope.turn_id)
         ?? ctx.currentTurnId

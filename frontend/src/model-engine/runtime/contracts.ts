@@ -1,5 +1,6 @@
 import type { DesktopHistoryEntry } from "../../types/desktop.js";
 import type {
+  CatalogMotionPayload,
   ModelSummary,
   MotionPlanPayload,
 } from "../../types/protocol.js";
@@ -78,6 +79,10 @@ export interface MotionStartDependencies {
     plan: unknown,
     model: ModelSummary | null,
     options: PlayPlanOptions,
+  ) => boolean;
+  playCatalogMotion: (
+    motion: CatalogMotionPayload,
+    model: ModelSummary | null,
   ) => boolean;
   getPlayerMessage?: () => string;
   onPlanStarted?: (event: ModelEnginePlanStartedEvent) => void;

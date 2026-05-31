@@ -14,7 +14,12 @@ from ..prompts.motion_selector import (
     build_selector_platform_context,
     build_selector_user_prompt,
     resolve_motion_prompt_instruction,
+    resolve_selector_motion_catalog_options,
     resolve_selector_motion_reference_templates,
+)
+from ..prompts.motion_catalog import (
+    build_catalog_motion_payload,
+    find_motion_catalog_option,
 )
 from ..prompts.semantic_axis_prompt import profile_prompt_axes
 
@@ -80,6 +85,9 @@ class RealtimeMotionPlanGenerator:
             runtime_state=self.runtime_state,
             semantic_profile=semantic_profile,
         )
+        motion_catalog_options = resolve_selector_motion_catalog_options(
+            runtime_state=self.runtime_state,
+        )
         selector_raw = await self._call_astrbot_selector(
             context_text,
             few_shot_examples=self._resolve_prompt_few_shot_examples(
@@ -89,7 +97,15 @@ class RealtimeMotionPlanGenerator:
             motion_instruction=resolve_motion_prompt_instruction(runtime_state=self.runtime_state),
             semantic_profile=semantic_profile,
             motion_reference_templates=motion_reference_templates,
+            motion_catalog_options=motion_catalog_options,
         )
+        catalog_payload = build_catalog_motion_from_selector(
+            selector_raw,
+            semantic_profile=semantic_profile,
+            motion_catalog_options=motion_catalog_options,
+        )
+        if catalog_payload is not None:
+            return catalog_payload
         selector = normalize_selector_output(selector_raw, semantic_profile=semantic_profile)
         intent = build_intent_from_selector(selector, semantic_profile=semantic_profile)
         valid, failure_reason = validate_motion_intent_payload(intent)
@@ -142,6 +158,7 @@ class RealtimeMotionPlanGenerator:
         motion_instruction: str,
         semantic_profile: dict[str, Any],
         motion_reference_templates: list[dict[str, Any]],
+        motion_catalog_options: list[dict[str, Any]],
     ) -> dict[str, Any]:
         provider = getattr(self.runtime_state, "selected_motion_analysis_provider", None)
         if provider is None:
@@ -161,6 +178,7 @@ class RealtimeMotionPlanGenerator:
                         motion_instruction=motion_instruction,
                         semantic_profile=semantic_profile,
                         motion_reference_templates=motion_reference_templates,
+                        motion_catalog_options=motion_catalog_options,
                     ),
                     system_prompt=_SYSTEM_PROMPT,
                 ),
@@ -260,6 +278,10 @@ def normalize_selector_output_v2(
     if not isinstance(payload, dict):
         raise ValueError("selector_payload_not_object")
 
+    choice = str(payload.get("choice") or "generate").strip().lower()
+    if choice not in {"generate", ""}:
+        raise ValueError(f"selector_choice_not_generate:{choice}")
+
     emotion_raw = payload.get("emotion")
     emotion = str(emotion_raw).strip() if isinstance(emotion_raw, str) else ""
     if not emotion:
@@ -354,6 +376,35 @@ def normalize_selector_output_v2(
         "axes": normalized_axes,
         "warnings": axis_warnings + axis_errors,
     }
+
+
+def build_catalog_motion_from_selector(
+    payload: dict[str, Any],
+    *,
+    semantic_profile: dict[str, Any],
+    motion_catalog_options: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    choice = str(payload.get("choice") or "generate").strip().lower()
+    if choice != "catalog":
+        return None
+    motion_id = str(payload.get("motion_id") or "").strip()
+    option = find_motion_catalog_option(
+        options=motion_catalog_options,
+        motion_id=motion_id,
+    )
+    if option is None:
+        raise ValueError(f"selector_catalog_motion_not_allowed:{motion_id or '<empty>'}")
+    emotion_raw = payload.get("emotion")
+    emotion_label = str(emotion_raw).strip() if isinstance(emotion_raw, str) else ""
+    if not emotion_label:
+        emotion_label = str(option.get("label") or option.get("id") or "catalog").strip()
+    return build_catalog_motion_payload(
+        option=option,
+        model_id=str(semantic_profile.get("model_id") or "").strip(),
+        emotion_label=emotion_label,
+    )
 
 
 def build_intent_from_selector(

@@ -16,6 +16,12 @@ from ..motion.realtime_motion_plan import (
     _apply_expressive_floor_v2,
     resolve_selected_semantic_axis_profile,
 )
+from ..prompts.motion_catalog import (
+    build_catalog_motion_payload,
+    find_motion_catalog_option,
+    format_motion_catalog_options,
+    resolve_motion_catalog_options,
+)
 from ..prompts.motion_selector import (
     resolve_motion_prompt_instruction,
 )
@@ -253,6 +259,16 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     if not isinstance(motion_hint, dict):
         return None, "ag99live_motion_missing"
 
+    choice = str(motion_hint.get("choice") or "generate").strip().lower()
+    if choice == "catalog":
+        catalog_payload, catalog_reason = _resolve_plugin_hints_catalog_motion_payload(
+            motion_hint,
+            runtime_state,
+        )
+        return catalog_payload, catalog_reason
+    if choice not in {"generate", ""}:
+        return None, f"invalid_choice:{choice or '<empty>'}"
+
     mode = str(motion_hint.get("mode") or "").strip()
     if mode not in {"idle", "expressive"}:
         return None, f"invalid_mode:{mode or '<empty>'}"
@@ -301,6 +317,43 @@ def _resolve_plugin_hints_motion_payload_with_reason(
         "axes": validated_axes,
         "summary": {"axis_count": len(validated_axes)},
     }, "ok"
+
+
+def _resolve_plugin_hints_catalog_motion_payload(
+    motion_hint: dict[str, Any],
+    runtime_state: Any,
+) -> tuple[dict[str, Any] | None, str]:
+    motion_id = str(motion_hint.get("motion_id") or "").strip()
+    if not motion_id:
+        return None, "catalog_motion_id_empty"
+
+    catalog_options = resolve_motion_catalog_options(
+        runtime_state=runtime_state,
+        limit=None,
+    )
+    option = find_motion_catalog_option(
+        options=catalog_options,
+        motion_id=motion_id,
+    )
+    if option is None:
+        return None, f"catalog_motion_not_allowed:{motion_id}"
+
+    try:
+        semantic_profile = resolve_selected_semantic_axis_profile(
+            runtime_state=runtime_state
+        )
+    except Exception as exc:  # noqa: BLE001
+        return None, f"semantic_profile_unresolved:{exc}"
+
+    emotion_label = str(motion_hint.get("emotion_label") or "").strip()
+    if not emotion_label:
+        emotion_label = str(option.get("label") or option.get("id") or "catalog").strip()
+
+    return build_catalog_motion_payload(
+        option=option,
+        model_id=str(semantic_profile.get("model_id") or "").strip(),
+        emotion_label=emotion_label,
+    ), "ok"
 
 
 def _normalize_plugin_hint_axes(
@@ -406,6 +459,12 @@ def _build_motion_capability_payload(runtime_state: Any) -> dict[str, Any]:
             )
             if reference_templates:
                 capability_payload["motion_reference_templates"] = reference_templates
+        catalog_options = resolve_motion_catalog_options(
+            runtime_state=runtime_state,
+            limit=None,
+        )
+        if catalog_options:
+            capability_payload["motion_catalog_options"] = catalog_options
 
     return capability_payload
 
@@ -445,14 +504,28 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         )
         if formatted_templates:
             reference_template_text = f"{formatted_templates}\n"
+    motion_catalog_text = ""
+    catalog_options = capability_payload.get("motion_catalog_options")
+    if isinstance(catalog_options, list):
+        formatted_catalog = format_motion_catalog_options(
+            catalog_options,
+            truncate_text=_truncate_text,
+            limit=None,
+        )
+        if formatted_catalog:
+            motion_catalog_text = f"{formatted_catalog}\n"
 
     return (
         "AG99live Motion 是当前桌宠前端的主动作通道。"
         "每次 interaction decision 都必须在 JSON 输出的 plugin_hints 中写入 ag99live_motion；"
         "不要把动作写进 immediate_spoken_reply、core_task_spec 或普通文本。"
-        "ag99live_motion.mode 只能是 idle 或 expressive；axes 只能使用下方 schema 中已有的轴 id，"
-        "每个轴值必须写成 {\"value\": number}。"
-        "如果用户只是普通说话，也要给一个轻量 idle 或 expressive 动作。"
+        "ag99live_motion.choice 可以是 catalog 或 generate。"
+        "choice=catalog 时只写 motion_id 和 emotion_label，表示播放一个已经制作好的完整 motion3；"
+        "只有 catalog 说明明确匹配本轮回复时才这样做。"
+        "choice=generate 时 mode 只能是 idle 或 expressive；axes 只能使用下方 schema 中已有的轴 id，"
+        "每个轴值必须写成 {\"value\": number}，表示一个单帧姿态目标，由前端平滑插值播放。"
+        "不要生成关键帧、时间曲线、随机抖动或来回摆动。"
+        "如果用户只是普通说话，也要给一个轻量 idle/generate 或合适 catalog 动作。"
         "不要把参考示例、输出形状或情绪名称当成封闭动作模板；先理解本轮对话语气，再自由组合少量相关轴。"
         "避免连续复用同一组轴和值；同样是 idle 也要在头部朝向、身体跟随、视线和眼部之间做语义变化。"
         "明确转身、强调、回避、惊讶、调侃、开心或疑惑时，优先用 head_yaw/head_roll/head_pitch "
@@ -460,6 +533,7 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         "输出形状示例只展示 JSON 结构和可用轴，里面的中位值不是推荐动作；实际输出应删掉无关轴，只保留本轮需要的轴。"
         f"{style_text}"
         f"{axis_prompt_text}"
+        f"{motion_catalog_text}"
         f"{reference_template_text}"
         f" 输出形状示例：{format_json}"
     )
@@ -481,9 +555,11 @@ def _build_plugin_hints_motion_format(profile_payload: dict[str, Any]) -> dict[s
 
     return {
         "ag99live_motion": {
+            "choice": "generate | catalog",
             "mode": "idle | expressive",
             "emotion_label": "neutral",
             "duration_hint_ms": 1500,
+            "motion_id": "optional catalog motion_id when choice=catalog",
             "axes": axis_schema,
         },
     }

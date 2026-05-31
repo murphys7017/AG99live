@@ -19,6 +19,7 @@ export const INBOUND_MESSAGE_TYPES = {
   CONTROL_SYNTH_FINISHED: "control.synth_finished",
   CONTROL_ERROR: "control.error",
   ENGINE_MOTION_INTENT: "engine.motion_intent",
+  ENGINE_CATALOG_MOTION: "engine.catalog_motion",
 } as const;
 
 export const OUTBOUND_MESSAGE_TYPES = {
@@ -35,6 +36,7 @@ export const OUTBOUND_MESSAGE_TYPES = {
   SYSTEM_MOTION_TUNING_SAMPLE_SAVE: "system.motion_tuning_sample_save",
   SYSTEM_MOTION_TUNING_SAMPLE_DELETE: "system.motion_tuning_sample_delete",
   ENGINE_MOTION_INTENT: "engine.motion_intent",
+  ENGINE_CATALOG_MOTION: "engine.catalog_motion",
 } as const;
 
 export type InboundMessageType =

@@ -155,10 +155,14 @@ def _model_info() -> dict:
                         {
                             "name": "serious",
                             "file": "Motions/serious.motion3.json",
+                            "group": "TapBody",
                             "catalog_label": "认真说明",
+                            "catalog_description": "姿态更稳定、更像进入解释状态。",
                             "catalog_intensity": "medium",
                             "catalog_tags": ["serious", "explain"],
+                            "catalog_emotion_bias": ["neutral", "thinking"],
                             "recommended_scenarios": ["说明问题"],
+                            "duration": 3.0,
                         }
                     ],
                     "expressions": [
@@ -594,8 +598,10 @@ def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
     assert "场景：用户确认收到信息" not in provider.last_prompt
     assert "角色风格偏好：" in provider.last_prompt
     assert "中性时偏少轴" in provider.last_prompt
-    assert "旧动作/表情参考模板" in provider.last_prompt
-    assert "[动作] 认真说明/serious" in provider.last_prompt
+    assert "可复用的现成 motion3 动画" in provider.last_prompt
+    assert "motion_id=认真说明" in provider.last_prompt
+    assert "旧表情参考模板" in provider.last_prompt
+    assert "[动作]" not in provider.last_prompt
     assert "head_yaw" in provider.last_prompt
     assert "[表情] Question" in provider.last_prompt
     assert "ParamHairX" not in provider.last_prompt
@@ -604,6 +610,54 @@ def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
     assert "Use stronger head and mouth motion." in provider.last_prompt
     assert "Live2D 表情动作参数生成器" in provider.last_system_prompt
     assert "不要回复用户" in provider.last_system_prompt
+
+
+def test_realtime_motion_plan_generator_can_return_catalog_motion() -> None:
+    class ProviderStub:
+        async def text_chat(self, *, prompt: str, system_prompt: str):
+            assert "可复用的现成 motion3 动画" in prompt
+            assert "motion_id=认真说明" in prompt
+            del system_prompt
+
+            class Response:
+                completion_text = json.dumps(
+                    {
+                        "choice": "catalog",
+                        "motion_id": "认真说明",
+                        "emotion": "explain",
+                    },
+                    separators=(",", ":"),
+                )
+
+            return Response()
+
+    class RuntimeStub:
+        enable_realtime_motion_plan = True
+        selected_motion_analysis_provider = ProviderStub()
+        realtime_motion_timeout_seconds = 2.0
+        model_info = _model_info()
+
+        def list_effective_motion_tuning_examples(self) -> list[dict]:
+            return []
+
+        def build_motion_tuning_style_prompt(self) -> str:
+            return ""
+
+    generator = RealtimeMotionPlanGenerator(runtime_state=RuntimeStub())
+
+    payload = asyncio.run(
+        generator.generate(
+            user_text="why",
+            assistant_text="let me explain",
+        )
+    )
+
+    assert isinstance(payload, dict)
+    assert payload["schema_version"] == "engine.catalog_motion.v1"
+    assert payload["motion_id"] == "认真说明"
+    assert payload["group"] == "TapBody"
+    assert payload["index"] == 0
+    assert payload["emotion_label"] == "explain"
 
 
 def test_realtime_motion_plan_prompt_keeps_fixed_few_shot_when_reference_templates_empty() -> None:
@@ -654,7 +708,7 @@ def test_realtime_motion_plan_prompt_keeps_fixed_few_shot_when_reference_templat
     intent = asyncio.run(generator.generate(user_text="ok", assistant_text="ok"))
 
     assert isinstance(intent, dict)
-    assert "旧动作/表情参考模板" not in provider.last_prompt
+    assert "旧表情参考模板" not in provider.last_prompt
     assert "少量示例仅作为风格参考。" in provider.last_prompt
     assert "场景：用户确认收到信息" in provider.last_prompt
 
@@ -700,7 +754,7 @@ def test_realtime_motion_plan_prompt_can_keep_fixed_few_shot_with_reference_temp
     intent = asyncio.run(generator.generate(user_text="why", assistant_text="let me explain"))
 
     assert isinstance(intent, dict)
-    assert "旧动作/表情参考模板" in provider.last_prompt
+    assert "旧表情参考模板" in provider.last_prompt
     assert "少量示例仅作为风格参考。" in provider.last_prompt
     assert "场景：用户确认收到信息" in provider.last_prompt
 

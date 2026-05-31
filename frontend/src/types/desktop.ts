@@ -168,7 +168,7 @@ export interface DesktopMotionPlaybackRecord {
   id: string;
   createdAt: string;
   source: string;
-  payloadKind: "semantic_intent" | "semantic_plan";
+  payloadKind: "semantic_intent" | "semantic_plan" | "catalog_motion";
   turnId: string | null;
   playbackTurnId: string | null;
   modelName: string;

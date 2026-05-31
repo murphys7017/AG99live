@@ -1,5 +1,8 @@
 import type { ProtocolEnvelope } from "../../types/protocol.js";
-import { SCHEMA_MOTION_INTENT_V2 } from "../../types/protocol.js";
+import {
+  SCHEMA_CATALOG_MOTION_V1,
+  SCHEMA_MOTION_INTENT_V2,
+} from "../../types/protocol.js";
 import {
   normalizeTurnIdForComparison,
 } from "../core/turnIds.js";
@@ -97,7 +100,7 @@ export function applyInboundMotionPayload(
 
   const rawPayload = envelope.payload;
   const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
-  const payloadKey = "intent";
+  const payloadKey = envelope.type === "engine.catalog_motion" ? "motion" : "intent";
   const mode =
     typeof payload.mode === "string" && payload.mode.trim()
       ? payload.mode.trim()
@@ -130,7 +133,10 @@ export function applyInboundMotionPayload(
     typeof (plan as Record<string, unknown>).schema_version === "string"
       ? String((plan as Record<string, unknown>).schema_version).trim()
       : "";
-  const allowedSchemaVersions = new Set([SCHEMA_MOTION_INTENT_V2]);
+  const allowedSchemaVersions = new Set([
+    SCHEMA_MOTION_INTENT_V2,
+    SCHEMA_CATALOG_MOTION_V1,
+  ]);
   if (!allowedSchemaVersions.has(schemaVersion)) {
     console.warn(
       "[Connection] motion payload schema mismatch.",

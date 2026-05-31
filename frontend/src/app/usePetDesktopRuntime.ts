@@ -78,6 +78,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     getSelectedModel: () => selectedModel.value,
     getSettings: () => cloneModelEngineSettings(motionEngineSettings),
     playPlan: (plan, model, options) => motionPlayer.playPlan(plan, model, options),
+    playCatalogMotion: (motion, model) => motionPlayer.playCatalogMotion(motion, model),
     stopPlan: (reason) => motionPlayer.stopPlan(reason),
     getCurrentTurnId: () => adapter.state.currentTurnId,
     pushHistory: (role, text) => adapter.pushHistory(role, text),
