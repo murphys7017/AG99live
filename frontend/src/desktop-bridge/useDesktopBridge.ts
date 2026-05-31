@@ -182,6 +182,66 @@ function persistProfileAuthoringSnapshot(
   }
 }
 
+function reuseStableRuntimeSnapshotCollections(
+  previous: DesktopRuntimeSnapshot,
+  next: DesktopRuntimeSnapshot,
+): DesktopRuntimeSnapshot {
+  return {
+    ...next,
+    microphoneDevices: sameCollection(
+      previous.microphoneDevices,
+      next.microphoneDevices,
+      (item) => `${item.deviceId}:${item.label}`,
+    )
+      ? previous.microphoneDevices
+      : next.microphoneDevices,
+    historyEntries: sameCollection(
+      previous.historyEntries,
+      next.historyEntries,
+      (item) => `${item.id}:${item.role}:${item.timestamp}:${item.text}`,
+    )
+      ? previous.historyEntries
+      : next.historyEntries,
+    backendHistorySummaries: sameCollection(
+      previous.backendHistorySummaries,
+      next.backendHistorySummaries,
+      (item) => `${item.uid}:${item.timestamp}:${item.latestMessage?.timestamp ?? ""}:${item.latestMessage?.content ?? ""}`,
+    )
+      ? previous.backendHistorySummaries
+      : next.backendHistorySummaries,
+    backendHistoryEntries: sameCollection(
+      previous.backendHistoryEntries,
+      next.backendHistoryEntries,
+      (item) => `${item.id}:${item.timestamp}:${item.role}:${item.type}:${item.content}:${item.status ?? ""}`,
+    )
+      ? previous.backendHistoryEntries
+      : next.backendHistoryEntries,
+    motionPlaybackRecords: sameCollection(
+      previous.motionPlaybackRecords,
+      next.motionPlaybackRecords,
+      (item) => `${item.id}:${item.createdAt}:${item.payloadKind}:${item.playbackTurnId ?? ""}`,
+    )
+      ? previous.motionPlaybackRecords
+      : next.motionPlaybackRecords,
+  };
+}
+
+function sameCollection<T>(
+  previous: readonly T[],
+  next: readonly T[],
+  signature: (item: T) => string,
+): boolean {
+  if (previous.length !== next.length) {
+    return false;
+  }
+  for (let index = 0; index < previous.length; index += 1) {
+    if (signature(previous[index]) !== signature(next[index])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function createDesktopBridge(): DesktopBridgeInstance {
   const state = reactive<DesktopBridgeState>({
     snapshot: loadRuntimeSnapshot(),
@@ -227,8 +287,12 @@ export function createDesktopBridge(): DesktopBridgeInstance {
           if (!nextSnapshot) {
             return;
           }
-          state.snapshot = nextSnapshot;
-          persistRuntimeSnapshot(nextSnapshot);
+          const stabilizedSnapshot = reuseStableRuntimeSnapshotCollections(
+            state.snapshot,
+            nextSnapshot,
+          );
+          state.snapshot = stabilizedSnapshot;
+          persistRuntimeSnapshot(stabilizedSnapshot);
           return;
         }
 
@@ -351,11 +415,15 @@ export function createDesktopBridge(): DesktopBridgeInstance {
     if (!nextSnapshot) {
       throw new Error("[DesktopBridge] publish snapshot rejected.");
     }
-    state.snapshot = nextSnapshot;
-    persistRuntimeSnapshot(nextSnapshot);
+    const stabilizedSnapshot = reuseStableRuntimeSnapshotCollections(
+      state.snapshot,
+      nextSnapshot,
+    );
+    state.snapshot = stabilizedSnapshot;
+    persistRuntimeSnapshot(stabilizedSnapshot);
     runtimeChannel?.postMessage({
       kind: "snapshot",
-      snapshot: nextSnapshot,
+      snapshot: stabilizedSnapshot,
     } satisfies RuntimeBridgeMessage);
   }
 

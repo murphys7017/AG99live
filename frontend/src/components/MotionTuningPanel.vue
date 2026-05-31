@@ -94,28 +94,26 @@ type SemanticMotionPlaybackRecord = DesktopMotionPlaybackRecord & {
   plan: SemanticParameterPlan;
 };
 
-const mutableProfile = computed<SemanticAxisProfile | null>(() =>
-  props.semanticProfile ? cloneJson(props.semanticProfile) as SemanticAxisProfile : null,
-);
+const currentProfile = computed<SemanticAxisProfile | null>(() => props.semanticProfile);
 const promptAxes = computed(() => {
-  const currentProfile = mutableProfile.value;
-  if (!currentProfile) {
+  const profile = currentProfile.value;
+  if (!profile) {
     return [];
   }
-  return currentProfile.axes.filter((axis) =>
+  return profile.axes.filter((axis) =>
     axis.control_role === "primary" || axis.control_role === "hint",
   );
 });
 const recentSemanticRecords = computed(() =>
   {
-    const currentProfile = mutableProfile.value;
-    if (!currentProfile) {
+    const profile = currentProfile.value;
+    if (!profile) {
       return [];
     }
     return props.motionPlaybackRecords
       .filter(isSemanticMotionPlaybackRecord)
-      .filter((record) => record.plan.model_id === currentProfile.model_id)
-      .filter((record) => record.plan.profile_id === currentProfile.profile_id)
+      .filter((record) => record.plan.model_id === profile.model_id)
+      .filter((record) => record.plan.profile_id === profile.profile_id)
       .slice(0, RECENT_RECORD_LIMIT);
   },
 );
@@ -248,7 +246,7 @@ const effectiveExampleCoverage = computed(() => {
 });
 const savedSamples = computed(() =>
   props.motionTuningSamples.filter((sample) =>
-    matchesCurrentProfileSample(sample, mutableProfile.value)),
+    matchesCurrentProfileSample(sample, currentProfile.value)),
 );
 
 onMounted(() => {
@@ -301,11 +299,11 @@ watch(
 
 watch(
   () => {
-    const currentProfile = mutableProfile.value;
-    if (!currentProfile) {
+    const profile = currentProfile.value;
+    if (!profile) {
       return "";
     }
-    return `${currentProfile.model_id}:${currentProfile.revision}`;
+    return `${profile.model_id}:${profile.revision}`;
   },
   () => {
     resetDraftAxes(selectedDraftSource.value);
@@ -361,9 +359,9 @@ function updateAxisValue(axis: SemanticAxisDefinition, event: Event): void {
 }
 
 function buildAdjustedIntent(): SemanticMotionIntent | null {
-  const currentProfile = mutableProfile.value;
+  const profile = currentProfile.value;
   const source = selectedDraftSource.value;
-  if (!currentProfile || !source) {
+  if (!profile || !source) {
     return null;
   }
 
@@ -384,9 +382,9 @@ function buildAdjustedIntent(): SemanticMotionIntent | null {
 
   return {
     schema_version: SCHEMA_MOTION_INTENT_V2,
-    profile_id: currentProfile.profile_id,
-    profile_revision: currentProfile.revision,
-    model_id: currentProfile.model_id,
+    profile_id: profile.profile_id,
+    profile_revision: profile.revision,
+    model_id: profile.model_id,
     mode: source.mode,
     emotion_label: normalizeEmotionLabel(emotionLabelText.value, source.emotionLabel),
     duration_hint_ms: source.durationMs,
@@ -410,22 +408,22 @@ function playAdjustedIntent(): void {
 
 function saveSample(): void {
   const source = selectedDraftSource.value;
-  const currentProfile = mutableProfile.value;
-  if (!source || !currentProfile) {
+  const profile = currentProfile.value;
+  if (!source || !profile) {
     saveStatusText.value = "当前没有可保存的动作参考或主轴 profile。";
     return;
   }
 
-  const adjustedAxes = normalizeDraftAxes(currentProfile);
+  const adjustedAxes = normalizeDraftAxes(profile);
   const now = new Date();
   const emotionLabel = normalizeEmotionLabel(emotionLabelText.value, source.emotionLabel);
   const sample: DesktopMotionTuningSample = {
     id: `motion-sample-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
     createdAt: now.toISOString(),
     sourceRecordId: source.id,
-    modelName: currentProfile.model_id,
-    profileId: currentProfile.profile_id,
-    profileRevision: currentProfile.revision,
+    modelName: profile.model_id,
+    profileId: profile.profile_id,
+    profileRevision: profile.revision,
     emotionLabel,
     assistantText: source.assistantText,
     feedback: feedbackText.value.trim(),
@@ -433,7 +431,7 @@ function saveSample(): void {
     enabledForLlmReference: enabledForLlmReference.value,
     originalAxes: { ...source.axes },
     adjustedAxes,
-    adjustedPlan: buildAdjustedPlan(source, currentProfile, adjustedAxes, emotionLabel),
+    adjustedPlan: buildAdjustedPlan(source, profile, adjustedAxes, emotionLabel),
   };
 
   emit("saveMotionTuningSample", sample);
@@ -683,7 +681,7 @@ function normalizeEmotionKey(value: string): string {
       </li>
     </ul>
 
-    <template v-if="mutableProfile && (historyDraftSources.length || savedDraftSources.length)">
+    <template v-if="currentProfile && (historyDraftSources.length || savedDraftSources.length)">
       <div class="motion-tuning__layout">
         <aside class="motion-tuning__records">
           <div class="motion-tuning__tabs" role="tablist" aria-label="动作样本来源">

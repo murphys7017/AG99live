@@ -36,8 +36,10 @@ const planMode = ref<"parallel" | "sequential">("parallel");
 const durationScale = ref(1);
 const intensityScale = ref(1);
 const stepGapMs = ref(120);
+const visibleAtomLimit = ref(160);
 
 const LLM_CONTROLLABLE_ROLES = new Set(["primary", "hint"]);
+const ATOM_PAGE_SIZE = 160;
 
 const channelsByName = computed(() => {
   const channels = props.preview?.channels ?? [];
@@ -105,7 +107,7 @@ const excludedAtomCount = computed(() =>
 
 const groupedAtoms = computed(() => {
   const groups = new Map<string, DesktopBaseActionPreviewAtom[]>();
-  for (const atom of filteredAtoms.value) {
+  for (const atom of visibleAtoms.value) {
     const bucket = groups.get(atom.channel) ?? [];
     bucket.push(atom);
     groups.set(atom.channel, bucket);
@@ -250,12 +252,19 @@ const playButtonEnabled = computed(
     && Object.keys(buildSemanticAxisValuesFromAtoms(selectedAtoms.value)).length > 0,
 );
 const playStatusText = ref("");
+const visibleAtoms = computed(() =>
+  filteredAtoms.value.slice(0, visibleAtomLimit.value),
+);
+const hiddenFilteredAtomCount = computed(() =>
+  Math.max(0, filteredAtoms.value.length - visibleAtoms.value.length),
+);
 
 watch(
   () => filteredAtoms.value.map((atom) => atom.id).join("|"),
   () => {
     const allowed = new Set(filteredAtoms.value.map((atom) => atom.id));
     selectedAtomIds.value = selectedAtomIds.value.filter((id) => allowed.has(id));
+    visibleAtomLimit.value = ATOM_PAGE_SIZE;
   },
   { immediate: true },
 );
@@ -281,6 +290,10 @@ function selectFilteredAtoms(): void {
 
 function clearSelectedAtoms(): void {
   selectedAtomIds.value = [];
+}
+
+function showMoreAtoms(): void {
+  visibleAtomLimit.value += ATOM_PAGE_SIZE;
 }
 
 function atomMatchesExcludedParameterKeyword(
@@ -490,7 +503,7 @@ function buildSemanticAxisValuesFromAtoms(
       </div>
 
       <p class="settings-card__hint">
-        当前过滤后共有 {{ filteredAtoms.length }} 个原子动作，已隐藏 {{ excludedAtomCount }} 个匹配排除关键词的动作。
+        当前过滤后共有 {{ filteredAtoms.length }} 个原子动作，正在显示 {{ visibleAtoms.length }} 个，已隐藏 {{ excludedAtomCount }} 个匹配排除关键词的动作。
       </p>
       <div class="action-preview__selection-actions">
         <button
@@ -570,7 +583,17 @@ function buildSemanticAxisValuesFromAtoms(
           </ul>
         </section>
       </div>
-      <p v-else class="history-empty">当前筛选条件下没有动作原子。</p>
+      <div v-if="hiddenFilteredAtomCount > 0" class="settings-card__actions">
+        <button
+          type="button"
+          class="settings-card__button settings-card__button--ghost"
+          @click="showMoreAtoms"
+        >
+          显示更多动作原子
+        </button>
+        <span>还有 {{ hiddenFilteredAtomCount }} 个未显示</span>
+      </div>
+      <p v-if="!groupedAtoms.length" class="history-empty">当前筛选条件下没有动作原子。</p>
 
       <section class="action-preview__plan">
         <header class="action-preview__plan-header">
