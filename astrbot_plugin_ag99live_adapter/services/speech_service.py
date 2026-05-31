@@ -58,6 +58,7 @@ class SpeechIngressService:
         self._audio_streams: dict[str, AudioStreamState] = {}
         self._pending_temp_audio_files: dict[str, PendingTempAudioFile] = {}
         self._completed_transcription_turns = 0
+        self._vad_turn_counters: dict[str, int] = {}
 
     async def handle_audio_stream_start(self, message) -> None:
         payload = message.payload
@@ -166,11 +167,10 @@ class SpeechIngressService:
             vad_engine = self._ensure_vad_engine()
         except Exception as exc:
             logger.error("Failed to initialize VAD engine: %s", exc)
-            await self._send_json(
-                build_control_error(
-                    turn_id=message.turn_id,
-                    message=f"VAD unavailable: {exc}",
-                )
+            await self._emit_terminal_turn_signal(
+                turn_id=message.turn_id,
+                reason="vad_unavailable",
+                error_message=f"VAD unavailable: {exc}",
             )
             return None
 
@@ -186,7 +186,7 @@ class SpeechIngressService:
                     np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
                 )
                 await self.media_service.append_audio_chunk(chunk, segment_id=segment_id)
-                built_message = await self.handle_audio_end(message)
+                built_message = await self._build_message_from_vad_segment(message)
 
         return built_message
 
@@ -206,6 +206,9 @@ class SpeechIngressService:
         audio_buffer = await self.media_service.drain_audio_buffer(segment_id=segment_id)
 
         if audio_buffer.size == 0:
+            if self._consume_vad_turn_counter(segment_id):
+                logger.debug("Ignoring empty root microphone end after VAD child turns.")
+                return None
             logger.debug("Ignoring `input.mic_audio_end` with empty buffer.")
             await self._emit_terminal_turn_signal(
                 turn_id=message.turn_id,
@@ -283,6 +286,26 @@ class SpeechIngressService:
         normalized_raw_message["payload"] = normalized_payload
         return self._build_message_object(text=text, raw_message=normalized_raw_message)
 
+    async def _build_message_from_vad_segment(self, message):
+        segment_id = self._resolve_audio_segment_id(message)
+        audio_buffer = await self.media_service.drain_audio_buffer(segment_id=segment_id)
+        vad_turn_id = self._next_vad_turn_id(message.turn_id)
+
+        if audio_buffer.size == 0:
+            logger.debug("Ignoring VAD segment with empty buffer.")
+            await self._emit_terminal_turn_signal(
+                turn_id=vad_turn_id,
+                reason="audio_transcription_empty",
+                error_message="Microphone audio segment was empty before transcription.",
+            )
+            return None
+
+        return await self._build_message_from_audio_buffer(
+            audio_buffer,
+            raw_message=self._clone_raw_message_with_turn_id(message.raw, vad_turn_id),
+            turn_id=vad_turn_id,
+        )
+
     def _resolve_audio_segment_id(self, message) -> str | None:
         segment_id = getattr(message, "turn_id", None)
         if isinstance(segment_id, str):
@@ -290,6 +313,29 @@ class SpeechIngressService:
             if normalized:
                 return normalized
         return None
+
+    def _next_vad_turn_id(self, root_turn_id: str | None) -> str | None:
+        normalized = str(root_turn_id or "").strip()
+        if not normalized:
+            return None
+        next_index = self._vad_turn_counters.get(normalized, 0) + 1
+        self._vad_turn_counters[normalized] = next_index
+        return f"{normalized}:vad:{next_index}"
+
+    def _consume_vad_turn_counter(self, root_turn_id: str | None) -> bool:
+        normalized = str(root_turn_id or "").strip()
+        if not normalized:
+            return False
+        return self._vad_turn_counters.pop(normalized, 0) > 0
+
+    @staticmethod
+    def _clone_raw_message_with_turn_id(
+        raw_message: dict[str, Any],
+        turn_id: str | None,
+    ) -> dict[str, Any]:
+        cloned = dict(raw_message)
+        cloned["turn_id"] = turn_id
+        return cloned
 
     async def _emit_terminal_turn_signal(
         self,

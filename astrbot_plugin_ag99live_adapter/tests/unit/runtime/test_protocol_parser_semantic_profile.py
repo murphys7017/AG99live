@@ -118,6 +118,36 @@ def test_parse_inbound_message_accepts_motion_tuning_sample_delete() -> None:
     assert envelope.payload["sample_id"] == "sample-1"
 
 
+def test_parse_inbound_message_accepts_raw_audio_data_payload() -> None:
+    envelope = parse_inbound_message(
+        _message(
+            "input.raw_audio_data",
+            {
+                "audio": [0.1, -0.2, 0],
+                "sample_rate": 16000,
+                "channels": 1,
+            },
+        ),
+    )
+
+    assert envelope.type == "input.raw_audio_data"
+    assert envelope.payload["audio"] == [0.1, -0.2, 0]
+
+
+def test_parse_inbound_message_rejects_invalid_raw_audio_data_payload() -> None:
+    with pytest.raises(ProtocolError, match="payload.audio"):
+        parse_inbound_message(
+            _message(
+                "input.raw_audio_data",
+                {
+                    "audio": [0.1, "bad"],
+                    "sample_rate": 16000,
+                    "channels": 1,
+                },
+            ),
+        )
+
+
 def test_parse_inbound_message_rejects_engine_parameter_plan_preview() -> None:
     with pytest.raises(ProtocolError, match="Unsupported message type"):
         parse_inbound_message(

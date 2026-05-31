@@ -35,9 +35,25 @@ class SttProviderStub:
         return "hello from stt"
 
 
+class VadEngineStub:
+    def __init__(self, results) -> None:
+        self.results = list(results)
+
+    def detect_speech(self, _audio_data):
+        if not self.results:
+            return []
+        return self.results.pop(0)
+
+
 class MessageStub:
-    def __init__(self, *, dropped: bool = True, turn_id: str = "input:segment-1") -> None:
-        self.payload = {"dropped": dropped}
+    def __init__(
+        self,
+        *,
+        dropped: bool = True,
+        turn_id: str = "input:segment-1",
+        payload: dict | None = None,
+    ) -> None:
+        self.payload = dict(payload) if payload is not None else {"dropped": dropped}
         self.turn_id = turn_id
         self.raw = {
             "turn_id": self.turn_id,
@@ -146,3 +162,144 @@ def test_handle_audio_end_drains_matching_segment_buffer(
     assert result["raw_message"]["payload"]["transcription"] == "hello from stt"
     assert sent_messages[0]["type"] == "output.transcription"
     assert sent_messages[0]["turn_id"] == "input:segment-drain"
+
+
+def test_handle_raw_audio_data_vad_unavailable_reports_terminal_signal(
+    install_fake_astrbot,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.services.speech_service import SpeechIngressService
+
+    sent_messages: list[dict] = []
+
+    async def send_json(message: dict) -> None:
+        sent_messages.append(message)
+
+    service = SpeechIngressService(
+        media_service=MediaServiceStub(),
+        runtime_state=SimpleNamespace(selected_stt_provider=SttProviderStub()),
+        ensure_vad_engine=lambda: (_ for _ in ()).throw(RuntimeError("vad boom")),
+        send_json=send_json,
+        build_message_object=lambda *, text, raw_message: {
+            "text": text,
+            "raw_message": raw_message,
+        },
+    )
+
+    result = asyncio.run(
+        service.handle_raw_audio_data(
+            MessageStub(
+                turn_id="input:vad-failure",
+                payload={"audio": [0.1, -0.1]},
+            )
+        )
+    )
+
+    assert result is None
+    assert [message["type"] for message in sent_messages] == [
+        "control.error",
+        "control.turn_finished",
+    ]
+    assert sent_messages[0]["turn_id"] == "input:vad-failure"
+    assert sent_messages[1]["turn_id"] == "input:vad-failure"
+    assert sent_messages[1]["payload"]["reason"] == "vad_unavailable"
+
+
+def test_handle_raw_audio_data_vad_segments_get_distinct_child_turns(
+    install_fake_astrbot,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.services.speech_service import SpeechIngressService
+
+    sent_messages: list[dict] = []
+    pcm = (
+        np.tile(np.array([0.2, -0.2, 0.3], dtype=np.float32), 256) * 32767
+    ).astype(np.int16).tobytes()
+    vad_engine = VadEngineStub([[pcm], [pcm]])
+
+    async def send_json(message: dict) -> None:
+        sent_messages.append(message)
+
+    service = SpeechIngressService(
+        media_service=MediaServiceStub(),
+        runtime_state=SimpleNamespace(selected_stt_provider=SttProviderStub()),
+        ensure_vad_engine=lambda: vad_engine,
+        send_json=send_json,
+        build_message_object=lambda *, text, raw_message: {
+            "text": text,
+            "raw_message": raw_message,
+        },
+    )
+
+    first = asyncio.run(
+        service.handle_raw_audio_data(
+            MessageStub(
+                turn_id="input:auto-root",
+                payload={"audio": [0.1, -0.1]},
+            )
+        )
+    )
+    second = asyncio.run(
+        service.handle_raw_audio_data(
+            MessageStub(
+                turn_id="input:auto-root",
+                payload={"audio": [0.2, -0.2]},
+            )
+        )
+    )
+
+    assert first["raw_message"]["turn_id"] == "input:auto-root:vad:1"
+    assert second["raw_message"]["turn_id"] == "input:auto-root:vad:2"
+    assert sent_messages[0]["type"] == "output.transcription"
+    assert sent_messages[0]["turn_id"] == "input:auto-root:vad:1"
+    assert sent_messages[1]["type"] == "output.transcription"
+    assert sent_messages[1]["turn_id"] == "input:auto-root:vad:2"
+    assert service.media_service.drain_calls == ["input:auto-root", "input:auto-root"]
+
+
+def test_handle_audio_end_ignores_empty_root_after_vad_child_turns(
+    install_fake_astrbot,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.services.speech_service import SpeechIngressService
+
+    sent_messages: list[dict] = []
+    pcm = (
+        np.tile(np.array([0.2, -0.2, 0.3], dtype=np.float32), 256) * 32767
+    ).astype(np.int16).tobytes()
+    vad_engine = VadEngineStub([[pcm]])
+
+    async def send_json(message: dict) -> None:
+        sent_messages.append(message)
+
+    media_service = MediaServiceStub()
+    media_service.drain_result = np.array([], dtype=np.float32)
+    service = SpeechIngressService(
+        media_service=media_service,
+        runtime_state=SimpleNamespace(selected_stt_provider=SttProviderStub()),
+        ensure_vad_engine=lambda: vad_engine,
+        send_json=send_json,
+        build_message_object=lambda *, text, raw_message: {
+            "text": text,
+            "raw_message": raw_message,
+        },
+    )
+
+    asyncio.run(
+        service.handle_raw_audio_data(
+            MessageStub(
+                turn_id="input:auto-root",
+                payload={"audio": [0.1, -0.1]},
+            )
+        )
+    )
+    sent_messages.clear()
+
+    result = asyncio.run(
+        service.handle_audio_end(
+            MessageStub(dropped=False, turn_id="input:auto-root")
+        )
+    )
+
+    assert result is None
+    assert sent_messages == []

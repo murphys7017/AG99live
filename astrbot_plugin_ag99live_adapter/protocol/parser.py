@@ -13,6 +13,8 @@ from .constants import (
     SOURCE_FRONTEND,
     TYPE_CONTROL_PLAYBACK_FINISHED,
     TYPE_INPUT_AUDIO_STREAM_CHUNK,
+    TYPE_INPUT_MIC_AUDIO_DATA,
+    TYPE_INPUT_RAW_AUDIO_DATA,
     TYPE_INPUT_TEXT,
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HISTORY_LOAD,
@@ -153,6 +155,20 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
         audio_base64 = payload.get("audio_base64")
         if not isinstance(audio_base64, str) or not audio_base64:
             raise ProtocolError("`input.audio_stream_chunk` requires `payload.audio_base64`.")
+        return
+
+    if message_type in {TYPE_INPUT_MIC_AUDIO_DATA, TYPE_INPUT_RAW_AUDIO_DATA}:
+        audio = payload.get("audio")
+        if not isinstance(audio, list) or not audio:
+            raise ProtocolError(f"`{message_type}` requires `payload.audio` to be a non-empty list.")
+        if not all(isinstance(item, (int, float)) and not isinstance(item, bool) for item in audio):
+            raise ProtocolError(f"`{message_type}` requires `payload.audio` to contain only numbers.")
+        sample_rate = payload.get("sample_rate", 16000)
+        if not isinstance(sample_rate, int) or isinstance(sample_rate, bool) or sample_rate <= 0:
+            raise ProtocolError(f"`{message_type}` requires `payload.sample_rate` to be a positive integer when provided.")
+        channels = payload.get("channels", 1)
+        if not isinstance(channels, int) or isinstance(channels, bool) or channels <= 0:
+            raise ProtocolError(f"`{message_type}` requires `payload.channels` to be a positive integer when provided.")
         return
 
     if message_type == TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE:
