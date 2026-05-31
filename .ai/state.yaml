@@ -2,7 +2,7 @@ task:
   class: feature
   risk: medium
   phase: implemented
-  scope: Mk6 SemanticAxisProfile migration and AstrBot middleware-first motion prompt default
+  scope: Broaden Mk6 head/body motion expressiveness, middleware axis semantics, and partial motion-plan salvage
 context:
   confidence: medium
   assumptions:
@@ -14,6 +14,8 @@ context:
     - User-modified semantic profiles should not be overwritten by default; when a stale profile already matches the current model hash and only needs old-default-design migration, it can auto-refresh to the latest default design, otherwise it remains stale for manual review.
     - Legacy motion `key_axes` references in tests remain as rejection coverage, and `adaptive_parameter_profile.v1.key_axes` remains a scanner schema field outside this migration.
     - AstrBot interaction middleware is the default motion prompt path; inline `<@anim>` prompt injection is retained only as an explicit compatibility mode.
+    - The current adjustment should make body_yaw/body_roll/body_pitch more visible through prompt language, default few-shot anchors, and generated head-to-body coupling, without raising global motion intensity.
+    - Motion intent/plan parameter-level faults should preserve usable axes/parameters where the schema/profile/timing contract is otherwise valid, so Action Lab history can still capture playable partial motions.
   unresolved_questions:
     - Body pitch and brow detail axes still need real Mk6 visual preview before treating their default ranges as final.
 architecture:
@@ -26,13 +28,23 @@ architecture:
     - Realtime motion prompt and default examples now prefer action skeleton axes before expression detail axes.
     - Runtime motion ingress/egress logs now report semantic `axis_count` instead of legacy `key_axes_count`.
     - Default `motion_generation_mode` is `split_after_reply` / middleware-first; `inline_first` remains available as a compatibility path.
+    - Default generated SemanticAxisProfile head-to-body couplings now use stronger body follow-through for yaw and roll.
+    - Default realtime motion prompt/examples now treat visible body yaw/roll/pitch as part of the action skeleton for explicit emotion and posture, not only small follow-through.
+    - Middleware motion prompt capability now includes per-axis semantics, value ranges, neutral values, and usage notes for prompt-visible axes.
+    - Frontend ModelEngine and Live2D direct plan startup now salvage valid axes/parameters from partially invalid payloads instead of failing the entire motion when possible.
+    - Frontend semantic parameter playback adds bounded secondary life motion for head/body/gaze axes so a plan does not hold a perfectly static target through the whole duration.
 verification:
   checks_run:
     - python -m compileall astrbot_plugin_ag99live_adapter
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py -q
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py -q
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_runtime_state_provider_analysis.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_realtime_motion_plan.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\live2d\test_semantic_axis_profile.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_runtime_state_motion_tuning_refresh.py -q
+    - npm run test:model-engine
+    - npm run typecheck
   checks_failed: []
-  validation_gap: No live Mk6 visual preview, real AstrBot websocket session, frontend checks, or full backend suite was exercised in this pass.
+  validation_gap: No live Mk6 visual preview, real AstrBot websocket session, or end-to-end Action Lab history observation has confirmed whether partial salvage and secondary life motion feel natural.
 runtime:
   mode: minimal_v1

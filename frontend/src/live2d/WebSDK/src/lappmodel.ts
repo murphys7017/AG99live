@@ -98,6 +98,16 @@ const DIRECT_EXPRESSIVE_AXIS_GAIN = 1.35;
 const DIRECT_EXPRESSIVE_AXIS_MIN_MAGNITUDE = 0.22;
 const DIRECT_MAX_MISSING_AXIS_BINDINGS = 3;
 const DIRECT_MAX_SUPPLEMENTARY_BINDING_FAILURES = 3;
+const DIRECT_LIFE_MOTION_AXIS_CONFIG: Record<string, { amplitudeRatio: number; minAmplitude: number; maxAmplitude: number; frequencyHz: number }> = {
+  head_yaw: { amplitudeRatio: 0.12, minAmplitude: 0.18, maxAmplitude: 1.2, frequencyHz: 0.62 },
+  head_roll: { amplitudeRatio: 0.13, minAmplitude: 0.16, maxAmplitude: 1.1, frequencyHz: 0.55 },
+  head_pitch: { amplitudeRatio: 0.10, minAmplitude: 0.14, maxAmplitude: 0.9, frequencyHz: 0.48 },
+  body_yaw: { amplitudeRatio: 0.10, minAmplitude: 0.12, maxAmplitude: 0.9, frequencyHz: 0.45 },
+  body_roll: { amplitudeRatio: 0.11, minAmplitude: 0.12, maxAmplitude: 0.9, frequencyHz: 0.42 },
+  body_pitch: { amplitudeRatio: 0.09, minAmplitude: 0.10, maxAmplitude: 0.75, frequencyHz: 0.38 },
+  gaze_x: { amplitudeRatio: 0.08, minAmplitude: 0.08, maxAmplitude: 0.45, frequencyHz: 0.75 },
+  gaze_y: { amplitudeRatio: 0.08, minAmplitude: 0.08, maxAmplitude: 0.45, frequencyHz: 0.68 },
+};
 
 interface DirectParameterAxisBinding {
   axisName: string;
@@ -130,6 +140,9 @@ interface DirectSemanticParameterBinding {
   modulationPhase: number;
   modulationAmplitude: number;
   neutralValue: number;
+  lifeMotionPhase: number;
+  lifeMotionAmplitude: number;
+  lifeMotionFrequencyHz: number;
   modulation: {
     kind: string;
     neutral: number | null;
@@ -1480,22 +1493,25 @@ export class LAppModel extends CubismUserModel {
   }): boolean {
     const semanticBindings: DirectSemanticParameterBinding[] = [];
     const seenParameterIndices = new Set<number>();
+    const bindingWarnings = Array.isArray(parsed.plan.diagnostics?.warnings)
+      ? [...parsed.plan.diagnostics.warnings]
+      : [];
 
-    for (const item of parsed.plan.parameters) {
+    for (const [index, item] of parsed.plan.parameters.entries()) {
       const parameterIdRaw = String(item.parameter_id || "").trim();
       const axisId = String(item.axis_id || "").trim();
       const resolved = this.resolveWritableParameter(parameterIdRaw);
       if (!resolved) {
-        this.stopDirectParameterPlan(`v2_missing_parameter:${parameterIdRaw}`);
-        return false;
+        bindingWarnings.push(`v2_parameter_skipped_missing_runtime_parameter:${axisId}:${parameterIdRaw || index}`);
+        continue;
       }
       if (seenParameterIndices.has(resolved.parameterIndex)) {
-        this.stopDirectParameterPlan(`v2_duplicate_parameter:${parameterIdRaw}`);
-        return false;
+        bindingWarnings.push(`v2_parameter_skipped_duplicate_runtime_parameter:${axisId}:${parameterIdRaw}`);
+        continue;
       }
       if (!this.isParameterIndexWritable(resolved.parameterIndex)) {
-        this.stopDirectParameterPlan(`v2_parameter_not_writable:${parameterIdRaw}`);
-        return false;
+        bindingWarnings.push(`v2_parameter_skipped_not_writable:${axisId}:${parameterIdRaw}`);
+        continue;
       }
       const minValue = this._model.getParameterMinimumValue(resolved.parameterIndex);
       const maxValue = this._model.getParameterMaximumValue(resolved.parameterIndex);
@@ -1515,6 +1531,9 @@ export class LAppModel extends CubismUserModel {
         modulationPhase: this.resolveSpeechPosePhase(axisId),
         modulationAmplitude: 0,
         neutralValue: clampedTargetValue,
+        lifeMotionPhase: this.resolveLifeMotionPhase(axisId, parameterIdRaw),
+        lifeMotionAmplitude: 0,
+        lifeMotionFrequencyHz: 0,
         modulation: item.modulation && typeof item.modulation === "object"
           ? {
             kind: String(item.modulation.kind || "").trim(),
@@ -1535,12 +1554,25 @@ export class LAppModel extends CubismUserModel {
     }
 
     if (semanticBindings.length === 0) {
-      this.stopDirectParameterPlan("v2_parameters_empty");
+      if (bindingWarnings.length > 0) {
+        console.warn("[LAppModel] Semantic parameter plan had no playable runtime parameters.", bindingWarnings);
+      }
+      this.stopDirectParameterPlan("v2_parameters_empty_after_runtime_filter");
       return false;
+    }
+    if (bindingWarnings.length > 0) {
+      console.warn("[LAppModel] Semantic parameter bindings skipped invalid runtime parameters.", bindingWarnings);
+      if (!parsed.plan.diagnostics || typeof parsed.plan.diagnostics !== "object") {
+        parsed.plan.diagnostics = {};
+      }
+      parsed.plan.diagnostics.warnings = bindingWarnings;
     }
 
     for (const item of semanticBindings) {
       if (!item.source.startsWith("speech_pose")) {
+        const lifeMotion = this.resolveSemanticLifeMotion(item);
+        item.lifeMotionAmplitude = lifeMotion.amplitude;
+        item.lifeMotionFrequencyHz = lifeMotion.frequencyHz;
         continue;
       }
       const modulation = this.resolveSpeechPoseModulation(item);
@@ -1869,10 +1901,20 @@ export class LAppModel extends CubismUserModel {
     minValue: number,
     maxValue: number,
   ): number {
-    if (
-      !item.source.startsWith("speech_pose")
-      || item.modulationAmplitude <= 0
-    ) {
+    if (!item.source.startsWith("speech_pose")) {
+      if (item.lifeMotionAmplitude <= 0 || item.lifeMotionFrequencyHz <= 0) {
+        return fallbackTargetValue;
+      }
+      const cycleRadians = ((elapsedMs / 1000) * item.lifeMotionFrequencyHz * Math.PI * 2) + item.lifeMotionPhase;
+      const secondaryCycleRadians = ((elapsedMs / 1000) * item.lifeMotionFrequencyHz * 0.47 * Math.PI * 2) + item.lifeMotionPhase * 0.37;
+      const modulatedValue =
+        fallbackTargetValue
+        + Math.sin(cycleRadians) * item.lifeMotionAmplitude
+        + Math.sin(secondaryCycleRadians) * item.lifeMotionAmplitude * 0.35;
+      return Math.max(minValue, Math.min(maxValue, modulatedValue));
+    }
+
+    if (item.modulationAmplitude <= 0) {
       return fallbackTargetValue;
     }
 
@@ -1880,6 +1922,35 @@ export class LAppModel extends CubismUserModel {
     const modulatedValue =
       item.neutralValue + Math.sin(cycleRadians) * item.modulationAmplitude;
     return Math.max(minValue, Math.min(maxValue, modulatedValue));
+  }
+
+  private resolveSemanticLifeMotion(
+    item: DirectSemanticParameterBinding,
+  ): {
+    amplitude: number;
+    frequencyHz: number;
+  } {
+    if (item.source === "supplementary") {
+      return { amplitude: 0, frequencyHz: 0 };
+    }
+    const config = DIRECT_LIFE_MOTION_AXIS_CONFIG[item.axisId];
+    if (!config) {
+      return { amplitude: 0, frequencyHz: 0 };
+    }
+    const inputValue = this.inputValueOr(item, 50.0);
+    const distance = Math.abs(item.targetValue - inputValue);
+    if (distance <= 0.001) {
+      return { amplitude: 0, frequencyHz: 0 };
+    }
+    const weight = Number.isFinite(item.weight) ? Math.max(0, Math.min(1, item.weight)) : 1.0;
+    const amplitude = Math.min(
+      config.maxAmplitude,
+      Math.max(config.minAmplitude, distance * config.amplitudeRatio),
+    ) * weight;
+    return {
+      amplitude,
+      frequencyHz: config.frequencyHz,
+    };
   }
 
   private resolveSpeechPoseModulation(
@@ -1910,6 +1981,15 @@ export class LAppModel extends CubismUserModel {
     let hash = 0;
     for (let index = 0; index < channelName.length; index += 1) {
       hash = (hash + channelName.charCodeAt(index)) % 360;
+    }
+    return (hash / 180) * Math.PI;
+  }
+
+  private resolveLifeMotionPhase(axisId: string, parameterId: string): number {
+    const phaseKey = `${axisId}:${parameterId}`;
+    let hash = 0;
+    for (let index = 0; index < phaseKey.length; index += 1) {
+      hash = (hash * 31 + phaseKey.charCodeAt(index)) % 360;
     }
     return (hash / 180) * Math.PI;
   }
@@ -2450,6 +2530,9 @@ export class LAppModel extends CubismUserModel {
     }
 
     const parameterIds = new Set<string>();
+    const warnings = Array.isArray(payload.diagnostics?.warnings)
+      ? payload.diagnostics.warnings.map((item: unknown) => String(item || "").trim()).filter(Boolean)
+      : [];
     const parameters: Array<{
       axis_id: string;
       parameter_id: string;
@@ -2458,9 +2541,10 @@ export class LAppModel extends CubismUserModel {
       input_value: number | null;
       source: string;
     }> = [];
-    for (const item of parametersPayload) {
+    for (const [index, item] of parametersPayload.entries()) {
       if (!item || typeof item !== "object") {
-        return fail("v2_parameter_item_not_object");
+        warnings.push(`v2_parameter_item_skipped_not_object:${index}`);
+        continue;
       }
       const axisId = String(item.axis_id || "").trim();
       const parameterId = String(item.parameter_id || "").trim();
@@ -2470,25 +2554,31 @@ export class LAppModel extends CubismUserModel {
         ? null
         : item.input_value;
       if (!axisId || !parameterId) {
-        return fail("v2_parameter_required_field_missing");
+        warnings.push(`v2_parameter_skipped_required_field_missing:${index}`);
+        continue;
       }
       if (parameterIds.has(parameterId)) {
-        return fail(`v2_duplicate_parameter:${parameterId}`);
+        warnings.push(`v2_parameter_skipped_duplicate:${parameterId}`);
+        continue;
       }
       if (typeof targetValue !== "number" || typeof weight !== "number" || !Number.isFinite(targetValue) || !Number.isFinite(weight)) {
-        return fail("v2_parameter_not_number");
+        warnings.push(`v2_parameter_skipped_not_number:${axisId}:${parameterId}`);
+        continue;
       }
       if (inputValue !== null && (typeof inputValue !== "number" || !Number.isFinite(inputValue))) {
-        return fail("v2_parameter_input_value_not_number");
+        warnings.push(`v2_parameter_skipped_input_value_not_number:${axisId}:${parameterId}`);
+        continue;
       }
       if (weight < 0 || weight > 1) {
-        return fail("v2_parameter_weight_out_of_range");
+        warnings.push(`v2_parameter_skipped_weight_out_of_range:${axisId}:${parameterId}`);
+        continue;
       }
       const source = item.source === undefined || item.source === null
         ? "semantic_axis"
         : String(item.source || "").trim();
       if (!isSemanticParameterPlanSource(source)) {
-        return fail("v2_parameter_source_invalid");
+        warnings.push(`v2_parameter_skipped_source_invalid:${axisId}:${parameterId}`);
+        continue;
       }
       parameterIds.add(parameterId);
       parameters.push({
@@ -2499,6 +2589,12 @@ export class LAppModel extends CubismUserModel {
         input_value: inputValue,
         source,
       });
+    }
+    if (parameters.length === 0) {
+      return fail("v2_parameters_empty_after_salvage");
+    }
+    if (warnings.length > 0) {
+      console.warn("[LAppModel] parseDirectParameterPlan salvaged playable parameters.", warnings);
     }
 
     return {
@@ -2516,6 +2612,9 @@ export class LAppModel extends CubismUserModel {
           blend_out_ms: timing.blendOutMs,
         },
         parameters,
+        diagnostics: {
+          warnings,
+        },
       },
       timing,
       reason: "",

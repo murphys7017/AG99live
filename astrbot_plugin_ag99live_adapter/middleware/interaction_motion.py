@@ -19,7 +19,10 @@ from ..motion.realtime_motion_plan import (
 from ..prompts.motion_selector import (
     resolve_motion_prompt_instruction,
 )
-from ..prompts.semantic_axis_prompt import profile_prompt_axes
+from ..prompts.semantic_axis_prompt import (
+    format_profile_axis_prompt_line,
+    profile_prompt_axes,
+)
 
 @dataclass(slots=True)
 class _MotionRuntimeBundle:
@@ -414,6 +417,11 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
             f"{motion_style_prompt}"
             "这些偏好来自用户手调样本，用于约束角色表演习惯，不是固定动作模板。"
         )
+    semantic_profile = capability_payload.get("semantic_profile")
+    axis_prompt = ""
+    if isinstance(semantic_profile, dict):
+        axis_prompt = str(semantic_profile.get("axis_prompt") or "").strip()
+    axis_prompt_text = f"可用动作轴语义：\n{axis_prompt}\n" if axis_prompt else ""
 
     return (
         "AG99live Motion 是当前桌宠前端的主动作通道。"
@@ -422,8 +430,13 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         "ag99live_motion.mode 只能是 idle 或 expressive；axes 只能使用下方 schema 中已有的轴 id，"
         "每个轴值必须写成 {\"value\": number}。"
         "如果用户只是普通说话，也要给一个轻量 idle 或 expressive 动作。"
-        "不要把参考示例或情绪名称当成封闭动作模板；先理解本轮对话语气，再自由组合少量相关轴。"
+        "不要把参考示例、输出形状或情绪名称当成封闭动作模板；先理解本轮对话语气，再自由组合少量相关轴。"
+        "避免连续复用同一组轴和值；同样是 idle 也要在头部朝向、身体跟随、视线和眼部之间做语义变化。"
+        "明确转身、强调、回避、惊讶、调侃、开心或疑惑时，优先用 head_yaw/head_roll/head_pitch "
+        "配合 body_yaw/body_roll/body_pitch 建立可见动作骨架，再少量补眼部和表情细节。"
+        "输出形状示例只展示 JSON 结构和可用轴，里面的中位值不是推荐动作；实际输出应删掉无关轴，只保留本轮需要的轴。"
         f"{style_text}"
+        f"{axis_prompt_text}"
         f" 输出形状示例：{format_json}"
     )
 
@@ -493,13 +506,56 @@ def _summarize_semantic_profile(
                     "id": str(axis.get("id") or "").strip(),
                     "label": str(axis.get("label") or axis.get("id") or "").strip(),
                     "control_role": str(axis.get("control_role") or "").strip(),
+                    "neutral": axis.get("neutral", 50),
+                    "value_range": _normalize_axis_range(axis.get("value_range"), [0.0, 100.0]),
+                    "soft_range": _normalize_axis_range(axis.get("soft_range"), None),
+                    "strong_range": _normalize_axis_range(axis.get("strong_range"), None),
+                    "negative_semantics": _normalize_axis_text_list(axis.get("negative_semantics")),
+                    "positive_semantics": _normalize_axis_text_list(axis.get("positive_semantics")),
+                    "usage_notes": _truncate_text(str(axis.get("usage_notes") or "").strip(), 160),
                 }
                 for axis in prompt_axes
                 if str(axis.get("id") or "").strip()
             ],
+            "axis_prompt": _build_middleware_axis_prompt(prompt_axes),
         },
         None,
     )
+
+
+def _build_middleware_axis_prompt(prompt_axes: list[dict[str, Any]]) -> str:
+    return "\n".join(
+        format_profile_axis_prompt_line(axis, truncate_text=_truncate_text)
+        for axis in prompt_axes
+    )
+
+
+def _truncate_text(value: str, max_length: int) -> str:
+    normalized = str(value or "").strip()
+    if max_length <= 0 or len(normalized) <= max_length:
+        return normalized
+    return normalized[: max(0, max_length - 1)].rstrip() + "…"
+
+
+def _normalize_axis_text_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [
+        _truncate_text(str(item).strip(), 48)
+        for item in value
+        if str(item).strip()
+    ]
+
+
+def _normalize_axis_range(value: Any, fallback: list[float] | None) -> list[float] | None:
+    if (
+        isinstance(value, list)
+        and len(value) == 2
+        and isinstance(value[0], (int, float))
+        and isinstance(value[1], (int, float))
+    ):
+        return [float(value[0]), float(value[1])]
+    return fallback
 
 
 def _schedule_motion_from_interaction_result(

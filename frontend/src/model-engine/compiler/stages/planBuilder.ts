@@ -51,24 +51,30 @@ export function runPlanBuilderStage(
     }
     return parameterResult;
   }
+  if (parameterResult.warnings.length) {
+    context.state.warnings = [
+      ...context.state.warnings,
+      ...parameterResult.warnings,
+    ];
+  }
 
   const existingParameterIds = new Set(
     context.state.parameters.map((item) => item.parameter_id),
   );
   for (const parameter of parameterResult.parameters) {
     if (existingParameterIds.has(parameter.parameter_id)) {
-      return {
-        ok: false,
-        reason: `duplicate_parameter_binding:${parameter.parameter_id}`,
-      };
+      context.state.warnings = [
+        ...context.state.warnings,
+        `duplicate_parameter_binding_skipped:${parameter.parameter_id}`,
+      ];
+      continue;
     }
     existingParameterIds.add(parameter.parameter_id);
+    context.state.parameters.push(parameter);
   }
-
-  context.state.parameters = [
-    ...context.state.parameters,
-    ...parameterResult.parameters,
-  ];
+  if (!context.state.parameters.length) {
+    return { ok: false, reason: "semantic_plan_parameters_empty_after_salvage" };
+  }
   return { ok: true };
 }
 
@@ -77,30 +83,32 @@ function buildSemanticPlanParameters(
   axisById: Map<string, SemanticAxisDefinition>,
   axisValueSources: MotionAxisValueSourceMap,
 ):
-  | { ok: true; parameters: SemanticParameterPlan["parameters"] }
+  | { ok: true; parameters: SemanticParameterPlan["parameters"]; warnings: string[] }
   | { ok: false; reason: string } {
   const parameters: SemanticParameterPlan["parameters"] = [];
   const seenParameterIds = new Set<string>();
+  const warnings: string[] = [];
 
   for (const [axisId, value] of Object.entries(axisValues)) {
     const axis = axisById.get(axisId);
     if (!axis) {
-      return { ok: false, reason: `unknown_axis:${axisId}` };
+      warnings.push(`unknown_axis_skipped:${axisId}`);
+      continue;
     }
     if (!axis.parameter_bindings.length) {
-      return { ok: false, reason: `axis_has_no_parameter_binding:${axisId}` };
+      warnings.push(`axis_has_no_parameter_binding_skipped:${axisId}`);
+      continue;
     }
 
     for (const binding of axis.parameter_bindings) {
       const parameter = mapSemanticBindingValue(axis, binding, value);
       if (!parameter.ok) {
-        return parameter;
+        warnings.push(`${parameter.reason}_skipped`);
+        continue;
       }
       if (seenParameterIds.has(binding.parameter_id)) {
-        return {
-          ok: false,
-          reason: `duplicate_parameter_binding:${binding.parameter_id}`,
-        };
+        warnings.push(`duplicate_parameter_binding_skipped:${binding.parameter_id}`);
+        continue;
       }
 
       seenParameterIds.add(binding.parameter_id);
@@ -116,9 +124,11 @@ function buildSemanticPlanParameters(
   }
 
   if (!parameters.length) {
-    return { ok: false, reason: "semantic_plan_parameters_empty" };
+    return warnings.length
+      ? { ok: false, reason: `semantic_plan_parameters_empty_after_salvage:${warnings.join(",")}` }
+      : { ok: false, reason: "semantic_plan_parameters_empty" };
   }
-  return { ok: true, parameters };
+  return { ok: true, parameters, warnings };
 }
 
 function mapSemanticBindingValue(

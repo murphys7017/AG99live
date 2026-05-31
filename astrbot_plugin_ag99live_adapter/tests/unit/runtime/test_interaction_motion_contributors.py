@@ -270,15 +270,29 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "AG99live Motion 是当前桌宠前端的主动作通道" in system.value
     assert '"plugin_hints":{"ag99live_motion"' in system.value
     assert "immediate_spoken_reply" in system.value
+    assert "避免连续复用同一组轴和值" in system.value
+    assert "中位值不是推荐动作" in system.value
     assert "角色风格偏好" in system.value
     assert "中性时偏少轴" in system.value
     assert capability.value["configured_generation_mode"] == "split_after_reply"
     assert capability.value["motion_style_prompt"] == "中性时偏少轴，开心时优先笑眼和嘴角。"
     assert capability.value["semantic_profile"]["profile_id"] == "pet.semantic.v1"
+    assert "低值=turn left；高值=turn right" in capability.value["semantic_profile"]["axis_prompt"]
+    assert "使用说明=Use for attention direction." in capability.value["semantic_profile"]["axis_prompt"]
+    assert "低值=turn left；高值=turn right" in system.value
     prompt_axis_ids = [
         item["id"] for item in capability.value["semantic_profile"]["prompt_axes"]
     ]
     assert prompt_axis_ids == ["head_yaw", "eye_open_left"]
+    assert capability.value["semantic_profile"]["prompt_axes"][0]["positive_semantics"] == [
+        "turn right"
+    ]
+    assert capability.value["semantic_profile"]["prompt_axes"][0]["negative_semantics"] == [
+        "turn left"
+    ]
+    assert capability.value["semantic_profile"]["prompt_axes"][0]["usage_notes"] == (
+        "Use for attention direction."
+    )
     assert (
         capability.value["plugin_hints_format"]["ag99live_motion"]["axes"]["head_yaw"]["value"]
         == 50

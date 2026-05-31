@@ -223,6 +223,8 @@ def test_default_semantic_axis_profile_uses_motion_axis_roles(tmp_path) -> None:
     assert axes["body_roll"]["control_role"] == "primary"
     assert axes["body_pitch"]["control_role"] == "primary"
     assert axes["body_pitch"]["parameter_bindings"][0]["parameter_id"] == "BodyAngleY"
+    couplings = {coupling["id"]: coupling for coupling in profile["couplings"]}
+    assert couplings["head_yaw_to_body_yaw"]["scale"] == 0.5
     assert axes["eye_open_left"]["control_role"] == "primary"
     assert axes["eye_open_left"]["neutral"] == 100.0
     assert axes["eye_open_left"]["parameter_bindings"][0]["invert"] is False
@@ -238,6 +240,31 @@ def test_default_semantic_axis_profile_uses_motion_axis_roles(tmp_path) -> None:
     assert axes["brow_right_detail"]["control_role"] == "hint"
     assert axes["mouth_open"]["control_role"] == "runtime"
     assert axes["breath"]["control_role"] == "ambient"
+
+
+def test_default_semantic_axis_profile_uses_stronger_roll_body_coupling(tmp_path) -> None:
+    model_dir = tmp_path / "DemoModel"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
+    model_payload = _build_model_payload()
+    _add_motion_axis_parameters(model_payload)
+    parameter_scan = model_payload["parameter_scan"]
+    parameter_scan["standard_channels"]["head_roll"] = {
+        "label": "Head Roll",
+        "available": True,
+        "primary_parameter_id": "ParamAngleZ",
+        "primary_parameter_name": "ParamAngleZ",
+        "group_name": "Head",
+        "candidate_parameter_ids": ["ParamAngleZ"],
+    }
+
+    profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+    couplings = {coupling["id"]: coupling for coupling in profile["couplings"]}
+
+    assert couplings["head_roll_to_body_roll"]["scale"] == 0.45
 
 
 def test_ensure_semantic_axis_profile_migrates_old_generated_default_design(tmp_path) -> None:

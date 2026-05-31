@@ -70,13 +70,11 @@ export function runAxisResolver(
     ...context.state.warnings,
     ...resolvedAxes.warnings,
   ];
-
   if (axisErrorCount > maxAxisErrors) {
-    return {
-      ok: false,
-      reason:
-        `semantic_axis_error_rate_exceeded:${axisErrorCount}/${roleAxisIds.primaryAxes.length + roleAxisIds.hintAxes.length}`,
-    };
+    context.state.warnings = [
+      ...context.state.warnings,
+      `semantic_axis_error_rate_exceeded_but_salvaged:${axisErrorCount}/${roleAxisIds.primaryAxes.length + roleAxisIds.hintAxes.length}`,
+    ];
   }
 
   if (axisErrorCount > 0) {

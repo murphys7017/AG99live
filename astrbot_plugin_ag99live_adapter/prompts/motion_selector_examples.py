@@ -29,7 +29,7 @@ def create_default_selector_few_shot_examples(axis_names: list[str]) -> list[dic
             },
         },
         {
-            "input": "场景：助手在平静解释或说明，不需要明显情绪，只要有轻微朝向和关注感。",
+            "input": "场景：助手在平静解释或说明，不需要明显情绪，但要有轻微朝向、身体跟随和关注感。",
             "output": {
                 "emotion": "explain",
                 "mode": "idle",
@@ -37,13 +37,15 @@ def create_default_selector_few_shot_examples(axis_names: list[str]) -> list[dic
                 "axes": build_example_axes(
                     axis_names,
                     head_pitch=54,
+                    head_yaw=56,
+                    body_yaw=54,
                     gaze_y=53,
                     mouth_smile=54,
                 ),
             },
         },
         {
-            "input": "场景：助手温和安抚用户，语气柔和，动作应收敛但可见。",
+            "input": "场景：助手温和安抚用户，语气柔和，头身动作应收敛但清楚可见。",
             "output": {
                 "emotion": "soothe",
                 "mode": "expressive",
@@ -51,21 +53,24 @@ def create_default_selector_few_shot_examples(axis_names: list[str]) -> list[dic
                 "axes": build_example_axes(
                     axis_names,
                     head_pitch=42,
-                    body_pitch=44,
+                    head_roll=44,
+                    body_roll=43,
+                    body_pitch=42,
                     gaze_y=40,
                     mouth_smile=58,
                 ),
             },
         },
         {
-            "input": "场景：助手对当前说法略带疑惑或追问，应以头部和视线表达轻微困惑。",
+            "input": "场景：助手对当前说法略带疑惑或追问，应以歪头、身体侧倾和视线表达困惑。",
             "output": {
                 "emotion": "confused",
                 "mode": "expressive",
                 "duration_ms": 1050,
                 "axes": build_example_axes(
                     axis_names,
-                    head_roll=60,
+                    head_roll=64,
+                    body_roll=61,
                     gaze_x=42,
                     brow_bias=58,
                 ),
@@ -80,7 +85,9 @@ def create_default_selector_few_shot_examples(axis_names: list[str]) -> list[dic
                 "axes": build_example_axes(
                     axis_names,
                     head_pitch=62,
-                    body_pitch=58,
+                    head_roll=58,
+                    body_roll=59,
+                    body_pitch=61,
                     eye_smile_left=78,
                     eye_smile_right=78,
                     mouth_smile=84,
@@ -96,6 +103,8 @@ def create_default_selector_few_shot_examples(axis_names: list[str]) -> list[dic
                 "axes": build_example_axes(
                     axis_names,
                     head_pitch=63,
+                    body_pitch=64,
+                    body_roll=58,
                     gaze_y=64,
                     eye_open_left=88,
                     eye_open_right=88,

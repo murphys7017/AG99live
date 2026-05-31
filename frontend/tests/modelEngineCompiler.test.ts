@@ -420,6 +420,78 @@ function testRevisionMismatchBecomesWarningInsteadOfCompileFailure(): void {
   );
 }
 
+function testCompileSalvagesValidAxesWhenIntentContainsManyInvalidAxes(): void {
+  const profile = buildProfile();
+  const result = compileMotionIntent(buildIntent({
+    axes: {
+      unknown_a: { value: 60 },
+      unknown_b: { value: 61 },
+      unknown_c: { value: 62 },
+      mouth_smile: { value: 68 },
+    },
+  }), {
+    model: buildModel(profile),
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(result.plan);
+  assert.equal(
+    result.plan?.parameters.some((item) => item.parameter_id === "ParamMouthForm"),
+    true,
+  );
+  assert.equal(
+    result.diagnostics.warnings?.includes("semantic_axis_ignored_unknown:unknown_a"),
+    true,
+  );
+  assert.equal(
+    result.diagnostics.warnings?.includes("semantic_axis_error_rate_exceeded_but_salvaged:3/3"),
+    true,
+  );
+}
+
+function testCompileSkipsInvalidBindingsAndKeepsUsableParameters(): void {
+  const profile = buildProfile();
+  profile.axes.find((axis) => axis.id === "head_yaw")?.parameter_bindings.push({
+    parameter_id: "ParamBroken",
+    input_range: [50, 50],
+    output_range: [-1, 1],
+    default_weight: 1,
+    invert: false,
+  });
+  const result = compileMotionIntent(buildIntent({
+    axes: {
+      head_yaw: { value: 80 },
+    },
+  }), {
+    model: buildModel(profile),
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(result.plan);
+  assert.equal(
+    result.plan?.parameters.some((item) => item.parameter_id === "ParamAngleX"),
+    true,
+  );
+  assert.equal(
+    result.plan?.parameters.some((item) => item.parameter_id === "ParamBroken"),
+    false,
+  );
+  assert.equal(
+    result.diagnostics.warnings?.includes(
+      "binding_input_range_zero:head_yaw:ParamBroken_skipped",
+    ),
+    true,
+  );
+}
+
 function testSpeechPoseAppliesForSpeechLinkedIdleIntent(): void {
   const profile = buildProfile();
   const result = compileMotionIntent(buildIntent({
@@ -688,6 +760,8 @@ function run(): void {
   testExplicitPrimaryAxisIsNotOverwrittenByCoupling();
   testAxisIntensityScaleAffectsOnlyTargetAxis();
   testRevisionMismatchBecomesWarningInsteadOfCompileFailure();
+  testCompileSalvagesValidAxesWhenIntentContainsManyInvalidAxes();
+  testCompileSkipsInvalidBindingsAndKeepsUsableParameters();
   testSpeechPoseAppliesForSpeechLinkedIdleIntent();
   testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes();
   testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight();
