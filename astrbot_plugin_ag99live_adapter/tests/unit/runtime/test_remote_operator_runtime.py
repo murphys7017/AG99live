@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import types
 
@@ -186,3 +187,78 @@ def test_runtime_execute_and_submit_failure_metadata(
     assert "执行状态：failed" in text
     assert metadata["remote_operator"]["status"] == "failed"
     assert metadata["remote_operator"]["error"] == "remote_operator_endpoint_unavailable"
+
+
+def test_codex_client_accepts_nested_thread_id_and_sends_text_input(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_remote_operator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    from astrbot_plugin_ag99live_adapter.services.remote_operator_runtime import (
+        CodexAppServerClient,
+    )
+
+    sent_payloads = []
+
+    class WebSocketStub:
+        def __init__(self) -> None:
+            self.responses = []
+
+        async def send(self, raw: str) -> None:
+            payload = json.loads(raw)
+            if payload.get("method") == "initialize":
+                self.responses.append(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {},
+                    }
+                )
+            elif payload.get("method") == "thread/start":
+                self.responses.append(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {
+                            "thread": {
+                                "id": "thr_123",
+                            }
+                        },
+                    }
+                )
+            elif payload.get("method") == "turn/start":
+                self.responses.extend(
+                    [
+                        {
+                            "jsonrpc": "2.0",
+                            "id": payload["id"],
+                            "result": {},
+                        },
+                        {
+                            "jsonrpc": "2.0",
+                            "method": "turn/completed",
+                            "params": {
+                                "text": "done",
+                            },
+                        },
+                    ]
+                )
+            sent_payloads.append(payload)
+
+        async def recv(self) -> str:
+            return json.dumps(self.responses.pop(0))
+
+    websocket = WebSocketStub()
+    client = CodexAppServerClient("ws://127.0.0.1:4500")
+
+    result = asyncio.run(client._execute_unbounded_with_websocket(websocket, "打开浏览器"))
+
+    assert result == "done"
+    turn_start = next(payload for payload in sent_payloads if payload.get("method") == "turn/start")
+    assert turn_start["params"]["threadId"] == "thr_123"
+    assert turn_start["params"]["input"] == [
+        {
+            "type": "text",
+            "text": "打开浏览器",
+        }
+    ]

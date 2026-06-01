@@ -106,9 +106,12 @@ class CodexAppServerClient:
         import websockets  # type: ignore
 
         async with websockets.connect(self.endpoint) as websocket:
-            await self._initialize(websocket)
-            thread_id = await self._start_thread(websocket)
-            return await self._start_turn(websocket, thread_id=thread_id, prompt=prompt)
+            return await self._execute_unbounded_with_websocket(websocket, prompt)
+
+    async def _execute_unbounded_with_websocket(self, websocket: Any, prompt: str) -> str:
+        await self._initialize(websocket)
+        thread_id = await self._start_thread(websocket)
+        return await self._start_turn(websocket, thread_id=thread_id, prompt=prompt)
 
     async def _initialize(self, websocket: Any) -> None:
         request_id = uuid4().hex
@@ -156,10 +159,7 @@ class CodexAppServerClient:
             result = payload.get("result")
             if not isinstance(result, Mapping):
                 raise RuntimeError("thread/start returned no result object")
-            thread_id = _first_text(
-                result,
-                ("threadId", "thread_id", "id", "conversationId", "conversation_id"),
-            )
+            thread_id = _extract_thread_id(result)
             if not thread_id:
                 raise RuntimeError("thread/start returned no thread id")
             return thread_id
@@ -174,7 +174,12 @@ class CodexAppServerClient:
                     "method": "turn/start",
                     "params": {
                         "threadId": thread_id,
-                        "input": prompt,
+                        "input": [
+                            {
+                                "type": "text",
+                                "text": prompt,
+                            }
+                        ],
                     },
                 }
             )
@@ -361,6 +366,24 @@ def _first_text(mapping: Mapping[str, Any], keys: tuple[str, ...]) -> str:
         value = mapping.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
+    return ""
+
+
+def _extract_thread_id(result: Mapping[str, Any]) -> str:
+    direct = _first_text(
+        result,
+        ("threadId", "thread_id", "id", "conversationId", "conversation_id"),
+    )
+    if direct:
+        return direct
+    thread = result.get("thread")
+    if isinstance(thread, Mapping):
+        nested = _first_text(
+            thread,
+            ("id", "threadId", "thread_id", "conversationId", "conversation_id"),
+        )
+        if nested:
+            return nested
     return ""
 
 
