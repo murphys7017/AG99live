@@ -477,3 +477,36 @@ def test_register_remote_operator_contributors_registers_main_prompt_collector(
     assert len(prompt_collectors) == 1
     assert len(prompt_contributors) == 1
     assert len(result_contributors) == 1
+
+
+def test_main_prompt_collector_accepts_astrbot_collector_signature(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_prompt_stub(install_fake_astrbot, monkeypatch)
+    module = _load_module()
+    monkeypatch.setattr(
+        module,
+        "_load_plugin_config",
+        lambda: {
+            "remote_operator_default_computer": "work",
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
+        },
+    )
+    module.set_remote_operator_online_computers(["work"])
+
+    collector = module.AG99liveRemoteOperatorPromptExtensionCollector()
+    extension = asyncio.run(
+        collector.collect(
+            EventStub(),
+            plugin_context=None,
+            config=object(),
+            provider_request=object(),
+        )
+    )
+
+    assert extension is not None
+    assert extension.plugin_id == "ag99live.remote_operator.prompt"
+    assert "工作电脑 -> work（默认）" in extension.value

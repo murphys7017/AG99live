@@ -38,8 +38,8 @@ class AG99liveRemoteOperatorPromptExtensionCollector:
     plugin_id = "ag99live.remote_operator.prompt"
     priority = 35
 
-    async def collect(self, event, plugin_context, provider_request):
-        del plugin_context, provider_request
+    async def collect(self, event, plugin_context, config=None, *, provider_request=None):
+        del plugin_context, config, provider_request
 
         return collect_remote_operator_prompt_extension(event, plugin_id=self.plugin_id)
 
