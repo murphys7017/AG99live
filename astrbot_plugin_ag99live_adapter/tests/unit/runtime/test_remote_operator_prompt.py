@@ -136,7 +136,9 @@ def test_prompt_contributor_injects_only_online_computer_keys(
     assert "工作电脑 -> work（默认）" in extension.value
     assert "服务器 -> server" not in extension.value
     assert '"computer":"<computer_key>"' in extension.value
+    assert '"profile":"simple|complex"' in extension.value
     assert '"prompt":"<交给远程执行器的完整任务说明>"' in extension.value
+    assert "不要自行因为任务看起来复杂就升档" in extension.value
 
 
 def test_prompt_contributor_uses_configured_default_when_online(
@@ -204,7 +206,7 @@ def test_parse_remote_operator_request_accepts_two_field_json(
     )
     module.set_remote_operator_online_computers(["work"])
     view = types.SimpleNamespace(
-        final_result='{"computer":"work","prompt":"打开浏览器并搜索天气"}',
+        final_result='{"computer":"work","profile":"simple","prompt":"打开浏览器并搜索天气"}',
         core_result=None,
     )
 
@@ -215,6 +217,7 @@ def test_parse_remote_operator_request_accepts_two_field_json(
 
     assert reason == "ok"
     assert request.computer == "work"
+    assert request.profile == "simple"
     assert request.prompt == "打开浏览器并搜索天气"
 
 
@@ -234,7 +237,7 @@ def test_parse_remote_operator_request_rejects_extra_field(
     )
     module.set_remote_operator_online_computers(["work"])
     view = types.SimpleNamespace(
-        final_result='{"computer":"work","prompt":"do it","steps":[]}',
+        final_result='{"computer":"work","profile":"simple","prompt":"do it","steps":[]}',
         core_result=None,
     )
 
@@ -266,7 +269,7 @@ def test_parse_remote_operator_request_rejects_unavailable_computer(
     )
     module.set_remote_operator_online_computers(["work"])
     view = types.SimpleNamespace(
-        final_result='{"computer":"server","prompt":"检查服务"}',
+        final_result='{"computer":"server","profile":"simple","prompt":"检查服务"}',
         core_result=None,
     )
 
@@ -277,6 +280,35 @@ def test_parse_remote_operator_request_rejects_unavailable_computer(
 
     assert request is None
     assert reason == "computer_unavailable"
+
+
+def test_parse_remote_operator_request_rejects_unknown_profile(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_prompt_stub(install_fake_astrbot, monkeypatch)
+    module = _load_module()
+    monkeypatch.setattr(
+        module,
+        "_load_plugin_config",
+        lambda: {
+            "remote_operator_default_computer": "work",
+            "remote_operator_computers": {"work": "工作电脑"},
+        },
+    )
+    module.set_remote_operator_online_computers(["work"])
+    view = types.SimpleNamespace(
+        final_result='{"computer":"work","profile":"ultra","prompt":"检查服务"}',
+        core_result=None,
+    )
+
+    request, reason = module.parse_remote_operator_request_from_view(
+        EventStub(),
+        view,
+    )
+
+    assert request is None
+    assert reason == "profile_empty"
 
 
 def test_prompt_contributor_skips_remote_operator_result_event(
@@ -340,7 +372,7 @@ def test_result_contributor_schedules_remote_operator_task(
         adapter = AdapterStub()
 
     view = types.SimpleNamespace(
-        final_result='{"computer":"work","prompt":"打开记事本"}',
+        final_result='{"computer":"work","profile":"complex","prompt":"打开记事本"}',
         core_result=None,
     )
     contributor = module.AG99liveRemoteOperatorResultContributor()
@@ -350,6 +382,7 @@ def test_result_contributor_schedules_remote_operator_task(
     assert contribution is not None
     assert contribution.metadata["ag99live_remote_operator"]["scheduled"] is True
     assert contribution.metadata["ag99live_remote_operator"]["computer"] == "work"
+    assert contribution.metadata["ag99live_remote_operator"]["profile"] == "complex"
     assert scheduled
 
 
@@ -362,7 +395,7 @@ def test_result_contributor_skips_after_request_scheduled(
     event = EventStub()
     event.set_extra("ag99live_remote_operator_scheduled", True)
     view = types.SimpleNamespace(
-        final_result='{"computer":"work","prompt":"打开记事本"}',
+        final_result='{"computer":"work","profile":"simple","prompt":"打开记事本"}',
         core_result=None,
     )
     contributor = module.AG99liveRemoteOperatorResultContributor()

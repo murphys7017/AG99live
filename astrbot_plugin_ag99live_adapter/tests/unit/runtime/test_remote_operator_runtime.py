@@ -64,6 +64,11 @@ def test_resolve_endpoint_config_requires_matching_endpoint(
     assert config.default_computer == "work"
     assert config.computers == {"work": "工作电脑"}
     assert config.endpoints == {"work": "ws://127.0.0.1:4500"}
+    assert config.default_profile == "simple"
+    assert config.profiles["simple"].model == "gpt-5.3-codex"
+    assert config.profiles["simple"].effort == "low"
+    assert config.profiles["complex"].model == "gpt-5.4-codex"
+    assert config.profiles["complex"].effort == "high"
 
 
 def test_runtime_refresh_online_once_filters_probe_failures(
@@ -119,9 +124,11 @@ def test_runtime_execute_and_submit_success_metadata(
 
     class ClientStub:
         def __init__(self, _endpoint: str) -> None:
+            self.calls = []
             pass
 
-        async def execute(self, prompt: str) -> str:
+        async def execute(self, prompt: str, *, model=None, effort=None) -> str:
+            self.calls.append((prompt, model, effort))
             return f"done: {prompt}"
 
     async def submit(text, metadata):
@@ -139,7 +146,7 @@ def test_runtime_execute_and_submit_success_metadata(
 
     asyncio.run(
         runtime.execute_and_submit(
-            RemoteOperatorRequest(computer="work", prompt="打开浏览器")
+            RemoteOperatorRequest(computer="work", profile="complex", prompt="打开浏览器")
         )
     )
 
@@ -150,6 +157,7 @@ def test_runtime_execute_and_submit_success_metadata(
     assert "done: 打开浏览器" in text
     assert metadata["ag99live_input_source"] == "remote_operator_result"
     assert metadata["remote_operator"]["computer"] == "work"
+    assert metadata["remote_operator"]["profile"] == "complex"
     assert metadata["remote_operator"]["status"] == "completed"
 
 
@@ -179,7 +187,7 @@ def test_runtime_execute_and_submit_failure_metadata(
 
     asyncio.run(
         runtime.execute_and_submit(
-            RemoteOperatorRequest(computer="work", prompt="打开浏览器")
+            RemoteOperatorRequest(computer="work", profile="simple", prompt="打开浏览器")
         )
     )
 
@@ -251,7 +259,14 @@ def test_codex_client_accepts_nested_thread_id_and_sends_text_input(
     websocket = WebSocketStub()
     client = CodexAppServerClient("ws://127.0.0.1:4500")
 
-    result = asyncio.run(client._execute_unbounded_with_websocket(websocket, "打开浏览器"))
+    result = asyncio.run(
+        client._execute_unbounded_with_websocket(
+            websocket,
+            "打开浏览器",
+            model="gpt-5.3-codex",
+            effort="low",
+        )
+    )
 
     assert result == "done"
     turn_start = next(payload for payload in sent_payloads if payload.get("method") == "turn/start")
@@ -262,3 +277,5 @@ def test_codex_client_accepts_nested_thread_id_and_sends_text_input(
             "text": "打开浏览器",
         }
     ]
+    assert turn_start["params"]["model"] == "gpt-5.3-codex"
+    assert turn_start["params"]["effort"] == "low"

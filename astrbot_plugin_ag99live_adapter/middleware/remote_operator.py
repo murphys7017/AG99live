@@ -16,6 +16,8 @@ from astrbot.core.prompt import PromptExtension
 class RemoteOperatorConfig:
     default_computer: str
     computers: dict[str, str]
+    default_profile: str
+    profiles: dict[str, str]
 
 
 _registry_lock = threading.RLock()
@@ -105,6 +107,7 @@ class AG99liveRemoteOperatorResultContributor:
                 "ag99live_remote_operator": {
                     "scheduled": True,
                     "computer": request.computer,
+                    "profile": request.profile,
                     "prompt": request.prompt,
                 }
             },
@@ -171,6 +174,8 @@ def resolve_remote_operator_config(config: Any) -> RemoteOperatorConfig | None:
     return RemoteOperatorConfig(
         default_computer=default_computer,
         computers=computers,
+        default_profile=_resolve_default_profile(config),
+        profiles=_resolve_profile_labels(config),
     )
 
 
@@ -196,20 +201,28 @@ def filter_online_remote_operator_config(
     return RemoteOperatorConfig(
         default_computer=default_computer,
         computers=online_computers,
+        default_profile=config.default_profile,
+        profiles=config.profiles,
     )
 
 
 def build_remote_operator_prompt(config: RemoteOperatorConfig) -> str:
     lines = [
         "当用户明确要求操作电脑、打开软件、使用浏览器、检查本机项目或让远程执行器完成任务时，生成远程执行器请求。",
-        "远程执行器请求只能包含两个字段：",
-        '{"computer":"<computer_key>","prompt":"<交给远程执行器的完整任务说明>"}',
+        "远程执行器请求只能包含三个字段：",
+        '{"computer":"<computer_key>","profile":"simple|complex","prompt":"<交给远程执行器的完整任务说明>"}',
         "不要输出底层点击、坐标、键盘、UIA selector 或 shell 步骤；这些由远程执行器自行决定。",
         f"如果用户没有指定电脑，computer 使用默认电脑 `{config.default_computer}`。",
+        f"如果用户没有明确要求复杂/深入/高档执行，profile 必须使用默认档位 `{config.default_profile}`。",
+        "只有当用户明确要求复杂任务、深入排查、高档、高思考、复杂代码修改或大范围重构时，profile 才使用 `complex`；不要自行因为任务看起来复杂就升档。",
         "可用电脑名称映射：",
     ]
     for key, label in config.computers.items():
         default_suffix = "（默认）" if key == config.default_computer else ""
+        lines.append(f"- {label} -> {key}{default_suffix}")
+    lines.append("可用执行档位：")
+    for key, label in config.profiles.items():
+        default_suffix = "（默认）" if key == config.default_profile else ""
         lines.append(f"- {label} -> {key}{default_suffix}")
     return "\n".join(lines)
 
@@ -233,13 +246,16 @@ def parse_remote_operator_request_from_view(
         return None, "assistant_text_not_json"
     if not isinstance(payload, dict):
         return None, "payload_not_object"
-    if set(payload.keys()) != {"computer", "prompt"}:
+    if set(payload.keys()) != {"computer", "profile", "prompt"}:
         return None, "payload_keys_invalid"
 
     computer = _normalize_key(payload.get("computer"))
+    profile = _normalize_profile(payload.get("profile"))
     prompt = str(payload.get("prompt") or "").strip()
     if not computer:
         return None, "computer_empty"
+    if not profile:
+        return None, "profile_empty"
     if not prompt:
         return None, "prompt_empty"
 
@@ -251,10 +267,12 @@ def parse_remote_operator_request_from_view(
         return None, "no_online_computer"
     if computer not in online_config.computers:
         return None, "computer_unavailable"
+    if profile not in online_config.profiles:
+        return None, "profile_unavailable"
 
     from ..services.remote_operator_runtime import RemoteOperatorRequest
 
-    return RemoteOperatorRequest(computer=computer, prompt=prompt), "ok"
+    return RemoteOperatorRequest(computer=computer, profile=profile, prompt=prompt), "ok"
 
 
 def _normalize_computers(value: Any) -> dict[str, str]:
@@ -275,6 +293,35 @@ def _normalize_computers(value: Any) -> dict[str, str]:
 
 def _normalize_key(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _normalize_profile(value: Any) -> str:
+    normalized = str(value or "").strip()
+    if normalized in {"simple", "complex"}:
+        return normalized
+    return ""
+
+
+def _resolve_default_profile(config: Mapping[str, Any]) -> str:
+    profile = _normalize_profile(config.get("remote_operator_default_profile"))
+    return profile or "simple"
+
+
+def _resolve_profile_labels(config: Mapping[str, Any]) -> dict[str, str]:
+    labels = {
+        "simple": "简单任务",
+        "complex": "复杂任务",
+    }
+    raw_profiles = config.get("remote_operator_profiles")
+    if isinstance(raw_profiles, Mapping):
+        for key in ("simple", "complex"):
+            raw_profile = raw_profiles.get(key)
+            if not isinstance(raw_profile, Mapping):
+                continue
+            label = str(raw_profile.get("label") or "").strip()
+            if label:
+                labels[key] = label
+    return labels
 
 
 def _is_ag99live_event(event: Any) -> bool:

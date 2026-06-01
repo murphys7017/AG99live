@@ -21,17 +21,28 @@ class RemoteOperatorEndpointConfig:
     default_computer: str
     computers: dict[str, str]
     endpoints: dict[str, str]
+    default_profile: str
+    profiles: dict[str, "RemoteOperatorProfile"]
 
 
 @dataclass(frozen=True, slots=True)
 class RemoteOperatorRequest:
     computer: str
+    profile: str
     prompt: str
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteOperatorProfile:
+    label: str
+    model: str
+    effort: str
 
 
 @dataclass(frozen=True, slots=True)
 class RemoteOperatorExecutionResult:
     computer: str
+    profile: str
     prompt: str
     status: str
     result: str = ""
@@ -57,6 +68,11 @@ def resolve_remote_operator_endpoint_config(
     if not available:
         return None
 
+    profiles = _resolve_profiles(config.get("remote_operator_profiles"))
+    default_profile = _normalize_text(config.get("remote_operator_default_profile"))
+    if default_profile not in profiles:
+        default_profile = "simple"
+
     default_computer = _normalize_text(config.get("remote_operator_default_computer"))
     if default_computer not in available:
         default_computer = next(iter(available))
@@ -65,6 +81,8 @@ def resolve_remote_operator_endpoint_config(
         default_computer=default_computer,
         computers=available,
         endpoints={key: endpoints[key] for key in available},
+        default_profile=default_profile,
+        profiles=profiles,
     )
 
 
@@ -90,9 +108,15 @@ class CodexAppServerClient:
             )
             return False
 
-    async def execute(self, prompt: str) -> str:
+    async def execute(
+        self,
+        prompt: str,
+        *,
+        model: str | None = None,
+        effort: str | None = None,
+    ) -> str:
         return await asyncio.wait_for(
-            self._execute_unbounded(prompt),
+            self._execute_unbounded(prompt, model=model, effort=effort),
             timeout=self.timeout_seconds,
         )
 
@@ -102,16 +126,40 @@ class CodexAppServerClient:
         async with websockets.connect(self.endpoint) as websocket:
             await self._initialize(websocket)
 
-    async def _execute_unbounded(self, prompt: str) -> str:
+    async def _execute_unbounded(
+        self,
+        prompt: str,
+        *,
+        model: str | None = None,
+        effort: str | None = None,
+    ) -> str:
         import websockets  # type: ignore
 
         async with websockets.connect(self.endpoint) as websocket:
-            return await self._execute_unbounded_with_websocket(websocket, prompt)
+            return await self._execute_unbounded_with_websocket(
+                websocket,
+                prompt,
+                model=model,
+                effort=effort,
+            )
 
-    async def _execute_unbounded_with_websocket(self, websocket: Any, prompt: str) -> str:
+    async def _execute_unbounded_with_websocket(
+        self,
+        websocket: Any,
+        prompt: str,
+        *,
+        model: str | None = None,
+        effort: str | None = None,
+    ) -> str:
         await self._initialize(websocket)
         thread_id = await self._start_thread(websocket)
-        return await self._start_turn(websocket, thread_id=thread_id, prompt=prompt)
+        return await self._start_turn(
+            websocket,
+            thread_id=thread_id,
+            prompt=prompt,
+            model=model,
+            effort=effort,
+        )
 
     async def _initialize(self, websocket: Any) -> None:
         request_id = uuid4().hex
@@ -164,23 +212,36 @@ class CodexAppServerClient:
                 raise RuntimeError("thread/start returned no thread id")
             return thread_id
 
-    async def _start_turn(self, websocket: Any, *, thread_id: str, prompt: str) -> str:
+    async def _start_turn(
+        self,
+        websocket: Any,
+        *,
+        thread_id: str,
+        prompt: str,
+        model: str | None = None,
+        effort: str | None = None,
+    ) -> str:
         request_id = uuid4().hex
+        params: dict[str, Any] = {
+            "threadId": thread_id,
+            "input": [
+                {
+                    "type": "text",
+                    "text": prompt,
+                }
+            ],
+        }
+        if model:
+            params["model"] = model
+        if effort:
+            params["effort"] = effort
         await websocket.send(
             json.dumps(
                 {
                     "jsonrpc": "2.0",
                     "id": request_id,
                     "method": "turn/start",
-                    "params": {
-                        "threadId": thread_id,
-                        "input": [
-                            {
-                                "type": "text",
-                                "text": prompt,
-                            }
-                        ],
-                    },
+                    "params": params,
                 }
             )
         )
@@ -268,18 +329,31 @@ class RemoteOperatorRuntime:
         if config is None or request.computer not in config.endpoints:
             return RemoteOperatorExecutionResult(
                 computer=request.computer,
+                profile=request.profile,
                 prompt=request.prompt,
                 status="failed",
                 error="remote_operator_endpoint_unavailable",
             )
+        profile = config.profiles.get(request.profile)
+        if profile is None:
+            return RemoteOperatorExecutionResult(
+                computer=request.computer,
+                profile=request.profile,
+                prompt=request.prompt,
+                status="failed",
+                error="remote_operator_profile_unavailable",
+            )
         try:
             output = await self._client_factory(config.endpoints[request.computer]).execute(
-                request.prompt
+                request.prompt,
+                model=profile.model,
+                effort=profile.effort,
             )
         except Exception as exc:  # noqa: BLE001
             mark_remote_operator_computer_offline(request.computer)
             return RemoteOperatorExecutionResult(
                 computer=request.computer,
+                profile=request.profile,
                 prompt=request.prompt,
                 status="failed",
                 error=str(exc),
@@ -287,6 +361,7 @@ class RemoteOperatorRuntime:
         mark_remote_operator_computer_online(request.computer)
         return RemoteOperatorExecutionResult(
             computer=request.computer,
+            profile=request.profile,
             prompt=request.prompt,
             status="completed",
             result=output or "远程执行器已完成，但没有返回文本结果。",
@@ -300,6 +375,7 @@ class RemoteOperatorRuntime:
                 "ag99live_input_source": "remote_operator_result",
                 "remote_operator": {
                     "computer": result.computer,
+                    "profile": result.profile,
                     "prompt": result.prompt,
                     "status": result.status,
                     "result": result.result,
@@ -348,6 +424,40 @@ def _normalize_mapping(value: Any) -> dict[str, str]:
         if key and item and key not in result:
             result[key] = item
     return result
+
+
+def _resolve_profiles(value: Any) -> dict[str, RemoteOperatorProfile]:
+    defaults = {
+        "simple": RemoteOperatorProfile(
+            label="简单任务",
+            model="gpt-5.3-codex",
+            effort="low",
+        ),
+        "complex": RemoteOperatorProfile(
+            label="复杂任务",
+            model="gpt-5.4-codex",
+            effort="high",
+        ),
+    }
+    if not isinstance(value, Mapping):
+        return defaults
+
+    profiles = dict(defaults)
+    for raw_key, raw_profile in value.items():
+        key = _normalize_text(raw_key)
+        if key not in {"simple", "complex"} or not isinstance(raw_profile, Mapping):
+            continue
+        label = _normalize_text(raw_profile.get("label")) or defaults[key].label
+        model = _normalize_text(raw_profile.get("model")) or defaults[key].model
+        effort = _normalize_text(raw_profile.get("effort")) or defaults[key].effort
+        if effort not in {"none", "minimal", "low", "medium", "high", "xhigh"}:
+            effort = defaults[key].effort
+        profiles[key] = RemoteOperatorProfile(
+            label=label,
+            model=model,
+            effort=effort,
+        )
+    return profiles
 
 
 def _normalize_text(value: Any) -> str:

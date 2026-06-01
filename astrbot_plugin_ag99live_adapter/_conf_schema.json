@@ -36,6 +36,31 @@
     "type": "object",
     "default": {}
   },
+  "remote_operator_default_profile": {
+    "description": "远程执行器默认执行档位。未明确指定复杂任务时使用 simple。",
+    "type": "string",
+    "default": "simple",
+    "options": [
+      "simple",
+      "complex"
+    ]
+  },
+  "remote_operator_profiles": {
+    "description": "远程执行器执行档位配置。仅支持 simple 和 complex 两档；simple 默认 gpt-5.3-codex/low，complex 默认 gpt-5.4-codex/high。",
+    "type": "object",
+    "default": {
+      "simple": {
+        "label": "简单任务",
+        "model": "gpt-5.3-codex",
+        "effort": "low"
+      },
+      "complex": {
+        "label": "复杂任务",
+        "model": "gpt-5.4-codex",
+        "effort": "high"
+      }
+    }
+  },
   "live2d_model_name": {
     "description": "优先加载的 Live2D 模型目录名。留空时默认使用扫描到的第一个模型。",
     "type": "string",
