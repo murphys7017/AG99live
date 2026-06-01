@@ -93,10 +93,10 @@ def test_prompt_contributor_skips_when_no_online_computer(
         "_load_plugin_config",
         lambda: {
             "remote_operator_default_computer": "work",
-            "remote_operator_computers": {
-                "server": "服务器",
-                "work": "工作电脑",
-            },
+            "remote_operator_computer_entries": [
+                {"key": "server", "label": "服务器", "endpoint": "ws://127.0.0.1:4501"},
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
         },
     )
     module.set_remote_operator_online_computers([])
@@ -118,10 +118,10 @@ def test_prompt_contributor_injects_only_online_computer_keys(
         "_load_plugin_config",
         lambda: {
             "remote_operator_default_computer": "server",
-            "remote_operator_computers": {
-                "server": "服务器",
-                "work": "工作电脑",
-            },
+            "remote_operator_computer_entries": [
+                {"key": "server", "label": "服务器", "endpoint": "ws://127.0.0.1:4501"},
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
         },
     )
     module.set_remote_operator_online_computers(["work", "unknown"])
@@ -181,10 +181,10 @@ def test_prompt_contributor_uses_configured_default_when_online(
         "_load_plugin_config",
         lambda: {
             "remote_operator_default_computer": "work",
-            "remote_operator_computers": {
-                "server": "服务器",
-                "work": "工作电脑",
-            },
+            "remote_operator_computer_entries": [
+                {"key": "server", "label": "服务器", "endpoint": "ws://127.0.0.1:4501"},
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
         },
     )
     module.set_remote_operator_online_computers(["server", "work"])
@@ -208,7 +208,9 @@ def test_prompt_contributor_skips_non_ag99live_events(
         "_load_plugin_config",
         lambda: {
             "remote_operator_default_computer": "work",
-            "remote_operator_computers": {"work": "工作电脑"},
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
         },
     )
     module.set_remote_operator_online_computers(["work"])
@@ -219,7 +221,7 @@ def test_prompt_contributor_skips_non_ag99live_events(
     assert payload is None
 
 
-def test_parse_remote_operator_request_accepts_two_field_json(
+def test_parse_remote_operator_request_accepts_remote_operator_json(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -230,7 +232,9 @@ def test_parse_remote_operator_request_accepts_two_field_json(
         "_load_plugin_config",
         lambda: {
             "remote_operator_default_computer": "work",
-            "remote_operator_computers": {"work": "工作电脑"},
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
         },
     )
     module.set_remote_operator_online_computers(["work"])
@@ -261,7 +265,9 @@ def test_parse_remote_operator_request_rejects_extra_field(
         "_load_plugin_config",
         lambda: {
             "remote_operator_default_computer": "work",
-            "remote_operator_computers": {"work": "工作电脑"},
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
         },
     )
     module.set_remote_operator_online_computers(["work"])
@@ -290,10 +296,10 @@ def test_parse_remote_operator_request_rejects_unavailable_computer(
         "_load_plugin_config",
         lambda: {
             "remote_operator_default_computer": "work",
-            "remote_operator_computers": {
-                "work": "工作电脑",
-                "server": "服务器",
-            },
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+                {"key": "server", "label": "服务器", "endpoint": "ws://127.0.0.1:4501"},
+            ],
         },
     )
     module.set_remote_operator_online_computers(["work"])
@@ -322,7 +328,9 @@ def test_parse_remote_operator_request_rejects_unknown_profile(
         "_load_plugin_config",
         lambda: {
             "remote_operator_default_computer": "work",
-            "remote_operator_computers": {"work": "工作电脑"},
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
         },
     )
     module.set_remote_operator_online_computers(["work"])
@@ -351,7 +359,9 @@ def test_prompt_contributor_skips_remote_operator_result_event(
         "_load_plugin_config",
         lambda: {
             "remote_operator_default_computer": "work",
-            "remote_operator_computers": {"work": "工作电脑"},
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
         },
     )
     module.set_remote_operator_online_computers(["work"])
@@ -379,7 +389,9 @@ def test_result_contributor_schedules_remote_operator_task(
         "_load_plugin_config",
         lambda: {
             "remote_operator_default_computer": "work",
-            "remote_operator_computers": {"work": "工作电脑"},
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
         },
     )
     module.set_remote_operator_online_computers(["work"])
@@ -432,3 +444,36 @@ def test_result_contributor_skips_after_request_scheduled(
     contribution = asyncio.run(contributor.collect(event, None, view))
 
     assert contribution is None
+
+
+def test_register_remote_operator_contributors_registers_main_prompt_collector(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_prompt_stub(install_fake_astrbot, monkeypatch)
+    module = _load_module()
+
+    prompt_collectors = []
+    prompt_contributors = []
+    result_contributors = []
+    removed_prefixes = []
+
+    class ContextStub:
+        def remove_prompt_extension_collectors_by_module_prefix(self, prefix):
+            removed_prefixes.append(prefix)
+
+        def register_prompt_extension_collector(self, collector):
+            prompt_collectors.append(collector)
+
+        def register_interaction_prompt_contributor(self, contributor):
+            prompt_contributors.append(contributor)
+
+        def register_interaction_result_contributor(self, contributor):
+            result_contributors.append(contributor)
+
+    module.register_remote_operator_interaction_contributors(ContextStub())
+
+    assert removed_prefixes == ["astrbot_plugin_ag99live_adapter.middleware"]
+    assert len(prompt_collectors) == 1
+    assert len(prompt_contributors) == 1
+    assert len(result_contributors) == 1

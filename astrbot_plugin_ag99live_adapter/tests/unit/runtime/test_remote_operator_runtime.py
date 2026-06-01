@@ -50,13 +50,9 @@ def test_resolve_endpoint_config_requires_matching_endpoint(
     config = resolve_remote_operator_endpoint_config(
         {
             "remote_operator_default_computer": "server",
-            "remote_operator_computers": {
-                "server": "服务器",
-                "work": "工作电脑",
-            },
-            "remote_operator_endpoints": {
-                "work": "ws://127.0.0.1:4500",
-            },
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
         }
     )
 
@@ -71,7 +67,7 @@ def test_resolve_endpoint_config_requires_matching_endpoint(
     assert config.profiles["complex"].effort == "high"
 
 
-def test_resolve_endpoint_config_prefers_computer_entries(
+def test_resolve_endpoint_config_reads_computer_entries(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -83,8 +79,6 @@ def test_resolve_endpoint_config_prefers_computer_entries(
     config = resolve_remote_operator_endpoint_config(
         {
             "remote_operator_default_computer": "work",
-            "remote_operator_computers": {"legacy": "旧电脑"},
-            "remote_operator_endpoints": {"legacy": "ws://127.0.0.1:4501"},
             "remote_operator_computer_entries": [
                 {
                     "key": "work",
@@ -120,14 +114,10 @@ def test_runtime_refresh_online_once_filters_probe_failures(
     runtime = RemoteOperatorRuntime(
         plugin_config_loader=lambda: {
             "remote_operator_default_computer": "work",
-            "remote_operator_computers": {
-                "work": "工作电脑",
-                "server": "服务器",
-            },
-            "remote_operator_endpoints": {
-                "work": "ws://127.0.0.1:4500",
-                "server": "ws://127.0.0.1:4501",
-            },
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+                {"key": "server", "label": "服务器", "endpoint": "ws://127.0.0.1:4501"},
+            ],
         },
         submit_system_text_input=lambda _text, _metadata: None,
         client_factory=ClientStub,
@@ -166,8 +156,9 @@ def test_runtime_execute_and_submit_success_metadata(
     runtime = RemoteOperatorRuntime(
         plugin_config_loader=lambda: {
             "remote_operator_default_computer": "work",
-            "remote_operator_computers": {"work": "工作电脑"},
-            "remote_operator_endpoints": {"work": "ws://127.0.0.1:4500"},
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
         },
         submit_system_text_input=submit,
         client_factory=ClientStub,
@@ -208,8 +199,9 @@ def test_runtime_execute_and_submit_failure_metadata(
     runtime = RemoteOperatorRuntime(
         plugin_config_loader=lambda: {
             "remote_operator_default_computer": "work",
-            "remote_operator_computers": {"work": "工作电脑"},
-            "remote_operator_endpoints": {},
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": ""},
+            ],
         },
         submit_system_text_input=submit,
     )
@@ -298,6 +290,13 @@ def test_codex_client_accepts_nested_thread_id_and_sends_text_input(
     )
 
     assert result == "done"
+    initialize = next(payload for payload in sent_payloads if payload.get("method") == "initialize")
+    assert initialize["params"]["protocolVersion"] == "2024-11-05"
+    assert initialize["params"]["capabilities"] == {}
+    assert initialize["params"]["clientInfo"] == {
+        "name": "astrbot-plugin-ag99live-adapter",
+        "version": "1.1.0",
+    }
     turn_start = next(payload for payload in sent_payloads if payload.get("method") == "turn/start")
     assert turn_start["params"]["threadId"] == "thr_123"
     assert turn_start["params"]["input"] == [

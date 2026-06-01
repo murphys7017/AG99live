@@ -26,16 +26,6 @@
     "type": "string",
     "default": ""
   },
-  "remote_operator_computers": {
-    "description": "兼容字段：远程执行器电脑名称映射 JSON。新配置请优先使用 remote_operator_computer_entries。",
-    "type": "string",
-    "default": "{}"
-  },
-  "remote_operator_endpoints": {
-    "description": "兼容字段：远程执行器 endpoint 映射 JSON。新配置请优先使用 remote_operator_computer_entries。",
-    "type": "string",
-    "default": "{}"
-  },
   "remote_operator_computer_entries": {
     "description": "远程执行器电脑列表。每项配置一个 computer key、用户可说出的名称和 codex-cli-app-server WebSocket 地址。",
     "type": "template_list",

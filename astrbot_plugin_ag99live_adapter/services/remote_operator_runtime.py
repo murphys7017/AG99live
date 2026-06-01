@@ -168,7 +168,14 @@ class CodexAppServerClient:
                     "jsonrpc": "2.0",
                     "id": request_id,
                     "method": "initialize",
-                    "params": {},
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {
+                            "name": "astrbot-plugin-ag99live-adapter",
+                            "version": "1.1.0",
+                        },
+                    },
                 }
             )
         )
@@ -413,19 +420,6 @@ def _format_result_text(result: RemoteOperatorExecutionResult) -> str:
     return "\n".join(lines)
 
 
-def _normalize_mapping(value: Any) -> dict[str, str]:
-    value = _coerce_json_mapping(value)
-    if not isinstance(value, Mapping):
-        return {}
-    result: dict[str, str] = {}
-    for raw_key, raw_value in value.items():
-        key = _normalize_text(raw_key)
-        item = _normalize_text(raw_value)
-        if key and item and key not in result:
-            result[key] = item
-    return result
-
-
 def _resolve_computer_entries(config: Mapping[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
     entries = config.get("remote_operator_computer_entries")
     computers: dict[str, str] = {}
@@ -443,12 +437,7 @@ def _resolve_computer_entries(config: Mapping[str, Any]) -> tuple[dict[str, str]
                 continue
             computers[key] = label
             endpoints[key] = endpoint
-    if computers and endpoints:
-        return computers, endpoints
-    return (
-        _normalize_mapping(config.get("remote_operator_computers")),
-        _normalize_mapping(config.get("remote_operator_endpoints")),
-    )
+    return computers, endpoints
 
 
 def _resolve_profiles(value: Any) -> dict[str, RemoteOperatorProfile]:
@@ -464,7 +453,6 @@ def _resolve_profiles(value: Any) -> dict[str, RemoteOperatorProfile]:
             effort="high",
         ),
     }
-    value = _coerce_json_mapping(value)
     if not isinstance(value, Mapping):
         return defaults
 
@@ -488,18 +476,6 @@ def _resolve_profiles(value: Any) -> dict[str, RemoteOperatorProfile]:
 
 def _normalize_text(value: Any) -> str:
     return str(value or "").strip()
-
-
-def _coerce_json_mapping(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return value
-    if not isinstance(value, str) or not value.strip():
-        return value
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError:
-        return value
-    return parsed if isinstance(parsed, Mapping) else value
 
 
 def _loads_json_object(message: Any) -> dict[str, Any]:

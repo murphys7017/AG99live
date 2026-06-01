@@ -31,31 +31,17 @@ class AG99liveRemoteOperatorPromptContributor:
     async def collect(self, event, plugin_context, view):
         del plugin_context, view
 
-        if not _is_ag99live_event(event):
-            return None
-        if _is_remote_operator_result_event(event):
-            return None
+        return collect_remote_operator_prompt_extension(event, plugin_id=self.plugin_id)
 
-        config = resolve_remote_operator_config(_load_plugin_config())
-        if config is None:
-            return None
 
-        online_config = filter_online_remote_operator_config(config)
-        if online_config is None:
-            return None
+class AG99liveRemoteOperatorPromptExtensionCollector:
+    plugin_id = "ag99live.remote_operator.prompt"
+    priority = 35
 
-        return PromptExtension(
-            plugin_id=self.plugin_id,
-            mount="system",
-            title="AG99live Remote Operator Routing",
-            value_kind="text",
-            value=build_remote_operator_prompt(online_config),
-            order=35,
-            meta={
-                "scope": "dynamic",
-                "node_type": "ag99live_remote_operator_routing",
-            },
-        )
+    async def collect(self, event, plugin_context, provider_request):
+        del plugin_context, provider_request
+
+        return collect_remote_operator_prompt_extension(event, plugin_id=self.plugin_id)
 
 
 class AG99liveRemoteOperatorResultContributor:
@@ -117,12 +103,64 @@ class AG99liveRemoteOperatorResultContributor:
 
 
 def register_remote_operator_interaction_contributors(context: Any) -> None:
+    remove_extension = getattr(
+        context,
+        "remove_prompt_extension_collectors_by_module_prefix",
+        None,
+    )
+    if callable(remove_extension):
+        remove_extension("astrbot_plugin_ag99live_adapter.middleware")
+
+    register_extension = getattr(context, "register_prompt_extension_collector", None)
+    if callable(register_extension):
+        register_extension(AG99liveRemoteOperatorPromptExtensionCollector())
+
     register_prompt = getattr(context, "register_interaction_prompt_contributor", None)
     if callable(register_prompt):
         register_prompt(AG99liveRemoteOperatorPromptContributor())
     register_result = getattr(context, "register_interaction_result_contributor", None)
     if callable(register_result):
         register_result(AG99liveRemoteOperatorResultContributor())
+
+
+def collect_remote_operator_prompt_extension(
+    event: Any,
+    *,
+    plugin_id: str,
+) -> PromptExtension | None:
+    if not _is_ag99live_event(event):
+        return None
+    if _is_remote_operator_result_event(event):
+        return None
+
+    config = resolve_remote_operator_config(_load_plugin_config())
+    if config is None:
+        logger.debug("Remote operator prompt skipped: config_unavailable")
+        return None
+
+    online_config = filter_online_remote_operator_config(config)
+    if online_config is None:
+        logger.debug("Remote operator prompt skipped: no_online_computer")
+        return None
+
+    logger.debug(
+        "Remote operator prompt injected: computers=%s default=%s profile=%s",
+        sorted(online_config.computers),
+        online_config.default_computer,
+        online_config.default_profile,
+    )
+    return PromptExtension(
+        plugin_id=plugin_id,
+        mount="system",
+        title="AG99live Remote Operator Routing",
+        value_kind="text",
+        value=build_remote_operator_prompt(online_config),
+        order=35,
+        meta={
+            "scope": "dynamic",
+            "node_type": "ag99live_remote_operator_routing",
+        },
+    )
 
 
 def set_remote_operator_online_computers(computer_keys: Any) -> None:
@@ -275,23 +313,6 @@ def parse_remote_operator_request_from_view(
     return RemoteOperatorRequest(computer=computer, profile=profile, prompt=prompt), "ok"
 
 
-def _normalize_computers(value: Any) -> dict[str, str]:
-    value = _coerce_json_mapping(value)
-    if not isinstance(value, Mapping):
-        return {}
-
-    computers: dict[str, str] = {}
-    for raw_key, raw_label in value.items():
-        key = _normalize_key(raw_key)
-        label = str(raw_label or "").strip()
-        if not key or not label:
-            continue
-        if key in computers:
-            continue
-        computers[key] = label
-    return computers
-
-
 def _resolve_computers(config: Mapping[str, Any]) -> dict[str, str]:
     entries = config.get("remote_operator_computer_entries")
     computers: dict[str, str] = {}
@@ -304,9 +325,7 @@ def _resolve_computers(config: Mapping[str, Any]) -> dict[str, str]:
             endpoint = str(item.get("endpoint") or "").strip()
             if key and label and endpoint and key not in computers:
                 computers[key] = label
-    if computers:
-        return computers
-    return _normalize_computers(config.get("remote_operator_computers"))
+    return computers
 
 
 def _normalize_key(value: Any) -> str:
@@ -330,7 +349,7 @@ def _resolve_profile_labels(config: Mapping[str, Any]) -> dict[str, str]:
         "simple": "简单任务",
         "complex": "复杂任务",
     }
-    raw_profiles = _coerce_json_mapping(config.get("remote_operator_profiles"))
+    raw_profiles = config.get("remote_operator_profiles")
     if isinstance(raw_profiles, Mapping):
         for key in ("simple", "complex"):
             raw_profile = raw_profiles.get(key)
@@ -340,18 +359,6 @@ def _resolve_profile_labels(config: Mapping[str, Any]) -> dict[str, str]:
             if label:
                 labels[key] = label
     return labels
-
-
-def _coerce_json_mapping(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return value
-    if not isinstance(value, str) or not value.strip():
-        return value
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError:
-        return value
-    return parsed if isinstance(parsed, Mapping) else value
 
 
 def _is_ag99live_event(event: Any) -> bool:
