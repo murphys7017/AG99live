@@ -6,20 +6,21 @@ task:
 context:
   confidence: medium
   assumptions:
-    - The remote operator should be an independent SDK/service, not part of the AG99live frontend.
-    - AG99live Adapter can act as the hub with one WebSocket to the desktop frontend and one WebSocket to the SDK.
+    - The remote operator should be a Local Bridge/SDK plus executor service, not part of the AG99live frontend.
+    - AG99live Adapter can act as the hub with one WebSocket to the desktop frontend and one or more SDK/WebSocket connections from user computers.
+    - Multiple computers can register with computer_id/computer_name; unspecified tasks route to the configured default computer.
     - AstrBot should produce task-level commands with target, objective, success criteria, and constraints instead of low-level click/type commands.
-    - The SDK can use OpenCode CLI or Codex CLI internally to split and execute tasks.
+    - The SDK should prioritize Codex CLI app-server as the executor bridge; OpenCode CLI can remain an optional executor.
     - Prompt injection exposes remote operator availability and capability context; execution details remain inside the SDK.
   unresolved_questions:
-    - Exact SDK transport authentication and pairing model still needs design.
+    - Exact SDK transport authentication, pairing model, and default-computer conflict handling still need design.
     - Exact frontend client object schema for operator progress, approval, artifacts, and final results still needs design.
 architecture:
   stability: evolving
   boundary_changes:
     - Planned remote operator events should stay separate from `engine.motion_*` and avoid replacing the existing motion pipeline.
-    - Planned adapter work adds remote operator prompt/result integration and SDK connection management.
-    - Planned SDK owns low-level execution through OpenCode/Codex/browser/shell/filesystem/desktop tools.
+    - Planned adapter work adds remote operator prompt/result integration, multi-computer registry, default routing, and SDK connection management.
+    - Planned SDK/Local Bridge connects to Codex app-server or optional OpenCode/browser/shell/filesystem/desktop executors.
 verification:
   checks_run:
     - docs target-state review only

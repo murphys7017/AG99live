@@ -21,6 +21,16 @@
     "type": "string",
     "default": "DesktopUser"
   },
+  "remote_operator_default_computer": {
+    "description": "远程执行器默认电脑 key。用户没有指定电脑时使用该 key；如果不在映射中，则使用映射中的第一台电脑。",
+    "type": "string",
+    "default": ""
+  },
+  "remote_operator_computers": {
+    "description": "远程执行器电脑名称映射。key 是内部 computer 字段，value 是用户可说出的电脑名称；为空时不注入远程执行器 prompt。",
+    "type": "object",
+    "default": {}
+  },
   "live2d_model_name": {
     "description": "优先加载的 Live2D 模型目录名。留空时默认使用扫描到的第一个模型。",
     "type": "string",
