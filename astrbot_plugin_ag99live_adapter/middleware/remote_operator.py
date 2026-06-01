@@ -163,7 +163,7 @@ def resolve_remote_operator_config(config: Any) -> RemoteOperatorConfig | None:
     if not isinstance(config, Mapping):
         return None
 
-    computers = _normalize_computers(config.get("remote_operator_computers"))
+    computers = _resolve_computers(config)
     if not computers:
         return None
 
@@ -276,6 +276,7 @@ def parse_remote_operator_request_from_view(
 
 
 def _normalize_computers(value: Any) -> dict[str, str]:
+    value = _coerce_json_mapping(value)
     if not isinstance(value, Mapping):
         return {}
 
@@ -289,6 +290,23 @@ def _normalize_computers(value: Any) -> dict[str, str]:
             continue
         computers[key] = label
     return computers
+
+
+def _resolve_computers(config: Mapping[str, Any]) -> dict[str, str]:
+    entries = config.get("remote_operator_computer_entries")
+    computers: dict[str, str] = {}
+    if isinstance(entries, list):
+        for item in entries:
+            if not isinstance(item, Mapping):
+                continue
+            key = _normalize_key(item.get("key"))
+            label = str(item.get("label") or "").strip()
+            endpoint = str(item.get("endpoint") or "").strip()
+            if key and label and endpoint and key not in computers:
+                computers[key] = label
+    if computers:
+        return computers
+    return _normalize_computers(config.get("remote_operator_computers"))
 
 
 def _normalize_key(value: Any) -> str:
@@ -312,7 +330,7 @@ def _resolve_profile_labels(config: Mapping[str, Any]) -> dict[str, str]:
         "simple": "简单任务",
         "complex": "复杂任务",
     }
-    raw_profiles = config.get("remote_operator_profiles")
+    raw_profiles = _coerce_json_mapping(config.get("remote_operator_profiles"))
     if isinstance(raw_profiles, Mapping):
         for key in ("simple", "complex"):
             raw_profile = raw_profiles.get(key)
@@ -322,6 +340,18 @@ def _resolve_profile_labels(config: Mapping[str, Any]) -> dict[str, str]:
             if label:
                 labels[key] = label
     return labels
+
+
+def _coerce_json_mapping(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return value
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return value
+    return parsed if isinstance(parsed, Mapping) else value
 
 
 def _is_ag99live_event(event: Any) -> bool:

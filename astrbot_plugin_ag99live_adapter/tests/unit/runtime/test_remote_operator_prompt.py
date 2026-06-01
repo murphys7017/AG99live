@@ -141,6 +141,35 @@ def test_prompt_contributor_injects_only_online_computer_keys(
     assert "不要自行因为任务看起来复杂就升档" in extension.value
 
 
+def test_prompt_contributor_reads_computer_entries(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_prompt_stub(install_fake_astrbot, monkeypatch)
+    module = _load_module()
+    monkeypatch.setattr(
+        module,
+        "_load_plugin_config",
+        lambda: {
+            "remote_operator_default_computer": "work",
+            "remote_operator_computer_entries": [
+                {
+                    "key": "work",
+                    "label": "工作电脑",
+                    "endpoint": "ws://127.0.0.1:4500",
+                }
+            ],
+        },
+    )
+    module.set_remote_operator_online_computers(["work"])
+
+    contributor = module.AG99liveRemoteOperatorPromptContributor()
+    extension = asyncio.run(contributor.collect(EventStub(), None, None))
+
+    assert extension is not None
+    assert "工作电脑 -> work（默认）" in extension.value
+
+
 def test_prompt_contributor_uses_configured_default_when_online(
     install_fake_astrbot,
     monkeypatch,

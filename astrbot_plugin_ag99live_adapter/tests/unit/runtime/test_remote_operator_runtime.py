@@ -71,6 +71,35 @@ def test_resolve_endpoint_config_requires_matching_endpoint(
     assert config.profiles["complex"].effort == "high"
 
 
+def test_resolve_endpoint_config_prefers_computer_entries(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_remote_operator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    from astrbot_plugin_ag99live_adapter.services.remote_operator_runtime import (
+        resolve_remote_operator_endpoint_config,
+    )
+
+    config = resolve_remote_operator_endpoint_config(
+        {
+            "remote_operator_default_computer": "work",
+            "remote_operator_computers": {"legacy": "旧电脑"},
+            "remote_operator_endpoints": {"legacy": "ws://127.0.0.1:4501"},
+            "remote_operator_computer_entries": [
+                {
+                    "key": "work",
+                    "label": "工作电脑",
+                    "endpoint": "ws://127.0.0.1:4500",
+                }
+            ],
+        }
+    )
+
+    assert config is not None
+    assert config.computers == {"work": "工作电脑"}
+    assert config.endpoints == {"work": "ws://127.0.0.1:4500"}
+
+
 def test_runtime_refresh_online_once_filters_probe_failures(
     install_fake_astrbot,
     monkeypatch,

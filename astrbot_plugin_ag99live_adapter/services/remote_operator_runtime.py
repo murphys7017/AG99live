@@ -55,8 +55,7 @@ def resolve_remote_operator_endpoint_config(
     if not isinstance(config, Mapping):
         return None
 
-    computers = _normalize_mapping(config.get("remote_operator_computers"))
-    endpoints = _normalize_mapping(config.get("remote_operator_endpoints"))
+    computers, endpoints = _resolve_computer_entries(config)
     if not computers or not endpoints:
         return None
 
@@ -415,6 +414,7 @@ def _format_result_text(result: RemoteOperatorExecutionResult) -> str:
 
 
 def _normalize_mapping(value: Any) -> dict[str, str]:
+    value = _coerce_json_mapping(value)
     if not isinstance(value, Mapping):
         return {}
     result: dict[str, str] = {}
@@ -424,6 +424,31 @@ def _normalize_mapping(value: Any) -> dict[str, str]:
         if key and item and key not in result:
             result[key] = item
     return result
+
+
+def _resolve_computer_entries(config: Mapping[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
+    entries = config.get("remote_operator_computer_entries")
+    computers: dict[str, str] = {}
+    endpoints: dict[str, str] = {}
+    if isinstance(entries, list):
+        for item in entries:
+            if not isinstance(item, Mapping):
+                continue
+            key = _normalize_text(item.get("key"))
+            label = _normalize_text(item.get("label"))
+            endpoint = _normalize_text(item.get("endpoint"))
+            if not key or not label or not endpoint:
+                continue
+            if key in computers:
+                continue
+            computers[key] = label
+            endpoints[key] = endpoint
+    if computers and endpoints:
+        return computers, endpoints
+    return (
+        _normalize_mapping(config.get("remote_operator_computers")),
+        _normalize_mapping(config.get("remote_operator_endpoints")),
+    )
 
 
 def _resolve_profiles(value: Any) -> dict[str, RemoteOperatorProfile]:
@@ -439,6 +464,7 @@ def _resolve_profiles(value: Any) -> dict[str, RemoteOperatorProfile]:
             effort="high",
         ),
     }
+    value = _coerce_json_mapping(value)
     if not isinstance(value, Mapping):
         return defaults
 
@@ -462,6 +488,18 @@ def _resolve_profiles(value: Any) -> dict[str, RemoteOperatorProfile]:
 
 def _normalize_text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _coerce_json_mapping(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return value
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return value
+    return parsed if isinstance(parsed, Mapping) else value
 
 
 def _loads_json_object(message: Any) -> dict[str, Any]:
