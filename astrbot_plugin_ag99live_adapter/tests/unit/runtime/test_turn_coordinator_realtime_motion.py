@@ -421,6 +421,89 @@ def test_commit_inbound_message_disables_streaming_in_split_mode(
     assert "ag99live_inline_motion_contract_applied" not in event.extras
 
 
+def test_submit_system_text_input_commits_remote_operator_metadata(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
+    coordinator._turn_lock = asyncio.Lock()
+    coordinator.turn_identity_map = None
+
+    class SessionStateStub:
+        client_uid = "desktop-client"
+        current_turn_id = None
+        waiting_for_playback_complete = False
+
+        def begin_turn(self, _message_str: str, *, turn_id: str | None = None) -> str:
+            self.current_turn_id = turn_id or "turn-system"
+            return self.current_turn_id
+
+    coordinator.session_state = SessionStateStub()
+    coordinator.chat_buffer = type(
+        "ChatBufferStub",
+        (),
+        {"add": lambda self, role, text: None},
+    )()
+    coordinator._begin_turn_timing = lambda *_args, **_kwargs: None
+    coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
+    coordinator._emit_image_input_diagnostics = lambda _message_obj: _noop_async()
+    coordinator._send_json = lambda _payload: _return_true_async()
+
+    class EventStub:
+        def __init__(self, message_str: str) -> None:
+            self.message_str = message_str
+            self.extras: dict[str, object] = {}
+
+        def set_extra(self, key: str, value: object) -> None:
+            self.extras[key] = value
+
+    events: list[EventStub] = []
+
+    def build_event(message_obj):
+        event = EventStub(message_obj.message_str)
+        events.append(event)
+        return event
+
+    coordinator._build_platform_event = build_event
+    committed: list[object] = []
+    coordinator._commit_event = lambda committed_event: committed.append(committed_event)
+
+    class MessageFactoryStub:
+        def build_message_object(self, *, text, raw_message, images=None):
+            return type(
+                "MessageObjectStub",
+                (),
+                {
+                    "message_str": text,
+                    "message_id": raw_message["message_id"],
+                    "raw_message": raw_message,
+                },
+            )()
+
+    coordinator._build_message_object = MessageFactoryStub().build_message_object
+
+    asyncio.run(
+        coordinator.submit_system_text_input(
+            "[系统级输入：远程执行器结果]\n执行状态：completed",
+            {
+                "ag99live_input_source": "remote_operator_result",
+                "remote_operator": {"computer": "work", "status": "completed"},
+            },
+        )
+    )
+
+    assert len(committed) == 1
+    event = committed[0]
+    assert event.message_str.startswith("[系统级输入：远程执行器结果]")
+    assert event.extras["ag99live_input_source"] == "remote_operator_result"
+    assert event.extras["remote_operator"]["computer"] == "work"
+
+
 def test_emit_message_chain_inline_plan_uses_primary_route(
     install_fake_astrbot,
     monkeypatch,

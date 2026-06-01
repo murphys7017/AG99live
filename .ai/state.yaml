@@ -1,30 +1,29 @@
 task:
   class: feature
   risk: medium
-  phase: target_documented
-  scope: Remote operator task delegation target state for AG99live adapter and external SDK
+  phase: implementation_in_progress
+  scope: Remote operator v1 execution loop in AG99live adapter
 context:
   confidence: medium
   assumptions:
-    - The remote operator should be a Local Bridge/SDK plus executor service, not part of the AG99live frontend.
-    - AG99live Adapter can act as the hub with one WebSocket to the desktop frontend and one or more SDK/WebSocket connections from user computers.
-    - Multiple computers can register with computer_id/computer_name; unspecified tasks route to the configured default computer.
-    - AstrBot should produce task-level commands with target, objective, success criteria, and constraints instead of low-level click/type commands.
-    - The SDK should prioritize Codex CLI app-server as the executor bridge; OpenCode CLI can remain an optional executor.
-    - Prompt injection exposes remote operator availability and capability context; execution details remain inside the SDK.
+    - The adapter owns the computer key to codex-cli-app-server endpoint mapping.
+    - Only configured and online remote operator computers are exposed in prompt context.
+    - AstrBot model output for remote operation remains exactly `computer` plus `prompt`.
+    - Remote execution results are re-entered as system-level text input through the existing AstrBot event path.
   unresolved_questions:
-    - Exact SDK transport authentication, pairing model, and default-computer conflict handling still need design.
-    - Exact frontend client object schema for operator progress, approval, artifacts, and final results still needs design.
+    - Codex app-server protocol compatibility should be validated against a live server.
+    - Authentication, pairing, approval UX, artifacts, and progress reporting remain future work.
 architecture:
   stability: evolving
   boundary_changes:
-    - Planned remote operator events should stay separate from `engine.motion_*` and avoid replacing the existing motion pipeline.
-    - Planned adapter work adds remote operator prompt/result integration, multi-computer registry, default routing, and SDK connection management.
-    - Planned SDK/Local Bridge connects to Codex app-server or optional OpenCode/browser/shell/filesystem/desktop executors.
+    - Remote operator runtime is adapter-side service code, separate from the desktop frontend and motion pipeline.
+    - Result contributor schedules remote execution and re-injects results; it does not directly push operator output to the frontend.
 verification:
   checks_run:
-    - docs target-state review only
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_remote_operator_prompt.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_remote_operator_runtime.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_main_plugin_hooks.py -q
+    - python -m compileall astrbot_plugin_ag99live_adapter
+    - git diff --check
   checks_failed: []
-  validation_gap: No implementation or runtime validation yet; this turn only records the target state.
+  validation_gap: No live codex-cli-app-server integration test has been run.
 runtime:
-  mode: planning
+  mode: implemented_pending_live_integration

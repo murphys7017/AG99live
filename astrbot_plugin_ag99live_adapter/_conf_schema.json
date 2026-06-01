@@ -31,6 +31,11 @@
     "type": "object",
     "default": {}
   },
+  "remote_operator_endpoints": {
+    "description": "远程执行器 endpoint 映射。key 必须与 remote_operator_computers 相同，value 是 codex-cli-app-server 的 WebSocket 地址，例如 ws://127.0.0.1:4500。",
+    "type": "object",
+    "default": {}
+  },
   "live2d_model_name": {
     "description": "优先加载的 Live2D 模型目录名。留空时默认使用扫描到的第一个模型。",
     "type": "string",

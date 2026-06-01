@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Any, Awaitable, Callable
+from uuid import uuid4
 
 from astrbot.api import logger
 from astrbot.api.message_components import Plain, Record  # re-exported for test access
@@ -21,6 +22,7 @@ from ..protocol.builder import (
     build_output_text,
 )
 from ..protocol import (
+    SOURCE_ADAPTER,
     SOURCE_ENGINE,
     TYPE_ENGINE_CATALOG_MOTION,
     TYPE_CONTROL_INTERRUPT,
@@ -390,6 +392,7 @@ class TurnCoordinator:
                 if callable(set_extra):
                     set_extra("enable_streaming", False)
                     set_extra("ag99live_motion_generation_mode", motion_generation_mode)
+            self._apply_raw_message_metadata_to_event(event, message_obj)
             if motion_generation_mode == "inline_first":
                 self._apply_inline_motion_contract_to_event(event, message_obj=message_obj)
             self._commit_event(event)
@@ -400,6 +403,49 @@ class TurnCoordinator:
                 len(message_obj.message_str or ""),
                 current_turn_id,
             )
+
+    async def submit_system_text_input(
+        self,
+        text: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        normalized_text = str(text or "").strip()
+        if not normalized_text:
+            return
+        message_id = uuid4().hex
+        raw_message = build_message_envelope(
+            TYPE_INPUT_TEXT,
+            source=SOURCE_ADAPTER,
+            message_id=message_id,
+            turn_id=f"remote-operator:{message_id}",
+            payload={
+                "text": normalized_text,
+                "images": [],
+            },
+        )
+        if isinstance(metadata, dict):
+            raw_message.update(metadata)
+        message_obj = self._build_message_object(
+            text=normalized_text,
+            raw_message=raw_message,
+            images=[],
+        )
+        await self._commit_inbound_message(
+            message_obj,
+            turn_id=str(raw_message.get("turn_id") or ""),
+        )
+
+    @staticmethod
+    def _apply_raw_message_metadata_to_event(event: Any, message_obj: Any) -> None:
+        raw_message = getattr(message_obj, "raw_message", None)
+        if not isinstance(raw_message, dict):
+            return
+        set_extra = getattr(event, "set_extra", None)
+        if not callable(set_extra):
+            return
+        for key in ("ag99live_input_source", "remote_operator"):
+            if key in raw_message:
+                set_extra(key, raw_message[key])
 
     def _apply_inline_motion_contract_to_event(self, event, *, message_obj) -> None:
         original_message_str = str(getattr(message_obj, "message_str", "") or "")

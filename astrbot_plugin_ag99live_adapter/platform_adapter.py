@@ -26,6 +26,7 @@ from .services.frontend_system_service import FrontendSystemCommandHandler
 from .services.history_service import ConversationHistoryBridge
 from .services.media_service import MediaService
 from .services.message_factory import MessageFactory
+from .services.remote_operator_runtime import RemoteOperatorRuntime
 from .transport.static_routes import build_static_routes, list_background_files
 from .runtime.plugin_runtime import get_plugin_config, get_plugin_context
 from .runtime.state import RuntimeState
@@ -177,6 +178,10 @@ class OLVPetPlatformAdapter(Platform):
             send_motion_tuning_samples_state=self._send_motion_tuning_samples_state,
             on_disconnect=self._handle_transport_disconnect,
         )
+        self.remote_operator_runtime = RemoteOperatorRuntime(
+            plugin_config_loader=get_plugin_config,
+            submit_system_text_input=self._submit_remote_operator_system_text_input,
+        )
 
         self._vad_engine = None
         self.turn_coordinator = TurnCoordinator(
@@ -244,6 +249,7 @@ class OLVPetPlatformAdapter(Platform):
         self._event_loop = asyncio.get_running_loop()
         try:
             await asyncio.to_thread(self._debug_server.start)
+            self.remote_operator_runtime.start()
             await self.transport.start()
         except asyncio.CancelledError:
             await self.terminate()
@@ -377,9 +383,23 @@ class OLVPetPlatformAdapter(Platform):
 
     async def terminate(self) -> None:
         logger.info("AG99live adapter terminate() called")
+        await self.remote_operator_runtime.stop()
         await self.transport.stop()
         await asyncio.to_thread(self._debug_server.stop)
         self._event_loop = None
+
+    def spawn_background_task(self, coroutine) -> None:
+        if self._event_loop is not None and self._event_loop.is_running():
+            self.turn_coordinator._spawn_background_task(coroutine)
+            return
+        asyncio.create_task(coroutine)
+
+    async def _submit_remote_operator_system_text_input(
+        self,
+        text: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        await self.turn_coordinator.submit_system_text_input(text, metadata)
 
     async def _send_json(self, payload: dict[str, Any]) -> bool:
         return await self.transport.send_json(payload)
