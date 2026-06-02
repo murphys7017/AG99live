@@ -143,6 +143,9 @@ def test_prompt_contributor_injects_only_online_computer_keys(
     assert '"computer":"<computer_key>"' in extension.value
     assert '"profile":"simple|complex"' in extension.value
     assert '"prompt":"<交给远程执行器的完整任务说明>"' in extension.value
+    assert "绝不能选择 self_reply" in extension.value
+    assert "core_task_spec.execution_prompt" in extension.value
+    assert "不能调用 astrbot_execute_shell" in extension.value
     assert "不要自行因为任务看起来复杂就升档" in extension.value
 
 

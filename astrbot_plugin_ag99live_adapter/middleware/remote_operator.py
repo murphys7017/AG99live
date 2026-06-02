@@ -367,8 +367,10 @@ def filter_online_remote_operator_config(
 def build_remote_operator_prompt(config: RemoteOperatorConfig) -> str:
     lines = [
         "当用户明确要求操作电脑、打开软件、使用浏览器、检查本机项目或让远程执行器完成任务时，生成远程执行器请求。",
+        "如果你正在进行 AstrBot interaction 路由决策，以上请求绝不能选择 self_reply；必须选择 hybrid 或 delegate_to_core，并在 core_task_spec.execution_prompt 中要求核心只输出远程执行器 JSON。",
         "远程执行器请求只能包含三个字段：",
         '{"computer":"<computer_key>","profile":"simple|complex","prompt":"<交给远程执行器的完整任务说明>"}',
+        "核心执行层遇到这类请求时，不能调用 astrbot_execute_shell、Python、文件、浏览器或 CUA 工具；只能输出上述 JSON，由 AG99live 适配器转发给远程执行器。",
         "不要输出底层点击、坐标、键盘、UIA selector 或 shell 步骤；这些由远程执行器自行决定。",
         f"如果用户没有指定电脑，computer 使用默认电脑 `{config.default_computer}`。",
         f"如果用户没有明确要求复杂/深入/高档执行，profile 必须使用默认档位 `{config.default_profile}`。",
