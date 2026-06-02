@@ -558,12 +558,62 @@ def test_tool_arbitration_removes_conflicting_tools_for_desktop_action(
         def remove_tool(self, name):
             self.tools = [tool for tool in self.tools if tool.name != name]
 
-    request = types.SimpleNamespace(prompt="帮我打开钉钉", func_tool=ToolSet())
+    request = types.SimpleNamespace(
+        prompt="帮我打开钉钉",
+        func_tool=ToolSet(),
+        system_prompt="existing prompt",
+    )
 
-    removed = module.arbitrate_remote_operator_tools_for_request(EventStub(), request)
+    event = EventStub()
+    removed = module.arbitrate_remote_operator_tools_for_request(event, request)
 
     assert removed == ["astrbot_execute_shell", "astrbot_file_read_tool"]
     assert [tool.name for tool in request.func_tool.tools] == ["ordinary_tool"]
+    assert "existing prompt" in request.system_prompt
+    assert "<ag99live_remote_operator_core_override>" in request.system_prompt
+    assert "不得声称调用 astrbot_execute_shell" in request.system_prompt
+    assert "不得把历史结果当成本轮执行结果复述" in request.system_prompt
+    assert "输出必须从 `{` 开始并以 `}` 结束" in request.system_prompt
+    assert '"computer":"work"' in request.system_prompt
+    assert '"profile":"simple"' in request.system_prompt
+    assert event.extras["ag99live_remote_operator_core_override"] == {
+        "computer": "work",
+        "profile": "simple",
+        "reason": "desktop_action_remote_operator_priority",
+    }
+
+
+def test_tool_arbitration_appends_override_even_without_tools(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_prompt_stub(install_fake_astrbot, monkeypatch)
+    module = _load_module()
+    monkeypatch.setattr(
+        module,
+        "_load_plugin_config",
+        lambda: {
+            "remote_operator_default_computer": "work",
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
+        },
+    )
+    module.set_remote_operator_online_computers(["work"])
+    event = EventStub()
+    request = types.SimpleNamespace(
+        prompt="帮我关闭Edge",
+        func_tool=types.SimpleNamespace(tools=[]),
+        system_prompt="existing prompt",
+    )
+
+    removed = module.arbitrate_remote_operator_tools_for_request(event, request)
+
+    assert removed == []
+    assert "existing prompt" in request.system_prompt
+    assert "<ag99live_remote_operator_core_override>" in request.system_prompt
+    assert '"computer":"work"' in request.system_prompt
+    assert event.extras["ag99live_remote_operator_core_override"]["computer"] == "work"
 
 
 def test_tool_arbitration_skips_when_remote_operator_offline(
@@ -587,12 +637,14 @@ def test_tool_arbitration_skips_when_remote_operator_offline(
     request = types.SimpleNamespace(
         prompt="帮我打开钉钉",
         func_tool=types.SimpleNamespace(tools=[tool]),
+        system_prompt="existing prompt",
     )
 
     removed = module.arbitrate_remote_operator_tools_for_request(EventStub(), request)
 
     assert removed == []
     assert request.func_tool.tools == [tool]
+    assert request.system_prompt == "existing prompt"
 
 
 def test_tool_arbitration_skips_non_ag99live_event(
@@ -616,6 +668,7 @@ def test_tool_arbitration_skips_non_ag99live_event(
     request = types.SimpleNamespace(
         prompt="帮我打开钉钉",
         func_tool=types.SimpleNamespace(tools=[tool]),
+        system_prompt="existing prompt",
     )
 
     removed = module.arbitrate_remote_operator_tools_for_request(
@@ -625,6 +678,7 @@ def test_tool_arbitration_skips_non_ag99live_event(
 
     assert removed == []
     assert request.func_tool.tools == [tool]
+    assert request.system_prompt == "existing prompt"
 
 
 def test_tool_arbitration_skips_non_desktop_action_text(
@@ -648,9 +702,11 @@ def test_tool_arbitration_skips_non_desktop_action_text(
     request = types.SimpleNamespace(
         prompt="今天天气怎么样",
         func_tool=types.SimpleNamespace(tools=[tool]),
+        system_prompt="existing prompt",
     )
 
     removed = module.arbitrate_remote_operator_tools_for_request(EventStub(), request)
 
     assert removed == []
     assert request.func_tool.tools == [tool]
+    assert request.system_prompt == "existing prompt"

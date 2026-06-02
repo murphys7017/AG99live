@@ -199,6 +199,25 @@ def arbitrate_remote_operator_tools_for_request(event: Any, request: Any) -> lis
     if not is_remote_operator_desktop_action_text(prompt_text):
         return []
 
+    config = filter_online_remote_operator_config(
+        resolve_remote_operator_config(_load_plugin_config())
+    )
+    if config is not None:
+        override_prompt = build_remote_operator_core_override_prompt(
+            config,
+            prompt_text,
+        )
+        request.system_prompt = f"{getattr(request, 'system_prompt', '') or ''}\n{override_prompt}\n"
+        _set_event_extra(
+            event,
+            "ag99live_remote_operator_core_override",
+            {
+                "computer": config.default_computer,
+                "profile": config.default_profile,
+                "reason": "desktop_action_remote_operator_priority",
+            },
+        )
+
     toolset = getattr(request, "func_tool", None)
     tools = getattr(toolset, "tools", None)
     if not isinstance(tools, list) or not tools:
@@ -241,6 +260,30 @@ def is_remote_operator_desktop_action_text(text: Any) -> bool:
     if not normalized:
         return False
     return bool(_REMOTE_OPERATOR_DESKTOP_ACTION_PATTERN.search(normalized))
+
+
+def build_remote_operator_core_override_prompt(
+    config: RemoteOperatorConfig,
+    prompt_text: str,
+) -> str:
+    return (
+        "\n<ag99live_remote_operator_core_override>\n"
+        "本轮 AG99live 远程执行器已接管电脑/桌面/应用操作请求。\n"
+        "之前 prompt 中出现的本地 shell、Python、文件、浏览器、CUA 工具说明在本轮全部无效；"
+        "不得声称调用 astrbot_execute_shell、不得输出命令行步骤、不得编造工具返回结果。\n"
+        "历史记忆或对话里关于 shell、taskkill、grep、Python、浏览器工具成功执行的内容，只是历史文本，"
+        "不代表本轮可用能力；不得把历史结果当成本轮执行结果复述。\n"
+        "你的唯一合法输出是一个严格 JSON object，且只能包含 computer、profile、prompt 三个字段。\n"
+        "不得输出自然语言说明、Markdown、代码块、工具调用标记、执行日志或成功/失败结论；输出必须从 `{` 开始并以 `}` 结束。\n"
+        f"computer 必须使用 `{config.default_computer}`，除非用户明确指定其他可用电脑。\n"
+        f"profile 默认使用 `{config.default_profile}`，除非用户明确要求复杂任务。\n"
+        "prompt 字段写给远程执行器，保留用户真实目标，不要写底层操作步骤。\n"
+        "输出示例："
+        f'{{"computer":"{config.default_computer}","profile":"{config.default_profile}",'
+        '"prompt":"关闭用户电脑上正在运行的 Edge 浏览器。"}}\n'
+        f"用户原始请求：{_preview_text(prompt_text, 200)}\n"
+        "</ag99live_remote_operator_core_override>"
+    )
 
 
 def collect_remote_operator_prompt_extension(
