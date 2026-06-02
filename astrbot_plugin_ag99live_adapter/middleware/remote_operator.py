@@ -41,7 +41,8 @@ class AG99liveRemoteOperatorPromptExtensionCollector:
     async def collect(self, event, plugin_context, config=None, *, provider_request=None):
         del plugin_context, config, provider_request
 
-        return collect_remote_operator_prompt_extension(event, plugin_id=self.plugin_id)
+        extension = collect_remote_operator_prompt_extension(event, plugin_id=self.plugin_id)
+        return [extension] if extension is not None else []
 
 
 class AG99liveRemoteOperatorResultContributor:

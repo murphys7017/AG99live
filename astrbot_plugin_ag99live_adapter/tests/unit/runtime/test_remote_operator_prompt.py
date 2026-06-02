@@ -498,7 +498,7 @@ def test_main_prompt_collector_accepts_astrbot_collector_signature(
     module.set_remote_operator_online_computers(["work"])
 
     collector = module.AG99liveRemoteOperatorPromptExtensionCollector()
-    extension = asyncio.run(
+    extensions = asyncio.run(
         collector.collect(
             EventStub(),
             plugin_context=None,
@@ -507,6 +507,8 @@ def test_main_prompt_collector_accepts_astrbot_collector_signature(
         )
     )
 
+    assert len(extensions) == 1
+    extension = extensions[0]
     assert extension is not None
     assert extension.plugin_id == "ag99live.remote_operator.prompt"
     assert "工作电脑 -> work（默认）" in extension.value
