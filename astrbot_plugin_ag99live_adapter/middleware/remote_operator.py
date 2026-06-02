@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 import json
+import re
 import threading
 from typing import Any
 
@@ -22,6 +23,68 @@ class RemoteOperatorConfig:
 
 _registry_lock = threading.RLock()
 _online_computer_keys: set[str] = set()
+
+REMOTE_OPERATOR_CONFLICTING_TOOL_NAMES = frozenset(
+    {
+        "astrbot_execute_shell",
+        "astrbot_execute_ipython",
+        "astrbot_execute_python",
+        "astrbot_file_read_tool",
+        "astrbot_file_write_tool",
+        "astrbot_file_edit_tool",
+        "astrbot_grep_tool",
+        "astrbot_upload_file",
+        "astrbot_download_file",
+        "astrbot_execute_browser",
+        "astrbot_execute_browser_batch",
+        "astrbot_run_browser_skill",
+        "astrbot_cua_screenshot",
+        "astrbot_cua_mouse_click",
+        "astrbot_cua_keyboard_type",
+    }
+)
+
+_REMOTE_OPERATOR_DESKTOP_ACTION_PATTERN = re.compile(
+    "|".join(
+        re.escape(keyword)
+        for keyword in (
+            "打开",
+            "启动",
+            "运行",
+            "关闭",
+            "退出",
+            "最小化",
+            "最大化",
+            "切换到",
+            "点一下",
+            "点击",
+            "输入",
+            "粘贴",
+            "截图",
+            "浏览器",
+            "网页",
+            "应用",
+            "软件",
+            "程序",
+            "窗口",
+            "桌面",
+            "电脑",
+            "钉钉",
+            "QQ音乐",
+            "qq音乐",
+            "记事本",
+            "文件夹",
+            "open ",
+            "launch ",
+            "start ",
+            "close ",
+            "browser",
+            "desktop",
+            "app",
+        )
+    ),
+    re.IGNORECASE,
+)
 
 
 class AG99liveRemoteOperatorPromptContributor:
@@ -122,6 +185,62 @@ def register_remote_operator_interaction_contributors(context: Any) -> None:
     register_result = getattr(context, "register_interaction_result_contributor", None)
     if callable(register_result):
         register_result(AG99liveRemoteOperatorResultContributor())
+
+
+def arbitrate_remote_operator_tools_for_request(event: Any, request: Any) -> list[str]:
+    if not _is_ag99live_event(event):
+        return []
+    if _is_remote_operator_result_event(event):
+        return []
+    if not remote_operator_available():
+        return []
+
+    prompt_text = _extract_request_text(event, request)
+    if not is_remote_operator_desktop_action_text(prompt_text):
+        return []
+
+    toolset = getattr(request, "func_tool", None)
+    tools = getattr(toolset, "tools", None)
+    if not isinstance(tools, list) or not tools:
+        return []
+
+    removed: list[str] = []
+    for tool_name in sorted(REMOTE_OPERATOR_CONFLICTING_TOOL_NAMES):
+        tool = _get_tool(toolset, tool_name)
+        if tool is None:
+            continue
+        _remove_tool(toolset, tool_name)
+        removed.append(tool_name)
+
+    if removed:
+        _set_event_extra(
+            event,
+            "ag99live_remote_operator_tool_arbitration",
+            {
+                "removed_tools": removed,
+                "reason": "desktop_action_remote_operator_priority",
+            },
+        )
+        logger.info(
+            "Remote operator tool arbitration applied: removed_tools=%s prompt=%s",
+            removed,
+            _preview_text(prompt_text),
+        )
+    return removed
+
+
+def remote_operator_available() -> bool:
+    config = resolve_remote_operator_config(_load_plugin_config())
+    if config is None:
+        return False
+    return filter_online_remote_operator_config(config) is not None
+
+
+def is_remote_operator_desktop_action_text(text: Any) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    return bool(_REMOTE_OPERATOR_DESKTOP_ACTION_PATTERN.search(normalized))
 
 
 def collect_remote_operator_prompt_extension(
@@ -388,6 +507,16 @@ def _get_event_extra(event: Any, key: str) -> Any:
         return None
 
 
+def _set_event_extra(event: Any, key: str, value: Any) -> None:
+    method = getattr(event, "set_extra", None)
+    if not callable(method):
+        return
+    try:
+        method(key, value)
+    except Exception:
+        return
+
+
 def _extract_assistant_text(view: Any) -> str:
     for attr in ("final_result", "core_result"):
         value = getattr(view, attr, None)
@@ -405,6 +534,54 @@ def _call_event_method(event: Any, name: str) -> Any:
         return method()
     except Exception:
         return None
+
+
+def _extract_request_text(event: Any, request: Any) -> str:
+    parts: list[str] = []
+    prompt = getattr(request, "prompt", None)
+    if prompt:
+        parts.append(str(prompt))
+    message_str = getattr(event, "message_str", None)
+    if message_str:
+        parts.append(str(message_str))
+    return "\n".join(part.strip() for part in parts if part and str(part).strip())
+
+
+def _get_tool(toolset: Any, tool_name: str) -> Any:
+    method = getattr(toolset, "get_tool", None)
+    if callable(method):
+        try:
+            return method(tool_name)
+        except Exception:
+            return None
+
+    for tool in list(getattr(toolset, "tools", []) or []):
+        if getattr(tool, "name", None) == tool_name:
+            return tool
+    return None
+
+
+def _remove_tool(toolset: Any, tool_name: str) -> None:
+    method = getattr(toolset, "remove_tool", None)
+    if callable(method):
+        method(tool_name)
+        return
+    remove_func = getattr(toolset, "remove_func", None)
+    if callable(remove_func):
+        remove_func(tool_name)
+        return
+    tools = getattr(toolset, "tools", None)
+    if isinstance(tools, list):
+        toolset.tools = [
+            tool for tool in tools if getattr(tool, "name", None) != tool_name
+        ]
+
+
+def _preview_text(text: str, limit: int = 80) -> str:
+    normalized = " ".join(str(text or "").split())
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: limit - 3]}..."
 
 
 def _load_plugin_config() -> Any:

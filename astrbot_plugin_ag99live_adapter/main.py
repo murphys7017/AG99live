@@ -3,9 +3,11 @@ import logging
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import Plain
+from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star
 
 from .middleware import register_ag99live_interaction_contributors
+from .middleware.remote_operator import arbitrate_remote_operator_tools_for_request
 from .motion.output_sanitizer import (
     contains_hidden_output_markup,
     sanitize_assistant_output_text,
@@ -27,6 +29,14 @@ class MyPlugin(Star):
         from .platform_adapter import OLVPetPlatformAdapter  # noqa: F401
 
         register_ag99live_interaction_contributors(context)
+
+    @filter.on_llm_request()
+    async def arbitrate_remote_operator_tools(
+        self,
+        event: AstrMessageEvent,
+        request: ProviderRequest,
+    ) -> None:
+        arbitrate_remote_operator_tools_for_request(event, request)
 
     @filter.on_decorating_result()
     async def sanitize_hidden_output_markup_before_tts(

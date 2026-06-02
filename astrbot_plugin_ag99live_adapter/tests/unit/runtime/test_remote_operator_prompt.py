@@ -65,8 +65,13 @@ def _load_module():
 
 
 class EventStub:
-    def __init__(self, platform_name: str = "olv_pet_adapter") -> None:
+    def __init__(
+        self,
+        platform_name: str = "olv_pet_adapter",
+        message_str: str = "",
+    ) -> None:
         self.platform_name = platform_name
+        self.message_str = message_str
         self.extras: dict[str, object] = {}
 
     def get_platform_name(self) -> str:
@@ -512,3 +517,137 @@ def test_main_prompt_collector_accepts_astrbot_collector_signature(
     assert extension is not None
     assert extension.plugin_id == "ag99live.remote_operator.prompt"
     assert "工作电脑 -> work（默认）" in extension.value
+
+
+def test_tool_arbitration_removes_conflicting_tools_for_desktop_action(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_prompt_stub(install_fake_astrbot, monkeypatch)
+    module = _load_module()
+    monkeypatch.setattr(
+        module,
+        "_load_plugin_config",
+        lambda: {
+            "remote_operator_default_computer": "work",
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
+        },
+    )
+    module.set_remote_operator_online_computers(["work"])
+
+    class Tool:
+        def __init__(self, name):
+            self.name = name
+
+    class ToolSet:
+        def __init__(self):
+            self.tools = [
+                Tool("astrbot_execute_shell"),
+                Tool("astrbot_file_read_tool"),
+                Tool("ordinary_tool"),
+            ]
+
+        def get_tool(self, name):
+            return next((tool for tool in self.tools if tool.name == name), None)
+
+        def remove_tool(self, name):
+            self.tools = [tool for tool in self.tools if tool.name != name]
+
+    request = types.SimpleNamespace(prompt="帮我打开钉钉", func_tool=ToolSet())
+
+    removed = module.arbitrate_remote_operator_tools_for_request(EventStub(), request)
+
+    assert removed == ["astrbot_execute_shell", "astrbot_file_read_tool"]
+    assert [tool.name for tool in request.func_tool.tools] == ["ordinary_tool"]
+
+
+def test_tool_arbitration_skips_when_remote_operator_offline(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_prompt_stub(install_fake_astrbot, monkeypatch)
+    module = _load_module()
+    monkeypatch.setattr(
+        module,
+        "_load_plugin_config",
+        lambda: {
+            "remote_operator_default_computer": "work",
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
+        },
+    )
+    module.set_remote_operator_online_computers([])
+    tool = types.SimpleNamespace(name="astrbot_execute_shell")
+    request = types.SimpleNamespace(
+        prompt="帮我打开钉钉",
+        func_tool=types.SimpleNamespace(tools=[tool]),
+    )
+
+    removed = module.arbitrate_remote_operator_tools_for_request(EventStub(), request)
+
+    assert removed == []
+    assert request.func_tool.tools == [tool]
+
+
+def test_tool_arbitration_skips_non_ag99live_event(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_prompt_stub(install_fake_astrbot, monkeypatch)
+    module = _load_module()
+    monkeypatch.setattr(
+        module,
+        "_load_plugin_config",
+        lambda: {
+            "remote_operator_default_computer": "work",
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
+        },
+    )
+    module.set_remote_operator_online_computers(["work"])
+    tool = types.SimpleNamespace(name="astrbot_execute_shell")
+    request = types.SimpleNamespace(
+        prompt="帮我打开钉钉",
+        func_tool=types.SimpleNamespace(tools=[tool]),
+    )
+
+    removed = module.arbitrate_remote_operator_tools_for_request(
+        EventStub("other_platform"),
+        request,
+    )
+
+    assert removed == []
+    assert request.func_tool.tools == [tool]
+
+
+def test_tool_arbitration_skips_non_desktop_action_text(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_prompt_stub(install_fake_astrbot, monkeypatch)
+    module = _load_module()
+    monkeypatch.setattr(
+        module,
+        "_load_plugin_config",
+        lambda: {
+            "remote_operator_default_computer": "work",
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
+        },
+    )
+    module.set_remote_operator_online_computers(["work"])
+    tool = types.SimpleNamespace(name="astrbot_execute_shell")
+    request = types.SimpleNamespace(
+        prompt="今天天气怎么样",
+        func_tool=types.SimpleNamespace(tools=[tool]),
+    )
+
+    removed = module.arbitrate_remote_operator_tools_for_request(EventStub(), request)
+
+    assert removed == []
+    assert request.func_tool.tools == [tool]
