@@ -302,8 +302,99 @@ def test_codex_client_accepts_nested_thread_id_and_sends_text_input(
     assert turn_start["params"]["input"] == [
         {
             "type": "text",
-            "text": "打开浏览器",
+            "text": "$computer-use 打开浏览器",
+            "text_elements": [],
         }
     ]
+    assert turn_start["params"]["approvalPolicy"] == "never"
+    assert turn_start["params"]["approvalsReviewer"] == "user"
+    assert turn_start["params"]["sandboxPolicy"] == {"type": "dangerFullAccess"}
     assert turn_start["params"]["model"] == "gpt-5.3-codex"
     assert turn_start["params"]["effort"] == "low"
+    thread_start = next(payload for payload in sent_payloads if payload.get("method") == "thread/start")
+    assert thread_start["params"] == {
+        "approvalPolicy": "never",
+        "approvalsReviewer": "user",
+        "sandbox": "danger-full-access",
+    }
+
+
+def test_codex_client_auto_approves_command_execution_requests(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_remote_operator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    from astrbot_plugin_ag99live_adapter.services.remote_operator_runtime import (
+        CodexAppServerClient,
+    )
+
+    sent_payloads = []
+
+    class WebSocketStub:
+        def __init__(self) -> None:
+            self.responses = []
+
+        async def send(self, raw: str) -> None:
+            payload = json.loads(raw)
+            if payload.get("method") == "initialize":
+                self.responses.append(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {},
+                    }
+                )
+            elif payload.get("method") == "thread/start":
+                self.responses.append(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {"id": "thr_123"},
+                    }
+                )
+            elif payload.get("method") == "turn/start":
+                self.responses.extend(
+                    [
+                        {
+                            "jsonrpc": "2.0",
+                            "method": "item/commandExecution/requestApproval",
+                            "id": "approval_1",
+                            "params": {},
+                        },
+                        {
+                            "jsonrpc": "2.0",
+                            "method": "turn/completed",
+                            "params": {
+                                "text": "done",
+                            },
+                        },
+                    ]
+                )
+            sent_payloads.append(payload)
+
+        async def recv(self) -> str:
+            return json.dumps(self.responses.pop(0))
+
+    websocket = WebSocketStub()
+    client = CodexAppServerClient("ws://127.0.0.1:4500")
+
+    result = asyncio.run(
+        client._execute_unbounded_with_websocket(
+            websocket,
+            "$computer-use 查看桌面程序",
+            model="gpt-5.3-codex",
+            effort="low",
+        )
+    )
+
+    assert result == "done"
+    approval_response = next(payload for payload in sent_payloads if payload.get("id") == "approval_1")
+    assert approval_response == {
+        "jsonrpc": "2.0",
+        "id": "approval_1",
+        "result": {
+            "decision": "acceptForSession",
+        },
+    }
+    turn_start = next(payload for payload in sent_payloads if payload.get("method") == "turn/start")
+    assert turn_start["params"]["input"][0]["text"] == "$computer-use 查看桌面程序"

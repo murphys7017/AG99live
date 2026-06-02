@@ -199,12 +199,18 @@ class CodexAppServerClient:
                     "jsonrpc": "2.0",
                     "id": request_id,
                     "method": "thread/start",
-                    "params": {},
+                    "params": {
+                        "approvalPolicy": "never",
+                        "approvalsReviewer": "user",
+                        "sandbox": "danger-full-access",
+                    },
                 }
             )
         )
         while True:
             payload = _loads_json_object(await websocket.recv())
+            if await self._auto_approve_server_request(websocket, payload):
+                continue
             if payload.get("id") != request_id:
                 continue
             error = payload.get("error")
@@ -228,14 +234,21 @@ class CodexAppServerClient:
         effort: str | None = None,
     ) -> str:
         request_id = uuid4().hex
+        executable_prompt = _format_codex_computer_use_prompt(prompt)
         params: dict[str, Any] = {
             "threadId": thread_id,
             "input": [
                 {
                     "type": "text",
-                    "text": prompt,
+                    "text": executable_prompt,
+                    "text_elements": [],
                 }
             ],
+            "approvalPolicy": "never",
+            "approvalsReviewer": "user",
+            "sandboxPolicy": {
+                "type": "dangerFullAccess",
+            },
         }
         if model:
             params["model"] = model
@@ -255,6 +268,8 @@ class CodexAppServerClient:
         collected: list[str] = []
         while True:
             payload = _loads_json_object(await websocket.recv())
+            if await self._auto_approve_server_request(websocket, payload):
+                continue
             if payload.get("id") == request_id and isinstance(payload.get("error"), Mapping):
                 error = payload["error"]
                 raise RuntimeError(str(error.get("message") or error))
@@ -271,9 +286,60 @@ class CodexAppServerClient:
             if method in {"turn/completed", "turn/failed"}:
                 break
             if method in {"approval/requested", "exec/approval/requested"}:
-                raise RuntimeError("codex app-server requested approval; v1 remote operator refuses approval-gated actions")
+                logger.info(
+                    "Remote operator ignored legacy approval notification during development test: method=%s",
+                    method,
+                )
 
         return "\n".join(_dedupe_keep_order(collected)).strip()
+
+    async def _auto_approve_server_request(
+        self,
+        websocket: Any,
+        payload: Mapping[str, Any],
+    ) -> bool:
+        method = str(payload.get("method") or "").strip()
+        request_id = payload.get("id")
+        if not method or request_id is None:
+            return False
+
+        response_result: dict[str, Any] | None = None
+        if method == "item/commandExecution/requestApproval":
+            response_result = {"decision": "acceptForSession"}
+        elif method == "item/fileChange/requestApproval":
+            response_result = {"decision": "acceptForSession"}
+        elif method == "item/permissions/requestApproval":
+            params = payload.get("params")
+            requested_permissions = {}
+            if isinstance(params, Mapping) and isinstance(params.get("permissions"), Mapping):
+                requested_permissions = dict(params["permissions"])
+            response_result = {
+                "permissions": requested_permissions,
+                "scope": "session",
+                "strictAutoReview": False,
+            }
+        elif method == "execCommandApproval":
+            response_result = {"decision": "approved_for_session"}
+        elif method == "applyPatchApproval":
+            response_result = {"decision": "approved"}
+
+        if response_result is None:
+            return False
+
+        await websocket.send(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": response_result,
+                }
+            )
+        )
+        logger.info(
+            "Remote operator auto-approved app-server request for development testing: method=%s",
+            method,
+        )
+        return True
 
 
 class RemoteOperatorRuntime:
@@ -418,6 +484,15 @@ def _format_result_text(result: RemoteOperatorExecutionResult) -> str:
     else:
         lines.extend(["执行错误：", result.error or "远程执行失败。"])
     return "\n".join(lines)
+
+
+def _format_codex_computer_use_prompt(prompt: str) -> str:
+    normalized = str(prompt or "").strip()
+    if not normalized:
+        return "$computer-use"
+    if normalized.startswith("$computer-use"):
+        return normalized
+    return f"$computer-use {normalized}"
 
 
 def _resolve_computer_entries(config: Mapping[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
