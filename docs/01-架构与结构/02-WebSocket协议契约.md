@@ -67,6 +67,8 @@ control.turn_finished
 - 该采集期的所有 `input.raw_audio_data` 和最后的 `input.mic_audio_end` 共享同一个 `turn_id`。
 - 后端语音转文字入口使用该 `turn_id` 作为音频缓冲键。
 - 如果 `dropped === true`，后端丢弃该 turn 的本次音频并立即终结该 turn。
+- Electron / Windows 桌面端的设备枚举和采集可以来自主进程 DirectShow/ffmpeg，也可以回退到浏览器 `MediaDevices`；这只影响前端本地采集来源，不改变 WebSocket 协议载荷。
+- 按键说话模式只改变采集开始/结束时机。按下配置按键等价于开始一段麦克风采集，松开按键等价于发送该段 `input.mic_audio_end(reason="ptt_release")`。
 
 ### output.* （后端 -> 前端）
 

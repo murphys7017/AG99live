@@ -28,7 +28,11 @@ AG99live 是一个面向桌面陪伴场景的 AI 虚拟形象项目。它把 Ast
 
 ### 实时桌宠对话
 
-支持文字输入和麦克风输入。用户说话或输入文字后，前端会把消息发送到 AstrBot 插件后端，再由后端协调 AI 回复、语音和动作。
+支持文字输入和麦克风输入。用户说话或输入文字后，前端会把消息发送到 AstrBot 插件后端，再由后端协调 AI 回复、语音和动作。Electron 桌面端在 Windows 上优先使用主进程 DirectShow/ffmpeg 原生麦克风枚举与采集，因此可以选择系统中真实存在的输入设备；不可用时再回退到浏览器 `MediaDevices` 路径。
+
+### Windows 操作委托
+
+AG99live 可以把“操作电脑、打开软件、查看桌面状态”等请求交给远程执行器链路。Adapter 负责识别可用电脑、注入远程执行器 prompt、把任务级 JSON 转发到 Codex app-server；app-server 侧通过 `computer-use:computer-use` skill 执行 Windows 桌面观察和操作。AstrBot 主模型不直接输出坐标、UIA selector 或 shell 步骤，只描述任务目标、约束和成功标准。
 
 ### 文本、语音、动作同步播放
 
@@ -75,7 +79,8 @@ AG99live 会把“解释、疑惑、开心、强调、安静聆听”等对话�
 - AstrBot 插件后端。
 - WebSocket 前后端协议。
 - 文本、音频、动作同步播放。
-- 麦克风输入与语音转文字路径。
+- 麦克风输入与语音转文字路径，Windows 桌面端支持原生设备枚举、设备选择和自定义按键说话。
+- 远程执行器接入，可把 Windows 桌面操作任务委托给 Codex app-server / Computer Use。
 - Live2D 模型资源扫描。
 - motion 资源候选选择。
 - 动作实验室和动作样本保存。

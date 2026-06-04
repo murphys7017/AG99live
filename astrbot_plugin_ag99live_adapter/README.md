@@ -9,6 +9,7 @@ AG99live V2 的 AstrBot 插件侧实现。该目录负责协议桥接、turn 生
 - 管理 turn 生命周期，保证文本/语音/动作消息在同一轮次可追踪。
 - 扫描 Live2D 资源并产出结构化能力信息。
 - 生成并下发动作用载荷；默认走 AstrBot 交互中间件主链路，由 `client_objects` / plugin hints 提供动作；`inline_first` 内联动作链路仅作为显式兼容路径保留。
+- 注入远程执行器能力，并把电脑/桌面/软件操作类请求委托给配置的 Codex app-server / Computer Use。
 
 ## 当前路线说明
 
@@ -26,6 +27,7 @@ astrbot_plugin_ag99live_adapter/
 ├─ runtime/              # runtime state、turn 协调、session/chat 状态
 ├─ services/             # 媒体、消息、语音服务
 ├─ motion/               # 动作意图生成与输出清洗
+├─ middleware/           # interaction 动作贡献、远程执行器 prompt/result 贡献
 ├─ live2d/               # 扫描、缓存与分析
 ├─ tests/                # 单元测试
 ├─ live2ds/              # 模型资源
@@ -50,6 +52,7 @@ astrbot_plugin_ag99live_adapter/
 - 主回复末尾若包含合法 `<@anim {...}>`，则优先提取并广播动作载荷。
 - 当前 inline contract 使用 `engine.motion_intent.v2`，字段来自当前模型的 `semantic_axis_profile`。
 - 如果中间件在 result contributor 阶段返回 `client_objects` / plugin hints 动作载荷，则后端优先广播这些结构化动作对象。
+- MiniMax 等 provider 可能把工具参数里的 `plugin_hints` 作为 JSON 字符串返回；当前插件会在动作 contributor 中兼容 dict 和 JSON 字符串两种形态，AstrBot core 侧也应保留同样的解析能力，避免 `_interaction_plugin_hints` 被清空。
 
 ### 动作 selector 输出
 
@@ -70,7 +73,31 @@ astrbot_plugin_ag99live_adapter/
 - 麦克风输入现在按“单段录音”组织：一段采集内的 `input.raw_audio_data` 与 `input.mic_audio_end` 共享同一个新的 `turn_id`；后端 STT ingress 也按这个 `turn_id` 分桶缓冲，不再把不同输入段混到一个全局缓冲。
 - 若前端检测到发送积压，会在 `input.mic_audio_end` 中带上 `dropped: true`，后端直接丢弃该段转写。
 - 切换麦克风设备时，前端会先正常结束旧输入段，再启动新输入段；收到 `control.interrupt` 时，前端会把已释放的 segment 音频写成失败终态后再清理播放 runtime。
+- Windows / Electron 前端现在优先使用主进程 DirectShow/ffmpeg 原生麦克风枚举与采集；这不改变插件侧协议，后端仍只接收 `input.raw_audio_data` 和 `input.mic_audio_end`。
+- 按键说话模式会以 `reason="ptt_release"` 结束本段录音；对插件侧来说它仍是一段普通麦克风输入。
 - `semantic_axis_profile` 在默认设计升级时会自动刷新 backend-owned profile；用户修改过的 profile 如果只是旧默认设计残留，在重新匹配当前模型 hash 后也会自动刷新到新默认，否则保持 `stale` 等待人工处理。
+
+## 远程执行器 / Windows 操作
+
+AG99live 远程执行器当前走任务委托链路：
+
+```text
+用户请求操作电脑
+  -> remote_operator middleware 注入/仲裁
+    -> AstrBot core 输出 {"computer","profile","prompt"}
+      -> RemoteOperatorRuntime
+        -> Codex app-server WebSocket
+          -> computer-use:computer-use skill
+```
+
+当前关键边界：
+
+- `_conf_schema.json` 的 `remote_operator_computer_entries` 配置电脑 key、用户可读名称和 Codex app-server WebSocket endpoint。
+- Adapter 会 probe endpoint 并只向 prompt 注入在线电脑。
+- 对桌面/软件/电脑操作类请求，remote operator middleware 会要求核心只输出三字段 JSON，不允许核心直接调用 shell、浏览器、CUA 或输出底层步骤。
+- `RemoteOperatorRuntime` 会查找 app-server 的 `computer-use:computer-use` skill，并把该 skill 与任务文本一起作为 turn 输入。
+- Windows 桌面观察、点击、输入等底层操作由 Codex app-server / Computer Use 执行；Adapter 不直接持有本机桌面操作权限。
+- 执行结果以 `remote_operator_result` 来源重新进入 AstrBot 事件，避免远程执行器结果再次触发远程执行器。
 
 当前结构注意点：
 
@@ -92,6 +119,8 @@ astrbot_plugin_ag99live_adapter/
 - `realtime_motion_platform_context_enabled`：是否注入平台上下文。
 - `motion_prompt_instruction`：动作 intent 生成的补充指令，默认要求 Live2D 表现更夸张。
 - `enable_action_llm_filter`：是否启用基础动作库 LLM 严格筛选。
+- `remote_operator_default_computer` / `remote_operator_computer_entries`：远程执行器电脑路由和 Codex app-server endpoint 配置。
+- `remote_operator_default_profile` / `remote_operator_profiles`：远程执行器执行档位，当前用于选择 app-server turn 的模型与 effort。
 
 当前 realtime motion selector 的参考策略：
 
