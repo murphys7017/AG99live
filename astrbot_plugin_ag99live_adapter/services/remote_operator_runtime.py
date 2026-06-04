@@ -16,6 +16,9 @@ from ..middleware.remote_operator import (
 )
 
 
+_COMPUTER_USE_SKILL_NAME = "computer-use:computer-use"
+
+
 @dataclass(frozen=True, slots=True)
 class RemoteOperatorEndpointConfig:
     default_computer: str
@@ -151,11 +154,13 @@ class CodexAppServerClient:
         effort: str | None = None,
     ) -> str:
         await self._initialize(websocket)
+        computer_use_skill_path = await self._resolve_computer_use_skill_path(websocket)
         thread_id = await self._start_thread(websocket)
         return await self._start_turn(
             websocket,
             thread_id=thread_id,
             prompt=prompt,
+            computer_use_skill_path=computer_use_skill_path,
             model=model,
             effort=effort,
         )
@@ -190,6 +195,32 @@ class CodexAppServerClient:
                     json.dumps({"jsonrpc": "2.0", "method": "initialized"})
                 )
                 return
+
+    async def _resolve_computer_use_skill_path(self, websocket: Any) -> str:
+        request_id = uuid4().hex
+        await websocket.send(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": "skills/list",
+                    "params": {},
+                }
+            )
+        )
+        while True:
+            payload = _loads_json_object(await websocket.recv())
+            if payload.get("id") != request_id:
+                continue
+            error = payload.get("error")
+            if isinstance(error, Mapping):
+                raise RuntimeError(str(error.get("message") or error))
+            path = _extract_skill_path(payload.get("result"), _COMPUTER_USE_SKILL_NAME)
+            if not path:
+                raise RuntimeError(
+                    f"codex app-server skill unavailable: {_COMPUTER_USE_SKILL_NAME}"
+                )
+            return path
 
     async def _start_thread(self, websocket: Any) -> str:
         request_id = uuid4().hex
@@ -230,20 +261,17 @@ class CodexAppServerClient:
         *,
         thread_id: str,
         prompt: str,
+        computer_use_skill_path: str,
         model: str | None = None,
         effort: str | None = None,
     ) -> str:
         request_id = uuid4().hex
-        executable_prompt = _format_codex_computer_use_prompt(prompt)
         params: dict[str, Any] = {
             "threadId": thread_id,
-            "input": [
-                {
-                    "type": "text",
-                    "text": executable_prompt,
-                    "text_elements": [],
-                }
-            ],
+            "input": _build_codex_computer_use_input(
+                prompt,
+                skill_path=computer_use_skill_path,
+            ),
             "approvalPolicy": "never",
             "approvalsReviewer": "user",
             "sandboxPolicy": {
@@ -486,13 +514,48 @@ def _format_result_text(result: RemoteOperatorExecutionResult) -> str:
     return "\n".join(lines)
 
 
-def _format_codex_computer_use_prompt(prompt: str) -> str:
+def _build_codex_computer_use_input(prompt: str, *, skill_path: str) -> list[dict[str, Any]]:
     normalized = str(prompt or "").strip()
     if not normalized:
-        return "$computer-use"
-    if normalized.startswith("$computer-use"):
-        return normalized
-    return f"$computer-use {normalized}"
+        normalized = "使用 Computer Use 查看当前 Windows 桌面状态，并返回你看到的内容。"
+    return [
+        {
+            "type": "skill",
+            "name": _COMPUTER_USE_SKILL_NAME,
+            "path": skill_path,
+        },
+        {
+            "type": "text",
+            "text": normalized,
+            "text_elements": [],
+        },
+    ]
+
+
+def _extract_skill_path(result: Any, target_name: str) -> str:
+    if isinstance(result, list):
+        candidates = result
+    elif isinstance(result, Mapping):
+        raw_candidates = (
+            result.get("skills")
+            or result.get("items")
+            or result.get("availableSkills")
+            or result.get("available_skills")
+        )
+        candidates = raw_candidates if isinstance(raw_candidates, list) else []
+    else:
+        candidates = []
+
+    for item in candidates:
+        if not isinstance(item, Mapping):
+            continue
+        name = _first_text(item, ("name", "id", "skill"))
+        if name != target_name:
+            continue
+        path = _first_text(item, ("path", "skillPath", "skill_path", "file"))
+        if path:
+            return path
+    return ""
 
 
 def _resolve_computer_entries(config: Mapping[str, Any]) -> tuple[dict[str, str], dict[str, str]]:

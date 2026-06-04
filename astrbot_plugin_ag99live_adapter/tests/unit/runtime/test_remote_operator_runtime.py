@@ -218,7 +218,7 @@ def test_runtime_execute_and_submit_failure_metadata(
     assert metadata["remote_operator"]["error"] == "remote_operator_endpoint_unavailable"
 
 
-def test_codex_client_accepts_nested_thread_id_and_sends_text_input(
+def test_codex_client_accepts_nested_thread_id_and_sends_computer_use_skill_input(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -241,6 +241,21 @@ def test_codex_client_accepts_nested_thread_id_and_sends_text_input(
                         "jsonrpc": "2.0",
                         "id": payload["id"],
                         "result": {},
+                    }
+                )
+            elif payload.get("method") == "skills/list":
+                self.responses.append(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {
+                            "skills": [
+                                {
+                                    "name": "computer-use:computer-use",
+                                    "path": "C:\\Users\\Administrator\\.codex\\plugins\\cache\\openai-bundled\\computer-use\\26.601.20914\\skills\\computer-use\\SKILL.md",
+                                }
+                            ],
+                        },
                     }
                 )
             elif payload.get("method") == "thread/start":
@@ -301,8 +316,13 @@ def test_codex_client_accepts_nested_thread_id_and_sends_text_input(
     assert turn_start["params"]["threadId"] == "thr_123"
     assert turn_start["params"]["input"] == [
         {
+            "type": "skill",
+            "name": "computer-use:computer-use",
+            "path": "C:\\Users\\Administrator\\.codex\\plugins\\cache\\openai-bundled\\computer-use\\26.601.20914\\skills\\computer-use\\SKILL.md",
+        },
+        {
             "type": "text",
-            "text": "$computer-use 打开浏览器",
+            "text": "打开浏览器",
             "text_elements": [],
         }
     ]
@@ -344,6 +364,19 @@ def test_codex_client_auto_approves_command_execution_requests(
                         "result": {},
                     }
                 )
+            elif payload.get("method") == "skills/list":
+                self.responses.append(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": [
+                            {
+                                "name": "computer-use:computer-use",
+                                "path": "C:\\computer-use\\SKILL.md",
+                            }
+                        ],
+                    }
+                )
             elif payload.get("method") == "thread/start":
                 self.responses.append(
                     {
@@ -381,7 +414,7 @@ def test_codex_client_auto_approves_command_execution_requests(
     result = asyncio.run(
         client._execute_unbounded_with_websocket(
             websocket,
-            "$computer-use 查看桌面程序",
+            "查看桌面程序",
             model="gpt-5.3-codex",
             effort="low",
         )
@@ -397,4 +430,15 @@ def test_codex_client_auto_approves_command_execution_requests(
         },
     }
     turn_start = next(payload for payload in sent_payloads if payload.get("method") == "turn/start")
-    assert turn_start["params"]["input"][0]["text"] == "$computer-use 查看桌面程序"
+    assert turn_start["params"]["input"] == [
+        {
+            "type": "skill",
+            "name": "computer-use:computer-use",
+            "path": "C:\\computer-use\\SKILL.md",
+        },
+        {
+            "type": "text",
+            "text": "查看桌面程序",
+            "text_elements": [],
+        },
+    ]
