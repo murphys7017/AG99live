@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 import sys
 import types
 
@@ -483,6 +484,41 @@ def test_plugin_hints_motion_payload_uses_profile_axis_value_range(
     assert payload["axes"]["eye_open_left"]["value"] == 72
     assert "debug_tail" not in payload["axes"]
     assert "unknown_axis" not in payload["axes"]
+
+
+def test_plugin_hints_motion_payload_accepts_json_string(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    event.set_extra(
+        "_interaction_plugin_hints",
+        json.dumps(
+            {
+                "ag99live_motion": {
+                    "mode": "expressive",
+                    "emotion_label": "curious",
+                    "duration_hint_ms": 1500,
+                    "axes": {
+                        "head_yaw": {"value": 48},
+                        "eye_open_left": {"value": 72},
+                    },
+                }
+            }
+        ),
+    )
+
+    payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
+
+    assert payload is not None
+    assert payload["emotion_label"] == "curious"
+    assert payload["duration_hint_ms"] == 1500
+    assert payload["axes"]["head_yaw"]["value"] == 48
+    assert payload["axes"]["eye_open_left"]["value"] == 72
 
 
 def test_plugin_hints_expressive_payload_is_pushed_out_of_idle_deadzone(

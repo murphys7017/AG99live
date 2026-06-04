@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -251,7 +252,9 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     event: Any,
     runtime_state: Any,
 ) -> tuple[dict[str, Any] | None, str]:
-    hints = _call_event_method(event, "get_extra", "_interaction_plugin_hints")
+    hints = _coerce_plugin_hints_mapping(
+        _call_event_method(event, "get_extra", "_interaction_plugin_hints")
+    )
     if not isinstance(hints, dict):
         return None, "plugin_hints_missing"
 
@@ -773,7 +776,9 @@ def _log_plugin_hints_motion_resolution(
     payload: dict[str, Any] | None,
     reason: str,
 ) -> None:
-    hints = _call_event_method(event, "get_extra", "_interaction_plugin_hints")
+    hints = _coerce_plugin_hints_mapping(
+        _call_event_method(event, "get_extra", "_interaction_plugin_hints")
+    )
     hint_keys: list[str] = []
     motion_axes_keys: list[str] = []
     if isinstance(hints, dict):
@@ -800,6 +805,22 @@ def _log_plugin_hints_motion_resolution(
         ",".join(hint_keys),
         ",".join(motion_axes_keys),
     )
+
+
+def _coerce_plugin_hints_mapping(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return None
+
+    raw_value = value.strip()
+    if not raw_value:
+        return None
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _extract_assistant_text(view: Any) -> str:
