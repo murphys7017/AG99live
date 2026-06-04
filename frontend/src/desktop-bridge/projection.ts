@@ -5,6 +5,7 @@ import type {
   DesktopHistoryEntry,
   DesktopMicrophoneDevice,
   DesktopMotionPlaybackRecord,
+  DesktopPttKeyBinding,
   DesktopMotionTuningSamplesStatus,
   DesktopMotionTuningSample,
 } from "../types/desktop.js";
@@ -28,6 +29,7 @@ export interface AdapterRuntimeProjection {
   micRequested: boolean;
   micCapturing: boolean;
   pttModeEnabled: boolean;
+  pttKeyBinding: DesktopPttKeyBinding;
   audioPlaying: boolean;
   historyEntries: DesktopHistoryEntry[];
   backendHistorySummaries: DesktopBackendHistorySummary[];
@@ -54,6 +56,7 @@ export interface AdapterRuntimeProjectionInput {
   micRequested: boolean;
   micCapturing: boolean;
   pttModeEnabled: boolean;
+  pttKeyBinding: DesktopPttKeyBinding;
   isPlayingAudio: boolean;
   historyEntries: DesktopHistoryEntry[];
   backendHistorySummaries: DesktopBackendHistorySummary[];
@@ -105,6 +108,7 @@ export interface DesktopRuntimeSnapshotOutput {
   micRequested: boolean;
   micCapturing: boolean;
   pttModeEnabled: boolean;
+  pttKeyBinding: DesktopPttKeyBinding;
   audioPlaying: boolean;
   confName: string;
   lastUpdated: string;
@@ -152,6 +156,7 @@ export function buildAdapterRuntimeProjection(
     micCapturing: input.micCapturing,
     audioPlaying: input.isPlayingAudio,
     pttModeEnabled: input.pttModeEnabled,
+    pttKeyBinding: { ...input.pttKeyBinding },
     historyEntries: [...input.historyEntries],
     backendHistorySummaries: input.backendHistorySummaries.map((s) =>
       cloneJson(s),
@@ -244,6 +249,7 @@ export function buildDesktopRuntimeSnapshot(
     micCapturing: p.micCapturing,
     audioPlaying: p.audioPlaying,
     pttModeEnabled: p.pttModeEnabled,
+    pttKeyBinding: { ...p.pttKeyBinding },
     confName: input.confName,
     lastUpdated: input.lastUpdated,
     serverWsUrl: p.serverWsUrl,

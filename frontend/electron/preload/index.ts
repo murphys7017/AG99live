@@ -2,6 +2,9 @@ import { contextBridge, ipcRenderer } from "electron";
 import os from "node:os";
 import type {
   DesktopAuxWindowRole,
+  DesktopMicrophoneAudioChunk,
+  DesktopMicrophoneDevice,
+  DesktopPttKeyBinding,
   DesktopWindowVisibilityState,
 } from "../../src/types/desktop";
 
@@ -61,6 +64,17 @@ const api = {
       captured_at: string;
     } | null>;
   },
+  listNativeMicrophones: () => {
+    return ipcRenderer.invoke("desktop:list-native-microphones") as Promise<DesktopMicrophoneDevice[]>;
+  },
+  startNativeMicrophoneCapture: (deviceId: string | null) => {
+    return ipcRenderer.invoke("desktop:start-native-microphone-capture", deviceId) as Promise<
+      { ok: true; sessionId: string } | { ok: false; error: string }
+    >;
+  },
+  stopNativeMicrophoneCapture: (sessionId: string) => {
+    return ipcRenderer.invoke("desktop:stop-native-microphone-capture", sessionId) as Promise<boolean>;
+  },
   toggleAuxWindow: (target: DesktopAuxWindowRole) => {
     ipcRenderer.send("desktop:toggle-aux-window", target);
   },
@@ -73,8 +87,8 @@ const api = {
   setOverlayContentHeight: (height: number) => {
     ipcRenderer.send("desktop:set-overlay-content-height", height);
   },
-  setPttMode: (enabled: boolean) => {
-    ipcRenderer.send("desktop:set-ptt-mode", enabled);
+  setPttMode: (enabled: boolean, binding?: DesktopPttKeyBinding) => {
+    ipcRenderer.send("desktop:set-ptt-mode", enabled, binding);
   },
   onIpc: (channel: string, callback: () => void) => {
     const handler = () => {
@@ -83,6 +97,39 @@ const api = {
     ipcRenderer.on(channel, handler);
     return () => {
       ipcRenderer.removeListener(channel, handler);
+    };
+  },
+  onNativeMicrophoneChunk: (
+    callback: (chunk: DesktopMicrophoneAudioChunk & { sessionId: string }) => void,
+  ) => {
+    const handler = (_event: unknown, payload: DesktopMicrophoneAudioChunk & { sessionId: string }) => {
+      callback(payload);
+    };
+    ipcRenderer.on("desktop:native-microphone-chunk", handler);
+    return () => {
+      ipcRenderer.removeListener("desktop:native-microphone-chunk", handler);
+    };
+  },
+  onNativeMicrophoneEnded: (
+    callback: (payload: { sessionId: string; reason: string }) => void,
+  ) => {
+    const handler = (_event: unknown, payload: { sessionId: string; reason: string }) => {
+      callback(payload);
+    };
+    ipcRenderer.on("desktop:native-microphone-ended", handler);
+    return () => {
+      ipcRenderer.removeListener("desktop:native-microphone-ended", handler);
+    };
+  },
+  onNativeMicrophoneError: (
+    callback: (payload: { sessionId: string; error: string }) => void,
+  ) => {
+    const handler = (_event: unknown, payload: { sessionId: string; error: string }) => {
+      callback(payload);
+    };
+    ipcRenderer.on("desktop:native-microphone-error", handler);
+    return () => {
+      ipcRenderer.removeListener("desktop:native-microphone-error", handler);
     };
   },
   onWindowState: (

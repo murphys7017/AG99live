@@ -318,6 +318,7 @@ export interface DesktopRuntimeSnapshot {
   micRequested: boolean;
   micCapturing: boolean;
   pttModeEnabled: boolean;
+  pttKeyBinding: DesktopPttKeyBinding;
   audioPlaying: boolean;
   confName: string;
   lastUpdated: string;
@@ -349,6 +350,18 @@ export interface DesktopMicrophoneDevice {
   label: string;
 }
 
+export interface DesktopMicrophoneAudioChunk {
+  audio: number[];
+  sampleRate: number;
+  channels: 1;
+}
+
+export interface DesktopPttKeyBinding {
+  code: string;
+  label: string;
+  uiohookKeycode: number | null;
+}
+
 export interface DesktopMotionTuningSamplesStatus {
   rootError: string;
   loadError: string;
@@ -378,4 +391,5 @@ export type DesktopRuntimeCommand =
   | { type: "interrupt" }
   | { type: "toggle_mic_capture" }
   | { type: "set_ptt_mode"; enabled: boolean }
+  | { type: "set_ptt_key_binding"; binding: DesktopPttKeyBinding }
   | { type: "preview_motion_payload"; payload: unknown };

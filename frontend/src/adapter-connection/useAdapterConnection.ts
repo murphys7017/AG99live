@@ -102,6 +102,7 @@ export interface AdapterConnectionInstance {
   releaseAudioForPlayback: ReturnType<typeof createAdapterAudioRuntime>["releaseAudioForPlayback"];
   toggleMicrophoneCapture: ReturnType<typeof createAdapterMicrophoneRuntime>["toggleMicrophoneCapture"];
   setPttMode: ReturnType<typeof createAdapterMicrophoneRuntime>["setPttMode"];
+  setPttKeyBinding: ReturnType<typeof createAdapterMicrophoneRuntime>["setPttKeyBinding"];
   startPttCapture: ReturnType<typeof createAdapterMicrophoneRuntime>["startPttCapture"];
   stopPttCapture: ReturnType<typeof createAdapterMicrophoneRuntime>["stopPttCapture"];
   pushHistory: (role: DesktopHistoryEntry["role"], text: string) => void;
@@ -162,9 +163,9 @@ export function createAdapterConnection(
     buildEnvelope: buildMessageEnvelope as (typeof buildMessageEnvelope),
     pushHistory: pushHistory as (role: "system" | "error", text: string) => void,
     createMessageId,
-    setDesktopPttMode: (enabled) => {
+    setDesktopPttMode: (enabled, binding) => {
       if (typeof window !== "undefined") {
-        window.ag99desktop?.setPttMode?.(enabled);
+        window.ag99desktop?.setPttMode?.(enabled, binding);
       }
     },
   });
@@ -177,6 +178,7 @@ export function createAdapterConnection(
     startMicrophoneCapture,
     stopMicrophoneCapture,
     setPttMode,
+    setPttKeyBinding,
     startPttCapture,
     stopPttCapture,
   } = microphoneRuntime;
@@ -611,6 +613,7 @@ export function createAdapterConnection(
     releaseAudioForPlayback,
     toggleMicrophoneCapture,
     setPttMode,
+    setPttKeyBinding,
     startPttCapture,
     stopPttCapture,
     pushHistory,

@@ -3,6 +3,7 @@ import type {
   DesktopMicrophoneDevice,
   DesktopMotionTuningSample,
   DesktopMotionTuningSamplesStatus,
+  DesktopPttKeyBinding,
   DesktopProfileAuthoringCommand,
   DesktopRuntimeCommand,
 } from "../types/desktop.js";
@@ -31,6 +32,7 @@ interface DesktopRuntimeCommandAdapterPort {
   interruptCurrentTurn: () => boolean;
   toggleMicrophoneCapture: () => Promise<unknown>;
   setPttMode: (enabled: boolean) => void;
+  setPttKeyBinding: (binding: DesktopPttKeyBinding) => void;
   sendSemanticAxisProfileSave: (payload: SystemSemanticAxisProfileSavePayload) => boolean;
 }
 
@@ -129,6 +131,9 @@ export function createDesktopRuntimeCommandHandler(
         return;
       case "set_ptt_mode":
         deps.adapter.setPttMode(command.enabled);
+        return;
+      case "set_ptt_key_binding":
+        deps.adapter.setPttKeyBinding(command.binding);
         return;
       case "preview_motion_payload":
         deps.handlePreviewMotionPlan(command.payload);

@@ -1,16 +1,24 @@
 import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen, session } from "electron";
 import { MenuManager } from "./menu-manager";
 import { WindowManager } from "./window-manager";
+import { setupNativeMicrophoneIpc } from "./native-microphone";
+import type { DesktopPttKeyBinding } from "../../src/types/desktop";
 
 let windowManager: WindowManager;
 let menuManager: MenuManager;
 const WM_DWMCOMPOSITIONCHANGED = 0x031e;
 const WINDOW_RECOVERY_DEBOUNCE_MS = 5000;
 
+app.commandLine.appendSwitch("enable-media-stream");
+
 // ── Global keyboard hook for PTT ───────────────────────────────────
 
 let uiohookModule: Record<string, unknown> | null = null;
 let globalPttEnabled = false;
+let globalPttKeycode: number | null = 29;
+let globalPttHookStarted = false;
+let globalPttListenersInstalled = false;
+let globalPttPressed = false;
 
 function loadUiohook(): Record<string, unknown> | null {
   if (uiohookModule) {
@@ -26,47 +34,79 @@ function loadUiohook(): Record<string, unknown> | null {
 }
 
 function startGlobalPttHook(): void {
+  if (!globalPttKeycode) {
+    console.warn("[PTT] global keyboard hook disabled for unmapped key binding.");
+    return;
+  }
   const uiohook = loadUiohook();
   if (!uiohook) {
     return;
   }
   globalPttEnabled = true;
+  if (globalPttHookStarted) {
+    return;
+  }
   const hook = uiohook.uIOhook as {
     on: (event: string, callback: (event: { keycode: number }) => void) => void;
     start: () => void;
     stop: () => void;
   };
-  hook.on("keydown", (event) => {
-    if (!globalPttEnabled) return;
-    if (event.keycode === 29) {
-      const pet = windowManager?.getWindow("pet");
-      pet?.webContents.send("desktop:ptt-keydown");
-    }
-  });
-  hook.on("keyup", (event) => {
-    if (!globalPttEnabled) return;
-    if (event.keycode === 29) {
-      const pet = windowManager?.getWindow("pet");
-      pet?.webContents.send("desktop:ptt-keyup");
-    }
-  });
+  if (!globalPttListenersInstalled) {
+    hook.on("keydown", (event) => {
+      if (!globalPttEnabled) return;
+      if (event.keycode === globalPttKeycode) {
+        if (globalPttPressed) return;
+        globalPttPressed = true;
+        const pet = windowManager?.getWindow("pet");
+        console.info("[PTT] global keydown matched keycode=%s petReady=%s", event.keycode, Boolean(pet && !pet.isDestroyed()));
+        pet?.webContents.send("desktop:ptt-keydown");
+      }
+    });
+    hook.on("keyup", (event) => {
+      if (!globalPttEnabled) return;
+      if (event.keycode === globalPttKeycode) {
+        globalPttPressed = false;
+        const pet = windowManager?.getWindow("pet");
+        console.info("[PTT] global keyup matched keycode=%s petReady=%s", event.keycode, Boolean(pet && !pet.isDestroyed()));
+        pet?.webContents.send("desktop:ptt-keyup");
+      }
+    });
+    globalPttListenersInstalled = true;
+  }
   hook.start();
+  globalPttHookStarted = true;
   console.info("[PTT] global keyboard hook started");
 }
 
 function stopGlobalPttHook(): void {
-  const uiohook = loadUiohook();
+  const uiohook = uiohookModule;
+  globalPttEnabled = false;
+  globalPttPressed = false;
   if (!uiohook) {
     return;
   }
-  globalPttEnabled = false;
+  if (!globalPttHookStarted) {
+    return;
+  }
   try {
     const hook = uiohook.uIOhook as { stop: () => void };
     hook.stop();
+    globalPttHookStarted = false;
   } catch (err) {
     console.warn("[PTT] failed to stop global keyboard hook.", err);
   }
   console.info("[PTT] global keyboard hook stopped");
+}
+
+function normalizePttKeycode(binding: unknown): number | null {
+  if (!binding || typeof binding !== "object") {
+    return 29;
+  }
+
+  const keycode = (binding as Partial<DesktopPttKeyBinding>).uiohookKeycode;
+  return typeof keycode === "number" && Number.isInteger(keycode) && keycode > 0
+    ? keycode
+    : null;
 }
 
 function isEnvFlagEnabled(name: string): boolean {
@@ -195,10 +235,17 @@ function setupIpc(): void {
     windowManager.endWindowDrag(BrowserWindow.fromWebContents(event.sender));
   });
 
-  ipcMain.on("desktop:set-ptt-mode", (_event, enabled: boolean) => {
+  ipcMain.on("desktop:set-ptt-mode", (_event, enabled: boolean, binding?: DesktopPttKeyBinding) => {
+    globalPttKeycode = normalizePttKeycode(binding);
+    globalPttPressed = false;
+    console.info("[PTT] set mode enabled=%s keycode=%s", Boolean(enabled), globalPttKeycode ?? "unmapped");
     windowManager.setPetWindowFocusEnabled(enabled);
     if (enabled) {
-      startGlobalPttHook();
+      if (globalPttKeycode) {
+        startGlobalPttHook();
+      } else {
+        stopGlobalPttHook();
+      }
     } else {
       stopGlobalPttHook();
     }
@@ -235,7 +282,7 @@ function setupMediaPermissions(): void {
       return false;
     }
 
-    return details.mediaType === "audio";
+    return isAudioMediaPermissionCheck(details);
   });
 
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
@@ -244,8 +291,7 @@ function setupMediaPermissions(): void {
       return;
     }
 
-    const mediaTypes = getRequestedMediaTypes(details);
-    callback(mediaTypes.includes("audio") && !mediaTypes.includes("video"));
+    callback(isAudioOnlyMediaRequest(details));
   });
 }
 
@@ -258,6 +304,30 @@ function getRequestedMediaTypes(details: unknown): string[] {
   return Array.isArray(mediaTypes)
     ? mediaTypes.filter((item): item is string => typeof item === "string")
     : [];
+}
+
+function getRequestedMediaType(details: unknown): string {
+  if (!details || typeof details !== "object") {
+    return "";
+  }
+
+  const mediaType = (details as { mediaType?: unknown }).mediaType;
+  return typeof mediaType === "string" ? mediaType : "";
+}
+
+function isAudioMediaPermissionCheck(details: unknown): boolean {
+  const mediaType = getRequestedMediaType(details);
+  return mediaType === "audio" || mediaType === "unknown" || mediaType === "";
+}
+
+function isAudioOnlyMediaRequest(details: unknown): boolean {
+  const mediaTypes = getRequestedMediaTypes(details);
+  if (mediaTypes.length > 0) {
+    return mediaTypes.includes("audio") && !mediaTypes.includes("video");
+  }
+
+  const mediaType = getRequestedMediaType(details);
+  return mediaType === "audio";
 }
 
 function setupTransparentWindowRecovery(): (window: BrowserWindow) => void {
@@ -349,6 +419,7 @@ app.whenReady().then(() => {
   void menuManager;
   windowManager.createWindows();
   setupIpc();
+  setupNativeMicrophoneIpc();
 
   if (!app.isPackaged) {
     globalShortcut.register("CommandOrControl+Shift+L", () => {

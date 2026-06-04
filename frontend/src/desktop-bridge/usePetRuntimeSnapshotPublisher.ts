@@ -8,6 +8,7 @@ import type {
   DesktopMicrophoneDevice,
   DesktopModelProjectionSnapshot,
   DesktopMotionPlaybackRecord,
+  DesktopPttKeyBinding,
   DesktopSemanticAxisProfileSaveResult,
   DesktopMotionTuningSamplesStatus,
   DesktopMotionTuningSample,
@@ -44,6 +45,7 @@ interface PetRuntimeSnapshotAdapterPort {
     readonly micCapturing: boolean;
     readonly isPlayingAudio: boolean;
     readonly pttModeEnabled: boolean;
+    readonly pttKeyBinding: DesktopPttKeyBinding;
     readonly historyEntries: readonly DesktopHistoryEntry[];
     readonly backendHistorySummaries: readonly DesktopBackendHistorySummary[];
     readonly backendHistoryEntries: readonly DesktopBackendHistoryMessage[];
@@ -158,6 +160,7 @@ export function createPetRuntimeSnapshotPublisher(
         micCapturing: a.micCapturing,
         isPlayingAudio: a.isPlayingAudio,
         pttModeEnabled: a.pttModeEnabled,
+        pttKeyBinding: a.pttKeyBinding,
         historyEntries: [...a.historyEntries],
         backendHistorySummaries: [...a.backendHistorySummaries],
         backendHistoryEntries: [...a.backendHistoryEntries],

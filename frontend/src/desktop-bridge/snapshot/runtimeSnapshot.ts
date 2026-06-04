@@ -12,6 +12,10 @@ import {
 } from "../../model-engine/settings";
 import { cloneSemanticParameterPlan } from "../../model-engine/planParser";
 import { DEFAULT_ADAPTER_ADDRESS } from "../../adapter-connection/core/address";
+import {
+  DEFAULT_PTT_KEY_BINDING,
+  normalizePttKeyBinding,
+} from "../../adapter-connection/core/pttKeyBinding";
 import { SCHEMA_CATALOG_MOTION_V1 } from "../../types/protocol";
 import {
   cloneNumericRecord,
@@ -39,6 +43,7 @@ export const defaultSnapshot: DesktopRuntimeSnapshot = {
   micRequested: false,
   micCapturing: false,
   pttModeEnabled: false,
+  pttKeyBinding: DEFAULT_PTT_KEY_BINDING,
   audioPlaying: false,
   confName: "",
   lastUpdated: "",
@@ -121,6 +126,7 @@ export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRunt
     backendHistoryEntries: backendHistoryEntries
       .map(cloneBackendHistoryMessage)
       .filter(isPresent),
+    pttKeyBinding: normalizePttKeyBinding(snapshot.pttKeyBinding),
     activeBackendHistoryUid: normalizeText(snapshot.activeBackendHistoryUid),
     backendHistoryLoading: Boolean(snapshot.backendHistoryLoading),
     backendHistoryStatusMessage: normalizeText(snapshot.backendHistoryStatusMessage),

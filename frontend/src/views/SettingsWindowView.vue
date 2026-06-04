@@ -11,6 +11,9 @@ const {
   microphoneDeviceStatus,
   ambientMotionEnabled,
   pttModeEnabled,
+  pttKeyBinding,
+  pttKeyCaptureActive,
+  pttKeyStatus,
   motionEngineSettings,
   statusLabel,
   profileEditorButtonLabel,
@@ -29,6 +32,8 @@ const {
   refreshMicrophoneDevices,
   applyAmbientMotionEnabled,
   applyPttModeEnabled,
+  startPttKeyCapture,
+  capturePttKey,
   applyMotionEngineSettings,
   resetMotionEngineSettings,
   requestModelProjectionSync,
@@ -225,12 +230,24 @@ onMounted(() => {
           />
           <span class="settings-toggle__control" aria-hidden="true"></span>
           <span class="settings-toggle__copy">
-            开启后麦克风默认关闭。长按 Ctrl 键开始收音，松开 Ctrl 停止收音。关闭后恢复手动开关麦克风。
+            开启后麦克风默认关闭。长按当前配置按键开始收音，松开按键停止收音。关闭后恢复手动开关麦克风。
           </span>
         </label>
 
+        <div class="settings-card__actions">
+          <button
+            type="button"
+            class="settings-card__button settings-card__button--ghost"
+            @click="startPttKeyCapture"
+            @keydown="capturePttKey"
+          >
+            {{ pttKeyCaptureActive ? "按下任意键" : `当前按键：${pttKeyBinding.label}` }}
+          </button>
+        </div>
+
         <p class="settings-card__hint">
           按键说话模式下，"开始/停止麦克风"按钮仍可手动接管。切换模式会关闭当前收音。
+          {{ pttKeyStatus }}
         </p>
       </article>
 

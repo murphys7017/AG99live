@@ -1,8 +1,6 @@
-export interface MicrophoneAudioChunk {
-  audio: number[];
-  sampleRate: number;
-  channels: 1;
-}
+import type { DesktopMicrophoneAudioChunk } from "../../types/desktop.js";
+
+export type MicrophoneAudioChunk = DesktopMicrophoneAudioChunk;
 
 export interface StartMicrophoneCaptureOptions {
   deviceId: string | null;
@@ -12,11 +10,21 @@ export interface StartMicrophoneCaptureOptions {
 
 interface MicrophoneCaptureRuntime {
   sampleRate: number;
+  kind: "web";
   mediaStream: MediaStream;
   audioContext: AudioContext;
   sourceNode: MediaStreamAudioSourceNode;
   processorNode: AudioWorkletNode;
   sinkGainNode: GainNode;
+}
+
+interface NativeMicrophoneCaptureRuntime {
+  sampleRate: number;
+  kind: "native";
+  sessionId: string;
+  detachChunkListener: () => void;
+  detachEndedListener: () => void;
+  detachErrorListener: () => void;
 }
 
 const MIC_TARGET_SAMPLE_RATE = 16000;
@@ -42,7 +50,7 @@ class Ag99liveMicrophoneCaptureProcessor extends AudioWorkletProcessor {
 registerProcessor("${MIC_AUDIO_WORKLET_PROCESSOR_NAME}", Ag99liveMicrophoneCaptureProcessor);
 `;
 
-let microphoneRuntime: MicrophoneCaptureRuntime | null = null;
+let microphoneRuntime: MicrophoneCaptureRuntime | NativeMicrophoneCaptureRuntime | null = null;
 
 export function isMicrophoneCaptureRuntimeActive(): boolean {
   return Boolean(microphoneRuntime);
@@ -55,15 +63,6 @@ export async function startMicrophoneCaptureRuntime(
     return;
   }
 
-  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-    throw new Error("当前环境不支持麦克风采集。");
-  }
-
-  const AudioContextConstructor = getAudioContextConstructor();
-  if (!AudioContextConstructor) {
-    throw new Error("当前环境不支持 Web Audio API。");
-  }
-
   let mediaStream: MediaStream | null = null;
   let audioContext: AudioContext | null = null;
   let sourceNode: MediaStreamAudioSourceNode | null = null;
@@ -72,6 +71,29 @@ export async function startMicrophoneCaptureRuntime(
 
   try {
     const selectedDeviceId = normalizeMicrophoneDeviceId(options.deviceId);
+    const selectedNativeDevice = isNativeMicrophoneDeviceId(selectedDeviceId);
+    if (selectedDeviceId) {
+      const nativeStarted = await tryStartNativeMicrophoneCaptureRuntime(
+        selectedDeviceId,
+        options,
+      );
+      if (nativeStarted) {
+        return;
+      }
+      if (selectedNativeDevice) {
+        throw new Error("原生麦克风采集启动失败，请确认 ffmpeg 可用且设备未被独占。");
+      }
+    }
+
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      throw new Error("当前环境不支持麦克风采集。");
+    }
+
+    const AudioContextConstructor = getAudioContextConstructor();
+    if (!AudioContextConstructor) {
+      throw new Error("当前环境不支持 Web Audio API。");
+    }
+
     const audioConstraints: MediaTrackConstraints = {
       channelCount: 1,
       sampleRate: MIC_TARGET_SAMPLE_RATE,
@@ -113,6 +135,7 @@ export async function startMicrophoneCaptureRuntime(
     );
 
     microphoneRuntime = {
+      kind: "web",
       sampleRate,
       mediaStream,
       audioContext,
@@ -155,6 +178,10 @@ function normalizeMicrophoneDeviceId(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function isNativeMicrophoneDeviceId(value: string): boolean {
+  return value.startsWith("@device_") || value.startsWith("native:");
+}
+
 export async function stopMicrophoneCaptureRuntime(): Promise<boolean> {
   const runtime = microphoneRuntime;
   if (!runtime) {
@@ -162,6 +189,14 @@ export async function stopMicrophoneCaptureRuntime(): Promise<boolean> {
   }
 
   microphoneRuntime = null;
+  if (runtime.kind === "native") {
+    runtime.detachChunkListener();
+    runtime.detachEndedListener();
+    runtime.detachErrorListener();
+    await window.ag99desktop?.stopNativeMicrophoneCapture?.(runtime.sessionId);
+    return true;
+  }
+
   runtime.sourceNode.disconnect();
   disconnectMicrophoneProcessorNode(runtime.processorNode);
   runtime.sinkGainNode.disconnect();
@@ -173,6 +208,60 @@ export async function stopMicrophoneCaptureRuntime(): Promise<boolean> {
     // Ignore close failures during teardown.
   }
 
+  return true;
+}
+
+async function tryStartNativeMicrophoneCaptureRuntime(
+  deviceId: string,
+  options: StartMicrophoneCaptureOptions,
+): Promise<boolean> {
+  if (!window.ag99desktop?.startNativeMicrophoneCapture) {
+    return false;
+  }
+
+  const startResult = await window.ag99desktop.startNativeMicrophoneCapture(deviceId);
+  if (!startResult.ok) {
+    console.warn("[Connection] native microphone capture unavailable.", startResult.error);
+    return false;
+  }
+
+  const sessionId = startResult.sessionId;
+  const detachChunkListener = window.ag99desktop.onNativeMicrophoneChunk?.((
+    chunk: DesktopMicrophoneAudioChunk & { sessionId: string },
+  ) => {
+    if (chunk.sessionId !== sessionId || microphoneRuntime?.kind !== "native") {
+      return;
+    }
+    options.onChunk({
+      audio: chunk.audio,
+      sampleRate: chunk.sampleRate,
+      channels: chunk.channels,
+    });
+  }) ?? (() => {});
+  const detachEndedListener = window.ag99desktop.onNativeMicrophoneEnded?.((
+    payload: { sessionId: string; reason: string },
+  ) => {
+    if (payload.sessionId === sessionId) {
+      options.onDeviceEnded();
+    }
+  }) ?? (() => {});
+  const detachErrorListener = window.ag99desktop.onNativeMicrophoneError?.((
+    payload: { sessionId: string; error: string },
+  ) => {
+    if (payload.sessionId === sessionId) {
+      console.warn("[Connection] native microphone capture failed.", payload.error);
+      options.onDeviceEnded();
+    }
+  }) ?? (() => {});
+
+  microphoneRuntime = {
+    kind: "native",
+    sampleRate: MIC_TARGET_SAMPLE_RATE,
+    sessionId,
+    detachChunkListener,
+    detachEndedListener,
+    detachErrorListener,
+  };
   return true;
 }
 

@@ -13,6 +13,11 @@ const MICROPHONE_PERMISSION_TIMEOUT_MS = 4000;
 export async function listMicrophoneInputDevices(
   options: ListMicrophoneInputDevicesOptions = {},
 ): Promise<MicrophoneDeviceInfo[]> {
+  const nativeDevices = await listNativeMicrophoneInputDevices();
+  if (nativeDevices.length > 0) {
+    return nativeDevices;
+  }
+
   if (typeof navigator === "undefined") {
     return [];
   }
@@ -33,11 +38,31 @@ export async function listMicrophoneInputDevices(
 
   return devices
     .filter((device) => device.kind === "audioinput")
+    .filter((device) => !isPseudoDefaultMicrophoneDevice(device))
     .map((device, index) => ({
       deviceId: device.deviceId.trim(),
       label: device.label.trim() || `麦克风 ${index + 1}`,
     }))
     .filter((device) => device.deviceId.length > 0);
+}
+
+async function listNativeMicrophoneInputDevices(): Promise<MicrophoneDeviceInfo[]> {
+  try {
+    const devices = await window.ag99desktop?.listNativeMicrophones?.();
+    if (!Array.isArray(devices)) {
+      return [];
+    }
+
+    return devices
+      .map((device) => ({
+        deviceId: typeof device.deviceId === "string" ? device.deviceId.trim() : "",
+        label: typeof device.label === "string" ? device.label.trim() : "",
+      }))
+      .filter((device) => device.deviceId && device.label);
+  } catch (error) {
+    console.warn("[Connection] failed to enumerate native microphones.", error);
+    return [];
+  }
 }
 
 function shouldRequestPermissionForDeviceList(devices: MediaDeviceInfo[]): boolean {
@@ -46,7 +71,13 @@ function shouldRequestPermissionForDeviceList(devices: MediaDeviceInfo[]): boole
     return true;
   }
 
-  return audioInputs.every((device) => !device.label.trim());
+  return audioInputs.every((device) => !device.label.trim())
+    || audioInputs.every(isPseudoDefaultMicrophoneDevice);
+}
+
+function isPseudoDefaultMicrophoneDevice(device: MediaDeviceInfo): boolean {
+  const deviceId = device.deviceId.trim().toLowerCase();
+  return deviceId === "default" || deviceId === "communications";
 }
 
 async function unlockMicrophoneDeviceEnumeration(

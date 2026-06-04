@@ -1,8 +1,14 @@
 import { DEFAULT_ADAPTER_ADDRESS } from "./address.js";
+import {
+  DEFAULT_PTT_KEY_BINDING,
+  normalizePttKeyBinding,
+} from "./pttKeyBinding.js";
+import type { DesktopPttKeyBinding } from "../../types/desktop.js";
 
 const ADDRESS_STORAGE_KEY = "ag99live.adapter.address";
 const DESKTOP_SCREENSHOT_ON_SEND_STORAGE_KEY = "ag99live.desktop.capture_on_send";
 const MICROPHONE_DEVICE_ID_STORAGE_KEY = "ag99live.microphone.device_id";
+const PTT_KEY_BINDING_STORAGE_KEY = "ag99live.microphone.ptt_key_binding";
 
 export function normalizeAdapterAddressSetting(nextAddress: string): string {
   return nextAddress.trim() || DEFAULT_ADAPTER_ADDRESS;
@@ -101,5 +107,36 @@ export function saveStoredMicrophoneDeviceId(deviceId: string): void {
     }
   } catch (error) {
     console.warn("[AdapterPreferences] Failed to persist microphone device preference.", error);
+  }
+}
+
+export function loadStoredPttKeyBinding(): DesktopPttKeyBinding {
+  if (typeof window === "undefined") {
+    return DEFAULT_PTT_KEY_BINDING;
+  }
+
+  try {
+    const storedValue = window.localStorage.getItem(PTT_KEY_BINDING_STORAGE_KEY);
+    if (!storedValue) {
+      return DEFAULT_PTT_KEY_BINDING;
+    }
+    return normalizePttKeyBinding(JSON.parse(storedValue));
+  } catch (error) {
+    console.warn("[AdapterPreferences] Failed to load PTT key binding preference.", error);
+    return DEFAULT_PTT_KEY_BINDING;
+  }
+}
+
+export function saveStoredPttKeyBinding(binding: DesktopPttKeyBinding): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      PTT_KEY_BINDING_STORAGE_KEY,
+      JSON.stringify(normalizePttKeyBinding(binding)),
+    );
+  } catch (error) {
+    console.warn("[AdapterPreferences] Failed to persist PTT key binding preference.", error);
   }
 }

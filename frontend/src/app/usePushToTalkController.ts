@@ -1,6 +1,10 @@
+import type { DesktopPttKeyBinding } from "../types/desktop";
+import { matchesPttKeyBinding } from "../adapter-connection/core/pttKeyBinding";
+
 export interface PushToTalkAdapterPort {
   readonly state: {
     readonly pttModeEnabled: boolean;
+    readonly pttKeyBinding: DesktopPttKeyBinding;
   };
   startPttCapture: () => Promise<void>;
   stopPttCapture: () => Promise<void>;
@@ -17,8 +21,7 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
     if (!adapter.state.pttModeEnabled) {
       return;
     }
-    // Ctrl activates PTT and repeated keydown events are ignored.
-    if (event.key === "Control" && !event.repeat) {
+    if (matchesPttKeyBinding(event, adapter.state.pttKeyBinding) && !event.repeat) {
       console.info("[PTT] starting mic capture");
       void adapter.startPttCapture();
     }
@@ -29,7 +32,7 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
     if (!adapter.state.pttModeEnabled) {
       return;
     }
-    if (event.key === "Control") {
+    if (matchesPttKeyBinding(event, adapter.state.pttKeyBinding)) {
       console.info("[PTT] stopping mic capture");
       void adapter.stopPttCapture();
     }

@@ -1,7 +1,11 @@
-import { computed, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { listMicrophoneInputDevices } from "../adapter-connection/runtime/microphoneDevices";
 import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import { DEFAULT_ADAPTER_ADDRESS } from "../adapter-connection/core/address";
+import {
+  createPttKeyBindingFromKeyboardEvent,
+  normalizePttKeyBinding,
+} from "../adapter-connection/core/pttKeyBinding";
 import {
   MAX_MOTION_INTENSITY_SCALE,
   MIN_MOTION_INTENSITY_SCALE,
@@ -20,9 +24,15 @@ export function useSettingsWindow() {
   const microphoneDeviceStatus = ref("");
   const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
   const pttModeEnabled = ref(bridge.state.snapshot.pttModeEnabled);
+  const pttKeyBinding = ref(
+    normalizePttKeyBinding(bridge.state.snapshot.pttKeyBinding),
+  );
+  const pttKeyCaptureActive = ref(false);
+  const pttKeyStatus = ref("");
   const motionEngineSettings = reactive(
     cloneModelEngineSettings(bridge.state.snapshot.motionEngineSettings),
   );
+  let removePttCaptureListener: (() => void) | null = null;
 
   watch(
     () => bridge.state.snapshot.adapterAddress,
@@ -57,6 +67,14 @@ export function useSettingsWindow() {
     (nextValue) => {
       pttModeEnabled.value = nextValue;
     },
+  );
+
+  watch(
+    () => bridge.state.snapshot.pttKeyBinding,
+    (nextValue) => {
+      pttKeyBinding.value = normalizePttKeyBinding(nextValue);
+    },
+    { deep: true },
   );
 
   watch(
@@ -160,6 +178,44 @@ export function useSettingsWindow() {
     });
   }
 
+  function startPttKeyCapture(): void {
+    pttKeyCaptureActive.value = true;
+    pttKeyStatus.value = "请按下新的按键。";
+    installPttCaptureListener();
+  }
+
+  function capturePttKey(event: KeyboardEvent): void {
+    if (!pttKeyCaptureActive.value) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const binding = createPttKeyBindingFromKeyboardEvent(event);
+    pttKeyBinding.value = binding;
+    pttKeyCaptureActive.value = false;
+    removePttCaptureListener?.();
+    removePttCaptureListener = null;
+    pttKeyStatus.value = binding.uiohookKeycode === null
+      ? `${binding.label} 已保存；当前只能在桌宠窗口获得焦点时触发。`
+      : `${binding.label} 已保存。`;
+    bridge.sendCommand({
+      type: "set_ptt_key_binding",
+      binding,
+    });
+  }
+
+  function installPttCaptureListener(): void {
+    removePttCaptureListener?.();
+    document.addEventListener("keydown", capturePttKey, { capture: true });
+    removePttCaptureListener = () => {
+      document.removeEventListener("keydown", capturePttKey, { capture: true });
+    };
+  }
+
+  onBeforeUnmount(() => {
+    removePttCaptureListener?.();
+  });
+
   function applyMotionEngineSettings(): void {
     bridge.sendCommand({
       type: "set_motion_engine_settings",
@@ -188,6 +244,9 @@ export function useSettingsWindow() {
     microphoneDeviceStatus,
     ambientMotionEnabled,
     pttModeEnabled,
+    pttKeyBinding,
+    pttKeyCaptureActive,
+    pttKeyStatus,
     motionEngineSettings,
     statusLabel,
     profileEditorButtonLabel,
@@ -206,6 +265,8 @@ export function useSettingsWindow() {
     refreshMicrophoneDevices,
     applyAmbientMotionEnabled,
     applyPttModeEnabled,
+    startPttKeyCapture,
+    capturePttKey,
     applyMotionEngineSettings,
     resetMotionEngineSettings,
     requestModelProjectionSync,

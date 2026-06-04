@@ -18,6 +18,7 @@ import {
   loadDesktopScreenshotOnSendEnabled,
   loadStoredAdapterAddress,
   loadStoredMicrophoneDeviceId,
+  loadStoredPttKeyBinding,
 } from "../core/preferences.js";
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
@@ -42,6 +43,7 @@ export function createAdapterConnectionState() {
     micRequested: false,
     micCapturing: false,
     pttModeEnabled: false,
+    pttKeyBinding: loadStoredPttKeyBinding(),
     isPlayingAudio: false,
     historyEntries: [] as DesktopHistoryEntry[],
     backendHistorySummaries: [] as DesktopBackendHistorySummary[],

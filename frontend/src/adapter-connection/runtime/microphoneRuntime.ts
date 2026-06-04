@@ -12,8 +12,13 @@ import {
 } from "./microphoneDevices.js";
 import {
   normalizeMicrophoneDeviceId,
+  saveStoredPttKeyBinding,
   saveStoredMicrophoneDeviceId,
 } from "../core/preferences.js";
+import {
+  normalizePttKeyBinding,
+} from "../core/pttKeyBinding.js";
+import type { DesktopPttKeyBinding } from "../../types/desktop.js";
 
 export type MicrophoneCaptureOrigin = "manual" | "ptt" | "auto";
 
@@ -23,6 +28,7 @@ export interface AdapterMicrophoneRuntimeState {
   micRequested: boolean;
   micCapturing: boolean;
   pttModeEnabled: boolean;
+  pttKeyBinding: DesktopPttKeyBinding;
   lastError: string;
   statusMessage: string;
 }
@@ -37,7 +43,7 @@ export interface AdapterMicrophoneRuntimeDeps {
   ) => ProtocolEnvelope<TPayload>;
   pushHistory: (role: Extract<DesktopHistoryEntry["role"], "system" | "error">, text: string) => void;
   createMessageId: () => string;
-  setDesktopPttMode?: (enabled: boolean) => void;
+  setDesktopPttMode?: (enabled: boolean, binding: DesktopPttKeyBinding) => void;
 }
 
 export interface RefreshMicrophoneDevicesOptions {
@@ -52,6 +58,7 @@ export interface AdapterMicrophoneRuntime {
   startMicrophoneCapture: (origin?: MicrophoneCaptureOrigin) => Promise<boolean>;
   stopMicrophoneCapture: (reason?: string) => Promise<boolean>;
   setPttMode: (enabled: boolean) => void;
+  setPttKeyBinding: (binding: DesktopPttKeyBinding) => void;
   startPttCapture: () => Promise<void>;
   stopPttCapture: () => Promise<void>;
   clearPendingStart: () => void;
@@ -234,11 +241,20 @@ export function createAdapterMicrophoneRuntime(
 
   function setPttMode(enabled: boolean): void {
     deps.state.pttModeEnabled = enabled;
-    deps.setDesktopPttMode?.(enabled);
+    deps.setDesktopPttMode?.(enabled, deps.state.pttKeyBinding);
     if (enabled) {
       if (deps.state.micCapturing || isMicrophoneCaptureRuntimeActive()) {
         void stopMicrophoneCapture("ptt_mode_enabled");
       }
+    }
+  }
+
+  function setPttKeyBinding(binding: DesktopPttKeyBinding): void {
+    const normalized = normalizePttKeyBinding(binding);
+    deps.state.pttKeyBinding = normalized;
+    saveStoredPttKeyBinding(normalized);
+    if (deps.state.pttModeEnabled) {
+      deps.setDesktopPttMode?.(true, normalized);
     }
   }
 
@@ -343,6 +359,7 @@ export function createAdapterMicrophoneRuntime(
     startMicrophoneCapture,
     stopMicrophoneCapture,
     setPttMode,
+    setPttKeyBinding,
     startPttCapture,
     stopPttCapture,
     clearPendingStart,
