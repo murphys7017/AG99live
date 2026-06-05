@@ -191,7 +191,9 @@ export function createPetRuntimeSnapshotPublisher(
         session: sessionProjection,
         ambientMotionEnabled: options.ambientMotionEnabled.value,
         motionEngineSettings: cloneModelEngineSettings(options.motionEngineSettings),
-        motionPlaybackRecords: options.motionPlaybackRecords.value,
+        motionPlaybackRecords: options.motionPlaybackRecords.value.map((record) =>
+          cloneJson(record),
+        ) as DesktopMotionPlaybackRecord[],
         connectionState: options.connectionState.value,
         connectionLabel: options.connectionLabel.value,
         stageMessage: options.stageMessage.value,
@@ -250,7 +252,9 @@ export function createPetRuntimeSnapshotPublisher(
       runtimeSemanticAxisProfile: options.selectedSemanticAxisProfile.value
         ? cloneJson(options.selectedSemanticAxisProfile.value)
         : null,
-      baseActionPreview: options.parameterActionPreview.value,
+      baseActionPreview: options.parameterActionPreview.value
+        ? cloneJson(options.parameterActionPreview.value)
+        : null,
       motionTuningEffectiveExamples: options.adapter.state.motionTuningSamplesStatus.effectiveExamples
         .map((example) => cloneJson(example)),
     };

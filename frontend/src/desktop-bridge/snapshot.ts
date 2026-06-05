@@ -2,21 +2,21 @@ export {
   defaultSnapshot,
   normalizeSnapshot,
   safeNormalizeSnapshot,
-} from "./snapshot/runtimeSnapshot";
+} from "./snapshot/runtimeSnapshot.js";
 
 export {
   defaultModelProjectionSnapshot,
   normalizeModelProjectionSnapshot,
   safeNormalizeModelProjectionSnapshot,
-} from "./snapshot/modelProjectionSnapshot";
+} from "./snapshot/modelProjectionSnapshot.js";
 
 export {
   defaultProfileAuthoringSnapshot,
   normalizeProfileAuthoringSnapshot,
   safeNormalizeProfileAuthoringSnapshot,
-} from "./snapshot/profileAuthoringSnapshot";
+} from "./snapshot/profileAuthoringSnapshot.js";
 
 export {
   normalizeMotionTuningSamples,
   normalizeMotionTuningSamplesStatus,
-} from "./snapshot/motionTuningSnapshot";
+} from "./snapshot/motionTuningSnapshot.js";

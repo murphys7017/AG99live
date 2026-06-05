@@ -3,20 +3,20 @@ import type {
   DesktopBackendHistorySummary,
   DesktopRuntimeSnapshot,
   DesktopMotionPlaybackRecord,
-} from "../../types/desktop";
-import type { CatalogMotionPayload } from "../../types/protocol";
+} from "../../types/desktop.js";
+import type { CatalogMotionPayload } from "../../types/protocol.js";
 import {
   buildDefaultModelEngineSettings,
   cloneModelEngineSettings,
   normalizeModelEngineSettings,
-} from "../../model-engine/settings";
-import { cloneSemanticParameterPlan } from "../../model-engine/planParser";
-import { DEFAULT_ADAPTER_ADDRESS } from "../../adapter-connection/core/address";
+} from "../../model-engine/settings.js";
+import { cloneSemanticParameterPlan } from "../../model-engine/planParser.js";
+import { DEFAULT_ADAPTER_ADDRESS } from "../../adapter-connection/core/address.js";
 import {
   DEFAULT_PTT_KEY_BINDING,
   normalizePttKeyBinding,
-} from "../../adapter-connection/core/pttKeyBinding";
-import { SCHEMA_CATALOG_MOTION_V1 } from "../../types/protocol";
+} from "../../adapter-connection/core/pttKeyBinding.js";
+import { SCHEMA_CATALOG_MOTION_V1 } from "../../types/protocol.js";
 import {
   cloneNumericRecord,
   isFiniteNumber,
@@ -26,7 +26,7 @@ import {
   normalizeOptionalText,
   normalizeStringArray,
   normalizeText,
-} from "../../utils/guards";
+} from "../../utils/guards.js";
 
 export const defaultSnapshot: DesktopRuntimeSnapshot = {
   adapterAddress: DEFAULT_ADAPTER_ADDRESS,

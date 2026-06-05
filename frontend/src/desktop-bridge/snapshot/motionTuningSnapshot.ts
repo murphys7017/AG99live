@@ -2,15 +2,15 @@ import type {
   DesktopMotionTuningEffectiveExample,
   DesktopMotionTuningSample,
   DesktopMotionTuningSamplesStatus,
-} from "../../types/desktop";
-import { cloneSemanticParameterPlan } from "../../model-engine/planParser";
+} from "../../types/desktop.js";
+import { cloneSemanticParameterPlan } from "../../model-engine/planParser.js";
 import {
   cloneNumericRecord,
   isObject,
   isPresent,
   normalizeStringArray,
   normalizeText,
-} from "../../utils/guards";
+} from "../../utils/guards.js";
 
 export function normalizeMotionTuningSamplesStatus(
   value: unknown,

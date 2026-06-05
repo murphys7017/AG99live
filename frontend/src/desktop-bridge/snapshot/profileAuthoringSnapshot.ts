@@ -1,5 +1,5 @@
-import type { DesktopProfileAuthoringSnapshot } from "../../types/desktop";
-import { isObject } from "../../utils/guards";
+import type { DesktopProfileAuthoringSnapshot } from "../../types/desktop.js";
+import { isObject } from "../../utils/guards.js";
 
 export const defaultProfileAuthoringSnapshot: DesktopProfileAuthoringSnapshot = {
   latestSemanticAxisProfileSaveResult: null,

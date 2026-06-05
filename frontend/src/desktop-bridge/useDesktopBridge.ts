@@ -29,7 +29,8 @@ import {
   safeNormalizeModelProjectionSnapshot,
   safeNormalizeProfileAuthoringSnapshot,
   safeNormalizeSnapshot,
-} from "./snapshot";
+} from "./snapshot.js";
+import { cloneJson } from "../utils/cloneJson.js";
 
 const RUNTIME_CHANNEL_NAME = "ag99live.desktop.runtime";
 const PROFILE_AUTHORING_CHANNEL_NAME = "ag99live.desktop.profile_authoring";
@@ -384,7 +385,7 @@ export function createDesktopBridge(): DesktopBridgeInstance {
       window.removeEventListener("storage", onStorage);
     };
 
-    const detachWindowState = window.ag99desktop?.onWindowState((nextState) => {
+    const detachWindowState = window.ag99desktop?.onWindowState((nextState: DesktopWindowVisibilityState) => {
       state.windowState = nextState;
     });
     removeWindowStateListener = () => {
@@ -421,9 +422,10 @@ export function createDesktopBridge(): DesktopBridgeInstance {
     );
     state.snapshot = stabilizedSnapshot;
     persistRuntimeSnapshot(stabilizedSnapshot);
+    const broadcastSnapshot = cloneJson(stabilizedSnapshot);
     runtimeChannel?.postMessage({
       kind: "snapshot",
-      snapshot: stabilizedSnapshot,
+      snapshot: broadcastSnapshot,
     } satisfies RuntimeBridgeMessage);
   }
 
@@ -435,9 +437,10 @@ export function createDesktopBridge(): DesktopBridgeInstance {
       throw new Error("[DesktopBridge] publish model projection snapshot rejected.");
     }
     state.modelProjectionSnapshot = nextSnapshot;
+    const broadcastSnapshot = cloneJson(nextSnapshot);
     runtimeChannel?.postMessage({
       kind: "model_projection",
-      snapshot: nextSnapshot,
+      snapshot: broadcastSnapshot,
     } satisfies RuntimeBridgeMessage);
   }
 
@@ -451,8 +454,8 @@ export function createDesktopBridge(): DesktopBridgeInstance {
     state.motionTuningSamplesStatus = nextStatus;
     runtimeChannel?.postMessage({
       kind: "motion_tuning_samples",
-      samples: nextSamples,
-      status: nextStatus,
+      samples: cloneJson(nextSamples),
+      status: cloneJson(nextStatus),
     } satisfies RuntimeBridgeMessage);
   }
 
@@ -465,16 +468,17 @@ export function createDesktopBridge(): DesktopBridgeInstance {
     }
     state.profileAuthoringSnapshot = nextSnapshot;
     persistProfileAuthoringSnapshot(nextSnapshot);
+    const broadcastSnapshot = cloneJson(nextSnapshot);
     profileAuthoringChannel?.postMessage({
       kind: "profile_authoring_snapshot",
-      snapshot: nextSnapshot,
+      snapshot: broadcastSnapshot,
     } satisfies ProfileAuthoringBridgeMessage);
   }
 
   function sendCommand(command: DesktopRuntimeCommand): void {
     runtimeChannel?.postMessage({
       kind: "command",
-      command,
+      command: cloneJson(command),
     } satisfies RuntimeBridgeMessage);
   }
 
@@ -483,7 +487,7 @@ export function createDesktopBridge(): DesktopBridgeInstance {
   ): void {
     profileAuthoringChannel?.postMessage({
       kind: "profile_authoring_command",
-      command,
+      command: cloneJson(command),
     } satisfies ProfileAuthoringBridgeMessage);
   }
 

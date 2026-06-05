@@ -1,15 +1,15 @@
 import type {
   DesktopBaseActionPreview,
   DesktopModelProjectionSnapshot,
-} from "../../types/desktop";
-import type { SemanticAxisProfile } from "../../types/semantic-axis-profile";
-import { cloneMotionTuningEffectiveExample } from "./motionTuningSnapshot";
+} from "../../types/desktop.js";
+import type { SemanticAxisProfile } from "../../types/semantic-axis-profile.js";
+import { cloneMotionTuningEffectiveExample } from "./motionTuningSnapshot.js";
 import {
   cloneNumericRecord,
   isObject,
   isPresent,
   normalizeText,
-} from "../../utils/guards";
+} from "../../utils/guards.js";
 
 export const defaultModelProjectionSnapshot: DesktopModelProjectionSnapshot = {
   selectedModelName: "",
