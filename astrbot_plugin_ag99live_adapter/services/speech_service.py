@@ -182,6 +182,16 @@ class SpeechIngressService:
             return None
 
         stream = self._audio_streams.pop(stream_id, None)
+        dropped = bool(payload.get("dropped", False))
+        if dropped:
+            logger.warning("Dropping binary microphone audio stream because frontend reported chunk loss.")
+            await self._emit_terminal_turn_signal(
+                turn_id=message.turn_id,
+                reason="microphone_audio_dropped",
+                error_message="Microphone audio segment dropped before transcription.",
+            )
+            return None
+
         if stream is None or not stream.chunks:
             logger.debug("Ignoring `input.audio_stream_end` with empty or missing stream: %s", stream_id)
             return None

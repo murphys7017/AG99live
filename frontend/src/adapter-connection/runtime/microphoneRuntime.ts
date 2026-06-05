@@ -78,6 +78,7 @@ export function createAdapterMicrophoneRuntime(
   let activeMicSeq = 0;
   let audioStreamStarted = false;
   let micCaptureOrigin: MicrophoneCaptureOrigin | null = null;
+  let pendingPttRelease = false;
 
   function sendMicrophoneAudioChunk(chunk: MicrophoneAudioChunk): void {
     const socket = deps.getSocket();
@@ -222,6 +223,7 @@ export function createAdapterMicrophoneRuntime(
     micStartPromise = (async () => {
       try {
         audioSequenceBroken = false;
+        pendingPttRelease = false;
         activeMicTurnId = createRootInputTurnId();
         micCaptureOrigin = origin;
         await startMicrophoneCaptureRuntime({
@@ -240,6 +242,10 @@ export function createAdapterMicrophoneRuntime(
         deps.state.statusMessage = "麦克风已开启，正在自动检测说话。";
         void refreshMicrophoneDevices({ requestPermission: false });
         deps.pushHistory("system", deps.state.statusMessage);
+        if (pendingPttRelease && micCaptureOrigin === "ptt") {
+          pendingPttRelease = false;
+          await stopMicrophoneCapture("ptt_release");
+        }
         return true;
       } catch (error) {
         deps.state.micCapturing = false;
@@ -248,6 +254,7 @@ export function createAdapterMicrophoneRuntime(
         activeMicSeq = 0;
         audioStreamStarted = false;
         micCaptureOrigin = null;
+        pendingPttRelease = false;
         deps.state.lastError =
           error instanceof Error ? error.message : "麦克风启动失败。";
         deps.state.statusMessage = `麦克风启动失败：${deps.state.lastError}`;
@@ -304,6 +311,9 @@ export function createAdapterMicrophoneRuntime(
       return;
     }
     if (!deps.state.micCapturing) {
+      if (micStartPromise && micCaptureOrigin === "ptt") {
+        pendingPttRelease = true;
+      }
       return;
     }
     if (micCaptureOrigin !== "ptt") {
@@ -411,6 +421,7 @@ export function createAdapterMicrophoneRuntime(
     audioStreamStarted = false;
     micCaptureOrigin = null;
     audioSequenceBroken = false;
+    pendingPttRelease = false;
   }
 
   return {

@@ -1,7 +1,7 @@
 task:
   class: feature
   risk: high
-  phase: binary_microphone_transport_validated
+  phase: microphone_transport_drop_and_ptt_release_fixed
   scope: AG99live frontend Electron/Web microphone capture transport and adapter speech ingress; remote operator permission policy remains out of scope
 context:
   confidence: medium
@@ -10,6 +10,8 @@ context:
     - Current Electron frontend should prefer JSON control frames plus WebSocket binary PCM16LE chunks over JSON number-array audio.
     - Legacy input.raw_audio_data and input.mic_audio_end remain available for old clients and debugging, but are no longer the current frontend main path.
     - PTT start/stop timing now uses the same stream start/binary chunk/stream end path as manual microphone capture.
+    - Binary audio stream end now honors frontend dropped=true and stops the turn without transcription.
+    - PTT key release during microphone startup is remembered and stops capture as soon as startup finishes.
   unresolved_questions:
     - Native microphone startup still returns ok immediately after spawn; a later step should add first-frame or ready/error acknowledgement.
     - The binary chunk header still carries JSON metadata per chunk; a later optimization can move stable fields to stream start and compact chunk headers further.
@@ -23,9 +25,9 @@ verification:
   checks_run:
     - git status --short
     - cd frontend; npm run test:adapter-connection
-    - cd frontend; npm run typecheck:node
     - cd frontend; npm run typecheck:renderer
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_speech_ingress_service.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_binary_audio_protocol.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_websocket_transport_binary.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_speech_ingress_service.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_binary_audio_protocol.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_websocket_transport_binary.py -q
     - python -m compileall astrbot_plugin_ag99live_adapter
     - git diff --check
   checks_failed: []

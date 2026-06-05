@@ -218,6 +218,60 @@ def test_handle_binary_audio_stream_chunk_transcribes_on_stream_end(
     assert sent_messages[0]["turn_id"] == "input:binary"
 
 
+def test_handle_binary_audio_stream_end_dropped_reports_terminal_signal(
+    install_fake_astrbot,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.protocol.binary_audio import BinaryAudioChunkFrame
+    from astrbot_plugin_ag99live_adapter.services.speech_service import SpeechIngressService
+
+    sent_messages: list[dict] = []
+    build_calls: list[tuple[str, dict]] = []
+
+    async def send_json(message: dict) -> None:
+        sent_messages.append(message)
+
+    service = SpeechIngressService(
+        media_service=MediaServiceStub(),
+        runtime_state=SimpleNamespace(selected_stt_provider=SttProviderStub()),
+        ensure_vad_engine=lambda: None,
+        send_json=send_json,
+        build_message_object=lambda *, text, raw_message: build_calls.append((text, raw_message)),
+    )
+
+    asyncio.run(
+        service.handle_audio_stream_binary_chunk(
+            BinaryAudioChunkFrame(
+                stream_id="mic:dropped",
+                turn_id="input:binary-dropped",
+                seq=0,
+                encoding="pcm16le",
+                sample_rate=16000,
+                channels=1,
+                payload=np.array([8192, -8192], dtype=np.int16).tobytes(),
+                metadata={},
+            )
+        )
+    )
+    result = asyncio.run(
+        service.handle_audio_stream_end(
+            MessageStub(
+                turn_id="input:binary-dropped",
+                payload={"stream_id": "mic:dropped", "reason": "manual_stop", "dropped": True},
+            )
+        )
+    )
+
+    assert result is None
+    assert build_calls == []
+    assert len(sent_messages) == 2
+    assert sent_messages[0]["type"] == "control.error"
+    assert sent_messages[0]["payload"]["message"] == "Microphone audio segment dropped before transcription."
+    assert sent_messages[0]["turn_id"] == "input:binary-dropped"
+    assert sent_messages[1]["type"] == "control.turn_finished"
+    assert sent_messages[1]["turn_id"] == "input:binary-dropped"
+
+
 def test_handle_raw_audio_data_vad_unavailable_reports_terminal_signal(
     install_fake_astrbot,
 ) -> None:

@@ -139,6 +139,22 @@ class FakeAudio {
   }
 }
 
+let deferredGetUserMedia: {
+  promise: Promise<FakeMediaStream>;
+  resolve: () => void;
+} | null = null;
+
+function deferNextGetUserMedia(): void {
+  let resolveDeferred!: () => void;
+  const promise = new Promise<FakeMediaStream>((resolve) => {
+    resolveDeferred = () => resolve(new FakeMediaStream());
+  });
+  deferredGetUserMedia = {
+    promise,
+    resolve: resolveDeferred,
+  };
+}
+
 function installWindowStubs(): void {
   const storage = new Map<string, string>();
   const nativeUrl = globalThis.URL;
@@ -173,7 +189,13 @@ function installWindowStubs(): void {
     configurable: true,
     value: {
       mediaDevices: {
-        getUserMedia: async () => new FakeMediaStream(),
+        getUserMedia: async () => {
+          const deferred = deferredGetUserMedia;
+          if (deferred) {
+            return deferred.promise;
+          }
+          return new FakeMediaStream();
+        },
         enumerateDevices: async () => [],
       },
     },
@@ -225,6 +247,7 @@ function createConnectedAdapter() {
   FakeAudioWorkletNode.instances.length = 0;
   FakeAudio.instances.length = 0;
   FakeAudio.nextPlayShouldStall = false;
+  deferredGetUserMedia = null;
   const sessionStore = useTurnPlaybackSessionStore();
   const modelSync = createModelSync();
   const scope = effectScope();
@@ -933,6 +956,36 @@ async function testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd(): Promis
   }
 }
 
+async function testPttReleaseDuringStartupStopsCaptureAfterStart(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket } = harness;
+    adapter.setPttMode(true);
+    deferNextGetUserMedia();
+
+    const startPromise = adapter.startPttCapture();
+    await flushMicrotasks();
+    assert.equal(adapter.state.micCapturing, false);
+
+    await adapter.stopPttCapture();
+    deferredGetUserMedia?.resolve();
+    await startPromise;
+    await flushMicrotasks();
+
+    assert.equal(adapter.state.micCapturing, false);
+    assert.equal(adapter.state.micRequested, false);
+    const endMessage = parseSentJsonMessages(socket)
+      .find((item) => item.type === "input.mic_audio_end");
+    assert.ok(endMessage);
+    assert.deepEqual(endMessage?.payload, {
+      reason: "ptt_release",
+      dropped: false,
+    });
+  } finally {
+    harness.scope.stop();
+  }
+}
+
 async function testDeviceChangeEndsPreviousMicSegmentBeforeRestart(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
@@ -1115,6 +1168,7 @@ async function run(): Promise<void> {
   await testAutoStartMicDoesNotDuplicateCaptureStart();
   await testMicAudioUsesFreshInputTurnAcrossChunkAndEnd();
   await testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd();
+  await testPttReleaseDuringStartupStopsCaptureAfterStart();
   await testDeviceChangeEndsPreviousMicSegmentBeforeRestart();
   await testInterruptMarksPlayingAudioSegmentFailed();
   await testInterruptMarksPendingAudioSegmentFailedBeforePlaybackStart();
