@@ -236,16 +236,17 @@ export function createAdapterMicrophoneRuntime(
           },
         });
 
+        if (pendingPttRelease && micCaptureOrigin === "ptt") {
+          await discardMicrophoneCaptureBeforeRecognition("ptt_release_before_ready");
+          return false;
+        }
+
         deps.state.micCapturing = true;
         deps.state.micRequested = true;
         deps.state.lastError = "";
         deps.state.statusMessage = "麦克风已开启，正在自动检测说话。";
         void refreshMicrophoneDevices({ requestPermission: false });
         deps.pushHistory("system", deps.state.statusMessage);
-        if (pendingPttRelease && micCaptureOrigin === "ptt") {
-          pendingPttRelease = false;
-          await stopMicrophoneCapture("ptt_release");
-        }
         return true;
       } catch (error) {
         deps.state.micCapturing = false;
@@ -320,6 +321,16 @@ export function createAdapterMicrophoneRuntime(
       return;
     }
     await stopMicrophoneCapture("ptt_release");
+  }
+
+  async function discardMicrophoneCaptureBeforeRecognition(reason: string): Promise<void> {
+    await stopMicrophoneCaptureRuntime();
+    deps.state.micCapturing = false;
+    deps.state.micRequested = false;
+    deps.state.statusMessage = reason === "ptt_release_before_ready"
+      ? "按键时间过短，未开始识别。"
+      : "麦克风启动已取消。";
+    clearMicCaptureSession();
   }
 
   async function stopMicrophoneCapture(reason = "manual_stop"): Promise<boolean> {

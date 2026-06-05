@@ -11,6 +11,8 @@ const FFMPEG_SAMPLE_RATE = 16000;
 const FFMPEG_CHANNELS = 1;
 const FFMPEG_CHUNK_SAMPLES = 1024;
 const FFMPEG_CHUNK_BYTES = FFMPEG_CHUNK_SAMPLES * Int16Array.BYTES_PER_ELEMENT;
+const FFMPEG_STARTUP_READY_TIMEOUT_MS = 4000;
+const FFMPEG_STARTUP_FLUSH_DELAY_MS = 25;
 
 interface NativeMicrophoneDevice extends DesktopMicrophoneDevice {
   alternativeName: string;
@@ -22,6 +24,17 @@ interface NativeCaptureRuntime {
   process: ChildProcessByStdio<null, Readable, Readable>;
   pendingBytes: Buffer;
   stopping: boolean;
+  ready: boolean;
+  forwardingEnabled: boolean;
+  stderrLines: string[];
+  startup: NativeCaptureStartup | null;
+}
+
+interface NativeCaptureStartup {
+  settled: boolean;
+  timeout: ReturnType<typeof setTimeout>;
+  resolve: () => void;
+  reject: (error: string) => void;
 }
 
 let deviceCache: {
@@ -138,7 +151,13 @@ async function startNativeMicrophoneCapture(
     process: child,
     pendingBytes: Buffer.alloc(0),
     stopping: false,
+    ready: false,
+    forwardingEnabled: false,
+    stderrLines: [],
+    startup: null,
   };
+  const startup = createNativeCaptureStartup(runtime);
+  runtime.startup = startup;
   activeCapture = runtime;
 
   child.stdout.on("data", (chunk: Buffer) => {
@@ -147,22 +166,51 @@ async function startNativeMicrophoneCapture(
   child.stderr.on("data", (chunk: Buffer) => {
     const text = chunk.toString("utf8").trim();
     if (text) {
+      runtime.stderrLines.push(text);
+      if (runtime.stderrLines.length > 8) {
+        runtime.stderrLines.splice(0, runtime.stderrLines.length - 8);
+      }
       console.warn("[NativeMicrophone] ffmpeg:", text);
     }
   });
   child.on("error", (error) => {
-    emitNativeCaptureError(runtime, event.sender, error.message);
+    failNativeCaptureStartup(runtime, error.message);
+    if (runtime.ready) {
+      emitNativeCaptureError(runtime, event.sender, error.message);
+    }
   });
   child.on("exit", (code, signal) => {
+    const reason = runtime.stopping ? "stopped" : `ffmpeg_exit:${code ?? "null"}:${signal ?? "null"}`;
     if (activeCapture === runtime) {
       activeCapture = null;
     }
-    event.sender.send("desktop:native-microphone-ended", {
-      sessionId,
-      reason: runtime.stopping ? "stopped" : `ffmpeg_exit:${code ?? "null"}:${signal ?? "null"}`,
-    });
+    failNativeCaptureStartup(runtime, appendNativeCaptureStderr(runtime, reason));
+    if (runtime.ready) {
+      event.sender.send("desktop:native-microphone-ended", {
+        sessionId,
+        reason,
+      });
+    }
     captureEvents.emit(`ended:${sessionId}`);
   });
+
+  try {
+    await startup.promise;
+  } catch (error) {
+    await stopActiveCapture("startup_failed");
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "native_microphone_start_failed",
+    };
+  }
+
+  runtime.ready = true;
+  runtime.startup = null;
+  runtime.pendingBytes = Buffer.alloc(0);
+  windowSetTimeout(() => {
+    runtime.forwardingEnabled = true;
+    flushNativeCaptureBytes(runtime, event.sender);
+  }, FFMPEG_STARTUP_FLUSH_DELAY_MS);
 
   return { ok: true, sessionId };
 }
@@ -216,6 +264,24 @@ function handleNativeCaptureBytes(
   const bytes = runtime.pendingBytes.length
     ? Buffer.concat([runtime.pendingBytes, chunk])
     : chunk;
+  runtime.pendingBytes = bytes;
+  resolveNativeCaptureStartup(runtime);
+  if (!runtime.ready || !runtime.forwardingEnabled) {
+    return;
+  }
+
+  flushNativeCaptureBytes(runtime, sender);
+}
+
+function flushNativeCaptureBytes(
+  runtime: NativeCaptureRuntime,
+  sender: WebContents,
+): void {
+  if (activeCapture !== runtime || runtime.stopping || !runtime.ready || !runtime.forwardingEnabled) {
+    return;
+  }
+
+  const bytes = runtime.pendingBytes;
   let offset = 0;
   while (offset + FFMPEG_CHUNK_BYTES <= bytes.length) {
     const frame = bytes.subarray(offset, offset + FFMPEG_CHUNK_BYTES);
@@ -228,6 +294,51 @@ function handleNativeCaptureBytes(
     });
   }
   runtime.pendingBytes = offset < bytes.length ? bytes.subarray(offset) : Buffer.alloc(0);
+}
+
+function createNativeCaptureStartup(runtime: NativeCaptureRuntime): NativeCaptureStartup & { promise: Promise<void> } {
+  let startup!: NativeCaptureStartup;
+  const promise = new Promise<void>((resolve, reject) => {
+    startup = {
+      settled: false,
+      timeout: windowSetTimeoutWithHandle(() => {
+        failNativeCaptureStartup(runtime, "native_microphone_start_timeout");
+      }, FFMPEG_STARTUP_READY_TIMEOUT_MS),
+      resolve,
+      reject: (error) => reject(new Error(error)),
+    };
+  });
+  return Object.assign(startup, { promise });
+}
+
+function resolveNativeCaptureStartup(runtime: NativeCaptureRuntime): void {
+  const startup = runtime.startup;
+  if (!startup || startup.settled) {
+    return;
+  }
+
+  startup.settled = true;
+  clearTimeout(startup.timeout);
+  startup.resolve();
+}
+
+function failNativeCaptureStartup(runtime: NativeCaptureRuntime, error: string): void {
+  const startup = runtime.startup;
+  if (!startup || startup.settled) {
+    return;
+  }
+
+  startup.settled = true;
+  clearTimeout(startup.timeout);
+  startup.reject(error);
+}
+
+function appendNativeCaptureStderr(runtime: NativeCaptureRuntime, error: string): string {
+  const stderr = runtime.stderrLines.join("\n").trim();
+  if (!stderr) {
+    return error;
+  }
+  return `${error}: ${stderr.slice(-500)}`;
 }
 
 function emitNativeCaptureError(
@@ -370,4 +481,8 @@ function getExistingFilePath(candidatePath: string): string | null {
 
 function windowSetTimeout(callback: () => void, timeoutMs: number): void {
   setTimeout(callback, timeoutMs);
+}
+
+function windowSetTimeoutWithHandle(callback: () => void, timeoutMs: number): ReturnType<typeof setTimeout> {
+  return setTimeout(callback, timeoutMs);
 }

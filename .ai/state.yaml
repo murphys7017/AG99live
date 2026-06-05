@@ -1,7 +1,7 @@
 task:
   class: feature
   risk: high
-  phase: microphone_transport_drop_and_ptt_release_fixed
+  phase: native_microphone_handshake_boundary_added
   scope: AG99live frontend Electron/Web microphone capture transport and adapter speech ingress; remote operator permission policy remains out of scope
 context:
   confidence: medium
@@ -12,8 +12,10 @@ context:
     - PTT start/stop timing now uses the same stream start/binary chunk/stream end path as manual microphone capture.
     - Binary audio stream end now honors frontend dropped=true and stops the turn without transcription.
     - PTT key release during microphone startup is remembered and stops capture as soon as startup finishes.
+    - Native microphone start now waits for the first ffmpeg PCM bytes before returning ok; startup handshake bytes are discarded so recognition starts only after the handshake boundary.
+    - PTT release before microphone startup handshake completes discards the local capture and does not send a backend microphone end event.
   unresolved_questions:
-    - Native microphone startup still returns ok immediately after spawn; a later step should add first-frame or ready/error acknowledgement.
+    - Native microphone first-frame acknowledgement still needs live Electron and Windows device regression testing, including device-busy and no-input scenarios.
     - The binary chunk header still carries JSON metadata per chunk; a later optimization can move stable fields to stream start and compact chunk headers further.
 architecture:
   stability: evolving
@@ -25,10 +27,8 @@ verification:
   checks_run:
     - git status --short
     - cd frontend; npm run test:adapter-connection
+    - cd frontend; npm run typecheck:node
     - cd frontend; npm run typecheck:renderer
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_speech_ingress_service.py -q
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_binary_audio_protocol.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_websocket_transport_binary.py -q
-    - python -m compileall astrbot_plugin_ag99live_adapter
     - git diff --check
   checks_failed: []
   validation_gap: Live Electron ffmpeg/device capture was not manually exercised in this turn.

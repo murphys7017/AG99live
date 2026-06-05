@@ -974,13 +974,13 @@ async function testPttReleaseDuringStartupStopsCaptureAfterStart(): Promise<void
 
     assert.equal(adapter.state.micCapturing, false);
     assert.equal(adapter.state.micRequested, false);
-    const endMessage = parseSentJsonMessages(socket)
-      .find((item) => item.type === "input.mic_audio_end");
-    assert.ok(endMessage);
-    assert.deepEqual(endMessage?.payload, {
-      reason: "ptt_release",
-      dropped: false,
-    });
+    assert.equal(adapter.state.statusMessage, "按键时间过短，未开始识别。");
+    assert.equal(
+      parseSentJsonMessages(socket).some((item) =>
+        item.type === "input.mic_audio_end" || item.type === "input.audio_stream_end"
+      ),
+      false,
+    );
   } finally {
     harness.scope.stop();
   }
