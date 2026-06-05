@@ -129,6 +129,88 @@ def test_runtime_refresh_online_once_filters_probe_failures(
     assert remote_operator.get_remote_operator_online_computers() == {"work"}
 
 
+def test_runtime_stops_probe_after_consecutive_failures(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_remote_operator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    from astrbot_plugin_ag99live_adapter.middleware import remote_operator
+    from astrbot_plugin_ag99live_adapter.services.remote_operator_runtime import (
+        RemoteOperatorRuntime,
+    )
+
+    probe_calls = 0
+
+    class ClientStub:
+        def __init__(self, _endpoint: str) -> None:
+            pass
+
+        async def probe(self) -> bool:
+            nonlocal probe_calls
+            probe_calls += 1
+            return False
+
+    runtime = RemoteOperatorRuntime(
+        plugin_config_loader=lambda: {
+            "remote_operator_default_computer": "work",
+            "remote_operator_probe_max_failures": 2,
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": "ws://127.0.0.1:4500"},
+            ],
+        },
+        submit_system_text_input=lambda _text, _metadata: None,
+        client_factory=ClientStub,
+    )
+
+    assert asyncio.run(runtime.refresh_online_once()) == set()
+    assert asyncio.run(runtime.refresh_online_once()) == set()
+    assert asyncio.run(runtime.refresh_online_once()) == set()
+
+    assert probe_calls == 2
+    assert remote_operator.get_remote_operator_online_computers() == set()
+
+
+def test_runtime_resumes_probe_when_endpoint_changes_after_exhaustion(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_remote_operator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    from astrbot_plugin_ag99live_adapter.services.remote_operator_runtime import (
+        RemoteOperatorRuntime,
+    )
+
+    endpoint = "ws://127.0.0.1:4500"
+    probe_calls: list[str] = []
+
+    class ClientStub:
+        def __init__(self, endpoint: str) -> None:
+            self.endpoint = endpoint
+
+        async def probe(self) -> bool:
+            probe_calls.append(self.endpoint)
+            return self.endpoint.endswith("4501")
+
+    runtime = RemoteOperatorRuntime(
+        plugin_config_loader=lambda: {
+            "remote_operator_default_computer": "work",
+            "remote_operator_probe_max_failures": 1,
+            "remote_operator_computer_entries": [
+                {"key": "work", "label": "工作电脑", "endpoint": endpoint},
+            ],
+        },
+        submit_system_text_input=lambda _text, _metadata: None,
+        client_factory=ClientStub,
+    )
+
+    assert asyncio.run(runtime.refresh_online_once()) == set()
+    assert asyncio.run(runtime.refresh_online_once()) == set()
+
+    endpoint = "ws://127.0.0.1:4501"
+
+    assert asyncio.run(runtime.refresh_online_once()) == {"work"}
+    assert probe_calls == ["ws://127.0.0.1:4500", "ws://127.0.0.1:4501"]
+
+
 def test_runtime_execute_and_submit_success_metadata(
     install_fake_astrbot,
     monkeypatch,

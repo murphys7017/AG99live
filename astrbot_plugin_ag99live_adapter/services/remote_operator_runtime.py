@@ -26,6 +26,7 @@ class RemoteOperatorEndpointConfig:
     endpoints: dict[str, str]
     default_profile: str
     profiles: dict[str, "RemoteOperatorProfile"]
+    probe_max_failures: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,12 +80,18 @@ def resolve_remote_operator_endpoint_config(
     if default_computer not in available:
         default_computer = next(iter(available))
 
+    probe_max_failures = _normalize_positive_int(
+        config.get("remote_operator_probe_max_failures"),
+        default=5,
+    )
+
     return RemoteOperatorEndpointConfig(
         default_computer=default_computer,
         computers=available,
         endpoints={key: endpoints[key] for key in available},
         default_profile=default_profile,
         profiles=profiles,
+        probe_max_failures=probe_max_failures,
     )
 
 
@@ -385,6 +392,8 @@ class RemoteOperatorRuntime:
         self._probe_interval_seconds = max(float(probe_interval_seconds or 15.0), 1.0)
         self._task: asyncio.Task[Any] | None = None
         self._stopped = asyncio.Event()
+        self._probe_failure_counts: dict[tuple[str, str], int] = {}
+        self._probe_exhausted: set[tuple[str, str]] = set()
 
     def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -407,18 +416,48 @@ class RemoteOperatorRuntime:
     async def refresh_online_once(self) -> set[str]:
         config = resolve_remote_operator_endpoint_config(self._plugin_config_loader())
         if config is None:
+            self._probe_failure_counts.clear()
+            self._probe_exhausted.clear()
             set_remote_operator_online_computers([])
             return set()
 
         online: set[str] = set()
+        active_probe_keys = {
+            (computer, endpoint)
+            for computer, endpoint in config.endpoints.items()
+        }
+        self._prune_probe_state(active_probe_keys)
         for computer, endpoint in config.endpoints.items():
+            probe_key = (computer, endpoint)
+            if probe_key in self._probe_exhausted:
+                mark_remote_operator_computer_offline(computer)
+                continue
+
             if await self._client_factory(endpoint).probe():
+                self._probe_failure_counts.pop(probe_key, None)
+                self._probe_exhausted.discard(probe_key)
                 online.add(computer)
                 mark_remote_operator_computer_online(computer)
             else:
+                failure_count = self._probe_failure_counts.get(probe_key, 0) + 1
+                self._probe_failure_counts[probe_key] = failure_count
                 mark_remote_operator_computer_offline(computer)
+                if failure_count >= config.probe_max_failures:
+                    self._probe_exhausted.add(probe_key)
+                    logger.warning(
+                        "Remote operator endpoint probe stopped after %s consecutive failures: computer=%s endpoint=%s",
+                        failure_count,
+                        computer,
+                        endpoint,
+                    )
         set_remote_operator_online_computers(online)
         return online
+
+    def _prune_probe_state(self, active_probe_keys: set[tuple[str, str]]) -> None:
+        for probe_key in list(self._probe_failure_counts):
+            if probe_key not in active_probe_keys:
+                self._probe_failure_counts.pop(probe_key, None)
+        self._probe_exhausted.intersection_update(active_probe_keys)
 
     async def execute_and_submit(self, request: RemoteOperatorRequest) -> None:
         result = await self.execute(request)
@@ -614,6 +653,14 @@ def _resolve_profiles(value: Any) -> dict[str, RemoteOperatorProfile]:
 
 def _normalize_text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _normalize_positive_int(value: Any, *, default: int) -> int:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return default
+    return normalized if normalized > 0 else default
 
 
 def _loads_json_object(message: Any) -> dict[str, Any]:

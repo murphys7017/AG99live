@@ -54,6 +54,11 @@
       }
     }
   },
+  "remote_operator_probe_max_failures": {
+    "description": "远程执行器在线探测连续失败多少次后停止继续探测该 endpoint。重启插件或修改 endpoint 后会重新探测。",
+    "type": "int",
+    "default": 5
+  },
   "remote_operator_default_profile": {
     "description": "远程执行器默认执行档位。未明确指定复杂任务时使用 simple。",
     "type": "string",
