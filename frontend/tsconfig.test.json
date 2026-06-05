@@ -26,6 +26,7 @@
     "src/types/semantic-axis-profile.ts",
     "src/utils/cloneJson.ts",
     "src/utils/guards.ts",
+    "src/app/usePushToTalkController.ts",
     "src/desktop-bridge/useDesktopBridge.ts",
     "src/desktop-bridge/snapshot.ts",
     "src/desktop-bridge/snapshot/**/*.ts",
@@ -45,6 +46,7 @@
     "src/adapter-connection/inbound/inboundMotionDispatcher.ts",
     "src/adapter-connection/outbound/outboundClient.ts",
     "src/adapter-connection/runtime/microphoneDevices.ts",
+    "src/adapter-connection/core/pttKeyBinding.ts",
     "src/adapter-connection/core/preferences.ts",
     "src/adapter-connection/core/transport.ts"
   ]

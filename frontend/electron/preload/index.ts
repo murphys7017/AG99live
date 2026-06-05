@@ -4,6 +4,7 @@ import type {
   DesktopAuxWindowRole,
   DesktopMicrophoneAudioChunk,
   DesktopMicrophoneDevice,
+  DesktopPttEventAck,
   DesktopPttKeyBinding,
   DesktopWindowVisibilityState,
 } from "../../src/types/desktop";
@@ -90,9 +91,12 @@ const api = {
   setPttMode: (enabled: boolean, binding?: DesktopPttKeyBinding) => {
     ipcRenderer.send("desktop:set-ptt-mode", enabled, binding);
   },
-  onIpc: (channel: string, callback: () => void) => {
-    const handler = () => {
-      callback();
+  reportPttEventAck: (ack: DesktopPttEventAck) => {
+    ipcRenderer.send("desktop:ptt-event-ack", ack);
+  },
+  onIpc: <TPayload = unknown>(channel: string, callback: (payload: TPayload) => void) => {
+    const handler = (_event: unknown, payload: TPayload) => {
+      callback(payload);
     };
     ipcRenderer.on(channel, handler);
     return () => {

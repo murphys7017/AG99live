@@ -1,7 +1,7 @@
 task:
   class: feature
   risk: high
-  phase: native_microphone_handshake_boundary_added
+  phase: ptt_event_ack_boundary_added
   scope: AG99live frontend Electron/Web microphone capture transport and adapter speech ingress; remote operator permission policy remains out of scope
 context:
   confidence: medium
@@ -14,8 +14,10 @@ context:
     - PTT key release during microphone startup is remembered and stops capture as soon as startup finishes.
     - Native microphone start now waits for the first ffmpeg PCM bytes before returning ok; startup handshake bytes are discarded so recognition starts only after the handshake boundary.
     - PTT release before microphone startup handshake completes discards the local capture and does not send a backend microphone end event.
+    - Electron global PTT events now carry event ids and expect renderer acknowledgements for received/start/stop/discard/ignore/failure diagnosis.
   unresolved_questions:
     - Native microphone first-frame acknowledgement still needs live Electron and Windows device regression testing, including device-busy and no-input scenarios.
+    - Electron global PTT acknowledgement still needs live desktop testing with uiohook and the pet renderer window.
     - The binary chunk header still carries JSON metadata per chunk; a later optimization can move stable fields to stream start and compact chunk headers further.
 architecture:
   stability: evolving
@@ -23,14 +25,16 @@ architecture:
     - Current issue ledger is recorded in docs/02-设计文档/05-前端结构维护清单.md.
     - Microphone WebSocket protocol now has JSON stream control frames and AG99 binary PCM16LE audio chunk frames.
     - Backend transport has a separate binary message handler instead of decoding bytes as UTF-8 JSON.
+    - Preload desktop IPC now forwards payloads to renderer callbacks and exposes a PTT acknowledgement channel back to the main process.
 verification:
   checks_run:
     - git status --short
+    - cd frontend; npm run test:push-to-talk-controller
     - cd frontend; npm run test:adapter-connection
     - cd frontend; npm run typecheck:node
     - cd frontend; npm run typecheck:renderer
     - git diff --check
   checks_failed: []
-  validation_gap: Live Electron ffmpeg/device capture was not manually exercised in this turn.
+  validation_gap: Live Electron ffmpeg/device capture and global uiohook PTT acknowledgement were not manually exercised in this turn.
 runtime:
   mode: binary_microphone_transport

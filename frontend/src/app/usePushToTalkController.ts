@@ -1,13 +1,18 @@
-import type { DesktopPttKeyBinding } from "../types/desktop";
-import { matchesPttKeyBinding } from "../adapter-connection/core/pttKeyBinding";
+import type {
+  DesktopPttAckStatus,
+  DesktopPttEventKind,
+  DesktopPttEventPayload,
+  DesktopPttKeyBinding,
+} from "../types/desktop";
+import { matchesPttKeyBinding } from "../adapter-connection/core/pttKeyBinding.js";
 
 export interface PushToTalkAdapterPort {
   readonly state: {
     readonly pttModeEnabled: boolean;
     readonly pttKeyBinding: DesktopPttKeyBinding;
   };
-  startPttCapture: () => Promise<void>;
-  stopPttCapture: () => Promise<void>;
+  startPttCapture: () => Promise<DesktopPttAckStatus>;
+  stopPttCapture: () => Promise<DesktopPttAckStatus>;
 }
 
 export interface PushToTalkController {
@@ -53,20 +58,61 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
     window.removeEventListener("keyup", onPttKeyUp);
   }
 
-  function onPttIpcKeyDown(): void {
+  function onPttIpcKeyDown(payload: DesktopPttEventPayload): void {
     if (!adapter.state.pttModeEnabled) {
+      reportPttEvent(payload, "ignored", "ptt mode disabled");
       return;
     }
     console.info("[PTT] IPC keydown");
-    void adapter.startPttCapture();
+    reportPttEvent(payload, "received");
+    void handlePttIpcCaptureStart(payload);
   }
 
-  function onPttIpcKeyUp(): void {
+  function onPttIpcKeyUp(payload: DesktopPttEventPayload): void {
     if (!adapter.state.pttModeEnabled) {
+      reportPttEvent(payload, "ignored", "ptt mode disabled");
       return;
     }
     console.info("[PTT] IPC keyup");
-    void adapter.stopPttCapture();
+    reportPttEvent(payload, "received");
+    void handlePttIpcCaptureStop(payload);
+  }
+
+  async function handlePttIpcCaptureStart(payload: DesktopPttEventPayload): Promise<void> {
+    try {
+      reportPttEvent(payload, await adapter.startPttCapture());
+    } catch (error) {
+      reportPttEvent(payload, "failed", getErrorMessage(error));
+    }
+  }
+
+  async function handlePttIpcCaptureStop(payload: DesktopPttEventPayload): Promise<void> {
+    try {
+      reportPttEvent(payload, await adapter.stopPttCapture());
+    } catch (error) {
+      reportPttEvent(payload, "failed", getErrorMessage(error));
+    }
+  }
+
+  function reportPttEvent(
+    payload: DesktopPttEventPayload | undefined,
+    status: DesktopPttAckStatus,
+    message?: string,
+  ): void {
+    if (!payload) {
+      return;
+    }
+    window.ag99desktop?.reportPttEventAck?.({
+      eventId: payload.eventId,
+      kind: payload.kind,
+      status,
+      message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  function getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : "unknown error";
   }
 
   let detachPttIpcKeyDown: (() => void) | undefined;
@@ -74,8 +120,42 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
   let installed = false;
 
   function installPttIpcListeners(): void {
-    detachPttIpcKeyDown = window.ag99desktop?.onIpc?.("desktop:ptt-keydown", onPttIpcKeyDown);
-    detachPttIpcKeyUp = window.ag99desktop?.onIpc?.("desktop:ptt-keyup", onPttIpcKeyUp);
+    const onIpc = window.ag99desktop?.onIpc as
+      | ((channel: string, callback: (payload: DesktopPttEventPayload) => void) => () => void)
+      | undefined;
+    detachPttIpcKeyDown = onIpc?.(
+      "desktop:ptt-keydown",
+      (payload) => handlePttIpcPayload(payload, "keydown", onPttIpcKeyDown),
+    );
+    detachPttIpcKeyUp = onIpc?.(
+      "desktop:ptt-keyup",
+      (payload) => handlePttIpcPayload(payload, "keyup", onPttIpcKeyUp),
+    );
+  }
+
+  function handlePttIpcPayload(
+    payload: DesktopPttEventPayload,
+    expectedKind: DesktopPttEventKind,
+    handler: (payload: DesktopPttEventPayload) => void,
+  ): void {
+    if (!isDesktopPttEventPayload(payload) || payload.kind !== expectedKind) {
+      return;
+    }
+    handler(payload);
+  }
+
+  function isDesktopPttEventPayload(value: unknown): value is DesktopPttEventPayload {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+
+    const raw = value as Partial<DesktopPttEventPayload>;
+    return (
+      typeof raw.eventId === "string"
+      && (raw.kind === "keydown" || raw.kind === "keyup")
+      && typeof raw.keycode === "number"
+      && typeof raw.createdAt === "string"
+    );
   }
 
   function removePttIpcListeners(): void {

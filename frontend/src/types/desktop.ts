@@ -363,6 +363,31 @@ export interface DesktopPttKeyBinding {
   uiohookKeycode: number | null;
 }
 
+export type DesktopPttEventKind = "keydown" | "keyup";
+
+export interface DesktopPttEventPayload {
+  eventId: string;
+  kind: DesktopPttEventKind;
+  keycode: number;
+  createdAt: string;
+}
+
+export type DesktopPttAckStatus =
+  | "received"
+  | "started"
+  | "stopped"
+  | "discarded"
+  | "ignored"
+  | "failed";
+
+export interface DesktopPttEventAck {
+  eventId: string;
+  kind: DesktopPttEventKind;
+  status: DesktopPttAckStatus;
+  message?: string;
+  timestamp: string;
+}
+
 export interface DesktopMotionTuningSamplesStatus {
   rootError: string;
   loadError: string;

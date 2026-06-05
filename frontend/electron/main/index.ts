@@ -2,7 +2,12 @@ import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen, s
 import { MenuManager } from "./menu-manager";
 import { WindowManager } from "./window-manager";
 import { setupNativeMicrophoneIpc } from "./native-microphone";
-import type { DesktopPttKeyBinding } from "../../src/types/desktop";
+import type {
+  DesktopPttEventAck,
+  DesktopPttEventKind,
+  DesktopPttEventPayload,
+  DesktopPttKeyBinding,
+} from "../../src/types/desktop";
 
 let windowManager: WindowManager;
 let menuManager: MenuManager;
@@ -19,6 +24,9 @@ let globalPttKeycode: number | null = 29;
 let globalPttHookStarted = false;
 let globalPttListenersInstalled = false;
 let globalPttPressed = false;
+let globalPttEventSerial = 0;
+const recentPttEvents = new Map<string, DesktopPttEventPayload>();
+const MAX_RECENT_PTT_EVENTS = 20;
 
 function loadUiohook(): Record<string, unknown> | null {
   if (uiohookModule) {
@@ -57,18 +65,14 @@ function startGlobalPttHook(): void {
       if (event.keycode === globalPttKeycode) {
         if (globalPttPressed) return;
         globalPttPressed = true;
-        const pet = windowManager?.getWindow("pet");
-        console.info("[PTT] global keydown matched keycode=%s petReady=%s", event.keycode, Boolean(pet && !pet.isDestroyed()));
-        pet?.webContents.send("desktop:ptt-keydown");
+        sendGlobalPttEvent("keydown", event.keycode);
       }
     });
     hook.on("keyup", (event) => {
       if (!globalPttEnabled) return;
       if (event.keycode === globalPttKeycode) {
         globalPttPressed = false;
-        const pet = windowManager?.getWindow("pet");
-        console.info("[PTT] global keyup matched keycode=%s petReady=%s", event.keycode, Boolean(pet && !pet.isDestroyed()));
-        pet?.webContents.send("desktop:ptt-keyup");
+        sendGlobalPttEvent("keyup", event.keycode);
       }
     });
     globalPttListenersInstalled = true;
@@ -107,6 +111,89 @@ function normalizePttKeycode(binding: unknown): number | null {
   return typeof keycode === "number" && Number.isInteger(keycode) && keycode > 0
     ? keycode
     : null;
+}
+
+function sendGlobalPttEvent(kind: DesktopPttEventKind, keycode: number): void {
+  const pet = windowManager?.getWindow("pet");
+  const payload: DesktopPttEventPayload = {
+    eventId: `ptt:${Date.now()}:${++globalPttEventSerial}`,
+    kind,
+    keycode,
+    createdAt: new Date().toISOString(),
+  };
+  recentPttEvents.set(payload.eventId, payload);
+  trimRecentPttEvents();
+
+  const ready = Boolean(pet && !pet.isDestroyed());
+  console.info(
+    "[PTT] global %s matched keycode=%s event=%s petReady=%s",
+    kind,
+    keycode,
+    payload.eventId,
+    ready,
+  );
+
+  if (!pet || pet.isDestroyed()) {
+    console.warn("[PTT] event=%s not delivered: pet window unavailable", payload.eventId);
+    return;
+  }
+
+  pet.webContents.send(`desktop:ptt-${kind}`, payload);
+}
+
+function trimRecentPttEvents(): void {
+  while (recentPttEvents.size > MAX_RECENT_PTT_EVENTS) {
+    const oldest = recentPttEvents.keys().next().value;
+    if (!oldest) {
+      return;
+    }
+    recentPttEvents.delete(oldest);
+  }
+}
+
+function recordPttAck(ack: unknown): void {
+  if (!isDesktopPttEventAck(ack)) {
+    console.warn("[PTT] ignored malformed ack", ack);
+    return;
+  }
+
+  const eventPayload = recentPttEvents.get(ack.eventId);
+  const latencyMs = eventPayload
+    ? Date.now() - Date.parse(eventPayload.createdAt)
+    : null;
+  console.info(
+    "[PTT] ack event=%s kind=%s status=%s latencyMs=%s message=%s",
+    ack.eventId,
+    ack.kind,
+    ack.status,
+    latencyMs ?? "unknown",
+    ack.message ?? "",
+  );
+
+  if (ack.status !== "received") {
+    recentPttEvents.delete(ack.eventId);
+  }
+}
+
+function isDesktopPttEventAck(value: unknown): value is DesktopPttEventAck {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const raw = value as Partial<DesktopPttEventAck>;
+  return (
+    typeof raw.eventId === "string"
+    && (raw.kind === "keydown" || raw.kind === "keyup")
+    && (
+      raw.status === "received"
+      || raw.status === "started"
+      || raw.status === "stopped"
+      || raw.status === "discarded"
+      || raw.status === "ignored"
+      || raw.status === "failed"
+    )
+    && typeof raw.timestamp === "string"
+  );
 }
 
 function isEnvFlagEnabled(name: string): boolean {
@@ -249,6 +336,10 @@ function setupIpc(): void {
     } else {
       stopGlobalPttHook();
     }
+  });
+
+  ipcMain.on("desktop:ptt-event-ack", (_event, ack: unknown) => {
+    recordPttAck(ack);
   });
 
   ipcMain.handle("desktop:capture-screen-image", async () => {

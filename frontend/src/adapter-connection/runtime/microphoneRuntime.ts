@@ -22,6 +22,7 @@ import type { DesktopPttKeyBinding } from "../../types/desktop.js";
 import { buildAudioStreamChunkFrame, float32ToPcm16le } from "./audioStreamFrame.js";
 
 export type MicrophoneCaptureOrigin = "manual" | "ptt" | "auto";
+export type PttCaptureCommandResult = "started" | "stopped" | "discarded" | "ignored" | "failed";
 
 export interface AdapterMicrophoneRuntimeState {
   microphoneDeviceId: string;
@@ -60,8 +61,8 @@ export interface AdapterMicrophoneRuntime {
   stopMicrophoneCapture: (reason?: string) => Promise<boolean>;
   setPttMode: (enabled: boolean) => void;
   setPttKeyBinding: (binding: DesktopPttKeyBinding) => void;
-  startPttCapture: () => Promise<void>;
-  stopPttCapture: () => Promise<void>;
+  startPttCapture: () => Promise<PttCaptureCommandResult>;
+  stopPttCapture: () => Promise<PttCaptureCommandResult>;
   clearPendingStart: () => void;
 }
 
@@ -297,30 +298,35 @@ export function createAdapterMicrophoneRuntime(
     }
   }
 
-  async function startPttCapture(): Promise<void> {
+  async function startPttCapture(): Promise<PttCaptureCommandResult> {
     if (!deps.state.pttModeEnabled) {
-      return;
+      return "ignored";
     }
     if (deps.state.micCapturing) {
-      return;
+      return "started";
     }
-    await startMicrophoneCapture("ptt");
+    const started = await startMicrophoneCapture("ptt");
+    if (started) {
+      return "started";
+    }
+    return deps.state.statusMessage.includes("未开始识别") ? "discarded" : "failed";
   }
 
-  async function stopPttCapture(): Promise<void> {
+  async function stopPttCapture(): Promise<PttCaptureCommandResult> {
     if (!deps.state.pttModeEnabled) {
-      return;
+      return "ignored";
     }
     if (!deps.state.micCapturing) {
       if (micStartPromise && micCaptureOrigin === "ptt") {
         pendingPttRelease = true;
+        return "discarded";
       }
-      return;
+      return "ignored";
     }
     if (micCaptureOrigin !== "ptt") {
-      return;
+      return "ignored";
     }
-    await stopMicrophoneCapture("ptt_release");
+    return await stopMicrophoneCapture("ptt_release") ? "stopped" : "ignored";
   }
 
   async function discardMicrophoneCaptureBeforeRecognition(reason: string): Promise<void> {
