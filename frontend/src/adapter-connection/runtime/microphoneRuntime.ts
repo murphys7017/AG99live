@@ -19,6 +19,7 @@ import {
   normalizePttKeyBinding,
 } from "../core/pttKeyBinding.js";
 import type { DesktopPttKeyBinding } from "../../types/desktop.js";
+import { buildAudioStreamChunkFrame, float32ToPcm16le } from "./audioStreamFrame.js";
 
 export type MicrophoneCaptureOrigin = "manual" | "ptt" | "auto";
 
@@ -73,6 +74,9 @@ export function createAdapterMicrophoneRuntime(
   let micStartPromise: Promise<boolean> | null = null;
   let audioSequenceBroken = false;
   let activeMicTurnId: string | null = null;
+  let activeMicStreamId: string | null = null;
+  let activeMicSeq = 0;
+  let audioStreamStarted = false;
   let micCaptureOrigin: MicrophoneCaptureOrigin | null = null;
 
   function sendMicrophoneAudioChunk(chunk: MicrophoneAudioChunk): void {
@@ -97,23 +101,47 @@ export function createAdapterMicrophoneRuntime(
       return;
     }
 
-    if (!chunk.audio.length) {
+    const audioPayload = resolveAudioPayload(chunk);
+    if (!audioPayload.byteLength) {
       return;
     }
 
-    socket.send(
-      JSON.stringify(
-        deps.buildEnvelope(
-          "input.raw_audio_data",
-          {
-            audio: chunk.audio,
-            sample_rate: chunk.sampleRate,
-            channels: chunk.channels,
-          },
-          getOrCreateActiveMicTurnId(),
+    const turnId = getOrCreateActiveMicTurnId();
+    const streamId = getOrCreateActiveMicStreamId();
+    if (!audioStreamStarted) {
+      socket.send(
+        JSON.stringify(
+          deps.buildEnvelope(
+            "input.audio_stream_start",
+            {
+              stream_id: streamId,
+              source: resolveMicrophoneStreamSource(),
+              device_id: deps.state.microphoneDeviceId || "",
+              encoding: "pcm16le",
+              sample_rate: chunk.sampleRate,
+              channels: chunk.channels,
+            },
+            turnId,
+          ),
         ),
+      );
+      audioStreamStarted = true;
+    }
+
+    socket.send(
+      buildAudioStreamChunkFrame(
+        {
+          stream_id: streamId,
+          turn_id: turnId,
+          seq: activeMicSeq,
+          encoding: "pcm16le",
+          sample_rate: chunk.sampleRate,
+          channels: chunk.channels,
+        },
+        audioPayload,
       ),
     );
+    activeMicSeq += 1;
   }
 
   function setMicrophoneDevice(deviceId: string): void {
@@ -216,6 +244,9 @@ export function createAdapterMicrophoneRuntime(
       } catch (error) {
         deps.state.micCapturing = false;
         activeMicTurnId = null;
+        activeMicStreamId = null;
+        activeMicSeq = 0;
+        audioStreamStarted = false;
         micCaptureOrigin = null;
         deps.state.lastError =
           error instanceof Error ? error.message : "麦克风启动失败。";
@@ -299,20 +330,24 @@ export function createAdapterMicrophoneRuntime(
     await stopMicrophoneCaptureRuntime();
 
     const inputTurnId = activeMicTurnId ?? createRootInputTurnId();
+    const inputStreamId = activeMicStreamId;
     const socket = deps.getSocket();
     if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(
-        JSON.stringify(
-          deps.buildEnvelope(
-            "input.mic_audio_end",
-            {
-              reason,
-              dropped: audioSequenceBroken,
-            },
-            inputTurnId,
-          ),
-        ),
-      );
+      const endType = audioStreamStarted && inputStreamId
+        ? "input.audio_stream_end"
+        : "input.mic_audio_end";
+      const payload = audioStreamStarted && inputStreamId
+        ? {
+            stream_id: inputStreamId,
+            reason,
+            dropped: audioSequenceBroken,
+            last_seq: activeMicSeq - 1,
+          }
+        : {
+            reason,
+            dropped: audioSequenceBroken,
+          };
+      socket.send(JSON.stringify(deps.buildEnvelope(endType, payload, inputTurnId)));
     }
     clearMicCaptureSession();
 
@@ -345,8 +380,35 @@ export function createAdapterMicrophoneRuntime(
     return activeMicTurnId;
   }
 
+  function getOrCreateActiveMicStreamId(): string {
+    if (!activeMicStreamId) {
+      activeMicStreamId = `mic:${deps.createMessageId()}`;
+    }
+    return activeMicStreamId;
+  }
+
+  function resolveMicrophoneStreamSource(): string {
+    return deps.state.microphoneDeviceId.startsWith("@device_")
+      || deps.state.microphoneDeviceId.startsWith("native:")
+      ? "native_dshow"
+      : "web_audio";
+  }
+
+  function resolveAudioPayload(chunk: MicrophoneAudioChunk): ArrayBuffer {
+    if (chunk.pcm16le instanceof ArrayBuffer) {
+      return chunk.pcm16le;
+    }
+    if (chunk.audio?.length) {
+      return float32ToPcm16le(Float32Array.from(chunk.audio));
+    }
+    return new ArrayBuffer(0);
+  }
+
   function clearMicCaptureSession(): void {
     activeMicTurnId = null;
+    activeMicStreamId = null;
+    activeMicSeq = 0;
+    audioStreamStarted = false;
     micCaptureOrigin = null;
     audioSequenceBroken = false;
   }

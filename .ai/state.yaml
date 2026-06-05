@@ -1,29 +1,34 @@
 task:
   class: feature
-  risk: medium
-  phase: implementation_in_progress
-  scope: Remote operator v1 execution loop in AG99live adapter
+  risk: high
+  phase: binary_microphone_transport_validated
+  scope: AG99live frontend Electron/Web microphone capture transport and adapter speech ingress; remote operator permission policy remains out of scope
 context:
   confidence: medium
   assumptions:
-    - The adapter owns the computer key to codex-cli-app-server endpoint mapping.
-    - Only configured and online remote operator computers are exposed in prompt context.
-    - AstrBot model output for remote operation remains exactly `computer` plus `prompt`.
-    - Remote execution results are re-entered as system-level text input through the existing AstrBot event path.
+    - Remote operator permission and approval policy is intentionally open during functional testing and is not part of the current remediation scope.
+    - Current Electron frontend should prefer JSON control frames plus WebSocket binary PCM16LE chunks over JSON number-array audio.
+    - Legacy input.raw_audio_data and input.mic_audio_end remain available for old clients and debugging, but are no longer the current frontend main path.
+    - PTT start/stop timing now uses the same stream start/binary chunk/stream end path as manual microphone capture.
   unresolved_questions:
-    - Codex app-server protocol compatibility should be validated against a live server.
-    - Authentication, pairing, approval UX, artifacts, and progress reporting remain future work.
+    - Native microphone startup still returns ok immediately after spawn; a later step should add first-frame or ready/error acknowledgement.
+    - The binary chunk header still carries JSON metadata per chunk; a later optimization can move stable fields to stream start and compact chunk headers further.
 architecture:
   stability: evolving
   boundary_changes:
-    - Remote operator runtime is adapter-side service code, separate from the desktop frontend and motion pipeline.
-    - Result contributor schedules remote execution and re-injects results; it does not directly push operator output to the frontend.
+    - Current issue ledger is recorded in docs/02-设计文档/05-前端结构维护清单.md.
+    - Microphone WebSocket protocol now has JSON stream control frames and AG99 binary PCM16LE audio chunk frames.
+    - Backend transport has a separate binary message handler instead of decoding bytes as UTF-8 JSON.
 verification:
   checks_run:
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_remote_operator_prompt.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_remote_operator_runtime.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_main_plugin_hooks.py -q
+    - git status --short
+    - cd frontend; npm run test:adapter-connection
+    - cd frontend; npm run typecheck:node
+    - cd frontend; npm run typecheck:renderer
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_speech_ingress_service.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_binary_audio_protocol.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_websocket_transport_binary.py -q
     - python -m compileall astrbot_plugin_ag99live_adapter
     - git diff --check
   checks_failed: []
-  validation_gap: No live codex-cli-app-server integration test has been run.
+  validation_gap: Live Electron ffmpeg/device capture was not manually exercised in this turn.
 runtime:
-  mode: implemented_pending_live_integration
+  mode: binary_microphone_transport

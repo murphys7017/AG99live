@@ -76,7 +76,11 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     console.warn("[Connection] runtime protocol violation.", message);
   }
 
-  async function handleSocketMessage(rawData: string): Promise<void> {
+  async function handleSocketMessage(rawData: string | ArrayBuffer | Blob): Promise<void> {
+    if (typeof rawData !== "string") {
+      console.warn("[Connection] ignored non-JSON inbound websocket payload.");
+      return;
+    }
     const parsed = parseInboundEnvelope(rawData);
     if (!parsed.ok) {
       if (parsed.code === "version_mismatch") {

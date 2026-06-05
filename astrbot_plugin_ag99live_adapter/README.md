@@ -70,10 +70,11 @@ astrbot_plugin_ag99live_adapter/
 - 一个 user input 对应一个 turn，但一个 turn 内可能输出多个 assistant segment。
 - `control.synth_finished` 表示该 turn 的输出队列关闭，不会再追加新的 `output.*` / `engine.motion_*` segment；它不要求早于所有前端播放完成。
 - 前端在 `synth_finished` 已到且所有 segment 播放完成后回传 `control.playback_finished`；后端收到后再发 `control.turn_finished`。
-- 麦克风输入现在按“单段录音”组织：一段采集内的 `input.raw_audio_data` 与 `input.mic_audio_end` 共享同一个新的 `turn_id`；后端 STT ingress 也按这个 `turn_id` 分桶缓冲，不再把不同输入段混到一个全局缓冲。
-- 若前端检测到发送积压，会在 `input.mic_audio_end` 中带上 `dropped: true`，后端直接丢弃该段转写。
+- 麦克风输入现在按“单段录音”组织：一段采集内的 `input.audio_stream_start`、WebSocket binary PCM16LE chunk 与 `input.audio_stream_end` 共享同一个新的 `turn_id` 和 `stream_id`；后端 STT ingress 按 `stream_id` 汇总音频，不再把不同输入段混到一个全局缓冲。
+- 若前端检测到发送积压，会在 `input.audio_stream_end` 中带上 `dropped: true`，后端直接丢弃该段转写。
 - 切换麦克风设备时，前端会先正常结束旧输入段，再启动新输入段；收到 `control.interrupt` 时，前端会把已释放的 segment 音频写成失败终态后再清理播放 runtime。
-- Windows / Electron 前端现在优先使用主进程 DirectShow/ffmpeg 原生麦克风枚举与采集；这不改变插件侧协议，后端仍只接收 `input.raw_audio_data` 和 `input.mic_audio_end`。
+- Windows / Electron 前端现在优先使用主进程 DirectShow/ffmpeg 原生麦克风枚举与采集；原生路径直接采集 `s16le`，渲染进程通过二进制音频帧发送给插件侧。
+- `input.raw_audio_data` / `input.mic_audio_end` 仍保留为旧前端和调试脚本兼容路径，不是当前 Electron 前端主路径。
 - 按键说话模式会以 `reason="ptt_release"` 结束本段录音；对插件侧来说它仍是一段普通麦克风输入。
 - `semantic_axis_profile` 在默认设计升级时会自动刷新 backend-owned profile；用户修改过的 profile 如果只是旧默认设计残留，在重新匹配当前模型 hash 后也会自动刷新到新默认，否则保持 `stale` 等待人工处理。
 

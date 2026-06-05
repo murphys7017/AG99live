@@ -58,17 +58,47 @@ control.turn_finished
 | 类型 | 载荷 |
 | --- | --- |
 | `input.text` | `{ text: string, images: ImagePayload[] }` |
-| `input.raw_audio_data` | `{ audio: number[], sample_rate: number, channels: 1 }` |
-| `input.mic_audio_end` | `{ reason: string, dropped?: boolean }` |
+| `input.audio_stream_start` | `{ stream_id: string, source: string, device_id?: string, encoding: "pcm16le", sample_rate: number, channels: 1 }` |
+| WebSocket 二进制音频块 | `AG99` 二进制帧，见下文 |
+| `input.audio_stream_end` | `{ stream_id: string, reason: string, dropped?: boolean, last_seq?: number }` |
+| `input.raw_audio_data` | 兼容旧路径：`{ audio: number[], sample_rate: number, channels: 1 }` |
+| `input.mic_audio_end` | 兼容旧路径：`{ reason: string, dropped?: boolean }` |
 
 麦克风输入规则：
 
 - 一段采集期只使用一个新的 `turn_id`。
-- 该采集期的所有 `input.raw_audio_data` 和最后的 `input.mic_audio_end` 共享同一个 `turn_id`。
-- 后端语音转文字入口使用该 `turn_id` 作为音频缓冲键。
+- 该采集期先发送 `input.audio_stream_start`，随后发送一个或多个 WebSocket 二进制音频块，最后发送 `input.audio_stream_end`。
+- `input.audio_stream_start`、二进制音频块元数据和 `input.audio_stream_end` 共享同一个 `turn_id` 与 `stream_id`。
+- 后端语音转文字入口使用 `stream_id` 作为流缓冲键，并在 `input.audio_stream_end` 时把本段 PCM16LE 音频转成 STT 输入。
 - 如果 `dropped === true`，后端丢弃该 turn 的本次音频并立即终结该 turn。
-- Electron / Windows 桌面端的设备枚举和采集可以来自主进程 DirectShow/ffmpeg，也可以回退到浏览器 `MediaDevices`；这只影响前端本地采集来源，不改变 WebSocket 协议载荷。
-- 按键说话模式只改变采集开始/结束时机。按下配置按键等价于开始一段麦克风采集，松开按键等价于发送该段 `input.mic_audio_end(reason="ptt_release")`。
+- Electron / Windows 桌面端的设备枚举和采集可以来自主进程 DirectShow/ffmpeg，也可以回退到浏览器 `MediaDevices`。原生路径直接让 ffmpeg 输出 `s16le`，Web Audio 路径在 renderer 内把 Float32 转成 PCM16LE。
+- 按键说话模式只改变采集开始/结束时机。按下配置按键等价于开始一段麦克风采集，松开按键等价于发送该段 `input.audio_stream_end(reason="ptt_release")`。
+- `input.raw_audio_data` / `input.mic_audio_end` 仍保留给旧前端或调试脚本，但不是当前 Electron 前端主路径。
+
+二进制音频块格式：
+
+```text
+0..3    magic      ASCII "AG99"
+4       version    1
+5       frame_type 1 = microphone audio chunk
+6..7    flags      little-endian uint16，当前保留为 0
+8..11   meta_len   little-endian uint32
+12..    meta       UTF-8 JSON
+...     payload    PCM16LE bytes
+```
+
+元数据示例：
+
+```json
+{
+  "stream_id": "mic:xxx",
+  "turn_id": "input:xxx",
+  "seq": 0,
+  "encoding": "pcm16le",
+  "sample_rate": 16000,
+  "channels": 1
+}
+```
 
 ### output.* （后端 -> 前端）
 

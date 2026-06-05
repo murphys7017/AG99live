@@ -21,6 +21,7 @@ from ..protocol.builder import (
     build_output_image,
     build_output_text,
 )
+from ..protocol.binary_audio import parse_binary_audio_frame
 from ..protocol import (
     SOURCE_ADAPTER,
     SOURCE_ENGINE,
@@ -174,6 +175,10 @@ class TurnCoordinator:
                 message=f"Unhandled message type: {message.type}",
             )
         )
+
+    async def handle_binary_msg(self, raw_message: bytes) -> None:
+        frame = parse_binary_audio_frame(raw_message)
+        await self.speech_ingress.handle_audio_stream_binary_chunk(frame)
 
     async def emit_message_chain(
         self,

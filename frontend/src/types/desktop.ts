@@ -351,7 +351,8 @@ export interface DesktopMicrophoneDevice {
 }
 
 export interface DesktopMicrophoneAudioChunk {
-  audio: number[];
+  audio?: number[];
+  pcm16le?: ArrayBuffer;
   sampleRate: number;
   channels: 1;
 }

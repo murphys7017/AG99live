@@ -24,6 +24,8 @@ export const INBOUND_MESSAGE_TYPES = {
 
 export const OUTBOUND_MESSAGE_TYPES = {
   INPUT_TEXT: "input.text",
+  INPUT_AUDIO_STREAM_START: "input.audio_stream_start",
+  INPUT_AUDIO_STREAM_END: "input.audio_stream_end",
   INPUT_RAW_AUDIO_DATA: "input.raw_audio_data",
   INPUT_MIC_AUDIO_END: "input.mic_audio_end",
   CONTROL_INTERRUPT: "control.interrupt",

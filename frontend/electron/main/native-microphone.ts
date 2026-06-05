@@ -10,7 +10,7 @@ import type { DesktopMicrophoneDevice } from "../../src/types/desktop";
 const FFMPEG_SAMPLE_RATE = 16000;
 const FFMPEG_CHANNELS = 1;
 const FFMPEG_CHUNK_SAMPLES = 1024;
-const FFMPEG_CHUNK_BYTES = FFMPEG_CHUNK_SAMPLES * Float32Array.BYTES_PER_ELEMENT;
+const FFMPEG_CHUNK_BYTES = FFMPEG_CHUNK_SAMPLES * Int16Array.BYTES_PER_ELEMENT;
 
 interface NativeMicrophoneDevice extends DesktopMicrophoneDevice {
   alternativeName: string;
@@ -123,7 +123,7 @@ async function startNativeMicrophoneCapture(
       "-ar",
       String(FFMPEG_SAMPLE_RATE),
       "-f",
-      "f32le",
+      "s16le",
       "pipe:1",
     ],
     {
@@ -222,7 +222,7 @@ function handleNativeCaptureBytes(
     offset += FFMPEG_CHUNK_BYTES;
     sender.send("desktop:native-microphone-chunk", {
       sessionId: runtime.sessionId,
-      audio: serializeF32leAudio(frame),
+      pcm16le: bufferToExactArrayBuffer(frame),
       sampleRate: FFMPEG_SAMPLE_RATE,
       channels: FFMPEG_CHANNELS,
     });
@@ -241,14 +241,10 @@ function emitNativeCaptureError(
   });
 }
 
-function serializeF32leAudio(frame: Buffer): number[] {
-  const length = Math.floor(frame.length / Float32Array.BYTES_PER_ELEMENT);
-  const audio = new Array<number>(length);
-  for (let index = 0; index < length; index += 1) {
-    const sample = Math.max(-1, Math.min(1, frame.readFloatLE(index * 4)));
-    audio[index] = Math.round(sample * 10000) / 10000;
-  }
-  return audio;
+function bufferToExactArrayBuffer(frame: Buffer): ArrayBuffer {
+  const copy = new Uint8Array(frame.byteLength);
+  copy.set(frame);
+  return copy.buffer;
 }
 
 function selectNativeMicrophoneDevice(

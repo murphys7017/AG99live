@@ -24,6 +24,7 @@ class WebSocketTransport:
         static_server,
         auto_start_mic: bool,
         handle_message: Callable[[dict[str, Any]], Awaitable[None]],
+        handle_binary_message: Callable[[bytes], Awaitable[None]] | None = None,
         refresh_runtime_settings_async: Callable[..., Awaitable[None]],
         send_current_model_and_conf: Callable[..., Awaitable[None]],
         send_motion_tuning_samples_state: Callable[..., Awaitable[None]],
@@ -34,6 +35,7 @@ class WebSocketTransport:
         self.static_server = static_server
         self.auto_start_mic = auto_start_mic
         self._handle_message = handle_message
+        self._handle_binary_message = handle_binary_message
         self._refresh_runtime_settings_async = refresh_runtime_settings_async
         self._send_current_model_and_conf = send_current_model_and_conf
         self._send_motion_tuning_samples_state = send_motion_tuning_samples_state
@@ -139,7 +141,8 @@ class WebSocketTransport:
             await self._send_initial_messages()
             async for raw_message in websocket:
                 if isinstance(raw_message, bytes):
-                    raw_message = raw_message.decode("utf-8", errors="ignore")
+                    await self._handle_binary_payload(raw_message)
+                    continue
                 try:
                     parsed = json.loads(raw_message)
                 except json.JSONDecodeError:
@@ -188,6 +191,26 @@ class WebSocketTransport:
             except Exception as exc:
                 logger.warning("Failed to run disconnect cleanup: %s", exc)
             logger.debug("Desktop frontend disconnected from adapter transport")
+
+    async def _handle_binary_payload(self, raw_message: bytes) -> None:
+        if self._handle_binary_message is None:
+            await self.send_json(
+                build_control_error(
+                    message="Binary websocket payloads are not supported by this adapter.",
+                )
+            )
+            return
+        try:
+            await self._handle_binary_message(raw_message)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Failed to process inbound binary websocket payload: %s", exc)
+            await self.send_json(
+                build_control_error(
+                    message=f"Failed to process binary message: {exc}",
+                )
+            )
 
     async def _send_initial_messages(self) -> None:
         await self._refresh_runtime_settings_async(

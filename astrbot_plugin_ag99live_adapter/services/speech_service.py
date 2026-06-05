@@ -11,6 +11,7 @@ import numpy as np
 
 from astrbot.api import logger
 
+from ..protocol.binary_audio import BinaryAudioChunkFrame
 from ..protocol.builder import (
     build_control_error,
     build_control_interrupt,
@@ -118,6 +119,61 @@ class SpeechIngressService:
 
         stream.chunks.append(chunk_bytes)
         stream.last_seq = seq
+
+    async def handle_audio_stream_binary_chunk(self, frame: BinaryAudioChunkFrame) -> None:
+        stream_id = self._normalize_stream_id(frame.stream_id)
+        if not stream_id:
+            return
+
+        stream = self._audio_streams.get(stream_id)
+        if stream is None:
+            stream = AudioStreamState(
+                stream_id=stream_id,
+                sample_rate=frame.sample_rate,
+                channels=frame.channels,
+                encoding=frame.encoding,
+            )
+            self._audio_streams[stream_id] = stream
+
+        if stream.encoding != "pcm16le" or frame.encoding != "pcm16le":
+            await self._send_json(
+                build_control_error(
+                    turn_id=frame.turn_id,
+                    message=f"Unsupported audio stream encoding: {stream.encoding or frame.encoding}",
+                )
+            )
+            self._audio_streams.pop(stream_id, None)
+            return
+
+        if frame.seq <= stream.last_seq:
+            logger.warning(
+                "Ignoring out-of-order binary audio stream chunk: stream_id=%s seq=%s last_seq=%s",
+                stream_id,
+                frame.seq,
+                stream.last_seq,
+            )
+            return
+
+        if stream.sample_rate != frame.sample_rate or stream.channels != frame.channels:
+            logger.warning(
+                "Binary audio stream format changed: stream_id=%s existing=%s/%s next=%s/%s",
+                stream_id,
+                stream.sample_rate,
+                stream.channels,
+                frame.sample_rate,
+                frame.channels,
+            )
+            self._audio_streams.pop(stream_id, None)
+            await self._send_json(
+                build_control_error(
+                    turn_id=frame.turn_id,
+                    message="Audio stream format changed during capture.",
+                )
+            )
+            return
+
+        stream.chunks.append(frame.payload)
+        stream.last_seq = frame.seq
 
     async def handle_audio_stream_end(self, message):
         payload = message.payload

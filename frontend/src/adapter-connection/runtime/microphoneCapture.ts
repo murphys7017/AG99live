@@ -1,4 +1,5 @@
 import type { DesktopMicrophoneAudioChunk } from "../../types/desktop.js";
+import { cloneArrayBuffer, float32ToPcm16le } from "./audioStreamFrame.js";
 
 export type MicrophoneAudioChunk = DesktopMicrophoneAudioChunk;
 
@@ -234,6 +235,7 @@ async function tryStartNativeMicrophoneCaptureRuntime(
     }
     options.onChunk({
       audio: chunk.audio,
+      pcm16le: chunk.pcm16le ? cloneArrayBuffer(chunk.pcm16le) : undefined,
       sampleRate: chunk.sampleRate,
       channels: chunk.channels,
     });
@@ -275,7 +277,7 @@ function buildMicrophoneAudioChunk(
     MIC_TARGET_SAMPLE_RATE,
   );
   return {
-    audio: serializeAudioChunk(normalizedChunk),
+    pcm16le: float32ToPcm16le(normalizedChunk),
     sampleRate: MIC_TARGET_SAMPLE_RATE,
     channels: 1,
   };
@@ -312,15 +314,6 @@ function downsampleAudioBuffer(
   }
 
   return output;
-}
-
-function serializeAudioChunk(audioBuffer: Float32Array): number[] {
-  const serialized = new Array<number>(audioBuffer.length);
-  for (let index = 0; index < audioBuffer.length; index += 1) {
-    const sample = Math.max(-1, Math.min(1, audioBuffer[index] ?? 0));
-    serialized[index] = Math.round(sample * 10000) / 10000;
-  }
-  return serialized;
 }
 
 async function createMicrophoneProcessorNode(

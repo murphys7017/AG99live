@@ -173,6 +173,7 @@ class OLVPetPlatformAdapter(Platform):
             static_server=self._static_server,
             auto_start_mic=self.auto_start_mic,
             handle_message=self.handle_msg,
+            handle_binary_message=self.handle_binary_msg,
             refresh_runtime_settings_async=self._refresh_runtime_settings_async,
             send_current_model_and_conf=self._send_current_model_and_conf,
             send_motion_tuning_samples_state=self._send_motion_tuning_samples_state,
@@ -291,6 +292,9 @@ class OLVPetPlatformAdapter(Platform):
 
     async def handle_msg(self, message: dict[str, Any]):
         await self.turn_coordinator.handle_msg(message)
+
+    async def handle_binary_msg(self, message: bytes):
+        await self.turn_coordinator.handle_binary_msg(message)
 
     def _ensure_vad_engine(self):
         if self._vad_engine is not None:

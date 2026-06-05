@@ -22,7 +22,7 @@ class FakeWebSocket {
   readonly listeners: ListenerMap = {};
   readyState = FakeWebSocket.OPEN;
   bufferedAmount = 0;
-  sent: string[] = [];
+  sent: Array<string | ArrayBuffer> = [];
   readonly url: string;
 
   constructor(url: string) {
@@ -40,7 +40,7 @@ class FakeWebSocket {
     bucket.push(listener as never);
   }
 
-  send(data: string): void {
+  send(data: string | ArrayBuffer): void {
     this.sent.push(data);
   }
 
@@ -271,6 +271,27 @@ function sendTurnStarted(socket: FakeWebSocket, turnId = "turn-1"): void {
     source: "backend",
     payload: {},
   }));
+}
+
+function parseSentJsonMessages(socket: FakeWebSocket): Array<Record<string, unknown>> {
+  return socket.sent
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => JSON.parse(item) as Record<string, unknown>);
+}
+
+function sentBinaryFrames(socket: FakeWebSocket): Array<ArrayBuffer> {
+  return socket.sent.filter((item): item is ArrayBuffer => item instanceof ArrayBuffer);
+}
+
+function parseAudioFrameMetadata(frame: ArrayBuffer): Record<string, unknown> {
+  const view = new DataView(frame);
+  const bytes = new Uint8Array(frame);
+  assert.equal(String.fromCharCode(...bytes.slice(0, 4)), "AG99");
+  assert.equal(view.getUint8(4), 1);
+  assert.equal(view.getUint8(5), 1);
+  const metadataLength = view.getUint32(8, true);
+  const metadataBytes = bytes.slice(12, 12 + metadataLength);
+  return JSON.parse(new TextDecoder().decode(metadataBytes)) as Record<string, unknown>;
 }
 
 async function flushMicrotasks(): Promise<void> {
@@ -700,7 +721,8 @@ async function testSendTextUsesOutboundProtocolEnvelope(): Promise<void> {
 
     assert.equal(sent, true);
     assert.equal(socket.sent.length, 1);
-    const message = JSON.parse(socket.sent[0]) as Record<string, unknown>;
+    const message = parseSentJsonMessages(socket)[0];
+    assert.ok(message);
     assert.equal(message.type, "input.text");
     assert.equal(message.version, "v2");
     assert.equal(typeof message.message_id, "string");
@@ -732,7 +754,8 @@ function testSendMotionPreviewUsesOutboundProtocolEnvelope(): void {
 
     assert.equal(sent, true);
     assert.equal(socket.sent.length, 1);
-    const message = JSON.parse(socket.sent[0]) as Record<string, unknown>;
+    const message = parseSentJsonMessages(socket)[0];
+    assert.ok(message);
     assert.equal(message.type, "engine.motion_intent");
     assert.equal(message.version, "v2");
     assert.deepEqual(message.payload, {
@@ -841,22 +864,27 @@ async function testMicAudioUsesFreshInputTurnAcrossChunkAndEnd(): Promise<void> 
     await flushMicrotasks();
     await adapter.toggleMicrophoneCapture();
 
-    const rawAudioMessage = socket.sent
-      .map((item) => JSON.parse(item) as Record<string, unknown>)
-      .find((item) => item.type === "input.raw_audio_data");
-    const micEndMessage = socket.sent
-      .map((item) => JSON.parse(item) as Record<string, unknown>)
-      .find((item) => item.type === "input.mic_audio_end");
+    const jsonMessages = parseSentJsonMessages(socket);
+    const startMessage = jsonMessages.find((item) => item.type === "input.audio_stream_start");
+    const endMessage = jsonMessages.find((item) => item.type === "input.audio_stream_end");
+    const binaryFrame = sentBinaryFrames(socket)[0];
+    assert.ok(startMessage);
+    assert.ok(endMessage);
+    assert.ok(binaryFrame);
+    const metadata = parseAudioFrameMetadata(binaryFrame);
 
-    assert.ok(rawAudioMessage);
-    assert.ok(micEndMessage);
-    assert.equal(typeof rawAudioMessage?.turn_id, "string");
-    assert.equal(rawAudioMessage?.turn_id, micEndMessage?.turn_id);
-    assert.notEqual(rawAudioMessage?.turn_id, "turn-playback");
-    assert.match(String(rawAudioMessage?.turn_id), /^input:/);
-    assert.deepEqual(micEndMessage?.payload, {
+    assert.equal(typeof startMessage?.turn_id, "string");
+    assert.equal(startMessage?.turn_id, endMessage?.turn_id);
+    assert.equal(startMessage?.turn_id, metadata.turn_id);
+    assert.notEqual(startMessage?.turn_id, "turn-playback");
+    assert.match(String(startMessage?.turn_id), /^input:/);
+    assert.equal((startMessage?.payload as Record<string, unknown>).stream_id, metadata.stream_id);
+    assert.equal(metadata.encoding, "pcm16le");
+    assert.deepEqual(endMessage?.payload, {
+      stream_id: metadata.stream_id,
       reason: "manual_stop",
       dropped: false,
+      last_seq: 0,
     });
   } finally {
     harness.scope.stop();
@@ -884,15 +912,16 @@ async function testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd(): Promis
       true,
     );
     assert.equal(
-      socket.sent.some((item) => item.includes("\"input.raw_audio_data\"")),
+      socket.sent.some((item) =>
+        typeof item === "string" && item.includes("\"input.audio_stream_start\"")
+      ),
       false,
     );
 
     socket.bufferedAmount = 0;
     await adapter.toggleMicrophoneCapture();
 
-    const micEndMessage = socket.sent
-      .map((item) => JSON.parse(item) as Record<string, unknown>)
+    const micEndMessage = parseSentJsonMessages(socket)
       .find((item) => item.type === "input.mic_audio_end");
     assert.ok(micEndMessage);
     assert.deepEqual(micEndMessage?.payload, {
@@ -923,25 +952,25 @@ async function testDeviceChangeEndsPreviousMicSegmentBeforeRestart(): Promise<vo
     firstWorklet.emitChunk(new Float32Array([0.1, 0.2]));
     await flushMicrotasks();
 
-    const firstRawMessage = socket.sent
-      .map((item) => JSON.parse(item) as Record<string, unknown>)
-      .find((item) => item.type === "input.raw_audio_data");
-    assert.ok(firstRawMessage);
-    const firstTurnId = String(firstRawMessage?.turn_id ?? "");
+    const firstStartMessage = parseSentJsonMessages(socket)
+      .find((item) => item.type === "input.audio_stream_start");
+    assert.ok(firstStartMessage);
+    const firstTurnId = String(firstStartMessage?.turn_id ?? "");
     assert.match(firstTurnId, /^input:/);
 
     socket.sent.length = 0;
     adapter.setMicrophoneDevice("mic-b");
     await flushMicrotasks();
 
-    const restartEndMessage = socket.sent
-      .map((item) => JSON.parse(item) as Record<string, unknown>)
-      .find((item) => item.type === "input.mic_audio_end");
+    const restartEndMessage = parseSentJsonMessages(socket)
+      .find((item) => item.type === "input.audio_stream_end");
     assert.ok(restartEndMessage);
     assert.equal(restartEndMessage?.turn_id, firstTurnId);
     assert.deepEqual(restartEndMessage?.payload, {
+      stream_id: (firstStartMessage?.payload as Record<string, unknown>).stream_id,
       reason: "device_change",
       dropped: false,
+      last_seq: 0,
     });
 
     const secondWorklet = FakeAudioWorkletNode.instances.at(-1);
@@ -950,13 +979,12 @@ async function testDeviceChangeEndsPreviousMicSegmentBeforeRestart(): Promise<vo
 
     secondWorklet?.emitChunk(new Float32Array([0.4, -0.4]));
     await flushMicrotasks();
-    const latestRawMessage = socket.sent
-      .map((item) => JSON.parse(item) as Record<string, unknown>)
+    const latestStartMessage = parseSentJsonMessages(socket)
       .reverse()
-      .find((item) => item.type === "input.raw_audio_data");
-    assert.ok(latestRawMessage);
-    assert.notEqual(latestRawMessage?.turn_id, firstTurnId);
-    assert.match(String(latestRawMessage?.turn_id), /^input:/);
+      .find((item) => item.type === "input.audio_stream_start");
+    assert.ok(latestStartMessage);
+    assert.notEqual(latestStartMessage?.turn_id, firstTurnId);
+    assert.match(String(latestStartMessage?.turn_id), /^input:/);
   } finally {
     harness.scope.stop();
   }

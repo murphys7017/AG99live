@@ -164,6 +164,60 @@ def test_handle_audio_end_drains_matching_segment_buffer(
     assert sent_messages[0]["turn_id"] == "input:segment-drain"
 
 
+def test_handle_binary_audio_stream_chunk_transcribes_on_stream_end(
+    install_fake_astrbot,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.protocol.binary_audio import BinaryAudioChunkFrame
+    from astrbot_plugin_ag99live_adapter.services.speech_service import SpeechIngressService
+
+    sent_messages: list[dict] = []
+
+    async def send_json(message: dict) -> None:
+        sent_messages.append(message)
+
+    service = SpeechIngressService(
+        media_service=MediaServiceStub(),
+        runtime_state=SimpleNamespace(selected_stt_provider=SttProviderStub()),
+        ensure_vad_engine=lambda: None,
+        send_json=send_json,
+        build_message_object=lambda *, text, raw_message: {
+            "text": text,
+            "raw_message": raw_message,
+        },
+    )
+
+    asyncio.run(
+        service.handle_audio_stream_binary_chunk(
+            BinaryAudioChunkFrame(
+                stream_id="mic:test",
+                turn_id="input:binary",
+                seq=0,
+                encoding="pcm16le",
+                sample_rate=16000,
+                channels=1,
+                payload=np.array([8192, -8192], dtype=np.int16).tobytes(),
+                metadata={},
+            )
+        )
+    )
+    result = asyncio.run(
+        service.handle_audio_stream_end(
+            MessageStub(
+                dropped=False,
+                turn_id="input:binary",
+                payload={"stream_id": "mic:test", "reason": "manual_stop"},
+            )
+        )
+    )
+
+    assert result["text"] == "hello from stt"
+    assert result["raw_message"]["payload"]["stream_id"] == "mic:test"
+    assert result["raw_message"]["payload"]["audio_sample_rate"] == 16000
+    assert sent_messages[0]["type"] == "output.transcription"
+    assert sent_messages[0]["turn_id"] == "input:binary"
+
+
 def test_handle_raw_audio_data_vad_unavailable_reports_terminal_signal(
     install_fake_astrbot,
 ) -> None:
