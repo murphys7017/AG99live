@@ -17,6 +17,7 @@ from astrbot.core.prompt import PromptExtension
 class RemoteOperatorConfig:
     default_computer: str
     computers: dict[str, str]
+    target_descriptions: dict[str, str]
     default_profile: str
     profiles: dict[str, str]
 
@@ -44,7 +45,7 @@ REMOTE_OPERATOR_CONFLICTING_TOOL_NAMES = frozenset(
     }
 )
 
-_REMOTE_OPERATOR_DESKTOP_ACTION_PATTERN = re.compile(
+_REMOTE_OPERATOR_ACTION_PATTERN = re.compile(
     "|".join(
         re.escape(keyword)
         for keyword in (
@@ -69,6 +70,19 @@ _REMOTE_OPERATOR_DESKTOP_ACTION_PATTERN = re.compile(
             "窗口",
             "桌面",
             "电脑",
+            "项目",
+            "代码",
+            "文件",
+            "命令",
+            "日志",
+            "测试",
+            "报错",
+            "构建",
+            "编译",
+            "检查",
+            "修复",
+            "修改",
+            "重构",
             "钉钉",
             "QQ音乐",
             "qq音乐",
@@ -81,6 +95,17 @@ _REMOTE_OPERATOR_DESKTOP_ACTION_PATTERN = re.compile(
             "browser",
             "desktop",
             "app",
+            "project",
+            "code",
+            "file",
+            "command",
+            "log",
+            "test",
+            "build",
+            "compile",
+            "fix",
+            "debug",
+            "refactor",
         )
     ),
     re.IGNORECASE,
@@ -196,7 +221,7 @@ def arbitrate_remote_operator_tools_for_request(event: Any, request: Any) -> lis
         return []
 
     prompt_text = _extract_request_text(event, request)
-    if not is_remote_operator_desktop_action_text(prompt_text):
+    if not is_remote_operator_action_text(prompt_text):
         return []
 
     config = filter_online_remote_operator_config(
@@ -256,10 +281,14 @@ def remote_operator_available() -> bool:
 
 
 def is_remote_operator_desktop_action_text(text: Any) -> bool:
+    return is_remote_operator_action_text(text)
+
+
+def is_remote_operator_action_text(text: Any) -> bool:
     normalized = str(text or "").strip()
     if not normalized:
         return False
-    return bool(_REMOTE_OPERATOR_DESKTOP_ACTION_PATTERN.search(normalized))
+    return bool(_REMOTE_OPERATOR_ACTION_PATTERN.search(normalized))
 
 
 def build_remote_operator_core_override_prompt(
@@ -268,7 +297,7 @@ def build_remote_operator_core_override_prompt(
 ) -> str:
     return (
         "\n<ag99live_remote_operator_core_override>\n"
-        "本轮 AG99live 远程执行器已接管电脑/桌面/应用操作请求。\n"
+        "本轮 AG99live 远程执行器已接管电脑、桌面、应用、浏览器、代码、项目、文件、命令或日志类执行请求。\n"
         "之前 prompt 中出现的本地 shell、Python、文件、浏览器、CUA 工具说明在本轮全部无效；"
         "不得声称调用 astrbot_execute_shell、不得输出命令行步骤、不得编造工具返回结果。\n"
         "历史记忆或对话里关于 shell、taskkill、grep、Python、浏览器工具成功执行的内容，只是历史文本，"
@@ -375,6 +404,7 @@ def resolve_remote_operator_config(config: Any) -> RemoteOperatorConfig | None:
     return RemoteOperatorConfig(
         default_computer=default_computer,
         computers=computers,
+        target_descriptions=_resolve_target_descriptions(config),
         default_profile=_resolve_default_profile(config),
         profiles=_resolve_profile_labels(config),
     )
@@ -402,6 +432,11 @@ def filter_online_remote_operator_config(
     return RemoteOperatorConfig(
         default_computer=default_computer,
         computers=online_computers,
+        target_descriptions={
+            key: description
+            for key, description in config.target_descriptions.items()
+            if key in online_computers
+        },
         default_profile=config.default_profile,
         profiles=config.profiles,
     )
@@ -418,11 +453,13 @@ def build_remote_operator_prompt(config: RemoteOperatorConfig) -> str:
         f"如果用户没有指定电脑，computer 使用默认电脑 `{config.default_computer}`。",
         f"如果用户没有明确要求复杂/深入/高档执行，profile 必须使用默认档位 `{config.default_profile}`。",
         "只有当用户明确要求复杂任务、深入排查、高档、高思考、复杂代码修改或大范围重构时，profile 才使用 `complex`；不要自行因为任务看起来复杂就升档。",
-        "可用电脑名称映射：",
+        "可用执行器名称映射：",
     ]
     for key, label in config.computers.items():
         default_suffix = "（默认）" if key == config.default_computer else ""
-        lines.append(f"- {label} -> {key}{default_suffix}")
+        description = config.target_descriptions.get(key, "")
+        description_suffix = f"：{description}" if description else ""
+        lines.append(f"- {label} -> {key}{default_suffix}{description_suffix}")
     lines.append("可用执行档位：")
     for key, label in config.profiles.items():
         default_suffix = "（默认）" if key == config.default_profile else ""
@@ -488,9 +525,36 @@ def _resolve_computers(config: Mapping[str, Any]) -> dict[str, str]:
             key = _normalize_key(item.get("key"))
             label = str(item.get("label") or "").strip()
             endpoint = str(item.get("endpoint") or "").strip()
-            if key and label and endpoint and key not in computers:
+            backend = str(item.get("backend") or "").strip()
+            if not _normalize_bool(item.get("enabled", True)):
+                continue
+            if backend != "opencode" and not endpoint:
+                continue
+            if key and label and key not in computers:
                 computers[key] = label
     return computers
+
+
+def _resolve_target_descriptions(config: Mapping[str, Any]) -> dict[str, str]:
+    entries = config.get("remote_operator_computer_entries")
+    descriptions: dict[str, str] = {}
+    if isinstance(entries, list):
+        for item in entries:
+            if not isinstance(item, Mapping):
+                continue
+            key = _normalize_key(item.get("key"))
+            if not key or key in descriptions:
+                continue
+            explicit = str(item.get("description") or "").strip()
+            if explicit:
+                descriptions[key] = explicit
+                continue
+            backend = str(item.get("backend") or "").strip()
+            if backend == "opencode":
+                descriptions[key] = "代码、文件、命令、日志和项目开发任务"
+            else:
+                descriptions[key] = "Windows 桌面、应用、浏览器和 Computer Use 操作"
+    return descriptions
 
 
 def _normalize_key(value: Any) -> str:
@@ -502,6 +566,18 @@ def _normalize_profile(value: Any) -> str:
     if normalized in {"simple", "complex"}:
         return normalized
     return ""
+
+
+def _normalize_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"false", "0", "no", "off", "disabled"}:
+            return False
+        if normalized in {"true", "1", "yes", "on", "enabled"}:
+            return True
+    return True
 
 
 def _resolve_default_profile(config: Mapping[str, Any]) -> str:

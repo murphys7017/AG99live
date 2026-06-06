@@ -87,13 +87,15 @@ AG99live 远程执行器当前走任务委托链路：
   -> remote_operator middleware 注入/仲裁
     -> AstrBot core 输出 {"computer","profile","prompt"}
       -> RemoteOperatorRuntime
-        -> Codex app-server WebSocket
-          -> computer-use:computer-use skill
+        -> Codex app-server WebSocket / Computer Use
+        -> OpenCode CLI / opencode serve
 ```
 
 当前关键边界：
 
-- `_conf_schema.json` 的 `remote_operator_computer_entries` 配置电脑 key、用户可读名称和 Codex app-server WebSocket endpoint。
+- `_conf_schema.json` 的 `remote_operator_computer_entries` 配置执行器 key、用户可读名称、后端类型和固定执行参数。
+- `backend=codex_app_server` 用于 Windows 桌面、应用、浏览器和 Computer Use 操作，endpoint 填 Codex app-server WebSocket 地址。
+- `backend=opencode` 用于代码、文件、命令、日志和项目开发任务；`model`、`variant`、`workdir` 均由配置锁定，不由聊天模型决定。
 - Adapter 会 probe endpoint 并只向 prompt 注入在线电脑。
 - 对桌面/软件/电脑操作类请求，remote operator middleware 会要求核心只输出三字段 JSON，不允许核心直接调用 shell、浏览器、CUA 或输出底层步骤。
 - `RemoteOperatorRuntime` 会查找 app-server 的 `computer-use:computer-use` skill，并把该 skill 与任务文本一起作为 turn 输入。
@@ -120,8 +122,8 @@ AG99live 远程执行器当前走任务委托链路：
 - `realtime_motion_platform_context_enabled`：是否注入平台上下文。
 - `motion_prompt_instruction`：动作 intent 生成的补充指令，默认要求 Live2D 表现更夸张。
 - `enable_action_llm_filter`：是否启用基础动作库 LLM 严格筛选。
-- `remote_operator_default_computer` / `remote_operator_computer_entries`：远程执行器电脑路由和 Codex app-server endpoint 配置。
-- `remote_operator_default_profile` / `remote_operator_profiles`：远程执行器执行档位，当前用于选择 app-server turn 的模型与 effort。
+- `remote_operator_default_computer` / `remote_operator_computer_entries`：远程执行器路由和后端配置；支持 `codex_app_server` 与 `opencode`。
+- `remote_operator_default_profile` / `remote_operator_profiles`：远程执行器执行档位。Codex app-server 后端使用该档位选择 turn 模型与 effort；OpenCode 后端使用 entry 内固定的 `model` / `variant`。
 
 当前 realtime motion selector 的参考策略：
 

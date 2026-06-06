@@ -92,6 +92,52 @@ def test_resolve_endpoint_config_reads_computer_entries(
     assert config is not None
     assert config.computers == {"work": "工作电脑"}
     assert config.endpoints == {"work": "ws://127.0.0.1:4500"}
+    assert config.targets["work"].backend == "codex_app_server"
+
+
+def test_resolve_endpoint_config_reads_opencode_fixed_backend_settings(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_remote_operator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    from astrbot_plugin_ag99live_adapter.services.remote_operator_runtime import (
+        resolve_remote_operator_endpoint_config,
+    )
+
+    config = resolve_remote_operator_endpoint_config(
+        {
+            "remote_operator_default_computer": "code",
+            "remote_operator_computer_entries": [
+                {
+                    "key": "desktop",
+                    "label": "桌面执行器",
+                    "endpoint": "ws://127.0.0.1:4500",
+                    "enabled": False,
+                },
+                {
+                    "key": "code",
+                    "label": "免费代码执行器",
+                    "backend": "opencode",
+                    "endpoint": "http://127.0.0.1:4096",
+                    "workdir": "C:\\repo",
+                    "model": "github-copilot/gpt-4.1",
+                    "variant": "minimal",
+                    "description": "代码、文件、命令和日志任务",
+                },
+            ],
+        }
+    )
+
+    assert config is not None
+    assert config.default_computer == "code"
+    assert config.computers == {"code": "免费代码执行器"}
+    assert config.endpoints == {"code": "http://127.0.0.1:4096"}
+    target = config.targets["code"]
+    assert target.backend == "opencode"
+    assert target.workdir == "C:\\repo"
+    assert target.model == "github-copilot/gpt-4.1"
+    assert target.variant == "minimal"
+    assert target.description == "代码、文件、命令和日志任务"
 
 
 def test_runtime_refresh_online_once_filters_probe_failures(
@@ -298,6 +344,69 @@ def test_runtime_execute_and_submit_failure_metadata(
     assert "执行状态：failed" in text
     assert metadata["remote_operator"]["status"] == "failed"
     assert metadata["remote_operator"]["error"] == "remote_operator_endpoint_unavailable"
+
+
+def test_runtime_execute_uses_opencode_target_fixed_settings(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_remote_operator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    from astrbot_plugin_ag99live_adapter.services.remote_operator_runtime import (
+        RemoteOperatorRequest,
+        RemoteOperatorRuntime,
+    )
+
+    seen_targets = []
+
+    class OpenCodeClientStub:
+        def __init__(self, target) -> None:
+            self.target = target
+            seen_targets.append(target)
+
+        async def probe(self) -> bool:
+            return True
+
+        async def execute(self, prompt: str, *, model=None, effort=None) -> str:
+            assert prompt == "检查项目测试失败原因"
+            assert model == "gpt-5.4-codex"
+            assert effort == "high"
+            return (
+                f"opencode:{self.target.model}:{self.target.variant}:"
+                f"{self.target.workdir}:{prompt}"
+            )
+
+    runtime = RemoteOperatorRuntime(
+        plugin_config_loader=lambda: {
+            "remote_operator_default_computer": "code",
+            "remote_operator_computer_entries": [
+                {
+                    "key": "code",
+                    "label": "免费代码执行器",
+                    "backend": "opencode",
+                    "endpoint": "",
+                    "workdir": "C:\\repo",
+                    "model": "github-copilot/gpt-4.1",
+                    "variant": "minimal",
+                },
+            ],
+        },
+        submit_system_text_input=lambda _text, _metadata: None,
+        opencode_client_factory=OpenCodeClientStub,
+    )
+
+    result = asyncio.run(
+        runtime.execute(
+            RemoteOperatorRequest(
+                computer="code",
+                profile="complex",
+                prompt="检查项目测试失败原因",
+            )
+        )
+    )
+
+    assert result.status == "completed"
+    assert result.result == "opencode:github-copilot/gpt-4.1:minimal:C:\\repo:检查项目测试失败原因"
+    assert seen_targets[0].backend == "opencode"
 
 
 def test_codex_client_accepts_nested_thread_id_and_sends_computer_use_skill_input(

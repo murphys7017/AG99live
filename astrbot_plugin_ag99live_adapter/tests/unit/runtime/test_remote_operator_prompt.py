@@ -178,6 +178,43 @@ def test_prompt_contributor_reads_computer_entries(
     assert "工作电脑 -> work（默认）" in extension.value
 
 
+def test_prompt_contributor_describes_opencode_target_without_execution_settings(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_prompt_stub(install_fake_astrbot, monkeypatch)
+    module = _load_module()
+    monkeypatch.setattr(
+        module,
+        "_load_plugin_config",
+        lambda: {
+            "remote_operator_default_computer": "code",
+            "remote_operator_computer_entries": [
+                {
+                    "key": "code",
+                    "label": "免费代码执行器",
+                    "backend": "opencode",
+                    "endpoint": "",
+                    "workdir": "C:\\repo",
+                    "model": "github-copilot/gpt-4.1",
+                    "variant": "minimal",
+                    "description": "代码、文件、命令和日志任务",
+                }
+            ],
+        },
+    )
+    module.set_remote_operator_online_computers(["code"])
+
+    contributor = module.AG99liveRemoteOperatorPromptContributor()
+    extension = asyncio.run(contributor.collect(EventStub(), None, None))
+
+    assert extension is not None
+    assert "免费代码执行器 -> code（默认）：代码、文件、命令和日志任务" in extension.value
+    assert "github-copilot/gpt-4.1" not in extension.value
+    assert "minimal" not in extension.value
+    assert "C:\\repo" not in extension.value
+
+
 def test_prompt_contributor_uses_configured_default_when_online(
     install_fake_astrbot,
     monkeypatch,
@@ -581,6 +618,61 @@ def test_tool_arbitration_removes_conflicting_tools_for_desktop_action(
         "profile": "simple",
         "reason": "desktop_action_remote_operator_priority",
     }
+
+
+def test_tool_arbitration_removes_conflicting_tools_for_code_action(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_prompt_stub(install_fake_astrbot, monkeypatch)
+    module = _load_module()
+    monkeypatch.setattr(
+        module,
+        "_load_plugin_config",
+        lambda: {
+            "remote_operator_default_computer": "code",
+            "remote_operator_computer_entries": [
+                {
+                    "key": "code",
+                    "label": "免费代码执行器",
+                    "backend": "opencode",
+                    "workdir": "C:\\repo",
+                    "model": "github-copilot/gpt-4.1",
+                    "variant": "minimal",
+                    "description": "代码、文件、命令和日志任务",
+                },
+            ],
+        },
+    )
+    module.set_remote_operator_online_computers(["code"])
+
+    class ToolSet:
+        def __init__(self):
+            self.tools = [
+                types.SimpleNamespace(name="astrbot_execute_shell"),
+                types.SimpleNamespace(name="astrbot_file_read_tool"),
+                types.SimpleNamespace(name="ordinary_tool"),
+            ]
+
+        def get_tool(self, name):
+            return next((tool for tool in self.tools if tool.name == name), None)
+
+        def remove_tool(self, name):
+            self.tools = [tool for tool in self.tools if tool.name != name]
+
+    event = EventStub()
+    request = types.SimpleNamespace(
+        prompt="帮我检查这个项目的测试为什么失败",
+        func_tool=ToolSet(),
+        system_prompt="existing prompt",
+    )
+
+    removed = module.arbitrate_remote_operator_tools_for_request(event, request)
+
+    assert removed == ["astrbot_execute_shell", "astrbot_file_read_tool"]
+    assert [tool.name for tool in request.func_tool.tools] == ["ordinary_tool"]
+    assert "<ag99live_remote_operator_core_override>" in request.system_prompt
+    assert '"computer":"code"' in request.system_prompt
 
 
 def test_tool_arbitration_appends_override_even_without_tools(

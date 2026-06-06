@@ -27,7 +27,7 @@
     "default": ""
   },
   "remote_operator_computer_entries": {
-    "description": "远程执行器电脑列表。每项配置一个 computer key、用户可说出的名称和 codex-cli-app-server WebSocket 地址。",
+    "description": "远程执行器列表。每项配置一个 computer key、用户可说出的名称、执行后端和后端固定参数；模型和工作目录由配置决定，不由聊天模型选择。",
     "type": "template_list",
     "default": [],
     "templates": {
@@ -45,8 +45,42 @@
             "type": "string",
             "default": ""
           },
+          "enabled": {
+            "description": "是否启用这个执行器。",
+            "type": "bool",
+            "default": true
+          },
+          "backend": {
+            "description": "执行后端。codex_app_server 用于 Codex app-server + Computer Use 桌面控制；opencode 用于 OpenCode 代码、文件、命令和项目任务。",
+            "type": "string",
+            "default": "codex_app_server",
+            "options": [
+              "codex_app_server",
+              "opencode"
+            ]
+          },
           "endpoint": {
-            "description": "codex-cli-app-server WebSocket 地址，例如 ws://127.0.0.1:4500。",
+            "description": "后端地址。codex_app_server 填 WebSocket 地址，例如 ws://127.0.0.1:4500；opencode 可填 opencode serve 地址，例如 http://127.0.0.1:4096，留空则直接本地运行 opencode run。",
+            "type": "string",
+            "default": ""
+          },
+          "workdir": {
+            "description": "OpenCode 工作目录。仅 backend=opencode 时使用，例如 C:\\Users\\Administrator\\Documents\\GitHub\\AG99live。",
+            "type": "string",
+            "default": ""
+          },
+          "model": {
+            "description": "OpenCode 固定执行模型，例如 provider/free-model。仅 backend=opencode 时使用；由配置锁定，不由聊天模型选择。",
+            "type": "string",
+            "default": ""
+          },
+          "variant": {
+            "description": "OpenCode 模型变体或推理档位，例如 minimal、low、high。仅 backend=opencode 时使用。",
+            "type": "string",
+            "default": ""
+          },
+          "description": {
+            "description": "给聊天模型看的执行器用途说明，只描述适合处理什么任务，不包含模型、密钥或工作目录。",
             "type": "string",
             "default": ""
           }

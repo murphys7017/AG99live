@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
+import urllib.error
+import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -24,9 +27,22 @@ class RemoteOperatorEndpointConfig:
     default_computer: str
     computers: dict[str, str]
     endpoints: dict[str, str]
+    targets: dict[str, "RemoteOperatorTarget"]
     default_profile: str
     profiles: dict[str, "RemoteOperatorProfile"]
     probe_max_failures: int
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteOperatorTarget:
+    key: str
+    label: str
+    backend: str
+    endpoint: str
+    workdir: str
+    model: str
+    variant: str
+    description: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,17 +75,12 @@ def resolve_remote_operator_endpoint_config(
     if not isinstance(config, Mapping):
         return None
 
-    computers, endpoints = _resolve_computer_entries(config)
-    if not computers or not endpoints:
+    targets = _resolve_target_entries(config)
+    if not targets:
         return None
 
-    available = {
-        key: label
-        for key, label in computers.items()
-        if key in endpoints
-    }
-    if not available:
-        return None
+    computers = {key: target.label for key, target in targets.items()}
+    endpoints = {key: target.endpoint for key, target in targets.items()}
 
     profiles = _resolve_profiles(config.get("remote_operator_profiles"))
     default_profile = _normalize_text(config.get("remote_operator_default_profile"))
@@ -77,8 +88,8 @@ def resolve_remote_operator_endpoint_config(
         default_profile = "simple"
 
     default_computer = _normalize_text(config.get("remote_operator_default_computer"))
-    if default_computer not in available:
-        default_computer = next(iter(available))
+    if default_computer not in targets:
+        default_computer = next(iter(targets))
 
     probe_max_failures = _normalize_positive_int(
         config.get("remote_operator_probe_max_failures"),
@@ -87,8 +98,9 @@ def resolve_remote_operator_endpoint_config(
 
     return RemoteOperatorEndpointConfig(
         default_computer=default_computer,
-        computers=available,
-        endpoints={key: endpoints[key] for key in available},
+        computers=computers,
+        endpoints=endpoints,
+        targets=targets,
         default_profile=default_profile,
         profiles=profiles,
         probe_max_failures=probe_max_failures,
@@ -377,6 +389,74 @@ class CodexAppServerClient:
         return True
 
 
+class OpenCodeRunClient:
+    def __init__(
+        self,
+        target: RemoteOperatorTarget,
+        *,
+        timeout_seconds: float = 120.0,
+    ) -> None:
+        self.target = target
+        self.timeout_seconds = max(float(timeout_seconds or 120.0), 1.0)
+
+    async def probe(self) -> bool:
+        if not _resolve_opencode_executable():
+            logger.debug(
+                "Remote operator OpenCode probe failed: opencode command unavailable target=%s",
+                self.target.key,
+            )
+            return False
+        if self.target.workdir and not await asyncio.to_thread(
+            _path_is_directory,
+            self.target.workdir,
+        ):
+            logger.debug(
+                "Remote operator OpenCode probe failed: workdir unavailable target=%s workdir=%s",
+                self.target.key,
+                self.target.workdir,
+            )
+            return False
+        if not self.target.endpoint:
+            return True
+        return await asyncio.to_thread(_http_endpoint_reachable, self.target.endpoint)
+
+    async def execute(
+        self,
+        prompt: str,
+        *,
+        model: str | None = None,
+        effort: str | None = None,
+    ) -> str:
+        del model, effort
+        return await asyncio.wait_for(
+            self._execute_unbounded(prompt),
+            timeout=self.timeout_seconds,
+        )
+
+    async def _execute_unbounded(self, prompt: str) -> str:
+        executable = _resolve_opencode_executable()
+        if not executable:
+            raise RuntimeError("opencode command unavailable")
+
+        command = _build_opencode_run_command(
+            executable,
+            target=self.target,
+            prompt=prompt,
+        )
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_bytes, stderr_bytes = await process.communicate()
+        stdout = stdout_bytes.decode("utf-8", errors="replace").strip()
+        stderr = stderr_bytes.decode("utf-8", errors="replace").strip()
+        if process.returncode != 0:
+            detail = stderr or stdout or f"opencode exited with code {process.returncode}"
+            raise RuntimeError(detail)
+        return _extract_opencode_output_text(stdout) or stdout
+
+
 class RemoteOperatorRuntime:
     def __init__(
         self,
@@ -384,11 +464,13 @@ class RemoteOperatorRuntime:
         plugin_config_loader: Callable[[], Any],
         submit_system_text_input: Callable[[str, dict[str, Any]], Awaitable[None]],
         client_factory: Callable[[str], CodexAppServerClient] | None = None,
+        opencode_client_factory: Callable[[RemoteOperatorTarget], OpenCodeRunClient] | None = None,
         probe_interval_seconds: float = 15.0,
     ) -> None:
         self._plugin_config_loader = plugin_config_loader
         self._submit_system_text_input = submit_system_text_input
         self._client_factory = client_factory or (lambda endpoint: CodexAppServerClient(endpoint))
+        self._opencode_client_factory = opencode_client_factory or OpenCodeRunClient
         self._probe_interval_seconds = max(float(probe_interval_seconds or 15.0), 1.0)
         self._task: asyncio.Task[Any] | None = None
         self._stopped = asyncio.Event()
@@ -423,17 +505,17 @@ class RemoteOperatorRuntime:
 
         online: set[str] = set()
         active_probe_keys = {
-            (computer, endpoint)
-            for computer, endpoint in config.endpoints.items()
+            (target.key, _target_probe_identity(target))
+            for target in config.targets.values()
         }
         self._prune_probe_state(active_probe_keys)
-        for computer, endpoint in config.endpoints.items():
-            probe_key = (computer, endpoint)
+        for computer, target in config.targets.items():
+            probe_key = (computer, _target_probe_identity(target))
             if probe_key in self._probe_exhausted:
                 mark_remote_operator_computer_offline(computer)
                 continue
 
-            if await self._client_factory(endpoint).probe():
+            if await self._client_for_target(target).probe():
                 self._probe_failure_counts.pop(probe_key, None)
                 self._probe_exhausted.discard(probe_key)
                 online.add(computer)
@@ -445,10 +527,11 @@ class RemoteOperatorRuntime:
                 if failure_count >= config.probe_max_failures:
                     self._probe_exhausted.add(probe_key)
                     logger.warning(
-                        "Remote operator endpoint probe stopped after %s consecutive failures: computer=%s endpoint=%s",
+                        "Remote operator endpoint probe stopped after %s consecutive failures: computer=%s backend=%s endpoint=%s",
                         failure_count,
                         computer,
-                        endpoint,
+                        target.backend,
+                        target.endpoint,
                     )
         set_remote_operator_online_computers(online)
         return online
@@ -465,7 +548,7 @@ class RemoteOperatorRuntime:
 
     async def execute(self, request: RemoteOperatorRequest) -> RemoteOperatorExecutionResult:
         config = resolve_remote_operator_endpoint_config(self._plugin_config_loader())
-        if config is None or request.computer not in config.endpoints:
+        if config is None or request.computer not in config.targets:
             return RemoteOperatorExecutionResult(
                 computer=request.computer,
                 profile=request.profile,
@@ -483,7 +566,8 @@ class RemoteOperatorRuntime:
                 error="remote_operator_profile_unavailable",
             )
         try:
-            output = await self._client_factory(config.endpoints[request.computer]).execute(
+            target = config.targets[request.computer]
+            output = await self._client_for_target(target).execute(
                 request.prompt,
                 model=profile.model,
                 effort=profile.effort,
@@ -505,6 +589,11 @@ class RemoteOperatorRuntime:
             status="completed",
             result=output or "远程执行器已完成，但没有返回文本结果。",
         )
+
+    def _client_for_target(self, target: RemoteOperatorTarget) -> Any:
+        if target.backend == "opencode":
+            return self._opencode_client_factory(target)
+        return self._client_factory(target.endpoint)
 
     async def _submit_result(self, result: RemoteOperatorExecutionResult) -> None:
         text = _format_result_text(result)
@@ -597,10 +686,9 @@ def _extract_skill_path(result: Any, target_name: str) -> str:
     return ""
 
 
-def _resolve_computer_entries(config: Mapping[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
+def _resolve_target_entries(config: Mapping[str, Any]) -> dict[str, RemoteOperatorTarget]:
     entries = config.get("remote_operator_computer_entries")
-    computers: dict[str, str] = {}
-    endpoints: dict[str, str] = {}
+    targets: dict[str, RemoteOperatorTarget] = {}
     if isinstance(entries, list):
         for item in entries:
             if not isinstance(item, Mapping):
@@ -608,13 +696,161 @@ def _resolve_computer_entries(config: Mapping[str, Any]) -> tuple[dict[str, str]
             key = _normalize_text(item.get("key"))
             label = _normalize_text(item.get("label"))
             endpoint = _normalize_text(item.get("endpoint"))
-            if not key or not label or not endpoint:
+            backend = _normalize_backend(item.get("backend"))
+            enabled = _normalize_bool(item.get("enabled"), default=True)
+            if not enabled or not key or not label:
                 continue
-            if key in computers:
+            if backend == "codex_app_server" and not endpoint:
                 continue
-            computers[key] = label
-            endpoints[key] = endpoint
-    return computers, endpoints
+            if key in targets:
+                continue
+            targets[key] = RemoteOperatorTarget(
+                key=key,
+                label=label,
+                backend=backend,
+                endpoint=endpoint,
+                workdir=_normalize_text(item.get("workdir")),
+                model=_normalize_text(item.get("model")),
+                variant=_normalize_text(item.get("variant")),
+                description=_normalize_text(item.get("description")),
+            )
+    return targets
+
+
+def _normalize_backend(value: Any) -> str:
+    normalized = _normalize_text(value)
+    if normalized in {"opencode", "codex_app_server"}:
+        return normalized
+    return "codex_app_server"
+
+
+def _normalize_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on", "enabled"}:
+            return True
+        if normalized in {"false", "0", "no", "off", "disabled"}:
+            return False
+    return default
+
+
+def _target_probe_identity(target: RemoteOperatorTarget) -> str:
+    return "|".join(
+        (
+            target.backend,
+            target.endpoint,
+            target.workdir,
+            target.model,
+            target.variant,
+        )
+    )
+
+
+def _build_opencode_run_command(
+    executable: str,
+    *,
+    target: RemoteOperatorTarget,
+    prompt: str,
+) -> list[str]:
+    command = [
+        executable,
+        "run",
+        "--format",
+        "json",
+        "--dangerously-skip-permissions",
+    ]
+    if target.endpoint:
+        command.extend(["--attach", target.endpoint])
+    if target.workdir:
+        command.extend(["--dir", target.workdir])
+    if target.model:
+        command.extend(["--model", target.model])
+    if target.variant:
+        command.extend(["--variant", target.variant])
+    command.append(str(prompt or "").strip())
+    return command
+
+
+def _resolve_opencode_executable() -> str:
+    return (
+        shutil.which("opencode.cmd")
+        or shutil.which("opencode.exe")
+        or shutil.which("opencode")
+        or ""
+    )
+
+
+def _path_is_directory(path: str) -> bool:
+    from pathlib import Path
+
+    return Path(path).is_dir()
+
+
+def _http_endpoint_reachable(endpoint: str) -> bool:
+    try:
+        with urllib.request.urlopen(endpoint, timeout=5.0) as response:
+            return 200 <= int(response.status) < 500
+    except urllib.error.HTTPError as exc:
+        return 200 <= int(exc.code) < 500
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "Remote operator OpenCode endpoint probe failed: endpoint=%s error=%s",
+            endpoint,
+            exc,
+        )
+        return False
+
+
+def _extract_opencode_output_text(stdout: str) -> str:
+    collected: list[str] = []
+    for line in str(stdout or "").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        event_text = _extract_opencode_event_text(payload)
+        if event_text:
+            collected.append(event_text)
+    return "\n".join(_dedupe_keep_order(collected)).strip()
+
+
+def _extract_opencode_event_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts = [
+            _extract_opencode_event_text(item)
+            for item in value
+        ]
+        return "\n".join(part for part in parts if part).strip()
+    if not isinstance(value, Mapping):
+        return ""
+
+    direct = _first_text(
+        value,
+        (
+            "text",
+            "content",
+            "message",
+            "output",
+            "summary",
+            "result",
+        ),
+    )
+    if direct:
+        return direct
+
+    for key in ("data", "part", "item", "message", "content", "result"):
+        nested = value.get(key)
+        text = _extract_opencode_event_text(nested)
+        if text:
+            return text
+    return ""
 
 
 def _resolve_profiles(value: Any) -> dict[str, RemoteOperatorProfile]:
