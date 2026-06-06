@@ -3,6 +3,8 @@ declare module "@cubismsdksamples/main" {
 }
 
 declare module "@cubismsdksamples/lappdefine" {
+  export let LIMITED_FRAME_RATE: number;
+
   export function updateModelConfig(
     resourcePath: string,
     modelDirectory: string,

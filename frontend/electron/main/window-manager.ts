@@ -340,15 +340,7 @@ export class WindowManager {
       return;
     }
 
-    targetWindow.setBounds(
-      {
-        x: nextX,
-        y: nextY,
-        width: activeDragState.lockedWidth,
-        height: activeDragState.lockedHeight,
-      },
-      false,
-    );
+    targetWindow.setPosition(nextX, nextY, false);
     if (activeDragState.role === "pet") {
       this.translateOverlayWindow(deltaX, deltaY);
     } else if (
@@ -850,16 +842,8 @@ export class WindowManager {
       return;
     }
 
-    const bounds = overlayWindow.getBounds();
-    overlayWindow.setBounds(
-      {
-        x: bounds.x + deltaX,
-        y: bounds.y + deltaY,
-        width: bounds.width,
-        height: bounds.height,
-      },
-      false,
-    );
+    const [ox, oy] = overlayWindow.getPosition();
+    overlayWindow.setPosition(ox + deltaX, oy + deltaY, false);
   }
 
   private normalizeTransparentWindowSize(
