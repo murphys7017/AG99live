@@ -871,7 +871,7 @@ async function testAutoStartMicDoesNotDuplicateCaptureStart(): Promise<void> {
   }
 }
 
-async function testMicAudioUsesFreshInputTurnAcrossChunkAndEnd(): Promise<void> {
+async function testManualMicAudioStreamsBinaryFramesForVad(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
     const { adapter, socket } = harness;
@@ -902,12 +902,15 @@ async function testMicAudioUsesFreshInputTurnAcrossChunkAndEnd(): Promise<void> 
     assert.notEqual(startMessage?.turn_id, "turn-playback");
     assert.match(String(startMessage?.turn_id), /^input:/);
     assert.equal((startMessage?.payload as Record<string, unknown>).stream_id, metadata.stream_id);
+    assert.equal((startMessage?.payload as Record<string, unknown>).capture_mode, "manual");
     assert.equal(metadata.encoding, "pcm16le");
+    assert.equal(metadata.capture_mode, "manual");
     assert.deepEqual(endMessage?.payload, {
       stream_id: metadata.stream_id,
       reason: "manual_stop",
       dropped: false,
       last_seq: 0,
+      capture_mode: "manual",
     });
   } finally {
     harness.scope.stop();
@@ -946,10 +949,20 @@ async function testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd(): Promis
 
     const micEndMessage = parseSentJsonMessages(socket)
       .find((item) => item.type === "input.mic_audio_end");
-    assert.ok(micEndMessage);
+    const streamEndMessage = parseSentJsonMessages(socket)
+      .find((item) => item.type === "input.audio_stream_end");
+    assert.ok(streamEndMessage ?? micEndMessage);
+    const endPayload = (streamEndMessage ?? micEndMessage)?.payload as Record<string, unknown>;
+    assert.equal(endPayload.dropped, true);
+    assert.equal(endPayload.capture_mode, "manual");
+    assert.equal(endPayload.reason, "manual_stop");
+    if (streamEndMessage) {
+      return;
+    }
     assert.deepEqual(micEndMessage?.payload, {
       reason: "manual_stop",
       dropped: true,
+      capture_mode: "manual",
     });
   } finally {
     harness.scope.stop();
@@ -1024,6 +1037,7 @@ async function testDeviceChangeEndsPreviousMicSegmentBeforeRestart(): Promise<vo
       reason: "device_change",
       dropped: false,
       last_seq: 0,
+      capture_mode: "manual",
     });
 
     const secondWorklet = FakeAudioWorkletNode.instances.at(-1);
@@ -1166,7 +1180,7 @@ async function run(): Promise<void> {
   testSendMotionPreviewUsesOutboundProtocolEnvelope();
   testSendParameterPlanPayloadPreviewIsRejected();
   await testAutoStartMicDoesNotDuplicateCaptureStart();
-  await testMicAudioUsesFreshInputTurnAcrossChunkAndEnd();
+  await testManualMicAudioStreamsBinaryFramesForVad();
   await testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd();
   await testPttReleaseDuringStartupStopsCaptureAfterStart();
   await testDeviceChangeEndsPreviousMicSegmentBeforeRestart();

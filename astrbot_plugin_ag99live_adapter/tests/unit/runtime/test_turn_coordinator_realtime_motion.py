@@ -1085,3 +1085,46 @@ def test_handle_msg_emits_control_error_for_unhandled_allowed_message_type(
     assert payload["turn_id"] == "turn-unhandled"
     assert "Unhandled message type" in str(payload["payload"]["message"])
 
+
+def test_handle_binary_msg_commits_vad_message(install_fake_astrbot, monkeypatch) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+
+    committed: list[tuple[object, str | None]] = []
+    message_obj = object()
+
+    class SpeechIngressStub:
+        async def handle_audio_stream_binary_chunk(self, frame):
+            assert frame.stream_id == "mic:manual"
+            return message_obj
+
+    async def commit_inbound_message(message, *, turn_id=None):
+        committed.append((message, turn_id))
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.speech_ingress = SpeechIngressStub()
+    coordinator._commit_inbound_message = commit_inbound_message
+
+    metadata = {
+        "stream_id": "mic:manual",
+        "turn_id": "input:manual-binary",
+        "seq": 0,
+        "encoding": "pcm16le",
+        "sample_rate": 16000,
+        "channels": 1,
+        "capture_mode": "manual",
+    }
+    metadata_bytes = json.dumps(metadata).encode("utf-8")
+    raw_frame = (
+        b"AG99"
+        + bytes([1, 1, 0, 0])
+        + len(metadata_bytes).to_bytes(4, "little")
+        + metadata_bytes
+        + b"\x00\x00\x01\x00"
+    )
+
+    asyncio.run(coordinator.handle_binary_msg(raw_frame))
+
+    assert committed == [(message_obj, "input:manual-binary")]
+

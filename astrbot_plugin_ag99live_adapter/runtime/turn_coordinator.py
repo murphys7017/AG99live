@@ -178,7 +178,10 @@ class TurnCoordinator:
 
     async def handle_binary_msg(self, raw_message: bytes) -> None:
         frame = parse_binary_audio_frame(raw_message)
-        await self.speech_ingress.handle_audio_stream_binary_chunk(frame)
+        message_obj = await self.speech_ingress.handle_audio_stream_binary_chunk(frame)
+        if message_obj is not None:
+            turn_id = self._require_turn_id_value(frame.turn_id)
+            await self._commit_inbound_message(message_obj, turn_id=turn_id)
 
     async def emit_message_chain(
         self,

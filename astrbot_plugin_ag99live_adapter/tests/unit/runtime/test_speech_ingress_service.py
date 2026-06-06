@@ -197,7 +197,7 @@ def test_handle_binary_audio_stream_chunk_transcribes_on_stream_end(
                 sample_rate=16000,
                 channels=1,
                 payload=np.array([8192, -8192], dtype=np.int16).tobytes(),
-                metadata={},
+                metadata={"capture_mode": "ptt"},
             )
         )
     )
@@ -206,7 +206,7 @@ def test_handle_binary_audio_stream_chunk_transcribes_on_stream_end(
             MessageStub(
                 dropped=False,
                 turn_id="input:binary",
-                payload={"stream_id": "mic:test", "reason": "manual_stop"},
+                payload={"stream_id": "mic:test", "reason": "ptt_release", "capture_mode": "ptt"},
             )
         )
     )
@@ -216,6 +216,55 @@ def test_handle_binary_audio_stream_chunk_transcribes_on_stream_end(
     assert result["raw_message"]["payload"]["audio_sample_rate"] == 16000
     assert sent_messages[0]["type"] == "output.transcription"
     assert sent_messages[0]["turn_id"] == "input:binary"
+
+
+def test_handle_manual_binary_audio_stream_chunk_uses_vad_segments(
+    install_fake_astrbot,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.protocol.binary_audio import BinaryAudioChunkFrame
+    from astrbot_plugin_ag99live_adapter.services.speech_service import SpeechIngressService
+
+    sent_messages: list[dict] = []
+    pcm = (
+        np.tile(np.array([0.2, -0.2, 0.3], dtype=np.float32), 256) * 32767
+    ).astype(np.int16).tobytes()
+    vad_engine = VadEngineStub([[pcm]])
+
+    async def send_json(message: dict) -> None:
+        sent_messages.append(message)
+
+    service = SpeechIngressService(
+        media_service=MediaServiceStub(),
+        runtime_state=SimpleNamespace(selected_stt_provider=SttProviderStub()),
+        ensure_vad_engine=lambda: vad_engine,
+        send_json=send_json,
+        build_message_object=lambda *, text, raw_message: {
+            "text": text,
+            "raw_message": raw_message,
+        },
+    )
+
+    result = asyncio.run(
+        service.handle_audio_stream_binary_chunk(
+            BinaryAudioChunkFrame(
+                stream_id="mic:manual",
+                turn_id="input:manual-binary",
+                seq=0,
+                encoding="pcm16le",
+                sample_rate=16000,
+                channels=1,
+                payload=np.array([8192, -8192], dtype=np.int16).tobytes(),
+                metadata={"capture_mode": "manual"},
+            )
+        )
+    )
+
+    assert result["text"] == "hello from stt"
+    assert result["raw_message"]["turn_id"] == "input:manual-binary:vad:1"
+    assert result["raw_message"]["payload"]["stream_id"] == "mic:manual"
+    assert sent_messages[0]["type"] == "output.transcription"
+    assert sent_messages[0]["turn_id"] == "input:manual-binary:vad:1"
 
 
 def test_handle_binary_audio_stream_end_dropped_reports_terminal_signal(

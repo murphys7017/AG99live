@@ -26,6 +26,7 @@ class AudioStreamState:
     sample_rate: int = 16000
     channels: int = 1
     encoding: str = "pcm16le"
+    capture_mode: str = "ptt"
     chunks: list[bytes] = field(default_factory=list)
     last_seq: int = -1
 
@@ -35,6 +36,29 @@ class PendingTempAudioFile:
     path: str
     available_after_turn: int
     failure_count: int = 0
+
+
+@dataclass(frozen=True)
+class _StreamVadMessage:
+    turn_id: str | None
+    raw_type: str
+    stream_id: str
+    sample_rate: int
+
+    @property
+    def payload(self) -> dict[str, Any]:
+        return {
+            "stream_id": self.stream_id,
+            "sample_rate": self.sample_rate,
+        }
+
+    @property
+    def raw(self) -> dict[str, Any]:
+        return {
+            "type": self.raw_type,
+            "turn_id": self.turn_id,
+            "payload": self.payload,
+        }
 
 
 TEMP_AUDIO_CLEANUP_DELAY_TURNS = 3
@@ -72,6 +96,7 @@ class SpeechIngressService:
             sample_rate=max(int(payload.get("sample_rate") or 16000), 1),
             channels=max(int(payload.get("channels") or 1), 1),
             encoding=str(payload.get("encoding") or "pcm16le"),
+            capture_mode=self._normalize_capture_mode(payload.get("capture_mode"), default="ptt"),
         )
 
     async def handle_audio_stream_chunk(self, message) -> None:
@@ -120,7 +145,7 @@ class SpeechIngressService:
         stream.chunks.append(chunk_bytes)
         stream.last_seq = seq
 
-    async def handle_audio_stream_binary_chunk(self, frame: BinaryAudioChunkFrame) -> None:
+    async def handle_audio_stream_binary_chunk(self, frame: BinaryAudioChunkFrame):
         stream_id = self._normalize_stream_id(frame.stream_id)
         if not stream_id:
             return
@@ -132,6 +157,7 @@ class SpeechIngressService:
                 sample_rate=frame.sample_rate,
                 channels=frame.channels,
                 encoding=frame.encoding,
+                capture_mode=self._normalize_capture_mode(frame.metadata.get("capture_mode"), default="ptt"),
             )
             self._audio_streams[stream_id] = stream
 
@@ -172,8 +198,24 @@ class SpeechIngressService:
             )
             return
 
-        stream.chunks.append(frame.payload)
+        stream.capture_mode = self._normalize_capture_mode(
+            frame.metadata.get("capture_mode"),
+            default=stream.capture_mode,
+        )
+        if stream.capture_mode in {"manual", "auto"}:
+            built_message = await self._handle_vad_pcm16_chunk(
+                frame.payload,
+                turn_id=frame.turn_id,
+                raw_type=frame.raw_type,
+                stream_id=stream_id,
+                sample_rate=stream.sample_rate,
+            )
+            stream.last_seq = frame.seq
+            return built_message
+        else:
+            stream.chunks.append(frame.payload)
         stream.last_seq = frame.seq
+        return None
 
     async def handle_audio_stream_end(self, message):
         payload = message.payload
@@ -183,12 +225,30 @@ class SpeechIngressService:
 
         stream = self._audio_streams.pop(stream_id, None)
         dropped = bool(payload.get("dropped", False))
+        capture_mode = self._normalize_capture_mode(
+            payload.get("capture_mode"),
+            default=stream.capture_mode if stream else "ptt",
+        )
         if dropped:
             logger.warning("Dropping binary microphone audio stream because frontend reported chunk loss.")
             await self._emit_terminal_turn_signal(
                 turn_id=message.turn_id,
                 reason="microphone_audio_dropped",
                 error_message="Microphone audio segment dropped before transcription.",
+            )
+            return None
+
+        if capture_mode in {"manual", "auto"}:
+            if stream is None:
+                logger.debug("Ignoring VAD audio stream end with missing stream: %s", stream_id)
+                return None
+            if self._consume_vad_turn_counter(message.turn_id):
+                logger.debug("Ignoring VAD audio stream end after child turns: %s", stream_id)
+                return None
+            await self._emit_terminal_turn_signal(
+                turn_id=message.turn_id,
+                reason="microphone_audio_empty",
+                error_message="Microphone audio segment was empty before transcription.",
             )
             return None
 
@@ -255,6 +315,51 @@ class SpeechIngressService:
                 built_message = await self._build_message_from_vad_segment(message)
 
         return built_message
+
+    async def _handle_vad_pcm16_chunk(
+        self,
+        chunk_bytes: bytes,
+        *,
+        turn_id: str | None,
+        raw_type: str,
+        stream_id: str,
+        sample_rate: int,
+    ):
+        audio_data = self._pcm16_bytes_to_float32([chunk_bytes])
+        if audio_data.size == 0:
+            return None
+        message = _StreamVadMessage(
+            turn_id=turn_id,
+            raw_type=raw_type,
+            stream_id=stream_id,
+            sample_rate=sample_rate,
+        )
+        try:
+            vad_engine = self._ensure_vad_engine()
+        except Exception as exc:
+            logger.error("Failed to initialize VAD engine: %s", exc)
+            await self._emit_terminal_turn_signal(
+                turn_id=turn_id,
+                reason="vad_unavailable",
+                error_message=f"VAD unavailable: {exc}",
+            )
+            return None
+
+        segment_id = self._resolve_audio_segment_id(message)
+        for audio_bytes in vad_engine.detect_speech(audio_data.tolist()):
+            if audio_bytes == b"<|PAUSE|>":
+                await self._build_interrupt_message(message)
+            elif audio_bytes == b"<|RESUME|>":
+                continue
+            elif len(audio_bytes) > 1024:
+                chunk = (
+                    np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+                )
+                await self.media_service.append_audio_chunk(chunk, segment_id=segment_id)
+                built_message = await self._build_message_from_vad_segment(message)
+                if built_message is not None:
+                    return built_message
+        return None
 
     async def handle_audio_end(self, message):
         segment_id = self._resolve_audio_segment_id(message)
@@ -477,6 +582,11 @@ class SpeechIngressService:
         if not isinstance(value, str):
             return ""
         return value.strip()
+
+    @staticmethod
+    def _normalize_capture_mode(value: Any, *, default: str = "manual") -> str:
+        normalized = str(value or default).strip().lower()
+        return normalized if normalized in {"manual", "ptt", "auto"} else default
 
     @staticmethod
     def _pcm16_bytes_to_float32(chunks: list[bytes]) -> np.ndarray:

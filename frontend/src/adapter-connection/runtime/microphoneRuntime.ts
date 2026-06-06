@@ -94,12 +94,7 @@ export function createAdapterMicrophoneRuntime(
     }
 
     if (socket.bufferedAmount > MAX_MIC_SOCKET_BUFFERED_AMOUNT) {
-      if (!audioSequenceBroken) {
-        audioSequenceBroken = true;
-        deps.state.lastError = "麦克风音频发送积压，本段收音已丢弃。";
-        deps.state.statusMessage = deps.state.lastError;
-        deps.pushHistory("error", deps.state.lastError);
-      }
+      markMicrophoneAudioSequenceBroken();
       return;
     }
 
@@ -118,6 +113,7 @@ export function createAdapterMicrophoneRuntime(
             {
               stream_id: streamId,
               source: resolveMicrophoneStreamSource(),
+              capture_mode: resolveMicrophoneCaptureMode(),
               device_id: deps.state.microphoneDeviceId || "",
               encoding: "pcm16le",
               sample_rate: chunk.sampleRate,
@@ -139,11 +135,22 @@ export function createAdapterMicrophoneRuntime(
           encoding: "pcm16le",
           sample_rate: chunk.sampleRate,
           channels: chunk.channels,
+          capture_mode: resolveMicrophoneCaptureMode(),
         },
         audioPayload,
       ),
     );
     activeMicSeq += 1;
+  }
+
+  function markMicrophoneAudioSequenceBroken(): void {
+    if (audioSequenceBroken) {
+      return;
+    }
+    audioSequenceBroken = true;
+    deps.state.lastError = "麦克风音频发送积压，本段收音已丢弃。";
+    deps.state.statusMessage = deps.state.lastError;
+    deps.pushHistory("error", deps.state.lastError);
   }
 
   function setMicrophoneDevice(deviceId: string): void {
@@ -369,10 +376,12 @@ export function createAdapterMicrophoneRuntime(
             reason,
             dropped: audioSequenceBroken,
             last_seq: activeMicSeq - 1,
+            capture_mode: resolveMicrophoneCaptureMode(),
           }
         : {
             reason,
             dropped: audioSequenceBroken,
+            capture_mode: resolveMicrophoneCaptureMode(),
           };
       socket.send(JSON.stringify(deps.buildEnvelope(endType, payload, inputTurnId)));
     }
@@ -419,6 +428,10 @@ export function createAdapterMicrophoneRuntime(
       || deps.state.microphoneDeviceId.startsWith("native:")
       ? "native_dshow"
       : "web_audio";
+  }
+
+  function resolveMicrophoneCaptureMode(): MicrophoneCaptureOrigin {
+    return micCaptureOrigin ?? "manual";
   }
 
   function resolveAudioPayload(chunk: MicrophoneAudioChunk): ArrayBuffer {

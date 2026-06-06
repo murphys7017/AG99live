@@ -1,7 +1,7 @@
 task:
   class: feature
   risk: high
-  phase: ptt_event_ack_boundary_added
+  phase: binary_microphone_capture_mode_split
   scope: AG99live frontend Electron/Web microphone capture transport and adapter speech ingress; remote operator permission policy remains out of scope
 context:
   confidence: medium
@@ -9,7 +9,8 @@ context:
     - Remote operator permission and approval policy is intentionally open during functional testing and is not part of the current remediation scope.
     - Current Electron frontend should prefer JSON control frames plus WebSocket binary PCM16LE chunks over JSON number-array audio.
     - Legacy input.raw_audio_data and input.mic_audio_end remain available for old clients and debugging, but are no longer the current frontend main path.
-    - PTT start/stop timing now uses the same stream start/binary chunk/stream end path as manual microphone capture.
+    - PTT start/stop timing uses stream start/binary chunk/stream end as a press-delimited segment.
+    - Manual and auto microphone capture remain on binary PCM16LE transport but are tagged with capture_mode=manual/auto so backend VAD can segment speech while capture stays open.
     - Binary audio stream end now honors frontend dropped=true and stops the turn without transcription.
     - PTT key release during microphone startup is remembered and stops capture as soon as startup finishes.
     - Native microphone start now waits for the first ffmpeg PCM bytes before returning ok; startup handshake bytes are discarded so recognition starts only after the handshake boundary.
@@ -25,6 +26,7 @@ architecture:
     - Current issue ledger is recorded in docs/02-设计文档/05-前端结构维护清单.md.
     - Microphone WebSocket protocol now has JSON stream control frames and AG99 binary PCM16LE audio chunk frames.
     - Backend transport has a separate binary message handler instead of decoding bytes as UTF-8 JSON.
+    - AG99 binary audio chunk metadata now carries capture_mode so backend speech ingress can route continuous capture to VAD and PTT capture to end-of-segment transcription.
     - Preload desktop IPC now forwards payloads to renderer callbacks and exposes a PTT acknowledgement channel back to the main process.
 verification:
   checks_run:
@@ -33,6 +35,7 @@ verification:
     - cd frontend; npm run test:adapter-connection
     - cd frontend; npm run typecheck:node
     - cd frontend; npm run typecheck:renderer
+    - cd astrbot_plugin_ag99live_adapter; python -m pytest tests/unit/runtime/test_binary_audio_protocol.py tests/unit/runtime/test_speech_ingress_service.py
     - git diff --check
   checks_failed: []
   validation_gap: Live Electron ffmpeg/device capture and global uiohook PTT acknowledgement were not manually exercised in this turn.

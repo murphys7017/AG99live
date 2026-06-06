@@ -10,6 +10,7 @@ export interface AudioStreamFrameMetadata {
   encoding: "pcm16le";
   sample_rate: number;
   channels: 1;
+  capture_mode?: "manual" | "ptt" | "auto";
 }
 
 export function buildAudioStreamChunkFrame(
