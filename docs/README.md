@@ -13,7 +13,8 @@
 
 1. **[ModelEngine 边界与分层设计](./02-设计文档/01-ModelEngine边界与分层设计.md)** — 前端动作编译边界、stage 规则、参数所有权
 2. **[SpeechPoseStage 设计](./02-设计文档/04-SpeechPoseStage设计.md)** — 说话时随动的 compile 级增强规则
-3. **[前端结构维护清单](./02-设计文档/05-前端结构维护清单.md)** — 主控制器、适配器层、ModelEngine 与 Live2D runtime 的维护边界
+3. **[语义动作 fallback 计划](./02-设计文档/08-语义动作Fallback计划.md)** — LLM 语义轴输出、代表性示例 fallback 和协议边界
+4. **[前端结构维护清单](./02-设计文档/05-前端结构维护清单.md)** — 主控制器、适配器层、ModelEngine 与 Live2D runtime 的维护边界
 
 远程执行器和 Windows 操作能力推荐阅读：
 
@@ -40,6 +41,7 @@ docs/
     05-前端结构维护清单.md               # 前端结构维护清单
     06-Motion主轴辅轴候选评估.md         # Motion 主轴/辅轴候选评估
     07-远程执行器目标书.md               # 远程执行器目标书
+    08-语义动作Fallback计划.md           # 语义动作 fallback 计划
 
   03-运行时与运维/                       # 运行时与运维
     01-AI运行协议.md                     # AI 运行协议
