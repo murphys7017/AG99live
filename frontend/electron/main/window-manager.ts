@@ -57,6 +57,15 @@ function isDevelopment(): boolean {
   return !app.isPackaged || Boolean(process.env.ELECTRON_RENDERER_URL);
 }
 
+function isSafeExternalLink(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export class WindowManager {
   private isAppQuitting = false;
   private overlayVisiblePreference = true;
@@ -651,7 +660,11 @@ export class WindowManager {
 
   private attachExternalLinkGuard(targetWindow: BrowserWindow): void {
     targetWindow.webContents.setWindowOpenHandler((details) => {
-      void shell.openExternal(details.url);
+      if (isSafeExternalLink(details.url)) {
+        void shell.openExternal(details.url);
+      } else {
+        console.warn("[AG99live] Blocked external link with disallowed protocol.");
+      }
       return { action: "deny" };
     });
   }
