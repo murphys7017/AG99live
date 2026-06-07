@@ -145,7 +145,7 @@ export function sendSemanticAxisProfileSave(
 export function sendMotionPayloadPreview(
   ctx: OutboundActionContext,
   payload: unknown,
-  schemaMotionIntentV2: string,
+  supportedMotionIntentSchemas: readonly string[],
 ): boolean {
   if (!ctx.outboundClient.canSend()) {
     ctx.state.lastError = "当前还没有连上适配器，无法发送动作测试载荷。";
@@ -157,7 +157,7 @@ export function sendMotionPayloadPreview(
   const schemaVersion = payload && typeof payload === "object"
     ? String((payload as Record<string, unknown>).schema_version ?? "").trim()
     : "";
-  if (schemaVersion !== schemaMotionIntentV2) {
+  if (!supportedMotionIntentSchemas.includes(schemaVersion)) {
     ctx.state.lastError = `动作测试载荷无效：不支持 schema_version=${schemaVersion || "empty"}。`;
     ctx.state.statusMessage = ctx.state.lastError;
     ctx.pushHistory("error", ctx.state.lastError);

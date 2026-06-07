@@ -55,23 +55,30 @@ def _build_valid_parameter_plan(mode: str = "expressive") -> dict:
     }
 
 
-def _build_valid_motion_intent(mode: str = "expressive") -> dict:
-    return {
-        "schema_version": "engine.motion_intent.v2",
+def _build_valid_motion_intent(
+    mode: str = "expressive",
+    *,
+    include_mode: bool = True,
+) -> dict:
+    intent = {
+        "schema_version": "engine.motion_intent.v3",
         "profile_id": "pet.semantic.v1",
         "profile_revision": 2,
         "model_id": "pet",
-        "mode": mode,
         "emotion_label": "test",
         "duration_hint_ms": 1200,
+        "fallback_pose_id": "neutral",
         "axes": {
-            "head_yaw": {"value": 62},
-            "mouth_smile": {"value": 64},
+            "head_yaw": 62,
+            "mouth_smile": 64,
         },
         "summary": {
             "axis_count": 2,
         },
     }
+    if include_mode:
+        intent["mode"] = mode
+    return intent
 
 
 def _build_semantic_model_info() -> dict:
@@ -212,7 +219,7 @@ def test_extract_inline_motion_plan_strips_valid_tag(install_fake_astrbot, monke
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
     module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
     tag_payload = json.dumps(
-        {"mode": "inline", "intent": _build_valid_motion_intent()},
+        {"mode": "inline", "intent": _build_valid_motion_intent(include_mode=False)},
         separators=(",", ":"),
     )
 
@@ -224,7 +231,58 @@ def test_extract_inline_motion_plan_strips_valid_tag(install_fake_astrbot, monke
     assert "hello" in text.lower()
     assert "world" in text.lower()
     assert isinstance(plan, dict)
-    assert plan.get("schema_version") == "engine.motion_intent.v2"
+    assert plan.get("schema_version") == "engine.motion_intent.v3"
+    assert plan.get("mode") == "expressive"
+    assert mode == "inline"
+
+
+def test_extract_inline_motion_plan_rejects_v3_intent_mode(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    tag_payload = json.dumps(
+        {"mode": "inline", "intent": _build_valid_motion_intent()},
+        separators=(",", ":"),
+    )
+
+    text, plan, mode = module._extract_inline_motion_plan(
+        f"hello <@anim {tag_payload}> world"
+    )
+
+    assert "<@anim" not in text.lower()
+    assert "hello" in text.lower()
+    assert "world" in text.lower()
+    assert plan is None
+    assert mode is None
+
+
+def test_extract_inline_motion_plan_falls_back_when_runtime_available(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    tag_payload = json.dumps(
+        {"mode": "inline", "intent": _build_valid_motion_intent()},
+        separators=(",", ":"),
+    )
+
+    text, plan, mode = module._extract_inline_motion_plan(
+        f"hello <@anim {tag_payload}> world",
+        runtime_state=_runtime_state_stub(mode="inline_first"),
+    )
+
+    assert "<@anim" not in text.lower()
+    assert "hello" in text.lower()
+    assert "world" in text.lower()
+    assert isinstance(plan, dict)
+    assert plan["schema_version"] == "engine.motion_intent.v3"
+    assert plan["mode"] == "expressive"
+    assert plan["fallback_pose_id"] == "neutral"
+    assert plan["summary"]["fallback_used"] is True
+    assert plan["summary"]["fallback_reason"] == "forbidden_field:mode"
     assert mode == "inline"
 
 
@@ -281,7 +339,8 @@ def test_build_model_visible_user_text_appends_inline_contract(
     assert "Use readable exaggerated head and smile motion." in prompt_text
     assert "当前 Live2D 模型：pet。" in prompt_text
     assert "<@anim {" in prompt_text
-    assert '"schema_version":"engine.motion_intent.v2"' in prompt_text
+    assert '"schema_version":"engine.motion_intent.v3"' in prompt_text
+    assert '"fallback_pose_id":"neutral"' in prompt_text
     assert '"profile_id":"pet.semantic.v1"' in prompt_text
     assert "debug_tail" not in prompt_text
 
@@ -573,7 +632,7 @@ def test_emit_message_chain_inline_plan_uses_primary_route(
 
     coordinator._finish_turn = fake_finish_turn
     tag_payload = json.dumps(
-        {"mode": "inline", "intent": _build_valid_motion_intent()},
+        {"mode": "inline", "intent": _build_valid_motion_intent(include_mode=False)},
         separators=(",", ":"),
     )
 
@@ -726,7 +785,7 @@ def test_emit_message_chain_split_mode_ignores_inline_payload(
 
     coordinator._finish_turn = fake_finish_turn
     tag_payload = json.dumps(
-        {"mode": "inline", "intent": _build_valid_motion_intent()},
+        {"mode": "inline", "intent": _build_valid_motion_intent(include_mode=False)},
         separators=(",", ":"),
     )
 
@@ -917,7 +976,7 @@ def test_emit_message_chain_uses_raw_reply_text_override_for_inline_extraction(
 
     coordinator._finish_turn = fake_finish_turn
     tag_payload = json.dumps(
-        {"mode": "inline", "intent": _build_valid_motion_intent()},
+        {"mode": "inline", "intent": _build_valid_motion_intent(include_mode=False)},
         separators=(",", ":"),
     )
     raw_reply_text = f"hello <@anim {tag_payload}> world"
@@ -940,6 +999,71 @@ def test_emit_message_chain_uses_raw_reply_text_override_for_inline_extraction(
     assert "<@anim" not in output_text.lower()
     assert "hello" in output_text.lower()
     assert "world" in output_text.lower()
+
+
+def test_emit_message_chain_inline_invalid_v3_intent_broadcasts_fallback(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+    Plain = module.Plain
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="inline_first")
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-inline-fallback",
+            "last_user_text": "fallback user text",
+        },
+    )()
+
+    class ChatBufferStub:
+        def add(self, role: str, text: str) -> None:
+            del role
+            del text
+
+    coordinator.chat_buffer = ChatBufferStub()
+    coordinator.speaker_name = "assistant"
+    coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
+
+    async def fake_send_json(*_args, **_kwargs):
+        return True
+
+    coordinator._send_json = fake_send_json
+    inline_broadcast: dict[str, object] = {}
+
+    async def fake_broadcast_motion_payload(**kwargs):
+        inline_broadcast.update(kwargs)
+        return True
+
+    coordinator.broadcast_motion_payload = fake_broadcast_motion_payload
+
+    tag_payload = json.dumps(
+        {"mode": "inline", "intent": _build_valid_motion_intent()},
+        separators=(",", ":"),
+    )
+    raw_reply_text = f"hello <@anim {tag_payload}> world"
+
+    asyncio.run(
+        coordinator.emit_message_chain(
+            message_chain=[Plain("hello world")],
+            raw_reply_text_override=raw_reply_text,
+        )
+    )
+
+    assert inline_broadcast.get("source") == "engine.inline_motion_intent"
+    motion_payload = inline_broadcast.get("motion_payload")
+    assert isinstance(motion_payload, dict)
+    assert motion_payload["schema_version"] == "engine.motion_intent.v3"
+    assert motion_payload["fallback_pose_id"] == "neutral"
+    assert motion_payload["summary"]["fallback_used"] is True
+    assert motion_payload["summary"]["fallback_reason"] == "forbidden_field:mode"
+    assert inline_broadcast.get("turn_id") == "turn-inline-fallback"
 
 
 def test_emit_message_chain_inline_v1_intent_is_rejected(
@@ -1013,7 +1137,13 @@ def test_emit_message_chain_inline_v1_intent_is_rejected(
         )
     )
 
-    assert "motion_payload" not in inline_broadcast
+    motion_payload = inline_broadcast.get("motion_payload")
+    assert isinstance(motion_payload, dict)
+    assert motion_payload["schema_version"] == "engine.motion_intent.v3"
+    assert motion_payload["emotion_label"] == "curious"
+    assert motion_payload["fallback_pose_id"] == "neutral"
+    assert motion_payload["summary"]["fallback_used"] is True
+    assert motion_payload["summary"]["fallback_reason"] == "invalid_schema_version"
 
 
 def test_handle_msg_emits_control_error_for_unhandled_allowed_message_type(

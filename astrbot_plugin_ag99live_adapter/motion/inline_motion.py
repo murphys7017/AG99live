@@ -16,9 +16,17 @@ from .catalog_motion import (
     validate_catalog_motion_payload,
 )
 from .realtime_motion_plan import (
+    DEFAULT_MOTION_INTENT_DURATION_MS,
+    MOTION_INTENT_V2_SCHEMA_VERSION,
+    MOTION_INTENT_V3_SCHEMA_VERSION,
     normalize_motion_intent_payload,
     resolve_selected_semantic_axis_profile,
     validate_motion_intent_payload,
+)
+from .fallback_pose import (
+    DEFAULT_FALLBACK_POSE_ID,
+    build_default_neutral_pose_axes,
+    resolve_fallback_pose_axes,
 )
 from ..prompts.inline_motion_contract import build_inline_motion_contract
 from ..prompts.main_reply import build_main_llm_user_text
@@ -30,7 +38,11 @@ INLINE_ANIM_START_PATTERN = re.compile(r"<@anim\b", re.IGNORECASE)
 
 # ── Inline motion plan extraction ──────────────────────────────────
 
-def extract_inline_motion_plan(text: str) -> tuple[str, dict[str, Any] | None, str | None]:
+def extract_inline_motion_plan(
+    text: str,
+    *,
+    runtime_state: Any | None = None,
+) -> tuple[str, dict[str, Any] | None, str | None]:
     normalized = str(text or "")
     if not normalized:
         return "", None, None
@@ -44,7 +56,7 @@ def extract_inline_motion_plan(text: str) -> tuple[str, dict[str, Any] | None, s
         payload = _parse_inline_anim_tag(match.group(0))
         if not isinstance(payload, dict):
             continue
-        plan, mode = normalize_inline_anim_payload(payload)
+        plan, mode = normalize_inline_anim_payload(payload, runtime_state=runtime_state)
         if isinstance(plan, dict):
             return cleaned_text, plan, mode
 
@@ -67,17 +79,34 @@ def _parse_inline_anim_tag(tag_text: str) -> dict[str, Any] | None:
 
 def normalize_inline_anim_payload(
     payload: dict[str, Any],
+    *,
+    runtime_state: Any | None = None,
 ) -> tuple[dict[str, Any] | None, str | None]:
     mode_value = payload.get("mode")
     mode = str(mode_value).strip() if isinstance(mode_value, str) else "inline"
     mode = mode or "inline"
 
     if isinstance(payload.get("intent"), dict):
+        raw_intent = payload["intent"]
+        raw_schema_version = str(raw_intent.get("schema_version") or "").strip()
+        if raw_schema_version == MOTION_INTENT_V3_SCHEMA_VERSION and "mode" in raw_intent:
+            logger.warning("WIRING inline_motion payload rejected: forbidden_field:mode")
+            return _build_inline_fallback_motion_payload(
+                raw_intent,
+                runtime_state=runtime_state,
+                fallback_reason="forbidden_field:mode",
+                mode=mode,
+            )
         try:
-            plan = normalize_motion_intent_payload(payload["intent"])
+            plan = normalize_motion_intent_payload(raw_intent)
         except ValueError as exc:
             logger.warning("WIRING inline_motion payload rejected: %s", exc)
-            return None, None
+            return _build_inline_fallback_motion_payload(
+                raw_intent,
+                runtime_state=runtime_state,
+                fallback_reason=str(exc),
+                mode=mode,
+            )
     else:
         logger.warning("WIRING inline_motion payload rejected: missing_nested_intent")
         return None, None
@@ -85,16 +114,84 @@ def normalize_inline_anim_payload(
     valid, failure_reason = validate_motion_payload(plan)
     if not valid:
         logger.warning("WIRING inline_motion payload rejected: %s", failure_reason)
-        return None, None
+        return _build_inline_fallback_motion_payload(
+            plan,
+            runtime_state=runtime_state,
+            fallback_reason=failure_reason,
+            mode=mode,
+        )
 
     return plan, mode
+
+
+def _build_inline_fallback_motion_payload(
+    raw_intent: Any,
+    *,
+    runtime_state: Any | None,
+    fallback_reason: str,
+    mode: str,
+) -> tuple[dict[str, Any] | None, str | None]:
+    if runtime_state is None:
+        return None, None
+    try:
+        semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
+    except RuntimeError as exc:
+        logger.warning("WIRING inline_motion fallback disabled: %s", exc)
+        return None, None
+
+    fallback_pose_id = DEFAULT_FALLBACK_POSE_ID
+    emotion_label = "neutral"
+    if isinstance(raw_intent, dict):
+        fallback_pose_id = str(raw_intent.get("fallback_pose_id") or fallback_pose_id).strip() or fallback_pose_id
+        emotion_label = str(raw_intent.get("emotion_label") or emotion_label).strip() or emotion_label
+
+    axes = resolve_fallback_pose_axes(
+        runtime_state=runtime_state,
+        semantic_profile=semantic_profile,
+        fallback_pose_id=fallback_pose_id,
+    )
+    if not axes:
+        axes = build_default_neutral_pose_axes(semantic_profile)
+        fallback_pose_id = DEFAULT_FALLBACK_POSE_ID
+    if not axes:
+        return None, None
+
+    try:
+        profile_revision = int(semantic_profile.get("revision") or 0)
+    except (TypeError, ValueError):
+        return None, None
+    if profile_revision <= 0:
+        return None, None
+
+    payload = {
+        "schema_version": MOTION_INTENT_V3_SCHEMA_VERSION,
+        "profile_id": str(semantic_profile.get("profile_id") or "").strip(),
+        "profile_revision": profile_revision,
+        "model_id": str(semantic_profile.get("model_id") or "").strip(),
+        "mode": "expressive",
+        "emotion_label": emotion_label,
+        "duration_hint_ms": DEFAULT_MOTION_INTENT_DURATION_MS,
+        "fallback_pose_id": fallback_pose_id,
+        "axes": axes,
+        "summary": {
+            "axis_count": len(axes),
+            "fallback_pose_id": fallback_pose_id,
+            "fallback_used": True,
+            "fallback_reason": str(fallback_reason or "").strip(),
+        },
+    }
+    valid, failure_reason = validate_motion_intent_payload(payload)
+    if not valid:
+        logger.warning("WIRING inline_motion fallback rejected: %s", failure_reason)
+        return None, None
+    return payload, mode or "inline"
 
 
 # ── Motion payload validation ──────────────────────────────────────
 
 def validate_motion_payload(payload: Any) -> tuple[bool, str]:
     schema_version = resolve_motion_payload_schema_version(payload)
-    if schema_version == "engine.motion_intent.v2":
+    if schema_version in {MOTION_INTENT_V2_SCHEMA_VERSION, MOTION_INTENT_V3_SCHEMA_VERSION}:
         return validate_motion_intent_payload(payload)
     if schema_version == "engine.catalog_motion.v1":
         return validate_catalog_motion_payload(payload)
@@ -111,7 +208,7 @@ def resolve_motion_payload_schema_version(payload: Any) -> str:
 
 def resolve_engine_motion_message_type(payload: Any) -> str:
     schema_version = resolve_motion_payload_schema_version(payload)
-    if schema_version == "engine.motion_intent.v2":
+    if schema_version in {MOTION_INTENT_V2_SCHEMA_VERSION, MOTION_INTENT_V3_SCHEMA_VERSION}:
         return TYPE_ENGINE_MOTION_INTENT
     if schema_version == "engine.catalog_motion.v1":
         return TYPE_ENGINE_CATALOG_MOTION

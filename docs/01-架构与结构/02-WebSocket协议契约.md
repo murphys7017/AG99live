@@ -141,7 +141,7 @@ control.turn_finished
 
 | 类型 | 方向 | 模式 |
 | --- | --- | --- |
-| `engine.motion_intent` | 双向 | `engine.motion_intent.v2` |
+| `engine.motion_intent` | 双向 | 当前主协议：`engine.motion_intent.v3`；遗留兼容：`engine.motion_intent.v2` |
 
 ## 动作路径
 
@@ -155,6 +155,54 @@ control.turn_finished
 ```
 
 后端主路径仅广播 `engine.motion_intent`。
+
+### `engine.motion_intent.v3`
+
+`engine.motion_intent.v3` 是当前大模型自动动作链路的主协议。
+
+约束：
+
+- `axes` 唯一合法形态是 flat number map：`Record<string, number>`。
+- 轴值范围以当前 `SemanticAxisProfile` 中对应 axis 的 `value_range` 为准。
+- 自动动作链路不允许输出 `choice`、`motion_id`、catalog motion、motion3、exp3 或旧播放文件引用。
+- LLM 输出契约不包含 `mode`；Adapter 归一化后会补 `mode: "expressive"` 给现有 ModelEngine 编译链路使用。
+- `idle` 是前端/运行时本底能力，不属于 LLM 本轮动作输出。
+
+示例：
+
+```json
+{
+  "schema_version": "engine.motion_intent.v3",
+  "profile_id": "pet.semantic.v1",
+  "profile_revision": 2,
+  "model_id": "pet",
+  "mode": "expressive",
+  "emotion_label": "happy",
+  "duration_hint_ms": 1000,
+  "fallback_pose_id": "happy_smile",
+  "axes": {
+    "head_yaw": 54,
+    "head_pitch": 62,
+    "body_roll": 59,
+    "gaze_x": 54,
+    "mouth_smile": 84
+  }
+}
+```
+
+### `engine.motion_intent.v2`
+
+`engine.motion_intent.v2` 保留为旧协议含义。它的 `axes` 使用旧嵌套形态：
+
+```json
+{
+  "axes": {
+    "head_yaw": { "value": 54 }
+  }
+}
+```
+
+v3 不会把 `{ "value": number }` 静默当作合法 flat axis。自动动作链路应产出 v3；v2 只作为遗留/预览兼容路径处理。
 
 ## 后端内部映射
 

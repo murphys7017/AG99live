@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { compileMotionIntent } from "../src/model-engine/compiler/compileMotionIntent.js";
+import { normalizeMotionPayload } from "../src/model-engine/normalize.js";
 import { listCompileStageRegistrations } from "../src/model-engine/compiler/registry.js";
 import type { ModelSummary, SemanticMotionIntent } from "../src/types/protocol.js";
 import type { SemanticAxisProfile } from "../src/types/semantic-axis-profile.js";
@@ -340,7 +341,7 @@ function buildModelWithVoiceFollowingProfile(profile: SemanticAxisProfile): Mode
 
 function buildIntent(overrides?: Partial<SemanticMotionIntent>): SemanticMotionIntent {
   return {
-    schema_version: "engine.motion_intent.v2",
+    schema_version: "engine.motion_intent.v3",
     profile_id: "profile-1",
     profile_revision: 1,
     model_id: "model-1",
@@ -348,9 +349,9 @@ function buildIntent(overrides?: Partial<SemanticMotionIntent>): SemanticMotionI
     emotion_label: "happy",
     duration_hint_ms: 1200,
     axes: {
-      gaze_x: { value: 70 },
-      head_yaw: { value: 80 },
-      mouth_smile: { value: 62 },
+      gaze_x: 70,
+      head_yaw: 80,
+      mouth_smile: 62,
     },
     ...overrides,
   };
@@ -383,11 +384,54 @@ function testExplicitPrimaryAxisIsNotOverwrittenByCoupling(): void {
   );
 }
 
+function testNormalizeMotionPayloadAcceptsV3FlatAxes(): void {
+  const result = normalizeMotionPayload({
+    schema_version: "engine.motion_intent.v3",
+    profile_id: "profile-1",
+    profile_revision: 1,
+    model_id: "model-1",
+    mode: "expressive",
+    emotion_label: "happy",
+    duration_hint_ms: 1000,
+    fallback_pose_id: "neutral",
+    axes: {
+      head_yaw: 62,
+      mouth_smile: 84,
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.payload.kind, "semantic_intent");
+  assert.deepEqual(result.payload.intent.axes, {
+    head_yaw: 62,
+    mouth_smile: 84,
+  });
+}
+
+function testNormalizeMotionPayloadRejectsV3NestedAxes(): void {
+  const result = normalizeMotionPayload({
+    schema_version: "engine.motion_intent.v3",
+    profile_id: "profile-1",
+    profile_revision: 1,
+    model_id: "model-1",
+    mode: "expressive",
+    emotion_label: "happy",
+    duration_hint_ms: 1000,
+    fallback_pose_id: "neutral",
+    axes: {
+      head_yaw: { value: 62 },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "motion_intent_v3.invalid_flat_axes");
+}
+
 function testAxisIntensityScaleAffectsOnlyTargetAxis(): void {
   const profile = buildProfile();
   const baseline = compileMotionIntent(buildIntent({
     axes: {
-      mouth_smile: { value: 60 },
+      mouth_smile: 60,
     },
   }), {
     model: buildModel(profile),
@@ -398,7 +442,7 @@ function testAxisIntensityScaleAffectsOnlyTargetAxis(): void {
   });
   const scaled = compileMotionIntent(buildIntent({
     axes: {
-      mouth_smile: { value: 60 },
+      mouth_smile: 60,
     },
   }), {
     model: buildModel(profile),
@@ -450,10 +494,10 @@ function testCompileSalvagesValidAxesWhenIntentContainsManyInvalidAxes(): void {
   const profile = buildProfile();
   const result = compileMotionIntent(buildIntent({
     axes: {
-      unknown_a: { value: 60 },
-      unknown_b: { value: 61 },
-      unknown_c: { value: 62 },
-      mouth_smile: { value: 68 },
+      unknown_a: 60,
+      unknown_b: 61,
+      unknown_c: 62,
+      mouth_smile: 68,
     },
   }), {
     model: buildModel(profile),
@@ -490,7 +534,7 @@ function testCompileSkipsInvalidBindingsAndKeepsUsableParameters(): void {
   });
   const result = compileMotionIntent(buildIntent({
     axes: {
-      head_yaw: { value: 80 },
+      head_yaw: 80,
     },
   }), {
     model: buildModel(profile),
@@ -639,7 +683,7 @@ function testSpeechPoseSkipsVoiceFollowingParameterAlreadyControlledBySemanticAx
   const profile = buildProfile();
   const result = compileMotionIntent(buildIntent({
     axes: {
-      head_yaw: { value: 80 },
+      head_yaw: 80,
     },
   }), {
     model: buildModelWithVoiceFollowingProfile(profile),
@@ -665,7 +709,7 @@ function testSpeechPoseDoesNotApplyWithoutSpeechActive(): void {
   const result = compileMotionIntent(buildIntent({
     mode: "idle",
     axes: {
-      mouth_smile: { value: 62 },
+      mouth_smile: 62,
     },
   }), {
     model: buildModel(profile),
@@ -730,7 +774,7 @@ function testSpeechPoseDoesNotOverwriteCouplingDerivedAxis(): void {
 
   const result = compileMotionIntent(buildIntent({
     axes: {
-      head_yaw: { value: 80 },
+      head_yaw: 80,
     },
   }), {
     model: buildModel(profile),
@@ -797,6 +841,8 @@ function testRegistryCoreStageOrder(): void {
 
 function run(): void {
   testRegistryCoreStageOrder();
+  testNormalizeMotionPayloadAcceptsV3FlatAxes();
+  testNormalizeMotionPayloadRejectsV3NestedAxes();
   testExplicitPrimaryAxisIsNotOverwrittenByCoupling();
   testAxisIntensityScaleAffectsOnlyTargetAxis();
   testRevisionMismatchBecomesWarningInsteadOfCompileFailure();

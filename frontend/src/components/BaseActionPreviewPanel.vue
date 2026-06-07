@@ -7,7 +7,7 @@ import type {
 import type {
   SemanticMotionIntent,
 } from "../types/protocol";
-import { SCHEMA_MOTION_INTENT_V2 } from "../types/protocol";
+import { SCHEMA_MOTION_INTENT_V3 } from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 import { useParameterExcludeKeywords } from "../action-lab/parameterExcludeKeywords";
 import { buildParameterPlanTiming } from "../model-engine/timing";
@@ -202,20 +202,21 @@ const generatedPlan = computed(() => {
       : Math.max(cursorMs - Math.max(0, Math.round(stepGapMs.value)), 0);
 
   const axisValues = buildSemanticAxisValuesFromAtoms(selectedAtoms.value);
-  const expressive = Object.values(axisValues).some((axisValue) => axisValue.value !== 50);
+  const expressive = Object.values(axisValues).some((axisValue) => axisValue !== 50);
   const timing = buildParameterPlanTiming(
     expressive ? Math.max(totalDurationMs, 900) : Math.max(totalDurationMs, 480),
     expressive ? "expressive" : "idle",
   );
   const profile = props.semanticProfile;
   const intent: SemanticMotionIntent = {
-    schema_version: SCHEMA_MOTION_INTENT_V2,
+    schema_version: SCHEMA_MOTION_INTENT_V3,
     profile_id: profile?.profile_id ?? "",
     profile_revision: profile?.revision ?? 0,
     model_id: profile?.model_id ?? "",
     mode: expressive ? "expressive" : "idle",
     emotion_label: selectedAtoms.value[0]?.semanticPolarity || "preview",
     duration_hint_ms: timing.duration_ms,
+    fallback_pose_id: "neutral",
     axes: axisValues,
     summary: {
       axis_count: Object.keys(axisValues).length,
@@ -397,9 +398,7 @@ function buildAxisValuesFromAtoms(
       0,
       Math.min(45, Math.round(baseIntensity * intensityScale.value * 35)),
     );
-    axisValues[axisName] = {
-      value: Math.max(0, Math.min(100, 50 + direction * magnitude)),
-    };
+    axisValues[axisName] = Math.max(0, Math.min(100, 50 + direction * magnitude));
   }
 
   return axisValues;

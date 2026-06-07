@@ -9,6 +9,7 @@ Thumbs.db
 *.log
 coverage/
 frontend/.test-out*/
+/data/
 .env
 .env.*
 !.env.example

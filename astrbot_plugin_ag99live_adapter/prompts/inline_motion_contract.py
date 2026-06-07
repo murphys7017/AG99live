@@ -24,13 +24,15 @@ def build_inline_motion_contract(
         "不要把标签放进代码块，也不要解释标签。",
         "标签内部的 JSON 必须是合法 JSON。",
         "顶层标签 payload 必须使用 `mode: \"inline\"`，并包含 `intent` 对象。",
-        "`intent.schema_version` 必须是 `engine.motion_intent.v2`。",
+        "`intent.schema_version` 必须是 `engine.motion_intent.v3`。",
         "intent 必须按模板原样包含 `profile_id`、`profile_revision` 和 `model_id`。",
-        "`intent.mode` 必须是 `idle` 或 `expressive`。",
+        "不要输出 `intent.mode`；系统会在归一化后补充 expressive。",
         "`intent.axes` 对象只能包含下方列出的可控制参数。",
+        "`intent.axes` 的每个值必须是 flat number，不要写成 {\"value\": number}。",
         "不要编造参数名，也不要输出未列出的参数。",
-        "`intent.duration_hint_ms` 应该是合理的毫秒级持续时间提示。",
-        "如果本轮语气平静或不确定，输出安全的 idle intent，不要省略标签。",
+        "`intent.duration_hint_ms` 缺失或不合理时会被系统默认成 1000ms。",
+        "`intent.fallback_pose_id` 必须按模板填写；如果不确定就用 neutral。",
+        "如果本轮语气平静或不确定，输出安全的轻量语义 intent，不要省略标签。",
     ]
     if motion_instruction:
         lines.append(f"补充动作指令：{motion_instruction}")
@@ -85,7 +87,7 @@ def _format_control_role_label(role: str) -> str:
 
 
 def build_inline_motion_intent_template(semantic_profile: dict[str, Any]) -> dict[str, Any]:
-    axes: dict[str, dict[str, float]] = {}
+    axes: dict[str, float] = {}
     for axis in semantic_profile.get("axes", []):
         if not isinstance(axis, dict):
             continue
@@ -96,17 +98,17 @@ def build_inline_motion_intent_template(semantic_profile: dict[str, Any]) -> dic
         if not axis_id:
             continue
         neutral = axis.get("neutral", 50)
-        axes[axis_id] = {"value": float(neutral) if isinstance(neutral, (int, float)) else 50.0}
+        axes[axis_id] = float(neutral) if isinstance(neutral, (int, float)) else 50.0
     if not axes:
         raise RuntimeError("SemanticAxisProfile 没有可用于内联动作契约的可控制参数。")
     return {
-        "schema_version": "engine.motion_intent.v2",
+        "schema_version": "engine.motion_intent.v3",
         "profile_id": str(semantic_profile.get("profile_id") or "").strip(),
         "profile_revision": int(semantic_profile.get("revision") or 0),
         "model_id": str(semantic_profile.get("model_id") or "").strip(),
-        "mode": "idle",
         "emotion_label": "neutral",
-        "duration_hint_ms": 1200,
+        "duration_hint_ms": 1000,
+        "fallback_pose_id": "neutral",
         "axes": axes,
         "summary": {
             "axis_count": len(axes),

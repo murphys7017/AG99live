@@ -14,12 +14,6 @@ from ..prompts.motion_selector import (
     build_selector_platform_context,
     build_selector_user_prompt,
     resolve_motion_prompt_instruction,
-    resolve_selector_motion_catalog_options,
-    resolve_selector_motion_reference_templates,
-)
-from ..prompts.motion_catalog import (
-    build_catalog_motion_payload,
-    find_motion_catalog_option,
 )
 from ..prompts.semantic_axis_prompt import profile_prompt_axes
 
@@ -49,9 +43,11 @@ _NEUTRAL_EMOTION_MARKERS = {
     "steady",
     "normal",
 }
-MOTION_INTENT_SCHEMA_VERSION = "engine.motion_intent.v2"
+MOTION_INTENT_SCHEMA_VERSION = "engine.motion_intent.v3"
 MOTION_INTENT_V2_SCHEMA_VERSION = "engine.motion_intent.v2"
+MOTION_INTENT_V3_SCHEMA_VERSION = "engine.motion_intent.v3"
 PARAMETER_PLAN_V2_SCHEMA_VERSION = "engine.parameter_plan.v2"
+DEFAULT_MOTION_INTENT_DURATION_MS = 1000
 PARAMETER_PLAN_SOURCES = {
     "semantic_axis",
     "coupling",
@@ -81,31 +77,15 @@ class RealtimeMotionPlanGenerator:
             platform_context=build_selector_platform_context(runtime_state=self.runtime_state),
         )
         semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=self.runtime_state)
-        motion_reference_templates = resolve_selector_motion_reference_templates(
-            runtime_state=self.runtime_state,
-            semantic_profile=semantic_profile,
-        )
-        motion_catalog_options = resolve_selector_motion_catalog_options(
-            runtime_state=self.runtime_state,
-        )
         selector_raw = await self._call_astrbot_selector(
             context_text,
             few_shot_examples=self._resolve_prompt_few_shot_examples(
-                motion_reference_templates=motion_reference_templates,
+                motion_reference_templates=[],
             ),
             style_prompt=self.runtime_state.build_motion_tuning_style_prompt(),
             motion_instruction=resolve_motion_prompt_instruction(runtime_state=self.runtime_state),
             semantic_profile=semantic_profile,
-            motion_reference_templates=motion_reference_templates,
-            motion_catalog_options=motion_catalog_options,
         )
-        catalog_payload = build_catalog_motion_from_selector(
-            selector_raw,
-            semantic_profile=semantic_profile,
-            motion_catalog_options=motion_catalog_options,
-        )
-        if catalog_payload is not None:
-            return catalog_payload
         selector = normalize_selector_output(selector_raw, semantic_profile=semantic_profile)
         intent = build_intent_from_selector(selector, semantic_profile=semantic_profile)
         valid, failure_reason = validate_motion_intent_payload(intent)
@@ -157,8 +137,6 @@ class RealtimeMotionPlanGenerator:
         style_prompt: str,
         motion_instruction: str,
         semantic_profile: dict[str, Any],
-        motion_reference_templates: list[dict[str, Any]],
-        motion_catalog_options: list[dict[str, Any]],
     ) -> dict[str, Any]:
         provider = getattr(self.runtime_state, "selected_motion_analysis_provider", None)
         if provider is None:
@@ -177,8 +155,6 @@ class RealtimeMotionPlanGenerator:
                         style_prompt=style_prompt,
                         motion_instruction=motion_instruction,
                         semantic_profile=semantic_profile,
-                        motion_reference_templates=motion_reference_templates,
-                        motion_catalog_options=motion_catalog_options,
                     ),
                     system_prompt=_SYSTEM_PROMPT,
                 ),
@@ -266,7 +242,7 @@ def normalize_selector_output(
     semantic_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if semantic_profile is not None:
-        return normalize_selector_output_v2(payload, semantic_profile=semantic_profile)
+        return normalize_selector_output_v3(payload, semantic_profile=semantic_profile)
     raise ValueError("semantic_profile_required")
 
 
@@ -378,33 +354,101 @@ def normalize_selector_output_v2(
     }
 
 
-def build_catalog_motion_from_selector(
+def normalize_selector_output_v3(
     payload: dict[str, Any],
     *,
     semantic_profile: dict[str, Any],
-    motion_catalog_options: list[dict[str, Any]],
-) -> dict[str, Any] | None:
+) -> dict[str, Any]:
     if not isinstance(payload, dict):
-        return None
-    choice = str(payload.get("choice") or "generate").strip().lower()
-    if choice != "catalog":
-        return None
-    motion_id = str(payload.get("motion_id") or "").strip()
-    option = find_motion_catalog_option(
-        options=motion_catalog_options,
-        motion_id=motion_id,
+        raise ValueError("selector_payload_not_object")
+    for forbidden_key in ("choice", "mode", "motion_id", "catalog_motion", "motion3", "exp3"):
+        if forbidden_key in payload:
+            raise ValueError(f"selector_forbidden_field:{forbidden_key}")
+
+    emotion_raw = payload.get("emotion_label", payload.get("emotion"))
+    emotion = str(emotion_raw).strip() if isinstance(emotion_raw, str) else ""
+    if not emotion:
+        raise ValueError("selector_emotion_empty")
+
+    duration_ms = _normalize_duration_hint_ms(payload.get("duration_hint_ms", payload.get("duration_ms")))
+
+    raw_axes = payload.get("axes")
+    if not isinstance(raw_axes, dict):
+        raise ValueError("selector_axes_not_object")
+    if not raw_axes:
+        raise ValueError("selector_axes_empty")
+
+    prompt_axes = profile_prompt_axes(semantic_profile)
+    allowed_axes = {str(axis.get("id") or "").strip(): axis for axis in prompt_axes}
+    allowed_axis_count = len(allowed_axes)
+    max_axis_errors = _max_axis_error_count(allowed_axis_count)
+    normalized_axes: dict[str, float] = {}
+    axis_errors: list[str] = []
+    axis_warnings: list[str] = []
+    for raw_axis_id, raw_value in raw_axes.items():
+        axis_id = str(raw_axis_id or "").strip()
+        if axis_id not in allowed_axes:
+            axis_errors.append(f"selector_axis_not_allowed:{axis_id}")
+            continue
+        if isinstance(raw_value, dict):
+            raise ValueError(f"selector_axis_payload_invalid:{axis_id}")
+        value = _coerce_finite_number(raw_value)
+        if value is None:
+            axis_errors.append(f"selector_axis_not_number:{axis_id}")
+            continue
+        axis = allowed_axes[axis_id]
+        value_range = axis.get("value_range")
+        min_value = 0.0
+        max_value = 100.0
+        if (
+            isinstance(value_range, list)
+            and len(value_range) == 2
+            and isinstance(value_range[0], (int, float))
+            and isinstance(value_range[1], (int, float))
+        ):
+            min_value = float(value_range[0])
+            max_value = float(value_range[1])
+        if value < min_value or value > max_value:
+            clamped_value = min_value if value < min_value else max_value
+            axis_warnings.append(
+                f"selector_axis_clamped:{axis_id}:{value:g}->{clamped_value:g}"
+            )
+            value = clamped_value
+        normalized_axes[axis_id] = round(value, 4)
+
+    if len(axis_errors) > max_axis_errors:
+        raise ValueError(
+            "selector_axis_error_rate_exceeded:"
+            f"{len(axis_errors)}/{allowed_axis_count}:{','.join(axis_errors)}"
+        )
+    if axis_errors:
+        LOGGER.warning(
+            "Realtime motion selector ignored invalid semantic axes within threshold. errors=%s threshold=%s/%s",
+            ",".join(axis_errors),
+            max_axis_errors,
+            allowed_axis_count,
+        )
+    if axis_warnings:
+        LOGGER.warning(
+            "Realtime motion selector clamped semantic axis values. warnings=%s",
+            ",".join(axis_warnings),
+        )
+    if not normalized_axes:
+        raise ValueError("selector_axes_empty_after_error_filter")
+
+    normalized_axes = _apply_expressive_floor_v2(
+        axes=normalized_axes,
+        emotion=emotion,
+        semantic_profile=semantic_profile,
     )
-    if option is None:
-        raise ValueError(f"selector_catalog_motion_not_allowed:{motion_id or '<empty>'}")
-    emotion_raw = payload.get("emotion")
-    emotion_label = str(emotion_raw).strip() if isinstance(emotion_raw, str) else ""
-    if not emotion_label:
-        emotion_label = str(option.get("label") or option.get("id") or "catalog").strip()
-    return build_catalog_motion_payload(
-        option=option,
-        model_id=str(semantic_profile.get("model_id") or "").strip(),
-        emotion_label=emotion_label,
-    )
+
+    return {
+        "emotion": emotion,
+        "duration_ms": duration_ms,
+        "fallback_pose_id": str(payload.get("fallback_pose_id") or "").strip(),
+        "axes": normalized_axes,
+        "warnings": axis_warnings + axis_errors,
+    }
 
 
 def build_intent_from_selector(
@@ -413,7 +457,7 @@ def build_intent_from_selector(
     semantic_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if semantic_profile is not None:
-        return build_intent_from_selector_v2(selector_output, semantic_profile=semantic_profile)
+        return build_intent_from_selector_v3(selector_output, semantic_profile=semantic_profile)
     raise ValueError("semantic_profile_required")
 
 
@@ -466,13 +510,57 @@ def build_intent_from_selector_v2(
     }
 
 
+def build_intent_from_selector_v3(
+    selector_output: dict[str, Any],
+    *,
+    semantic_profile: dict[str, Any],
+) -> dict[str, Any]:
+    axes = selector_output.get("axes")
+    if not isinstance(axes, dict) or not axes:
+        raise ValueError("selector_axes_not_object")
+
+    duration_ms_raw = selector_output.get("duration_ms")
+    duration_hint_ms = _normalize_duration_hint_ms(duration_ms_raw)
+
+    emotion_label = str(selector_output.get("emotion") or "").strip()
+    if not emotion_label:
+        raise ValueError("selector_emotion_empty")
+
+    profile_revision_raw = semantic_profile.get("revision")
+    try:
+        profile_revision = int(profile_revision_raw)
+    except (TypeError, ValueError):
+        raise ValueError("semantic_profile_revision_invalid") from None
+
+    return {
+        "schema_version": MOTION_INTENT_V3_SCHEMA_VERSION,
+        "profile_id": str(semantic_profile.get("profile_id") or "").strip(),
+        "profile_revision": profile_revision,
+        "model_id": str(semantic_profile.get("model_id") or "").strip(),
+        "mode": "expressive",
+        "emotion_label": emotion_label,
+        "duration_hint_ms": duration_hint_ms,
+        "fallback_pose_id": str(selector_output.get("fallback_pose_id") or "").strip(),
+        "axes": {
+            str(axis_id): round(float(value), 4)
+            for axis_id, value in axes.items()
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        },
+        "summary": {
+            "axis_count": len(axes),
+        },
+    }
+
+
 def normalize_motion_intent_payload(intent: Any) -> dict[str, Any]:
     if not isinstance(intent, dict):
         raise ValueError("intent_not_object")
 
     schema_version = str(intent.get("schema_version") or "").strip()
-    if schema_version != MOTION_INTENT_V2_SCHEMA_VERSION:
-        raise ValueError("invalid_schema_version")
+    if schema_version == MOTION_INTENT_V2_SCHEMA_VERSION:
+        return normalize_motion_intent_v2_payload(intent)
+    if schema_version == MOTION_INTENT_V3_SCHEMA_VERSION:
+        return normalize_motion_intent_v3_payload(intent)
     return normalize_motion_intent_v2_payload(intent)
 
 
@@ -542,6 +630,99 @@ def normalize_motion_intent_v2_payload(intent: Any) -> dict[str, Any]:
             "axis_count": len(normalized_axes),
         },
     }
+
+
+def normalize_motion_intent_v3_payload(intent: Any) -> dict[str, Any]:
+    if not isinstance(intent, dict):
+        raise ValueError("intent_not_object")
+
+    schema_version = str(intent.get("schema_version") or "").strip()
+    if schema_version != MOTION_INTENT_V3_SCHEMA_VERSION:
+        raise ValueError("invalid_schema_version")
+
+    profile_id = str(intent.get("profile_id") or "").strip()
+    model_id = str(intent.get("model_id") or "").strip()
+    if not profile_id:
+        raise ValueError("profile_id_empty")
+    if not model_id:
+        raise ValueError("model_id_empty")
+    profile_revision_raw = intent.get("profile_revision")
+    if not isinstance(profile_revision_raw, int) or profile_revision_raw <= 0:
+        raise ValueError("profile_revision_invalid")
+
+    mode = str(intent.get("mode") or "expressive").strip().lower()
+    if mode not in {"expressive", "idle"}:
+        raise ValueError("invalid_mode")
+
+    emotion_label = str(intent.get("emotion_label") or "").strip()
+    if not emotion_label:
+        raise ValueError("emotion_label_empty")
+
+    axes = intent.get("axes")
+    if not isinstance(axes, dict) or not axes:
+        raise ValueError("axes_not_object")
+
+    normalized_axes: dict[str, float] = {}
+    for axis_id_raw, axis_value in axes.items():
+        axis_id = str(axis_id_raw or "").strip()
+        if not axis_id:
+            raise ValueError("axis_id_empty")
+        if isinstance(axis_value, dict):
+            raise ValueError(f"axis_payload_invalid:{axis_id}")
+        value = _coerce_finite_number(axis_value)
+        if value is None:
+            raise ValueError(f"axis_{axis_id}_value_not_number")
+        normalized_axes[axis_id] = round(value, 4)
+
+    duration_hint_ms = _normalize_duration_hint_ms(intent.get("duration_hint_ms"))
+
+    return {
+        "schema_version": MOTION_INTENT_V3_SCHEMA_VERSION,
+        "profile_id": profile_id,
+        "profile_revision": profile_revision_raw,
+        "model_id": model_id,
+        "mode": mode,
+        "emotion_label": emotion_label,
+        "duration_hint_ms": duration_hint_ms,
+        "fallback_pose_id": str(intent.get("fallback_pose_id") or "").strip(),
+        "axes": normalized_axes,
+        "summary": {
+            "axis_count": len(normalized_axes),
+        },
+    }
+
+
+def _normalize_duration_hint_ms(value: Any) -> int:
+    if value is None:
+        return DEFAULT_MOTION_INTENT_DURATION_MS
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return DEFAULT_MOTION_INTENT_DURATION_MS
+    else:
+        number = float(value)
+    if not float("-inf") < number < float("inf"):
+        return DEFAULT_MOTION_INTENT_DURATION_MS
+    duration_hint_ms = int(round(number))
+    return max(320, min(15000, duration_hint_ms))
+
+
+def _coerce_finite_number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+    elif isinstance(value, str):
+        try:
+            number = float(value.strip())
+        except ValueError:
+            return None
+    else:
+        return None
+    if not float("-inf") < number < float("inf"):
+        return None
+    return number
 
 
 def _apply_expressive_floor(
