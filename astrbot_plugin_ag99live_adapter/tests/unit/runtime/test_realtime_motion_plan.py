@@ -16,6 +16,7 @@ from astrbot_plugin_ag99live_adapter.prompts.motion_selector import (
     DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES,
     resolve_selector_few_shot_examples,
 )
+from astrbot_plugin_ag99live_adapter.motion.inline_motion import summarize_motion_payload
 
 
 _AXIS_NAMES = [
@@ -321,6 +322,29 @@ def test_normalize_motion_intent_v3_accepts_string_number_axis() -> None:
     assert intent["schema_version"] == "engine.motion_intent.v3"
     assert intent["duration_hint_ms"] == 900
     assert intent["axes"]["head_yaw"] == 72.5
+
+
+def test_summarize_motion_payload_defaults_v3_mode_to_expressive() -> None:
+    schema_version, mode, axis_count, supplementary_count, failure_reason = summarize_motion_payload(
+        {
+            "schema_version": "engine.motion_intent.v3",
+            "profile_id": "DemoModel.semantic.v1",
+            "profile_revision": 3,
+            "model_id": "DemoModel",
+            "emotion_label": "curious",
+            "duration_hint_ms": 900,
+            "fallback_pose_id": "neutral",
+            "axes": {
+                "head_yaw": 72.5,
+            },
+        }
+    )
+
+    assert schema_version == "engine.motion_intent.v3"
+    assert mode == "expressive"
+    assert axis_count == 1
+    assert supplementary_count == 0
+    assert failure_reason == ""
 
 
 def test_normalize_motion_intent_v3_rejects_nested_axis_payload() -> None:

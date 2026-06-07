@@ -52,9 +52,10 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             or None,
             platform_extras=platform_extras,
         )
-        await super().send(message)
         if not record_send_operation:
             self._has_send_oper = previous_has_send_oper
+        else:
+            self._has_send_oper = True
 
     async def complete_visible_turn(self) -> None:
         base_complete = getattr(super(), "complete_visible_turn", None)

@@ -233,6 +233,8 @@ def summarize_motion_payload(plan: Any) -> tuple[str, str, int, int, str]:
         return catalog_schema, motion_id or emotion_label, 0, 0, failure_reason
 
     mode = str(plan.get("mode") or "").strip().lower()
+    if schema_version == MOTION_INTENT_V3_SCHEMA_VERSION and not mode:
+        mode = "expressive"
     axes = plan.get("axes")
     if axes is None:
         axes = plan.get("key_axes")

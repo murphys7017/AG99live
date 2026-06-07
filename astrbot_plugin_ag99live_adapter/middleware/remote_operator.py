@@ -192,14 +192,6 @@ class AG99liveRemoteOperatorResultContributor:
 
 
 def register_remote_operator_interaction_contributors(context: Any) -> None:
-    remove_extension = getattr(
-        context,
-        "remove_prompt_extension_collectors_by_module_prefix",
-        None,
-    )
-    if callable(remove_extension):
-        remove_extension("astrbot_plugin_ag99live_adapter.middleware")
-
     register_extension = getattr(context, "register_prompt_extension_collector", None)
     if callable(register_extension):
         register_extension(AG99liveRemoteOperatorPromptExtensionCollector())

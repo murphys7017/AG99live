@@ -870,7 +870,41 @@ def test_result_contributor_schedules_motion_for_immediate_reply(
     )
 
 
-def test_result_contributor_reports_missing_plugin_hints_in_split_final_phase(
+def test_result_contributor_uses_default_pose_when_plugin_hints_missing_in_immediate_phase(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(mode="split_after_reply", raw_turn_id="raw-turn")
+    view = _build_view(
+        phase="immediate",
+        route_mode="self_reply",
+        final_result="你好呀",
+        immediate_reply="你好呀",
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == []
+    assert contribution.client_objects
+    client_object = contribution.client_objects[0]
+    assert client_object["source"] == "default_pose"
+    payload = client_object["motion_payload"]
+    assert payload["schema_version"] == "engine.motion_intent.v3"
+    assert payload["mode"] == "expressive"
+    assert payload["emotion_label"] == "neutral"
+    assert isinstance(payload["axes"]["head_yaw"], (int, float))
+    assert (
+        contribution.metadata["ag99live_motion_schedule"]["reason"]
+        == "default_motion_client_object"
+    )
+
+
+def test_result_contributor_uses_default_pose_when_plugin_hints_missing_in_split_final_phase(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -889,9 +923,22 @@ def test_result_contributor_reports_missing_plugin_hints_in_split_final_phase(
 
     assert contribution is not None
     assert scheduled_calls == []
+    assert contribution.client_objects
+    client_object = contribution.client_objects[0]
+    assert client_object["source"] == "default_pose"
+    payload = client_object["motion_payload"]
+    assert payload["schema_version"] == "engine.motion_intent.v3"
+    assert payload["mode"] == "expressive"
+    assert payload["emotion_label"] == "neutral"
+    assert payload["duration_hint_ms"] == 1000
+    assert isinstance(payload["axes"]["head_yaw"], (int, float))
     assert (
         contribution.metadata["ag99live_motion_schedule"]["reason"]
-        == "plugin_hints_motion_missing"
+        == "default_motion_client_object"
+    )
+    assert (
+        contribution.metadata["ag99live_motion_schedule"]["plugin_hints_resolution_reason"]
+        == "plugin_hints_missing:default_pose:neutral"
     )
 
 
@@ -1107,7 +1154,9 @@ def test_result_contributor_uses_event_turn_state_reply_plan_when_view_plan_miss
     metadata = contribution.metadata["ag99live_motion_schedule"]
     assert metadata["reply_plan_source"] == "event_turn_state"
     assert metadata["reply_plan_route_mode"] == "self_reply"
-    assert metadata["reason"] == "schedule_self_reply_immediate"
+    assert metadata["reason"] == "default_motion_client_object"
+    assert contribution.client_objects
+    assert contribution.client_objects[0]["source"] == "default_pose"
 
 
 def test_result_contributor_does_not_silently_schedule_immediate_phase_without_reply_plan(

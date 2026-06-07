@@ -501,12 +501,8 @@ def test_register_remote_operator_contributors_registers_main_prompt_collector(
     prompt_collectors = []
     prompt_contributors = []
     result_contributors = []
-    removed_prefixes = []
 
     class ContextStub:
-        def remove_prompt_extension_collectors_by_module_prefix(self, prefix):
-            removed_prefixes.append(prefix)
-
         def register_prompt_extension_collector(self, collector):
             prompt_collectors.append(collector)
 
@@ -518,7 +514,6 @@ def test_register_remote_operator_contributors_registers_main_prompt_collector(
 
     module.register_remote_operator_interaction_contributors(ContextStub())
 
-    assert removed_prefixes == ["astrbot_plugin_ag99live_adapter.middleware"]
     assert len(prompt_collectors) == 1
     assert len(prompt_contributors) == 1
     assert len(result_contributors) == 1

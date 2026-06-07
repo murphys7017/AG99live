@@ -177,7 +177,7 @@ class AG99liveMotionResultContributor:
                     "type": "ag99live.motion_payload",
                     "motion_payload": attempt.plugin_hints_motion_payload,
                     "mode": "preview",
-                    "source": "plugin_hints",
+                    "source": attempt.source or "plugin_hints",
                 }
             )
         platform_extras = {"client_objects": client_objects} if client_objects else {}
@@ -191,22 +191,6 @@ class AG99liveMotionResultContributor:
 
 
 def register_ag99live_interaction_contributors(context: Any) -> None:
-    remove_prompt = getattr(
-        context,
-        "remove_interaction_prompt_contributors_by_module_prefix",
-        None,
-    )
-    if callable(remove_prompt):
-        remove_prompt("astrbot_plugin_ag99live_adapter.middleware")
-
-    remove_result = getattr(
-        context,
-        "remove_interaction_result_contributors_by_module_prefix",
-        None,
-    )
-    if callable(remove_result):
-        remove_result("astrbot_plugin_ag99live_adapter.middleware")
-
     register_prompt = getattr(context, "register_interaction_prompt_contributor", None)
     if callable(register_prompt):
         register_prompt(AG99liveMotionPromptContributor())
@@ -738,24 +722,31 @@ def _schedule_motion_from_interaction_result(
             plugin_hints_resolution_reason=plugin_hints_reason,
         )
 
-    if phase == "final" and plugin_hints_payload is None:
-        return _MotionScheduleAttempt(
-            phase=phase,
-            source=None,
-            scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
-            event_frontend_turn_id=identity.event_frontend_turn_id,
-            active_frontend_turn_id=identity.active_frontend_turn_id,
-            reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
-            reply_plan_should_emit_immediate_reply=(
-                reply_plan.should_emit_immediate_reply if reply_plan is not None else None
-            ),
-            reply_plan_source=reply_plan.source if reply_plan is not None else None,
-            motion_generation_mode=motion_generation_mode,
-            scheduled=False,
-            reason="plugin_hints_motion_missing",
-            assistant_text=assistant_text,
-            plugin_hints_resolution_reason=plugin_hints_reason,
+    if policy.should_schedule and plugin_hints_payload is None:
+        plugin_hints_payload, plugin_hints_reason = _build_default_motion_payload(
+            bundle.runtime_state,
+            reason=plugin_hints_reason,
         )
+        if plugin_hints_payload is not None:
+            _call_event_method(event, "set_extra", "ag99live_split_motion_scheduled", True)
+            return _MotionScheduleAttempt(
+                phase=phase,
+                source="default_pose",
+                scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
+                event_frontend_turn_id=identity.event_frontend_turn_id,
+                active_frontend_turn_id=identity.active_frontend_turn_id,
+                reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
+                reply_plan_should_emit_immediate_reply=(
+                    reply_plan.should_emit_immediate_reply if reply_plan is not None else None
+                ),
+                reply_plan_source=reply_plan.source if reply_plan is not None else None,
+                motion_generation_mode=motion_generation_mode,
+                scheduled=True,
+                reason="default_motion_client_object",
+                assistant_text=assistant_text,
+                plugin_hints_motion_payload=plugin_hints_payload,
+                plugin_hints_resolution_reason=plugin_hints_reason,
+            )
 
     return _MotionScheduleAttempt(
         phase=phase,
@@ -774,6 +765,59 @@ def _schedule_motion_from_interaction_result(
         assistant_text=assistant_text,
         plugin_hints_resolution_reason=plugin_hints_reason,
     )
+
+
+def _build_default_motion_payload(
+    runtime_state: Any,
+    *,
+    reason: str,
+) -> tuple[dict[str, Any] | None, str]:
+    try:
+        semantic_profile = resolve_selected_semantic_axis_profile(
+            runtime_state=runtime_state
+        )
+    except Exception as exc:  # noqa: BLE001
+        return None, f"{reason}:default_pose_profile_unresolved:{exc}"
+
+    profile_id = str(semantic_profile.get("profile_id") or "").strip()
+    model_id = str(semantic_profile.get("model_id") or "").strip()
+    if not profile_id or not model_id:
+        return None, f"{reason}:default_pose_profile_identity_empty"
+
+    try:
+        profile_revision = int(semantic_profile.get("revision") or 0)
+    except (TypeError, ValueError):
+        profile_revision = 0
+    if profile_revision <= 0:
+        return None, f"{reason}:default_pose_profile_revision_invalid"
+
+    fallback_pose_id = DEFAULT_FALLBACK_POSE_ID
+    axes = resolve_fallback_pose_axes(
+        runtime_state=runtime_state,
+        semantic_profile=semantic_profile,
+        fallback_pose_id=fallback_pose_id,
+    )
+    if axes:
+        resolved_reason = f"{reason}:default_pose:{fallback_pose_id}"
+    else:
+        axes = build_default_neutral_pose_axes(semantic_profile)
+        resolved_reason = f"{reason}:default_pose_neutral"
+
+    if not axes:
+        return None, f"{reason}:default_pose_axes_empty"
+
+    return {
+        "schema_version": MOTION_INTENT_V3_SCHEMA_VERSION,
+        "profile_id": profile_id,
+        "profile_revision": profile_revision,
+        "model_id": model_id,
+        "mode": "expressive",
+        "emotion_label": "neutral",
+        "duration_hint_ms": DEFAULT_MOTION_INTENT_DURATION_MS,
+        "fallback_pose_id": fallback_pose_id,
+        "axes": axes,
+        "summary": {"axis_count": len(axes)},
+    }, resolved_reason
 
 
 def _log_plugin_hints_motion_resolution(

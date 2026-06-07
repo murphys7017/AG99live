@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
 import types
@@ -56,8 +57,11 @@ class Image:
 
 
 class AdapterStub:
+    def __init__(self) -> None:
+        self.emit_calls = []
+
     async def emit_message_chain(self, **kwargs) -> None:
-        del kwargs
+        self.emit_calls.append(kwargs)
 
 
 def _build_event(module, *, images: list[dict] | None):
@@ -140,3 +144,39 @@ def test_prompt_annotations_mark_screen_image_as_desktop_snapshot(
 
     annotations = event.get_extra("prompt_input_item_annotations")
     assert annotations["message.1"]["semantic_type"] == "desktop_snapshot"
+
+
+def test_send_interaction_message_only_uses_adapter_emit_path(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_platform_event_module()
+    adapter = AdapterStub()
+    message_obj = type(
+        "MessageObjectStub",
+        (),
+        {
+            "message": [Plain("hello")],
+            "raw_message": {"payload": {"text": "hello"}},
+        },
+    )()
+    event = module.OLVPetPlatformEvent(
+        "hello",
+        message_obj,
+        {},
+        "desktop-client",
+        adapter,
+    )
+
+    asyncio.run(
+        event.send_interaction_message(
+            [Plain("hi")],
+            platform_extras={"visible_message_id": "msg-1"},
+            record_send_operation=True,
+        )
+    )
+
+    assert len(adapter.emit_calls) == 1
+    assert adapter.emit_calls[0]["platform_extras"] == {"visible_message_id": "msg-1"}
+    assert event._has_send_oper is True
