@@ -441,6 +441,18 @@ def _build_motion_capability_payload(runtime_state: Any) -> dict[str, Any]:
                         "id": str(item.get("id") or "").strip(),
                         "label": str(item.get("label") or item.get("id") or "").strip(),
                         "emotion_label": str(item.get("emotion_label") or "").strip(),
+                        "description": _truncate_text(
+                            str(item.get("description") or "").strip(),
+                            96,
+                        ),
+                        "emotion_bias": _normalize_axis_text_list(
+                            item.get("emotion_bias")
+                        )[:4],
+                        "intensity": str(item.get("intensity") or "").strip(),
+                        "recommended_scenarios": _normalize_axis_text_list(
+                            item.get("recommended_scenarios")
+                        )[:4],
+                        "key_axes": _summarize_key_axes(item.get("axes"), limit=5),
                         "source": str(item.get("source") or "").strip(),
                     }
                     for item in fallback_candidates
@@ -487,16 +499,37 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
                 continue
             label = str(item.get("label") or pose_id).strip()
             source = str(item.get("source") or "").strip()
-            lines.append(f"- {pose_id}: {label}" + (f" ({source})" if source else ""))
+            context_parts = []
+            emotion_bias = _join_prompt_list(item.get("emotion_bias"), limit=3)
+            intensity = str(item.get("intensity") or "").strip()
+            scenarios = _join_prompt_list(item.get("recommended_scenarios"), limit=3)
+            description = _truncate_text(str(item.get("description") or "").strip(), 72)
+            key_axes = _format_key_axes_for_prompt(item.get("key_axes"))
+            if emotion_bias:
+                context_parts.append(f"情绪={emotion_bias}")
+            if intensity:
+                context_parts.append(f"强度={intensity}")
+            if scenarios:
+                context_parts.append(f"适用={scenarios}")
+            if description:
+                context_parts.append(f"说明={description}")
+            if key_axes:
+                context_parts.append(f"关键轴={key_axes}")
+            context_text = f"；{'；'.join(context_parts)}" if context_parts else ""
+            lines.append(
+                f"- {pose_id}: {label}"
+                + (f" ({source})" if source else "")
+                + context_text
+            )
         fallback_pose_text = "\n".join(lines) + "\n"
 
     return (
         "AG99live Motion 是当前桌宠前端的主动作通道。"
         "每次 interaction decision 都必须在 JSON 输出的 plugin_hints 中写入 ag99live_motion；"
         "不要把动作写进 immediate_spoken_reply、core_task_spec 或普通文本。"
-        "ag99live_motion 只允许 emotion_label、duration_hint_ms、fallback_pose_id、axes 四类动作字段。"
+        "ag99live_motion 只允许 emotion_label、duration_hint_ms、fallback_pose_id，以及 axes 语义轴目标组。"
         "不要输出 choice、mode、motion_id、catalog、motion3、exp3 或任何播放文件引用。"
-        "axes 只能使用下方 schema 中已有的轴 id，每个轴值必须直接写成 number，例如 \"head_yaw\": 62。"
+        "axes 是一组语义轴目标值，只能使用下方 schema 中已有的轴 id；每个轴值必须直接写成 number，例如 \"head_yaw\": 62。"
         "不要生成关键帧、时间曲线、随机抖动或来回摆动。"
         "fallback_pose_id 必须从候选中选择；它只是解析失败时的语义姿态兜底，不是播放表情文件。"
         "如果用户只是普通说话，也要给一个轻量语义姿态。"
@@ -617,6 +650,47 @@ def _normalize_axis_text_list(value: Any) -> list[str]:
         for item in value
         if str(item).strip()
     ]
+
+
+def _summarize_key_axes(value: Any, *, limit: int) -> dict[str, float]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, float] = {}
+    for axis_id, axis_value in value.items():
+        if len(result) >= limit:
+            break
+        if not isinstance(axis_value, (int, float)) or isinstance(axis_value, bool):
+            continue
+        normalized_axis_id = str(axis_id or "").strip()
+        if not normalized_axis_id:
+            continue
+        result[normalized_axis_id] = round(float(axis_value), 2)
+    return result
+
+
+def _join_prompt_list(value: Any, *, limit: int) -> str:
+    if not isinstance(value, list):
+        return ""
+    items = [
+        _truncate_text(str(item).strip(), 24)
+        for item in value
+        if str(item).strip()
+    ][: max(0, limit)]
+    return ", ".join(items)
+
+
+def _format_key_axes_for_prompt(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    parts = []
+    for axis_id, axis_value in value.items():
+        if not isinstance(axis_value, (int, float)) or isinstance(axis_value, bool):
+            continue
+        normalized_axis_id = str(axis_id or "").strip()
+        if not normalized_axis_id:
+            continue
+        parts.append(f"{normalized_axis_id}={float(axis_value):g}")
+    return ", ".join(parts)
 
 
 def _normalize_axis_range(value: Any, fallback: list[float] | None) -> list[float] | None:

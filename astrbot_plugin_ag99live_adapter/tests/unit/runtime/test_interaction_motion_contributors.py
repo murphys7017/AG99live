@@ -426,6 +426,9 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "[动作]" not in system.value
     assert "head_yaw" in system.value
     assert "fallback_pose_id" in system.value
+    assert "axes 语义轴目标组" in system.value
+    assert "关键轴=head_yaw=80" in system.value
+    assert "姿态更稳定" in system.value
     assert "eye_open_left" in system.value
     assert "ParamHairX" not in system.value
     assert "ParamPhysicsX" not in system.value
@@ -433,6 +436,16 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "motion_reference_templates" not in capability.value
     assert "motion_catalog_options" not in capability.value
     assert "fallback_pose_candidates" in capability.value
+    catalog_candidate = next(
+        item
+        for item in capability.value["fallback_pose_candidates"]
+        if item["id"] == "serious_explain"
+    )
+    assert catalog_candidate["source"] == "motion_catalog_semantic_extract"
+    assert catalog_candidate["description"] == "姿态更稳定、更像进入解释状态。"
+    assert catalog_candidate["emotion_bias"] == ["neutral", "thinking"]
+    assert catalog_candidate["recommended_scenarios"] == ["说明问题", "认真解释"]
+    assert catalog_candidate["key_axes"] == {"head_yaw": 80.0}
     prompt_axis_ids = [
         item["id"] for item in capability.value["semantic_profile"]["prompt_axes"]
     ]
@@ -549,6 +562,36 @@ def test_fallback_pose_candidates_use_expression_dominant_parameter_ids(
     assert candidates[0]["source"] == "profile_binding_parameter_extract"
     assert candidates[0]["axes"] == {"eye_open_left": 50.0}
     assert candidates[-1]["id"] == "neutral"
+
+
+def test_fallback_pose_candidates_use_motion_catalog_metadata_only_when_axes_exist(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    runtime_state = _build_runtime_state()
+    semantic_profile = runtime_state.model_info["models"][0]["semantic_axis_profile"]
+
+    candidates = module.build_fallback_pose_candidates(
+        runtime_state=runtime_state,
+        semantic_profile=semantic_profile,
+        limit=None,
+    )
+
+    catalog_candidate = next(
+        item for item in candidates if item["id"] == "serious_explain"
+    )
+    assert catalog_candidate["source"] == "motion_catalog_semantic_extract"
+    assert catalog_candidate["label"] == "认真说明"
+    assert catalog_candidate["description"] == "姿态更稳定、更像进入解释状态。"
+    assert catalog_candidate["emotion_bias"] == ["neutral", "thinking"]
+    assert catalog_candidate["recommended_scenarios"] == ["说明问题", "认真解释"]
+    assert catalog_candidate["intensity"] == "medium"
+    assert catalog_candidate["axes"] == {"head_yaw": 80.0}
+    assert "file" not in catalog_candidate
+    assert "motion_id" not in catalog_candidate
 
 
 def test_plugin_hints_motion_payload_uses_profile_axis_value_range(

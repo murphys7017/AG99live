@@ -1,37 +1,29 @@
 task:
-  class: bugfix
+  class: feature
   risk: medium
-  phase: motion_intent_v3_playback_path_stabilization
-  scope: AG99live adapter interaction motion client_objects, frontend turn playback orchestration, and ModelEngine started-event completion handoff
+  phase: motion_intent_v3_fallback_pose_prompt_enrichment
+  scope: AG99live adapter fallback pose semantic metadata, motion catalog semantic extraction, and middleware-first motion prompt wording
 context:
   confidence: medium
   assumptions:
     - The automatic LLM motion path remains pure engine.motion_intent.v3 semantic axes; catalog motion, motion3, exp3, and choice outputs stay out of this path.
     - middleware-first and inline-first remain separate routes; middleware-first reads plugin_hints.ag99live_motion, inline-first reads the inline anim contract only.
-    - AstrBot core is responsible for merging InteractionResultContribution.client_objects into final platform_extras for the delivered visible message.
-    - Frontend text/audio/motion playback is segment-scoped by visible message_id and turn_id; motion should be released through the same turn playback orchestrator as text and audio.
-    - ModelEngine playPlan returning true means the motion should be considered started for turn completion, even if the underlying player implementation omits its optional onStarted callback.
+    - motion_catalog.json may enrich fallback pose descriptions and catalog-derived semantic candidates only when the motion can be mapped to semantic axes.
+    - fallback_pose_id remains a semantic-axis fallback selector, not a motion3/catalog playback selector.
   unresolved_questions:
-    - Runtime validation still needs a fresh AstrBot + Electron run to confirm logs show one output.text, one engine.motion_intent, and ModelEngine playback for the same visible message_id.
+    - Runtime validation still needs a fresh AstrBot + Electron run to confirm MiniMax sees enriched fallback pose candidates and continues to emit plugin_hints.ag99live_motion.
 architecture:
   stability: evolving
   boundary_changes:
-    - Interaction motion result contributors now use client_objects as the single authoritative motion object output; platform_extras.client_objects is left to AstrBot core merge/build logic.
-    - Turn playback orchestrator feeds motion readiness before no-audio/output-queue release signals for the same active segment, avoiding a late-motion fallback path when state arrives in one batch.
-    - ModelEngine emits a plan-started event after successful playPlan even when the player does not invoke the optional onStarted callback, preventing motion payloads from blocking turn settlement.
+    - fallback pose candidates can now include semantic metadata from motion catalog entries and key semantic axes derived from motion_resource_pool driver components.
+    - middleware motion prompt now names axes as a semantic-axis target group instead of a plain field and exposes fallback candidate descriptions, scenarios, intensity, emotion bias, and key axes.
 verification:
   checks_run:
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_middleware_registration.py -q
-    - cd frontend; npm run test:turn-orchestrator
-    - cd frontend; npm run test:orchestration
-    - cd frontend; npm run test:model-engine
-    - cd frontend; npm run test:coordinator
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_realtime_motion_plan.py -q
     - python -m compileall astrbot_plugin_ag99live_adapter
-    - cd frontend; npm run typecheck:renderer
-    - cd frontend; npm run typecheck:node
-    - cd frontend; npm run test:adapter-connection
     - git diff --check
   checks_failed: []
   validation_gap: Live AstrBot plus Electron runtime still needs manual validation against fresh logs.
 runtime:
-  mode: motion_intent_v3_semantic_playback
+  mode: motion_intent_v3_semantic_prompt_enrichment

@@ -35,6 +35,12 @@ def build_fallback_pose_candidates(
     ):
         _append_unique_candidate(candidates, seen_ids, candidate)
 
+    for candidate in _build_motion_catalog_semantic_candidates(
+        runtime_state=runtime_state,
+        semantic_profile=semantic_profile,
+    ):
+        _append_unique_candidate(candidates, seen_ids, candidate)
+
     for candidate in _build_neutral_fallback_candidates(semantic_profile):
         _append_unique_candidate(candidates, seen_ids, candidate)
 
@@ -117,6 +123,8 @@ def _build_user_tuning_candidates(
                 "label": emotion,
                 "emotion_label": emotion,
                 "source": "motion_tuning_sample",
+                "description": str(sample.get("description") or sample.get("scenario") or "").strip(),
+                "tags": _text_list(sample.get("tags"), limit=6),
                 "axes": axes,
             }
         )
@@ -153,6 +161,9 @@ def _build_expression_candidates(
                 "label": expression_name,
                 "emotion_label": _normalize_pose_id(expression_name) or expression_name,
                 "source": "expression_parameter_extract",
+                "description": str(expression.get("description") or "").strip(),
+                "intensity": str(expression.get("intensity") or "").strip(),
+                "tags": _text_list([expression.get("category")], limit=3),
                 "axes": axes,
             }
         )
@@ -192,10 +203,158 @@ def _build_profile_binding_expression_candidates(
                 "label": expression_name,
                 "emotion_label": _normalize_pose_id(expression_name) or expression_name,
                 "source": "profile_binding_parameter_extract",
+                "description": str(expression.get("description") or "").strip(),
+                "intensity": str(expression.get("intensity") or "").strip(),
+                "tags": _text_list([expression.get("category")], limit=3),
                 "axes": axes,
             }
         )
     return candidates
+
+
+def _build_motion_catalog_semantic_candidates(
+    *,
+    runtime_state: Any,
+    semantic_profile: dict[str, Any],
+) -> list[dict[str, Any]]:
+    model = _resolve_selected_model_payload(runtime_state)
+    constraints = model.get("constraints") if isinstance(model, dict) else None
+    motions = constraints.get("motions") if isinstance(constraints, dict) else None
+    if not isinstance(motions, list):
+        return []
+
+    components_by_file = _build_motion_component_axis_map(
+        model.get("motion_resource_pool") if isinstance(model, dict) else None,
+        semantic_profile,
+    )
+    if not components_by_file:
+        return []
+
+    candidates: list[dict[str, Any]] = []
+    for motion in motions:
+        if not isinstance(motion, dict):
+            continue
+        file_value = str(motion.get("file") or "").strip().replace("\\", "/")
+        if not file_value:
+            continue
+        axes = components_by_file.get(file_value)
+        if not axes:
+            continue
+        candidate_id = _normalize_pose_id(
+            motion.get("catalog_id")
+            or motion.get("catalog_label")
+            or motion.get("name")
+            or file_value
+        )
+        if not candidate_id:
+            continue
+        emotion_bias = _text_list(motion.get("catalog_emotion_bias"), limit=6)
+        candidates.append(
+            {
+                "id": candidate_id,
+                "label": str(
+                    motion.get("catalog_label") or motion.get("name") or candidate_id
+                ).strip(),
+                "emotion_label": emotion_bias[0] if emotion_bias else candidate_id,
+                "source": "motion_catalog_semantic_extract",
+                "description": str(motion.get("catalog_description") or "").strip(),
+                "tags": _text_list(motion.get("catalog_tags"), limit=6),
+                "emotion_bias": emotion_bias,
+                "intensity": str(motion.get("catalog_intensity") or "").strip(),
+                "recommended_scenarios": _text_list(
+                    motion.get("recommended_scenarios"),
+                    limit=6,
+                ),
+                "axes": axes,
+            }
+        )
+    return candidates
+
+
+def _build_motion_component_axis_map(
+    motion_resource_pool: Any,
+    semantic_profile: dict[str, Any],
+) -> dict[str, dict[str, float]]:
+    if not isinstance(motion_resource_pool, dict):
+        return {}
+    components = motion_resource_pool.get("driver_components")
+    if not isinstance(components, list):
+        return {}
+
+    axis_by_parameter = _build_axis_binding_map(semantic_profile)
+    axes_by_file: dict[str, dict[str, float]] = {}
+    score_by_file_axis: dict[tuple[str, str], float] = {}
+    for component in components:
+        if not isinstance(component, dict):
+            continue
+        if str(component.get("engine_role") or "").strip() != "driver":
+            continue
+        file_value = str(component.get("source_file") or "").strip().replace("\\", "/")
+        parameter_id = str(component.get("parameter_id") or "").strip()
+        binding_entry = axis_by_parameter.get(parameter_id)
+        if not file_value or binding_entry is None:
+            continue
+        axis, binding = binding_entry
+        axis_id = str(axis.get("id") or "").strip()
+        if not axis_id:
+            continue
+        score = _coerce_finite_number(component.get("energy_score")) or 0.0
+        score_key = (file_value, axis_id)
+        if score_key in score_by_file_axis and score <= score_by_file_axis[score_key]:
+            continue
+        value = _motion_component_to_axis_value(
+            component,
+            axis=axis,
+            binding=binding,
+        )
+        axes_by_file.setdefault(file_value, {})[axis_id] = value
+        score_by_file_axis[score_key] = score
+    return {
+        file_value: axes
+        for file_value, axes in axes_by_file.items()
+        if axes
+    }
+
+
+def _build_axis_binding_map(
+    semantic_profile: dict[str, Any],
+) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
+    result: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+    for axis in profile_prompt_axes(semantic_profile):
+        bindings = axis.get("parameter_bindings")
+        if not isinstance(bindings, list):
+            continue
+        for binding in bindings:
+            if not isinstance(binding, dict):
+                continue
+            parameter_id = str(binding.get("parameter_id") or "").strip()
+            if parameter_id and parameter_id not in result:
+                result[parameter_id] = (axis, binding)
+    return result
+
+
+def _motion_component_to_axis_value(
+    component: dict[str, Any],
+    *,
+    axis: dict[str, Any],
+    binding: dict[str, Any],
+) -> float:
+    value_profile = component.get("value_profile")
+    if not isinstance(value_profile, dict):
+        return _coerce_axis_value(axis.get("neutral", 50), axis)
+
+    baseline = _coerce_finite_number(value_profile.get("baseline")) or 0.0
+    observed_min = _coerce_finite_number(value_profile.get("min"))
+    observed_max = _coerce_finite_number(value_profile.get("max"))
+    candidates = [
+        value
+        for value in (observed_min, observed_max)
+        if value is not None
+    ]
+    if not candidates:
+        return _coerce_axis_value(axis.get("neutral", 50), axis)
+    output_value = max(candidates, key=lambda value: abs(value - baseline))
+    return _map_output_value_to_axis_value(output_value, axis=axis, binding=binding)
 
 
 def _build_neutral_fallback_candidates(semantic_profile: dict[str, Any]) -> list[dict[str, Any]]:
@@ -390,6 +549,20 @@ def _coerce_finite_number(value: Any) -> float | None:
     if isinstance(value, (int, float)) and float("-inf") < float(value) < float("inf"):
         return float(value)
     return None
+
+
+def _text_list(value: Any, *, limit: int) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        result.append(text)
+        if len(result) >= limit:
+            break
+    return result
 
 
 def _normalize_pose_id(value: Any) -> str:
