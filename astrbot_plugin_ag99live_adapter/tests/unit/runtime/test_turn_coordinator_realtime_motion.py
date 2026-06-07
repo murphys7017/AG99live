@@ -1297,6 +1297,8 @@ def test_emit_message_chain_inline_v1_intent_is_rejected(
     assert motion_payload["schema_version"] == "engine.motion_intent.v3"
     assert motion_payload["emotion_label"] == "curious"
     assert motion_payload["fallback_pose_id"] == "neutral"
+    assert motion_payload["axes"]["head_yaw"] == 50.0
+    assert set(motion_payload["axes"].values()) == {50.0}
     assert motion_payload["summary"]["fallback_used"] is True
     assert motion_payload["summary"]["fallback_reason"] == "invalid_schema_version"
 

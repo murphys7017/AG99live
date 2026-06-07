@@ -268,6 +268,7 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     fallback_pose_id = str(motion_hint.get("fallback_pose_id") or "").strip()
     axes = motion_hint.get("axes")
     validated_axes = None
+    expressive_floor_emotion = emotion_label
     repair_added_axes: list[str] = []
     repair_replaced_axes: list[str] = []
     reason = hints_reason
@@ -294,10 +295,13 @@ def _resolve_plugin_hints_motion_payload_with_reason(
         )
         if fallback_axes:
             validated_axes = fallback_axes
+            if _is_default_fallback_pose_id(fallback_pose_id):
+                expressive_floor_emotion = "neutral"
             reason = _append_resolution_reason(reason, f"fallback_pose:{fallback_pose_id}")
         else:
             validated_axes = build_default_neutral_pose_axes(semantic_profile)
             fallback_pose_id = DEFAULT_FALLBACK_POSE_ID
+            expressive_floor_emotion = "neutral"
             reason = _append_resolution_reason(
                 reason,
                 f"fallback_pose_default:{DEFAULT_FALLBACK_POSE_ID}",
@@ -334,7 +338,7 @@ def _resolve_plugin_hints_motion_payload_with_reason(
 
     validated_axes = _apply_expressive_floor_v2(
         axes=validated_axes,
-        emotion=emotion_label,
+        emotion=expressive_floor_emotion,
         semantic_profile=semantic_profile,
     )
 
@@ -397,6 +401,10 @@ def _normalize_plugin_hint_axes(
         return None
 
     return normalized_axes
+
+
+def _is_default_fallback_pose_id(value: Any) -> bool:
+    return str(value or "").strip().lower() == DEFAULT_FALLBACK_POSE_ID
 
 
 def _coerce_plugin_hint_axis_value(raw_value: float, axis: dict[str, Any]) -> float:

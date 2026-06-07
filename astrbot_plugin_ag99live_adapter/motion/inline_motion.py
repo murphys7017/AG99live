@@ -203,14 +203,18 @@ def _build_inline_fallback_motion_payload(
         semantic_profile=semantic_profile,
         fallback_pose_id=fallback_pose_id,
     )
+    expressive_floor_emotion = emotion_label
+    if _is_default_fallback_pose_id(fallback_pose_id):
+        expressive_floor_emotion = "neutral"
     if not axes:
         axes = build_default_neutral_pose_axes(semantic_profile)
         fallback_pose_id = DEFAULT_FALLBACK_POSE_ID
+        expressive_floor_emotion = "neutral"
     if not axes:
         return None, None
     axes = _apply_expressive_floor_v2(
         axes=axes,
-        emotion=emotion_label,
+        emotion=expressive_floor_emotion,
         semantic_profile=semantic_profile,
     )
 
@@ -243,6 +247,10 @@ def _build_inline_fallback_motion_payload(
         logger.warning("WIRING inline_motion fallback rejected: %s", failure_reason)
         return None, None
     return payload, mode or "inline"
+
+
+def _is_default_fallback_pose_id(value: Any) -> bool:
+    return str(value or "").strip().lower() == DEFAULT_FALLBACK_POSE_ID
 
 
 # ── Motion payload validation ──────────────────────────────────────

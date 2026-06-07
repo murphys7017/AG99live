@@ -956,6 +956,8 @@ def test_plugin_hints_forbidden_catalog_fields_fall_back_to_semantic_pose(
     assert "motion_id" not in payload
     assert payload["fallback_pose_id"] == "neutral"
     assert payload["emotion_label"] == "explain"
+    assert payload["axes"]["head_yaw"] == 50.0
+    assert payload["axes"]["eye_open_left"] == 50.0
 
 
 def test_plugin_hints_motion_payload_accepts_head_roll_and_mouth_smile(
