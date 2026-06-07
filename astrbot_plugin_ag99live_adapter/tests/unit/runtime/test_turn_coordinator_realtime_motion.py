@@ -155,6 +155,76 @@ def _runtime_state_stub(
     )()
 
 
+def _runtime_state_stub_with_motion_tuning_fallback():
+    state = _runtime_state_stub(mode="inline_first")
+    profile = state.model_info["models"][0]["semantic_axis_profile"]
+    profile["axes"].extend(
+        [
+            {
+                "id": "body_yaw",
+                "label": "Body Yaw",
+                "description": "body turn",
+                "semantic_group": "body",
+                "control_role": "primary",
+                "neutral": 50,
+                "value_range": [0, 100],
+                "soft_range": [46, 54],
+                "strong_range": [38, 62],
+                "positive_semantics": ["body right"],
+                "negative_semantics": ["body left"],
+                "usage_notes": "Use for body posture.",
+                "parameter_bindings": [],
+            },
+            {
+                "id": "gaze_x",
+                "label": "Gaze X",
+                "description": "eye target",
+                "semantic_group": "gaze",
+                "control_role": "primary",
+                "neutral": 50,
+                "value_range": [0, 100],
+                "soft_range": [44, 56],
+                "strong_range": [30, 70],
+                "positive_semantics": ["eyes right"],
+                "negative_semantics": ["eyes left"],
+                "usage_notes": "Use for gaze.",
+                "parameter_bindings": [],
+            },
+            {
+                "id": "mouth_smile",
+                "label": "Mouth Smile",
+                "description": "smile",
+                "semantic_group": "mouth",
+                "control_role": "hint",
+                "neutral": 50,
+                "value_range": [0, 100],
+                "soft_range": [44, 60],
+                "strong_range": [30, 75],
+                "positive_semantics": ["smile"],
+                "negative_semantics": ["frown"],
+                "usage_notes": "Use for mouth detail.",
+                "parameter_bindings": [],
+            },
+        ]
+    )
+    state.motion_tuning_samples = [
+        {
+            "id": "body_pose",
+            "model_name": "pet",
+            "profile_id": "pet.semantic.v1",
+            "profile_revision": 2,
+            "emotion_label": "happy",
+            "enabled_for_llm_reference": True,
+            "adjusted_axes": {
+                "body_yaw": 66,
+                "gaze_x": 64,
+                "mouth_smile": 82,
+            },
+        }
+    ]
+    return state
+
+
 async def _noop_async():
     return None
 
@@ -284,6 +354,91 @@ def test_extract_inline_motion_plan_falls_back_when_runtime_available(
     assert plan["summary"]["fallback_used"] is True
     assert plan["summary"]["fallback_reason"] == "forbidden_field:mode"
     assert mode == "inline"
+
+
+def test_extract_inline_motion_plan_repairs_detail_only_axes_from_fallback_pose(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    intent = _build_valid_motion_intent(include_mode=False)
+    intent["fallback_pose_id"] = "happy_body_pose"
+    intent["axes"] = {"mouth_smile": 74}
+    tag_payload = json.dumps(
+        {"mode": "inline", "intent": intent},
+        separators=(",", ":"),
+    )
+
+    text, plan, mode = module._extract_inline_motion_plan(
+        f"hello <@anim {tag_payload}> world",
+        runtime_state=_runtime_state_stub_with_motion_tuning_fallback(),
+    )
+
+    assert "<@anim" not in text.lower()
+    assert isinstance(plan, dict)
+    assert mode == "inline"
+    assert plan["axes"]["mouth_smile"] == 74
+    assert plan["axes"]["body_yaw"] == 66.0
+    assert plan["axes"]["gaze_x"] == 64.0
+    assert plan["summary"]["skeleton_repair_added_axes"] == ["body_yaw", "gaze_x"]
+    assert plan["summary"]["skeleton_repair_replaced_axes"] == []
+
+
+def test_extract_inline_motion_plan_replaces_neutral_skeleton_axis_from_fallback_pose(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    intent = _build_valid_motion_intent(include_mode=False)
+    intent["emotion_label"] = "happy"
+    intent["fallback_pose_id"] = "happy_body_pose"
+    intent["axes"] = {
+        "body_yaw": 50,
+        "mouth_smile": 74,
+    }
+    tag_payload = json.dumps(
+        {"mode": "inline", "intent": intent},
+        separators=(",", ":"),
+    )
+
+    _text, plan, _mode = module._extract_inline_motion_plan(
+        f"hello <@anim {tag_payload}> world",
+        runtime_state=_runtime_state_stub_with_motion_tuning_fallback(),
+    )
+
+    assert isinstance(plan, dict)
+    assert plan["axes"]["body_yaw"] == 66.0
+    assert plan["axes"]["gaze_x"] == 64.0
+    assert plan["axes"]["mouth_smile"] == 74
+    assert plan["summary"]["skeleton_repair_added_axes"] == ["gaze_x"]
+    assert plan["summary"]["skeleton_repair_replaced_axes"] == ["body_yaw"]
+
+
+def test_extract_inline_motion_plan_applies_expressive_floor_to_valid_v3(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    intent = _build_valid_motion_intent(include_mode=False)
+    intent["emotion_label"] = "happy"
+    intent["fallback_pose_id"] = "neutral"
+    intent["axes"] = {"head_yaw": 50}
+    tag_payload = json.dumps(
+        {"mode": "inline", "intent": intent},
+        separators=(",", ":"),
+    )
+
+    _text, plan, _mode = module._extract_inline_motion_plan(
+        f"hello <@anim {tag_payload}> world",
+        runtime_state=_runtime_state_stub(mode="inline_first"),
+    )
+
+    assert isinstance(plan, dict)
+    assert plan["axes"]["head_yaw"] > 58
+    assert plan["summary"]["expressive_floor_applied"] is True
 
 
 def test_extract_inline_motion_plan_strips_malformed_tag(install_fake_astrbot, monkeypatch) -> None:

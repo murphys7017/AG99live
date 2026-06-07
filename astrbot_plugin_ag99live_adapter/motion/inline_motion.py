@@ -16,6 +16,7 @@ from .catalog_motion import (
     validate_catalog_motion_payload,
 )
 from .realtime_motion_plan import (
+    _apply_expressive_floor_v2,
     DEFAULT_MOTION_INTENT_DURATION_MS,
     MOTION_INTENT_V2_SCHEMA_VERSION,
     MOTION_INTENT_V3_SCHEMA_VERSION,
@@ -26,6 +27,7 @@ from .realtime_motion_plan import (
 from .fallback_pose import (
     DEFAULT_FALLBACK_POSE_ID,
     build_default_neutral_pose_axes,
+    repair_motion_axes_with_fallback_pose,
     resolve_fallback_pose_axes,
 )
 from ..prompts.inline_motion_contract import build_inline_motion_contract
@@ -121,7 +123,58 @@ def normalize_inline_anim_payload(
             mode=mode,
         )
 
+    plan = _repair_inline_motion_payload_with_fallback(
+        plan,
+        runtime_state=runtime_state,
+    )
+
     return plan, mode
+
+
+def _repair_inline_motion_payload_with_fallback(
+    plan: dict[str, Any],
+    *,
+    runtime_state: Any | None,
+) -> dict[str, Any]:
+    if runtime_state is None:
+        return plan
+    if str(plan.get("schema_version") or "").strip() != MOTION_INTENT_V3_SCHEMA_VERSION:
+        return plan
+    axes = plan.get("axes")
+    if not isinstance(axes, dict) or not axes:
+        return plan
+    try:
+        semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
+    except RuntimeError:
+        return plan
+    fallback_axes = resolve_fallback_pose_axes(
+        runtime_state=runtime_state,
+        semantic_profile=semantic_profile,
+        fallback_pose_id=plan.get("fallback_pose_id"),
+    )
+    repaired_axes, added_axes, replaced_axes = repair_motion_axes_with_fallback_pose(
+        axes=dict(axes),
+        semantic_profile=semantic_profile,
+        fallback_axes=fallback_axes,
+    )
+    floored_axes = _apply_expressive_floor_v2(
+        axes=repaired_axes,
+        emotion=str(plan.get("emotion_label") or ""),
+        semantic_profile=semantic_profile,
+    )
+    changed_by_floor = floored_axes != repaired_axes
+    if not added_axes and not replaced_axes and not changed_by_floor:
+        return plan
+    repaired = dict(plan)
+    summary = dict(repaired.get("summary") or {})
+    summary["axis_count"] = len(floored_axes)
+    summary["skeleton_repair_added_axes"] = added_axes
+    summary["skeleton_repair_replaced_axes"] = replaced_axes
+    if changed_by_floor:
+        summary["expressive_floor_applied"] = True
+    repaired["axes"] = floored_axes
+    repaired["summary"] = summary
+    return repaired
 
 
 def _build_inline_fallback_motion_payload(
@@ -155,6 +208,11 @@ def _build_inline_fallback_motion_payload(
         fallback_pose_id = DEFAULT_FALLBACK_POSE_ID
     if not axes:
         return None, None
+    axes = _apply_expressive_floor_v2(
+        axes=axes,
+        emotion=emotion_label,
+        semantic_profile=semantic_profile,
+    )
 
     try:
         profile_revision = int(semantic_profile.get("revision") or 0)

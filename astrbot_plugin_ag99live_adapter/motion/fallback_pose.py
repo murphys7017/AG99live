@@ -6,6 +6,18 @@ from typing import Any
 from ..prompts.semantic_axis_prompt import profile_prompt_axes
 
 DEFAULT_FALLBACK_POSE_ID = "neutral"
+_REPAIR_SKELETON_GROUPS = ("head", "body", "gaze")
+_REPAIR_MAX_AXES_PER_GROUP = 2
+_NON_EMOTIVE_EXPRESSION_TOKENS = {
+    "controller",
+    "jacketoff",
+    "jaketoff",
+    "mouseclick",
+    "outfit",
+    "pen",
+    "tablet",
+    "tracking",
+}
 
 
 def build_fallback_pose_candidates(
@@ -67,6 +79,65 @@ def resolve_fallback_pose_axes(
             axes = candidate.get("axes")
             return dict(axes) if isinstance(axes, dict) and axes else None
     return None
+
+
+def repair_motion_axes_with_fallback_pose(
+    *,
+    axes: dict[str, float],
+    semantic_profile: dict[str, Any],
+    fallback_axes: dict[str, float] | None,
+) -> tuple[dict[str, float], list[str], list[str]]:
+    """Fill missing semantic skeleton groups from a fallback pose.
+
+    This repairs weak LLM outputs that only contain expression detail axes while
+    preserving non-neutral axes the model already produced.
+    """
+    if not isinstance(axes, dict) or not axes:
+        return axes, [], []
+    if not isinstance(fallback_axes, dict) or not fallback_axes:
+        return dict(axes), [], []
+
+    axis_by_id = _prompt_axis_by_id(semantic_profile)
+    if not axis_by_id:
+        return dict(axes), [], []
+
+    repaired = dict(axes)
+    added: list[str] = []
+    replaced: list[str] = []
+    present_groups = _active_axis_groups(repaired, axis_by_id)
+    missing_groups = [
+        group
+        for group in _REPAIR_SKELETON_GROUPS
+        if group not in present_groups
+    ]
+    if not missing_groups and len(repaired) >= 3:
+        return repaired, [], []
+
+    for group in missing_groups:
+        group_added = 0
+        for axis_id, fallback_value in fallback_axes.items():
+            if group_added >= _REPAIR_MAX_AXES_PER_GROUP:
+                break
+            axis = axis_by_id.get(str(axis_id or "").strip())
+            if axis is None:
+                continue
+            if str(axis.get("semantic_group") or "").strip().lower() != group:
+                continue
+            if _is_axis_neutralish(fallback_value, axis):
+                continue
+            normalized_axis_id = str(axis_id)
+            if normalized_axis_id in repaired:
+                if not _is_axis_neutralish(repaired[normalized_axis_id], axis):
+                    continue
+                repaired[normalized_axis_id] = _coerce_axis_value(fallback_value, axis)
+                replaced.append(normalized_axis_id)
+                group_added += 1
+                continue
+            repaired[str(axis_id)] = _coerce_axis_value(fallback_value, axis)
+            added.append(str(axis_id))
+            group_added += 1
+
+    return repaired, added, replaced
 
 
 def build_default_neutral_pose_axes(semantic_profile: dict[str, Any]) -> dict[str, float]:
@@ -149,6 +220,8 @@ def _build_expression_candidates(
         expression_name = str(expression.get("name") or expression.get("file") or "").strip()
         if not expression_name:
             continue
+        if _is_non_emotive_expression(expression_name):
+            continue
         expression_values = _expression_parameter_values(expression)
         if not expression_values:
             continue
@@ -187,6 +260,8 @@ def _build_profile_binding_expression_candidates(
             continue
         expression_name = str(expression.get("name") or expression.get("file") or "").strip()
         if not expression_name:
+            continue
+        if _is_non_emotive_expression(expression_name):
             continue
         parameter_ids = _expression_parameter_ids_without_values(expression)
         if not parameter_ids:
@@ -389,11 +464,7 @@ def _append_unique_candidate(
 def _filter_axes(value: Any, semantic_profile: dict[str, Any]) -> dict[str, float]:
     if not isinstance(value, dict):
         return {}
-    axis_by_id = {
-        str(axis.get("id") or "").strip(): axis
-        for axis in profile_prompt_axes(semantic_profile)
-        if str(axis.get("id") or "").strip()
-    }
+    axis_by_id = _prompt_axis_by_id(semantic_profile)
     result: dict[str, float] = {}
     for raw_axis_id, raw_axis_value in value.items():
         axis_id = str(raw_axis_id or "").strip()
@@ -405,6 +476,46 @@ def _filter_axes(value: Any, semantic_profile: dict[str, Any]) -> dict[str, floa
             continue
         result[axis_id] = _coerce_axis_value(number, axis)
     return result
+
+
+def _prompt_axis_by_id(semantic_profile: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        str(axis.get("id") or "").strip(): axis
+        for axis in profile_prompt_axes(semantic_profile)
+        if str(axis.get("id") or "").strip()
+    }
+
+
+def _active_axis_groups(
+    axes: dict[str, float],
+    axis_by_id: dict[str, dict[str, Any]],
+) -> set[str]:
+    groups: set[str] = set()
+    for axis_id, value in axes.items():
+        axis = axis_by_id.get(str(axis_id or "").strip())
+        if not axis:
+            continue
+        if _is_axis_neutralish(value, axis):
+            continue
+        group = str(axis.get("semantic_group") or "").strip().lower()
+        if group:
+            groups.add(group)
+    return groups
+
+
+def _is_axis_neutralish(value: Any, axis: dict[str, Any]) -> bool:
+    number = _coerce_finite_number(value)
+    if number is None:
+        return True
+    neutral = _coerce_finite_number(axis.get("neutral"))
+    if neutral is None:
+        neutral = 50.0
+    soft_range = _normalize_pair(axis.get("soft_range"), None)
+    if soft_range is not None:
+        return soft_range[0] <= number <= soft_range[1]
+    value_range = _normalize_pair(axis.get("value_range"), [0.0, 100.0]) or [0.0, 100.0]
+    tolerance = max((value_range[1] - value_range[0]) * 0.08, 1.0)
+    return abs(number - neutral) <= tolerance
 
 
 def _map_expression_parameters_to_axes(
@@ -486,6 +597,14 @@ def _expression_parameter_values(expression: dict[str, Any]) -> dict[str, float]
             if parameter_id and value is not None and parameter_id not in values:
                 values[parameter_id] = value
     return values
+
+
+def _is_non_emotive_expression(value: Any) -> bool:
+    normalized = _normalize_pose_id(value)
+    if not normalized:
+        return False
+    compact = normalized.replace("_", "").replace("-", "")
+    return any(token in compact for token in _NON_EMOTIVE_EXPRESSION_TOKENS)
 
 
 def _expression_parameter_ids_without_values(expression: dict[str, Any]) -> set[str]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -22,6 +23,7 @@ from ..motion.realtime_motion_plan import (
 from ..motion.fallback_pose import (
     DEFAULT_FALLBACK_POSE_ID,
     build_default_neutral_pose_axes,
+    repair_motion_axes_with_fallback_pose,
     build_fallback_pose_candidates,
     resolve_fallback_pose_axes,
 )
@@ -232,15 +234,15 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     event: Any,
     runtime_state: Any,
 ) -> tuple[dict[str, Any] | None, str]:
-    hints = _coerce_plugin_hints_mapping(
+    hints, hints_reason = _coerce_plugin_hints_mapping_with_reason(
         _call_event_method(event, "get_extra", "_interaction_plugin_hints")
     )
     if not isinstance(hints, dict):
-        return None, "plugin_hints_missing"
+        return None, hints_reason
 
     motion_hint = hints.get("ag99live_motion")
     if not isinstance(motion_hint, dict):
-        return None, "ag99live_motion_missing"
+        return None, _append_resolution_reason(hints_reason, "ag99live_motion_missing")
 
     forbidden_fields = [
         key
@@ -266,9 +268,14 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     fallback_pose_id = str(motion_hint.get("fallback_pose_id") or "").strip()
     axes = motion_hint.get("axes")
     validated_axes = None
-    reason = "ok"
+    repair_added_axes: list[str] = []
+    repair_replaced_axes: list[str] = []
+    reason = hints_reason
     if forbidden_fields:
-        reason = "forbidden_fields:" + ",".join(forbidden_fields)
+        reason = _append_resolution_reason(
+            reason,
+            "forbidden_fields:" + ",".join(forbidden_fields),
+        )
     else:
         validated_axes = _normalize_plugin_hint_axes(
             axes,
@@ -276,8 +283,9 @@ def _resolve_plugin_hints_motion_payload_with_reason(
             emotion_label=emotion_label,
         )
         if not validated_axes:
-            reason = "axes_empty_or_invalid"
+            reason = _append_resolution_reason(reason, "axes_empty_or_invalid")
 
+    fallback_axes = None
     if not validated_axes:
         fallback_axes = resolve_fallback_pose_axes(
             runtime_state=runtime_state,
@@ -286,14 +294,49 @@ def _resolve_plugin_hints_motion_payload_with_reason(
         )
         if fallback_axes:
             validated_axes = fallback_axes
-            reason = f"{reason}:fallback_pose:{fallback_pose_id}"
+            reason = _append_resolution_reason(reason, f"fallback_pose:{fallback_pose_id}")
         else:
             validated_axes = build_default_neutral_pose_axes(semantic_profile)
             fallback_pose_id = DEFAULT_FALLBACK_POSE_ID
-            reason = f"{reason}:fallback_pose_default:{DEFAULT_FALLBACK_POSE_ID}"
+            reason = _append_resolution_reason(
+                reason,
+                f"fallback_pose_default:{DEFAULT_FALLBACK_POSE_ID}",
+            )
+    else:
+        fallback_axes = resolve_fallback_pose_axes(
+            runtime_state=runtime_state,
+            semantic_profile=semantic_profile,
+            fallback_pose_id=fallback_pose_id,
+        )
+        if fallback_axes:
+            (
+                validated_axes,
+                repair_added_axes,
+                repair_replaced_axes,
+            ) = repair_motion_axes_with_fallback_pose(
+                axes=validated_axes,
+                semantic_profile=semantic_profile,
+                fallback_axes=fallback_axes,
+            )
+            if repair_added_axes:
+                reason = _append_resolution_reason(
+                    reason,
+                    f"skeleton_repair_added:{','.join(repair_added_axes)}",
+                )
+            if repair_replaced_axes:
+                reason = _append_resolution_reason(
+                    reason,
+                    f"skeleton_repair_replaced:{','.join(repair_replaced_axes)}",
+                )
 
     if not validated_axes:
         return None, reason
+
+    validated_axes = _apply_expressive_floor_v2(
+        axes=validated_axes,
+        emotion=emotion_label,
+        semantic_profile=semantic_profile,
+    )
 
     duration_hint_ms = _normalize_duration_hint_ms(motion_hint.get("duration_hint_ms"))
 
@@ -307,7 +350,11 @@ def _resolve_plugin_hints_motion_payload_with_reason(
         "duration_hint_ms": duration_hint_ms,
         "fallback_pose_id": fallback_pose_id,
         "axes": validated_axes,
-        "summary": {"axis_count": len(validated_axes)},
+        "summary": {
+            "axis_count": len(validated_axes),
+            "skeleton_repair_added_axes": repair_added_axes,
+            "skeleton_repair_replaced_axes": repair_replaced_axes,
+        },
     }, reason
 
 
@@ -348,12 +395,6 @@ def _normalize_plugin_hint_axes(
 
     if not normalized_axes:
         return None
-
-    normalized_axes = _apply_expressive_floor_v2(
-        axes=normalized_axes,
-        emotion=emotion_label,
-        semantic_profile=semantic_profile,
-    )
 
     return normalized_axes
 
@@ -931,19 +972,165 @@ def _log_plugin_hints_motion_resolution(
 
 
 def _coerce_plugin_hints_mapping(value: Any) -> dict[str, Any] | None:
+    hints, _reason = _coerce_plugin_hints_mapping_with_reason(value)
+    return hints
+
+
+def _coerce_plugin_hints_mapping_with_reason(
+    value: Any,
+) -> tuple[dict[str, Any] | None, str]:
     if isinstance(value, dict):
-        return value
+        return value, "ok"
     if not isinstance(value, str):
-        return None
+        return None, "plugin_hints_missing"
 
     raw_value = value.strip()
     if not raw_value:
+        return None, "plugin_hints_missing"
+    parsed, reason = _parse_json_mapping_lenient(raw_value)
+    return parsed, reason
+
+
+def _parse_json_mapping_lenient(raw_value: str) -> tuple[dict[str, Any] | None, str]:
+    attempts: list[tuple[str, str]] = [("ok", raw_value)]
+
+    fenced = _extract_fenced_json(raw_value)
+    if fenced and fenced != raw_value:
+        attempts.append(("plugin_hints_json_repaired:fenced_json", fenced))
+
+    extracted = _extract_first_json_object(raw_value)
+    if extracted and extracted not in {raw_value, fenced}:
+        attempts.append(("plugin_hints_json_repaired:extracted_object", extracted))
+
+    expanded_attempts: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for reason, candidate in attempts:
+        if candidate not in seen:
+            expanded_attempts.append((reason, candidate))
+            seen.add(candidate)
+        trailing_fixed = _strip_json_trailing_commas(candidate)
+        if trailing_fixed != candidate and trailing_fixed not in seen:
+            expanded_attempts.append(
+                (
+                    _append_resolution_reason(
+                        reason,
+                        "plugin_hints_json_repaired:trailing_commas",
+                    ),
+                    trailing_fixed,
+                )
+            )
+            seen.add(trailing_fixed)
+
+    for reason, candidate in expanded_attempts:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        mapping = _unwrap_plugin_hints_mapping(parsed)
+        if isinstance(mapping, dict):
+            return mapping, reason
+
+    return None, "plugin_hints_json_rejected:json_decode_failed"
+
+
+def _extract_fenced_json(raw_value: str) -> str | None:
+    match = re.search(
+        r"```(?:json|JSON)?\s*([\s\S]*?)\s*```",
+        raw_value,
+        flags=re.IGNORECASE,
+    )
+    if not match:
         return None
-    try:
-        parsed = json.loads(raw_value)
-    except json.JSONDecodeError:
+    return match.group(1).strip() or None
+
+
+def _extract_first_json_object(raw_value: str) -> str | None:
+    start = raw_value.find("{")
+    if start < 0:
         return None
-    return parsed if isinstance(parsed, dict) else None
+    in_string = False
+    escaped = False
+    depth = 0
+    for index in range(start, len(raw_value)):
+        char = raw_value[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            continue
+        if char == "{":
+            depth += 1
+            continue
+        if char == "}":
+            depth -= 1
+            if depth == 0:
+                return raw_value[start : index + 1].strip()
+    return None
+
+
+def _strip_json_trailing_commas(value: str) -> str:
+    output: list[str] = []
+    in_string = False
+    escaped = False
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if in_string:
+            output.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+            output.append(char)
+            index += 1
+            continue
+        if char == ",":
+            next_index = index + 1
+            while next_index < len(value) and value[next_index].isspace():
+                next_index += 1
+            if next_index < len(value) and value[next_index] in "}]":
+                index += 1
+                continue
+        output.append(char)
+        index += 1
+    return "".join(output)
+
+
+def _unwrap_plugin_hints_mapping(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    if isinstance(value.get("ag99live_motion"), dict):
+        return value
+    plugin_hints = value.get("plugin_hints")
+    if isinstance(plugin_hints, dict):
+        if isinstance(plugin_hints.get("ag99live_motion"), dict):
+            return plugin_hints
+        nested = plugin_hints.get("plugin_hints")
+        if isinstance(nested, dict) and isinstance(nested.get("ag99live_motion"), dict):
+            return nested
+    return value
+
+
+def _append_resolution_reason(base: str | None, suffix: str) -> str:
+    normalized_base = str(base or "").strip()
+    normalized_suffix = str(suffix or "").strip()
+    if not normalized_base or normalized_base == "ok":
+        return normalized_suffix or "ok"
+    if not normalized_suffix or normalized_suffix == "ok":
+        return normalized_base
+    return f"{normalized_base}:{normalized_suffix}"
 
 
 def _extract_assistant_text(view: Any) -> str:

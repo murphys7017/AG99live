@@ -1,8 +1,8 @@
 task:
   class: feature
   risk: medium
-  phase: motion_intent_v3_fallback_pose_prompt_enrichment
-  scope: AG99live adapter fallback pose semantic metadata, motion catalog semantic extraction, and middleware-first motion prompt wording
+  phase: motion_intent_v3_skeleton_axis_repair
+  scope: AG99live adapter semantic skeleton repair for middleware-first and inline-first motion intent paths
 context:
   confidence: medium
   assumptions:
@@ -10,20 +10,24 @@ context:
     - middleware-first and inline-first remain separate routes; middleware-first reads plugin_hints.ag99live_motion, inline-first reads the inline anim contract only.
     - motion_catalog.json may enrich fallback pose descriptions and catalog-derived semantic candidates only when the motion can be mapped to semantic axes.
     - fallback_pose_id remains a semantic-axis fallback selector, not a motion3/catalog playback selector.
+    - Skeleton repair may add missing head/body/gaze axes from fallback semantic axes and may replace neutralish skeleton axes, but it must not overwrite non-neutral LLM axes.
   unresolved_questions:
-    - Runtime validation still needs a fresh AstrBot + Electron run to confirm MiniMax sees enriched fallback pose candidates and continues to emit plugin_hints.ag99live_motion.
+    - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
 architecture:
   stability: evolving
   boundary_changes:
     - fallback pose candidates can now include semantic metadata from motion catalog entries and key semantic axes derived from motion_resource_pool driver components.
     - middleware motion prompt now names axes as a semantic-axis target group instead of a plain field and exposes fallback candidate descriptions, scenarios, intensity, emotion bias, and key axes.
+    - middleware-first and inline-first valid v3 motion intents now share fallback-pose skeleton repair and expressive-floor ordering for weak semantic axis outputs.
+    - plugin_hints JSON parsing now tolerates outer-format issues such as fenced JSON, text-wrapped objects, and trailing commas while preserving strict v3 axis semantics.
 verification:
   checks_run:
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py -q
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_realtime_motion_plan.py -q
     - python -m compileall astrbot_plugin_ag99live_adapter
     - git diff --check
   checks_failed: []
   validation_gap: Live AstrBot plus Electron runtime still needs manual validation against fresh logs.
 runtime:
-  mode: motion_intent_v3_semantic_prompt_enrichment
+  mode: motion_intent_v3_skeleton_axis_repair

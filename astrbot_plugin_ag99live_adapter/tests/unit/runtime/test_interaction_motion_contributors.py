@@ -432,7 +432,7 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "eye_open_left" in system.value
     assert "ParamHairX" not in system.value
     assert "ParamPhysicsX" not in system.value
-    assert "tablet" in system.value
+    assert "tablet" not in system.value.lower()
     assert "motion_reference_templates" not in capability.value
     assert "motion_catalog_options" not in capability.value
     assert "fallback_pose_candidates" in capability.value
@@ -666,6 +666,76 @@ def test_plugin_hints_motion_payload_accepts_json_string(
     assert payload["axes"]["eye_open_left"] == 72
 
 
+def test_plugin_hints_motion_payload_accepts_fenced_json_string(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    event.set_extra(
+        "_interaction_plugin_hints",
+        """
+        好的，动作参数如下：
+        ```json
+        {
+          "plugin_hints": {
+            "ag99live_motion": {
+              "emotion_label": "curious",
+              "duration_hint_ms": "1500",
+              "fallback_pose_id": "neutral",
+              "axes": {
+                "head_yaw": "48",
+                "eye_open_left": 72,
+              }
+            }
+          }
+        }
+        ```
+        """,
+    )
+
+    payload, reason = module._resolve_plugin_hints_motion_payload_with_reason(
+        event,
+        runtime_state,
+    )
+
+    assert payload is not None
+    assert payload["emotion_label"] == "curious"
+    assert payload["duration_hint_ms"] == 1500
+    assert payload["axes"]["head_yaw"] == 48
+    assert payload["axes"]["eye_open_left"] == 72
+    assert "plugin_hints_json_repaired:fenced_json" in reason
+    assert "plugin_hints_json_repaired:trailing_commas" in reason
+
+
+def test_plugin_hints_motion_payload_accepts_text_wrapped_json_object(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    event.set_extra(
+        "_interaction_plugin_hints",
+        '前缀 {"plugin_hints":{"ag99live_motion":{"emotion_label":"curious","fallback_pose_id":"neutral","axes":{"head_yaw":48}}}} 后缀',
+    )
+
+    payload, reason = module._resolve_plugin_hints_motion_payload_with_reason(
+        event,
+        runtime_state,
+    )
+
+    assert payload is not None
+    assert payload["emotion_label"] == "curious"
+    assert payload["axes"]["head_yaw"] < 42
+    assert "plugin_hints_json_repaired:extracted_object" in reason
+
+
 def test_plugin_hints_motion_payload_accepts_string_number_axes(
     install_fake_astrbot,
     monkeypatch,
@@ -725,6 +795,138 @@ def test_plugin_hints_expressive_payload_is_pushed_out_of_idle_deadzone(
 
     assert payload is not None
     assert payload["axes"]["head_yaw"] > 58
+
+
+def test_plugin_hints_detail_only_axes_are_repaired_from_fallback_pose(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "emotion_label": "thinking",
+                "duration_hint_ms": 1200,
+                "fallback_pose_id": "serious_explain",
+                "axes": {
+                    "eye_open_left": 72,
+                },
+            }
+        },
+    )
+
+    payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
+
+    assert payload is not None
+    assert payload["axes"]["eye_open_left"] == 72
+    assert payload["axes"]["head_yaw"] == 80.0
+    assert payload["summary"]["skeleton_repair_added_axes"] == ["head_yaw"]
+    assert payload["summary"]["skeleton_repair_replaced_axes"] == []
+    assert "motion_id" not in payload
+    assert "file" not in payload
+
+
+def test_plugin_hints_neutral_skeleton_axis_is_replaced_from_fallback_pose(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "emotion_label": "thinking",
+                "duration_hint_ms": 1200,
+                "fallback_pose_id": "serious_explain",
+                "axes": {
+                    "head_yaw": 50,
+                    "eye_open_left": 72,
+                },
+            }
+        },
+    )
+
+    payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
+
+    assert payload is not None
+    assert payload["axes"]["head_yaw"] == 80.0
+    assert payload["axes"]["eye_open_left"] == 72
+    assert payload["summary"]["skeleton_repair_added_axes"] == []
+    assert payload["summary"]["skeleton_repair_replaced_axes"] == ["head_yaw"]
+
+
+def test_plugin_hints_v3_nested_axis_payload_is_not_repaired_as_valid_axes(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "emotion_label": "thinking",
+                "fallback_pose_id": "serious_explain",
+                "axes": {
+                    "head_yaw": {"value": 62},
+                    "eye_open_left": 72,
+                },
+            }
+        },
+    )
+
+    payload, reason = module._resolve_plugin_hints_motion_payload_with_reason(
+        event,
+        runtime_state,
+    )
+
+    assert payload is not None
+    assert payload["axes"] == {"head_yaw": 80.0}
+    assert "axes_empty_or_invalid" in reason
+    assert "fallback_pose:serious_explain" in reason
+
+
+def test_plugin_hints_existing_skeleton_axes_are_not_overwritten_by_repair(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "emotion_label": "thinking",
+                "fallback_pose_id": "serious_explain",
+                "axes": {
+                    "head_yaw": 64,
+                    "eye_open_left": 72,
+                },
+            }
+        },
+    )
+
+    payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
+
+    assert payload is not None
+    assert payload["axes"]["head_yaw"] == 64
+    assert payload["summary"]["skeleton_repair_added_axes"] == []
+    assert payload["summary"]["skeleton_repair_replaced_axes"] == []
 
 
 def test_plugin_hints_forbidden_catalog_fields_fall_back_to_semantic_pose(
