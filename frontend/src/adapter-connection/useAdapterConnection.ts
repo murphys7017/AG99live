@@ -38,7 +38,6 @@ import {
   buildConnectFailureMessage,
   buildConnectionCandidates,
   DEFAULT_ADAPTER_ADDRESS,
-  formatAddressHost,
   normalizeWsAddress,
 } from "./core/address.js";
 import { openAdapterConnectionTransport } from "./core/transport.js";
@@ -337,17 +336,8 @@ export function createAdapterConnection(
     attemptSerial: number,
   ): void {
     const targetAddress = candidates[index];
-    const total = candidates.length;
-
-    if (index > 0) {
-      pushHistory("system", `尝试候选地址 ${targetAddress}`);
-    }
-
     state.status = "connecting";
-    state.statusMessage =
-      total > 1
-        ? `正在连接适配器 (${index + 1}/${total})...`
-        : "正在连接适配器...";
+    state.statusMessage = "正在连接适配器...";
 
     const transport = openAdapterConnectionTransport(targetAddress, {
       onOpen: (nextSocket) => {
@@ -373,14 +363,6 @@ export function createAdapterConnection(
           return;
         }
 
-        if (!opened && index < candidates.length - 1) {
-          state.statusMessage = `连接 ${formatAddressHost(targetAddress)} 失败，尝试下一个地址...`;
-          socket = null;
-          nextSocket.close();
-          openConnectionCandidate(candidates, index + 1, attemptSerial);
-          return;
-        }
-
         state.status = "error";
         state.lastError = opened
           ? "WebSocket 连接异常，请检查地址和 AstrBot 插件状态。"
@@ -397,16 +379,6 @@ export function createAdapterConnection(
 
         if (isCurrentSocket) {
           socket = null;
-        }
-
-        if (
-          !opened
-          && !manualClose
-          && attemptSerial === connectAttemptSerial
-          && index < candidates.length - 1
-        ) {
-          openConnectionCandidate(candidates, index + 1, attemptSerial);
-          return;
         }
 
         resetConnectionRuntimeState();

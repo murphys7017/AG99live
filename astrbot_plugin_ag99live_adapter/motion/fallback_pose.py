@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from ..prompts.semantic_axis_prompt import profile_prompt_axes
@@ -18,6 +19,17 @@ _NON_EMOTIVE_EXPRESSION_TOKENS = {
     "tablet",
     "tracking",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class FallbackPoseResolution:
+    id: str
+    source: str
+    axes: dict[str, float]
+
+    @property
+    def is_default_neutral(self) -> bool:
+        return self.id == DEFAULT_FALLBACK_POSE_ID and self.source == "semantic_axis_profile"
 
 
 def build_fallback_pose_candidates(
@@ -67,6 +79,20 @@ def resolve_fallback_pose_axes(
     semantic_profile: dict[str, Any],
     fallback_pose_id: Any,
 ) -> dict[str, float] | None:
+    resolution = resolve_fallback_pose(
+        runtime_state=runtime_state,
+        semantic_profile=semantic_profile,
+        fallback_pose_id=fallback_pose_id,
+    )
+    return dict(resolution.axes) if resolution is not None else None
+
+
+def resolve_fallback_pose(
+    *,
+    runtime_state: Any,
+    semantic_profile: dict[str, Any],
+    fallback_pose_id: Any,
+) -> FallbackPoseResolution | None:
     normalized_id = _normalize_pose_id(fallback_pose_id)
     if not normalized_id:
         return None
@@ -77,7 +103,13 @@ def resolve_fallback_pose_axes(
     ):
         if candidate.get("id") == normalized_id:
             axes = candidate.get("axes")
-            return dict(axes) if isinstance(axes, dict) and axes else None
+            if not isinstance(axes, dict) or not axes:
+                return None
+            return FallbackPoseResolution(
+                id=normalized_id,
+                source=str(candidate.get("source") or "").strip(),
+                axes=dict(axes),
+            )
     return None
 
 

@@ -25,6 +25,7 @@ from ..motion.fallback_pose import (
     build_default_neutral_pose_axes,
     repair_motion_axes_with_fallback_pose,
     build_fallback_pose_candidates,
+    resolve_fallback_pose,
     resolve_fallback_pose_axes,
 )
 from ..prompts.motion_selector import (
@@ -286,16 +287,15 @@ def _resolve_plugin_hints_motion_payload_with_reason(
         if not validated_axes:
             reason = _append_resolution_reason(reason, "axes_empty_or_invalid")
 
-    fallback_axes = None
     if not validated_axes:
-        fallback_axes = resolve_fallback_pose_axes(
+        fallback_resolution = resolve_fallback_pose(
             runtime_state=runtime_state,
             semantic_profile=semantic_profile,
             fallback_pose_id=fallback_pose_id,
         )
-        if fallback_axes:
-            validated_axes = fallback_axes
-            if _is_default_fallback_pose_id(fallback_pose_id):
+        if fallback_resolution is not None:
+            validated_axes = fallback_resolution.axes
+            if fallback_resolution.is_default_neutral:
                 expressive_floor_emotion = "neutral"
             reason = _append_resolution_reason(reason, f"fallback_pose:{fallback_pose_id}")
         else:
@@ -307,12 +307,12 @@ def _resolve_plugin_hints_motion_payload_with_reason(
                 f"fallback_pose_default:{DEFAULT_FALLBACK_POSE_ID}",
             )
     else:
-        fallback_axes = resolve_fallback_pose_axes(
+        fallback_resolution = resolve_fallback_pose(
             runtime_state=runtime_state,
             semantic_profile=semantic_profile,
             fallback_pose_id=fallback_pose_id,
         )
-        if fallback_axes:
+        if fallback_resolution is not None:
             (
                 validated_axes,
                 repair_added_axes,
@@ -320,7 +320,7 @@ def _resolve_plugin_hints_motion_payload_with_reason(
             ) = repair_motion_axes_with_fallback_pose(
                 axes=validated_axes,
                 semantic_profile=semantic_profile,
-                fallback_axes=fallback_axes,
+                fallback_axes=fallback_resolution.axes,
             )
             if repair_added_axes:
                 reason = _append_resolution_reason(
@@ -401,10 +401,6 @@ def _normalize_plugin_hint_axes(
         return None
 
     return normalized_axes
-
-
-def _is_default_fallback_pose_id(value: Any) -> bool:
-    return str(value or "").strip().lower() == DEFAULT_FALLBACK_POSE_ID
 
 
 def _coerce_plugin_hint_axis_value(raw_value: float, axis: dict[str, Any]) -> float:

@@ -28,6 +28,7 @@ from .fallback_pose import (
     DEFAULT_FALLBACK_POSE_ID,
     build_default_neutral_pose_axes,
     repair_motion_axes_with_fallback_pose,
+    resolve_fallback_pose,
     resolve_fallback_pose_axes,
 )
 from ..prompts.inline_motion_contract import build_inline_motion_contract
@@ -198,13 +199,19 @@ def _build_inline_fallback_motion_payload(
         fallback_pose_id = str(raw_intent.get("fallback_pose_id") or fallback_pose_id).strip() or fallback_pose_id
         emotion_label = str(raw_intent.get("emotion_label") or emotion_label).strip() or emotion_label
 
-    axes = resolve_fallback_pose_axes(
+    fallback_resolution = resolve_fallback_pose(
         runtime_state=runtime_state,
         semantic_profile=semantic_profile,
         fallback_pose_id=fallback_pose_id,
     )
     expressive_floor_emotion = emotion_label
-    if _is_default_fallback_pose_id(fallback_pose_id):
+    if fallback_resolution is not None:
+        axes = fallback_resolution.axes
+        if fallback_resolution.is_default_neutral:
+            expressive_floor_emotion = "neutral"
+    else:
+        axes = None
+    if fallback_resolution is None and fallback_pose_id == DEFAULT_FALLBACK_POSE_ID:
         expressive_floor_emotion = "neutral"
     if not axes:
         axes = build_default_neutral_pose_axes(semantic_profile)
@@ -247,10 +254,6 @@ def _build_inline_fallback_motion_payload(
         logger.warning("WIRING inline_motion fallback rejected: %s", failure_reason)
         return None, None
     return payload, mode or "inline"
-
-
-def _is_default_fallback_pose_id(value: Any) -> bool:
-    return str(value or "").strip().lower() == DEFAULT_FALLBACK_POSE_ID
 
 
 # ── Motion payload validation ──────────────────────────────────────
