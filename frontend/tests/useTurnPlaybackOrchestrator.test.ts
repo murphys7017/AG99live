@@ -16,7 +16,23 @@ function createHarness() {
   const sessionStore = useTurnPlaybackSessionStore();
   const released: string[] = [];
   const turnChanges: Array<string | null> = [];
+  const logs: Array<{ message: string; details: Record<string, unknown> }> = [];
   const scope = effectScope();
+  const originalConsoleInfo = console.info;
+  console.info = (...args: unknown[]) => {
+    if (
+      typeof args[0] === "string"
+      && args[0].startsWith("[TurnPlaybackOrchestrator]")
+      && typeof args[1] === "object"
+      && args[1] !== null
+    ) {
+      logs.push({
+        message: args[0],
+        details: args[1] as Record<string, unknown>,
+      });
+    }
+    originalConsoleInfo(...args);
+  };
 
   const adapter = {
     releaseAssistantTextForPlayback(
@@ -59,8 +75,12 @@ function createHarness() {
     sessionStore,
     released,
     turnChanges,
+    logs,
     flush: () => nextTick(),
-    stop: () => scope.stop(),
+    stop: () => {
+      scope.stop();
+      console.info = originalConsoleInfo;
+    },
   };
 }
 
@@ -126,6 +146,13 @@ async function testTextAndMotionReleaseWhenAudioIsAbsent(): Promise<void> {
     "text:msg-text-motion:turn-text-motion",
     "motion:msg-text-motion:turn-text-motion",
   ]);
+  assert.equal(
+    h.logs.some((item) =>
+      item.message.includes("motion released")
+      && String(item.details.reason || "").startsWith("late_motion_after_")
+    ),
+    false,
+  );
   h.stop();
 }
 

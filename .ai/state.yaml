@@ -1,45 +1,37 @@
 task:
-  class: feature
-  risk: high
-  phase: binary_microphone_capture_mode_split
-  scope: AG99live frontend Electron/Web microphone capture transport and adapter speech ingress; remote operator permission policy remains out of scope
+  class: bugfix
+  risk: medium
+  phase: motion_intent_v3_playback_path_stabilization
+  scope: AG99live adapter interaction motion client_objects, frontend turn playback orchestration, and ModelEngine started-event completion handoff
 context:
   confidence: medium
   assumptions:
-    - Single frontend instance ↔ single adapter instance ↔ single Live2D model, one-to-one binding; multi-connection / multi-frontend / multi-model is out of scope for current refactor. Single-instance module-level singletons (e.g. frontend audio element, native microphone activeCapture, Live2D WebSDK LAppDelegate) are accepted by design and should not be flagged as multi-instance bugs in reviews. Cleanup-on-unmount is sufficient.
-    - Remote operator permission and approval policy is intentionally open during functional testing and is not part of the current remediation scope.
-    - Current Electron frontend should prefer JSON control frames plus WebSocket binary PCM16LE chunks over JSON number-array audio.
-    - Legacy input.raw_audio_data and input.mic_audio_end remain available for old clients and debugging, but are no longer the current frontend main path.
-    - PTT start/stop timing uses stream start/binary chunk/stream end as a press-delimited segment.
-    - Manual and auto microphone capture remain on binary PCM16LE transport but are tagged with capture_mode=manual/auto so backend VAD can segment speech while capture stays open.
-    - Binary audio stream end now honors frontend dropped=true and stops the turn without transcription.
-    - PTT key release during microphone startup is remembered and stops capture as soon as startup finishes.
-    - Native microphone start now waits for the first ffmpeg PCM bytes before returning ok; startup handshake bytes are discarded so recognition starts only after the handshake boundary.
-    - PTT release before microphone startup handshake completes discards the local capture and does not send a backend microphone end event.
-    - Electron global PTT events now carry event ids and expect renderer acknowledgements for received/start/stop/discard/ignore/failure diagnosis.
+    - The automatic LLM motion path remains pure engine.motion_intent.v3 semantic axes; catalog motion, motion3, exp3, and choice outputs stay out of this path.
+    - middleware-first and inline-first remain separate routes; middleware-first reads plugin_hints.ag99live_motion, inline-first reads the inline anim contract only.
+    - AstrBot core is responsible for merging InteractionResultContribution.client_objects into final platform_extras for the delivered visible message.
+    - Frontend text/audio/motion playback is segment-scoped by visible message_id and turn_id; motion should be released through the same turn playback orchestrator as text and audio.
+    - ModelEngine playPlan returning true means the motion should be considered started for turn completion, even if the underlying player implementation omits its optional onStarted callback.
   unresolved_questions:
-    - Native microphone first-frame acknowledgement still needs live Electron and Windows device regression testing, including device-busy and no-input scenarios.
-    - Electron global PTT acknowledgement still needs live desktop testing with uiohook and the pet renderer window.
-    - The binary chunk header still carries JSON metadata per chunk; a later optimization can move stable fields to stream start and compact chunk headers further.
+    - Runtime validation still needs a fresh AstrBot + Electron run to confirm logs show one output.text, one engine.motion_intent, and ModelEngine playback for the same visible message_id.
 architecture:
   stability: evolving
   boundary_changes:
-    - Current issue ledger is recorded in docs/02-设计文档/05-前端结构维护清单.md.
-    - 2026-06-07 review reconciled: issue ledger in 05-前端结构维护清单.md already covers most reviewed high/medium findings. New findings not in ledger are mostly trust-boundary, Vue component polish, and Electron main process details; see review summary. Single-instance design premise (single frontend / adapter / Live2D model) is now recorded as a design assumption so future reviews do not re-flag singletons as multi-instance bugs.
-    - Microphone WebSocket protocol now has JSON stream control frames and AG99 binary PCM16LE audio chunk frames.
-    - Backend transport has a separate binary message handler instead of decoding bytes as UTF-8 JSON.
-    - AG99 binary audio chunk metadata now carries capture_mode so backend speech ingress can route continuous capture to VAD and PTT capture to end-of-segment transcription.
-    - Preload desktop IPC now forwards payloads to renderer callbacks and exposes a PTT acknowledgement channel back to the main process.
+    - Interaction motion result contributors now use client_objects as the single authoritative motion object output; platform_extras.client_objects is left to AstrBot core merge/build logic.
+    - Turn playback orchestrator feeds motion readiness before no-audio/output-queue release signals for the same active segment, avoiding a late-motion fallback path when state arrives in one batch.
+    - ModelEngine emits a plan-started event after successful playPlan even when the player does not invoke the optional onStarted callback, preventing motion payloads from blocking turn settlement.
 verification:
   checks_run:
-    - git status --short
-    - cd frontend; npm run test:push-to-talk-controller
-    - cd frontend; npm run test:adapter-connection
-    - cd frontend; npm run typecheck:node
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_middleware_registration.py -q
+    - cd frontend; npm run test:turn-orchestrator
+    - cd frontend; npm run test:orchestration
+    - cd frontend; npm run test:model-engine
+    - cd frontend; npm run test:coordinator
+    - python -m compileall astrbot_plugin_ag99live_adapter
     - cd frontend; npm run typecheck:renderer
-    - cd astrbot_plugin_ag99live_adapter; python -m pytest tests/unit/runtime/test_binary_audio_protocol.py tests/unit/runtime/test_speech_ingress_service.py
+    - cd frontend; npm run typecheck:node
+    - cd frontend; npm run test:adapter-connection
     - git diff --check
   checks_failed: []
-  validation_gap: Live Electron ffmpeg/device capture and global uiohook PTT acknowledgement were not manually exercised in this turn.
+  validation_gap: Live AstrBot plus Electron runtime still needs manual validation against fresh logs.
 runtime:
-  mode: binary_microphone_transport
+  mode: motion_intent_v3_semantic_playback

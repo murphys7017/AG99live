@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { compileMotionIntent } from "../src/model-engine/compiler/compileMotionIntent.js";
 import { normalizeMotionPayload } from "../src/model-engine/normalize.js";
+import { startNormalizedMotionPayload } from "../src/model-engine/runtime/motionStart.js";
 import { listCompileStageRegistrations } from "../src/model-engine/compiler/registry.js";
 import type { ModelSummary, SemanticMotionIntent } from "../src/types/protocol.js";
 import type { SemanticAxisProfile } from "../src/types/semantic-axis-profile.js";
+import type { ModelEnginePlanStartedEvent } from "../src/model-engine/runtime/contracts.js";
 
 function buildProfile(): SemanticAxisProfile {
   return {
@@ -427,6 +429,69 @@ function testNormalizeMotionPayloadRejectsV3NestedAxes(): void {
   assert.equal(result.reason, "motion_intent_v3.invalid_flat_axes");
 }
 
+function testMotionStartNotifiesStartedWhenPlayerOmitsCallback(): void {
+  const profile = buildProfile();
+  const model = buildModel(profile);
+  const compileResult = compileMotionIntent(buildIntent(), {
+    model,
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+  assert.equal(compileResult.ok, true);
+  assert.ok(compileResult.plan);
+
+  const startedEvents: ModelEnginePlanStartedEvent[] = [];
+  const stateChanges: Array<{ status: string; message: string }> = [];
+  const started = startNormalizedMotionPayload(
+    {
+      kind: "semantic_plan",
+      plan: compileResult.plan,
+    },
+    {
+      messageId: "msg-plan",
+      turnId: "turn-plan",
+      playbackTurnId: "turn-plan",
+      startReason: "test",
+      queuedDelayMs: 0,
+    },
+    {
+      getSelectedModel: () => model,
+      getSettings: () => ({
+        motionIntensityScale: 1,
+        axisIntensityScale: {},
+      }),
+      playPlan: (_plan, _model, _options) => true,
+      playCatalogMotion: () => false,
+      getPlayerMessage: () => "playing without callback",
+      onPlanStarted: (event) => {
+        startedEvents.push(event);
+      },
+    },
+    {
+      resolveMotionTargetDurationMs: () => null,
+      isSpeechActiveForPayload: () => false,
+    },
+    {
+      setState: (status, message) => {
+        stateChanges.push({ status, message });
+      },
+      setLastCompileReason: () => {},
+      setLastCompileDiagnostics: () => {},
+      setLastStartReason: () => {},
+      pushHistory: () => {},
+    },
+  );
+
+  assert.equal(started, true);
+  assert.equal(startedEvents.length, 1);
+  assert.equal(startedEvents[0].messageId, "msg-plan");
+  assert.equal(startedEvents[0].payloadKind, "semantic_plan");
+  assert.equal(startedEvents[0].playerMessage, "playing without callback");
+  assert.equal(stateChanges.at(-1)?.status, "playing");
+}
+
 function testAxisIntensityScaleAffectsOnlyTargetAxis(): void {
   const profile = buildProfile();
   const baseline = compileMotionIntent(buildIntent({
@@ -843,6 +908,7 @@ function run(): void {
   testRegistryCoreStageOrder();
   testNormalizeMotionPayloadAcceptsV3FlatAxes();
   testNormalizeMotionPayloadRejectsV3NestedAxes();
+  testMotionStartNotifiesStartedWhenPlayerOmitsCallback();
   testExplicitPrimaryAxisIsNotOverwrittenByCoupling();
   testAxisIntensityScaleAffectsOnlyTargetAxis();
   testRevisionMismatchBecomesWarningInsteadOfCompileFailure();

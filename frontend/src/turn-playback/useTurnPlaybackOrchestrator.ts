@@ -135,19 +135,19 @@ export function useTurnPlaybackOrchestrator(
           core.markAudioReady(segment.messageId, segment.turnId);
         }
 
-        if (segment.audio.terminal === "absent") {
-          core.markNoAudioConfirmed(
-            segment.messageId,
-            segment.turnId,
-          );
-        }
-
         if (canReleaseMotion(segment) && segment.motion.payload) {
           core.markMotionReady(
             segment.messageId,
             segment.turnId,
             segment.motion.payload,
             segment.motion.receivedAtMs ?? performance.now(),
+          );
+        }
+
+        if (segment.audio.terminal === "absent") {
+          core.markNoAudioConfirmed(
+            segment.messageId,
+            segment.turnId,
           );
         }
 

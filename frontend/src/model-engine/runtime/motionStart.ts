@@ -145,14 +145,26 @@ function startSemanticIntentPayload(
     diagnostics: compileResult.diagnostics,
   });
 
-  let startedPlan: MotionPlanPayload | null = null;
+  let notifiedStarted = false;
   const started = dependencies.playPlan(
     compileResult.plan,
     selectedModel,
     {
       softHandoff: true,
       onStarted: (plan) => {
-        startedPlan = plan;
+        notifiedStarted = true;
+        dependencies.onPlanStarted?.({
+          plan,
+          model: selectedModel,
+          messageId: context.messageId,
+          turnId: context.turnId,
+          playbackTurnId: context.playbackTurnId,
+          startReason: context.startReason,
+          queuedDelayMs: context.queuedDelayMs,
+          payloadKind: payload.kind,
+          diagnostics: compileResult.diagnostics,
+          playerMessage: buildSuccessMessage(context, dependencies),
+        });
       },
     },
   );
@@ -166,9 +178,9 @@ function startSemanticIntentPayload(
   }
 
   const successMessage = buildSuccessMessage(context, dependencies);
-  if (startedPlan) {
+  if (!notifiedStarted) {
     dependencies.onPlanStarted?.({
-      plan: startedPlan,
+      plan: compileResult.plan,
       model: selectedModel,
       messageId: context.messageId,
       turnId: context.turnId,
@@ -194,7 +206,7 @@ function startDirectPlanPayload(
   state: MotionRuntimeStateController,
 ): boolean {
   const selectedModel = dependencies.getSelectedModel();
-  let startedPlan: MotionPlanPayload | null = null;
+  let notifiedStarted = false;
   const started = dependencies.playPlan(
     payload.plan,
     selectedModel,
@@ -206,7 +218,19 @@ function startDirectPlanPayload(
         context.playbackTurnId,
       ),
       onStarted: (plan) => {
-        startedPlan = plan;
+        notifiedStarted = true;
+        dependencies.onPlanStarted?.({
+          plan,
+          model: selectedModel,
+          messageId: context.messageId,
+          turnId: context.turnId,
+          playbackTurnId: context.playbackTurnId,
+          startReason: context.startReason,
+          queuedDelayMs: context.queuedDelayMs,
+          payloadKind: payload.kind,
+          diagnostics: null,
+          playerMessage: buildSuccessMessage(context, dependencies),
+        });
       },
     },
   );
@@ -221,9 +245,9 @@ function startDirectPlanPayload(
   }
 
   const successMessage = buildSuccessMessage(context, dependencies);
-  if (startedPlan) {
+  if (!notifiedStarted) {
     dependencies.onPlanStarted?.({
-      plan: startedPlan,
+      plan: payload.plan,
       model: selectedModel,
       messageId: context.messageId,
       turnId: context.turnId,
