@@ -131,7 +131,7 @@ function resolveAllowedLlmAxisValues(
     axes: context.intent.axes,
   });
 
-  for (const [axisId, axisValuePayload] of Object.entries(context.intent.axes)) {
+  for (const [axisId, value] of Object.entries(context.intent.axes)) {
     const axis = context.state.axisById.get(axisId);
     if (!axis) {
       invalidAxes.push(axisId);
@@ -145,7 +145,6 @@ function resolveAllowedLlmAxisValues(
       );
       continue;
     }
-    const value = axisValuePayload.value as unknown;
     if (typeof value !== "number" || !Number.isFinite(value)) {
       invalidAxes.push(axisId);
       warnings.push(`semantic_axis_ignored_not_number:${axisId}`);

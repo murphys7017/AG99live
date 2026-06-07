@@ -20,6 +20,13 @@ def _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
             return decorator
 
         @staticmethod
+        def on_llm_request():
+            def decorator(fn):
+                return fn
+
+            return decorator
+
+        @staticmethod
         def on_llm_response():
             def decorator(fn):
                 return fn
@@ -42,6 +49,14 @@ def _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
     message_components.Plain = Plain
     monkeypatch.setitem(sys.modules, "astrbot.api.message_components", message_components)
 
+    provider_module = types.ModuleType("astrbot.api.provider")
+
+    class ProviderRequest:
+        pass
+
+    provider_module.ProviderRequest = ProviderRequest
+    monkeypatch.setitem(sys.modules, "astrbot.api.provider", provider_module)
+
     star_module = types.ModuleType("astrbot.api.star")
 
     class Context:
@@ -54,6 +69,18 @@ def _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
     star_module.Context = Context
     star_module.Star = Star
     monkeypatch.setitem(sys.modules, "astrbot.api.star", star_module)
+
+    remote_operator_module = types.ModuleType(
+        "astrbot_plugin_ag99live_adapter.middleware.remote_operator"
+    )
+    remote_operator_module.arbitrate_remote_operator_tools_for_request = (
+        lambda _event, _request: None
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "astrbot_plugin_ag99live_adapter.middleware.remote_operator",
+        remote_operator_module,
+    )
 
 
 def test_main_plugin_sanitizes_hidden_output_markup_before_tts(
@@ -73,6 +100,7 @@ def test_main_plugin_sanitizes_hidden_output_markup_before_tts(
     )
 
     middleware_module = types.ModuleType("astrbot_plugin_ag99live_adapter.middleware")
+    middleware_module.__path__ = []
     middleware_module.register_ag99live_interaction_contributors = lambda _context: None
     monkeypatch.setitem(
         sys.modules,
@@ -134,6 +162,7 @@ def test_main_plugin_registers_interaction_contributors_during_init(
 
     registered_contexts: list[object] = []
     middleware_module = types.ModuleType("astrbot_plugin_ag99live_adapter.middleware")
+    middleware_module.__path__ = []
     middleware_module.register_ag99live_interaction_contributors = (
         lambda context: registered_contexts.append(context)
     )

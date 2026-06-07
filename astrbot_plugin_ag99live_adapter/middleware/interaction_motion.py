@@ -15,20 +15,18 @@ from astrbot.core.prompt import PromptExtension
 from ..motion.output_sanitizer import sanitize_assistant_output_text
 from ..motion.realtime_motion_plan import (
     _apply_expressive_floor_v2,
+    DEFAULT_MOTION_INTENT_DURATION_MS,
+    MOTION_INTENT_V3_SCHEMA_VERSION,
     resolve_selected_semantic_axis_profile,
 )
-from ..prompts.motion_catalog import (
-    build_catalog_motion_payload,
-    find_motion_catalog_option,
-    format_motion_catalog_options,
-    resolve_motion_catalog_options,
+from ..motion.fallback_pose import (
+    DEFAULT_FALLBACK_POSE_ID,
+    build_default_neutral_pose_axes,
+    build_fallback_pose_candidates,
+    resolve_fallback_pose_axes,
 )
 from ..prompts.motion_selector import (
     resolve_motion_prompt_instruction,
-)
-from ..prompts.motion_reference_templates import (
-    format_motion_reference_templates,
-    resolve_motion_reference_templates,
 )
 from ..prompts.semantic_axis_prompt import (
     format_profile_axis_prompt_line,
@@ -262,19 +260,11 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     if not isinstance(motion_hint, dict):
         return None, "ag99live_motion_missing"
 
-    choice = str(motion_hint.get("choice") or "generate").strip().lower()
-    if choice == "catalog":
-        catalog_payload, catalog_reason = _resolve_plugin_hints_catalog_motion_payload(
-            motion_hint,
-            runtime_state,
-        )
-        return catalog_payload, catalog_reason
-    if choice not in {"generate", ""}:
-        return None, f"invalid_choice:{choice or '<empty>'}"
-
-    mode = str(motion_hint.get("mode") or "").strip()
-    if mode not in {"idle", "expressive"}:
-        return None, f"invalid_mode:{mode or '<empty>'}"
+    forbidden_fields = [
+        key
+        for key in ("choice", "mode", "motion_id", "catalog_motion", "motion3", "exp3")
+        if key in motion_hint
+    ]
 
     try:
         semantic_profile = resolve_selected_semantic_axis_profile(
@@ -282,16 +272,6 @@ def _resolve_plugin_hints_motion_payload_with_reason(
         )
     except Exception as exc:  # noqa: BLE001
         return None, f"semantic_profile_unresolved:{exc}"
-
-    axes = motion_hint.get("axes")
-    validated_axes = _normalize_plugin_hint_axes(
-        axes,
-        semantic_profile,
-        mode=mode,
-        emotion_label=str(motion_hint.get("emotion_label") or "").strip() or "neutral",
-    )
-    if not validated_axes:
-        return None, "axes_empty_or_invalid"
 
     profile_id = str(semantic_profile.get("profile_id") or "").strip()
     if not profile_id:
@@ -301,71 +281,60 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     if not emotion_label:
         emotion_label = "neutral"
 
-    duration_hint_ms = motion_hint.get("duration_hint_ms")
-    if duration_hint_ms is not None:
-        try:
-            duration_hint_ms = int(duration_hint_ms)
-            duration_hint_ms = max(320, min(15000, duration_hint_ms))
-        except (TypeError, ValueError):
-            duration_hint_ms = None
+    fallback_pose_id = str(motion_hint.get("fallback_pose_id") or "").strip()
+    axes = motion_hint.get("axes")
+    validated_axes = None
+    reason = "ok"
+    if forbidden_fields:
+        reason = "forbidden_fields:" + ",".join(forbidden_fields)
+    else:
+        validated_axes = _normalize_plugin_hint_axes(
+            axes,
+            semantic_profile,
+            emotion_label=emotion_label,
+        )
+        if not validated_axes:
+            reason = "axes_empty_or_invalid"
+
+    if not validated_axes:
+        fallback_axes = resolve_fallback_pose_axes(
+            runtime_state=runtime_state,
+            semantic_profile=semantic_profile,
+            fallback_pose_id=fallback_pose_id,
+        )
+        if fallback_axes:
+            validated_axes = fallback_axes
+            reason = f"{reason}:fallback_pose:{fallback_pose_id}"
+        else:
+            validated_axes = build_default_neutral_pose_axes(semantic_profile)
+            fallback_pose_id = DEFAULT_FALLBACK_POSE_ID
+            reason = f"{reason}:fallback_pose_default:{DEFAULT_FALLBACK_POSE_ID}"
+
+    if not validated_axes:
+        return None, reason
+
+    duration_hint_ms = _normalize_duration_hint_ms(motion_hint.get("duration_hint_ms"))
 
     return {
-        "schema_version": "engine.motion_intent.v2",
+        "schema_version": MOTION_INTENT_V3_SCHEMA_VERSION,
         "profile_id": profile_id,
         "profile_revision": int(semantic_profile.get("revision") or 0),
         "model_id": str(semantic_profile.get("model_id") or "").strip(),
-        "mode": mode,
+        "mode": "expressive",
         "emotion_label": emotion_label,
         "duration_hint_ms": duration_hint_ms,
+        "fallback_pose_id": fallback_pose_id,
         "axes": validated_axes,
         "summary": {"axis_count": len(validated_axes)},
-    }, "ok"
-
-
-def _resolve_plugin_hints_catalog_motion_payload(
-    motion_hint: dict[str, Any],
-    runtime_state: Any,
-) -> tuple[dict[str, Any] | None, str]:
-    motion_id = str(motion_hint.get("motion_id") or "").strip()
-    if not motion_id:
-        return None, "catalog_motion_id_empty"
-
-    catalog_options = resolve_motion_catalog_options(
-        runtime_state=runtime_state,
-        limit=None,
-    )
-    option = find_motion_catalog_option(
-        options=catalog_options,
-        motion_id=motion_id,
-    )
-    if option is None:
-        return None, f"catalog_motion_not_allowed:{motion_id}"
-
-    try:
-        semantic_profile = resolve_selected_semantic_axis_profile(
-            runtime_state=runtime_state
-        )
-    except Exception as exc:  # noqa: BLE001
-        return None, f"semantic_profile_unresolved:{exc}"
-
-    emotion_label = str(motion_hint.get("emotion_label") or "").strip()
-    if not emotion_label:
-        emotion_label = str(option.get("label") or option.get("id") or "catalog").strip()
-
-    return build_catalog_motion_payload(
-        option=option,
-        model_id=str(semantic_profile.get("model_id") or "").strip(),
-        emotion_label=emotion_label,
-    ), "ok"
+    }, reason
 
 
 def _normalize_plugin_hint_axes(
     axes: Any,
     semantic_profile: dict[str, Any],
     *,
-    mode: str,
     emotion_label: str,
-) -> dict[str, dict[str, float]] | None:
+) -> dict[str, float] | None:
     if not isinstance(axes, dict) or not axes:
         return None
 
@@ -378,7 +347,7 @@ def _normalize_plugin_hint_axes(
     if not axis_by_id:
         return None
 
-    normalized_axes: dict[str, dict[str, float]] = {}
+    normalized_axes: dict[str, float] = {}
     for axis_id_raw, axis_value in axes.items():
         axis_id = str(axis_id_raw or "").strip()
         if not axis_id:
@@ -386,28 +355,23 @@ def _normalize_plugin_hint_axes(
         axis = axis_by_id.get(axis_id)
         if axis is None:
             continue
-        if not isinstance(axis_value, dict):
-            continue
-        raw_value = axis_value.get("value")
-        if not isinstance(raw_value, (int, float)):
+        if isinstance(axis_value, dict):
+            return None
+        number = _coerce_finite_number(axis_value)
+        if number is None:
             continue
 
-        value = _coerce_plugin_hint_axis_value(float(raw_value), axis)
-        normalized_axes[axis_id] = {"value": value}
+        value = _coerce_plugin_hint_axis_value(number, axis)
+        normalized_axes[axis_id] = value
 
     if not normalized_axes:
         return None
 
-    if mode == "expressive":
-        expressive_axes = _apply_expressive_floor_v2(
-            axes={axis_id: axis_payload["value"] for axis_id, axis_payload in normalized_axes.items()},
-            emotion=emotion_label,
-            semantic_profile=semantic_profile,
-        )
-        normalized_axes = {
-            axis_id: {"value": value}
-            for axis_id, value in expressive_axes.items()
-        }
+    normalized_axes = _apply_expressive_floor_v2(
+        axes=normalized_axes,
+        emotion=emotion_label,
+        semantic_profile=semantic_profile,
+    )
 
     return normalized_axes
 
@@ -417,6 +381,23 @@ def _coerce_plugin_hint_axis_value(raw_value: float, axis: dict[str, Any]) -> fl
 
     clamped = max(min_value, min(max_value, raw_value))
     return round(clamped, 4)
+
+
+def _coerce_finite_number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+    elif isinstance(value, str):
+        try:
+            number = float(value.strip())
+        except ValueError:
+            return None
+    else:
+        return None
+    if not float("-inf") < number < float("inf"):
+        return None
+    return number
 
 
 def _resolve_axis_value_range(axis: dict[str, Any]) -> tuple[float, float]:
@@ -430,6 +411,18 @@ def _resolve_axis_value_range(axis: dict[str, Any]) -> tuple[float, float]:
     ):
         return float(value_range[0]), float(value_range[1])
     return 0.0, 100.0
+
+
+def _normalize_duration_hint_ms(value: Any) -> int:
+    if value is None:
+        return DEFAULT_MOTION_INTENT_DURATION_MS
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_MOTION_INTENT_DURATION_MS
+    if not float("-inf") < number < float("inf"):
+        return DEFAULT_MOTION_INTENT_DURATION_MS
+    return max(320, min(15000, int(round(number))))
 
 
 def _build_motion_capability_payload(runtime_state: Any) -> dict[str, Any]:
@@ -455,19 +448,22 @@ def _build_motion_capability_payload(runtime_state: Any) -> dict[str, Any]:
         capability_payload["semantic_profile"] = profile_payload
         capability_payload["plugin_hints_format"] = _build_plugin_hints_motion_format(profile_payload)
         if isinstance(raw_profile, dict):
-            reference_templates = resolve_motion_reference_templates(
+            fallback_candidates = build_fallback_pose_candidates(
                 runtime_state=runtime_state,
                 semantic_profile=raw_profile,
-                limit=None,
+                limit=12,
             )
-            if reference_templates:
-                capability_payload["motion_reference_templates"] = reference_templates
-        catalog_options = resolve_motion_catalog_options(
-            runtime_state=runtime_state,
-            limit=None,
-        )
-        if catalog_options:
-            capability_payload["motion_catalog_options"] = catalog_options
+            if fallback_candidates:
+                capability_payload["fallback_pose_candidates"] = [
+                    {
+                        "id": str(item.get("id") or "").strip(),
+                        "label": str(item.get("label") or item.get("id") or "").strip(),
+                        "emotion_label": str(item.get("emotion_label") or "").strip(),
+                        "source": str(item.get("source") or "").strip(),
+                    }
+                    for item in fallback_candidates
+                    if str(item.get("id") or "").strip()
+                ]
 
     return capability_payload
 
@@ -497,47 +493,39 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     if isinstance(semantic_profile, dict):
         axis_prompt = str(semantic_profile.get("axis_prompt") or "").strip()
     axis_prompt_text = f"可用动作轴语义：\n{axis_prompt}\n" if axis_prompt else ""
-    reference_template_text = ""
-    reference_templates = capability_payload.get("motion_reference_templates")
-    if isinstance(reference_templates, list):
-        formatted_templates = format_motion_reference_templates(
-            reference_templates,
-            truncate_text=_truncate_text,
-            limit=None,
-        )
-        if formatted_templates:
-            reference_template_text = f"{formatted_templates}\n"
-    motion_catalog_text = ""
-    catalog_options = capability_payload.get("motion_catalog_options")
-    if isinstance(catalog_options, list):
-        formatted_catalog = format_motion_catalog_options(
-            catalog_options,
-            truncate_text=_truncate_text,
-            limit=None,
-        )
-        if formatted_catalog:
-            motion_catalog_text = f"{formatted_catalog}\n"
+    fallback_pose_text = ""
+    fallback_candidates = capability_payload.get("fallback_pose_candidates")
+    if isinstance(fallback_candidates, list) and fallback_candidates:
+        lines = ["可用 fallback_pose_id："]
+        for item in fallback_candidates:
+            if not isinstance(item, dict):
+                continue
+            pose_id = str(item.get("id") or "").strip()
+            if not pose_id:
+                continue
+            label = str(item.get("label") or pose_id).strip()
+            source = str(item.get("source") or "").strip()
+            lines.append(f"- {pose_id}: {label}" + (f" ({source})" if source else ""))
+        fallback_pose_text = "\n".join(lines) + "\n"
 
     return (
         "AG99live Motion 是当前桌宠前端的主动作通道。"
         "每次 interaction decision 都必须在 JSON 输出的 plugin_hints 中写入 ag99live_motion；"
         "不要把动作写进 immediate_spoken_reply、core_task_spec 或普通文本。"
-        "ag99live_motion.choice 可以是 catalog 或 generate。"
-        "choice=catalog 时只写 motion_id 和 emotion_label，表示播放一个已经制作好的完整 motion3；"
-        "只有 catalog 说明明确匹配本轮回复时才这样做。"
-        "choice=generate 时 mode 只能是 idle 或 expressive；axes 只能使用下方 schema 中已有的轴 id，"
-        "每个轴值必须写成 {\"value\": number}，表示一个单帧姿态目标，由前端平滑插值播放。"
+        "ag99live_motion 只允许 emotion_label、duration_hint_ms、fallback_pose_id、axes 四类动作字段。"
+        "不要输出 choice、mode、motion_id、catalog、motion3、exp3 或任何播放文件引用。"
+        "axes 只能使用下方 schema 中已有的轴 id，每个轴值必须直接写成 number，例如 \"head_yaw\": 62。"
         "不要生成关键帧、时间曲线、随机抖动或来回摆动。"
-        "如果用户只是普通说话，也要给一个轻量 idle/generate 或合适 catalog 动作。"
-        "不要把参考示例、输出形状或情绪名称当成封闭动作模板；先理解本轮对话语气，再自由组合少量相关轴。"
-        "避免连续复用同一组轴和值；同样是 idle 也要在头部朝向、身体跟随、视线和眼部之间做语义变化。"
+        "fallback_pose_id 必须从候选中选择；它只是解析失败时的语义姿态兜底，不是播放表情文件。"
+        "如果用户只是普通说话，也要给一个轻量语义姿态。"
+        "不要把输出形状或情绪名称当成封闭动作模板；先理解本轮对话语气，再自由组合相关轴。"
+        "避免连续复用同一组轴和值；平静语气也要在头部朝向、身体跟随、视线和眼部之间做轻微语义变化。"
         "明确转身、强调、回避、惊讶、调侃、开心或疑惑时，优先用 head_yaw/head_roll/head_pitch "
         "配合 body_yaw/body_roll/body_pitch 建立可见动作骨架，再少量补眼部和表情细节。"
-        "输出形状示例只展示 JSON 结构和可用轴，里面的中位值不是推荐动作；实际输出应删掉无关轴，只保留本轮需要的轴。"
+        "输出形状示例只展示 JSON 结构和可用轴，里面的中位值不是推荐动作；实际输出应保留本轮有语义贡献的轴。"
         f"{style_text}"
         f"{axis_prompt_text}"
-        f"{motion_catalog_text}"
-        f"{reference_template_text}"
+        f"{fallback_pose_text}"
         f" 输出形状示例：{format_json}"
     )
 
@@ -554,15 +542,13 @@ def _build_plugin_hints_motion_format(profile_payload: dict[str, Any]) -> dict[s
         axis_id = str(axis.get("id") or "").strip()
         if not axis_id:
             continue
-        axis_schema[axis_id] = {"value": _resolve_axis_neutral_value(axis)}
+        axis_schema[axis_id] = _resolve_axis_neutral_value(axis)
 
     return {
         "ag99live_motion": {
-            "choice": "generate | catalog",
-            "mode": "idle | expressive",
             "emotion_label": "neutral",
-            "duration_hint_ms": 1500,
-            "motion_id": "optional catalog motion_id when choice=catalog",
+            "duration_hint_ms": DEFAULT_MOTION_INTENT_DURATION_MS,
+            "fallback_pose_id": DEFAULT_FALLBACK_POSE_ID,
             "axes": axis_schema,
         },
     }
@@ -685,7 +671,16 @@ def _schedule_motion_from_interaction_result(
         payload=plugin_hints_payload,
         reason=plugin_hints_reason,
     )
-    if plugin_hints_payload is not None:
+
+    policy = _resolve_motion_schedule_policy(
+        event,
+        phase=phase,
+        motion_generation_mode=motion_generation_mode,
+        reply_plan=reply_plan,
+    )
+
+    if plugin_hints_payload is not None and policy.should_schedule:
+        _call_event_method(event, "set_extra", "ag99live_split_motion_scheduled", True)
         return _MotionScheduleAttempt(
             phase=phase,
             source="plugin_hints",
@@ -704,13 +699,6 @@ def _schedule_motion_from_interaction_result(
             plugin_hints_motion_payload=plugin_hints_payload,
             plugin_hints_resolution_reason=plugin_hints_reason,
         )
-
-    policy = _resolve_motion_schedule_policy(
-        event,
-        phase=phase,
-        motion_generation_mode=motion_generation_mode,
-        reply_plan=reply_plan,
-    )
 
     if not assistant_text:
         return _MotionScheduleAttempt(
@@ -746,6 +734,25 @@ def _schedule_motion_from_interaction_result(
             motion_generation_mode=motion_generation_mode,
             scheduled=False,
             reason=policy.reason,
+            assistant_text=assistant_text,
+            plugin_hints_resolution_reason=plugin_hints_reason,
+        )
+
+    if phase == "final" and plugin_hints_payload is None:
+        return _MotionScheduleAttempt(
+            phase=phase,
+            source=None,
+            scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
+            event_frontend_turn_id=identity.event_frontend_turn_id,
+            active_frontend_turn_id=identity.active_frontend_turn_id,
+            reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
+            reply_plan_should_emit_immediate_reply=(
+                reply_plan.should_emit_immediate_reply if reply_plan is not None else None
+            ),
+            reply_plan_source=reply_plan.source if reply_plan is not None else None,
+            motion_generation_mode=motion_generation_mode,
+            scheduled=False,
+            reason="plugin_hints_motion_missing",
             assistant_text=assistant_text,
             plugin_hints_resolution_reason=plugin_hints_reason,
         )
@@ -943,9 +950,9 @@ def _resolve_final_phase_policy(
             reason="already_scheduled_by_motion_pipeline",
         )
     return _MotionSchedulePolicy(
-        should_schedule=False,
-        source=None,
-        reason="plugin_hints_motion_missing",
+        should_schedule=True,
+        source="interaction_result_final",
+        reason="schedule_core_reply_final",
     )
 
 

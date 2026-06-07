@@ -6,12 +6,12 @@
 
 ModelEngine 是前端的动作语义编译与启动模块。
 
-它接收当前协议中的动作载荷，将 `engine.motion_intent.v2` 编译为 `engine.parameter_plan.v2`，再把参数计划交给 Live2D 参数播放器执行。
+它接收当前协议中的动作载荷，将 `engine.motion_intent.v3` 编译为 `engine.parameter_plan.v2`，再把参数计划交给 Live2D 参数播放器执行。
 
 主链路：
 
 ```text
-engine.motion_intent.v2 / engine.parameter_plan.v2
+engine.motion_intent.v3 / engine.parameter_plan.v2
 -> normalizeMotionPayload / parseSemanticParameterPlan
 -> useModelEngine
 -> motionRuntimeScheduler
@@ -25,7 +25,8 @@ engine.motion_intent.v2 / engine.parameter_plan.v2
 
 | Payload | Schema | 说明 |
 | --- | --- | --- |
-| 动作意图 | `engine.motion_intent.v2` | 由语义轴表达动作意图，前端编译为参数计划 |
+| 动作意图 | `engine.motion_intent.v3` | 当前自动动作链路主协议；`axes` 为 flat number map |
+| 遗留动作意图 | `engine.motion_intent.v2` | 旧协议兼容路径；`axes` 为 `{ value }` 嵌套形态，不与 v3 混写 |
 | 参数计划 | `engine.parameter_plan.v2` | 前端可直接执行的 Live2D 参数计划 |
 
 ## 2. 负责什么
@@ -58,7 +59,7 @@ ModelEngine 不负责：
 | --- | --- |
 | `useModelEngine.ts` | 引擎 facade：持有状态、装配 runtime/start 依赖、暴露对外 API |
 | `contracts.ts` | 入站动作 payload 归一化后的边界类型 |
-| `normalize.ts` | `engine.motion_intent.v2` 和 `engine.parameter_plan.v2` 入站归一化 |
+| `normalize.ts` | `engine.motion_intent.v3`、遗留 `engine.motion_intent.v2` 和 `engine.parameter_plan.v2` 入站归一化 |
 | `planParser.ts` | `engine.parameter_plan.v2` parser 与 clone |
 | `settings.ts` | 动作强度和单轴强度设置 |
 | `timing.ts` | motion timing resolution，支持 hint/audio_sync/default |
@@ -282,13 +283,14 @@ order: 45
 
 ## 11. 表情与 Expressions 边界
 
-表情表现由语义轴和 Live2D 参数计划表达，不从 `Expressions/*.exp3.json` 生成主轴、prompt 示例或动作参考池。
+表情表现由语义轴和 Live2D 参数计划表达。自动动作链路不直接播放 `Expressions/*.exp3.json`，也不让 LLM 输出 exp3 文件名。
 
 当前规则：
 
 - LLM 只面向当前 `SemanticAxisProfile` 中允许控制的语义轴。
 - 表情态度主要通过 `mouth_smile`、`brow_bias`、`gaze_x`、`gaze_y` 等辅轴表达；需要姿态配合时再组合头部和身体主轴。
-- `Expressions/*.exp3.json` 属于模型作者预制的触发或叠加效果，不进入 ModelEngine compile pipeline。
+- `Expressions/*.exp3.json` 可以作为 fallback pose 候选的参数抽取来源，但最终仍必须转成 `engine.motion_intent.v3` flat axes，不作为播放 payload。
+- `Expressions/*.exp3.json` 不进入 ModelEngine compile pipeline 的直接播放分支。
 - 后续如果需要重新接入原生 expression，必须作为独立能力重新设计，不能混入主轴来源。
 
 ## 12. Motion 与主轴选择边界

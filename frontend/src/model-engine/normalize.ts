@@ -7,6 +7,7 @@ import type {
 import {
   SCHEMA_CATALOG_MOTION_V1,
   SCHEMA_MOTION_INTENT_V2,
+  SCHEMA_MOTION_INTENT_V3,
   SCHEMA_PARAMETER_PLAN_V2,
 } from "../types/protocol.js";
 import {
@@ -17,12 +18,12 @@ import type { NormalizedMotionPayload } from "./contracts.js";
 import { parseSemanticParameterPlan, type ParseResult } from "./planParser.js";
 import { isFiniteNumber, isObject, normalizeText } from "../utils/guards.js";
 
-function normalizeDynamicAxes(value: unknown): Record<string, { value: number }> | null {
+function normalizeDynamicAxesV2(value: unknown): Record<string, number> | null {
   if (!isObject(value)) {
     return null;
   }
 
-  const axes: Record<string, { value: number }> = {};
+  const axes: Record<string, number> = {};
   for (const [axisId, axisPayload] of Object.entries(value)) {
     const normalizedAxisId = normalizeText(axisId);
     if (!normalizedAxisId || !isObject(axisPayload) || !("value" in axisPayload)) {
@@ -32,7 +33,24 @@ function normalizeDynamicAxes(value: unknown): Record<string, { value: number }>
     if (!isFiniteNumber(axisValue)) {
       return null;
     }
-    axes[normalizedAxisId] = { value: axisValue };
+    axes[normalizedAxisId] = axisValue;
+  }
+
+  return Object.keys(axes).length > 0 ? axes : null;
+}
+
+function normalizeDynamicAxesV3(value: unknown): Record<string, number> | null {
+  if (!isObject(value)) {
+    return null;
+  }
+
+  const axes: Record<string, number> = {};
+  for (const [axisId, axisValue] of Object.entries(value)) {
+    const normalizedAxisId = normalizeText(axisId);
+    if (!normalizedAxisId || isObject(axisValue) || !isFiniteNumber(axisValue)) {
+      return null;
+    }
+    axes[normalizedAxisId] = axisValue;
   }
 
   return Object.keys(axes).length > 0 ? axes : null;
@@ -49,66 +67,75 @@ function warnNormalizeFailure(reason: string, value: unknown): void {
 
 function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIntent> {
   if (!isObject(value)) {
-    return { ok: false, reason: "motion_intent_v2_not_object" };
+    return { ok: false, reason: "motion_intent_not_object" };
   }
 
-  if (normalizeText(value.schema_version) !== SCHEMA_MOTION_INTENT_V2) {
-    return { ok: false, reason: "motion_intent_v2.invalid_schema_version" };
+  const schemaVersion = normalizeText(value.schema_version);
+  if (schemaVersion !== SCHEMA_MOTION_INTENT_V2 && schemaVersion !== SCHEMA_MOTION_INTENT_V3) {
+    return { ok: false, reason: "motion_intent.invalid_schema_version" };
   }
 
   const profileId = normalizeText(value.profile_id);
   const modelId = normalizeText(value.model_id);
   const profileRevision = value.profile_revision;
   if (!profileId) {
-    return { ok: false, reason: "motion_intent_v2.profile_id_empty" };
+    return { ok: false, reason: "motion_intent.profile_id_empty" };
   }
   if (!modelId) {
-    return { ok: false, reason: "motion_intent_v2.model_id_empty" };
+    return { ok: false, reason: "motion_intent.model_id_empty" };
   }
   if (!isFiniteNumber(profileRevision) || profileRevision <= 0) {
-    return { ok: false, reason: "motion_intent_v2.profile_revision_invalid" };
+    return { ok: false, reason: "motion_intent.profile_revision_invalid" };
   }
 
-  const modeRaw = normalizeText(value.mode).toLowerCase();
+  const modeRaw = normalizeText(value.mode || "expressive").toLowerCase();
   if (modeRaw !== "idle" && modeRaw !== "expressive") {
-    return { ok: false, reason: "motion_intent_v2.invalid_mode" };
+    return { ok: false, reason: "motion_intent.invalid_mode" };
   }
 
-  const axes = normalizeDynamicAxes(value.axes);
+  const axes = schemaVersion === SCHEMA_MOTION_INTENT_V3
+    ? normalizeDynamicAxesV3(value.axes)
+    : normalizeDynamicAxesV2(value.axes);
   if (!axes) {
-    return { ok: false, reason: "motion_intent_v2.invalid_axes" };
+    return {
+      ok: false,
+      reason: schemaVersion === SCHEMA_MOTION_INTENT_V3
+        ? "motion_intent_v3.invalid_flat_axes"
+        : "motion_intent_v2.invalid_axes",
+    };
   }
 
   const emotionLabel = normalizeText(value.emotion_label);
   if (!emotionLabel) {
-    return { ok: false, reason: "motion_intent_v2.emotion_label_empty" };
+    return { ok: false, reason: "motion_intent.emotion_label_empty" };
   }
 
   const durationHintRaw = value.duration_hint_ms;
   let durationHintMs: number | null = null;
   if (durationHintRaw !== undefined && durationHintRaw !== null) {
     if (!isFiniteNumber(durationHintRaw)) {
-      return { ok: false, reason: "motion_intent_v2.duration_hint_ms_not_number" };
+      return { ok: false, reason: "motion_intent.duration_hint_ms_not_number" };
     }
     if (durationHintRaw < 0) {
-      return { ok: false, reason: "motion_intent_v2.duration_hint_ms_negative" };
+      return { ok: false, reason: "motion_intent.duration_hint_ms_negative" };
     }
     durationHintMs = Math.round(durationHintRaw);
     if (durationHintMs < MIN_MOTION_DURATION_MS || durationHintMs > MAX_MOTION_DURATION_MS) {
-      return { ok: false, reason: "motion_intent_v2.duration_hint_ms_out_of_range" };
+      return { ok: false, reason: "motion_intent.duration_hint_ms_out_of_range" };
     }
   }
 
   return {
     ok: true,
     value: {
-      schema_version: SCHEMA_MOTION_INTENT_V2,
+      schema_version: schemaVersion,
       profile_id: profileId,
       profile_revision: Math.round(profileRevision),
       model_id: modelId,
       mode: modeRaw,
       emotion_label: emotionLabel,
       duration_hint_ms: durationHintMs,
+      fallback_pose_id: normalizeText(value.fallback_pose_id) || undefined,
       axes,
       summary: isObject(value.summary)
         ? {
@@ -210,7 +237,7 @@ export function normalizeMotionPayload(
     return { ok: true, payload: { kind: "catalog_motion", motion: motion.value } };
   }
 
-  if (schemaVersion === SCHEMA_MOTION_INTENT_V2) {
+  if (schemaVersion === SCHEMA_MOTION_INTENT_V2 || schemaVersion === SCHEMA_MOTION_INTENT_V3) {
     const intent = parseSemanticMotionIntent(value);
     if (!intent.ok) {
       warnNormalizeFailure(intent.reason, value);

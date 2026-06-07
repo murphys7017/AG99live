@@ -206,7 +206,10 @@ class TurnCoordinator:
         raw_reply_text = override_text or "\n".join(texts).strip()
         motion_generation_mode = _resolve_motion_generation_mode(self.runtime_state)
         inline_anim_detected = INLINE_ANIM_START_PATTERN.search(raw_reply_text) is not None
-        reply_text, inline_payload, inline_mode = _extract_inline_motion_plan(raw_reply_text)
+        reply_text, inline_payload, inline_mode = _extract_inline_motion_plan(
+            raw_reply_text,
+            runtime_state=self.runtime_state,
+        )
 
         if reply_text:
             self.chat_buffer.add("assistant", reply_text)
@@ -595,7 +598,10 @@ class TurnCoordinator:
         if not isinstance(motion_payload, dict):
             return False
 
-        if _resolve_motion_payload_schema_version(motion_payload) == "engine.motion_intent.v2":
+        if _resolve_motion_payload_schema_version(motion_payload) in {
+            "engine.motion_intent.v2",
+            "engine.motion_intent.v3",
+        }:
             try:
                 motion_payload = normalize_motion_intent_payload(motion_payload)
             except ValueError as exc:

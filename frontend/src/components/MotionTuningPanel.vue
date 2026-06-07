@@ -16,7 +16,7 @@ import type {
   SemanticParameterPlan,
 } from "../types/protocol";
 import {
-  SCHEMA_MOTION_INTENT_V2,
+  SCHEMA_MOTION_INTENT_V3,
   SCHEMA_PARAMETER_PLAN_V2,
 } from "../types/protocol";
 import type {
@@ -371,9 +371,7 @@ function buildAdjustedIntent(): SemanticMotionIntent | null {
     if (!Number.isFinite(value)) {
       continue;
     }
-    axes[axis.id] = {
-      value: clamp(value, axis.value_range[0], axis.value_range[1]),
-    };
+    axes[axis.id] = clamp(value, axis.value_range[0], axis.value_range[1]);
   }
 
   if (!Object.keys(axes).length) {
@@ -381,13 +379,14 @@ function buildAdjustedIntent(): SemanticMotionIntent | null {
   }
 
   return {
-    schema_version: SCHEMA_MOTION_INTENT_V2,
+    schema_version: SCHEMA_MOTION_INTENT_V3,
     profile_id: profile.profile_id,
     profile_revision: profile.revision,
     model_id: profile.model_id,
     mode: source.mode,
     emotion_label: normalizeEmotionLabel(emotionLabelText.value, source.emotionLabel),
     duration_hint_ms: source.durationMs,
+    fallback_pose_id: "neutral",
     axes,
     summary: {
       axis_count: Object.keys(axes).length,

@@ -407,7 +407,9 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     runtime = next(item for item in extensions if item.mount == "context")
     assert "AG99live Motion 是当前桌宠前端的主动作通道" in system.value
     assert '"plugin_hints":{"ag99live_motion"' in system.value
-    assert '"choice":"generate | catalog"' in system.value
+    assert '"fallback_pose_id":"neutral"' in system.value
+    assert '"choice"' not in system.value
+    assert '"motion_id"' not in system.value
     assert "immediate_spoken_reply" in system.value
     assert "避免连续复用同一组轴和值" in system.value
     assert "中位值不是推荐动作" in system.value
@@ -419,18 +421,18 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "低值=turn left；高值=turn right" in capability.value["semantic_profile"]["axis_prompt"]
     assert "使用说明=Use for attention direction." in capability.value["semantic_profile"]["axis_prompt"]
     assert "低值=turn left；高值=turn right" in system.value
-    assert "可复用的现成 motion3 动画" in system.value
-    assert "motion_id=serious_explain" in system.value
-    assert "旧表情参考模板" in system.value
+    assert "可复用的现成 motion3 动画" not in system.value
+    assert "旧表情参考模板" not in system.value
     assert "[动作]" not in system.value
     assert "head_yaw" in system.value
-    assert "[表情] Surprised" in system.value
+    assert "fallback_pose_id" in system.value
     assert "eye_open_left" in system.value
     assert "ParamHairX" not in system.value
     assert "ParamPhysicsX" not in system.value
-    assert "Tablet" not in system.value
-    assert "motion_reference_templates" in capability.value
-    assert "motion_catalog_options" in capability.value
+    assert "tablet" in system.value
+    assert "motion_reference_templates" not in capability.value
+    assert "motion_catalog_options" not in capability.value
+    assert "fallback_pose_candidates" in capability.value
     prompt_axis_ids = [
         item["id"] for item in capability.value["semantic_profile"]["prompt_axes"]
     ]
@@ -445,10 +447,108 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
         "Use for attention direction."
     )
     assert (
-        capability.value["plugin_hints_format"]["ag99live_motion"]["axes"]["head_yaw"]["value"]
+        capability.value["plugin_hints_format"]["ag99live_motion"]["axes"]["head_yaw"]
         == 50
     )
     assert runtime.value["configured_generation_mode"] == "split_after_reply"
+
+
+def test_fallback_pose_candidates_prioritize_enabled_matching_user_tuning(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    runtime_state = _build_runtime_state()
+    semantic_profile = runtime_state.model_info["models"][0]["semantic_axis_profile"]
+    runtime_state.motion_tuning_samples = [
+        {
+            "id": "disabled",
+            "model_name": "pet",
+            "profile_id": "pet.semantic.v1",
+            "profile_revision": 2,
+            "emotion_label": "disabled",
+            "enabled_for_llm_reference": False,
+            "adjusted_axes": {"head_yaw": 90},
+        },
+        {
+            "id": "old_revision",
+            "model_name": "pet",
+            "profile_id": "pet.semantic.v1",
+            "profile_revision": 1,
+            "emotion_label": "old",
+            "enabled_for_llm_reference": True,
+            "adjusted_axes": {"head_yaw": 80},
+        },
+        {
+            "id": "user_pose",
+            "model_name": "pet",
+            "profile_id": "pet.semantic.v1",
+            "profile_revision": 2,
+            "emotion_label": "happy",
+            "enabled_for_llm_reference": True,
+            "adjusted_axes": {
+                "head_yaw": 64,
+                "eye_open_left": 30,
+                "debug_tail": 100,
+            },
+        },
+    ]
+
+    candidates = module.build_fallback_pose_candidates(
+        runtime_state=runtime_state,
+        semantic_profile=semantic_profile,
+        limit=None,
+    )
+
+    assert candidates[0]["source"] == "motion_tuning_sample"
+    assert candidates[0]["id"] == "happy_user_pose"
+    assert candidates[0]["axes"] == {"head_yaw": 64.0, "eye_open_left": 30.0}
+    assert {item["id"] for item in candidates}.isdisjoint(
+        {"disabled_disabled", "old_old_revision"}
+    )
+
+
+def test_fallback_pose_candidates_use_expression_dominant_parameter_ids(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    runtime_state = _build_runtime_state()
+    semantic_profile = runtime_state.model_info["models"][0]["semantic_axis_profile"]
+    runtime_state.model_info = {
+        "selected_model": "pet",
+        "models": [
+            {
+                "name": "pet",
+                "semantic_axis_profile": semantic_profile,
+                "constraints": {
+                    "expressions": [
+                        {
+                            "name": "Question",
+                            "file": "Expressions/Question.exp3.json",
+                            "parameters": [],
+                            "dominant_parameters": [{"id": "ParamEyeLOpen"}],
+                        }
+                    ]
+                },
+            }
+        ],
+    }
+
+    candidates = module.build_fallback_pose_candidates(
+        runtime_state=runtime_state,
+        semantic_profile=semantic_profile,
+        limit=None,
+    )
+
+    assert candidates[0]["id"] == "question"
+    assert candidates[0]["source"] == "profile_binding_parameter_extract"
+    assert candidates[0]["axes"] == {"eye_open_left": 50.0}
+    assert candidates[-1]["id"] == "neutral"
 
 
 def test_plugin_hints_motion_payload_uses_profile_axis_value_range(
@@ -462,26 +562,28 @@ def test_plugin_hints_motion_payload_uses_profile_axis_value_range(
     runtime_state = event.adapter.turn_coordinator.runtime_state
     event.set_extra(
         "_interaction_plugin_hints",
-        {
-            "ag99live_motion": {
-                "mode": "expressive",
-                "emotion_label": "playful",
-                "duration_hint_ms": 1200,
-                "axes": {
-                    "head_yaw": {"value": 48},
-                    "eye_open_left": {"value": 72},
-                    "debug_tail": {"value": 100},
-                    "unknown_axis": {"value": 60},
-                },
-            }
-        },
+            {
+                "ag99live_motion": {
+                    "emotion_label": "playful",
+                    "duration_hint_ms": 1200,
+                    "fallback_pose_id": "neutral",
+                    "axes": {
+                        "head_yaw": 48,
+                        "eye_open_left": 72,
+                        "debug_tail": 100,
+                        "unknown_axis": 60,
+                    },
+                }
+            },
     )
 
     payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
 
     assert payload is not None
-    assert payload["axes"]["head_yaw"]["value"] == 48
-    assert payload["axes"]["eye_open_left"]["value"] == 72
+    assert payload["schema_version"] == "engine.motion_intent.v3"
+    assert payload["mode"] == "expressive"
+    assert payload["axes"]["head_yaw"] == 48
+    assert payload["axes"]["eye_open_left"] == 72
     assert "debug_tail" not in payload["axes"]
     assert "unknown_axis" not in payload["axes"]
 
@@ -498,17 +600,17 @@ def test_plugin_hints_motion_payload_accepts_json_string(
     event.set_extra(
         "_interaction_plugin_hints",
         json.dumps(
-            {
-                "ag99live_motion": {
-                    "mode": "expressive",
-                    "emotion_label": "curious",
-                    "duration_hint_ms": 1500,
-                    "axes": {
-                        "head_yaw": {"value": 48},
-                        "eye_open_left": {"value": 72},
-                    },
+                {
+                    "ag99live_motion": {
+                        "emotion_label": "curious",
+                        "duration_hint_ms": 1500,
+                        "fallback_pose_id": "neutral",
+                        "axes": {
+                            "head_yaw": 48,
+                            "eye_open_left": 72,
+                        },
+                    }
                 }
-            }
         ),
     )
 
@@ -517,8 +619,40 @@ def test_plugin_hints_motion_payload_accepts_json_string(
     assert payload is not None
     assert payload["emotion_label"] == "curious"
     assert payload["duration_hint_ms"] == 1500
-    assert payload["axes"]["head_yaw"]["value"] == 48
-    assert payload["axes"]["eye_open_left"]["value"] == 72
+    assert payload["axes"]["head_yaw"] == 48
+    assert payload["axes"]["eye_open_left"] == 72
+
+
+def test_plugin_hints_motion_payload_accepts_string_number_axes(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "emotion_label": "curious",
+                "duration_hint_ms": "1500",
+                "fallback_pose_id": "neutral",
+                "axes": {
+                    "head_yaw": "48",
+                    "eye_open_left": "72.5",
+                },
+            }
+        },
+    )
+
+    payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
+
+    assert payload is not None
+    assert payload["duration_hint_ms"] == 1500
+    assert payload["axes"]["head_yaw"] == 48
+    assert payload["axes"]["eye_open_left"] == 72.5
 
 
 def test_plugin_hints_expressive_payload_is_pushed_out_of_idle_deadzone(
@@ -532,25 +666,25 @@ def test_plugin_hints_expressive_payload_is_pushed_out_of_idle_deadzone(
     runtime_state = event.adapter.turn_coordinator.runtime_state
     event.set_extra(
         "_interaction_plugin_hints",
-        {
-            "ag99live_motion": {
-                "mode": "expressive",
-                "emotion_label": "playful",
-                "duration_hint_ms": 1200,
-                "axes": {
-                    "head_yaw": {"value": 50},
-                },
-            }
-        },
+            {
+                "ag99live_motion": {
+                    "emotion_label": "playful",
+                    "duration_hint_ms": 1200,
+                    "fallback_pose_id": "neutral",
+                    "axes": {
+                        "head_yaw": 50,
+                    },
+                }
+            },
     )
 
     payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
 
     assert payload is not None
-    assert payload["axes"]["head_yaw"]["value"] > 58
+    assert payload["axes"]["head_yaw"] > 58
 
 
-def test_plugin_hints_catalog_motion_payload_uses_catalog_option(
+def test_plugin_hints_forbidden_catalog_fields_fall_back_to_semantic_pose(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -573,10 +707,9 @@ def test_plugin_hints_catalog_motion_payload_uses_catalog_option(
     payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
 
     assert payload is not None
-    assert payload["schema_version"] == "engine.catalog_motion.v1"
-    assert payload["motion_id"] == "serious_explain"
-    assert payload["group"] == "TapBody"
-    assert payload["index"] == 0
+    assert payload["schema_version"] == "engine.motion_intent.v3"
+    assert "motion_id" not in payload
+    assert payload["fallback_pose_id"] == "neutral"
     assert payload["emotion_label"] == "explain"
 
 
@@ -646,11 +779,11 @@ def test_plugin_hints_motion_payload_accepts_head_roll_and_mouth_smile(
         "_interaction_plugin_hints",
         {
             "ag99live_motion": {
-                "mode": "expressive",
                 "emotion_label": "neutral",
+                "fallback_pose_id": "neutral",
                 "axes": {
-                    "head_roll": {"value": 40},
-                    "mouth_smile": {"value": 65},
+                    "head_roll": 40,
+                    "mouth_smile": 65,
                 },
             }
         },
@@ -678,9 +811,9 @@ def test_result_contributor_returns_plugin_hint_motion_as_client_object(
         "_interaction_plugin_hints",
         {
             "ag99live_motion": {
-                "mode": "expressive",
                 "emotion_label": "happy",
-                "axes": {"head_yaw": {"value": 50}},
+                "fallback_pose_id": "neutral",
+                "axes": {"head_yaw": 50},
             }
         },
     )
@@ -699,7 +832,7 @@ def test_result_contributor_returns_plugin_hint_motion_as_client_object(
     client_object = contribution.client_objects[0]
     assert client_object["type"] == "ag99live.motion_payload"
     assert client_object["source"] == "plugin_hints"
-    assert client_object["motion_payload"]["schema_version"] == "engine.motion_intent.v2"
+    assert client_object["motion_payload"]["schema_version"] == "engine.motion_intent.v3"
     assert contribution.platform_extras["client_objects"] == contribution.client_objects
     assert (
         contribution.metadata["ag99live_motion_schedule"]["reason"]
@@ -762,6 +895,44 @@ def test_result_contributor_reports_missing_plugin_hints_in_split_final_phase(
     )
 
 
+def test_result_contributor_returns_plugin_hint_motion_in_split_final_phase(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(mode="split_after_reply", raw_turn_id="raw-turn")
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "emotion_label": "focused",
+                "fallback_pose_id": "neutral",
+                "axes": {"head_yaw": 60},
+            }
+        },
+    )
+    view = _build_view(
+        phase="final",
+        route_mode="delegate_to_core",
+        final_result="最终回复文本",
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == []
+    assert len(contribution.client_objects) == 1
+    assert contribution.client_objects[0]["source"] == "plugin_hints"
+    assert event.get_extra("ag99live_split_motion_scheduled") is True
+    assert (
+        contribution.metadata["ag99live_motion_schedule"]["reason"]
+        == "plugin_hints_motion_client_object"
+    )
+
+
 def test_result_contributor_skips_final_phase_in_inline_mode(
     install_fake_astrbot,
     monkeypatch,
@@ -810,6 +981,98 @@ def test_result_contributor_skips_immediate_phase_for_hybrid_reply(
     assert (
         contribution.metadata["ag99live_motion_schedule"]["reason"]
         == "immediate_phase_waits_for_core_reply"
+    )
+
+
+def test_result_contributor_skips_plugin_hint_motion_in_hybrid_immediate_phase(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(mode="split_after_reply", raw_turn_id="raw-turn")
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "emotion_label": "thinking",
+                "fallback_pose_id": "neutral",
+                "axes": {"head_yaw": 55},
+            }
+        },
+    )
+    view = _build_view(
+        phase="immediate",
+        route_mode="hybrid",
+        final_result="先给你一句过渡回复",
+        immediate_reply="先给你一句过渡回复",
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == []
+    assert contribution.client_objects == []
+    assert event.get_extra("ag99live_split_motion_scheduled") is None
+    metadata = contribution.metadata["ag99live_motion_schedule"]
+    assert metadata["reason"] == "immediate_phase_waits_for_core_reply"
+    assert metadata["plugin_hints_resolution_reason"] == "ok"
+
+
+def test_result_contributor_dedupes_plugin_hint_motion_after_immediate_phase(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(mode="split_after_reply", raw_turn_id="raw-turn")
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "emotion_label": "happy",
+                "fallback_pose_id": "neutral",
+                "axes": {"head_yaw": 50},
+            }
+        },
+    )
+
+    immediate = asyncio.run(
+        contributor.collect(
+            event,
+            None,
+            _build_view(
+                phase="immediate",
+                route_mode="self_reply",
+                final_result="你好呀",
+                immediate_reply="你好呀",
+            ),
+        )
+    )
+    final = asyncio.run(
+        contributor.collect(
+            event,
+            None,
+            _build_view(
+                phase="final",
+                route_mode="delegate_to_core",
+                final_result="最终回复文本",
+            ),
+        )
+    )
+
+    assert immediate is not None
+    assert final is not None
+    assert scheduled_calls == []
+    assert len(immediate.client_objects) == 1
+    assert final.client_objects == []
+    assert (
+        final.metadata["ag99live_motion_schedule"]["reason"]
+        == "already_scheduled_by_motion_pipeline"
     )
 
 

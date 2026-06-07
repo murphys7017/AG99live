@@ -6,6 +6,7 @@ task:
 context:
   confidence: medium
   assumptions:
+    - Single frontend instance ↔ single adapter instance ↔ single Live2D model, one-to-one binding; multi-connection / multi-frontend / multi-model is out of scope for current refactor. Single-instance module-level singletons (e.g. frontend audio element, native microphone activeCapture, Live2D WebSDK LAppDelegate) are accepted by design and should not be flagged as multi-instance bugs in reviews. Cleanup-on-unmount is sufficient.
     - Remote operator permission and approval policy is intentionally open during functional testing and is not part of the current remediation scope.
     - Current Electron frontend should prefer JSON control frames plus WebSocket binary PCM16LE chunks over JSON number-array audio.
     - Legacy input.raw_audio_data and input.mic_audio_end remain available for old clients and debugging, but are no longer the current frontend main path.
@@ -24,6 +25,7 @@ architecture:
   stability: evolving
   boundary_changes:
     - Current issue ledger is recorded in docs/02-设计文档/05-前端结构维护清单.md.
+    - 2026-06-07 review reconciled: issue ledger in 05-前端结构维护清单.md already covers most reviewed high/medium findings. New findings not in ledger are mostly trust-boundary, Vue component polish, and Electron main process details; see review summary. Single-instance design premise (single frontend / adapter / Live2D model) is now recorded as a design assumption so future reviews do not re-flag singletons as multi-instance bugs.
     - Microphone WebSocket protocol now has JSON stream control frames and AG99 binary PCM16LE audio chunk frames.
     - Backend transport has a separate binary message handler instead of decoding bytes as UTF-8 JSON.
     - AG99 binary audio chunk metadata now carries capture_mode so backend speech ingress can route continuous capture to VAD and PTT capture to end-of-segment transcription.

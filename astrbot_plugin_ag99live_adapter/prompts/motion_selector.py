@@ -8,14 +8,6 @@ from .motion_selector_examples import (
     create_default_selector_few_shot_examples,
     resolve_selector_few_shot_examples as _resolve_selector_few_shot_examples,
 )
-from .motion_reference_templates import (
-    format_motion_reference_templates,
-    resolve_motion_reference_templates,
-)
-from .motion_catalog import (
-    format_motion_catalog_options,
-    resolve_motion_catalog_options,
-)
 from .semantic_axis_prompt import build_profile_axis_prompt_block
 
 
@@ -159,6 +151,7 @@ def build_selector_user_prompt(
     motion_reference_templates: list[dict[str, Any]] | None = None,
     motion_catalog_options: list[dict[str, Any]] | None = None,
 ) -> str:
+    del motion_reference_templates, motion_catalog_options
     if semantic_profile is not None:
         return build_selector_user_prompt_v2(
             text,
@@ -166,8 +159,6 @@ def build_selector_user_prompt(
             style_prompt=style_prompt,
             motion_instruction=motion_instruction,
             semantic_profile=semantic_profile,
-            motion_reference_templates=motion_reference_templates,
-            motion_catalog_options=motion_catalog_options,
         )
 
     lines: list[str] = []
@@ -194,9 +185,9 @@ def build_selector_user_prompt(
         "返回要求：\n"
         "只返回一个符合以下结构的 JSON 对象：\n"
         "{\n"
-        '  "emotion": "short-label",\n'
-        '  "mode": "idle or expressive",\n'
-        '  "duration_ms": 1200,\n'
+        '  "emotion_label": "short-label",\n'
+        '  "duration_hint_ms": 1000,\n'
+        '  "fallback_pose_id": "neutral",\n'
         '  "axes": {\n'
         '    "head_yaw": 50, "head_roll": 50, "head_pitch": 50,\n'
         '    "body_yaw": 50, "body_roll": 50, "body_pitch": 50,\n'
@@ -210,7 +201,6 @@ def build_selector_user_prompt(
         "生成规则：\n"
         "- 包含所有列出的轴。\n"
         "- 只使用整数。\n"
-        "- 中性、说明性、低情绪回复使用 mode=idle；明确情绪或明确姿态使用 mode=expressive。\n"
         "- 按语义匹配选择数值，不要按固定动作列表套模板。\n"
         "- 数值要稳定、可读，避免混乱的极端值。\n\n"
         f"{motion_instruction_block}"
@@ -226,8 +216,6 @@ def build_selector_user_prompt_v2(
     style_prompt: str = "",
     motion_instruction: str = "",
     semantic_profile: dict[str, Any],
-    motion_reference_templates: list[dict[str, Any]] | None = None,
-    motion_catalog_options: list[dict[str, Any]] | None = None,
 ) -> str:
     axis_block, allowed_axis_ids = build_profile_axis_prompt_block(
         semantic_profile,
@@ -246,16 +234,12 @@ def build_selector_user_prompt_v2(
     )
     motion_instruction_block = _build_motion_instruction_block(motion_instruction)
     style_prompt_block = _build_style_prompt_block(style_prompt)
-    reference_template_block = _build_motion_reference_template_block(
-        motion_reference_templates
-    )
-    catalog_block = _build_motion_catalog_block(motion_catalog_options)
 
     return (
         "请根据文本为 Live2D 角色选择语义动作轴数值。\n"
         "平台与任务：\n"
         "- AG99live 会在 AstrBot 对话过程中驱动 Live2D 角色。\n"
-        "- 主 LLM 已经完成助手回复；你的任务是选择一个现成 motion3 动画，或把本轮对话转换成一个单帧姿态目标。\n"
+        "- 主 LLM 已经完成助手回复；你的任务是把本轮对话转换成一个语义姿态目标。\n"
         "- 不要生成聊天文本、解释、Markdown 或额外字段。\n\n"
         "可控制参数：\n"
         "- 你只能使用下面列出的参数，不要编造参数名。\n"
@@ -268,26 +252,17 @@ def build_selector_user_prompt_v2(
         "返回要求：\n"
         "只返回一个符合以下结构的 JSON 对象：\n"
         "{\n"
-        '  "choice": "generate",\n'
-        '  "emotion": "short-label",\n'
-        '  "mode": "idle or expressive",\n'
-        '  "duration_ms": 1200,\n'
+        '  "emotion_label": "short-label",\n'
+        '  "duration_hint_ms": 1000,\n'
+        '  "fallback_pose_id": "neutral",\n'
         '  "axes": {\n'
         f'    "{allowed_axis_ids[0]}": 50\n'
         "  }\n"
         "}\n"
-        "如果选择现成 motion，则只返回：\n"
-        "{\n"
-        '  "choice": "catalog",\n'
-        '  "motion_id": "catalog-motion-id",\n'
-        '  "emotion": "short-label"\n'
-        "}\n"
         "生成规则：\n"
-        "- choice=catalog 表示播放一个已经制作好的完整 motion3 动画；只有当 catalog 说明明确匹配本轮语气时才使用。\n"
-        "- choice=generate 表示生成一个单帧姿态目标；这是默认路径，输出会由前端平滑插值播放，不是 motion3 多关键帧动画。\n"
-        "- 不要生成时间曲线、关键帧、随机抖动或来回摆动；generate 只给目标姿态轴值。\n"
-        "- 中性、说明性、低情绪回复使用 mode=idle；只有当助手文本带有明确情绪或明确姿态时才使用 mode=expressive。\n"
-        "- 通常输出 1 到 4 个相关轴；宁可少输出，也不要输出无关动作。\n"
+        "- 不要输出 choice、mode、motion_id、动画文件、表情文件或播放资源引用。\n"
+        "- 不要生成时间曲线、关键帧、随机抖动或来回摆动；只给目标姿态轴值。\n"
+        "- 尽可能输出能支撑本轮语气的相关轴，尤其保留头部、身体和视线的动作骨架；不要为了凑数量输出无关动作。\n"
         "- 只使用数字，并保持在每个轴自己的范围内。\n"
         "- 通过理解参数含义和对话上下文来选择参数；不要把示例或动作名当成封闭选项。\n"
         "- 示例只是语气锚点，不是模板答案；不要机械复用示例中的固定组合。\n"
@@ -298,8 +273,6 @@ def build_selector_user_prompt_v2(
         "- 数值要稳定、可读，避免混乱的极端值。\n\n"
         f"{style_prompt_block}"
         f"{motion_instruction_block}"
-        f"{catalog_block}"
-        f"{reference_template_block}"
         f"{few_shot_block}"
         f"文本：{text}"
     )
@@ -324,7 +297,7 @@ def _build_few_shot_block(
         input_text = truncate_prompt_text(str(item.get("input") or "").strip(), input_limit)
         output_payload = item.get("output")
         output_json = json.dumps(
-            output_payload if isinstance(output_payload, dict) else {},
+            _normalize_few_shot_output(output_payload),
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -353,52 +326,19 @@ def _build_style_prompt_block(style_prompt: str) -> str:
     )
 
 
-def _build_motion_reference_template_block(
-    motion_reference_templates: list[dict[str, Any]] | None,
-) -> str:
-    block = format_motion_reference_templates(
-        motion_reference_templates or [],
-        truncate_text=truncate_prompt_text,
-        limit=None,
-    )
-    if not block:
-        return ""
-    return f"{block}\n\n"
-
-
-def _build_motion_catalog_block(
-    motion_catalog_options: list[dict[str, Any]] | None,
-) -> str:
-    block = format_motion_catalog_options(
-        motion_catalog_options or [],
-        truncate_text=truncate_prompt_text,
-        limit=None,
-    )
-    if not block:
-        return ""
-    return f"{block}\n\n"
-
-
-def resolve_selector_motion_reference_templates(
-    *,
-    runtime_state: Any,
-    semantic_profile: dict[str, Any],
-) -> list[dict[str, Any]]:
-    return resolve_motion_reference_templates(
-        runtime_state=runtime_state,
-        semantic_profile=semantic_profile,
-        limit=None,
-    )
-
-
-def resolve_selector_motion_catalog_options(
-    *,
-    runtime_state: Any,
-) -> list[dict[str, Any]]:
-    return resolve_motion_catalog_options(
-        runtime_state=runtime_state,
-        limit=None,
-    )
+def _normalize_few_shot_output(output_payload: Any) -> dict[str, Any]:
+    if not isinstance(output_payload, dict):
+        return {}
+    axes = output_payload.get("axes")
+    normalized: dict[str, Any] = {
+        "emotion_label": str(
+            output_payload.get("emotion_label") or output_payload.get("emotion") or "neutral"
+        ).strip() or "neutral",
+        "duration_hint_ms": output_payload.get("duration_hint_ms", output_payload.get("duration_ms", 1000)),
+        "fallback_pose_id": str(output_payload.get("fallback_pose_id") or "neutral").strip() or "neutral",
+        "axes": axes if isinstance(axes, dict) else {},
+    }
+    return normalized
 
 
 def truncate_prompt_text(value: str, max_chars: int) -> str:

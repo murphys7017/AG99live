@@ -13,7 +13,7 @@ AG99live V2 的 AstrBot 插件侧实现。该目录负责协议桥接、turn 生
 
 ## 当前路线说明
 
-- 后端当前主职责是产出结构化动作意图 `engine.motion_intent.v2`，并通过 middleware-first 链路稳定送到前端。
+- 后端当前主职责是产出结构化动作意图 `engine.motion_intent.v3`，并通过 middleware-first 链路稳定送到前端。
 - 前端 `ModelEngine` 负责把 intent 编译为 `engine.parameter_plan.v2`。
 - 说话时的 plan 级补偿由前端 compile 侧 `SpeechPoseStage` 承接。
 - 连续多段之间的惯性、衰减、残留、soft handoff 和层间混合由前端 Live2D runtime 侧 `ParameterPresentationLayer` 承接，而不是放回后端动作生成链路。
@@ -50,13 +50,15 @@ astrbot_plugin_ag99live_adapter/
 
 - Adapter 在请求主模型前注入 `<@anim {...}>` 输出契约。
 - 主回复末尾若包含合法 `<@anim {...}>`，则优先提取并广播动作载荷。
-- 当前 inline contract 使用 `engine.motion_intent.v2`，字段来自当前模型的 `semantic_axis_profile`。
+- 当前 inline contract 使用 `engine.motion_intent.v3`，字段来自当前模型的 `semantic_axis_profile`。
 - 如果中间件在 result contributor 阶段返回 `client_objects` / plugin hints 动作载荷，则后端优先广播这些结构化动作对象。
 - MiniMax 等 provider 可能把工具参数里的 `plugin_hints` 作为 JSON 字符串返回；当前插件会在动作 contributor 中兼容 dict 和 JSON 字符串两种形态，AstrBot core 侧也应保留同样的解析能力，避免 `_interaction_plugin_hints` 被清空。
 
 ### 动作 selector 输出
 
-- 当前主动作载荷为 `engine.motion_intent.v2`，前端 `ModelEngine` 根据 `semantic_axis_profile` 编译为 `engine.parameter_plan.v2` 再执行。
+- 当前主动作载荷为 `engine.motion_intent.v3`，前端 `ModelEngine` 根据 `semantic_axis_profile` 编译为 `engine.parameter_plan.v2` 再执行。
+- v3 的 `axes` 是 flat number map，例如 `"head_yaw": 62`；LLM 契约不包含 `mode`，Adapter 归一化后补 `mode: "expressive"`。
+- 自动动作链路不允许 LLM 输出 `choice`、`motion_id`、catalog motion、motion3、exp3 或旧播放文件引用。
 - `motion_prompt_instruction` 会注入中间件动作上下文或 selector prompt，用于影响动作风格和幅度；只有显式启用 `inline_first` 时才会注入 inline contract。
 - 中间件 prompt 只暴露 profile 中的 `primary/hint` axes，禁止输出 `derived/runtime/ambient/debug` axes。
 
@@ -127,9 +129,9 @@ AG99live 远程执行器当前走任务委托链路：
 
 当前 realtime motion selector 的参考策略：
 
-- 默认优先使用从旧 motion/exp3 抽象出的动作/表情参考模板；这些模板可用时，不再额外注入内置固定 few-shot。
-- 内置 fixed few-shot 只作为 fallback：模板为空时使用，或通过 `realtime_motion_fixed_fewshot_with_reference_templates` 显式打开。
-- 用户保存的 motion tuning 样本默认不直接进入 few-shot，而是汇总成角色风格偏好文本，注入 selector prompt 和 middleware-first 主链路动作契约，约束角色习惯而不是强推固定输出。
+- 自动动作链路不再把旧 motion/exp3 reference templates 或 catalog motion 作为模型可选项注入。
+- selector prompt 使用当前 `SemanticAxisProfile` 轴说明、动作指令、用户手调样本形成的风格偏好和 fallback pose 候选。
+- fallback pose 候选来源优先级为：用户保存的手调结果 -> `Expressions/*.exp3.json` 显式参数抽取 -> 当前 `SemanticAxisProfile.parameter_bindings` 可映射参数抽取；三层都不可用时才使用默认 neutral pose；最终仍输出 `engine.motion_intent.v3` flat axes。
 
 ## 开发与验证
 

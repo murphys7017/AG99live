@@ -12,6 +12,7 @@ import type {
 } from "../types/protocol";
 import {
   SCHEMA_MOTION_INTENT_V2,
+  SCHEMA_MOTION_INTENT_V3,
 } from "../types/protocol.js";
 import {
   clearPlaybackGroupContext as clearPlaybackGroup,
@@ -536,7 +537,10 @@ export function createAdapterConnection(
   }
 
   function sendMotionPayloadPreview(payload: unknown): boolean {
-    return sendMotionPreview(outboundCtx, payload, SCHEMA_MOTION_INTENT_V2);
+    return sendMotionPreview(outboundCtx, payload, [
+      SCHEMA_MOTION_INTENT_V2,
+      SCHEMA_MOTION_INTENT_V3,
+    ]);
   }
 
   async function sendPlaybackFinished(

@@ -9,7 +9,7 @@ AG99live 的 Electron + Vue 客户端。
 - 历史窗口
 - Action Lab（动作计划预览与测试）
 - 与 Adapter 的 V2 协议通信
-- 前端 ModelEngine：本地编译 `engine.motion_intent.v2 -> engine.parameter_plan.v2`
+- 前端 ModelEngine：本地编译 `engine.motion_intent.v3 -> engine.parameter_plan.v2`，并保留 `engine.motion_intent.v2` 遗留兼容路径
 
 ## 开发命令
 
@@ -34,6 +34,6 @@ npm run dev
 - 本地播放完成与后端 `turn_finished` 已分离：先 `playback_finished`，再等后端收口
 - 计划软衔接（soft handoff）
 - 高频重复计划去重与重启节流
-- 设置窗口支持 ModelEngine 表现倍率：全局强度倍率参与 v2 编译
-- 动作实验室支持最近 5 次真实 v2 播放 plan 回放、主轴手动调参、保存调参样本
-- Action Lab 参数动作原子池基于当前 semantic profile 生成 `engine.motion_intent.v2` 预览
+- 设置窗口支持 ModelEngine 表现倍率：全局强度倍率参与语义 intent 编译
+- 动作实验室支持最近 5 次真实语义播放 plan 回放、主轴手动调参、保存调参样本
+- Action Lab 参数动作原子池基于当前 semantic profile 生成 `engine.motion_intent.v3` 预览
