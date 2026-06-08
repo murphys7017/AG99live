@@ -202,6 +202,14 @@ class TurnCoordinator:
 
         self._mark_turn_timing("emit_started_at")
         texts, picture_paths, record_paths = _extract_outbound_message_parts(message_chain)
+        logger.info(
+            "WIRING output_parts turn_id=%s message_id=%s text_count=%s image_count=%s record_count=%s",
+            turn_id or "",
+            segment_message_id or "",
+            len(texts),
+            len(picture_paths),
+            len(record_paths),
+        )
         override_text = str(raw_reply_text_override or "").strip()
         raw_reply_text = override_text or "\n".join(texts).strip()
         motion_generation_mode = _resolve_motion_generation_mode(self.runtime_state)
@@ -291,7 +299,16 @@ class TurnCoordinator:
 
         if record_paths:
             record_path = record_paths[0]
-            _, audio_url = self.media_service.cache_audio_file(record_path)
+            try:
+                _, audio_url = self.media_service.cache_audio_file(record_path)
+            except Exception as exc:
+                logger.warning(
+                    "WIRING audio_payload_egress_failed turn_id=%s message_id=%s error=%s",
+                    turn_id or "",
+                    segment_message_id or "",
+                    exc,
+                )
+                raise
             await self._send_json(
                 build_output_audio(
                     turn_id=turn_id,
@@ -301,6 +318,12 @@ class TurnCoordinator:
                     speaker_name=self.speaker_name,
                     avatar="",
                 )
+            )
+            logger.info(
+                "WIRING audio_payload_egress turn_id=%s message_id=%s audio_url=%s",
+                turn_id or "",
+                segment_message_id or "",
+                audio_url,
             )
             self._mark_turn_timing("audio_payload_sent_at")
             self._mark_turn_synthesizing()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -24,7 +25,7 @@ def _build_handler(
     normalized_routes = {prefix: path.resolve() for prefix, path in routes.items()}
 
     class StaticResourceHandler(SimpleHTTPRequestHandler):
-        def translate_path(self, path: str) -> str:
+        def _resolve_static_path(self, path: str) -> Path | None:
             parsed_path = urlparse(path).path
             request_path = unquote(parsed_path)
 
@@ -35,16 +36,28 @@ def _build_handler(
                     try:
                         target.relative_to(root)
                     except ValueError:
-                        return str(root / "__forbidden__")
-                    return str(target)
+                        return None
+                    return target
 
-            return str(Path("__missing__").resolve())
+            return None
+
+        def translate_path(self, path: str) -> str:
+            target = self._resolve_static_path(path)
+            if target is None:
+                return str(Path("__missing__").resolve())
+            return str(target)
 
         def end_headers(self) -> None:
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS, POST")
             self.send_header("Access-Control-Allow-Headers", "*")
             super().end_headers()
+
+        def do_GET(self) -> None:  # noqa: N802
+            self._send_static_file(include_body=True)
+
+        def do_HEAD(self) -> None:  # noqa: N802
+            self._send_static_file(include_body=False)
 
         def do_OPTIONS(self) -> None:  # noqa: N802
             self.send_response(200)
@@ -88,6 +101,43 @@ def _build_handler(
             content_type, _ = mimetypes.guess_type(path)
             return content_type or "application/octet-stream"
 
+        def _send_static_file(self, *, include_body: bool) -> None:
+            target = self._resolve_static_path(self.path)
+            if target is None:
+                self.send_error(404, "Not found.")
+                return
+            if target.is_dir():
+                self.send_error(404, "Not found.")
+                return
+            if not target.is_file():
+                self.send_error(404, "Not found.")
+                return
+
+            try:
+                file_size = target.stat().st_size
+                self.send_response(200)
+                self.send_header("Content-Type", self.guess_type(str(target)))
+                self.send_header("Content-Length", str(file_size))
+                self.end_headers()
+                if include_body:
+                    with target.open("rb") as file_handle:
+                        self._copy_file(file_handle)
+            except (BrokenPipeError, ConnectionResetError):
+                return
+            except OSError as exc:
+                logger.warning(
+                    "Static resource request failed: path=%s error=%s",
+                    urlparse(self.path).path,
+                    exc,
+                )
+
+        def _copy_file(self, file_handle) -> None:
+            while True:
+                chunk = file_handle.read(1024 * 1024)
+                if not chunk:
+                    return
+                self.wfile.write(chunk)
+
         def _send_json_response(self, status_code: int, payload: dict[str, Any]) -> None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(status_code)
@@ -99,6 +149,7 @@ def _build_handler(
         def log_message(self, format: str, *args) -> None:
             return
 
+    StaticResourceHandler.directory = os.fspath(Path.cwd())
     return StaticResourceHandler
 
 
