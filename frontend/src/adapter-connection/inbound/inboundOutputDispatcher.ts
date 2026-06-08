@@ -29,7 +29,7 @@ export interface InboundOutputDispatchDeps {
       turnId: string | null,
       url: string,
       messageId: string,
-    ) => void;
+    ) => boolean;
     ensureSegment: (
       turnId: string | null,
       messageId: string,
@@ -149,13 +149,28 @@ async function applyOutputAudio(
   }
 
   const resolvedUrl = deps.rewriteHttpUrl(event.audioUrl);
+  const audioAccepted = deps.sessionStore?.markAudioReceived(
+    event.turnId,
+    resolvedUrl,
+    event.messageId,
+  ) ?? true;
+  console.info("[Connection] output audio received.", {
+    turnId: event.turnId,
+    messageId: event.messageId,
+    audioAccepted,
+    rawUrl: event.audioUrl,
+    resolvedUrl,
+  });
+  if (!audioAccepted) {
+    s.statusMessage = "收到重复语音回复，已忽略。";
+    return;
+  }
   deps.queuePendingAudioForPlayback(
     s.pendingAudios,
     resolvedUrl,
     event.turnId,
     event.messageId,
   );
-  deps.sessionStore?.markAudioReceived(event.turnId, resolvedUrl, event.messageId);
 }
 
 function applyOutputImage(

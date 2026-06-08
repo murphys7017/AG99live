@@ -243,12 +243,25 @@ export function useTurnPlaybackSessionStore() {
     turnId: string | null,
     url: string,
     messageId: string,
-  ): void {
+  ): boolean {
     const trimmed = url.trim();
     if (!trimmed) {
-      return;
+      return false;
     }
-    const { segment } = getSegmentSession(turnId, messageId);
+    const { session, segment } = getSegmentSession(turnId, messageId);
+    const hasExistingAudioUrl =
+      typeof segment.audio.url === "string"
+      && segment.audio.url.trim().length > 0;
+    if (
+      hasExistingAudioUrl
+      && (
+        segment.audio.released
+        || segment.audio.started
+        || segment.audio.terminal !== "idle"
+      )
+    ) {
+      return false;
+    }
     segment.audio.url = trimmed;
     segment.audio.receivedAtMs = performance.now();
     segment.audio.released = false;
@@ -257,6 +270,10 @@ export function useTurnPlaybackSessionStore() {
     segment.audio.started = false;
     segment.audio.startedAtMs = null;
     segment.audio.durationMs = null;
+    if (session.phase === "settling") {
+      markPhaseInternal(session, "playing");
+    }
+    return true;
   }
 
   function markAudioStarted(

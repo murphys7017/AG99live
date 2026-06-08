@@ -85,6 +85,13 @@ export async function startAudioPlayback(
       if (audioElement !== audio) {
         return;
       }
+      console.warn("[Connection] audio element error.", {
+        audioUrl,
+        errorCode: audio.error?.code ?? null,
+        errorMessage: audio.error?.message ?? "",
+        networkState: audio.networkState,
+        readyState: audio.readyState,
+      });
       cleanup();
       options.onError();
     },
@@ -95,6 +102,12 @@ export async function startAudioPlayback(
     await audio.play();
     markPlaybackStarted();
   } catch (error) {
+    console.warn("[Connection] audio play rejected.", {
+      audioUrl,
+      error,
+      networkState: audio.networkState,
+      readyState: audio.readyState,
+    });
     cleanup();
     throw error;
   }

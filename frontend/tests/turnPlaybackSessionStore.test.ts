@@ -270,6 +270,39 @@ function testAudioTerminalHandlesAllStates(): void {
   assert.equal(store.getSession("turn-1")?.segments.get("msg-1")?.audio.reason, "error");
 }
 
+function testDuplicateAudioReceiveDoesNotResetCompletedSegment(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.setActiveSession("turn-1");
+  store.markTextReceived("turn-1", "Hello", "msg-1");
+
+  assert.equal(store.markAudioReceived("turn-1", "http://localhost/a.wav", "msg-1"), true);
+  store.markAudioReleased("turn-1", "msg-1");
+  store.markAudioStarted("turn-1", "msg-1", 100, 1000);
+  store.markAudioTerminal("turn-1", "completed", "msg-1", "ok");
+
+  assert.equal(store.markAudioReceived("turn-1", "http://localhost/a.wav", "msg-1"), false);
+  const segment = store.getSession("turn-1")?.segments.get("msg-1");
+  assert.equal(segment?.audio.terminal, "completed");
+  assert.equal(segment?.audio.started, true);
+}
+
+function testDifferentAudioUrlDoesNotResetCompletedSegment(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.setActiveSession("turn-1");
+  store.markTextReceived("turn-1", "Hello", "msg-1");
+
+  assert.equal(store.markAudioReceived("turn-1", "http://localhost/a.wav", "msg-1"), true);
+  store.markAudioReleased("turn-1", "msg-1");
+  store.markAudioStarted("turn-1", "msg-1", 100, 1000);
+  store.markAudioTerminal("turn-1", "completed", "msg-1", "ok");
+
+  assert.equal(store.markAudioReceived("turn-1", "http://localhost/a-v2.wav", "msg-1"), false);
+  const segment = store.getSession("turn-1")?.segments.get("msg-1");
+  assert.equal(segment?.audio.url, "http://localhost/a.wav");
+  assert.equal(segment?.audio.terminal, "completed");
+  assert.equal(segment?.audio.started, true);
+}
+
 function run(): void {
   testSessionStartsWithoutTurnLevelPlaybackSlots();
   testSameMessageIdGroupsTextAudioMotion();
@@ -288,6 +321,8 @@ function run(): void {
   testInterruptMarksSessionFailed();
   testInterruptDoesNotCreateNewSession();
   testAudioTerminalHandlesAllStates();
+  testDuplicateAudioReceiveDoesNotResetCompletedSegment();
+  testDifferentAudioUrlDoesNotResetCompletedSegment();
   console.log("turnPlaybackSessionStore tests passed");
 }
 

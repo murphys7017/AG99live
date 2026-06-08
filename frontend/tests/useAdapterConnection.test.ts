@@ -296,6 +296,43 @@ function sendTurnStarted(socket: FakeWebSocket, turnId = "turn-1"): void {
   }));
 }
 
+function sendSynthFinished(socket: FakeWebSocket, turnId: string | null, messageId: string): void {
+  socket.emitMessage(JSON.stringify({
+    type: "control.synth_finished",
+    version: "v2",
+    message_id: messageId,
+    timestamp: "2026-05-08T00:00:02.000Z",
+    turn_id: turnId,
+    source: "backend",
+    payload: {},
+  }));
+}
+
+function sendOutputAudio(
+  socket: FakeWebSocket,
+  options: {
+    turnId: string;
+    messageId: string;
+    audioUrl: string;
+    text?: string;
+  },
+): void {
+  socket.emitMessage(JSON.stringify({
+    type: "output.audio",
+    version: "v2",
+    message_id: options.messageId,
+    timestamp: "2026-05-08T00:00:03.000Z",
+    turn_id: options.turnId,
+    source: "backend",
+    payload: {
+      audio_url: options.audioUrl,
+      text: options.text ?? "hello",
+      speaker_name: "Alice",
+      avatar: "",
+    },
+  }));
+}
+
 function parseSentJsonMessages(socket: FakeWebSocket): Array<Record<string, unknown>> {
   return socket.sent
     .filter((item): item is string => typeof item === "string")
@@ -577,6 +614,130 @@ function testSynthFinishedDoesNotMarkReleasedAudioAbsent(): void {
     assert.equal(segment?.audio.released, true);
     assert.notEqual(segment?.audio.terminal, "absent");
   });
+}
+
+async function testLateAudioAfterSynthFinishedStillPlaysOnce(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket, sessionStore } = harness;
+    sendTurnStarted(socket, "turn-late-audio");
+    socket.emitMessage(JSON.stringify({
+      type: "output.text",
+      version: "v2",
+      message_id: "msg-late-audio",
+      timestamp: "2026-05-08T00:00:01.000Z",
+      turn_id: "turn-late-audio",
+      source: "backend",
+      payload: { text: "late audio", speaker_name: "assistant", avatar: "" },
+    }));
+
+    sendSynthFinished(socket, null, "synth-late-audio");
+    await flushMicrotasks();
+
+    const beforeAudio = sessionStore.getSession("turn-late-audio")?.segments.get("msg-late-audio");
+    assert.equal(beforeAudio?.audio.terminal, "absent");
+
+    sendOutputAudio(socket, {
+      turnId: "turn-late-audio",
+      messageId: "msg-late-audio",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/late.wav",
+      text: "late audio",
+    });
+    await flushMicrotasks();
+
+    const queuedAudio = sessionStore.getSession("turn-late-audio")?.segments.get("msg-late-audio");
+    assert.equal(queuedAudio?.audio.terminal, "idle");
+    assert.equal(adapter.state.pendingAudios.size, 1);
+    assert.equal(adapter.releaseAudioForPlayback("msg-late-audio", "turn-late-audio"), true);
+    await flushMicrotasks();
+
+    const afterAudio = sessionStore.getSession("turn-late-audio")?.segments.get("msg-late-audio");
+    assert.equal(FakeAudio.instances.length, 1);
+    assert.equal(adapter.state.isPlayingAudio, true);
+    assert.equal(afterAudio?.audio.started, true);
+    assert.equal(afterAudio?.audio.terminal, "idle");
+    assert.equal(adapter.state.pendingAudios.size, 0);
+  } finally {
+    harness.scope.stop();
+  }
+}
+
+async function testDuplicateOutputAudioDoesNotReplayCompletedSegment(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket, sessionStore } = harness;
+    sendTurnStarted(socket, "turn-duplicate-audio");
+    sendOutputAudio(socket, {
+      turnId: "turn-duplicate-audio",
+      messageId: "msg-duplicate-audio",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/repeat.wav",
+      text: "repeat audio",
+    });
+
+    assert.equal(adapter.releaseAudioForPlayback("msg-duplicate-audio", "turn-duplicate-audio"), true);
+    await flushMicrotasks();
+    FakeAudio.instances[0]?.emit("ended");
+    await flushMicrotasks();
+
+    const completed = sessionStore.getSession("turn-duplicate-audio")?.segments.get("msg-duplicate-audio");
+    assert.equal(FakeAudio.instances.length, 1);
+    assert.equal(completed?.audio.terminal, "completed");
+
+    sendOutputAudio(socket, {
+      turnId: "turn-duplicate-audio",
+      messageId: "msg-duplicate-audio",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/repeat.wav",
+      text: "repeat audio",
+    });
+    await flushMicrotasks();
+
+    const afterDuplicate = sessionStore.getSession("turn-duplicate-audio")?.segments.get("msg-duplicate-audio");
+    assert.equal(FakeAudio.instances.length, 1);
+    assert.equal(adapter.state.pendingAudios.size, 0);
+    assert.equal(afterDuplicate?.audio.terminal, "completed");
+  } finally {
+    harness.scope.stop();
+  }
+}
+
+async function testChangedUrlOutputAudioDoesNotReplayCompletedSegment(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket, sessionStore } = harness;
+    sendTurnStarted(socket, "turn-changed-audio");
+    sendOutputAudio(socket, {
+      turnId: "turn-changed-audio",
+      messageId: "msg-changed-audio",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/first.wav",
+      text: "repeat audio",
+    });
+
+    assert.equal(adapter.releaseAudioForPlayback("msg-changed-audio", "turn-changed-audio"), true);
+    await flushMicrotasks();
+    FakeAudio.instances[0]?.emit("ended");
+    await flushMicrotasks();
+
+    const completed = sessionStore.getSession("turn-changed-audio")?.segments.get("msg-changed-audio");
+    assert.equal(FakeAudio.instances.length, 1);
+    assert.equal(completed?.audio.url, "http://127.0.0.1:12397/cache/audio/first.wav");
+    assert.equal(completed?.audio.terminal, "completed");
+
+    sendOutputAudio(socket, {
+      turnId: "turn-changed-audio",
+      messageId: "msg-changed-audio",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/second.wav",
+      text: "repeat audio",
+    });
+    await flushMicrotasks();
+
+    const afterDuplicate = sessionStore.getSession("turn-changed-audio")?.segments.get("msg-changed-audio");
+    assert.equal(FakeAudio.instances.length, 1);
+    assert.equal(adapter.state.pendingAudios.size, 0);
+    assert.equal(afterDuplicate?.audio.url, "http://127.0.0.1:12397/cache/audio/first.wav");
+    assert.equal(afterDuplicate?.audio.terminal, "completed");
+  } finally {
+    harness.scope.stop();
+  }
 }
 
 function testTurnFinishedDoesNotMarkMissingSegmentAudioAbsent(): void {
@@ -1169,6 +1330,9 @@ async function run(): Promise<void> {
   testTurnStartedResetsPendingMaps();
   testSynthFinishedMarksMissingSegmentAudioAbsent();
   testSynthFinishedDoesNotMarkReleasedAudioAbsent();
+  await testLateAudioAfterSynthFinishedStillPlaysOnce();
+  await testDuplicateOutputAudioDoesNotReplayCompletedSegment();
+  await testChangedUrlOutputAudioDoesNotReplayCompletedSegment();
   testTurnFinishedDoesNotMarkMissingSegmentAudioAbsent();
   testStaleSynthFinishedReportsProtocolViolation();
   testMotionFallbackDoesNotCreateAnonymousSession();

@@ -467,6 +467,40 @@ async function testSettlementWindowUsesInjectedTimer(): Promise<void> {
   assert.equal(h.scheduledTimers.size, 0);
 }
 
+async function testLateAudioAfterNoAudioAckReopensSettlingSession(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
+  h.sessionStore.markTextDelivered("turn-1", "msg-a");
+  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-a", "no_audio");
+  h.sessionStore.markMotionAbsent("turn-1", "msg-a");
+  h.sessionStore.markSynthFinished("turn-1");
+  await h.flush();
+  await h.flush();
+
+  assert.equal(h.playbackFinishedCalls.length, 1);
+  assert.equal(h.sessionStore.getActiveSession()?.phase, "settling");
+
+  assert.equal(h.sessionStore.markAudioReceived("turn-1", "http://localhost/late.wav", "msg-a"), true);
+  await h.flush();
+
+  assert.equal(h.sessionStore.getActiveSession()?.phase, "playing");
+  assert.equal(h.playbackFinishedCalls.length, 1);
+
+  h.sessionStore.markAudioReleased("turn-1", "msg-a");
+  h.sessionStore.markAudioStarted("turn-1", "msg-a", 100, 1000);
+  h.sessionStore.markAudioTerminal("turn-1", "completed", "msg-a", "audio_playback_completed");
+  await h.flush();
+  await h.flush();
+
+  assert.equal(h.playbackFinishedCalls.length, 2);
+  assert.deepEqual(h.playbackFinishedCalls[1], {
+    turnId: "turn-1",
+    success: true,
+    reason: "text_delivered",
+  });
+  assert.equal(h.sessionStore.getActiveSession()?.phase, "settling");
+}
+
 async function run(): Promise<void> {
   await testSegmentCompletionDoesNotFinishTurnEarly();
   await testAllSegmentsAndSynthFinishedAckOnce();
@@ -481,6 +515,7 @@ async function run(): Promise<void> {
   await testSynthFinishedAfterTurnFinishedStillAcks();
   await testCompletionCoordinatorIgnoresStaleSession();
   await testSettlementWindowUsesInjectedTimer();
+  await testLateAudioAfterNoAudioAckReopensSettlingSession();
   console.log("playbackCompletionCoordinator tests passed");
 }
 

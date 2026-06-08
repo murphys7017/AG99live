@@ -64,7 +64,7 @@ export interface InboundDispatchDeps {
     markInterrupt: (turnId: string | null) => void;
     markTextReceived: (turnId: string | null, text: string, messageId: string, mode?: string) => void;
     markTextDelivered: (turnId: string | null, messageId: string) => void;
-    markAudioReceived: (turnId: string | null, url: string, messageId: string) => void;
+    markAudioReceived: (turnId: string | null, url: string, messageId: string) => boolean;
     markAudioTerminal: (turnId: string | null, terminal: string, messageId: string, reason?: string) => void;
     markMotionReceived: (turnId: string | null, payload: NormalizedMotionPayload, messageId: string) => void;
     ensureSegment: (turnId: string | null, messageId: string) => { text: { content: string | null } };

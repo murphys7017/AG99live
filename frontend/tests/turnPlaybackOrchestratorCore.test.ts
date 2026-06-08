@@ -187,6 +187,21 @@ function testTextOnlyReleasesAfterShortWait(): void {
   assert.deepEqual(harness.events, ["text:msg-1:turn-1"]);
 }
 
+function testLateAudioAfterTextReleaseDoesNotReleaseTextAgain(): void {
+  const harness = createHarness();
+
+  harness.core.markTextReady("msg-1", "turn-1");
+  harness.advanceTo(TEXT_ONLY_RELEASE_WAIT_MS);
+  harness.core.markTextReady("msg-1", "turn-1", true);
+  harness.core.markAudioReady("msg-1", "turn-1");
+  harness.advanceTo(TEXT_ONLY_RELEASE_WAIT_MS + AUDIO_MOTION_SYNC_WAIT_MS);
+
+  assert.deepEqual(harness.events, [
+    "text:msg-1:turn-1",
+    "audio:msg-1:turn-1",
+  ]);
+}
+
 function testNoAudioWithMotionReleasesTextAndMotion(): void {
   const harness = createHarness();
 
@@ -244,6 +259,7 @@ function run(): void {
   testLateMotionAfterReleaseIsForwarded();
   testAudioReleaseFailureKeepsGroupRetryable();
   testTextOnlyReleasesAfterShortWait();
+  testLateAudioAfterTextReleaseDoesNotReleaseTextAgain();
   testNoAudioWithMotionReleasesTextAndMotion();
   testDifferentMessageGroupsDoNotCrossRelease();
   testMissingIdentifiersDoNotShareUnknownGroup();

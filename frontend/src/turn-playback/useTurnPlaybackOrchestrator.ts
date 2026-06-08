@@ -127,8 +127,12 @@ export function useTurnPlaybackOrchestrator(
           options.sessionStore.markPhase(segment.turnId, "ready");
         }
 
-        if (canReleaseText(segment)) {
-          core.markTextReady(segment.messageId, segment.turnId);
+        if (segment.text.content) {
+          core.markTextReady(
+            segment.messageId,
+            segment.turnId,
+            segment.text.released || segment.text.delivered,
+          );
         }
 
         if (canReleaseAudio(segment)) {

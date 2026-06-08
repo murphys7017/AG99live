@@ -14,7 +14,7 @@ const VALID_PHASE_TRANSITIONS: Record<TurnPlaybackPhase, TurnPlaybackPhase[]> = 
   collecting: ["ready", "failed"],
   ready: ["playing", "failed"],
   playing: ["settling", "failed"],
-  settling: ["completed", "failed"],
+  settling: ["playing", "completed", "failed"],
   completed: [],
   failed: [],
 };

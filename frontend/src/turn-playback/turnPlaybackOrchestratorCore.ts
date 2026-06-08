@@ -134,11 +134,14 @@ export function createTurnPlaybackOrchestratorCore(
   function releaseGroup(group: PendingTurnPlaybackGroup, reason: string): void {
     clearReleaseTimer(group);
     group.released = true;
-    const releasedText = options.releaseText(
-      group.messageId,
-      group.turnId,
-    );
-    group.textReleased = group.textReleased || releasedText;
+    let releasedText = false;
+    if (!group.textReleased) {
+      releasedText = options.releaseText(
+        group.messageId,
+        group.turnId,
+      );
+      group.textReleased = releasedText;
+    }
     releaseMotion(group, reason);
     if (group.audioReady) {
       const releasedAudio = options.releaseAudio(
@@ -240,9 +243,11 @@ export function createTurnPlaybackOrchestratorCore(
     markTextReady: (
       messageId: string,
       turnId: string | null,
+      alreadyReleased = false,
     ) => {
       const group = getOrCreateGroup(messageId, turnId);
       group.textReady = true;
+      group.textReleased = group.textReleased || alreadyReleased;
       evaluateGroup(group, "text_ready");
     },
     markAudioReady: (

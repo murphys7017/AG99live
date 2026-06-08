@@ -207,6 +207,24 @@ export function usePlaybackCompletionCoordinator(
     }
   }
 
+  function reopenAckedSessionForLateAudio(
+    session: TurnPlaybackSession,
+    segment: TurnPlaybackSegment,
+  ): void {
+    if (!ackedSessions.has(session.id)) {
+      return;
+    }
+    if (
+      session.phase !== "playing"
+      || !segment.audio.url
+      || segment.audio.terminal !== "idle"
+      || segment.audio.released
+    ) {
+      return;
+    }
+    ackedSessions.delete(session.id);
+  }
+
   function schedulePlaybackSettlementWindow(sessionId: string, messageId: string): void {
     const key = segmentKey(sessionId, messageId);
     if (settlementTimers.has(key)) {
@@ -337,6 +355,8 @@ export function usePlaybackCompletionCoordinator(
         const segment = session.segments.get(segmentId);
         return {
           messageId: segmentId,
+          audioUrl: segment?.audio.url ?? null,
+          audioReleased: segment?.audio.released ?? false,
           textDelivered: segment?.text.delivered ?? false,
           audioTerminal: segment?.audio.terminal ?? "idle",
           motionAbsent: segment?.motion.absent ?? false,
@@ -355,6 +375,9 @@ export function usePlaybackCompletionCoordinator(
         }
         for (const segmentId of session.segmentOrder) {
           const segment = session.segments.get(segmentId);
+          if (segment) {
+            reopenAckedSessionForLateAudio(session, segment);
+          }
           if (segment?.text.delivered) {
             maybeFlushPlaybackCompletion(session.id, segment.messageId, "text_delivered");
           }

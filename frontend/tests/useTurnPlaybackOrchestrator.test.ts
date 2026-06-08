@@ -156,9 +156,49 @@ async function testTextAndMotionReleaseWhenAudioIsAbsent(): Promise<void> {
   h.stop();
 }
 
+async function testLateAudioAfterTextReleaseOnlyReleasesAudio(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.setActiveSession("turn-late-audio");
+  h.sessionStore.markTurnStarted("turn-late-audio");
+
+  h.sessionStore.markTextReceived("turn-late-audio", "hello", "msg-late-audio");
+  h.sessionStore.markSynthFinished("turn-late-audio");
+  h.sessionStore.markAudioTerminal(
+    "turn-late-audio",
+    "absent",
+    "msg-late-audio",
+    "synth_finished_without_audio_playback",
+  );
+
+  await h.flush();
+  await h.flush();
+  assert.deepEqual(h.released, [
+    "text:msg-late-audio:turn-late-audio",
+  ]);
+
+  assert.equal(
+    h.sessionStore.markAudioReceived(
+      "turn-late-audio",
+      "http://localhost/late.wav",
+      "msg-late-audio",
+    ),
+    true,
+  );
+
+  await h.flush();
+  await h.flush();
+
+  assert.deepEqual(h.released, [
+    "text:msg-late-audio:turn-late-audio",
+    "audio:msg-late-audio:turn-late-audio",
+  ]);
+  h.stop();
+}
+
 async function run(): Promise<void> {
   await testSegmentsReleaseSequentiallyWithinTurn();
   await testTextAndMotionReleaseWhenAudioIsAbsent();
+  await testLateAudioAfterTextReleaseOnlyReleasesAudio();
   console.log("useTurnPlaybackOrchestrator tests passed");
 }
 
