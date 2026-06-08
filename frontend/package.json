@@ -21,9 +21,10 @@
     "test:push-to-talk-controller": "tsc -p tsconfig.test.json --outDir .test-out-push-to-talk-controller && node --experimental-specifier-resolution=node .test-out-push-to-talk-controller/tests/pushToTalkController.test.js",
     "test:inbound-protocol": "tsc -p tsconfig.test.json --outDir .test-out-inbound-protocol && node --experimental-specifier-resolution=node .test-out-inbound-protocol/tests/inboundProtocol.test.js",
     "test:inbound-events": "tsc -p tsconfig.test.json --outDir .test-out-inbound-events && node --experimental-specifier-resolution=node .test-out-inbound-events/tests/inboundEvents.test.js",
+    "test:motion-runtime-scheduler": "tsc -p tsconfig.test.json --outDir .test-out-motion-runtime-scheduler && node --experimental-specifier-resolution=node .test-out-motion-runtime-scheduler/tests/motionRuntimeScheduler.test.js",
     "test:model-engine": "tsc -p tsconfig.test.json --outDir .test-out-model-engine && node --experimental-specifier-resolution=node .test-out-model-engine/tests/modelEngineCompiler.test.js",
     "test:adapter-connection": "tsc -p tsconfig.test.json --outDir .test-out-adapter-connection && node --experimental-specifier-resolution=node .test-out-adapter-connection/tests/useAdapterConnection.test.js",
-    "test": "npm run test:orchestration && npm run test:session && npm run test:turn-orchestrator && npm run test:coordinator && npm run test:preview-motion-player && npm run test:desktop-profile-scope && npm run test:desktop-bridge-clone && npm run test:push-to-talk-controller && npm run test:inbound-protocol && npm run test:inbound-events && npm run test:model-engine && npm run test:adapter-connection",
+    "test": "npm run test:orchestration && npm run test:session && npm run test:turn-orchestrator && npm run test:coordinator && npm run test:preview-motion-player && npm run test:desktop-profile-scope && npm run test:desktop-bridge-clone && npm run test:push-to-talk-controller && npm run test:inbound-protocol && npm run test:inbound-events && npm run test:motion-runtime-scheduler && npm run test:model-engine && npm run test:adapter-connection",
     "build": "npm run typecheck && electron-vite build",
     "build:web": "vue-tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview"

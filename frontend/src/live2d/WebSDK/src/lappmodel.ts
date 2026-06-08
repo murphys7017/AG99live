@@ -46,6 +46,8 @@ import { TextureInfo } from "./lapptexturemanager";
 import { LAppWavFileHandler } from "./lappwavfilehandler";
 import { CubismMoc } from "@framework/model/cubismmoc";
 
+const AsyncMotionAcceptedHandle = { status: "async_motion_accepted" };
+
 enum LoadStep {
   LoadAssets,
   LoadModel,
@@ -797,6 +799,8 @@ export class LAppModel extends CubismUserModel {
     priority: number,
     onFinishedMotionHandler?: FinishedMotionCallback
   ): CubismMotionQueueEntryHandle {
+    this._motionStartError = "";
+
     // Add a log specifically when trying to start a tap motion (which uses priority 3)
     if (priority === 3 && LAppDefine.DebugLogEnable) {
       console.log(`[APP] startMotion: Attempting to start tap motion. Group: '${group}', Index: ${no}`);
@@ -808,6 +812,7 @@ export class LAppModel extends CubismUserModel {
       if (this._debugMode) {
         LAppPal.printMessage("[APP]can't start motion.");
       }
+      this._motionStartError = "motion_priority_rejected";
       return InvalidMotionQueueEntryHandleValue;
     }
 
@@ -817,6 +822,13 @@ export class LAppModel extends CubismUserModel {
     const name = `${group}_${no}`;
     let motion: CubismMotion = this._motions.getValue(name) as CubismMotion;
     let autoDelete = false;
+    const finishAsyncMotionWithoutStart = (reason: string): void => {
+      this._motionStartError = reason;
+      if (this._motionManager.getReservePriority() === priority) {
+        this._motionManager.setReservePriority(0);
+      }
+      onFinishedMotionHandler?.();
+    };
 
     if (motion == null) {
       if (LAppDefine.DebugLogEnable) {
@@ -834,6 +846,10 @@ export class LAppModel extends CubismUserModel {
           }
         })
         .then((arrayBuffer) => {
+          if (!(arrayBuffer instanceof ArrayBuffer)) {
+            finishAsyncMotionWithoutStart("motion_fetch_no_data");
+            return;
+          }
           motion = this.loadMotion(
             arrayBuffer,
             arrayBuffer.byteLength,
@@ -845,6 +861,7 @@ export class LAppModel extends CubismUserModel {
              if (LAppDefine.DebugLogEnable) {
                 console.error(`[APP] startMotion: Failed to load motion from fetched data for '${name}'`);
              }
+            finishAsyncMotionWithoutStart("motion_load_failed");
             return;
           }
 
@@ -870,30 +887,44 @@ export class LAppModel extends CubismUserModel {
           if (LAppDefine.DebugLogEnable) {
             console.log(`[APP] startMotion: Starting fetched motion '${name}'`);
           }
-          this._motionManager.startMotionPriority(
+          const loadedHandle = this._motionManager.startMotionPriority(
             motion,
             autoDelete,
             priority
           );
+          if (loadedHandle === InvalidMotionQueueEntryHandleValue) {
+            finishAsyncMotionWithoutStart("motion_start_rejected");
+          }
+        })
+        .catch((error) => {
+          if (LAppDefine.DebugLogEnable) {
+            console.error(`[APP] startMotion: Failed to fetch motion '${name}'`, error);
+          }
+          finishAsyncMotionWithoutStart("motion_fetch_failed");
         });
-      // Return InvalidHandle immediately because the motion starts asynchronously
-      // This might be an issue if the caller expects a valid handle right away.
-      // Let's reconsider this. Maybe startMotion should return a Promise? For now, keep original logic.
-       return InvalidMotionQueueEntryHandleValue; 
+      return AsyncMotionAcceptedHandle;
     } else {
       if (LAppDefine.DebugLogEnable) {
         console.log(`[APP] startMotion: Motion '${name}' found in cache. Starting.`);
       }
       motion.setFinishedMotionHandler(onFinishedMotionHandler);
       // Start the motion if found in cache
-      return this._motionManager.startMotionPriority(
+      const handle = this._motionManager.startMotionPriority(
           motion,
           autoDelete, // Should be false for cached motions? Let's assume true based on original code.
           priority
       );
+      if (handle === InvalidMotionQueueEntryHandleValue) {
+        this._motionStartError = "motion_start_rejected";
+      }
+      return handle;
     }
 
     // Original code had voice logic and startMotionPriority call here, moved inside blocks
+  }
+
+  public getMotionStartError(): string {
+    return this._motionStartError || "";
   }
 
   /**
@@ -2760,6 +2791,7 @@ export class LAppModel extends CubismUserModel {
     this._consistency = false;
     this._directParameterPlanState = null;
     this._directParameterPlanError = "";
+    this._motionStartError = "";
     this._speechAudioEnvelope = 0.0;
   }
 
@@ -2792,5 +2824,6 @@ export class LAppModel extends CubismUserModel {
   _consistency: boolean; // MOC3一貫性チェック管理用
   _directParameterPlanState: DirectParameterPlanState | null;
   _directParameterPlanError: string;
+  _motionStartError: string;
   _speechAudioEnvelope: number;
 }

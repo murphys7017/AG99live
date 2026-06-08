@@ -256,6 +256,39 @@ function testInvalidHistoryCreatedPayloadReturnsProtocolError(): void {
   assert.equal(event.error.path, "payload.history_uid");
 }
 
+function testInvalidModelSyncPayloadReturnsProtocolError(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.model_sync", {
+      model_info: null,
+      conf_name: "default",
+      conf_uid: "conf-1",
+      client_uid: "client-1",
+    }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
+  }
+  assert.equal(event.error.path, "payload.model_info");
+}
+
+function testInvalidMotionTuningSamplesStatePayloadReturnsProtocolError(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.motion_tuning_samples_state", {
+      samples: {},
+    }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
+  }
+  assert.equal(event.error.path, "payload.samples");
+}
+
 function run(): void {
   testOutputTextUsesEnvelopeIdentity();
   testOutputAudioFallsBackToCurrentTurn();
@@ -269,6 +302,8 @@ function run(): void {
   testInvalidOutputTextPayloadReturnsProtocolError();
   testInvalidTurnFinishedReasonReturnsProtocolError();
   testInvalidHistoryCreatedPayloadReturnsProtocolError();
+  testInvalidModelSyncPayloadReturnsProtocolError();
+  testInvalidMotionTuningSamplesStatePayloadReturnsProtocolError();
 
   console.log("inboundEvents tests passed");
 }

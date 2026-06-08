@@ -61,6 +61,7 @@ export interface ModelEnginePlaybackSegment {
     started: boolean;
     startedAtMs: number | null;
     durationMs: number | null;
+    terminal: "idle" | "completed" | "failed" | "absent";
   };
 }
 

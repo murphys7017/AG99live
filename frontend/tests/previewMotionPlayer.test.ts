@@ -81,18 +81,26 @@ function installMockAdapter(): { startCount: () => number } {
   };
 }
 
-function installCatalogMockAdapter(startMotionResult: number): { startMotionCount: () => number } {
+function installCatalogMockAdapter(
+  startMotionResult: unknown,
+  options: { finishImmediately?: boolean; motionStartError?: string } = {},
+): { startMotionCount: () => number } {
   let startMotionCount = 0;
   (globalThis as typeof globalThis & {
     getLAppAdapter?: () => {
-      startMotion: (group: string, no: number, priority: number, onFinished?: () => void) => number;
+      startMotion: (group: string, no: number, priority: number, onFinished?: () => void) => unknown;
+      getMotionStartError: () => string;
       stopDirectParameterPlan: () => void;
     };
   }).getLAppAdapter = () => ({
-    startMotion: () => {
+    startMotion: (_group, _no, _priority, onFinished) => {
       startMotionCount += 1;
+      if (options.finishImmediately) {
+        queueMicrotask(() => onFinished?.());
+      }
       return startMotionResult;
     },
+    getMotionStartError: () => options.motionStartError ?? "",
     stopDirectParameterPlan: () => {},
   });
   return {
@@ -130,15 +138,16 @@ async function testSoftHandoffDuplicateStillReportsStarted(): Promise<void> {
   scope.stop();
 }
 
-async function testCatalogMotionAsyncHandleWithDurationIsAccepted(): Promise<void> {
-  const adapter = installCatalogMockAdapter(-1);
+async function testCatalogMotionInvalidHandleWithDurationFails(): Promise<void> {
+  const adapter = installCatalogMockAdapter(-1, { motionStartError: "motion_start_rejected" });
   const scope = effectScope();
   const player = scope.run(() => usePreviewMotionPlayer());
   assert.ok(player);
 
-  assert.equal(player.playCatalogMotion(buildCatalogMotion(3000), null), true);
+  assert.equal(player.playCatalogMotion(buildCatalogMotion(3000), null), false);
   assert.equal(adapter.startMotionCount(), 1);
-  assert.equal(player.state.status, "playing");
+  assert.equal(player.state.status, "failed");
+  assert.match(player.state.message, /motion_start_rejected/);
   scope.stop();
 }
 
@@ -153,10 +162,28 @@ async function testCatalogMotionInvalidHandleWithoutDurationStillFails(): Promis
   scope.stop();
 }
 
+async function testCatalogMotionAsyncAcceptedFailureReportsFailed(): Promise<void> {
+  const adapter = installCatalogMockAdapter(
+    { status: "async_motion_accepted" },
+    { finishImmediately: true, motionStartError: "motion_fetch_failed" },
+  );
+  const scope = effectScope();
+  const player = scope.run(() => usePreviewMotionPlayer());
+  assert.ok(player);
+
+  assert.equal(player.playCatalogMotion(buildCatalogMotion(3000), null), true);
+  await Promise.resolve();
+  assert.equal(adapter.startMotionCount(), 1);
+  assert.equal(player.state.status, "failed");
+  assert.match(player.state.message, /motion_fetch_failed/);
+  scope.stop();
+}
+
 async function run(): Promise<void> {
   await testSoftHandoffDuplicateStillReportsStarted();
-  await testCatalogMotionAsyncHandleWithDurationIsAccepted();
+  await testCatalogMotionInvalidHandleWithDurationFails();
   await testCatalogMotionInvalidHandleWithoutDurationStillFails();
+  await testCatalogMotionAsyncAcceptedFailureReportsFailed();
   console.log("previewMotionPlayer tests passed");
 }
 

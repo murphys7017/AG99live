@@ -80,7 +80,7 @@ export function createMotionRuntimeScheduler(
       }
       for (const segmentId of session.segmentOrder) {
         const segment = session.segments.get(segmentId);
-        if (!segment || !segment.audio.started) {
+        if (!segment || !segment.audio.started || segment.audio.terminal !== "idle") {
           continue;
         }
         if (normalizedMessageId) {
@@ -161,11 +161,13 @@ export function createMotionRuntimeScheduler(
     context: InboundPayloadContext,
   ): void {
     const normalizedTurnId = normalizeTurnId(context.turnId);
+    const normalizedPlaybackTurnId =
+      normalizeTurnId(context.playbackTurnId ?? null) ?? normalizedTurnId;
     if (!normalizedTurnId) {
       hooks.onStartPayload(payload, {
         messageId: context.messageId,
         turnId: null,
-        playbackTurnId: context.playbackTurnId ?? context.turnId ?? null,
+        playbackTurnId: normalizedPlaybackTurnId,
         startReason: "missing_turn_id",
         queuedDelayMs: 0,
       });
@@ -186,7 +188,7 @@ export function createMotionRuntimeScheduler(
       payload,
       messageId: context.messageId,
       turnId: normalizedTurnId,
-      playbackTurnId: context.playbackTurnId ?? context.turnId ?? null,
+      playbackTurnId: normalizedPlaybackTurnId,
       receivedAtMs: context.receivedAtMs,
       audioWaitTimer: 0,
     };

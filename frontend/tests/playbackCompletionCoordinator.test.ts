@@ -137,6 +137,10 @@ async function testAllSegmentsAndSynthFinishedAckOnce(): Promise<void> {
   h.sessionStore.markTurnFinished("turn-1", true);
   await h.flush();
   assert.equal(h.sessionStore.getActiveSession()?.phase, "completed");
+
+  h.sessionStore.markSynthFinished("turn-1");
+  await h.flush();
+  assert.equal(h.playbackFinishedCalls.length, 1);
 }
 
 async function testTurnFinishedBeforeSynthFinishedDoesNotAck(): Promise<void> {

@@ -24,12 +24,14 @@ import {
   parseHistoryDataPayload,
   parseHistoryDeletedPayload,
   parseHistoryListPayload,
+  parseMotionTuningSamplesStatePayload,
   parseOutputAudioPayload,
   parseOutputImagePayload,
   parseOutputTextPayload,
   parseOutputTranscriptionPayload,
   parseSemanticAxisProfileSaveFailedPayload,
   parseSemanticAxisProfileSavedPayload,
+  parseSystemModelSyncPayload,
   parseSystemServerInfoPayload,
 } from "./inboundPayloads.js";
 
@@ -168,10 +170,16 @@ export function mapInboundEnvelopeToEvent(
       };
     }
     case INBOUND_MESSAGE_TYPES.SYSTEM_MODEL_SYNC:
-      return {
-        kind: "model_sync",
-        envelope: envelope as ProtocolEnvelope<SystemModelSyncPayload>,
-      };
+      {
+        const parsed = parseSystemModelSyncPayload(envelope);
+        if (!parsed.ok) {
+          return protocolPayloadError(envelope, parsed.error);
+        }
+        return {
+          kind: "model_sync",
+          envelope: withPayload(envelope, parsed.payload),
+        };
+      }
     case INBOUND_MESSAGE_TYPES.SYSTEM_SEMANTIC_AXIS_PROFILE_SAVED: {
       const parsed = parseSemanticAxisProfileSavedPayload(envelope);
       if (!parsed.ok) {
@@ -193,10 +201,16 @@ export function mapInboundEnvelopeToEvent(
       };
     }
     case INBOUND_MESSAGE_TYPES.SYSTEM_MOTION_TUNING_SAMPLES_STATE:
-      return {
-        kind: "motion_tuning_samples_state",
-        envelope,
-      };
+      {
+        const parsed = parseMotionTuningSamplesStatePayload(envelope);
+        if (!parsed.ok) {
+          return protocolPayloadError(envelope, parsed.error);
+        }
+        return {
+          kind: "motion_tuning_samples_state",
+          envelope: withPayload(envelope, parsed.payload),
+        };
+      }
     case INBOUND_MESSAGE_TYPES.SYSTEM_HISTORY_LIST: {
       const parsed = parseHistoryListPayload(envelope);
       if (!parsed.ok) {

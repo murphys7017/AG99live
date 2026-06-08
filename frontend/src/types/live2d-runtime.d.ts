@@ -16,7 +16,8 @@ declare global {
         no: number,
         priority: number,
         onFinishedMotionHandler?: () => void,
-      ) => number;
+      ) => unknown;
+      getMotionStartError?: () => string;
       setAmbientMotionEnabled?: (enabled: boolean) => void;
       startDirectParameterPlan?: (plan: MotionPlanPayload) => boolean;
       stopDirectParameterPlan?: () => void;

@@ -22,6 +22,9 @@ class Esp32DisplayBridge {
   private connected = false;
   private closing = false;
   private lastError = "";
+  private rejectedFrameCount = 0;
+  private lastRejectedReply = "";
+  private lastRejectLogAt = 0;
 
   isConnected(): boolean {
     return this.connected;
@@ -40,6 +43,9 @@ class Esp32DisplayBridge {
     this.config = config;
     this.closing = false;
     this.lastError = "";
+    this.rejectedFrameCount = 0;
+    this.lastRejectedReply = "";
+    this.lastRejectLogAt = 0;
     await this.connect();
     console.info(`[Esp32Display] start resolved connected=${this.connected}`);
   }
@@ -222,7 +228,23 @@ class Esp32DisplayBridge {
         }
         resolve(ok);
       };
-      const onData = () => finish(true);
+      const onData = (chunk: Buffer) => {
+        const reply = chunk.toString("utf8").trim().toLowerCase();
+        if (reply === "ok" || reply.includes("ok")) {
+          finish(true);
+          return;
+        }
+        this.rejectedFrameCount += 1;
+        this.lastRejectedReply = reply || "<empty>";
+        const now = Date.now();
+        if (now - this.lastRejectLogAt > 5000) {
+          this.lastRejectLogAt = now;
+          console.warn(
+            `[Esp32Display] device rejected frame(s): count=${this.rejectedFrameCount} last=${this.lastRejectedReply}`,
+          );
+        }
+        finish(true);
+      };
       const onError = (err: Error) => finish(false, err.message);
       const onClose = () => finish(false, "connection_closed");
       sock.once("data", onData);

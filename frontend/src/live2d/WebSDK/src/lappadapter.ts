@@ -63,6 +63,10 @@ export class LAppAdapter {
     return this.getModel()?.startMotion(group, no, priority, onFinishedMotionHandler) ?? InvalidMotionQueueEntryHandleValue;
   }
 
+  public getMotionStartError(): string {
+    return this.getModel()?.getMotionStartError?.() ?? "";
+  }
+
   public setAmbientMotionEnabled(enabled: boolean): void {
     LAppDefine.setAmbientMotionEnabled(enabled);
     this.getModel()?.setAmbientMotionEnabled(enabled);

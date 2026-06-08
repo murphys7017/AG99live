@@ -23,6 +23,11 @@ import { buildAudioStreamChunkFrame, float32ToPcm16le } from "./audioStreamFrame
 
 export type MicrophoneCaptureOrigin = "manual" | "ptt" | "auto";
 export type PttCaptureCommandResult = "started" | "stopped" | "discarded" | "ignored" | "failed";
+type MicrophoneStartFailureReason =
+  | "none"
+  | "not_connected"
+  | "ptt_release_before_ready"
+  | "start_error";
 
 export interface AdapterMicrophoneRuntimeState {
   microphoneDeviceId: string;
@@ -80,6 +85,7 @@ export function createAdapterMicrophoneRuntime(
   let audioStreamStarted = false;
   let micCaptureOrigin: MicrophoneCaptureOrigin | null = null;
   let pendingPttRelease = false;
+  let lastStartFailureReason: MicrophoneStartFailureReason = "none";
 
   function sendMicrophoneAudioChunk(chunk: MicrophoneAudioChunk): void {
     const socket = deps.getSocket();
@@ -220,6 +226,7 @@ export function createAdapterMicrophoneRuntime(
 
     const socket = deps.getSocket();
     if (!socket || socket.readyState !== WebSocket.OPEN) {
+      lastStartFailureReason = "not_connected";
       deps.state.lastError = "当前还没有连上适配器，无法启动麦克风。";
       deps.state.statusMessage = deps.state.lastError;
       deps.pushHistory("error", deps.state.lastError);
@@ -231,6 +238,7 @@ export function createAdapterMicrophoneRuntime(
     micStartPromise = (async () => {
       try {
         audioSequenceBroken = false;
+        lastStartFailureReason = "none";
         pendingPttRelease = false;
         activeMicTurnId = createRootInputTurnId();
         micCaptureOrigin = origin;
@@ -246,12 +254,14 @@ export function createAdapterMicrophoneRuntime(
 
         if (pendingPttRelease && micCaptureOrigin === "ptt") {
           await discardMicrophoneCaptureBeforeRecognition("ptt_release_before_ready");
+          lastStartFailureReason = "ptt_release_before_ready";
           return false;
         }
 
         deps.state.micCapturing = true;
         deps.state.micRequested = true;
         deps.state.lastError = "";
+        lastStartFailureReason = "none";
         deps.state.statusMessage = "麦克风已开启，正在自动检测说话。";
         void refreshMicrophoneDevices({ requestPermission: false });
         deps.pushHistory("system", deps.state.statusMessage);
@@ -264,6 +274,7 @@ export function createAdapterMicrophoneRuntime(
         audioStreamStarted = false;
         micCaptureOrigin = null;
         pendingPttRelease = false;
+        lastStartFailureReason = "start_error";
         deps.state.lastError =
           error instanceof Error ? error.message : "麦克风启动失败。";
         deps.state.statusMessage = `麦克风启动失败：${deps.state.lastError}`;
@@ -316,7 +327,7 @@ export function createAdapterMicrophoneRuntime(
     if (started) {
       return "started";
     }
-    return deps.state.statusMessage.includes("未开始识别") ? "discarded" : "failed";
+    return lastStartFailureReason === "ptt_release_before_ready" ? "discarded" : "failed";
   }
 
   async function stopPttCapture(): Promise<PttCaptureCommandResult> {

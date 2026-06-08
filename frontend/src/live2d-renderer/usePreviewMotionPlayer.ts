@@ -286,7 +286,7 @@ export function usePreviewMotionPlayer() {
       state.status = "finished";
       state.message = "参数计划执行完成。";
       state.finishedAt = new Date().toISOString();
-      activeTimerHandles = [];
+      clearActiveTimers();
     });
 
     options.onStarted?.(playbackPlan.plan);
@@ -314,6 +314,12 @@ export function usePreviewMotionPlayer() {
       adapter.stopDirectParameterPlan();
     }
 
+    const getMotionStartError = (): string => (
+      typeof adapter.getMotionStartError === "function"
+        ? adapter.getMotionStartError().trim()
+        : ""
+    );
+
     const handle = adapter.startMotion(
       motion.group,
       motion.index,
@@ -322,14 +328,27 @@ export function usePreviewMotionPlayer() {
         if (activeRunId !== runId) {
           return;
         }
+        const motionStartError = getMotionStartError();
+        if (motionStartError) {
+          const reason = `现成 motion 执行失败：${motion.motion_id}（${motionStartError}）。`;
+          console.warn("[MotionPlayer]", reason);
+          state.status = "failed";
+          state.message = reason;
+          state.finishedAt = new Date().toISOString();
+          clearActiveTimers();
+          return;
+        }
         state.status = "finished";
         state.message = "现成 motion 执行完成。";
         state.finishedAt = new Date().toISOString();
-        activeTimerHandles = [];
+        clearActiveTimers();
       },
     );
-    if (handle === -1 && motion.duration_ms === null) {
-      const reason = `现成 motion 执行失败：${motion.motion_id}。`;
+    if (handle === -1) {
+      const motionStartError = getMotionStartError();
+      const reason = motionStartError
+        ? `现成 motion 执行失败：${motion.motion_id}（${motionStartError}）。`
+        : `现成 motion 执行失败：${motion.motion_id}。`;
       console.warn("[MotionPlayer]", reason);
       state.status = "failed";
       state.message = reason;
@@ -349,7 +368,7 @@ export function usePreviewMotionPlayer() {
       state.status = "finished";
       state.message = "现成 motion 执行完成。";
       state.finishedAt = new Date().toISOString();
-      activeTimerHandles = [];
+      clearActiveTimers();
     });
     return true;
   }

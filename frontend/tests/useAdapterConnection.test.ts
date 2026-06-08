@@ -982,7 +982,7 @@ async function testPttReleaseDuringStartupStopsCaptureAfterStart(): Promise<void
 
     await adapter.stopPttCapture();
     deferredGetUserMedia?.resolve();
-    await startPromise;
+    assert.equal(await startPromise, "discarded");
     await flushMicrotasks();
 
     assert.equal(adapter.state.micCapturing, false);

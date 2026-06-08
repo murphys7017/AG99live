@@ -126,7 +126,10 @@ export function usePlaybackCompletionCoordinator(
     if (!s) return;
     for (const segmentId of s.segmentOrder) {
       clearSettlementTimer(segmentKey(sessionId, segmentId));
+      notifiedAudioStartedSegments.delete(segmentKey(sessionId, segmentId));
+      activeMotionSegments.delete(segmentKey(sessionId, segmentId));
     }
+    ackedSessions.delete(sessionId);
     const firstSegment = s.segmentOrder
       .map((id) => s.segments.get(id))
       .find(Boolean);

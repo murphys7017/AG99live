@@ -12,6 +12,8 @@ import type {
   SystemHistoryListPayload,
   SystemSemanticAxisProfileSavedPayload,
   SystemSemanticAxisProfileSaveFailedPayload,
+  SystemModelSyncPayload,
+  SystemMotionTuningSamplesStatePayload,
   SystemServerInfoPayload,
 } from "../../types/protocol.js";
 
@@ -200,6 +202,81 @@ export function parseSystemServerInfoPayload(
       ws_url: wsUrl.payload,
       http_base_url: httpBaseUrl.payload,
       auto_start_mic: autoStartMic.payload,
+    },
+  };
+}
+
+export function parseSystemModelSyncPayload(
+  envelope: ProtocolEnvelope<unknown>,
+): PayloadParseResult<SystemModelSyncPayload> {
+  const record = parseObjectPayload(envelope);
+  if (!record.ok) return record;
+  const modelInfo = asRecord(record.payload.model_info);
+  if (!modelInfo) {
+    return invalidPayload(envelope.type, "payload.model_info", "object");
+  }
+  const confName = requiredString(envelope.type, record.payload, "conf_name");
+  if (!confName.ok) return confName;
+  const confUid = requiredString(envelope.type, record.payload, "conf_uid");
+  if (!confUid.ok) return confUid;
+  const clientUid = requiredString(envelope.type, record.payload, "client_uid");
+  if (!clientUid.ok) return clientUid;
+  const runtimeCacheErrors = record.payload.runtime_cache_errors;
+  if (runtimeCacheErrors !== undefined && !asRecord(runtimeCacheErrors)) {
+    return invalidPayload(
+      envelope.type,
+      "payload.runtime_cache_errors",
+      "object | undefined",
+    );
+  }
+  return {
+    ok: true,
+    payload: {
+      model_info: modelInfo as unknown as SystemModelSyncPayload["model_info"],
+      runtime_cache_errors: runtimeCacheErrors as SystemModelSyncPayload["runtime_cache_errors"],
+      conf_name: confName.payload,
+      conf_uid: confUid.payload,
+      client_uid: clientUid.payload,
+    },
+  };
+}
+
+export function parseMotionTuningSamplesStatePayload(
+  envelope: ProtocolEnvelope<unknown>,
+): PayloadParseResult<SystemMotionTuningSamplesStatePayload> {
+  const record = parseObjectPayload(envelope);
+  if (!record.ok) return record;
+  const samples = record.payload.samples;
+  if (!Array.isArray(samples)) {
+    return invalidPayload(envelope.type, "payload.samples", "array");
+  }
+  const rootError = record.payload.root_error;
+  if (rootError !== undefined && typeof rootError !== "string") {
+    return invalidPayload(envelope.type, "payload.root_error", "string | undefined");
+  }
+  const loadError = record.payload.load_error;
+  if (loadError !== undefined && typeof loadError !== "string") {
+    return invalidPayload(envelope.type, "payload.load_error", "string | undefined");
+  }
+  const diagnostics = record.payload.diagnostics;
+  if (
+    diagnostics !== undefined
+    && (!Array.isArray(diagnostics) || !diagnostics.every((item) => typeof item === "string"))
+  ) {
+    return invalidPayload(envelope.type, "payload.diagnostics", "string[] | undefined");
+  }
+  const effectiveExamples = record.payload.effective_examples;
+  if (effectiveExamples !== undefined && !Array.isArray(effectiveExamples)) {
+    return invalidPayload(envelope.type, "payload.effective_examples", "array | undefined");
+  }
+  return {
+    ok: true,
+    payload: {
+      root_error: rootError,
+      samples,
+      load_error: loadError,
+      diagnostics,
+      effective_examples: effectiveExamples as SystemMotionTuningSamplesStatePayload["effective_examples"],
     },
   };
 }
