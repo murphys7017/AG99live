@@ -51,7 +51,7 @@ export class LAppGlManager {
        alpha: true,
        antialias: true,
        premultipliedAlpha: true,
-       preserveDrawingBuffer: false,
+       preserveDrawingBuffer: true,
      });
 
      if (!gl) {

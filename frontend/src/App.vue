@@ -7,6 +7,7 @@ import PetDesktopView from "./views/PetDesktopView.vue";
 import PetOverlayView from "./views/PetOverlayView.vue";
 import ProfileEditorWindowView from "./views/ProfileEditorWindowView.vue";
 import SettingsWindowView from "./views/SettingsWindowView.vue";
+import Esp32DisplayPipelineHost from "./esp32-display/Esp32DisplayPipelineHost.vue";
 
 const windowRole = computed(() => getWindowRole());
 </script>
@@ -19,4 +20,5 @@ const windowRole = computed(() => getWindowRole());
   <ActionLabWindowView v-else-if="windowRole === 'action_lab'" />
   <ProfileEditorWindowView v-else-if="windowRole === 'profile_editor'" />
   <PetDesktopView v-else />
+  <Esp32DisplayPipelineHost v-if="windowRole === 'pet'" />
 </template>

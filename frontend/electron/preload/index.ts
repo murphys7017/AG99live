@@ -158,6 +158,39 @@ const api = {
       ipcRenderer.removeListener("desktop-force-redraw", handler);
     };
   },
+  startEsp32Display: (host: string, port: number, timeoutSeconds?: number) => {
+    return ipcRenderer.invoke("esp32-display:start", {
+      host,
+      port,
+      timeoutSeconds,
+    }) as Promise<{ ok: boolean; error?: string }>;
+  },
+  stopEsp32Display: () => {
+    return ipcRenderer.invoke("esp32-display:stop") as Promise<{ ok: boolean }>;
+  },
+  sendEsp32DisplayFrame: (jpeg: Uint8Array) => {
+    return ipcRenderer.invoke("esp32-display:send-frame", { jpeg }) as Promise<{
+      ok: boolean;
+      error?: string;
+    }>;
+  },
+  getEsp32DisplayStatus: () => {
+    return ipcRenderer.invoke("esp32-display:status") as Promise<{
+      connected: boolean;
+      error: string;
+    }>;
+  },
+  onEsp32DisplayStatus: (
+    callback: (payload: { connected: boolean; error: string }) => void,
+  ) => {
+    const handler = (_event: unknown, payload: { connected: boolean; error: string }) => {
+      callback(payload);
+    };
+    ipcRenderer.on("esp32-display:status", handler);
+    return () => {
+      ipcRenderer.removeListener("esp32-display:status", handler);
+    };
+  },
 };
 
 const hasContextIsolation = Boolean(

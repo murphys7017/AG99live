@@ -2,6 +2,7 @@ import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen, s
 import { MenuManager } from "./menu-manager";
 import { WindowManager } from "./window-manager";
 import { setupNativeMicrophoneIpc } from "./native-microphone";
+import { registerEsp32DisplayIpc, shutdownEsp32DisplayBridge } from "./esp32-display-bridge";
 import type {
   DesktopPttEventAck,
   DesktopPttEventKind,
@@ -511,6 +512,7 @@ app.whenReady().then(() => {
   windowManager.createWindows();
   setupIpc();
   setupNativeMicrophoneIpc();
+  registerEsp32DisplayIpc();
 
   if (!app.isPackaged) {
     globalShortcut.register("CommandOrControl+Shift+L", () => {
@@ -539,6 +541,7 @@ app.whenReady().then(() => {
 
 app.on("before-quit", () => {
   windowManager?.markAppQuitting();
+  void shutdownEsp32DisplayBridge();
 });
 
 app.on("window-all-closed", () => {

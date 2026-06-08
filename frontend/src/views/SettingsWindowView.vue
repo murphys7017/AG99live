@@ -2,6 +2,7 @@
 import { onMounted } from "vue";
 import DesktopWindowPanel from "../components/DesktopWindowPanel.vue";
 import { useSettingsWindow } from "../settings/useSettingsWindow";
+import Esp32DisplaySettingsCard from "../esp32-display/Esp32DisplaySettingsCard.vue";
 
 const {
   bridgeState,
@@ -348,6 +349,8 @@ onMounted(() => {
           {{ profileEditorButtonLabel }}
         </button>
       </article>
+
+      <Esp32DisplaySettingsCard />
     </section>
   </DesktopWindowPanel>
 </template>
