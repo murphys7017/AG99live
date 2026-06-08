@@ -5,8 +5,10 @@ import { useEsp32DisplayConnection } from "./useEsp32DisplayConnection";
 import {
   ESP32_DISPLAY_FPS_OPTIONS,
   ESP32_DISPLAY_OUTPUT_SIZE_OPTIONS,
+  ESP32_DISPLAY_SCALE_MODE_OPTIONS,
   type Esp32DisplayFps,
   type Esp32DisplayOutputSize,
+  type Esp32DisplayScaleMode,
 } from "./types";
 
 const { config, reset } = useEsp32DisplaySettings();
@@ -81,6 +83,12 @@ function setOutputSize(value: number): void {
   }
 }
 
+function setScaleMode(value: string): void {
+  if ((ESP32_DISPLAY_SCALE_MODE_OPTIONS as readonly string[]).includes(value)) {
+    config.scaleMode = value as Esp32DisplayScaleMode;
+  }
+}
+
 function setCropField(field: "x" | "y" | "w" | "h", value: number): void {
   const next = Math.min(1, Math.max(0, Number(value) || 0));
   if (field === "w") {
@@ -102,6 +110,19 @@ function setCropField(field: "x" | "y" | "w" | "h", value: number): void {
 
 function formatPercent(value: number): string {
   return `${Math.round(value * 100)}%`;
+}
+
+function formatScaleMode(value: Esp32DisplayScaleMode): string {
+  switch (value) {
+    case "cover":
+      return "填满";
+    case "contain":
+      return "完整";
+    case "stretch":
+      return "拉伸";
+    default:
+      return value;
+  }
 }
 </script>
 
@@ -175,6 +196,22 @@ function formatPercent(value: number): string {
             :value="value"
           >
             {{ value }}×{{ value }}
+          </option>
+        </select>
+      </label>
+      <label class="settings-card__field settings-card__field--narrow">
+        <span>缩放</span>
+        <select
+          class="settings-card__input"
+          :value="config.scaleMode"
+          @change="setScaleMode(($event.target as HTMLSelectElement).value)"
+        >
+          <option
+            v-for="value in ESP32_DISPLAY_SCALE_MODE_OPTIONS"
+            :key="value"
+            :value="value"
+          >
+            {{ formatScaleMode(value) }}
           </option>
         </select>
       </label>
@@ -268,7 +305,7 @@ function formatPercent(value: number): string {
     </p>
     <p class="settings-card__hint">
       头部画布来自桌宠窗口；裁剪坐标是相对画布像素的比例。设置会自动保存到
-      localStorage，桌宠窗口和设置窗口共享同一份配置。
+      localStorage，桌宠窗口和设置窗口共享同一份配置。缩放选择填满会铺满小屏，完整会保留整块裁剪区域，拉伸会模拟脚本的固定尺寸缩放。
     </p>
   </article>
 </template>

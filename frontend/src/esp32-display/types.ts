@@ -13,6 +13,7 @@ export interface Esp32DisplayConfig {
   fps: number;
   jpegQuality: number;
   outputSize: number;
+  scaleMode: Esp32DisplayScaleMode;
 }
 
 export type Esp32DisplayStatus =
@@ -37,13 +38,16 @@ export const ESP32_DISPLAY_DEFAULT_CONFIG: Esp32DisplayConfig = {
   fps: 24,
   jpegQuality: 0.75,
   outputSize: 240,
+  scaleMode: "cover",
 };
 
 export const ESP32_DISPLAY_FPS_OPTIONS = [1, 2, 4, 8, 12, 24] as const;
 export const ESP32_DISPLAY_OUTPUT_SIZE_OPTIONS = [120, 160, 200, 240, 320] as const;
+export const ESP32_DISPLAY_SCALE_MODE_OPTIONS = ["cover", "contain", "stretch"] as const;
 
 export type Esp32DisplayFps = (typeof ESP32_DISPLAY_FPS_OPTIONS)[number];
 export type Esp32DisplayOutputSize = (typeof ESP32_DISPLAY_OUTPUT_SIZE_OPTIONS)[number];
+export type Esp32DisplayScaleMode = (typeof ESP32_DISPLAY_SCALE_MODE_OPTIONS)[number];
 
 export function isEsp32DisplayFps(value: number): value is Esp32DisplayFps {
   return (ESP32_DISPLAY_FPS_OPTIONS as readonly number[]).includes(value);
@@ -51,6 +55,11 @@ export function isEsp32DisplayFps(value: number): value is Esp32DisplayFps {
 
 export function isEsp32DisplayOutputSize(value: number): value is Esp32DisplayOutputSize {
   return (ESP32_DISPLAY_OUTPUT_SIZE_OPTIONS as readonly number[]).includes(value);
+}
+
+export function isEsp32DisplayScaleMode(value: unknown): value is Esp32DisplayScaleMode {
+  return typeof value === "string"
+    && (ESP32_DISPLAY_SCALE_MODE_OPTIONS as readonly string[]).includes(value);
 }
 
 export function normalizeCrop(crop: Partial<Esp32DisplayCrop> | undefined): Esp32DisplayCrop {
@@ -85,6 +94,7 @@ export function normalizeConfig(input: Partial<Esp32DisplayConfig> | undefined):
   const fps = Number(input?.fps);
   const quality = Number(input?.jpegQuality);
   const outputSize = Number(input?.outputSize);
+  const scaleMode = input?.scaleMode;
   return {
     enabled,
     host,
@@ -97,6 +107,9 @@ export function normalizeConfig(input: Partial<Esp32DisplayConfig> | undefined):
     outputSize: isEsp32DisplayOutputSize(outputSize)
       ? outputSize
       : fallback.outputSize,
+    scaleMode: isEsp32DisplayScaleMode(scaleMode)
+      ? scaleMode
+      : fallback.scaleMode,
   };
 }
 

@@ -151,6 +151,7 @@ function drawImageDataOnCanvas(
   context: CanvasRenderingContext2D,
   target: CompositeTarget,
   source: { pixels: Uint8Array; width: number; height: number },
+  scaleMode: Esp32DisplayConfig["scaleMode"],
 ): void {
   const imageData = new ImageData(new Uint8ClampedArray(source.pixels), source.width, source.height);
   const tempCanvas = document.createElement("canvas");
@@ -161,29 +162,27 @@ function drawImageDataOnCanvas(
     return;
   }
   tempContext.putImageData(imageData, 0, 0);
-  const sourceRatio = source.width / source.height;
-  const targetRatio = target.width / target.height;
-  let cropX = 0;
-  let cropY = 0;
-  let cropW = source.width;
-  let cropH = source.height;
-  if (sourceRatio > targetRatio) {
-    cropW = source.height * targetRatio;
-    cropX = (source.width - cropW) / 2;
-  } else if (sourceRatio < targetRatio) {
-    cropH = source.width / targetRatio;
-    cropY = (source.height - cropH) / 2;
-  }
+  const scale = scaleMode === "stretch"
+    ? null
+    : scaleMode === "cover"
+      ? Math.max(target.width / source.width, target.height / source.height)
+      : Math.min(target.width / source.width, target.height / source.height);
+  const destW = scale === null ? target.width : Math.max(1, Math.round(source.width * scale));
+  const destH = scale === null ? target.height : Math.max(1, Math.round(source.height * scale));
+  const destX = scale === null ? 0 : Math.round((target.width - destW) * 0.5);
+  const destY = scale === null ? 0 : Math.round((target.height - destH) * 0.5);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
   context.drawImage(
     tempCanvas,
-    cropX,
-    cropY,
-    cropW,
-    cropH,
     0,
     0,
-    target.width,
-    target.height,
+    source.width,
+    source.height,
+    destX,
+    destY,
+    destW,
+    destH,
   );
 }
 
@@ -259,7 +258,12 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
         lastError.value = "webgl2_unavailable";
         return;
       }
-      const region = readCropRegion(gl, canvas.width, canvas.height, config.crop);
+      const region = readCropRegion(
+        gl,
+        gl.drawingBufferWidth || canvas.width,
+        gl.drawingBufferHeight || canvas.height,
+        config.crop,
+      );
       if (!region) {
         lastError.value = "crop_invalid";
         return;
@@ -270,7 +274,7 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
       }
       const ctx = composite.context;
       ctx.clearRect(0, 0, composite.width, composite.height);
-      drawImageDataOnCanvas(ctx, composite, region);
+      drawImageDataOnCanvas(ctx, composite, region, config.scaleMode);
 
       let blob: Blob | null = null;
       try {

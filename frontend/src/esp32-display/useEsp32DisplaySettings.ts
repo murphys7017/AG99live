@@ -57,6 +57,7 @@ function applyConfig(target: Esp32DisplayConfig, source: Esp32DisplayConfig): vo
   target.fps = source.fps;
   target.jpegQuality = source.jpegQuality;
   target.outputSize = source.outputSize;
+  target.scaleMode = source.scaleMode;
   target.crop.x = source.crop.x;
   target.crop.y = source.crop.y;
   target.crop.w = source.crop.w;
