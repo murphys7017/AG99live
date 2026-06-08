@@ -336,7 +336,7 @@ Live2D `Motions/*.motion3.json` 是当前选择动作主轴的重要参考来源
 - 负责：惯性、衰减、残留、soft handoff、idle/talk/action 层混合、必要的参数平滑。
 - 不负责：文本理解、动作选择、协议收发、compile pipeline 决策。
 
-当前待办顺序：
+当前演进方向：
 
 1. 先完成 `SpeechPoseStage`，补齐说话时的 plan 级轻量姿态。
 2. 再实现 `ParameterPresentationLayer`，承接连续性和逐帧表现。

@@ -21,7 +21,7 @@
   - 说话期间头身参数围绕 neutral 做连续振荡，而不是整段只缓到一个静态 target
   - 仍然不引入 RMS / phoneme / viseme
 
-当前待办定位：
+当前职责定位：
 
 - `SpeechPoseStage` 负责“说话时随动”的 plan 级补偿。
 - 说话随动属于 speaking idle：它由运行时音频 started 事实触发，不要求 `intent.mode === "expressive"`，也不把 `resolvedMode` 强行提升为 `expressive`。

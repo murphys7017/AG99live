@@ -40,7 +40,7 @@
 ```text
 control.synth_finished
 = 后端输出队列关闭
-= 此轮次不再有新的 output.* 或 engine.motion_intent
+= 此轮次不应再追加新的 output.* 或 engine.motion_intent segment
 
 control.playback_finished
 = 前端本地播放已稳定
@@ -50,6 +50,8 @@ control.turn_finished
 = 后端轮次关闭
 = 后端收到 playback_finished 后发出
 ```
+
+`synth_finished` 是 turn 级输出队列关闭信号，不是单条音频生成完成信号。为容忍传输顺序，同一 `turn_id / message_id` 的晚到媒体可以补齐已知 segment，但不得创建新 segment，也不得让已 release / started / terminal 的音频重复播放。
 
 ## 消息类型
 
@@ -110,6 +112,8 @@ control.turn_finished
 | `output.transcription` | `{ text: string }` | 否 |
 
 同一回复片段的 `output.text`、`output.audio`、`engine.motion_intent` 必须共享同一个 `turn_id`，并各自带独立 `message_id`。
+
+`output.audio.audio_url` 指向 Adapter HTTP 静态资源，常见路径为 `/cache/audio/*.wav`。前端可以按当前连接重写 host；如果 URL 无法 fetch，属于音频交付 / 静态资源服务问题，不等同于 TTS 生成失败。
 
 ### control.* （双向）
 

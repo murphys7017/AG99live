@@ -51,8 +51,6 @@ astrbot_plugin_ag99live_adapter/
 - Adapter 在请求主模型前注入 `<@anim {...}>` 输出契约。
 - 主回复末尾若包含合法 `<@anim {...}>`，则优先提取并广播动作载荷。
 - 当前 inline contract 使用 `engine.motion_intent.v3`，字段来自当前模型的 `semantic_axis_profile`。
-- 如果中间件在 result contributor 阶段返回 `client_objects` / plugin hints 动作载荷，则后端优先广播这些结构化动作对象。
-- MiniMax 等 provider 可能把工具参数里的 `plugin_hints` 作为 JSON 字符串返回；当前插件会在动作 contributor 中兼容 dict 和 JSON 字符串两种形态，AstrBot core 侧也应保留同样的解析能力，避免 `_interaction_plugin_hints` 被清空。
 
 ### 动作 selector 输出
 
@@ -70,15 +68,16 @@ astrbot_plugin_ag99live_adapter/
 - `semantic_axis_profile` / `calibration_profile` / `voice_following_profile` / `parameter_action_library` / `base_action_library` 由 `system.model_sync` 下发。
 - `system.semantic_axis_profile_saved` / `system.semantic_axis_profile_save_failed` 用于 Profile Editor 保存结果确认，不再依赖 `system.model_sync` 推断保存成败。
 - 一个 user input 对应一个 turn，但一个 turn 内可能输出多个 assistant segment。
-- `control.synth_finished` 表示该 turn 的输出队列关闭，不会再追加新的 `output.*` / `engine.motion_*` segment；它不要求早于所有前端播放完成。
+- `control.synth_finished` 表示该 turn 的输出队列逻辑关闭，不应再追加新的 `output.*` / `engine.motion_*` segment；它不要求早于所有前端播放完成。
+- 为容忍传输和调度顺序，同一 `turn_id / message_id` 的晚到媒体可在前端最终结算前补齐已知 segment；这不允许创建新 segment，也不允许重复播放已 release / started / terminal 的音频。
 - 前端在 `synth_finished` 已到且所有 segment 播放完成后回传 `control.playback_finished`；后端收到后再发 `control.turn_finished`。
+- `output.audio.audio_url` 指向插件侧 HTTP 静态资源，通常是 `/cache/audio/*.wav`；有 TTS 文件但前端无声时，应先验证该 URL 在配置的 `host / http_port` 上是否可达。
 - 麦克风输入现在按“单段录音”组织：一段采集内的 `input.audio_stream_start`、WebSocket binary PCM16LE chunk 与 `input.audio_stream_end` 共享同一个新的 `turn_id` 和 `stream_id`；后端 STT ingress 按 `stream_id` 汇总音频，不再把不同输入段混到一个全局缓冲。
 - 若前端检测到发送积压，会在 `input.audio_stream_end` 中带上 `dropped: true`，后端直接丢弃该段转写。
 - 切换麦克风设备时，前端会先正常结束旧输入段，再启动新输入段；收到 `control.interrupt` 时，前端会把已释放的 segment 音频写成失败终态后再清理播放 runtime。
 - Windows / Electron 前端现在优先使用主进程 DirectShow/ffmpeg 原生麦克风枚举与采集；原生路径直接采集 `s16le`，渲染进程通过二进制音频帧发送给插件侧。
 - `input.raw_audio_data` / `input.mic_audio_end` 仍保留为旧前端和调试脚本兼容路径，不是当前 Electron 前端主路径。
 - 按键说话模式会以 `reason="ptt_release"` 结束本段录音；对插件侧来说它仍是一段普通麦克风输入。
-- `semantic_axis_profile` 在默认设计升级时会自动刷新 backend-owned profile；用户修改过的 profile 如果只是旧默认设计残留，在重新匹配当前模型 hash 后也会自动刷新到新默认，否则保持 `stale` 等待人工处理。
 
 ## 远程执行器 / Windows 操作
 
@@ -110,20 +109,11 @@ AG99live 远程执行器当前走任务委托链路：
 - 如果同一 turn 内会多次输出 assistant segment，后端必须确保最后一个 segment 之后才发送 `synth_finished`。
 - 这不是单条音频生成完成信号，也不是整轮完成信号。
 
-## 关键配置（`_conf_schema.json`）
+## 关键配置
 
 - `motion_generation_mode`：动作生成链路，默认 `split_after_reply`（middleware-first）；可选 `inline_first` 兼容路径。
-- `enable_inline_motion_contract`：兼容开关，`inline_first` 模式下是否启用主请求内联动作契约。
-- `enable_realtime_motion_plan`：是否启用 runtime 内部的 realtime motion fallback 组件；如果该组件被明确调用，产物仍必须回到同一条 `engine.motion_*` 协议链路和同一 segment identity。
 - `motion_analysis_provider_id`：动作分析 / realtime motion selector 使用的 Provider。
-- `realtime_motion_timeout_seconds`：realtime 生成超时（秒）。
-- `realtime_motion_fewshot_enabled`：是否启用 realtime motion fallback 的 few-shot fallback。
-- `realtime_motion_fewshot_count`：fixed few-shot fallback 的数量；旧动作/表情参考模板可用时默认不注入这些固定示例。
-- `realtime_motion_user_fewshot_count`：用户调参样本直接作为 few-shot 的数量，默认 0；样本主要汇总成角色风格偏好。
-- `realtime_motion_fixed_fewshot_with_reference_templates`：旧动作/表情参考模板可用时是否仍注入内置固定 few-shot，默认关闭。
-- `realtime_motion_platform_context_enabled`：是否注入平台上下文。
 - `motion_prompt_instruction`：动作 intent 生成的补充指令，默认要求 Live2D 表现更夸张。
-- `enable_action_llm_filter`：是否启用基础动作库 LLM 严格筛选。
 - `remote_operator_default_computer` / `remote_operator_computer_entries`：远程执行器路由和后端配置；支持 `codex_app_server` 与 `opencode`。
 - `remote_operator_default_profile` / `remote_operator_profiles`：远程执行器执行档位。Codex app-server 后端使用该档位选择 turn 模型与 effort；OpenCode 后端使用 entry 内固定的 `model` / `variant`。
 
