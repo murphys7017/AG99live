@@ -338,6 +338,13 @@ export function useTurnPlaybackSessionStore() {
       return;
     }
     const { segment } = getSegmentSession(turnId, messageId);
+    if (
+      segment.motion.released
+      || segment.motion.started
+      || segment.motion.completed
+    ) {
+      return;
+    }
     segment.motion.payload = payload;
     segment.motion.receivedAtMs = performance.now();
     segment.motion.absent = false;

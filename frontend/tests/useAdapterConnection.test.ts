@@ -801,6 +801,62 @@ function testStaleSynthFinishedReportsProtocolViolation(): void {
   });
 }
 
+async function testCurrentTurnFinishedCreatesMissingSession(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket, sessionStore } = harness;
+    socket.sent.length = 0;
+    await adapter.sendText("hello without turn_started");
+    const turnId = String(parseSentJsonMessages(socket)[0]?.turn_id ?? "");
+    assert.ok(turnId);
+
+    socket.emitMessage(JSON.stringify({
+      type: "control.turn_finished",
+      version: "v2",
+      message_id: "m-current-finished",
+      timestamp: "2026-05-08T00:00:02.000Z",
+      turn_id: turnId,
+      source: "backend",
+      payload: { success: true },
+    }));
+
+    const session = sessionStore.getSession(turnId);
+    assert.equal(session?.backend.turnStarted, true);
+    assert.equal(session?.backend.turnFinished, true);
+    assert.equal(adapter.state.lastError, "");
+  } finally {
+    harness.scope.stop();
+  }
+}
+
+async function testCurrentSynthFinishedCreatesMissingSession(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket, sessionStore } = harness;
+    socket.sent.length = 0;
+    await adapter.sendText("hello synth without turn_started");
+    const turnId = String(parseSentJsonMessages(socket)[0]?.turn_id ?? "");
+    assert.ok(turnId);
+
+    socket.emitMessage(JSON.stringify({
+      type: "control.synth_finished",
+      version: "v2",
+      message_id: "m-current-synth",
+      timestamp: "2026-05-08T00:00:02.000Z",
+      turn_id: turnId,
+      source: "backend",
+      payload: {},
+    }));
+
+    const session = sessionStore.getSession(turnId);
+    assert.equal(session?.backend.turnStarted, true);
+    assert.equal(session?.backend.synthFinished, true);
+    assert.equal(adapter.state.lastError, "");
+  } finally {
+    harness.scope.stop();
+  }
+}
+
 function testInvalidMotionDoesNotRewritePreviousSegment(): void {
   withConnectedAdapter(({ socket, sessionStore }) => {
     sendTurnStarted(socket, "turn-motion-old");
@@ -1335,6 +1391,8 @@ async function run(): Promise<void> {
   await testChangedUrlOutputAudioDoesNotReplayCompletedSegment();
   testTurnFinishedDoesNotMarkMissingSegmentAudioAbsent();
   testStaleSynthFinishedReportsProtocolViolation();
+  await testCurrentTurnFinishedCreatesMissingSession();
+  await testCurrentSynthFinishedCreatesMissingSession();
   testMotionFallbackDoesNotCreateAnonymousSession();
   testInvalidMotionDoesNotRewritePreviousSegment();
   testBackToBackTurnsDoNotSharePendingState();

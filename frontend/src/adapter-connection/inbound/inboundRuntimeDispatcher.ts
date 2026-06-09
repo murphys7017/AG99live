@@ -113,10 +113,19 @@ function applyTurnFinished(
       s.turnFinishedReason,
     );
   } catch (error) {
-    deps.reportRuntimeProtocolViolation(
-      error instanceof Error ? error.message : "turn_finished arrived for unknown session.",
-    );
-    return;
+    if (isCurrentTurnEvent(s.currentTurnId, s.turnFinishedTurnId)) {
+      deps.sessionStore?.markTurnStarted(s.turnFinishedTurnId);
+      deps.sessionStore?.markTurnFinished(
+        s.turnFinishedTurnId,
+        s.turnFinishedSuccess,
+        s.turnFinishedReason,
+      );
+    } else {
+      deps.reportRuntimeProtocolViolation(
+        error instanceof Error ? error.message : "turn_finished arrived for unknown session.",
+      );
+      return;
+    }
   }
 
   if (event.success) {
@@ -171,10 +180,15 @@ function applySynthFinished(
   try {
     deps.sessionStore?.markSynthFinished(event.turnId);
   } catch (error) {
-    deps.reportRuntimeProtocolViolation(
-      error instanceof Error ? error.message : "synth_finished arrived for unknown session.",
-    );
-    return;
+    if (isCurrentTurnEvent(s.currentTurnId, event.turnId)) {
+      deps.sessionStore?.markTurnStarted(event.turnId);
+      deps.sessionStore?.markSynthFinished(event.turnId);
+    } else {
+      deps.reportRuntimeProtocolViolation(
+        error instanceof Error ? error.message : "synth_finished arrived for unknown session.",
+      );
+      return;
+    }
   }
   deps.markMissingAudiosForTurn(
     event.turnId,
@@ -185,6 +199,13 @@ function applySynthFinished(
       ? "语音已准备同步播放。"
       : "语音合成已完成。";
   deps.pushHistory("system", s.statusMessage);
+}
+
+function isCurrentTurnEvent(
+  currentTurnId: string | null,
+  eventTurnId: string | null,
+): boolean {
+  return Boolean(currentTurnId && eventTurnId && currentTurnId === eventTurnId);
 }
 
 function applyControlError(

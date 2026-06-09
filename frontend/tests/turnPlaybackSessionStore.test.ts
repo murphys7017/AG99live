@@ -303,6 +303,19 @@ function testDifferentAudioUrlDoesNotResetCompletedSegment(): void {
   assert.equal(segment?.audio.started, true);
 }
 
+function testDuplicateMotionReceiveDoesNotResetReleasedSegment(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.setActiveSession("turn-1");
+  store.markTextReceived("turn-1", "Hello", "msg-1");
+  store.markMotionReceived("turn-1", motionPayload, "msg-1");
+  store.markMotionReleased("turn-1", "msg-1");
+
+  store.markMotionReceived("turn-1", catalogMotionPayload, "msg-1");
+  const segment = store.getSession("turn-1")?.segments.get("msg-1");
+  assert.deepEqual(segment?.motion.payload, motionPayload);
+  assert.equal(segment?.motion.released, true);
+}
+
 function run(): void {
   testSessionStartsWithoutTurnLevelPlaybackSlots();
   testSameMessageIdGroupsTextAudioMotion();
@@ -323,6 +336,7 @@ function run(): void {
   testAudioTerminalHandlesAllStates();
   testDuplicateAudioReceiveDoesNotResetCompletedSegment();
   testDifferentAudioUrlDoesNotResetCompletedSegment();
+  testDuplicateMotionReceiveDoesNotResetReleasedSegment();
   console.log("turnPlaybackSessionStore tests passed");
 }
 
