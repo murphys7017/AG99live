@@ -136,4 +136,4 @@ Copy-Item -Recurse .\astrbot_plugin_ag99live_adapter "C:\path\to\AstrBot\data\pl
 
 ## 说明
 
-AG99live 目前更接近一个本地实验型桌宠系统，而不是已经产品化的一键安装应用。README 只描述当前已经形成闭环的能力；更长期的设想会放在设计文档中维护。
+AG99live 目前更接近一个本地实验型桌宠系统，而不是已经产品化的一键安装应用。README 只描述当前已经形成闭环的能力；架构和运行边界以 `docs/` 中的当前设计文档为准。

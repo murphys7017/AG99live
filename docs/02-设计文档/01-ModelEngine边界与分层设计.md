@@ -125,7 +125,7 @@ compile state 是 stage 之间共享的中间状态。新增 stage 必须先明�
 
 ## 6. 参数所有权
 
-长期参数所有权按 semantic axis role 划分：
+参数所有权按 semantic axis role 划分：
 
 | 角色 | 主导方 | 说明 |
 | --- | --- | --- |
@@ -291,7 +291,7 @@ order: 45
 - 表情态度主要通过 `mouth_smile`、`brow_bias`、`gaze_x`、`gaze_y` 等辅轴表达；需要姿态配合时再组合头部和身体主轴。
 - `Expressions/*.exp3.json` 可以作为 fallback pose 候选的参数抽取来源，但最终仍必须转成 `engine.motion_intent.v3` flat axes，不作为播放 payload。
 - `Expressions/*.exp3.json` 不进入 ModelEngine compile pipeline 的直接播放分支。
-- 后续如果需要重新接入原生 expression，必须作为独立能力重新设计，不能混入主轴来源。
+- 如果重新接入原生 expression，必须作为独立能力设计，不能混入主轴来源。
 
 ## 12. Motion 与主轴选择边界
 
@@ -303,7 +303,7 @@ Live2D `Motions/*.motion3.json` 是当前选择动作主轴的重要参考来源
 - motion 用于辅助判断哪些参数适合作为动作主轴、表情辅轴、运行时轴或候选派生轴。
 - motion 不直接替代 ModelEngine 的语义轴编译，不作为协议载荷，不作为 LLM 必须输出的动作名称。
 - motion 中的物理、动画、表达式开关类参数不直接暴露给 LLM 主控。
-- 后续优化默认 profile 时，应优先根据 motion 统计校准轴角色，再调整 prompt 和调参工具展示。
+- 默认 profile 的轴角色以 motion 统计和手调样本为主要依据，再同步到 prompt 和调参工具展示。
 
 当前 Mk6 观察结论：
 
@@ -311,7 +311,7 @@ Live2D `Motions/*.motion3.json` 是当前选择动作主轴的重要参考来源
 - `ParamBodyAngleX/Z` 是身体扭转和摇晃的重要依据。
 - `BodyAngleY` 是第一版 `body_pitch` 的优先验证参数；`PhyBodyPositionY`、`PhyBodyUpperY` 等暂作为观察材料。
 - `ParamEyeLOpen`、`ParamEyeROpen`、`ParamEyeLSmile`、`ParamEyeRSmile` 对眼部动作成立有明确贡献，应归入动作主轴体系。
-- `ParamEyeBallX/Y` 第一版作为注意力方向主轴，后续可根据生成效果再调整。
+- `ParamEyeBallX/Y` 当前作为注意力方向主轴。
 - `ParamMouthForm`、`ParamMouthX`、眉毛细节参数更适合作为表情和态度辅轴。
 
 ## 13. ParameterPresentationLayer
@@ -335,13 +335,6 @@ Live2D `Motions/*.motion3.json` 是当前选择动作主轴的重要参考来源
 - 输出：交给 Live2D runtime 的逐帧连续参数值或增量值。
 - 负责：惯性、衰减、残留、soft handoff、idle/talk/action 层混合、必要的参数平滑。
 - 不负责：文本理解、动作选择、协议收发、compile pipeline 决策。
-
-当前演进方向：
-
-1. 先完成 `SpeechPoseStage`，补齐说话时的 plan 级轻量姿态。
-2. 再实现 `ParameterPresentationLayer`，承接连续性和逐帧表现。
-3. 随后明确参数所有权与层间混合规则，收口 `plan / talk / runtime / ambient / physics` 的叠加边界。
-4. 最后补 diagnostics 和高价值时序测试。
 
 ## 14. 外部边界
 
@@ -371,10 +364,10 @@ Avatar Runtime 不理解语义轴，也不判断表情语义。
 
 ## 15. 维护原则
 
-- 当前只支持 v2 主路径。
+- 当前自动动作主路径是 `engine.motion_intent.v3 -> engine.parameter_plan.v2`。
+- `engine.motion_intent.v2` 只作为遗留归一化兼容路径，不作为新自动链路目标。
 - 废弃协议回退分支不进入主代码和主文档。
 - 模块按职责维护，扩展通过 stage / registry 挂载。
-- plan 级增强先于逐帧 runtime 增强。
 - 连续性主实现优先放在 `ParameterPresentationLayer`，而不是 compile 阶段做静态补丁。
 - 默认参数保守，先保证自然，再追求表现力。
 - 主轴选择优先服从 motion 观察到的真实动作骨架，不凭 expression 文件或名称猜测。
