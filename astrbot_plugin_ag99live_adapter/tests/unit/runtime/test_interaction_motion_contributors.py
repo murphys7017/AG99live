@@ -285,6 +285,8 @@ def _build_runtime_state(*, mode: str = "split_after_reply"):
             "motion_generation_mode": mode,
             "enable_inline_motion_contract": True,
             "enable_realtime_motion_plan": True,
+            "selected_motion_analysis_provider": None,
+            "realtime_motion_timeout_seconds": 2.0,
             "motion_prompt_instruction": "Use readable exaggerated head and smile motion.",
             "model_info": _build_semantic_model_info(),
         },
@@ -292,6 +294,7 @@ def _build_runtime_state(*, mode: str = "split_after_reply"):
     state.build_motion_tuning_style_prompt = lambda: (
         "中性时偏少轴，开心时优先笑眼和嘴角。"
     )
+    state.list_effective_motion_tuning_examples = lambda: []
     return state
 
 
@@ -330,10 +333,12 @@ def _build_event(*, mode: str = "split_after_reply", raw_turn_id: str = "front-t
     class EventStub:
         def __init__(self) -> None:
             self.adapter = adapter
+            self.message_str = "用户说话内容"
             self.message_obj = type(
                 "MessageObjectStub",
                 (),
                 {
+                    "message_str": "用户说话内容",
                     "raw_message": {
                         "turn_id": raw_turn_id,
                     }
@@ -1185,7 +1190,70 @@ def test_result_contributor_uses_default_pose_when_plugin_hints_missing_in_split
     )
     assert (
         contribution.metadata["ag99live_motion_schedule"]["plugin_hints_resolution_reason"]
-        == "plugin_hints_missing:default_pose:neutral"
+        == "plugin_hints_missing:realtime_provider_unavailable:default_pose:neutral"
+    )
+
+
+def test_result_contributor_generates_realtime_motion_when_plugin_hints_missing_in_split_final_phase(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    class ProviderStub:
+        async def text_chat(self, *, prompt: str, system_prompt: str):
+            assert "用户说话内容" in prompt
+            assert "最终回复文本" in prompt
+            assert system_prompt
+            return type(
+                "ResponseStub",
+                (),
+                {
+                    "completion_text": json.dumps(
+                        {
+                            "emotion_label": "happy",
+                            "duration_hint_ms": 1000,
+                            "fallback_pose_id": "neutral",
+                            "axes": {
+                                "head_yaw": 74,
+                                "eye_open_left": 82,
+                            },
+                        },
+                        ensure_ascii=False,
+                    )
+                },
+            )()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(mode="split_after_reply", raw_turn_id="raw-turn")
+    event.adapter.turn_coordinator.runtime_state.selected_motion_analysis_provider = ProviderStub()
+    event.set_extra("ag99live_original_message_str", "用户说话内容")
+    view = _build_view(
+        phase="final",
+        route_mode="delegate_to_core",
+        final_result="最终回复文本",
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == []
+    assert len(contribution.client_objects) == 1
+    client_object = contribution.client_objects[0]
+    assert client_object["source"] == "realtime_motion"
+    payload = client_object["motion_payload"]
+    assert payload["schema_version"] == "engine.motion_intent.v3"
+    assert payload["mode"] == "expressive"
+    assert payload["emotion_label"] == "happy"
+    assert payload["axes"]["head_yaw"] >= 74
+    assert (
+        contribution.metadata["ag99live_motion_schedule"]["reason"]
+        == "realtime_motion_client_object"
+    )
+    assert (
+        contribution.metadata["ag99live_motion_schedule"]["plugin_hints_resolution_reason"]
+        == "plugin_hints_missing:realtime_generated"
     )
 
 

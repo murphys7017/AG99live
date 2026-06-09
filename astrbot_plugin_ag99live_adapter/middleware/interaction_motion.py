@@ -18,6 +18,7 @@ from ..motion.realtime_motion_plan import (
     _apply_expressive_floor_v2,
     DEFAULT_MOTION_INTENT_DURATION_MS,
     MOTION_INTENT_V3_SCHEMA_VERSION,
+    RealtimeMotionPlanGenerator,
     resolve_selected_semantic_axis_profile,
 )
 from ..motion.fallback_pose import (
@@ -169,7 +170,7 @@ class AG99liveMotionResultContributor:
     async def collect(self, event, plugin_context, view):
         del plugin_context
 
-        attempt = _schedule_motion_from_interaction_result(event, view)
+        attempt = await _schedule_motion_from_interaction_result(event, view)
         if attempt is None:
             return None
 
@@ -820,7 +821,7 @@ def _normalize_axis_range(value: Any, fallback: list[float] | None) -> list[floa
     return fallback
 
 
-def _schedule_motion_from_interaction_result(
+async def _schedule_motion_from_interaction_result(
     event: Any,
     view: Any,
 ) -> _MotionScheduleAttempt | None:
@@ -911,15 +912,17 @@ def _schedule_motion_from_interaction_result(
         )
 
     if policy.should_schedule and plugin_hints_payload is None:
-        plugin_hints_payload, plugin_hints_reason = _build_default_motion_payload(
+        plugin_hints_payload, plugin_hints_reason = await _build_realtime_or_default_motion_payload(
+            event,
             bundle.runtime_state,
+            assistant_text=assistant_text,
             reason=plugin_hints_reason,
         )
         if plugin_hints_payload is not None:
             _call_event_method(event, "set_extra", "ag99live_split_motion_scheduled", True)
             return _MotionScheduleAttempt(
                 phase=phase,
-                source="default_pose",
+                source=_resolve_generated_motion_source(plugin_hints_reason),
                 scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
                 event_frontend_turn_id=identity.event_frontend_turn_id,
                 active_frontend_turn_id=identity.active_frontend_turn_id,
@@ -930,7 +933,7 @@ def _schedule_motion_from_interaction_result(
                 reply_plan_source=reply_plan.source if reply_plan is not None else None,
                 motion_generation_mode=motion_generation_mode,
                 scheduled=True,
-                reason="default_motion_client_object",
+                reason=_resolve_generated_motion_reason(plugin_hints_reason),
                 assistant_text=assistant_text,
                 plugin_hints_motion_payload=plugin_hints_payload,
                 plugin_hints_resolution_reason=plugin_hints_reason,
@@ -953,6 +956,78 @@ def _schedule_motion_from_interaction_result(
         assistant_text=assistant_text,
         plugin_hints_resolution_reason=plugin_hints_reason,
     )
+
+
+async def _build_realtime_or_default_motion_payload(
+    event: Any,
+    runtime_state: Any,
+    *,
+    assistant_text: str,
+    reason: str,
+) -> tuple[dict[str, Any] | None, str]:
+    realtime_payload, realtime_reason = await _build_realtime_motion_payload(
+        event,
+        runtime_state,
+        assistant_text=assistant_text,
+        reason=reason,
+    )
+    if realtime_payload is not None:
+        return realtime_payload, realtime_reason
+    return _build_default_motion_payload(runtime_state, reason=realtime_reason)
+
+
+async def _build_realtime_motion_payload(
+    event: Any,
+    runtime_state: Any,
+    *,
+    assistant_text: str,
+    reason: str,
+) -> tuple[dict[str, Any] | None, str]:
+    if not bool(getattr(runtime_state, "enable_realtime_motion_plan", True)):
+        return None, _append_resolution_reason(reason, "realtime_disabled")
+
+    provider = getattr(runtime_state, "selected_motion_analysis_provider", None)
+    if provider is None:
+        return None, _append_resolution_reason(reason, "realtime_provider_unavailable")
+
+    user_text = _extract_user_text(event)
+    try:
+        payload = await RealtimeMotionPlanGenerator(runtime_state=runtime_state).generate(
+            user_text=user_text,
+            assistant_text=assistant_text,
+        )
+    except TimeoutError as exc:
+        logger.warning("Realtime motion generation timed out in final phase: %s", exc)
+        return None, _append_resolution_reason(reason, "realtime_provider_timeout")
+    except ValueError as exc:
+        logger.warning("Realtime motion selector output invalid in final phase: %s", exc)
+        return None, _append_resolution_reason(
+            reason,
+            f"realtime_selector_invalid:{_sanitize_reason_fragment(exc)}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Realtime motion generation failed in final phase: %s", exc)
+        return None, _append_resolution_reason(
+            reason,
+            f"realtime_failed:{_sanitize_reason_fragment(exc)}",
+        )
+
+    if not isinstance(payload, dict):
+        return None, _append_resolution_reason(reason, "realtime_returned_empty")
+    axes = payload.get("axes")
+    if not isinstance(axes, dict) or not axes:
+        return None, _append_resolution_reason(reason, "realtime_returned_empty")
+    return payload, _append_resolution_reason(reason, "realtime_generated")
+
+
+def _resolve_generated_motion_source(reason: str) -> str:
+    return "realtime_motion" if ":realtime_generated" in f":{reason}" else "default_pose"
+
+
+def _resolve_generated_motion_reason(reason: str) -> str:
+    if _resolve_generated_motion_source(reason) == "realtime_motion":
+        return "realtime_motion_client_object"
+    return "default_motion_client_object"
 
 
 def _build_default_motion_payload(
@@ -1218,6 +1293,23 @@ def _extract_assistant_text(view: Any) -> str:
         if text:
             return text
     return ""
+
+
+def _extract_user_text(event: Any) -> str:
+    for value in (
+        _call_event_method(event, "get_extra", "ag99live_original_message_str"),
+        getattr(event, "message_str", None),
+        getattr(getattr(event, "message_obj", None), "message_str", None),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _sanitize_reason_fragment(value: Any) -> str:
+    fragment = re.sub(r"[^0-9A-Za-z_.:-]+", "_", str(value or "").strip())
+    return fragment[:80] or "unknown"
 
 
 def _resolve_motion_generation_mode(runtime_state: Any) -> str:
