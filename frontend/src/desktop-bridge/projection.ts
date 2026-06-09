@@ -11,6 +11,7 @@ import type {
 } from "../types/desktop.js";
 import { cloneModelEngineSettings, type ModelEngineSettings } from "../model-engine/settings.js";
 import type { TurnPlaybackSegment } from "../turn-playback/session.js";
+import type { BilibiliLiveStatus } from "../types/bilibili-live.js";
 
 // ── Adapter runtime projection ─────────────────────────────────────
 
@@ -39,6 +40,7 @@ export interface AdapterRuntimeProjection {
   backendHistoryStatusMessage: string;
   motionTuningSamples: DesktopMotionTuningSample[];
   motionTuningSamplesStatus: DesktopMotionTuningSamplesStatus;
+  bilibiliLiveStatus: BilibiliLiveStatus;
 }
 
 export interface AdapterRuntimeProjectionInput {
@@ -66,6 +68,7 @@ export interface AdapterRuntimeProjectionInput {
   backendHistoryStatusMessage: string;
   motionTuningSamples: DesktopMotionTuningSample[];
   motionTuningSamplesStatus: DesktopMotionTuningSamplesStatus;
+  bilibiliLiveStatus: BilibiliLiveStatus;
 }
 
 export interface SessionProjectionInput {
@@ -125,6 +128,7 @@ export interface DesktopRuntimeSnapshotOutput {
   activeBackendHistoryUid: string;
   backendHistoryLoading: boolean;
   backendHistoryStatusMessage: string;
+  bilibiliLiveStatus: BilibiliLiveStatus;
   activeSessionId: string | null;
   activeSessionPhase: string;
   activeSessionTextReady: boolean;
@@ -169,6 +173,7 @@ export function buildAdapterRuntimeProjection(
     backendHistoryStatusMessage: input.backendHistoryStatusMessage,
     motionTuningSamples: input.motionTuningSamples,
     motionTuningSamplesStatus: input.motionTuningSamplesStatus,
+    bilibiliLiveStatus: { ...input.bilibiliLiveStatus },
   };
 }
 
@@ -269,6 +274,7 @@ export function buildDesktopRuntimeSnapshot(
     activeBackendHistoryUid: p.activeBackendHistoryUid,
     backendHistoryLoading: p.backendHistoryLoading,
     backendHistoryStatusMessage: p.backendHistoryStatusMessage,
+    bilibiliLiveStatus: { ...p.bilibiliLiveStatus },
     activeSessionId: input.session.activeSessionId,
     activeSessionPhase: input.session.activeSessionPhase,
     activeSessionTextReady: input.session.activeSessionTextReady,

@@ -16,6 +16,10 @@ import {
   DEFAULT_PTT_KEY_BINDING,
   normalizePttKeyBinding,
 } from "../../adapter-connection/core/pttKeyBinding.js";
+import {
+  DEFAULT_BILIBILI_LIVE_STATUS,
+  type BilibiliLiveStatus,
+} from "../../types/bilibili-live.js";
 import { SCHEMA_CATALOG_MOTION_V1 } from "../../types/protocol.js";
 import {
   cloneNumericRecord,
@@ -60,6 +64,7 @@ export const defaultSnapshot: DesktopRuntimeSnapshot = {
   activeBackendHistoryUid: "",
   backendHistoryLoading: false,
   backendHistoryStatusMessage: "等待桌宠窗口同步后端历史。",
+  bilibiliLiveStatus: { ...DEFAULT_BILIBILI_LIVE_STATUS },
   activeSessionId: null,
   activeSessionPhase: "",
   activeSessionTextReady: false,
@@ -130,7 +135,43 @@ export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRunt
     activeBackendHistoryUid: normalizeText(snapshot.activeBackendHistoryUid),
     backendHistoryLoading: Boolean(snapshot.backendHistoryLoading),
     backendHistoryStatusMessage: normalizeText(snapshot.backendHistoryStatusMessage),
+    bilibiliLiveStatus: normalizeBilibiliLiveStatus(snapshot.bilibiliLiveStatus),
   };
+}
+
+function normalizeBilibiliLiveStatus(value: unknown): BilibiliLiveStatus {
+  if (!isObject(value)) {
+    return { ...DEFAULT_BILIBILI_LIVE_STATUS };
+  }
+  return {
+    enabled: Boolean(value.enabled),
+    connected: Boolean(value.connected),
+    status: normalizeBilibiliLiveStatusKind(value.status),
+    roomId: normalizeText(value.roomId),
+    realRoomId: isFiniteNumber(value.realRoomId) ? Math.round(value.realRoomId) : null,
+    bufferedCount: isFiniteNumber(value.bufferedCount)
+      ? Math.max(0, Math.round(value.bufferedCount))
+      : 0,
+    lastMessageAt: normalizeText(value.lastMessageAt),
+    lastError: normalizeText(value.lastError),
+    hasCookie: Boolean(value.hasCookie),
+  };
+}
+
+function normalizeBilibiliLiveStatusKind(
+  value: unknown,
+): BilibiliLiveStatus["status"] {
+  const normalized = normalizeText(value);
+  if (
+    normalized === "idle"
+    || normalized === "connecting"
+    || normalized === "connected"
+    || normalized === "waiting"
+    || normalized === "error"
+  ) {
+    return normalized;
+  }
+  return "disabled";
 }
 
 function rejectUnsupportedRuntimeSnapshotFields(snapshot: DesktopRuntimeSnapshot): void {

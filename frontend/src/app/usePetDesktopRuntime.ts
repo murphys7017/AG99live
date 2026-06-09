@@ -30,6 +30,8 @@ import { useAmbientMotionPreference } from "./useAmbientMotionPreference";
 import { useDesktopContextMenu } from "./useDesktopContextMenu";
 import { createDesktopRuntimeCommandHandler } from "../desktop-bridge/useDesktopRuntimeCommandHandler";
 import { usePushToTalkController } from "./usePushToTalkController";
+import { useBilibiliLiveRuntime } from "../bilibili-live/useBilibiliLiveRuntime";
+import { isTerminalPhase } from "../turn-playback/session";
 
 export interface PetDesktopRuntime {
   sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>;
@@ -184,6 +186,21 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     },
   );
   const pushToTalk = usePushToTalkController(adapter);
+  let snapshotPublisher: ReturnType<typeof createPetRuntimeSnapshotPublisher> | null = null;
+  const bilibiliLive = useBilibiliLiveRuntime({
+    sendText: (text) => adapter.sendText(text),
+    isInteractionBusy: () => {
+      const activeSession = sessionStore.getActiveSession();
+      if (adapter.state.currentTurnId) {
+        return true;
+      }
+      return Boolean(activeSession && !isTerminalPhase(activeSession.phase));
+    },
+    pushHistory: (role, text) => adapter.pushHistory(role, text),
+    onStatusChanged: () => {
+      snapshotPublisher?.publishRuntimeSnapshot();
+    },
+  });
 
   function handlePreviewMotionPlan(plan: unknown): void {
     const localPlayed = modelEngine.playPreviewPayload(plan);
@@ -201,7 +218,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     adapter.deleteMotionTuningSample(sampleId);
   }
 
-  const snapshotPublisher = createPetRuntimeSnapshotPublisher({
+  snapshotPublisher = createPetRuntimeSnapshotPublisher({
     adapter,
     bridge,
     modelSyncState: state,
@@ -216,6 +233,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     stageMessage,
     aiState,
     sessionStore,
+    bilibiliLiveStatus: () => bilibiliLive.getStatus(),
   });
 
   const commandHandler = createDesktopRuntimeCommandHandler({
@@ -231,6 +249,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     deleteMotionTuningSample,
     handlePreviewMotionPlan,
     applyAmbientMotionPreference,
+    setBilibiliLiveSettings: bilibiliLive.applySettings,
   });
 
   const detachBridgeListener = bridge.onCommand(commandHandler.handleCommand);
@@ -243,15 +262,17 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     adapter.connect();
     applyAmbientMotionPreference();
     pushToTalk.install();
+    bilibiliLive.start();
   });
 
   onBeforeUnmount(() => {
     pushToTalk.dispose();
+    bilibiliLive.dispose();
     playbackCoordinator.resetPlaybackCoordination();
     modelEngine.stop("unmount");
     detachBridgeListener();
     detachProfileAuthoringBridgeListener();
-    snapshotPublisher.dispose();
+    snapshotPublisher?.dispose();
   });
 
   const runtime: PetDesktopRuntime = {

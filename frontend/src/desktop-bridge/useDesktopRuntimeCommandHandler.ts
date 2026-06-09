@@ -11,6 +11,7 @@ import type { SystemSemanticAxisProfileSavePayload } from "../types/protocol.js"
 import { cloneJson } from "../utils/cloneJson.js";
 import { applyMotionEngineSettingsSnapshot } from "../app/motionEngineSettingsSnapshot.js";
 import type { ModelEngineSettings } from "../model-engine/settings.js";
+import type { BilibiliLiveSettings } from "../types/bilibili-live.js";
 
 interface DesktopRuntimeCommandAdapterPort {
   readonly state: {
@@ -37,6 +38,7 @@ interface DesktopRuntimeCommandAdapterPort {
 }
 
 interface DesktopRuntimeSnapshotPublisherPort {
+  publishRuntimeSnapshot: () => void;
   publishMotionTuningSamples: () => void;
   publishModelProjectionSnapshot: () => void;
 }
@@ -54,6 +56,7 @@ export interface DesktopRuntimeCommandDeps {
   deleteMotionTuningSample: (sampleId: string) => void;
   handlePreviewMotionPlan: (plan: unknown) => void;
   applyAmbientMotionPreference: () => void;
+  setBilibiliLiveSettings: (settings: BilibiliLiveSettings) => void;
 }
 
 export function createDesktopRuntimeCommandHandler(
@@ -134,6 +137,9 @@ export function createDesktopRuntimeCommandHandler(
         return;
       case "set_ptt_key_binding":
         deps.adapter.setPttKeyBinding(command.binding);
+        return;
+      case "set_bilibili_live_settings":
+        deps.setBilibiliLiveSettings(command.settings);
         return;
       case "preview_motion_payload":
         deps.handlePreviewMotionPlan(command.payload);

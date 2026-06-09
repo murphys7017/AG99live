@@ -13,6 +13,7 @@ import type {
   DesktopMotionTuningSamplesStatus,
   DesktopMotionTuningSample,
 } from "../types/desktop";
+import type { BilibiliLiveStatus } from "../types/bilibili-live";
 import type { ModelSummary, SystemServerInfoPayload } from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 import type { useModelSync } from "../adapter-connection/model-sync/useModelSync";
@@ -85,6 +86,7 @@ interface PetRuntimeSnapshotPublisherOptions {
   stageMessage: ComputedRef<string>;
   aiState: ComputedRef<string>;
   sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>;
+  bilibiliLiveStatus: () => BilibiliLiveStatus;
 }
 
 function createDebounce(): {
@@ -130,6 +132,7 @@ function createDebounce(): {
 }
 
 export interface PetRuntimeSnapshotPublisher {
+  publishRuntimeSnapshot: () => void;
   publishMotionTuningSamples: () => void;
   publishModelProjectionSnapshot: () => void;
   dispose: () => void;
@@ -141,8 +144,7 @@ export function createPetRuntimeSnapshotPublisher(
   const snapshotDebounce = createDebounce();
   const modelProjectionDebounce = createDebounce();
   const profileDebounce = createDebounce();
-  const stopRuntimeSnapshotWatch = watch(
-    () => {
+  function buildRuntimeSnapshotInput() {
       const a = options.adapter.state;
       const adapterProjection = buildAdapterRuntimeProjection({
         address: a.address,
@@ -171,6 +173,7 @@ export function createPetRuntimeSnapshotPublisher(
           cloneJson(s),
         ) as DesktopMotionTuningSample[],
         motionTuningSamplesStatus: cloneJson(a.motionTuningSamplesStatus) as DesktopMotionTuningSamplesStatus,
+        bilibiliLiveStatus: options.bilibiliLiveStatus(),
       });
 
       const activeSession = options.sessionStore.getActiveSession();
@@ -201,7 +204,10 @@ export function createPetRuntimeSnapshotPublisher(
         confName: options.modelSyncState.confName,
         lastUpdated: options.modelSyncState.lastUpdated,
       };
-    },
+  }
+
+  const stopRuntimeSnapshotWatch = watch(
+    buildRuntimeSnapshotInput,
     (input) => {
       snapshotDebounce.schedule(() => {
         options.bridge.publishSnapshot(
@@ -211,6 +217,13 @@ export function createPetRuntimeSnapshotPublisher(
     },
     { deep: true, immediate: true },
   );
+
+  function publishRuntimeSnapshot(): void {
+    snapshotDebounce.cancel();
+    options.bridge.publishSnapshot(
+      buildDesktopRuntimeSnapshot(buildRuntimeSnapshotInput()),
+    );
+  }
 
   function publishMotionTuningSamples(): void {
     options.bridge.publishMotionTuningSamples(
@@ -311,6 +324,7 @@ export function createPetRuntimeSnapshotPublisher(
   }
 
   return {
+    publishRuntimeSnapshot,
     publishMotionTuningSamples,
     publishModelProjectionSnapshot,
     dispose,

@@ -3,6 +3,7 @@ import { MenuManager } from "./menu-manager";
 import { WindowManager } from "./window-manager";
 import { setupNativeMicrophoneIpc } from "./native-microphone";
 import { registerEsp32DisplayIpc, shutdownEsp32DisplayBridge } from "./esp32-display-bridge";
+import { registerBilibiliLiveIpc } from "./bilibili-live-bridge";
 import type {
   DesktopPttEventAck,
   DesktopPttEventKind,
@@ -513,6 +514,7 @@ app.whenReady().then(() => {
   setupIpc();
   setupNativeMicrophoneIpc();
   registerEsp32DisplayIpc();
+  registerBilibiliLiveIpc();
 
   if (!app.isPackaged) {
     globalShortcut.register("CommandOrControl+Shift+L", () => {

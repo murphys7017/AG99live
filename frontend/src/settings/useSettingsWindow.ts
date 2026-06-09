@@ -13,6 +13,10 @@ import {
   cloneModelEngineSettings,
 } from "../model-engine/settings";
 import { applyMotionEngineSettingsSnapshot } from "../app/motionEngineSettingsSnapshot";
+import {
+  loadBilibiliLiveSettings,
+  normalizeBilibiliLiveSettings,
+} from "../bilibili-live/settings";
 
 export function useSettingsWindow() {
   const bridge = useDesktopBridge();
@@ -32,6 +36,7 @@ export function useSettingsWindow() {
   const motionEngineSettings = reactive(
     cloneModelEngineSettings(bridge.state.snapshot.motionEngineSettings),
   );
+  const bilibiliLiveSettings = reactive(loadBilibiliLiveSettings());
   let removePttCaptureListener: (() => void) | null = null;
 
   watch(
@@ -223,6 +228,15 @@ export function useSettingsWindow() {
     });
   }
 
+  function applyBilibiliLiveSettings(): void {
+    const normalized = normalizeBilibiliLiveSettings(bilibiliLiveSettings);
+    Object.assign(bilibiliLiveSettings, normalized);
+    bridge.sendCommand({
+      type: "set_bilibili_live_settings",
+      settings: normalized,
+    });
+  }
+
   function formatScale(value: unknown): string {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) {
@@ -248,6 +262,7 @@ export function useSettingsWindow() {
     pttKeyCaptureActive,
     pttKeyStatus,
     motionEngineSettings,
+    bilibiliLiveSettings,
     statusLabel,
     profileEditorButtonLabel,
     defaultAdapterAddress: DEFAULT_ADAPTER_ADDRESS,
@@ -269,6 +284,7 @@ export function useSettingsWindow() {
     capturePttKey,
     applyMotionEngineSettings,
     resetMotionEngineSettings,
+    applyBilibiliLiveSettings,
     requestModelProjectionSync,
     formatScale,
   };

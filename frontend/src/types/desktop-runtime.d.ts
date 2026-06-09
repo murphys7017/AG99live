@@ -1,4 +1,8 @@
 import type {
+  BilibiliDanmakuInfoResult,
+  BilibiliLiveSettings,
+} from "./bilibili-live";
+import type {
   DesktopAuxWindowRole,
   DesktopMicrophoneAudioChunk,
   DesktopMicrophoneDevice,
@@ -19,6 +23,9 @@ export interface Ag99DesktopApi {
   updateWindowDrag: (screenX: number, screenY: number) => void;
   endWindowDrag: () => void;
   getLocalAdapterHosts: () => string[];
+  getBilibiliDanmakuInfo: (
+    settings: BilibiliLiveSettings,
+  ) => Promise<BilibiliDanmakuInfoResult>;
   captureDesktopScreenshot: () => Promise<{
     data: string;
     mime_type: "image/jpeg";

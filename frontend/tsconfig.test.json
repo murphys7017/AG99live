@@ -27,6 +27,7 @@
     "src/utils/cloneJson.ts",
     "src/utils/guards.ts",
     "src/app/usePushToTalkController.ts",
+    "src/bilibili-live/**/*.ts",
     "src/desktop-bridge/useDesktopBridge.ts",
     "src/desktop-bridge/snapshot.ts",
     "src/desktop-bridge/snapshot/**/*.ts",

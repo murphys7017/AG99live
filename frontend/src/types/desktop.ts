@@ -3,6 +3,10 @@ import type {
   MotionPlanPayload,
 } from "./protocol";
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
+import type {
+  BilibiliLiveSettings,
+  BilibiliLiveStatus,
+} from "./bilibili-live";
 
 export type DesktopWindowRole =
   | "pet"
@@ -344,6 +348,7 @@ export interface DesktopRuntimeSnapshot {
   activeBackendHistoryUid: string;
   backendHistoryLoading: boolean;
   backendHistoryStatusMessage: string;
+  bilibiliLiveStatus: BilibiliLiveStatus;
   activeSessionId: string | null;
   activeSessionPhase: string;
   activeSessionTextReady: boolean;
@@ -427,4 +432,5 @@ export type DesktopRuntimeCommand =
   | { type: "toggle_mic_capture" }
   | { type: "set_ptt_mode"; enabled: boolean }
   | { type: "set_ptt_key_binding"; binding: DesktopPttKeyBinding }
+  | { type: "set_bilibili_live_settings"; settings: BilibiliLiveSettings }
   | { type: "preview_motion_payload"; payload: unknown };
