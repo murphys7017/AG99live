@@ -163,6 +163,14 @@ export interface DesktopMotionCompileDiagnostics {
   intensityApplied: boolean;
   motionIntensityScale: number;
   axisIntensityScale: Record<string, number>;
+  activeGroups?: string[];
+  skeletonGroups?: string[];
+  missingSkeletonGroups?: string[];
+  maxDeltaFromNeutral?: number;
+  neutralishAxisCount?: number;
+  expressiveAxisCount?: number;
+  semanticAxisCount?: number;
+  couplingSkippedExplicitTargets?: string[];
 }
 
 interface DesktopMotionPlaybackRecordBase {
@@ -170,6 +178,7 @@ interface DesktopMotionPlaybackRecordBase {
   createdAt: string;
   source: string;
   payloadKind: "semantic_intent" | "semantic_plan" | "catalog_motion";
+  messageId: string;
   turnId: string | null;
   playbackTurnId: string | null;
   modelName: string;

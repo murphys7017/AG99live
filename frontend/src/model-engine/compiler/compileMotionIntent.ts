@@ -89,6 +89,7 @@ function buildSuccessResultFromContext(
     return failCompile("compile_pipeline_missing_required_state", context);
   }
 
+  const diagnostics = finalizeCompileDiagnostics(context, extra);
   const plan: SemanticParameterPlan = {
     schema_version: SCHEMA_PARAMETER_PLAN_V2,
     profile_id: profile.profile_id,
@@ -105,6 +106,14 @@ function buildSuccessResultFromContext(
       axis_count: Object.keys(context.state.allAxisValues).length,
       parameter_count: context.state.parameters.length,
       target_duration_ms: timing.resolvedDurationMs,
+      active_groups: diagnostics.activeGroups,
+      skeleton_groups: diagnostics.skeletonGroups,
+      missing_skeleton_groups: diagnostics.missingSkeletonGroups,
+      max_delta_from_neutral: diagnostics.maxDeltaFromNeutral,
+      neutralish_axis_count: diagnostics.neutralishAxisCount,
+      expressive_axis_count: diagnostics.expressiveAxisCount,
+      skeleton_repair_added_axes: context.intent.summary?.skeleton_repair_added_axes,
+      skeleton_repair_replaced_axes: context.intent.summary?.skeleton_repair_replaced_axes,
     },
   };
 
@@ -112,6 +121,6 @@ function buildSuccessResultFromContext(
     ok: true,
     plan,
     reason: "",
-    diagnostics: finalizeCompileDiagnostics(context, extra),
+    diagnostics,
   };
 }

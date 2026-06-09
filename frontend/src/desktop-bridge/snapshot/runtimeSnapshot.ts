@@ -171,6 +171,7 @@ function cloneMotionPlaybackRecord(
       return {
         ...(record as unknown as DesktopMotionPlaybackRecord),
         payloadKind: "catalog_motion",
+        messageId: normalizeText(record.messageId),
         playbackTurnId,
         emotionLabel: normalizeText(record.emotionLabel) || motion.emotion_label || motion.label || motion.motion_id,
         mode: "expressive",
@@ -193,6 +194,7 @@ function cloneMotionPlaybackRecord(
       payloadKind: normalizeText(record.payloadKind) === "semantic_plan"
         ? "semantic_plan"
         : "semantic_intent",
+      messageId: normalizeText(record.messageId),
       playbackTurnId,
       emotionLabel: normalizeText(record.emotionLabel) || plan.emotion_label,
       mode: plan.mode,
@@ -284,6 +286,16 @@ function cloneMotionCompileDiagnostics(
       ? diagnostics.motionIntensityScale
       : 1,
     axisIntensityScale: cloneNumericRecord(diagnostics.axisIntensityScale),
+    activeGroups: normalizeStringArray(diagnostics.activeGroups),
+    skeletonGroups: normalizeStringArray(diagnostics.skeletonGroups),
+    missingSkeletonGroups: normalizeStringArray(diagnostics.missingSkeletonGroups),
+    maxDeltaFromNeutral: isFiniteNumber(diagnostics.maxDeltaFromNeutral)
+      ? diagnostics.maxDeltaFromNeutral
+      : undefined,
+    neutralishAxisCount: normalizeOptionalInteger(diagnostics.neutralishAxisCount),
+    expressiveAxisCount: normalizeOptionalInteger(diagnostics.expressiveAxisCount),
+    semanticAxisCount: normalizeOptionalInteger(diagnostics.semanticAxisCount),
+    couplingSkippedExplicitTargets: normalizeStringArray(diagnostics.couplingSkippedExplicitTargets),
   };
 }
 

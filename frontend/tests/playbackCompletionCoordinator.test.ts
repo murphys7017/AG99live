@@ -351,6 +351,44 @@ async function testPreviewMotionPlaybackDoesNotCreateSessionSegmentOrHistory(): 
   assert.equal(h.coordinator.motionPlaybackRecords.value.length, beforeRecordCount);
 }
 
+async function testDuplicateMotionPlaybackRecordIsDeduped(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
+  const event = {
+    messageId: "msg-a",
+    turnId: "turn-1",
+    playbackTurnId: "turn-1",
+    model: null,
+    payloadKind: "semantic_intent" as const,
+    startReason: "test",
+    queuedDelayMs: 0,
+    diagnostics: null,
+    playerMessage: "playing",
+    plan: {
+      schema_version: "semantic_parameter_plan.v1",
+      parameters: [
+        {
+          axis_id: "head_yaw",
+          parameter_id: "ParamAngleX",
+          target_value: 12,
+          weight: 1,
+          input_value: 72,
+          source: "semantic_axis",
+        },
+      ],
+      mode: "expressive",
+      emotion_label: "neutral",
+      timing: { duration_ms: 1000 },
+    } as never,
+  };
+
+  h.coordinator.recordMotionPlayback(event);
+  h.coordinator.recordMotionPlayback(event);
+
+  assert.equal(h.coordinator.motionPlaybackRecords.value.length, 1);
+  assert.equal(h.coordinator.motionPlaybackRecords.value[0]?.messageId, "msg-a");
+}
+
 async function testMixedAudioStatesRequireAllSettled(): Promise<void> {
   const h = createHarness();
   h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
@@ -510,6 +548,7 @@ async function run(): Promise<void> {
   await testMotionHandoffCompletesPreviousSegmentAndFinishesCurrent();
   await testCatalogMotionCompletionWritesSegmentAndHistory();
   await testPreviewMotionPlaybackDoesNotCreateSessionSegmentOrHistory();
+  await testDuplicateMotionPlaybackRecordIsDeduped();
   await testMixedAudioStatesRequireAllSettled();
   await testSegmentWithAudioFailureStillSettles();
   await testSynthFinishedAfterTurnFinishedStillAcks();

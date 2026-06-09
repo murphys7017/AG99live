@@ -16,6 +16,7 @@ type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 
 const DEFAULT_MAX_MOTION_PLAYBACK_RECORDS = 5;
 const PLAYBACK_SETTLEMENT_WINDOW_MS = 900;
+const MOTION_RECORD_DEDUP_WINDOW_MS = 1200;
 
 interface PlaybackCompletionCoordinatorOptions {
   sessionStore: SessionStore;
@@ -280,6 +281,7 @@ export function usePlaybackCompletionCoordinator(
       createdAt: now.toISOString(),
       source: event.diagnostics?.source || event.startReason,
       payloadKind: event.payloadKind,
+      messageId: event.messageId,
       turnId: event.turnId,
       playbackTurnId: event.playbackTurnId,
       modelName: event.model?.name ?? options.motionRecord.getSelectedModel().value?.name ?? "",
@@ -309,6 +311,13 @@ export function usePlaybackCompletionCoordinator(
           mode: event.plan.mode,
           plan: cloneJson(event.plan),
         };
+    if (isDuplicateMotionPlaybackRecord(record, motionPlaybackRecords.value[0])) {
+      motionPlaybackRecords.value = [
+        record,
+        ...motionPlaybackRecords.value.slice(1),
+      ];
+      return;
+    }
     motionPlaybackRecords.value = [
       record,
       ...motionPlaybackRecords.value,
@@ -404,4 +413,59 @@ export function usePlaybackCompletionCoordinator(
     recordMotionPlayback,
     resetPlaybackCoordination,
   };
+}
+
+function isDuplicateMotionPlaybackRecord(
+  next: DesktopMotionPlaybackRecord,
+  previous: DesktopMotionPlaybackRecord | undefined,
+): boolean {
+  if (!previous) {
+    return false;
+  }
+  const nextCreatedAt = Date.parse(next.createdAt);
+  const previousCreatedAt = Date.parse(previous.createdAt);
+  if (
+    Number.isFinite(nextCreatedAt)
+    && Number.isFinite(previousCreatedAt)
+    && Math.abs(nextCreatedAt - previousCreatedAt) > MOTION_RECORD_DEDUP_WINDOW_MS
+  ) {
+    return false;
+  }
+  return (
+    previous.messageId === next.messageId
+    && previous.turnId === next.turnId
+    && previous.playbackTurnId === next.playbackTurnId
+    && previous.payloadKind === next.payloadKind
+    && previous.startReason === next.startReason
+    && buildMotionRecordSignature(previous) === buildMotionRecordSignature(next)
+  );
+}
+
+function buildMotionRecordSignature(record: DesktopMotionPlaybackRecord): string {
+  if (record.payloadKind === "catalog_motion") {
+    return [
+      record.motion.motion_id,
+      record.motion.group,
+      record.motion.index,
+      record.motion.file,
+    ].join("|");
+  }
+  return [
+    record.plan.schema_version,
+    record.plan.profile_id,
+    record.plan.profile_revision,
+    record.plan.mode,
+    record.plan.emotion_label,
+    record.plan.timing.duration_ms,
+    record.plan.parameters
+      .map((parameter) => [
+        parameter.axis_id,
+        parameter.parameter_id,
+        parameter.input_value ?? "",
+        parameter.target_value,
+        parameter.weight,
+        parameter.source ?? "",
+      ].join(":"))
+      .join(";"),
+  ].join("|");
 }

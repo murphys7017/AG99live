@@ -27,6 +27,7 @@ export function finalizeCompileDiagnostics(
   const { baseDiagnostics, state } = context;
   const compiledParameters = state.parameters.map((item) => item.parameter_id);
   const appliedDerivedAxes = [...state.appliedDerivedAxes];
+  const visibility = buildVisibilityDiagnostics(context);
 
   return {
     ...baseDiagnostics,
@@ -46,6 +47,73 @@ export function finalizeCompileDiagnostics(
     axisErrorCount: state.axisErrorCount,
     axisErrorLimit: state.axisErrorLimit,
     compiledParameters,
+    ...visibility,
     ...extra,
   };
+}
+
+function buildVisibilityDiagnostics(
+  context: MotionCompileContext,
+): Partial<CompileDiagnostics> {
+  const activeGroups = new Set<string>();
+  let maxDeltaFromNeutral = 0;
+  let neutralishAxisCount = 0;
+  let expressiveAxisCount = 0;
+
+  for (const [axisId, value] of Object.entries(context.state.allAxisValues)) {
+    const axis = context.state.axisById.get(axisId);
+    if (!axis) {
+      continue;
+    }
+    const group = normalizeText(axis.semantic_group);
+    if (group) {
+      activeGroups.add(group);
+    }
+    const delta = Math.abs(value - axis.neutral);
+    maxDeltaFromNeutral = Math.max(maxDeltaFromNeutral, delta);
+    if (isAxisWithinSoftRange(value, axis.soft_range)) {
+      neutralishAxisCount += 1;
+    } else {
+      expressiveAxisCount += 1;
+    }
+  }
+
+  const activeGroupList = [...activeGroups].sort();
+  const skeletonGroupIds = ["head", "body", "gaze"];
+  const skeletonGroups = skeletonGroupIds.filter((group) => activeGroups.has(group));
+  const missingSkeletonGroups = skeletonGroupIds.filter((group) => !activeGroups.has(group));
+
+  return {
+    activeGroups: activeGroupList,
+    skeletonGroups,
+    missingSkeletonGroups,
+    maxDeltaFromNeutral: roundDiagnosticNumber(maxDeltaFromNeutral),
+    neutralishAxisCount,
+    expressiveAxisCount,
+    semanticAxisCount: Object.keys(context.state.allAxisValues).length,
+    couplingSkippedExplicitTargets: collectCouplingSkippedExplicitTargets(context.state.warnings),
+  };
+}
+
+function isAxisWithinSoftRange(value: number, softRange: readonly [number, number]): boolean {
+  return value >= softRange[0] && value <= softRange[1];
+}
+
+function collectCouplingSkippedExplicitTargets(warnings: readonly string[]): string[] {
+  const targets: string[] = [];
+  for (const warning of warnings) {
+    const match = /^semantic_coupling_skipped_explicit_target:[^:]+:([^:]+)$/.exec(warning);
+    if (match?.[1]) {
+      targets.push(match[1]);
+    }
+  }
+  return [...new Set(targets)];
+}
+
+function roundDiagnosticNumber(value: number): number {
+  return Math.round(value * 10000) / 10000;
+}
+
+function normalizeText(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
 }

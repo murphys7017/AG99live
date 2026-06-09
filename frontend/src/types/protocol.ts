@@ -603,6 +603,16 @@ export interface NormalizedSemanticMotionIntent {
   axes: Record<string, number>;
   summary?: {
     axis_count?: number;
+    active_groups?: string[];
+    skeleton_groups?: string[];
+    missing_skeleton_groups?: string[];
+    max_delta_from_neutral?: number;
+    neutralish_axis_count?: number;
+    expressive_axis_count?: number;
+    neutralish_axes?: string[];
+    expressive_axes?: string[];
+    skeleton_repair_added_axes?: string[];
+    skeleton_repair_replaced_axes?: string[];
   };
 }
 
@@ -664,6 +674,16 @@ export interface SemanticParameterPlan {
     axis_count?: number;
     parameter_count?: number;
     target_duration_ms?: number;
+    active_groups?: string[];
+    skeleton_groups?: string[];
+    missing_skeleton_groups?: string[];
+    max_delta_from_neutral?: number;
+    neutralish_axis_count?: number;
+    expressive_axis_count?: number;
+    neutralish_axes?: string[];
+    expressive_axes?: string[];
+    skeleton_repair_added_axes?: string[];
+    skeleton_repair_replaced_axes?: string[];
   };
 }
 

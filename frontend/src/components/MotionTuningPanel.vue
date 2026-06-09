@@ -93,6 +93,18 @@ type SemanticMotionPlaybackRecord = DesktopMotionPlaybackRecord & {
   payloadKind: "semantic_intent" | "semantic_plan";
   plan: SemanticParameterPlan;
 };
+type MotionVisibilitySummary = Record<string, unknown> & {
+  axis_count?: number;
+  parameter_count?: number;
+  target_duration_ms?: number;
+  max_delta_from_neutral?: number;
+  neutralish_axis_count?: number;
+  expressive_axis_count?: number;
+  skeleton_groups?: string[];
+  missing_skeleton_groups?: string[];
+  skeleton_repair_added_axes?: string[];
+  skeleton_repair_replaced_axes?: string[];
+};
 
 const currentProfile = computed<SemanticAxisProfile | null>(() => props.semanticProfile);
 const promptAxes = computed(() => {
@@ -224,6 +236,9 @@ const selectedDraftSource = computed<MotionDraftSource | null>(() => {
     record,
   };
 });
+const selectedMotionDiagnosticLines = computed(() =>
+  buildMotionDiagnosticLines(selectedDraftSource.value),
+);
 
 const effectiveExampleCoverage = computed(() => {
   const groups = [
@@ -610,6 +625,93 @@ function formatAxisList(axes: Record<string, number>): string {
   return Object.keys(axes).join(", ");
 }
 
+function buildMotionDiagnosticLines(source: MotionDraftSource | null): string[] {
+  const record = source?.record;
+  if (!record) {
+    return [];
+  }
+  const lines: string[] = [];
+  const summary = (record.plan.summary ?? {}) as MotionVisibilitySummary;
+  const diagnostics = record.diagnostics;
+  const warningLines = uniqueStrings([
+    ...(diagnostics?.warnings ?? []),
+    ...(record.plan.diagnostics?.warnings ?? []),
+  ]);
+  appendMetric(lines, "轴", summary.axis_count ?? diagnostics?.semanticAxisCount);
+  appendMetric(lines, "参数", summary.parameter_count ?? diagnostics?.compiledParameterCount);
+  appendMetric(lines, "时长", summary.target_duration_ms ?? record.plan.timing.duration_ms, "ms");
+  appendMetric(lines, "最大偏移", pickNumber(summary.max_delta_from_neutral, diagnostics?.maxDeltaFromNeutral));
+  appendList(lines, "骨架", pickStringList(summary.skeleton_groups, diagnostics?.skeletonGroups));
+  appendList(lines, "缺骨架", pickStringList(summary.missing_skeleton_groups, diagnostics?.missingSkeletonGroups));
+  appendMetric(lines, "soft内轴", pickNumber(summary.neutralish_axis_count, diagnostics?.neutralishAxisCount));
+  appendMetric(lines, "表达轴", pickNumber(summary.expressive_axis_count, diagnostics?.expressiveAxisCount));
+  appendList(lines, "fallback补轴", pickStringList(summary.skeleton_repair_added_axes));
+  appendList(lines, "fallback替换", pickStringList(summary.skeleton_repair_replaced_axes));
+  appendList(lines, "coupling跳过", diagnostics?.couplingSkippedExplicitTargets);
+  appendList(lines, "编译/计划警告", warningLines.slice(0, 8));
+  return lines;
+}
+
+function appendMetric(
+  lines: string[],
+  label: string,
+  value: unknown,
+  suffix = "",
+): void {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return;
+  }
+  lines.push(`${label}: ${roundTo(value, 3)}${suffix}`);
+}
+
+function appendList(lines: string[], label: string, value: unknown): void {
+  if (!Array.isArray(value) || !value.length) {
+    return;
+  }
+  const items = value
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .slice(0, 12);
+  if (items.length) {
+    lines.push(`${label}: ${items.join(", ")}`);
+  }
+}
+
+function pickNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function pickStringList(...values: unknown[]): string[] | undefined {
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      const items = uniqueStrings(value);
+      if (items.length) {
+        return items;
+      }
+    }
+  }
+  return undefined;
+}
+
+function uniqueStrings(value: readonly unknown[]): string[] {
+  const seen = new Set<string>();
+  const items: string[] = [];
+  for (const item of value) {
+    const text = String(item || "").trim();
+    if (!text || seen.has(text)) {
+      continue;
+    }
+    seen.add(text);
+    items.push(text);
+  }
+  return items;
+}
+
 function normalizeEmotionLabel(value: string, fallback: string): string {
   return value.trim().slice(0, 80) || fallback.trim() || "manual_tuning";
 }
@@ -713,6 +815,12 @@ function normalizeEmotionKey(value: string): string {
               <strong>{{ source.emotionLabel }}</strong>
               <span>{{ source.mode }} · {{ formatRecordTime(source) }}</span>
               <small>{{ source.assistantText }}</small>
+              <small
+                v-if="source.record"
+                class="motion-tuning__diagnostic-chip"
+              >
+                {{ buildMotionDiagnosticLines(source).slice(0, 3).join(" · ") || "暂无诊断" }}
+              </small>
             </button>
           </template>
           <template v-else>
@@ -760,6 +868,20 @@ function normalizeEmotionKey(value: string): string {
               </button>
             </div>
           </div>
+          <details
+            v-if="selectedDraftSource?.record && selectedMotionDiagnosticLines.length"
+            class="motion-tuning__details motion-tuning__diagnostics"
+          >
+            <summary>动作诊断</summary>
+            <ul>
+              <li
+                v-for="line in selectedMotionDiagnosticLines"
+                :key="line"
+              >
+                {{ line }}
+              </li>
+            </ul>
+          </details>
           <div class="motion-tuning__axis-grid">
             <label
               v-for="axis in promptAxes"
@@ -939,6 +1061,21 @@ function normalizeEmotionKey(value: string): string {
 
 .motion-tuning__coverage-item[data-covered="true"] {
   border-color: rgba(34, 197, 94, 0.35);
+}
+
+.motion-tuning__diagnostic-chip {
+  color: rgba(71, 85, 105, 0.86);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.motion-tuning__diagnostics ul {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: rgba(51, 65, 85, 0.92);
+  font-size: 12px;
 }
 
 .motion-tuning__sample-group {

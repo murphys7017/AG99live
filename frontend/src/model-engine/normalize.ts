@@ -16,7 +16,12 @@ import {
 } from "./constants.js";
 import type { NormalizedMotionPayload } from "./contracts.js";
 import { parseSemanticParameterPlan, type ParseResult } from "./planParser.js";
-import { isFiniteNumber, isObject, normalizeText } from "../utils/guards.js";
+import {
+  isFiniteNumber,
+  isObject,
+  normalizeStringArray,
+  normalizeText,
+} from "../utils/guards.js";
 
 function normalizeDynamicAxesV2(value: unknown): Record<string, number> | null {
   if (!isObject(value)) {
@@ -137,13 +142,7 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
       duration_hint_ms: durationHintMs,
       fallback_pose_id: normalizeText(value.fallback_pose_id) || undefined,
       axes,
-      summary: isObject(value.summary)
-        ? {
-          axis_count: isFiniteNumber(value.summary.axis_count)
-            ? Math.round(value.summary.axis_count)
-            : undefined,
-        }
-        : undefined,
+      summary: normalizeMotionVisibilitySummary(value.summary),
     },
   };
 }
@@ -266,5 +265,30 @@ export function normalizeMotionPayload(
     reason: schemaVersion
       ? `unsupported_motion_payload:${schemaVersion}`
       : "invalid_motion_payload",
+  };
+}
+
+function normalizeMotionVisibilitySummary(value: unknown): SemanticMotionIntent["summary"] {
+  if (!isObject(value)) {
+    return undefined;
+  }
+  return {
+    axis_count: isFiniteNumber(value.axis_count) ? Math.round(value.axis_count) : undefined,
+    active_groups: normalizeStringArray(value.active_groups),
+    skeleton_groups: normalizeStringArray(value.skeleton_groups),
+    missing_skeleton_groups: normalizeStringArray(value.missing_skeleton_groups),
+    max_delta_from_neutral: isFiniteNumber(value.max_delta_from_neutral)
+      ? value.max_delta_from_neutral
+      : undefined,
+    neutralish_axis_count: isFiniteNumber(value.neutralish_axis_count)
+      ? Math.round(value.neutralish_axis_count)
+      : undefined,
+    expressive_axis_count: isFiniteNumber(value.expressive_axis_count)
+      ? Math.round(value.expressive_axis_count)
+      : undefined,
+    neutralish_axes: normalizeStringArray(value.neutralish_axes),
+    expressive_axes: normalizeStringArray(value.expressive_axes),
+    skeleton_repair_added_axes: normalizeStringArray(value.skeleton_repair_added_axes),
+    skeleton_repair_replaced_axes: normalizeStringArray(value.skeleton_repair_replaced_axes),
   };
 }

@@ -343,6 +343,12 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     )
 
     duration_hint_ms = _normalize_duration_hint_ms(motion_hint.get("duration_hint_ms"))
+    summary = _build_motion_visibility_summary(
+        axes=validated_axes,
+        semantic_profile=semantic_profile,
+        repair_added_axes=repair_added_axes,
+        repair_replaced_axes=repair_replaced_axes,
+    )
 
     return {
         "schema_version": MOTION_INTENT_V3_SCHEMA_VERSION,
@@ -354,11 +360,7 @@ def _resolve_plugin_hints_motion_payload_with_reason(
         "duration_hint_ms": duration_hint_ms,
         "fallback_pose_id": fallback_pose_id,
         "axes": validated_axes,
-        "summary": {
-            "axis_count": len(validated_axes),
-            "skeleton_repair_added_axes": repair_added_axes,
-            "skeleton_repair_replaced_axes": repair_replaced_axes,
-        },
+        "summary": summary,
     }, reason
 
 
@@ -408,6 +410,75 @@ def _coerce_plugin_hint_axis_value(raw_value: float, axis: dict[str, Any]) -> fl
 
     clamped = max(min_value, min(max_value, raw_value))
     return round(clamped, 4)
+
+
+def _build_motion_visibility_summary(
+    *,
+    axes: dict[str, float],
+    semantic_profile: dict[str, Any],
+    repair_added_axes: list[str] | None = None,
+    repair_replaced_axes: list[str] | None = None,
+) -> dict[str, Any]:
+    axis_by_id = {
+        str(axis.get("id") or "").strip(): axis
+        for axis in profile_prompt_axes(semantic_profile)
+        if isinstance(axis, dict) and str(axis.get("id") or "").strip()
+    }
+    active_groups: set[str] = set()
+    max_delta_from_neutral = 0.0
+    neutralish_axes: list[str] = []
+    expressive_axes: list[str] = []
+
+    for axis_id, raw_value in axes.items():
+        axis = axis_by_id.get(str(axis_id))
+        if axis is None:
+            continue
+        try:
+            value = float(raw_value)
+            neutral = float(axis.get("neutral", 50))
+        except (TypeError, ValueError):
+            continue
+        delta = abs(value - neutral)
+        max_delta_from_neutral = max(max_delta_from_neutral, delta)
+        group = str(axis.get("semantic_group") or "").strip().lower()
+        if group:
+            active_groups.add(group)
+        if _is_axis_soft_range_neutral(value, axis):
+            neutralish_axes.append(str(axis_id))
+        else:
+            expressive_axes.append(str(axis_id))
+
+    skeleton_groups = ("head", "body", "gaze")
+    covered_skeleton_groups = [group for group in skeleton_groups if group in active_groups]
+    missing_skeleton_groups = [group for group in skeleton_groups if group not in active_groups]
+
+    return {
+        "axis_count": len(axes),
+        "active_groups": sorted(active_groups),
+        "skeleton_groups": covered_skeleton_groups,
+        "missing_skeleton_groups": missing_skeleton_groups,
+        "max_delta_from_neutral": round(max_delta_from_neutral, 4),
+        "neutralish_axis_count": len(neutralish_axes),
+        "expressive_axis_count": len(expressive_axes),
+        "neutralish_axes": neutralish_axes[:12],
+        "expressive_axes": expressive_axes[:12],
+        "skeleton_repair_added_axes": list(repair_added_axes or []),
+        "skeleton_repair_replaced_axes": list(repair_replaced_axes or []),
+    }
+
+
+def _is_axis_soft_range_neutral(value: float, axis: dict[str, Any]) -> bool:
+    soft_range = axis.get("soft_range")
+    if isinstance(soft_range, (list, tuple)) and len(soft_range) >= 2:
+        try:
+            return float(soft_range[0]) <= value <= float(soft_range[1])
+        except (TypeError, ValueError):
+            pass
+    try:
+        neutral = float(axis.get("neutral", 50))
+    except (TypeError, ValueError):
+        neutral = 50.0
+    return abs(value - neutral) <= 2.0
 
 
 def _coerce_finite_number(value: Any) -> float | None:

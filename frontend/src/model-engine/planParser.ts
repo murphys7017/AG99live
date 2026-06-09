@@ -6,7 +6,12 @@ import {
   SCHEMA_PARAMETER_PLAN_V2,
   isSemanticParameterPlanSource,
 } from "../types/protocol.js";
-import { isFiniteNumber, isObject, normalizeText } from "../utils/guards.js";
+import {
+  isFiniteNumber,
+  isObject,
+  normalizeStringArray,
+  normalizeText,
+} from "../utils/guards.js";
 
 interface ParseFailure {
   ok: false;
@@ -166,19 +171,7 @@ export function parseSemanticParameterPlan(
             : undefined,
         }
         : undefined,
-      summary: isObject(value.summary)
-        ? {
-          axis_count: isFiniteNumber(value.summary.axis_count)
-            ? Math.round(value.summary.axis_count)
-            : undefined,
-          parameter_count: isFiniteNumber(value.summary.parameter_count)
-            ? Math.round(value.summary.parameter_count)
-            : undefined,
-          target_duration_ms: isFiniteNumber(value.summary.target_duration_ms)
-            ? Math.round(value.summary.target_duration_ms)
-            : undefined,
-        }
-        : undefined,
+      summary: normalizePlanSummary(value.summary),
     },
   };
 }
@@ -207,4 +200,37 @@ export function cloneSemanticParameterPlan(plan: unknown): SemanticParameterPlan
       ? { ...planObj.summary, ...parsed.summary }
       : parsed.summary,
   } as SemanticParameterPlan;
+}
+
+function normalizePlanSummary(value: unknown): SemanticParameterPlan["summary"] {
+  if (!isObject(value)) {
+    return undefined;
+  }
+  return {
+    axis_count: isFiniteNumber(value.axis_count)
+      ? Math.round(value.axis_count)
+      : undefined,
+    parameter_count: isFiniteNumber(value.parameter_count)
+      ? Math.round(value.parameter_count)
+      : undefined,
+    target_duration_ms: isFiniteNumber(value.target_duration_ms)
+      ? Math.round(value.target_duration_ms)
+      : undefined,
+    active_groups: normalizeStringArray(value.active_groups),
+    skeleton_groups: normalizeStringArray(value.skeleton_groups),
+    missing_skeleton_groups: normalizeStringArray(value.missing_skeleton_groups),
+    max_delta_from_neutral: isFiniteNumber(value.max_delta_from_neutral)
+      ? value.max_delta_from_neutral
+      : undefined,
+    neutralish_axis_count: isFiniteNumber(value.neutralish_axis_count)
+      ? Math.round(value.neutralish_axis_count)
+      : undefined,
+    expressive_axis_count: isFiniteNumber(value.expressive_axis_count)
+      ? Math.round(value.expressive_axis_count)
+      : undefined,
+    neutralish_axes: normalizeStringArray(value.neutralish_axes),
+    expressive_axes: normalizeStringArray(value.expressive_axes),
+    skeleton_repair_added_axes: normalizeStringArray(value.skeleton_repair_added_axes),
+    skeleton_repair_replaced_axes: normalizeStringArray(value.skeleton_repair_replaced_axes),
+  };
 }
