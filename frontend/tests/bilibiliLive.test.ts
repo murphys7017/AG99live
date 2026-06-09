@@ -76,6 +76,72 @@ async function testMd5(): Promise<void> {
   );
 }
 
+function testAuthPayloadOmitsEmptyToken(): void {
+  const payload = BILIBILI_LIVE_CLIENT_TEST_ONLY.buildAuthPayload({
+    realRoomId: 123,
+    uid: 0,
+    buvid: "BUVID_TEST",
+    token: "",
+    hosts: [],
+  });
+  assert.equal(payload.roomid, 123);
+  assert.equal(payload.buvid, "BUVID_TEST");
+  assert.equal("key" in payload, false);
+}
+
+function testAuthPayloadIncludesToken(): void {
+  const payload = BILIBILI_LIVE_CLIENT_TEST_ONLY.buildAuthPayload({
+    realRoomId: 123,
+    uid: 0,
+    buvid: "BUVID_TEST",
+    token: "token-test",
+    hosts: [],
+  });
+  assert.equal(payload.key, "token-test");
+}
+
+function testPreferredProtoverFallsBackWhenBrotliUnsupported(): void {
+  const original = globalThis.DecompressionStream;
+  try {
+    Object.assign(globalThis, {
+      DecompressionStream: class {
+        constructor(format: string) {
+          if (format === "br") {
+            throw new Error("unsupported br");
+          }
+        }
+      },
+    });
+    assert.equal(BILIBILI_LIVE_CLIENT_TEST_ONLY.resolvePreferredProtover(), 2);
+  } finally {
+    Object.assign(globalThis, { DecompressionStream: original });
+  }
+}
+
+function testPreferredProtoverUsesBrotliWhenSupported(): void {
+  const original = globalThis.DecompressionStream;
+  try {
+    Object.assign(globalThis, {
+      DecompressionStream: class {
+        constructor(_format: string) {}
+      },
+    });
+    assert.equal(BILIBILI_LIVE_CLIENT_TEST_ONLY.resolvePreferredProtover(), 3);
+  } finally {
+    Object.assign(globalThis, { DecompressionStream: original });
+  }
+}
+
+function testLastCommandNameUsesLatestCommand(): void {
+  assert.equal(
+    BILIBILI_LIVE_CLIENT_TEST_ONLY.getLastCommandName([
+      { cmd: "INTERACT_WORD" },
+      { cmd: "DANMU_MSG:4:0:2:2:2:0" },
+    ]),
+    "DANMU_MSG:4:0:2:2:2:0",
+  );
+}
+
 function testSettingsNormalize(): void {
   assert.deepEqual(
     normalizeBilibiliLiveSettings({
@@ -104,6 +170,12 @@ function testSnapshotNormalize(): void {
       roomId: "123",
       realRoomId: 456,
       bufferedCount: 7.2,
+      authReceived: true,
+      heartbeatReceived: true,
+      commandCount: 3.8,
+      danmakuCount: 2.2,
+      lastCommand: "DANMU_MSG",
+      protover: 2.4,
       lastMessageAt: "2026-06-09T00:00:00.000Z",
       lastError: "",
       hasCookie: true,
@@ -111,12 +183,23 @@ function testSnapshotNormalize(): void {
   });
   assert.equal(normalized.bilibiliLiveStatus.connected, true);
   assert.equal(normalized.bilibiliLiveStatus.bufferedCount, 7);
+  assert.equal(normalized.bilibiliLiveStatus.authReceived, true);
+  assert.equal(normalized.bilibiliLiveStatus.heartbeatReceived, true);
+  assert.equal(normalized.bilibiliLiveStatus.commandCount, 4);
+  assert.equal(normalized.bilibiliLiveStatus.danmakuCount, 2);
+  assert.equal(normalized.bilibiliLiveStatus.lastCommand, "DANMU_MSG");
+  assert.equal(normalized.bilibiliLiveStatus.protover, 2);
 }
 
 await testPacketParsesDanmakuCommand();
 testAuthPacketIsBinary();
 testCookieParsing();
 await testMd5();
+testAuthPayloadOmitsEmptyToken();
+testAuthPayloadIncludesToken();
+testPreferredProtoverFallsBackWhenBrotliUnsupported();
+testPreferredProtoverUsesBrotliWhenSupported();
+testLastCommandNameUsesLatestCommand();
 testSettingsNormalize();
 testSnapshotNormalize();
 

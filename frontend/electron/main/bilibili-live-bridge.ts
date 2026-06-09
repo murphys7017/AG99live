@@ -13,6 +13,14 @@ const DEFAULT_HOST: BilibiliDanmakuHost = {
   host: "broadcastlv.chat.bilibili.com",
   wssPort: 443,
 };
+const BILIBILI_WEB_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+const DANMAKU_WBI_DEVICE_PARAMS: Record<string, string> = {
+  dm_img_list: "[]",
+  dm_img_str: "V2ViR0wgMS",
+  dm_cover_img_str:
+    "QU5HTEUgKEludGVsLCBJbnRlbChSKSBIRCBHcmFwaGljcyBEaXJlY3QzRDExIHZzXzVfMCBwc181XzApLCBvciBzaW1pbGFyR29vZ2xlIEluYy4gKEludGVsKQ",
+};
 const WBI_KEY_INDEX_TABLE = [
   46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
   27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13,
@@ -54,10 +62,11 @@ async function fetchDanmakuInfo(settings: BilibiliLiveSettings): Promise<Bilibil
     throw new Error("Bilibili live room ID is required.");
   }
 
-  const realRoomId = await fetchRealRoomId(roomId);
+  const cookie = normalizeCookie(settings.cookie);
+  const realRoomId = await fetchRealRoomId(roomId, cookie);
   const uid = extractNumericCookie(settings.cookie, "DedeUserID") ?? 0;
   const buvid = extractCookie(settings.cookie, "buvid3") || createFallbackBuvid();
-  const config = await fetchDanmakuServerConfig(realRoomId);
+  const config = await fetchDanmakuServerConfig(realRoomId, cookie);
   return {
     realRoomId,
     uid,
@@ -67,10 +76,10 @@ async function fetchDanmakuInfo(settings: BilibiliLiveSettings): Promise<Bilibil
   };
 }
 
-async function fetchRealRoomId(roomId: number): Promise<number> {
+async function fetchRealRoomId(roomId: number, cookie: string): Promise<number> {
   const url = new URL(ROOM_INFO_URL);
   url.searchParams.set("room_id", String(roomId));
-  const data = await fetchJson(url);
+  const data = await fetchJson(url, cookie);
   const realRoomId = Number(readPath(data, ["data", "room_id"]));
   if (!Number.isFinite(realRoomId) || realRoomId <= 0) {
     throw new Error("Bilibili live room info response did not include room_id.");
@@ -78,10 +87,16 @@ async function fetchRealRoomId(roomId: number): Promise<number> {
   return realRoomId;
 }
 
-async function fetchDanmakuServerConfig(roomId: number): Promise<DanmakuServerConfig> {
-  const config = await tryFetchDanmakuServerConfig(roomId, true)
-    ?? await tryFetchDanmakuServerConfig(roomId, false);
+async function fetchDanmakuServerConfig(
+  roomId: number,
+  cookie: string,
+): Promise<DanmakuServerConfig> {
+  const config = await tryFetchDanmakuServerConfig(roomId, cookie, true)
+    ?? await tryFetchDanmakuServerConfig(roomId, cookie, false);
   if (!config) {
+    if (!cookie) {
+      throw new Error("B 站弹幕服务器配置获取失败：当前接口需要登录 Cookie 才能完成 WBI 签名。");
+    }
     return { token: "", hosts: [DEFAULT_HOST] };
   }
   return config;
@@ -89,17 +104,23 @@ async function fetchDanmakuServerConfig(roomId: number): Promise<DanmakuServerCo
 
 async function tryFetchDanmakuServerConfig(
   roomId: number,
+  cookie: string,
   signed: boolean,
 ): Promise<DanmakuServerConfig | null> {
   try {
     const url = new URL(DANMAKU_INFO_URL);
+    const baseParams = {
+      id: String(roomId),
+      type: "0",
+      ...DANMAKU_WBI_DEVICE_PARAMS,
+    };
     const params = signed
-      ? await signWbiParams({ id: String(roomId), type: "0" })
-      : { id: String(roomId), type: "0" };
+      ? await signWbiParams(baseParams, cookie)
+      : baseParams;
     for (const [key, value] of Object.entries(params)) {
       url.searchParams.set(key, value);
     }
-    const data = await fetchJson(url);
+    const data = await fetchJson(url, cookie);
     return parseDanmakuServerConfig(data);
   } catch (error) {
     console.warn(
@@ -129,11 +150,12 @@ function parseDanmakuServerConfig(data: unknown): DanmakuServerConfig {
   return { token, hosts };
 }
 
-async function fetchJson(url: URL): Promise<unknown> {
+async function fetchJson(url: URL, cookie = ""): Promise<unknown> {
   const response = await fetch(url, {
     headers: {
-      "User-Agent": "Mozilla/5.0 AG99live",
+      "User-Agent": BILIBILI_WEB_USER_AGENT,
       Referer: "https://live.bilibili.com/",
+      ...(cookie ? { Cookie: cookie } : {}),
     },
   });
   if (!response.ok) {
@@ -148,8 +170,11 @@ async function fetchJson(url: URL): Promise<unknown> {
   return data;
 }
 
-async function signWbiParams(params: Record<string, string>): Promise<Record<string, string>> {
-  const wbiKey = await fetchWbiKey().catch((error: unknown) => {
+async function signWbiParams(
+  params: Record<string, string>,
+  cookie: string,
+): Promise<Record<string, string>> {
+  const wbiKey = await fetchWbiKey(cookie).catch((error: unknown) => {
     console.warn(
       "[BilibiliLive] WBI key request failed; retrying unsigned.",
       error instanceof Error ? error.message : error,
@@ -173,8 +198,8 @@ async function signWbiParams(params: Record<string, string>): Promise<Record<str
   };
 }
 
-async function fetchWbiKey(): Promise<string> {
-  const data = await fetchJson(new URL(WBI_INIT_URL));
+async function fetchWbiKey(cookie: string): Promise<string> {
+  const data = await fetchJsonAllowingApiCodes(new URL(WBI_INIT_URL), cookie, [-101]);
   const imgUrl = String(readPath(data, ["data", "wbi_img", "img_url"]) ?? "");
   const subUrl = String(readPath(data, ["data", "wbi_img", "sub_url"]) ?? "");
   const imgKey = extractFilenameStem(imgUrl);
@@ -188,6 +213,30 @@ async function fetchWbiKey(): Promise<string> {
     .join("");
 }
 
+async function fetchJsonAllowingApiCodes(
+  url: URL,
+  cookie: string,
+  allowedCodes: readonly number[],
+): Promise<unknown> {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": BILIBILI_WEB_USER_AGENT,
+      Referer: "https://live.bilibili.com/",
+      ...(cookie ? { Cookie: cookie } : {}),
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Bilibili live request failed: ${response.status} ${response.statusText}`);
+  }
+  const data = await response.json() as unknown;
+  const code = Number(readPath(data, ["code"]));
+  if (Number.isFinite(code) && code !== 0 && !allowedCodes.includes(code)) {
+    const message = String(readPath(data, ["message"]) ?? "unknown error");
+    throw new Error(`Bilibili live API error: ${message}`);
+  }
+  return data;
+}
+
 function extractFilenameStem(url: string): string {
   const filename = url.split("/").pop() ?? "";
   return filename.split(".")[0] ?? "";
@@ -195,6 +244,10 @@ function extractFilenameStem(url: string): string {
 
 function filterWbiValue(value: string): string {
   return value.replace(/[!'()*]/g, "");
+}
+
+function normalizeCookie(cookie: string): string {
+  return cookie.trim();
 }
 
 async function md5Hex(value: string): Promise<string> {

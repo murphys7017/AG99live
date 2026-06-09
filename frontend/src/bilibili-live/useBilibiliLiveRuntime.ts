@@ -95,6 +95,12 @@ export function useBilibiliLiveRuntime(options: BilibiliLiveRuntimeOptions) {
         status.connected = nextStatus.connected;
         status.realRoomId = nextStatus.realRoomId;
         status.lastError = nextStatus.lastError;
+        status.authReceived = Boolean(nextStatus.authReceived);
+        status.heartbeatReceived = Boolean(nextStatus.heartbeatReceived);
+        status.commandCount = Math.max(0, Math.round(nextStatus.commandCount ?? 0));
+        status.danmakuCount = Math.max(0, Math.round(nextStatus.danmakuCount ?? 0));
+        status.lastCommand = nextStatus.lastCommand ?? "";
+        status.protover = nextStatus.protover ?? null;
         status.status = nextStatus.connected
           ? "connected"
           : nextStatus.lastError

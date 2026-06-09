@@ -152,6 +152,16 @@ function normalizeBilibiliLiveStatus(value: unknown): BilibiliLiveStatus {
     bufferedCount: isFiniteNumber(value.bufferedCount)
       ? Math.max(0, Math.round(value.bufferedCount))
       : 0,
+    authReceived: Boolean(value.authReceived),
+    heartbeatReceived: Boolean(value.heartbeatReceived),
+    commandCount: isFiniteNumber(value.commandCount)
+      ? Math.max(0, Math.round(value.commandCount))
+      : 0,
+    danmakuCount: isFiniteNumber(value.danmakuCount)
+      ? Math.max(0, Math.round(value.danmakuCount))
+      : 0,
+    lastCommand: normalizeText(value.lastCommand),
+    protover: isFiniteNumber(value.protover) ? Math.round(value.protover) : null,
     lastMessageAt: normalizeText(value.lastMessageAt),
     lastError: normalizeText(value.lastError),
     hasCookie: Boolean(value.hasCookie),

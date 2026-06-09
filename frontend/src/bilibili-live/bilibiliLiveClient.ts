@@ -15,11 +15,20 @@ const DEFAULT_HOST = {
   wssPort: 443,
 };
 const HEARTBEAT_INTERVAL_MS = 30_000;
+const PROTO_NORMAL = 0;
+const PROTO_DEFLATE = 2;
+const PROTO_BROTLI = 3;
 
 export interface BilibiliLiveClientStatus {
   connected: boolean;
   realRoomId: number | null;
   lastError: string;
+  authReceived?: boolean;
+  heartbeatReceived?: boolean;
+  commandCount?: number;
+  danmakuCount?: number;
+  lastCommand?: string;
+  protover?: number | null;
 }
 
 export interface BilibiliLiveClientOptions {
@@ -39,6 +48,12 @@ export class BilibiliLiveClient {
   private reconnectAttempts = 0;
   private currentInfo: BilibiliDanmakuInfo | null = null;
   private lastError = "";
+  private authReceived = false;
+  private heartbeatReceived = false;
+  private commandCount = 0;
+  private danmakuCount = 0;
+  private lastCommand = "";
+  private protover: number | null = null;
 
   constructor(options: BilibiliLiveClientOptions) {
     this.settings = options.settings;
@@ -78,10 +93,12 @@ export class BilibiliLiveClient {
       const socket = new WebSocket(`wss://${host.host}:${host.wssPort}/sub`);
       socket.binaryType = "arraybuffer";
       this.socket = socket;
+      this.resetDiagnostics();
       this.emitStatus({
         connected: false,
         realRoomId: info.realRoomId,
         lastError: "",
+        protover: this.protover,
       });
 
       socket.onopen = () => {
@@ -90,15 +107,10 @@ export class BilibiliLiveClient {
           return;
         }
         this.reconnectAttempts = 0;
-        socket.send(makeBilibiliAuthPacket({
-          uid: info.uid,
-          roomid: info.realRoomId,
-          protover: 2,
-          platform: "web",
-          type: 2,
-          buvid: info.buvid,
-          key: info.token,
-        }));
+        const authPayload = buildAuthPayload(info);
+        this.protover = Number(authPayload.protover);
+        this.emitStatus({ connected: false, protover: this.protover });
+        socket.send(makeBilibiliAuthPacket(authPayload));
         this.clearHeartbeatTimer();
         this.heartbeatTimer = window.setInterval(() => {
           if (this.socket === socket && socket.readyState === WebSocket.OPEN) {
@@ -149,13 +161,27 @@ export class BilibiliLiveClient {
         || message.heartbeat
         || message.commands.length > 0
       ) {
-        this.emitStatus({ connected: true, lastError: "" });
+        this.authReceived = this.authReceived || message.authenticated;
+        this.heartbeatReceived = this.heartbeatReceived || message.heartbeat;
+        this.commandCount += message.commands.length;
+        const lastCommand = getLastCommandName(message.commands);
+        if (lastCommand) {
+          this.lastCommand = lastCommand;
+        }
       }
       for (const command of message.commands) {
         const danmaku = extractDanmakuMessage(command);
         if (danmaku) {
+          this.danmakuCount += 1;
           this.onDanmaku(danmaku);
         }
+      }
+      if (
+        message.authenticated
+        || message.heartbeat
+        || message.commands.length > 0
+      ) {
+        this.emitStatus({ connected: true, lastError: "" });
       }
     } catch (error) {
       this.emitStatus({
@@ -185,7 +211,22 @@ export class BilibiliLiveClient {
       connected: patch.connected ?? false,
       realRoomId: patch.realRoomId ?? this.currentInfo?.realRoomId ?? null,
       lastError: this.lastError,
+      authReceived: patch.authReceived ?? this.authReceived,
+      heartbeatReceived: patch.heartbeatReceived ?? this.heartbeatReceived,
+      commandCount: patch.commandCount ?? this.commandCount,
+      danmakuCount: patch.danmakuCount ?? this.danmakuCount,
+      lastCommand: patch.lastCommand ?? this.lastCommand,
+      protover: patch.protover ?? this.protover,
     });
+  }
+
+  private resetDiagnostics(): void {
+    this.authReceived = false;
+    this.heartbeatReceived = false;
+    this.commandCount = 0;
+    this.danmakuCount = 0;
+    this.lastCommand = "";
+    this.protover = null;
   }
 
   private clearHeartbeatTimer(): void {
@@ -218,6 +259,57 @@ async function fetchDanmakuInfo(settings: BilibiliLiveSettings): Promise<Bilibil
     ...result.info,
     hosts: result.info.hosts.length ? result.info.hosts : [DEFAULT_HOST],
   };
+}
+
+function getLastCommandName(commands: readonly Record<string, unknown>[]): string {
+  for (let index = commands.length - 1; index >= 0; index -= 1) {
+    const command = commands[index];
+    const cmd = typeof command.cmd === "string" ? command.cmd.trim() : "";
+    if (cmd) {
+      return cmd;
+    }
+  }
+  return "";
+}
+
+function buildAuthPayload(info: BilibiliDanmakuInfo): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    uid: info.uid,
+    roomid: info.realRoomId,
+    protover: resolvePreferredProtover(),
+    platform: "web",
+    type: 2,
+    buvid: info.buvid,
+  };
+  if (info.token) {
+    payload.key = info.token;
+  }
+  return payload;
+}
+
+function resolvePreferredProtover(): number {
+  if (canCreateDecompressionStream("br")) {
+    return PROTO_BROTLI;
+  }
+  if (canCreateDecompressionStream("deflate")) {
+    return PROTO_DEFLATE;
+  }
+  return PROTO_NORMAL;
+}
+
+function canCreateDecompressionStream(format: "br" | "deflate"): boolean {
+  const ctor = (globalThis as {
+    DecompressionStream?: new (format: string) => DecompressionStream;
+  }).DecompressionStream;
+  if (typeof ctor !== "function") {
+    return false;
+  }
+  try {
+    new ctor(format);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function filterWbiValue(value: string): string {
@@ -406,5 +498,8 @@ export const BILIBILI_LIVE_CLIENT_TEST_ONLY = {
   extractCookie,
   extractNumericCookie,
   filterWbiValue,
+  buildAuthPayload,
+  getLastCommandName,
   md5Hex,
+  resolvePreferredProtover,
 };

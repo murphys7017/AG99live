@@ -213,6 +213,14 @@ onMounted(() => {
           Cookie：{{ bridgeState.snapshot.bilibiliLiveStatus.hasCookie ? "已配置" : "未配置" }}。
           {{ bridgeState.snapshot.bilibiliLiveStatus.lastError }}
         </p>
+        <p class="settings-card__hint">
+          鉴权：{{ bridgeState.snapshot.bilibiliLiveStatus.authReceived ? "ok" : "-" }}；
+          心跳：{{ bridgeState.snapshot.bilibiliLiveStatus.heartbeatReceived ? "ok" : "-" }}；
+          协议：{{ bridgeState.snapshot.bilibiliLiveStatus.protover ?? "-" }}；
+          命令：{{ bridgeState.snapshot.bilibiliLiveStatus.commandCount }}；
+          弹幕：{{ bridgeState.snapshot.bilibiliLiveStatus.danmakuCount }}；
+          最近命令：{{ bridgeState.snapshot.bilibiliLiveStatus.lastCommand || "-" }}。
+        </p>
       </article>
 
       <article class="settings-card">

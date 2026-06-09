@@ -12,6 +12,12 @@ export interface BilibiliLiveStatus {
   roomId: string;
   realRoomId: number | null;
   bufferedCount: number;
+  authReceived: boolean;
+  heartbeatReceived: boolean;
+  commandCount: number;
+  danmakuCount: number;
+  lastCommand: string;
+  protover: number | null;
   lastMessageAt: string;
   lastError: string;
   hasCookie: boolean;
@@ -55,6 +61,12 @@ export const DEFAULT_BILIBILI_LIVE_STATUS: BilibiliLiveStatus = {
   roomId: "",
   realRoomId: null,
   bufferedCount: 0,
+  authReceived: false,
+  heartbeatReceived: false,
+  commandCount: 0,
+  danmakuCount: 0,
+  lastCommand: "",
+  protover: null,
   lastMessageAt: "",
   lastError: "",
   hasCookie: false,
