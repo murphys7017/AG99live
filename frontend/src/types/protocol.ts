@@ -137,6 +137,9 @@ export interface VoiceFollowingChannelProfile {
   weight: number;
   phase: number;
   frequency_hz?: number;
+  /** 说话跟随的方向偏好。1 = 正向偏移（如 head_yaw=右转, head_pitch=抬头），-1 = 反向偏移。
+   *  不设置时由 defaultVoiceFollowingDirection 按 channel 名映射。 */
+  direction?: 1 | -1;
 }
 
 export interface VoiceFollowingProfile {

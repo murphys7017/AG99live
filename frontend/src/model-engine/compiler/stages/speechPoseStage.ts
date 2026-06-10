@@ -178,7 +178,13 @@ function isUsableVoiceFollowingChannel(
     && channel.amplitude > 0
     && typeof channel.weight === "number"
     && Number.isFinite(channel.weight)
-    && channel.weight > 0,
+    && channel.weight > 0
+    && typeof channel.output_range === "object"
+    && channel.output_range !== null
+    && typeof channel.output_range.min === "number"
+    && Number.isFinite(channel.output_range.min)
+    && typeof channel.output_range.max === "number"
+    && Number.isFinite(channel.output_range.max),
   );
 }
 
@@ -219,9 +225,35 @@ function resolveVoiceFollowingTargetValue(
 ): number {
   const minValue = channel.output_range.min;
   const maxValue = channel.output_range.max;
-  const direction = stableAxisDirection(channel.channel);
+  const direction = resolveVoiceFollowingDirection(channel);
   const rawTarget = channel.neutral + direction * channel.amplitude;
   return Math.max(minValue, Math.min(maxValue, rawTarget));
+}
+
+function resolveVoiceFollowingDirection(
+  channel: VoiceFollowingChannelProfile,
+): 1 | -1 {
+  if (channel.direction === 1 || channel.direction === -1) {
+    return channel.direction;
+  }
+  return defaultVoiceFollowingDirection(channel.channel);
+}
+
+function defaultVoiceFollowingDirection(channelName: string): 1 | -1 {
+  switch (channelName) {
+    case "head_yaw":
+    case "body_yaw":
+    case "head_roll":
+    case "body_roll":
+    case "gaze_x":
+      return 1;
+    case "head_pitch":
+    case "body_pitch":
+    case "gaze_y":
+      return -1;
+    default:
+      return 1;
+  }
 }
 
 function selectSpeechPoseAxes(
@@ -296,7 +328,7 @@ function resolveSpeechPoseValue(
   const [minStrong, maxStrong] = axis.strong_range;
   const positiveRoom = Math.max(0, maxStrong - axis.neutral);
   const negativeRoom = Math.max(0, axis.neutral - minStrong);
-  const direction = stableAxisDirection(axis.id);
+  const direction = resolveSpeechPoseAxisDirection(axis);
   const signedRoom = direction >= 0 ? positiveRoom : negativeRoom;
   const delta = signedRoom > 0 ? Math.max(2, signedRoom * 0.45) : 4;
   const targetValue = baseValue + direction * delta;
@@ -304,7 +336,42 @@ function resolveSpeechPoseValue(
   return Math.max(minValue, Math.min(maxValue, targetValue));
 }
 
+/**
+ * 从轴元数据推断说话跟随偏移方向。优先读取语义关键词，最后才 fallback 到旧 hash 方法。
+ */
+function resolveSpeechPoseAxisDirection(
+  axis: SemanticAxisDefinition,
+): 1 | -1 {
+  const text = [
+    axis.id,
+    axis.label,
+    axis.description,
+    ...axis.positive_semantics,
+    ...axis.negative_semantics,
+  ].join(" ").toLowerCase();
+
+  if (text.includes("down") || text.includes("lower") || text.includes("下沉")) {
+    return -1;
+  }
+  if (text.includes("left") || text.includes("左")) {
+    return -1;
+  }
+
+  return 1;
+}
+
+/**
+ * @deprecated 改用 resolveVoiceFollowingDirection() / defaultVoiceFollowingDirection()
+ *             或 resolveSpeechPoseAxisDirection()。此函数用字符串 hash 决定方向，
+ *             语义不可控，仅作为未迁移模型的兼容 fallback 保留。
+ *             命中时会上报 speech_pose_direction_fallback warning。
+ */
 function stableAxisDirection(axisId: string): 1 | -1 {
+  console.warn(
+    `[ModelEngine] speech_pose_direction_fallback:${axisId} — ` +
+    "axis direction fell back to hash-based resolution. " +
+    "Add explicit direction to VoiceFollowingChannelProfile or axis metadata.",
+  );
   let hash = 0;
   for (let index = 0; index < axisId.length; index += 1) {
     hash = (hash + axisId.charCodeAt(index)) % 2;
