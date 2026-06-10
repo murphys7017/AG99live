@@ -151,7 +151,7 @@ function startSemanticIntentPayload(
     selectedModel,
     {
       softHandoff: true,
-      onStarted: (plan) => {
+      onStarted: (plan, runId) => {
         notifiedStarted = true;
         dependencies.onPlanStarted?.({
           plan,
@@ -164,6 +164,7 @@ function startSemanticIntentPayload(
           payloadKind: payload.kind,
           diagnostics: compileResult.diagnostics,
           playerMessage: buildSuccessMessage(context, dependencies),
+          runId,
         });
       },
     },
@@ -217,7 +218,7 @@ function startDirectPlanPayload(
         context.turnId,
         context.playbackTurnId,
       ),
-      onStarted: (plan) => {
+      onStarted: (plan, runId) => {
         notifiedStarted = true;
         dependencies.onPlanStarted?.({
           plan,
@@ -230,6 +231,7 @@ function startDirectPlanPayload(
           payloadKind: payload.kind,
           diagnostics: null,
           playerMessage: buildSuccessMessage(context, dependencies),
+          runId,
         });
       },
     },

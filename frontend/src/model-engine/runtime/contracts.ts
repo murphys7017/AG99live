@@ -23,7 +23,8 @@ export type ModelEngineStatus =
 export interface PlayPlanOptions {
   softHandoff?: boolean;
   targetDurationMs?: number | null;
-  onStarted?: (plan: MotionPlanPayload) => void;
+  onStarted?: (plan: MotionPlanPayload, runId?: string) => void;
+  onFinished?: (event: { runId: string; status: string; reason?: string }) => void;
 }
 
 interface ModelEnginePlanStartedEventBase {
@@ -36,6 +37,8 @@ interface ModelEnginePlanStartedEventBase {
   payloadKind: NormalizedMotionPayload["kind"];
   diagnostics: CompileDiagnostics | null;
   playerMessage: string;
+  /** SDK 分配给本次动作计划的唯一 runId，用于完成事件归属校验。 */
+  runId?: string;
 }
 
 export type ModelEnginePlanStartedEvent =

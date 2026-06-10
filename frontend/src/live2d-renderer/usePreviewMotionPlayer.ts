@@ -5,6 +5,7 @@ import type {
   SemanticParameterPlan,
 } from "../types/protocol.js";
 import { SCHEMA_PARAMETER_PLAN_V2 } from "../types/protocol.js";
+import type { DirectParameterPlanTerminalEvent } from "../types/live2d-runtime.d.ts";
 import { isFiniteNumber, isObject, normalizeText } from "../utils/guards.js";
 import { parseSemanticParameterPlan } from "../model-engine/planParser.js";
 
@@ -18,7 +19,8 @@ interface ParsedParameterPlan {
 interface PlayPlanOptions {
   softHandoff?: boolean;
   targetDurationMs?: number | null;
-  onStarted?: (plan: SemanticParameterPlan) => void;
+  onStarted?: (plan: SemanticParameterPlan, runId?: string) => void;
+  onFinished?: (event: DirectParameterPlanTerminalEvent) => void;
 }
 
 function stableStringify(value: unknown): string {
@@ -126,6 +128,7 @@ export function usePreviewMotionPlayer() {
   let activeRunId = 0;
   let activeTimerHandles: number[] = [];
   let lastStartedPlanSignature = "";
+  let lastPlaybackRunId = "";
   let lastStartedPlanAtMs = 0;
 
   const PLAN_RESTART_DEDUP_WINDOW_MS = 700;
@@ -175,7 +178,7 @@ export function usePreviewMotionPlayer() {
 
     const adapter = window.getLAppAdapter?.();
     if (adapter && typeof adapter.stopDirectParameterPlan === "function") {
-      adapter.stopDirectParameterPlan();
+      adapter.stopDirectParameterPlan(reason, "stopped");
     }
 
     if (state.status === "playing") {
@@ -232,7 +235,7 @@ export function usePreviewMotionPlayer() {
           elapsedSinceLastStartMs,
         );
         state.message = `复用当前参数计划（mode=${playbackPlan.plan.mode}, emotion=${playbackPlan.plan.emotion_label}）...`;
-        options.onStarted?.(playbackPlan.plan);
+        options.onStarted?.(playbackPlan.plan, lastPlaybackRunId);
         return true;
       }
     }
@@ -256,7 +259,37 @@ export function usePreviewMotionPlayer() {
     }
 
     console.info("[MotionPlayer] calling startDirectParameterPlan...");
-    const started = adapter.startDirectParameterPlan(playbackPlan.plan);
+    const playbackRunId = `motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    lastPlaybackRunId = playbackRunId;
+    const started = adapter.startDirectParameterPlan(playbackPlan.plan, {
+      runId: playbackRunId,
+      onTerminal: (event: DirectParameterPlanTerminalEvent) => {
+        // 校验 runId 避免 stale callback 收错段
+        if (event.runId !== playbackRunId) {
+          return;
+        }
+        if (state.status !== "playing") {
+          return;
+        }
+        if (event.status === "stopped") {
+          // 手动停止不是失败，保持 idle 语义
+          state.status = "idle";
+          state.message = "参数计划已停止。";
+          state.finishedAt = new Date().toISOString();
+          clearActiveTimers();
+          options.onFinished?.(event);
+          return;
+        }
+        state.status = event.status === "completed" ? "finished" : "failed";
+        state.message = event.reason
+          || (event.status === "completed"
+            ? "参数计划执行完成。"
+            : `参数计划执行失败：${event.status}`);
+        state.finishedAt = new Date().toISOString();
+        clearActiveTimers();
+        options.onFinished?.(event);
+      },
+    });
     console.info("[MotionPlayer] startDirectParameterPlan returned:", started);
     if (!started) {
       const runtimeReason = typeof adapter.getDirectParameterPlanError === "function"
@@ -282,14 +315,26 @@ export function usePreviewMotionPlayer() {
     state.startedAt = new Date().toISOString();
     state.finishedAt = "";
 
-    scheduleTimer(runId, playbackPlan.totalDurationMs + 40, () => {
-      state.status = "finished";
-      state.message = "参数计划执行完成。";
+    // watchdog：SDK 完成事件的超时保护
+  scheduleTimer(runId, playbackPlan.totalDurationMs + 800, () => {
+    if (state.status === "playing") {
+      console.warn(
+        "[MotionPlayer] direct parameter plan terminal timeout. runId=",
+        playbackRunId,
+      );
+      state.status = "failed";
+      state.message = "参数计划完成事件超时。";
       state.finishedAt = new Date().toISOString();
       clearActiveTimers();
-    });
+      options.onFinished?.({
+        runId: playbackRunId,
+        status: "failed",
+        reason: "direct_parameter_plan_terminal_timeout",
+      });
+    }
+  });
 
-    options.onStarted?.(playbackPlan.plan);
+  options.onStarted?.(playbackPlan.plan, playbackRunId);
     return true;
   }
 

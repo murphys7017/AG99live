@@ -79,7 +79,13 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const modelEngine = useModelEngine({
     getSelectedModel: () => selectedModel.value,
     getSettings: () => cloneModelEngineSettings(motionEngineSettings),
-    playPlan: (plan, model, options) => motionPlayer.playPlan(plan, model, options),
+    playPlan: (plan, model, options) => motionPlayer.playPlan(plan, model, {
+      ...options,
+      onFinished: (event) => {
+        options?.onFinished?.(event);
+        playbackCoordinator.completeMotionPlayback(event);
+      },
+    }),
     playCatalogMotion: (motion, model) => motionPlayer.playCatalogMotion(motion, model),
     stopPlan: (reason) => motionPlayer.stopPlan(reason),
     getCurrentTurnId: () => adapter.state.currentTurnId,

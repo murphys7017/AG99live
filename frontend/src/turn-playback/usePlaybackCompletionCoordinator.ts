@@ -22,6 +22,7 @@
 
 import { shallowReadonly, ref, watch } from "vue";
 import type { ModelEnginePlanStartedEvent } from "../model-engine/runtime/contracts";
+import type { DirectParameterPlanTerminalEvent } from "../types/live2d-runtime.d.ts";
 import type { DesktopMotionPlaybackRecord } from "../types/desktop";
 import type { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
@@ -310,6 +311,10 @@ export function usePlaybackCompletionCoordinator(
         completeMotionSegmentByKey(currentMotionSegmentKey, "motion_handed_off");
       }
       currentMotionSegmentKey = key;
+      currentMotionRun = {
+        runId: event.runId || key,
+        segmentKey: key,
+      };
       activeMotionSegments.add(key);
       options.sessionStore.markMotionStarted(
         event.turnId,
@@ -439,21 +444,53 @@ export function usePlaybackCompletionCoordinator(
     { deep: true },
   );
 
-  // Motion completed (from motion player) → write to session, try flush
-  watch(
-    () => options.motionPlayer.state.status,
-    (status, previousStatus) => {
-      if (status !== "finished" || previousStatus !== "playing") {
-        return;
+  /** 当前正在播放的动作 { runId, segmentKey }。由 recordMotionPlayback 设置，
+   *  completeMotionPlayback 按 runId 校验后消费。不依赖全局 status watch。 */
+  let currentMotionRun: { runId: string; segmentKey: string } | null = null;
+
+  /**
+   * 由 usePreviewMotionPlayer 的 onFinished 回调调用。
+   * 校验 event.runId 防止 stale callback 收错段，使用 findSegmentByKey 定位段。
+   */
+  function completeMotionPlayback(event: DirectParameterPlanTerminalEvent): void {
+    if (!currentMotionRun || currentMotionRun.runId !== event.runId) {
+      return;
+    }
+
+    if (event.status === "completed") {
+      completeMotionSegmentByKey(currentMotionRun.segmentKey, "motion_completed_after_audio");
+    } else if (event.status === "stopped") {
+      // 按原因区分：中断/重置类停止需要标记 motion failed，
+      // 否则 segment 会卡在 motion.started=true 永远无法 settled
+      // 正常 unmount/clean stop 不标记
+      if (event.reason && ["interrupted", "reset", "switch_model", "reconnect"].includes(event.reason)) {
+        const found = findSegmentByKey(currentMotionRun.segmentKey);
+        if (found) {
+          options.sessionStore.markMotionFailed(
+            found.segment.turnId,
+            found.segment.messageId,
+            event.reason,
+          );
+        }
       }
-      completeMotionSegmentByKey(currentMotionSegmentKey, "motion_completed_after_audio");
-      currentMotionSegmentKey = null;
-    },
-  );
+    } else {
+      const found = findSegmentByKey(currentMotionRun.segmentKey);
+      if (found) {
+        options.sessionStore.markMotionFailed(
+          found.segment.turnId,
+          found.segment.messageId,
+          event.reason || event.status,
+        );
+      }
+    }
+
+    currentMotionRun = null;
+  }
 
   return {
     motionPlaybackRecords: shallowReadonly(motionPlaybackRecords),
     recordMotionPlayback,
+    completeMotionPlayback,
     resetPlaybackCoordination,
   };
 }
