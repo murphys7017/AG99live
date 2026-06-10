@@ -90,6 +90,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       getActiveSession: () => sessionStore.getActiveSession(),
       getSessionByTurnId: (turnId) => sessionStore.getSession(turnId),
       markMotionAbsent: (turnId, messageId) => sessionStore.markMotionAbsent(turnId, messageId),
+      markMotionFailed: (turnId, messageId, reason) => sessionStore.markMotionFailed(turnId, messageId, reason),
     },
   });
 

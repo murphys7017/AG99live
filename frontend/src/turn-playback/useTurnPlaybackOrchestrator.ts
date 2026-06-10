@@ -65,9 +65,10 @@ export function useTurnPlaybackOrchestrator(
         context,
       );
       if (accepted === false) {
-        options.sessionStore.markMotionAbsent(
+        options.sessionStore.markMotionFailed(
           context.turnId,
           context.messageId,
+          "motion_payload_rejected",
         );
       }
       options.sessionStore.markPhase(
@@ -104,6 +105,7 @@ export function useTurnPlaybackOrchestrator(
           motionReleased: segment?.motion.released ?? false,
           motionCompleted: segment?.motion.completed ?? false,
           motionAbsent: segment?.motion.absent ?? false,
+          motionFailed: segment?.motion.failed ?? false,
           hasMotionPayload: segment?.motion.payload !== null,
         };
       }),

@@ -505,12 +505,12 @@ async function testSettlementWindowUsesInjectedTimer(): Promise<void> {
   assert.equal(h.scheduledTimers.size, 0);
 }
 
-async function testMotionStartFailureMarkedAbsentAllowsAck(): Promise<void> {
+async function testMotionStartFailureMarkedFailedAllowsAck(): Promise<void> {
   const h = createHarness();
   h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
   h.sessionStore.markTextDelivered("turn-1", "msg-a");
   h.sessionStore.markAudioTerminal("turn-1", "completed", "msg-a", "ok");
-  h.sessionStore.markMotionAbsent("turn-1", "msg-a");
+  h.sessionStore.markMotionFailed("turn-1", "msg-a", "motion_start_failed");
   h.sessionStore.markSynthFinished("turn-1");
   await h.flush();
   await h.flush();
@@ -572,7 +572,7 @@ async function run(): Promise<void> {
   await testSynthFinishedAfterTurnFinishedStillAcks();
   await testCompletionCoordinatorIgnoresStaleSession();
   await testSettlementWindowUsesInjectedTimer();
-  await testMotionStartFailureMarkedAbsentAllowsAck();
+  await testMotionStartFailureMarkedFailedAllowsAck();
   await testLateAudioAfterNoAudioAckReopensSettlingSession();
   console.log("playbackCompletionCoordinator tests passed");
 }

@@ -63,7 +63,7 @@ export function shouldWaitForLateMotion(
   if (segment.motion.absent) {
     return false;
   }
-  if (segment.motion.released || segment.motion.completed) {
+  if (segment.motion.released || segment.motion.completed || segment.motion.failed) {
     return false;
   }
   return segment.motion.payload !== null;

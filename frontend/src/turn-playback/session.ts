@@ -74,6 +74,8 @@ export interface TurnPlaybackSessionMotion {
   started: boolean;
   completed: boolean;
   absent: boolean;
+  failed: boolean;
+  reason: string;
 }
 
 export interface TurnPlaybackSessionBackend {
@@ -153,6 +155,8 @@ export function createEmptyMotionState(): TurnPlaybackSessionMotion {
     started: false,
     completed: false,
     absent: false,
+    failed: false,
+    reason: "",
   };
 }
 
@@ -208,7 +212,7 @@ export function isSegmentLocallySettled(segment: TurnPlaybackSegment): boolean {
   if (terminal !== "completed" && terminal !== "failed" && terminal !== "absent") {
     return false;
   }
-  if (!segment.motion.absent && !segment.motion.completed) {
+  if (!segment.motion.absent && !segment.motion.completed && !segment.motion.failed) {
     return false;
   }
   return true;

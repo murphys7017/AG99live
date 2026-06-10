@@ -157,7 +157,7 @@ async function testTextAndMotionReleaseWhenAudioIsAbsent(): Promise<void> {
   h.stop();
 }
 
-async function testRejectedMotionReleaseMarksSegmentAbsent(): Promise<void> {
+async function testRejectedMotionReleaseMarksSegmentFailed(): Promise<void> {
   const h = createHarness({ motionAccepted: false });
   h.sessionStore.setActiveSession("turn-motion-rejected");
   h.sessionStore.markTurnStarted("turn-motion-rejected");
@@ -178,9 +178,11 @@ async function testRejectedMotionReleaseMarksSegmentAbsent(): Promise<void> {
   const segment = h.sessionStore
     .getSession("turn-motion-rejected")
     ?.segments.get("msg-motion-rejected");
-  assert.equal(segment?.motion.released, false);
-  assert.equal(segment?.motion.absent, true);
-  assert.equal(segment?.motion.completed, true);
+  assert.equal(segment?.motion.released, true);
+  assert.equal(segment?.motion.absent, false);
+  assert.equal(segment?.motion.completed, false);
+  assert.equal(segment?.motion.failed, true);
+  assert.equal(segment?.motion.reason, "motion_payload_rejected");
   h.stop();
 }
 
@@ -226,7 +228,7 @@ async function testLateAudioAfterTextReleaseOnlyReleasesAudio(): Promise<void> {
 async function run(): Promise<void> {
   await testSegmentsReleaseSequentiallyWithinTurn();
   await testTextAndMotionReleaseWhenAudioIsAbsent();
-  await testRejectedMotionReleaseMarksSegmentAbsent();
+  await testRejectedMotionReleaseMarksSegmentFailed();
   await testLateAudioAfterTextReleaseOnlyReleasesAudio();
   console.log("useTurnPlaybackOrchestrator tests passed");
 }

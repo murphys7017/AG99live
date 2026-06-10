@@ -94,9 +94,10 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         runtimeStateController,
       ),
     onStartFailed: (context: StartPayloadContext) => {
-      runtimeSchedulerDependencies.sessionStore?.markMotionAbsent?.(
+      runtimeSchedulerDependencies.sessionStore?.markMotionFailed?.(
         context.turnId,
         context.messageId,
+        context.startReason,
       );
     },
   });
@@ -108,9 +109,10 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     const normalized = normalizeMotionPayload(payload);
     if (!normalized.ok) {
       reportInvalidMotionPayload(normalized.reason, runtimeStateController);
-      runtimeSchedulerDependencies.sessionStore?.markMotionAbsent?.(
+      runtimeSchedulerDependencies.sessionStore?.markMotionFailed?.(
         context.turnId,
         context.messageId,
+        normalized.reason,
       );
       return false;
     }

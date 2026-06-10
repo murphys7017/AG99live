@@ -164,6 +164,7 @@ export function usePlaybackCompletionCoordinator(
         && !segment.motion.absent
         && !segment.motion.started
         && !segment.motion.completed
+        && !segment.motion.failed
       ) {
         schedulePlaybackSettlementWindow(sessionId, messageId);
         return;
@@ -241,6 +242,7 @@ export function usePlaybackCompletionCoordinator(
         && segment.audio.terminal !== "idle"
         && !segment.motion.started
         && !segment.motion.completed
+        && !segment.motion.failed
         && segment.motion.payload === null
       ) {
         options.sessionStore.markMotionAbsent(
@@ -371,6 +373,7 @@ export function usePlaybackCompletionCoordinator(
           motionAbsent: segment?.motion.absent ?? false,
           motionStarted: segment?.motion.started ?? false,
           motionCompleted: segment?.motion.completed ?? false,
+          motionFailed: segment?.motion.failed ?? false,
         };
       }),
       backendSynthFinished: session.backend.synthFinished,

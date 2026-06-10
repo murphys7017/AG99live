@@ -223,7 +223,7 @@ function isLocallySettled(segment: TurnPlaybackSegment): boolean {
   if (!segment.text.delivered) return false;
   const t = segment.audio.terminal;
   if (t !== "completed" && t !== "failed" && t !== "absent") return false;
-  if (!segment.motion.absent && !segment.motion.completed) return false;
+  if (!segment.motion.absent && !segment.motion.completed && !segment.motion.failed) return false;
   return true;
 }
 

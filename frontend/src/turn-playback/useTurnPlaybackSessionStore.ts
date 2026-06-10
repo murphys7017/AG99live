@@ -351,6 +351,8 @@ export function useTurnPlaybackSessionStore() {
     segment.motion.released = false;
     segment.motion.started = false;
     segment.motion.completed = false;
+    segment.motion.failed = false;
+    segment.motion.reason = "";
   }
 
   function markMotionAbsent(
@@ -364,6 +366,22 @@ export function useTurnPlaybackSessionStore() {
     segment.motion.released = false;
     segment.motion.started = false;
     segment.motion.completed = true;
+    segment.motion.failed = false;
+    segment.motion.reason = "";
+  }
+
+  function markMotionFailed(
+    turnId: string | null,
+    messageId: string,
+    reason = "",
+  ): void {
+    const { segment } = getSegmentSession(turnId, messageId);
+    segment.motion.absent = false;
+    segment.motion.released = true;
+    segment.motion.started = false;
+    segment.motion.completed = false;
+    segment.motion.failed = true;
+    segment.motion.reason = reason || segment.motion.reason;
   }
 
   function markMotionReleased(
@@ -372,6 +390,8 @@ export function useTurnPlaybackSessionStore() {
   ): void {
     const { segment } = getSegmentSession(turnId, messageId);
     segment.motion.absent = false;
+    segment.motion.failed = false;
+    segment.motion.reason = "";
     segment.motion.released = true;
   }
 
@@ -381,6 +401,8 @@ export function useTurnPlaybackSessionStore() {
   ): void {
     const { segment } = getSegmentSession(turnId, messageId);
     segment.motion.absent = false;
+    segment.motion.failed = false;
+    segment.motion.reason = "";
     segment.motion.released = true;
     segment.motion.started = true;
   }
@@ -391,6 +413,8 @@ export function useTurnPlaybackSessionStore() {
   ): void {
     const { segment } = getSegmentSession(turnId, messageId);
     segment.motion.absent = false;
+    segment.motion.failed = false;
+    segment.motion.reason = "";
     segment.motion.released = true;
     segment.motion.completed = true;
   }
@@ -556,6 +580,7 @@ export function useTurnPlaybackSessionStore() {
     markAudioTerminal,
     markMotionReceived,
     markMotionAbsent,
+    markMotionFailed,
     markMotionReleased,
     markMotionStarted,
     markMotionCompleted,

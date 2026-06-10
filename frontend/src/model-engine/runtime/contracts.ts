@@ -81,6 +81,11 @@ export interface ModelEngineSessionStorePort {
     turnId: string | null,
     messageId: string,
   ) => void;
+  markMotionFailed?: (
+    turnId: string | null,
+    messageId: string,
+    reason?: string,
+  ) => void;
 }
 
 export interface MotionRuntimeSchedulerDependencies {
