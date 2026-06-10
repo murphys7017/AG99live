@@ -204,6 +204,16 @@ interface DirectParameterPlanState {
   usesBindingProfile: boolean;
   startedAtMs: number;
   diagnosticFrameCount: number;
+  /** 本次参数计划的唯一标识符。由 startDirectParameterPlan 生成并回传。 */
+  runId: string;
+  /** 参数计划完成时的回调。 */
+  onTerminal?: (event: {
+    runId: string;
+    status: "completed" | "stopped" | "failed" | "rejected";
+    reason?: string;
+  }) => void;
+  /** 防止重复发射完成事件 */
+  terminalEmitted: boolean;
 }
 
 /**
@@ -1496,7 +1506,7 @@ export class LAppModel extends CubismUserModel {
     }
   }
 
-  public startDirectParameterPlan(plan: unknown): boolean {
+  public startDirectParameterPlan(plan: unknown, options?: unknown): boolean {
     console.info("[LAppModel] startDirectParameterPlan called. plan type:", typeof plan);
     const parsed = this.parseDirectParameterPlan(plan);
     if (!parsed.plan) {
@@ -1512,14 +1522,31 @@ export class LAppModel extends CubismUserModel {
       return false;
     }
 
-    return this.startSemanticParameterPlan(parsed);
+    // 从 options 中提取 runId 和 onTerminal 回调
+    const opts = (options && typeof options === 'object') ? options : {};
+    const runId = opts.runId || ('direct-plan-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+    const onTerminal = typeof opts.onTerminal === 'function' ? opts.onTerminal : undefined;
+
+    return this.startSemanticParameterPlan(parsed, runId, onTerminal);
   }
 
-  public stopDirectParameterPlan(reason = ""): void {
+  public stopDirectParameterPlan(reason = "", status = "stopped"): void {
+    const state = this._directParameterPlanState;
     this._directParameterPlanState = null;
     this._directParameterPlanError = reason ? String(reason) : "";
     if (this._directParameterPlanError) {
       console.error(`[APP] Direct parameter plan stopped: ${this._directParameterPlanError}`);
+    }
+    // 发射完成事件（仅一次）
+    if (state && !state.terminalEmitted) {
+      state.terminalEmitted = true;
+      if (typeof state.onTerminal === "function") {
+        state.onTerminal({
+          runId: state.runId,
+          status: status,
+          reason: reason || undefined,
+        });
+      }
     }
   }
 
@@ -1531,7 +1558,7 @@ export class LAppModel extends CubismUserModel {
     plan: any;
     timing: DirectParameterPlanState["timing"];
     reason: string;
-  }): boolean {
+  }, runId?: string, onTerminal?: (event: any) => void): boolean {
     const semanticBindings: DirectSemanticParameterBinding[] = [];
     const seenParameterIndices = new Set<number>();
     const bindingWarnings = Array.isArray(parsed.plan.diagnostics?.warnings)
@@ -1643,6 +1670,9 @@ export class LAppModel extends CubismUserModel {
       usesBindingProfile: true,
       startedAtMs: performance.now(),
       diagnosticFrameCount: 0,
+      runId: runId || ('direct-plan-' + Date.now() + '-' + Math.random().toString(36).slice(2)),
+      onTerminal: onTerminal,
+      terminalEmitted: false,
     };
     this._directParameterPlanError = "";
     return true;
@@ -1713,7 +1743,7 @@ export class LAppModel extends CubismUserModel {
 
     if (elapsedMs >= planState.timing.totalMs) {
       console.info(`[LAppModel] applyDirectParameterPlanOverlay: plan complete at ${elapsedMs}ms >= ${planState.timing.totalMs}ms, stopping.`);
-      this.stopDirectParameterPlan();
+      this.stopDirectParameterPlan("", "completed");
     }
     return null;
   }

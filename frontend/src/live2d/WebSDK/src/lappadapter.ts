@@ -72,12 +72,12 @@ export class LAppAdapter {
     this.getModel()?.setAmbientMotionEnabled(enabled);
   }
 
-  public startDirectParameterPlan(plan: unknown): boolean {
-    return this.getModel()?.startDirectParameterPlan(plan) ?? false;
+  public startDirectParameterPlan(plan: unknown, options?: unknown): boolean {
+    return this.getModel()?.startDirectParameterPlan(plan, options) ?? false;
   }
 
-  public stopDirectParameterPlan(): void {
-    this.getModel()?.stopDirectParameterPlan();
+  public stopDirectParameterPlan(reason?: string, status?: string): void {
+    this.getModel()?.stopDirectParameterPlan(reason, status);
   }
 
   public getDirectParameterPlanError(): string {
