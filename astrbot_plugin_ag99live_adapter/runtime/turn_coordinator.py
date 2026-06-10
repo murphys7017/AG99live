@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
@@ -110,6 +111,7 @@ class TurnCoordinator:
         self._turn_lock = asyncio.Lock()
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._turn_timing: dict[str, Any] = {}
+        self._dispatched_platform_motion_keys: set[str] = set()
 
     async def handle_msg(self, raw_message: dict[str, Any]) -> None:
         message = parse_inbound_message(raw_message)
@@ -410,6 +412,7 @@ class TurnCoordinator:
                 message_obj.message_str,
                 turn_id=normalized_turn_id,
             )
+            self._get_dispatched_platform_motion_keys().clear()
             self._begin_turn_timing(message_obj.message_str)
             self.chat_buffer.add("user", message_obj.message_str)
             await self._send_json(
@@ -692,6 +695,23 @@ class TurnCoordinator:
             if not isinstance(motion_payload, dict):
                 continue
 
+            dispatch_key = self._resolve_platform_motion_dispatch_key(
+                platform_extras=platform_extras,
+                turn_id=turn_id,
+                motion_object=motion_object,
+                motion_payload=motion_payload,
+            )
+            dispatched_keys = self._get_dispatched_platform_motion_keys()
+            if dispatch_key in dispatched_keys:
+                logger.info(
+                    "WIRING motion_payload_egress skipped_duplicate_client_object "
+                    "turn_id=%s message_id=%s message_kind=%s",
+                    turn_id or "",
+                    message_id or "",
+                    str(platform_extras.get("message_kind") or ""),
+                )
+                continue
+
             sent = await self.broadcast_motion_payload(
                 motion_payload=motion_payload,
                 mode=str(motion_object.get("mode") or "preview"),
@@ -699,8 +719,60 @@ class TurnCoordinator:
                 turn_id=turn_id,
                 message_id=message_id,
             )
+            if sent:
+                dispatched_keys.add(dispatch_key)
             dispatched = dispatched or sent
         return dispatched
+
+    def _get_dispatched_platform_motion_keys(self) -> set[str]:
+        keys = getattr(self, "_dispatched_platform_motion_keys", None)
+        if not isinstance(keys, set):
+            keys = set()
+            self._dispatched_platform_motion_keys = keys
+        return keys
+
+    @staticmethod
+    def _resolve_platform_motion_dispatch_key(
+        *,
+        platform_extras: dict[str, Any],
+        turn_id: str | None,
+        motion_object: dict[str, Any],
+        motion_payload: dict[str, Any],
+    ) -> str:
+        message_kind = str(platform_extras.get("message_kind") or "").strip()
+        semantic_text = str(platform_extras.get("semantic_text") or "").strip()
+        visible_message_id = str(platform_extras.get("visible_message_id") or "").strip()
+        visible_group = TurnCoordinator._strip_segment_suffix(visible_message_id)
+        try:
+            motion_signature = json.dumps(
+                motion_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        except TypeError:
+            motion_signature = str(motion_payload)
+        return "|".join(
+            [
+                str(turn_id or "").strip(),
+                message_kind,
+                visible_group or visible_message_id,
+                semantic_text,
+                str(motion_object.get("source") or "").strip(),
+                str(motion_object.get("mode") or "").strip(),
+                motion_signature,
+            ]
+        )
+
+    @staticmethod
+    def _strip_segment_suffix(message_id: str) -> str:
+        parts = message_id.rsplit("::", 1)
+        if len(parts) != 2:
+            return message_id
+        suffix = parts[1]
+        if len(suffix) == 4 and suffix.isdigit():
+            return parts[0]
+        return message_id
 
     def _spawn_background_task(self, coroutine: Awaitable[None]) -> None:
         task = asyncio.create_task(coroutine)
@@ -738,6 +810,7 @@ class TurnCoordinator:
             self.session_state.mark_playback_complete()
         else:
             self.session_state.reset_to_idle()
+        self._get_dispatched_platform_motion_keys().clear()
 
     def _resolve_backend_turn_id(
         self,

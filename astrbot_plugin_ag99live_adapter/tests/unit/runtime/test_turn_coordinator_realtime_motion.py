@@ -885,6 +885,81 @@ def test_emit_message_chain_reuses_platform_visible_message_id_for_segment_outpu
     assert by_type["output.audio"]["turn_id"] == "turn-segment"
 
 
+def test_emit_message_chain_dedupes_motion_client_object_for_segmented_output(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+    Plain = module.Plain
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-segmented",
+            "last_user_text": "user text",
+            "mark_playing": lambda self: None,
+        },
+    )()
+
+    class ChatBufferStub:
+        def add(self, role: str, text: str) -> None:
+            del role
+            del text
+
+    coordinator.chat_buffer = ChatBufferStub()
+    coordinator.speaker_name = "assistant"
+    coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+    motion_client_object = {
+        "type": "ag99live.motion_payload",
+        "motion_payload": _build_valid_motion_intent(),
+        "mode": "preview",
+        "source": "plugin_hints",
+    }
+
+    async def emit_segment(message_id: str) -> None:
+        await coordinator.emit_message_chain(
+            message_chain=[Plain("hello")],
+            platform_extras={
+                "visible_message_id": message_id,
+                "message_kind": "core_reply",
+                "semantic_text": "hello",
+                "client_objects": [motion_client_object],
+            },
+        )
+
+    asyncio.run(emit_segment("visible-msg::core_reply::0001"))
+    asyncio.run(emit_segment("visible-msg::core_reply::0002"))
+
+    motion_payloads = [
+        payload
+        for payload in sent_payloads
+        if payload.get("type") == "engine.motion_intent"
+    ]
+    text_payloads = [
+        payload
+        for payload in sent_payloads
+        if payload.get("type") == "output.text"
+    ]
+
+    assert len(text_payloads) == 2
+    assert len(motion_payloads) == 1
+    assert motion_payloads[0]["message_id"] == "visible-msg::core_reply::0001"
+
+
 def test_emit_message_chain_split_mode_ignores_inline_payload(
     install_fake_astrbot,
     monkeypatch,
