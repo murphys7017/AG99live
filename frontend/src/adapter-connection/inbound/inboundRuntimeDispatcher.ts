@@ -27,7 +27,7 @@ export interface InboundRuntimeDispatchDeps {
     markInterrupt: (turnId: string | null) => void;
   } | undefined;
   pushHistory: (role: string, text: string) => void;
-  stopAudioPlayback: () => void;
+  stopAudioAndSettleCurrent: (reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
   markAudioPlaybackTerminal: (
     terminalState: string,
@@ -146,15 +146,7 @@ function applyInterrupt(
   event: Extract<InboundAdapterEvent, { kind: "interrupt" }>,
 ): void {
   const s = deps.state;
-  if (s.audioPlaybackStartedMessageId) {
-      deps.markAudioPlaybackTerminal(
-        "failed",
-        s.audioPlaybackStartedTurnId,
-        "audio_playback_interrupted",
-        s.audioPlaybackStartedMessageId,
-      );
-  }
-  deps.stopAudioPlayback();
+  deps.stopAudioAndSettleCurrent("audio_playback_interrupted");
   deps.resetAudioPlaybackTerminal();
   s.pendingAssistantTexts.clear();
   s.pendingAudios.clear();

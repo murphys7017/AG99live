@@ -24,7 +24,7 @@ export interface ConnectionRuntimeState {
 export interface ConnectionRuntimeDeps {
   state: ConnectionRuntimeState;
   stopMicrophoneCapture: (reason: string) => Promise<boolean>;
-  stopAudioPlayback: () => void;
+  stopAudioAndSettleCurrent: (reason: string) => void;
   historyAdapter: { resetHistoryState: () => void } | null;
   modelSyncAdapter: { resetModelSyncState: () => void } | null;
   resetAudioPlaybackTerminal: () => void;
@@ -32,7 +32,7 @@ export interface ConnectionRuntimeDeps {
 
 export function resetConnectionRuntimeState(deps: ConnectionRuntimeDeps): void {
   void deps.stopMicrophoneCapture("connection_closed");
-  deps.stopAudioPlayback();
+  deps.stopAudioAndSettleCurrent("connection_closed");
   deps.historyAdapter?.resetHistoryState();
   const s = deps.state;
   s.isPlayingAudio = false;

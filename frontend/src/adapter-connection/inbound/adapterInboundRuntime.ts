@@ -19,6 +19,7 @@ import {
   rewriteSocketUrl as rewriteSocketUrlWithActiveHost,
 } from "../features/modelSyncRewrite.js";
 import {
+  buildPendingPlaybackKey,
   queueAssistantTextForPlayback as queuePendingAssistantTextForPlayback,
 } from "../runtime/playbackReleaseQueue.js";
 import type { useAdapterHistory } from "../history/useAdapterHistory.js";
@@ -33,7 +34,7 @@ export interface AdapterInboundRuntimeDeps {
   getMotionTuningAdapter: () => ReturnType<typeof useAdapterMotionTuning> | null;
   getModelSyncAdapter: () => ReturnType<typeof useModelSync> | null;
   pushHistory: (role: string, text: string) => void;
-  stopAudioPlayback: () => void;
+  stopAudioAndSettleCurrent: (reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
   markAudioPlaybackTerminal: (
     terminalState: "completed" | "failed" | "absent",
@@ -159,7 +160,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       rewriteModelSyncEnvelope: (env) => rewriteModelSyncEnvelope(env),
       rewriteSocketUrl: (url) => rewriteSocketUrl(url),
       rewriteHttpUrl: (url) => rewriteHttpUrl(url),
-      stopAudioPlayback: () => deps.stopAudioPlayback(),
+      stopAudioAndSettleCurrent: (reason) => deps.stopAudioAndSettleCurrent(reason),
       resetAudioPlaybackTerminal: () => deps.resetAudioPlaybackTerminal(),
       markAudioPlaybackTerminal: (terminalState, turnId, reason, messageId) =>
         deps.markAudioPlaybackTerminal(
@@ -178,7 +179,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
           deps.queueAudioForPlayback(url, turnId, messageId);
           return;
         }
-        map.set(messageId, {
+        map.set(buildPendingPlaybackKey(turnId, messageId), {
           audioUrl: url,
           turnId,
           messageId,

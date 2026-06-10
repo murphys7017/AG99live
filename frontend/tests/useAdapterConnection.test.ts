@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { effectScope } from "vue";
 import { useAdapterConnection } from "../src/adapter-connection/useAdapterConnection.js";
 import { createModelSync } from "../src/adapter-connection/model-sync/useModelSync.js";
+import { buildPendingPlaybackKey } from "../src/adapter-connection/runtime/playbackReleaseQueue.js";
 import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
 
 interface ListenerMap {
@@ -137,6 +138,10 @@ class FakeAudio {
       listener();
     }
   }
+}
+
+function pendingKey(turnId: string | null, messageId: string): string {
+  return buildPendingPlaybackKey(turnId, messageId);
 }
 
 let deferredGetUserMedia: {
@@ -436,7 +441,10 @@ function testInvalidPayloadDoesNotEnterPlaybackState(): void {
       adapter.state.lastError,
       "收到非法协议载荷（type=output.text, path=payload.text, expected=string）。",
     );
-    assert.equal(adapter.state.pendingAssistantTexts.has("m-invalid-payload"), false);
+    assert.equal(
+      adapter.state.pendingAssistantTexts.has(pendingKey("turn-invalid-payload", "m-invalid-payload")),
+      false,
+    );
     assert.equal(
       sessionStore.getSession("turn-invalid-payload")?.segments.has("m-invalid-payload"),
       false,
@@ -473,9 +481,12 @@ function testTextAudioMotionWithSameMessageIdShareSegment(): void {
     }));
     socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-segment-1", "turn-segment")));
 
-    assert.equal(adapter.state.pendingAssistantTexts.get("m-segment-1")?.text, "segment text");
     assert.equal(
-      adapter.state.pendingAudios.get("m-segment-1")?.audioUrl,
+      adapter.state.pendingAssistantTexts.get(pendingKey("turn-segment", "m-segment-1"))?.text,
+      "segment text",
+    );
+    assert.equal(
+      adapter.state.pendingAudios.get(pendingKey("turn-segment", "m-segment-1"))?.audioUrl,
       "http://127.0.0.1/segment.wav",
     );
 
@@ -505,9 +516,34 @@ function testMultipleMessageIdsDoNotOverwritePendingItems(): void {
       }));
     }
 
-    assert.equal(adapter.state.pendingAssistantTexts.get("m-a")?.text, "First");
-    assert.equal(adapter.state.pendingAssistantTexts.get("m-b")?.text, "Second");
+    assert.equal(adapter.state.pendingAssistantTexts.get(pendingKey("turn-multi", "m-a"))?.text, "First");
+    assert.equal(adapter.state.pendingAssistantTexts.get(pendingKey("turn-multi", "m-b"))?.text, "Second");
     assert.deepEqual(sessionStore.getSession("turn-multi")?.segmentOrder, ["m-a", "m-b"]);
+  });
+}
+
+function testSameMessageIdAcrossTurnsDoesNotOverwritePendingItems(): void {
+  withConnectedAdapter(({ adapter, socket }) => {
+    for (const [turnId, text] of [["turn-a", "First"], ["turn-b", "Second"]] as const) {
+      socket.emitMessage(JSON.stringify({
+        type: "output.text",
+        version: "v2",
+        message_id: "shared-message",
+        timestamp: "2026-05-08T00:00:01.000Z",
+        turn_id: turnId,
+        source: "backend",
+        payload: { text, speaker_name: "assistant", avatar: "" },
+      }));
+    }
+
+    assert.equal(
+      adapter.state.pendingAssistantTexts.get(pendingKey("turn-a", "shared-message"))?.text,
+      "First",
+    );
+    assert.equal(
+      adapter.state.pendingAssistantTexts.get(pendingKey("turn-b", "shared-message"))?.text,
+      "Second",
+    );
   });
 }
 
@@ -529,7 +565,10 @@ function testFallbackIdentityWritesCurrentSessionSegment(): void {
       },
     }));
 
-    assert.equal(adapter.state.pendingAudios.get("m-audio-fallback")?.turnId, "turn-fallback");
+    assert.equal(
+      adapter.state.pendingAudios.get(pendingKey("turn-fallback", "m-audio-fallback"))?.turnId,
+      "turn-fallback",
+    );
     const segment = sessionStore.getSession("turn-fallback")?.segments.get("m-audio-fallback");
     assert.equal(segment?.audio.url, "http://127.0.0.1/audio-fallback.wav");
     assert.equal(segment?.text.content, "audio text");
@@ -901,7 +940,7 @@ function testBackToBackTurnsDoNotSharePendingState(): void {
       payload: { text: "text a", speaker_name: "assistant", avatar: "" },
     }));
 
-    assert.ok(adapter.state.pendingAssistantTexts.has("m-a"));
+    assert.ok(adapter.state.pendingAssistantTexts.has(pendingKey("turn-a", "m-a")));
 
     // Turn B starts, should clear Turn A's pending state
     sendTurnStarted(socket, "turn-b");
@@ -1256,7 +1295,10 @@ async function testSendTextSettlesPendingAudioBeforeNewInput(): Promise<void> {
       messageId: "msg-pending-before-new-input",
       audioUrl: "http://127.0.0.1:12397/cache/audio/pending-before-new-input.wav",
     });
-    assert.equal(adapter.state.pendingAudios.has("msg-pending-before-new-input"), true);
+    assert.equal(
+      adapter.state.pendingAudios.has(pendingKey("turn-pending-before-new-input", "msg-pending-before-new-input")),
+      true,
+    );
 
     socket.sent.length = 0;
     assert.equal(await adapter.sendText("new input while audio pending"), true);
@@ -1266,7 +1308,10 @@ async function testSendTextSettlesPendingAudioBeforeNewInput(): Promise<void> {
       ?.segments.get("msg-pending-before-new-input");
     assert.equal(segment?.audio.terminal, "failed");
     assert.equal(segment?.audio.reason, "audio_playback_replaced_by_new_input");
-    assert.equal(adapter.state.pendingAudios.has("msg-pending-before-new-input"), false);
+    assert.equal(
+      adapter.state.pendingAudios.has(pendingKey("turn-pending-before-new-input", "msg-pending-before-new-input")),
+      false,
+    );
     assert.deepEqual(
       parseSentJsonMessages(socket).map((item) => item.type),
       ["control.interrupt", "input.text"],
@@ -1461,7 +1506,10 @@ async function testUserInterruptMarksPendingAudioSegmentFailedBeforeSending(): P
       messageId: "msg-user-interrupt-pending-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/user-interrupt-pending.wav",
     });
-    assert.equal(adapter.state.pendingAudios.has("msg-user-interrupt-pending-audio"), true);
+    assert.equal(
+      adapter.state.pendingAudios.has(pendingKey("turn-user-interrupt-pending", "msg-user-interrupt-pending-audio")),
+      true,
+    );
 
     socket.sent.length = 0;
     assert.equal(adapter.interruptCurrentTurn(), true);
@@ -1471,7 +1519,10 @@ async function testUserInterruptMarksPendingAudioSegmentFailedBeforeSending(): P
       ?.segments.get("msg-user-interrupt-pending-audio");
     assert.equal(segment?.audio.terminal, "failed");
     assert.equal(segment?.audio.reason, "audio_playback_interrupted");
-    assert.equal(adapter.state.pendingAudios.has("msg-user-interrupt-pending-audio"), false);
+    assert.equal(
+      adapter.state.pendingAudios.has(pendingKey("turn-user-interrupt-pending", "msg-user-interrupt-pending-audio")),
+      false,
+    );
     assert.equal(
       parseSentJsonMessages(socket).some((item) => item.type === "control.interrupt"),
       true,
@@ -1537,6 +1588,7 @@ async function run(): Promise<void> {
   testInvalidPayloadDoesNotEnterPlaybackState();
   testTextAudioMotionWithSameMessageIdShareSegment();
   testMultipleMessageIdsDoNotOverwritePendingItems();
+  testSameMessageIdAcrossTurnsDoesNotOverwritePendingItems();
   testFallbackIdentityWritesCurrentSessionSegment();
   testTurnStartedResetsPendingMaps();
   testSynthFinishedMarksMissingSegmentAudioAbsent();

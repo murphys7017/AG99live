@@ -24,7 +24,6 @@ export interface OutboundActionContext {
   state: OutboundActionState;
   outboundClient: AdapterOutboundClient;
   pushHistory: (role: string, text: string) => void;
-  stopAudio: () => void;
   stopAudioAndSettleCurrent: (reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
   createMessageId: () => string;
@@ -253,13 +252,13 @@ export function clearPlaybackGroupContext(
     && normalizedTurnId === normalizedCurrentTurnId,
   );
 
-  if (matchesActiveGroup) {
-    ctx.state.currentTurnId = null;
-  }
-
   const matchesStartedAudio = normalizeTurnIdForComparison(ctx.state.audioPlaybackStartedTurnId) === normalizedTurnId;
   if (matchesStartedAudio) {
-    ctx.stopAudio();
+    ctx.stopAudioAndSettleCurrent("playback_group_cleared");
+  }
+
+  if (matchesActiveGroup) {
+    ctx.state.currentTurnId = null;
   }
 
   const matchesTerminalAudio =

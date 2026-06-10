@@ -12,13 +12,38 @@ export interface PendingAudioItem extends PendingPlaybackItem {
   audioUrl: string;
 }
 
+export function buildPendingPlaybackKey(
+  turnId: string | null,
+  messageId: string,
+): string {
+  const normalizedTurnId = normalizeTurnIdForComparison(turnId);
+  const normalizedMessageId = messageId.trim();
+  return `${normalizedTurnId.length}:${normalizedTurnId}:${normalizedMessageId}`;
+}
+
+export function getPendingPlaybackItem<TItem extends PendingPlaybackItem>(
+  pendingItems: Map<string, TItem>,
+  turnId: string | null,
+  messageId: string,
+): TItem | undefined {
+  return pendingItems.get(buildPendingPlaybackKey(turnId, messageId));
+}
+
+export function deletePendingPlaybackItem<TItem extends PendingPlaybackItem>(
+  pendingItems: Map<string, TItem>,
+  turnId: string | null,
+  messageId: string,
+): boolean {
+  return pendingItems.delete(buildPendingPlaybackKey(turnId, messageId));
+}
+
 export function queueAssistantTextForPlayback(
   pendingAssistantTexts: Map<string, PendingAssistantTextItem>,
   text: string,
   turnId: string | null,
   messageId: string,
 ): void {
-  pendingAssistantTexts.set(messageId, {
+  pendingAssistantTexts.set(buildPendingPlaybackKey(turnId, messageId), {
     text,
     turnId,
     messageId,
@@ -32,7 +57,7 @@ export function queueAudioForPlayback(
   turnId: string | null,
   messageId: string,
 ): void {
-  pendingAudios.set(messageId, {
+  pendingAudios.set(buildPendingPlaybackKey(turnId, messageId), {
     audioUrl,
     turnId,
     messageId,

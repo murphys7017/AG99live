@@ -84,7 +84,7 @@ export interface InboundDispatchDeps {
   rewriteSocketUrl: (rawUrl: string) => string;
   rewriteHttpUrl: (rawUrl: string | null) => string;
   // audio
-  stopAudioPlayback: () => void;
+  stopAudioAndSettleCurrent: (reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
   markAudioPlaybackTerminal: (terminalState: string, turnId: string | null, reason?: string, messageId?: string | null) => void;
   hasPendingAudioForTurn: (turnId: string | null) => boolean;

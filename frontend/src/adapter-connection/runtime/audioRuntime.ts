@@ -11,6 +11,8 @@ import {
   type AudioBridgeDeps,
 } from "./adapterAudioBridge.js";
 import {
+  getPendingPlaybackItem,
+  deletePendingPlaybackItem,
   matchesPlaybackGroup,
   queueAudioForPlayback as queuePendingAudioForPlayback,
   type PendingAudioItem,
@@ -110,7 +112,6 @@ export interface AdapterAudioRuntime {
     messageId?: string | null,
   ) => void;
   resetAudioPlaybackTerminal: () => void;
-  stopAudioPlayback: () => void;
   stopAudioAndSettleCurrent: (reason: string) => void;
   findActiveAudioSegment: () => ActiveAudioSegment | null;
 }
@@ -216,7 +217,11 @@ export function createAdapterAudioRuntime(
     messageId: string,
     turnId: string | null,
   ): boolean {
-    const item = deps.state.pendingAudios.get(messageId);
+    const item = getPendingPlaybackItem(
+      deps.state.pendingAudios,
+      turnId,
+      messageId,
+    );
     if (!item) {
       return false;
     }
@@ -228,7 +233,7 @@ export function createAdapterAudioRuntime(
       return false;
     }
     const releasedTurnId = item.turnId ?? turnId;
-    deps.state.pendingAudios.delete(messageId);
+    deletePendingPlaybackItem(deps.state.pendingAudios, turnId, messageId);
     void playAudioAndAcknowledge(
       audioUrl,
       releasedTurnId,
@@ -272,7 +277,7 @@ export function createAdapterAudioRuntime(
         );
       }
     }
-    for (const [messageId, item] of Array.from(deps.state.pendingAudios.entries())) {
+    for (const [queueKey, item] of Array.from(deps.state.pendingAudios.entries())) {
       if (!matchesPlaybackGroup(item.turnId, deps.state.currentTurnId)) {
         continue;
       }
@@ -280,9 +285,9 @@ export function createAdapterAudioRuntime(
         "failed",
         item.turnId,
         reason,
-        messageId,
+        item.messageId,
       );
-      deps.state.pendingAudios.delete(messageId);
+      deps.state.pendingAudios.delete(queueKey);
     }
     stopAudioPlayback();
   }
@@ -317,7 +322,6 @@ export function createAdapterAudioRuntime(
     markMissingAudiosForTurn,
     markAudioPlaybackTerminal,
     resetAudioPlaybackTerminal,
-    stopAudioPlayback,
     stopAudioAndSettleCurrent,
     findActiveAudioSegment,
   };

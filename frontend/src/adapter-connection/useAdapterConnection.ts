@@ -52,6 +52,8 @@ import {
   saveStoredAdapterAddress,
 } from "./core/preferences.js";
 import {
+  getPendingPlaybackItem,
+  deletePendingPlaybackItem,
   matchesPlaybackGroup,
   queueAssistantTextForPlayback as queuePendingAssistantTextForPlayback,
 } from "./runtime/playbackReleaseQueue.js";
@@ -198,7 +200,6 @@ export function createAdapterConnection(
     markMissingAudiosForTurn,
     markAudioPlaybackTerminal,
     resetAudioPlaybackTerminal,
-    stopAudioPlayback,
     stopAudioAndSettleCurrent,
     findActiveAudioSegment,
   } = audioRuntime;
@@ -210,7 +211,7 @@ export function createAdapterConnection(
     getMotionTuningAdapter: () => motionTuningAdapter,
     getModelSyncAdapter: () => modelSync,
     pushHistory: pushHistory as (role: string, text: string) => void,
-    stopAudioPlayback: () => stopAudioPlayback(),
+    stopAudioAndSettleCurrent: (reason) => stopAudioAndSettleCurrent(reason),
     resetAudioPlaybackTerminal: () => resetAudioPlaybackTerminal(),
     markAudioPlaybackTerminal: (terminalState, turnId, reason, messageId) =>
       markAudioPlaybackTerminal(terminalState, turnId, reason, messageId),
@@ -233,7 +234,6 @@ export function createAdapterConnection(
     },
     outboundClient,
     pushHistory: pushHistory as (role: string, text: string) => void,
-    stopAudio: () => stopAudioPlayback(),
     stopAudioAndSettleCurrent: (reason: string) => stopAudioAndSettleCurrent(reason),
     resetAudioPlaybackTerminal,
     createMessageId,
@@ -312,7 +312,7 @@ export function createAdapterConnection(
     connectAttemptSerial += 1;
     microphoneRuntime.clearPendingStart();
     void stopMicrophoneCapture(markManualClose ? "manual_disconnect" : "connection_reset");
-    stopAudioPlayback();
+    stopAudioAndSettleCurrent(markManualClose ? "manual_disconnect" : "connection_reset");
     if (socket) {
       const currentSocket = socket;
       socket = null;
@@ -415,7 +415,7 @@ export function createAdapterConnection(
     resetConnectionRuntime({
       state,
       stopMicrophoneCapture,
-      stopAudioPlayback,
+      stopAudioAndSettleCurrent,
       historyAdapter,
       modelSyncAdapter: modelSync,
       resetAudioPlaybackTerminal,
@@ -451,7 +451,11 @@ export function createAdapterConnection(
     messageId: string,
     turnId: string | null,
   ): boolean {
-    const item = state.pendingAssistantTexts.get(messageId);
+    const item = getPendingPlaybackItem(
+      state.pendingAssistantTexts,
+      turnId,
+      messageId,
+    );
     if (!item) {
       return false;
     }
@@ -464,7 +468,7 @@ export function createAdapterConnection(
     }
 
     const releasedTurnId = item.turnId ?? turnId;
-    state.pendingAssistantTexts.delete(messageId);
+    deletePendingPlaybackItem(state.pendingAssistantTexts, turnId, messageId);
     updateAssistantText(text, releasedTurnId);
     state.assistantTextDeliveryTurnId = releasedTurnId;
     sessionStore?.markTextDelivered(releasedTurnId, messageId);
