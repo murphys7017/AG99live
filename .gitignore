@@ -22,6 +22,5 @@ analysis/
 analysis/*.ipynb
 deepseek-tui-windows-x64.exe
 ai_governance_runtime_overview_manifest.md
-.ai/reviews/
 .reasonix/
 deploy_adapter.ps1
