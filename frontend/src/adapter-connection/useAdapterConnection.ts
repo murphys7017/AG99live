@@ -199,6 +199,7 @@ export function createAdapterConnection(
     markAudioPlaybackTerminal,
     resetAudioPlaybackTerminal,
     stopAudioPlayback,
+    stopAudioAndSettleCurrent,
     findActiveAudioSegment,
   } = audioRuntime;
 
@@ -233,6 +234,7 @@ export function createAdapterConnection(
     outboundClient,
     pushHistory: pushHistory as (role: string, text: string) => void,
     stopAudio: () => stopAudioPlayback(),
+    stopAudioAndSettleCurrent: (reason: string) => stopAudioAndSettleCurrent(reason),
     resetAudioPlaybackTerminal,
     createMessageId,
   };

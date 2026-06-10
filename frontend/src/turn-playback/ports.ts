@@ -21,7 +21,7 @@ export interface MotionPayloadPort {
   ingestNormalizedPayload(
     payload: NormalizedMotionPayload,
     context: TurnPlaybackReleaseContext,
-  ): void;
+  ): boolean | void;
   notifyCurrentTurnChanged(turnId: string | null): void;
 }
 

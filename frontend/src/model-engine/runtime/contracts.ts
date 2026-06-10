@@ -77,6 +77,10 @@ export interface ModelEngineSessionStorePort {
   getSessionByTurnId?: (
     turnId: string | null,
   ) => ModelEnginePlaybackSession | undefined;
+  markMotionAbsent?: (
+    turnId: string | null,
+    messageId: string,
+  ) => void;
 }
 
 export interface MotionRuntimeSchedulerDependencies {

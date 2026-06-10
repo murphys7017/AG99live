@@ -1186,6 +1186,77 @@ async function testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd(): Promis
   }
 }
 
+async function testSendTextSettlesPlayingAudioBeforeNewInput(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket, sessionStore } = harness;
+    sendTurnStarted(socket, "turn-before-new-input");
+    sendOutputAudio(socket, {
+      turnId: "turn-before-new-input",
+      messageId: "msg-before-new-input",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/before-new-input.wav",
+    });
+    assert.equal(adapter.releaseAudioForPlayback(
+      "msg-before-new-input",
+      "turn-before-new-input",
+    ), true);
+    await flushMicrotasks();
+
+    const beforeSegment = sessionStore
+      .getSession("turn-before-new-input")
+      ?.segments.get("msg-before-new-input");
+    assert.equal(beforeSegment?.audio.terminal, "idle");
+    assert.equal(adapter.state.isPlayingAudio, true);
+
+    socket.sent.length = 0;
+    const sent = await adapter.sendText("new input while speaking");
+    assert.equal(sent, true);
+
+    const afterSegment = sessionStore
+      .getSession("turn-before-new-input")
+      ?.segments.get("msg-before-new-input");
+    assert.equal(afterSegment?.audio.terminal, "failed");
+    assert.equal(afterSegment?.audio.reason, "audio_playback_replaced_by_new_input");
+    assert.equal(adapter.state.isPlayingAudio, false);
+    assert.deepEqual(
+      parseSentJsonMessages(socket).map((item) => item.type),
+      ["control.interrupt", "input.text"],
+    );
+  } finally {
+    harness.scope.stop();
+  }
+}
+
+async function testSendTextSettlesPendingAudioBeforeNewInput(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket, sessionStore } = harness;
+    sendTurnStarted(socket, "turn-pending-before-new-input");
+    sendOutputAudio(socket, {
+      turnId: "turn-pending-before-new-input",
+      messageId: "msg-pending-before-new-input",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/pending-before-new-input.wav",
+    });
+    assert.equal(adapter.state.pendingAudios.has("msg-pending-before-new-input"), true);
+
+    socket.sent.length = 0;
+    assert.equal(await adapter.sendText("new input while audio pending"), true);
+
+    const segment = sessionStore
+      .getSession("turn-pending-before-new-input")
+      ?.segments.get("msg-pending-before-new-input");
+    assert.equal(segment?.audio.terminal, "failed");
+    assert.equal(segment?.audio.reason, "audio_playback_replaced_by_new_input");
+    assert.equal(adapter.state.pendingAudios.has("msg-pending-before-new-input"), false);
+    assert.deepEqual(
+      parseSentJsonMessages(socket).map((item) => item.type),
+      ["control.interrupt", "input.text"],
+    );
+  } finally {
+    harness.scope.stop();
+  }
+}
+
 async function testPttReleaseDuringStartupStopsCaptureAfterStart(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
@@ -1326,6 +1397,71 @@ async function testInterruptMarksPlayingAudioSegmentFailed(): Promise<void> {
   }
 }
 
+async function testUserInterruptMarksPlayingAudioSegmentFailedBeforeSending(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket, sessionStore } = harness;
+    sendTurnStarted(socket, "turn-user-interrupt");
+    sendOutputAudio(socket, {
+      turnId: "turn-user-interrupt",
+      messageId: "msg-user-interrupt-audio",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/user-interrupt.wav",
+    });
+    assert.equal(adapter.releaseAudioForPlayback(
+      "msg-user-interrupt-audio",
+      "turn-user-interrupt",
+    ), true);
+    await flushMicrotasks();
+
+    socket.sent.length = 0;
+    const interrupted = adapter.interruptCurrentTurn();
+    assert.equal(interrupted, true);
+
+    const segment = sessionStore
+      .getSession("turn-user-interrupt")
+      ?.segments.get("msg-user-interrupt-audio");
+    assert.equal(segment?.audio.terminal, "failed");
+    assert.equal(segment?.audio.reason, "audio_playback_interrupted");
+    assert.equal(adapter.state.isPlayingAudio, false);
+    assert.equal(
+      parseSentJsonMessages(socket).some((item) => item.type === "control.interrupt"),
+      true,
+    );
+  } finally {
+    harness.scope.stop();
+  }
+}
+
+async function testUserInterruptMarksPendingAudioSegmentFailedBeforeSending(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket, sessionStore } = harness;
+    sendTurnStarted(socket, "turn-user-interrupt-pending");
+    sendOutputAudio(socket, {
+      turnId: "turn-user-interrupt-pending",
+      messageId: "msg-user-interrupt-pending-audio",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/user-interrupt-pending.wav",
+    });
+    assert.equal(adapter.state.pendingAudios.has("msg-user-interrupt-pending-audio"), true);
+
+    socket.sent.length = 0;
+    assert.equal(adapter.interruptCurrentTurn(), true);
+
+    const segment = sessionStore
+      .getSession("turn-user-interrupt-pending")
+      ?.segments.get("msg-user-interrupt-pending-audio");
+    assert.equal(segment?.audio.terminal, "failed");
+    assert.equal(segment?.audio.reason, "audio_playback_interrupted");
+    assert.equal(adapter.state.pendingAudios.has("msg-user-interrupt-pending-audio"), false);
+    assert.equal(
+      parseSentJsonMessages(socket).some((item) => item.type === "control.interrupt"),
+      true,
+    );
+  } finally {
+    harness.scope.stop();
+  }
+}
+
 async function testInterruptMarksPendingAudioSegmentFailedBeforePlaybackStart(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
@@ -1399,6 +1535,8 @@ async function run(): Promise<void> {
   testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted();
   testScopeDisposeDisconnectsAdapterRuntime();
   await testSendTextUsesOutboundProtocolEnvelope();
+  await testSendTextSettlesPlayingAudioBeforeNewInput();
+  await testSendTextSettlesPendingAudioBeforeNewInput();
   testSendMotionPreviewUsesOutboundProtocolEnvelope();
   testSendParameterPlanPayloadPreviewIsRejected();
   await testAutoStartMicDoesNotDuplicateCaptureStart();
@@ -1407,6 +1545,8 @@ async function run(): Promise<void> {
   await testPttReleaseDuringStartupStopsCaptureAfterStart();
   await testDeviceChangeEndsPreviousMicSegmentBeforeRestart();
   await testInterruptMarksPlayingAudioSegmentFailed();
+  await testUserInterruptMarksPlayingAudioSegmentFailedBeforeSending();
+  await testUserInterruptMarksPendingAudioSegmentFailedBeforeSending();
   await testInterruptMarksPendingAudioSegmentFailedBeforePlaybackStart();
 
   console.log("useAdapterConnection tests passed");

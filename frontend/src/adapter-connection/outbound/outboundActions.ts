@@ -18,6 +18,7 @@ export interface OutboundActionContext {
   outboundClient: AdapterOutboundClient;
   pushHistory: (role: string, text: string) => void;
   stopAudio: () => void;
+  stopAudioAndSettleCurrent: (reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
   createMessageId: () => string;
 }
@@ -38,6 +39,13 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
     return false;
   }
 
+  const interruptedTurnId = ctx.state.currentTurnId;
+  if (interruptedTurnId) {
+    ctx.outboundClient.send("control.interrupt", {}, interruptedTurnId);
+  }
+  if (interruptedTurnId || ctx.state.audioPlaybackStartedTurnId) {
+    ctx.stopAudioAndSettleCurrent("audio_playback_replaced_by_new_input");
+  }
   ctx.state.currentTurnId = ctx.createMessageId();
   ctx.resetAudioPlaybackTerminal();
   const desktopCapture = ctx.state.desktopScreenshotOnSendEnabled
@@ -105,7 +113,7 @@ export function interruptCurrentTurn(ctx: OutboundActionContext): boolean {
     return false;
   }
 
-  ctx.stopAudio();
+  ctx.stopAudioAndSettleCurrent("audio_playback_interrupted");
   ctx.resetAudioPlaybackTerminal();
 
   if (!ctx.outboundClient.send("control.interrupt", {}, ctx.state.currentTurnId)) {

@@ -60,10 +60,16 @@ export function useTurnPlaybackOrchestrator(
         context.turnId,
         context.messageId,
       );
-      options.motionPayload.ingestNormalizedPayload(
+      const accepted = options.motionPayload.ingestNormalizedPayload(
         payload as NormalizedMotionPayload,
         context,
       );
+      if (accepted === false) {
+        options.sessionStore.markMotionAbsent(
+          context.turnId,
+          context.messageId,
+        );
+      }
       options.sessionStore.markPhase(
         context.turnId,
         "playing",

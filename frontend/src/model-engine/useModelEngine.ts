@@ -93,25 +93,37 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         },
         runtimeStateController,
       ),
+    onStartFailed: (context: StartPayloadContext) => {
+      runtimeSchedulerDependencies.sessionStore?.markMotionAbsent?.(
+        context.turnId,
+        context.messageId,
+      );
+    },
   });
 
   function ingestInboundPayload(
     payload: unknown,
     context: InboundPayloadContext,
-  ): void {
+  ): boolean {
     const normalized = normalizeMotionPayload(payload);
     if (!normalized.ok) {
       reportInvalidMotionPayload(normalized.reason, runtimeStateController);
-      return;
+      runtimeSchedulerDependencies.sessionStore?.markMotionAbsent?.(
+        context.turnId,
+        context.messageId,
+      );
+      return false;
     }
     runtimeScheduler.queueInboundPayload(normalized.payload, context);
+    return true;
   }
 
   function ingestNormalizedPayload(
     payload: NormalizedMotionPayload,
     context: InboundPayloadContext,
-  ): void {
+  ): boolean {
     runtimeScheduler.queueInboundPayload(payload, context);
+    return true;
   }
 
   function notifyAudioPlaybackStarted(

@@ -35,6 +35,7 @@ interface MotionRuntimeSchedulerHooks {
     payload: NormalizedMotionPayload,
     context: StartPayloadContext,
   ) => boolean;
+  onStartFailed?: (context: StartPayloadContext) => void;
 }
 
 export function createMotionRuntimeScheduler(
@@ -147,13 +148,18 @@ export function createMotionRuntimeScheduler(
     pendingInboundMotionPayloads.delete(messageId);
     clearPendingPayload(entry);
     syncPendingState();
-    return hooks.onStartPayload(entry.payload, {
+    const context = {
       turnId: entry.turnId,
       playbackTurnId: entry.playbackTurnId,
       messageId: entry.messageId,
       startReason,
       queuedDelayMs: Math.max(0, Math.round(performance.now() - entry.receivedAtMs)),
-    });
+    };
+    const started = hooks.onStartPayload(entry.payload, context);
+    if (!started) {
+      hooks.onStartFailed?.(context);
+    }
+    return started;
   }
 
   function queueInboundPayload(
@@ -164,13 +170,17 @@ export function createMotionRuntimeScheduler(
     const normalizedPlaybackTurnId =
       normalizeTurnId(context.playbackTurnId ?? null) ?? normalizedTurnId;
     if (!normalizedTurnId) {
-      hooks.onStartPayload(payload, {
+      const startContext = {
         messageId: context.messageId,
         turnId: null,
         playbackTurnId: normalizedPlaybackTurnId,
         startReason: "missing_turn_id",
         queuedDelayMs: 0,
-      });
+      };
+      const started = hooks.onStartPayload(payload, startContext);
+      if (!started) {
+        hooks.onStartFailed?.(startContext);
+      }
       return;
     }
 

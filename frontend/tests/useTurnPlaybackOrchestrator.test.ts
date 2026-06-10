@@ -12,7 +12,7 @@ const motionPayload: NormalizedMotionPayload = {
   intent: {} as never,
 };
 
-function createHarness() {
+function createHarness(options: { motionAccepted?: boolean } = {}) {
   const sessionStore = useTurnPlaybackSessionStore();
   const released: string[] = [];
   const turnChanges: Array<string | null> = [];
@@ -55,8 +55,9 @@ function createHarness() {
     ingestNormalizedPayload(
       _payload: NormalizedMotionPayload,
       context: { messageId: string; turnId: string | null },
-    ): void {
+    ): boolean {
       released.push(`motion:${context.messageId}:${context.turnId ?? ""}`);
+      return options.motionAccepted ?? true;
     },
     notifyCurrentTurnChanged(turnId: string | null): void {
       turnChanges.push(turnId);
@@ -156,6 +157,33 @@ async function testTextAndMotionReleaseWhenAudioIsAbsent(): Promise<void> {
   h.stop();
 }
 
+async function testRejectedMotionReleaseMarksSegmentAbsent(): Promise<void> {
+  const h = createHarness({ motionAccepted: false });
+  h.sessionStore.setActiveSession("turn-motion-rejected");
+  h.sessionStore.markTurnStarted("turn-motion-rejected");
+
+  h.sessionStore.markTextReceived("turn-motion-rejected", "hello", "msg-motion-rejected");
+  h.sessionStore.markMotionReceived("turn-motion-rejected", motionPayload, "msg-motion-rejected");
+  h.sessionStore.markSynthFinished("turn-motion-rejected");
+  h.sessionStore.markAudioTerminal(
+    "turn-motion-rejected",
+    "absent",
+    "msg-motion-rejected",
+    "synth_finished_without_audio_playback",
+  );
+
+  await h.flush();
+  await h.flush();
+
+  const segment = h.sessionStore
+    .getSession("turn-motion-rejected")
+    ?.segments.get("msg-motion-rejected");
+  assert.equal(segment?.motion.released, false);
+  assert.equal(segment?.motion.absent, true);
+  assert.equal(segment?.motion.completed, true);
+  h.stop();
+}
+
 async function testLateAudioAfterTextReleaseOnlyReleasesAudio(): Promise<void> {
   const h = createHarness();
   h.sessionStore.setActiveSession("turn-late-audio");
@@ -198,6 +226,7 @@ async function testLateAudioAfterTextReleaseOnlyReleasesAudio(): Promise<void> {
 async function run(): Promise<void> {
   await testSegmentsReleaseSequentiallyWithinTurn();
   await testTextAndMotionReleaseWhenAudioIsAbsent();
+  await testRejectedMotionReleaseMarksSegmentAbsent();
   await testLateAudioAfterTextReleaseOnlyReleasesAudio();
   console.log("useTurnPlaybackOrchestrator tests passed");
 }

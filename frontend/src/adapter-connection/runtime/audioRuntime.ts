@@ -52,6 +52,7 @@ export interface AdapterAudioRuntimeSessionStore {
     reason?: string,
   ) => void;
   getSessions: () => Array<{
+    phase?: string;
     segmentOrder: string[];
     segments: Map<
       string,
@@ -110,6 +111,7 @@ export interface AdapterAudioRuntime {
   ) => void;
   resetAudioPlaybackTerminal: () => void;
   stopAudioPlayback: () => void;
+  stopAudioAndSettleCurrent: (reason: string) => void;
   findActiveAudioSegment: () => ActiveAudioSegment | null;
 }
 
@@ -250,9 +252,50 @@ export function createAdapterAudioRuntime(
     stopAudioAction(audioPlaybackCtx);
   }
 
+  function stopAudioAndSettleCurrent(reason: string): void {
+    const activeMessageId = deps.state.audioPlaybackStartedMessageId;
+    if (activeMessageId) {
+      markAudioPlaybackTerminal(
+        "failed",
+        deps.state.audioPlaybackStartedTurnId,
+        reason,
+        activeMessageId,
+      );
+    } else {
+      const activeSegment = findActiveAudioSegment();
+      if (activeSegment) {
+        markAudioPlaybackTerminal(
+          "failed",
+          activeSegment.turnId,
+          reason,
+          activeSegment.messageId,
+        );
+      }
+    }
+    for (const [messageId, item] of Array.from(deps.state.pendingAudios.entries())) {
+      if (!matchesPlaybackGroup(item.turnId, deps.state.currentTurnId)) {
+        continue;
+      }
+      markAudioPlaybackTerminal(
+        "failed",
+        item.turnId,
+        reason,
+        messageId,
+      );
+      deps.state.pendingAudios.delete(messageId);
+    }
+    stopAudioPlayback();
+  }
+
   function findActiveAudioSegment(): ActiveAudioSegment | null {
     const sessions = deps.getSessionStore()?.getSessions() ?? [];
     for (const session of sessions) {
+      if ("phase" in session && (
+        session.phase === "completed"
+        || session.phase === "failed"
+      )) {
+        continue;
+      }
       for (const segmentId of session.segmentOrder) {
         const segment = session.segments.get(segmentId);
         if (segment?.audio.started && segment.audio.terminal === "idle") {
@@ -275,6 +318,7 @@ export function createAdapterAudioRuntime(
     markAudioPlaybackTerminal,
     resetAudioPlaybackTerminal,
     stopAudioPlayback,
+    stopAudioAndSettleCurrent,
     findActiveAudioSegment,
   };
 }

@@ -505,6 +505,24 @@ async function testSettlementWindowUsesInjectedTimer(): Promise<void> {
   assert.equal(h.scheduledTimers.size, 0);
 }
 
+async function testMotionStartFailureMarkedAbsentAllowsAck(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
+  h.sessionStore.markTextDelivered("turn-1", "msg-a");
+  h.sessionStore.markAudioTerminal("turn-1", "completed", "msg-a", "ok");
+  h.sessionStore.markMotionAbsent("turn-1", "msg-a");
+  h.sessionStore.markSynthFinished("turn-1");
+  await h.flush();
+  await h.flush();
+
+  assert.equal(h.playbackFinishedCalls.length, 1);
+  assert.deepEqual(h.playbackFinishedCalls[0], {
+    turnId: "turn-1",
+    success: true,
+    reason: "text_delivered",
+  });
+}
+
 async function testLateAudioAfterNoAudioAckReopensSettlingSession(): Promise<void> {
   const h = createHarness();
   h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
@@ -554,6 +572,7 @@ async function run(): Promise<void> {
   await testSynthFinishedAfterTurnFinishedStillAcks();
   await testCompletionCoordinatorIgnoresStaleSession();
   await testSettlementWindowUsesInjectedTimer();
+  await testMotionStartFailureMarkedAbsentAllowsAck();
   await testLateAudioAfterNoAudioAckReopensSettlingSession();
   console.log("playbackCompletionCoordinator tests passed");
 }
