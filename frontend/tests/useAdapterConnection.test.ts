@@ -1321,6 +1321,133 @@ async function testSendTextSettlesPendingAudioBeforeNewInput(): Promise<void> {
   }
 }
 
+async function testClearPlaybackGroupOnlySettlesTargetTurnAudio(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket, sessionStore } = harness;
+    sendTurnStarted(socket, "turn-clear-target");
+    sendOutputAudio(socket, {
+      turnId: "turn-clear-target",
+      messageId: "msg-clear-target-audio",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/clear-target.wav",
+    });
+    assert.equal(adapter.releaseAudioForPlayback(
+      "msg-clear-target-audio",
+      "turn-clear-target",
+    ), true);
+    await flushMicrotasks();
+
+    sendTurnStarted(socket, "turn-clear-current");
+    sendOutputAudio(socket, {
+      turnId: "turn-clear-current",
+      messageId: "msg-clear-current-pending",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/clear-current.wav",
+    });
+    assert.equal(adapter.state.currentTurnId, "turn-clear-current");
+    assert.equal(
+      adapter.state.pendingAudios.has(pendingKey("turn-clear-current", "msg-clear-current-pending")),
+      true,
+    );
+
+    adapter.clearPlaybackGroupContext("turn-clear-target");
+
+    const targetSegment = sessionStore
+      .getSession("turn-clear-target")
+      ?.segments.get("msg-clear-target-audio");
+    const currentSegment = sessionStore
+      .getSession("turn-clear-current")
+      ?.segments.get("msg-clear-current-pending");
+    assert.equal(targetSegment?.audio.terminal, "failed");
+    assert.equal(targetSegment?.audio.reason, "playback_group_cleared");
+    assert.equal(adapter.state.isPlayingAudio, false);
+    assert.equal(adapter.state.currentTurnId, "turn-clear-current");
+    assert.equal(
+      adapter.state.pendingAudios.has(pendingKey("turn-clear-current", "msg-clear-current-pending")),
+      true,
+    );
+    assert.equal(currentSegment?.audio.terminal, "idle");
+  } finally {
+    harness.scope.stop();
+  }
+}
+
+async function testInboundInterruptOnlySettlesTargetTurnAudio(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket, sessionStore } = harness;
+    sendTurnStarted(socket, "turn-inbound-interrupt-target");
+    sendOutputAudio(socket, {
+      turnId: "turn-inbound-interrupt-target",
+      messageId: "msg-inbound-interrupt-target-audio",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/inbound-interrupt-target.wav",
+    });
+    assert.equal(adapter.releaseAudioForPlayback(
+      "msg-inbound-interrupt-target-audio",
+      "turn-inbound-interrupt-target",
+    ), true);
+    await flushMicrotasks();
+
+    sendTurnStarted(socket, "turn-inbound-interrupt-current");
+    sendOutputAudio(socket, {
+      turnId: "turn-inbound-interrupt-current",
+      messageId: "msg-inbound-interrupt-current-pending",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/inbound-interrupt-current.wav",
+    });
+
+    socket.emitMessage(JSON.stringify({
+      type: "control.interrupt",
+      version: "v2",
+      message_id: "interrupt-target-only",
+      timestamp: "2026-05-08T00:00:21.000Z",
+      turn_id: "turn-inbound-interrupt-target",
+      source: "backend",
+      payload: {},
+    }));
+
+    const targetSegment = sessionStore
+      .getSession("turn-inbound-interrupt-target")
+      ?.segments.get("msg-inbound-interrupt-target-audio");
+    const currentSegment = sessionStore
+      .getSession("turn-inbound-interrupt-current")
+      ?.segments.get("msg-inbound-interrupt-current-pending");
+    assert.equal(targetSegment?.audio.terminal, "failed");
+    assert.equal(targetSegment?.audio.reason, "audio_playback_interrupted");
+    assert.equal(adapter.state.isPlayingAudio, false);
+    assert.equal(adapter.state.currentTurnId, "turn-inbound-interrupt-current");
+    assert.equal(
+      adapter.state.pendingAudios.has(pendingKey("turn-inbound-interrupt-current", "msg-inbound-interrupt-current-pending")),
+      true,
+    );
+    assert.equal(currentSegment?.audio.terminal, "idle");
+  } finally {
+    harness.scope.stop();
+  }
+}
+
+function testDisconnectSettlesPendingAudioBeforeClearingQueue(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-disconnect-pending");
+    sendOutputAudio(socket, {
+      turnId: "turn-disconnect-pending",
+      messageId: "msg-disconnect-pending",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/disconnect-pending.wav",
+    });
+    assert.equal(
+      adapter.state.pendingAudios.has(pendingKey("turn-disconnect-pending", "msg-disconnect-pending")),
+      true,
+    );
+
+    adapter.disconnect();
+
+    const segment = sessionStore
+      .getSession("turn-disconnect-pending")
+      ?.segments.get("msg-disconnect-pending");
+    assert.equal(adapter.state.pendingAudios.size, 0);
+    assert.equal(segment?.audio.terminal, "failed");
+    assert.equal(segment?.audio.reason, "manual_disconnect");
+  });
+}
+
 async function testPttReleaseDuringStartupStopsCaptureAfterStart(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
@@ -1609,6 +1736,9 @@ async function run(): Promise<void> {
   await testSendTextDoesNotInterruptIdleCurrentTurn();
   await testSendTextSettlesPlayingAudioBeforeNewInput();
   await testSendTextSettlesPendingAudioBeforeNewInput();
+  await testClearPlaybackGroupOnlySettlesTargetTurnAudio();
+  await testInboundInterruptOnlySettlesTargetTurnAudio();
+  testDisconnectSettlesPendingAudioBeforeClearingQueue();
   testSendMotionPreviewUsesOutboundProtocolEnvelope();
   testSendParameterPlanPayloadPreviewIsRejected();
   await testAutoStartMicDoesNotDuplicateCaptureStart();

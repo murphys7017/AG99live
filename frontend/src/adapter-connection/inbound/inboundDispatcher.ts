@@ -1,3 +1,20 @@
+/**
+ * 入站事件分发的顶层路由。
+ *
+ * 上游 inboundEvents.ts 把原始信封映射成判别联合 InboundAdapterEvent；本文件按
+ * event.kind 转发到下列五个领域分发器之一：
+ *   - inboundConnectionDispatcher   server_info
+ *   - inboundFeatureDispatcher      model_sync / 语义轴档案 / 动作样本 / 历史
+ *   - inboundOutputDispatcher       output_text / output_audio / output_image / output_transcription
+ *   - inboundRuntimeDispatcher      turn_started / turn_finished / interrupt / start_mic / synth_finished / control_error
+ *   - inboundMotionDispatcher       engine_motion_payload
+ * protocol_error 和 unhandled 走 inboundProtocolDiagnostics 上报。
+ *
+ * 自身不写状态、不发协议、不调用任何业务行为，只做 switch + forward；状态写回
+ * 由各领域分发器完成。InboundDispatchDeps 是它们共享的依赖集合（session 写回、
+ * 音频运行时、URL 重写、pending 队列工具等），由 createAdapterInboundRuntime 装配。
+ */
+
 import type {
   ProtocolEnvelope,
   SystemModelSyncPayload,
@@ -84,7 +101,7 @@ export interface InboundDispatchDeps {
   rewriteSocketUrl: (rawUrl: string) => string;
   rewriteHttpUrl: (rawUrl: string | null) => string;
   // audio
-  stopAudioAndSettleCurrent: (reason: string) => void;
+  stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
   markAudioPlaybackTerminal: (terminalState: string, turnId: string | null, reason?: string, messageId?: string | null) => void;
   hasPendingAudioForTurn: (turnId: string | null) => boolean;
@@ -121,6 +138,12 @@ export interface InboundDispatchDeps {
 
 // ── Main dispatch ──────────────────────────────────────────────────
 
+/**
+ * 入站事件的顶层 switch，按 event.kind 转发到对应领域分发器。
+ *
+ * 自身只 forward，不读写任何 state、不发协议、不抛异常。output_* 是 async 的，
+ * 其他分支同步执行；调用方需要 await 返回值以保证 output 路径下的副作用顺序。
+ */
 export async function dispatchInboundEvent(
   deps: InboundDispatchDeps,
   event: InboundAdapterEvent,

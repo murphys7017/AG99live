@@ -1,3 +1,18 @@
+/**
+ * 适配器出站动作集合。
+ *
+ * 集中放"前端 → 后端"方向上的业务级请求。每个函数节奏一致：
+ * 检查 outboundClient.canSend → 维护本地轮次/播放状态 → 调用
+ * outboundClient.send(type, payload, turnId) 发一条消息 → 写回 state.statusMessage
+ * 与历史记录。底层 WebSocket 框架由 outboundClient.ts 负责，本文件只决定
+ * "在什么时机发什么消息"。
+ *
+ * 边界：
+ *   - 不直接持有 WebSocket，统一通过 OutboundActionContext.outboundClient 发送。
+ *   - 不接收入站消息，入站走 inbound/ 分支。
+ *   - 任何业务级停播都走 ctx.stopAudioAndSettleTurn，由它先把段终态写回再停播。
+ */
+
 import type { SystemSemanticAxisProfileSavePayload } from "../../types/protocol.js";
 import {
   normalizeTurnIdForComparison,
@@ -8,6 +23,13 @@ import type {
 } from "../runtime/playbackReleaseQueue.js";
 import type { AdapterOutboundClient } from "./outboundClient.js";
 
+/**
+ * 出站动作共享的轻量状态视图。
+ *
+ * 由 useAdapterConnection 持有真实对象，函数只读取/写回，不创建新实例。
+ * pendingAssistantTexts / pendingAudios 的键由 `buildPendingPlaybackKey(turnId, messageId)`
+ * 决定，详见 runtime/playbackReleaseQueue.ts。
+ */
 export interface OutboundActionState {
   currentTurnId: string | null;
   isPlayingAudio: boolean;
@@ -20,11 +42,18 @@ export interface OutboundActionState {
   statusMessage: string;
 }
 
+/**
+ * 出站动作执行上下文。
+ *
+ * 把发消息所需的“连接、状态、UI 副作用、ID 工厂”聚合成一个参数，避免每个 action
+ * 单独维护一长串依赖。stopAudioAndSettleTurn 是收口入口：任何业务级停播都必须经过它，
+ * 不应直接调用底层 stopAudioPlayback。
+ */
 export interface OutboundActionContext {
   state: OutboundActionState;
   outboundClient: AdapterOutboundClient;
   pushHistory: (role: string, text: string) => void;
-  stopAudioAndSettleCurrent: (reason: string) => void;
+  stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
   createMessageId: () => string;
 }
@@ -36,6 +65,19 @@ interface DesktopCaptureImagePayload {
   captured_at: string;
 }
 
+/**
+ * 发送文本输入到 AstrBot 适配器，开启新一轮对话。
+ *
+ * 行为：
+ *   1. 若当前还有可被打断的播放轮次（音频已起播 / 还有 pending 文本或音频），
+ *      先发 `control.interrupt` 并就地把当前音频段标 failed，避免新旧轮次混播。
+ *   2. 为新一轮分配新的 turn_id（与 messageId 同体），重置音频终态。
+ *   3. 若用户启用了“发送时附带桌面截图”，调用 Electron preload 抓一张 JPEG，
+ *      失败时静默回退到纯文本（截图能力不可用不应阻断发消息）。
+ *   4. 发送 `input.text` 信封，同步更新 statusMessage / 历史记录。
+ *
+ * 返回 true 表示信封已成功投递到底层 WebSocket（不代表后端已确认）。
+ */
 export async function sendText(ctx: OutboundActionContext, text: string): Promise<boolean> {
   const message = text.trim();
   if (!message || !ctx.outboundClient.canSend()) {
@@ -48,7 +90,10 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
   const interruptedTurnId = getInterruptibleTurnId(ctx.state);
   if (interruptedTurnId) {
     ctx.outboundClient.send("control.interrupt", {}, interruptedTurnId);
-    ctx.stopAudioAndSettleCurrent("audio_playback_replaced_by_new_input");
+    ctx.stopAudioAndSettleTurn(
+      interruptedTurnId,
+      "audio_playback_replaced_by_new_input",
+    );
   }
   ctx.state.currentTurnId = ctx.createMessageId();
   ctx.resetAudioPlaybackTerminal();
@@ -144,6 +189,13 @@ function buildDesktopAwareText(
   ].join("\n");
 }
 
+/**
+ * 用户主动打断当前轮次。
+ *
+ * 先在本地把活跃音频段就地标 failed 并停播（reason=audio_playback_interrupted），
+ * 再向后端发送 `control.interrupt`。本地清理与协议发送顺序固定，保证 UI 立即响应，
+ * 即使后端 ACK 慢也不会出现“点了中断仍在说话”的状态。
+ */
 export function interruptCurrentTurn(ctx: OutboundActionContext): boolean {
   if (!ctx.outboundClient.canSend()) {
     ctx.state.lastError = "当前还没有连上适配器，无法发送中断。";
@@ -152,10 +204,14 @@ export function interruptCurrentTurn(ctx: OutboundActionContext): boolean {
     return false;
   }
 
-  ctx.stopAudioAndSettleCurrent("audio_playback_interrupted");
+  const interruptTurnId =
+    getInterruptibleTurnId(ctx.state)
+    ?? ctx.state.currentTurnId
+    ?? null;
+  ctx.stopAudioAndSettleTurn(interruptTurnId, "audio_playback_interrupted");
   ctx.resetAudioPlaybackTerminal();
 
-  if (!ctx.outboundClient.send("control.interrupt", {}, ctx.state.currentTurnId)) {
+  if (!ctx.outboundClient.send("control.interrupt", {}, interruptTurnId)) {
     ctx.state.lastError = "当前还没有连上适配器，无法发送中断。";
     ctx.state.statusMessage = ctx.state.lastError;
     ctx.pushHistory("error", ctx.state.lastError);
@@ -166,6 +222,12 @@ export function interruptCurrentTurn(ctx: OutboundActionContext): boolean {
   return true;
 }
 
+/**
+ * 把档案编辑器整理好的语义轴档案保存到后端。
+ *
+ * 走 `system.semantic_axis_profile_save`，由后端落盘并广播 saved/save_failed 回执。
+ * 不属于对话轮次，因此不携带 turn_id。
+ */
 export function sendSemanticAxisProfileSave(
   ctx: OutboundActionContext,
   payload: SystemSemanticAxisProfileSavePayload,
@@ -189,6 +251,12 @@ export function sendSemanticAxisProfileSave(
   return true;
 }
 
+/**
+ * 把动作实验室构造的 motion intent 载荷以预览模式发到后端。
+ *
+ * 后端只记录 ingress，不参与播放（预览始终在本地动作引擎里执行），因此 mode=preview。
+ * 在发送前先校验 schema_version，避免把无效载荷打到协议侧再被后端拒绝。
+ */
 export function sendMotionPayloadPreview(
   ctx: OutboundActionContext,
   payload: unknown,
@@ -226,6 +294,12 @@ export function sendMotionPayloadPreview(
   return true;
 }
 
+/**
+ * 发 `control.playback_finished`，向后端报告本轮播放结果。
+ *
+ * success/reason 透传到 payload；reason 只在非空时才写入，避免被后端 payload 校验拒收。
+ * 本函数不检查连接状态，由调用方保证；不触碰本地播放状态，纯协议发送。
+ */
 export function sendPlaybackFinished(
   ctx: OutboundActionContext,
   turnId: string | null,
@@ -240,6 +314,13 @@ export function sendPlaybackFinished(
   ctx.outboundClient.send("control.playback_finished", payload, turnId);
 }
 
+/**
+ * 收到 turn_finished 之后清理与该 turn 关联的播放组上下文。
+ *
+ * 三件事：若该 turn 仍是活跃音频归属，调用 stopAudioAndSettleTurn 写回段终态并停播；
+ * 若该 turn 还是 currentTurnId，置空；若任一终态/活跃/活跃组与该 turn 匹配，重置音频终态记录。
+ * 不发协议消息，纯本地状态清理。
+ */
 export function clearPlaybackGroupContext(
   ctx: OutboundActionContext,
   turnId: string | null,
@@ -254,7 +335,7 @@ export function clearPlaybackGroupContext(
 
   const matchesStartedAudio = normalizeTurnIdForComparison(ctx.state.audioPlaybackStartedTurnId) === normalizedTurnId;
   if (matchesStartedAudio) {
-    ctx.stopAudioAndSettleCurrent("playback_group_cleared");
+    ctx.stopAudioAndSettleTurn(turnId, "playback_group_cleared");
   }
 
   if (matchesActiveGroup) {

@@ -34,7 +34,7 @@ export interface AdapterInboundRuntimeDeps {
   getMotionTuningAdapter: () => ReturnType<typeof useAdapterMotionTuning> | null;
   getModelSyncAdapter: () => ReturnType<typeof useModelSync> | null;
   pushHistory: (role: string, text: string) => void;
-  stopAudioAndSettleCurrent: (reason: string) => void;
+  stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
   markAudioPlaybackTerminal: (
     terminalState: "completed" | "failed" | "absent",
@@ -160,7 +160,8 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       rewriteModelSyncEnvelope: (env) => rewriteModelSyncEnvelope(env),
       rewriteSocketUrl: (url) => rewriteSocketUrl(url),
       rewriteHttpUrl: (url) => rewriteHttpUrl(url),
-      stopAudioAndSettleCurrent: (reason) => deps.stopAudioAndSettleCurrent(reason),
+      stopAudioAndSettleTurn: (turnId, reason) =>
+        deps.stopAudioAndSettleTurn(turnId, reason),
       resetAudioPlaybackTerminal: () => deps.resetAudioPlaybackTerminal(),
       markAudioPlaybackTerminal: (terminalState, turnId, reason, messageId) =>
         deps.markAudioPlaybackTerminal(

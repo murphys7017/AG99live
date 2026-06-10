@@ -200,7 +200,8 @@ export function createAdapterConnection(
     markMissingAudiosForTurn,
     markAudioPlaybackTerminal,
     resetAudioPlaybackTerminal,
-    stopAudioAndSettleCurrent,
+    stopAudioAndSettleTurn,
+    stopAudioAndSettleAll,
     findActiveAudioSegment,
   } = audioRuntime;
 
@@ -211,7 +212,8 @@ export function createAdapterConnection(
     getMotionTuningAdapter: () => motionTuningAdapter,
     getModelSyncAdapter: () => modelSync,
     pushHistory: pushHistory as (role: string, text: string) => void,
-    stopAudioAndSettleCurrent: (reason) => stopAudioAndSettleCurrent(reason),
+    stopAudioAndSettleTurn: (turnId, reason) =>
+      stopAudioAndSettleTurn(turnId, reason),
     resetAudioPlaybackTerminal: () => resetAudioPlaybackTerminal(),
     markAudioPlaybackTerminal: (terminalState, turnId, reason, messageId) =>
       markAudioPlaybackTerminal(terminalState, turnId, reason, messageId),
@@ -234,7 +236,8 @@ export function createAdapterConnection(
     },
     outboundClient,
     pushHistory: pushHistory as (role: string, text: string) => void,
-    stopAudioAndSettleCurrent: (reason: string) => stopAudioAndSettleCurrent(reason),
+    stopAudioAndSettleTurn: (turnId: string | null, reason: string) =>
+      stopAudioAndSettleTurn(turnId, reason),
     resetAudioPlaybackTerminal,
     createMessageId,
   };
@@ -312,7 +315,7 @@ export function createAdapterConnection(
     connectAttemptSerial += 1;
     microphoneRuntime.clearPendingStart();
     void stopMicrophoneCapture(markManualClose ? "manual_disconnect" : "connection_reset");
-    stopAudioAndSettleCurrent(markManualClose ? "manual_disconnect" : "connection_reset");
+    stopAudioAndSettleAll(markManualClose ? "manual_disconnect" : "connection_reset");
     if (socket) {
       const currentSocket = socket;
       socket = null;
@@ -415,7 +418,7 @@ export function createAdapterConnection(
     resetConnectionRuntime({
       state,
       stopMicrophoneCapture,
-      stopAudioAndSettleCurrent,
+      stopAudioAndSettleAll,
       historyAdapter,
       modelSyncAdapter: modelSync,
       resetAudioPlaybackTerminal,

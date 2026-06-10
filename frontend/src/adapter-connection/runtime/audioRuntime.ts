@@ -112,7 +112,8 @@ export interface AdapterAudioRuntime {
     messageId?: string | null,
   ) => void;
   resetAudioPlaybackTerminal: () => void;
-  stopAudioAndSettleCurrent: (reason: string) => void;
+  stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
+  stopAudioAndSettleAll: (reason: string) => void;
   findActiveAudioSegment: () => ActiveAudioSegment | null;
 }
 
@@ -257,7 +258,67 @@ export function createAdapterAudioRuntime(
     stopAudioAction(audioPlaybackCtx);
   }
 
-  function stopAudioAndSettleCurrent(reason: string): void {
+  function matchesTurn(
+    candidateTurnId: string | null,
+    targetTurnId: string | null,
+  ): boolean {
+    if (matchesPlaybackGroup(candidateTurnId, targetTurnId)) {
+      return true;
+    }
+    return !candidateTurnId && !targetTurnId;
+  }
+
+  function settlePendingAudiosForTurn(
+    turnId: string | null,
+    reason: string,
+  ): void {
+    for (const [queueKey, item] of Array.from(deps.state.pendingAudios.entries())) {
+      if (!matchesTurn(item.turnId, turnId)) {
+        continue;
+      }
+      markAudioPlaybackTerminal(
+        "failed",
+        item.turnId,
+        reason,
+        item.messageId,
+      );
+      deps.state.pendingAudios.delete(queueKey);
+    }
+  }
+
+  function stopAudioAndSettleTurn(turnId: string | null, reason: string): void {
+    let shouldStopAudio = false;
+    const activeMessageId = deps.state.audioPlaybackStartedMessageId;
+    if (
+      activeMessageId
+      && matchesTurn(deps.state.audioPlaybackStartedTurnId, turnId)
+    ) {
+      markAudioPlaybackTerminal(
+        "failed",
+        deps.state.audioPlaybackStartedTurnId,
+        reason,
+        activeMessageId,
+      );
+      shouldStopAudio = true;
+    } else {
+      const activeSegment = findActiveAudioSegmentForTurn(turnId);
+      if (activeSegment) {
+        markAudioPlaybackTerminal(
+          "failed",
+          activeSegment.turnId,
+          reason,
+          activeSegment.messageId,
+        );
+        shouldStopAudio = true;
+      }
+    }
+    settlePendingAudiosForTurn(turnId, reason);
+    if (shouldStopAudio) {
+      stopAudioPlayback();
+    }
+  }
+
+  function stopAudioAndSettleAll(reason: string): void {
     const activeMessageId = deps.state.audioPlaybackStartedMessageId;
     if (activeMessageId) {
       markAudioPlaybackTerminal(
@@ -266,21 +327,23 @@ export function createAdapterAudioRuntime(
         reason,
         activeMessageId,
       );
-    } else {
-      const activeSegment = findActiveAudioSegment();
-      if (activeSegment) {
-        markAudioPlaybackTerminal(
-          "failed",
-          activeSegment.turnId,
-          reason,
-          activeSegment.messageId,
-        );
-      }
     }
-    for (const [queueKey, item] of Array.from(deps.state.pendingAudios.entries())) {
-      if (!matchesPlaybackGroup(item.turnId, deps.state.currentTurnId)) {
+    for (const activeSegment of findActiveAudioSegments()) {
+      if (
+        activeMessageId
+        && activeSegment.messageId === activeMessageId
+        && matchesTurn(activeSegment.turnId, deps.state.audioPlaybackStartedTurnId)
+      ) {
         continue;
       }
+      markAudioPlaybackTerminal(
+        "failed",
+        activeSegment.turnId,
+        reason,
+        activeSegment.messageId,
+      );
+    }
+    for (const [queueKey, item] of Array.from(deps.state.pendingAudios.entries())) {
       markAudioPlaybackTerminal(
         "failed",
         item.turnId,
@@ -293,6 +356,17 @@ export function createAdapterAudioRuntime(
   }
 
   function findActiveAudioSegment(): ActiveAudioSegment | null {
+    return findActiveAudioSegments()[0] ?? null;
+  }
+
+  function findActiveAudioSegmentForTurn(turnId: string | null): ActiveAudioSegment | null {
+    return findActiveAudioSegments().find((segment) =>
+      matchesTurn(segment.turnId, turnId)
+    ) ?? null;
+  }
+
+  function findActiveAudioSegments(): ActiveAudioSegment[] {
+    const activeSegments: ActiveAudioSegment[] = [];
     const sessions = deps.getSessionStore()?.getSessions() ?? [];
     for (const session of sessions) {
       if ("phase" in session && (
@@ -304,14 +378,14 @@ export function createAdapterAudioRuntime(
       for (const segmentId of session.segmentOrder) {
         const segment = session.segments.get(segmentId);
         if (segment?.audio.started && segment.audio.terminal === "idle") {
-          return {
+          activeSegments.push({
             turnId: segment.turnId,
             messageId: segment.messageId,
-          };
+          });
         }
       }
     }
-    return null;
+    return activeSegments;
   }
 
   return {
@@ -322,7 +396,8 @@ export function createAdapterAudioRuntime(
     markMissingAudiosForTurn,
     markAudioPlaybackTerminal,
     resetAudioPlaybackTerminal,
-    stopAudioAndSettleCurrent,
+    stopAudioAndSettleTurn,
+    stopAudioAndSettleAll,
     findActiveAudioSegment,
   };
 }

@@ -107,10 +107,10 @@ function testTurnStartedDoesNotInheritCurrentIdentity(): void {
   assert.equal(event.turnId, null);
 }
 
-function testInterruptUsesCurrentIdentity(): void {
+function testInterruptUsesEnvelopeIdentity(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("control.interrupt", {}, {
-      turnId: "stale-turn",
+      turnId: "target-turn",
     }),
     defaultContext(),
   );
@@ -119,7 +119,22 @@ function testInterruptUsesCurrentIdentity(): void {
   if (event.kind !== "interrupt") {
     throw new Error("expected interrupt event");
   }
-  assert.equal(event.turnId, "current-turn");
+  assert.equal(event.turnId, "target-turn");
+}
+
+function testInterruptFallsBackToActiveAudioIdentity(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("control.interrupt", {}, {
+      turnId: null,
+    }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "interrupt");
+  if (event.kind !== "interrupt") {
+    throw new Error("expected interrupt event");
+  }
+  assert.equal(event.turnId, "audio-turn");
 }
 
 function testEngineMotionFallsBackCurrentThenAudioTurn(): void {
@@ -294,7 +309,8 @@ function run(): void {
   testOutputAudioFallsBackToCurrentTurn();
   testTurnFinishedFallsBackToActiveIdentity();
   testTurnStartedDoesNotInheritCurrentIdentity();
-  testInterruptUsesCurrentIdentity();
+  testInterruptUsesEnvelopeIdentity();
+  testInterruptFallsBackToActiveAudioIdentity();
   testEngineMotionFallsBackCurrentThenAudioTurn();
   testEngineCatalogMotionMapsAsMotionPayload();
   testMissingSegmentMessageIdReturnsProtocolError();

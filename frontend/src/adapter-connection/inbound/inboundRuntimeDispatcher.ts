@@ -1,6 +1,24 @@
+/**
+ * 入站运行时/控制事件的落地处理。
+ *
+ * 处理 6 类事件：turn_started / turn_finished / interrupt / start_mic /
+ * synth_finished / control_error。每个 apply* 函数都会做三件事：
+ *   1. 写 deps.state 字段（statusMessage、lastError、currentTurnId、pending 队列等）
+ *   2. 调用 deps.sessionStore.* 把同样的事件同步到播放会话存储
+ *   3. 调用 deps.pushHistory 把一条系统/错误条目落到历史
+ * 中断与 turn_finished 路径还会触发 deps.stopAudioAndSettleTurn 与
+ * deps.markAudioPlaybackTerminal 把音频段就地收口，避免新旧轮次混播。
+ *
+ * 边界：不发协议、不解析信封、不直接持有 WebSocket；所有副作用都通过 deps 注入。
+ */
+
 import type { ControlErrorPayload, ProtocolEnvelope } from "../../types/protocol.js";
 import type { InboundAdapterEvent } from "./inboundEvents.js";
-import type { PendingAssistantTextItem, PendingAudioItem } from "../runtime/playbackReleaseQueue.js";
+import {
+  matchesPlaybackGroup,
+  type PendingAssistantTextItem,
+  type PendingAudioItem,
+} from "../runtime/playbackReleaseQueue.js";
 
 export interface InboundRuntimeDispatchState {
   currentTurnId: string | null;
@@ -27,7 +45,7 @@ export interface InboundRuntimeDispatchDeps {
     markInterrupt: (turnId: string | null) => void;
   } | undefined;
   pushHistory: (role: string, text: string) => void;
-  stopAudioAndSettleCurrent: (reason: string) => void;
+  stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
   markAudioPlaybackTerminal: (
     terminalState: string,
@@ -54,6 +72,12 @@ type InboundRuntimeEvent = Extract<
   | { kind: "control_error" }
 >;
 
+/**
+ * 运行时事件的内部 switch，按 event.kind 调对应 apply* 处理函数。
+ *
+ * 同步执行（applyStartMic 内部以 void 启动 startMicrophoneCapture，不 await）。
+ * 不抛异常，单条事件失败不影响后续事件投递。
+ */
 export function dispatchInboundRuntimeEvent(
   deps: InboundRuntimeDispatchDeps,
   event: InboundRuntimeEvent,
@@ -146,12 +170,19 @@ function applyInterrupt(
   event: Extract<InboundAdapterEvent, { kind: "interrupt" }>,
 ): void {
   const s = deps.state;
-  deps.stopAudioAndSettleCurrent("audio_playback_interrupted");
+  const interruptedTurnId =
+    event.turnId
+    ?? s.audioPlaybackStartedTurnId
+    ?? s.currentTurnId
+    ?? null;
+  deps.stopAudioAndSettleTurn(interruptedTurnId, "audio_playback_interrupted");
   deps.resetAudioPlaybackTerminal();
-  s.pendingAssistantTexts.clear();
-  s.pendingAudios.clear();
-  deps.sessionStore?.markInterrupt(event.turnId);
-  s.currentTurnId = null;
+  deletePendingItemsForTurn(s.pendingAssistantTexts, interruptedTurnId);
+  deletePendingItemsForTurn(s.pendingAudios, interruptedTurnId);
+  deps.sessionStore?.markInterrupt(interruptedTurnId);
+  if (matchesTurn(s.currentTurnId, interruptedTurnId)) {
+    s.currentTurnId = null;
+  }
   s.statusMessage = "当前轮次已中断。";
   deps.pushHistory("system", s.statusMessage);
 }
@@ -198,6 +229,27 @@ function isCurrentTurnEvent(
   eventTurnId: string | null,
 ): boolean {
   return Boolean(currentTurnId && eventTurnId && currentTurnId === eventTurnId);
+}
+
+function deletePendingItemsForTurn<TItem extends { turnId: string | null }>(
+  pendingItems: Map<string, TItem>,
+  turnId: string | null,
+): void {
+  for (const [key, item] of Array.from(pendingItems.entries())) {
+    if (matchesTurn(item.turnId, turnId)) {
+      pendingItems.delete(key);
+    }
+  }
+}
+
+function matchesTurn(
+  candidateTurnId: string | null,
+  targetTurnId: string | null,
+): boolean {
+  if (matchesPlaybackGroup(candidateTurnId, targetTurnId)) {
+    return true;
+  }
+  return !candidateTurnId && !targetTurnId;
 }
 
 function applyControlError(
