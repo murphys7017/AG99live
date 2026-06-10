@@ -192,6 +192,7 @@ async function testMotionCompletionWritesCorrectSegment(): Promise<void> {
     queuedDelayMs: 0,
     diagnostics: null,
     playerMessage: "playing",
+    runId: "test-run-msg-b",
     plan: {
       schema_version: "semantic_parameter_plan.v1",
       parameters: [],
@@ -201,9 +202,7 @@ async function testMotionCompletionWritesCorrectSegment(): Promise<void> {
     } as never,
   });
 
-  h.mockMotionPlayer.state.status = "playing";
-  await h.flush();
-  h.mockMotionPlayer.state.status = "finished";
+  h.coordinator.completeMotionPlayback({ runId: "test-run-msg-b", status: "completed" });
   await h.flush();
 
   const session = h.sessionStore.getActiveSession();
@@ -248,12 +247,12 @@ async function testMotionHandoffCompletesPreviousSegmentAndFinishesCurrent(): Pr
   h.mockMotionPlayer.state.status = "playing";
   await h.flush();
 
-  h.coordinator.recordMotionPlayback({ ...baseEvent, messageId: "msg-b" });
+  h.coordinator.recordMotionPlayback({ ...baseEvent, runId: "handoff-msg-b", messageId: "msg-b" });
   await h.flush();
   assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-a")?.motion.completed, true);
   assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-b")?.motion.completed, false);
 
-  h.mockMotionPlayer.state.status = "finished";
+  h.coordinator.completeMotionPlayback({ runId: "handoff-msg-b", status: "completed" });
   await h.flush();
   assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-b")?.motion.completed, true);
 }
@@ -291,6 +290,7 @@ async function testCatalogMotionCompletionWritesSegmentAndHistory(): Promise<voi
     queuedDelayMs: 0,
     diagnostics: null,
     playerMessage: "playing",
+    runId: "cat-run-1",
     motion: {
       schema_version: "engine.catalog_motion.v1",
       model_id: "model-1",
@@ -305,9 +305,7 @@ async function testCatalogMotionCompletionWritesSegmentAndHistory(): Promise<voi
     },
   });
 
-  h.mockMotionPlayer.state.status = "playing";
-  await h.flush();
-  h.mockMotionPlayer.state.status = "finished";
+  h.coordinator.completeMotionPlayback({ runId: "cat-run-1", status: "completed" });
   await h.flush();
 
   const segment = h.sessionStore.getActiveSession()?.segments.get("msg-a");
