@@ -2,12 +2,19 @@ import type { SystemSemanticAxisProfileSavePayload } from "../../types/protocol.
 import {
   normalizeTurnIdForComparison,
 } from "../core/turnIds.js";
+import type {
+  PendingAssistantTextItem,
+  PendingAudioItem,
+} from "../runtime/playbackReleaseQueue.js";
 import type { AdapterOutboundClient } from "./outboundClient.js";
 
 export interface OutboundActionState {
   currentTurnId: string | null;
+  isPlayingAudio: boolean;
   audioPlaybackStartedTurnId: string | null;
   audioPlaybackTerminalTurnId: string | null;
+  pendingAssistantTexts: Map<string, PendingAssistantTextItem>;
+  pendingAudios: Map<string, PendingAudioItem>;
   desktopScreenshotOnSendEnabled: boolean;
   lastError: string;
   statusMessage: string;
@@ -39,11 +46,9 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
     return false;
   }
 
-  const interruptedTurnId = ctx.state.currentTurnId;
+  const interruptedTurnId = getInterruptibleTurnId(ctx.state);
   if (interruptedTurnId) {
     ctx.outboundClient.send("control.interrupt", {}, interruptedTurnId);
-  }
-  if (interruptedTurnId || ctx.state.audioPlaybackStartedTurnId) {
     ctx.stopAudioAndSettleCurrent("audio_playback_replaced_by_new_input");
   }
   ctx.state.currentTurnId = ctx.createMessageId();
@@ -68,6 +73,41 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
     : "文本已发送，等待后端回复。";
   ctx.pushHistory("user", message);
   return true;
+}
+
+function getInterruptibleTurnId(state: OutboundActionState): string | null {
+  const currentTurnId = normalizeTurnIdForComparison(state.currentTurnId);
+  const activeAudioTurnId = normalizeTurnIdForComparison(state.audioPlaybackStartedTurnId);
+  if (activeAudioTurnId && (!currentTurnId || activeAudioTurnId === currentTurnId)) {
+    return activeAudioTurnId;
+  }
+
+  if (!currentTurnId) {
+    return null;
+  }
+
+  if (state.isPlayingAudio) {
+    return currentTurnId;
+  }
+  if (hasPendingPlaybackForTurn(state.pendingAssistantTexts, currentTurnId)) {
+    return currentTurnId;
+  }
+  if (hasPendingPlaybackForTurn(state.pendingAudios, currentTurnId)) {
+    return currentTurnId;
+  }
+  return null;
+}
+
+function hasPendingPlaybackForTurn(
+  pendingItems: Map<string, { turnId: string | null }>,
+  turnId: string,
+): boolean {
+  for (const item of pendingItems.values()) {
+    if (normalizeTurnIdForComparison(item.turnId) === turnId) {
+      return true;
+    }
+  }
+  return false;
 }
 
 async function captureRealtimeDesktopScreenshot(): Promise<DesktopCaptureImagePayload | null> {

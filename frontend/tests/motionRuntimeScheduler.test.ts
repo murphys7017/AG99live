@@ -78,6 +78,7 @@ function buildSession(audioTerminal: "idle" | "completed" = "idle"): ModelEngine
 
 function createHarness(session: ModelEnginePlaybackSession) {
   const started: StartPayloadContext[] = [];
+  const failed: StartPayloadContext[] = [];
   const scheduler = createMotionRuntimeScheduler(
     {
       getCurrentTurnId: () => "turn-1",
@@ -93,9 +94,12 @@ function createHarness(session: ModelEnginePlaybackSession) {
         started.push(context);
         return true;
       },
+      onStartFailed: (context) => {
+        failed.push(context);
+      },
     },
   );
-  return { scheduler, started };
+  return { scheduler, started, failed };
 }
 
 function testEndedAudioDoesNotCountAsSpeechActiveOrDurationTarget(): void {
@@ -124,9 +128,29 @@ function testQueuedPlaybackTurnIdIsNormalized(): void {
   assert.equal(started[0].playbackTurnId, "turn-1");
 }
 
+function testDroppedPendingPayloadReportsStartFailure(): void {
+  const { scheduler, started, failed } = createHarness(buildSession("completed"));
+
+  scheduler.queueInboundPayload(buildPayload(), {
+    messageId: "msg-dropped",
+    turnId: "turn-1",
+    playbackTurnId: "turn-1",
+    receivedAtMs: 900,
+  });
+
+  scheduler.notifyCurrentTurnChanged("turn-2");
+
+  assert.equal(started.length, 0);
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].messageId, "msg-dropped");
+  assert.equal(failed[0].turnId, "turn-1");
+  assert.equal(failed[0].startReason, "current_turn_changed");
+}
+
 function run(): void {
   testEndedAudioDoesNotCountAsSpeechActiveOrDurationTarget();
   testQueuedPlaybackTurnIdIsNormalized();
+  testDroppedPendingPayloadReportsStartFailure();
   console.log("motionRuntimeScheduler tests passed");
 }
 

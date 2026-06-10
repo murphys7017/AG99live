@@ -1186,6 +1186,25 @@ async function testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd(): Promis
   }
 }
 
+async function testSendTextDoesNotInterruptIdleCurrentTurn(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket } = harness;
+    sendTurnStarted(socket, "turn-idle-current");
+    socket.sent.length = 0;
+
+    const sent = await adapter.sendText("next message after idle turn");
+    assert.equal(sent, true);
+
+    assert.deepEqual(
+      parseSentJsonMessages(socket).map((item) => item.type),
+      ["input.text"],
+    );
+  } finally {
+    harness.scope.stop();
+  }
+}
+
 async function testSendTextSettlesPlayingAudioBeforeNewInput(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
@@ -1535,6 +1554,7 @@ async function run(): Promise<void> {
   testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted();
   testScopeDisposeDisconnectsAdapterRuntime();
   await testSendTextUsesOutboundProtocolEnvelope();
+  await testSendTextDoesNotInterruptIdleCurrentTurn();
   await testSendTextSettlesPlayingAudioBeforeNewInput();
   await testSendTextSettlesPendingAudioBeforeNewInput();
   testSendMotionPreviewUsesOutboundProtocolEnvelope();

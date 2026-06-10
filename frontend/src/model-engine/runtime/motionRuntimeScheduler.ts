@@ -55,11 +55,32 @@ export function createMotionRuntimeScheduler(
     window.clearTimeout(entry.audioWaitTimer);
   }
 
+  function buildStartContext(
+    entry: PendingInboundMotionPayload,
+    startReason: string,
+  ): StartPayloadContext {
+    return {
+      turnId: entry.turnId,
+      playbackTurnId: entry.playbackTurnId,
+      messageId: entry.messageId,
+      startReason,
+      queuedDelayMs: Math.max(0, Math.round(performance.now() - entry.receivedAtMs)),
+    };
+  }
+
+  function dropPendingPayload(
+    entry: PendingInboundMotionPayload,
+    startReason: string,
+  ): void {
+    clearPendingPayload(entry);
+    pendingInboundMotionPayloads.delete(entry.messageId);
+    hooks.onStartFailed?.(buildStartContext(entry, startReason));
+  }
+
   function clearAllPendingPayloads(): void {
-    for (const entry of pendingInboundMotionPayloads.values()) {
-      clearPendingPayload(entry);
+    for (const entry of Array.from(pendingInboundMotionPayloads.values())) {
+      dropPendingPayload(entry, "motion_engine_stopped");
     }
-    pendingInboundMotionPayloads.clear();
     syncPendingState();
   }
 
@@ -148,13 +169,7 @@ export function createMotionRuntimeScheduler(
     pendingInboundMotionPayloads.delete(messageId);
     clearPendingPayload(entry);
     syncPendingState();
-    const context = {
-      turnId: entry.turnId,
-      playbackTurnId: entry.playbackTurnId,
-      messageId: entry.messageId,
-      startReason,
-      queuedDelayMs: Math.max(0, Math.round(performance.now() - entry.receivedAtMs)),
-    };
+    const context = buildStartContext(entry, startReason);
     const started = hooks.onStartPayload(entry.payload, context);
     if (!started) {
       hooks.onStartFailed?.(context);
@@ -228,8 +243,7 @@ export function createMotionRuntimeScheduler(
           tryStartPendingPayload(context.messageId, "wait_audio_timeout_playback_turn_match");
           return;
         }
-        clearPendingPayload(entry);
-        pendingInboundMotionPayloads.delete(context.messageId);
+        dropPendingPayload(entry, "stale_turn_dropped");
         syncPendingState();
         return;
       }
@@ -299,12 +313,11 @@ export function createMotionRuntimeScheduler(
       return;
     }
 
-    for (const [messageId, entry] of pendingInboundMotionPayloads.entries()) {
+    for (const entry of Array.from(pendingInboundMotionPayloads.values())) {
       if (entry.turnId === currentTurnId) {
         continue;
       }
-      clearPendingPayload(entry);
-      pendingInboundMotionPayloads.delete(messageId);
+      dropPendingPayload(entry, "current_turn_changed");
     }
     syncPendingState();
   }
