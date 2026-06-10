@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { parseInboundEnvelope } from "../src/adapter-connection/inbound/inboundProtocol.js";
+import {
+  parseInboundEnvelope,
+  parseInboundEnvelopeObject,
+} from "../src/adapter-connection/inbound/inboundProtocol.js";
 
 function testInvalidJson(): void {
   const result = parseInboundEnvelope("{");
@@ -60,11 +63,60 @@ function testValidEnvelope(): void {
   assert.equal(result.envelope.type, "output.text");
 }
 
+function testParseInboundEnvelopeObjectNull(): void {
+  const result = parseInboundEnvelopeObject(null);
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.code, "invalid_envelope");
+  }
+}
+
+function testParseInboundEnvelopeObjectNonObject(): void {
+  const result = parseInboundEnvelopeObject("string");
+  assert.equal(result.ok, false);
+}
+
+function testParseInboundEnvelopeObjectValid(): void {
+  const result = parseInboundEnvelopeObject({
+    type: "system.model_sync",
+    version: "v2",
+    message_id: "m-1",
+    timestamp: "2026-05-08T00:00:00.000Z",
+    turn_id: null,
+    source: "backend",
+    payload: {},
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.envelope.type, "system.model_sync");
+  }
+}
+
+function testParseInboundEnvelopeObjectBadVersion(): void {
+  const result = parseInboundEnvelopeObject({
+    type: "system.model_sync",
+    version: "wrong",
+    message_id: "m-1",
+    timestamp: "",
+    turn_id: null,
+    source: "backend",
+    payload: {},
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.code, "version_mismatch");
+  }
+}
+
 function run(): void {
   testInvalidJson();
   testInvalidEnvelope();
   testVersionMismatch();
   testValidEnvelope();
+  testParseInboundEnvelopeObjectNull();
+  testParseInboundEnvelopeObjectNonObject();
+  testParseInboundEnvelopeObjectValid();
+  testParseInboundEnvelopeObjectBadVersion();
 
   console.log("inboundProtocol tests passed");
 }

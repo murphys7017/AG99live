@@ -26,6 +26,7 @@ import type {
   SystemHistoryDeletedPayload,
   SystemHistoryListPayload,
   SystemModelSyncPayload,
+  SystemMotionTuningSamplesStatePayload,
   SystemSemanticAxisProfileSavedPayload,
   SystemSemanticAxisProfileSaveFailedPayload,
   SystemServerInfoPayload,
@@ -111,7 +112,7 @@ type InboundPassthroughEvent =
     kind: "semantic_axis_profile_save_failed";
     envelope: ProtocolEnvelope<SystemSemanticAxisProfileSaveFailedPayload>;
   }
-  | { kind: "motion_tuning_samples_state"; envelope: ProtocolEnvelope<unknown> }
+  | { kind: "motion_tuning_samples_state"; envelope: ProtocolEnvelope<SystemMotionTuningSamplesStatePayload> }
   | { kind: "history_list"; envelope: ProtocolEnvelope<SystemHistoryListPayload> }
   | { kind: "history_created"; envelope: ProtocolEnvelope<SystemHistoryCreatedPayload> }
   | { kind: "history_data"; envelope: ProtocolEnvelope<SystemHistoryDataPayload> }

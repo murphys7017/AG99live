@@ -10,6 +10,8 @@ import type {
   SystemModelSyncPayload,
 } from "../../types/protocol.js";
 import type { SemanticAxisProfile } from "../../types/semantic-axis-profile.js";
+import { parseInboundEnvelopeObject } from "../inbound/inboundProtocol.js";
+import { parseSystemModelSyncPayload } from "../inbound/inboundPayloads.js";
 
 interface ModelSyncState {
   confName: string;
@@ -52,16 +54,22 @@ export function createModelSync(): ModelSyncInstance {
   }
 
   function applyUnknownMessage(raw: unknown): void {
-    if (!raw || typeof raw !== "object") {
+    const parsed = parseInboundEnvelopeObject(raw);
+    if (!parsed.ok) {
       return;
     }
-
-    const candidate = raw as Partial<ProtocolEnvelope<SystemModelSyncPayload>>;
-    if (candidate.type !== "system.model_sync" || !candidate.payload) {
+    if (parsed.envelope.type !== "system.model_sync") {
       return;
     }
-
-    applyModelSyncMessage(candidate as ProtocolEnvelope<SystemModelSyncPayload>);
+    const payload = parseSystemModelSyncPayload(parsed.envelope);
+    if (!payload.ok) {
+      console.warn("[ModelSync] rejected malformed model_sync from window/devtools.", payload.error);
+      return;
+    }
+    applyModelSyncMessage({
+      ...parsed.envelope,
+      payload: payload.payload,
+    });
   }
 
   const selectedModel = computed<ModelSummary | null>(() => {

@@ -15,7 +15,10 @@ export interface InboundFeatureDispatchState {
 export interface InboundFeatureDispatchDeps {
   state: InboundFeatureDispatchState;
   pushHistory: (role: string, text: string) => void;
-  modelSyncAdapter: { applyUnknownMessage: (envelope: ProtocolEnvelope<unknown>) => void } | null;
+  modelSyncAdapter: {
+    applyUnknownMessage: (envelope: ProtocolEnvelope<unknown>) => void;
+    applyModelSyncMessage: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => void;
+  } | null;
   historyAdapter: {
     applyHistoryList: (envelope: ProtocolEnvelope<unknown>) => void;
     applyHistoryCreated: (envelope: ProtocolEnvelope<unknown>) => void;
@@ -44,7 +47,7 @@ export function dispatchInboundFeatureEvent(
 ): void {
   switch (event.kind) {
     case "model_sync":
-      deps.modelSyncAdapter?.applyUnknownMessage(
+      deps.modelSyncAdapter?.applyModelSyncMessage(
         deps.rewriteModelSyncEnvelope(event.envelope),
       );
       deps.state.statusMessage = "模型能力已同步。";

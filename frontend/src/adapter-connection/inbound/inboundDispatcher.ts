@@ -88,7 +88,10 @@ export interface InboundDispatchDeps {
     getSessions: () => Array<{ segmentOrder: string[]; segments: Map<string, { messageId: string; turnId: string | null }> }>;
   } | undefined;
   pushHistory: (role: string, text: string) => void;
-  modelSyncAdapter: { applyUnknownMessage: (envelope: ProtocolEnvelope<unknown>) => void } | null;
+  modelSyncAdapter: {
+    applyUnknownMessage: (envelope: ProtocolEnvelope<unknown>) => void;
+    applyModelSyncMessage: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => void;
+  } | null;
   historyAdapter: {
     applyHistoryList: (envelope: ProtocolEnvelope<unknown>) => void;
     applyHistoryCreated: (envelope: ProtocolEnvelope<unknown>) => void;

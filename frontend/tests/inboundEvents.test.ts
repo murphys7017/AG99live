@@ -289,6 +289,63 @@ function testInvalidModelSyncPayloadReturnsProtocolError(): void {
   assert.equal(event.error.path, "payload.model_info");
 }
 
+
+
+function testModelSyncPayloadMissingSelectedModelRejected(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.model_sync", {
+      model_info: { models: [{ name: "model-a" }] },
+      conf_name: "default",
+      conf_uid: "conf-1",
+      client_uid: "client-1",
+    }),
+    defaultContext(),
+  );
+  assert.equal(event.kind, "protocol_error");
+}
+
+function testModelSyncPayloadEmptyModelsRejected(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.model_sync", {
+      model_info: { selected_model: "model-a", models: [] },
+      conf_name: "default",
+      conf_uid: "conf-1",
+      client_uid: "client-1",
+    }),
+    defaultContext(),
+  );
+  assert.equal(event.kind, "protocol_error");
+}
+
+function testModelSyncPayloadModelMissingNameRejected(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.model_sync", {
+      model_info: {
+        selected_model: "model-a",
+        models: [{ icon_url: "https://example.com/icon.png" }],
+      },
+      conf_name: "default",
+      conf_uid: "conf-1",
+      client_uid: "client-1",
+    }),
+    defaultContext(),
+  );
+  assert.equal(event.kind, "protocol_error");
+}
+
+function testValidModelSyncPayloadPasses(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.model_sync", {
+      model_info: { selected_model: "model-a", models: [{ name: "model-a" }] },
+      conf_name: "default",
+      conf_uid: "conf-1",
+      client_uid: "client-1",
+    }),
+    defaultContext(),
+  );
+  assert.equal(event.kind, "model_sync");
+}
+
 function testInvalidMotionTuningSamplesStatePayloadReturnsProtocolError(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("system.motion_tuning_samples_state", {
@@ -318,7 +375,12 @@ function run(): void {
   testInvalidOutputTextPayloadReturnsProtocolError();
   testInvalidTurnFinishedReasonReturnsProtocolError();
   testInvalidHistoryCreatedPayloadReturnsProtocolError();
+  testModelSyncPayloadMissingSelectedModelRejected();
+  testModelSyncPayloadEmptyModelsRejected();
+  testModelSyncPayloadModelMissingNameRejected();
+  testValidModelSyncPayloadPasses();
   testInvalidModelSyncPayloadReturnsProtocolError();
+
   testInvalidMotionTuningSamplesStatePayloadReturnsProtocolError();
 
   console.log("inboundEvents tests passed");

@@ -144,7 +144,10 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
         : undefined,
       pushHistory: deps.pushHistory,
       modelSyncAdapter: modelSyncAdapter
-        ? { applyUnknownMessage: (env) => modelSyncAdapter.applyUnknownMessage(env) }
+        ? {
+            applyUnknownMessage: (env) => modelSyncAdapter.applyUnknownMessage(env),
+            applyModelSyncMessage: (env) => modelSyncAdapter.applyModelSyncMessage(env),
+          }
         : null,
       historyAdapter: historyAdapter
         ? {

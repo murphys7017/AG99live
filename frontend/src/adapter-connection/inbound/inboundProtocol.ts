@@ -11,6 +11,9 @@ export type ParsedInboundEnvelope =
     envelope?: ProtocolEnvelope<unknown>;
   };
 
+/**
+ * 从 string（WebSocket 文本帧）解析入站信封。
+ */
 export function parseInboundEnvelope(rawData: string): ParsedInboundEnvelope {
   let envelope: ProtocolEnvelope<unknown>;
   try {
@@ -22,6 +25,34 @@ export function parseInboundEnvelope(rawData: string): ParsedInboundEnvelope {
       message: "收到无法解析的后端消息。",
     };
   }
+
+  return parseEnvelopeRecord(envelope as unknown as Record<string, unknown>);
+}
+
+/**
+ * 从已反序列化的 unknown 对象（window.postMessage / devtools 注入）解析入站信封。
+ * 与 parseInboundEnvelope 共享核心校验逻辑，但不走 JSON.parse。
+ */
+export function parseInboundEnvelopeObject(raw: unknown): ParsedInboundEnvelope {
+  if (!raw || typeof raw !== "object") {
+    return {
+      ok: false,
+      code: "invalid_envelope",
+      message: "收到非法协议消息（非对象）。",
+    };
+  }
+  return parseEnvelopeRecord(raw as Record<string, unknown>);
+
+}
+
+/**
+ * 核心信封校验逻辑：要求 envelope.type/version/message_id 合法。
+ * WebSocket 和 window/devtools 共用同一套校验规则。
+ */
+function parseEnvelopeRecord(
+  record: Record<string, unknown>,
+): ParsedInboundEnvelope {
+  const envelope = record as unknown as ProtocolEnvelope<unknown>;
 
   if (!envelope || typeof envelope !== "object" || typeof envelope.type !== "string") {
     return {

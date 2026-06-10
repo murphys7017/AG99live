@@ -211,34 +211,130 @@ export function parseSystemModelSyncPayload(
 ): PayloadParseResult<SystemModelSyncPayload> {
   const record = parseObjectPayload(envelope);
   if (!record.ok) return record;
-  const modelInfo = asRecord(record.payload.model_info);
-  if (!modelInfo) {
-    return invalidPayload(envelope.type, "payload.model_info", "object");
-  }
+
   const confName = requiredString(envelope.type, record.payload, "conf_name");
   if (!confName.ok) return confName;
   const confUid = requiredString(envelope.type, record.payload, "conf_uid");
   if (!confUid.ok) return confUid;
   const clientUid = requiredString(envelope.type, record.payload, "client_uid");
   if (!clientUid.ok) return clientUid;
-  const runtimeCacheErrors = record.payload.runtime_cache_errors;
-  if (runtimeCacheErrors !== undefined && !asRecord(runtimeCacheErrors)) {
-    return invalidPayload(
-      envelope.type,
-      "payload.runtime_cache_errors",
-      "object | undefined",
-    );
+
+  const modelInfoRecord = asRecord(record.payload.model_info);
+  if (!modelInfoRecord) {
+    return invalidPayload(envelope.type, "payload.model_info", "object");
   }
+
+  // Parse model_info.selected_model (required string)
+  const selectedModel = requiredString(envelope.type, modelInfoRecord, "selected_model");
+  if (!selectedModel.ok) return selectedModel;
+
+  // Parse model_info.models (required non-empty array of ModelSummary-like objects)
+  const modelsRaw = modelInfoRecord.models;
+  if (!Array.isArray(modelsRaw) || modelsRaw.length < 1) {
+    return invalidPayload(envelope.type, "payload.model_info.models", "non-empty array");
+  }
+  const models: SystemModelSyncPayload["model_info"]["models"] = [];
+  for (const item of modelsRaw) {
+    const parsed = parseModelSummarySnapshot(envelope.type, item);
+    if (!parsed.ok) return parsed;
+    models.push(parsed.payload);
+  }
+
+  // Parse runtime_cache_errors (optional object, not deep-validated per-field)
+  const runtimeCacheErrors = parseRuntimeCacheErrorsPayload(envelope.type, record.payload.runtime_cache_errors);
+
   return {
     ok: true,
     payload: {
-      model_info: modelInfo as unknown as SystemModelSyncPayload["model_info"],
-      runtime_cache_errors: runtimeCacheErrors as SystemModelSyncPayload["runtime_cache_errors"],
+      model_info: {
+        schema_version: "",
+        driver_priority: [],
+        selected_model: selectedModel.payload,
+        models,
+        available_models: [],
+        runtime_cache_errors: runtimeCacheErrors,
+      },
+      runtime_cache_errors: runtimeCacheErrors,
       conf_name: confName.payload,
       conf_uid: confUid.payload,
       client_uid: clientUid.payload,
     },
   };
+}
+
+function parseModelSummarySnapshot(
+  type: string,
+  value: unknown,
+): PayloadParseResult<SystemModelSyncPayload["model_info"]["models"][number]> {
+  const record = asRecord(value);
+  if (!record) {
+    return invalidPayload(type, "payload.model_info.models[]", "object");
+  }
+  const name = requiredString(type, record, "name");
+  if (!name.ok) return name;
+  return {
+    ok: true,
+    payload: {
+      name: name.payload,
+      root_path: optionalString(record.root_path) ?? "",
+      model_path: optionalString(record.model_path) ?? "",
+      model_url: optionalString(record.model_url) ?? "",
+      icon_url: optionalString(record.icon_url) ?? "",
+      resource_scan: asRecord(record.resource_scan) ?? undefined as never,
+      parameter_scan: asRecord(record.parameter_scan) ?? undefined as never,
+      expression_scan: asRecord(record.expression_scan) ?? undefined as never,
+      base_action_library: asRecord(record.base_action_library) ?? undefined as never,
+      parameter_action_library: asRecord(record.parameter_action_library) ?? undefined as never,
+      motion_resource_pool: asRecord(record.motion_resource_pool) ?? undefined as never,
+      constraints: { expressions: [], motions: [] },
+      semantic_axis_profile: parseSemanticAxisProfileSnapshot(record.semantic_axis_profile),
+      calibration_profile: asRecord(record.calibration_profile) ?? null,
+      voice_following_profile: asRecord(record.voice_following_profile) ?? null,
+      engine_hints: {
+        driver_priority: [],
+        recommended_mode: "idle",
+        available_channels: [],
+        base_expression_count: 0,
+        fallback_motion_count: 0,
+        motion_decomposition_level: "none",
+      },
+    } as unknown as SystemModelSyncPayload["model_info"]["models"][number],
+  };
+}
+
+function parseSemanticAxisProfileSnapshot(
+  value: unknown,
+): SystemModelSyncPayload["model_info"]["models"][number]["semantic_axis_profile"] {
+  const record = asRecord(value);
+  if (!record) return null;
+  const profileId = record.profile_id;
+  if (typeof profileId !== "string") return null;
+  const revision = record.revision;
+  if (typeof revision !== "number" || !Number.isFinite(revision)) return null;
+  const axes = record.axes;
+  if (!Array.isArray(axes)) return null;
+  // 浅校验 axes 至少包含 id 字段即可接受，深层语义校验由 feature 层负责
+  for (const axis of axes) {
+    const axisRecord = asRecord(axis);
+    if (!axisRecord || typeof axisRecord.id !== "string") return null;
+  }
+  return value as SystemModelSyncPayload["model_info"]["models"][number]["semantic_axis_profile"];
+}
+
+function parseRuntimeCacheErrorsPayload(
+  type: string,
+  value: unknown,
+): Record<string, string> | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const result: Record<string, string> = {};
+  for (const [key, val] of Object.entries(record)) {
+    if (typeof val === "string") {
+      result[key] = val;
+    }
+    // 非 string 字段直接丢弃，不整体 reject
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 export function parseMotionTuningSamplesStatePayload(
