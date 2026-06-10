@@ -1,3 +1,22 @@
+/**
+ * 段释放编排：把会话存储里的段状态变化翻译成"释放文本 / 释放音频 / 释放动作"动作。
+ *
+ * 自身不维护播放时机逻辑（那部分在 turnPlaybackOrchestratorCore 里），只做两件事：
+ *   1. 装配 core，把"释放"映射到 playbackRelease / motionPayload 端口，并在释放
+ *      成功后回写 sessionStore 的 markTextReleased / markAudioReleased / markMotionReleased
+ *      / markMotionFailed 等状态；
+ *   2. 用 Vue watch 深度观察所有会话的段，把段当前状态喂给 core（textReady /
+ *      audioReady / motionReady / outputQueueClosed / noAudioConfirmed），让 core
+ *      根据时机决策出"该释放谁"。
+ *
+ * 另外两个 watch 处理活跃会话切换：
+ *   - 切换后 core.flush()，避免上一组挂着的等待计时器影响新组；
+ *   - 切换后通知 motionPayload.notifyCurrentTurnChanged(turnId)，让动作引擎刷新归属。
+ *
+ * 边界：不发协议、不直接触发音频/动作播放、不修改 session 之外的状态；返回 flush()
+ * 用于外部强制刷新等待中的释放（如打断、断连后）。
+ */
+
 import { onScopeDispose, watch } from "vue";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
 import type { NormalizedMotionPayload } from "../model-engine/contracts";
@@ -25,6 +44,10 @@ interface TurnPlaybackOrchestratorOptions {
   motionPayload: MotionPayloadPort;
 }
 
+/**
+ * 在当前组件/作用域内装配段释放编排，并把生命周期挂到 onScopeDispose（卸载时 core.clear）。
+ * 返回 { flush } 供外部在打断/断连等场景强制清干等待中的释放。
+ */
 export function useTurnPlaybackOrchestrator(
   options: TurnPlaybackOrchestratorOptions,
 ) {

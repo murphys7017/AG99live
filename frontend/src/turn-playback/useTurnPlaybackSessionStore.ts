@@ -1,3 +1,28 @@
+/**
+ * 播放会话存储。
+ *
+ * 是文本/音频/动作三类入站材料在前端唯一的归宿，也是播放编排器、完成协调器、
+ * 桌面投影读取播放进度的事实来源。
+ *
+ * 模型：
+ *   sessions: Map<sessionId, TurnPlaybackSession>   一个 turnId 对应一份会话
+ *   每个 session 内含 segments: Map<messageId, segment>，段是 text/audio/motion
+ *   三个子状态 + turnId/messageId 的组合。
+ *
+ * 写入约定：
+ *   - 文本/音频/动作这类段级 mark* 会通过 ensureSegment 现场创建缺失段；
+ *     后端 turn/synth/finished 信号要求 session 已存在。
+ *   - phase 转移统一经 markPhaseInternal 做合法性检查；非法转移只记 warn、
+ *     不抛异常，保持事件投递不被打断。
+ *   - 大多数段写入不主动推进 phase；例外是晚到 audio 在 settling 阶段会把
+ *     session 重新拨回 playing，给补到的媒体一次释放机会。
+ *
+ * 边界：
+ *   - 不知道协议形状，也不收发任何消息。
+ *   - 不调度任何定时器；时间相关的逻辑（settlement window 等）在完成协调器里。
+ *   - 暴露的 state 是 readonly 包装，外部只能通过 mark* / setActiveSession / prune* 写入。
+ */
+
 import { reactive, readonly } from "vue";
 import type {
   TurnPlaybackSession,
@@ -25,6 +50,14 @@ interface SessionStoreState {
 
 // ── Store ──────────────────────────────────────────────────────────
 
+/**
+ * 创建一份新的会话存储实例。
+ *
+ * 内部用 Vue reactive 持有 sessions Map + activeSessionId；返回的 state 是 readonly 视图，
+ * 写入必须走 mark* / setActiveSession / pruneSessions 这些方法。整套 API 是同步的，
+ * 不做任何 I/O，可被多个调用方共享（依赖注入下，主控制器装配一份并下发到适配器、
+ * 播放编排、完成协调、投影发布等所有消费者）。
+ */
 export function useTurnPlaybackSessionStore() {
   const state = reactive<SessionStoreState>({
     sessions: new Map(),
@@ -239,6 +272,13 @@ export function useTurnPlaybackSessionStore() {
 
   // ── audio ───────────────────────────────────────────────────────
 
+  /**
+   * 收到新音频：写入 url 并把段重置为可播状态。
+   *
+   * 已经有过 url，且段已 released/started 或 terminal != "idle" 时，视为重复音频，
+   * 返回 false 由调用方决定是否上报"已忽略重复音频"。会话若处于 settling，
+   * 收到一份新 url 会把 phase 拨回 playing，给晚到媒体一次补齐机会。
+   */
   function markAudioReceived(
     turnId: string | null,
     url: string,
@@ -329,6 +369,11 @@ export function useTurnPlaybackSessionStore() {
 
   // ── motion ──────────────────────────────────────────────────────
 
+  /**
+   * 收到一份动作载荷。如果段动作已经 released/started/completed，直接 return，
+   * 不覆盖正在播或已收口的动作。写入会同时清掉 absent/failed/reason 标记，
+   * 让段重新具备"等待动作播放"的语义。
+   */
   function markMotionReceived(
     turnId: string | null,
     payload: NormalizedMotionPayload,
@@ -449,18 +494,19 @@ export function useTurnPlaybackSessionStore() {
   // ── interrupt ───────────────────────────────────────────────────
 
   /**
-   * Mark the active session as interrupted.
+   * 把活跃会话标为已中断。
    *
-   * Per the design spec:
-   *   - Does NOT create a new session
-   *   - Marks interrupted = true, backend.reason = "interrupted", phase = "failed"
-   *   - Falls back to ensureSession if no active session
+   * 实际行为：
+   *   - 没有活跃会话时直接 return（不创建新会话，不复活已结算会话）；
+   *   - 写 interrupted = true、backend.reason = "interrupted"（已有 reason 优先保留）；
+   *   - markPhaseInternal(session, "failed")；非法转移（已是终态）会只记 warn 不报错。
+   * 入参 turnId 当前不用于查找目标；调用方需要先把 activeSessionId 对齐到
+   * 目标会话，或接受"中断当前活跃会话"的语义。
    */
   function markInterrupt(
     turnId: string | null,
   ): void {
     void turnId;
-    // Interrupt must not create a new session — only operate on the active one
     const session = getActiveSession();
     if (!session) {
       return;
@@ -476,6 +522,11 @@ export function useTurnPlaybackSessionStore() {
 
   // ── phase ───────────────────────────────────────────────────────
 
+  /**
+   * 阶段转移：相同阶段直接返回 true（幂等）；非法转移只记 warn 并返回 false，
+   * 不抛异常、不改 session.phase，避免事件投递被状态机错误打断。合法转移表见
+   * session.ts/VALID_PHASE_TRANSITIONS。
+   */
   function markPhaseInternal(
     session: TurnPlaybackSession,
     phase: TurnPlaybackPhase,
@@ -505,12 +556,8 @@ export function useTurnPlaybackSessionStore() {
   // ── finalize / prune ─────────────────────────────────────────────
 
   /**
-   * Attempt to finalize the session — transition to "completed"
-   * if the internal state warrants it.
-   *
-   * The caller (completion coordinator) is still responsible for
-   * deciding *when* to call this.  This function only enforces
-   * the phase transition rules.
+   * 尝试把会话推到 completed。仅做 phase 转移（受合法性检查约束）；
+   * 调用方（完成协调器）负责决定"什么时候"调用。
    */
   function finalizeSession(
     turnId: string | null,
@@ -520,9 +567,9 @@ export function useTurnPlaybackSessionStore() {
   }
 
   /**
-   * Remove sessions that have reached a terminal phase,
-   * keeping only the active session plus a configurable number
-   * of recent terminal sessions for debugging.
+   * 清理已到终态（completed/failed）的旧会话，仅保留活跃会话和最近 keepRecent
+   * 条终态会话（按插入顺序保留新的、丢弃老的）。activeSession 永不删；
+   * 删除发生时记一条 pruned sessions 日志。
    */
   function pruneSessions(keepRecent = 3): void {
     const terminalSessions: TurnPlaybackSession[] = [];

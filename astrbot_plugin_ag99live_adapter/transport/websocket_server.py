@@ -1,3 +1,5 @@
+"""WebSocket 传输层：单前端连接 + 配套静态资源服务。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -16,6 +18,18 @@ from ..protocol.builder import (
 
 
 class WebSocketTransport:
+    """单连接的 WebSocket 传输 + 静态资源进程。
+
+    同一进程同时起两样东西：
+      - 一个 websockets.serve 单端口服务器（self._ws_server），最多一个客户端
+        （self._ws_client）；新连接在已有客户端时会回 control.error 后立刻关掉；
+      - 通过构造时注入的 static_server.start / .stop 启停 HTTP 静态资源路由，
+        用来给前端提供 /cache/audio/*.wav 等媒体文件。
+
+    自身不解析任何业务消息：所有入站文本/二进制都转手给 handle_message /
+    handle_binary_message 回调；出站只暴露 send_json。回调用法见 __init__ 形参。
+    """
+
     def __init__(
         self,
         *,
@@ -45,6 +59,12 @@ class WebSocketTransport:
         self._ws_client = None
 
     async def start(self) -> None:
+        """启动静态资源 + WebSocket 监听；直到 ws_server.wait_closed()。
+
+        启动顺序：先刷一次 runtime settings（reload_persona / reload_providers），
+        再 to_thread 起 static_server，最后 websockets.serve。CancelledError
+        与其它异常都会在退出前调 stop() 回收静态服务器与 WS 句柄，再重新抛。
+        """
         logger.debug("Desktop VTuber Adapter transport starting")
         try:
             import websockets  # type: ignore
@@ -100,6 +120,11 @@ class WebSocketTransport:
                 logger.warning("Failed to close static resource server cleanly: %s", exc)
 
     async def send_json(self, payload: dict[str, Any]) -> bool:
+        """出站发送：把 dict 序列化为 JSON 经当前 _ws_client 发出。
+
+        没有客户端时直接返回 False，不抛；发送过程中异常会清空 _ws_client 并
+        尝试 close 旧连接再返回 False。CancelledError 透传，调用方需要捕获。
+        """
         client = self._ws_client
         if client is None:
             return False
@@ -123,6 +148,20 @@ class WebSocketTransport:
             return False
 
     async def _handle_client(self, websocket) -> None:
+        """每条新连接的主循环。
+
+        行为：
+          - 若已有 _ws_client，回 control.error 后立刻关掉（单客户端契约）；
+          - 否则注册 _ws_client，发 _send_initial_messages 初始化一份快照（server_info
+            / model / motion samples / group / 可能的 start_mic）；
+          - 进入 async for raw_message：
+              bytes  → _handle_binary_payload；
+              JSON 解析失败 / 解析结果不是 dict → 发 control.error 后继续；
+              其它  → 调 handle_message；handle_message 抛错时同样回 control.error
+            而不断连（只丢这一条消息）。
+          - 退出时无论是 CancelledError / ConnectionClosedOK / ConnectionClosedError
+            / 其它，都先清 _ws_client、跑 on_disconnect 钩子再 return。
+        """
         if self._ws_client is not None:
             await websocket.send(
                 json.dumps(
@@ -213,6 +252,12 @@ class WebSocketTransport:
             )
 
     async def _send_initial_messages(self) -> None:
+        """新客户端连上后立刻广播的初始化快照。
+
+        顺序固定：refresh runtime → server_info → current_model_and_conf(force=True)
+        → motion_tuning_samples_state → group_update（成员=空、is_owner=False），
+        最后如果 auto_start_mic=True 再发 control.start_mic。
+        """
         await self._refresh_runtime_settings_async(
             reload_persona=True,
             reload_providers=True,

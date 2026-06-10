@@ -1,3 +1,19 @@
+/**
+ * 输出类入站事件着陆：把 output_text / output_audio / output_image /
+ * output_transcription 写到本地播放状态。
+ *
+ * 文本与音频要求段身份（turnId + messageId）；它们的 apply* 行为：
+ *   - 用 queuePendingAssistantTextForPlayback / queuePendingAudioForPlayback
+ *     把内容塞进 pending 队列（按 buildPendingPlaybackKey 复合键去重）；
+ *   - 通过 sessionStore.markTextReceived / markAudioReceived 把同一份内容写到
+ *     播放会话存储；
+ *   - markAudioReceived 返回 false（重复音频）时直接落"已忽略"状态，不再入队；
+ *   - 音频段 audio_url 缺失时把段标 failed:missing_audio_url，避免 pending 漂在那。
+ * 图片与转写只更新计数/快照与历史，不接入播放管线。
+ *
+ * 边界：不发协议、不持有 WebSocket、不解析信封；所有副作用通过 deps 注入。
+ */
+
 import type {
   OutputImagePayload,
   OutputTranscriptionPayload,
@@ -65,6 +81,10 @@ type InboundOutputEvent = Extract<
   | { kind: "output_transcription" }
 >;
 
+/**
+ * 输出事件的内部 switch。output_audio 是 async（保留扩展余地），其余同步执行。
+ * 不抛异常，单条事件失败不影响后续事件投递。
+ */
 export async function dispatchInboundOutputEvent(
   deps: InboundOutputDispatchDeps,
   event: InboundOutputEvent,

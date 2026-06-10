@@ -1,6 +1,6 @@
-from __future__ import annotations
+"""桌面侧 AstrBot 平台适配器 — 组件组装与 AstrBot 钩子响应入口。"""
 
-"""AstrBot platform adapter for the AG99live desktop frontend."""
+from __future__ import annotations
 
 import asyncio
 from concurrent.futures import TimeoutError as FutureTimeoutError
@@ -71,7 +71,21 @@ IMAGE_CACHE_DIR = RUNTIME_CACHE_DIR / "images"
     },
 )
 class OLVPetPlatformAdapter(Platform):
-    """Desktop adapter that bridges the AG99live frontend with AstrBot."""
+    """桌面侧 AstrBot 平台适配器，组装全部后端组件并对外暴露为单条连接。
+
+    持有的组件（按生命周期顺序）：
+      - RuntimeState / SessionState / TurnIdentityMap — 配置与轮次状态；
+      - StaticResourceServer × 2 — 静态资源 + 调试 API 端口；
+      - MediaService — 音频流缓冲 / 缓存 / 图片落地；
+      - MessageFactory — 协议消息 → AstrBotMessage；
+      - ChatBuffer / ConversationHistoryBridge / FrontendSystemCommandHandler — 业务组合；
+      - RemoteOperatorRuntime — 远程操作注入入口；
+      - WebSocketTransport — 单连接 WebSocket 入口；
+      - TurnCoordinator — 协议 + 轮次中枢（详细职责见 turn_coordinator.py）。
+
+    AstrBot 自身只通过 Platform.run / emit_message_chain / commit_event 等基类钩子
+    与它交互；前端只看到 WebSocketTransport + 静态资源 + 调试 API。
+    """
 
     def __init__(
         self,
@@ -315,6 +329,11 @@ class OLVPetPlatformAdapter(Platform):
         raw_reply_text_override: str | None = None,
         platform_extras: dict[str, Any] | None = None,
     ) -> None:
+        """AstrBot 在产出 LLM 回复后回调的入口；纯透传到 TurnCoordinator.emit_message_chain。
+
+        参数含义、发送顺序与 motion 分发策略都在 turn_coordinator 那一层；
+        本方法只负责把命名参数一一对应。
+        """
         await self.turn_coordinator.emit_message_chain(
             message_chain=message_chain,
             unified_msg_origin=unified_msg_origin,
@@ -409,6 +428,13 @@ class OLVPetPlatformAdapter(Platform):
         return await self.transport.send_json(payload)
 
     async def _handle_transport_disconnect(self) -> None:
+        """WebSocket 断开时调用的清理钩子。
+
+        顺序固定：session_state → idle，turn_identity_map 全清，调
+        speech_ingress.handle_audio_stream_interrupt 中断所有在飞的音频流，
+        media_service.clear_audio_buffer 丢弃缓冲。turn_coordinator 的轮次状态
+        在它自己的逻辑里随下一次 begin_turn 重建。
+        """
         self.session_state.reset_to_idle()
         self.turn_identity_map.clear_all()
         await self.turn_coordinator.speech_ingress.handle_audio_stream_interrupt()
@@ -419,6 +445,13 @@ class OLVPetPlatformAdapter(Platform):
         path: str,
         payload: dict[str, Any],
     ) -> tuple[int, dict[str, Any]]:
+        """调试 HTTP 端点：/api/engine/motion_payload_preview。
+
+        把请求中的 motion intent/catalog payload 规范化、校验后提交到
+        turn_coordinator.broadcast_motion_payload（用本进程事件循环的
+        run_coroutine_threadsafe 投递，5s 超时）。返回 (status_code, body)
+        让 StaticResourceServer 透传给 HTTP 响应。
+        """
         normalized_path = path.rstrip("/")
         if normalized_path not in {
             "/api/engine/motion_payload_preview",

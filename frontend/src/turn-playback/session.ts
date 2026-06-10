@@ -1,3 +1,24 @@
+/**
+ * 播放会话数据契约。
+ *
+ * 会话与段的关系：
+ *   一个 turnId        → 一个 TurnPlaybackSession（id = resolveSessionId(turnId)）
+ *   一个 messageId     → 一个 TurnPlaybackSegment（挂在 session.segments）
+ *   一个 segment 包含  → text / audio / motion 三个子状态 + turnId/messageId
+ *
+ * 会话阶段（phase）走有限状态机：
+ *   collecting → ready → playing → settling → completed
+ *                                      ↘ playing （settling 还可以回到 playing）
+ *   任意非终态阶段都可以失败到 failed。
+ *   终态：completed / failed（isTerminalPhase）；终态后不接受任何转移。
+ *
+ * 边界：
+ *   - 纯数据结构 + 构造器 + 谓词，不依赖任何 store / I/O。
+ *   - 状态写入由 useTurnPlaybackSessionStore 之类的持有者完成；本文件不变更对象。
+ *   - 段终态判定（isSegmentLocallySettled）：text.delivered && audio.terminal 非 idle &&
+ *     motion 已 absent/completed/failed 三者之一。
+ */
+
 import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
 
 // ── Phase ──────────────────────────────────────────────────────────
@@ -24,10 +45,19 @@ const TERMINAL_PHASES: ReadonlySet<TurnPlaybackPhase> = new Set([
   "failed",
 ]);
 
+/**
+ * 是否为终态阶段（completed / failed）。终态后不再接受任何阶段转移。
+ */
 export function isTerminalPhase(phase: TurnPlaybackPhase): boolean {
   return TERMINAL_PHASES.has(phase);
 }
 
+/**
+ * 阶段转移合法性查询。
+ *
+ * 终态 from 一律返回 false；其余按 VALID_PHASE_TRANSITIONS 表查询。
+ * 注意 settling → playing 是允许的（晚到媒体重新激活段时回到 playing）。
+ */
 export function isValidPhaseTransition(
   from: TurnPlaybackPhase,
   to: TurnPlaybackPhase,
@@ -48,6 +78,13 @@ export type TextReceiveMode = "replace" | "append";
 
 // ── Session sub-states ─────────────────────────────────────────────
 
+/**
+ * 段的文本子状态。
+ *   content      已收到的文本，未收到为 null
+ *   receiveMode  replace = 替换，append = 追加
+ *   released     文本是否已被播放协调器释放（推到 UI 显示）
+ *   delivered    文本是否真正显示完毕
+ */
 export interface TurnPlaybackSessionText {
   content: string | null;
   receivedAtMs: number | null;
@@ -56,6 +93,14 @@ export interface TurnPlaybackSessionText {
   delivered: boolean;
 }
 
+/**
+ * 段的音频子状态。
+ *   url        音频地址，未收到为 null
+ *   released   是否已经把音频交给播放器（pending 出队）
+ *   started    本地音频是否真正开播
+ *   terminal   播放终态：idle/completed/failed/absent，详见 AudioTerminalState
+ *   reason     terminal != "completed" 时的失败/缺失原因，仅供诊断
+ */
 export interface TurnPlaybackSessionAudio {
   url: string | null;
   receivedAtMs: number | null;
@@ -67,6 +112,16 @@ export interface TurnPlaybackSessionAudio {
   reason: string;
 }
 
+/**
+ * 段的动作子状态。
+ *
+ * 四个互斥终态：
+ *   absent     段不需要动作（无 payload）
+ *   completed  动作播放完成
+ *   failed     有 payload 但编译/启动/排队丢弃失败（reason 记录失败原因）
+ *   （以上三者任一为 true 时，本段对动作视为已结算）
+ * released/started 表示动作生命周期推进；payload 为 null 表示尚未收到任何动作意图。
+ */
 export interface TurnPlaybackSessionMotion {
   payload: NormalizedMotionPayload | null;
   receivedAtMs: number | null;
@@ -78,6 +133,13 @@ export interface TurnPlaybackSessionMotion {
   reason: string;
 }
 
+/**
+ * 后端轮次三段信号在前端的镜像。
+ *   turnStarted     是否收到 turn_started
+ *   synthFinished   是否收到 synth_finished
+ *   turnFinished    是否收到 turn_finished
+ *   success/reason  turn_finished 的成败与原因
+ */
 export interface TurnPlaybackSessionBackend {
   turnStarted: boolean;
   synthFinished: boolean;
@@ -112,7 +174,7 @@ function normalizeId(value: unknown): string {
 }
 
 /**
- * Resolve a stable session id from turnId.
+ * 由 turnId 推导出稳定的会话 id；空 turnId 返回空串（调用方自行判错）。
  */
 export function resolveSessionId(turnId: string | null): string {
   const normalizedTurn = normalizeId(turnId);
@@ -160,6 +222,9 @@ export function createEmptyMotionState(): TurnPlaybackSessionMotion {
   };
 }
 
+/**
+ * 新建一份空白段（text/audio/motion 子状态都为初始值）。
+ */
 export function createTurnPlaybackSegment(
   messageId: string,
   turnId: string | null,
@@ -174,6 +239,10 @@ export function createTurnPlaybackSegment(
   };
 }
 
+/**
+ * 新建一份空白会话；turnId 为空时直接抛错（无法解析 sessionId）。
+ * 初始 phase = collecting，segments 为空 Map。
+ */
 export function createTurnPlaybackSession(
   turnId: string | null = null,
 ): TurnPlaybackSession {
@@ -204,6 +273,10 @@ export function isSessionPlaybackComplete(session: TurnPlaybackSession): boolean
   return session.phase === "completed";
 }
 
+/**
+ * 段是否已经本地结算：text 已 delivered、audio 已到终态、motion 已 absent/completed/failed
+ * 三者之一。注意不读 backend.*，仅看本段三个子状态。
+ */
 export function isSegmentLocallySettled(segment: TurnPlaybackSegment): boolean {
   if (!segment.text.delivered) {
     return false;

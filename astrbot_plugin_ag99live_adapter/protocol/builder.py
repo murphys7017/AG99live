@@ -1,4 +1,19 @@
-"""Builders for outbound AG99live V2 protocol messages."""
+"""出站协议消息构造器。
+
+按消息类别聚合"后端 → 前端"方向的信封构造函数，每个函数都是一次纯组装：
+没有副作用，不查状态，只把入参塞进 build_message_envelope 出来一份 dict。
+
+类别（按 protocol/constants.py 里的 TYPE_* 常量分组）：
+    system.*  — 服务器信息、群组、模型同步、历史、心跳、语义轴档案、动作样本
+    output.*  — 一次回复内的文本/音频/图片/转写片段（携带 turn_id + message_id）
+    control.* — 轮次开始/结束、合成完成、中断、错误等控制信号
+
+边界：
+    - 不发送，只构造；真正的 send 由调用方完成。
+    - 不校验 payload 形状（出站方向由调用方保证）。
+    - 所有函数都把 source 写成 SOURCE_ADAPTER；其他 source（如 SOURCE_ENGINE）
+      由调用方直接走 parser.build_message_envelope。
+"""
 
 from __future__ import annotations
 

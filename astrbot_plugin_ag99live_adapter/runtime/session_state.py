@@ -1,4 +1,4 @@
-"""Single-session state machine for the AG99live V2 adapter."""
+"""单连接轮次状态机。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,17 @@ class SessionStage(str, Enum):
 
 @dataclass
 class SessionState:
-    """Small state container for a single user and a single connection."""
+    """单一 AstrBot 会话侧的轮次状态容器：stage + turn 索引 + 当前 turn_id 等。
+
+    字段语义：
+      client_uid                    端侧客户端标识（用于历史/平台事件）
+      stage                         idle → thinking → synthesizing → playing 状态机当前值
+      turn_index                    累计轮次计数（自增，不在 reset 时回退）
+      last_user_text                最近一次 begin_turn 写入的原文
+      waiting_for_playback_complete 等待前端 control.playback_finished 的标志
+      output_queue_closed           输出队列已关闭（与 control.synth_finished 配套）
+      current_turn_id               正在处理的 turn_id；idle 时为 None
+    """
 
     client_uid: str = "single-client"
     stage: SessionStage = SessionStage.IDLE
@@ -31,6 +41,11 @@ class SessionState:
         *,
         turn_id: str,
     ) -> str:
+        """开启新一轮：turn_index 自增、stage→THINKING、清两个标志位、写入 current_turn_id。
+
+        turn_id 会被 trim，空串或 None 直接 ValueError（与 turn_coordinator 强制
+        turn_id 非空一致）。返回规范化后的 current_turn_id。
+        """
         normalized_turn_id = str(turn_id or "").strip()
         if not normalized_turn_id:
             raise ValueError("turn_id is required when beginning a turn.")
@@ -46,16 +61,30 @@ class SessionState:
         self.stage = SessionStage.SYNTHESIZING
 
     def mark_playing(self) -> None:
+        """进入 PLAYING 阶段，并置 waiting_for_playback_complete=True。
+
+        此时 turn_coordinator 等待前端的 control.playback_finished；收到后由
+        mark_playback_complete 切回 idle。
+        """
         self.stage = SessionStage.PLAYING
         self.waiting_for_playback_complete = True
 
     def mark_output_queue_closed(self) -> bool:
+        """幂等关闭输出队列：首次调用返回 True，重复调用返回 False。
+
+        与 control.synth_finished 配套：第一次 close_turn_output_queue 调用时
+        允许真正发出 control.synth_finished 消息，避免重复关闭。
+        """
         if self.output_queue_closed:
             return False
         self.output_queue_closed = True
         return True
 
     def mark_playback_complete(self) -> None:
+        """完成收口：清 waiting_for_playback_complete 与 output_queue_closed，
+        stage→IDLE，current_turn_id=None。比 reset_to_idle 多一步：不需要用户
+        主动调用，与收到 control.playback_finished 配套。
+        """
         self.waiting_for_playback_complete = False
         self.output_queue_closed = False
         self.stage = SessionStage.IDLE

@@ -1,3 +1,5 @@
+"""把入站 input.text 协议消息转成 AstrBot 平台事件用的 AstrBotMessage。"""
+
 from __future__ import annotations
 
 import time
@@ -13,6 +15,14 @@ from ..protocol.parser import normalize_inbound_message
 
 
 class MessageFactory:
+    """协议消息 → AstrBotMessage 工厂。
+
+    同时承担图片冷却（_apply_image_cooldown）：当配置了冷却窗口
+    （runtime_state.image_cooldown_seconds）时，窗口外到达的一批图片整体放行，
+    窗口内到达的新图片批次整体丢弃，并在 image_diagnostics 里记录
+    reason = "cooldown_window"。
+    """
+
     def __init__(
         self,
         *,
@@ -46,6 +56,19 @@ class MessageFactory:
         raw_message: dict[str, Any],
         images: list[Any] | None = None,
     ) -> AstrBotMessage:
+        """构造一条 AstrBotMessage。
+
+        流程：
+          1. _apply_image_cooldown 过滤掉冷却窗口内的图片，余下的 accepted；
+          2. 构造 AstrBotMessage（type=FRIEND_MESSAGE, self_id="olv_pet_adapter"，
+             session_id=client_uid），Plain(text) 放在 abm.message 头部；
+          3. 每张 accepted image 走 media_service.convert_image_component_with_diagnostic，
+             成功时追加到 abm.message 并把 ref 收集到 resolved_image_inputs
+             （最终会作为 raw_message["resolved_images"]）；
+          4. 图片解析失败记 failed_image_diagnostics；
+          5. 把 dropped_image_count / image_input_diagnostics 写进 raw_message，
+             方便下游诊断与统计。
+        """
         images = images or []
         accepted_images, image_diagnostics = self._apply_image_cooldown(images)
         if images:

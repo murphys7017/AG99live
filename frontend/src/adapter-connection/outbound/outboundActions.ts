@@ -1,11 +1,11 @@
 /**
  * 适配器出站动作集合。
  *
- * 集中放"前端 → 后端"方向上的业务级请求。每个函数节奏一致：
+ * 集中放"前端 → 后端"方向上的业务级请求。用户触发的 action 通常遵循：
  * 检查 outboundClient.canSend → 维护本地轮次/播放状态 → 调用
  * outboundClient.send(type, payload, turnId) 发一条消息 → 写回 state.statusMessage
- * 与历史记录。底层 WebSocket 框架由 outboundClient.ts 负责，本文件只决定
- * "在什么时机发什么消息"。
+ * 与历史记录。少数底层回执 helper（如 playback_finished）只负责协议发送。
+ * 底层 WebSocket 框架由 outboundClient.ts 负责，本文件只决定"在什么时机发什么消息"。
  *
  * 边界：
  *   - 不直接持有 WebSocket，统一通过 OutboundActionContext.outboundClient 发送。

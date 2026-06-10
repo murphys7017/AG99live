@@ -2,12 +2,12 @@
  * 入站运行时/控制事件的落地处理。
  *
  * 处理 6 类事件：turn_started / turn_finished / interrupt / start_mic /
- * synth_finished / control_error。每个 apply* 函数都会做三件事：
- *   1. 写 deps.state 字段（statusMessage、lastError、currentTurnId、pending 队列等）
- *   2. 调用 deps.sessionStore.* 把同样的事件同步到播放会话存储
- *   3. 调用 deps.pushHistory 把一条系统/错误条目落到历史
- * 中断与 turn_finished 路径还会触发 deps.stopAudioAndSettleTurn 与
- * deps.markAudioPlaybackTerminal 把音频段就地收口，避免新旧轮次混播。
+ * synth_finished / control_error。各 apply* 函数按事件类型写 deps.state、同步
+ * sessionStore、追加历史；并非每个事件都会触碰三者。
+ *
+ * 音频收口只发生在需要它的控制路径：interrupt 会按目标 turn 调
+ * deps.stopAudioAndSettleTurn；synth_finished 会把本轮缺失音频标 absent；
+ * turn_finished 只收口 turn 状态，不直接停播或结算音频段。
  *
  * 边界：不发协议、不解析信封、不直接持有 WebSocket；所有副作用都通过 deps 注入。
  */

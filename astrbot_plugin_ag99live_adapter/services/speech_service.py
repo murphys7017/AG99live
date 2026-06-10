@@ -1,3 +1,11 @@
+"""语音输入入口：麦克风流聚合 → STT → 转写产出。
+
+只处理"前端 → 后端"方向的麦克风/语音路径；文本回复不在这里。
+可转写的完整音频段会走到 _build_message_from_audio_buffer，产出
+AstrBotMessage 并配套发 build_output_transcription（如果转写出了文字）。
+空流、丢帧、VAD 不可用或被过滤的转写可能只发控制信号或直接 return None。
+"""
+
 from __future__ import annotations
 
 import base64
@@ -66,6 +74,19 @@ TEMP_AUDIO_CLEANUP_WARNING_THRESHOLD = 5
 
 
 class SpeechIngressService:
+    """语音输入服务：聚合 PCM chunk、做 VAD 切分、调 STT、产出 AstrBotMessage。
+
+    内部维护三类状态：
+      - _audio_streams: dict[stream_id, AudioStreamState]，存正在接收的流；
+      - _pending_temp_audio_files: dict[path, PendingTempAudioFile]，延迟 N 轮后
+        回收的 STT 临时 wav 文件；
+      - _vad_turn_counters: dict[root_turn_id, int]，VAD 切分出来的子轮次自增计数。
+
+    出站时通过构造注入的 send_json 发 control_error / control_turn_finished /
+    control_interrupt / output_transcription；能形成有效转写的路径才返回
+    AstrBotMessage 交给 TurnCoordinator commit。
+    """
+
     def __init__(
         self,
         *,
@@ -86,6 +107,10 @@ class SpeechIngressService:
         self._vad_turn_counters: dict[str, int] = {}
 
     async def handle_audio_stream_start(self, message) -> None:
+        """处理 input.audio_stream_start：登记新流的状态。
+
+        没拿到 stream_id 时静默 return；已有同名流会被覆盖（用最新一次 start 的参数）。
+        """
         payload = message.payload
         stream_id = self._normalize_stream_id(payload.get("stream_id"))
         if not stream_id:
@@ -218,6 +243,15 @@ class SpeechIngressService:
         return None
 
     async def handle_audio_stream_end(self, message):
+        """处理 input.audio_stream_end：取走流、组装一轮消息。
+
+        行为分支：
+          - dropped=True → 发 terminal_turn_signal(microphone_audio_dropped) 后 return；
+          - capture_mode∈{manual, auto} 且流为 VAD 模式 → 转写前若一轮 VAD 子段都没
+            收到，发 terminal_turn_signal(microphone_audio_empty)；
+          - 否则把所有 chunks 拼成 float32 缓冲，走 _build_message_from_audio_buffer。
+        返回 None 或 AstrBotMessage；后者会被 turn_coordinator 进一步 commit。
+        """
         payload = message.payload
         stream_id = self._normalize_stream_id(payload.get("stream_id"))
         if not stream_id:
@@ -362,6 +396,12 @@ class SpeechIngressService:
         return None
 
     async def handle_audio_end(self, message):
+        """处理 input.mic_audio_end（旧非流式路径）。
+
+        drain MediaService 里按 message.turn_id 分桶的缓冲；empty 时按
+        _consume_vad_turn_counter 决定是否走 terminal_turn_signal；非空时
+        _build_message_from_audio_buffer。
+        """
         segment_id = self._resolve_audio_segment_id(message)
         dropped = bool(message.payload.get("dropped", False))
         if dropped:
@@ -602,6 +642,16 @@ class SpeechIngressService:
 
 
 def should_drop_transcription(text: str) -> tuple[bool, str]:
+    """判断一段 STT 转写是否值得继续送进 LLM。
+
+    过滤规则（任一命中就丢）：
+      - 去空白后空字符串；
+      - 有效字符（中/英/数字）少于 2 个；
+      - 字符串长度 ≥4 且非允许符号的字符占比 ≥0.45；
+      - 有效字符长度 ≥4 且单字符出现次数 ≥0.8（明显重复刷屏）；
+      - 整段是单字符重复 ≥4 次。
+    返回 (should_drop, reason)；reason 描述具体命中哪条规则。
+    """
     normalized = (text or "").strip()
     if not normalized:
         return True, "empty transcription"

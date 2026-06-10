@@ -1,3 +1,15 @@
+"""媒体服务：音频流式缓冲、文件缓存、前端图片落地。
+
+承载三类能力：
+  1. 流式音频缓冲（append_audio_chunk / drain_audio_buffer / clear_audio_buffer）：
+     接收 VAD 引擎切分的小段 float32，按 segment_id 分桶堆积，最后一次性 drain。
+  2. 音频文件缓存（cache_audio_file）：把 AstrBot 生成的任意格式音频转 wav，
+     落到 http_port 暴露的 /cache/audio/ 下，发给前端用。
+  3. 前端图片落地（convert_image_component / convert_image_component_with_diagnostic）：
+     接受 data: / base64:// / 本地路径 / http URL 四种形式，只在白名单根目录内的
+     本地文件被允许拷贝到 image_cache_dir。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -32,6 +44,13 @@ FRONTEND_IMAGE_ALLOWED_SUFFIXES = {
 
 
 class MediaService:
+    """音频流缓冲 + 缓存 + 前端图片落地。
+
+    内部以 asyncio.Lock 串行化音频缓冲读写；缓冲按 segment_id 分桶，None/空串
+    都被规范化为 "__default__"。每次 cache_audio_file 调用前会先做一次缓存
+    清理（_cleanup_audio_cache），见顶部常量。
+    """
+
     def __init__(
         self,
         *,
@@ -88,6 +107,12 @@ class MediaService:
         return normalized or "__default__"
 
     def cache_audio_file(self, source_audio_path: str) -> tuple[str, str]:
+        """把任意格式的音频文件转 wav 落到 audio_cache_dir，返回 (本地路径, http URL)。
+
+        每次调用前都触发一次 _cleanup_audio_cache。新文件名用 uuid4().hex。
+        源文件不存在时 FileNotFoundError；转码失败时包成 ValueError 抛出。
+        得到的 http URL 由 static_server 暴露，前端拉来播放和做 lip sync。
+        """
         self._cleanup_audio_cache()
 
         source_path = Path(source_audio_path)
@@ -147,6 +172,12 @@ class MediaService:
         *,
         sample_rate: int = 16000,
     ) -> str:
+        """把一段 float32 缓冲（[-1, 1]）落成单声道 16-bit PCM wav 临时文件。
+
+        路径在 AstrBot 临时目录下，文件名带 uuid4().hex。返回临时文件绝对路径；
+        调用方负责在用完后清理（SpeechIngressService 用 _pending_temp_audio_files
+        做延迟回收）。
+        """
         import wave
 
         temp_dir = get_astrbot_temp_path()
@@ -169,6 +200,12 @@ class MediaService:
         self.audio_cache_dir.mkdir(parents=True, exist_ok=True)
 
     def _cleanup_audio_cache(self) -> None:
+        """音频缓存两段清理。
+
+        先按 mtime 把超 AUDIO_CACHE_MAX_AGE_SECONDS（6h）的文件删掉；再对剩下的
+        文件按 mtime 排序，剔除超过 AUDIO_CACHE_MAX_FILES（120）个老文件，但
+        AUDIO_CACHE_TRIM_PROTECTION_SECONDS（10m）内的新文件不受数量限制保留。
+        """
         self._prepare_audio_cache_dir()
         now = time.time()
         cached_files = [

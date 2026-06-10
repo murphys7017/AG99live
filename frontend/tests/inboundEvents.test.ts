@@ -50,7 +50,7 @@ function testOutputTextUsesEnvelopeIdentity(): void {
   assert.equal(event.text, "hello");
 }
 
-function testOutputAudioFallsBackToCurrentTurn(): void {
+function testOutputAudioUsesEnvelopeIdentity(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("output.audio", {
       text: " hi ",
@@ -73,7 +73,7 @@ function testOutputAudioFallsBackToCurrentTurn(): void {
   assert.equal(event.audioUrl, "https://example.com/a.wav");
 }
 
-function testTurnFinishedFallsBackToActiveIdentity(): void {
+function testTurnFinishedFallsBackToCurrentIdentity(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("control.turn_finished", {
       success: true,
@@ -306,8 +306,8 @@ function testInvalidMotionTuningSamplesStatePayloadReturnsProtocolError(): void 
 
 function run(): void {
   testOutputTextUsesEnvelopeIdentity();
-  testOutputAudioFallsBackToCurrentTurn();
-  testTurnFinishedFallsBackToActiveIdentity();
+  testOutputAudioUsesEnvelopeIdentity();
+  testTurnFinishedFallsBackToCurrentIdentity();
   testTurnStartedDoesNotInheritCurrentIdentity();
   testInterruptUsesEnvelopeIdentity();
   testInterruptFallsBackToActiveAudioIdentity();

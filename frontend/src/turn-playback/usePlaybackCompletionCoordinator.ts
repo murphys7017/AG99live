@@ -1,3 +1,25 @@
+/**
+ * 播放完成协调器。负责本地回环到后端的最后一步：
+ *   1. 持续观察会话存储里所有段的进度（text.delivered / audio.terminal /
+ *      motion.{absent,started,completed,failed}）和后端三段信号；
+ *   2. 在合适时机调用 playbackAck.sendPlaybackFinishedForCurrentGroup（发回
+ *      control.playback_finished）并 markPhase(session, "settling")；
+ *   3. 收到后端 backend.turnFinished 后调用 finalizeCompletion → playbackAck
+ *      .clearPlaybackGroupContext + markPhase "completed"，会话至此真正闭环。
+ *
+ * 还附带管理：
+ *   - 段级 settlement window（PLAYBACK_SETTLEMENT_WINDOW_MS）：音频已终态但动作
+ *     payload 仍未到达且未起播/收口时，给晚到动作一段时间机会，超时则把段动作
+ *     markMotionAbsent，再尝试 flush；
+ *   - 已 ack 会话遇到晚到音频时反向 reopen（reopenAckedSessionForLateAudio），
+ *     允许这一段重新参与释放；
+ *   - 动作播放记录 motionPlaybackRecords（用于桌面投影/调试），同段重复记录
+ *     在 MOTION_RECORD_DEDUP_WINDOW_MS 内会覆盖头一条。
+ *
+ * 边界：不直接控制播放器、不解析信封；通过 deps（playbackAck / motionRecord /
+ * motionPlayer / sessionStore）注入所有副作用。
+ */
+
 import { shallowReadonly, ref, watch } from "vue";
 import type { ModelEnginePlanStartedEvent } from "../model-engine/runtime/contracts";
 import type { DesktopMotionPlaybackRecord } from "../types/desktop";
@@ -30,6 +52,12 @@ interface PlaybackCompletionCoordinatorOptions {
   maxMotionPlaybackRecords?: number;
 }
 
+/**
+ * 装配完成协调器。在当前组件/作用域内绑定三组 watch（音频起播通知、
+ * 文本 delivered/late-audio 触发 flush、动作 player 状态收口），返回外部可用的
+ * recordMotionPlayback（动作引擎播放成功后回调写入记录）和
+ * resetPlaybackCoordination（断连/重置时清干内部计时器和去重集合）。
+ */
 export function usePlaybackCompletionCoordinator(
   options: PlaybackCompletionCoordinatorOptions,
 ) {
@@ -86,6 +114,11 @@ export function usePlaybackCompletionCoordinator(
     }
   }
 
+  /**
+   * 清干内部状态：所有未触发的 settlement 计时器、起播通知去重集合、ack 去重集合、
+   * 活跃动作段集合。用于断连/手动重置：协调器进入"什么都没发生过"的初始态。
+   * 不写会话存储；会话本身的清理由调用方走 pruneSessions 等接口。
+   */
   function resetPlaybackCoordination(): void {
     for (const key of settlementTimers.keys()) {
       clearSettlementTimer(key);
@@ -255,6 +288,13 @@ export function usePlaybackCompletionCoordinator(
     settlementTimers.set(key, timer);
   }
 
+  /**
+   * 把动作引擎一次启动事件落到 motionPlaybackRecords，并在会话存储里
+   * markMotionStarted。preview 启动（动作实验室）不计入；动作段切换时会先把
+   * 上一段以 motion_handed_off 收口（completeMotionSegmentByKey）。
+   * 与最近一条记录指纹一致且时间差在 MOTION_RECORD_DEDUP_WINDOW_MS 内时，
+   * 用新记录覆盖头一条，避免动作引擎重试时刷出重复条目。
+   */
   function recordMotionPlayback(event: ModelEnginePlanStartedEvent): void {
     if (event.startReason === "preview") {
       return;

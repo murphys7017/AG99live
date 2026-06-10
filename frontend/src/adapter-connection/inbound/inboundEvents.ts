@@ -4,8 +4,9 @@
  * 上游 transport 已经把 socket 消息解析成 ProtocolEnvelope；本文件按 envelope.type
  * 把它折叠成 InboundAdapterEvent，并在折叠时：
  *   - 调用 inboundPayloads.* 做 payload 形状校验，失败返回 protocol_error 事件；
- *   - 把 turn_id 规范化（空串和非字符串都视为 null），若 envelope 未提供则
- *     回落到 ctx.currentTurnId / ctx.activeAudioTurnId；
+ *   - 把 turn_id 规范化（空串和非字符串都视为 null），并按事件类别选择归属：
+ *     输出/turn_finished/synth_finished 回落到 currentTurnId，interrupt 优先回落到
+ *     activeAudioTurnId，动作 payload 优先回落到 currentTurnId；turn_started 不继承；
  *   - 输出类与动作类事件强制要求非空 message_id，缺失时返回 protocol_error；
  *   - 未识别 envelope.type 返回 unhandled，由 dispatcher 走 diagnostics 上报。
  *
@@ -50,9 +51,9 @@ import {
 } from "./inboundPayloads.js";
 
 /**
- * 映射上下文：折叠时若 envelope 未带 turn_id，则按这里给出的当前轮次/活跃音频轮次
- * 兜底，避免段事件落到 null turn 而无处归属。由 createAdapterInboundRuntime 在每次
- * 折叠前现场快照构造，不由本文件持有状态。
+ * 映射上下文：折叠时给缺失 turn_id 的事件提供现场归属候选。
+ * 具体 fallback 顺序由每类事件自己决定，不在上下文层统一指定。
+ * 由 createAdapterInboundRuntime 在每次折叠前现场快照构造，不由本文件持有状态。
  */
 export interface InboundEventMappingContext {
   currentTurnId: string | null;

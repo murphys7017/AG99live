@@ -1,4 +1,16 @@
-"""V2 protocol message parser and envelope builder."""
+"""入站协议消息解析与通用信封构造。
+
+本模块只做协议层校验：
+    - 顶层信封字段（type / version / message_id / turn_id / source / timestamp）
+    - 入站消息类型必须落在 INBOUND_ALLOWED_TYPES 内
+    - 按 message_type 校验 payload 形状（_validate_payload）
+
+只关心"消息形状是否合法"，不处理任何业务语义（轮次、播放、动作）。
+业务级处理由 runtime/turn_coordinator.py 拿到 ProtocolMessage 之后完成。
+
+出站方向只暴露 build_message_envelope 一个通用底座；
+具体业务消息工厂在 protocol/builder.py 里围绕它包装。
+"""
 
 from __future__ import annotations
 
@@ -33,6 +45,13 @@ from .models import (
 def parse_inbound_message(
     raw: Mapping[str, Any],
 ) -> ProtocolMessage:
+    """解析一条入站信封并校验 payload。
+
+    成功时返回 ProtocolMessage（封装信封字段 + 规范化后的 payload + 原始 raw）。
+    任何字段缺失、类型错误、消息类型不在 INBOUND_ALLOWED_TYPES，统一抛 ProtocolError，
+    由调用方（transport 层）捕获。timestamp 缺失时用当前 UTC 时间补齐；
+    turn_id 允许为 None（_normalize_optional_string 把空串和非字符串都归一为 None）。
+    """
     if not isinstance(raw, Mapping):
         raise ProtocolError("Protocol payload must be an object.")
 
@@ -81,6 +100,12 @@ def parse_inbound_message(
 def normalize_inbound_message(
     raw: Mapping[str, Any],
 ) -> InboundMessage:
+    """把一条入站 input.text 信封规范化为 InboundMessage。
+
+    比 parse_inbound_message 多两步：限定 type 必须是 input.text，
+    且把 payload.text / payload.images 提取为 TextInputPayload。
+    非 input.text 直接 ProtocolError 拒绝。
+    """
     envelope = parse_inbound_message(raw)
     if envelope.type != TYPE_INPUT_TEXT:
         raise ProtocolError(f"Expected `{TYPE_INPUT_TEXT}`, got `{envelope.type}`")
@@ -105,6 +130,13 @@ def build_message_envelope(
     message_id: str | None = None,
     timestamp: str | None = None,
 ) -> dict[str, Any]:
+    """组装一份出站信封 dict。
+
+    只做最薄的拼装，不校验 payload 形状（出站方向由调用方保证）。
+    message_id 缺省时用 uuid4().hex 生成；timestamp 缺省时用当前 UTC 时间；
+    其他字段必须由调用方显式给出。所有业务级 build_* 工厂函数都基于此组装，
+    见 protocol/builder.py。
+    """
     if message_type not in KNOWN_MESSAGE_TYPES:
         raise ProtocolError(f"Unsupported outbound message type: {message_type}")
 

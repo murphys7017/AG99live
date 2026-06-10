@@ -1,3 +1,38 @@
+"""后端轮次编排中枢。
+
+TurnCoordinator 把"前端协议消息 ↔ AstrBot 事件总线 ↔ 出站回放"绑在一起，
+是这条链路上唯一同时持有协议侧轮次身份与业务侧轮次生命周期的对象。
+
+入站
+    1. 接收 transport 解码出的 JSON dict / 二进制帧，并在本层完成协议解析。
+    2. handle_msg 按 message.type 路由：
+         - system.*                                        → _handle_frontend_system
+         - engine.motion_intent / engine.catalog_motion    → _handle_engine_motion_payload_preview
+         - control.playback_finished                       → finalize_turn
+         - control.interrupt                               → _handle_interrupt_signal
+         - input.audio_stream_*                            → SpeechIngressService
+         - input.mic_audio_data / input.raw_audio_data     → 旧的非流式麦克风入口
+         - input.text                                      → _commit_inbound_message
+    3. 除 system.* 与 engine preview 入口外，交互类 message.type 都要求 turn_id 非空
+       （_require_interactive_turn_id）；前端 turn_id 通过 turn_identity_map 与
+       后端 turn_id 互相绑定。
+
+出站
+    4. emit_message_chain 把 AstrBot 平台回复链拆成 output.text / engine.motion_* /
+       output.image / output.audio 依次发送。
+    5. close_turn_output_queue 发 control.synth_finished。
+    6. finalize_turn → _finish_turn 在收到前端 control.playback_finished（或被打断）
+       后发 control.turn_finished 并把 session_state 切回 idle。
+
+边界
+    - 不直接读写 WebSocket：所有出站都走注入的 send_json 回调。
+    - 信封形状解析集中交给 protocol/parser.py，由本层在入口调用。
+    - 大多数出站信封交给 protocol/builder.py；engine preview/egress 少量路径直接使用
+      build_message_envelope。
+    - 不感知动作语义内部细节：动作 payload 的提取、规范化在 motion/* 与 middleware/*，
+      本中枢只决定"何时把动作 payload 广播给前端"。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -66,6 +101,13 @@ from .image_diagnostics import (
 )
 
 class TurnCoordinator:
+    """后端单连接的协议+轮次编排器。
+
+    一个 WebSocket 会话对应一个 TurnCoordinator 实例：内部以 _turn_lock 串行化轮次
+    生命周期事件，避免"上一轮没收口就被下一轮覆盖"。背景任务、轮次计时、平台动作
+    去重集合都由它持有，跨连接不共享。
+    """
+
     def __init__(
         self,
         *,
@@ -114,6 +156,12 @@ class TurnCoordinator:
         self._dispatched_platform_motion_keys: set[str] = set()
 
     async def handle_msg(self, raw_message: dict[str, Any]) -> None:
+        """入站文本协议消息的顶层路由。
+
+        先经 parse_inbound_message 做协议校验，再按 message.type 分发到各个处理分支
+        （详见模块 docstring 的入站表）。未识别类型回一条 control.error。
+        system.* 与 engine preview 入口不要求 turn_id；其余交互类消息要求 turn_id 非空。
+        """
         message = parse_inbound_message(raw_message)
 
         if message.type.startswith("system."):
@@ -179,6 +227,12 @@ class TurnCoordinator:
         )
 
     async def handle_binary_msg(self, raw_message: bytes) -> None:
+        """WebSocket 二进制帧入口：解析 AG99 麦克风音频帧并交给语音入口。
+
+        二进制路径只用于麦克风采集的 PCM16LE chunk（见 protocol/binary_audio.py）。
+        当一段采集已经收到 end 时，speech_ingress 会回传一条 message 对象，
+        本方法负责把它作为新一轮交互 commit 进去。
+        """
         frame = parse_binary_audio_frame(raw_message)
         message_obj = await self.speech_ingress.handle_audio_stream_binary_chunk(frame)
         if message_obj is not None:
@@ -194,6 +248,21 @@ class TurnCoordinator:
         raw_reply_text_override: str | None = None,
         platform_extras: dict[str, Any] | None = None,
     ) -> None:
+        """把 AstrBot 平台层产出的回复链拆成出站消息序列发给前端。
+
+        发送顺序固定为 text → motion → image → audio：
+            1. _extract_outbound_message_parts 抽出文本/图片/音频路径；
+               _extract_inline_motion_plan 剥离 inline 动作标记得到可见文本。
+            2. 若有可见文本，写聊天缓存并发 output.text。
+            3. _broadcast_platform_motion_client_objects 优先派发平台 motion client object；
+               若未派发且 motion_generation_mode 是 inline_first 且 inline_payload 是 dict，
+               直接派发 inline payload；split_after_reply/secondary 路径由上游补齐
+               platform_extras 后再走本方法。
+            4. 有图片就发 output.image。
+            5. 有音频文件就 media_service.cache_audio_file → 取 URL → 发 output.audio，
+               并把会话状态推进到 synthesizing → playing。
+        无音频时直接 mark_playing，不进入 synthesizing 阶段。
+        """
         del unified_msg_origin
         del inline_base_expression
         del inline_motion_id
@@ -335,6 +404,12 @@ class TurnCoordinator:
         self._mark_turn_playing()
 
     async def close_turn_output_queue(self) -> None:
+        """发 control.synth_finished。
+
+        借助 session_state.mark_output_queue_closed 做幂等保护：第一次调用时它会
+        返回 True 并允许发送，重复调用直接 return；老 session_state 没有该方法时
+        退化成读写 output_queue_closed 属性。current_turn_id 为 None 时不发。
+        """
         current_turn_id = self.session_state.current_turn_id
         if current_turn_id is None:
             return
@@ -372,6 +447,12 @@ class TurnCoordinator:
         success: bool = True,
         reason: str | None = None,
     ) -> None:
+        """收到 control.playback_finished 后收口本轮。
+
+        只在 session_state.waiting_for_playback_complete=True 时生效，避免把还在
+        合成中或已 idle 的轮次误结束。若信号携带的 turn_id 不属于当前轮（脏数据
+        或乱序），直接忽略。
+        """
         current_turn_id = self.session_state.current_turn_id
         if not self.session_state.waiting_for_playback_complete:
             return
@@ -446,6 +527,13 @@ class TurnCoordinator:
         text: str,
         metadata: dict[str, Any] | None = None,
     ) -> None:
+        """从后端侧主动注入一条文本作为新一轮交互（用于 remote operator 等中间件）。
+
+        等价于"前端发了一条 input.text"：分配 turn_id 前缀 remote-operator:、
+        组装一份完整信封、通过 _build_message_object 合成 message 对象、
+        再走 _commit_inbound_message 进入轮次生命周期。空文本直接 return。
+        metadata 会合并进 raw_message，供下游识别注入来源（如 ag99live_input_source）。
+        """
         normalized_text = str(text or "").strip()
         if not normalized_text:
             return
@@ -621,6 +709,15 @@ class TurnCoordinator:
         turn_id: str | None = None,
         message_id: str | None = None,
     ) -> bool:
+        """把一份动作载荷以 engine.* 出站到前端。
+
+        - schema 是 engine.motion_intent.v2/v3 时先经 normalize_motion_intent_payload 规范化；
+          规范化失败直接拒发。
+        - 根据 _resolve_engine_motion_message_type 选择信封类型（intent / catalog / 旧版 plan），
+          并按类型选择 payload 子键 (intent/motion/plan)。
+        - source 字段表明这份载荷的来源（inline、catalog、platform_extras 等），用于诊断。
+        返回 True 表示已成功提交到 send_json。
+        """
         if not isinstance(motion_payload, dict):
             return False
 
