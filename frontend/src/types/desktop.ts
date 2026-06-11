@@ -317,6 +317,10 @@ export type DesktopProfileAuthoringCommand = {
 };
 
 export interface DesktopRuntimeSnapshot {
+  /** 快照发布者标识符（窗口实例 mount 时随机生成） */
+  _publisherId?: string;
+  /** 单调递增的快照版本号（每次 publish 自增，值大的优先） */
+  _revision?: number;
   adapterAddress: string;
   desktopScreenshotOnSendEnabled: boolean;
   microphoneDeviceId: string;

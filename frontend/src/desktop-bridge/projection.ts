@@ -97,6 +97,8 @@ export interface DesktopRuntimeSnapshotInput {
 }
 
 export interface DesktopRuntimeSnapshotOutput {
+  _publisherId?: string;
+  _revision?: number;
   adapterAddress: string;
   desktopScreenshotOnSendEnabled: boolean;
   microphoneDeviceId: string;

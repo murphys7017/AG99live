@@ -57,6 +57,27 @@ PARAMETER_PLAN_SOURCES = {
     "manual",
 }
 
+# ── repair/fallback hit rate stats ─────────────────────────────────
+
+_repair_stats: dict[str, int] = {}
+
+def _incr_repair_stat(key: str) -> None:
+    _repair_stats[key] = _repair_stats.get(key, 0) + 1
+
+def get_repair_stats() -> dict:
+    total = sum(_repair_stats.values())
+    fallback_count = _repair_stats.get("fallback_used_from_pose_id", 0)
+    neutral_count = _repair_stats.get("fallback_used_neutral", 0)
+    return {
+        "total": total,
+        "counts": dict(_repair_stats),
+        "fallback_rate": round(fallback_count / max(1, total), 3),
+        "neutral_fallback_rate": round(neutral_count / max(1, total), 3),
+    }
+
+def reset_repair_stats() -> None:
+    _repair_stats.clear()
+
 
 class RealtimeMotionPlanGenerator:
     def __init__(self, *, runtime_state: Any) -> None:
@@ -694,18 +715,24 @@ def normalize_motion_intent_v3_payload(intent: Any) -> dict[str, Any]:
 
 def _normalize_duration_hint_ms(value: Any) -> int:
     if value is None:
+        _incr_repair_stat("duration_hint_defaulted")
         return DEFAULT_MOTION_INTENT_DURATION_MS
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         try:
             number = float(value)
         except (TypeError, ValueError):
+            _incr_repair_stat("duration_hint_defaulted")
             return DEFAULT_MOTION_INTENT_DURATION_MS
     else:
         number = float(value)
     if not float("-inf") < number < float("inf"):
+        _incr_repair_stat("duration_hint_defaulted")
         return DEFAULT_MOTION_INTENT_DURATION_MS
     duration_hint_ms = int(round(number))
-    return max(320, min(15000, duration_hint_ms))
+    clamped = max(320, min(15000, duration_hint_ms))
+    if clamped != duration_hint_ms:
+        _incr_repair_stat("duration_hint_clamped")
+    return clamped
 
 
 def _coerce_finite_number(value: Any) -> float | None:

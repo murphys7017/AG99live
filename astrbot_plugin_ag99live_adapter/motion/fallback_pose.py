@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from ..motion.realtime_motion_plan import _incr_repair_stat
 from ..prompts.semantic_axis_prompt import profile_prompt_axes
 
 DEFAULT_FALLBACK_POSE_ID = "neutral"
@@ -94,6 +95,8 @@ def resolve_fallback_pose(
     fallback_pose_id: Any,
 ) -> FallbackPoseResolution | None:
     normalized_id = _normalize_pose_id(fallback_pose_id)
+    if normalized_id:
+        _incr_repair_stat("fallback_resolve_requested")
     if not normalized_id:
         return None
     for candidate in build_fallback_pose_candidates(
@@ -173,6 +176,7 @@ def repair_motion_axes_with_fallback_pose(
 
 
 def build_default_neutral_pose_axes(semantic_profile: dict[str, Any]) -> dict[str, float]:
+    _incr_repair_stat("fallback_used_neutral")
     axes: dict[str, float] = {}
     for axis in profile_prompt_axes(semantic_profile):
         axis_id = str(axis.get("id") or "").strip()

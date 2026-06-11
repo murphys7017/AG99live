@@ -24,6 +24,10 @@ import {
   getActiveSegmentSnapshot,
   type SessionProjectionInput,
 } from "./projection.js";
+import {
+  nextSnapshotRevision,
+  getPublisherId,
+} from "./snapshot/runtimeSnapshot.js";
 import { cloneJson } from "../utils/cloneJson.js";
 
 type ModelSync = ReturnType<typeof useModelSync>;
@@ -206,13 +210,20 @@ export function createPetRuntimeSnapshotPublisher(
       };
   }
 
+  function publishSnapshotWithRevision(input: ReturnType<typeof buildRuntimeSnapshotInput>): void {
+    const snap = buildDesktopRuntimeSnapshot(input);
+    options.bridge.publishSnapshot({
+      ...snap,
+      _publisherId: getPublisherId(),
+      _revision: nextSnapshotRevision(),
+    });
+  }
+
   const stopRuntimeSnapshotWatch = watch(
     buildRuntimeSnapshotInput,
     (input) => {
       snapshotDebounce.schedule(() => {
-        options.bridge.publishSnapshot(
-          buildDesktopRuntimeSnapshot(input),
-        );
+        publishSnapshotWithRevision(input);
       });
     },
     { deep: true, immediate: true },
@@ -220,9 +231,7 @@ export function createPetRuntimeSnapshotPublisher(
 
   function publishRuntimeSnapshot(): void {
     snapshotDebounce.cancel();
-    options.bridge.publishSnapshot(
-      buildDesktopRuntimeSnapshot(buildRuntimeSnapshotInput()),
-    );
+    publishSnapshotWithRevision(buildRuntimeSnapshotInput());
   }
 
   function publishMotionTuningSamples(): void {
