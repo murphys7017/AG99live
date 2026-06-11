@@ -912,12 +912,18 @@ async def _schedule_motion_from_interaction_result(
         )
 
     if policy.should_schedule and plugin_hints_payload is None:
-        plugin_hints_payload, plugin_hints_reason = await _build_realtime_or_default_motion_payload(
-            event,
-            bundle.runtime_state,
-            assistant_text=assistant_text,
-            reason=plugin_hints_reason,
-        )
+        if phase == "immediate" and reply_plan is not None and reply_plan.route_mode == "self_reply":
+            plugin_hints_payload, plugin_hints_reason = _build_default_motion_payload(
+                bundle.runtime_state,
+                reason=_append_resolution_reason(plugin_hints_reason, "self_reply_default_pose"),
+            )
+        else:
+            plugin_hints_payload, plugin_hints_reason = await _build_realtime_or_default_motion_payload(
+                event,
+                bundle.runtime_state,
+                assistant_text=assistant_text,
+                reason=plugin_hints_reason,
+            )
         if plugin_hints_payload is not None:
             _call_event_method(event, "set_extra", "ag99live_split_motion_scheduled", True)
             return _MotionScheduleAttempt(
@@ -1372,9 +1378,9 @@ def _resolve_immediate_phase_policy(
                 reason="self_reply_managed_by_inline_compat",
             )
         return _MotionSchedulePolicy(
-            should_schedule=False,
-            source=None,
-            reason="self_reply_default_pose",
+            should_schedule=True,
+            source="interaction_result_immediate",
+            reason="schedule_self_reply_immediate",
         )
     if reply_plan.route_mode in {"hybrid", "delegate_to_core"}:
         return _MotionSchedulePolicy(
