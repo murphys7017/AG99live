@@ -13,24 +13,23 @@ except Exception:  # pragma: no cover - fallback for local dry runs outside Astr
     logger = logging.getLogger(__name__)
 
 from .motion_scan import build_motion_resource_pool, decompose_motion
+
+SCAN_SCHEMA_VERSION = "live2d_scan.v1"
+
 from .channel_specs import (
-    ADAPTIVE_PARAMETER_PROFILE_SCHEMA_VERSION,
-    BASE_ACTION_LIBRARY_SCHEMA_VERSION,
     BASE_EXPRESSION_NAMES,
+    BASE_ACTION_LIBRARY_SCHEMA_VERSION,
     CALIBRATION_PROFILE_SCHEMA_VERSION,
     CORE_BASE_ACTION_CHANNEL_SPECS,
     MODEL_SUMMARY_SCHEMA_VERSION,
     PARAMETER_ACTION_LIBRARY_SCHEMA_VERSION,
-    PARAMETER_ACTION_MAX_ATOMS_PER_PARAMETER,
+    ADAPTIVE_PARAMETER_PROFILE_SCHEMA_VERSION,
     SPECIAL_EXPRESSION_KEYWORDS,
     STANDARD_CHANNEL_SPECS,
     VOICE_FOLLOWING_CHANNEL_SPECS,
     VOICE_FOLLOWING_PROFILE_SCHEMA_VERSION,
+    PARAMETER_ACTION_MAX_ATOMS_PER_PARAMETER,
 )
-
-SCAN_SCHEMA_VERSION = "live2d_scan.v1"
-
-
 def scan_live2d_models(
     *,
     live2ds_dir: Path,
