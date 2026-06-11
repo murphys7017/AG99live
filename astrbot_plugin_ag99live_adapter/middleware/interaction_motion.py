@@ -1372,9 +1372,9 @@ def _resolve_immediate_phase_policy(
                 reason="self_reply_managed_by_inline_compat",
             )
         return _MotionSchedulePolicy(
-            should_schedule=False,
-            source=None,
-            reason="self_reply_default_pose",
+            should_schedule=True,
+            source="interaction_result_immediate",
+            reason="schedule_self_reply_immediate",
         )
     if reply_plan.route_mode in {"hybrid", "delegate_to_core"}:
         return _MotionSchedulePolicy(
