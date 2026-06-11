@@ -50,6 +50,7 @@ export interface AdapterInboundRuntimeDeps {
     messageId: string,
   ) => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
+  playMotionPreviewPayload?: (payload: unknown) => boolean;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
 }
 
@@ -191,6 +192,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
         });
       },
       findActiveAudioSegment: () => deps.findActiveAudioSegment(),
+      playMotionPreviewPayload: deps.playMotionPreviewPayload,
       normalizeMotionPayload: (payload) => normalizeMotionPayload(payload),
       applyInboundMotionPayload: (ctx, envelope) =>
         applyInboundMotionPayload(ctx, envelope),

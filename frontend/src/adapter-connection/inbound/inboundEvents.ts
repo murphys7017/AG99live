@@ -173,6 +173,10 @@ export type InboundAdapterEvent =
     messageId: string;
     turnId: string | null;
     envelope: ProtocolEnvelope<Record<string, unknown>>;
+  }
+  | {
+    kind: "engine_motion_preview";
+    envelope: ProtocolEnvelope<Record<string, unknown>>;
   };
 
 /**
@@ -407,6 +411,11 @@ export function mapInboundEnvelopeToEvent(
         envelope: envelope as ProtocolEnvelope<Record<string, unknown>>,
       };
     }
+    case INBOUND_MESSAGE_TYPES.ENGINE_MOTION_PREVIEW:
+      return {
+        kind: "engine_motion_preview",
+        envelope: envelope as ProtocolEnvelope<Record<string, unknown>>,
+      };
     default:
       return {
         kind: "unhandled",

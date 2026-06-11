@@ -56,6 +56,10 @@ type InboundMotionEvent = Extract<
   InboundAdapterEvent,
   { kind: "engine_motion_payload" }
 >;
+type InboundMotionPreviewEvent = Extract<
+  InboundAdapterEvent,
+  { kind: "engine_motion_preview" }
+>;
 
 export function dispatchInboundMotionEvent(
   deps: InboundMotionDispatchDeps,
@@ -78,4 +82,41 @@ export function dispatchInboundMotionEvent(
       event.messageId,
     );
   }
+}
+
+export function dispatchInboundMotionPreviewEvent(
+  deps: InboundMotionDispatchDeps & {
+    playMotionPreviewPayload?: (payload: unknown) => boolean;
+  },
+  event: InboundMotionPreviewEvent,
+): void {
+  const payload = event.envelope.payload;
+  const rawPlan =
+    payload && typeof payload === "object" && "motion" in payload
+      ? payload.motion
+      : payload && typeof payload === "object" && "intent" in payload
+        ? payload.intent
+        : null;
+
+  if (!rawPlan || typeof rawPlan !== "object") {
+    deps.state.lastError = "收到无效的动作预览载荷（缺少 intent/motion 对象）。";
+    deps.state.statusMessage = deps.state.lastError;
+    deps.pushHistory("error", deps.state.lastError);
+    return;
+  }
+
+  deps.state.inboundMotionPlan = rawPlan;
+  deps.state.inboundMotionPlanTurnId = null;
+  deps.state.inboundMotionPlanReceivedAtMs = performance.now();
+
+  const played = deps.playMotionPreviewPayload?.(rawPlan) ?? false;
+  if (!played) {
+    deps.state.lastError = "动作预览播放失败。";
+    deps.state.statusMessage = deps.state.lastError;
+    deps.pushHistory("error", deps.state.lastError);
+    return;
+  }
+
+  deps.state.statusMessage = "已播放动作预览。";
+  deps.pushHistory("system", deps.state.statusMessage);
 }

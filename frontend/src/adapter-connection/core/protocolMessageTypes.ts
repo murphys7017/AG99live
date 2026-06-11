@@ -20,6 +20,7 @@ export const INBOUND_MESSAGE_TYPES = {
   CONTROL_ERROR: "control.error",
   ENGINE_MOTION_INTENT: "engine.motion_intent",
   ENGINE_CATALOG_MOTION: "engine.catalog_motion",
+  ENGINE_MOTION_PREVIEW: "engine.motion_preview",
 } as const;
 
 export const OUTBOUND_MESSAGE_TYPES = {

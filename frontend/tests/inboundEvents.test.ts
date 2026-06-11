@@ -183,6 +183,23 @@ function testEngineCatalogMotionMapsAsMotionPayload(): void {
   assert.equal(event.messageId, "m-1");
 }
 
+function testEngineMotionPreviewDoesNotRequireSegmentMessageId(): void {
+  const envelope = makeEnvelope("engine.motion_preview", {
+    mode: "preview",
+    motion_type: "engine.motion_intent",
+    intent: {
+      schema_version: "engine.motion_intent.v3",
+    },
+  }, {
+    turnId: null,
+  });
+  envelope.message_id = "";
+
+  const event = mapInboundEnvelopeToEvent(envelope, defaultContext());
+
+  assert.equal(event.kind, "engine_motion_preview");
+}
+
 function testMissingSegmentMessageIdReturnsProtocolError(): void {
   const envelopeA = makeEnvelope("output.text", {
     text: " first ",
@@ -405,6 +422,7 @@ function run(): void {
   testInterruptFallsBackToActiveAudioIdentity();
   testEngineMotionFallsBackCurrentThenAudioTurn();
   testEngineCatalogMotionMapsAsMotionPayload();
+  testEngineMotionPreviewDoesNotRequireSegmentMessageId();
   testMissingSegmentMessageIdReturnsProtocolError();
   testUnhandledTypeReturnsUnhandled();
   testInvalidOutputTextPayloadReturnsProtocolError();

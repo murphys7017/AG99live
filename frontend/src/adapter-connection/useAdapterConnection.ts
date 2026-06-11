@@ -94,6 +94,7 @@ export interface AdapterConnectionInstance {
   saveMotionTuningSample: (sample: DesktopMotionTuningSample) => boolean;
   deleteMotionTuningSample: (sampleId: string) => boolean;
   sendMotionPayloadPreview: (payload: unknown) => boolean;
+  setMotionPreviewHandler: (handler: ((payload: unknown) => boolean) | null) => void;
   sendPlaybackFinishedForCurrentGroup: (
     turnId: string | null,
     success: boolean,
@@ -132,6 +133,7 @@ export function createAdapterConnection(
   const sessionStore = options.sessionStore;
   let historyAdapter: AdapterHistory | null = null;
   let motionTuningAdapter: AdapterMotionTuning | null = null;
+  let motionPreviewHandler: ((payload: unknown) => boolean) | null = null;
 
   function buildMessageEnvelope<TPayload>(
     type: string,
@@ -222,6 +224,7 @@ export function createAdapterConnection(
     queueAudioForPlayback: (url, turnId, messageId) =>
       queueAudioForPlayback(url, turnId, messageId),
     findActiveAudioSegment: () => findActiveAudioSegment(),
+    playMotionPreviewPayload: (payload) => motionPreviewHandler?.(payload) ?? false,
     startMicrophoneCapture: (origin) => startMicrophoneCapture(origin),
   });
 
@@ -524,6 +527,12 @@ export function createAdapterConnection(
     ]);
   }
 
+  function setMotionPreviewHandler(
+    handler: ((payload: unknown) => boolean) | null,
+  ): void {
+    motionPreviewHandler = handler;
+  }
+
   async function sendPlaybackFinished(
     turnId: string | null,
     success: boolean,
@@ -592,6 +601,7 @@ export function createAdapterConnection(
     saveMotionTuningSample,
     deleteMotionTuningSample,
     sendMotionPayloadPreview,
+    setMotionPreviewHandler,
     sendPlaybackFinishedForCurrentGroup: sendPlaybackFinished,
     clearPlaybackGroupContext,
     releaseAssistantTextForPlayback,

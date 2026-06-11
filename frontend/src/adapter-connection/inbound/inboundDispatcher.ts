@@ -7,7 +7,7 @@
  *   - inboundFeatureDispatcher      model_sync / 语义轴档案 / 动作样本 / 历史
  *   - inboundOutputDispatcher       output_text / output_audio / output_image / output_transcription
  *   - inboundRuntimeDispatcher      turn_started / turn_finished / interrupt / start_mic / synth_finished / control_error
- *   - inboundMotionDispatcher       engine_motion_payload
+ *   - inboundMotionDispatcher       engine_motion_payload / engine_motion_preview
  * protocol_error 和 unhandled 走 inboundProtocolDiagnostics 上报。
  *
  * 自身不写状态、不发协议、不调用任何业务行为，只做 switch + forward；状态写回
@@ -31,6 +31,7 @@ import type { NormalizedMotionPayload } from "../../model-engine/contracts.js";
 import { dispatchInboundConnectionEvent } from "./inboundConnectionDispatcher.js";
 import { dispatchInboundFeatureEvent } from "./inboundFeatureDispatcher.js";
 import { dispatchInboundMotionEvent } from "./inboundMotionDispatcher.js";
+import { dispatchInboundMotionPreviewEvent } from "./inboundMotionDispatcher.js";
 import { dispatchInboundOutputEvent } from "./inboundOutputDispatcher.js";
 import {
   reportInboundProtocolError,
@@ -118,6 +119,7 @@ export interface InboundDispatchDeps {
   // text / audio queue
   queuePendingAssistantTextForPlayback: (map: Map<string, PendingAssistantTextItem>, text: string, turnId: string | null, messageId: string) => void;
   queuePendingAudioForPlayback: (map: Map<string, PendingAudioItem>, url: string, turnId: string | null, messageId: string) => void;
+  playMotionPreviewPayload?: (payload: unknown) => boolean;
   // motion
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   normalizeMotionPayload: (payload: unknown) => { ok: true; payload: NormalizedMotionPayload } | { ok: false };
@@ -189,6 +191,9 @@ export async function dispatchInboundEvent(
       return;
     case "engine_motion_payload":
       dispatchInboundMotionEvent(deps, event);
+      return;
+    case "engine_motion_preview":
+      dispatchInboundMotionPreviewEvent(deps, event);
       return;
     case "unhandled":
       reportUnhandledInboundEnvelope(deps, event.envelope);

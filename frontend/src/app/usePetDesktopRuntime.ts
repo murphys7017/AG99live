@@ -99,6 +99,13 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       markMotionFailed: (turnId, messageId, reason) => sessionStore.markMotionFailed(turnId, messageId, reason),
     },
   });
+  adapter.setMotionPreviewHandler((payload) => {
+    const localPlayed = modelEngine.playPreviewPayload(payload);
+    if (!localPlayed) {
+      console.warn("[AG99live] Remote motion preview playback failed to start.");
+    }
+    return localPlayed;
+  });
 
   useTurnPlaybackOrchestrator({
     sessionStore,
