@@ -1,6 +1,11 @@
 import type {
   ProtocolEnvelope,
+  SystemHistoryCreatedPayload,
+  SystemHistoryDataPayload,
+  SystemHistoryDeletedPayload,
+  SystemHistoryListPayload,
   SystemModelSyncPayload,
+  SystemMotionTuningSamplesStatePayload,
   SystemSemanticAxisProfileSavedPayload,
   SystemSemanticAxisProfileSaveFailedPayload,
 } from "../../types/protocol.js";
@@ -20,12 +25,12 @@ export interface InboundFeatureDispatchDeps {
     applyModelSyncMessage: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => void;
   } | null;
   historyAdapter: {
-    applyHistoryList: (envelope: ProtocolEnvelope<unknown>) => void;
-    applyHistoryCreated: (envelope: ProtocolEnvelope<unknown>) => void;
-    applyHistoryData: (envelope: ProtocolEnvelope<unknown>) => void;
-    applyHistoryDeleted: (envelope: ProtocolEnvelope<unknown>) => void;
+    applyHistoryList: (envelope: ProtocolEnvelope<SystemHistoryListPayload>) => void;
+    applyHistoryCreated: (envelope: ProtocolEnvelope<SystemHistoryCreatedPayload>) => void;
+    applyHistoryData: (envelope: ProtocolEnvelope<SystemHistoryDataPayload>) => void;
+    applyHistoryDeleted: (envelope: ProtocolEnvelope<SystemHistoryDeletedPayload>) => void;
   } | null;
-  motionTuningAdapter: { applyMotionTuningSamplesState: (envelope: ProtocolEnvelope<unknown>) => void } | null;
+  motionTuningAdapter: { applyMotionTuningSamplesState: (envelope: ProtocolEnvelope<SystemMotionTuningSamplesStatePayload>) => void } | null;
   rewriteModelSyncEnvelope: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => ProtocolEnvelope<SystemModelSyncPayload>;
 }
 

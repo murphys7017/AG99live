@@ -17,7 +17,12 @@
 
 import type {
   ProtocolEnvelope,
+  SystemHistoryCreatedPayload,
+  SystemHistoryDataPayload,
+  SystemHistoryDeletedPayload,
+  SystemHistoryListPayload,
   SystemModelSyncPayload,
+  SystemMotionTuningSamplesStatePayload,
 } from "../../types/protocol.js";
 import type { InboundAdapterEvent, InboundEventMappingContext } from "./inboundEvents.js";
 import { mapInboundEnvelopeToEvent } from "./inboundEvents.js";
@@ -93,12 +98,12 @@ export interface InboundDispatchDeps {
     applyModelSyncMessage: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => void;
   } | null;
   historyAdapter: {
-    applyHistoryList: (envelope: ProtocolEnvelope<unknown>) => void;
-    applyHistoryCreated: (envelope: ProtocolEnvelope<unknown>) => void;
-    applyHistoryData: (envelope: ProtocolEnvelope<unknown>) => void;
-    applyHistoryDeleted: (envelope: ProtocolEnvelope<unknown>) => void;
+    applyHistoryList: (envelope: ProtocolEnvelope<SystemHistoryListPayload>) => void;
+    applyHistoryCreated: (envelope: ProtocolEnvelope<SystemHistoryCreatedPayload>) => void;
+    applyHistoryData: (envelope: ProtocolEnvelope<SystemHistoryDataPayload>) => void;
+    applyHistoryDeleted: (envelope: ProtocolEnvelope<SystemHistoryDeletedPayload>) => void;
   } | null;
-  motionTuningAdapter: { applyMotionTuningSamplesState: (envelope: ProtocolEnvelope<unknown>) => void } | null;
+  motionTuningAdapter: { applyMotionTuningSamplesState: (envelope: ProtocolEnvelope<SystemMotionTuningSamplesStatePayload>) => void } | null;
   // url rewriting
   rewriteModelSyncEnvelope: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => ProtocolEnvelope<SystemModelSyncPayload>;
   rewriteSocketUrl: (rawUrl: string) => string;

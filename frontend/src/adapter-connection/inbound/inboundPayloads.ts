@@ -240,8 +240,9 @@ export function parseSystemModelSyncPayload(
     models.push(parsed.payload);
   }
 
-  // Parse runtime_cache_errors (optional object, not deep-validated per-field)
+  // Parse runtime_cache_errors (optional object)
   const runtimeCacheErrors = parseRuntimeCacheErrorsPayload(envelope.type, record.payload.runtime_cache_errors);
+  if (!runtimeCacheErrors.ok) return runtimeCacheErrors;
 
   return {
     ok: true,
@@ -252,9 +253,9 @@ export function parseSystemModelSyncPayload(
         selected_model: selectedModel.payload,
         models,
         available_models: [],
-        runtime_cache_errors: runtimeCacheErrors,
+        runtime_cache_errors: runtimeCacheErrors.payload,
       },
-      runtime_cache_errors: runtimeCacheErrors,
+      runtime_cache_errors: runtimeCacheErrors.payload,
       conf_name: confName.payload,
       conf_uid: confUid.payload,
       client_uid: clientUid.payload,
@@ -272,33 +273,31 @@ function parseModelSummarySnapshot(
   }
   const name = requiredString(type, record, "name");
   if (!name.ok) return name;
+
+  // 校验必要字段后保留原始对象，不重建空壳。
+  // 后端返回的复杂字段（engine_hints、constraints、resource_scan 等）
+  // 由业务层按 ModelSummary 类型读取，parser 只保证 name 存在。
+  // URL 字段做基本文本清洗。
+  const model: Record<string, unknown> = { ...record };
+  model.name = name.payload;
+
+  // 浅校验 semantic_axis_profile 结构完整性
+  const parsedProfile = parseSemanticAxisProfileSnapshot(record.semantic_axis_profile);
+  if (parsedProfile !== null || record.semantic_axis_profile === undefined || record.semantic_axis_profile === null) {
+    model.semantic_axis_profile = parsedProfile;
+  }
+
+  // voice_following_profile 只需是 object | null
+  if (record.voice_following_profile !== undefined && record.voice_following_profile !== null) {
+    const vf = asRecord(record.voice_following_profile);
+    if (!vf) {
+      return invalidPayload(type, "payload.model_info.models[].voice_following_profile", "object | null");
+    }
+  }
+
   return {
     ok: true,
-    payload: {
-      name: name.payload,
-      root_path: optionalString(record.root_path) ?? "",
-      model_path: optionalString(record.model_path) ?? "",
-      model_url: optionalString(record.model_url) ?? "",
-      icon_url: optionalString(record.icon_url) ?? "",
-      resource_scan: asRecord(record.resource_scan) ?? undefined as never,
-      parameter_scan: asRecord(record.parameter_scan) ?? undefined as never,
-      expression_scan: asRecord(record.expression_scan) ?? undefined as never,
-      base_action_library: asRecord(record.base_action_library) ?? undefined as never,
-      parameter_action_library: asRecord(record.parameter_action_library) ?? undefined as never,
-      motion_resource_pool: asRecord(record.motion_resource_pool) ?? undefined as never,
-      constraints: { expressions: [], motions: [] },
-      semantic_axis_profile: parseSemanticAxisProfileSnapshot(record.semantic_axis_profile),
-      calibration_profile: asRecord(record.calibration_profile) ?? null,
-      voice_following_profile: asRecord(record.voice_following_profile) ?? null,
-      engine_hints: {
-        driver_priority: [],
-        recommended_mode: "idle",
-        available_channels: [],
-        base_expression_count: 0,
-        fallback_motion_count: 0,
-        motion_decomposition_level: "none",
-      },
-    } as unknown as SystemModelSyncPayload["model_info"]["models"][number],
+    payload: { ...model } as unknown as SystemModelSyncPayload["model_info"]["models"][number],
   };
 }
 
@@ -324,9 +323,14 @@ function parseSemanticAxisProfileSnapshot(
 function parseRuntimeCacheErrorsPayload(
   type: string,
   value: unknown,
-): Record<string, string> | undefined {
+): PayloadParseResult<Record<string, string> | undefined> {
+  if (value === undefined || value === null) {
+    return { ok: true, payload: undefined };
+  }
   const record = asRecord(value);
-  if (!record) return undefined;
+  if (!record) {
+    return invalidPayload(type, "payload.runtime_cache_errors", "object | undefined");
+  }
   const result: Record<string, string> = {};
   for (const [key, val] of Object.entries(record)) {
     if (typeof val === "string") {
@@ -334,7 +338,7 @@ function parseRuntimeCacheErrorsPayload(
     }
     // 非 string 字段直接丢弃，不整体 reject
   }
-  return Object.keys(result).length > 0 ? result : undefined;
+  return { ok: true, payload: Object.keys(result).length > 0 ? result : undefined };
 }
 
 export function parseMotionTuningSamplesStatePayload(
