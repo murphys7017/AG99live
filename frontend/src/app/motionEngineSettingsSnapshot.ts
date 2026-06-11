@@ -15,6 +15,7 @@ export function applyMotionEngineSettingsSnapshot(
     return;
   }
   target.motionIntensityScale = normalized.motionIntensityScale;
+  target.live2dRenderDprCap = normalized.live2dRenderDprCap;
   target.axisIntensityScale = {
     ...normalized.axisIntensityScale,
   };

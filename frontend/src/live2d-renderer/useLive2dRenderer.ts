@@ -9,11 +9,11 @@ import {
   type Ref,
 } from "vue";
 import type { ModelSummary } from "../types/protocol";
+import type { ModelEngineSettings } from "../model-engine/settings";
 
 type RenderStatus = "idle" | "loading" | "ready" | "error";
 
 const LIVE2D_CORE_SCRIPT_ID = "ag99live-live2d-core";
-const LIVE2D_RENDER_DPR_CAP = 1.25;
 
 let live2dCorePromise: Promise<void> | null = null;
 
@@ -91,7 +91,10 @@ function ensureLive2DCoreLoaded(): Promise<void> {
   return live2dCorePromise;
 }
 
-export function useLive2dRenderer(selectedModel: Ref<ModelSummary | null>) {
+export function useLive2dRenderer(
+  selectedModel: Ref<ModelSummary | null>,
+  settings: Ref<ModelEngineSettings>,
+) {
   const containerRef = ref<HTMLDivElement | null>(null);
   const canvasRef = ref<HTMLCanvasElement | null>(null);
   const renderStatus = ref<RenderStatus>("idle");
@@ -132,7 +135,10 @@ export function useLive2dRenderer(selectedModel: Ref<ModelSummary | null>) {
     const rect = container.getBoundingClientRect();
     const width = Math.max(rect.width, 1);
     const height = Math.max(rect.height, 1);
-    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, LIVE2D_RENDER_DPR_CAP));
+    const dprCap = Number.isFinite(settings.value.live2dRenderDprCap)
+      ? Math.max(1, settings.value.live2dRenderDprCap)
+      : 1.25;
+    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, dprCap));
     const nextCanvasWidth = Math.round(width * dpr);
     const nextCanvasHeight = Math.round(height * dpr);
     const changed =
@@ -246,6 +252,13 @@ export function useLive2dRenderer(selectedModel: Ref<ModelSummary | null>) {
       await loadModel(selectedModel.value);
     },
     { immediate: true },
+  );
+
+  watch(
+    () => settings.value.live2dRenderDprCap,
+    () => {
+      forceLive2DRedraw();
+    },
   );
 
   onBeforeUnmount(async () => {

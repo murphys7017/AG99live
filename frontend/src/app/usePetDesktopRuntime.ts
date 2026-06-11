@@ -17,6 +17,7 @@ import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRunti
 import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
 import { cloneModelEngineSettings } from "../model-engine/settings";
+import type { ModelEngineSettings } from "../model-engine/settings";
 import { usePlaybackCompletionCoordinator } from "../turn-playback/usePlaybackCompletionCoordinator";
 import { useTurnPlaybackOrchestrator } from "../turn-playback/useTurnPlaybackOrchestrator";
 import { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore";
@@ -36,6 +37,7 @@ import { isTerminalPhase } from "../turn-playback/session";
 export interface PetDesktopRuntime {
   sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>;
   selectedModel: ReturnType<typeof createModelSync>["selectedModel"];
+  motionEngineSettings: ModelEngineSettings;
   stageMessage: ComputedRef<string>;
   showContextMenu: ReturnType<typeof useDesktopContextMenu>["showContextMenu"];
 }
@@ -293,6 +295,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const runtime: PetDesktopRuntime = {
     sessionStore,
     selectedModel,
+    motionEngineSettings,
     stageMessage,
     showContextMenu,
   };

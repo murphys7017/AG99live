@@ -143,6 +143,7 @@ export interface DesktopBaseActionPreview {
 export interface DesktopMotionEngineSettings {
   motionIntensityScale: number;
   axisIntensityScale: Record<string, number>;
+  live2dRenderDprCap: number;
 }
 
 export interface DesktopMotionCompileDiagnostics {

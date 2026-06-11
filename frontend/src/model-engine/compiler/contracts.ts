@@ -26,7 +26,7 @@ export interface CompileOptions {
   targetDurationMs?: number | null;
   speechActive?: boolean;
   source?: string;
-  settings?: ModelEngineSettings;
+  settings?: Partial<ModelEngineSettings>;
 }
 
 export interface CompileDiagnostics {

@@ -1,12 +1,17 @@
 export interface ModelEngineSettings {
   motionIntensityScale: number;
   axisIntensityScale: Record<string, number>;
+  live2dRenderDprCap: number;
 }
 
 export const DEFAULT_MOTION_INTENSITY_SCALE = 1.35;
 export const MIN_MOTION_INTENSITY_SCALE = 0.5;
 export const MAX_MOTION_INTENSITY_SCALE = 2.5;
 export const MOTION_INTENSITY_SCALE_STEP = 0.05;
+export const DEFAULT_LIVE2D_RENDER_DPR_CAP = 1.25;
+export const MIN_LIVE2D_RENDER_DPR_CAP = 1;
+export const MAX_LIVE2D_RENDER_DPR_CAP = 2.5;
+export const LIVE2D_RENDER_DPR_CAP_STEP = 0.25;
 
 export const MIN_AXIS_INTENSITY_SCALE = 0;
 export const MAX_AXIS_INTENSITY_SCALE = 2.5;
@@ -19,6 +24,7 @@ export function buildDefaultModelEngineSettings(): ModelEngineSettings {
   return {
     motionIntensityScale: DEFAULT_MOTION_INTENSITY_SCALE,
     axisIntensityScale: buildDefaultAxisIntensityScale(),
+    live2dRenderDprCap: DEFAULT_LIVE2D_RENDER_DPR_CAP,
   };
 }
 
@@ -41,6 +47,15 @@ export function normalizeMotionIntensityScale(value: unknown): number {
     DEFAULT_MOTION_INTENSITY_SCALE,
     MIN_MOTION_INTENSITY_SCALE,
     MAX_MOTION_INTENSITY_SCALE,
+  );
+}
+
+export function normalizeLive2dRenderDprCap(value: unknown): number {
+  return normalizeScale(
+    value,
+    DEFAULT_LIVE2D_RENDER_DPR_CAP,
+    MIN_LIVE2D_RENDER_DPR_CAP,
+    MAX_LIVE2D_RENDER_DPR_CAP,
   );
 }
 
@@ -67,20 +82,24 @@ export function normalizeModelEngineSettings(value: unknown): ModelEngineSetting
     ? value as {
       motionIntensityScale?: unknown;
       axisIntensityScale?: unknown;
+      live2dRenderDprCap?: unknown;
     }
     : {};
   return {
     motionIntensityScale: normalizeMotionIntensityScale(raw.motionIntensityScale),
     axisIntensityScale: normalizeAxisIntensityScale(raw.axisIntensityScale),
+    live2dRenderDprCap: normalizeLive2dRenderDprCap(raw.live2dRenderDprCap),
   };
 }
 
 export function cloneModelEngineSettings(
-  settings: ModelEngineSettings,
+  settings: Partial<ModelEngineSettings>,
 ): ModelEngineSettings {
+  const normalized = normalizeModelEngineSettings(settings);
   return {
-    motionIntensityScale: settings.motionIntensityScale,
-    axisIntensityScale: { ...settings.axisIntensityScale },
+    motionIntensityScale: normalized.motionIntensityScale,
+    axisIntensityScale: { ...normalized.axisIntensityScale },
+    live2dRenderDprCap: normalized.live2dRenderDprCap,
   };
 }
 
@@ -89,6 +108,9 @@ export function modelEngineSettingsEqual(
   right: ModelEngineSettings,
 ): boolean {
   if (left.motionIntensityScale !== right.motionIntensityScale) {
+    return false;
+  }
+  if (left.live2dRenderDprCap !== right.live2dRenderDprCap) {
     return false;
   }
 

@@ -10,6 +10,9 @@ import {
   MAX_MOTION_INTENSITY_SCALE,
   MIN_MOTION_INTENSITY_SCALE,
   MOTION_INTENSITY_SCALE_STEP,
+  MAX_LIVE2D_RENDER_DPR_CAP,
+  MIN_LIVE2D_RENDER_DPR_CAP,
+  LIVE2D_RENDER_DPR_CAP_STEP,
   cloneModelEngineSettings,
 } from "../model-engine/settings";
 import { applyMotionEngineSettingsSnapshot } from "../app/motionEngineSettingsSnapshot";
@@ -269,6 +272,9 @@ export function useSettingsWindow() {
     motionIntensityMin: MIN_MOTION_INTENSITY_SCALE,
     motionIntensityMax: MAX_MOTION_INTENSITY_SCALE,
     motionIntensityStep: MOTION_INTENSITY_SCALE_STEP,
+    live2dRenderDprCapMin: MIN_LIVE2D_RENDER_DPR_CAP,
+    live2dRenderDprCapMax: MAX_LIVE2D_RENDER_DPR_CAP,
+    live2dRenderDprCapStep: LIVE2D_RENDER_DPR_CAP_STEP,
     applyAddress,
     connectAdapter,
     disconnectAdapter,

@@ -23,6 +23,9 @@ const {
   motionIntensityMin,
   motionIntensityMax,
   motionIntensityStep,
+  live2dRenderDprCapMin,
+  live2dRenderDprCapMax,
+  live2dRenderDprCapStep,
   applyAddress,
   connectAdapter,
   disconnectAdapter,
@@ -126,6 +129,39 @@ onMounted(() => {
         <p v-if="microphoneDeviceStatus" class="settings-card__hint">
           {{ microphoneDeviceStatus }}
         </p>
+      </article>
+
+      <article class="settings-card settings-card--wide">
+        <div class="settings-card__header">
+          <div>
+            <p class="settings-card__eyebrow">渲染</p>
+            <h2>Live2D 清晰度</h2>
+          </div>
+          <span class="settings-card__badge">
+            x{{ formatScale(motionEngineSettings.live2dRenderDprCap) }}
+          </span>
+        </div>
+
+        <div class="settings-slider">
+          <div class="settings-slider__header">
+            <div>
+              <strong>渲染分辨率上限</strong>
+              <p>数值越高越清晰，也会增加显卡负载。</p>
+            </div>
+            <span class="settings-slider__value">
+              x{{ formatScale(motionEngineSettings.live2dRenderDprCap) }}
+            </span>
+          </div>
+          <input
+            v-model.number="motionEngineSettings.live2dRenderDprCap"
+            class="settings-slider__input"
+            type="range"
+            :min="live2dRenderDprCapMin"
+            :max="live2dRenderDprCapMax"
+            :step="live2dRenderDprCapStep"
+            @input="applyMotionEngineSettings"
+          />
+        </div>
       </article>
 
       <article class="settings-card settings-card--wide">

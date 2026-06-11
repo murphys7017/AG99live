@@ -98,7 +98,7 @@ export interface MotionRuntimeSchedulerDependencies {
 
 export interface MotionStartDependencies {
   getSelectedModel: () => ModelSummary | null;
-  getSettings: () => ModelEngineSettings;
+  getSettings: () => Partial<ModelEngineSettings>;
   playPlan: (
     plan: unknown,
     model: ModelSummary | null,
