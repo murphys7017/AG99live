@@ -248,13 +248,11 @@ export function parseSystemModelSyncPayload(
     ok: true,
     payload: {
       model_info: {
-        schema_version: "",
-        driver_priority: [],
+        ...modelInfoRecord,
         selected_model: selectedModel.payload,
         models,
-        available_models: [],
         runtime_cache_errors: runtimeCacheErrors.payload,
-      },
+      } as SystemModelSyncPayload["model_info"],
       runtime_cache_errors: runtimeCacheErrors.payload,
       conf_name: confName.payload,
       conf_uid: confUid.payload,
