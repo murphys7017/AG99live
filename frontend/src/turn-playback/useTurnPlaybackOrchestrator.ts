@@ -137,7 +137,7 @@ export function useTurnPlaybackOrchestrator(
       for (const session of options.sessionStore.getSessions()) {
         if (session.phase === "completed" || session.phase === "failed") {
           for (const segmentId of session.segmentOrder) {
-            core.clearSegment(segmentId);
+            core.clearSegment(session.turnId, segmentId);
           }
           continue;
         }
@@ -145,7 +145,7 @@ export function useTurnPlaybackOrchestrator(
         for (const segmentId of session.segmentOrder) {
           const candidate = session.segments.get(segmentId);
           if (candidate && isSegmentLocallySettled(candidate)) {
-            core.clearSegment(candidate.messageId);
+            core.clearSegment(candidate.turnId, candidate.messageId);
           }
         }
 

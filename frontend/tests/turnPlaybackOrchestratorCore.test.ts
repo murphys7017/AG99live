@@ -225,6 +225,24 @@ function testDifferentMessageGroupsDoNotCrossRelease(): void {
   assert.deepEqual(harness.events, []);
 }
 
+function testSameMessageIdDifferentTurnsDoNotShareGroup(): void {
+  const harness = createHarness();
+
+  harness.core.markTextReady("msg-1", "turn-a");
+  harness.core.markAudioReady("msg-1", "turn-b");
+  harness.core.markMotionReady("msg-1", "turn-b", "motion-b", 10);
+
+  assert.deepEqual(harness.events, []);
+
+  harness.core.markTextReady("msg-1", "turn-b");
+
+  assert.deepEqual(harness.events, [
+    "text:msg-1:turn-b",
+    "motion:motion-b:msg-1:turn-b",
+    "audio:msg-1:turn-b",
+  ]);
+}
+
 function testMissingIdentifiersDoNotShareUnknownGroup(): void {
   const harness = createHarness();
 
@@ -245,7 +263,7 @@ function testClearSegmentRemovesReleasedGroup(): void {
   harness.core.markTextReady("msg-1", "turn-1");
   assert.equal(harness.core.getGroupCount(), 1);
 
-  harness.core.clearSegment("msg-1");
+  harness.core.clearSegment("turn-1", "msg-1");
   assert.equal(harness.core.getGroupCount(), 0);
 
   harness.advanceTo(TEXT_ONLY_RELEASE_WAIT_MS);
@@ -262,6 +280,7 @@ function run(): void {
   testLateAudioAfterTextReleaseDoesNotReleaseTextAgain();
   testNoAudioWithMotionReleasesTextAndMotion();
   testDifferentMessageGroupsDoNotCrossRelease();
+  testSameMessageIdDifferentTurnsDoNotShareGroup();
   testMissingIdentifiersDoNotShareUnknownGroup();
   testClearSegmentRemovesReleasedGroup();
   console.log("turnPlaybackOrchestratorCore tests passed");

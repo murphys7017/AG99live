@@ -44,10 +44,22 @@ export function createMotionRuntimeScheduler(
 ) {
   const pendingInboundMotionPayloads = new Map<string, PendingInboundMotionPayload>();
 
+  function buildPendingMotionKey(
+    turnId: string | null,
+    messageId: string,
+  ): string {
+    const normalizedTurnId = normalizeTurnId(turnId) ?? "anonymous";
+    const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
+    if (!normalizedMessageId) {
+      throw new Error("Pending motion payload requires a non-empty messageId.");
+    }
+    return `${normalizedTurnId}::${normalizedMessageId}`;
+  }
+
   function syncPendingState(): void {
     hooks.onPendingStateChanged(
       pendingInboundMotionPayloads.size,
-      pendingInboundMotionPayloads.keys().next().value ?? "",
+      pendingInboundMotionPayloads.values().next().value?.messageId ?? "",
     );
   }
 
@@ -73,7 +85,7 @@ export function createMotionRuntimeScheduler(
     startReason: string,
   ): void {
     clearPendingPayload(entry);
-    pendingInboundMotionPayloads.delete(entry.messageId);
+    pendingInboundMotionPayloads.delete(buildPendingMotionKey(entry.turnId, entry.messageId));
     hooks.onStartFailed?.(buildStartContext(entry, startReason));
   }
 
@@ -105,13 +117,20 @@ export function createMotionRuntimeScheduler(
         if (!segment || !segment.audio.started || segment.audio.terminal !== "idle") {
           continue;
         }
+        const segmentTurnId = normalizeTurnId(segment.turnId);
         if (normalizedMessageId) {
-          if (segment.messageId === normalizedMessageId) {
+          const turnMatches = Boolean(
+            (normalizedTurnId && segmentTurnId === normalizedTurnId)
+            || (normalizedPlaybackTurnId && segmentTurnId === normalizedPlaybackTurnId),
+          );
+          if (
+            segment.messageId === normalizedMessageId
+            && (!normalizedTurnId && !normalizedPlaybackTurnId || turnMatches)
+          ) {
             return segment;
           }
           continue;
         }
-        const segmentTurnId = normalizeTurnId(segment.turnId);
         if (normalizedTurnId && segmentTurnId === normalizedTurnId) {
           return segment;
         }
@@ -160,13 +179,18 @@ export function createMotionRuntimeScheduler(
     return findStartedSegment(messageId, turnId, playbackTurnId) !== null;
   }
 
-  function tryStartPendingPayload(messageId: string, startReason: string): boolean {
-    const entry = pendingInboundMotionPayloads.get(messageId);
+  function tryStartPendingPayload(
+    turnId: string | null,
+    messageId: string,
+    startReason: string,
+  ): boolean {
+    const key = buildPendingMotionKey(turnId, messageId);
+    const entry = pendingInboundMotionPayloads.get(key);
     if (!entry) {
       return false;
     }
 
-    pendingInboundMotionPayloads.delete(messageId);
+    pendingInboundMotionPayloads.delete(key);
     clearPendingPayload(entry);
     syncPendingState();
     const context = buildStartContext(entry, startReason);
@@ -199,14 +223,15 @@ export function createMotionRuntimeScheduler(
       return;
     }
 
-    const existing = pendingInboundMotionPayloads.get(context.messageId);
+    const pendingKey = buildPendingMotionKey(normalizedTurnId, context.messageId);
+    const existing = pendingInboundMotionPayloads.get(pendingKey);
     if (existing) {
       console.info("[ModelEngine] replacing pending motion payload for turn.", {
         turnId: normalizedTurnId,
         messageId: context.messageId,
       });
       clearPendingPayload(existing);
-      pendingInboundMotionPayloads.delete(context.messageId);
+      pendingInboundMotionPayloads.delete(pendingKey);
     }
 
     const entry: PendingInboundMotionPayload = {
@@ -219,7 +244,7 @@ export function createMotionRuntimeScheduler(
     };
 
     entry.audioWaitTimer = window.setTimeout(() => {
-      const latest = pendingInboundMotionPayloads.get(context.messageId);
+      const latest = pendingInboundMotionPayloads.get(pendingKey);
       if (!latest || latest !== entry) {
         return;
       }
@@ -240,7 +265,7 @@ export function createMotionRuntimeScheduler(
           && (normalizeTurnId(entry.playbackTurnId) === currentPlaybackTurnId
             || normalizeTurnId(entry.playbackTurnId) === audioPlaybackTurnId)
         ) {
-          tryStartPendingPayload(context.messageId, "wait_audio_timeout_playback_turn_match");
+          tryStartPendingPayload(entry.turnId, entry.messageId, "wait_audio_timeout_playback_turn_match");
           return;
         }
         dropPendingPayload(entry, "stale_turn_dropped");
@@ -248,10 +273,10 @@ export function createMotionRuntimeScheduler(
         return;
       }
 
-      tryStartPendingPayload(context.messageId, "wait_audio_timeout");
+      tryStartPendingPayload(entry.turnId, entry.messageId, "wait_audio_timeout");
     }, MOTION_SYNC_WAIT_FOR_AUDIO_MS);
 
-    pendingInboundMotionPayloads.set(context.messageId, entry);
+    pendingInboundMotionPayloads.set(pendingKey, entry);
     syncPendingState();
     hooks.onPendingStatus("动作已排队，等待音频起播。");
     console.info("[ModelEngine] queued motion payload.", {
@@ -271,7 +296,7 @@ export function createMotionRuntimeScheduler(
       ?? null;
 
     if (activeAudioMessageId === context.messageId) {
-      tryStartPendingPayload(context.messageId, "audio_already_playing");
+      tryStartPendingPayload(entry.turnId, entry.messageId, "audio_already_playing");
     }
   }
 
@@ -280,8 +305,26 @@ export function createMotionRuntimeScheduler(
     messageId: string | null = null,
   ): void {
     const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
+    const normalizedTurnId = normalizeTurnId(turnId);
     if (normalizedMessageId) {
-      const started = tryStartPendingPayload(normalizedMessageId, "audio_playing_event");
+      let started = false;
+      if (normalizedTurnId) {
+        started = tryStartPendingPayload(
+          normalizedTurnId,
+          normalizedMessageId,
+          "audio_playing_event",
+        );
+      } else {
+        for (const entry of Array.from(pendingInboundMotionPayloads.values())) {
+          if (entry.messageId === normalizedMessageId) {
+            started = tryStartPendingPayload(
+              entry.turnId,
+              entry.messageId,
+              "audio_playing_event",
+            ) || started;
+          }
+        }
+      }
       console.info("[ModelEngine] audio playback start notification handled.", {
         turnId,
         messageId: normalizedMessageId,
@@ -290,14 +333,13 @@ export function createMotionRuntimeScheduler(
       });
       return;
     }
-    const normalizedTurnId = normalizeTurnId(turnId);
     if (!normalizedTurnId) {
       return;
     }
     let started = false;
     for (const entry of Array.from(pendingInboundMotionPayloads.values())) {
       if (entry.turnId === normalizedTurnId) {
-        started = tryStartPendingPayload(entry.messageId, "audio_playing_event") || started;
+        started = tryStartPendingPayload(entry.turnId, entry.messageId, "audio_playing_event") || started;
       }
     }
     console.info("[ModelEngine] audio playback start notification handled.", {

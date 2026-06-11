@@ -18,6 +18,11 @@ let mockNowMs = 1000;
 let nextTimerId = 1;
 const timers = new Map<number, () => void>();
 
+function resetTimers(): void {
+  timers.clear();
+  nextTimerId = 1;
+}
+
 window.setTimeout = ((handler: TimerHandler, _timeout?: number) => {
   const id = nextTimerId++;
   timers.set(id, () => {
@@ -103,6 +108,7 @@ function createHarness(session: ModelEnginePlaybackSession) {
 }
 
 function testEndedAudioDoesNotCountAsSpeechActiveOrDurationTarget(): void {
+  resetTimers();
   const { scheduler } = createHarness(buildSession("completed"));
 
   assert.equal(scheduler.isSpeechActiveForPayload("msg-1", "turn-1", "turn-1"), false);
@@ -110,6 +116,7 @@ function testEndedAudioDoesNotCountAsSpeechActiveOrDurationTarget(): void {
 }
 
 function testQueuedPlaybackTurnIdIsNormalized(): void {
+  resetTimers();
   const { scheduler, started } = createHarness(buildSession("completed"));
 
   scheduler.queueInboundPayload(buildPayload(), {
@@ -129,6 +136,7 @@ function testQueuedPlaybackTurnIdIsNormalized(): void {
 }
 
 function testDroppedPendingPayloadReportsStartFailure(): void {
+  resetTimers();
   const { scheduler, started, failed } = createHarness(buildSession("completed"));
 
   scheduler.queueInboundPayload(buildPayload(), {
@@ -147,10 +155,160 @@ function testDroppedPendingPayloadReportsStartFailure(): void {
   assert.equal(failed[0].startReason, "current_turn_changed");
 }
 
+function testSameMessageIdDifferentTurnsStartByCompositeIdentity(): void {
+  resetTimers();
+  const session = buildSession("completed");
+  const started: StartPayloadContext[] = [];
+  const scheduler = createMotionRuntimeScheduler(
+    {
+      getCurrentTurnId: () => "turn-1",
+      sessionStore: {
+        getActiveSession: () => session,
+        getSessionByTurnId: (turnId) => ({
+          ...session,
+          id: `turn:${turnId ?? ""}`,
+          turnId,
+          segmentOrder: ["shared-msg"],
+          segments: new Map([
+            [
+              "shared-msg",
+              {
+                messageId: "shared-msg",
+                turnId,
+                audio: {
+                  released: true,
+                  started: false,
+                  startedAtMs: null,
+                  durationMs: null,
+                  terminal: "idle",
+                },
+              },
+            ],
+          ]),
+        }),
+      },
+    },
+    {
+      onPendingStateChanged: () => {},
+      onPendingStatus: () => {},
+      onStartPayload: (_payload, context) => {
+        started.push(context);
+        return true;
+      },
+    },
+  );
+
+  scheduler.queueInboundPayload(buildPayload(), {
+    messageId: "shared-msg",
+    turnId: "turn-a",
+    playbackTurnId: "turn-a",
+    receivedAtMs: 900,
+  });
+  scheduler.queueInboundPayload(buildPayload(), {
+    messageId: "shared-msg",
+    turnId: "turn-b",
+    playbackTurnId: "turn-b",
+    receivedAtMs: 910,
+  });
+
+  scheduler.notifyAudioPlaybackStarted("turn-b", "shared-msg");
+
+  assert.equal(started.length, 1);
+  assert.equal(started[0].turnId, "turn-b");
+
+  scheduler.notifyAudioPlaybackStarted("turn-a", "shared-msg");
+
+  assert.equal(started.length, 2);
+  assert.equal(started[1].turnId, "turn-a");
+}
+
+function testActiveAudioLookupRequiresMatchingTurnWhenMessageIdIsShared(): void {
+  resetTimers();
+  const activeSession: ModelEnginePlaybackSession = {
+    id: "turn:turn-active",
+    turnId: "turn-active",
+    segmentOrder: ["shared-msg"],
+    segments: new Map([
+      [
+        "shared-msg",
+        {
+          messageId: "shared-msg",
+          turnId: "turn-active",
+          audio: {
+            released: true,
+            started: true,
+            startedAtMs: 800,
+            durationMs: 2000,
+            terminal: "idle",
+          },
+        },
+      ],
+    ]),
+  };
+  const targetSession: ModelEnginePlaybackSession = {
+    id: "turn:turn-target",
+    turnId: "turn-target",
+    segmentOrder: ["shared-msg"],
+    segments: new Map([
+      [
+        "shared-msg",
+        {
+          messageId: "shared-msg",
+          turnId: "turn-target",
+          audio: {
+            released: true,
+            started: false,
+            startedAtMs: null,
+            durationMs: null,
+            terminal: "idle",
+          },
+        },
+      ],
+    ]),
+  };
+  const started: StartPayloadContext[] = [];
+  const scheduler = createMotionRuntimeScheduler(
+    {
+      getCurrentTurnId: () => "turn-target",
+      sessionStore: {
+        getActiveSession: () => activeSession,
+        getSessionByTurnId: (turnId) =>
+          turnId === "turn-target" ? targetSession : activeSession,
+      },
+    },
+    {
+      onPendingStateChanged: () => {},
+      onPendingStatus: () => {},
+      onStartPayload: (_payload, context) => {
+        started.push(context);
+        return true;
+      },
+    },
+  );
+
+  scheduler.queueInboundPayload(buildPayload(), {
+    messageId: "shared-msg",
+    turnId: "turn-target",
+    playbackTurnId: "turn-target",
+    receivedAtMs: 900,
+  });
+
+  assert.equal(started.length, 0);
+
+  scheduler.notifyAudioPlaybackStarted("turn-active", "shared-msg");
+  assert.equal(started.length, 0);
+
+  scheduler.notifyAudioPlaybackStarted("turn-target", "shared-msg");
+  assert.equal(started.length, 1);
+  assert.equal(started[0].turnId, "turn-target");
+}
+
 function run(): void {
   testEndedAudioDoesNotCountAsSpeechActiveOrDurationTarget();
   testQueuedPlaybackTurnIdIsNormalized();
   testDroppedPendingPayloadReportsStartFailure();
+  testSameMessageIdDifferentTurnsStartByCompositeIdentity();
+  testActiveAudioLookupRequiresMatchingTurnWhenMessageIdIsShared();
   console.log("motionRuntimeScheduler tests passed");
 }
 

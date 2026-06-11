@@ -674,6 +674,43 @@ async function testInterruptStoppedMarksMotionFailed(): Promise<void> {
     "interrupt should mark motion as failed");
 }
 
+async function testRecordMotionPlaybackPrefersEventTurnSession(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.markTextReceived("turn-1", "A", "shared-msg");
+  h.sessionStore.setActiveSession("turn-2");
+  h.sessionStore.markTurnStarted("turn-2");
+  h.sessionStore.markPhase("turn-2", "ready");
+  h.sessionStore.markPhase("turn-2", "playing");
+  h.sessionStore.markTextReceived("turn-2", "B", "shared-msg");
+  h.sessionStore.markMotionReceived(
+    "turn-1",
+    { kind: "semantic_intent", intent: {} as never },
+    "shared-msg",
+  );
+  h.sessionStore.markMotionReceived(
+    "turn-2",
+    { kind: "semantic_intent", intent: {} as never },
+    "shared-msg",
+  );
+
+  h.coordinator.recordMotionPlayback({
+    messageId: "shared-msg", turnId: "turn-2", playbackTurnId: "turn-2",
+    model: null, payloadKind: "semantic_intent", startReason: "test",
+    queuedDelayMs: 0, diagnostics: null, playerMessage: "playing",
+    runId: "shared-turn-2",
+    plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
+  });
+
+  assert.equal(
+    h.sessionStore.getSession("turn-1")?.segments.get("shared-msg")?.motion.started,
+    false,
+  );
+  assert.equal(
+    h.sessionStore.getSession("turn-2")?.segments.get("shared-msg")?.motion.started,
+    true,
+  );
+}
+
 async function testLateAudioReopenAndCompleteOnce(): Promise<void> {
   const h = createHarness();
   h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
@@ -729,6 +766,7 @@ async function run(): Promise<void> {
   await testStaleRunIdDoesNotCorruptCurrentSegment();
   await testMultiSegmentMotionCompletionsAreSegmentScoped();
   await testInterruptStoppedMarksMotionFailed();
+  await testRecordMotionPlaybackPrefersEventTurnSession();
   await testLateAudioReopenAndCompleteOnce();
   await testLateAudioAfterNoAudioAckReopensSettlingSession();
   console.log("playbackCompletionCoordinator tests passed");

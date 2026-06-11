@@ -108,6 +108,20 @@ export function usePlaybackCompletionCoordinator(
     return session && segment ? { session, segment } : null;
   }
 
+  function findSessionForMotionEvent(
+    event: ModelEnginePlanStartedEvent,
+  ): TurnPlaybackSession | undefined {
+    for (const turnId of [event.turnId, event.playbackTurnId]) {
+      const session = options.sessionStore.getSession(turnId);
+      if (session?.segments.has(event.messageId)) {
+        return session;
+      }
+    }
+    return options.sessionStore.getSessions().find((candidate) =>
+      candidate.segmentOrder.some((segmentId) => segmentId === event.messageId),
+    );
+  }
+
   function clearSettlementTimer(key: string): void {
     if (settlementTimers.has(key)) {
       clearSchedule(settlementTimers.get(key));
@@ -301,10 +315,7 @@ export function usePlaybackCompletionCoordinator(
       return;
     }
 
-    const session =
-      options.sessionStore.getSessions().find((candidate) =>
-        candidate.segmentOrder.some((segmentId) => segmentId === event.messageId),
-      );
+    const session = findSessionForMotionEvent(event);
     if (session) {
       const key = segmentKey(session.id, event.messageId);
       if (currentMotionSegmentKey && currentMotionSegmentKey !== key) {

@@ -42,13 +42,15 @@ export interface TurnPlaybackOrchestratorCoreOptions {
 }
 
 export function resolveTurnPlaybackGroupKey(
+  turnId: string | null,
   messageId: string,
 ): string {
+  const normalizedTurnId = typeof turnId === "string" ? turnId.trim() : "";
   const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
   if (!normalizedMessageId) {
     throw new Error("Turn playback group requires a non-empty messageId.");
   }
-  return `segment:${normalizedMessageId}`;
+  return `segment:${normalizedTurnId || "anonymous"}:${normalizedMessageId}`;
 }
 
 export function createTurnPlaybackOrchestratorCore(
@@ -64,7 +66,7 @@ export function createTurnPlaybackOrchestratorCore(
     messageId: string,
     turnId: string | null,
   ): PendingTurnPlaybackGroup {
-    const key = resolveTurnPlaybackGroupKey(messageId);
+    const key = resolveTurnPlaybackGroupKey(turnId, messageId);
     const existing = groups.get(key);
     if (existing) {
       existing.turnId = existing.turnId ?? turnId;
@@ -294,8 +296,8 @@ export function createTurnPlaybackOrchestratorCore(
         evaluateGroup(group, "manual_flush");
       }
     },
-    clearSegment: (messageId: string) => {
-      const group = groups.get(resolveTurnPlaybackGroupKey(messageId));
+    clearSegment: (turnId: string | null, messageId: string) => {
+      const group = groups.get(resolveTurnPlaybackGroupKey(turnId, messageId));
       if (!group) {
         return;
       }
