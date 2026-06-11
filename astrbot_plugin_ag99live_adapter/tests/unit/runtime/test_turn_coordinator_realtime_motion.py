@@ -1076,6 +1076,22 @@ def test_broadcast_motion_payload_uses_intent_key_for_motion_intent(
     assert "plan" not in envelope["payload"]
 
 
+def test_build_engine_motion_preview_uses_preview_envelope() -> None:
+    builder = importlib.import_module("astrbot_plugin_ag99live_adapter.protocol.builder")
+
+    envelope = builder.build_engine_motion_preview(
+        motion_payload=_build_valid_motion_intent(),
+        motion_type="engine.motion_intent",
+        mode="preview",
+        source="test.debug",
+    )
+
+    assert envelope["type"] == "engine.motion_preview"
+    assert envelope["turn_id"] is None
+    assert envelope["payload"]["motion_type"] == "engine.motion_intent"
+    assert "intent" in envelope["payload"]
+
+
 def test_handle_engine_motion_payload_preview_rejects_missing_intent_key(
     install_fake_astrbot,
     monkeypatch,

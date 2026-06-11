@@ -34,8 +34,15 @@ from .motion.realtime_motion_plan import (
     normalize_motion_intent_payload,
     validate_motion_intent_payload,
 )
-from .protocol.builder import build_system_motion_tuning_samples_state
-from .protocol.constants import TYPE_ENGINE_MOTION_INTENT
+from .protocol.builder import (
+    build_engine_motion_preview,
+    build_system_motion_tuning_samples_state,
+)
+from .protocol.constants import (
+    TYPE_ENGINE_CATALOG_MOTION,
+    TYPE_ENGINE_MOTION_INTENT,
+    TYPE_ENGINE_MOTION_PREVIEW,
+)
 from .motion.catalog_motion import (
     normalize_catalog_motion_payload,
     validate_catalog_motion_payload,
@@ -447,10 +454,9 @@ class OLVPetPlatformAdapter(Platform):
     ) -> tuple[int, dict[str, Any]]:
         """调试 HTTP 端点：/api/engine/motion_payload_preview。
 
-        把请求中的 motion intent/catalog payload 规范化、校验后提交到
-        turn_coordinator.broadcast_motion_payload（用本进程事件循环的
-        run_coroutine_threadsafe 投递，5s 超时）。返回 (status_code, body)
-        让 StaticResourceServer 透传给 HTTP 响应。
+        把请求中的 motion intent/catalog payload 规范化、校验后作为
+        engine.motion_preview 发送给前端。preview-only 信封不继承当前 turn，
+        不创建播放段，也不参与 playback_finished。
         """
         normalized_path = path.rstrip("/")
         if normalized_path not in {
@@ -473,8 +479,9 @@ class OLVPetPlatformAdapter(Platform):
             return 503, {"ok": False, "error": "Adapter event loop is not ready."}
 
         future = asyncio.run_coroutine_threadsafe(
-            self.turn_coordinator.broadcast_motion_payload(
+            self._broadcast_debug_motion_preview(
                 motion_payload=motion_payload,
+                motion_type=message_type,
                 mode=mode,
                 source=source,
             ),
@@ -497,10 +504,28 @@ class OLVPetPlatformAdapter(Platform):
             "ok": True,
             "status": "dispatched",
             "endpoint": normalized_path,
-            "type": message_type,
+            "type": TYPE_ENGINE_MOTION_PREVIEW,
+            "motion_type": message_type,
             "mode": mode,
             "source": source,
         }
+
+    async def _broadcast_debug_motion_preview(
+        self,
+        *,
+        motion_payload: dict[str, Any],
+        motion_type: str,
+        mode: str,
+        source: str,
+    ) -> bool:
+        return await self._send_json(
+            build_engine_motion_preview(
+                motion_payload=motion_payload,
+                motion_type=motion_type,
+                mode=mode,
+                source=source,
+            )
+        )
     def _sync_client_profile_from_runtime_state(self) -> None:
         self.client_uid = normalize_client_uid(
             getattr(self.runtime_state, "client_uid", self.client_uid),
@@ -543,8 +568,6 @@ def _extract_debug_motion_payload(
         return motion_payload, TYPE_ENGINE_MOTION_INTENT, ""
 
     if schema_version == "engine.catalog_motion.v1":
-        from .protocol.constants import TYPE_ENGINE_CATALOG_MOTION
-
         try:
             motion_payload = normalize_catalog_motion_payload(payload)
         except ValueError as exc:
