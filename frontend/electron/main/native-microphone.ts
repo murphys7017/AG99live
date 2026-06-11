@@ -13,6 +13,9 @@ const FFMPEG_CHUNK_SAMPLES = 1024;
 const FFMPEG_CHUNK_BYTES = FFMPEG_CHUNK_SAMPLES * Int16Array.BYTES_PER_ELEMENT;
 const FFMPEG_STARTUP_READY_TIMEOUT_MS = 4000;
 const FFMPEG_STARTUP_FLUSH_DELAY_MS = 25;
+const FFMPEG_GRACEFUL_STOP_TIMEOUT_MS = 900;
+const FFMPEG_FORCE_STOP_TIMEOUT_MS = 1500;
+const TASKKILL_TIMEOUT_MS = 1500;
 
 interface NativeMicrophoneDevice extends DesktopMicrophoneDevice {
   alternativeName: string;
@@ -235,21 +238,80 @@ async function stopActiveCapture(reason: string): Promise<void> {
   }
 
   runtime.stopping = true;
-  const done = new Promise<void>((resolve) => {
-    captureEvents.once(`ended:${runtime.sessionId}`, () => resolve());
-    windowSetTimeout(resolve, 1500);
-  });
+  const done = waitForNativeCaptureEnd(runtime, FFMPEG_FORCE_STOP_TIMEOUT_MS);
+  const gracefulDone = waitForNativeCaptureEnd(runtime, FFMPEG_GRACEFUL_STOP_TIMEOUT_MS);
 
   try {
     runtime.process.kill("SIGTERM");
   } catch (error) {
-    console.warn(`[NativeMicrophone] failed to stop capture (${reason}).`, error);
+    console.warn(`[NativeMicrophone] failed to request capture stop (${reason}).`, error);
+  }
+
+  await gracefulDone;
+  if (activeCapture === runtime && process.platform === "win32") {
+    await forceKillWindowsProcessTree(runtime.process.pid, reason);
   }
 
   await done;
   if (activeCapture === runtime) {
     activeCapture = null;
   }
+}
+
+function waitForNativeCaptureEnd(
+  runtime: NativeCaptureRuntime,
+  timeoutMs: number,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    captureEvents.once(`ended:${runtime.sessionId}`, () => resolve());
+    windowSetTimeout(resolve, timeoutMs);
+  });
+}
+
+async function forceKillWindowsProcessTree(
+  pid: number | undefined,
+  reason: string,
+): Promise<void> {
+  if (!pid || pid <= 0) {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      resolve();
+    };
+    const child = spawn(
+      "taskkill",
+      ["/PID", String(pid), "/T", "/F"],
+      {
+        windowsHide: true,
+        stdio: "ignore",
+      },
+    );
+    timeout = windowSetTimeoutWithHandle(() => {
+      console.warn(`[NativeMicrophone] taskkill timed out (${reason}).`);
+      try {
+        child.kill("SIGKILL");
+      } catch (_error) {
+        // Ignore cleanup failures after taskkill timeout.
+      }
+      finish();
+    }, TASKKILL_TIMEOUT_MS);
+    child.on("error", (error) => {
+      console.warn(`[NativeMicrophone] taskkill failed (${reason}).`, error);
+      finish();
+    });
+    child.on("exit", () => finish());
+  });
 }
 
 function handleNativeCaptureBytes(

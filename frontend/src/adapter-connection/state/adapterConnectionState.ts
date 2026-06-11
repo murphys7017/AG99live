@@ -5,6 +5,7 @@ import type {
   DesktopHistoryEntry,
   DesktopMotionTuningSample,
   DesktopMotionTuningSamplesStatus,
+  DesktopPttHookStatus,
   DesktopSemanticAxisProfileSaveResult,
 } from "../../types/desktop.js";
 import type { SystemServerInfoPayload } from "../../types/protocol.js";
@@ -25,6 +26,14 @@ export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "er
 
 export type AdapterConnectionState = ReturnType<typeof createAdapterConnectionState>;
 
+export const DEFAULT_PTT_HOOK_STATUS: DesktopPttHookStatus = {
+  available: true,
+  enabled: false,
+  keycode: null,
+  reason: "",
+  updatedAt: "",
+};
+
 export function createAdapterConnectionState() {
   return reactive({
     address: loadStoredAdapterAddress(),
@@ -44,6 +53,7 @@ export function createAdapterConnectionState() {
     micCapturing: false,
     pttModeEnabled: false,
     pttKeyBinding: loadStoredPttKeyBinding(),
+    pttHookStatus: { ...DEFAULT_PTT_HOOK_STATUS },
     isPlayingAudio: false,
     historyEntries: [] as DesktopHistoryEntry[],
     backendHistorySummaries: [] as DesktopBackendHistorySummary[],

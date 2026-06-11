@@ -3,6 +3,7 @@ import type {
   DesktopBackendHistorySummary,
   DesktopRuntimeSnapshot,
   DesktopMotionPlaybackRecord,
+  DesktopPttHookStatus,
 } from "../../types/desktop.js";
 import type { CatalogMotionPayload } from "../../types/protocol.js";
 import {
@@ -71,6 +72,13 @@ export const defaultSnapshot: DesktopRuntimeSnapshot = {
   micCapturing: false,
   pttModeEnabled: false,
   pttKeyBinding: DEFAULT_PTT_KEY_BINDING,
+  pttHookStatus: {
+    available: true,
+    enabled: false,
+    keycode: null,
+    reason: "",
+    updatedAt: "",
+  },
   audioPlaying: false,
   confName: "",
   lastUpdated: "",
@@ -159,6 +167,20 @@ export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRunt
     backendHistoryLoading: Boolean(snapshot.backendHistoryLoading),
     backendHistoryStatusMessage: normalizeText(snapshot.backendHistoryStatusMessage),
     bilibiliLiveStatus: normalizeBilibiliLiveStatus(snapshot.bilibiliLiveStatus),
+    pttHookStatus: normalizePttHookStatus(snapshot.pttHookStatus),
+  };
+}
+
+function normalizePttHookStatus(value: unknown): DesktopPttHookStatus {
+  if (!isObject(value)) {
+    return { ...defaultSnapshot.pttHookStatus };
+  }
+  return {
+    available: Boolean(value.available),
+    enabled: Boolean(value.enabled),
+    keycode: isFiniteNumber(value.keycode) ? Math.round(value.keycode) : null,
+    reason: normalizeText(value.reason),
+    updatedAt: normalizeText(value.updatedAt),
   };
 }
 

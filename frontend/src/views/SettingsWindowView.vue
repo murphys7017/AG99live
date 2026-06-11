@@ -347,6 +347,13 @@ onMounted(() => {
           按键说话模式下，"开始/停止麦克风"按钮仍可手动接管。切换模式会关闭当前收音。
           {{ pttKeyStatus }}
         </p>
+        <p
+          v-if="pttModeEnabled && !bridgeState.snapshot.pttHookStatus.available"
+          class="settings-card__hint"
+        >
+          全局按键不可用，当前会退回到桌宠窗口获得焦点时触发。
+          {{ bridgeState.snapshot.pttHookStatus.reason }}
+        </p>
       </article>
 
       <article class="settings-card settings-card--wide">

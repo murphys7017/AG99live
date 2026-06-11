@@ -5,6 +5,7 @@ import type {
 import type {
   DesktopHistoryEntry,
   DesktopMotionTuningSample,
+  DesktopPttHookStatus,
 } from "../types/desktop";
 import type {
   ProtocolEnvelope,
@@ -134,6 +135,7 @@ export function createAdapterConnection(
   let historyAdapter: AdapterHistory | null = null;
   let motionTuningAdapter: AdapterMotionTuning | null = null;
   let motionPreviewHandler: ((payload: unknown) => boolean) | null = null;
+  let detachPttHookStatusListener: (() => void) | null = null;
 
   function buildMessageEnvelope<TPayload>(
     type: string,
@@ -173,6 +175,18 @@ export function createAdapterConnection(
       }
     },
   });
+
+  function applyPttHookStatus(payload: DesktopPttHookStatus): void {
+    state.pttHookStatus = {
+      available: Boolean(payload.available),
+      enabled: Boolean(payload.enabled),
+      keycode: typeof payload.keycode === "number" && Number.isFinite(payload.keycode)
+        ? Math.round(payload.keycode)
+        : null,
+      reason: typeof payload.reason === "string" ? payload.reason : "",
+      updatedAt: typeof payload.updatedAt === "string" ? payload.updatedAt : new Date().toISOString(),
+    };
+  }
 
   const {
     setMicrophoneDevice,
@@ -271,6 +285,11 @@ export function createAdapterConnection(
           persistAddress(storedAddress);
         }
         void refreshMicrophoneDevices({ requestPermission: false });
+        detachPttHookStatusListener?.();
+        detachPttHookStatusListener = window.ag99desktop?.onPttHookStatus?.(applyPttHookStatus) ?? null;
+        void window.ag99desktop?.getPttHookStatus?.().then(applyPttHookStatus).catch((error: unknown) => {
+          console.warn("[useAdapterConnection] failed to read PTT hook status:", error);
+        });
       });
     }
 
@@ -332,6 +351,8 @@ export function createAdapterConnection(
     }
     disposed = true;
     disconnectInternal(true);
+    detachPttHookStatusListener?.();
+    detachPttHookStatusListener = null;
     resetConnectionRuntimeState();
     state.status = "disconnected";
     state.statusMessage = "已断开适配器连接。";

@@ -9,6 +9,7 @@ import type {
   DesktopMicrophoneAudioChunk,
   DesktopMicrophoneDevice,
   DesktopPttEventAck,
+  DesktopPttHookStatus,
   DesktopPttKeyBinding,
   DesktopWindowVisibilityState,
 } from "../../src/types/desktop";
@@ -101,6 +102,9 @@ const api = {
   setPttMode: (enabled: boolean, binding?: DesktopPttKeyBinding) => {
     ipcRenderer.send("desktop:set-ptt-mode", enabled, binding);
   },
+  getPttHookStatus: () => {
+    return ipcRenderer.invoke("desktop:get-ptt-hook-status") as Promise<DesktopPttHookStatus>;
+  },
   reportPttEventAck: (ack: DesktopPttEventAck) => {
     ipcRenderer.send("desktop:ptt-event-ack", ack);
   },
@@ -111,6 +115,17 @@ const api = {
     ipcRenderer.on(channel, handler);
     return () => {
       ipcRenderer.removeListener(channel, handler);
+    };
+  },
+  onPttHookStatus: (
+    callback: (payload: DesktopPttHookStatus) => void,
+  ) => {
+    const handler = (_event: unknown, payload: DesktopPttHookStatus) => {
+      callback(payload);
+    };
+    ipcRenderer.on("desktop:ptt-hook-status", handler);
+    return () => {
+      ipcRenderer.removeListener("desktop:ptt-hook-status", handler);
     };
   },
   onNativeMicrophoneChunk: (

@@ -9,6 +9,7 @@ import type {
   DesktopModelProjectionSnapshot,
   DesktopMotionPlaybackRecord,
   DesktopPttKeyBinding,
+  DesktopPttHookStatus,
   DesktopSemanticAxisProfileSaveResult,
   DesktopMotionTuningSamplesStatus,
   DesktopMotionTuningSample,
@@ -51,6 +52,7 @@ interface PetRuntimeSnapshotAdapterPort {
     readonly isPlayingAudio: boolean;
     readonly pttModeEnabled: boolean;
     readonly pttKeyBinding: DesktopPttKeyBinding;
+    readonly pttHookStatus: DesktopPttHookStatus;
     readonly historyEntries: readonly DesktopHistoryEntry[];
     readonly backendHistorySummaries: readonly DesktopBackendHistorySummary[];
     readonly backendHistoryEntries: readonly DesktopBackendHistoryMessage[];
@@ -167,6 +169,7 @@ export function createPetRuntimeSnapshotPublisher(
         isPlayingAudio: a.isPlayingAudio,
         pttModeEnabled: a.pttModeEnabled,
         pttKeyBinding: a.pttKeyBinding,
+        pttHookStatus: a.pttHookStatus,
         historyEntries: [...a.historyEntries],
         backendHistorySummaries: [...a.backendHistorySummaries],
         backendHistoryEntries: [...a.backendHistoryEntries],

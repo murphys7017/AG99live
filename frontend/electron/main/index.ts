@@ -8,6 +8,7 @@ import type {
   DesktopPttEventAck,
   DesktopPttEventKind,
   DesktopPttEventPayload,
+  DesktopPttHookStatus,
   DesktopPttKeyBinding,
 } from "../../src/types/desktop";
 
@@ -25,10 +26,23 @@ let globalPttEnabled = false;
 let globalPttKeycode: number | null = 29;
 let globalPttHookStarted = false;
 let globalPttListenersInstalled = false;
+let globalPttListenerGeneration = 0;
 let globalPttPressed = false;
 let globalPttEventSerial = 0;
+let lastPttHookStatus: DesktopPttHookStatus = buildPttHookStatus({
+  available: true,
+  enabled: false,
+  keycode: globalPttKeycode,
+  reason: "",
+});
 const recentPttEvents = new Map<string, DesktopPttEventPayload>();
 const MAX_RECENT_PTT_EVENTS = 20;
+
+interface UiohookController {
+  on: (event: string, callback: (event: { keycode: number }) => void) => void;
+  start: () => void;
+  stop: () => void;
+}
 
 function loadUiohook(): Record<string, unknown> | null {
   if (uiohookModule) {
@@ -37,15 +51,48 @@ function loadUiohook(): Record<string, unknown> | null {
   try {
     uiohookModule = require("uiohook-napi");
   } catch (err) {
+    const reason = err instanceof Error ? err.message : "uiohook_unavailable";
     console.warn("[PTT] uiohook-napi unavailable, global PTT disabled.", err);
     uiohookModule = null;
+    publishPttHookStatus({
+      available: false,
+      enabled: false,
+      keycode: globalPttKeycode,
+      reason,
+    });
   }
   return uiohookModule;
+}
+
+function resolveUiohookController(uiohook: Record<string, unknown>): UiohookController | null {
+  const hook = uiohook.uIOhook;
+  if (!hook || typeof hook !== "object") {
+    publishPttHookFailure("uiohook_invalid_export");
+    return null;
+  }
+
+  const maybeHook = hook as Partial<UiohookController>;
+  if (
+    typeof maybeHook.on !== "function"
+    || typeof maybeHook.start !== "function"
+    || typeof maybeHook.stop !== "function"
+  ) {
+    publishPttHookFailure("uiohook_invalid_controller");
+    return null;
+  }
+
+  return maybeHook as UiohookController;
 }
 
 function startGlobalPttHook(): void {
   if (!globalPttKeycode) {
     console.warn("[PTT] global keyboard hook disabled for unmapped key binding.");
+    publishPttHookStatus({
+      available: false,
+      enabled: false,
+      keycode: null,
+      reason: "unmapped_key_binding",
+    });
     return;
   }
   const uiohook = loadUiohook();
@@ -54,33 +101,70 @@ function startGlobalPttHook(): void {
   }
   globalPttEnabled = true;
   if (globalPttHookStarted) {
+    publishPttHookStatus({
+      available: true,
+      enabled: true,
+      keycode: globalPttKeycode,
+      reason: "",
+    });
     return;
   }
-  const hook = uiohook.uIOhook as {
-    on: (event: string, callback: (event: { keycode: number }) => void) => void;
-    start: () => void;
-    stop: () => void;
-  };
-  if (!globalPttListenersInstalled) {
-    hook.on("keydown", (event) => {
-      if (!globalPttEnabled) return;
-      if (event.keycode === globalPttKeycode) {
-        if (globalPttPressed) return;
-        globalPttPressed = true;
-        sendGlobalPttEvent("keydown", event.keycode);
-      }
-    });
-    hook.on("keyup", (event) => {
-      if (!globalPttEnabled) return;
-      if (event.keycode === globalPttKeycode) {
-        globalPttPressed = false;
-        sendGlobalPttEvent("keyup", event.keycode);
-      }
-    });
-    globalPttListenersInstalled = true;
+  const hook = resolveUiohookController(uiohook);
+  if (!hook) {
+    globalPttEnabled = false;
+    return;
   }
-  hook.start();
-  globalPttHookStarted = true;
+  if (!globalPttListenersInstalled) {
+    const listenerGeneration = ++globalPttListenerGeneration;
+    try {
+      hook.on("keydown", (event) => {
+        if (listenerGeneration !== globalPttListenerGeneration) return;
+        if (!globalPttEnabled) return;
+        if (event.keycode === globalPttKeycode) {
+          if (globalPttPressed) return;
+          globalPttPressed = true;
+          sendGlobalPttEvent("keydown", event.keycode);
+        }
+      });
+      hook.on("keyup", (event) => {
+        if (listenerGeneration !== globalPttListenerGeneration) return;
+        if (!globalPttEnabled) return;
+        if (event.keycode === globalPttKeycode) {
+          globalPttPressed = false;
+          sendGlobalPttEvent("keyup", event.keycode);
+        }
+      });
+      globalPttListenersInstalled = true;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "uiohook_listener_registration_failed";
+      console.warn("[PTT] failed to register global keyboard listeners.", err);
+      globalPttEnabled = false;
+      globalPttListenerGeneration += 1;
+      publishPttHookFailure(reason);
+      return;
+    }
+  }
+  try {
+    hook.start();
+    globalPttHookStarted = true;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "uiohook_start_failed";
+    console.warn("[PTT] failed to start global keyboard hook.", err);
+    globalPttEnabled = false;
+    publishPttHookStatus({
+      available: false,
+      enabled: false,
+      keycode: globalPttKeycode,
+      reason,
+    });
+    return;
+  }
+  publishPttHookStatus({
+    available: true,
+    enabled: true,
+    keycode: globalPttKeycode,
+    reason: "",
+  });
   console.info("[PTT] global keyboard hook started");
 }
 
@@ -89,19 +173,73 @@ function stopGlobalPttHook(): void {
   globalPttEnabled = false;
   globalPttPressed = false;
   if (!uiohook) {
+    publishPttHookStatus({
+      available: false,
+      enabled: false,
+      keycode: globalPttKeycode,
+      reason: lastPttHookStatus.reason || "uiohook_unavailable",
+    });
+    return;
+  }
+  const hook = resolveUiohookController(uiohook);
+  if (!hook) {
     return;
   }
   if (!globalPttHookStarted) {
+    publishPttHookStatus({
+      available: true,
+      enabled: false,
+      keycode: globalPttKeycode,
+      reason: "",
+    });
     return;
   }
   try {
-    const hook = uiohook.uIOhook as { stop: () => void };
     hook.stop();
     globalPttHookStarted = false;
   } catch (err) {
     console.warn("[PTT] failed to stop global keyboard hook.", err);
   }
+  publishPttHookStatus({
+    available: true,
+    enabled: false,
+    keycode: globalPttKeycode,
+    reason: "",
+  });
   console.info("[PTT] global keyboard hook stopped");
+}
+
+function buildPttHookStatus(
+  input: Omit<DesktopPttHookStatus, "updatedAt">,
+): DesktopPttHookStatus {
+  return {
+    ...input,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function publishPttHookStatus(
+  input: Omit<DesktopPttHookStatus, "updatedAt">,
+): void {
+  lastPttHookStatus = buildPttHookStatus(input);
+  broadcastToAllWindows("desktop:ptt-hook-status", lastPttHookStatus);
+}
+
+function publishPttHookFailure(reason: string): void {
+  publishPttHookStatus({
+    available: false,
+    enabled: false,
+    keycode: globalPttKeycode,
+    reason,
+  });
+}
+
+function broadcastToAllWindows(channel: string, payload: unknown): void {
+  for (const currentWindow of BrowserWindow.getAllWindows()) {
+    if (!currentWindow.isDestroyed()) {
+      currentWindow.webContents.send(channel, payload);
+    }
+  }
 }
 
 function normalizePttKeycode(binding: unknown): number | null {
@@ -339,6 +477,8 @@ function setupIpc(): void {
       stopGlobalPttHook();
     }
   });
+
+  ipcMain.handle("desktop:get-ptt-hook-status", async () => lastPttHookStatus);
 
   ipcMain.on("desktop:ptt-event-ack", (_event, ack: unknown) => {
     recordPttAck(ack);

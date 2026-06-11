@@ -7,6 +7,7 @@ import type {
   DesktopMicrophoneAudioChunk,
   DesktopMicrophoneDevice,
   DesktopPttEventAck,
+  DesktopPttHookStatus,
   DesktopPttKeyBinding,
   DesktopWindowVisibilityState,
 } from "./desktop";
@@ -42,10 +43,14 @@ export interface Ag99DesktopApi {
   minimizeCurrentWindow: () => void;
   setOverlayContentHeight: (height: number) => void;
   setPttMode: (enabled: boolean, binding?: DesktopPttKeyBinding) => void;
+  getPttHookStatus: () => Promise<DesktopPttHookStatus>;
   reportPttEventAck: (ack: DesktopPttEventAck) => void;
   onIpc: <TPayload = unknown>(
     channel: string,
     callback: (payload: TPayload) => void,
+  ) => () => void;
+  onPttHookStatus: (
+    callback: (payload: DesktopPttHookStatus) => void,
   ) => () => void;
   onNativeMicrophoneChunk: (
     callback: (chunk: DesktopMicrophoneAudioChunk & { sessionId: string }) => void,

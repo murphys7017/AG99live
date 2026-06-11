@@ -336,6 +336,7 @@ export interface DesktopRuntimeSnapshot {
   micCapturing: boolean;
   pttModeEnabled: boolean;
   pttKeyBinding: DesktopPttKeyBinding;
+  pttHookStatus: DesktopPttHookStatus;
   audioPlaying: boolean;
   confName: string;
   lastUpdated: string;
@@ -379,6 +380,14 @@ export interface DesktopPttKeyBinding {
   code: string;
   label: string;
   uiohookKeycode: number | null;
+}
+
+export interface DesktopPttHookStatus {
+  available: boolean;
+  enabled: boolean;
+  keycode: number | null;
+  reason: string;
+  updatedAt: string;
 }
 
 export type DesktopPttEventKind = "keydown" | "keyup";
