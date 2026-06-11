@@ -766,3 +766,31 @@ catalog / asset motion start
 6. **"动作生成只靠修复层"修正为**：prompt + repair/fallback 双保险已成型，但缺少命中率观测指标。
 
 全部确认结论：**先把 stableAxisDirection、SDK 完成事件、深层 parser、回归测试四个钉牢，后面的拆分会顺很多。**
+
+---
+
+## 后续修复状态（截至 2025-07-20 终）
+
+以下条目为上一轮审阅报告中的问题，当前已修复或部分处理：
+
+| 状态 | 问题 | 涉及文件 | 修复方式 |
+|------|------|---------|---------|
+| ✅ 已修复 | `stableAxisDirection` 伪随机方向 | `protocol.ts`, `speechPoseStage.ts` | VoiceFollowingChannelProfile 增加 direction 字段；新增 `resolveVoiceFollowingDirection()` / `defaultVoiceFollowingDirection()`；legacy speech pose 改用 `resolveSpeechPoseAxisDirection()` |
+| ✅ 已修复 | SDK 完成事件依赖 `setTimeout` | `live2d-runtime.d.ts`, `lappadapter.ts`, `lappmodel.ts`, `usePreviewMotionPlayer.ts` | DirectParameterPlanState 增加 runId/onTerminal/terminalEmitted；stopDirectParameterPlan 发射完成事件；前端 `onTerminal` 回调为主路径，timer 降级为 watchdog |
+| ✅ 已修复 | 动作完成归属缺少 `runId`/`messageId` | `contracts.ts`, `motionStart.ts`, `usePlaybackCompletionCoordinator.ts`, `usePetDesktopRuntime.ts` | `ModelEnginePlanStartedEventBase` 增加 runId；coordinator 用 `currentMotionRun {runId, segmentKey}` 跟踪；`completeMotionPlayback` 校验 event.runId；`findSegmentByKey` 替代手写 split |
+| ✅ 已修复 | Soft handoff duplicate 丢失真实 runId | `usePreviewMotionPlayer.ts` | 增加 `lastPlaybackRunId` 状态变量，复用分支传 `lastPlaybackRunId` 而非空串 |
+| ✅ 已修复 | `stopped` 中断场景不标记 motion failed | `usePlaybackCompletionCoordinator.ts` | `stopped` 分支按 reason 判断：`interrupted`/`reset`/`switch_model`/`reconnect` 标记 motion failed |
+| ✅ 已修复 | 入站协议深层透传路径 | `inboundProtocol.ts`, `inboundPayloads.ts`, `useModelSync.ts`, `inboundFeatureDispatcher.ts` | `parseInboundEnvelopeObject()` 供 window/devtools 入口；`parseSystemModelSyncPayload` 分层 parse `model_info.models[]`、`selected_model`、`semantic_axis_profile`；`applyUnknownMessage` 改走 parser；history/motion tuning 端口改用 typed envelope |
+| ✅ 已修复 | parser 裁剪后端字段 | `inboundPayloads.ts` | `parseModelSummarySnapshot` 改为 spread 原始 record 并覆盖已验证的 name；`model_info` 同理 spread 保留 `schema_version`/`driver_priority`/`available_models` |
+| ✅ 已修复 | `runtime_cache_errors` 畸形值静默丢弃 | `inboundPayloads.ts` | `parseRuntimeCacheErrorsPayload` 改为返回 `PayloadParseResult`，非 object 时整体 reject |
+| ✅ 已修复 | 桌面快照缺少时序控制 | `desktop.ts`, `runtimeSnapshot.ts`, `usePetRuntimeSnapshotPublisher.ts`, `useDesktopBridge.ts` | `_publisherId` + `_revision` 字段；发布端每次 publish 递增 revision；接收端同一 publisher 只接受 revision 严格递增的快照 |
+| ✅ 已修复 | coordinator 测试依赖旧全局 watch | `playbackCompletionCoordinator.test.ts` | 改为直接调 `completeMotionPlayback({runId, status})`；新增 stale runId、interrupt、late audio reopen、multi-segment 四个回归测试 |
+| ✅ 部分处理 | Motion repair/fallback 缺少命中率观测 | `realtime_motion_plan.py`, `fallback_pose.py` | `_repair_stats` 模块级 dict + `_incr_repair_stat()`/`get_repair_stats()`/`reset_repair_stats()`；`duration_hint_defaulted`/`clamped`、`fallback_resolve_requested`/`fallback_used_neutral` 埋点 |
+| ⚠️ 未处理 | `runtime/state.py` 1798 行全局状态混合 | — | 待后续拆分 |
+| ⚠️ 未处理 | `live2d/scanner/scan.py` 3010 行多职责混合 | — | 待后续拆分 |
+| ⚠️ 未处理 | `turn_coordinator.py` 1004 行集中 | — | 待后续拆分 |
+| ⚠️ 未处理 | `useAdapterConnection.ts` 622 行门面偏大 | — | 待后续拆分 |
+| ⚠️ 未处理 | DPR cap 配置化 | — | 待后续处理 |
+| ⚠️ 未处理 | 原生麦克风 Windows 进程树兜底 | — | 待后续处理 |
+| ⚠️ 未处理 | PTT 全局钩子不可用时通知前端 | — | 待后续处理 |
+| ⚠️ 未处理 | preload 双命名 API 收敛 | — | 待后续处理 |
