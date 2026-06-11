@@ -42,7 +42,6 @@ export function parseInboundEnvelopeObject(raw: unknown): ParsedInboundEnvelope 
     };
   }
   return parseEnvelopeRecord(raw as Record<string, unknown>);
-
 }
 
 /**

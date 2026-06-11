@@ -346,6 +346,41 @@ function testValidModelSyncPayloadPasses(): void {
   assert.equal(event.kind, "model_sync");
 }
 
+
+
+function testModelSyncPayloadVoiceFollowingProfileBadTypeRejected(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.model_sync", {
+      model_info: {
+        selected_model: "model-a",
+        models: [{ name: "model-a", voice_following_profile: "bad-string" }],
+      },
+      conf_name: "default",
+      conf_uid: "conf-1",
+      client_uid: "client-1",
+    }),
+    defaultContext(),
+  );
+  assert.equal(event.kind, "protocol_error");
+}
+
+function testModelSyncPayloadRuntimeCacheErrorsBadTypeRejected(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.model_sync", {
+      model_info: {
+        selected_model: "model-a",
+        models: [{ name: "model-a" }],
+      },
+      runtime_cache_errors: "bad-string",
+      conf_name: "default",
+      conf_uid: "conf-1",
+      client_uid: "client-1",
+    }),
+    defaultContext(),
+  );
+  assert.equal(event.kind, "protocol_error");
+}
+
 function testInvalidMotionTuningSamplesStatePayloadReturnsProtocolError(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("system.motion_tuning_samples_state", {
@@ -381,6 +416,8 @@ function run(): void {
   testValidModelSyncPayloadPasses();
   testInvalidModelSyncPayloadReturnsProtocolError();
 
+  testModelSyncPayloadRuntimeCacheErrorsBadTypeRejected();
+  testModelSyncPayloadVoiceFollowingProfileBadTypeRejected();
   testInvalidMotionTuningSamplesStatePayloadReturnsProtocolError();
 
   console.log("inboundEvents tests passed");

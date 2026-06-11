@@ -279,9 +279,12 @@ function parseModelSummarySnapshot(
   const model: Record<string, unknown> = { ...record };
   model.name = name.payload;
 
-  // 浅校验 semantic_axis_profile 结构完整性
+  // 浅校验 semantic_axis_profile 结构完整性。
+  // 如果解析失败但原始值非空（看似有效），保留原始值保护存量 profile 不被误清掉。
   const parsedProfile = parseSemanticAxisProfileSnapshot(record.semantic_axis_profile);
-  if (parsedProfile !== null || record.semantic_axis_profile === undefined || record.semantic_axis_profile === null) {
+  const parsedFailed = parsedProfile === null;
+  const originalHasContent = record.semantic_axis_profile !== undefined && record.semantic_axis_profile !== null;
+  if (!parsedFailed || !originalHasContent) {
     model.semantic_axis_profile = parsedProfile;
   }
 
