@@ -19,6 +19,10 @@ from ..motion.realtime_motion_plan import (
     DEFAULT_MOTION_INTENT_DURATION_MS,
     MOTION_INTENT_V3_SCHEMA_VERSION,
     RealtimeMotionPlanGenerator,
+    maybe_log_repair_stats,
+    record_realtime_motion_attempt,
+    record_realtime_motion_fallback,
+    record_realtime_motion_generated,
     resolve_selected_semantic_axis_profile,
 )
 from ..motion.fallback_pose import (
@@ -979,7 +983,16 @@ async def _build_realtime_or_default_motion_payload(
     )
     if realtime_payload is not None:
         return realtime_payload, realtime_reason
-    return _build_default_motion_payload(runtime_state, reason=realtime_reason)
+    default_payload, default_reason = _build_default_motion_payload(
+        runtime_state,
+        reason=realtime_reason,
+    )
+    if _realtime_generation_was_attempted(realtime_reason):
+        record_realtime_motion_fallback(
+            neutral="default_pose_neutral" in default_reason,
+        )
+        maybe_log_repair_stats()
+    return default_payload, default_reason
 
 
 async def _build_realtime_motion_payload(
@@ -997,6 +1010,7 @@ async def _build_realtime_motion_payload(
         return None, _append_resolution_reason(reason, "realtime_provider_unavailable")
 
     user_text = _extract_user_text(event)
+    record_realtime_motion_attempt()
     try:
         payload = await RealtimeMotionPlanGenerator(runtime_state=runtime_state).generate(
             user_text=user_text,
@@ -1022,8 +1036,23 @@ async def _build_realtime_motion_payload(
         return None, _append_resolution_reason(reason, "realtime_returned_empty")
     axes = payload.get("axes")
     if not isinstance(axes, dict) or not axes:
+        maybe_log_repair_stats()
         return None, _append_resolution_reason(reason, "realtime_returned_empty")
+    record_realtime_motion_generated()
+    maybe_log_repair_stats()
     return payload, _append_resolution_reason(reason, "realtime_generated")
+
+
+def _realtime_generation_was_attempted(reason: str) -> bool:
+    return any(
+        marker in reason
+        for marker in (
+            "realtime_provider_timeout",
+            "realtime_selector_invalid",
+            "realtime_failed",
+            "realtime_returned_empty",
+        )
+    )
 
 
 def _resolve_generated_motion_source(reason: str) -> str:

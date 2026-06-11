@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from typing import Any
 
 from ..prompts.motion_selector import (
@@ -60,23 +61,83 @@ PARAMETER_PLAN_SOURCES = {
 # ── repair/fallback hit rate stats ─────────────────────────────────
 
 _repair_stats: dict[str, int] = {}
+_motion_outcome_stats: dict[str, int] = {}
+_stats_revision = 0
+_last_repair_stats_log_at = 0.0
+_last_repair_stats_log_total = 0
+_REPAIR_STATS_LOG_INTERVAL_SECONDS = 60.0
+
+def _bump_stats_revision() -> None:
+    global _stats_revision
+    _stats_revision += 1
 
 def _incr_repair_stat(key: str) -> None:
     _repair_stats[key] = _repair_stats.get(key, 0) + 1
+    _bump_stats_revision()
+
+def _incr_motion_outcome_stat(key: str) -> None:
+    _motion_outcome_stats[key] = _motion_outcome_stats.get(key, 0) + 1
+    _bump_stats_revision()
+
+def record_realtime_motion_attempt() -> None:
+    _incr_motion_outcome_stat("attempt_total")
+
+def record_realtime_motion_generated() -> None:
+    _incr_motion_outcome_stat("generated_total")
+
+def record_realtime_motion_fallback(*, neutral: bool = False) -> None:
+    _incr_motion_outcome_stat("fallback_total")
+    if neutral:
+        _incr_motion_outcome_stat("neutral_fallback_total")
 
 def get_repair_stats() -> dict:
-    total = sum(_repair_stats.values())
-    fallback_count = _repair_stats.get("fallback_used_from_pose_id", 0)
-    neutral_count = _repair_stats.get("fallback_used_neutral", 0)
+    repair_event_total = sum(_repair_stats.values())
+    attempt_total = _motion_outcome_stats.get("attempt_total", 0)
+    fallback_total = _motion_outcome_stats.get("fallback_total", 0)
+    neutral_fallback_total = _motion_outcome_stats.get("neutral_fallback_total", 0)
     return {
-        "total": total,
+        "total": repair_event_total,
+        "repair_event_total": repair_event_total,
         "counts": dict(_repair_stats),
-        "fallback_rate": round(fallback_count / max(1, total), 3),
-        "neutral_fallback_rate": round(neutral_count / max(1, total), 3),
+        "motion_counts": dict(_motion_outcome_stats),
+        "attempt_total": attempt_total,
+        "generated_total": _motion_outcome_stats.get("generated_total", 0),
+        "fallback_total": fallback_total,
+        "neutral_fallback_total": neutral_fallback_total,
+        "stats_revision": _stats_revision,
+        "fallback_rate": round(fallback_total / max(1, attempt_total), 3),
+        "neutral_fallback_rate": round(neutral_fallback_total / max(1, attempt_total), 3),
     }
 
 def reset_repair_stats() -> None:
+    global _last_repair_stats_log_at, _last_repair_stats_log_total, _stats_revision
     _repair_stats.clear()
+    _motion_outcome_stats.clear()
+    _stats_revision = 0
+    _last_repair_stats_log_at = 0.0
+    _last_repair_stats_log_total = 0
+
+def maybe_log_repair_stats() -> None:
+    global _last_repair_stats_log_at, _last_repair_stats_log_total
+    stats = get_repair_stats()
+    revision = int(stats.get("stats_revision") or 0)
+    if revision <= 0 or revision == _last_repair_stats_log_total:
+        return
+    now = time.monotonic()
+    if now - _last_repair_stats_log_at < _REPAIR_STATS_LOG_INTERVAL_SECONDS:
+        return
+    _last_repair_stats_log_at = now
+    _last_repair_stats_log_total = revision
+    LOGGER.info(
+        "Realtime motion stats: attempts=%s generated=%s fallback=%s fallback_rate=%s neutral_fallback_rate=%s repair_events=%s repair_counts=%s",
+        stats.get("attempt_total"),
+        stats.get("generated_total"),
+        stats.get("fallback_total"),
+        stats.get("fallback_rate"),
+        stats.get("neutral_fallback_rate"),
+        stats.get("repair_event_total"),
+        stats.get("counts"),
+    )
 
 
 class RealtimeMotionPlanGenerator:
