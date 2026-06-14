@@ -707,13 +707,13 @@ catalog / asset motion start
   -> maybeFlushPlaybackCompletion
 ```
 
-### 14.3 仍待处理
+### 14.3 后续状态更新
 
 #### 1. 深层入站协议 parser
 
-状态：未完成，仍是下一批正确性优先项。
+状态：已处理。
 
-范围：
+原范围：
 
 - `system.model_sync.model_info`
 - `runtime_cache_errors`
@@ -721,17 +721,18 @@ catalog / asset motion start
 - `system.motion_tuning_samples_state`
 - window/devtools bridge 的 `applyUnknownMessage`
 
-目标：
+处理结果：
 
-- 所有入站边界先 parse 成可信结构。
-- 业务层不再接收 `unknown as Xxx`。
-- 畸形 payload 不污染 `modelInfo`、history、motion tuning samples 等状态。
+- `parseInboundEnvelopeObject()` 已接入 window/devtools 入口。
+- `parseSystemModelSyncPayload()` 已分层解析 `model_info.models[]`、`selected_model`、`semantic_axis_profile` 和 `runtime_cache_errors`。
+- history / motion tuning 端口已改用 typed envelope。
+- 畸形 `runtime_cache_errors` 不再静默丢弃，而是作为 payload parse failure。
 
 #### 2. 链路回归测试补强
 
 状态：部分补强，仍需继续。
 
-下一批重点：
+已补强：
 
 - `synth_finished` 早于晚到 `output.audio`。
 - 多 segment 连续动作和 soft handoff。
@@ -740,17 +741,47 @@ catalog / asset motion start
 - interrupt / reconnect / switch_model 停止动作后不悬挂。
 - 深层 parser 拒绝畸形 `system.model_sync` 和 window/devtools 注入消息。
 
+仍建议继续覆盖：
+
+- WebSocket 重连后的前端恢复行为。
+- binary audio frame 乱序 / 重复 / 丢帧场景。
+- profile revision 冲突时的降级路径。
+- 更贴近真实多窗口场景的 snapshot 同步测试。
+
 #### 3. 桌面快照 revision / publisher 时序保护
 
-状态：未处理，仍为 P1。
+状态：已处理。
 
-建议在本轮正确性修复稳定后单独处理，不和 parser / playback terminal 混在同一批。
+处理结果：
+
+- `DesktopRuntimeSnapshot` 增加 `_publisherId` 和 `_revision`。
+- 发布端每次 publish 递增 revision。
+- 接收端同一 publisher 只接受 revision 严格递增的快照，降低旧快照覆盖新快照的风险。
 
 #### 4. Repair/fallback 命中率观测
 
-状态：未处理，仍为 P1。
+状态：部分处理，仍可增强。
 
-建议后续在 `AG99liveMotionResultContributor` 和 inline / realtime motion 修复层增加 fallback reason counter，观察 LLM 动作输出质量是否退化。
+处理结果：
+
+- `realtime_motion_plan.py` 已有 `_repair_stats`、`get_repair_stats()`、`reset_repair_stats()` 和 `maybe_log_repair_stats()`。
+- 已记录 duration 默认/裁剪、fallback resolve / neutral fallback 等基础原因。
+
+后续建议：
+
+- 把 middleware-first、inline-first 和 realtime fallback 的统计口径统一。
+- 提供稳定的诊断输出入口，而不只依赖间隔日志。
+- 统计按 session / provider / model 维度聚合，方便观察不同模型的动作输出质量。
+
+#### 5. Electron / Live2D 近期修复
+
+状态：已处理。
+
+处理结果：
+
+- DPR cap 已配置化：`ModelEngineSettings.live2dRenderDprCap`、设置页滑块、快照同步和 renderer resize 均已接线。
+- 原生麦克风 Windows 进程树兜底已补齐：停止 ffmpeg 时增加 `taskkill` 兜底，避免子进程残留。
+- PTT 全局钩子不可用通知已补齐：主进程发布 `pttHookStatus`，前端设置页显示降级提示。
 
 ---
 
@@ -769,7 +800,7 @@ catalog / asset motion start
 
 ---
 
-## 后续修复状态（截至 2025-07-20 终）
+## 后续修复状态（截至 2026-06-13）
 
 以下条目为上一轮审阅报告中的问题，当前已修复或部分处理：
 
@@ -785,12 +816,16 @@ catalog / asset motion start
 | ✅ 已修复 | `runtime_cache_errors` 畸形值静默丢弃 | `inboundPayloads.ts` | `parseRuntimeCacheErrorsPayload` 改为返回 `PayloadParseResult`，非 object 时整体 reject |
 | ✅ 已修复 | 桌面快照缺少时序控制 | `desktop.ts`, `runtimeSnapshot.ts`, `usePetRuntimeSnapshotPublisher.ts`, `useDesktopBridge.ts` | `_publisherId` + `_revision` 字段；发布端每次 publish 递增 revision；接收端同一 publisher 只接受 revision 严格递增的快照 |
 | ✅ 已修复 | coordinator 测试依赖旧全局 watch | `playbackCompletionCoordinator.test.ts` | 改为直接调 `completeMotionPlayback({runId, status})`；新增 stale runId、interrupt、late audio reopen、multi-segment 四个回归测试 |
+| ✅ 已修复 | DPR cap 配置化 | `settings.ts`, `useLive2dRenderer.ts`, `SettingsWindowView.vue`, `DesktopPetCanvas.vue` | 新增 `live2dRenderDprCap` 设置、设置页滑块、快照应用和 renderer redraw；默认仍保持保守值 1.25 |
+| ✅ 已修复 | 原生麦克风 Windows 进程树兜底 | `native-microphone.ts` | 停止 ffmpeg 时增加 Windows `taskkill` 兜底，并处理 timeout / failure 日志 |
+| ✅ 已修复 | PTT 全局钩子不可用时通知前端 | `index.ts`, `preload/index.ts`, `useAdapterConnection.ts`, `SettingsWindowView.vue` | 主进程维护 `pttHookStatus`，前端读取并在设置页展示全局按键不可用降级提示 |
 | ✅ 部分处理 | Motion repair/fallback 缺少命中率观测 | `realtime_motion_plan.py`, `fallback_pose.py` | `_repair_stats` 模块级 dict + `_incr_repair_stat()`/`get_repair_stats()`/`reset_repair_stats()`；`duration_hint_defaulted`/`clamped`、`fallback_resolve_requested`/`fallback_used_neutral` 埋点 |
 | ⚠️ 未处理 | `runtime/state.py` 1798 行全局状态混合 | — | 待后续拆分 |
 | ⚠️ 未处理 | `live2d/scanner/scan.py` 3010 行多职责混合 | — | 待后续拆分 |
 | ⚠️ 未处理 | `turn_coordinator.py` 1004 行集中 | — | 待后续拆分 |
-| ⚠️ 未处理 | `useAdapterConnection.ts` 622 行门面偏大 | — | 待后续拆分 |
-| ⚠️ 未处理 | DPR cap 配置化 | — | 待后续处理 |
-| ⚠️ 未处理 | 原生麦克风 Windows 进程树兜底 | — | 待后续处理 |
-| ⚠️ 未处理 | PTT 全局钩子不可用时通知前端 | — | 待后续处理 |
+| ⚠️ 未处理 | `useAdapterConnection.ts` 653 行门面偏大 | — | 待后续拆分 |
 | ⚠️ 未处理 | preload 双命名 API 收敛 | — | 待后续处理 |
+| ⚠️ 未处理 | 前端测试重复编译 | `frontend/package.json` | 待合并单次 test build 或迁移 Vitest |
+| ⚠️ 未处理 | WebSDK 最小类型检查 | `frontend/tsconfig.json`, `frontend/src/live2d/WebSDK/**/*` | 当前仍从 renderer tsconfig exclude，待逐步纳入 adapter / direct parameter plan 类型保护 |
+| ⚠️ 未处理 | `console.info` 迁移统一 logger | 前端 / Electron / WebSDK 多处 | 待后续日志治理 |
+| ⚠️ 未处理 | 远程 Operator 安全边界文档化 | `docs/02-设计文档/07-远程执行器接入设计.md`, adapter README | 待补充生产环境推荐配置、默认电脑风险和能力边界 |
