@@ -44,7 +44,7 @@
 系统的主要风险集中在 **实现细节与精心设计的架构文档之间的落差**：
 
 1. **少数关键实现使用"近似解"替代"确切解"**：`stableAxisDirection` 用字符串 hash 决定说话方向、`usePreviewMotionPlayer` 用 `setTimeout` 替代 SDK 完成回调、深层入站协议 parser 部分路径未全覆盖。
-2. **部分大模块接近拆分临界点**：`turn_coordinator.py`（1004行）、`state.py`（1798行）、`scan.py`（3010行）、`useAdapterConnection.ts`（622行）体量偏大，虽然已有子模块和文档注释，但继续增长的边际成本在上升。
+2. **部分大模块接近拆分临界点**：`turn_coordinator.py`（1004行）、`state.py`（约1282行）、`scan.py`（3010行）、`useAdapterConnection.ts`（622行）体量偏大。`state.py` 已先拆出 motion tuning store，但剩余扫描、配置和缓存职责仍需继续收口。
 3. **跨窗口快照同步缺少时序保护**：BroadcastChannel + localStorage 组合没有 monotonic timestamp 或 revision，可能出现旧快照覆盖新快照。
 
 ---
@@ -391,15 +391,14 @@ TTS 输出:
 
 ### 8.1 概况
 
-**文件**：`runtime/state.py`（1798行）
+**文件**：`runtime/state.py`（约1282行）及 `runtime/motion_state/tuning_store.py`（约611行）
 
-后端第二大文件，混合了：
+`RuntimeState` 已将 Motion tuning 样本持久化、校验和 prompt 投影拆到独立 store，但主文件仍混合：
 - 配置管理（`plugin_config` 的 clone/refresh）
 - 模型扫描和缓存生命周期
 - LLM action filter 的执行
 - ~70 个运行时布尔/数字/字符串/列表字段
 - 语义轴 profile 的加载和刷新
-- Motion tuning 样本管理
 - 配置热加载（`_start_config_watch`）
 
 ### 8.2 发现问题
@@ -419,6 +418,7 @@ TTS 输出:
 - ✅ 有 `deepcopy` 用于配置隔离
 - ✅ 扫描和 profile 构建有缓存层（`runtime_cache.py` + MD5 hash）
 - ✅ 配置热加载路径有 `_start_config_watch`
+- ✅ Motion tuning 样本管理已按领域拆到 `runtime/motion_state/tuning_store.py`，`RuntimeState` 保留兼容门面
 
 ---
 
@@ -578,7 +578,7 @@ TTS 输出:
 | # | 问题 | 领域 |
 |---|------|------|
 | 12 | session phase 状态迁移的分散触发点需测试保护 | 链路 |
-| 13 | RuntimeState 1798 行需拆分扫描/配置 | 后端 |
+| 13 | RuntimeState 已拆出 motion tuning，仍需拆分扫描/配置 | 后端 |
 | 14 | Scanner 3010 行需拆分四个子模块 | 后端 |
 | 15 | PTT 全局钩子不可用时通知前端 | Electron |
 | 16 | DPR cap 1.25 配置化 | Live2D |
@@ -800,7 +800,7 @@ catalog / asset motion start
 
 ---
 
-## 后续修复状态（截至 2026-06-13）
+## 后续修复状态（截至 2026-06-15）
 
 以下条目为上一轮审阅报告中的问题，当前已修复或部分处理：
 
@@ -820,7 +820,7 @@ catalog / asset motion start
 | ✅ 已修复 | 原生麦克风 Windows 进程树兜底 | `native-microphone.ts` | 停止 ffmpeg 时增加 Windows `taskkill` 兜底，并处理 timeout / failure 日志 |
 | ✅ 已修复 | PTT 全局钩子不可用时通知前端 | `index.ts`, `preload/index.ts`, `useAdapterConnection.ts`, `SettingsWindowView.vue` | 主进程维护 `pttHookStatus`，前端读取并在设置页展示全局按键不可用降级提示 |
 | ✅ 部分处理 | Motion repair/fallback 缺少命中率观测 | `realtime_motion_plan.py`, `fallback_pose.py` | `_repair_stats` 模块级 dict + `_incr_repair_stat()`/`get_repair_stats()`/`reset_repair_stats()`；`duration_hint_defaulted`/`clamped`、`fallback_resolve_requested`/`fallback_used_neutral` 埋点 |
-| ⚠️ 未处理 | `runtime/state.py` 1798 行全局状态混合 | — | 待后续拆分 |
+| ✅ 部分处理 | `runtime/state.py` 全局状态混合 | `runtime/state.py`, `runtime/motion_state/tuning_store.py` | 已拆出 motion tuning 样本持久化、校验和 prompt 投影；主文件约 1282 行，扫描、配置和缓存职责仍待继续拆分 |
 | ⚠️ 未处理 | `live2d/scanner/scan.py` 3010 行多职责混合 | — | 待后续拆分 |
 | ⚠️ 未处理 | `turn_coordinator.py` 1004 行集中 | — | 待后续拆分 |
 | ⚠️ 未处理 | `useAdapterConnection.ts` 653 行门面偏大 | — | 待后续拆分 |
