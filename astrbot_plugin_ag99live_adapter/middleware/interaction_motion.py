@@ -572,12 +572,8 @@ def _build_motion_capability_payload(runtime_state: Any) -> dict[str, Any]:
             if prompt_fallback_candidates:
                 capability_payload["fallback_pose_candidates"] = prompt_fallback_candidates
 
-        fallback_pose_id = _resolve_motion_format_fallback_pose_id(
-            capability_payload.get("fallback_pose_candidates")
-        )
         capability_payload["plugin_hints_format"] = _build_plugin_hints_motion_format(
             profile_payload,
-            fallback_pose_id=fallback_pose_id,
         )
 
     return capability_payload
@@ -611,7 +607,7 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     fallback_pose_text = ""
     fallback_candidates = capability_payload.get("fallback_pose_candidates")
     if isinstance(fallback_candidates, list) and fallback_candidates:
-        lines = ["可用 fallback_pose_id："]
+        lines = ["可参考的姿态语义样本（只用于理解姿态组合，不要输出这些 id）："]
         for item in fallback_candidates:
             if not isinstance(item, dict):
                 continue
@@ -625,9 +621,12 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
             intensity = str(item.get("intensity") or "").strip()
             scenarios = _join_prompt_list(item.get("recommended_scenarios"), limit=3)
             description = _truncate_text(str(item.get("description") or "").strip(), 72)
+            pose_descriptors = _join_prompt_list(item.get("pose_descriptors"), limit=4)
             key_axes = _format_key_axes_for_prompt(item.get("key_axes"))
             if emotion_bias:
-                context_parts.append(f"情绪={emotion_bias}")
+                context_parts.append(f"语义={emotion_bias}")
+            if pose_descriptors:
+                context_parts.append(f"姿态={pose_descriptors}")
             if intensity:
                 context_parts.append(f"强度={intensity}")
             if scenarios:
@@ -638,7 +637,7 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
                 context_parts.append(f"关键轴={key_axes}")
             context_text = f"；{'；'.join(context_parts)}" if context_parts else ""
             lines.append(
-                f"- {pose_id}: {label}"
+                f"- {label}"
                 + (f" ({source})" if source else "")
                 + context_text
             )
@@ -648,13 +647,14 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         "AG99live Motion 是当前桌宠前端的主动作通道。"
         "每次 interaction decision 都必须在 JSON 输出的 plugin_hints 中写入 ag99live_motion；"
         "不要把动作写进 immediate_spoken_reply、core_task_spec 或普通文本。"
-        "ag99live_motion 只允许 emotion_label、duration_hint_ms、fallback_pose_id，以及 axes 语义轴目标组。"
+        "ag99live_motion 只允许 intent_tags、resource_id、duration_hint_ms，以及 axes 语义轴目标组。"
+        "intent_tags 是 2 到 6 个表演意图关键词，可以包含情绪、语气、姿态和场景词；不要输出 emotion_label。"
+        "resource_id 是可选明确资源引用；没有可用候选或不确定时省略，不要编造。"
         "不要输出 choice、mode、motion_id、catalog、motion3、exp3 或任何播放文件引用。"
         "axes 是一组语义轴目标值，只能使用下方 schema 中已有的轴 id；每个轴值必须直接写成 number，例如 \"head_yaw\": 62。"
         "不要生成关键帧、时间曲线、随机抖动或来回摆动。"
-        "fallback_pose_id 必须从候选中选择；它只是解析失败时的语义姿态兜底，不是播放表情文件。"
         "如果用户只是普通说话，也要给一个轻量语义姿态。"
-        "不要把输出形状或情绪名称当成封闭动作模板；先理解本轮对话语气，再自由组合相关轴。"
+        "不要把输出形状或单一情绪名称当成封闭动作模板；先理解本轮对话语气，再自由组合相关轴。"
         "避免连续复用同一组轴和值；平静语气也要在头部朝向、身体跟随、视线和眼部之间做轻微语义变化。"
         "明确转身、强调、回避、惊讶、调侃、开心或疑惑时，优先用 head_yaw/head_roll/head_pitch "
         "配合 body_yaw/body_roll/body_pitch 建立可见动作骨架，再少量补眼部和表情细节。"
@@ -668,8 +668,6 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
 
 def _build_plugin_hints_motion_format(
     profile_payload: dict[str, Any],
-    *,
-    fallback_pose_id: str | None = None,
 ) -> dict[str, Any]:
     prompt_axes = profile_payload.get("prompt_axes")
     if not isinstance(prompt_axes, list) or not prompt_axes:
@@ -686,9 +684,8 @@ def _build_plugin_hints_motion_format(
 
     return {
         "ag99live_motion": {
-            "emotion_label": "expressive",
+            "intent_tags": ["语气关键词", "姿态关键词", "场景关键词"],
             "duration_hint_ms": DEFAULT_MOTION_INTENT_DURATION_MS,
-            "fallback_pose_id": fallback_pose_id or DEFAULT_FALLBACK_POSE_ID,
             "axes": axis_schema,
         },
     }

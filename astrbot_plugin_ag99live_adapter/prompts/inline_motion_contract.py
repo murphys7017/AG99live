@@ -27,11 +27,12 @@ def build_inline_motion_contract(
         "`intent.schema_version` 必须是 `engine.motion_intent.v3`。",
         "intent 必须按模板原样包含 `profile_id`、`profile_revision` 和 `model_id`。",
         "不要输出 `intent.mode`；系统会在归一化后补充 expressive。",
+        "`intent.intent_tags` 必须包含 2 到 6 个表演意图关键词，可以包含情绪、语气、姿态和场景词。",
+        "`intent.resource_id` 是可选明确资源引用；没有候选或不确定时省略，不要编造。",
         "`intent.axes` 对象只能包含下方列出的可控制参数。",
         "`intent.axes` 的每个值必须是 flat number，不要写成 {\"value\": number}。",
         "不要编造参数名，也不要输出未列出的参数。",
         "`intent.duration_hint_ms` 缺失或不合理时会被系统默认成 1000ms。",
-        "`intent.fallback_pose_id` 必须按模板填写；如果不确定就用 neutral。",
         "如果本轮语气平静或不确定，输出安全的轻量语义 intent，不要省略标签。",
     ]
     if motion_instruction:
@@ -106,9 +107,8 @@ def build_inline_motion_intent_template(semantic_profile: dict[str, Any]) -> dic
         "profile_id": str(semantic_profile.get("profile_id") or "").strip(),
         "profile_revision": int(semantic_profile.get("revision") or 0),
         "model_id": str(semantic_profile.get("model_id") or "").strip(),
-        "emotion_label": "neutral",
+        "intent_tags": ["语气关键词", "姿态关键词", "场景关键词"],
         "duration_hint_ms": 1000,
-        "fallback_pose_id": "neutral",
         "axes": axes,
         "summary": {
             "axis_count": len(axes),

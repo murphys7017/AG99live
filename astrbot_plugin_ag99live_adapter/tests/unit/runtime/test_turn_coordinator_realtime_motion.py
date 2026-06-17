@@ -495,7 +495,9 @@ def test_build_model_visible_user_text_appends_inline_contract(
     assert "当前 Live2D 模型：pet。" in prompt_text
     assert "<@anim {" in prompt_text
     assert '"schema_version":"engine.motion_intent.v3"' in prompt_text
-    assert '"fallback_pose_id":"neutral"' in prompt_text
+    assert "intent_tags" in prompt_text
+    assert "resource_id" in prompt_text
+    assert "fallback_pose_id" not in prompt_text
     assert '"profile_id":"pet.semantic.v1"' in prompt_text
     assert "debug_tail" not in prompt_text
 

@@ -437,7 +437,9 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "旧表情参考模板" not in system.value
     assert "[动作]" not in system.value
     assert "head_yaw" in system.value
-    assert "fallback_pose_id" in system.value
+    assert "fallback_pose_id" not in system.value
+    assert "intent_tags" in system.value
+    assert "resource_id" in system.value
     assert "axes 语义轴目标组" in system.value
     assert "关键轴=head_yaw=80" in system.value
     assert "姿态更稳定" in system.value
@@ -488,18 +490,15 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
         capability.value["plugin_hints_format"]["ag99live_motion"]["axes"]
     ) == {"head_yaw", "eye_open_left"}
     assert (
-        capability.value["plugin_hints_format"]["ag99live_motion"]["fallback_pose_id"]
-        == capability.value["fallback_pose_candidates"][0]["id"]
+        capability.value["plugin_hints_format"]["ag99live_motion"]["intent_tags"]
+        == ["语气关键词", "姿态关键词", "场景关键词"]
     )
-    assert capability.value["plugin_hints_format"]["ag99live_motion"]["fallback_pose_id"] != "neutral"
+    assert "intent_tags" in system.value
+    assert "resource_id" in system.value
     assert (
-        f'"fallback_pose_id":"{capability.value["fallback_pose_candidates"][0]["id"]}"'
-        in system.value
+        "fallback_pose_id" not in capability.value["plugin_hints_format"]["ag99live_motion"]
     )
-    assert (
-        capability.value["plugin_hints_format"]["ag99live_motion"]["emotion_label"]
-        == "expressive"
-    )
+    assert capability.value["fallback_pose_candidates"][0]["label"] in system.value
     assert runtime.value["configured_generation_mode"] == "split_after_reply"
     assert runtime.value["prompt_purpose"] == "persona_reply"
 
