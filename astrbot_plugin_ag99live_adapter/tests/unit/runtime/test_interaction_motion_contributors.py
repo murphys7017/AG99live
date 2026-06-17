@@ -453,6 +453,10 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
         item["id"] != "neutral"
         for item in capability.value["fallback_pose_candidates"]
     )
+    assert all(
+        item["pose_descriptors"]
+        for item in capability.value["fallback_pose_candidates"]
+    )
     catalog_candidate = next(
         item
         for item in capability.value["fallback_pose_candidates"]
@@ -569,7 +573,7 @@ def test_prompt_purpose_appears_in_runtime_payload(
         assert runtime.value["prompt_purpose"] == purpose
 
 
-def test_prompt_fallback_candidates_are_representative_not_first_four(
+def test_prompt_fallback_candidates_are_representative_by_axis_descriptors(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -583,7 +587,7 @@ def test_prompt_fallback_candidates_are_representative_not_first_four(
             "emotion_label": "calm",
             "source": "motion_catalog_semantic_extract",
             "intensity": "low",
-            "axes": {"head_yaw": 52},
+            "axes": {"head_yaw": 65},
         },
         {
             "id": "calm_b",
@@ -591,7 +595,7 @@ def test_prompt_fallback_candidates_are_representative_not_first_four(
             "emotion_label": "calm",
             "source": "motion_catalog_semantic_extract",
             "intensity": "low",
-            "axes": {"head_yaw": 53},
+            "axes": {"head_yaw": 66},
         },
         {
             "id": "neutral",
@@ -606,7 +610,23 @@ def test_prompt_fallback_candidates_are_representative_not_first_four(
             "emotion_label": "calm",
             "source": "motion_catalog_semantic_extract",
             "intensity": "low",
-            "axes": {"head_yaw": 54},
+            "axes": {"head_yaw": 67},
+        },
+        {
+            "id": "calm_tilt",
+            "label": "Calm Tilt",
+            "emotion_label": "calm",
+            "source": "motion_catalog_semantic_extract",
+            "intensity": "low",
+            "axes": {"head_roll": 32},
+        },
+        {
+            "id": "calm_forward",
+            "label": "Calm Forward",
+            "emotion_label": "calm",
+            "source": "motion_catalog_semantic_extract",
+            "intensity": "low",
+            "axes": {"body_pitch": 35},
         },
         {
             "id": "angry_forward",
@@ -630,11 +650,113 @@ def test_prompt_fallback_candidates_are_representative_not_first_four(
 
     selected = module._build_prompt_fallback_pose_candidates(candidates, limit=4)
     selected_ids = [item["id"] for item in selected]
+    selected_descriptors = {
+        descriptor
+        for item in selected
+        for descriptor in item["pose_descriptors"]
+    }
 
     assert "neutral" not in selected_ids
-    assert "angry_forward" in selected_ids
-    assert "surprised" in selected_ids
-    assert selected_ids != ["calm_a", "calm_b", "calm_c", "angry_forward"]
+    assert "calm_tilt" in selected_ids
+    assert "calm_forward" in selected_ids
+    assert "angry_forward" in selected_ids or "surprised" in selected_ids
+    assert {"tilt_left", "lean_forward"}.issubset(selected_descriptors)
+    assert selected_ids != ["calm_a", "calm_b", "calm_c", "calm_tilt"]
+
+
+def test_prompt_fallback_descriptors_follow_profile_neutral_not_fixed_50(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    semantic_profile = {
+        "axes": [
+            {
+                "id": "head_yaw",
+                "control_role": "primary",
+                "neutral": 30,
+                "value_range": [0, 100],
+                "soft_range": [24, 36],
+            },
+            {
+                "id": "body_pitch",
+                "control_role": "primary",
+                "neutral": 70,
+                "value_range": [0, 100],
+                "soft_range": [66, 74],
+            },
+        ]
+    }
+    candidates = [
+        {
+            "id": "off_center",
+            "label": "Off Center",
+            "source": "motion_catalog_semantic_extract",
+            "axes": {"head_yaw": 40, "body_pitch": 58},
+        }
+    ]
+
+    selected = module._build_prompt_fallback_pose_candidates(
+        candidates,
+        semantic_profile=semantic_profile,
+        limit=4,
+    )
+
+    assert selected[0]["pose_descriptors"] == ["lean_forward", "look_right"]
+
+
+def test_motion_visibility_summary_includes_pose_descriptors_and_soft_range_axes(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    semantic_profile = {
+        "axes": [
+            {
+                "id": "head_yaw",
+                "control_role": "primary",
+                "semantic_group": "head",
+                "neutral": 30,
+                "value_range": [0, 100],
+                "soft_range": [24, 36],
+            },
+            {
+                "id": "body_pitch",
+                "control_role": "primary",
+                "semantic_group": "body",
+                "neutral": 70,
+                "value_range": [0, 100],
+                "soft_range": [66, 74],
+            },
+            {
+                "id": "eye_open_left",
+                "control_role": "hint",
+                "semantic_group": "eye",
+                "neutral": 50,
+                "value_range": [0, 100],
+                "soft_range": [45, 55],
+            },
+        ]
+    }
+
+    summary = module._build_motion_visibility_summary(
+        axes={"head_yaw": 40, "body_pitch": 58, "eye_open_left": 50},
+        semantic_profile=semantic_profile,
+        repair_added_axes=["body_pitch"],
+        repair_replaced_axes=[],
+    )
+
+    assert summary["skeleton_groups"] == ["head", "body"]
+    assert summary["skeleton_groups_present"] == ["head", "body"]
+    assert summary["missing_skeleton_groups"] == ["gaze"]
+    assert summary["outside_soft_range_axes"] == ["head_yaw", "body_pitch"]
+    assert summary["pose_descriptors"] == ["lean_forward", "look_right"]
+    assert summary["neutralish_axes"] == ["eye_open_left"]
+    assert summary["skeleton_repair_added_axes"] == ["body_pitch"]
 
 
 def test_view_plugin_hints_prioritized_over_event_extra(

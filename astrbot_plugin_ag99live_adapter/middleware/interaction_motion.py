@@ -433,15 +433,12 @@ def _build_motion_visibility_summary(
     repair_added_axes: list[str] | None = None,
     repair_replaced_axes: list[str] | None = None,
 ) -> dict[str, Any]:
-    axis_by_id = {
-        str(axis.get("id") or "").strip(): axis
-        for axis in profile_prompt_axes(semantic_profile)
-        if isinstance(axis, dict) and str(axis.get("id") or "").strip()
-    }
+    axis_by_id = _build_prompt_axis_lookup(semantic_profile)
     active_groups: set[str] = set()
     max_delta_from_neutral = 0.0
     neutralish_axes: list[str] = []
     expressive_axes: list[str] = []
+    outside_soft_range_axes: list[str] = []
 
     for axis_id, raw_value in axes.items():
         axis = axis_by_id.get(str(axis_id))
@@ -449,10 +446,9 @@ def _build_motion_visibility_summary(
             continue
         try:
             value = float(raw_value)
-            neutral = float(axis.get("neutral", 50))
         except (TypeError, ValueError):
             continue
-        delta = abs(value - neutral)
+        delta = abs(_resolve_axis_neutral_delta(value, axis))
         max_delta_from_neutral = max(max_delta_from_neutral, delta)
         group = str(axis.get("semantic_group") or "").strip().lower()
         if group:
@@ -461,6 +457,7 @@ def _build_motion_visibility_summary(
             neutralish_axes.append(str(axis_id))
         else:
             expressive_axes.append(str(axis_id))
+            outside_soft_range_axes.append(str(axis_id))
 
     skeleton_groups = ("head", "body", "gaze")
     covered_skeleton_groups = [group for group in skeleton_groups if group in active_groups]
@@ -470,12 +467,15 @@ def _build_motion_visibility_summary(
         "axis_count": len(axes),
         "active_groups": sorted(active_groups),
         "skeleton_groups": covered_skeleton_groups,
+        "skeleton_groups_present": covered_skeleton_groups,
         "missing_skeleton_groups": missing_skeleton_groups,
         "max_delta_from_neutral": round(max_delta_from_neutral, 4),
         "neutralish_axis_count": len(neutralish_axes),
         "expressive_axis_count": len(expressive_axes),
         "neutralish_axes": neutralish_axes[:12],
         "expressive_axes": expressive_axes[:12],
+        "outside_soft_range_axes": outside_soft_range_axes[:12],
+        "pose_descriptors": _describe_fallback_pose_axes(axes, axis_by_id=axis_by_id)[:8],
         "skeleton_repair_added_axes": list(repair_added_axes or []),
         "skeleton_repair_replaced_axes": list(repair_replaced_axes or []),
     }
@@ -566,6 +566,7 @@ def _build_motion_capability_payload(runtime_state: Any) -> dict[str, Any]:
             )
             prompt_fallback_candidates = _build_prompt_fallback_pose_candidates(
                 fallback_candidates,
+                semantic_profile=raw_profile,
                 limit=4,
             )
             if prompt_fallback_candidates:
@@ -696,10 +697,13 @@ def _build_plugin_hints_motion_format(
 def _build_prompt_fallback_pose_candidates(
     fallback_candidates: list[dict[str, Any]],
     *,
+    semantic_profile: dict[str, Any] | None = None,
     limit: int,
 ) -> list[dict[str, Any]]:
+    axis_by_id = _build_prompt_axis_lookup(semantic_profile)
     selected_candidates = _select_representative_fallback_pose_candidates(
         fallback_candidates,
+        axis_by_id=axis_by_id,
         limit=limit,
     )
     result: list[dict[str, Any]] = []
@@ -720,6 +724,10 @@ def _build_prompt_fallback_pose_candidates(
                 "recommended_scenarios": _normalize_axis_text_list(
                     item.get("recommended_scenarios")
                 )[:4],
+                "pose_descriptors": _describe_fallback_pose_axes(
+                    item.get("axes"),
+                    axis_by_id=axis_by_id,
+                )[:4],
                 "key_axes": _summarize_key_axes(item.get("axes"), limit=5),
                 "source": source,
             }
@@ -730,6 +738,7 @@ def _build_prompt_fallback_pose_candidates(
 def _select_representative_fallback_pose_candidates(
     fallback_candidates: list[dict[str, Any]],
     *,
+    axis_by_id: Mapping[str, dict[str, Any]] | None = None,
     limit: int,
 ) -> list[dict[str, Any]]:
     max_items = max(0, limit)
@@ -744,35 +753,28 @@ def _select_representative_fallback_pose_candidates(
     if not candidates:
         return []
 
-    by_bucket: dict[str, list[dict[str, Any]]] = {}
+    by_signature: dict[str, list[dict[str, Any]]] = {}
     for item in candidates:
-        bucket = _classify_prompt_fallback_pose_bucket(item)
-        by_bucket.setdefault(bucket, []).append(item)
+        signature = _classify_prompt_fallback_pose_signature(item, axis_by_id=axis_by_id)
+        by_signature.setdefault(signature, []).append(item)
 
-    for bucket_candidates in by_bucket.values():
-        bucket_candidates.sort(
+    for signature_candidates in by_signature.values():
+        signature_candidates.sort(
             key=_score_prompt_fallback_pose_candidate,
             reverse=True,
         )
 
     selected: list[dict[str, Any]] = []
     selected_ids: set[str] = set()
-    bucket_order = (
-        "negative",
-        "surprise",
-        "thinking",
-        "happy",
-        "sad",
-        "calm",
-        "other",
+    ranked_signatures = sorted(
+        by_signature.items(),
+        key=lambda entry: _score_prompt_fallback_signature(entry[0], entry[1]),
+        reverse=True,
     )
-    for bucket in bucket_order:
+    for _signature, signature_candidates in ranked_signatures:
         if len(selected) >= max_items:
             break
-        bucket_candidates = by_bucket.get(bucket)
-        if not bucket_candidates:
-            continue
-        item = bucket_candidates[0]
+        item = signature_candidates[0]
         candidate_id = str(item.get("id") or "").strip()
         if candidate_id in selected_ids:
             continue
@@ -810,60 +812,157 @@ def _is_prompt_fallback_pose_candidate(item: Any) -> bool:
     return isinstance(axes, dict) and bool(axes)
 
 
-def _classify_prompt_fallback_pose_bucket(item: dict[str, Any]) -> str:
-    text = " ".join(
-        [
-            str(item.get("id") or ""),
-            str(item.get("label") or ""),
-            str(item.get("emotion_label") or ""),
-            str(item.get("description") or ""),
-            " ".join(_normalize_axis_text_list(item.get("emotion_bias"))),
-            " ".join(_normalize_axis_text_list(item.get("tags"))),
-            " ".join(_normalize_axis_text_list(item.get("recommended_scenarios"))),
-        ]
-    ).lower()
-    marker_groups = (
-        (
-            "negative",
-            (
-                "angry",
-                "disgust",
-                "mocking",
-                "impatient",
-                "annoy",
-                "不耐烦",
-                "吐槽",
-                "嫌弃",
-                "催促",
-            ),
-        ),
-        ("surprise", ("surprise", "surprised", "startled", "惊讶", "震惊")),
-        (
-            "thinking",
-            (
-                "thinking",
-                "confused",
-                "curious",
-                "serious",
-                "explain",
-                "困惑",
-                "疑问",
-                "认真",
-                "说明",
-                "解释",
-            ),
-        ),
-        (
-            "happy",
-            ("happy", "joy", "smile", "playful", "开心", "高兴", "微笑"),
-        ),
-        ("sad", ("sad", "tired", "失落", "伤心", "低落", "委屈")),
-        ("calm", ("calm", "gentle", "neutral", "温和", "平和", "安抚")),
+def _classify_prompt_fallback_pose_signature(
+    item: dict[str, Any],
+    *,
+    axis_by_id: Mapping[str, dict[str, Any]] | None = None,
+) -> str:
+    descriptors = _describe_fallback_pose_axes(item.get("axes"), axis_by_id=axis_by_id)
+    if descriptors:
+        return "+".join(descriptors[:3])
+    return "metadata:" + _normalize_prompt_fallback_metadata_signature(item)
+
+
+def _describe_fallback_pose_axes(
+    value: Any,
+    *,
+    axis_by_id: Mapping[str, dict[str, Any]] | None = None,
+) -> list[str]:
+    if not isinstance(value, dict):
+        return []
+    descriptors: list[str] = []
+    for axis_id, axis_value in sorted(value.items()):
+        if not isinstance(axis_value, (int, float)) or isinstance(axis_value, bool):
+            continue
+        axis_name = str(axis_id or "").strip()
+        if not axis_name:
+            continue
+        descriptor = _describe_fallback_pose_axis_value(
+            axis_name,
+            float(axis_value),
+            axis=axis_by_id.get(axis_name) if axis_by_id else None,
+        )
+        if descriptor and descriptor not in descriptors:
+            descriptors.append(descriptor)
+    return descriptors
+
+
+def _describe_fallback_pose_axis_value(
+    axis_id: str,
+    value: float,
+    *,
+    axis: dict[str, Any] | None = None,
+) -> str:
+    normalized_axis = axis_id.strip().lower()
+    if not float("-inf") < value < float("inf"):
+        return ""
+    delta = _resolve_axis_neutral_delta(value, axis)
+    threshold = _resolve_axis_descriptor_threshold(axis)
+    if abs(delta) < threshold:
+        return ""
+
+    axis_descriptors = {
+        "head_yaw": ("look_left", "look_right"),
+        "body_yaw": ("body_turn_left", "body_turn_right"),
+        "gaze_yaw": ("gaze_left", "gaze_right"),
+        "eye_gaze_x": ("gaze_left", "gaze_right"),
+        "head_pitch": ("look_down", "look_up"),
+        "body_pitch": ("lean_forward", "lean_back"),
+        "gaze_pitch": ("gaze_down", "gaze_up"),
+        "eye_gaze_y": ("gaze_down", "gaze_up"),
+        "head_roll": ("tilt_left", "tilt_right"),
+        "body_roll": ("body_lean_left", "body_lean_right"),
+        "eye_open_left": ("left_eye_narrow", "left_eye_open"),
+        "eye_open_right": ("right_eye_narrow", "right_eye_open"),
+        "eye_smile_left": ("left_eye_relaxed", "left_eye_smile"),
+        "eye_smile_right": ("right_eye_relaxed", "right_eye_smile"),
+        "mouth_smile": ("mouth_frown", "mouth_smile"),
+        "brow_bias": ("brow_down", "brow_raise"),
+        "mouth_open": ("mouth_closed", "mouth_open"),
+    }
+    negative, positive = axis_descriptors.get(
+        normalized_axis,
+        (f"{normalized_axis}_low", f"{normalized_axis}_high"),
     )
-    for bucket, markers in marker_groups:
-        if any(marker in text for marker in markers):
-            return bucket
-    return "other"
+    return positive if delta > 0 else negative
+
+
+def _build_prompt_axis_lookup(
+    semantic_profile: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    if not isinstance(semantic_profile, dict):
+        return {}
+    return _build_prompt_axis_lookup_from_axes(profile_prompt_axes(semantic_profile))
+
+
+def _build_prompt_axis_lookup_from_axes(
+    prompt_axes: list[dict[str, Any]] | None,
+) -> dict[str, dict[str, Any]]:
+    if not isinstance(prompt_axes, list):
+        return {}
+    return {
+        str(axis.get("id") or "").strip(): axis
+        for axis in prompt_axes
+        if isinstance(axis, dict) and str(axis.get("id") or "").strip()
+    }
+
+
+def _resolve_axis_soft_range(axis: dict[str, Any] | None) -> tuple[float, float] | None:
+    if not isinstance(axis, dict):
+        return None
+    soft_range = axis.get("soft_range")
+    if (
+        isinstance(soft_range, (list, tuple))
+        and len(soft_range) >= 2
+        and isinstance(soft_range[0], (int, float))
+        and isinstance(soft_range[1], (int, float))
+    ):
+        return float(soft_range[0]), float(soft_range[1])
+    return None
+
+
+def _resolve_axis_neutral_delta(value: float, axis: dict[str, Any] | None) -> float:
+    neutral = _resolve_axis_neutral_value(axis or {})
+    return float(value) - neutral
+
+
+def _resolve_axis_descriptor_threshold(axis: dict[str, Any] | None) -> float:
+    soft_range = _resolve_axis_soft_range(axis)
+    if soft_range is not None:
+        soft_min, soft_max = soft_range
+        neutral = _resolve_axis_neutral_value(axis or {})
+        soft_delta = max(abs(soft_max - neutral), abs(neutral - soft_min))
+        if soft_delta > 0:
+            return max(soft_delta * 0.6, 2.0)
+    return 6.0
+
+
+def _normalize_prompt_fallback_metadata_signature(item: dict[str, Any]) -> str:
+    for key in ("label", "emotion_label", "id"):
+        value = re.sub(r"[^0-9A-Za-z_\u4e00-\u9fff]+", "_", str(item.get(key) or "").strip())
+        if value:
+            return value[:48]
+    return "unknown"
+
+
+def _score_prompt_fallback_signature(
+    signature: str,
+    candidates: list[dict[str, Any]],
+) -> tuple[int, int, str]:
+    descriptors = [part for part in signature.split("+") if part]
+    descriptor_score = min(len(descriptors), 3) * 20
+    skeleton_score = 0
+    if any(part.startswith(("look_", "tilt_", "gaze_")) for part in descriptors):
+        skeleton_score += 12
+    if any(part.startswith(("body_", "lean_")) for part in descriptors):
+        skeleton_score += 10
+    if any("eye" in part or "mouth" in part or "brow" in part for part in descriptors):
+        skeleton_score += 5
+    best_candidate_score = max(
+        (_score_prompt_fallback_pose_candidate(item)[0] for item in candidates),
+        default=0,
+    )
+    return descriptor_score + skeleton_score, best_candidate_score, signature
 
 
 def _score_prompt_fallback_pose_candidate(item: dict[str, Any]) -> tuple[int, int, int, str]:

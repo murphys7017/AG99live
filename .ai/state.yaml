@@ -19,9 +19,11 @@ architecture:
   boundary_changes:
     - fallback pose candidates can now include semantic metadata from motion catalog entries and key semantic axes derived from motion_resource_pool driver components.
     - middleware motion prompt now names axes as a semantic-axis target group instead of a plain field and exposes fallback candidate descriptions, scenarios, intensity, emotion bias, and key axes.
-    - middleware motion prompt examples should use a small set of visible non-neutral axis values and show only 2-4 non-default fallback pose candidates to reduce neutral anchoring.
+    - middleware motion prompt examples should use a small set of visible non-neutral axis values and show 2-4 non-default fallback pose candidates selected by axis/pose descriptors rather than coarse emotion labels.
     - middleware-first and inline-first valid v3 motion intents now share fallback-pose skeleton repair and expressive-floor ordering for weak semantic axis outputs.
     - plugin_hints JSON parsing now tolerates outer-format issues such as fenced JSON, text-wrapped objects, and trailing commas while preserving strict v3 axis semantics.
+    - fallback candidate selection and motion visibility summaries now derive pose descriptors from each axis profile's own neutral and soft_range values instead of assuming a global midpoint of 50.
+    - frontend motion diagnostics now surface pose_descriptors, outside_soft_range_axes, and skeleton_groups_present from semantic motion summaries so prompt tuning can be compared against runtime-visible motion coverage.
 verification:
   checks_run:
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py -q

@@ -218,6 +218,7 @@ function normalizePlanSummary(value: unknown): SemanticParameterPlan["summary"] 
       : undefined,
     active_groups: normalizeStringArray(value.active_groups),
     skeleton_groups: normalizeStringArray(value.skeleton_groups),
+    skeleton_groups_present: normalizeStringArray(value.skeleton_groups_present),
     missing_skeleton_groups: normalizeStringArray(value.missing_skeleton_groups),
     max_delta_from_neutral: isFiniteNumber(value.max_delta_from_neutral)
       ? value.max_delta_from_neutral
@@ -230,6 +231,8 @@ function normalizePlanSummary(value: unknown): SemanticParameterPlan["summary"] 
       : undefined,
     neutralish_axes: normalizeStringArray(value.neutralish_axes),
     expressive_axes: normalizeStringArray(value.expressive_axes),
+    outside_soft_range_axes: normalizeStringArray(value.outside_soft_range_axes),
+    pose_descriptors: normalizeStringArray(value.pose_descriptors),
     skeleton_repair_added_axes: normalizeStringArray(value.skeleton_repair_added_axes),
     skeleton_repair_replaced_axes: normalizeStringArray(value.skeleton_repair_replaced_axes),
   };

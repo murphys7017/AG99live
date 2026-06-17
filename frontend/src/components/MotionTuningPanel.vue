@@ -101,7 +101,10 @@ type MotionVisibilitySummary = Record<string, unknown> & {
   neutralish_axis_count?: number;
   expressive_axis_count?: number;
   skeleton_groups?: string[];
+  skeleton_groups_present?: string[];
   missing_skeleton_groups?: string[];
+  outside_soft_range_axes?: string[];
+  pose_descriptors?: string[];
   skeleton_repair_added_axes?: string[];
   skeleton_repair_replaced_axes?: string[];
 };
@@ -641,10 +644,16 @@ function buildMotionDiagnosticLines(source: MotionDraftSource | null): string[] 
   appendMetric(lines, "参数", summary.parameter_count ?? diagnostics?.compiledParameterCount);
   appendMetric(lines, "时长", summary.target_duration_ms ?? record.plan.timing.duration_ms, "ms");
   appendMetric(lines, "最大偏移", pickNumber(summary.max_delta_from_neutral, diagnostics?.maxDeltaFromNeutral));
-  appendList(lines, "骨架", pickStringList(summary.skeleton_groups, diagnostics?.skeletonGroups));
+  appendList(lines, "骨架", pickStringList(
+    summary.skeleton_groups,
+    summary.skeleton_groups_present,
+    diagnostics?.skeletonGroups,
+  ));
   appendList(lines, "缺骨架", pickStringList(summary.missing_skeleton_groups, diagnostics?.missingSkeletonGroups));
   appendMetric(lines, "soft内轴", pickNumber(summary.neutralish_axis_count, diagnostics?.neutralishAxisCount));
   appendMetric(lines, "表达轴", pickNumber(summary.expressive_axis_count, diagnostics?.expressiveAxisCount));
+  appendList(lines, "越过soft轴", pickStringList(summary.outside_soft_range_axes));
+  appendList(lines, "姿态描述", pickStringList(summary.pose_descriptors));
   appendList(lines, "fallback补轴", pickStringList(summary.skeleton_repair_added_axes));
   appendList(lines, "fallback替换", pickStringList(summary.skeleton_repair_replaced_axes));
   appendList(lines, "coupling跳过", diagnostics?.couplingSkippedExplicitTargets);
