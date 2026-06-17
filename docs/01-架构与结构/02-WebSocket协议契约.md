@@ -166,11 +166,13 @@ control.turn_finished
 
 约束：
 
+- `intent_tags` 和 `axes` 是主语义输入。
 - `axes` 唯一合法形态是 flat number map：`Record<string, number>`。
 - 轴值范围以当前 `SemanticAxisProfile` 中对应 axis 的 `value_range` 为准。
 - 自动动作链路不允许输出 `choice`、`motion_id`、catalog motion、motion3、exp3 或旧播放文件引用。
 - LLM 输出契约不包含 `mode`；Adapter 归一化后会补 `mode: "expressive"` 给现有 ModelEngine 编译链路使用。
 - `idle` 是前端/运行时本底能力，不属于 LLM 本轮动作输出。
+- `emotion_label`、`fallback_pose_id`、`summary` 只属于后端派生或兼容字段，不是 LLM 输出目标。
 
 示例：
 
@@ -181,16 +183,18 @@ control.turn_finished
   "profile_revision": 2,
   "model_id": "pet",
   "mode": "expressive",
-  "emotion_label": "happy",
+  "intent_tags": ["开心", "轻快", "看向用户"],
   "duration_hint_ms": 1000,
-  "fallback_pose_id": "happy_smile",
+  "resource_id": "",
   "axes": {
     "head_yaw": 54,
     "head_pitch": 62,
     "body_roll": 59,
     "gaze_x": 54,
     "mouth_smile": 84
-  }
+  },
+  "emotion_label": "开心-轻快-看向用户",
+  "fallback_pose_id": "happy_smile"
 }
 ```
 

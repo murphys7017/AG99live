@@ -66,7 +66,7 @@ id: "speechPose"
 读取：
 
 - `context.intent.mode`
-- `context.intent.emotion_label`
+- `context.intent.intent_tags`
 - `context.options.speechActive`
 - `context.options.model.voice_following_profile`
 - `context.state.profile`
@@ -138,6 +138,8 @@ legacy derived 轴 fallback：
 | 运行时轴 | 嘴巴开闭、呼吸等由音频或运行时驱动的轴 |
 
 `SpeechPoseStage` 只处理说话场景下缺失的轻量姿态补偿。身体动作已经是主轴体系的一部分，因此说话随动不进入 `SemanticAxisProfile` 的 LLM 可见主轴设计。`VoiceFollowingProfile` 是模型能力 profile；如果后续 profile 额外定义说话姿态派生轴，`SpeechPoseStage` 也不能覆盖 LLM 或用户已经直接表达的主轴/辅轴动作。
+
+当前不以 `emotion_label` 作为进入点；如果上游只有标签串，应该先在接收层里归一化成 `intent_tags`。
 
 `idle` 在这里表示基础状态或轻量持续表现，不等于完全静止。说话随动作为 speaking idle 层存在；明确动作表演仍由 `expressive` 和 LLM 控制的主轴/辅轴表达。
 
