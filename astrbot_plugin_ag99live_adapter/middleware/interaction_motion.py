@@ -119,6 +119,9 @@ class AG99liveMotionPromptContributor:
         if bundle is None:
             return None
 
+        if not _should_contribute_motion_prompt(view):
+            return None
+
         capability_payload = _build_motion_capability_payload(bundle.runtime_state)
         runtime_payload = _build_motion_runtime_payload(
             event,
@@ -228,10 +231,13 @@ def _resolve_motion_runtime_bundle(event: Any) -> _MotionRuntimeBundle | None:
 def _resolve_plugin_hints_motion_payload(
     event: Any,
     runtime_state: Any,
+    *,
+    view: Any = None,
 ) -> dict[str, Any] | None:
     payload, _reason = _resolve_plugin_hints_motion_payload_with_reason(
         event,
         runtime_state,
+        view=view,
     )
     return payload
 
@@ -239,10 +245,13 @@ def _resolve_plugin_hints_motion_payload(
 def _resolve_plugin_hints_motion_payload_with_reason(
     event: Any,
     runtime_state: Any,
+    *,
+    view: Any = None,
 ) -> tuple[dict[str, Any] | None, str]:
-    hints, hints_reason = _coerce_plugin_hints_mapping_with_reason(
-        _call_event_method(event, "get_extra", "_interaction_plugin_hints")
-    )
+    hints = _extract_plugin_hints_from_view(view) if view is not None else None
+    if hints is None:
+        hints = _call_event_method(event, "get_extra", "_interaction_plugin_hints")
+    hints, hints_reason = _coerce_plugin_hints_mapping_with_reason(hints)
     if not isinstance(hints, dict):
         return None, hints_reason
 
@@ -706,9 +715,9 @@ def _build_motion_runtime_payload(
     *,
     view: Any,
 ) -> dict[str, Any]:
-    del event, turn_coordinator, view
     return {
         "configured_generation_mode": _resolve_motion_generation_mode(runtime_state),
+        "prompt_purpose": _resolve_prompt_purpose(view),
     }
 
 
@@ -840,13 +849,14 @@ async def _schedule_motion_from_interaction_result(
     reply_plan = _resolve_interaction_reply_plan_snapshot(event, view)
 
     plugin_hints_payload, plugin_hints_reason = _resolve_plugin_hints_motion_payload_with_reason(
-        event, bundle.runtime_state
+        event, bundle.runtime_state, view=view
     )
     _log_plugin_hints_motion_resolution(
         event,
         phase=phase,
         payload=plugin_hints_payload,
         reason=plugin_hints_reason,
+        view=view,
     )
 
     policy = _resolve_motion_schedule_policy(
@@ -916,18 +926,19 @@ async def _schedule_motion_from_interaction_result(
         )
 
     if policy.should_schedule and plugin_hints_payload is None:
-        if phase == "immediate" and reply_plan is not None and reply_plan.route_mode == "self_reply":
-            plugin_hints_payload, plugin_hints_reason = _build_default_motion_payload(
-                bundle.runtime_state,
-                reason=_append_resolution_reason(plugin_hints_reason, "self_reply_default_pose"),
-            )
-        else:
-            plugin_hints_payload, plugin_hints_reason = await _build_realtime_or_default_motion_payload(
-                event,
-                bundle.runtime_state,
-                assistant_text=assistant_text,
-                reason=plugin_hints_reason,
-            )
+        plugin_hints_payload, plugin_hints_reason = await _build_realtime_or_default_motion_payload(
+            event,
+            bundle.runtime_state,
+            assistant_text=assistant_text,
+            reason=_append_resolution_reason(
+                plugin_hints_reason,
+                "self_reply_motion_missing"
+                if phase == "immediate"
+                and reply_plan is not None
+                and reply_plan.route_mode == "self_reply"
+                else "",
+            ),
+        )
         if plugin_hints_payload is not None:
             _call_event_method(event, "set_extra", "ag99live_split_motion_scheduled", True)
             return _MotionScheduleAttempt(
@@ -1124,10 +1135,12 @@ def _log_plugin_hints_motion_resolution(
     phase: str,
     payload: dict[str, Any] | None,
     reason: str,
+    view: Any = None,
 ) -> None:
-    hints = _coerce_plugin_hints_mapping(
-        _call_event_method(event, "get_extra", "_interaction_plugin_hints")
-    )
+    hints = _extract_plugin_hints_from_view(view) if view is not None else None
+    if hints is None:
+        hints = _call_event_method(event, "get_extra", "_interaction_plugin_hints")
+    hints = _coerce_plugin_hints_mapping(hints)
     hint_keys: list[str] = []
     motion_axes_keys: list[str] = []
     if isinstance(hints, dict):
@@ -1539,6 +1552,61 @@ def _normalize_optional_string(value: Any) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _resolve_prompt_purpose(view: Any) -> str:
+    """Read the prompt purpose from the AstrBot view.
+
+    Returns one of ``"router"``, ``"persona_reply"``, ``"core_reply"``,
+    or ``"unknown"``.
+    """
+    purpose = _normalize_optional_string(getattr(view, "purpose", None))
+    if purpose:
+        return purpose
+    metadata = getattr(view, "metadata", None)
+    if isinstance(metadata, Mapping):
+        purpose = _normalize_optional_string(metadata.get("purpose"))
+    elif callable(getattr(metadata, "get", None)):
+        purpose = _normalize_optional_string(metadata.get("purpose"))
+    if purpose:
+        return purpose
+    return "unknown"
+
+
+def _should_contribute_motion_prompt(view: Any) -> bool:
+    """Only inject motion capability into persona_reply / core_reply prompts.
+
+    This keeps router and other prompt lanes clean of ag99live motion metadata.
+    """
+    purpose = _resolve_prompt_purpose(view)
+    return purpose in {"persona_reply", "core_reply"}
+
+
+def _extract_plugin_hints_from_view(view: Any) -> Any:
+    """Extract plugin_hints from the AstrBot view, preferring direct attributes.
+
+    Returns a dict or str if found, otherwise None.  Callers must coerce the
+    result with ``_coerce_plugin_hints_mapping_with_reason()``.
+    """
+    hints = getattr(view, "plugin_hints", None)
+    if hints is not None:
+        return hints
+
+    metadata = getattr(view, "metadata", None)
+    if isinstance(metadata, Mapping):
+        hints = metadata.get("plugin_hints")
+    elif callable(getattr(metadata, "get", None)):
+        hints = metadata.get("plugin_hints")
+    if hints is not None:
+        return hints
+
+    result = getattr(view, "result", None)
+    if result is not None:
+        hints = getattr(result, "plugin_hints", None)
+        if hints is not None:
+            return hints
+
+    return None
 
 
 def _call_event_method(event: Any, method_name: str, *args: Any) -> Any:

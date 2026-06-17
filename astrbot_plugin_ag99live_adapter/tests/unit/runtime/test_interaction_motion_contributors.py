@@ -5,6 +5,7 @@ import importlib
 import json
 import sys
 import types
+from unittest.mock import patch
 
 
 def _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
@@ -369,6 +370,8 @@ def _build_view(
     final_result: str | None = None,
     core_result: str | None = None,
     immediate_reply: str | None = None,
+    purpose: str | None = None,
+    plugin_hints: object | None = None,
 ):
     decision = None
     if route_mode is not None or should_emit_immediate_reply is not None:
@@ -377,6 +380,9 @@ def _build_view(
             decision["route_mode"] = route_mode
         if should_emit_immediate_reply is not None:
             decision["should_emit_immediate_reply"] = should_emit_immediate_reply
+    metadata: dict[str, object] = {"phase": phase}
+    if purpose is not None:
+        metadata["purpose"] = purpose
     return type(
         "ResultViewStub",
         (),
@@ -387,7 +393,8 @@ def _build_view(
             "final_result": final_result,
             "core_result": core_result,
             "immediate_reply": immediate_reply,
-            "metadata": {"phase": phase},
+            "metadata": metadata,
+            "plugin_hints": plugin_hints,
         },
     )()
 
@@ -401,7 +408,7 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
 
     contributor = module.AG99liveMotionPromptContributor()
     event, _scheduled_calls = _build_event()
-    view = _build_view(phase="decision", route_mode="delegate_to_core")
+    view = _build_view(phase="decision", route_mode="delegate_to_core", purpose="persona_reply")
 
     extensions = asyncio.run(contributor.collect(event, None, view))
 
@@ -469,6 +476,191 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
         == 50
     )
     assert runtime.value["configured_generation_mode"] == "split_after_reply"
+    assert runtime.value["prompt_purpose"] == "persona_reply"
+
+
+def test_prompt_contributor_returns_none_for_router_purpose(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionPromptContributor()
+    event, _scheduled_calls = _build_event()
+    view = _build_view(phase="decision", purpose="router")
+
+    extensions = asyncio.run(contributor.collect(event, None, view))
+    assert extensions is None
+
+
+def test_prompt_contributor_returns_none_for_unknown_purpose(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionPromptContributor()
+    event, _scheduled_calls = _build_event()
+    view = _build_view(phase="decision", purpose="unknown")
+
+    extensions = asyncio.run(contributor.collect(event, None, view))
+    assert extensions is None
+
+
+def test_prompt_contributor_returns_extensions_for_core_reply_purpose(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionPromptContributor()
+    event, _scheduled_calls = _build_event()
+    view = _build_view(phase="final", purpose="core_reply")
+
+    extensions = asyncio.run(contributor.collect(event, None, view))
+    assert isinstance(extensions, list)
+    assert len(extensions) == 3
+
+
+def test_prompt_purpose_appears_in_runtime_payload(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionPromptContributor()
+    event, _scheduled_calls = _build_event()
+    for purpose, expect_present in [
+        ("persona_reply", True),
+        ("core_reply", True),
+        ("router", False),
+    ]:
+        view = _build_view(phase="decision", purpose=purpose)
+        extensions = asyncio.run(contributor.collect(event, None, view))
+        if not expect_present:
+            assert extensions is None
+            continue
+        runtime = next(item for item in extensions if item.mount == "context")
+        assert runtime.value["prompt_purpose"] == purpose
+
+
+def test_view_plugin_hints_prioritized_over_event_extra(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    # Set a DIFFERENT hint on event extra — should be ignored when view has plugin_hints.
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "emotion_label": "event_extra",
+                "fallback_pose_id": "neutral",
+                "axes": {"head_yaw": 20},
+            }
+        },
+    )
+    view = _build_view(
+        phase="final",
+        route_mode="hybrid",
+        final_result="助手回复",
+        plugin_hints={
+            "ag99live_motion": {
+                "emotion_label": "view_hints",
+                "fallback_pose_id": "neutral",
+                "axes": {"head_yaw": 30},
+            }
+        },
+    )
+
+    payload = module._resolve_plugin_hints_motion_payload_with_reason(
+        event, runtime_state, view=view
+    )[0]
+    assert payload is not None
+    assert payload["emotion_label"] == "view_hints"
+    assert payload["axes"]["head_yaw"] == 30
+
+
+def test_event_extra_used_as_fallback_when_view_has_no_plugin_hints(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "emotion_label": "fallback_extra",
+                "fallback_pose_id": "neutral",
+                "axes": {"head_yaw": 40},
+            }
+        },
+    )
+    view = _build_view(phase="final", route_mode="hybrid", final_result="助手回复")
+
+    payload = module._resolve_plugin_hints_motion_payload_with_reason(
+        event, runtime_state, view=view
+    )[0]
+    assert payload is not None
+    assert payload["emotion_label"] == "fallback_extra"
+
+
+def test_log_plugin_hints_motion_resolution_prefers_view_hints(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "emotion_label": "event_extra",
+                "fallback_pose_id": "neutral",
+                "axes": {"head_yaw": 20},
+            }
+        },
+    )
+    view = _build_view(
+        phase="final",
+        plugin_hints={
+            "ag99live_motion": {
+                "emotion_label": "view_hints",
+                "fallback_pose_id": "neutral",
+                "axes": {"head_yaw": 30, "head_roll": 60},
+            }
+        },
+    )
+
+    with patch.object(module.logger, "info") as info_mock:
+        module._log_plugin_hints_motion_resolution(
+            event,
+            phase="final",
+            payload={"axes": {"head_yaw": 30}},
+            reason="ok",
+            view=view,
+        )
+
+    _, phase, payload_present, reason, hint_keys, motion_axes = info_mock.call_args.args
+    assert phase == "final"
+    assert payload_present is True
+    assert reason == "ok"
+    assert hint_keys == "ag99live_motion"
+    assert motion_axes == "head_roll,head_yaw"
 
 
 def test_fallback_pose_candidates_prioritize_enabled_matching_user_tuning(
@@ -1524,6 +1716,72 @@ def test_result_contributor_skips_self_reply_in_inline_first_mode(
         contribution.metadata["ag99live_motion_schedule"]["reason"]
         == "self_reply_managed_by_inline_compat"
     )
+
+
+def test_self_reply_missing_hints_calls_realtime_motion_with_provider(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, scheduled_calls = _build_event(raw_turn_id="turn-1")
+
+    # Inject a mock motion analysis provider that returns non-neutral axes.
+    mock_response = type("Response", (), {"completion_text": json.dumps({
+        "emotion_label": "mocking",
+        "duration_hint_ms": 1500,
+        "fallback_pose_id": "\u4e0d\u8010\u70e6\u524d\u503e",
+        "axes": {"head_yaw": 30},
+    })})()
+    mock_provider = type("Provider", (), {
+        "text_chat": lambda *args, **kwargs: asyncio.ensure_future(
+            asyncio.sleep(0, result=mock_response)
+        ),
+    })()
+    event.adapter.turn_coordinator.runtime_state.selected_motion_analysis_provider = mock_provider
+
+    contributor = module.AG99liveMotionResultContributor()
+    view = _build_view(
+        phase="immediate",
+        route_mode="self_reply",
+        final_result="\u4f60\u662f\u5b87\u5b99\u65e0\u654c\u5c0f\u673a\u5668\u4eba",
+        immediate_reply="\u4f60\u662f\u5b87\u5b99\u65e0\u654c\u5c0f\u673a\u5668\u4eba",
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+    assert contribution is not None
+    metadata = contribution.metadata["ag99live_motion_schedule"]
+    assert metadata["scheduled"] is True
+    assert metadata["source"] == "realtime_motion"
+    assert contribution.client_objects[0]["motion_payload"]["axes"]["head_yaw"] == 30
+
+
+def test_self_reply_missing_hints_falls_back_to_default_pose_without_provider(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, scheduled_calls = _build_event(raw_turn_id="turn-2")
+    # Provider is None (default) — realtime cannot run.
+
+    contributor = module.AG99liveMotionResultContributor()
+    view = _build_view(
+        phase="immediate",
+        route_mode="self_reply",
+        final_result="\u4f60\u597d",
+        immediate_reply="\u4f60\u597d",
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+    assert contribution is not None
+    metadata = contribution.metadata["ag99live_motion_schedule"]
+    assert metadata["scheduled"] is True
+    assert metadata["source"] == "default_pose"
+    payload = contribution.client_objects[0]["motion_payload"]
+    assert payload["fallback_pose_id"] == "neutral"
 
 
 def test_register_interaction_contributors_uses_available_hooks(
