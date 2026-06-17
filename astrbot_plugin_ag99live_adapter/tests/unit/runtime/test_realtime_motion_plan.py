@@ -324,6 +324,29 @@ def test_normalize_motion_intent_v3_accepts_string_number_axis() -> None:
     assert intent["axes"]["head_yaw"] == 72.5
 
 
+def test_normalize_motion_intent_v3_supports_intent_tags_and_resource_id() -> None:
+    intent = normalize_motion_intent_payload(
+        {
+            "schema_version": "engine.motion_intent.v3",
+            "profile_id": "DemoModel.semantic.v1",
+            "profile_revision": 3,
+            "model_id": "DemoModel",
+            "mode": "expressive",
+            "intent_tags": ["感激", "温和", "低头致谢", "感激"],
+            "resource_id": " expr_thanks_smile ",
+            "duration_hint_ms": 900,
+            "axes": {
+                "head_yaw": 72.5,
+            },
+        }
+    )
+
+    assert intent["intent_tags"] == ["感激", "温和", "低头致谢"]
+    assert intent["emotion_label"] == "感激-温和-低头致谢"
+    assert intent["resource_id"] == "expr_thanks_smile"
+    assert intent["summary"]["intent_tag_count"] == 3
+
+
 def test_summarize_motion_payload_defaults_v3_mode_to_expressive() -> None:
     schema_version, mode, axis_count, supplementary_count, failure_reason = summarize_motion_payload(
         {

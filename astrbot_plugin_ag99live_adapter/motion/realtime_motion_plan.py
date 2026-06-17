@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from ..prompts.motion_selector import (
@@ -57,6 +58,15 @@ PARAMETER_PLAN_SOURCES = {
     "continuity",
     "manual",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class MotionFallbackDecision:
+    fallback_pose_id: str
+    matched_candidate_id: str
+    score: float
+    used_default_neutral: bool
+    reasons: list[str]
 
 # ── repair/fallback hit rate stats ─────────────────────────────────
 
@@ -607,6 +617,9 @@ def build_intent_from_selector_v3(
     emotion_label = str(selector_output.get("emotion") or "").strip()
     if not emotion_label:
         raise ValueError("selector_emotion_empty")
+    intent_tags = normalize_motion_intent_tags(selector_output.get("intent_tags"))
+    if not intent_tags:
+        intent_tags = normalize_motion_intent_tags(emotion_label)
 
     profile_revision_raw = semantic_profile.get("revision")
     try:
@@ -620,9 +633,11 @@ def build_intent_from_selector_v3(
         "profile_revision": profile_revision,
         "model_id": str(semantic_profile.get("model_id") or "").strip(),
         "mode": "expressive",
+        "intent_tags": intent_tags,
         "emotion_label": emotion_label,
         "duration_hint_ms": duration_hint_ms,
         "fallback_pose_id": str(selector_output.get("fallback_pose_id") or "").strip(),
+        "resource_id": normalize_motion_resource_id(selector_output.get("resource_id")),
         "axes": {
             str(axis_id): round(float(value), 4)
             for axis_id, value in axes.items()
@@ -630,6 +645,7 @@ def build_intent_from_selector_v3(
         },
         "summary": {
             "axis_count": len(axes),
+            "intent_tag_count": len(intent_tags),
         },
     }
 
@@ -736,9 +752,14 @@ def normalize_motion_intent_v3_payload(intent: Any) -> dict[str, Any]:
     if mode not in {"expressive", "idle"}:
         raise ValueError("invalid_mode")
 
-    emotion_label = str(intent.get("emotion_label") or "").strip()
-    if not emotion_label:
-        raise ValueError("emotion_label_empty")
+    intent_tags = normalize_motion_intent_tags(intent.get("intent_tags"))
+    if not intent_tags:
+        intent_tags = normalize_motion_intent_tags(
+            intent.get("emotion_label") or intent.get("emotion") or ""
+        )
+    emotion_label = derive_motion_emotion_label(intent_tags)
+    resource_id = normalize_motion_resource_id(intent.get("resource_id"))
+    fallback_pose_id = normalize_motion_resource_id(intent.get("fallback_pose_id"))
 
     axes = intent.get("axes")
     if not isinstance(axes, dict) or not axes:
@@ -764,14 +785,268 @@ def normalize_motion_intent_v3_payload(intent: Any) -> dict[str, Any]:
         "profile_revision": profile_revision_raw,
         "model_id": model_id,
         "mode": mode,
+        "intent_tags": intent_tags,
         "emotion_label": emotion_label,
         "duration_hint_ms": duration_hint_ms,
-        "fallback_pose_id": str(intent.get("fallback_pose_id") or "").strip(),
+        "resource_id": resource_id,
+        "fallback_pose_id": fallback_pose_id,
         "axes": normalized_axes,
         "summary": {
             "axis_count": len(normalized_axes),
+            "intent_tag_count": len(intent_tags),
         },
     }
+
+
+def normalize_motion_intent_tags(value: Any) -> list[str]:
+    if value is None:
+        return []
+    raw_items: list[Any]
+    if isinstance(value, (list, tuple)):
+        raw_items = list(value)
+    elif isinstance(value, set):
+        raw_items = list(value)
+    else:
+        raw_items = [value]
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_item in raw_items:
+        if isinstance(raw_item, str):
+            pieces = [
+                part.strip()
+                for part in re.split(r"[-,，、/|]+", raw_item)
+            ]
+        else:
+            pieces = [str(raw_item).strip()]
+        for piece in pieces:
+            tag = str(piece or "").strip()
+            if not tag or tag in seen:
+                continue
+            seen.add(tag)
+            normalized.append(tag)
+    return normalized
+
+
+def normalize_motion_resource_id(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def derive_motion_emotion_label(intent_tags: Any, *, fallback: str = "motion") -> str:
+    tags = normalize_motion_intent_tags(intent_tags)
+    if tags:
+        return "-".join(tags)
+    fallback_value = str(fallback or "").strip()
+    return fallback_value or "motion"
+
+
+def derive_motion_fallback_decision(
+    *,
+    candidates: list[dict[str, Any]],
+    intent_tags: list[str],
+    resource_id: str,
+    axes: Any,
+    describe_axes: Any,
+) -> MotionFallbackDecision:
+    if not candidates:
+        return MotionFallbackDecision(
+            fallback_pose_id="neutral",
+            matched_candidate_id="",
+            score=0.0,
+            used_default_neutral=True,
+            reasons=["candidate_pool_empty"],
+        )
+
+    normalized_axes = axes if isinstance(axes, dict) else {}
+    current_descriptors = {
+        str(item).strip().lower()
+        for item in (describe_axes(normalized_axes) or [])
+        if str(item).strip()
+    }
+    normalized_tags = {
+        str(item).strip().lower()
+        for item in intent_tags
+        if str(item).strip()
+    }
+    normalized_resource_id = normalize_motion_resource_id(resource_id).lower()
+
+    best_candidate_id = "neutral"
+    best_score = float("-inf")
+    best_reasons: list[str] = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        candidate_id = str(candidate.get("id") or "").strip()
+        if not candidate_id:
+            continue
+        score = 0.0
+        reasons: list[str] = []
+        candidate_id_lower = candidate_id.lower()
+        if normalized_resource_id and normalized_resource_id == candidate_id_lower:
+            score += 120.0
+            reasons.append("resource_id_exact_match")
+        if candidate_id_lower in normalized_tags:
+            score += 40.0
+            reasons.append("candidate_id_matches_intent_tag")
+
+        prompt_tag_pool = {
+            str(item).strip().lower()
+            for item in (
+                list(candidate.get("tags") or [])
+                + list(candidate.get("emotion_bias") or [])
+                + list(candidate.get("recommended_scenarios") or [])
+            )
+            if str(item).strip()
+        }
+        tag_overlap = len(normalized_tags & prompt_tag_pool)
+        score += 16.0 * tag_overlap
+        if tag_overlap:
+            reasons.append(f"tag_overlap:{tag_overlap}")
+
+        descriptor_pool = {
+            str(item).strip().lower()
+            for item in (describe_axes(candidate.get("axes")) or [])
+            if str(item).strip()
+        }
+        descriptor_overlap = len(current_descriptors & descriptor_pool)
+        score += 12.0 * descriptor_overlap
+        if descriptor_overlap:
+            reasons.append(f"descriptor_overlap:{descriptor_overlap}")
+
+        if str(candidate.get("source") or "").strip() == "motion_tuning_sample":
+            score += 6.0
+            reasons.append("prefer_motion_tuning_sample")
+
+        if score > best_score:
+            best_score = score
+            best_candidate_id = candidate_id
+            best_reasons = reasons
+
+    if best_score > 0:
+        return MotionFallbackDecision(
+            fallback_pose_id=best_candidate_id,
+            matched_candidate_id=best_candidate_id,
+            score=round(best_score, 4),
+            used_default_neutral=False,
+            reasons=best_reasons or ["candidate_selected"],
+        )
+    return MotionFallbackDecision(
+        fallback_pose_id="neutral",
+        matched_candidate_id="",
+        score=0.0,
+        used_default_neutral=True,
+        reasons=["score_below_threshold"],
+    )
+
+
+def derive_motion_fallback_pose_id(
+    *,
+    candidates: list[dict[str, Any]],
+    intent_tags: list[str],
+    resource_id: str,
+    axes: Any,
+    describe_axes: Any,
+) -> str:
+    return derive_motion_fallback_decision(
+        candidates=candidates,
+        intent_tags=intent_tags,
+        resource_id=resource_id,
+        axes=axes,
+        describe_axes=describe_axes,
+    ).fallback_pose_id
+
+
+def describe_motion_axes_for_fallback(
+    axes: Any,
+    *,
+    semantic_profile: dict[str, Any],
+) -> list[str]:
+    if not isinstance(axes, dict) or not axes:
+        return []
+    axis_by_id = {
+        str(axis.get("id") or "").strip(): axis
+        for axis in profile_prompt_axes(semantic_profile)
+        if str(axis.get("id") or "").strip()
+    }
+    descriptors: list[str] = []
+    for axis_id, axis_value in sorted(axes.items()):
+        if not isinstance(axis_value, (int, float)) or isinstance(axis_value, bool):
+            continue
+        axis_name = str(axis_id or "").strip()
+        if not axis_name:
+            continue
+        descriptor = _describe_fallback_pose_axis_value(
+            axis_name,
+            float(axis_value),
+            axis=axis_by_id.get(axis_name),
+        )
+        if descriptor and descriptor not in descriptors:
+            descriptors.append(descriptor)
+    return descriptors
+
+
+def _describe_fallback_pose_axis_value(
+    axis_id: str,
+    value: float,
+    *,
+    axis: dict[str, Any] | None = None,
+) -> str:
+    normalized_axis = axis_id.strip().lower()
+    if not float("-inf") < value < float("inf"):
+        return ""
+    delta = _resolve_axis_neutral_delta(value, axis)
+    threshold = _resolve_axis_descriptor_threshold(axis)
+    if abs(delta) < threshold:
+        return ""
+
+    axis_descriptors = {
+        "head_yaw": ("look_left", "look_right"),
+        "body_yaw": ("body_turn_left", "body_turn_right"),
+        "gaze_x": ("gaze_left", "gaze_right"),
+        "gaze_y": ("gaze_down", "gaze_up"),
+        "head_pitch": ("look_down", "look_up"),
+        "body_pitch": ("lean_forward", "lean_back"),
+        "head_roll": ("tilt_left", "tilt_right"),
+        "body_roll": ("body_lean_left", "body_lean_right"),
+        "eye_open_left": ("left_eye_narrow", "left_eye_open"),
+        "eye_open_right": ("right_eye_narrow", "right_eye_open"),
+        "eye_smile_left": ("left_eye_relaxed", "left_eye_smile"),
+        "eye_smile_right": ("right_eye_relaxed", "right_eye_smile"),
+        "mouth_smile": ("mouth_frown", "mouth_smile"),
+        "brow_bias": ("brow_down", "brow_raise"),
+        "mouth_open": ("mouth_closed", "mouth_open"),
+    }
+    negative, positive = axis_descriptors.get(
+        normalized_axis,
+        (f"{normalized_axis}_low", f"{normalized_axis}_high"),
+    )
+    return positive if delta > 0 else negative
+
+
+def _resolve_axis_neutral_delta(value: float, axis: dict[str, Any] | None) -> float:
+    neutral = _coerce_finite_number((axis or {}).get("neutral"))
+    if neutral is None:
+        neutral = 50.0
+    return float(value) - neutral
+
+
+def _resolve_axis_descriptor_threshold(axis: dict[str, Any] | None) -> float:
+    if not isinstance(axis, dict):
+        return 6.0
+    soft_range = axis.get("soft_range")
+    if isinstance(soft_range, (list, tuple)) and len(soft_range) >= 2:
+        try:
+            soft_min = float(soft_range[0])
+            soft_max = float(soft_range[1])
+            neutral = _coerce_finite_number(axis.get("neutral"))
+            if neutral is None:
+                neutral = 50.0
+            soft_delta = max(abs(soft_max - neutral), abs(neutral - soft_min))
+            if soft_delta > 0:
+                return max(soft_delta * 0.6, 2.0)
+        except (TypeError, ValueError):
+            pass
+    return 6.0
 
 
 def _normalize_duration_hint_ms(value: Any) -> int:

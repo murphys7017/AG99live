@@ -19,10 +19,15 @@ from ..motion.realtime_motion_plan import (
     DEFAULT_MOTION_INTENT_DURATION_MS,
     MOTION_INTENT_V3_SCHEMA_VERSION,
     RealtimeMotionPlanGenerator,
+    derive_motion_emotion_label,
+    derive_motion_fallback_decision,
+    describe_motion_axes_for_fallback,
     maybe_log_repair_stats,
     record_realtime_motion_attempt,
     record_realtime_motion_fallback,
     record_realtime_motion_generated,
+    normalize_motion_intent_tags,
+    normalize_motion_resource_id,
     resolve_selected_semantic_axis_profile,
 )
 from ..motion.fallback_pose import (
@@ -276,11 +281,12 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     if not profile_id:
         return None, "profile_id_empty"
 
-    emotion_label = str(motion_hint.get("emotion_label") or "").strip()
-    if not emotion_label:
-        emotion_label = "neutral"
-
-    fallback_pose_id = str(motion_hint.get("fallback_pose_id") or "").strip()
+    intent_tags = normalize_motion_intent_tags(
+        motion_hint.get("intent_tags") or motion_hint.get("emotion_label") or motion_hint.get("emotion")
+    )
+    emotion_label = derive_motion_emotion_label(intent_tags)
+    resource_id = normalize_motion_resource_id(motion_hint.get("resource_id"))
+    fallback_pose_id = normalize_motion_resource_id(motion_hint.get("fallback_pose_id"))
     axes = motion_hint.get("axes")
     validated_axes = None
     expressive_floor_emotion = emotion_label
@@ -300,6 +306,22 @@ def _resolve_plugin_hints_motion_payload_with_reason(
         )
         if not validated_axes:
             reason = _append_resolution_reason(reason, "axes_empty_or_invalid")
+
+    fallback_decision = derive_motion_fallback_decision(
+        candidates=build_fallback_pose_candidates(
+            runtime_state=runtime_state,
+            semantic_profile=semantic_profile,
+            limit=None,
+        ),
+        intent_tags=intent_tags,
+        resource_id=resource_id,
+        axes=validated_axes if isinstance(validated_axes, dict) else axes,
+        describe_axes=lambda value: describe_motion_axes_for_fallback(
+            value,
+            semantic_profile=semantic_profile,
+        ),
+    )
+    fallback_pose_id = fallback_decision.fallback_pose_id
 
     if not validated_axes:
         fallback_resolution = resolve_fallback_pose(
@@ -360,6 +382,13 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     summary = _build_motion_visibility_summary(
         axes=validated_axes,
         semantic_profile=semantic_profile,
+        intent_tags=intent_tags,
+        resource_id=resource_id,
+        fallback_pose_id=fallback_pose_id,
+        fallback_reasons=fallback_decision.reasons,
+        fallback_score=fallback_decision.score,
+        fallback_used=fallback_decision.used_default_neutral or not bool(axes),
+        matched_candidate_id=fallback_decision.matched_candidate_id,
         repair_added_axes=repair_added_axes,
         repair_replaced_axes=repair_replaced_axes,
     )
@@ -370,8 +399,10 @@ def _resolve_plugin_hints_motion_payload_with_reason(
         "profile_revision": int(semantic_profile.get("revision") or 0),
         "model_id": str(semantic_profile.get("model_id") or "").strip(),
         "mode": "expressive",
+        "intent_tags": intent_tags,
         "emotion_label": emotion_label,
         "duration_hint_ms": duration_hint_ms,
+        "resource_id": resource_id,
         "fallback_pose_id": fallback_pose_id,
         "axes": validated_axes,
         "summary": summary,
@@ -430,6 +461,13 @@ def _build_motion_visibility_summary(
     *,
     axes: dict[str, float],
     semantic_profile: dict[str, Any],
+    intent_tags: list[str] | None = None,
+    resource_id: str = "",
+    fallback_pose_id: str = "",
+    fallback_reasons: list[str] | None = None,
+    fallback_score: float = 0.0,
+    fallback_used: bool = False,
+    matched_candidate_id: str = "",
     repair_added_axes: list[str] | None = None,
     repair_replaced_axes: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -465,6 +503,14 @@ def _build_motion_visibility_summary(
 
     return {
         "axis_count": len(axes),
+        "intent_tags": list(intent_tags or []),
+        "intent_tag_count": len(intent_tags or []),
+        "resource_id": resource_id,
+        "fallback_pose_id": fallback_pose_id,
+        "fallback_used": fallback_used,
+        "fallback_reasons": list(fallback_reasons or []),
+        "fallback_score": round(float(fallback_score or 0.0), 4),
+        "matched_candidate_id": matched_candidate_id,
         "active_groups": sorted(active_groups),
         "skeleton_groups": covered_skeleton_groups,
         "skeleton_groups_present": covered_skeleton_groups,
@@ -1128,13 +1174,23 @@ def _truncate_text(value: str, max_length: int) -> str:
 
 
 def _normalize_axis_text_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
+    if isinstance(value, str):
+        items = re.split(r"[-,，、/|]+", value)
+    elif isinstance(value, list):
+        items = value
+    else:
         return []
-    return [
-        _truncate_text(str(item).strip(), 48)
-        for item in value
-        if str(item).strip()
-    ]
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        normalized = _truncate_text(str(item).strip(), 48)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
+
+
 
 
 def _summarize_key_axes(value: Any, *, limit: int) -> dict[str, float]:
@@ -1476,11 +1532,13 @@ def _build_default_motion_payload(
         "profile_revision": profile_revision,
         "model_id": model_id,
         "mode": "expressive",
+        "intent_tags": [],
         "emotion_label": "neutral",
         "duration_hint_ms": DEFAULT_MOTION_INTENT_DURATION_MS,
+        "resource_id": "",
         "fallback_pose_id": fallback_pose_id,
         "axes": axes,
-        "summary": {"axis_count": len(axes)},
+        "summary": {"axis_count": len(axes), "intent_tag_count": 0},
     }, resolved_reason
 
 

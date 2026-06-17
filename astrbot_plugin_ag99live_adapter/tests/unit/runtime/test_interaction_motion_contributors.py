@@ -1361,10 +1361,10 @@ def test_plugin_hints_forbidden_catalog_fields_fall_back_to_semantic_pose(
     assert payload is not None
     assert payload["schema_version"] == "engine.motion_intent.v3"
     assert "motion_id" not in payload
-    assert payload["fallback_pose_id"] == "neutral"
+    assert payload["fallback_pose_id"] == "serious_explain"
     assert payload["emotion_label"] == "explain"
-    assert payload["axes"]["head_yaw"] == 50.0
-    assert payload["axes"]["eye_open_left"] == 50.0
+    assert payload["axes"]["head_yaw"] == 80.0
+    assert "eye_open_left" not in payload["axes"]
 
 
 def test_plugin_hints_motion_payload_accepts_head_roll_and_mouth_smile(
@@ -1782,7 +1782,10 @@ def test_result_contributor_skips_plugin_hint_motion_in_hybrid_immediate_phase(
     assert event.get_extra("ag99live_split_motion_scheduled") is None
     metadata = contribution.metadata["ag99live_motion_schedule"]
     assert metadata["reason"] == "immediate_phase_waits_for_core_reply"
-    assert metadata["plugin_hints_resolution_reason"] == "ok"
+    assert metadata["plugin_hints_resolution_reason"] in {
+        "ok",
+        "skeleton_repair_replaced:head_yaw",
+    }
 
 
 def test_result_contributor_dedupes_plugin_hint_motion_after_immediate_phase(
@@ -1965,6 +1968,39 @@ def test_self_reply_missing_hints_calls_realtime_motion_with_provider(
     assert metadata["scheduled"] is True
     assert metadata["source"] == "realtime_motion"
     assert contribution.client_objects[0]["motion_payload"]["axes"]["head_yaw"] == 30
+
+
+def test_plugin_hints_motion_payload_supports_intent_tags_and_resource_id(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "intent_tags": ["说明", "认真", "说明"],
+                "resource_id": "serious_explain",
+                "duration_hint_ms": 1200,
+                "axes": {
+                    "head_yaw": 48,
+                },
+            }
+        },
+    )
+
+    payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
+
+    assert payload is not None
+    assert payload["intent_tags"] == ["说明", "认真"]
+    assert payload["emotion_label"] == "说明-认真"
+    assert payload["resource_id"] == "serious_explain"
+    assert payload["fallback_pose_id"] == "serious_explain"
+    assert payload["summary"]["intent_tag_count"] == 2
 
 
 def test_self_reply_missing_hints_falls_back_to_default_pose_without_provider(

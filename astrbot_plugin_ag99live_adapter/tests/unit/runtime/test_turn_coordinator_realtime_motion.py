@@ -65,7 +65,9 @@ def _build_valid_motion_intent(
         "profile_id": "pet.semantic.v1",
         "profile_revision": 2,
         "model_id": "pet",
-        "emotion_label": "test",
+        "intent_tags": ["test", "motion"],
+        "resource_id": "",
+        "emotion_label": "test-motion",
         "duration_hint_ms": 1200,
         "fallback_pose_id": "neutral",
         "axes": {
@@ -74,6 +76,7 @@ def _build_valid_motion_intent(
         },
         "summary": {
             "axis_count": 2,
+            "intent_tag_count": 2,
         },
     }
     if include_mode:
@@ -303,6 +306,8 @@ def test_extract_inline_motion_plan_strips_valid_tag(install_fake_astrbot, monke
     assert isinstance(plan, dict)
     assert plan.get("schema_version") == "engine.motion_intent.v3"
     assert plan.get("mode") == "expressive"
+    assert plan.get("intent_tags") == ["test", "motion"]
+    assert plan.get("emotion_label") == "test-motion"
     assert mode == "inline"
 
 

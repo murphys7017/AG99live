@@ -20,12 +20,18 @@ from .realtime_motion_plan import (
     DEFAULT_MOTION_INTENT_DURATION_MS,
     MOTION_INTENT_V2_SCHEMA_VERSION,
     MOTION_INTENT_V3_SCHEMA_VERSION,
+    derive_motion_emotion_label,
+    derive_motion_fallback_decision,
+    describe_motion_axes_for_fallback,
     normalize_motion_intent_payload,
+    normalize_motion_intent_tags,
+    normalize_motion_resource_id,
     resolve_selected_semantic_axis_profile,
     validate_motion_intent_payload,
 )
 from .fallback_pose import (
     DEFAULT_FALLBACK_POSE_ID,
+    build_fallback_pose_candidates,
     build_default_neutral_pose_axes,
     repair_motion_axes_with_fallback_pose,
     resolve_fallback_pose,
@@ -148,10 +154,25 @@ def _repair_inline_motion_payload_with_fallback(
         semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
     except RuntimeError:
         return plan
+    fallback_decision = derive_motion_fallback_decision(
+        candidates=build_fallback_pose_candidates(
+            runtime_state=runtime_state,
+            semantic_profile=semantic_profile,
+            limit=None,
+        ),
+        intent_tags=normalize_motion_intent_tags(plan.get("intent_tags")),
+        resource_id=normalize_motion_resource_id(plan.get("resource_id")),
+        axes=axes,
+        describe_axes=lambda value: describe_motion_axes_for_fallback(
+            value,
+            semantic_profile=semantic_profile,
+        ),
+    )
+    fallback_pose_id = fallback_decision.fallback_pose_id
     fallback_axes = resolve_fallback_pose_axes(
         runtime_state=runtime_state,
         semantic_profile=semantic_profile,
-        fallback_pose_id=plan.get("fallback_pose_id"),
+        fallback_pose_id=fallback_pose_id,
     )
     repaired_axes, added_axes, replaced_axes = repair_motion_axes_with_fallback_pose(
         axes=dict(axes),
@@ -169,11 +190,16 @@ def _repair_inline_motion_payload_with_fallback(
     repaired = dict(plan)
     summary = dict(repaired.get("summary") or {})
     summary["axis_count"] = len(floored_axes)
+    summary["fallback_pose_id"] = fallback_pose_id
+    summary["fallback_score"] = fallback_decision.score
+    summary["fallback_used"] = fallback_decision.used_default_neutral
+    summary["fallback_reasons"] = fallback_decision.reasons
     summary["skeleton_repair_added_axes"] = added_axes
     summary["skeleton_repair_replaced_axes"] = replaced_axes
     if changed_by_floor:
         summary["expressive_floor_applied"] = True
     repaired["axes"] = floored_axes
+    repaired["fallback_pose_id"] = fallback_pose_id
     repaired["summary"] = summary
     return repaired
 
@@ -193,11 +219,31 @@ def _build_inline_fallback_motion_payload(
         logger.warning("WIRING inline_motion fallback disabled: %s", exc)
         return None, None
 
+    intent_tags: list[str] = []
+    resource_id = ""
     fallback_pose_id = DEFAULT_FALLBACK_POSE_ID
-    emotion_label = "neutral"
     if isinstance(raw_intent, dict):
-        fallback_pose_id = str(raw_intent.get("fallback_pose_id") or fallback_pose_id).strip() or fallback_pose_id
-        emotion_label = str(raw_intent.get("emotion_label") or emotion_label).strip() or emotion_label
+        intent_tags = normalize_motion_intent_tags(
+            raw_intent.get("intent_tags") or raw_intent.get("emotion_label") or raw_intent.get("emotion")
+        )
+        resource_id = normalize_motion_resource_id(raw_intent.get("resource_id"))
+        fallback_pose_id = normalize_motion_resource_id(raw_intent.get("fallback_pose_id")) or fallback_pose_id
+    emotion_label = derive_motion_emotion_label(intent_tags)
+    fallback_decision = derive_motion_fallback_decision(
+        candidates=build_fallback_pose_candidates(
+            runtime_state=runtime_state,
+            semantic_profile=semantic_profile,
+            limit=None,
+        ),
+        intent_tags=intent_tags,
+        resource_id=resource_id,
+        axes=raw_intent.get("axes") if isinstance(raw_intent, dict) else {},
+        describe_axes=lambda value: describe_motion_axes_for_fallback(
+            value,
+            semantic_profile=semantic_profile,
+        ),
+    )
+    fallback_pose_id = fallback_decision.fallback_pose_id
 
     fallback_resolution = resolve_fallback_pose(
         runtime_state=runtime_state,
@@ -238,14 +284,19 @@ def _build_inline_fallback_motion_payload(
         "profile_revision": profile_revision,
         "model_id": str(semantic_profile.get("model_id") or "").strip(),
         "mode": "expressive",
+        "intent_tags": intent_tags,
         "emotion_label": emotion_label,
         "duration_hint_ms": DEFAULT_MOTION_INTENT_DURATION_MS,
+        "resource_id": resource_id,
         "fallback_pose_id": fallback_pose_id,
         "axes": axes,
         "summary": {
             "axis_count": len(axes),
+            "intent_tag_count": len(intent_tags),
             "fallback_pose_id": fallback_pose_id,
-            "fallback_used": True,
+            "fallback_used": fallback_decision.used_default_neutral,
+            "fallback_score": fallback_decision.score,
+            "fallback_reasons": fallback_decision.reasons,
             "fallback_reason": str(fallback_reason or "").strip(),
         },
     }
