@@ -558,36 +558,26 @@ def _build_motion_capability_payload(runtime_state: Any) -> dict[str, Any]:
     if profile_payload is not None:
         raw_profile = profile_payload.pop("raw_profile", None)
         capability_payload["semantic_profile"] = profile_payload
-        capability_payload["plugin_hints_format"] = _build_plugin_hints_motion_format(profile_payload)
         if isinstance(raw_profile, dict):
             fallback_candidates = build_fallback_pose_candidates(
                 runtime_state=runtime_state,
                 semantic_profile=raw_profile,
-                limit=12,
+                limit=None,
             )
-            if fallback_candidates:
-                capability_payload["fallback_pose_candidates"] = [
-                    {
-                        "id": str(item.get("id") or "").strip(),
-                        "label": str(item.get("label") or item.get("id") or "").strip(),
-                        "emotion_label": str(item.get("emotion_label") or "").strip(),
-                        "description": _truncate_text(
-                            str(item.get("description") or "").strip(),
-                            96,
-                        ),
-                        "emotion_bias": _normalize_axis_text_list(
-                            item.get("emotion_bias")
-                        )[:4],
-                        "intensity": str(item.get("intensity") or "").strip(),
-                        "recommended_scenarios": _normalize_axis_text_list(
-                            item.get("recommended_scenarios")
-                        )[:4],
-                        "key_axes": _summarize_key_axes(item.get("axes"), limit=5),
-                        "source": str(item.get("source") or "").strip(),
-                    }
-                    for item in fallback_candidates
-                    if str(item.get("id") or "").strip()
-                ]
+            prompt_fallback_candidates = _build_prompt_fallback_pose_candidates(
+                fallback_candidates,
+                limit=4,
+            )
+            if prompt_fallback_candidates:
+                capability_payload["fallback_pose_candidates"] = prompt_fallback_candidates
+
+        fallback_pose_id = _resolve_motion_format_fallback_pose_id(
+            capability_payload.get("fallback_pose_candidates")
+        )
+        capability_payload["plugin_hints_format"] = _build_plugin_hints_motion_format(
+            profile_payload,
+            fallback_pose_id=fallback_pose_id,
+        )
 
     return capability_payload
 
@@ -667,7 +657,7 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         "避免连续复用同一组轴和值；平静语气也要在头部朝向、身体跟随、视线和眼部之间做轻微语义变化。"
         "明确转身、强调、回避、惊讶、调侃、开心或疑惑时，优先用 head_yaw/head_roll/head_pitch "
         "配合 body_yaw/body_roll/body_pitch 建立可见动作骨架，再少量补眼部和表情细节。"
-        "输出形状示例只展示 JSON 结构和可用轴，里面的中位值不是推荐动作；实际输出应保留本轮有语义贡献的轴。"
+        "输出形状示例只展示 JSON 结构、少量可用轴和合法数值幅度；实际输出应保留本轮有语义贡献的轴。"
         f"{style_text}"
         f"{axis_prompt_text}"
         f"{fallback_pose_text}"
@@ -675,28 +665,297 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     )
 
 
-def _build_plugin_hints_motion_format(profile_payload: dict[str, Any]) -> dict[str, Any]:
+def _build_plugin_hints_motion_format(
+    profile_payload: dict[str, Any],
+    *,
+    fallback_pose_id: str | None = None,
+) -> dict[str, Any]:
     prompt_axes = profile_payload.get("prompt_axes")
     if not isinstance(prompt_axes, list) or not prompt_axes:
         return {}
 
     axis_schema: dict[str, Any] = {}
-    for axis in prompt_axes:
+    for index, axis in enumerate(_select_motion_format_example_axes(prompt_axes, limit=5)):
         if not isinstance(axis, dict):
             continue
         axis_id = str(axis.get("id") or "").strip()
         if not axis_id:
             continue
-        axis_schema[axis_id] = _resolve_axis_neutral_value(axis)
+        axis_schema[axis_id] = _resolve_axis_example_value(axis, index=index)
 
     return {
         "ag99live_motion": {
-            "emotion_label": "neutral",
+            "emotion_label": "expressive",
             "duration_hint_ms": DEFAULT_MOTION_INTENT_DURATION_MS,
-            "fallback_pose_id": DEFAULT_FALLBACK_POSE_ID,
+            "fallback_pose_id": fallback_pose_id or DEFAULT_FALLBACK_POSE_ID,
             "axes": axis_schema,
         },
     }
+
+
+def _build_prompt_fallback_pose_candidates(
+    fallback_candidates: list[dict[str, Any]],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    selected_candidates = _select_representative_fallback_pose_candidates(
+        fallback_candidates,
+        limit=limit,
+    )
+    result: list[dict[str, Any]] = []
+    for item in selected_candidates:
+        pose_id = str(item.get("id") or "").strip()
+        source = str(item.get("source") or "").strip()
+        result.append(
+            {
+                "id": pose_id,
+                "label": str(item.get("label") or pose_id).strip(),
+                "emotion_label": str(item.get("emotion_label") or "").strip(),
+                "description": _truncate_text(
+                    str(item.get("description") or "").strip(),
+                    96,
+                ),
+                "emotion_bias": _normalize_axis_text_list(item.get("emotion_bias"))[:4],
+                "intensity": str(item.get("intensity") or "").strip(),
+                "recommended_scenarios": _normalize_axis_text_list(
+                    item.get("recommended_scenarios")
+                )[:4],
+                "key_axes": _summarize_key_axes(item.get("axes"), limit=5),
+                "source": source,
+            }
+        )
+    return result
+
+
+def _select_representative_fallback_pose_candidates(
+    fallback_candidates: list[dict[str, Any]],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    max_items = max(0, limit)
+    if max_items <= 0:
+        return []
+
+    candidates = [
+        item
+        for item in fallback_candidates
+        if _is_prompt_fallback_pose_candidate(item)
+    ]
+    if not candidates:
+        return []
+
+    by_bucket: dict[str, list[dict[str, Any]]] = {}
+    for item in candidates:
+        bucket = _classify_prompt_fallback_pose_bucket(item)
+        by_bucket.setdefault(bucket, []).append(item)
+
+    for bucket_candidates in by_bucket.values():
+        bucket_candidates.sort(
+            key=_score_prompt_fallback_pose_candidate,
+            reverse=True,
+        )
+
+    selected: list[dict[str, Any]] = []
+    selected_ids: set[str] = set()
+    bucket_order = (
+        "negative",
+        "surprise",
+        "thinking",
+        "happy",
+        "sad",
+        "calm",
+        "other",
+    )
+    for bucket in bucket_order:
+        if len(selected) >= max_items:
+            break
+        bucket_candidates = by_bucket.get(bucket)
+        if not bucket_candidates:
+            continue
+        item = bucket_candidates[0]
+        candidate_id = str(item.get("id") or "").strip()
+        if candidate_id in selected_ids:
+            continue
+        selected.append(item)
+        selected_ids.add(candidate_id)
+
+    if len(selected) < min(2, max_items):
+        ranked = sorted(
+            candidates,
+            key=_score_prompt_fallback_pose_candidate,
+            reverse=True,
+        )
+        for item in ranked:
+            if len(selected) >= min(2, max_items):
+                break
+            candidate_id = str(item.get("id") or "").strip()
+            if candidate_id in selected_ids:
+                continue
+            selected.append(item)
+            selected_ids.add(candidate_id)
+
+    return selected[:max_items]
+
+
+def _is_prompt_fallback_pose_candidate(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    pose_id = str(item.get("id") or "").strip()
+    if not pose_id:
+        return False
+    source = str(item.get("source") or "").strip()
+    if pose_id == DEFAULT_FALLBACK_POSE_ID and source == "semantic_axis_profile":
+        return False
+    axes = item.get("axes")
+    return isinstance(axes, dict) and bool(axes)
+
+
+def _classify_prompt_fallback_pose_bucket(item: dict[str, Any]) -> str:
+    text = " ".join(
+        [
+            str(item.get("id") or ""),
+            str(item.get("label") or ""),
+            str(item.get("emotion_label") or ""),
+            str(item.get("description") or ""),
+            " ".join(_normalize_axis_text_list(item.get("emotion_bias"))),
+            " ".join(_normalize_axis_text_list(item.get("tags"))),
+            " ".join(_normalize_axis_text_list(item.get("recommended_scenarios"))),
+        ]
+    ).lower()
+    marker_groups = (
+        (
+            "negative",
+            (
+                "angry",
+                "disgust",
+                "mocking",
+                "impatient",
+                "annoy",
+                "不耐烦",
+                "吐槽",
+                "嫌弃",
+                "催促",
+            ),
+        ),
+        ("surprise", ("surprise", "surprised", "startled", "惊讶", "震惊")),
+        (
+            "thinking",
+            (
+                "thinking",
+                "confused",
+                "curious",
+                "serious",
+                "explain",
+                "困惑",
+                "疑问",
+                "认真",
+                "说明",
+                "解释",
+            ),
+        ),
+        (
+            "happy",
+            ("happy", "joy", "smile", "playful", "开心", "高兴", "微笑"),
+        ),
+        ("sad", ("sad", "tired", "失落", "伤心", "低落", "委屈")),
+        ("calm", ("calm", "gentle", "neutral", "温和", "平和", "安抚")),
+    )
+    for bucket, markers in marker_groups:
+        if any(marker in text for marker in markers):
+            return bucket
+    return "other"
+
+
+def _score_prompt_fallback_pose_candidate(item: dict[str, Any]) -> tuple[int, int, int, str]:
+    source = str(item.get("source") or "").strip()
+    source_score = {
+        "motion_tuning_sample": 90,
+        "motion_catalog_semantic_extract": 80,
+        "expression_parameter_extract": 70,
+        "profile_binding_parameter_extract": 45,
+    }.get(source, 40)
+    intensity = str(item.get("intensity") or "").strip().lower()
+    intensity_score = {
+        "high": 30,
+        "medium": 20,
+        "low": 10,
+    }.get(intensity, 0)
+    axes = item.get("axes")
+    axis_score = min(len(axes), 5) if isinstance(axes, dict) else 0
+    label = str(item.get("label") or item.get("id") or "").strip()
+    metadata_score = 0
+    if str(item.get("description") or "").strip():
+        metadata_score += 3
+    if _normalize_axis_text_list(item.get("recommended_scenarios")):
+        metadata_score += 2
+    if _normalize_axis_text_list(item.get("emotion_bias")):
+        metadata_score += 2
+    return source_score + intensity_score + metadata_score, axis_score, len(label), label
+
+
+def _resolve_motion_format_fallback_pose_id(candidates: Any) -> str | None:
+    if not isinstance(candidates, list):
+        return None
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        pose_id = str(item.get("id") or "").strip()
+        if pose_id:
+            return pose_id
+    return None
+
+
+def _select_motion_format_example_axes(
+    prompt_axes: list[dict[str, Any]],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    primary_axes = [
+        axis
+        for axis in prompt_axes
+        if isinstance(axis, dict)
+        and str(axis.get("control_role") or "").strip() == "primary"
+    ]
+    other_axes = [
+        axis
+        for axis in prompt_axes
+        if isinstance(axis, dict)
+        and str(axis.get("control_role") or "").strip() != "primary"
+    ]
+    return (primary_axes + other_axes)[: max(0, limit)]
+
+
+def _resolve_axis_example_value(axis: dict[str, Any], *, index: int) -> float:
+    neutral = _resolve_axis_neutral_value(axis)
+    min_value, max_value = _resolve_axis_value_range(axis)
+    soft_range = axis.get("soft_range")
+    if (
+        isinstance(soft_range, list)
+        and len(soft_range) == 2
+        and isinstance(soft_range[0], (int, float))
+        and isinstance(soft_range[1], (int, float))
+    ):
+        soft_min = float(soft_range[0])
+        soft_max = float(soft_range[1])
+    else:
+        span = max((max_value - min_value) * 0.08, 1.0)
+        soft_min = neutral - span
+        soft_max = neutral + span
+
+    use_positive = index % 2 == 0
+    if use_positive and soft_max < max_value:
+        span = max(soft_max - neutral, 1.0)
+        value = soft_max + max(span * 0.35, 1.0)
+    elif soft_min > min_value:
+        span = max(neutral - soft_min, 1.0)
+        value = soft_min - max(span * 0.35, 1.0)
+    elif soft_max < max_value:
+        span = max(soft_max - neutral, 1.0)
+        value = soft_max + max(span * 0.35, 1.0)
+    else:
+        value = neutral
+
+    return round(max(min_value, min(max_value, value)), 4)
 
 
 def _resolve_axis_neutral_value(axis: dict[str, Any]) -> float:

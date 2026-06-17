@@ -419,12 +419,12 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     runtime = next(item for item in extensions if item.mount == "context")
     assert "AG99live Motion 是当前桌宠前端的主动作通道" in system.value
     assert '"plugin_hints":{"ag99live_motion"' in system.value
-    assert '"fallback_pose_id":"neutral"' in system.value
+    assert '"fallback_pose_id":"neutral"' not in system.value
     assert '"choice"' not in system.value
     assert '"motion_id"' not in system.value
     assert "immediate_spoken_reply" in system.value
     assert "避免连续复用同一组轴和值" in system.value
-    assert "中位值不是推荐动作" in system.value
+    assert "少量可用轴和合法数值幅度" in system.value
     assert "角色风格偏好" in system.value
     assert "中性时偏少轴" in system.value
     assert capability.value["configured_generation_mode"] == "split_after_reply"
@@ -448,6 +448,11 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "motion_reference_templates" not in capability.value
     assert "motion_catalog_options" not in capability.value
     assert "fallback_pose_candidates" in capability.value
+    assert 2 <= len(capability.value["fallback_pose_candidates"]) <= 4
+    assert all(
+        item["id"] != "neutral"
+        for item in capability.value["fallback_pose_candidates"]
+    )
     catalog_candidate = next(
         item
         for item in capability.value["fallback_pose_candidates"]
@@ -473,7 +478,23 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     )
     assert (
         capability.value["plugin_hints_format"]["ag99live_motion"]["axes"]["head_yaw"]
-        == 50
+        > 58
+    )
+    assert set(
+        capability.value["plugin_hints_format"]["ag99live_motion"]["axes"]
+    ) == {"head_yaw", "eye_open_left"}
+    assert (
+        capability.value["plugin_hints_format"]["ag99live_motion"]["fallback_pose_id"]
+        == capability.value["fallback_pose_candidates"][0]["id"]
+    )
+    assert capability.value["plugin_hints_format"]["ag99live_motion"]["fallback_pose_id"] != "neutral"
+    assert (
+        f'"fallback_pose_id":"{capability.value["fallback_pose_candidates"][0]["id"]}"'
+        in system.value
+    )
+    assert (
+        capability.value["plugin_hints_format"]["ag99live_motion"]["emotion_label"]
+        == "expressive"
     )
     assert runtime.value["configured_generation_mode"] == "split_after_reply"
     assert runtime.value["prompt_purpose"] == "persona_reply"
@@ -546,6 +567,74 @@ def test_prompt_purpose_appears_in_runtime_payload(
             continue
         runtime = next(item for item in extensions if item.mount == "context")
         assert runtime.value["prompt_purpose"] == purpose
+
+
+def test_prompt_fallback_candidates_are_representative_not_first_four(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    candidates = [
+        {
+            "id": "calm_a",
+            "label": "Calm A",
+            "emotion_label": "calm",
+            "source": "motion_catalog_semantic_extract",
+            "intensity": "low",
+            "axes": {"head_yaw": 52},
+        },
+        {
+            "id": "calm_b",
+            "label": "Calm B",
+            "emotion_label": "calm",
+            "source": "motion_catalog_semantic_extract",
+            "intensity": "low",
+            "axes": {"head_yaw": 53},
+        },
+        {
+            "id": "neutral",
+            "label": "neutral",
+            "emotion_label": "neutral",
+            "source": "semantic_axis_profile",
+            "axes": {"head_yaw": 50},
+        },
+        {
+            "id": "calm_c",
+            "label": "Calm C",
+            "emotion_label": "calm",
+            "source": "motion_catalog_semantic_extract",
+            "intensity": "low",
+            "axes": {"head_yaw": 54},
+        },
+        {
+            "id": "angry_forward",
+            "label": "不耐烦前倾",
+            "emotion_label": "angry",
+            "source": "motion_catalog_semantic_extract",
+            "intensity": "medium",
+            "emotion_bias": ["angry", "disgust"],
+            "recommended_scenarios": ["吐槽"],
+            "axes": {"head_yaw": 30, "body_pitch": 35},
+        },
+        {
+            "id": "surprised",
+            "label": "Surprised",
+            "emotion_label": "surprised",
+            "source": "expression_parameter_extract",
+            "intensity": "high",
+            "axes": {"eye_open_left": 80},
+        },
+    ]
+
+    selected = module._build_prompt_fallback_pose_candidates(candidates, limit=4)
+    selected_ids = [item["id"] for item in selected]
+
+    assert "neutral" not in selected_ids
+    assert "angry_forward" in selected_ids
+    assert "surprised" in selected_ids
+    assert selected_ids != ["calm_a", "calm_b", "calm_c", "angry_forward"]
 
 
 def test_view_plugin_hints_prioritized_over_event_extra(
