@@ -515,6 +515,12 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert capability.value["semantic_profile"]["prompt_axes"][0]["usage_notes"] == (
         "Use for attention direction."
     )
+    assert all(
+        "neutral" not in axis
+        and "soft_range" not in axis
+        and "strong_range" not in axis
+        for axis in capability.value["semantic_profile"]["prompt_axes"]
+    )
     assert (
         capability.value["plugin_hints_format"]["ag99live_motion"]["axes"]["head_yaw"]
         > 58
@@ -1335,7 +1341,7 @@ def test_plugin_hints_neutral_skeleton_axis_is_replaced_from_fallback_pose(
     assert payload["summary"]["skeleton_repair_replaced_axes"] == ["head_yaw"]
 
 
-def test_plugin_hints_v3_nested_axis_payload_is_not_repaired_as_valid_axes(
+def test_plugin_hints_v3_nested_axis_payload_rejects_only_invalid_axis(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1364,9 +1370,10 @@ def test_plugin_hints_v3_nested_axis_payload_is_not_repaired_as_valid_axes(
     )
 
     assert payload is not None
-    assert payload["axes"] == {"head_yaw": 80.0}
-    assert "axes_empty_or_invalid" in reason
-    assert "fallback_pose:serious_explain" in reason
+    assert payload["axes"] == {"head_yaw": 80.0, "eye_open_left": 72.0}
+    assert "rejected_axes:head_yaw" in reason
+    assert "axes_empty_or_invalid" not in reason
+    assert "skeleton_repair_added:head_yaw" in reason
 
 
 def test_plugin_hints_existing_skeleton_axes_are_not_overwritten_by_repair(
@@ -1400,7 +1407,7 @@ def test_plugin_hints_existing_skeleton_axes_are_not_overwritten_by_repair(
     assert payload["summary"]["skeleton_repair_replaced_axes"] == []
 
 
-def test_plugin_hints_forbidden_catalog_fields_are_rejected(
+def test_plugin_hints_forbidden_catalog_fields_are_stripped_before_repair(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1421,9 +1428,17 @@ def test_plugin_hints_forbidden_catalog_fields_are_rejected(
         },
     )
 
-    payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
+    payload, reason = module._resolve_plugin_hints_motion_payload_with_reason(
+        event,
+        runtime_state,
+    )
 
-    assert payload is None
+    assert payload is not None
+    assert payload["intent_tags"] == ["explain"]
+    assert payload["axes"] == {"head_yaw": 80.0}
+    assert "choice" not in payload
+    assert "motion_id" not in payload
+    assert "stripped_forbidden_fields:choice,motion_id" in reason
 
 
 def test_plugin_hints_motion_payload_accepts_head_roll_and_mouth_smile(
@@ -1581,7 +1596,7 @@ def test_result_contributor_schedules_motion_for_immediate_reply(
     )
 
 
-def test_result_contributor_uses_default_pose_when_plugin_hints_missing_in_immediate_phase(
+def test_result_contributor_skips_motion_when_plugin_hints_missing_in_immediate_phase(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1601,21 +1616,17 @@ def test_result_contributor_uses_default_pose_when_plugin_hints_missing_in_immed
 
     assert contribution is not None
     assert scheduled_calls == []
-    assert contribution.client_objects
-    client_object = contribution.client_objects[0]
-    assert client_object["source"] == "default_pose"
-    payload = client_object["motion_payload"]
-    assert payload["schema_version"] == "engine.motion_intent.v3"
-    assert payload["mode"] == "expressive"
-    assert payload["emotion_label"] == "system_fallback"
-    assert isinstance(payload["axes"]["head_yaw"], (int, float))
+    assert contribution.client_objects == []
+    metadata = contribution.metadata["ag99live_motion_schedule"]
+    assert metadata["scheduled"] is False
+    assert metadata["reason"] == "motion_payload_missing"
     assert (
-        contribution.metadata["ag99live_motion_schedule"]["reason"]
-        == "default_motion_client_object"
+        metadata["plugin_hints_resolution_reason"]
+        == "plugin_hints_missing:self_reply_motion_missing"
     )
 
 
-def test_result_contributor_uses_default_pose_when_plugin_hints_missing_in_split_final_phase(
+def test_result_contributor_skips_motion_when_plugin_hints_missing_in_split_final_phase(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1634,26 +1645,17 @@ def test_result_contributor_uses_default_pose_when_plugin_hints_missing_in_split
 
     assert contribution is not None
     assert scheduled_calls == []
-    assert contribution.client_objects
-    client_object = contribution.client_objects[0]
-    assert client_object["source"] == "default_pose"
-    payload = client_object["motion_payload"]
-    assert payload["schema_version"] == "engine.motion_intent.v3"
-    assert payload["mode"] == "expressive"
-    assert payload["emotion_label"] == "system_fallback"
-    assert payload["duration_hint_ms"] == 1000
-    assert isinstance(payload["axes"]["head_yaw"], (int, float))
+    assert contribution.client_objects == []
+    metadata = contribution.metadata["ag99live_motion_schedule"]
+    assert metadata["scheduled"] is False
+    assert metadata["reason"] == "motion_payload_missing"
     assert (
-        contribution.metadata["ag99live_motion_schedule"]["reason"]
-        == "default_motion_client_object"
-    )
-    assert (
-        contribution.metadata["ag99live_motion_schedule"]["plugin_hints_resolution_reason"]
-        == "plugin_hints_missing:default_pose:neutral"
+        metadata["plugin_hints_resolution_reason"]
+        == "plugin_hints_missing:motion_payload_missing"
     )
 
 
-def test_result_contributor_uses_default_pose_even_when_realtime_provider_is_available(
+def test_result_contributor_does_not_invoke_legacy_provider_when_hints_are_missing(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1698,22 +1700,10 @@ def test_result_contributor_uses_default_pose_even_when_realtime_provider_is_ava
 
     assert contribution is not None
     assert scheduled_calls == []
-    assert len(contribution.client_objects) == 1
-    client_object = contribution.client_objects[0]
-    assert client_object["source"] == "default_pose"
-    payload = client_object["motion_payload"]
-    assert payload["schema_version"] == "engine.motion_intent.v3"
-    assert payload["mode"] == "expressive"
-    assert payload["emotion_label"] == "system_fallback"
-    assert "head_yaw" in payload["axes"]
-    assert (
-        contribution.metadata["ag99live_motion_schedule"]["reason"]
-        == "default_motion_client_object"
-    )
-    assert (
-        contribution.metadata["ag99live_motion_schedule"]["plugin_hints_resolution_reason"]
-        == "plugin_hints_missing:default_pose:neutral"
-    )
+    assert contribution.client_objects == []
+    metadata = contribution.metadata["ag99live_motion_schedule"]
+    assert metadata["scheduled"] is False
+    assert metadata["reason"] == "motion_payload_missing"
 
 
 def test_result_contributor_returns_plugin_hint_motion_in_split_final_phase(
@@ -1928,9 +1918,9 @@ def test_result_contributor_uses_event_turn_state_reply_plan_when_view_plan_miss
     metadata = contribution.metadata["ag99live_motion_schedule"]
     assert metadata["reply_plan_source"] == "event_turn_state"
     assert metadata["reply_plan_route_mode"] == "self_reply"
-    assert metadata["reason"] == "default_motion_client_object"
-    assert contribution.client_objects
-    assert contribution.client_objects[0]["source"] == "default_pose"
+    assert metadata["reason"] == "motion_payload_missing"
+    assert metadata["scheduled"] is False
+    assert contribution.client_objects == []
 
 
 def test_result_contributor_does_not_silently_schedule_immediate_phase_without_reply_plan(
@@ -1985,7 +1975,7 @@ def test_result_contributor_skips_self_reply_in_inline_first_mode(
     )
 
 
-def test_self_reply_missing_hints_uses_default_pose_with_provider_available(
+def test_self_reply_missing_hints_skips_motion_with_legacy_provider_available(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -2019,9 +2009,10 @@ def test_self_reply_missing_hints_uses_default_pose_with_provider_available(
     contribution = asyncio.run(contributor.collect(event, None, view))
     assert contribution is not None
     metadata = contribution.metadata["ag99live_motion_schedule"]
-    assert metadata["scheduled"] is True
-    assert metadata["source"] == "default_pose"
-    assert "head_yaw" in contribution.client_objects[0]["motion_payload"]["axes"]
+    assert metadata["scheduled"] is False
+    assert metadata["source"] == "interaction_result_immediate"
+    assert metadata["reason"] == "motion_payload_missing"
+    assert contribution.client_objects == []
 
 
 def test_plugin_hints_motion_payload_supports_intent_tags_and_resource_id(
@@ -2121,7 +2112,7 @@ def test_plugin_hints_rejects_resource_id_not_exposed_by_catalog(
     assert "resource_id_rejected:surprised" in reason
 
 
-def test_self_reply_missing_hints_falls_back_to_default_pose_without_provider(
+def test_self_reply_missing_hints_skips_motion_without_provider(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -2142,10 +2133,10 @@ def test_self_reply_missing_hints_falls_back_to_default_pose_without_provider(
     contribution = asyncio.run(contributor.collect(event, None, view))
     assert contribution is not None
     metadata = contribution.metadata["ag99live_motion_schedule"]
-    assert metadata["scheduled"] is True
-    assert metadata["source"] == "default_pose"
-    payload = contribution.client_objects[0]["motion_payload"]
-    assert payload["fallback_pose_id"] == "neutral"
+    assert metadata["scheduled"] is False
+    assert metadata["source"] == "interaction_result_immediate"
+    assert metadata["reason"] == "motion_payload_missing"
+    assert contribution.client_objects == []
 
 
 def test_register_interaction_contributors_uses_available_hooks(

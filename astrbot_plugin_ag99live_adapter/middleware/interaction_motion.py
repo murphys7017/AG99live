@@ -35,7 +35,6 @@ from ..motion.fallback_pose import (
     repair_motion_axes_with_fallback_pose,
     build_fallback_pose_candidates,
     resolve_fallback_pose,
-    resolve_fallback_pose_axes,
 )
 from ..prompts.motion_selector import (
     resolve_motion_prompt_instruction,
@@ -259,10 +258,11 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     if not isinstance(hints, dict):
         return None, hints_reason
 
-    motion_hint = hints.get("ag99live_motion")
-    if not isinstance(motion_hint, dict):
+    raw_motion_hint = hints.get("ag99live_motion")
+    if not isinstance(raw_motion_hint, dict):
         return None, _append_resolution_reason(hints_reason, "ag99live_motion_missing")
 
+    motion_hint = dict(raw_motion_hint)
     forbidden_fields = [
         key
         for key in (
@@ -280,6 +280,8 @@ def _resolve_plugin_hints_motion_payload_with_reason(
         )
         if key in motion_hint
     ]
+    for key in forbidden_fields:
+        motion_hint.pop(key, None)
 
     try:
         semantic_profile = resolve_selected_semantic_axis_profile(
@@ -292,12 +294,6 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     if not profile_id:
         return None, "profile_id_empty"
 
-    if forbidden_fields:
-        return None, _append_resolution_reason(
-            hints_reason,
-            "forbidden_fields:" + ",".join(forbidden_fields),
-        )
-
     intent_tags = normalize_motion_intent_tags(motion_hint.get("intent_tags"))
     if not intent_tags:
         return None, _append_resolution_reason(hints_reason, "intent_tags_empty")
@@ -309,12 +305,21 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     apply_expressive_floor = True
     repair_added_axes: list[str] = []
     repair_replaced_axes: list[str] = []
-    reason = hints_reason
-    validated_axes = _normalize_plugin_hint_axes(
+    validated_axes, rejected_axes = _normalize_plugin_hint_axes(
         axes,
         semantic_profile,
-        emotion_label=emotion_label,
     )
+    reason = hints_reason
+    if forbidden_fields:
+        reason = _append_resolution_reason(
+            reason,
+            "stripped_forbidden_fields:" + ",".join(forbidden_fields),
+        )
+    if rejected_axes:
+        reason = _append_resolution_reason(
+            reason,
+            "rejected_axes:" + ",".join(rejected_axes),
+        )
     if not validated_axes:
         reason = _append_resolution_reason(reason, "axes_empty_or_invalid")
 
@@ -450,11 +455,9 @@ def _validate_motion_resource_id(
 def _normalize_plugin_hint_axes(
     axes: Any,
     semantic_profile: dict[str, Any],
-    *,
-    emotion_label: str,
-) -> dict[str, float] | None:
+) -> tuple[dict[str, float] | None, list[str]]:
     if not isinstance(axes, dict) or not axes:
-        return None
+        return None, []
 
     prompt_axes = profile_prompt_axes(semantic_profile)
     axis_by_id = {
@@ -463,29 +466,33 @@ def _normalize_plugin_hint_axes(
         if str(axis.get("id") or "").strip()
     }
     if not axis_by_id:
-        return None
+        return None, []
 
     normalized_axes: dict[str, float] = {}
+    rejected_axes: list[str] = []
     for axis_id_raw, axis_value in axes.items():
         axis_id = str(axis_id_raw or "").strip()
         if not axis_id:
             continue
         axis = axis_by_id.get(axis_id)
         if axis is None:
+            rejected_axes.append(axis_id)
             continue
         if isinstance(axis_value, dict):
-            return None
+            rejected_axes.append(axis_id)
+            continue
         number = _coerce_finite_number(axis_value)
         if number is None:
+            rejected_axes.append(axis_id)
             continue
 
         value = _coerce_plugin_hint_axis_value(number, axis)
         normalized_axes[axis_id] = value
 
     if not normalized_axes:
-        return None
+        return None, rejected_axes
 
-    return normalized_axes
+    return normalized_axes, rejected_axes
 
 
 def _coerce_plugin_hint_axis_value(raw_value: float, axis: dict[str, Any]) -> float:
@@ -1224,10 +1231,7 @@ def _summarize_semantic_profile(
                     "id": str(axis.get("id") or "").strip(),
                     "label": str(axis.get("label") or axis.get("id") or "").strip(),
                     "control_role": str(axis.get("control_role") or "").strip(),
-                    "neutral": axis.get("neutral", 50),
                     "value_range": _normalize_axis_range(axis.get("value_range"), [0.0, 100.0]),
-                    "soft_range": _normalize_axis_range(axis.get("soft_range"), None),
-                    "strong_range": _normalize_axis_range(axis.get("strong_range"), None),
                     "negative_semantics": _normalize_axis_text_list(axis.get("negative_semantics")),
                     "positive_semantics": _normalize_axis_text_list(axis.get("positive_semantics")),
                     "usage_notes": _truncate_text(str(axis.get("usage_notes") or "").strip(), 160),
@@ -1419,37 +1423,31 @@ async def _schedule_motion_from_interaction_result(
         )
 
     if policy.should_schedule and plugin_hints_payload is None:
-        plugin_hints_payload, plugin_hints_reason = _build_default_motion_payload(
-            bundle.runtime_state,
-            reason=_append_resolution_reason(
-                plugin_hints_reason,
-                "self_reply_motion_missing"
-                if phase == "immediate"
-                and reply_plan is not None
-                and reply_plan.route_mode == "self_reply"
-                else "",
-            ),
+        missing_reason = _append_resolution_reason(
+            plugin_hints_reason,
+            "self_reply_motion_missing"
+            if phase == "immediate"
+            and reply_plan is not None
+            and reply_plan.route_mode == "self_reply"
+            else "motion_payload_missing",
         )
-        if plugin_hints_payload is not None:
-            _call_event_method(event, "set_extra", "ag99live_split_motion_scheduled", True)
-            return _MotionScheduleAttempt(
-                phase=phase,
-                source="default_pose",
-                scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
-                event_frontend_turn_id=identity.event_frontend_turn_id,
-                active_frontend_turn_id=identity.active_frontend_turn_id,
-                reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
-                reply_plan_should_emit_immediate_reply=(
-                    reply_plan.should_emit_immediate_reply if reply_plan is not None else None
-                ),
-                reply_plan_source=reply_plan.source if reply_plan is not None else None,
-                motion_generation_mode=motion_generation_mode,
-                scheduled=True,
-                reason="default_motion_client_object",
-                assistant_text=assistant_text,
-                plugin_hints_motion_payload=plugin_hints_payload,
-                plugin_hints_resolution_reason=plugin_hints_reason,
-            )
+        return _MotionScheduleAttempt(
+            phase=phase,
+            source=policy.source,
+            scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
+            event_frontend_turn_id=identity.event_frontend_turn_id,
+            active_frontend_turn_id=identity.active_frontend_turn_id,
+            reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
+            reply_plan_should_emit_immediate_reply=(
+                reply_plan.should_emit_immediate_reply if reply_plan is not None else None
+            ),
+            reply_plan_source=reply_plan.source if reply_plan is not None else None,
+            motion_generation_mode=motion_generation_mode,
+            scheduled=False,
+            reason="motion_payload_missing",
+            assistant_text=assistant_text,
+            plugin_hints_resolution_reason=missing_reason,
+        )
 
     return _MotionScheduleAttempt(
         phase=phase,
@@ -1468,62 +1466,6 @@ async def _schedule_motion_from_interaction_result(
         assistant_text=assistant_text,
         plugin_hints_resolution_reason=plugin_hints_reason,
     )
-
-
-def _build_default_motion_payload(
-    runtime_state: Any,
-    *,
-    reason: str,
-) -> tuple[dict[str, Any] | None, str]:
-    try:
-        semantic_profile = resolve_selected_semantic_axis_profile(
-            runtime_state=runtime_state
-        )
-    except Exception as exc:  # noqa: BLE001
-        return None, f"{reason}:default_pose_profile_unresolved:{exc}"
-
-    profile_id = str(semantic_profile.get("profile_id") or "").strip()
-    model_id = str(semantic_profile.get("model_id") or "").strip()
-    if not profile_id or not model_id:
-        return None, f"{reason}:default_pose_profile_identity_empty"
-
-    try:
-        profile_revision = int(semantic_profile.get("revision") or 0)
-    except (TypeError, ValueError):
-        profile_revision = 0
-    if profile_revision <= 0:
-        return None, f"{reason}:default_pose_profile_revision_invalid"
-
-    fallback_pose_id = DEFAULT_FALLBACK_POSE_ID
-    axes = resolve_fallback_pose_axes(
-        runtime_state=runtime_state,
-        semantic_profile=semantic_profile,
-        fallback_pose_id=fallback_pose_id,
-    )
-    if axes:
-        resolved_reason = f"{reason}:default_pose:{fallback_pose_id}"
-    else:
-        axes = build_default_neutral_pose_axes(semantic_profile)
-        resolved_reason = f"{reason}:default_pose_neutral"
-
-    if not axes:
-        return None, f"{reason}:default_pose_axes_empty"
-
-    return {
-        "schema_version": MOTION_INTENT_V3_SCHEMA_VERSION,
-        "profile_id": profile_id,
-        "profile_revision": profile_revision,
-        "model_id": model_id,
-        "mode": "expressive",
-        "intent_tags": ["system_fallback"],
-        "emotion_label": "system_fallback",
-        "duration_hint_ms": DEFAULT_MOTION_INTENT_DURATION_MS,
-        "resource_id": "",
-        "fallback_pose_id": fallback_pose_id,
-        "axes": axes,
-        "summary": {"axis_count": len(axes), "intent_tag_count": 1},
-    }, resolved_reason
-
 
 def _log_plugin_hints_motion_resolution(
     event: Any,
