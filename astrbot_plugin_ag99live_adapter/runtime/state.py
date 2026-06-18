@@ -757,6 +757,12 @@ class RuntimeState:
                     error="action_filter_timeout",
                     fallback_reason="",
                 )
+                self._base_action_filter_cache[cache_key] = {
+                    "selected_atom_ids_by_channel": {},
+                    "selected_channel_count": 0,
+                    "chunk_count": 1,
+                }
+                self._persist_runtime_cache_payload()
             except Exception as exc:
                 self._set_base_action_analysis(
                     model,
@@ -769,6 +775,12 @@ class RuntimeState:
                     error=str(exc),
                     fallback_reason="",
                 )
+                self._base_action_filter_cache[cache_key] = {
+                    "selected_atom_ids_by_channel": {},
+                    "selected_channel_count": 0,
+                    "chunk_count": 1,
+                }
+                self._persist_runtime_cache_payload()
                 logger.warning(
                     "Failed to apply LLM strict filter for base action library "
                     "(model=%s, provider=%s): %s",
