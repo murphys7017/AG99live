@@ -19,7 +19,8 @@
 - SDK 执行层负责 `speech_pose` 的逐帧调制：
   - `voice_following_profile` 的 `phase / neutral / amplitude / weight` 会进入前端执行层
   - 说话期间头身参数围绕 neutral 做连续振荡，而不是整段只缓到一个静态 target
-  - 仍然不引入 RMS / phoneme / viseme
+  - 使用 WAV RMS 的平滑包络调节头身随动强度，让停顿收敛、发声时增强
+  - 不做 phoneme / viseme；嘴型仍由独立 lip sync 参数驱动
 
 当前职责定位：
 
@@ -253,3 +254,111 @@ npm run test:model-engine
 1. 先做 `SpeechPoseStage`
 2. 再做 `ParameterPresentationLayer`
 3. 连续表现统一由 `ParameterPresentationLayer` 承接
+
+## 10. 说话随动调参位置
+
+说话随动分为“模型能力幅度”和“音频实时增益”两层，调整时不要混为一处。
+
+### 10.1 基础振幅、权重与频率
+
+文件：
+
+```text
+astrbot_plugin_ag99live_adapter/live2d/scanner/scan.py
+```
+
+常量：
+
+```text
+VOICE_FOLLOWING_TUNING
+```
+
+这是说话随动风格的唯一基础配置区。`VOICE_FOLLOWING_CHANNEL_SPECS` 由
+`_build_voice_following_channel_specs()` 自动生成，不应直接维护生成结果。
+
+配置按动作组组织：
+
+```python
+VOICE_FOLLOWING_TUNING = {
+    "roll": {
+        "frequency_hz": 1.65,
+        "phase": 0.35,
+        "head": {"amplitude": 8.5, "weight": 1.0},
+        "body": {"amplitude": 6.0, "weight": 0.85},
+    },
+    "yaw": {
+        "frequency_hz": 1.55,
+        "phase": 0.0,
+        "head": {"amplitude": 6.5, "weight": 1.0},
+        "body": {"amplitude": 4.5, "weight": 0.85},
+    },
+    "pitch": {
+        "frequency_hz": {"head": 0.68, "body": 0.55},
+        "phase": {"head": 0.35, "body": 0.55},
+        "head": {"amplitude": 1.2, "weight": 0.35},
+        "body": {"amplitude": 0.8, "weight": 0.25},
+    },
+}
+```
+
+日常调节角色说话风格时只修改这一块。横向组共用单个
+`frequency_hz/phase`，因此代码结构本身会保证头身同向同步；俯仰组允许头身使用不同节奏，以维持克制的上下跟随。
+
+字段含义：
+
+| 字段 | 作用 |
+| --- | --- |
+| `amplitude` | 参数围绕 neutral 摆动的基础最大幅度 |
+| `weight` | 对基础幅度的静态缩放 |
+| `frequency_hz` | 每秒振荡频率 |
+| `phase` | 动作组之间的相位差；同一方向的头身通道必须保持一致 |
+
+当前为方便早期观察，横向扭转和摇晃采用偏明显的测试配置：
+
+| 通道 | amplitude | weight | frequency_hz |
+| --- | ---: | ---: | ---: |
+| `head_yaw` | 6.5 | 1.0 | 1.55 |
+| `body_yaw` | 4.5 | 0.85 | 1.55 |
+| `head_roll` | 8.5 | 1.0 | 1.65 |
+| `body_roll` | 6.0 | 0.85 | 1.65 |
+
+`head_pitch` 和 `body_pitch` 暂时保持小幅度，避免角色说话时频繁上下点头。完成实际模型测试后，优先回调 `frequency_hz`，其次调整 `amplitude`；不要先降低音频响应，否则会重新出现“数值在动但肉眼不可见”。
+
+横向动作必须遵守以下身体逻辑：
+
+- `head_yaw` 与 `body_yaw` 使用相同的 phase 和 frequency，保证头向哪边扭，身体就向同一边跟随。
+- `head_roll` 与 `body_roll` 使用相同的 phase 和 frequency，保证头向哪边歪，身体就向同一边侧倾。
+- 同组头部有效幅度必须大于身体有效幅度，即 `head amplitude × weight > body amplitude × weight`。
+- yaw 和 roll 可以使用不同 phase，避免扭转与侧倾始终在同一时刻到达峰值，但不能破坏各自组内的头身同步。
+- 当前配置有意突出侧倾摇晃、收小左右扭头。后续调参必须成组修改，不能只修改头部或身体单侧通道。
+
+修改扫描侧配置后，需要重新生成或同步模型信息，新的 `voice_following_profile` 才会下发到前端。
+
+### 10.2 音频能量响应
+
+文件：
+
+```text
+frontend/src/live2d/WebSDK/src/lappmodel.ts
+```
+
+相关常量：
+
+```text
+SPEECH_AUDIO_RMS_GAIN
+SPEECH_AUDIO_GAIN_FLOOR
+SPEECH_AUDIO_GAIN_SPAN
+SPEECH_AUDIO_GAIN_MAX
+SPEECH_AUDIO_PITCH_GAIN_MAX
+SPEECH_AUDIO_ENVELOPE_ATTACK_PER_SECOND
+SPEECH_AUDIO_ENVELOPE_RELEASE_PER_SECOND
+```
+
+这一层决定发声强弱如何缩放 profile 的基础幅度：
+
+- `RMS_GAIN` 决定普通 TTS 音量多快进入可见随动区间。
+- `GAIN_FLOOR` 决定弱音和短暂停顿时保留多少基础运动。
+- `GAIN_SPAN / GAIN_MAX` 决定正常和强音时最多放大多少。
+- `ATTACK / RELEASE` 决定随动起势和收势速度。
+
+嘴型仍使用独立的 `lipSyncValue`，调整上述头身随动常量不会直接放大张嘴幅度。

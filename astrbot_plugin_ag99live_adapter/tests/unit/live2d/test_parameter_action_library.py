@@ -202,11 +202,11 @@ def test_seed_model_info_summary_embeds_adaptive_parameter_profile() -> None:
         "parameter_name": "ParamAngleX",
         "layer": "head",
         "neutral": 0.0,
-        "output_range": {"min": -10.4, "max": 10.4},
-        "amplitude": 5.2,
+        "output_range": {"min": -13.0, "max": 13.0},
+        "amplitude": 6.5,
         "weight": 1.0,
         "phase": 0.0,
-        "frequency_hz": 1.35,
+        "frequency_hz": 1.55,
     }
     assert model["summary"]["schema_version"] == live2d_scan.MODEL_SUMMARY_SCHEMA_VERSION
     assert model["summary"]["adaptive_parameter_profile"]["schema_version"] == (
@@ -227,6 +227,31 @@ def test_seed_model_info_summary_embeds_adaptive_parameter_profile() -> None:
     assert model["summary"]["adaptive_parameter_profile"]["runtime_summary"] == (
         model["adaptive_parameter_profile"]["runtime_summary"]
     )
+
+
+def test_voice_following_lateral_channels_preserve_body_hierarchy() -> None:
+    tuning = live2d_scan.VOICE_FOLLOWING_TUNING
+    specs = {
+        str(item["name"]): item
+        for item in live2d_scan.VOICE_FOLLOWING_CHANNEL_SPECS
+    }
+
+    for group_name in ("yaw", "roll"):
+        group = tuning[group_name]
+        assert not isinstance(group["phase"], dict)
+        assert not isinstance(group["frequency_hz"], dict)
+        head_name = f"head_{group_name}"
+        body_name = f"body_{group_name}"
+        head = specs[head_name]
+        body = specs[body_name]
+        assert head["phase"] == body["phase"]
+        assert head["frequency_hz"] == body["frequency_hz"]
+        assert float(head["amplitude"]) * float(head["weight"]) > (
+            float(body["amplitude"]) * float(body["weight"])
+        )
+
+    assert specs["head_roll"]["amplitude"] > specs["head_yaw"]["amplitude"]
+    assert specs["body_roll"]["amplitude"] > specs["body_yaw"]["amplitude"]
 
 
 def test_seed_model_info_with_reinforced_primary_observations_exports_safe_calibration() -> None:

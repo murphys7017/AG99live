@@ -168,56 +168,57 @@ VOICE_FOLLOWING_PROFILE_SCHEMA_VERSION = "ag99.voice_following_profile.v1"
 MODEL_SUMMARY_SCHEMA_VERSION = "live2d_model_summary.v1"
 PARAMETER_ACTION_MAX_ATOMS_PER_PARAMETER = 24
 
-VOICE_FOLLOWING_CHANNEL_SPECS: tuple[dict[str, Any], ...] = (
-    {
-        "name": "head_yaw",
-        "layer": "head",
-        "amplitude": 5.2,
-        "weight": 1.0,
-        "phase": 0.0,
-        "frequency_hz": 1.35,
-    },
-    {
-        "name": "head_pitch",
-        "layer": "head",
-        "amplitude": 1.2,
-        "weight": 0.35,
+# Speech-following style tuning. Keep head/body values in the same group
+# synchronized; the head effective amplitude must remain larger than the body.
+VOICE_FOLLOWING_TUNING: dict[str, dict[str, Any]] = {
+    # Cute lateral sway: primary speaking motion, intentionally most visible.
+    "roll": {
+        "frequency_hz": 1.65,
         "phase": 0.35,
-        "frequency_hz": 0.68,
+        "head": {"amplitude": 8.5, "weight": 1.0},
+        "body": {"amplitude": 6.0, "weight": 0.85},
     },
-    {
-        "name": "head_roll",
-        "layer": "head",
-        "amplitude": 4.8,
-        "weight": 1.0,
-        "phase": 0.7,
-        "frequency_hz": 1.45,
+    # Horizontal twist: supporting motion, kept smaller to avoid an uncanny look.
+    "yaw": {
+        "frequency_hz": 1.55,
+        "phase": 0.0,
+        "head": {"amplitude": 6.5, "weight": 1.0},
+        "body": {"amplitude": 4.5, "weight": 0.85},
     },
-    {
-        "name": "body_yaw",
-        "layer": "body",
-        "amplitude": 3.2,
-        "weight": 0.7,
-        "phase": 0.2,
-        "frequency_hz": 1.15,
+    # Vertical nodding: deliberately restrained during ordinary speech.
+    "pitch": {
+        "frequency_hz": {"head": 0.68, "body": 0.55},
+        "phase": {"head": 0.35, "body": 0.55},
+        "head": {"amplitude": 1.2, "weight": 0.35},
+        "body": {"amplitude": 0.8, "weight": 0.25},
     },
-    {
-        "name": "body_pitch",
-        "layer": "body",
-        "amplitude": 0.8,
-        "weight": 0.25,
-        "phase": 0.55,
-        "frequency_hz": 0.55,
-    },
-    {
-        "name": "body_roll",
-        "layer": "body",
-        "amplitude": 3.0,
-        "weight": 0.7,
-        "phase": 0.85,
-        "frequency_hz": 1.2,
-    },
-)
+}
+
+
+def _build_voice_following_channel_specs() -> tuple[dict[str, Any], ...]:
+    specs: list[dict[str, Any]] = []
+    for group_name in ("yaw", "pitch", "roll"):
+        group = VOICE_FOLLOWING_TUNING[group_name]
+        for layer in ("head", "body"):
+            layer_tuning = group[layer]
+            frequency = group["frequency_hz"]
+            phase = group["phase"]
+            specs.append(
+                {
+                    "name": f"{layer}_{group_name}",
+                    "layer": layer,
+                    "amplitude": float(layer_tuning["amplitude"]),
+                    "weight": float(layer_tuning["weight"]),
+                    "phase": float(phase[layer] if isinstance(phase, dict) else phase),
+                    "frequency_hz": float(
+                        frequency[layer] if isinstance(frequency, dict) else frequency
+                    ),
+                }
+            )
+    return tuple(specs)
+
+
+VOICE_FOLLOWING_CHANNEL_SPECS = _build_voice_following_channel_specs()
 
 CORE_BASE_ACTION_CHANNEL_SPECS: tuple[dict[str, Any], ...] = (
     {

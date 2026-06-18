@@ -112,10 +112,11 @@ const DIRECT_LIFE_MOTION_AXIS_CONFIG: Record<string, { amplitudeRatio: number; m
 };
 const SPEECH_AUDIO_ENVELOPE_ATTACK_PER_SECOND = 12.0;
 const SPEECH_AUDIO_ENVELOPE_RELEASE_PER_SECOND = 4.5;
-const SPEECH_AUDIO_GAIN_FLOOR = 0.35;
-const SPEECH_AUDIO_GAIN_SPAN = 0.9;
-const SPEECH_AUDIO_GAIN_MAX = 1.25;
-const SPEECH_AUDIO_PITCH_GAIN_MAX = 0.85;
+const SPEECH_AUDIO_RMS_GAIN = 5.0;
+const SPEECH_AUDIO_GAIN_FLOOR = 0.16;
+const SPEECH_AUDIO_GAIN_SPAN = 1.24;
+const SPEECH_AUDIO_GAIN_MAX = 1.4;
+const SPEECH_AUDIO_PITCH_GAIN_MAX = 1.0;
 
 interface DirectParameterAxisBinding {
   axisName: string;
@@ -691,11 +692,14 @@ export class LAppModel extends CubismUserModel {
     this._dragX = this._dragManager.getX();
     this._dragY = this._dragManager.getY();
     let lipSyncValue = 0.0;
+    let speechEnergyValue = 0.0;
     if (this._lipsync) {
       this._wavFileHandler.update(deltaTimeSeconds);
-      lipSyncValue = Math.min(1.0, this._wavFileHandler.getRms() * 1.5);
+      const rms = this._wavFileHandler.getRms();
+      lipSyncValue = Math.min(1.0, rms * 1.5);
+      speechEnergyValue = Math.min(1.0, rms * SPEECH_AUDIO_RMS_GAIN);
     }
-    this.updateSpeechAudioEnvelope(lipSyncValue, deltaTimeSeconds);
+    this.updateSpeechAudioEnvelope(speechEnergyValue, deltaTimeSeconds);
 
     // モーションによるパラメータ更新の有無
     let motionUpdated = false;
