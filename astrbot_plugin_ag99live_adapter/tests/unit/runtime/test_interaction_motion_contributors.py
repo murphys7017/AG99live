@@ -565,6 +565,32 @@ def test_prompt_contributor_returns_none_for_unknown_purpose(
     assert extensions is None
 
 
+def test_prompt_contributor_hides_resource_id_when_no_resource_candidates(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionPromptContributor()
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    for item in runtime_state.model_info["models"][0]["constraints"]["motions"]:
+        item["catalog_expose_as_resource"] = False
+    for item in runtime_state.model_info["models"][0]["constraints"]["expressions"]:
+        item["catalog_expose_as_resource"] = False
+    view = _build_view(phase="decision", route_mode="delegate_to_core", purpose="persona_reply")
+
+    extensions = asyncio.run(contributor.collect(event, None, view))
+
+    capability = next(item for item in extensions if item.mount == "capability")
+    system = next(item for item in extensions if item.mount == "system")
+    assert "resource_candidates" not in capability.value
+    assert "resource_id" not in capability.value["plugin_hints_format"]["ag99live_motion"]
+    assert "resource_id 只有在确定要引用明确资源时才填写" not in system.value
+    assert "允许字段只有 intent_tags、duration_hint_ms 和 axes。" in system.value
+
+
 def test_prompt_contributor_returns_extensions_for_core_reply_purpose(
     install_fake_astrbot,
     monkeypatch,
@@ -977,6 +1003,13 @@ def test_fallback_pose_candidates_use_expression_dominant_parameter_ids(
                         {
                             "name": "Question",
                             "file": "Expressions/Question.exp3.json",
+                            "catalog_id": "expr_question",
+                            "catalog_label": "疑问符号表情",
+                            "catalog_description": "适合短促疑问和反问。",
+                            "catalog_tags": ["疑问", "反问"],
+                            "catalog_emotion_bias": ["question", "confused"],
+                            "catalog_intensity": "low",
+                            "recommended_scenarios": ["短促疑问", "反问"],
                             "parameters": [],
                             "dominant_parameters": [{"id": "ParamEyeLOpen"}],
                         }
@@ -992,8 +1025,12 @@ def test_fallback_pose_candidates_use_expression_dominant_parameter_ids(
         limit=None,
     )
 
-    assert candidates[0]["id"] == "question"
+    assert candidates[0]["id"] == "expr_question"
     assert candidates[0]["source"] == "profile_binding_parameter_extract"
+    assert candidates[0]["label"] == "疑问符号表情"
+    assert candidates[0]["description"] == "适合短促疑问和反问。"
+    assert candidates[0]["emotion_bias"] == ["question", "confused"]
+    assert candidates[0]["recommended_scenarios"] == ["短促疑问", "反问"]
     assert candidates[0]["axes"] == {"eye_open_left": 50.0}
     assert candidates[-1]["id"] == "neutral"
 
@@ -2042,8 +2079,8 @@ def test_plugin_hints_accepts_catalog_expression_resource_without_fallback_id_ma
 
     assert payload is not None
     assert payload["resource_id"] == "expr_surprised"
-    assert payload["fallback_pose_id"] == "surprised"
-    assert payload["summary"]["matched_candidate_id"] == "surprised"
+    assert payload["fallback_pose_id"] == "expr_surprised"
+    assert payload["summary"]["matched_candidate_id"] == "expr_surprised"
 
 
 def test_plugin_hints_rejects_resource_id_not_exposed_by_catalog(

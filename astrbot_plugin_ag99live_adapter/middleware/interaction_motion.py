@@ -663,6 +663,7 @@ def _build_motion_capability_payload(runtime_state: Any) -> dict[str, Any]:
 
         capability_payload["plugin_hints_format"] = _build_plugin_hints_motion_format(
             profile_payload,
+            include_resource_id=bool(capability_payload.get("resource_candidates")),
         )
 
     return capability_payload
@@ -693,6 +694,17 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     if isinstance(semantic_profile, dict):
         axis_prompt = str(semantic_profile.get("axis_prompt") or "").strip()
     axis_prompt_text = f"可用动作轴语义：\n{axis_prompt}\n" if axis_prompt else ""
+    has_resource_candidates = bool(capability_payload.get("resource_candidates"))
+    allowed_fields_text = (
+        "允许字段只有 intent_tags、resource_id、duration_hint_ms 和 axes。"
+        if has_resource_candidates
+        else "允许字段只有 intent_tags、duration_hint_ms 和 axes。"
+    )
+    resource_field_text = (
+        "resource_id 只有在确定要引用明确资源时才填写，不确定就省略。"
+        if has_resource_candidates
+        else ""
+    )
     fallback_pose_text = ""
     fallback_candidates = capability_payload.get("fallback_pose_candidates")
     if isinstance(fallback_candidates, list) and fallback_candidates:
@@ -762,9 +774,9 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     return (
         "AG99live Motion 负责把本轮回复语义转成可执行动作。"
         "请只在 JSON 的 plugin_hints.ag99live_motion 中输出结果，不要把动作写进普通文本、immediate_spoken_reply 或 core_task_spec。"
-        "允许字段只有 intent_tags、resource_id、duration_hint_ms 和 axes。"
+        f"{allowed_fields_text}"
         "intent_tags 用 2 到 6 个开放关键词概括本轮语气、姿态和场景，不要输出 emotion_label。"
-        "resource_id 只有在确定要引用明确资源时才填写，不确定就省略。"
+        f"{resource_field_text}"
         "axes 只能使用当前 schema 里的轴 id，并且每个值都直接写成 number。"
         "优先让头部、身体和视线形成可见骨架，再用少量表情轴补充细节。"
         "普通回复也要给轻量姿态；明显转身、强调、回避、惊讶、调侃、开心或疑惑时，动作幅度要更明确。"
@@ -780,6 +792,8 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
 
 def _build_plugin_hints_motion_format(
     profile_payload: dict[str, Any],
+    *,
+    include_resource_id: bool,
 ) -> dict[str, Any]:
     prompt_axes = profile_payload.get("prompt_axes")
     if not isinstance(prompt_axes, list) or not prompt_axes:
@@ -794,14 +808,14 @@ def _build_plugin_hints_motion_format(
             continue
         axis_schema[axis_id] = _resolve_axis_example_value(axis, index=index)
 
-    return {
-        "ag99live_motion": {
-            "intent_tags": ["语气关键词", "姿态关键词", "场景关键词"],
-            "resource_id": "可选资源id",
-            "duration_hint_ms": DEFAULT_MOTION_INTENT_DURATION_MS,
-            "axes": axis_schema,
-        },
+    payload = {
+        "intent_tags": ["语气关键词", "姿态关键词", "场景关键词"],
+        "duration_hint_ms": DEFAULT_MOTION_INTENT_DURATION_MS,
+        "axes": axis_schema,
     }
+    if include_resource_id:
+        payload["resource_id"] = "可选资源id"
+    return {"ag99live_motion": payload}
 
 
 def _build_prompt_fallback_pose_candidates(

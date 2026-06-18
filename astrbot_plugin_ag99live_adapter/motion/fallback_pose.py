@@ -266,13 +266,39 @@ def _build_expression_candidates(
             continue
         candidates.append(
             {
-                "id": _normalize_pose_id(expression_name),
-                "label": expression_name,
-                "emotion_label": _normalize_pose_id(expression_name) or expression_name,
+                "id": _normalize_pose_id(
+                    expression.get("catalog_id") or expression_name
+                ),
+                "label": str(
+                    expression.get("catalog_label") or expression_name
+                ).strip(),
+                "emotion_label": (
+                    _text_list(expression.get("catalog_emotion_bias"), limit=1) or
+                    [_normalize_pose_id(expression_name) or expression_name]
+                )[0],
                 "source": "expression_parameter_extract",
-                "description": str(expression.get("description") or "").strip(),
-                "intensity": str(expression.get("intensity") or "").strip(),
-                "tags": _text_list([expression.get("category")], limit=3),
+                "description": str(
+                    expression.get("catalog_description")
+                    or expression.get("description")
+                    or ""
+                ).strip(),
+                "intensity": str(
+                    expression.get("catalog_intensity")
+                    or expression.get("intensity")
+                    or ""
+                ).strip(),
+                "tags": _text_list(
+                    expression.get("catalog_tags") or [expression.get("category")],
+                    limit=6,
+                ),
+                "emotion_bias": _text_list(
+                    expression.get("catalog_emotion_bias"),
+                    limit=6,
+                ),
+                "recommended_scenarios": _text_list(
+                    expression.get("recommended_scenarios"),
+                    limit=6,
+                ),
                 "axes": axes,
             }
         )
@@ -310,13 +336,39 @@ def _build_profile_binding_expression_candidates(
             continue
         candidates.append(
             {
-                "id": _normalize_pose_id(expression_name),
-                "label": expression_name,
-                "emotion_label": _normalize_pose_id(expression_name) or expression_name,
+                "id": _normalize_pose_id(
+                    expression.get("catalog_id") or expression_name
+                ),
+                "label": str(
+                    expression.get("catalog_label") or expression_name
+                ).strip(),
+                "emotion_label": (
+                    _text_list(expression.get("catalog_emotion_bias"), limit=1) or
+                    [_normalize_pose_id(expression_name) or expression_name]
+                )[0],
                 "source": "profile_binding_parameter_extract",
-                "description": str(expression.get("description") or "").strip(),
-                "intensity": str(expression.get("intensity") or "").strip(),
-                "tags": _text_list([expression.get("category")], limit=3),
+                "description": str(
+                    expression.get("catalog_description")
+                    or expression.get("description")
+                    or ""
+                ).strip(),
+                "intensity": str(
+                    expression.get("catalog_intensity")
+                    or expression.get("intensity")
+                    or ""
+                ).strip(),
+                "tags": _text_list(
+                    expression.get("catalog_tags") or [expression.get("category")],
+                    limit=6,
+                ),
+                "emotion_bias": _text_list(
+                    expression.get("catalog_emotion_bias"),
+                    limit=6,
+                ),
+                "recommended_scenarios": _text_list(
+                    expression.get("recommended_scenarios"),
+                    limit=6,
+                ),
                 "axes": axes,
             }
         )
