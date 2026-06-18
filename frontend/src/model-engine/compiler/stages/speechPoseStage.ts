@@ -139,6 +139,7 @@ function buildVoiceFollowingParameters(
         amplitude: channel.amplitude,
         phase: channel.phase,
         frequency_hz: resolveVoiceFollowingFrequencyHz(channel),
+        direction: resolveVoiceFollowingDirection(channel),
       },
     });
     existingParameterIds.add(channel.parameter_id);

@@ -254,6 +254,25 @@ def test_voice_following_lateral_channels_preserve_body_hierarchy() -> None:
     assert specs["body_roll"]["amplitude"] > specs["body_yaw"]["amplitude"]
 
 
+def test_voice_following_ignores_unsafe_calibration_direction() -> None:
+    parameter_scan, _motions = build_seed_inputs()
+    profile = live2d_scan._build_voice_following_profile(
+        model_id="DemoModel",
+        parameter_scan=deepcopy(parameter_scan),
+        calibration_profile={
+            "axes": {
+                "head_yaw": {
+                    "baseline": 0.0,
+                    "direction": -1,
+                    "safe_to_apply": False,
+                }
+            }
+        },
+    )
+
+    assert "direction" not in profile["channels"]["head_yaw"]
+
+
 def test_seed_model_info_with_reinforced_primary_observations_exports_safe_calibration() -> None:
     model_info = build_seed_model_info_with_options(reinforce_primary_observations=True)
     model = model_info["models"][0]
@@ -264,6 +283,8 @@ def test_seed_model_info_with_reinforced_primary_observations_exports_safe_calib
         "min": -0.05,
         "max": 0.7,
     }
+    assert model["calibration_profile"]["axes"]["head_yaw"]["direction"] == 1
+    assert model["voice_following_profile"]["channels"]["head_yaw"]["direction"] == 1
     assert model["adaptive_parameter_profile"]["runtime_summary"]["axis_parameter_map"] == {
         "head_yaw": "ParamAngleX",
     }

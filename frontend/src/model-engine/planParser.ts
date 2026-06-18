@@ -143,6 +143,7 @@ export function parseSemanticParameterPlan(
             && item.modulation.frequency_hz > 0
             ? Number(item.modulation.frequency_hz)
             : undefined,
+          direction: item.modulation.direction === -1 ? -1 : 1,
         }
         : undefined,
     });

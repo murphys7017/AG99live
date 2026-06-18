@@ -295,6 +295,7 @@ function buildModelWithVoiceFollowingProfile(profile: SemanticAxisProfile): Mode
         weight: 1,
         phase: 0,
         frequency_hz: 1.45,
+        direction: -1,
       },
       head_pitch: {
         channel: "head_pitch",
@@ -331,6 +332,7 @@ function buildModelWithVoiceFollowingProfile(profile: SemanticAxisProfile): Mode
         weight: 0.7,
         phase: 0.5,
         frequency_hz: 1.2,
+        direction: -1,
       },
     },
     summary: {
@@ -705,6 +707,7 @@ function testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes(): void {
     amplitude: 6,
     phase: 0,
     frequency_hz: 1.45,
+    direction: -1,
   });
   assert.equal(headPitch?.modulation?.frequency_hz, 0.68);
   assert.ok(
@@ -736,8 +739,9 @@ function testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight(): void {
   assert.equal(result.ok, true);
   const bodyRoll = result.plan?.parameters.find((item) => item.parameter_id === "ParamBodyAngleZ");
   assert.ok(bodyRoll);
-  assert.equal(bodyRoll?.target_value, 3);
+  assert.equal(bodyRoll?.target_value, -3);
   assert.equal(bodyRoll?.weight, 0.7);
+  assert.equal(bodyRoll?.modulation?.direction, -1);
   const headPitch = result.plan?.parameters.find((item) => item.parameter_id === "ParamAngleY");
   assert.ok(headPitch);
   assert.equal(Math.abs(headPitch?.target_value ?? 0), 1.2);

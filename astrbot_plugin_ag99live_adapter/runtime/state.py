@@ -44,7 +44,7 @@ from ..prompts.motion_selector import (
 )
 from .motion_state import MotionTuningStore
 
-LIVE2D_SCAN_CACHE_VERSION = "motion_reference_templates.v1"
+LIVE2D_SCAN_CACHE_VERSION = "voice_following_tuning.v2"
 
 
 class RuntimeState:

@@ -1945,7 +1945,7 @@ def _build_voice_following_profile(
             calibration_axis=calibration_axis,
             amplitude=float(spec["amplitude"]),
         )
-        channels[channel_name] = {
+        channel_profile = {
             "channel": channel_name,
             "parameter_id": parameter_id,
             "parameter_name": str(
@@ -1959,6 +1959,10 @@ def _build_voice_following_profile(
             "phase": _round_float(spec["phase"]),
             "frequency_hz": _round_float(spec["frequency_hz"]),
         }
+        calibration_direction = calibration_axis.get("direction")
+        if calibration_axis.get("safe_to_apply") is True and calibration_direction in {-1, 1}:
+            channel_profile["direction"] = int(calibration_direction)
+        channels[channel_name] = channel_profile
 
     return {
         "schema_version": VOICE_FOLLOWING_PROFILE_SCHEMA_VERSION,

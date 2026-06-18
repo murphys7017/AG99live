@@ -131,6 +131,7 @@ def test_runtime_state_invalidates_old_scan_cache_version(
         return deepcopy(seed_model_info)
 
     monkeypatch.setattr(runtime_state, "scan_live2d_models", scan_stub)
+    monkeypatch.setattr(runtime_state, "build_live2d_directory_md5", lambda _path: "sig-current")
 
     model_dir = tmp_path / "live2ds" / "DemoModel"
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -143,7 +144,8 @@ def test_runtime_state_invalidates_old_scan_cache_version(
             {
                 "schema_version": "live2d_runtime_cache.v1",
                 "scan_cache": {
-                    "live2d_dir_md5": "stale",
+                    "cache_version": "motion_reference_templates.v1",
+                    "live2d_dir_md5": "sig-current",
                     "base_url": "http://127.0.0.1:12397",
                     "model_info": {"selected_model": "CachedOnly", "models": []},
                 },

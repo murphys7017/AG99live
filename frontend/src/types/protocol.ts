@@ -642,6 +642,7 @@ export interface SemanticParameterPlanEntry {
     amplitude: number;
     phase: number;
     frequency_hz?: number;
+    direction?: 1 | -1;
   };
 }
 

@@ -333,6 +333,14 @@ VOICE_FOLLOWING_TUNING = {
 - 当前配置有意突出侧倾摇晃、收小左右扭头。后续调参必须成组修改，不能只修改头部或身体单侧通道。
 
 修改扫描侧配置后，需要重新生成或同步模型信息，新的 `voice_following_profile` 才会下发到前端。
+扫描缓存版本由 `runtime/state.py` 的 `LIVE2D_SCAN_CACHE_VERSION` 管理；调整
+`VOICE_FOLLOWING_TUNING` 或 profile 生成规则时必须同步提升该版本，使旧扫描结果自动失效。
+
+如果模型校准结果提供可靠的 `direction`，扫描器会把它写入
+`voice_following_profile.channels.*.direction`。前端 compiler 将该方向继续写入
+`speech_pose_cycle` modulation，SDK 逐帧振荡时再应用它。没有可靠方向时使用标准
+Live2D channel 的默认方向。这样同组头身共享节奏，同时允许参数方向相反的模型通过
+校准信息得到视觉上的同向动作。
 
 ### 10.2 音频能量响应
 
