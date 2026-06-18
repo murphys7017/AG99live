@@ -280,7 +280,7 @@
       "exclusive_with": ["angry_standard", "annoyed_lean", "surprised_backoff"],
       "intensity": "medium",
       "recommended_scenarios": ["害羞", "被夸", "不自然回避"],
-      "expose_as_resource": false
+      "expose_as_resource": true
     },
     {
       "id": "surprised_standard",
@@ -336,7 +336,7 @@
       "exclusive_with": ["gentle_nod", "happy_smile", "comfort_relaxed", "embarrassed_lookaway", "surprised_backoff"],
       "intensity": "high",
       "recommended_scenarios": ["生气", "否定", "强烈不满"],
-      "expose_as_resource": false
+      "expose_as_resource": true
     }
   ],
   "expressions": [
@@ -360,7 +360,7 @@
       "emotion_bias": ["angry", "reject"],
       "intensity": "high",
       "recommended_scenarios": ["明确不满", "强硬否定", "斥责", "被冒犯"],
-      "expose_as_resource": false
+      "expose_as_resource": true
     },
     {
       "id": "expr_surprised",
@@ -382,7 +382,7 @@
       "emotion_bias": ["confused", "overwhelmed"],
       "intensity": "high",
       "recommended_scenarios": ["听不懂", "信息过载", "混乱", "疑惑加重"],
-      "expose_as_resource": false
+      "expose_as_resource": true
     },
     {
       "id": "expr_embarrassed",
@@ -393,7 +393,7 @@
       "emotion_bias": ["embarrassed", "awkward"],
       "intensity": "medium",
       "recommended_scenarios": ["被戳穿", "不好意思", "嘴硬否认", "尴尬回应"],
-      "expose_as_resource": false
+      "expose_as_resource": true
     },
     {
       "id": "expr_blush",
@@ -404,7 +404,7 @@
       "emotion_bias": ["shy", "warm"],
       "intensity": "low",
       "recommended_scenarios": ["被夸", "感谢", "轻微害羞", "温柔回应"],
-      "expose_as_resource": false
+      "expose_as_resource": true
     },
     {
       "id": "expr_tired",
@@ -415,7 +415,7 @@
       "emotion_bias": ["tired", "sleepy"],
       "intensity": "medium",
       "recommended_scenarios": ["疲惫", "犯困", "无力吐槽", "熬夜感"],
-      "expose_as_resource": false
+      "expose_as_resource": true
     },
     {
       "id": "expr_extremely_tired",
@@ -426,7 +426,7 @@
       "emotion_bias": ["tired", "weak"],
       "intensity": "high",
       "recommended_scenarios": ["非常疲惫", "撑不住", "崩溃吐槽", "夸张无力"],
-      "expose_as_resource": false
+      "expose_as_resource": true
     },
     {
       "id": "expr_messy",
@@ -437,7 +437,7 @@
       "emotion_bias": ["panic", "confused"],
       "intensity": "high",
       "recommended_scenarios": ["慌乱", "信息过载", "崩溃吐槽", "被难住"],
-      "expose_as_resource": false
+      "expose_as_resource": true
     },
     {
       "id": "expr_murderous",
@@ -448,7 +448,7 @@
       "emotion_bias": ["menacing", "angry"],
       "intensity": "high",
       "recommended_scenarios": ["黑化玩笑", "强烈不满", "危险吐槽", "压迫感"],
-      "expose_as_resource": false
+      "expose_as_resource": true
     },
     {
       "id": "expr_question",
@@ -459,7 +459,7 @@
       "emotion_bias": ["question", "confused"],
       "intensity": "low",
       "recommended_scenarios": ["短促疑问", "反问", "没听懂", "确认问题"],
-      "expose_as_resource": false
+      "expose_as_resource": true
     },
     {
       "id": "expr_exclamation",
@@ -470,7 +470,7 @@
       "emotion_bias": ["alert", "surprised"],
       "intensity": "low",
       "recommended_scenarios": ["突然想起", "提醒", "轻微惊讶", "强调重点"],
-      "expose_as_resource": false
+      "expose_as_resource": true
     },
     {
       "id": "expr_loading",
@@ -481,7 +481,7 @@
       "emotion_bias": ["thinking", "waiting"],
       "intensity": "low",
       "recommended_scenarios": ["思考", "等待", "组织语言", "处理中"],
-      "expose_as_resource": false
+      "expose_as_resource": true
     },
     {
       "id": "expr_neutral",
