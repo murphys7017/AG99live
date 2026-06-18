@@ -171,7 +171,7 @@ export function createAdapterConnection(
     createMessageId,
     setDesktopPttMode: (enabled, binding) => {
       if (typeof window !== "undefined") {
-        window.ag99desktop?.setPttMode?.(enabled, binding);
+        window.ag99desktop?.setPttMode?.(enabled, binding ? { ...binding } : binding);
       }
     },
   });
@@ -291,7 +291,7 @@ export function createAdapterConnection(
           console.warn("[useAdapterConnection] failed to read PTT hook status:", error);
         });
         // 同步持久化的 PTT 模式到主进程 hook
-        window.ag99desktop?.setPttMode?.(state.pttModeEnabled, state.pttKeyBinding);
+        window.ag99desktop?.setPttMode?.(state.pttModeEnabled, { ...state.pttKeyBinding });
       });
     }
 
