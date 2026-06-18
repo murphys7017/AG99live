@@ -778,6 +778,7 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         "intent_tags 用 2 到 6 个开放关键词概括本轮语气、姿态和场景，不要输出 emotion_label。"
         f"{resource_field_text}"
         "axes 只能使用当前 schema 里的轴 id，并且每个值都直接写成 number。"
+        "axes 是本轮动作目标，不是角色全部参数的状态快照；没有明确方向或表演贡献的轴直接省略。"
         "优先让头部、身体和视线形成可见骨架，再用少量表情轴补充细节。"
         "普通回复也要给轻量姿态；明显转身、强调、回避、惊讶、调侃、开心或疑惑时，动作幅度要更明确。"
         "不要输出 choice、mode、motion_id、catalog、motion3、exp3、关键帧、时间曲线或播放文件引用。"

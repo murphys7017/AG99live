@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .semantic_axis_prompt import format_axis_action_directions
+
 
 def build_inline_motion_contract(
     *,
@@ -31,6 +33,7 @@ def build_inline_motion_contract(
         "`intent.resource_id` 是可选明确资源引用；没有候选或不确定时省略，不要编造。",
         "`intent.axes` 对象只能包含下方列出的可控制参数。",
         "`intent.axes` 的每个值必须是 flat number，不要写成 {\"value\": number}。",
+        "`intent.axes` 是本轮动作目标，不是角色全部参数的状态快照；没有对应方向或表演贡献的轴直接省略。",
         "不要编造参数名，也不要输出未列出的参数。",
         "`intent.duration_hint_ms` 缺失或不合理时会被系统默认成 1000ms。",
         "如果本轮语气平静或不确定，输出安全的轻量语义 intent，不要省略标签。",
@@ -72,9 +75,16 @@ def build_inline_motion_axis_lines(semantic_profile: dict[str, Any]) -> list[str
             for item in axis.get("positive_semantics", [])
             if str(item).strip()
         )
+        negative_action, positive_action = format_axis_action_directions(
+            axis_id,
+            negative=negative or "向负方向动作",
+            positive=positive or "向正方向动作",
+        )
         lines.append(
             f"- {axis_id}（{label}，{role_label}）："
-            f"低值={negative or '负方向'}；高值={positive or '正方向'}"
+            f"向较小值调整会让角色{negative_action}；"
+            f"向较大值调整会让角色{positive_action}；"
+            "本轮没有对应方向的表达需要时省略此轴"
         )
     return lines
 

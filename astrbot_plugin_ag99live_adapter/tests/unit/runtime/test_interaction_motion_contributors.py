@@ -443,9 +443,14 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert capability.value["configured_generation_mode"] == "split_after_reply"
     assert capability.value["motion_style_prompt"] == "中性时偏少轴，开心时优先笑眼和嘴角。"
     assert capability.value["semantic_profile"]["profile_id"] == "pet.semantic.v1"
-    assert "低值=turn left；高值=turn right" in capability.value["semantic_profile"]["axis_prompt"]
+    assert (
+        "向较小值调整会让角色向左扭头；向较大值调整会让角色向右扭头"
+        in capability.value["semantic_profile"]["axis_prompt"]
+    )
+    assert "中性值" not in capability.value["semantic_profile"]["axis_prompt"]
     assert "使用说明=Use for attention direction." in capability.value["semantic_profile"]["axis_prompt"]
-    assert "低值=turn left；高值=turn right" in system.value
+    assert "向较小值调整会让角色向左扭头；向较大值调整会让角色向右扭头" in system.value
+    assert "没有明确方向或表演贡献的轴直接省略" in system.value
     assert "可复用的现成 motion3 动画" not in system.value
     assert "旧表情参考模板" not in system.value
     assert "[动作]" not in system.value
