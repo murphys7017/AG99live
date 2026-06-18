@@ -14,6 +14,7 @@ import {
   normalizeMicrophoneDeviceId,
   saveStoredPttKeyBinding,
   saveStoredMicrophoneDeviceId,
+  saveStoredPttModeEnabled,
 } from "../core/preferences.js";
 import {
   normalizePttKeyBinding,
@@ -211,6 +212,10 @@ export function createAdapterMicrophoneRuntime(
       return stopMicrophoneCapture("manual_stop");
     }
 
+    if (deps.state.pttModeEnabled) {
+      // PTT 模式下点按钮 = 切换到常开模式并启动麦克风
+      setPttMode(false);
+    }
     return startMicrophoneCapture("manual");
   }
 
@@ -299,6 +304,7 @@ export function createAdapterMicrophoneRuntime(
 
   function setPttMode(enabled: boolean): void {
     deps.state.pttModeEnabled = enabled;
+    saveStoredPttModeEnabled(enabled);
     deps.setDesktopPttMode?.(enabled, deps.state.pttKeyBinding);
     if (enabled) {
       if (deps.state.micCapturing || isMicrophoneCaptureRuntimeActive()) {

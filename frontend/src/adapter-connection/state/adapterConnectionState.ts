@@ -20,6 +20,7 @@ import {
   loadStoredAdapterAddress,
   loadStoredMicrophoneDeviceId,
   loadStoredPttKeyBinding,
+  loadStoredPttModeEnabled,
 } from "../core/preferences.js";
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
@@ -51,7 +52,7 @@ export function createAdapterConnectionState() {
     currentTurnId: null as string | null,
     micRequested: false,
     micCapturing: false,
-    pttModeEnabled: false,
+    pttModeEnabled: loadStoredPttModeEnabled(),
     pttKeyBinding: loadStoredPttKeyBinding(),
     pttHookStatus: { ...DEFAULT_PTT_HOOK_STATUS },
     isPlayingAudio: false,

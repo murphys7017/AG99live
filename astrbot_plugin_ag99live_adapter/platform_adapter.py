@@ -74,7 +74,7 @@ IMAGE_CACHE_DIR = RUNTIME_CACHE_DIR / "images"
         "conf_name": "AG99live Desktop",
         "conf_uid": "ag99live-desktop",
         "speaker_name": "AstrBot",
-        "auto_start_mic": True,
+        "auto_start_mic": False,
     },
 )
 class OLVPetPlatformAdapter(Platform):
@@ -111,7 +111,7 @@ class OLVPetPlatformAdapter(Platform):
         self.conf_name = _config_get(self.config, "conf_name", "AG99live Desktop")
         self.conf_uid = _config_get(self.config, "conf_uid", "ag99live-desktop")
         self.speaker_name = _config_get(self.config, "speaker_name", "AstrBot")
-        self.auto_start_mic = bool(_config_get(self.config, "auto_start_mic", True))
+        self.auto_start_mic = bool(_config_get(self.config, "auto_start_mic", False))
         self._event_loop: asyncio.AbstractEventLoop | None = None
 
         self._plugin_context = get_plugin_context()

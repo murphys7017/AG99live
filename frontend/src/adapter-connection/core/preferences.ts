@@ -9,6 +9,7 @@ const ADDRESS_STORAGE_KEY = "ag99live.adapter.address";
 const DESKTOP_SCREENSHOT_ON_SEND_STORAGE_KEY = "ag99live.desktop.capture_on_send";
 const MICROPHONE_DEVICE_ID_STORAGE_KEY = "ag99live.microphone.device_id";
 const PTT_KEY_BINDING_STORAGE_KEY = "ag99live.microphone.ptt_key_binding";
+const PTT_MODE_ENABLED_STORAGE_KEY = "ag99live.microphone.ptt_mode_enabled";
 
 export function normalizeAdapterAddressSetting(nextAddress: string): string {
   return nextAddress.trim() || DEFAULT_ADAPTER_ADDRESS;
@@ -107,6 +108,32 @@ export function saveStoredMicrophoneDeviceId(deviceId: string): void {
     }
   } catch (error) {
     console.warn("[AdapterPreferences] Failed to persist microphone device preference.", error);
+  }
+}
+
+export function loadStoredPttModeEnabled(): boolean {
+  if (typeof window === "undefined") {
+    return true;
+  }
+  try {
+    const storedValue = window.localStorage.getItem(PTT_MODE_ENABLED_STORAGE_KEY);
+    if (storedValue === "false") {
+      return false;
+    }
+  } catch (error) {
+    console.warn("[AdapterPreferences] Failed to load PTT mode preference.", error);
+  }
+  return true;
+}
+
+export function saveStoredPttModeEnabled(enabled: boolean): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(PTT_MODE_ENABLED_STORAGE_KEY, enabled ? "true" : "false");
+  } catch (error) {
+    console.warn("[AdapterPreferences] Failed to persist PTT mode preference.", error);
   }
 }
 

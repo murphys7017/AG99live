@@ -28,6 +28,7 @@ export interface InboundRuntimeDispatchState {
   turnFinishedSuccess: boolean;
   turnFinishedReason: string;
   micRequested: boolean;
+  pttModeEnabled: boolean;
   isPlayingAudio: boolean;
   audioPlaybackStartedTurnId: string | null;
   audioPlaybackStartedMessageId: string | null;
@@ -189,8 +190,12 @@ function applyInterrupt(
 
 function applyStartMic(deps: InboundRuntimeDispatchDeps): void {
   const s = deps.state;
-  s.micRequested = true;
   s.statusMessage = "后端已请求启动麦克风，准备自动收音。";
+  if (s.pttModeEnabled) {
+    deps.pushHistory("system", "后端请求自动收音，当前为按键说话模式，已跳过。");
+    return;
+  }
+  s.micRequested = true;
   deps.pushHistory("system", s.statusMessage);
   void deps.startMicrophoneCapture("auto");
 }

@@ -56,6 +56,7 @@ export interface InboundDispatchState {
   turnFinishedReason: string;
   // mic
   micRequested: boolean;
+  pttModeEnabled: boolean;
   // audio io
   isPlayingAudio: boolean;
   audioPlaybackStartedTurnId: string | null;

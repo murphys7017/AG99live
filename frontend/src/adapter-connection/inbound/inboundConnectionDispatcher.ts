@@ -4,6 +4,7 @@ import type { InboundAdapterEvent } from "./inboundEvents.js";
 export interface InboundConnectionDispatchState {
   statusMessage: string;
   micRequested: boolean;
+  pttModeEnabled: boolean;
   serverInfo: SystemServerInfoPayload | null;
 }
 
@@ -37,10 +38,14 @@ function applyServerInfoMessage(
     ws_url: deps.rewriteSocketUrl(envelope.payload.ws_url),
     http_base_url: deps.rewriteHttpUrl(envelope.payload.http_base_url),
   };
-  s.micRequested = s.serverInfo.auto_start_mic;
   s.statusMessage = "适配器已连接，等待模型同步。";
   deps.pushHistory("system", "收到后端运行信息。");
   if (s.serverInfo.auto_start_mic) {
-    void deps.startMicrophoneCapture("auto");
+    if (s.pttModeEnabled) {
+      deps.pushHistory("system", "后端请求自动收音，当前为按键说话模式，已跳过。");
+    } else {
+      s.micRequested = true;
+      void deps.startMicrophoneCapture("auto");
+    }
   }
 }

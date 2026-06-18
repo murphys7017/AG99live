@@ -364,7 +364,7 @@ onMounted(() => {
           />
           <span class="settings-toggle__control" aria-hidden="true"></span>
           <span class="settings-toggle__copy">
-            开启后麦克风默认关闭。长按当前配置按键开始收音，松开按键停止收音。关闭后恢复手动开关麦克风。
+            开启后默认闭麦，按住配置按键开始收音，松开按键停止收音；关闭后可使用常开/手动麦克风。
           </span>
         </label>
 
@@ -380,7 +380,6 @@ onMounted(() => {
         </div>
 
         <p class="settings-card__hint">
-          按键说话模式下，"开始/停止麦克风"按钮仍可手动接管。切换模式会关闭当前收音。
           {{ pttKeyStatus }}
         </p>
         <p

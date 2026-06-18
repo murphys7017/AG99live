@@ -42,9 +42,12 @@ const isMicCapturing = computed(() => bridge.state.snapshot.micCapturing);
 const voiceActive = computed(() =>
   bridge.state.snapshot.micCapturing || bridge.state.snapshot.audioPlaying,
 );
-const micButtonTitle = computed(() =>
-  isMicCapturing.value ? "关闭常驻收音" : "开启常驻收音",
-);
+const micButtonTitle = computed(() => {
+  if (isMicCapturing.value) {
+    return "关闭收音";
+  }
+  return bridge.state.snapshot.pttModeEnabled ? "切换到常开收音" : "开启常开收音";
+});
 
 function handleSend(): void {
   const text = draft.value.trim();
