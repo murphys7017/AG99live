@@ -227,6 +227,7 @@ def _build_semantic_model_info() -> dict:
                             "catalog_intensity": "medium",
                             "catalog_tags": ["serious", "explain"],
                             "catalog_emotion_bias": ["neutral", "thinking"],
+                            "catalog_expose_as_resource": True,
                             "catalog_exclusive_with": ["happy_burst"],
                             "recommended_scenarios": ["说明问题", "认真解释"],
                         }
@@ -236,6 +237,14 @@ def _build_semantic_model_info() -> dict:
                             "name": "Surprised",
                             "file": "Expressions/Surprised.exp3.json",
                             "category": "base_emotion",
+                            "catalog_id": "expr_surprised",
+                            "catalog_label": "惊讶表情",
+                            "catalog_description": "适合突然被问到或意外反应。",
+                            "catalog_tags": ["惊讶", "意外"],
+                            "catalog_emotion_bias": ["surprised", "shock"],
+                            "catalog_intensity": "high",
+                            "catalog_expose_as_resource": True,
+                            "recommended_scenarios": ["突然被问到", "意外"],
                             "intensity": "high",
                             "parameters": [
                                 {
@@ -260,6 +269,9 @@ def _build_semantic_model_info() -> dict:
                             "name": "Tablet",
                             "file": "Expressions/Tablet.exp3.json",
                             "category": "special_state",
+                            "catalog_id": "expr_tablet",
+                            "catalog_label": "平板状态",
+                            "catalog_expose_as_resource": False,
                             "intensity": "high",
                             "parameters": [
                                 {
@@ -417,14 +429,15 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     system = next(item for item in extensions if item.mount == "system")
     capability = next(item for item in extensions if item.mount == "capability")
     runtime = next(item for item in extensions if item.mount == "context")
-    assert "AG99live Motion 是当前桌宠前端的主动作通道" in system.value
+    assert "AG99live Motion 负责把本轮回复语义转成可执行动作" in system.value
     assert '"plugin_hints":{"ag99live_motion"' in system.value
+    assert "plugin_hints.ag99live_motion 中输出结果" in system.value
     assert '"fallback_pose_id":"neutral"' not in system.value
     assert '"choice"' not in system.value
     assert '"motion_id"' not in system.value
     assert "immediate_spoken_reply" in system.value
-    assert "避免连续复用同一组轴和值" in system.value
-    assert "少量可用轴和合法数值幅度" in system.value
+    assert "头部、身体和视线形成可见骨架" in system.value
+    assert "普通回复也要给轻量姿态" in system.value
     assert "角色风格偏好" in system.value
     assert "中性时偏少轴" in system.value
     assert capability.value["configured_generation_mode"] == "split_after_reply"
@@ -440,7 +453,9 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "fallback_pose_id" not in system.value
     assert "intent_tags" in system.value
     assert "resource_id" in system.value
-    assert "axes 语义轴目标组" in system.value
+    assert "axes 只能使用当前 schema 里的轴 id" in system.value
+    assert "可选明确资源" in system.value
+    assert "expr_surprised" in system.value
     assert "关键轴=head_yaw=80" in system.value
     assert "姿态更稳定" in system.value
     assert "eye_open_left" in system.value
@@ -450,6 +465,19 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "motion_reference_templates" not in capability.value
     assert "motion_catalog_options" not in capability.value
     assert "fallback_pose_candidates" in capability.value
+    assert "resource_candidates" in capability.value
+    resource_ids = {
+        item["resource_id"] for item in capability.value["resource_candidates"]
+    }
+    assert {"expr_surprised", "serious_explain"}.issubset(resource_ids)
+    assert "expr_tablet" not in resource_ids
+    resource_candidate = next(
+        item
+        for item in capability.value["resource_candidates"]
+        if item["resource_id"] == "expr_surprised"
+    )
+    assert resource_candidate["resource_type"] == "expression"
+    assert resource_candidate["recommended_scenarios"] == ["突然被问到", "意外"]
     assert 2 <= len(capability.value["fallback_pose_candidates"]) <= 4
     assert all(
         item["id"] != "neutral"
@@ -492,6 +520,10 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert (
         capability.value["plugin_hints_format"]["ag99live_motion"]["intent_tags"]
         == ["语气关键词", "姿态关键词", "场景关键词"]
+    )
+    assert (
+        capability.value["plugin_hints_format"]["ag99live_motion"]["resource_id"]
+        == "可选资源id"
     )
     assert "intent_tags" in system.value
     assert "resource_id" in system.value
@@ -1981,6 +2013,70 @@ def test_plugin_hints_motion_payload_supports_intent_tags_and_resource_id(
     assert payload["resource_id"] == "serious_explain"
     assert payload["fallback_pose_id"] == "serious_explain"
     assert payload["summary"]["intent_tag_count"] == 2
+
+
+def test_plugin_hints_accepts_catalog_expression_resource_without_fallback_id_match(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "intent_tags": ["惊讶", "意外"],
+                "resource_id": "expr_surprised",
+                "duration_hint_ms": 1200,
+                "axes": {
+                    "eye_open_left": 72,
+                },
+            }
+        },
+    )
+
+    payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
+
+    assert payload is not None
+    assert payload["resource_id"] == "expr_surprised"
+    assert payload["fallback_pose_id"] == "surprised"
+    assert payload["summary"]["matched_candidate_id"] == "surprised"
+
+
+def test_plugin_hints_rejects_resource_id_not_exposed_by_catalog(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "intent_tags": ["惊讶", "意外"],
+                "resource_id": "surprised",
+                "duration_hint_ms": 1200,
+                "axes": {
+                    "eye_open_left": 72,
+                },
+            }
+        },
+    )
+
+    payload, reason = module._resolve_plugin_hints_motion_payload_with_reason(
+        event,
+        runtime_state,
+    )
+
+    assert payload is not None
+    assert payload["resource_id"] == ""
+    assert "resource_id_rejected:surprised" in reason
 
 
 def test_self_reply_missing_hints_falls_back_to_default_pose_without_provider(

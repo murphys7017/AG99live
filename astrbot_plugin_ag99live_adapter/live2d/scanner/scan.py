@@ -441,6 +441,7 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
         model_dir=model_dir,
         model_payload=model_payload,
         parameter_lookup=parameter_lookup,
+        expression_catalog=motion_catalog.get("expressions", {}),
     )
     expression_scan = _apply_expression_hints_to_parameters(
         parameter_scan=parameter_scan,
@@ -450,7 +451,7 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
         model_dir=model_dir,
         model_payload=model_payload,
         parameter_lookup=parameter_lookup,
-        motion_catalog=motion_catalog,
+        motion_catalog=motion_catalog.get("motions", {}),
     )
     try:
         base_action_library = _build_base_action_library(
@@ -548,7 +549,7 @@ def _scan_model_resources(
     model3_path: Path,
     cdi_path: Path | None,
     model_payload: dict[str, Any],
-    motion_catalog: dict[str, dict[str, Any]],
+    motion_catalog: dict[str, Any],
 ) -> dict[str, Any]:
     file_references = model_payload.get("FileReferences", {})
     texture_files = [
@@ -598,7 +599,9 @@ def _scan_model_resources(
         ],
         "vtube_profile_count": len(vtube_profiles),
         "vtube_profiles": vtube_profiles,
-        "has_motion_catalog": bool(motion_catalog),
+        "has_motion_catalog": bool(
+            motion_catalog.get("motions") or motion_catalog.get("expressions")
+        ),
     }
 
 
@@ -697,6 +700,7 @@ def _scan_expressions(
     model_dir: Path,
     model_payload: dict[str, Any],
     parameter_lookup: dict[str, dict[str, Any]],
+    expression_catalog: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     expressions_payload = model_payload.get("FileReferences", {}).get("Expressions", [])
     expressions: list[dict[str, Any]] = []
@@ -736,6 +740,7 @@ def _scan_expressions(
             )
         parameter_ids = [item["id"] for item in expression_parameters]
         name = str(item.get("Name") or expression_path.stem).strip() or expression_path.stem
+        catalog_entry = expression_catalog.get(file_value.replace("\\", "/"), {})
         dominant_parameters = [
             {
                 "id": item["id"],
@@ -763,6 +768,29 @@ def _scan_expressions(
                 "name": name,
                 "file": file_value.replace("\\", "/"),
                 "category": _infer_expression_category(name, parameter_ids),
+                "catalog_id": str(catalog_entry.get("id") or "").strip(),
+                "catalog_label": str(catalog_entry.get("label") or "").strip(),
+                "catalog_description": str(catalog_entry.get("description") or "").strip(),
+                "catalog_tags": [
+                    str(tag).strip()
+                    for tag in catalog_entry.get("tags", [])
+                    if str(tag).strip()
+                ],
+                "catalog_emotion_bias": [
+                    str(tag).strip()
+                    for tag in catalog_entry.get("emotion_bias", [])
+                    if str(tag).strip()
+                ],
+                "catalog_intensity": str(catalog_entry.get("intensity") or "").strip(),
+                "catalog_expose_as_resource": bool(
+                    catalog_entry.get("expose_as_resource")
+                    or catalog_entry.get("is_resource")
+                ),
+                "recommended_scenarios": [
+                    str(tag).strip()
+                    for tag in catalog_entry.get("recommended_scenarios", [])
+                    if str(tag).strip()
+                ],
                 "parameter_ids": parameter_ids,
                 "parameter_count": len(parameter_ids),
                 "affects_channels": _collect_affected_channels(parameter_ids, parameter_lookup),
@@ -964,6 +992,10 @@ def _scan_motions(
                         if str(item).strip()
                     ],
                     "catalog_intensity": str(catalog_entry.get("intensity") or "").strip(),
+                    "catalog_expose_as_resource": bool(
+                        catalog_entry.get("expose_as_resource")
+                        or catalog_entry.get("is_resource")
+                    ),
                     "catalog_exclusive_with": [
                         str(item).strip()
                         for item in catalog_entry.get("exclusive_with", [])
@@ -2917,11 +2949,19 @@ def _infer_motion_category(
 
 def _load_motion_catalog(path: Path) -> dict[str, dict[str, Any]]:
     if not path.exists():
-        return {}
+        return {"motions": {}, "expressions": {}}
     payload = _load_json_file(path)
-    motions = payload.get("motions", [])
+    return {
+        "motions": _index_catalog_items_by_file(payload.get("motions", [])),
+        "expressions": _index_catalog_items_by_file(payload.get("expressions", [])),
+    }
+
+
+def _index_catalog_items_by_file(items: Any) -> dict[str, dict[str, Any]]:
     catalog: dict[str, dict[str, Any]] = {}
-    for item in motions:
+    if not isinstance(items, list):
+        return catalog
+    for item in items:
         if not isinstance(item, dict):
             continue
         file_value = str(item.get("file") or "").strip().replace("\\", "/")

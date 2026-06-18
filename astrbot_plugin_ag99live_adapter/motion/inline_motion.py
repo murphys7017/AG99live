@@ -37,6 +37,10 @@ from .fallback_pose import (
     resolve_fallback_pose,
     resolve_fallback_pose_axes,
 )
+from .resource_catalog import (
+    build_motion_resource_candidates,
+    validate_motion_resource_id,
+)
 from ..prompts.inline_motion_contract import build_inline_motion_contract
 from ..prompts.main_reply import build_main_llm_user_text
 from ..prompts.motion_selector import resolve_motion_prompt_instruction
@@ -181,9 +185,12 @@ def _repair_inline_motion_payload_with_fallback(
         semantic_profile=semantic_profile,
         limit=None,
     )
+    resource_candidates = build_motion_resource_candidates(
+        runtime_state=runtime_state,
+    )
     resource_id = _validate_inline_motion_resource_id(
         normalize_motion_resource_id(plan.get("resource_id")),
-        candidates=fallback_candidates,
+        candidates=resource_candidates,
     )
     fallback_decision = derive_motion_fallback_decision(
         candidates=fallback_candidates,
@@ -273,9 +280,12 @@ def _build_inline_fallback_motion_payload(
         limit=None,
     )
     raw_resource_id = resource_id
+    resource_candidates = build_motion_resource_candidates(
+        runtime_state=runtime_state,
+    )
     resource_id = _validate_inline_motion_resource_id(
         resource_id,
-        candidates=fallback_candidates,
+        candidates=resource_candidates,
     )
     fallback_decision = derive_motion_fallback_decision(
         candidates=fallback_candidates,
@@ -365,12 +375,7 @@ def _validate_inline_motion_resource_id(
     normalized = normalize_motion_resource_id(resource_id)
     if not normalized:
         return ""
-    candidate_ids = {
-        normalize_motion_resource_id(candidate.get("id")).lower()
-        for candidate in candidates
-        if isinstance(candidate, dict)
-    }
-    if normalized.lower() in candidate_ids:
+    if validate_motion_resource_id(normalized, candidates=candidates):
         return normalized
     return ""
 

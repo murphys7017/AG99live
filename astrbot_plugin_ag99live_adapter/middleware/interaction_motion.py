@@ -25,6 +25,10 @@ from ..motion.motion_intent import (
     normalize_motion_resource_id,
     resolve_selected_semantic_axis_profile,
 )
+from ..motion.resource_catalog import (
+    build_motion_resource_candidates,
+    validate_motion_resource_id,
+)
 from ..motion.fallback_pose import (
     DEFAULT_FALLBACK_POSE_ID,
     build_default_neutral_pose_axes,
@@ -319,9 +323,12 @@ def _resolve_plugin_hints_motion_payload_with_reason(
         semantic_profile=semantic_profile,
         limit=None,
     )
+    resource_candidates = build_motion_resource_candidates(
+        runtime_state=runtime_state,
+    )
     resource_id, resource_reason = _validate_motion_resource_id(
         resource_id,
-        candidates=fallback_candidates,
+        candidates=resource_candidates,
     )
     if resource_reason:
         reason = _append_resolution_reason(reason, resource_reason)
@@ -435,12 +442,7 @@ def _validate_motion_resource_id(
     normalized = normalize_motion_resource_id(resource_id)
     if not normalized:
         return "", ""
-    candidate_ids = {
-        normalize_motion_resource_id(candidate.get("id")).lower()
-        for candidate in candidates
-        if isinstance(candidate, dict)
-    }
-    if normalized.lower() in candidate_ids:
+    if validate_motion_resource_id(normalized, candidates=candidates):
         return normalized, "resource_id_validated"
     return "", f"resource_id_rejected:{_sanitize_reason_fragment(normalized)}"
 
@@ -653,6 +655,11 @@ def _build_motion_capability_payload(runtime_state: Any) -> dict[str, Any]:
             )
             if prompt_fallback_candidates:
                 capability_payload["fallback_pose_candidates"] = prompt_fallback_candidates
+            resource_candidates = build_motion_resource_candidates(
+                runtime_state=runtime_state,
+            )
+            if resource_candidates:
+                capability_payload["resource_candidates"] = resource_candidates
 
         capability_payload["plugin_hints_format"] = _build_plugin_hints_motion_format(
             profile_payload,
@@ -724,25 +731,48 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
                 + context_text
             )
         fallback_pose_text = "\n".join(lines) + "\n"
+    resource_text = ""
+    resource_candidates = capability_payload.get("resource_candidates")
+    if isinstance(resource_candidates, list) and resource_candidates:
+        lines = ["可选明确资源（只有需要特定表情/动画时才输出 resource_id；不确定就省略）："]
+        for item in resource_candidates:
+            if not isinstance(item, dict):
+                continue
+            resource_id = str(item.get("resource_id") or "").strip()
+            if not resource_id:
+                continue
+            label = str(item.get("label") or resource_id).strip()
+            context_parts = []
+            tags = _join_prompt_list(item.get("tags"), limit=4)
+            scenarios = _join_prompt_list(item.get("recommended_scenarios"), limit=3)
+            description = _truncate_text(str(item.get("description") or "").strip(), 72)
+            intensity = str(item.get("intensity") or "").strip()
+            if tags:
+                context_parts.append(f"标签={tags}")
+            if scenarios:
+                context_parts.append(f"适用={scenarios}")
+            if intensity:
+                context_parts.append(f"强度={intensity}")
+            if description:
+                context_parts.append(f"说明={description}")
+            context_text = f"；{'；'.join(context_parts)}" if context_parts else ""
+            lines.append(f"- {resource_id}: {label}{context_text}")
+        resource_text = "\n".join(lines) + "\n"
 
     return (
-        "AG99live Motion 是当前桌宠前端的主动作通道。"
-        "每次 interaction decision 都必须在 JSON 输出的 plugin_hints 中写入 ag99live_motion；"
-        "不要把动作写进 immediate_spoken_reply、core_task_spec 或普通文本。"
-        "ag99live_motion 只允许 intent_tags、resource_id、duration_hint_ms，以及 axes 语义轴目标组。"
-        "intent_tags 是 2 到 6 个表演意图关键词，可以包含情绪、语气、姿态和场景词；不要输出 emotion_label。"
-        "resource_id 是可选明确资源引用；没有可用候选或不确定时省略，不要编造。"
-        "不要输出 choice、mode、motion_id、catalog、motion3、exp3 或任何播放文件引用。"
-        "axes 是一组语义轴目标值，只能使用下方 schema 中已有的轴 id；每个轴值必须直接写成 number，例如 \"head_yaw\": 62。"
-        "不要生成关键帧、时间曲线、随机抖动或来回摆动。"
-        "如果用户只是普通说话，也要给一个轻量语义姿态。"
-        "不要把输出形状或单一情绪名称当成封闭动作模板；先理解本轮对话语气，再自由组合相关轴。"
-        "避免连续复用同一组轴和值；平静语气也要在头部朝向、身体跟随、视线和眼部之间做轻微语义变化。"
-        "明确转身、强调、回避、惊讶、调侃、开心或疑惑时，优先用 head_yaw/head_roll/head_pitch "
-        "配合 body_yaw/body_roll/body_pitch 建立可见动作骨架，再少量补眼部和表情细节。"
-        "输出形状示例只展示 JSON 结构、少量可用轴和合法数值幅度；实际输出应保留本轮有语义贡献的轴。"
+        "AG99live Motion 负责把本轮回复语义转成可执行动作。"
+        "请只在 JSON 的 plugin_hints.ag99live_motion 中输出结果，不要把动作写进普通文本、immediate_spoken_reply 或 core_task_spec。"
+        "允许字段只有 intent_tags、resource_id、duration_hint_ms 和 axes。"
+        "intent_tags 用 2 到 6 个开放关键词概括本轮语气、姿态和场景，不要输出 emotion_label。"
+        "resource_id 只有在确定要引用明确资源时才填写，不确定就省略。"
+        "axes 只能使用当前 schema 里的轴 id，并且每个值都直接写成 number。"
+        "优先让头部、身体和视线形成可见骨架，再用少量表情轴补充细节。"
+        "普通回复也要给轻量姿态；明显转身、强调、回避、惊讶、调侃、开心或疑惑时，动作幅度要更明确。"
+        "不要输出 choice、mode、motion_id、catalog、motion3、exp3、关键帧、时间曲线或播放文件引用。"
+        "示例只展示结构和数值，不要照抄示例内容。"
         f"{style_text}"
         f"{axis_prompt_text}"
+        f"{resource_text}"
         f"{fallback_pose_text}"
         f" 输出形状示例：{format_json}"
     )
@@ -767,6 +797,7 @@ def _build_plugin_hints_motion_format(
     return {
         "ag99live_motion": {
             "intent_tags": ["语气关键词", "姿态关键词", "场景关键词"],
+            "resource_id": "可选资源id",
             "duration_hint_ms": DEFAULT_MOTION_INTENT_DURATION_MS,
             "axes": axis_schema,
         },

@@ -13,7 +13,8 @@
       "priority": 10,
       "exclusive_with": [],
       "intensity": "low",
-      "recommended_scenarios": ["无明显情绪", "等待", "默认待机"]
+      "recommended_scenarios": ["无明显情绪", "等待", "默认待机"],
+      "expose_as_resource": false
     },
     {
       "id": "neutral_peaceful",
@@ -26,7 +27,8 @@
       "priority": 10,
       "exclusive_with": [],
       "intensity": "low",
-      "recommended_scenarios": ["日常聊天", "普通说明", "中性回复"]
+      "recommended_scenarios": ["日常聊天", "普通说明", "中性回复"],
+      "expose_as_resource": false
     },
     {
       "id": "happy_smile",
@@ -39,7 +41,8 @@
       "priority": 50,
       "exclusive_with": ["angry_standard", "annoyed_lean", "surprised_backoff", "sad_standard", "sad_drop"],
       "intensity": "low",
-      "recommended_scenarios": ["友好回应", "普通开心", "轻度正向反馈"]
+      "recommended_scenarios": ["友好回应", "普通开心", "轻度正向反馈"],
+      "expose_as_resource": false
     },
     {
       "id": "smirk_left_tilt",
@@ -52,7 +55,8 @@
       "priority": 50,
       "exclusive_with": ["sad_standard", "sad_drop", "angry_standard", "surprised_backoff"],
       "intensity": "medium",
-      "recommended_scenarios": ["调侃", "嘴硬", "小得意"]
+      "recommended_scenarios": ["调侃", "嘴硬", "小得意"],
+      "expose_as_resource": false
     },
     {
       "id": "embarrassed_smile_blink_right",
@@ -65,7 +69,8 @@
       "priority": 30,
       "exclusive_with": ["angry_standard", "annoyed_lean", "surprised_backoff"],
       "intensity": "medium",
-      "recommended_scenarios": ["被夸", "害羞否认", "轻微撒娇"]
+      "recommended_scenarios": ["被夸", "害羞否认", "轻微撒娇"],
+      "expose_as_resource": false
     },
     {
       "id": "comfort_relaxed",
@@ -78,7 +83,8 @@
       "priority": 30,
       "exclusive_with": ["angry_standard", "surprised_backoff", "annoyed_lean"],
       "intensity": "low",
-      "recommended_scenarios": ["安抚", "放松", "满足", "舒缓语气"]
+      "recommended_scenarios": ["安抚", "放松", "满足", "舒缓语气"],
+      "expose_as_resource": false
     },
     {
       "id": "gentle_sway",
@@ -91,7 +97,8 @@
       "priority": 30,
       "exclusive_with": ["angry_standard", "surprised_backoff"],
       "intensity": "low",
-      "recommended_scenarios": ["温柔陪伴", "轻松聊天", "安慰"]
+      "recommended_scenarios": ["温柔陪伴", "轻松聊天", "安慰"],
+      "expose_as_resource": false
     },
     {
       "id": "gentle_nod",
@@ -104,7 +111,8 @@
       "priority": 30,
       "exclusive_with": ["surprised_backoff", "angry_standard"],
       "intensity": "low",
-      "recommended_scenarios": ["认同", "确认", "安抚", "解释"]
+      "recommended_scenarios": ["认同", "确认", "安抚", "解释"],
+      "expose_as_resource": false
     },
     {
       "id": "thinking_pause",
@@ -117,7 +125,8 @@
       "priority": 70,
       "exclusive_with": ["happy_burst", "surprised_backoff", "angry_standard"],
       "intensity": "medium",
-      "recommended_scenarios": ["思考", "分析问题", "斟酌回答"]
+      "recommended_scenarios": ["思考", "分析问题", "斟酌回答"],
+      "expose_as_resource": false
     },
     {
       "id": "smirk_tilt",
@@ -130,7 +139,8 @@
       "priority": 50,
       "exclusive_with": ["sad_standard", "sad_drop", "angry_standard", "surprised_backoff"],
       "intensity": "medium",
-      "recommended_scenarios": ["调侃", "得意", "嘴硬", "半开玩笑"]
+      "recommended_scenarios": ["调侃", "得意", "嘴硬", "半开玩笑"],
+      "expose_as_resource": false
     },
     {
       "id": "happy_sway",
@@ -143,7 +153,8 @@
       "priority": 50,
       "exclusive_with": ["sad_standard", "sad_drop", "angry_standard", "surprised_backoff"],
       "intensity": "medium",
-      "recommended_scenarios": ["轻度开心", "满意", "友好互动"]
+      "recommended_scenarios": ["轻度开心", "满意", "友好互动"],
+      "expose_as_resource": false
     },
     {
       "id": "happy_burst",
@@ -156,7 +167,8 @@
       "priority": 50,
       "exclusive_with": ["sad_standard", "sad_drop", "thinking_pause", "angry_standard"],
       "intensity": "high",
-      "recommended_scenarios": ["兴奋", "获得好消息", "强烈开心"]
+      "recommended_scenarios": ["兴奋", "获得好消息", "强烈开心"],
+      "expose_as_resource": false
     },
     {
       "id": "annoyed_lean",
@@ -169,7 +181,8 @@
       "priority": 70,
       "exclusive_with": ["gentle_nod", "comfort_relaxed", "embarrassed_lookaway", "happy_smile", "surprised_backoff"],
       "intensity": "medium",
-      "recommended_scenarios": ["不耐烦", "吐槽", "催促", "嫌弃"]
+      "recommended_scenarios": ["不耐烦", "吐槽", "催促", "嫌弃"],
+      "expose_as_resource": false
     },
     {
       "id": "sad_standard",
@@ -182,7 +195,8 @@
       "priority": 50,
       "exclusive_with": ["happy_smile", "happy_burst", "smirk_tilt", "angry_standard"],
       "intensity": "medium",
-      "recommended_scenarios": ["伤心", "低落", "委屈"]
+      "recommended_scenarios": ["伤心", "低落", "委屈"],
+      "expose_as_resource": false
     },
     {
       "id": "sad_drop",
@@ -195,7 +209,8 @@
       "priority": 50,
       "exclusive_with": ["happy_smile", "happy_burst", "smirk_tilt", "angry_standard"],
       "intensity": "medium",
-      "recommended_scenarios": ["失落", "沮丧", "委屈"]
+      "recommended_scenarios": ["失落", "沮丧", "委屈"],
+      "expose_as_resource": false
     },
     {
       "id": "tired_yawn",
@@ -208,7 +223,8 @@
       "priority": 30,
       "exclusive_with": ["happy_burst", "surprised_backoff", "angry_standard"],
       "intensity": "medium",
-      "recommended_scenarios": ["疲惫", "犯困", "无力吐槽"]
+      "recommended_scenarios": ["疲惫", "犯困", "无力吐槽"],
+      "expose_as_resource": false
     },
     {
       "id": "confused_sway",
@@ -221,7 +237,8 @@
       "priority": 30,
       "exclusive_with": ["happy_burst", "angry_standard", "surprised_backoff"],
       "intensity": "medium",
-      "recommended_scenarios": ["思考", "犹豫", "疑惑", "不确定"]
+      "recommended_scenarios": ["思考", "犹豫", "疑惑", "不确定"],
+      "expose_as_resource": false
     },
     {
       "id": "confused_tilt",
@@ -234,7 +251,8 @@
       "priority": 70,
       "exclusive_with": ["happy_burst", "angry_standard", "surprised_backoff"],
       "intensity": "medium",
-      "recommended_scenarios": ["困惑", "疑问", "听不懂"]
+      "recommended_scenarios": ["困惑", "疑问", "听不懂"],
+      "expose_as_resource": false
     },
     {
       "id": "skeptical_narrow",
@@ -247,7 +265,8 @@
       "priority": 70,
       "exclusive_with": ["happy_burst", "sad_standard", "surprised_backoff"],
       "intensity": "medium",
-      "recommended_scenarios": ["怀疑", "不信", "质疑"]
+      "recommended_scenarios": ["怀疑", "不信", "质疑"],
+      "expose_as_resource": false
     },
     {
       "id": "embarrassed_lookaway",
@@ -260,7 +279,8 @@
       "priority": 70,
       "exclusive_with": ["angry_standard", "annoyed_lean", "surprised_backoff"],
       "intensity": "medium",
-      "recommended_scenarios": ["害羞", "被夸", "不自然回避"]
+      "recommended_scenarios": ["害羞", "被夸", "不自然回避"],
+      "expose_as_resource": false
     },
     {
       "id": "surprised_standard",
@@ -273,7 +293,8 @@
       "priority": 50,
       "exclusive_with": ["gentle_nod", "comfort_relaxed", "sad_drop", "tired_yawn"],
       "intensity": "medium",
-      "recommended_scenarios": ["惊讶", "意外", "突然被问到"]
+      "recommended_scenarios": ["惊讶", "意外", "突然被问到"],
+      "expose_as_resource": false
     },
     {
       "id": "surprised_backoff",
@@ -286,7 +307,8 @@
       "priority": 90,
       "exclusive_with": ["gentle_nod", "happy_smile", "happy_sway", "angry_standard", "comfort_relaxed", "serious_explain"],
       "intensity": "high",
-      "recommended_scenarios": ["被吓到", "强烈意外", "后退式惊讶"]
+      "recommended_scenarios": ["被吓到", "强烈意外", "后退式惊讶"],
+      "expose_as_resource": false
     },
     {
       "id": "serious_explain",
@@ -299,7 +321,8 @@
       "priority": 70,
       "exclusive_with": ["happy_burst", "surprised_backoff", "tired_yawn"],
       "intensity": "medium",
-      "recommended_scenarios": ["说明问题", "讲道理", "认真解释"]
+      "recommended_scenarios": ["说明问题", "讲道理", "认真解释"],
+      "expose_as_resource": false
     },
     {
       "id": "angry_standard",
@@ -312,7 +335,252 @@
       "priority": 90,
       "exclusive_with": ["gentle_nod", "happy_smile", "comfort_relaxed", "embarrassed_lookaway", "surprised_backoff"],
       "intensity": "high",
-      "recommended_scenarios": ["生气", "否定", "强烈不满"]
+      "recommended_scenarios": ["生气", "否定", "强烈不满"],
+      "expose_as_resource": false
+    }
+  ],
+  "expressions": [
+    {
+      "id": "expr_happy",
+      "file": "Expressions/Happy.exp3.json",
+      "label": "开心表情",
+      "description": "开启 ExpHappy 并带轻微脸红，适合真诚开心、感谢、被夸后的柔和笑意。",
+      "tags": ["开心", "感谢", "友好", "脸红", "笑意"],
+      "emotion_bias": ["happy", "warm"],
+      "intensity": "medium",
+      "recommended_scenarios": ["感谢", "被夸", "开心回应", "友好反馈"],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_angry",
+      "file": "Expressions/Angry.exp3.json",
+      "label": "生气表情",
+      "description": "开启 ExpAngry，带皱鼻、压嘴和抿唇，适合明确不满、斥责、强硬否定。",
+      "tags": ["生气", "不满", "否定", "斥责", "压嘴"],
+      "emotion_bias": ["angry", "reject"],
+      "intensity": "high",
+      "recommended_scenarios": ["明确不满", "强硬否定", "斥责", "被冒犯"],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_surprised",
+      "file": "Expressions/Surprised.exp3.json",
+      "label": "惊讶表情",
+      "description": "切到圆眼惊讶并收紧嘴型，适合突然被问到、意外消息、被吓一跳。",
+      "tags": ["惊讶", "意外", "圆眼", "吃惊"],
+      "emotion_bias": ["surprised", "shock"],
+      "intensity": "high",
+      "recommended_scenarios": ["意外消息", "突然被问到", "被吓到", "没想到"],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_confused",
+      "file": "Expressions/Confused.exp3.json",
+      "label": "混乱困惑表情",
+      "description": "隐藏高光和默认瞳孔，开启螺旋瞳、眼泪和特殊嘴型，适合听不懂、混乱、信息过载。",
+      "tags": ["困惑", "混乱", "螺旋眼", "眼泪", "听不懂"],
+      "emotion_bias": ["confused", "overwhelmed"],
+      "intensity": "high",
+      "recommended_scenarios": ["听不懂", "信息过载", "混乱", "疑惑加重"],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_embarrassed",
+      "file": "Expressions/Embarrassed.exp3.json",
+      "label": "尴尬阴影表情",
+      "description": "隐藏眼部高光，开启脸部阴影和黑线，并压低嘴型，适合尴尬、被戳穿、窘迫嘴硬。",
+      "tags": ["尴尬", "窘迫", "阴影", "嘴硬", "被戳穿"],
+      "emotion_bias": ["embarrassed", "awkward"],
+      "intensity": "medium",
+      "recommended_scenarios": ["被戳穿", "不好意思", "嘴硬否认", "尴尬回应"],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_blush",
+      "file": "Expressions/Blush.exp3.json",
+      "label": "脸红表情",
+      "description": "只开启脸红参数，适合轻微害羞、被夸、温暖但不夸张的正向反馈。",
+      "tags": ["脸红", "害羞", "温暖", "被夸"],
+      "emotion_bias": ["shy", "warm"],
+      "intensity": "low",
+      "recommended_scenarios": ["被夸", "感谢", "轻微害羞", "温柔回应"],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_tired",
+      "file": "Expressions/Tired.exp3.json",
+      "label": "疲惫黑眼圈表情",
+      "description": "隐藏眼部高光并开启黑眼圈，适合疲惫、犯困、无力吐槽。",
+      "tags": ["疲惫", "黑眼圈", "犯困", "无力"],
+      "emotion_bias": ["tired", "sleepy"],
+      "intensity": "medium",
+      "recommended_scenarios": ["疲惫", "犯困", "无力吐槽", "熬夜感"],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_extremely_tired",
+      "file": "Expressions/ExtremelyTired.exp3.json",
+      "label": "极度疲惫表情",
+      "description": "隐藏高光，开启黑眼圈、嘴角血迹和眼部震动，适合夸张崩溃、撑不住、极度疲惫。",
+      "tags": ["极度疲惫", "崩溃", "黑眼圈", "眼震", "撑不住"],
+      "emotion_bias": ["tired", "weak"],
+      "intensity": "high",
+      "recommended_scenarios": ["非常疲惫", "撑不住", "崩溃吐槽", "夸张无力"],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_messy",
+      "file": "Expressions/Messy.exp3.json",
+      "label": "凌乱崩溃表情",
+      "description": "切换斜眼、暗脸、黑线和头发贴纸，并闭眼压眉，适合慌乱、崩溃、强烈信息过载。",
+      "tags": ["凌乱", "慌乱", "崩溃", "暗脸", "闭眼"],
+      "emotion_bias": ["panic", "confused"],
+      "intensity": "high",
+      "recommended_scenarios": ["慌乱", "信息过载", "崩溃吐槽", "被难住"],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_murderous",
+      "file": "Expressions/Murderous.exp3.json",
+      "label": "压迫杀气表情",
+      "description": "隐藏高光和默认瞳孔，缩小虹膜，开启暗脸和眼部震动，适合黑化玩笑、强压迫感、危险吐槽。",
+      "tags": ["杀气", "压迫", "黑化", "危险", "眼震"],
+      "emotion_bias": ["menacing", "angry"],
+      "intensity": "high",
+      "recommended_scenarios": ["黑化玩笑", "强烈不满", "危险吐槽", "压迫感"],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_question",
+      "file": "Expressions/Question.exp3.json",
+      "label": "疑问符号表情",
+      "description": "开启问号符号，适合短促疑问、反问、没听懂时的轻量提示。",
+      "tags": ["疑问", "问号", "反问", "没听懂"],
+      "emotion_bias": ["question", "confused"],
+      "intensity": "low",
+      "recommended_scenarios": ["短促疑问", "反问", "没听懂", "确认问题"],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_exclamation",
+      "file": "Expressions/Exclamation.exp3.json",
+      "label": "感叹符号表情",
+      "description": "开启感叹符号，适合突然意识到、提醒、轻微惊讶或强调重点。",
+      "tags": ["感叹", "提醒", "突然", "强调"],
+      "emotion_bias": ["alert", "surprised"],
+      "intensity": "low",
+      "recommended_scenarios": ["突然想起", "提醒", "轻微惊讶", "强调重点"],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_loading",
+      "file": "Expressions/Loading.exp3.json",
+      "label": "加载思考表情",
+      "description": "开启加载符号并隐藏高光，适合正在思考、等待、组织语言。",
+      "tags": ["加载", "思考", "等待", "处理中"],
+      "emotion_bias": ["thinking", "waiting"],
+      "intensity": "low",
+      "recommended_scenarios": ["思考", "等待", "组织语言", "处理中"],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_neutral",
+      "file": "Expressions/Neutral.exp3.json",
+      "label": "默认空表情",
+      "description": "不包含参数变化，用于表情复位；不作为模型主动选择资源。",
+      "tags": ["默认", "复位", "中性"],
+      "emotion_bias": ["neutral"],
+      "intensity": "low",
+      "recommended_scenarios": ["表情复位", "默认状态"],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_eyemask",
+      "file": "Expressions/Eyemask.exp3.json",
+      "label": "眼罩外观状态",
+      "description": "开启 ExpMask，属于外观或道具状态，不作为对话表情资源。",
+      "tags": ["外观", "眼罩", "道具"],
+      "emotion_bias": [],
+      "intensity": "low",
+      "recommended_scenarios": [],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_controller",
+      "file": "Expressions/Controller.exp3.json",
+      "label": "手柄道具状态",
+      "description": "开启右前臂手柄相关参数，属于道具状态，不作为对话表情资源。",
+      "tags": ["道具", "手柄", "右手"],
+      "emotion_bias": [],
+      "intensity": "low",
+      "recommended_scenarios": [],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_mouse_click",
+      "file": "Expressions/MouseClick.exp3.json",
+      "label": "鼠标点击状态",
+      "description": "开启鼠标点击参数，属于交互状态，不作为对话表情资源。",
+      "tags": ["交互", "鼠标", "点击"],
+      "emotion_bias": [],
+      "intensity": "low",
+      "recommended_scenarios": [],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_outfit",
+      "file": "Expressions/Outfit.exp3.json",
+      "label": "服装切换状态",
+      "description": "切换 OutfitA/OutfitB 外观参数，属于服装状态，不作为对话表情资源。",
+      "tags": ["外观", "服装", "切换"],
+      "emotion_bias": [],
+      "intensity": "low",
+      "recommended_scenarios": [],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_jacket_off",
+      "file": "Expressions/JaketOFF.exp3.json",
+      "label": "外套关闭状态",
+      "description": "关闭 OutfitA 外套相关参数，属于外观状态，不作为对话表情资源。",
+      "tags": ["外观", "外套", "切换"],
+      "emotion_bias": [],
+      "intensity": "low",
+      "recommended_scenarios": [],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_pen",
+      "file": "Expressions/Pen.exp3.json",
+      "label": "笔道具状态",
+      "description": "开启左前臂笔相关参数，属于道具状态，不作为对话表情资源。",
+      "tags": ["道具", "笔", "左手"],
+      "emotion_bias": [],
+      "intensity": "low",
+      "recommended_scenarios": [],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_tablet",
+      "file": "Expressions/Tablet.exp3.json",
+      "label": "平板道具状态",
+      "description": "开启右前臂平板相关参数，属于道具状态，不作为对话表情资源。",
+      "tags": ["道具", "平板", "右手"],
+      "emotion_bias": [],
+      "intensity": "low",
+      "recommended_scenarios": [],
+      "expose_as_resource": false
+    },
+    {
+      "id": "expr_tracking",
+      "file": "Expressions/Tracking.exp3.json",
+      "label": "鼠标追踪状态",
+      "description": "开启鼠标追踪和双前臂参数，属于运行时交互状态，不作为对话表情资源。",
+      "tags": ["追踪", "鼠标", "交互", "双手"],
+      "emotion_bias": [],
+      "intensity": "low",
+      "recommended_scenarios": [],
+      "expose_as_resource": false
     }
   ]
 }
