@@ -1088,7 +1088,8 @@ function testSendParameterPlanPayloadPreviewIsRejected(): void {
   });
 }
 
-async function testAutoStartMicDoesNotDuplicateCaptureStart(): Promise<void> {
+async function testAutoStartMicIsIgnoredInPttMode(): Promise<void> {
+  // pttModeEnabled defaults to true — both auto_start_mic and control.start_mic must be skipped
   const harness = createConnectedAdapter();
   try {
     const { adapter, socket } = harness;
@@ -1099,11 +1100,7 @@ async function testAutoStartMicDoesNotDuplicateCaptureStart(): Promise<void> {
       timestamp: "2026-05-08T00:00:00.000Z",
       turn_id: null,
       source: "adapter",
-      payload: {
-        ws_url: "ws://127.0.0.1:12396",
-        http_base_url: "http://127.0.0.1:12397",
-        auto_start_mic: true,
-      },
+      payload: { ws_url: "ws://127.0.0.1:12396", http_base_url: "http://127.0.0.1:12397", auto_start_mic: true },
     }));
     socket.emitMessage(JSON.stringify({
       type: "control.start_mic",
@@ -1114,9 +1111,39 @@ async function testAutoStartMicDoesNotDuplicateCaptureStart(): Promise<void> {
       source: "adapter",
       payload: {},
     }));
-
     await flushMicrotasks();
+    assert.equal(adapter.state.micCapturing, false);
+    assert.equal(adapter.state.micRequested, false);
+  } finally {
+    harness.scope.stop();
+  }
+}
 
+async function testAutoStartMicDoesNotDuplicateCaptureStart(): Promise<void> {
+  // always-on mode: auto_start_mic + control.start_mic should start mic exactly once
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket } = harness;
+    adapter.setPttMode(false);
+    socket.emitMessage(JSON.stringify({
+      type: "system.server_info",
+      version: "v2",
+      message_id: "server-info-1",
+      timestamp: "2026-05-08T00:00:00.000Z",
+      turn_id: null,
+      source: "adapter",
+      payload: { ws_url: "ws://127.0.0.1:12396", http_base_url: "http://127.0.0.1:12397", auto_start_mic: true },
+    }));
+    socket.emitMessage(JSON.stringify({
+      type: "control.start_mic",
+      version: "v2",
+      message_id: "start-mic-1",
+      timestamp: "2026-05-08T00:00:00.001Z",
+      turn_id: null,
+      source: "adapter",
+      payload: {},
+    }));
+    await flushMicrotasks();
     assert.equal(adapter.state.micCapturing, true);
     const openMicLogs = adapter.state.historyEntries.filter((entry) =>
       entry.text === "麦克风已开启，正在自动检测说话。"
@@ -1741,6 +1768,7 @@ async function run(): Promise<void> {
   testDisconnectSettlesPendingAudioBeforeClearingQueue();
   testSendMotionPreviewUsesOutboundProtocolEnvelope();
   testSendParameterPlanPayloadPreviewIsRejected();
+  await testAutoStartMicIsIgnoredInPttMode();
   await testAutoStartMicDoesNotDuplicateCaptureStart();
   await testManualMicAudioStreamsBinaryFramesForVad();
   await testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd();

@@ -190,11 +190,12 @@ function applyInterrupt(
 
 function applyStartMic(deps: InboundRuntimeDispatchDeps): void {
   const s = deps.state;
-  s.statusMessage = "后端已请求启动麦克风，准备自动收音。";
   if (s.pttModeEnabled) {
-    deps.pushHistory("system", "后端请求自动收音，当前为按键说话模式，已跳过。");
+    s.statusMessage = "当前为按键说话模式，已忽略自动收音请求。";
+    deps.pushHistory("system", s.statusMessage);
     return;
   }
+  s.statusMessage = "后端已请求启动麦克风，准备自动收音。";
   s.micRequested = true;
   deps.pushHistory("system", s.statusMessage);
   void deps.startMicrophoneCapture("auto");

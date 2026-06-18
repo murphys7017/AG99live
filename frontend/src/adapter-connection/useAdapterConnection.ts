@@ -290,6 +290,8 @@ export function createAdapterConnection(
         void window.ag99desktop?.getPttHookStatus?.().then(applyPttHookStatus).catch((error: unknown) => {
           console.warn("[useAdapterConnection] failed to read PTT hook status:", error);
         });
+        // 同步持久化的 PTT 模式到主进程 hook
+        window.ag99desktop?.setPttMode?.(state.pttModeEnabled, state.pttKeyBinding);
       });
     }
 
