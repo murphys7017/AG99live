@@ -15,7 +15,7 @@ from .catalog_motion import (
     summarize_catalog_motion_payload,
     validate_catalog_motion_payload,
 )
-from .realtime_motion_plan import (
+from .motion_intent import (
     _apply_expressive_floor_v2,
     DEFAULT_MOTION_INTENT_DURATION_MS,
     MOTION_INTENT_V2_SCHEMA_VERSION,
@@ -98,12 +98,13 @@ def normalize_inline_anim_payload(
     if isinstance(payload.get("intent"), dict):
         raw_intent = payload["intent"]
         raw_schema_version = str(raw_intent.get("schema_version") or "").strip()
-        if raw_schema_version == MOTION_INTENT_V3_SCHEMA_VERSION and "mode" in raw_intent:
-            logger.warning("WIRING inline_motion payload rejected: forbidden_field:mode")
+        forbidden_field = _find_inline_forbidden_field(raw_intent)
+        if raw_schema_version == MOTION_INTENT_V3_SCHEMA_VERSION and forbidden_field:
+            logger.warning("WIRING inline_motion payload rejected: forbidden_field:%s", forbidden_field)
             return _build_inline_fallback_motion_payload(
                 raw_intent,
                 runtime_state=runtime_state,
-                fallback_reason="forbidden_field:mode",
+                fallback_reason=f"forbidden_field:{forbidden_field}",
                 mode=mode,
             )
         try:
@@ -138,6 +139,27 @@ def normalize_inline_anim_payload(
     return plan, mode
 
 
+def _find_inline_forbidden_field(raw_intent: Any) -> str:
+    if not isinstance(raw_intent, dict):
+        return ""
+    for field in (
+        "choice",
+        "mode",
+        "motion_id",
+        "catalog_motion",
+        "motion3",
+        "exp3",
+        "kind",
+        "emotion",
+        "emotion_label",
+        "fallback_pose_id",
+        "summary",
+    ):
+        if field in raw_intent:
+            return field
+    return ""
+
+
 def _repair_inline_motion_payload_with_fallback(
     plan: dict[str, Any],
     *,
@@ -154,14 +176,19 @@ def _repair_inline_motion_payload_with_fallback(
         semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
     except RuntimeError:
         return plan
+    fallback_candidates = build_fallback_pose_candidates(
+        runtime_state=runtime_state,
+        semantic_profile=semantic_profile,
+        limit=None,
+    )
+    resource_id = _validate_inline_motion_resource_id(
+        normalize_motion_resource_id(plan.get("resource_id")),
+        candidates=fallback_candidates,
+    )
     fallback_decision = derive_motion_fallback_decision(
-        candidates=build_fallback_pose_candidates(
-            runtime_state=runtime_state,
-            semantic_profile=semantic_profile,
-            limit=None,
-        ),
+        candidates=fallback_candidates,
         intent_tags=normalize_motion_intent_tags(plan.get("intent_tags")),
-        resource_id=normalize_motion_resource_id(plan.get("resource_id")),
+        resource_id=resource_id,
         axes=axes,
         describe_axes=lambda value: describe_motion_axes_for_fallback(
             value,
@@ -186,7 +213,15 @@ def _repair_inline_motion_payload_with_fallback(
     )
     changed_by_floor = floored_axes != repaired_axes
     if not added_axes and not replaced_axes and not changed_by_floor:
-        return plan
+        if resource_id == normalize_motion_resource_id(plan.get("resource_id")):
+            return plan
+        repaired = dict(plan)
+        repaired["resource_id"] = resource_id
+        summary = dict(repaired.get("summary") or {})
+        if not resource_id:
+            summary["resource_id_rejected"] = True
+        repaired["summary"] = summary
+        return repaired
     repaired = dict(plan)
     summary = dict(repaired.get("summary") or {})
     summary["axis_count"] = len(floored_axes)
@@ -198,6 +233,9 @@ def _repair_inline_motion_payload_with_fallback(
     summary["skeleton_repair_replaced_axes"] = replaced_axes
     if changed_by_floor:
         summary["expressive_floor_applied"] = True
+    if not resource_id and normalize_motion_resource_id(plan.get("resource_id")):
+        summary["resource_id_rejected"] = True
+    repaired["resource_id"] = resource_id
     repaired["axes"] = floored_axes
     repaired["fallback_pose_id"] = fallback_pose_id
     repaired["summary"] = summary
@@ -221,20 +259,26 @@ def _build_inline_fallback_motion_payload(
 
     intent_tags: list[str] = []
     resource_id = ""
-    fallback_pose_id = DEFAULT_FALLBACK_POSE_ID
     if isinstance(raw_intent, dict):
-        intent_tags = normalize_motion_intent_tags(
-            raw_intent.get("intent_tags") or raw_intent.get("emotion_label") or raw_intent.get("emotion")
-        )
+        if _find_inline_forbidden_field(raw_intent):
+            return None, None
+        intent_tags = normalize_motion_intent_tags(raw_intent.get("intent_tags"))
         resource_id = normalize_motion_resource_id(raw_intent.get("resource_id"))
-        fallback_pose_id = normalize_motion_resource_id(raw_intent.get("fallback_pose_id")) or fallback_pose_id
+    if not intent_tags:
+        return None, None
     emotion_label = derive_motion_emotion_label(intent_tags)
+    fallback_candidates = build_fallback_pose_candidates(
+        runtime_state=runtime_state,
+        semantic_profile=semantic_profile,
+        limit=None,
+    )
+    raw_resource_id = resource_id
+    resource_id = _validate_inline_motion_resource_id(
+        resource_id,
+        candidates=fallback_candidates,
+    )
     fallback_decision = derive_motion_fallback_decision(
-        candidates=build_fallback_pose_candidates(
-            runtime_state=runtime_state,
-            semantic_profile=semantic_profile,
-            limit=None,
-        ),
+        candidates=fallback_candidates,
         intent_tags=intent_tags,
         resource_id=resource_id,
         axes=raw_intent.get("axes") if isinstance(raw_intent, dict) else {},
@@ -251,25 +295,30 @@ def _build_inline_fallback_motion_payload(
         fallback_pose_id=fallback_pose_id,
     )
     expressive_floor_emotion = emotion_label
+    apply_expressive_floor = True
     if fallback_resolution is not None:
         axes = fallback_resolution.axes
         if fallback_resolution.is_default_neutral:
             expressive_floor_emotion = "neutral"
+            apply_expressive_floor = False
     else:
         axes = None
     if fallback_resolution is None and fallback_pose_id == DEFAULT_FALLBACK_POSE_ID:
         expressive_floor_emotion = "neutral"
+        apply_expressive_floor = False
     if not axes:
         axes = build_default_neutral_pose_axes(semantic_profile)
         fallback_pose_id = DEFAULT_FALLBACK_POSE_ID
         expressive_floor_emotion = "neutral"
+        apply_expressive_floor = False
     if not axes:
         return None, None
-    axes = _apply_expressive_floor_v2(
-        axes=axes,
-        emotion=expressive_floor_emotion,
-        semantic_profile=semantic_profile,
-    )
+    if apply_expressive_floor:
+        axes = _apply_expressive_floor_v2(
+            axes=axes,
+            emotion=expressive_floor_emotion,
+            semantic_profile=semantic_profile,
+        )
 
     try:
         profile_revision = int(semantic_profile.get("revision") or 0)
@@ -298,6 +347,7 @@ def _build_inline_fallback_motion_payload(
             "fallback_score": fallback_decision.score,
             "fallback_reasons": fallback_decision.reasons,
             "fallback_reason": str(fallback_reason or "").strip(),
+            "resource_id_rejected": bool(raw_resource_id and not resource_id),
         },
     }
     valid, failure_reason = validate_motion_intent_payload(payload)
@@ -305,6 +355,24 @@ def _build_inline_fallback_motion_payload(
         logger.warning("WIRING inline_motion fallback rejected: %s", failure_reason)
         return None, None
     return payload, mode or "inline"
+
+
+def _validate_inline_motion_resource_id(
+    resource_id: Any,
+    *,
+    candidates: list[dict[str, Any]],
+) -> str:
+    normalized = normalize_motion_resource_id(resource_id)
+    if not normalized:
+        return ""
+    candidate_ids = {
+        normalize_motion_resource_id(candidate.get("id")).lower()
+        for candidate in candidates
+        if isinstance(candidate, dict)
+    }
+    if normalized.lower() in candidate_ids:
+        return normalized
+    return ""
 
 
 # ── Motion payload validation ──────────────────────────────────────

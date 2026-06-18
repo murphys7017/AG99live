@@ -76,7 +76,7 @@ from ..protocol import (
     parse_inbound_message,
 )
 from ..services.speech_service import SpeechIngressService
-from ..motion.realtime_motion_plan import (
+from ..motion.motion_intent import (
     normalize_motion_intent_payload,
 )
 from ..motion.inline_motion import (

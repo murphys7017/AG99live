@@ -185,21 +185,16 @@ def build_selector_user_prompt(
         "返回要求：\n"
         "只返回一个符合以下结构的 JSON 对象：\n"
         "{\n"
-        '  "emotion_label": "short-label",\n'
+        '  "intent_tags": ["语气关键词", "姿态关键词", "场景关键词"],\n'
         '  "duration_hint_ms": 1000,\n'
-        '  "fallback_pose_id": "neutral",\n'
         '  "axes": {\n'
-        '    "head_yaw": 50, "head_roll": 50, "head_pitch": 50,\n'
-        '    "body_yaw": 50, "body_roll": 50, "body_pitch": 50,\n'
-        '    "eye_open_left": 50, "eye_open_right": 50,\n'
-        '    "eye_smile_left": 50, "eye_smile_right": 50,\n'
-        '    "gaze_x": 50, "gaze_y": 50,\n'
-        '    "mouth_smile": 50, "mouth_x": 50, "brow_bias": 50,\n'
-        '    "brow_left_detail": 50, "brow_right_detail": 50\n'
+        '    "head_yaw": 62, "head_pitch": 46, "body_pitch": 58,\n'
+        '    "gaze_x": 56, "mouth_smile": 64\n'
         '  }\n'
         "}\n"
         "生成规则：\n"
-        "- 包含所有列出的轴。\n"
+        "- intent_tags 是开放关键词，不要输出 emotion_label 或 fallback_pose_id。\n"
+        "- 只输出本轮有语义贡献的少量轴，不要全量填 50。\n"
         "- 只使用整数。\n"
         "- 按语义匹配选择数值，不要按固定动作列表套模板。\n"
         "- 数值要稳定、可读，避免混乱的极端值。\n\n"
@@ -252,15 +247,14 @@ def build_selector_user_prompt_v2(
         "返回要求：\n"
         "只返回一个符合以下结构的 JSON 对象：\n"
         "{\n"
-        '  "emotion_label": "short-label",\n'
+        '  "intent_tags": ["语气关键词", "姿态关键词", "场景关键词"],\n'
         '  "duration_hint_ms": 1000,\n'
-        '  "fallback_pose_id": "neutral",\n'
         '  "axes": {\n'
-        f'    "{allowed_axis_ids[0]}": 50\n'
+        f'    "{allowed_axis_ids[0]}": 62\n'
         "  }\n"
         "}\n"
         "生成规则：\n"
-        "- 不要输出 choice、mode、motion_id、动画文件、表情文件或播放资源引用。\n"
+        "- 不要输出 emotion_label、fallback_pose_id、choice、mode、motion_id、动画文件、表情文件或播放资源引用。\n"
         "- 不要生成时间曲线、关键帧、随机抖动或来回摆动；只给目标姿态轴值。\n"
         "- 尽可能输出能支撑本轮语气的相关轴，尤其保留头部、身体和视线的动作骨架；不要为了凑数量输出无关动作。\n"
         "- 只使用数字，并保持在每个轴自己的范围内。\n"
@@ -330,12 +324,16 @@ def _normalize_few_shot_output(output_payload: Any) -> dict[str, Any]:
     if not isinstance(output_payload, dict):
         return {}
     axes = output_payload.get("axes")
+    intent_tags = output_payload.get("intent_tags")
+    if not isinstance(intent_tags, list) or not intent_tags:
+        return {}
     normalized: dict[str, Any] = {
-        "emotion_label": str(
-            output_payload.get("emotion_label") or output_payload.get("emotion") or "neutral"
-        ).strip() or "neutral",
+        "intent_tags": [
+            str(item).strip()
+            for item in intent_tags
+            if str(item).strip()
+        ],
         "duration_hint_ms": output_payload.get("duration_hint_ms", output_payload.get("duration_ms", 1000)),
-        "fallback_pose_id": str(output_payload.get("fallback_pose_id") or "neutral").strip() or "neutral",
         "axes": axes if isinstance(axes, dict) else {},
     }
     return normalized

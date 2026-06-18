@@ -89,17 +89,13 @@ def _format_control_role_label(role: str) -> str:
 
 def build_inline_motion_intent_template(semantic_profile: dict[str, Any]) -> dict[str, Any]:
     axes: dict[str, float] = {}
-    for axis in semantic_profile.get("axes", []):
+    for index, axis in enumerate(_select_template_axes(semantic_profile, limit=5)):
         if not isinstance(axis, dict):
-            continue
-        role = str(axis.get("control_role") or "").strip()
-        if role not in {"primary", "hint"}:
             continue
         axis_id = str(axis.get("id") or "").strip()
         if not axis_id:
             continue
-        neutral = axis.get("neutral", 50)
-        axes[axis_id] = float(neutral) if isinstance(neutral, (int, float)) else 50.0
+        axes[axis_id] = _resolve_axis_template_value(axis, index=index)
     if not axes:
         raise RuntimeError("SemanticAxisProfile 没有可用于内联动作契约的可控制参数。")
     return {
@@ -110,7 +106,75 @@ def build_inline_motion_intent_template(semantic_profile: dict[str, Any]) -> dic
         "intent_tags": ["语气关键词", "姿态关键词", "场景关键词"],
         "duration_hint_ms": 1000,
         "axes": axes,
-        "summary": {
-            "axis_count": len(axes),
-        },
     }
+
+
+def _select_template_axes(
+    semantic_profile: dict[str, Any],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    axes = [axis for axis in semantic_profile.get("axes", []) if isinstance(axis, dict)]
+    preferred: list[dict[str, Any]] = []
+    fallback: list[dict[str, Any]] = []
+    preferred_groups = {"head", "body", "gaze", "eye", "mouth", "brow"}
+    for axis in axes:
+        role = str(axis.get("control_role") or "").strip()
+        if role not in {"primary", "hint"}:
+            continue
+        group = str(axis.get("semantic_group") or "").strip().lower()
+        if group in preferred_groups:
+            preferred.append(axis)
+        else:
+            fallback.append(axis)
+    return (preferred + fallback)[: max(0, limit)]
+
+
+def _resolve_axis_template_value(axis: dict[str, Any], *, index: int) -> float:
+    neutral = _coerce_axis_number(axis.get("neutral"), 50.0)
+    value_range = axis.get("value_range")
+    if (
+        isinstance(value_range, list)
+        and len(value_range) == 2
+        and isinstance(value_range[0], (int, float))
+        and isinstance(value_range[1], (int, float))
+        and float(value_range[0]) < float(value_range[1])
+    ):
+        min_value = float(value_range[0])
+        max_value = float(value_range[1])
+    else:
+        min_value = 0.0
+        max_value = 100.0
+
+    soft_range = axis.get("soft_range")
+    if (
+        isinstance(soft_range, list)
+        and len(soft_range) == 2
+        and isinstance(soft_range[0], (int, float))
+        and isinstance(soft_range[1], (int, float))
+    ):
+        soft_min = float(soft_range[0])
+        soft_max = float(soft_range[1])
+    else:
+        span = max((max_value - min_value) * 0.08, 1.0)
+        soft_min = neutral - span
+        soft_max = neutral + span
+
+    if index % 2 == 0 and soft_max < max_value:
+        span = max(soft_max - neutral, 1.0)
+        value = soft_max + max(span * 0.35, 1.0)
+    elif soft_min > min_value:
+        span = max(neutral - soft_min, 1.0)
+        value = soft_min - max(span * 0.35, 1.0)
+    elif soft_max < max_value:
+        span = max(soft_max - neutral, 1.0)
+        value = soft_max + max(span * 0.35, 1.0)
+    else:
+        value = neutral
+    return round(max(min_value, min(max_value, value)), 4)
+
+
+def _coerce_axis_number(value: Any, fallback: float) -> float:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return fallback

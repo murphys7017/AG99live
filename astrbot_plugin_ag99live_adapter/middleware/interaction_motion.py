@@ -14,18 +14,13 @@ from astrbot.core.interaction import (
 from astrbot.core.prompt import PromptExtension
 
 from ..motion.output_sanitizer import sanitize_assistant_output_text
-from ..motion.realtime_motion_plan import (
+from ..motion.motion_intent import (
     _apply_expressive_floor_v2,
     DEFAULT_MOTION_INTENT_DURATION_MS,
     MOTION_INTENT_V3_SCHEMA_VERSION,
-    RealtimeMotionPlanGenerator,
     derive_motion_emotion_label,
     derive_motion_fallback_decision,
     describe_motion_axes_for_fallback,
-    maybe_log_repair_stats,
-    record_realtime_motion_attempt,
-    record_realtime_motion_fallback,
-    record_realtime_motion_generated,
     normalize_motion_intent_tags,
     normalize_motion_resource_id,
     resolve_selected_semantic_axis_profile,
@@ -266,7 +261,19 @@ def _resolve_plugin_hints_motion_payload_with_reason(
 
     forbidden_fields = [
         key
-        for key in ("choice", "mode", "motion_id", "catalog_motion", "motion3", "exp3")
+        for key in (
+            "choice",
+            "mode",
+            "motion_id",
+            "catalog_motion",
+            "motion3",
+            "exp3",
+            "kind",
+            "emotion",
+            "emotion_label",
+            "fallback_pose_id",
+            "summary",
+        )
         if key in motion_hint
     ]
 
@@ -281,38 +288,46 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     if not profile_id:
         return None, "profile_id_empty"
 
-    intent_tags = normalize_motion_intent_tags(
-        motion_hint.get("intent_tags") or motion_hint.get("emotion_label") or motion_hint.get("emotion")
-    )
+    if forbidden_fields:
+        return None, _append_resolution_reason(
+            hints_reason,
+            "forbidden_fields:" + ",".join(forbidden_fields),
+        )
+
+    intent_tags = normalize_motion_intent_tags(motion_hint.get("intent_tags"))
+    if not intent_tags:
+        return None, _append_resolution_reason(hints_reason, "intent_tags_empty")
     emotion_label = derive_motion_emotion_label(intent_tags)
     resource_id = normalize_motion_resource_id(motion_hint.get("resource_id"))
-    fallback_pose_id = normalize_motion_resource_id(motion_hint.get("fallback_pose_id"))
     axes = motion_hint.get("axes")
     validated_axes = None
     expressive_floor_emotion = emotion_label
+    apply_expressive_floor = True
     repair_added_axes: list[str] = []
     repair_replaced_axes: list[str] = []
     reason = hints_reason
-    if forbidden_fields:
-        reason = _append_resolution_reason(
-            reason,
-            "forbidden_fields:" + ",".join(forbidden_fields),
-        )
-    else:
-        validated_axes = _normalize_plugin_hint_axes(
-            axes,
-            semantic_profile,
-            emotion_label=emotion_label,
-        )
-        if not validated_axes:
-            reason = _append_resolution_reason(reason, "axes_empty_or_invalid")
+    validated_axes = _normalize_plugin_hint_axes(
+        axes,
+        semantic_profile,
+        emotion_label=emotion_label,
+    )
+    if not validated_axes:
+        reason = _append_resolution_reason(reason, "axes_empty_or_invalid")
+
+    fallback_candidates = build_fallback_pose_candidates(
+        runtime_state=runtime_state,
+        semantic_profile=semantic_profile,
+        limit=None,
+    )
+    resource_id, resource_reason = _validate_motion_resource_id(
+        resource_id,
+        candidates=fallback_candidates,
+    )
+    if resource_reason:
+        reason = _append_resolution_reason(reason, resource_reason)
 
     fallback_decision = derive_motion_fallback_decision(
-        candidates=build_fallback_pose_candidates(
-            runtime_state=runtime_state,
-            semantic_profile=semantic_profile,
-            limit=None,
-        ),
+        candidates=fallback_candidates,
         intent_tags=intent_tags,
         resource_id=resource_id,
         axes=validated_axes if isinstance(validated_axes, dict) else axes,
@@ -333,11 +348,13 @@ def _resolve_plugin_hints_motion_payload_with_reason(
             validated_axes = fallback_resolution.axes
             if fallback_resolution.is_default_neutral:
                 expressive_floor_emotion = "neutral"
+                apply_expressive_floor = False
             reason = _append_resolution_reason(reason, f"fallback_pose:{fallback_pose_id}")
         else:
             validated_axes = build_default_neutral_pose_axes(semantic_profile)
             fallback_pose_id = DEFAULT_FALLBACK_POSE_ID
             expressive_floor_emotion = "neutral"
+            apply_expressive_floor = False
             reason = _append_resolution_reason(
                 reason,
                 f"fallback_pose_default:{DEFAULT_FALLBACK_POSE_ID}",
@@ -372,11 +389,12 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     if not validated_axes:
         return None, reason
 
-    validated_axes = _apply_expressive_floor_v2(
-        axes=validated_axes,
-        emotion=expressive_floor_emotion,
-        semantic_profile=semantic_profile,
-    )
+    if apply_expressive_floor:
+        validated_axes = _apply_expressive_floor_v2(
+            axes=validated_axes,
+            emotion=expressive_floor_emotion,
+            semantic_profile=semantic_profile,
+        )
 
     duration_hint_ms = _normalize_duration_hint_ms(motion_hint.get("duration_hint_ms"))
     summary = _build_motion_visibility_summary(
@@ -407,6 +425,24 @@ def _resolve_plugin_hints_motion_payload_with_reason(
         "axes": validated_axes,
         "summary": summary,
     }, reason
+
+
+def _validate_motion_resource_id(
+    resource_id: Any,
+    *,
+    candidates: list[dict[str, Any]],
+) -> tuple[str, str]:
+    normalized = normalize_motion_resource_id(resource_id)
+    if not normalized:
+        return "", ""
+    candidate_ids = {
+        normalize_motion_resource_id(candidate.get("id")).lower()
+        for candidate in candidates
+        if isinstance(candidate, dict)
+    }
+    if normalized.lower() in candidate_ids:
+        return normalized, "resource_id_validated"
+    return "", f"resource_id_rejected:{_sanitize_reason_fragment(normalized)}"
 
 
 def _normalize_plugin_hint_axes(
@@ -1337,10 +1373,8 @@ async def _schedule_motion_from_interaction_result(
         )
 
     if policy.should_schedule and plugin_hints_payload is None:
-        plugin_hints_payload, plugin_hints_reason = await _build_realtime_or_default_motion_payload(
-            event,
+        plugin_hints_payload, plugin_hints_reason = _build_default_motion_payload(
             bundle.runtime_state,
-            assistant_text=assistant_text,
             reason=_append_resolution_reason(
                 plugin_hints_reason,
                 "self_reply_motion_missing"
@@ -1354,7 +1388,7 @@ async def _schedule_motion_from_interaction_result(
             _call_event_method(event, "set_extra", "ag99live_split_motion_scheduled", True)
             return _MotionScheduleAttempt(
                 phase=phase,
-                source=_resolve_generated_motion_source(plugin_hints_reason),
+                source="default_pose",
                 scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
                 event_frontend_turn_id=identity.event_frontend_turn_id,
                 active_frontend_turn_id=identity.active_frontend_turn_id,
@@ -1365,7 +1399,7 @@ async def _schedule_motion_from_interaction_result(
                 reply_plan_source=reply_plan.source if reply_plan is not None else None,
                 motion_generation_mode=motion_generation_mode,
                 scheduled=True,
-                reason=_resolve_generated_motion_reason(plugin_hints_reason),
+                reason="default_motion_client_object",
                 assistant_text=assistant_text,
                 plugin_hints_motion_payload=plugin_hints_payload,
                 plugin_hints_resolution_reason=plugin_hints_reason,
@@ -1388,103 +1422,6 @@ async def _schedule_motion_from_interaction_result(
         assistant_text=assistant_text,
         plugin_hints_resolution_reason=plugin_hints_reason,
     )
-
-
-async def _build_realtime_or_default_motion_payload(
-    event: Any,
-    runtime_state: Any,
-    *,
-    assistant_text: str,
-    reason: str,
-) -> tuple[dict[str, Any] | None, str]:
-    realtime_payload, realtime_reason = await _build_realtime_motion_payload(
-        event,
-        runtime_state,
-        assistant_text=assistant_text,
-        reason=reason,
-    )
-    if realtime_payload is not None:
-        return realtime_payload, realtime_reason
-    default_payload, default_reason = _build_default_motion_payload(
-        runtime_state,
-        reason=realtime_reason,
-    )
-    if _realtime_generation_was_attempted(realtime_reason):
-        record_realtime_motion_fallback(
-            neutral="default_pose_neutral" in default_reason,
-        )
-        maybe_log_repair_stats()
-    return default_payload, default_reason
-
-
-async def _build_realtime_motion_payload(
-    event: Any,
-    runtime_state: Any,
-    *,
-    assistant_text: str,
-    reason: str,
-) -> tuple[dict[str, Any] | None, str]:
-    if not bool(getattr(runtime_state, "enable_realtime_motion_plan", True)):
-        return None, _append_resolution_reason(reason, "realtime_disabled")
-
-    provider = getattr(runtime_state, "selected_motion_analysis_provider", None)
-    if provider is None:
-        return None, _append_resolution_reason(reason, "realtime_provider_unavailable")
-
-    user_text = _extract_user_text(event)
-    record_realtime_motion_attempt()
-    try:
-        payload = await RealtimeMotionPlanGenerator(runtime_state=runtime_state).generate(
-            user_text=user_text,
-            assistant_text=assistant_text,
-        )
-    except TimeoutError as exc:
-        logger.warning("Realtime motion generation timed out in final phase: %s", exc)
-        return None, _append_resolution_reason(reason, "realtime_provider_timeout")
-    except ValueError as exc:
-        logger.warning("Realtime motion selector output invalid in final phase: %s", exc)
-        return None, _append_resolution_reason(
-            reason,
-            f"realtime_selector_invalid:{_sanitize_reason_fragment(exc)}",
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Realtime motion generation failed in final phase: %s", exc)
-        return None, _append_resolution_reason(
-            reason,
-            f"realtime_failed:{_sanitize_reason_fragment(exc)}",
-        )
-
-    if not isinstance(payload, dict):
-        return None, _append_resolution_reason(reason, "realtime_returned_empty")
-    axes = payload.get("axes")
-    if not isinstance(axes, dict) or not axes:
-        maybe_log_repair_stats()
-        return None, _append_resolution_reason(reason, "realtime_returned_empty")
-    record_realtime_motion_generated()
-    maybe_log_repair_stats()
-    return payload, _append_resolution_reason(reason, "realtime_generated")
-
-
-def _realtime_generation_was_attempted(reason: str) -> bool:
-    return any(
-        marker in reason
-        for marker in (
-            "realtime_provider_timeout",
-            "realtime_selector_invalid",
-            "realtime_failed",
-            "realtime_returned_empty",
-        )
-    )
-
-
-def _resolve_generated_motion_source(reason: str) -> str:
-    return "realtime_motion" if ":realtime_generated" in f":{reason}" else "default_pose"
-
-
-def _resolve_generated_motion_reason(reason: str) -> str:
-    if _resolve_generated_motion_source(reason) == "realtime_motion":
-        return "realtime_motion_client_object"
-    return "default_motion_client_object"
 
 
 def _build_default_motion_payload(
@@ -1532,13 +1469,13 @@ def _build_default_motion_payload(
         "profile_revision": profile_revision,
         "model_id": model_id,
         "mode": "expressive",
-        "intent_tags": [],
-        "emotion_label": "neutral",
+        "intent_tags": ["system_fallback"],
+        "emotion_label": "system_fallback",
         "duration_hint_ms": DEFAULT_MOTION_INTENT_DURATION_MS,
         "resource_id": "",
         "fallback_pose_id": fallback_pose_id,
         "axes": axes,
-        "summary": {"axis_count": len(axes), "intent_tag_count": 0},
+        "summary": {"axis_count": len(axes), "intent_tag_count": 1},
     }, resolved_reason
 
 

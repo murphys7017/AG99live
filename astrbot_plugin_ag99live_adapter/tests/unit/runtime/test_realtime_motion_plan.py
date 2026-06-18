@@ -310,9 +310,8 @@ def test_normalize_motion_intent_v3_accepts_string_number_axis() -> None:
             "profile_revision": 3,
             "model_id": "DemoModel",
             "mode": "expressive",
-            "emotion_label": "curious",
+            "intent_tags": ["curious"],
             "duration_hint_ms": "900",
-            "fallback_pose_id": "neutral",
             "axes": {
                 "head_yaw": "72.5",
             },
@@ -354,9 +353,8 @@ def test_summarize_motion_payload_defaults_v3_mode_to_expressive() -> None:
             "profile_id": "DemoModel.semantic.v1",
             "profile_revision": 3,
             "model_id": "DemoModel",
-            "emotion_label": "curious",
+            "intent_tags": ["curious"],
             "duration_hint_ms": 900,
-            "fallback_pose_id": "neutral",
             "axes": {
                 "head_yaw": 72.5,
             },
@@ -379,9 +377,8 @@ def test_normalize_motion_intent_v3_rejects_nested_axis_payload() -> None:
                 "profile_revision": 3,
                 "model_id": "DemoModel",
                 "mode": "expressive",
-                "emotion_label": "curious",
+                "intent_tags": ["curious"],
                 "duration_hint_ms": 900,
-                "fallback_pose_id": "neutral",
                 "axes": {
                     "head_yaw": {"value": 72},
                 },
@@ -392,9 +389,8 @@ def test_normalize_motion_intent_v3_rejects_nested_axis_payload() -> None:
 def test_normalize_selector_output_v3_clamps_out_of_range_axis(caplog) -> None:
     selector = normalize_selector_output(
         {
-            "emotion_label": "curious",
+            "intent_tags": ["curious"],
             "duration_hint_ms": 1200,
-            "fallback_pose_id": "neutral",
             "axes": {"head_yaw": 180},
         },
         semantic_profile=_semantic_profile(),
@@ -407,9 +403,8 @@ def test_normalize_selector_output_v3_clamps_out_of_range_axis(caplog) -> None:
 def test_normalize_selector_output_v3_accepts_string_number_axis() -> None:
     selector = normalize_selector_output(
         {
-            "emotion_label": "curious",
+            "intent_tags": ["curious"],
             "duration_hint_ms": "1200",
-            "fallback_pose_id": "neutral",
             "axes": {"head_yaw": "82"},
         },
         semantic_profile=_semantic_profile(),
@@ -423,9 +418,8 @@ def test_normalize_selector_output_v3_pushes_exact_neutral_axis_past_soft_range(
     profile = _semantic_profile()
     selector = normalize_selector_output(
         {
-            "emotion_label": "curious",
+            "intent_tags": ["curious"],
             "duration_hint_ms": 1200,
-            "fallback_pose_id": "neutral",
             "axes": {"head_yaw": 50},
         },
         semantic_profile=profile,
@@ -447,9 +441,8 @@ def test_normalize_selector_output_v3_pushes_exact_neutral_axis_outside_one_side
 
     selector = normalize_selector_output(
         {
-            "emotion_label": "curious",
+            "intent_tags": ["curious"],
             "duration_hint_ms": 1200,
-            "fallback_pose_id": "neutral",
             "axes": {"head_yaw": 50},
         },
         semantic_profile=profile,
@@ -463,9 +456,8 @@ def test_normalize_selector_output_v3_pushes_exact_neutral_axis_outside_one_side
 def test_normalize_selector_output_v3_allows_axis_errors_under_threshold(caplog) -> None:
     selector = normalize_selector_output(
         {
-            "emotion_label": "curious",
+            "intent_tags": ["curious"],
             "duration_hint_ms": 1200,
-            "fallback_pose_id": "neutral",
             "axes": {
                 "axis_0": 60,
                 "axis_1": 62,
@@ -488,9 +480,8 @@ def test_normalize_selector_output_v3_rejects_axis_errors_over_threshold() -> No
     with pytest.raises(ValueError, match="selector_axis_error_rate_exceeded:2/4"):
         normalize_selector_output(
             {
-                "emotion_label": "curious",
+                "intent_tags": ["curious"],
                 "duration_hint_ms": 1200,
-                "fallback_pose_id": "neutral",
                 "axes": {
                     "axis_0": 60,
                     "axis_1": 62,
@@ -548,7 +539,7 @@ def test_validate_parameter_plan_v2_rejects_invalid_source() -> None:
     )
 
     assert valid is False
-    assert reason == "parameter_source_invalid"
+    assert reason == "parameter_source_invalid:unknown_source"
 
 
 def test_validate_parameter_plan_v2_accepts_multihop_coupling_parameters() -> None:
@@ -600,11 +591,10 @@ def test_validate_parameter_plan_v2_accepts_multihop_coupling_parameters() -> No
 
 
 def test_normalize_selector_output_rejects_missing_emotion() -> None:
-    with pytest.raises(ValueError, match="selector_emotion_empty"):
+    with pytest.raises(ValueError, match="selector_intent_tags_empty"):
         normalize_selector_output(
             {
                 "duration_hint_ms": 1200,
-                "fallback_pose_id": "neutral",
                 "axes": {"head_yaw": 82},
             },
             semantic_profile=_semantic_profile(),
@@ -614,9 +604,8 @@ def test_normalize_selector_output_rejects_missing_emotion() -> None:
 def test_normalize_selector_output_boosts_subtle_non_neutral_axes() -> None:
     selector = normalize_selector_output(
             {
-                "emotion_label": "playful",
+                "intent_tags": ["playful"],
                 "duration_hint_ms": 1200,
-                "fallback_pose_id": "neutral",
                 "axes": {"head_yaw": 54},
             },
             semantic_profile=_semantic_profile(),
@@ -627,14 +616,13 @@ def test_normalize_selector_output_boosts_subtle_non_neutral_axes() -> None:
 def test_normalize_selector_output_keeps_neutral_near_center_axes() -> None:
     selector = normalize_selector_output(
             {
-                "emotion_label": "neutral",
+                "intent_tags": ["neutral"],
                 "duration_hint_ms": 1200,
-                "fallback_pose_id": "neutral",
                 "axes": {"head_yaw": 54},
             },
             semantic_profile=_semantic_profile(),
         )
-    assert selector["axes"]["head_yaw"] == 54
+    assert selector["axes"]["head_yaw"] > 58
 
 
 def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
@@ -652,9 +640,8 @@ def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
             class Response:
                 completion_text = json.dumps(
                     {
-                        "emotion_label": "curious",
+                        "intent_tags": ["curious"],
                         "duration_hint_ms": 1200,
-                        "fallback_pose_id": "neutral",
                         "axes": {"head_yaw": 82},
                     },
                     separators=(",", ":"),
@@ -707,7 +694,7 @@ def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:
     assert "旧表情参考模板" not in provider.last_prompt
     assert "[动作]" not in provider.last_prompt
     assert "head_yaw" in provider.last_prompt
-    assert "fallback_pose_id" in provider.last_prompt
+    assert '"fallback_pose_id"' not in provider.last_prompt
     assert "ParamHairX" not in provider.last_prompt
     assert "表情关键词参考动作：" not in provider.last_prompt
     assert "补充动作指令：" in provider.last_prompt
@@ -770,9 +757,8 @@ def test_realtime_motion_plan_prompt_keeps_fixed_few_shot_when_reference_templat
             class Response:
                 completion_text = json.dumps(
                     {
-                        "emotion_label": "neutral",
+                        "intent_tags": ["neutral"],
                         "duration_hint_ms": 900,
-                        "fallback_pose_id": "neutral",
                         "axes": {"head_yaw": 50},
                     },
                     separators=(",", ":"),
@@ -823,9 +809,8 @@ def test_realtime_motion_plan_prompt_can_keep_fixed_few_shot_with_reference_temp
             class Response:
                 completion_text = json.dumps(
                     {
-                        "emotion_label": "curious",
+                        "intent_tags": ["curious"],
                         "duration_hint_ms": 1200,
-                        "fallback_pose_id": "neutral",
                         "axes": {"head_yaw": 82},
                     },
                     separators=(",", ":"),
@@ -869,9 +854,8 @@ def test_realtime_motion_plan_prompt_includes_user_tuned_examples_first() -> Non
             class Response:
                 completion_text = json.dumps(
                     {
-                        "emotion_label": "joy",
+                        "intent_tags": ["joy"],
                         "duration_hint_ms": 1200,
-                        "fallback_pose_id": "neutral",
                         "axes": {"head_yaw": 76},
                     },
                     separators=(",", ":"),
@@ -891,10 +875,9 @@ def test_realtime_motion_plan_prompt_includes_user_tuned_examples_first() -> Non
             {
                 "input": "Assistant: tuned sample",
                 "output": {
-                        "emotion_label": "joy",
-                        "duration_hint_ms": 900,
-                        "fallback_pose_id": "neutral",
-                        "axes": {"head_yaw": 76},
+                    "intent_tags": ["joy"],
+                    "duration_hint_ms": 900,
+                    "axes": {"head_yaw": 76},
                 },
             }
         ]
@@ -929,9 +912,8 @@ def test_resolve_selector_few_shot_examples_respects_configured_count() -> None:
             {
                 "input": f"Assistant: tuned sample {index}",
                 "output": {
-                    "emotion_label": "joy",
+                    "intent_tags": ["joy"],
                     "duration_hint_ms": 900 + index,
-                    "fallback_pose_id": "neutral",
                     "axes": {"head_yaw": 70 + index},
                 },
             }
@@ -951,9 +933,8 @@ def test_resolve_selector_few_shot_examples_backfills_defaults_up_to_configured_
     user_example = {
         "input": "Assistant: tuned sample",
         "output": {
-            "emotion_label": "joy",
+            "intent_tags": ["joy"],
             "duration_hint_ms": 900,
-            "fallback_pose_id": "neutral",
             "axes": {"head_yaw": 76},
         },
     }
@@ -1034,9 +1015,8 @@ def test_resolve_selector_few_shot_examples_uses_unbounded_configured_count() ->
             {
                 "input": f"Assistant: tuned sample {index}",
                 "output": {
-                    "emotion_label": "joy",
+                    "intent_tags": ["joy"],
                     "duration_hint_ms": 900 + index,
-                    "fallback_pose_id": "neutral",
                     "axes": {"head_yaw": 70 + index},
                 },
             }
@@ -1059,9 +1039,8 @@ def test_resolve_selector_few_shot_examples_does_not_use_user_samples_by_default
             {
                 "input": "Assistant: tuned sample",
                 "output": {
-                    "emotion_label": "joy",
+                    "intent_tags": ["joy"],
                     "duration_hint_ms": 900,
-                    "fallback_pose_id": "neutral",
                     "axes": {"head_yaw": 76},
                 },
             }
@@ -1087,9 +1066,8 @@ def test_resolve_selector_few_shot_examples_reports_final_shortage_after_default
             {
                 "input": "Assistant: tuned sample",
                 "output": {
-                    "emotion_label": "joy",
+                    "intent_tags": ["joy"],
                     "duration_hint_ms": 900,
-                    "fallback_pose_id": "neutral",
                     "axes": {"head_yaw": 76},
                 },
             }
@@ -1114,7 +1092,7 @@ def test_resolve_selector_few_shot_examples_reports_final_shortage_after_default
     ]
 
 
-def test_realtime_motion_plan_generator_accepts_incomplete_selector_output_with_warning(caplog) -> None:
+def test_realtime_motion_plan_generator_rejects_old_selector_output_fields(caplog) -> None:
     class ProviderStub:
         async def text_chat(self, *, prompt: str, system_prompt: str):
             del prompt
@@ -1142,15 +1120,13 @@ def test_realtime_motion_plan_generator_accepts_incomplete_selector_output_with_
 
     generator = RealtimeMotionPlanGenerator(runtime_state=RuntimeStub())
 
-    intent = asyncio.run(
-        generator.generate(
-            user_text="what is this?",
-            assistant_text="let me explain that for you",
+    with pytest.raises(ValueError, match="selector_forbidden_field:emotion_label"):
+        asyncio.run(
+            generator.generate(
+                user_text="what is this?",
+                assistant_text="let me explain that for you",
+            )
         )
-    )
-
-    assert isinstance(intent, dict)
-    assert intent["axes"]["head_yaw"] == 82
 
 
 def test_realtime_motion_plan_generator_prompt_switches_off_context_and_few_shot() -> None:
@@ -1165,9 +1141,8 @@ def test_realtime_motion_plan_generator_prompt_switches_off_context_and_few_shot
             class Response:
                 completion_text = json.dumps(
                     {
-                        "emotion_label": "neutral",
+                        "intent_tags": ["neutral"],
                         "duration_hint_ms": 1000,
-                        "fallback_pose_id": "neutral",
                         "axes": {"head_yaw": 50},
                     },
                     separators=(",", ":"),

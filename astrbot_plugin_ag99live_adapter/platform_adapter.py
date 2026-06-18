@@ -30,7 +30,7 @@ from .services.remote_operator_runtime import RemoteOperatorRuntime
 from .transport.static_routes import build_static_routes, list_background_files
 from .runtime.plugin_runtime import get_plugin_config, get_plugin_context
 from .runtime.state import RuntimeState
-from .motion.realtime_motion_plan import (
+from .motion.motion_intent import (
     normalize_motion_intent_payload,
     validate_motion_intent_payload,
 )

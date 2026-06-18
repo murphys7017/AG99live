@@ -772,8 +772,7 @@ def test_view_plugin_hints_prioritized_over_event_extra(
         "_interaction_plugin_hints",
         {
             "ag99live_motion": {
-                "emotion_label": "event_extra",
-                "fallback_pose_id": "neutral",
+                "intent_tags": ["event_extra"],
                 "axes": {"head_yaw": 20},
             }
         },
@@ -784,8 +783,7 @@ def test_view_plugin_hints_prioritized_over_event_extra(
         final_result="助手回复",
         plugin_hints={
             "ag99live_motion": {
-                "emotion_label": "view_hints",
-                "fallback_pose_id": "neutral",
+                "intent_tags": ["view_hints"],
                 "axes": {"head_yaw": 30},
             }
         },
@@ -812,8 +810,7 @@ def test_event_extra_used_as_fallback_when_view_has_no_plugin_hints(
         "_interaction_plugin_hints",
         {
             "ag99live_motion": {
-                "emotion_label": "fallback_extra",
-                "fallback_pose_id": "neutral",
+                "intent_tags": ["fallback_extra"],
                 "axes": {"head_yaw": 40},
             }
         },
@@ -839,8 +836,7 @@ def test_log_plugin_hints_motion_resolution_prefers_view_hints(
         "_interaction_plugin_hints",
         {
             "ag99live_motion": {
-                "emotion_label": "event_extra",
-                "fallback_pose_id": "neutral",
+                "intent_tags": ["event_extra"],
                 "axes": {"head_yaw": 20},
             }
         },
@@ -849,8 +845,7 @@ def test_log_plugin_hints_motion_resolution_prefers_view_hints(
         phase="final",
         plugin_hints={
             "ag99live_motion": {
-                "emotion_label": "view_hints",
-                "fallback_pose_id": "neutral",
+                "intent_tags": ["view_hints"],
                 "axes": {"head_yaw": 30, "head_roll": 60},
             }
         },
@@ -1014,9 +1009,8 @@ def test_plugin_hints_motion_payload_uses_profile_axis_value_range(
         "_interaction_plugin_hints",
             {
                 "ag99live_motion": {
-                    "emotion_label": "playful",
+                    "intent_tags": ["playful"],
                     "duration_hint_ms": 1200,
-                    "fallback_pose_id": "neutral",
                     "axes": {
                         "head_yaw": 48,
                         "eye_open_left": 72,
@@ -1052,9 +1046,8 @@ def test_plugin_hints_motion_payload_accepts_json_string(
         json.dumps(
                 {
                     "ag99live_motion": {
-                        "emotion_label": "curious",
+                        "intent_tags": ["curious"],
                         "duration_hint_ms": 1500,
-                        "fallback_pose_id": "neutral",
                         "axes": {
                             "head_yaw": 48,
                             "eye_open_left": 72,
@@ -1090,9 +1083,8 @@ def test_plugin_hints_motion_payload_accepts_fenced_json_string(
         {
           "plugin_hints": {
             "ag99live_motion": {
-              "emotion_label": "curious",
+              "intent_tags": ["curious"],
               "duration_hint_ms": "1500",
-              "fallback_pose_id": "neutral",
               "axes": {
                 "head_yaw": "48",
                 "eye_open_left": 72,
@@ -1129,7 +1121,7 @@ def test_plugin_hints_motion_payload_accepts_text_wrapped_json_object(
     runtime_state = event.adapter.turn_coordinator.runtime_state
     event.set_extra(
         "_interaction_plugin_hints",
-        '前缀 {"plugin_hints":{"ag99live_motion":{"emotion_label":"curious","fallback_pose_id":"neutral","axes":{"head_yaw":48}}}} 后缀',
+        '前缀 {"plugin_hints":{"ag99live_motion":{"intent_tags":["curious"],"axes":{"head_yaw":48}}}} 后缀',
     )
 
     payload, reason = module._resolve_plugin_hints_motion_payload_with_reason(
@@ -1156,9 +1148,8 @@ def test_plugin_hints_motion_payload_accepts_string_number_axes(
         "_interaction_plugin_hints",
         {
             "ag99live_motion": {
-                "emotion_label": "curious",
+                "intent_tags": ["curious"],
                 "duration_hint_ms": "1500",
-                "fallback_pose_id": "neutral",
                 "axes": {
                     "head_yaw": "48",
                     "eye_open_left": "72.5",
@@ -1188,9 +1179,8 @@ def test_plugin_hints_expressive_payload_is_pushed_out_of_idle_deadzone(
         "_interaction_plugin_hints",
             {
                 "ag99live_motion": {
-                    "emotion_label": "playful",
+                    "intent_tags": ["playful"],
                     "duration_hint_ms": 1200,
-                    "fallback_pose_id": "neutral",
                     "axes": {
                         "head_yaw": 50,
                     },
@@ -1217,9 +1207,9 @@ def test_plugin_hints_detail_only_axes_are_repaired_from_fallback_pose(
         "_interaction_plugin_hints",
         {
             "ag99live_motion": {
-                "emotion_label": "thinking",
+                "intent_tags": ["thinking", "explain"],
+                "resource_id": "serious_explain",
                 "duration_hint_ms": 1200,
-                "fallback_pose_id": "serious_explain",
                 "axes": {
                     "eye_open_left": 72,
                 },
@@ -1251,9 +1241,9 @@ def test_plugin_hints_neutral_skeleton_axis_is_replaced_from_fallback_pose(
         "_interaction_plugin_hints",
         {
             "ag99live_motion": {
-                "emotion_label": "thinking",
+                "intent_tags": ["thinking", "explain"],
+                "resource_id": "serious_explain",
                 "duration_hint_ms": 1200,
-                "fallback_pose_id": "serious_explain",
                 "axes": {
                     "head_yaw": 50,
                     "eye_open_left": 72,
@@ -1284,8 +1274,8 @@ def test_plugin_hints_v3_nested_axis_payload_is_not_repaired_as_valid_axes(
         "_interaction_plugin_hints",
         {
             "ag99live_motion": {
-                "emotion_label": "thinking",
-                "fallback_pose_id": "serious_explain",
+                "intent_tags": ["thinking", "explain"],
+                "resource_id": "serious_explain",
                 "axes": {
                     "head_yaw": {"value": 62},
                     "eye_open_left": 72,
@@ -1318,8 +1308,8 @@ def test_plugin_hints_existing_skeleton_axes_are_not_overwritten_by_repair(
         "_interaction_plugin_hints",
         {
             "ag99live_motion": {
-                "emotion_label": "thinking",
-                "fallback_pose_id": "serious_explain",
+                "intent_tags": ["thinking", "explain"],
+                "resource_id": "serious_explain",
                 "axes": {
                     "head_yaw": 64,
                     "eye_open_left": 72,
@@ -1336,7 +1326,7 @@ def test_plugin_hints_existing_skeleton_axes_are_not_overwritten_by_repair(
     assert payload["summary"]["skeleton_repair_replaced_axes"] == []
 
 
-def test_plugin_hints_forbidden_catalog_fields_fall_back_to_semantic_pose(
+def test_plugin_hints_forbidden_catalog_fields_are_rejected(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1351,20 +1341,15 @@ def test_plugin_hints_forbidden_catalog_fields_fall_back_to_semantic_pose(
             "ag99live_motion": {
                 "choice": "catalog",
                 "motion_id": "serious_explain",
-                "emotion_label": "explain",
+                "intent_tags": ["explain"],
+                "resource_id": "serious_explain",
             }
         },
     )
 
     payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
 
-    assert payload is not None
-    assert payload["schema_version"] == "engine.motion_intent.v3"
-    assert "motion_id" not in payload
-    assert payload["fallback_pose_id"] == "serious_explain"
-    assert payload["emotion_label"] == "explain"
-    assert payload["axes"]["head_yaw"] == 80.0
-    assert "eye_open_left" not in payload["axes"]
+    assert payload is None
 
 
 def test_plugin_hints_motion_payload_accepts_head_roll_and_mouth_smile(
@@ -1433,8 +1418,7 @@ def test_plugin_hints_motion_payload_accepts_head_roll_and_mouth_smile(
         "_interaction_plugin_hints",
         {
             "ag99live_motion": {
-                "emotion_label": "neutral",
-                "fallback_pose_id": "neutral",
+                "intent_tags": ["calm"],
                 "axes": {
                     "head_roll": 40,
                     "mouth_smile": 65,
@@ -1465,8 +1449,7 @@ def test_result_contributor_returns_plugin_hint_motion_as_client_object(
         "_interaction_plugin_hints",
         {
             "ag99live_motion": {
-                "emotion_label": "happy",
-                "fallback_pose_id": "neutral",
+                "intent_tags": ["happy"],
                 "axes": {"head_yaw": 50},
             }
         },
@@ -1550,7 +1533,7 @@ def test_result_contributor_uses_default_pose_when_plugin_hints_missing_in_immed
     payload = client_object["motion_payload"]
     assert payload["schema_version"] == "engine.motion_intent.v3"
     assert payload["mode"] == "expressive"
-    assert payload["emotion_label"] == "neutral"
+    assert payload["emotion_label"] == "system_fallback"
     assert isinstance(payload["axes"]["head_yaw"], (int, float))
     assert (
         contribution.metadata["ag99live_motion_schedule"]["reason"]
@@ -1583,7 +1566,7 @@ def test_result_contributor_uses_default_pose_when_plugin_hints_missing_in_split
     payload = client_object["motion_payload"]
     assert payload["schema_version"] == "engine.motion_intent.v3"
     assert payload["mode"] == "expressive"
-    assert payload["emotion_label"] == "neutral"
+    assert payload["emotion_label"] == "system_fallback"
     assert payload["duration_hint_ms"] == 1000
     assert isinstance(payload["axes"]["head_yaw"], (int, float))
     assert (
@@ -1592,11 +1575,11 @@ def test_result_contributor_uses_default_pose_when_plugin_hints_missing_in_split
     )
     assert (
         contribution.metadata["ag99live_motion_schedule"]["plugin_hints_resolution_reason"]
-        == "plugin_hints_missing:realtime_provider_unavailable:default_pose:neutral"
+        == "plugin_hints_missing:default_pose:neutral"
     )
 
 
-def test_result_contributor_generates_realtime_motion_when_plugin_hints_missing_in_split_final_phase(
+def test_result_contributor_uses_default_pose_even_when_realtime_provider_is_available(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1643,19 +1626,19 @@ def test_result_contributor_generates_realtime_motion_when_plugin_hints_missing_
     assert scheduled_calls == []
     assert len(contribution.client_objects) == 1
     client_object = contribution.client_objects[0]
-    assert client_object["source"] == "realtime_motion"
+    assert client_object["source"] == "default_pose"
     payload = client_object["motion_payload"]
     assert payload["schema_version"] == "engine.motion_intent.v3"
     assert payload["mode"] == "expressive"
-    assert payload["emotion_label"] == "happy"
-    assert payload["axes"]["head_yaw"] >= 74
+    assert payload["emotion_label"] == "system_fallback"
+    assert "head_yaw" in payload["axes"]
     assert (
         contribution.metadata["ag99live_motion_schedule"]["reason"]
-        == "realtime_motion_client_object"
+        == "default_motion_client_object"
     )
     assert (
         contribution.metadata["ag99live_motion_schedule"]["plugin_hints_resolution_reason"]
-        == "plugin_hints_missing:realtime_generated"
+        == "plugin_hints_missing:default_pose:neutral"
     )
 
 
@@ -1672,8 +1655,7 @@ def test_result_contributor_returns_plugin_hint_motion_in_split_final_phase(
         "_interaction_plugin_hints",
         {
             "ag99live_motion": {
-                "emotion_label": "focused",
-                "fallback_pose_id": "neutral",
+                "intent_tags": ["focused"],
                 "axes": {"head_yaw": 60},
             }
         },
@@ -1761,8 +1743,7 @@ def test_result_contributor_skips_plugin_hint_motion_in_hybrid_immediate_phase(
         "_interaction_plugin_hints",
         {
             "ag99live_motion": {
-                "emotion_label": "thinking",
-                "fallback_pose_id": "neutral",
+                "intent_tags": ["thinking"],
                 "axes": {"head_yaw": 55},
             }
         },
@@ -1801,8 +1782,7 @@ def test_result_contributor_dedupes_plugin_hint_motion_after_immediate_phase(
         "_interaction_plugin_hints",
         {
             "ag99live_motion": {
-                "emotion_label": "happy",
-                "fallback_pose_id": "neutral",
+                "intent_tags": ["happy"],
                 "axes": {"head_yaw": 50},
             }
         },
@@ -1931,7 +1911,7 @@ def test_result_contributor_skips_self_reply_in_inline_first_mode(
     )
 
 
-def test_self_reply_missing_hints_calls_realtime_motion_with_provider(
+def test_self_reply_missing_hints_uses_default_pose_with_provider_available(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1966,8 +1946,8 @@ def test_self_reply_missing_hints_calls_realtime_motion_with_provider(
     assert contribution is not None
     metadata = contribution.metadata["ag99live_motion_schedule"]
     assert metadata["scheduled"] is True
-    assert metadata["source"] == "realtime_motion"
-    assert contribution.client_objects[0]["motion_payload"]["axes"]["head_yaw"] == 30
+    assert metadata["source"] == "default_pose"
+    assert "head_yaw" in contribution.client_objects[0]["motion_payload"]["axes"]
 
 
 def test_plugin_hints_motion_payload_supports_intent_tags_and_resource_id(

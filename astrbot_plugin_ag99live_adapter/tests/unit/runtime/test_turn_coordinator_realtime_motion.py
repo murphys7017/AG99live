@@ -67,16 +67,10 @@ def _build_valid_motion_intent(
         "model_id": "pet",
         "intent_tags": ["test", "motion"],
         "resource_id": "",
-        "emotion_label": "test-motion",
         "duration_hint_ms": 1200,
-        "fallback_pose_id": "neutral",
         "axes": {
             "head_yaw": 62,
             "mouth_smile": 64,
-        },
-        "summary": {
-            "axis_count": 2,
-            "intent_tag_count": 2,
         },
     }
     if include_mode:
@@ -352,13 +346,8 @@ def test_extract_inline_motion_plan_falls_back_when_runtime_available(
     assert "<@anim" not in text.lower()
     assert "hello" in text.lower()
     assert "world" in text.lower()
-    assert isinstance(plan, dict)
-    assert plan["schema_version"] == "engine.motion_intent.v3"
-    assert plan["mode"] == "expressive"
-    assert plan["fallback_pose_id"] == "neutral"
-    assert plan["summary"]["fallback_used"] is True
-    assert plan["summary"]["fallback_reason"] == "forbidden_field:mode"
-    assert mode == "inline"
+    assert plan is None
+    assert mode is None
 
 
 def test_extract_inline_motion_plan_repairs_detail_only_axes_from_fallback_pose(
@@ -368,7 +357,7 @@ def test_extract_inline_motion_plan_repairs_detail_only_axes_from_fallback_pose(
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
     module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
     intent = _build_valid_motion_intent(include_mode=False)
-    intent["fallback_pose_id"] = "happy_body_pose"
+    intent["resource_id"] = "happy_body_pose"
     intent["axes"] = {"mouth_smile": 74}
     tag_payload = json.dumps(
         {"mode": "inline", "intent": intent},
@@ -397,8 +386,8 @@ def test_extract_inline_motion_plan_replaces_neutral_skeleton_axis_from_fallback
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
     module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
     intent = _build_valid_motion_intent(include_mode=False)
-    intent["emotion_label"] = "happy"
-    intent["fallback_pose_id"] = "happy_body_pose"
+    intent["intent_tags"] = ["happy", "body_pose"]
+    intent["resource_id"] = "happy_body_pose"
     intent["axes"] = {
         "body_yaw": 50,
         "mouth_smile": 74,
@@ -428,8 +417,7 @@ def test_extract_inline_motion_plan_applies_expressive_floor_to_valid_v3(
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
     module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
     intent = _build_valid_motion_intent(include_mode=False)
-    intent["emotion_label"] = "happy"
-    intent["fallback_pose_id"] = "neutral"
+    intent["intent_tags"] = ["happy", "subtle"]
     intent["axes"] = {"head_yaw": 50}
     tag_payload = json.dumps(
         {"mode": "inline", "intent": intent},
@@ -807,7 +795,12 @@ def test_emit_message_chain_inline_plan_uses_primary_route(
     )
 
     assert inline_broadcast.get("source") == "engine.inline_motion_intent"
-    assert inline_broadcast.get("motion_payload") == _build_valid_motion_intent()
+    motion_payload = inline_broadcast.get("motion_payload")
+    assert isinstance(motion_payload, dict)
+    assert motion_payload["intent_tags"] == ["test", "motion"]
+    assert motion_payload["emotion_label"] == "test-motion"
+    assert motion_payload["fallback_pose_id"] == ""
+    assert motion_payload["axes"]["head_yaw"] == 62
     assert inline_broadcast.get("mode") == "inline"
     assert inline_broadcast.get("turn_id") == "turn-inline"
     assert "reply_text" not in scheduled
@@ -1242,7 +1235,11 @@ def test_emit_message_chain_uses_raw_reply_text_override_for_inline_extraction(
     )
 
     assert inline_broadcast.get("source") == "engine.inline_motion_intent"
-    assert inline_broadcast.get("motion_payload") == _build_valid_motion_intent()
+    motion_payload = inline_broadcast.get("motion_payload")
+    assert isinstance(motion_payload, dict)
+    assert motion_payload["intent_tags"] == ["test", "motion"]
+    assert motion_payload["emotion_label"] == "test-motion"
+    assert motion_payload["fallback_pose_id"] == ""
     assert inline_broadcast.get("mode") == "inline"
     assert inline_broadcast.get("turn_id") == "turn-inline-override"
     assert sent_payloads
@@ -1309,14 +1306,7 @@ def test_emit_message_chain_inline_invalid_v3_intent_broadcasts_fallback(
         )
     )
 
-    assert inline_broadcast.get("source") == "engine.inline_motion_intent"
-    motion_payload = inline_broadcast.get("motion_payload")
-    assert isinstance(motion_payload, dict)
-    assert motion_payload["schema_version"] == "engine.motion_intent.v3"
-    assert motion_payload["fallback_pose_id"] == "neutral"
-    assert motion_payload["summary"]["fallback_used"] is True
-    assert motion_payload["summary"]["fallback_reason"] == "forbidden_field:mode"
-    assert inline_broadcast.get("turn_id") == "turn-inline-fallback"
+    assert inline_broadcast == {}
 
 
 def test_emit_message_chain_inline_v1_intent_is_rejected(
@@ -1390,15 +1380,7 @@ def test_emit_message_chain_inline_v1_intent_is_rejected(
         )
     )
 
-    motion_payload = inline_broadcast.get("motion_payload")
-    assert isinstance(motion_payload, dict)
-    assert motion_payload["schema_version"] == "engine.motion_intent.v3"
-    assert motion_payload["emotion_label"] == "curious"
-    assert motion_payload["fallback_pose_id"] == "neutral"
-    assert motion_payload["axes"]["head_yaw"] == 50.0
-    assert set(motion_payload["axes"].values()) == {50.0}
-    assert motion_payload["summary"]["fallback_used"] is True
-    assert motion_payload["summary"]["fallback_reason"] == "invalid_schema_version"
+    assert inline_broadcast == {}
 
 
 def test_handle_msg_emits_control_error_for_unhandled_allowed_message_type(

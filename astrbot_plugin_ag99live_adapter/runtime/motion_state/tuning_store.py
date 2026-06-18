@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Callable
 
-from ...motion.realtime_motion_plan import PARAMETER_PLAN_SOURCES
+from ...motion.motion_intent import PARAMETER_PLAN_SOURCES
 from ...prompts.motion_selector import resolve_selector_few_shot_examples
 from ...prompts.semantic_axis_prompt import profile_prompt_axes
 

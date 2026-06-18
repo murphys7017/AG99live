@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from ..motion.realtime_motion_plan import _incr_repair_stat
+from ..motion.motion_intent import _incr_repair_stat
 from ..prompts.semantic_axis_prompt import profile_prompt_axes
 
 DEFAULT_FALLBACK_POSE_ID = "neutral"
