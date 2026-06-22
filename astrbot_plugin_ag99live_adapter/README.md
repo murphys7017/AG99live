@@ -8,7 +8,7 @@ AG99live V2 的 AstrBot 插件侧实现。该目录负责协议桥接、turn 生
 - 发送 `output.* / control.* / system.* / engine.*` 消息回前端。
 - 管理 turn 生命周期，保证文本/语音/动作消息在同一轮次可追踪。
 - 扫描 Live2D 资源并产出结构化能力信息。
-- 生成并下发动作用载荷；默认走 AstrBot 交互中间件主链路，由 `client_objects` / plugin hints 提供动作；`inline_first` 内联动作链路仅作为显式兼容路径保留。
+- 生成并下发动作用载荷；默认走 AstrBot 交互中间件主链路，由 `ag99live.motion` Persona Effect 产出动作并通过 `client_objects` 下发；`inline_first` 内联动作链路仅作为显式兼容路径保留。
 - 注入远程执行器能力，并把电脑/桌面/软件操作类请求委托给配置的 Codex app-server / Computer Use。
 
 ## 当前路线说明
@@ -42,7 +42,7 @@ astrbot_plugin_ag99live_adapter/
 ### 默认主路径（split_after_reply / middleware-first）
 
 - 主聊天模型只负责正常回复文本，不要求内联 `<@anim {...}>`。
-- 交互中间件在 prompt contributor 中注入动作能力/运行态上下文，在 result contributor 中返回 `client_objects` 或 plugin hints。
+- 交互中间件在 prompt contributor 中注入动作能力/运行态上下文，并注册 `ag99live.motion` Persona Effect；result contributor 从 `view.effect_calls` 消费该 effect 并返回 `client_objects`。
 - 后端从 `platform_extras` / `client_objects` 中读取动作载荷，并与文本、音频一起广播到前端。
 - 若 runtime 内部明确启用了额外 fallback 组件，它的结果也必须回到同一条 `engine.motion_*` 协议链路和同一 segment identity。
 

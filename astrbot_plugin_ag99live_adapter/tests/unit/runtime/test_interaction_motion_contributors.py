@@ -57,7 +57,32 @@ def _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
             self.metadata = metadata or {}
             self.priority = priority
 
+    class PersonaEffectSpec:
+        def __init__(
+            self,
+            *,
+            plugin_id: str,
+            name: str,
+            description: str,
+            parameters: dict,
+            phases: tuple = (),
+            legacy_hint_names: tuple = (),
+            priority: int = 100,
+            enabled: bool = True,
+            metadata: dict | None = None,
+        ) -> None:
+            self.plugin_id = plugin_id
+            self.name = name
+            self.description = description
+            self.parameters = parameters
+            self.phases = phases
+            self.legacy_hint_names = legacy_hint_names
+            self.priority = priority
+            self.enabled = enabled
+            self.metadata = metadata or {}
+
     interaction_module.InteractionResultContribution = InteractionResultContribution
+    interaction_module.PersonaEffectSpec = PersonaEffectSpec
     interaction_module.get_interaction_decision = (
         lambda event: event.get_extra("_interaction_decision", None)
     )
@@ -385,6 +410,7 @@ def _build_view(
     immediate_reply: str | None = None,
     purpose: str | None = None,
     plugin_hints: object | None = None,
+    effect_calls: object | None = None,
 ):
     decision = None
     if route_mode is not None or should_emit_immediate_reply is not None:
@@ -408,8 +434,16 @@ def _build_view(
             "immediate_reply": immediate_reply,
             "metadata": metadata,
             "plugin_hints": plugin_hints,
+            "effect_calls": effect_calls,
         },
     )()
+
+
+def _motion_effect_call(arguments: dict[str, object]):
+    return {
+        "name": "ag99live.motion",
+        "arguments": arguments,
+    }
 
 
 def test_prompt_contributor_returns_capability_and_runtime_extensions(
@@ -431,8 +465,10 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     capability = next(item for item in extensions if item.mount == "capability")
     runtime = next(item for item in extensions if item.mount == "context")
     assert "AG99live Motion 负责把本轮回复语义转成可执行动作" in system.value
-    assert '"plugin_hints":{"ag99live_motion"' in system.value
-    assert "plugin_hints.ag99live_motion 中输出结果" in system.value
+    assert '"plugin_hints":{"ag99live_motion"' not in system.value
+    assert "ag99live.motion Persona Effect" in system.value
+    assert "动作内容只写入该 effect 的 arguments" in system.value
+    assert "不要输出 plugin_hints 外壳" in system.value
     assert '"fallback_pose_id":"neutral"' not in system.value
     assert '"choice"' not in system.value
     assert '"motion_id"' not in system.value
@@ -523,25 +559,23 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
         for axis in capability.value["semantic_profile"]["prompt_axes"]
     )
     assert (
-        capability.value["plugin_hints_format"]["ag99live_motion"]["axes"]["head_yaw"]
+        capability.value["effect_arguments_example"]["axes"]["head_yaw"]
         > 58
     )
     assert set(
-        capability.value["plugin_hints_format"]["ag99live_motion"]["axes"]
+        capability.value["effect_arguments_example"]["axes"]
     ) == {"head_yaw", "eye_open_left"}
     assert (
-        capability.value["plugin_hints_format"]["ag99live_motion"]["intent_tags"]
+        capability.value["effect_arguments_example"]["intent_tags"]
         == ["语气关键词", "姿态关键词", "场景关键词"]
     )
     assert (
-        capability.value["plugin_hints_format"]["ag99live_motion"]["resource_id"]
+        capability.value["effect_arguments_example"]["resource_id"]
         == "可选资源id"
     )
     assert "intent_tags" in system.value
     assert "resource_id" in system.value
-    assert (
-        "fallback_pose_id" not in capability.value["plugin_hints_format"]["ag99live_motion"]
-    )
+    assert "fallback_pose_id" not in capability.value["effect_arguments_example"]
     assert capability.value["fallback_pose_candidates"][0]["label"] in system.value
     assert runtime.value["configured_generation_mode"] == "split_after_reply"
     assert runtime.value["prompt_purpose"] == "persona_reply"
@@ -598,7 +632,7 @@ def test_prompt_contributor_hides_resource_id_when_no_resource_candidates(
     capability = next(item for item in extensions if item.mount == "capability")
     system = next(item for item in extensions if item.mount == "system")
     assert "resource_candidates" not in capability.value
-    assert "resource_id" not in capability.value["plugin_hints_format"]["ag99live_motion"]
+    assert "resource_id" not in capability.value["effect_arguments_example"]
     assert "resource_id 只有在确定要引用明确资源时才填写" not in system.value
     assert "允许字段只有 intent_tags、duration_hint_ms 和 axes。" in system.value
 
@@ -1623,7 +1657,47 @@ def test_plugin_hints_motion_payload_accepts_head_roll_and_mouth_smile(
     assert set(payload["axes"]) == {"head_roll", "mouth_smile"}
 
 
-def test_result_contributor_returns_plugin_hint_motion_as_client_object(
+def test_result_contributor_returns_persona_effect_motion_as_client_object(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(raw_turn_id="raw-turn")
+    view = _build_view(
+        phase="immediate",
+        route_mode="self_reply",
+        final_result="你好呀",
+        immediate_reply="你好呀",
+        effect_calls=[
+            _motion_effect_call(
+                {
+                "intent_tags": ["happy"],
+                "axes": {"head_yaw": 70},
+                }
+            )
+        ],
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == []
+    assert len(contribution.client_objects) == 1
+    client_object = contribution.client_objects[0]
+    assert client_object["type"] == "ag99live.motion_payload"
+    assert client_object["source"] == "persona_effect"
+    assert client_object["motion_payload"]["schema_version"] == "engine.motion_intent.v3"
+    assert contribution.platform_extras == {}
+    assert (
+        contribution.metadata["ag99live_motion_schedule"]["reason"]
+        == "persona_effect_motion_client_object"
+    )
+
+
+def test_result_contributor_ignores_legacy_plugin_hints_without_effect_calls(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1652,15 +1726,12 @@ def test_result_contributor_returns_plugin_hint_motion_as_client_object(
 
     assert contribution is not None
     assert scheduled_calls == []
-    assert len(contribution.client_objects) == 1
-    client_object = contribution.client_objects[0]
-    assert client_object["type"] == "ag99live.motion_payload"
-    assert client_object["source"] == "plugin_hints"
-    assert client_object["motion_payload"]["schema_version"] == "engine.motion_intent.v3"
-    assert contribution.platform_extras == {}
-    assert (
-        contribution.metadata["ag99live_motion_schedule"]["reason"]
-        == "plugin_hints_motion_client_object"
+    assert contribution.client_objects == []
+    metadata = contribution.metadata["ag99live_motion_schedule"]
+    assert metadata["scheduled"] is False
+    assert metadata["reason"] == "motion_payload_missing"
+    assert metadata["motion_resolution_reason"] == (
+        "effect_calls_missing:self_reply_motion_missing"
     )
 
 
@@ -1719,8 +1790,8 @@ def test_result_contributor_skips_motion_when_plugin_hints_missing_in_immediate_
     assert metadata["scheduled"] is False
     assert metadata["reason"] == "motion_payload_missing"
     assert (
-        metadata["plugin_hints_resolution_reason"]
-        == "plugin_hints_missing:self_reply_motion_missing"
+        metadata["motion_resolution_reason"]
+        == "effect_calls_missing:self_reply_motion_missing"
     )
 
 
@@ -1748,8 +1819,8 @@ def test_result_contributor_skips_motion_when_plugin_hints_missing_in_split_fina
     assert metadata["scheduled"] is False
     assert metadata["reason"] == "motion_payload_missing"
     assert (
-        metadata["plugin_hints_resolution_reason"]
-        == "plugin_hints_missing:motion_payload_missing"
+        metadata["motion_resolution_reason"]
+        == "effect_calls_missing:motion_payload_missing"
     )
 
 
@@ -1804,7 +1875,7 @@ def test_result_contributor_does_not_invoke_legacy_provider_when_hints_are_missi
     assert metadata["reason"] == "motion_payload_missing"
 
 
-def test_result_contributor_returns_plugin_hint_motion_in_split_final_phase(
+def test_result_contributor_returns_persona_effect_motion_in_split_final_phase(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1813,19 +1884,18 @@ def test_result_contributor_returns_plugin_hint_motion_in_split_final_phase(
 
     contributor = module.AG99liveMotionResultContributor()
     event, scheduled_calls = _build_event(mode="split_after_reply", raw_turn_id="raw-turn")
-    event.set_extra(
-        "_interaction_plugin_hints",
-        {
-            "ag99live_motion": {
-                "intent_tags": ["focused"],
-                "axes": {"head_yaw": 60},
-            }
-        },
-    )
     view = _build_view(
         phase="final",
         route_mode="delegate_to_core",
         final_result="最终回复文本",
+        effect_calls=[
+            _motion_effect_call(
+                {
+                "intent_tags": ["focused"],
+                "axes": {"head_yaw": 60},
+                }
+            )
+        ],
     )
 
     contribution = asyncio.run(contributor.collect(event, None, view))
@@ -1833,11 +1903,11 @@ def test_result_contributor_returns_plugin_hint_motion_in_split_final_phase(
     assert contribution is not None
     assert scheduled_calls == []
     assert len(contribution.client_objects) == 1
-    assert contribution.client_objects[0]["source"] == "plugin_hints"
+    assert contribution.client_objects[0]["source"] == "persona_effect"
     assert event.get_extra("ag99live_split_motion_scheduled") is True
     assert (
         contribution.metadata["ag99live_motion_schedule"]["reason"]
-        == "plugin_hints_motion_client_object"
+        == "persona_effect_motion_client_object"
     )
 
 
@@ -1892,7 +1962,7 @@ def test_result_contributor_skips_immediate_phase_for_hybrid_reply(
     )
 
 
-def test_result_contributor_skips_plugin_hint_motion_in_hybrid_immediate_phase(
+def test_result_contributor_skips_persona_effect_motion_in_hybrid_immediate_phase(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1901,20 +1971,19 @@ def test_result_contributor_skips_plugin_hint_motion_in_hybrid_immediate_phase(
 
     contributor = module.AG99liveMotionResultContributor()
     event, scheduled_calls = _build_event(mode="split_after_reply", raw_turn_id="raw-turn")
-    event.set_extra(
-        "_interaction_plugin_hints",
-        {
-            "ag99live_motion": {
-                "intent_tags": ["thinking"],
-                "axes": {"head_yaw": 55},
-            }
-        },
-    )
     view = _build_view(
         phase="immediate",
         route_mode="hybrid",
         final_result="先给你一句过渡回复",
         immediate_reply="先给你一句过渡回复",
+        effect_calls=[
+            _motion_effect_call(
+                {
+                "intent_tags": ["thinking"],
+                "axes": {"head_yaw": 55},
+                }
+            )
+        ],
     )
 
     contribution = asyncio.run(contributor.collect(event, None, view))
@@ -1926,12 +1995,12 @@ def test_result_contributor_skips_plugin_hint_motion_in_hybrid_immediate_phase(
     metadata = contribution.metadata["ag99live_motion_schedule"]
     assert metadata["reason"] == "immediate_phase_waits_for_core_reply"
     assert (
-        metadata["plugin_hints_resolution_reason"]
-        == "axes_all_neutral:axes_empty_or_invalid:fallback_pose:serious_explain"
+        metadata["motion_resolution_reason"]
+        == "persona_effect:axes_all_neutral:axes_empty_or_invalid:fallback_pose:serious_explain"
     )
 
 
-def test_result_contributor_dedupes_plugin_hint_motion_after_immediate_phase(
+def test_result_contributor_dedupes_persona_effect_motion_after_immediate_phase(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1940,15 +2009,6 @@ def test_result_contributor_dedupes_plugin_hint_motion_after_immediate_phase(
 
     contributor = module.AG99liveMotionResultContributor()
     event, scheduled_calls = _build_event(mode="split_after_reply", raw_turn_id="raw-turn")
-    event.set_extra(
-        "_interaction_plugin_hints",
-        {
-            "ag99live_motion": {
-                "intent_tags": ["happy"],
-                "axes": {"head_yaw": 70},
-            }
-        },
-    )
 
     immediate = asyncio.run(
         contributor.collect(
@@ -1959,6 +2019,14 @@ def test_result_contributor_dedupes_plugin_hint_motion_after_immediate_phase(
                 route_mode="self_reply",
                 final_result="你好呀",
                 immediate_reply="你好呀",
+                effect_calls=[
+                    _motion_effect_call(
+                        {
+                            "intent_tags": ["happy"],
+                            "axes": {"head_yaw": 70},
+                        }
+                    )
+                ],
             ),
         )
     )
@@ -1970,6 +2038,14 @@ def test_result_contributor_dedupes_plugin_hint_motion_after_immediate_phase(
                 phase="final",
                 route_mode="delegate_to_core",
                 final_result="最终回复文本",
+                effect_calls=[
+                    _motion_effect_call(
+                        {
+                            "intent_tags": ["happy"],
+                            "axes": {"head_yaw": 70},
+                        }
+                    )
+                ],
             ),
         )
     )
@@ -2246,8 +2322,18 @@ def test_register_interaction_contributors_uses_available_hooks(
 
     prompt_contributors: list[object] = []
     result_contributors: list[object] = []
+    unregistered_effect_plugins: list[str | None] = []
+    registered_effects: list[object] = []
 
     class ContextStub:
+        def unregister_persona_effects(self, *, plugin_id=None, module_prefix=None) -> int:
+            del module_prefix
+            unregistered_effect_plugins.append(plugin_id)
+            return 0
+
+        def register_persona_effect(self, effect) -> None:
+            registered_effects.append(effect)
+
         def register_interaction_prompt_contributor(self, contributor) -> None:
             prompt_contributors.append(contributor)
 
@@ -2258,3 +2344,16 @@ def test_register_interaction_contributors_uses_available_hooks(
 
     assert len(prompt_contributors) == 1
     assert len(result_contributors) == 1
+    assert unregistered_effect_plugins == ["astrbot_plugin_ag99live_adapter"]
+    assert len(registered_effects) == 1
+    effect = registered_effects[0]
+    assert effect.plugin_id == "astrbot_plugin_ag99live_adapter"
+    assert effect.name == "ag99live.motion"
+    assert effect.legacy_hint_names == ()
+    assert effect.parameters["required"] == ["intent_tags"]
+    assert set(effect.parameters["properties"]) == {
+        "intent_tags",
+        "axes",
+        "duration_hint_ms",
+        "resource_id",
+    }

@@ -11,6 +11,10 @@ from astrbot.core.interaction import (
     InteractionResultContribution,
     get_interaction_decision as get_interaction_reply_plan,
 )
+try:
+    from astrbot.core.interaction import PersonaEffectSpec
+except ImportError:  # pragma: no cover - older AstrBot cores do not expose it.
+    PersonaEffectSpec = None  # type: ignore[assignment]
 from astrbot.core.prompt import PromptExtension
 
 from ..motion.output_sanitizer import sanitize_assistant_output_text
@@ -41,6 +45,10 @@ from ..prompts.semantic_axis_prompt import (
     format_profile_axis_prompt_line,
     profile_prompt_axes,
 )
+
+AG99LIVE_PLUGIN_ID = "astrbot_plugin_ag99live_adapter"
+AG99LIVE_MOTION_EFFECT_NAME = "ag99live.motion"
+
 
 @dataclass(slots=True)
 class _MotionRuntimeBundle:
@@ -87,8 +95,8 @@ class _MotionScheduleAttempt:
     scheduled: bool
     reason: str
     assistant_text: str
-    plugin_hints_motion_payload: dict[str, Any] | None = None
-    plugin_hints_resolution_reason: str | None = None
+    motion_payload: dict[str, Any] | None = None
+    motion_resolution_reason: str | None = None
 
     def to_metadata(self) -> dict[str, Any]:
         metadata = {
@@ -104,8 +112,8 @@ class _MotionScheduleAttempt:
             "scheduled": self.scheduled,
             "reason": self.reason,
         }
-        if self.plugin_hints_resolution_reason:
-            metadata["plugin_hints_resolution_reason"] = self.plugin_hints_resolution_reason
+        if self.motion_resolution_reason:
+            metadata["motion_resolution_reason"] = self.motion_resolution_reason
         return metadata
 
 
@@ -183,13 +191,13 @@ class AG99liveMotionResultContributor:
             return None
 
         client_objects = []
-        if attempt.plugin_hints_motion_payload is not None:
+        if attempt.motion_payload is not None:
             client_objects.append(
                 {
                     "type": "ag99live.motion_payload",
-                    "motion_payload": attempt.plugin_hints_motion_payload,
+                    "motion_payload": attempt.motion_payload,
                     "mode": "preview",
-                    "source": attempt.source or "plugin_hints",
+                    "source": attempt.source or "persona_effect",
                 }
             )
         return InteractionResultContribution(
@@ -201,6 +209,8 @@ class AG99liveMotionResultContributor:
 
 
 def register_ag99live_interaction_contributors(context: Any) -> None:
+    _register_ag99live_motion_persona_effect(context)
+
     register_prompt = getattr(context, "register_interaction_prompt_contributor", None)
     if callable(register_prompt):
         register_prompt(AG99liveMotionPromptContributor())
@@ -208,6 +218,49 @@ def register_ag99live_interaction_contributors(context: Any) -> None:
     register_result = getattr(context, "register_interaction_result_contributor", None)
     if callable(register_result):
         register_result(AG99liveMotionResultContributor())
+
+
+def _register_ag99live_motion_persona_effect(context: Any) -> None:
+    if PersonaEffectSpec is None:
+        return
+
+    unregister_effects = getattr(context, "unregister_persona_effects", None)
+    if callable(unregister_effects):
+        unregister_effects(plugin_id=AG99LIVE_PLUGIN_ID)
+
+    register_effect = getattr(context, "register_persona_effect", None)
+    if not callable(register_effect):
+        return
+
+    register_effect(
+        PersonaEffectSpec(
+            plugin_id=AG99LIVE_PLUGIN_ID,
+            name=AG99LIVE_MOTION_EFFECT_NAME,
+            description=(
+                "Generate Live2D motion intent for AG99Live persona expression. "
+                "Choose a small number of meaningful semantic axes; omit axes "
+                "that do not visibly contribute to this turn. Use resource_id "
+                "only when a listed explicit expression or motion resource is "
+                "clearly appropriate."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "intent_tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "axes": {
+                        "type": "object",
+                        "additionalProperties": {"type": "number"},
+                    },
+                    "duration_hint_ms": {"type": "integer"},
+                    "resource_id": {"type": "string"},
+                },
+                "required": ["intent_tags"],
+            },
+        )
+    )
 
 
 def _resolve_motion_runtime_bundle(event: Any) -> _MotionRuntimeBundle | None:
@@ -235,6 +288,12 @@ def _resolve_plugin_hints_motion_payload(
     *,
     view: Any = None,
 ) -> dict[str, Any] | None:
+    """Resolve the historical plugin_hints.ag99live_motion payload.
+
+    This helper is retained for legacy diagnostics and parser coverage only.
+    The middleware result contributor's active structured path consumes
+    ``view.effect_calls`` with the ``ag99live.motion`` Persona Effect.
+    """
     payload, _reason = _resolve_plugin_hints_motion_payload_with_reason(
         event,
         runtime_state,
@@ -249,6 +308,7 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     *,
     view: Any = None,
 ) -> tuple[dict[str, Any] | None, str]:
+    """Resolve historical plugin_hints payloads without driving new scheduling."""
     hints = _extract_plugin_hints_from_view(view) if view is not None else None
     if hints is None:
         hints = _call_event_method(event, "get_extra", "_interaction_plugin_hints")
@@ -260,7 +320,50 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     if not isinstance(raw_motion_hint, dict):
         return None, _append_resolution_reason(hints_reason, "ag99live_motion_missing")
 
-    motion_hint = dict(raw_motion_hint)
+    return _normalize_motion_arguments_payload(
+        raw_motion_hint,
+        runtime_state,
+        base_reason=hints_reason,
+    )
+
+
+def _resolve_persona_effect_motion_payload(
+    event: Any,
+    runtime_state: Any,
+    *,
+    view: Any = None,
+) -> dict[str, Any] | None:
+    payload, _reason = _resolve_persona_effect_motion_payload_with_reason(
+        event,
+        runtime_state,
+        view=view,
+    )
+    return payload
+
+
+def _resolve_persona_effect_motion_payload_with_reason(
+    event: Any,
+    runtime_state: Any,
+    *,
+    view: Any = None,
+) -> tuple[dict[str, Any] | None, str]:
+    raw_arguments, effect_reason = _extract_ag99live_motion_effect_arguments(view)
+    if raw_arguments is None:
+        return None, effect_reason
+    return _normalize_motion_arguments_payload(
+        raw_arguments,
+        runtime_state,
+        base_reason=effect_reason,
+    )
+
+
+def _normalize_motion_arguments_payload(
+    raw_motion_arguments: dict[str, Any],
+    runtime_state: Any,
+    *,
+    base_reason: str,
+) -> tuple[dict[str, Any] | None, str]:
+    motion_hint = dict(raw_motion_arguments)
     forbidden_fields = [
         key
         for key in (
@@ -294,7 +397,7 @@ def _resolve_plugin_hints_motion_payload_with_reason(
 
     intent_tags = normalize_motion_intent_tags(motion_hint.get("intent_tags"))
     if not intent_tags:
-        return None, _append_resolution_reason(hints_reason, "intent_tags_empty")
+        return None, _append_resolution_reason(base_reason, "intent_tags_empty")
     emotion_label = derive_motion_emotion_label(intent_tags)
     resource_id = normalize_motion_resource_id(motion_hint.get("resource_id"))
     axes = motion_hint.get("axes")
@@ -307,7 +410,7 @@ def _resolve_plugin_hints_motion_payload_with_reason(
         axes,
         semantic_profile,
     )
-    reason = hints_reason
+    reason = base_reason
     if forbidden_fields:
         reason = _append_resolution_reason(
             reason,
@@ -437,6 +540,53 @@ def _resolve_plugin_hints_motion_payload_with_reason(
         "axes": validated_axes,
         "summary": summary,
     }, reason
+
+
+def _extract_ag99live_motion_effect_arguments(view: Any) -> tuple[dict[str, Any] | None, str]:
+    effect_calls = _extract_effect_calls_from_view(view)
+    if not effect_calls:
+        return None, "effect_calls_missing"
+
+    for raw_call in effect_calls:
+        call = _thaw_snapshot_value(raw_call)
+        name = _effect_call_get(call, "name")
+        if str(name or "").strip() != AG99LIVE_MOTION_EFFECT_NAME:
+            continue
+        arguments = _effect_call_get(call, "arguments")
+        arguments = _thaw_snapshot_value(arguments)
+        if isinstance(arguments, Mapping):
+            return {
+                str(key): _thaw_snapshot_value(value)
+                for key, value in arguments.items()
+            }, "persona_effect"
+        return None, "persona_effect_arguments_invalid"
+
+    return None, "ag99live_motion_effect_missing"
+
+
+def _extract_effect_calls_from_view(view: Any) -> list[Any]:
+    raw_calls = getattr(view, "effect_calls", None)
+    if raw_calls is None:
+        metadata = getattr(view, "metadata", None)
+        if isinstance(metadata, Mapping):
+            raw_calls = metadata.get("effect_calls")
+        elif callable(getattr(metadata, "get", None)):
+            raw_calls = metadata.get("effect_calls")
+    if raw_calls is None:
+        result = getattr(view, "result", None)
+        if result is not None:
+            raw_calls = getattr(result, "effect_calls", None)
+
+    thawed = _thaw_snapshot_value(raw_calls)
+    if isinstance(thawed, list):
+        return thawed
+    return []
+
+
+def _effect_call_get(call: Any, key: str) -> Any:
+    if isinstance(call, Mapping):
+        return call.get(key)
+    return getattr(call, key, None)
 
 
 def _validate_motion_resource_id(
@@ -689,22 +839,24 @@ def _build_motion_capability_payload(runtime_state: Any) -> dict[str, Any]:
             if resource_candidates:
                 capability_payload["resource_candidates"] = resource_candidates
 
-        capability_payload["plugin_hints_format"] = _build_plugin_hints_motion_format(
-            profile_payload,
-            include_resource_id=bool(capability_payload.get("resource_candidates")),
+        capability_payload["effect_arguments_example"] = (
+            _build_motion_effect_arguments_example(
+                profile_payload,
+                include_resource_id=bool(capability_payload.get("resource_candidates")),
+            )
         )
 
     return capability_payload
 
 
 def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> str:
-    plugin_hints_format = capability_payload.get("plugin_hints_format")
+    effect_arguments_example = capability_payload.get("effect_arguments_example")
     format_json = "{}"
-    if isinstance(plugin_hints_format, dict) and plugin_hints_format:
+    if isinstance(effect_arguments_example, dict) and effect_arguments_example:
         import json
 
         format_json = json.dumps(
-            {"plugin_hints": plugin_hints_format},
+            effect_arguments_example,
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -801,7 +953,8 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
 
     return (
         "AG99live Motion 负责把本轮回复语义转成可执行动作。"
-        "请只在 JSON 的 plugin_hints.ag99live_motion 中输出结果，不要把动作写进普通文本、immediate_spoken_reply 或 core_task_spec。"
+        "你可以使用 ag99live.motion Persona Effect；动作内容只写入该 effect 的 arguments。"
+        "不要把动作写进普通文本、spoken_reply、immediate_spoken_reply 或 core_task_spec，也不要输出 plugin_hints 外壳。"
         f"{allowed_fields_text}"
         "intent_tags 用 2 到 6 个开放关键词概括本轮语气、姿态和场景，不要输出 emotion_label。"
         f"{resource_field_text}"
@@ -819,7 +972,7 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     )
 
 
-def _build_plugin_hints_motion_format(
+def _build_motion_effect_arguments_example(
     profile_payload: dict[str, Any],
     *,
     include_resource_id: bool,
@@ -844,7 +997,7 @@ def _build_plugin_hints_motion_format(
     }
     if include_resource_id:
         payload["resource_id"] = "可选资源id"
-    return {"ag99live_motion": payload}
+    return payload
 
 
 def _build_prompt_fallback_pose_candidates(
@@ -1363,14 +1516,14 @@ async def _schedule_motion_from_interaction_result(
     identity = _resolve_frontend_identity_snapshot(event, bundle.turn_coordinator)
     reply_plan = _resolve_interaction_reply_plan_snapshot(event, view)
 
-    plugin_hints_payload, plugin_hints_reason = _resolve_plugin_hints_motion_payload_with_reason(
+    motion_payload, motion_reason = _resolve_persona_effect_motion_payload_with_reason(
         event, bundle.runtime_state, view=view
     )
-    _log_plugin_hints_motion_resolution(
+    _log_persona_effect_motion_resolution(
         event,
         phase=phase,
-        payload=plugin_hints_payload,
-        reason=plugin_hints_reason,
+        payload=motion_payload,
+        reason=motion_reason,
         view=view,
     )
 
@@ -1381,11 +1534,11 @@ async def _schedule_motion_from_interaction_result(
         reply_plan=reply_plan,
     )
 
-    if plugin_hints_payload is not None and policy.should_schedule:
+    if motion_payload is not None and policy.should_schedule:
         _call_event_method(event, "set_extra", "ag99live_split_motion_scheduled", True)
         return _MotionScheduleAttempt(
             phase=phase,
-            source="plugin_hints",
+            source="persona_effect",
             scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
             event_frontend_turn_id=identity.event_frontend_turn_id,
             active_frontend_turn_id=identity.active_frontend_turn_id,
@@ -1396,10 +1549,10 @@ async def _schedule_motion_from_interaction_result(
             reply_plan_source=reply_plan.source if reply_plan is not None else None,
             motion_generation_mode=motion_generation_mode,
             scheduled=True,
-            reason="plugin_hints_motion_client_object",
+            reason="persona_effect_motion_client_object",
             assistant_text=assistant_text,
-            plugin_hints_motion_payload=plugin_hints_payload,
-            plugin_hints_resolution_reason=plugin_hints_reason,
+            motion_payload=motion_payload,
+            motion_resolution_reason=motion_reason,
         )
 
     if not assistant_text:
@@ -1418,7 +1571,7 @@ async def _schedule_motion_from_interaction_result(
             scheduled=False,
             reason="assistant_text_empty",
             assistant_text=assistant_text,
-            plugin_hints_resolution_reason=plugin_hints_reason,
+            motion_resolution_reason=motion_reason,
         )
 
     if not policy.should_schedule or policy.source is None:
@@ -1437,12 +1590,12 @@ async def _schedule_motion_from_interaction_result(
             scheduled=False,
             reason=policy.reason,
             assistant_text=assistant_text,
-            plugin_hints_resolution_reason=plugin_hints_reason,
+            motion_resolution_reason=motion_reason,
         )
 
-    if policy.should_schedule and plugin_hints_payload is None:
+    if policy.should_schedule and motion_payload is None:
         missing_reason = _append_resolution_reason(
-            plugin_hints_reason,
+            motion_reason,
             "self_reply_motion_missing"
             if phase == "immediate"
             and reply_plan is not None
@@ -1464,7 +1617,7 @@ async def _schedule_motion_from_interaction_result(
             scheduled=False,
             reason="motion_payload_missing",
             assistant_text=assistant_text,
-            plugin_hints_resolution_reason=missing_reason,
+            motion_resolution_reason=missing_reason,
         )
 
     return _MotionScheduleAttempt(
@@ -1482,8 +1635,44 @@ async def _schedule_motion_from_interaction_result(
         scheduled=False,
         reason=policy.reason,
         assistant_text=assistant_text,
-        plugin_hints_resolution_reason=plugin_hints_reason,
+        motion_resolution_reason=motion_reason,
     )
+
+
+def _log_persona_effect_motion_resolution(
+    event: Any,
+    *,
+    phase: str,
+    payload: dict[str, Any] | None,
+    reason: str,
+    view: Any = None,
+) -> None:
+    effect_names = []
+    for raw_call in _extract_effect_calls_from_view(view):
+        call = _thaw_snapshot_value(raw_call)
+        name = str(_effect_call_get(call, "name") or "").strip()
+        if name:
+            effect_names.append(name)
+
+    motion_axes_keys: list[str] = []
+    if isinstance(payload, dict):
+        axes = payload.get("axes")
+        if isinstance(axes, dict):
+            motion_axes_keys = sorted(
+                str(key).strip()
+                for key in axes.keys()
+                if str(key).strip()
+            )
+
+    logger.info(
+        "WIRING persona_effect_motion phase=%s payload_present=%s reason=%s effect_names=%s motion_axes=%s",
+        phase or "",
+        payload is not None,
+        reason,
+        ",".join(sorted(effect_names)),
+        ",".join(motion_axes_keys),
+    )
+
 
 def _log_plugin_hints_motion_resolution(
     event: Any,
@@ -1540,6 +1729,19 @@ def _thaw_plugin_hints_value(value: Any) -> Any:
         return [_thaw_plugin_hints_value(item) for item in value]
     if isinstance(value, list):
         return [_thaw_plugin_hints_value(item) for item in value]
+    return value
+
+
+def _thaw_snapshot_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _thaw_snapshot_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, tuple):
+        return [_thaw_snapshot_value(item) for item in value]
+    if isinstance(value, list):
+        return [_thaw_snapshot_value(item) for item in value]
     return value
 
 
