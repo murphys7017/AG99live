@@ -1083,7 +1083,7 @@ def test_fallback_pose_candidates_use_expression_dominant_parameter_ids(
     assert candidates[0]["emotion_bias"] == ["question", "confused"]
     assert candidates[0]["recommended_scenarios"] == ["短促疑问", "反问"]
     assert candidates[0]["axes"] == {"eye_open_left": 50.0}
-    assert candidates[-1]["id"] == "neutral"
+    assert all(candidate["id"] != "neutral" for candidate in candidates)
 
 
 def test_fallback_pose_candidates_exclude_neutral_for_skeleton_repair(

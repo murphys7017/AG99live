@@ -30,7 +30,6 @@ from ..motion.resource_catalog import (
     validate_motion_resource_id,
 )
 from ..motion.fallback_pose import (
-    DEFAULT_FALLBACK_POSE_ID,
     repair_motion_axes_with_fallback_pose,
     build_fallback_pose_candidates,
     resolve_fallback_pose,
@@ -418,7 +417,7 @@ def _resolve_plugin_hints_motion_payload_with_reason(
         fallback_pose_id=fallback_pose_id,
         fallback_reasons=fallback_decision.reasons,
         fallback_score=fallback_decision.score,
-        fallback_used=fallback_decision.used_default_neutral or not bool(axes),
+        fallback_used=fallback_decision.fallback_missing or not bool(axes),
         matched_candidate_id=fallback_decision.matched_candidate_id,
         repair_added_axes=repair_added_axes,
         repair_replaced_axes=repair_replaced_axes,
@@ -958,9 +957,6 @@ def _is_prompt_fallback_pose_candidate(item: Any) -> bool:
         return False
     pose_id = str(item.get("id") or "").strip()
     if not pose_id:
-        return False
-    source = str(item.get("source") or "").strip()
-    if pose_id == DEFAULT_FALLBACK_POSE_ID and source == "semantic_axis_profile":
         return False
     axes = item.get("axes")
     return isinstance(axes, dict) and bool(axes)

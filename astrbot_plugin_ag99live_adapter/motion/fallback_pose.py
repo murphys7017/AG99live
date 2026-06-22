@@ -4,10 +4,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from ..motion.motion_intent import _incr_repair_stat
 from ..prompts.semantic_axis_prompt import profile_prompt_axes
 
-DEFAULT_FALLBACK_POSE_ID = "neutral"
 _REPAIR_SKELETON_GROUPS = ("head", "body", "gaze")
 _REPAIR_MAX_AXES_PER_GROUP = 2
 _NON_EMOTIVE_EXPRESSION_TOKENS = {
@@ -27,10 +25,6 @@ class FallbackPoseResolution:
     id: str
     source: str
     axes: dict[str, float]
-
-    @property
-    def is_default_neutral(self) -> bool:
-        return self.id == DEFAULT_FALLBACK_POSE_ID and self.source == "semantic_axis_profile"
 
 
 def build_fallback_pose_candidates(
@@ -91,10 +85,6 @@ def build_fallback_pose_candidates(
             require_non_neutral_skeleton=require_non_neutral_skeleton,
         )
 
-    if not require_non_neutral_skeleton:
-        for candidate in _build_neutral_fallback_candidates(semantic_profile):
-            _append_unique_candidate(candidates, seen_ids, candidate)
-
     if limit is not None:
         return candidates[: max(0, int(limit))]
     return candidates
@@ -124,8 +114,6 @@ def resolve_fallback_pose(
     require_non_neutral_skeleton: bool = False,
 ) -> FallbackPoseResolution | None:
     normalized_id = _normalize_pose_id(fallback_pose_id)
-    if normalized_id:
-        _incr_repair_stat("fallback_resolve_requested")
     if not normalized_id:
         return None
     for candidate in build_fallback_pose_candidates(
@@ -203,17 +191,6 @@ def repair_motion_axes_with_fallback_pose(
             group_added += 1
 
     return repaired, added, replaced
-
-
-def build_default_neutral_pose_axes(semantic_profile: dict[str, Any]) -> dict[str, float]:
-    _incr_repair_stat("fallback_used_neutral")
-    axes: dict[str, float] = {}
-    for axis in profile_prompt_axes(semantic_profile):
-        axis_id = str(axis.get("id") or "").strip()
-        if not axis_id:
-            continue
-        axes[axis_id] = _coerce_axis_value(axis.get("neutral", 50), axis)
-    return axes
 
 
 def _build_user_tuning_candidates(
@@ -548,21 +525,6 @@ def _motion_component_to_axis_value(
         return _coerce_axis_value(axis.get("neutral", 50), axis)
     output_value = max(candidates, key=lambda value: abs(value - baseline))
     return _map_output_value_to_axis_value(output_value, axis=axis, binding=binding)
-
-
-def _build_neutral_fallback_candidates(semantic_profile: dict[str, Any]) -> list[dict[str, Any]]:
-    neutral_axes = build_default_neutral_pose_axes(semantic_profile)
-    if not neutral_axes:
-        return []
-    return [
-        {
-            "id": DEFAULT_FALLBACK_POSE_ID,
-            "label": "neutral",
-            "emotion_label": "neutral",
-            "source": "semantic_axis_profile",
-            "axes": neutral_axes,
-        }
-    ]
 
 
 def _append_unique_candidate(

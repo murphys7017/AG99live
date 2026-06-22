@@ -34,7 +34,7 @@ class MotionFallbackDecision:
     fallback_pose_id: str
     matched_candidate_id: str
     score: float
-    used_default_neutral: bool
+    fallback_missing: bool
     reasons: list[str]
 
 
@@ -68,17 +68,14 @@ def record_realtime_motion_generated() -> None:
     _incr_motion_outcome_stat("generated_total")
 
 
-def record_realtime_motion_fallback(*, neutral: bool = False) -> None:
+def record_realtime_motion_fallback() -> None:
     _incr_motion_outcome_stat("fallback_total")
-    if neutral:
-        _incr_motion_outcome_stat("neutral_fallback_total")
 
 
 def get_repair_stats() -> dict[str, Any]:
     repair_event_total = sum(_repair_stats.values())
     attempt_total = _motion_outcome_stats.get("attempt_total", 0)
     fallback_total = _motion_outcome_stats.get("fallback_total", 0)
-    neutral_fallback_total = _motion_outcome_stats.get("neutral_fallback_total", 0)
     return {
         "total": repair_event_total,
         "repair_event_total": repair_event_total,
@@ -87,10 +84,8 @@ def get_repair_stats() -> dict[str, Any]:
         "attempt_total": attempt_total,
         "generated_total": _motion_outcome_stats.get("generated_total", 0),
         "fallback_total": fallback_total,
-        "neutral_fallback_total": neutral_fallback_total,
         "stats_revision": _stats_revision,
         "fallback_rate": round(fallback_total / max(1, attempt_total), 3),
-        "neutral_fallback_rate": round(neutral_fallback_total / max(1, attempt_total), 3),
     }
 
 
@@ -115,12 +110,11 @@ def maybe_log_repair_stats() -> None:
     _last_repair_stats_log_at = now
     _last_repair_stats_log_total = revision
     LOGGER.info(
-        "Motion intent stats: attempts=%s generated=%s fallback=%s fallback_rate=%s neutral_fallback_rate=%s repair_events=%s repair_counts=%s",
+        "Motion intent stats: attempts=%s generated=%s fallback=%s fallback_rate=%s repair_events=%s repair_counts=%s",
         stats.get("attempt_total"),
         stats.get("generated_total"),
         stats.get("fallback_total"),
         stats.get("fallback_rate"),
-        stats.get("neutral_fallback_rate"),
         stats.get("repair_event_total"),
         stats.get("counts"),
     )
@@ -364,10 +358,10 @@ def derive_motion_fallback_decision(
 ) -> MotionFallbackDecision:
     if not candidates:
         return MotionFallbackDecision(
-            fallback_pose_id="neutral",
+            fallback_pose_id="",
             matched_candidate_id="",
             score=0.0,
-            used_default_neutral=True,
+            fallback_missing=True,
             reasons=["candidate_pool_empty"],
         )
 
@@ -384,7 +378,7 @@ def derive_motion_fallback_decision(
     }
     normalized_resource_id = normalize_motion_resource_id(resource_id).lower()
 
-    best_candidate_id = "neutral"
+    best_candidate_id = ""
     best_score = float("-inf")
     best_reasons: list[str] = []
     for candidate in candidates:
@@ -441,14 +435,14 @@ def derive_motion_fallback_decision(
             fallback_pose_id=best_candidate_id,
             matched_candidate_id=best_candidate_id,
             score=round(best_score, 4),
-            used_default_neutral=False,
+            fallback_missing=False,
             reasons=best_reasons or ["candidate_selected"],
         )
     return MotionFallbackDecision(
-        fallback_pose_id="neutral",
+        fallback_pose_id="",
         matched_candidate_id="",
         score=0.0,
-        used_default_neutral=True,
+        fallback_missing=True,
         reasons=["score_below_threshold"],
     )
 

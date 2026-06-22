@@ -234,7 +234,7 @@ def _repair_inline_motion_payload_with_fallback(
     summary["axis_count"] = len(floored_axes)
     summary["fallback_pose_id"] = fallback_pose_id
     summary["fallback_score"] = fallback_decision.score
-    summary["fallback_used"] = fallback_decision.used_default_neutral
+    summary["fallback_used"] = fallback_decision.fallback_missing
     summary["fallback_reasons"] = fallback_decision.reasons
     summary["skeleton_repair_added_axes"] = added_axes
     summary["skeleton_repair_replaced_axes"] = replaced_axes
@@ -337,7 +337,7 @@ def _build_inline_fallback_motion_payload(
             "axis_count": len(axes),
             "intent_tag_count": len(intent_tags),
             "fallback_pose_id": fallback_pose_id,
-            "fallback_used": fallback_decision.used_default_neutral,
+            "fallback_used": fallback_decision.fallback_missing,
             "fallback_score": fallback_decision.score,
             "fallback_reasons": fallback_decision.reasons,
             "fallback_reason": str(fallback_reason or "").strip(),
