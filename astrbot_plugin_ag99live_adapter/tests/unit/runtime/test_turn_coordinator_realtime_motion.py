@@ -869,7 +869,7 @@ def test_emit_message_chain_reuses_platform_visible_message_id_for_segment_outpu
                         "type": "ag99live.motion_payload",
                         "motion_payload": _build_valid_motion_intent(),
                         "mode": "preview",
-                        "source": "plugin_hints",
+                        "source": "persona_effect",
                     }
                 ],
             },
@@ -927,7 +927,7 @@ def test_emit_message_chain_dedupes_motion_client_object_for_segmented_output(
         "type": "ag99live.motion_payload",
         "motion_payload": _build_valid_motion_intent(),
         "mode": "preview",
-        "source": "plugin_hints",
+        "source": "persona_effect",
     }
 
     async def emit_segment(message_id: str) -> None:

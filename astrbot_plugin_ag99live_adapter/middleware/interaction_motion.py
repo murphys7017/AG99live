@@ -16,26 +16,35 @@ except ImportError:  # pragma: no cover - older AstrBot cores do not expose it.
     PersonaEffectSpec = None  # type: ignore[assignment]
 from astrbot.core.prompt import PromptExtension
 
+from .motion_payload import (
+    are_motion_axes_all_neutralish as _payload_are_motion_axes_all_neutralish,
+    build_motion_visibility_summary as _payload_build_motion_visibility_summary,
+    build_prompt_axis_lookup as _payload_build_prompt_axis_lookup,
+    build_prompt_axis_lookup_from_axes as _payload_build_prompt_axis_lookup_from_axes,
+    coerce_plugin_hint_axis_value as _payload_coerce_plugin_hint_axis_value,
+    describe_fallback_pose_axes as _payload_describe_fallback_pose_axes,
+    describe_fallback_pose_axis_value as _payload_describe_fallback_pose_axis_value,
+    is_axis_soft_range_neutral as _payload_is_axis_soft_range_neutral,
+    normalize_duration_hint_ms as _payload_normalize_duration_hint_ms,
+    normalize_motion_arguments_payload as _payload_normalize_motion_arguments_payload,
+    normalize_plugin_hint_axes as _payload_normalize_plugin_hint_axes,
+    resolve_axis_descriptor_threshold as _payload_resolve_axis_descriptor_threshold,
+    resolve_axis_neutral_delta as _payload_resolve_axis_neutral_delta,
+    resolve_axis_neutral_value as _payload_resolve_axis_neutral_value,
+    resolve_axis_soft_range as _payload_resolve_axis_soft_range,
+    resolve_axis_value_range as _payload_resolve_axis_value_range,
+    validate_motion_resource_id_for_payload as _payload_validate_motion_resource_id,
+)
 from ..motion.output_sanitizer import sanitize_assistant_output_text
 from ..motion.motion_intent import (
-    _apply_expressive_floor_v2,
     DEFAULT_MOTION_INTENT_DURATION_MS,
-    MOTION_INTENT_V3_SCHEMA_VERSION,
-    derive_motion_emotion_label,
-    derive_motion_fallback_decision,
-    describe_motion_axes_for_fallback,
-    normalize_motion_intent_tags,
-    normalize_motion_resource_id,
     resolve_selected_semantic_axis_profile,
 )
 from ..motion.resource_catalog import (
     build_motion_resource_candidates,
-    validate_motion_resource_id,
 )
 from ..motion.fallback_pose import (
-    repair_motion_axes_with_fallback_pose,
     build_fallback_pose_candidates,
-    resolve_fallback_pose,
 )
 from ..prompts.motion_selector import (
     resolve_motion_prompt_instruction,
@@ -43,11 +52,6 @@ from ..prompts.motion_selector import (
 from ..prompts.semantic_axis_prompt import (
     format_profile_axis_prompt_line,
     profile_prompt_axes,
-)
-from .motion_legacy_plugin_hints import (
-    log_plugin_hints_motion_resolution as _legacy_log_plugin_hints_motion_resolution,
-    resolve_plugin_hints_motion_payload as _legacy_resolve_plugin_hints_motion_payload,
-    resolve_plugin_hints_motion_payload_with_reason as _legacy_resolve_plugin_hints_motion_payload_with_reason,
 )
 
 AG99LIVE_PLUGIN_ID = "astrbot_plugin_ag99live_adapter"
@@ -286,45 +290,6 @@ def _resolve_motion_runtime_bundle(event: Any) -> _MotionRuntimeBundle | None:
     )
 
 
-def _resolve_plugin_hints_motion_payload(
-    event: Any,
-    runtime_state: Any,
-    *,
-    view: Any = None,
-) -> dict[str, Any] | None:
-    """Legacy plugin_hints parser kept outside the active middleware-first path.
-
-    The current result contributor schedules motion only from the
-    ``ag99live.motion`` Persona Effect. This helper remains as a compatibility
-    shim for historical diagnostics and targeted legacy tests.
-    """
-    return _legacy_resolve_plugin_hints_motion_payload(
-        event,
-        runtime_state,
-        view=view,
-        normalize_motion_arguments_payload=_normalize_motion_arguments_payload,
-        call_event_method=_call_event_method,
-        append_resolution_reason=_append_resolution_reason,
-    )
-
-
-def _resolve_plugin_hints_motion_payload_with_reason(
-    event: Any,
-    runtime_state: Any,
-    *,
-    view: Any = None,
-) -> tuple[dict[str, Any] | None, str]:
-    """Resolve historical ``plugin_hints.ag99live_motion`` payloads only."""
-    return _legacy_resolve_plugin_hints_motion_payload_with_reason(
-        event,
-        runtime_state,
-        view=view,
-        normalize_motion_arguments_payload=_normalize_motion_arguments_payload,
-        call_event_method=_call_event_method,
-        append_resolution_reason=_append_resolution_reason,
-    )
-
-
 def _resolve_persona_effect_motion_payload(
     event: Any,
     runtime_state: Any,
@@ -361,183 +326,13 @@ def _normalize_motion_arguments_payload(
     *,
     base_reason: str,
 ) -> tuple[dict[str, Any] | None, str]:
-    motion_hint = dict(raw_motion_arguments)
-    forbidden_fields = [
-        key
-        for key in (
-            "choice",
-            "mode",
-            "motion_id",
-            "catalog_motion",
-            "motion3",
-            "exp3",
-            "kind",
-            "emotion",
-            "emotion_label",
-            "fallback_pose_id",
-            "summary",
-        )
-        if key in motion_hint
-    ]
-    for key in forbidden_fields:
-        motion_hint.pop(key, None)
-
-    try:
-        semantic_profile = resolve_selected_semantic_axis_profile(
-            runtime_state=runtime_state
-        )
-    except Exception as exc:  # noqa: BLE001
-        return None, f"semantic_profile_unresolved:{exc}"
-
-    profile_id = str(semantic_profile.get("profile_id") or "").strip()
-    if not profile_id:
-        return None, "profile_id_empty"
-
-    intent_tags = normalize_motion_intent_tags(motion_hint.get("intent_tags"))
-    if not intent_tags:
-        return None, _append_resolution_reason(base_reason, "intent_tags_empty")
-    emotion_label = derive_motion_emotion_label(intent_tags)
-    resource_id = normalize_motion_resource_id(motion_hint.get("resource_id"))
-    axes = motion_hint.get("axes")
-    validated_axes = None
-    expressive_floor_emotion = emotion_label
-    apply_expressive_floor = True
-    repair_added_axes: list[str] = []
-    repair_replaced_axes: list[str] = []
-    validated_axes, rejected_axes = _normalize_plugin_hint_axes(
-        axes,
-        semantic_profile,
+    return _payload_normalize_motion_arguments_payload(
+        raw_motion_arguments,
+        runtime_state,
+        base_reason=base_reason,
+        append_resolution_reason=_append_resolution_reason,
+        sanitize_reason_fragment=_sanitize_reason_fragment,
     )
-    reason = base_reason
-    if forbidden_fields:
-        reason = _append_resolution_reason(
-            reason,
-            "stripped_forbidden_fields:" + ",".join(forbidden_fields),
-        )
-    if rejected_axes:
-        reason = _append_resolution_reason(
-            reason,
-            "rejected_axes:" + ",".join(rejected_axes),
-        )
-    if validated_axes and _are_motion_axes_all_neutralish(validated_axes, semantic_profile):
-        validated_axes = None
-        reason = _append_resolution_reason(reason, "axes_all_neutral")
-    if not validated_axes:
-        reason = _append_resolution_reason(reason, "axes_empty_or_invalid")
-
-    fallback_candidates = build_fallback_pose_candidates(
-        runtime_state=runtime_state,
-        semantic_profile=semantic_profile,
-        limit=None,
-        require_non_neutral_skeleton=True,
-    )
-    resource_candidates = build_motion_resource_candidates(
-        runtime_state=runtime_state,
-    )
-    resource_id, resource_reason = _validate_motion_resource_id(
-        resource_id,
-        candidates=resource_candidates,
-    )
-    if resource_reason:
-        reason = _append_resolution_reason(reason, resource_reason)
-
-    fallback_decision = derive_motion_fallback_decision(
-        candidates=fallback_candidates,
-        intent_tags=intent_tags,
-        resource_id=resource_id,
-        axes=validated_axes if isinstance(validated_axes, dict) else axes,
-        describe_axes=lambda value: describe_motion_axes_for_fallback(
-            value,
-            semantic_profile=semantic_profile,
-        ),
-    )
-    fallback_pose_id = fallback_decision.fallback_pose_id
-
-    if not validated_axes:
-        fallback_resolution = resolve_fallback_pose(
-            runtime_state=runtime_state,
-            semantic_profile=semantic_profile,
-            fallback_pose_id=fallback_pose_id,
-            require_non_neutral_skeleton=True,
-        )
-        if fallback_resolution is not None:
-            validated_axes = fallback_resolution.axes
-            reason = _append_resolution_reason(reason, f"fallback_pose:{fallback_pose_id}")
-        else:
-            reason = _append_resolution_reason(
-                reason,
-                "fallback_pose_unavailable",
-            )
-            return None, reason
-    else:
-        fallback_resolution = resolve_fallback_pose(
-            runtime_state=runtime_state,
-            semantic_profile=semantic_profile,
-            fallback_pose_id=fallback_pose_id,
-            require_non_neutral_skeleton=True,
-        )
-        if fallback_resolution is not None:
-            (
-                validated_axes,
-                repair_added_axes,
-                repair_replaced_axes,
-            ) = repair_motion_axes_with_fallback_pose(
-                axes=validated_axes,
-                semantic_profile=semantic_profile,
-                fallback_axes=fallback_resolution.axes,
-            )
-            if repair_added_axes:
-                reason = _append_resolution_reason(
-                    reason,
-                    f"skeleton_repair_added:{','.join(repair_added_axes)}",
-                )
-            if repair_replaced_axes:
-                reason = _append_resolution_reason(
-                    reason,
-                    f"skeleton_repair_replaced:{','.join(repair_replaced_axes)}",
-                )
-        else:
-            fallback_pose_id = ""
-
-    if not validated_axes:
-        return None, reason
-
-    if apply_expressive_floor:
-        validated_axes = _apply_expressive_floor_v2(
-            axes=validated_axes,
-            emotion=expressive_floor_emotion,
-            semantic_profile=semantic_profile,
-        )
-
-    duration_hint_ms = _normalize_duration_hint_ms(motion_hint.get("duration_hint_ms"))
-    summary = _build_motion_visibility_summary(
-        axes=validated_axes,
-        semantic_profile=semantic_profile,
-        intent_tags=intent_tags,
-        resource_id=resource_id,
-        fallback_pose_id=fallback_pose_id,
-        fallback_reasons=fallback_decision.reasons,
-        fallback_score=fallback_decision.score,
-        fallback_used=fallback_decision.fallback_missing or not bool(axes),
-        matched_candidate_id=fallback_decision.matched_candidate_id,
-        repair_added_axes=repair_added_axes,
-        repair_replaced_axes=repair_replaced_axes,
-    )
-
-    return {
-        "schema_version": MOTION_INTENT_V3_SCHEMA_VERSION,
-        "profile_id": profile_id,
-        "profile_revision": int(semantic_profile.get("revision") or 0),
-        "model_id": str(semantic_profile.get("model_id") or "").strip(),
-        "mode": "expressive",
-        "intent_tags": intent_tags,
-        "emotion_label": emotion_label,
-        "duration_hint_ms": duration_hint_ms,
-        "resource_id": resource_id,
-        "fallback_pose_id": fallback_pose_id,
-        "axes": validated_axes,
-        "summary": summary,
-    }, reason
 
 
 def _extract_ag99live_motion_effect_arguments(view: Any) -> tuple[dict[str, Any] | None, str]:
@@ -592,83 +387,29 @@ def _validate_motion_resource_id(
     *,
     candidates: list[dict[str, Any]],
 ) -> tuple[str, str]:
-    normalized = normalize_motion_resource_id(resource_id)
-    if not normalized:
-        return "", ""
-    if validate_motion_resource_id(normalized, candidates=candidates):
-        return normalized, "resource_id_validated"
-    return "", f"resource_id_rejected:{_sanitize_reason_fragment(normalized)}"
+    return _payload_validate_motion_resource_id(
+        resource_id,
+        candidates=candidates,
+        sanitize_reason_fragment=_sanitize_reason_fragment,
+    )
 
 
 def _are_motion_axes_all_neutralish(
     axes: dict[str, float],
     semantic_profile: dict[str, Any],
 ) -> bool:
-    if not axes:
-        return False
-    axis_by_id = _build_prompt_axis_lookup(semantic_profile)
-    checked = 0
-    for axis_id, value in axes.items():
-        axis = axis_by_id.get(str(axis_id or "").strip())
-        if axis is None:
-            continue
-        checked += 1
-        if not _is_axis_soft_range_neutral(float(value), axis):
-            return False
-    return checked > 0
+    return _payload_are_motion_axes_all_neutralish(axes, semantic_profile)
 
 
 def _normalize_plugin_hint_axes(
     axes: Any,
     semantic_profile: dict[str, Any],
 ) -> tuple[dict[str, float] | None, list[str]]:
-    if not isinstance(axes, dict) or not axes:
-        return None, []
-
-    prompt_axes = profile_prompt_axes(semantic_profile)
-    axis_by_id = {
-        str(axis.get("id") or "").strip(): axis
-        for axis in prompt_axes
-        if str(axis.get("id") or "").strip()
-    }
-    if not axis_by_id:
-        return None, []
-
-    normalized_axes: dict[str, float] = {}
-    rejected_axes: list[str] = []
-    for axis_id_raw, axis_value in axes.items():
-        axis_id = str(axis_id_raw or "").strip()
-        if not axis_id:
-            continue
-        axis = axis_by_id.get(axis_id)
-        if axis is None:
-            rejected_axes.append(axis_id)
-            continue
-        if isinstance(axis_value, dict):
-            rejected_axes.append(axis_id)
-            continue
-        if isinstance(axis_value, bool) or not isinstance(axis_value, (int, float)):
-            rejected_axes.append(axis_id)
-            continue
-        number = float(axis_value)
-        if not float("-inf") < number < float("inf"):
-            rejected_axes.append(axis_id)
-            continue
-
-        value = _coerce_plugin_hint_axis_value(number, axis)
-        normalized_axes[axis_id] = value
-
-    if not normalized_axes:
-        return None, rejected_axes
-
-    return normalized_axes, rejected_axes
+    return _payload_normalize_plugin_hint_axes(axes, semantic_profile)
 
 
 def _coerce_plugin_hint_axis_value(raw_value: float, axis: dict[str, Any]) -> float:
-    min_value, max_value = _resolve_axis_value_range(axis)
-
-    clamped = max(min_value, min(max_value, raw_value))
-    return round(clamped, 4)
+    return _payload_coerce_plugin_hint_axis_value(raw_value, axis)
 
 
 def _build_motion_visibility_summary(
@@ -685,116 +426,31 @@ def _build_motion_visibility_summary(
     repair_added_axes: list[str] | None = None,
     repair_replaced_axes: list[str] | None = None,
 ) -> dict[str, Any]:
-    axis_by_id = _build_prompt_axis_lookup(semantic_profile)
-    active_groups: set[str] = set()
-    max_delta_from_neutral = 0.0
-    neutralish_axes: list[str] = []
-    expressive_axes: list[str] = []
-    outside_soft_range_axes: list[str] = []
-
-    for axis_id, raw_value in axes.items():
-        axis = axis_by_id.get(str(axis_id))
-        if axis is None:
-            continue
-        try:
-            value = float(raw_value)
-        except (TypeError, ValueError):
-            continue
-        delta = abs(_resolve_axis_neutral_delta(value, axis))
-        max_delta_from_neutral = max(max_delta_from_neutral, delta)
-        group = str(axis.get("semantic_group") or "").strip().lower()
-        if group:
-            active_groups.add(group)
-        if _is_axis_soft_range_neutral(value, axis):
-            neutralish_axes.append(str(axis_id))
-        else:
-            expressive_axes.append(str(axis_id))
-            outside_soft_range_axes.append(str(axis_id))
-
-    skeleton_groups = ("head", "body", "gaze")
-    covered_skeleton_groups = [group for group in skeleton_groups if group in active_groups]
-    missing_skeleton_groups = [group for group in skeleton_groups if group not in active_groups]
-
-    return {
-        "axis_count": len(axes),
-        "intent_tags": list(intent_tags or []),
-        "intent_tag_count": len(intent_tags or []),
-        "resource_id": resource_id,
-        "fallback_pose_id": fallback_pose_id,
-        "fallback_used": fallback_used,
-        "fallback_reasons": list(fallback_reasons or []),
-        "fallback_score": round(float(fallback_score or 0.0), 4),
-        "matched_candidate_id": matched_candidate_id,
-        "active_groups": sorted(active_groups),
-        "skeleton_groups": covered_skeleton_groups,
-        "skeleton_groups_present": covered_skeleton_groups,
-        "missing_skeleton_groups": missing_skeleton_groups,
-        "max_delta_from_neutral": round(max_delta_from_neutral, 4),
-        "neutralish_axis_count": len(neutralish_axes),
-        "expressive_axis_count": len(expressive_axes),
-        "neutralish_axes": neutralish_axes[:12],
-        "expressive_axes": expressive_axes[:12],
-        "outside_soft_range_axes": outside_soft_range_axes[:12],
-        "pose_descriptors": _describe_fallback_pose_axes(axes, axis_by_id=axis_by_id)[:8],
-        "skeleton_repair_added_axes": list(repair_added_axes or []),
-        "skeleton_repair_replaced_axes": list(repair_replaced_axes or []),
-    }
+    return _payload_build_motion_visibility_summary(
+        axes=axes,
+        semantic_profile=semantic_profile,
+        intent_tags=intent_tags,
+        resource_id=resource_id,
+        fallback_pose_id=fallback_pose_id,
+        fallback_reasons=fallback_reasons,
+        fallback_score=fallback_score,
+        fallback_used=fallback_used,
+        matched_candidate_id=matched_candidate_id,
+        repair_added_axes=repair_added_axes,
+        repair_replaced_axes=repair_replaced_axes,
+    )
 
 
 def _is_axis_soft_range_neutral(value: float, axis: dict[str, Any]) -> bool:
-    soft_range = axis.get("soft_range")
-    if isinstance(soft_range, (list, tuple)) and len(soft_range) >= 2:
-        try:
-            return float(soft_range[0]) <= value <= float(soft_range[1])
-        except (TypeError, ValueError):
-            pass
-    try:
-        neutral = float(axis.get("neutral", 50))
-    except (TypeError, ValueError):
-        neutral = 50.0
-    return abs(value - neutral) <= 2.0
-
-
-def _coerce_finite_number(value: Any) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        number = float(value)
-    elif isinstance(value, str):
-        try:
-            number = float(value.strip())
-        except ValueError:
-            return None
-    else:
-        return None
-    if not float("-inf") < number < float("inf"):
-        return None
-    return number
+    return _payload_is_axis_soft_range_neutral(value, axis)
 
 
 def _resolve_axis_value_range(axis: dict[str, Any]) -> tuple[float, float]:
-    value_range = axis.get("value_range")
-    if (
-        isinstance(value_range, list)
-        and len(value_range) == 2
-        and isinstance(value_range[0], (int, float))
-        and isinstance(value_range[1], (int, float))
-        and float(value_range[0]) < float(value_range[1])
-    ):
-        return float(value_range[0]), float(value_range[1])
-    return 0.0, 100.0
+    return _payload_resolve_axis_value_range(axis)
 
 
 def _normalize_duration_hint_ms(value: Any) -> int:
-    if value is None:
-        return DEFAULT_MOTION_INTENT_DURATION_MS
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return DEFAULT_MOTION_INTENT_DURATION_MS
-    if not float("-inf") < number < float("inf"):
-        return DEFAULT_MOTION_INTENT_DURATION_MS
-    return max(320, min(15000, int(round(number))))
+    return _payload_normalize_duration_hint_ms(value)
 
 
 def _build_motion_capability_payload(runtime_state: Any) -> dict[str, Any]:
@@ -1129,23 +785,7 @@ def _describe_fallback_pose_axes(
     *,
     axis_by_id: Mapping[str, dict[str, Any]] | None = None,
 ) -> list[str]:
-    if not isinstance(value, dict):
-        return []
-    descriptors: list[str] = []
-    for axis_id, axis_value in sorted(value.items()):
-        if not isinstance(axis_value, (int, float)) or isinstance(axis_value, bool):
-            continue
-        axis_name = str(axis_id or "").strip()
-        if not axis_name:
-            continue
-        descriptor = _describe_fallback_pose_axis_value(
-            axis_name,
-            float(axis_value),
-            axis=axis_by_id.get(axis_name) if axis_by_id else None,
-        )
-        if descriptor and descriptor not in descriptors:
-            descriptors.append(descriptor)
-    return descriptors
+    return _payload_describe_fallback_pose_axes(value, axis_by_id=axis_by_id)
 
 
 def _describe_fallback_pose_axis_value(
@@ -1154,88 +794,31 @@ def _describe_fallback_pose_axis_value(
     *,
     axis: dict[str, Any] | None = None,
 ) -> str:
-    normalized_axis = axis_id.strip().lower()
-    if not float("-inf") < value < float("inf"):
-        return ""
-    delta = _resolve_axis_neutral_delta(value, axis)
-    threshold = _resolve_axis_descriptor_threshold(axis)
-    if abs(delta) < threshold:
-        return ""
-
-    axis_descriptors = {
-        "head_yaw": ("look_left", "look_right"),
-        "body_yaw": ("body_turn_left", "body_turn_right"),
-        "gaze_yaw": ("gaze_left", "gaze_right"),
-        "eye_gaze_x": ("gaze_left", "gaze_right"),
-        "head_pitch": ("look_down", "look_up"),
-        "body_pitch": ("lean_forward", "lean_back"),
-        "gaze_pitch": ("gaze_down", "gaze_up"),
-        "eye_gaze_y": ("gaze_down", "gaze_up"),
-        "head_roll": ("tilt_left", "tilt_right"),
-        "body_roll": ("body_lean_left", "body_lean_right"),
-        "eye_open_left": ("left_eye_narrow", "left_eye_open"),
-        "eye_open_right": ("right_eye_narrow", "right_eye_open"),
-        "eye_smile_left": ("left_eye_relaxed", "left_eye_smile"),
-        "eye_smile_right": ("right_eye_relaxed", "right_eye_smile"),
-        "mouth_smile": ("mouth_frown", "mouth_smile"),
-        "brow_bias": ("brow_down", "brow_raise"),
-        "mouth_open": ("mouth_closed", "mouth_open"),
-    }
-    negative, positive = axis_descriptors.get(
-        normalized_axis,
-        (f"{normalized_axis}_low", f"{normalized_axis}_high"),
-    )
-    return positive if delta > 0 else negative
+    return _payload_describe_fallback_pose_axis_value(axis_id, value, axis=axis)
 
 
 def _build_prompt_axis_lookup(
     semantic_profile: dict[str, Any] | None,
 ) -> dict[str, dict[str, Any]]:
-    if not isinstance(semantic_profile, dict):
-        return {}
-    return _build_prompt_axis_lookup_from_axes(profile_prompt_axes(semantic_profile))
+    return _payload_build_prompt_axis_lookup(semantic_profile)
 
 
 def _build_prompt_axis_lookup_from_axes(
     prompt_axes: list[dict[str, Any]] | None,
 ) -> dict[str, dict[str, Any]]:
-    if not isinstance(prompt_axes, list):
-        return {}
-    return {
-        str(axis.get("id") or "").strip(): axis
-        for axis in prompt_axes
-        if isinstance(axis, dict) and str(axis.get("id") or "").strip()
-    }
+    return _payload_build_prompt_axis_lookup_from_axes(prompt_axes)
 
 
 def _resolve_axis_soft_range(axis: dict[str, Any] | None) -> tuple[float, float] | None:
-    if not isinstance(axis, dict):
-        return None
-    soft_range = axis.get("soft_range")
-    if (
-        isinstance(soft_range, (list, tuple))
-        and len(soft_range) >= 2
-        and isinstance(soft_range[0], (int, float))
-        and isinstance(soft_range[1], (int, float))
-    ):
-        return float(soft_range[0]), float(soft_range[1])
-    return None
+    return _payload_resolve_axis_soft_range(axis)
 
 
 def _resolve_axis_neutral_delta(value: float, axis: dict[str, Any] | None) -> float:
-    neutral = _resolve_axis_neutral_value(axis or {})
-    return float(value) - neutral
+    return _payload_resolve_axis_neutral_delta(value, axis)
 
 
 def _resolve_axis_descriptor_threshold(axis: dict[str, Any] | None) -> float:
-    soft_range = _resolve_axis_soft_range(axis)
-    if soft_range is not None:
-        soft_min, soft_max = soft_range
-        neutral = _resolve_axis_neutral_value(axis or {})
-        soft_delta = max(abs(soft_max - neutral), abs(neutral - soft_min))
-        if soft_delta > 0:
-            return max(soft_delta * 0.6, 2.0)
-    return 6.0
+    return _payload_resolve_axis_descriptor_threshold(axis)
 
 
 def _normalize_prompt_fallback_metadata_signature(item: dict[str, Any]) -> str:
@@ -1359,12 +942,7 @@ def _resolve_axis_example_value(axis: dict[str, Any], *, index: int) -> float:
 
 
 def _resolve_axis_neutral_value(axis: dict[str, Any]) -> float:
-    neutral = axis.get("neutral")
-    if isinstance(neutral, (int, float)):
-        min_value, max_value = _resolve_axis_value_range(axis)
-        return round(max(min_value, min(max_value, float(neutral))), 4)
-    min_value, max_value = _resolve_axis_value_range(axis)
-    return round((min_value + max_value) / 2.0, 4)
+    return _payload_resolve_axis_neutral_value(axis)
 
 
 def _build_motion_runtime_payload(
@@ -1669,26 +1247,6 @@ def _log_persona_effect_motion_resolution(
         reason,
         ",".join(sorted(effect_names)),
         ",".join(motion_axes_keys),
-    )
-
-
-def _log_plugin_hints_motion_resolution(
-    event: Any,
-    *,
-    phase: str,
-    payload: dict[str, Any] | None,
-    reason: str,
-    view: Any = None,
-) -> None:
-    """Legacy logging helper for historical plugin_hints payload inspection."""
-    _legacy_log_plugin_hints_motion_resolution(
-        event,
-        phase=phase,
-        payload=payload,
-        reason=reason,
-        view=view,
-        logger=logger,
-        call_event_method=_call_event_method,
     )
 
 
