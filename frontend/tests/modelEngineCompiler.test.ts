@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { compileMotionIntent } from "../src/model-engine/compiler/compileMotionIntent.js";
 import { normalizeMotionPayload } from "../src/model-engine/normalize.js";
 import { startNormalizedMotionPayload } from "../src/model-engine/runtime/motionStart.js";
+import { buildSpeechOnlyMotionPayload } from "../src/model-engine/runtime/speechOnlyMotion.js";
 import { listCompileStageRegistrations } from "../src/model-engine/compiler/registry.js";
 import type { ModelSummary, SemanticMotionIntent } from "../src/types/protocol.js";
 import type { SemanticAxisProfile } from "../src/types/semantic-axis-profile.js";
@@ -721,6 +722,29 @@ function testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes(): void {
   );
 }
 
+function testSpeechOnlyPayloadUsesSelectedModelProfile(): void {
+  const profile = buildProfile();
+  const payload = buildSpeechOnlyMotionPayload(
+    buildModelWithVoiceFollowingProfile(profile),
+  );
+
+  assert.ok(payload);
+  assert.equal(payload.kind, "semantic_intent");
+  assert.equal(payload.intent.profile_id, profile.profile_id);
+  assert.equal(payload.intent.profile_revision, profile.revision);
+  assert.equal(payload.intent.model_id, profile.model_id);
+  assert.equal(payload.intent.mode, "idle");
+  assert.equal(payload.intent.emotion_label, "speech");
+  assert.deepEqual(payload.intent.axes, {});
+}
+
+function testSpeechOnlyPayloadRequiresVoiceFollowingProfile(): void {
+  const profile = buildProfile();
+
+  assert.equal(buildSpeechOnlyMotionPayload(buildModel(profile)), null);
+  assert.equal(buildSpeechOnlyMotionPayload(null), null);
+}
+
 function testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight(): void {
   const profile = buildProfile();
   const result = compileMotionIntent(buildIntent({
@@ -920,6 +944,8 @@ function run(): void {
   testCompileSkipsInvalidBindingsAndKeepsUsableParameters();
   testSpeechPoseAppliesForSpeechLinkedIdleIntent();
   testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes();
+  testSpeechOnlyPayloadUsesSelectedModelProfile();
+  testSpeechOnlyPayloadRequiresVoiceFollowingProfile();
   testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight();
   testSpeechPoseSkipsVoiceFollowingParameterAlreadyControlledBySemanticAxis();
   testSpeechPoseDoesNotApplyWithoutSpeechActive();

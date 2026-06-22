@@ -295,12 +295,29 @@ function testActiveAudioLookupRequiresMatchingTurnWhenMessageIdIsShared(): void 
 
   assert.equal(started.length, 0);
 
-  scheduler.notifyAudioPlaybackStarted("turn-active", "shared-msg");
+  assert.equal(
+    scheduler.notifyAudioPlaybackStarted("turn-active", "shared-msg"),
+    false,
+  );
   assert.equal(started.length, 0);
 
-  scheduler.notifyAudioPlaybackStarted("turn-target", "shared-msg");
+  assert.equal(
+    scheduler.notifyAudioPlaybackStarted("turn-target", "shared-msg"),
+    true,
+  );
   assert.equal(started.length, 1);
   assert.equal(started[0].turnId, "turn-target");
+}
+
+function testAudioStartReturnsFalseWithoutQueuedMotion(): void {
+  resetTimers();
+  const { scheduler, started } = createHarness(buildSession());
+
+  assert.equal(
+    scheduler.notifyAudioPlaybackStarted("turn-1", "msg-1"),
+    false,
+  );
+  assert.equal(started.length, 0);
 }
 
 function run(): void {
@@ -309,6 +326,7 @@ function run(): void {
   testDroppedPendingPayloadReportsStartFailure();
   testSameMessageIdDifferentTurnsStartByCompositeIdentity();
   testActiveAudioLookupRequiresMatchingTurnWhenMessageIdIsShared();
+  testAudioStartReturnsFalseWithoutQueuedMotion();
   console.log("motionRuntimeScheduler tests passed");
 }
 

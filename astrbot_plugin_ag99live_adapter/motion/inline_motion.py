@@ -30,9 +30,7 @@ from .motion_intent import (
     validate_motion_intent_payload,
 )
 from .fallback_pose import (
-    DEFAULT_FALLBACK_POSE_ID,
     build_fallback_pose_candidates,
-    build_default_neutral_pose_axes,
     repair_motion_axes_with_fallback_pose,
     resolve_fallback_pose,
     resolve_fallback_pose_axes,
@@ -184,6 +182,7 @@ def _repair_inline_motion_payload_with_fallback(
         runtime_state=runtime_state,
         semantic_profile=semantic_profile,
         limit=None,
+        require_non_neutral_skeleton=True,
     )
     resource_candidates = build_motion_resource_candidates(
         runtime_state=runtime_state,
@@ -207,6 +206,7 @@ def _repair_inline_motion_payload_with_fallback(
         runtime_state=runtime_state,
         semantic_profile=semantic_profile,
         fallback_pose_id=fallback_pose_id,
+        require_non_neutral_skeleton=True,
     )
     repaired_axes, added_axes, replaced_axes = repair_motion_axes_with_fallback_pose(
         axes=dict(axes),
@@ -278,6 +278,7 @@ def _build_inline_fallback_motion_payload(
         runtime_state=runtime_state,
         semantic_profile=semantic_profile,
         limit=None,
+        require_non_neutral_skeleton=True,
     )
     raw_resource_id = resource_id
     resource_candidates = build_motion_resource_candidates(
@@ -303,32 +304,15 @@ def _build_inline_fallback_motion_payload(
         runtime_state=runtime_state,
         semantic_profile=semantic_profile,
         fallback_pose_id=fallback_pose_id,
+        require_non_neutral_skeleton=True,
     )
-    expressive_floor_emotion = emotion_label
-    apply_expressive_floor = True
-    if fallback_resolution is not None:
-        axes = fallback_resolution.axes
-        if fallback_resolution.is_default_neutral:
-            expressive_floor_emotion = "neutral"
-            apply_expressive_floor = False
-    else:
-        axes = None
-    if fallback_resolution is None and fallback_pose_id == DEFAULT_FALLBACK_POSE_ID:
-        expressive_floor_emotion = "neutral"
-        apply_expressive_floor = False
-    if not axes:
-        axes = build_default_neutral_pose_axes(semantic_profile)
-        fallback_pose_id = DEFAULT_FALLBACK_POSE_ID
-        expressive_floor_emotion = "neutral"
-        apply_expressive_floor = False
-    if not axes:
+    if fallback_resolution is None:
         return None, None
-    if apply_expressive_floor:
-        axes = _apply_expressive_floor_v2(
-            axes=axes,
-            emotion=expressive_floor_emotion,
-            semantic_profile=semantic_profile,
-        )
+    axes = _apply_expressive_floor_v2(
+        axes=fallback_resolution.axes,
+        emotion=emotion_label,
+        semantic_profile=semantic_profile,
+    )
 
     try:
         profile_revision = int(semantic_profile.get("revision") or 0)

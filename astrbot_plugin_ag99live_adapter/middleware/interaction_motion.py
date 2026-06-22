@@ -31,7 +31,6 @@ from ..motion.resource_catalog import (
 )
 from ..motion.fallback_pose import (
     DEFAULT_FALLBACK_POSE_ID,
-    build_default_neutral_pose_axes,
     repair_motion_axes_with_fallback_pose,
     build_fallback_pose_candidates,
     resolve_fallback_pose,
@@ -320,6 +319,9 @@ def _resolve_plugin_hints_motion_payload_with_reason(
             reason,
             "rejected_axes:" + ",".join(rejected_axes),
         )
+    if validated_axes and _are_motion_axes_all_neutralish(validated_axes, semantic_profile):
+        validated_axes = None
+        reason = _append_resolution_reason(reason, "axes_all_neutral")
     if not validated_axes:
         reason = _append_resolution_reason(reason, "axes_empty_or_invalid")
 
@@ -327,6 +329,7 @@ def _resolve_plugin_hints_motion_payload_with_reason(
         runtime_state=runtime_state,
         semantic_profile=semantic_profile,
         limit=None,
+        require_non_neutral_skeleton=True,
     )
     resource_candidates = build_motion_resource_candidates(
         runtime_state=runtime_state,
@@ -355,27 +358,23 @@ def _resolve_plugin_hints_motion_payload_with_reason(
             runtime_state=runtime_state,
             semantic_profile=semantic_profile,
             fallback_pose_id=fallback_pose_id,
+            require_non_neutral_skeleton=True,
         )
         if fallback_resolution is not None:
             validated_axes = fallback_resolution.axes
-            if fallback_resolution.is_default_neutral:
-                expressive_floor_emotion = "neutral"
-                apply_expressive_floor = False
             reason = _append_resolution_reason(reason, f"fallback_pose:{fallback_pose_id}")
         else:
-            validated_axes = build_default_neutral_pose_axes(semantic_profile)
-            fallback_pose_id = DEFAULT_FALLBACK_POSE_ID
-            expressive_floor_emotion = "neutral"
-            apply_expressive_floor = False
             reason = _append_resolution_reason(
                 reason,
-                f"fallback_pose_default:{DEFAULT_FALLBACK_POSE_ID}",
+                "fallback_pose_unavailable",
             )
+            return None, reason
     else:
         fallback_resolution = resolve_fallback_pose(
             runtime_state=runtime_state,
             semantic_profile=semantic_profile,
             fallback_pose_id=fallback_pose_id,
+            require_non_neutral_skeleton=True,
         )
         if fallback_resolution is not None:
             (
@@ -397,6 +396,8 @@ def _resolve_plugin_hints_motion_payload_with_reason(
                     reason,
                     f"skeleton_repair_replaced:{','.join(repair_replaced_axes)}",
                 )
+        else:
+            fallback_pose_id = ""
 
     if not validated_axes:
         return None, reason
@@ -452,6 +453,24 @@ def _validate_motion_resource_id(
     return "", f"resource_id_rejected:{_sanitize_reason_fragment(normalized)}"
 
 
+def _are_motion_axes_all_neutralish(
+    axes: dict[str, float],
+    semantic_profile: dict[str, Any],
+) -> bool:
+    if not axes:
+        return False
+    axis_by_id = _build_prompt_axis_lookup(semantic_profile)
+    checked = 0
+    for axis_id, value in axes.items():
+        axis = axis_by_id.get(str(axis_id or "").strip())
+        if axis is None:
+            continue
+        checked += 1
+        if not _is_axis_soft_range_neutral(float(value), axis):
+            return False
+    return checked > 0
+
+
 def _normalize_plugin_hint_axes(
     axes: Any,
     semantic_profile: dict[str, Any],
@@ -481,8 +500,11 @@ def _normalize_plugin_hint_axes(
         if isinstance(axis_value, dict):
             rejected_axes.append(axis_id)
             continue
-        number = _coerce_finite_number(axis_value)
-        if number is None:
+        if isinstance(axis_value, bool) or not isinstance(axis_value, (int, float)):
+            rejected_axes.append(axis_id)
+            continue
+        number = float(axis_value)
+        if not float("-inf") < number < float("inf"):
             rejected_axes.append(axis_id)
             continue
 

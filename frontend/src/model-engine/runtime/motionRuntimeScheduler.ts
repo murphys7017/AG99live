@@ -303,7 +303,7 @@ export function createMotionRuntimeScheduler(
   function notifyAudioPlaybackStarted(
     turnId: string | null,
     messageId: string | null = null,
-  ): void {
+  ): boolean {
     const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
     const normalizedTurnId = normalizeTurnId(turnId);
     if (normalizedMessageId) {
@@ -331,10 +331,10 @@ export function createMotionRuntimeScheduler(
         started,
         pendingCount: pendingInboundMotionPayloads.size,
       });
-      return;
+      return started;
     }
     if (!normalizedTurnId) {
-      return;
+      return false;
     }
     let started = false;
     for (const entry of Array.from(pendingInboundMotionPayloads.values())) {
@@ -347,6 +347,7 @@ export function createMotionRuntimeScheduler(
       started,
       pendingCount: pendingInboundMotionPayloads.size,
     });
+    return started;
   }
 
   function notifyCurrentTurnChanged(turnId: string | null): void {

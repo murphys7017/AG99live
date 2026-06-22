@@ -38,6 +38,7 @@ def build_fallback_pose_candidates(
     runtime_state: Any,
     semantic_profile: dict[str, Any],
     limit: int | None = 12,
+    require_non_neutral_skeleton: bool = False,
 ) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
@@ -46,28 +47,53 @@ def build_fallback_pose_candidates(
         runtime_state=runtime_state,
         semantic_profile=semantic_profile,
     ):
-        _append_unique_candidate(candidates, seen_ids, candidate)
+        _append_unique_candidate(
+            candidates,
+            seen_ids,
+            candidate,
+            semantic_profile=semantic_profile,
+            require_non_neutral_skeleton=require_non_neutral_skeleton,
+        )
 
     for candidate in _build_expression_candidates(
         runtime_state=runtime_state,
         semantic_profile=semantic_profile,
     ):
-        _append_unique_candidate(candidates, seen_ids, candidate)
+        _append_unique_candidate(
+            candidates,
+            seen_ids,
+            candidate,
+            semantic_profile=semantic_profile,
+            require_non_neutral_skeleton=require_non_neutral_skeleton,
+        )
 
     for candidate in _build_profile_binding_expression_candidates(
         runtime_state=runtime_state,
         semantic_profile=semantic_profile,
     ):
-        _append_unique_candidate(candidates, seen_ids, candidate)
+        _append_unique_candidate(
+            candidates,
+            seen_ids,
+            candidate,
+            semantic_profile=semantic_profile,
+            require_non_neutral_skeleton=require_non_neutral_skeleton,
+        )
 
     for candidate in _build_motion_catalog_semantic_candidates(
         runtime_state=runtime_state,
         semantic_profile=semantic_profile,
     ):
-        _append_unique_candidate(candidates, seen_ids, candidate)
+        _append_unique_candidate(
+            candidates,
+            seen_ids,
+            candidate,
+            semantic_profile=semantic_profile,
+            require_non_neutral_skeleton=require_non_neutral_skeleton,
+        )
 
-    for candidate in _build_neutral_fallback_candidates(semantic_profile):
-        _append_unique_candidate(candidates, seen_ids, candidate)
+    if not require_non_neutral_skeleton:
+        for candidate in _build_neutral_fallback_candidates(semantic_profile):
+            _append_unique_candidate(candidates, seen_ids, candidate)
 
     if limit is not None:
         return candidates[: max(0, int(limit))]
@@ -79,11 +105,13 @@ def resolve_fallback_pose_axes(
     runtime_state: Any,
     semantic_profile: dict[str, Any],
     fallback_pose_id: Any,
+    require_non_neutral_skeleton: bool = False,
 ) -> dict[str, float] | None:
     resolution = resolve_fallback_pose(
         runtime_state=runtime_state,
         semantic_profile=semantic_profile,
         fallback_pose_id=fallback_pose_id,
+        require_non_neutral_skeleton=require_non_neutral_skeleton,
     )
     return dict(resolution.axes) if resolution is not None else None
 
@@ -93,6 +121,7 @@ def resolve_fallback_pose(
     runtime_state: Any,
     semantic_profile: dict[str, Any],
     fallback_pose_id: Any,
+    require_non_neutral_skeleton: bool = False,
 ) -> FallbackPoseResolution | None:
     normalized_id = _normalize_pose_id(fallback_pose_id)
     if normalized_id:
@@ -103,6 +132,7 @@ def resolve_fallback_pose(
         runtime_state=runtime_state,
         semantic_profile=semantic_profile,
         limit=None,
+        require_non_neutral_skeleton=require_non_neutral_skeleton,
     ):
         if candidate.get("id") == normalized_id:
             axes = candidate.get("axes")
@@ -539,14 +569,41 @@ def _append_unique_candidate(
     candidates: list[dict[str, Any]],
     seen_ids: set[str],
     candidate: dict[str, Any],
+    *,
+    semantic_profile: dict[str, Any] | None = None,
+    require_non_neutral_skeleton: bool = False,
 ) -> None:
     candidate_id = _normalize_pose_id(candidate.get("id"))
     axes = candidate.get("axes")
     if not candidate_id or candidate_id in seen_ids or not isinstance(axes, dict) or not axes:
         return
+    if (
+        require_non_neutral_skeleton
+        and not _has_non_neutral_skeleton_axes(axes, semantic_profile)
+    ):
+        return
     candidate["id"] = candidate_id
     seen_ids.add(candidate_id)
     candidates.append(candidate)
+
+
+def _has_non_neutral_skeleton_axes(
+    axes: dict[str, Any],
+    semantic_profile: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(semantic_profile, dict):
+        return False
+    axis_by_id = _prompt_axis_by_id(semantic_profile)
+    for axis_id, value in axes.items():
+        axis = axis_by_id.get(str(axis_id or "").strip())
+        if axis is None:
+            continue
+        group = str(axis.get("semantic_group") or "").strip().lower()
+        if group not in _REPAIR_SKELETON_GROUPS:
+            continue
+        if not _is_axis_neutralish(value, axis):
+            return True
+    return False
 
 
 def _filter_axes(value: Any, semantic_profile: dict[str, Any]) -> dict[str, float]:

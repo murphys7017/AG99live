@@ -1086,6 +1086,25 @@ def test_fallback_pose_candidates_use_expression_dominant_parameter_ids(
     assert candidates[-1]["id"] == "neutral"
 
 
+def test_fallback_pose_candidates_exclude_neutral_for_skeleton_repair(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    runtime_state = _build_runtime_state()
+    semantic_profile = runtime_state.model_info["models"][0]["semantic_axis_profile"]
+    candidates = module.build_fallback_pose_candidates(
+        runtime_state=runtime_state,
+        semantic_profile=semantic_profile,
+        limit=None,
+        require_non_neutral_skeleton=True,
+    )
+
+    assert all(candidate["id"] != "neutral" for candidate in candidates)
+
+
 def test_fallback_pose_candidates_use_motion_catalog_metadata_only_when_axes_exist(
     install_fake_astrbot,
     monkeypatch,
@@ -1114,6 +1133,48 @@ def test_fallback_pose_candidates_use_motion_catalog_metadata_only_when_axes_exi
     assert catalog_candidate["axes"] == {"head_yaw": 80.0}
     assert "file" not in catalog_candidate
     assert "motion_id" not in catalog_candidate
+
+
+def test_plugin_hints_neutral_axes_without_pose_candidate_produce_no_motion(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    event.set_extra(
+        "_interaction_plugin_hints",
+        {
+            "ag99live_motion": {
+                "intent_tags": ["calm"],
+                "axes": {
+                    "head_yaw": 50,
+                    "body_yaw": 50,
+                },
+            }
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "build_fallback_pose_candidates",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        module,
+        "resolve_fallback_pose",
+        lambda **_kwargs: None,
+    )
+
+    payload, reason = module._resolve_plugin_hints_motion_payload_with_reason(
+        event,
+        runtime_state,
+    )
+
+    assert payload is None
+    assert "axes_all_neutral" in reason
+    assert "fallback_pose_unavailable" in reason
 
 
 def test_plugin_hints_motion_payload_uses_profile_axis_value_range(
@@ -1224,10 +1285,11 @@ def test_plugin_hints_motion_payload_accepts_fenced_json_string(
     assert payload is not None
     assert payload["emotion_label"] == "curious"
     assert payload["duration_hint_ms"] == 1500
-    assert payload["axes"]["head_yaw"] == 48
+    assert "head_yaw" not in payload["axes"]
     assert payload["axes"]["eye_open_left"] == 72
     assert "plugin_hints_json_repaired:fenced_json" in reason
     assert "plugin_hints_json_repaired:trailing_commas" in reason
+    assert "rejected_axes:head_yaw" in reason
 
 
 def test_plugin_hints_motion_payload_accepts_text_wrapped_json_object(
@@ -1249,9 +1311,9 @@ def test_plugin_hints_motion_payload_accepts_text_wrapped_json_object(
         runtime_state,
     )
 
-    assert payload is not None
-    assert payload["emotion_label"] == "curious"
-    assert payload["axes"]["head_yaw"] < 42
+    assert payload is None
+    assert "axes_all_neutral" in reason
+    assert "fallback_pose_unavailable" in reason
     assert "plugin_hints_json_repaired:extracted_object" in reason
 
 
@@ -1280,10 +1342,7 @@ def test_plugin_hints_motion_payload_accepts_string_number_axes(
 
     payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
 
-    assert payload is not None
-    assert payload["duration_hint_ms"] == 1500
-    assert payload["axes"]["head_yaw"] == 48
-    assert payload["axes"]["eye_open_left"] == 72.5
+    assert payload is None
 
 
 def test_plugin_hints_expressive_payload_is_pushed_out_of_idle_deadzone(
@@ -1310,8 +1369,7 @@ def test_plugin_hints_expressive_payload_is_pushed_out_of_idle_deadzone(
 
     payload = module._resolve_plugin_hints_motion_payload(event, runtime_state)
 
-    assert payload is not None
-    assert payload["axes"]["head_yaw"] > 58
+    assert payload is None
 
 
 def test_plugin_hints_detail_only_axes_are_repaired_from_fallback_pose(
@@ -1579,7 +1637,7 @@ def test_result_contributor_returns_plugin_hint_motion_as_client_object(
         {
             "ag99live_motion": {
                 "intent_tags": ["happy"],
-                "axes": {"head_yaw": 50},
+                "axes": {"head_yaw": 70},
             }
         },
     )
@@ -1867,10 +1925,10 @@ def test_result_contributor_skips_plugin_hint_motion_in_hybrid_immediate_phase(
     assert event.get_extra("ag99live_split_motion_scheduled") is None
     metadata = contribution.metadata["ag99live_motion_schedule"]
     assert metadata["reason"] == "immediate_phase_waits_for_core_reply"
-    assert metadata["plugin_hints_resolution_reason"] in {
-        "ok",
-        "skeleton_repair_replaced:head_yaw",
-    }
+    assert (
+        metadata["plugin_hints_resolution_reason"]
+        == "axes_all_neutral:axes_empty_or_invalid:fallback_pose:serious_explain"
+    )
 
 
 def test_result_contributor_dedupes_plugin_hint_motion_after_immediate_phase(
@@ -1887,7 +1945,7 @@ def test_result_contributor_dedupes_plugin_hint_motion_after_immediate_phase(
         {
             "ag99live_motion": {
                 "intent_tags": ["happy"],
-                "axes": {"head_yaw": 50},
+                "axes": {"head_yaw": 70},
             }
         },
     )
@@ -2115,8 +2173,8 @@ def test_plugin_hints_accepts_catalog_expression_resource_without_fallback_id_ma
 
     assert payload is not None
     assert payload["resource_id"] == "expr_surprised"
-    assert payload["fallback_pose_id"] == "expr_surprised"
-    assert payload["summary"]["matched_candidate_id"] == "expr_surprised"
+    assert payload["fallback_pose_id"] == ""
+    assert payload["summary"]["matched_candidate_id"] == ""
 
 
 def test_plugin_hints_rejects_resource_id_not_exposed_by_catalog(

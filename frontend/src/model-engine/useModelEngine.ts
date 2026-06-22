@@ -3,6 +3,7 @@ import {
   createMotionRuntimeScheduler,
   type StartPayloadContext,
 } from "./runtime/motionRuntimeScheduler";
+import { buildSpeechOnlyMotionPayload } from "./runtime/speechOnlyMotion";
 import type { InboundPayloadContext, NormalizedMotionPayload } from "./contracts";
 import type { CompileDiagnostics } from "./compiler/contracts";
 import type {
@@ -131,8 +132,41 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   function notifyAudioPlaybackStarted(
     turnId: string | null,
     messageId: string | null = null,
-  ): void {
-    runtimeScheduler.notifyAudioPlaybackStarted(turnId, messageId);
+  ): boolean {
+    const queuedMotionStarted =
+      runtimeScheduler.notifyAudioPlaybackStarted(turnId, messageId);
+    if (queuedMotionStarted) {
+      return true;
+    }
+
+    const normalizedMessageId =
+      typeof messageId === "string" ? messageId.trim() : "";
+    if (!normalizedMessageId) {
+      return false;
+    }
+    const speechOnlyPayload = buildSpeechOnlyMotionPayload(
+      dependencies.getSelectedModel(),
+    );
+    if (!speechOnlyPayload) {
+      return false;
+    }
+
+    return startNormalizedMotionPayload(
+      speechOnlyPayload,
+      {
+        messageId: normalizedMessageId,
+        turnId,
+        playbackTurnId: turnId,
+        startReason: "speech_only",
+        queuedDelayMs: 0,
+      },
+      motionStartDependencies,
+      {
+        resolveMotionTargetDurationMs: runtimeScheduler.resolveMotionTargetDurationMs,
+        isSpeechActiveForPayload: runtimeScheduler.isSpeechActiveForPayload,
+      },
+      runtimeStateController,
+    );
   }
 
   function notifyCurrentTurnChanged(turnId: string | null): void {
