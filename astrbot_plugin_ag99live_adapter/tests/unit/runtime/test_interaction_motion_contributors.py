@@ -5,6 +5,7 @@ import importlib
 import json
 import sys
 import types
+from types import MappingProxyType
 from unittest.mock import patch
 
 
@@ -863,6 +864,45 @@ def test_view_plugin_hints_prioritized_over_event_extra(
     )[0]
     assert payload is not None
     assert payload["emotion_label"] == "view_hints"
+    assert payload["axes"]["head_yaw"] == 30
+
+
+def test_view_accepts_recursively_frozen_plugin_hints(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    event, _scheduled_calls = _build_event()
+    runtime_state = event.adapter.turn_coordinator.runtime_state
+    frozen_hints = MappingProxyType(
+        {
+            "ag99live_motion": MappingProxyType(
+                {
+                    "intent_tags": ("淡定", "傲娇", "轻微害羞"),
+                    "axes": MappingProxyType({"head_yaw": 30}),
+                    "duration_hint_ms": 1000,
+                }
+            )
+        }
+    )
+    view = _build_view(
+        phase="immediate",
+        route_mode="split_after_reply",
+        immediate_reply="还能怎么样，就那样呗。",
+        plugin_hints=frozen_hints,
+    )
+
+    payload, reason = module._resolve_plugin_hints_motion_payload_with_reason(
+        event,
+        runtime_state,
+        view=view,
+    )
+
+    assert payload is not None
+    assert reason == "ok"
+    assert payload["emotion_label"] == "淡定-傲娇-轻微害羞"
     assert payload["axes"]["head_yaw"] == 30
 
 

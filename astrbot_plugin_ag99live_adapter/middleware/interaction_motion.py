@@ -1512,11 +1512,24 @@ def _coerce_plugin_hints_mapping(value: Any) -> dict[str, Any] | None:
     return hints
 
 
+def _thaw_plugin_hints_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _thaw_plugin_hints_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, tuple):
+        return [_thaw_plugin_hints_value(item) for item in value]
+    if isinstance(value, list):
+        return [_thaw_plugin_hints_value(item) for item in value]
+    return value
+
+
 def _coerce_plugin_hints_mapping_with_reason(
     value: Any,
 ) -> tuple[dict[str, Any] | None, str]:
-    if isinstance(value, dict):
-        return value, "ok"
+    if isinstance(value, Mapping):
+        return _thaw_plugin_hints_value(value), "ok"
     if not isinstance(value, str):
         return None, "plugin_hints_missing"
 
