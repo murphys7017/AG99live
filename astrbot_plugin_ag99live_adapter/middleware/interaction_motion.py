@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -44,6 +43,11 @@ from ..prompts.motion_selector import (
 from ..prompts.semantic_axis_prompt import (
     format_profile_axis_prompt_line,
     profile_prompt_axes,
+)
+from .motion_legacy_plugin_hints import (
+    log_plugin_hints_motion_resolution as _legacy_log_plugin_hints_motion_resolution,
+    resolve_plugin_hints_motion_payload as _legacy_resolve_plugin_hints_motion_payload,
+    resolve_plugin_hints_motion_payload_with_reason as _legacy_resolve_plugin_hints_motion_payload_with_reason,
 )
 
 AG99LIVE_PLUGIN_ID = "astrbot_plugin_ag99live_adapter"
@@ -288,18 +292,20 @@ def _resolve_plugin_hints_motion_payload(
     *,
     view: Any = None,
 ) -> dict[str, Any] | None:
-    """Resolve the historical plugin_hints.ag99live_motion payload.
+    """Legacy plugin_hints parser kept outside the active middleware-first path.
 
-    This helper is retained for legacy diagnostics and parser coverage only.
-    The middleware result contributor's active structured path consumes
-    ``view.effect_calls`` with the ``ag99live.motion`` Persona Effect.
+    The current result contributor schedules motion only from the
+    ``ag99live.motion`` Persona Effect. This helper remains as a compatibility
+    shim for historical diagnostics and targeted legacy tests.
     """
-    payload, _reason = _resolve_plugin_hints_motion_payload_with_reason(
+    return _legacy_resolve_plugin_hints_motion_payload(
         event,
         runtime_state,
         view=view,
+        normalize_motion_arguments_payload=_normalize_motion_arguments_payload,
+        call_event_method=_call_event_method,
+        append_resolution_reason=_append_resolution_reason,
     )
-    return payload
 
 
 def _resolve_plugin_hints_motion_payload_with_reason(
@@ -308,22 +314,14 @@ def _resolve_plugin_hints_motion_payload_with_reason(
     *,
     view: Any = None,
 ) -> tuple[dict[str, Any] | None, str]:
-    """Resolve historical plugin_hints payloads without driving new scheduling."""
-    hints = _extract_plugin_hints_from_view(view) if view is not None else None
-    if hints is None:
-        hints = _call_event_method(event, "get_extra", "_interaction_plugin_hints")
-    hints, hints_reason = _coerce_plugin_hints_mapping_with_reason(hints)
-    if not isinstance(hints, dict):
-        return None, hints_reason
-
-    raw_motion_hint = hints.get("ag99live_motion")
-    if not isinstance(raw_motion_hint, dict):
-        return None, _append_resolution_reason(hints_reason, "ag99live_motion_missing")
-
-    return _normalize_motion_arguments_payload(
-        raw_motion_hint,
+    """Resolve historical ``plugin_hints.ag99live_motion`` payloads only."""
+    return _legacy_resolve_plugin_hints_motion_payload_with_reason(
+        event,
         runtime_state,
-        base_reason=hints_reason,
+        view=view,
+        normalize_motion_arguments_payload=_normalize_motion_arguments_payload,
+        call_event_method=_call_event_method,
+        append_resolution_reason=_append_resolution_reason,
     )
 
 
@@ -1682,54 +1680,16 @@ def _log_plugin_hints_motion_resolution(
     reason: str,
     view: Any = None,
 ) -> None:
-    hints = _extract_plugin_hints_from_view(view) if view is not None else None
-    if hints is None:
-        hints = _call_event_method(event, "get_extra", "_interaction_plugin_hints")
-    hints = _coerce_plugin_hints_mapping(hints)
-    hint_keys: list[str] = []
-    motion_axes_keys: list[str] = []
-    if isinstance(hints, dict):
-        hint_keys = sorted(
-            str(key).strip()
-            for key in hints.keys()
-            if str(key).strip()
-        )
-        motion_hint = hints.get("ag99live_motion")
-        if isinstance(motion_hint, dict):
-            axes = motion_hint.get("axes")
-            if isinstance(axes, dict):
-                motion_axes_keys = sorted(
-                    str(key).strip()
-                    for key in axes.keys()
-                    if str(key).strip()
-                )
-
-    logger.info(
-        "WIRING plugin_hints_motion phase=%s payload_present=%s reason=%s hint_keys=%s motion_axes=%s",
-        phase or "",
-        payload is not None,
-        reason,
-        ",".join(hint_keys),
-        ",".join(motion_axes_keys),
+    """Legacy logging helper for historical plugin_hints payload inspection."""
+    _legacy_log_plugin_hints_motion_resolution(
+        event,
+        phase=phase,
+        payload=payload,
+        reason=reason,
+        view=view,
+        logger=logger,
+        call_event_method=_call_event_method,
     )
-
-
-def _coerce_plugin_hints_mapping(value: Any) -> dict[str, Any] | None:
-    hints, _reason = _coerce_plugin_hints_mapping_with_reason(value)
-    return hints
-
-
-def _thaw_plugin_hints_value(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {
-            str(key): _thaw_plugin_hints_value(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, tuple):
-        return [_thaw_plugin_hints_value(item) for item in value]
-    if isinstance(value, list):
-        return [_thaw_plugin_hints_value(item) for item in value]
-    return value
 
 
 def _thaw_snapshot_value(value: Any) -> Any:
@@ -1742,153 +1702,6 @@ def _thaw_snapshot_value(value: Any) -> Any:
         return [_thaw_snapshot_value(item) for item in value]
     if isinstance(value, list):
         return [_thaw_snapshot_value(item) for item in value]
-    return value
-
-
-def _coerce_plugin_hints_mapping_with_reason(
-    value: Any,
-) -> tuple[dict[str, Any] | None, str]:
-    if isinstance(value, Mapping):
-        return _thaw_plugin_hints_value(value), "ok"
-    if not isinstance(value, str):
-        return None, "plugin_hints_missing"
-
-    raw_value = value.strip()
-    if not raw_value:
-        return None, "plugin_hints_missing"
-    parsed, reason = _parse_json_mapping_lenient(raw_value)
-    return parsed, reason
-
-
-def _parse_json_mapping_lenient(raw_value: str) -> tuple[dict[str, Any] | None, str]:
-    attempts: list[tuple[str, str]] = [("ok", raw_value)]
-
-    fenced = _extract_fenced_json(raw_value)
-    if fenced and fenced != raw_value:
-        attempts.append(("plugin_hints_json_repaired:fenced_json", fenced))
-
-    extracted = _extract_first_json_object(raw_value)
-    if extracted and extracted not in {raw_value, fenced}:
-        attempts.append(("plugin_hints_json_repaired:extracted_object", extracted))
-
-    expanded_attempts: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    for reason, candidate in attempts:
-        if candidate not in seen:
-            expanded_attempts.append((reason, candidate))
-            seen.add(candidate)
-        trailing_fixed = _strip_json_trailing_commas(candidate)
-        if trailing_fixed != candidate and trailing_fixed not in seen:
-            expanded_attempts.append(
-                (
-                    _append_resolution_reason(
-                        reason,
-                        "plugin_hints_json_repaired:trailing_commas",
-                    ),
-                    trailing_fixed,
-                )
-            )
-            seen.add(trailing_fixed)
-
-    for reason, candidate in expanded_attempts:
-        try:
-            parsed = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        mapping = _unwrap_plugin_hints_mapping(parsed)
-        if isinstance(mapping, dict):
-            return mapping, reason
-
-    return None, "plugin_hints_json_rejected:json_decode_failed"
-
-
-def _extract_fenced_json(raw_value: str) -> str | None:
-    match = re.search(
-        r"```(?:json|JSON)?\s*([\s\S]*?)\s*```",
-        raw_value,
-        flags=re.IGNORECASE,
-    )
-    if not match:
-        return None
-    return match.group(1).strip() or None
-
-
-def _extract_first_json_object(raw_value: str) -> str | None:
-    start = raw_value.find("{")
-    if start < 0:
-        return None
-    in_string = False
-    escaped = False
-    depth = 0
-    for index in range(start, len(raw_value)):
-        char = raw_value[index]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-            continue
-        if char == '"':
-            in_string = True
-            continue
-        if char == "{":
-            depth += 1
-            continue
-        if char == "}":
-            depth -= 1
-            if depth == 0:
-                return raw_value[start : index + 1].strip()
-    return None
-
-
-def _strip_json_trailing_commas(value: str) -> str:
-    output: list[str] = []
-    in_string = False
-    escaped = False
-    index = 0
-    while index < len(value):
-        char = value[index]
-        if in_string:
-            output.append(char)
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-            index += 1
-            continue
-        if char == '"':
-            in_string = True
-            output.append(char)
-            index += 1
-            continue
-        if char == ",":
-            next_index = index + 1
-            while next_index < len(value) and value[next_index].isspace():
-                next_index += 1
-            if next_index < len(value) and value[next_index] in "}]":
-                index += 1
-                continue
-        output.append(char)
-        index += 1
-    return "".join(output)
-
-
-def _unwrap_plugin_hints_mapping(value: Any) -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        return None
-    if isinstance(value.get("ag99live_motion"), dict):
-        return value
-    plugin_hints = value.get("plugin_hints")
-    if isinstance(plugin_hints, dict):
-        if isinstance(plugin_hints.get("ag99live_motion"), dict):
-            return plugin_hints
-        nested = plugin_hints.get("plugin_hints")
-        if isinstance(nested, dict) and isinstance(nested.get("ag99live_motion"), dict):
-            return nested
     return value
 
 
@@ -2151,33 +1964,6 @@ def _should_contribute_motion_prompt(view: Any) -> bool:
     """
     purpose = _resolve_prompt_purpose(view)
     return purpose in {"persona_reply", "core_reply"}
-
-
-def _extract_plugin_hints_from_view(view: Any) -> Any:
-    """Extract plugin_hints from the AstrBot view, preferring direct attributes.
-
-    Returns a dict or str if found, otherwise None.  Callers must coerce the
-    result with ``_coerce_plugin_hints_mapping_with_reason()``.
-    """
-    hints = getattr(view, "plugin_hints", None)
-    if hints is not None:
-        return hints
-
-    metadata = getattr(view, "metadata", None)
-    if isinstance(metadata, Mapping):
-        hints = metadata.get("plugin_hints")
-    elif callable(getattr(metadata, "get", None)):
-        hints = metadata.get("plugin_hints")
-    if hints is not None:
-        return hints
-
-    result = getattr(view, "result", None)
-    if result is not None:
-        hints = getattr(result, "plugin_hints", None)
-        if hints is not None:
-            return hints
-
-    return None
 
 
 def _call_event_method(event: Any, method_name: str, *args: Any) -> Any:
