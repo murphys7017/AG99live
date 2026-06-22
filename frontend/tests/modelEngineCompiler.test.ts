@@ -396,6 +396,7 @@ function testNormalizeMotionPayloadAcceptsV3FlatAxes(): void {
     profile_revision: 1,
     model_id: "model-1",
     mode: "expressive",
+    intent_tags: ["happy", "preview"],
     emotion_label: "happy",
     duration_hint_ms: 1000,
     fallback_pose_id: "neutral",

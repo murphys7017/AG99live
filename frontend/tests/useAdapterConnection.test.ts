@@ -1022,13 +1022,16 @@ function testSendMotionPreviewUsesOutboundProtocolEnvelope(): void {
     socket.sent.length = 0;
 
     const sent = adapter.sendMotionPayloadPreview({
-      schema_version: "engine.motion_intent.v2",
+      schema_version: "engine.motion_intent.v3",
       profile_id: "profile-1",
       profile_revision: 1,
       model_id: "model-1",
       mode: "expressive",
+      intent_tags: ["happy", "preview"],
       emotion_label: "happy",
-      axes: {},
+      axes: {
+        head_yaw: 62,
+      },
     });
 
     assert.equal(sent, true);
@@ -1040,16 +1043,44 @@ function testSendMotionPreviewUsesOutboundProtocolEnvelope(): void {
     assert.deepEqual(message.payload, {
       mode: "preview",
       intent: {
-        schema_version: "engine.motion_intent.v2",
+        schema_version: "engine.motion_intent.v3",
         profile_id: "profile-1",
         profile_revision: 1,
         model_id: "model-1",
         mode: "expressive",
+        intent_tags: ["happy", "preview"],
         emotion_label: "happy",
-        axes: {},
+        axes: {
+          head_yaw: 62,
+        },
       },
     });
     assert.equal(adapter.state.statusMessage, "已发送动作测试载荷（engine.motion_intent）。");
+  });
+}
+
+function testSendMotionPreviewRejectsV3PayloadWithoutIntentTags(): void {
+  withConnectedAdapter(({ adapter, socket }) => {
+    socket.sent.length = 0;
+
+    const sent = adapter.sendMotionPayloadPreview({
+      schema_version: "engine.motion_intent.v3",
+      profile_id: "profile-1",
+      profile_revision: 1,
+      model_id: "model-1",
+      mode: "expressive",
+      emotion_label: "happy",
+      axes: {
+        head_yaw: 62,
+      },
+    });
+
+    assert.equal(sent, false);
+    assert.equal(socket.sent.length, 0);
+    assert.equal(
+      adapter.state.lastError,
+      "动作测试载荷无效：engine.motion_intent.v3 缺少 intent_tags。",
+    );
   });
 }
 
@@ -1767,6 +1798,7 @@ async function run(): Promise<void> {
   await testInboundInterruptOnlySettlesTargetTurnAudio();
   testDisconnectSettlesPendingAudioBeforeClearingQueue();
   testSendMotionPreviewUsesOutboundProtocolEnvelope();
+  testSendMotionPreviewRejectsV3PayloadWithoutIntentTags();
   testSendParameterPlanPayloadPreviewIsRejected();
   await testAutoStartMicIsIgnoredInPttMode();
   await testAutoStartMicDoesNotDuplicateCaptureStart();

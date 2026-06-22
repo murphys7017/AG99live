@@ -396,13 +396,22 @@ function buildAdjustedIntent(): SemanticMotionIntent | null {
     return null;
   }
 
+  const emotionLabel = normalizeEmotionLabel(emotionLabelText.value, source.emotionLabel);
+  const parsedTags = parseTags(tagsText.value);
+  const intentTags = [
+    ...parsedTags,
+    emotionLabel,
+    source.mode === "idle" ? "manual_tuning_idle" : "manual_tuning",
+  ].filter((value, index, array) => Boolean(value) && array.indexOf(value) === index);
+
   return {
     schema_version: SCHEMA_MOTION_INTENT_V3,
     profile_id: profile.profile_id,
     profile_revision: profile.revision,
     model_id: profile.model_id,
     mode: source.mode,
-    emotion_label: normalizeEmotionLabel(emotionLabelText.value, source.emotionLabel),
+    intent_tags: intentTags,
+    emotion_label: emotionLabel,
     duration_hint_ms: source.durationMs,
     fallback_pose_id: "neutral",
     axes,

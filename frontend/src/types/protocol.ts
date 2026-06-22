@@ -600,6 +600,7 @@ export interface NormalizedSemanticMotionIntent {
   profile_revision: number;
   model_id: string;
   mode: "expressive" | "idle";
+  intent_tags?: string[];
   emotion_label: string;
   duration_hint_ms?: number | null;
   fallback_pose_id?: string;

@@ -280,6 +280,17 @@ export function sendMotionPayloadPreview(
     return false;
   }
 
+  if (
+    schemaVersion === "engine.motion_intent.v3"
+    && !hasNonEmptyIntentTags(payload)
+  ) {
+    ctx.state.lastError = "动作测试载荷无效：engine.motion_intent.v3 缺少 intent_tags。";
+    ctx.state.statusMessage = ctx.state.lastError;
+    ctx.pushHistory("error", ctx.state.lastError);
+    console.warn("[Connection] refusing motion preview payload without intent_tags:", payload);
+    return false;
+  }
+
   if (!ctx.outboundClient.send("engine.motion_intent", {
     mode: "preview",
     intent: payload,
@@ -292,6 +303,17 @@ export function sendMotionPayloadPreview(
   ctx.state.statusMessage = "已发送动作测试载荷（engine.motion_intent）。";
   ctx.pushHistory("system", ctx.state.statusMessage);
   return true;
+}
+
+function hasNonEmptyIntentTags(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+  const intentTags = (payload as Record<string, unknown>).intent_tags;
+  if (!Array.isArray(intentTags)) {
+    return false;
+  }
+  return intentTags.some((item) => String(item ?? "").trim().length > 0);
 }
 
 /**

@@ -208,12 +208,18 @@ const generatedPlan = computed(() => {
     expressive ? "expressive" : "idle",
   );
   const profile = props.semanticProfile;
+  const intentTags = [
+    selectedAtoms.value[0]?.semanticPolarity || "preview",
+    expressive ? "base_action_preview" : "idle_preview",
+    ...[...new Set(selectedAtoms.value.map((atom) => atom.channel))].slice(0, 2),
+  ].filter((value, index, array) => Boolean(value) && array.indexOf(value) === index);
   const intent: SemanticMotionIntent = {
     schema_version: SCHEMA_MOTION_INTENT_V3,
     profile_id: profile?.profile_id ?? "",
     profile_revision: profile?.revision ?? 0,
     model_id: profile?.model_id ?? "",
     mode: expressive ? "expressive" : "idle",
+    intent_tags: intentTags,
     emotion_label: selectedAtoms.value[0]?.semanticPolarity || "preview",
     duration_hint_ms: timing.duration_ms,
     fallback_pose_id: "neutral",
