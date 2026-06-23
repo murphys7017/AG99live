@@ -272,11 +272,8 @@ def normalize_plugin_hint_axes(
         if isinstance(axis_value, dict):
             rejected_axes.append(axis_id)
             continue
-        if isinstance(axis_value, bool) or not isinstance(axis_value, (int, float)):
-            rejected_axes.append(axis_id)
-            continue
-        number = float(axis_value)
-        if not float("-inf") < number < float("inf"):
+        number = _coerce_effect_axis_number(axis_value)
+        if number is None:
             rejected_axes.append(axis_id)
             continue
 
@@ -292,6 +289,27 @@ def coerce_plugin_hint_axis_value(raw_value: float, axis: dict[str, Any]) -> flo
     min_value, max_value = resolve_axis_value_range(axis)
     clamped = max(min_value, min(max_value, raw_value))
     return round(clamped, 4)
+
+
+def _coerce_effect_axis_number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+    else:
+        return None
+
+    if not float("-inf") < number < float("inf"):
+        return None
+    return number
 
 
 def build_motion_visibility_summary(

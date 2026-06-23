@@ -1230,24 +1230,73 @@ def _log_persona_effect_motion_resolution(
         if name:
             effect_names.append(name)
 
-    motion_axes_keys: list[str] = []
+    effect_summary = _summarize_ag99live_motion_effect_arguments(view)
+    payload_axes_keys: list[str] = []
+    payload_resource_id = ""
+    payload_fallback_pose_id = ""
     if isinstance(payload, dict):
         axes = payload.get("axes")
         if isinstance(axes, dict):
-            motion_axes_keys = sorted(
+            payload_axes_keys = sorted(
                 str(key).strip()
                 for key in axes.keys()
                 if str(key).strip()
             )
+        payload_resource_id = str(payload.get("resource_id") or "").strip()
+        payload_fallback_pose_id = str(payload.get("fallback_pose_id") or "").strip()
 
     logger.info(
-        "WIRING persona_effect_motion phase=%s payload_present=%s reason=%s effect_names=%s motion_axes=%s",
+        "WIRING persona_effect_motion phase=%s payload_present=%s reason=%s "
+        "effect_names=%s effect_fields=%s effect_axis_keys=%s effect_intent_tags=%s "
+        "effect_resource_id=%s payload_axes=%s payload_resource_id=%s payload_fallback_pose_id=%s",
         phase or "",
         payload is not None,
         reason,
         ",".join(sorted(effect_names)),
-        ",".join(motion_axes_keys),
+        ",".join(effect_summary["fields"]),
+        ",".join(effect_summary["axis_keys"]),
+        ",".join(effect_summary["intent_tags"]),
+        effect_summary["resource_id"],
+        ",".join(payload_axes_keys),
+        payload_resource_id,
+        payload_fallback_pose_id,
     )
+
+
+def _summarize_ag99live_motion_effect_arguments(view: Any) -> dict[str, Any]:
+    summary = {
+        "fields": [],
+        "axis_keys": [],
+        "intent_tags": [],
+        "resource_id": "",
+    }
+    raw_arguments, _reason = _extract_ag99live_motion_effect_arguments(view)
+    if not isinstance(raw_arguments, dict):
+        return summary
+
+    summary["fields"] = sorted(
+        str(key).strip()
+        for key in raw_arguments.keys()
+        if str(key).strip()
+    )
+    raw_axes = raw_arguments.get("axes")
+    if isinstance(raw_axes, Mapping):
+        summary["axis_keys"] = sorted(
+            str(key).strip()
+            for key in raw_axes.keys()
+            if str(key).strip()
+        )
+    raw_intent_tags = _thaw_snapshot_value(raw_arguments.get("intent_tags"))
+    if isinstance(raw_intent_tags, (list, tuple, set)):
+        summary["intent_tags"] = [
+            str(item).strip()
+            for item in raw_intent_tags
+            if str(item).strip()
+        ]
+    elif str(raw_intent_tags or "").strip():
+        summary["intent_tags"] = [str(raw_intent_tags).strip()]
+    summary["resource_id"] = str(raw_arguments.get("resource_id") or "").strip()
+    return summary
 
 
 def _thaw_snapshot_value(value: Any) -> Any:

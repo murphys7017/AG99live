@@ -1057,6 +1057,108 @@ def test_result_contributor_returns_persona_effect_motion_as_client_object(
     )
 
 
+def test_result_contributor_normalizes_numeric_string_axes_from_persona_effect(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(raw_turn_id="raw-turn")
+    view = _build_view(
+        phase="immediate",
+        route_mode="self_reply",
+        final_result="你好呀",
+        immediate_reply="你好呀",
+        effect_calls=[
+            _motion_effect_call(
+                {
+                    "intent_tags": ["happy"],
+                    "axes": {
+                        "head_yaw": "70",
+                        "eye_open_left": "oops",
+                    },
+                }
+            )
+        ],
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == []
+    assert len(contribution.client_objects) == 1
+    motion_payload = contribution.client_objects[0]["motion_payload"]
+    assert motion_payload["axes"]["head_yaw"] == 70.0
+    assert "eye_open_left" not in motion_payload["axes"]
+    assert (
+        contribution.metadata["ag99live_motion_schedule"]["motion_resolution_reason"]
+        == "persona_effect:rejected_axes:eye_open_left"
+    )
+
+
+def test_persona_effect_motion_logs_input_and_output_diagnostics(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    log_messages: list[str] = []
+
+    class LoggerStub:
+        def info(self, message, *args, **kwargs) -> None:
+            del kwargs
+            if args:
+                log_messages.append(message % args)
+            else:
+                log_messages.append(str(message))
+
+    monkeypatch.setattr(module, "logger", LoggerStub())
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(raw_turn_id="raw-turn")
+    view = _build_view(
+        phase="immediate",
+        route_mode="self_reply",
+        final_result="你好呀",
+        immediate_reply="你好呀",
+        effect_calls=[
+            _motion_effect_call(
+                {
+                    "intent_tags": ["thinking", "explain"],
+                    "resource_id": "serious_explain",
+                    "axes": {
+                        "head_yaw": "70",
+                        "eye_open_left": "oops",
+                    },
+                }
+            )
+        ],
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == []
+    persona_effect_logs = [
+        item
+        for item in log_messages
+        if item.startswith("WIRING persona_effect_motion ")
+    ]
+    assert len(persona_effect_logs) == 1
+    log_line = persona_effect_logs[0]
+    assert "effect_fields=axes,intent_tags,resource_id" in log_line
+    assert "effect_axis_keys=eye_open_left,head_yaw" in log_line
+    assert "effect_intent_tags=thinking,explain" in log_line
+    assert "effect_resource_id=serious_explain" in log_line
+    assert "payload_axes=head_yaw" in log_line
+    assert "payload_resource_id=serious_explain" in log_line
+    assert "payload_fallback_pose_id=serious_explain" in log_line
+    assert "reason=persona_effect:rejected_axes:eye_open_left" in log_line
+
+
 def test_result_contributor_schedules_motion_for_immediate_reply(
     install_fake_astrbot,
     monkeypatch,
