@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from astrbot_plugin_ag99live_adapter.motion.axis_constraints import apply_motion_constraints_to_intent_payload
 from astrbot_plugin_ag99live_adapter.motion.realtime_motion_plan import (
     RealtimeMotionPlanGenerator,
     normalize_motion_intent_payload,
@@ -300,6 +301,72 @@ def test_normalize_motion_intent_payload_accepts_v2_semantic_axes() -> None:
     assert intent["schema_version"] == "engine.motion_intent.v2"
     assert intent["axes"]["head_yaw"]["value"] == 72
     assert intent["summary"]["axis_count"] == 1
+
+
+def test_apply_motion_constraints_to_intent_payload_limits_opposite_body_yaw() -> None:
+    semantic_profile = {
+        "axes": [
+            {
+                "id": "head_yaw",
+                "neutral": 50,
+                "value_range": [0, 100],
+                "strong_range": [30, 70],
+            },
+            {
+                "id": "body_yaw",
+                "neutral": 50,
+                "value_range": [0, 100],
+                "strong_range": [38, 62],
+            },
+        ],
+        "couplings": [],
+    }
+    payload, constraint_result = apply_motion_constraints_to_intent_payload(
+        payload={
+            "schema_version": "engine.motion_intent.v3",
+            "axes": {
+                "head_yaw": 72.0,
+                "body_yaw": 28.0,
+            },
+            "summary": {
+                "axis_count": 2,
+            },
+        },
+        semantic_profile=semantic_profile,
+    )
+
+    assert constraint_result.adjusted_axes == ["body_yaw"]
+    assert payload["axes"]["body_yaw"] == 43.15
+    assert payload["summary"]["axis_constraint_adjusted_axes"] == ["body_yaw"]
+
+
+def test_apply_motion_constraints_to_intent_payload_keeps_body_only_pose_within_cap() -> None:
+    semantic_profile = {
+        "axes": [
+            {
+                "id": "body_yaw",
+                "neutral": 50,
+                "value_range": [0, 100],
+                "strong_range": [38, 62],
+            },
+        ],
+        "couplings": [],
+    }
+    payload, constraint_result = apply_motion_constraints_to_intent_payload(
+        payload={
+            "schema_version": "engine.motion_intent.v3",
+            "axes": {
+                "body_yaw": 66.0,
+            },
+            "summary": {
+                "axis_count": 1,
+            },
+        },
+        semantic_profile=semantic_profile,
+    )
+
+    assert constraint_result.adjusted_axes == []
+    assert payload["axes"]["body_yaw"] == 66.0
 
 
 def test_normalize_motion_intent_v3_accepts_string_number_axis() -> None:

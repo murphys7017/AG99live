@@ -10,6 +10,7 @@ from ..protocol import (
     TYPE_ENGINE_CATALOG_MOTION,
     TYPE_ENGINE_MOTION_INTENT,
 )
+from .axis_constraints import apply_motion_constraints_to_intent_payload
 from .catalog_motion import (
     normalize_catalog_motion_payload,
     summarize_catalog_motion_payload,
@@ -221,31 +222,37 @@ def _repair_inline_motion_payload_with_fallback(
     changed_by_floor = floored_axes != repaired_axes
     if not added_axes and not replaced_axes and not changed_by_floor:
         if resource_id == normalize_motion_resource_id(plan.get("resource_id")):
-            return plan
+            repaired = dict(plan)
+        else:
+            repaired = dict(plan)
+            repaired["resource_id"] = resource_id
+            summary = dict(repaired.get("summary") or {})
+            if not resource_id:
+                summary["resource_id_rejected"] = True
+            repaired["summary"] = summary
+    else:
         repaired = dict(plan)
-        repaired["resource_id"] = resource_id
         summary = dict(repaired.get("summary") or {})
-        if not resource_id:
+        summary["axis_count"] = len(floored_axes)
+        summary["fallback_pose_id"] = fallback_pose_id
+        summary["fallback_score"] = fallback_decision.score
+        summary["fallback_used"] = fallback_decision.fallback_missing
+        summary["fallback_reasons"] = fallback_decision.reasons
+        summary["skeleton_repair_added_axes"] = added_axes
+        summary["skeleton_repair_replaced_axes"] = replaced_axes
+        if changed_by_floor:
+            summary["expressive_floor_applied"] = True
+        if not resource_id and normalize_motion_resource_id(plan.get("resource_id")):
             summary["resource_id_rejected"] = True
+        repaired["resource_id"] = resource_id
+        repaired["axes"] = floored_axes
+        repaired["fallback_pose_id"] = fallback_pose_id
         repaired["summary"] = summary
-        return repaired
-    repaired = dict(plan)
-    summary = dict(repaired.get("summary") or {})
-    summary["axis_count"] = len(floored_axes)
-    summary["fallback_pose_id"] = fallback_pose_id
-    summary["fallback_score"] = fallback_decision.score
-    summary["fallback_used"] = fallback_decision.fallback_missing
-    summary["fallback_reasons"] = fallback_decision.reasons
-    summary["skeleton_repair_added_axes"] = added_axes
-    summary["skeleton_repair_replaced_axes"] = replaced_axes
-    if changed_by_floor:
-        summary["expressive_floor_applied"] = True
-    if not resource_id and normalize_motion_resource_id(plan.get("resource_id")):
-        summary["resource_id_rejected"] = True
-    repaired["resource_id"] = resource_id
-    repaired["axes"] = floored_axes
-    repaired["fallback_pose_id"] = fallback_pose_id
-    repaired["summary"] = summary
+
+    repaired, _constraint_result = apply_motion_constraints_to_intent_payload(
+        payload=repaired,
+        semantic_profile=semantic_profile,
+    )
     return repaired
 
 
@@ -344,6 +351,10 @@ def _build_inline_fallback_motion_payload(
             "resource_id_rejected": bool(raw_resource_id and not resource_id),
         },
     }
+    payload, _constraint_result = apply_motion_constraints_to_intent_payload(
+        payload=payload,
+        semantic_profile=semantic_profile,
+    )
     valid, failure_reason = validate_motion_intent_payload(payload)
     if not valid:
         logger.warning("WIRING inline_motion fallback rejected: %s", failure_reason)

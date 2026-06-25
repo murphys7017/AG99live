@@ -6,6 +6,7 @@ import logging
 import re
 from typing import Any
 
+from .axis_constraints import apply_motion_constraints_to_intent_payload
 from ..prompts.motion_selector import (
     AXIS_NAMES,
     DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES,
@@ -501,7 +502,7 @@ def build_intent_from_selector_v3(
     except (TypeError, ValueError):
         raise ValueError("semantic_profile_revision_invalid") from None
 
-    return {
+    payload = {
         "schema_version": MOTION_INTENT_V3_SCHEMA_VERSION,
         "profile_id": str(semantic_profile.get("profile_id") or "").strip(),
         "profile_revision": profile_revision,
@@ -522,6 +523,11 @@ def build_intent_from_selector_v3(
             "intent_tag_count": len(intent_tags),
         },
     }
+    payload, _constraint_result = apply_motion_constraints_to_intent_payload(
+        payload=payload,
+        semantic_profile=semantic_profile,
+    )
+    return payload
 
 
 def _extract_json_object(text: str) -> dict[str, Any]:

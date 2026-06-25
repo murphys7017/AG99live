@@ -1076,6 +1076,63 @@ def test_broadcast_motion_payload_uses_intent_key_for_motion_intent(
     assert "plan" not in envelope["payload"]
 
 
+def test_broadcast_motion_payload_applies_engine_axis_constraints(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-intent",
+        },
+    )()
+    coordinator.runtime_state = _runtime_state_stub_with_motion_tuning_fallback()
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+
+    sent = asyncio.run(
+        coordinator.broadcast_motion_payload(
+            motion_payload={
+                "schema_version": "engine.motion_intent.v3",
+                "profile_id": "pet.semantic.v1",
+                "profile_revision": 2,
+                "model_id": "pet",
+                "intent_tags": ["test", "motion"],
+                "duration_hint_ms": 1200,
+                "axes": {
+                    "head_yaw": 72.0,
+                    "body_yaw": 28.0,
+                },
+                "summary": {
+                    "axis_count": 2,
+                },
+            },
+            mode="preview",
+            source="test.intent",
+            turn_id="turn-intent",
+        )
+    )
+
+    assert sent is True
+    envelope = sent_payloads[0]
+    intent = envelope["payload"]["intent"]
+    assert intent["axes"]["body_yaw"] == 43.15
+    assert intent["summary"]["axis_constraint_adjusted_axes"] == ["body_yaw"]
+
+
 def test_build_engine_motion_preview_uses_preview_envelope() -> None:
     builder = importlib.import_module("astrbot_plugin_ag99live_adapter.protocol.builder")
 

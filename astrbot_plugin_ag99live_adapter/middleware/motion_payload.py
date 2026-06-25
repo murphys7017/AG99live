@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from ..motion.axis_constraints import apply_motion_constraints_to_intent_payload
 from ..motion.fallback_pose import (
     build_fallback_pose_candidates,
     repair_motion_axes_with_fallback_pose,
@@ -195,7 +196,7 @@ def normalize_motion_arguments_payload(
         repair_replaced_axes=repair_replaced_axes,
     )
 
-    return {
+    payload = {
         "schema_version": MOTION_INTENT_V3_SCHEMA_VERSION,
         "profile_id": profile_id,
         "profile_revision": int(semantic_profile.get("revision") or 0),
@@ -208,7 +209,17 @@ def normalize_motion_arguments_payload(
         "fallback_pose_id": fallback_pose_id,
         "axes": validated_axes,
         "summary": summary,
-    }, reason
+    }
+    payload, constraint_result = apply_motion_constraints_to_intent_payload(
+        payload=payload,
+        semantic_profile=semantic_profile,
+    )
+    if constraint_result.adjusted_axes:
+        reason = append_resolution_reason(
+            reason,
+            "axis_constraints:" + ",".join(constraint_result.adjusted_axes),
+        )
+    return payload, reason
 
 
 def validate_motion_resource_id_for_payload(
