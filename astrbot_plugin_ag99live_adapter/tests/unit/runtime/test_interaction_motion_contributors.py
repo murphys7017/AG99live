@@ -673,6 +673,48 @@ def test_prompt_purpose_appears_in_runtime_payload(
         assert runtime.value["prompt_purpose"] == purpose
 
 
+def test_prompt_runtime_includes_previous_motion_variation_hint(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionPromptContributor()
+    event, _scheduled_calls = _build_event()
+    event.adapter.turn_coordinator._last_prompt_motion_snapshot = {
+        "schema_version": "engine.motion_intent.v3",
+        "resource_id": "serious_explain",
+        "axes": {
+            "head_yaw": 64.0,
+            "body_yaw": 43.0,
+        },
+    }
+    view = _build_view(phase="decision", purpose="persona_reply")
+
+    extensions = asyncio.run(contributor.collect(event, None, view))
+
+    runtime = next(item for item in extensions if item.mount == "context")
+    assert runtime.value["previous_motion_variation_instruction"]
+    assert runtime.value["previous_motion_key_axes"] == [
+        {
+            "axis_id": "head_yaw",
+            "value": 64.0,
+            "descriptor": "look_right",
+            "neutral": 50.0,
+        },
+        {
+            "axis_id": "body_yaw",
+            "value": 43.0,
+            "descriptor": "body_turn_left",
+            "neutral": 50.0,
+        },
+    ]
+    assert "head_yaw=look_right(64)" in runtime.value["previous_motion_summary"]
+    assert "body_yaw=body_turn_left(43)" in runtime.value["previous_motion_summary"]
+    assert "resource_id=serious_explain" in runtime.value["previous_motion_summary"]
+
+
 def test_prompt_fallback_candidates_are_representative_by_axis_descriptors(
     install_fake_astrbot,
     monkeypatch,

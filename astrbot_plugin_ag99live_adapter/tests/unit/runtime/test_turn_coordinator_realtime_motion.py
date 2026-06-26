@@ -1076,6 +1076,52 @@ def test_broadcast_motion_payload_uses_intent_key_for_motion_intent(
     assert "plan" not in envelope["payload"]
 
 
+def test_broadcast_motion_payload_records_prompt_motion_snapshot(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-intent",
+        },
+    )()
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+
+    sent = asyncio.run(
+        coordinator.broadcast_motion_payload(
+            motion_payload=_build_valid_motion_intent(),
+            mode="preview",
+            source="test.intent",
+            turn_id="turn-intent",
+        )
+    )
+
+    assert sent is True
+    assert sent_payloads
+    snapshot = coordinator.get_last_prompt_motion_snapshot()
+    assert snapshot is not None
+    assert snapshot["schema_version"] == "engine.motion_intent.v3"
+    assert snapshot["source"] == "test.intent"
+    assert snapshot["intent_tags"] == ["test", "motion"]
+    assert snapshot["axes"]["head_yaw"] == 62.0
+    assert snapshot["axes"]["mouth_smile"] == 64.0
+
+
 def test_broadcast_motion_payload_applies_engine_axis_constraints(
     install_fake_astrbot,
     monkeypatch,

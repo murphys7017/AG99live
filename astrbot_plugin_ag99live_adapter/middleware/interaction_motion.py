@@ -56,6 +56,7 @@ from ..prompts.semantic_axis_prompt import (
 
 AG99LIVE_PLUGIN_ID = "astrbot_plugin_ag99live_adapter"
 AG99LIVE_MOTION_EFFECT_NAME = "ag99live.motion"
+PROMPT_VARIATION_AXIS_IDS = ("head_yaw", "body_yaw")
 
 
 @dataclass(slots=True)
@@ -615,6 +616,7 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         "axes 只能使用当前 schema 里的轴 id，并且每个值都直接写成 number。"
         "axes 是本轮动作目标，不是角色全部参数的状态快照；没有明确方向或表演贡献的轴直接省略。"
         "优先让头部、身体和视线形成可见骨架，再用少量表情轴补充细节。"
+        "如果当前语义没有强烈要求重复，尽量不要让 head_yaw 和 body_yaw 与上一动作保持相同方向和近似幅度；优先回中、反向或明显改变幅度。"
         "普通回复也要给轻量姿态；明显转身、强调、回避、惊讶、调侃、开心或疑惑时，动作幅度要更明确。"
         "不要输出 choice、mode、motion_id、catalog、motion3、exp3、关键帧、时间曲线或播放文件引用。"
         "示例只展示结构和数值，不要照抄示例内容。"
@@ -952,10 +954,90 @@ def _build_motion_runtime_payload(
     *,
     view: Any,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "configured_generation_mode": _resolve_motion_generation_mode(runtime_state),
         "prompt_purpose": _resolve_prompt_purpose(view),
     }
+    previous_motion_payload = _build_previous_motion_variation_payload(
+        turn_coordinator,
+        runtime_state=runtime_state,
+    )
+    if previous_motion_payload:
+        payload.update(previous_motion_payload)
+    return payload
+
+
+def _build_previous_motion_variation_payload(
+    turn_coordinator: Any,
+    *,
+    runtime_state: Any,
+) -> dict[str, Any]:
+    snapshot = _resolve_previous_motion_prompt_snapshot(turn_coordinator)
+    if not isinstance(snapshot, dict):
+        return {}
+
+    axes = snapshot.get("axes")
+    if not isinstance(axes, dict):
+        return {}
+
+    semantic_profile = None
+    try:
+        semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
+    except Exception:  # noqa: BLE001
+        semantic_profile = None
+    axis_by_id = _build_prompt_axis_lookup(semantic_profile)
+
+    key_axes: list[dict[str, Any]] = []
+    summary_parts: list[str] = []
+    for axis_id in PROMPT_VARIATION_AXIS_IDS:
+        axis_value = axes.get(axis_id)
+        if not isinstance(axis_value, (int, float)) or isinstance(axis_value, bool):
+            continue
+        axis = axis_by_id.get(axis_id)
+        descriptor = _describe_fallback_pose_axis_value(axis_id, float(axis_value), axis=axis)
+        if not descriptor:
+            descriptor = "neutral_center"
+        neutral = _resolve_axis_neutral_value(axis) if isinstance(axis, dict) else 50.0
+        key_axes.append(
+            {
+                "axis_id": axis_id,
+                "value": round(float(axis_value), 2),
+                "descriptor": descriptor,
+                "neutral": round(neutral, 2),
+            }
+        )
+        summary_parts.append(f"{axis_id}={descriptor}({float(axis_value):g})")
+
+    if not key_axes:
+        return {}
+
+    resource_id = str(snapshot.get("resource_id") or "").strip()
+    summary_text = "上一动作关键轴：" + "，".join(summary_parts) + "。"
+    if resource_id:
+        summary_text += f" 上一动作 resource_id={resource_id}。"
+    summary_text += " 若本轮语义允许，避免重复相同方向和接近幅度，优先回中、反向或明显改变幅度。"
+    return {
+        "previous_motion_key_axes": key_axes,
+        "previous_motion_summary": summary_text,
+        "previous_motion_variation_instruction": (
+            "如果当前语义允许，避免在 head_yaw/body_yaw 上重复上一动作的相同方向与接近幅度。"
+        ),
+    }
+
+
+def _resolve_previous_motion_prompt_snapshot(turn_coordinator: Any) -> dict[str, Any] | None:
+    getter = getattr(turn_coordinator, "get_last_prompt_motion_snapshot", None)
+    snapshot = None
+    if callable(getter):
+        try:
+            snapshot = getter()
+        except Exception:  # noqa: BLE001
+            snapshot = None
+    if snapshot is None:
+        snapshot = getattr(turn_coordinator, "_last_prompt_motion_snapshot", None)
+    if not isinstance(snapshot, dict):
+        return None
+    return snapshot
 
 
 def _summarize_semantic_profile(

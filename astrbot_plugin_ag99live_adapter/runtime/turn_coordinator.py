@@ -156,6 +156,7 @@ class TurnCoordinator:
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._turn_timing: dict[str, Any] = {}
         self._dispatched_platform_motion_keys: set[str] = set()
+        self._last_prompt_motion_snapshot: dict[str, Any] | None = None
 
     async def handle_msg(self, raw_message: dict[str, Any]) -> None:
         """入站文本协议消息的顶层路由。
@@ -772,6 +773,10 @@ class TurnCoordinator:
             )
         )
         if sent:
+            self._record_prompt_motion_snapshot(
+                motion_payload=motion_payload,
+                source=payload["source"],
+            )
             schema_version, resolved_mode, axis_count, supplementary_count, failure_reason = (
                 _summarize_motion_payload(motion_payload)
             )
@@ -789,6 +794,56 @@ class TurnCoordinator:
                 failure_reason,
             )
         return sent
+
+    def get_last_prompt_motion_snapshot(self) -> dict[str, Any] | None:
+        snapshot = getattr(self, "_last_prompt_motion_snapshot", None)
+        if not isinstance(snapshot, dict):
+            return None
+        axes = snapshot.get("axes")
+        cloned_snapshot = dict(snapshot)
+        if isinstance(axes, dict):
+            cloned_snapshot["axes"] = dict(axes)
+        return cloned_snapshot
+
+    def _record_prompt_motion_snapshot(
+        self,
+        *,
+        motion_payload: dict[str, Any],
+        source: str,
+    ) -> None:
+        if str(motion_payload.get("schema_version") or "").strip() != "engine.motion_intent.v3":
+            return
+        axes = motion_payload.get("axes")
+        if not isinstance(axes, dict):
+            return
+
+        normalized_axes: dict[str, float] = {}
+        for axis_id, axis_value in axes.items():
+            if not isinstance(axis_value, (int, float)) or isinstance(axis_value, bool):
+                continue
+            normalized_axis_id = str(axis_id or "").strip()
+            if not normalized_axis_id:
+                continue
+            normalized_axes[normalized_axis_id] = round(float(axis_value), 4)
+        if not normalized_axes:
+            return
+
+        intent_tags = motion_payload.get("intent_tags")
+        normalized_tags = []
+        if isinstance(intent_tags, list):
+            normalized_tags = [
+                str(item).strip()
+                for item in intent_tags
+                if str(item).strip()
+            ][:6]
+
+        self._last_prompt_motion_snapshot = {
+            "schema_version": "engine.motion_intent.v3",
+            "source": str(source or "").strip(),
+            "resource_id": str(motion_payload.get("resource_id") or "").strip(),
+            "intent_tags": normalized_tags,
+            "axes": normalized_axes,
+        }
 
     async def _broadcast_platform_motion_client_objects(
         self,
