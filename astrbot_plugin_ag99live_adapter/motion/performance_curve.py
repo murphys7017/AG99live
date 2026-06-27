@@ -39,6 +39,7 @@ _DEFAULT_HINT = {
     "emphasis": "none",
     "energy": "medium",
 }
+_MAX_RETAINED_RESULTS = 64
 
 
 @dataclass(slots=True)
@@ -85,6 +86,7 @@ class PerformanceCurveRuntime:
         task = asyncio.create_task(self._run(key, request))
         self._tasks[key] = task
         self._requests[key] = request
+        self._prune_retained_results()
         return True
 
     def get_ready(self, *, turn_id: str | None, message_id: str | None) -> dict[str, Any] | None:
@@ -98,6 +100,17 @@ class PerformanceCurveRuntime:
         if not isinstance(result, dict):
             return None
         return dict(result)
+
+    def clear(self, *, turn_id: str | None, message_id: str | None) -> None:
+        key = _build_curve_key(turn_id, message_id)
+        if not key:
+            return
+        task = self._tasks.get(key)
+        if task is not None and not task.done():
+            task.cancel()
+        self._tasks.pop(key, None)
+        self._results.pop(key, None)
+        self._requests.pop(key, None)
 
     def fail_if_not_ready(
         self,
@@ -117,8 +130,8 @@ class PerformanceCurveRuntime:
             return False
         if task is not None and not task.done():
             task.cancel()
-        self._tasks.pop(key, None)
         self._record_failed(request, reason, latency_ms=0)
+        self.clear(turn_id=turn_id, message_id=message_id)
         return True
 
     def cancel_turn(self, turn_id: str | None) -> None:
@@ -139,6 +152,7 @@ class PerformanceCurveRuntime:
         provider = getattr(self.runtime_state, "selected_performance_curve_provider", None)
         if provider is None:
             self._record_failed(request, "provider_unavailable", latency_ms=0)
+            self._drop_cached_key(key)
             return
 
         prompt = build_performance_curve_prompt(
@@ -160,6 +174,7 @@ class PerformanceCurveRuntime:
             completion_text = str(getattr(response, "completion_text", "") or "").strip()
             hint = normalize_performance_curve_hint(_extract_json_object(completion_text))
             self._results[key] = hint
+            self._drop_current_task(key)
             self._record_event(
                 "performance_curve.resolved",
                 request=request,
@@ -174,10 +189,12 @@ class PerformanceCurveRuntime:
                 },
             )
         except asyncio.CancelledError:
+            self._drop_current_task(key)
             raise
         except Exception as exc:  # noqa: BLE001
             latency_ms = int((time.perf_counter() - started_at) * 1000)
             self._record_failed(request, str(exc), latency_ms=latency_ms)
+            self._drop_cached_key(key)
 
     def _record_failed(
         self,
@@ -220,6 +237,22 @@ class PerformanceCurveRuntime:
 
     def _is_enabled(self) -> bool:
         return bool(getattr(self.runtime_state, "enable_performance_curve", False))
+
+    def _drop_current_task(self, key: str) -> None:
+        current_task = asyncio.current_task()
+        if current_task is not None and self._tasks.get(key) is current_task:
+            self._tasks.pop(key, None)
+
+    def _drop_cached_key(self, key: str) -> None:
+        self._drop_current_task(key)
+        self._results.pop(key, None)
+        self._requests.pop(key, None)
+
+    def _prune_retained_results(self) -> None:
+        while len(self._results) > _MAX_RETAINED_RESULTS:
+            key = next(iter(self._results))
+            self._results.pop(key, None)
+            self._requests.pop(key, None)
 
 
 def normalize_performance_curve_hint(value: Any) -> dict[str, Any]:

@@ -53,6 +53,18 @@ export function resolveMotionTiming(
       options.speechActive === true && syncedDuration !== null
         ? resolvedDurationMs
         : Math.max(480, Math.min(resolvedDurationMs, 2200));
+    const curveTiming = resolvePerformanceCurveTiming({
+      durationMs: idleDurationMs,
+      hint: options.performanceCurveHint,
+    });
+    if (curveTiming) {
+      return {
+        timing: curveTiming,
+        resolvedDurationMs: idleDurationMs,
+        timingSource,
+        performanceCurveFamily: options.performanceCurveHint?.curve_family,
+      };
+    }
     return {
       timing: {
         duration_ms: idleDurationMs,

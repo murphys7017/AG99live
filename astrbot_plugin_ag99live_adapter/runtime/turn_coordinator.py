@@ -1072,6 +1072,9 @@ class TurnCoordinator:
                 ],
             },
         )
+        clear = getattr(runtime, "clear", None)
+        if callable(clear):
+            clear(turn_id=turn_id, message_id=message_id)
         return next_payload
 
     def _fail_pending_performance_curve_if_not_ready(

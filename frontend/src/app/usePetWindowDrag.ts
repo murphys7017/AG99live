@@ -1,8 +1,5 @@
 import { onBeforeUnmount, ref } from "vue";
 
-const DRAG_SMOOTHING_FACTOR = 0.42;
-const DRAG_SETTLE_DISTANCE_PX = 0.75;
-
 function setPetWindowDragging(dragging: boolean): void {
   const targetWindow = window as Window & {
     __ag99PetWindowDragging?: boolean;
@@ -39,35 +36,13 @@ export function usePetWindowDrag(): {
   let rafHandle: number | null = null;
   let lastKnownScreenX = 0;
   let lastKnownScreenY = 0;
-  let smoothedScreenX = 0;
-  let smoothedScreenY = 0;
-
-  function smoothDragCoordinate(current: number, target: number): number {
-    const delta = target - current;
-    if (Math.abs(delta) <= DRAG_SETTLE_DISTANCE_PX) {
-      return target;
-    }
-    return current + delta * DRAG_SMOOTHING_FACTOR;
-  }
-
-  function hasPendingDragDistance(): boolean {
-    return (
-      Math.abs(lastKnownScreenX - smoothedScreenX) > DRAG_SETTLE_DISTANCE_PX
-      || Math.abs(lastKnownScreenY - smoothedScreenY) > DRAG_SETTLE_DISTANCE_PX
-    );
-  }
 
   function scheduleDragFlush(): void {
     if (rafHandle !== null) return;
     rafHandle = requestAnimationFrame(() => {
       rafHandle = null;
       if (activePointerId.value === null) return;
-      smoothedScreenX = smoothDragCoordinate(smoothedScreenX, lastKnownScreenX);
-      smoothedScreenY = smoothDragCoordinate(smoothedScreenY, lastKnownScreenY);
-      window.ag99desktop?.updateWindowDrag(smoothedScreenX, smoothedScreenY);
-      if (hasPendingDragDistance()) {
-        scheduleDragFlush();
-      }
+      window.ag99desktop?.updateWindowDrag(lastKnownScreenX, lastKnownScreenY);
     });
   }
 
@@ -84,8 +59,6 @@ export function usePetWindowDrag(): {
     }
 
     cancelDragFlush();
-    smoothedScreenX = lastKnownScreenX;
-    smoothedScreenY = lastKnownScreenY;
     window.ag99desktop?.updateWindowDrag(lastKnownScreenX, lastKnownScreenY);
     setPetWindowDragging(false);
     activePointerId.value = null;
@@ -106,8 +79,6 @@ export function usePetWindowDrag(): {
     cancelDragFlush();
     lastKnownScreenX = event.screenX;
     lastKnownScreenY = event.screenY;
-    smoothedScreenX = event.screenX;
-    smoothedScreenY = event.screenY;
     setPetWindowDragging(true);
     window.ag99desktop?.setIgnoreMouseEvents(false);
     activePointerId.value = event.pointerId;

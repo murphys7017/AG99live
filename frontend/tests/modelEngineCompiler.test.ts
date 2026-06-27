@@ -789,6 +789,44 @@ function testPerformanceCurveHintAdjustsExpressiveTiming(): void {
   );
 }
 
+function testPerformanceCurveHintAdjustsSpeechIdleTiming(): void {
+  const profile = buildProfile();
+  const result = compileMotionIntent(buildIntent({
+    mode: "idle",
+    axes: {},
+    performance_curve_hint: {
+      schema_version: "ag99.performance_curve_hint.v1",
+      curve_family: "quick_in_hold_soft_out",
+      entry: "quick",
+      hold: "steady",
+      exit: "soft",
+      emphasis: "early",
+      energy: "medium",
+    },
+  }), {
+    model: buildModelWithVoiceFollowingProfile(profile),
+    targetDurationMs: 2400,
+    speechActive: true,
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(result.plan);
+  assert.deepEqual(result.plan?.timing, {
+    duration_ms: 2400,
+    blend_in_ms: 240,
+    hold_ms: 1632,
+    blend_out_ms: 528,
+  });
+  assert.equal(
+    result.diagnostics.warnings?.includes("performance_curve_applied:quick_in_hold_soft_out"),
+    true,
+  );
+}
+
 function testSpeechOnlyPayloadUsesSelectedModelProfile(): void {
   const profile = buildProfile();
   const payload = buildSpeechOnlyMotionPayload(
@@ -1012,6 +1050,7 @@ function run(): void {
   testCompileSkipsInvalidBindingsAndKeepsUsableParameters();
   testSpeechPoseAppliesForSpeechLinkedIdleIntent();
   testPerformanceCurveHintAdjustsExpressiveTiming();
+  testPerformanceCurveHintAdjustsSpeechIdleTiming();
   testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes();
   testSpeechOnlyPayloadUsesSelectedModelProfile();
   testSpeechOnlyPayloadRequiresVoiceFollowingProfile();
