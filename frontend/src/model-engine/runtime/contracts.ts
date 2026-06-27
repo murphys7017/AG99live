@@ -3,6 +3,7 @@ import type {
   CatalogMotionPayload,
   ModelSummary,
   MotionPlanPayload,
+  SemanticMotionIntent,
 } from "../../types/protocol.js";
 import type {
   InboundPayloadContext,
@@ -43,7 +44,13 @@ interface ModelEnginePlanStartedEventBase {
 
 export type ModelEnginePlanStartedEvent =
   | (ModelEnginePlanStartedEventBase & {
-    payloadKind: "semantic_intent" | "semantic_plan";
+    payloadKind: "semantic_intent";
+    intent: SemanticMotionIntent;
+    plan: MotionPlanPayload;
+    motion?: null;
+  })
+  | (ModelEnginePlanStartedEventBase & {
+    payloadKind: "semantic_plan";
     plan: MotionPlanPayload;
     motion?: null;
   })

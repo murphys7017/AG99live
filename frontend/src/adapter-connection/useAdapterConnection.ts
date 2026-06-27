@@ -18,6 +18,7 @@ import {
 import {
   clearPlaybackGroupContext as clearPlaybackGroup,
   interruptCurrentTurn as sendInterrupt,
+  sendMotionLabRawEvent as sendMotionLabRawEventAction,
   sendMotionPayloadPreview as sendMotionPreview,
   sendPlaybackFinished as sendPlaybackFinishedAction,
   sendSemanticAxisProfileSave as sendProfileSave,
@@ -95,6 +96,10 @@ export interface AdapterConnectionInstance {
   saveMotionTuningSample: (sample: DesktopMotionTuningSample) => boolean;
   deleteMotionTuningSample: (sampleId: string) => boolean;
   sendMotionPayloadPreview: (payload: unknown) => boolean;
+  sendMotionLabRawEvent: (
+    payload: Parameters<typeof sendMotionLabRawEventAction>[1],
+    turnId?: string | null,
+  ) => boolean;
   setMotionPreviewHandler: (handler: ((payload: unknown) => boolean) | null) => void;
   sendPlaybackFinishedForCurrentGroup: (
     turnId: string | null,
@@ -543,6 +548,13 @@ export function createAdapterConnection(
     return motionTuningAdapter?.deleteMotionTuningSample(sampleId) ?? false;
   }
 
+  function sendMotionLabRawEvent(
+    payload: Parameters<typeof sendMotionLabRawEventAction>[1],
+    turnId?: string | null,
+  ): boolean {
+    return sendMotionLabRawEventAction(outboundCtx, payload, turnId);
+  }
+
   function sendMotionPayloadPreview(payload: unknown): boolean {
     return sendMotionPreview(outboundCtx, payload, [
       SCHEMA_MOTION_INTENT_V2,
@@ -624,6 +636,7 @@ export function createAdapterConnection(
     saveMotionTuningSample,
     deleteMotionTuningSample,
     sendMotionPayloadPreview,
+    sendMotionLabRawEvent,
     setMotionPreviewHandler,
     sendPlaybackFinishedForCurrentGroup: sendPlaybackFinished,
     clearPlaybackGroupContext,

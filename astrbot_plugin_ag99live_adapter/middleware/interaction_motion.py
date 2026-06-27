@@ -53,6 +53,7 @@ from ..prompts.semantic_axis_prompt import (
     format_profile_axis_prompt_line,
     profile_prompt_axes,
 )
+from ..runtime.motion_lab import enqueue_motion_lab_raw_event
 
 AG99LIVE_PLUGIN_ID = "astrbot_plugin_ag99live_adapter"
 AG99LIVE_MOTION_EFFECT_NAME = "ag99live.motion"
@@ -1184,6 +1185,16 @@ async def _schedule_motion_from_interaction_result(
         reason=motion_reason,
         view=view,
     )
+    _record_motion_lab_interaction_event(
+        bundle,
+        event,
+        view=view,
+        phase=phase,
+        identity=identity,
+        assistant_text=assistant_text,
+        motion_payload=motion_payload,
+        motion_reason=motion_reason,
+    )
 
     policy = _resolve_motion_schedule_policy(
         event,
@@ -1342,6 +1353,66 @@ def _log_persona_effect_motion_resolution(
         ",".join(payload_axes_keys),
         payload_resource_id,
         payload_fallback_pose_id,
+    )
+
+
+def _record_motion_lab_interaction_event(
+    bundle: _MotionRuntimeBundle,
+    event: Any,
+    *,
+    view: Any,
+    phase: str,
+    identity: _FrontendIdentitySnapshot,
+    assistant_text: str,
+    motion_payload: dict[str, Any] | None,
+    motion_reason: str,
+) -> None:
+    profile = None
+    try:
+        profile = resolve_selected_semantic_axis_profile(runtime_state=bundle.runtime_state)
+    except Exception:  # noqa: BLE001
+        profile = None
+    effect_calls = [_thaw_snapshot_value(item) for item in _extract_effect_calls_from_view(view)]
+    turn_id = identity.scheduled_frontend_turn_id
+    base_event = {
+        "conversation_uid": getattr(getattr(bundle.turn_coordinator, "session_state", None), "client_uid", None),
+        "turn_id": turn_id,
+        "frontend_turn_id": identity.event_frontend_turn_id,
+        "source_route": "persona_effect",
+        "phase": phase,
+        "model_name": str((profile or {}).get("model_id") or "").strip(),
+        "profile_id": str((profile or {}).get("profile_id") or "").strip(),
+        "profile_revision": (profile or {}).get("revision"),
+        "assistant_text": assistant_text,
+    }
+    enqueue_motion_lab_raw_event(
+        bundle.runtime_state,
+        {
+            **base_event,
+            "event_type": "motion.persona_effect_received",
+            "payload_kind": "effect_calls",
+            "raw": {
+                "effect_calls": effect_calls,
+                "effect_summary": _summarize_ag99live_motion_effect_arguments(view),
+                "view_metadata": _thaw_snapshot_value(getattr(view, "metadata", None)),
+                "reply_plan": _thaw_snapshot_value(get_interaction_reply_plan(event)),
+                "original_user_text": _call_event_method(event, "get_extra", "ag99live_original_message_str", ""),
+            },
+        },
+    )
+    enqueue_motion_lab_raw_event(
+        bundle.runtime_state,
+        {
+            **base_event,
+            "event_type": "motion.intent_resolved",
+            "payload_kind": "engine.motion_intent.v3" if isinstance(motion_payload, dict) else "",
+            "raw": {
+                "motion_payload": motion_payload,
+                "motion_reason": motion_reason,
+                "effect_calls": effect_calls,
+                "assistant_text": assistant_text,
+            },
+        },
     )
 
 

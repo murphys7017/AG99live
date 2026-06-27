@@ -118,6 +118,26 @@ def test_parse_inbound_message_accepts_motion_tuning_sample_delete() -> None:
     assert envelope.payload["sample_id"] == "sample-1"
 
 
+def test_parse_inbound_message_accepts_motion_lab_raw_event() -> None:
+    envelope = parse_inbound_message(
+        _message(
+            "system.motion_lab_raw_event",
+            {
+                "event_type": "motion.playback_started",
+                "source_route": "split_after_reply",
+                "raw": {
+                    "turnId": "turn-test",
+                    "messageId": "message-test",
+                },
+            },
+        ),
+    )
+
+    assert envelope.type == "system.motion_lab_raw_event"
+    assert envelope.payload["event_type"] == "motion.playback_started"
+    assert envelope.payload["raw"]["messageId"] == "message-test"
+
+
 def test_parse_inbound_message_accepts_raw_audio_data_payload() -> None:
     envelope = parse_inbound_message(
         _message(

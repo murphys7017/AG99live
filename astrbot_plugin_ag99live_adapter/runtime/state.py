@@ -43,6 +43,7 @@ from ..prompts.motion_selector import (
     DEFAULT_MOTION_PROMPT_INSTRUCTION,
 )
 from .motion_state import MotionTuningStore
+from .motion_lab import MotionLabRawEventStore, MotionLabRecorder
 
 LIVE2D_SCAN_CACHE_VERSION = "voice_following_tuning.v2"
 
@@ -95,6 +96,7 @@ class RuntimeState:
             ensure_cache_writable=self._raise_if_runtime_cache_error_active,
             persist_cache=self._persist_runtime_cache_payload,
         )
+        self.motion_lab_recorder = self._build_motion_lab_recorder()
         self.realtime_motion_platform_context_enabled = True
         self.realtime_motion_platform_description = ""
         self.motion_prompt_instruction = DEFAULT_MOTION_PROMPT_INSTRUCTION
@@ -116,6 +118,15 @@ class RuntimeState:
         )
         self._motion_tuning_store.load_from_payload(self._runtime_cache_payload)
         self.last_sent_model_signature: str | None = None
+
+    def _build_motion_lab_recorder(self) -> MotionLabRecorder | None:
+        if self.runtime_cache_dir is None:
+            return None
+        return MotionLabRecorder(
+            store=MotionLabRawEventStore(self.runtime_cache_dir / "motion_lab.sqlite3"),
+            queue_size=1000,
+            batch_size=20,
+        )
 
     @property
     def motion_tuning_samples(self) -> list[dict[str, Any]]:

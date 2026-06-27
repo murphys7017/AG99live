@@ -23,6 +23,18 @@ import type {
 } from "../runtime/playbackReleaseQueue.js";
 import type { AdapterOutboundClient } from "./outboundClient.js";
 
+export interface MotionLabRawEventPayload {
+  event_type: string;
+  source_route?: string;
+  phase?: string;
+  model_name?: string;
+  profile_id?: string;
+  profile_revision?: number;
+  assistant_text?: string;
+  payload_kind?: string;
+  raw: Record<string, unknown>;
+}
+
 /**
  * 出站动作共享的轻量状态视图。
  *
@@ -334,6 +346,17 @@ export function sendPlaybackFinished(
   }
 
   ctx.outboundClient.send("control.playback_finished", payload, turnId);
+}
+
+export function sendMotionLabRawEvent(
+  ctx: OutboundActionContext,
+  payload: MotionLabRawEventPayload,
+  turnId?: string | null,
+): boolean {
+  if (!ctx.outboundClient.canSend()) {
+    return false;
+  }
+  return ctx.outboundClient.send("system.motion_lab_raw_event", payload, turnId);
 }
 
 /**

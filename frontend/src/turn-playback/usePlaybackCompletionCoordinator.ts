@@ -51,6 +51,20 @@ interface PlaybackCompletionCoordinatorOptions {
   clearSchedule?: (timer: unknown) => void;
   initialMotionPlaybackRecords?: readonly DesktopMotionPlaybackRecord[];
   maxMotionPlaybackRecords?: number;
+  onMotionLabRawEvent?: (
+    payload: {
+      event_type: string;
+      source_route?: string;
+      phase?: string;
+      model_name?: string;
+      profile_id?: string;
+      profile_revision?: number;
+      assistant_text?: string;
+      payload_kind?: string;
+      raw: Record<string, unknown>;
+    },
+    turnId?: string | null,
+  ) => void;
 }
 
 /**
@@ -369,6 +383,43 @@ export function usePlaybackCompletionCoordinator(
           mode: event.plan.mode,
           plan: cloneJson(event.plan),
         };
+    const playbackStartedPayload = {
+      event_type: "motion.playback_started",
+      source_route: event.startReason,
+      phase: "playback_started",
+      model_name: event.model?.name ?? "",
+      profile_id: event.payloadKind === "catalog_motion" ? "" : event.plan.profile_id,
+      profile_revision: event.payloadKind === "catalog_motion" ? undefined : event.plan.profile_revision,
+      assistant_text: record.assistantText,
+      payload_kind: event.payloadKind,
+      raw: {
+        record,
+        intent: event.payloadKind === "semantic_intent" ? cloneJson(event.intent) : null,
+        plan: event.payloadKind === "catalog_motion" ? null : cloneJson(event.plan),
+        motion: event.payloadKind === "catalog_motion" ? cloneJson(event.motion) : null,
+        diagnostics: event.diagnostics ? cloneJson(event.diagnostics) : null,
+        playerMessage: event.playerMessage,
+        runId: event.runId ?? "",
+        queuedDelayMs: event.queuedDelayMs,
+      },
+    };
+    options.onMotionLabRawEvent?.(playbackStartedPayload, event.turnId);
+    if (event.payloadKind === "semantic_intent") {
+      options.onMotionLabRawEvent?.({
+        ...playbackStartedPayload,
+        event_type: "motion.frontend_compiled",
+        phase: "frontend_compiled",
+        raw: {
+          record,
+          intent: cloneJson(event.intent),
+          plan: cloneJson(event.plan),
+          diagnostics: event.diagnostics ? cloneJson(event.diagnostics) : null,
+          playerMessage: event.playerMessage,
+          runId: event.runId ?? "",
+          queuedDelayMs: event.queuedDelayMs,
+        },
+      }, event.turnId);
+    }
     if (isDuplicateMotionPlaybackRecord(record, motionPlaybackRecords.value[0])) {
       motionPlaybackRecords.value = [
         record,
@@ -467,6 +518,23 @@ export function usePlaybackCompletionCoordinator(
     if (!currentMotionRun || currentMotionRun.runId !== event.runId) {
       return;
     }
+
+    const terminalSegment = findSegmentByKey(currentMotionRun.segmentKey);
+    options.onMotionLabRawEvent?.({
+      event_type: event.status === "completed"
+        ? "motion.playback_completed"
+        : "motion.playback_failed",
+      source_route: "frontend_motion_player",
+      phase: "playback_terminal",
+      raw: {
+        runId: event.runId,
+        status: event.status,
+        reason: event.reason ?? "",
+        segmentKey: currentMotionRun.segmentKey,
+        turnId: terminalSegment?.segment.turnId ?? null,
+        messageId: terminalSegment?.segment.messageId ?? "",
+      },
+    }, terminalSegment?.segment.turnId ?? null);
 
     if (event.status === "completed") {
       completeMotionSegmentByKey(currentMotionRun.segmentKey, "motion_completed_after_audio");

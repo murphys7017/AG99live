@@ -154,6 +154,7 @@ function startSemanticIntentPayload(
       onStarted: (plan, runId) => {
         notifiedStarted = true;
         dependencies.onPlanStarted?.({
+          intent: payload.intent,
           plan,
           model: selectedModel,
           messageId: context.messageId,
@@ -181,6 +182,7 @@ function startSemanticIntentPayload(
   const successMessage = buildSuccessMessage(context, dependencies);
   if (!notifiedStarted) {
     dependencies.onPlanStarted?.({
+      intent: payload.intent,
       plan: compileResult.plan,
       model: selectedModel,
       messageId: context.messageId,

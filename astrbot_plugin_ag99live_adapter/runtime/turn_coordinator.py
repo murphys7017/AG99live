@@ -101,6 +101,7 @@ from .message_utils import (
 from .image_diagnostics import (
     emit_image_input_diagnostics,
 )
+from .motion_lab import enqueue_motion_lab_raw_event
 
 class TurnCoordinator:
     """后端单连接的协议+轮次编排器。
@@ -305,6 +306,27 @@ class TurnCoordinator:
                 )
             )
 
+        self._record_motion_lab_raw_event(
+            event_type="turn.assistant_output",
+            turn_id=turn_id,
+            message_id=segment_message_id,
+            source_route="emit_message_chain",
+            phase="assistant_output",
+            assistant_text=reply_text or raw_reply_text,
+            raw={
+                "raw_reply_text": raw_reply_text,
+                "visible_reply_text": reply_text,
+                "text_count": len(texts),
+                "image_count": len(picture_paths),
+                "record_count": len(record_paths),
+                "inline_anim_detected": inline_anim_detected,
+                "inline_mode": inline_mode,
+                "inline_payload": inline_payload,
+                "platform_extras": platform_extras_dict,
+                "chat_context": self._motion_lab_chat_context(),
+            },
+        )
+
         if motion_generation_mode == "split_after_reply":
             logger.info(
                 "WIRING motion_plan turn_id=%s inline_anim_detected=%s route=split_after_reply",
@@ -499,6 +521,22 @@ class TurnCoordinator:
             self._get_dispatched_platform_motion_keys().clear()
             self._begin_turn_timing(message_obj.message_str)
             self.chat_buffer.add("user", message_obj.message_str)
+            self._record_motion_lab_raw_event(
+                event_type="turn.input_received",
+                turn_id=current_turn_id,
+                frontend_turn_id=normalized_turn_id,
+                message_id=getattr(message_obj, "message_id", None),
+                source_route="input.text",
+                phase="input",
+                user_text=message_obj.message_str,
+                raw={
+                    "backend_turn_id": backend_turn_id,
+                    "frontend_turn_id": normalized_turn_id,
+                    "message_str": message_obj.message_str,
+                    "raw_message": getattr(message_obj, "raw_message", None),
+                    "chat_context": self._motion_lab_chat_context(),
+                },
+            )
             await self._send_json(
                 build_control_turn_started(
                     turn_id=current_turn_id,
@@ -777,6 +815,21 @@ class TurnCoordinator:
                 motion_payload=motion_payload,
                 source=payload["source"],
             )
+            self._record_motion_lab_raw_event(
+                event_type="motion.egress_sent",
+                turn_id=resolved_turn_id,
+                message_id=message_id,
+                source_route=payload["source"],
+                phase="egress",
+                payload_kind=payload_key,
+                raw={
+                    "message_type": message_type,
+                    "mode": payload["mode"],
+                    "payload_key": payload_key,
+                    "motion_payload": motion_payload,
+                    "envelope_payload": payload,
+                },
+            )
             schema_version, resolved_mode, axis_count, supplementary_count, failure_reason = (
                 _summarize_motion_payload(motion_payload)
             )
@@ -844,6 +897,59 @@ class TurnCoordinator:
             "intent_tags": normalized_tags,
             "axes": normalized_axes,
         }
+
+    def _record_motion_lab_raw_event(
+        self,
+        *,
+        event_type: str,
+        turn_id: str | None = None,
+        frontend_turn_id: str | None = None,
+        message_id: str | None = None,
+        source_route: str = "",
+        phase: str = "",
+        user_text: str = "",
+        assistant_text: str = "",
+        payload_kind: str = "",
+        raw: dict[str, Any] | None = None,
+    ) -> bool:
+        runtime_state = getattr(self, "runtime_state", None)
+        if runtime_state is None:
+            return False
+        profile = None
+        try:
+            profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
+        except Exception:  # noqa: BLE001
+            profile = None
+        return enqueue_motion_lab_raw_event(
+            runtime_state,
+            {
+                "event_type": event_type,
+                "conversation_uid": getattr(self.session_state, "client_uid", None),
+                "turn_id": turn_id if turn_id is not None else self.session_state.current_turn_id,
+                "frontend_turn_id": frontend_turn_id,
+                "message_id": message_id,
+                "source_route": source_route,
+                "phase": phase,
+                "model_name": str((profile or {}).get("model_id") or "").strip(),
+                "profile_id": str((profile or {}).get("profile_id") or "").strip(),
+                "profile_revision": (profile or {}).get("revision"),
+                "user_text": user_text,
+                "assistant_text": assistant_text,
+                "payload_kind": payload_kind,
+                "raw": raw or {},
+            },
+        )
+
+    def _motion_lab_chat_context(self) -> list[dict[str, str]]:
+        chat_buffer = getattr(self, "chat_buffer", None)
+        to_list = getattr(chat_buffer, "to_list", None)
+        if not callable(to_list):
+            return []
+        try:
+            value = to_list()
+        except Exception:  # noqa: BLE001
+            return []
+        return value if isinstance(value, list) else []
 
     async def _broadcast_platform_motion_client_objects(
         self,

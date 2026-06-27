@@ -30,6 +30,7 @@ from .constants import (
     TYPE_INPUT_TEXT,
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HISTORY_LOAD,
+    TYPE_SYSTEM_MOTION_LAB_RAW_EVENT,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_DELETE,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE,
@@ -269,6 +270,19 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
         if not isinstance(sample_id, str) or not sample_id.strip():
             raise ProtocolError(
                 "`system.motion_tuning_sample_delete` requires `payload.sample_id` to be a non-empty string."
+            )
+        return
+
+    if message_type == TYPE_SYSTEM_MOTION_LAB_RAW_EVENT:
+        event_type = payload.get("event_type")
+        if not isinstance(event_type, str) or not event_type.strip():
+            raise ProtocolError(
+                "`system.motion_lab_raw_event` requires `payload.event_type` to be a non-empty string."
+            )
+        raw = payload.get("raw")
+        if not isinstance(raw, Mapping):
+            raise ProtocolError(
+                "`system.motion_lab_raw_event` requires `payload.raw` to be an object."
             )
         return
 

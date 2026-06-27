@@ -26,10 +26,12 @@ from ..protocol import (
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HISTORY_LIST_REQUEST,
     TYPE_SYSTEM_HISTORY_LOAD,
+    TYPE_SYSTEM_MOTION_LAB_RAW_EVENT,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_DELETE,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE,
 )
+from ..runtime.motion_lab import enqueue_motion_lab_raw_event
 
 SUPPORTED_SYSTEM_MESSAGE_TYPES = {
     TYPE_SYSTEM_BACKGROUND_LIST_REQUEST,
@@ -38,6 +40,7 @@ SUPPORTED_SYSTEM_MESSAGE_TYPES = {
     TYPE_SYSTEM_HISTORY_LOAD,
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HEARTBEAT,
+    TYPE_SYSTEM_MOTION_LAB_RAW_EVENT,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_DELETE,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE,
@@ -122,6 +125,27 @@ class FrontendSystemCommandHandler:
             )
         elif msg_type == TYPE_SYSTEM_HEARTBEAT:
             await send_json(build_system_heartbeat_ack())
+        elif msg_type == TYPE_SYSTEM_MOTION_LAB_RAW_EVENT:
+            enqueue_motion_lab_raw_event(
+                self._runtime_state,
+                {
+                    "event_type": payload.get("event_type"),
+                    "turn_id": message.turn_id,
+                    "frontend_turn_id": message.turn_id,
+                    "message_id": message.message_id,
+                    "source_route": payload.get("source_route") or "frontend",
+                    "phase": payload.get("phase") or "",
+                    "model_name": payload.get("model_name") or "",
+                    "profile_id": payload.get("profile_id") or "",
+                    "profile_revision": payload.get("profile_revision"),
+                    "assistant_text": payload.get("assistant_text") or "",
+                    "payload_kind": payload.get("payload_kind") or "",
+                    "raw": {
+                        "frontend_payload": payload,
+                        "envelope": message.raw,
+                    },
+                },
+            )
         elif msg_type == TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE:
             sample = payload.get("sample")
             try:

@@ -4,6 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 from astrbot_plugin_ag99live_adapter.live2d.semantic_axis_profile import SemanticAxisProfileError
+from astrbot_plugin_ag99live_adapter.services import frontend_system_service
 from astrbot_plugin_ag99live_adapter.services.frontend_system_service import FrontendSystemCommandHandler
 
 
@@ -505,3 +506,64 @@ def test_frontend_system_handler_delete_missing_motion_tuning_sample_fails() -> 
     assert sent_payloads[0]["type"] == "control.error"
     assert sent_payloads[0]["turn_id"] == "turn-delete-missing"
     assert sent_payloads[0]["payload"]["message"] == "motion_tuning_sample_not_found: missing-sample"
+
+
+def test_frontend_system_handler_records_motion_lab_raw_event(monkeypatch) -> None:
+    runtime_state = _RuntimeStateStub()
+    handler = FrontendSystemCommandHandler(
+        background_files_getter=lambda: [],
+        history_bridge=_HistoryBridgeStub(),
+        runtime_state=runtime_state,
+    )
+    recorded_events: list[dict[str, object]] = []
+    sent_payloads: list[dict] = []
+
+    def fake_enqueue_motion_lab_raw_event(runtime_state_arg, event: dict[str, object]) -> bool:
+        assert runtime_state_arg is runtime_state
+        recorded_events.append(event)
+        return True
+
+    async def send_json(payload: dict) -> bool:
+        sent_payloads.append(payload)
+        return True
+
+    async def refresh_and_send_model(*, force: bool = False) -> None:
+        raise AssertionError("motion lab raw event should not refresh model sync")
+
+    monkeypatch.setattr(
+        frontend_system_service,
+        "enqueue_motion_lab_raw_event",
+        fake_enqueue_motion_lab_raw_event,
+    )
+
+    asyncio.run(
+        handler.handle(
+            SimpleNamespace(
+                type="system.motion_lab_raw_event",
+                session_id="session",
+                turn_id="turn-playback",
+                message_id="message-playback",
+                raw={"type": "system.motion_lab_raw_event", "payload": {"event_type": "motion.playback_started"}},
+                payload={
+                    "event_type": "motion.playback_started",
+                    "source_route": "frontend_motion_player",
+                    "phase": "playback_started",
+                    "profile_id": "DemoModel.semantic.v1",
+                    "profile_revision": 3,
+                    "assistant_text": "好的",
+                    "payload_kind": "semantic_intent",
+                    "raw": {"runId": "run-1"},
+                },
+            ),
+            send_json=send_json,
+            refresh_and_send_model=refresh_and_send_model,
+        )
+    )
+
+    assert sent_payloads == []
+    assert len(recorded_events) == 1
+    assert recorded_events[0]["event_type"] == "motion.playback_started"
+    assert recorded_events[0]["turn_id"] == "turn-playback"
+    assert recorded_events[0]["message_id"] == "message-playback"
+    assert recorded_events[0]["profile_id"] == "DemoModel.semantic.v1"
+    assert recorded_events[0]["raw"]["frontend_payload"]["raw"] == {"runId": "run-1"}

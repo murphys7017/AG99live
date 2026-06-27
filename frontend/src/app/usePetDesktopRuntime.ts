@@ -76,6 +76,9 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     onAudioPlaybackStarted: (turnId, messageId) => {
       modelEngine.notifyAudioPlaybackStarted(turnId, messageId);
     },
+    onMotionLabRawEvent: (payload, turnId) => {
+      adapter.sendMotionLabRawEvent(cloneJson(payload), turnId);
+    },
     initialMotionPlaybackRecords,
   });
   const modelEngine = useModelEngine({
