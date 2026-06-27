@@ -587,6 +587,21 @@ export interface DirectParameterCalibrationProfile {
   axis_calibrations?: Partial<Record<DirectParameterAxisName, DirectParameterAxisCalibration | null>>;
 }
 
+export interface PerformanceCurveHint {
+  schema_version: "ag99.performance_curve_hint.v1";
+  curve_family:
+    | "default"
+    | "quick_in_hold_soft_out"
+    | "slow_in_hold_quick_out"
+    | "pulse_then_settle"
+    | "soft_breathe";
+  entry: "instant" | "quick" | "soft" | "slow";
+  hold: "short" | "steady" | "long" | "breathing";
+  exit: "quick" | "soft" | "slow";
+  emphasis: "none" | "early" | "middle" | "late" | "punctuated";
+  energy: "low" | "medium" | "high" | "teasing" | "calm";
+}
+
 /**
  * Normalized semantic motion intent consumed by ModelEngine.
  *
@@ -604,6 +619,7 @@ export interface NormalizedSemanticMotionIntent {
   emotion_label: string;
   duration_hint_ms?: number | null;
   fallback_pose_id?: string;
+  performance_curve_hint?: PerformanceCurveHint;
   axes: Record<string, number>;
   summary?: {
     axis_count?: number;

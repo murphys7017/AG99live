@@ -29,7 +29,13 @@ export function runTimingStage(
     durationHintMs: context.intent.duration_hint_ms ?? null,
     targetDurationMs: context.options.targetDurationMs ?? null,
     speechActive: context.options.speechActive === true,
+    performanceCurveHint: context.intent.performance_curve_hint ?? null,
   });
+  if (context.state.timing.performanceCurveFamily) {
+    context.state.warnings.push(
+      `performance_curve_applied:${context.state.timing.performanceCurveFamily}`,
+    );
+  }
 
   return { ok: true };
 }

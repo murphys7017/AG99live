@@ -1,8 +1,8 @@
 task:
   class: feature
   risk: medium
-  phase: motion_intent_v3_skeleton_axis_repair
-  scope: AG99live adapter semantic skeleton repair for middleware-first and inline-first motion intent paths
+  phase: performance_curve_timing_mvp
+  scope: AG99live independent performance curve hint layer and frontend timing resolution
 context:
   confidence: medium
   assumptions:
@@ -14,9 +14,12 @@ context:
   unresolved_questions:
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.
+    - For earlier curve generation during actual TTS synthesis, identify an AstrBot hook before message-chain Record creation; current MVP starts from emit_message_chain and never blocks playback.
 architecture:
   stability: evolving
   boundary_changes:
+    - Performance curve timing MVP adds an optional `performance_curve_hint` to `engine.motion_intent.v3`; frontend ModelEngine resolves it into existing timing fields rather than a new per-frame player.
+    - Performance curve generation uses the current turn chat Provider as an auxiliary call and does not add the curve request to AstrBot chat history.
     - fallback pose candidates can now include semantic metadata from motion catalog entries and key semantic axes derived from motion_resource_pool driver components.
     - middleware motion prompt now names axes as a semantic-axis target group instead of a plain field and exposes fallback candidate descriptions, scenarios, intensity, emotion bias, and key axes.
     - middleware motion prompt examples should use a small set of visible non-neutral axis values and show 2-4 non-default fallback pose candidates selected by axis/pose descriptors rather than coarse emotion labels.
@@ -26,12 +29,38 @@ architecture:
     - frontend motion diagnostics now surface pose_descriptors, outside_soft_range_axes, and skeleton_groups_present from semantic motion summaries so prompt tuning can be compared against runtime-visible motion coverage.
 verification:
   checks_run:
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_performance_curve.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_runtime_state_provider_analysis.py -q
+    - npm run test:model-engine
+    - npm run typecheck:renderer
+    - npm run typecheck:node
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py -q
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py -q
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_realtime_motion_plan.py -q
     - python -m compileall astrbot_plugin_ag99live_adapter
     - git diff --check
-  checks_failed: []
-  validation_gap: Live AstrBot plus Electron runtime still needs manual validation against fresh logs.
+  checks_failed:
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py -q currently has pre-existing axis expectation drift unrelated to this curve patch: body_yaw expected 66.0 but runtime returns 64.0, and expected 43.15 but runtime returns 45.15.
+  validation_gap: Live AstrBot plus Electron runtime still needs manual validation against fresh logs; earlier TTS hook integration remains future work.
 runtime:
-  mode: motion_intent_v3_skeleton_axis_repair
+  mode: performance_curve_timing_mvp
+backlog:
+  - id: motion_lab_history_sample_workbench
+    status: todo
+    summary: Build a standalone historical motion sample workbench separate from the current Action Lab sandbox.
+    notes:
+      - Query saved Motion Lab SQLite raw events instead of relying only on in-memory recent motionPlaybackRecords.
+      - Default the UI to useful training candidates such as turn.assistant_output, with optional expansion of all events for the same turn_id.
+      - Support filtering by event_type, turn_id, profile_id/profile_revision, and conversation context.
+      - Reuse the existing preview_motion_payload playback path so selected or adjusted historical samples can be observed on Live2D.
+      - Save curated and adjusted samples back into the existing motion tuning sample flow for later LLM reference or training export.
+  - id: performance_curve_timing_layer
+    status: mvp_implemented
+    summary: Add an independent small-model performance curve layer for speech-synchronized motion timing.
+    notes:
+      - Performance curve generation now follows the current turn chat Provider; no dedicated provider_id or model-timeout config is exposed.
+      - Curve generation and lookup are bound by turn_id plus message_id to keep multi-segment turns aligned.
+      - Symbolic curve hints are generated asynchronously after assistant text is available and never block TTS or playback; if not ready before motion egress, the task is cancelled and playback falls back to default timing.
+      - Requested, resolved, failed, and attached curve events are stored in Motion Lab SQLite raw events.
+      - Frontend ModelEngine evaluates the hint against real audio duration and falls back to current timing when missing or invalid.
+      - Future work: use an earlier AstrBot hook to start curve generation before Record/audio chain creation, and consider full per-frame curve playback only after MVP behavior is validated.

@@ -9,6 +9,7 @@ export interface MotionTimingResolution {
   timing: DirectParameterPlanTiming;
   resolvedDurationMs: number;
   timingSource: "hint" | "audio_sync" | "default";
+  performanceCurveFamily?: string;
 }
 
 export interface SupplementaryBuildDiagnostics {

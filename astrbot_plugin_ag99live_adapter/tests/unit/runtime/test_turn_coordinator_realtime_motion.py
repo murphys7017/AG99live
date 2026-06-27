@@ -1179,6 +1179,72 @@ def test_broadcast_motion_payload_applies_engine_axis_constraints(
     assert intent["summary"]["axis_constraint_adjusted_axes"] == ["body_yaw"]
 
 
+def test_broadcast_motion_payload_attaches_ready_performance_curve_hint(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+
+    class PerformanceCurveRuntimeStub:
+        def get_ready(self, *, turn_id: str | None, message_id: str | None):
+            assert turn_id == "turn-intent"
+            assert message_id == "message-intent"
+            return {
+                "schema_version": "ag99.performance_curve_hint.v1",
+                "curve_family": "quick_in_hold_soft_out",
+                "entry": "quick",
+                "hold": "steady",
+                "exit": "soft",
+                "emphasis": "early",
+                "energy": "medium",
+            }
+
+        def start(self, request):
+            raise AssertionError("ready curve hint should not restart provider request")
+
+    runtime_state = _runtime_state_stub()
+    runtime_state.performance_curve_runtime = PerformanceCurveRuntimeStub()
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-intent",
+        },
+    )()
+    coordinator.runtime_state = runtime_state
+    coordinator._current_performance_curve_context = {
+        "assistant_text": "hello",
+    }
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+
+    sent = asyncio.run(
+        coordinator.broadcast_motion_payload(
+            motion_payload=_build_valid_motion_intent(),
+            mode="preview",
+            source="test.intent",
+            turn_id="turn-intent",
+            message_id="message-intent",
+        )
+    )
+
+    assert sent is True
+    intent = sent_payloads[0]["payload"]["intent"]
+    assert intent["performance_curve_hint"]["curve_family"] == "quick_in_hold_soft_out"
+    assert intent["performance_curve_hint"]["entry"] == "quick"
+
+
 def test_build_engine_motion_preview_uses_preview_envelope() -> None:
     builder = importlib.import_module("astrbot_plugin_ag99live_adapter.protocol.builder")
 

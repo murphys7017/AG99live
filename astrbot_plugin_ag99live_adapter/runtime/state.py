@@ -25,6 +25,7 @@ from ..motion.action_llm_filter import (
     count_selected_channels,
     parse_action_filter_decision,
 )
+from ..motion.performance_curve import PerformanceCurveRuntime
 from ..live2d.cache.runtime_cache import (
     build_live2d_directory_md5,
     load_live2d_runtime_cache,
@@ -76,6 +77,7 @@ class RuntimeState:
 
         self.stt_provider_id = ""
         self.motion_analysis_provider_id = ""
+        self.enable_performance_curve = False
         self.enable_action_llm_filter = True
         self.action_llm_filter_timeout_seconds = 12.0
         self.action_llm_filter_min_selected_channels = 3
@@ -107,6 +109,8 @@ class RuntimeState:
         self.default_persona: dict[str, Any] | None = None
         self.selected_stt_provider: STTProvider | None = None
         self.selected_motion_analysis_provider: Provider | None = None
+        self.selected_performance_curve_provider: Provider | None = None
+        self.performance_curve_runtime = PerformanceCurveRuntime(runtime_state=self)
         self._live2d_runtime_cache_path = (
             self.runtime_cache_dir / "live2d_runtime_cache.json"
             if self.runtime_cache_dir is not None
@@ -222,6 +226,7 @@ class RuntimeState:
 
         previous_stt_provider_id = self.stt_provider_id
         previous_motion_analysis_provider_id = self.motion_analysis_provider_id
+        previous_enable_performance_curve = self.enable_performance_curve
         previous_vad_model = self.vad_model
         previous_vad_config = dict(self.vad_config)
 
@@ -242,6 +247,9 @@ class RuntimeState:
             self.plugin_config,
             "motion_analysis_provider_id",
             "",
+        )
+        self.enable_performance_curve = bool(
+            _plugin_config_get(self.plugin_config, "enable_performance_curve", False)
         )
         self.enable_action_llm_filter = bool(
             _plugin_config_get(self.plugin_config, "enable_action_llm_filter", True)
@@ -382,6 +390,7 @@ class RuntimeState:
         provider_config_changed = (
             previous_stt_provider_id != self.stt_provider_id
             or previous_motion_analysis_provider_id != self.motion_analysis_provider_id
+            or previous_enable_performance_curve != self.enable_performance_curve
         )
         provider_binding_missing = (
             (self.stt_provider_id and self.selected_stt_provider is None)
@@ -394,18 +403,29 @@ class RuntimeState:
                 not self.motion_analysis_provider_id
                 and self.selected_motion_analysis_provider is not None
             )
+            or (
+                self.enable_performance_curve
+                and self.selected_performance_curve_provider is None
+            )
+            or (
+                not self.enable_performance_curve
+                and self.selected_performance_curve_provider is not None
+            )
         )
         if provider_config_changed or provider_binding_missing:
             logger.info(
                 "Provider runtime settings changed, reloading provider bindings "
-                "(stt: %s -> %s, motion_analysis: %s -> %s)",
+                "(stt: %s -> %s, motion_analysis: %s -> %s, performance_curve_enabled: %s -> %s)",
                 previous_stt_provider_id or "<default>",
                 self.stt_provider_id or "<default>",
                 previous_motion_analysis_provider_id or "<default>",
                 self.motion_analysis_provider_id or "<default>",
+                previous_enable_performance_curve,
+                self.enable_performance_curve,
             )
             self.selected_stt_provider = None
             self.selected_motion_analysis_provider = None
+            self.selected_performance_curve_provider = None
             self.load_selected_providers()
 
         return (
@@ -427,6 +447,7 @@ class RuntimeState:
         if reload_providers:
             self.selected_stt_provider = None
             self.selected_motion_analysis_provider = None
+            self.selected_performance_curve_provider = None
             self.load_selected_providers()
 
         await self._refresh_base_action_analysis_async()
@@ -482,6 +503,23 @@ class RuntimeState:
             if isinstance(provider, Provider):
                 self.selected_motion_analysis_provider = provider
                 logger.info("Using current chat provider for motion analysis: %s", provider.meta().id)
+
+        if self.enable_performance_curve:
+            try:
+                provider = self.plugin_context.get_using_provider(umo=self.client_uid)
+            except Exception as exc:
+                logger.warning("Failed to get current chat provider for performance curve: %s", exc)
+                provider = None
+            if isinstance(provider, Provider):
+                self.selected_performance_curve_provider = provider
+                logger.info(
+                    "Using current chat provider for performance curve: %s",
+                    provider.meta().id,
+                )
+            else:
+                logger.warning(
+                    "Current chat provider unavailable; performance curve generation is disabled for now.",
+                )
 
     def build_current_model_payload(
         self,

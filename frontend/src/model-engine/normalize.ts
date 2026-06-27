@@ -1,6 +1,7 @@
 import type {
   CatalogMotionPayload,
   DirectParameterPlanTiming,
+  PerformanceCurveHint,
   SemanticMotionIntent,
   SemanticParameterPlan,
 } from "../types/protocol.js";
@@ -60,6 +61,20 @@ function normalizeDynamicAxesV3(value: unknown): Record<string, number> | null {
 
   return Object.keys(axes).length > 0 ? axes : null;
 }
+
+const PERFORMANCE_CURVE_SCHEMA_VERSION = "ag99.performance_curve_hint.v1";
+const CURVE_FAMILIES = [
+  "default",
+  "quick_in_hold_soft_out",
+  "slow_in_hold_quick_out",
+  "pulse_then_settle",
+  "soft_breathe",
+] as const;
+const CURVE_ENTRIES = ["instant", "quick", "soft", "slow"] as const;
+const CURVE_HOLDS = ["short", "steady", "long", "breathing"] as const;
+const CURVE_EXITS = ["quick", "soft", "slow"] as const;
+const CURVE_EMPHASES = ["none", "early", "middle", "late", "punctuated"] as const;
+const CURVE_ENERGIES = ["low", "medium", "high", "teasing", "calm"] as const;
 
 export function normalizeTurnId(turnId: string | null): string | null {
   const normalized = normalizeText(turnId);
@@ -141,10 +156,38 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
       emotion_label: emotionLabel,
       duration_hint_ms: durationHintMs,
       fallback_pose_id: normalizeText(value.fallback_pose_id) || undefined,
+      performance_curve_hint: normalizePerformanceCurveHint(value.performance_curve_hint),
       axes,
       summary: normalizeMotionVisibilitySummary(value.summary),
     },
   };
+}
+
+function normalizePerformanceCurveHint(value: unknown): PerformanceCurveHint | undefined {
+  if (!isObject(value)) {
+    return undefined;
+  }
+  if (normalizeText(value.schema_version) !== PERFORMANCE_CURVE_SCHEMA_VERSION) {
+    return undefined;
+  }
+  return {
+    schema_version: PERFORMANCE_CURVE_SCHEMA_VERSION,
+    curve_family: normalizeEnum(value.curve_family, CURVE_FAMILIES, "default"),
+    entry: normalizeEnum(value.entry, CURVE_ENTRIES, "soft"),
+    hold: normalizeEnum(value.hold, CURVE_HOLDS, "steady"),
+    exit: normalizeEnum(value.exit, CURVE_EXITS, "soft"),
+    emphasis: normalizeEnum(value.emphasis, CURVE_EMPHASES, "none"),
+    energy: normalizeEnum(value.energy, CURVE_ENERGIES, "medium"),
+  };
+}
+
+function normalizeEnum<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  fallback: T,
+): T {
+  const normalized = normalizeText(value).toLowerCase();
+  return allowed.includes(normalized as T) ? normalized as T : fallback;
 }
 
 function parseCatalogMotionPayload(value: unknown): ParseResult<CatalogMotionPayload> {

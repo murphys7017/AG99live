@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..prompts.semantic_axis_prompt import profile_prompt_axes
+from .performance_curve import normalize_performance_curve_hint
 
 LOGGER = logging.getLogger(__name__)
 
@@ -286,8 +287,16 @@ def normalize_motion_intent_v3_payload(intent: Any) -> dict[str, Any]:
         normalized_axes[axis_id] = round(value, 4)
 
     duration_hint_ms = _normalize_duration_hint_ms(intent.get("duration_hint_ms"))
+    performance_curve_hint = None
+    if "performance_curve_hint" in intent:
+        try:
+            performance_curve_hint = normalize_performance_curve_hint(
+                intent.get("performance_curve_hint")
+            )
+        except ValueError:
+            performance_curve_hint = None
 
-    return {
+    normalized_intent = {
         "schema_version": MOTION_INTENT_V3_SCHEMA_VERSION,
         "profile_id": profile_id,
         "profile_revision": profile_revision_raw,
@@ -304,6 +313,9 @@ def normalize_motion_intent_v3_payload(intent: Any) -> dict[str, Any]:
             "intent_tag_count": len(intent_tags),
         },
     }
+    if performance_curve_hint is not None:
+        normalized_intent["performance_curve_hint"] = performance_curve_hint
+    return normalized_intent
 
 
 def normalize_motion_intent_tags(value: Any) -> list[str]:

@@ -414,6 +414,36 @@ function testNormalizeMotionPayloadAcceptsV3FlatAxes(): void {
   });
 }
 
+function testNormalizeMotionPayloadAcceptsPerformanceCurveHint(): void {
+  const result = normalizeMotionPayload({
+    schema_version: "engine.motion_intent.v3",
+    profile_id: "profile-1",
+    profile_revision: 1,
+    model_id: "model-1",
+    mode: "expressive",
+    intent_tags: ["happy", "preview"],
+    emotion_label: "happy",
+    duration_hint_ms: 1000,
+    performance_curve_hint: {
+      schema_version: "ag99.performance_curve_hint.v1",
+      curve_family: "quick_in_hold_soft_out",
+      entry: "quick",
+      hold: "steady",
+      exit: "soft",
+      emphasis: "early",
+      energy: "medium",
+    },
+    axes: {
+      head_yaw: 62,
+      mouth_smile: 84,
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.payload.kind, "semantic_intent");
+  assert.equal(result.payload.intent.performance_curve_hint?.curve_family, "quick_in_hold_soft_out");
+}
+
 function testNormalizeMotionPayloadRejectsV3NestedAxes(): void {
   const result = normalizeMotionPayload({
     schema_version: "engine.motion_intent.v3",
@@ -723,6 +753,42 @@ function testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes(): void {
   );
 }
 
+function testPerformanceCurveHintAdjustsExpressiveTiming(): void {
+  const profile = buildProfile();
+  const result = compileMotionIntent(buildIntent({
+    performance_curve_hint: {
+      schema_version: "ag99.performance_curve_hint.v1",
+      curve_family: "quick_in_hold_soft_out",
+      entry: "quick",
+      hold: "steady",
+      exit: "soft",
+      emphasis: "early",
+      energy: "medium",
+    },
+  }), {
+    model: buildModel(profile),
+    targetDurationMs: 2400,
+    speechActive: true,
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(result.plan);
+  assert.deepEqual(result.plan?.timing, {
+    duration_ms: 2400,
+    blend_in_ms: 240,
+    hold_ms: 1632,
+    blend_out_ms: 528,
+  });
+  assert.equal(
+    result.diagnostics.warnings?.includes("performance_curve_applied:quick_in_hold_soft_out"),
+    true,
+  );
+}
+
 function testSpeechOnlyPayloadUsesSelectedModelProfile(): void {
   const profile = buildProfile();
   const payload = buildSpeechOnlyMotionPayload(
@@ -936,6 +1002,7 @@ function testRegistryCoreStageOrder(): void {
 function run(): void {
   testRegistryCoreStageOrder();
   testNormalizeMotionPayloadAcceptsV3FlatAxes();
+  testNormalizeMotionPayloadAcceptsPerformanceCurveHint();
   testNormalizeMotionPayloadRejectsV3NestedAxes();
   testMotionStartNotifiesStartedWhenPlayerOmitsCallback();
   testExplicitPrimaryAxisIsNotOverwrittenByCoupling();
@@ -944,6 +1011,7 @@ function run(): void {
   testCompileSalvagesValidAxesWhenIntentContainsManyInvalidAxes();
   testCompileSkipsInvalidBindingsAndKeepsUsableParameters();
   testSpeechPoseAppliesForSpeechLinkedIdleIntent();
+  testPerformanceCurveHintAdjustsExpressiveTiming();
   testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes();
   testSpeechOnlyPayloadUsesSelectedModelProfile();
   testSpeechOnlyPayloadRequiresVoiceFollowingProfile();

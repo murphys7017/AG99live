@@ -81,6 +81,12 @@ from ..motion.motion_intent import (
     normalize_motion_intent_payload,
     resolve_selected_semantic_axis_profile,
 )
+from ..motion.performance_curve import (
+    PerformanceCurveInput,
+    attach_performance_curve_hint,
+    extract_assistant_reply_keywords,
+    summarize_motion_for_curve,
+)
 from ..motion.inline_motion import (
     INLINE_ANIM_START_PATTERN,
     build_model_visible_user_text as _build_model_visible_user_text,
@@ -158,6 +164,7 @@ class TurnCoordinator:
         self._turn_timing: dict[str, Any] = {}
         self._dispatched_platform_motion_keys: set[str] = set()
         self._last_prompt_motion_snapshot: dict[str, Any] | None = None
+        self._current_performance_curve_context: dict[str, Any] | None = None
 
     async def handle_msg(self, raw_message: dict[str, Any]) -> None:
         """入站文本协议消息的顶层路由。
@@ -326,6 +333,20 @@ class TurnCoordinator:
                 "chat_context": self._motion_lab_chat_context(),
             },
         )
+        self._current_performance_curve_context = {
+            "turn_id": turn_id,
+            "message_id": segment_message_id,
+            "assistant_text": reply_text or raw_reply_text,
+            "assistant_reply_keywords": extract_assistant_reply_keywords(reply_text or raw_reply_text),
+            "chat_context": self._motion_lab_chat_context(),
+            "platform_extras": platform_extras_dict,
+        }
+        self._start_performance_curve_request(
+            motion_payload=_resolve_initial_performance_curve_motion_payload(
+                platform_extras=platform_extras_dict,
+                inline_payload=inline_payload,
+            )
+        )
 
         if motion_generation_mode == "split_after_reply":
             logger.info(
@@ -424,9 +445,11 @@ class TurnCoordinator:
             self._mark_turn_timing("audio_payload_sent_at")
             self._mark_turn_synthesizing()
             self._mark_turn_playing()
+            self._current_performance_curve_context = None
             return
 
         self._mark_turn_playing()
+        self._current_performance_curve_context = None
 
     async def close_turn_output_queue(self) -> None:
         """发 control.synth_finished。
@@ -784,6 +807,17 @@ class TurnCoordinator:
                 payload=motion_payload,
                 semantic_profile=semantic_profile,
             )
+            motion_payload = self._attach_ready_performance_curve_hint(
+                motion_payload=motion_payload,
+                turn_id=turn_id,
+                message_id=message_id,
+            )
+            if "performance_curve_hint" not in motion_payload:
+                self._fail_pending_performance_curve_if_not_ready(
+                    turn_id=turn_id,
+                    message_id=message_id,
+                    reason="not_ready_before_motion_egress",
+                )
 
         message_type = _resolve_engine_motion_message_type(motion_payload)
         if not message_type:
@@ -950,6 +984,115 @@ class TurnCoordinator:
         except Exception:  # noqa: BLE001
             return []
         return value if isinstance(value, list) else []
+
+    def _start_performance_curve_request(
+        self,
+        *,
+        motion_payload: dict[str, Any] | None,
+    ) -> bool:
+        context = getattr(self, "_current_performance_curve_context", None)
+        if not isinstance(context, dict):
+            return False
+        runtime_state = getattr(self, "runtime_state", None)
+        runtime = getattr(runtime_state, "performance_curve_runtime", None)
+        start = getattr(runtime, "start", None)
+        if not callable(start):
+            return False
+
+        turn_id = str(context.get("turn_id") or "").strip()
+        message_id = str(context.get("message_id") or "").strip()
+        assistant_text = str(context.get("assistant_text") or "").strip()
+        if not turn_id or not assistant_text:
+            return False
+
+        motion_summary = summarize_motion_for_curve(motion_payload)
+        motion_intent_tags = [
+            str(item).strip()
+            for item in motion_summary.get("intent_tags", [])
+            if str(item).strip()
+        ]
+        request = PerformanceCurveInput(
+            turn_id=turn_id,
+            message_id=message_id,
+            assistant_text=assistant_text,
+            assistant_reply_keywords=[
+                str(item).strip()
+                for item in context.get("assistant_reply_keywords", [])
+                if str(item).strip()
+            ],
+            motion_intent_tags=motion_intent_tags,
+            motion_effect_summary=motion_summary,
+            chat_context=[
+                item
+                for item in context.get("chat_context", [])
+                if isinstance(item, dict)
+            ],
+        )
+        return bool(start(request))
+
+    def _attach_ready_performance_curve_hint(
+        self,
+        *,
+        motion_payload: dict[str, Any],
+        turn_id: str | None,
+        message_id: str | None,
+    ) -> dict[str, Any]:
+        runtime_state = getattr(self, "runtime_state", None)
+        runtime = getattr(runtime_state, "performance_curve_runtime", None)
+        get_ready = getattr(runtime, "get_ready", None)
+        if not callable(get_ready):
+            return motion_payload
+
+        hint = get_ready(turn_id=turn_id, message_id=message_id)
+        if not isinstance(hint, dict):
+            return motion_payload
+
+        next_payload, attached_hint = attach_performance_curve_hint(motion_payload, hint)
+        if attached_hint is None:
+            return motion_payload
+        self._record_motion_lab_raw_event(
+            event_type="performance_curve.attached",
+            turn_id=turn_id,
+            message_id=message_id,
+            source_route="performance_curve_provider",
+            phase="performance_curve",
+            assistant_text=str(
+                (getattr(self, "_current_performance_curve_context", None) or {}).get(
+                    "assistant_text",
+                    "",
+                )
+            ),
+            payload_kind="ag99.performance_curve_hint.v1",
+            raw={
+                "curve_hint": attached_hint,
+                "motion_intent_tags": [
+                    str(item).strip()
+                    for item in motion_payload.get("intent_tags", [])
+                    if str(item).strip()
+                ],
+            },
+        )
+        return next_payload
+
+    def _fail_pending_performance_curve_if_not_ready(
+        self,
+        *,
+        turn_id: str | None,
+        message_id: str | None,
+        reason: str,
+    ) -> bool:
+        runtime_state = getattr(self, "runtime_state", None)
+        runtime = getattr(runtime_state, "performance_curve_runtime", None)
+        fail_if_not_ready = getattr(runtime, "fail_if_not_ready", None)
+        if not callable(fail_if_not_ready):
+            return False
+        return bool(
+            fail_if_not_ready(
+                turn_id=turn_id,
+                message_id=message_id,
+                reason=reason,
+            )
+        )
 
     async def _broadcast_platform_motion_client_objects(
         self,
@@ -1172,6 +1315,24 @@ class TurnCoordinator:
         if not normalized:
             raise ValueError("Interactive protocol messages require a non-empty turn_id.")
         return normalized
+
+
+def _resolve_initial_performance_curve_motion_payload(
+    *,
+    platform_extras: dict[str, Any],
+    inline_payload: Any,
+) -> dict[str, Any] | None:
+    if isinstance(inline_payload, dict):
+        return inline_payload
+    for motion_object in _iter_platform_motion_client_objects(platform_extras):
+        motion_payload = motion_object.get("motion_payload")
+        if not isinstance(motion_payload, dict):
+            motion_payload = motion_object.get("intent")
+        if not isinstance(motion_payload, dict):
+            motion_payload = motion_object.get("plan")
+        if isinstance(motion_payload, dict):
+            return motion_payload
+    return None
 
 
 def _coerce_perf_counter(value: Any) -> float | None:
