@@ -1245,6 +1245,155 @@ def test_broadcast_motion_payload_attaches_ready_performance_curve_hint(
     assert intent["performance_curve_hint"]["entry"] == "quick"
 
 
+def test_broadcast_motion_payload_defers_performance_curve_failure_until_audio(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+
+    class PerformanceCurveRuntimeStub:
+        def get_ready(self, *, turn_id: str | None, message_id: str | None):
+            assert turn_id == "turn-intent"
+            assert message_id == "message-intent"
+            return None
+
+        def fail_if_not_ready(self, *, turn_id: str | None, message_id: str | None, reason: str):
+            raise AssertionError("performance curve should not fail at motion egress")
+
+    runtime_state = _runtime_state_stub()
+    runtime_state.performance_curve_runtime = PerformanceCurveRuntimeStub()
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-intent",
+        },
+    )()
+    coordinator.runtime_state = runtime_state
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+
+    sent = asyncio.run(
+        coordinator.broadcast_motion_payload(
+            motion_payload=_build_valid_motion_intent(),
+            mode="preview",
+            source="test.intent",
+            turn_id="turn-intent",
+            message_id="message-intent",
+        )
+    )
+
+    assert sent is True
+    intent = sent_payloads[0]["payload"]["intent"]
+    assert "performance_curve_hint" not in intent
+    pending = coordinator._pending_performance_curve_motion
+    assert pending["turn_id"] == "turn-intent"
+    assert pending["message_id"] == "message-intent"
+
+
+def test_flush_performance_curve_before_audio_resends_pending_motion(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+
+    class PerformanceCurveRuntimeStub:
+        ready = False
+        failed = False
+        cleared = False
+
+        def get_ready(self, *, turn_id: str | None, message_id: str | None):
+            assert turn_id == "turn-intent"
+            assert message_id == "message-intent"
+            if not self.ready:
+                return None
+            return {
+                "schema_version": "ag99.performance_curve_hint.v1",
+                "curve_family": "quick_in_hold_soft_out",
+                "entry": "quick",
+                "hold": "steady",
+                "exit": "soft",
+                "emphasis": "early",
+                "energy": "medium",
+            }
+
+        def clear(self, *, turn_id: str | None, message_id: str | None):
+            assert turn_id == "turn-intent"
+            assert message_id == "message-intent"
+            self.cleared = True
+
+        def fail_if_not_ready(self, *, turn_id: str | None, message_id: str | None, reason: str):
+            self.failed = True
+            return True
+
+    curve_runtime = PerformanceCurveRuntimeStub()
+    runtime_state = _runtime_state_stub()
+    runtime_state.performance_curve_runtime = curve_runtime
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-intent",
+        },
+    )()
+    coordinator.runtime_state = runtime_state
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+
+    first_sent = asyncio.run(
+        coordinator.broadcast_motion_payload(
+            motion_payload=_build_valid_motion_intent(),
+            mode="preview",
+            source="test.intent",
+            turn_id="turn-intent",
+            message_id="message-intent",
+        )
+    )
+    assert first_sent is True
+    assert "performance_curve_hint" not in sent_payloads[0]["payload"]["intent"]
+
+    curve_runtime.ready = True
+    flushed = asyncio.run(
+        coordinator._flush_performance_curve_motion_before_audio(
+            turn_id="turn-intent",
+            message_id="message-intent",
+        )
+    )
+
+    assert flushed is True
+    assert curve_runtime.failed is False
+    assert curve_runtime.cleared is True
+    assert coordinator._pending_performance_curve_motion is None
+    assert len(sent_payloads) == 2
+    updated_envelope = sent_payloads[1]
+    assert updated_envelope["turn_id"] == "turn-intent"
+    assert updated_envelope["message_id"] == "message-intent"
+    assert updated_envelope["payload"]["intent"]["performance_curve_hint"]["entry"] == "quick"
+    assert updated_envelope["payload"]["source"] == "test.intent.performance_curve_update"
+
+
 def test_build_engine_motion_preview_uses_preview_envelope() -> None:
     builder = importlib.import_module("astrbot_plugin_ag99live_adapter.protocol.builder")
 

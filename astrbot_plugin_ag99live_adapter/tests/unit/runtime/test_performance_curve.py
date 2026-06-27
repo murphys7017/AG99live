@@ -134,7 +134,7 @@ def test_performance_curve_runtime_fails_not_ready_request(
         failed = runtime.fail_if_not_ready(
             turn_id="turn-1",
             message_id="message-1",
-            reason="not_ready_before_motion_egress",
+            reason="not_ready_before_audio_egress",
         )
         return failed, runtime.get_ready(turn_id="turn-1", message_id="message-1")
 

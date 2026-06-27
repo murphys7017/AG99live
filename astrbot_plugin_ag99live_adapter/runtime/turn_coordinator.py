@@ -165,6 +165,7 @@ class TurnCoordinator:
         self._dispatched_platform_motion_keys: set[str] = set()
         self._last_prompt_motion_snapshot: dict[str, Any] | None = None
         self._current_performance_curve_context: dict[str, Any] | None = None
+        self._pending_performance_curve_motion: dict[str, Any] | None = None
 
     async def handle_msg(self, raw_message: dict[str, Any]) -> None:
         """入站文本协议消息的顶层路由。
@@ -426,6 +427,10 @@ class TurnCoordinator:
                     exc,
                 )
                 raise
+            await self._flush_performance_curve_motion_before_audio(
+                turn_id=turn_id,
+                message_id=segment_message_id,
+            )
             await self._send_json(
                 build_output_audio(
                     turn_id=turn_id,
@@ -449,6 +454,11 @@ class TurnCoordinator:
             return
 
         self._mark_turn_playing()
+        self._fail_pending_performance_curve_motion(
+            turn_id=turn_id,
+            message_id=segment_message_id,
+            reason="audio_absent_before_curve_check",
+        )
         self._current_performance_curve_context = None
 
     async def close_turn_output_queue(self) -> None:
@@ -812,11 +822,18 @@ class TurnCoordinator:
                 turn_id=turn_id,
                 message_id=message_id,
             )
-            if "performance_curve_hint" not in motion_payload:
-                self._fail_pending_performance_curve_if_not_ready(
+            if "performance_curve_hint" in motion_payload:
+                self._clear_pending_performance_curve_motion(
                     turn_id=turn_id,
                     message_id=message_id,
-                    reason="not_ready_before_motion_egress",
+                )
+            else:
+                self._record_pending_performance_curve_motion(
+                    motion_payload=motion_payload,
+                    mode=mode,
+                    source=source,
+                    turn_id=turn_id,
+                    message_id=message_id,
                 )
 
         message_type = _resolve_engine_motion_message_type(motion_payload)
@@ -1076,6 +1093,112 @@ class TurnCoordinator:
         if callable(clear):
             clear(turn_id=turn_id, message_id=message_id)
         return next_payload
+
+    def _record_pending_performance_curve_motion(
+        self,
+        *,
+        motion_payload: dict[str, Any],
+        mode: str,
+        source: str,
+        turn_id: str | None,
+        message_id: str | None,
+    ) -> None:
+        normalized_turn_id = str(turn_id or "").strip()
+        normalized_message_id = str(message_id or "").strip()
+        if (
+            not normalized_turn_id
+            or not normalized_message_id
+            or str(motion_payload.get("schema_version") or "").strip() != "engine.motion_intent.v3"
+        ):
+            return
+        self._pending_performance_curve_motion = {
+            "turn_id": normalized_turn_id,
+            "message_id": normalized_message_id,
+            "mode": str(mode or "preview").strip() or "preview",
+            "source": str(source or "engine.motion_payload").strip() or "engine.motion_payload",
+            "motion_payload": dict(motion_payload),
+        }
+
+    def _clear_pending_performance_curve_motion(
+        self,
+        *,
+        turn_id: str | None,
+        message_id: str | None,
+    ) -> None:
+        pending = getattr(self, "_pending_performance_curve_motion", None)
+        if not isinstance(pending, dict):
+            return
+        if (
+            str(pending.get("turn_id") or "").strip() == str(turn_id or "").strip()
+            and str(pending.get("message_id") or "").strip() == str(message_id or "").strip()
+        ):
+            self._pending_performance_curve_motion = None
+
+    async def _flush_performance_curve_motion_before_audio(
+        self,
+        *,
+        turn_id: str | None,
+        message_id: str | None,
+    ) -> bool:
+        pending = getattr(self, "_pending_performance_curve_motion", None)
+        if not isinstance(pending, dict):
+            return False
+        normalized_turn_id = str(turn_id or "").strip()
+        normalized_message_id = str(message_id or "").strip()
+        if (
+            str(pending.get("turn_id") or "").strip() != normalized_turn_id
+            or str(pending.get("message_id") or "").strip() != normalized_message_id
+        ):
+            return False
+
+        motion_payload = pending.get("motion_payload")
+        if not isinstance(motion_payload, dict):
+            self._pending_performance_curve_motion = None
+            return False
+
+        updated_payload = self._attach_ready_performance_curve_hint(
+            motion_payload=dict(motion_payload),
+            turn_id=normalized_turn_id,
+            message_id=normalized_message_id,
+        )
+        if "performance_curve_hint" not in updated_payload:
+            self._fail_pending_performance_curve_motion(
+                turn_id=normalized_turn_id,
+                message_id=normalized_message_id,
+                reason="not_ready_before_audio_egress",
+            )
+            return False
+
+        self._pending_performance_curve_motion = None
+        return await self.broadcast_motion_payload(
+            motion_payload=updated_payload,
+            mode=str(pending.get("mode") or "preview"),
+            source=f"{str(pending.get('source') or 'engine.motion_payload')}.performance_curve_update",
+            turn_id=normalized_turn_id,
+            message_id=normalized_message_id,
+        )
+
+    def _fail_pending_performance_curve_motion(
+        self,
+        *,
+        turn_id: str | None,
+        message_id: str | None,
+        reason: str,
+    ) -> bool:
+        pending = getattr(self, "_pending_performance_curve_motion", None)
+        if not isinstance(pending, dict):
+            return False
+        if (
+            str(pending.get("turn_id") or "").strip() != str(turn_id or "").strip()
+            or str(pending.get("message_id") or "").strip() != str(message_id or "").strip()
+        ):
+            return False
+        self._pending_performance_curve_motion = None
+        return self._fail_pending_performance_curve_if_not_ready(
+            turn_id=turn_id,
+            message_id=message_id,
+            reason=reason,
+        )
 
     def _fail_pending_performance_curve_if_not_ready(
         self,
