@@ -168,29 +168,29 @@ VOICE_FOLLOWING_PROFILE_SCHEMA_VERSION = "ag99.voice_following_profile.v1"
 MODEL_SUMMARY_SCHEMA_VERSION = "live2d_model_summary.v1"
 PARAMETER_ACTION_MAX_ATOMS_PER_PARAMETER = 24
 
-# Speech-following style tuning. Keep head/body values in the same group
-# synchronized; the head effective amplitude must remain larger than the body.
+# Speech-following style tuning. Keep head/body present, but make the layer
+# feel like restrained speech inertia instead of a full-body rhythmic sway.
 VOICE_FOLLOWING_TUNING: dict[str, dict[str, Any]] = {
-    # Cute lateral sway: primary speaking motion, intentionally most visible.
+    # Lateral sway: visible on the head, subtle and slower on the body.
     "roll": {
-        "frequency_hz": 1.65,
+        "frequency_hz": {"head": 0.56, "body": 0.30},
         "phase": 0.35,
-        "head": {"amplitude": 8.5, "weight": 1.0},
-        "body": {"amplitude": 6.0, "weight": 0.85},
+        "head": {"amplitude": 2.8, "weight": 0.75},
+        "body": {"amplitude": 1.2, "weight": 0.45},
     },
-    # Horizontal twist: supporting motion, kept smaller to avoid an uncanny look.
+    # Horizontal twist: supporting motion, kept smaller than roll.
     "yaw": {
-        "frequency_hz": 1.55,
+        "frequency_hz": {"head": 0.48, "body": 0.26},
         "phase": 0.0,
-        "head": {"amplitude": 6.5, "weight": 1.0},
-        "body": {"amplitude": 4.5, "weight": 0.85},
+        "head": {"amplitude": 2.2, "weight": 0.65},
+        "body": {"amplitude": 0.9, "weight": 0.35},
     },
     # Vertical nodding: deliberately restrained during ordinary speech.
     "pitch": {
-        "frequency_hz": {"head": 0.68, "body": 0.55},
+        "frequency_hz": {"head": 0.48, "body": 0.30},
         "phase": {"head": 0.35, "body": 0.55},
-        "head": {"amplitude": 1.2, "weight": 0.35},
-        "body": {"amplitude": 0.8, "weight": 0.25},
+        "head": {"amplitude": 1.0, "weight": 0.35},
+        "body": {"amplitude": 0.5, "weight": 0.20},
     },
 }
 

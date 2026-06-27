@@ -12,6 +12,16 @@ interface PlaybackFinishedCall {
   reason?: string;
 }
 
+const TEST_SEMANTIC_INTENT = {
+  schema_version: "engine.motion_intent.v3",
+  profile_id: "profile-test",
+  profile_revision: 1,
+  model_id: "model-test",
+  mode: "idle",
+  emotion_label: "test",
+  axes: {},
+} as never;
+
 function createHarness() {
   const sessionStore = useTurnPlaybackSessionStore();
   const playbackFinishedCalls: PlaybackFinishedCall[] = [];
@@ -188,6 +198,7 @@ async function testMotionCompletionWritesCorrectSegment(): Promise<void> {
     playbackTurnId: "turn-1",
     model: null,
     payloadKind: "semantic_intent",
+    intent: TEST_SEMANTIC_INTENT,
     startReason: "test",
     queuedDelayMs: 0,
     diagnostics: null,
@@ -230,6 +241,7 @@ async function testMotionHandoffCompletesPreviousSegmentAndFinishesCurrent(): Pr
     playbackTurnId: "turn-1",
     model: null,
     payloadKind: "semantic_intent" as const,
+    intent: TEST_SEMANTIC_INTENT,
     startReason: "test",
     queuedDelayMs: 0,
     diagnostics: null,
@@ -358,6 +370,7 @@ async function testDuplicateMotionPlaybackRecordIsDeduped(): Promise<void> {
     playbackTurnId: "turn-1",
     model: null,
     payloadKind: "semantic_intent" as const,
+    intent: TEST_SEMANTIC_INTENT,
     startReason: "test",
     queuedDelayMs: 0,
     diagnostics: null,
@@ -575,7 +588,7 @@ async function testStaleRunIdDoesNotCorruptCurrentSegment(): Promise<void> {
   // Start msg-a
   h.coordinator.recordMotionPlayback({
     messageId: "msg-a", turnId: "turn-1", playbackTurnId: "turn-1",
-    model: null, payloadKind: "semantic_intent", startReason: "test",
+    model: null, payloadKind: "semantic_intent", intent: TEST_SEMANTIC_INTENT, startReason: "test",
     queuedDelayMs: 0, diagnostics: null, playerMessage: "playing",
     runId: "run-a",
     plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
@@ -584,7 +597,7 @@ async function testStaleRunIdDoesNotCorruptCurrentSegment(): Promise<void> {
   // Handoff to msg-b (this completes msg-a via handoff)
   h.coordinator.recordMotionPlayback({
     messageId: "msg-b", turnId: "turn-1", playbackTurnId: "turn-1",
-    model: null, payloadKind: "semantic_intent", startReason: "test",
+    model: null, payloadKind: "semantic_intent", intent: TEST_SEMANTIC_INTENT, startReason: "test",
     queuedDelayMs: 0, diagnostics: null, playerMessage: "playing",
     runId: "run-b",
     plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
@@ -624,7 +637,7 @@ async function testMultiSegmentMotionCompletionsAreSegmentScoped(): Promise<void
   // Start and complete msg-a
   h.coordinator.recordMotionPlayback({
     messageId: "msg-a", turnId: "turn-1", playbackTurnId: "turn-1",
-    model: null, payloadKind: "semantic_intent", startReason: "test",
+    model: null, payloadKind: "semantic_intent", intent: TEST_SEMANTIC_INTENT, startReason: "test",
     queuedDelayMs: 0, diagnostics: null, playerMessage: "playing",
     runId: "multi-a",
     plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
@@ -635,7 +648,7 @@ async function testMultiSegmentMotionCompletionsAreSegmentScoped(): Promise<void
   // Start and complete msg-b
   h.coordinator.recordMotionPlayback({
     messageId: "msg-b", turnId: "turn-1", playbackTurnId: "turn-1",
-    model: null, payloadKind: "semantic_intent", startReason: "test",
+    model: null, payloadKind: "semantic_intent", intent: TEST_SEMANTIC_INTENT, startReason: "test",
     queuedDelayMs: 0, diagnostics: null, playerMessage: "playing",
     runId: "multi-b",
     plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
@@ -659,7 +672,7 @@ async function testInterruptStoppedMarksMotionFailed(): Promise<void> {
 
   h.coordinator.recordMotionPlayback({
     messageId: "msg-a", turnId: "turn-1", playbackTurnId: "turn-1",
-    model: null, payloadKind: "semantic_intent", startReason: "test",
+    model: null, payloadKind: "semantic_intent", intent: TEST_SEMANTIC_INTENT, startReason: "test",
     queuedDelayMs: 0, diagnostics: null, playerMessage: "playing",
     runId: "interrupt-a",
     plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
@@ -695,7 +708,7 @@ async function testRecordMotionPlaybackPrefersEventTurnSession(): Promise<void> 
 
   h.coordinator.recordMotionPlayback({
     messageId: "shared-msg", turnId: "turn-2", playbackTurnId: "turn-2",
-    model: null, payloadKind: "semantic_intent", startReason: "test",
+    model: null, payloadKind: "semantic_intent", intent: TEST_SEMANTIC_INTENT, startReason: "test",
     queuedDelayMs: 0, diagnostics: null, playerMessage: "playing",
     runId: "shared-turn-2",
     plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,

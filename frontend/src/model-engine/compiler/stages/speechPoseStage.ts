@@ -205,19 +205,19 @@ function resolveVoiceFollowingFrequencyHz(
 function defaultVoiceFollowingFrequencyHz(channelName: string): number {
   switch (channelName) {
     case "head_pitch":
-      return 0.68;
+      return 0.48;
     case "body_pitch":
-      return 0.55;
+      return 0.30;
     case "head_yaw":
-      return 1.35;
+      return 0.48;
     case "head_roll":
-      return 1.45;
+      return 0.56;
     case "body_yaw":
-      return 1.15;
+      return 0.26;
     case "body_roll":
-      return 1.2;
+      return 0.30;
     default:
-      return 1.2;
+      return 0.40;
   }
 }
 

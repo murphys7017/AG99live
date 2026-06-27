@@ -117,6 +117,8 @@ const SPEECH_AUDIO_GAIN_FLOOR = 0.16;
 const SPEECH_AUDIO_GAIN_SPAN = 1.24;
 const SPEECH_AUDIO_GAIN_MAX = 1.4;
 const SPEECH_AUDIO_PITCH_GAIN_MAX = 1.0;
+const BODY_SPEECH_FOLLOW_RESPONSE_PER_SECOND = 2.2;
+const BODY_SPEECH_FOLLOW_MAX_SPEED_PER_SECOND = 4.0;
 
 interface DirectParameterAxisBinding {
   axisName: string;
@@ -164,6 +166,8 @@ interface DirectSemanticParameterBinding {
   } | null;
   parameterId: CubismIdHandle;
   parameterIndex: number;
+  smoothedSpeechTargetValue: number | null;
+  lastSpeechTargetElapsedMs: number | null;
 }
 
 interface DirectParameterCalibrationRange {
@@ -1630,6 +1634,8 @@ export class LAppModel extends CubismUserModel {
           : null,
         parameterId: resolved.parameterId,
         parameterIndex: resolved.parameterIndex,
+        smoothedSpeechTargetValue: null,
+        lastSpeechTargetElapsedMs: null,
       });
     }
 
@@ -1725,10 +1731,18 @@ export class LAppModel extends CubismUserModel {
       }
 
       const baseValue = this._model.getParameterValueByIndex(item.parameterIndex);
-      const frameTargetValue = this.resolveSemanticBindingFrameTarget(
+      const rawFrameTargetValue = this.resolveSemanticBindingFrameTarget(
         item,
         elapsedMs,
         effectiveTargetValue,
+        minValue,
+        maxValue,
+      );
+      const frameTargetValue = this.resolveSmoothedSpeechBodyTarget(
+        item,
+        rawFrameTargetValue,
+        baseValue,
+        elapsedMs,
         minValue,
         maxValue,
       );
@@ -2045,6 +2059,61 @@ export class LAppModel extends CubismUserModel {
     return Math.max(minValue, Math.min(maxValue, modulatedValue));
   }
 
+  private resolveSmoothedSpeechBodyTarget(
+    item: DirectSemanticParameterBinding,
+    rawTargetValue: number,
+    currentValue: number,
+    elapsedMs: number,
+    minValue: number,
+    maxValue: number,
+  ): number {
+    if (!this.isBodySpeechFollowingBinding(item)) {
+      return rawTargetValue;
+    }
+
+    const previousValue = Number.isFinite(item.smoothedSpeechTargetValue)
+      ? Number(item.smoothedSpeechTargetValue)
+      : currentValue;
+    const previousElapsedMs = Number.isFinite(item.lastSpeechTargetElapsedMs)
+      ? Number(item.lastSpeechTargetElapsedMs)
+      : null;
+    item.lastSpeechTargetElapsedMs = elapsedMs;
+
+    if (previousElapsedMs === null || elapsedMs <= previousElapsedMs) {
+      const initialized = this.clampNumber(previousValue, minValue, maxValue);
+      item.smoothedSpeechTargetValue = initialized;
+      return initialized;
+    }
+
+    const deltaSeconds = Math.max(0, (elapsedMs - previousElapsedMs) / 1000);
+    const response = 1 - Math.exp(-deltaSeconds * BODY_SPEECH_FOLLOW_RESPONSE_PER_SECOND);
+    const lowPassValue = previousValue + (rawTargetValue - previousValue) * response;
+    const maxDelta = BODY_SPEECH_FOLLOW_MAX_SPEED_PER_SECOND * deltaSeconds;
+    const speedLimitedValue = this.clampNumber(
+      lowPassValue,
+      previousValue - maxDelta,
+      previousValue + maxDelta,
+    );
+    const nextValue = this.clampNumber(speedLimitedValue, minValue, maxValue);
+    item.smoothedSpeechTargetValue = nextValue;
+    return nextValue;
+  }
+
+  private isBodySpeechFollowingBinding(item: DirectSemanticParameterBinding): boolean {
+    if (!item.source.startsWith("speech_pose")) {
+      return false;
+    }
+    const channelName = this.resolveSpeechFollowingChannelName(item.axisId);
+    return channelName.startsWith("body_")
+      || item.parameterIdRaw.toLowerCase().includes("body");
+  }
+
+  private resolveSpeechFollowingChannelName(axisId: string): string {
+    return axisId.startsWith("voice_following.")
+      ? axisId.slice("voice_following.".length).split("|")[0]
+      : axisId;
+  }
+
   private resolveSemanticLifeMotion(
     item: DirectSemanticParameterBinding,
   ): {
@@ -2099,9 +2168,7 @@ export class LAppModel extends CubismUserModel {
   }
 
   private resolveSpeechPosePhase(axisId: string): number {
-    const channelName = axisId.startsWith("voice_following.")
-      ? axisId.slice("voice_following.".length).split("|")[0]
-      : axisId;
+    const channelName = this.resolveSpeechFollowingChannelName(axisId);
 
     let hash = 0;
     for (let index = 0; index < channelName.length; index += 1) {
@@ -2111,24 +2178,22 @@ export class LAppModel extends CubismUserModel {
   }
 
   private resolveSpeechPoseFrequency(axisId: string): number {
-    const channelName = axisId.startsWith("voice_following.")
-      ? axisId.slice("voice_following.".length).split("|")[0]
-      : axisId;
+    const channelName = this.resolveSpeechFollowingChannelName(axisId);
     switch (channelName) {
       case "head_pitch":
       case "pitch":
       case "body_pitch":
-        return channelName === "body_pitch" ? 0.55 : 0.68;
+        return channelName === "body_pitch" ? 0.30 : 0.48;
       case "head_yaw":
-        return 1.35;
+        return 0.48;
       case "head_roll":
-        return 1.45;
+        return 0.56;
       case "body_yaw":
-        return 1.15;
+        return 0.26;
       case "body_roll":
-        return 1.2;
+        return 0.30;
       default:
-        return axisId.toLowerCase().includes("pitch") ? 0.65 : 1.2;
+        return axisId.toLowerCase().includes("pitch") ? 0.42 : 0.40;
     }
   }
 

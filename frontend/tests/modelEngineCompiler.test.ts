@@ -292,10 +292,10 @@ function buildModelWithVoiceFollowingProfile(profile: SemanticAxisProfile): Mode
         layer: "head",
         neutral: 0,
         output_range: { min: -30, max: 30 },
-        amplitude: 6,
-        weight: 1,
+        amplitude: 2.8,
+        weight: 0.75,
         phase: 0,
-        frequency_hz: 1.45,
+        frequency_hz: 0.56,
         direction: -1,
       },
       head_pitch: {
@@ -305,10 +305,10 @@ function buildModelWithVoiceFollowingProfile(profile: SemanticAxisProfile): Mode
         layer: "head",
         neutral: 0,
         output_range: { min: -30, max: 30 },
-        amplitude: 1.2,
+        amplitude: 1.0,
         weight: 0.35,
         phase: 0.35,
-        frequency_hz: 0.68,
+        frequency_hz: 0.48,
       },
       body_yaw: {
         channel: "body_yaw",
@@ -317,10 +317,10 @@ function buildModelWithVoiceFollowingProfile(profile: SemanticAxisProfile): Mode
         layer: "body",
         neutral: 0,
         output_range: { min: -10, max: 10 },
-        amplitude: 3.2,
-        weight: 0.7,
+        amplitude: 0.9,
+        weight: 0.35,
         phase: 0.2,
-        frequency_hz: 1.15,
+        frequency_hz: 0.26,
       },
       body_roll: {
         channel: "body_roll",
@@ -329,10 +329,10 @@ function buildModelWithVoiceFollowingProfile(profile: SemanticAxisProfile): Mode
         layer: "body",
         neutral: 0,
         output_range: { min: -10, max: 10 },
-        amplitude: 3,
-        weight: 0.7,
+        amplitude: 1.2,
+        weight: 0.45,
         phase: 0.5,
-        frequency_hz: 1.2,
+        frequency_hz: 0.30,
         direction: -1,
       },
     },
@@ -706,12 +706,12 @@ function testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes(): void {
   assert.deepEqual(headRoll?.modulation, {
     kind: "speech_pose_cycle",
     neutral: 0,
-    amplitude: 6,
+    amplitude: 2.8,
     phase: 0,
-    frequency_hz: 1.45,
+    frequency_hz: 0.56,
     direction: -1,
   });
-  assert.equal(headPitch?.modulation?.frequency_hz, 0.68);
+  assert.equal(headPitch?.modulation?.frequency_hz, 0.48);
   assert.ok(
     (headPitch?.modulation?.frequency_hz ?? 0) < (headRoll?.modulation?.frequency_hz ?? 0),
   );
@@ -764,12 +764,12 @@ function testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight(): void {
   assert.equal(result.ok, true);
   const bodyRoll = result.plan?.parameters.find((item) => item.parameter_id === "ParamBodyAngleZ");
   assert.ok(bodyRoll);
-  assert.equal(bodyRoll?.target_value, -3);
-  assert.equal(bodyRoll?.weight, 0.7);
+  assert.equal(bodyRoll?.target_value, -1.2);
+  assert.equal(bodyRoll?.weight, 0.45);
   assert.equal(bodyRoll?.modulation?.direction, -1);
   const headPitch = result.plan?.parameters.find((item) => item.parameter_id === "ParamAngleY");
   assert.ok(headPitch);
-  assert.equal(Math.abs(headPitch?.target_value ?? 0), 1.2);
+  assert.equal(Math.abs(headPitch?.target_value ?? 0), 1.0);
   assert.equal(headPitch?.weight, 0.35);
 }
 
