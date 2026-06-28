@@ -65,6 +65,7 @@ from ..protocol import (
     TYPE_CONTROL_INTERRUPT,
     TYPE_CONTROL_PLAYBACK_FINISHED,
     TYPE_ENGINE_MOTION_INTENT,
+    TYPE_ENGINE_PERFORMANCE_CURVE_HINT,
     TYPE_INPUT_AUDIO_STREAM_CHUNK,
     TYPE_INPUT_AUDIO_STREAM_END,
     TYPE_INPUT_AUDIO_STREAM_START,
@@ -1156,27 +1157,62 @@ class TurnCoordinator:
             self._pending_performance_curve_motion = None
             return False
 
-        updated_payload = self._attach_ready_performance_curve_hint(
-            motion_payload=dict(motion_payload),
+        runtime_state = getattr(self, "runtime_state", None)
+        runtime = getattr(runtime_state, "performance_curve_runtime", None)
+        get_ready = getattr(runtime, "get_ready", None)
+        hint = get_ready(
             turn_id=normalized_turn_id,
             message_id=normalized_message_id,
+        ) if callable(get_ready) else None
+        _updated_payload, curve_hint = attach_performance_curve_hint(
+            dict(motion_payload),
+            hint,
         )
-        if "performance_curve_hint" not in updated_payload:
+        if curve_hint is None:
             self._fail_pending_performance_curve_motion(
                 turn_id=normalized_turn_id,
                 message_id=normalized_message_id,
                 reason="not_ready_before_audio_egress",
             )
             return False
+        clear = getattr(runtime, "clear", None)
+        if callable(clear):
+            clear(turn_id=normalized_turn_id, message_id=normalized_message_id)
 
         self._pending_performance_curve_motion = None
-        return await self.broadcast_motion_payload(
-            motion_payload=updated_payload,
-            mode=str(pending.get("mode") or "preview"),
-            source=f"{str(pending.get('source') or 'engine.motion_payload')}.performance_curve_update",
-            turn_id=normalized_turn_id,
-            message_id=normalized_message_id,
+        sent = await self._send_json(
+            build_message_envelope(
+                TYPE_ENGINE_PERFORMANCE_CURVE_HINT,
+                turn_id=normalized_turn_id,
+                message_id=normalized_message_id,
+                source=SOURCE_ENGINE,
+                payload=curve_hint,
+            )
         )
+        if sent:
+            self._record_motion_lab_raw_event(
+                event_type="performance_curve.egress_sent",
+                turn_id=normalized_turn_id,
+                message_id=normalized_message_id,
+                source_route=f"{str(pending.get('source') or 'engine.motion_payload')}.performance_curve_hint",
+                phase="performance_curve",
+                payload_kind="ag99.performance_curve_hint.v1",
+                raw={
+                    "curve_hint": curve_hint,
+                    "motion_intent_tags": [
+                        str(item).strip()
+                        for item in motion_payload.get("intent_tags", [])
+                        if str(item).strip()
+                    ],
+                },
+            )
+            logger.info(
+                "WIRING performance_curve_hint_egress turn_id=%s message_id=%s source=%s",
+                normalized_turn_id,
+                normalized_message_id,
+                str(pending.get("source") or "engine.motion_payload"),
+            )
+        return sent
 
     def _fail_pending_performance_curve_motion(
         self,

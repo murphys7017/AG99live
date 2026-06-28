@@ -19,6 +19,7 @@
  *     motion 已 absent/completed/failed 三者之一。
  */
 
+import type { PerformanceCurveHint } from "../types/protocol.js";
 import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
 
 // ── Phase ──────────────────────────────────────────────────────────
@@ -125,6 +126,8 @@ export interface TurnPlaybackSessionAudio {
 export interface TurnPlaybackSessionMotion {
   payload: NormalizedMotionPayload | null;
   receivedAtMs: number | null;
+  performanceCurveHint: PerformanceCurveHint | null;
+  performanceCurveHintReceivedAtMs: number | null;
   released: boolean;
   started: boolean;
   completed: boolean;
@@ -213,6 +216,8 @@ export function createEmptyMotionState(): TurnPlaybackSessionMotion {
   return {
     payload: null,
     receivedAtMs: null,
+    performanceCurveHint: null,
+    performanceCurveHintReceivedAtMs: null,
     released: false,
     started: false,
     completed: false,

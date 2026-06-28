@@ -21,6 +21,7 @@ export const INBOUND_MESSAGE_TYPES = {
   ENGINE_MOTION_INTENT: "engine.motion_intent",
   ENGINE_CATALOG_MOTION: "engine.catalog_motion",
   ENGINE_MOTION_PREVIEW: "engine.motion_preview",
+  ENGINE_PERFORMANCE_CURVE_HINT: "engine.performance_curve_hint",
 } as const;
 
 export const OUTBOUND_MESSAGE_TYPES = {

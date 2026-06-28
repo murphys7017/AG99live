@@ -23,6 +23,7 @@ import type {
   SystemHistoryListPayload,
   SystemModelSyncPayload,
   SystemMotionTuningSamplesStatePayload,
+  PerformanceCurveHint,
 } from "../../types/protocol.js";
 import type { InboundAdapterEvent, InboundEventMappingContext } from "./inboundEvents.js";
 import { mapInboundEnvelopeToEvent } from "./inboundEvents.js";
@@ -30,8 +31,11 @@ import type { PendingAssistantTextItem, PendingAudioItem } from "../runtime/play
 import type { NormalizedMotionPayload } from "../../model-engine/contracts.js";
 import { dispatchInboundConnectionEvent } from "./inboundConnectionDispatcher.js";
 import { dispatchInboundFeatureEvent } from "./inboundFeatureDispatcher.js";
-import { dispatchInboundMotionEvent } from "./inboundMotionDispatcher.js";
-import { dispatchInboundMotionPreviewEvent } from "./inboundMotionDispatcher.js";
+import {
+  dispatchInboundMotionEvent,
+  dispatchInboundMotionPreviewEvent,
+  dispatchInboundPerformanceCurveHintEvent,
+} from "./inboundMotionDispatcher.js";
 import { dispatchInboundOutputEvent } from "./inboundOutputDispatcher.js";
 import {
   reportInboundProtocolError,
@@ -91,6 +95,7 @@ export interface InboundDispatchDeps {
     markAudioReceived: (turnId: string | null, url: string, messageId: string) => boolean;
     markAudioTerminal: (turnId: string | null, terminal: string, messageId: string, reason?: string) => void;
     markMotionReceived: (turnId: string | null, payload: NormalizedMotionPayload, messageId: string) => void;
+    markPerformanceCurveHintReceived: (turnId: string | null, hint: PerformanceCurveHint, messageId: string) => void;
     ensureSegment: (turnId: string | null, messageId: string) => { text: { content: string | null } };
     getSessions: () => Array<{ segmentOrder: string[]; segments: Map<string, { messageId: string; turnId: string | null }> }>;
   } | undefined;
@@ -195,6 +200,9 @@ export async function dispatchInboundEvent(
       return;
     case "engine_motion_preview":
       dispatchInboundMotionPreviewEvent(deps, event);
+      return;
+    case "engine_performance_curve_hint":
+      dispatchInboundPerformanceCurveHintEvent(deps, event);
       return;
     case "unhandled":
       reportUnhandledInboundEnvelope(deps, event.envelope);

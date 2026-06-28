@@ -101,6 +101,23 @@ function requireSegmentMessageId(
   };
 }
 
+function requireSegmentTurnId(
+  envelope: ProtocolEnvelope<unknown>,
+): { ok: true; turnId: string } | { ok: false; event: InboundAdapterEvent } {
+  const turnId = normalizeTurnId(envelope.turn_id);
+  if (turnId) {
+    return { ok: true, turnId };
+  }
+  return {
+    ok: false,
+    event: protocolPayloadError(envelope, {
+      code: "invalid_payload",
+      path: "turn_id",
+      message: `收到非法协议载荷（type=${envelope.type}, path=turn_id, expected=non-empty string）。`,
+    }),
+  };
+}
+
 type InboundPassthroughEvent =
   | { kind: "server_info"; envelope: ProtocolEnvelope<SystemServerInfoPayload> }
   | { kind: "model_sync"; envelope: ProtocolEnvelope<SystemModelSyncPayload> }
@@ -176,6 +193,12 @@ export type InboundAdapterEvent =
   }
   | {
     kind: "engine_motion_preview";
+    envelope: ProtocolEnvelope<Record<string, unknown>>;
+  }
+  | {
+    kind: "engine_performance_curve_hint";
+    messageId: string;
+    turnId: string | null;
     envelope: ProtocolEnvelope<Record<string, unknown>>;
   };
 
@@ -416,6 +439,22 @@ export function mapInboundEnvelopeToEvent(
         kind: "engine_motion_preview",
         envelope: envelope as ProtocolEnvelope<Record<string, unknown>>,
       };
+    case INBOUND_MESSAGE_TYPES.ENGINE_PERFORMANCE_CURVE_HINT: {
+      const turnId = requireSegmentTurnId(envelope);
+      if (!turnId.ok) {
+        return turnId.event;
+      }
+      const messageId = requireSegmentMessageId(envelope);
+      if (!messageId.ok) {
+        return messageId.event;
+      }
+      return {
+        kind: "engine_performance_curve_hint",
+        messageId: messageId.messageId,
+        turnId: turnId.turnId,
+        envelope: envelope as ProtocolEnvelope<Record<string, unknown>>,
+      };
+    }
     default:
       return {
         kind: "unhandled",

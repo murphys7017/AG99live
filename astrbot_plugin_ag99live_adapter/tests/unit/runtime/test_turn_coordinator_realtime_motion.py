@@ -1302,7 +1302,7 @@ def test_broadcast_motion_payload_defers_performance_curve_failure_until_audio(
     assert pending["message_id"] == "message-intent"
 
 
-def test_flush_performance_curve_before_audio_resends_pending_motion(
+def test_flush_performance_curve_before_audio_sends_hint_patch(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1388,10 +1388,10 @@ def test_flush_performance_curve_before_audio_resends_pending_motion(
     assert coordinator._pending_performance_curve_motion is None
     assert len(sent_payloads) == 2
     updated_envelope = sent_payloads[1]
+    assert updated_envelope["type"] == "engine.performance_curve_hint"
     assert updated_envelope["turn_id"] == "turn-intent"
     assert updated_envelope["message_id"] == "message-intent"
-    assert updated_envelope["payload"]["intent"]["performance_curve_hint"]["entry"] == "quick"
-    assert updated_envelope["payload"]["source"] == "test.intent.performance_curve_update"
+    assert updated_envelope["payload"]["entry"] == "quick"
 
 
 def test_build_engine_motion_preview_uses_preview_envelope() -> None:

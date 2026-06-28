@@ -200,6 +200,53 @@ function testEngineMotionPreviewDoesNotRequireSegmentMessageId(): void {
   assert.equal(event.kind, "engine_motion_preview");
 }
 
+function testPerformanceCurveHintMapsAsSegmentPatch(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("engine.performance_curve_hint", {
+      schema_version: "ag99.performance_curve_hint.v1",
+      curve_family: "quick_in_hold_soft_out",
+      entry: "quick",
+      hold: "steady",
+      exit: "soft",
+      emphasis: "early",
+      energy: "medium",
+    }, {
+      turnId: "turn-curve",
+    }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "engine_performance_curve_hint");
+  if (event.kind !== "engine_performance_curve_hint") {
+    throw new Error("expected engine_performance_curve_hint event");
+  }
+  assert.equal(event.turnId, "turn-curve");
+  assert.equal(event.messageId, "m-1");
+}
+
+function testPerformanceCurveHintRequiresTurnId(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("engine.performance_curve_hint", {
+      schema_version: "ag99.performance_curve_hint.v1",
+      curve_family: "quick_in_hold_soft_out",
+      entry: "quick",
+      hold: "steady",
+      exit: "soft",
+      emphasis: "early",
+      energy: "medium",
+    }, {
+      turnId: null,
+    }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
+  }
+  assert.equal(event.error.path, "turn_id");
+}
+
 function testMissingSegmentMessageIdReturnsProtocolError(): void {
   const envelopeA = makeEnvelope("output.text", {
     text: " first ",
@@ -423,6 +470,8 @@ function run(): void {
   testEngineMotionFallsBackCurrentThenAudioTurn();
   testEngineCatalogMotionMapsAsMotionPayload();
   testEngineMotionPreviewDoesNotRequireSegmentMessageId();
+  testPerformanceCurveHintMapsAsSegmentPatch();
+  testPerformanceCurveHintRequiresTurnId();
   testMissingSegmentMessageIdReturnsProtocolError();
   testUnhandledTypeReturnsUnhandled();
   testInvalidOutputTextPayloadReturnsProtocolError();

@@ -163,7 +163,7 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
   };
 }
 
-function normalizePerformanceCurveHint(value: unknown): PerformanceCurveHint | undefined {
+export function normalizePerformanceCurveHint(value: unknown): PerformanceCurveHint | undefined {
   if (!isObject(value)) {
     return undefined;
   }

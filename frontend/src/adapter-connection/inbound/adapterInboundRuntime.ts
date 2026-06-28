@@ -139,6 +139,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
             markAudioReceived: (tId, url, msgId) => sessionStore.markAudioReceived(tId, url, msgId),
             markAudioTerminal: (tId, terminal, msgId, reason) => sessionStore.markAudioTerminal(tId, terminal as "completed" | "failed" | "absent", msgId, reason),
             markMotionReceived: (tId, payload, msgId) => sessionStore.markMotionReceived(tId, payload as NormalizedMotionPayload, msgId),
+            markPerformanceCurveHintReceived: (tId, hint, msgId) => sessionStore.markPerformanceCurveHintReceived(tId, hint, msgId),
             ensureSegment: (tId, msgId) => sessionStore.ensureSegment(tId, msgId),
             getSessions: () => sessionStore.getSessions(),
           }

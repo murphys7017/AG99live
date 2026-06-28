@@ -40,6 +40,7 @@ import {
 } from "./session.js";
 import { getActivePlaybackSegment } from "./selectors.js";
 import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
+import type { PerformanceCurveHint } from "../types/protocol.js";
 
 // ── Store state ────────────────────────────────────────────────────
 
@@ -400,6 +401,26 @@ export function useTurnPlaybackSessionStore() {
     segment.motion.reason = "";
   }
 
+  function markPerformanceCurveHintReceived(
+    turnId: string | null,
+    hint: PerformanceCurveHint,
+    messageId: string,
+  ): void {
+    if (!hint) {
+      return;
+    }
+    const { segment } = getSegmentSession(turnId, messageId);
+    if (
+      segment.motion.released
+      || segment.motion.started
+      || segment.motion.completed
+    ) {
+      return;
+    }
+    segment.motion.performanceCurveHint = hint;
+    segment.motion.performanceCurveHintReceivedAtMs = performance.now();
+  }
+
   function markMotionAbsent(
     turnId: string | null,
     messageId: string,
@@ -407,6 +428,8 @@ export function useTurnPlaybackSessionStore() {
     const { segment } = getSegmentSession(turnId, messageId);
     segment.motion.payload = null;
     segment.motion.receivedAtMs = null;
+    segment.motion.performanceCurveHint = null;
+    segment.motion.performanceCurveHintReceivedAtMs = null;
     segment.motion.absent = true;
     segment.motion.released = false;
     segment.motion.started = false;
@@ -626,6 +649,7 @@ export function useTurnPlaybackSessionStore() {
     markAudioDuration,
     markAudioTerminal,
     markMotionReceived,
+    markPerformanceCurveHintReceived,
     markMotionAbsent,
     markMotionFailed,
     markMotionReleased,

@@ -20,6 +20,7 @@
 import { onScopeDispose, watch } from "vue";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
 import type { NormalizedMotionPayload } from "../model-engine/contracts";
+import type { PerformanceCurveHint } from "../types/protocol.js";
 import {
   createTurnPlaybackOrchestratorCore,
   type TurnPlaybackReleaseContext,
@@ -42,6 +43,22 @@ interface TurnPlaybackOrchestratorOptions {
   sessionStore: SessionStore;
   playbackRelease: PlaybackReleasePort;
   motionPayload: MotionPayloadPort;
+}
+
+function attachPerformanceCurveHintToPayload(
+  payload: NormalizedMotionPayload,
+  hint: PerformanceCurveHint | null,
+): NormalizedMotionPayload {
+  if (!hint || payload.kind !== "semantic_intent") {
+    return payload;
+  }
+  return {
+    ...payload,
+    intent: {
+      ...payload.intent,
+      performance_curve_hint: hint,
+    },
+  };
 }
 
 /**
@@ -125,6 +142,8 @@ export function useTurnPlaybackOrchestrator(
           audioReleased: segment?.audio.released ?? false,
           audioTerminal: segment?.audio.terminal ?? "idle",
           motionReceivedAtMs: segment?.motion.receivedAtMs ?? null,
+          performanceCurveHintReceivedAtMs:
+            segment?.motion.performanceCurveHintReceivedAtMs ?? null,
           motionReleased: segment?.motion.released ?? false,
           motionCompleted: segment?.motion.completed ?? false,
           motionAbsent: segment?.motion.absent ?? false,
@@ -174,7 +193,10 @@ export function useTurnPlaybackOrchestrator(
           core.markMotionReady(
             segment.messageId,
             segment.turnId,
-            segment.motion.payload,
+            attachPerformanceCurveHintToPayload(
+              segment.motion.payload,
+              segment.motion.performanceCurveHint,
+            ),
             segment.motion.receivedAtMs ?? performance.now(),
           );
         }

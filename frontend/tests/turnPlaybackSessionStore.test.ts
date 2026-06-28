@@ -11,6 +11,7 @@ import {
 } from "../src/turn-playback/selectors.js";
 import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
 import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
+import type { PerformanceCurveHint } from "../src/types/protocol.js";
 
 const motionPayload: NormalizedMotionPayload = {
   kind: "semantic_intent",
@@ -31,6 +32,16 @@ const catalogMotionPayload: NormalizedMotionPayload = {
     duration_ms: 3000,
     priority: 3,
   },
+};
+
+const curveHint: PerformanceCurveHint = {
+  schema_version: "ag99.performance_curve_hint.v1",
+  curve_family: "quick_in_hold_soft_out",
+  entry: "quick",
+  hold: "steady",
+  exit: "soft",
+  emphasis: "early",
+  energy: "medium",
 };
 
 function getOnlySession(store: ReturnType<typeof useTurnPlaybackSessionStore>) {
@@ -84,6 +95,20 @@ function testCatalogMotionPayloadCanBeStored(): void {
 
   const segment = getSegment(store, "msg-1");
   assert.equal(segment.motion.payload?.kind, "catalog_motion");
+}
+
+function testPerformanceCurveHintCanBeStoredOnSegment(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.markPerformanceCurveHintReceived("turn-1", curveHint, "msg-1");
+  store.markMotionReceived("turn-1", motionPayload, "msg-1");
+
+  const segment = getSegment(store, "msg-1");
+  assert.deepEqual(segment.motion.performanceCurveHint, curveHint);
+  assert.equal(typeof segment.motion.performanceCurveHintReceivedAtMs, "number");
+
+  store.markMotionAbsent("turn-1", "msg-1");
+  assert.equal(segment.motion.performanceCurveHint, null);
+  assert.equal(segment.motion.performanceCurveHintReceivedAtMs, null);
 }
 
 function testMultipleMessageIdsKeepArrivalOrder(): void {
@@ -320,6 +345,7 @@ function run(): void {
   testSessionStartsWithoutTurnLevelPlaybackSlots();
   testSameMessageIdGroupsTextAudioMotion();
   testCatalogMotionPayloadCanBeStored();
+  testPerformanceCurveHintCanBeStoredOnSegment();
   testMultipleMessageIdsKeepArrivalOrder();
   testSelectorsOperateOnSegments();
   testSegmentSettlementAndTurnSettlement();

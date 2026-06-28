@@ -6,15 +6,35 @@ import { effectScope, nextTick } from "vue";
 import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
 import { useTurnPlaybackOrchestrator } from "../src/turn-playback/useTurnPlaybackOrchestrator.js";
 import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
+import type { PerformanceCurveHint } from "../src/types/protocol.js";
 
 const motionPayload: NormalizedMotionPayload = {
   kind: "semantic_intent",
-  intent: {} as never,
+  intent: {
+    schema_version: "engine.motion_intent.v3",
+    profile_id: "profile-1",
+    profile_revision: 1,
+    model_id: "model-1",
+    mode: "expressive",
+    emotion_label: "happy",
+    axes: {},
+  },
+};
+
+const curveHint: PerformanceCurveHint = {
+  schema_version: "ag99.performance_curve_hint.v1",
+  curve_family: "quick_in_hold_soft_out",
+  entry: "quick",
+  hold: "steady",
+  exit: "soft",
+  emphasis: "early",
+  energy: "medium",
 };
 
 function createHarness(options: { motionAccepted?: boolean } = {}) {
   const sessionStore = useTurnPlaybackSessionStore();
   const released: string[] = [];
+  const motionPayloads: NormalizedMotionPayload[] = [];
   const turnChanges: Array<string | null> = [];
   const logs: Array<{ message: string; details: Record<string, unknown> }> = [];
   const scope = effectScope();
@@ -53,9 +73,10 @@ function createHarness(options: { motionAccepted?: boolean } = {}) {
 
   const modelEngine = {
     ingestNormalizedPayload(
-      _payload: NormalizedMotionPayload,
+      payload: NormalizedMotionPayload,
       context: { messageId: string; turnId: string | null },
     ): boolean {
+      motionPayloads.push(payload);
       released.push(`motion:${context.messageId}:${context.turnId ?? ""}`);
       return options.motionAccepted ?? true;
     },
@@ -75,6 +96,7 @@ function createHarness(options: { motionAccepted?: boolean } = {}) {
   return {
     sessionStore,
     released,
+    motionPayloads,
     turnChanges,
     logs,
     flush: () => nextTick(),
@@ -186,6 +208,44 @@ async function testRejectedMotionReleaseMarksSegmentFailed(): Promise<void> {
   h.stop();
 }
 
+async function testPerformanceCurveHintIsMergedBeforeMotionRelease(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.setActiveSession("turn-curve");
+  h.sessionStore.markTurnStarted("turn-curve");
+
+  h.sessionStore.markTextReceived("turn-curve", "hello", "msg-curve");
+  h.sessionStore.markMotionReceived("turn-curve", motionPayload, "msg-curve");
+  h.sessionStore.markPerformanceCurveHintReceived("turn-curve", curveHint, "msg-curve");
+  h.sessionStore.markSynthFinished("turn-curve");
+  h.sessionStore.markAudioTerminal(
+    "turn-curve",
+    "absent",
+    "msg-curve",
+    "synth_finished_without_audio_playback",
+  );
+
+  await h.flush();
+  await h.flush();
+
+  assert.equal(h.motionPayloads.length, 1);
+  const releasedPayload = h.motionPayloads[0];
+  assert.equal(releasedPayload.kind, "semantic_intent");
+  if (releasedPayload.kind !== "semantic_intent") {
+    throw new Error("expected semantic_intent payload");
+  }
+  assert.deepEqual(releasedPayload.intent.performance_curve_hint, curveHint);
+  const storedPayload = h.sessionStore
+    .getSession("turn-curve")
+    ?.segments.get("msg-curve")
+    ?.motion.payload;
+  assert.equal(storedPayload?.kind, "semantic_intent");
+  if (storedPayload?.kind !== "semantic_intent") {
+    throw new Error("expected stored semantic_intent payload");
+  }
+  assert.equal(storedPayload.intent.performance_curve_hint, undefined);
+  h.stop();
+}
+
 async function testLateAudioAfterTextReleaseOnlyReleasesAudio(): Promise<void> {
   const h = createHarness();
   h.sessionStore.setActiveSession("turn-late-audio");
@@ -229,6 +289,7 @@ async function run(): Promise<void> {
   await testSegmentsReleaseSequentiallyWithinTurn();
   await testTextAndMotionReleaseWhenAudioIsAbsent();
   await testRejectedMotionReleaseMarksSegmentFailed();
+  await testPerformanceCurveHintIsMergedBeforeMotionRelease();
   await testLateAudioAfterTextReleaseOnlyReleasesAudio();
   console.log("useTurnPlaybackOrchestrator tests passed");
 }

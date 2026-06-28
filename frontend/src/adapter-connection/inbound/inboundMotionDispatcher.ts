@@ -13,7 +13,9 @@
  */
 
 import type { ProtocolEnvelope } from "../../types/protocol.js";
+import type { PerformanceCurveHint } from "../../types/protocol.js";
 import type { NormalizedMotionPayload } from "../../model-engine/contracts.js";
+import { normalizePerformanceCurveHint } from "../../model-engine/normalize.js";
 import type { InboundAdapterEvent } from "./inboundEvents.js";
 import type {
   InboundMotionApplyResult,
@@ -35,6 +37,11 @@ export interface InboundMotionDispatchDeps {
     markMotionReceived: (
       turnId: string | null,
       payload: NormalizedMotionPayload,
+      messageId: string,
+    ) => void;
+    markPerformanceCurveHintReceived: (
+      turnId: string | null,
+      hint: PerformanceCurveHint,
       messageId: string,
     ) => void;
   } | undefined;
@@ -59,6 +66,10 @@ type InboundMotionEvent = Extract<
 type InboundMotionPreviewEvent = Extract<
   InboundAdapterEvent,
   { kind: "engine_motion_preview" }
+>;
+type InboundPerformanceCurveHintEvent = Extract<
+  InboundAdapterEvent,
+  { kind: "engine_performance_curve_hint" }
 >;
 
 export function dispatchInboundMotionEvent(
@@ -118,5 +129,25 @@ export function dispatchInboundMotionPreviewEvent(
   }
 
   deps.state.statusMessage = "已播放动作预览。";
+  deps.pushHistory("system", deps.state.statusMessage);
+}
+
+export function dispatchInboundPerformanceCurveHintEvent(
+  deps: InboundMotionDispatchDeps,
+  event: InboundPerformanceCurveHintEvent,
+): void {
+  const hint = normalizePerformanceCurveHint(event.envelope.payload);
+  if (!hint) {
+    deps.state.lastError = "收到无效的表演曲线提示。";
+    deps.state.statusMessage = deps.state.lastError;
+    deps.pushHistory("error", deps.state.lastError);
+    return;
+  }
+  deps.sessionStore?.markPerformanceCurveHintReceived(
+    event.turnId,
+    hint,
+    event.messageId,
+  );
+  deps.state.statusMessage = "收到表演曲线提示。";
   deps.pushHistory("system", deps.state.statusMessage);
 }
