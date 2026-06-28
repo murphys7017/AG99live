@@ -38,6 +38,13 @@ interface MotionRuntimeSchedulerHooks {
   onStartFailed?: (context: StartPayloadContext) => void;
 }
 
+function hasPerformanceCurveHint(payload: NormalizedMotionPayload): boolean {
+  return (
+    payload.kind === "semantic_intent"
+    && payload.intent.performance_curve_hint?.schema_version === "ag99.performance_curve_hint.v1"
+  );
+}
+
 export function createMotionRuntimeScheduler(
   dependencies: MotionRuntimeSchedulerDependencies,
   hooks: MotionRuntimeSchedulerHooks,
@@ -179,6 +186,81 @@ export function createMotionRuntimeScheduler(
     return findStartedSegment(messageId, turnId, playbackTurnId) !== null;
   }
 
+  function getSegmentAudioTerminal(
+    messageId: string | null,
+    turnId: string | null,
+    playbackTurnId: string | null = null,
+  ): "idle" | "completed" | "failed" | "absent" | null {
+    const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
+    const normalizedTurnId = normalizeTurnId(turnId);
+    const normalizedPlaybackTurnId = normalizeTurnId(playbackTurnId);
+    if (!normalizedMessageId) {
+      return null;
+    }
+
+    for (const session of [
+      dependencies.sessionStore?.getActiveSession(),
+      dependencies.sessionStore?.getSessionByTurnId?.(turnId),
+    ]) {
+      if (!session) {
+        continue;
+      }
+      for (const segmentId of session.segmentOrder) {
+        const segment = session.segments.get(segmentId);
+        if (!segment || segment.messageId !== normalizedMessageId) {
+          continue;
+        }
+        const segmentTurnId = normalizeTurnId(segment.turnId);
+        const turnMatches = Boolean(
+          (normalizedTurnId && segmentTurnId === normalizedTurnId)
+          || (normalizedPlaybackTurnId && segmentTurnId === normalizedPlaybackTurnId),
+        );
+        if (!normalizedTurnId && !normalizedPlaybackTurnId || turnMatches) {
+          return segment.audio.terminal;
+        }
+      }
+    }
+    return null;
+  }
+
+  function scheduleCurveAudioWait(
+    entry: PendingInboundMotionPayload,
+    pendingKey: string,
+  ): void {
+    entry.audioWaitTimer = window.setTimeout(() => {
+      const latest = pendingInboundMotionPayloads.get(pendingKey);
+      if (!latest || latest !== entry) {
+        return;
+      }
+
+      const targetSession = dependencies.sessionStore?.getSessionByTurnId?.(entry.turnId);
+      const currentTurnId = normalizeTurnId(dependencies.getCurrentTurnId());
+      if (!targetSession && currentTurnId && currentTurnId !== entry.turnId) {
+        dropPendingPayload(entry, "stale_turn_dropped");
+        syncPendingState();
+        return;
+      }
+
+      const terminal = getSegmentAudioTerminal(
+        entry.messageId,
+        entry.turnId,
+        entry.playbackTurnId,
+      );
+      if (terminal === null) {
+        dropPendingPayload(entry, "missing_audio_segment_before_curve_motion_start");
+        syncPendingState();
+        return;
+      }
+      if (terminal && terminal !== "idle") {
+        dropPendingPayload(entry, `audio_${terminal}_before_curve_motion_start`);
+        syncPendingState();
+        return;
+      }
+
+      scheduleCurveAudioWait(entry, pendingKey);
+    }, MOTION_SYNC_WAIT_FOR_AUDIO_MS);
+  }
+
   function tryStartPendingPayload(
     turnId: string | null,
     messageId: string,
@@ -270,6 +352,26 @@ export function createMotionRuntimeScheduler(
         }
         dropPendingPayload(entry, "stale_turn_dropped");
         syncPendingState();
+        return;
+      }
+
+      if (hasPerformanceCurveHint(entry.payload)) {
+        const terminal = getSegmentAudioTerminal(
+          entry.messageId,
+          entry.turnId,
+          entry.playbackTurnId,
+        );
+        if (terminal === null) {
+          dropPendingPayload(entry, "missing_audio_segment_before_curve_motion_start");
+          syncPendingState();
+          return;
+        }
+        if (terminal && terminal !== "idle") {
+          dropPendingPayload(entry, `audio_${terminal}_before_curve_motion_start`);
+          syncPendingState();
+          return;
+        }
+        scheduleCurveAudioWait(entry, pendingKey);
         return;
       }
 

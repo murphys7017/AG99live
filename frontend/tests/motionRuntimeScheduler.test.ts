@@ -57,6 +57,28 @@ function buildPayload(): NormalizedMotionPayload {
   };
 }
 
+function buildCurvePayload(): NormalizedMotionPayload {
+  const payload = buildPayload();
+  if (payload.kind !== "semantic_intent") {
+    throw new Error("expected semantic_intent payload");
+  }
+  return {
+    ...payload,
+    intent: {
+      ...payload.intent,
+      performance_curve_hint: {
+        schema_version: "ag99.performance_curve_hint.v1",
+        curve_family: "quick_in_hold_soft_out",
+        entry: "quick",
+        hold: "steady",
+        exit: "soft",
+        emphasis: "early",
+        energy: "medium",
+      },
+    },
+  };
+}
+
 function buildSession(audioTerminal: "idle" | "completed" = "idle"): ModelEnginePlaybackSession {
   return {
     id: "turn:turn-1",
@@ -105,6 +127,17 @@ function createHarness(session: ModelEnginePlaybackSession) {
     },
   );
   return { scheduler, started, failed };
+}
+
+function setAudioWaiting(session: ModelEnginePlaybackSession): void {
+  const segment = session.segments.get("msg-1");
+  if (!segment) {
+    throw new Error("missing test segment");
+  }
+  segment.audio.started = false;
+  segment.audio.startedAtMs = null;
+  segment.audio.durationMs = null;
+  segment.audio.terminal = "idle";
 }
 
 function testEndedAudioDoesNotCountAsSpeechActiveOrDurationTarget(): void {
@@ -320,6 +353,67 @@ function testAudioStartReturnsFalseWithoutQueuedMotion(): void {
   assert.equal(started.length, 0);
 }
 
+function testCurvePayloadWaitsForAudioStartPastInitialTimeout(): void {
+  resetTimers();
+  const session = buildSession();
+  setAudioWaiting(session);
+  const { scheduler, started, failed } = createHarness(session);
+
+  scheduler.queueInboundPayload(buildCurvePayload(), {
+    messageId: "msg-1",
+    turnId: "turn-1",
+    playbackTurnId: "turn-1",
+    receivedAtMs: 900,
+  });
+
+  const timer = timers.values().next().value;
+  assert.ok(timer);
+  timer();
+
+  assert.equal(started.length, 0);
+  assert.equal(failed.length, 0);
+
+  const segment = session.segments.get("msg-1");
+  assert.ok(segment);
+  segment.audio.started = true;
+  segment.audio.startedAtMs = 1200;
+  segment.audio.durationMs = 2000;
+
+  assert.equal(
+    scheduler.notifyAudioPlaybackStarted("turn-1", "msg-1"),
+    true,
+  );
+  assert.equal(started.length, 1);
+  assert.equal(started[0].startReason, "audio_playing_event");
+  assert.equal(failed.length, 0);
+}
+
+function testCurvePayloadFailsWhenAudioTerminalArrivesBeforeStart(): void {
+  resetTimers();
+  const session = buildSession();
+  setAudioWaiting(session);
+  const { scheduler, started, failed } = createHarness(session);
+
+  scheduler.queueInboundPayload(buildCurvePayload(), {
+    messageId: "msg-1",
+    turnId: "turn-1",
+    playbackTurnId: "turn-1",
+    receivedAtMs: 900,
+  });
+
+  const segment = session.segments.get("msg-1");
+  assert.ok(segment);
+  segment.audio.terminal = "failed";
+
+  const timer = timers.values().next().value;
+  assert.ok(timer);
+  timer();
+
+  assert.equal(started.length, 0);
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].startReason, "audio_failed_before_curve_motion_start");
+}
+
 function run(): void {
   testEndedAudioDoesNotCountAsSpeechActiveOrDurationTarget();
   testQueuedPlaybackTurnIdIsNormalized();
@@ -327,6 +421,8 @@ function run(): void {
   testSameMessageIdDifferentTurnsStartByCompositeIdentity();
   testActiveAudioLookupRequiresMatchingTurnWhenMessageIdIsShared();
   testAudioStartReturnsFalseWithoutQueuedMotion();
+  testCurvePayloadWaitsForAudioStartPastInitialTimeout();
+  testCurvePayloadFailsWhenAudioTerminalArrivesBeforeStart();
   console.log("motionRuntimeScheduler tests passed");
 }
 
