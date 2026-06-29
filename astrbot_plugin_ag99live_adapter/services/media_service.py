@@ -18,9 +18,11 @@ import mimetypes
 import os
 from pathlib import Path
 import re
+import shutil
 import time
 from urllib.parse import unquote
 from uuid import uuid4
+import wave
 
 import numpy as np
 
@@ -123,6 +125,11 @@ class MediaService:
         cached_filename = f"{uuid4().hex}.wav"
         cached_path = self.audio_cache_dir / cached_filename
 
+        if self._is_pcm_wav_file(source_path):
+            shutil.copy2(source_path, cached_path)
+            audio_url = f"http://{self.host}:{self.http_port}/cache/audio/{cached_filename}"
+            return str(cached_path), audio_url
+
         try:
             audio = AudioSegment.from_file(source_path)
             audio.export(cached_path, format="wav")
@@ -133,6 +140,25 @@ class MediaService:
 
         audio_url = f"http://{self.host}:{self.http_port}/cache/audio/{cached_filename}"
         return str(cached_path), audio_url
+
+    def _is_pcm_wav_file(self, source_path: Path) -> bool:
+        if source_path.suffix.lower() != ".wav":
+            return False
+
+        try:
+            with wave.open(str(source_path), "rb") as wav_file:
+                comptype = wav_file.getcomptype()
+                sample_width = wav_file.getsampwidth()
+                channel_count = wav_file.getnchannels()
+                sample_rate = wav_file.getframerate()
+        except (OSError, EOFError, wave.Error):
+            return False
+
+        if comptype != "NONE":
+            return False
+        if sample_width <= 0 or channel_count <= 0 or sample_rate <= 0:
+            return False
+        return True
 
     def convert_image_component(self, image_payload):
         image_component, _ = self.convert_image_component_with_diagnostic(image_payload)
@@ -178,8 +204,6 @@ class MediaService:
         调用方负责在用完后清理（SpeechIngressService 用 _pending_temp_audio_files
         做延迟回收）。
         """
-        import wave
-
         temp_dir = get_astrbot_temp_path()
         os.makedirs(temp_dir, exist_ok=True)
         temp_path = os.path.join(temp_dir, f"olv_stt_{uuid4().hex}.wav")
