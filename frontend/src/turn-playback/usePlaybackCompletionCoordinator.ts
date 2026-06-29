@@ -38,7 +38,7 @@ type PreviewMotionPlayer = ReturnType<typeof usePreviewMotionPlayer>;
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 
 const DEFAULT_MAX_MOTION_PLAYBACK_RECORDS = 5;
-const PLAYBACK_SETTLEMENT_WINDOW_MS = 900;
+const PLAYBACK_SETTLEMENT_WINDOW_MS = 360;
 const MOTION_RECORD_DEDUP_WINDOW_MS = 1200;
 
 interface PlaybackCompletionCoordinatorOptions {
@@ -292,6 +292,19 @@ export function usePlaybackCompletionCoordinator(
   function schedulePlaybackSettlementWindow(sessionId: string, messageId: string): void {
     const key = segmentKey(sessionId, messageId);
     if (settlementTimers.has(key)) {
+      return;
+    }
+    const session = getSession(sessionId);
+    const segment = session?.segments.get(messageId);
+    if (
+      !session
+      || !segment
+      || segment.audio.terminal === "idle"
+      || segment.motion.started
+      || segment.motion.completed
+      || segment.motion.failed
+      || segment.motion.payload !== null
+    ) {
       return;
     }
     const timer = schedule(PLAYBACK_SETTLEMENT_WINDOW_MS, () => {

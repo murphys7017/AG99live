@@ -419,7 +419,10 @@ class TurnCoordinator:
         if record_paths:
             record_path = record_paths[0]
             try:
-                _, audio_url = self.media_service.cache_audio_file(record_path)
+                _, audio_url = await asyncio.to_thread(
+                    self.media_service.cache_audio_file,
+                    record_path,
+                )
             except Exception as exc:
                 logger.warning(
                     "WIRING audio_payload_egress_failed turn_id=%s message_id=%s error=%s",

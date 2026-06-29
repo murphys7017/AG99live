@@ -194,6 +194,76 @@ def test_close_turn_output_queue_is_idempotent_via_attr_flag(
     assert len(sent_payloads) == 1
 
 
+def test_emit_message_chain_converts_audio_off_thread(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    TurnCoordinator = _load_module(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    Record = module.Record
+    to_thread_calls: list[tuple[object, tuple[object, ...]]] = []
+
+    async def fake_to_thread(func, *args):
+        to_thread_calls.append((func, args))
+        return func(*args)
+
+    monkeypatch.setattr(module.asyncio, "to_thread", fake_to_thread)
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = type("RuntimeStateStub", (), {})()
+    coordinator.session_state = _create_session_state_stub(current_turn_id="turn-1")
+    coordinator.chat_buffer = type("ChatBufferStub", (), {"add": lambda self, *_args: None})()
+    coordinator.speaker_name = "assistant"
+    coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
+    async def _broadcast_platform_motion_client_objects(**_kwargs):
+        return False
+
+    coordinator._broadcast_platform_motion_client_objects = _broadcast_platform_motion_client_objects
+
+    async def broadcast_motion_payload(**_kwargs):
+        return False
+
+    coordinator.broadcast_motion_payload = broadcast_motion_payload
+    coordinator._resolve_initial_performance_curve_motion_payload = lambda **_kwargs: None
+    async def _flush_performance_curve_motion_before_audio(**_kwargs):
+        return None
+
+    coordinator._flush_performance_curve_motion_before_audio = _flush_performance_curve_motion_before_audio
+    coordinator._record_motion_lab_raw_event = lambda **_kwargs: None
+    coordinator._motion_lab_chat_context = lambda: {}
+    coordinator._start_performance_curve_request = lambda **_kwargs: None
+    coordinator._fail_pending_performance_curve_motion = lambda **_kwargs: None
+
+    class MediaServiceStub:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def cache_audio_file(self, path: str):
+            self.calls.append(path)
+            return path, "/cache/audio.wav"
+
+    media_service = MediaServiceStub()
+    coordinator.media_service = media_service
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+
+    asyncio.run(
+        coordinator.emit_message_chain(
+            message_chain=[Record(file="voice.wav")],
+        )
+    )
+
+    assert to_thread_calls
+    assert media_service.calls == ["voice.wav"]
+    assert any(payload.get("type") == "output.audio" for payload in sent_payloads)
+
+
 # ── finalize_turn ───────────────────────────────────────────────────
 
 def test_finalize_turn_sends_turn_finished_and_clears_waiting_flag(
