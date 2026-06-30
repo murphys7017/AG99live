@@ -247,14 +247,14 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
             plugin_id=AG99LIVE_PLUGIN_ID,
             name=AG99LIVE_MOTION_EFFECT_NAME,
             description=(
-                "Generate Live2D motion intent for AG99Live persona expression. "
-                "Choose a small number of meaningful semantic axes; omit axes "
-                "that do not visibly contribute to this turn. Use resource_id "
-                "only when a listed explicit expression or motion resource is "
-                "clearly appropriate."
+                "Generate Live2D motion intent for persona expression. Describe "
+                "the visible performance with intent_tags and choose meaningful "
+                "semantic axes for this turn. Use resource_id only when a listed "
+                "explicit expression or motion resource is clearly appropriate."
             ),
             parameters={
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "intent_tags": {
                         "type": "array",
@@ -263,11 +263,12 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
                     "axes": {
                         "type": "object",
                         "additionalProperties": {"type": "number"},
+                        "minProperties": 1,
                     },
                     "duration_hint_ms": {"type": "integer"},
                     "resource_id": {"type": "string"},
                 },
-                "required": ["intent_tags"],
+                "required": ["intent_tags", "axes"],
             },
         )
     )
@@ -529,12 +530,12 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     axis_prompt = ""
     if isinstance(semantic_profile, dict):
         axis_prompt = str(semantic_profile.get("axis_prompt") or "").strip()
-    axis_prompt_text = f"可用动作轴语义：\n{axis_prompt}\n" if axis_prompt else ""
+    axis_prompt_text = f"可用 axes 参数及语义：\n{axis_prompt}\n" if axis_prompt else ""
     has_resource_candidates = bool(capability_payload.get("resource_candidates"))
     allowed_fields_text = (
-        "允许字段只有 intent_tags、resource_id、duration_hint_ms 和 axes。"
+        "必填字段是 intent_tags 和 axes；可选字段只有 resource_id 和 duration_hint_ms。"
         if has_resource_candidates
-        else "允许字段只有 intent_tags、duration_hint_ms 和 axes。"
+        else "必填字段是 intent_tags 和 axes；可选字段只有 duration_hint_ms。"
     )
     resource_field_text = (
         "resource_id 只有在确定要引用明确资源时才填写，不确定就省略。"
@@ -608,18 +609,14 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         resource_text = "\n".join(lines) + "\n"
 
     return (
-        "AG99live Motion 负责把本轮回复语义转成可执行动作。"
-        "你可以使用 ag99live.motion Persona Effect；动作内容只写入该 effect 的 arguments。"
-        "不要把动作写进普通文本、spoken_reply、immediate_spoken_reply 或 core_task_spec，也不要输出 plugin_hints 外壳。"
+        "你正在控制一个 Live2D 模型；在本轮动作 arguments 中填写动作参数。"
         f"{allowed_fields_text}"
-        "intent_tags 用 2 到 6 个开放关键词概括本轮语气、姿态和场景，不要输出 emotion_label。"
+        "intent_tags 用 2 到 6 个开放关键词概括本轮语气、姿态和场景。"
         f"{resource_field_text}"
-        "axes 只能使用当前 schema 里的轴 id，并且每个值都直接写成 number。"
+        "axes 是必填对象，只能使用下方列出的轴 id，并且每个值都直接写成 JSON number。"
         "axes 是本轮动作目标，不是角色全部参数的状态快照；没有明确方向或表演贡献的轴直接省略。"
-        "优先让头部、身体和视线形成可见骨架，再用少量表情轴补充细节。"
-        "如果当前语义没有强烈要求重复，尽量不要让 head_yaw 和 body_yaw 与上一动作保持相同方向和近似幅度；优先回中、反向或明显改变幅度。"
-        "普通回复也要给轻量姿态；明显转身、强调、回避、惊讶、调侃、开心或疑惑时，动作幅度要更明确。"
-        "不要输出 choice、mode、motion_id、catalog、motion3、exp3、关键帧、时间曲线或播放文件引用。"
+        "优先选择能表达姿态方向、视线焦点和身体重心的关键轴，再用少量表情轴补充情绪细节。"
+        "普通回复也要给轻量姿态参数；明显转身、强调、回避、惊讶、调侃、开心或疑惑时，动作幅度要更明确。"
         "示例只展示结构和数值，不要照抄示例内容。"
         f"{style_text}"
         f"{axis_prompt_text}"
@@ -1016,12 +1013,12 @@ def _build_previous_motion_variation_payload(
     summary_text = "上一动作关键轴：" + "，".join(summary_parts) + "。"
     if resource_id:
         summary_text += f" 上一动作 resource_id={resource_id}。"
-    summary_text += " 若本轮语义允许，避免重复相同方向和接近幅度，优先回中、反向或明显改变幅度。"
+    summary_text += " 参考上一动作，按本轮语义重新选择方向、幅度和重心。"
     return {
         "previous_motion_key_axes": key_axes,
         "previous_motion_summary": summary_text,
         "previous_motion_variation_instruction": (
-            "如果当前语义允许，避免在 head_yaw/body_yaw 上重复上一动作的相同方向与接近幅度。"
+            "参考上一动作的 head_yaw/body_yaw，按本轮语义调整方向与幅度。"
         ),
     }
 

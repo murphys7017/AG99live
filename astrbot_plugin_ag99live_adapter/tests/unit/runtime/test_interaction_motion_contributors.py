@@ -461,17 +461,17 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     system = next(item for item in extensions if item.mount == "system")
     capability = next(item for item in extensions if item.mount == "capability")
     runtime = next(item for item in extensions if item.mount == "context")
-    assert "AG99live Motion 负责把本轮回复语义转成可执行动作" in system.value
+    assert "你正在控制一个 Live2D 模型" in system.value
+    assert "在本轮动作 arguments 中填写动作参数" in system.value
     assert '"plugin_hints":{"ag99live_motion"' not in system.value
-    assert "ag99live.motion Persona Effect" in system.value
-    assert "动作内容只写入该 effect 的 arguments" in system.value
-    assert "不要输出 plugin_hints 外壳" in system.value
+    assert "Persona Effect" not in system.value
+    assert "不要输出 plugin_hints 外壳" not in system.value
     assert '"fallback_pose_id":"neutral"' not in system.value
     assert '"choice"' not in system.value
     assert '"motion_id"' not in system.value
-    assert "immediate_spoken_reply" in system.value
-    assert "头部、身体和视线形成可见骨架" in system.value
-    assert "普通回复也要给轻量姿态" in system.value
+    assert "immediate_spoken_reply" not in system.value
+    assert "姿态方向、视线焦点和身体重心" in system.value
+    assert "普通回复也要给轻量姿态参数" in system.value
     assert "角色风格偏好" in system.value
     assert "中性时偏少轴" in system.value
     assert capability.value["configured_generation_mode"] == "split_after_reply"
@@ -492,7 +492,10 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "fallback_pose_id" not in system.value
     assert "intent_tags" in system.value
     assert "resource_id" in system.value
-    assert "axes 只能使用当前 schema 里的轴 id" in system.value
+    assert "axes 是必填对象" in system.value
+    assert "可用 axes 参数及语义" in system.value
+    assert "插件会负责" not in system.value
+    assert "choice、mode、motion_id" not in system.value
     assert "可选明确资源" in system.value
     assert "expr_surprised" in system.value
     assert "关键轴=head_yaw=80" in system.value
@@ -631,7 +634,7 @@ def test_prompt_contributor_hides_resource_id_when_no_resource_candidates(
     assert "resource_candidates" not in capability.value
     assert "resource_id" not in capability.value["effect_arguments_example"]
     assert "resource_id 只有在确定要引用明确资源时才填写" not in system.value
-    assert "允许字段只有 intent_tags、duration_hint_ms 和 axes。" in system.value
+    assert "必填字段是 intent_tags 和 axes；可选字段只有 duration_hint_ms。" in system.value
 
 
 def test_prompt_contributor_returns_extensions_for_core_reply_purpose(
@@ -713,6 +716,8 @@ def test_prompt_runtime_includes_previous_motion_variation_hint(
     assert "head_yaw=look_right(64)" in runtime.value["previous_motion_summary"]
     assert "body_yaw=body_turn_left(43)" in runtime.value["previous_motion_summary"]
     assert "resource_id=serious_explain" in runtime.value["previous_motion_summary"]
+    assert "按本轮语义调整方向与幅度" in runtime.value["previous_motion_variation_instruction"]
+    assert "避免在 head_yaw/body_yaw 上重复" not in runtime.value["previous_motion_variation_instruction"]
 
 
 def test_prompt_fallback_candidates_are_representative_by_axis_descriptors(
@@ -1719,7 +1724,9 @@ def test_register_interaction_contributors_uses_available_hooks(
     assert effect.plugin_id == "astrbot_plugin_ag99live_adapter"
     assert effect.name == "ag99live.motion"
     assert effect.legacy_hint_names == ()
-    assert effect.parameters["required"] == ["intent_tags"]
+    assert effect.parameters["required"] == ["intent_tags", "axes"]
+    assert effect.parameters["additionalProperties"] is False
+    assert effect.parameters["properties"]["axes"]["minProperties"] == 1
     assert set(effect.parameters["properties"]) == {
         "intent_tags",
         "axes",
