@@ -42,7 +42,9 @@ declare global {
       ) => boolean;
       stopDirectParameterPlan?: (reason?: string, status?: DirectParameterPlanTerminalStatus) => void;
       getDirectParameterPlanError?: () => string;
-      loadWavFileForLipSync?: (url: string) => Promise<boolean>;
+      loadWavFileForLipSync?: (url: string, offsetSeconds?: number) => Promise<boolean>;
+      setExternalLipSyncValue?: (value: number) => void;
+      clearExternalLipSyncValue?: () => void;
     };
     LAppDelegate?: {
       getInstance?: () => {

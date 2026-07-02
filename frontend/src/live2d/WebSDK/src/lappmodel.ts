@@ -702,8 +702,12 @@ export class LAppModel extends CubismUserModel {
     if (this._lipsync) {
       this._wavFileHandler.update(deltaTimeSeconds);
       const rms = this._wavFileHandler.getRms();
-      lipSyncValue = Math.min(1.0, rms * 1.5);
-      speechEnergyValue = Math.min(1.0, rms * SPEECH_AUDIO_RMS_GAIN);
+      const wavLipSyncValue = Math.min(1.0, rms * 1.5);
+      const liveLipSyncValue = this.resolveExternalLipSyncValue();
+      lipSyncValue = liveLipSyncValue ?? wavLipSyncValue;
+      speechEnergyValue = liveLipSyncValue !== null
+        ? liveLipSyncValue
+        : Math.min(1.0, rms * SPEECH_AUDIO_RMS_GAIN);
     }
     this.updateSpeechAudioEnvelope(speechEnergyValue, deltaTimeSeconds);
 
@@ -1693,15 +1697,28 @@ export class LAppModel extends CubismUserModel {
     return true;
   }
 
-  public async loadWavFileForLipSync(url: string): Promise<boolean> {
+  public async loadWavFileForLipSync(url: string, offsetSeconds = 0): Promise<boolean> {
     try {
       await this._wavFileHandler.loadWavFile(url);
-      this._wavFileHandler.resetPlaybackCursor();
+      this._wavFileHandler.seekPlaybackCursor(offsetSeconds);
       return true;
     } catch (e) {
       console.warn("[LAppModel] Failed to load wav for lip sync:", e);
       return false;
     }
+  }
+
+  public setExternalLipSyncValue(value: number): void {
+    if (!Number.isFinite(value)) {
+      return;
+    }
+    this._externalLipSyncValue = Math.max(0, Math.min(1, value));
+    this._externalLipSyncUpdatedAtMs = performance.now();
+  }
+
+  public clearExternalLipSyncValue(): void {
+    this._externalLipSyncValue = null;
+    this._externalLipSyncUpdatedAtMs = 0;
   }
 
   private applyDirectParameterPlanOverlay(): string | null {
@@ -2057,6 +2074,17 @@ export class LAppModel extends CubismUserModel {
         * item.modulationDirection
         * audioGain;
     return Math.max(minValue, Math.min(maxValue, modulatedValue));
+  }
+
+  private resolveExternalLipSyncValue(): number | null {
+    if (this._externalLipSyncValue === null) {
+      return null;
+    }
+    if (performance.now() - this._externalLipSyncUpdatedAtMs > 180) {
+      this.clearExternalLipSyncValue();
+      return null;
+    }
+    return this._externalLipSyncValue;
   }
 
   private resolveSmoothedSpeechBodyTarget(
@@ -2906,6 +2934,8 @@ export class LAppModel extends CubismUserModel {
     this._directParameterPlanError = "";
     this._motionStartError = "";
     this._speechAudioEnvelope = 0.0;
+    this._externalLipSyncValue = null;
+    this._externalLipSyncUpdatedAtMs = 0;
   }
 
   _modelSetting: ICubismModelSetting; // モデルセッティング情報
@@ -2939,4 +2969,6 @@ export class LAppModel extends CubismUserModel {
   _directParameterPlanError: string;
   _motionStartError: string;
   _speechAudioEnvelope: number;
+  _externalLipSyncValue: number | null;
+  _externalLipSyncUpdatedAtMs: number;
 }

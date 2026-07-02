@@ -34,6 +34,8 @@ import { usePushToTalkController } from "./usePushToTalkController";
 import { useBilibiliLiveRuntime } from "../bilibili-live/useBilibiliLiveRuntime";
 import { isTerminalPhase } from "../turn-playback/session";
 
+const MOTION_AFTER_AUDIO_START_DELAY_MS = 90;
+
 export interface PetDesktopRuntime {
   sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>;
   selectedModel: ReturnType<typeof createModelSync>["selectedModel"];
@@ -64,6 +66,28 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     sendPlaybackFinishedForCurrentGroup: adapter.sendPlaybackFinishedForCurrentGroup,
     clearPlaybackGroupContext: adapter.clearPlaybackGroupContext,
   };
+  const delayedMotionStartTimers = new Set<number>();
+  const scheduleMotionAfterAudioStart = (turnId: string | null, messageId: string): void => {
+    if (!turnId) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      delayedMotionStartTimers.delete(timer);
+      const session = sessionStore.getSession(turnId);
+      const segment = session?.segments.get(messageId);
+      if (
+        !session
+        || !segment
+        || isTerminalPhase(session.phase)
+        || !segment.audio.started
+        || segment.audio.terminal !== "idle"
+      ) {
+        return;
+      }
+      modelEngine.notifyAudioPlaybackStarted(turnId, messageId);
+    }, MOTION_AFTER_AUDIO_START_DELAY_MS);
+    delayedMotionStartTimers.add(timer);
+  };
   const motionRecord = {
     getLastAssistantText: () => adapter.state.lastAssistantText,
     getSelectedModel: () => selectedModel,
@@ -73,9 +97,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     playbackAck,
     motionRecord,
     motionPlayer,
-    onAudioPlaybackStarted: (turnId, messageId) => {
-      modelEngine.notifyAudioPlaybackStarted(turnId, messageId);
-    },
+    onAudioPlaybackStarted: scheduleMotionAfterAudioStart,
     onMotionLabRawEvent: (payload, turnId) => {
       adapter.sendMotionLabRawEvent(cloneJson(payload), turnId);
     },
@@ -286,6 +308,10 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   });
 
   onBeforeUnmount(() => {
+    for (const timer of delayedMotionStartTimers) {
+      window.clearTimeout(timer);
+    }
+    delayedMotionStartTimers.clear();
     pushToTalk.dispose();
     bilibiliLive.dispose();
     playbackCoordinator.resetPlaybackCoordination();

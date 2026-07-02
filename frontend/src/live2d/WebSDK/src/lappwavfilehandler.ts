@@ -93,6 +93,17 @@ export class LAppWavFileHandler {
     this._lastRms = 0.0;
   }
 
+  public seekPlaybackCursor(seconds: number): void {
+    const targetSeconds = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
+    const samplingRate = this._wavFileInfo?._samplingRate ?? 0;
+    const sampleCount = this._wavFileInfo?._samplesPerChannel ?? 0;
+    this._userTimeSeconds = targetSeconds;
+    this._sampleOffset = samplingRate > 0
+      ? Math.max(0, Math.min(sampleCount, Math.floor(targetSeconds * samplingRate)))
+      : 0;
+    this._lastRms = 0.0;
+  }
+
   public start(filePath: string): void {
     this.resetPlaybackCursor();
     this.loadWavFile(filePath);
