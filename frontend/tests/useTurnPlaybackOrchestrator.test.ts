@@ -179,6 +179,35 @@ async function testTextAndMotionReleaseWhenAudioIsAbsent(): Promise<void> {
   h.stop();
 }
 
+async function testAudioCaptionOnlySegmentDoesNotReleaseVisibleText(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.setActiveSession("turn-audio-caption");
+  h.sessionStore.markTurnStarted("turn-audio-caption");
+
+  h.sessionStore.markAudioReceived(
+    "turn-audio-caption",
+    "http://localhost/caption.wav",
+    "msg-audio-caption",
+    "subtitle only",
+  );
+  h.sessionStore.markTextDelivered("turn-audio-caption", "msg-audio-caption");
+  h.sessionStore.markMotionReceived("turn-audio-caption", motionPayload, "msg-audio-caption");
+
+  await h.flush();
+  await h.flush();
+
+  assert.deepEqual(h.released, [
+    "motion:msg-audio-caption:turn-audio-caption",
+    "audio:msg-audio-caption:turn-audio-caption",
+  ]);
+  const segment = h.sessionStore
+    .getSession("turn-audio-caption")
+    ?.segments.get("msg-audio-caption");
+  assert.equal(segment?.text.content, null);
+  assert.equal(segment?.audio.captionText, "subtitle only");
+  h.stop();
+}
+
 async function testRejectedMotionReleaseMarksSegmentFailed(): Promise<void> {
   const h = createHarness({ motionAccepted: false });
   h.sessionStore.setActiveSession("turn-motion-rejected");
@@ -288,6 +317,7 @@ async function testLateAudioAfterTextReleaseOnlyReleasesAudio(): Promise<void> {
 async function run(): Promise<void> {
   await testSegmentsReleaseSequentiallyWithinTurn();
   await testTextAndMotionReleaseWhenAudioIsAbsent();
+  await testAudioCaptionOnlySegmentDoesNotReleaseVisibleText();
   await testRejectedMotionReleaseMarksSegmentFailed();
   await testPerformanceCurveHintIsMergedBeforeMotionRelease();
   await testLateAudioAfterTextReleaseOnlyReleasesAudio();

@@ -29,7 +29,7 @@ export interface OutputTextPayload {
 
 export interface OutputAudioPayload {
   audio_url: string | null;
-  text: string;
+  caption_text: string;
   speaker_name: string;
   avatar: string;
 }

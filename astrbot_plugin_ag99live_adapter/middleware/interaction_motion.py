@@ -313,7 +313,7 @@ def _resolve_persona_effect_motion_payload_with_reason(
     *,
     view: Any = None,
 ) -> tuple[dict[str, Any] | None, str]:
-    raw_arguments, effect_reason = _extract_ag99live_motion_effect_arguments(view)
+    raw_arguments, effect_reason = _extract_ag99live_motion_effect_arguments(event, view)
     if raw_arguments is None:
         return None, effect_reason
     return _normalize_motion_arguments_payload(
@@ -338,8 +338,8 @@ def _normalize_motion_arguments_payload(
     )
 
 
-def _extract_ag99live_motion_effect_arguments(view: Any) -> tuple[dict[str, Any] | None, str]:
-    effect_calls = _extract_effect_calls_from_view(view)
+def _extract_ag99live_motion_effect_arguments(event: Any, view: Any) -> tuple[dict[str, Any] | None, str]:
+    effect_calls = _extract_effect_calls_for_motion(event, view)
     if not effect_calls:
         return None, "effect_calls_missing"
 
@@ -358,6 +358,20 @@ def _extract_ag99live_motion_effect_arguments(view: Any) -> tuple[dict[str, Any]
         return None, "persona_effect_arguments_invalid"
 
     return None, "ag99live_motion_effect_missing"
+
+
+def _extract_effect_calls_for_motion(event: Any, view: Any) -> list[Any]:
+    if _resolve_result_phase(view) == "final":
+        raw_calls = _call_event_method(
+            event,
+            "get_extra",
+            "_interaction_final_response_effect_calls",
+            None,
+        )
+        thawed_calls = _thaw_snapshot_value(raw_calls)
+        if isinstance(thawed_calls, list):
+            return thawed_calls
+    return _extract_effect_calls_from_view(view)
 
 
 def _extract_effect_calls_from_view(view: Any) -> list[Any]:
@@ -1314,13 +1328,13 @@ def _log_persona_effect_motion_resolution(
     view: Any = None,
 ) -> None:
     effect_names = []
-    for raw_call in _extract_effect_calls_from_view(view):
+    for raw_call in _extract_effect_calls_for_motion(event, view):
         call = _thaw_snapshot_value(raw_call)
         name = str(_effect_call_get(call, "name") or "").strip()
         if name:
             effect_names.append(name)
 
-    effect_summary = _summarize_ag99live_motion_effect_arguments(view)
+    effect_summary = _summarize_ag99live_motion_effect_arguments(event, view)
     payload_axes_keys: list[str] = []
     payload_resource_id = ""
     payload_fallback_pose_id = ""
@@ -1369,7 +1383,7 @@ def _record_motion_lab_interaction_event(
         profile = resolve_selected_semantic_axis_profile(runtime_state=bundle.runtime_state)
     except Exception:  # noqa: BLE001
         profile = None
-    effect_calls = [_thaw_snapshot_value(item) for item in _extract_effect_calls_from_view(view)]
+    effect_calls = [_thaw_snapshot_value(item) for item in _extract_effect_calls_for_motion(event, view)]
     turn_id = identity.scheduled_frontend_turn_id
     base_event = {
         "conversation_uid": getattr(getattr(bundle.turn_coordinator, "session_state", None), "client_uid", None),
@@ -1390,7 +1404,7 @@ def _record_motion_lab_interaction_event(
             "payload_kind": "effect_calls",
             "raw": {
                 "effect_calls": effect_calls,
-                "effect_summary": _summarize_ag99live_motion_effect_arguments(view),
+                "effect_summary": _summarize_ag99live_motion_effect_arguments(event, view),
                 "view_metadata": _thaw_snapshot_value(getattr(view, "metadata", None)),
                 "reply_plan": _thaw_snapshot_value(get_interaction_reply_plan(event)),
                 "original_user_text": _call_event_method(event, "get_extra", "ag99live_original_message_str", ""),
@@ -1413,14 +1427,14 @@ def _record_motion_lab_interaction_event(
     )
 
 
-def _summarize_ag99live_motion_effect_arguments(view: Any) -> dict[str, Any]:
+def _summarize_ag99live_motion_effect_arguments(event: Any, view: Any) -> dict[str, Any]:
     summary = {
         "fields": [],
         "axis_keys": [],
         "intent_tags": [],
         "resource_id": "",
     }
-    raw_arguments, _reason = _extract_ag99live_motion_effect_arguments(view)
+    raw_arguments, _reason = _extract_ag99live_motion_effect_arguments(event, view)
     if not isinstance(raw_arguments, dict):
         return summary
 
@@ -1567,9 +1581,9 @@ def _resolve_immediate_phase_policy(
         )
     if reply_plan.route_mode in {"hybrid", "delegate_to_core"}:
         return _MotionSchedulePolicy(
-            should_schedule=False,
-            source=None,
-            reason="immediate_phase_waits_for_core_reply",
+            should_schedule=True,
+            source="interaction_result_immediate",
+            reason="schedule_hybrid_immediate",
         )
     if reply_plan.route_mode:
         return _MotionSchedulePolicy(
@@ -1602,7 +1616,11 @@ def _resolve_final_phase_policy(
             source=None,
             reason="final_phase_managed_by_inline_compat",
         )
-    if bool(_call_event_method(event, "get_extra", "ag99live_split_motion_scheduled", False)):
+    already_scheduled = bool(
+        _call_event_method(event, "get_extra", "ag99live_split_motion_scheduled", False)
+    )
+    route_mode = reply_plan.route_mode if reply_plan is not None else None
+    if already_scheduled and route_mode not in {"hybrid", "delegate_to_core"}:
         return _MotionSchedulePolicy(
             should_schedule=False,
             source=None,

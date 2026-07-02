@@ -118,8 +118,8 @@ export function parseOutputAudioPayload(
 ): PayloadParseResult<OutputAudioPayload> {
   const record = parseObjectPayload(envelope);
   if (!record.ok) return record;
-  const text = requiredString(envelope.type, record.payload, "text");
-  if (!text.ok) return text;
+  const captionText = requiredString(envelope.type, record.payload, "caption_text");
+  if (!captionText.ok) return captionText;
   const audioUrl = record.payload.audio_url;
   if (audioUrl !== null && typeof audioUrl !== "string") {
     return invalidPayload(envelope.type, "payload.audio_url", "string | null");
@@ -127,7 +127,7 @@ export function parseOutputAudioPayload(
   return {
     ok: true,
     payload: {
-      text: text.payload,
+      caption_text: captionText.payload,
       audio_url: audioUrl,
       speaker_name: optionalString(record.payload.speaker_name) ?? "",
       avatar: optionalString(record.payload.avatar) ?? "",

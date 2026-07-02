@@ -136,7 +136,8 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
             markInterrupt: (tId) => sessionStore.markInterrupt(tId),
             markTextReceived: (tId, text, msgId, mode) => sessionStore.markTextReceived(tId, text, msgId, mode as "replace" | "append"),
             markTextDelivered: (tId, msgId) => sessionStore.markTextDelivered(tId, msgId),
-            markAudioReceived: (tId, url, msgId) => sessionStore.markAudioReceived(tId, url, msgId),
+            markAudioReceived: (tId, url, msgId, captionText) =>
+              sessionStore.markAudioReceived(tId, url, msgId, captionText),
             markAudioTerminal: (tId, terminal, msgId, reason) => sessionStore.markAudioTerminal(tId, terminal as "completed" | "failed" | "absent", msgId, reason),
             markMotionReceived: (tId, payload, msgId) => sessionStore.markMotionReceived(tId, payload as NormalizedMotionPayload, msgId),
             markPerformanceCurveHintReceived: (tId, hint, msgId) => sessionStore.markPerformanceCurveHintReceived(tId, hint, msgId),

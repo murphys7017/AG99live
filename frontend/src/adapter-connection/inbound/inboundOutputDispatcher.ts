@@ -3,10 +3,10 @@
  * output_transcription 写到本地播放状态。
  *
  * 文本与音频要求段身份（turnId + messageId）；它们的 apply* 行为：
- *   - 用 queuePendingAssistantTextForPlayback / queuePendingAudioForPlayback
- *     把内容塞进 pending 队列（按 buildPendingPlaybackKey 复合键去重）；
- *   - 通过 sessionStore.markTextReceived / markAudioReceived 把同一份内容写到
- *     播放会话存储；
+ *   - output_text 用 queuePendingAssistantTextForPlayback 把可见文本塞进 pending 队列；
+ *   - output_audio 用 queuePendingAudioForPlayback 把音频塞进 pending 队列，
+ *     payload.caption_text 只作为音频字幕写入 audio.captionText；
+ *   - 通过 sessionStore.markTextReceived / markAudioReceived 写到播放会话存储；
  *   - markAudioReceived 返回 false（重复音频）时直接落"已忽略"状态，不再入队；
  *   - 音频段 audio_url 缺失时把段标 failed:missing_audio_url，避免 pending 漂在那。
  * 图片与转写只更新计数/快照与历史，不接入播放管线。
@@ -45,7 +45,12 @@ export interface InboundOutputDispatchDeps {
       turnId: string | null,
       url: string,
       messageId: string,
+      captionText?: string,
     ) => boolean;
+    markTextDelivered: (
+      turnId: string | null,
+      messageId: string,
+    ) => void;
     ensureSegment: (
       turnId: string | null,
       messageId: string,
@@ -136,27 +141,14 @@ async function applyOutputAudio(
 ): Promise<void> {
   const s = deps.state;
   s.currentTurnId = event.turnId;
-  if (event.text) {
-    const existingText = deps.sessionStore
-      ?.ensureSegment(event.turnId, event.messageId)
-      .text.content;
-    if (!existingText) {
-      deps.queuePendingAssistantTextForPlayback(
-        s.pendingAssistantTexts,
-        event.text,
-        event.turnId,
-        event.messageId,
-      );
-      deps.sessionStore?.markTextReceived(
-        event.turnId,
-        event.text,
-        event.messageId,
-        "replace",
-      );
-    }
-  }
+  const existingText = deps.sessionStore
+    ?.ensureSegment(event.turnId, event.messageId)
+    .text.content;
 
   if (!event.audioUrl) {
+    if (!existingText) {
+      deps.sessionStore?.markTextDelivered(event.turnId, event.messageId);
+    }
     s.statusMessage = "收到音频回复占位，未提供可播放地址。";
     deps.pushHistory("system", s.statusMessage);
     deps.markAudioPlaybackTerminal(
@@ -173,7 +165,11 @@ async function applyOutputAudio(
     event.turnId,
     resolvedUrl,
     event.messageId,
+    event.captionText,
   ) ?? true;
+  if (!existingText) {
+    deps.sessionStore?.markTextDelivered(event.turnId, event.messageId);
+  }
   console.info("[Connection] output audio received.", {
     turnId: event.turnId,
     messageId: event.messageId,

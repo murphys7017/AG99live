@@ -319,7 +319,7 @@ function sendOutputAudio(
     turnId: string;
     messageId: string;
     audioUrl: string;
-    text?: string;
+    captionText?: string;
   },
 ): void {
   socket.emitMessage(JSON.stringify({
@@ -331,7 +331,7 @@ function sendOutputAudio(
     source: "backend",
     payload: {
       audio_url: options.audioUrl,
-      text: options.text ?? "hello",
+      caption_text: options.captionText ?? "hello",
       speaker_name: "Alice",
       avatar: "",
     },
@@ -473,7 +473,7 @@ function testTextAudioMotionWithSameMessageIdShareSegment(): void {
       turn_id: "turn-segment",
       source: "backend",
       payload: {
-        text: " audio fallback should not overwrite ",
+        caption_text: " audio fallback should not overwrite ",
         audio_url: "http://localhost/segment.wav",
         speaker_name: "assistant",
         avatar: "",
@@ -497,6 +497,7 @@ function testTextAudioMotionWithSameMessageIdShareSegment(): void {
     const segment = session?.segments.get("m-segment-1");
     assert.equal(segment?.text.content, "segment text");
     assert.equal(segment?.audio.url, "http://127.0.0.1/segment.wav");
+    assert.equal(segment?.audio.captionText, "audio fallback should not overwrite");
     assert.equal(segment?.motion.payload?.kind, "semantic_intent");
   });
 }
@@ -558,7 +559,7 @@ function testFallbackIdentityWritesCurrentSessionSegment(): void {
       turn_id: null,
       source: "backend",
       payload: {
-        text: " audio text ",
+        caption_text: " audio text ",
         audio_url: "http://localhost/audio-fallback.wav",
         speaker_name: "assistant",
         avatar: "",
@@ -571,7 +572,10 @@ function testFallbackIdentityWritesCurrentSessionSegment(): void {
     );
     const segment = sessionStore.getSession("turn-fallback")?.segments.get("m-audio-fallback");
     assert.equal(segment?.audio.url, "http://127.0.0.1/audio-fallback.wav");
-    assert.equal(segment?.text.content, "audio text");
+    assert.equal(segment?.audio.captionText, "audio text");
+    assert.equal(segment?.text.content, null);
+    assert.equal(segment?.text.delivered, true);
+    assert.equal(adapter.state.pendingAssistantTexts.has(pendingKey("turn-fallback", "m-audio-fallback")), false);
   });
 }
 
@@ -680,7 +684,7 @@ async function testLateAudioAfterSynthFinishedStillPlaysOnce(): Promise<void> {
       turnId: "turn-late-audio",
       messageId: "msg-late-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/late.wav",
-      text: "late audio",
+      captionText: "late audio",
     });
     await flushMicrotasks();
 
@@ -710,7 +714,7 @@ async function testDuplicateOutputAudioDoesNotReplayCompletedSegment(): Promise<
       turnId: "turn-duplicate-audio",
       messageId: "msg-duplicate-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/repeat.wav",
-      text: "repeat audio",
+      captionText: "repeat audio",
     });
 
     assert.equal(adapter.releaseAudioForPlayback("msg-duplicate-audio", "turn-duplicate-audio"), true);
@@ -726,7 +730,7 @@ async function testDuplicateOutputAudioDoesNotReplayCompletedSegment(): Promise<
       turnId: "turn-duplicate-audio",
       messageId: "msg-duplicate-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/repeat.wav",
-      text: "repeat audio",
+      captionText: "repeat audio",
     });
     await flushMicrotasks();
 
@@ -748,7 +752,7 @@ async function testChangedUrlOutputAudioDoesNotReplayCompletedSegment(): Promise
       turnId: "turn-changed-audio",
       messageId: "msg-changed-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/first.wav",
-      text: "repeat audio",
+      captionText: "repeat audio",
     });
 
     assert.equal(adapter.releaseAudioForPlayback("msg-changed-audio", "turn-changed-audio"), true);
@@ -765,7 +769,7 @@ async function testChangedUrlOutputAudioDoesNotReplayCompletedSegment(): Promise
       turnId: "turn-changed-audio",
       messageId: "msg-changed-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/second.wav",
-      text: "repeat audio",
+      captionText: "repeat audio",
     });
     await flushMicrotasks();
 
@@ -1608,7 +1612,7 @@ async function testInterruptMarksPlayingAudioSegmentFailed(): Promise<void> {
       source: "backend",
       payload: {
         audio_url: "http://127.0.0.1:12397/cache/audio/test.wav",
-        text: "hello",
+        caption_text: "hello",
         speaker_name: "Alice",
         avatar: "",
       },
@@ -1731,7 +1735,7 @@ async function testInterruptMarksPendingAudioSegmentFailedBeforePlaybackStart():
       source: "backend",
       payload: {
         audio_url: "http://127.0.0.1:12397/cache/audio/test-pending.wav",
-        text: "hello pending",
+        caption_text: "hello pending",
         speaker_name: "Alice",
         avatar: "",
       },

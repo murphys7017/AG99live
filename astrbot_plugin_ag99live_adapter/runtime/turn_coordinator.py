@@ -97,6 +97,7 @@ from ..motion.inline_motion import (
     resolve_inline_motion_source as _resolve_inline_motion_source,
     resolve_motion_generation_mode as _resolve_motion_generation_mode,
     resolve_motion_payload_schema_version as _resolve_motion_payload_schema_version,
+    strip_inline_anim_tags as _strip_inline_anim_tags,
     summarize_motion_payload as _summarize_motion_payload,
     validate_motion_payload as _validate_motion_payload,
 )
@@ -285,7 +286,7 @@ class TurnCoordinator:
         segment_message_id = _resolve_platform_segment_message_id(platform_extras_dict)
 
         self._mark_turn_timing("emit_started_at")
-        texts, picture_paths, record_paths = _extract_outbound_message_parts(message_chain)
+        texts, picture_paths, record_paths, record_texts = _extract_outbound_message_parts(message_chain)
         logger.info(
             "WIRING output_parts turn_id=%s message_id=%s text_count=%s image_count=%s record_count=%s",
             turn_id or "",
@@ -296,12 +297,16 @@ class TurnCoordinator:
         )
         override_text = str(raw_reply_text_override or "").strip()
         raw_reply_text = override_text or "\n".join(texts).strip()
+        raw_record_text = "\n".join(record_texts).strip()
+        audio_caption_text = _strip_inline_anim_tags(raw_record_text).strip()
         motion_generation_mode = _resolve_motion_generation_mode(self.runtime_state)
         inline_anim_detected = INLINE_ANIM_START_PATTERN.search(raw_reply_text) is not None
         reply_text, inline_payload, inline_mode = _extract_inline_motion_plan(
             raw_reply_text,
             runtime_state=self.runtime_state,
         )
+        semantic_text = str(platform_extras_dict.get("semantic_text") or "").strip()
+        assistant_semantic_text = semantic_text or reply_text or raw_reply_text
 
         if reply_text:
             self.chat_buffer.add("assistant", reply_text)
@@ -321,10 +326,13 @@ class TurnCoordinator:
             message_id=segment_message_id,
             source_route="emit_message_chain",
             phase="assistant_output",
-            assistant_text=reply_text or raw_reply_text,
+            assistant_text=assistant_semantic_text,
             raw={
                 "raw_reply_text": raw_reply_text,
+                "record_text": raw_record_text,
                 "visible_reply_text": reply_text,
+                "audio_caption_text": audio_caption_text,
+                "semantic_text": semantic_text,
                 "text_count": len(texts),
                 "image_count": len(picture_paths),
                 "record_count": len(record_paths),
@@ -338,8 +346,10 @@ class TurnCoordinator:
         self._current_performance_curve_context = {
             "turn_id": turn_id,
             "message_id": segment_message_id,
-            "assistant_text": reply_text or raw_reply_text,
-            "assistant_reply_keywords": extract_assistant_reply_keywords(reply_text or raw_reply_text),
+            "assistant_text": assistant_semantic_text,
+            "assistant_reply_keywords": extract_assistant_reply_keywords(
+                assistant_semantic_text
+            ),
             "chat_context": self._motion_lab_chat_context(),
             "platform_extras": platform_extras_dict,
         }
@@ -440,7 +450,7 @@ class TurnCoordinator:
                     turn_id=turn_id,
                     message_id=segment_message_id,
                     audio_url=audio_url,
-                    text=reply_text,
+                    caption_text=audio_caption_text,
                     speaker_name=self.speaker_name,
                     avatar="",
                 )

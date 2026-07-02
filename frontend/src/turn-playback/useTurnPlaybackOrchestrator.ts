@@ -173,11 +173,11 @@ export function useTurnPlaybackOrchestrator(
           continue;
         }
 
-        if (session.phase === "collecting" && segment.text.content) {
+        if (session.phase === "collecting" && (segment.text.content || segment.text.delivered)) {
           options.sessionStore.markPhase(segment.turnId, "ready");
         }
 
-        if (segment.text.content) {
+        if (segment.text.content || segment.text.delivered) {
           core.markTextReady(
             segment.messageId,
             segment.turnId,

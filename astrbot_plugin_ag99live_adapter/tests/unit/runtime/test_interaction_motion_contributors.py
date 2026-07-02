@@ -1407,7 +1407,7 @@ def test_result_contributor_skips_final_phase_in_inline_mode(
     )
 
 
-def test_result_contributor_skips_immediate_phase_for_hybrid_reply(
+def test_result_contributor_reports_missing_motion_for_hybrid_immediate_reply(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1427,13 +1427,17 @@ def test_result_contributor_skips_immediate_phase_for_hybrid_reply(
 
     assert contribution is not None
     assert scheduled_calls == []
+    assert contribution.client_objects == []
+    metadata = contribution.metadata["ag99live_motion_schedule"]
+    assert metadata["source"] == "interaction_result_immediate"
+    assert metadata["reason"] == "motion_payload_missing"
     assert (
-        contribution.metadata["ag99live_motion_schedule"]["reason"]
-        == "immediate_phase_waits_for_core_reply"
+        metadata["motion_resolution_reason"]
+        == "effect_calls_missing:motion_payload_missing"
     )
 
 
-def test_result_contributor_skips_persona_effect_motion_in_hybrid_immediate_phase(
+def test_result_contributor_schedules_persona_effect_motion_in_hybrid_immediate_phase(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1461,17 +1465,18 @@ def test_result_contributor_skips_persona_effect_motion_in_hybrid_immediate_phas
 
     assert contribution is not None
     assert scheduled_calls == []
-    assert contribution.client_objects == []
-    assert event.get_extra("ag99live_split_motion_scheduled") is None
+    assert len(contribution.client_objects) == 1
+    assert event.get_extra("ag99live_split_motion_scheduled") is True
     metadata = contribution.metadata["ag99live_motion_schedule"]
-    assert metadata["reason"] == "immediate_phase_waits_for_core_reply"
+    assert metadata["reason"] == "persona_effect_motion_client_object"
+    assert metadata["source"] == "persona_effect"
     assert (
         metadata["motion_resolution_reason"]
         == "persona_effect:axes_all_neutral:axes_empty_or_invalid:fallback_pose:serious_explain"
     )
 
 
-def test_result_contributor_dedupes_persona_effect_motion_after_immediate_phase(
+def test_result_contributor_schedules_final_motion_after_hybrid_immediate_phase(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1487,7 +1492,7 @@ def test_result_contributor_dedupes_persona_effect_motion_after_immediate_phase(
             None,
             _build_view(
                 phase="immediate",
-                route_mode="self_reply",
+                route_mode="hybrid",
                 final_result="你好呀",
                 immediate_reply="你好呀",
                 effect_calls=[
@@ -1525,11 +1530,60 @@ def test_result_contributor_dedupes_persona_effect_motion_after_immediate_phase(
     assert final is not None
     assert scheduled_calls == []
     assert len(immediate.client_objects) == 1
-    assert final.client_objects == []
+    assert len(final.client_objects) == 1
     assert (
         final.metadata["ag99live_motion_schedule"]["reason"]
-        == "already_scheduled_by_motion_pipeline"
+        == "persona_effect_motion_client_object"
     )
+
+
+def test_result_contributor_prefers_final_response_effect_calls(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(mode="split_after_reply", raw_turn_id="raw-turn")
+    event.set_extra(
+        "_interaction_final_response_effect_calls",
+        [
+            _motion_effect_call(
+                {
+                    "intent_tags": ["final"],
+                    "axes": {"head_yaw": 70},
+                }
+            )
+        ],
+    )
+
+    contribution = asyncio.run(
+        contributor.collect(
+            event,
+            None,
+            _build_view(
+                phase="final",
+                route_mode="hybrid",
+                final_result="最终回复文本",
+                effect_calls=[
+                    _motion_effect_call(
+                        {
+                            "intent_tags": ["old"],
+                            "axes": {"head_yaw": 70},
+                        }
+                    )
+                ],
+            ),
+        )
+    )
+
+    assert contribution is not None
+    assert scheduled_calls == []
+    assert len(contribution.client_objects) == 1
+    motion_payload = contribution.client_objects[0]["motion_payload"]
+    assert motion_payload["intent_tags"] == ["final"]
+    assert motion_payload["axes"]["head_yaw"] == 70.0
 
 
 def test_result_contributor_uses_event_turn_state_reply_plan_when_view_plan_missing(

@@ -299,7 +299,7 @@ def build_output_audio(
     turn_id: str | None,
     message_id: str | None = None,
     audio_url: str | None,
-    text: str,
+    caption_text: str,
     speaker_name: str,
     avatar: str,
 ) -> dict[str, Any]:
@@ -310,7 +310,7 @@ def build_output_audio(
         source=SOURCE_ADAPTER,
         payload={
             "audio_url": audio_url,
-            "text": text,
+            "caption_text": caption_text,
             "speaker_name": speaker_name,
             "avatar": avatar,
         },

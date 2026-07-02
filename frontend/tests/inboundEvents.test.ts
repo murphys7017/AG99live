@@ -53,7 +53,7 @@ function testOutputTextUsesEnvelopeIdentity(): void {
 function testOutputAudioUsesEnvelopeIdentity(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("output.audio", {
-      text: " hi ",
+      caption_text: " hi ",
       audio_url: " https://example.com/a.wav ",
       speaker_name: "assistant",
       avatar: "",
@@ -69,7 +69,7 @@ function testOutputAudioUsesEnvelopeIdentity(): void {
   }
   assert.equal(event.turnId, "turn-2");
   assert.equal(event.messageId, "m-1");
-  assert.equal(event.text, "hi");
+  assert.equal(event.captionText, "hi");
   assert.equal(event.audioUrl, "https://example.com/a.wav");
 }
 
@@ -304,6 +304,26 @@ function testInvalidOutputTextPayloadReturnsProtocolError(): void {
   assert.equal(event.warningKey, "payload:output.text:payload.text");
 }
 
+function testOutputAudioRejectsVisibleTextPayloadField(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("output.audio", {
+      text: "legacy visible text field",
+      audio_url: "https://example.com/a.wav",
+      speaker_name: "assistant",
+      avatar: "",
+    }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
+  }
+  assert.equal(event.error.code, "invalid_payload");
+  assert.equal(event.error.path, "payload.caption_text");
+  assert.equal(event.warningKey, "payload:output.audio:payload.caption_text");
+}
+
 function testInvalidTurnFinishedReasonReturnsProtocolError(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("control.turn_finished", {
@@ -475,6 +495,7 @@ function run(): void {
   testMissingSegmentMessageIdReturnsProtocolError();
   testUnhandledTypeReturnsUnhandled();
   testInvalidOutputTextPayloadReturnsProtocolError();
+  testOutputAudioRejectsVisibleTextPayloadField();
   testInvalidTurnFinishedReasonReturnsProtocolError();
   testInvalidHistoryCreatedPayloadReturnsProtocolError();
   testModelSyncPayloadMissingSelectedModelRejected();

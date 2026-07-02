@@ -249,6 +249,8 @@ export function useTurnPlaybackSessionStore() {
     }
     segment.text.receiveMode = mode;
     segment.text.receivedAtMs = performance.now();
+    segment.text.released = false;
+    segment.text.delivered = false;
     if (!session.backend.turnStarted) {
       session.backend.turnStarted = true;
     }
@@ -284,6 +286,7 @@ export function useTurnPlaybackSessionStore() {
     turnId: string | null,
     url: string,
     messageId: string,
+    captionText = "",
   ): boolean {
     const trimmed = url.trim();
     if (!trimmed) {
@@ -304,6 +307,8 @@ export function useTurnPlaybackSessionStore() {
       return false;
     }
     segment.audio.url = trimmed;
+    const normalizedCaption = captionText.trim();
+    segment.audio.captionText = normalizedCaption || segment.audio.captionText;
     segment.audio.receivedAtMs = performance.now();
     segment.audio.released = false;
     segment.audio.terminal = "idle";

@@ -159,7 +159,7 @@ export type InboundAdapterEvent =
     kind: "output_audio";
     messageId: string;
     turnId: string | null;
-    text: string;
+    captionText: string;
     audioUrl: string | null;
     envelope: ProtocolEnvelope<OutputAudioPayload>;
   }
@@ -342,7 +342,7 @@ export function mapInboundEnvelopeToEvent(
         kind: "output_audio",
         messageId: messageId.messageId,
         turnId,
-        text: payload.text.trim(),
+        captionText: payload.caption_text.trim(),
         audioUrl: normalizedAudioUrl,
         envelope: withPayload(envelope, payload),
       };

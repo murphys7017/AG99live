@@ -885,6 +885,74 @@ def test_emit_message_chain_reuses_platform_visible_message_id_for_segment_outpu
     assert by_type["output.audio"]["turn_id"] == "turn-segment"
 
 
+def test_emit_message_chain_uses_record_text_only_as_audio_caption(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+    Record = module.Record
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-record",
+            "last_user_text": "user text",
+            "mark_synthesizing": lambda self: None,
+            "mark_playing": lambda self: None,
+        },
+    )()
+
+    class ChatBufferStub:
+        def add(self, role: str, text: str) -> None:
+            del role
+            del text
+
+    class MediaServiceStub:
+        def cache_audio_file(self, path: str):
+            return path, "/cache/audio.wav"
+
+    coordinator.chat_buffer = ChatBufferStub()
+    coordinator.media_service = MediaServiceStub()
+    coordinator.speaker_name = "assistant"
+    coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
+
+    sent_payloads: list[dict[str, object]] = []
+    recorded_events: list[dict[str, object]] = []
+    curve_contexts: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+    coordinator._record_motion_lab_raw_event = lambda **kwargs: recorded_events.append(kwargs)
+    coordinator._start_performance_curve_request = lambda **_kwargs: curve_contexts.append(
+        dict(coordinator._current_performance_curve_context)
+    )
+
+    asyncio.run(
+        coordinator.emit_message_chain(
+            message_chain=[Record(file="voice.wav", text="字幕文本")],
+            platform_extras={"visible_message_id": "visible-audio-1"},
+        )
+    )
+
+    assert [payload.get("type") for payload in sent_payloads] == ["output.audio"]
+    audio_payload = sent_payloads[0]["payload"]
+    assert audio_payload["caption_text"] == "字幕文本"
+    assert "text" not in audio_payload
+    assert sent_payloads[0]["message_id"] == "visible-audio-1"
+    assert recorded_events[0]["assistant_text"] == ""
+    assert recorded_events[0]["raw"]["audio_caption_text"] == "字幕文本"
+    assert curve_contexts[0]["assistant_text"] == ""
+
+
 def test_emit_message_chain_dedupes_motion_client_object_for_segmented_output(
     install_fake_astrbot,
     monkeypatch,
