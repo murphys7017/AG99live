@@ -548,13 +548,13 @@ function testSameMessageIdAcrossTurnsDoesNotOverwritePendingItems(): void {
   });
 }
 
-function testFallbackIdentityWritesCurrentSessionSegment(): void {
+function testOutputAudioWithoutTurnIdIsRejected(): void {
   withConnectedAdapter(({ adapter, socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-fallback");
+    sendTurnStarted(socket, "turn-missing-audio-turn");
     socket.emitMessage(JSON.stringify({
       type: "output.audio",
       version: "v2",
-      message_id: "m-audio-fallback",
+      message_id: "m-audio-missing-turn",
       timestamp: "2026-05-08T00:00:01.000Z",
       turn_id: null,
       source: "backend",
@@ -566,16 +566,19 @@ function testFallbackIdentityWritesCurrentSessionSegment(): void {
       },
     }));
 
+    assert.match(adapter.state.lastError, /path=turn_id/);
     assert.equal(
-      adapter.state.pendingAudios.get(pendingKey("turn-fallback", "m-audio-fallback"))?.turnId,
-      "turn-fallback",
+      adapter.state.pendingAudios.has(pendingKey("turn-missing-audio-turn", "m-audio-missing-turn")),
+      false,
     );
-    const segment = sessionStore.getSession("turn-fallback")?.segments.get("m-audio-fallback");
-    assert.equal(segment?.audio.url, "http://127.0.0.1/audio-fallback.wav");
-    assert.equal(segment?.audio.captionText, "audio text");
-    assert.equal(segment?.text.content, null);
-    assert.equal(segment?.text.delivered, true);
-    assert.equal(adapter.state.pendingAssistantTexts.has(pendingKey("turn-fallback", "m-audio-fallback")), false);
+    assert.equal(
+      sessionStore.getSession("turn-missing-audio-turn")?.segments.has("m-audio-missing-turn"),
+      false,
+    );
+    assert.equal(
+      adapter.state.pendingAssistantTexts.has(pendingKey("turn-missing-audio-turn", "m-audio-missing-turn")),
+      false,
+    );
   });
 }
 
@@ -814,14 +817,14 @@ function testTurnFinishedDoesNotMarkMissingSegmentAudioAbsent(): void {
   });
 }
 
-function testMotionFallbackDoesNotCreateAnonymousSession(): void {
+function testMotionWithoutTurnIdIsRejected(): void {
   withConnectedAdapter(({ socket, sessionStore }) => {
     sendTurnStarted(socket, "turn-motion");
     socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-motion", null)));
 
     const session = sessionStore.getSession("turn-motion");
     assert.ok(session);
-    assert.equal(session?.segments.get("m-motion")?.motion.payload?.kind, "semantic_intent");
+    assert.equal(session?.segments.has("m-motion"), false);
     assert.equal(sessionStore.getSessions().some((item) => item.id === "turn:turn-motion"), true);
   });
 }
@@ -903,7 +906,7 @@ async function testCurrentSynthFinishedCreatesMissingSession(): Promise<void> {
 function testInvalidMotionDoesNotRewritePreviousSegment(): void {
   withConnectedAdapter(({ socket, sessionStore }) => {
     sendTurnStarted(socket, "turn-motion-old");
-    socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-motion-valid", null)));
+    socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-motion-valid", "turn-motion-old")));
 
     const beforeSessionCount = sessionStore.getSessions().length;
     const previousPayload =
@@ -914,7 +917,7 @@ function testInvalidMotionDoesNotRewritePreviousSegment(): void {
       version: "v2",
       message_id: "m-motion-invalid",
       timestamp: "2026-05-08T00:00:04.000Z",
-      turn_id: null,
+      turn_id: "turn-motion-old",
       source: "backend",
       payload: {
         mode: "preview",
@@ -1778,7 +1781,7 @@ async function run(): Promise<void> {
   testTextAudioMotionWithSameMessageIdShareSegment();
   testMultipleMessageIdsDoNotOverwritePendingItems();
   testSameMessageIdAcrossTurnsDoesNotOverwritePendingItems();
-  testFallbackIdentityWritesCurrentSessionSegment();
+  testOutputAudioWithoutTurnIdIsRejected();
   testTurnStartedResetsPendingMaps();
   testSynthFinishedMarksMissingSegmentAudioAbsent();
   testSynthFinishedDoesNotMarkReleasedAudioAbsent();
@@ -1789,7 +1792,7 @@ async function run(): Promise<void> {
   testStaleSynthFinishedReportsProtocolViolation();
   await testCurrentTurnFinishedCreatesMissingSession();
   await testCurrentSynthFinishedCreatesMissingSession();
-  testMotionFallbackDoesNotCreateAnonymousSession();
+  testMotionWithoutTurnIdIsRejected();
   testInvalidMotionDoesNotRewritePreviousSegment();
   testBackToBackTurnsDoNotSharePendingState();
   testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted();

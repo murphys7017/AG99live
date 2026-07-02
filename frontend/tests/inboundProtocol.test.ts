@@ -21,7 +21,40 @@ function testInvalidEnvelope(): void {
     throw new Error("expected invalid_envelope");
   }
   assert.equal(result.code, "invalid_envelope");
-  assert.equal(result.message, "收到非法协议消息。");
+  assert.equal(result.message, "收到非法协议消息（type 必须是非空字符串）。");
+}
+
+function testInvalidEnvelopeTopLevelFields(): void {
+  const base = {
+    type: "output.text",
+    version: "v2",
+    message_id: "m-1",
+    timestamp: "2026-05-08T00:00:00.000Z",
+    turn_id: "turn-1",
+    source: "backend",
+    payload: { text: "hello" },
+  };
+
+  for (const [field, value, expected] of [
+    ["message_id", "", "message_id 必须是非空字符串"],
+    ["timestamp", "", "timestamp 必须是非空字符串"],
+    ["source", "", "source 必须是非空字符串"],
+    ["turn_id", 123, "turn_id 必须是非空字符串或 null"],
+    ["turn_id", "", "turn_id 必须是非空字符串或 null"],
+    ["payload", [], "payload 必须是对象"],
+    ["payload", null, "payload 必须是对象"],
+  ] as const) {
+    const result = parseInboundEnvelope(JSON.stringify({
+      ...base,
+      [field]: value,
+    }));
+    assert.equal(result.ok, false);
+    if (result.ok) {
+      throw new Error(`expected invalid_envelope for ${field}`);
+    }
+    assert.equal(result.code, "invalid_envelope");
+    assert.equal(result.message, `收到非法协议消息（${expected}）。`);
+  }
 }
 
 function testVersionMismatch(): void {
@@ -63,6 +96,23 @@ function testValidEnvelope(): void {
   assert.equal(result.envelope.type, "output.text");
 }
 
+function testValidEnvelopeNormalizesTurnId(): void {
+  const result = parseInboundEnvelope(JSON.stringify({
+    type: "output.text",
+    version: "v2",
+    message_id: "m-1",
+    timestamp: "2026-05-08T00:00:00.000Z",
+    turn_id: " turn-1 ",
+    source: "backend",
+    payload: { text: "hello" },
+  }));
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    throw new Error("expected valid envelope");
+  }
+  assert.equal(result.envelope.turn_id, "turn-1");
+}
+
 function testParseInboundEnvelopeObjectNull(): void {
   const result = parseInboundEnvelopeObject(null);
   assert.equal(result.ok, false);
@@ -74,6 +124,15 @@ function testParseInboundEnvelopeObjectNull(): void {
 function testParseInboundEnvelopeObjectNonObject(): void {
   const result = parseInboundEnvelopeObject("string");
   assert.equal(result.ok, false);
+}
+
+function testParseInboundEnvelopeRejectsJsonNull(): void {
+  const result = parseInboundEnvelope("null");
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.code, "invalid_envelope");
+    assert.equal(result.message, "收到非法协议消息（非对象）。");
+  }
 }
 
 function testParseInboundEnvelopeObjectValid(): void {
@@ -111,10 +170,13 @@ function testParseInboundEnvelopeObjectBadVersion(): void {
 function run(): void {
   testInvalidJson();
   testInvalidEnvelope();
+  testInvalidEnvelopeTopLevelFields();
   testVersionMismatch();
   testValidEnvelope();
+  testValidEnvelopeNormalizesTurnId();
   testParseInboundEnvelopeObjectNull();
   testParseInboundEnvelopeObjectNonObject();
+  testParseInboundEnvelopeRejectsJsonNull();
   testParseInboundEnvelopeObjectValid();
   testParseInboundEnvelopeObjectBadVersion();
 

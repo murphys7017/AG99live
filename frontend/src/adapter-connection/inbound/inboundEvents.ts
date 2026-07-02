@@ -4,10 +4,10 @@
  * 上游 transport 已经把 socket 消息解析成 ProtocolEnvelope；本文件按 envelope.type
  * 把它折叠成 InboundAdapterEvent，并在折叠时：
  *   - 调用 inboundPayloads.* 做 payload 形状校验，失败返回 protocol_error 事件；
- *   - 把 turn_id 规范化（空串和非字符串都视为 null），并按事件类别选择归属：
- *     输出/turn_finished/synth_finished 回落到 currentTurnId，interrupt 优先回落到
- *     activeAudioTurnId，动作 payload 优先回落到 currentTurnId；turn_started 不继承；
- *   - 输出类与动作类事件强制要求非空 message_id，缺失时返回 protocol_error；
+ *   - 把 turn_id 规范化（空串和非字符串都视为 null），并按事件类别选择归属；
+ *   - segment 输出类与正式动作类事件强制要求非空 message_id/turn_id，缺失时返回 protocol_error；
+ *   - turn_finished/synth_finished 是 turn 控制信号，可回落到 currentTurnId；
+ *   - interrupt 是控制信号，优先回落到 activeAudioTurnId；
  *   - 未识别 envelope.type 返回 unhandled，由 dispatcher 走 diagnostics 上报。
  *
  * 自身不读写任何状态，也不调用副作用；纯函数式折叠，方便单元测试与缓冲重放。
@@ -151,14 +151,14 @@ export type InboundAdapterEvent =
   | {
     kind: "output_text";
     messageId: string;
-    turnId: string | null;
+    turnId: string;
     text: string;
     envelope: ProtocolEnvelope<OutputTextPayload>;
   }
   | {
     kind: "output_audio";
     messageId: string;
-    turnId: string | null;
+    turnId: string;
     captionText: string;
     audioUrl: string | null;
     envelope: ProtocolEnvelope<OutputAudioPayload>;
@@ -188,7 +188,7 @@ export type InboundAdapterEvent =
   | {
     kind: "engine_motion_payload";
     messageId: string;
-    turnId: string | null;
+    turnId: string;
     envelope: ProtocolEnvelope<Record<string, unknown>>;
   }
   | {
@@ -198,7 +198,7 @@ export type InboundAdapterEvent =
   | {
     kind: "engine_performance_curve_hint";
     messageId: string;
-    turnId: string | null;
+    turnId: string;
     envelope: ProtocolEnvelope<Record<string, unknown>>;
   };
 
@@ -310,7 +310,10 @@ export function mapInboundEnvelopeToEvent(
         return protocolPayloadError(envelope, parsed.error);
       }
       const payload = parsed.payload;
-      const turnId = resolveCurrentTurnIdentity(envelope.turn_id, ctx.currentTurnId);
+      const turnId = requireSegmentTurnId(envelope);
+      if (!turnId.ok) {
+        return turnId.event;
+      }
       const messageId = requireSegmentMessageId(envelope);
       if (!messageId.ok) {
         return messageId.event;
@@ -318,7 +321,7 @@ export function mapInboundEnvelopeToEvent(
       return {
         kind: "output_text",
         messageId: messageId.messageId,
-        turnId,
+        turnId: turnId.turnId,
         text: payload.text.trim(),
         envelope: withPayload(envelope, payload),
       };
@@ -333,7 +336,10 @@ export function mapInboundEnvelopeToEvent(
         typeof payload.audio_url === "string" && payload.audio_url.trim()
           ? payload.audio_url.trim()
           : null;
-      const turnId = resolveCurrentTurnIdentity(envelope.turn_id, ctx.currentTurnId);
+      const turnId = requireSegmentTurnId(envelope);
+      if (!turnId.ok) {
+        return turnId.event;
+      }
       const messageId = requireSegmentMessageId(envelope);
       if (!messageId.ok) {
         return messageId.event;
@@ -341,7 +347,7 @@ export function mapInboundEnvelopeToEvent(
       return {
         kind: "output_audio",
         messageId: messageId.messageId,
-        turnId,
+        turnId: turnId.turnId,
         captionText: payload.caption_text.trim(),
         audioUrl: normalizedAudioUrl,
         envelope: withPayload(envelope, payload),
@@ -419,10 +425,10 @@ export function mapInboundEnvelopeToEvent(
     }
     case INBOUND_MESSAGE_TYPES.ENGINE_MOTION_INTENT:
     case INBOUND_MESSAGE_TYPES.ENGINE_CATALOG_MOTION: {
-      const turnId =
-        normalizeTurnId(envelope.turn_id)
-        ?? ctx.currentTurnId
-        ?? ctx.activeAudioTurnId;
+      const turnId = requireSegmentTurnId(envelope);
+      if (!turnId.ok) {
+        return turnId.event;
+      }
       const messageId = requireSegmentMessageId(envelope);
       if (!messageId.ok) {
         return messageId.event;
@@ -430,7 +436,7 @@ export function mapInboundEnvelopeToEvent(
       return {
         kind: "engine_motion_payload",
         messageId: messageId.messageId,
-        turnId,
+        turnId: turnId.turnId,
         envelope: envelope as ProtocolEnvelope<Record<string, unknown>>,
       };
     }

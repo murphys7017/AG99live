@@ -26,7 +26,15 @@ export function parseInboundEnvelope(rawData: string): ParsedInboundEnvelope {
     };
   }
 
-  return parseEnvelopeRecord(envelope as unknown as Record<string, unknown>);
+  if (!isRecord(envelope)) {
+    return {
+      ok: false,
+      code: "invalid_envelope",
+      message: "收到非法协议消息（非对象）。",
+    };
+  }
+
+  return parseEnvelopeRecord(envelope);
 }
 
 /**
@@ -34,38 +42,38 @@ export function parseInboundEnvelope(rawData: string): ParsedInboundEnvelope {
  * 与 parseInboundEnvelope 共享核心校验逻辑，但不走 JSON.parse。
  */
 export function parseInboundEnvelopeObject(raw: unknown): ParsedInboundEnvelope {
-  if (!raw || typeof raw !== "object") {
+  if (!isRecord(raw)) {
     return {
       ok: false,
       code: "invalid_envelope",
       message: "收到非法协议消息（非对象）。",
     };
   }
-  return parseEnvelopeRecord(raw as Record<string, unknown>);
+  return parseEnvelopeRecord(raw);
 }
 
 /**
- * 核心信封校验逻辑：要求 envelope.type/version/message_id 合法。
+ * 核心信封校验逻辑：要求 envelope 顶层字段合法。
  * WebSocket 和 window/devtools 共用同一套校验规则。
  */
 function parseEnvelopeRecord(
   record: Record<string, unknown>,
 ): ParsedInboundEnvelope {
-  const envelope = record as unknown as ProtocolEnvelope<unknown>;
-
-  if (!envelope || typeof envelope !== "object" || typeof envelope.type !== "string") {
+  const type = readNonEmptyString(record.type);
+  if (!type) {
     return {
       ok: false,
       code: "invalid_envelope",
-      message: "收到非法协议消息。",
+      message: "收到非法协议消息（type 必须是非空字符串）。",
     };
   }
 
   const messageVersion =
-    typeof envelope.version === "string"
-      ? envelope.version.trim()
+    typeof record.version === "string"
+      ? record.version.trim()
       : "";
   if (messageVersion !== PROTOCOL_VERSION) {
+    const envelope = record as unknown as ProtocolEnvelope<unknown>;
     return {
       ok: false,
       code: "version_mismatch",
@@ -75,5 +83,60 @@ function parseEnvelopeRecord(
     };
   }
 
+  const messageId = readNonEmptyString(record.message_id);
+  if (!messageId) {
+    return invalidEnvelope("message_id 必须是非空字符串");
+  }
+
+  const timestamp = readNonEmptyString(record.timestamp);
+  if (!timestamp) {
+    return invalidEnvelope("timestamp 必须是非空字符串");
+  }
+
+  const source = readNonEmptyString(record.source);
+  if (!source) {
+    return invalidEnvelope("source 必须是非空字符串");
+  }
+
+  const turnId = record.turn_id === null
+    ? null
+    : readNonEmptyString(record.turn_id);
+  if (record.turn_id !== null && !turnId) {
+    return invalidEnvelope("turn_id 必须是非空字符串或 null");
+  }
+
+  if (!isRecord(record.payload)) {
+    return invalidEnvelope("payload 必须是对象");
+  }
+
+  const envelope = {
+    ...record,
+    type,
+    version: messageVersion,
+    message_id: messageId,
+    timestamp,
+    turn_id: turnId,
+    source,
+  } as ProtocolEnvelope<unknown>;
   return { ok: true, envelope };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function invalidEnvelope(message: string): ParsedInboundEnvelope {
+  return {
+    ok: false,
+    code: "invalid_envelope",
+    message: `收到非法协议消息（${message}）。`,
+  };
 }

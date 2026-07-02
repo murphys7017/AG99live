@@ -73,6 +73,45 @@ function testOutputAudioUsesEnvelopeIdentity(): void {
   assert.equal(event.audioUrl, "https://example.com/a.wav");
 }
 
+function testOutputTextRequiresTurnId(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("output.text", {
+      text: " hello ",
+      speaker_name: "assistant",
+      avatar: "",
+    }, {
+      turnId: null,
+    }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
+  }
+  assert.equal(event.error.path, "turn_id");
+}
+
+function testOutputAudioRequiresTurnId(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("output.audio", {
+      caption_text: " hi ",
+      audio_url: "https://example.com/a.wav",
+      speaker_name: "assistant",
+      avatar: "",
+    }, {
+      turnId: null,
+    }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
+  }
+  assert.equal(event.error.path, "turn_id");
+}
+
 function testTurnFinishedFallsBackToCurrentIdentity(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("control.turn_finished", {
@@ -137,11 +176,7 @@ function testInterruptFallsBackToActiveAudioIdentity(): void {
   assert.equal(event.turnId, "audio-turn");
 }
 
-function testEngineMotionFallsBackCurrentThenAudioTurn(): void {
-  const currentContext = {
-    currentTurnId: "current-turn",
-    activeAudioTurnId: "audio-turn",
-  };
+function testEngineMotionRequiresTurnId(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("engine.motion_intent", {
       mode: "preview",
@@ -151,15 +186,14 @@ function testEngineMotionFallsBackCurrentThenAudioTurn(): void {
     }, {
       turnId: null,
     }),
-    currentContext,
+    defaultContext(),
   );
 
-  assert.equal(event.kind, "engine_motion_payload");
-  if (event.kind !== "engine_motion_payload") {
-    throw new Error("expected engine_motion_payload event");
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
   }
-  assert.equal(event.turnId, "current-turn");
-  assert.equal(event.messageId, "m-1");
+  assert.equal(event.error.path, "turn_id");
 }
 
 function testEngineCatalogMotionMapsAsMotionPayload(): void {
@@ -483,11 +517,13 @@ function testInvalidMotionTuningSamplesStatePayloadReturnsProtocolError(): void 
 function run(): void {
   testOutputTextUsesEnvelopeIdentity();
   testOutputAudioUsesEnvelopeIdentity();
+  testOutputTextRequiresTurnId();
+  testOutputAudioRequiresTurnId();
   testTurnFinishedFallsBackToCurrentIdentity();
   testTurnStartedDoesNotInheritCurrentIdentity();
   testInterruptUsesEnvelopeIdentity();
   testInterruptFallsBackToActiveAudioIdentity();
-  testEngineMotionFallsBackCurrentThenAudioTurn();
+  testEngineMotionRequiresTurnId();
   testEngineCatalogMotionMapsAsMotionPayload();
   testEngineMotionPreviewDoesNotRequireSegmentMessageId();
   testPerformanceCurveHintMapsAsSegmentPatch();
