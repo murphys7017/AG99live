@@ -1,8 +1,8 @@
 task:
-  class: feature
+  class: maintenance
   risk: medium
-  phase: performance_curve_timing_mvp
-  scope: AG99live independent performance curve hint layer and frontend timing resolution
+  phase: motion_prompt_static_dynamic_split
+  scope: AG99Live motion prompt static/dynamic lifecycle alignment and no-replacement fallback policy
 context:
   confidence: medium
   assumptions:
@@ -10,7 +10,9 @@ context:
     - middleware-first and inline-first remain separate routes; middleware-first reads plugin_hints.ag99live_motion, inline-first reads the inline anim contract only.
     - motion_catalog.json may enrich fallback pose descriptions and catalog-derived semantic candidates only when the motion can be mapped to semantic axes.
     - fallback_pose_id remains a semantic-axis fallback selector, not a motion3/catalog playback selector.
+    - Motion prompt static/dynamic scope metadata improves render-tree selection and diagnostics, but model input token reduction still depends on AstrBot/provider static prefix caching or session-level reuse.
     - Skeleton repair may add missing head/body/gaze axes from fallback semantic axes and may replace neutralish skeleton axes, but it must not overwrite non-neutral LLM axes.
+    - Empty, invalid, or all-neutral motion axes should not be replaced by a fallback pose; those turns should be treated as no valid motion input.
   unresolved_questions:
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.
@@ -27,8 +29,15 @@ architecture:
     - plugin_hints JSON parsing now tolerates outer-format issues such as fenced JSON, text-wrapped objects, and trailing commas while preserving strict v3 axis semantics.
     - fallback candidate selection and motion visibility summaries now derive pose descriptors from each axis profile's own neutral and soft_range values instead of assuming a global midpoint of 50.
     - frontend motion diagnostics now surface pose_descriptors, outside_soft_range_axes, and skeleton_groups_present from semantic motion summaries so prompt tuning can be compared against runtime-visible motion coverage.
+    - middleware motion prompt now marks the decision contract and capability payload as static, keeps per-turn runtime data dynamic, and keeps configured_generation_mode out of the static capability mapping.
+    - middleware-first and inline compatibility routes now disable fallback-pose replacement for unusable motion axes while preserving skeleton repair for otherwise valid axes.
 verification:
   checks_run:
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_interaction_motion_contributors.py
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_turn_coordinator_realtime_motion.py::test_extract_inline_motion_plan_rejects_invalid_intent_without_replacement astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_turn_coordinator_realtime_motion.py::test_emit_message_chain_inline_invalid_v3_intent_does_not_broadcast_replacement
+    - python -m py_compile astrbot_plugin_ag99live_adapter/middleware/motion_payload.py astrbot_plugin_ag99live_adapter/motion/inline_motion.py
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_prompt_contributor_returns_capability_and_runtime_extensions astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_prompt_contributor_hides_resource_id_when_no_resource_candidates astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_prompt_contributor_returns_extensions_for_core_reply_purpose astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_prompt_purpose_appears_in_runtime_payload astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_prompt_runtime_includes_previous_motion_variation_hint -q
+    - python -m compileall astrbot_plugin_ag99live_adapter\middleware\interaction_motion.py
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_performance_curve.py -q
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_runtime_state_provider_analysis.py -q
     - npm run test:model-engine
@@ -40,10 +49,10 @@ verification:
     - python -m compileall astrbot_plugin_ag99live_adapter
     - git diff --check
   checks_failed:
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py -q currently has pre-existing axis expectation drift unrelated to this curve patch: body_yaw expected 66.0 but runtime returns 64.0, and expected 43.15 but runtime returns 45.15.
-  validation_gap: Live AstrBot plus Electron runtime still needs manual validation against fresh logs; earlier TTS hook integration remains future work.
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py -q currently has pre-existing axis expectation drift unrelated to this prompt/fallback patch: body_yaw expected 66.0 but runtime returns 64.0, and expected 43.15 but runtime returns 45.15.
+  validation_gap: Live AstrBot plus provider logs still need validation to confirm input_tokens decrease; static scope alone may not reduce request tokens without provider/static-prefix caching.
 runtime:
-  mode: performance_curve_timing_mvp
+  mode: motion_prompt_static_dynamic_split
 backlog:
   - id: motion_lab_history_sample_workbench
     status: todo

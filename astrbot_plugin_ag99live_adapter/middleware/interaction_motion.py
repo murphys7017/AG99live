@@ -141,7 +141,9 @@ class AG99liveMotionPromptContributor:
         if not _should_contribute_motion_prompt(view):
             return None
 
-        capability_payload = _build_motion_capability_payload(bundle.runtime_state)
+        static_capability_payload = _build_motion_static_capability_payload(
+            bundle.runtime_state
+        )
         runtime_payload = _build_motion_runtime_payload(
             event,
             bundle.turn_coordinator,
@@ -155,10 +157,10 @@ class AG99liveMotionPromptContributor:
                 mount="system",
                 title="AG99live Motion Decision Contract",
                 value_kind="text",
-                value=_build_motion_decision_contract_text(capability_payload),
+                value=_build_motion_decision_contract_text(static_capability_payload),
                 order=39,
                 meta={
-                    "scope": "dynamic",
+                    "scope": "static",
                     "node_type": "ag99live_motion_decision_contract",
                 },
             ),
@@ -167,10 +169,10 @@ class AG99liveMotionPromptContributor:
                 mount="capability",
                 title="AG99live Motion Capability",
                 value_kind="mapping",
-                value=capability_payload,
+                value=static_capability_payload,
                 order=40,
                 meta={
-                    "scope": "dynamic",
+                    "scope": "static",
                     "node_type": "ag99live_motion_capability",
                 },
             ),
@@ -470,10 +472,8 @@ def _normalize_duration_hint_ms(value: Any) -> int:
     return _payload_normalize_duration_hint_ms(value)
 
 
-def _build_motion_capability_payload(runtime_state: Any) -> dict[str, Any]:
-    motion_generation_mode = _resolve_motion_generation_mode(runtime_state)
+def _build_motion_static_capability_payload(runtime_state: Any) -> dict[str, Any]:
     capability_payload: dict[str, Any] = {
-        "configured_generation_mode": motion_generation_mode,
         "inline_contract_supported": bool(
             getattr(runtime_state, "enable_inline_motion_contract", True)
         ),

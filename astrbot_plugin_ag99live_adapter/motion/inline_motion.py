@@ -18,10 +18,8 @@ from .catalog_motion import (
 )
 from .motion_intent import (
     _apply_expressive_floor_v2,
-    DEFAULT_MOTION_INTENT_DURATION_MS,
     MOTION_INTENT_V2_SCHEMA_VERSION,
     MOTION_INTENT_V3_SCHEMA_VERSION,
-    derive_motion_emotion_label,
     derive_motion_fallback_decision,
     describe_motion_axes_for_fallback,
     normalize_motion_intent_payload,
@@ -33,7 +31,6 @@ from .motion_intent import (
 from .fallback_pose import (
     build_fallback_pose_candidates,
     repair_motion_axes_with_fallback_pose,
-    resolve_fallback_pose,
     resolve_fallback_pose_axes,
 )
 from .resource_catalog import (
@@ -263,103 +260,14 @@ def _build_inline_fallback_motion_payload(
     fallback_reason: str,
     mode: str,
 ) -> tuple[dict[str, Any] | None, str | None]:
-    if runtime_state is None:
-        return None, None
-    try:
-        semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
-    except RuntimeError as exc:
-        logger.warning("WIRING inline_motion fallback disabled: %s", exc)
-        return None, None
-
-    intent_tags: list[str] = []
-    resource_id = ""
-    if isinstance(raw_intent, dict):
-        if _find_inline_forbidden_field(raw_intent):
-            return None, None
-        intent_tags = normalize_motion_intent_tags(raw_intent.get("intent_tags"))
-        resource_id = normalize_motion_resource_id(raw_intent.get("resource_id"))
-    if not intent_tags:
-        return None, None
-    emotion_label = derive_motion_emotion_label(intent_tags)
-    fallback_candidates = build_fallback_pose_candidates(
-        runtime_state=runtime_state,
-        semantic_profile=semantic_profile,
-        limit=None,
-        require_non_neutral_skeleton=True,
+    del raw_intent
+    del runtime_state
+    del mode
+    logger.warning(
+        "WIRING inline_motion fallback replacement disabled: %s",
+        fallback_reason,
     )
-    raw_resource_id = resource_id
-    resource_candidates = build_motion_resource_candidates(
-        runtime_state=runtime_state,
-    )
-    resource_id = _validate_inline_motion_resource_id(
-        resource_id,
-        candidates=resource_candidates,
-    )
-    fallback_decision = derive_motion_fallback_decision(
-        candidates=fallback_candidates,
-        intent_tags=intent_tags,
-        resource_id=resource_id,
-        axes=raw_intent.get("axes") if isinstance(raw_intent, dict) else {},
-        describe_axes=lambda value: describe_motion_axes_for_fallback(
-            value,
-            semantic_profile=semantic_profile,
-        ),
-    )
-    fallback_pose_id = fallback_decision.fallback_pose_id
-
-    fallback_resolution = resolve_fallback_pose(
-        runtime_state=runtime_state,
-        semantic_profile=semantic_profile,
-        fallback_pose_id=fallback_pose_id,
-        require_non_neutral_skeleton=True,
-    )
-    if fallback_resolution is None:
-        return None, None
-    axes = _apply_expressive_floor_v2(
-        axes=fallback_resolution.axes,
-        emotion=emotion_label,
-        semantic_profile=semantic_profile,
-    )
-
-    try:
-        profile_revision = int(semantic_profile.get("revision") or 0)
-    except (TypeError, ValueError):
-        return None, None
-    if profile_revision <= 0:
-        return None, None
-
-    payload = {
-        "schema_version": MOTION_INTENT_V3_SCHEMA_VERSION,
-        "profile_id": str(semantic_profile.get("profile_id") or "").strip(),
-        "profile_revision": profile_revision,
-        "model_id": str(semantic_profile.get("model_id") or "").strip(),
-        "mode": "expressive",
-        "intent_tags": intent_tags,
-        "emotion_label": emotion_label,
-        "duration_hint_ms": DEFAULT_MOTION_INTENT_DURATION_MS,
-        "resource_id": resource_id,
-        "fallback_pose_id": fallback_pose_id,
-        "axes": axes,
-        "summary": {
-            "axis_count": len(axes),
-            "intent_tag_count": len(intent_tags),
-            "fallback_pose_id": fallback_pose_id,
-            "fallback_used": fallback_decision.fallback_missing,
-            "fallback_score": fallback_decision.score,
-            "fallback_reasons": fallback_decision.reasons,
-            "fallback_reason": str(fallback_reason or "").strip(),
-            "resource_id_rejected": bool(raw_resource_id and not resource_id),
-        },
-    }
-    payload, _constraint_result = apply_motion_constraints_to_intent_payload(
-        payload=payload,
-        semantic_profile=semantic_profile,
-    )
-    valid, failure_reason = validate_motion_intent_payload(payload)
-    if not valid:
-        logger.warning("WIRING inline_motion fallback rejected: %s", failure_reason)
-        return None, None
-    return payload, mode or "inline"
+    return None, None
 
 
 def _validate_inline_motion_resource_id(

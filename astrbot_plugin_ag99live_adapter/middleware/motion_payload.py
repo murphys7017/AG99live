@@ -127,21 +127,9 @@ def normalize_motion_arguments_payload(
     fallback_pose_id = fallback_decision.fallback_pose_id
 
     if not validated_axes:
-        fallback_resolution = resolve_fallback_pose(
-            runtime_state=runtime_state,
-            semantic_profile=semantic_profile,
-            fallback_pose_id=fallback_pose_id,
-            require_non_neutral_skeleton=True,
-        )
-        if fallback_resolution is not None:
-            validated_axes = fallback_resolution.axes
-            reason = append_resolution_reason(reason, f"fallback_pose:{fallback_pose_id}")
-        else:
-            reason = append_resolution_reason(
-                reason,
-                "fallback_pose_unavailable",
-            )
-            return None, reason
+        reason = append_resolution_reason(reason, "motion_axes_unusable_no_replacement")
+        return None, reason
+
     else:
         fallback_resolution = resolve_fallback_pose(
             runtime_state=runtime_state,

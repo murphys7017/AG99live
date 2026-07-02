@@ -327,7 +327,7 @@ def test_extract_inline_motion_plan_rejects_v3_intent_mode(
     assert mode is None
 
 
-def test_extract_inline_motion_plan_falls_back_when_runtime_available(
+def test_extract_inline_motion_plan_rejects_invalid_intent_without_replacement(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1744,7 +1744,7 @@ def test_emit_message_chain_uses_raw_reply_text_override_for_inline_extraction(
     assert "world" in output_text.lower()
 
 
-def test_emit_message_chain_inline_invalid_v3_intent_broadcasts_fallback(
+def test_emit_message_chain_inline_invalid_v3_intent_does_not_broadcast_replacement(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:

@@ -461,6 +461,9 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     system = next(item for item in extensions if item.mount == "system")
     capability = next(item for item in extensions if item.mount == "capability")
     runtime = next(item for item in extensions if item.mount == "context")
+    assert system.meta["scope"] == "static"
+    assert capability.meta["scope"] == "static"
+    assert runtime.meta["scope"] == "dynamic"
     assert "你正在控制一个 Live2D 模型" in system.value
     assert "在本轮动作 arguments 中填写动作参数" in system.value
     assert '"plugin_hints":{"ag99live_motion"' not in system.value
@@ -474,7 +477,7 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "普通回复也要给轻量姿态参数" in system.value
     assert "角色风格偏好" in system.value
     assert "中性时偏少轴" in system.value
-    assert capability.value["configured_generation_mode"] == "split_after_reply"
+    assert "configured_generation_mode" not in capability.value
     assert capability.value["motion_style_prompt"] == "中性时偏少轴，开心时优先笑眼和嘴角。"
     assert capability.value["semantic_profile"]["profile_id"] == "pet.semantic.v1"
     assert (
@@ -631,6 +634,9 @@ def test_prompt_contributor_hides_resource_id_when_no_resource_candidates(
 
     capability = next(item for item in extensions if item.mount == "capability")
     system = next(item for item in extensions if item.mount == "system")
+    runtime = next(item for item in extensions if item.mount == "context")
+    assert capability.meta["scope"] == "static"
+    assert runtime.meta["scope"] == "dynamic"
     assert "resource_candidates" not in capability.value
     assert "resource_id" not in capability.value["effect_arguments_example"]
     assert "resource_id 只有在确定要引用明确资源时才填写" not in system.value
@@ -1437,7 +1443,7 @@ def test_result_contributor_reports_missing_motion_for_hybrid_immediate_reply(
     )
 
 
-def test_result_contributor_schedules_persona_effect_motion_in_hybrid_immediate_phase(
+def test_result_contributor_skips_neutral_persona_effect_motion_in_hybrid_immediate_phase(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1465,14 +1471,14 @@ def test_result_contributor_schedules_persona_effect_motion_in_hybrid_immediate_
 
     assert contribution is not None
     assert scheduled_calls == []
-    assert len(contribution.client_objects) == 1
-    assert event.get_extra("ag99live_split_motion_scheduled") is True
+    assert contribution.client_objects == []
+    assert event.get_extra("ag99live_split_motion_scheduled") is None
     metadata = contribution.metadata["ag99live_motion_schedule"]
-    assert metadata["reason"] == "persona_effect_motion_client_object"
-    assert metadata["source"] == "persona_effect"
+    assert metadata["reason"] == "motion_payload_missing"
+    assert metadata["source"] == "interaction_result_immediate"
     assert (
         metadata["motion_resolution_reason"]
-        == "persona_effect:axes_all_neutral:axes_empty_or_invalid:fallback_pose:serious_explain"
+        == "persona_effect:axes_all_neutral:axes_empty_or_invalid:motion_axes_unusable_no_replacement:motion_payload_missing"
     )
 
 
