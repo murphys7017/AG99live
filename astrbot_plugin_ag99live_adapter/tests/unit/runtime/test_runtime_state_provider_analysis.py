@@ -700,6 +700,130 @@ def test_runtime_state_refresh_reads_motion_prompt_instruction(
     assert state.motion_prompt_instruction == "Use stronger mouth motion."
 
 
+def test_runtime_state_loads_dedicated_performance_curve_provider(
+    monkeypatch,
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    runtime_state, provider_cls = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+
+    class ProviderMeta:
+        id = "curve-provider"
+
+    class DedicatedCurveProvider(provider_cls):
+        def meta(self):
+            return ProviderMeta()
+
+    class ProviderMetaFallback:
+        id = "chat-provider"
+
+    class FallbackChatProvider(provider_cls):
+        def meta(self):
+            return ProviderMetaFallback()
+
+    dedicated_provider = DedicatedCurveProvider()
+    fallback_provider = FallbackChatProvider()
+
+    class PluginContext:
+        def get_provider_by_id(self, provider_id: str):
+            if provider_id == "curve-provider":
+                return dedicated_provider
+            return None
+
+        def get_using_stt_provider(self, umo: str):
+            del umo
+            return None
+
+        def get_using_provider(self, umo: str):
+            del umo
+            return fallback_provider
+
+    seed_model_info = build_seed_model_info()
+    monkeypatch.setattr(
+        runtime_state,
+        "scan_live2d_models",
+        lambda **kwargs: deepcopy(seed_model_info),
+    )
+
+    state = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=PluginContext(),
+        plugin_config={
+            "enable_performance_curve": True,
+            "performance_curve_provider_id": "curve-provider",
+        },
+        plugin_config_loader=None,
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=tmp_path / "live2ds",
+    )
+
+    state.refresh()
+
+    assert state.performance_curve_provider_id == "curve-provider"
+    assert state.selected_performance_curve_provider is dedicated_provider
+
+
+def test_runtime_state_falls_back_to_current_chat_provider_for_performance_curve(
+    monkeypatch,
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    runtime_state, provider_cls = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+
+    class ProviderMeta:
+        id = "chat-provider"
+
+    class ChatProvider(provider_cls):
+        def meta(self):
+            return ProviderMeta()
+
+    chat_provider = ChatProvider()
+
+    class PluginContext:
+        def get_provider_by_id(self, provider_id: str):
+            del provider_id
+            return None
+
+        def get_using_stt_provider(self, umo: str):
+            del umo
+            return None
+
+        def get_using_provider(self, umo: str):
+            del umo
+            return chat_provider
+
+    seed_model_info = build_seed_model_info()
+    monkeypatch.setattr(
+        runtime_state,
+        "scan_live2d_models",
+        lambda **kwargs: deepcopy(seed_model_info),
+    )
+
+    state = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=PluginContext(),
+        plugin_config={
+            "enable_performance_curve": True,
+        },
+        plugin_config_loader=None,
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=tmp_path / "live2ds",
+    )
+
+    state.refresh()
+
+    assert state.performance_curve_provider_id == ""
+    assert state.selected_performance_curve_provider is chat_provider
+
+
 def test_runtime_state_persists_scan_and_action_filter_cache_across_instances(
     monkeypatch,
     install_fake_astrbot,

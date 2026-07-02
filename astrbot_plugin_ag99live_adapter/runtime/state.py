@@ -77,6 +77,7 @@ class RuntimeState:
 
         self.stt_provider_id = ""
         self.motion_analysis_provider_id = ""
+        self.performance_curve_provider_id = ""
         self.enable_performance_curve = False
         self.enable_action_llm_filter = True
         self.action_llm_filter_timeout_seconds = 12.0
@@ -226,6 +227,7 @@ class RuntimeState:
 
         previous_stt_provider_id = self.stt_provider_id
         previous_motion_analysis_provider_id = self.motion_analysis_provider_id
+        previous_performance_curve_provider_id = self.performance_curve_provider_id
         previous_enable_performance_curve = self.enable_performance_curve
         previous_vad_model = self.vad_model
         previous_vad_config = dict(self.vad_config)
@@ -246,6 +248,11 @@ class RuntimeState:
         self.motion_analysis_provider_id = _plugin_config_get(
             self.plugin_config,
             "motion_analysis_provider_id",
+            "",
+        )
+        self.performance_curve_provider_id = _plugin_config_get(
+            self.plugin_config,
+            "performance_curve_provider_id",
             "",
         )
         self.enable_performance_curve = bool(
@@ -390,6 +397,7 @@ class RuntimeState:
         provider_config_changed = (
             previous_stt_provider_id != self.stt_provider_id
             or previous_motion_analysis_provider_id != self.motion_analysis_provider_id
+            or previous_performance_curve_provider_id != self.performance_curve_provider_id
             or previous_enable_performance_curve != self.enable_performance_curve
         )
         provider_binding_missing = (
@@ -415,11 +423,13 @@ class RuntimeState:
         if provider_config_changed or provider_binding_missing:
             logger.info(
                 "Provider runtime settings changed, reloading provider bindings "
-                "(stt: %s -> %s, motion_analysis: %s -> %s, performance_curve_enabled: %s -> %s)",
+                "(stt: %s -> %s, motion_analysis: %s -> %s, performance_curve: %s -> %s, performance_curve_enabled: %s -> %s)",
                 previous_stt_provider_id or "<default>",
                 self.stt_provider_id or "<default>",
                 previous_motion_analysis_provider_id or "<default>",
                 self.motion_analysis_provider_id or "<default>",
+                previous_performance_curve_provider_id or "<default>",
+                self.performance_curve_provider_id or "<default>",
                 previous_enable_performance_curve,
                 self.enable_performance_curve,
             )
@@ -505,21 +515,39 @@ class RuntimeState:
                 logger.info("Using current chat provider for motion analysis: %s", provider.meta().id)
 
         if self.enable_performance_curve:
-            try:
-                provider = self.plugin_context.get_using_provider(umo=self.client_uid)
-            except Exception as exc:
-                logger.warning("Failed to get current chat provider for performance curve: %s", exc)
-                provider = None
-            if isinstance(provider, Provider):
-                self.selected_performance_curve_provider = provider
-                logger.info(
-                    "Using current chat provider for performance curve: %s",
-                    provider.meta().id,
-                )
+            provider = None
+            if self.performance_curve_provider_id:
+                provider = self.plugin_context.get_provider_by_id(self.performance_curve_provider_id)
+                if isinstance(provider, Provider):
+                    self.selected_performance_curve_provider = provider
+                    logger.info(
+                        "Loaded performance curve provider from plugin config: %s",
+                        self.performance_curve_provider_id,
+                    )
+                else:
+                    logger.warning(
+                        "Configured performance curve provider `%s` not found or not a chat Provider.",
+                        self.performance_curve_provider_id,
+                    )
             else:
-                logger.warning(
-                    "Current chat provider unavailable; performance curve generation is disabled for now.",
-                )
+                try:
+                    provider = self.plugin_context.get_using_provider(umo=self.client_uid)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to get current chat provider for performance curve: %s",
+                        exc,
+                    )
+                    provider = None
+                if isinstance(provider, Provider):
+                    self.selected_performance_curve_provider = provider
+                    logger.info(
+                        "Using current chat provider for performance curve: %s",
+                        provider.meta().id,
+                    )
+                else:
+                    logger.warning(
+                        "Current chat provider unavailable; performance curve generation is disabled for now.",
+                    )
 
     def build_current_model_payload(
         self,

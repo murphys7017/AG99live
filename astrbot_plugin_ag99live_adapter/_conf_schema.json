@@ -189,9 +189,15 @@
     "_special": "select_provider"
   },
   "enable_performance_curve": {
-    "description": "是否启用表演曲线提示生成。启用后会使用当前会话聊天 Provider 为动作生成进入、保持、退出节奏提示；失败时不影响原动作播放。",
+    "description": "是否启用表演曲线提示生成。启用后会调用表演曲线 Provider 为动作生成进入、保持、退出节奏提示；失败时不影响原动作播放。",
     "type": "bool",
     "default": false
+  },
+  "performance_curve_provider_id": {
+    "description": "表演曲线提示生成使用的聊天 Provider。留空时回退到当前 AstrBot 会话聊天模型。",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider"
   },
   "enable_action_llm_filter": {
     "description": "是否启用基础动作库 LLM 严格筛选。关闭后仅使用规则候选（rule seed）。",
