@@ -17,7 +17,7 @@ from astrbot_plugin_ag99live_adapter.prompts.motion_selector import (
     DEFAULT_SELECTOR_FEW_SHOT_EXAMPLES,
     resolve_selector_few_shot_examples,
 )
-from astrbot_plugin_ag99live_adapter.motion.inline_motion import summarize_motion_payload
+from astrbot_plugin_ag99live_adapter.motion.payload_dispatch import summarize_motion_payload
 
 
 _AXIS_NAMES = [
@@ -282,25 +282,22 @@ def test_normalize_motion_intent_payload_rejects_v1_legacy_axes() -> None:
         )
 
 
-def test_normalize_motion_intent_payload_accepts_v2_semantic_axes() -> None:
-    intent = normalize_motion_intent_payload(
-        {
-            "schema_version": "engine.motion_intent.v2",
-            "profile_id": "DemoModel.semantic.v1",
-            "profile_revision": 3,
-            "model_id": "DemoModel",
-            "mode": "expressive",
-            "emotion_label": "curious",
-            "duration_hint_ms": 900,
-            "axes": {
-                "head_yaw": {"value": 72},
-            },
-        }
-    )
-
-    assert intent["schema_version"] == "engine.motion_intent.v2"
-    assert intent["axes"]["head_yaw"]["value"] == 72
-    assert intent["summary"]["axis_count"] == 1
+def test_normalize_motion_intent_payload_rejects_v2_semantic_axes() -> None:
+    with pytest.raises(ValueError, match="invalid_schema_version"):
+        normalize_motion_intent_payload(
+            {
+                "schema_version": "engine.motion_intent.v2",
+                "profile_id": "DemoModel.semantic.v1",
+                "profile_revision": 3,
+                "model_id": "DemoModel",
+                "mode": "expressive",
+                "emotion_label": "curious",
+                "duration_hint_ms": 900,
+                "axes": {
+                    "head_yaw": {"value": 72},
+                },
+            }
+        )
 
 
 def test_apply_motion_constraints_to_intent_payload_limits_opposite_body_yaw() -> None:
@@ -336,7 +333,7 @@ def test_apply_motion_constraints_to_intent_payload_limits_opposite_body_yaw() -
     )
 
     assert constraint_result.adjusted_axes == ["body_yaw"]
-    assert payload["axes"]["body_yaw"] == 43.15
+    assert payload["axes"]["body_yaw"] == 45.15
     assert payload["summary"]["axis_constraint_adjusted_axes"] == ["body_yaw"]
 
 
@@ -365,8 +362,8 @@ def test_apply_motion_constraints_to_intent_payload_keeps_body_only_pose_within_
         semantic_profile=semantic_profile,
     )
 
-    assert constraint_result.adjusted_axes == []
-    assert payload["axes"]["body_yaw"] == 66.0
+    assert constraint_result.adjusted_axes == ["body_yaw"]
+    assert payload["axes"]["body_yaw"] == 64.0
 
 
 def test_normalize_motion_intent_v3_accepts_string_number_axis() -> None:
@@ -560,8 +557,8 @@ def test_normalize_selector_output_v3_rejects_axis_errors_over_threshold() -> No
         )
 
 
-def test_normalize_motion_intent_v2_rejects_duration_out_of_range() -> None:
-    with pytest.raises(ValueError, match="duration_hint_ms_out_of_range"):
+def test_normalize_motion_intent_v2_is_not_supported() -> None:
+    with pytest.raises(ValueError, match="invalid_schema_version"):
         normalize_motion_intent_payload(
             {
                 "schema_version": "engine.motion_intent.v2",

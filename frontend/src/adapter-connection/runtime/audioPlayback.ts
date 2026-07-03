@@ -3,6 +3,13 @@ export interface AudioPlaybackStartedEvent {
   durationMs: number | null;
 }
 
+export interface RuntimeAudioPlaybackClock {
+  getCurrentTimeMs(): number | null;
+  getDurationMs(): number | null;
+  getPlaybackRate(): number;
+  isPlaying(): boolean;
+}
+
 export interface StartAudioPlaybackOptions {
   onLipSyncUnavailable: () => void;
   onDurationChanged: (durationMs: number) => void;
@@ -17,6 +24,38 @@ let lipSyncRuntime: LiveLipSyncRuntime | null = null;
 interface LiveLipSyncRuntime {
   resume: () => Promise<void>;
   stop: () => void;
+}
+
+interface AudioElementClockSource {
+  currentTime: number;
+  duration: number;
+  playbackRate: number;
+  paused: boolean;
+  ended: boolean;
+}
+
+export function createAudioElementPlaybackClock(
+  audio: AudioElementClockSource,
+): RuntimeAudioPlaybackClock {
+  return {
+    getCurrentTimeMs: () => Number.isFinite(audio.currentTime)
+      ? Math.max(0, Math.round(audio.currentTime * 1000))
+      : null,
+    getDurationMs: () => Number.isFinite(audio.duration) && audio.duration > 0
+      ? Math.max(0, Math.round(audio.duration * 1000))
+      : null,
+    getPlaybackRate: () => Number.isFinite(audio.playbackRate) && audio.playbackRate > 0
+      ? audio.playbackRate
+      : 1,
+    isPlaying: () => !audio.paused && !audio.ended,
+  };
+}
+
+export function getActiveAudioPlaybackClock(): RuntimeAudioPlaybackClock | null {
+  if (!audioElement) {
+    return null;
+  }
+  return createAudioElementPlaybackClock(audioElement);
 }
 
 export async function startAudioPlayback(

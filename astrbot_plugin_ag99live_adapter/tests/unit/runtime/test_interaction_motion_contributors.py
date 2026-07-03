@@ -321,7 +321,6 @@ def _build_runtime_state(*, mode: str = "split_after_reply"):
         (),
         {
             "motion_generation_mode": mode,
-            "enable_inline_motion_contract": True,
             "enable_realtime_motion_plan": True,
             "selected_motion_analysis_provider": None,
             "realtime_motion_timeout_seconds": 2.0,
@@ -1388,7 +1387,7 @@ def test_result_contributor_returns_persona_effect_motion_in_split_final_phase(
     )
 
 
-def test_result_contributor_skips_final_phase_in_inline_mode(
+def test_result_contributor_ignores_removed_inline_mode_for_final_phase(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1401,15 +1400,24 @@ def test_result_contributor_skips_final_phase_in_inline_mode(
         phase="final",
         route_mode="delegate_to_core",
         final_result="最终回复文本",
+        effect_calls=[
+            _motion_effect_call(
+                {
+                    "intent_tags": ["说明"],
+                    "axes": {"head_yaw": 64, "body_yaw": 56},
+                }
+            )
+        ],
     )
 
     contribution = asyncio.run(contributor.collect(event, None, view))
 
     assert contribution is not None
     assert scheduled_calls == []
+    assert len(contribution.client_objects) == 1
     assert (
         contribution.metadata["ag99live_motion_schedule"]["reason"]
-        == "final_phase_managed_by_inline_compat"
+        == "persona_effect_motion_client_object"
     )
 
 
@@ -1654,7 +1662,7 @@ def test_result_contributor_does_not_silently_schedule_immediate_phase_without_r
     )
 
 
-def test_result_contributor_skips_self_reply_in_inline_first_mode(
+def test_result_contributor_ignores_removed_inline_mode_for_self_reply(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1668,15 +1676,24 @@ def test_result_contributor_skips_self_reply_in_inline_first_mode(
         route_mode="self_reply",
         final_result="你好呀",
         immediate_reply="你好呀",
+        effect_calls=[
+            _motion_effect_call(
+                {
+                    "intent_tags": ["轻快"],
+                    "axes": {"head_yaw": 62, "mouth_smile": 65},
+                }
+            )
+        ],
     )
 
     contribution = asyncio.run(contributor.collect(event, None, view))
 
     assert contribution is not None
     assert scheduled_calls == []
+    assert len(contribution.client_objects) == 1
     assert (
         contribution.metadata["ag99live_motion_schedule"]["reason"]
-        == "self_reply_managed_by_inline_compat"
+        == "persona_effect_motion_client_object"
     )
 
 

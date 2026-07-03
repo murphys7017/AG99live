@@ -376,14 +376,15 @@ function motionIntentEnvelope(messageId: string, turnId: string | null) {
     payload: {
       mode: "preview",
       intent: {
-        schema_version: "engine.motion_intent.v2",
+        schema_version: "engine.motion_intent.v3",
         profile_id: "profile-1",
         profile_revision: 1,
         model_id: "model-1",
         mode: "expressive",
+        intent_tags: ["happy"],
         emotion_label: "happy",
         axes: {
-          smile: { value: 0.8 },
+          mouth_smile: 80,
         },
       },
     },

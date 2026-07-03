@@ -7,7 +7,6 @@ import type {
 } from "../types/protocol.js";
 import {
   SCHEMA_CATALOG_MOTION_V1,
-  SCHEMA_MOTION_INTENT_V2,
   SCHEMA_MOTION_INTENT_V3,
   SCHEMA_PARAMETER_PLAN_V2,
 } from "../types/protocol.js";
@@ -23,27 +22,6 @@ import {
   normalizeStringArray,
   normalizeText,
 } from "../utils/guards.js";
-
-function normalizeDynamicAxesV2(value: unknown): Record<string, number> | null {
-  if (!isObject(value)) {
-    return null;
-  }
-
-  const axes: Record<string, number> = {};
-  for (const [axisId, axisPayload] of Object.entries(value)) {
-    const normalizedAxisId = normalizeText(axisId);
-    if (!normalizedAxisId || !isObject(axisPayload) || !("value" in axisPayload)) {
-      return null;
-    }
-    const axisValue = axisPayload.value;
-    if (!isFiniteNumber(axisValue)) {
-      return null;
-    }
-    axes[normalizedAxisId] = axisValue;
-  }
-
-  return Object.keys(axes).length > 0 ? axes : null;
-}
 
 function normalizeDynamicAxesV3(value: unknown): Record<string, number> | null {
   if (!isObject(value)) {
@@ -91,7 +69,7 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
   }
 
   const schemaVersion = normalizeText(value.schema_version);
-  if (schemaVersion !== SCHEMA_MOTION_INTENT_V2 && schemaVersion !== SCHEMA_MOTION_INTENT_V3) {
+  if (schemaVersion !== SCHEMA_MOTION_INTENT_V3) {
     return { ok: false, reason: "motion_intent.invalid_schema_version" };
   }
 
@@ -113,15 +91,11 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
     return { ok: false, reason: "motion_intent.invalid_mode" };
   }
 
-  const axes = schemaVersion === SCHEMA_MOTION_INTENT_V3
-    ? normalizeDynamicAxesV3(value.axes)
-    : normalizeDynamicAxesV2(value.axes);
+  const axes = normalizeDynamicAxesV3(value.axes);
   if (!axes) {
     return {
       ok: false,
-      reason: schemaVersion === SCHEMA_MOTION_INTENT_V3
-        ? "motion_intent_v3.invalid_flat_axes"
-        : "motion_intent_v2.invalid_axes",
+      reason: "motion_intent_v3.invalid_flat_axes",
     };
   }
 
@@ -279,7 +253,7 @@ export function normalizeMotionPayload(
     return { ok: true, payload: { kind: "catalog_motion", motion: motion.value } };
   }
 
-  if (schemaVersion === SCHEMA_MOTION_INTENT_V2 || schemaVersion === SCHEMA_MOTION_INTENT_V3) {
+  if (schemaVersion === SCHEMA_MOTION_INTENT_V3) {
     const intent = parseSemanticMotionIntent(value);
     if (!intent.ok) {
       warnNormalizeFailure(intent.reason, value);

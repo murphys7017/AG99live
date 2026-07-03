@@ -474,9 +474,6 @@ def _normalize_duration_hint_ms(value: Any) -> int:
 
 def _build_motion_static_capability_payload(runtime_state: Any) -> dict[str, Any]:
     capability_payload: dict[str, Any] = {
-        "inline_contract_supported": bool(
-            getattr(runtime_state, "enable_inline_motion_contract", True)
-        ),
         "motion_instruction": resolve_motion_prompt_instruction(
             runtime_state=runtime_state
         ),
@@ -1516,11 +1513,7 @@ def _sanitize_reason_fragment(value: Any) -> str:
 
 
 def _resolve_motion_generation_mode(runtime_state: Any) -> str:
-    raw_mode = str(
-        getattr(runtime_state, "motion_generation_mode", "split_after_reply") or ""
-    ).strip()
-    if raw_mode in {"inline_first", "split_after_reply"}:
-        return raw_mode
+    del runtime_state
     return "split_after_reply"
 
 
@@ -1568,12 +1561,6 @@ def _resolve_immediate_phase_policy(
             reason="immediate_phase_reply_plan_unresolved",
         )
     if reply_plan.route_mode == "self_reply":
-        if motion_generation_mode == "inline_first":
-            return _MotionSchedulePolicy(
-                should_schedule=False,
-                source=None,
-                reason="self_reply_managed_by_inline_compat",
-            )
         return _MotionSchedulePolicy(
             should_schedule=True,
             source="interaction_result_immediate",
@@ -1609,12 +1596,6 @@ def _resolve_final_phase_policy(
             should_schedule=False,
             source=None,
             reason="self_reply_does_not_use_final_phase",
-        )
-    if motion_generation_mode != "split_after_reply":
-        return _MotionSchedulePolicy(
-            should_schedule=False,
-            source=None,
-            reason="final_phase_managed_by_inline_compat",
         )
     already_scheduled = bool(
         _call_event_method(event, "get_extra", "ag99live_split_motion_scheduled", False)

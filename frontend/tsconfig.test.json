@@ -47,6 +47,7 @@
     "src/adapter-connection/inbound/inboundMotionDispatcher.ts",
     "src/adapter-connection/outbound/outboundClient.ts",
     "src/adapter-connection/runtime/microphoneDevices.ts",
+    "src/playback-timeline/**/*.ts",
     "src/adapter-connection/core/pttKeyBinding.ts",
     "src/adapter-connection/core/preferences.ts",
     "src/adapter-connection/core/transport.ts"

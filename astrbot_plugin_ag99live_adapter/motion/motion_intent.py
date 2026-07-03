@@ -12,7 +12,6 @@ from .performance_curve import normalize_performance_curve_hint
 LOGGER = logging.getLogger(__name__)
 
 MOTION_INTENT_SCHEMA_VERSION = "engine.motion_intent.v3"
-MOTION_INTENT_V2_SCHEMA_VERSION = "engine.motion_intent.v2"
 MOTION_INTENT_V3_SCHEMA_VERSION = "engine.motion_intent.v3"
 PARAMETER_PLAN_V2_SCHEMA_VERSION = "engine.parameter_plan.v2"
 DEFAULT_MOTION_INTENT_DURATION_MS = 1000
@@ -167,79 +166,9 @@ def normalize_motion_intent_payload(intent: Any) -> dict[str, Any]:
         raise ValueError("intent_not_object")
 
     schema_version = str(intent.get("schema_version") or "").strip()
-    if schema_version == MOTION_INTENT_V2_SCHEMA_VERSION:
-        return normalize_motion_intent_v2_payload(intent)
     if schema_version == MOTION_INTENT_V3_SCHEMA_VERSION:
         return normalize_motion_intent_v3_payload(intent)
-    return normalize_motion_intent_v2_payload(intent)
-
-
-def normalize_motion_intent_v2_payload(intent: Any) -> dict[str, Any]:
-    if not isinstance(intent, dict):
-        raise ValueError("intent_not_object")
-
-    schema_version = str(intent.get("schema_version") or "").strip()
-    if schema_version != MOTION_INTENT_V2_SCHEMA_VERSION:
-        raise ValueError("invalid_schema_version")
-
-    profile_id = str(intent.get("profile_id") or "").strip()
-    model_id = str(intent.get("model_id") or "").strip()
-    if not profile_id:
-        raise ValueError("profile_id_empty")
-    if not model_id:
-        raise ValueError("model_id_empty")
-    profile_revision_raw = intent.get("profile_revision")
-    if not isinstance(profile_revision_raw, int) or profile_revision_raw <= 0:
-        raise ValueError("profile_revision_invalid")
-
-    mode = str(intent.get("mode") or "").strip().lower()
-    if mode not in {"expressive", "idle"}:
-        raise ValueError("invalid_mode")
-
-    emotion_label = str(intent.get("emotion_label") or "").strip()
-    if not emotion_label:
-        raise ValueError("emotion_label_empty")
-
-    axes = intent.get("axes")
-    if not isinstance(axes, dict) or not axes:
-        raise ValueError("axes_not_object")
-
-    normalized_axes: dict[str, dict[str, float]] = {}
-    for axis_id_raw, axis_payload in axes.items():
-        axis_id = str(axis_id_raw or "").strip()
-        if not axis_id:
-            raise ValueError("axis_id_empty")
-        if not isinstance(axis_payload, dict) or "value" not in axis_payload:
-            raise ValueError(f"axis_payload_invalid:{axis_id}")
-        value = axis_payload.get("value")
-        if not isinstance(value, (int, float)):
-            raise ValueError(f"axis_{axis_id}_value_not_number")
-        if not float("-inf") < float(value) < float("inf"):
-            raise ValueError(f"axis_{axis_id}_value_not_finite")
-        normalized_axes[axis_id] = {"value": round(float(value), 4)}
-
-    duration_hint_raw = intent.get("duration_hint_ms")
-    duration_hint_ms: int | None = None
-    if duration_hint_raw is not None:
-        if not isinstance(duration_hint_raw, (int, float)):
-            raise ValueError("duration_hint_ms_not_number")
-        duration_hint_ms = int(round(float(duration_hint_raw)))
-        if duration_hint_ms < 320 or duration_hint_ms > 15000:
-            raise ValueError("duration_hint_ms_out_of_range")
-
-    return {
-        "schema_version": MOTION_INTENT_V2_SCHEMA_VERSION,
-        "profile_id": profile_id,
-        "profile_revision": profile_revision_raw,
-        "model_id": model_id,
-        "mode": mode,
-        "emotion_label": emotion_label,
-        "duration_hint_ms": duration_hint_ms,
-        "axes": normalized_axes,
-        "summary": {
-            "axis_count": len(normalized_axes),
-        },
-    }
+    raise ValueError("invalid_schema_version")
 
 
 def normalize_motion_intent_v3_payload(intent: Any) -> dict[str, Any]:
@@ -608,7 +537,7 @@ def _coerce_finite_number(value: Any) -> float | None:
     return number
 
 
-def _apply_expressive_floor_v2(
+def _apply_semantic_expressive_floor(
     *,
     axes: dict[str, float],
     emotion: str,

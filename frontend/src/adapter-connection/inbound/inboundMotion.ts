@@ -1,7 +1,6 @@
 import type { ProtocolEnvelope } from "../../types/protocol.js";
 import {
   SCHEMA_CATALOG_MOTION_V1,
-  SCHEMA_MOTION_INTENT_V2,
   SCHEMA_MOTION_INTENT_V3,
 } from "../../types/protocol.js";
 import {
@@ -134,11 +133,11 @@ export function applyInboundMotionPayload(
     typeof (plan as Record<string, unknown>).schema_version === "string"
       ? String((plan as Record<string, unknown>).schema_version).trim()
       : "";
-  const allowedSchemaVersions = new Set([
-    SCHEMA_MOTION_INTENT_V2,
-    SCHEMA_MOTION_INTENT_V3,
-    SCHEMA_CATALOG_MOTION_V1,
-  ]);
+  const allowedSchemaVersions = new Set(
+    envelope.type === "engine.catalog_motion"
+      ? [SCHEMA_CATALOG_MOTION_V1]
+      : [SCHEMA_MOTION_INTENT_V3],
+  );
   if (!allowedSchemaVersions.has(schemaVersion)) {
     console.warn(
       "[Connection] motion payload schema mismatch.",

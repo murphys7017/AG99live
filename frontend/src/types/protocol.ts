@@ -1,6 +1,5 @@
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
 
-export const SCHEMA_MOTION_INTENT_V2 = "engine.motion_intent.v2";
 export const SCHEMA_MOTION_INTENT_V3 = "engine.motion_intent.v3";
 export const SCHEMA_CATALOG_MOTION_V1 = "engine.catalog_motion.v1";
 export const SCHEMA_PARAMETER_PLAN_V2 = "engine.parameter_plan.v2";
@@ -604,13 +603,9 @@ export interface PerformanceCurveHint {
 
 /**
  * Normalized semantic motion intent consumed by ModelEngine.
- *
- * Wire v2 payloads still carry nested axes (`{ axis_id: { value } }`) at the
- * protocol boundary. `normalizeMotionPayload` flattens both v2 and v3 into this
- * shape before compiler stages read the intent.
  */
 export interface NormalizedSemanticMotionIntent {
-  schema_version: typeof SCHEMA_MOTION_INTENT_V2 | typeof SCHEMA_MOTION_INTENT_V3;
+  schema_version: typeof SCHEMA_MOTION_INTENT_V3;
   profile_id: string;
   profile_revision: number;
   model_id: string;

@@ -181,7 +181,7 @@ function testEngineMotionRequiresTurnId(): void {
     makeEnvelope("engine.motion_intent", {
       mode: "preview",
       intent: {
-        schema_version: "engine.motion_intent.v2",
+        schema_version: "engine.motion_intent.v3",
       },
     }, {
       turnId: null,
@@ -292,7 +292,7 @@ function testMissingSegmentMessageIdReturnsProtocolError(): void {
   const envelopeB = makeEnvelope("engine.motion_intent", {
     mode: "preview",
     intent: {
-      schema_version: "engine.motion_intent.v2",
+      schema_version: "engine.motion_intent.v3",
     },
   }, {
     turnId: "turn-legacy",

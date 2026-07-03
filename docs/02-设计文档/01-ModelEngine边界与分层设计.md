@@ -26,7 +26,6 @@ engine.motion_intent.v3 / engine.parameter_plan.v2
 | Payload | Schema | 说明 |
 | --- | --- | --- |
 | 动作意图 | `engine.motion_intent.v3` | 当前自动动作链路主协议；`axes` 为 flat number map |
-| 遗留动作意图 | `engine.motion_intent.v2` | 旧协议兼容路径；`axes` 为 `{ value }` 嵌套形态，不与 v3 混写 |
 | 参数计划 | `engine.parameter_plan.v2` | 前端可直接执行的 Live2D 参数计划 |
 
 ## 2. 负责什么
@@ -59,7 +58,7 @@ ModelEngine 不负责：
 | --- | --- |
 | `useModelEngine.ts` | 引擎 facade：持有状态、装配 runtime/start 依赖、暴露对外 API |
 | `contracts.ts` | 入站动作 payload 归一化后的边界类型 |
-| `normalize.ts` | `engine.motion_intent.v3`、遗留 `engine.motion_intent.v2` 和 `engine.parameter_plan.v2` 入站归一化 |
+| `normalize.ts` | `engine.motion_intent.v3` 和 `engine.parameter_plan.v2` 入站归一化 |
 | `planParser.ts` | `engine.parameter_plan.v2` parser 与 clone |
 | `settings.ts` | 动作强度和单轴强度设置 |
 | `timing.ts` | motion timing resolution，支持 hint/audio_sync/default |
@@ -365,7 +364,7 @@ Avatar Runtime 不理解语义轴，也不判断表情语义。
 ## 15. 维护原则
 
 - 当前自动动作主路径是 `engine.motion_intent.v3 -> engine.parameter_plan.v2`。
-- `engine.motion_intent.v2` 只作为遗留归一化兼容路径，不作为新自动链路目标。
+- `engine.motion_intent.v2` 不再作为当前自动链路或播放入口维护。
 - 废弃协议回退分支不进入主代码和主文档。
 - 模块按职责维护，扩展通过 stage / registry 挂载。
 - 连续性主实现优先放在 `ParameterPresentationLayer`，而不是 compile 阶段做静态补丁。

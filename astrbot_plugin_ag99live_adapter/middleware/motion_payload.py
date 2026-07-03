@@ -10,7 +10,7 @@ from ..motion.fallback_pose import (
     resolve_fallback_pose,
 )
 from ..motion.motion_intent import (
-    _apply_expressive_floor_v2,
+    _apply_semantic_expressive_floor,
     DEFAULT_MOTION_INTENT_DURATION_MS,
     MOTION_INTENT_V3_SCHEMA_VERSION,
     derive_motion_emotion_label,
@@ -163,7 +163,7 @@ def normalize_motion_arguments_payload(
     if not validated_axes:
         return None, reason
 
-    validated_axes = _apply_expressive_floor_v2(
+    validated_axes = _apply_semantic_expressive_floor(
         axes=validated_axes,
         emotion=expressive_floor_emotion,
         semantic_profile=semantic_profile,

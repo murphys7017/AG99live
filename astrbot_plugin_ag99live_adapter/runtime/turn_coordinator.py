@@ -88,19 +88,13 @@ from ..motion.performance_curve import (
     extract_assistant_reply_keywords,
     summarize_motion_for_curve,
 )
-from ..motion.inline_motion import (
-    INLINE_ANIM_START_PATTERN,
-    build_model_visible_user_text as _build_model_visible_user_text,
-    extract_inline_motion_plan as _extract_inline_motion_plan,
+from ..motion.payload_dispatch import (
     extract_message_motion_payload as _extract_message_motion_payload,
     resolve_engine_motion_message_type as _resolve_engine_motion_message_type,
-    resolve_inline_motion_source as _resolve_inline_motion_source,
-    resolve_motion_generation_mode as _resolve_motion_generation_mode,
     resolve_motion_payload_schema_version as _resolve_motion_payload_schema_version,
-    strip_inline_anim_tags as _strip_inline_anim_tags,
     summarize_motion_payload as _summarize_motion_payload,
-    validate_motion_payload as _validate_motion_payload,
 )
+from ..motion.output_sanitizer import sanitize_assistant_output_text
 from .message_utils import (
     extract_outbound_message_parts as _extract_outbound_message_parts,
     iter_platform_motion_client_objects as _iter_platform_motion_client_objects,
@@ -257,8 +251,6 @@ class TurnCoordinator:
         self,
         message_chain,
         unified_msg_origin: str | None = None,
-        inline_base_expression: str | None = None,
-        inline_motion_id: str | None = None,
         raw_reply_text_override: str | None = None,
         platform_extras: dict[str, Any] | None = None,
     ) -> None:
@@ -266,20 +258,16 @@ class TurnCoordinator:
 
         发送顺序固定为 text → motion → image → audio：
             1. _extract_outbound_message_parts 抽出文本/图片/音频路径；
-               _extract_inline_motion_plan 剥离 inline 动作标记得到可见文本。
             2. 若有可见文本，写聊天缓存并发 output.text。
             3. _broadcast_platform_motion_client_objects 优先派发平台 motion client object；
-               若未派发且 motion_generation_mode 是 inline_first 且 inline_payload 是 dict，
-               直接派发 inline payload；split_after_reply/secondary 路径由上游补齐
-               platform_extras 后再走本方法。
+               Persona Effect / middleware result contributor 生成的动作会以 client object
+               进入这里。旧 inline 动作标签不再作为运行时入口。
             4. 有图片就发 output.image。
             5. 有音频文件就 media_service.cache_audio_file → 取 URL → 发 output.audio，
                并把会话状态推进到 synthesizing → playing。
         无音频时直接 mark_playing，不进入 synthesizing 阶段。
         """
         del unified_msg_origin
-        del inline_base_expression
-        del inline_motion_id
 
         turn_id = self.session_state.current_turn_id
         platform_extras_dict = platform_extras if isinstance(platform_extras, dict) else {}
@@ -298,15 +286,12 @@ class TurnCoordinator:
         override_text = str(raw_reply_text_override or "").strip()
         raw_reply_text = override_text or "\n".join(texts).strip()
         raw_record_text = "\n".join(record_texts).strip()
-        audio_caption_text = _strip_inline_anim_tags(raw_record_text).strip()
-        motion_generation_mode = _resolve_motion_generation_mode(self.runtime_state)
-        inline_anim_detected = INLINE_ANIM_START_PATTERN.search(raw_reply_text) is not None
-        reply_text, inline_payload, inline_mode = _extract_inline_motion_plan(
-            raw_reply_text,
-            runtime_state=self.runtime_state,
-        )
+        audio_caption_text = sanitize_assistant_output_text(raw_record_text)
+        reply_text = sanitize_assistant_output_text(raw_reply_text)
         semantic_text = str(platform_extras_dict.get("semantic_text") or "").strip()
-        assistant_semantic_text = semantic_text or reply_text or raw_reply_text
+        assistant_semantic_text = sanitize_assistant_output_text(
+            semantic_text or reply_text or raw_reply_text
+        )
 
         if reply_text:
             self.chat_buffer.add("assistant", reply_text)
@@ -336,9 +321,6 @@ class TurnCoordinator:
                 "text_count": len(texts),
                 "image_count": len(picture_paths),
                 "record_count": len(record_paths),
-                "inline_anim_detected": inline_anim_detected,
-                "inline_mode": inline_mode,
-                "inline_payload": inline_payload,
                 "platform_extras": platform_extras_dict,
                 "chat_context": self._motion_lab_chat_context(),
             },
@@ -356,67 +338,24 @@ class TurnCoordinator:
         self._start_performance_curve_request(
             motion_payload=_resolve_initial_performance_curve_motion_payload(
                 platform_extras=platform_extras_dict,
-                inline_payload=inline_payload,
             )
         )
 
-        if motion_generation_mode == "split_after_reply":
-            logger.info(
-                "WIRING motion_plan turn_id=%s inline_anim_detected=%s route=split_after_reply",
-                turn_id or "",
-                inline_anim_detected,
-            )
-        elif inline_anim_detected:
-            if inline_payload is None:
-                logger.warning(
-                    "WIRING motion_plan turn_id=%s inline_anim_parse_failed=true "
-                    "route=secondary_request",
-                    turn_id or "",
-                )
-            else:
-                logger.info(
-                    "WIRING motion_plan turn_id=%s inline_anim_detected=%s inline_plan_valid=%s "
-                    "inline_mode=%s route=inline_primary",
-                    turn_id or "",
-                    inline_anim_detected,
-                    inline_payload is not None,
-                    inline_mode or "",
-                )
-        else:
-            logger.info(
-                "WIRING motion_plan turn_id=%s inline_anim_detected=false "
-                "route=secondary_request",
-                turn_id or "",
-            )
+        logger.info(
+            "WIRING motion_plan turn_id=%s route=persona_effect_client_object",
+            turn_id or "",
+        )
 
-        inline_dispatched = False
         platform_motion_dispatched = await self._broadcast_platform_motion_client_objects(
             platform_extras=platform_extras_dict,
             turn_id=turn_id,
             message_id=segment_message_id,
         )
-        if platform_motion_dispatched:
-            inline_dispatched = True
-
-        if (
-            motion_generation_mode == "inline_first"
-            and not inline_dispatched
-            and isinstance(inline_payload, dict)
-        ):
-            inline_mode_resolved = str(inline_mode or "inline").strip() or "inline"
-            inline_dispatched = await self.broadcast_motion_payload(
-                motion_payload=inline_payload,
-                mode=inline_mode_resolved,
-                source=_resolve_inline_motion_source(inline_payload),
-                turn_id=turn_id,
-                message_id=segment_message_id,
+        if not platform_motion_dispatched:
+            logger.debug(
+                "WIRING motion_plan turn_id=%s client_object_present=false",
+                turn_id or "",
             )
-            if not inline_dispatched:
-                logger.warning(
-                    "WIRING motion_plan turn_id=%s inline_plan_dispatch_failed=true "
-                    "route=secondary_request",
-                    turn_id or "",
-                )
 
         if picture_paths:
             await self._send_json(
@@ -592,15 +531,11 @@ class TurnCoordinator:
             await self._emit_image_input_diagnostics(message_obj)
 
             event = self._build_platform_event(message_obj)
-            motion_generation_mode = _resolve_motion_generation_mode(self.runtime_state)
-            if motion_generation_mode == "split_after_reply":
-                set_extra = getattr(event, "set_extra", None)
-                if callable(set_extra):
-                    set_extra("enable_streaming", False)
-                    set_extra("ag99live_motion_generation_mode", motion_generation_mode)
+            set_extra = getattr(event, "set_extra", None)
+            if callable(set_extra):
+                set_extra("enable_streaming", False)
+                set_extra("ag99live_motion_generation_mode", "split_after_reply")
             self._apply_raw_message_metadata_to_event(event, message_obj)
-            if motion_generation_mode == "inline_first":
-                self._apply_inline_motion_contract_to_event(event, message_obj=message_obj)
             self._commit_event(event)
             self._mark_turn_timing("event_committed_at")
             logger.debug(
@@ -659,32 +594,6 @@ class TurnCoordinator:
         for key in ("ag99live_input_source", "remote_operator"):
             if key in raw_message:
                 set_extra(key, raw_message[key])
-
-    def _apply_inline_motion_contract_to_event(self, event, *, message_obj) -> None:
-        original_message_str = str(getattr(message_obj, "message_str", "") or "")
-        set_extra = getattr(event, "set_extra", None)
-        if callable(set_extra):
-            set_extra("ag99live_original_message_str", original_message_str)
-
-        prompt_text = _build_model_visible_user_text(
-            original_message_str,
-            runtime_state=self.runtime_state,
-        )
-        if prompt_text == original_message_str:
-            return
-
-        event.message_str = prompt_text
-        if callable(set_extra):
-            set_extra("ag99live_inline_motion_contract_applied", True)
-            set_extra("ag99live_inline_motion_contract_mode", "user_prompt_system_reminder")
-            set_extra("ag99live_inline_motion_contract_prompt", prompt_text)
-
-        logger.info(
-            "WIRING inline_motion_contract applied=true turn_id=%s original_len=%s prompt_len=%s",
-            getattr(self.session_state, "current_turn_id", "") or "",
-            len(original_message_str),
-            len(prompt_text),
-        )
 
     async def _emit_image_input_diagnostics(self, message_obj) -> None:
         await emit_image_input_diagnostics(
@@ -799,20 +708,17 @@ class TurnCoordinator:
     ) -> bool:
         """把一份动作载荷以 engine.* 出站到前端。
 
-        - schema 是 engine.motion_intent.v2/v3 时先经 normalize_motion_intent_payload 规范化；
+        - schema 是 engine.motion_intent.v3 时先经 normalize_motion_intent_payload 规范化；
           规范化失败直接拒发。
-        - 根据 _resolve_engine_motion_message_type 选择信封类型（intent / catalog / 旧版 plan），
+        - 根据 _resolve_engine_motion_message_type 选择信封类型（intent / catalog），
           并按类型选择 payload 子键 (intent/motion/plan)。
-        - source 字段表明这份载荷的来源（inline、catalog、platform_extras 等），用于诊断。
+        - source 字段表明这份载荷的来源（persona_effect、catalog、platform_extras 等），用于诊断。
         返回 True 表示已成功提交到 send_json。
         """
         if not isinstance(motion_payload, dict):
             return False
 
-        if _resolve_motion_payload_schema_version(motion_payload) in {
-            "engine.motion_intent.v2",
-            "engine.motion_intent.v3",
-        }:
+        if _resolve_motion_payload_schema_version(motion_payload) == "engine.motion_intent.v3":
             try:
                 motion_payload = normalize_motion_intent_payload(motion_payload)
             except ValueError as exc:
@@ -1524,10 +1430,7 @@ class TurnCoordinator:
 def _resolve_initial_performance_curve_motion_payload(
     *,
     platform_extras: dict[str, Any],
-    inline_payload: Any,
 ) -> dict[str, Any] | None:
-    if isinstance(inline_payload, dict):
-        return inline_payload
     for motion_object in _iter_platform_motion_client_objects(platform_extras):
         motion_payload = motion_object.get("motion_payload")
         if not isinstance(motion_payload, dict):

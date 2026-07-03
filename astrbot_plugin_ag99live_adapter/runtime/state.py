@@ -86,7 +86,6 @@ class RuntimeState:
         self.action_llm_filter_chunk_max_channels = 8
         self.action_llm_filter_chunk_max_candidates = 96
         self.motion_generation_mode = "split_after_reply"
-        self.enable_inline_motion_contract = True
         self.realtime_motion_fewshot_enabled = True
         self.realtime_motion_fewshot_count = 2
         self.realtime_motion_user_fewshot_count = 0
@@ -287,9 +286,6 @@ class RuntimeState:
                 "motion_generation_mode",
                 "split_after_reply",
             )
-        )
-        self.enable_inline_motion_contract = bool(
-            _plugin_config_get(self.plugin_config, "enable_inline_motion_contract", True)
         )
         self.realtime_motion_fewshot_enabled = bool(
             _plugin_config_get(self.plugin_config, "realtime_motion_fewshot_enabled", True)
@@ -1365,7 +1361,5 @@ def _normalize_motion_prompt_instruction(value: Any) -> str:
 
 
 def _normalize_motion_generation_mode(value: Any) -> str:
-    mode = str(value or "").strip()
-    if mode in {"inline_first", "split_after_reply"}:
-        return mode
+    del value
     return "split_after_reply"

@@ -1,38 +1,56 @@
 task:
-  class: maintenance
+  class: feature
   risk: medium
-  phase: motion_prompt_static_dynamic_split
-  scope: AG99Live motion prompt static/dynamic lifecycle alignment and no-replacement fallback policy
+  phase: unified_playback_timeline_phase1
+  scope: Frontend unified playback timeline skeleton with pure logic clock and sink lifecycle state machine
 context:
   confidence: medium
   assumptions:
+    - Phase 1 only introduces pure timeline logic and tests; it does not replace the current audioRuntime, ModelEngine, or turn playback orchestrator integration path yet.
+    - The first shipped timeline shape should remain single active segment oriented, matching the current turn playback session semantics.
+    - Existing notifyAudioPlaybackStarted based motion timing remains the migration path until a later timeline integration phase takes ownership.
     - The automatic LLM motion path remains pure engine.motion_intent.v3 semantic axes; catalog motion, motion3, exp3, and choice outputs stay out of this path.
-    - middleware-first and inline-first remain separate routes; middleware-first reads plugin_hints.ag99live_motion, inline-first reads the inline anim contract only.
+    - The automatic motion path is middleware-first only; inline_first / <@anim> is no longer a runtime-selectable motion generation route.
+    - engine.motion_intent.v2 is no longer accepted at backend normalization, frontend inbound, preview send, or ModelEngine normalization boundaries.
+    - <@anim> is retained only as hidden-output sanitization, not as a motion parsing or dispatch format.
     - motion_catalog.json may enrich fallback pose descriptions and catalog-derived semantic candidates only when the motion can be mapped to semantic axes.
     - fallback_pose_id remains a semantic-axis fallback selector, not a motion3/catalog playback selector.
     - Motion prompt static/dynamic scope metadata improves render-tree selection and diagnostics, but model input token reduction still depends on AstrBot/provider static prefix caching or session-level reuse.
     - Skeleton repair may add missing head/body/gaze axes from fallback semantic axes and may replace neutralish skeleton axes, but it must not overwrite non-neutral LLM axes.
     - Empty, invalid, or all-neutral motion axes should not be replaced by a fallback pose; those turns should be treated as no valid motion input.
   unresolved_questions:
+    - Phase 2 still needs a careful extraction boundary for AudioSink because audioRuntime currently owns queueing, pending items, and settle behavior in addition to raw playback.
+    - Phase 3 needs an explicit guard to prevent timeline-driven playback start from double-triggering the current notifyAudioPlaybackStarted motion path for the same segment.
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.
     - For earlier curve generation during actual TTS synthesis, identify an AstrBot hook before message-chain Record creation; current MVP starts from emit_message_chain and never blocks playback.
 architecture:
   stability: evolving
   boundary_changes:
+    - Frontend now has a new playback-timeline module that defines a reusable segment timeline contract, synthetic/audio clock abstraction, and sink terminal state machine without yet changing real playback integration.
+    - Adapter runtime no longer exposes inline_first / enable_inline_motion_contract configuration; <@anim> inline motion tags are not parsed or broadcast as a runtime motion path.
+    - Frontend and adapter motion-intent boundaries are now v3-only; v2 nested axes are treated as invalid input instead of being normalized forward.
+    - TurnCoordinator sanitizes hidden legacy motion markup from visible text/captions while preserving raw assistant output in Motion Lab records.
     - Performance curve timing MVP adds an optional `performance_curve_hint` to `engine.motion_intent.v3`; frontend ModelEngine resolves it into existing timing fields rather than a new per-frame player.
     - Performance curve generation uses the current turn chat Provider as an auxiliary call and does not add the curve request to AstrBot chat history.
     - fallback pose candidates can now include semantic metadata from motion catalog entries and key semantic axes derived from motion_resource_pool driver components.
     - middleware motion prompt now names axes as a semantic-axis target group instead of a plain field and exposes fallback candidate descriptions, scenarios, intensity, emotion bias, and key axes.
     - middleware motion prompt examples should use a small set of visible non-neutral axis values and show 2-4 non-default fallback pose candidates selected by axis/pose descriptors rather than coarse emotion labels.
-    - middleware-first and inline-first valid v3 motion intents now share fallback-pose skeleton repair and expressive-floor ordering for weak semantic axis outputs.
+    - middleware-first valid v3 motion intents use fallback-pose skeleton repair and expressive-floor ordering for weak semantic axis outputs.
     - plugin_hints JSON parsing now tolerates outer-format issues such as fenced JSON, text-wrapped objects, and trailing commas while preserving strict v3 axis semantics.
     - fallback candidate selection and motion visibility summaries now derive pose descriptors from each axis profile's own neutral and soft_range values instead of assuming a global midpoint of 50.
     - frontend motion diagnostics now surface pose_descriptors, outside_soft_range_axes, and skeleton_groups_present from semantic motion summaries so prompt tuning can be compared against runtime-visible motion coverage.
     - middleware motion prompt now marks the decision contract and capability payload as static, keeps per-turn runtime data dynamic, and keeps configured_generation_mode out of the static capability mapping.
-    - middleware-first and inline compatibility routes now disable fallback-pose replacement for unusable motion axes while preserving skeleton repair for otherwise valid axes.
+    - middleware-first route disables fallback-pose replacement for unusable motion axes while preserving skeleton repair for otherwise valid axes.
 verification:
   checks_run:
+    - npm run test:playback-timeline
+    - npm run test:playback-timeline-audio
+    - npm run typecheck:renderer
+    - git diff --check
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_runtime_state_provider_analysis.py::test_runtime_state_ignores_removed_inline_motion_config astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_result_contributor_ignores_removed_inline_mode_for_final_phase astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_result_contributor_ignores_removed_inline_mode_for_self_reply -q
+    - python -m py_compile astrbot_plugin_ag99live_adapter\runtime\turn_coordinator.py astrbot_plugin_ag99live_adapter\runtime\state.py astrbot_plugin_ag99live_adapter\middleware\interaction_motion.py
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py -q
     - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_interaction_motion_contributors.py
     - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_turn_coordinator_realtime_motion.py::test_extract_inline_motion_plan_rejects_invalid_intent_without_replacement astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_turn_coordinator_realtime_motion.py::test_emit_message_chain_inline_invalid_v3_intent_does_not_broadcast_replacement
     - python -m py_compile astrbot_plugin_ag99live_adapter/middleware/motion_payload.py astrbot_plugin_ag99live_adapter/motion/inline_motion.py
@@ -46,13 +64,17 @@ verification:
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py -q
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py -q
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_realtime_motion_plan.py -q
+    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_realtime_motion_plan.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_runtime_state_provider_analysis.py -q
     - python -m compileall astrbot_plugin_ag99live_adapter
     - git diff --check
-  checks_failed:
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py -q currently has pre-existing axis expectation drift unrelated to this prompt/fallback patch: body_yaw expected 66.0 but runtime returns 64.0, and expected 43.15 but runtime returns 45.15.
+    - npm run test:inbound-events
+    - npm run test:adapter-connection
+    - npm run test:playback-timeline
+    - npm run test:playback-timeline-audio
+  checks_failed: []
   validation_gap: Live AstrBot plus provider logs still need validation to confirm input_tokens decrease; static scope alone may not reduce request tokens without provider/static-prefix caching.
 runtime:
-  mode: motion_prompt_static_dynamic_split
+  mode: unified_playback_timeline_phase1
 backlog:
   - id: motion_lab_history_sample_workbench
     status: todo

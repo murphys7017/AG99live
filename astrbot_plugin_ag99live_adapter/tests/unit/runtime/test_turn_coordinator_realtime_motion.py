@@ -282,297 +282,6 @@ def _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch) -
     monkeypatch.setitem(sys.modules, "astrbot.core.utils.active_event_registry", registry_module)
 
 
-def test_extract_inline_motion_plan_strips_valid_tag(install_fake_astrbot, monkeypatch) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-    tag_payload = json.dumps(
-        {"mode": "inline", "intent": _build_valid_motion_intent(include_mode=False)},
-        separators=(",", ":"),
-    )
-
-    text, plan, mode = module._extract_inline_motion_plan(
-        f"hello <@anim {tag_payload}> world"
-    )
-
-    assert "<@anim" not in text.lower()
-    assert "hello" in text.lower()
-    assert "world" in text.lower()
-    assert isinstance(plan, dict)
-    assert plan.get("schema_version") == "engine.motion_intent.v3"
-    assert plan.get("mode") == "expressive"
-    assert plan.get("intent_tags") == ["test", "motion"]
-    assert plan.get("emotion_label") == "test-motion"
-    assert mode == "inline"
-
-
-def test_extract_inline_motion_plan_rejects_v3_intent_mode(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-    tag_payload = json.dumps(
-        {"mode": "inline", "intent": _build_valid_motion_intent()},
-        separators=(",", ":"),
-    )
-
-    text, plan, mode = module._extract_inline_motion_plan(
-        f"hello <@anim {tag_payload}> world"
-    )
-
-    assert "<@anim" not in text.lower()
-    assert "hello" in text.lower()
-    assert "world" in text.lower()
-    assert plan is None
-    assert mode is None
-
-
-def test_extract_inline_motion_plan_rejects_invalid_intent_without_replacement(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-    tag_payload = json.dumps(
-        {"mode": "inline", "intent": _build_valid_motion_intent()},
-        separators=(",", ":"),
-    )
-
-    text, plan, mode = module._extract_inline_motion_plan(
-        f"hello <@anim {tag_payload}> world",
-        runtime_state=_runtime_state_stub(mode="inline_first"),
-    )
-
-    assert "<@anim" not in text.lower()
-    assert "hello" in text.lower()
-    assert "world" in text.lower()
-    assert plan is None
-    assert mode is None
-
-
-def test_extract_inline_motion_plan_repairs_detail_only_axes_from_fallback_pose(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-    intent = _build_valid_motion_intent(include_mode=False)
-    intent["resource_id"] = "happy_body_pose"
-    intent["axes"] = {"mouth_smile": 74}
-    tag_payload = json.dumps(
-        {"mode": "inline", "intent": intent},
-        separators=(",", ":"),
-    )
-
-    text, plan, mode = module._extract_inline_motion_plan(
-        f"hello <@anim {tag_payload}> world",
-        runtime_state=_runtime_state_stub_with_motion_tuning_fallback(),
-    )
-
-    assert "<@anim" not in text.lower()
-    assert isinstance(plan, dict)
-    assert mode == "inline"
-    assert plan["axes"]["mouth_smile"] == 74
-    assert plan["axes"]["body_yaw"] == 66.0
-    assert plan["axes"]["gaze_x"] == 64.0
-    assert plan["summary"]["skeleton_repair_added_axes"] == ["body_yaw", "gaze_x"]
-    assert plan["summary"]["skeleton_repair_replaced_axes"] == []
-
-
-def test_extract_inline_motion_plan_replaces_neutral_skeleton_axis_from_fallback_pose(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-    intent = _build_valid_motion_intent(include_mode=False)
-    intent["intent_tags"] = ["happy", "body_pose"]
-    intent["resource_id"] = "happy_body_pose"
-    intent["axes"] = {
-        "body_yaw": 50,
-        "mouth_smile": 74,
-    }
-    tag_payload = json.dumps(
-        {"mode": "inline", "intent": intent},
-        separators=(",", ":"),
-    )
-
-    _text, plan, _mode = module._extract_inline_motion_plan(
-        f"hello <@anim {tag_payload}> world",
-        runtime_state=_runtime_state_stub_with_motion_tuning_fallback(),
-    )
-
-    assert isinstance(plan, dict)
-    assert plan["axes"]["body_yaw"] == 66.0
-    assert plan["axes"]["gaze_x"] == 64.0
-    assert plan["axes"]["mouth_smile"] == 74
-    assert plan["summary"]["skeleton_repair_added_axes"] == ["gaze_x"]
-    assert plan["summary"]["skeleton_repair_replaced_axes"] == ["body_yaw"]
-
-
-def test_extract_inline_motion_plan_applies_expressive_floor_to_valid_v3(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-    intent = _build_valid_motion_intent(include_mode=False)
-    intent["intent_tags"] = ["happy", "subtle"]
-    intent["axes"] = {"head_yaw": 50}
-    tag_payload = json.dumps(
-        {"mode": "inline", "intent": intent},
-        separators=(",", ":"),
-    )
-
-    _text, plan, _mode = module._extract_inline_motion_plan(
-        f"hello <@anim {tag_payload}> world",
-        runtime_state=_runtime_state_stub(mode="inline_first"),
-    )
-
-    assert isinstance(plan, dict)
-    assert plan["axes"]["head_yaw"] > 58
-    assert plan["summary"]["expressive_floor_applied"] is True
-
-
-def test_extract_inline_motion_plan_strips_malformed_tag(install_fake_astrbot, monkeypatch) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-
-    text, plan, mode = module._extract_inline_motion_plan(
-        'hello <@anim {"mode":"inline" \nworld'
-    )
-
-    assert "<@anim" not in text.lower()
-    assert "hello" in text.lower()
-    assert "world" in text.lower()
-    assert plan is None
-    assert mode is None
-
-
-def test_extract_inline_motion_plan_rejects_top_level_payload_without_nested_intent_or_plan(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-
-    text, plan, mode = module._extract_inline_motion_plan(
-        'hello <@anim {"mode":"inline","schema_version":"engine.motion_intent.v1","emotion_label":"inline","duration_hint_ms":900,"key_axes":{"head_yaw":{"value":61},"head_roll":{"value":50},"head_pitch":{"value":50},"body_yaw":{"value":50},"body_roll":{"value":50},"gaze_x":{"value":50},"gaze_y":{"value":50},"eye_open_left":{"value":55},"eye_open_right":{"value":55},"mouth_open":{"value":52},"mouth_smile":{"value":63},"brow_bias":{"value":58}}}> world'
-    )
-
-    assert "<@anim" not in text.lower()
-    assert "hello" in text.lower()
-    assert "world" in text.lower()
-    assert plan is None
-    assert mode is None
-
-
-def test_build_model_visible_user_text_appends_inline_contract(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-
-    runtime_state = _runtime_state_stub(mode="inline_first")
-
-    prompt_text = module._build_model_visible_user_text(
-        "你好，今天怎么样？",
-        runtime_state=runtime_state,
-    )
-
-    assert prompt_text.startswith("你好，今天怎么样？")
-    assert "<system_reminder>" in prompt_text
-    assert "AG99live 内联动作契约" in prompt_text
-    assert "Use readable exaggerated head and smile motion." in prompt_text
-    assert "当前 Live2D 模型：pet。" in prompt_text
-    assert "<@anim {" in prompt_text
-    assert '"schema_version":"engine.motion_intent.v3"' in prompt_text
-    assert "intent_tags" in prompt_text
-    assert "resource_id" in prompt_text
-    assert "fallback_pose_id" not in prompt_text
-    assert '"profile_id":"pet.semantic.v1"' in prompt_text
-    assert "debug_tail" not in prompt_text
-
-
-def test_build_model_visible_user_text_skips_inline_contract_when_disabled(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-
-    runtime_state = _runtime_state_stub(
-        mode="inline_first",
-        enable_inline_motion_contract=False,
-    )
-
-    prompt_text = module._build_model_visible_user_text(
-        "just the user text",
-        runtime_state=runtime_state,
-    )
-
-    assert prompt_text == "just the user text"
-    assert "<system_reminder>" not in prompt_text
-    assert "<@anim" not in prompt_text
-
-
-def test_build_model_visible_user_text_skips_inline_contract_in_split_mode(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-
-    prompt_text = module._build_model_visible_user_text(
-        "just the user text",
-        runtime_state=_runtime_state_stub(mode="split_after_reply"),
-    )
-
-    assert prompt_text == "just the user text"
-    assert "<system_reminder>" not in prompt_text
-    assert "<@anim" not in prompt_text
-
-
-def test_apply_inline_motion_contract_mutates_event_message_only(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-    TurnCoordinator = module.TurnCoordinator
-
-    coordinator = TurnCoordinator.__new__(TurnCoordinator)
-    coordinator.runtime_state = _runtime_state_stub(mode="inline_first")
-    coordinator.session_state = type("SessionStateStub", (), {"current_turn_id": "turn-contract"})()
-
-    message_obj = type("MessageObjectStub", (), {"message_str": "原始用户消息"})()
-
-    class EventStub:
-        def __init__(self) -> None:
-            self.message_str = message_obj.message_str
-            self.extras: dict[str, object] = {}
-
-        def set_extra(self, key: str, value: object) -> None:
-            self.extras[key] = value
-
-    event = EventStub()
-
-    coordinator._apply_inline_motion_contract_to_event(event, message_obj=message_obj)
-
-    assert message_obj.message_str == "原始用户消息"
-    assert event.message_str.startswith("原始用户消息")
-    assert "<system_reminder>" in event.message_str
-    assert "<@anim {" in event.message_str
-    assert event.extras["ag99live_original_message_str"] == "原始用户消息"
-    assert event.extras["ag99live_inline_motion_contract_applied"] is True
-    assert event.extras["ag99live_inline_motion_contract_mode"] == "user_prompt_system_reminder"
-    assert "<system_reminder>" in str(event.extras["ag99live_inline_motion_contract_prompt"])
-    assert "Use readable exaggerated head and smile motion." in str(
-        event.extras["ag99live_inline_motion_contract_prompt"]
-    )
-
-
 def test_commit_inbound_message_disables_streaming_in_split_mode(
     install_fake_astrbot,
     monkeypatch,
@@ -713,7 +422,7 @@ def test_submit_system_text_input_commits_remote_operator_metadata(
     assert event.extras["remote_operator"]["computer"] == "work"
 
 
-def test_emit_message_chain_inline_plan_uses_primary_route(
+def test_emit_message_chain_does_not_parse_removed_inline_motion_route(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -794,20 +503,15 @@ def test_emit_message_chain_inline_plan_uses_primary_route(
         )
     )
 
-    assert inline_broadcast.get("source") == "engine.inline_motion_intent"
-    motion_payload = inline_broadcast.get("motion_payload")
-    assert isinstance(motion_payload, dict)
-    assert motion_payload["intent_tags"] == ["test", "motion"]
-    assert motion_payload["emotion_label"] == "test-motion"
-    assert motion_payload["fallback_pose_id"] == ""
-    assert motion_payload["axes"]["head_yaw"] == 62
-    assert inline_broadcast.get("mode") == "inline"
-    assert inline_broadcast.get("turn_id") == "turn-inline"
+    assert inline_broadcast == {}
     assert "reply_text" not in scheduled
     assert sent_payloads
     output_text_payload = sent_payloads[0]
     assert output_text_payload.get("type") == "output.text"
-    assert "<@anim" not in str(output_text_payload.get("payload", {}).get("text", "")).lower()
+    output_text = str(output_text_payload.get("payload", {}).get("text", "")).lower()
+    assert "<@anim" not in output_text
+    assert "hello" in output_text
+    assert "world" in output_text
 
 
 def test_emit_message_chain_reuses_platform_visible_message_id_for_segment_outputs(
@@ -1028,7 +732,7 @@ def test_emit_message_chain_dedupes_motion_client_object_for_segmented_output(
     assert motion_payloads[0]["message_id"] == "visible-msg::core_reply::0001"
 
 
-def test_emit_message_chain_split_mode_ignores_inline_payload(
+def test_emit_message_chain_treats_removed_inline_payload_as_text(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1243,7 +947,7 @@ def test_broadcast_motion_payload_applies_engine_axis_constraints(
     assert sent is True
     envelope = sent_payloads[0]
     intent = envelope["payload"]["intent"]
-    assert intent["axes"]["body_yaw"] == 43.15
+    assert intent["axes"]["body_yaw"] == 45.15
     assert intent["summary"]["axis_constraint_adjusted_axes"] == ["body_yaw"]
 
 
@@ -1661,7 +1365,7 @@ def test_handle_msg_accepts_motion_intent_preview_without_turn_id(
     assert handled_messages[0].turn_id is None
 
 
-def test_emit_message_chain_uses_raw_reply_text_override_for_inline_extraction(
+def test_emit_message_chain_raw_reply_text_override_does_not_parse_inline_motion(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1727,14 +1431,7 @@ def test_emit_message_chain_uses_raw_reply_text_override_for_inline_extraction(
         )
     )
 
-    assert inline_broadcast.get("source") == "engine.inline_motion_intent"
-    motion_payload = inline_broadcast.get("motion_payload")
-    assert isinstance(motion_payload, dict)
-    assert motion_payload["intent_tags"] == ["test", "motion"]
-    assert motion_payload["emotion_label"] == "test-motion"
-    assert motion_payload["fallback_pose_id"] == ""
-    assert inline_broadcast.get("mode") == "inline"
-    assert inline_broadcast.get("turn_id") == "turn-inline-override"
+    assert inline_broadcast == {}
     assert sent_payloads
     output_text_payload = sent_payloads[0]
     assert output_text_payload.get("type") == "output.text"

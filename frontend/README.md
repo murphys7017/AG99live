@@ -9,7 +9,7 @@ AG99live 的 Electron + Vue 客户端。
 - 历史窗口
 - Action Lab（动作计划预览与测试）
 - 与 Adapter 的 V2 协议通信
-- 前端 ModelEngine：本地编译 `engine.motion_intent.v3 -> engine.parameter_plan.v2`，并保留 `engine.motion_intent.v2` 遗留兼容路径
+- 前端 ModelEngine：本地编译 `engine.motion_intent.v3 -> engine.parameter_plan.v2`，不再接受旧版 `engine.motion_intent.v2`
 
 ## 开发命令
 

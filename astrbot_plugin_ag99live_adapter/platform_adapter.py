@@ -331,8 +331,6 @@ class OLVPetPlatformAdapter(Platform):
         self,
         message_chain,
         unified_msg_origin: str | None = None,
-        inline_base_expression: str | None = None,
-        inline_motion_id: str | None = None,
         raw_reply_text_override: str | None = None,
         platform_extras: dict[str, Any] | None = None,
     ) -> None:
@@ -344,8 +342,6 @@ class OLVPetPlatformAdapter(Platform):
         await self.turn_coordinator.emit_message_chain(
             message_chain=message_chain,
             unified_msg_origin=unified_msg_origin,
-            inline_base_expression=inline_base_expression,
-            inline_motion_id=inline_motion_id,
             raw_reply_text_override=raw_reply_text_override,
             platform_extras=platform_extras,
         )
@@ -557,7 +553,7 @@ def _extract_debug_motion_payload(
         return motion_payload, TYPE_ENGINE_MOTION_INTENT, ""
 
     schema_version = str(payload.get("schema_version") or "").strip()
-    if schema_version in {"engine.motion_intent.v2", "engine.motion_intent.v3"}:
+    if schema_version == "engine.motion_intent.v3":
         try:
             motion_payload = normalize_motion_intent_payload(payload)
         except ValueError as exc:

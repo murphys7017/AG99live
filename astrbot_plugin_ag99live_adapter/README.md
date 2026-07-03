@@ -8,7 +8,7 @@ AG99live V2 的 AstrBot 插件侧实现。该目录负责协议桥接、turn 生
 - 发送 `output.* / control.* / system.* / engine.*` 消息回前端。
 - 管理 turn 生命周期，保证文本/语音/动作消息在同一轮次可追踪。
 - 扫描 Live2D 资源并产出结构化能力信息。
-- 生成并下发动作用载荷；默认走 AstrBot 交互中间件主链路，由 `ag99live.motion` Persona Effect 产出动作并通过 `client_objects` 下发；`inline_first` 内联动作链路仅作为显式兼容路径保留。
+- 生成并下发动作用载荷；统一走 AstrBot 交互中间件主链路，由 `ag99live.motion` Persona Effect 产出动作并通过 `client_objects` 下发。
 - 注入远程执行器能力，并把电脑/桌面/软件操作类请求委托给配置的 Codex app-server / Computer Use。
 
 ## 当前路线说明
@@ -39,25 +39,19 @@ astrbot_plugin_ag99live_adapter/
 
 ## 动作链路
 
-### 默认主路径（split_after_reply / middleware-first）
+### 统一主路径（middleware-first）
 
-- 主聊天模型只负责正常回复文本，不要求内联 `<@anim {...}>`。
+- 主聊天模型只负责正常回复文本，不输出动作标签。
 - 交互中间件在 prompt contributor 中注入动作能力/运行态上下文，并注册 `ag99live.motion` Persona Effect；result contributor 从 `view.effect_calls` 消费该 effect 并返回 `client_objects`。
 - 后端从 `platform_extras` / `client_objects` 中读取动作载荷，并与文本、音频一起广播到前端。
 - 若 runtime 内部明确启用了额外 fallback 组件，它的结果也必须回到同一条 `engine.motion_*` 协议链路和同一 segment identity。
-
-### 兼容路径（inline_first）
-
-- Adapter 在请求主模型前注入 `<@anim {...}>` 输出契约。
-- 主回复末尾若包含合法 `<@anim {...}>`，则优先提取并广播动作载荷。
-- 当前 inline contract 使用 `engine.motion_intent.v3`，字段来自当前模型的 `semantic_axis_profile`。
 
 ### 动作 selector 输出
 
 - 当前主动作载荷为 `engine.motion_intent.v3`，前端 `ModelEngine` 根据 `semantic_axis_profile` 编译为 `engine.parameter_plan.v2` 再执行。
 - v3 的 `axes` 是 flat number map，例如 `"head_yaw": 62`；LLM 契约不包含 `mode`，Adapter 归一化后补 `mode: "expressive"`。
 - 自动动作链路不允许 LLM 输出 `choice`、`motion_id`、catalog motion、motion3、exp3 或旧播放文件引用。
-- `motion_prompt_instruction` 会注入中间件动作上下文或 selector prompt，用于影响动作风格和幅度；只有显式启用 `inline_first` 时才会注入 inline contract。
+- `motion_prompt_instruction` 会注入中间件动作上下文或 selector prompt，用于影响动作风格和幅度。
 - 中间件 prompt 只暴露 profile 中的 `primary/hint` axes，禁止输出 `derived/runtime/ambient/debug` axes。
 
 ## 与前端协同的关键点
@@ -111,7 +105,6 @@ AG99live 远程执行器当前走任务委托链路：
 
 ## 关键配置
 
-- `motion_generation_mode`：动作生成链路，默认 `split_after_reply`（middleware-first）；可选 `inline_first` 兼容路径。
 - `motion_analysis_provider_id`：动作分析 / realtime motion selector 使用的 Provider。
 - `motion_prompt_instruction`：动作 intent 生成的补充指令，默认要求 Live2D 表现更夸张。
 - `remote_operator_default_computer` / `remote_operator_computer_entries`：远程执行器路由和后端配置；支持 `codex_app_server` 与 `opencode`。

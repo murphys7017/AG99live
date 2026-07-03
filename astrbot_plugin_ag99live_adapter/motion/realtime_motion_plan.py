@@ -20,11 +20,10 @@ from ..prompts.semantic_axis_prompt import profile_prompt_axes
 from .motion_intent import (
     DEFAULT_MOTION_INTENT_DURATION_MS,
     MOTION_INTENT_SCHEMA_VERSION,
-    MOTION_INTENT_V2_SCHEMA_VERSION,
     MOTION_INTENT_V3_SCHEMA_VERSION,
     PARAMETER_PLAN_SOURCES,
     PARAMETER_PLAN_V2_SCHEMA_VERSION,
-    _apply_expressive_floor_v2,
+    _apply_semantic_expressive_floor,
     _coerce_finite_number,
     _normalize_duration_hint_ms,
     clamp_axis_value,
@@ -201,114 +200,6 @@ def normalize_selector_output(
     raise ValueError("semantic_profile_required")
 
 
-def normalize_selector_output_v2(
-    payload: dict[str, Any],
-    *,
-    semantic_profile: dict[str, Any],
-) -> dict[str, Any]:
-    if not isinstance(payload, dict):
-        raise ValueError("selector_payload_not_object")
-
-    choice = str(payload.get("choice") or "generate").strip().lower()
-    if choice not in {"generate", ""}:
-        raise ValueError(f"selector_choice_not_generate:{choice}")
-
-    emotion_raw = payload.get("emotion")
-    emotion = str(emotion_raw).strip() if isinstance(emotion_raw, str) else ""
-    if not emotion:
-        raise ValueError("selector_emotion_empty")
-
-    if "mode" not in payload:
-        raise ValueError("selector_mode_missing")
-    mode = str(payload.get("mode") or "").strip().lower()
-    if mode not in {"idle", "expressive"}:
-        raise ValueError("selector_mode_invalid")
-
-    duration_ms_raw = payload.get("duration_ms")
-    if not isinstance(duration_ms_raw, (int, float)):
-        raise ValueError("selector_duration_ms_not_number")
-    duration_ms = int(round(float(duration_ms_raw)))
-    if duration_ms < 320 or duration_ms > 15000:
-        raise ValueError("selector_duration_ms_out_of_range")
-
-    raw_axes = payload.get("axes")
-    if not isinstance(raw_axes, dict):
-        raise ValueError("selector_axes_not_object")
-    if not raw_axes:
-        raise ValueError("selector_axes_empty")
-
-    prompt_axes = profile_prompt_axes(semantic_profile)
-    allowed_axes = {str(axis.get("id") or "").strip(): axis for axis in prompt_axes}
-    allowed_axis_count = len(allowed_axes)
-    max_axis_errors = _max_axis_error_count(allowed_axis_count)
-    normalized_axes: dict[str, float] = {}
-    axis_errors: list[str] = []
-    axis_warnings: list[str] = []
-    for raw_axis_id, raw_value in raw_axes.items():
-        axis_id = str(raw_axis_id or "").strip()
-        if axis_id not in allowed_axes:
-            axis_errors.append(f"selector_axis_not_allowed:{axis_id}")
-            continue
-        if not isinstance(raw_value, (int, float)):
-            axis_errors.append(f"selector_axis_not_number:{axis_id}")
-            continue
-        axis = allowed_axes[axis_id]
-        value_range = axis.get("value_range")
-        min_value = 0.0
-        max_value = 100.0
-        if (
-            isinstance(value_range, list)
-            and len(value_range) == 2
-            and isinstance(value_range[0], (int, float))
-            and isinstance(value_range[1], (int, float))
-        ):
-            min_value = float(value_range[0])
-            max_value = float(value_range[1])
-        value = float(raw_value)
-        if value < min_value or value > max_value:
-            clamped_value = min_value if value < min_value else max_value
-            axis_warnings.append(
-                f"selector_axis_clamped:{axis_id}:{value:g}->{clamped_value:g}"
-            )
-            value = clamped_value
-        normalized_axes[axis_id] = round(value, 4)
-
-    if len(axis_errors) > max_axis_errors:
-        raise ValueError(
-            "selector_axis_error_rate_exceeded:"
-            f"{len(axis_errors)}/{allowed_axis_count}:{','.join(axis_errors)}"
-        )
-    if axis_errors:
-        LOGGER.warning(
-            "Realtime motion selector ignored invalid semantic axes within threshold. errors=%s threshold=%s/%s",
-            ",".join(axis_errors),
-            max_axis_errors,
-            allowed_axis_count,
-        )
-    if axis_warnings:
-        LOGGER.warning(
-            "Realtime motion selector clamped semantic axis values. warnings=%s",
-            ",".join(axis_warnings),
-        )
-    if not normalized_axes:
-        raise ValueError("selector_axes_empty_after_error_filter")
-
-    if mode == "expressive":
-        normalized_axes = _apply_expressive_floor_v2(
-            axes=normalized_axes,
-            emotion=emotion,
-            semantic_profile=semantic_profile,
-        )
-
-    return {
-        "emotion": emotion,
-        "mode": mode,
-        "duration_ms": duration_ms,
-        "axes": normalized_axes,
-        "warnings": axis_warnings + axis_errors,
-    }
-
-
 def normalize_selector_output_v3(
     payload: dict[str, Any],
     *,
@@ -403,7 +294,7 @@ def normalize_selector_output_v3(
     if not normalized_axes:
         raise ValueError("selector_axes_empty_after_error_filter")
 
-    normalized_axes = _apply_expressive_floor_v2(
+    normalized_axes = _apply_semantic_expressive_floor(
         axes=normalized_axes,
         emotion=emotion,
         semantic_profile=semantic_profile,
@@ -428,55 +319,6 @@ def build_intent_from_selector(
     if semantic_profile is not None:
         return build_intent_from_selector_v3(selector_output, semantic_profile=semantic_profile)
     raise ValueError("semantic_profile_required")
-
-
-def build_intent_from_selector_v2(
-    selector_output: dict[str, Any],
-    *,
-    semantic_profile: dict[str, Any],
-) -> dict[str, Any]:
-    axes = selector_output.get("axes")
-    if not isinstance(axes, dict) or not axes:
-        raise ValueError("selector_axes_not_object")
-
-    requested_mode = str(selector_output.get("mode") or "").strip().lower()
-    if requested_mode not in {"idle", "expressive"}:
-        raise ValueError("selector_mode_invalid")
-    mode = requested_mode
-
-    duration_ms_raw = selector_output.get("duration_ms")
-    if not isinstance(duration_ms_raw, (int, float)):
-        raise ValueError("selector_duration_ms_not_number")
-    duration_hint_ms = int(round(float(duration_ms_raw)))
-    if duration_hint_ms < 320 or duration_hint_ms > 15000:
-        raise ValueError("selector_duration_ms_out_of_range")
-
-    emotion_label = str(selector_output.get("emotion") or "").strip()
-    if not emotion_label:
-        raise ValueError("selector_emotion_empty")
-
-    profile_revision_raw = semantic_profile.get("revision")
-    try:
-        profile_revision = int(profile_revision_raw)
-    except (TypeError, ValueError):
-        raise ValueError("semantic_profile_revision_invalid") from None
-
-    return {
-        "schema_version": MOTION_INTENT_V2_SCHEMA_VERSION,
-        "profile_id": str(semantic_profile.get("profile_id") or "").strip(),
-        "profile_revision": profile_revision,
-        "model_id": str(semantic_profile.get("model_id") or "").strip(),
-        "mode": mode,
-        "emotion_label": emotion_label,
-        "duration_hint_ms": duration_hint_ms,
-        "axes": {
-            str(axis_id): {"value": value}
-            for axis_id, value in axes.items()
-        },
-        "summary": {
-            "axis_count": len(axes),
-        },
-    }
 
 
 def build_intent_from_selector_v3(

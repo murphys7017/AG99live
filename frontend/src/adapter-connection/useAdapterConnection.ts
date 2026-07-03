@@ -12,7 +12,6 @@ import type {
   SystemSemanticAxisProfileSavePayload,
 } from "../types/protocol";
 import {
-  SCHEMA_MOTION_INTENT_V2,
   SCHEMA_MOTION_INTENT_V3,
 } from "../types/protocol.js";
 import {
@@ -557,7 +556,6 @@ export function createAdapterConnection(
 
   function sendMotionPayloadPreview(payload: unknown): boolean {
     return sendMotionPreview(outboundCtx, payload, [
-      SCHEMA_MOTION_INTENT_V2,
       SCHEMA_MOTION_INTENT_V3,
     ]);
   }

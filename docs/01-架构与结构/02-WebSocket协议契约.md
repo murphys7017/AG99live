@@ -145,7 +145,7 @@ control.turn_finished
 
 | 类型 | 方向 | 模式 |
 | --- | --- | --- |
-| `engine.motion_intent` | 双向 | 当前主协议：`engine.motion_intent.v3`；遗留兼容：`engine.motion_intent.v2` |
+| `engine.motion_intent` | 双向 | 当前主协议：`engine.motion_intent.v3` |
 
 ## 动作路径
 
@@ -198,19 +198,7 @@ control.turn_finished
 }
 ```
 
-### `engine.motion_intent.v2`
-
-`engine.motion_intent.v2` 保留为旧协议含义。它的 `axes` 使用旧嵌套形态：
-
-```json
-{
-  "axes": {
-    "head_yaw": { "value": 54 }
-  }
-}
-```
-
-v3 不会把 `{ "value": number }` 静默当作合法 flat axis。自动动作链路应产出 v3；v2 只作为遗留/预览兼容路径处理。
+`engine.motion_intent.v2` 不再作为当前协议入口维护。动作意图只接受 v3 flat axes。
 
 ## 后端内部映射
 
