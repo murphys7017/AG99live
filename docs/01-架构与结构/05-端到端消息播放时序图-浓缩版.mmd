@@ -1,0 +1,28 @@
+flowchart LR
+    A[前端 input.text] --> B[TurnCoordinator]
+    B --> C[AstrBot 主回复 + middleware 动作结果]
+    C --> D[output.text]
+    C --> E[engine.motion_intent]
+    C --> F[output.audio]
+    C --> G[可选 performance_curve_hint]
+
+    D --> H[SessionStore]
+    E --> H
+    F --> H
+    G --> H
+
+    H --> I[TurnPlaybackOrchestrator]
+    I --> J[文本释放]
+    I --> K[音频释放]
+    I --> L[动作释放]
+
+    L --> M[ModelEngine 编译 timing/parameter plan]
+    M --> N[Live2D 播放]
+    K --> O[Audio 播放]
+
+    B --> P[control.synth_finished]
+    N --> Q[前端本地 settled]
+    O --> Q
+    P --> Q
+    Q --> R[control.playback_finished]
+    R --> S[control.turn_finished]
