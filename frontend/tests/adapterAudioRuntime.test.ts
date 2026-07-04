@@ -315,6 +315,38 @@ async function testMotionSinkKeepsTimelineOpenAfterAudioCompletes(): Promise<voi
   assert.equal(snapshot, null);
 }
 
+async function testMotionOnlyTimelineUsesSyntheticClock(): Promise<void> {
+  const state = buildState();
+  const runtime = createAdapterAudioRuntime({
+    state,
+    audioSink: buildAudioSink({
+      start: async () => {},
+    }),
+    pushHistory: () => {},
+    getSessionStore: () => undefined,
+  });
+
+  let snapshot = runtime.prepareMotionOnlyTimeline("turn-motion-only", "msg-motion-only");
+  assert.equal(snapshot?.phase, "preparing");
+  assert.equal(snapshot?.clockSource, "synthetic");
+  assert.equal(snapshot?.sinks.find((sink) => sink.id === "motion")?.required, true);
+  assert.equal(snapshot?.sinks.find((sink) => sink.id === "motion")?.terminal, "idle");
+
+  runtime.markMotionTimelineStarted("turn-motion-only", "msg-motion-only");
+  snapshot = runtime.getActiveAudioTimelineSnapshot();
+  assert.equal(snapshot?.phase, "playing");
+  assert.equal(snapshot?.clockSource, "synthetic");
+  assert.equal(snapshot?.sinks.find((sink) => sink.id === "motion")?.terminal, "started");
+
+  runtime.markMotionTimelineTerminal(
+    "turn-motion-only",
+    "msg-motion-only",
+    "completed",
+    "motion_only_completed",
+  );
+  assert.equal(runtime.getActiveAudioTimelineSnapshot(), null);
+}
+
 async function run(): Promise<void> {
   await testAudioPlaybackCreatesAudioClockTimeline();
   await testAudioTimelineCompletesOnAudioEnded();
@@ -322,6 +354,7 @@ async function run(): Promise<void> {
   await testAudioTimelineInterruptsPreparedAudioOnStopAll();
   await testStartingNextAudioSettlesInterruptedPreviousSegment();
   await testMotionSinkKeepsTimelineOpenAfterAudioCompletes();
+  await testMotionOnlyTimelineUsesSyntheticClock();
   console.log("adapterAudioRuntime tests passed");
 }
 

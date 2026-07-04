@@ -52,6 +52,25 @@ const matchingTimelineSnapshot: PlaybackTimelineSnapshot = {
   ],
 };
 
+const matchingMotionOnlyTimelineSnapshot: PlaybackTimelineSnapshot = {
+  timelineId: "timeline-motion-only",
+  turnId: "turn-motion-only",
+  messageId: "msg-motion-only",
+  phase: "preparing",
+  clockSource: "synthetic",
+  startedAtMs: null,
+  currentTimeMs: 0,
+  durationMs: null,
+  playbackRate: 1,
+  sinks: [
+    {
+      id: "motion",
+      required: true,
+      terminal: "idle",
+    },
+  ],
+};
+
 function createHarness(options: {
   motionAccepted?: boolean;
   audioTimelineAfterRelease?: PlaybackTimelineSnapshot | null;
@@ -454,6 +473,38 @@ function testMotionTimelineSinkMarksPreparedTimelineFailedWhenEngineRejects(): v
   ]);
 }
 
+function testMotionTimelineSinkCreatesSyntheticTimelineWhenAudioAbsent(): void {
+  const preparedMotionOnly: string[] = [];
+  const contexts: Array<{
+    playbackTimeline?: PlaybackTimelineSnapshot | null;
+  }> = [];
+  const sink = createModelEngineMotionTimelineSink({
+    motionEngine: {
+      ingestNormalizedPayload: (_payload, context) => {
+        contexts.push(context);
+        return true;
+      },
+      notifyCurrentTurnChanged: () => {},
+    },
+    getActiveAudioTimelineSnapshot: () => null,
+    prepareMotionOnlyTimeline: (turnId, messageId) => {
+      preparedMotionOnly.push(`${turnId ?? ""}:${messageId}`);
+      return matchingMotionOnlyTimelineSnapshot;
+    },
+  });
+
+  const accepted = sink.start(motionPayload, {
+    messageId: "msg-motion-only",
+    turnId: "turn-motion-only",
+    receivedAtMs: 100,
+  });
+
+  assert.equal(accepted, true);
+  assert.deepEqual(preparedMotionOnly, ["turn-motion-only:msg-motion-only"]);
+  assert.equal(contexts[0].playbackTimeline?.timelineId, "timeline-motion-only");
+  assert.equal(contexts[0].playbackTimeline?.clockSource, "synthetic");
+}
+
 async function run(): Promise<void> {
   await testSegmentsReleaseSequentiallyWithinTurn();
   await testTextAndMotionReleaseWhenAudioIsAbsent();
@@ -464,6 +515,7 @@ async function run(): Promise<void> {
   await testPerformanceCurveHintIsMergedBeforeMotionRelease();
   await testLateAudioAfterTextReleaseOnlyReleasesAudio();
   testMotionTimelineSinkMarksPreparedTimelineFailedWhenEngineRejects();
+  testMotionTimelineSinkCreatesSyntheticTimelineWhenAudioAbsent();
   console.log("useTurnPlaybackOrchestrator tests passed");
 }
 

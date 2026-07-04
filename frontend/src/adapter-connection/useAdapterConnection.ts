@@ -118,6 +118,7 @@ export interface AdapterConnectionInstance {
   releaseAssistantTextForPlayback: (messageId: string, turnId: string | null) => boolean;
   releaseAudioForPlayback: ReturnType<typeof createAdapterAudioRuntime>["releaseAudioForPlayback"];
   getActiveAudioTimelineSnapshot: ReturnType<typeof createAdapterAudioRuntime>["getActiveAudioTimelineSnapshot"];
+  prepareMotionOnlyTimeline: ReturnType<typeof createAdapterAudioRuntime>["prepareMotionOnlyTimeline"];
   prepareMotionTimelineSink: ReturnType<typeof createAdapterAudioRuntime>["prepareMotionTimelineSink"];
   markMotionTimelineStarted: ReturnType<typeof createAdapterAudioRuntime>["markMotionTimelineStarted"];
   markMotionTimelineTerminal: ReturnType<typeof createAdapterAudioRuntime>["markMotionTimelineTerminal"];
@@ -236,6 +237,7 @@ export function createAdapterConnection(
     queueAudioForPlayback,
     releaseAudioForPlayback,
     getActiveAudioTimelineSnapshot,
+    prepareMotionOnlyTimeline,
     prepareMotionTimelineSink,
     markMotionTimelineStarted,
     markMotionTimelineTerminal,
@@ -671,6 +673,7 @@ export function createAdapterConnection(
     releaseAssistantTextForPlayback,
     releaseAudioForPlayback,
     getActiveAudioTimelineSnapshot,
+    prepareMotionOnlyTimeline,
     prepareMotionTimelineSink,
     markMotionTimelineStarted,
     markMotionTimelineTerminal,

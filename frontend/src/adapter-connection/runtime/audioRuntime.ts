@@ -127,6 +127,10 @@ export interface AdapterAudioRuntime {
   stopAudioAndSettleAll: (reason: string) => void;
   findActiveAudioSegment: () => ActiveAudioSegment | null;
   getActiveAudioTimelineSnapshot: () => PlaybackTimelineSnapshot | null;
+  prepareMotionOnlyTimeline: (
+    turnId: string | null,
+    messageId: string,
+  ) => PlaybackTimelineSnapshot | null;
   prepareMotionTimelineSink: (
     turnId: string | null,
     messageId: string,
@@ -266,6 +270,33 @@ export function createAdapterAudioRuntime(
     };
   }
 
+  function prepareMotionOnlyTimeline(
+    turnId: string | null,
+    messageId: string,
+  ): PlaybackTimelineSnapshot | null {
+    if (isActiveAudioTimeline(turnId, messageId) && activeAudioTimeline) {
+      return prepareMotionTimelineSink(turnId, messageId)
+        ? activeAudioTimeline.engine.getSnapshot()
+        : null;
+    }
+    if (activeAudioTimeline) {
+      return null;
+    }
+    const engine = createPlaybackTimelineEngine();
+    engine.load(
+      { turnId, messageId },
+      [
+        { id: MOTION_TIMELINE_SINK_ID, required: true },
+      ],
+    );
+    activeAudioTimeline = {
+      turnId,
+      messageId,
+      engine,
+    };
+    return engine.getSnapshot();
+  }
+
   function markAudioTimelineDuration(
     turnId: string | null,
     messageId: string,
@@ -364,7 +395,11 @@ export function createAdapterAudioRuntime(
     if (!prepareMotionTimelineSink(turnId, messageId) || !activeAudioTimeline) {
       return;
     }
-    activeAudioTimeline.engine.markSinkStarted(MOTION_TIMELINE_SINK_ID);
+    const engine = activeAudioTimeline.engine;
+    engine.markSinkStarted(MOTION_TIMELINE_SINK_ID);
+    if (engine.getPhase() === "ready") {
+      engine.start();
+    }
   }
 
   function markMotionTimelineTerminal(
@@ -624,6 +659,7 @@ export function createAdapterAudioRuntime(
     stopAudioAndSettleAll,
     findActiveAudioSegment,
     getActiveAudioTimelineSnapshot,
+    prepareMotionOnlyTimeline,
     prepareMotionTimelineSink,
     markMotionTimelineStarted,
     markMotionTimelineTerminal,

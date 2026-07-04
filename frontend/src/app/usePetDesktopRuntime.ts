@@ -198,6 +198,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const motionTimelineSink = createModelEngineMotionTimelineSink({
     motionEngine: modelEngine,
     getActiveAudioTimelineSnapshot: adapter.getActiveAudioTimelineSnapshot,
+    prepareMotionOnlyTimeline: adapter.prepareMotionOnlyTimeline,
     prepareMotionTimelineSink: adapter.prepareMotionTimelineSink,
     markMotionTimelineTerminal: adapter.markMotionTimelineTerminal,
   });

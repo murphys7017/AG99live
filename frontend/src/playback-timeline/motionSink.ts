@@ -41,21 +41,37 @@ function matchesMotionContext(
   );
 }
 
-function attachAudioTimelineToMotionContext(
+function attachPlaybackTimelineToMotionContext(
   context: PlaybackTimelineMotionContext,
   snapshot: PlaybackTimelineSnapshot | null | undefined,
   prepareMotionTimeline?: (
     turnId: string | null,
     messageId: string,
   ) => boolean,
+  prepareMotionOnlyTimeline?: (
+    turnId: string | null,
+    messageId: string,
+  ) => PlaybackTimelineSnapshot | null,
+  getActiveTimelineSnapshot?: () => PlaybackTimelineSnapshot | null,
 ): PlaybackTimelineMotionContext {
-  if (!snapshot || !matchesMotionContext(snapshot, context)) {
+  if (snapshot && matchesMotionContext(snapshot, context)) {
+    if (prepareMotionTimeline && !prepareMotionTimeline(context.turnId, context.messageId)) {
+      return {
+        ...context,
+        playbackTimeline: null,
+      };
+    }
     return {
       ...context,
-      playbackTimeline: null,
+      playbackTimeline: getActiveTimelineSnapshot?.() ?? snapshot,
     };
   }
-  if (prepareMotionTimeline && !prepareMotionTimeline(context.turnId, context.messageId)) {
+
+  const motionOnlyTimeline = prepareMotionOnlyTimeline?.(
+    context.turnId,
+    context.messageId,
+  );
+  if (!motionOnlyTimeline || !matchesMotionContext(motionOnlyTimeline, context)) {
     return {
       ...context,
       playbackTimeline: null,
@@ -63,7 +79,7 @@ function attachAudioTimelineToMotionContext(
   }
   return {
     ...context,
-    playbackTimeline: snapshot,
+    playbackTimeline: motionOnlyTimeline,
   };
 }
 
@@ -74,6 +90,10 @@ export function createModelEngineMotionTimelineSink(options: {
     turnId: string | null,
     messageId: string,
   ) => boolean;
+  prepareMotionOnlyTimeline?: (
+    turnId: string | null,
+    messageId: string,
+  ) => PlaybackTimelineSnapshot | null;
   markMotionTimelineTerminal?: (
     turnId: string | null,
     messageId: string,
@@ -83,10 +103,12 @@ export function createModelEngineMotionTimelineSink(options: {
 }): PlaybackTimelineMotionSink {
   return {
     start(payload, context) {
-      const nextContext = attachAudioTimelineToMotionContext(
+      const nextContext = attachPlaybackTimelineToMotionContext(
         context,
         options.getActiveAudioTimelineSnapshot?.(),
         options.prepareMotionTimelineSink,
+        options.prepareMotionOnlyTimeline,
+        options.getActiveAudioTimelineSnapshot,
       );
       const accepted = options.motionEngine.ingestNormalizedPayload(
         payload,
