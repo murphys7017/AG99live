@@ -16,6 +16,7 @@ import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRuntimeSnapshotPublisher";
 import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
+import { createAudioStartMotionTimelineBridge } from "../playback-timeline/audioStartMotionBridge.js";
 import { createModelEngineMotionTimelineSink } from "../playback-timeline/motionSink.js";
 import { cloneModelEngineSettings } from "../model-engine/settings";
 import type { ModelEngineSettings } from "../model-engine/settings";
@@ -34,8 +35,6 @@ import { createDesktopRuntimeCommandHandler } from "../desktop-bridge/useDesktop
 import { usePushToTalkController } from "./usePushToTalkController";
 import { useBilibiliLiveRuntime } from "../bilibili-live/useBilibiliLiveRuntime";
 import { isTerminalPhase } from "../turn-playback/session";
-
-const MOTION_AFTER_AUDIO_START_DELAY_MS = 90;
 
 export interface PetDesktopRuntime {
   sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>;
@@ -66,37 +65,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const playbackAck = {
     sendPlaybackFinishedForCurrentGroup: adapter.sendPlaybackFinishedForCurrentGroup,
     clearPlaybackGroupContext: adapter.clearPlaybackGroupContext,
-  };
-  const delayedMotionStartTimers = new Set<number>();
-  const scheduleMotionAfterAudioStart = (
-    turnId: string | null,
-    messageId: string,
-  ): void => {
-    if (!turnId) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      delayedMotionStartTimers.delete(timer);
-      const session = sessionStore.getSession(turnId);
-      const segment = session?.segments.get(messageId);
-      if (
-        !session
-        || !segment
-        || isTerminalPhase(session.phase)
-        || !segment.audio.started
-        || segment.audio.terminal !== "idle"
-      ) {
-        return;
-      }
-      const latestPlaybackTimeline =
-        adapter.getPlaybackTimelineSnapshotForSegment(turnId, messageId);
-      modelEngine.notifyAudioPlaybackStarted(
-        turnId,
-        messageId,
-        latestPlaybackTimeline,
-      );
-    }, MOTION_AFTER_AUDIO_START_DELAY_MS);
-    delayedMotionStartTimers.add(timer);
   };
   const motionRecord = {
     getLastAssistantText: () => adapter.state.lastAssistantText,
@@ -185,8 +153,30 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       markMotionFailed: (turnId, messageId, reason) => sessionStore.markMotionFailed(turnId, messageId, reason),
     },
   });
+  const audioStartMotionBridge = createAudioStartMotionTimelineBridge({
+    schedule: (delayMs, fn) => window.setTimeout(fn, delayMs),
+    clearSchedule: (timer) => window.clearTimeout(timer as number),
+    canStartMotionForAudioTimeline: (turnId, messageId) => {
+      const session = sessionStore.getSession(turnId);
+      const segment = session?.segments.get(messageId);
+      return Boolean(
+        session
+        && segment
+        && !isTerminalPhase(session.phase)
+        && segment.audio.started
+        && segment.audio.terminal === "idle",
+      );
+    },
+    getPlaybackTimelineSnapshotForSegment: adapter.getPlaybackTimelineSnapshotForSegment,
+    startMotionForAudioTimeline: (turnId, messageId, playbackTimeline) =>
+      modelEngine.notifyAudioPlaybackStarted(
+        turnId,
+        messageId,
+        playbackTimeline,
+      ),
+  });
   adapter.setAudioTimelineStartedHandler((turnId, messageId) => {
-    scheduleMotionAfterAudioStart(turnId, messageId);
+    audioStartMotionBridge.handleAudioTimelineStarted(turnId, messageId);
   });
   adapter.setMotionPreviewHandler((payload) => {
     const localPlayed = modelEngine.playPreviewPayload(payload);
@@ -377,10 +367,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   });
 
   onBeforeUnmount(() => {
-    for (const timer of delayedMotionStartTimers) {
-      window.clearTimeout(timer);
-    }
-    delayedMotionStartTimers.clear();
+    audioStartMotionBridge.clear();
     pushToTalk.dispose();
     bilibiliLive.dispose();
     playbackCoordinator.resetPlaybackCoordination();

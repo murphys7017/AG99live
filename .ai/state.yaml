@@ -12,11 +12,11 @@ context:
     - The first shipped timeline shape should remain single active segment oriented, matching the current turn playback session semantics.
     - ModelEngine notifyAudioPlaybackStarted remains the internal motion scheduling entry point, but it is now triggered from AdapterAudioRuntime audio timeline started events instead of PlaybackCompletionCoordinator session watches.
     - Motion release now receives a segment-scoped audio timeline snapshot from PlaybackTimelineRuntime when turnId and messageId match; mismatched timeline snapshots are intentionally hidden from the motion sink.
-    - Audio-start delayed motion wakeup now refreshes the segment-scoped playback timeline snapshot at timer fire time, so ModelEngine does not consume stale currentTimeMs.
+    - Audio-start delayed motion wakeup now lives in PlaybackTimeline AudioStartMotionTimelineBridge and refreshes the segment-scoped playback timeline snapshot at timer fire time, so ModelEngine does not consume stale currentTimeMs.
     - Motion release now registers a required motion sink on the matched active audio timeline; ModelEngine started/finished callbacks write motion started/completed/failed/interrupted terminal state back into that timeline.
     - Active audio timelines are retained after audio completion when a required motion sink is still running, and are cleared only after the timeline reaches completed/failed/interrupted.
     - Active playback timeline lifecycle has been extracted from AdapterAudioRuntime into PlaybackTimelineRuntime; AdapterAudioRuntime now delegates audio timeline, motion-only timeline, and motion/lip-sync sink terminal updates.
-    - TurnPlaybackOrchestratorCore now emits a typed segment release job with explicit text/audio/motion slots instead of separately owning text/audio/motion release calls; segmentPlaybackRelease maps that job onto the existing release ports during migration.
+    - TurnPlaybackOrchestratorCore now emits a typed segment release job with explicit text/audio/motion slots instead of separately owning text/audio/motion release calls; segmentReleaseExecutor maps that job onto the existing release ports during migration.
     - PreviewMotionPlayer now reports stopped terminal events for explicit motion stops and direct-plan replacement, so motion timeline sinks do not depend on silent local cleanup.
     - Motion-only segments now create a synthetic playback timeline with motion as the required sink when no matching audio timeline exists.
     - ModelEngine now prefers playback timeline duration/currentTime for motion target duration when the release context carries a valid audio timeline snapshot.
@@ -53,6 +53,7 @@ architecture:
     - AdapterAudioRuntime depends on PlaybackTimelineAudioSink for audio start/stop/clock access, while createAdapterConnection wires the browser HTMLAudioElement implementation through createBrowserAudioTimelineSink.
     - TurnPlaybackOrchestrator now releases audio before motion for the same ready segment so audioRuntime can create an active timeline before ModelEngine ingests the motion payload.
     - Segment playback release is now a dedicated turn-playback boundary; motion release requires a valid receivedAtMs and fails visibly instead of substituting a local fallback timestamp.
+    - Segment release side effects are now isolated in segmentReleaseExecutor, leaving segmentPlaybackRelease as a thin adapter that can later be replaced by a timeline-runtime segment job executor.
     - AdapterConnection no longer exposes getActiveAudioTimelineSnapshot publicly; upper layers use segment-scoped timeline lookup instead.
     - A new PlaybackTimelineMotionSink wraps ModelEngine motion start and attaches only same turnId/messageId timeline snapshots supplied by PlaybackTimelineRuntime to motion contexts.
     - PlaybackTimelineMotionSink now prepares a required motion sink on matched audio timelines and marks it failed when ModelEngine rejects the motion payload before playback starts.

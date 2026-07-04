@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { effectScope, nextTick } from "vue";
 import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
 import { useTurnPlaybackOrchestrator } from "../src/turn-playback/useTurnPlaybackOrchestrator.js";
+import { executeTurnPlaybackSegmentReleaseJob } from "../src/turn-playback/segmentReleaseExecutor.js";
 import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
 import { createModelEngineMotionTimelineSink } from "../src/playback-timeline/motionSink.js";
 import type { PlaybackTimelineSnapshot } from "../src/playback-timeline/contracts.js";
@@ -583,6 +584,54 @@ function testMotionTimelineSinkUsesSegmentScopedTimelineLookup(): void {
   assert.equal(contexts[0].playbackTimeline?.timelineId, "timeline-1");
 }
 
+function testSegmentReleaseExecutorRejectsInvalidMotionTimestamp(): void {
+  const sessionStore = useTurnPlaybackSessionStore();
+  sessionStore.setActiveSession("turn-invalid-motion-time");
+  sessionStore.markTurnStarted("turn-invalid-motion-time");
+  sessionStore.markTextReceived(
+    "turn-invalid-motion-time",
+    "hello",
+    "msg-invalid-motion-time",
+  );
+  sessionStore.markMotionReceived(
+    "turn-invalid-motion-time",
+    motionPayload,
+    "msg-invalid-motion-time",
+  );
+
+  assert.throws(
+    () => executeTurnPlaybackSegmentReleaseJob(
+      {
+        messageId: "msg-invalid-motion-time",
+        turnId: "turn-invalid-motion-time",
+        reason: "test",
+        text: {
+          release: false,
+        },
+        audio: {
+          release: false,
+        },
+        motion: {
+          payload: motionPayload,
+          receivedAtMs: Number.NaN,
+        },
+      },
+      {
+        sessionStore,
+        playbackRelease: {
+          releaseAssistantTextForPlayback: () => true,
+          releaseAudioForPlayback: () => true,
+        },
+        motionPayload: {
+          start: () => true,
+          notifyCurrentTurnChanged: () => {},
+        },
+      },
+    ),
+    /valid receivedAtMs/,
+  );
+}
+
 async function run(): Promise<void> {
   await testSegmentsReleaseSequentiallyWithinTurn();
   await testTextAndMotionReleaseWhenAudioIsAbsent();
@@ -596,6 +645,7 @@ async function run(): Promise<void> {
   testMotionTimelineSinkMarksPreparedTimelineFailedWhenEngineRejects();
   testMotionTimelineSinkCreatesSyntheticTimelineWhenAudioAbsent();
   testMotionTimelineSinkUsesSegmentScopedTimelineLookup();
+  testSegmentReleaseExecutorRejectsInvalidMotionTimestamp();
   console.log("useTurnPlaybackOrchestrator tests passed");
 }
 

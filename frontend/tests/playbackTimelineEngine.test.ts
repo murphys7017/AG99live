@@ -5,7 +5,11 @@ import {
 import { resolvePerformanceCurveTimeline } from "../src/playback-timeline/performanceCurveSink.js";
 import { createPlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
 import { createTimelineClock } from "../src/playback-timeline/timelineClock.js";
-import type { AudioPlaybackClock } from "../src/playback-timeline/contracts.js";
+import { createAudioStartMotionTimelineBridge } from "../src/playback-timeline/audioStartMotionBridge.js";
+import type {
+  AudioPlaybackClock,
+  PlaybackTimelineSnapshot,
+} from "../src/playback-timeline/contracts.js";
 
 function testSyntheticClockLifecycle(): void {
   let nowMs = 100;
@@ -371,6 +375,98 @@ function testTerminalSinkEventsAreStable(): void {
   assert.equal(lipSyncSink?.reason, "lip_sync_unavailable");
 }
 
+function buildTimelineSnapshot(
+  currentTimeMs: number,
+): PlaybackTimelineSnapshot {
+  return {
+    timelineId: `timeline-${currentTimeMs}`,
+    turnId: "turn-audio",
+    messageId: "msg-audio",
+    phase: "playing",
+    clockSource: "audio",
+    startedAtMs: 10,
+    currentTimeMs,
+    durationMs: 1200,
+    playbackRate: 1,
+    sinks: [],
+  };
+}
+
+function testAudioStartMotionBridgeRefreshesTimelineAtFireTime(): void {
+  const scheduled: Array<() => void> = [];
+  let snapshot = buildTimelineSnapshot(100);
+  const started: PlaybackTimelineSnapshot[] = [];
+  const bridge = createAudioStartMotionTimelineBridge({
+    delayMs: 90,
+    schedule: (_delayMs, fn) => {
+      scheduled.push(fn);
+      return "timer-1";
+    },
+    clearSchedule: () => {},
+    getPlaybackTimelineSnapshotForSegment: () => snapshot,
+    startMotionForAudioTimeline: (_turnId, _messageId, playbackTimeline) => {
+      if (playbackTimeline) {
+        started.push(playbackTimeline);
+      }
+    },
+  });
+
+  bridge.handleAudioTimelineStarted("turn-audio", "msg-audio");
+  snapshot = buildTimelineSnapshot(220);
+  scheduled[0]?.();
+
+  assert.equal(started.length, 1);
+  assert.equal(started[0].currentTimeMs, 220);
+}
+
+function testAudioStartMotionBridgeCanCancelPendingWakeup(): void {
+  const cleared: unknown[] = [];
+  const scheduled: Array<() => void> = [];
+  let started = false;
+  const bridge = createAudioStartMotionTimelineBridge({
+    schedule: (_delayMs, fn) => {
+      scheduled.push(fn);
+      return "timer-clear";
+    },
+    clearSchedule: (timer) => {
+      cleared.push(timer);
+    },
+    getPlaybackTimelineSnapshotForSegment: () => buildTimelineSnapshot(0),
+    startMotionForAudioTimeline: () => {
+      started = true;
+    },
+  });
+
+  bridge.handleAudioTimelineStarted("turn-audio", "msg-audio");
+  bridge.clear();
+  scheduled[0]?.();
+
+  assert.deepEqual(cleared, ["timer-clear"]);
+  assert.equal(started, false);
+}
+
+function testAudioStartMotionBridgeSkipsStaleSegment(): void {
+  const scheduled: Array<() => void> = [];
+  let started = false;
+  const bridge = createAudioStartMotionTimelineBridge({
+    schedule: (_delayMs, fn) => {
+      scheduled.push(fn);
+      return "timer-stale";
+    },
+    clearSchedule: () => {},
+    canStartMotionForAudioTimeline: () => false,
+    getPlaybackTimelineSnapshotForSegment: () => buildTimelineSnapshot(0),
+    startMotionForAudioTimeline: () => {
+      started = true;
+    },
+  });
+
+  bridge.handleAudioTimelineStarted("turn-audio", "msg-audio");
+  scheduled[0]?.();
+
+  assert.equal(started, false);
+}
+
 function run(): void {
   testSyntheticClockLifecycle();
   testAudioClockTakesPriorityAndExposesUnavailableState();
@@ -385,6 +481,9 @@ function run(): void {
   testPlaybackTimelineRuntimeDoesNotStealMismatchedActiveTimeline();
   testPlaybackTimelineRuntimeExposesMissingAudioClock();
   testTerminalSinkEventsAreStable();
+  testAudioStartMotionBridgeRefreshesTimelineAtFireTime();
+  testAudioStartMotionBridgeCanCancelPendingWakeup();
+  testAudioStartMotionBridgeSkipsStaleSegment();
   console.log("playbackTimelineEngine tests passed");
 }
 
