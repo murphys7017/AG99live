@@ -37,6 +37,9 @@ import type {
   MotionPayloadPort,
   PlaybackReleasePort,
 } from "./ports.js";
+import type {
+  PlaybackTimelineSegmentRuntimePort,
+} from "../playback-timeline/segmentJobExecutor.js";
 
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 
@@ -44,6 +47,7 @@ interface TurnPlaybackOrchestratorOptions {
   sessionStore: SessionStore;
   playbackRelease: PlaybackReleasePort;
   motionPayload: MotionPayloadPort;
+  timelineRuntime?: PlaybackTimelineSegmentRuntimePort;
 }
 
 function attachPerformanceCurveHintToPayload(

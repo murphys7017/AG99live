@@ -28,7 +28,18 @@ export interface PlaybackTimelineRuntimeDeps {
   ) => void;
 }
 
+export interface PlaybackTimelineSegmentJobOptions {
+  hasAudio: boolean;
+  hasMotion: boolean;
+  noAudioConfirmed: boolean;
+}
+
 export interface PlaybackTimelineRuntime {
+  prepareSegmentJob: (
+    turnId: string | null,
+    messageId: string,
+    options: PlaybackTimelineSegmentJobOptions,
+  ) => boolean;
   prepareAudioTimeline: (
     turnId: string | null,
     messageId: string,
@@ -106,6 +117,19 @@ export function createPlaybackTimelineRuntime(
     turnId: string | null,
     messageId: string,
   ): void {
+    if (
+      isActiveTimeline(turnId, messageId)
+      && activeTimeline
+      && activeTimeline.engine.hasSink(AUDIO_TIMELINE_SINK_ID)
+    ) {
+      if (!activeTimeline.engine.hasSink(LIP_SYNC_TIMELINE_SINK_ID)) {
+        activeTimeline.engine.registerSink({
+          id: LIP_SYNC_TIMELINE_SINK_ID,
+          required: false,
+        });
+      }
+      return;
+    }
     const engine = createPlaybackTimelineEngine();
     engine.load(
       { turnId, messageId },
@@ -119,6 +143,26 @@ export function createPlaybackTimelineRuntime(
       messageId,
       engine,
     };
+  }
+
+  function prepareSegmentJob(
+    turnId: string | null,
+    messageId: string,
+    options: PlaybackTimelineSegmentJobOptions,
+  ): boolean {
+    if (options.hasAudio) {
+      prepareAudioTimeline(turnId, messageId);
+      if (options.hasMotion) {
+        return prepareMotionTimelineSink(turnId, messageId);
+      }
+      return isActiveTimeline(turnId, messageId);
+    }
+
+    if (options.hasMotion && options.noAudioConfirmed) {
+      return prepareMotionOnlyTimeline(turnId, messageId) !== null;
+    }
+
+    return true;
   }
 
   function prepareMotionOnlyTimeline(
@@ -314,6 +358,7 @@ export function createPlaybackTimelineRuntime(
   }
 
   return {
+    prepareSegmentJob,
     prepareAudioTimeline,
     prepareMotionOnlyTimeline,
     markAudioTimelineDuration,

@@ -222,6 +222,9 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       releaseAssistantTextForPlayback: adapter.releaseAssistantTextForPlayback,
       releaseAudioForPlayback: adapter.releaseAudioForPlayback,
     },
+    timelineRuntime: {
+      prepareSegmentJob: adapter.prepareSegmentJob,
+    },
     motionPayload: {
       start: motionTimelineSink.start,
       notifyCurrentTurnChanged: motionTimelineSink.notifyCurrentTurnChanged,

@@ -8,6 +8,9 @@ import {
   executePlaybackTimelineSegmentJob,
 } from "../playback-timeline/segmentJobExecutor.js";
 import type {
+  PlaybackTimelineSegmentRuntimePort,
+} from "../playback-timeline/segmentJobExecutor.js";
+import type {
   TurnPlaybackSegmentReleaseJob,
   TurnPlaybackSegmentReleaseResult,
 } from "./turnPlaybackOrchestratorCore.js";
@@ -18,6 +21,7 @@ export interface TurnPlaybackSegmentReleaserOptions {
   sessionStore: SessionStore;
   playbackRelease: PlaybackReleasePort;
   motionPayload: MotionPayloadPort;
+  timelineRuntime?: PlaybackTimelineSegmentRuntimePort;
 }
 
 export interface TurnPlaybackSegmentReleaser {
@@ -48,6 +52,7 @@ export function createTurnPlaybackSegmentReleaser(
         releaseAudioForPlayback: options.playbackRelease.releaseAudioForPlayback,
       },
       motionSink: options.motionPayload,
+      timelineRuntime: options.timelineRuntime,
     });
   }
 

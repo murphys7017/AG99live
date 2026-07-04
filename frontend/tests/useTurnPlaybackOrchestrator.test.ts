@@ -776,6 +776,142 @@ function testPlaybackTimelineSegmentExecutorMarksMotionOnlyContext(): void {
   ]);
 }
 
+function testPlaybackTimelineSegmentExecutorPreparesAudioMotionTimeline(): void {
+  const events: string[] = [];
+  const result = executePlaybackTimelineSegmentJob(
+    {
+      messageId: "msg-audio-motion-job",
+      turnId: "turn-audio-motion-job",
+      reason: "test",
+      text: {
+        release: false,
+      },
+      audio: {
+        release: true,
+        noAudioConfirmed: false,
+      },
+      motion: {
+        payload: motionPayload,
+        receivedAtMs: 123,
+      },
+    },
+    {
+      session: {
+        markTextReleased: () => events.push("text_released"),
+        markAudioReleased: () => events.push("audio_released"),
+        markMotionReleased: () => events.push("motion_released"),
+        markMotionFailed: () => events.push("motion_failed"),
+        markPhase: (_turnId, phase) => {
+          events.push(`phase:${phase}`);
+          return true;
+        },
+      },
+      textSink: {
+        releaseAssistantTextForPlayback: () => true,
+      },
+      audioSink: {
+        releaseAudioForPlayback: () => {
+          events.push("audio_sink");
+          return true;
+        },
+      },
+      motionSink: {
+        start: () => {
+          events.push("motion_sink");
+          return true;
+        },
+      },
+      timelineRuntime: {
+        prepareSegmentJob: (_turnId, _messageId, options) => {
+          events.push(
+            `timeline:${options.hasAudio}:${options.hasMotion}:${options.noAudioConfirmed}`,
+          );
+          return true;
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(result, {
+    releasedText: false,
+    releasedAudio: true,
+    releasedMotion: true,
+  });
+  assert.deepEqual(events, [
+    "audio_sink",
+    "audio_released",
+    "timeline:true:true:false",
+    "motion_released",
+    "motion_sink",
+    "phase:playing",
+  ]);
+}
+
+function testPlaybackTimelineSegmentExecutorFailsMotionOnlyTimelinePreparation(): void {
+  const events: string[] = [];
+  const result = executePlaybackTimelineSegmentJob(
+    {
+      messageId: "msg-motion-only-missing-timeline",
+      turnId: "turn-motion-only-missing-timeline",
+      reason: "test",
+      text: {
+        release: false,
+      },
+      audio: {
+        release: false,
+        noAudioConfirmed: true,
+      },
+      motion: {
+        payload: motionPayload,
+        receivedAtMs: 123,
+      },
+    },
+    {
+      session: {
+        markTextReleased: () => events.push("text_released"),
+        markAudioReleased: () => events.push("audio_released"),
+        markMotionReleased: () => events.push("motion_released"),
+        markMotionFailed: (_turnId, _messageId, reason) =>
+          events.push(`motion_failed:${reason ?? ""}`),
+        markPhase: (_turnId, phase) => {
+          events.push(`phase:${phase}`);
+          return true;
+        },
+      },
+      textSink: {
+        releaseAssistantTextForPlayback: () => true,
+      },
+      audioSink: {
+        releaseAudioForPlayback: () => true,
+      },
+      motionSink: {
+        start: () => {
+          events.push("motion_sink");
+          return true;
+        },
+      },
+      timelineRuntime: {
+        prepareSegmentJob: (_turnId, _messageId, options) => {
+          events.push(
+            `timeline:${options.hasAudio}:${options.hasMotion}:${options.noAudioConfirmed}`,
+          );
+          return false;
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(result, {
+    releasedText: false,
+    releasedAudio: false,
+    releasedMotion: false,
+  });
+  assert.deepEqual(events, [
+    "timeline:false:true:true",
+    "motion_failed:motion_only_timeline_unavailable",
+  ]);
+}
+
 async function run(): Promise<void> {
   await testSegmentsReleaseSequentiallyWithinTurn();
   await testTextAndMotionReleaseWhenAudioIsAbsent();
@@ -793,6 +929,8 @@ async function run(): Promise<void> {
   testMotionTimelineSinkUsesSegmentScopedTimelineLookup();
   testPlaybackTimelineSegmentExecutorRejectsInvalidMotionTimestamp();
   testPlaybackTimelineSegmentExecutorMarksMotionOnlyContext();
+  testPlaybackTimelineSegmentExecutorPreparesAudioMotionTimeline();
+  testPlaybackTimelineSegmentExecutorFailsMotionOnlyTimelinePreparation();
   console.log("useTurnPlaybackOrchestrator tests passed");
 }
 

@@ -59,6 +59,18 @@ export interface PlaybackTimelineSegmentMotionSink<TMotionPayload = NormalizedMo
   ): boolean | void;
 }
 
+export interface PlaybackTimelineSegmentRuntimePort {
+  prepareSegmentJob(
+    turnId: string | null,
+    messageId: string,
+    options: {
+      hasAudio: boolean;
+      hasMotion: boolean;
+      noAudioConfirmed: boolean;
+    },
+  ): boolean;
+}
+
 export interface PlaybackTimelineSegmentExecutorPorts<
   TMotionPayload = NormalizedMotionPayload,
 > {
@@ -66,6 +78,7 @@ export interface PlaybackTimelineSegmentExecutorPorts<
   textSink: PlaybackTimelineSegmentTextSink;
   audioSink: PlaybackTimelineSegmentAudioSink;
   motionSink: PlaybackTimelineSegmentMotionSink<TMotionPayload>;
+  timelineRuntime?: PlaybackTimelineSegmentRuntimePort;
 }
 
 export function executePlaybackTimelineSegmentJob<
@@ -95,6 +108,18 @@ export function executePlaybackTimelineSegmentJob<
   }
   if (releasedAudio) {
     ports.session.markAudioReleased(job.turnId, job.messageId);
+    const prepared = ports.timelineRuntime?.prepareSegmentJob(
+      job.turnId,
+      job.messageId,
+      {
+        hasAudio: true,
+        hasMotion: job.motion.payload !== null,
+        noAudioConfirmed: false,
+      },
+    );
+    if (prepared === false) {
+      throw new Error("Playback timeline segment preparation failed.");
+    }
   }
 
   let releasedMotion = false;
@@ -107,6 +132,32 @@ export function executePlaybackTimelineSegmentJob<
     ) {
       throw new Error("Motion segment release requires a valid receivedAtMs.");
     }
+    const timelineMode = job.audio.noAudioConfirmed && !job.audio.release
+      ? "motion_only"
+      : "audio";
+    if (!releasedAudio && timelineMode === "motion_only") {
+      const prepared = ports.timelineRuntime?.prepareSegmentJob(
+        job.turnId,
+        job.messageId,
+        {
+          hasAudio: false,
+          hasMotion: true,
+          noAudioConfirmed: true,
+        },
+      );
+      if (prepared === false) {
+        ports.session.markMotionFailed(
+          job.turnId,
+          job.messageId,
+          "motion_only_timeline_unavailable",
+        );
+        return {
+          releasedText,
+          releasedAudio,
+          releasedMotion: false,
+        };
+      }
+    }
     ports.session.markMotionReleased(job.turnId, job.messageId);
     const accepted = ports.motionSink.start(
       job.motion.payload,
@@ -114,9 +165,7 @@ export function executePlaybackTimelineSegmentJob<
         turnId: job.turnId,
         messageId: job.messageId,
         receivedAtMs,
-        timelineMode: job.audio.noAudioConfirmed && !job.audio.release
-          ? "motion_only"
-          : "audio",
+        timelineMode,
       },
     );
     releasedMotion = accepted !== false;

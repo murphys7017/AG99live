@@ -18,6 +18,7 @@ context:
     - Active playback timeline lifecycle has been extracted from AdapterAudioRuntime into PlaybackTimelineRuntime; AdapterAudioRuntime now delegates audio timeline, motion-only timeline, and motion/lip-sync sink terminal updates.
     - TurnPlaybackOrchestratorCore now emits a typed segment release job with explicit text/audio/motion slots instead of separately owning text/audio/motion release calls; the playback timeline segment job executor owns that job's execution semantics while turn-playback keeps a compatibility adapter during migration.
     - Segment job execution semantics now live under playback-timeline/segmentJobExecutor; turn-playback segmentPlaybackRelease is a compatibility adapter over existing SessionStore/text/audio/motion ports.
+    - PlaybackTimelineRuntime now exposes prepareSegmentJob as the segment-level timeline preparation entry point; the segment executor calls it during release while existing text/audio/motion sinks still perform actual playback during migration.
     - PreviewMotionPlayer now reports stopped terminal events for explicit motion stops and direct-plan replacement, so motion timeline sinks do not depend on silent local cleanup.
     - Explicit no-audio motion-only segments create a synthetic playback timeline with motion as the required sink.
     - Motion-only synthetic timelines now require an explicit release context marked as no-audio; a missing audio timeline is not enough to create synthetic timing.
@@ -58,6 +59,8 @@ architecture:
     - Segment playback release is now a dedicated turn-playback boundary; motion release requires a valid receivedAtMs and fails visibly instead of substituting a local fallback timestamp.
     - Segment release side effects are now isolated behind the playback timeline segment job executor, leaving segmentPlaybackRelease as the thin turn-playback compatibility adapter during migration.
     - PlaybackTimelineSegmentExecutor is the new segment job execution boundary; it still invokes existing sinks during migration, but owns the release context shape such as explicit motion_only timeline mode.
+    - PlaybackTimelineSegmentExecutor now receives an optional timeline runtime port and asks PlaybackTimelineRuntime to prepare audio+motion or explicit motion-only segment timelines before motion execution; motion-only preparation failure is marked as motion_only_timeline_unavailable instead of being hidden by ModelEngine ingestion.
+    - PlaybackTimelineRuntime.prepareAudioTimeline is idempotent for the same active audio segment so segment-level preparation cannot wipe an already registered motion sink when audio playback also prepares the same timeline.
     - AdapterConnection no longer exposes getActiveAudioTimelineSnapshot publicly; upper layers use segment-scoped timeline lookup instead.
     - A new PlaybackTimelineMotionSink wraps ModelEngine motion start and attaches only same turnId/messageId timeline snapshots supplied by PlaybackTimelineRuntime to motion contexts.
     - PlaybackTimelineMotionSink now prepares a required motion sink on matched audio timelines and marks it failed when ModelEngine rejects the motion payload before playback starts.

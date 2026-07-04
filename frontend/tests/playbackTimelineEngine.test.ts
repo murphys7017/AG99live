@@ -311,6 +311,43 @@ function testPlaybackTimelineRuntimeCreatesMotionOnlyTimeline(): void {
   assert.equal(runtime.getActiveTimelineSnapshot(), null);
 }
 
+function testPlaybackTimelineRuntimePreparesSegmentJobIdempotently(): void {
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => null,
+  });
+
+  runtime.prepareAudioTimeline("turn-segment", "msg-segment");
+  assert.equal(
+    runtime.getTimelineSnapshotForSegment("turn-segment", "msg-segment")
+      ?.sinks.some((sink) => sink.id === "motion"),
+    false,
+  );
+
+  assert.equal(
+    runtime.prepareSegmentJob("turn-segment", "msg-segment", {
+      hasAudio: true,
+      hasMotion: true,
+      noAudioConfirmed: false,
+    }),
+    true,
+  );
+  assert.equal(
+    runtime.getTimelineSnapshotForSegment("turn-segment", "msg-segment")
+      ?.sinks.some((sink) => sink.id === "motion" && sink.required),
+    true,
+  );
+
+  runtime.prepareAudioTimeline("turn-segment", "msg-segment");
+  const snapshot = runtime.getTimelineSnapshotForSegment(
+    "turn-segment",
+    "msg-segment",
+  );
+  assert.equal(
+    snapshot?.sinks.some((sink) => sink.id === "motion" && sink.required),
+    true,
+  );
+}
+
 function testPlaybackTimelineRuntimeDoesNotStealMismatchedActiveTimeline(): void {
   const runtime = createPlaybackTimelineRuntime({
     getAudioClock: () => null,
@@ -504,6 +541,7 @@ function run(): void {
   testPerformanceCurveTimelineUsesRemainingAudioDuration();
   testPerformanceCurveTimelineRejectsUnavailableAudio();
   testPlaybackTimelineRuntimeCreatesMotionOnlyTimeline();
+  testPlaybackTimelineRuntimePreparesSegmentJobIdempotently();
   testPlaybackTimelineRuntimeDoesNotStealMismatchedActiveTimeline();
   testPlaybackTimelineRuntimeExposesMissingAudioClock();
   testTerminalSinkEventsAreStable();

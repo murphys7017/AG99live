@@ -110,6 +110,7 @@ export interface AdapterAudioRuntime {
     messageId: string,
     turnId: string | null,
   ) => boolean;
+  prepareSegmentJob: ReturnType<typeof createPlaybackTimelineRuntime>["prepareSegmentJob"];
   hasPendingAudioForTurn: (turnId: string | null) => boolean;
   markMissingAudiosForTurn: (
     turnId: string | null,
@@ -159,6 +160,7 @@ export function createAdapterAudioRuntime(
   });
   const {
     prepareAudioTimeline,
+    prepareSegmentJob,
     prepareMotionOnlyTimeline,
     markAudioTimelineDuration,
     markAudioTimelineStarted,
@@ -451,6 +453,7 @@ export function createAdapterAudioRuntime(
     queueAudioForPlayback,
     playAudioAndAcknowledge,
     releaseAudioForPlayback,
+    prepareSegmentJob,
     hasPendingAudioForTurn,
     markMissingAudiosForTurn,
     markAudioPlaybackTerminal,
