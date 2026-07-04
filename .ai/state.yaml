@@ -12,6 +12,7 @@ context:
     - The first shipped timeline shape should remain single active segment oriented, matching the current turn playback session semantics.
     - ModelEngine notifyAudioPlaybackStarted remains the internal motion scheduling entry point, but it is now triggered from AdapterAudioRuntime audio timeline started events instead of PlaybackCompletionCoordinator session watches.
     - Motion release now receives a segment-scoped audio timeline snapshot from PlaybackTimelineRuntime when turnId and messageId match; mismatched timeline snapshots are intentionally hidden from the motion sink.
+    - Audio-start delayed motion wakeup now refreshes the segment-scoped playback timeline snapshot at timer fire time, so ModelEngine does not consume stale currentTimeMs.
     - Motion release now registers a required motion sink on the matched active audio timeline; ModelEngine started/finished callbacks write motion started/completed/failed/interrupted terminal state back into that timeline.
     - Active audio timelines are retained after audio completion when a required motion sink is still running, and are cleared only after the timeline reaches completed/failed/interrupted.
     - Active playback timeline lifecycle has been extracted from AdapterAudioRuntime into PlaybackTimelineRuntime; AdapterAudioRuntime now delegates audio timeline, motion-only timeline, and motion/lip-sync sink terminal updates.
@@ -26,7 +27,7 @@ context:
     - Lip sync runtime has been moved behind PlaybackTimelineLipSyncSink; AudioSink owns attaching, resuming, and stopping lip sync for the active audio element while reporting lip_sync sink state into the active playback timeline.
     - Playback timeline sink terminal state is now stable once a sink reaches a terminal value, so late cleanup/completion events cannot overwrite a real failure.
     - Lip sync can only complete after it has explicitly started; if audio ends before lip sync starts, the lip_sync sink fails with lip_sync_not_started_before_audio_end.
-    - Timeline snapshots now expose audio_unavailable when an attached audio clock cannot provide a playable audio-time snapshot, keeping text-only synthetic timing separate from audio-clock failures.
+    - Timeline snapshots now expose audio_unavailable when an attached or expected audio clock cannot provide a playable audio-time snapshot, keeping text-only synthetic timing separate from audio-clock failures.
     - ModelEngine no longer consumes audio_unavailable playback timelines for audio-synced duration or speech-active detection, and it will not fall back to SessionStore audio-duration estimates for that failure state.
     - Stopping an already-playing audio segment now writes an audio terminal only when no more specific terminal reason has already been set.
     - The automatic LLM motion path remains pure engine.motion_intent.v3 semantic axes; catalog motion, motion3, exp3, and choice outputs stay out of this path.
@@ -52,6 +53,7 @@ architecture:
     - AdapterAudioRuntime depends on PlaybackTimelineAudioSink for audio start/stop/clock access, while createAdapterConnection wires the browser HTMLAudioElement implementation through createBrowserAudioTimelineSink.
     - TurnPlaybackOrchestrator now releases audio before motion for the same ready segment so audioRuntime can create an active timeline before ModelEngine ingests the motion payload.
     - Segment playback release is now a dedicated turn-playback boundary; motion release requires a valid receivedAtMs and fails visibly instead of substituting a local fallback timestamp.
+    - AdapterConnection no longer exposes getActiveAudioTimelineSnapshot publicly; upper layers use segment-scoped timeline lookup instead.
     - A new PlaybackTimelineMotionSink wraps ModelEngine motion start and attaches only same turnId/messageId timeline snapshots supplied by PlaybackTimelineRuntime to motion contexts.
     - PlaybackTimelineMotionSink now prepares a required motion sink on matched audio timelines and marks it failed when ModelEngine rejects the motion payload before playback starts.
     - PreviewMotionPlayer catalog motion playback now exposes started/terminal callbacks with runId, allowing catalog motions to participate in motion timeline terminal tracking.

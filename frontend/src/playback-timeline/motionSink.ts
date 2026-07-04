@@ -85,7 +85,6 @@ function attachPlaybackTimelineToMotionContext(
 
 export function createModelEngineMotionTimelineSink(options: {
   motionEngine: PlaybackTimelineMotionEngine;
-  getActiveAudioTimelineSnapshot?: () => PlaybackTimelineSnapshot | null;
   getPlaybackTimelineSnapshotForSegment?: (
     turnId: string | null,
     messageId: string,
@@ -112,15 +111,11 @@ export function createModelEngineMotionTimelineSink(options: {
           context.turnId,
           context.messageId,
         ) ?? null;
-      const playbackTimelineSnapshot = options.getPlaybackTimelineSnapshotForSegment
-        ? getSegmentTimelineSnapshot()
-        : options.getActiveAudioTimelineSnapshot?.();
+      const playbackTimelineSnapshot = getSegmentTimelineSnapshot();
       const refreshPreparedTimelineSnapshot =
         options.prepareMotionTimelineSink && options.getPlaybackTimelineSnapshotForSegment
           ? getSegmentTimelineSnapshot
-          : options.getPlaybackTimelineSnapshotForSegment
-            ? undefined
-            : options.getActiveAudioTimelineSnapshot;
+          : undefined;
       const nextContext = attachPlaybackTimelineToMotionContext(
         context,
         playbackTimelineSnapshot,

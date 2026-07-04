@@ -173,6 +173,8 @@ export function createPlaybackTimelineRuntime(
     const audioClock = deps.getAudioClock();
     if (audioClock) {
       engine.attachAudioClock(audioClock);
+    } else {
+      engine.attachAudioClock(createUnavailableAudioClock());
     }
     engine.markSinkStarted(AUDIO_TIMELINE_SINK_ID);
     if (engine.getPhase() === "ready") {
@@ -325,6 +327,15 @@ export function createPlaybackTimelineRuntime(
     stopActiveTimeline,
     getActiveTimelineSnapshot,
     getTimelineSnapshotForSegment,
+  };
+}
+
+function createUnavailableAudioClock(): AudioPlaybackClock {
+  return {
+    getCurrentTimeMs: () => null,
+    getDurationMs: () => null,
+    getPlaybackRate: () => 1,
+    isPlaying: () => true,
   };
 }
 

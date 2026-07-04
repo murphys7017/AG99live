@@ -336,6 +336,20 @@ function testPlaybackTimelineRuntimeDoesNotStealMismatchedActiveTimeline(): void
   assert.equal(snapshot?.sinks.some((sink) => sink.id === "motion"), false);
 }
 
+function testPlaybackTimelineRuntimeExposesMissingAudioClock(): void {
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => null,
+  });
+
+  runtime.prepareAudioTimeline("turn-audio", "msg-audio");
+  runtime.markAudioTimelineStarted("turn-audio", "msg-audio", 100, 1200);
+
+  const snapshot = runtime.getTimelineSnapshotForSegment("turn-audio", "msg-audio");
+  assert.equal(snapshot?.phase, "playing");
+  assert.equal(snapshot?.clockSource, "audio_unavailable");
+  assert.equal(snapshot?.durationMs, 1200);
+}
+
 function testTerminalSinkEventsAreStable(): void {
   const engine = createPlaybackTimelineEngine({ now: () => 0 });
   engine.load(
@@ -369,6 +383,7 @@ function run(): void {
   testPerformanceCurveTimelineRejectsUnavailableAudio();
   testPlaybackTimelineRuntimeCreatesMotionOnlyTimeline();
   testPlaybackTimelineRuntimeDoesNotStealMismatchedActiveTimeline();
+  testPlaybackTimelineRuntimeExposesMissingAudioClock();
   testTerminalSinkEventsAreStable();
   console.log("playbackTimelineEngine tests passed");
 }

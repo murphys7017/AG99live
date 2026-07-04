@@ -151,15 +151,28 @@ export function useTurnPlaybackOrchestrator(
         }
 
         if (canReleaseMotion(segment) && segment.motion.payload) {
-          core.markMotionReady(
-            segment.messageId,
-            segment.turnId,
-            attachPerformanceCurveHintToPayload(
-              segment.motion.payload,
-              segment.motion.performanceCurveHint,
-            ),
-            segment.motion.receivedAtMs ?? performance.now(),
-          );
+          const motionReceivedAtMs = segment.motion.receivedAtMs;
+          if (
+            motionReceivedAtMs === null
+            || !Number.isFinite(motionReceivedAtMs)
+            || motionReceivedAtMs < 0
+          ) {
+            options.sessionStore.markMotionFailed(
+              segment.turnId,
+              segment.messageId,
+              "motion_received_at_missing",
+            );
+          } else {
+            core.markMotionReady(
+              segment.messageId,
+              segment.turnId,
+              attachPerformanceCurveHintToPayload(
+                segment.motion.payload,
+                segment.motion.performanceCurveHint,
+              ),
+              motionReceivedAtMs,
+            );
+          }
         }
 
         if (segment.audio.terminal === "absent") {

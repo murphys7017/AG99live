@@ -17,7 +17,6 @@ import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRunti
 import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
 import { createModelEngineMotionTimelineSink } from "../playback-timeline/motionSink.js";
-import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
 import { cloneModelEngineSettings } from "../model-engine/settings";
 import type { ModelEngineSettings } from "../model-engine/settings";
 import { usePlaybackCompletionCoordinator } from "../turn-playback/usePlaybackCompletionCoordinator";
@@ -72,7 +71,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const scheduleMotionAfterAudioStart = (
     turnId: string | null,
     messageId: string,
-    playbackTimeline: PlaybackTimelineSnapshot | null,
   ): void => {
     if (!turnId) {
       return;
@@ -90,10 +88,12 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       ) {
         return;
       }
+      const latestPlaybackTimeline =
+        adapter.getPlaybackTimelineSnapshotForSegment(turnId, messageId);
       modelEngine.notifyAudioPlaybackStarted(
         turnId,
         messageId,
-        playbackTimeline,
+        latestPlaybackTimeline,
       );
     }, MOTION_AFTER_AUDIO_START_DELAY_MS);
     delayedMotionStartTimers.add(timer);
@@ -185,8 +185,8 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       markMotionFailed: (turnId, messageId, reason) => sessionStore.markMotionFailed(turnId, messageId, reason),
     },
   });
-  adapter.setAudioTimelineStartedHandler((turnId, messageId, playbackTimeline) => {
-    scheduleMotionAfterAudioStart(turnId, messageId, playbackTimeline);
+  adapter.setAudioTimelineStartedHandler((turnId, messageId) => {
+    scheduleMotionAfterAudioStart(turnId, messageId);
   });
   adapter.setMotionPreviewHandler((payload) => {
     const localPlayed = modelEngine.playPreviewPayload(payload);

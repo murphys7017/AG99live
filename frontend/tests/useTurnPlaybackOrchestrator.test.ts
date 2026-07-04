@@ -141,7 +141,16 @@ function createHarness(options: {
   };
   const motionTimelineSink = createModelEngineMotionTimelineSink({
     motionEngine: modelEngine,
-    getActiveAudioTimelineSnapshot: () => activeAudioTimeline,
+    getPlaybackTimelineSnapshotForSegment: (turnId, messageId) => {
+      if (
+        activeAudioTimeline
+        && activeAudioTimeline.turnId === turnId
+        && activeAudioTimeline.messageId === messageId
+      ) {
+        return activeAudioTimeline;
+      }
+      return null;
+    },
   });
 
   scope.run(() => {
@@ -358,6 +367,44 @@ async function testRejectedMotionReleaseMarksSegmentFailed(): Promise<void> {
   h.stop();
 }
 
+async function testMotionWithoutReceivedAtMarksSegmentFailed(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.setActiveSession("turn-motion-missing-time");
+  h.sessionStore.markTurnStarted("turn-motion-missing-time");
+
+  h.sessionStore.markTextReceived("turn-motion-missing-time", "hello", "msg-motion-missing-time");
+  h.sessionStore.markMotionReceived(
+    "turn-motion-missing-time",
+    motionPayload,
+    "msg-motion-missing-time",
+  );
+  const segment = h.sessionStore
+    .getSession("turn-motion-missing-time")
+    ?.segments.get("msg-motion-missing-time");
+  if (!segment) {
+    throw new Error("expected test segment");
+  }
+  segment.motion.receivedAtMs = null;
+  h.sessionStore.markSynthFinished("turn-motion-missing-time");
+  h.sessionStore.markAudioTerminal(
+    "turn-motion-missing-time",
+    "absent",
+    "msg-motion-missing-time",
+    "synth_finished_without_audio_playback",
+  );
+
+  await h.flush();
+  await h.flush();
+
+  assert.equal(segment.motion.released, true);
+  assert.equal(segment.motion.failed, true);
+  assert.equal(segment.motion.reason, "motion_received_at_missing");
+  assert.deepEqual(h.released, [
+    "text:msg-motion-missing-time:turn-motion-missing-time",
+  ]);
+  h.stop();
+}
+
 async function testPerformanceCurveHintIsMergedBeforeMotionRelease(): Promise<void> {
   const h = createHarness();
   h.sessionStore.setActiveSession("turn-curve");
@@ -449,7 +496,7 @@ function testMotionTimelineSinkMarksPreparedTimelineFailedWhenEngineRejects(): v
       },
       notifyCurrentTurnChanged: () => {},
     },
-    getActiveAudioTimelineSnapshot: () => matchingTimelineSnapshot,
+    getPlaybackTimelineSnapshotForSegment: () => matchingTimelineSnapshot,
     prepareMotionTimelineSink: (turnId, messageId) => {
       prepared.push(`${turnId ?? ""}:${messageId}`);
       return true;
@@ -486,7 +533,6 @@ function testMotionTimelineSinkCreatesSyntheticTimelineWhenAudioAbsent(): void {
       },
       notifyCurrentTurnChanged: () => {},
     },
-    getActiveAudioTimelineSnapshot: () => null,
     prepareMotionOnlyTimeline: (turnId, messageId) => {
       preparedMotionOnly.push(`${turnId ?? ""}:${messageId}`);
       return matchingMotionOnlyTimelineSnapshot;
@@ -506,7 +552,6 @@ function testMotionTimelineSinkCreatesSyntheticTimelineWhenAudioAbsent(): void {
 }
 
 function testMotionTimelineSinkUsesSegmentScopedTimelineLookup(): void {
-  const activeTimelineLookupCalls: string[] = [];
   const segmentTimelineLookupCalls: string[] = [];
   const contexts: Array<{
     playbackTimeline?: PlaybackTimelineSnapshot | null;
@@ -518,14 +563,6 @@ function testMotionTimelineSinkUsesSegmentScopedTimelineLookup(): void {
         return true;
       },
       notifyCurrentTurnChanged: () => {},
-    },
-    getActiveAudioTimelineSnapshot: () => {
-      activeTimelineLookupCalls.push("active");
-      return {
-        ...matchingTimelineSnapshot,
-        turnId: "turn-other",
-        messageId: "msg-other",
-      };
     },
     getPlaybackTimelineSnapshotForSegment: (turnId, messageId) => {
       segmentTimelineLookupCalls.push(`${turnId ?? ""}:${messageId}`);
@@ -543,7 +580,6 @@ function testMotionTimelineSinkUsesSegmentScopedTimelineLookup(): void {
   assert.deepEqual(segmentTimelineLookupCalls, [
     "turn-timeline:msg-timeline",
   ]);
-  assert.deepEqual(activeTimelineLookupCalls, []);
   assert.equal(contexts[0].playbackTimeline?.timelineId, "timeline-1");
 }
 
@@ -554,6 +590,7 @@ async function run(): Promise<void> {
   await testMotionReleaseReceivesMatchingAudioTimeline();
   await testMotionReleaseRejectsMismatchedAudioTimeline();
   await testRejectedMotionReleaseMarksSegmentFailed();
+  await testMotionWithoutReceivedAtMarksSegmentFailed();
   await testPerformanceCurveHintIsMergedBeforeMotionRelease();
   await testLateAudioAfterTextReleaseOnlyReleasesAudio();
   testMotionTimelineSinkMarksPreparedTimelineFailedWhenEngineRejects();
