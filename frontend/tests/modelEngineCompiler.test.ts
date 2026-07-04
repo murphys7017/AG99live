@@ -615,6 +615,82 @@ function testMotionStartUsesPlaybackTimelineDuration(): void {
   });
 }
 
+function testMotionStartRejectsAudioUnavailableTimelineForTiming(): void {
+  const profile = buildProfile();
+  const model = buildModel(profile);
+  let resolverCalled = false;
+  let speechFallbackCalled = false;
+  const playedPlans: MotionPlanPayload[] = [];
+
+  const started = startNormalizedMotionPayload(
+    {
+      kind: "semantic_intent",
+      intent: buildIntent(),
+    },
+    {
+      messageId: "msg-audio-unavailable",
+      turnId: "turn-audio-unavailable",
+      playbackTurnId: "turn-audio-unavailable",
+      startReason: "audio_playing_event",
+      queuedDelayMs: 0,
+      playbackTimeline: {
+        timelineId: "timeline-audio-unavailable",
+        turnId: "turn-audio-unavailable",
+        messageId: "msg-audio-unavailable",
+        phase: "playing",
+        clockSource: "audio_unavailable",
+        startedAtMs: 100,
+        currentTimeMs: 300,
+        durationMs: 2400,
+        playbackRate: 1,
+        sinks: [
+          {
+            id: "audio",
+            required: true,
+            terminal: "started",
+          },
+        ],
+      },
+    },
+    {
+      getSelectedModel: () => model,
+      getSettings: () => ({
+        motionIntensityScale: 1,
+        axisIntensityScale: {},
+      }),
+      playPlan: (plan) => {
+        playedPlans.push(plan as MotionPlanPayload);
+        return true;
+      },
+      playCatalogMotion: () => false,
+      getPlayerMessage: () => "audio unavailable timeline rejected",
+    },
+    {
+      resolveMotionTargetDurationMs: () => {
+        resolverCalled = true;
+        return 1800;
+      },
+      isSpeechActiveForPayload: () => {
+        speechFallbackCalled = true;
+        return true;
+      },
+    },
+    {
+      setState: () => {},
+      setLastCompileReason: () => {},
+      setLastCompileDiagnostics: () => {},
+      setLastStartReason: () => {},
+      pushHistory: () => {},
+    },
+  );
+
+  assert.equal(started, true);
+  assert.equal(resolverCalled, false);
+  assert.equal(speechFallbackCalled, false);
+  assert.equal(playedPlans.length, 1);
+  assert.equal(playedPlans[0].timing.duration_ms, 1200);
+}
+
 function testAxisIntensityScaleAffectsOnlyTargetAxis(): void {
   const profile = buildProfile();
   const baseline = compileMotionIntent(buildIntent({
@@ -1186,6 +1262,7 @@ function run(): void {
   testNormalizeMotionPayloadRejectsV3NestedAxes();
   testMotionStartNotifiesStartedWhenPlayerOmitsCallback();
   testMotionStartUsesPlaybackTimelineDuration();
+  testMotionStartRejectsAudioUnavailableTimelineForTiming();
   testExplicitPrimaryAxisIsNotOverwrittenByCoupling();
   testAxisIntensityScaleAffectsOnlyTargetAxis();
   testRevisionMismatchBecomesWarningInsteadOfCompileFailure();

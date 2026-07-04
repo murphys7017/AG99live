@@ -20,6 +20,7 @@ context:
     - Playback timeline sink terminal state is now stable once a sink reaches a terminal value, so late cleanup/completion events cannot overwrite a real failure.
     - Lip sync can only complete after it has explicitly started; if audio ends before lip sync starts, the lip_sync sink fails with lip_sync_not_started_before_audio_end.
     - Timeline snapshots now expose audio_unavailable when an attached audio clock cannot provide a playable audio-time snapshot, keeping text-only synthetic timing separate from audio-clock failures.
+    - ModelEngine no longer consumes audio_unavailable playback timelines for audio-synced duration or speech-active detection, and it will not fall back to SessionStore audio-duration estimates for that failure state.
     - Stopping an already-playing audio segment now writes an audio terminal only when no more specific terminal reason has already been set.
     - The automatic LLM motion path remains pure engine.motion_intent.v3 semantic axes; catalog motion, motion3, exp3, and choice outputs stay out of this path.
     - The automatic motion path is middleware-first only; inline_first / <@anim> is no longer a runtime-selectable motion generation route.
@@ -48,6 +49,7 @@ architecture:
     - PlaybackTimelineEngine ignores late started/terminal events for sinks that are already completed, failed, absent, or interrupted.
     - During early development, fallback behavior should be fail-visible: optional sinks may fail without blocking required playback, but missing capabilities must not be silently reported as started or completed.
     - TimelineClock uses synthetic clock only for explicit no-audio timing; attached audio clock failures are exposed as audio_unavailable rather than hidden behind synthetic.
+    - PlaybackTimeline snapshots with clockSource=audio_unavailable are diagnostic failure contexts, not usable timing sources for motion compilation or speech-following.
     - AdapterConnection exposes setAudioTimelineStartedHandler so PetDesktopRuntime can drive ModelEngine motion wakeup from the real audio timeline started event instead of CompletionCoordinator session watching.
     - Frontend motion ingest context can carry an optional playbackTimeline snapshot; ModelEngine pending scheduler preserves it and motionStart uses it before falling back to sessionStore audio-duration lookup.
     - ModelEngine pending motion entries refresh their playbackTimeline from the AdapterAudioRuntime audio timeline started event when a same turnId/messageId audio timeline is available.

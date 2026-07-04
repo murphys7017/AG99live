@@ -66,6 +66,9 @@ function resolveTimelineTargetDurationMs(
   if (!timeline) {
     return null;
   }
+  if (timeline.clockSource === "audio_unavailable") {
+    return null;
+  }
   const durationMs = timeline.durationMs;
   if (
     typeof durationMs !== "number"
@@ -92,20 +95,32 @@ function resolveMotionTargetDurationMs(
   context: StartPayloadContext,
   runtime: MotionStartRuntimeAccess,
 ): number | null {
-  return resolveTimelineTargetDurationMs(context)
-    ?? runtime.resolveMotionTargetDurationMs(
-      context.messageId,
-      context.turnId,
-      context.playbackTurnId,
-    );
+  const timelineDurationMs = resolveTimelineTargetDurationMs(context);
+  if (timelineDurationMs !== null) {
+    return timelineDurationMs;
+  }
+  if (context.playbackTimeline?.clockSource === "audio_unavailable") {
+    return null;
+  }
+  return runtime.resolveMotionTargetDurationMs(
+    context.messageId,
+    context.turnId,
+    context.playbackTurnId,
+  );
 }
 
 function isSpeechActiveForPayload(
   context: StartPayloadContext,
   runtime: MotionStartRuntimeAccess,
 ): boolean {
-  const timelinePhase = context.playbackTimeline?.phase;
-  if (timelinePhase === "playing" || timelinePhase === "paused") {
+  const timeline = context.playbackTimeline;
+  if (timeline?.clockSource === "audio_unavailable") {
+    return false;
+  }
+  if (
+    timeline?.clockSource === "audio"
+    && (timeline.phase === "playing" || timeline.phase === "paused")
+  ) {
     return true;
   }
   return runtime.isSpeechActiveForPayload(
