@@ -86,6 +86,10 @@ function attachPlaybackTimelineToMotionContext(
 export function createModelEngineMotionTimelineSink(options: {
   motionEngine: PlaybackTimelineMotionEngine;
   getActiveAudioTimelineSnapshot?: () => PlaybackTimelineSnapshot | null;
+  getPlaybackTimelineSnapshotForSegment?: (
+    turnId: string | null,
+    messageId: string,
+  ) => PlaybackTimelineSnapshot | null;
   prepareMotionTimelineSink?: (
     turnId: string | null,
     messageId: string,
@@ -103,12 +107,26 @@ export function createModelEngineMotionTimelineSink(options: {
 }): PlaybackTimelineMotionSink {
   return {
     start(payload, context) {
+      const getSegmentTimelineSnapshot = () =>
+        options.getPlaybackTimelineSnapshotForSegment?.(
+          context.turnId,
+          context.messageId,
+        ) ?? null;
+      const playbackTimelineSnapshot = options.getPlaybackTimelineSnapshotForSegment
+        ? getSegmentTimelineSnapshot()
+        : options.getActiveAudioTimelineSnapshot?.();
+      const refreshPreparedTimelineSnapshot =
+        options.prepareMotionTimelineSink && options.getPlaybackTimelineSnapshotForSegment
+          ? getSegmentTimelineSnapshot
+          : options.getPlaybackTimelineSnapshotForSegment
+            ? undefined
+            : options.getActiveAudioTimelineSnapshot;
       const nextContext = attachPlaybackTimelineToMotionContext(
         context,
-        options.getActiveAudioTimelineSnapshot?.(),
+        playbackTimelineSnapshot,
         options.prepareMotionTimelineSink,
         options.prepareMotionOnlyTimeline,
-        options.getActiveAudioTimelineSnapshot,
+        refreshPreparedTimelineSnapshot,
       );
       const accepted = options.motionEngine.ingestNormalizedPayload(
         payload,

@@ -505,6 +505,48 @@ function testMotionTimelineSinkCreatesSyntheticTimelineWhenAudioAbsent(): void {
   assert.equal(contexts[0].playbackTimeline?.clockSource, "synthetic");
 }
 
+function testMotionTimelineSinkUsesSegmentScopedTimelineLookup(): void {
+  const activeTimelineLookupCalls: string[] = [];
+  const segmentTimelineLookupCalls: string[] = [];
+  const contexts: Array<{
+    playbackTimeline?: PlaybackTimelineSnapshot | null;
+  }> = [];
+  const sink = createModelEngineMotionTimelineSink({
+    motionEngine: {
+      ingestNormalizedPayload: (_payload, context) => {
+        contexts.push(context);
+        return true;
+      },
+      notifyCurrentTurnChanged: () => {},
+    },
+    getActiveAudioTimelineSnapshot: () => {
+      activeTimelineLookupCalls.push("active");
+      return {
+        ...matchingTimelineSnapshot,
+        turnId: "turn-other",
+        messageId: "msg-other",
+      };
+    },
+    getPlaybackTimelineSnapshotForSegment: (turnId, messageId) => {
+      segmentTimelineLookupCalls.push(`${turnId ?? ""}:${messageId}`);
+      return matchingTimelineSnapshot;
+    },
+  });
+
+  const accepted = sink.start(motionPayload, {
+    messageId: "msg-timeline",
+    turnId: "turn-timeline",
+    receivedAtMs: 100,
+  });
+
+  assert.equal(accepted, true);
+  assert.deepEqual(segmentTimelineLookupCalls, [
+    "turn-timeline:msg-timeline",
+  ]);
+  assert.deepEqual(activeTimelineLookupCalls, []);
+  assert.equal(contexts[0].playbackTimeline?.timelineId, "timeline-1");
+}
+
 async function run(): Promise<void> {
   await testSegmentsReleaseSequentiallyWithinTurn();
   await testTextAndMotionReleaseWhenAudioIsAbsent();
@@ -516,6 +558,7 @@ async function run(): Promise<void> {
   await testLateAudioAfterTextReleaseOnlyReleasesAudio();
   testMotionTimelineSinkMarksPreparedTimelineFailedWhenEngineRejects();
   testMotionTimelineSinkCreatesSyntheticTimelineWhenAudioAbsent();
+  testMotionTimelineSinkUsesSegmentScopedTimelineLookup();
   console.log("useTurnPlaybackOrchestrator tests passed");
 }
 

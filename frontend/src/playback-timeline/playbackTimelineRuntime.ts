@@ -80,6 +80,10 @@ export interface PlaybackTimelineRuntime {
   ) => void;
   stopActiveTimeline: (reason: string) => void;
   getActiveTimelineSnapshot: () => PlaybackTimelineSnapshot | null;
+  getTimelineSnapshotForSegment: (
+    turnId: string | null,
+    messageId: string,
+  ) => PlaybackTimelineSnapshot | null;
 }
 
 export function createPlaybackTimelineRuntime(
@@ -286,6 +290,16 @@ export function createPlaybackTimelineRuntime(
     return activeTimeline?.engine.getSnapshot() ?? null;
   }
 
+  function getTimelineSnapshotForSegment(
+    turnId: string | null,
+    messageId: string,
+  ): PlaybackTimelineSnapshot | null {
+    if (!isActiveTimeline(turnId, messageId)) {
+      return null;
+    }
+    return activeTimeline?.engine.getSnapshot() ?? null;
+  }
+
   function clearActiveTimelineIfTerminal(): void {
     if (isTimelineTerminalPhase()) {
       activeTimeline = null;
@@ -310,6 +324,7 @@ export function createPlaybackTimelineRuntime(
     markAudioTimelineTerminal,
     stopActiveTimeline,
     getActiveTimelineSnapshot,
+    getTimelineSnapshotForSegment,
   };
 }
 

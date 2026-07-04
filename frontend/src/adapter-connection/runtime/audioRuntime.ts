@@ -126,6 +126,10 @@ export interface AdapterAudioRuntime {
   stopAudioAndSettleAll: (reason: string) => void;
   findActiveAudioSegment: () => ActiveAudioSegment | null;
   getActiveAudioTimelineSnapshot: () => PlaybackTimelineSnapshot | null;
+  getPlaybackTimelineSnapshotForSegment: (
+    turnId: string | null,
+    messageId: string,
+  ) => PlaybackTimelineSnapshot | null;
   prepareMotionOnlyTimeline: (
     turnId: string | null,
     messageId: string,
@@ -166,6 +170,7 @@ export function createAdapterAudioRuntime(
     markAudioTimelineTerminal,
     stopActiveTimeline: stopActiveAudioTimeline,
     getActiveTimelineSnapshot: getActiveAudioTimelineSnapshot,
+    getTimelineSnapshotForSegment: getPlaybackTimelineSnapshotForSegment,
   } = playbackTimelineRuntime;
 
   const audioBridge = {
@@ -454,6 +459,7 @@ export function createAdapterAudioRuntime(
     stopAudioAndSettleAll,
     findActiveAudioSegment,
     getActiveAudioTimelineSnapshot,
+    getPlaybackTimelineSnapshotForSegment,
     prepareMotionOnlyTimeline,
     prepareMotionTimelineSink,
     markMotionTimelineStarted,

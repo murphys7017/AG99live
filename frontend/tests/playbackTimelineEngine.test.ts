@@ -313,6 +313,14 @@ function testPlaybackTimelineRuntimeDoesNotStealMismatchedActiveTimeline(): void
   });
 
   runtime.prepareAudioTimeline("turn-audio", "msg-audio");
+  assert.equal(
+    runtime.getTimelineSnapshotForSegment("turn-motion", "msg-motion"),
+    null,
+  );
+  assert.equal(
+    runtime.getTimelineSnapshotForSegment("turn-audio", "msg-audio")?.messageId,
+    "msg-audio",
+  );
 
   assert.equal(
     runtime.prepareMotionOnlyTimeline("turn-motion", "msg-motion"),
