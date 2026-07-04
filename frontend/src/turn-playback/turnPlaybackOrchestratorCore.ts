@@ -1,3 +1,5 @@
+import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
+
 // Orchestrator startup window: once text/audio are present, keep a wider window
 // for a late motion plan to join the same playback group before releasing.
 export const AUDIO_MOTION_SYNC_WAIT_MS = 820;
@@ -23,6 +25,7 @@ export interface TurnPlaybackReleaseContext {
   messageId: string;
   turnId: string | null;
   receivedAtMs: number;
+  playbackTimeline?: PlaybackTimelineSnapshot | null;
 }
 
 export interface TurnPlaybackOrchestratorCoreOptions {
@@ -144,7 +147,6 @@ export function createTurnPlaybackOrchestratorCore(
       );
       group.textReleased = releasedText;
     }
-    releaseMotion(group, reason);
     if (group.audioReady) {
       const releasedAudio = options.releaseAudio(
         group.messageId,
@@ -152,6 +154,7 @@ export function createTurnPlaybackOrchestratorCore(
       );
       group.audioReady = !releasedAudio;
     }
+    releaseMotion(group, reason);
     log("group released", {
       messageId: group.messageId,
       turnId: group.turnId,

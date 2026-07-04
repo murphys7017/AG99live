@@ -9,6 +9,7 @@ import type {
   InboundPayloadContext,
   MotionRuntimeSchedulerDependencies,
 } from "./contracts.js";
+import type { PlaybackTimelineSnapshot } from "../../playback-timeline/contracts.js";
 import { normalizeTurnId } from "../normalize.js";
 
 export interface PendingInboundMotionPayload {
@@ -17,6 +18,7 @@ export interface PendingInboundMotionPayload {
   turnId: string;
   playbackTurnId: string | null;
   receivedAtMs: number;
+  playbackTimeline: PlaybackTimelineSnapshot | null;
   audioWaitTimer: number;
 }
 
@@ -26,6 +28,7 @@ export interface StartPayloadContext {
   playbackTurnId: string | null;
   startReason: string;
   queuedDelayMs: number;
+  playbackTimeline?: PlaybackTimelineSnapshot | null;
 }
 
 interface MotionRuntimeSchedulerHooks {
@@ -84,6 +87,7 @@ export function createMotionRuntimeScheduler(
       messageId: entry.messageId,
       startReason,
       queuedDelayMs: Math.max(0, Math.round(performance.now() - entry.receivedAtMs)),
+      playbackTimeline: entry.playbackTimeline,
     };
   }
 
@@ -297,6 +301,7 @@ export function createMotionRuntimeScheduler(
         playbackTurnId: normalizedPlaybackTurnId,
         startReason: "missing_turn_id",
         queuedDelayMs: 0,
+        playbackTimeline: context.playbackTimeline ?? null,
       };
       const started = hooks.onStartPayload(payload, startContext);
       if (!started) {
@@ -322,6 +327,7 @@ export function createMotionRuntimeScheduler(
       turnId: normalizedTurnId,
       playbackTurnId: normalizedPlaybackTurnId,
       receivedAtMs: context.receivedAtMs,
+      playbackTimeline: context.playbackTimeline ?? null,
       audioWaitTimer: 0,
     };
 

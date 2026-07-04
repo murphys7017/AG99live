@@ -1,4 +1,5 @@
 import { compileMotionIntent } from "../compiler/compileMotionIntent.js";
+import { MOTION_MIN_REMAINING_AUDIO_MS } from "../constants.js";
 import type { NormalizedMotionPayload } from "../contracts.js";
 import type { CompileDiagnostics } from "../compiler/contracts.js";
 import type { MotionPlanPayload } from "../../types/protocol.js";
@@ -58,6 +59,62 @@ export function startNormalizedMotionPayload(
   return startDirectPlanPayload(payload, context, dependencies, runtime, state);
 }
 
+function resolveTimelineTargetDurationMs(
+  context: StartPayloadContext,
+): number | null {
+  const timeline = context.playbackTimeline;
+  if (!timeline) {
+    return null;
+  }
+  const durationMs = timeline.durationMs;
+  if (
+    typeof durationMs !== "number"
+    || !Number.isFinite(durationMs)
+    || durationMs <= 0
+  ) {
+    return null;
+  }
+
+  if (timeline.phase === "playing" || timeline.phase === "paused") {
+    const currentTimeMs = Number.isFinite(timeline.currentTimeMs)
+      ? Math.max(0, timeline.currentTimeMs)
+      : 0;
+    return Math.max(
+      MOTION_MIN_REMAINING_AUDIO_MS,
+      Math.round(durationMs - currentTimeMs),
+    );
+  }
+
+  return Math.round(durationMs);
+}
+
+function resolveMotionTargetDurationMs(
+  context: StartPayloadContext,
+  runtime: MotionStartRuntimeAccess,
+): number | null {
+  return resolveTimelineTargetDurationMs(context)
+    ?? runtime.resolveMotionTargetDurationMs(
+      context.messageId,
+      context.turnId,
+      context.playbackTurnId,
+    );
+}
+
+function isSpeechActiveForPayload(
+  context: StartPayloadContext,
+  runtime: MotionStartRuntimeAccess,
+): boolean {
+  const timelinePhase = context.playbackTimeline?.phase;
+  if (timelinePhase === "playing" || timelinePhase === "paused") {
+    return true;
+  }
+  return runtime.isSpeechActiveForPayload(
+    context.messageId,
+    context.turnId,
+    context.playbackTurnId,
+  );
+}
+
 function startCatalogMotionPayload(
   payload: Extract<NormalizedMotionPayload, { kind: "catalog_motion" }>,
   context: StartPayloadContext,
@@ -109,19 +166,11 @@ function startSemanticIntentPayload(
   }
 
   state.setState("compiling", "正在编译动作意图...", null);
-  const targetDurationMs = runtime.resolveMotionTargetDurationMs(
-    context.messageId,
-    context.turnId,
-    context.playbackTurnId,
-  );
+  const targetDurationMs = resolveMotionTargetDurationMs(context, runtime);
   const compileResult = compileMotionIntent(payload.intent, {
     model: selectedModel,
     targetDurationMs,
-    speechActive: runtime.isSpeechActiveForPayload(
-      context.messageId,
-      context.turnId,
-      context.playbackTurnId,
-    ),
+    speechActive: isSpeechActiveForPayload(context, runtime),
     source: context.startReason,
     settings: dependencies.getSettings(),
   });
@@ -215,11 +264,7 @@ function startDirectPlanPayload(
     selectedModel,
     {
       softHandoff: true,
-      targetDurationMs: runtime.resolveMotionTargetDurationMs(
-        context.messageId,
-        context.turnId,
-        context.playbackTurnId,
-      ),
+      targetDurationMs: resolveMotionTargetDurationMs(context, runtime),
       onStarted: (plan, runId) => {
         notifiedStarted = true;
         dependencies.onPlanStarted?.({

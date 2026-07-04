@@ -139,6 +139,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     playbackRelease: {
       releaseAssistantTextForPlayback: adapter.releaseAssistantTextForPlayback,
       releaseAudioForPlayback: adapter.releaseAudioForPlayback,
+      getActiveAudioTimelineSnapshot: adapter.getActiveAudioTimelineSnapshot,
     },
     motionPayload: {
       ingestNormalizedPayload: modelEngine.ingestNormalizedPayload,

@@ -3,6 +3,7 @@ import type {
   SemanticMotionIntent,
   SemanticParameterPlan,
 } from "../types/protocol";
+import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
 
 export type NormalizedMotionPayload =
   | { kind: "catalog_motion"; motion: CatalogMotionPayload }
@@ -14,4 +15,5 @@ export interface InboundPayloadContext {
   turnId: string | null;
   playbackTurnId?: string | null;
   receivedAtMs: number;
+  playbackTimeline?: PlaybackTimelineSnapshot | null;
 }

@@ -4,7 +4,7 @@ import { normalizeMotionPayload } from "../src/model-engine/normalize.js";
 import { startNormalizedMotionPayload } from "../src/model-engine/runtime/motionStart.js";
 import { buildSpeechOnlyMotionPayload } from "../src/model-engine/runtime/speechOnlyMotion.js";
 import { listCompileStageRegistrations } from "../src/model-engine/compiler/registry.js";
-import type { ModelSummary, SemanticMotionIntent } from "../src/types/protocol.js";
+import type { ModelSummary, MotionPlanPayload, SemanticMotionIntent } from "../src/types/protocol.js";
 import type { SemanticAxisProfile } from "../src/types/semantic-axis-profile.js";
 import type { ModelEnginePlanStartedEvent } from "../src/model-engine/runtime/contracts.js";
 
@@ -526,6 +526,94 @@ function testMotionStartNotifiesStartedWhenPlayerOmitsCallback(): void {
   assert.equal(stateChanges.at(-1)?.status, "playing");
 }
 
+function testMotionStartUsesPlaybackTimelineDuration(): void {
+  const profile = buildProfile();
+  const model = buildModel(profile);
+  let resolverCalled = false;
+  const playedPlans: MotionPlanPayload[] = [];
+
+  const started = startNormalizedMotionPayload(
+    {
+      kind: "semantic_intent",
+      intent: buildIntent({
+        performance_curve_hint: {
+          schema_version: "ag99.performance_curve_hint.v1",
+          curve_family: "quick_in_hold_soft_out",
+          entry: "quick",
+          hold: "steady",
+          exit: "soft",
+          emphasis: "early",
+          energy: "medium",
+        },
+      }),
+    },
+    {
+      messageId: "msg-timeline",
+      turnId: "turn-timeline",
+      playbackTurnId: "turn-timeline",
+      startReason: "audio_playing_event",
+      queuedDelayMs: 0,
+      playbackTimeline: {
+        timelineId: "timeline-1",
+        turnId: "turn-timeline",
+        messageId: "msg-timeline",
+        phase: "playing",
+        clockSource: "audio",
+        startedAtMs: 100,
+        currentTimeMs: 300,
+        durationMs: 2400,
+        playbackRate: 1,
+        sinks: [
+          {
+            id: "audio",
+            required: true,
+            terminal: "started",
+          },
+        ],
+      },
+    },
+    {
+      getSelectedModel: () => model,
+      getSettings: () => ({
+        motionIntensityScale: 1,
+        axisIntensityScale: {},
+      }),
+      playPlan: (plan) => {
+        playedPlans.push(plan as MotionPlanPayload);
+        return true;
+      },
+      playCatalogMotion: () => false,
+      getPlayerMessage: () => "timeline duration applied",
+    },
+    {
+      resolveMotionTargetDurationMs: () => {
+        resolverCalled = true;
+        return null;
+      },
+      isSpeechActiveForPayload: () => false,
+    },
+    {
+      setState: () => {},
+      setLastCompileReason: () => {},
+      setLastCompileDiagnostics: () => {},
+      setLastStartReason: () => {},
+      pushHistory: () => {},
+    },
+  );
+
+  assert.equal(started, true);
+  assert.equal(resolverCalled, false);
+  const playedPlan = playedPlans[0];
+  assert.ok(playedPlan);
+  assert.equal(playedPlan?.timing.duration_ms, 2100);
+  assert.deepEqual(playedPlan?.timing, {
+    duration_ms: 2100,
+    blend_in_ms: 210,
+    hold_ms: 1428,
+    blend_out_ms: 462,
+  });
+}
+
 function testAxisIntensityScaleAffectsOnlyTargetAxis(): void {
   const profile = buildProfile();
   const baseline = compileMotionIntent(buildIntent({
@@ -1043,6 +1131,7 @@ function run(): void {
   testNormalizeMotionPayloadAcceptsPerformanceCurveHint();
   testNormalizeMotionPayloadRejectsV3NestedAxes();
   testMotionStartNotifiesStartedWhenPlayerOmitsCallback();
+  testMotionStartUsesPlaybackTimelineDuration();
   testExplicitPrimaryAxisIsNotOverwrittenByCoupling();
   testAxisIntensityScaleAffectsOnlyTargetAxis();
   testRevisionMismatchBecomesWarningInsteadOfCompileFailure();

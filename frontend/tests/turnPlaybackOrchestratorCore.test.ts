@@ -94,8 +94,8 @@ function testTextAudioMotionReadyReleaseTogether(): void {
 
   assert.deepEqual(harness.events, [
     "text:msg-1:turn-1",
-    "motion:motion-1:msg-1:turn-1",
     "audio:msg-1:turn-1",
+    "motion:motion-1:msg-1:turn-1",
   ]);
 }
 
@@ -114,8 +114,8 @@ function testAudioWaitsForLateMotionWithinWindow(): void {
   harness.core.markMotionReady("msg-1", "turn-1", "motion-1", 100);
   assert.deepEqual(harness.events, [
     "text:msg-1:turn-1",
-    "motion:motion-1:msg-1:turn-1",
     "audio:msg-1:turn-1",
+    "motion:motion-1:msg-1:turn-1",
   ]);
 }
 
@@ -238,8 +238,8 @@ function testSameMessageIdDifferentTurnsDoNotShareGroup(): void {
 
   assert.deepEqual(harness.events, [
     "text:msg-1:turn-b",
-    "motion:motion-b:msg-1:turn-b",
     "audio:msg-1:turn-b",
+    "motion:motion-b:msg-1:turn-b",
   ]);
 }
 
