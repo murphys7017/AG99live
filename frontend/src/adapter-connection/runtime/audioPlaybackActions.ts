@@ -29,35 +29,35 @@ export interface AudioPlaybackSessionStore {
 export interface AudioPlaybackContext {
   state: AudioPlaybackState;
   audioSink: PlaybackTimelineAudioSink;
-  prepareAudioTimeline?: (turnId: string | null, messageId: string) => void;
-  markAudioTimelineDuration?: (
+  prepareAudioTimeline: (turnId: string | null, messageId: string) => void;
+  markAudioTimelineDuration: (
     turnId: string | null,
     messageId: string,
     durationMs: number | null,
   ) => void;
-  markAudioTimelineStarted?: (
+  markAudioTimelineStarted: (
     turnId: string | null,
     messageId: string,
     startedAtMs: number,
     durationMs: number | null,
   ) => void;
-  markLipSyncTimelineStarted?: (
+  markLipSyncTimelineStarted: (
     turnId: string | null,
     messageId: string,
   ) => void;
-  markLipSyncTimelineTerminal?: (
-    turnId: string | null,
-    messageId: string,
-    terminal: "completed" | "failed" | "interrupted",
-    reason: string,
-  ) => void;
-  markAudioTimelineTerminal?: (
+  markLipSyncTimelineTerminal: (
     turnId: string | null,
     messageId: string,
     terminal: "completed" | "failed" | "interrupted",
     reason: string,
   ) => void;
-  stopActiveAudioTimeline?: (reason: string) => void;
+  markAudioTimelineTerminal: (
+    turnId: string | null,
+    messageId: string,
+    terminal: "completed" | "failed" | "interrupted",
+    reason: string,
+  ) => void;
+  stopActiveAudioTimeline: (reason: string) => void;
   pushHistory: (role: string, text: string) => void;
   markTerminal: (
     terminalState: "completed" | "failed" | "absent",
@@ -77,7 +77,7 @@ export async function playAudioAndAcknowledge(
 ): Promise<void> {
   stopAudioPlayback(ctx);
   ctx.resetTerminal();
-  ctx.prepareAudioTimeline?.(turnId, messageId);
+  ctx.prepareAudioTimeline(turnId, messageId);
   ctx.state.isPlayingAudio = true;
   ctx.state.audioPlaybackStartedTurnId = turnId;
   ctx.state.audioPlaybackStartedMessageId = messageId;
@@ -92,13 +92,13 @@ export async function playAudioAndAcknowledge(
         ctx.pushHistory("system", "嘴型同步加载失败，音频播放将无对应张嘴动作。");
       },
       onLipSyncStarted: () => {
-        ctx.markLipSyncTimelineStarted?.(
+        ctx.markLipSyncTimelineStarted(
           turnId,
           messageId,
         );
       },
       onLipSyncTerminal: (terminal, reason) => {
-        ctx.markLipSyncTimelineTerminal?.(
+        ctx.markLipSyncTimelineTerminal(
           turnId,
           messageId,
           terminal,
@@ -107,7 +107,7 @@ export async function playAudioAndAcknowledge(
       },
       onDurationChanged: (durationMs) => {
         ctx.state.audioPlaybackDurationMs = durationMs;
-        ctx.markAudioTimelineDuration?.(
+        ctx.markAudioTimelineDuration(
           turnId,
           messageId,
           durationMs,
@@ -122,7 +122,7 @@ export async function playAudioAndAcknowledge(
         ctx.state.audioPlaybackStartedTurnId = turnId;
         ctx.state.audioPlaybackStartedMessageId = messageId;
         ctx.state.audioPlaybackStartedAtMs = event.startedAtMs;
-        ctx.markAudioTimelineStarted?.(
+        ctx.markAudioTimelineStarted(
           turnId,
           messageId,
           event.startedAtMs,
@@ -155,7 +155,7 @@ export async function playAudioAndAcknowledge(
           "audio_playback_completed",
           completedMessageId,
         );
-        ctx.markAudioTimelineTerminal?.(
+        ctx.markAudioTimelineTerminal(
           completedTurnId,
           completedMessageId,
           "completed",
@@ -177,7 +177,7 @@ export async function playAudioAndAcknowledge(
           "audio_playback_error",
           failedMessageId,
         );
-        ctx.markAudioTimelineTerminal?.(
+        ctx.markAudioTimelineTerminal(
           failedTurnId,
           failedMessageId,
           "failed",
@@ -201,7 +201,7 @@ export async function playAudioAndAcknowledge(
       "audio_autoplay_blocked",
       messageId,
     );
-    ctx.markAudioTimelineTerminal?.(
+    ctx.markAudioTimelineTerminal(
       turnId,
       messageId,
       "failed",
@@ -223,21 +223,21 @@ export function stopAudioPlayback(ctx: AudioPlaybackContext): void {
       "audio_playback_stopped",
       interruptedMessageId,
     );
-    ctx.markAudioTimelineTerminal?.(
+    ctx.markAudioTimelineTerminal(
       interruptedTurnId,
       interruptedMessageId,
       "interrupted",
       "audio_playback_stopped",
     );
   } else if (interruptedMessageId) {
-    ctx.markAudioTimelineTerminal?.(
+    ctx.markAudioTimelineTerminal(
       interruptedTurnId,
       interruptedMessageId,
       "interrupted",
       ctx.state.audioPlaybackTerminalReason || "audio_playback_stopped",
     );
   } else {
-    ctx.stopActiveAudioTimeline?.("audio_playback_stopped");
+    ctx.stopActiveAudioTimeline("audio_playback_stopped");
   }
   ctx.state.isPlayingAudio = false;
   ctx.state.audioPlaybackStartedTurnId = null;

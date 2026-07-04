@@ -44,19 +44,19 @@ function matchesMotionContext(
 
 function attachPlaybackTimelineToMotionContext(
   context: PlaybackTimelineMotionContext,
-  snapshot: PlaybackTimelineSnapshot | null | undefined,
-  prepareMotionTimeline?: (
+  snapshot: PlaybackTimelineSnapshot | null,
+  prepareMotionTimeline: (
     turnId: string | null,
     messageId: string,
   ) => boolean,
-  prepareMotionOnlyTimeline?: (
+  prepareMotionOnlyTimeline: (
     turnId: string | null,
     messageId: string,
   ) => PlaybackTimelineSnapshot | null,
-  getActiveTimelineSnapshot?: () => PlaybackTimelineSnapshot | null,
+  getActiveTimelineSnapshot: () => PlaybackTimelineSnapshot | null,
 ): PlaybackTimelineMotionContext {
   if (snapshot && matchesMotionContext(snapshot, context)) {
-    if (prepareMotionTimeline && !prepareMotionTimeline(context.turnId, context.messageId)) {
+    if (!prepareMotionTimeline(context.turnId, context.messageId)) {
       return {
         ...context,
         playbackTimeline: null,
@@ -64,7 +64,7 @@ function attachPlaybackTimelineToMotionContext(
     }
     return {
       ...context,
-      playbackTimeline: getActiveTimelineSnapshot?.() ?? snapshot,
+      playbackTimeline: getActiveTimelineSnapshot() ?? snapshot,
     };
   }
 
@@ -75,7 +75,7 @@ function attachPlaybackTimelineToMotionContext(
     };
   }
 
-  const motionOnlyTimeline = prepareMotionOnlyTimeline?.(
+  const motionOnlyTimeline = prepareMotionOnlyTimeline(
     context.turnId,
     context.messageId,
   );
@@ -93,15 +93,15 @@ function attachPlaybackTimelineToMotionContext(
 
 export function createModelEngineMotionTimelineSink(options: {
   motionEngine: PlaybackTimelineMotionEngine;
-  getPlaybackTimelineSnapshotForSegment?: (
+  getPlaybackTimelineSnapshotForSegment: (
     turnId: string | null,
     messageId: string,
   ) => PlaybackTimelineSnapshot | null;
-  prepareMotionTimelineSink?: (
+  prepareMotionTimelineSink: (
     turnId: string | null,
     messageId: string,
   ) => boolean;
-  prepareMotionOnlyTimeline?: (
+  prepareMotionOnlyTimeline: (
     turnId: string | null,
     messageId: string,
   ) => PlaybackTimelineSnapshot | null;
@@ -115,21 +115,17 @@ export function createModelEngineMotionTimelineSink(options: {
   return {
     start(payload, context) {
       const getSegmentTimelineSnapshot = () =>
-        options.getPlaybackTimelineSnapshotForSegment?.(
+        options.getPlaybackTimelineSnapshotForSegment(
           context.turnId,
           context.messageId,
-        ) ?? null;
+        );
       const playbackTimelineSnapshot = getSegmentTimelineSnapshot();
-      const refreshPreparedTimelineSnapshot =
-        options.prepareMotionTimelineSink && options.getPlaybackTimelineSnapshotForSegment
-          ? getSegmentTimelineSnapshot
-          : undefined;
       const nextContext = attachPlaybackTimelineToMotionContext(
         context,
         playbackTimelineSnapshot,
         options.prepareMotionTimelineSink,
         options.prepareMotionOnlyTimeline,
-        refreshPreparedTimelineSnapshot,
+        getSegmentTimelineSnapshot,
       );
       if (context.timelineMode === "motion_only" && !nextContext.playbackTimeline) {
         options.markMotionTimelineTerminal(

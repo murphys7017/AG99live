@@ -80,6 +80,14 @@ function createAcceptingTimelineRuntime() {
   };
 }
 
+function createMissingMotionTimelineWiring() {
+  return {
+    getPlaybackTimelineSnapshotForSegment: () => null,
+    prepareMotionTimelineSink: () => false,
+    prepareMotionOnlyTimeline: () => null,
+  };
+}
+
 function createHarness(options: {
   motionAccepted?: boolean;
   audioTimelineAfterRelease?: PlaybackTimelineSnapshot | null;
@@ -160,6 +168,7 @@ function createHarness(options: {
       }
       return null;
     },
+    prepareMotionTimelineSink: () => true,
     prepareMotionOnlyTimeline: (turnId, messageId) => ({
       ...matchingMotionOnlyTimelineSnapshot,
       timelineId: `timeline-motion-only:${turnId ?? ""}:${messageId}`,
@@ -518,6 +527,7 @@ function testMotionTimelineSinkMarksPreparedTimelineFailedWhenEngineRejects(): v
       prepared.push(`${turnId ?? ""}:${messageId}`);
       return true;
     },
+    prepareMotionOnlyTimeline: () => null,
     markMotionTimelineTerminal: (turnId, messageId, terminal, reason) => {
       terminals.push(`${turnId ?? ""}:${messageId}:${terminal}:${reason}`);
     },
@@ -550,6 +560,10 @@ function testMotionTimelineSinkCreatesSyntheticTimelineWhenAudioAbsent(): void {
       },
       notifyCurrentTurnChanged: () => {},
     },
+    getPlaybackTimelineSnapshotForSegment:
+      createMissingMotionTimelineWiring().getPlaybackTimelineSnapshotForSegment,
+    prepareMotionTimelineSink:
+      createMissingMotionTimelineWiring().prepareMotionTimelineSink,
     prepareMotionOnlyTimeline: (turnId, messageId) => {
       preparedMotionOnly.push(`${turnId ?? ""}:${messageId}`);
       return matchingMotionOnlyTimelineSnapshot;
@@ -583,6 +597,10 @@ function testMotionTimelineSinkDoesNotGuessSyntheticTimeline(): void {
       },
       notifyCurrentTurnChanged: () => {},
     },
+    getPlaybackTimelineSnapshotForSegment:
+      createMissingMotionTimelineWiring().getPlaybackTimelineSnapshotForSegment,
+    prepareMotionTimelineSink:
+      createMissingMotionTimelineWiring().prepareMotionTimelineSink,
     prepareMotionOnlyTimeline: (turnId, messageId) => {
       preparedMotionOnly.push(`${turnId ?? ""}:${messageId}`);
       return matchingMotionOnlyTimelineSnapshot;
@@ -614,6 +632,10 @@ function testMotionTimelineSinkRejectsMissingMotionOnlyTimeline(): void {
       },
       notifyCurrentTurnChanged: () => {},
     },
+    getPlaybackTimelineSnapshotForSegment:
+      createMissingMotionTimelineWiring().getPlaybackTimelineSnapshotForSegment,
+    prepareMotionTimelineSink:
+      createMissingMotionTimelineWiring().prepareMotionTimelineSink,
     prepareMotionOnlyTimeline: () => null,
     markMotionTimelineTerminal: (turnId, messageId, terminal, reason) => {
       terminals.push(`${turnId ?? ""}:${messageId}:${terminal}:${reason}`);
@@ -651,6 +673,8 @@ function testMotionTimelineSinkUsesSegmentScopedTimelineLookup(): void {
       segmentTimelineLookupCalls.push(`${turnId ?? ""}:${messageId}`);
       return matchingTimelineSnapshot;
     },
+    prepareMotionTimelineSink: () => true,
+    prepareMotionOnlyTimeline: () => null,
     markMotionTimelineTerminal: () => {},
   });
 
@@ -662,6 +686,7 @@ function testMotionTimelineSinkUsesSegmentScopedTimelineLookup(): void {
 
   assert.equal(accepted, true);
   assert.deepEqual(segmentTimelineLookupCalls, [
+    "turn-timeline:msg-timeline",
     "turn-timeline:msg-timeline",
   ]);
   assert.equal(contexts[0].playbackTimeline?.timelineId, "timeline-1");
