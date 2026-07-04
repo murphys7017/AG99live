@@ -404,7 +404,7 @@ function testAudioStartMotionBridgeRefreshesTimelineAtFireTime(): void {
     },
     clearSchedule: () => {},
     getPlaybackTimelineSnapshotForSegment: () => snapshot,
-    startMotionForAudioTimeline: (_turnId, _messageId, playbackTimeline) => {
+    handlePlaybackTimelineStarted: (_turnId, _messageId, playbackTimeline) => {
       if (playbackTimeline) {
         started.push(playbackTimeline);
       }
@@ -432,7 +432,7 @@ function testAudioStartMotionBridgeCanCancelPendingWakeup(): void {
       cleared.push(timer);
     },
     getPlaybackTimelineSnapshotForSegment: () => buildTimelineSnapshot(0),
-    startMotionForAudioTimeline: () => {
+    handlePlaybackTimelineStarted: () => {
       started = true;
     },
   });
@@ -456,7 +456,7 @@ function testAudioStartMotionBridgeSkipsStaleSegment(): void {
     clearSchedule: () => {},
     canStartMotionForAudioTimeline: () => false,
     getPlaybackTimelineSnapshotForSegment: () => buildTimelineSnapshot(0),
-    startMotionForAudioTimeline: () => {
+    handlePlaybackTimelineStarted: () => {
       started = true;
     },
   });
@@ -465,6 +465,32 @@ function testAudioStartMotionBridgeSkipsStaleSegment(): void {
   scheduled[0]?.();
 
   assert.equal(started, false);
+}
+
+function testAudioStartMotionBridgeReportsMissingTimeline(): void {
+  const scheduled: Array<() => void> = [];
+  let started = false;
+  const missing: Array<{ turnId: string; messageId: string }> = [];
+  const bridge = createAudioStartMotionTimelineBridge({
+    schedule: (_delayMs, fn) => {
+      scheduled.push(fn);
+      return "timer-missing";
+    },
+    clearSchedule: () => {},
+    getPlaybackTimelineSnapshotForSegment: () => null,
+    onMissingPlaybackTimeline: (turnId, messageId) => {
+      missing.push({ turnId, messageId });
+    },
+    handlePlaybackTimelineStarted: () => {
+      started = true;
+    },
+  });
+
+  bridge.handleAudioTimelineStarted("turn-audio", "msg-audio");
+  scheduled[0]?.();
+
+  assert.equal(started, false);
+  assert.deepEqual(missing, [{ turnId: "turn-audio", messageId: "msg-audio" }]);
 }
 
 function run(): void {
@@ -484,6 +510,7 @@ function run(): void {
   testAudioStartMotionBridgeRefreshesTimelineAtFireTime();
   testAudioStartMotionBridgeCanCancelPendingWakeup();
   testAudioStartMotionBridgeSkipsStaleSegment();
+  testAudioStartMotionBridgeReportsMissingTimeline();
   console.log("playbackTimelineEngine tests passed");
 }
 

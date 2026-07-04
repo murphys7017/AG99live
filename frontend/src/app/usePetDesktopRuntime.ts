@@ -168,11 +168,19 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       );
     },
     getPlaybackTimelineSnapshotForSegment: adapter.getPlaybackTimelineSnapshotForSegment,
-    startMotionForAudioTimeline: (turnId, messageId, playbackTimeline) =>
-      modelEngine.notifyAudioPlaybackStarted(
+    onMissingPlaybackTimeline: (turnId, messageId) => {
+      console.error("[AG99live] audio timeline started without matching playback timeline.", {
         turnId,
         messageId,
-        playbackTimeline,
+      });
+    },
+    handlePlaybackTimelineStarted: (turnId, messageId, playbackTimeline) =>
+      modelEngine.handlePlaybackTimelineStarted(
+        {
+          ...playbackTimeline,
+          turnId,
+          messageId,
+        },
       ),
   });
   adapter.setAudioTimelineStartedHandler((turnId, messageId) => {

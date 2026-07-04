@@ -40,23 +40,6 @@ function setState(
   state.lastCompileDiagnostics = diagnostics;
 }
 
-function normalizePlaybackTurnId(turnId: string | null): string | null {
-  const normalized = typeof turnId === "string" ? turnId.trim() : "";
-  return normalized || null;
-}
-
-function matchesPlaybackTimeline(
-  timeline: PlaybackTimelineSnapshot | null,
-  turnId: string | null,
-  messageId: string,
-): boolean {
-  return Boolean(
-    timeline
-    && timeline.messageId === messageId
-    && normalizePlaybackTurnId(timeline.turnId) === normalizePlaybackTurnId(turnId),
-  );
-}
-
 export function useModelEngine(dependencies: ModelEngineDependencies) {
   function pushHistory(
     role: ModelEngineHistoryRole,
@@ -106,10 +89,6 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         payload,
         context,
         motionStartDependencies,
-        {
-          resolveMotionTargetDurationMs: runtimeScheduler.resolveMotionTargetDurationMs,
-          isSpeechActiveForPayload: runtimeScheduler.isSpeechActiveForPayload,
-        },
         runtimeStateController,
       ),
     onStartFailed: (context: StartPayloadContext) => {
@@ -147,24 +126,26 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     return true;
   }
 
-  function notifyAudioPlaybackStarted(
-    turnId: string | null,
-    messageId: string | null = null,
-    playbackTimeline: PlaybackTimelineSnapshot | null = null,
+  function handlePlaybackTimelineStarted(
+    playbackTimeline: PlaybackTimelineSnapshot,
   ): boolean {
     const queuedMotionStarted =
-      runtimeScheduler.notifyAudioPlaybackStarted(
-        turnId,
-        messageId,
-        playbackTimeline,
-      );
+      runtimeScheduler.handlePlaybackTimelineStarted(playbackTimeline);
     if (queuedMotionStarted) {
       return true;
     }
 
     const normalizedMessageId =
-      typeof messageId === "string" ? messageId.trim() : "";
+      typeof playbackTimeline.messageId === "string"
+        ? playbackTimeline.messageId.trim()
+        : "";
     if (!normalizedMessageId) {
+      return false;
+    }
+    if (
+      playbackTimeline.clockSource !== "audio"
+      || (playbackTimeline.phase !== "playing" && playbackTimeline.phase !== "paused")
+    ) {
       return false;
     }
     const speechOnlyPayload = buildSpeechOnlyMotionPayload(
@@ -178,23 +159,13 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       speechOnlyPayload,
       {
         messageId: normalizedMessageId,
-        turnId,
-        playbackTurnId: turnId,
+        turnId: playbackTimeline.turnId,
+        playbackTurnId: playbackTimeline.turnId,
         startReason: "speech_only",
         queuedDelayMs: 0,
-        playbackTimeline: matchesPlaybackTimeline(
-          playbackTimeline,
-          turnId,
-          normalizedMessageId,
-        )
-          ? playbackTimeline
-          : null,
+        playbackTimeline,
       },
       motionStartDependencies,
-      {
-        resolveMotionTargetDurationMs: runtimeScheduler.resolveMotionTargetDurationMs,
-        isSpeechActiveForPayload: runtimeScheduler.isSpeechActiveForPayload,
-      },
       runtimeStateController,
     );
   }
@@ -220,10 +191,6 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         queuedDelayMs: 0,
       },
       motionStartDependencies,
-      {
-        resolveMotionTargetDurationMs: runtimeScheduler.resolveMotionTargetDurationMs,
-        isSpeechActiveForPayload: runtimeScheduler.isSpeechActiveForPayload,
-      },
       runtimeStateController,
     );
   }
@@ -245,7 +212,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     state: readonly(state),
     ingestInboundPayload,
     ingestNormalizedPayload,
-    notifyAudioPlaybackStarted,
+    handlePlaybackTimelineStarted,
     notifyCurrentTurnChanged,
     playPreviewPayload,
     stop,

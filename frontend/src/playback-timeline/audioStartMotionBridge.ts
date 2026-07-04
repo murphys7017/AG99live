@@ -14,10 +14,14 @@ export interface AudioStartMotionTimelineBridgeDeps {
     turnId: string,
     messageId: string,
   ) => PlaybackTimelineSnapshot | null;
-  startMotionForAudioTimeline: (
+  onMissingPlaybackTimeline?: (
     turnId: string,
     messageId: string,
-    playbackTimeline: PlaybackTimelineSnapshot | null,
+  ) => void;
+  handlePlaybackTimelineStarted: (
+    turnId: string,
+    messageId: string,
+    playbackTimeline: PlaybackTimelineSnapshot,
   ) => boolean | void;
 }
 
@@ -62,7 +66,14 @@ export function createAudioStartMotionTimelineBridge(
         normalizedTurnId,
         normalizedMessageId,
       );
-      deps.startMotionForAudioTimeline(
+      if (!latestPlaybackTimeline) {
+        deps.onMissingPlaybackTimeline?.(
+          normalizedTurnId,
+          normalizedMessageId,
+        );
+        return;
+      }
+      deps.handlePlaybackTimelineStarted(
         normalizedTurnId,
         normalizedMessageId,
         latestPlaybackTimeline,

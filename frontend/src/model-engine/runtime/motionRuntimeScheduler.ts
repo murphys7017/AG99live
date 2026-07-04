@@ -1,5 +1,4 @@
 import {
-  MOTION_MIN_REMAINING_AUDIO_MS,
   MOTION_SYNC_WAIT_FOR_AUDIO_MS,
 } from "../constants.js";
 import type {
@@ -56,6 +55,24 @@ function matchesPlaybackTimeline(
     entry.messageId === snapshot.messageId
     && normalizeTurnId(entry.turnId) === normalizeTurnId(snapshot.turnId)
   );
+}
+
+function canStartFromPlaybackTimeline(
+  snapshot: PlaybackTimelineSnapshot,
+): boolean {
+  if (snapshot.clockSource === "synthetic") {
+    return true;
+  }
+  return (
+    snapshot.clockSource === "audio"
+    && (snapshot.phase === "playing" || snapshot.phase === "paused")
+  );
+}
+
+function isTimelineUnavailable(
+  snapshot: PlaybackTimelineSnapshot,
+): boolean {
+  return snapshot.clockSource === "audio_unavailable";
 }
 
 export function createMotionRuntimeScheduler(
@@ -117,164 +134,6 @@ export function createMotionRuntimeScheduler(
     syncPendingState();
   }
 
-  function findStartedSegment(
-    messageId: string | null,
-    turnId: string | null,
-    playbackTurnId: string | null = null,
-  ) {
-    const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
-    const normalizedTurnId = normalizeTurnId(turnId);
-    const normalizedPlaybackTurnId = normalizeTurnId(playbackTurnId);
-
-    for (const session of [
-      dependencies.sessionStore?.getActiveSession(),
-      dependencies.sessionStore?.getSessionByTurnId?.(turnId),
-    ]) {
-      if (!session) {
-        continue;
-      }
-      for (const segmentId of session.segmentOrder) {
-        const segment = session.segments.get(segmentId);
-        if (!segment || !segment.audio.started || segment.audio.terminal !== "idle") {
-          continue;
-        }
-        const segmentTurnId = normalizeTurnId(segment.turnId);
-        if (normalizedMessageId) {
-          const turnMatches = Boolean(
-            (normalizedTurnId && segmentTurnId === normalizedTurnId)
-            || (normalizedPlaybackTurnId && segmentTurnId === normalizedPlaybackTurnId),
-          );
-          if (
-            segment.messageId === normalizedMessageId
-            && (!normalizedTurnId && !normalizedPlaybackTurnId || turnMatches)
-          ) {
-            return segment;
-          }
-          continue;
-        }
-        if (normalizedTurnId && segmentTurnId === normalizedTurnId) {
-          return segment;
-        }
-        if (normalizedPlaybackTurnId && segmentTurnId === normalizedPlaybackTurnId) {
-          return segment;
-        }
-      }
-    }
-    return null;
-  }
-
-  function resolveMotionTargetDurationMs(
-    messageId: string | null,
-    turnId: string | null,
-    playbackTurnId: string | null = null,
-  ): number | null {
-    const startedSegment = findStartedSegment(messageId, turnId, playbackTurnId);
-    const audioStartedAtMs = startedSegment?.audio.startedAtMs;
-    const audioDurationMs = startedSegment?.audio.durationMs;
-    const sessionTurnId = startedSegment?.turnId;
-
-    const normalizedTurnId = normalizeTurnId(turnId);
-    const normalizedSessionTurnId = normalizeTurnId(sessionTurnId ?? null);
-
-    if (
-      (!normalizedTurnId || !normalizedSessionTurnId || normalizedTurnId === normalizedSessionTurnId)
-      && audioStartedAtMs
-      && audioDurationMs
-      && Number.isFinite(audioStartedAtMs)
-      && audioStartedAtMs > 0
-      && Number.isFinite(audioDurationMs)
-      && audioDurationMs > 0
-    ) {
-      const elapsedMs = Math.max(0, performance.now() - audioStartedAtMs);
-      return Math.max(MOTION_MIN_REMAINING_AUDIO_MS, Math.round(audioDurationMs - elapsedMs));
-    }
-
-    return null;
-  }
-
-  function isSpeechActiveForPayload(
-    messageId: string | null,
-    turnId: string | null,
-    playbackTurnId: string | null = null,
-  ): boolean {
-    return findStartedSegment(messageId, turnId, playbackTurnId) !== null;
-  }
-
-  function getSegmentAudioTerminal(
-    messageId: string | null,
-    turnId: string | null,
-    playbackTurnId: string | null = null,
-  ): "idle" | "completed" | "failed" | "absent" | null {
-    const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
-    const normalizedTurnId = normalizeTurnId(turnId);
-    const normalizedPlaybackTurnId = normalizeTurnId(playbackTurnId);
-    if (!normalizedMessageId) {
-      return null;
-    }
-
-    for (const session of [
-      dependencies.sessionStore?.getActiveSession(),
-      dependencies.sessionStore?.getSessionByTurnId?.(turnId),
-    ]) {
-      if (!session) {
-        continue;
-      }
-      for (const segmentId of session.segmentOrder) {
-        const segment = session.segments.get(segmentId);
-        if (!segment || segment.messageId !== normalizedMessageId) {
-          continue;
-        }
-        const segmentTurnId = normalizeTurnId(segment.turnId);
-        const turnMatches = Boolean(
-          (normalizedTurnId && segmentTurnId === normalizedTurnId)
-          || (normalizedPlaybackTurnId && segmentTurnId === normalizedPlaybackTurnId),
-        );
-        if (!normalizedTurnId && !normalizedPlaybackTurnId || turnMatches) {
-          return segment.audio.terminal;
-        }
-      }
-    }
-    return null;
-  }
-
-  function scheduleCurveAudioWait(
-    entry: PendingInboundMotionPayload,
-    pendingKey: string,
-  ): void {
-    entry.audioWaitTimer = window.setTimeout(() => {
-      const latest = pendingInboundMotionPayloads.get(pendingKey);
-      if (!latest || latest !== entry) {
-        return;
-      }
-
-      const targetSession = dependencies.sessionStore?.getSessionByTurnId?.(entry.turnId);
-      const currentTurnId = normalizeTurnId(dependencies.getCurrentTurnId());
-      if (!targetSession && currentTurnId && currentTurnId !== entry.turnId) {
-        dropPendingPayload(entry, "stale_turn_dropped");
-        syncPendingState();
-        return;
-      }
-
-      const terminal = getSegmentAudioTerminal(
-        entry.messageId,
-        entry.turnId,
-        entry.playbackTurnId,
-      );
-      if (terminal === null) {
-        dropPendingPayload(entry, "missing_audio_segment_before_curve_motion_start");
-        syncPendingState();
-        return;
-      }
-      if (terminal && terminal !== "idle") {
-        dropPendingPayload(entry, `audio_${terminal}_before_curve_motion_start`);
-        syncPendingState();
-        return;
-      }
-
-      scheduleCurveAudioWait(entry, pendingKey);
-    }, MOTION_SYNC_WAIT_FOR_AUDIO_MS);
-  }
-
   function tryStartPendingPayload(
     turnId: string | null,
     messageId: string,
@@ -299,6 +158,20 @@ export function createMotionRuntimeScheduler(
       hooks.onStartFailed?.(context);
     }
     return started;
+  }
+
+  function failPendingPayloadForTimeline(
+    snapshot: PlaybackTimelineSnapshot,
+    reason: string,
+  ): boolean {
+    const key = buildPendingMotionKey(snapshot.turnId, snapshot.messageId);
+    const entry = pendingInboundMotionPayloads.get(key);
+    if (!entry) {
+      return false;
+    }
+    dropPendingPayload(entry, reason);
+    syncPendingState();
+    return true;
   }
 
   function queueInboundPayload(
@@ -345,6 +218,18 @@ export function createMotionRuntimeScheduler(
       audioWaitTimer: 0,
     };
 
+    if (entry.playbackTimeline && !matchesPlaybackTimeline(entry, entry.playbackTimeline)) {
+      hooks.onStartFailed?.({
+        messageId: entry.messageId,
+        turnId: entry.turnId,
+        playbackTurnId: entry.playbackTurnId,
+        startReason: "playback_timeline_identity_mismatch",
+        queuedDelayMs: 0,
+        playbackTimeline: entry.playbackTimeline,
+      });
+      return;
+    }
+
     entry.audioWaitTimer = window.setTimeout(() => {
       const latest = pendingInboundMotionPayloads.get(pendingKey);
       if (!latest || latest !== entry) {
@@ -355,47 +240,20 @@ export function createMotionRuntimeScheduler(
       const currentTurnId = normalizeTurnId(
         activeSession?.turnId ?? dependencies.getCurrentTurnId(),
       );
-      const currentPlaybackTurnId = currentTurnId;
-      const audioPlaybackTurnId =
-        normalizeTurnId(
-          findStartedSegment(entry.messageId, entry.turnId, entry.playbackTurnId)?.turnId ?? null,
-        );
 
       if (currentTurnId && currentTurnId !== normalizedTurnId) {
-        if (
-          entry.playbackTurnId
-          && (normalizeTurnId(entry.playbackTurnId) === currentPlaybackTurnId
-            || normalizeTurnId(entry.playbackTurnId) === audioPlaybackTurnId)
-        ) {
-          tryStartPendingPayload(entry.turnId, entry.messageId, "wait_audio_timeout_playback_turn_match");
-          return;
-        }
         dropPendingPayload(entry, "stale_turn_dropped");
         syncPendingState();
         return;
       }
 
-      if (hasPerformanceCurveHint(entry.payload)) {
-        const terminal = getSegmentAudioTerminal(
-          entry.messageId,
-          entry.turnId,
-          entry.playbackTurnId,
-        );
-        if (terminal === null) {
-          dropPendingPayload(entry, "missing_audio_segment_before_curve_motion_start");
-          syncPendingState();
-          return;
-        }
-        if (terminal && terminal !== "idle") {
-          dropPendingPayload(entry, `audio_${terminal}_before_curve_motion_start`);
-          syncPendingState();
-          return;
-        }
-        scheduleCurveAudioWait(entry, pendingKey);
-        return;
-      }
-
-      tryStartPendingPayload(entry.turnId, entry.messageId, "wait_audio_timeout");
+      dropPendingPayload(
+        entry,
+        hasPerformanceCurveHint(entry.payload)
+          ? "playback_timeline_missing_before_curve_motion_start"
+          : "playback_timeline_missing_before_motion_start",
+      );
+      syncPendingState();
     }, MOTION_SYNC_WAIT_FOR_AUDIO_MS);
 
     pendingInboundMotionPayloads.set(pendingKey, entry);
@@ -408,72 +266,49 @@ export function createMotionRuntimeScheduler(
       pendingCount: pendingInboundMotionPayloads.size,
     });
 
-    const startedSegment = findStartedSegment(
-      context.messageId,
-      normalizedTurnId,
-      entry.playbackTurnId,
-    );
-    const activeAudioMessageId =
-      startedSegment?.messageId
-      ?? null;
-
-    if (activeAudioMessageId === context.messageId) {
-      tryStartPendingPayload(entry.turnId, entry.messageId, "audio_already_playing");
+    if (entry.playbackTimeline) {
+      if (isTimelineUnavailable(entry.playbackTimeline)) {
+        failPendingPayloadForTimeline(
+          entry.playbackTimeline,
+          "playback_timeline_audio_unavailable_before_motion_start",
+        );
+        return;
+      }
+      if (canStartFromPlaybackTimeline(entry.playbackTimeline)) {
+        tryStartPendingPayload(
+          entry.turnId,
+          entry.messageId,
+          entry.playbackTimeline.clockSource === "synthetic"
+            ? "motion_only_timeline_ready"
+            : "playback_timeline_ready",
+          entry.playbackTimeline,
+        );
+      }
     }
   }
 
-  function notifyAudioPlaybackStarted(
-    turnId: string | null,
-    messageId: string | null = null,
-    playbackTimeline: PlaybackTimelineSnapshot | null = null,
+  function handlePlaybackTimelineStarted(
+    playbackTimeline: PlaybackTimelineSnapshot,
   ): boolean {
-    const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
-    const normalizedTurnId = normalizeTurnId(turnId);
-    if (normalizedMessageId) {
-      let started = false;
-      if (normalizedTurnId) {
-        started = tryStartPendingPayload(
-          normalizedTurnId,
-          normalizedMessageId,
-          "audio_playing_event",
+    if (!canStartFromPlaybackTimeline(playbackTimeline)) {
+      if (isTimelineUnavailable(playbackTimeline)) {
+        return failPendingPayloadForTimeline(
           playbackTimeline,
+          "playback_timeline_audio_unavailable_before_motion_start",
         );
-      } else {
-        for (const entry of Array.from(pendingInboundMotionPayloads.values())) {
-          if (entry.messageId === normalizedMessageId) {
-            started = tryStartPendingPayload(
-              entry.turnId,
-              entry.messageId,
-              "audio_playing_event",
-              playbackTimeline,
-            ) || started;
-          }
-        }
       }
-      console.info("[ModelEngine] audio playback start notification handled.", {
-        turnId,
-        messageId: normalizedMessageId,
-        started,
-        pendingCount: pendingInboundMotionPayloads.size,
-      });
-      return started;
-    }
-    if (!normalizedTurnId) {
       return false;
     }
-    let started = false;
-    for (const entry of Array.from(pendingInboundMotionPayloads.values())) {
-      if (entry.turnId === normalizedTurnId) {
-        started = tryStartPendingPayload(
-          entry.turnId,
-          entry.messageId,
-          "audio_playing_event",
-          playbackTimeline,
-        ) || started;
-      }
-    }
-    console.info("[ModelEngine] audio playback start notification handled.", {
-      turnId: normalizedTurnId,
+    const started = tryStartPendingPayload(
+      playbackTimeline.turnId,
+      playbackTimeline.messageId,
+      "playback_timeline_started",
+      playbackTimeline,
+    );
+    console.info("[ModelEngine] playback timeline start handled.", {
+      turnId: playbackTimeline.turnId,
+      messageId: playbackTimeline.messageId,
+      timelineId: playbackTimeline.timelineId,
       started,
       pendingCount: pendingInboundMotionPayloads.size,
     });
@@ -497,10 +332,8 @@ export function createMotionRuntimeScheduler(
 
   return {
     queueInboundPayload,
-    notifyAudioPlaybackStarted,
+    handlePlaybackTimelineStarted,
     notifyCurrentTurnChanged,
     clearAllPendingPayloads,
-    resolveMotionTargetDurationMs,
-    isSpeechActiveForPayload,
   };
 }

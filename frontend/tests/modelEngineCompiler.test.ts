@@ -506,10 +506,6 @@ function testMotionStartNotifiesStartedWhenPlayerOmitsCallback(): void {
       },
     },
     {
-      resolveMotionTargetDurationMs: () => null,
-      isSpeechActiveForPayload: () => false,
-    },
-    {
       setState: (status, message) => {
         stateChanges.push({ status, message });
       },
@@ -531,7 +527,6 @@ function testMotionStartNotifiesStartedWhenPlayerOmitsCallback(): void {
 function testMotionStartUsesPlaybackTimelineDuration(): void {
   const profile = buildProfile();
   const model = buildModel(profile);
-  let resolverCalled = false;
   const playedPlans: MotionPlanPayload[] = [];
 
   const started = startNormalizedMotionPayload(
@@ -553,7 +548,7 @@ function testMotionStartUsesPlaybackTimelineDuration(): void {
       messageId: "msg-timeline",
       turnId: "turn-timeline",
       playbackTurnId: "turn-timeline",
-      startReason: "audio_playing_event",
+      startReason: "playback_timeline_started",
       queuedDelayMs: 0,
       playbackTimeline: {
         timelineId: "timeline-1",
@@ -588,13 +583,6 @@ function testMotionStartUsesPlaybackTimelineDuration(): void {
       getPlayerMessage: () => "timeline duration applied",
     },
     {
-      resolveMotionTargetDurationMs: () => {
-        resolverCalled = true;
-        return null;
-      },
-      isSpeechActiveForPayload: () => false,
-    },
-    {
       setState: () => {},
       setLastCompileReason: () => {},
       setLastCompileDiagnostics: () => {},
@@ -604,7 +592,6 @@ function testMotionStartUsesPlaybackTimelineDuration(): void {
   );
 
   assert.equal(started, true);
-  assert.equal(resolverCalled, false);
   const playedPlan = playedPlans[0];
   assert.ok(playedPlan);
   assert.equal(playedPlan?.timing.duration_ms, 2100);
@@ -619,8 +606,6 @@ function testMotionStartUsesPlaybackTimelineDuration(): void {
 function testMotionStartRejectsAudioUnavailableTimelineForTiming(): void {
   const profile = buildProfile();
   const model = buildModel(profile);
-  let resolverCalled = false;
-  let speechFallbackCalled = false;
   const playedPlans: MotionPlanPayload[] = [];
 
   const started = startNormalizedMotionPayload(
@@ -632,7 +617,7 @@ function testMotionStartRejectsAudioUnavailableTimelineForTiming(): void {
       messageId: "msg-audio-unavailable",
       turnId: "turn-audio-unavailable",
       playbackTurnId: "turn-audio-unavailable",
-      startReason: "audio_playing_event",
+      startReason: "playback_timeline_started",
       queuedDelayMs: 0,
       playbackTimeline: {
         timelineId: "timeline-audio-unavailable",
@@ -667,16 +652,6 @@ function testMotionStartRejectsAudioUnavailableTimelineForTiming(): void {
       getPlayerMessage: () => "audio unavailable timeline rejected",
     },
     {
-      resolveMotionTargetDurationMs: () => {
-        resolverCalled = true;
-        return 1800;
-      },
-      isSpeechActiveForPayload: () => {
-        speechFallbackCalled = true;
-        return true;
-      },
-    },
-    {
       setState: () => {},
       setLastCompileReason: () => {},
       setLastCompileDiagnostics: () => {},
@@ -686,8 +661,6 @@ function testMotionStartRejectsAudioUnavailableTimelineForTiming(): void {
   );
 
   assert.equal(started, true);
-  assert.equal(resolverCalled, false);
-  assert.equal(speechFallbackCalled, false);
   assert.equal(playedPlans.length, 1);
   assert.equal(playedPlans[0].timing.duration_ms, 1200);
 }
@@ -695,8 +668,6 @@ function testMotionStartRejectsAudioUnavailableTimelineForTiming(): void {
 function testPerformanceCurveSkipsAudioUnavailableTimeline(): void {
   const profile = buildProfile();
   const model = buildModel(profile);
-  let resolverCalled = false;
-  let speechFallbackCalled = false;
   const playedPlans: MotionPlanPayload[] = [];
   const diagnostics: CompileDiagnostics[] = [];
 
@@ -719,7 +690,7 @@ function testPerformanceCurveSkipsAudioUnavailableTimeline(): void {
       messageId: "msg-curve-unavailable",
       turnId: "turn-curve-unavailable",
       playbackTurnId: "turn-curve-unavailable",
-      startReason: "audio_playing_event",
+      startReason: "playback_timeline_started",
       queuedDelayMs: 0,
       playbackTimeline: {
         timelineId: "timeline-curve-unavailable",
@@ -754,16 +725,6 @@ function testPerformanceCurveSkipsAudioUnavailableTimeline(): void {
       getPlayerMessage: () => "performance curve skipped",
     },
     {
-      resolveMotionTargetDurationMs: () => {
-        resolverCalled = true;
-        return 1800;
-      },
-      isSpeechActiveForPayload: () => {
-        speechFallbackCalled = true;
-        return true;
-      },
-    },
-    {
       setState: () => {},
       setLastCompileReason: () => {},
       setLastCompileDiagnostics: (nextDiagnostics) => {
@@ -777,8 +738,6 @@ function testPerformanceCurveSkipsAudioUnavailableTimeline(): void {
   );
 
   assert.equal(started, true);
-  assert.equal(resolverCalled, false);
-  assert.equal(speechFallbackCalled, false);
   assert.equal(playedPlans.length, 1);
   assert.deepEqual(playedPlans[0].timing, {
     duration_ms: 1200,
@@ -1142,28 +1101,24 @@ function testSpeechOnlyPlaybackUsesTimelineDuration(): void {
     getCurrentTurnId: () => "turn-speech",
   });
 
-  const started = engine.notifyAudioPlaybackStarted(
-    "turn-speech",
-    "msg-speech",
-    {
-      timelineId: "timeline-speech",
-      turnId: "turn-speech",
-      messageId: "msg-speech",
-      phase: "playing",
-      clockSource: "audio",
-      startedAtMs: 100,
-      currentTimeMs: 250,
-      durationMs: 2250,
-      playbackRate: 1,
-      sinks: [
-        {
-          id: "audio",
-          required: true,
-          terminal: "started",
-        },
-      ],
-    },
-  );
+  const started = engine.handlePlaybackTimelineStarted({
+    timelineId: "timeline-speech",
+    turnId: "turn-speech",
+    messageId: "msg-speech",
+    phase: "playing",
+    clockSource: "audio",
+    startedAtMs: 100,
+    currentTimeMs: 250,
+    durationMs: 2250,
+    playbackRate: 1,
+    sinks: [
+      {
+        id: "audio",
+        required: true,
+        terminal: "started",
+      },
+    ],
+  });
 
   assert.equal(started, true);
   const plan = playedPlans[0];

@@ -163,17 +163,9 @@ function setAudioWaiting(session: ModelEnginePlaybackSession): void {
   segment.audio.terminal = "idle";
 }
 
-function testEndedAudioDoesNotCountAsSpeechActiveOrDurationTarget(): void {
+function testQueuedPayloadFailsWhenTimelineDoesNotArrive(): void {
   resetTimers();
-  const { scheduler } = createHarness(buildSession("completed"));
-
-  assert.equal(scheduler.isSpeechActiveForPayload("msg-1", "turn-1", "turn-1"), false);
-  assert.equal(scheduler.resolveMotionTargetDurationMs("msg-1", "turn-1", "turn-1"), null);
-}
-
-function testQueuedPlaybackTurnIdIsNormalized(): void {
-  resetTimers();
-  const { scheduler, started } = createHarness(buildSession("completed"));
+  const { scheduler, started, failed } = createHarness(buildSession("completed"));
 
   scheduler.queueInboundPayload(buildPayload(), {
     messageId: "msg-queued",
@@ -186,9 +178,11 @@ function testQueuedPlaybackTurnIdIsNormalized(): void {
   assert.ok(timer);
   timer();
 
-  assert.equal(started.length, 1);
-  assert.equal(started[0].turnId, "turn-1");
-  assert.equal(started[0].playbackTurnId, "turn-1");
+  assert.equal(started.length, 0);
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].turnId, "turn-1");
+  assert.equal(failed[0].playbackTurnId, "turn-1");
+  assert.equal(failed[0].startReason, "playback_timeline_missing_before_motion_start");
 }
 
 function testDroppedPendingPayloadReportsStartFailure(): void {
@@ -267,18 +261,24 @@ function testSameMessageIdDifferentTurnsStartByCompositeIdentity(): void {
     receivedAtMs: 910,
   });
 
-  scheduler.notifyAudioPlaybackStarted("turn-b", "shared-msg");
+  scheduler.handlePlaybackTimelineStarted(buildTimelineSnapshot({
+    turnId: "turn-b",
+    messageId: "shared-msg",
+  }));
 
   assert.equal(started.length, 1);
   assert.equal(started[0].turnId, "turn-b");
 
-  scheduler.notifyAudioPlaybackStarted("turn-a", "shared-msg");
+  scheduler.handlePlaybackTimelineStarted(buildTimelineSnapshot({
+    turnId: "turn-a",
+    messageId: "shared-msg",
+  }));
 
   assert.equal(started.length, 2);
   assert.equal(started[1].turnId, "turn-a");
 }
 
-function testActiveAudioLookupRequiresMatchingTurnWhenMessageIdIsShared(): void {
+function testPlaybackTimelineRequiresMatchingTurnWhenMessageIdIsShared(): void {
   resetTimers();
   const activeSession: ModelEnginePlaybackSession = {
     id: "turn:turn-active",
@@ -352,31 +352,37 @@ function testActiveAudioLookupRequiresMatchingTurnWhenMessageIdIsShared(): void 
   assert.equal(started.length, 0);
 
   assert.equal(
-    scheduler.notifyAudioPlaybackStarted("turn-active", "shared-msg"),
+    scheduler.handlePlaybackTimelineStarted(buildTimelineSnapshot({
+      turnId: "turn-active",
+      messageId: "shared-msg",
+    })),
     false,
   );
   assert.equal(started.length, 0);
 
   assert.equal(
-    scheduler.notifyAudioPlaybackStarted("turn-target", "shared-msg"),
+    scheduler.handlePlaybackTimelineStarted(buildTimelineSnapshot({
+      turnId: "turn-target",
+      messageId: "shared-msg",
+    })),
     true,
   );
   assert.equal(started.length, 1);
   assert.equal(started[0].turnId, "turn-target");
 }
 
-function testAudioStartReturnsFalseWithoutQueuedMotion(): void {
+function testTimelineStartReturnsFalseWithoutQueuedMotion(): void {
   resetTimers();
   const { scheduler, started } = createHarness(buildSession());
 
   assert.equal(
-    scheduler.notifyAudioPlaybackStarted("turn-1", "msg-1"),
+    scheduler.handlePlaybackTimelineStarted(buildTimelineSnapshot()),
     false,
   );
   assert.equal(started.length, 0);
 }
 
-function testCurvePayloadWaitsForAudioStartPastInitialTimeout(): void {
+function testCurvePayloadRequiresTimelineBeforeInitialTimeout(): void {
   resetTimers();
   const session = buildSession();
   setAudioWaiting(session);
@@ -394,24 +400,11 @@ function testCurvePayloadWaitsForAudioStartPastInitialTimeout(): void {
   timer();
 
   assert.equal(started.length, 0);
-  assert.equal(failed.length, 0);
-
-  const segment = session.segments.get("msg-1");
-  assert.ok(segment);
-  segment.audio.started = true;
-  segment.audio.startedAtMs = 1200;
-  segment.audio.durationMs = 2000;
-
-  assert.equal(
-    scheduler.notifyAudioPlaybackStarted("turn-1", "msg-1"),
-    true,
-  );
-  assert.equal(started.length, 1);
-  assert.equal(started[0].startReason, "audio_playing_event");
-  assert.equal(failed.length, 0);
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].startReason, "playback_timeline_missing_before_curve_motion_start");
 }
 
-function testAudioStartRefreshesPendingPlaybackTimeline(): void {
+function testPlaybackTimelineStartRefreshesPendingPlaybackTimeline(): void {
   resetTimers();
   const session = buildSession();
   setAudioWaiting(session);
@@ -438,15 +431,16 @@ function testAudioStartRefreshesPendingPlaybackTimeline(): void {
   });
 
   assert.equal(
-    scheduler.notifyAudioPlaybackStarted("turn-1", "msg-1", freshTimeline),
+    scheduler.handlePlaybackTimelineStarted(freshTimeline),
     true,
   );
   assert.equal(started.length, 1);
   assert.equal(started[0].playbackTimeline?.timelineId, "fresh");
   assert.equal(started[0].playbackTimeline?.durationMs, 2200);
+  assert.equal(started[0].startReason, "playback_timeline_started");
 }
 
-function testCurvePayloadFailsWhenAudioTerminalArrivesBeforeStart(): void {
+function testUnavailablePlaybackTimelineFailsPendingMotion(): void {
   resetTimers();
   const session = buildSession();
   setAudioWaiting(session);
@@ -459,29 +453,24 @@ function testCurvePayloadFailsWhenAudioTerminalArrivesBeforeStart(): void {
     receivedAtMs: 900,
   });
 
-  const segment = session.segments.get("msg-1");
-  assert.ok(segment);
-  segment.audio.terminal = "failed";
-
-  const timer = timers.values().next().value;
-  assert.ok(timer);
-  timer();
+  scheduler.handlePlaybackTimelineStarted(buildTimelineSnapshot({
+    clockSource: "audio_unavailable",
+  }));
 
   assert.equal(started.length, 0);
   assert.equal(failed.length, 1);
-  assert.equal(failed[0].startReason, "audio_failed_before_curve_motion_start");
+  assert.equal(failed[0].startReason, "playback_timeline_audio_unavailable_before_motion_start");
 }
 
 function run(): void {
-  testEndedAudioDoesNotCountAsSpeechActiveOrDurationTarget();
-  testQueuedPlaybackTurnIdIsNormalized();
+  testQueuedPayloadFailsWhenTimelineDoesNotArrive();
   testDroppedPendingPayloadReportsStartFailure();
   testSameMessageIdDifferentTurnsStartByCompositeIdentity();
-  testActiveAudioLookupRequiresMatchingTurnWhenMessageIdIsShared();
-  testAudioStartReturnsFalseWithoutQueuedMotion();
-  testCurvePayloadWaitsForAudioStartPastInitialTimeout();
-  testAudioStartRefreshesPendingPlaybackTimeline();
-  testCurvePayloadFailsWhenAudioTerminalArrivesBeforeStart();
+  testPlaybackTimelineRequiresMatchingTurnWhenMessageIdIsShared();
+  testTimelineStartReturnsFalseWithoutQueuedMotion();
+  testCurvePayloadRequiresTimelineBeforeInitialTimeout();
+  testPlaybackTimelineStartRefreshesPendingPlaybackTimeline();
+  testUnavailablePlaybackTimelineFailsPendingMotion();
   console.log("motionRuntimeScheduler tests passed");
 }
 

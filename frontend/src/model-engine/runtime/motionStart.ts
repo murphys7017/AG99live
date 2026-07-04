@@ -11,19 +11,6 @@ import type {
 } from "./contracts.js";
 import type { StartPayloadContext } from "./motionRuntimeScheduler.js";
 
-export interface MotionStartRuntimeAccess {
-  resolveMotionTargetDurationMs: (
-    messageId: string | null,
-    turnId: string | null,
-    playbackTurnId?: string | null,
-  ) => number | null;
-  isSpeechActiveForPayload: (
-    messageId: string | null,
-    turnId: string | null,
-    playbackTurnId?: string | null,
-  ) => boolean;
-}
-
 export function reportInvalidMotionPayload(
   reason: string,
   state: MotionRuntimeStateController,
@@ -37,7 +24,6 @@ export function startNormalizedMotionPayload(
   payload: NormalizedMotionPayload,
   context: StartPayloadContext,
   dependencies: MotionStartDependencies,
-  runtime: MotionStartRuntimeAccess,
   state: MotionRuntimeStateController,
 ): boolean {
   state.setLastStartReason(context.startReason);
@@ -51,13 +37,13 @@ export function startNormalizedMotionPayload(
   });
 
   if (payload.kind === "semantic_intent") {
-    return startSemanticIntentPayload(payload, context, dependencies, runtime, state);
+    return startSemanticIntentPayload(payload, context, dependencies, state);
   }
   if (payload.kind === "catalog_motion") {
     return startCatalogMotionPayload(payload, context, dependencies, state);
   }
 
-  return startDirectPlanPayload(payload, context, dependencies, runtime, state);
+  return startDirectPlanPayload(payload, context, dependencies, state);
 }
 
 function resolveTimelineTargetDurationMs(
@@ -94,25 +80,12 @@ function resolveTimelineTargetDurationMs(
 
 function resolveMotionTargetDurationMs(
   context: StartPayloadContext,
-  runtime: MotionStartRuntimeAccess,
 ): number | null {
-  const timelineDurationMs = resolveTimelineTargetDurationMs(context);
-  if (timelineDurationMs !== null) {
-    return timelineDurationMs;
-  }
-  if (context.playbackTimeline?.clockSource === "audio_unavailable") {
-    return null;
-  }
-  return runtime.resolveMotionTargetDurationMs(
-    context.messageId,
-    context.turnId,
-    context.playbackTurnId,
-  );
+  return resolveTimelineTargetDurationMs(context);
 }
 
 function isSpeechActiveForPayload(
   context: StartPayloadContext,
-  runtime: MotionStartRuntimeAccess,
 ): boolean {
   const timeline = context.playbackTimeline;
   if (timeline?.clockSource === "audio_unavailable") {
@@ -124,11 +97,7 @@ function isSpeechActiveForPayload(
   ) {
     return true;
   }
-  return runtime.isSpeechActiveForPayload(
-    context.messageId,
-    context.turnId,
-    context.playbackTurnId,
-  );
+  return false;
 }
 
 function startCatalogMotionPayload(
@@ -190,7 +159,6 @@ function startSemanticIntentPayload(
   payload: Extract<NormalizedMotionPayload, { kind: "semantic_intent" }>,
   context: StartPayloadContext,
   dependencies: MotionStartDependencies,
-  runtime: MotionStartRuntimeAccess,
   state: MotionRuntimeStateController,
 ): boolean {
   const selectedModel = dependencies.getSelectedModel();
@@ -202,8 +170,8 @@ function startSemanticIntentPayload(
   }
 
   state.setState("compiling", "正在编译动作意图...", null);
-  let targetDurationMs = resolveMotionTargetDurationMs(context, runtime);
-  let speechActive = isSpeechActiveForPayload(context, runtime);
+  let targetDurationMs = resolveMotionTargetDurationMs(context);
+  let speechActive = isSpeechActiveForPayload(context);
   let intent = payload.intent;
   const runtimeWarnings: string[] = [];
   const performanceCurveHint = payload.intent.performance_curve_hint ?? null;
@@ -313,7 +281,6 @@ function startDirectPlanPayload(
   payload: Extract<NormalizedMotionPayload, { kind: "semantic_plan" }>,
   context: StartPayloadContext,
   dependencies: MotionStartDependencies,
-  runtime: MotionStartRuntimeAccess,
   state: MotionRuntimeStateController,
 ): boolean {
   const selectedModel = dependencies.getSelectedModel();
@@ -323,7 +290,7 @@ function startDirectPlanPayload(
     selectedModel,
     {
       softHandoff: true,
-      targetDurationMs: resolveMotionTargetDurationMs(context, runtime),
+      targetDurationMs: resolveMotionTargetDurationMs(context),
       onStarted: (plan, runId) => {
         notifiedStarted = true;
         dependencies.onPlanStarted?.({
