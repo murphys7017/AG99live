@@ -348,6 +348,82 @@ function testPlaybackTimelineRuntimePreparesSegmentJobIdempotently(): void {
   );
 }
 
+function testPlaybackTimelineRuntimeStartsSegmentJobThroughTimelineEntry(): void {
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => null,
+  });
+  const events: string[] = [];
+  runtime.setSegmentExecutionPorts({
+    session: {
+      markTextReleased: () => events.push("text_released"),
+      markAudioReleased: () => events.push("audio_released"),
+      markMotionReleased: () => events.push("motion_released"),
+      markMotionFailed: () => events.push("motion_failed"),
+      markPhase: (_turnId, phase) => {
+        events.push(`phase:${phase}`);
+        return true;
+      },
+    },
+    textSink: {
+      releaseAssistantTextForPlayback: () => true,
+    },
+    audioSink: {
+      releaseAudioForPlayback: () => true,
+    },
+    motionSink: {
+      start: (_payload, context) => {
+        events.push(`motion_sink:${context.timelineMode ?? ""}`);
+        return true;
+      },
+    },
+  });
+  const result = runtime.startSegmentJob(
+    {
+      messageId: "msg-runtime-start",
+      turnId: "turn-runtime-start",
+      reason: "test",
+      text: {
+        release: false,
+      },
+      audio: {
+        release: false,
+        noAudioConfirmed: true,
+      },
+      motion: {
+        payload: {
+          kind: "semantic_intent",
+          intent: {
+            schema_version: "engine.motion_intent.v3",
+            profile_id: "profile-runtime-start",
+            profile_revision: 1,
+            model_id: "model-runtime-start",
+            mode: "expressive",
+            emotion_label: "test",
+            axes: {},
+          },
+        },
+        receivedAtMs: 10,
+      },
+    },
+  );
+
+  assert.deepEqual(result, {
+    releasedText: false,
+    releasedAudio: false,
+    releasedMotion: true,
+  });
+  assert.deepEqual(events, [
+    "motion_released",
+    "motion_sink:motion_only",
+    "phase:playing",
+  ]);
+  assert.equal(
+    runtime.getActiveTimelineSnapshot()
+      ?.sinks.find((sink) => sink.id === "motion")?.required,
+    true,
+  );
+}
+
 function testPlaybackTimelineRuntimeDoesNotStealMismatchedActiveTimeline(): void {
   const runtime = createPlaybackTimelineRuntime({
     getAudioClock: () => null,
@@ -542,6 +618,7 @@ function run(): void {
   testPerformanceCurveTimelineRejectsUnavailableAudio();
   testPlaybackTimelineRuntimeCreatesMotionOnlyTimeline();
   testPlaybackTimelineRuntimePreparesSegmentJobIdempotently();
+  testPlaybackTimelineRuntimeStartsSegmentJobThroughTimelineEntry();
   testPlaybackTimelineRuntimeDoesNotStealMismatchedActiveTimeline();
   testPlaybackTimelineRuntimeExposesMissingAudioClock();
   testTerminalSinkEventsAreStable();

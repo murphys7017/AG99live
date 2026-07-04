@@ -10,6 +10,10 @@ import { createModelEngineMotionTimelineSink } from "../src/playback-timeline/mo
 import {
   executePlaybackTimelineSegmentJob,
 } from "../src/playback-timeline/segmentJobExecutor.js";
+import type {
+  PlaybackTimelineSegmentExecutionPorts,
+  PlaybackTimelineSegmentJob,
+} from "../src/playback-timeline/segmentJobExecutor.js";
 import type { PlaybackTimelineSnapshot } from "../src/playback-timeline/contracts.js";
 import type { PerformanceCurveHint } from "../src/types/protocol.js";
 
@@ -74,10 +78,18 @@ const matchingMotionOnlyTimelineSnapshot: PlaybackTimelineSnapshot = {
   ],
 };
 
-function createAcceptingTimelineRuntime() {
-  return {
+function createAcceptingTimelineRuntime(
+  ports: PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload>,
+) {
+  const runtime = {
+    startSegmentJob: (job: PlaybackTimelineSegmentJob<NormalizedMotionPayload>) =>
+      executePlaybackTimelineSegmentJob(job, {
+        ...ports,
+        timelineRuntime: runtime,
+      }),
     prepareSegmentJob: () => true,
   };
+  return runtime;
 }
 
 function createMissingMotionTimelineWiring() {
@@ -85,6 +97,14 @@ function createMissingMotionTimelineWiring() {
     getPlaybackTimelineSnapshotForSegment: () => null,
     prepareMotionTimelineSink: () => false,
     prepareMotionOnlyTimeline: () => null,
+  };
+}
+function createPreparingTimelineRuntime(
+  prepareSegmentJob: (options: { hasAudio: boolean; hasMotion: boolean; noAudioConfirmed: boolean }) => boolean,
+) {
+  return {
+    prepareSegmentJob: (_turnId: string | null, _messageId: string, options: { hasAudio: boolean; hasMotion: boolean; noAudioConfirmed: boolean }) =>
+      prepareSegmentJob(options),
   };
 }
 
@@ -178,12 +198,26 @@ function createHarness(options: {
     markMotionTimelineTerminal: () => {},
   });
 
+  const timelineRuntime = createAcceptingTimelineRuntime({
+    session: {
+      markTextReleased: sessionStore.markTextReleased,
+      markAudioReleased: sessionStore.markAudioReleased,
+      markMotionReleased: sessionStore.markMotionReleased,
+      markMotionFailed: sessionStore.markMotionFailed,
+      markPhase: sessionStore.markPhase,
+    },
+    textSink: adapter,
+    audioSink: adapter,
+    motionSink: motionTimelineSink,
+  });
+
   scope.run(() => {
     useTurnPlaybackOrchestrator({
       sessionStore,
-      playbackRelease: adapter,
-      motionPayload: motionTimelineSink,
-      timelineRuntime: createAcceptingTimelineRuntime(),
+      motionPayload: {
+        notifyCurrentTurnChanged: motionTimelineSink.notifyCurrentTurnChanged,
+      },
+      timelineRuntime,
     });
   });
 
@@ -742,7 +776,8 @@ function testPlaybackTimelineSegmentExecutorRejectsInvalidMotionTimestamp(): voi
         motionSink: {
           start: () => true,
         },
-        timelineRuntime: createAcceptingTimelineRuntime(),
+        timelineRuntime: createPreparingTimelineRuntime(() => true),
+
       },
     ),
     /valid receivedAtMs/,
@@ -792,7 +827,8 @@ function testPlaybackTimelineSegmentExecutorMarksMotionOnlyContext(): void {
           return true;
         },
       },
-      timelineRuntime: createAcceptingTimelineRuntime(),
+      timelineRuntime: createPreparingTimelineRuntime(() => true),
+
     },
   );
 

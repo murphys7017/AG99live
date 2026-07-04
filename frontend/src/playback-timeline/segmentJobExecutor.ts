@@ -71,15 +71,33 @@ export interface PlaybackTimelineSegmentRuntimePort {
   ): boolean;
 }
 
-export interface PlaybackTimelineSegmentExecutorPorts<
+export interface PlaybackTimelineSegmentExecutionPorts<
   TMotionPayload = NormalizedMotionPayload,
 > {
   session: PlaybackTimelineSegmentSessionPort;
   textSink: PlaybackTimelineSegmentTextSink;
   audioSink: PlaybackTimelineSegmentAudioSink;
   motionSink: PlaybackTimelineSegmentMotionSink<TMotionPayload>;
+}
+
+export interface PlaybackTimelineSegmentExecutorPorts<
+  TMotionPayload = NormalizedMotionPayload,
+> extends PlaybackTimelineSegmentExecutionPorts<TMotionPayload> {
   timelineRuntime: PlaybackTimelineSegmentRuntimePort;
 }
+
+export interface PlaybackTimelineSegmentStartPort<
+  TMotionPayload = NormalizedMotionPayload,
+> {
+  startSegmentJob(
+    job: PlaybackTimelineSegmentJob<TMotionPayload>,
+  ): PlaybackTimelineSegmentExecutionResult;
+}
+
+export interface PlaybackTimelineSegmentRunnerPort<
+  TMotionPayload = NormalizedMotionPayload,
+> extends PlaybackTimelineSegmentRuntimePort,
+    PlaybackTimelineSegmentStartPort<TMotionPayload> {}
 
 export function executePlaybackTimelineSegmentJob<
   TMotionPayload = NormalizedMotionPayload,

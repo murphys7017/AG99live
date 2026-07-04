@@ -1,10 +1,8 @@
 /**
- * 段释放编排：把会话存储里的段状态变化翻译成"释放文本 / 释放音频 / 释放动作"动作。
+ * 段释放编排：把会话存储里的段状态变化翻译成 segment release job。
  *
  * 自身不维护播放时机逻辑（那部分在 turnPlaybackOrchestratorCore 里），只做两件事：
- *   1. 装配 core，把"释放"映射到 playbackRelease / motionPayload 端口，并在释放
- *      成功后回写 sessionStore 的 markTextReleased / markAudioReleased / markMotionReleased
- *      / markMotionFailed 等状态；
+ *   1. 装配 core，把"该释放什么"交给 PlaybackTimelineRuntime.startSegmentJob() 统一启动；
  *   2. 用 Vue watch 深度观察所有会话的段，把段当前状态喂给 core（textReady /
  *      audioReady / motionReady / outputQueueClosed / noAudioConfirmed），让 core
  *      根据时机决策出"该释放谁"。
@@ -13,7 +11,7 @@
  *   - 切换后 core.flush()，避免上一组挂着的等待计时器影响新组；
  *   - 切换后通知 motionPayload.notifyCurrentTurnChanged(turnId)，让动作引擎刷新归属。
  *
- * 边界：不发协议、不直接触发音频/动作播放、不修改 session 之外的状态；返回 flush()
+ * 边界：不发协议、不直接触发音频/动作播放；返回 flush()
  * 用于外部强制刷新等待中的释放（如打断、断连后）。
  */
 
@@ -21,9 +19,6 @@ import { onScopeDispose, watch } from "vue";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
 import type { NormalizedMotionPayload } from "../model-engine/contracts";
 import type { PerformanceCurveHint } from "../types/protocol.js";
-import {
-  createTurnPlaybackSegmentReleaser,
-} from "./segmentPlaybackRelease.js";
 import {
   createTurnPlaybackOrchestratorCore,
 } from "./turnPlaybackOrchestratorCore.js";
@@ -35,19 +30,17 @@ import {
 import { isSegmentLocallySettled } from "./session.js";
 import type {
   MotionPayloadPort,
-  PlaybackReleasePort,
 } from "./ports.js";
 import type {
-  PlaybackTimelineSegmentRuntimePort,
+  PlaybackTimelineSegmentStartPort,
 } from "../playback-timeline/segmentJobExecutor.js";
 
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 
 interface TurnPlaybackOrchestratorOptions {
   sessionStore: SessionStore;
-  playbackRelease: PlaybackReleasePort;
-  motionPayload: MotionPayloadPort;
-  timelineRuntime: PlaybackTimelineSegmentRuntimePort;
+  motionPayload: Pick<MotionPayloadPort, "notifyCurrentTurnChanged">;
+  timelineRuntime: PlaybackTimelineSegmentStartPort<NormalizedMotionPayload>;
 }
 
 function attachPerformanceCurveHintToPayload(
@@ -73,14 +66,13 @@ function attachPerformanceCurveHintToPayload(
 export function useTurnPlaybackOrchestrator(
   options: TurnPlaybackOrchestratorOptions,
 ) {
-  const segmentReleaser = createTurnPlaybackSegmentReleaser(options);
   const core = createTurnPlaybackOrchestratorCore<NormalizedMotionPayload>({
     now: () => performance.now(),
     schedule: (delayMs, fn) => window.setTimeout(fn, delayMs),
     clearSchedule: (timer) => {
       window.clearTimeout(timer as number);
     },
-    releaseSegment: segmentReleaser.release,
+    releaseSegment: options.timelineRuntime.startSegmentJob,
     log: (message, details) => {
       console.info(`[TurnPlaybackOrchestrator] ${message}.`, details);
     },

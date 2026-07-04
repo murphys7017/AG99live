@@ -216,17 +216,31 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     markMotionTimelineTerminal: adapter.markMotionTimelineTerminal,
   });
 
-  useTurnPlaybackOrchestrator({
-    sessionStore,
-    playbackRelease: {
+  adapter.setSegmentExecutionPorts({
+    session: {
+      markTextReleased: sessionStore.markTextReleased,
+      markAudioReleased: sessionStore.markAudioReleased,
+      markMotionReleased: sessionStore.markMotionReleased,
+      markMotionFailed: sessionStore.markMotionFailed,
+      markPhase: sessionStore.markPhase,
+    },
+    textSink: {
       releaseAssistantTextForPlayback: adapter.releaseAssistantTextForPlayback,
+    },
+    audioSink: {
       releaseAudioForPlayback: adapter.releaseAudioForPlayback,
     },
+    motionSink: {
+      start: motionTimelineSink.start,
+    },
+  });
+
+  useTurnPlaybackOrchestrator({
+    sessionStore,
     timelineRuntime: {
-      prepareSegmentJob: adapter.prepareSegmentJob,
+      startSegmentJob: adapter.startSegmentJob,
     },
     motionPayload: {
-      start: motionTimelineSink.start,
       notifyCurrentTurnChanged: motionTimelineSink.notifyCurrentTurnChanged,
     },
   });

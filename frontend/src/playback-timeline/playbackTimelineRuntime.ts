@@ -6,6 +6,13 @@ import {
   createPlaybackTimelineEngine,
   type PlaybackTimelineEngine,
 } from "./playbackTimelineEngine.js";
+import {
+  executePlaybackTimelineSegmentJob,
+  type PlaybackTimelineSegmentExecutionPorts,
+  type PlaybackTimelineSegmentExecutionResult,
+  type PlaybackTimelineSegmentJob,
+} from "./segmentJobExecutor.js";
+import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
 
 const AUDIO_TIMELINE_SINK_ID = "audio";
 const LIP_SYNC_TIMELINE_SINK_ID = "lip_sync";
@@ -35,6 +42,12 @@ export interface PlaybackTimelineSegmentJobOptions {
 }
 
 export interface PlaybackTimelineRuntime {
+  setSegmentExecutionPorts: (
+    ports: PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload>,
+  ) => void;
+  startSegmentJob: (
+    job: PlaybackTimelineSegmentJob<NormalizedMotionPayload>,
+  ) => PlaybackTimelineSegmentExecutionResult;
   prepareSegmentJob: (
     turnId: string | null,
     messageId: string,
@@ -101,6 +114,7 @@ export function createPlaybackTimelineRuntime(
   deps: PlaybackTimelineRuntimeDeps,
 ): PlaybackTimelineRuntime {
   let activeTimeline: ActivePlaybackTimeline | null = null;
+  let segmentExecutionPorts: PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload> | null = null;
 
   function isActiveTimeline(
     turnId: string | null,
@@ -163,6 +177,29 @@ export function createPlaybackTimelineRuntime(
     }
 
     return true;
+  }
+
+  function setSegmentExecutionPorts(
+    ports: PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload>,
+  ): void {
+    segmentExecutionPorts = ports;
+  }
+
+  function startSegmentJob(
+    job: PlaybackTimelineSegmentJob<NormalizedMotionPayload>,
+  ): PlaybackTimelineSegmentExecutionResult {
+    if (!segmentExecutionPorts) {
+      throw new Error("Playback timeline segment execution ports are not configured.");
+    }
+    return executePlaybackTimelineSegmentJob(
+      job,
+      {
+        ...segmentExecutionPorts,
+        timelineRuntime: {
+          prepareSegmentJob,
+        },
+      },
+    );
   }
 
   function prepareMotionOnlyTimeline(
@@ -358,6 +395,8 @@ export function createPlaybackTimelineRuntime(
   }
 
   return {
+    setSegmentExecutionPorts,
+    startSegmentJob,
     prepareSegmentJob,
     prepareAudioTimeline,
     prepareMotionOnlyTimeline,

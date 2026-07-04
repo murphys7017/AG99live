@@ -117,6 +117,8 @@ export interface AdapterConnectionInstance {
   clearPlaybackGroupContext: (turnId: string | null) => void;
   releaseAssistantTextForPlayback: (messageId: string, turnId: string | null) => boolean;
   releaseAudioForPlayback: ReturnType<typeof createAdapterAudioRuntime>["releaseAudioForPlayback"];
+  setSegmentExecutionPorts: ReturnType<typeof createAdapterAudioRuntime>["setSegmentExecutionPorts"];
+  startSegmentJob: ReturnType<typeof createAdapterAudioRuntime>["startSegmentJob"];
   prepareSegmentJob: ReturnType<typeof createAdapterAudioRuntime>["prepareSegmentJob"];
   getPlaybackTimelineSnapshotForSegment: ReturnType<typeof createAdapterAudioRuntime>["getPlaybackTimelineSnapshotForSegment"];
   prepareMotionOnlyTimeline: ReturnType<typeof createAdapterAudioRuntime>["prepareMotionOnlyTimeline"];
@@ -237,6 +239,8 @@ export function createAdapterConnection(
   const {
     queueAudioForPlayback,
     releaseAudioForPlayback,
+    setSegmentExecutionPorts,
+    startSegmentJob,
     prepareSegmentJob,
     getPlaybackTimelineSnapshotForSegment,
     prepareMotionOnlyTimeline,
@@ -674,6 +678,8 @@ export function createAdapterConnection(
     clearPlaybackGroupContext,
     releaseAssistantTextForPlayback,
     releaseAudioForPlayback,
+    setSegmentExecutionPorts,
+    startSegmentJob,
     prepareSegmentJob,
     getPlaybackTimelineSnapshotForSegment,
     prepareMotionOnlyTimeline,
