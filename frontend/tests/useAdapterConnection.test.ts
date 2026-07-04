@@ -709,6 +709,51 @@ async function testLateAudioAfterSynthFinishedStillPlaysOnce(): Promise<void> {
   }
 }
 
+async function testAudioTimelineStartedHandlerReceivesStartedSnapshot(): Promise<void> {
+  const h = createConnectedAdapter();
+  try {
+    const { adapter, socket } = h;
+    const started: Array<{
+      turnId: string | null;
+      messageId: string;
+      phase: string | undefined;
+      clockSource: string | undefined;
+      durationMs: number | null | undefined;
+    }> = [];
+    adapter.setAudioTimelineStartedHandler((turnId, messageId, playbackTimeline) => {
+      started.push({
+        turnId,
+        messageId,
+        phase: playbackTimeline?.phase,
+        clockSource: playbackTimeline?.clockSource,
+        durationMs: playbackTimeline?.durationMs,
+      });
+    });
+
+    sendTurnStarted(socket, "turn-audio-timeline");
+    sendOutputAudio(socket, {
+      turnId: "turn-audio-timeline",
+      messageId: "msg-audio-timeline",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/timeline.wav",
+    });
+
+    assert.equal(adapter.releaseAudioForPlayback("msg-audio-timeline", "turn-audio-timeline"), true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.deepEqual(started, [
+      {
+        turnId: "turn-audio-timeline",
+        messageId: "msg-audio-timeline",
+        phase: "playing",
+        clockSource: "audio",
+        durationMs: 1250,
+      },
+    ]);
+  } finally {
+    h.scope.stop();
+  }
+}
 async function testDuplicateOutputAudioDoesNotReplayCompletedSegment(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
@@ -1787,6 +1832,7 @@ async function run(): Promise<void> {
   testSynthFinishedMarksMissingSegmentAudioAbsent();
   testSynthFinishedDoesNotMarkReleasedAudioAbsent();
   await testLateAudioAfterSynthFinishedStillPlaysOnce();
+  await testAudioTimelineStartedHandlerReceivesStartedSnapshot();
   await testDuplicateOutputAudioDoesNotReplayCompletedSegment();
   await testChangedUrlOutputAudioDoesNotReplayCompletedSegment();
   testTurnFinishedDoesNotMarkMissingSegmentAudioAbsent();

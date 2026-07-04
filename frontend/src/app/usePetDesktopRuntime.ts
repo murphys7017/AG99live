@@ -17,6 +17,7 @@ import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRunti
 import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
 import { createModelEngineMotionTimelineSink } from "../playback-timeline/motionSink.js";
+import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
 import { cloneModelEngineSettings } from "../model-engine/settings";
 import type { ModelEngineSettings } from "../model-engine/settings";
 import { usePlaybackCompletionCoordinator } from "../turn-playback/usePlaybackCompletionCoordinator";
@@ -68,7 +69,11 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     clearPlaybackGroupContext: adapter.clearPlaybackGroupContext,
   };
   const delayedMotionStartTimers = new Set<number>();
-  const scheduleMotionAfterAudioStart = (turnId: string | null, messageId: string): void => {
+  const scheduleMotionAfterAudioStart = (
+    turnId: string | null,
+    messageId: string,
+    playbackTimeline: PlaybackTimelineSnapshot | null,
+  ): void => {
     if (!turnId) {
       return;
     }
@@ -88,7 +93,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       modelEngine.notifyAudioPlaybackStarted(
         turnId,
         messageId,
-        adapter.getActiveAudioTimelineSnapshot(),
+        playbackTimeline,
       );
     }, MOTION_AFTER_AUDIO_START_DELAY_MS);
     delayedMotionStartTimers.add(timer);
@@ -102,7 +107,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     playbackAck,
     motionRecord,
     motionPlayer,
-    onAudioPlaybackStarted: scheduleMotionAfterAudioStart,
     onMotionLabRawEvent: (payload, turnId) => {
       adapter.sendMotionLabRawEvent(cloneJson(payload), turnId);
     },
@@ -130,6 +134,9 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       markMotionAbsent: (turnId, messageId) => sessionStore.markMotionAbsent(turnId, messageId),
       markMotionFailed: (turnId, messageId, reason) => sessionStore.markMotionFailed(turnId, messageId, reason),
     },
+  });
+  adapter.setAudioTimelineStartedHandler((turnId, messageId, playbackTimeline) => {
+    scheduleMotionAfterAudioStart(turnId, messageId, playbackTimeline);
   });
   adapter.setMotionPreviewHandler((payload) => {
     const localPlayed = modelEngine.playPreviewPayload(payload);
@@ -324,6 +331,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     pushToTalk.dispose();
     bilibiliLive.dispose();
     playbackCoordinator.resetPlaybackCoordination();
+    adapter.setAudioTimelineStartedHandler(null);
     modelEngine.stop("unmount");
     detachBridgeListener();
     detachProfileAuthoringBridgeListener();

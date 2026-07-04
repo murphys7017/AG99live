@@ -41,6 +41,16 @@ export interface AudioPlaybackContext {
     startedAtMs: number,
     durationMs: number | null,
   ) => void;
+  markLipSyncTimelineStarted?: (
+    turnId: string | null,
+    messageId: string,
+  ) => void;
+  markLipSyncTimelineTerminal?: (
+    turnId: string | null,
+    messageId: string,
+    terminal: "completed" | "failed" | "interrupted",
+    reason: string,
+  ) => void;
   markAudioTimelineTerminal?: (
     turnId: string | null,
     messageId: string,
@@ -80,6 +90,20 @@ export async function playAudioAndAcknowledge(
     await ctx.audioSink.start(audioUrl, {
       onLipSyncUnavailable: () => {
         ctx.pushHistory("system", "嘴型同步加载失败，音频播放将无对应张嘴动作。");
+      },
+      onLipSyncStarted: () => {
+        ctx.markLipSyncTimelineStarted?.(
+          turnId,
+          messageId,
+        );
+      },
+      onLipSyncTerminal: (terminal, reason) => {
+        ctx.markLipSyncTimelineTerminal?.(
+          turnId,
+          messageId,
+          terminal,
+          reason,
+        );
       },
       onDurationChanged: (durationMs) => {
         ctx.state.audioPlaybackDurationMs = durationMs;

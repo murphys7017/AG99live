@@ -84,6 +84,11 @@ export interface AdapterAudioRuntimeDeps {
   audioSink: PlaybackTimelineAudioSink;
   pushHistory: (role: string, text: string) => void;
   getSessionStore: () => AdapterAudioRuntimeSessionStore | undefined;
+  onAudioTimelineStarted?: (
+    turnId: string | null,
+    messageId: string,
+    playbackTimeline: PlaybackTimelineSnapshot | null,
+  ) => void;
 }
 
 export interface ActiveAudioSegment {
@@ -125,6 +130,7 @@ export interface AdapterAudioRuntime {
 }
 
 const AUDIO_TIMELINE_SINK_ID = "audio";
+const LIP_SYNC_TIMELINE_SINK_ID = "lip_sync";
 
 export function createAdapterAudioRuntime(
   deps: AdapterAudioRuntimeDeps,
@@ -163,6 +169,8 @@ export function createAdapterAudioRuntime(
     prepareAudioTimeline,
     markAudioTimelineDuration,
     markAudioTimelineStarted,
+    markLipSyncTimelineStarted,
+    markLipSyncTimelineTerminal,
     markAudioTimelineTerminal,
     stopActiveAudioTimeline,
     pushHistory: deps.pushHistory,
@@ -231,7 +239,10 @@ export function createAdapterAudioRuntime(
     const engine = createPlaybackTimelineEngine();
     engine.load(
       { turnId, messageId },
-      [{ id: AUDIO_TIMELINE_SINK_ID, required: true }],
+      [
+        { id: AUDIO_TIMELINE_SINK_ID, required: true },
+        { id: LIP_SYNC_TIMELINE_SINK_ID, required: false },
+      ],
     );
     activeAudioTimeline = {
       turnId,
@@ -270,6 +281,37 @@ export function createAdapterAudioRuntime(
     if (engine.getPhase() === "ready") {
       engine.start(startedAtMs);
     }
+    deps.onAudioTimelineStarted?.(
+      turnId,
+      messageId,
+      engine.getSnapshot(),
+    );
+  }
+
+  function markLipSyncTimelineStarted(
+    turnId: string | null,
+    messageId: string,
+  ): void {
+    if (!isActiveAudioTimeline(turnId, messageId) || !activeAudioTimeline) {
+      return;
+    }
+    activeAudioTimeline.engine.markSinkStarted(LIP_SYNC_TIMELINE_SINK_ID);
+  }
+
+  function markLipSyncTimelineTerminal(
+    turnId: string | null,
+    messageId: string,
+    terminal: "completed" | "failed" | "interrupted",
+    reason: string,
+  ): void {
+    if (!isActiveAudioTimeline(turnId, messageId) || !activeAudioTimeline) {
+      return;
+    }
+    activeAudioTimeline.engine.markSinkTerminal(
+      LIP_SYNC_TIMELINE_SINK_ID,
+      terminal,
+      reason,
+    );
   }
 
   function markAudioTimelineTerminal(

@@ -213,6 +213,27 @@ function testLateSinkEventsDoNotRewriteTerminalTimeline(): void {
   );
 }
 
+function testTerminalSinkEventsAreStable(): void {
+  const engine = createPlaybackTimelineEngine({ now: () => 0 });
+  engine.load(
+    { turnId: "turn-5", messageId: "msg-5" },
+    [
+      { id: "audio", required: true },
+      { id: "lip_sync", required: false },
+    ],
+  );
+
+  engine.markSinkStarted("audio");
+  engine.start();
+  engine.markSinkTerminal("lip_sync", "failed", "lip_sync_unavailable");
+  engine.markSinkTerminal("lip_sync", "completed", "audio_playback_completed");
+  engine.markSinkStarted("lip_sync");
+
+  const lipSyncSink = engine.getSnapshot()?.sinks.find((sink) => sink.id === "lip_sync");
+  assert.equal(lipSyncSink?.terminal, "failed");
+  assert.equal(lipSyncSink?.reason, "lip_sync_unavailable");
+}
+
 function run(): void {
   testSyntheticClockLifecycle();
   testAudioClockTakesPriorityAndFallsBack();
@@ -221,6 +242,7 @@ function run(): void {
   testTimelineFailsWhenRequiredSinkFails();
   testInterruptPropagatesToActiveSinks();
   testLateSinkEventsDoNotRewriteTerminalTimeline();
+  testTerminalSinkEventsAreStable();
   console.log("playbackTimelineEngine tests passed");
 }
 

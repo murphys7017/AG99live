@@ -246,6 +246,9 @@ export function createPlaybackTimelineEngine(
         return;
       }
       const sink = getRegisteredSink(sinkId);
+      if (isTerminal(sink.state.terminal)) {
+        return;
+      }
       sink.state.terminal = "started";
       delete sink.state.reason;
       if (phase === "preparing" && isReady()) {
@@ -258,6 +261,9 @@ export function createPlaybackTimelineEngine(
         return;
       }
       const sink = getRegisteredSink(sinkId);
+      if (isTerminal(sink.state.terminal)) {
+        return;
+      }
       sink.state.terminal = terminal;
       sink.state.reason = reason;
       if (phase === "preparing" && isReady()) {

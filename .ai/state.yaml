@@ -2,7 +2,7 @@ task:
   class: feature
   risk: medium
   phase: unified_playback_timeline_phase3_motion_timeline_context
-  scope: Frontend motion release timeline-context integration while preserving existing audio-start notification migration path
+  scope: Frontend playback timeline integration for audio, lip sync, and audio-start motion bridge
 context:
   confidence: medium
   assumptions:
@@ -10,12 +10,14 @@ context:
     - Audio timeline integration observes and records real audio playback clock state, but does not yet replace turnPlaybackOrchestrator release decisions.
     - Audio playback is now injected through PlaybackTimelineAudioSink instead of separate start/stop/clock functions, making audio execution a concrete timeline sink boundary.
     - The first shipped timeline shape should remain single active segment oriented, matching the current turn playback session semantics.
-    - Existing notifyAudioPlaybackStarted based motion timing remains the migration path until a later timeline integration phase takes ownership.
+    - ModelEngine notifyAudioPlaybackStarted remains the internal motion scheduling entry point, but it is now triggered from AdapterAudioRuntime audio timeline started events instead of PlaybackCompletionCoordinator session watches.
     - Motion release now receives a strictly matched active audio timeline snapshot when turnId and messageId match; mismatched timeline snapshots are intentionally ignored.
     - ModelEngine now prefers playback timeline duration/currentTime for motion target duration when the release context carries a valid audio timeline snapshot.
     - Audio-start notifications now refresh pending motion entries with the current matched audio timeline snapshot before starting the payload, avoiding stale release-time timeline snapshots.
     - Speech-only motion now also consumes the matched audio-start timeline snapshot when no queued motion starts, so speech-following plans use real remaining audio duration instead of relying only on SessionStore fallback lookup.
     - Motion release timeline matching now lives in PlaybackTimelineMotionSink; TurnPlaybackOrchestrator no longer reads active audio timeline snapshots directly.
+    - Lip sync runtime has been moved behind PlaybackTimelineLipSyncSink; AudioSink owns attaching, resuming, and stopping lip sync for the active audio element while reporting lip_sync sink state into the active playback timeline.
+    - Playback timeline sink terminal state is now stable once a sink reaches a terminal value, so late cleanup/completion events cannot overwrite a real failure.
     - Stopping an already-playing audio segment now writes an audio terminal only when no more specific terminal reason has already been set.
     - The automatic LLM motion path remains pure engine.motion_intent.v3 semantic axes; catalog motion, motion3, exp3, and choice outputs stay out of this path.
     - The automatic motion path is middleware-first only; inline_first / <@anim> is no longer a runtime-selectable motion generation route.
@@ -28,7 +30,7 @@ context:
     - Empty, invalid, or all-neutral motion axes should not be replaced by a fallback pose; those turns should be treated as no valid motion input.
   unresolved_questions:
     - Phase 2 still needs a careful extraction boundary for a standalone AudioSink because audioRuntime currently owns queueing, pending items, and settle behavior in addition to raw playback.
-    - Phase 3 still needs a full MotionSink migration before notifyAudioPlaybackStarted can be removed as a migration path.
+    - Phase 3 still needs a full MotionSink/timeline event migration before ModelEngine notifyAudioPlaybackStarted can be removed as an internal bridge.
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.
     - For earlier curve generation during actual TTS synthesis, identify an AstrBot hook before message-chain Record creation; current MVP starts from emit_message_chain and never blocks playback.
@@ -40,9 +42,13 @@ architecture:
     - AdapterAudioRuntime depends on PlaybackTimelineAudioSink for audio start/stop/clock access, while createAdapterConnection wires the browser HTMLAudioElement implementation through createBrowserAudioTimelineSink.
     - TurnPlaybackOrchestrator now releases audio before motion for the same ready segment so audioRuntime can create an active timeline before ModelEngine ingests the motion payload.
     - A new PlaybackTimelineMotionSink wraps ModelEngine motion start and attaches only same turnId/messageId audio timeline snapshots to motion contexts.
+    - A new PlaybackTimelineLipSyncSink wraps WAV lip sync preload, live WebAudio RMS sampling, external Live2D lip sync writes, and cleanup; it is currently executed through AudioSink, while AdapterAudioRuntime registers lip_sync as an optional PlaybackTimelineEngine sink and records started/failed/completed terminal state.
+    - PlaybackTimelineEngine ignores late started/terminal events for sinks that are already completed, failed, absent, or interrupted.
+    - During early development, fallback behavior should be fail-visible: optional sinks may fail without blocking required playback, but missing capabilities must not be silently reported as started or completed.
+    - AdapterConnection exposes setAudioTimelineStartedHandler so PetDesktopRuntime can drive ModelEngine motion wakeup from the real audio timeline started event instead of CompletionCoordinator session watching.
     - Frontend motion ingest context can carry an optional playbackTimeline snapshot; ModelEngine pending scheduler preserves it and motionStart uses it before falling back to sessionStore audio-duration lookup.
-    - ModelEngine pending motion entries refresh their playbackTimeline from the audio-start notification when a same turnId/messageId audio timeline is available.
-    - ModelEngine speech-only audio-start path now passes a same turnId/messageId playbackTimeline snapshot into motionStart, keeping speech-only timing on the same timeline contract as queued motion.
+    - ModelEngine pending motion entries refresh their playbackTimeline from the AdapterAudioRuntime audio timeline started event when a same turnId/messageId audio timeline is available.
+    - ModelEngine speech-only audio-start path now receives a same turnId/messageId playbackTimeline snapshot from the audio timeline started bridge, keeping speech-only timing on the same timeline contract as queued motion.
     - Generic audio stop cleanup no longer overwrites a more specific terminal reason such as audio_playback_replaced_by_new_input.
     - Adapter runtime no longer exposes inline_first / enable_inline_motion_contract configuration; <@anim> inline motion tags are not parsed or broadcast as a runtime motion path.
     - Frontend and adapter motion-intent boundaries are now v3-only; v2 nested axes are treated as invalid input instead of being normalized forward.

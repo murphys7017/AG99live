@@ -26,7 +26,6 @@ function createHarness() {
   const sessionStore = useTurnPlaybackSessionStore();
   const playbackFinishedCalls: PlaybackFinishedCall[] = [];
   const clearContextCalls: Array<{ turnId: string | null }> = [];
-  const audioStarted: Array<{ turnId: string | null; messageId: string }> = [];
   const scheduledTimers = new Map<number, () => void>();
   let nextTimerId = 1;
 
@@ -63,9 +62,6 @@ function createHarness() {
       getSelectedModel: () => ref(null),
     },
     motionPlayer: mockMotionPlayer as never,
-    onAudioPlaybackStarted: (turnId, messageId) => {
-      audioStarted.push({ turnId, messageId });
-    },
     schedule: (_delayMs, fn) => {
       const timerId = nextTimerId++;
       scheduledTimers.set(timerId, fn);
@@ -88,7 +84,6 @@ function createHarness() {
     mockMotionPlayer,
     playbackFinishedCalls,
     clearContextCalls,
-    audioStarted,
     scheduledTimers,
     runScheduledTimer: (timerId: number) => {
       const fn = scheduledTimers.get(timerId);
@@ -170,16 +165,6 @@ async function testTurnFinishedBeforeSynthFinishedDoesNotAck(): Promise<void> {
   await h.flush();
   assert.equal(h.playbackFinishedCalls.length, 1);
   assert.equal(h.sessionStore.getActiveSession()?.phase, "completed");
-}
-
-async function testAudioStartedNotificationIsSegmentScoped(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markAudioReceived("turn-1", "http://localhost/a.wav", "msg-a");
-  h.sessionStore.markAudioStarted("turn-1", "msg-a", 100, 1000);
-  await h.flush();
-
-  assert.deepEqual(h.audioStarted, [{ turnId: "turn-1", messageId: "msg-a" }]);
 }
 
 async function testMotionCompletionWritesCorrectSegment(): Promise<void> {
@@ -764,7 +749,6 @@ async function run(): Promise<void> {
   await testSegmentCompletionDoesNotFinishTurnEarly();
   await testAllSegmentsAndSynthFinishedAckOnce();
   await testTurnFinishedBeforeSynthFinishedDoesNotAck();
-  await testAudioStartedNotificationIsSegmentScoped();
   await testMotionCompletionWritesCorrectSegment();
   await testMotionHandoffCompletesPreviousSegmentAndFinishesCurrent();
   await testCatalogMotionCompletionWritesSegmentAndHistory();

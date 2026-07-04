@@ -43,6 +43,12 @@ function buildAudioSink(options: {
 async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
   const state = buildState();
   const startOptionsRef: { current: PlaybackTimelineAudioStartCallbacks | null } = { current: null };
+  const audioTimelineStarted: Array<{
+    turnId: string | null;
+    messageId: string;
+    phase: string | undefined;
+    durationMs: number | null | undefined;
+  }> = [];
   const runtime = createAdapterAudioRuntime({
     state,
     audioSink: buildAudioSink({
@@ -53,6 +59,7 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
           startedAtMs: 100,
           durationMs: 1250,
         });
+        callbacks.onLipSyncStarted?.();
       },
       getClock: () => ({
         getCurrentTimeMs: () => 320,
@@ -63,6 +70,14 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
     }),
     pushHistory: () => {},
     getSessionStore: () => undefined,
+    onAudioTimelineStarted: (turnId, messageId, playbackTimeline) => {
+      audioTimelineStarted.push({
+        turnId,
+        messageId,
+        phase: playbackTimeline?.phase,
+        durationMs: playbackTimeline?.durationMs,
+      });
+    },
   });
 
   runtime.queueAudioForPlayback("http://127.0.0.1/audio.wav", "turn-1", "msg-1");
@@ -77,11 +92,26 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
   assert.equal(snapshot?.currentTimeMs, 320);
   assert.equal(snapshot?.durationMs, 1250);
   assert.equal(snapshot?.sinks.find((sink) => sink.id === "audio")?.terminal, "started");
+  assert.equal(snapshot?.sinks.find((sink) => sink.id === "lip_sync")?.terminal, "started");
+  assert.deepEqual(audioTimelineStarted, [
+    {
+      turnId: "turn-1",
+      messageId: "msg-1",
+      phase: "playing",
+      durationMs: 1250,
+    },
+  ]);
 }
 
 async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
   const state = buildState();
   const startOptionsRef: { current: PlaybackTimelineAudioStartCallbacks | null } = { current: null };
+  const audioTimelineStarted: Array<{
+    turnId: string | null;
+    messageId: string;
+    phase: string | undefined;
+    durationMs: number | null | undefined;
+  }> = [];
   const runtime = createAdapterAudioRuntime({
     state,
     audioSink: buildAudioSink({
@@ -92,6 +122,7 @@ async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
           startedAtMs: 50,
           durationMs: 900,
         });
+        callbacks.onLipSyncStarted?.();
       },
       getClock: () => ({
         getCurrentTimeMs: () => 900,
@@ -111,9 +142,46 @@ async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
 
   const options = startOptionsRef.current;
   assert.ok(options);
+  options.onLipSyncTerminal?.("completed", "audio_playback_completed");
   options.onEnded?.();
 
   assert.equal(runtime.getActiveAudioTimelineSnapshot(), null);
+}
+
+async function testLipSyncFailureRemainsVisibleUntilAudioCompletes(): Promise<void> {
+  const state = buildState();
+  const runtime = createAdapterAudioRuntime({
+    state,
+    audioSink: buildAudioSink({
+      start: async (_url, callbacks) => {
+        callbacks.onPlaybackStarted?.({
+          startedAtMs: 80,
+          durationMs: 1000,
+        });
+        callbacks.onLipSyncTerminal?.("failed", "lip_sync_unavailable");
+        callbacks.onLipSyncTerminal?.("completed", "audio_playback_completed");
+      },
+      getClock: () => ({
+        getCurrentTimeMs: () => 100,
+        getDurationMs: () => 1000,
+        getPlaybackRate: () => 1,
+        isPlaying: () => true,
+      }),
+    }),
+    pushHistory: () => {},
+    getSessionStore: () => undefined,
+  });
+
+  runtime.queueAudioForPlayback("http://127.0.0.1/audio.wav", "turn-lip", "msg-lip");
+  assert.equal(runtime.releaseAudioForPlayback("msg-lip", "turn-lip"), true);
+  await flushMicrotasks();
+
+  const snapshot = runtime.getActiveAudioTimelineSnapshot();
+  assert.equal(snapshot?.sinks.find((sink) => sink.id === "lip_sync")?.terminal, "failed");
+  assert.equal(
+    snapshot?.sinks.find((sink) => sink.id === "lip_sync")?.reason,
+    "lip_sync_unavailable",
+  );
 }
 
 async function testAudioTimelineInterruptsPreparedAudioOnStopAll(): Promise<void> {
@@ -201,6 +269,7 @@ async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise
 async function run(): Promise<void> {
   await testAudioPlaybackCreatesAudioClockTimeline();
   await testAudioTimelineCompletesOnAudioEnded();
+  await testLipSyncFailureRemainsVisibleUntilAudioCompletes();
   await testAudioTimelineInterruptsPreparedAudioOnStopAll();
   await testStartingNextAudioSettlesInterruptedPreviousSegment();
   console.log("adapterAudioRuntime tests passed");

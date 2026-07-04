@@ -46,7 +46,6 @@ interface PlaybackCompletionCoordinatorOptions {
   playbackAck: PlaybackAckPort;
   motionRecord: MotionPlaybackRecordPort;
   motionPlayer: PreviewMotionPlayer;
-  onAudioPlaybackStarted: (turnId: string | null, messageId: string) => void;
   schedule?: (delayMs: number, fn: () => void) => unknown;
   clearSchedule?: (timer: unknown) => void;
   initialMotionPlaybackRecords?: readonly DesktopMotionPlaybackRecord[];
@@ -89,7 +88,6 @@ export function usePlaybackCompletionCoordinator(
 
   // Lightweight internal state — session is the single source of truth
   const settlementTimers = new Map<string, unknown>();
-  const notifiedAudioStartedSegments = new Set<string>();
   const ackedSessions = new Set<string>();
   const activeMotionSegments = new Set<string>();
   let currentMotionSegmentKey: string | null = null;
@@ -152,7 +150,6 @@ export function usePlaybackCompletionCoordinator(
     for (const key of settlementTimers.keys()) {
       clearSettlementTimer(key);
     }
-    notifiedAudioStartedSegments.clear();
     ackedSessions.clear();
     activeMotionSegments.clear();
     currentMotionSegmentKey = null;
@@ -189,7 +186,6 @@ export function usePlaybackCompletionCoordinator(
     if (!s) return;
     for (const segmentId of s.segmentOrder) {
       clearSettlementTimer(segmentKey(sessionId, segmentId));
-      notifiedAudioStartedSegments.delete(segmentKey(sessionId, segmentId));
       activeMotionSegments.delete(segmentKey(sessionId, segmentId));
     }
     ackedSessions.delete(sessionId);
@@ -448,35 +444,6 @@ export function usePlaybackCompletionCoordinator(
 
   // ── watchers: observe session, write back on completion ─────────
 
-  watch(
-    () => options.sessionStore.getSessions().map((session) => ({
-      id: session.id,
-      turnId: session.turnId,
-      segments: session.segmentOrder.map((segmentId) => {
-        const segment = session.segments.get(segmentId);
-        return {
-          messageId: segmentId,
-          turnId: segment?.turnId ?? null,
-          audioStarted: segment?.audio.started ?? false,
-          audioStartedAtMs: segment?.audio.startedAtMs ?? null,
-        };
-      }),
-    })),
-    () => {
-      for (const session of options.sessionStore.getSessions()) {
-        for (const segmentId of session.segmentOrder) {
-          const segment = session.segments.get(segmentId);
-          const key = segmentKey(session.id, segmentId);
-          if (!segment?.audio.started || notifiedAudioStartedSegments.has(key)) {
-            continue;
-          }
-          notifiedAudioStartedSegments.add(key);
-          options.onAudioPlaybackStarted(segment.turnId, segment.messageId);
-        }
-      }
-    },
-    { deep: true },
-  );
 
   // Text delivered → try flush
   watch(

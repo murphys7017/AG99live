@@ -5,9 +5,18 @@ import {
   type RuntimeAudioPlaybackClock,
 } from "../adapter-connection/runtime/audioPlayback.js";
 import type { AudioPlaybackClock } from "./contracts.js";
+import {
+  createBrowserLipSyncTimelineSink,
+  type PlaybackTimelineLipSyncSink,
+} from "./lipSyncSink.js";
 
 export interface PlaybackTimelineAudioStartCallbacks {
   onLipSyncUnavailable?: () => void;
+  onLipSyncStarted?: () => void;
+  onLipSyncTerminal?: (
+    terminal: "completed" | "failed" | "interrupted",
+    reason: string,
+  ) => void;
   onDurationChanged?: (durationMs: number | null) => void;
   onPlaybackStarted?: (event: { startedAtMs: number; durationMs: number | null }) => void;
   onEnded?: () => void;
@@ -29,18 +38,61 @@ function adaptClock(clock: RuntimeAudioPlaybackClock): AudioPlaybackClock {
   };
 }
 
-export function createBrowserAudioTimelineSink(): PlaybackTimelineAudioSink {
+export function createBrowserAudioTimelineSink(
+  lipSyncSink: PlaybackTimelineLipSyncSink = createBrowserLipSyncTimelineSink(),
+): PlaybackTimelineAudioSink {
   return {
     async start(audioUrl, callbacks = {}) {
+      let lipSyncTerminalSettled = false;
+      const settleLipSyncTerminal = (
+        terminal: "completed" | "failed" | "interrupted",
+        reason: string,
+      ) => {
+        if (lipSyncTerminalSettled) {
+          return;
+        }
+        lipSyncTerminalSettled = true;
+        callbacks.onLipSyncTerminal?.(terminal, reason);
+      };
+      lipSyncSink.stop();
       await startAudioPlayback(audioUrl, {
-        onLipSyncUnavailable: () => callbacks.onLipSyncUnavailable?.(),
+        onAudioElementCreated: (event) => {
+          lipSyncSink.attachAudio({
+            audioUrl,
+            audio: event.audio,
+            getAudioCurrentTimeSeconds: event.getAudioCurrentTimeSeconds,
+            isCurrentAudio: event.isCurrentAudio,
+            onStarted: () => {
+              callbacks.onLipSyncStarted?.();
+            },
+            onUnavailable: () => {
+              callbacks.onLipSyncUnavailable?.();
+              settleLipSyncTerminal("failed", "lip_sync_unavailable");
+            },
+          });
+        },
+        onAudioElementDisposed: () => {
+          lipSyncSink.stop();
+        },
         onDurationChanged: (durationMs) => callbacks.onDurationChanged?.(durationMs),
-        onPlaybackStarted: (event) => callbacks.onPlaybackStarted?.(event),
-        onEnded: () => callbacks.onEnded?.(),
-        onError: () => callbacks.onError?.(),
+        onPlaybackStarted: (event) => {
+          void lipSyncSink.resume().catch(() => {
+            settleLipSyncTerminal("failed", "lip_sync_resume_failed");
+          });
+          callbacks.onPlaybackStarted?.(event);
+        },
+        onEnded: () => {
+          settleLipSyncTerminal("completed", "audio_playback_completed");
+          callbacks.onEnded?.();
+        },
+        onError: () => {
+          settleLipSyncTerminal("failed", "audio_playback_error");
+          callbacks.onError?.();
+        },
       });
     },
     stop() {
+      lipSyncSink.stop();
       stopAudioPlaybackRuntime();
     },
     getClock() {

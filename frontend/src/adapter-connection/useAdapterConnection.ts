@@ -34,6 +34,9 @@ import {
 import {
   createBrowserAudioTimelineSink,
 } from "../playback-timeline/audioSink.js";
+import type {
+  PlaybackTimelineSnapshot,
+} from "../playback-timeline/contracts.js";
 import {
   buildConnectFailureMessage,
   buildConnectionCandidates,
@@ -99,6 +102,13 @@ export interface AdapterConnectionInstance {
     turnId?: string | null,
   ) => boolean;
   setMotionPreviewHandler: (handler: ((payload: unknown) => boolean) | null) => void;
+  setAudioTimelineStartedHandler: (
+    handler: ((
+      turnId: string | null,
+      messageId: string,
+      playbackTimeline: PlaybackTimelineSnapshot | null,
+    ) => void) | null,
+  ) => void;
   sendPlaybackFinishedForCurrentGroup: (
     turnId: string | null,
     success: boolean,
@@ -139,6 +149,11 @@ export function createAdapterConnection(
   let historyAdapter: AdapterHistory | null = null;
   let motionTuningAdapter: AdapterMotionTuning | null = null;
   let motionPreviewHandler: ((payload: unknown) => boolean) | null = null;
+  let audioTimelineStartedHandler: ((
+    turnId: string | null,
+    messageId: string,
+    playbackTimeline: PlaybackTimelineSnapshot | null,
+  ) => void) | null = null;
   let detachPttHookStatusListener: (() => void) | null = null;
 
   function buildMessageEnvelope<TPayload>(
@@ -210,6 +225,8 @@ export function createAdapterConnection(
     audioSink: createBrowserAudioTimelineSink(),
     pushHistory: pushHistory as (role: string, text: string) => void,
     getSessionStore: () => sessionStore,
+    onAudioTimelineStarted: (turnId, messageId, playbackTimeline) =>
+      audioTimelineStartedHandler?.(turnId, messageId, playbackTimeline),
   });
 
   const {
@@ -566,6 +583,12 @@ export function createAdapterConnection(
     motionPreviewHandler = handler;
   }
 
+  function setAudioTimelineStartedHandler(
+    handler: typeof audioTimelineStartedHandler,
+  ): void {
+    audioTimelineStartedHandler = handler;
+  }
+
   async function sendPlaybackFinished(
     turnId: string | null,
     success: boolean,
@@ -636,6 +659,7 @@ export function createAdapterConnection(
     sendMotionPayloadPreview,
     sendMotionLabRawEvent,
     setMotionPreviewHandler,
+    setAudioTimelineStartedHandler,
     sendPlaybackFinishedForCurrentGroup: sendPlaybackFinished,
     clearPlaybackGroupContext,
     releaseAssistantTextForPlayback,
