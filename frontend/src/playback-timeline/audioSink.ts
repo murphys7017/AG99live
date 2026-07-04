@@ -6,6 +6,7 @@ import {
 } from "../adapter-connection/runtime/audioPlayback.js";
 import type { AudioPlaybackClock } from "./contracts.js";
 import {
+  createPlaybackTimelineLipSyncRuntime,
   createBrowserLipSyncTimelineSink,
   type PlaybackTimelineLipSyncSink,
 } from "./lipSyncSink.js";
@@ -43,60 +44,37 @@ export function createBrowserAudioTimelineSink(
 ): PlaybackTimelineAudioSink {
   return {
     async start(audioUrl, callbacks = {}) {
-      let lipSyncTerminalSettled = false;
-      let lipSyncStarted = false;
-      const settleLipSyncTerminal = (
-        terminal: "completed" | "failed" | "interrupted",
-        reason: string,
-      ) => {
-        if (lipSyncTerminalSettled) {
-          return;
-        }
-        lipSyncTerminalSettled = true;
-        callbacks.onLipSyncTerminal?.(terminal, reason);
-      };
-      lipSyncSink.stop();
+      const lipSyncRuntime = createPlaybackTimelineLipSyncRuntime(
+        lipSyncSink,
+        {
+          onUnavailable: callbacks.onLipSyncUnavailable,
+          onStarted: callbacks.onLipSyncStarted,
+          onTerminal: callbacks.onLipSyncTerminal,
+        },
+      );
       await startAudioPlayback(audioUrl, {
         onAudioElementCreated: (event) => {
-          lipSyncSink.attachAudio({
+          lipSyncRuntime.attachAudio({
             audioUrl,
             audio: event.audio,
             getAudioCurrentTimeSeconds: event.getAudioCurrentTimeSeconds,
             isCurrentAudio: event.isCurrentAudio,
-            onStarted: () => {
-              if (lipSyncTerminalSettled) {
-                return;
-              }
-              lipSyncStarted = true;
-              callbacks.onLipSyncStarted?.();
-            },
-            onUnavailable: () => {
-              callbacks.onLipSyncUnavailable?.();
-              settleLipSyncTerminal("failed", "lip_sync_unavailable");
-            },
           });
         },
         onAudioElementDisposed: () => {
-          lipSyncSink.stop();
+          lipSyncRuntime.stop();
         },
         onDurationChanged: (durationMs) => callbacks.onDurationChanged?.(durationMs),
         onPlaybackStarted: (event) => {
-          void lipSyncSink.resume().catch(() => {
-            settleLipSyncTerminal("failed", "lip_sync_resume_failed");
-          });
+          void lipSyncRuntime.resume();
           callbacks.onPlaybackStarted?.(event);
         },
         onEnded: () => {
-          settleLipSyncTerminal(
-            lipSyncStarted ? "completed" : "failed",
-            lipSyncStarted
-              ? "audio_playback_completed"
-              : "lip_sync_not_started_before_audio_end",
-          );
+          lipSyncRuntime.completeAfterAudioEnded();
           callbacks.onEnded?.();
         },
         onError: () => {
-          settleLipSyncTerminal("failed", "audio_playback_error");
+          lipSyncRuntime.failAfterAudioError();
           callbacks.onError?.();
         },
       });

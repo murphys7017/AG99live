@@ -14,6 +14,8 @@ context:
     - Motion release now receives a strictly matched active audio timeline snapshot when turnId and messageId match; mismatched timeline snapshots are intentionally ignored.
     - Motion release now registers a required motion sink on the matched active audio timeline; ModelEngine started/finished callbacks write motion started/completed/failed/interrupted terminal state back into that timeline.
     - Active audio timelines are retained after audio completion when a required motion sink is still running, and are cleared only after the timeline reaches completed/failed/interrupted.
+    - Active playback timeline lifecycle has been extracted from AdapterAudioRuntime into PlaybackTimelineRuntime; AdapterAudioRuntime now delegates audio timeline, motion-only timeline, and motion/lip-sync sink terminal updates.
+    - TurnPlaybackOrchestratorCore now emits a typed segment release job with explicit text/audio/motion slots instead of separately owning text/audio/motion release calls; segmentPlaybackRelease maps that job onto the existing release ports during migration.
     - PreviewMotionPlayer now reports stopped terminal events for explicit motion stops and direct-plan replacement, so motion timeline sinks do not depend on silent local cleanup.
     - Motion-only segments now create a synthetic playback timeline with motion as the required sink when no matching audio timeline exists.
     - ModelEngine now prefers playback timeline duration/currentTime for motion target duration when the release context carries a valid audio timeline snapshot.
@@ -49,12 +51,15 @@ architecture:
     - Audio runtime now creates an active playback timeline for each released audio segment, attaches the HTMLAudioElement playback clock on playback start, and clears the timeline on completion, failure, or interruption.
     - AdapterAudioRuntime depends on PlaybackTimelineAudioSink for audio start/stop/clock access, while createAdapterConnection wires the browser HTMLAudioElement implementation through createBrowserAudioTimelineSink.
     - TurnPlaybackOrchestrator now releases audio before motion for the same ready segment so audioRuntime can create an active timeline before ModelEngine ingests the motion payload.
+    - Segment playback release is now a dedicated turn-playback boundary; motion release requires a valid receivedAtMs and fails visibly instead of substituting a local fallback timestamp.
     - A new PlaybackTimelineMotionSink wraps ModelEngine motion start and attaches only same turnId/messageId audio timeline snapshots to motion contexts.
     - PlaybackTimelineMotionSink now prepares a required motion sink on matched audio timelines and marks it failed when ModelEngine rejects the motion payload before playback starts.
     - PreviewMotionPlayer catalog motion playback now exposes started/terminal callbacks with runId, allowing catalog motions to participate in motion timeline terminal tracking.
     - PreviewMotionPlayer stores the active terminal callback and emits a single stopped terminal when playback is explicitly stopped before the Live2D runtime reports completion.
     - AdapterAudioRuntime exposes a motion-only timeline preparation path so no-audio motion segments can still run under PlaybackTimelineEngine with a synthetic clock.
+    - PlaybackTimelineRuntime is the neutral owner for the active segment timeline slot during migration; AdapterAudioRuntime remains the outer audio queue/playback compatibility facade.
     - A new PlaybackTimelineLipSyncSink wraps WAV lip sync preload, live WebAudio RMS sampling, external Live2D lip sync writes, and cleanup; it is currently executed through AudioSink, while AdapterAudioRuntime registers lip_sync as an optional PlaybackTimelineEngine sink and records started/failed/completed terminal state.
+    - PlaybackTimelineLipSyncRuntime now owns lip-sync started/unavailable/completed/failed settlement, so AudioSink no longer carries the lip-sync terminal state machine directly.
     - PlaybackTimelineEngine ignores late started/terminal events for sinks that are already completed, failed, absent, or interrupted.
     - During early development, fallback behavior should be fail-visible: optional sinks may fail without blocking required playback, but missing capabilities must not be silently reported as started or completed.
     - TimelineClock uses synthetic clock only for explicit no-audio timing; attached audio clock failures are exposed as audio_unavailable rather than hidden behind synthetic.

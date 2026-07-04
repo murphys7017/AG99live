@@ -3,9 +3,8 @@ import type {
   PlaybackTimelineSnapshot,
 } from "../../playback-timeline/contracts.js";
 import {
-  createPlaybackTimelineEngine,
-  type PlaybackTimelineEngine,
-} from "../../playback-timeline/playbackTimelineEngine.js";
+  createPlaybackTimelineRuntime,
+} from "../../playback-timeline/playbackTimelineRuntime.js";
 import {
   playAudioAndAcknowledge as playAudioAction,
   stopAudioPlayback as stopAudioAction,
@@ -147,18 +146,27 @@ export interface AdapterAudioRuntime {
   ) => void;
 }
 
-const AUDIO_TIMELINE_SINK_ID = "audio";
-const LIP_SYNC_TIMELINE_SINK_ID = "lip_sync";
-const MOTION_TIMELINE_SINK_ID = "motion";
-
 export function createAdapterAudioRuntime(
   deps: AdapterAudioRuntimeDeps,
 ): AdapterAudioRuntime {
-  let activeAudioTimeline: {
-    turnId: string | null;
-    messageId: string;
-    engine: PlaybackTimelineEngine;
-  } | null = null;
+  const playbackTimelineRuntime = createPlaybackTimelineRuntime({
+    getAudioClock: () => deps.audioSink.getClock(),
+    onAudioTimelineStarted: deps.onAudioTimelineStarted,
+  });
+  const {
+    prepareAudioTimeline,
+    prepareMotionOnlyTimeline,
+    markAudioTimelineDuration,
+    markAudioTimelineStarted,
+    markLipSyncTimelineStarted,
+    markLipSyncTimelineTerminal,
+    prepareMotionTimelineSink,
+    markMotionTimelineStarted,
+    markMotionTimelineTerminal,
+    markAudioTimelineTerminal,
+    stopActiveTimeline: stopActiveAudioTimeline,
+    getActiveTimelineSnapshot: getActiveAudioTimelineSnapshot,
+  } = playbackTimelineRuntime;
 
   const audioBridge = {
     get state() {
@@ -235,215 +243,6 @@ export function createAdapterAudioRuntime(
 
   function resetAudioPlaybackTerminal(): void {
     resetAudioTerminalBridge(audioBridge);
-  }
-
-  function isActiveAudioTimeline(
-    turnId: string | null,
-    messageId: string,
-  ): boolean {
-    return Boolean(
-      activeAudioTimeline
-      && activeAudioTimeline.messageId === messageId
-      && (
-        matchesTurn(activeAudioTimeline.turnId, turnId)
-        || (!activeAudioTimeline.turnId && !turnId)
-      ),
-    );
-  }
-
-  function prepareAudioTimeline(
-    turnId: string | null,
-    messageId: string,
-  ): void {
-    const engine = createPlaybackTimelineEngine();
-    engine.load(
-      { turnId, messageId },
-      [
-        { id: AUDIO_TIMELINE_SINK_ID, required: true },
-        { id: LIP_SYNC_TIMELINE_SINK_ID, required: false },
-      ],
-    );
-    activeAudioTimeline = {
-      turnId,
-      messageId,
-      engine,
-    };
-  }
-
-  function prepareMotionOnlyTimeline(
-    turnId: string | null,
-    messageId: string,
-  ): PlaybackTimelineSnapshot | null {
-    if (isActiveAudioTimeline(turnId, messageId) && activeAudioTimeline) {
-      return prepareMotionTimelineSink(turnId, messageId)
-        ? activeAudioTimeline.engine.getSnapshot()
-        : null;
-    }
-    if (activeAudioTimeline) {
-      return null;
-    }
-    const engine = createPlaybackTimelineEngine();
-    engine.load(
-      { turnId, messageId },
-      [
-        { id: MOTION_TIMELINE_SINK_ID, required: true },
-      ],
-    );
-    activeAudioTimeline = {
-      turnId,
-      messageId,
-      engine,
-    };
-    return engine.getSnapshot();
-  }
-
-  function markAudioTimelineDuration(
-    turnId: string | null,
-    messageId: string,
-    durationMs: number | null,
-  ): void {
-    if (!isActiveAudioTimeline(turnId, messageId)) {
-      return;
-    }
-    activeAudioTimeline?.engine.setExpectedDurationMs(durationMs);
-  }
-
-  function markAudioTimelineStarted(
-    turnId: string | null,
-    messageId: string,
-    startedAtMs: number,
-    durationMs: number | null,
-  ): void {
-    if (!isActiveAudioTimeline(turnId, messageId) || !activeAudioTimeline) {
-      return;
-    }
-    const engine = activeAudioTimeline.engine;
-    engine.setExpectedDurationMs(durationMs);
-    const audioClock = deps.audioSink.getClock();
-    if (audioClock) {
-      engine.attachAudioClock(audioClock);
-    }
-    engine.markSinkStarted(AUDIO_TIMELINE_SINK_ID);
-    if (engine.getPhase() === "ready") {
-      engine.start(startedAtMs);
-    }
-    deps.onAudioTimelineStarted?.(
-      turnId,
-      messageId,
-      engine.getSnapshot(),
-    );
-  }
-
-  function markLipSyncTimelineStarted(
-    turnId: string | null,
-    messageId: string,
-  ): void {
-    if (!isActiveAudioTimeline(turnId, messageId) || !activeAudioTimeline) {
-      return;
-    }
-    activeAudioTimeline.engine.markSinkStarted(LIP_SYNC_TIMELINE_SINK_ID);
-  }
-
-  function markLipSyncTimelineTerminal(
-    turnId: string | null,
-    messageId: string,
-    terminal: "completed" | "failed" | "interrupted",
-    reason: string,
-  ): void {
-    if (!isActiveAudioTimeline(turnId, messageId) || !activeAudioTimeline) {
-      return;
-    }
-    activeAudioTimeline.engine.markSinkTerminal(
-      LIP_SYNC_TIMELINE_SINK_ID,
-      terminal,
-      reason,
-    );
-  }
-
-  function isTimelineTerminalPhase(): boolean {
-    const phase = activeAudioTimeline?.engine.getPhase();
-    return phase === "completed" || phase === "failed" || phase === "interrupted";
-  }
-
-  function clearActiveAudioTimelineIfTerminal(): void {
-    if (isTimelineTerminalPhase()) {
-      activeAudioTimeline = null;
-    }
-  }
-
-  function prepareMotionTimelineSink(
-    turnId: string | null,
-    messageId: string,
-  ): boolean {
-    if (!isActiveAudioTimeline(turnId, messageId) || !activeAudioTimeline) {
-      return false;
-    }
-    const engine = activeAudioTimeline.engine;
-    if (!engine.hasSink(MOTION_TIMELINE_SINK_ID)) {
-      engine.registerSink({
-        id: MOTION_TIMELINE_SINK_ID,
-        required: true,
-      });
-    }
-    return true;
-  }
-
-  function markMotionTimelineStarted(
-    turnId: string | null,
-    messageId: string,
-  ): void {
-    if (!prepareMotionTimelineSink(turnId, messageId) || !activeAudioTimeline) {
-      return;
-    }
-    const engine = activeAudioTimeline.engine;
-    engine.markSinkStarted(MOTION_TIMELINE_SINK_ID);
-    if (engine.getPhase() === "ready") {
-      engine.start();
-    }
-  }
-
-  function markMotionTimelineTerminal(
-    turnId: string | null,
-    messageId: string,
-    terminal: "completed" | "failed" | "interrupted",
-    reason: string,
-  ): void {
-    if (!prepareMotionTimelineSink(turnId, messageId) || !activeAudioTimeline) {
-      return;
-    }
-    activeAudioTimeline.engine.markSinkTerminal(
-      MOTION_TIMELINE_SINK_ID,
-      terminal,
-      reason,
-    );
-    clearActiveAudioTimelineIfTerminal();
-  }
-
-  function markAudioTimelineTerminal(
-    turnId: string | null,
-    messageId: string,
-    terminal: "completed" | "failed" | "interrupted",
-    reason: string,
-  ): void {
-    if (!isActiveAudioTimeline(turnId, messageId) || !activeAudioTimeline) {
-      return;
-    }
-    const engine = activeAudioTimeline.engine;
-    if (terminal === "interrupted") {
-      engine.interrupt(reason);
-    } else {
-      engine.detachAudioClock();
-      engine.markSinkTerminal(AUDIO_TIMELINE_SINK_ID, terminal, reason);
-    }
-    clearActiveAudioTimelineIfTerminal();
-  }
-
-  function stopActiveAudioTimeline(reason: string): void {
-    if (!activeAudioTimeline) {
-      return;
-    }
-    activeAudioTimeline.engine.interrupt(reason);
-    activeAudioTimeline = null;
   }
 
   function queueAudioForPlayback(
@@ -612,10 +411,6 @@ export function createAdapterAudioRuntime(
 
   function findActiveAudioSegment(): ActiveAudioSegment | null {
     return findActiveAudioSegments()[0] ?? null;
-  }
-
-  function getActiveAudioTimelineSnapshot(): PlaybackTimelineSnapshot | null {
-    return activeAudioTimeline?.engine.getSnapshot() ?? null;
   }
 
   function findActiveAudioSegmentForTurn(turnId: string | null): ActiveAudioSegment | null {

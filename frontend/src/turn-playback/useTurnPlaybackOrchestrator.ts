@@ -22,13 +22,14 @@ import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore"
 import type { NormalizedMotionPayload } from "../model-engine/contracts";
 import type { PerformanceCurveHint } from "../types/protocol.js";
 import {
+  createTurnPlaybackSegmentReleaser,
+} from "./segmentPlaybackRelease.js";
+import {
   createTurnPlaybackOrchestratorCore,
-  type TurnPlaybackReleaseContext,
 } from "./turnPlaybackOrchestratorCore.js";
 import {
   canReleaseAudio,
   canReleaseMotion,
-  canReleaseText,
   getActivePlaybackSegment,
 } from "./selectors.js";
 import { isSegmentLocallySettled } from "./session.js";
@@ -68,54 +69,14 @@ function attachPerformanceCurveHintToPayload(
 export function useTurnPlaybackOrchestrator(
   options: TurnPlaybackOrchestratorOptions,
 ) {
-  const core = createTurnPlaybackOrchestratorCore({
+  const segmentReleaser = createTurnPlaybackSegmentReleaser(options);
+  const core = createTurnPlaybackOrchestratorCore<NormalizedMotionPayload>({
     now: () => performance.now(),
     schedule: (delayMs, fn) => window.setTimeout(fn, delayMs),
     clearSchedule: (timer) => {
       window.clearTimeout(timer as number);
     },
-    releaseText: (messageId, turnId) => {
-      const released = options.playbackRelease.releaseAssistantTextForPlayback(
-        messageId,
-        turnId,
-      );
-      if (released) {
-        options.sessionStore.markTextReleased(turnId, messageId);
-        options.sessionStore.markPhase(turnId, "playing");
-      }
-      return released;
-    },
-    releaseAudio: (messageId, turnId) => {
-      const released = options.playbackRelease.releaseAudioForPlayback(
-        messageId,
-        turnId,
-      );
-      if (released) {
-        options.sessionStore.markAudioReleased(turnId, messageId);
-      }
-      return released;
-    },
-    releaseMotion: (payload: unknown, context: TurnPlaybackReleaseContext) => {
-      options.sessionStore.markMotionReleased(
-        context.turnId,
-        context.messageId,
-      );
-      const accepted = options.motionPayload.start(
-        payload as NormalizedMotionPayload,
-        context,
-      );
-      if (accepted === false) {
-        options.sessionStore.markMotionFailed(
-          context.turnId,
-          context.messageId,
-          "motion_payload_rejected",
-        );
-      }
-      options.sessionStore.markPhase(
-        context.turnId,
-        "playing",
-      );
-    },
+    releaseSegment: segmentReleaser.release,
     log: (message, details) => {
       console.info(`[TurnPlaybackOrchestrator] ${message}.`, details);
     },

@@ -1,11 +1,9 @@
-import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
-
 // Orchestrator startup window: once text/audio are present, keep a wider window
 // for a late motion plan to join the same playback group before releasing.
 export const AUDIO_MOTION_SYNC_WAIT_MS = 820;
 export const TEXT_ONLY_RELEASE_WAIT_MS = 260;
 
-export interface PendingTurnPlaybackGroup {
+export interface PendingTurnPlaybackGroup<TMotionPayload = unknown> {
   key: string;
   messageId: string;
   turnId: string | null;
@@ -14,33 +12,42 @@ export interface PendingTurnPlaybackGroup {
   audioReady: boolean;
   noAudioConfirmed: boolean;
   motionReady: boolean;
-  motionPayload: unknown | null;
+  motionPayload: TMotionPayload | null;
   motionReceivedAtMs: number;
   textReleased: boolean;
   released: boolean;
   releaseTimer: unknown | null;
 }
 
-export interface TurnPlaybackReleaseContext {
+export interface TurnPlaybackSegmentReleaseJob<TMotionPayload = unknown> {
   messageId: string;
   turnId: string | null;
-  receivedAtMs: number;
-  playbackTimeline?: PlaybackTimelineSnapshot | null;
+  reason: string;
+  text: {
+    release: boolean;
+  };
+  audio: {
+    release: boolean;
+  };
+  motion: {
+    payload: TMotionPayload | null;
+    receivedAtMs: number | null;
+  };
 }
 
-export interface TurnPlaybackOrchestratorCoreOptions {
+export interface TurnPlaybackSegmentReleaseResult {
+  releasedText: boolean;
+  releasedAudio: boolean;
+  releasedMotion: boolean;
+}
+
+export interface TurnPlaybackOrchestratorCoreOptions<TMotionPayload = unknown> {
   now: () => number;
   schedule: (delayMs: number, fn: () => void) => unknown;
   clearSchedule: (timer: unknown) => void;
-  releaseText: (
-    messageId: string,
-    turnId: string | null,
-  ) => boolean;
-  releaseAudio: (
-    messageId: string,
-    turnId: string | null,
-  ) => boolean;
-  releaseMotion: (payload: unknown, context: TurnPlaybackReleaseContext) => void;
+  releaseSegment: (
+    job: TurnPlaybackSegmentReleaseJob<TMotionPayload>,
+  ) => TurnPlaybackSegmentReleaseResult;
   log?: (message: string, details: Record<string, unknown>) => void;
 }
 
@@ -56,10 +63,10 @@ export function resolveTurnPlaybackGroupKey(
   return `segment:${normalizedTurnId || "anonymous"}:${normalizedMessageId}`;
 }
 
-export function createTurnPlaybackOrchestratorCore(
-  options: TurnPlaybackOrchestratorCoreOptions,
+export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
+  options: TurnPlaybackOrchestratorCoreOptions<TMotionPayload>,
 ) {
-  const groups = new Map<string, PendingTurnPlaybackGroup>();
+  const groups = new Map<string, PendingTurnPlaybackGroup<TMotionPayload>>();
 
   function log(message: string, details: Record<string, unknown>): void {
     options.log?.(message, details);
@@ -68,7 +75,7 @@ export function createTurnPlaybackOrchestratorCore(
   function getOrCreateGroup(
     messageId: string,
     turnId: string | null,
-  ): PendingTurnPlaybackGroup {
+  ): PendingTurnPlaybackGroup<TMotionPayload> {
     const key = resolveTurnPlaybackGroupKey(turnId, messageId);
     const existing = groups.get(key);
     if (existing) {
@@ -76,7 +83,7 @@ export function createTurnPlaybackOrchestratorCore(
       return existing;
     }
 
-    const group: PendingTurnPlaybackGroup = {
+    const group: PendingTurnPlaybackGroup<TMotionPayload> = {
       key,
       messageId,
       turnId,
@@ -95,11 +102,11 @@ export function createTurnPlaybackOrchestratorCore(
     return group;
   }
 
-  function deleteGroup(group: PendingTurnPlaybackGroup): void {
+  function deleteGroup(group: PendingTurnPlaybackGroup<TMotionPayload>): void {
     groups.delete(group.key);
   }
 
-  function clearReleaseTimer(group: PendingTurnPlaybackGroup): void {
+  function clearReleaseTimer(group: PendingTurnPlaybackGroup<TMotionPayload>): void {
     if (group.releaseTimer !== null) {
       options.clearSchedule(group.releaseTimer);
       group.releaseTimer = null;
@@ -107,7 +114,7 @@ export function createTurnPlaybackOrchestratorCore(
   }
 
   function scheduleEvaluate(
-    group: PendingTurnPlaybackGroup,
+    group: PendingTurnPlaybackGroup<TMotionPayload>,
     delayMs: number,
   ): void {
     clearReleaseTimer(group);
@@ -117,85 +124,120 @@ export function createTurnPlaybackOrchestratorCore(
     });
   }
 
-  function releaseMotion(group: PendingTurnPlaybackGroup, reason: string): void {
-    if (!group.motionReady || group.motionPayload === null) {
-      return;
-    }
-    const payload = group.motionPayload;
-    group.motionPayload = null;
-    group.motionReady = false;
-    options.releaseMotion(payload, {
-      turnId: group.turnId,
-      receivedAtMs: group.motionReceivedAtMs || options.now(),
-      messageId: group.messageId,
-    });
-    log("motion released", {
-      messageId: group.messageId,
-      turnId: group.turnId,
-      reason,
-    });
-  }
-
-  function releaseGroup(group: PendingTurnPlaybackGroup, reason: string): void {
+  function releaseGroup(
+    group: PendingTurnPlaybackGroup<TMotionPayload>,
+    reason: string,
+  ): void {
     clearReleaseTimer(group);
     group.released = true;
-    let releasedText = false;
-    if (!group.textReleased) {
-      releasedText = options.releaseText(
-        group.messageId,
-        group.turnId,
-      );
-      group.textReleased = releasedText;
-    }
-    if (group.audioReady) {
-      const releasedAudio = options.releaseAudio(
-        group.messageId,
-        group.turnId,
-      );
-      group.audioReady = !releasedAudio;
-    }
-    releaseMotion(group, reason);
+    const result = releaseSegmentJob(group, {
+      reason,
+      releaseText: !group.textReleased,
+      releaseAudio: group.audioReady,
+      releaseMotion: group.motionReady && group.motionPayload !== null,
+    });
     log("group released", {
       messageId: group.messageId,
       turnId: group.turnId,
       reason,
-      releasedText,
+      releasedText: result.releasedText,
       audioReady: group.audioReady,
       noAudioConfirmed: group.noAudioConfirmed,
     });
   }
 
-  function releaseTextOnly(group: PendingTurnPlaybackGroup, reason: string): void {
+  function releaseTextOnly(
+    group: PendingTurnPlaybackGroup<TMotionPayload>,
+    reason: string,
+  ): void {
     if (group.textReleased) {
       return;
     }
-    const releasedText = options.releaseText(
-      group.messageId,
-      group.turnId,
-    );
-    group.textReleased = group.textReleased || releasedText;
+    const result = releaseSegmentJob(group, {
+      reason,
+      releaseText: true,
+      releaseAudio: false,
+      releaseMotion: false,
+    });
     log("text released before audio", {
       messageId: group.messageId,
       turnId: group.turnId,
       reason,
-      releasedText,
+      releasedText: result.releasedText,
     });
   }
 
+  function releaseSegmentJob(
+    group: PendingTurnPlaybackGroup<TMotionPayload>,
+    optionsForJob: {
+      reason: string;
+      releaseText: boolean;
+      releaseAudio: boolean;
+      releaseMotion: boolean;
+    },
+  ): TurnPlaybackSegmentReleaseResult {
+    const motionPayload = optionsForJob.releaseMotion
+      ? group.motionPayload
+      : null;
+    const motionReceivedAtMs = optionsForJob.releaseMotion
+      ? group.motionReceivedAtMs
+      : null;
+    if (
+      optionsForJob.releaseMotion
+      && (
+        motionReceivedAtMs === null
+        || !Number.isFinite(motionReceivedAtMs)
+        || motionReceivedAtMs < 0
+      )
+    ) {
+      throw new Error("Motion segment release requires a valid receivedAtMs.");
+    }
+    if (optionsForJob.releaseMotion) {
+      group.motionPayload = null;
+      group.motionReady = false;
+    }
+
+    const result = options.releaseSegment({
+      messageId: group.messageId,
+      turnId: group.turnId,
+      reason: optionsForJob.reason,
+      text: {
+        release: optionsForJob.releaseText,
+      },
+      audio: {
+        release: optionsForJob.releaseAudio,
+      },
+      motion: {
+        payload: motionPayload,
+        receivedAtMs: motionReceivedAtMs,
+      },
+    });
+    group.textReleased = group.textReleased || result.releasedText;
+    if (optionsForJob.releaseAudio) {
+      group.audioReady = !result.releasedAudio;
+    }
+    if (motionPayload !== null) {
+      log("motion released", {
+        messageId: group.messageId,
+        turnId: group.turnId,
+        reason: optionsForJob.reason,
+      });
+    }
+    return result;
+  }
+
   function evaluateGroup(
-    group: PendingTurnPlaybackGroup,
+    group: PendingTurnPlaybackGroup<TMotionPayload>,
     reason: string,
   ): void {
     if (group.released) {
-      if (group.motionReady) {
-        releaseMotion(group, `late_motion_after_${reason}`);
-      }
-      if (group.audioReady) {
-        const releasedAudio = options.releaseAudio(
-          group.messageId,
-          group.turnId,
-        );
-        group.audioReady = !releasedAudio;
+      if (group.motionReady || group.audioReady) {
+        releaseSegmentJob(group, {
+          reason: `late_release_after_${reason}`,
+          releaseText: false,
+          releaseAudio: group.audioReady,
+          releaseMotion: group.motionReady && group.motionPayload !== null,
+        });
       }
       return;
     }
@@ -266,7 +308,7 @@ export function createTurnPlaybackOrchestratorCore(
     markMotionReady: (
       messageId: string,
       turnId: string | null,
-      payload: unknown,
+      payload: TMotionPayload,
       receivedAtMs: number,
     ) => {
       if (!payload) {

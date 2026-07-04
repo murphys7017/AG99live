@@ -3,6 +3,7 @@ import {
   createPlaybackTimelineEngine,
 } from "../src/playback-timeline/playbackTimelineEngine.js";
 import { resolvePerformanceCurveTimeline } from "../src/playback-timeline/performanceCurveSink.js";
+import { createPlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
 import { createTimelineClock } from "../src/playback-timeline/timelineClock.js";
 import type { AudioPlaybackClock } from "../src/playback-timeline/contracts.js";
 
@@ -282,6 +283,51 @@ function testPerformanceCurveTimelineRejectsUnavailableAudio(): void {
   assert.equal(resolution.reason, "playback_timeline_audio_unavailable");
 }
 
+function testPlaybackTimelineRuntimeCreatesMotionOnlyTimeline(): void {
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => null,
+  });
+
+  let snapshot = runtime.prepareMotionOnlyTimeline("turn-motion", "msg-motion");
+  assert.equal(snapshot?.phase, "preparing");
+  assert.equal(snapshot?.clockSource, "synthetic");
+  assert.equal(snapshot?.sinks.find((sink) => sink.id === "motion")?.terminal, "idle");
+
+  runtime.markMotionTimelineStarted("turn-motion", "msg-motion");
+  snapshot = runtime.getActiveTimelineSnapshot();
+  assert.equal(snapshot?.phase, "playing");
+  assert.equal(snapshot?.sinks.find((sink) => sink.id === "motion")?.terminal, "started");
+
+  runtime.markMotionTimelineTerminal(
+    "turn-motion",
+    "msg-motion",
+    "completed",
+    "motion_completed",
+  );
+  assert.equal(runtime.getActiveTimelineSnapshot(), null);
+}
+
+function testPlaybackTimelineRuntimeDoesNotStealMismatchedActiveTimeline(): void {
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => null,
+  });
+
+  runtime.prepareAudioTimeline("turn-audio", "msg-audio");
+
+  assert.equal(
+    runtime.prepareMotionOnlyTimeline("turn-motion", "msg-motion"),
+    null,
+  );
+  assert.equal(
+    runtime.prepareMotionTimelineSink("turn-motion", "msg-motion"),
+    false,
+  );
+  const snapshot = runtime.getActiveTimelineSnapshot();
+  assert.equal(snapshot?.turnId, "turn-audio");
+  assert.equal(snapshot?.messageId, "msg-audio");
+  assert.equal(snapshot?.sinks.some((sink) => sink.id === "motion"), false);
+}
+
 function testTerminalSinkEventsAreStable(): void {
   const engine = createPlaybackTimelineEngine({ now: () => 0 });
   engine.load(
@@ -313,6 +359,8 @@ function run(): void {
   testLateSinkEventsDoNotRewriteTerminalTimeline();
   testPerformanceCurveTimelineUsesRemainingAudioDuration();
   testPerformanceCurveTimelineRejectsUnavailableAudio();
+  testPlaybackTimelineRuntimeCreatesMotionOnlyTimeline();
+  testPlaybackTimelineRuntimeDoesNotStealMismatchedActiveTimeline();
   testTerminalSinkEventsAreStable();
   console.log("playbackTimelineEngine tests passed");
 }

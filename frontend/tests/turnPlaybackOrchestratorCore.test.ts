@@ -3,7 +3,6 @@ import {
   AUDIO_MOTION_SYNC_WAIT_MS,
   TEXT_ONLY_RELEASE_WAIT_MS,
   createTurnPlaybackOrchestratorCore,
-  type TurnPlaybackReleaseContext,
 } from "../src/turn-playback/turnPlaybackOrchestratorCore.js";
 
 interface ScheduledTask {
@@ -38,27 +37,23 @@ function createHarness() {
         task.cleared = true;
       }
     },
-    releaseText: (
-      messageId: string,
-      turnId: string | null,
-    ): boolean => {
-      events.push(`text:${messageId}:${turnId ?? ""}`);
-      return true;
-    },
-    releaseAudio: (
-      messageId: string,
-      turnId: string | null,
-    ): boolean => {
-      events.push(`audio:${messageId}:${turnId ?? ""}`);
-      return true;
-    },
-    releaseMotion: (
-      payload: unknown,
-      context: TurnPlaybackReleaseContext,
-    ): void => {
-      events.push(
-        `motion:${String(payload)}:${context.messageId}:${context.turnId ?? ""}`,
-      );
+    releaseSegment: (job) => {
+      if (job.text.release) {
+        events.push(`text:${job.messageId}:${job.turnId ?? ""}`);
+      }
+      if (job.audio.release) {
+        events.push(`audio:${job.messageId}:${job.turnId ?? ""}`);
+      }
+      if (job.motion.payload !== null) {
+        events.push(
+          `motion:${String(job.motion.payload)}:${job.messageId}:${job.turnId ?? ""}`,
+        );
+      }
+      return {
+        releasedText: job.text.release,
+        releasedAudio: job.audio.release,
+        releasedMotion: job.motion.payload !== null,
+      };
     },
   });
 
@@ -154,15 +149,19 @@ function testAudioReleaseFailureKeepsGroupRetryable(): void {
     now: () => nowMs,
     schedule: () => 1,
     clearSchedule: () => {},
-    releaseText: (messageId) => {
-      events.push(`text:${messageId}`);
-      return true;
+    releaseSegment: (job) => {
+      if (job.text.release) {
+        events.push(`text:${job.messageId}`);
+      }
+      if (job.audio.release) {
+        events.push(`audio:${job.messageId}`);
+      }
+      return {
+        releasedText: job.text.release,
+        releasedAudio: false,
+        releasedMotion: job.motion.payload !== null,
+      };
     },
-    releaseAudio: (messageId) => {
-      events.push(`audio:${messageId}`);
-      return false;
-    },
-    releaseMotion: () => {},
   });
 
   core.markTextReady("msg-1", "turn-1");

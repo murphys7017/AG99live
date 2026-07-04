@@ -3,7 +3,10 @@ import {
   createAudioElementPlaybackClock,
 } from "../src/adapter-connection/runtime/audioPlayback.js";
 import { createBrowserAudioTimelineSink } from "../src/playback-timeline/audioSink.js";
-import type { PlaybackTimelineLipSyncSink } from "../src/playback-timeline/lipSyncSink.js";
+import {
+  createPlaybackTimelineLipSyncRuntime,
+  type PlaybackTimelineLipSyncSink,
+} from "../src/playback-timeline/lipSyncSink.js";
 
 class FakeAudio {
   static instances: FakeAudio[] = [];
@@ -73,6 +76,53 @@ function testAudioElementPlaybackClockHandlesInvalidValues(): void {
   assert.equal(clock.getDurationMs(), null);
   assert.equal(clock.getPlaybackRate(), 1);
   assert.equal(clock.isPlaying(), false);
+}
+
+function testLipSyncRuntimeFailsWhenAudioEndsBeforeStart(): void {
+  const events: string[] = [];
+  const sink: PlaybackTimelineLipSyncSink = {
+    attachAudio: () => {},
+    resume: async () => {},
+    stop: () => {},
+  };
+  const runtime = createPlaybackTimelineLipSyncRuntime(sink, {
+    onStarted: () => events.push("started"),
+    onTerminal: (terminal, reason) => events.push(`${terminal}:${reason}`),
+  });
+
+  runtime.completeAfterAudioEnded();
+
+  assert.deepEqual(events, ["failed:lip_sync_not_started_before_audio_end"]);
+}
+
+function testLipSyncRuntimeKeepsUnavailableTerminalStable(): void {
+  const events: string[] = [];
+  const attachedOptions: Array<Parameters<PlaybackTimelineLipSyncSink["attachAudio"]>[0]> = [];
+  const sink: PlaybackTimelineLipSyncSink = {
+    attachAudio: (options) => {
+      attachedOptions.push(options);
+    },
+    resume: async () => {},
+    stop: () => {},
+  };
+  const runtime = createPlaybackTimelineLipSyncRuntime(sink, {
+    onUnavailable: () => events.push("unavailable"),
+    onTerminal: (terminal, reason) => events.push(`${terminal}:${reason}`),
+  });
+
+  runtime.attachAudio({
+    audioUrl: "http://127.0.0.1/audio.wav",
+    audio: {} as HTMLAudioElement,
+    getAudioCurrentTimeSeconds: () => 0,
+    isCurrentAudio: () => true,
+  });
+  attachedOptions[0]?.onUnavailable();
+  runtime.completeAfterAudioEnded();
+
+  assert.deepEqual(events, [
+    "unavailable",
+    "failed:lip_sync_unavailable",
+  ]);
 }
 
 async function testBrowserAudioSinkDrivesLipSyncSink(): Promise<void> {
@@ -250,6 +300,8 @@ async function testBrowserAudioSinkReportsDefaultLipSyncUnavailable(): Promise<v
 async function run(): Promise<void> {
   testAudioElementPlaybackClockMapsElementState();
   testAudioElementPlaybackClockHandlesInvalidValues();
+  testLipSyncRuntimeFailsWhenAudioEndsBeforeStart();
+  testLipSyncRuntimeKeepsUnavailableTerminalStable();
   await testBrowserAudioSinkDrivesLipSyncSink();
   await testBrowserAudioSinkDoesNotStartLipSyncWithoutSinkConfirmation();
   await testBrowserAudioSinkKeepsLipSyncFailureTerminal();
