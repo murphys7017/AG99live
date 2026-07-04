@@ -137,7 +137,25 @@ function startCatalogMotionPayload(
   state: MotionRuntimeStateController,
 ): boolean {
   const selectedModel = dependencies.getSelectedModel();
-  const started = dependencies.playCatalogMotion(payload.motion, selectedModel);
+  let notifiedStarted = false;
+  const started = dependencies.playCatalogMotion(payload.motion, selectedModel, {
+    onStarted: (_motion, runId) => {
+      notifiedStarted = true;
+      dependencies.onPlanStarted?.({
+        motion: payload.motion,
+        model: selectedModel,
+        messageId: context.messageId,
+        turnId: context.turnId,
+        playbackTurnId: context.playbackTurnId,
+        startReason: context.startReason,
+        queuedDelayMs: context.queuedDelayMs,
+        payloadKind: payload.kind,
+        diagnostics: null,
+        playerMessage: buildSuccessMessage(context, dependencies),
+        runId,
+      });
+    },
+  });
   if (!started) {
     const failureReason = dependencies.getPlayerMessage?.()
       || "现成 motion 被运行时拒绝执行。";
@@ -148,18 +166,20 @@ function startCatalogMotionPayload(
   }
 
   const successMessage = buildSuccessMessage(context, dependencies);
-  dependencies.onPlanStarted?.({
-    motion: payload.motion,
-    model: selectedModel,
-    messageId: context.messageId,
-    turnId: context.turnId,
-    playbackTurnId: context.playbackTurnId,
-    startReason: context.startReason,
-    queuedDelayMs: context.queuedDelayMs,
-    payloadKind: payload.kind,
-    diagnostics: null,
-    playerMessage: successMessage,
-  });
+  if (!notifiedStarted) {
+    dependencies.onPlanStarted?.({
+      motion: payload.motion,
+      model: selectedModel,
+      messageId: context.messageId,
+      turnId: context.turnId,
+      playbackTurnId: context.playbackTurnId,
+      startReason: context.startReason,
+      queuedDelayMs: context.queuedDelayMs,
+      payloadKind: payload.kind,
+      diagnostics: null,
+      playerMessage: successMessage,
+    });
+  }
   state.setState("playing", successMessage, null);
   state.pushHistory("system", `现成 motion 执行中（${successMessage}）。`);
   return true;

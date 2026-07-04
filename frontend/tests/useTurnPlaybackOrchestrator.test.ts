@@ -416,6 +416,44 @@ async function testLateAudioAfterTextReleaseOnlyReleasesAudio(): Promise<void> {
   h.stop();
 }
 
+function testMotionTimelineSinkMarksPreparedTimelineFailedWhenEngineRejects(): void {
+  const prepared: string[] = [];
+  const terminals: string[] = [];
+  const contexts: Array<{
+    playbackTimeline?: PlaybackTimelineSnapshot | null;
+  }> = [];
+  const sink = createModelEngineMotionTimelineSink({
+    motionEngine: {
+      ingestNormalizedPayload: (_payload, context) => {
+        contexts.push(context);
+        return false;
+      },
+      notifyCurrentTurnChanged: () => {},
+    },
+    getActiveAudioTimelineSnapshot: () => matchingTimelineSnapshot,
+    prepareMotionTimelineSink: (turnId, messageId) => {
+      prepared.push(`${turnId ?? ""}:${messageId}`);
+      return true;
+    },
+    markMotionTimelineTerminal: (turnId, messageId, terminal, reason) => {
+      terminals.push(`${turnId ?? ""}:${messageId}:${terminal}:${reason}`);
+    },
+  });
+
+  const accepted = sink.start(motionPayload, {
+    messageId: "msg-timeline",
+    turnId: "turn-timeline",
+    receivedAtMs: 100,
+  });
+
+  assert.equal(accepted, false);
+  assert.deepEqual(prepared, ["turn-timeline:msg-timeline"]);
+  assert.equal(contexts[0].playbackTimeline?.timelineId, "timeline-1");
+  assert.deepEqual(terminals, [
+    "turn-timeline:msg-timeline:failed:motion_payload_rejected",
+  ]);
+}
+
 async function run(): Promise<void> {
   await testSegmentsReleaseSequentiallyWithinTurn();
   await testTextAndMotionReleaseWhenAudioIsAbsent();
@@ -425,6 +463,7 @@ async function run(): Promise<void> {
   await testRejectedMotionReleaseMarksSegmentFailed();
   await testPerformanceCurveHintIsMergedBeforeMotionRelease();
   await testLateAudioAfterTextReleaseOnlyReleasesAudio();
+  testMotionTimelineSinkMarksPreparedTimelineFailedWhenEngineRejects();
   console.log("useTurnPlaybackOrchestrator tests passed");
 }
 

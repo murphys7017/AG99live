@@ -12,6 +12,9 @@ context:
     - The first shipped timeline shape should remain single active segment oriented, matching the current turn playback session semantics.
     - ModelEngine notifyAudioPlaybackStarted remains the internal motion scheduling entry point, but it is now triggered from AdapterAudioRuntime audio timeline started events instead of PlaybackCompletionCoordinator session watches.
     - Motion release now receives a strictly matched active audio timeline snapshot when turnId and messageId match; mismatched timeline snapshots are intentionally ignored.
+    - Motion release now registers a required motion sink on the matched active audio timeline; ModelEngine started/finished callbacks write motion started/completed/failed/interrupted terminal state back into that timeline.
+    - Active audio timelines are retained after audio completion when a required motion sink is still running, and are cleared only after the timeline reaches completed/failed/interrupted.
+    - PreviewMotionPlayer now reports stopped terminal events for explicit motion stops and direct-plan replacement, so motion timeline sinks do not depend on silent local cleanup.
     - ModelEngine now prefers playback timeline duration/currentTime for motion target duration when the release context carries a valid audio timeline snapshot.
     - Audio-start notifications now refresh pending motion entries with the current matched audio timeline snapshot before starting the payload, avoiding stale release-time timeline snapshots.
     - Speech-only motion now also consumes the matched audio-start timeline snapshot when no queued motion starts, so speech-following plans use real remaining audio duration instead of relying only on SessionStore fallback lookup.
@@ -45,6 +48,9 @@ architecture:
     - AdapterAudioRuntime depends on PlaybackTimelineAudioSink for audio start/stop/clock access, while createAdapterConnection wires the browser HTMLAudioElement implementation through createBrowserAudioTimelineSink.
     - TurnPlaybackOrchestrator now releases audio before motion for the same ready segment so audioRuntime can create an active timeline before ModelEngine ingests the motion payload.
     - A new PlaybackTimelineMotionSink wraps ModelEngine motion start and attaches only same turnId/messageId audio timeline snapshots to motion contexts.
+    - PlaybackTimelineMotionSink now prepares a required motion sink on matched audio timelines and marks it failed when ModelEngine rejects the motion payload before playback starts.
+    - PreviewMotionPlayer catalog motion playback now exposes started/terminal callbacks with runId, allowing catalog motions to participate in motion timeline terminal tracking.
+    - PreviewMotionPlayer stores the active terminal callback and emits a single stopped terminal when playback is explicitly stopped before the Live2D runtime reports completion.
     - A new PlaybackTimelineLipSyncSink wraps WAV lip sync preload, live WebAudio RMS sampling, external Live2D lip sync writes, and cleanup; it is currently executed through AudioSink, while AdapterAudioRuntime registers lip_sync as an optional PlaybackTimelineEngine sink and records started/failed/completed terminal state.
     - PlaybackTimelineEngine ignores late started/terminal events for sinks that are already completed, failed, absent, or interrupted.
     - During early development, fallback behavior should be fail-visible: optional sinks may fail without blocking required playback, but missing capabilities must not be silently reported as started or completed.

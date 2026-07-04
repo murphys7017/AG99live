@@ -179,11 +179,79 @@ async function testCatalogMotionAsyncAcceptedFailureReportsFailed(): Promise<voi
   scope.stop();
 }
 
+async function testCatalogMotionReportsStartedAndCompletedCallbacks(): Promise<void> {
+  installCatalogMockAdapter(
+    { status: "async_motion_accepted" },
+    { finishImmediately: true },
+  );
+  const scope = effectScope();
+  const player = scope.run(() => usePreviewMotionPlayer());
+  assert.ok(player);
+  const startedRunIds: string[] = [];
+  const finished: Array<{ runId: string; status: string; reason?: string }> = [];
+
+  assert.equal(player.playCatalogMotion(buildCatalogMotion(3000), null, {
+    onStarted: (_motion, runId) => {
+      if (runId) {
+        startedRunIds.push(runId);
+      }
+    },
+    onFinished: (event) => {
+      finished.push(event);
+    },
+  }), true);
+  await Promise.resolve();
+
+  assert.equal(startedRunIds.length, 1);
+  assert.deepEqual(finished, [
+    {
+      runId: startedRunIds[0],
+      status: "completed",
+    },
+  ]);
+  scope.stop();
+}
+
+async function testDirectPlanStopReportsStoppedTerminalOnce(): Promise<void> {
+  installMockAdapter();
+  const scope = effectScope();
+  const player = scope.run(() => usePreviewMotionPlayer());
+  assert.ok(player);
+  const startedRunIds: string[] = [];
+  const finished: Array<{ runId: string; status: string; reason?: string }> = [];
+
+  assert.equal(player.playPlan(buildPlan(), null, {
+    softHandoff: true,
+    onStarted: (_plan, runId) => {
+      if (runId) {
+        startedRunIds.push(runId);
+      }
+    },
+    onFinished: (event) => {
+      finished.push(event);
+    },
+  }), true);
+
+  assert.equal(startedRunIds.length, 1);
+  player.stopPlan("manual_stop");
+  scope.stop();
+
+  assert.deepEqual(finished, [
+    {
+      runId: startedRunIds[0],
+      status: "stopped",
+      reason: "manual_stop",
+    },
+  ]);
+}
+
 async function run(): Promise<void> {
   await testSoftHandoffDuplicateStillReportsStarted();
   await testCatalogMotionInvalidHandleWithDurationFails();
   await testCatalogMotionInvalidHandleWithoutDurationStillFails();
   await testCatalogMotionAsyncAcceptedFailureReportsFailed();
+  await testCatalogMotionReportsStartedAndCompletedCallbacks();
+  await testDirectPlanStopReportsStoppedTerminalOnce();
   console.log("previewMotionPlayer tests passed");
 }
 

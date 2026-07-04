@@ -118,6 +118,9 @@ export interface AdapterConnectionInstance {
   releaseAssistantTextForPlayback: (messageId: string, turnId: string | null) => boolean;
   releaseAudioForPlayback: ReturnType<typeof createAdapterAudioRuntime>["releaseAudioForPlayback"];
   getActiveAudioTimelineSnapshot: ReturnType<typeof createAdapterAudioRuntime>["getActiveAudioTimelineSnapshot"];
+  prepareMotionTimelineSink: ReturnType<typeof createAdapterAudioRuntime>["prepareMotionTimelineSink"];
+  markMotionTimelineStarted: ReturnType<typeof createAdapterAudioRuntime>["markMotionTimelineStarted"];
+  markMotionTimelineTerminal: ReturnType<typeof createAdapterAudioRuntime>["markMotionTimelineTerminal"];
   toggleMicrophoneCapture: ReturnType<typeof createAdapterMicrophoneRuntime>["toggleMicrophoneCapture"];
   setPttMode: ReturnType<typeof createAdapterMicrophoneRuntime>["setPttMode"];
   setPttKeyBinding: ReturnType<typeof createAdapterMicrophoneRuntime>["setPttKeyBinding"];
@@ -233,6 +236,9 @@ export function createAdapterConnection(
     queueAudioForPlayback,
     releaseAudioForPlayback,
     getActiveAudioTimelineSnapshot,
+    prepareMotionTimelineSink,
+    markMotionTimelineStarted,
+    markMotionTimelineTerminal,
     hasPendingAudioForTurn,
     markMissingAudiosForTurn,
     markAudioPlaybackTerminal,
@@ -665,6 +671,9 @@ export function createAdapterConnection(
     releaseAssistantTextForPlayback,
     releaseAudioForPlayback,
     getActiveAudioTimelineSnapshot,
+    prepareMotionTimelineSink,
+    markMotionTimelineStarted,
+    markMotionTimelineTerminal,
     toggleMicrophoneCapture,
     setPttMode,
     setPttKeyBinding,

@@ -28,6 +28,11 @@ export interface PlayPlanOptions {
   onFinished?: (event: { runId: string; status: string; reason?: string }) => void;
 }
 
+export interface PlayCatalogMotionOptions {
+  onStarted?: (motion: CatalogMotionPayload, runId?: string) => void;
+  onFinished?: (event: { runId: string; status: string; reason?: string }) => void;
+}
+
 interface ModelEnginePlanStartedEventBase {
   model: ModelSummary | null;
   messageId: string;
@@ -114,6 +119,7 @@ export interface MotionStartDependencies {
   playCatalogMotion: (
     motion: CatalogMotionPayload,
     model: ModelSummary | null,
+    options?: PlayCatalogMotionOptions,
   ) => boolean;
   getPlayerMessage?: () => string;
   onPlanStarted?: (event: ModelEnginePlanStartedEvent) => void;

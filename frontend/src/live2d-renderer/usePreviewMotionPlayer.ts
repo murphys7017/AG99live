@@ -23,6 +23,11 @@ interface PlayPlanOptions {
   onFinished?: (event: DirectParameterPlanTerminalEvent) => void;
 }
 
+interface PlayCatalogMotionOptions {
+  onStarted?: (motion: CatalogMotionPayload, runId?: string) => void;
+  onFinished?: (event: DirectParameterPlanTerminalEvent) => void;
+}
+
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map((item) => stableStringify(item)).join(",")}]`;
@@ -130,6 +135,8 @@ export function usePreviewMotionPlayer() {
   let lastStartedPlanSignature = "";
   let lastPlaybackRunId = "";
   let lastStartedPlanAtMs = 0;
+  let activeTerminalRunId = "";
+  let activeTerminalCallback: ((event: DirectParameterPlanTerminalEvent) => void) | null = null;
 
   const PLAN_RESTART_DEDUP_WINDOW_MS = 700;
 
@@ -162,6 +169,37 @@ export function usePreviewMotionPlayer() {
     activeTimerHandles = [];
   }
 
+  function setActiveTerminalCallback(
+    runId: string,
+    callback: ((event: DirectParameterPlanTerminalEvent) => void) | undefined,
+  ): void {
+    activeTerminalRunId = runId;
+    activeTerminalCallback = callback ?? null;
+  }
+
+  function clearActiveTerminalCallback(runId: string): void {
+    if (activeTerminalRunId !== runId) {
+      return;
+    }
+    activeTerminalRunId = "";
+    activeTerminalCallback = null;
+  }
+
+  function notifyActiveStopped(reason: string): void {
+    if (!activeTerminalRunId) {
+      return;
+    }
+    const runId = activeTerminalRunId;
+    const callback = activeTerminalCallback;
+    activeTerminalRunId = "";
+    activeTerminalCallback = null;
+    callback?.({
+      runId,
+      status: "stopped",
+      reason,
+    });
+  }
+
   function scheduleTimer(runId: number, delayMs: number, fn: () => void): void {
     const timerHandle = window.setTimeout(() => {
       if (runId !== activeRunId) {
@@ -180,6 +218,7 @@ export function usePreviewMotionPlayer() {
     if (adapter && typeof adapter.stopDirectParameterPlan === "function") {
       adapter.stopDirectParameterPlan(reason, "stopped");
     }
+    notifyActiveStopped(reason);
 
     if (state.status === "playing") {
       state.status = "idle";
@@ -256,6 +295,7 @@ export function usePreviewMotionPlayer() {
 
     if (!options.softHandoff && typeof adapter.stopDirectParameterPlan === "function") {
       adapter.stopDirectParameterPlan();
+      notifyActiveStopped("direct_parameter_plan_replaced");
     }
 
     console.info("[MotionPlayer] calling startDirectParameterPlan...");
@@ -277,6 +317,7 @@ export function usePreviewMotionPlayer() {
           state.message = "参数计划已停止。";
           state.finishedAt = new Date().toISOString();
           clearActiveTimers();
+          clearActiveTerminalCallback(playbackRunId);
           options.onFinished?.(event);
           return;
         }
@@ -287,6 +328,7 @@ export function usePreviewMotionPlayer() {
             : `参数计划执行失败：${event.status}`);
         state.finishedAt = new Date().toISOString();
         clearActiveTimers();
+        clearActiveTerminalCallback(playbackRunId);
         options.onFinished?.(event);
       },
     });
@@ -314,33 +356,36 @@ export function usePreviewMotionPlayer() {
     state.parameterCount = playbackPlan.plan.parameters.length;
     state.startedAt = new Date().toISOString();
     state.finishedAt = "";
+    setActiveTerminalCallback(playbackRunId, options.onFinished);
 
     // watchdog：SDK 完成事件的超时保护
-  scheduleTimer(runId, playbackPlan.totalDurationMs + 800, () => {
-    if (state.status === "playing") {
-      console.warn(
-        "[MotionPlayer] direct parameter plan terminal timeout. runId=",
-        playbackRunId,
-      );
-      state.status = "failed";
-      state.message = "参数计划完成事件超时。";
-      state.finishedAt = new Date().toISOString();
-      clearActiveTimers();
-      options.onFinished?.({
-        runId: playbackRunId,
-        status: "failed",
-        reason: "direct_parameter_plan_terminal_timeout",
-      });
-    }
-  });
+    scheduleTimer(runId, playbackPlan.totalDurationMs + 800, () => {
+      if (state.status === "playing") {
+        console.warn(
+          "[MotionPlayer] direct parameter plan terminal timeout. runId=",
+          playbackRunId,
+        );
+        state.status = "failed";
+        state.message = "参数计划完成事件超时。";
+        state.finishedAt = new Date().toISOString();
+        clearActiveTimers();
+        clearActiveTerminalCallback(playbackRunId);
+        options.onFinished?.({
+          runId: playbackRunId,
+          status: "failed",
+          reason: "direct_parameter_plan_terminal_timeout",
+        });
+      }
+    });
 
-  options.onStarted?.(playbackPlan.plan, playbackRunId);
+    options.onStarted?.(playbackPlan.plan, playbackRunId);
     return true;
   }
 
   function playCatalogMotion(
     motion: CatalogMotionPayload,
     _model: ModelSummary | null = null,
+    options: PlayCatalogMotionOptions = {},
   ): boolean {
     const adapter = window.getLAppAdapter?.();
     if (!adapter || typeof adapter.startMotion !== "function") {
@@ -354,9 +399,11 @@ export function usePreviewMotionPlayer() {
 
     activeRunId += 1;
     const runId = activeRunId;
+    const playbackRunId = `catalog-motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     clearActiveTimers();
     if (typeof adapter.stopDirectParameterPlan === "function") {
       adapter.stopDirectParameterPlan();
+      notifyActiveStopped("catalog_motion_replaced_direct_plan");
     }
 
     const getMotionStartError = (): string => (
@@ -381,12 +428,23 @@ export function usePreviewMotionPlayer() {
           state.message = reason;
           state.finishedAt = new Date().toISOString();
           clearActiveTimers();
+          clearActiveTerminalCallback(playbackRunId);
+          options.onFinished?.({
+            runId: playbackRunId,
+            status: "failed",
+            reason,
+          });
           return;
         }
         state.status = "finished";
         state.message = "现成 motion 执行完成。";
         state.finishedAt = new Date().toISOString();
         clearActiveTimers();
+        clearActiveTerminalCallback(playbackRunId);
+        options.onFinished?.({
+          runId: playbackRunId,
+          status: "completed",
+        });
       },
     );
     if (handle === -1) {
@@ -408,12 +466,19 @@ export function usePreviewMotionPlayer() {
     state.parameterCount = 0;
     state.startedAt = new Date().toISOString();
     state.finishedAt = "";
+    setActiveTerminalCallback(playbackRunId, options.onFinished);
+    options.onStarted?.(motion, playbackRunId);
 
     scheduleTimer(runId, durationMs + 40, () => {
       state.status = "finished";
       state.message = "现成 motion 执行完成。";
       state.finishedAt = new Date().toISOString();
       clearActiveTimers();
+      clearActiveTerminalCallback(playbackRunId);
+      options.onFinished?.({
+        runId: playbackRunId,
+        status: "completed",
+      });
     });
     return true;
   }

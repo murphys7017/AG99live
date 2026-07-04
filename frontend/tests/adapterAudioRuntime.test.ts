@@ -266,12 +266,62 @@ async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise
   });
 }
 
+async function testMotionSinkKeepsTimelineOpenAfterAudioCompletes(): Promise<void> {
+  const state = buildState();
+  const startOptionsRef: { current: PlaybackTimelineAudioStartCallbacks | null } = { current: null };
+  const runtime = createAdapterAudioRuntime({
+    state,
+    audioSink: buildAudioSink({
+      start: async (_url, callbacks) => {
+        startOptionsRef.current = callbacks;
+        callbacks.onDurationChanged?.(900);
+        callbacks.onPlaybackStarted?.({
+          startedAtMs: 50,
+          durationMs: 900,
+        });
+      },
+      getClock: () => ({
+        getCurrentTimeMs: () => 500,
+        getDurationMs: () => 900,
+        getPlaybackRate: () => 1,
+        isPlaying: () => true,
+      }),
+    }),
+    pushHistory: () => {},
+    getSessionStore: () => undefined,
+  });
+
+  runtime.queueAudioForPlayback("http://127.0.0.1/audio.wav", "turn-motion", "msg-motion");
+  assert.equal(runtime.releaseAudioForPlayback("msg-motion", "turn-motion"), true);
+  await flushMicrotasks();
+
+  assert.equal(runtime.prepareMotionTimelineSink("turn-motion", "msg-motion"), true);
+  runtime.markMotionTimelineStarted("turn-motion", "msg-motion");
+  startOptionsRef.current?.onEnded?.();
+
+  let snapshot = runtime.getActiveAudioTimelineSnapshot();
+  assert.equal(snapshot?.phase, "playing");
+  assert.equal(snapshot?.sinks.find((sink) => sink.id === "audio")?.terminal, "completed");
+  assert.equal(snapshot?.sinks.find((sink) => sink.id === "motion")?.terminal, "started");
+
+  runtime.markMotionTimelineTerminal(
+    "turn-motion",
+    "msg-motion",
+    "completed",
+    "motion_completed_after_audio",
+  );
+
+  snapshot = runtime.getActiveAudioTimelineSnapshot();
+  assert.equal(snapshot, null);
+}
+
 async function run(): Promise<void> {
   await testAudioPlaybackCreatesAudioClockTimeline();
   await testAudioTimelineCompletesOnAudioEnded();
   await testLipSyncFailureRemainsVisibleUntilAudioCompletes();
   await testAudioTimelineInterruptsPreparedAudioOnStopAll();
   await testStartingNextAudioSettlesInterruptedPreviousSegment();
+  await testMotionSinkKeepsTimelineOpenAfterAudioCompletes();
   console.log("adapterAudioRuntime tests passed");
 }
 

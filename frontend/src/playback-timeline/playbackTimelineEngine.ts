@@ -27,6 +27,7 @@ export interface PlaybackTimelineEngine {
   stop(reason?: string): void;
   interrupt(reason: string): void;
   registerSink(sink: PlaybackTimelineSinkDefinition): void;
+  hasSink(sinkId: string): boolean;
   attachAudioClock(clock: AudioPlaybackClock): void;
   detachAudioClock(): void;
   markSinkStarted(sinkId: string): void;
@@ -224,6 +225,9 @@ export function createPlaybackTimelineEngine(
     },
     registerSink(definition) {
       ensureLoaded();
+      if (sinks.has(definition.id)) {
+        return;
+      }
       sinks.set(definition.id, {
         definition,
         state: createSinkState(definition),
@@ -231,6 +235,10 @@ export function createPlaybackTimelineEngine(
       if (phase === "preparing" && isReady()) {
         phase = "ready";
       }
+    },
+    hasSink(sinkId) {
+      ensureLoaded();
+      return sinks.has(sinkId);
     },
     attachAudioClock(audioClock) {
       ensureLoaded();

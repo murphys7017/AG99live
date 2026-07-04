@@ -112,6 +112,45 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     },
     initialMotionPlaybackRecords,
   });
+  const motionTimelineRuns = new Map<string, {
+    turnId: string | null;
+    messageId: string;
+  }>();
+  const markMotionTimelineStarted = (
+    event: Parameters<typeof playbackCoordinator.recordMotionPlayback>[0],
+  ): void => {
+    if (event.startReason === "preview") {
+      return;
+    }
+    adapter.markMotionTimelineStarted(event.turnId, event.messageId);
+    if (event.runId) {
+      motionTimelineRuns.set(event.runId, {
+        turnId: event.turnId,
+        messageId: event.messageId,
+      });
+    }
+  };
+  const markMotionTimelineTerminal = (event: {
+    runId: string;
+    status: string;
+    reason?: string;
+  }): void => {
+    const owner = motionTimelineRuns.get(event.runId);
+    if (!owner) {
+      return;
+    }
+    motionTimelineRuns.delete(event.runId);
+    adapter.markMotionTimelineTerminal(
+      owner.turnId,
+      owner.messageId,
+      event.status === "completed"
+        ? "completed"
+        : event.status === "stopped"
+          ? "interrupted"
+          : "failed",
+      event.reason || event.status,
+    );
+  };
   const modelEngine = useModelEngine({
     getSelectedModel: () => selectedModel.value,
     getSettings: () => cloneModelEngineSettings(motionEngineSettings),
@@ -119,15 +158,26 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       ...options,
       onFinished: (event) => {
         options?.onFinished?.(event);
+        markMotionTimelineTerminal(event);
         playbackCoordinator.completeMotionPlayback(event);
       },
     }),
-    playCatalogMotion: (motion, model) => motionPlayer.playCatalogMotion(motion, model),
+    playCatalogMotion: (motion, model, options) => motionPlayer.playCatalogMotion(motion, model, {
+      ...options,
+      onFinished: (event) => {
+        options?.onFinished?.(event);
+        markMotionTimelineTerminal(event);
+        playbackCoordinator.completeMotionPlayback(event);
+      },
+    }),
     stopPlan: (reason) => motionPlayer.stopPlan(reason),
     getCurrentTurnId: () => adapter.state.currentTurnId,
     pushHistory: (role, text) => adapter.pushHistory(role, text),
     getPlayerMessage: () => motionPlayer.state.message,
-    onPlanStarted: playbackCoordinator.recordMotionPlayback,
+    onPlanStarted: (event) => {
+      markMotionTimelineStarted(event);
+      playbackCoordinator.recordMotionPlayback(event);
+    },
     sessionStore: {
       getActiveSession: () => sessionStore.getActiveSession(),
       getSessionByTurnId: (turnId) => sessionStore.getSession(turnId),
@@ -148,6 +198,8 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const motionTimelineSink = createModelEngineMotionTimelineSink({
     motionEngine: modelEngine,
     getActiveAudioTimelineSnapshot: adapter.getActiveAudioTimelineSnapshot,
+    prepareMotionTimelineSink: adapter.prepareMotionTimelineSink,
+    markMotionTimelineTerminal: adapter.markMotionTimelineTerminal,
   });
 
   useTurnPlaybackOrchestrator({
@@ -331,6 +383,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     pushToTalk.dispose();
     bilibiliLive.dispose();
     playbackCoordinator.resetPlaybackCoordination();
+    motionTimelineRuns.clear();
     adapter.setAudioTimelineStartedHandler(null);
     modelEngine.stop("unmount");
     detachBridgeListener();
