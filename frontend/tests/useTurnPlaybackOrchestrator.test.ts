@@ -5,9 +5,11 @@ import assert from "node:assert/strict";
 import { effectScope, nextTick } from "vue";
 import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
 import { useTurnPlaybackOrchestrator } from "../src/turn-playback/useTurnPlaybackOrchestrator.js";
-import { executeTurnPlaybackSegmentReleaseJob } from "../src/turn-playback/segmentReleaseExecutor.js";
 import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
 import { createModelEngineMotionTimelineSink } from "../src/playback-timeline/motionSink.js";
+import {
+  executePlaybackTimelineSegmentJob,
+} from "../src/playback-timeline/segmentJobExecutor.js";
 import type { PlaybackTimelineSnapshot } from "../src/playback-timeline/contracts.js";
 import type { PerformanceCurveHint } from "../src/types/protocol.js";
 
@@ -658,7 +660,7 @@ function testMotionTimelineSinkUsesSegmentScopedTimelineLookup(): void {
   assert.equal(contexts[0].playbackTimeline?.timelineId, "timeline-1");
 }
 
-function testSegmentReleaseExecutorRejectsInvalidMotionTimestamp(): void {
+function testPlaybackTimelineSegmentExecutorRejectsInvalidMotionTimestamp(): void {
   const sessionStore = useTurnPlaybackSessionStore();
   sessionStore.setActiveSession("turn-invalid-motion-time");
   sessionStore.markTurnStarted("turn-invalid-motion-time");
@@ -674,7 +676,7 @@ function testSegmentReleaseExecutorRejectsInvalidMotionTimestamp(): void {
   );
 
   assert.throws(
-    () => executeTurnPlaybackSegmentReleaseJob(
+    () => executePlaybackTimelineSegmentJob(
       {
         messageId: "msg-invalid-motion-time",
         turnId: "turn-invalid-motion-time",
@@ -692,19 +694,86 @@ function testSegmentReleaseExecutorRejectsInvalidMotionTimestamp(): void {
         },
       },
       {
-        sessionStore,
-        playbackRelease: {
+        session: {
+          markTextReleased: sessionStore.markTextReleased,
+          markAudioReleased: sessionStore.markAudioReleased,
+          markMotionReleased: sessionStore.markMotionReleased,
+          markMotionFailed: sessionStore.markMotionFailed,
+          markPhase: sessionStore.markPhase,
+        },
+        textSink: {
           releaseAssistantTextForPlayback: () => true,
+        },
+        audioSink: {
           releaseAudioForPlayback: () => true,
         },
-        motionPayload: {
+        motionSink: {
           start: () => true,
-          notifyCurrentTurnChanged: () => {},
         },
       },
     ),
     /valid receivedAtMs/,
   );
+}
+
+function testPlaybackTimelineSegmentExecutorMarksMotionOnlyContext(): void {
+  const events: string[] = [];
+  const contexts: Array<{ timelineMode?: string }> = [];
+  const result = executePlaybackTimelineSegmentJob(
+    {
+      messageId: "msg-motion-only-job",
+      turnId: "turn-motion-only-job",
+      reason: "test",
+      text: {
+        release: false,
+      },
+      audio: {
+        release: false,
+        noAudioConfirmed: true,
+      },
+      motion: {
+        payload: motionPayload,
+        receivedAtMs: 123,
+      },
+    },
+    {
+      session: {
+        markTextReleased: () => events.push("text_released"),
+        markAudioReleased: () => events.push("audio_released"),
+        markMotionReleased: () => events.push("motion_released"),
+        markMotionFailed: () => events.push("motion_failed"),
+        markPhase: (_turnId, phase) => {
+          events.push(`phase:${phase}`);
+          return true;
+        },
+      },
+      textSink: {
+        releaseAssistantTextForPlayback: () => true,
+      },
+      audioSink: {
+        releaseAudioForPlayback: () => true,
+      },
+      motionSink: {
+        start: (_payload, context) => {
+          contexts.push({ timelineMode: context.timelineMode });
+          return true;
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(result, {
+    releasedText: false,
+    releasedAudio: false,
+    releasedMotion: true,
+  });
+  assert.deepEqual(events, [
+    "motion_released",
+    "phase:playing",
+  ]);
+  assert.deepEqual(contexts, [
+    { timelineMode: "motion_only" },
+  ]);
 }
 
 async function run(): Promise<void> {
@@ -722,7 +791,8 @@ async function run(): Promise<void> {
   testMotionTimelineSinkDoesNotGuessSyntheticTimeline();
   testMotionTimelineSinkRejectsMissingMotionOnlyTimeline();
   testMotionTimelineSinkUsesSegmentScopedTimelineLookup();
-  testSegmentReleaseExecutorRejectsInvalidMotionTimestamp();
+  testPlaybackTimelineSegmentExecutorRejectsInvalidMotionTimestamp();
+  testPlaybackTimelineSegmentExecutorMarksMotionOnlyContext();
   console.log("useTurnPlaybackOrchestrator tests passed");
 }
 

@@ -5,8 +5,8 @@ import type {
 } from "./ports.js";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
 import {
-  executeTurnPlaybackSegmentReleaseJob,
-} from "./segmentReleaseExecutor.js";
+  executePlaybackTimelineSegmentJob,
+} from "../playback-timeline/segmentJobExecutor.js";
 import type {
   TurnPlaybackSegmentReleaseJob,
   TurnPlaybackSegmentReleaseResult,
@@ -32,7 +32,23 @@ export function createTurnPlaybackSegmentReleaser(
   function release(
     job: TurnPlaybackSegmentReleaseJob<NormalizedMotionPayload>,
   ): TurnPlaybackSegmentReleaseResult {
-    return executeTurnPlaybackSegmentReleaseJob(job, options);
+    return executePlaybackTimelineSegmentJob(job, {
+      session: {
+        markTextReleased: options.sessionStore.markTextReleased,
+        markAudioReleased: options.sessionStore.markAudioReleased,
+        markMotionReleased: options.sessionStore.markMotionReleased,
+        markMotionFailed: options.sessionStore.markMotionFailed,
+        markPhase: options.sessionStore.markPhase,
+      },
+      textSink: {
+        releaseAssistantTextForPlayback:
+          options.playbackRelease.releaseAssistantTextForPlayback,
+      },
+      audioSink: {
+        releaseAudioForPlayback: options.playbackRelease.releaseAudioForPlayback,
+      },
+      motionSink: options.motionPayload,
+    });
   }
 
   return {
