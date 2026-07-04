@@ -1,12 +1,13 @@
 task:
   class: feature
   risk: medium
-  phase: unified_playback_timeline_phase1
-  scope: Frontend unified playback timeline skeleton with pure logic clock and sink lifecycle state machine
+  phase: unified_playback_timeline_phase2_audio_runtime
+  scope: Frontend playback timeline audio-runtime integration while preserving existing session-store release semantics
 context:
   confidence: medium
   assumptions:
-    - Phase 1 only introduces pure timeline logic and tests; it does not replace the current audioRuntime, ModelEngine, or turn playback orchestrator integration path yet.
+    - Phase 1 pure timeline logic is complete; Phase 2 now lets audioRuntime create a segment PlaybackTimelineEngine for released audio.
+    - Audio timeline integration observes and records real audio playback clock state, but does not yet replace turnPlaybackOrchestrator release decisions.
     - The first shipped timeline shape should remain single active segment oriented, matching the current turn playback session semantics.
     - Existing notifyAudioPlaybackStarted based motion timing remains the migration path until a later timeline integration phase takes ownership.
     - The automatic LLM motion path remains pure engine.motion_intent.v3 semantic axes; catalog motion, motion3, exp3, and choice outputs stay out of this path.
@@ -19,7 +20,7 @@ context:
     - Skeleton repair may add missing head/body/gaze axes from fallback semantic axes and may replace neutralish skeleton axes, but it must not overwrite non-neutral LLM axes.
     - Empty, invalid, or all-neutral motion axes should not be replaced by a fallback pose; those turns should be treated as no valid motion input.
   unresolved_questions:
-    - Phase 2 still needs a careful extraction boundary for AudioSink because audioRuntime currently owns queueing, pending items, and settle behavior in addition to raw playback.
+    - Phase 2 still needs a careful extraction boundary for a standalone AudioSink because audioRuntime currently owns queueing, pending items, and settle behavior in addition to raw playback.
     - Phase 3 needs an explicit guard to prevent timeline-driven playback start from double-triggering the current notifyAudioPlaybackStarted motion path for the same segment.
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.
@@ -28,6 +29,7 @@ architecture:
   stability: evolving
   boundary_changes:
     - Frontend now has a new playback-timeline module that defines a reusable segment timeline contract, synthetic/audio clock abstraction, and sink terminal state machine without yet changing real playback integration.
+    - Audio runtime now creates an active playback timeline for each released audio segment, attaches the HTMLAudioElement playback clock on playback start, and clears the timeline on completion, failure, or interruption.
     - Adapter runtime no longer exposes inline_first / enable_inline_motion_contract configuration; <@anim> inline motion tags are not parsed or broadcast as a runtime motion path.
     - Frontend and adapter motion-intent boundaries are now v3-only; v2 nested axes are treated as invalid input instead of being normalized forward.
     - TurnCoordinator sanitizes hidden legacy motion markup from visible text/captions while preserving raw assistant output in Motion Lab records.
@@ -46,6 +48,7 @@ verification:
   checks_run:
     - npm run test:playback-timeline
     - npm run test:playback-timeline-audio
+    - npm run test:adapter-audio-runtime
     - npm run typecheck:renderer
     - git diff --check
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_runtime_state_provider_analysis.py::test_runtime_state_ignores_removed_inline_motion_config astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_result_contributor_ignores_removed_inline_mode_for_final_phase astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_result_contributor_ignores_removed_inline_mode_for_self_reply -q
@@ -74,7 +77,7 @@ verification:
   checks_failed: []
   validation_gap: Live AstrBot plus provider logs still need validation to confirm input_tokens decrease; static scope alone may not reduce request tokens without provider/static-prefix caching.
 runtime:
-  mode: unified_playback_timeline_phase1
+  mode: unified_playback_timeline_phase2_audio_runtime
 backlog:
   - id: motion_lab_history_sample_workbench
     status: todo

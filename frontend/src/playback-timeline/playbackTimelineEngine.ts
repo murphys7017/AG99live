@@ -1,4 +1,5 @@
 import type {
+  AudioPlaybackClock,
   PlaybackTimelineSinkDefinition,
   PlaybackTimelineSinkState,
   PlaybackTimelineSnapshot,
@@ -20,12 +21,14 @@ interface RegisteredSink {
 
 export interface PlaybackTimelineEngine {
   load(job: SegmentPlaybackJob, sinks?: PlaybackTimelineSinkDefinition[]): void;
-  start(): void;
+  start(startedAtMs?: number): void;
   pause(): void;
   resume(): void;
   stop(reason?: string): void;
   interrupt(reason: string): void;
   registerSink(sink: PlaybackTimelineSinkDefinition): void;
+  attachAudioClock(clock: AudioPlaybackClock): void;
+  detachAudioClock(): void;
   markSinkStarted(sinkId: string): void;
   markSinkTerminal(
     sinkId: string,
@@ -156,7 +159,7 @@ export function createPlaybackTimelineEngine(
         phase = "ready";
       }
     },
-    start() {
+    start(startedAtMs) {
       ensureLoaded();
       if (phase === "playing") {
         return;
@@ -167,7 +170,7 @@ export function createPlaybackTimelineEngine(
       if (!isReady()) {
         throw new Error("Playback timeline cannot start before required sinks are ready");
       }
-      clock.start();
+      clock.start(startedAtMs);
       phase = "playing";
     },
     pause() {
@@ -228,6 +231,14 @@ export function createPlaybackTimelineEngine(
       if (phase === "preparing" && isReady()) {
         phase = "ready";
       }
+    },
+    attachAudioClock(audioClock) {
+      ensureLoaded();
+      clock.attachAudioClock(audioClock);
+    },
+    detachAudioClock() {
+      ensureLoaded();
+      clock.detachAudioClock();
     },
     markSinkStarted(sinkId) {
       ensureLoaded();
