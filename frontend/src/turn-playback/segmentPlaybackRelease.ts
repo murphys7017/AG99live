@@ -21,7 +21,7 @@ export interface TurnPlaybackSegmentReleaserOptions {
   sessionStore: SessionStore;
   playbackRelease: PlaybackReleasePort;
   motionPayload: MotionPayloadPort;
-  timelineRuntime?: PlaybackTimelineSegmentRuntimePort;
+  timelineRuntime: PlaybackTimelineSegmentRuntimePort;
 }
 
 export interface TurnPlaybackSegmentReleaser {

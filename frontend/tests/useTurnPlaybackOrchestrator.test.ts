@@ -74,6 +74,12 @@ const matchingMotionOnlyTimelineSnapshot: PlaybackTimelineSnapshot = {
   ],
 };
 
+function createAcceptingTimelineRuntime() {
+  return {
+    prepareSegmentJob: () => true,
+  };
+}
+
 function createHarness(options: {
   motionAccepted?: boolean;
   audioTimelineAfterRelease?: PlaybackTimelineSnapshot | null;
@@ -168,6 +174,7 @@ function createHarness(options: {
       sessionStore,
       playbackRelease: adapter,
       motionPayload: motionTimelineSink,
+      timelineRuntime: createAcceptingTimelineRuntime(),
     });
   });
 
@@ -710,6 +717,7 @@ function testPlaybackTimelineSegmentExecutorRejectsInvalidMotionTimestamp(): voi
         motionSink: {
           start: () => true,
         },
+        timelineRuntime: createAcceptingTimelineRuntime(),
       },
     ),
     /valid receivedAtMs/,
@@ -759,6 +767,7 @@ function testPlaybackTimelineSegmentExecutorMarksMotionOnlyContext(): void {
           return true;
         },
       },
+      timelineRuntime: createAcceptingTimelineRuntime(),
     },
   );
 

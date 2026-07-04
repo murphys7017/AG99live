@@ -78,7 +78,7 @@ export interface PlaybackTimelineSegmentExecutorPorts<
   textSink: PlaybackTimelineSegmentTextSink;
   audioSink: PlaybackTimelineSegmentAudioSink;
   motionSink: PlaybackTimelineSegmentMotionSink<TMotionPayload>;
-  timelineRuntime?: PlaybackTimelineSegmentRuntimePort;
+  timelineRuntime: PlaybackTimelineSegmentRuntimePort;
 }
 
 export function executePlaybackTimelineSegmentJob<
@@ -108,7 +108,7 @@ export function executePlaybackTimelineSegmentJob<
   }
   if (releasedAudio) {
     ports.session.markAudioReleased(job.turnId, job.messageId);
-    const prepared = ports.timelineRuntime?.prepareSegmentJob(
+    const prepared = ports.timelineRuntime.prepareSegmentJob(
       job.turnId,
       job.messageId,
       {
@@ -117,7 +117,7 @@ export function executePlaybackTimelineSegmentJob<
         noAudioConfirmed: false,
       },
     );
-    if (prepared === false) {
+    if (!prepared) {
       throw new Error("Playback timeline segment preparation failed.");
     }
   }
@@ -136,7 +136,7 @@ export function executePlaybackTimelineSegmentJob<
       ? "motion_only"
       : "audio";
     if (!releasedAudio && timelineMode === "motion_only") {
-      const prepared = ports.timelineRuntime?.prepareSegmentJob(
+      const prepared = ports.timelineRuntime.prepareSegmentJob(
         job.turnId,
         job.messageId,
         {
@@ -145,7 +145,7 @@ export function executePlaybackTimelineSegmentJob<
           noAudioConfirmed: true,
         },
       );
-      if (prepared === false) {
+      if (!prepared) {
         ports.session.markMotionFailed(
           job.turnId,
           job.messageId,

@@ -47,7 +47,7 @@ interface TurnPlaybackOrchestratorOptions {
   sessionStore: SessionStore;
   playbackRelease: PlaybackReleasePort;
   motionPayload: MotionPayloadPort;
-  timelineRuntime?: PlaybackTimelineSegmentRuntimePort;
+  timelineRuntime: PlaybackTimelineSegmentRuntimePort;
 }
 
 function attachPerformanceCurveHintToPayload(
