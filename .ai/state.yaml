@@ -12,6 +12,8 @@ context:
     - Existing notifyAudioPlaybackStarted based motion timing remains the migration path until a later timeline integration phase takes ownership.
     - Motion release now receives a strictly matched active audio timeline snapshot when turnId and messageId match; mismatched timeline snapshots are intentionally ignored.
     - ModelEngine now prefers playback timeline duration/currentTime for motion target duration when the release context carries a valid audio timeline snapshot.
+    - Audio-start notifications now refresh pending motion entries with the current matched audio timeline snapshot before starting the payload, avoiding stale release-time timeline snapshots.
+    - Stopping an already-playing audio segment now writes an audio terminal only when no more specific terminal reason has already been set.
     - The automatic LLM motion path remains pure engine.motion_intent.v3 semantic axes; catalog motion, motion3, exp3, and choice outputs stay out of this path.
     - The automatic motion path is middleware-first only; inline_first / <@anim> is no longer a runtime-selectable motion generation route.
     - engine.motion_intent.v2 is no longer accepted at backend normalization, frontend inbound, preview send, or ModelEngine normalization boundaries.
@@ -23,7 +25,7 @@ context:
     - Empty, invalid, or all-neutral motion axes should not be replaced by a fallback pose; those turns should be treated as no valid motion input.
   unresolved_questions:
     - Phase 2 still needs a careful extraction boundary for a standalone AudioSink because audioRuntime currently owns queueing, pending items, and settle behavior in addition to raw playback.
-    - Phase 3 needs an explicit guard to prevent timeline-driven playback start from double-triggering the current notifyAudioPlaybackStarted motion path for the same segment.
+    - Phase 3 still needs a full MotionSink migration before notifyAudioPlaybackStarted can be removed as a migration path.
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.
     - For earlier curve generation during actual TTS synthesis, identify an AstrBot hook before message-chain Record creation; current MVP starts from emit_message_chain and never blocks playback.
@@ -34,6 +36,8 @@ architecture:
     - Audio runtime now creates an active playback timeline for each released audio segment, attaches the HTMLAudioElement playback clock on playback start, and clears the timeline on completion, failure, or interruption.
     - TurnPlaybackOrchestrator now releases audio before motion for the same ready segment so audioRuntime can create an active timeline before ModelEngine ingests the motion payload.
     - Frontend motion ingest context can carry an optional playbackTimeline snapshot; ModelEngine pending scheduler preserves it and motionStart uses it before falling back to sessionStore audio-duration lookup.
+    - ModelEngine pending motion entries refresh their playbackTimeline from the audio-start notification when a same turnId/messageId audio timeline is available.
+    - Generic audio stop cleanup no longer overwrites a more specific terminal reason such as audio_playback_replaced_by_new_input.
     - Adapter runtime no longer exposes inline_first / enable_inline_motion_contract configuration; <@anim> inline motion tags are not parsed or broadcast as a runtime motion path.
     - Frontend and adapter motion-intent boundaries are now v3-only; v2 nested axes are treated as invalid input instead of being normalized forward.
     - TurnCoordinator sanitizes hidden legacy motion markup from visible text/captions while preserving raw assistant output in Motion Lab records.
@@ -57,6 +61,7 @@ verification:
     - npm run test:turn-orchestrator
     - npm run test:model-engine
     - npm run test:adapter-connection
+    - npm run test:motion-runtime-scheduler
     - npm run typecheck:renderer
     - git diff --check
     - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_runtime_state_provider_analysis.py::test_runtime_state_ignores_removed_inline_motion_config astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_result_contributor_ignores_removed_inline_mode_for_final_phase astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_result_contributor_ignores_removed_inline_mode_for_self_reply -q

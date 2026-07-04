@@ -13,6 +13,7 @@ import type {
   MotionRuntimeSchedulerDependencies,
   MotionStartDependencies,
 } from "./runtime/contracts";
+import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
 import { normalizeMotionPayload } from "./normalize";
 import {
   reportInvalidMotionPayload,
@@ -132,9 +133,14 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   function notifyAudioPlaybackStarted(
     turnId: string | null,
     messageId: string | null = null,
+    playbackTimeline: PlaybackTimelineSnapshot | null = null,
   ): boolean {
     const queuedMotionStarted =
-      runtimeScheduler.notifyAudioPlaybackStarted(turnId, messageId);
+      runtimeScheduler.notifyAudioPlaybackStarted(
+        turnId,
+        messageId,
+        playbackTimeline,
+      );
     if (queuedMotionStarted) {
       return true;
     }

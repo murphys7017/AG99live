@@ -122,10 +122,69 @@ async function testAudioTimelineInterruptsPreparedAudioOnStopAll(): Promise<void
   assert.equal(runtime.getActiveAudioTimelineSnapshot(), null);
 }
 
+async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise<void> {
+  const state = buildState();
+  const terminalEvents: Array<{
+    turnId: string | null;
+    terminal: string;
+    messageId: string;
+    reason?: string;
+  }> = [];
+  const runtime = createAdapterAudioRuntime({
+    state,
+    startAudio: async (_url, options) => {
+      options.onPlaybackStarted({
+        startedAtMs: 100,
+        durationMs: 1000,
+      });
+      return new Promise<void>(() => {});
+    },
+    stopAudioRuntime: () => {},
+    pushHistory: () => {},
+    getSessionStore: () => ({
+      markAudioStarted: () => {},
+      markAudioDuration: () => {},
+      markAudioTerminal: (turnId, terminal, messageId, reason) => {
+        terminalEvents.push({
+          turnId,
+          terminal,
+          messageId,
+          reason,
+        });
+      },
+      getSessions: () => [],
+    }),
+    getAudioPlaybackClock: () => null,
+  });
+
+  void runtime.playAudioAndAcknowledge(
+    "http://127.0.0.1/first.wav",
+    "turn-4",
+    "msg-4a",
+  );
+  await flushMicrotasks();
+  assert.equal(state.audioPlaybackStartedMessageId, "msg-4a");
+
+  void runtime.playAudioAndAcknowledge(
+    "http://127.0.0.1/second.wav",
+    "turn-4",
+    "msg-4b",
+  );
+  await flushMicrotasks();
+
+  assert.deepEqual(terminalEvents[0], {
+    turnId: "turn-4",
+    terminal: "failed",
+    messageId: "msg-4a",
+    reason: "audio_playback_stopped",
+  });
+}
+
 async function run(): Promise<void> {
   await testAudioPlaybackCreatesAudioClockTimeline();
   await testAudioTimelineCompletesOnAudioEnded();
   await testAudioTimelineInterruptsPreparedAudioOnStopAll();
+  await testStartingNextAudioSettlesInterruptedPreviousSegment();
   console.log("adapterAudioRuntime tests passed");
 }
 

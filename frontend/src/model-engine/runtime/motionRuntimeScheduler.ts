@@ -48,6 +48,16 @@ function hasPerformanceCurveHint(payload: NormalizedMotionPayload): boolean {
   );
 }
 
+function matchesPlaybackTimeline(
+  entry: PendingInboundMotionPayload,
+  snapshot: PlaybackTimelineSnapshot,
+): boolean {
+  return (
+    entry.messageId === snapshot.messageId
+    && normalizeTurnId(entry.turnId) === normalizeTurnId(snapshot.turnId)
+  );
+}
+
 export function createMotionRuntimeScheduler(
   dependencies: MotionRuntimeSchedulerDependencies,
   hooks: MotionRuntimeSchedulerHooks,
@@ -269,6 +279,7 @@ export function createMotionRuntimeScheduler(
     turnId: string | null,
     messageId: string,
     startReason: string,
+    playbackTimeline: PlaybackTimelineSnapshot | null = null,
   ): boolean {
     const key = buildPendingMotionKey(turnId, messageId);
     const entry = pendingInboundMotionPayloads.get(key);
@@ -276,6 +287,9 @@ export function createMotionRuntimeScheduler(
       return false;
     }
 
+    if (playbackTimeline && matchesPlaybackTimeline(entry, playbackTimeline)) {
+      entry.playbackTimeline = playbackTimeline;
+    }
     pendingInboundMotionPayloads.delete(key);
     clearPendingPayload(entry);
     syncPendingState();
@@ -411,6 +425,7 @@ export function createMotionRuntimeScheduler(
   function notifyAudioPlaybackStarted(
     turnId: string | null,
     messageId: string | null = null,
+    playbackTimeline: PlaybackTimelineSnapshot | null = null,
   ): boolean {
     const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
     const normalizedTurnId = normalizeTurnId(turnId);
@@ -421,6 +436,7 @@ export function createMotionRuntimeScheduler(
           normalizedTurnId,
           normalizedMessageId,
           "audio_playing_event",
+          playbackTimeline,
         );
       } else {
         for (const entry of Array.from(pendingInboundMotionPayloads.values())) {
@@ -429,6 +445,7 @@ export function createMotionRuntimeScheduler(
               entry.turnId,
               entry.messageId,
               "audio_playing_event",
+              playbackTimeline,
             ) || started;
           }
         }
@@ -447,7 +464,12 @@ export function createMotionRuntimeScheduler(
     let started = false;
     for (const entry of Array.from(pendingInboundMotionPayloads.values())) {
       if (entry.turnId === normalizedTurnId) {
-        started = tryStartPendingPayload(entry.turnId, entry.messageId, "audio_playing_event") || started;
+        started = tryStartPendingPayload(
+          entry.turnId,
+          entry.messageId,
+          "audio_playing_event",
+          playbackTimeline,
+        ) || started;
       }
     }
     console.info("[ModelEngine] audio playback start notification handled.", {

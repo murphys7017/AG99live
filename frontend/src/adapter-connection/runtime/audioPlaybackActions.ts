@@ -6,6 +6,8 @@ export interface AudioPlaybackState {
   audioPlaybackStartedMessageId: string | null;
   audioPlaybackStartedAtMs: number;
   audioPlaybackDurationMs: number | null;
+  audioPlaybackTerminalState: "idle" | "completed" | "failed" | "absent";
+  audioPlaybackTerminalReason: string;
   statusMessage: string;
   lastError: string;
 }
@@ -188,13 +190,28 @@ export async function playAudioAndAcknowledge(
 export function stopAudioPlayback(ctx: AudioPlaybackContext): void {
   const interruptedTurnId = ctx.state.audioPlaybackStartedTurnId;
   const interruptedMessageId = ctx.state.audioPlaybackStartedMessageId;
+  const shouldMarkInterruptedTerminal =
+    ctx.state.audioPlaybackTerminalState === "idle";
   ctx.stopAudioRuntime();
-  if (interruptedMessageId) {
+  if (interruptedMessageId && shouldMarkInterruptedTerminal) {
+    ctx.markTerminal(
+      "failed",
+      interruptedTurnId,
+      "audio_playback_stopped",
+      interruptedMessageId,
+    );
     ctx.markAudioTimelineTerminal?.(
       interruptedTurnId,
       interruptedMessageId,
       "interrupted",
       "audio_playback_stopped",
+    );
+  } else if (interruptedMessageId) {
+    ctx.markAudioTimelineTerminal?.(
+      interruptedTurnId,
+      interruptedMessageId,
+      "interrupted",
+      ctx.state.audioPlaybackTerminalReason || "audio_playback_stopped",
     );
   } else {
     ctx.stopActiveAudioTimeline?.("audio_playback_stopped");

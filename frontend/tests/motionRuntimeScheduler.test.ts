@@ -13,6 +13,7 @@ import type {
   ModelEnginePlaybackSession,
 } from "../src/model-engine/runtime/contracts.js";
 import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
+import type { PlaybackTimelineSnapshot } from "../src/playback-timeline/contracts.js";
 
 let mockNowMs = 1000;
 let nextTimerId = 1;
@@ -76,6 +77,28 @@ function buildCurvePayload(): NormalizedMotionPayload {
         energy: "medium",
       },
     },
+  };
+}
+
+function buildTimelineSnapshot(overrides: Partial<PlaybackTimelineSnapshot> = {}): PlaybackTimelineSnapshot {
+  return {
+    timelineId: "timeline-1",
+    turnId: "turn-1",
+    messageId: "msg-1",
+    phase: "playing",
+    clockSource: "audio",
+    startedAtMs: 1200,
+    currentTimeMs: 420,
+    durationMs: 2400,
+    playbackRate: 1,
+    sinks: [
+      {
+        id: "audio",
+        required: true,
+        terminal: "started",
+      },
+    ],
+    ...overrides,
   };
 }
 
@@ -388,6 +411,41 @@ function testCurvePayloadWaitsForAudioStartPastInitialTimeout(): void {
   assert.equal(failed.length, 0);
 }
 
+function testAudioStartRefreshesPendingPlaybackTimeline(): void {
+  resetTimers();
+  const session = buildSession();
+  setAudioWaiting(session);
+  const { scheduler, started } = createHarness(session);
+  const staleTimeline = buildTimelineSnapshot({
+    timelineId: "stale",
+    phase: "preparing",
+    currentTimeMs: 0,
+    durationMs: 1000,
+  });
+  const freshTimeline = buildTimelineSnapshot({
+    timelineId: "fresh",
+    phase: "playing",
+    currentTimeMs: 360,
+    durationMs: 2200,
+  });
+
+  scheduler.queueInboundPayload(buildPayload(), {
+    messageId: "msg-1",
+    turnId: "turn-1",
+    playbackTurnId: "turn-1",
+    receivedAtMs: 900,
+    playbackTimeline: staleTimeline,
+  });
+
+  assert.equal(
+    scheduler.notifyAudioPlaybackStarted("turn-1", "msg-1", freshTimeline),
+    true,
+  );
+  assert.equal(started.length, 1);
+  assert.equal(started[0].playbackTimeline?.timelineId, "fresh");
+  assert.equal(started[0].playbackTimeline?.durationMs, 2200);
+}
+
 function testCurvePayloadFailsWhenAudioTerminalArrivesBeforeStart(): void {
   resetTimers();
   const session = buildSession();
@@ -422,6 +480,7 @@ function run(): void {
   testActiveAudioLookupRequiresMatchingTurnWhenMessageIdIsShared();
   testAudioStartReturnsFalseWithoutQueuedMotion();
   testCurvePayloadWaitsForAudioStartPastInitialTimeout();
+  testAudioStartRefreshesPendingPlaybackTimeline();
   testCurvePayloadFailsWhenAudioTerminalArrivesBeforeStart();
   console.log("motionRuntimeScheduler tests passed");
 }

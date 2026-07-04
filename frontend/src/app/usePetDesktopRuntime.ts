@@ -84,7 +84,11 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       ) {
         return;
       }
-      modelEngine.notifyAudioPlaybackStarted(turnId, messageId);
+      modelEngine.notifyAudioPlaybackStarted(
+        turnId,
+        messageId,
+        adapter.getActiveAudioTimelineSnapshot(),
+      );
     }, MOTION_AFTER_AUDIO_START_DELAY_MS);
     delayedMotionStartTimers.add(timer);
   };
