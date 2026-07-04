@@ -1,4 +1,4 @@
-import type { StartAudioPlaybackOptions } from "./audioPlayback.js";
+import type { PlaybackTimelineAudioSink } from "../../playback-timeline/audioSink.js";
 
 export interface AudioPlaybackState {
   isPlayingAudio: boolean;
@@ -28,8 +28,7 @@ export interface AudioPlaybackSessionStore {
 
 export interface AudioPlaybackContext {
   state: AudioPlaybackState;
-  startAudio: (url: string, opts: StartAudioPlaybackOptions) => Promise<void>;
-  stopAudioRuntime: () => void;
+  audioSink: PlaybackTimelineAudioSink;
   prepareAudioTimeline?: (turnId: string | null, messageId: string) => void;
   markAudioTimelineDuration?: (
     turnId: string | null,
@@ -78,7 +77,7 @@ export async function playAudioAndAcknowledge(
   ctx.pushHistory("system", ctx.state.statusMessage);
 
   try {
-    await ctx.startAudio(audioUrl, {
+    await ctx.audioSink.start(audioUrl, {
       onLipSyncUnavailable: () => {
         ctx.pushHistory("system", "嘴型同步加载失败，音频播放将无对应张嘴动作。");
       },
@@ -192,7 +191,7 @@ export function stopAudioPlayback(ctx: AudioPlaybackContext): void {
   const interruptedMessageId = ctx.state.audioPlaybackStartedMessageId;
   const shouldMarkInterruptedTerminal =
     ctx.state.audioPlaybackTerminalState === "idle";
-  ctx.stopAudioRuntime();
+  ctx.audioSink.stop();
   if (interruptedMessageId && shouldMarkInterruptedTerminal) {
     ctx.markTerminal(
       "failed",

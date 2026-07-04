@@ -16,6 +16,7 @@ import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRuntimeSnapshotPublisher";
 import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
+import { createModelEngineMotionTimelineSink } from "../playback-timeline/motionSink.js";
 import { cloneModelEngineSettings } from "../model-engine/settings";
 import type { ModelEngineSettings } from "../model-engine/settings";
 import { usePlaybackCompletionCoordinator } from "../turn-playback/usePlaybackCompletionCoordinator";
@@ -137,17 +138,20 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     }
     return localPlayed;
   });
+  const motionTimelineSink = createModelEngineMotionTimelineSink({
+    motionEngine: modelEngine,
+    getActiveAudioTimelineSnapshot: adapter.getActiveAudioTimelineSnapshot,
+  });
 
   useTurnPlaybackOrchestrator({
     sessionStore,
     playbackRelease: {
       releaseAssistantTextForPlayback: adapter.releaseAssistantTextForPlayback,
       releaseAudioForPlayback: adapter.releaseAudioForPlayback,
-      getActiveAudioTimelineSnapshot: adapter.getActiveAudioTimelineSnapshot,
     },
     motionPayload: {
-      ingestNormalizedPayload: modelEngine.ingestNormalizedPayload,
-      notifyCurrentTurnChanged: modelEngine.notifyCurrentTurnChanged,
+      start: motionTimelineSink.start,
+      notifyCurrentTurnChanged: motionTimelineSink.notifyCurrentTurnChanged,
     },
   });
 

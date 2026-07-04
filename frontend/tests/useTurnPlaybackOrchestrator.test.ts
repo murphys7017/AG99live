@@ -6,6 +6,7 @@ import { effectScope, nextTick } from "vue";
 import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
 import { useTurnPlaybackOrchestrator } from "../src/turn-playback/useTurnPlaybackOrchestrator.js";
 import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
+import { createModelEngineMotionTimelineSink } from "../src/playback-timeline/motionSink.js";
 import type { PlaybackTimelineSnapshot } from "../src/playback-timeline/contracts.js";
 import type { PerformanceCurveHint } from "../src/types/protocol.js";
 
@@ -99,9 +100,6 @@ function createHarness(options: {
       activeAudioTimeline = options.audioTimelineAfterRelease ?? null;
       return true;
     },
-    getActiveAudioTimelineSnapshot(): PlaybackTimelineSnapshot | null {
-      return activeAudioTimeline;
-    },
   };
 
   const modelEngine = {
@@ -122,12 +120,16 @@ function createHarness(options: {
       turnChanges.push(turnId);
     },
   };
+  const motionTimelineSink = createModelEngineMotionTimelineSink({
+    motionEngine: modelEngine,
+    getActiveAudioTimelineSnapshot: () => activeAudioTimeline,
+  });
 
   scope.run(() => {
     useTurnPlaybackOrchestrator({
       sessionStore,
       playbackRelease: adapter,
-      motionPayload: modelEngine,
+      motionPayload: motionTimelineSink,
     });
   });
 

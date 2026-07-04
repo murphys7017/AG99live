@@ -32,10 +32,8 @@ import {
   createAdapterMicrophoneRuntime,
 } from "./runtime/microphoneRuntime.js";
 import {
-  getActiveAudioPlaybackClock,
-  startAudioPlayback,
-  stopAudioPlaybackRuntime,
-} from "./runtime/audioPlayback.js";
+  createBrowserAudioTimelineSink,
+} from "../playback-timeline/audioSink.js";
 import {
   buildConnectFailureMessage,
   buildConnectionCandidates,
@@ -209,9 +207,7 @@ export function createAdapterConnection(
 
   const audioRuntime = createAdapterAudioRuntime({
     state,
-    startAudio: startAudioPlayback,
-    stopAudioRuntime: stopAudioPlaybackRuntime,
-    getAudioPlaybackClock: getActiveAudioPlaybackClock,
+    audioSink: createBrowserAudioTimelineSink(),
     pushHistory: pushHistory as (role: string, text: string) => void,
     getSessionStore: () => sessionStore,
   });

@@ -4,8 +4,7 @@ import type {
   NormalizedMotionPayload,
 } from "../model-engine/contracts.js";
 import type { ModelSummary } from "../types/protocol.js";
-import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
-import type { TurnPlaybackReleaseContext } from "./turnPlaybackOrchestratorCore.js";
+import type { PlaybackTimelineMotionContext } from "../playback-timeline/motionSink.js";
 
 export interface PlaybackReleasePort {
   releaseAssistantTextForPlayback(
@@ -16,13 +15,12 @@ export interface PlaybackReleasePort {
     messageId: string,
     turnId: string | null,
   ): boolean;
-  getActiveAudioTimelineSnapshot?: () => PlaybackTimelineSnapshot | null;
 }
 
 export interface MotionPayloadPort {
-  ingestNormalizedPayload(
+  start(
     payload: NormalizedMotionPayload,
-    context: TurnPlaybackReleaseContext,
+    context: PlaybackTimelineMotionContext,
   ): boolean | void;
   notifyCurrentTurnChanged(turnId: string | null): void;
 }

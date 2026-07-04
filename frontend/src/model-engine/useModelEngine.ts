@@ -2,23 +2,23 @@ import { reactive, readonly } from "vue";
 import {
   createMotionRuntimeScheduler,
   type StartPayloadContext,
-} from "./runtime/motionRuntimeScheduler";
-import { buildSpeechOnlyMotionPayload } from "./runtime/speechOnlyMotion";
-import type { InboundPayloadContext, NormalizedMotionPayload } from "./contracts";
-import type { CompileDiagnostics } from "./compiler/contracts";
+} from "./runtime/motionRuntimeScheduler.js";
+import { buildSpeechOnlyMotionPayload } from "./runtime/speechOnlyMotion.js";
+import type { InboundPayloadContext, NormalizedMotionPayload } from "./contracts.js";
+import type { CompileDiagnostics } from "./compiler/contracts.js";
 import type {
   ModelEngineDependencies,
   ModelEngineHistoryRole,
   ModelEngineStatus,
   MotionRuntimeSchedulerDependencies,
   MotionStartDependencies,
-} from "./runtime/contracts";
+} from "./runtime/contracts.js";
 import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
-import { normalizeMotionPayload } from "./normalize";
+import { normalizeMotionPayload } from "./normalize.js";
 import {
   reportInvalidMotionPayload,
   startNormalizedMotionPayload,
-} from "./runtime/motionStart";
+} from "./runtime/motionStart.js";
 
 const state = reactive({
   status: "idle" as ModelEngineStatus,
@@ -38,6 +38,23 @@ function setState(
   state.status = status;
   state.message = message;
   state.lastCompileDiagnostics = diagnostics;
+}
+
+function normalizePlaybackTurnId(turnId: string | null): string | null {
+  const normalized = typeof turnId === "string" ? turnId.trim() : "";
+  return normalized || null;
+}
+
+function matchesPlaybackTimeline(
+  timeline: PlaybackTimelineSnapshot | null,
+  turnId: string | null,
+  messageId: string,
+): boolean {
+  return Boolean(
+    timeline
+    && timeline.messageId === messageId
+    && normalizePlaybackTurnId(timeline.turnId) === normalizePlaybackTurnId(turnId),
+  );
 }
 
 export function useModelEngine(dependencies: ModelEngineDependencies) {
@@ -165,6 +182,13 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         playbackTurnId: turnId,
         startReason: "speech_only",
         queuedDelayMs: 0,
+        playbackTimeline: matchesPlaybackTimeline(
+          playbackTimeline,
+          turnId,
+          normalizedMessageId,
+        )
+          ? playbackTimeline
+          : null,
       },
       motionStartDependencies,
       {

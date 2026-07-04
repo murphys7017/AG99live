@@ -3,6 +3,7 @@ import { compileMotionIntent } from "../src/model-engine/compiler/compileMotionI
 import { normalizeMotionPayload } from "../src/model-engine/normalize.js";
 import { startNormalizedMotionPayload } from "../src/model-engine/runtime/motionStart.js";
 import { buildSpeechOnlyMotionPayload } from "../src/model-engine/runtime/speechOnlyMotion.js";
+import { useModelEngine } from "../src/model-engine/useModelEngine.js";
 import { listCompileStageRegistrations } from "../src/model-engine/compiler/registry.js";
 import type { ModelSummary, MotionPlanPayload, SemanticMotionIntent } from "../src/types/protocol.js";
 import type { SemanticAxisProfile } from "../src/types/semantic-axis-profile.js";
@@ -938,6 +939,59 @@ function testSpeechOnlyPayloadRequiresVoiceFollowingProfile(): void {
   assert.equal(buildSpeechOnlyMotionPayload(null), null);
 }
 
+function testSpeechOnlyPlaybackUsesTimelineDuration(): void {
+  const profile = buildProfile();
+  const model = buildModelWithVoiceFollowingProfile(profile);
+  const playedPlans: MotionPlanPayload[] = [];
+  const engine = useModelEngine({
+    getSelectedModel: () => model,
+    getSettings: () => ({
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    }),
+    playPlan: (plan) => {
+      playedPlans.push(plan as MotionPlanPayload);
+      return true;
+    },
+    playCatalogMotion: () => false,
+    stopPlan: () => {},
+    getCurrentTurnId: () => "turn-speech",
+  });
+
+  const started = engine.notifyAudioPlaybackStarted(
+    "turn-speech",
+    "msg-speech",
+    {
+      timelineId: "timeline-speech",
+      turnId: "turn-speech",
+      messageId: "msg-speech",
+      phase: "playing",
+      clockSource: "audio",
+      startedAtMs: 100,
+      currentTimeMs: 250,
+      durationMs: 2250,
+      playbackRate: 1,
+      sinks: [
+        {
+          id: "audio",
+          required: true,
+          terminal: "started",
+        },
+      ],
+    },
+  );
+
+  assert.equal(started, true);
+  const plan = playedPlans[0];
+  assert.ok(plan);
+  assert.equal(plan.mode, "idle");
+  assert.equal(plan.timing.duration_ms, 2000);
+  assert.equal(
+    plan.parameters.some((item) => item.source === "speech_pose"),
+    true,
+  );
+}
+
 function testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight(): void {
   const profile = buildProfile();
   const result = compileMotionIntent(buildIntent({
@@ -1143,6 +1197,7 @@ function run(): void {
   testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes();
   testSpeechOnlyPayloadUsesSelectedModelProfile();
   testSpeechOnlyPayloadRequiresVoiceFollowingProfile();
+  testSpeechOnlyPlaybackUsesTimelineDuration();
   testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight();
   testSpeechPoseSkipsVoiceFollowingParameterAlreadyControlledBySemanticAxis();
   testSpeechPoseDoesNotApplyWithoutSpeechActive();

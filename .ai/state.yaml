@@ -8,11 +8,14 @@ context:
   assumptions:
     - Phase 1 pure timeline logic is complete; Phase 2 now lets audioRuntime create a segment PlaybackTimelineEngine for released audio.
     - Audio timeline integration observes and records real audio playback clock state, but does not yet replace turnPlaybackOrchestrator release decisions.
+    - Audio playback is now injected through PlaybackTimelineAudioSink instead of separate start/stop/clock functions, making audio execution a concrete timeline sink boundary.
     - The first shipped timeline shape should remain single active segment oriented, matching the current turn playback session semantics.
     - Existing notifyAudioPlaybackStarted based motion timing remains the migration path until a later timeline integration phase takes ownership.
     - Motion release now receives a strictly matched active audio timeline snapshot when turnId and messageId match; mismatched timeline snapshots are intentionally ignored.
     - ModelEngine now prefers playback timeline duration/currentTime for motion target duration when the release context carries a valid audio timeline snapshot.
     - Audio-start notifications now refresh pending motion entries with the current matched audio timeline snapshot before starting the payload, avoiding stale release-time timeline snapshots.
+    - Speech-only motion now also consumes the matched audio-start timeline snapshot when no queued motion starts, so speech-following plans use real remaining audio duration instead of relying only on SessionStore fallback lookup.
+    - Motion release timeline matching now lives in PlaybackTimelineMotionSink; TurnPlaybackOrchestrator no longer reads active audio timeline snapshots directly.
     - Stopping an already-playing audio segment now writes an audio terminal only when no more specific terminal reason has already been set.
     - The automatic LLM motion path remains pure engine.motion_intent.v3 semantic axes; catalog motion, motion3, exp3, and choice outputs stay out of this path.
     - The automatic motion path is middleware-first only; inline_first / <@anim> is no longer a runtime-selectable motion generation route.
@@ -34,9 +37,12 @@ architecture:
   boundary_changes:
     - Frontend now has a new playback-timeline module that defines a reusable segment timeline contract, synthetic/audio clock abstraction, and sink terminal state machine without yet changing real playback integration.
     - Audio runtime now creates an active playback timeline for each released audio segment, attaches the HTMLAudioElement playback clock on playback start, and clears the timeline on completion, failure, or interruption.
+    - AdapterAudioRuntime depends on PlaybackTimelineAudioSink for audio start/stop/clock access, while createAdapterConnection wires the browser HTMLAudioElement implementation through createBrowserAudioTimelineSink.
     - TurnPlaybackOrchestrator now releases audio before motion for the same ready segment so audioRuntime can create an active timeline before ModelEngine ingests the motion payload.
+    - A new PlaybackTimelineMotionSink wraps ModelEngine motion start and attaches only same turnId/messageId audio timeline snapshots to motion contexts.
     - Frontend motion ingest context can carry an optional playbackTimeline snapshot; ModelEngine pending scheduler preserves it and motionStart uses it before falling back to sessionStore audio-duration lookup.
     - ModelEngine pending motion entries refresh their playbackTimeline from the audio-start notification when a same turnId/messageId audio timeline is available.
+    - ModelEngine speech-only audio-start path now passes a same turnId/messageId playbackTimeline snapshot into motionStart, keeping speech-only timing on the same timeline contract as queued motion.
     - Generic audio stop cleanup no longer overwrites a more specific terminal reason such as audio_playback_replaced_by_new_input.
     - Adapter runtime no longer exposes inline_first / enable_inline_motion_contract configuration; <@anim> inline motion tags are not parsed or broadcast as a runtime motion path.
     - Frontend and adapter motion-intent boundaries are now v3-only; v2 nested axes are treated as invalid input instead of being normalized forward.

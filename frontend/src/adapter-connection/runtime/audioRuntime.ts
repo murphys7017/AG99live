@@ -1,6 +1,5 @@
-import type { StartAudioPlaybackOptions } from "./audioPlayback.js";
+import type { PlaybackTimelineAudioSink } from "../../playback-timeline/audioSink.js";
 import type {
-  AudioPlaybackClock,
   PlaybackTimelineSnapshot,
 } from "../../playback-timeline/contracts.js";
 import {
@@ -82,11 +81,9 @@ export interface AdapterAudioRuntimeSessionStore {
 
 export interface AdapterAudioRuntimeDeps {
   state: AdapterAudioRuntimeState;
-  startAudio: (url: string, opts: StartAudioPlaybackOptions) => Promise<void>;
-  stopAudioRuntime: () => void;
+  audioSink: PlaybackTimelineAudioSink;
   pushHistory: (role: string, text: string) => void;
   getSessionStore: () => AdapterAudioRuntimeSessionStore | undefined;
-  getAudioPlaybackClock?: () => AudioPlaybackClock | null;
 }
 
 export interface ActiveAudioSegment {
@@ -162,8 +159,7 @@ export function createAdapterAudioRuntime(
     get state() {
       return deps.state;
     },
-    startAudio: deps.startAudio,
-    stopAudioRuntime: deps.stopAudioRuntime,
+    audioSink: deps.audioSink,
     prepareAudioTimeline,
     markAudioTimelineDuration,
     markAudioTimelineStarted,
@@ -266,7 +262,7 @@ export function createAdapterAudioRuntime(
     }
     const engine = activeAudioTimeline.engine;
     engine.setFallbackDurationMs(durationMs);
-    const audioClock = deps.getAudioPlaybackClock?.();
+    const audioClock = deps.audioSink.getClock();
     if (audioClock) {
       engine.attachAudioClock(audioClock);
     }

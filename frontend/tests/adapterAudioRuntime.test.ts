@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { createAdapterAudioRuntime } from "../src/adapter-connection/runtime/audioRuntime.js";
-import type { StartAudioPlaybackOptions } from "../src/adapter-connection/runtime/audioPlayback.js";
+import type {
+  PlaybackTimelineAudioSink,
+  PlaybackTimelineAudioStartCallbacks,
+} from "../src/playback-timeline/audioSink.js";
+import type { AudioPlaybackClock } from "../src/playback-timeline/contracts.js";
 
 function buildState() {
   return {
@@ -24,28 +28,41 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
 }
 
+function buildAudioSink(options: {
+  start: (url: string, callbacks: PlaybackTimelineAudioStartCallbacks) => Promise<void>;
+  stop?: () => void;
+  getClock?: () => AudioPlaybackClock | null;
+}): PlaybackTimelineAudioSink {
+  return {
+    start: options.start,
+    stop: options.stop ?? (() => {}),
+    getClock: options.getClock ?? (() => null),
+  };
+}
+
 async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
   const state = buildState();
-  const startOptionsRef: { current: StartAudioPlaybackOptions | null } = { current: null };
+  const startOptionsRef: { current: PlaybackTimelineAudioStartCallbacks | null } = { current: null };
   const runtime = createAdapterAudioRuntime({
     state,
-    startAudio: async (_url, options) => {
-      startOptionsRef.current = options;
-      options.onDurationChanged(1250);
-      options.onPlaybackStarted({
-        startedAtMs: 100,
-        durationMs: 1250,
-      });
-    },
-    stopAudioRuntime: () => {},
+    audioSink: buildAudioSink({
+      start: async (_url, callbacks) => {
+        startOptionsRef.current = callbacks;
+        callbacks.onDurationChanged?.(1250);
+        callbacks.onPlaybackStarted?.({
+          startedAtMs: 100,
+          durationMs: 1250,
+        });
+      },
+      getClock: () => ({
+        getCurrentTimeMs: () => 320,
+        getDurationMs: () => 1250,
+        getPlaybackRate: () => 1,
+        isPlaying: () => true,
+      }),
+    }),
     pushHistory: () => {},
     getSessionStore: () => undefined,
-    getAudioPlaybackClock: () => ({
-      getCurrentTimeMs: () => 320,
-      getDurationMs: () => 1250,
-      getPlaybackRate: () => 1,
-      isPlaying: () => true,
-    }),
   });
 
   runtime.queueAudioForPlayback("http://127.0.0.1/audio.wav", "turn-1", "msg-1");
@@ -64,26 +81,27 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
 
 async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
   const state = buildState();
-  const startOptionsRef: { current: StartAudioPlaybackOptions | null } = { current: null };
+  const startOptionsRef: { current: PlaybackTimelineAudioStartCallbacks | null } = { current: null };
   const runtime = createAdapterAudioRuntime({
     state,
-    startAudio: async (_url, options) => {
-      startOptionsRef.current = options;
-      options.onDurationChanged(900);
-      options.onPlaybackStarted({
-        startedAtMs: 50,
-        durationMs: 900,
-      });
-    },
-    stopAudioRuntime: () => {},
+    audioSink: buildAudioSink({
+      start: async (_url, callbacks) => {
+        startOptionsRef.current = callbacks;
+        callbacks.onDurationChanged?.(900);
+        callbacks.onPlaybackStarted?.({
+          startedAtMs: 50,
+          durationMs: 900,
+        });
+      },
+      getClock: () => ({
+        getCurrentTimeMs: () => 900,
+        getDurationMs: () => 900,
+        getPlaybackRate: () => 1,
+        isPlaying: () => true,
+      }),
+    }),
     pushHistory: () => {},
     getSessionStore: () => undefined,
-    getAudioPlaybackClock: () => ({
-      getCurrentTimeMs: () => 900,
-      getDurationMs: () => 900,
-      getPlaybackRate: () => 1,
-      isPlaying: () => true,
-    }),
   });
 
   runtime.queueAudioForPlayback("http://127.0.0.1/audio.wav", "turn-2", "msg-2");
@@ -93,7 +111,7 @@ async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
 
   const options = startOptionsRef.current;
   assert.ok(options);
-  options.onEnded();
+  options.onEnded?.();
 
   assert.equal(runtime.getActiveAudioTimelineSnapshot(), null);
 }
@@ -102,11 +120,11 @@ async function testAudioTimelineInterruptsPreparedAudioOnStopAll(): Promise<void
   const state = buildState();
   const runtime = createAdapterAudioRuntime({
     state,
-    startAudio: async () => new Promise<void>(() => {}),
-    stopAudioRuntime: () => {},
+    audioSink: buildAudioSink({
+      start: async () => new Promise<void>(() => {}),
+    }),
     pushHistory: () => {},
     getSessionStore: () => undefined,
-    getAudioPlaybackClock: () => null,
   });
 
   void runtime.playAudioAndAcknowledge(
@@ -132,14 +150,15 @@ async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise
   }> = [];
   const runtime = createAdapterAudioRuntime({
     state,
-    startAudio: async (_url, options) => {
-      options.onPlaybackStarted({
-        startedAtMs: 100,
-        durationMs: 1000,
-      });
-      return new Promise<void>(() => {});
-    },
-    stopAudioRuntime: () => {},
+    audioSink: buildAudioSink({
+      start: async (_url, callbacks) => {
+        callbacks.onPlaybackStarted?.({
+          startedAtMs: 100,
+          durationMs: 1000,
+        });
+        return new Promise<void>(() => {});
+      },
+    }),
     pushHistory: () => {},
     getSessionStore: () => ({
       markAudioStarted: () => {},
@@ -154,7 +173,6 @@ async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise
       },
       getSessions: () => [],
     }),
-    getAudioPlaybackClock: () => null,
   });
 
   void runtime.playAudioAndAcknowledge(

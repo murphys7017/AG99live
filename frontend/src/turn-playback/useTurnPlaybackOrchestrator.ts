@@ -20,7 +20,6 @@
 import { onScopeDispose, watch } from "vue";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
 import type { NormalizedMotionPayload } from "../model-engine/contracts";
-import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
 import type { PerformanceCurveHint } from "../types/protocol.js";
 import {
   createTurnPlaybackOrchestratorCore,
@@ -62,39 +61,6 @@ function attachPerformanceCurveHintToPayload(
   };
 }
 
-function normalizePlaybackTurnId(turnId: string | null): string | null {
-  const normalized = typeof turnId === "string" ? turnId.trim() : "";
-  return normalized || null;
-}
-
-function matchesReleaseContext(
-  snapshot: PlaybackTimelineSnapshot,
-  context: TurnPlaybackReleaseContext,
-): boolean {
-  if (snapshot.messageId !== context.messageId) {
-    return false;
-  }
-  const snapshotTurnId = normalizePlaybackTurnId(snapshot.turnId);
-  const contextTurnId = normalizePlaybackTurnId(context.turnId);
-  return snapshotTurnId === contextTurnId;
-}
-
-function attachAudioTimelineToReleaseContext(
-  context: TurnPlaybackReleaseContext,
-  snapshot: PlaybackTimelineSnapshot | null | undefined,
-): TurnPlaybackReleaseContext {
-  if (!snapshot || !matchesReleaseContext(snapshot, context)) {
-    return {
-      ...context,
-      playbackTimeline: null,
-    };
-  }
-  return {
-    ...context,
-    playbackTimeline: snapshot,
-  };
-}
-
 /**
  * 在当前组件/作用域内装配段释放编排，并把生命周期挂到 onScopeDispose（卸载时 core.clear）。
  * 返回 { flush } 供外部在打断/断连等场景强制清干等待中的释放。
@@ -130,27 +96,23 @@ export function useTurnPlaybackOrchestrator(
       return released;
     },
     releaseMotion: (payload: unknown, context: TurnPlaybackReleaseContext) => {
-      const motionContext = attachAudioTimelineToReleaseContext(
-        context,
-        options.playbackRelease.getActiveAudioTimelineSnapshot?.(),
-      );
       options.sessionStore.markMotionReleased(
-        motionContext.turnId,
-        motionContext.messageId,
+        context.turnId,
+        context.messageId,
       );
-      const accepted = options.motionPayload.ingestNormalizedPayload(
+      const accepted = options.motionPayload.start(
         payload as NormalizedMotionPayload,
-        motionContext,
+        context,
       );
       if (accepted === false) {
         options.sessionStore.markMotionFailed(
-          motionContext.turnId,
-          motionContext.messageId,
+          context.turnId,
+          context.messageId,
           "motion_payload_rejected",
         );
       }
       options.sessionStore.markPhase(
-        motionContext.turnId,
+        context.turnId,
         "playing",
       );
     },
