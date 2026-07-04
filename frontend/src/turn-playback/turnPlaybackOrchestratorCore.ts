@@ -28,6 +28,7 @@ export interface TurnPlaybackSegmentReleaseJob<TMotionPayload = unknown> {
   };
   audio: {
     release: boolean;
+    noAudioConfirmed: boolean;
   };
   motion: {
     payload: TMotionPayload | null;
@@ -206,6 +207,7 @@ export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
       },
       audio: {
         release: optionsForJob.releaseAudio,
+        noAudioConfirmed: group.noAudioConfirmed,
       },
       motion: {
         payload: motionPayload,
@@ -333,7 +335,6 @@ export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
       turnId: string | null,
     ) => {
       const group = getOrCreateGroup(messageId, turnId);
-      group.noAudioConfirmed = group.noAudioConfirmed || !group.audioReady;
       evaluateGroup(group, "output_queue_closed");
     },
     flush: () => {

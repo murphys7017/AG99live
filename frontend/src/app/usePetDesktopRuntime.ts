@@ -139,6 +139,21 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       },
     }),
     stopPlan: (reason) => motionPlayer.stopPlan(reason),
+    markMotionTimelineTerminal: adapter.markMotionTimelineTerminal,
+    canStartSpeechOnlyMotion: (turnId, messageId) => {
+      const session = sessionStore.getSession(turnId);
+      const segment = session?.segments.get(messageId);
+      if (!segment) {
+        return false;
+      }
+      return (
+        !segment.motion.failed
+        && segment.motion.payload === null
+        && !segment.motion.released
+        && !segment.motion.started
+        && !segment.motion.completed
+      );
+    },
     getCurrentTurnId: () => adapter.state.currentTurnId,
     pushHistory: (role, text) => adapter.pushHistory(role, text),
     getPlayerMessage: () => motionPlayer.state.message,

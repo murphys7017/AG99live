@@ -64,6 +64,9 @@ export function executeTurnPlaybackSegmentReleaseJob(
         turnId: job.turnId,
         messageId: job.messageId,
         receivedAtMs,
+        timelineMode: job.audio.noAudioConfirmed && !job.audio.release
+          ? "motion_only"
+          : "audio",
       },
     );
     releasedMotion = accepted !== false;

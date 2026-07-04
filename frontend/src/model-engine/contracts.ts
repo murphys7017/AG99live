@@ -16,4 +16,5 @@ export interface InboundPayloadContext {
   playbackTurnId?: string | null;
   receivedAtMs: number;
   playbackTimeline?: PlaybackTimelineSnapshot | null;
+  timelineMode?: "audio" | "motion_only";
 }

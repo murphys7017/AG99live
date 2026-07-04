@@ -6,6 +6,7 @@ export interface PlaybackTimelineMotionContext {
   turnId: string | null;
   receivedAtMs: number;
   playbackTimeline?: PlaybackTimelineSnapshot | null;
+  timelineMode?: "audio" | "motion_only";
 }
 
 export interface PlaybackTimelineMotionEngine {
@@ -67,6 +68,13 @@ function attachPlaybackTimelineToMotionContext(
     };
   }
 
+  if (context.timelineMode !== "motion_only") {
+    return {
+      ...context,
+      playbackTimeline: null,
+    };
+  }
+
   const motionOnlyTimeline = prepareMotionOnlyTimeline?.(
     context.turnId,
     context.messageId,
@@ -97,7 +105,7 @@ export function createModelEngineMotionTimelineSink(options: {
     turnId: string | null,
     messageId: string,
   ) => PlaybackTimelineSnapshot | null;
-  markMotionTimelineTerminal?: (
+  markMotionTimelineTerminal: (
     turnId: string | null,
     messageId: string,
     terminal: MotionTimelineTerminal,
@@ -123,12 +131,21 @@ export function createModelEngineMotionTimelineSink(options: {
         options.prepareMotionOnlyTimeline,
         refreshPreparedTimelineSnapshot,
       );
+      if (context.timelineMode === "motion_only" && !nextContext.playbackTimeline) {
+        options.markMotionTimelineTerminal(
+          context.turnId,
+          context.messageId,
+          "failed",
+          "motion_only_timeline_unavailable",
+        );
+        return false;
+      }
       const accepted = options.motionEngine.ingestNormalizedPayload(
         payload,
         nextContext,
       );
       if (accepted === false && nextContext.playbackTimeline) {
-        options.markMotionTimelineTerminal?.(
+        options.markMotionTimelineTerminal(
           context.turnId,
           context.messageId,
           "failed",

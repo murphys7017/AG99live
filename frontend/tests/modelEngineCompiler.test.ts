@@ -10,6 +10,8 @@ import type { SemanticAxisProfile } from "../src/types/semantic-axis-profile.js"
 import type { ModelEnginePlanStartedEvent } from "../src/model-engine/runtime/contracts.js";
 import type { CompileDiagnostics } from "../src/model-engine/compiler/contracts.js";
 
+(globalThis as Record<string, unknown>).window = globalThis;
+
 function buildProfile(): SemanticAxisProfile {
   return {
     schema_version: "ag99.semantic_axis_profile.v1",
@@ -1098,6 +1100,8 @@ function testSpeechOnlyPlaybackUsesTimelineDuration(): void {
     },
     playCatalogMotion: () => false,
     stopPlan: () => {},
+    markMotionTimelineTerminal: () => {},
+    canStartSpeechOnlyMotion: () => true,
     getCurrentTurnId: () => "turn-speech",
   });
 
@@ -1129,6 +1133,121 @@ function testSpeechOnlyPlaybackUsesTimelineDuration(): void {
     plan.parameters.some((item) => item.source === "speech_pose"),
     true,
   );
+}
+
+function testSpeechOnlyPlaybackCanBeSuppressedForFailedMotionSegment(): void {
+  const profile = buildProfile();
+  const model = buildModelWithVoiceFollowingProfile(profile);
+  const playedPlans: MotionPlanPayload[] = [];
+  const engine = useModelEngine({
+    getSelectedModel: () => model,
+    getSettings: () => ({
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    }),
+    playPlan: (plan) => {
+      playedPlans.push(plan as MotionPlanPayload);
+      return true;
+    },
+    playCatalogMotion: () => false,
+    stopPlan: () => {},
+    markMotionTimelineTerminal: () => {},
+    getCurrentTurnId: () => "turn-speech",
+    canStartSpeechOnlyMotion: () => false,
+  });
+
+  const started = engine.handlePlaybackTimelineStarted({
+    timelineId: "timeline-speech",
+    turnId: "turn-speech",
+    messageId: "msg-speech",
+    phase: "playing",
+    clockSource: "audio",
+    startedAtMs: 100,
+    currentTimeMs: 250,
+    durationMs: 2250,
+    playbackRate: 1,
+    sinks: [
+      {
+        id: "audio",
+        required: true,
+        terminal: "started",
+      },
+    ],
+  });
+
+  assert.equal(started, false);
+  assert.equal(playedPlans.length, 0);
+}
+
+function testTimelineTerminalIsMarkedWhenQueuedMotionFails(): void {
+  const profile = buildProfile();
+  const model = buildModel(profile);
+  const failures: Array<{
+    turnId: string | null;
+    messageId: string;
+    terminal: string;
+    reason: string;
+  }> = [];
+  const engine = useModelEngine({
+    getSelectedModel: () => model,
+    getSettings: () => ({
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    }),
+    playPlan: () => true,
+    playCatalogMotion: () => false,
+    stopPlan: () => {},
+    getCurrentTurnId: () => "turn-failed-timeline",
+    canStartSpeechOnlyMotion: () => false,
+    markMotionTimelineTerminal: (turnId, messageId, terminal, reason) => {
+      failures.push({ turnId, messageId, terminal, reason });
+    },
+  });
+
+  engine.ingestNormalizedPayload(
+    {
+      kind: "semantic_intent",
+      intent: buildIntent(),
+    },
+    {
+      messageId: "msg-failed-timeline",
+      turnId: "turn-failed-timeline",
+      playbackTurnId: "turn-failed-timeline",
+      receivedAtMs: 100,
+      playbackTimeline: {
+        timelineId: "timeline-failed",
+        turnId: "turn-failed-timeline",
+        messageId: "msg-failed-timeline",
+        phase: "playing",
+        clockSource: "audio_unavailable",
+        startedAtMs: 100,
+        currentTimeMs: 0,
+        durationMs: null,
+        playbackRate: 1,
+        sinks: [
+          {
+            id: "audio",
+            required: true,
+            terminal: "started",
+          },
+          {
+            id: "motion",
+            required: true,
+            terminal: "idle",
+          },
+        ],
+      },
+    },
+  );
+
+  assert.deepEqual(failures, [
+    {
+      turnId: "turn-failed-timeline",
+      messageId: "msg-failed-timeline",
+      terminal: "failed",
+      reason: "playback_timeline_audio_unavailable_before_motion_start",
+    },
+  ]);
 }
 
 function testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight(): void {
@@ -1339,6 +1458,8 @@ function run(): void {
   testSpeechOnlyPayloadUsesSelectedModelProfile();
   testSpeechOnlyPayloadRequiresVoiceFollowingProfile();
   testSpeechOnlyPlaybackUsesTimelineDuration();
+  testSpeechOnlyPlaybackCanBeSuppressedForFailedMotionSegment();
+  testTimelineTerminalIsMarkedWhenQueuedMotionFails();
   testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight();
   testSpeechPoseSkipsVoiceFollowingParameterAlreadyControlledBySemanticAxis();
   testSpeechPoseDoesNotApplyWithoutSpeechActive();

@@ -143,6 +143,16 @@ export interface MotionRuntimeStateController {
 export interface ModelEngineDependencies
   extends MotionRuntimeSchedulerDependencies, MotionStartDependencies {
   stopPlan: (reason?: string) => void;
+  markMotionTimelineTerminal: (
+    turnId: string | null,
+    messageId: string,
+    terminal: "completed" | "failed" | "interrupted",
+    reason: string,
+  ) => void;
+  canStartSpeechOnlyMotion: (
+    turnId: string | null,
+    messageId: string,
+  ) => boolean;
   pushHistory?: (
     role: ModelEngineHistoryRole,
     text: string,

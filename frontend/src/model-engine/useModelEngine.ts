@@ -97,6 +97,14 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         context.messageId,
         context.startReason,
       );
+      if (context.playbackTimeline) {
+        dependencies.markMotionTimelineTerminal(
+          context.turnId,
+          context.messageId,
+          "failed",
+          context.startReason,
+        );
+      }
     },
   });
 
@@ -146,6 +154,9 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       playbackTimeline.clockSource !== "audio"
       || (playbackTimeline.phase !== "playing" && playbackTimeline.phase !== "paused")
     ) {
+      return false;
+    }
+    if (!dependencies.canStartSpeechOnlyMotion(playbackTimeline.turnId, normalizedMessageId)) {
       return false;
     }
     const speechOnlyPayload = buildSpeechOnlyMotionPayload(

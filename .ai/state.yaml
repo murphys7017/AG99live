@@ -18,7 +18,9 @@ context:
     - Active playback timeline lifecycle has been extracted from AdapterAudioRuntime into PlaybackTimelineRuntime; AdapterAudioRuntime now delegates audio timeline, motion-only timeline, and motion/lip-sync sink terminal updates.
     - TurnPlaybackOrchestratorCore now emits a typed segment release job with explicit text/audio/motion slots instead of separately owning text/audio/motion release calls; segmentReleaseExecutor maps that job onto the existing release ports during migration.
     - PreviewMotionPlayer now reports stopped terminal events for explicit motion stops and direct-plan replacement, so motion timeline sinks do not depend on silent local cleanup.
-    - Motion-only segments now create a synthetic playback timeline with motion as the required sink when no matching audio timeline exists.
+    - Explicit no-audio motion-only segments create a synthetic playback timeline with motion as the required sink.
+    - Motion-only synthetic timelines now require an explicit release context marked as no-audio; a missing audio timeline is not enough to create synthetic timing.
+    - Explicit motion-only contexts fail immediately with motion_only_timeline_unavailable when a synthetic timeline cannot be prepared; they must not queue in ModelEngine waiting for an audio-start timeout.
     - ModelEngine now uses playback timeline duration/currentTime as the only audio-synced motion timing source when the release context carries a usable timeline snapshot.
     - Performance curve timing now resolves through a playback-timeline curve resolver; valid audio timelines use remaining duration, explicit synthetic timelines may be used only with duration, and audio_unavailable/missing-duration timelines skip the curve with diagnostics instead of being treated as synced timing.
     - Audio-start notifications now refresh pending motion entries with the current matched audio timeline snapshot before starting the payload, avoiding stale release-time timeline snapshots.
@@ -70,8 +72,10 @@ architecture:
     - Performance curve hints are consumed only after the current playback timeline proves a usable duration; skipped curves remain visible as `performance_curve_skipped:*` compiler diagnostics.
     - AdapterConnection exposes setAudioTimelineStartedHandler so PetDesktopRuntime can drive ModelEngine motion wakeup from the real audio timeline started event instead of CompletionCoordinator session watching.
     - Frontend motion ingest context can carry an optional playbackTimeline snapshot; ModelEngine pending scheduler preserves it and motionStart uses only usable timeline timing, failing pending audio-synced motion when no matching timeline arrives.
+    - Pending audio-synced motion failures now also mark the attached playback timeline motion sink failed, so required sinks do not remain idle after scheduler rejection.
     - ModelEngine pending motion entries refresh their playbackTimeline from the AdapterAudioRuntime audio timeline started event when a same turnId/messageId audio timeline is available.
     - ModelEngine speech-only audio-start path now receives a same turnId/messageId playbackTimeline snapshot from the audio timeline started bridge, keeping speech-only timing on the same timeline contract as queued motion.
+    - ModelEngine requires injected timeline-terminal reporting and speech-only gating dependencies; speech-only motion is suppressed when the same segment already has a failed/released/started/completed formal motion state, preventing it from masking motion timeline failures during development.
     - Generic audio stop cleanup no longer overwrites a more specific terminal reason such as audio_playback_replaced_by_new_input.
     - Adapter runtime no longer exposes inline_first / enable_inline_motion_contract configuration; <@anim> inline motion tags are not parsed or broadcast as a runtime motion path.
     - Frontend and adapter motion-intent boundaries are now v3-only; v2 nested axes are treated as invalid input instead of being normalized forward.
