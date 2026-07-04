@@ -15,7 +15,7 @@ export interface TimelineClock {
   stop(stoppedAtMs?: number): void;
   attachAudioClock(clock: AudioPlaybackClock): void;
   detachAudioClock(): void;
-  setFallbackDurationMs(durationMs: number | null): void;
+  setExpectedDurationMs(durationMs: number | null): void;
   snapshot(): PlaybackClockSnapshot;
 }
 
@@ -28,7 +28,7 @@ export function createTimelineClock(
   let stoppedAtMs: number | null = null;
   let pausedOffsetMs = 0;
   let audioClock: AudioPlaybackClock | null = null;
-  let fallbackDurationMs: number | null = null;
+  let expectedDurationMs: number | null = null;
 
   function getSyntheticCurrentTimeMs(atMs: number): number {
     if (startedAtMs === null) {
@@ -52,7 +52,7 @@ export function createTimelineClock(
     return {
       startedAtMs,
       currentTimeMs: Math.max(0, currentTimeMs),
-      durationMs: audioClock.getDurationMs() ?? fallbackDurationMs,
+      durationMs: audioClock.getDurationMs() ?? expectedDurationMs,
       playbackRate: audioClock.getPlaybackRate(),
       clockSource: "audio",
       paused: pausedAtMs !== null,
@@ -67,7 +67,7 @@ export function createTimelineClock(
       stoppedAtMs = null;
       pausedOffsetMs = 0;
       audioClock = null;
-      fallbackDurationMs = null;
+      expectedDurationMs = null;
     },
     start(startedAtMsOverride) {
       const atMs = startedAtMsOverride ?? now();
@@ -102,8 +102,8 @@ export function createTimelineClock(
     detachAudioClock() {
       audioClock = null;
     },
-    setFallbackDurationMs(durationMs) {
-      fallbackDurationMs = durationMs !== null && Number.isFinite(durationMs)
+    setExpectedDurationMs(durationMs) {
+      expectedDurationMs = durationMs !== null && Number.isFinite(durationMs)
         ? Math.max(0, durationMs)
         : null;
     },
@@ -113,12 +113,17 @@ export function createTimelineClock(
         return audioSnapshot;
       }
       const atMs = now();
+      const audioUnavailable = Boolean(
+        audioClock
+        && pausedAtMs === null
+        && stoppedAtMs === null,
+      );
       return {
         startedAtMs,
         currentTimeMs: getSyntheticCurrentTimeMs(atMs),
-        durationMs: fallbackDurationMs,
+        durationMs: expectedDurationMs,
         playbackRate: 1,
-        clockSource: "synthetic",
+        clockSource: audioUnavailable ? "audio_unavailable" : "synthetic",
         paused: pausedAtMs !== null,
         stopped: stoppedAtMs !== null,
       };

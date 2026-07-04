@@ -164,10 +164,18 @@ async function testBrowserAudioSinkDoesNotStartLipSyncWithoutSinkConfirmation():
       onLipSyncStarted: () => {
         events.push("timeline:started");
       },
+      onLipSyncTerminal: (terminal, reason) => {
+        events.push(`timeline:${terminal}:${reason}`);
+      },
     });
     await Promise.resolve();
 
     assert.equal(events.includes("timeline:started"), false);
+    FakeAudio.instances[0].emit("ended");
+    assert.equal(
+      events.includes("timeline:failed:lip_sync_not_started_before_audio_end"),
+      true,
+    );
   } finally {
     (globalThis as { window?: unknown }).window = originalWindow;
     (globalThis as { Audio?: unknown }).Audio = originalAudio;

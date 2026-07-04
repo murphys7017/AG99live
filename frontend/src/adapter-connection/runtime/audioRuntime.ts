@@ -259,7 +259,7 @@ export function createAdapterAudioRuntime(
     if (!isActiveAudioTimeline(turnId, messageId)) {
       return;
     }
-    activeAudioTimeline?.engine.setFallbackDurationMs(durationMs);
+    activeAudioTimeline?.engine.setExpectedDurationMs(durationMs);
   }
 
   function markAudioTimelineStarted(
@@ -272,7 +272,7 @@ export function createAdapterAudioRuntime(
       return;
     }
     const engine = activeAudioTimeline.engine;
-    engine.setFallbackDurationMs(durationMs);
+    engine.setExpectedDurationMs(durationMs);
     const audioClock = deps.audioSink.getClock();
     if (audioClock) {
       engine.attachAudioClock(audioClock);

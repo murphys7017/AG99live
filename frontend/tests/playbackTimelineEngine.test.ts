@@ -28,7 +28,7 @@ function testSyntheticClockLifecycle(): void {
   assert.equal(clock.snapshot().stopped, true);
 }
 
-function testAudioClockTakesPriorityAndFallsBack(): void {
+function testAudioClockTakesPriorityAndExposesUnavailableState(): void {
   let nowMs = 0;
   let audioPlaying = true;
   let audioCurrentTimeMs = 320;
@@ -39,7 +39,7 @@ function testAudioClockTakesPriorityAndFallsBack(): void {
     isPlaying: () => audioPlaying,
   };
   const clock = createTimelineClock({ now: () => nowMs });
-  clock.setFallbackDurationMs(900);
+  clock.setExpectedDurationMs(900);
   clock.start();
   clock.attachAudioClock(audioClock);
 
@@ -51,7 +51,7 @@ function testAudioClockTakesPriorityAndFallsBack(): void {
   audioPlaying = false;
   nowMs = 480;
   snapshot = clock.snapshot();
-  assert.equal(snapshot.clockSource, "synthetic");
+  assert.equal(snapshot.clockSource, "audio_unavailable");
   assert.equal(snapshot.currentTimeMs, 480);
   assert.equal(snapshot.durationMs, 900);
 
@@ -73,7 +73,7 @@ function testClockResetClearsPreviousAudioBindingAndDuration(): void {
     isPlaying: () => true,
   };
 
-  clock.setFallbackDurationMs(900);
+  clock.setExpectedDurationMs(900);
   clock.attachAudioClock(audioClock);
   clock.start();
   assert.equal(clock.snapshot().clockSource, "audio");
@@ -236,7 +236,7 @@ function testTerminalSinkEventsAreStable(): void {
 
 function run(): void {
   testSyntheticClockLifecycle();
-  testAudioClockTakesPriorityAndFallsBack();
+  testAudioClockTakesPriorityAndExposesUnavailableState();
   testClockResetClearsPreviousAudioBindingAndDuration();
   testTimelineCompletesWhenRequiredSinksSettle();
   testTimelineFailsWhenRequiredSinkFails();

@@ -35,7 +35,7 @@ export interface PlaybackTimelineEngine {
     terminal: Exclude<SinkTerminal, "idle">,
     reason?: string,
   ): void;
-  setFallbackDurationMs(durationMs: number | null): void;
+  setExpectedDurationMs(durationMs: number | null): void;
   getSnapshot(): PlaybackTimelineSnapshot | null;
   getPhase(): TimelinePhase;
 }
@@ -271,8 +271,8 @@ export function createPlaybackTimelineEngine(
       }
       updatePhaseFromTerminals();
     },
-    setFallbackDurationMs(durationMs) {
-      clock.setFallbackDurationMs(durationMs);
+    setExpectedDurationMs(durationMs) {
+      clock.setExpectedDurationMs(durationMs);
     },
     getSnapshot() {
       if (!job) {

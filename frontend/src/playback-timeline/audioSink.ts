@@ -44,6 +44,7 @@ export function createBrowserAudioTimelineSink(
   return {
     async start(audioUrl, callbacks = {}) {
       let lipSyncTerminalSettled = false;
+      let lipSyncStarted = false;
       const settleLipSyncTerminal = (
         terminal: "completed" | "failed" | "interrupted",
         reason: string,
@@ -63,6 +64,10 @@ export function createBrowserAudioTimelineSink(
             getAudioCurrentTimeSeconds: event.getAudioCurrentTimeSeconds,
             isCurrentAudio: event.isCurrentAudio,
             onStarted: () => {
+              if (lipSyncTerminalSettled) {
+                return;
+              }
+              lipSyncStarted = true;
               callbacks.onLipSyncStarted?.();
             },
             onUnavailable: () => {
@@ -82,7 +87,12 @@ export function createBrowserAudioTimelineSink(
           callbacks.onPlaybackStarted?.(event);
         },
         onEnded: () => {
-          settleLipSyncTerminal("completed", "audio_playback_completed");
+          settleLipSyncTerminal(
+            lipSyncStarted ? "completed" : "failed",
+            lipSyncStarted
+              ? "audio_playback_completed"
+              : "lip_sync_not_started_before_audio_end",
+          );
           callbacks.onEnded?.();
         },
         onError: () => {
