@@ -3,6 +3,7 @@ import { MOTION_MIN_REMAINING_AUDIO_MS } from "../constants.js";
 import type { NormalizedMotionPayload } from "../contracts.js";
 import type { CompileDiagnostics } from "../compiler/contracts.js";
 import type { MotionPlanPayload } from "../../types/protocol.js";
+import { resolvePerformanceCurveTimeline } from "../../playback-timeline/performanceCurveSink.js";
 import type {
   ModelEngineStatus,
   MotionRuntimeStateController,
@@ -201,13 +202,36 @@ function startSemanticIntentPayload(
   }
 
   state.setState("compiling", "正在编译动作意图...", null);
-  const targetDurationMs = resolveMotionTargetDurationMs(context, runtime);
-  const compileResult = compileMotionIntent(payload.intent, {
+  let targetDurationMs = resolveMotionTargetDurationMs(context, runtime);
+  let speechActive = isSpeechActiveForPayload(context, runtime);
+  let intent = payload.intent;
+  const runtimeWarnings: string[] = [];
+  const performanceCurveHint = payload.intent.performance_curve_hint ?? null;
+  if (performanceCurveHint) {
+    const curveTimeline = resolvePerformanceCurveTimeline({
+      hint: performanceCurveHint,
+      timeline: context.playbackTimeline ?? null,
+      minRemainingDurationMs: MOTION_MIN_REMAINING_AUDIO_MS,
+    });
+    if (curveTimeline.ok) {
+      targetDurationMs = curveTimeline.targetDurationMs;
+      speechActive = curveTimeline.speechActive;
+      runtimeWarnings.push(`performance_curve_timeline:${curveTimeline.clockSource}`);
+    } else {
+      intent = {
+        ...payload.intent,
+      };
+      delete intent.performance_curve_hint;
+      runtimeWarnings.push(`performance_curve_skipped:${curveTimeline.reason}`);
+    }
+  }
+  const compileResult = compileMotionIntent(intent, {
     model: selectedModel,
     targetDurationMs,
-    speechActive: isSpeechActiveForPayload(context, runtime),
+    speechActive,
     source: context.startReason,
     settings: dependencies.getSettings(),
+    runtimeWarnings,
   });
 
   state.setLastCompileReason(compileResult.reason);

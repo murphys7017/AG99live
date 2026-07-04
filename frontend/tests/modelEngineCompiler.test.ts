@@ -8,6 +8,7 @@ import { listCompileStageRegistrations } from "../src/model-engine/compiler/regi
 import type { ModelSummary, MotionPlanPayload, SemanticMotionIntent } from "../src/types/protocol.js";
 import type { SemanticAxisProfile } from "../src/types/semantic-axis-profile.js";
 import type { ModelEnginePlanStartedEvent } from "../src/model-engine/runtime/contracts.js";
+import type { CompileDiagnostics } from "../src/model-engine/compiler/contracts.js";
 
 function buildProfile(): SemanticAxisProfile {
   return {
@@ -691,6 +692,113 @@ function testMotionStartRejectsAudioUnavailableTimelineForTiming(): void {
   assert.equal(playedPlans[0].timing.duration_ms, 1200);
 }
 
+function testPerformanceCurveSkipsAudioUnavailableTimeline(): void {
+  const profile = buildProfile();
+  const model = buildModel(profile);
+  let resolverCalled = false;
+  let speechFallbackCalled = false;
+  const playedPlans: MotionPlanPayload[] = [];
+  const diagnostics: CompileDiagnostics[] = [];
+
+  const started = startNormalizedMotionPayload(
+    {
+      kind: "semantic_intent",
+      intent: buildIntent({
+        performance_curve_hint: {
+          schema_version: "ag99.performance_curve_hint.v1",
+          curve_family: "quick_in_hold_soft_out",
+          entry: "quick",
+          hold: "steady",
+          exit: "soft",
+          emphasis: "early",
+          energy: "medium",
+        },
+      }),
+    },
+    {
+      messageId: "msg-curve-unavailable",
+      turnId: "turn-curve-unavailable",
+      playbackTurnId: "turn-curve-unavailable",
+      startReason: "audio_playing_event",
+      queuedDelayMs: 0,
+      playbackTimeline: {
+        timelineId: "timeline-curve-unavailable",
+        turnId: "turn-curve-unavailable",
+        messageId: "msg-curve-unavailable",
+        phase: "playing",
+        clockSource: "audio_unavailable",
+        startedAtMs: 100,
+        currentTimeMs: 300,
+        durationMs: 2400,
+        playbackRate: 1,
+        sinks: [
+          {
+            id: "audio",
+            required: true,
+            terminal: "started",
+          },
+        ],
+      },
+    },
+    {
+      getSelectedModel: () => model,
+      getSettings: () => ({
+        motionIntensityScale: 1,
+        axisIntensityScale: {},
+      }),
+      playPlan: (plan) => {
+        playedPlans.push(plan as MotionPlanPayload);
+        return true;
+      },
+      playCatalogMotion: () => false,
+      getPlayerMessage: () => "performance curve skipped",
+    },
+    {
+      resolveMotionTargetDurationMs: () => {
+        resolverCalled = true;
+        return 1800;
+      },
+      isSpeechActiveForPayload: () => {
+        speechFallbackCalled = true;
+        return true;
+      },
+    },
+    {
+      setState: () => {},
+      setLastCompileReason: () => {},
+      setLastCompileDiagnostics: (nextDiagnostics) => {
+        if (nextDiagnostics) {
+          diagnostics.push(nextDiagnostics);
+        }
+      },
+      setLastStartReason: () => {},
+      pushHistory: () => {},
+    },
+  );
+
+  assert.equal(started, true);
+  assert.equal(resolverCalled, false);
+  assert.equal(speechFallbackCalled, false);
+  assert.equal(playedPlans.length, 1);
+  assert.deepEqual(playedPlans[0].timing, {
+    duration_ms: 1200,
+    blend_in_ms: 216,
+    hold_ms: 684,
+    blend_out_ms: 300,
+  });
+  const lastDiagnostics = diagnostics.at(-1);
+  assert.equal(
+    lastDiagnostics?.warnings?.includes(
+      "performance_curve_skipped:playback_timeline_audio_unavailable",
+    ),
+    true,
+  );
+  assert.equal(
+    lastDiagnostics?.warnings?.includes("performance_curve_applied:quick_in_hold_soft_out"),
+    false,
+  );
+}
+
 function testAxisIntensityScaleAffectsOnlyTargetAxis(): void {
   const profile = buildProfile();
   const baseline = compileMotionIntent(buildIntent({
@@ -1263,6 +1371,7 @@ function run(): void {
   testMotionStartNotifiesStartedWhenPlayerOmitsCallback();
   testMotionStartUsesPlaybackTimelineDuration();
   testMotionStartRejectsAudioUnavailableTimelineForTiming();
+  testPerformanceCurveSkipsAudioUnavailableTimeline();
   testExplicitPrimaryAxisIsNotOverwrittenByCoupling();
   testAxisIntensityScaleAffectsOnlyTargetAxis();
   testRevisionMismatchBecomesWarningInsteadOfCompileFailure();

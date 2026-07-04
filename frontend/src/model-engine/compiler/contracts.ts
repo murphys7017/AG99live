@@ -28,6 +28,7 @@ export interface CompileOptions {
   speechActive?: boolean;
   source?: string;
   settings?: Partial<ModelEngineSettings>;
+  runtimeWarnings?: readonly string[];
 }
 
 export interface CompileDiagnostics {

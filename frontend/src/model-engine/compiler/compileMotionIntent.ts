@@ -25,6 +25,7 @@ export function compileMotionIntent(
     baseDiagnostics: buildBaseCompileDiagnostics(options, normalizedSettings),
     state: createInitialCompileState(),
   };
+  context.state.warnings.push(...(options.runtimeWarnings ?? []));
 
   const pipelineResult = runCompilePipeline(context, resolveCompileStages(context));
   if (!pipelineResult.ok) {

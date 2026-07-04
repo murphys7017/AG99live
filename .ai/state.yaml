@@ -17,6 +17,7 @@ context:
     - PreviewMotionPlayer now reports stopped terminal events for explicit motion stops and direct-plan replacement, so motion timeline sinks do not depend on silent local cleanup.
     - Motion-only segments now create a synthetic playback timeline with motion as the required sink when no matching audio timeline exists.
     - ModelEngine now prefers playback timeline duration/currentTime for motion target duration when the release context carries a valid audio timeline snapshot.
+    - Performance curve timing now resolves through a playback-timeline curve resolver; valid audio timelines use remaining duration, explicit synthetic timelines may be used only with duration, and audio_unavailable/missing-duration timelines skip the curve with diagnostics instead of being treated as synced timing.
     - Audio-start notifications now refresh pending motion entries with the current matched audio timeline snapshot before starting the payload, avoiding stale release-time timeline snapshots.
     - Speech-only motion now also consumes the matched audio-start timeline snapshot when no queued motion starts, so speech-following plans use real remaining audio duration instead of relying only on SessionStore fallback lookup.
     - Motion release timeline matching now lives in PlaybackTimelineMotionSink; TurnPlaybackOrchestrator no longer reads active audio timeline snapshots directly.
@@ -58,6 +59,7 @@ architecture:
     - During early development, fallback behavior should be fail-visible: optional sinks may fail without blocking required playback, but missing capabilities must not be silently reported as started or completed.
     - TimelineClock uses synthetic clock only for explicit no-audio timing; attached audio clock failures are exposed as audio_unavailable rather than hidden behind synthetic.
     - PlaybackTimeline snapshots with clockSource=audio_unavailable are diagnostic failure contexts, not usable timing sources for motion compilation or speech-following.
+    - Performance curve hints are consumed only after the current playback timeline proves a usable duration; skipped curves remain visible as `performance_curve_skipped:*` compiler diagnostics.
     - AdapterConnection exposes setAudioTimelineStartedHandler so PetDesktopRuntime can drive ModelEngine motion wakeup from the real audio timeline started event instead of CompletionCoordinator session watching.
     - Frontend motion ingest context can carry an optional playbackTimeline snapshot; ModelEngine pending scheduler preserves it and motionStart uses it before falling back to sessionStore audio-duration lookup.
     - ModelEngine pending motion entries refresh their playbackTimeline from the AdapterAudioRuntime audio timeline started event when a same turnId/messageId audio timeline is available.

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   createPlaybackTimelineEngine,
 } from "../src/playback-timeline/playbackTimelineEngine.js";
+import { resolvePerformanceCurveTimeline } from "../src/playback-timeline/performanceCurveSink.js";
 import { createTimelineClock } from "../src/playback-timeline/timelineClock.js";
 import type { AudioPlaybackClock } from "../src/playback-timeline/contracts.js";
 
@@ -213,6 +214,74 @@ function testLateSinkEventsDoNotRewriteTerminalTimeline(): void {
   );
 }
 
+function testPerformanceCurveTimelineUsesRemainingAudioDuration(): void {
+  const resolution = resolvePerformanceCurveTimeline({
+    hint: {
+      schema_version: "ag99.performance_curve_hint.v1",
+      curve_family: "quick_in_hold_soft_out",
+      entry: "quick",
+      hold: "steady",
+      exit: "soft",
+      emphasis: "early",
+      energy: "medium",
+    },
+    minRemainingDurationMs: 180,
+    timeline: {
+      timelineId: "timeline-curve",
+      turnId: "turn-curve",
+      messageId: "msg-curve",
+      phase: "playing",
+      clockSource: "audio",
+      startedAtMs: 100,
+      currentTimeMs: 450,
+      durationMs: 2000,
+      playbackRate: 1,
+      sinks: [],
+    },
+  });
+
+  assert.equal(resolution.ok, true);
+  if (!resolution.ok) {
+    throw new Error("expected performance curve timeline resolution");
+  }
+  assert.equal(resolution.clockSource, "audio");
+  assert.equal(resolution.targetDurationMs, 1550);
+  assert.equal(resolution.speechActive, true);
+}
+
+function testPerformanceCurveTimelineRejectsUnavailableAudio(): void {
+  const resolution = resolvePerformanceCurveTimeline({
+    hint: {
+      schema_version: "ag99.performance_curve_hint.v1",
+      curve_family: "quick_in_hold_soft_out",
+      entry: "quick",
+      hold: "steady",
+      exit: "soft",
+      emphasis: "early",
+      energy: "medium",
+    },
+    minRemainingDurationMs: 180,
+    timeline: {
+      timelineId: "timeline-curve",
+      turnId: "turn-curve",
+      messageId: "msg-curve",
+      phase: "playing",
+      clockSource: "audio_unavailable",
+      startedAtMs: 100,
+      currentTimeMs: 450,
+      durationMs: 2000,
+      playbackRate: 1,
+      sinks: [],
+    },
+  });
+
+  assert.equal(resolution.ok, false);
+  if (resolution.ok) {
+    throw new Error("expected unavailable audio to be rejected");
+  }
+  assert.equal(resolution.reason, "playback_timeline_audio_unavailable");
+}
+
 function testTerminalSinkEventsAreStable(): void {
   const engine = createPlaybackTimelineEngine({ now: () => 0 });
   engine.load(
@@ -242,6 +311,8 @@ function run(): void {
   testTimelineFailsWhenRequiredSinkFails();
   testInterruptPropagatesToActiveSinks();
   testLateSinkEventsDoNotRewriteTerminalTimeline();
+  testPerformanceCurveTimelineUsesRemainingAudioDuration();
+  testPerformanceCurveTimelineRejectsUnavailableAudio();
   testTerminalSinkEventsAreStable();
   console.log("playbackTimelineEngine tests passed");
 }
