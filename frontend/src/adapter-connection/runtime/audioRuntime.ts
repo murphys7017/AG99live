@@ -17,12 +17,13 @@ import {
   type AudioBridgeDeps,
 } from "./adapterAudioBridge.js";
 import {
-  getPendingPlaybackItem,
-  deletePendingPlaybackItem,
   matchesPlaybackGroup,
   queueAudioForPlayback as queuePendingAudioForPlayback,
   type PendingAudioItem,
-} from "./playbackReleaseQueue.js";
+} from "../../playback-timeline/playbackReleaseQueue.js";
+import {
+  createQueuedAudioSegmentSink,
+} from "../../playback-timeline/segmentReleaseSinks.js";
 
 export type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "absent";
 
@@ -279,33 +280,22 @@ export function createAdapterAudioRuntime(
     return playAudioAction(audioPlaybackCtx, audioUrl, turnId, messageId);
   }
 
+  const queuedAudioSegmentSink = createQueuedAudioSegmentSink({
+    state: deps.state,
+    startAudioPlayback: (audioUrl, turnId, messageId) => {
+      void playAudioAndAcknowledge(
+        audioUrl,
+        turnId,
+        messageId,
+      );
+    },
+  });
+
   function releaseAudioForPlayback(
     messageId: string,
     turnId: string | null,
   ): boolean {
-    const item = getPendingPlaybackItem(
-      deps.state.pendingAudios,
-      turnId,
-      messageId,
-    );
-    if (!item) {
-      return false;
-    }
-    const audioUrl = item.audioUrl.trim();
-    if (!audioUrl) {
-      return false;
-    }
-    if (!matchesPlaybackGroup(item.turnId, turnId)) {
-      return false;
-    }
-    const releasedTurnId = item.turnId ?? turnId;
-    deletePendingPlaybackItem(deps.state.pendingAudios, turnId, messageId);
-    void playAudioAndAcknowledge(
-      audioUrl,
-      releasedTurnId,
-      messageId,
-    );
-    return true;
+    return queuedAudioSegmentSink.releaseAudioForPlayback(messageId, turnId);
   }
 
   function hasPendingAudioForTurn(turnId: string | null): boolean {

@@ -27,7 +27,7 @@ import type {
 } from "../../types/protocol.js";
 import type { InboundAdapterEvent, InboundEventMappingContext } from "./inboundEvents.js";
 import { mapInboundEnvelopeToEvent } from "./inboundEvents.js";
-import type { PendingAssistantTextItem, PendingAudioItem } from "../runtime/playbackReleaseQueue.js";
+import type { PendingAssistantTextItem, PendingAudioItem } from "../../playback-timeline/playbackReleaseQueue.js";
 import type { NormalizedMotionPayload } from "../../model-engine/contracts.js";
 import { dispatchInboundConnectionEvent } from "./inboundConnectionDispatcher.js";
 import { dispatchInboundFeatureEvent } from "./inboundFeatureDispatcher.js";

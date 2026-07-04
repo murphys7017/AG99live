@@ -55,11 +55,12 @@ import {
   saveStoredAdapterAddress,
 } from "./core/preferences.js";
 import {
-  getPendingPlaybackItem,
-  deletePendingPlaybackItem,
   matchesPlaybackGroup,
   queueAssistantTextForPlayback as queuePendingAssistantTextForPlayback,
-} from "./runtime/playbackReleaseQueue.js";
+} from "../playback-timeline/playbackReleaseQueue.js";
+import {
+  createQueuedTextSegmentSink,
+} from "../playback-timeline/segmentReleaseSinks.js";
 import {
   type ModelSyncInstance,
 } from "./model-sync/useModelSync.js";
@@ -511,33 +512,22 @@ export function createAdapterConnection(
     pushHistory("assistant", text);
   }
 
+  const queuedTextSegmentSink = createQueuedTextSegmentSink({
+    state,
+    updateAssistantText,
+    markTextDelivered: (turnId, messageId) => {
+      sessionStore?.markTextDelivered(turnId, messageId);
+    },
+  });
+
   function releaseAssistantTextForPlayback(
     messageId: string,
     turnId: string | null,
   ): boolean {
-    const item = getPendingPlaybackItem(
-      state.pendingAssistantTexts,
-      turnId,
+    return queuedTextSegmentSink.releaseAssistantTextForPlayback(
       messageId,
+      turnId,
     );
-    if (!item) {
-      return false;
-    }
-    const text = item.text.trim();
-    if (!text) {
-      return false;
-    }
-    if (!matchesPlaybackGroup(item.turnId, turnId)) {
-      return false;
-    }
-
-    const releasedTurnId = item.turnId ?? turnId;
-    deletePendingPlaybackItem(state.pendingAssistantTexts, turnId, messageId);
-    updateAssistantText(text, releasedTurnId);
-    state.assistantTextDeliveryTurnId = releasedTurnId;
-    sessionStore?.markTextDelivered(releasedTurnId, messageId);
-    state.statusMessage = "文本回复已进入同步播放。";
-    return true;
   }
 
   async function sendText(text: string): Promise<boolean> {

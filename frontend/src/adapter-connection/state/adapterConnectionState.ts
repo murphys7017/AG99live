@@ -14,7 +14,7 @@ import type { AudioPlaybackTerminalState } from "../runtime/audioRuntime.js";
 import type {
   PendingAssistantTextItem,
   PendingAudioItem,
-} from "../runtime/playbackReleaseQueue.js";
+} from "../../playback-timeline/playbackReleaseQueue.js";
 import {
   loadDesktopScreenshotOnSendEnabled,
   loadStoredAdapterAddress,

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { effectScope } from "vue";
 import { useAdapterConnection } from "../src/adapter-connection/useAdapterConnection.js";
 import { createModelSync } from "../src/adapter-connection/model-sync/useModelSync.js";
-import { buildPendingPlaybackKey } from "../src/adapter-connection/runtime/playbackReleaseQueue.js";
+import { buildPendingPlaybackKey } from "../src/playback-timeline/playbackReleaseQueue.js";
 import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
 
 interface ListenerMap {

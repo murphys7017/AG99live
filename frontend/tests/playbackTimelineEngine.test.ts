@@ -6,6 +6,10 @@ import { resolvePerformanceCurveTimeline } from "../src/playback-timeline/perfor
 import { createPlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
 import { createTimelineClock } from "../src/playback-timeline/timelineClock.js";
 import { createAudioStartMotionTimelineBridge } from "../src/playback-timeline/audioStartMotionBridge.js";
+import {
+  createQueuedAudioSegmentSink,
+  createQueuedTextSegmentSink,
+} from "../src/playback-timeline/segmentReleaseSinks.js";
 import type {
   AudioPlaybackClock,
   PlaybackTimelineSnapshot,
@@ -424,6 +428,56 @@ function testPlaybackTimelineRuntimeStartsSegmentJobThroughTimelineEntry(): void
   );
 }
 
+function testQueuedSegmentReleaseSinksConsumePendingItems(): void {
+  const pendingAssistantTexts = new Map();
+  const pendingAudios = new Map();
+  pendingAssistantTexts.set("6:turn-q:msg-q", {
+    turnId: "turn-q",
+    messageId: "msg-q",
+    receivedAtMs: 1,
+    text: "  hello timeline  ",
+  });
+  pendingAudios.set("6:turn-q:msg-q", {
+    turnId: "turn-q",
+    messageId: "msg-q",
+    receivedAtMs: 2,
+    audioUrl: "  http://127.0.0.1/audio.wav  ",
+  });
+
+  const events: string[] = [];
+  const textSink = createQueuedTextSegmentSink({
+    state: {
+      pendingAssistantTexts,
+      assistantTextDeliveryTurnId: null,
+      statusMessage: "",
+    },
+    updateAssistantText: (text, turnId) => {
+      events.push(`text:${turnId ?? ""}:${text}`);
+    },
+    markTextDelivered: (turnId, messageId) => {
+      events.push(`text_delivered:${turnId ?? ""}:${messageId}`);
+    },
+  });
+  const audioSink = createQueuedAudioSegmentSink({
+    state: {
+      pendingAudios,
+    },
+    startAudioPlayback: (audioUrl, turnId, messageId) => {
+      events.push(`audio:${turnId ?? ""}:${messageId}:${audioUrl}`);
+    },
+  });
+
+  assert.equal(textSink.releaseAssistantTextForPlayback("msg-q", "turn-q"), true);
+  assert.equal(audioSink.releaseAudioForPlayback("msg-q", "turn-q"), true);
+  assert.equal(pendingAssistantTexts.size, 0);
+  assert.equal(pendingAudios.size, 0);
+  assert.deepEqual(events, [
+    "text:turn-q:hello timeline",
+    "text_delivered:turn-q:msg-q",
+    "audio:turn-q:msg-q:http://127.0.0.1/audio.wav",
+  ]);
+}
+
 function testPlaybackTimelineRuntimeDoesNotStealMismatchedActiveTimeline(): void {
   const runtime = createPlaybackTimelineRuntime({
     getAudioClock: () => null,
@@ -619,6 +673,7 @@ function run(): void {
   testPlaybackTimelineRuntimeCreatesMotionOnlyTimeline();
   testPlaybackTimelineRuntimePreparesSegmentJobIdempotently();
   testPlaybackTimelineRuntimeStartsSegmentJobThroughTimelineEntry();
+  testQueuedSegmentReleaseSinksConsumePendingItems();
   testPlaybackTimelineRuntimeDoesNotStealMismatchedActiveTimeline();
   testPlaybackTimelineRuntimeExposesMissingAudioClock();
   testTerminalSinkEventsAreStable();

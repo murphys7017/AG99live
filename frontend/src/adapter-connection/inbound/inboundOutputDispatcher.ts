@@ -20,7 +20,7 @@ import type {
   ProtocolEnvelope,
 } from "../../types/protocol.js";
 import type { InboundAdapterEvent } from "./inboundEvents.js";
-import type { PendingAssistantTextItem, PendingAudioItem } from "../runtime/playbackReleaseQueue.js";
+import type { PendingAssistantTextItem, PendingAudioItem } from "../../playback-timeline/playbackReleaseQueue.js";
 
 export interface InboundOutputDispatchState {
   currentTurnId: string | null;

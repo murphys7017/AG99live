@@ -18,7 +18,7 @@ import {
   matchesPlaybackGroup,
   type PendingAssistantTextItem,
   type PendingAudioItem,
-} from "../runtime/playbackReleaseQueue.js";
+} from "../../playback-timeline/playbackReleaseQueue.js";
 
 export interface InboundRuntimeDispatchState {
   currentTurnId: string | null;

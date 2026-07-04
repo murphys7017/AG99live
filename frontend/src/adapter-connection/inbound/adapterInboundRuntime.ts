@@ -21,7 +21,7 @@ import {
 import {
   buildPendingPlaybackKey,
   queueAssistantTextForPlayback as queuePendingAssistantTextForPlayback,
-} from "../runtime/playbackReleaseQueue.js";
+} from "../../playback-timeline/playbackReleaseQueue.js";
 import type { useAdapterHistory } from "../history/useAdapterHistory.js";
 import type { useAdapterMotionTuning } from "../motion-tuning/useAdapterMotionTuning.js";
 import type { useModelSync } from "../model-sync/useModelSync.js";

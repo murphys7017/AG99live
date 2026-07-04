@@ -20,7 +20,7 @@ import {
 import type {
   PendingAssistantTextItem,
   PendingAudioItem,
-} from "../runtime/playbackReleaseQueue.js";
+} from "../../playback-timeline/playbackReleaseQueue.js";
 import type { AdapterOutboundClient } from "./outboundClient.js";
 
 export interface MotionLabRawEventPayload {
@@ -40,7 +40,7 @@ export interface MotionLabRawEventPayload {
  *
  * 由 useAdapterConnection 持有真实对象，函数只读取/写回，不创建新实例。
  * pendingAssistantTexts / pendingAudios 的键由 `buildPendingPlaybackKey(turnId, messageId)`
- * 决定，详见 runtime/playbackReleaseQueue.ts。
+ * 决定，详见 playback-timeline/playbackReleaseQueue.ts。
  */
 export interface OutboundActionState {
   currentTurnId: string | null;

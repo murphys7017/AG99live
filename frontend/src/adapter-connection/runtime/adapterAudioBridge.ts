@@ -1,4 +1,4 @@
-import { matchesPlaybackGroup, type PendingAudioItem } from "./playbackReleaseQueue.js";
+import { matchesPlaybackGroup, type PendingAudioItem } from "../../playback-timeline/playbackReleaseQueue.js";
 
 export interface AudioBridgeState {
   audioPlaybackTerminalState: "idle" | "completed" | "failed" | "absent";
