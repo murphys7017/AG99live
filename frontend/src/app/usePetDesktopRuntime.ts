@@ -17,7 +17,10 @@ import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRunti
 import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
 import { createAudioStartMotionTimelineBridge } from "../playback-timeline/audioStartMotionBridge.js";
-import { createModelEngineMotionTimelineSink } from "../playback-timeline/motionSink.js";
+import {
+  createModelEngineMotionTimelineSink,
+  createMotionTimelineRunTracker,
+} from "../playback-timeline/motionSink.js";
 import { cloneModelEngineSettings } from "../model-engine/settings";
 import type { ModelEngineSettings } from "../model-engine/settings";
 import { usePlaybackCompletionCoordinator } from "../turn-playback/usePlaybackCompletionCoordinator";
@@ -80,45 +83,10 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     },
     initialMotionPlaybackRecords,
   });
-  const motionTimelineRuns = new Map<string, {
-    turnId: string | null;
-    messageId: string;
-  }>();
-  const markMotionTimelineStarted = (
-    event: Parameters<typeof playbackCoordinator.recordMotionPlayback>[0],
-  ): void => {
-    if (event.startReason === "preview") {
-      return;
-    }
-    adapter.markMotionTimelineStarted(event.turnId, event.messageId);
-    if (event.runId) {
-      motionTimelineRuns.set(event.runId, {
-        turnId: event.turnId,
-        messageId: event.messageId,
-      });
-    }
-  };
-  const markMotionTimelineTerminal = (event: {
-    runId: string;
-    status: string;
-    reason?: string;
-  }): void => {
-    const owner = motionTimelineRuns.get(event.runId);
-    if (!owner) {
-      return;
-    }
-    motionTimelineRuns.delete(event.runId);
-    adapter.markMotionTimelineTerminal(
-      owner.turnId,
-      owner.messageId,
-      event.status === "completed"
-        ? "completed"
-        : event.status === "stopped"
-          ? "interrupted"
-          : "failed",
-      event.reason || event.status,
-    );
-  };
+  const motionTimelineRunTracker = createMotionTimelineRunTracker({
+    markMotionTimelineStarted: adapter.markMotionTimelineStarted,
+    markMotionTimelineTerminal: adapter.markMotionTimelineTerminal,
+  });
   const modelEngine = useModelEngine({
     getSelectedModel: () => selectedModel.value,
     getSettings: () => cloneModelEngineSettings(motionEngineSettings),
@@ -126,7 +94,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       ...options,
       onFinished: (event) => {
         options?.onFinished?.(event);
-        markMotionTimelineTerminal(event);
+        motionTimelineRunTracker.recordTerminal(event);
         playbackCoordinator.completeMotionPlayback(event);
       },
     }),
@@ -134,7 +102,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       ...options,
       onFinished: (event) => {
         options?.onFinished?.(event);
-        markMotionTimelineTerminal(event);
+        motionTimelineRunTracker.recordTerminal(event);
         playbackCoordinator.completeMotionPlayback(event);
       },
     }),
@@ -158,7 +126,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     pushHistory: (role, text) => adapter.pushHistory(role, text),
     getPlayerMessage: () => motionPlayer.state.message,
     onPlanStarted: (event) => {
-      markMotionTimelineStarted(event);
+      motionTimelineRunTracker.recordStarted(event);
       playbackCoordinator.recordMotionPlayback(event);
     },
     sessionStore: {
@@ -411,7 +379,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     pushToTalk.dispose();
     bilibiliLive.dispose();
     playbackCoordinator.resetPlaybackCoordination();
-    motionTimelineRuns.clear();
+    motionTimelineRunTracker.clear();
     adapter.setAudioTimelineStartedHandler(null);
     modelEngine.stop("unmount");
     detachBridgeListener();

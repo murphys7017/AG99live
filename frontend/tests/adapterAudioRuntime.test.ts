@@ -59,7 +59,7 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
           startedAtMs: 100,
           durationMs: 1250,
         });
-        callbacks.onLipSyncStarted?.();
+        callbacks.lipSync?.onStarted?.();
       },
       getClock: () => ({
         getCurrentTimeMs: () => 320,
@@ -122,7 +122,7 @@ async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
           startedAtMs: 50,
           durationMs: 900,
         });
-        callbacks.onLipSyncStarted?.();
+        callbacks.lipSync?.onStarted?.();
       },
       getClock: () => ({
         getCurrentTimeMs: () => 900,
@@ -142,7 +142,7 @@ async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
 
   const options = startOptionsRef.current;
   assert.ok(options);
-  options.onLipSyncTerminal?.("completed", "audio_playback_completed");
+  options.lipSync?.onTerminal?.("completed", "audio_playback_completed");
   options.onEnded?.();
 
   assert.equal(runtime.getActiveAudioTimelineSnapshot(), null);
@@ -158,8 +158,8 @@ async function testLipSyncFailureRemainsVisibleUntilAudioCompletes(): Promise<vo
           startedAtMs: 80,
           durationMs: 1000,
         });
-        callbacks.onLipSyncTerminal?.("failed", "lip_sync_unavailable");
-        callbacks.onLipSyncTerminal?.("completed", "audio_playback_completed");
+        callbacks.lipSync?.onTerminal?.("failed", "lip_sync_unavailable");
+        callbacks.lipSync?.onTerminal?.("completed", "audio_playback_completed");
       },
       getClock: () => ({
         getCurrentTimeMs: () => 100,

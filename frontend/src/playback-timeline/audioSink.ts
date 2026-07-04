@@ -11,13 +11,17 @@ import {
   type PlaybackTimelineLipSyncSink,
 } from "./lipSyncSink.js";
 
-export interface PlaybackTimelineAudioStartCallbacks {
-  onLipSyncUnavailable?: () => void;
-  onLipSyncStarted?: () => void;
-  onLipSyncTerminal?: (
+export interface PlaybackTimelineAudioLipSyncCallbacks {
+  onUnavailable?: () => void;
+  onStarted?: () => void;
+  onTerminal?: (
     terminal: "completed" | "failed" | "interrupted",
     reason: string,
   ) => void;
+}
+
+export interface PlaybackTimelineAudioStartCallbacks {
+  lipSync?: PlaybackTimelineAudioLipSyncCallbacks;
   onDurationChanged?: (durationMs: number | null) => void;
   onPlaybackStarted?: (event: { startedAtMs: number; durationMs: number | null }) => void;
   onEnded?: () => void;
@@ -47,9 +51,9 @@ export function createBrowserAudioTimelineSink(
       const lipSyncRuntime = createPlaybackTimelineLipSyncRuntime(
         lipSyncSink,
         {
-          onUnavailable: callbacks.onLipSyncUnavailable,
-          onStarted: callbacks.onLipSyncStarted,
-          onTerminal: callbacks.onLipSyncTerminal,
+          onUnavailable: callbacks.lipSync?.onUnavailable,
+          onStarted: callbacks.lipSync?.onStarted,
+          onTerminal: callbacks.lipSync?.onTerminal,
         },
       );
       await startAudioPlayback(audioUrl, {

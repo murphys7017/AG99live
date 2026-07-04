@@ -152,11 +152,13 @@ async function testBrowserAudioSinkDrivesLipSyncSink(): Promise<void> {
     const audioSink = createBrowserAudioTimelineSink(lipSyncSink);
     let playbackStarted = false;
     await audioSink.start("http://127.0.0.1/audio.wav", {
-      onLipSyncStarted: () => {
-        events.push("timeline:started");
-      },
-      onLipSyncTerminal: (terminal, reason) => {
-        events.push(`timeline:${terminal}:${reason}`);
+      lipSync: {
+        onStarted: () => {
+          events.push("timeline:started");
+        },
+        onTerminal: (terminal, reason) => {
+          events.push(`timeline:${terminal}:${reason}`);
+        },
       },
       onPlaybackStarted: () => {
         playbackStarted = true;
@@ -211,11 +213,13 @@ async function testBrowserAudioSinkDoesNotStartLipSyncWithoutSinkConfirmation():
   try {
     const audioSink = createBrowserAudioTimelineSink(lipSyncSink);
     await audioSink.start("http://127.0.0.1/audio.wav", {
-      onLipSyncStarted: () => {
-        events.push("timeline:started");
-      },
-      onLipSyncTerminal: (terminal, reason) => {
-        events.push(`timeline:${terminal}:${reason}`);
+      lipSync: {
+        onStarted: () => {
+          events.push("timeline:started");
+        },
+        onTerminal: (terminal, reason) => {
+          events.push(`timeline:${terminal}:${reason}`);
+        },
       },
     });
     await Promise.resolve();
@@ -256,8 +260,10 @@ async function testBrowserAudioSinkKeepsLipSyncFailureTerminal(): Promise<void> 
   try {
     const audioSink = createBrowserAudioTimelineSink(lipSyncSink);
     await audioSink.start("http://127.0.0.1/audio.wav", {
-      onLipSyncTerminal: (terminal, reason) => {
-        events.push(`timeline:${terminal}:${reason}`);
+      lipSync: {
+        onTerminal: (terminal, reason) => {
+          events.push(`timeline:${terminal}:${reason}`);
+        },
       },
     });
     await Promise.resolve();
@@ -284,8 +290,10 @@ async function testBrowserAudioSinkReportsDefaultLipSyncUnavailable(): Promise<v
   try {
     const audioSink = createBrowserAudioTimelineSink();
     await audioSink.start("http://127.0.0.1/audio.wav", {
-      onLipSyncTerminal: (terminal, reason) => {
-        terminalEvents.push(`${terminal}:${reason}`);
+      lipSync: {
+        onTerminal: (terminal, reason) => {
+          terminalEvents.push(`${terminal}:${reason}`);
+        },
       },
     });
     await Promise.resolve();
@@ -296,7 +304,6 @@ async function testBrowserAudioSinkReportsDefaultLipSyncUnavailable(): Promise<v
     (globalThis as { Audio?: unknown }).Audio = originalAudio;
   }
 }
-
 async function run(): Promise<void> {
   testAudioElementPlaybackClockMapsElementState();
   testAudioElementPlaybackClockHandlesInvalidValues();

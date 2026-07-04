@@ -6,6 +6,7 @@ import { resolvePerformanceCurveTimeline } from "../src/playback-timeline/perfor
 import { createPlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
 import { createTimelineClock } from "../src/playback-timeline/timelineClock.js";
 import { createAudioStartMotionTimelineBridge } from "../src/playback-timeline/audioStartMotionBridge.js";
+import { createMotionTimelineRunTracker } from "../src/playback-timeline/motionSink.js";
 import {
   createQueuedAudioSegmentSink,
   createQueuedTextSegmentSink,
@@ -660,6 +661,113 @@ function testAudioStartMotionBridgeReportsMissingTimeline(): void {
   assert.deepEqual(missing, [{ turnId: "turn-audio", messageId: "msg-audio" }]);
 }
 
+function testMotionTimelineRunTrackerMarksStartedAndTerminalByRunId(): void {
+  const events: string[] = [];
+  const tracker = createMotionTimelineRunTracker({
+    markMotionTimelineStarted: (turnId, messageId) => {
+      events.push(`started:${turnId}:${messageId}`);
+    },
+    markMotionTimelineTerminal: (turnId, messageId, terminal, reason) => {
+      events.push(`terminal:${turnId}:${messageId}:${terminal}:${reason}`);
+    },
+  });
+
+  tracker.recordStarted({
+    model: null,
+    messageId: "msg-motion",
+    turnId: "turn-motion",
+    playbackTurnId: "turn-motion",
+    startReason: "timeline",
+    queuedDelayMs: 0,
+    payloadKind: "semantic_plan",
+    diagnostics: null,
+    playerMessage: "playing",
+    runId: "run-motion",
+    plan: {
+      schema_version: "engine.parameter_plan.v2",
+      profile_id: "profile-test",
+      profile_revision: 1,
+      model_id: "model-test",
+      mode: "expressive",
+      emotion_label: "test",
+      parameters: [],
+      timing: { duration_ms: 1000, blend_in_ms: 100, hold_ms: 800, blend_out_ms: 100 },
+    },
+    motion: null,
+  });
+  tracker.recordTerminal({ runId: "run-motion", status: "stopped", reason: "interrupted" });
+
+  assert.deepEqual(events, [
+    "started:turn-motion:msg-motion",
+    "terminal:turn-motion:msg-motion:interrupted:interrupted",
+  ]);
+}
+
+function testMotionTimelineRunTrackerIgnoresPreviewUnknownAndClearedRuns(): void {
+  const events: string[] = [];
+  const tracker = createMotionTimelineRunTracker({
+    markMotionTimelineStarted: (turnId, messageId) => {
+      events.push(`started:${turnId}:${messageId}`);
+    },
+    markMotionTimelineTerminal: (turnId, messageId, terminal, reason) => {
+      events.push(`terminal:${turnId}:${messageId}:${terminal}:${reason}`);
+    },
+  });
+
+  tracker.recordStarted({
+    model: null,
+    messageId: "msg-preview",
+    turnId: "turn-preview",
+    playbackTurnId: "turn-preview",
+    startReason: "preview",
+    queuedDelayMs: 0,
+    payloadKind: "semantic_plan",
+    diagnostics: null,
+    playerMessage: "preview",
+    runId: "run-preview",
+    plan: {
+      schema_version: "engine.parameter_plan.v2",
+      profile_id: "profile-test",
+      profile_revision: 1,
+      model_id: "model-test",
+      mode: "expressive",
+      emotion_label: "test",
+      parameters: [],
+      timing: { duration_ms: 1000, blend_in_ms: 100, hold_ms: 800, blend_out_ms: 100 },
+    },
+    motion: null,
+  });
+  tracker.recordTerminal({ runId: "run-preview", status: "completed" });
+  tracker.recordTerminal({ runId: "missing", status: "failed", reason: "missing" });
+
+  tracker.recordStarted({
+    model: null,
+    messageId: "msg-clear",
+    turnId: "turn-clear",
+    playbackTurnId: "turn-clear",
+    startReason: "timeline",
+    queuedDelayMs: 0,
+    payloadKind: "semantic_plan",
+    diagnostics: null,
+    playerMessage: "playing",
+    runId: "run-clear",
+    plan: {
+      schema_version: "engine.parameter_plan.v2",
+      profile_id: "profile-test",
+      profile_revision: 1,
+      model_id: "model-test",
+      mode: "expressive",
+      emotion_label: "test",
+      parameters: [],
+      timing: { duration_ms: 1000, blend_in_ms: 100, hold_ms: 800, blend_out_ms: 100 },
+    },
+    motion: null,
+  });
+  tracker.clear();
+  tracker.recordTerminal({ runId: "run-clear", status: "completed" });
+
+  assert.deepEqual(events, ["started:turn-clear:msg-clear"]);
+}
 function run(): void {
   testSyntheticClockLifecycle();
   testAudioClockTakesPriorityAndExposesUnavailableState();
@@ -681,6 +789,8 @@ function run(): void {
   testAudioStartMotionBridgeCanCancelPendingWakeup();
   testAudioStartMotionBridgeSkipsStaleSegment();
   testAudioStartMotionBridgeReportsMissingTimeline();
+  testMotionTimelineRunTrackerMarksStartedAndTerminalByRunId();
+  testMotionTimelineRunTrackerIgnoresPreviewUnknownAndClearedRuns();
   console.log("playbackTimelineEngine tests passed");
 }
 

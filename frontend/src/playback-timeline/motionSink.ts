@@ -1,4 +1,5 @@
 import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
+import type { ModelEnginePlanStartedEvent } from "../model-engine/runtime/contracts.js";
 import type { PlaybackTimelineSnapshot } from "./contracts.js";
 
 export interface PlaybackTimelineMotionContext {
@@ -26,6 +27,18 @@ export interface PlaybackTimelineMotionSink {
 }
 
 export type MotionTimelineTerminal = "completed" | "failed" | "interrupted";
+
+export interface MotionTimelineTerminalEvent {
+  runId: string;
+  status: string;
+  reason?: string;
+}
+
+export interface MotionTimelineRunTracker {
+  recordStarted(event: ModelEnginePlanStartedEvent): void;
+  recordTerminal(event: MotionTimelineTerminalEvent): void;
+  clear(): void;
+}
 
 function normalizeTurnId(turnId: string | null): string | null {
   const normalized = typeof turnId === "string" ? turnId.trim() : "";
@@ -152,6 +165,59 @@ export function createModelEngineMotionTimelineSink(options: {
     },
     notifyCurrentTurnChanged(turnId) {
       options.motionEngine.notifyCurrentTurnChanged(turnId);
+    },
+  };
+}
+
+export function createMotionTimelineRunTracker(options: {
+  markMotionTimelineStarted: (
+    turnId: string | null,
+    messageId: string,
+  ) => void;
+  markMotionTimelineTerminal: (
+    turnId: string | null,
+    messageId: string,
+    terminal: MotionTimelineTerminal,
+    reason: string,
+  ) => void;
+}): MotionTimelineRunTracker {
+  const runs = new Map<string, {
+    turnId: string | null;
+    messageId: string;
+  }>();
+
+  return {
+    recordStarted(event) {
+      if (event.startReason === "preview") {
+        return;
+      }
+      options.markMotionTimelineStarted(event.turnId, event.messageId);
+      if (event.runId) {
+        runs.set(event.runId, {
+          turnId: event.turnId,
+          messageId: event.messageId,
+        });
+      }
+    },
+    recordTerminal(event) {
+      const owner = runs.get(event.runId);
+      if (!owner) {
+        return;
+      }
+      runs.delete(event.runId);
+      options.markMotionTimelineTerminal(
+        owner.turnId,
+        owner.messageId,
+        event.status === "completed"
+          ? "completed"
+          : event.status === "stopped"
+            ? "interrupted"
+            : "failed",
+        event.reason || event.status,
+      );
+    },
+    clear() {
+      runs.clear();
     },
   };
 }
