@@ -75,6 +75,27 @@ import { createAdapterInboundRuntime } from "./inbound/adapterInboundRuntime.js"
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 type AdapterHistory = ReturnType<typeof useAdapterHistory>;
 type AdapterMotionTuning = ReturnType<typeof useAdapterMotionTuning>;
+type AdapterAudioRuntimeInstance = ReturnType<typeof createAdapterAudioRuntime>;
+
+export interface AdapterPlaybackTimelinePort {
+  setAudioTimelineStartedHandler: (
+    handler: ((
+      turnId: string | null,
+      messageId: string,
+      playbackTimeline: PlaybackTimelineSnapshot | null,
+    ) => void) | null,
+  ) => void;
+  releaseAssistantTextForPlayback: (messageId: string, turnId: string | null) => boolean;
+  releaseAudioForPlayback: AdapterAudioRuntimeInstance["releaseAudioForPlayback"];
+  setSegmentExecutionPorts: AdapterAudioRuntimeInstance["setSegmentExecutionPorts"];
+  startSegmentJob: AdapterAudioRuntimeInstance["startSegmentJob"];
+  prepareSegmentJob: AdapterAudioRuntimeInstance["prepareSegmentJob"];
+  getPlaybackTimelineSnapshotForSegment: AdapterAudioRuntimeInstance["getPlaybackTimelineSnapshotForSegment"];
+  prepareMotionOnlyTimeline: AdapterAudioRuntimeInstance["prepareMotionOnlyTimeline"];
+  prepareMotionTimelineSink: AdapterAudioRuntimeInstance["prepareMotionTimelineSink"];
+  markMotionTimelineStarted: AdapterAudioRuntimeInstance["markMotionTimelineStarted"];
+  markMotionTimelineTerminal: AdapterAudioRuntimeInstance["markMotionTimelineTerminal"];
+}
 
 export interface AdapterConnectionInstance {
   readonly state: DeepReadonly<ReturnType<typeof createAdapterConnectionState>>;
@@ -103,29 +124,13 @@ export interface AdapterConnectionInstance {
     turnId?: string | null,
   ) => boolean;
   setMotionPreviewHandler: (handler: ((payload: unknown) => boolean) | null) => void;
-  setAudioTimelineStartedHandler: (
-    handler: ((
-      turnId: string | null,
-      messageId: string,
-      playbackTimeline: PlaybackTimelineSnapshot | null,
-    ) => void) | null,
-  ) => void;
   sendPlaybackFinishedForCurrentGroup: (
     turnId: string | null,
     success: boolean,
     reason?: string,
   ) => Promise<void>;
   clearPlaybackGroupContext: (turnId: string | null) => void;
-  releaseAssistantTextForPlayback: (messageId: string, turnId: string | null) => boolean;
-  releaseAudioForPlayback: ReturnType<typeof createAdapterAudioRuntime>["releaseAudioForPlayback"];
-  setSegmentExecutionPorts: ReturnType<typeof createAdapterAudioRuntime>["setSegmentExecutionPorts"];
-  startSegmentJob: ReturnType<typeof createAdapterAudioRuntime>["startSegmentJob"];
-  prepareSegmentJob: ReturnType<typeof createAdapterAudioRuntime>["prepareSegmentJob"];
-  getPlaybackTimelineSnapshotForSegment: ReturnType<typeof createAdapterAudioRuntime>["getPlaybackTimelineSnapshotForSegment"];
-  prepareMotionOnlyTimeline: ReturnType<typeof createAdapterAudioRuntime>["prepareMotionOnlyTimeline"];
-  prepareMotionTimelineSink: ReturnType<typeof createAdapterAudioRuntime>["prepareMotionTimelineSink"];
-  markMotionTimelineStarted: ReturnType<typeof createAdapterAudioRuntime>["markMotionTimelineStarted"];
-  markMotionTimelineTerminal: ReturnType<typeof createAdapterAudioRuntime>["markMotionTimelineTerminal"];
+  playbackTimeline: AdapterPlaybackTimelinePort;
   toggleMicrophoneCapture: ReturnType<typeof createAdapterMicrophoneRuntime>["toggleMicrophoneCapture"];
   setPttMode: ReturnType<typeof createAdapterMicrophoneRuntime>["setPttMode"];
   setPttKeyBinding: ReturnType<typeof createAdapterMicrophoneRuntime>["setPttKeyBinding"];
@@ -607,6 +612,20 @@ export function createAdapterConnection(
     clearPlaybackGroup(outboundCtx, turnId);
   }
 
+  const playbackTimeline: AdapterPlaybackTimelinePort = {
+    setAudioTimelineStartedHandler,
+    releaseAssistantTextForPlayback,
+    releaseAudioForPlayback,
+    setSegmentExecutionPorts,
+    startSegmentJob,
+    prepareSegmentJob,
+    getPlaybackTimelineSnapshotForSegment,
+    prepareMotionOnlyTimeline,
+    prepareMotionTimelineSink,
+    markMotionTimelineStarted,
+    markMotionTimelineTerminal,
+  };
+
   historyAdapter = useAdapterHistory(
     state,
     {
@@ -663,19 +682,9 @@ export function createAdapterConnection(
     sendMotionPayloadPreview,
     sendMotionLabRawEvent,
     setMotionPreviewHandler,
-    setAudioTimelineStartedHandler,
     sendPlaybackFinishedForCurrentGroup: sendPlaybackFinished,
     clearPlaybackGroupContext,
-    releaseAssistantTextForPlayback,
-    releaseAudioForPlayback,
-    setSegmentExecutionPorts,
-    startSegmentJob,
-    prepareSegmentJob,
-    getPlaybackTimelineSnapshotForSegment,
-    prepareMotionOnlyTimeline,
-    prepareMotionTimelineSink,
-    markMotionTimelineStarted,
-    markMotionTimelineTerminal,
+    playbackTimeline,
     toggleMicrophoneCapture,
     setPttMode,
     setPttKeyBinding,

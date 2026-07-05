@@ -33,6 +33,7 @@ import type {
 import { cloneJson } from "../utils/cloneJson";
 import { applyMotionEngineSettingsSnapshot } from "./motionEngineSettingsSnapshot";
 import { useAmbientMotionPreference } from "./useAmbientMotionPreference";
+import { configurePlaybackTimelineSegmentExecution } from "./playbackTimelineWiring";
 import { useDesktopContextMenu } from "./useDesktopContextMenu";
 import { createDesktopRuntimeCommandHandler } from "../desktop-bridge/useDesktopRuntimeCommandHandler";
 import { usePushToTalkController } from "./usePushToTalkController";
@@ -55,6 +56,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const modelSync = useModelSync(createModelSync());
   const { state, selectedModel, selectedSemanticAxisProfile } = modelSync;
   const adapter = useAdapterConnection(sessionStore, modelSync);
+  const playbackTimeline = adapter.playbackTimeline;
   const bridge = useDesktopBridge();
   const motionPlayer = usePreviewMotionPlayer();
   const motionEngineSettings = reactive(
@@ -84,8 +86,8 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     initialMotionPlaybackRecords,
   });
   const motionTimelineRunTracker = createMotionTimelineRunTracker({
-    markMotionTimelineStarted: adapter.markMotionTimelineStarted,
-    markMotionTimelineTerminal: adapter.markMotionTimelineTerminal,
+    markMotionTimelineStarted: playbackTimeline.markMotionTimelineStarted,
+    markMotionTimelineTerminal: playbackTimeline.markMotionTimelineTerminal,
   });
   const modelEngine = useModelEngine({
     getSelectedModel: () => selectedModel.value,
@@ -107,7 +109,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       },
     }),
     stopPlan: (reason) => motionPlayer.stopPlan(reason),
-    markMotionTimelineTerminal: adapter.markMotionTimelineTerminal,
+    markMotionTimelineTerminal: playbackTimeline.markMotionTimelineTerminal,
     canStartSpeechOnlyMotion: (turnId, messageId) => {
       const session = sessionStore.getSession(turnId);
       const segment = session?.segments.get(messageId);
@@ -150,7 +152,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
         && segment.audio.terminal === "idle",
       );
     },
-    getPlaybackTimelineSnapshotForSegment: adapter.getPlaybackTimelineSnapshotForSegment,
+    getPlaybackTimelineSnapshotForSegment: playbackTimeline.getPlaybackTimelineSnapshotForSegment,
     onMissingPlaybackTimeline: (turnId, messageId) => {
       console.error("[AG99live] audio timeline started without matching playback timeline.", {
         turnId,
@@ -166,7 +168,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
         },
       ),
   });
-  adapter.setAudioTimelineStartedHandler((turnId, messageId) => {
+  playbackTimeline.setAudioTimelineStartedHandler((turnId, messageId) => {
     audioStartMotionBridge.handleAudioTimelineStarted(turnId, messageId);
   });
   adapter.setMotionPreviewHandler((payload) => {
@@ -178,35 +180,22 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   });
   const motionTimelineSink = createModelEngineMotionTimelineSink({
     motionEngine: modelEngine,
-    getPlaybackTimelineSnapshotForSegment: adapter.getPlaybackTimelineSnapshotForSegment,
-    prepareMotionOnlyTimeline: adapter.prepareMotionOnlyTimeline,
-    prepareMotionTimelineSink: adapter.prepareMotionTimelineSink,
-    markMotionTimelineTerminal: adapter.markMotionTimelineTerminal,
+    getPlaybackTimelineSnapshotForSegment: playbackTimeline.getPlaybackTimelineSnapshotForSegment,
+    prepareMotionOnlyTimeline: playbackTimeline.prepareMotionOnlyTimeline,
+    prepareMotionTimelineSink: playbackTimeline.prepareMotionTimelineSink,
+    markMotionTimelineTerminal: playbackTimeline.markMotionTimelineTerminal,
   });
 
-  adapter.setSegmentExecutionPorts({
-    session: {
-      markTextReleased: sessionStore.markTextReleased,
-      markAudioReleased: sessionStore.markAudioReleased,
-      markMotionReleased: sessionStore.markMotionReleased,
-      markMotionFailed: sessionStore.markMotionFailed,
-      markPhase: sessionStore.markPhase,
-    },
-    textSink: {
-      releaseAssistantTextForPlayback: adapter.releaseAssistantTextForPlayback,
-    },
-    audioSink: {
-      releaseAudioForPlayback: adapter.releaseAudioForPlayback,
-    },
-    motionSink: {
-      start: motionTimelineSink.start,
-    },
+  configurePlaybackTimelineSegmentExecution({
+    playbackTimeline,
+    sessionStore,
+    motionTimelineSink,
   });
 
   useTurnPlaybackOrchestrator({
     sessionStore,
     timelineRuntime: {
-      startSegmentJob: adapter.startSegmentJob,
+      startSegmentJob: playbackTimeline.startSegmentJob,
     },
     motionPayload: {
       notifyCurrentTurnChanged: motionTimelineSink.notifyCurrentTurnChanged,
@@ -380,7 +369,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     bilibiliLive.dispose();
     playbackCoordinator.resetPlaybackCoordination();
     motionTimelineRunTracker.clear();
-    adapter.setAudioTimelineStartedHandler(null);
+    playbackTimeline.setAudioTimelineStartedHandler(null);
     modelEngine.stop("unmount");
     detachBridgeListener();
     detachProfileAuthoringBridgeListener();

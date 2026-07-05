@@ -47,6 +47,7 @@ context:
     - Motion prompt static/dynamic scope metadata improves render-tree selection and diagnostics, but model input token reduction still depends on AstrBot/provider static prefix caching or session-level reuse.
     - Skeleton repair may add missing head/body/gaze axes from fallback semantic axes and may replace neutralish skeleton axes, but it must not overwrite non-neutral LLM axes.
     - Empty, invalid, or all-neutral motion axes should not be replaced by a fallback pose; those turns should be treated as no valid motion input.
+    - AdapterConnection now exposes playback timeline operations through the aggregated playbackTimeline port; production callers should not depend on scattered root-level timeline methods.
   unresolved_questions:
     - Phase 2 still needs a careful extraction boundary for a standalone AudioSink because audioRuntime currently owns queueing, pending items, and settle behavior in addition to raw playback.
     - Phase 3 still needs AdapterAudioRuntime to be reduced further into queue/facade boundaries after the ModelEngine audio-start bridge removal.
@@ -103,6 +104,7 @@ architecture:
     - frontend motion diagnostics now surface pose_descriptors, outside_soft_range_axes, and skeleton_groups_present from semantic motion summaries so prompt tuning can be compared against runtime-visible motion coverage.
     - middleware motion prompt now marks the decision contract and capability payload as static, keeps per-turn runtime data dynamic, and keeps configured_generation_mode out of the static capability mapping.
     - middleware-first route disables fallback-pose replacement for unusable motion axes while preserving skeleton repair for otherwise valid axes.
+    - AdapterConnection playback timeline controls and audio timeline started subscription are grouped under adapter.playbackTimeline, keeping the unified clock boundary out of the general adapter facade.
 verification:
   checks_run:
     - npm run test:playback-timeline

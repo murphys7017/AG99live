@@ -695,7 +695,7 @@ async function testLateAudioAfterSynthFinishedStillPlaysOnce(): Promise<void> {
     const queuedAudio = sessionStore.getSession("turn-late-audio")?.segments.get("msg-late-audio");
     assert.equal(queuedAudio?.audio.terminal, "idle");
     assert.equal(adapter.state.pendingAudios.size, 1);
-    assert.equal(adapter.releaseAudioForPlayback("msg-late-audio", "turn-late-audio"), true);
+    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback("msg-late-audio", "turn-late-audio"), true);
     await flushMicrotasks();
 
     const afterAudio = sessionStore.getSession("turn-late-audio")?.segments.get("msg-late-audio");
@@ -720,7 +720,7 @@ async function testAudioTimelineStartedHandlerReceivesStartedSnapshot(): Promise
       clockSource: string | undefined;
       durationMs: number | null | undefined;
     }> = [];
-    adapter.setAudioTimelineStartedHandler((turnId, messageId, playbackTimeline) => {
+    adapter.playbackTimeline.setAudioTimelineStartedHandler((turnId, messageId, playbackTimeline) => {
       started.push({
         turnId,
         messageId,
@@ -737,7 +737,7 @@ async function testAudioTimelineStartedHandlerReceivesStartedSnapshot(): Promise
       audioUrl: "http://127.0.0.1:12397/cache/audio/timeline.wav",
     });
 
-    assert.equal(adapter.releaseAudioForPlayback("msg-audio-timeline", "turn-audio-timeline"), true);
+    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback("msg-audio-timeline", "turn-audio-timeline"), true);
     await Promise.resolve();
     await Promise.resolve();
 
@@ -766,7 +766,7 @@ async function testDuplicateOutputAudioDoesNotReplayCompletedSegment(): Promise<
       captionText: "repeat audio",
     });
 
-    assert.equal(adapter.releaseAudioForPlayback("msg-duplicate-audio", "turn-duplicate-audio"), true);
+    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback("msg-duplicate-audio", "turn-duplicate-audio"), true);
     await flushMicrotasks();
     FakeAudio.instances[0]?.emit("ended");
     await flushMicrotasks();
@@ -804,7 +804,7 @@ async function testChangedUrlOutputAudioDoesNotReplayCompletedSegment(): Promise
       captionText: "repeat audio",
     });
 
-    assert.equal(adapter.releaseAudioForPlayback("msg-changed-audio", "turn-changed-audio"), true);
+    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback("msg-changed-audio", "turn-changed-audio"), true);
     await flushMicrotasks();
     FakeAudio.instances[0]?.emit("ended");
     await flushMicrotasks();
@@ -1365,7 +1365,7 @@ async function testSendTextSettlesPlayingAudioBeforeNewInput(): Promise<void> {
       messageId: "msg-before-new-input",
       audioUrl: "http://127.0.0.1:12397/cache/audio/before-new-input.wav",
     });
-    assert.equal(adapter.releaseAudioForPlayback(
+    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback(
       "msg-before-new-input",
       "turn-before-new-input",
     ), true);
@@ -1442,7 +1442,7 @@ async function testClearPlaybackGroupOnlySettlesTargetTurnAudio(): Promise<void>
       messageId: "msg-clear-target-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/clear-target.wav",
     });
-    assert.equal(adapter.releaseAudioForPlayback(
+    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback(
       "msg-clear-target-audio",
       "turn-clear-target",
     ), true);
@@ -1492,7 +1492,7 @@ async function testInboundInterruptOnlySettlesTargetTurnAudio(): Promise<void> {
       messageId: "msg-inbound-interrupt-target-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/inbound-interrupt-target.wav",
     });
-    assert.equal(adapter.releaseAudioForPlayback(
+    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback(
       "msg-inbound-interrupt-target-audio",
       "turn-inbound-interrupt-target",
     ), true);
@@ -1667,7 +1667,7 @@ async function testInterruptMarksPlayingAudioSegmentFailed(): Promise<void> {
       },
     }));
 
-    const released = adapter.releaseAudioForPlayback(
+    const released = adapter.playbackTimeline.releaseAudioForPlayback(
       "msg-interrupt-audio",
       "turn-interrupt",
     );
@@ -1709,7 +1709,7 @@ async function testUserInterruptMarksPlayingAudioSegmentFailedBeforeSending(): P
       messageId: "msg-user-interrupt-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/user-interrupt.wav",
     });
-    assert.equal(adapter.releaseAudioForPlayback(
+    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback(
       "msg-user-interrupt-audio",
       "turn-user-interrupt",
     ), true);
@@ -1791,7 +1791,7 @@ async function testInterruptMarksPendingAudioSegmentFailedBeforePlaybackStart():
     }));
 
     FakeAudio.nextPlayShouldStall = true;
-    const released = adapter.releaseAudioForPlayback(
+    const released = adapter.playbackTimeline.releaseAudioForPlayback(
       "msg-interrupt-pending-audio",
       "turn-interrupt-pending",
     );
