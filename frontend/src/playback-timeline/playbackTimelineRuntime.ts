@@ -246,6 +246,9 @@ export function createPlaybackTimelineRuntime(
   ): void {
     const timeline = getTimeline(turnId, messageId);
     if (!timeline) {
+      warnMissingTimeline("audio.duration", turnId, messageId, {
+        durationMs,
+      });
       return;
     }
     timeline.engine.setExpectedDurationMs(durationMs);
@@ -259,6 +262,10 @@ export function createPlaybackTimelineRuntime(
   ): void {
     const timeline = getTimeline(turnId, messageId);
     if (!timeline) {
+      warnMissingTimeline("audio.started", turnId, messageId, {
+        startedAtMs,
+        durationMs,
+      });
       return;
     }
     const engine = timeline.engine;
@@ -286,6 +293,7 @@ export function createPlaybackTimelineRuntime(
   ): void {
     const timeline = getTimeline(turnId, messageId);
     if (!timeline) {
+      warnMissingTimeline("lip_sync.started", turnId, messageId);
       return;
     }
     timeline.engine.markSinkStarted(LIP_SYNC_TIMELINE_SINK_ID);
@@ -299,6 +307,10 @@ export function createPlaybackTimelineRuntime(
   ): void {
     const timeline = getTimeline(turnId, messageId);
     if (!timeline) {
+      warnMissingTimeline("lip_sync.terminal", turnId, messageId, {
+        terminal,
+        reason,
+      });
       return;
     }
     timeline.engine.markSinkTerminal(
@@ -331,10 +343,7 @@ export function createPlaybackTimelineRuntime(
     messageId: string,
   ): void {
     if (!prepareMotionTimelineSink(turnId, messageId)) {
-      console.warn("[PlaybackTimelineRuntime] dropped motion started event without active timeline.", {
-        turnId,
-        messageId,
-      });
+      warnMissingTimeline("motion.started", turnId, messageId);
       return;
     }
     const timeline = getTimeline(turnId, messageId);
@@ -355,9 +364,7 @@ export function createPlaybackTimelineRuntime(
     reason: string,
   ): void {
     if (!prepareMotionTimelineSink(turnId, messageId)) {
-      console.warn("[PlaybackTimelineRuntime] dropped motion terminal event without active timeline.", {
-        turnId,
-        messageId,
+      warnMissingTimeline("motion.terminal", turnId, messageId, {
         terminal,
         reason,
       });
@@ -383,6 +390,10 @@ export function createPlaybackTimelineRuntime(
   ): void {
     const timeline = getTimeline(turnId, messageId);
     if (!timeline) {
+      warnMissingTimeline("audio.terminal", turnId, messageId, {
+        terminal,
+        reason,
+      });
       return;
     }
     const engine = timeline.engine;
@@ -402,6 +413,9 @@ export function createPlaybackTimelineRuntime(
   ): void {
     const timeline = getTimeline(turnId, messageId);
     if (!timeline) {
+      warnMissingTimeline("timeline.stop", turnId, messageId, {
+        reason,
+      });
       return;
     }
     timeline.engine.interrupt(reason);
@@ -471,4 +485,21 @@ function createUnavailableAudioClock(): AudioPlaybackClock {
 
 function normalizeTurnId(value: string | null): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function warnMissingTimeline(
+  event: string,
+  turnId: string | null,
+  messageId: string,
+  details: Record<string, unknown> = {},
+): void {
+  console.warn(
+    "[PlaybackTimelineRuntime] dropped timeline event for missing segment timeline.",
+    {
+      event,
+      turnId,
+      messageId,
+      ...details,
+    },
+  );
 }
