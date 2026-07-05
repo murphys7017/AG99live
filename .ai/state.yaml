@@ -9,7 +9,7 @@ context:
     - Phase 1 pure timeline logic is complete; Phase 2 now lets audioRuntime create a segment PlaybackTimelineEngine for released audio.
     - Audio timeline integration observes and records real audio playback clock state, but does not yet replace turnPlaybackOrchestrator release decisions.
     - Audio playback is now injected through PlaybackTimelineAudioSink instead of separate start/stop/clock functions, making audio execution a concrete timeline sink boundary.
-    - The first shipped timeline shape should remain single active segment oriented, matching the current turn playback session semantics.
+    - PlaybackTimelineRuntime now stores timelines by turnId + messageId, while getActiveTimelineSnapshot/stopActiveTimeline remain a compatibility view over the most recently active segment.
     - ModelEngine now consumes handlePlaybackTimelineStarted(PlaybackTimelineSnapshot) as the audio-start motion wakeup entry point; the old notifyAudioPlaybackStarted bridge has been removed.
     - Motion release now receives a segment-scoped audio timeline snapshot from PlaybackTimelineRuntime when turnId and messageId match; mismatched timeline snapshots are intentionally hidden from the motion sink.
     - Audio-start delayed motion wakeup now lives in PlaybackTimeline AudioStartMotionTimelineBridge and refreshes the segment-scoped playback timeline snapshot at timer fire time, so ModelEngine does not consume stale currentTimeMs.
@@ -59,7 +59,7 @@ architecture:
   stability: evolving
   boundary_changes:
     - Frontend now has a new playback-timeline module that defines a reusable segment timeline contract, synthetic/audio clock abstraction, and sink terminal state machine without yet changing real playback integration.
-    - Audio runtime now creates an active playback timeline for each released audio segment, attaches the HTMLAudioElement playback clock on playback start, and clears the timeline on completion, failure, or interruption.
+    - Audio runtime now creates a segment-scoped playback timeline for each released audio segment, attaches the HTMLAudioElement playback clock on playback start, and clears only that segment timeline on completion, failure, or interruption.
     - AdapterAudioRuntime depends on PlaybackTimelineAudioSink for audio start/stop/clock access, while createAdapterConnection wires the browser HTMLAudioElement implementation through createBrowserAudioTimelineSink.
     - TurnPlaybackOrchestrator now releases audio before motion for the same ready segment so audioRuntime can create an active timeline before ModelEngine ingests the motion payload.
     - Segment playback release is now a dedicated turn-playback boundary; motion release requires a valid receivedAtMs and fails visibly instead of substituting a local fallback timestamp.

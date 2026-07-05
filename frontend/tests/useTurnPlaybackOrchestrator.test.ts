@@ -962,7 +962,7 @@ function testPlaybackTimelineRuntimeDoesNotReleaseMotionWhenAudioReleaseFails():
   ]);
   assert.equal(runtime.getActiveTimelineSnapshot(), null);
 }
-function testPlaybackTimelineRuntimeFailsMotionOnlyTimelinePreparation(): void {
+function testPlaybackTimelineRuntimeCreatesMotionOnlyTimelineBesideExistingAudioTimeline(): void {
   const events: string[] = [];
   const runtime = createRuntimeWithExecutionPorts({
     session: {
@@ -1011,11 +1011,24 @@ function testPlaybackTimelineRuntimeFailsMotionOnlyTimelinePreparation(): void {
   assert.deepEqual(result, {
     releasedText: false,
     releasedAudio: false,
-    releasedMotion: false,
+    releasedMotion: true,
   });
   assert.deepEqual(events, [
-    "motion_failed:motion_only_timeline_unavailable",
+    "motion_released",
+    "motion_sink",
+    "phase:playing",
   ]);
+  assert.equal(
+    runtime.getTimelineSnapshotForSegment("turn-existing", "msg-existing")?.messageId,
+    "msg-existing",
+  );
+  assert.equal(
+    runtime.getTimelineSnapshotForSegment(
+      "turn-motion-only-missing-timeline",
+      "msg-motion-only-missing-timeline",
+    )?.messageId,
+    "msg-motion-only-missing-timeline",
+  );
 }
 async function run(): Promise<void> {
   await testSegmentsReleaseSequentiallyWithinTurn();
@@ -1036,7 +1049,7 @@ async function run(): Promise<void> {
   testPlaybackTimelineRuntimeMarksMotionOnlyContext();
   testPlaybackTimelineRuntimePreparesAudioMotionTimeline();
   testPlaybackTimelineRuntimeDoesNotReleaseMotionWhenAudioReleaseFails();
-  testPlaybackTimelineRuntimeFailsMotionOnlyTimelinePreparation();
+  testPlaybackTimelineRuntimeCreatesMotionOnlyTimelineBesideExistingAudioTimeline();
   console.log("useTurnPlaybackOrchestrator tests passed");
 }
 

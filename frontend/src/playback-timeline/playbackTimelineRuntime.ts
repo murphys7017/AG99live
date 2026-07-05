@@ -22,7 +22,7 @@ const MOTION_TIMELINE_SINK_ID = "motion";
 
 type TimelineTerminal = "completed" | "failed" | "interrupted";
 
-interface ActivePlaybackTimeline {
+interface PlaybackTimelineEntry {
   turnId: string | null;
   messageId: string;
   engine: PlaybackTimelineEngine;
@@ -115,35 +115,61 @@ export interface PlaybackTimelineRuntime {
 export function createPlaybackTimelineRuntime(
   deps: PlaybackTimelineRuntimeDeps,
 ): PlaybackTimelineRuntime {
-  let activeTimeline: ActivePlaybackTimeline | null = null;
+  const timelines = new Map<string, PlaybackTimelineEntry>();
+  let activeTimelineKey: string | null = null;
   let segmentExecutionPorts: PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload> | null = null;
 
-  function isActiveTimeline(
+  function resolveTimelineKey(
     turnId: string | null,
     messageId: string,
-  ): boolean {
-    return Boolean(
-      activeTimeline
-      && activeTimeline.messageId === messageId
-      && matchesTimelineTurn(activeTimeline.turnId, turnId),
-    );
+  ): string {
+    const normalizedTurnId = normalizeTurnId(turnId);
+    const normalizedMessageId = messageId.trim();
+    return `${normalizedTurnId.length}:${normalizedTurnId}:${normalizedMessageId}`;
+  }
+
+  function getTimeline(
+    turnId: string | null,
+    messageId: string,
+  ): PlaybackTimelineEntry | null {
+    return timelines.get(resolveTimelineKey(turnId, messageId)) ?? null;
+  }
+
+  function setTimelineActive(
+    turnId: string | null,
+    messageId: string,
+    entry: PlaybackTimelineEntry,
+  ): void {
+    const key = resolveTimelineKey(turnId, messageId);
+    timelines.set(key, entry);
+    activeTimelineKey = key;
+  }
+
+  function getActiveTimeline(): PlaybackTimelineEntry | null {
+    if (!activeTimelineKey) {
+      return null;
+    }
+    const timeline = timelines.get(activeTimelineKey);
+    if (timeline) {
+      return timeline;
+    }
+    activeTimelineKey = null;
+    return null;
   }
 
   function prepareAudioTimeline(
     turnId: string | null,
     messageId: string,
   ): void {
-    if (
-      isActiveTimeline(turnId, messageId)
-      && activeTimeline
-      && activeTimeline.engine.hasSink(AUDIO_TIMELINE_SINK_ID)
-    ) {
-      if (!activeTimeline.engine.hasSink(LIP_SYNC_TIMELINE_SINK_ID)) {
-        activeTimeline.engine.registerSink({
+    const existing = getTimeline(turnId, messageId);
+    if (existing?.engine.hasSink(AUDIO_TIMELINE_SINK_ID)) {
+      if (!existing.engine.hasSink(LIP_SYNC_TIMELINE_SINK_ID)) {
+        existing.engine.registerSink({
           id: LIP_SYNC_TIMELINE_SINK_ID,
           required: false,
         });
       }
+      activeTimelineKey = resolveTimelineKey(turnId, messageId);
       return;
     }
     const engine = createPlaybackTimelineEngine();
@@ -154,11 +180,11 @@ export function createPlaybackTimelineRuntime(
         { id: LIP_SYNC_TIMELINE_SINK_ID, required: false },
       ],
     );
-    activeTimeline = {
+    setTimelineActive(turnId, messageId, {
       turnId,
       messageId,
       engine,
-    };
+    });
   }
 
   function prepareSegmentJob(
@@ -171,7 +197,7 @@ export function createPlaybackTimelineRuntime(
       if (options.hasMotion) {
         return prepareMotionTimelineSink(turnId, messageId);
       }
-      return isActiveTimeline(turnId, messageId);
+      return getTimeline(turnId, messageId) !== null;
     }
 
     if (options.hasMotion && options.noAudioConfirmed) {
@@ -204,13 +230,11 @@ export function createPlaybackTimelineRuntime(
     turnId: string | null,
     messageId: string,
   ): PlaybackTimelineSnapshot | null {
-    if (isActiveTimeline(turnId, messageId) && activeTimeline) {
+    const existing = getTimeline(turnId, messageId);
+    if (existing) {
       return prepareMotionTimelineSink(turnId, messageId)
-        ? activeTimeline.engine.getSnapshot()
+        ? existing.engine.getSnapshot()
         : null;
-    }
-    if (activeTimeline) {
-      return null;
     }
     const engine = createPlaybackTimelineEngine();
     engine.load(
@@ -219,11 +243,11 @@ export function createPlaybackTimelineRuntime(
         { id: MOTION_TIMELINE_SINK_ID, required: true },
       ],
     );
-    activeTimeline = {
+    setTimelineActive(turnId, messageId, {
       turnId,
       messageId,
       engine,
-    };
+    });
     return engine.getSnapshot();
   }
 
@@ -232,10 +256,11 @@ export function createPlaybackTimelineRuntime(
     messageId: string,
     durationMs: number | null,
   ): void {
-    if (!isActiveTimeline(turnId, messageId)) {
+    const timeline = getTimeline(turnId, messageId);
+    if (!timeline) {
       return;
     }
-    activeTimeline?.engine.setExpectedDurationMs(durationMs);
+    timeline.engine.setExpectedDurationMs(durationMs);
   }
 
   function markAudioTimelineStarted(
@@ -244,10 +269,12 @@ export function createPlaybackTimelineRuntime(
     startedAtMs: number,
     durationMs: number | null,
   ): void {
-    if (!isActiveTimeline(turnId, messageId) || !activeTimeline) {
+    const timeline = getTimeline(turnId, messageId);
+    if (!timeline) {
       return;
     }
-    const engine = activeTimeline.engine;
+    activeTimelineKey = resolveTimelineKey(turnId, messageId);
+    const engine = timeline.engine;
     engine.setExpectedDurationMs(durationMs);
     const audioClock = deps.getAudioClock();
     if (audioClock) {
@@ -270,10 +297,11 @@ export function createPlaybackTimelineRuntime(
     turnId: string | null,
     messageId: string,
   ): void {
-    if (!isActiveTimeline(turnId, messageId) || !activeTimeline) {
+    const timeline = getTimeline(turnId, messageId);
+    if (!timeline) {
       return;
     }
-    activeTimeline.engine.markSinkStarted(LIP_SYNC_TIMELINE_SINK_ID);
+    timeline.engine.markSinkStarted(LIP_SYNC_TIMELINE_SINK_ID);
   }
 
   function markLipSyncTimelineTerminal(
@@ -282,10 +310,11 @@ export function createPlaybackTimelineRuntime(
     terminal: TimelineTerminal,
     reason: string,
   ): void {
-    if (!isActiveTimeline(turnId, messageId) || !activeTimeline) {
+    const timeline = getTimeline(turnId, messageId);
+    if (!timeline) {
       return;
     }
-    activeTimeline.engine.markSinkTerminal(
+    timeline.engine.markSinkTerminal(
       LIP_SYNC_TIMELINE_SINK_ID,
       terminal,
       reason,
@@ -296,10 +325,11 @@ export function createPlaybackTimelineRuntime(
     turnId: string | null,
     messageId: string,
   ): boolean {
-    if (!isActiveTimeline(turnId, messageId) || !activeTimeline) {
+    const timeline = getTimeline(turnId, messageId);
+    if (!timeline) {
       return false;
     }
-    const engine = activeTimeline.engine;
+    const engine = timeline.engine;
     if (!engine.hasSink(MOTION_TIMELINE_SINK_ID)) {
       engine.registerSink({
         id: MOTION_TIMELINE_SINK_ID,
@@ -313,14 +343,19 @@ export function createPlaybackTimelineRuntime(
     turnId: string | null,
     messageId: string,
   ): void {
-    if (!prepareMotionTimelineSink(turnId, messageId) || !activeTimeline) {
+    if (!prepareMotionTimelineSink(turnId, messageId)) {
       console.warn("[PlaybackTimelineRuntime] dropped motion started event without active timeline.", {
         turnId,
         messageId,
       });
       return;
     }
-    const engine = activeTimeline.engine;
+    activeTimelineKey = resolveTimelineKey(turnId, messageId);
+    const timeline = getTimeline(turnId, messageId);
+    if (!timeline) {
+      return;
+    }
+    const engine = timeline.engine;
     engine.markSinkStarted(MOTION_TIMELINE_SINK_ID);
     if (engine.getPhase() === "ready") {
       engine.start();
@@ -333,7 +368,7 @@ export function createPlaybackTimelineRuntime(
     terminal: TimelineTerminal,
     reason: string,
   ): void {
-    if (!prepareMotionTimelineSink(turnId, messageId) || !activeTimeline) {
+    if (!prepareMotionTimelineSink(turnId, messageId)) {
       console.warn("[PlaybackTimelineRuntime] dropped motion terminal event without active timeline.", {
         turnId,
         messageId,
@@ -342,12 +377,16 @@ export function createPlaybackTimelineRuntime(
       });
       return;
     }
-    activeTimeline.engine.markSinkTerminal(
+    const timeline = getTimeline(turnId, messageId);
+    if (!timeline) {
+      return;
+    }
+    timeline.engine.markSinkTerminal(
       MOTION_TIMELINE_SINK_ID,
       terminal,
       reason,
     );
-    clearActiveTimelineIfTerminal();
+    clearTimelineIfTerminal(turnId, messageId);
   }
 
   function markAudioTimelineTerminal(
@@ -356,49 +395,69 @@ export function createPlaybackTimelineRuntime(
     terminal: TimelineTerminal,
     reason: string,
   ): void {
-    if (!isActiveTimeline(turnId, messageId) || !activeTimeline) {
+    const timeline = getTimeline(turnId, messageId);
+    if (!timeline) {
       return;
     }
-    const engine = activeTimeline.engine;
+    const engine = timeline.engine;
     if (terminal === "interrupted") {
       engine.interrupt(reason);
     } else {
       engine.detachAudioClock();
       engine.markSinkTerminal(AUDIO_TIMELINE_SINK_ID, terminal, reason);
     }
-    clearActiveTimelineIfTerminal();
+    clearTimelineIfTerminal(turnId, messageId);
   }
 
   function stopActiveTimeline(reason: string): void {
+    const activeTimeline = getActiveTimeline();
     if (!activeTimeline) {
       return;
     }
     activeTimeline.engine.interrupt(reason);
-    activeTimeline = null;
+    clearTimeline(activeTimeline.turnId, activeTimeline.messageId);
   }
 
   function getActiveTimelineSnapshot(): PlaybackTimelineSnapshot | null {
-    return activeTimeline?.engine.getSnapshot() ?? null;
+    return getActiveTimeline()?.engine.getSnapshot() ?? null;
   }
 
   function getTimelineSnapshotForSegment(
     turnId: string | null,
     messageId: string,
   ): PlaybackTimelineSnapshot | null {
-    if (!isActiveTimeline(turnId, messageId)) {
-      return null;
-    }
-    return activeTimeline?.engine.getSnapshot() ?? null;
+    return getTimeline(turnId, messageId)?.engine.getSnapshot() ?? null;
   }
 
-  function clearActiveTimelineIfTerminal(): void {
-    if (isTimelineTerminalPhase()) {
-      activeTimeline = null;
+  function clearTimelineIfTerminal(
+    turnId: string | null,
+    messageId: string,
+  ): void {
+    const timeline = getTimeline(turnId, messageId);
+    if (!timeline) {
+      return;
+    }
+    if (isTimelineTerminalPhase(timeline)) {
+      clearTimeline(turnId, messageId);
     }
   }
 
-  function isTimelineTerminalPhase(): boolean {
-    const phase = activeTimeline?.engine.getPhase();
+  function clearTimeline(
+    turnId: string | null,
+    messageId: string,
+  ): void {
+    const key = resolveTimelineKey(turnId, messageId);
+    timelines.delete(key);
+    if (activeTimelineKey === key) {
+      const remainingKeys = Array.from(timelines.keys());
+      activeTimelineKey = remainingKeys.length > 0
+        ? remainingKeys[remainingKeys.length - 1]
+        : null;
+    }
+  }
+
+  function isTimelineTerminalPhase(timeline: PlaybackTimelineEntry): boolean {
+    const phase = timeline.engine.getPhase();
     return phase === "completed" || phase === "failed" || phase === "interrupted";
   }
 
@@ -429,22 +488,6 @@ function createUnavailableAudioClock(): AudioPlaybackClock {
     getPlaybackRate: () => 1,
     isPlaying: () => true,
   };
-}
-
-function matchesTimelineTurn(
-  candidateTurnId: string | null,
-  targetTurnId: string | null,
-): boolean {
-  const normalizedCandidateTurnId = normalizeTurnId(candidateTurnId);
-  const normalizedTargetTurnId = normalizeTurnId(targetTurnId);
-  if (!normalizedCandidateTurnId && !normalizedTargetTurnId) {
-    return true;
-  }
-  return Boolean(
-    normalizedCandidateTurnId
-    && normalizedTargetTurnId
-    && normalizedCandidateTurnId === normalizedTargetTurnId,
-  );
 }
 
 function normalizeTurnId(value: string | null): string {

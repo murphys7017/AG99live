@@ -479,7 +479,7 @@ function testQueuedSegmentReleaseSinksConsumePendingItems(): void {
   ]);
 }
 
-function testPlaybackTimelineRuntimeDoesNotStealMismatchedActiveTimeline(): void {
+function testPlaybackTimelineRuntimeKeepsMismatchedSegmentTimelinesSeparate(): void {
   const runtime = createPlaybackTimelineRuntime({
     getAudioClock: () => null,
   });
@@ -494,18 +494,45 @@ function testPlaybackTimelineRuntimeDoesNotStealMismatchedActiveTimeline(): void
     "msg-audio",
   );
 
+  const motionSnapshot = runtime.prepareMotionOnlyTimeline("turn-motion", "msg-motion");
+  assert.equal(motionSnapshot?.messageId, "msg-motion");
   assert.equal(
-    runtime.prepareMotionOnlyTimeline("turn-motion", "msg-motion"),
+    runtime.prepareMotionTimelineSink("turn-motion", "msg-motion"),
+    true,
+  );
+  assert.equal(
+    runtime.getTimelineSnapshotForSegment("turn-audio", "msg-audio")?.messageId,
+    "msg-audio",
+  );
+  assert.equal(
+    runtime.getTimelineSnapshotForSegment("turn-motion", "msg-motion")?.messageId,
+    "msg-motion",
+  );
+}
+
+function testPlaybackTimelineRuntimeClearsOnlyTerminalSegmentTimeline(): void {
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => null,
+  });
+
+  runtime.prepareAudioTimeline("turn-audio", "msg-audio");
+  runtime.prepareMotionOnlyTimeline("turn-motion", "msg-motion");
+  runtime.markMotionTimelineStarted("turn-motion", "msg-motion");
+  runtime.markMotionTimelineTerminal(
+    "turn-motion",
+    "msg-motion",
+    "completed",
+    "motion_completed",
+  );
+
+  assert.equal(
+    runtime.getTimelineSnapshotForSegment("turn-motion", "msg-motion"),
     null,
   );
   assert.equal(
-    runtime.prepareMotionTimelineSink("turn-motion", "msg-motion"),
-    false,
+    runtime.getTimelineSnapshotForSegment("turn-audio", "msg-audio")?.messageId,
+    "msg-audio",
   );
-  const snapshot = runtime.getActiveTimelineSnapshot();
-  assert.equal(snapshot?.turnId, "turn-audio");
-  assert.equal(snapshot?.messageId, "msg-audio");
-  assert.equal(snapshot?.sinks.some((sink) => sink.id === "motion"), false);
 }
 
 function testPlaybackTimelineRuntimeExposesMissingAudioClock(): void {
@@ -782,7 +809,8 @@ function run(): void {
   testPlaybackTimelineRuntimePreparesSegmentJobIdempotently();
   testPlaybackTimelineRuntimeStartsSegmentJobThroughTimelineEntry();
   testQueuedSegmentReleaseSinksConsumePendingItems();
-  testPlaybackTimelineRuntimeDoesNotStealMismatchedActiveTimeline();
+  testPlaybackTimelineRuntimeKeepsMismatchedSegmentTimelinesSeparate();
+  testPlaybackTimelineRuntimeClearsOnlyTerminalSegmentTimeline();
   testPlaybackTimelineRuntimeExposesMissingAudioClock();
   testTerminalSinkEventsAreStable();
   testAudioStartMotionBridgeRefreshesTimelineAtFireTime();
