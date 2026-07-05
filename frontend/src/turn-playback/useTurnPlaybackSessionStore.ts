@@ -438,7 +438,7 @@ export function useTurnPlaybackSessionStore() {
     segment.motion.absent = true;
     segment.motion.released = false;
     segment.motion.started = false;
-    segment.motion.completed = true;
+    segment.motion.completed = false;
     segment.motion.failed = false;
     segment.motion.reason = "";
   }

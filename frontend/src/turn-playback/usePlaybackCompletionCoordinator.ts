@@ -250,7 +250,9 @@ export function usePlaybackCompletionCoordinator(
     void firstSegment;
     const success = s.segmentOrder.every((segmentId) => {
       const segment = s.segments.get(segmentId);
-      return segment ? segment.audio.terminal !== "failed" : true;
+      return segment
+        ? segment.audio.terminal !== "failed" && !segment.motion.failed
+        : true;
     });
     for (const segmentId of s.segmentOrder) {
       clearSettlementTimer(segmentKey(sessionId, segmentId));

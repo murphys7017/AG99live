@@ -109,6 +109,8 @@ function testPerformanceCurveHintCanBeStoredOnSegment(): void {
   store.markMotionAbsent("turn-1", "msg-1");
   assert.equal(segment.motion.performanceCurveHint, null);
   assert.equal(segment.motion.performanceCurveHintReceivedAtMs, null);
+  assert.equal(segment.motion.absent, true);
+  assert.equal(segment.motion.completed, false);
 }
 
 function testMultipleMessageIdsKeepArrivalOrder(): void {

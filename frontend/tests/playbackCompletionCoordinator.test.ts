@@ -514,7 +514,7 @@ async function testMotionStartFailureMarkedFailedAllowsAck(): Promise<void> {
   assert.equal(h.playbackFinishedCalls.length, 1);
   assert.deepEqual(h.playbackFinishedCalls[0], {
     turnId: "turn-1",
-    success: true,
+    success: false,
     reason: "text_delivered",
   });
 }

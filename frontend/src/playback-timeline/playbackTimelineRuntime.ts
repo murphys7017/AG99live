@@ -314,6 +314,10 @@ export function createPlaybackTimelineRuntime(
     messageId: string,
   ): void {
     if (!prepareMotionTimelineSink(turnId, messageId) || !activeTimeline) {
+      console.warn("[PlaybackTimelineRuntime] dropped motion started event without active timeline.", {
+        turnId,
+        messageId,
+      });
       return;
     }
     const engine = activeTimeline.engine;
@@ -330,6 +334,12 @@ export function createPlaybackTimelineRuntime(
     reason: string,
   ): void {
     if (!prepareMotionTimelineSink(turnId, messageId) || !activeTimeline) {
+      console.warn("[PlaybackTimelineRuntime] dropped motion terminal event without active timeline.", {
+        turnId,
+        messageId,
+        terminal,
+        reason,
+      });
       return;
     }
     activeTimeline.engine.markSinkTerminal(
