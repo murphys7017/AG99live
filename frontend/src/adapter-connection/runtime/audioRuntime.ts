@@ -188,6 +188,7 @@ export function createAdapterAudioRuntime(
     prepareMotionTimelineSink,
     markMotionTimelineStarted,
     markMotionTimelineTerminal,
+    findActiveAudioTimelineSegments,
     getTimelineSnapshotForSegment: getPlaybackTimelineSnapshotForSegment,
   } = playbackTimelineRuntime;
 
@@ -367,26 +368,7 @@ export function createAdapterAudioRuntime(
   }
 
   function findActiveAudioSegments(): ActiveAudioSegment[] {
-    const activeSegments: ActiveAudioSegment[] = [];
-    const sessions = deps.getSessionStore()?.getSessions() ?? [];
-    for (const session of sessions) {
-      if ("phase" in session && (
-        session.phase === "completed"
-        || session.phase === "failed"
-      )) {
-        continue;
-      }
-      for (const segmentId of session.segmentOrder) {
-        const segment = session.segments.get(segmentId);
-        if (segment?.audio.started && segment.audio.terminal === "idle") {
-          activeSegments.push({
-            turnId: segment.turnId,
-            messageId: segment.messageId,
-          });
-        }
-      }
-    }
-    return activeSegments;
+    return findActiveAudioTimelineSegments();
   }
 
   return {

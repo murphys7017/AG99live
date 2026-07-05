@@ -28,6 +28,11 @@ interface PlaybackTimelineEntry {
   engine: PlaybackTimelineEngine;
 }
 
+export interface PlaybackTimelineAudioSegment {
+  turnId: string | null;
+  messageId: string;
+}
+
 export interface PlaybackTimelineRuntimeDeps {
   getAudioClock: () => AudioPlaybackClock | null;
   onAudioTimelineStarted?: (
@@ -113,6 +118,7 @@ export interface PlaybackTimelineRuntime {
     turnId: string | null,
     messageId: string,
   ) => PlaybackTimelineSnapshot | null;
+  findActiveAudioTimelineSegments: () => PlaybackTimelineAudioSegment[];
 }
 
 export function createPlaybackTimelineRuntime(
@@ -429,6 +435,26 @@ export function createPlaybackTimelineRuntime(
     return getTimeline(turnId, messageId)?.engine.getSnapshot() ?? null;
   }
 
+  function findActiveAudioTimelineSegments(): PlaybackTimelineAudioSegment[] {
+    const segments: PlaybackTimelineAudioSegment[] = [];
+    for (const timeline of timelines.values()) {
+      const snapshot = timeline.engine.getSnapshot();
+      if (!snapshot || isTimelineTerminalPhase(timeline)) {
+        continue;
+      }
+      const audioSink = snapshot.sinks.find((sink) =>
+        sink.id === AUDIO_TIMELINE_SINK_ID
+      );
+      if (audioSink?.terminal === "started") {
+        segments.push({
+          turnId: timeline.turnId,
+          messageId: timeline.messageId,
+        });
+      }
+    }
+    return segments;
+  }
+
   function clearTimelineIfTerminal(
     turnId: string | null,
     messageId: string,
@@ -471,6 +497,7 @@ export function createPlaybackTimelineRuntime(
     markAudioTimelineTerminal,
     stopTimelineForSegment,
     getTimelineSnapshotForSegment,
+    findActiveAudioTimelineSegments,
   };
 }
 

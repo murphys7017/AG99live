@@ -1699,6 +1699,21 @@ async function testInterruptMarksPlayingAudioSegmentFailed(): Promise<void> {
   }
 }
 
+function testUserInterruptWithoutTurnIdentityIsRejected(): void {
+  withConnectedAdapter(({ adapter, socket }) => {
+    socket.sent.length = 0;
+
+    const interrupted = adapter.interruptCurrentTurn();
+
+    assert.equal(interrupted, false);
+    assert.equal(adapter.state.lastError, "当前没有可中断的轮次。");
+    assert.equal(
+      parseSentJsonMessages(socket).some((item) => item.type === "control.interrupt"),
+      false,
+    );
+  });
+}
+
 async function testUserInterruptMarksPlayingAudioSegmentFailedBeforeSending(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
@@ -1861,6 +1876,7 @@ async function run(): Promise<void> {
   await testPttReleaseDuringStartupStopsCaptureAfterStart();
   await testDeviceChangeEndsPreviousMicSegmentBeforeRestart();
   await testInterruptMarksPlayingAudioSegmentFailed();
+  testUserInterruptWithoutTurnIdentityIsRejected();
   await testUserInterruptMarksPlayingAudioSegmentFailedBeforeSending();
   await testUserInterruptMarksPendingAudioSegmentFailedBeforeSending();
   await testInterruptMarksPendingAudioSegmentFailedBeforePlaybackStart();

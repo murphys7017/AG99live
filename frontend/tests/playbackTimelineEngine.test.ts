@@ -573,6 +573,29 @@ function testPlaybackTimelineRuntimeStopsOnlyRequestedSegmentTimeline(): void {
   );
 }
 
+function testPlaybackTimelineRuntimeFindsActiveAudioSegments(): void {
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => null,
+  });
+
+  runtime.prepareAudioTimeline("turn-active", "msg-active");
+  runtime.prepareAudioTimeline("turn-idle", "msg-idle");
+  assert.deepEqual(runtime.findActiveAudioTimelineSegments(), []);
+
+  runtime.markAudioTimelineStarted("turn-active", "msg-active", 100, 1200);
+  assert.deepEqual(runtime.findActiveAudioTimelineSegments(), [
+    { turnId: "turn-active", messageId: "msg-active" },
+  ]);
+
+  runtime.markAudioTimelineTerminal(
+    "turn-active",
+    "msg-active",
+    "completed",
+    "audio_playback_completed",
+  );
+  assert.deepEqual(runtime.findActiveAudioTimelineSegments(), []);
+}
+
 function testTerminalSinkEventsAreStable(): void {
   const engine = createPlaybackTimelineEngine({ now: () => 0 });
   engine.load(
@@ -837,6 +860,7 @@ function run(): void {
   testPlaybackTimelineRuntimeClearsOnlyTerminalSegmentTimeline();
   testPlaybackTimelineRuntimeExposesMissingAudioClock();
   testPlaybackTimelineRuntimeStopsOnlyRequestedSegmentTimeline();
+  testPlaybackTimelineRuntimeFindsActiveAudioSegments();
   testTerminalSinkEventsAreStable();
   testAudioStartMotionBridgeRefreshesTimelineAtFireTime();
   testAudioStartMotionBridgeCanCancelPendingWakeup();

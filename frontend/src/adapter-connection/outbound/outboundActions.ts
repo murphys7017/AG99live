@@ -220,6 +220,13 @@ export function interruptCurrentTurn(ctx: OutboundActionContext): boolean {
     getInterruptibleTurnId(ctx.state)
     ?? ctx.state.currentTurnId
     ?? null;
+  if (!interruptTurnId) {
+    ctx.state.lastError = "当前没有可中断的轮次。";
+    ctx.state.statusMessage = ctx.state.lastError;
+    ctx.pushHistory("error", ctx.state.lastError);
+    return false;
+  }
+
   ctx.stopAudioAndSettleTurn(interruptTurnId, "audio_playback_interrupted");
   ctx.resetAudioPlaybackTerminal();
 
