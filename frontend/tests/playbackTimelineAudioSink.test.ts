@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import {
   createAudioElementPlaybackClock,
 } from "../src/adapter-connection/runtime/audioPlayback.js";
-import { createBrowserAudioTimelineSink } from "../src/playback-timeline/audioSink.js";
+import {
+  createBrowserAudioTimelineSink,
+  createBrowserAudioTimelineSinkWithLipSync,
+} from "../src/playback-timeline/audioSink.js";
 import {
   createPlaybackTimelineLipSyncRuntime,
   type PlaybackTimelineLipSyncSink,
@@ -149,7 +152,7 @@ async function testBrowserAudioSinkDrivesLipSyncSink(): Promise<void> {
   };
 
   try {
-    const audioSink = createBrowserAudioTimelineSink(lipSyncSink);
+    const audioSink = createBrowserAudioTimelineSinkWithLipSync(lipSyncSink);
     let playbackStarted = false;
     await audioSink.start("http://127.0.0.1/audio.wav", {
       lipSync: {
@@ -211,7 +214,7 @@ async function testBrowserAudioSinkDoesNotStartLipSyncWithoutSinkConfirmation():
   };
 
   try {
-    const audioSink = createBrowserAudioTimelineSink(lipSyncSink);
+    const audioSink = createBrowserAudioTimelineSinkWithLipSync(lipSyncSink);
     await audioSink.start("http://127.0.0.1/audio.wav", {
       lipSync: {
         onStarted: () => {
@@ -258,7 +261,7 @@ async function testBrowserAudioSinkKeepsLipSyncFailureTerminal(): Promise<void> 
   };
 
   try {
-    const audioSink = createBrowserAudioTimelineSink(lipSyncSink);
+    const audioSink = createBrowserAudioTimelineSinkWithLipSync(lipSyncSink);
     await audioSink.start("http://127.0.0.1/audio.wav", {
       lipSync: {
         onTerminal: (terminal, reason) => {
@@ -288,7 +291,7 @@ async function testBrowserAudioSinkReportsDefaultLipSyncUnavailable(): Promise<v
 
   const terminalEvents: string[] = [];
   try {
-    const audioSink = createBrowserAudioTimelineSink();
+    const audioSink = createBrowserAudioTimelineSinkWithLipSync();
     await audioSink.start("http://127.0.0.1/audio.wav", {
       lipSync: {
         onTerminal: (terminal, reason) => {
@@ -299,6 +302,37 @@ async function testBrowserAudioSinkReportsDefaultLipSyncUnavailable(): Promise<v
     await Promise.resolve();
 
     assert.deepEqual(terminalEvents, ["failed:lip_sync_unavailable"]);
+  } finally {
+    (globalThis as { window?: unknown }).window = originalWindow;
+    (globalThis as { Audio?: unknown }).Audio = originalAudio;
+  }
+}
+async function testBrowserAudioSinkDoesNotOwnLipSyncCallbacks(): Promise<void> {
+  const originalWindow = (globalThis as { window?: unknown }).window;
+  const originalAudio = (globalThis as { Audio?: unknown }).Audio;
+  (globalThis as { window?: unknown }).window = globalThis;
+  (globalThis as { Audio?: unknown }).Audio = FakeAudio;
+  FakeAudio.instances.length = 0;
+
+  const terminalEvents: string[] = [];
+  let audioElementCreated = false;
+  try {
+    const audioSink = createBrowserAudioTimelineSink();
+    await audioSink.start("http://127.0.0.1/audio.wav", {
+      lipSync: {
+        onTerminal: (terminal, reason) => {
+          terminalEvents.push(`${terminal}:${reason}`);
+        },
+      },
+      onAudioElementCreated: () => {
+        audioElementCreated = true;
+      },
+    });
+    await Promise.resolve();
+    FakeAudio.instances[0].emit("ended");
+
+    assert.equal(audioElementCreated, true);
+    assert.deepEqual(terminalEvents, []);
   } finally {
     (globalThis as { window?: unknown }).window = originalWindow;
     (globalThis as { Audio?: unknown }).Audio = originalAudio;

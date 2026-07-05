@@ -32,7 +32,7 @@ import {
   createAdapterMicrophoneRuntime,
 } from "./runtime/microphoneRuntime.js";
 import {
-  createBrowserAudioTimelineSink,
+  createBrowserAudioTimelineSinkWithLipSync,
 } from "../playback-timeline/audioSink.js";
 import type {
   PlaybackTimelineSnapshot,
@@ -230,7 +230,7 @@ export function createAdapterConnection(
 
   const audioRuntime = createAdapterAudioRuntime({
     state,
-    audioSink: createBrowserAudioTimelineSink(),
+    audioSink: createBrowserAudioTimelineSinkWithLipSync(),
     pushHistory: pushHistory as (role: string, text: string) => void,
     getSessionStore: () => sessionStore,
     onAudioTimelineStarted: (turnId, messageId, playbackTimeline) =>
