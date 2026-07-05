@@ -81,7 +81,7 @@ export function createAdapterAudioTimelineController(
     markLipSyncTimelineStarted: playbackTimelineRuntime.markLipSyncTimelineStarted,
     markLipSyncTimelineTerminal: playbackTimelineRuntime.markLipSyncTimelineTerminal,
     markAudioTimelineTerminal: playbackTimelineRuntime.markAudioTimelineTerminal,
-    stopActiveAudioTimeline: playbackTimelineRuntime.stopActiveTimeline,
+    stopAudioTimelineForSegment: playbackTimelineRuntime.stopTimelineForSegment,
     pushHistory: deps.pushHistory,
     markTerminal: deps.markTerminal,
     resetTerminal: deps.resetTerminal,

@@ -66,7 +66,7 @@ function attachPlaybackTimelineToMotionContext(
     turnId: string | null,
     messageId: string,
   ) => PlaybackTimelineSnapshot | null,
-  getActiveTimelineSnapshot: () => PlaybackTimelineSnapshot | null,
+  getSegmentTimelineSnapshot: () => PlaybackTimelineSnapshot | null,
 ): PlaybackTimelineMotionContext {
   if (snapshot && matchesMotionContext(snapshot, context)) {
     if (!prepareMotionTimeline(context.turnId, context.messageId)) {
@@ -77,7 +77,7 @@ function attachPlaybackTimelineToMotionContext(
     }
     return {
       ...context,
-      playbackTimeline: getActiveTimelineSnapshot() ?? snapshot,
+      playbackTimeline: getSegmentTimelineSnapshot() ?? snapshot,
     };
   }
 

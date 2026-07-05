@@ -71,7 +71,11 @@ export interface AudioPlaybackContext {
     terminal: "completed" | "failed" | "interrupted",
     reason: string,
   ) => void;
-  stopActiveAudioTimeline: (reason: string) => void;
+  stopAudioTimelineForSegment: (
+    turnId: string | null,
+    messageId: string,
+    reason: string,
+  ) => void;
   pushHistory: (role: string, text: string) => void;
   markTerminal: (
     terminalState: "completed" | "failed" | "absent",
@@ -229,6 +233,7 @@ export async function playAudioAndAcknowledge(
 export function stopAudioPlayback(ctx: AudioPlaybackContext): void {
   const interruptedTurnId = ctx.state.audioPlaybackStartedTurnId;
   const interruptedMessageId = ctx.state.audioPlaybackStartedMessageId;
+  const wasPlayingAudio = ctx.state.isPlayingAudio;
   const shouldMarkInterruptedTerminal =
     ctx.state.audioPlaybackTerminalState === "idle";
   ctx.stopLipSyncRuntime();
@@ -240,21 +245,25 @@ export function stopAudioPlayback(ctx: AudioPlaybackContext): void {
       "audio_playback_stopped",
       interruptedMessageId,
     );
-    ctx.markAudioTimelineTerminal(
+    ctx.stopAudioTimelineForSegment(
       interruptedTurnId,
       interruptedMessageId,
-      "interrupted",
       "audio_playback_stopped",
     );
   } else if (interruptedMessageId) {
-    ctx.markAudioTimelineTerminal(
+    ctx.stopAudioTimelineForSegment(
       interruptedTurnId,
       interruptedMessageId,
-      "interrupted",
       ctx.state.audioPlaybackTerminalReason || "audio_playback_stopped",
     );
-  } else {
-    ctx.stopActiveAudioTimeline("audio_playback_stopped");
+  } else if (wasPlayingAudio) {
+    console.error(
+      "[Connection] audio playback stopped without segment identity; timeline was not interrupted.",
+      {
+        turnId: interruptedTurnId,
+        messageId: interruptedMessageId,
+      },
+    );
   }
   ctx.state.isPlayingAudio = false;
   ctx.state.audioPlaybackStartedTurnId = null;

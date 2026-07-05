@@ -9,7 +9,7 @@ context:
     - Phase 1 pure timeline logic is complete; Phase 2 now lets audioRuntime create a segment PlaybackTimelineEngine for released audio.
     - Audio timeline integration observes and records real audio playback clock state, but does not yet replace turnPlaybackOrchestrator release decisions.
     - Audio playback is now injected through PlaybackTimelineAudioSink instead of separate start/stop/clock functions, making audio execution a concrete timeline sink boundary.
-    - PlaybackTimelineRuntime now stores timelines by turnId + messageId, while getActiveTimelineSnapshot/stopActiveTimeline remain a compatibility view over the most recently active segment.
+    - PlaybackTimelineRuntime stores timelines only by turnId + messageId; active timeline compatibility APIs and the hidden active segment pointer have been removed.
     - ModelEngine now consumes handlePlaybackTimelineStarted(PlaybackTimelineSnapshot) as the audio-start motion wakeup entry point; the old notifyAudioPlaybackStarted bridge has been removed.
     - Motion release now receives a segment-scoped audio timeline snapshot from PlaybackTimelineRuntime when turnId and messageId match; mismatched timeline snapshots are intentionally hidden from the motion sink.
     - Audio-start delayed motion wakeup now lives in PlaybackTimeline AudioStartMotionTimelineBridge and refreshes the segment-scoped playback timeline snapshot at timer fire time, so ModelEngine does not consume stale currentTimeMs.
@@ -76,7 +76,7 @@ architecture:
     - PreviewMotionPlayer catalog motion playback now exposes started/terminal callbacks with runId, allowing catalog motions to participate in motion timeline terminal tracking.
     - PreviewMotionPlayer stores the active terminal callback and emits a single stopped terminal when playback is explicitly stopped before the Live2D runtime reports completion.
     - AdapterAudioRuntime exposes a motion-only timeline preparation path so no-audio motion segments can still run under PlaybackTimelineEngine with a synthetic clock.
-    - PlaybackTimelineRuntime is the neutral owner for the active segment timeline slot during migration; AdapterAudioRuntime remains the outer audio queue/playback compatibility facade.
+    - PlaybackTimelineRuntime owns segment-scoped timelines during migration; AdapterAudioRuntime remains the outer audio queue/playback compatibility facade.
     - A new PlaybackTimelineLipSyncSink wraps WAV lip sync preload, live WebAudio RMS sampling, external Live2D lip sync writes, and cleanup; it is currently executed through AudioSink, while AdapterAudioRuntime registers lip_sync as an optional PlaybackTimelineEngine sink and records started/failed/completed terminal state.
     - PlaybackTimelineLipSyncRuntime now owns lip-sync started/unavailable/completed/failed settlement, so AudioSink no longer carries the lip-sync terminal state machine directly.
     - PlaybackTimelineEngine ignores late started/terminal events for sinks that are already completed, failed, absent, or interrupted.
@@ -110,6 +110,7 @@ architecture:
     - AdapterAudioRuntime no longer exposes a global active audio timeline snapshot; tests and callers use segment-scoped playback timeline lookup.
     - AdapterAudioRuntime audio queue/release responsibilities are isolated behind an audio queue controller, reducing the runtime facade's direct pending-audio ownership.
     - Audio playback actions now delegate lip-sync lifecycle handling to a playback-timeline audio lip-sync coordinator instead of owning the lip-sync callback wiring inline.
+    - Audio playback stop now interrupts the explicit turnId + messageId playback segment; missing segment identity is surfaced as an error instead of stopping an arbitrary active timeline.
 verification:
   checks_run:
     - npm run test:playback-timeline

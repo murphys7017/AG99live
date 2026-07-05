@@ -104,8 +104,11 @@ export interface PlaybackTimelineRuntime {
     terminal: TimelineTerminal,
     reason: string,
   ) => void;
-  stopActiveTimeline: (reason: string) => void;
-  getActiveTimelineSnapshot: () => PlaybackTimelineSnapshot | null;
+  stopTimelineForSegment: (
+    turnId: string | null,
+    messageId: string,
+    reason: string,
+  ) => void;
   getTimelineSnapshotForSegment: (
     turnId: string | null,
     messageId: string,
@@ -116,7 +119,6 @@ export function createPlaybackTimelineRuntime(
   deps: PlaybackTimelineRuntimeDeps,
 ): PlaybackTimelineRuntime {
   const timelines = new Map<string, PlaybackTimelineEntry>();
-  let activeTimelineKey: string | null = null;
   let segmentExecutionPorts: PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload> | null = null;
 
   function resolveTimelineKey(
@@ -135,26 +137,13 @@ export function createPlaybackTimelineRuntime(
     return timelines.get(resolveTimelineKey(turnId, messageId)) ?? null;
   }
 
-  function setTimelineActive(
+  function setTimeline(
     turnId: string | null,
     messageId: string,
     entry: PlaybackTimelineEntry,
   ): void {
     const key = resolveTimelineKey(turnId, messageId);
     timelines.set(key, entry);
-    activeTimelineKey = key;
-  }
-
-  function getActiveTimeline(): PlaybackTimelineEntry | null {
-    if (!activeTimelineKey) {
-      return null;
-    }
-    const timeline = timelines.get(activeTimelineKey);
-    if (timeline) {
-      return timeline;
-    }
-    activeTimelineKey = null;
-    return null;
   }
 
   function prepareAudioTimeline(
@@ -169,7 +158,6 @@ export function createPlaybackTimelineRuntime(
           required: false,
         });
       }
-      activeTimelineKey = resolveTimelineKey(turnId, messageId);
       return;
     }
     const engine = createPlaybackTimelineEngine();
@@ -180,7 +168,7 @@ export function createPlaybackTimelineRuntime(
         { id: LIP_SYNC_TIMELINE_SINK_ID, required: false },
       ],
     );
-    setTimelineActive(turnId, messageId, {
+    setTimeline(turnId, messageId, {
       turnId,
       messageId,
       engine,
@@ -243,7 +231,7 @@ export function createPlaybackTimelineRuntime(
         { id: MOTION_TIMELINE_SINK_ID, required: true },
       ],
     );
-    setTimelineActive(turnId, messageId, {
+    setTimeline(turnId, messageId, {
       turnId,
       messageId,
       engine,
@@ -273,7 +261,6 @@ export function createPlaybackTimelineRuntime(
     if (!timeline) {
       return;
     }
-    activeTimelineKey = resolveTimelineKey(turnId, messageId);
     const engine = timeline.engine;
     engine.setExpectedDurationMs(durationMs);
     const audioClock = deps.getAudioClock();
@@ -350,7 +337,6 @@ export function createPlaybackTimelineRuntime(
       });
       return;
     }
-    activeTimelineKey = resolveTimelineKey(turnId, messageId);
     const timeline = getTimeline(turnId, messageId);
     if (!timeline) {
       return;
@@ -409,17 +395,17 @@ export function createPlaybackTimelineRuntime(
     clearTimelineIfTerminal(turnId, messageId);
   }
 
-  function stopActiveTimeline(reason: string): void {
-    const activeTimeline = getActiveTimeline();
-    if (!activeTimeline) {
+  function stopTimelineForSegment(
+    turnId: string | null,
+    messageId: string,
+    reason: string,
+  ): void {
+    const timeline = getTimeline(turnId, messageId);
+    if (!timeline) {
       return;
     }
-    activeTimeline.engine.interrupt(reason);
-    clearTimeline(activeTimeline.turnId, activeTimeline.messageId);
-  }
-
-  function getActiveTimelineSnapshot(): PlaybackTimelineSnapshot | null {
-    return getActiveTimeline()?.engine.getSnapshot() ?? null;
+    timeline.engine.interrupt(reason);
+    clearTimeline(turnId, messageId);
   }
 
   function getTimelineSnapshotForSegment(
@@ -448,12 +434,6 @@ export function createPlaybackTimelineRuntime(
   ): void {
     const key = resolveTimelineKey(turnId, messageId);
     timelines.delete(key);
-    if (activeTimelineKey === key) {
-      const remainingKeys = Array.from(timelines.keys());
-      activeTimelineKey = remainingKeys.length > 0
-        ? remainingKeys[remainingKeys.length - 1]
-        : null;
-    }
   }
 
   function isTimelineTerminalPhase(timeline: PlaybackTimelineEntry): boolean {
@@ -475,8 +455,7 @@ export function createPlaybackTimelineRuntime(
     markMotionTimelineStarted,
     markMotionTimelineTerminal,
     markAudioTimelineTerminal,
-    stopActiveTimeline,
-    getActiveTimelineSnapshot,
+    stopTimelineForSegment,
     getTimelineSnapshotForSegment,
   };
 }

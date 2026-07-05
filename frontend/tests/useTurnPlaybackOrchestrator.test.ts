@@ -833,7 +833,7 @@ function testPlaybackTimelineRuntimeMarksMotionOnlyContext(): void {
     { timelineMode: "motion_only" },
   ]);
   assert.equal(
-    runtime.getActiveTimelineSnapshot()
+    runtime.getTimelineSnapshotForSegment("turn-motion-only-job", "msg-motion-only-job")
       ?.sinks.some((sink) => sink.id === "motion" && sink.required),
     true,
   );
@@ -898,7 +898,10 @@ function testPlaybackTimelineRuntimePreparesAudioMotionTimeline(): void {
     "motion_sink",
     "phase:playing",
   ]);
-  const snapshot = runtime.getActiveTimelineSnapshot();
+  const snapshot = runtime.getTimelineSnapshotForSegment(
+    "turn-audio-motion-job",
+    "msg-audio-motion-job",
+  );
   assert.equal(snapshot?.sinks.some((sink) => sink.id === "audio" && sink.required), true);
   assert.equal(snapshot?.sinks.some((sink) => sink.id === "motion" && sink.required), true);
 }
@@ -960,7 +963,13 @@ function testPlaybackTimelineRuntimeDoesNotReleaseMotionWhenAudioReleaseFails():
   assert.deepEqual(events, [
     "audio_sink",
   ]);
-  assert.equal(runtime.getActiveTimelineSnapshot(), null);
+  assert.equal(
+    runtime.getTimelineSnapshotForSegment(
+      "turn-audio-release-failed",
+      "msg-audio-release-failed",
+    ),
+    null,
+  );
 }
 function testPlaybackTimelineRuntimeCreatesMotionOnlyTimelineBesideExistingAudioTimeline(): void {
   const events: string[] = [];
