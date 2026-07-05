@@ -59,18 +59,6 @@ export interface PlaybackTimelineSegmentMotionSink<TMotionPayload = NormalizedMo
   ): boolean | void;
 }
 
-export interface PlaybackTimelineSegmentRuntimePort {
-  prepareSegmentJob(
-    turnId: string | null,
-    messageId: string,
-    options: {
-      hasAudio: boolean;
-      hasMotion: boolean;
-      noAudioConfirmed: boolean;
-    },
-  ): boolean;
-}
-
 export interface PlaybackTimelineSegmentExecutionPorts<
   TMotionPayload = NormalizedMotionPayload,
 > {
@@ -79,13 +67,6 @@ export interface PlaybackTimelineSegmentExecutionPorts<
   audioSink: PlaybackTimelineSegmentAudioSink;
   motionSink: PlaybackTimelineSegmentMotionSink<TMotionPayload>;
 }
-
-export interface PlaybackTimelineSegmentExecutorPorts<
-  TMotionPayload = NormalizedMotionPayload,
-> extends PlaybackTimelineSegmentExecutionPorts<TMotionPayload> {
-  timelineRuntime: PlaybackTimelineSegmentRuntimePort;
-}
-
 export interface PlaybackTimelineSegmentStartPort<
   TMotionPayload = NormalizedMotionPayload,
 > {
@@ -96,110 +77,4 @@ export interface PlaybackTimelineSegmentStartPort<
 
 export interface PlaybackTimelineSegmentRunnerPort<
   TMotionPayload = NormalizedMotionPayload,
-> extends PlaybackTimelineSegmentRuntimePort,
-    PlaybackTimelineSegmentStartPort<TMotionPayload> {}
-
-export function executePlaybackTimelineSegmentJob<
-  TMotionPayload = NormalizedMotionPayload,
->(
-  job: PlaybackTimelineSegmentJob<TMotionPayload>,
-  ports: PlaybackTimelineSegmentExecutorPorts<TMotionPayload>,
-): PlaybackTimelineSegmentExecutionResult {
-  let releasedText = false;
-  if (job.text.release) {
-    releasedText = ports.textSink.releaseAssistantTextForPlayback(
-      job.messageId,
-      job.turnId,
-    );
-  }
-  if (releasedText) {
-    ports.session.markTextReleased(job.turnId, job.messageId);
-    ports.session.markPhase(job.turnId, "playing");
-  }
-
-  let releasedAudio = false;
-  if (job.audio.release) {
-    releasedAudio = ports.audioSink.releaseAudioForPlayback(
-      job.messageId,
-      job.turnId,
-    );
-  }
-  if (releasedAudio) {
-    ports.session.markAudioReleased(job.turnId, job.messageId);
-    const prepared = ports.timelineRuntime.prepareSegmentJob(
-      job.turnId,
-      job.messageId,
-      {
-        hasAudio: true,
-        hasMotion: job.motion.payload !== null,
-        noAudioConfirmed: false,
-      },
-    );
-    if (!prepared) {
-      throw new Error("Playback timeline segment preparation failed.");
-    }
-  }
-
-  let releasedMotion = false;
-  if (job.motion.payload !== null) {
-    const receivedAtMs = job.motion.receivedAtMs;
-    if (
-      receivedAtMs === null
-      || !Number.isFinite(receivedAtMs)
-      || receivedAtMs < 0
-    ) {
-      throw new Error("Motion segment release requires a valid receivedAtMs.");
-    }
-    const timelineMode = job.audio.noAudioConfirmed && !job.audio.release
-      ? "motion_only"
-      : "audio";
-    if (!releasedAudio && timelineMode === "motion_only") {
-      const prepared = ports.timelineRuntime.prepareSegmentJob(
-        job.turnId,
-        job.messageId,
-        {
-          hasAudio: false,
-          hasMotion: true,
-          noAudioConfirmed: true,
-        },
-      );
-      if (!prepared) {
-        ports.session.markMotionFailed(
-          job.turnId,
-          job.messageId,
-          "motion_only_timeline_unavailable",
-        );
-        return {
-          releasedText,
-          releasedAudio,
-          releasedMotion: false,
-        };
-      }
-    }
-    ports.session.markMotionReleased(job.turnId, job.messageId);
-    const accepted = ports.motionSink.start(
-      job.motion.payload,
-      {
-        turnId: job.turnId,
-        messageId: job.messageId,
-        receivedAtMs,
-        timelineMode,
-      },
-    );
-    releasedMotion = accepted !== false;
-    if (accepted === false) {
-      ports.session.markMotionFailed(
-        job.turnId,
-        job.messageId,
-        "motion_payload_rejected",
-      );
-    }
-    ports.session.markPhase(job.turnId, "playing");
-  }
-
-  return {
-    releasedText,
-    releasedAudio,
-    releasedMotion,
-  };
-}
+> extends PlaybackTimelineSegmentStartPort<TMotionPayload> {}
