@@ -25,7 +25,6 @@ function makeEnvelope<TPayload>(
 function defaultContext() {
   return {
     currentTurnId: "current-turn",
-    activeAudioTurnId: "audio-turn",
   };
 }
 
@@ -112,7 +111,7 @@ function testOutputAudioRequiresTurnId(): void {
   assert.equal(event.error.path, "turn_id");
 }
 
-function testTurnFinishedFallsBackToCurrentIdentity(): void {
+function testTurnFinishedWithoutTurnIdIsRejected(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("control.turn_finished", {
       success: true,
@@ -123,12 +122,11 @@ function testTurnFinishedFallsBackToCurrentIdentity(): void {
     defaultContext(),
   );
 
-  assert.equal(event.kind, "turn_finished");
-  if (event.kind !== "turn_finished") {
-    throw new Error("expected turn_finished event");
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
   }
-  assert.equal(event.turnId, "current-turn");
-  assert.equal(event.reason, "done");
+  assert.equal(event.error.path, "turn_id");
 }
 
 function testTurnStartedDoesNotInheritCurrentIdentity(): void {
@@ -161,7 +159,7 @@ function testInterruptUsesEnvelopeIdentity(): void {
   assert.equal(event.turnId, "target-turn");
 }
 
-function testInterruptFallsBackToActiveAudioIdentity(): void {
+function testInterruptWithoutTurnIdIsRejected(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("control.interrupt", {}, {
       turnId: null,
@@ -169,11 +167,26 @@ function testInterruptFallsBackToActiveAudioIdentity(): void {
     defaultContext(),
   );
 
-  assert.equal(event.kind, "interrupt");
-  if (event.kind !== "interrupt") {
-    throw new Error("expected interrupt event");
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
   }
-  assert.equal(event.turnId, "audio-turn");
+  assert.equal(event.error.path, "turn_id");
+}
+
+function testSynthFinishedWithoutTurnIdIsRejected(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("control.synth_finished", {}, {
+      turnId: null,
+    }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
+  }
+  assert.equal(event.error.path, "turn_id");
 }
 
 function testEngineMotionRequiresTurnId(): void {
@@ -519,10 +532,11 @@ function run(): void {
   testOutputAudioUsesEnvelopeIdentity();
   testOutputTextRequiresTurnId();
   testOutputAudioRequiresTurnId();
-  testTurnFinishedFallsBackToCurrentIdentity();
+  testTurnFinishedWithoutTurnIdIsRejected();
   testTurnStartedDoesNotInheritCurrentIdentity();
   testInterruptUsesEnvelopeIdentity();
-  testInterruptFallsBackToActiveAudioIdentity();
+  testInterruptWithoutTurnIdIsRejected();
+  testSynthFinishedWithoutTurnIdIsRejected();
   testEngineMotionRequiresTurnId();
   testEngineCatalogMotionMapsAsMotionPayload();
   testEngineMotionPreviewDoesNotRequireSegmentMessageId();

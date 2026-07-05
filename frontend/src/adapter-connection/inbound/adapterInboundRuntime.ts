@@ -106,10 +106,8 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
   }
 
   function buildInboundEventContext(): InboundEventMappingContext {
-    const activeAudioSegment = deps.findActiveAudioSegment();
     return {
       currentTurnId: deps.state.currentTurnId,
-      activeAudioTurnId: activeAudioSegment?.turnId ?? null,
     };
   }
 

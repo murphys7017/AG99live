@@ -171,11 +171,7 @@ function applyInterrupt(
   event: Extract<InboundAdapterEvent, { kind: "interrupt" }>,
 ): void {
   const s = deps.state;
-  const interruptedTurnId =
-    event.turnId
-    ?? s.audioPlaybackStartedTurnId
-    ?? s.currentTurnId
-    ?? null;
+  const interruptedTurnId = event.turnId;
   deps.stopAudioAndSettleTurn(interruptedTurnId, "audio_playback_interrupted");
   deps.resetAudioPlaybackTerminal();
   deletePendingItemsForTurn(s.pendingAssistantTexts, interruptedTurnId);

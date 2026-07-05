@@ -6,8 +6,7 @@
  *   - 调用 inboundPayloads.* 做 payload 形状校验，失败返回 protocol_error 事件；
  *   - 把 turn_id 规范化（空串和非字符串都视为 null），并按事件类别选择归属；
  *   - segment 输出类与正式动作类事件强制要求非空 message_id/turn_id，缺失时返回 protocol_error；
- *   - turn_finished/synth_finished 是 turn 控制信号，可回落到 currentTurnId；
- *   - interrupt 是控制信号，优先回落到 activeAudioTurnId；
+ *   - turn_finished/synth_finished/interrupt 必须携带明确 turn_id，缺失时返回 protocol_error；
  *   - 未识别 envelope.type 返回 unhandled，由 dispatcher 走 diagnostics 上报。
  *
  * 自身不读写任何状态，也不调用副作用；纯函数式折叠，方便单元测试与缓冲重放。
@@ -52,13 +51,11 @@ import {
 } from "./inboundPayloads.js";
 
 /**
- * 映射上下文：折叠时给缺失 turn_id 的事件提供现场归属候选。
- * 具体 fallback 顺序由每类事件自己决定，不在上下文层统一指定。
+ * 映射上下文：折叠时提供当前运行现场；不为 segment/control 事件补缺失身份。
  * 由 createAdapterInboundRuntime 在每次折叠前现场快照构造，不由本文件持有状态。
  */
 export interface InboundEventMappingContext {
   currentTurnId: string | null;
-  activeAudioTurnId: string | null;
 }
 
 function normalizeTurnId(value: unknown): string | null {
@@ -67,13 +64,6 @@ function normalizeTurnId(value: unknown): string | null {
   }
   const normalized = value.trim();
   return normalized || null;
-}
-
-function resolveCurrentTurnIdentity(
-  value: unknown,
-  fallback: string | null,
-): string | null {
-  return normalizeTurnId(value) ?? fallback;
 }
 
 function normalizeMessageId(value: unknown): string | null {
@@ -209,7 +199,7 @@ export type InboundAdapterEvent =
  */
 export function mapInboundEnvelopeToEvent(
   envelope: ProtocolEnvelope<unknown>,
-  ctx: InboundEventMappingContext,
+  _ctx: InboundEventMappingContext,
 ): InboundAdapterEvent {
   switch (envelope.type) {
     case INBOUND_MESSAGE_TYPES.SYSTEM_SERVER_INFO: {
@@ -385,34 +375,47 @@ export function mapInboundEnvelopeToEvent(
         return protocolPayloadError(envelope, parsed.error);
       }
       const payload = parsed.payload;
+      const turnId = requireSegmentTurnId(envelope);
+      if (!turnId.ok) {
+        return turnId.event;
+      }
       return {
         kind: "turn_finished",
-        turnId: resolveCurrentTurnIdentity(envelope.turn_id, ctx.currentTurnId),
+        turnId: turnId.turnId,
         success: Boolean(payload.success),
         reason: payload.reason?.trim() ?? "",
         envelope: withPayload(envelope, payload),
       };
     }
     case INBOUND_MESSAGE_TYPES.CONTROL_INTERRUPT:
-      return {
-        kind: "interrupt",
-        turnId:
-          normalizeTurnId(envelope.turn_id)
-          ?? ctx.activeAudioTurnId
-          ?? ctx.currentTurnId,
-        envelope,
-      };
+      {
+        const turnId = requireSegmentTurnId(envelope);
+        if (!turnId.ok) {
+          return turnId.event;
+        }
+        return {
+          kind: "interrupt",
+          turnId: turnId.turnId,
+          envelope,
+        };
+      }
     case INBOUND_MESSAGE_TYPES.CONTROL_START_MIC:
       return {
         kind: "start_mic",
         envelope,
       };
     case INBOUND_MESSAGE_TYPES.CONTROL_SYNTH_FINISHED:
-      return {
-        kind: "synth_finished",
-        turnId: resolveCurrentTurnIdentity(envelope.turn_id, ctx.currentTurnId),
-        envelope,
-      };
+      {
+        const turnId = requireSegmentTurnId(envelope);
+        if (!turnId.ok) {
+          return turnId.event;
+        }
+        return {
+          kind: "synth_finished",
+          turnId: turnId.turnId,
+          envelope,
+        };
+      }
     case INBOUND_MESSAGE_TYPES.CONTROL_ERROR: {
       const parsed = parseControlErrorPayload(envelope);
       if (!parsed.ok) {

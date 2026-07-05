@@ -618,7 +618,7 @@ function testSynthFinishedMarksMissingSegmentAudioAbsent(): void {
       version: "v2",
       message_id: "m-synth-finished",
       timestamp: "2026-05-08T00:00:02.000Z",
-      turn_id: null,
+      turn_id: "turn-synth-finished",
       source: "backend",
       payload: {},
     }));
@@ -678,7 +678,7 @@ async function testLateAudioAfterSynthFinishedStillPlaysOnce(): Promise<void> {
       payload: { text: "late audio", speaker_name: "assistant", avatar: "" },
     }));
 
-    sendSynthFinished(socket, null, "synth-late-audio");
+    sendSynthFinished(socket, "turn-late-audio", "synth-late-audio");
     await flushMicrotasks();
 
     const beforeAudio = sessionStore.getSession("turn-late-audio")?.segments.get("msg-late-audio");
@@ -849,7 +849,7 @@ function testTurnFinishedDoesNotMarkMissingSegmentAudioAbsent(): void {
       version: "v2",
       message_id: "m-turn-finished",
       timestamp: "2026-05-08T00:00:02.000Z",
-      turn_id: null,
+      turn_id: "turn-finished",
       source: "backend",
       payload: { success: true },
     }));
