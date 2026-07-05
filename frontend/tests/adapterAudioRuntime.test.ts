@@ -35,21 +35,41 @@ function buildLipSyncRuntimeFactory(options: {
   startOnResume?: boolean;
   onResume?: (callbacks: PlaybackTimelineLipSyncRuntimeCallbacks) => void;
 } = {}) {
-  return (callbacks: PlaybackTimelineLipSyncRuntimeCallbacks) => ({
-    attachAudio: () => {},
-    resume: async () => {
-      if (options.startOnResume !== false) {
-        callbacks.onStarted?.();
-      }
-      options.onResume?.(callbacks);
-    },
-    completeAfterAudioEnded: () => {
-      callbacks.onTerminal?.("completed", "audio_playback_completed");
-    },
-    failAfterAudioError: () => {
-      callbacks.onTerminal?.("failed", "audio_playback_error");
-    },
-    stop: () => {},
+  return (callbacks: PlaybackTimelineLipSyncRuntimeCallbacks) => {
+    let attached = false;
+    return {
+      attachAudio: () => {
+        attached = true;
+      },
+      resume: async () => {
+        if (!attached) {
+          return;
+        }
+        if (options.startOnResume !== false) {
+          callbacks.onStarted?.();
+        }
+        options.onResume?.(callbacks);
+      },
+      completeAfterAudioEnded: () => {
+        callbacks.onTerminal?.("completed", "audio_playback_completed");
+      },
+      failAfterAudioError: () => {
+        callbacks.onTerminal?.("failed", "audio_playback_error");
+      },
+      stop: () => {},
+    };
+  };
+}
+
+function emitFakeAudioElementCreated(
+  callbacks: PlaybackTimelineAudioStartCallbacks,
+  audioUrl = "http://127.0.0.1/audio.wav",
+): void {
+  callbacks.onAudioElementCreated?.({
+    audioUrl,
+    audio: {} as HTMLAudioElement,
+    getAudioCurrentTimeSeconds: () => 0,
+    isCurrentAudio: () => true,
   });
 }
 
@@ -77,7 +97,8 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
   const runtime = createAdapterAudioRuntime({
     state,
     audioSink: buildAudioSink({
-      start: async (_url, callbacks) => {
+      start: async (url, callbacks) => {
+        emitFakeAudioElementCreated(callbacks, url);
         startOptionsRef.current = callbacks;
         callbacks.onDurationChanged?.(1250);
         callbacks.onPlaybackStarted?.({
@@ -140,7 +161,8 @@ async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
   const runtime = createAdapterAudioRuntime({
     state,
     audioSink: buildAudioSink({
-      start: async (_url, callbacks) => {
+      start: async (url, callbacks) => {
+        emitFakeAudioElementCreated(callbacks, url);
         startOptionsRef.current = callbacks;
         callbacks.onDurationChanged?.(900);
         callbacks.onPlaybackStarted?.({
@@ -177,7 +199,8 @@ async function testLipSyncFailureRemainsVisibleUntilAudioCompletes(): Promise<vo
   const runtime = createAdapterAudioRuntime({
     state,
     audioSink: buildAudioSink({
-      start: async (_url, callbacks) => {
+      start: async (url, callbacks) => {
+        emitFakeAudioElementCreated(callbacks, url);
         callbacks.onPlaybackStarted?.({
           startedAtMs: 80,
           durationMs: 1000,
@@ -249,7 +272,8 @@ async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise
   const runtime = createAdapterAudioRuntime({
     state,
     audioSink: buildAudioSink({
-      start: async (_url, callbacks) => {
+      start: async (url, callbacks) => {
+        emitFakeAudioElementCreated(callbacks, url);
         callbacks.onPlaybackStarted?.({
           startedAtMs: 100,
           durationMs: 1000,
@@ -303,7 +327,8 @@ async function testMotionSinkKeepsTimelineOpenAfterAudioCompletes(): Promise<voi
   const runtime = createAdapterAudioRuntime({
     state,
     audioSink: buildAudioSink({
-      start: async (_url, callbacks) => {
+      start: async (url, callbacks) => {
+        emitFakeAudioElementCreated(callbacks, url);
         startOptionsRef.current = callbacks;
         callbacks.onDurationChanged?.(900);
         callbacks.onPlaybackStarted?.({

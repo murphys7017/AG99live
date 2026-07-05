@@ -132,7 +132,6 @@ async function testBrowserAudioSinkDoesNotOwnLipSyncCallbacks(): Promise<void> {
   (globalThis as { Audio?: unknown }).Audio = FakeAudio;
   FakeAudio.instances.length = 0;
 
-  const terminalEvents: string[] = [];
   let audioElementCreated = false;
   try {
     const audioSink = createBrowserAudioTimelineSink();
@@ -145,7 +144,6 @@ async function testBrowserAudioSinkDoesNotOwnLipSyncCallbacks(): Promise<void> {
     FakeAudio.instances[0].emit("ended");
 
     assert.equal(audioElementCreated, true);
-    assert.deepEqual(terminalEvents, []);
   } finally {
     (globalThis as { window?: unknown }).window = originalWindow;
     (globalThis as { Audio?: unknown }).Audio = originalAudio;
