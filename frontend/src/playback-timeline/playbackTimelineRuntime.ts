@@ -225,6 +225,18 @@ export function createPlaybackTimelineRuntime(
         throw new Error("Playback timeline segment preparation failed.");
       }
     }
+    if (
+      job.audio.release
+      && !releasedAudio
+      && job.motion.payload !== null
+      && !job.audio.noAudioConfirmed
+    ) {
+      return {
+        releasedText,
+        releasedAudio,
+        releasedMotion: false,
+      };
+    }
 
     let releasedMotion = false;
     if (job.motion.payload !== null) {
@@ -272,7 +284,7 @@ export function createPlaybackTimelineRuntime(
           timelineMode,
         },
       );
-      releasedMotion = accepted !== false;
+      releasedMotion = true;
       if (accepted === false) {
         segmentExecutionPorts.session.markMotionFailed(
           job.turnId,

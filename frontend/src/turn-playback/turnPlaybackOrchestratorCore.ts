@@ -193,11 +193,6 @@ export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
     ) {
       throw new Error("Motion segment release requires a valid receivedAtMs.");
     }
-    if (optionsForJob.releaseMotion) {
-      group.motionPayload = null;
-      group.motionReady = false;
-    }
-
     const result = options.releaseSegment({
       messageId: group.messageId,
       turnId: group.turnId,
@@ -217,6 +212,10 @@ export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
     group.textReleased = group.textReleased || result.releasedText;
     if (optionsForJob.releaseAudio) {
       group.audioReady = !result.releasedAudio;
+    }
+    if (result.releasedMotion) {
+      group.motionPayload = null;
+      group.motionReady = false;
     }
     if (motionPayload !== null) {
       log("motion released", {

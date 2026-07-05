@@ -903,6 +903,65 @@ function testPlaybackTimelineRuntimePreparesAudioMotionTimeline(): void {
   assert.equal(snapshot?.sinks.some((sink) => sink.id === "motion" && sink.required), true);
 }
 
+
+function testPlaybackTimelineRuntimeDoesNotReleaseMotionWhenAudioReleaseFails(): void {
+  const events: string[] = [];
+  const runtime = createRuntimeWithExecutionPorts({
+    session: {
+      markTextReleased: () => events.push("text_released"),
+      markAudioReleased: () => events.push("audio_released"),
+      markMotionReleased: () => events.push("motion_released"),
+      markMotionFailed: (_turnId, _messageId, reason) =>
+        events.push(`motion_failed:${reason ?? ""}`),
+      markPhase: (_turnId, phase) => {
+        events.push(`phase:${phase}`);
+        return true;
+      },
+    },
+    textSink: {
+      releaseAssistantTextForPlayback: () => true,
+    },
+    audioSink: {
+      releaseAudioForPlayback: () => {
+        events.push("audio_sink");
+        return false;
+      },
+    },
+    motionSink: {
+      start: () => {
+        events.push("motion_sink");
+        return true;
+      },
+    },
+  });
+
+  const result = runtime.startSegmentJob({
+    messageId: "msg-audio-release-failed",
+    turnId: "turn-audio-release-failed",
+    reason: "test",
+    text: {
+      release: false,
+    },
+    audio: {
+      release: true,
+      noAudioConfirmed: false,
+    },
+    motion: {
+      payload: motionPayload,
+      receivedAtMs: 123,
+    },
+  });
+
+  assert.deepEqual(result, {
+    releasedText: false,
+    releasedAudio: false,
+    releasedMotion: false,
+  });
+  assert.deepEqual(events, [
+    "audio_sink",
+  ]);
+  assert.equal(runtime.getActiveTimelineSnapshot(), null);
+}
 function testPlaybackTimelineRuntimeFailsMotionOnlyTimelinePreparation(): void {
   const events: string[] = [];
   const runtime = createRuntimeWithExecutionPorts({
@@ -976,6 +1035,7 @@ async function run(): Promise<void> {
   testPlaybackTimelineRuntimeRejectsInvalidMotionTimestamp();
   testPlaybackTimelineRuntimeMarksMotionOnlyContext();
   testPlaybackTimelineRuntimePreparesAudioMotionTimeline();
+  testPlaybackTimelineRuntimeDoesNotReleaseMotionWhenAudioReleaseFails();
   testPlaybackTimelineRuntimeFailsMotionOnlyTimelinePreparation();
   console.log("useTurnPlaybackOrchestrator tests passed");
 }

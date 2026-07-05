@@ -156,16 +156,20 @@ function testAudioReleaseFailureKeepsGroupRetryable(): void {
       if (job.audio.release) {
         events.push(`audio:${job.messageId}`);
       }
+      if (job.motion.payload !== null) {
+        events.push(`motion:${String(job.motion.payload)}:${job.messageId}`);
+      }
       return {
         releasedText: job.text.release,
         releasedAudio: false,
-        releasedMotion: job.motion.payload !== null,
+        releasedMotion: false,
       };
     },
   });
 
   core.markTextReady("msg-1", "turn-1");
   core.markAudioReady("msg-1", "turn-1");
+  core.markMotionReady("msg-1", "turn-1", "motion-1", 42);
   nowMs = AUDIO_MOTION_SYNC_WAIT_MS;
   core.flush();
   core.flush();
@@ -173,7 +177,11 @@ function testAudioReleaseFailureKeepsGroupRetryable(): void {
   assert.deepEqual(events, [
     "text:msg-1",
     "audio:msg-1",
+    "motion:motion-1:msg-1",
     "audio:msg-1",
+    "motion:motion-1:msg-1",
+    "audio:msg-1",
+    "motion:motion-1:msg-1",
   ]);
 }
 
