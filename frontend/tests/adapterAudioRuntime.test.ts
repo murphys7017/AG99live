@@ -5,6 +5,9 @@ import type {
   PlaybackTimelineAudioStartCallbacks,
 } from "../src/playback-timeline/audioSink.js";
 import type { AudioPlaybackClock } from "../src/playback-timeline/contracts.js";
+import type {
+  PlaybackTimelineLipSyncRuntimeCallbacks,
+} from "../src/playback-timeline/lipSyncSink.js";
 
 function buildState() {
   return {
@@ -26,6 +29,28 @@ function buildState() {
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
+}
+
+function buildLipSyncRuntimeFactory(options: {
+  startOnResume?: boolean;
+  onResume?: (callbacks: PlaybackTimelineLipSyncRuntimeCallbacks) => void;
+} = {}) {
+  return (callbacks: PlaybackTimelineLipSyncRuntimeCallbacks) => ({
+    attachAudio: () => {},
+    resume: async () => {
+      if (options.startOnResume !== false) {
+        callbacks.onStarted?.();
+      }
+      options.onResume?.(callbacks);
+    },
+    completeAfterAudioEnded: () => {
+      callbacks.onTerminal?.("completed", "audio_playback_completed");
+    },
+    failAfterAudioError: () => {
+      callbacks.onTerminal?.("failed", "audio_playback_error");
+    },
+    stop: () => {},
+  });
 }
 
 function buildAudioSink(options: {
@@ -59,7 +84,6 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
           startedAtMs: 100,
           durationMs: 1250,
         });
-        callbacks.lipSync?.onStarted?.();
       },
       getClock: () => ({
         getCurrentTimeMs: () => 320,
@@ -70,6 +94,7 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
     }),
     pushHistory: () => {},
     getSessionStore: () => undefined,
+    createLipSyncRuntime: buildLipSyncRuntimeFactory(),
     onAudioTimelineStarted: (turnId, messageId, playbackTimeline) => {
       audioTimelineStarted.push({
         turnId,
@@ -122,7 +147,6 @@ async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
           startedAtMs: 50,
           durationMs: 900,
         });
-        callbacks.lipSync?.onStarted?.();
       },
       getClock: () => ({
         getCurrentTimeMs: () => 900,
@@ -133,6 +157,7 @@ async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
     }),
     pushHistory: () => {},
     getSessionStore: () => undefined,
+    createLipSyncRuntime: buildLipSyncRuntimeFactory(),
   });
 
   runtime.queueAudioForPlayback("http://127.0.0.1/audio.wav", "turn-2", "msg-2");
@@ -142,7 +167,6 @@ async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
 
   const options = startOptionsRef.current;
   assert.ok(options);
-  options.lipSync?.onTerminal?.("completed", "audio_playback_completed");
   options.onEnded?.();
 
   assert.equal(runtime.getActiveAudioTimelineSnapshot(), null);
@@ -158,8 +182,6 @@ async function testLipSyncFailureRemainsVisibleUntilAudioCompletes(): Promise<vo
           startedAtMs: 80,
           durationMs: 1000,
         });
-        callbacks.lipSync?.onTerminal?.("failed", "lip_sync_unavailable");
-        callbacks.lipSync?.onTerminal?.("completed", "audio_playback_completed");
       },
       getClock: () => ({
         getCurrentTimeMs: () => 100,
@@ -170,6 +192,13 @@ async function testLipSyncFailureRemainsVisibleUntilAudioCompletes(): Promise<vo
     }),
     pushHistory: () => {},
     getSessionStore: () => undefined,
+    createLipSyncRuntime: buildLipSyncRuntimeFactory({
+      startOnResume: false,
+      onResume: (callbacks) => {
+        callbacks.onTerminal?.("failed", "lip_sync_unavailable");
+        callbacks.onTerminal?.("completed", "audio_playback_completed");
+      },
+    }),
   });
 
   runtime.queueAudioForPlayback("http://127.0.0.1/audio.wav", "turn-lip", "msg-lip");
@@ -193,6 +222,7 @@ async function testAudioTimelineInterruptsPreparedAudioOnStopAll(): Promise<void
     }),
     pushHistory: () => {},
     getSessionStore: () => undefined,
+    createLipSyncRuntime: buildLipSyncRuntimeFactory(),
   });
 
   void runtime.playAudioAndAcknowledge(
@@ -228,6 +258,7 @@ async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise
       },
     }),
     pushHistory: () => {},
+    createLipSyncRuntime: buildLipSyncRuntimeFactory(),
     getSessionStore: () => ({
       markAudioStarted: () => {},
       markAudioDuration: () => {},
@@ -289,6 +320,7 @@ async function testMotionSinkKeepsTimelineOpenAfterAudioCompletes(): Promise<voi
     }),
     pushHistory: () => {},
     getSessionStore: () => undefined,
+    createLipSyncRuntime: buildLipSyncRuntimeFactory(),
   });
 
   runtime.queueAudioForPlayback("http://127.0.0.1/audio.wav", "turn-motion", "msg-motion");
@@ -324,6 +356,7 @@ async function testMotionOnlyTimelineUsesSyntheticClock(): Promise<void> {
     }),
     pushHistory: () => {},
     getSessionStore: () => undefined,
+    createLipSyncRuntime: buildLipSyncRuntimeFactory(),
   });
 
   let snapshot = runtime.prepareMotionOnlyTimeline("turn-motion-only", "msg-motion-only");

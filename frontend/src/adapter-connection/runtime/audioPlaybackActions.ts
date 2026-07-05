@@ -1,4 +1,11 @@
-import type { PlaybackTimelineAudioSink } from "../../playback-timeline/audioSink.js";
+import type {
+  PlaybackTimelineAudioElementContext,
+  PlaybackTimelineAudioSink,
+} from "../../playback-timeline/audioSink.js";
+import type {
+  PlaybackTimelineLipSyncRuntime,
+  PlaybackTimelineLipSyncRuntimeCallbacks,
+} from "../../playback-timeline/lipSyncSink.js";
 
 export interface AudioPlaybackState {
   isPlayingAudio: boolean;
@@ -29,6 +36,10 @@ export interface AudioPlaybackSessionStore {
 export interface AudioPlaybackContext {
   state: AudioPlaybackState;
   audioSink: PlaybackTimelineAudioSink;
+  createLipSyncRuntime: (
+    callbacks: PlaybackTimelineLipSyncRuntimeCallbacks,
+  ) => PlaybackTimelineLipSyncRuntime;
+  stopLipSyncRuntime: () => void;
   prepareAudioTimeline: (turnId: string | null, messageId: string) => void;
   markAudioTimelineDuration: (
     turnId: string | null,
@@ -86,26 +97,38 @@ export async function playAudioAndAcknowledge(
   ctx.state.statusMessage = "收到语音回复，正在播放。";
   ctx.pushHistory("system", ctx.state.statusMessage);
 
+  const lipSyncRuntime = ctx.createLipSyncRuntime({
+    onUnavailable: () => {
+      ctx.pushHistory("system", "嘴型同步加载失败，音频播放将无对应张嘴动作。");
+    },
+    onStarted: () => {
+      ctx.markLipSyncTimelineStarted(
+        turnId,
+        messageId,
+      );
+    },
+    onTerminal: (terminal, reason) => {
+      ctx.markLipSyncTimelineTerminal(
+        turnId,
+        messageId,
+        terminal,
+        reason,
+      );
+    },
+  });
+
   try {
     await ctx.audioSink.start(audioUrl, {
-      lipSync: {
-        onUnavailable: () => {
-          ctx.pushHistory("system", "嘴型同步加载失败，音频播放将无对应张嘴动作。");
-        },
-        onStarted: () => {
-          ctx.markLipSyncTimelineStarted(
-            turnId,
-            messageId,
-          );
-        },
-        onTerminal: (terminal, reason) => {
-          ctx.markLipSyncTimelineTerminal(
-            turnId,
-            messageId,
-            terminal,
-            reason,
-          );
-        },
+      onAudioElementCreated: (event: PlaybackTimelineAudioElementContext) => {
+        lipSyncRuntime.attachAudio({
+          audioUrl: event.audioUrl,
+          audio: event.audio,
+          getAudioCurrentTimeSeconds: event.getAudioCurrentTimeSeconds,
+          isCurrentAudio: event.isCurrentAudio,
+        });
+      },
+      onAudioElementDisposed: () => {
+        lipSyncRuntime.stop();
       },
       onDurationChanged: (durationMs) => {
         ctx.state.audioPlaybackDurationMs = durationMs;
@@ -121,6 +144,7 @@ export async function playAudioAndAcknowledge(
         );
       },
       onPlaybackStarted: (event) => {
+        void lipSyncRuntime.resume();
         ctx.state.audioPlaybackStartedTurnId = turnId;
         ctx.state.audioPlaybackStartedMessageId = messageId;
         ctx.state.audioPlaybackStartedAtMs = event.startedAtMs;
@@ -151,6 +175,7 @@ export async function playAudioAndAcknowledge(
         ctx.state.audioPlaybackStartedMessageId = null;
         ctx.state.audioPlaybackStartedAtMs = 0;
         ctx.state.audioPlaybackDurationMs = null;
+        lipSyncRuntime.completeAfterAudioEnded();
         ctx.markTerminal(
           "completed",
           completedTurnId,
@@ -173,6 +198,7 @@ export async function playAudioAndAcknowledge(
         ctx.state.audioPlaybackStartedAtMs = 0;
         ctx.state.audioPlaybackDurationMs = null;
         ctx.pushHistory("error", "音频播放失败。");
+        lipSyncRuntime.failAfterAudioError();
         ctx.markTerminal(
           "failed",
           failedTurnId,
@@ -197,6 +223,7 @@ export async function playAudioAndAcknowledge(
       error instanceof Error ? error.message : "浏览器拒绝自动播放语音。";
     ctx.state.statusMessage = "语音播放失败，已回传结束状态。";
     ctx.pushHistory("error", ctx.state.statusMessage);
+    lipSyncRuntime.failAfterAudioError();
     ctx.markTerminal(
       "failed",
       turnId,
@@ -217,6 +244,7 @@ export function stopAudioPlayback(ctx: AudioPlaybackContext): void {
   const interruptedMessageId = ctx.state.audioPlaybackStartedMessageId;
   const shouldMarkInterruptedTerminal =
     ctx.state.audioPlaybackTerminalState === "idle";
+  ctx.stopLipSyncRuntime();
   ctx.audioSink.stop();
   if (interruptedMessageId && shouldMarkInterruptedTerminal) {
     ctx.markTerminal(

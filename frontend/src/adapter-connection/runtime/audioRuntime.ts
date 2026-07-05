@@ -1,4 +1,10 @@
 import type { PlaybackTimelineAudioSink } from "../../playback-timeline/audioSink.js";
+import {
+  createBrowserLipSyncTimelineSink,
+  createPlaybackTimelineLipSyncRuntime,
+  type PlaybackTimelineLipSyncRuntime,
+  type PlaybackTimelineLipSyncRuntimeCallbacks,
+} from "../../playback-timeline/lipSyncSink.js";
 import type {
   PlaybackTimelineSnapshot,
 } from "../../playback-timeline/contracts.js";
@@ -84,6 +90,9 @@ export interface AdapterAudioRuntimeDeps {
   audioSink: PlaybackTimelineAudioSink;
   pushHistory: (role: string, text: string) => void;
   getSessionStore: () => AdapterAudioRuntimeSessionStore | undefined;
+  createLipSyncRuntime?: (
+    callbacks: PlaybackTimelineLipSyncRuntimeCallbacks,
+  ) => PlaybackTimelineLipSyncRuntime;
   onAudioTimelineStarted?: (
     turnId: string | null,
     messageId: string,
@@ -157,6 +166,22 @@ export interface AdapterAudioRuntime {
 export function createAdapterAudioRuntime(
   deps: AdapterAudioRuntimeDeps,
 ): AdapterAudioRuntime {
+  const browserLipSyncSink = createBrowserLipSyncTimelineSink();
+  let activeLipSyncRuntime: PlaybackTimelineLipSyncRuntime | null = null;
+  const createLipSyncRuntime = (
+    callbacks: PlaybackTimelineLipSyncRuntimeCallbacks,
+  ): PlaybackTimelineLipSyncRuntime => {
+    activeLipSyncRuntime?.stop();
+    const runtime = deps.createLipSyncRuntime
+      ? deps.createLipSyncRuntime(callbacks)
+      : createPlaybackTimelineLipSyncRuntime(browserLipSyncSink, callbacks);
+    activeLipSyncRuntime = runtime;
+    return runtime;
+  };
+  const stopLipSyncRuntime = (): void => {
+    activeLipSyncRuntime?.stop();
+    activeLipSyncRuntime = null;
+  };
   const playbackTimelineRuntime = createPlaybackTimelineRuntime({
     getAudioClock: () => deps.audioSink.getClock(),
     onAudioTimelineStarted: deps.onAudioTimelineStarted,
@@ -205,6 +230,8 @@ export function createAdapterAudioRuntime(
       return deps.state;
     },
     audioSink: deps.audioSink,
+    createLipSyncRuntime,
+    stopLipSyncRuntime,
     prepareAudioTimeline,
     markAudioTimelineDuration,
     markAudioTimelineStarted,
