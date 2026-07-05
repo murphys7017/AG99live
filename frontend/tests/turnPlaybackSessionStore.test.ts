@@ -280,8 +280,31 @@ function testInterruptMarksSessionFailed(): void {
 
 function testInterruptDoesNotCreateNewSession(): void {
   const store = useTurnPlaybackSessionStore();
-  store.markInterrupt("turn-nonexistent");
+  assert.throws(
+    () => store.markInterrupt("turn-nonexistent"),
+    /Turn playback session does not exist/,
+  );
   assert.equal(store.getSessions().length, 0);
+}
+
+function testInterruptTargetsRequestedSession(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.setActiveSession("turn-active");
+  store.markTurnStarted("turn-active");
+  store.markPhase("turn-active", "ready");
+  store.markPhase("turn-active", "playing");
+  store.setActiveSession("turn-target");
+  store.markTurnStarted("turn-target");
+  store.markPhase("turn-target", "ready");
+  store.markPhase("turn-target", "playing");
+  store.setActiveSession("turn-active");
+
+  store.markInterrupt("turn-target");
+
+  assert.equal(store.getSession("turn-target")?.interrupted, true);
+  assert.equal(store.getSession("turn-target")?.phase, "failed");
+  assert.equal(store.getSession("turn-active")?.interrupted, false);
+  assert.equal(store.getSession("turn-active")?.phase, "playing");
 }
 
 function testAudioTerminalHandlesAllStates(): void {
@@ -361,6 +384,7 @@ function run(): void {
   testFailedSessionCannotTransition();
   testInterruptMarksSessionFailed();
   testInterruptDoesNotCreateNewSession();
+  testInterruptTargetsRequestedSession();
   testAudioTerminalHandlesAllStates();
   testDuplicateAudioReceiveDoesNotResetCompletedSegment();
   testDifferentAudioUrlDoesNotResetCompletedSegment();

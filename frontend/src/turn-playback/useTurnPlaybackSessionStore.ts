@@ -521,30 +521,16 @@ export function useTurnPlaybackSessionStore() {
 
   // ── interrupt ───────────────────────────────────────────────────
 
-  /**
-   * 把活跃会话标为已中断。
-   *
-   * 实际行为：
-   *   - 没有活跃会话时直接 return（不创建新会话，不复活已结算会话）；
-   *   - 写 interrupted = true、backend.reason = "interrupted"（已有 reason 优先保留）；
-   *   - markPhaseInternal(session, "failed")；非法转移（已是终态）会只记 warn 不报错。
-   * 入参 turnId 当前不用于查找目标；调用方需要先把 activeSessionId 对齐到
-   * 目标会话，或接受"中断当前活跃会话"的语义。
-   */
   function markInterrupt(
     turnId: string | null,
   ): void {
-    void turnId;
-    const session = getActiveSession();
-    if (!session) {
-      return;
-    }
+    const session = requireSession(turnId);
     session.interrupted = true;
     session.backend.reason = session.backend.reason || "interrupted";
     markPhaseInternal(session, "failed");
     log("session interrupted", {
       id: session.id,
-      activeSessionId: state.activeSessionId,
+      turnId: session.turnId,
     });
   }
 

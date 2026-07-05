@@ -23,6 +23,10 @@ export interface AudioPlaybackState {
 }
 
 export interface AudioPlaybackSessionStore {
+  markAudioReleased: (
+    turnId: string | null,
+    messageId: string,
+  ) => void;
   markAudioStarted: (
     turnId: string | null,
     messageId: string,
@@ -96,6 +100,7 @@ export async function playAudioAndAcknowledge(
   stopAudioPlayback(ctx);
   ctx.resetTerminal();
   ctx.prepareAudioTimeline(turnId, messageId);
+  ctx.sessionStore?.markAudioReleased(turnId, messageId);
   ctx.state.isPlayingAudio = true;
   ctx.state.audioPlaybackStartedTurnId = turnId;
   ctx.state.audioPlaybackStartedMessageId = messageId;

@@ -65,7 +65,7 @@ export interface OutboundActionContext {
   pushHistory: (role: string, text: string) => void;
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
-  findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
+  findOpenAudioSegment: () => { turnId: string | null; messageId: string } | null;
   createMessageId: () => string;
 }
 
@@ -133,11 +133,11 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
 function getInterruptibleTurnId(ctx: OutboundActionContext): string | null {
   const state = ctx.state;
   const currentTurnId = normalizeTurnIdForComparison(state.currentTurnId);
-  const activeAudioTurnId = normalizeTurnIdForComparison(
-    ctx.findActiveAudioSegment()?.turnId ?? null,
+  const openAudioTurnId = normalizeTurnIdForComparison(
+    ctx.findOpenAudioSegment()?.turnId ?? null,
   );
-  if (activeAudioTurnId && (!currentTurnId || activeAudioTurnId === currentTurnId)) {
-    return activeAudioTurnId;
+  if (openAudioTurnId && (!currentTurnId || openAudioTurnId === currentTurnId)) {
+    return openAudioTurnId;
   }
 
   if (!currentTurnId) {
@@ -384,10 +384,10 @@ export function clearPlaybackGroupContext(
     && normalizedTurnId === normalizedCurrentTurnId,
   );
 
-  const matchesStartedAudio = normalizeTurnIdForComparison(
-    ctx.findActiveAudioSegment()?.turnId ?? null,
+  const matchesOpenAudio = normalizeTurnIdForComparison(
+    ctx.findOpenAudioSegment()?.turnId ?? null,
   ) === normalizedTurnId;
-  if (matchesStartedAudio) {
+  if (matchesOpenAudio) {
     ctx.stopAudioAndSettleTurn(turnId, "playback_group_cleared");
   }
 
@@ -397,7 +397,7 @@ export function clearPlaybackGroupContext(
 
   const matchesTerminalAudio =
     normalizeTurnIdForComparison(ctx.state.audioPlaybackTerminalTurnId) === normalizedTurnId;
-  if (matchesTerminalAudio || matchesStartedAudio || matchesActiveGroup) {
+  if (matchesTerminalAudio || matchesOpenAudio || matchesActiveGroup) {
     ctx.resetAudioPlaybackTerminal();
   }
 }

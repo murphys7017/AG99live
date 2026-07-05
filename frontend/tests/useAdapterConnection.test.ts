@@ -893,6 +893,34 @@ function testStaleSynthFinishedReportsProtocolViolation(): void {
   });
 }
 
+function testStaleInterruptReportsProtocolViolationWithoutClearingCurrentPlayback(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-current");
+    sendOutputAudio(socket, {
+      turnId: "turn-current",
+      messageId: "msg-current-pending-audio",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/current-pending.wav",
+    });
+    const pendingAudioKey = pendingKey("turn-current", "msg-current-pending-audio");
+    assert.equal(adapter.state.pendingAudios.has(pendingAudioKey), true);
+
+    socket.emitMessage(JSON.stringify({
+      type: "control.interrupt",
+      version: "v2",
+      message_id: "m-stale-interrupt",
+      timestamp: "2026-05-08T00:00:02.000Z",
+      turn_id: "turn-other",
+      source: "backend",
+      payload: {},
+    }));
+
+    assert.match(adapter.state.lastError, /does not exist/);
+    assert.equal(sessionStore.getSession("turn-other"), undefined);
+    assert.equal(sessionStore.getSession("turn-current")?.interrupted, false);
+    assert.equal(adapter.state.pendingAudios.has(pendingAudioKey), true);
+  });
+}
+
 async function testCurrentTurnFinishedCreatesMissingSession(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
@@ -1396,6 +1424,54 @@ async function testSendTextSettlesPlayingAudioBeforeNewInput(): Promise<void> {
   }
 }
 
+async function testSendTextSettlesPreparingAudioBeforeNewInput(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket, sessionStore } = harness;
+    sendTurnStarted(socket, "turn-preparing-before-new-input");
+    sendOutputAudio(socket, {
+      turnId: "turn-preparing-before-new-input",
+      messageId: "msg-preparing-before-new-input",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/preparing-before-new-input.wav",
+    });
+    assert.equal(
+      adapter.state.pendingAudios.has(
+        pendingKey("turn-preparing-before-new-input", "msg-preparing-before-new-input"),
+      ),
+      true,
+    );
+
+    FakeAudio.nextPlayShouldStall = true;
+    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback(
+      "msg-preparing-before-new-input",
+      "turn-preparing-before-new-input",
+    ), true);
+
+    const beforeSegment = sessionStore
+      .getSession("turn-preparing-before-new-input")
+      ?.segments.get("msg-preparing-before-new-input");
+    assert.equal(beforeSegment?.audio.released, true);
+    assert.equal(beforeSegment?.audio.started, false);
+    assert.equal(beforeSegment?.audio.terminal, "idle");
+    assert.equal(adapter.state.isPlayingAudio, true);
+
+    socket.sent.length = 0;
+    assert.equal(await adapter.sendText("new input while audio preparing"), true);
+
+    const afterSegment = sessionStore
+      .getSession("turn-preparing-before-new-input")
+      ?.segments.get("msg-preparing-before-new-input");
+    assert.equal(afterSegment?.audio.terminal, "failed");
+    assert.equal(afterSegment?.audio.reason, "audio_playback_replaced_by_new_input");
+    assert.deepEqual(
+      parseSentJsonMessages(socket).map((item) => item.type),
+      ["control.interrupt", "input.text"],
+    );
+  } finally {
+    harness.scope.stop();
+  }
+}
+
 async function testSendTextSettlesPendingAudioBeforeNewInput(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
@@ -1858,10 +1934,12 @@ async function run(): Promise<void> {
   testInvalidMotionDoesNotRewritePreviousSegment();
   testBackToBackTurnsDoNotSharePendingState();
   testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted();
+  testStaleInterruptReportsProtocolViolationWithoutClearingCurrentPlayback();
   testScopeDisposeDisconnectsAdapterRuntime();
   await testSendTextUsesOutboundProtocolEnvelope();
   await testSendTextDoesNotInterruptIdleCurrentTurn();
   await testSendTextSettlesPlayingAudioBeforeNewInput();
+  await testSendTextSettlesPreparingAudioBeforeNewInput();
   await testSendTextSettlesPendingAudioBeforeNewInput();
   await testClearPlaybackGroupOnlySettlesTargetTurnAudio();
   await testInboundInterruptOnlySettlesTargetTurnAudio();

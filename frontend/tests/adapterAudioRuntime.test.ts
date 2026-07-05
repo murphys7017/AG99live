@@ -277,6 +277,10 @@ async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise
     messageId: string;
     reason?: string;
   }> = [];
+  const releasedEvents: Array<{
+    turnId: string | null;
+    messageId: string;
+  }> = [];
   const runtime = createAdapterAudioRuntime({
     state,
     audioSink: buildAudioSink({
@@ -292,6 +296,9 @@ async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise
     pushHistory: () => {},
     createLipSyncRuntime: buildLipSyncRuntimeFactory(),
     getSessionStore: () => ({
+      markAudioReleased: (turnId, messageId) => {
+        releasedEvents.push({ turnId, messageId });
+      },
       markAudioStarted: () => {},
       markAudioDuration: () => {},
       markAudioTerminal: (turnId, terminal, messageId, reason) => {
@@ -313,6 +320,10 @@ async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise
   );
   await flushMicrotasks();
   assert.equal(state.audioPlaybackStartedMessageId, "msg-4a");
+  assert.deepEqual(releasedEvents[0], {
+    turnId: "turn-4",
+    messageId: "msg-4a",
+  });
 
   void runtime.playAudioAndAcknowledge(
     "http://127.0.0.1/second.wav",

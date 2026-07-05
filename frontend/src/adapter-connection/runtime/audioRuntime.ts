@@ -45,6 +45,10 @@ export interface AdapterAudioRuntimeState {
 }
 
 export interface AdapterAudioRuntimeSessionStore {
+  markAudioReleased: (
+    turnId: string | null,
+    messageId: string,
+  ) => void;
   markAudioStarted: (
     turnId: string | null,
     messageId: string,
@@ -134,6 +138,7 @@ export interface AdapterAudioRuntime {
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   stopAudioAndSettleAll: (reason: string) => void;
   findActiveAudioSegment: () => ActiveAudioSegment | null;
+  findOpenAudioSegment: () => ActiveAudioSegment | null;
   getPlaybackTimelineSnapshotForSegment: (
     turnId: string | null,
     messageId: string,
@@ -169,6 +174,7 @@ export function createAdapterAudioRuntime(
       const sessionStore = deps.getSessionStore();
       return sessionStore
         ? {
+            markAudioReleased: sessionStore.markAudioReleased,
             markAudioStarted: sessionStore.markAudioStarted,
             markAudioDuration: sessionStore.markAudioDuration,
           }
@@ -332,6 +338,10 @@ export function createAdapterAudioRuntime(
     return findActiveAudioSegments()[0] ?? null;
   }
 
+  function findOpenAudioSegment(): ActiveAudioSegment | null {
+    return findOpenAudioSegments()[0] ?? null;
+  }
+
   function findActiveAudioSegmentForTurn(turnId: string | null): ActiveAudioSegment | null {
     return findOpenAudioSegments().find((segment) =>
       matchesTurn(segment.turnId, turnId)
@@ -360,6 +370,7 @@ export function createAdapterAudioRuntime(
     stopAudioAndSettleTurn,
     stopAudioAndSettleAll,
     findActiveAudioSegment,
+    findOpenAudioSegment,
     getPlaybackTimelineSnapshotForSegment,
     prepareMotionOnlyTimeline,
     prepareMotionTimelineSink,

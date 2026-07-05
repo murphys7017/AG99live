@@ -170,11 +170,18 @@ function applyInterrupt(
 ): void {
   const s = deps.state;
   const interruptedTurnId = event.turnId;
+  try {
+    deps.sessionStore?.markInterrupt(interruptedTurnId);
+  } catch (error) {
+    deps.reportRuntimeProtocolViolation(
+      error instanceof Error ? error.message : "interrupt arrived for unknown session.",
+    );
+    return;
+  }
   deps.stopAudioAndSettleTurn(interruptedTurnId, "audio_playback_interrupted");
   deps.resetAudioPlaybackTerminal();
   deletePendingItemsForTurn(s.pendingAssistantTexts, interruptedTurnId);
   deletePendingItemsForTurn(s.pendingAudios, interruptedTurnId);
-  deps.sessionStore?.markInterrupt(interruptedTurnId);
   if (matchesTurn(s.currentTurnId, interruptedTurnId)) {
     s.currentTurnId = null;
   }
