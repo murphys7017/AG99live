@@ -16,11 +16,6 @@ import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRuntimeSnapshotPublisher";
 import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
-import { createAudioStartMotionTimelineBridge } from "../playback-timeline/audioStartMotionBridge.js";
-import {
-  createModelEngineMotionTimelineSink,
-  createMotionTimelineRunTracker,
-} from "../playback-timeline/motionSink.js";
 import { cloneModelEngineSettings } from "../model-engine/settings";
 import type { ModelEngineSettings } from "../model-engine/settings";
 import { usePlaybackCompletionCoordinator } from "../turn-playback/usePlaybackCompletionCoordinator";
@@ -33,7 +28,11 @@ import type {
 import { cloneJson } from "../utils/cloneJson";
 import { applyMotionEngineSettingsSnapshot } from "./motionEngineSettingsSnapshot";
 import { useAmbientMotionPreference } from "./useAmbientMotionPreference";
-import { configurePlaybackTimelineSegmentExecution } from "./playbackTimelineWiring";
+import {
+  configurePlaybackTimelineMotionRuntime,
+  configurePlaybackTimelineSegmentExecution,
+  createPlaybackTimelineMotionRunTracker,
+} from "./playbackTimelineWiring";
 import { useDesktopContextMenu } from "./useDesktopContextMenu";
 import { createDesktopRuntimeCommandHandler } from "../desktop-bridge/useDesktopRuntimeCommandHandler";
 import { usePushToTalkController } from "./usePushToTalkController";
@@ -85,10 +84,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     },
     initialMotionPlaybackRecords,
   });
-  const motionTimelineRunTracker = createMotionTimelineRunTracker({
-    markMotionTimelineStarted: playbackTimeline.markMotionTimelineStarted,
-    markMotionTimelineTerminal: playbackTimeline.markMotionTimelineTerminal,
-  });
+  const motionTimelineRunTracker = createPlaybackTimelineMotionRunTracker(playbackTimeline);
   const modelEngine = useModelEngine({
     getSelectedModel: () => selectedModel.value,
     getSettings: () => cloneModelEngineSettings(motionEngineSettings),
@@ -138,38 +134,18 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       markMotionFailed: (turnId, messageId, reason) => sessionStore.markMotionFailed(turnId, messageId, reason),
     },
   });
-  const audioStartMotionBridge = createAudioStartMotionTimelineBridge({
+  const playbackTimelineMotionRuntime = configurePlaybackTimelineMotionRuntime({
+    playbackTimeline,
+    sessionStore,
+    motionEngine: modelEngine,
     schedule: (delayMs, fn) => window.setTimeout(fn, delayMs),
     clearSchedule: (timer) => window.clearTimeout(timer as number),
-    canStartMotionForAudioTimeline: (turnId, messageId) => {
-      const session = sessionStore.getSession(turnId);
-      const segment = session?.segments.get(messageId);
-      return Boolean(
-        session
-        && segment
-        && !isTerminalPhase(session.phase)
-        && segment.audio.started
-        && segment.audio.terminal === "idle",
-      );
-    },
-    getPlaybackTimelineSnapshotForSegment: playbackTimeline.getPlaybackTimelineSnapshotForSegment,
     onMissingPlaybackTimeline: (turnId, messageId) => {
       console.error("[AG99live] audio timeline started without matching playback timeline.", {
         turnId,
         messageId,
       });
     },
-    handlePlaybackTimelineStarted: (turnId, messageId, playbackTimeline) =>
-      modelEngine.handlePlaybackTimelineStarted(
-        {
-          ...playbackTimeline,
-          turnId,
-          messageId,
-        },
-      ),
-  });
-  playbackTimeline.setAudioTimelineStartedHandler((turnId, messageId) => {
-    audioStartMotionBridge.handleAudioTimelineStarted(turnId, messageId);
   });
   adapter.setMotionPreviewHandler((payload) => {
     const localPlayed = modelEngine.playPreviewPayload(payload);
@@ -178,13 +154,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     }
     return localPlayed;
   });
-  const motionTimelineSink = createModelEngineMotionTimelineSink({
-    motionEngine: modelEngine,
-    getPlaybackTimelineSnapshotForSegment: playbackTimeline.getPlaybackTimelineSnapshotForSegment,
-    prepareMotionOnlyTimeline: playbackTimeline.prepareMotionOnlyTimeline,
-    prepareMotionTimelineSink: playbackTimeline.prepareMotionTimelineSink,
-    markMotionTimelineTerminal: playbackTimeline.markMotionTimelineTerminal,
-  });
+  const motionTimelineSink = playbackTimelineMotionRuntime.motionTimelineSink;
 
   configurePlaybackTimelineSegmentExecution({
     playbackTimeline,
@@ -364,12 +334,11 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   });
 
   onBeforeUnmount(() => {
-    audioStartMotionBridge.clear();
+    playbackTimelineMotionRuntime.dispose();
     pushToTalk.dispose();
     bilibiliLive.dispose();
     playbackCoordinator.resetPlaybackCoordination();
     motionTimelineRunTracker.clear();
-    playbackTimeline.setAudioTimelineStartedHandler(null);
     modelEngine.stop("unmount");
     detachBridgeListener();
     detachProfileAuthoringBridgeListener();

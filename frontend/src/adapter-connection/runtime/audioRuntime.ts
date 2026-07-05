@@ -21,12 +21,11 @@ import {
 } from "./adapterAudioBridge.js";
 import {
   matchesPlaybackGroup,
-  queueAudioForPlayback as queuePendingAudioForPlayback,
   type PendingAudioItem,
 } from "../../playback-timeline/playbackReleaseQueue.js";
 import {
-  createQueuedAudioSegmentSink,
-} from "../../playback-timeline/segmentReleaseSinks.js";
+  createAdapterAudioQueueController,
+} from "./audioQueueController.js";
 
 export type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "absent";
 
@@ -135,7 +134,6 @@ export interface AdapterAudioRuntime {
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   stopAudioAndSettleAll: (reason: string) => void;
   findActiveAudioSegment: () => ActiveAudioSegment | null;
-  getActiveAudioTimelineSnapshot: () => PlaybackTimelineSnapshot | null;
   getPlaybackTimelineSnapshotForSegment: (
     turnId: string | null,
     messageId: string,
@@ -190,7 +188,6 @@ export function createAdapterAudioRuntime(
     prepareMotionTimelineSink,
     markMotionTimelineStarted,
     markMotionTimelineTerminal,
-    getActiveTimelineSnapshot: getActiveAudioTimelineSnapshot,
     getTimelineSnapshotForSegment: getPlaybackTimelineSnapshotForSegment,
   } = playbackTimelineRuntime;
 
@@ -227,21 +224,6 @@ export function createAdapterAudioRuntime(
     resetAudioTerminalBridge(audioBridge);
   }
 
-  function queueAudioForPlayback(
-    audioUrl: string,
-    turnId: string | null,
-    messageId: string,
-  ): void {
-    queuePendingAudioForPlayback(
-      deps.state.pendingAudios,
-      audioUrl,
-      turnId,
-      messageId,
-    );
-    deps.state.statusMessage = "收到语音回复，等待同步播放。";
-    deps.pushHistory("system", deps.state.statusMessage);
-  }
-
   async function playAudioAndAcknowledge(
     audioUrl: string,
     turnId: string | null,
@@ -250,7 +232,7 @@ export function createAdapterAudioRuntime(
     return timelineController.playAudioAndAcknowledge(audioUrl, turnId, messageId);
   }
 
-  const queuedAudioSegmentSink = createQueuedAudioSegmentSink({
+  const audioQueueController = createAdapterAudioQueueController({
     state: deps.state,
     startAudioPlayback: (audioUrl, turnId, messageId) => {
       void playAudioAndAcknowledge(
@@ -259,14 +241,8 @@ export function createAdapterAudioRuntime(
         messageId,
       );
     },
+    pushHistory: deps.pushHistory,
   });
-
-  function releaseAudioForPlayback(
-    messageId: string,
-    turnId: string | null,
-  ): boolean {
-    return queuedAudioSegmentSink.releaseAudioForPlayback(messageId, turnId);
-  }
 
   function hasPendingAudioForTurn(turnId: string | null): boolean {
     return hasPendingAudioForTurnBridge(audioBridge, turnId);
@@ -414,9 +390,9 @@ export function createAdapterAudioRuntime(
   }
 
   return {
-    queueAudioForPlayback,
+    queueAudioForPlayback: audioQueueController.queueAudioForPlayback,
     playAudioAndAcknowledge,
-    releaseAudioForPlayback,
+    releaseAudioForPlayback: audioQueueController.releaseAudioForPlayback,
     setSegmentExecutionPorts,
     startSegmentJob,
     prepareSegmentJob,
@@ -427,7 +403,6 @@ export function createAdapterAudioRuntime(
     stopAudioAndSettleTurn,
     stopAudioAndSettleAll,
     findActiveAudioSegment,
-    getActiveAudioTimelineSnapshot,
     getPlaybackTimelineSnapshotForSegment,
     prepareMotionOnlyTimeline,
     prepareMotionTimelineSink,

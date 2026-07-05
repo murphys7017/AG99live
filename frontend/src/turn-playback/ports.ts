@@ -6,17 +6,6 @@ import type {
 import type { ModelSummary } from "../types/protocol.js";
 import type { PlaybackTimelineMotionContext } from "../playback-timeline/motionSink.js";
 
-export interface PlaybackReleasePort {
-  releaseAssistantTextForPlayback(
-    messageId: string,
-    turnId: string | null,
-  ): boolean;
-  releaseAudioForPlayback(
-    messageId: string,
-    turnId: string | null,
-  ): boolean;
-}
-
 export interface MotionPayloadPort {
   start(
     payload: NormalizedMotionPayload,

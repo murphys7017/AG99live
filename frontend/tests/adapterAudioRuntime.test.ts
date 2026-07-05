@@ -85,6 +85,14 @@ function buildAudioSink(options: {
   };
 }
 
+function getSegmentTimelineSnapshot(
+  runtime: ReturnType<typeof createAdapterAudioRuntime>,
+  turnId: string | null,
+  messageId: string,
+) {
+  return runtime.getPlaybackTimelineSnapshotForSegment(turnId, messageId);
+}
+
 async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
   const state = buildState();
   const startOptionsRef: { current: PlaybackTimelineAudioStartCallbacks | null } = { current: null };
@@ -131,7 +139,7 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
   await flushMicrotasks();
 
   assert.ok(startOptionsRef.current);
-  const snapshot = runtime.getActiveAudioTimelineSnapshot();
+  const snapshot = getSegmentTimelineSnapshot(runtime, "turn-1", "msg-1");
   assert.ok(snapshot);
   assert.equal(snapshot?.phase, "playing");
   assert.equal(snapshot?.clockSource, "audio");
@@ -185,13 +193,13 @@ async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
   runtime.queueAudioForPlayback("http://127.0.0.1/audio.wav", "turn-2", "msg-2");
   assert.equal(runtime.releaseAudioForPlayback("msg-2", "turn-2"), true);
   await flushMicrotasks();
-  assert.ok(runtime.getActiveAudioTimelineSnapshot());
+  assert.ok(getSegmentTimelineSnapshot(runtime, "turn-2", "msg-2"));
 
   const options = startOptionsRef.current;
   assert.ok(options);
   options.onEnded?.();
 
-  assert.equal(runtime.getActiveAudioTimelineSnapshot(), null);
+  assert.equal(getSegmentTimelineSnapshot(runtime, "turn-2", "msg-2"), null);
 }
 
 async function testLipSyncFailureRemainsVisibleUntilAudioCompletes(): Promise<void> {
@@ -228,7 +236,7 @@ async function testLipSyncFailureRemainsVisibleUntilAudioCompletes(): Promise<vo
   assert.equal(runtime.releaseAudioForPlayback("msg-lip", "turn-lip"), true);
   await flushMicrotasks();
 
-  const snapshot = runtime.getActiveAudioTimelineSnapshot();
+  const snapshot = getSegmentTimelineSnapshot(runtime, "turn-lip", "msg-lip");
   assert.equal(snapshot?.sinks.find((sink) => sink.id === "lip_sync")?.terminal, "failed");
   assert.equal(
     snapshot?.sinks.find((sink) => sink.id === "lip_sync")?.reason,
@@ -254,11 +262,11 @@ async function testAudioTimelineInterruptsPreparedAudioOnStopAll(): Promise<void
     "msg-3",
   );
   await flushMicrotasks();
-  assert.equal(runtime.getActiveAudioTimelineSnapshot()?.phase, "preparing");
+  assert.equal(getSegmentTimelineSnapshot(runtime, "turn-3", "msg-3")?.phase, "preparing");
 
   runtime.stopAudioAndSettleAll("test_stop_all");
 
-  assert.equal(runtime.getActiveAudioTimelineSnapshot(), null);
+  assert.equal(getSegmentTimelineSnapshot(runtime, "turn-3", "msg-3"), null);
 }
 
 async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise<void> {
@@ -356,7 +364,7 @@ async function testMotionSinkKeepsTimelineOpenAfterAudioCompletes(): Promise<voi
   runtime.markMotionTimelineStarted("turn-motion", "msg-motion");
   startOptionsRef.current?.onEnded?.();
 
-  let snapshot = runtime.getActiveAudioTimelineSnapshot();
+  let snapshot = getSegmentTimelineSnapshot(runtime, "turn-motion", "msg-motion");
   assert.equal(snapshot?.phase, "playing");
   assert.equal(snapshot?.sinks.find((sink) => sink.id === "audio")?.terminal, "completed");
   assert.equal(snapshot?.sinks.find((sink) => sink.id === "motion")?.terminal, "started");
@@ -368,7 +376,7 @@ async function testMotionSinkKeepsTimelineOpenAfterAudioCompletes(): Promise<voi
     "motion_completed_after_audio",
   );
 
-  snapshot = runtime.getActiveAudioTimelineSnapshot();
+  snapshot = getSegmentTimelineSnapshot(runtime, "turn-motion", "msg-motion");
   assert.equal(snapshot, null);
 }
 
@@ -391,7 +399,7 @@ async function testMotionOnlyTimelineUsesSyntheticClock(): Promise<void> {
   assert.equal(snapshot?.sinks.find((sink) => sink.id === "motion")?.terminal, "idle");
 
   runtime.markMotionTimelineStarted("turn-motion-only", "msg-motion-only");
-  snapshot = runtime.getActiveAudioTimelineSnapshot();
+  snapshot = getSegmentTimelineSnapshot(runtime, "turn-motion-only", "msg-motion-only");
   assert.equal(snapshot?.phase, "playing");
   assert.equal(snapshot?.clockSource, "synthetic");
   assert.equal(snapshot?.sinks.find((sink) => sink.id === "motion")?.terminal, "started");
@@ -402,7 +410,7 @@ async function testMotionOnlyTimelineUsesSyntheticClock(): Promise<void> {
     "completed",
     "motion_only_completed",
   );
-  assert.equal(runtime.getActiveAudioTimelineSnapshot(), null);
+  assert.equal(getSegmentTimelineSnapshot(runtime, "turn-motion-only", "msg-motion-only"), null);
 }
 
 async function run(): Promise<void> {

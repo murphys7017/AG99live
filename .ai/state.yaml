@@ -48,6 +48,7 @@ context:
     - Skeleton repair may add missing head/body/gaze axes from fallback semantic axes and may replace neutralish skeleton axes, but it must not overwrite non-neutral LLM axes.
     - Empty, invalid, or all-neutral motion axes should not be replaced by a fallback pose; those turns should be treated as no valid motion input.
     - AdapterConnection now exposes playback timeline operations through the aggregated playbackTimeline port; production callers should not depend on scattered root-level timeline methods.
+    - PetDesktopRuntime now delegates playback timeline motion wiring and segment execution wiring to app-level helpers, keeping the desktop runtime from owning bridge details directly.
   unresolved_questions:
     - Phase 2 still needs a careful extraction boundary for a standalone AudioSink because audioRuntime currently owns queueing, pending items, and settle behavior in addition to raw playback.
     - Phase 3 still needs AdapterAudioRuntime to be reduced further into queue/facade boundaries after the ModelEngine audio-start bridge removal.
@@ -105,6 +106,10 @@ architecture:
     - middleware motion prompt now marks the decision contract and capability payload as static, keeps per-turn runtime data dynamic, and keeps configured_generation_mode out of the static capability mapping.
     - middleware-first route disables fallback-pose replacement for unusable motion axes while preserving skeleton repair for otherwise valid axes.
     - AdapterConnection playback timeline controls and audio timeline started subscription are grouped under adapter.playbackTimeline, keeping the unified clock boundary out of the general adapter facade.
+    - PlaybackTimeline segment job start semantics live in segmentJobExecutor, while PlaybackTimelineRuntime remains responsible for timeline preparation, sink lifecycle, and terminal state.
+    - AdapterAudioRuntime no longer exposes a global active audio timeline snapshot; tests and callers use segment-scoped playback timeline lookup.
+    - AdapterAudioRuntime audio queue/release responsibilities are isolated behind an audio queue controller, reducing the runtime facade's direct pending-audio ownership.
+    - Audio playback actions now delegate lip-sync lifecycle handling to a playback-timeline audio lip-sync coordinator instead of owning the lip-sync callback wiring inline.
 verification:
   checks_run:
     - npm run test:playback-timeline

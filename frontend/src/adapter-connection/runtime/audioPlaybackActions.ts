@@ -2,6 +2,9 @@ import type {
   PlaybackTimelineAudioElementContext,
   PlaybackTimelineAudioSink,
 } from "../../playback-timeline/audioSink.js";
+import {
+  createPlaybackTimelineAudioLipSyncCoordinator,
+} from "../../playback-timeline/audioLipSyncCoordinator.js";
 import type {
   PlaybackTimelineLipSyncRuntime,
   PlaybackTimelineLipSyncRuntimeCallbacks,
@@ -97,38 +100,22 @@ export async function playAudioAndAcknowledge(
   ctx.state.statusMessage = "收到语音回复，正在播放。";
   ctx.pushHistory("system", ctx.state.statusMessage);
 
-  const lipSyncRuntime = ctx.createLipSyncRuntime({
-    onUnavailable: () => {
-      ctx.pushHistory("system", "嘴型同步加载失败，音频播放将无对应张嘴动作。");
-    },
-    onStarted: () => {
-      ctx.markLipSyncTimelineStarted(
-        turnId,
-        messageId,
-      );
-    },
-    onTerminal: (terminal, reason) => {
-      ctx.markLipSyncTimelineTerminal(
-        turnId,
-        messageId,
-        terminal,
-        reason,
-      );
-    },
+  const lipSyncCoordinator = createPlaybackTimelineAudioLipSyncCoordinator({
+    turnId,
+    messageId,
+    pushHistory: ctx.pushHistory,
+    createLipSyncRuntime: ctx.createLipSyncRuntime,
+    markLipSyncTimelineStarted: ctx.markLipSyncTimelineStarted,
+    markLipSyncTimelineTerminal: ctx.markLipSyncTimelineTerminal,
   });
 
   try {
     await ctx.audioSink.start(audioUrl, {
       onAudioElementCreated: (event: PlaybackTimelineAudioElementContext) => {
-        lipSyncRuntime.attachAudio({
-          audioUrl: event.audioUrl,
-          audio: event.audio,
-          getAudioCurrentTimeSeconds: event.getAudioCurrentTimeSeconds,
-          isCurrentAudio: event.isCurrentAudio,
-        });
+        lipSyncCoordinator.attachAudio(event);
       },
       onAudioElementDisposed: () => {
-        lipSyncRuntime.stop();
+        lipSyncCoordinator.stop();
       },
       onDurationChanged: (durationMs) => {
         ctx.state.audioPlaybackDurationMs = durationMs;
@@ -144,7 +131,7 @@ export async function playAudioAndAcknowledge(
         );
       },
       onPlaybackStarted: (event) => {
-        void lipSyncRuntime.resume();
+        lipSyncCoordinator.resume();
         ctx.state.audioPlaybackStartedTurnId = turnId;
         ctx.state.audioPlaybackStartedMessageId = messageId;
         ctx.state.audioPlaybackStartedAtMs = event.startedAtMs;
@@ -175,7 +162,7 @@ export async function playAudioAndAcknowledge(
         ctx.state.audioPlaybackStartedMessageId = null;
         ctx.state.audioPlaybackStartedAtMs = 0;
         ctx.state.audioPlaybackDurationMs = null;
-        lipSyncRuntime.completeAfterAudioEnded();
+        lipSyncCoordinator.completeAfterAudioEnded();
         ctx.markTerminal(
           "completed",
           completedTurnId,
@@ -198,7 +185,7 @@ export async function playAudioAndAcknowledge(
         ctx.state.audioPlaybackStartedAtMs = 0;
         ctx.state.audioPlaybackDurationMs = null;
         ctx.pushHistory("error", "音频播放失败。");
-        lipSyncRuntime.failAfterAudioError();
+        lipSyncCoordinator.failAfterAudioError();
         ctx.markTerminal(
           "failed",
           failedTurnId,
@@ -223,7 +210,7 @@ export async function playAudioAndAcknowledge(
       error instanceof Error ? error.message : "浏览器拒绝自动播放语音。";
     ctx.state.statusMessage = "语音播放失败，已回传结束状态。";
     ctx.pushHistory("error", ctx.state.statusMessage);
-    lipSyncRuntime.failAfterAudioError();
+    lipSyncCoordinator.failAfterAudioError();
     ctx.markTerminal(
       "failed",
       turnId,
