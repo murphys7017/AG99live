@@ -61,10 +61,6 @@ export interface InboundDispatchState {
   // mic
   micRequested: boolean;
   pttModeEnabled: boolean;
-  // audio io
-  isPlayingAudio: boolean;
-  audioPlaybackStartedTurnId: string | null;
-  audioPlaybackStartedMessageId: string | null;
   // server info
   serverInfo: {
     ws_url: string;

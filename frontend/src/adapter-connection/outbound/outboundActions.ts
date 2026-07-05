@@ -44,8 +44,6 @@ export interface MotionLabRawEventPayload {
  */
 export interface OutboundActionState {
   currentTurnId: string | null;
-  isPlayingAudio: boolean;
-  audioPlaybackStartedTurnId: string | null;
   audioPlaybackTerminalTurnId: string | null;
   pendingAssistantTexts: Map<string, PendingAssistantTextItem>;
   pendingAudios: Map<string, PendingAudioItem>;
@@ -67,6 +65,7 @@ export interface OutboundActionContext {
   pushHistory: (role: string, text: string) => void;
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
+  findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   createMessageId: () => string;
 }
 
@@ -99,7 +98,7 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
     return false;
   }
 
-  const interruptedTurnId = getInterruptibleTurnId(ctx.state);
+  const interruptedTurnId = getInterruptibleTurnId(ctx);
   if (interruptedTurnId) {
     ctx.outboundClient.send("control.interrupt", {}, interruptedTurnId);
     ctx.stopAudioAndSettleTurn(
@@ -131,9 +130,12 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
   return true;
 }
 
-function getInterruptibleTurnId(state: OutboundActionState): string | null {
+function getInterruptibleTurnId(ctx: OutboundActionContext): string | null {
+  const state = ctx.state;
   const currentTurnId = normalizeTurnIdForComparison(state.currentTurnId);
-  const activeAudioTurnId = normalizeTurnIdForComparison(state.audioPlaybackStartedTurnId);
+  const activeAudioTurnId = normalizeTurnIdForComparison(
+    ctx.findActiveAudioSegment()?.turnId ?? null,
+  );
   if (activeAudioTurnId && (!currentTurnId || activeAudioTurnId === currentTurnId)) {
     return activeAudioTurnId;
   }
@@ -142,9 +144,6 @@ function getInterruptibleTurnId(state: OutboundActionState): string | null {
     return null;
   }
 
-  if (state.isPlayingAudio) {
-    return currentTurnId;
-  }
   if (hasPendingPlaybackForTurn(state.pendingAssistantTexts, currentTurnId)) {
     return currentTurnId;
   }
@@ -217,7 +216,7 @@ export function interruptCurrentTurn(ctx: OutboundActionContext): boolean {
   }
 
   const interruptTurnId =
-    getInterruptibleTurnId(ctx.state)
+    getInterruptibleTurnId(ctx)
     ?? ctx.state.currentTurnId
     ?? null;
   if (!interruptTurnId) {
@@ -385,7 +384,9 @@ export function clearPlaybackGroupContext(
     && normalizedTurnId === normalizedCurrentTurnId,
   );
 
-  const matchesStartedAudio = normalizeTurnIdForComparison(ctx.state.audioPlaybackStartedTurnId) === normalizedTurnId;
+  const matchesStartedAudio = normalizeTurnIdForComparison(
+    ctx.findActiveAudioSegment()?.turnId ?? null,
+  ) === normalizedTurnId;
   if (matchesStartedAudio) {
     ctx.stopAudioAndSettleTurn(turnId, "playback_group_cleared");
   }

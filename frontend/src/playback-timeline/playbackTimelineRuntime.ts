@@ -119,6 +119,7 @@ export interface PlaybackTimelineRuntime {
     messageId: string,
   ) => PlaybackTimelineSnapshot | null;
   findActiveAudioTimelineSegments: () => PlaybackTimelineAudioSegment[];
+  findOpenAudioTimelineSegments: () => PlaybackTimelineAudioSegment[];
 }
 
 export function createPlaybackTimelineRuntime(
@@ -436,6 +437,20 @@ export function createPlaybackTimelineRuntime(
   }
 
   function findActiveAudioTimelineSegments(): PlaybackTimelineAudioSegment[] {
+    return findAudioTimelineSegments((audioSink) => audioSink?.terminal === "started");
+  }
+
+  function findOpenAudioTimelineSegments(): PlaybackTimelineAudioSegment[] {
+    return findAudioTimelineSegments((audioSink) =>
+      audioSink?.terminal === "idle" || audioSink?.terminal === "started"
+    );
+  }
+
+  function findAudioTimelineSegments(
+    predicate: (
+      audioSink: PlaybackTimelineSnapshot["sinks"][number] | undefined,
+    ) => boolean,
+  ): PlaybackTimelineAudioSegment[] {
     const segments: PlaybackTimelineAudioSegment[] = [];
     for (const timeline of timelines.values()) {
       const snapshot = timeline.engine.getSnapshot();
@@ -445,7 +460,7 @@ export function createPlaybackTimelineRuntime(
       const audioSink = snapshot.sinks.find((sink) =>
         sink.id === AUDIO_TIMELINE_SINK_ID
       );
-      if (audioSink?.terminal === "started") {
+      if (predicate(audioSink)) {
         segments.push({
           turnId: timeline.turnId,
           messageId: timeline.messageId,
@@ -498,6 +513,7 @@ export function createPlaybackTimelineRuntime(
     stopTimelineForSegment,
     getTimelineSnapshotForSegment,
     findActiveAudioTimelineSegments,
+    findOpenAudioTimelineSegments,
   };
 }
 

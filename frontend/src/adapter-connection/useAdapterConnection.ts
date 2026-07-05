@@ -297,6 +297,7 @@ export function createAdapterConnection(
     stopAudioAndSettleTurn: (turnId: string | null, reason: string) =>
       stopAudioAndSettleTurn(turnId, reason),
     resetAudioPlaybackTerminal,
+    findActiveAudioSegment: () => findActiveAudioSegment(),
     createMessageId,
   };
 

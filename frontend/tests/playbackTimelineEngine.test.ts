@@ -596,6 +596,31 @@ function testPlaybackTimelineRuntimeFindsActiveAudioSegments(): void {
   assert.deepEqual(runtime.findActiveAudioTimelineSegments(), []);
 }
 
+function testPlaybackTimelineRuntimeFindsOpenAudioSegments(): void {
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => null,
+  });
+
+  runtime.prepareAudioTimeline("turn-open", "msg-open");
+  assert.deepEqual(runtime.findActiveAudioTimelineSegments(), []);
+  assert.deepEqual(runtime.findOpenAudioTimelineSegments(), [
+    { turnId: "turn-open", messageId: "msg-open" },
+  ]);
+
+  runtime.markAudioTimelineStarted("turn-open", "msg-open", 100, 1200);
+  assert.deepEqual(runtime.findOpenAudioTimelineSegments(), [
+    { turnId: "turn-open", messageId: "msg-open" },
+  ]);
+
+  runtime.markAudioTimelineTerminal(
+    "turn-open",
+    "msg-open",
+    "completed",
+    "audio_playback_completed",
+  );
+  assert.deepEqual(runtime.findOpenAudioTimelineSegments(), []);
+}
+
 function testTerminalSinkEventsAreStable(): void {
   const engine = createPlaybackTimelineEngine({ now: () => 0 });
   engine.load(
@@ -861,6 +886,7 @@ function run(): void {
   testPlaybackTimelineRuntimeExposesMissingAudioClock();
   testPlaybackTimelineRuntimeStopsOnlyRequestedSegmentTimeline();
   testPlaybackTimelineRuntimeFindsActiveAudioSegments();
+  testPlaybackTimelineRuntimeFindsOpenAudioSegments();
   testTerminalSinkEventsAreStable();
   testAudioStartMotionBridgeRefreshesTimelineAtFireTime();
   testAudioStartMotionBridgeCanCancelPendingWakeup();

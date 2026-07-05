@@ -29,9 +29,6 @@ export interface InboundRuntimeDispatchState {
   turnFinishedReason: string;
   micRequested: boolean;
   pttModeEnabled: boolean;
-  isPlayingAudio: boolean;
-  audioPlaybackStartedTurnId: string | null;
-  audioPlaybackStartedMessageId: string | null;
   pendingAssistantTexts: Map<string, PendingAssistantTextItem>;
   pendingAudios: Map<string, PendingAudioItem>;
 }
@@ -59,6 +56,7 @@ export interface InboundRuntimeDispatchDeps {
     turnId: string | null,
     reason: string,
   ) => void;
+  findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
   reportRuntimeProtocolViolation: (message: string) => void;
 }
@@ -219,8 +217,12 @@ function applySynthFinished(
     event.turnId,
     "synth_finished_without_audio_playback",
   );
+  const activeAudioSegment = deps.findActiveAudioSegment();
+  const hasActiveAudioForTurn = Boolean(
+    activeAudioSegment && matchesTurn(activeAudioSegment.turnId, event.turnId),
+  );
   s.statusMessage =
-    s.isPlayingAudio || deps.hasPendingAudioForTurn(event.turnId)
+    hasActiveAudioForTurn || deps.hasPendingAudioForTurn(event.turnId)
       ? "语音已准备同步播放。"
       : "语音合成已完成。";
   deps.pushHistory("system", s.statusMessage);
