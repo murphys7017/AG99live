@@ -46,6 +46,15 @@ astrbot_plugin_ag99live_adapter/
 - 后端从 `platform_extras` / `client_objects` 中读取动作载荷，并与文本、音频一起广播到前端。
 - 若 runtime 内部明确启用了额外 fallback 组件，它的结果也必须回到同一条 `engine.motion_*` 协议链路和同一 segment identity。
 
+### 官方 `<@anim>` 兼容路径
+
+`<@anim {...}>` 不是 AG99live 的第二条主链路，也不是 `ag99live.motion` 失败后的兜底。它只用于兼容缺少 Persona Effect 注入能力的 AstrBot 运行环境：
+
+- RuntimeState 会检测 `astrbot.core.interaction.PersonaEffectSpec` 和 `context.register_persona_effect` 是否可用。
+- 可用时，prompt 要求模型填写 `ag99live.motion` effect arguments，并且 TurnCoordinator 不解析 `<@anim>`。
+- 不可用时，prompt 才要求把动作包装进 `<@anim {"mode":"inline","intent":...}>`，其中 `intent` 必须是完整 `engine.motion_intent.v3`。
+- 如果 `<@anim>` 内部 JSON、schema 或 v3 payload 无效，后端只记录拒绝原因，不生成替代动作。
+
 ### 动作 selector 输出
 
 - 当前主动作载荷为 `engine.motion_intent.v3`，前端 `ModelEngine` 根据 `semantic_axis_profile` 编译为 `engine.parameter_plan.v2` 再执行。
