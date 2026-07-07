@@ -113,6 +113,7 @@ architecture:
     - PlaybackTimeline segment job start semantics live in segmentJobExecutor, while PlaybackTimelineRuntime remains responsible for timeline preparation, sink lifecycle, and terminal state.
     - AdapterAudioRuntime no longer exposes a global active audio timeline snapshot; tests and callers use segment-scoped playback timeline lookup.
     - AdapterAudioRuntime audio queue/release responsibilities are isolated behind an audio queue controller, reducing the runtime facade's direct pending-audio ownership.
+    - AdapterAudioRuntime pending-audio settlement responsibilities are isolated behind an audio settlement controller, so turn/all audio cleanup no longer lives inline in the runtime facade.
     - Audio playback actions now delegate lip-sync lifecycle handling to a playback-timeline audio lip-sync coordinator instead of owning the lip-sync callback wiring inline.
     - Audio playback stop now interrupts the explicit turnId + messageId playback segment; missing segment identity is surfaced as an error instead of stopping an arbitrary active timeline.
 verification:

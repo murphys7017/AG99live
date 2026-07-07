@@ -269,6 +269,54 @@ async function testAudioTimelineInterruptsPreparedAudioOnStopAll(): Promise<void
   assert.equal(getSegmentTimelineSnapshot(runtime, "turn-3", "msg-3"), null);
 }
 
+async function testStopAudioAndSettleTurnFailsOnlyMatchingPendingAudio(): Promise<void> {
+  const state = buildState();
+  const terminalEvents: Array<{
+    turnId: string | null;
+    terminal: string;
+    messageId: string;
+    reason?: string;
+  }> = [];
+  const runtime = createAdapterAudioRuntime({
+    state,
+    audioSink: buildAudioSink({
+      start: async () => {},
+    }),
+    pushHistory: () => {},
+    getSessionStore: () => ({
+      markAudioReleased: () => {},
+      markAudioStarted: () => {},
+      markAudioDuration: () => {},
+      markAudioTerminal: (turnId, terminal, messageId, reason) => {
+        terminalEvents.push({
+          turnId,
+          terminal,
+          messageId,
+          reason,
+        });
+      },
+      getSessions: () => [],
+    }),
+    createLipSyncRuntime: buildLipSyncRuntimeFactory(),
+  });
+
+  runtime.queueAudioForPlayback("http://127.0.0.1/target.wav", "turn-target", "msg-target");
+  runtime.queueAudioForPlayback("http://127.0.0.1/other.wav", "turn-other", "msg-other");
+
+  runtime.stopAudioAndSettleTurn("turn-target", "test_turn_settle");
+
+  assert.equal(runtime.hasPendingAudioForTurn("turn-target"), false);
+  assert.equal(runtime.hasPendingAudioForTurn("turn-other"), true);
+  assert.deepEqual(terminalEvents, [
+    {
+      turnId: "turn-target",
+      terminal: "failed",
+      messageId: "msg-target",
+      reason: "test_turn_settle",
+    },
+  ]);
+}
+
 async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise<void> {
   const state = buildState();
   const terminalEvents: Array<{
@@ -429,6 +477,7 @@ async function run(): Promise<void> {
   await testAudioTimelineCompletesOnAudioEnded();
   await testLipSyncFailureRemainsVisibleUntilAudioCompletes();
   await testAudioTimelineInterruptsPreparedAudioOnStopAll();
+  await testStopAudioAndSettleTurnFailsOnlyMatchingPendingAudio();
   await testStartingNextAudioSettlesInterruptedPreviousSegment();
   await testMotionSinkKeepsTimelineOpenAfterAudioCompletes();
   await testMotionOnlyTimelineUsesSyntheticClock();

@@ -13,19 +13,17 @@ import {
   createAdapterAudioTimelineController,
 } from "./audioTimelineController.js";
 import {
-  hasPendingAudioForTurn as hasPendingAudioForTurnBridge,
   markAudioPlaybackTerminal as markAudioTerminalBridge,
-  markMissingAudiosForTurn as markMissingAudiosForTurnBridge,
   resetAudioPlaybackTerminal as resetAudioTerminalBridge,
   type AudioBridgeDeps,
 } from "./adapterAudioBridge.js";
-import {
-  matchesPlaybackGroup,
-  type PendingAudioItem,
-} from "../../playback-timeline/playbackReleaseQueue.js";
+import type { PendingAudioItem } from "../../playback-timeline/playbackReleaseQueue.js";
 import {
   createAdapterAudioQueueController,
 } from "./audioQueueController.js";
+import {
+  createAdapterAudioSettlementController,
+} from "./audioSettlementController.js";
 
 export type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "absent";
 
@@ -252,100 +250,19 @@ export function createAdapterAudioRuntime(
     pushHistory: deps.pushHistory,
   });
 
-  function hasPendingAudioForTurn(turnId: string | null): boolean {
-    return hasPendingAudioForTurnBridge(audioBridge, turnId);
-  }
-
-  function markMissingAudiosForTurn(
-    turnId: string | null,
-    reason: string,
-  ): void {
-    markMissingAudiosForTurnBridge(audioBridge, turnId, reason);
-  }
-
   function stopAudioPlayback(): void {
     timelineController.stopAudioPlayback();
   }
 
-  function matchesTurn(
-    candidateTurnId: string | null,
-    targetTurnId: string | null,
-  ): boolean {
-    if (matchesPlaybackGroup(candidateTurnId, targetTurnId)) {
-      return true;
-    }
-    return !candidateTurnId && !targetTurnId;
-  }
-
-  function settlePendingAudiosForTurn(
-    turnId: string | null,
-    reason: string,
-  ): void {
-    for (const [queueKey, item] of Array.from(deps.state.pendingAudios.entries())) {
-      if (!matchesTurn(item.turnId, turnId)) {
-        continue;
-      }
-      markAudioPlaybackTerminal(
-        "failed",
-        item.turnId,
-        reason,
-        item.messageId,
-      );
-      deps.state.pendingAudios.delete(queueKey);
-    }
-  }
-
-  function stopAudioAndSettleTurn(turnId: string | null, reason: string): void {
-    let shouldStopAudio = false;
-    const activeSegment = findOpenAudioSegmentForTurn(turnId);
-    if (activeSegment) {
-      markAudioPlaybackTerminal(
-        "failed",
-        activeSegment.turnId,
-        reason,
-        activeSegment.messageId,
-      );
-      shouldStopAudio = true;
-    }
-    settlePendingAudiosForTurn(turnId, reason);
-    if (shouldStopAudio) {
-      stopAudioPlayback();
-    }
-  }
-
-  function stopAudioAndSettleAll(reason: string): void {
-    for (const activeSegment of findOpenAudioSegments()) {
-      markAudioPlaybackTerminal(
-        "failed",
-        activeSegment.turnId,
-        reason,
-        activeSegment.messageId,
-      );
-    }
-    for (const [queueKey, item] of Array.from(deps.state.pendingAudios.entries())) {
-      markAudioPlaybackTerminal(
-        "failed",
-        item.turnId,
-        reason,
-        item.messageId,
-      );
-      deps.state.pendingAudios.delete(queueKey);
-    }
-    stopAudioPlayback();
-  }
+  const audioSettlementController = createAdapterAudioSettlementController({
+    audioBridge,
+    findOpenAudioSegments,
+    markAudioPlaybackTerminal,
+    stopAudioPlayback,
+  });
 
   function findActiveAudioSegment(): ActiveAudioSegment | null {
     return findActiveAudioSegments()[0] ?? null;
-  }
-
-  function findOpenAudioSegment(): ActiveAudioSegment | null {
-    return findOpenAudioSegments()[0] ?? null;
-  }
-
-  function findOpenAudioSegmentForTurn(turnId: string | null): ActiveAudioSegment | null {
-    return findOpenAudioSegments().find((segment) =>
-      matchesTurn(segment.turnId, turnId)
-    ) ?? null;
   }
 
   function findActiveAudioSegments(): ActiveAudioSegment[] {
@@ -363,14 +280,14 @@ export function createAdapterAudioRuntime(
     setSegmentExecutionPorts,
     startSegmentJob,
     prepareSegmentJob,
-    hasPendingAudioForTurn,
-    markMissingAudiosForTurn,
+    hasPendingAudioForTurn: audioSettlementController.hasPendingAudioForTurn,
+    markMissingAudiosForTurn: audioSettlementController.markMissingAudiosForTurn,
     markAudioPlaybackTerminal,
     resetAudioPlaybackTerminal,
-    stopAudioAndSettleTurn,
-    stopAudioAndSettleAll,
+    stopAudioAndSettleTurn: audioSettlementController.stopAudioAndSettleTurn,
+    stopAudioAndSettleAll: audioSettlementController.stopAudioAndSettleAll,
     findActiveAudioSegment,
-    findOpenAudioSegment,
+    findOpenAudioSegment: audioSettlementController.findOpenAudioSegment,
     getPlaybackTimelineSnapshotForSegment,
     prepareMotionOnlyTimeline,
     prepareMotionTimelineSink,
