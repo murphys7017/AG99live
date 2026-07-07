@@ -41,9 +41,9 @@ context:
     - ModelEngine no longer consumes audio_unavailable playback timelines for audio-synced duration or speech-active detection, and it will not fall back to SessionStore audio-duration estimates for that failure state.
     - Stopping an already-playing audio segment now writes an audio terminal only when no more specific terminal reason has already been set.
     - The automatic LLM motion path remains pure engine.motion_intent.v3 semantic axes; catalog motion, motion3, exp3, and choice outputs stay out of this path.
-    - The automatic motion path is middleware-first only; inline_first / <@anim> is no longer a runtime-selectable motion generation route.
+    - The automatic motion path is middleware-first only; inline_first is no longer a runtime-selectable motion generation route.
     - engine.motion_intent.v2 is no longer accepted at backend normalization, frontend inbound, preview send, or ModelEngine normalization boundaries.
-    - <@anim> is retained only as hidden-output sanitization, not as a motion parsing or dispatch format.
+    - <@anim> remains an official AstrBot compatibility transport only when Persona Effect injection is unavailable; it is not a fallback for invalid ag99live.motion payloads.
     - motion_catalog.json may enrich fallback pose descriptions and catalog-derived semantic candidates only when the motion can be mapped to semantic axes.
     - fallback_pose_id remains a semantic-axis fallback selector, not a motion3/catalog playback selector.
     - Motion prompt static/dynamic scope metadata improves render-tree selection and diagnostics, but model input token reduction still depends on AstrBot/provider static prefix caching or session-level reuse.
@@ -95,7 +95,7 @@ architecture:
     - ModelEngine speech-only audio-start path now receives a same turnId/messageId playbackTimeline snapshot from the audio timeline started bridge, keeping speech-only timing on the same timeline contract as queued motion.
     - ModelEngine requires injected timeline-terminal reporting and speech-only gating dependencies; speech-only motion is suppressed when the same segment already has a failed/released/started/completed formal motion state, preventing it from masking motion timeline failures during development.
     - Generic audio stop cleanup no longer overwrites a more specific terminal reason such as audio_playback_replaced_by_new_input.
-    - Adapter runtime no longer exposes inline_first / enable_inline_motion_contract configuration; <@anim> inline motion tags are not parsed or broadcast as a runtime motion path.
+    - Adapter runtime no longer exposes inline_first / enable_inline_motion_contract configuration; <@anim> inline motion tags are parsed and broadcast only for the official compatibility path when Persona Effect injection is unavailable.
     - Frontend and adapter motion-intent boundaries are now v3-only; v2 nested axes are treated as invalid input instead of being normalized forward.
     - TurnCoordinator sanitizes hidden legacy motion markup from visible text/captions while preserving raw assistant output in Motion Lab records.
     - Performance curve timing MVP adds an optional `performance_curve_hint` to `engine.motion_intent.v3`; frontend ModelEngine resolves it into existing timing fields rather than a new per-frame player.

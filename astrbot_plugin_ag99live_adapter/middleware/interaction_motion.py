@@ -474,6 +474,9 @@ def _normalize_duration_hint_ms(value: Any) -> int:
 
 def _build_motion_static_capability_payload(runtime_state: Any) -> dict[str, Any]:
     capability_payload: dict[str, Any] = {
+        "persona_effect_available": bool(
+            getattr(runtime_state, "ag99live_motion_persona_effect_available", True)
+        ),
         "motion_instruction": resolve_motion_prompt_instruction(
             runtime_state=runtime_state
         ),
@@ -619,9 +622,34 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
             lines.append(f"- {resource_id}: {label}{context_text}")
         resource_text = "\n".join(lines) + "\n"
 
+    persona_effect_available = bool(capability_payload.get("persona_effect_available", True))
+    if persona_effect_available:
+        output_contract_text = (
+            "你正在控制一个 Live2D 模型；在本轮动作 arguments 中填写动作参数。"
+            f"{allowed_fields_text}"
+        )
+        output_shape_text = f" 输出形状示例：{format_json}"
+    else:
+        inline_wrapper = {
+            "mode": "inline",
+            "intent": _build_official_inline_motion_intent_example(capability_payload),
+        }
+        import json
+
+        inline_json = json.dumps(
+            inline_wrapper,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        output_contract_text = (
+            "当前 AstrBot 运行环境不支持动作注入函数；请把动作参数放入官方兼容标签 "
+            "<@anim {...}>，并追加在回复末尾。标签外层只作为传输包装，内部 intent "
+            f"字段必须是 engine.motion_intent.v3，且遵循当前动作参数契约。{allowed_fields_text}"
+        )
+        output_shape_text = f" 输出标签示例：<@anim {inline_json}>"
+
     return (
-        "你正在控制一个 Live2D 模型；在本轮动作 arguments 中填写动作参数。"
-        f"{allowed_fields_text}"
+        f"{output_contract_text}"
         "intent_tags 用 2 到 6 个开放关键词概括本轮语气、姿态和场景。"
         f"{resource_field_text}"
         "axes 是必填对象，只能使用下方列出的轴 id，并且每个值都直接写成 JSON number。"
@@ -633,8 +661,36 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         f"{axis_prompt_text}"
         f"{resource_text}"
         f"{fallback_pose_text}"
-        f" 输出形状示例：{format_json}"
+        f"{output_shape_text}"
     )
+
+
+def _build_official_inline_motion_intent_example(
+    capability_payload: dict[str, Any],
+) -> dict[str, Any]:
+    semantic_profile = capability_payload.get("semantic_profile")
+    effect_arguments_example = capability_payload.get("effect_arguments_example")
+    intent: dict[str, Any] = {
+        "schema_version": "engine.motion_intent.v3",
+        "profile_id": "",
+        "profile_revision": 1,
+        "model_id": "",
+        "mode": "expressive",
+        "intent_tags": ["语气关键词", "姿态关键词", "场景关键词"],
+        "duration_hint_ms": 1000,
+        "axes": {},
+    }
+    if isinstance(semantic_profile, dict):
+        intent["profile_id"] = str(semantic_profile.get("profile_id") or "")
+        profile_revision = semantic_profile.get("profile_revision")
+        if isinstance(profile_revision, int) and profile_revision > 0:
+            intent["profile_revision"] = profile_revision
+        intent["model_id"] = str(semantic_profile.get("model_id") or "")
+    if isinstance(effect_arguments_example, dict):
+        for key in ("intent_tags", "duration_hint_ms", "resource_id", "axes"):
+            if key in effect_arguments_example:
+                intent[key] = effect_arguments_example[key]
+    return intent
 
 
 def _build_motion_effect_arguments_example(

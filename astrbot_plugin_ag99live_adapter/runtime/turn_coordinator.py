@@ -88,6 +88,9 @@ from ..motion.performance_curve import (
     extract_assistant_reply_keywords,
     summarize_motion_for_curve,
 )
+from ..motion.inline_motion import (
+    extract_official_inline_anim_motion_intent,
+)
 from ..motion.payload_dispatch import (
     extract_message_motion_payload as _extract_message_motion_payload,
     resolve_engine_motion_message_type as _resolve_engine_motion_message_type,
@@ -261,7 +264,8 @@ class TurnCoordinator:
             2. 若有可见文本，写聊天缓存并发 output.text。
             3. _broadcast_platform_motion_client_objects 优先派发平台 motion client object；
                Persona Effect / middleware result contributor 生成的动作会以 client object
-               进入这里。旧 inline 动作标签不再作为运行时入口。
+               进入这里。只有当前 AstrBot 不支持 Persona Effect 注入时，才允许解析
+               官方 <@anim> 兼容标签，并且仍要求标签内是 engine.motion_intent.v3。
             4. 有图片就发 output.image。
             5. 有音频文件就 media_service.cache_audio_file → 取 URL → 发 output.audio，
                并把会话状态推进到 synthesizing → playing。
@@ -352,10 +356,16 @@ class TurnCoordinator:
             message_id=segment_message_id,
         )
         if not platform_motion_dispatched:
-            logger.debug(
-                "WIRING motion_plan turn_id=%s client_object_present=false",
-                turn_id or "",
+            inline_motion_dispatched = await self._broadcast_official_inline_anim_motion_payload(
+                raw_reply_text=raw_reply_text,
+                turn_id=turn_id,
+                message_id=segment_message_id,
             )
+            if not inline_motion_dispatched:
+                logger.debug(
+                    "WIRING motion_plan turn_id=%s client_object_present=false inline_compat_dispatched=false",
+                    turn_id or "",
+                )
 
         if picture_paths:
             await self._send_json(
@@ -1249,6 +1259,53 @@ class TurnCoordinator:
                 dispatched_keys.add(dispatch_key)
             dispatched = dispatched or sent
         return dispatched
+
+    async def _broadcast_official_inline_anim_motion_payload(
+        self,
+        *,
+        raw_reply_text: str,
+        turn_id: str | None,
+        message_id: str,
+    ) -> bool:
+        if not self._allows_official_inline_anim_compat():
+            return False
+
+        motion_payload, reason = extract_official_inline_anim_motion_intent(raw_reply_text)
+        if motion_payload is None:
+            if reason != "inline_anim_missing":
+                logger.warning(
+                    "WIRING official_inline_anim_compat rejected turn_id=%s message_id=%s reason=%s",
+                    turn_id or "",
+                    message_id or "",
+                    reason,
+                )
+            return False
+
+        sent = await self.broadcast_motion_payload(
+            motion_payload=motion_payload,
+            mode="preview",
+            source="official_inline_anim_compat",
+            turn_id=turn_id,
+            message_id=message_id,
+        )
+        if sent:
+            logger.info(
+                "WIRING official_inline_anim_compat dispatched turn_id=%s message_id=%s",
+                turn_id or "",
+                message_id or "",
+            )
+        return sent
+
+    def _allows_official_inline_anim_compat(self) -> bool:
+        runtime_state = getattr(self, "runtime_state", None)
+        return (
+            getattr(
+                runtime_state,
+                "ag99live_motion_persona_effect_available",
+                True,
+            )
+            is False
+        )
 
     def _get_dispatched_platform_motion_keys(self) -> set[str]:
         keys = getattr(self, "_dispatched_platform_motion_keys", None)

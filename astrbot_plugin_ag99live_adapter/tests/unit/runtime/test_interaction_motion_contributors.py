@@ -322,6 +322,7 @@ def _build_runtime_state(*, mode: str = "split_after_reply"):
         {
             "motion_generation_mode": mode,
             "enable_realtime_motion_plan": True,
+            "ag99live_motion_persona_effect_available": True,
             "selected_motion_analysis_provider": None,
             "realtime_motion_timeout_seconds": 2.0,
             "motion_prompt_instruction": "Use readable exaggerated head and smile motion.",
@@ -463,8 +464,10 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert system.meta["scope"] == "static"
     assert capability.meta["scope"] == "static"
     assert runtime.meta["scope"] == "dynamic"
+    assert capability.value["persona_effect_available"] is True
     assert "你正在控制一个 Live2D 模型" in system.value
     assert "在本轮动作 arguments 中填写动作参数" in system.value
+    assert "<@anim" not in system.value
     assert '"plugin_hints":{"ag99live_motion"' not in system.value
     assert "Persona Effect" not in system.value
     assert "不要输出 plugin_hints 外壳" not in system.value
@@ -581,6 +584,36 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert capability.value["fallback_pose_candidates"][0]["label"] in system.value
     assert runtime.value["configured_generation_mode"] == "split_after_reply"
     assert runtime.value["prompt_purpose"] == "persona_reply"
+
+
+def test_prompt_contributor_uses_official_inline_anim_contract_when_persona_effect_unavailable(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionPromptContributor()
+    event, _scheduled_calls = _build_event()
+    event.adapter.turn_coordinator.runtime_state.ag99live_motion_persona_effect_available = False
+    view = _build_view(phase="decision", route_mode="delegate_to_core", purpose="persona_reply")
+
+    extensions = asyncio.run(contributor.collect(event, None, view))
+
+    system = next(item for item in extensions if item.mount == "system")
+    capability = next(item for item in extensions if item.mount == "capability")
+    assert capability.value["persona_effect_available"] is False
+    assert "当前 AstrBot 运行环境不支持动作注入函数" in system.value
+    assert "官方兼容标签 <@anim {...}>" in system.value
+    assert "内部 intent 字段必须是 engine.motion_intent.v3" in system.value
+    assert '<@anim {"mode":"inline","intent":' in system.value
+    assert "engine.motion_intent.v3" in system.value
+    assert '"schema_version":"engine.motion_intent.v3"' in system.value
+    assert '"profile_id":"pet.semantic.v1"' in system.value
+    assert '"profile_revision":2' in system.value
+    assert '"model_id":"pet"' in system.value
+    assert "axes 是必填对象" in system.value
+    assert '"plugin_hints":{"ag99live_motion"' not in system.value
 
 
 def test_prompt_contributor_returns_none_for_router_purpose(

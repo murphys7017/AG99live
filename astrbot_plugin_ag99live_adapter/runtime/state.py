@@ -79,6 +79,9 @@ class RuntimeState:
         self.motion_analysis_provider_id = ""
         self.performance_curve_provider_id = ""
         self.enable_performance_curve = False
+        self.ag99live_motion_persona_effect_available = _supports_persona_effects(
+            plugin_context
+        )
         self.enable_action_llm_filter = True
         self.action_llm_filter_timeout_seconds = 12.0
         self.action_llm_filter_min_selected_channels = 3
@@ -1363,3 +1366,11 @@ def _normalize_motion_prompt_instruction(value: Any) -> str:
 def _normalize_motion_generation_mode(value: Any) -> str:
     del value
     return "split_after_reply"
+
+
+def _supports_persona_effects(plugin_context: Any) -> bool:
+    try:
+        from astrbot.core.interaction import PersonaEffectSpec  # noqa: F401
+    except ImportError:
+        return False
+    return callable(getattr(plugin_context, "register_persona_effect", None))

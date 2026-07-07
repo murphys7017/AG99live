@@ -138,6 +138,7 @@ def _runtime_state_stub(
     *,
     mode: str = "split_after_reply",
     enable_inline_motion_contract: bool = True,
+    persona_effect_available: bool = True,
 ):
     return type(
         "RuntimeStateStub",
@@ -145,6 +146,7 @@ def _runtime_state_stub(
         {
             "motion_generation_mode": mode,
             "enable_inline_motion_contract": enable_inline_motion_contract,
+            "ag99live_motion_persona_effect_available": persona_effect_available,
             "enable_realtime_motion_plan": True,
             "model_info": _build_semantic_model_info(),
             "motion_prompt_instruction": "Use readable exaggerated head and smile motion.",
@@ -422,7 +424,7 @@ def test_submit_system_text_input_commits_remote_operator_metadata(
     assert event.extras["remote_operator"]["computer"] == "work"
 
 
-def test_emit_message_chain_does_not_parse_removed_inline_motion_route(
+def test_emit_message_chain_ignores_inline_anim_when_persona_effect_is_available(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -432,7 +434,10 @@ def test_emit_message_chain_does_not_parse_removed_inline_motion_route(
     Plain = module.Plain
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
-    coordinator.runtime_state = _runtime_state_stub(mode="inline_first")
+    coordinator.runtime_state = _runtime_state_stub(
+        mode="split_after_reply",
+        persona_effect_available=True,
+    )
     coordinator.session_state = type(
         "SessionStateStub",
         (),
@@ -512,6 +517,89 @@ def test_emit_message_chain_does_not_parse_removed_inline_motion_route(
     assert "<@anim" not in output_text
     assert "hello" in output_text
     assert "world" in output_text
+
+
+def test_emit_message_chain_dispatches_official_inline_anim_when_persona_effect_unavailable(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+    Plain = module.Plain
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(
+        mode="split_after_reply",
+        persona_effect_available=False,
+    )
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-inline-compat",
+            "last_user_text": "fallback user text",
+        },
+    )()
+
+    class ChatBufferStub:
+        def add(self, role: str, text: str) -> None:
+            del role
+            del text
+
+    coordinator.chat_buffer = ChatBufferStub()
+    coordinator.speaker_name = "assistant"
+    coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+
+    inline_broadcast: dict[str, object] = {}
+
+    async def fake_broadcast_motion_payload(**kwargs):
+        inline_broadcast.update(kwargs)
+        return True
+
+    coordinator.broadcast_motion_payload = fake_broadcast_motion_payload
+
+    async def fake_finish_turn(*, success: bool, reason: str | None):
+        del success
+        del reason
+
+    coordinator._finish_turn = fake_finish_turn
+    tag_payload = json.dumps(
+        {"mode": "inline", "intent": _build_valid_motion_intent(include_mode=False)},
+        separators=(",", ":"),
+    )
+
+    asyncio.run(
+        coordinator.emit_message_chain(
+            message_chain=[Plain("hello world")],
+            raw_reply_text_override=f"hello <@anim {tag_payload}> world",
+        )
+    )
+
+    assert inline_broadcast["mode"] == "preview"
+    assert inline_broadcast["source"] == "official_inline_anim_compat"
+    assert inline_broadcast["turn_id"] == "turn-inline-compat"
+    assert isinstance(inline_broadcast["message_id"], str)
+    assert inline_broadcast["message_id"]
+    motion_payload = inline_broadcast["motion_payload"]
+    assert motion_payload["schema_version"] == "engine.motion_intent.v3"
+    assert motion_payload["mode"] == "expressive"
+    assert motion_payload["axes"] == {"head_yaw": 62.0, "mouth_smile": 64.0}
+
+    assert sent_payloads
+    output_text = str(sent_payloads[0].get("payload", {}).get("text", ""))
+    assert "<@anim" not in output_text.lower()
+    assert "hello" in output_text.lower()
+    assert "world" in output_text.lower()
 
 
 def test_emit_message_chain_reuses_platform_visible_message_id_for_segment_outputs(
@@ -732,7 +820,7 @@ def test_emit_message_chain_dedupes_motion_client_object_for_segmented_output(
     assert motion_payloads[0]["message_id"] == "visible-msg::core_reply::0001"
 
 
-def test_emit_message_chain_treats_removed_inline_payload_as_text(
+def test_emit_message_chain_treats_inline_payload_as_visible_text_only_when_persona_effect_available(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -742,7 +830,10 @@ def test_emit_message_chain_treats_removed_inline_payload_as_text(
     Plain = module.Plain
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
-    coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
+    coordinator.runtime_state = _runtime_state_stub(
+        mode="split_after_reply",
+        persona_effect_available=True,
+    )
     coordinator.session_state = type(
         "SessionStateStub",
         (),
@@ -1365,7 +1456,7 @@ def test_handle_msg_accepts_motion_intent_preview_without_turn_id(
     assert handled_messages[0].turn_id is None
 
 
-def test_emit_message_chain_raw_reply_text_override_does_not_parse_inline_motion(
+def test_emit_message_chain_raw_reply_text_override_uses_official_inline_anim_compat(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1375,7 +1466,10 @@ def test_emit_message_chain_raw_reply_text_override_does_not_parse_inline_motion
     Plain = module.Plain
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
-    coordinator.runtime_state = _runtime_state_stub(mode="inline_first")
+    coordinator.runtime_state = _runtime_state_stub(
+        mode="split_after_reply",
+        persona_effect_available=False,
+    )
     coordinator.session_state = type(
         "SessionStateStub",
         (),
@@ -1431,7 +1525,10 @@ def test_emit_message_chain_raw_reply_text_override_does_not_parse_inline_motion
         )
     )
 
-    assert inline_broadcast == {}
+    assert inline_broadcast["mode"] == "preview"
+    assert inline_broadcast["source"] == "official_inline_anim_compat"
+    assert inline_broadcast["turn_id"] == "turn-inline-override"
+    assert inline_broadcast["motion_payload"]["schema_version"] == "engine.motion_intent.v3"
     assert sent_payloads
     output_text_payload = sent_payloads[0]
     assert output_text_payload.get("type") == "output.text"
@@ -1451,7 +1548,10 @@ def test_emit_message_chain_inline_invalid_v3_intent_does_not_broadcast_replacem
     Plain = module.Plain
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
-    coordinator.runtime_state = _runtime_state_stub(mode="inline_first")
+    coordinator.runtime_state = _runtime_state_stub(
+        mode="split_after_reply",
+        persona_effect_available=False,
+    )
     coordinator.session_state = type(
         "SessionStateStub",
         (),
@@ -1483,8 +1583,10 @@ def test_emit_message_chain_inline_invalid_v3_intent_does_not_broadcast_replacem
 
     coordinator.broadcast_motion_payload = fake_broadcast_motion_payload
 
+    invalid_intent = _build_valid_motion_intent(include_mode=False)
+    invalid_intent["intent_tags"] = []
     tag_payload = json.dumps(
-        {"mode": "inline", "intent": _build_valid_motion_intent()},
+        {"mode": "inline", "intent": invalid_intent},
         separators=(",", ":"),
     )
     raw_reply_text = f"hello <@anim {tag_payload}> world"
@@ -1509,7 +1611,10 @@ def test_emit_message_chain_inline_v1_intent_is_rejected(
     Plain = module.Plain
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
-    coordinator.runtime_state = _runtime_state_stub(mode="inline_first")
+    coordinator.runtime_state = _runtime_state_stub(
+        mode="split_after_reply",
+        persona_effect_available=False,
+    )
     coordinator.session_state = type(
         "SessionStateStub",
         (),

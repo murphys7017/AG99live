@@ -297,7 +297,7 @@ export function createAdapterAudioRuntime(
 
   function stopAudioAndSettleTurn(turnId: string | null, reason: string): void {
     let shouldStopAudio = false;
-    const activeSegment = findActiveAudioSegmentForTurn(turnId);
+    const activeSegment = findOpenAudioSegmentForTurn(turnId);
     if (activeSegment) {
       markAudioPlaybackTerminal(
         "failed",
@@ -342,7 +342,7 @@ export function createAdapterAudioRuntime(
     return findOpenAudioSegments()[0] ?? null;
   }
 
-  function findActiveAudioSegmentForTurn(turnId: string | null): ActiveAudioSegment | null {
+  function findOpenAudioSegmentForTurn(turnId: string | null): ActiveAudioSegment | null {
     return findOpenAudioSegments().find((segment) =>
       matchesTurn(segment.turnId, turnId)
     ) ?? null;
