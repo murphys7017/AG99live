@@ -105,7 +105,7 @@ export function configurePlaybackTimelineSegmentExecution(options: {
   motionTimelineSink: Pick<PlaybackTimelineMotionSink, "start">;
 }): void {
   const { playbackTimeline, sessionStore, motionTimelineSink } = options;
-  playbackTimeline.setSegmentExecutionPorts({
+  playbackTimeline.setSegmentSinks({
     session: {
       markTextReleased: sessionStore.markTextReleased,
       markAudioReleased: sessionStore.markAudioReleased,

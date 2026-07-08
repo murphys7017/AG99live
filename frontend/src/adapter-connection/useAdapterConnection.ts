@@ -87,7 +87,7 @@ export interface AdapterPlaybackTimelinePort {
   ) => void;
   releaseAssistantTextForPlayback: (messageId: string, turnId: string | null) => boolean;
   releaseAudioForPlayback: AdapterAudioRuntimeInstance["releaseAudioForPlayback"];
-  setSegmentExecutionPorts: AdapterAudioRuntimeInstance["setSegmentExecutionPorts"];
+  setSegmentSinks: AdapterAudioRuntimeInstance["setSegmentSinks"];
   startSegmentJob: AdapterAudioRuntimeInstance["startSegmentJob"];
   prepareSegmentJob: AdapterAudioRuntimeInstance["prepareSegmentJob"];
   getPlaybackTimelineSnapshotForSegment: AdapterAudioRuntimeInstance["getPlaybackTimelineSnapshotForSegment"];
@@ -245,7 +245,7 @@ export function createAdapterConnection(
   const {
     queueAudioForPlayback,
     releaseAudioForPlayback,
-    setSegmentExecutionPorts,
+    setSegmentSinks,
     startSegmentJob,
     prepareSegmentJob,
     getPlaybackTimelineSnapshotForSegment,
@@ -618,7 +618,7 @@ export function createAdapterConnection(
     setAudioTimelineStartedHandler,
     releaseAssistantTextForPlayback,
     releaseAudioForPlayback,
-    setSegmentExecutionPorts,
+    setSegmentSinks,
     startSegmentJob,
     prepareSegmentJob,
     getPlaybackTimelineSnapshotForSegment,

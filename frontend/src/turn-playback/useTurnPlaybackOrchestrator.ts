@@ -33,7 +33,7 @@ import type {
 } from "./ports.js";
 import type {
   PlaybackTimelineSegmentStartPort,
-} from "../playback-timeline/segmentJobExecutor.js";
+} from "../playback-timeline/segmentJob.js";
 
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 

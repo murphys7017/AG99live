@@ -113,7 +113,7 @@ export interface AdapterAudioRuntime {
     messageId: string,
     turnId: string | null,
   ) => boolean;
-  setSegmentExecutionPorts: ReturnType<typeof createPlaybackTimelineRuntime>["setSegmentExecutionPorts"];
+  setSegmentSinks: ReturnType<typeof createPlaybackTimelineRuntime>["setSegmentSinks"];
   startSegmentJob: ReturnType<typeof createPlaybackTimelineRuntime>["startSegmentJob"];
   prepareSegmentJob: ReturnType<typeof createPlaybackTimelineRuntime>["prepareSegmentJob"];
   hasPendingAudioForTurn: (turnId: string | null) => boolean;
@@ -180,7 +180,7 @@ export function createAdapterAudioRuntime(
   });
   const { playbackTimelineRuntime } = timelineController;
   const {
-    setSegmentExecutionPorts,
+    setSegmentSinks,
     startSegmentJob,
     prepareSegmentJob,
     prepareMotionOnlyTimeline,
@@ -277,7 +277,7 @@ export function createAdapterAudioRuntime(
   return {
     queueAudioForPlayback: audioReleaseController.queueAudioForPlayback,
     releaseAudioForPlayback: audioReleaseController.releaseAudioForPlayback,
-    setSegmentExecutionPorts,
+    setSegmentSinks,
     startSegmentJob,
     prepareSegmentJob,
     hasPendingAudioForTurn: audioSettlementController.hasPendingAudioForTurn,

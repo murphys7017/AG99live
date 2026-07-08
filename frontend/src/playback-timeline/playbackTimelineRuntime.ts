@@ -7,10 +7,10 @@ import {
   type PlaybackTimelineEngine,
 } from "./playbackTimelineEngine.js";
 import type {
-  PlaybackTimelineSegmentExecutionPorts,
+  PlaybackTimelineSegmentSinks,
   PlaybackTimelineSegmentExecutionResult,
   PlaybackTimelineSegmentJob,
-} from "./segmentJobExecutor.js";
+} from "./segmentJob.js";
 import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
 
 const AUDIO_TIMELINE_SINK_ID = "audio";
@@ -50,8 +50,8 @@ export interface PlaybackTimelineSegmentJobOptions {
 }
 
 export interface PlaybackTimelineRuntime {
-  setSegmentExecutionPorts: (
-    ports: PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload>,
+  setSegmentSinks: (
+    sinks: PlaybackTimelineSegmentSinks<NormalizedMotionPayload>,
   ) => void;
   startSegmentJob: (
     job: PlaybackTimelineSegmentJob<NormalizedMotionPayload>,
@@ -130,7 +130,7 @@ export function createPlaybackTimelineRuntime(
   deps: PlaybackTimelineRuntimeDeps,
 ): PlaybackTimelineRuntime {
   const timelines = new Map<string, PlaybackTimelineEntry>();
-  let segmentExecutionPorts: PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload> | null = null;
+  let segmentSinks: PlaybackTimelineSegmentSinks<NormalizedMotionPayload> | null = null;
 
   function resolveTimelineKey(
     turnId: string | null,
@@ -216,41 +216,41 @@ export function createPlaybackTimelineRuntime(
     return true;
   }
 
-  function setSegmentExecutionPorts(
-    ports: PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload>,
+  function setSegmentSinks(
+    sinks: PlaybackTimelineSegmentSinks<NormalizedMotionPayload>,
   ): void {
-    segmentExecutionPorts = ports;
+    segmentSinks = sinks;
   }
 
   function startSegmentJob(
     job: PlaybackTimelineSegmentJob<NormalizedMotionPayload>,
   ): PlaybackTimelineSegmentExecutionResult {
-    if (!segmentExecutionPorts) {
-      throw new Error("Playback timeline segment execution ports are not configured.");
+    if (!segmentSinks) {
+      throw new Error("Playback timeline segment sinks are not configured.");
     }
-    return startPreparedSegmentJob(job, segmentExecutionPorts);
+    return startPreparedSegmentJob(job, segmentSinks);
   }
 
   function startPreparedSegmentJob(
     job: PlaybackTimelineSegmentJob<NormalizedMotionPayload>,
-    ports: PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload>,
+    sinks: PlaybackTimelineSegmentSinks<NormalizedMotionPayload>,
   ): PlaybackTimelineSegmentExecutionResult {
     let releasedText = false;
     if (job.text.release) {
-      releasedText = ports.textSink.releaseAssistantTextForPlayback(
+      releasedText = sinks.textSink.releaseAssistantTextForPlayback(
         job.messageId,
         job.turnId,
       );
     }
     if (releasedText) {
-      ports.session.markTextReleased(job.turnId, job.messageId);
-      ports.session.markPhase(job.turnId, "playing");
+      sinks.session.markTextReleased(job.turnId, job.messageId);
+      sinks.session.markPhase(job.turnId, "playing");
     }
 
     let releasedAudio = false;
     if (job.audio.release) {
       prepareAudioTimeline(job.turnId, job.messageId, {
-        start: () => ports.audioSink.releaseAudioForPlayback(
+        start: () => sinks.audioSink.releaseAudioForPlayback(
           job.messageId,
           job.turnId,
         ),
@@ -269,7 +269,7 @@ export function createPlaybackTimelineRuntime(
       }
     }
     if (releasedAudio) {
-      ports.session.markAudioReleased(job.turnId, job.messageId);
+      sinks.session.markAudioReleased(job.turnId, job.messageId);
       const prepared = prepareSegmentJob(
         job.turnId,
         job.messageId,
@@ -310,7 +310,7 @@ export function createPlaybackTimelineRuntime(
       const timelineMode = job.audio.noAudioConfirmed && !job.audio.release
         ? "motion_only"
         : "audio";
-      const startMotion = () => ports.motionSink.start(
+      const startMotion = () => sinks.motionSink.start(
         motionPayload,
         {
           turnId: job.turnId,
@@ -326,7 +326,7 @@ export function createPlaybackTimelineRuntime(
           { start: startMotion },
         ) !== null;
         if (!prepared) {
-          ports.session.markMotionFailed(
+          sinks.session.markMotionFailed(
             job.turnId,
             job.messageId,
             "motion_only_timeline_unavailable",
@@ -344,7 +344,7 @@ export function createPlaybackTimelineRuntime(
           { start: startMotion },
         );
         if (!prepared) {
-          ports.session.markMotionFailed(
+          sinks.session.markMotionFailed(
             job.turnId,
             job.messageId,
             "motion_timeline_unavailable",
@@ -356,7 +356,7 @@ export function createPlaybackTimelineRuntime(
           };
         }
       }
-      ports.session.markMotionReleased(job.turnId, job.messageId);
+      sinks.session.markMotionReleased(job.turnId, job.messageId);
       const accepted = startTimelineSink(
         job.turnId,
         job.messageId,
@@ -364,13 +364,13 @@ export function createPlaybackTimelineRuntime(
       );
       releasedMotion = true;
       if (accepted === false) {
-        ports.session.markMotionFailed(
+        sinks.session.markMotionFailed(
           job.turnId,
           job.messageId,
           "motion_payload_rejected",
         );
       }
-      ports.session.markPhase(job.turnId, "playing");
+      sinks.session.markPhase(job.turnId, "playing");
     }
 
     return {
@@ -698,7 +698,7 @@ export function createPlaybackTimelineRuntime(
   }
 
   return {
-    setSegmentExecutionPorts,
+    setSegmentSinks,
     startSegmentJob,
     prepareSegmentJob,
     prepareAudioTimeline,

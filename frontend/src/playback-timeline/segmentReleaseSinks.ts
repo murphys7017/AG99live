@@ -8,7 +8,7 @@ import {
 import type {
   PlaybackTimelineSegmentAudioSink,
   PlaybackTimelineSegmentTextSink,
-} from "./segmentJobExecutor.js";
+} from "./segmentJob.js";
 
 export interface QueuedTextSegmentSinkState {
   pendingAssistantTexts: Map<string, PendingAssistantTextItem>;

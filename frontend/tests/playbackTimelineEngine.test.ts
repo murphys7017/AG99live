@@ -385,7 +385,7 @@ function testPlaybackTimelineRuntimeStartsSegmentJobThroughTimelineEntry(): void
     getAudioClock: () => null,
   });
   const events: string[] = [];
-  runtime.setSegmentExecutionPorts({
+  runtime.setSegmentSinks({
     session: {
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
