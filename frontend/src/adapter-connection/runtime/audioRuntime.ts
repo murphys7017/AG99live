@@ -225,18 +225,18 @@ export function createAdapterAudioRuntime(
     resetAudioTerminalBridge(audioBridge);
   }
 
-  async function playAudioAndAcknowledge(
+  async function startAudioSegmentPlayback(
     audioUrl: string,
     turnId: string | null,
     messageId: string,
   ): Promise<void> {
-    return timelineController.playAudioAndAcknowledge(audioUrl, turnId, messageId);
+    return timelineController.startAudioSegmentPlayback(audioUrl, turnId, messageId);
   }
 
   const audioReleaseController = createPlaybackTimelineAudioReleaseController({
     state: deps.state,
     startAudioPlayback: (audioUrl, turnId, messageId) => {
-      void playAudioAndAcknowledge(
+      void startAudioSegmentPlayback(
         audioUrl,
         turnId,
         messageId,

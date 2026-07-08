@@ -22,13 +22,13 @@ import {
   createPlaybackTimelineRuntime,
 } from "../../playback-timeline/playbackTimelineRuntime.js";
 import {
-  playAudioAndAcknowledge as playAudioAction,
-  stopAudioPlayback as stopAudioAction,
-  stopAudioPlaybackForSegment as stopAudioForSegmentAction,
-  type AudioPlaybackContext,
+  startAudioSegmentAndBridgeState,
+  stopAudioSegmentAndBridgeState,
+  stopAudioSegmentAndBridgeStateForSegment,
+  type AudioPlaybackStateBridgeContext,
   type AudioPlaybackSessionStore,
   type AudioPlaybackState,
-} from "./audioPlaybackActions.js";
+} from "./audioPlaybackStateBridge.js";
 import type { AudioPlaybackTerminalState } from "./audioRuntime.js";
 
 export interface AdapterAudioTimelineControllerDeps {
@@ -97,7 +97,7 @@ export function createAdapterAudioTimelineController(
     audioSegmentSink,
   });
 
-  const audioPlaybackCtx: AudioPlaybackContext = {
+  const audioPlaybackStateBridgeCtx: AudioPlaybackStateBridgeContext = {
     get state() {
       return deps.state;
     },
@@ -112,19 +112,28 @@ export function createAdapterAudioTimelineController(
 
   return {
     playbackTimelineRuntime,
-    playAudioAndAcknowledge: (
+    startAudioSegmentPlayback: (
       audioUrl: string,
       turnId: string | null,
       messageId: string,
-    ) => playAudioAction(audioPlaybackCtx, audioUrl, turnId, messageId),
+    ) => startAudioSegmentAndBridgeState(
+      audioPlaybackStateBridgeCtx,
+      audioUrl,
+      turnId,
+      messageId,
+    ),
     stopAudioPlayback: () => {
-      stopAudioAction(audioPlaybackCtx);
+      stopAudioSegmentAndBridgeState(audioPlaybackStateBridgeCtx);
     },
     stopAudioPlaybackForSegment: (
       turnId: string | null,
       messageId: string | null,
     ) => {
-      stopAudioForSegmentAction(audioPlaybackCtx, turnId, messageId);
+      stopAudioSegmentAndBridgeStateForSegment(
+        audioPlaybackStateBridgeCtx,
+        turnId,
+        messageId,
+      );
     },
   };
 }

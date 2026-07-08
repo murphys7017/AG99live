@@ -32,7 +32,7 @@ export interface AudioPlaybackSessionStore {
   ) => void;
 }
 
-export interface AudioPlaybackContext {
+export interface AudioPlaybackStateBridgeContext {
   state: AudioPlaybackState;
   audioSegmentRunner: PlaybackTimelineAudioSegmentRunner;
   pushHistory: (role: string, text: string) => void;
@@ -46,13 +46,13 @@ export interface AudioPlaybackContext {
   sessionStore?: AudioPlaybackSessionStore;
 }
 
-export async function playAudioAndAcknowledge(
-  ctx: AudioPlaybackContext,
+export async function startAudioSegmentAndBridgeState(
+  ctx: AudioPlaybackStateBridgeContext,
   audioUrl: string,
   turnId: string | null,
   messageId: string,
 ): Promise<void> {
-  stopAudioPlayback(ctx);
+  stopAudioSegmentAndBridgeState(ctx);
   ctx.resetTerminal();
   ctx.sessionStore?.markAudioReleased(turnId, messageId);
   ctx.state.isPlayingAudio = true;
@@ -141,16 +141,18 @@ export async function playAudioAndAcknowledge(
   }
 }
 
-export function stopAudioPlayback(ctx: AudioPlaybackContext): void {
-  stopAudioPlaybackForSegment(
+export function stopAudioSegmentAndBridgeState(
+  ctx: AudioPlaybackStateBridgeContext,
+): void {
+  stopAudioSegmentAndBridgeStateForSegment(
     ctx,
     ctx.state.audioPlaybackStartedTurnId,
     ctx.state.audioPlaybackStartedMessageId,
   );
 }
 
-export function stopAudioPlaybackForSegment(
-  ctx: AudioPlaybackContext,
+export function stopAudioSegmentAndBridgeStateForSegment(
+  ctx: AudioPlaybackStateBridgeContext,
   turnId: string | null,
   messageId: string | null,
 ): void {
