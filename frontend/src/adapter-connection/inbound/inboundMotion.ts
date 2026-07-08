@@ -18,7 +18,6 @@ export interface InboundMotionState {
 
 export interface InboundMotionContext {
   state: InboundMotionState;
-  activeAudioTurnId: string | null;
   pushHistory: (role: "system" | "error", text: string) => void;
 }
 
@@ -33,7 +32,6 @@ export function applyInboundMotionPayload(
   const state = ctx.state;
   const envelopeTurnId = normalizeTurnIdForComparison(envelope.turn_id);
   const currentTurnId = normalizeTurnIdForComparison(state.currentTurnId);
-  const activeAudioTurnId = normalizeTurnIdForComparison(ctx.activeAudioTurnId);
   console.info(
     "[Connection] engine motion payload received. type=",
     envelope.type,
@@ -41,62 +39,7 @@ export function applyInboundMotionPayload(
     envelopeTurnId,
     "currentTurnId=",
     currentTurnId,
-    "activeAudioTurnId=",
-    activeAudioTurnId,
   );
-
-  const matchesCurrentTurn = Boolean(
-    envelopeTurnId
-    && currentTurnId
-    && envelopeTurnId === currentTurnId,
-  );
-  const matchesActiveAudioTurn = Boolean(
-    envelopeTurnId
-    && activeAudioTurnId
-    && envelopeTurnId === activeAudioTurnId,
-  );
-
-  if (
-    envelopeTurnId
-    && currentTurnId
-    && envelopeTurnId !== currentTurnId
-  ) {
-    if (
-      matchesActiveAudioTurn
-    ) {
-      console.info(
-        "[Connection] accepting late motion payload for active turn. envelope_turn_id=",
-        envelopeTurnId,
-        "current_turn_id=",
-        currentTurnId,
-      );
-    } else {
-      console.warn(
-        "[Connection] discarding motion payload for stale turn_id. envelope_turn_id=",
-        envelopeTurnId,
-        "current_turn_id=",
-        currentTurnId,
-      );
-      state.statusMessage = `忽略过期动作计划（turn_id=${envelopeTurnId}）。`;
-      ctx.pushHistory("system", state.statusMessage);
-      return { accepted: false };
-    }
-  }
-
-  if (
-    !matchesCurrentTurn
-    && !matchesActiveAudioTurn
-    && !currentTurnId
-    && !activeAudioTurnId
-  ) {
-    console.warn(
-      "[Connection] discarding orphan motion payload with no active turn context.",
-      envelope,
-    );
-    state.statusMessage = "忽略孤立动作计划（当前无活跃 turn 上下文）。";
-    ctx.pushHistory("system", state.statusMessage);
-    return { accepted: false };
-  }
 
   const rawPayload = envelope.payload;
   const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};

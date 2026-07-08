@@ -19,6 +19,7 @@ import {
   type PendingAssistantTextItem,
   type PendingAudioItem,
 } from "../../playback-timeline/playbackReleaseQueue.js";
+import type { PendingMotionItem } from "./pendingMotionIngress.js";
 
 export interface InboundRuntimeDispatchState {
   currentTurnId: string | null;
@@ -31,6 +32,7 @@ export interface InboundRuntimeDispatchState {
   pttModeEnabled: boolean;
   pendingAssistantTexts: Map<string, PendingAssistantTextItem>;
   pendingAudios: Map<string, PendingAudioItem>;
+  pendingMotions: Map<string, PendingMotionItem>;
 }
 
 export interface InboundRuntimeDispatchDeps {
@@ -56,6 +58,7 @@ export interface InboundRuntimeDispatchDeps {
     turnId: string | null,
     reason: string,
   ) => void;
+  clearPendingMotionsForTurn: (turnId: string | null, reason: string) => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
   reportRuntimeProtocolViolation: (message: string) => void;
@@ -114,6 +117,7 @@ function applyTurnStarted(
   deps.resetAudioPlaybackTerminal();
   s.pendingAssistantTexts.clear();
   s.pendingAudios.clear();
+  s.pendingMotions.clear();
   s.turnFinishedTurnId = null;
   s.turnFinishedSuccess = true;
   s.turnFinishedReason = "";
@@ -182,6 +186,7 @@ function applyInterrupt(
   deps.resetAudioPlaybackTerminal();
   deletePendingItemsForTurn(s.pendingAssistantTexts, interruptedTurnId);
   deletePendingItemsForTurn(s.pendingAudios, interruptedTurnId);
+  deletePendingItemsForTurn(s.pendingMotions, interruptedTurnId);
   if (matchesTurn(s.currentTurnId, interruptedTurnId)) {
     s.currentTurnId = null;
   }
@@ -223,6 +228,10 @@ function applySynthFinished(
   deps.markMissingAudiosForTurn(
     event.turnId,
     "synth_finished_without_audio_playback",
+  );
+  deps.clearPendingMotionsForTurn(
+    event.turnId,
+    "synth_finished_without_matching_output_segment",
   );
   const activeAudioSegment = deps.findActiveAudioSegment();
   const hasActiveAudioForTurn = Boolean(

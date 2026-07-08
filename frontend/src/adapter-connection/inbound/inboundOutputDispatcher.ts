@@ -40,6 +40,7 @@ export interface InboundOutputDispatchDeps {
       text: string,
       messageId: string,
       mode?: string,
+      audioExpected?: boolean,
     ) => void;
     markAudioReceived: (
       turnId: string | null,
@@ -73,6 +74,10 @@ export interface InboundOutputDispatchDeps {
   queuePendingAudioForPlayback: (
     map: Map<string, PendingAudioItem>,
     url: string,
+    turnId: string | null,
+    messageId: string,
+  ) => void;
+  flushPendingMotionForSegment: (
     turnId: string | null,
     messageId: string,
   ) => void;
@@ -129,7 +134,9 @@ function applyOutputText(
       text,
       event.messageId,
       "replace",
+      event.audioExpected,
     );
+    deps.flushPendingMotionForSegment(event.turnId, event.messageId);
   }
   s.lastError = "";
   s.statusMessage = text ? "已收到文本回复，等待同步播放。" : "已收到空文本回复。";
@@ -144,6 +151,7 @@ async function applyOutputAudio(
   const existingText = deps.sessionStore
     ?.ensureSegment(event.turnId, event.messageId)
     .text.content;
+  deps.flushPendingMotionForSegment(event.turnId, event.messageId);
 
   if (!event.audioUrl) {
     if (!existingText) {
@@ -167,6 +175,7 @@ async function applyOutputAudio(
     event.messageId,
     event.captionText,
   ) ?? true;
+  deps.flushPendingMotionForSegment(event.turnId, event.messageId);
   if (!existingText) {
     deps.sessionStore?.markTextDelivered(event.turnId, event.messageId);
   }

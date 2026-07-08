@@ -24,6 +24,7 @@ export interface OutputTextPayload {
   text: string;
   speaker_name: string;
   avatar: string;
+  audio_expected: boolean;
 }
 
 export interface OutputAudioPayload {

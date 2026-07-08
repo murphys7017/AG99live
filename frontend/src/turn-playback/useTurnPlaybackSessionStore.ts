@@ -236,6 +236,7 @@ export function useTurnPlaybackSessionStore() {
     text: string,
     messageId: string,
     mode: TextReceiveMode = "replace",
+    audioExpected = false,
   ): void {
     const trimmed = text.trim();
     if (!trimmed) {
@@ -251,6 +252,7 @@ export function useTurnPlaybackSessionStore() {
     segment.text.receivedAtMs = performance.now();
     segment.text.released = false;
     segment.text.delivered = false;
+    segment.audio.expected = Boolean(audioExpected);
     if (!session.backend.turnStarted) {
       session.backend.turnStarted = true;
     }
@@ -309,6 +311,7 @@ export function useTurnPlaybackSessionStore() {
     segment.audio.url = trimmed;
     const normalizedCaption = captionText.trim();
     segment.audio.captionText = normalizedCaption || segment.audio.captionText;
+    segment.audio.expected = true;
     segment.audio.receivedAtMs = performance.now();
     segment.audio.released = false;
     segment.audio.terminal = "idle";

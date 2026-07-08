@@ -306,6 +306,7 @@ class TurnCoordinator:
                     text=reply_text,
                     speaker_name=self.speaker_name,
                     avatar="",
+                    audio_expected=bool(record_paths),
                 )
             )
 
@@ -1125,10 +1126,31 @@ class TurnCoordinator:
             hint,
         )
         if curve_hint is None:
-            self._fail_pending_performance_curve_motion(
+            pending_motions.pop(pending_key, None)
+            clear = getattr(runtime, "clear", None)
+            if callable(clear):
+                clear(turn_id=normalized_turn_id, message_id=normalized_message_id)
+            self._record_motion_lab_raw_event(
+                event_type="performance_curve.skipped",
                 turn_id=normalized_turn_id,
                 message_id=normalized_message_id,
-                reason="not_ready_before_audio_egress",
+                source_route=f"{str(pending.get('source') or 'engine.motion_payload')}.performance_curve_hint",
+                phase="performance_curve",
+                payload_kind="ag99.performance_curve_hint.v1",
+                raw={
+                    "reason": "not_ready_before_audio_egress",
+                    "motion_intent_tags": [
+                        str(item).strip()
+                        for item in motion_payload.get("intent_tags", [])
+                        if str(item).strip()
+                    ],
+                },
+            )
+            logger.info(
+                "WIRING performance_curve_hint_skipped turn_id=%s message_id=%s reason=%s",
+                normalized_turn_id,
+                normalized_message_id,
+                "not_ready_before_audio_egress",
             )
             return False
         clear = getattr(runtime, "clear", None)

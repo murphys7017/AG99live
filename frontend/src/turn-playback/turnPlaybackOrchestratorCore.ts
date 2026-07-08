@@ -9,6 +9,7 @@ export interface PendingTurnPlaybackGroup<TMotionPayload = unknown> {
   turnId: string | null;
   firstReadyAtMs: number;
   textReady: boolean;
+  audioExpected: boolean;
   audioReady: boolean;
   noAudioConfirmed: boolean;
   motionReady: boolean;
@@ -90,6 +91,7 @@ export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
       turnId,
       firstReadyAtMs: options.now(),
       textReady: false,
+      audioExpected: false,
       audioReady: false,
       noAudioConfirmed: false,
       motionReady: false,
@@ -272,6 +274,11 @@ export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
       return;
     }
 
+    if (group.audioExpected) {
+      clearReleaseTimer(group);
+      return;
+    }
+
     const elapsedMs = options.now() - group.firstReadyAtMs;
     if (elapsedMs >= TEXT_ONLY_RELEASE_WAIT_MS) {
       releaseTextOnly(group, `text_wait_elapsed:${reason}`);
@@ -305,6 +312,14 @@ export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
       const group = getOrCreateGroup(messageId, turnId);
       group.audioReady = true;
       evaluateGroup(group, "audio_ready");
+    },
+    markAudioExpected: (
+      messageId: string,
+      turnId: string | null,
+    ) => {
+      const group = getOrCreateGroup(messageId, turnId);
+      group.audioExpected = true;
+      evaluateGroup(group, "audio_expected");
     },
     markMotionReady: (
       messageId: string,

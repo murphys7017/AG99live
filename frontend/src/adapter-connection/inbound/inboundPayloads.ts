@@ -103,12 +103,17 @@ export function parseOutputTextPayload(
   if (!record.ok) return record;
   const text = requiredString(envelope.type, record.payload, "text");
   if (!text.ok) return text;
+  const audioExpected = record.payload.audio_expected;
+  if (audioExpected !== undefined && typeof audioExpected !== "boolean") {
+    return invalidPayload(envelope.type, "payload.audio_expected", "boolean | undefined");
+  }
   return {
     ok: true,
     payload: {
       text: text.payload,
       speaker_name: optionalString(record.payload.speaker_name) ?? "",
       avatar: optionalString(record.payload.avatar) ?? "",
+      audio_expected: audioExpected ?? false,
     },
   };
 }

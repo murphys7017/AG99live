@@ -88,6 +88,7 @@ function createMissingMotionTimelineWiring() {
 function createHarness(options: {
   motionAccepted?: boolean;
   audioTimelineAfterRelease?: PlaybackTimelineSnapshot | null;
+  installFakeTimers?: boolean;
 } = {}) {
   const sessionStore = useTurnPlaybackSessionStore();
   const released: string[] = [];
@@ -102,6 +103,26 @@ function createHarness(options: {
   const logs: Array<{ message: string; details: Record<string, unknown> }> = [];
   const scope = effectScope();
   const originalConsoleInfo = console.info;
+  const originalSetTimeout = window.setTimeout;
+  const originalClearTimeout = window.clearTimeout;
+  const fakeTimers = new Map<number, () => void>();
+  let nextFakeTimerId = 1;
+  if (options.installFakeTimers) {
+    window.setTimeout = ((fn: TimerHandler, _timeout?: number) => {
+      const id = nextFakeTimerId++;
+      fakeTimers.set(id, () => {
+        if (typeof fn === "function") {
+          fn();
+        }
+      });
+      return id;
+    }) as typeof window.setTimeout;
+    window.clearTimeout = ((timer?: number) => {
+      if (typeof timer === "number") {
+        fakeTimers.delete(timer);
+      }
+    }) as typeof window.clearTimeout;
+  }
   console.info = (...args: unknown[]) => {
     if (
       typeof args[0] === "string"
@@ -215,10 +236,21 @@ function createHarness(options: {
     motionContexts,
     turnChanges,
     logs,
+    fakeTimers,
+    runFakeTimer: (timerId: number) => {
+      const fn = fakeTimers.get(timerId);
+      assert.ok(fn, `timer ${timerId} should exist`);
+      fakeTimers.delete(timerId);
+      fn();
+    },
     flush: () => nextTick(),
     stop: () => {
       scope.stop();
       console.info = originalConsoleInfo;
+      if (options.installFakeTimers) {
+        window.setTimeout = originalSetTimeout;
+        window.clearTimeout = originalClearTimeout;
+      }
     },
   };
 }
@@ -540,6 +572,86 @@ async function testLateAudioAfterTextReleaseOnlyReleasesAudio(): Promise<void> {
   assert.deepEqual(h.released, [
     "text:msg-late-audio:turn-late-audio",
     "audio:msg-late-audio:turn-late-audio",
+  ]);
+  h.stop();
+}
+
+async function testAudioExpectedDoesNotReleaseTextOnlyBeforeTimeout(): Promise<void> {
+  const h = createHarness({ installFakeTimers: true });
+  h.sessionStore.setActiveSession("turn-audio-expected");
+  h.sessionStore.markTurnStarted("turn-audio-expected");
+
+  h.sessionStore.markTextReceived(
+    "turn-audio-expected",
+    "hello",
+    "msg-audio-expected",
+    "replace",
+    true,
+  );
+
+  await h.flush();
+  await h.flush();
+  assert.deepEqual(h.released, []);
+  assert.equal(h.fakeTimers.size, 1);
+
+  const timeoutTimer = [...h.fakeTimers.keys()][0];
+  h.runFakeTimer(timeoutTimer);
+  await h.flush();
+  await h.flush();
+
+  const segment = h.sessionStore
+    .getSession("turn-audio-expected")
+    ?.segments.get("msg-audio-expected");
+  assert.equal(segment?.audio.terminal, "failed");
+  assert.equal(segment?.audio.reason, "audio_expected_timeout");
+  assert.deepEqual(h.released, [
+    "text:msg-audio-expected:turn-audio-expected",
+  ]);
+  h.stop();
+}
+
+async function testAudioExpectedTimerClearsWhenAudioArrives(): Promise<void> {
+  const h = createHarness({ installFakeTimers: true });
+  h.sessionStore.setActiveSession("turn-audio-arrives");
+  h.sessionStore.markTurnStarted("turn-audio-arrives");
+
+  h.sessionStore.markTextReceived(
+    "turn-audio-arrives",
+    "hello",
+    "msg-audio-arrives",
+    "replace",
+    true,
+  );
+  h.sessionStore.markMotionReceived(
+    "turn-audio-arrives",
+    motionPayload,
+    "msg-audio-arrives",
+  );
+  await h.flush();
+  await h.flush();
+  assert.equal(h.fakeTimers.size, 1);
+
+  h.sessionStore.markAudioReceived(
+    "turn-audio-arrives",
+    "http://localhost/audio-arrives.wav",
+    "msg-audio-arrives",
+  );
+  await h.flush();
+  await h.flush();
+
+  const segmentBeforeRelease = h.sessionStore
+    .getSession("turn-audio-arrives")
+    ?.segments.get("msg-audio-arrives");
+  assert.equal(segmentBeforeRelease?.audio.terminal, "idle");
+  assert.notEqual(segmentBeforeRelease?.audio.reason, "audio_expected_timeout");
+  assert.equal(h.fakeTimers.size, 0);
+
+  assert.deepEqual(h.released, [
+    "text:msg-audio-arrives:turn-audio-arrives",
+    "audio:msg-audio-arrives:turn-audio-arrives",
+  ]);
+  assert.deepEqual(h.motionSinkStarts, [
+    "motion:msg-audio-arrives:turn-audio-arrives",
   ]);
   h.stop();
 }
@@ -1043,6 +1155,8 @@ async function run(): Promise<void> {
   await testMotionWithoutReceivedAtMarksSegmentFailed();
   await testPerformanceCurveHintIsMergedBeforeMotionRelease();
   await testLateAudioAfterTextReleaseOnlyReleasesAudio();
+  await testAudioExpectedDoesNotReleaseTextOnlyBeforeTimeout();
+  await testAudioExpectedTimerClearsWhenAudioArrives();
   testMotionTimelineSinkMarksTimelineFailedWhenEngineRejects();
   testMotionTimelineSinkUsesPreparedSyntheticTimelineWhenAudioAbsent();
   testMotionTimelineSinkRejectsMissingAudioTimeline();

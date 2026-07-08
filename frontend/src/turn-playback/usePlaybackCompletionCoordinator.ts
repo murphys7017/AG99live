@@ -521,18 +521,14 @@ export function usePlaybackCompletionCoordinator(
     if (event.status === "completed") {
       completeMotionSegmentByKey(currentMotionRun.segmentKey, "motion_completed_after_audio");
     } else if (event.status === "stopped") {
-      // 按原因区分：中断/重置类停止需要标记 motion failed，
-      // 否则 segment 会卡在 motion.started=true 永远无法 settled
-      // 正常 unmount/clean stop 不标记
-      if (event.reason && ["interrupted", "reset", "switch_model", "reconnect"].includes(event.reason)) {
-        const found = findSegmentByKey(currentMotionRun.segmentKey);
-        if (found) {
-          options.sessionStore.markMotionFailed(
-            found.segment.turnId,
-            found.segment.messageId,
-            event.reason,
-          );
-        }
+      // started motion must always reach a terminal state; otherwise playback_finished can stall.
+      const found = findSegmentByKey(currentMotionRun.segmentKey);
+      if (found) {
+        options.sessionStore.markMotionFailed(
+          found.segment.turnId,
+          found.segment.messageId,
+          event.reason || "motion_stopped_without_terminal",
+        );
       }
     } else {
       const found = findSegmentByKey(currentMotionRun.segmentKey);

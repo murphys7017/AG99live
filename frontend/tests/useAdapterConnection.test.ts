@@ -391,6 +391,26 @@ function motionIntentEnvelope(messageId: string, turnId: string | null) {
   };
 }
 
+function performanceCurveHintEnvelope(messageId: string, turnId: string | null) {
+  return {
+    type: "engine.performance_curve_hint",
+    version: "v2",
+    message_id: messageId,
+    timestamp: "2026-05-08T00:00:03.000Z",
+    turn_id: turnId,
+    source: "backend",
+    payload: {
+      schema_version: "ag99.performance_curve_hint.v1",
+      curve_family: "quick_in_hold_soft_out",
+      entry: "quick",
+      hold: "steady",
+      exit: "soft",
+      emphasis: "early",
+      energy: "medium",
+    },
+  };
+}
+
 function testInvalidJsonMessage(): void {
   withConnectedAdapter(({ adapter, socket }) => {
     const initialHistoryLength = adapter.state.historyEntries.length;
@@ -594,10 +614,13 @@ function testTurnStartedResetsPendingMaps(): void {
       source: "backend",
       payload: { text: "queued", speaker_name: "assistant", avatar: "" },
     }));
+    socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-old-motion", "turn-old")));
+    assert.equal(adapter.state.pendingMotions.size, 1);
     sendTurnStarted(socket, "turn-new");
     assert.equal(adapter.state.currentTurnId, "turn-new");
     assert.equal(adapter.state.pendingAssistantTexts.size, 0);
     assert.equal(adapter.state.pendingAudios.size, 0);
+    assert.equal(adapter.state.pendingMotions.size, 0);
   });
 }
 
@@ -980,6 +1003,15 @@ async function testCurrentSynthFinishedCreatesMissingSession(): Promise<void> {
 function testInvalidMotionDoesNotRewritePreviousSegment(): void {
   withConnectedAdapter(({ socket, sessionStore }) => {
     sendTurnStarted(socket, "turn-motion-old");
+    socket.emitMessage(JSON.stringify({
+      type: "output.text",
+      version: "v2",
+      message_id: "m-motion-valid",
+      timestamp: "2026-05-08T00:00:01.000Z",
+      turn_id: "turn-motion-old",
+      source: "backend",
+      payload: { text: "motion segment", speaker_name: "assistant", avatar: "" },
+    }));
     socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-motion-valid", "turn-motion-old")));
 
     const beforeSessionCount = sessionStore.getSessions().length;
@@ -1137,6 +1169,150 @@ function testSendMotionPreviewUsesOutboundProtocolEnvelope(): void {
       },
     });
     assert.equal(adapter.state.statusMessage, "已发送动作测试载荷（engine.motion_intent）。");
+  });
+}
+
+function testMotionBeforeAudioIsQueuedUntilSegmentExists(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-motion-before-audio");
+    socket.emitMessage(JSON.stringify(motionIntentEnvelope(
+      "m-motion-before-audio",
+      "turn-motion-before-audio",
+    )));
+
+    assert.equal(
+      sessionStore.getSession("turn-motion-before-audio")?.segments.has("m-motion-before-audio"),
+      false,
+    );
+    assert.equal(
+      adapter.state.pendingMotions.has(pendingKey("turn-motion-before-audio", "m-motion-before-audio")),
+      true,
+    );
+
+    sendOutputAudio(socket, {
+      turnId: "turn-motion-before-audio",
+      messageId: "m-motion-before-audio",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/motion-before-audio.wav",
+    });
+
+    const segment = sessionStore
+      .getSession("turn-motion-before-audio")
+      ?.segments.get("m-motion-before-audio");
+    assert.equal(segment?.motion.payload?.kind, "semantic_intent");
+    assert.equal(
+      adapter.state.pendingMotions.has(pendingKey("turn-motion-before-audio", "m-motion-before-audio")),
+      false,
+    );
+  });
+}
+
+function testOrphanMotionIsRejectedOnSynthFinishedWithoutCreatingSegment(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-orphan-motion");
+    socket.emitMessage(JSON.stringify(motionIntentEnvelope(
+      "m-orphan-motion",
+      "turn-orphan-motion",
+    )));
+    sendSynthFinished(socket, "turn-orphan-motion", "synth-orphan-motion");
+
+    assert.equal(
+      sessionStore.getSession("turn-orphan-motion")?.segments.has("m-orphan-motion"),
+      false,
+    );
+    assert.equal(
+      adapter.state.pendingMotions.has(pendingKey("turn-orphan-motion", "m-orphan-motion")),
+      false,
+    );
+    assert.match(adapter.state.lastError, /动作载荷缺少同段输出/);
+  });
+}
+
+function testLateOrphanMotionAfterSynthFinishedIsRejectedWithoutPending(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-late-orphan-motion");
+    sendSynthFinished(socket, "turn-late-orphan-motion", "synth-late-orphan-motion");
+    socket.emitMessage(JSON.stringify(motionIntentEnvelope(
+      "m-late-orphan-motion",
+      "turn-late-orphan-motion",
+    )));
+
+    assert.equal(
+      sessionStore.getSession("turn-late-orphan-motion")?.segments.has("m-late-orphan-motion"),
+      false,
+    );
+    assert.equal(
+      adapter.state.pendingMotions.has(pendingKey("turn-late-orphan-motion", "m-late-orphan-motion")),
+      false,
+    );
+    assert.match(adapter.state.lastError, /动作载荷缺少同段输出/);
+  });
+}
+
+function testPerformanceCurveHintWithoutSegmentIsRejected(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-orphan-curve");
+    socket.emitMessage(JSON.stringify(performanceCurveHintEnvelope(
+      "m-orphan-curve",
+      "turn-orphan-curve",
+    )));
+
+    assert.equal(
+      sessionStore.getSession("turn-orphan-curve")?.segments.has("m-orphan-curve"),
+      false,
+    );
+    assert.match(adapter.state.lastError, /表演曲线提示缺少同段输出/);
+  });
+}
+
+function testPerformanceCurveHintAppliesToExistingSegment(): void {
+  withConnectedAdapter(({ socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-curve-segment");
+    socket.emitMessage(JSON.stringify({
+      type: "output.text",
+      version: "v2",
+      message_id: "m-curve-segment",
+      timestamp: "2026-05-08T00:00:01.000Z",
+      turn_id: "turn-curve-segment",
+      source: "backend",
+      payload: { text: "curve segment", speaker_name: "assistant", avatar: "" },
+    }));
+    socket.emitMessage(JSON.stringify(performanceCurveHintEnvelope(
+      "m-curve-segment",
+      "turn-curve-segment",
+    )));
+
+    const segment = sessionStore
+      .getSession("turn-curve-segment")
+      ?.segments.get("m-curve-segment");
+    assert.equal(
+      segment?.motion.performanceCurveHint?.schema_version,
+      "ag99.performance_curve_hint.v1",
+    );
+  });
+}
+
+function testLateMotionUsesEnvelopeSegmentIdentityWithoutActiveAudio(): void {
+  withConnectedAdapter(({ socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-old-motion");
+    socket.emitMessage(JSON.stringify({
+      type: "output.text",
+      version: "v2",
+      message_id: "m-old-motion",
+      timestamp: "2026-05-08T00:00:01.000Z",
+      turn_id: "turn-old-motion",
+      source: "backend",
+      payload: { text: "old turn", speaker_name: "assistant", avatar: "" },
+    }));
+    sendTurnStarted(socket, "turn-current-motion");
+
+    socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-old-motion", "turn-old-motion")));
+
+    const oldSegment = sessionStore
+      .getSession("turn-old-motion")
+      ?.segments.get("m-old-motion");
+    const currentSession = sessionStore.getSession("turn-current-motion");
+    assert.equal(oldSegment?.motion.payload?.kind, "semantic_intent");
+    assert.equal(currentSession?.segments.has("m-old-motion"), false);
   });
 }
 
@@ -1932,6 +2108,12 @@ async function run(): Promise<void> {
   await testCurrentSynthFinishedCreatesMissingSession();
   testMotionWithoutTurnIdIsRejected();
   testInvalidMotionDoesNotRewritePreviousSegment();
+  testMotionBeforeAudioIsQueuedUntilSegmentExists();
+  testOrphanMotionIsRejectedOnSynthFinishedWithoutCreatingSegment();
+  testLateOrphanMotionAfterSynthFinishedIsRejectedWithoutPending();
+  testPerformanceCurveHintWithoutSegmentIsRejected();
+  testPerformanceCurveHintAppliesToExistingSegment();
+  testLateMotionUsesEnvelopeSegmentIdentityWithoutActiveAudio();
   testBackToBackTurnsDoNotSharePendingState();
   testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted();
   testStaleInterruptReportsProtocolViolationWithoutClearingCurrentPlayback();

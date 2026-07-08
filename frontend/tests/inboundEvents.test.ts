@@ -47,6 +47,27 @@ function testOutputTextUsesEnvelopeIdentity(): void {
   assert.equal(event.turnId, "turn-1");
   assert.equal(event.messageId, "m-1");
   assert.equal(event.text, "hello");
+  assert.equal(event.audioExpected, false);
+}
+
+function testOutputTextMapsAudioExpected(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("output.text", {
+      text: " hello ",
+      speaker_name: "assistant",
+      avatar: "",
+      audio_expected: true,
+    }, {
+      turnId: "turn-1",
+    }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "output_text");
+  if (event.kind !== "output_text") {
+    throw new Error("expected output_text event");
+  }
+  assert.equal(event.audioExpected, true);
 }
 
 function testOutputAudioUsesEnvelopeIdentity(): void {
@@ -351,6 +372,23 @@ function testInvalidOutputTextPayloadReturnsProtocolError(): void {
   assert.equal(event.warningKey, "payload:output.text:payload.text");
 }
 
+function testInvalidOutputTextAudioExpectedReturnsProtocolError(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("output.text", {
+      text: "hello",
+      audio_expected: "true",
+    }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
+  }
+  assert.equal(event.error.code, "invalid_payload");
+  assert.equal(event.error.path, "payload.audio_expected");
+}
+
 function testOutputAudioRejectsVisibleTextPayloadField(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("output.audio", {
@@ -529,6 +567,7 @@ function testInvalidMotionTuningSamplesStatePayloadReturnsProtocolError(): void 
 
 function run(): void {
   testOutputTextUsesEnvelopeIdentity();
+  testOutputTextMapsAudioExpected();
   testOutputAudioUsesEnvelopeIdentity();
   testOutputTextRequiresTurnId();
   testOutputAudioRequiresTurnId();
@@ -545,6 +584,7 @@ function run(): void {
   testMissingSegmentMessageIdReturnsProtocolError();
   testUnhandledTypeReturnsUnhandled();
   testInvalidOutputTextPayloadReturnsProtocolError();
+  testInvalidOutputTextAudioExpectedReturnsProtocolError();
   testOutputAudioRejectsVisibleTextPayloadField();
   testInvalidTurnFinishedReasonReturnsProtocolError();
   testInvalidHistoryCreatedPayloadReturnsProtocolError();

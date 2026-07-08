@@ -280,6 +280,7 @@ def build_output_text(
     text: str,
     speaker_name: str,
     avatar: str,
+    audio_expected: bool = False,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_OUTPUT_TEXT,
@@ -290,6 +291,7 @@ def build_output_text(
             "text": text,
             "speaker_name": speaker_name,
             "avatar": avatar,
+            "audio_expected": bool(audio_expected),
         },
     )
 

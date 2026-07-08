@@ -20,6 +20,7 @@ import {
 } from "../features/modelSyncRewrite.js";
 import {
   buildPendingPlaybackKey,
+  matchesPlaybackGroup,
   queueAssistantTextForPlayback as queuePendingAssistantTextForPlayback,
 } from "../../playback-timeline/playbackReleaseQueue.js";
 import type { useAdapterHistory } from "../history/useAdapterHistory.js";
@@ -111,6 +112,94 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     };
   }
 
+  function hasPlaybackSegment(turnId: string | null, messageId: string): boolean {
+    const sessionStore = deps.getSessionStore();
+    const session = sessionStore?.getSession(turnId);
+    return Boolean(session?.segments.has(messageId));
+  }
+
+  function canQueuePendingMotionForTurn(turnId: string | null): boolean {
+    const sessionStore = deps.getSessionStore();
+    const session = sessionStore?.getSession(turnId);
+    return Boolean(session && !session.backend.synthFinished);
+  }
+
+  function queuePendingMotionForSegment(
+    turnId: string | null,
+    messageId: string,
+    payload: NormalizedMotionPayload,
+  ): void {
+    deps.state.pendingMotions.set(buildPendingPlaybackKey(turnId, messageId), {
+      turnId,
+      messageId,
+      payload,
+      receivedAtMs: performance.now(),
+    });
+    deps.state.statusMessage = "动作载荷先于同段输出到达，已暂存等待配对。";
+  }
+
+  function flushPendingMotionForSegment(
+    turnId: string | null,
+    messageId: string,
+  ): void {
+    const key = buildPendingPlaybackKey(turnId, messageId);
+    const pending = deps.state.pendingMotions.get(key);
+    if (!pending || !hasPlaybackSegment(turnId, messageId)) {
+      return;
+    }
+    deps.state.pendingMotions.delete(key);
+    deps.getSessionStore()?.markMotionReceived(
+      pending.turnId,
+      pending.payload,
+      pending.messageId,
+    );
+  }
+
+  function clearPendingMotionsForTurn(turnId: string | null, reason: string): void {
+    for (const [key, pending] of Array.from(deps.state.pendingMotions.entries())) {
+      if (!matchesPendingTurn(pending.turnId, turnId)) {
+        continue;
+      }
+      deps.state.pendingMotions.delete(key);
+      const message = `动作载荷缺少同段输出，已拒绝（turn_id=${turnId ?? "null"}, message_id=${pending.messageId}, reason=${reason}）。`;
+      deps.state.lastError = message;
+      deps.state.statusMessage = message;
+      deps.pushHistory("error", message);
+      console.warn("[Connection] rejected orphan motion payload.", {
+        turnId,
+        messageId: pending.messageId,
+        reason,
+        receivedAtMs: pending.receivedAtMs,
+      });
+    }
+  }
+
+  function rejectSegmentPatchWithoutOutput(
+    kind: string,
+    turnId: string | null,
+    messageId: string,
+  ): void {
+    const message = `${kind}缺少同段输出，已拒绝（turn_id=${turnId ?? "null"}, message_id=${messageId}）。`;
+    deps.state.lastError = message;
+    deps.state.statusMessage = message;
+    deps.pushHistory("error", message);
+    console.warn("[Connection] rejected segment patch without output segment.", {
+      kind,
+      turnId,
+      messageId,
+    });
+  }
+
+  function matchesPendingTurn(
+    candidateTurnId: string | null,
+    targetTurnId: string | null,
+  ): boolean {
+    if (matchesPlaybackGroup(candidateTurnId, targetTurnId)) {
+      return true;
+    }
+    return !candidateTurnId && !targetTurnId;
+  }
+
   async function dispatchInboundEvent(
     event: InboundAdapterEvent,
   ): Promise<void> {
@@ -132,7 +221,14 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
             markSynthFinished: (tId) => sessionStore.markSynthFinished(tId),
             markTurnFinished: (tId, success, reason) => sessionStore.markTurnFinished(tId, success, reason),
             markInterrupt: (tId) => sessionStore.markInterrupt(tId),
-            markTextReceived: (tId, text, msgId, mode) => sessionStore.markTextReceived(tId, text, msgId, mode as "replace" | "append"),
+            markTextReceived: (tId, text, msgId, mode, audioExpected) =>
+              sessionStore.markTextReceived(
+                tId,
+                text,
+                msgId,
+                mode as "replace" | "append",
+                audioExpected,
+              ),
             markTextDelivered: (tId, msgId) => sessionStore.markTextDelivered(tId, msgId),
             markAudioReceived: (tId, url, msgId, captionText) =>
               sessionStore.markAudioReceived(tId, url, msgId, captionText),
@@ -176,6 +272,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
         ),
       hasPendingAudioForTurn: (turnId) => deps.hasPendingAudioForTurn(turnId),
       markMissingAudiosForTurn: (turnId, reason) => deps.markMissingAudiosForTurn(turnId, reason),
+      clearPendingMotionsForTurn,
       reportRuntimeProtocolViolation,
       queuePendingAssistantTextForPlayback: (map, text, turnId, messageId) =>
         queuePendingAssistantTextForPlayback(map, text, turnId, messageId),
@@ -191,8 +288,13 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
           receivedAtMs: performance.now(),
         });
       },
+      flushPendingMotionForSegment,
+      rejectSegmentPatchWithoutOutput,
       findActiveAudioSegment: () => deps.findActiveAudioSegment(),
       playMotionPreviewPayload: deps.playMotionPreviewPayload,
+      hasPlaybackSegment,
+      canQueuePendingMotionForTurn,
+      queuePendingMotionForSegment,
       normalizeMotionPayload: (payload) => normalizeMotionPayload(payload),
       applyInboundMotionPayload: (ctx, envelope) =>
         applyInboundMotionPayload(ctx, envelope),

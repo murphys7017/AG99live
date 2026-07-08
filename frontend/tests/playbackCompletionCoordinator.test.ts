@@ -672,6 +672,31 @@ async function testInterruptStoppedMarksMotionFailed(): Promise<void> {
     "interrupt should mark motion as failed");
 }
 
+async function testStoppedWithoutReasonMarksMotionFailed(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
+  h.sessionStore.markMotionReceived(
+    "turn-1",
+    { kind: "semantic_intent", intent: {} as never },
+    "msg-a",
+  );
+
+  h.coordinator.recordMotionPlayback({
+    messageId: "msg-a", turnId: "turn-1", playbackTurnId: "turn-1",
+    model: null, payloadKind: "semantic_intent", intent: TEST_SEMANTIC_INTENT, startReason: "test",
+    queuedDelayMs: 0, diagnostics: null, playerMessage: "playing",
+    runId: "stopped-a",
+    plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
+  });
+
+  h.coordinator.completeMotionPlayback({ runId: "stopped-a", status: "stopped" });
+  await h.flush();
+
+  const segment = h.sessionStore.getActiveSession()?.segments.get("msg-a");
+  assert.equal(segment?.motion.failed, true);
+  assert.equal(segment?.motion.reason, "motion_stopped_without_terminal");
+}
+
 async function testRecordMotionPlaybackPrefersEventTurnSession(): Promise<void> {
   const h = createHarness();
   h.sessionStore.markTextReceived("turn-1", "A", "shared-msg");
@@ -763,6 +788,7 @@ async function run(): Promise<void> {
   await testStaleRunIdDoesNotCorruptCurrentSegment();
   await testMultiSegmentMotionCompletionsAreSegmentScoped();
   await testInterruptStoppedMarksMotionFailed();
+  await testStoppedWithoutReasonMarksMotionFailed();
   await testRecordMotionPlaybackPrefersEventTurnSession();
   await testLateAudioReopenAndCompleteOnce();
   await testLateAudioAfterNoAudioAckReopensSettlingSession();

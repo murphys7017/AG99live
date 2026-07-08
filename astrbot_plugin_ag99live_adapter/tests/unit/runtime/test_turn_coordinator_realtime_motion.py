@@ -1257,6 +1257,89 @@ def test_flush_performance_curve_before_audio_sends_hint_patch(
     assert updated_envelope["payload"]["entry"] == "quick"
 
 
+def test_flush_performance_curve_before_audio_skips_when_hint_not_ready(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+
+    class PerformanceCurveRuntimeStub:
+        failed = False
+        cleared = False
+
+        def get_ready(self, *, turn_id: str | None, message_id: str | None):
+            assert turn_id == "turn-intent"
+            assert message_id == "message-intent"
+            return None
+
+        def clear(self, *, turn_id: str | None, message_id: str | None):
+            assert turn_id == "turn-intent"
+            assert message_id == "message-intent"
+            self.cleared = True
+
+        def fail_if_not_ready(self, *, turn_id: str | None, message_id: str | None, reason: str):
+            self.failed = True
+            return True
+
+    curve_runtime = PerformanceCurveRuntimeStub()
+    runtime_state = _runtime_state_stub()
+    runtime_state.performance_curve_runtime = curve_runtime
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-intent",
+        },
+    )()
+    coordinator.runtime_state = runtime_state
+
+    sent_payloads: list[dict[str, object]] = []
+    recorded_events: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+    coordinator._record_motion_lab_raw_event = lambda **kwargs: recorded_events.append(kwargs)
+
+    assert asyncio.run(
+        coordinator.broadcast_motion_payload(
+            motion_payload=_build_valid_motion_intent(),
+            mode="preview",
+            source="test.intent",
+            turn_id="turn-intent",
+            message_id="message-intent",
+        )
+    ) is True
+    assert "performance_curve_hint" not in sent_payloads[0]["payload"]["intent"]
+
+    flushed = asyncio.run(
+        coordinator._flush_performance_curve_motion_before_audio(
+            turn_id="turn-intent",
+            message_id="message-intent",
+        )
+    )
+
+    assert flushed is False
+    assert curve_runtime.failed is False
+    assert curve_runtime.cleared is True
+    assert coordinator._pending_performance_curve_motions == {}
+    assert len(sent_payloads) == 1
+    skipped_events = [
+        event
+        for event in recorded_events
+        if event.get("event_type") == "performance_curve.skipped"
+    ]
+    assert len(skipped_events) == 1
+    assert skipped_events[0]["raw"]["reason"] == "not_ready_before_audio_egress"
+
+
 def test_pending_performance_curve_motions_are_tracked_per_segment(
     install_fake_astrbot,
     monkeypatch,

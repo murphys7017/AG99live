@@ -106,6 +106,7 @@ export interface TurnPlaybackSessionText {
 export interface TurnPlaybackSessionAudio {
   url: string | null;
   captionText: string | null;
+  expected: boolean;
   receivedAtMs: number | null;
   released: boolean;
   started: boolean;
@@ -205,6 +206,7 @@ export function createEmptyAudioState(): TurnPlaybackSessionAudio {
   return {
     url: null,
     captionText: null,
+    expected: false,
     receivedAtMs: null,
     released: false,
     started: false,

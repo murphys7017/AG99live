@@ -36,6 +36,7 @@ import type {
 } from "../playback-timeline/segmentJob.js";
 
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
+const AUDIO_EXPECTED_TIMEOUT_MS = 3000;
 
 interface TurnPlaybackOrchestratorOptions {
   sessionStore: SessionStore;
@@ -66,6 +67,7 @@ function attachPerformanceCurveHintToPayload(
 export function useTurnPlaybackOrchestrator(
   options: TurnPlaybackOrchestratorOptions,
 ) {
+  const audioExpectedTimers = new Map<string, number>();
   const core = createTurnPlaybackOrchestratorCore<NormalizedMotionPayload>({
     now: () => performance.now(),
     schedule: (delayMs, fn) => window.setTimeout(fn, delayMs),
@@ -77,6 +79,49 @@ export function useTurnPlaybackOrchestrator(
       console.info(`[TurnPlaybackOrchestrator] ${message}.`, details);
     },
   });
+
+  function segmentTimerKey(turnId: string | null, messageId: string): string {
+    const normalizedTurnId = typeof turnId === "string" ? turnId.trim() : "";
+    return `${normalizedTurnId.length}:${normalizedTurnId}:${messageId}`;
+  }
+
+  function clearAudioExpectedTimer(turnId: string | null, messageId: string): void {
+    const key = segmentTimerKey(turnId, messageId);
+    const timer = audioExpectedTimers.get(key);
+    if (timer === undefined) {
+      return;
+    }
+    window.clearTimeout(timer);
+    audioExpectedTimers.delete(key);
+  }
+
+  function scheduleAudioExpectedTimeout(turnId: string | null, messageId: string): void {
+    const key = segmentTimerKey(turnId, messageId);
+    if (audioExpectedTimers.has(key)) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      audioExpectedTimers.delete(key);
+      const session = options.sessionStore.getSession(turnId);
+      const segment = session?.segments.get(messageId);
+      if (
+        !segment
+        || segment.audio.url
+        || segment.audio.released
+        || segment.audio.started
+        || segment.audio.terminal !== "idle"
+      ) {
+        return;
+      }
+      options.sessionStore.markAudioTerminal(
+        turnId,
+        "failed",
+        messageId,
+        "audio_expected_timeout",
+      );
+    }, AUDIO_EXPECTED_TIMEOUT_MS);
+    audioExpectedTimers.set(key, timer);
+  }
 
   // ── Watch session state and feed to core ────────────────────────
 
@@ -96,6 +141,7 @@ export function useTurnPlaybackOrchestrator(
           textReleased: segment?.text.released ?? false,
           textDelivered: segment?.text.delivered ?? false,
           audioUrl: segment?.audio.url ?? null,
+          audioExpected: segment?.audio.expected ?? false,
           audioReleased: segment?.audio.released ?? false,
           audioTerminal: segment?.audio.terminal ?? "idle",
           motionReceivedAtMs: segment?.motion.receivedAtMs ?? null,
@@ -121,6 +167,7 @@ export function useTurnPlaybackOrchestrator(
         for (const segmentId of session.segmentOrder) {
           const candidate = session.segments.get(segmentId);
           if (candidate && isSegmentLocallySettled(candidate)) {
+            clearAudioExpectedTimer(candidate.turnId, candidate.messageId);
             core.clearSegment(candidate.turnId, candidate.messageId);
           }
         }
@@ -142,7 +189,29 @@ export function useTurnPlaybackOrchestrator(
           );
         }
 
+        if (segment.audio.expected) {
+          core.markAudioExpected(segment.messageId, segment.turnId);
+          if (
+            !segment.audio.url
+            && !segment.audio.released
+            && !segment.audio.started
+            && segment.audio.terminal === "idle"
+          ) {
+            scheduleAudioExpectedTimeout(segment.turnId, segment.messageId);
+          } else {
+            clearAudioExpectedTimer(segment.turnId, segment.messageId);
+          }
+        } else if (
+          segment.audio.url
+          || segment.audio.released
+          || segment.audio.started
+          || segment.audio.terminal !== "idle"
+        ) {
+          clearAudioExpectedTimer(segment.turnId, segment.messageId);
+        }
+
         if (canReleaseAudio(segment)) {
+          clearAudioExpectedTimer(segment.turnId, segment.messageId);
           core.markAudioReady(segment.messageId, segment.turnId);
         }
 
@@ -171,7 +240,14 @@ export function useTurnPlaybackOrchestrator(
           }
         }
 
-        if (segment.audio.terminal === "absent") {
+        if (segment.audio.terminal !== "idle") {
+          clearAudioExpectedTimer(segment.turnId, segment.messageId);
+        }
+
+        if (
+          segment.audio.terminal === "absent"
+          || segment.audio.terminal === "failed"
+        ) {
           core.markNoAudioConfirmed(
             segment.messageId,
             segment.turnId,
@@ -209,6 +285,10 @@ export function useTurnPlaybackOrchestrator(
   );
 
   onScopeDispose(() => {
+    for (const timer of audioExpectedTimers.values()) {
+      window.clearTimeout(timer);
+    }
+    audioExpectedTimers.clear();
     core.clear();
   });
 

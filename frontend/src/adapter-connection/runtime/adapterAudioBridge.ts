@@ -23,6 +23,7 @@ export interface AudioBridgeSessionStore {
         turnId: string | null;
         audio: {
           url: string | null;
+          expected?: boolean;
           released: boolean;
           started: boolean;
           terminal: string;
@@ -91,6 +92,7 @@ export function markMissingAudiosForTurn(
         segment
         && segment.audio.terminal === "idle"
         && !segment.audio.url
+        && !segment.audio.expected
         && !segment.audio.released
         && !segment.audio.started
         && matchesPlaybackGroup(segment.turnId, turnId)

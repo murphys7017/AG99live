@@ -29,6 +29,7 @@ import type { InboundAdapterEvent, InboundEventMappingContext } from "./inboundE
 import { mapInboundEnvelopeToEvent } from "./inboundEvents.js";
 import type { PendingAssistantTextItem, PendingAudioItem } from "../../playback-timeline/playbackReleaseQueue.js";
 import type { NormalizedMotionPayload } from "../../model-engine/contracts.js";
+import type { PendingMotionItem } from "./pendingMotionIngress.js";
 import { dispatchInboundConnectionEvent } from "./inboundConnectionDispatcher.js";
 import { dispatchInboundFeatureEvent } from "./inboundFeatureDispatcher.js";
 import {
@@ -72,6 +73,7 @@ export interface InboundDispatchState {
   // pending queues
   pendingAssistantTexts: Map<string, PendingAssistantTextItem>;
   pendingAudios: Map<string, PendingAudioItem>;
+  pendingMotions: Map<string, PendingMotionItem>;
   // motion plan
   inboundMotionPlan: unknown;
   inboundMotionPlanTurnId: string | null;
@@ -86,7 +88,7 @@ export interface InboundDispatchDeps {
     markSynthFinished: (turnId: string | null) => void;
     markTurnFinished: (turnId: string | null, success: boolean, reason?: string) => void;
     markInterrupt: (turnId: string | null) => void;
-    markTextReceived: (turnId: string | null, text: string, messageId: string, mode?: string) => void;
+    markTextReceived: (turnId: string | null, text: string, messageId: string, mode?: string, audioExpected?: boolean) => void;
     markTextDelivered: (turnId: string | null, messageId: string) => void;
     markAudioReceived: (turnId: string | null, url: string, messageId: string, captionText?: string) => boolean;
     markAudioTerminal: (turnId: string | null, terminal: string, messageId: string, reason?: string) => void;
@@ -117,13 +119,27 @@ export interface InboundDispatchDeps {
   markAudioPlaybackTerminal: (terminalState: string, turnId: string | null, reason?: string, messageId?: string | null) => void;
   hasPendingAudioForTurn: (turnId: string | null) => boolean;
   markMissingAudiosForTurn: (turnId: string | null, reason: string) => void;
+  findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   reportRuntimeProtocolViolation: (message: string) => void;
   // text / audio queue
   queuePendingAssistantTextForPlayback: (map: Map<string, PendingAssistantTextItem>, text: string, turnId: string | null, messageId: string) => void;
   queuePendingAudioForPlayback: (map: Map<string, PendingAudioItem>, url: string, turnId: string | null, messageId: string) => void;
+  flushPendingMotionForSegment: (turnId: string | null, messageId: string) => void;
   playMotionPreviewPayload?: (payload: unknown) => boolean;
   // motion
-  findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
+  hasPlaybackSegment: (turnId: string | null, messageId: string) => boolean;
+  canQueuePendingMotionForTurn: (turnId: string | null) => boolean;
+  queuePendingMotionForSegment: (
+    turnId: string | null,
+    messageId: string,
+    payload: NormalizedMotionPayload,
+  ) => void;
+  clearPendingMotionsForTurn: (turnId: string | null, reason: string) => void;
+  rejectSegmentPatchWithoutOutput: (
+    kind: string,
+    turnId: string | null,
+    messageId: string,
+  ) => void;
   normalizeMotionPayload: (payload: unknown) => { ok: true; payload: NormalizedMotionPayload } | { ok: false };
   applyInboundMotionPayload: (
     ctx: {
@@ -135,7 +151,6 @@ export interface InboundDispatchDeps {
         inboundMotionPlanTurnId: string | null;
         inboundMotionPlanReceivedAtMs: number;
       };
-      activeAudioTurnId: string | null;
       pushHistory: (role: "system" | "error", text: string) => void;
     },
     envelope: ProtocolEnvelope<Record<string, unknown>>,
