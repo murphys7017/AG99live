@@ -43,7 +43,7 @@ export interface PlaybackTimelineRuntimeDeps {
   ) => void;
 }
 
-export interface PlaybackTimelineSegmentJobOptions {
+interface SegmentTimelinePreparationOptions {
   hasAudio: boolean;
   hasMotion: boolean;
   noAudioConfirmed: boolean;
@@ -56,21 +56,11 @@ export interface PlaybackTimelineRuntime {
   startSegmentJob: (
     job: PlaybackTimelineSegmentJob<NormalizedMotionPayload>,
   ) => PlaybackTimelineSegmentExecutionResult;
-  prepareSegmentJob: (
-    turnId: string | null,
-    messageId: string,
-    options: PlaybackTimelineSegmentJobOptions,
-  ) => boolean;
   prepareAudioTimeline: (
     turnId: string | null,
     messageId: string,
     options?: PlaybackTimelineSinkStartOptions,
   ) => void;
-  prepareMotionOnlyTimeline: (
-    turnId: string | null,
-    messageId: string,
-    options?: PlaybackTimelineSinkStartOptions,
-  ) => PlaybackTimelineSnapshot | null;
   markAudioTimelineDuration: (
     turnId: string | null,
     messageId: string,
@@ -92,11 +82,6 @@ export interface PlaybackTimelineRuntime {
     terminal: TimelineTerminal,
     reason: string,
   ) => void;
-  prepareMotionTimelineSink: (
-    turnId: string | null,
-    messageId: string,
-    options?: PlaybackTimelineSinkStartOptions,
-  ) => boolean;
   markMotionTimelineStarted: (
     turnId: string | null,
     messageId: string,
@@ -196,21 +181,21 @@ export function createPlaybackTimelineRuntime(
     });
   }
 
-  function prepareSegmentJob(
+  function ensureSegmentTimelineForJob(
     turnId: string | null,
     messageId: string,
-    options: PlaybackTimelineSegmentJobOptions,
+    options: SegmentTimelinePreparationOptions,
   ): boolean {
     if (options.hasAudio) {
       prepareAudioTimeline(turnId, messageId);
       if (options.hasMotion) {
-        return prepareMotionTimelineSink(turnId, messageId);
+        return ensureMotionTimelineSink(turnId, messageId);
       }
       return getTimeline(turnId, messageId) !== null;
     }
 
     if (options.hasMotion && options.noAudioConfirmed) {
-      return prepareMotionOnlyTimeline(turnId, messageId) !== null;
+      return ensureMotionOnlyTimeline(turnId, messageId) !== null;
     }
 
     return true;
@@ -270,7 +255,7 @@ export function createPlaybackTimelineRuntime(
     }
     if (releasedAudio) {
       sinks.session.markAudioReleased(job.turnId, job.messageId);
-      const prepared = prepareSegmentJob(
+      const prepared = ensureSegmentTimelineForJob(
         job.turnId,
         job.messageId,
         {
@@ -320,7 +305,7 @@ export function createPlaybackTimelineRuntime(
         },
       );
       if (!releasedAudio && timelineMode === "motion_only") {
-        const prepared = prepareMotionOnlyTimeline(
+        const prepared = ensureMotionOnlyTimeline(
           job.turnId,
           job.messageId,
           { start: startMotion },
@@ -338,7 +323,7 @@ export function createPlaybackTimelineRuntime(
           };
         }
       } else {
-        const prepared = prepareMotionTimelineSink(
+        const prepared = ensureMotionTimelineSink(
           job.turnId,
           job.messageId,
           { start: startMotion },
@@ -392,14 +377,14 @@ export function createPlaybackTimelineRuntime(
     return timeline.engine.startSink(sinkId);
   }
 
-  function prepareMotionOnlyTimeline(
+  function ensureMotionOnlyTimeline(
     turnId: string | null,
     messageId: string,
     options: PlaybackTimelineSinkStartOptions = {},
   ): PlaybackTimelineSnapshot | null {
     const existing = getTimeline(turnId, messageId);
     if (existing) {
-      return prepareMotionTimelineSink(turnId, messageId, options)
+      return ensureMotionTimelineSink(turnId, messageId, options)
         ? existing.engine.getSnapshot()
         : null;
     }
@@ -522,7 +507,7 @@ export function createPlaybackTimelineRuntime(
     );
   }
 
-  function prepareMotionTimelineSink(
+  function ensureMotionTimelineSink(
     turnId: string | null,
     messageId: string,
     options: PlaybackTimelineSinkStartOptions = {},
@@ -746,14 +731,11 @@ export function createPlaybackTimelineRuntime(
   return {
     setSegmentSinks,
     startSegmentJob,
-    prepareSegmentJob,
     prepareAudioTimeline,
-    prepareMotionOnlyTimeline,
     markAudioTimelineDuration,
     markAudioTimelineStarted,
     markLipSyncTimelineStarted,
     markLipSyncTimelineTerminal,
-    prepareMotionTimelineSink,
     markMotionTimelineStarted,
     markMotionTimelineTerminal,
     markAudioTimelineTerminal,

@@ -15,6 +15,7 @@ import type {
   AudioPlaybackClock,
   PlaybackTimelineSnapshot,
 } from "../src/playback-timeline/contracts.js";
+import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
 
 function testSyntheticClockLifecycle(): void {
   let nowMs = 100;
@@ -319,12 +320,82 @@ function testPerformanceCurveTimelineRejectsUnavailableAudio(): void {
   assert.equal(resolution.reason, "playback_timeline_audio_unavailable");
 }
 
+const testMotionPayload: NormalizedMotionPayload = {
+  kind: "semantic_intent",
+  intent: {
+    schema_version: "engine.motion_intent.v3",
+    profile_id: "profile-test",
+    profile_revision: 1,
+    model_id: "model-test",
+    mode: "expressive",
+    emotion_label: "test",
+    axes: {},
+  },
+};
+
+function configureNoopSegmentSinks(
+  runtime: ReturnType<typeof createPlaybackTimelineRuntime>,
+  events: string[] = [],
+): void {
+  runtime.setSegmentSinks({
+    session: {
+      markTextReleased: () => events.push("text_released"),
+      markAudioReleased: () => events.push("audio_released"),
+      markMotionReleased: () => events.push("motion_released"),
+      markMotionFailed: (_turnId, _messageId, reason) =>
+        events.push(`motion_failed:${reason ?? ""}`),
+      markPhase: (_turnId, phase) => {
+        events.push(`phase:${phase}`);
+        return true;
+      },
+    },
+    textSink: {
+      releaseAssistantTextForPlayback: () => true,
+    },
+    audioSink: {
+      releaseAudioForPlayback: () => true,
+    },
+    motionSink: {
+      start: (_payload, context) => {
+        events.push(`motion_sink:${context.timelineMode ?? ""}`);
+        return true;
+      },
+    },
+  });
+}
+
+function startMotionOnlySegment(
+  runtime: ReturnType<typeof createPlaybackTimelineRuntime>,
+  turnId: string,
+  messageId: string,
+  events: string[] = [],
+): void {
+  configureNoopSegmentSinks(runtime, events);
+  runtime.startSegmentJob({
+    messageId,
+    turnId,
+    reason: "test",
+    text: {
+      release: false,
+    },
+    audio: {
+      release: false,
+      noAudioConfirmed: true,
+    },
+    motion: {
+      payload: testMotionPayload,
+      receivedAtMs: 10,
+    },
+  });
+}
+
 function testPlaybackTimelineRuntimeCreatesMotionOnlyTimeline(): void {
   const runtime = createPlaybackTimelineRuntime({
     getAudioClock: () => null,
   });
 
-  let snapshot = runtime.prepareMotionOnlyTimeline("turn-motion", "msg-motion");
+  startMotionOnlySegment(runtime, "turn-motion", "msg-motion");
+  let snapshot = runtime.getTimelineSnapshotForSegment("turn-motion", "msg-motion");
   assert.equal(snapshot?.phase, "preparing");
   assert.equal(snapshot?.clockSource, "synthetic");
   assert.equal(snapshot?.sinks.find((sink) => sink.id === "motion")?.terminal, "idle");
@@ -347,6 +418,8 @@ function testPlaybackTimelineRuntimePreparesSegmentJobIdempotently(): void {
   const runtime = createPlaybackTimelineRuntime({
     getAudioClock: () => null,
   });
+  const events: string[] = [];
+  configureNoopSegmentSinks(runtime, events);
 
   runtime.prepareAudioTimeline("turn-segment", "msg-segment");
   assert.equal(
@@ -355,14 +428,22 @@ function testPlaybackTimelineRuntimePreparesSegmentJobIdempotently(): void {
     false,
   );
 
-  assert.equal(
-    runtime.prepareSegmentJob("turn-segment", "msg-segment", {
-      hasAudio: true,
-      hasMotion: true,
+  runtime.startSegmentJob({
+    messageId: "msg-segment",
+    turnId: "turn-segment",
+    reason: "test",
+    text: {
+      release: false,
+    },
+    audio: {
+      release: false,
       noAudioConfirmed: false,
-    }),
-    true,
-  );
+    },
+    motion: {
+      payload: testMotionPayload,
+      receivedAtMs: 10,
+    },
+  });
   assert.equal(
     runtime.getTimelineSnapshotForSegment("turn-segment", "msg-segment")
       ?.sinks.some((sink) => sink.id === "motion" && sink.required),
@@ -410,7 +491,7 @@ function testAudioAndLipSyncEventsDoNotMutateMissingSinks(): void {
     getAudioClock: () => null,
   });
 
-  runtime.prepareMotionOnlyTimeline("turn-motion-only", "msg-motion-only");
+  startMotionOnlySegment(runtime, "turn-motion-only", "msg-motion-only");
   runtime.markAudioTimelineDuration("turn-motion-only", "msg-motion-only", 1200);
   runtime.markAudioTimelineStarted("turn-motion-only", "msg-motion-only", 100, 1200);
   runtime.markLipSyncTimelineStarted("turn-motion-only", "msg-motion-only");
@@ -584,12 +665,9 @@ function testPlaybackTimelineRuntimeKeepsMismatchedSegmentTimelinesSeparate(): v
     "msg-audio",
   );
 
-  const motionSnapshot = runtime.prepareMotionOnlyTimeline("turn-motion", "msg-motion");
+  startMotionOnlySegment(runtime, "turn-motion", "msg-motion");
+  const motionSnapshot = runtime.getTimelineSnapshotForSegment("turn-motion", "msg-motion");
   assert.equal(motionSnapshot?.messageId, "msg-motion");
-  assert.equal(
-    runtime.prepareMotionTimelineSink("turn-motion", "msg-motion"),
-    true,
-  );
   assert.equal(
     runtime.getTimelineSnapshotForSegment("turn-audio", "msg-audio")?.messageId,
     "msg-audio",
@@ -606,7 +684,7 @@ function testPlaybackTimelineRuntimeClearsOnlyTerminalSegmentTimeline(): void {
   });
 
   runtime.prepareAudioTimeline("turn-audio", "msg-audio");
-  runtime.prepareMotionOnlyTimeline("turn-motion", "msg-motion");
+  startMotionOnlySegment(runtime, "turn-motion", "msg-motion");
   runtime.markMotionTimelineStarted("turn-motion", "msg-motion");
   runtime.markMotionTimelineTerminal(
     "turn-motion",
@@ -645,7 +723,7 @@ function testPlaybackTimelineRuntimeStopsOnlyRequestedSegmentTimeline(): void {
   });
 
   runtime.prepareAudioTimeline("turn-audio", "msg-audio");
-  runtime.prepareMotionOnlyTimeline("turn-motion", "msg-motion");
+  startMotionOnlySegment(runtime, "turn-motion", "msg-motion");
 
   runtime.stopTimelineForSegment(
     "turn-motion",

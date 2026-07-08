@@ -115,7 +115,6 @@ export interface AdapterAudioRuntime {
   ) => boolean;
   setSegmentSinks: ReturnType<typeof createPlaybackTimelineRuntime>["setSegmentSinks"];
   startSegmentJob: ReturnType<typeof createPlaybackTimelineRuntime>["startSegmentJob"];
-  prepareSegmentJob: ReturnType<typeof createPlaybackTimelineRuntime>["prepareSegmentJob"];
   hasPendingAudioForTurn: (turnId: string | null) => boolean;
   markMissingAudiosForTurn: (
     turnId: string | null,
@@ -174,7 +173,6 @@ export function createAdapterAudioRuntime(
   const {
     setSegmentSinks,
     startSegmentJob,
-    prepareSegmentJob,
     markMotionTimelineStarted,
     markMotionTimelineTerminal,
     findActiveAudioTimelineSegments,
@@ -269,7 +267,6 @@ export function createAdapterAudioRuntime(
     releaseAudioForPlayback: audioReleaseController.releaseAudioForPlayback,
     setSegmentSinks,
     startSegmentJob,
-    prepareSegmentJob,
     hasPendingAudioForTurn: audioSettlementController.hasPendingAudioForTurn,
     markMissingAudiosForTurn: audioSettlementController.markMissingAudiosForTurn,
     markAudioPlaybackTerminal,

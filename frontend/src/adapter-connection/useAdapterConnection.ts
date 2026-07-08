@@ -89,7 +89,6 @@ export interface AdapterPlaybackTimelinePort {
   releaseAudioForPlayback: AdapterAudioRuntimeInstance["releaseAudioForPlayback"];
   setSegmentSinks: AdapterAudioRuntimeInstance["setSegmentSinks"];
   startSegmentJob: AdapterAudioRuntimeInstance["startSegmentJob"];
-  prepareSegmentJob: AdapterAudioRuntimeInstance["prepareSegmentJob"];
   getPlaybackTimelineSnapshotForSegment: AdapterAudioRuntimeInstance["getPlaybackTimelineSnapshotForSegment"];
   markMotionTimelineStarted: AdapterAudioRuntimeInstance["markMotionTimelineStarted"];
   markMotionTimelineTerminal: AdapterAudioRuntimeInstance["markMotionTimelineTerminal"];
@@ -245,7 +244,6 @@ export function createAdapterConnection(
     releaseAudioForPlayback,
     setSegmentSinks,
     startSegmentJob,
-    prepareSegmentJob,
     getPlaybackTimelineSnapshotForSegment,
     markMotionTimelineStarted,
     markMotionTimelineTerminal,
@@ -616,7 +614,6 @@ export function createAdapterConnection(
     releaseAudioForPlayback,
     setSegmentSinks,
     startSegmentJob,
-    prepareSegmentJob,
     getPlaybackTimelineSnapshotForSegment,
     markMotionTimelineStarted,
     markMotionTimelineTerminal,
