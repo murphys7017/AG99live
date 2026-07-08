@@ -94,6 +94,7 @@ export interface InboundDispatchDeps {
     markAudioTerminal: (turnId: string | null, terminal: string, messageId: string, reason?: string) => void;
     markMotionReceived: (turnId: string | null, payload: NormalizedMotionPayload, messageId: string) => void;
     markPerformanceCurveHintReceived: (turnId: string | null, hint: PerformanceCurveHint, messageId: string) => void;
+    canAcceptOutputSegment: (turnId: string | null, messageId: string) => boolean;
     ensureSegment: (turnId: string | null, messageId: string) => { text: { content: string | null } };
     getSessions: () => Array<{ segmentOrder: string[]; segments: Map<string, { messageId: string; turnId: string | null }> }>;
   } | undefined;
@@ -136,6 +137,11 @@ export interface InboundDispatchDeps {
   ) => void;
   clearPendingMotionsForTurn: (turnId: string | null, reason: string) => void;
   rejectSegmentPatchWithoutOutput: (
+    kind: string,
+    turnId: string | null,
+    messageId: string,
+  ) => void;
+  rejectOutputAfterSynthFinished: (
     kind: string,
     turnId: string | null,
     messageId: string,

@@ -313,6 +313,31 @@ function sendSynthFinished(socket: FakeWebSocket, turnId: string | null, message
   }));
 }
 
+function sendOutputText(
+  socket: FakeWebSocket,
+  options: {
+    turnId: string;
+    messageId: string;
+    text: string;
+    audioExpected?: boolean;
+  },
+): void {
+  socket.emitMessage(JSON.stringify({
+    type: "output.text",
+    version: "v2",
+    message_id: options.messageId,
+    timestamp: "2026-05-08T00:00:01.000Z",
+    turn_id: options.turnId,
+    source: "backend",
+    payload: {
+      text: options.text,
+      audio_expected: options.audioExpected ?? false,
+      speaker_name: "Alice",
+      avatar: "",
+    },
+  }));
+}
+
 function sendOutputAudio(
   socket: FakeWebSocket,
   options: {
@@ -683,6 +708,52 @@ function testSynthFinishedDoesNotMarkReleasedAudioAbsent(): void {
     const segment = session?.segments.get("m-released-audio");
     assert.equal(segment?.audio.released, true);
     assert.notEqual(segment?.audio.terminal, "absent");
+  });
+}
+
+function testLateOutputTextAfterSynthFinishedForUnknownSegmentIsRejected(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-late-unknown-text");
+    sendSynthFinished(socket, "turn-late-unknown-text", "synth-late-unknown-text");
+
+    sendOutputText(socket, {
+      turnId: "turn-late-unknown-text",
+      messageId: "msg-late-unknown-text",
+      text: "too late",
+    });
+
+    assert.equal(
+      sessionStore.getSession("turn-late-unknown-text")?.segments.has("msg-late-unknown-text"),
+      false,
+    );
+    assert.equal(
+      adapter.state.pendingAssistantTexts.has(pendingKey("turn-late-unknown-text", "msg-late-unknown-text")),
+      false,
+    );
+    assert.match(adapter.state.lastError, /output\.text在语音合成完成后创建新输出段/);
+  });
+}
+
+function testLateOutputAudioAfterSynthFinishedForUnknownSegmentIsRejected(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-late-unknown-audio");
+    sendSynthFinished(socket, "turn-late-unknown-audio", "synth-late-unknown-audio");
+
+    sendOutputAudio(socket, {
+      turnId: "turn-late-unknown-audio",
+      messageId: "msg-late-unknown-audio",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/too-late.wav",
+    });
+
+    assert.equal(
+      sessionStore.getSession("turn-late-unknown-audio")?.segments.has("msg-late-unknown-audio"),
+      false,
+    );
+    assert.equal(
+      adapter.state.pendingAudios.has(pendingKey("turn-late-unknown-audio", "msg-late-unknown-audio")),
+      false,
+    );
+    assert.match(adapter.state.lastError, /output\.audio在语音合成完成后创建新输出段/);
   });
 }
 
@@ -1811,6 +1882,24 @@ function testDisconnectSettlesPendingAudioBeforeClearingQueue(): void {
   });
 }
 
+function testDisconnectClearsPendingMotions(): void {
+  withConnectedAdapter(({ adapter, socket }) => {
+    sendTurnStarted(socket, "turn-disconnect-pending-motion");
+    socket.emitMessage(JSON.stringify(motionIntentEnvelope(
+      "msg-disconnect-pending-motion",
+      "turn-disconnect-pending-motion",
+    )));
+    assert.equal(
+      adapter.state.pendingMotions.has(pendingKey("turn-disconnect-pending-motion", "msg-disconnect-pending-motion")),
+      true,
+    );
+
+    adapter.disconnect();
+
+    assert.equal(adapter.state.pendingMotions.size, 0);
+  });
+}
+
 async function testPttReleaseDuringStartupStopsCaptureAfterStart(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
@@ -2098,6 +2187,8 @@ async function run(): Promise<void> {
   testTurnStartedResetsPendingMaps();
   testSynthFinishedMarksMissingSegmentAudioAbsent();
   testSynthFinishedDoesNotMarkReleasedAudioAbsent();
+  testLateOutputTextAfterSynthFinishedForUnknownSegmentIsRejected();
+  testLateOutputAudioAfterSynthFinishedForUnknownSegmentIsRejected();
   await testLateAudioAfterSynthFinishedStillPlaysOnce();
   await testAudioTimelineStartedHandlerReceivesStartedSnapshot();
   await testDuplicateOutputAudioDoesNotReplayCompletedSegment();
@@ -2126,6 +2217,7 @@ async function run(): Promise<void> {
   await testClearPlaybackGroupOnlySettlesTargetTurnAudio();
   await testInboundInterruptOnlySettlesTargetTurnAudio();
   testDisconnectSettlesPendingAudioBeforeClearingQueue();
+  testDisconnectClearsPendingMotions();
   testSendMotionPreviewUsesOutboundProtocolEnvelope();
   testSendMotionPreviewRejectsV3PayloadWithoutIntentTags();
   testSendParameterPlanPayloadPreviewIsRejected();

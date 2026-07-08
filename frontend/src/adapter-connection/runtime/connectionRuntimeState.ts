@@ -10,6 +10,7 @@ export interface ConnectionRuntimeState {
   inboundMotionPlanReceivedAtMs: number;
   pendingAssistantTexts: { clear(): void };
   pendingAudios: { clear(): void };
+  pendingMotions: { clear(): void };
   audioPlaybackStartedTurnId: string | null;
   audioPlaybackStartedMessageId: string | null;
   audioPlaybackStartedAtMs: number;
@@ -46,6 +47,7 @@ export function resetConnectionRuntimeState(deps: ConnectionRuntimeDeps): void {
   s.inboundMotionPlanReceivedAtMs = 0;
   s.pendingAssistantTexts.clear();
   s.pendingAudios.clear();
+  s.pendingMotions.clear();
   s.audioPlaybackStartedTurnId = null;
   s.audioPlaybackStartedMessageId = null;
   s.audioPlaybackStartedAtMs = 0;

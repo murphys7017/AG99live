@@ -52,6 +52,10 @@ export interface InboundOutputDispatchDeps {
       turnId: string | null,
       messageId: string,
     ) => void;
+    canAcceptOutputSegment: (
+      turnId: string | null,
+      messageId: string,
+    ) => boolean;
     ensureSegment: (
       turnId: string | null,
       messageId: string,
@@ -78,6 +82,11 @@ export interface InboundOutputDispatchDeps {
     messageId: string,
   ) => void;
   flushPendingMotionForSegment: (
+    turnId: string | null,
+    messageId: string,
+  ) => void;
+  rejectOutputAfterSynthFinished: (
+    kind: string,
     turnId: string | null,
     messageId: string,
   ) => void;
@@ -123,6 +132,10 @@ function applyOutputText(
   s.currentTurnId = event.turnId;
   const text = event.text;
   if (text) {
+    if (deps.sessionStore && !deps.sessionStore.canAcceptOutputSegment(event.turnId, event.messageId)) {
+      deps.rejectOutputAfterSynthFinished("output.text", event.turnId, event.messageId);
+      return;
+    }
     deps.queuePendingAssistantTextForPlayback(
       s.pendingAssistantTexts,
       text,
@@ -148,6 +161,10 @@ async function applyOutputAudio(
 ): Promise<void> {
   const s = deps.state;
   s.currentTurnId = event.turnId;
+  if (deps.sessionStore && !deps.sessionStore.canAcceptOutputSegment(event.turnId, event.messageId)) {
+    deps.rejectOutputAfterSynthFinished("output.audio", event.turnId, event.messageId);
+    return;
+  }
   const existingText = deps.sessionStore
     ?.ensureSegment(event.turnId, event.messageId)
     .text.content;

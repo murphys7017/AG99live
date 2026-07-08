@@ -118,6 +118,18 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     return Boolean(session?.segments.has(messageId));
   }
 
+  function canAcceptOutputSegment(turnId: string | null, messageId: string): boolean {
+    const sessionStore = deps.getSessionStore();
+    const session = sessionStore?.getSession(turnId);
+    if (!session) {
+      return true;
+    }
+    if (session.segments.has(messageId)) {
+      return true;
+    }
+    return !session.backend.synthFinished;
+  }
+
   function canQueuePendingMotionForTurn(turnId: string | null): boolean {
     const sessionStore = deps.getSessionStore();
     const session = sessionStore?.getSession(turnId);
@@ -190,6 +202,22 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     });
   }
 
+  function rejectOutputAfterSynthFinished(
+    kind: string,
+    turnId: string | null,
+    messageId: string,
+  ): void {
+    const message = `${kind}在语音合成完成后创建新输出段，已拒绝（turn_id=${turnId ?? "null"}, message_id=${messageId}）。`;
+    deps.state.lastError = message;
+    deps.state.statusMessage = message;
+    deps.pushHistory("error", message);
+    console.warn("[Connection] rejected output segment after synth finished.", {
+      kind,
+      turnId,
+      messageId,
+    });
+  }
+
   function matchesPendingTurn(
     candidateTurnId: string | null,
     targetTurnId: string | null,
@@ -235,6 +263,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
             markAudioTerminal: (tId, terminal, msgId, reason) => sessionStore.markAudioTerminal(tId, terminal as "completed" | "failed" | "absent", msgId, reason),
             markMotionReceived: (tId, payload, msgId) => sessionStore.markMotionReceived(tId, payload as NormalizedMotionPayload, msgId),
             markPerformanceCurveHintReceived: (tId, hint, msgId) => sessionStore.markPerformanceCurveHintReceived(tId, hint, msgId),
+            canAcceptOutputSegment,
             ensureSegment: (tId, msgId) => sessionStore.ensureSegment(tId, msgId),
             getSessions: () => sessionStore.getSessions(),
           }
@@ -290,6 +319,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       },
       flushPendingMotionForSegment,
       rejectSegmentPatchWithoutOutput,
+      rejectOutputAfterSynthFinished,
       findActiveAudioSegment: () => deps.findActiveAudioSegment(),
       playMotionPreviewPayload: deps.playMotionPreviewPayload,
       hasPlaybackSegment,

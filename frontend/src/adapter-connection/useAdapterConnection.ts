@@ -377,6 +377,7 @@ export function createAdapterConnection(
     microphoneRuntime.clearPendingStart();
     void stopMicrophoneCapture(markManualClose ? "manual_disconnect" : "connection_reset");
     stopAudioAndSettleAll(markManualClose ? "manual_disconnect" : "connection_reset");
+    state.pendingMotions.clear();
     if (socket) {
       const currentSocket = socket;
       socket = null;
