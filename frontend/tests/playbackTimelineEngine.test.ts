@@ -130,6 +130,33 @@ function testTimelineCompletesWhenRequiredSinksSettle(): void {
   assert.equal(snapshot?.currentTimeMs, 100);
 }
 
+function testEngineStartsSinkCallbacksAndPreservesThemAcrossRegister(): void {
+  const events: string[] = [];
+  const engine = createPlaybackTimelineEngine({ now: () => 0 });
+  engine.load(
+    { turnId: "turn-start", messageId: "msg-start" },
+    [
+      {
+        id: "audio",
+        required: true,
+        start: () => {
+          events.push("audio_start");
+          return true;
+        },
+      },
+    ],
+  );
+
+  assert.equal(engine.startSink("audio"), true);
+
+  engine.registerSink({
+    id: "audio",
+    required: true,
+  });
+  assert.equal(engine.startSink("audio"), true);
+  assert.deepEqual(events, ["audio_start", "audio_start"]);
+}
+
 function testTimelineFailsWhenRequiredSinkFails(): void {
   const engine = createPlaybackTimelineEngine({ now: () => 0 });
   engine.load(
@@ -872,6 +899,7 @@ function run(): void {
   testAudioClockTakesPriorityAndExposesUnavailableState();
   testClockResetClearsPreviousAudioBindingAndDuration();
   testTimelineCompletesWhenRequiredSinksSettle();
+  testEngineStartsSinkCallbacksAndPreservesThemAcrossRegister();
   testTimelineFailsWhenRequiredSinkFails();
   testInterruptPropagatesToActiveSinks();
   testLateSinkEventsDoNotRewriteTerminalTimeline();

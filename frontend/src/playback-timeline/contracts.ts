@@ -45,6 +45,7 @@ export interface PlaybackTimelineSinkDefinition {
   id: string;
   required: boolean;
   initialTerminal?: Exclude<SinkTerminal, "started">;
+  start?: () => boolean | void;
   onInterrupt?: (reason: string) => void;
 }
 

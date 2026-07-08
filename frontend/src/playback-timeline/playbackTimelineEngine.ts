@@ -22,6 +22,7 @@ interface RegisteredSink {
 export interface PlaybackTimelineEngine {
   load(job: SegmentPlaybackJob, sinks?: PlaybackTimelineSinkDefinition[]): void;
   start(startedAtMs?: number): void;
+  startSink(sinkId: string): boolean | void;
   pause(): void;
   resume(): void;
   stop(reason?: string): void;
@@ -225,7 +226,18 @@ export function createPlaybackTimelineEngine(
     },
     registerSink(definition) {
       ensureLoaded();
-      if (sinks.has(definition.id)) {
+      const existing = sinks.get(definition.id);
+      if (existing) {
+        existing.definition = {
+          ...existing.definition,
+          ...definition,
+          start: definition.start ?? existing.definition.start,
+          onInterrupt: definition.onInterrupt ?? existing.definition.onInterrupt,
+        };
+        existing.state.required = definition.required;
+        if (phase === "preparing" && isReady()) {
+          phase = "ready";
+        }
         return;
       }
       sinks.set(definition.id, {
@@ -239,6 +251,17 @@ export function createPlaybackTimelineEngine(
     hasSink(sinkId) {
       ensureLoaded();
       return sinks.has(sinkId);
+    },
+    startSink(sinkId) {
+      ensureLoaded();
+      if (isTerminalPhase(phase)) {
+        throw new Error(`Playback timeline sink cannot start from terminal phase: ${phase}`);
+      }
+      const sink = getRegisteredSink(sinkId);
+      if (!sink.definition.start) {
+        throw new Error(`Playback timeline sink has no start callback: ${sinkId}`);
+      }
+      return sink.definition.start();
     },
     attachAudioClock(audioClock) {
       ensureLoaded();

@@ -118,7 +118,7 @@ architecture:
     - AdapterAudioRuntime no longer exposes playAudioAndAcknowledge as a public method; production and tests enter audio playback through queue/release or segment job paths.
     - PlaybackTimelineAudioSegmentRunner now bridges audio segment duration/started/terminal events into PlaybackTimelineRuntime, so audioPlaybackActions only updates adapter/session state around playback.
     - Audio playback stop now interrupts the explicit turnId + messageId playback segment; missing segment identity is surfaced as an error instead of stopping an arbitrary active timeline.
-    - Target direction: PlaybackTimelineEngine should directly drive sink prepare/start/terminal semantics instead of keeping long-term execution behind migration-era segment ports.
+    - PlaybackTimelineEngine now owns sink start callbacks for audio/motion via startSink; remaining direct-sink migration should move prepare/terminal and SessionStore coordination out of migration-era segment ports.
     - Target direction: performance curve playback should first support a small preset library of per-frame curve shapes selected by hint, before considering real-time generated custom curves.
 verification:
   checks_run:
@@ -181,8 +181,9 @@ backlog:
       - Future work: add a small preset per-frame curve library and let the curve hint select a preset before considering real-time generated custom curves.
   - id: unified_timeline_direct_sink_execution
     status: todo
-    summary: Move from migration-era segment ports toward PlaybackTimelineEngine directly driving sink prepare/start/terminal semantics.
+    summary: Move remaining prepare/terminal and SessionStore coordination from migration-era segment ports toward PlaybackTimelineEngine-driven sink lifecycle.
     notes:
+      - Audio and motion start are now registered as PlaybackTimelineEngine sink callbacks and invoked through startSink.
       - Keep SessionStore as the persistent turn/segment fact store, but move execution ownership into timeline sinks.
       - Reduce AdapterAudioRuntime to adapter/session state bridge plus protocol-facing convenience methods.
       - Make missing sink wiring a hard error; do not reintroduce compatibility fallback routes.
