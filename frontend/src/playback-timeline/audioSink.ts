@@ -1,10 +1,16 @@
-import {
-  getActiveAudioPlaybackClock,
-  startAudioPlayback,
-  stopAudioPlaybackRuntime,
-  type RuntimeAudioPlaybackClock,
-} from "../adapter-connection/runtime/audioPlayback.js";
 import type { AudioPlaybackClock } from "./contracts.js";
+
+export interface AudioPlaybackStartedEvent {
+  startedAtMs: number;
+  durationMs: number | null;
+}
+
+export interface RuntimeAudioPlaybackClock {
+  getCurrentTimeMs(): number | null;
+  getDurationMs(): number | null;
+  getPlaybackRate(): number;
+  isPlaying(): boolean;
+}
 
 export interface PlaybackTimelineAudioElementContext {
   audioUrl: string;
@@ -28,6 +34,33 @@ export interface PlaybackTimelineAudioSink {
   getClock(): AudioPlaybackClock | null;
 }
 
+let activeAudioElement: HTMLAudioElement | null = null;
+
+interface AudioElementClockSource {
+  currentTime: number;
+  duration: number;
+  playbackRate: number;
+  paused: boolean;
+  ended: boolean;
+}
+
+export function createAudioElementPlaybackClock(
+  audio: AudioElementClockSource,
+): RuntimeAudioPlaybackClock {
+  return {
+    getCurrentTimeMs: () => Number.isFinite(audio.currentTime)
+      ? Math.max(0, Math.round(audio.currentTime * 1000))
+      : null,
+    getDurationMs: () => Number.isFinite(audio.duration) && audio.duration > 0
+      ? Math.max(0, Math.round(audio.duration * 1000))
+      : null,
+    getPlaybackRate: () => Number.isFinite(audio.playbackRate) && audio.playbackRate > 0
+      ? audio.playbackRate
+      : 1,
+    isPlaying: () => !audio.paused && !audio.ended,
+  };
+}
+
 function adaptClock(clock: RuntimeAudioPlaybackClock): AudioPlaybackClock {
   return {
     getCurrentTimeMs: () => clock.getCurrentTimeMs(),
@@ -37,35 +70,136 @@ function adaptClock(clock: RuntimeAudioPlaybackClock): AudioPlaybackClock {
   };
 }
 
+function getActiveAudioPlaybackClock(): RuntimeAudioPlaybackClock | null {
+  if (!activeAudioElement) {
+    return null;
+  }
+  return createAudioElementPlaybackClock(activeAudioElement);
+}
+
+async function startBrowserAudioPlayback(
+  audioUrl: string,
+  callbacks: PlaybackTimelineAudioStartCallbacks,
+): Promise<void> {
+  stopBrowserAudioPlayback();
+
+  const audio = new Audio();
+  audio.crossOrigin = "anonymous";
+  audio.src = audioUrl;
+  activeAudioElement = audio;
+  callbacks.onAudioElementCreated?.({
+    audioUrl,
+    audio,
+    getAudioCurrentTimeSeconds: () => Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
+    isCurrentAudio: () => activeAudioElement === audio,
+  });
+  let resolvedDurationMs: number | null = null;
+  let playbackStartNotified = false;
+
+  const cleanup = () => {
+    if (activeAudioElement === audio) {
+      activeAudioElement = null;
+    }
+    callbacks.onAudioElementDisposed?.();
+  };
+
+  const syncDurationFromElement = () => {
+    const durationSeconds = Number(audio.duration);
+    if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
+      resolvedDurationMs = Math.round(durationSeconds * 1000);
+      callbacks.onDurationChanged?.(resolvedDurationMs);
+    }
+  };
+
+  const markPlaybackStarted = () => {
+    if (playbackStartNotified || activeAudioElement !== audio) {
+      return;
+    }
+    playbackStartNotified = true;
+    syncDurationFromElement();
+    callbacks.onPlaybackStarted?.({
+      startedAtMs: performance.now(),
+      durationMs: resolvedDurationMs,
+    });
+  };
+
+  audio.addEventListener(
+    "loadedmetadata",
+    () => {
+      syncDurationFromElement();
+    },
+    { once: true },
+  );
+
+  audio.addEventListener(
+    "playing",
+    () => {
+      markPlaybackStarted();
+    },
+    { once: true },
+  );
+
+  audio.addEventListener(
+    "ended",
+    () => {
+      if (activeAudioElement !== audio) {
+        return;
+      }
+      cleanup();
+      callbacks.onEnded?.();
+    },
+    { once: true },
+  );
+
+  audio.addEventListener(
+    "error",
+    () => {
+      if (activeAudioElement !== audio) {
+        return;
+      }
+      console.warn("[Connection] audio element error.", {
+        audioUrl,
+        errorCode: audio.error?.code ?? null,
+        errorMessage: audio.error?.message ?? "",
+        networkState: audio.networkState,
+        readyState: audio.readyState,
+      });
+      cleanup();
+      callbacks.onError?.();
+    },
+    { once: true },
+  );
+
+  try {
+    await audio.play();
+    markPlaybackStarted();
+  } catch (error) {
+    console.warn("[Connection] audio play rejected.", {
+      audioUrl,
+      error,
+      networkState: audio.networkState,
+      readyState: audio.readyState,
+    });
+    cleanup();
+    throw error;
+  }
+}
+
+function stopBrowserAudioPlayback(): void {
+  if (activeAudioElement) {
+    activeAudioElement.pause();
+    activeAudioElement.currentTime = 0;
+  }
+  activeAudioElement = null;
+}
+
 export function createBrowserAudioTimelineSink(): PlaybackTimelineAudioSink {
   return {
     async start(audioUrl, callbacks = {}) {
-      await startAudioPlayback(audioUrl, {
-        onAudioElementCreated: (event) => {
-          callbacks.onAudioElementCreated?.({
-            audioUrl,
-            audio: event.audio,
-            getAudioCurrentTimeSeconds: event.getAudioCurrentTimeSeconds,
-            isCurrentAudio: event.isCurrentAudio,
-          });
-        },
-        onAudioElementDisposed: () => {
-          callbacks.onAudioElementDisposed?.();
-        },
-        onDurationChanged: (durationMs) => callbacks.onDurationChanged?.(durationMs),
-        onPlaybackStarted: (event) => {
-          callbacks.onPlaybackStarted?.(event);
-        },
-        onEnded: () => {
-          callbacks.onEnded?.();
-        },
-        onError: () => {
-          callbacks.onError?.();
-        },
-      });
+      await startBrowserAudioPlayback(audioUrl, callbacks);
     },
     stop() {
-      stopAudioPlaybackRuntime();
+      stopBrowserAudioPlayback();
     },
     getClock() {
       const clock = getActiveAudioPlaybackClock();

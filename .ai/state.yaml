@@ -53,7 +53,7 @@ context:
     - PetDesktopRuntime now delegates playback timeline motion wiring and segment execution wiring to app-level helpers, keeping the desktop runtime from owning bridge details directly.
   unresolved_questions:
     - Phase 2 still needs a careful extraction boundary for a standalone AudioSink because audioRuntime currently owns queueing, pending items, and settle behavior in addition to raw playback.
-    - Phase 3 still needs AdapterAudioRuntime and the browser audio playback implementation to be reduced further after segment execution and lip-sync sink boundaries were pulled closer to PlaybackTimelineRuntime.
+    - Phase 3 still needs AdapterAudioRuntime to be reduced further after segment execution, lip-sync sink, and browser audio playback boundaries were pulled into playback-timeline.
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.
     - For earlier curve generation during actual TTS synthesis, identify an AstrBot hook before message-chain Record creation; current MVP starts from emit_message_chain and never blocks playback.
@@ -64,7 +64,7 @@ architecture:
     - Inbound control.turn_finished, control.synth_finished, and control.interrupt now reject missing turn_id at protocol mapping instead of falling back to current or active audio turn identity.
     - Frontend now has a new playback-timeline module that defines a reusable segment timeline contract, synthetic/audio clock abstraction, and sink terminal state machine without yet changing real playback integration.
     - Audio runtime now creates a segment-scoped playback timeline for each released audio segment, attaches the HTMLAudioElement playback clock on playback start, and clears only that segment timeline on completion, failure, or interruption.
-    - AdapterAudioRuntime depends on PlaybackTimelineAudioSink for audio start/stop/clock access, while createAdapterConnection wires the browser HTMLAudioElement implementation through createBrowserAudioTimelineSink.
+    - AdapterAudioRuntime depends on PlaybackTimelineAudioSink for audio start/stop/clock access, while the browser HTMLAudioElement implementation now lives inside playback-timeline/audioSink.ts behind createBrowserAudioTimelineSink.
     - TurnPlaybackOrchestrator now releases audio before motion for the same ready segment so audioRuntime can create an active timeline before ModelEngine ingests the motion payload.
     - Segment playback release is now a dedicated playback-timeline runtime boundary; motion release requires a valid receivedAtMs and fails visibly instead of substituting a local fallback timestamp.
     - Segment release side effects are now isolated behind PlaybackTimelineRuntime.startSegmentJob; useTurnPlaybackOrchestrator submits typed segment jobs and no longer routes through a turn-playback compatibility adapter.
@@ -115,6 +115,8 @@ architecture:
     - AdapterAudioRuntime audio queue/release responsibilities are isolated behind an audio queue controller, reducing the runtime facade's direct pending-audio ownership.
     - AdapterAudioRuntime pending-audio settlement responsibilities are isolated behind an audio settlement controller, so turn/all audio cleanup no longer lives inline in the runtime facade.
     - Audio playback actions now delegate audio element plus lip-sync lifecycle handling to PlaybackTimelineAudioSegmentSink instead of owning audio element callback ordering or lip-sync runtime/callback wiring inline.
+    - Browser HTMLAudioElement playback ownership has moved from adapter-connection/runtime into playback-timeline/audioSink.ts, so adapter runtime no longer owns the raw audio element player.
+    - AdapterAudioRuntime no longer exposes playAudioAndAcknowledge as a public method; production and tests enter audio playback through queue/release or segment job paths.
     - Audio playback stop now interrupts the explicit turnId + messageId playback segment; missing segment identity is surfaced as an error instead of stopping an arbitrary active timeline.
 verification:
   checks_run:

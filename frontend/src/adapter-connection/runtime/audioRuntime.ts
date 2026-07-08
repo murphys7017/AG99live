@@ -109,11 +109,6 @@ export interface AdapterAudioRuntime {
     turnId: string | null,
     messageId: string,
   ) => void;
-  playAudioAndAcknowledge: (
-    audioUrl: string,
-    turnId: string | null,
-    messageId: string,
-  ) => Promise<void>;
   releaseAudioForPlayback: (
     messageId: string,
     turnId: string | null,
@@ -275,7 +270,6 @@ export function createAdapterAudioRuntime(
 
   return {
     queueAudioForPlayback: audioQueueController.queueAudioForPlayback,
-    playAudioAndAcknowledge,
     releaseAudioForPlayback: audioQueueController.releaseAudioForPlayback,
     setSegmentExecutionPorts,
     startSegmentJob,

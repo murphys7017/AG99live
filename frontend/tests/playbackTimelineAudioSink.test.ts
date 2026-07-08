@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {
   createAudioElementPlaybackClock,
-} from "../src/adapter-connection/runtime/audioPlayback.js";
+} from "../src/playback-timeline/audioSink.js";
 import { createBrowserAudioTimelineSink } from "../src/playback-timeline/audioSink.js";
 import type {
   PlaybackTimelineAudioSink,

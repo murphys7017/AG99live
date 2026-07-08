@@ -256,11 +256,8 @@ async function testAudioTimelineInterruptsPreparedAudioOnStopAll(): Promise<void
     createLipSyncRuntime: buildLipSyncRuntimeFactory(),
   });
 
-  void runtime.playAudioAndAcknowledge(
-    "http://127.0.0.1/audio.wav",
-    "turn-3",
-    "msg-3",
-  );
+  runtime.queueAudioForPlayback("http://127.0.0.1/audio.wav", "turn-3", "msg-3");
+  assert.equal(runtime.releaseAudioForPlayback("msg-3", "turn-3"), true);
   await flushMicrotasks();
   assert.equal(getSegmentTimelineSnapshot(runtime, "turn-3", "msg-3")?.phase, "preparing");
 
@@ -361,11 +358,8 @@ async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise
     }),
   });
 
-  void runtime.playAudioAndAcknowledge(
-    "http://127.0.0.1/first.wav",
-    "turn-4",
-    "msg-4a",
-  );
+  runtime.queueAudioForPlayback("http://127.0.0.1/first.wav", "turn-4", "msg-4a");
+  assert.equal(runtime.releaseAudioForPlayback("msg-4a", "turn-4"), true);
   await flushMicrotasks();
   assert.equal(state.audioPlaybackStartedMessageId, "msg-4a");
   assert.deepEqual(releasedEvents[0], {
@@ -373,11 +367,8 @@ async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise
     messageId: "msg-4a",
   });
 
-  void runtime.playAudioAndAcknowledge(
-    "http://127.0.0.1/second.wav",
-    "turn-4",
-    "msg-4b",
-  );
+  runtime.queueAudioForPlayback("http://127.0.0.1/second.wav", "turn-4", "msg-4b");
+  assert.equal(runtime.releaseAudioForPlayback("msg-4b", "turn-4"), true);
   await flushMicrotasks();
 
   assert.deepEqual(terminalEvents[0], {
