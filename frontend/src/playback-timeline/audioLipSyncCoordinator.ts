@@ -6,15 +6,15 @@ import type {
   PlaybackTimelineLipSyncRuntimeCallbacks,
 } from "./lipSyncSink.js";
 
-export interface PlaybackTimelineAudioLipSyncCoordinator {
+export interface PlaybackTimelineAudioLipSyncSink {
   attachAudio(event: PlaybackTimelineAudioElementContext): void;
-  resume(): void;
+  start(): void;
   completeAfterAudioEnded(): void;
   failAfterAudioError(): void;
   stop(): void;
 }
 
-export function createPlaybackTimelineAudioLipSyncCoordinator(options: {
+export function createPlaybackTimelineAudioLipSyncSink(options: {
   turnId: string | null;
   messageId: string;
   pushHistory: (role: string, text: string) => void;
@@ -31,7 +31,7 @@ export function createPlaybackTimelineAudioLipSyncCoordinator(options: {
     terminal: "completed" | "failed" | "interrupted",
     reason: string,
   ) => void;
-}): PlaybackTimelineAudioLipSyncCoordinator {
+}): PlaybackTimelineAudioLipSyncSink {
   const lipSyncRuntime = options.createLipSyncRuntime({
     onUnavailable: () => {
       options.pushHistory("system", "嘴型同步加载失败，音频播放将无对应张嘴动作。");
@@ -61,7 +61,7 @@ export function createPlaybackTimelineAudioLipSyncCoordinator(options: {
         isCurrentAudio: event.isCurrentAudio,
       });
     },
-    resume() {
+    start() {
       void lipSyncRuntime.resume();
     },
     completeAfterAudioEnded() {

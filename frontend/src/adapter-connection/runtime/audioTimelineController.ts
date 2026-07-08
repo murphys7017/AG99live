@@ -1,5 +1,12 @@
 import type { PlaybackTimelineAudioSink } from "../../playback-timeline/audioSink.js";
 import {
+  createPlaybackTimelineAudioLipSyncSink,
+  type PlaybackTimelineAudioLipSyncSink,
+} from "../../playback-timeline/audioLipSyncCoordinator.js";
+import {
+  createPlaybackTimelineAudioSegmentSink,
+} from "../../playback-timeline/audioSegmentPlaybackSink.js";
+import {
   createBrowserLipSyncTimelineSink,
   createPlaybackTimelineLipSyncRuntime,
   type PlaybackTimelineLipSyncRuntime,
@@ -63,23 +70,33 @@ export function createAdapterAudioTimelineController(
     return runtime;
   };
 
-  const stopLipSyncRuntime = (): void => {
-    activeLipSyncRuntime?.stop();
-    activeLipSyncRuntime = null;
+  const createLipSyncSink = (
+    turnId: string | null,
+    messageId: string,
+  ): PlaybackTimelineAudioLipSyncSink => {
+    return createPlaybackTimelineAudioLipSyncSink({
+      turnId,
+      messageId,
+      pushHistory: deps.pushHistory,
+      createLipSyncRuntime,
+      markLipSyncTimelineStarted: playbackTimelineRuntime.markLipSyncTimelineStarted,
+      markLipSyncTimelineTerminal: playbackTimelineRuntime.markLipSyncTimelineTerminal,
+    });
   };
+
+  const audioSegmentSink = createPlaybackTimelineAudioSegmentSink({
+    audioSink: deps.audioSink,
+    createLipSyncSink,
+  });
 
   const audioPlaybackCtx: AudioPlaybackContext = {
     get state() {
       return deps.state;
     },
-    audioSink: deps.audioSink,
-    createLipSyncRuntime,
-    stopLipSyncRuntime,
+    audioSegmentSink,
     prepareAudioTimeline: playbackTimelineRuntime.prepareAudioTimeline,
     markAudioTimelineDuration: playbackTimelineRuntime.markAudioTimelineDuration,
     markAudioTimelineStarted: playbackTimelineRuntime.markAudioTimelineStarted,
-    markLipSyncTimelineStarted: playbackTimelineRuntime.markLipSyncTimelineStarted,
-    markLipSyncTimelineTerminal: playbackTimelineRuntime.markLipSyncTimelineTerminal,
     markAudioTimelineTerminal: playbackTimelineRuntime.markAudioTimelineTerminal,
     stopAudioTimelineForSegment: playbackTimelineRuntime.stopTimelineForSegment,
     pushHistory: deps.pushHistory,

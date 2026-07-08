@@ -1,0 +1,80 @@
+import type {
+  PlaybackTimelineAudioSink,
+  PlaybackTimelineAudioStartCallbacks,
+} from "./audioSink.js";
+import type {
+  PlaybackTimelineAudioLipSyncSink,
+} from "./audioLipSyncCoordinator.js";
+
+export interface PlaybackTimelineAudioSegmentSinkCallbacks {
+  onDurationChanged?: PlaybackTimelineAudioStartCallbacks["onDurationChanged"];
+  onPlaybackStarted?: PlaybackTimelineAudioStartCallbacks["onPlaybackStarted"];
+  onEnded?: () => void;
+  onError?: () => void;
+}
+
+export interface PlaybackTimelineAudioSegmentSink {
+  start(
+    audioUrl: string,
+    turnId: string | null,
+    messageId: string,
+    callbacks?: PlaybackTimelineAudioSegmentSinkCallbacks,
+  ): Promise<void>;
+  stop(): void;
+}
+
+export function createPlaybackTimelineAudioSegmentSink(options: {
+  audioSink: PlaybackTimelineAudioSink;
+  createLipSyncSink: (
+    turnId: string | null,
+    messageId: string,
+  ) => PlaybackTimelineAudioLipSyncSink;
+}): PlaybackTimelineAudioSegmentSink {
+  let activeLipSyncSink: PlaybackTimelineAudioLipSyncSink | null = null;
+
+  function stopActiveLipSyncSink(): void {
+    activeLipSyncSink?.stop();
+    activeLipSyncSink = null;
+  }
+
+  return {
+    async start(audioUrl, turnId, messageId, callbacks = {}) {
+      stopActiveLipSyncSink();
+      const lipSyncSink = options.createLipSyncSink(turnId, messageId);
+      activeLipSyncSink = lipSyncSink;
+      try {
+        await options.audioSink.start(audioUrl, {
+          onAudioElementCreated: (event) => {
+            lipSyncSink.attachAudio(event);
+          },
+          onAudioElementDisposed: () => {
+            lipSyncSink.stop();
+            if (activeLipSyncSink === lipSyncSink) {
+              activeLipSyncSink = null;
+            }
+          },
+          onDurationChanged: callbacks.onDurationChanged,
+          onPlaybackStarted: (event) => {
+            lipSyncSink.start();
+            callbacks.onPlaybackStarted?.(event);
+          },
+          onEnded: () => {
+            lipSyncSink.completeAfterAudioEnded();
+            callbacks.onEnded?.();
+          },
+          onError: () => {
+            lipSyncSink.failAfterAudioError();
+            callbacks.onError?.();
+          },
+        });
+      } catch (error) {
+        lipSyncSink.failAfterAudioError();
+        throw error;
+      }
+    },
+    stop() {
+      stopActiveLipSyncSink();
+      options.audioSink.stop();
+    },
+  };
+}

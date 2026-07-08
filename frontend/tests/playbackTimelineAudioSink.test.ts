@@ -3,6 +3,13 @@ import {
   createAudioElementPlaybackClock,
 } from "../src/adapter-connection/runtime/audioPlayback.js";
 import { createBrowserAudioTimelineSink } from "../src/playback-timeline/audioSink.js";
+import type {
+  PlaybackTimelineAudioSink,
+  PlaybackTimelineAudioStartCallbacks,
+} from "../src/playback-timeline/audioSink.js";
+import {
+  createPlaybackTimelineAudioSegmentSink,
+} from "../src/playback-timeline/audioSegmentPlaybackSink.js";
 import {
   createPlaybackTimelineLipSyncRuntime,
   type PlaybackTimelineLipSyncSink,
@@ -149,12 +156,62 @@ async function testBrowserAudioSinkDoesNotOwnLipSyncCallbacks(): Promise<void> {
     (globalThis as { Audio?: unknown }).Audio = originalAudio;
   }
 }
+
+async function testAudioSegmentSinkOwnsLipSyncEventOrdering(): Promise<void> {
+  const events: string[] = [];
+  let callbacksRef: PlaybackTimelineAudioStartCallbacks | null = null;
+  const audioSink: PlaybackTimelineAudioSink = {
+    start: async (_audioUrl, callbacks = {}) => {
+      callbacksRef = callbacks;
+      callbacks.onAudioElementCreated?.({
+        audioUrl: "http://127.0.0.1/audio.wav",
+        audio: {} as HTMLAudioElement,
+        getAudioCurrentTimeSeconds: () => 0,
+        isCurrentAudio: () => true,
+      });
+      callbacks.onPlaybackStarted?.({
+        startedAtMs: 10,
+        durationMs: 500,
+      });
+      callbacks.onEnded?.();
+    },
+    stop: () => events.push("audio:stop"),
+    getClock: () => null,
+  };
+
+  const segmentSink = createPlaybackTimelineAudioSegmentSink({
+    audioSink,
+    createLipSyncSink: () => ({
+      attachAudio: () => events.push("lip:attach"),
+      start: () => events.push("lip:start"),
+      completeAfterAudioEnded: () => events.push("lip:complete"),
+      failAfterAudioError: () => events.push("lip:fail"),
+      stop: () => events.push("lip:stop"),
+    }),
+  });
+
+  await segmentSink.start("http://127.0.0.1/audio.wav", "turn-audio", "msg-audio", {
+    onPlaybackStarted: () => events.push("audio:started"),
+    onEnded: () => events.push("audio:ended"),
+  });
+
+  assert.ok(callbacksRef);
+  assert.deepEqual(events, [
+    "lip:attach",
+    "lip:start",
+    "audio:started",
+    "lip:complete",
+    "audio:ended",
+  ]);
+}
+
 async function run(): Promise<void> {
   testAudioElementPlaybackClockMapsElementState();
   testAudioElementPlaybackClockHandlesInvalidValues();
   testLipSyncRuntimeFailsWhenAudioEndsBeforeStart();
   testLipSyncRuntimeKeepsUnavailableTerminalStable();
   await testBrowserAudioSinkDoesNotOwnLipSyncCallbacks();
+  await testAudioSegmentSinkOwnsLipSyncEventOrdering();
   console.log("playbackTimelineAudioSink tests passed");
 }
 
