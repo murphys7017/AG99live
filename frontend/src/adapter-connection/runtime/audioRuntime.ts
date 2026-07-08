@@ -245,8 +245,11 @@ export function createAdapterAudioRuntime(
     pushHistory: deps.pushHistory,
   });
 
-  function stopAudioPlayback(): void {
-    timelineController.stopAudioPlayback();
+  function stopAudioPlayback(
+    turnId: string | null,
+    messageId: string | null,
+  ): void {
+    timelineController.stopAudioPlaybackForSegment(turnId, messageId);
   }
 
   const audioSettlementController = createAdapterAudioSettlementController({

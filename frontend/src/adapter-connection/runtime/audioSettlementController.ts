@@ -19,7 +19,10 @@ export interface AdapterAudioSettlementControllerDeps {
     reason?: string,
     messageId?: string | null,
   ) => void;
-  stopAudioPlayback: () => void;
+  stopAudioPlayback: (
+    turnId: string | null,
+    messageId: string | null,
+  ) => void;
 }
 
 export function createAdapterAudioSettlementController(
@@ -53,12 +56,16 @@ export function createAdapterAudioSettlementController(
     }
     settlePendingAudiosForTurn(turnId, reason);
     if (shouldStopAudio) {
-      deps.stopAudioPlayback();
+      deps.stopAudioPlayback(
+        activeSegment?.turnId ?? null,
+        activeSegment?.messageId ?? null,
+      );
     }
   }
 
   function stopAudioAndSettleAll(reason: string): void {
-    for (const activeSegment of deps.findOpenAudioSegments()) {
+    const activeSegments = deps.findOpenAudioSegments();
+    for (const activeSegment of activeSegments) {
       deps.markAudioPlaybackTerminal(
         "failed",
         activeSegment.turnId,
@@ -75,7 +82,13 @@ export function createAdapterAudioSettlementController(
       );
       deps.audioBridge.state.pendingAudios.delete(queueKey);
     }
-    deps.stopAudioPlayback();
+    if (activeSegments.length === 0) {
+      deps.stopAudioPlayback(null, null);
+      return;
+    }
+    for (const activeSegment of activeSegments) {
+      deps.stopAudioPlayback(activeSegment.turnId, activeSegment.messageId);
+    }
   }
 
   function findOpenAudioSegment(): AudioSettlementSegment | null {

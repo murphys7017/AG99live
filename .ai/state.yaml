@@ -53,7 +53,7 @@ context:
     - PetDesktopRuntime now delegates playback timeline motion wiring and segment execution wiring to app-level helpers, keeping the desktop runtime from owning bridge details directly.
   unresolved_questions:
     - Phase 2 still needs a careful extraction boundary for a standalone AudioSink because audioRuntime currently owns queueing, pending items, and settle behavior in addition to raw playback.
-    - Phase 3 still needs AdapterAudioRuntime to be reduced further after segment execution, lip-sync sink, and browser audio playback boundaries were pulled into playback-timeline.
+    - Phase 3 still needs AdapterAudioRuntime to be reduced further after segment execution, lip-sync sink, browser audio playback, and audio segment timeline event runner boundaries were pulled into playback-timeline.
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.
     - For earlier curve generation during actual TTS synthesis, identify an AstrBot hook before message-chain Record creation; current MVP starts from emit_message_chain and never blocks playback.
@@ -117,6 +117,7 @@ architecture:
     - Audio playback actions now delegate audio element plus lip-sync lifecycle handling to PlaybackTimelineAudioSegmentSink instead of owning audio element callback ordering or lip-sync runtime/callback wiring inline.
     - Browser HTMLAudioElement playback ownership has moved from adapter-connection/runtime into playback-timeline/audioSink.ts, so adapter runtime no longer owns the raw audio element player.
     - AdapterAudioRuntime no longer exposes playAudioAndAcknowledge as a public method; production and tests enter audio playback through queue/release or segment job paths.
+    - PlaybackTimelineAudioSegmentRunner now bridges audio segment duration/started/terminal events into PlaybackTimelineRuntime, so audioPlaybackActions only updates adapter/session state around playback.
     - Audio playback stop now interrupts the explicit turnId + messageId playback segment; missing segment identity is surfaced as an error instead of stopping an arbitrary active timeline.
 verification:
   checks_run:

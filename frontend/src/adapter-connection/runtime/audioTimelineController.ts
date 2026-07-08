@@ -7,6 +7,9 @@ import {
   createPlaybackTimelineAudioSegmentSink,
 } from "../../playback-timeline/audioSegmentPlaybackSink.js";
 import {
+  createPlaybackTimelineAudioSegmentRunner,
+} from "../../playback-timeline/audioSegmentTimelineRunner.js";
+import {
   createBrowserLipSyncTimelineSink,
   createPlaybackTimelineLipSyncRuntime,
   type PlaybackTimelineLipSyncRuntime,
@@ -21,6 +24,7 @@ import {
 import {
   playAudioAndAcknowledge as playAudioAction,
   stopAudioPlayback as stopAudioAction,
+  stopAudioPlaybackForSegment as stopAudioForSegmentAction,
   type AudioPlaybackContext,
   type AudioPlaybackSessionStore,
   type AudioPlaybackState,
@@ -88,17 +92,16 @@ export function createAdapterAudioTimelineController(
     audioSink: deps.audioSink,
     createLipSyncSink,
   });
+  const audioSegmentRunner = createPlaybackTimelineAudioSegmentRunner({
+    runtime: playbackTimelineRuntime,
+    audioSegmentSink,
+  });
 
   const audioPlaybackCtx: AudioPlaybackContext = {
     get state() {
       return deps.state;
     },
-    audioSegmentSink,
-    prepareAudioTimeline: playbackTimelineRuntime.prepareAudioTimeline,
-    markAudioTimelineDuration: playbackTimelineRuntime.markAudioTimelineDuration,
-    markAudioTimelineStarted: playbackTimelineRuntime.markAudioTimelineStarted,
-    markAudioTimelineTerminal: playbackTimelineRuntime.markAudioTimelineTerminal,
-    stopAudioTimelineForSegment: playbackTimelineRuntime.stopTimelineForSegment,
+    audioSegmentRunner,
     pushHistory: deps.pushHistory,
     markTerminal: deps.markTerminal,
     resetTerminal: deps.resetTerminal,
@@ -116,6 +119,12 @@ export function createAdapterAudioTimelineController(
     ) => playAudioAction(audioPlaybackCtx, audioUrl, turnId, messageId),
     stopAudioPlayback: () => {
       stopAudioAction(audioPlaybackCtx);
+    },
+    stopAudioPlaybackForSegment: (
+      turnId: string | null,
+      messageId: string | null,
+    ) => {
+      stopAudioForSegmentAction(audioPlaybackCtx, turnId, messageId);
     },
   };
 }
