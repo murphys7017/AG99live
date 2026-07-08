@@ -10,7 +10,7 @@ export interface PlaybackTimelineAudioSegmentRunnerCallbacks {
   onDurationChanged?: PlaybackTimelineAudioSegmentSinkCallbacks["onDurationChanged"];
   onPlaybackStarted?: PlaybackTimelineAudioSegmentSinkCallbacks["onPlaybackStarted"];
   onEnded?: () => void;
-  onError?: () => void;
+  onError?: (reason: string) => void;
 }
 
 export interface PlaybackTimelineAudioSegmentRunner {
@@ -33,45 +33,71 @@ export function createPlaybackTimelineAudioSegmentRunner(options: {
 }): PlaybackTimelineAudioSegmentRunner {
   return {
     async start(audioUrl, turnId, messageId, callbacks = {}) {
-      options.runtime.prepareAudioTimeline(turnId, messageId);
       try {
-        await options.audioSegmentSink.start(audioUrl, turnId, messageId, {
-          onDurationChanged: (durationMs) => {
-            options.runtime.markAudioTimelineDuration(
-              turnId,
-              messageId,
-              durationMs,
-            );
-            callbacks.onDurationChanged?.(durationMs);
+        const accepted = options.runtime.startAudioTimelineSink(
+          turnId,
+          messageId,
+          {
+            start: () => {
+              void options.audioSegmentSink.start(audioUrl, turnId, messageId, {
+                onDurationChanged: (durationMs) => {
+                  options.runtime.markAudioTimelineDuration(
+                    turnId,
+                    messageId,
+                    durationMs,
+                  );
+                  callbacks.onDurationChanged?.(durationMs);
+                },
+                onPlaybackStarted: (event) => {
+                  options.runtime.markAudioTimelineStarted(
+                    turnId,
+                    messageId,
+                    event.startedAtMs,
+                    event.durationMs,
+                  );
+                  callbacks.onPlaybackStarted?.(event);
+                },
+                onEnded: () => {
+                  options.runtime.markAudioTimelineTerminal(
+                    turnId,
+                    messageId,
+                    "completed",
+                    "audio_playback_completed",
+                  );
+                  callbacks.onEnded?.();
+                },
+                onError: () => {
+                  options.runtime.markAudioTimelineTerminal(
+                    turnId,
+                    messageId,
+                    "failed",
+                    "audio_playback_error",
+                  );
+                  callbacks.onError?.("audio_playback_error");
+                },
+              }).catch((error: unknown) => {
+                options.runtime.markAudioTimelineTerminal(
+                  turnId,
+                  messageId,
+                  "failed",
+                  "audio_autoplay_blocked",
+                );
+                callbacks.onError?.("audio_autoplay_blocked");
+                console.warn("[PlaybackTimelineAudioSegmentRunner] audio sink start failed.", error);
+              });
+              return true;
+            },
           },
-          onPlaybackStarted: (event) => {
-            options.runtime.markAudioTimelineStarted(
-              turnId,
-              messageId,
-              event.startedAtMs,
-              event.durationMs,
-            );
-            callbacks.onPlaybackStarted?.(event);
-          },
-          onEnded: () => {
-            options.runtime.markAudioTimelineTerminal(
-              turnId,
-              messageId,
-              "completed",
-              "audio_playback_completed",
-            );
-            callbacks.onEnded?.();
-          },
-          onError: () => {
-            options.runtime.markAudioTimelineTerminal(
-              turnId,
-              messageId,
-              "failed",
-              "audio_playback_error",
-            );
-            callbacks.onError?.();
-          },
-        });
+        );
+        if (accepted !== true) {
+          options.runtime.markAudioTimelineTerminal(
+            turnId,
+            messageId,
+            "failed",
+            "audio_sink_rejected",
+          );
+          callbacks.onError?.("audio_sink_rejected");
+        }
       } catch (error) {
         options.runtime.markAudioTimelineTerminal(
           turnId,

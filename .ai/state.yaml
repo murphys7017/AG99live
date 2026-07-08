@@ -35,6 +35,8 @@ context:
     - Speech-only motion now also consumes the matched audio-start timeline snapshot when no queued motion starts, so speech-following plans use real remaining audio duration instead of any SessionStore estimate.
     - Motion release timeline ownership lookup now lives in PlaybackTimelineRuntime; TurnPlaybackOrchestrator no longer reads active audio timeline snapshots directly, and MotionTimelineSink uses segment-scoped lookup when available.
     - Lip sync runtime has been moved behind an independent PlaybackTimelineAudioLipSyncSink boundary, and PlaybackTimelineAudioSegmentSink now owns audio element event ordering plus lip-sync attach/start/terminal/stop while audio playback actions only update adapter/session state.
+    - Audio segment runner now starts browser audio through PlaybackTimelineRuntime.startAudioTimelineSink, so released audio enters the PlaybackTimelineEngine sink-start callback path instead of runner-local prepare plus direct sink start.
+    - Live2D lip-sync sampling and external mouth-parameter writes now live in frontend/src/live2d/lipSyncTimelineSink.ts; playback-timeline/lipSyncSink.ts keeps only the timeline-facing lifecycle runtime and terminal rules.
     - Playback timeline sink terminal state is now stable once a sink reaches a terminal value, so late cleanup/completion events cannot overwrite a real failure.
     - Lip sync can only complete after it has explicitly started; if audio ends before lip sync starts, the lip_sync sink fails with lip_sync_not_started_before_audio_end.
     - Timeline snapshots now expose audio_unavailable when an attached or expected audio clock cannot provide a playable audio-time snapshot, keeping text-only synthetic timing separate from audio-clock failures.
@@ -55,7 +57,7 @@ context:
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.
     - For earlier curve generation during actual TTS synthesis, identify an AstrBot hook before message-chain Record creation; current MVP starts from emit_message_chain and never blocks playback.
-    - Confirm the final LipSync ownership split: timeline should schedule lip_sync as a real sink, while low-level mouth-value sampling and Live2D parameter writes may move into the Live2D WebSDK adapter/runtime layer.
+    - Confirm the final LipSync lifecycle split: timeline should schedule lip_sync as a real optional sink, while low-level mouth-value sampling and Live2D parameter writes now live at the Live2D boundary.
 architecture:
   stability: evolving
   boundary_changes:
@@ -72,6 +74,7 @@ architecture:
     - PlaybackTimelineRuntime asks itself to prepare audio+motion or explicit motion-only segment timelines before motion execution; motion-only preparation failure is marked as motion_only_timeline_unavailable instead of being hidden by ModelEngine ingestion.
     - PlaybackTimelineRuntime and useTurnPlaybackOrchestrator now require the timeline runtime start/preparation boundary so segment release cannot silently skip unified timeline preparation.
     - PlaybackTimelineRuntime.prepareAudioTimeline is idempotent for the same active audio segment so segment-level preparation cannot wipe an already registered motion sink when audio playback also prepares the same timeline.
+    - PlaybackTimelineRuntime.startAudioTimelineSink is now the audio sink start boundary used by both segment jobs and the audio segment runner; audio runner no longer starts browser audio outside the engine sink callback path.
     - AudioPlaybackActions now requires timeline lifecycle callbacks for audio duration, started, terminal, lip-sync terminal, and active timeline stop; MotionSink now requires segment-scoped timeline lookup plus audio/motion-only prepare callbacks.
     - AdapterConnection no longer exposes getActiveAudioTimelineSnapshot publicly; upper layers use segment-scoped timeline lookup instead.
     - A new PlaybackTimelineMotionSink wraps ModelEngine motion start and attaches only same turnId/messageId timeline snapshots supplied by PlaybackTimelineRuntime to motion contexts.
@@ -80,8 +83,8 @@ architecture:
     - PreviewMotionPlayer stores the active terminal callback and emits a single stopped terminal when playback is explicitly stopped before the Live2D runtime reports completion.
     - AdapterAudioRuntime exposes a motion-only timeline preparation path so no-audio motion segments can still run under PlaybackTimelineEngine with a synthetic clock.
     - PlaybackTimelineRuntime owns segment-scoped timelines during migration; AdapterAudioRuntime remains the outer playback compatibility facade.
-    - A new PlaybackTimelineLipSyncSink wraps WAV lip sync preload, live WebAudio RMS sampling, external Live2D lip sync writes, and cleanup; it is currently executed through AudioSink, while AdapterAudioRuntime registers lip_sync as an optional PlaybackTimelineEngine sink and records started/failed/completed terminal state.
     - PlaybackTimelineLipSyncRuntime now owns lip-sync started/unavailable/completed/failed settlement, so AudioSink no longer carries the lip-sync terminal state machine directly.
+    - The Live2D lip-sync timeline sink wraps WAV lip sync preload, live WebAudio RMS sampling, external Live2D lip sync writes, and cleanup; it is still coordinated through the audio segment sink while AdapterAudioRuntime registers lip_sync as an optional PlaybackTimelineEngine sink and records started/failed/completed terminal state.
     - PlaybackTimelineEngine ignores late started/terminal events for sinks that are already completed, failed, absent, or interrupted.
     - During early development, fallback behavior should be fail-visible: optional sinks may fail without blocking required playback, but missing capabilities must not be silently reported as started or completed.
     - TimelineClock uses synthetic clock only for explicit no-audio timing; attached audio clock failures are exposed as audio_unavailable rather than hidden behind synthetic.
@@ -185,6 +188,7 @@ backlog:
     summary: Move remaining prepare/terminal and SessionStore coordination from migration-era segment-sink wiring toward PlaybackTimelineEngine-driven sink lifecycle.
     notes:
       - Audio and motion start are now registered as PlaybackTimelineEngine sink callbacks and invoked through startSink.
+      - Browser audio release now enters PlaybackTimelineRuntime.startAudioTimelineSink before the actual audio segment sink starts.
       - Keep SessionStore as the persistent turn/segment fact store, but move execution ownership into timeline sinks.
       - Reduce AdapterAudioRuntime to adapter/session state bridge plus protocol-facing convenience methods.
       - Make missing sink wiring a hard error; do not reintroduce compatibility fallback routes.
@@ -194,6 +198,6 @@ backlog:
     summary: Evaluate moving low-level lip-sync sampling and Live2D parameter writes into the Live2D WebSDK adapter/runtime boundary.
     notes:
       - PlaybackTimeline should schedule lip_sync lifecycle as an optional sink.
-      - Live2D WebSDK side can own mouth-value sampling, WebAudio graph details, external lip-sync parameter writes, and cleanup.
+      - Live2D boundary now owns mouth-value sampling, WebAudio graph details, external lip-sync parameter writes, and cleanup.
       - The boundary must still report started/failed/completed/interrupted back to the timeline; silent success is not acceptable during migration.
       - Keep the shared HTMLAudioElement/audio clock ownership explicit to avoid desynchronizing mouth movement from sound.

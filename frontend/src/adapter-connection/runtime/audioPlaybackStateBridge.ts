@@ -105,7 +105,7 @@ export async function startAudioSegmentAndBridgeState(
           completedMessageId,
         );
       },
-      onError: () => {
+      onError: (reason) => {
         const failedTurnId = ctx.state.audioPlaybackStartedTurnId ?? turnId;
         const failedMessageId = ctx.state.audioPlaybackStartedMessageId ?? messageId;
         ctx.state.isPlayingAudio = false;
@@ -113,11 +113,15 @@ export async function startAudioSegmentAndBridgeState(
         ctx.state.audioPlaybackStartedMessageId = null;
         ctx.state.audioPlaybackStartedAtMs = 0;
         ctx.state.audioPlaybackDurationMs = null;
+        ctx.state.lastError = reason === "audio_autoplay_blocked"
+          ? "浏览器拒绝自动播放语音。"
+          : "音频播放失败。";
+        ctx.state.statusMessage = "语音播放失败，已回传结束状态。";
         ctx.pushHistory("error", "音频播放失败。");
         ctx.markTerminal(
           "failed",
           failedTurnId,
-          "audio_playback_error",
+          reason,
           failedMessageId,
         );
       },

@@ -239,6 +239,66 @@ async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
   assert.equal(getSegmentTimelineSnapshot(runtime, "turn-2", "msg-2"), null);
 }
 
+async function testRejectedAudioStartSettlesAdapterState(): Promise<void> {
+  const state = buildState();
+  const history: string[] = [];
+  const terminalEvents: Array<{
+    turnId: string | null;
+    terminal: string;
+    messageId: string;
+    reason?: string;
+  }> = [];
+  const runtime = createAdapterAudioRuntime({
+    state,
+    audioSink: buildAudioSink({
+      start: async () => {
+        throw new Error("autoplay blocked");
+      },
+    }),
+    pushHistory: (role, text) => {
+      history.push(`${role}:${text}`);
+    },
+    getSessionStore: () => ({
+      markAudioReleased: () => {},
+      markAudioStarted: () => {},
+      markAudioDuration: () => {},
+      markAudioTerminal: (turnId, terminal, messageId, reason) => {
+        terminalEvents.push({
+          turnId,
+          terminal,
+          messageId,
+          reason,
+        });
+      },
+      getSessions: () => [],
+    }),
+    createLipSyncRuntime: buildLipSyncRuntimeFactory(),
+  });
+
+  runtime.queueAudioForPlayback("http://127.0.0.1/blocked.wav", "turn-blocked", "msg-blocked");
+  assert.equal(runtime.releaseAudioForPlayback("msg-blocked", "turn-blocked"), true);
+  await flushMicrotasks();
+
+  assert.equal(state.isPlayingAudio, false);
+  assert.equal(state.audioPlaybackTerminalState, "failed");
+  assert.equal(state.audioPlaybackTerminalTurnId, "turn-blocked");
+  assert.equal(state.audioPlaybackTerminalReason, "audio_autoplay_blocked");
+  assert.equal(getSegmentTimelineSnapshot(runtime, "turn-blocked", "msg-blocked"), null);
+  assert.deepEqual(terminalEvents, [
+    {
+      turnId: "turn-blocked",
+      terminal: "failed",
+      messageId: "msg-blocked",
+      reason: "audio_autoplay_blocked",
+    },
+  ]);
+  assert.equal(state.lastError, "浏览器拒绝自动播放语音。");
+  assert.equal(
+    history.some((item) => item === "error:音频播放失败。"),
+    true,
+  );
+}
+
 async function testLipSyncFailureRemainsVisibleUntilAudioCompletes(): Promise<void> {
   const state = buildState();
   const runtime = createAdapterAudioRuntime({
@@ -536,6 +596,7 @@ async function testMotionOnlyTimelineUsesSyntheticClock(): Promise<void> {
 async function run(): Promise<void> {
   await testAudioPlaybackCreatesAudioClockTimeline();
   await testAudioTimelineCompletesOnAudioEnded();
+  await testRejectedAudioStartSettlesAdapterState();
   await testLipSyncFailureRemainsVisibleUntilAudioCompletes();
   await testAudioTimelineInterruptsPreparedAudioOnStopAll();
   await testStopAudioAndSettleTurnFailsOnlyMatchingPendingAudio();

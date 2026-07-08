@@ -61,6 +61,11 @@ export interface PlaybackTimelineRuntime {
     messageId: string,
     options?: PlaybackTimelineSinkStartOptions,
   ) => void;
+  startAudioTimelineSink: (
+    turnId: string | null,
+    messageId: string,
+    options: PlaybackTimelineSinkStartOptions,
+  ) => boolean | void;
   markAudioTimelineDuration: (
     turnId: string | null,
     messageId: string,
@@ -207,6 +212,19 @@ export function createPlaybackTimelineRuntime(
     segmentSinks = sinks;
   }
 
+  function startAudioTimelineSink(
+    turnId: string | null,
+    messageId: string,
+    options: PlaybackTimelineSinkStartOptions,
+  ): boolean | void {
+    prepareAudioTimeline(turnId, messageId, options);
+    return startTimelineSink(
+      turnId,
+      messageId,
+      AUDIO_TIMELINE_SINK_ID,
+    );
+  }
+
   function startSegmentJob(
     job: PlaybackTimelineSegmentJob<NormalizedMotionPayload>,
   ): PlaybackTimelineSegmentExecutionResult {
@@ -234,17 +252,12 @@ export function createPlaybackTimelineRuntime(
 
     let releasedAudio = false;
     if (job.audio.release) {
-      prepareAudioTimeline(job.turnId, job.messageId, {
+      releasedAudio = startAudioTimelineSink(job.turnId, job.messageId, {
         start: () => sinks.audioSink.releaseAudioForPlayback(
           job.messageId,
           job.turnId,
         ),
-      });
-      releasedAudio = startTimelineSink(
-        job.turnId,
-        job.messageId,
-        AUDIO_TIMELINE_SINK_ID,
-      ) === true;
+      }) === true;
       if (!releasedAudio) {
         clearTimelineIfSinkIdle(
           job.turnId,
@@ -732,6 +745,7 @@ export function createPlaybackTimelineRuntime(
     setSegmentSinks,
     startSegmentJob,
     prepareAudioTimeline,
+    startAudioTimelineSink,
     markAudioTimelineDuration,
     markAudioTimelineStarted,
     markLipSyncTimelineStarted,
