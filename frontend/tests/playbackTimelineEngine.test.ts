@@ -380,6 +380,69 @@ function testPlaybackTimelineRuntimePreparesSegmentJobIdempotently(): void {
   );
 }
 
+function testMotionTimelineEventsDoNotPrepareMissingSink(): void {
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => null,
+  });
+
+  runtime.prepareAudioTimeline("turn-no-motion-sink", "msg-no-motion-sink");
+  runtime.markMotionTimelineStarted("turn-no-motion-sink", "msg-no-motion-sink");
+  runtime.markMotionTimelineTerminal(
+    "turn-no-motion-sink",
+    "msg-no-motion-sink",
+    "completed",
+    "unexpected_motion_terminal",
+  );
+
+  const snapshot = runtime.getTimelineSnapshotForSegment(
+    "turn-no-motion-sink",
+    "msg-no-motion-sink",
+  );
+  assert.equal(
+    snapshot?.sinks.some((sink) => sink.id === "motion"),
+    false,
+  );
+  assert.equal(snapshot?.phase, "preparing");
+}
+
+function testAudioAndLipSyncEventsDoNotMutateMissingSinks(): void {
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => null,
+  });
+
+  runtime.prepareMotionOnlyTimeline("turn-motion-only", "msg-motion-only");
+  runtime.markAudioTimelineDuration("turn-motion-only", "msg-motion-only", 1200);
+  runtime.markAudioTimelineStarted("turn-motion-only", "msg-motion-only", 100, 1200);
+  runtime.markLipSyncTimelineStarted("turn-motion-only", "msg-motion-only");
+  runtime.markLipSyncTimelineTerminal(
+    "turn-motion-only",
+    "msg-motion-only",
+    "failed",
+    "unexpected_lip_sync_terminal",
+  );
+  runtime.markAudioTimelineTerminal(
+    "turn-motion-only",
+    "msg-motion-only",
+    "completed",
+    "unexpected_audio_terminal",
+  );
+
+  const snapshot = runtime.getTimelineSnapshotForSegment(
+    "turn-motion-only",
+    "msg-motion-only",
+  );
+  assert.equal(snapshot?.phase, "preparing");
+  assert.equal(snapshot?.durationMs, null);
+  assert.equal(
+    snapshot?.sinks.some((sink) => sink.id === "audio" || sink.id === "lip_sync"),
+    false,
+  );
+  assert.equal(
+    snapshot?.sinks.find((sink) => sink.id === "motion")?.terminal,
+    "idle",
+  );
+}
+
 function testPlaybackTimelineRuntimeStartsSegmentJobThroughTimelineEntry(): void {
   const runtime = createPlaybackTimelineRuntime({
     getAudioClock: () => null,
@@ -907,6 +970,8 @@ function run(): void {
   testPerformanceCurveTimelineRejectsUnavailableAudio();
   testPlaybackTimelineRuntimeCreatesMotionOnlyTimeline();
   testPlaybackTimelineRuntimePreparesSegmentJobIdempotently();
+  testMotionTimelineEventsDoNotPrepareMissingSink();
+  testAudioAndLipSyncEventsDoNotMutateMissingSinks();
   testPlaybackTimelineRuntimeStartsSegmentJobThroughTimelineEntry();
   testQueuedSegmentReleaseSinksConsumePendingItems();
   testPlaybackTimelineRuntimeKeepsMismatchedSegmentTimelinesSeparate();

@@ -55,66 +55,51 @@ function matchesMotionContext(
   );
 }
 
+function hasMotionSink(snapshot: PlaybackTimelineSnapshot): boolean {
+  return snapshot.sinks.some((sink) => sink.id === "motion");
+}
+
+function canAttachTimelineForMotionStart(
+  snapshot: PlaybackTimelineSnapshot,
+  context: PlaybackTimelineMotionContext,
+): boolean {
+  if (context.timelineMode === "motion_only") {
+    return snapshot.clockSource === "synthetic";
+  }
+  return (
+    snapshot.clockSource === "audio"
+    && (snapshot.phase === "playing" || snapshot.phase === "paused")
+  );
+}
+
 function attachPlaybackTimelineToMotionContext(
   context: PlaybackTimelineMotionContext,
   snapshot: PlaybackTimelineSnapshot | null,
-  prepareMotionTimeline: (
-    turnId: string | null,
-    messageId: string,
-  ) => boolean,
-  prepareMotionOnlyTimeline: (
-    turnId: string | null,
-    messageId: string,
-  ) => PlaybackTimelineSnapshot | null,
-  getSegmentTimelineSnapshot: () => PlaybackTimelineSnapshot | null,
-): PlaybackTimelineMotionContext {
-  if (snapshot && matchesMotionContext(snapshot, context)) {
-    if (!prepareMotionTimeline(context.turnId, context.messageId)) {
-      return {
-        ...context,
-        playbackTimeline: null,
-      };
-    }
+): PlaybackTimelineMotionContext | null {
+  if (!snapshot || !matchesMotionContext(snapshot, context) || !hasMotionSink(snapshot)) {
+    return null;
+  }
+
+  if (canAttachTimelineForMotionStart(snapshot, context)) {
     return {
       ...context,
-      playbackTimeline: getSegmentTimelineSnapshot() ?? snapshot,
+      playbackTimeline: snapshot,
     };
   }
 
-  if (context.timelineMode !== "motion_only") {
-    return {
-      ...context,
-      playbackTimeline: null,
-    };
+  if (context.timelineMode === "motion_only") {
+    return null;
   }
 
-  const motionOnlyTimeline = prepareMotionOnlyTimeline(
-    context.turnId,
-    context.messageId,
-  );
-  if (!motionOnlyTimeline || !matchesMotionContext(motionOnlyTimeline, context)) {
-    return {
-      ...context,
-      playbackTimeline: null,
-    };
-  }
   return {
     ...context,
-    playbackTimeline: motionOnlyTimeline,
+    playbackTimeline: null,
   };
 }
 
 export function createModelEngineMotionTimelineSink(options: {
   motionEngine: PlaybackTimelineMotionEngine;
   getPlaybackTimelineSnapshotForSegment: (
-    turnId: string | null,
-    messageId: string,
-  ) => PlaybackTimelineSnapshot | null;
-  prepareMotionTimelineSink: (
-    turnId: string | null,
-    messageId: string,
-  ) => boolean;
-  prepareMotionOnlyTimeline: (
     turnId: string | null,
     messageId: string,
   ) => PlaybackTimelineSnapshot | null;
@@ -127,25 +112,22 @@ export function createModelEngineMotionTimelineSink(options: {
 }): PlaybackTimelineMotionSink {
   return {
     start(payload, context) {
-      const getSegmentTimelineSnapshot = () =>
-        options.getPlaybackTimelineSnapshotForSegment(
-          context.turnId,
-          context.messageId,
-        );
-      const playbackTimelineSnapshot = getSegmentTimelineSnapshot();
+      const playbackTimelineSnapshot = options.getPlaybackTimelineSnapshotForSegment(
+        context.turnId,
+        context.messageId,
+      );
       const nextContext = attachPlaybackTimelineToMotionContext(
         context,
         playbackTimelineSnapshot,
-        options.prepareMotionTimelineSink,
-        options.prepareMotionOnlyTimeline,
-        getSegmentTimelineSnapshot,
       );
-      if (context.timelineMode === "motion_only" && !nextContext.playbackTimeline) {
+      if (!nextContext) {
         options.markMotionTimelineTerminal(
           context.turnId,
           context.messageId,
           "failed",
-          "motion_only_timeline_unavailable",
+          context.timelineMode === "motion_only"
+            ? "motion_only_timeline_unavailable"
+            : "motion_timeline_unavailable",
         );
         return false;
       }

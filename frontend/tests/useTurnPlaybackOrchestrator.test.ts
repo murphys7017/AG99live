@@ -41,9 +41,9 @@ const matchingTimelineSnapshot: PlaybackTimelineSnapshot = {
   timelineId: "timeline-1",
   turnId: "turn-timeline",
   messageId: "msg-timeline",
-  phase: "preparing",
+  phase: "playing",
   clockSource: "audio",
-  startedAtMs: null,
+  startedAtMs: 100,
   currentTimeMs: 0,
   durationMs: 1800,
   playbackRate: 1,
@@ -52,6 +52,11 @@ const matchingTimelineSnapshot: PlaybackTimelineSnapshot = {
       id: "audio",
       required: true,
       terminal: "started",
+    },
+    {
+      id: "motion",
+      required: true,
+      terminal: "idle",
     },
   ],
 };
@@ -75,21 +80,9 @@ const matchingMotionOnlyTimelineSnapshot: PlaybackTimelineSnapshot = {
   ],
 };
 
-function createAcceptingTimelineRuntime(
-  sinks: PlaybackTimelineSegmentSinks<NormalizedMotionPayload>,
-) {
-  const runtime = createPlaybackTimelineRuntime({
-    getAudioClock: () => null,
-  });
-  runtime.setSegmentSinks(sinks);
-  return runtime;
-}
-
 function createMissingMotionTimelineWiring() {
   return {
     getPlaybackTimelineSnapshotForSegment: () => null,
-    prepareMotionTimelineSink: () => false,
-    prepareMotionOnlyTimeline: () => null,
   };
 }
 function createHarness(options: {
@@ -98,6 +91,7 @@ function createHarness(options: {
 } = {}) {
   const sessionStore = useTurnPlaybackSessionStore();
   const released: string[] = [];
+  const motionSinkStarts: string[] = [];
   const motionPayloads: NormalizedMotionPayload[] = [];
   const motionContexts: Array<{
     messageId: string;
@@ -106,7 +100,6 @@ function createHarness(options: {
   }> = [];
   const turnChanges: Array<string | null> = [];
   const logs: Array<{ message: string; details: Record<string, unknown> }> = [];
-  let activeAudioTimeline: PlaybackTimelineSnapshot | null = null;
   const scope = effectScope();
   const originalConsoleInfo = console.info;
   console.info = (...args: unknown[]) => {
@@ -137,10 +130,13 @@ function createHarness(options: {
       turnId: string | null,
     ): boolean {
       released.push(`audio:${messageId}:${turnId ?? ""}`);
-      activeAudioTimeline = options.audioTimelineAfterRelease ?? null;
       return true;
     },
   };
+
+  const timelineRuntime = createPlaybackTimelineRuntime({
+    getAudioClock: () => null,
+  });
 
   const modelEngine = {
     ingestNormalizedPayload(
@@ -153,7 +149,6 @@ function createHarness(options: {
     ): boolean {
       motionPayloads.push(payload);
       motionContexts.push(context);
-      released.push(`motion:${context.messageId}:${context.turnId ?? ""}`);
       return options.motionAccepted ?? true;
     },
     notifyCurrentTurnChanged(turnId: string | null): void {
@@ -163,26 +158,33 @@ function createHarness(options: {
   const motionTimelineSink = createModelEngineMotionTimelineSink({
     motionEngine: modelEngine,
     getPlaybackTimelineSnapshotForSegment: (turnId, messageId) => {
-      if (
-        activeAudioTimeline
-        && activeAudioTimeline.turnId === turnId
-        && activeAudioTimeline.messageId === messageId
-      ) {
-        return activeAudioTimeline;
+      if (options.audioTimelineAfterRelease !== undefined) {
+        const snapshot = options.audioTimelineAfterRelease;
+        if (
+          snapshot
+          && snapshot.turnId === turnId
+          && snapshot.messageId === messageId
+        ) {
+          return snapshot;
+        }
+        return null;
       }
-      return null;
+      return timelineRuntime.getTimelineSnapshotForSegment(turnId, messageId);
     },
-    prepareMotionTimelineSink: () => true,
-    prepareMotionOnlyTimeline: (turnId, messageId) => ({
-      ...matchingMotionOnlyTimelineSnapshot,
-      timelineId: `timeline-motion-only:${turnId ?? ""}:${messageId}`,
-      turnId,
-      messageId,
-    }),
     markMotionTimelineTerminal: () => {},
   });
 
-  const timelineRuntime = createAcceptingTimelineRuntime({
+  const recordingMotionSink = {
+    start(
+      payload: NormalizedMotionPayload,
+      context: Parameters<typeof motionTimelineSink.start>[1],
+    ) {
+      motionSinkStarts.push(`motion:${context.messageId}:${context.turnId ?? ""}`);
+      return motionTimelineSink.start(payload, context);
+    },
+  };
+
+  timelineRuntime.setSegmentSinks({
     session: {
       markTextReleased: sessionStore.markTextReleased,
       markAudioReleased: sessionStore.markAudioReleased,
@@ -192,7 +194,7 @@ function createHarness(options: {
     },
     textSink: adapter,
     audioSink: adapter,
-    motionSink: motionTimelineSink,
+    motionSink: recordingMotionSink,
   });
 
   scope.run(() => {
@@ -208,6 +210,7 @@ function createHarness(options: {
   return {
     sessionStore,
     released,
+    motionSinkStarts,
     motionPayloads,
     motionContexts,
     turnChanges,
@@ -239,6 +242,8 @@ async function testSegmentsReleaseSequentiallyWithinTurn(): Promise<void> {
   assert.deepEqual(h.released, [
     "text:msg-a:turn-1",
     "audio:msg-a:turn-1",
+  ]);
+  assert.deepEqual(h.motionSinkStarts, [
     "motion:msg-a:turn-1",
   ]);
 
@@ -252,9 +257,11 @@ async function testSegmentsReleaseSequentiallyWithinTurn(): Promise<void> {
   assert.deepEqual(h.released, [
     "text:msg-a:turn-1",
     "audio:msg-a:turn-1",
-    "motion:msg-a:turn-1",
     "text:msg-b:turn-1",
     "audio:msg-b:turn-1",
+  ]);
+  assert.deepEqual(h.motionSinkStarts, [
+    "motion:msg-a:turn-1",
     "motion:msg-b:turn-1",
   ]);
   h.stop();
@@ -280,6 +287,8 @@ async function testTextAndMotionReleaseWhenAudioIsAbsent(): Promise<void> {
 
   assert.deepEqual(h.released, [
     "text:msg-text-motion:turn-text-motion",
+  ]);
+  assert.deepEqual(h.motionSinkStarts, [
     "motion:msg-text-motion:turn-text-motion",
   ]);
   assert.equal(
@@ -311,6 +320,8 @@ async function testAudioCaptionOnlySegmentDoesNotReleaseVisibleText(): Promise<v
 
   assert.deepEqual(h.released, [
     "audio:msg-audio-caption:turn-audio-caption",
+  ]);
+  assert.deepEqual(h.motionSinkStarts, [
     "motion:msg-audio-caption:turn-audio-caption",
   ]);
   const segment = h.sessionStore
@@ -342,6 +353,8 @@ async function testMotionReleaseReceivesMatchingAudioTimeline(): Promise<void> {
   assert.deepEqual(h.released, [
     "text:msg-timeline:turn-timeline",
     "audio:msg-timeline:turn-timeline",
+  ]);
+  assert.deepEqual(h.motionSinkStarts, [
     "motion:msg-timeline:turn-timeline",
   ]);
   assert.equal(h.motionContexts.length, 1);
@@ -377,8 +390,10 @@ async function testMotionReleaseRejectsMismatchedAudioTimeline(): Promise<void> 
   await h.flush();
   await h.flush();
 
-  assert.equal(h.motionContexts.length, 1);
-  assert.equal(h.motionContexts[0].playbackTimeline, null);
+  assert.deepEqual(h.motionSinkStarts, [
+    "motion:msg-timeline:turn-timeline",
+  ]);
+  assert.equal(h.motionContexts.length, 0);
   h.stop();
 }
 
@@ -408,6 +423,9 @@ async function testRejectedMotionReleaseMarksSegmentFailed(): Promise<void> {
   assert.equal(segment?.motion.completed, false);
   assert.equal(segment?.motion.failed, true);
   assert.equal(segment?.motion.reason, "motion_payload_rejected");
+  assert.deepEqual(h.motionSinkStarts, [
+    "motion:msg-motion-rejected:turn-motion-rejected",
+  ]);
   h.stop();
 }
 
@@ -526,8 +544,7 @@ async function testLateAudioAfterTextReleaseOnlyReleasesAudio(): Promise<void> {
   h.stop();
 }
 
-function testMotionTimelineSinkMarksPreparedTimelineFailedWhenEngineRejects(): void {
-  const prepared: string[] = [];
+function testMotionTimelineSinkMarksTimelineFailedWhenEngineRejects(): void {
   const terminals: string[] = [];
   const contexts: Array<{
     playbackTimeline?: PlaybackTimelineSnapshot | null;
@@ -541,11 +558,6 @@ function testMotionTimelineSinkMarksPreparedTimelineFailedWhenEngineRejects(): v
       notifyCurrentTurnChanged: () => {},
     },
     getPlaybackTimelineSnapshotForSegment: () => matchingTimelineSnapshot,
-    prepareMotionTimelineSink: (turnId, messageId) => {
-      prepared.push(`${turnId ?? ""}:${messageId}`);
-      return true;
-    },
-    prepareMotionOnlyTimeline: () => null,
     markMotionTimelineTerminal: (turnId, messageId, terminal, reason) => {
       terminals.push(`${turnId ?? ""}:${messageId}:${terminal}:${reason}`);
     },
@@ -558,15 +570,13 @@ function testMotionTimelineSinkMarksPreparedTimelineFailedWhenEngineRejects(): v
   });
 
   assert.equal(accepted, false);
-  assert.deepEqual(prepared, ["turn-timeline:msg-timeline"]);
   assert.equal(contexts[0].playbackTimeline?.timelineId, "timeline-1");
   assert.deepEqual(terminals, [
     "turn-timeline:msg-timeline:failed:motion_payload_rejected",
   ]);
 }
 
-function testMotionTimelineSinkCreatesSyntheticTimelineWhenAudioAbsent(): void {
-  const preparedMotionOnly: string[] = [];
+function testMotionTimelineSinkUsesPreparedSyntheticTimelineWhenAudioAbsent(): void {
   const contexts: Array<{
     playbackTimeline?: PlaybackTimelineSnapshot | null;
   }> = [];
@@ -578,14 +588,7 @@ function testMotionTimelineSinkCreatesSyntheticTimelineWhenAudioAbsent(): void {
       },
       notifyCurrentTurnChanged: () => {},
     },
-    getPlaybackTimelineSnapshotForSegment:
-      createMissingMotionTimelineWiring().getPlaybackTimelineSnapshotForSegment,
-    prepareMotionTimelineSink:
-      createMissingMotionTimelineWiring().prepareMotionTimelineSink,
-    prepareMotionOnlyTimeline: (turnId, messageId) => {
-      preparedMotionOnly.push(`${turnId ?? ""}:${messageId}`);
-      return matchingMotionOnlyTimelineSnapshot;
-    },
+    getPlaybackTimelineSnapshotForSegment: () => matchingMotionOnlyTimelineSnapshot,
     markMotionTimelineTerminal: () => {},
   });
 
@@ -597,16 +600,15 @@ function testMotionTimelineSinkCreatesSyntheticTimelineWhenAudioAbsent(): void {
   });
 
   assert.equal(accepted, true);
-  assert.deepEqual(preparedMotionOnly, ["turn-motion-only:msg-motion-only"]);
   assert.equal(contexts[0].playbackTimeline?.timelineId, "timeline-motion-only");
   assert.equal(contexts[0].playbackTimeline?.clockSource, "synthetic");
 }
 
-function testMotionTimelineSinkDoesNotGuessSyntheticTimeline(): void {
-  const preparedMotionOnly: string[] = [];
+function testMotionTimelineSinkRejectsMissingAudioTimeline(): void {
   const contexts: Array<{
     playbackTimeline?: PlaybackTimelineSnapshot | null;
   }> = [];
+  const terminals: string[] = [];
   const sink = createModelEngineMotionTimelineSink({
     motionEngine: {
       ingestNormalizedPayload: (_payload, context) => {
@@ -617,13 +619,9 @@ function testMotionTimelineSinkDoesNotGuessSyntheticTimeline(): void {
     },
     getPlaybackTimelineSnapshotForSegment:
       createMissingMotionTimelineWiring().getPlaybackTimelineSnapshotForSegment,
-    prepareMotionTimelineSink:
-      createMissingMotionTimelineWiring().prepareMotionTimelineSink,
-    prepareMotionOnlyTimeline: (turnId, messageId) => {
-      preparedMotionOnly.push(`${turnId ?? ""}:${messageId}`);
-      return matchingMotionOnlyTimelineSnapshot;
+    markMotionTimelineTerminal: (turnId, messageId, terminal, reason) => {
+      terminals.push(`${turnId ?? ""}:${messageId}:${terminal}:${reason}`);
     },
-    markMotionTimelineTerminal: () => {},
   });
 
   const accepted = sink.start(motionPayload, {
@@ -632,9 +630,11 @@ function testMotionTimelineSinkDoesNotGuessSyntheticTimeline(): void {
     receivedAtMs: 100,
   });
 
-  assert.equal(accepted, true);
-  assert.deepEqual(preparedMotionOnly, []);
-  assert.equal(contexts[0].playbackTimeline ?? null, null);
+  assert.equal(accepted, false);
+  assert.equal(contexts.length, 0);
+  assert.deepEqual(terminals, [
+    "turn-motion-only:msg-motion-only:failed:motion_timeline_unavailable",
+  ]);
 }
 
 function testMotionTimelineSinkRejectsMissingMotionOnlyTimeline(): void {
@@ -652,9 +652,6 @@ function testMotionTimelineSinkRejectsMissingMotionOnlyTimeline(): void {
     },
     getPlaybackTimelineSnapshotForSegment:
       createMissingMotionTimelineWiring().getPlaybackTimelineSnapshotForSegment,
-    prepareMotionTimelineSink:
-      createMissingMotionTimelineWiring().prepareMotionTimelineSink,
-    prepareMotionOnlyTimeline: () => null,
     markMotionTimelineTerminal: (turnId, messageId, terminal, reason) => {
       terminals.push(`${turnId ?? ""}:${messageId}:${terminal}:${reason}`);
     },
@@ -691,8 +688,6 @@ function testMotionTimelineSinkUsesSegmentScopedTimelineLookup(): void {
       segmentTimelineLookupCalls.push(`${turnId ?? ""}:${messageId}`);
       return matchingTimelineSnapshot;
     },
-    prepareMotionTimelineSink: () => true,
-    prepareMotionOnlyTimeline: () => null,
     markMotionTimelineTerminal: () => {},
   });
 
@@ -704,7 +699,6 @@ function testMotionTimelineSinkUsesSegmentScopedTimelineLookup(): void {
 
   assert.equal(accepted, true);
   assert.deepEqual(segmentTimelineLookupCalls, [
-    "turn-timeline:msg-timeline",
     "turn-timeline:msg-timeline",
   ]);
   assert.equal(contexts[0].playbackTimeline?.timelineId, "timeline-1");
@@ -1049,9 +1043,9 @@ async function run(): Promise<void> {
   await testMotionWithoutReceivedAtMarksSegmentFailed();
   await testPerformanceCurveHintIsMergedBeforeMotionRelease();
   await testLateAudioAfterTextReleaseOnlyReleasesAudio();
-  testMotionTimelineSinkMarksPreparedTimelineFailedWhenEngineRejects();
-  testMotionTimelineSinkCreatesSyntheticTimelineWhenAudioAbsent();
-  testMotionTimelineSinkDoesNotGuessSyntheticTimeline();
+  testMotionTimelineSinkMarksTimelineFailedWhenEngineRejects();
+  testMotionTimelineSinkUsesPreparedSyntheticTimelineWhenAudioAbsent();
+  testMotionTimelineSinkRejectsMissingAudioTimeline();
   testMotionTimelineSinkRejectsMissingMotionOnlyTimeline();
   testMotionTimelineSinkUsesSegmentScopedTimelineLookup();
   testPlaybackTimelineRuntimeRejectsInvalidMotionTimestamp();

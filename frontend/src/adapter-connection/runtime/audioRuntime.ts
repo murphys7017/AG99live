@@ -136,14 +136,6 @@ export interface AdapterAudioRuntime {
     turnId: string | null,
     messageId: string,
   ) => PlaybackTimelineSnapshot | null;
-  prepareMotionOnlyTimeline: (
-    turnId: string | null,
-    messageId: string,
-  ) => PlaybackTimelineSnapshot | null;
-  prepareMotionTimelineSink: (
-    turnId: string | null,
-    messageId: string,
-  ) => boolean;
   markMotionTimelineStarted: (
     turnId: string | null,
     messageId: string,
@@ -183,8 +175,6 @@ export function createAdapterAudioRuntime(
     setSegmentSinks,
     startSegmentJob,
     prepareSegmentJob,
-    prepareMotionOnlyTimeline,
-    prepareMotionTimelineSink,
     markMotionTimelineStarted,
     markMotionTimelineTerminal,
     findActiveAudioTimelineSegments,
@@ -289,8 +279,6 @@ export function createAdapterAudioRuntime(
     findActiveAudioSegment,
     findOpenAudioSegment: audioSettlementController.findOpenAudioSegment,
     getPlaybackTimelineSnapshotForSegment,
-    prepareMotionOnlyTimeline,
-    prepareMotionTimelineSink,
     markMotionTimelineStarted,
     markMotionTimelineTerminal,
   };

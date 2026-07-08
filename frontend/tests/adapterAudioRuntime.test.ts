@@ -8,6 +8,20 @@ import type { AudioPlaybackClock } from "../src/playback-timeline/contracts.js";
 import type {
   PlaybackTimelineLipSyncRuntimeCallbacks,
 } from "../src/playback-timeline/lipSyncSink.js";
+import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
+
+const motionPayload: NormalizedMotionPayload = {
+  kind: "semantic_intent",
+  intent: {
+    schema_version: "engine.motion_intent.v3",
+    profile_id: "profile-adapter-audio",
+    profile_revision: 1,
+    model_id: "model-adapter-audio",
+    mode: "expressive",
+    emotion_label: "test",
+    axes: {},
+  },
+};
 
 function buildState() {
   return {
@@ -91,6 +105,29 @@ function getSegmentTimelineSnapshot(
   messageId: string,
 ) {
   return runtime.getPlaybackTimelineSnapshotForSegment(turnId, messageId);
+}
+
+function configureNoopSegmentSinks(
+  runtime: ReturnType<typeof createAdapterAudioRuntime>,
+): void {
+  runtime.setSegmentSinks({
+    session: {
+      markTextReleased: () => {},
+      markAudioReleased: () => {},
+      markMotionReleased: () => {},
+      markMotionFailed: () => {},
+      markPhase: () => true,
+    },
+    textSink: {
+      releaseAssistantTextForPlayback: () => true,
+    },
+    audioSink: {
+      releaseAudioForPlayback: () => true,
+    },
+    motionSink: {
+      start: () => true,
+    },
+  });
 }
 
 async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
@@ -405,12 +442,28 @@ async function testMotionSinkKeepsTimelineOpenAfterAudioCompletes(): Promise<voi
     getSessionStore: () => undefined,
     createLipSyncRuntime: buildLipSyncRuntimeFactory(),
   });
+  configureNoopSegmentSinks(runtime);
 
   runtime.queueAudioForPlayback("http://127.0.0.1/audio.wav", "turn-motion", "msg-motion");
   assert.equal(runtime.releaseAudioForPlayback("msg-motion", "turn-motion"), true);
   await flushMicrotasks();
 
-  assert.equal(runtime.prepareMotionTimelineSink("turn-motion", "msg-motion"), true);
+  runtime.startSegmentJob({
+    messageId: "msg-motion",
+    turnId: "turn-motion",
+    reason: "test_motion_after_audio",
+    text: {
+      release: false,
+    },
+    audio: {
+      release: false,
+      noAudioConfirmed: false,
+    },
+    motion: {
+      payload: motionPayload,
+      receivedAtMs: 100,
+    },
+  });
   runtime.markMotionTimelineStarted("turn-motion", "msg-motion");
   startOptionsRef.current?.onEnded?.();
 
@@ -441,8 +494,25 @@ async function testMotionOnlyTimelineUsesSyntheticClock(): Promise<void> {
     getSessionStore: () => undefined,
     createLipSyncRuntime: buildLipSyncRuntimeFactory(),
   });
+  configureNoopSegmentSinks(runtime);
 
-  let snapshot = runtime.prepareMotionOnlyTimeline("turn-motion-only", "msg-motion-only");
+  runtime.startSegmentJob({
+    messageId: "msg-motion-only",
+    turnId: "turn-motion-only",
+    reason: "test_motion_only",
+    text: {
+      release: false,
+    },
+    audio: {
+      release: false,
+      noAudioConfirmed: true,
+    },
+    motion: {
+      payload: motionPayload,
+      receivedAtMs: 100,
+    },
+  });
+  let snapshot = getSegmentTimelineSnapshot(runtime, "turn-motion-only", "msg-motion-only");
   assert.equal(snapshot?.phase, "preparing");
   assert.equal(snapshot?.clockSource, "synthetic");
   assert.equal(snapshot?.sinks.find((sink) => sink.id === "motion")?.required, true);

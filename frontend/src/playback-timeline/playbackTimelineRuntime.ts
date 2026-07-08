@@ -427,11 +427,16 @@ export function createPlaybackTimelineRuntime(
     messageId: string,
     durationMs: number | null,
   ): void {
-    const timeline = getTimeline(turnId, messageId);
-    if (!timeline) {
-      warnMissingTimeline("audio.duration", turnId, messageId, {
+    const timeline = getTimelineWithSink(
+      "audio.duration",
+      AUDIO_TIMELINE_SINK_ID,
+      turnId,
+      messageId,
+      {
         durationMs,
-      });
+      },
+    );
+    if (!timeline) {
       return;
     }
     timeline.engine.setExpectedDurationMs(durationMs);
@@ -443,12 +448,17 @@ export function createPlaybackTimelineRuntime(
     startedAtMs: number,
     durationMs: number | null,
   ): void {
-    const timeline = getTimeline(turnId, messageId);
-    if (!timeline) {
-      warnMissingTimeline("audio.started", turnId, messageId, {
+    const timeline = getTimelineWithSink(
+      "audio.started",
+      AUDIO_TIMELINE_SINK_ID,
+      turnId,
+      messageId,
+      {
         startedAtMs,
         durationMs,
-      });
+      },
+    );
+    if (!timeline) {
       return;
     }
     const engine = timeline.engine;
@@ -474,9 +484,13 @@ export function createPlaybackTimelineRuntime(
     turnId: string | null,
     messageId: string,
   ): void {
-    const timeline = getTimeline(turnId, messageId);
+    const timeline = getTimelineWithSink(
+      "lip_sync.started",
+      LIP_SYNC_TIMELINE_SINK_ID,
+      turnId,
+      messageId,
+    );
     if (!timeline) {
-      warnMissingTimeline("lip_sync.started", turnId, messageId);
       return;
     }
     timeline.engine.markSinkStarted(LIP_SYNC_TIMELINE_SINK_ID);
@@ -488,12 +502,17 @@ export function createPlaybackTimelineRuntime(
     terminal: TimelineTerminal,
     reason: string,
   ): void {
-    const timeline = getTimeline(turnId, messageId);
-    if (!timeline) {
-      warnMissingTimeline("lip_sync.terminal", turnId, messageId, {
+    const timeline = getTimelineWithSink(
+      "lip_sync.terminal",
+      LIP_SYNC_TIMELINE_SINK_ID,
+      turnId,
+      messageId,
+      {
         terminal,
         reason,
-      });
+      },
+    );
+    if (!timeline) {
       return;
     }
     timeline.engine.markSinkTerminal(
@@ -533,11 +552,12 @@ export function createPlaybackTimelineRuntime(
     turnId: string | null,
     messageId: string,
   ): void {
-    if (!prepareMotionTimelineSink(turnId, messageId)) {
-      warnMissingTimeline("motion.started", turnId, messageId);
-      return;
-    }
-    const timeline = getTimeline(turnId, messageId);
+    const timeline = getTimelineWithSink(
+      "motion.started",
+      MOTION_TIMELINE_SINK_ID,
+      turnId,
+      messageId,
+    );
     if (!timeline) {
       return;
     }
@@ -554,14 +574,16 @@ export function createPlaybackTimelineRuntime(
     terminal: TimelineTerminal,
     reason: string,
   ): void {
-    if (!prepareMotionTimelineSink(turnId, messageId)) {
-      warnMissingTimeline("motion.terminal", turnId, messageId, {
+    const timeline = getTimelineWithSink(
+      "motion.terminal",
+      MOTION_TIMELINE_SINK_ID,
+      turnId,
+      messageId,
+      {
         terminal,
         reason,
-      });
-      return;
-    }
-    const timeline = getTimeline(turnId, messageId);
+      },
+    );
     if (!timeline) {
       return;
     }
@@ -579,12 +601,17 @@ export function createPlaybackTimelineRuntime(
     terminal: TimelineTerminal,
     reason: string,
   ): void {
-    const timeline = getTimeline(turnId, messageId);
-    if (!timeline) {
-      warnMissingTimeline("audio.terminal", turnId, messageId, {
+    const timeline = getTimelineWithSink(
+      "audio.terminal",
+      AUDIO_TIMELINE_SINK_ID,
+      turnId,
+      messageId,
+      {
         terminal,
         reason,
-      });
+      },
+    );
+    if (!timeline) {
       return;
     }
     const engine = timeline.engine;
@@ -684,6 +711,25 @@ export function createPlaybackTimelineRuntime(
     }
   }
 
+  function getTimelineWithSink(
+    event: string,
+    sinkId: string,
+    turnId: string | null,
+    messageId: string,
+    details: Record<string, unknown> = {},
+  ): PlaybackTimelineEntry | null {
+    const timeline = getTimeline(turnId, messageId);
+    if (!timeline) {
+      warnMissingTimeline(event, turnId, messageId, details);
+      return null;
+    }
+    if (!timeline.engine.hasSink(sinkId)) {
+      warnMissingSink(event, sinkId, turnId, messageId, details);
+      return null;
+    }
+    return timeline;
+  }
+
   function clearTimeline(
     turnId: string | null,
     messageId: string,
@@ -741,6 +787,25 @@ function warnMissingTimeline(
     "[PlaybackTimelineRuntime] dropped timeline event for missing segment timeline.",
     {
       event,
+      turnId,
+      messageId,
+      ...details,
+    },
+  );
+}
+
+function warnMissingSink(
+  event: string,
+  sinkId: string,
+  turnId: string | null,
+  messageId: string,
+  details: Record<string, unknown> = {},
+): void {
+  console.warn(
+    "[PlaybackTimelineRuntime] dropped timeline event for missing segment sink.",
+    {
+      event,
+      sinkId,
       turnId,
       messageId,
       ...details,

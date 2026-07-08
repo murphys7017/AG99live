@@ -119,6 +119,7 @@ architecture:
     - PlaybackTimelineAudioSegmentRunner now bridges audio segment duration/started/terminal events into PlaybackTimelineRuntime, so audioPlaybackActions only updates adapter/session state around playback.
     - Audio playback stop now interrupts the explicit turnId + messageId playback segment; missing segment identity is surfaced as an error instead of stopping an arbitrary active timeline.
     - PlaybackTimelineEngine now owns sink start callbacks for audio/motion via startSink; remaining direct-sink migration should move prepare/terminal and SessionStore coordination out of migration-era segment-sink wiring.
+    - Audio/lip_sync/motion timeline duration/started/terminal events no longer implicitly register or mutate a missing sink; missing segment timeline or sink wiring is diagnosed and the event is dropped.
     - Target direction: performance curve playback should first support a small preset library of per-frame curve shapes selected by hint, before considering real-time generated custom curves.
 verification:
   checks_run:

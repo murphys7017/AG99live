@@ -85,8 +85,6 @@ export function configurePlaybackTimelineMotionRuntime(options: {
   const motionTimelineSink = createModelEngineMotionTimelineSink({
     motionEngine,
     getPlaybackTimelineSnapshotForSegment: playbackTimeline.getPlaybackTimelineSnapshotForSegment,
-    prepareMotionOnlyTimeline: playbackTimeline.prepareMotionOnlyTimeline,
-    prepareMotionTimelineSink: playbackTimeline.prepareMotionTimelineSink,
     markMotionTimelineTerminal: playbackTimeline.markMotionTimelineTerminal,
   });
 
