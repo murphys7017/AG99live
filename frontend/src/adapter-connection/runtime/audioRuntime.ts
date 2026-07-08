@@ -19,8 +19,8 @@ import {
 } from "./adapterAudioBridge.js";
 import type { PendingAudioItem } from "../../playback-timeline/playbackReleaseQueue.js";
 import {
-  createAdapterAudioQueueController,
-} from "./audioQueueController.js";
+  createPlaybackTimelineAudioReleaseController,
+} from "../../playback-timeline/audioReleaseController.js";
 import {
   createAdapterAudioSettlementController,
 } from "./audioSettlementController.js";
@@ -233,7 +233,7 @@ export function createAdapterAudioRuntime(
     return timelineController.playAudioAndAcknowledge(audioUrl, turnId, messageId);
   }
 
-  const audioQueueController = createAdapterAudioQueueController({
+  const audioReleaseController = createPlaybackTimelineAudioReleaseController({
     state: deps.state,
     startAudioPlayback: (audioUrl, turnId, messageId) => {
       void playAudioAndAcknowledge(
@@ -242,7 +242,10 @@ export function createAdapterAudioRuntime(
         messageId,
       );
     },
-    pushHistory: deps.pushHistory,
+    onAudioQueued: () => {
+      deps.state.statusMessage = "收到语音回复，等待同步播放。";
+      deps.pushHistory("system", deps.state.statusMessage);
+    },
   });
 
   function stopAudioPlayback(
@@ -272,8 +275,8 @@ export function createAdapterAudioRuntime(
   }
 
   return {
-    queueAudioForPlayback: audioQueueController.queueAudioForPlayback,
-    releaseAudioForPlayback: audioQueueController.releaseAudioForPlayback,
+    queueAudioForPlayback: audioReleaseController.queueAudioForPlayback,
+    releaseAudioForPlayback: audioReleaseController.releaseAudioForPlayback,
     setSegmentExecutionPorts,
     startSegmentJob,
     prepareSegmentJob,
