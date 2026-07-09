@@ -82,6 +82,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       adapter.sendMotionLabRawEvent(cloneJson(payload), turnId);
     },
     initialMotionPlaybackRecords,
+    writeMotionSessionLifecycle: false,
   });
   const motionTimelineRunTracker = createPlaybackTimelineMotionRunTracker(playbackTimeline);
   const modelEngine = useModelEngine({

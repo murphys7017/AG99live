@@ -40,6 +40,7 @@ context:
     - AdapterConnection.playbackTimeline no longer exposes direct text/audio queue release wrappers or raw segment-sink wiring; connection-level callers and tests should release playback through PlaybackTimelineRuntime.startSegmentJob with explicit text/audio/motion slots.
     - AdapterAudioRuntime now hides the raw queued-audio consumer behind configureSegmentExecution, so adapter-facing wiring can provide session/text/motion ports without exposing queue consumption outside the audio runtime facade.
     - Audio playback started/duration and active-timeline terminal SessionStore writes now happen through PlaybackTimelineRuntime audio lifecycle session ports; AdapterAudioRuntime's state bridge updates UI playback state for those events.
+    - Motion playback started/terminal SessionStore writes now happen through PlaybackTimelineRuntime motion lifecycle session ports in production when motion timeline events arrive; PlaybackCompletionCoordinator still owns motion playback records, handoff bookkeeping, and playback_finished flushing during migration.
     - Live2D lip-sync sampling and external mouth-parameter writes now live in frontend/src/live2d/lipSyncTimelineSink.ts; playback-timeline/lipSyncSink.ts keeps only the timeline-facing lifecycle runtime and terminal rules.
     - Playback timeline sink terminal state is now stable once a sink reaches a terminal value, so late cleanup/completion events cannot overwrite a real failure.
     - Lip sync can only complete after it has explicitly started; if audio ends before lip sync starts, the lip_sync sink fails with lip_sync_not_started_before_audio_end.
@@ -127,6 +128,7 @@ architecture:
     - AdapterAudioRuntime no longer exposes playAudioAndAcknowledge as a public method; production and tests enter audio playback through queue/release or segment job paths.
     - PlaybackTimelineAudioSegmentRunner now bridges audio segment duration/started/terminal events into PlaybackTimelineRuntime, so audioPlaybackActions no longer owns audio element event ordering.
     - AudioPlaybackStateBridge no longer writes SessionStore audio.released/audio.started/audio.duration/audio.terminal for active timeline playback; started/duration/terminal facts are recorded by PlaybackTimelineRuntime when audio timeline events arrive, release ownership stays with the direct adapter release wrapper or PlaybackTimelineRuntime.startSegmentJob, and non-timeline pending/missing-audio terminal settlement remains in adapter handling.
+    - PlaybackTimelineRuntime now has a motion lifecycle session port for motion.started and motion.terminal events, guarded by open-sink checks so late terminal callbacks cannot rewrite motion SessionStore state after the timeline has settled; production disables the coordinator's duplicate ordinary motion lifecycle writes but keeps coordinator-owned handoff settlement.
     - AdapterPlaybackTimelinePort keeps only segment execution configuration and startSegmentJob; raw queued-audio consumption is private to AdapterAudioRuntime's configured segment execution ports.
     - Audio playback stop now interrupts the explicit turnId + messageId playback segment; missing segment identity is surfaced as an error instead of stopping an arbitrary active timeline.
     - PlaybackTimelineEngine now owns sink start callbacks for audio/motion via startSink; remaining direct-sink migration should move prepare/terminal and SessionStore coordination out of migration-era segment-sink wiring.
@@ -209,6 +211,7 @@ backlog:
     notes:
       - Audio and motion start are now registered as PlaybackTimelineEngine sink callbacks and invoked through startSink.
       - Browser audio release now enters PlaybackTimelineRuntime.startAudioTimelineSink before the actual audio segment sink starts.
+      - Audio lifecycle and ordinary motion started/terminal SessionStore writes now have PlaybackTimelineRuntime lifecycle session ports; remaining work is to reduce PlaybackCompletionCoordinator's handoff/record/flush coupling without losing motion playback records or playback_finished semantics.
       - Keep SessionStore as the persistent turn/segment fact store, but move execution ownership into timeline sinks.
       - Reduce AdapterAudioRuntime to adapter/session state bridge plus protocol-facing convenience methods.
       - Make missing sink wiring a hard error; do not reintroduce compatibility fallback routes.

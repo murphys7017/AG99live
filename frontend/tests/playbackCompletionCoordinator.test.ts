@@ -22,7 +22,9 @@ const TEST_SEMANTIC_INTENT = {
   axes: {},
 } as never;
 
-function createHarness() {
+function createHarness(options: {
+  writeMotionSessionLifecycle?: boolean;
+} = {}) {
   const sessionStore = useTurnPlaybackSessionStore();
   const playbackFinishedCalls: PlaybackFinishedCall[] = [];
   const clearContextCalls: Array<{ turnId: string | null }> = [];
@@ -71,6 +73,7 @@ function createHarness() {
       scheduledTimers.delete(timer as number);
     },
     initialMotionPlaybackRecords: [],
+    writeMotionSessionLifecycle: options.writeMotionSessionLifecycle,
   });
 
   sessionStore.setActiveSession("turn-1");
@@ -739,6 +742,69 @@ async function testRecordMotionPlaybackPrefersEventTurnSession(): Promise<void> 
   );
 }
 
+async function testTimelineOwnedMotionLifecycleSkipsCoordinatorSessionWrites(): Promise<void> {
+  const h = createHarness({ writeMotionSessionLifecycle: false });
+  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
+  h.sessionStore.markMotionReceived(
+    "turn-1",
+    { kind: "semantic_intent", intent: {} as never },
+    "msg-a",
+  );
+
+  h.coordinator.recordMotionPlayback({
+    messageId: "msg-a", turnId: "turn-1", playbackTurnId: "turn-1",
+    model: null, payloadKind: "semantic_intent", intent: TEST_SEMANTIC_INTENT, startReason: "test",
+    queuedDelayMs: 0, diagnostics: null, playerMessage: "playing",
+    runId: "timeline-owned-a",
+    plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
+  });
+  h.coordinator.completeMotionPlayback({ runId: "timeline-owned-a", status: "completed" });
+  await h.flush();
+
+  const segment = h.sessionStore.getActiveSession()?.segments.get("msg-a");
+  assert.equal(segment?.motion.started, false);
+  assert.equal(segment?.motion.completed, false);
+  assert.equal(segment?.motion.failed, false);
+  assert.equal(h.coordinator.motionPlaybackRecords.value.length, 1);
+}
+
+async function testTimelineOwnedMotionLifecycleKeepsCoordinatorHandoff(): Promise<void> {
+  const h = createHarness({ writeMotionSessionLifecycle: false });
+  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
+  h.sessionStore.markTextReceived("turn-1", "B", "msg-b");
+  h.sessionStore.markMotionReceived(
+    "turn-1",
+    { kind: "semantic_intent", intent: {} as never },
+    "msg-a",
+  );
+  h.sessionStore.markMotionReceived(
+    "turn-1",
+    { kind: "semantic_intent", intent: {} as never },
+    "msg-b",
+  );
+
+  const baseEvent = {
+    turnId: "turn-1",
+    playbackTurnId: "turn-1",
+    model: null,
+    payloadKind: "semantic_intent" as const,
+    intent: TEST_SEMANTIC_INTENT,
+    startReason: "test",
+    queuedDelayMs: 0,
+    diagnostics: null,
+    playerMessage: "playing",
+    plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
+  };
+
+  h.coordinator.recordMotionPlayback({ ...baseEvent, runId: "timeline-owned-a", messageId: "msg-a" });
+  h.coordinator.recordMotionPlayback({ ...baseEvent, runId: "timeline-owned-b", messageId: "msg-b" });
+  await h.flush();
+
+  const session = h.sessionStore.getActiveSession();
+  assert.equal(session?.segments.get("msg-a")?.motion.completed, true);
+  assert.equal(session?.segments.get("msg-b")?.motion.started, false);
+}
+
 async function testLateAudioReopenAndCompleteOnce(): Promise<void> {
   const h = createHarness();
   h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
@@ -795,6 +861,8 @@ async function run(): Promise<void> {
   await testInterruptStoppedMarksMotionFailed();
   await testStoppedWithoutReasonMarksMotionFailed();
   await testRecordMotionPlaybackPrefersEventTurnSession();
+  await testTimelineOwnedMotionLifecycleSkipsCoordinatorSessionWrites();
+  await testTimelineOwnedMotionLifecycleKeepsCoordinatorHandoff();
   await testLateAudioReopenAndCompleteOnce();
   await testLateAudioAfterNoAudioAckReopensSettlingSession();
   console.log("playbackCompletionCoordinator tests passed");

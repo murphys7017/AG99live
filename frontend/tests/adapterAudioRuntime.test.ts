@@ -9,6 +9,7 @@ import type {
   PlaybackTimelineLipSyncRuntimeCallbacks,
 } from "../src/playback-timeline/lipSyncSink.js";
 import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
+import type { AdapterAudioRuntimeSessionStore } from "../src/adapter-connection/runtime/audioRuntime.js";
 
 const motionPayload: NormalizedMotionPayload = {
   kind: "semantic_intent",
@@ -99,6 +100,21 @@ function buildAudioSink(options: {
   };
 }
 
+function buildSessionStoreMock(
+  overrides: Partial<AdapterAudioRuntimeSessionStore> = {},
+): AdapterAudioRuntimeSessionStore {
+  return {
+    markAudioReleased: () => {},
+    markAudioStarted: () => {},
+    markAudioDuration: () => {},
+    markAudioTerminal: () => {},
+    markMotionStarted: () => {},
+    markMotionCompleted: () => {},
+    markMotionFailed: () => {},
+    ...overrides,
+  };
+}
+
 function getSegmentTimelineSnapshot(
   runtime: ReturnType<typeof createAdapterAudioRuntime>,
   turnId: string | null,
@@ -157,7 +173,7 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
       }),
     }),
     pushHistory: () => {},
-    getSessionStore: () => ({
+    getSessionStore: () => buildSessionStoreMock({
       markAudioReleased: (turnId, messageId) => {
         sessionEvents.push(`released:${turnId ?? ""}:${messageId}`);
       },
@@ -169,7 +185,6 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
       markAudioDuration: (turnId, messageId, durationMs) => {
         sessionEvents.push(`duration:${turnId ?? ""}:${messageId}:${durationMs ?? ""}`);
       },
-      markAudioTerminal: () => {},
     }),
     createLipSyncRuntime: buildLipSyncRuntimeFactory(),
     onAudioTimelineStarted: (turnId, messageId, playbackTimeline) => {
@@ -239,10 +254,7 @@ async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
       }),
     }),
     pushHistory: () => {},
-    getSessionStore: () => ({
-      markAudioReleased: () => {},
-      markAudioStarted: () => {},
-      markAudioDuration: () => {},
+    getSessionStore: () => buildSessionStoreMock({
       markAudioTerminal: (turnId, terminal, messageId, reason) => {
         terminalEvents.push({
           turnId,
@@ -294,10 +306,7 @@ async function testRejectedAudioStartSettlesAdapterState(): Promise<void> {
     pushHistory: (role, text) => {
       history.push(`${role}:${text}`);
     },
-    getSessionStore: () => ({
-      markAudioReleased: () => {},
-      markAudioStarted: () => {},
-      markAudioDuration: () => {},
+    getSessionStore: () => buildSessionStoreMock({
       markAudioTerminal: (turnId, terminal, messageId, reason) => {
         terminalEvents.push({
           turnId,
@@ -390,10 +399,7 @@ async function testAudioTimelineInterruptsPreparedAudioOnStopAll(): Promise<void
       start: async () => new Promise<void>(() => {}),
     }),
     pushHistory: () => {},
-    getSessionStore: () => ({
-      markAudioReleased: () => {},
-      markAudioStarted: () => {},
-      markAudioDuration: () => {},
+    getSessionStore: () => buildSessionStoreMock({
       markAudioTerminal: (turnId, terminal, messageId, reason) => {
         terminalEvents.push({
           turnId,
@@ -438,10 +444,7 @@ async function testStopAudioAndSettleTurnFailsOnlyMatchingPendingAudio(): Promis
       start: async () => {},
     }),
     pushHistory: () => {},
-    getSessionStore: () => ({
-      markAudioReleased: () => {},
-      markAudioStarted: () => {},
-      markAudioDuration: () => {},
+    getSessionStore: () => buildSessionStoreMock({
       markAudioTerminal: (turnId, terminal, messageId, reason) => {
         terminalEvents.push({
           turnId,
@@ -497,12 +500,10 @@ async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise
     }),
     pushHistory: () => {},
     createLipSyncRuntime: buildLipSyncRuntimeFactory(),
-    getSessionStore: () => ({
+    getSessionStore: () => buildSessionStoreMock({
       markAudioReleased: (turnId, messageId) => {
         releasedEvents.push({ turnId, messageId });
       },
-      markAudioStarted: () => {},
-      markAudioDuration: () => {},
       markAudioTerminal: (turnId, terminal, messageId, reason) => {
         terminalEvents.push({
           turnId,
@@ -554,13 +555,10 @@ async function testTimelineAudioReleaseMarksSessionReleasedOnce(): Promise<void>
     }),
     pushHistory: () => {},
     createLipSyncRuntime: buildLipSyncRuntimeFactory(),
-    getSessionStore: () => ({
+    getSessionStore: () => buildSessionStoreMock({
       markAudioReleased: (turnId, messageId) => {
         releasedEvents.push({ turnId, messageId });
       },
-      markAudioStarted: () => {},
-      markAudioDuration: () => {},
-      markAudioTerminal: () => {},
     }),
   });
   runtime.configureSegmentExecution({

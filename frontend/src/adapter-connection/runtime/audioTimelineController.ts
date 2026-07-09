@@ -33,6 +33,7 @@ import {
 import type { AudioPlaybackTerminalState } from "./audioRuntime.js";
 import type {
   PlaybackTimelineAudioSessionPort,
+  PlaybackTimelineMotionSessionPort,
 } from "../../playback-timeline/playbackTimelineRuntime.js";
 
 export interface AdapterAudioTimelineControllerDeps {
@@ -40,6 +41,7 @@ export interface AdapterAudioTimelineControllerDeps {
   audioSink: PlaybackTimelineAudioSink;
   pushHistory: (role: string, text: string) => void;
   getAudioSession: () => PlaybackTimelineAudioSessionPort | undefined;
+  getMotionSession: () => PlaybackTimelineMotionSessionPort | undefined;
   createLipSyncRuntime?: (
     callbacks: PlaybackTimelineLipSyncRuntimeCallbacks,
   ) => PlaybackTimelineLipSyncRuntime;
@@ -66,6 +68,9 @@ export function createAdapterAudioTimelineController(
     getAudioClock: () => deps.audioSink.getClock(),
     get audioSession() {
       return deps.getAudioSession();
+    },
+    get motionSession() {
+      return deps.getMotionSession();
     },
     onAudioTimelineStarted: deps.onAudioTimelineStarted,
   });

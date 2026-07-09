@@ -37,6 +37,7 @@ export interface PlaybackTimelineAudioSegment {
 export interface PlaybackTimelineRuntimeDeps {
   getAudioClock: () => AudioPlaybackClock | null;
   audioSession?: PlaybackTimelineAudioSessionPort;
+  motionSession?: PlaybackTimelineMotionSessionPort;
   onAudioTimelineStarted?: (
     turnId: string | null,
     messageId: string,
@@ -59,6 +60,22 @@ export interface PlaybackTimelineAudioSessionPort {
   markAudioTerminal: (
     turnId: string | null,
     terminal: "completed" | "failed" | "absent",
+    messageId: string,
+    reason?: string,
+  ) => void;
+}
+
+export interface PlaybackTimelineMotionSessionPort {
+  markMotionStarted: (
+    turnId: string | null,
+    messageId: string,
+  ) => void;
+  markMotionCompleted: (
+    turnId: string | null,
+    messageId: string,
+  ) => void;
+  markMotionFailed: (
+    turnId: string | null,
     messageId: string,
     reason?: string,
   ) => void;
@@ -587,6 +604,9 @@ export function createPlaybackTimelineRuntime(
       return;
     }
     const engine = timeline.engine;
+    if (hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID)) {
+      deps.motionSession?.markMotionStarted(turnId, messageId);
+    }
     engine.markSinkStarted(MOTION_TIMELINE_SINK_ID);
     if (engine.getPhase() === "ready") {
       engine.start();
@@ -611,6 +631,9 @@ export function createPlaybackTimelineRuntime(
     );
     if (!timeline) {
       return;
+    }
+    if (hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID)) {
+      markMotionSessionTerminal(turnId, messageId, terminal, reason);
     }
     timeline.engine.markSinkTerminal(
       MOTION_TIMELINE_SINK_ID,
@@ -666,6 +689,9 @@ export function createPlaybackTimelineRuntime(
     }
     if (hasOpenSink(timeline, AUDIO_TIMELINE_SINK_ID)) {
       markAudioSessionTerminal(turnId, messageId, "interrupted", reason);
+    }
+    if (hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID)) {
+      markMotionSessionTerminal(turnId, messageId, "interrupted", reason);
     }
     timeline.engine.interrupt(reason);
     clearTimeline(turnId, messageId);
@@ -786,6 +812,19 @@ export function createPlaybackTimelineRuntime(
       messageId,
       reason,
     );
+  }
+
+  function markMotionSessionTerminal(
+    turnId: string | null,
+    messageId: string,
+    terminal: TimelineTerminal,
+    reason: string,
+  ): void {
+    if (terminal === "completed") {
+      deps.motionSession?.markMotionCompleted(turnId, messageId);
+      return;
+    }
+    deps.motionSession?.markMotionFailed(turnId, messageId, reason);
   }
 
   function hasOpenSink(

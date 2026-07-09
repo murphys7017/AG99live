@@ -64,6 +64,19 @@ export interface AdapterAudioRuntimeSessionStore {
     messageId: string,
     reason?: string,
   ) => void;
+  markMotionStarted: (
+    turnId: string | null,
+    messageId: string,
+  ) => void;
+  markMotionCompleted: (
+    turnId: string | null,
+    messageId: string,
+  ) => void;
+  markMotionFailed: (
+    turnId: string | null,
+    messageId: string,
+    reason?: string,
+  ) => void;
 }
 
 export interface AdapterAudioRuntimeDeps {
@@ -144,6 +157,16 @@ export function createAdapterAudioRuntime(
             markAudioStarted: sessionStore.markAudioStarted,
             markAudioDuration: sessionStore.markAudioDuration,
             markAudioTerminal: sessionStore.markAudioTerminal,
+          }
+        : undefined;
+    },
+    getMotionSession: () => {
+      const sessionStore = deps.getSessionStore();
+      return sessionStore
+        ? {
+            markMotionStarted: sessionStore.markMotionStarted,
+            markMotionCompleted: sessionStore.markMotionCompleted,
+            markMotionFailed: sessionStore.markMotionFailed,
           }
         : undefined;
     },

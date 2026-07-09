@@ -46,6 +46,7 @@ interface PlaybackCompletionCoordinatorOptions {
   clearSchedule?: (timer: unknown) => void;
   initialMotionPlaybackRecords?: readonly DesktopMotionPlaybackRecord[];
   maxMotionPlaybackRecords?: number;
+  writeMotionSessionLifecycle?: boolean;
   onMotionLabRawEvent?: (
     payload: {
       event_type: string;
@@ -77,6 +78,8 @@ export function usePlaybackCompletionCoordinator(
   );
   const maxMotionPlaybackRecords =
     options.maxMotionPlaybackRecords ?? DEFAULT_MAX_MOTION_PLAYBACK_RECORDS;
+  const writeMotionSessionLifecycle =
+    options.writeMotionSessionLifecycle !== false;
   // Lightweight internal state — session is the single source of truth
   const ackedSessions = new Set<string>();
   const activeMotionSegments = new Set<string>();
@@ -260,10 +263,12 @@ export function usePlaybackCompletionCoordinator(
         segmentKey: key,
       };
       activeMotionSegments.add(key);
-      options.sessionStore.markMotionStarted(
-        event.turnId,
-        event.messageId,
-      );
+      if (writeMotionSessionLifecycle) {
+        options.sessionStore.markMotionStarted(
+          event.turnId,
+          event.messageId,
+        );
+      }
     }
 
     const now = new Date();
@@ -427,26 +432,32 @@ export function usePlaybackCompletionCoordinator(
     }, terminalSegment?.segment.turnId ?? null);
 
     if (event.status === "completed") {
-      completeMotionSegmentByKey(currentMotionRun.segmentKey, "motion_completed_after_audio");
+      if (writeMotionSessionLifecycle) {
+        completeMotionSegmentByKey(currentMotionRun.segmentKey, "motion_completed_after_audio");
+      } else {
+        activeMotionSegments.delete(currentMotionRun.segmentKey);
+      }
     } else if (event.status === "stopped") {
       // started motion must always reach a terminal state; otherwise playback_finished can stall.
       const found = findSegmentByKey(currentMotionRun.segmentKey);
-      if (found) {
+      if (found && writeMotionSessionLifecycle) {
         options.sessionStore.markMotionFailed(
           found.segment.turnId,
           found.segment.messageId,
           event.reason || "motion_stopped_without_terminal",
         );
       }
+      activeMotionSegments.delete(currentMotionRun.segmentKey);
     } else {
       const found = findSegmentByKey(currentMotionRun.segmentKey);
-      if (found) {
+      if (found && writeMotionSessionLifecycle) {
         options.sessionStore.markMotionFailed(
           found.segment.turnId,
           found.segment.messageId,
           event.reason || event.status,
         );
       }
+      activeMotionSegments.delete(currentMotionRun.segmentKey);
     }
 
     currentMotionRun = null;
