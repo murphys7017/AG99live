@@ -138,6 +138,7 @@ architecture:
     - Target direction: performance curve playback should first support a small preset library of per-frame curve shapes selected by hint, before considering real-time generated custom curves.
     - PlaybackTimeline core no longer imports ModelEngine motion types; pure motion context/sink contracts live in playback-timeline/motionTypes.ts, while the ModelEngine-specific motion sink and run tracker live in playback-integrations/modelEngineMotionSink.ts.
     - PlaybackCompletionCoordinator no longer accepts motionPlayer, schedule, or clearSchedule dependencies and no longer keeps an activeMotionSegments shadow set; it observes SessionStore settlement, records motion playback history, and handles current run handoff only.
+    - PlaybackTimeline segment job release ordering now lives in playback-timeline/segmentJobExecutor.ts; PlaybackTimelineRuntime supplies timeline sink operations and keeps direct timeline map/engine ownership.
 verification:
   checks_run:
     - npm run test:playback-timeline
