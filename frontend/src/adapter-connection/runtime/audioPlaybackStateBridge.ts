@@ -116,11 +116,13 @@ export async function startAudioSegmentAndBridgeState(
 
 export function stopAudioSegmentAndBridgeState(
   ctx: AudioPlaybackStateBridgeContext,
+  reason = "audio_playback_stopped",
 ): void {
   stopAudioSegmentAndBridgeStateForSegment(
     ctx,
     ctx.state.audioPlaybackStartedTurnId,
     ctx.state.audioPlaybackStartedMessageId,
+    reason,
   );
 }
 
@@ -128,6 +130,7 @@ export function stopAudioSegmentAndBridgeStateForSegment(
   ctx: AudioPlaybackStateBridgeContext,
   turnId: string | null,
   messageId: string | null,
+  reason = "audio_playback_stopped",
 ): void {
   const interruptedTurnId = turnId;
   const interruptedMessageId = messageId;
@@ -137,13 +140,13 @@ export function stopAudioSegmentAndBridgeStateForSegment(
   ctx.audioSegmentRunner.stop(
     interruptedTurnId,
     interruptedMessageId,
-    ctx.state.audioPlaybackTerminalReason || "audio_playback_stopped",
+    reason,
   );
   if (interruptedMessageId && shouldMarkInterruptedTerminal) {
     ctx.markTerminal(
       "failed",
       interruptedTurnId,
-      "audio_playback_stopped",
+      reason,
       interruptedMessageId,
     );
   } else if (!interruptedMessageId && wasPlayingAudio) {

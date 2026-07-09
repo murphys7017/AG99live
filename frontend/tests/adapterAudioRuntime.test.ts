@@ -213,11 +213,11 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
 async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
   const state = buildState();
   const startOptionsRef: { current: PlaybackTimelineAudioStartCallbacks | null } = { current: null };
-  const audioTimelineStarted: Array<{
+  const terminalEvents: Array<{
     turnId: string | null;
+    terminal: string;
     messageId: string;
-    phase: string | undefined;
-    durationMs: number | null | undefined;
+    reason?: string;
   }> = [];
   const runtime = createAdapterAudioRuntime({
     state,
@@ -239,7 +239,19 @@ async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
       }),
     }),
     pushHistory: () => {},
-    getSessionStore: () => undefined,
+    getSessionStore: () => ({
+      markAudioReleased: () => {},
+      markAudioStarted: () => {},
+      markAudioDuration: () => {},
+      markAudioTerminal: (turnId, terminal, messageId, reason) => {
+        terminalEvents.push({
+          turnId,
+          terminal,
+          messageId,
+          reason,
+        });
+      },
+    }),
     createLipSyncRuntime: buildLipSyncRuntimeFactory(),
   });
 
@@ -253,6 +265,14 @@ async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
   options.onEnded?.();
 
   assert.equal(getSegmentTimelineSnapshot(runtime, "turn-2", "msg-2"), null);
+  assert.deepEqual(terminalEvents, [
+    {
+      turnId: "turn-2",
+      terminal: "completed",
+      messageId: "msg-2",
+      reason: "audio_playback_completed",
+    },
+  ]);
 }
 
 async function testRejectedAudioStartSettlesAdapterState(): Promise<void> {
@@ -358,13 +378,31 @@ async function testLipSyncFailureRemainsVisibleUntilAudioCompletes(): Promise<vo
 
 async function testAudioTimelineInterruptsPreparedAudioOnStopAll(): Promise<void> {
   const state = buildState();
+  const terminalEvents: Array<{
+    turnId: string | null;
+    terminal: string;
+    messageId: string;
+    reason?: string;
+  }> = [];
   const runtime = createAdapterAudioRuntime({
     state,
     audioSink: buildAudioSink({
       start: async () => new Promise<void>(() => {}),
     }),
     pushHistory: () => {},
-    getSessionStore: () => undefined,
+    getSessionStore: () => ({
+      markAudioReleased: () => {},
+      markAudioStarted: () => {},
+      markAudioDuration: () => {},
+      markAudioTerminal: (turnId, terminal, messageId, reason) => {
+        terminalEvents.push({
+          turnId,
+          terminal,
+          messageId,
+          reason,
+        });
+      },
+    }),
     createLipSyncRuntime: buildLipSyncRuntimeFactory(),
   });
 
@@ -376,6 +414,14 @@ async function testAudioTimelineInterruptsPreparedAudioOnStopAll(): Promise<void
   runtime.stopAudioAndSettleAll("test_stop_all");
 
   assert.equal(getSegmentTimelineSnapshot(runtime, "turn-3", "msg-3"), null);
+  assert.deepEqual(terminalEvents, [
+    {
+      turnId: "turn-3",
+      terminal: "failed",
+      messageId: "msg-3",
+      reason: "test_stop_all",
+    },
+  ]);
 }
 
 async function testStopAudioAndSettleTurnFailsOnlyMatchingPendingAudio(): Promise<void> {

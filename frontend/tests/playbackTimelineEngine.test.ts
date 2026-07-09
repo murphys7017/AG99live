@@ -799,6 +799,39 @@ function testPlaybackTimelineRuntimeFindsOpenAudioSegments(): void {
   assert.deepEqual(runtime.findOpenAudioTimelineSegments(), []);
 }
 
+function testPlaybackTimelineRuntimeDoesNotRewriteAudioSessionTerminal(): void {
+  const events: string[] = [];
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => null,
+    audioSession: {
+      markAudioStarted: () => {},
+      markAudioDuration: () => {},
+      markAudioTerminal: (_turnId, terminal, messageId, reason) => {
+        events.push(`${terminal}:${messageId}:${reason ?? ""}`);
+      },
+    },
+  });
+
+  prepareTestAudioTimeline(runtime, "turn-audio-terminal", "msg-audio-terminal");
+  runtime.markAudioTimelineStarted("turn-audio-terminal", "msg-audio-terminal", 100, 1200);
+  runtime.markAudioTimelineTerminal(
+    "turn-audio-terminal",
+    "msg-audio-terminal",
+    "completed",
+    "audio_playback_completed",
+  );
+  runtime.markAudioTimelineTerminal(
+    "turn-audio-terminal",
+    "msg-audio-terminal",
+    "failed",
+    "late_audio_error",
+  );
+
+  assert.deepEqual(events, [
+    "completed:msg-audio-terminal:audio_playback_completed",
+  ]);
+}
+
 function testTerminalSinkEventsAreStable(): void {
   const engine = createPlaybackTimelineEngine({ now: () => 0 });
   engine.load(
@@ -1068,6 +1101,7 @@ function run(): void {
   testPlaybackTimelineRuntimeStopsOnlyRequestedSegmentTimeline();
   testPlaybackTimelineRuntimeFindsActiveAudioSegments();
   testPlaybackTimelineRuntimeFindsOpenAudioSegments();
+  testPlaybackTimelineRuntimeDoesNotRewriteAudioSessionTerminal();
   testTerminalSinkEventsAreStable();
   testAudioStartMotionBridgeRefreshesTimelineAtFireTime();
   testAudioStartMotionBridgeCanCancelPendingWakeup();

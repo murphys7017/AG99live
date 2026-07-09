@@ -56,6 +56,12 @@ export interface PlaybackTimelineAudioSessionPort {
     messageId: string,
     durationMs: number | null,
   ) => void;
+  markAudioTerminal: (
+    turnId: string | null,
+    terminal: "completed" | "failed" | "absent",
+    messageId: string,
+    reason?: string,
+  ) => void;
 }
 
 interface SegmentTimelinePreparationOptions {
@@ -634,6 +640,9 @@ export function createPlaybackTimelineRuntime(
       return;
     }
     const engine = timeline.engine;
+    if (hasOpenSink(timeline, AUDIO_TIMELINE_SINK_ID)) {
+      markAudioSessionTerminal(turnId, messageId, terminal, reason);
+    }
     if (terminal === "interrupted") {
       engine.interrupt(reason);
     } else {
@@ -654,6 +663,9 @@ export function createPlaybackTimelineRuntime(
         reason,
       });
       return;
+    }
+    if (hasOpenSink(timeline, AUDIO_TIMELINE_SINK_ID)) {
+      markAudioSessionTerminal(turnId, messageId, "interrupted", reason);
     }
     timeline.engine.interrupt(reason);
     clearTimeline(turnId, messageId);
@@ -762,6 +774,30 @@ export function createPlaybackTimelineRuntime(
     return phase === "completed" || phase === "failed" || phase === "interrupted";
   }
 
+  function markAudioSessionTerminal(
+    turnId: string | null,
+    messageId: string,
+    terminal: TimelineTerminal,
+    reason: string,
+  ): void {
+    deps.audioSession?.markAudioTerminal(
+      turnId,
+      terminal === "completed" ? "completed" : "failed",
+      messageId,
+      reason,
+    );
+  }
+
+  function hasOpenSink(
+    timeline: PlaybackTimelineEntry,
+    sinkId: string,
+  ): boolean {
+    const sink = timeline.engine.getSnapshot()?.sinks.find((item) =>
+      item.id === sinkId
+    );
+    return Boolean(sink && !isTerminalSinkValue(sink.terminal));
+  }
+
   return {
     configureSegmentExecution,
     startSegmentJob,
@@ -791,6 +827,10 @@ function createUnavailableAudioClock(): AudioPlaybackClock {
 
 function normalizeTurnId(value: string | null): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function isTerminalSinkValue(value: string): boolean {
+  return value !== "idle" && value !== "started";
 }
 
 function warnMissingTimeline(

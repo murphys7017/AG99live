@@ -143,12 +143,13 @@ export function createAdapterAudioRuntime(
         ? {
             markAudioStarted: sessionStore.markAudioStarted,
             markAudioDuration: sessionStore.markAudioDuration,
+            markAudioTerminal: sessionStore.markAudioTerminal,
           }
         : undefined;
     },
     createLipSyncRuntime: deps.createLipSyncRuntime,
     onAudioTimelineStarted: deps.onAudioTimelineStarted,
-    markTerminal: markAudioPlaybackTerminal,
+    markTerminal: markAudioPlaybackTerminalState,
     resetTerminal: resetAudioPlaybackTerminal,
   });
   const { playbackTimelineRuntime } = timelineController;
@@ -180,6 +181,17 @@ export function createAdapterAudioRuntime(
       messageId,
       reason,
     );
+  }
+
+  function markAudioPlaybackTerminalState(
+    terminalState: Exclude<AudioPlaybackTerminalState, "idle">,
+    turnId: string | null,
+    reason = "",
+    _messageId: string | null = null,
+  ): void {
+    deps.state.audioPlaybackTerminalState = terminalState;
+    deps.state.audioPlaybackTerminalTurnId = turnId;
+    deps.state.audioPlaybackTerminalReason = reason;
   }
 
   function resetAudioPlaybackTerminal(): void {
@@ -249,8 +261,9 @@ export function createAdapterAudioRuntime(
   function stopAudioPlayback(
     turnId: string | null,
     messageId: string | null,
+    reason: string,
   ): void {
-    timelineController.stopAudioPlaybackForSegment(turnId, messageId);
+    timelineController.stopAudioPlaybackForSegment(turnId, messageId, reason);
   }
 
   const audioSettlementController = createAdapterAudioSettlementController({

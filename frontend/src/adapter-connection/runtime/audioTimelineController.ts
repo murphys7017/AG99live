@@ -132,11 +132,13 @@ export function createAdapterAudioTimelineController(
     stopAudioPlaybackForSegment: (
       turnId: string | null,
       messageId: string | null,
+      reason: string,
     ) => {
       stopAudioSegmentAndBridgeStateForSegment(
         audioPlaybackStateBridgeCtx,
         turnId,
         messageId,
+        reason,
       );
     },
   };
