@@ -1,0 +1,19 @@
+import type { PlaybackTimelineSnapshot } from "./contracts.js";
+
+export interface PlaybackTimelineMotionContext {
+  messageId: string;
+  turnId: string | null;
+  receivedAtMs: number;
+  playbackTimeline?: PlaybackTimelineSnapshot | null;
+  timelineMode?: "audio" | "motion_only";
+}
+
+export interface PlaybackTimelineMotionSink<TMotionPayload = unknown> {
+  start(
+    payload: TMotionPayload,
+    context: PlaybackTimelineMotionContext,
+  ): boolean | void;
+  notifyCurrentTurnChanged(turnId: string | null): void;
+}
+
+export type MotionTimelineTerminal = "completed" | "failed" | "interrupted";

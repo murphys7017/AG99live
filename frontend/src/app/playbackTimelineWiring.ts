@@ -1,11 +1,11 @@
 import type { AdapterPlaybackTimelinePort } from "../adapter-connection/useAdapterConnection.js";
 import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
-import type { PlaybackTimelineMotionSink } from "../playback-timeline/motionSink.js";
+import type { PlaybackTimelineMotionSink } from "../playback-timeline/motionTypes.js";
 import {
   createModelEngineMotionTimelineSink,
   createMotionTimelineRunTracker,
   type MotionTimelineRunTracker,
-} from "../playback-timeline/motionSink.js";
+} from "../playback-integrations/modelEngineMotionSink.js";
 import {
   createAudioStartMotionTimelineBridge,
   type AudioStartMotionTimelineBridge,

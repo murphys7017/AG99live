@@ -1,32 +1,19 @@
 import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
 import type { ModelEnginePlanStartedEvent } from "../model-engine/runtime/contracts.js";
-import type { PlaybackTimelineSnapshot } from "./contracts.js";
+import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
+import type {
+  MotionTimelineTerminal,
+  PlaybackTimelineMotionContext,
+  PlaybackTimelineMotionSink,
+} from "../playback-timeline/motionTypes.js";
 
-export interface PlaybackTimelineMotionContext {
-  messageId: string;
-  turnId: string | null;
-  receivedAtMs: number;
-  playbackTimeline?: PlaybackTimelineSnapshot | null;
-  timelineMode?: "audio" | "motion_only";
-}
-
-export interface PlaybackTimelineMotionEngine {
+export interface ModelEnginePlaybackTimelineMotionEngine {
   ingestNormalizedPayload(
     payload: NormalizedMotionPayload,
     context: PlaybackTimelineMotionContext,
   ): boolean | void;
   notifyCurrentTurnChanged(turnId: string | null): void;
 }
-
-export interface PlaybackTimelineMotionSink {
-  start(
-    payload: NormalizedMotionPayload,
-    context: PlaybackTimelineMotionContext,
-  ): boolean | void;
-  notifyCurrentTurnChanged(turnId: string | null): void;
-}
-
-export type MotionTimelineTerminal = "completed" | "failed" | "interrupted";
 
 export interface MotionTimelineTerminalEvent {
   runId: string;
@@ -98,7 +85,7 @@ function attachPlaybackTimelineToMotionContext(
 }
 
 export function createModelEngineMotionTimelineSink(options: {
-  motionEngine: PlaybackTimelineMotionEngine;
+  motionEngine: ModelEnginePlaybackTimelineMotionEngine;
   getPlaybackTimelineSnapshotForSegment: (
     turnId: string | null,
     messageId: string,
@@ -109,7 +96,7 @@ export function createModelEngineMotionTimelineSink(options: {
     terminal: MotionTimelineTerminal,
     reason: string,
   ) => void;
-}): PlaybackTimelineMotionSink {
+}): PlaybackTimelineMotionSink<NormalizedMotionPayload> {
   return {
     start(payload, context) {
       const playbackTimelineSnapshot = options.getPlaybackTimelineSnapshotForSegment(

@@ -27,8 +27,8 @@ export interface PlaybackTimelineAudioSegmentRunner {
   ): void;
 }
 
-export function createPlaybackTimelineAudioSegmentRunner(options: {
-  runtime: PlaybackTimelineRuntime;
+export function createPlaybackTimelineAudioSegmentRunner<TMotionPayload = unknown>(options: {
+  runtime: PlaybackTimelineRuntime<TMotionPayload>;
   audioSegmentSink: PlaybackTimelineAudioSegmentSink;
 }): PlaybackTimelineAudioSegmentRunner {
   return {

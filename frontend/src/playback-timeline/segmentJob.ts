@@ -1,9 +1,6 @@
-import type {
-  InboundPayloadContext,
-  NormalizedMotionPayload,
-} from "../model-engine/contracts.js";
+import type { PlaybackTimelineMotionContext } from "./motionTypes.js";
 
-export interface PlaybackTimelineSegmentJob<TMotionPayload = NormalizedMotionPayload> {
+export interface PlaybackTimelineSegmentJob<TMotionPayload = unknown> {
   messageId: string;
   turnId: string | null;
   reason: string;
@@ -52,15 +49,15 @@ export interface PlaybackTimelineSegmentAudioSink {
   ): boolean;
 }
 
-export interface PlaybackTimelineSegmentMotionSink<TMotionPayload = NormalizedMotionPayload> {
+export interface PlaybackTimelineSegmentMotionSink<TMotionPayload = unknown> {
   start(
     payload: TMotionPayload,
-    context: InboundPayloadContext,
+    context: PlaybackTimelineMotionContext,
   ): boolean | void;
 }
 
 export interface PlaybackTimelineSegmentExecutionPorts<
-  TMotionPayload = NormalizedMotionPayload,
+  TMotionPayload = unknown,
 > {
   session: PlaybackTimelineSegmentSessionPort;
   textSink: PlaybackTimelineSegmentTextSink;
@@ -68,7 +65,7 @@ export interface PlaybackTimelineSegmentExecutionPorts<
   motionSink: PlaybackTimelineSegmentMotionSink<TMotionPayload>;
 }
 export interface PlaybackTimelineSegmentStartPort<
-  TMotionPayload = NormalizedMotionPayload,
+  TMotionPayload = unknown,
 > {
   startSegmentJob(
     job: PlaybackTimelineSegmentJob<TMotionPayload>,
@@ -76,5 +73,5 @@ export interface PlaybackTimelineSegmentStartPort<
 }
 
 export interface PlaybackTimelineSegmentRunnerPort<
-  TMotionPayload = NormalizedMotionPayload,
+  TMotionPayload = unknown,
 > extends PlaybackTimelineSegmentStartPort<TMotionPayload> {}

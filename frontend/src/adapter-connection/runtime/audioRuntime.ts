@@ -7,7 +7,7 @@ import type {
   PlaybackTimelineSnapshot,
 } from "../../playback-timeline/contracts.js";
 import type {
-  createPlaybackTimelineRuntime,
+  PlaybackTimelineRuntime,
 } from "../../playback-timeline/playbackTimelineRuntime.js";
 import {
   createAdapterAudioTimelineController,
@@ -24,6 +24,7 @@ import type {
   PlaybackTimelineSegmentSessionPort,
   PlaybackTimelineSegmentTextSink,
 } from "../../playback-timeline/segmentJob.js";
+import type { NormalizedMotionPayload } from "../../model-engine/contracts.js";
 
 export type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "absent";
 
@@ -112,9 +113,12 @@ export interface AdapterAudioRuntime {
   configureSegmentExecution: (options: {
     session: PlaybackTimelineSegmentSessionPort;
     textSink: PlaybackTimelineSegmentTextSink;
-    motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start">;
+    motionSink: Pick<
+      PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload>,
+      "start"
+    >;
   }) => void;
-  startSegmentJob: ReturnType<typeof createPlaybackTimelineRuntime>["startSegmentJob"];
+  startSegmentJob: PlaybackTimelineRuntime<NormalizedMotionPayload>["startSegmentJob"];
   hasPendingAudioForTurn: (turnId: string | null) => boolean;
   markAudioPlaybackTerminal: (
     terminalState: Exclude<AudioPlaybackTerminalState, "idle">,
@@ -146,7 +150,7 @@ export interface AdapterAudioRuntime {
 export function createAdapterAudioRuntime(
   deps: AdapterAudioRuntimeDeps,
 ): AdapterAudioRuntime {
-  const timelineController = createAdapterAudioTimelineController({
+  const timelineController = createAdapterAudioTimelineController<NormalizedMotionPayload>({
     state: deps.state,
     audioSink: deps.audioSink,
     pushHistory: deps.pushHistory,
@@ -267,7 +271,10 @@ export function createAdapterAudioRuntime(
   function configureSegmentExecution(options: {
     session: PlaybackTimelineSegmentSessionPort;
     textSink: PlaybackTimelineSegmentTextSink;
-    motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start">;
+    motionSink: Pick<
+      PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload>,
+      "start"
+    >;
   }): void {
     playbackTimelineRuntime.configureSegmentExecution({
       session: options.session,

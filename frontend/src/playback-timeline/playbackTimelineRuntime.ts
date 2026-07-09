@@ -11,7 +11,6 @@ import type {
   PlaybackTimelineSegmentExecutionResult,
   PlaybackTimelineSegmentJob,
 } from "./segmentJob.js";
-import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
 
 const AUDIO_TIMELINE_SINK_ID = "audio";
 const LIP_SYNC_TIMELINE_SINK_ID = "lip_sync";
@@ -87,12 +86,12 @@ interface SegmentTimelinePreparationOptions {
   noAudioConfirmed: boolean;
 }
 
-export interface PlaybackTimelineRuntime {
+export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
   configureSegmentExecution: (
-    ports: PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload>,
+    ports: PlaybackTimelineSegmentExecutionPorts<TMotionPayload>,
   ) => void;
   startSegmentJob: (
-    job: PlaybackTimelineSegmentJob<NormalizedMotionPayload>,
+    job: PlaybackTimelineSegmentJob<TMotionPayload>,
   ) => PlaybackTimelineSegmentExecutionResult;
   startAudioTimelineSink: (
     turnId: string | null,
@@ -149,11 +148,11 @@ export interface PlaybackTimelineRuntime {
   findOpenAudioTimelineSegments: () => PlaybackTimelineAudioSegment[];
 }
 
-export function createPlaybackTimelineRuntime(
+export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
   deps: PlaybackTimelineRuntimeDeps,
-): PlaybackTimelineRuntime {
+): PlaybackTimelineRuntime<TMotionPayload> {
   const timelines = new Map<string, PlaybackTimelineEntry>();
-  let segmentExecutionPorts: PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload> | null = null;
+  let segmentExecutionPorts: PlaybackTimelineSegmentExecutionPorts<TMotionPayload> | null = null;
 
   function resolveTimelineKey(
     turnId: string | null,
@@ -240,7 +239,7 @@ export function createPlaybackTimelineRuntime(
   }
 
   function configureSegmentExecution(
-    ports: PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload>,
+    ports: PlaybackTimelineSegmentExecutionPorts<TMotionPayload>,
   ): void {
     segmentExecutionPorts = ports;
   }
@@ -259,7 +258,7 @@ export function createPlaybackTimelineRuntime(
   }
 
   function startSegmentJob(
-    job: PlaybackTimelineSegmentJob<NormalizedMotionPayload>,
+    job: PlaybackTimelineSegmentJob<TMotionPayload>,
   ): PlaybackTimelineSegmentExecutionResult {
     if (!segmentExecutionPorts) {
       throw new Error("Playback timeline segment execution ports are not configured.");
@@ -268,8 +267,8 @@ export function createPlaybackTimelineRuntime(
   }
 
   function startPreparedSegmentJob(
-    job: PlaybackTimelineSegmentJob<NormalizedMotionPayload>,
-    ports: PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload>,
+    job: PlaybackTimelineSegmentJob<TMotionPayload>,
+    ports: PlaybackTimelineSegmentExecutionPorts<TMotionPayload>,
   ): PlaybackTimelineSegmentExecutionResult {
     let releasedText = false;
     if (job.text.release) {

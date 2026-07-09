@@ -59,12 +59,12 @@ export interface AdapterAudioTimelineControllerDeps {
   resetTerminal: () => void;
 }
 
-export function createAdapterAudioTimelineController(
+export function createAdapterAudioTimelineController<TMotionPayload = unknown>(
   deps: AdapterAudioTimelineControllerDeps,
 ) {
   const live2dLipSyncSink = createLive2DLipSyncTimelineSink();
   let activeLipSyncRuntime: PlaybackTimelineLipSyncRuntime | null = null;
-  const playbackTimelineRuntime = createPlaybackTimelineRuntime({
+  const playbackTimelineRuntime = createPlaybackTimelineRuntime<TMotionPayload>({
     getAudioClock: () => deps.audioSink.getClock(),
     get audioSession() {
       return deps.getAudioSession();

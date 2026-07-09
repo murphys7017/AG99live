@@ -4,7 +4,7 @@ import type {
   NormalizedMotionPayload,
 } from "../model-engine/contracts.js";
 import type { ModelSummary } from "../types/protocol.js";
-import type { PlaybackTimelineMotionContext } from "../playback-timeline/motionSink.js";
+import type { PlaybackTimelineMotionContext } from "../playback-timeline/motionTypes.js";
 
 export interface MotionPayloadPort {
   start(

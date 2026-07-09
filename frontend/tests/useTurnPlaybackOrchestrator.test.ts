@@ -6,7 +6,7 @@ import { effectScope, nextTick } from "vue";
 import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
 import { useTurnPlaybackOrchestrator } from "../src/turn-playback/useTurnPlaybackOrchestrator.js";
 import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
-import { createModelEngineMotionTimelineSink } from "../src/playback-timeline/motionSink.js";
+import { createModelEngineMotionTimelineSink } from "../src/playback-integrations/modelEngineMotionSink.js";
 import { createPlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
 import type {
   PlaybackTimelineSegmentExecutionPorts,

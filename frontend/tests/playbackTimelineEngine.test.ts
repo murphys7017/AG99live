@@ -6,7 +6,7 @@ import { resolvePerformanceCurveTimeline } from "../src/playback-timeline/perfor
 import { createPlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
 import { createTimelineClock } from "../src/playback-timeline/timelineClock.js";
 import { createAudioStartMotionTimelineBridge } from "../src/playback-timeline/audioStartMotionBridge.js";
-import { createMotionTimelineRunTracker } from "../src/playback-timeline/motionSink.js";
+import { createMotionTimelineRunTracker } from "../src/playback-integrations/modelEngineMotionSink.js";
 import {
   createQueuedAudioSegmentSink,
   createQueuedTextSegmentSink,

@@ -1,8 +1,8 @@
 task:
-  class: feature
+  class: refactor
   risk: medium
-  phase: unified_playback_timeline_phase3_motion_timeline_context
-  scope: Frontend playback timeline integration for audio, lip sync, and audio-start motion bridge
+  phase: unified_playback_timeline_motion_sink_boundary_cleanup
+  scope: Frontend playback timeline directory boundary cleanup for ModelEngine motion integration
 context:
   confidence: medium
   assumptions:
@@ -136,6 +136,7 @@ architecture:
     - control.synth_finished marks existing output segments without motion payload as explicit motion.absent; motion and performance-curve patches after synth_finished are rejected.
     - control.synth_finished missing-audio settlement now lives in inbound protocol queue-close handling; AdapterAudioRuntime no longer exposes a missing-audio settlement API or scans all sessions for this case.
     - Target direction: performance curve playback should first support a small preset library of per-frame curve shapes selected by hint, before considering real-time generated custom curves.
+    - PlaybackTimeline core no longer imports ModelEngine motion types; pure motion context/sink contracts live in playback-timeline/motionTypes.ts, while the ModelEngine-specific motion sink and run tracker live in playback-integrations/modelEngineMotionSink.ts.
 verification:
   checks_run:
     - npm run test:playback-timeline
