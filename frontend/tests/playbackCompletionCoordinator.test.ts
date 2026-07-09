@@ -2,7 +2,7 @@
 (globalThis as Record<string, unknown>).window = globalThis;
 
 import assert from "node:assert/strict";
-import { reactive, nextTick, ref } from "vue";
+import { nextTick, ref } from "vue";
 import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
 import { usePlaybackCompletionCoordinator } from "../src/turn-playback/usePlaybackCompletionCoordinator.js";
 
@@ -28,12 +28,6 @@ function createHarness(options: {
   const sessionStore = useTurnPlaybackSessionStore();
   const playbackFinishedCalls: PlaybackFinishedCall[] = [];
   const clearContextCalls: Array<{ turnId: string | null }> = [];
-  const scheduledTimers = new Map<number, () => void>();
-  let nextTimerId = 1;
-
-  const mockMotionPlayer = {
-    state: reactive({ status: "idle" as string }),
-  };
 
   const mockAdapter = {
     state: { lastAssistantText: "Hello from assistant" },
@@ -63,15 +57,6 @@ function createHarness(options: {
       getLastAssistantText: () => mockAdapter.state.lastAssistantText,
       getSelectedModel: () => ref(null),
     },
-    motionPlayer: mockMotionPlayer as never,
-    schedule: (_delayMs, fn) => {
-      const timerId = nextTimerId++;
-      scheduledTimers.set(timerId, fn);
-      return timerId;
-    },
-    clearSchedule: (timer) => {
-      scheduledTimers.delete(timer as number);
-    },
     initialMotionPlaybackRecords: [],
     writeMotionSessionLifecycle: options.writeMotionSessionLifecycle,
   });
@@ -84,16 +69,8 @@ function createHarness(options: {
   return {
     sessionStore,
     coordinator,
-    mockMotionPlayer,
     playbackFinishedCalls,
     clearContextCalls,
-    scheduledTimers,
-    runScheduledTimer: (timerId: number) => {
-      const fn = scheduledTimers.get(timerId);
-      assert.ok(fn, `timer ${timerId} should exist`);
-      scheduledTimers.delete(timerId);
-      fn();
-    },
     flush: () => nextTick(),
   };
 }
@@ -244,7 +221,6 @@ async function testMotionHandoffCompletesPreviousSegmentAndFinishesCurrent(): Pr
   };
 
   h.coordinator.recordMotionPlayback({ ...baseEvent, messageId: "msg-a" });
-  h.mockMotionPlayer.state.status = "playing";
   await h.flush();
 
   h.coordinator.recordMotionPlayback({ ...baseEvent, runId: "handoff-msg-b", messageId: "msg-b" });
@@ -493,7 +469,6 @@ async function testMissingMotionRequiresExplicitAbsentState(): Promise<void> {
   await h.flush();
 
   assert.equal(h.playbackFinishedCalls.length, 0);
-  assert.equal(h.scheduledTimers.size, 0);
   assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-a")?.motion.absent, false);
 
   h.sessionStore.markMotionAbsent(
@@ -506,7 +481,6 @@ async function testMissingMotionRequiresExplicitAbsentState(): Promise<void> {
   assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-a")?.motion.absent, true);
   assert.equal(h.playbackFinishedCalls.length, 1);
   assert.equal(h.playbackFinishedCalls[0].reason, "text_delivered");
-  assert.equal(h.scheduledTimers.size, 0);
 }
 
 async function testMotionStartFailureMarkedFailedAllowsAck(): Promise<void> {

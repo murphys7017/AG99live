@@ -1,8 +1,8 @@
 task:
   class: refactor
   risk: medium
-  phase: unified_playback_timeline_motion_sink_boundary_cleanup
-  scope: Frontend playback timeline directory boundary cleanup for ModelEngine motion integration
+  phase: unified_playback_timeline_completion_coordinator_cleanup
+  scope: Frontend playback completion coordinator cleanup during unified timeline migration
 context:
   confidence: medium
   assumptions:
@@ -40,7 +40,7 @@ context:
     - AdapterConnection.playbackTimeline no longer exposes direct text/audio queue release wrappers or raw segment-sink wiring; connection-level callers and tests should release playback through PlaybackTimelineRuntime.startSegmentJob with explicit text/audio/motion slots.
     - AdapterAudioRuntime now hides the raw queued-audio consumer behind configureSegmentExecution, so adapter-facing wiring can provide session/text/motion ports without exposing queue consumption outside the audio runtime facade.
     - Audio playback started/duration and active-timeline terminal SessionStore writes now happen through PlaybackTimelineRuntime audio lifecycle session ports; AdapterAudioRuntime's state bridge updates UI playback state for those events.
-    - Motion playback started/terminal SessionStore writes now happen through PlaybackTimelineRuntime motion lifecycle session ports in production when motion timeline events arrive; PlaybackCompletionCoordinator still owns motion playback records, handoff bookkeeping, and playback_finished flushing during migration.
+    - Motion playback started/terminal SessionStore writes now happen through PlaybackTimelineRuntime motion lifecycle session ports in production when motion timeline events arrive; PlaybackCompletionCoordinator still owns motion playback records, handoff bookkeeping, and playback_finished flushing during migration, but no longer depends on the motion player object or legacy missing-motion timer hooks.
     - Live2D lip-sync sampling and external mouth-parameter writes now live in frontend/src/live2d/lipSyncTimelineSink.ts; playback-timeline/lipSyncSink.ts keeps only the timeline-facing lifecycle runtime and terminal rules.
     - Playback timeline sink terminal state is now stable once a sink reaches a terminal value, so late cleanup/completion events cannot overwrite a real failure.
     - Lip sync can only complete after it has explicitly started; if audio ends before lip sync starts, the lip_sync sink fails with lip_sync_not_started_before_audio_end.
@@ -137,6 +137,7 @@ architecture:
     - control.synth_finished missing-audio settlement now lives in inbound protocol queue-close handling; AdapterAudioRuntime no longer exposes a missing-audio settlement API or scans all sessions for this case.
     - Target direction: performance curve playback should first support a small preset library of per-frame curve shapes selected by hint, before considering real-time generated custom curves.
     - PlaybackTimeline core no longer imports ModelEngine motion types; pure motion context/sink contracts live in playback-timeline/motionTypes.ts, while the ModelEngine-specific motion sink and run tracker live in playback-integrations/modelEngineMotionSink.ts.
+    - PlaybackCompletionCoordinator no longer accepts motionPlayer, schedule, or clearSchedule dependencies and no longer keeps an activeMotionSegments shadow set; it observes SessionStore settlement, records motion playback history, and handles current run handoff only.
 verification:
   checks_run:
     - npm run test:playback-timeline
@@ -212,7 +213,7 @@ backlog:
     notes:
       - Audio and motion start are now registered as PlaybackTimelineEngine sink callbacks and invoked through startSink.
       - Browser audio release now enters PlaybackTimelineRuntime.startAudioTimelineSink before the actual audio segment sink starts.
-      - Audio lifecycle and ordinary motion started/terminal SessionStore writes now have PlaybackTimelineRuntime lifecycle session ports; remaining work is to reduce PlaybackCompletionCoordinator's handoff/record/flush coupling without losing motion playback records or playback_finished semantics.
+      - Audio lifecycle and ordinary motion started/terminal SessionStore writes now have PlaybackTimelineRuntime lifecycle session ports; PlaybackCompletionCoordinator no longer depends on the motion player or legacy timer hooks. Remaining work is to reduce its handoff/record/flush coupling without losing motion playback records or playback_finished semantics.
       - Keep SessionStore as the persistent turn/segment fact store, but move execution ownership into timeline sinks.
       - Reduce AdapterAudioRuntime to adapter/session state bridge plus protocol-facing convenience methods.
       - Make missing sink wiring a hard error; do not reintroduce compatibility fallback routes.

@@ -77,7 +77,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     sessionStore,
     playbackAck,
     motionRecord,
-    motionPlayer,
     onMotionLabRawEvent: (payload, turnId) => {
       adapter.sendMotionLabRawEvent(cloneJson(payload), turnId);
     },

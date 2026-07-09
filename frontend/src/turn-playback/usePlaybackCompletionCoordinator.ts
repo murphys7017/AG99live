@@ -14,14 +14,13 @@
  *     在 MOTION_RECORD_DEDUP_WINDOW_MS 内会覆盖头一条。
  *
  * 边界：不直接控制播放器、不解析信封；通过 deps（playbackAck / motionRecord /
- * motionPlayer / sessionStore）注入所有副作用。
+ * sessionStore）注入所有副作用。
  */
 
 import { shallowReadonly, ref, watch } from "vue";
 import type { ModelEnginePlanStartedEvent } from "../model-engine/runtime/contracts";
 import type { DirectParameterPlanTerminalEvent } from "../types/live2d-runtime.d.ts";
 import type { DesktopMotionPlaybackRecord } from "../types/desktop";
-import type { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
 import { isPlaybackLocallySettled } from "./selectors.js";
 import type { TurnPlaybackSegment, TurnPlaybackSession } from "./session.js";
@@ -31,7 +30,6 @@ import type {
   PlaybackAckPort,
 } from "./ports.js";
 
-type PreviewMotionPlayer = ReturnType<typeof usePreviewMotionPlayer>;
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 
 const DEFAULT_MAX_MOTION_PLAYBACK_RECORDS = 5;
@@ -41,9 +39,6 @@ interface PlaybackCompletionCoordinatorOptions {
   sessionStore: SessionStore;
   playbackAck: PlaybackAckPort;
   motionRecord: MotionPlaybackRecordPort;
-  motionPlayer: PreviewMotionPlayer;
-  schedule?: (delayMs: number, fn: () => void) => unknown;
-  clearSchedule?: (timer: unknown) => void;
   initialMotionPlaybackRecords?: readonly DesktopMotionPlaybackRecord[];
   maxMotionPlaybackRecords?: number;
   writeMotionSessionLifecycle?: boolean;
@@ -64,8 +59,8 @@ interface PlaybackCompletionCoordinatorOptions {
 }
 
 /**
- * 装配完成协调器。在当前组件/作用域内绑定三组 watch（音频起播通知、
- * 文本 delivered/late-audio 触发 flush、动作 player 状态收口），返回外部可用的
+ * 装配完成协调器。在当前组件/作用域内观察 SessionStore 结算状态和
+ * late-audio reopen 条件，返回外部可用的
  * recordMotionPlayback（动作引擎播放成功后回调写入记录）和
  * resetPlaybackCoordination（断连/重置时清干内部去重集合）。
  */
@@ -82,7 +77,6 @@ export function usePlaybackCompletionCoordinator(
     options.writeMotionSessionLifecycle !== false;
   // Lightweight internal state — session is the single source of truth
   const ackedSessions = new Set<string>();
-  const activeMotionSegments = new Set<string>();
   let currentMotionSegmentKey: string | null = null;
 
   // ── helpers ─────────────────────────────────────────────────────
@@ -134,7 +128,6 @@ export function usePlaybackCompletionCoordinator(
    */
   function resetPlaybackCoordination(): void {
     ackedSessions.clear();
-    activeMotionSegments.clear();
     currentMotionSegmentKey = null;
   }
 
@@ -151,10 +144,6 @@ export function usePlaybackCompletionCoordinator(
       found.segment.turnId,
       found.segment.messageId,
     );
-    if (key) {
-      activeMotionSegments.delete(key);
-    }
-
     if (found.segment.audio.terminal !== "idle") {
       maybeFlushPlaybackCompletion(
         found.session.id,
@@ -167,9 +156,6 @@ export function usePlaybackCompletionCoordinator(
   function finalizeCompletion(sessionId: string): void {
     const s = getSession(sessionId);
     if (!s) return;
-    for (const segmentId of s.segmentOrder) {
-      activeMotionSegments.delete(segmentKey(sessionId, segmentId));
-    }
     ackedSessions.delete(sessionId);
     options.playbackAck.clearPlaybackGroupContext(s.turnId);
     options.sessionStore.markPhase(s.turnId, "completed");
@@ -240,9 +226,10 @@ export function usePlaybackCompletionCoordinator(
   }
 
   /**
-   * 把动作引擎一次启动事件落到 motionPlaybackRecords，并在会话存储里
-   * markMotionStarted。preview 启动（动作实验室）不计入；动作段切换时会先把
-   * 上一段以 motion_handed_off 收口（completeMotionSegmentByKey）。
+   * 把动作引擎一次启动事件落到 motionPlaybackRecords。preview 启动
+   * （动作实验室）不计入；动作段切换时会先把上一段以 motion_handed_off
+   * 收口（completeMotionSegmentByKey）。迁移期可通过 writeMotionSessionLifecycle
+   * 让 coordinator 写 motion started/terminal；生产路径由 timeline runtime 写入。
    * 与最近一条记录指纹一致且时间差在 MOTION_RECORD_DEDUP_WINDOW_MS 内时，
    * 用新记录覆盖头一条，避免动作引擎重试时刷出重复条目。
    */
@@ -262,7 +249,6 @@ export function usePlaybackCompletionCoordinator(
         runId: event.runId || key,
         segmentKey: key,
       };
-      activeMotionSegments.add(key);
       if (writeMotionSessionLifecycle) {
         options.sessionStore.markMotionStarted(
           event.turnId,
@@ -434,8 +420,6 @@ export function usePlaybackCompletionCoordinator(
     if (event.status === "completed") {
       if (writeMotionSessionLifecycle) {
         completeMotionSegmentByKey(currentMotionRun.segmentKey, "motion_completed_after_audio");
-      } else {
-        activeMotionSegments.delete(currentMotionRun.segmentKey);
       }
     } else if (event.status === "stopped") {
       // started motion must always reach a terminal state; otherwise playback_finished can stall.
@@ -447,7 +431,6 @@ export function usePlaybackCompletionCoordinator(
           event.reason || "motion_stopped_without_terminal",
         );
       }
-      activeMotionSegments.delete(currentMotionRun.segmentKey);
     } else {
       const found = findSegmentByKey(currentMotionRun.segmentKey);
       if (found && writeMotionSessionLifecycle) {
@@ -457,7 +440,6 @@ export function usePlaybackCompletionCoordinator(
           event.reason || event.status,
         );
       }
-      activeMotionSegments.delete(currentMotionRun.segmentKey);
     }
 
     currentMotionRun = null;
