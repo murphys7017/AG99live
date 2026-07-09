@@ -36,10 +36,25 @@ export interface PlaybackTimelineAudioSegment {
 
 export interface PlaybackTimelineRuntimeDeps {
   getAudioClock: () => AudioPlaybackClock | null;
+  audioSession?: PlaybackTimelineAudioSessionPort;
   onAudioTimelineStarted?: (
     turnId: string | null,
     messageId: string,
     playbackTimeline: PlaybackTimelineSnapshot | null,
+  ) => void;
+}
+
+export interface PlaybackTimelineAudioSessionPort {
+  markAudioStarted: (
+    turnId: string | null,
+    messageId: string,
+    startedAtMs?: number | null,
+    durationMs?: number | null,
+  ) => void;
+  markAudioDuration: (
+    turnId: string | null,
+    messageId: string,
+    durationMs: number | null,
   ) => void;
 }
 
@@ -433,6 +448,11 @@ export function createPlaybackTimelineRuntime(
       return;
     }
     timeline.engine.setExpectedDurationMs(durationMs);
+    deps.audioSession?.markAudioDuration(
+      turnId,
+      messageId,
+      durationMs,
+    );
   }
 
   function markAudioTimelineStarted(
@@ -466,6 +486,12 @@ export function createPlaybackTimelineRuntime(
     if (engine.getPhase() === "ready") {
       engine.start(startedAtMs);
     }
+    deps.audioSession?.markAudioStarted(
+      turnId,
+      messageId,
+      startedAtMs,
+      durationMs,
+    );
     deps.onAudioTimelineStarted?.(
       turnId,
       messageId,

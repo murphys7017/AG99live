@@ -14,20 +14,6 @@ export interface AudioPlaybackState {
   lastError: string;
 }
 
-export interface AudioPlaybackSessionStore {
-  markAudioStarted: (
-    turnId: string | null,
-    messageId: string,
-    startedAtMs?: number | null,
-    durationMs?: number | null,
-  ) => void;
-  markAudioDuration: (
-    turnId: string | null,
-    messageId: string,
-    durationMs: number | null,
-  ) => void;
-}
-
 export interface AudioPlaybackStateBridgeContext {
   state: AudioPlaybackState;
   audioSegmentRunner: PlaybackTimelineAudioSegmentRunner;
@@ -39,7 +25,6 @@ export interface AudioPlaybackStateBridgeContext {
     messageId?: string | null,
   ) => void;
   resetTerminal: () => void;
-  sessionStore?: AudioPlaybackSessionStore;
 }
 
 export async function startAudioSegmentAndBridgeState(
@@ -62,22 +47,11 @@ export async function startAudioSegmentAndBridgeState(
     await ctx.audioSegmentRunner.start(audioUrl, turnId, messageId, {
       onDurationChanged: (durationMs) => {
         ctx.state.audioPlaybackDurationMs = durationMs;
-        ctx.sessionStore?.markAudioDuration(
-          turnId,
-          messageId,
-          durationMs,
-        );
       },
       onPlaybackStarted: (event) => {
         ctx.state.audioPlaybackStartedTurnId = turnId;
         ctx.state.audioPlaybackStartedMessageId = messageId;
         ctx.state.audioPlaybackStartedAtMs = event.startedAtMs;
-        ctx.sessionStore?.markAudioStarted(
-          turnId,
-          messageId,
-          event.startedAtMs,
-          ctx.state.audioPlaybackDurationMs,
-        );
         console.info(
           "[Connection] audio playback started. turn_id=",
           turnId,

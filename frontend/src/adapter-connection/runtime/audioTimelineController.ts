@@ -28,16 +28,18 @@ import {
   stopAudioSegmentAndBridgeState,
   stopAudioSegmentAndBridgeStateForSegment,
   type AudioPlaybackStateBridgeContext,
-  type AudioPlaybackSessionStore,
   type AudioPlaybackState,
 } from "./audioPlaybackStateBridge.js";
 import type { AudioPlaybackTerminalState } from "./audioRuntime.js";
+import type {
+  PlaybackTimelineAudioSessionPort,
+} from "../../playback-timeline/playbackTimelineRuntime.js";
 
 export interface AdapterAudioTimelineControllerDeps {
   state: AudioPlaybackState;
   audioSink: PlaybackTimelineAudioSink;
   pushHistory: (role: string, text: string) => void;
-  getSessionStore: () => AudioPlaybackSessionStore | undefined;
+  getAudioSession: () => PlaybackTimelineAudioSessionPort | undefined;
   createLipSyncRuntime?: (
     callbacks: PlaybackTimelineLipSyncRuntimeCallbacks,
   ) => PlaybackTimelineLipSyncRuntime;
@@ -62,6 +64,9 @@ export function createAdapterAudioTimelineController(
   let activeLipSyncRuntime: PlaybackTimelineLipSyncRuntime | null = null;
   const playbackTimelineRuntime = createPlaybackTimelineRuntime({
     getAudioClock: () => deps.audioSink.getClock(),
+    get audioSession() {
+      return deps.getAudioSession();
+    },
     onAudioTimelineStarted: deps.onAudioTimelineStarted,
   });
 
@@ -107,9 +112,6 @@ export function createAdapterAudioTimelineController(
     pushHistory: deps.pushHistory,
     markTerminal: deps.markTerminal,
     resetTerminal: deps.resetTerminal,
-    get sessionStore() {
-      return deps.getSessionStore();
-    },
   };
 
   return {

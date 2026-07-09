@@ -130,6 +130,7 @@ function configureNoopSegmentExecutionPorts(
 async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
   const state = buildState();
   const startOptionsRef: { current: PlaybackTimelineAudioStartCallbacks | null } = { current: null };
+  const sessionEvents: string[] = [];
   const audioTimelineStarted: Array<{
     turnId: string | null;
     messageId: string;
@@ -156,7 +157,20 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
       }),
     }),
     pushHistory: () => {},
-    getSessionStore: () => undefined,
+    getSessionStore: () => ({
+      markAudioReleased: (turnId, messageId) => {
+        sessionEvents.push(`released:${turnId ?? ""}:${messageId}`);
+      },
+      markAudioStarted: (turnId, messageId, startedAtMs, durationMs) => {
+        sessionEvents.push(
+          `started:${turnId ?? ""}:${messageId}:${startedAtMs ?? ""}:${durationMs ?? ""}`,
+        );
+      },
+      markAudioDuration: (turnId, messageId, durationMs) => {
+        sessionEvents.push(`duration:${turnId ?? ""}:${messageId}:${durationMs ?? ""}`);
+      },
+      markAudioTerminal: () => {},
+    }),
     createLipSyncRuntime: buildLipSyncRuntimeFactory(),
     onAudioTimelineStarted: (turnId, messageId, playbackTimeline) => {
       audioTimelineStarted.push({
@@ -188,6 +202,11 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
       phase: "playing",
       durationMs: 1250,
     },
+  ]);
+  assert.deepEqual(sessionEvents, [
+    "duration:turn-1:msg-1:1250",
+    "started:turn-1:msg-1:100:1250",
+    "released:turn-1:msg-1",
   ]);
 }
 

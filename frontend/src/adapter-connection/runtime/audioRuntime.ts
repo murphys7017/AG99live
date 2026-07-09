@@ -137,7 +137,7 @@ export function createAdapterAudioRuntime(
     state: deps.state,
     audioSink: deps.audioSink,
     pushHistory: deps.pushHistory,
-    getSessionStore: () => {
+    getAudioSession: () => {
       const sessionStore = deps.getSessionStore();
       return sessionStore
         ? {
