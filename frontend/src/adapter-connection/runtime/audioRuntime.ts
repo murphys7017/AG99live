@@ -234,7 +234,7 @@ export function createAdapterAudioRuntime(
     textSink: PlaybackTimelineSegmentTextSink;
     motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start">;
   }): void {
-    playbackTimelineRuntime.setSegmentSinks({
+    playbackTimelineRuntime.configureSegmentExecution({
       session: options.session,
       textSink: options.textSink,
       audioSink: {

@@ -333,11 +333,11 @@ const testMotionPayload: NormalizedMotionPayload = {
   },
 };
 
-function configureNoopSegmentSinks(
+function configureNoopSegmentExecutionPorts(
   runtime: ReturnType<typeof createPlaybackTimelineRuntime>,
   events: string[] = [],
 ): void {
-  runtime.setSegmentSinks({
+  runtime.configureSegmentExecution({
     session: {
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
@@ -370,7 +370,7 @@ function startMotionOnlySegment(
   messageId: string,
   events: string[] = [],
 ): void {
-  configureNoopSegmentSinks(runtime, events);
+  configureNoopSegmentExecutionPorts(runtime, events);
   runtime.startSegmentJob({
     messageId,
     turnId,
@@ -429,7 +429,7 @@ function testPlaybackTimelineRuntimePreparesSegmentJobIdempotently(): void {
     getAudioClock: () => null,
   });
   const events: string[] = [];
-  configureNoopSegmentSinks(runtime, events);
+  configureNoopSegmentExecutionPorts(runtime, events);
 
   prepareTestAudioTimeline(runtime, "turn-segment", "msg-segment");
   assert.equal(
@@ -539,7 +539,7 @@ function testPlaybackTimelineRuntimeStartsSegmentJobThroughTimelineEntry(): void
     getAudioClock: () => null,
   });
   const events: string[] = [];
-  runtime.setSegmentSinks({
+  runtime.configureSegmentExecution({
     session: {
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),

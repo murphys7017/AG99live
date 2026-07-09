@@ -59,7 +59,7 @@ export interface PlaybackTimelineSegmentMotionSink<TMotionPayload = NormalizedMo
   ): boolean | void;
 }
 
-export interface PlaybackTimelineSegmentSinks<
+export interface PlaybackTimelineSegmentExecutionPorts<
   TMotionPayload = NormalizedMotionPayload,
 > {
   session: PlaybackTimelineSegmentSessionPort;

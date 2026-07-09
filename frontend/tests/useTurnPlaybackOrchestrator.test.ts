@@ -9,7 +9,7 @@ import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
 import { createModelEngineMotionTimelineSink } from "../src/playback-timeline/motionSink.js";
 import { createPlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
 import type {
-  PlaybackTimelineSegmentSinks,
+  PlaybackTimelineSegmentExecutionPorts,
 } from "../src/playback-timeline/segmentJob.js";
 import type { PlaybackTimelineSnapshot } from "../src/playback-timeline/contracts.js";
 import type { PerformanceCurveHint } from "../src/types/protocol.js";
@@ -205,7 +205,7 @@ function createHarness(options: {
     },
   };
 
-  timelineRuntime.setSegmentSinks({
+  timelineRuntime.configureSegmentExecution({
     session: {
       markTextReleased: sessionStore.markTextReleased,
       markAudioReleased: sessionStore.markAudioReleased,
@@ -816,13 +816,13 @@ function testMotionTimelineSinkUsesSegmentScopedTimelineLookup(): void {
   assert.equal(contexts[0].playbackTimeline?.timelineId, "timeline-1");
 }
 
-function createRuntimeWithSegmentSinks(
-  sinks: PlaybackTimelineSegmentSinks<NormalizedMotionPayload>,
+function createRuntimeWithSegmentExecutionPorts(
+  ports: PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload>,
 ) {
   const runtime = createPlaybackTimelineRuntime({
     getAudioClock: () => null,
   });
-  runtime.setSegmentSinks(sinks);
+  runtime.configureSegmentExecution(ports);
   return runtime;
 }
 
@@ -851,7 +851,7 @@ function testPlaybackTimelineRuntimeRejectsInvalidMotionTimestamp(): void {
     "msg-invalid-motion-time",
   );
 
-  const runtime = createRuntimeWithSegmentSinks({
+  const runtime = createRuntimeWithSegmentExecutionPorts({
     session: {
       markTextReleased: sessionStore.markTextReleased,
       markAudioReleased: sessionStore.markAudioReleased,
@@ -894,7 +894,7 @@ function testPlaybackTimelineRuntimeRejectsInvalidMotionTimestamp(): void {
 function testPlaybackTimelineRuntimeMarksMotionOnlyContext(): void {
   const events: string[] = [];
   const contexts: Array<{ timelineMode?: string }> = [];
-  const runtime = createRuntimeWithSegmentSinks({
+  const runtime = createRuntimeWithSegmentExecutionPorts({
     session: {
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
@@ -957,7 +957,7 @@ function testPlaybackTimelineRuntimeMarksMotionOnlyContext(): void {
 
 function testPlaybackTimelineRuntimePreparesAudioMotionTimeline(): void {
   const events: string[] = [];
-  const runtime = createRuntimeWithSegmentSinks({
+  const runtime = createRuntimeWithSegmentExecutionPorts({
     session: {
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
@@ -1025,7 +1025,7 @@ function testPlaybackTimelineRuntimePreparesAudioMotionTimeline(): void {
 
 function testPlaybackTimelineRuntimeDoesNotReleaseMotionWhenAudioReleaseFails(): void {
   const events: string[] = [];
-  const runtime = createRuntimeWithSegmentSinks({
+  const runtime = createRuntimeWithSegmentExecutionPorts({
     session: {
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
@@ -1089,7 +1089,7 @@ function testPlaybackTimelineRuntimeDoesNotReleaseMotionWhenAudioReleaseFails():
 }
 function testPlaybackTimelineRuntimeCreatesMotionOnlyTimelineBesideExistingAudioTimeline(): void {
   const events: string[] = [];
-  const runtime = createRuntimeWithSegmentSinks({
+  const runtime = createRuntimeWithSegmentExecutionPorts({
     session: {
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),

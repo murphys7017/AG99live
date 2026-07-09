@@ -107,7 +107,7 @@ function getSegmentTimelineSnapshot(
   return runtime.getPlaybackTimelineSnapshotForSegment(turnId, messageId);
 }
 
-function configureNoopSegmentSinks(
+function configureNoopSegmentExecutionPorts(
   runtime: ReturnType<typeof createAdapterAudioRuntime>,
 ): void {
   runtime.configureSegmentExecution({
@@ -570,7 +570,7 @@ async function testMotionSinkKeepsTimelineOpenAfterAudioCompletes(): Promise<voi
     getSessionStore: () => undefined,
     createLipSyncRuntime: buildLipSyncRuntimeFactory(),
   });
-  configureNoopSegmentSinks(runtime);
+  configureNoopSegmentExecutionPorts(runtime);
 
   runtime.queueAudioForPlayback("http://127.0.0.1/audio.wav", "turn-motion", "msg-motion");
   assert.equal(runtime.releaseAudioForPlayback("msg-motion", "turn-motion"), true);
@@ -622,7 +622,7 @@ async function testMotionOnlyTimelineUsesSyntheticClock(): Promise<void> {
     getSessionStore: () => undefined,
     createLipSyncRuntime: buildLipSyncRuntimeFactory(),
   });
-  configureNoopSegmentSinks(runtime);
+  configureNoopSegmentExecutionPorts(runtime);
 
   runtime.startSegmentJob({
     messageId: "msg-motion-only",
