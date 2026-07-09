@@ -130,6 +130,12 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     return !session.backend.synthFinished;
   }
 
+  function canAcceptSegmentPatch(turnId: string | null, _messageId: string): boolean {
+    const sessionStore = deps.getSessionStore();
+    const session = sessionStore?.getSession(turnId);
+    return !session?.backend.synthFinished;
+  }
+
   function canQueuePendingMotionForTurn(turnId: string | null): boolean {
     const sessionStore = deps.getSessionStore();
     const session = sessionStore?.getSession(turnId);
@@ -200,6 +206,48 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       turnId,
       messageId,
     });
+  }
+
+  function rejectSegmentPatchAfterSynthFinished(
+    kind: string,
+    turnId: string | null,
+    messageId: string,
+  ): void {
+    const message = `${kind}在语音合成完成后到达，已拒绝（turn_id=${turnId ?? "null"}, message_id=${messageId}）。`;
+    deps.state.lastError = message;
+    deps.state.statusMessage = message;
+    deps.pushHistory("error", message);
+    console.warn("[Connection] rejected segment patch after synth finished.", {
+      kind,
+      turnId,
+      messageId,
+    });
+  }
+
+  function markMissingMotionsForTurn(turnId: string | null, reason: string): void {
+    const sessionStore = deps.getSessionStore();
+    if (!sessionStore) {
+      return;
+    }
+    const session = sessionStore.getSession(turnId);
+    if (!session) {
+      return;
+    }
+    for (const messageId of session.segmentOrder) {
+      const segment = session.segments.get(messageId);
+      if (
+        !segment
+        || segment.motion.payload !== null
+        || segment.motion.absent
+        || segment.motion.released
+        || segment.motion.started
+        || segment.motion.completed
+        || segment.motion.failed
+      ) {
+        continue;
+      }
+      sessionStore.markMotionAbsent(segment.turnId, segment.messageId, reason);
+    }
   }
 
   function rejectOutputAfterSynthFinished(
@@ -301,6 +349,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
         ),
       hasPendingAudioForTurn: (turnId) => deps.hasPendingAudioForTurn(turnId),
       markMissingAudiosForTurn: (turnId, reason) => deps.markMissingAudiosForTurn(turnId, reason),
+      markMissingMotionsForTurn,
       clearPendingMotionsForTurn,
       reportRuntimeProtocolViolation,
       queuePendingAssistantTextForPlayback: (map, text, turnId, messageId) =>
@@ -319,10 +368,12 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       },
       flushPendingMotionForSegment,
       rejectSegmentPatchWithoutOutput,
+      rejectSegmentPatchAfterSynthFinished,
       rejectOutputAfterSynthFinished,
       findActiveAudioSegment: () => deps.findActiveAudioSegment(),
       playMotionPreviewPayload: deps.playMotionPreviewPayload,
       hasPlaybackSegment,
+      canAcceptSegmentPatch,
       canQueuePendingMotionForTurn,
       queuePendingMotionForSegment,
       normalizeMotionPayload: (payload) => normalizeMotionPayload(payload),

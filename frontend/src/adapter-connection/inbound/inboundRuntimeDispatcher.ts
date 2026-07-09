@@ -58,6 +58,10 @@ export interface InboundRuntimeDispatchDeps {
     turnId: string | null,
     reason: string,
   ) => void;
+  markMissingMotionsForTurn: (
+    turnId: string | null,
+    reason: string,
+  ) => void;
   clearPendingMotionsForTurn: (turnId: string | null, reason: string) => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
@@ -228,6 +232,10 @@ function applySynthFinished(
   deps.markMissingAudiosForTurn(
     event.turnId,
     "synth_finished_without_audio_playback",
+  );
+  deps.markMissingMotionsForTurn(
+    event.turnId,
+    "synth_finished_without_motion_payload",
   );
   deps.clearPendingMotionsForTurn(
     event.turnId,

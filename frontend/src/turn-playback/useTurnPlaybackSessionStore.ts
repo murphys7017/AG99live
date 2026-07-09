@@ -19,7 +19,7 @@
  *
  * 边界：
  *   - 不知道协议形状，也不收发任何消息。
- *   - 不调度任何定时器；时间相关的逻辑（settlement window 等）在完成协调器里。
+ *   - 不调度任何定时器；队列关闭由入站协议标记，完成协调器只判断本地播放是否已收口。
  *   - 暴露的 state 是 readonly 包装，外部只能通过 mark* / setActiveSession / prune* 写入。
  */
 
@@ -432,6 +432,7 @@ export function useTurnPlaybackSessionStore() {
   function markMotionAbsent(
     turnId: string | null,
     messageId: string,
+    reason = "",
   ): void {
     const { segment } = getSegmentSession(turnId, messageId);
     segment.motion.payload = null;
@@ -443,7 +444,7 @@ export function useTurnPlaybackSessionStore() {
     segment.motion.started = false;
     segment.motion.completed = false;
     segment.motion.failed = false;
-    segment.motion.reason = "";
+    segment.motion.reason = reason;
   }
 
   function markMotionFailed(

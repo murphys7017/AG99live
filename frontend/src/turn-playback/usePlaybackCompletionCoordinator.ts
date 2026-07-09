@@ -8,9 +8,6 @@
  *      .clearPlaybackGroupContext + markPhase "completed"，会话至此真正闭环。
  *
  * 还附带管理：
- *   - 段级 settlement window（PLAYBACK_SETTLEMENT_WINDOW_MS）：音频已终态但动作
- *     payload 仍未到达且未起播/收口时，给晚到动作一段时间机会，超时则把段动作
- *     markMotionAbsent，再尝试 flush；
  *   - 已 ack 会话遇到晚到音频时反向 reopen（reopenAckedSessionForLateAudio），
  *     允许这一段重新参与释放；
  *   - 动作播放记录 motionPlaybackRecords（用于桌面投影/调试），同段重复记录
@@ -38,7 +35,6 @@ type PreviewMotionPlayer = ReturnType<typeof usePreviewMotionPlayer>;
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 
 const DEFAULT_MAX_MOTION_PLAYBACK_RECORDS = 5;
-const PLAYBACK_SETTLEMENT_WINDOW_MS = 360;
 const MOTION_RECORD_DEDUP_WINDOW_MS = 1200;
 
 interface PlaybackCompletionCoordinatorOptions {
@@ -70,7 +66,7 @@ interface PlaybackCompletionCoordinatorOptions {
  * 装配完成协调器。在当前组件/作用域内绑定三组 watch（音频起播通知、
  * 文本 delivered/late-audio 触发 flush、动作 player 状态收口），返回外部可用的
  * recordMotionPlayback（动作引擎播放成功后回调写入记录）和
- * resetPlaybackCoordination（断连/重置时清干内部计时器和去重集合）。
+ * resetPlaybackCoordination（断连/重置时清干内部去重集合）。
  */
 export function usePlaybackCompletionCoordinator(
   options: PlaybackCompletionCoordinatorOptions,
@@ -81,13 +77,7 @@ export function usePlaybackCompletionCoordinator(
   );
   const maxMotionPlaybackRecords =
     options.maxMotionPlaybackRecords ?? DEFAULT_MAX_MOTION_PLAYBACK_RECORDS;
-  const schedule = options.schedule ?? ((delayMs, fn) => window.setTimeout(fn, delayMs));
-  const clearSchedule = options.clearSchedule ?? ((timer) => {
-    window.clearTimeout(timer as number);
-  });
-
   // Lightweight internal state — session is the single source of truth
-  const settlementTimers = new Map<string, unknown>();
   const ackedSessions = new Set<string>();
   const activeMotionSegments = new Set<string>();
   let currentMotionSegmentKey: string | null = null;
@@ -134,22 +124,12 @@ export function usePlaybackCompletionCoordinator(
     );
   }
 
-  function clearSettlementTimer(key: string): void {
-    if (settlementTimers.has(key)) {
-      clearSchedule(settlementTimers.get(key));
-      settlementTimers.delete(key);
-    }
-  }
-
   /**
-   * 清干内部状态：所有未触发的 settlement 计时器、起播通知去重集合、ack 去重集合、
-   * 活跃动作段集合。用于断连/手动重置：协调器进入"什么都没发生过"的初始态。
+   * 清干内部状态：ack 去重集合、活跃动作段集合。用于断连/手动重置：
+   * 协调器进入"什么都没发生过"的初始态。
    * 不写会话存储；会话本身的清理由调用方走 pruneSessions 等接口。
    */
   function resetPlaybackCoordination(): void {
-    for (const key of settlementTimers.keys()) {
-      clearSettlementTimer(key);
-    }
     ackedSessions.clear();
     activeMotionSegments.clear();
     currentMotionSegmentKey = null;
@@ -185,14 +165,9 @@ export function usePlaybackCompletionCoordinator(
     const s = getSession(sessionId);
     if (!s) return;
     for (const segmentId of s.segmentOrder) {
-      clearSettlementTimer(segmentKey(sessionId, segmentId));
       activeMotionSegments.delete(segmentKey(sessionId, segmentId));
     }
     ackedSessions.delete(sessionId);
-    const firstSegment = s.segmentOrder
-      .map((id) => s.segments.get(id))
-      .find(Boolean);
-    void firstSegment;
     options.playbackAck.clearPlaybackGroupContext(s.turnId);
     options.sessionStore.markPhase(s.turnId, "completed");
   }
@@ -207,26 +182,7 @@ export function usePlaybackCompletionCoordinator(
 
     // Never re-ack a session that already reached a terminal phase
     if (s.phase === "completed" || s.phase === "failed") {
-      if (messageId) {
-        clearSettlementTimer(segmentKey(sessionId, messageId));
-      }
       return;
-    }
-
-    if (messageId) {
-      const segment = s.segments.get(messageId);
-      if (
-        segment
-        && segment.audio.terminal !== "idle"
-        && segment.text.delivered
-        && !segment.motion.absent
-        && !segment.motion.started
-        && !segment.motion.completed
-        && !segment.motion.failed
-      ) {
-        schedulePlaybackSettlementWindow(sessionId, messageId);
-        return;
-      }
     }
 
     if (!isPlaybackLocallySettled(s)) {
@@ -244,19 +200,12 @@ export function usePlaybackCompletionCoordinator(
       return;
     }
 
-    const firstSegment = s.segmentOrder
-      .map((id) => s.segments.get(id))
-      .find(Boolean);
-    void firstSegment;
     const success = s.segmentOrder.every((segmentId) => {
       const segment = s.segments.get(segmentId);
       return segment
         ? segment.audio.terminal !== "failed" && !segment.motion.failed
         : true;
     });
-    for (const segmentId of s.segmentOrder) {
-      clearSettlementTimer(segmentKey(sessionId, segmentId));
-    }
     options.sessionStore.markPhase(s.turnId, "settling");
     ackedSessions.add(sessionId);
     void options.playbackAck.sendPlaybackFinishedForCurrentGroup(
@@ -285,47 +234,6 @@ export function usePlaybackCompletionCoordinator(
       return;
     }
     ackedSessions.delete(session.id);
-  }
-
-  function schedulePlaybackSettlementWindow(sessionId: string, messageId: string): void {
-    const key = segmentKey(sessionId, messageId);
-    if (settlementTimers.has(key)) {
-      return;
-    }
-    const session = getSession(sessionId);
-    const segment = session?.segments.get(messageId);
-    if (
-      !session
-      || !segment
-      || segment.audio.terminal === "idle"
-      || segment.motion.started
-      || segment.motion.completed
-      || segment.motion.failed
-      || segment.motion.payload !== null
-    ) {
-      return;
-    }
-    const timer = schedule(PLAYBACK_SETTLEMENT_WINDOW_MS, () => {
-      settlementTimers.delete(key);
-      const session = getSession(sessionId);
-      const segment = session?.segments.get(messageId);
-      if (
-        session
-        && segment
-        && segment.audio.terminal !== "idle"
-        && !segment.motion.started
-        && !segment.motion.completed
-        && !segment.motion.failed
-        && segment.motion.payload === null
-      ) {
-        options.sessionStore.markMotionAbsent(
-          segment.turnId,
-          segment.messageId,
-        );
-      }
-      maybeFlushPlaybackCompletion(sessionId, messageId, "audio_and_motion_settled");
-    });
-    settlementTimers.set(key, timer);
   }
 
   /**

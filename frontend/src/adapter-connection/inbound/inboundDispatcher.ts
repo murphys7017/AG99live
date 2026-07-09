@@ -120,6 +120,7 @@ export interface InboundDispatchDeps {
   markAudioPlaybackTerminal: (terminalState: string, turnId: string | null, reason?: string, messageId?: string | null) => void;
   hasPendingAudioForTurn: (turnId: string | null) => boolean;
   markMissingAudiosForTurn: (turnId: string | null, reason: string) => void;
+  markMissingMotionsForTurn: (turnId: string | null, reason: string) => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   reportRuntimeProtocolViolation: (message: string) => void;
   // text / audio queue
@@ -130,6 +131,7 @@ export interface InboundDispatchDeps {
   // motion
   hasPlaybackSegment: (turnId: string | null, messageId: string) => boolean;
   canQueuePendingMotionForTurn: (turnId: string | null) => boolean;
+  canAcceptSegmentPatch: (turnId: string | null, messageId: string) => boolean;
   queuePendingMotionForSegment: (
     turnId: string | null,
     messageId: string,
@@ -137,6 +139,11 @@ export interface InboundDispatchDeps {
   ) => void;
   clearPendingMotionsForTurn: (turnId: string | null, reason: string) => void;
   rejectSegmentPatchWithoutOutput: (
+    kind: string,
+    turnId: string | null,
+    messageId: string,
+  ) => void;
+  rejectSegmentPatchAfterSynthFinished: (
     kind: string,
     turnId: string | null,
     messageId: string,

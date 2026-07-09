@@ -47,6 +47,7 @@ export interface InboundMotionDispatchDeps {
   } | undefined;
   pushHistory: (role: string, text: string) => void;
   hasPlaybackSegment: (turnId: string | null, messageId: string) => boolean;
+  canAcceptSegmentPatch: (turnId: string | null, messageId: string) => boolean;
   canQueuePendingMotionForTurn: (turnId: string | null) => boolean;
   queuePendingMotionForSegment: (
     turnId: string | null,
@@ -54,6 +55,11 @@ export interface InboundMotionDispatchDeps {
     payload: NormalizedMotionPayload,
   ) => void;
   rejectSegmentPatchWithoutOutput: (
+    kind: string,
+    turnId: string | null,
+    messageId: string,
+  ) => void;
+  rejectSegmentPatchAfterSynthFinished: (
     kind: string,
     turnId: string | null,
     messageId: string,
@@ -93,6 +99,14 @@ export function dispatchInboundMotionEvent(
   }
   const normalized = deps.normalizeMotionPayload(result.rawPlan);
   if (normalized.ok) {
+    if (!deps.canAcceptSegmentPatch(event.turnId, event.messageId)) {
+      deps.rejectSegmentPatchAfterSynthFinished(
+        "动作载荷",
+        event.turnId,
+        event.messageId,
+      );
+      return;
+    }
     if (deps.hasPlaybackSegment(event.turnId, event.messageId)) {
       deps.sessionStore?.markMotionReceived(
         event.turnId,
@@ -167,6 +181,14 @@ export function dispatchInboundPerformanceCurveHintEvent(
   }
   if (!deps.hasPlaybackSegment(event.turnId, event.messageId)) {
     deps.rejectSegmentPatchWithoutOutput(
+      "表演曲线提示",
+      event.turnId,
+      event.messageId,
+    );
+    return;
+  }
+  if (!deps.canAcceptSegmentPatch(event.turnId, event.messageId)) {
+    deps.rejectSegmentPatchAfterSynthFinished(
       "表演曲线提示",
       event.turnId,
       event.messageId,

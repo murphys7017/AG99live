@@ -675,6 +675,11 @@ function testSynthFinishedMarksMissingSegmentAudioAbsent(): void {
     assert.equal(session?.backend.synthFinished, true);
     assert.equal(session?.backend.turnFinished, false);
     assert.equal(session?.segments.get("m-no-audio")?.audio.terminal, "absent");
+    assert.equal(session?.segments.get("m-no-audio")?.motion.absent, true);
+    assert.equal(
+      session?.segments.get("m-no-audio")?.motion.reason,
+      "synth_finished_without_motion_payload",
+    );
   });
 }
 
@@ -1315,7 +1320,35 @@ function testLateOrphanMotionAfterSynthFinishedIsRejectedWithoutPending(): void 
       adapter.state.pendingMotions.has(pendingKey("turn-late-orphan-motion", "m-late-orphan-motion")),
       false,
     );
-    assert.match(adapter.state.lastError, /动作载荷缺少同段输出/);
+    assert.match(adapter.state.lastError, /动作载荷在语音合成完成后到达/);
+  });
+}
+
+function testLateMotionForExistingSegmentAfterSynthFinishedIsRejected(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-late-existing-motion");
+    socket.emitMessage(JSON.stringify({
+      type: "output.text",
+      version: "v2",
+      message_id: "m-late-existing-motion",
+      timestamp: "2026-05-08T00:00:01.000Z",
+      turn_id: "turn-late-existing-motion",
+      source: "backend",
+      payload: { text: "late motion target", speaker_name: "assistant", avatar: "" },
+    }));
+    sendSynthFinished(socket, "turn-late-existing-motion", "synth-late-existing-motion");
+    socket.emitMessage(JSON.stringify(motionIntentEnvelope(
+      "m-late-existing-motion",
+      "turn-late-existing-motion",
+    )));
+
+    const segment = sessionStore
+      .getSession("turn-late-existing-motion")
+      ?.segments.get("m-late-existing-motion");
+    assert.equal(segment?.motion.payload, null);
+    assert.equal(segment?.motion.absent, true);
+    assert.equal(segment?.motion.reason, "synth_finished_without_motion_payload");
+    assert.match(adapter.state.lastError, /动作载荷在语音合成完成后到达/);
   });
 }
 
@@ -1332,6 +1365,32 @@ function testPerformanceCurveHintWithoutSegmentIsRejected(): void {
       false,
     );
     assert.match(adapter.state.lastError, /表演曲线提示缺少同段输出/);
+  });
+}
+
+function testLatePerformanceCurveHintAfterSynthFinishedIsRejected(): void {
+  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
+    sendTurnStarted(socket, "turn-late-curve");
+    socket.emitMessage(JSON.stringify({
+      type: "output.text",
+      version: "v2",
+      message_id: "m-late-curve",
+      timestamp: "2026-05-08T00:00:01.000Z",
+      turn_id: "turn-late-curve",
+      source: "backend",
+      payload: { text: "late curve target", speaker_name: "assistant", avatar: "" },
+    }));
+    sendSynthFinished(socket, "turn-late-curve", "synth-late-curve");
+    socket.emitMessage(JSON.stringify(performanceCurveHintEnvelope(
+      "m-late-curve",
+      "turn-late-curve",
+    )));
+
+    const segment = sessionStore
+      .getSession("turn-late-curve")
+      ?.segments.get("m-late-curve");
+    assert.equal(segment?.motion.performanceCurveHint, null);
+    assert.match(adapter.state.lastError, /表演曲线提示在语音合成完成后到达/);
   });
 }
 
@@ -2202,7 +2261,9 @@ async function run(): Promise<void> {
   testMotionBeforeAudioIsQueuedUntilSegmentExists();
   testOrphanMotionIsRejectedOnSynthFinishedWithoutCreatingSegment();
   testLateOrphanMotionAfterSynthFinishedIsRejectedWithoutPending();
+  testLateMotionForExistingSegmentAfterSynthFinishedIsRejected();
   testPerformanceCurveHintWithoutSegmentIsRejected();
+  testLatePerformanceCurveHintAfterSynthFinishedIsRejected();
   testPerformanceCurveHintAppliesToExistingSegment();
   testLateMotionUsesEnvelopeSegmentIdentityWithoutActiveAudio();
   testBackToBackTurnsDoNotSharePendingState();

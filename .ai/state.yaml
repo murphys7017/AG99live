@@ -97,6 +97,7 @@ architecture:
     - ModelEngine speech-only audio-start path now receives a same turnId/messageId playbackTimeline snapshot from the audio timeline started bridge, keeping speech-only timing on the same timeline contract as queued motion.
     - ModelEngine requires injected timeline-terminal reporting and speech-only gating dependencies; speech-only motion is suppressed when the same segment already has a failed/released/started/completed formal motion state, preventing it from masking motion timeline failures during development.
     - Generic audio stop cleanup no longer overwrites a more specific terminal reason such as audio_playback_replaced_by_new_input.
+    - PlaybackCompletionCoordinator no longer owns timer-based missing-motion settlement; motion absence is established by the protocol queue close path instead of a frontend delay guess.
     - Adapter runtime no longer exposes inline_first / enable_inline_motion_contract configuration; <@anim> inline motion tags are parsed and broadcast only for the official compatibility path when Persona Effect injection is unavailable.
     - Frontend and adapter motion-intent boundaries are now v3-only; v2 nested axes are treated as invalid input instead of being normalized forward.
     - TurnCoordinator sanitizes hidden legacy motion markup from visible text/captions while preserving raw assistant output in Motion Lab records.
@@ -123,6 +124,7 @@ architecture:
     - Audio playback stop now interrupts the explicit turnId + messageId playback segment; missing segment identity is surfaced as an error instead of stopping an arbitrary active timeline.
     - PlaybackTimelineEngine now owns sink start callbacks for audio/motion via startSink; remaining direct-sink migration should move prepare/terminal and SessionStore coordination out of migration-era segment-sink wiring.
     - Audio/lip_sync/motion timeline duration/started/terminal events no longer implicitly register or mutate a missing sink; missing segment timeline or sink wiring is diagnosed and the event is dropped.
+    - control.synth_finished marks existing output segments without motion payload as explicit motion.absent; motion and performance-curve patches after synth_finished are rejected.
     - Target direction: performance curve playback should first support a small preset library of per-frame curve shapes selected by hint, before considering real-time generated custom curves.
 verification:
   checks_run:
@@ -159,6 +161,13 @@ verification:
     - npm run test:adapter-connection
     - npm run test:playback-timeline
     - npm run test:playback-timeline-audio
+    - npm run test:coordinator
+    - npm run test:turn-orchestrator
+    - npm run test:session
+    - npm run test:adapter-audio-runtime
+    - npm run test:inbound-events
+    - npm run typecheck:renderer
+    - npm run typecheck:node
   checks_failed: []
   validation_gap: Live AstrBot plus provider logs still need validation to confirm input_tokens decrease; static scope alone may not reduce request tokens without provider/static-prefix caching.
 runtime:

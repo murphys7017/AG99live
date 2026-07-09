@@ -481,7 +481,7 @@ async function testCompletionCoordinatorIgnoresStaleSession(): Promise<void> {
   assert.equal(h.playbackFinishedCalls[1].turnId, "turn-2");
 }
 
-async function testSettlementWindowUsesInjectedTimer(): Promise<void> {
+async function testMissingMotionRequiresExplicitAbsentState(): Promise<void> {
   const h = createHarness();
   h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
   h.sessionStore.markTextDelivered("turn-1", "msg-a");
@@ -490,14 +490,19 @@ async function testSettlementWindowUsesInjectedTimer(): Promise<void> {
   await h.flush();
 
   assert.equal(h.playbackFinishedCalls.length, 0);
-  assert.equal(h.scheduledTimers.size, 1);
+  assert.equal(h.scheduledTimers.size, 0);
+  assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-a")?.motion.absent, false);
 
-  h.runScheduledTimer(1);
+  h.sessionStore.markMotionAbsent(
+    "turn-1",
+    "msg-a",
+    "synth_finished_without_motion_payload",
+  );
   await h.flush();
 
   assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-a")?.motion.absent, true);
   assert.equal(h.playbackFinishedCalls.length, 1);
-  assert.equal(h.playbackFinishedCalls[0].reason, "audio_and_motion_settled");
+  assert.equal(h.playbackFinishedCalls[0].reason, "text_delivered");
   assert.equal(h.scheduledTimers.size, 0);
 }
 
@@ -783,7 +788,7 @@ async function run(): Promise<void> {
   await testSegmentWithAudioFailureStillSettles();
   await testSynthFinishedAfterTurnFinishedStillAcks();
   await testCompletionCoordinatorIgnoresStaleSession();
-  await testSettlementWindowUsesInjectedTimer();
+  await testMissingMotionRequiresExplicitAbsentState();
   await testMotionStartFailureMarkedFailedAllowsAck();
   await testStaleRunIdDoesNotCorruptCurrentSegment();
   await testMultiSegmentMotionCompletionsAreSegmentScoped();
