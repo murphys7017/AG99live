@@ -36,6 +36,7 @@ context:
     - Motion release timeline ownership lookup now lives in PlaybackTimelineRuntime; TurnPlaybackOrchestrator no longer reads active audio timeline snapshots directly, and MotionTimelineSink uses segment-scoped lookup when available.
     - Lip sync runtime has been moved behind an independent PlaybackTimelineAudioLipSyncSink boundary, and PlaybackTimelineAudioSegmentSink now owns audio element event ordering plus lip-sync attach/start/terminal/stop while audio playback actions only update adapter/session state.
     - Audio segment runner now starts browser audio through PlaybackTimelineRuntime.startAudioTimelineSink, so released audio enters the PlaybackTimelineEngine sink-start callback path instead of runner-local prepare plus direct sink start.
+    - AdapterAudioRuntime now separates direct adapter audio release from timeline job queue consumption: direct release marks SessionStore audio.released itself, while timeline segment jobs consume queued audio through a raw queue-release port and let PlaybackTimelineRuntime mark audio.released once.
     - Live2D lip-sync sampling and external mouth-parameter writes now live in frontend/src/live2d/lipSyncTimelineSink.ts; playback-timeline/lipSyncSink.ts keeps only the timeline-facing lifecycle runtime and terminal rules.
     - Playback timeline sink terminal state is now stable once a sink reaches a terminal value, so late cleanup/completion events cannot overwrite a real failure.
     - Lip sync can only complete after it has explicitly started; if audio ends before lip sync starts, the lip_sync sink fails with lip_sync_not_started_before_audio_end.
@@ -122,6 +123,7 @@ architecture:
     - Browser HTMLAudioElement playback ownership has moved from adapter-connection/runtime into playback-timeline/audioSink.ts, so adapter runtime no longer owns the raw audio element player.
     - AdapterAudioRuntime no longer exposes playAudioAndAcknowledge as a public method; production and tests enter audio playback through queue/release or segment job paths.
     - PlaybackTimelineAudioSegmentRunner now bridges audio segment duration/started/terminal events into PlaybackTimelineRuntime, so audioPlaybackActions only updates adapter/session state around playback.
+    - AudioPlaybackStateBridge no longer writes SessionStore audio.released; it only bridges real playback duration/started/terminal events, leaving release ownership to either the direct adapter release wrapper or PlaybackTimelineRuntime.startSegmentJob.
     - Audio playback stop now interrupts the explicit turnId + messageId playback segment; missing segment identity is surfaced as an error instead of stopping an arbitrary active timeline.
     - PlaybackTimelineEngine now owns sink start callbacks for audio/motion via startSink; remaining direct-sink migration should move prepare/terminal and SessionStore coordination out of migration-era segment-sink wiring.
     - Audio/lip_sync/motion timeline duration/started/terminal events no longer implicitly register or mutate a missing sink; missing segment timeline or sink wiring is diagnosed and the event is dropped.
@@ -168,6 +170,9 @@ verification:
     - npm run test:session
     - npm run test:adapter-audio-runtime
     - npm run test:inbound-events
+    - npm run test:adapter-audio-runtime
+    - npm run test:adapter-connection
+    - npm run test:playback-timeline
     - npm run typecheck:renderer
     - npm run typecheck:node
   checks_failed: []

@@ -473,6 +473,83 @@ async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise
   });
 }
 
+async function testTimelineAudioReleaseMarksSessionReleasedOnce(): Promise<void> {
+  const state = buildState();
+  const releasedEvents: Array<{
+    turnId: string | null;
+    messageId: string;
+  }> = [];
+  const runtime = createAdapterAudioRuntime({
+    state,
+    audioSink: buildAudioSink({
+      start: async (url, callbacks) => {
+        emitFakeAudioElementCreated(callbacks, url);
+        callbacks.onPlaybackStarted?.({
+          startedAtMs: 100,
+          durationMs: 1000,
+        });
+      },
+    }),
+    pushHistory: () => {},
+    createLipSyncRuntime: buildLipSyncRuntimeFactory(),
+    getSessionStore: () => ({
+      markAudioReleased: (turnId, messageId) => {
+        releasedEvents.push({ turnId, messageId });
+      },
+      markAudioStarted: () => {},
+      markAudioDuration: () => {},
+      markAudioTerminal: () => {},
+    }),
+  });
+  runtime.setSegmentSinks({
+    session: {
+      markTextReleased: () => {},
+      markAudioReleased: (turnId, messageId) => {
+        releasedEvents.push({ turnId, messageId });
+      },
+      markMotionReleased: () => {},
+      markMotionFailed: () => {},
+      markPhase: () => true,
+    },
+    textSink: {
+      releaseAssistantTextForPlayback: () => true,
+    },
+    audioSink: {
+      releaseAudioForPlayback: runtime.releaseQueuedAudioForTimelinePlayback,
+    },
+    motionSink: {
+      start: () => true,
+    },
+  });
+
+  runtime.queueAudioForPlayback("http://127.0.0.1/timeline.wav", "turn-timeline-audio", "msg-timeline-audio");
+  const result = runtime.startSegmentJob({
+    messageId: "msg-timeline-audio",
+    turnId: "turn-timeline-audio",
+    reason: "test_timeline_audio_release",
+    text: {
+      release: false,
+    },
+    audio: {
+      release: true,
+      noAudioConfirmed: false,
+    },
+    motion: {
+      payload: null,
+      receivedAtMs: null,
+    },
+  });
+  await flushMicrotasks();
+
+  assert.equal(result.releasedAudio, true);
+  assert.deepEqual(releasedEvents, [
+    {
+      turnId: "turn-timeline-audio",
+      messageId: "msg-timeline-audio",
+    },
+  ]);
+}
+
 async function testMotionSinkKeepsTimelineOpenAfterAudioCompletes(): Promise<void> {
   const state = buildState();
   const startOptionsRef: { current: PlaybackTimelineAudioStartCallbacks | null } = { current: null };
@@ -598,6 +675,7 @@ async function run(): Promise<void> {
   await testAudioTimelineInterruptsPreparedAudioOnStopAll();
   await testStopAudioAndSettleTurnFailsOnlyMatchingPendingAudio();
   await testStartingNextAudioSettlesInterruptedPreviousSegment();
+  await testTimelineAudioReleaseMarksSessionReleasedOnce();
   await testMotionSinkKeepsTimelineOpenAfterAudioCompletes();
   await testMotionOnlyTimelineUsesSyntheticClock();
   console.log("adapterAudioRuntime tests passed");

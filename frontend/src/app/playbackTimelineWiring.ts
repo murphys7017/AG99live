@@ -115,7 +115,7 @@ export function configurePlaybackTimelineSegmentExecution(options: {
       releaseAssistantTextForPlayback: playbackTimeline.releaseAssistantTextForPlayback,
     },
     audioSink: {
-      releaseAudioForPlayback: playbackTimeline.releaseAudioForPlayback,
+      releaseAudioForPlayback: playbackTimeline.releaseQueuedAudioForTimelinePlayback,
     },
     motionSink: {
       start: motionTimelineSink.start,

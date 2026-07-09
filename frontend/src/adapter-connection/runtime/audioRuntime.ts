@@ -91,6 +91,10 @@ export interface AdapterAudioRuntime {
     messageId: string,
     turnId: string | null,
   ) => boolean;
+  releaseQueuedAudioForTimelinePlayback: (
+    messageId: string,
+    turnId: string | null,
+  ) => boolean;
   setSegmentSinks: ReturnType<typeof createPlaybackTimelineRuntime>["setSegmentSinks"];
   startSegmentJob: ReturnType<typeof createPlaybackTimelineRuntime>["startSegmentJob"];
   hasPendingAudioForTurn: (turnId: string | null) => boolean;
@@ -132,7 +136,6 @@ export function createAdapterAudioRuntime(
       const sessionStore = deps.getSessionStore();
       return sessionStore
         ? {
-            markAudioReleased: sessionStore.markAudioReleased,
             markAudioStarted: sessionStore.markAudioStarted,
             markAudioDuration: sessionStore.markAudioDuration,
           }
@@ -204,6 +207,24 @@ export function createAdapterAudioRuntime(
     },
   });
 
+  function releaseQueuedAudioForTimelinePlayback(
+    messageId: string,
+    turnId: string | null,
+  ): boolean {
+    return audioReleaseController.releaseAudioForPlayback(messageId, turnId);
+  }
+
+  function releaseAudioForPlayback(
+    messageId: string,
+    turnId: string | null,
+  ): boolean {
+    const released = releaseQueuedAudioForTimelinePlayback(messageId, turnId);
+    if (released) {
+      deps.getSessionStore()?.markAudioReleased(turnId, messageId);
+    }
+    return released;
+  }
+
   function stopAudioPlayback(
     turnId: string | null,
     messageId: string | null,
@@ -232,7 +253,8 @@ export function createAdapterAudioRuntime(
 
   return {
     queueAudioForPlayback: audioReleaseController.queueAudioForPlayback,
-    releaseAudioForPlayback: audioReleaseController.releaseAudioForPlayback,
+    releaseAudioForPlayback,
+    releaseQueuedAudioForTimelinePlayback,
     setSegmentSinks,
     startSegmentJob,
     hasPendingAudioForTurn: audioSettlementController.hasPendingAudioForTurn,

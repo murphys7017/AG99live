@@ -15,10 +15,6 @@ export interface AudioPlaybackState {
 }
 
 export interface AudioPlaybackSessionStore {
-  markAudioReleased: (
-    turnId: string | null,
-    messageId: string,
-  ) => void;
   markAudioStarted: (
     turnId: string | null,
     messageId: string,
@@ -54,7 +50,6 @@ export async function startAudioSegmentAndBridgeState(
 ): Promise<void> {
   stopAudioSegmentAndBridgeState(ctx);
   ctx.resetTerminal();
-  ctx.sessionStore?.markAudioReleased(turnId, messageId);
   ctx.state.isPlayingAudio = true;
   ctx.state.audioPlaybackStartedTurnId = turnId;
   ctx.state.audioPlaybackStartedMessageId = messageId;
