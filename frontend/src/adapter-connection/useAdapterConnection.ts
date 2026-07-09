@@ -86,7 +86,6 @@ export interface AdapterPlaybackTimelinePort {
     ) => void) | null,
   ) => void;
   releaseAssistantTextForPlayback: (messageId: string, turnId: string | null) => boolean;
-  releaseAudioForPlayback: AdapterAudioRuntimeInstance["releaseAudioForPlayback"];
   releaseQueuedAudioForTimelinePlayback:
     AdapterAudioRuntimeInstance["releaseQueuedAudioForTimelinePlayback"];
   setSegmentSinks: AdapterAudioRuntimeInstance["setSegmentSinks"];
@@ -243,7 +242,6 @@ export function createAdapterConnection(
 
   const {
     queueAudioForPlayback,
-    releaseAudioForPlayback,
     releaseQueuedAudioForTimelinePlayback,
     setSegmentSinks,
     startSegmentJob,
@@ -613,7 +611,6 @@ export function createAdapterConnection(
   const playbackTimeline: AdapterPlaybackTimelinePort = {
     setAudioTimelineStartedHandler,
     releaseAssistantTextForPlayback,
-    releaseAudioForPlayback,
     releaseQueuedAudioForTimelinePlayback,
     setSegmentSinks,
     startSegmentJob,

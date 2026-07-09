@@ -260,6 +260,24 @@ function createConnectedAdapter() {
   if (!adapter) {
     throw new Error("expected adapter instance");
   }
+  adapter.playbackTimeline.setSegmentSinks({
+    session: {
+      markTextReleased: sessionStore.markTextReleased,
+      markAudioReleased: sessionStore.markAudioReleased,
+      markMotionReleased: sessionStore.markMotionReleased,
+      markMotionFailed: sessionStore.markMotionFailed,
+      markPhase: sessionStore.markPhase,
+    },
+    textSink: {
+      releaseAssistantTextForPlayback: adapter.playbackTimeline.releaseAssistantTextForPlayback,
+    },
+    audioSink: {
+      releaseAudioForPlayback: adapter.playbackTimeline.releaseQueuedAudioForTimelinePlayback,
+    },
+    motionSink: {
+      start: () => true,
+    },
+  });
   adapter.connect();
   const socket = FakeWebSocket.instances[0];
   if (!socket) {
@@ -388,6 +406,29 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function releaseAudioSegment(
+  adapter: ReturnType<typeof useAdapterConnection>,
+  messageId: string,
+  turnId: string | null,
+): boolean {
+  return adapter.playbackTimeline.startSegmentJob({
+    messageId,
+    turnId,
+    reason: "test_audio_release",
+    text: {
+      release: false,
+    },
+    audio: {
+      release: true,
+      noAudioConfirmed: false,
+    },
+    motion: {
+      payload: null,
+      receivedAtMs: null,
+    },
+  }).releasedAudio;
 }
 
 function motionIntentEnvelope(messageId: string, turnId: string | null) {
@@ -794,7 +835,7 @@ async function testLateAudioAfterSynthFinishedStillPlaysOnce(): Promise<void> {
     const queuedAudio = sessionStore.getSession("turn-late-audio")?.segments.get("msg-late-audio");
     assert.equal(queuedAudio?.audio.terminal, "idle");
     assert.equal(adapter.state.pendingAudios.size, 1);
-    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback("msg-late-audio", "turn-late-audio"), true);
+    assert.equal(releaseAudioSegment(adapter, "msg-late-audio", "turn-late-audio"), true);
     await flushMicrotasks();
 
     const afterAudio = sessionStore.getSession("turn-late-audio")?.segments.get("msg-late-audio");
@@ -836,7 +877,7 @@ async function testAudioTimelineStartedHandlerReceivesStartedSnapshot(): Promise
       audioUrl: "http://127.0.0.1:12397/cache/audio/timeline.wav",
     });
 
-    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback("msg-audio-timeline", "turn-audio-timeline"), true);
+    assert.equal(releaseAudioSegment(adapter, "msg-audio-timeline", "turn-audio-timeline"), true);
     await Promise.resolve();
     await Promise.resolve();
 
@@ -865,7 +906,7 @@ async function testDuplicateOutputAudioDoesNotReplayCompletedSegment(): Promise<
       captionText: "repeat audio",
     });
 
-    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback("msg-duplicate-audio", "turn-duplicate-audio"), true);
+    assert.equal(releaseAudioSegment(adapter, "msg-duplicate-audio", "turn-duplicate-audio"), true);
     await flushMicrotasks();
     FakeAudio.instances[0]?.emit("ended");
     await flushMicrotasks();
@@ -903,7 +944,7 @@ async function testChangedUrlOutputAudioDoesNotReplayCompletedSegment(): Promise
       captionText: "repeat audio",
     });
 
-    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback("msg-changed-audio", "turn-changed-audio"), true);
+    assert.equal(releaseAudioSegment(adapter, "msg-changed-audio", "turn-changed-audio"), true);
     await flushMicrotasks();
     FakeAudio.instances[0]?.emit("ended");
     await flushMicrotasks();
@@ -1699,7 +1740,8 @@ async function testSendTextSettlesPlayingAudioBeforeNewInput(): Promise<void> {
       messageId: "msg-before-new-input",
       audioUrl: "http://127.0.0.1:12397/cache/audio/before-new-input.wav",
     });
-    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback(
+    assert.equal(releaseAudioSegment(
+      adapter,
       "msg-before-new-input",
       "turn-before-new-input",
     ), true);
@@ -1748,7 +1790,8 @@ async function testSendTextSettlesPreparingAudioBeforeNewInput(): Promise<void> 
     );
 
     FakeAudio.nextPlayShouldStall = true;
-    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback(
+    assert.equal(releaseAudioSegment(
+      adapter,
       "msg-preparing-before-new-input",
       "turn-preparing-before-new-input",
     ), true);
@@ -1824,7 +1867,8 @@ async function testClearPlaybackGroupOnlySettlesTargetTurnAudio(): Promise<void>
       messageId: "msg-clear-target-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/clear-target.wav",
     });
-    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback(
+    assert.equal(releaseAudioSegment(
+      adapter,
       "msg-clear-target-audio",
       "turn-clear-target",
     ), true);
@@ -1874,7 +1918,8 @@ async function testInboundInterruptOnlySettlesTargetTurnAudio(): Promise<void> {
       messageId: "msg-inbound-interrupt-target-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/inbound-interrupt-target.wav",
     });
-    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback(
+    assert.equal(releaseAudioSegment(
+      adapter,
       "msg-inbound-interrupt-target-audio",
       "turn-inbound-interrupt-target",
     ), true);
@@ -2067,7 +2112,8 @@ async function testInterruptMarksPlayingAudioSegmentFailed(): Promise<void> {
       },
     }));
 
-    const released = adapter.playbackTimeline.releaseAudioForPlayback(
+    const released = releaseAudioSegment(
+      adapter,
       "msg-interrupt-audio",
       "turn-interrupt",
     );
@@ -2124,7 +2170,8 @@ async function testUserInterruptMarksPlayingAudioSegmentFailedBeforeSending(): P
       messageId: "msg-user-interrupt-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/user-interrupt.wav",
     });
-    assert.equal(adapter.playbackTimeline.releaseAudioForPlayback(
+    assert.equal(releaseAudioSegment(
+      adapter,
       "msg-user-interrupt-audio",
       "turn-user-interrupt",
     ), true);
@@ -2206,7 +2253,8 @@ async function testInterruptMarksPendingAudioSegmentFailedBeforePlaybackStart():
     }));
 
     FakeAudio.nextPlayShouldStall = true;
-    const released = adapter.playbackTimeline.releaseAudioForPlayback(
+    const released = releaseAudioSegment(
+      adapter,
       "msg-interrupt-pending-audio",
       "turn-interrupt-pending",
     );
