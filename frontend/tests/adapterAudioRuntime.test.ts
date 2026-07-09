@@ -270,7 +270,6 @@ async function testRejectedAudioStartSettlesAdapterState(): Promise<void> {
           reason,
         });
       },
-      getSessions: () => [],
     }),
     createLipSyncRuntime: buildLipSyncRuntimeFactory(),
   });
@@ -389,7 +388,6 @@ async function testStopAudioAndSettleTurnFailsOnlyMatchingPendingAudio(): Promis
           reason,
         });
       },
-      getSessions: () => [],
     }),
     createLipSyncRuntime: buildLipSyncRuntimeFactory(),
   });
@@ -451,7 +449,6 @@ async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise
           reason,
         });
       },
-      getSessions: () => [],
     }),
   });
 

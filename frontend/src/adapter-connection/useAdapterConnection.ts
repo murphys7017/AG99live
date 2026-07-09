@@ -248,7 +248,6 @@ export function createAdapterConnection(
     markMotionTimelineStarted,
     markMotionTimelineTerminal,
     hasPendingAudioForTurn,
-    markMissingAudiosForTurn,
     markAudioPlaybackTerminal,
     resetAudioPlaybackTerminal,
     stopAudioAndSettleTurn,
@@ -270,7 +269,6 @@ export function createAdapterConnection(
     markAudioPlaybackTerminal: (terminalState, turnId, reason, messageId) =>
       markAudioPlaybackTerminal(terminalState, turnId, reason, messageId),
     hasPendingAudioForTurn: (turnId) => hasPendingAudioForTurn(turnId),
-    markMissingAudiosForTurn: (turnId, reason) => markMissingAudiosForTurn(turnId, reason),
     queueAudioForPlayback: (url, turnId, messageId) =>
       queueAudioForPlayback(url, turnId, messageId),
     findActiveAudioSegment: () => findActiveAudioSegment(),

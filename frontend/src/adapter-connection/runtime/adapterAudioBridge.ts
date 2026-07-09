@@ -14,23 +14,6 @@ export interface AudioBridgeSessionStore {
     messageId: string,
     reason?: string,
   ) => void;
-  getSessions: () => Array<{
-    segmentOrder: string[];
-    segments: Map<
-      string,
-      {
-        messageId: string;
-        turnId: string | null;
-        audio: {
-          url: string | null;
-          expected?: boolean;
-          released: boolean;
-          started: boolean;
-          terminal: string;
-        };
-      }
-    >;
-  }>;
 }
 
 export interface AudioBridgeDeps {
@@ -77,34 +60,4 @@ export function hasPendingAudioForTurn(
     }
   }
   return false;
-}
-
-export function markMissingAudiosForTurn(
-  deps: AudioBridgeDeps,
-  turnId: string | null,
-  reason: string,
-): void {
-  const sessions = deps.sessionStore?.getSessions() ?? [];
-  for (const session of sessions) {
-    for (const segmentId of session.segmentOrder) {
-      const segment = session.segments.get(segmentId);
-      if (
-        segment
-        && segment.audio.terminal === "idle"
-        && !segment.audio.url
-        && !segment.audio.expected
-        && !segment.audio.released
-        && !segment.audio.started
-        && matchesPlaybackGroup(segment.turnId, turnId)
-      ) {
-        markAudioPlaybackTerminal(
-          deps,
-          "absent",
-          segment.turnId,
-          reason,
-          segment.messageId,
-        );
-      }
-    }
-  }
 }

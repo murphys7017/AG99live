@@ -1,7 +1,6 @@
 import { matchesPlaybackGroup } from "../../playback-timeline/playbackReleaseQueue.js";
 import {
   hasPendingAudioForTurn as hasPendingAudioForTurnBridge,
-  markMissingAudiosForTurn as markMissingAudiosForTurnBridge,
   type AudioBridgeDeps,
 } from "./adapterAudioBridge.js";
 
@@ -30,13 +29,6 @@ export function createAdapterAudioSettlementController(
 ) {
   function hasPendingAudioForTurn(turnId: string | null): boolean {
     return hasPendingAudioForTurnBridge(deps.audioBridge, turnId);
-  }
-
-  function markMissingAudiosForTurn(
-    turnId: string | null,
-    reason: string,
-  ): void {
-    markMissingAudiosForTurnBridge(deps.audioBridge, turnId, reason);
   }
 
   function stopAudioAndSettleTurn(
@@ -123,7 +115,6 @@ export function createAdapterAudioSettlementController(
 
   return {
     hasPendingAudioForTurn,
-    markMissingAudiosForTurn,
     stopAudioAndSettleTurn,
     stopAudioAndSettleAll,
     findOpenAudioSegment,

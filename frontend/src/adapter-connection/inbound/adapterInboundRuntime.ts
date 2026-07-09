@@ -44,7 +44,6 @@ export interface AdapterInboundRuntimeDeps {
     messageId?: string | null,
   ) => void;
   hasPendingAudioForTurn: (turnId: string | null) => boolean;
-  markMissingAudiosForTurn: (turnId: string | null, reason: string) => void;
   queueAudioForPlayback: (
     url: string,
     turnId: string | null,
@@ -224,6 +223,36 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     });
   }
 
+  function markMissingAudiosForTurn(turnId: string | null, reason: string): void {
+    const sessionStore = deps.getSessionStore();
+    if (!sessionStore) {
+      return;
+    }
+    const session = sessionStore.getSession(turnId);
+    if (!session) {
+      return;
+    }
+    for (const messageId of session.segmentOrder) {
+      const segment = session.segments.get(messageId);
+      if (
+        !segment
+        || segment.audio.terminal !== "idle"
+        || segment.audio.url
+        || segment.audio.expected
+        || segment.audio.released
+        || segment.audio.started
+      ) {
+        continue;
+      }
+      sessionStore.markAudioTerminal(
+        segment.turnId,
+        "absent",
+        segment.messageId,
+        reason,
+      );
+    }
+  }
+
   function markMissingMotionsForTurn(turnId: string | null, reason: string): void {
     const sessionStore = deps.getSessionStore();
     if (!sessionStore) {
@@ -348,7 +377,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
           messageId,
         ),
       hasPendingAudioForTurn: (turnId) => deps.hasPendingAudioForTurn(turnId),
-      markMissingAudiosForTurn: (turnId, reason) => deps.markMissingAudiosForTurn(turnId, reason),
+      markMissingAudiosForTurn,
       markMissingMotionsForTurn,
       clearPendingMotionsForTurn,
       reportRuntimeProtocolViolation,

@@ -64,23 +64,6 @@ export interface AdapterAudioRuntimeSessionStore {
     messageId: string,
     reason?: string,
   ) => void;
-  getSessions: () => Array<{
-    phase?: string;
-    segmentOrder: string[];
-    segments: Map<
-      string,
-      {
-        messageId: string;
-        turnId: string | null;
-        audio: {
-          url: string | null;
-          released: boolean;
-          started: boolean;
-          terminal: string;
-        };
-      }
-    >;
-  }>;
 }
 
 export interface AdapterAudioRuntimeDeps {
@@ -116,10 +99,6 @@ export interface AdapterAudioRuntime {
   setSegmentSinks: ReturnType<typeof createPlaybackTimelineRuntime>["setSegmentSinks"];
   startSegmentJob: ReturnType<typeof createPlaybackTimelineRuntime>["startSegmentJob"];
   hasPendingAudioForTurn: (turnId: string | null) => boolean;
-  markMissingAudiosForTurn: (
-    turnId: string | null,
-    reason: string,
-  ) => void;
   markAudioPlaybackTerminal: (
     terminalState: Exclude<AudioPlaybackTerminalState, "idle">,
     turnId: string | null,
@@ -194,7 +173,6 @@ export function createAdapterAudioRuntime(
               messageId: string,
               reason?: string,
             ) => sessionStore.markAudioTerminal(turnId, terminal, messageId, reason),
-            getSessions: () => sessionStore.getSessions(),
           }
         : undefined;
     },
@@ -268,7 +246,6 @@ export function createAdapterAudioRuntime(
     setSegmentSinks,
     startSegmentJob,
     hasPendingAudioForTurn: audioSettlementController.hasPendingAudioForTurn,
-    markMissingAudiosForTurn: audioSettlementController.markMissingAudiosForTurn,
     markAudioPlaybackTerminal,
     resetAudioPlaybackTerminal,
     stopAudioAndSettleTurn: audioSettlementController.stopAudioAndSettleTurn,

@@ -125,6 +125,7 @@ architecture:
     - PlaybackTimelineEngine now owns sink start callbacks for audio/motion via startSink; remaining direct-sink migration should move prepare/terminal and SessionStore coordination out of migration-era segment-sink wiring.
     - Audio/lip_sync/motion timeline duration/started/terminal events no longer implicitly register or mutate a missing sink; missing segment timeline or sink wiring is diagnosed and the event is dropped.
     - control.synth_finished marks existing output segments without motion payload as explicit motion.absent; motion and performance-curve patches after synth_finished are rejected.
+    - control.synth_finished missing-audio settlement now lives in inbound protocol queue-close handling; AdapterAudioRuntime no longer exposes a missing-audio settlement API or scans all sessions for this case.
     - Target direction: performance curve playback should first support a small preset library of per-frame curve shapes selected by hint, before considering real-time generated custom curves.
 verification:
   checks_run:
