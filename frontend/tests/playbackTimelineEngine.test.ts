@@ -389,6 +389,16 @@ function startMotionOnlySegment(
   });
 }
 
+function prepareTestAudioTimeline(
+  runtime: ReturnType<typeof createPlaybackTimelineRuntime>,
+  turnId: string,
+  messageId: string,
+): void {
+  runtime.startAudioTimelineSink(turnId, messageId, {
+    start: () => true,
+  });
+}
+
 function testPlaybackTimelineRuntimeCreatesMotionOnlyTimeline(): void {
   const runtime = createPlaybackTimelineRuntime({
     getAudioClock: () => null,
@@ -421,7 +431,7 @@ function testPlaybackTimelineRuntimePreparesSegmentJobIdempotently(): void {
   const events: string[] = [];
   configureNoopSegmentSinks(runtime, events);
 
-  runtime.prepareAudioTimeline("turn-segment", "msg-segment");
+  prepareTestAudioTimeline(runtime, "turn-segment", "msg-segment");
   assert.equal(
     runtime.getTimelineSnapshotForSegment("turn-segment", "msg-segment")
       ?.sinks.some((sink) => sink.id === "motion"),
@@ -450,7 +460,7 @@ function testPlaybackTimelineRuntimePreparesSegmentJobIdempotently(): void {
     true,
   );
 
-  runtime.prepareAudioTimeline("turn-segment", "msg-segment");
+  prepareTestAudioTimeline(runtime, "turn-segment", "msg-segment");
   const snapshot = runtime.getTimelineSnapshotForSegment(
     "turn-segment",
     "msg-segment",
@@ -466,7 +476,7 @@ function testMotionTimelineEventsDoNotPrepareMissingSink(): void {
     getAudioClock: () => null,
   });
 
-  runtime.prepareAudioTimeline("turn-no-motion-sink", "msg-no-motion-sink");
+  prepareTestAudioTimeline(runtime, "turn-no-motion-sink", "msg-no-motion-sink");
   runtime.markMotionTimelineStarted("turn-no-motion-sink", "msg-no-motion-sink");
   runtime.markMotionTimelineTerminal(
     "turn-no-motion-sink",
@@ -655,7 +665,7 @@ function testPlaybackTimelineRuntimeKeepsMismatchedSegmentTimelinesSeparate(): v
     getAudioClock: () => null,
   });
 
-  runtime.prepareAudioTimeline("turn-audio", "msg-audio");
+  prepareTestAudioTimeline(runtime, "turn-audio", "msg-audio");
   assert.equal(
     runtime.getTimelineSnapshotForSegment("turn-motion", "msg-motion"),
     null,
@@ -683,7 +693,7 @@ function testPlaybackTimelineRuntimeClearsOnlyTerminalSegmentTimeline(): void {
     getAudioClock: () => null,
   });
 
-  runtime.prepareAudioTimeline("turn-audio", "msg-audio");
+  prepareTestAudioTimeline(runtime, "turn-audio", "msg-audio");
   startMotionOnlySegment(runtime, "turn-motion", "msg-motion");
   runtime.markMotionTimelineStarted("turn-motion", "msg-motion");
   runtime.markMotionTimelineTerminal(
@@ -708,7 +718,7 @@ function testPlaybackTimelineRuntimeExposesMissingAudioClock(): void {
     getAudioClock: () => null,
   });
 
-  runtime.prepareAudioTimeline("turn-audio", "msg-audio");
+  prepareTestAudioTimeline(runtime, "turn-audio", "msg-audio");
   runtime.markAudioTimelineStarted("turn-audio", "msg-audio", 100, 1200);
 
   const snapshot = runtime.getTimelineSnapshotForSegment("turn-audio", "msg-audio");
@@ -722,7 +732,7 @@ function testPlaybackTimelineRuntimeStopsOnlyRequestedSegmentTimeline(): void {
     getAudioClock: () => null,
   });
 
-  runtime.prepareAudioTimeline("turn-audio", "msg-audio");
+  prepareTestAudioTimeline(runtime, "turn-audio", "msg-audio");
   startMotionOnlySegment(runtime, "turn-motion", "msg-motion");
 
   runtime.stopTimelineForSegment(
@@ -746,8 +756,8 @@ function testPlaybackTimelineRuntimeFindsActiveAudioSegments(): void {
     getAudioClock: () => null,
   });
 
-  runtime.prepareAudioTimeline("turn-active", "msg-active");
-  runtime.prepareAudioTimeline("turn-idle", "msg-idle");
+  prepareTestAudioTimeline(runtime, "turn-active", "msg-active");
+  prepareTestAudioTimeline(runtime, "turn-idle", "msg-idle");
   assert.deepEqual(runtime.findActiveAudioTimelineSegments(), []);
 
   runtime.markAudioTimelineStarted("turn-active", "msg-active", 100, 1200);
@@ -769,7 +779,7 @@ function testPlaybackTimelineRuntimeFindsOpenAudioSegments(): void {
     getAudioClock: () => null,
   });
 
-  runtime.prepareAudioTimeline("turn-open", "msg-open");
+  prepareTestAudioTimeline(runtime, "turn-open", "msg-open");
   assert.deepEqual(runtime.findActiveAudioTimelineSegments(), []);
   assert.deepEqual(runtime.findOpenAudioTimelineSegments(), [
     { turnId: "turn-open", messageId: "msg-open" },

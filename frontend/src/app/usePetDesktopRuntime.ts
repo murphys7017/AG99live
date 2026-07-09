@@ -30,7 +30,6 @@ import { applyMotionEngineSettingsSnapshot } from "./motionEngineSettingsSnapsho
 import { useAmbientMotionPreference } from "./useAmbientMotionPreference";
 import {
   configurePlaybackTimelineMotionRuntime,
-  configurePlaybackTimelineSegmentExecution,
   createPlaybackTimelineMotionRunTracker,
 } from "./playbackTimelineWiring";
 import { useDesktopContextMenu } from "./useDesktopContextMenu";
@@ -156,10 +155,8 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   });
   const motionTimelineSink = playbackTimelineMotionRuntime.motionTimelineSink;
 
-  configurePlaybackTimelineSegmentExecution({
-    playbackTimeline,
-    sessionStore,
-    motionTimelineSink,
+  playbackTimeline.configureSegmentExecution({
+    motionSink: motionTimelineSink,
   });
 
   useTurnPlaybackOrchestrator({

@@ -826,6 +826,16 @@ function createRuntimeWithSegmentSinks(
   return runtime;
 }
 
+function prepareTestAudioTimeline(
+  runtime: ReturnType<typeof createPlaybackTimelineRuntime>,
+  turnId: string,
+  messageId: string,
+): void {
+  runtime.startAudioTimelineSink(turnId, messageId, {
+    start: () => true,
+  });
+}
+
 function testPlaybackTimelineRuntimeRejectsInvalidMotionTimestamp(): void {
   const sessionStore = useTurnPlaybackSessionStore();
   sessionStore.setActiveSession("turn-invalid-motion-time");
@@ -1104,7 +1114,7 @@ function testPlaybackTimelineRuntimeCreatesMotionOnlyTimelineBesideExistingAudio
       },
     },
   });
-  runtime.prepareAudioTimeline("turn-existing", "msg-existing");
+  prepareTestAudioTimeline(runtime, "turn-existing", "msg-existing");
 
   const result = runtime.startSegmentJob({
     messageId: "msg-motion-only-missing-timeline",

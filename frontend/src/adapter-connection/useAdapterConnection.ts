@@ -61,6 +61,9 @@ import {
 import {
   createQueuedTextSegmentSink,
 } from "../playback-timeline/segmentReleaseSinks.js";
+import type {
+  PlaybackTimelineSegmentMotionSink,
+} from "../playback-timeline/segmentJob.js";
 import {
   type ModelSyncInstance,
 } from "./model-sync/useModelSync.js";
@@ -85,10 +88,9 @@ export interface AdapterPlaybackTimelinePort {
       playbackTimeline: PlaybackTimelineSnapshot | null,
     ) => void) | null,
   ) => void;
-  releaseAssistantTextForPlayback: (messageId: string, turnId: string | null) => boolean;
-  releaseQueuedAudioForTimelinePlayback:
-    AdapterAudioRuntimeInstance["releaseQueuedAudioForTimelinePlayback"];
-  setSegmentSinks: AdapterAudioRuntimeInstance["setSegmentSinks"];
+  configureSegmentExecution: (options: {
+    motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start">;
+  }) => void;
   startSegmentJob: AdapterAudioRuntimeInstance["startSegmentJob"];
   getPlaybackTimelineSnapshotForSegment: AdapterAudioRuntimeInstance["getPlaybackTimelineSnapshotForSegment"];
   markMotionTimelineStarted: AdapterAudioRuntimeInstance["markMotionTimelineStarted"];
@@ -242,8 +244,7 @@ export function createAdapterConnection(
 
   const {
     queueAudioForPlayback,
-    releaseQueuedAudioForTimelinePlayback,
-    setSegmentSinks,
+    configureSegmentExecution: configureAudioSegmentExecution,
     startSegmentJob,
     getPlaybackTimelineSnapshotForSegment,
     markMotionTimelineStarted,
@@ -531,6 +532,29 @@ export function createAdapterConnection(
     );
   }
 
+  function configureSegmentExecution(options: {
+    motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start">;
+  }): void {
+    if (!sessionStore) {
+      throw new Error("Playback segment execution requires a turn playback session store.");
+    }
+    configureAudioSegmentExecution({
+      session: {
+        markTextReleased: sessionStore.markTextReleased,
+        markAudioReleased: sessionStore.markAudioReleased,
+        markMotionReleased: sessionStore.markMotionReleased,
+        markMotionFailed: sessionStore.markMotionFailed,
+        markPhase: sessionStore.markPhase,
+      },
+      textSink: {
+        releaseAssistantTextForPlayback,
+      },
+      motionSink: {
+        start: options.motionSink.start,
+      },
+    });
+  }
+
   async function sendText(text: string): Promise<boolean> {
     return sendTextAction(outboundCtx, text);
   }
@@ -610,9 +634,7 @@ export function createAdapterConnection(
 
   const playbackTimeline: AdapterPlaybackTimelinePort = {
     setAudioTimelineStartedHandler,
-    releaseAssistantTextForPlayback,
-    releaseQueuedAudioForTimelinePlayback,
-    setSegmentSinks,
+    configureSegmentExecution,
     startSegmentJob,
     getPlaybackTimelineSnapshotForSegment,
     markMotionTimelineStarted,

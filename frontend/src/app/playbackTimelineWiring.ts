@@ -96,29 +96,3 @@ export function configurePlaybackTimelineMotionRuntime(options: {
     },
   };
 }
-
-export function configurePlaybackTimelineSegmentExecution(options: {
-  playbackTimeline: AdapterPlaybackTimelinePort;
-  sessionStore: TurnPlaybackSessionStore;
-  motionTimelineSink: Pick<PlaybackTimelineMotionSink, "start">;
-}): void {
-  const { playbackTimeline, sessionStore, motionTimelineSink } = options;
-  playbackTimeline.setSegmentSinks({
-    session: {
-      markTextReleased: sessionStore.markTextReleased,
-      markAudioReleased: sessionStore.markAudioReleased,
-      markMotionReleased: sessionStore.markMotionReleased,
-      markMotionFailed: sessionStore.markMotionFailed,
-      markPhase: sessionStore.markPhase,
-    },
-    textSink: {
-      releaseAssistantTextForPlayback: playbackTimeline.releaseAssistantTextForPlayback,
-    },
-    audioSink: {
-      releaseAudioForPlayback: playbackTimeline.releaseQueuedAudioForTimelinePlayback,
-    },
-    motionSink: {
-      start: motionTimelineSink.start,
-    },
-  });
-}

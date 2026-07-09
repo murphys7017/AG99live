@@ -110,7 +110,7 @@ function getSegmentTimelineSnapshot(
 function configureNoopSegmentSinks(
   runtime: ReturnType<typeof createAdapterAudioRuntime>,
 ): void {
-  runtime.setSegmentSinks({
+  runtime.configureSegmentExecution({
     session: {
       markTextReleased: () => {},
       markAudioReleased: () => {},
@@ -120,9 +120,6 @@ function configureNoopSegmentSinks(
     },
     textSink: {
       releaseAssistantTextForPlayback: () => true,
-    },
-    audioSink: {
-      releaseAudioForPlayback: () => true,
     },
     motionSink: {
       start: () => true,
@@ -501,7 +498,7 @@ async function testTimelineAudioReleaseMarksSessionReleasedOnce(): Promise<void>
       markAudioTerminal: () => {},
     }),
   });
-  runtime.setSegmentSinks({
+  runtime.configureSegmentExecution({
     session: {
       markTextReleased: () => {},
       markAudioReleased: (turnId, messageId) => {
@@ -513,9 +510,6 @@ async function testTimelineAudioReleaseMarksSessionReleasedOnce(): Promise<void>
     },
     textSink: {
       releaseAssistantTextForPlayback: () => true,
-    },
-    audioSink: {
-      releaseAudioForPlayback: runtime.releaseQueuedAudioForTimelinePlayback,
     },
     motionSink: {
       start: () => true,

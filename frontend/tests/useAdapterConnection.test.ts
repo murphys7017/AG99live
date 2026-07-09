@@ -260,20 +260,7 @@ function createConnectedAdapter() {
   if (!adapter) {
     throw new Error("expected adapter instance");
   }
-  adapter.playbackTimeline.setSegmentSinks({
-    session: {
-      markTextReleased: sessionStore.markTextReleased,
-      markAudioReleased: sessionStore.markAudioReleased,
-      markMotionReleased: sessionStore.markMotionReleased,
-      markMotionFailed: sessionStore.markMotionFailed,
-      markPhase: sessionStore.markPhase,
-    },
-    textSink: {
-      releaseAssistantTextForPlayback: adapter.playbackTimeline.releaseAssistantTextForPlayback,
-    },
-    audioSink: {
-      releaseAudioForPlayback: adapter.playbackTimeline.releaseQueuedAudioForTimelinePlayback,
-    },
+  adapter.playbackTimeline.configureSegmentExecution({
     motionSink: {
       start: () => true,
     },

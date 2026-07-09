@@ -56,11 +56,6 @@ export interface PlaybackTimelineRuntime {
   startSegmentJob: (
     job: PlaybackTimelineSegmentJob<NormalizedMotionPayload>,
   ) => PlaybackTimelineSegmentExecutionResult;
-  prepareAudioTimeline: (
-    turnId: string | null,
-    messageId: string,
-    options?: PlaybackTimelineSinkStartOptions,
-  ) => void;
   startAudioTimelineSink: (
     turnId: string | null,
     messageId: string,
@@ -744,7 +739,6 @@ export function createPlaybackTimelineRuntime(
   return {
     setSegmentSinks,
     startSegmentJob,
-    prepareAudioTimeline,
     startAudioTimelineSink,
     markAudioTimelineDuration,
     markAudioTimelineStarted,

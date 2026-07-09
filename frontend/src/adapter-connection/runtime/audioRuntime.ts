@@ -19,6 +19,11 @@ import {
 import {
   createAdapterAudioSettlementController,
 } from "./audioSettlementController.js";
+import type {
+  PlaybackTimelineSegmentMotionSink,
+  PlaybackTimelineSegmentSessionPort,
+  PlaybackTimelineSegmentTextSink,
+} from "../../playback-timeline/segmentJob.js";
 
 export type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "absent";
 
@@ -91,11 +96,11 @@ export interface AdapterAudioRuntime {
     messageId: string,
     turnId: string | null,
   ) => boolean;
-  releaseQueuedAudioForTimelinePlayback: (
-    messageId: string,
-    turnId: string | null,
-  ) => boolean;
-  setSegmentSinks: ReturnType<typeof createPlaybackTimelineRuntime>["setSegmentSinks"];
+  configureSegmentExecution: (options: {
+    session: PlaybackTimelineSegmentSessionPort;
+    textSink: PlaybackTimelineSegmentTextSink;
+    motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start">;
+  }) => void;
   startSegmentJob: ReturnType<typeof createPlaybackTimelineRuntime>["startSegmentJob"];
   hasPendingAudioForTurn: (turnId: string | null) => boolean;
   markAudioPlaybackTerminal: (
@@ -148,7 +153,6 @@ export function createAdapterAudioRuntime(
   });
   const { playbackTimelineRuntime } = timelineController;
   const {
-    setSegmentSinks,
     startSegmentJob,
     markMotionTimelineStarted,
     markMotionTimelineTerminal,
@@ -225,6 +229,23 @@ export function createAdapterAudioRuntime(
     return released;
   }
 
+  function configureSegmentExecution(options: {
+    session: PlaybackTimelineSegmentSessionPort;
+    textSink: PlaybackTimelineSegmentTextSink;
+    motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start">;
+  }): void {
+    playbackTimelineRuntime.setSegmentSinks({
+      session: options.session,
+      textSink: options.textSink,
+      audioSink: {
+        releaseAudioForPlayback: releaseQueuedAudioForTimelinePlayback,
+      },
+      motionSink: {
+        start: options.motionSink.start,
+      },
+    });
+  }
+
   function stopAudioPlayback(
     turnId: string | null,
     messageId: string | null,
@@ -254,8 +275,7 @@ export function createAdapterAudioRuntime(
   return {
     queueAudioForPlayback: audioReleaseController.queueAudioForPlayback,
     releaseAudioForPlayback,
-    releaseQueuedAudioForTimelinePlayback,
-    setSegmentSinks,
+    configureSegmentExecution,
     startSegmentJob,
     hasPendingAudioForTurn: audioSettlementController.hasPendingAudioForTurn,
     markAudioPlaybackTerminal,
