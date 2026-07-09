@@ -1,8 +1,7 @@
-import { matchesPlaybackGroup } from "../../playback-timeline/playbackReleaseQueue.js";
 import {
-  hasPendingAudioForTurn as hasPendingAudioForTurnBridge,
-  type AudioBridgeDeps,
-} from "./adapterAudioBridge.js";
+  matchesPlaybackGroup,
+  type PendingAudioItem,
+} from "../../playback-timeline/playbackReleaseQueue.js";
 
 export interface AudioSettlementSegment {
   turnId: string | null;
@@ -10,7 +9,7 @@ export interface AudioSettlementSegment {
 }
 
 export interface AdapterAudioSettlementControllerDeps {
-  audioBridge: AudioBridgeDeps;
+  pendingAudios: Map<string, PendingAudioItem>;
   findOpenAudioSegments: () => AudioSettlementSegment[];
   markAudioPlaybackTerminal: (
     terminalState: "completed" | "failed" | "absent",
@@ -28,7 +27,12 @@ export function createAdapterAudioSettlementController(
   deps: AdapterAudioSettlementControllerDeps,
 ) {
   function hasPendingAudioForTurn(turnId: string | null): boolean {
-    return hasPendingAudioForTurnBridge(deps.audioBridge, turnId);
+    for (const item of deps.pendingAudios.values()) {
+      if (matchesPlaybackGroup(item.turnId, turnId)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function stopAudioAndSettleTurn(
@@ -65,14 +69,14 @@ export function createAdapterAudioSettlementController(
         activeSegment.messageId,
       );
     }
-    for (const [queueKey, item] of Array.from(deps.audioBridge.state.pendingAudios.entries())) {
+    for (const [queueKey, item] of Array.from(deps.pendingAudios.entries())) {
       deps.markAudioPlaybackTerminal(
         "failed",
         item.turnId,
         reason,
         item.messageId,
       );
-      deps.audioBridge.state.pendingAudios.delete(queueKey);
+      deps.pendingAudios.delete(queueKey);
     }
     if (activeSegments.length === 0) {
       deps.stopAudioPlayback(null, null);
@@ -91,7 +95,7 @@ export function createAdapterAudioSettlementController(
     turnId: string | null,
     reason: string,
   ): void {
-    for (const [queueKey, item] of Array.from(deps.audioBridge.state.pendingAudios.entries())) {
+    for (const [queueKey, item] of Array.from(deps.pendingAudios.entries())) {
       if (!matchesTurn(item.turnId, turnId)) {
         continue;
       }
@@ -101,7 +105,7 @@ export function createAdapterAudioSettlementController(
         reason,
         item.messageId,
       );
-      deps.audioBridge.state.pendingAudios.delete(queueKey);
+      deps.pendingAudios.delete(queueKey);
     }
   }
 

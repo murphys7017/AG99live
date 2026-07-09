@@ -117,6 +117,7 @@ architecture:
     - AdapterAudioRuntime no longer exposes a global active audio timeline snapshot; tests and callers use segment-scoped playback timeline lookup.
     - AdapterAudioRuntime audio queue/release responsibilities are delegated to PlaybackTimelineAudioReleaseController; the old adapter audio queue controller has been removed.
     - AdapterAudioRuntime pending-audio settlement responsibilities are isolated behind an audio settlement controller, so turn/all audio cleanup no longer lives inline in the runtime facade.
+    - AdapterAudioBridge has been removed; AdapterAudioRuntime writes adapter/session audio terminal state directly, while the audio settlement controller owns pending-audio queue queries.
     - Audio playback actions now delegate audio element plus lip-sync lifecycle handling to PlaybackTimelineAudioSegmentSink instead of owning audio element callback ordering or lip-sync runtime/callback wiring inline.
     - Browser HTMLAudioElement playback ownership has moved from adapter-connection/runtime into playback-timeline/audioSink.ts, so adapter runtime no longer owns the raw audio element player.
     - AdapterAudioRuntime no longer exposes playAudioAndAcknowledge as a public method; production and tests enter audio playback through queue/release or segment job paths.

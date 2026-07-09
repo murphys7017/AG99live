@@ -12,11 +12,6 @@ import type {
 import {
   createAdapterAudioTimelineController,
 } from "./audioTimelineController.js";
-import {
-  markAudioPlaybackTerminal as markAudioTerminalBridge,
-  resetAudioPlaybackTerminal as resetAudioTerminalBridge,
-  type AudioBridgeDeps,
-} from "./adapterAudioBridge.js";
 import type { PendingAudioItem } from "../../playback-timeline/playbackReleaseQueue.js";
 import {
   createPlaybackTimelineAudioReleaseController,
@@ -159,36 +154,31 @@ export function createAdapterAudioRuntime(
     getTimelineSnapshotForSegment: getPlaybackTimelineSnapshotForSegment,
   } = playbackTimelineRuntime;
 
-  const audioBridge = {
-    get state() {
-      return deps.state;
-    },
-    get sessionStore() {
-      const sessionStore = deps.getSessionStore();
-      return sessionStore
-        ? {
-            markAudioTerminal: (
-              turnId: string | null,
-              terminal: "completed" | "failed" | "absent",
-              messageId: string,
-              reason?: string,
-            ) => sessionStore.markAudioTerminal(turnId, terminal, messageId, reason),
-          }
-        : undefined;
-    },
-  } satisfies AudioBridgeDeps;
-
   function markAudioPlaybackTerminal(
     terminalState: Exclude<AudioPlaybackTerminalState, "idle">,
     turnId: string | null,
     reason = "",
     messageId: string | null = null,
   ): void {
-    markAudioTerminalBridge(audioBridge, terminalState, turnId, reason, messageId);
+    deps.state.audioPlaybackTerminalState = terminalState;
+    deps.state.audioPlaybackTerminalTurnId = turnId;
+    deps.state.audioPlaybackTerminalReason = reason;
+
+    if (!messageId) {
+      return;
+    }
+    deps.getSessionStore()?.markAudioTerminal(
+      turnId,
+      terminalState,
+      messageId,
+      reason,
+    );
   }
 
   function resetAudioPlaybackTerminal(): void {
-    resetAudioTerminalBridge(audioBridge);
+    deps.state.audioPlaybackTerminalState = "idle";
+    deps.state.audioPlaybackTerminalTurnId = null;
+    deps.state.audioPlaybackTerminalReason = "";
   }
 
   async function startAudioSegmentPlayback(
@@ -222,7 +212,7 @@ export function createAdapterAudioRuntime(
   }
 
   const audioSettlementController = createAdapterAudioSettlementController({
-    audioBridge,
+    pendingAudios: deps.state.pendingAudios,
     findOpenAudioSegments,
     markAudioPlaybackTerminal,
     stopAudioPlayback,
