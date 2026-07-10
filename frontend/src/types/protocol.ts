@@ -640,7 +640,15 @@ export interface DirectParameterPlanTiming {
   blend_in_ms: number;
   hold_ms: number;
   blend_out_ms: number;
+  curve_preset?: PerformanceCurvePresetName;
 }
+
+export type PerformanceCurvePresetName =
+  | "smooth_hold"
+  | "snap_hold_soft_release"
+  | "slow_build_quick_release"
+  | "pulse_settle"
+  | "breathing_swell";
 
 export interface SemanticParameterPlanEntry {
   axis_id: string;

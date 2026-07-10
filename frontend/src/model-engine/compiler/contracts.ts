@@ -10,6 +10,7 @@ export interface MotionTimingResolution {
   resolvedDurationMs: number;
   timingSource: "hint" | "audio_sync" | "default";
   performanceCurveFamily?: string;
+  performanceCurvePreset?: string;
 }
 
 export interface SupplementaryBuildDiagnostics {

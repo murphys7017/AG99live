@@ -64,7 +64,7 @@ context:
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.
     - For earlier curve generation during actual TTS synthesis, identify an AstrBot hook before message-chain Record creation; current MVP starts from emit_message_chain and never blocks playback.
-    - Evaluate whether lip_sync start/terminal should become a fully independent optional sink callback; low-level mouth-value sampling and Live2D parameter writes already live at the Live2D boundary and should stay there.
+    - Lip-sync remains an optional timeline sink; PlaybackTimelineEngine interrupt now supplies its interrupted terminal state, while the Live2D boundary remains responsible for sampling and parameter writes.
 architecture:
   stability: evolving
   boundary_changes:
@@ -108,7 +108,7 @@ architecture:
     - Adapter runtime no longer exposes inline_first / enable_inline_motion_contract configuration; <@anim> inline motion tags are parsed and broadcast only for the official compatibility path when Persona Effect injection is unavailable.
     - Frontend and adapter motion-intent boundaries are now v3-only; v2 nested axes are treated as invalid input instead of being normalized forward.
     - TurnCoordinator sanitizes hidden legacy motion markup from visible text/captions while preserving raw assistant output in Motion Lab records.
-    - Performance curve timing MVP adds an optional `performance_curve_hint` to `engine.motion_intent.v3`; frontend ModelEngine resolves it into existing timing fields rather than a new per-frame player.
+    - Performance curve timing adds an optional `performance_curve_hint` to `engine.motion_intent.v3`; frontend ModelEngine resolves it into timing plus a validated preset name consumed by the Live2D per-frame easing layer.
     - Performance curve generation uses the current turn chat Provider as an auxiliary call and does not add the curve request to AstrBot chat history.
     - fallback pose candidates can now include semantic metadata from motion catalog entries and key semantic axes derived from motion_resource_pool driver components.
     - middleware motion prompt now names axes as a semantic-axis target group instead of a plain field and exposes fallback candidate descriptions, scenarios, intensity, emotion bias, and key axes.
@@ -211,9 +211,9 @@ backlog:
       - Symbolic curve hints are generated asynchronously after assistant text is available and never block TTS or playback; if not ready before motion egress, the task is cancelled and playback falls back to default timing.
       - Requested, resolved, failed, and attached curve events are stored in Motion Lab SQLite raw events.
       - Frontend ModelEngine evaluates the hint against real audio duration and falls back to current timing when missing or invalid.
-      - Future work: add a small preset per-frame curve library and let the curve hint select a preset before considering real-time generated custom curves.
+      - A five-preset per-frame curve library is now selected by curve family; real-time generated custom curves remain intentionally out of scope.
   - id: unified_timeline_direct_sink_execution
-    status: todo
+    status: in_progress
     summary: Move remaining prepare/terminal and SessionStore coordination from migration-era segment-sink wiring toward PlaybackTimelineEngine-driven sink lifecycle.
     notes:
       - Audio and motion start are now registered as PlaybackTimelineEngine sink callbacks and invoked through startSink.
@@ -224,7 +224,7 @@ backlog:
       - Make missing sink wiring a hard error; do not reintroduce compatibility fallback routes.
       - Start with audio and motion sink execution before text/subtitle and lip sync are fully independent.
   - id: lip_sync_live2d_websdk_boundary
-    status: todo
+    status: in_progress
     summary: Evaluate moving low-level lip-sync sampling and Live2D parameter writes into the Live2D WebSDK adapter/runtime boundary.
     notes:
       - PlaybackTimeline should schedule lip_sync lifecycle as an optional sink.

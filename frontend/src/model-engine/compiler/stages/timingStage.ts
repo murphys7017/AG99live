@@ -35,6 +35,11 @@ export function runTimingStage(
     context.state.warnings.push(
       `performance_curve_applied:${context.state.timing.performanceCurveFamily}`,
     );
+    if (context.state.timing.performanceCurvePreset) {
+      context.state.warnings.push(
+        `performance_curve_preset:${context.state.timing.performanceCurvePreset}`,
+      );
+    }
   }
 
   return { ok: true };

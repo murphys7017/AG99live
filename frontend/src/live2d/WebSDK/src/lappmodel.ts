@@ -202,6 +202,7 @@ interface DirectParameterPlanState {
     blendInMs: number;
     holdMs: number;
     blendOutMs: number;
+    curvePreset: "smooth_hold" | "snap_hold_soft_release" | "slow_build_quick_release" | "pulse_settle" | "breathing_swell";
     totalMs: number;
   };
   axisBindings: DirectParameterAxisBinding[];
@@ -1993,9 +1994,25 @@ export class LAppModel extends CubismUserModel {
     const blendOutMs = Math.max(0, timing.blendOutMs);
 
     if (blendInMs > 0 && elapsed < blendInMs) {
-      return this.smoothstep(elapsed / blendInMs);
+      const progress = elapsed / blendInMs;
+      if (timing.curvePreset === "slow_build_quick_release") {
+        return progress * progress;
+      }
+      if (timing.curvePreset === "pulse_settle") {
+        return Math.min(1.08, this.easeOutBack(progress));
+      }
+      return this.smoothstep(progress);
     }
     if (elapsed < blendInMs + holdMs) {
+      if (timing.curvePreset === "breathing_swell") {
+        const progress = holdMs > 0 ? (elapsed - blendInMs) / holdMs : 1;
+        // Keep both hold boundaries continuous with the blend-in/out value.
+        return 1 - 0.06 * Math.sin(Math.PI * progress);
+      }
+      if (timing.curvePreset === "pulse_settle") {
+        const progress = holdMs > 0 ? (elapsed - blendInMs) / holdMs : 1;
+        return 1 - 0.06 * Math.sin(Math.PI * progress);
+      }
       return 1.0;
     }
     if (blendOutMs > 0 && elapsed < blendInMs + holdMs + blendOutMs) {
@@ -2074,6 +2091,11 @@ export class LAppModel extends CubismUserModel {
         * item.modulationDirection
         * audioGain;
     return Math.max(minValue, Math.min(maxValue, modulatedValue));
+  }
+
+  private easeOutBack(value: number): number {
+    const x = Math.max(0, Math.min(1, value)) - 1;
+    return 1 + 2.70158 * x * x * x + 1.70158 * x * x;
   }
 
   private resolveExternalLipSyncValue(): number | null {
@@ -2699,6 +2721,7 @@ export class LAppModel extends CubismUserModel {
         blendInMs: 0,
         holdMs: 0,
         blendOutMs: 0,
+        curvePreset: "smooth_hold",
         totalMs: 0,
       },
       reason,
@@ -2735,6 +2758,7 @@ export class LAppModel extends CubismUserModel {
     const blendInMs = timingPayload.blend_in_ms;
     const holdMs = timingPayload.hold_ms;
     const blendOutMs = timingPayload.blend_out_ms;
+    const curvePreset = timingPayload.curve_preset;
     if (
       typeof durationMs !== "number"
       || typeof blendInMs !== "number"
@@ -2750,12 +2774,27 @@ export class LAppModel extends CubismUserModel {
     if (durationMs < 0 || blendInMs < 0 || holdMs < 0 || blendOutMs < 0) {
       return fail("timing_negative");
     }
+    const validCurvePresets = new Set([
+      "smooth_hold",
+      "snap_hold_soft_release",
+      "slow_build_quick_release",
+      "pulse_settle",
+      "breathing_swell",
+    ]);
+    if (curvePreset !== undefined && (
+      typeof curvePreset !== "string" || !validCurvePresets.has(curvePreset)
+    )) {
+      return fail("timing_invalid_curve_preset");
+    }
 
     const timing = {
       durationMs: Math.round(durationMs),
       blendInMs: Math.round(blendInMs),
       holdMs: Math.round(holdMs),
       blendOutMs: Math.round(blendOutMs),
+      curvePreset: typeof curvePreset === "string"
+        ? curvePreset as DirectParameterPlanState["timing"]["curvePreset"]
+        : "smooth_hold",
       totalMs: Math.max(
         Math.round(durationMs),
         Math.round(blendInMs + holdMs + blendOutMs),
@@ -2858,6 +2897,7 @@ export class LAppModel extends CubismUserModel {
           blend_in_ms: timing.blendInMs,
           hold_ms: timing.holdMs,
           blend_out_ms: timing.blendOutMs,
+          curve_preset: timing.curvePreset,
         },
         parameters,
         diagnostics: {

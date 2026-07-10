@@ -602,6 +602,7 @@ function testMotionStartUsesPlaybackTimelineDuration(): void {
     blend_in_ms: 210,
     hold_ms: 1428,
     blend_out_ms: 462,
+    curve_preset: "snap_hold_soft_release",
   });
 }
 
@@ -1016,9 +1017,14 @@ function testPerformanceCurveHintAdjustsExpressiveTiming(): void {
     blend_in_ms: 240,
     hold_ms: 1632,
     blend_out_ms: 528,
+    curve_preset: "snap_hold_soft_release",
   });
   assert.equal(
     result.diagnostics.warnings?.includes("performance_curve_applied:quick_in_hold_soft_out"),
+    true,
+  );
+  assert.equal(
+    result.diagnostics.warnings?.includes("performance_curve_preset:snap_hold_soft_release"),
     true,
   );
 }
@@ -1054,9 +1060,14 @@ function testPerformanceCurveHintAdjustsSpeechIdleTiming(): void {
     blend_in_ms: 240,
     hold_ms: 1632,
     blend_out_ms: 528,
+    curve_preset: "snap_hold_soft_release",
   });
   assert.equal(
     result.diagnostics.warnings?.includes("performance_curve_applied:quick_in_hold_soft_out"),
+    true,
+  );
+  assert.equal(
+    result.diagnostics.warnings?.includes("performance_curve_preset:snap_hold_soft_release"),
     true,
   );
 }

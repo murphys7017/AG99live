@@ -1,4 +1,8 @@
-import type { DirectParameterPlanTiming, PerformanceCurveHint } from "../types/protocol";
+import type {
+  DirectParameterPlanTiming,
+  PerformanceCurveHint,
+  PerformanceCurvePresetName,
+} from "../types/protocol";
 import {
   DEFAULT_MOTION_INTENT_DURATION_MS,
   MAX_MOTION_DURATION_MS,
@@ -63,6 +67,7 @@ export function resolveMotionTiming(
         resolvedDurationMs: idleDurationMs,
         timingSource,
         performanceCurveFamily: options.performanceCurveHint?.curve_family,
+        performanceCurvePreset: curveTiming.curve_preset,
       };
     }
     return {
@@ -87,6 +92,7 @@ export function resolveMotionTiming(
       resolvedDurationMs,
       timingSource,
       performanceCurveFamily: options.performanceCurveHint?.curve_family,
+      performanceCurvePreset: curveTiming.curve_preset,
     };
   }
 
@@ -140,6 +146,7 @@ export function resolvePerformanceCurveTiming(
     return null;
   }
 
+  const preset = resolvePerformanceCurvePreset(hint);
   let entryRatio = entryRatioFor(hint.entry);
   let exitRatio = exitRatioFor(hint.exit);
 
@@ -201,7 +208,26 @@ export function resolvePerformanceCurveTiming(
     blend_in_ms: blendInMs,
     hold_ms: holdMs,
     blend_out_ms: blendOutMs,
+    curve_preset: preset,
   };
+}
+
+export function resolvePerformanceCurvePreset(
+  hint: PerformanceCurveHint,
+): PerformanceCurvePresetName {
+  switch (hint.curve_family) {
+    case "quick_in_hold_soft_out":
+      return "snap_hold_soft_release";
+    case "slow_in_hold_quick_out":
+      return "slow_build_quick_release";
+    case "pulse_then_settle":
+      return "pulse_settle";
+    case "soft_breathe":
+      return "breathing_swell";
+    case "default":
+    default:
+      return "smooth_hold";
+  }
 }
 
 function entryRatioFor(entry: PerformanceCurveHint["entry"]): number {

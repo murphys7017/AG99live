@@ -1,5 +1,6 @@
 import type {
   DirectParameterPlanTiming,
+  PerformanceCurvePresetName,
   SemanticParameterPlan,
 } from "../types/protocol.js";
 import {
@@ -47,11 +48,27 @@ function normalizeTiming(value: unknown): DirectParameterPlanTiming | null {
     return null;
   }
 
+  const curvePreset = value.curve_preset;
+  const validCurvePresets: readonly PerformanceCurvePresetName[] = [
+    "smooth_hold",
+    "snap_hold_soft_release",
+    "slow_build_quick_release",
+    "pulse_settle",
+    "breathing_swell",
+  ];
+  if (curvePreset !== undefined && (
+    typeof curvePreset !== "string"
+    || !validCurvePresets.includes(curvePreset as PerformanceCurvePresetName)
+  )) {
+    return null;
+  }
+
   return {
     duration_ms: Math.round(durationMs),
     blend_in_ms: Math.round(blendInMs),
     hold_ms: Math.round(holdMs),
     blend_out_ms: Math.round(blendOutMs),
+    curve_preset: curvePreset as PerformanceCurvePresetName | undefined,
   };
 }
 
