@@ -816,8 +816,11 @@ def test_emit_message_chain_dedupes_motion_client_object_for_segmented_output(
     ]
 
     assert len(text_payloads) == 2
-    assert len(motion_payloads) == 1
-    assert motion_payloads[0]["message_id"] == "visible-msg::core_reply::0001"
+    assert len(motion_payloads) == 2
+    assert [payload["message_id"] for payload in motion_payloads] == [
+        "visible-msg::core_reply::0001",
+        "visible-msg::core_reply::0002",
+    ]
 
 
 def test_emit_message_chain_treats_inline_payload_as_visible_text_only_when_persona_effect_available(

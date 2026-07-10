@@ -615,6 +615,7 @@ export interface NormalizedSemanticMotionIntent {
   emotion_label: string;
   duration_hint_ms?: number | null;
   fallback_pose_id?: string;
+  resource_id?: string;
   performance_curve_hint?: PerformanceCurveHint;
   axes: Record<string, number>;
   summary?: {

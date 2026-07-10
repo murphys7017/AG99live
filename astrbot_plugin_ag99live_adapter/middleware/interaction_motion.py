@@ -345,11 +345,19 @@ def _extract_ag99live_motion_effect_arguments(event: Any, view: Any) -> tuple[di
     if not effect_calls:
         return None, "effect_calls_missing"
 
+    matching_calls = []
     for raw_call in effect_calls:
         call = _thaw_snapshot_value(raw_call)
         name = _effect_call_get(call, "name")
         if str(name or "").strip() != AG99LIVE_MOTION_EFFECT_NAME:
             continue
+        matching_calls.append(call)
+
+    if len(matching_calls) > 1:
+        return None, "persona_effect_duplicate"
+
+    if matching_calls:
+        call = matching_calls[0]
         arguments = _effect_call_get(call, "arguments")
         arguments = _thaw_snapshot_value(arguments)
         if isinstance(arguments, Mapping):

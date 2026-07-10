@@ -1183,6 +1183,37 @@ def test_result_contributor_normalizes_numeric_string_axes_from_persona_effect(
     )
 
 
+def test_result_contributor_rejects_duplicate_motion_effects(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(raw_turn_id="raw-turn")
+    view = _build_view(
+        phase="immediate",
+        route_mode="self_reply",
+        final_result="你好呀",
+        immediate_reply="你好呀",
+        effect_calls=[
+            _motion_effect_call({"intent_tags": ["happy"], "axes": {"head_yaw": 70}}),
+            _motion_effect_call({"intent_tags": ["疑惑"], "axes": {"head_yaw": 40}}),
+        ],
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == []
+    assert contribution.client_objects == []
+    assert (
+        contribution.metadata["ag99live_motion_schedule"]["motion_resolution_reason"]
+        == "persona_effect_duplicate:self_reply_motion_missing"
+    )
+
+
 def test_persona_effect_motion_logs_input_and_output_diagnostics(
     install_fake_astrbot,
     monkeypatch,

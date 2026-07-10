@@ -404,6 +404,7 @@ function testNormalizeMotionPayloadAcceptsV3FlatAxes(): void {
     emotion_label: "happy",
     duration_hint_ms: 1000,
     fallback_pose_id: "neutral",
+    resource_id: "expression.smile",
     axes: {
       head_yaw: 62,
       mouth_smile: 84,
@@ -416,6 +417,7 @@ function testNormalizeMotionPayloadAcceptsV3FlatAxes(): void {
     head_yaw: 62,
     mouth_smile: 84,
   });
+  assert.equal(result.payload.intent.resource_id, "expression.smile");
 }
 
 function testNormalizeMotionPayloadAcceptsPerformanceCurveHint(): void {
