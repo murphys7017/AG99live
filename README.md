@@ -2,100 +2,165 @@
 
 # AG99live
 
-一个接入 AstrBot 的本地桌面 AI Live2D 助手。
+**一个让大模型决定“说什么”，也决定“如何表现”的本地桌面 Live2D AI 助手。**
 
-会听你说话，会用语音回应，也会用表情、视线、头部和身体动作表达当前对话。
+不是预设表情播放器，而是一套面向对话表演的语义动作系统。
 
 ![AG99live 预览](./docs/images/image.png)
 
-[快速开始](#快速开始) · [功能亮点](#功能亮点) · [技术文档](./docs/README.md)
+[快速开始](#快速开始) · [核心理念](#核心理念) · [技术文档](./docs/README.md)
 
 </div>
 
-## 项目简介
+## 项目是什么
 
-AG99live 是一个面向桌面陪伴场景的 AI 虚拟形象项目。它把 AstrBot 对话能力、语音输入输出、Electron 桌面窗口和 Live2D 渲染串在一起，让 AI 回复不只停留在文字里，而是由一个桌面角色说出来、动起来。
+AG99live 是一个运行在 Windows 桌面上的 AstrBot + Electron + Live2D AI 角色系统。
 
-你可以把它理解成：
+它把一次对话转换成一段完整的角色表现：
 
-- 一个运行在本机桌面上的 AI 桌宠。
-- 一个能连接 AstrBot 的 Live2D 前端。
-- 一个用于实验“AI 对话如何驱动角色表演”的动作系统。
+```text
+用户输入
+  -> AstrBot / 主模型生成回复文本与 Persona Effect
+  -> Adapter 校验并整理语义动作意图
+  -> 前端 ModelEngine 编译 Live2D 参数计划
+  -> PlaybackTimeline 统一协调音频、动作和口型
+  -> Live2D 角色完成这一轮表演
+```
 
-它和普通聊天软件的区别在于，AG99live 关心的不只是“回复了什么”，还关心角色在回复时应该如何看你、如何转头、如何带动身体、如何利用模型资源理解动作骨架，以及如何生成新的语义动作。
+角色的动作不是简单地播放 `motion3.json` 或 `exp3.json`。当前主链路由模型生成语义轴目标，例如：
 
-## 功能亮点
+```json
+{
+  "intent_tags": ["疑惑", "轻微调侃"],
+  "axes": {
+    "head_yaw": 62,
+    "body_yaw": 47,
+    "brow_bias": 61
+  }
+}
+```
 
-### 实时桌宠对话
+这些值还不是最终的 Live2D 参数。它们会经过当前模型的语义轴档案、动作引擎编译、轴之间的关系约束和播放时序，最终变成角色在这一轮对话中的动作表现。
 
-支持文字输入和麦克风输入。用户说话或输入文字后，前端会把消息发送到 AstrBot 插件后端，再由后端协调 AI 回复、语音和动作。Electron 桌面端在 Windows 上优先使用主进程 DirectShow/ffmpeg 原生麦克风枚举与采集，因此可以选择系统中真实存在的输入设备；不可用时再回退到浏览器 `MediaDevices` 路径。
+## 核心理念
 
-### Windows 操作委托
+### 对话语义驱动动作
 
-AG99live 可以把“操作电脑、打开软件、查看桌面状态”等请求交给远程执行器链路。Adapter 负责识别可用电脑、注入远程执行器 prompt、把任务级 JSON 转发到 Codex app-server；app-server 侧通过 `computer-use:computer-use` skill 执行 Windows 桌面观察和操作。AstrBot 主模型不直接输出坐标、UIA selector 或 shell 步骤，只描述任务目标、约束和成功标准。
+主模型在生成回复文本的同时，通过 `ag99live.motion` Persona Effect 表达本轮动作意图。动作可以覆盖头部、身体、视线、眼睛、眉毛和嘴角等语义轴。
 
-### 文本、语音、动作同步播放
+模型不需要知道具体的 Live2D 文件路径，也不直接选择底层播放文件。它只需要理解角色应该表现出什么方向、姿态和语气。
 
-一次回复可以同时包含文本、音频和动作指令。前端播放管线按 `turn_id + message_id` 聚合同一回复片段，协调文字显示、音频播放和 Live2D 动作起播，避免角色表现和声音脱节。队列关闭信号 `synth_finished` 到达后，前端仍允许同一片段的晚到音频在最终结算前补齐；重复音频不会再次播放。
+### ModelEngine 负责把意图变成参数
 
-### 语义驱动的 Live2D 表现
+前端 ModelEngine 是动作编译器，而不是简单的播放器。它负责：
 
-AG99live 会把“解释、疑惑、开心、强调、安静聆听”等对话语义转换成 Live2D 参数计划。动作不只覆盖表情，也包括头部朝向、视线、身体扭转、说话随动等姿态变化。
+- 校验动作意图和当前模型 profile。
+- 将语义轴映射到真实模型参数。
+- 应用强度、轴关系、说话姿态和 timing 等可挂载 stage。
+- 生成 `engine.parameter_plan.v2`。
+- 将编译诊断和动作来源交给播放与实验工具。
 
-### 模型资源分析与语义动作
+这让同一种“疑惑”可以根据不同 Live2D 模型的参数能力，得到不同但合理的表现。
 
-项目会扫描 Live2D 模型自带的 motion / expression 资源，用它们分析模型真实参数曲线、动作骨架和 fallback pose 候选。当前自动动作链路不让 AI 选择 motion3、exp3、catalog motion 或旧播放文件，而是输出 `engine.motion_intent.v3` 语义轴，再由前端 ModelEngine 编译成参数计划。
+### 音频、动作和口型共享统一时钟
+
+一段回复由 `turn_id + message_id` 标识。文本、音频、动作和口型属于同一个播放 segment，由 `PlaybackTimeline` 统一协调：
+
+- 音频使用真实 `HTMLAudioElement` 播放时钟。
+- 动作在音频时序上启动，并由 ModelEngine 生成参数计划。
+- 口型从同一音频播放段采样。
+- 每个 sink 都有明确的 started、completed、failed 和 interrupted 终态。
+
+因此，动作不是收到消息就立刻独立播放，而是进入同一段对话表现的时间线上。
+
+### 模型资源用于理解能力，不替代语义动作
+
+项目会扫描 Live2D 的 motion、expression 和参数资源，用来分析：
+
+- 模型真实使用了哪些参数。
+- 哪些参数适合成为动作主轴或表情辅轴。
+- 头部、身体、视线和面部细节之间如何组合。
+- 哪些姿态可以作为受控的语义参考。
+
+当前自动动作主链路仍然输出语义轴，不让模型直接输出 `motion3`、`exp3`、文件路径或旧式动作选择器。
+
+## 主要能力
+
+### 实时对话桌宠
+
+支持文字输入和麦克风输入。Electron 桌面端负责窗口、麦克风、音频播放和 Live2D 展示，AstrBot 插件负责对话接入、turn 生命周期和前后端协议桥接。
+
+### 语音与口型表现
+
+支持 TTS 音频输出，并通过统一播放 Timeline 协调音频起播、动作延迟和 Live2D 口型采样。音频数据通常通过插件侧静态资源 URL 提供给前端播放。
+
+### 语义动作引擎
+
+动作链路的主协议是：
+
+```text
+ag99live.motion Persona Effect
+  -> engine.motion_intent.v3
+  -> ModelEngine
+  -> engine.parameter_plan.v2
+  -> Live2D runtime
+```
+
+动作引擎支持头身动作、视线、眼睛、表情辅轴、说话姿态和模型级参数映射。引擎扩展通过 compiler stage registry 挂载，而不是继续向单个播放器文件堆叠逻辑。
 
 ### 动作实验室
 
-动作实验室用于检查和调校 AI 生成的动作。你可以预览动作、查看历史动作、调整参数、选择情绪标签，并把满意的样本保存下来，作为后续生成风格的参考。
+动作实验室用于观察和调校模型生成的动作。它可以查看动作历史、预览参数计划、调整语义轴，并保存人工筛选结果，为后续 Prompt 优化、动作数据积累和模型训练提供基础。
 
 ### 语义轴档案
 
-不同 Live2D 模型的参数差异很大。AG99live 使用语义轴档案把“头部偏转、身体扭转、笑意、视线方向”等抽象动作概念映射到具体模型参数，让同一套动作意图可以落到不同模型上。
+每个 Live2D 模型可以拥有自己的 `SemanticAxisProfile`，描述语义轴到模型参数的映射、范围、中性值、主轴/辅轴角色和关系约束。
 
-### 说话姿态随动
+这使动作系统不依赖某一个固定模型，也不把某个模型的参数名直接暴露为对话层协议。
 
-角色说话时不只是嘴巴动。前端动作引擎会在音频播放期间补充克制的头部和身体姿态变化，并结合音频响度做轻量调制，让说话状态更像一个正在表达的角色。
+### Windows 操作委托
 
-## 一次互动会发生什么
+对于打开软件、查看桌面、操作浏览器等任务，AG99live 可以把任务委托给配置好的 Codex app-server / Computer Use 或 OpenCode 执行器。
+
+主模型只描述目标、约束和成功标准，不直接输出坐标、UIA selector 或 shell 操作步骤。
+
+## 一次互动如何完成
 
 ```text
 用户输入文字或语音
-  -> 前端桌宠发送到 AstrBot 插件
-    -> AstrBot / LLM 生成回复
-      -> 后端输出文本、音频、动作意图
-        -> 前端同步播放
-          -> Live2D 模型显示表情和姿态变化
+  -> 前端创建 turn
+  -> AstrBot 生成助手文本
+  -> 主模型通过 Persona Effect 生成动作意图
+  -> Adapter 从 view.effect_calls 读取动作
+  -> 后端按 turn_id + message_id 广播文本、音频和动作
+  -> 前端 orchestrator 聚合同一 segment
+  -> PlaybackTimeline 等待并释放播放任务
+  -> 音频建立真实时钟
+  -> ModelEngine 启动动作计划
+  -> Live2D runtime 同步处理参数、物理和口型
+  -> audio / motion / lip-sync 分别报告终态
+  -> turn 完成
 ```
 
-这条链路是项目当前最核心的部分。很多功能，包括动作实验室、语义轴、模型资源分析、fallback pose 和说话随动，都是围绕这条链路继续打磨角色表现。
-
-## 当前状态
-
-项目已经具备初步可用的本地桌宠闭环：
-
-- Electron + Vue 桌面客户端。
-- AstrBot 插件后端。
-- WebSocket 前后端协议。
-- 文本、音频、动作同步播放。
-- 麦克风输入与语音转文字路径，Windows 桌面端支持原生设备枚举、设备选择和自定义按键说话。
-- 远程执行器接入，可把 Windows 桌面操作任务委托给 Codex app-server / Computer Use。
-- Live2D 模型资源扫描。
-- 语义轴动作生成、fallback pose 候选和模型资源分析。
-- 动作实验室和动作样本保存。
-- 语义轴档案和前端动作编译。
-
-它仍然是持续开发中的项目。当前重点是把角色表现做自然：减少僵硬重复、改善说话随动、提高动作选择质量，并让用户可以用动作样本逐步塑造自己的桌宠风格。
+`<@anim>` 只保留为官方 AstrBot 兼容路径：只有当前运行环境无法注入 Persona Effect 时才使用它。它不是 `ag99live.motion` 无效后的 fallback，也不是当前主链路。
 
 ## 项目结构
 
 ```text
 AG99live/
-├─ frontend/                          # Electron + Vue 桌宠客户端
-├─ astrbot_plugin_ag99live_adapter/   # AstrBot 插件后端和 Live2D 适配层
-├─ docs/                              # 架构、协议、动作系统和运行文档
-└─ tools/                             # 开发辅助脚本
+├─ frontend/                          # Electron + Vue 桌面客户端
+│  ├─ src/model-engine/                # 语义动作编译器和 stage registry
+│  ├─ src/playback-timeline/           # 音频、动作、口型统一播放时钟
+│  ├─ src/live2d/                      # Live2D WebSDK 和模型运行时
+│  └─ src/turn-playback/               # turn / segment 播放编排
+├─ astrbot_plugin_ag99live_adapter/   # AstrBot 插件后端和协议适配层
+│  ├─ middleware/                      # Persona Effect、Prompt、result contributor
+│  ├─ motion/                          # 动作意图、profile 和资源分析
+│  ├─ runtime/                         # turn、消息、媒体和运行状态
+│  ├─ live2d/                          # 模型扫描、缓存和能力分析
+│  └─ protocol/                        # WebSocket 消息契约
+├─ docs/                               # 架构、协议和动作系统设计
+└─ tools/                              # 开发与运行验证工具
 ```
 
 ## 快速开始
@@ -108,7 +173,15 @@ npm install
 npm run dev
 ```
 
-### 运行后端测试
+### 运行前端测试和类型检查
+
+```powershell
+cd frontend
+npm run typecheck
+npm test
+```
+
+### 运行插件后端测试
 
 ```powershell
 python -m pytest astrbot_plugin_ag99live_adapter/tests -q
@@ -116,24 +189,31 @@ python -m pytest astrbot_plugin_ag99live_adapter/tests -q
 
 ### 部署 AstrBot 适配器
 
-把 `astrbot_plugin_ag99live_adapter/` 目录放到 AstrBot 的插件目录中：
+将 `astrbot_plugin_ag99live_adapter/` 目录放入 AstrBot 插件目录：
 
 ```powershell
 Copy-Item -Recurse .\astrbot_plugin_ag99live_adapter "C:\path\to\AstrBot\data\plugins\"
 ```
 
-然后在 AstrBot 中启用该插件。仓库根目录下的本地部署脚本只用于个人测试，不作为项目部署方式维护。
+然后在 AstrBot 中启用该插件。仓库内的本地部署脚本仅用于个人联调，不作为正式安装器维护。
 
 ## 技术文档
 
-如果你想了解内部结构，建议从 [docs/README.md](./docs/README.md) 开始。常用入口：
+建议从 [docs/README.md](./docs/README.md) 开始。重点入口：
 
 - [项目总览与模块职责](./docs/01-架构与结构/01-项目总览与模块职责.md)
 - [WebSocket 协议契约](./docs/01-架构与结构/02-WebSocket协议契约.md)
 - [前后端动作链路结构](./docs/01-架构与结构/03-前后端动作链路结构.md)
 - [播放同步编排设计](./docs/01-架构与结构/04-播放同步编排设计.md)
 - [ModelEngine 边界与分层设计](./docs/02-设计文档/01-ModelEngine边界与分层设计.md)
+- [动作意图标签化与资源派生设计](./docs/02-设计文档/10-动作意图标签化与资源派生设计.md)
+- [动作处理链路修复与轴关系图设计](./docs/02-设计文档/13-动作处理链路修复与轴关系图设计.md)
+- [统一时钟引擎改造设计](./docs/02-设计文档/12-统一时钟引擎改造设计.md)
 
-## 说明
+## 当前定位
 
-AG99live 目前更接近一个本地实验型桌宠系统，而不是已经产品化的一键安装应用。README 只描述当前已经形成闭环的能力；架构和运行边界以 `docs/` 中的当前设计文档为准。
+AG99live 目前是一个持续开发中的本地实验型桌宠系统，重点不是做一个固定动作播放器，而是探索：
+
+> 如何让一个对话模型的语言、动作、语音和口型共同组成一段可解释、可调试、可持续优化的 Live2D 表演。
+
+当前正在继续收紧动作协议、统一后处理所有权、完善轴关系图和 Motion Lab 数据记录。未来会在稳定的动作数据基础上，再评估更专门的小模型和训练方案。
