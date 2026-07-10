@@ -92,7 +92,7 @@ architecture:
     - PreviewMotionPlayer stores the active terminal callback and emits a single stopped terminal when playback is explicitly stopped before the Live2D runtime reports completion.
     - AdapterAudioRuntime exposes a motion-only timeline preparation path so no-audio motion segments can still run under PlaybackTimelineEngine with a synthetic clock.
     - PlaybackTimelineRuntime owns segment-scoped timelines during migration; AdapterAudioRuntime remains the outer playback compatibility facade.
-    - PlaybackTimelineLipSyncRuntime now owns lip-sync started/unavailable/completed/failed settlement, so AudioSink no longer carries the lip-sync terminal state machine directly.
+    - PlaybackTimelineLipSyncRuntime now owns lip-sync started/unavailable/completed/failed settlement, and PlaybackTimelineRuntime starts the optional lip_sync sink after audio playback starts; AudioSink no longer carries the lip-sync terminal state machine directly.
     - The Live2D lip-sync timeline sink wraps WAV lip sync preload, live WebAudio RMS sampling, external Live2D lip sync writes, and cleanup; it is still coordinated through the audio segment sink while AdapterAudioRuntime registers lip_sync as an optional PlaybackTimelineEngine sink and records started/failed/completed terminal state.
     - PlaybackTimelineEngine ignores late started/terminal events for sinks that are already completed, failed, absent, or interrupted.
     - During early development, fallback behavior should be fail-visible: optional sinks may fail without blocking required playback, but missing capabilities must not be silently reported as started or completed.
@@ -229,7 +229,7 @@ backlog:
     status: in_progress
     summary: Evaluate moving low-level lip-sync sampling and Live2D parameter writes into the Live2D WebSDK adapter/runtime boundary.
     notes:
-      - PlaybackTimeline schedules lip_sync lifecycle as an optional sink; the audio segment adapter now distinguishes disposal from interruption.
+      - PlaybackTimeline schedules and starts lip_sync as an optional sink; the audio segment adapter now only supplies the audio-element event and distinguishes disposal from interruption.
       - Live2D boundary now owns mouth-value sampling, WebAudio graph details, external lip-sync parameter writes, and cleanup.
       - The boundary must still report started/failed/completed/interrupted back to the timeline; silent success is not acceptable during migration.
       - Keep the shared HTMLAudioElement/audio clock ownership explicit to avoid desynchronizing mouth movement from sound.

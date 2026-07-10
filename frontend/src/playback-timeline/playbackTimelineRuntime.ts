@@ -96,6 +96,11 @@ export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
     messageId: string,
     options: PlaybackTimelineSinkStartOptions,
   ) => boolean | void;
+  startLipSyncTimelineSink: (
+    turnId: string | null,
+    messageId: string,
+    start: () => boolean | void,
+  ) => boolean | void;
   markAudioTimelineDuration: (
     turnId: string | null,
     messageId: string,
@@ -249,6 +254,23 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       messageId,
       AUDIO_TIMELINE_SINK_ID,
     );
+  }
+
+  function startLipSyncTimelineSink(
+    turnId: string | null,
+    messageId: string,
+    start: () => boolean | void,
+  ): boolean | void {
+    const timeline = getTimeline(turnId, messageId);
+    if (!timeline) {
+      throw new Error("Playback timeline missing before starting sink: lip_sync");
+    }
+    timeline.engine.registerSink({
+      id: LIP_SYNC_TIMELINE_SINK_ID,
+      required: false,
+      start,
+    });
+    return startTimelineSink(turnId, messageId, LIP_SYNC_TIMELINE_SINK_ID);
   }
 
   function startSegmentJob(
@@ -790,6 +812,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     configureSegmentExecution,
     startSegmentJob,
     startAudioTimelineSink,
+    startLipSyncTimelineSink,
     markAudioTimelineDuration,
     markAudioTimelineStarted,
     markLipSyncTimelineStarted,

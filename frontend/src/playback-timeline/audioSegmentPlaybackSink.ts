@@ -25,6 +25,11 @@ export interface PlaybackTimelineAudioSegmentSink {
 
 export function createPlaybackTimelineAudioSegmentSink(options: {
   audioSink: PlaybackTimelineAudioSink;
+  startLipSyncTimelineSink?: (
+    turnId: string | null,
+    messageId: string,
+    start: () => boolean | void,
+  ) => boolean | void;
   createLipSyncSink: (
     turnId: string | null,
     messageId: string,
@@ -63,7 +68,18 @@ export function createPlaybackTimelineAudioSegmentSink(options: {
           },
           onDurationChanged: callbacks.onDurationChanged,
           onPlaybackStarted: (event) => {
-            lipSyncSink.start();
+            if (options.startLipSyncTimelineSink) {
+              options.startLipSyncTimelineSink(
+                turnId,
+                messageId,
+                () => {
+                  lipSyncSink.start();
+                  return true;
+                },
+              );
+            } else {
+              lipSyncSink.start();
+            }
             callbacks.onPlaybackStarted?.(event);
           },
           onEnded: () => {

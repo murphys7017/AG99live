@@ -102,6 +102,7 @@ export function createAdapterAudioTimelineController<TMotionPayload = unknown>(
 
   const audioSegmentSink = createPlaybackTimelineAudioSegmentSink({
     audioSink: deps.audioSink,
+    startLipSyncTimelineSink: playbackTimelineRuntime.startLipSyncTimelineSink,
     createLipSyncSink,
   });
   const audioSegmentRunner = createPlaybackTimelineAudioSegmentRunner({
