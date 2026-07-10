@@ -19,6 +19,7 @@ import { useModelEngine } from "../model-engine/useModelEngine";
 import { cloneModelEngineSettings } from "../model-engine/settings";
 import type { ModelEngineSettings } from "../model-engine/settings";
 import { usePlaybackCompletionCoordinator } from "../turn-playback/usePlaybackCompletionCoordinator";
+import { useMotionPlaybackRecorder } from "../turn-playback/useMotionPlaybackRecorder";
 import { useTurnPlaybackOrchestrator } from "../turn-playback/useTurnPlaybackOrchestrator";
 import { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore";
 import type {
@@ -83,6 +84,13 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     initialMotionPlaybackRecords,
     writeMotionSessionLifecycle: false,
   });
+  const motionPlaybackRecorder = useMotionPlaybackRecorder({
+    motionRecord,
+    onMotionLabRawEvent: (payload, turnId) => {
+      adapter.sendMotionLabRawEvent(cloneJson(payload), turnId);
+    },
+    initialMotionPlaybackRecords,
+  });
   const motionTimelineRunTracker = createPlaybackTimelineMotionRunTracker(playbackTimeline);
   const modelEngine = useModelEngine({
     getSelectedModel: () => selectedModel.value,
@@ -92,7 +100,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       onFinished: (event) => {
         options?.onFinished?.(event);
         motionTimelineRunTracker.recordTerminal(event);
-        playbackCoordinator.completeMotionPlayback(event);
+        motionPlaybackRecorder.completeMotionPlayback(event);
       },
     }),
     playCatalogMotion: (motion, model, options) => motionPlayer.playCatalogMotion(motion, model, {
@@ -100,7 +108,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       onFinished: (event) => {
         options?.onFinished?.(event);
         motionTimelineRunTracker.recordTerminal(event);
-        playbackCoordinator.completeMotionPlayback(event);
+        motionPlaybackRecorder.completeMotionPlayback(event);
       },
     }),
     stopPlan: (reason) => motionPlayer.stopPlan(reason),
@@ -124,7 +132,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     getPlayerMessage: () => motionPlayer.state.message,
     onPlanStarted: (event) => {
       motionTimelineRunTracker.recordStarted(event);
-      playbackCoordinator.recordMotionPlayback(event);
+      motionPlaybackRecorder.recordMotionPlayback(event);
     },
     sessionStore: {
       getActiveSession: () => sessionStore.getActiveSession(),
@@ -291,7 +299,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     selectedSemanticAxisProfile,
     ambientMotionEnabled,
     motionEngineSettings,
-    motionPlaybackRecords: playbackCoordinator.motionPlaybackRecords,
+    motionPlaybackRecords: motionPlaybackRecorder.motionPlaybackRecords,
     parameterActionPreview,
     connectionState,
     connectionLabel,
@@ -335,6 +343,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     pushToTalk.dispose();
     bilibiliLive.dispose();
     playbackCoordinator.resetPlaybackCoordination();
+    motionPlaybackRecorder.resetMotionPlaybackRecorder();
     motionTimelineRunTracker.clear();
     modelEngine.stop("unmount");
     detachBridgeListener();

@@ -30,6 +30,8 @@ export interface PlaybackTimelineLipSyncRuntime {
   resume(): Promise<void>;
   completeAfterAudioEnded(): void;
   failAfterAudioError(): void;
+  interrupt?(reason: string): void;
+  dispose?(): void;
   stop(): void;
 }
 
@@ -89,7 +91,15 @@ export function createPlaybackTimelineLipSyncRuntime(
     failAfterAudioError() {
       settleTerminal("failed", "audio_playback_error");
     },
+    interrupt(reason) {
+      settleTerminal("interrupted", reason);
+      sink.stop();
+    },
+    dispose() {
+      sink.stop();
+    },
     stop() {
+      settleTerminal("interrupted", "lip_sync_stopped");
       sink.stop();
     },
   };

@@ -7,6 +7,10 @@
  *   3. 收到后端 backend.turnFinished 后调用 finalizeCompletion → playbackAck
  *      .clearPlaybackGroupContext + markPhase "completed"，会话至此真正闭环。
  *
+ * 迁移期兼容说明：
+ *   - 生产桌面 runtime 的动作记录已经移到 useMotionPlaybackRecorder；
+ *     本文件中的动作记录 API 仅为旧测试和迁移调用方保留，后续应删除。
+ *
  * 还附带管理：
  *   - 已 ack 会话遇到晚到音频时反向 reopen（reopenAckedSessionForLateAudio），
  *     允许这一段重新参与释放；

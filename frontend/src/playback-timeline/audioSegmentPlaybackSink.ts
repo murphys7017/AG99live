@@ -33,7 +33,11 @@ export function createPlaybackTimelineAudioSegmentSink(options: {
   let activeLipSyncSink: PlaybackTimelineAudioLipSyncSink | null = null;
 
   function stopActiveLipSyncSink(): void {
-    activeLipSyncSink?.stop();
+    if (activeLipSyncSink?.interrupt) {
+      activeLipSyncSink.interrupt("audio_playback_replaced");
+    } else {
+      activeLipSyncSink?.stop();
+    }
     activeLipSyncSink = null;
   }
 
@@ -48,7 +52,11 @@ export function createPlaybackTimelineAudioSegmentSink(options: {
             lipSyncSink.attachAudio(event);
           },
           onAudioElementDisposed: () => {
-            lipSyncSink.stop();
+            if (lipSyncSink.dispose) {
+              lipSyncSink.dispose();
+            } else {
+              lipSyncSink.stop();
+            }
             if (activeLipSyncSink === lipSyncSink) {
               activeLipSyncSink = null;
             }

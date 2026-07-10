@@ -11,6 +11,8 @@ export interface PlaybackTimelineAudioLipSyncSink {
   start(): void;
   completeAfterAudioEnded(): void;
   failAfterAudioError(): void;
+  interrupt?(reason: string): void;
+  dispose?(): void;
   stop(): void;
 }
 
@@ -69,6 +71,19 @@ export function createPlaybackTimelineAudioLipSyncSink(options: {
     },
     failAfterAudioError() {
       lipSyncRuntime.failAfterAudioError();
+    },
+    interrupt(reason) {
+      lipSyncRuntime.interrupt?.(reason);
+      if (!lipSyncRuntime.interrupt) {
+        lipSyncRuntime.stop();
+      }
+    },
+    dispose() {
+      if (lipSyncRuntime.dispose) {
+        lipSyncRuntime.dispose();
+      } else {
+        lipSyncRuntime.stop();
+      }
     },
     stop() {
       lipSyncRuntime.stop();
