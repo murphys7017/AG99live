@@ -11,6 +11,7 @@ export interface PendingTurnPlaybackGroup<TMotionPayload = unknown> {
   textReady: boolean;
   audioExpected: boolean;
   audioReady: boolean;
+  audioFailed: boolean;
   noAudioConfirmed: boolean;
   motionReady: boolean;
   motionPayload: TMotionPayload | null;
@@ -93,6 +94,7 @@ export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
       textReady: false,
       audioExpected: false,
       audioReady: false,
+      audioFailed: false,
       noAudioConfirmed: false,
       motionReady: false,
       motionPayload: null,
@@ -234,6 +236,9 @@ export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
     reason: string,
   ): void {
     if (group.released) {
+      if (group.audioFailed) {
+        return;
+      }
       if (group.motionReady || group.audioReady) {
         releaseSegmentJob(group, {
           reason: `late_release_after_${reason}`,
@@ -246,6 +251,12 @@ export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
     }
 
     if (!group.textReady) {
+      return;
+    }
+
+    if (group.audioFailed) {
+      releaseTextOnly(group, `audio_failed:${reason}`);
+      group.released = true;
       return;
     }
 
@@ -310,6 +321,9 @@ export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
       turnId: string | null,
     ) => {
       const group = getOrCreateGroup(messageId, turnId);
+      if (group.audioFailed) {
+        return;
+      }
       group.audioReady = true;
       evaluateGroup(group, "audio_ready");
     },
@@ -331,6 +345,9 @@ export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
         return;
       }
       const group = getOrCreateGroup(messageId, turnId);
+      if (group.audioFailed) {
+        return;
+      }
       group.motionReady = true;
       group.motionPayload = payload;
       group.motionReceivedAtMs = receivedAtMs;
@@ -341,8 +358,26 @@ export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
       turnId: string | null,
     ) => {
       const group = getOrCreateGroup(messageId, turnId);
+      if (group.audioFailed) {
+        return;
+      }
       group.noAudioConfirmed = true;
       evaluateGroup(group, "no_audio_terminal");
+    },
+    markAudioFailed: (
+      messageId: string,
+      turnId: string | null,
+      reason = "audio_failed",
+    ) => {
+      const group = getOrCreateGroup(messageId, turnId);
+      clearReleaseTimer(group);
+      group.audioFailed = true;
+      group.audioExpected = false;
+      group.audioReady = false;
+      group.noAudioConfirmed = false;
+      group.motionReady = false;
+      group.motionPayload = null;
+      evaluateGroup(group, reason);
     },
     markOutputQueueClosed: (
       messageId: string,

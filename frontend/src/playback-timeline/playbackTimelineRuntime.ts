@@ -150,6 +150,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
   deps: PlaybackTimelineRuntimeDeps,
 ): PlaybackTimelineRuntime<TMotionPayload> {
   const timelines = new Map<string, PlaybackTimelineEntry>();
+  const closedTimelineKeys = new Set<string>();
   let segmentExecutionPorts: PlaybackTimelineSegmentExecutionPorts<TMotionPayload> | null = null;
 
   function resolveTimelineKey(
@@ -174,6 +175,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     entry: PlaybackTimelineEntry,
   ): void {
     const key = resolveTimelineKey(turnId, messageId);
+    closedTimelineKeys.delete(key);
     timelines.set(key, entry);
   }
 
@@ -386,11 +388,24 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     const engine = timeline.engine;
     engine.setExpectedDurationMs(durationMs);
     const audioClock = deps.getAudioClock();
-    if (audioClock) {
-      engine.attachAudioClock(audioClock);
-    } else {
-      engine.attachAudioClock(createUnavailableAudioClock());
+    if (!audioClock) {
+      if (hasOpenSink(timeline, AUDIO_TIMELINE_SINK_ID)) {
+        markAudioSessionTerminal(
+          turnId,
+          messageId,
+          "failed",
+          "audio_clock_unavailable_on_started",
+        );
+      }
+      engine.markSinkTerminal(
+        AUDIO_TIMELINE_SINK_ID,
+        "failed",
+        "audio_clock_unavailable_on_started",
+      );
+      clearTimelineIfTerminal(turnId, messageId);
+      return;
     }
+    engine.attachAudioClock(audioClock);
     engine.markSinkStarted(AUDIO_TIMELINE_SINK_ID);
     if (engine.getPhase() === "ready") {
       engine.start(startedAtMs);
@@ -663,11 +678,11 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
   ): PlaybackTimelineEntry | null {
     const timeline = getTimeline(turnId, messageId);
     if (!timeline) {
-      warnMissingTimeline(event, turnId, messageId, details);
+      handleMissingTimelineEvent(event, sinkId, turnId, messageId, details);
       return null;
     }
     if (!timeline.engine.hasSink(sinkId)) {
-      warnMissingSink(event, sinkId, turnId, messageId, details);
+      handleMissingSinkEvent(event, sinkId, turnId, messageId, details);
       return null;
     }
     return timeline;
@@ -679,6 +694,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
   ): void {
     const key = resolveTimelineKey(turnId, messageId);
     timelines.delete(key);
+    closedTimelineKeys.add(key);
   }
 
   function isTimelineTerminalPhase(timeline: PlaybackTimelineEntry): boolean {
@@ -723,6 +739,53 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     return Boolean(sink && !isTerminalSinkValue(sink.terminal));
   }
 
+  function handleMissingTimelineEvent(
+    event: string,
+    sinkId: string,
+    turnId: string | null,
+    messageId: string,
+    details: Record<string, unknown>,
+  ): void {
+    if (closedTimelineKeys.has(resolveTimelineKey(turnId, messageId))) {
+      warnMissingTimeline(event, turnId, messageId, details);
+      return;
+    }
+    reportMissingTimelineWiring(event, sinkId, turnId, messageId, details);
+    markMissingRequiredSinkTerminal(event, sinkId, turnId, messageId);
+  }
+
+  function handleMissingSinkEvent(
+    event: string,
+    sinkId: string,
+    turnId: string | null,
+    messageId: string,
+    details: Record<string, unknown>,
+  ): void {
+    reportMissingSinkWiring(event, sinkId, turnId, messageId, details);
+    markMissingRequiredSinkTerminal(event, sinkId, turnId, messageId);
+  }
+
+  function markMissingRequiredSinkTerminal(
+    event: string,
+    sinkId: string,
+    turnId: string | null,
+    messageId: string,
+  ): void {
+    const reason = `playback_timeline_missing_${sinkId}_sink:${event}`;
+    if (sinkId === AUDIO_TIMELINE_SINK_ID) {
+      deps.audioSession?.markAudioTerminal(
+        turnId,
+        "failed",
+        messageId,
+        reason,
+      );
+      return;
+    }
+    if (sinkId === MOTION_TIMELINE_SINK_ID) {
+      deps.motionSession?.markMotionFailed(turnId, messageId, reason);
+    }
+  }
+
   return {
     configureSegmentExecution,
     startSegmentJob,
@@ -738,15 +801,6 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     getTimelineSnapshotForSegment,
     findActiveAudioTimelineSegments,
     findOpenAudioTimelineSegments,
-  };
-}
-
-function createUnavailableAudioClock(): AudioPlaybackClock {
-  return {
-    getCurrentTimeMs: () => null,
-    getDurationMs: () => null,
-    getPlaybackRate: () => 1,
-    isPlaying: () => true,
   };
 }
 
@@ -775,6 +829,25 @@ function warnMissingTimeline(
   );
 }
 
+function reportMissingTimelineWiring(
+  event: string,
+  sinkId: string,
+  turnId: string | null,
+  messageId: string,
+  details: Record<string, unknown> = {},
+): void {
+  console.error(
+    "[PlaybackTimelineRuntime] missing segment timeline for required lifecycle event.",
+    {
+      event,
+      sinkId,
+      turnId,
+      messageId,
+      ...details,
+    },
+  );
+}
+
 function warnMissingSink(
   event: string,
   sinkId: string,
@@ -784,6 +857,25 @@ function warnMissingSink(
 ): void {
   console.warn(
     "[PlaybackTimelineRuntime] dropped timeline event for missing segment sink.",
+    {
+      event,
+      sinkId,
+      turnId,
+      messageId,
+      ...details,
+    },
+  );
+}
+
+function reportMissingSinkWiring(
+  event: string,
+  sinkId: string,
+  turnId: string | null,
+  messageId: string,
+  details: Record<string, unknown> = {},
+): void {
+  console.error(
+    "[PlaybackTimelineRuntime] missing segment sink for lifecycle event.",
     {
       event,
       sinkId,

@@ -92,11 +92,6 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         runtimeStateController,
       ),
     onStartFailed: (context: StartPayloadContext) => {
-      runtimeSchedulerDependencies.sessionStore?.markMotionFailed?.(
-        context.turnId,
-        context.messageId,
-        context.startReason,
-      );
       if (context.playbackTimeline) {
         dependencies.markMotionTimelineTerminal(
           context.turnId,
@@ -104,7 +99,13 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
           "failed",
           context.startReason,
         );
+        return;
       }
+      runtimeSchedulerDependencies.sessionStore?.markMotionFailed?.(
+        context.turnId,
+        context.messageId,
+        context.startReason,
+      );
     },
   });
 

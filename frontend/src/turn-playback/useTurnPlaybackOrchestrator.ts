@@ -244,10 +244,29 @@ export function useTurnPlaybackOrchestrator(
           clearAudioExpectedTimer(segment.turnId, segment.messageId);
         }
 
-        if (
-          segment.audio.terminal === "absent"
-          || segment.audio.terminal === "failed"
-        ) {
+        if (segment.audio.terminal === "failed") {
+          if (
+            !segment.motion.released
+            && !segment.motion.started
+            && !segment.motion.completed
+            && !segment.motion.failed
+          ) {
+            options.sessionStore.markMotionFailed(
+              segment.turnId,
+              segment.messageId,
+              segment.audio.reason
+                ? `audio_failed_before_motion_release:${segment.audio.reason}`
+                : "audio_failed_before_motion_release",
+            );
+          }
+          core.markAudioFailed(
+            segment.messageId,
+            segment.turnId,
+            segment.audio.reason || "audio_failed",
+          );
+        }
+
+        if (segment.audio.terminal === "absent") {
           core.markNoAudioConfirmed(
             segment.messageId,
             segment.turnId,

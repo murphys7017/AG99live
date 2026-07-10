@@ -333,6 +333,19 @@ const testMotionPayload: NormalizedMotionPayload = {
   },
 };
 
+function createTestAudioClock(options: {
+  currentTimeMs?: number;
+  durationMs?: number;
+  playing?: boolean;
+} = {}): AudioPlaybackClock {
+  return {
+    getCurrentTimeMs: () => options.currentTimeMs ?? 0,
+    getDurationMs: () => options.durationMs ?? 1200,
+    getPlaybackRate: () => 1,
+    isPlaying: () => options.playing ?? true,
+  };
+}
+
 function configureNoopSegmentExecutionPorts(
   runtime: ReturnType<typeof createPlaybackTimelineRuntime>,
   events: string[] = [],
@@ -714,17 +727,26 @@ function testPlaybackTimelineRuntimeClearsOnlyTerminalSegmentTimeline(): void {
 }
 
 function testPlaybackTimelineRuntimeExposesMissingAudioClock(): void {
+  const terminalEvents: string[] = [];
   const runtime = createPlaybackTimelineRuntime({
     getAudioClock: () => null,
+    audioSession: {
+      markAudioStarted: () => {},
+      markAudioDuration: () => {},
+      markAudioTerminal: (_turnId, terminal, messageId, reason) => {
+        terminalEvents.push(`${terminal}:${messageId}:${reason ?? ""}`);
+      },
+    },
   });
 
   prepareTestAudioTimeline(runtime, "turn-audio", "msg-audio");
   runtime.markAudioTimelineStarted("turn-audio", "msg-audio", 100, 1200);
 
   const snapshot = runtime.getTimelineSnapshotForSegment("turn-audio", "msg-audio");
-  assert.equal(snapshot?.phase, "playing");
-  assert.equal(snapshot?.clockSource, "audio_unavailable");
-  assert.equal(snapshot?.durationMs, 1200);
+  assert.equal(snapshot, null);
+  assert.deepEqual(terminalEvents, [
+    "failed:msg-audio:audio_clock_unavailable_on_started",
+  ]);
 }
 
 function testPlaybackTimelineRuntimeStopsOnlyRequestedSegmentTimeline(): void {
@@ -753,7 +775,7 @@ function testPlaybackTimelineRuntimeStopsOnlyRequestedSegmentTimeline(): void {
 
 function testPlaybackTimelineRuntimeFindsActiveAudioSegments(): void {
   const runtime = createPlaybackTimelineRuntime({
-    getAudioClock: () => null,
+    getAudioClock: () => createTestAudioClock(),
   });
 
   prepareTestAudioTimeline(runtime, "turn-active", "msg-active");
@@ -776,7 +798,7 @@ function testPlaybackTimelineRuntimeFindsActiveAudioSegments(): void {
 
 function testPlaybackTimelineRuntimeFindsOpenAudioSegments(): void {
   const runtime = createPlaybackTimelineRuntime({
-    getAudioClock: () => null,
+    getAudioClock: () => createTestAudioClock(),
   });
 
   prepareTestAudioTimeline(runtime, "turn-open", "msg-open");
@@ -802,7 +824,7 @@ function testPlaybackTimelineRuntimeFindsOpenAudioSegments(): void {
 function testPlaybackTimelineRuntimeDoesNotRewriteAudioSessionTerminal(): void {
   const events: string[] = [];
   const runtime = createPlaybackTimelineRuntime({
-    getAudioClock: () => null,
+    getAudioClock: () => createTestAudioClock(),
     audioSession: {
       markAudioStarted: () => {},
       markAudioDuration: () => {},

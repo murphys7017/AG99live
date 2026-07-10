@@ -280,9 +280,9 @@ export function useTurnPlaybackSessionStore() {
   /**
    * 收到新音频：写入 url 并把段重置为可播状态。
    *
-   * 已经有过 url，且段已 released/started 或 terminal != "idle" 时，视为重复音频，
-   * 返回 false 由调用方决定是否上报"已忽略重复音频"。会话若处于 settling，
-   * 收到一份新 url 会把 phase 拨回 playing，给晚到媒体一次补齐机会。
+   * 段已 started/failed/completed 或已有 url 时，视为迟到/重复音频，
+   * 返回 false 由调用方决定是否上报"已忽略音频"。会话若处于 settling，
+   * 收到一份仍可补齐的新 url 会把 phase 拨回 playing，给晚到媒体一次补齐机会。
    */
   function markAudioReceived(
     turnId: string | null,
@@ -298,12 +298,16 @@ export function useTurnPlaybackSessionStore() {
     const hasExistingAudioUrl =
       typeof segment.audio.url === "string"
       && segment.audio.url.trim().length > 0;
+    const canFillAbsentAudio =
+      segment.audio.terminal === "absent"
+      && !segment.audio.started
+      && !hasExistingAudioUrl;
     if (
       hasExistingAudioUrl
-      && (
-        segment.audio.released
-        || segment.audio.started
-        || segment.audio.terminal !== "idle"
+      || segment.audio.started
+      || (
+        segment.audio.terminal !== "idle"
+        && !canFillAbsentAudio
       )
     ) {
       return false;

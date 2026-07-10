@@ -96,7 +96,12 @@ function buildAudioSink(options: {
   return {
     start: options.start,
     stop: options.stop ?? (() => {}),
-    getClock: options.getClock ?? (() => null),
+    getClock: options.getClock ?? (() => ({
+      getCurrentTimeMs: () => 0,
+      getDurationMs: () => 1000,
+      getPlaybackRate: () => 1,
+      isPlaying: () => true,
+    })),
   };
 }
 
