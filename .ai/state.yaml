@@ -40,8 +40,8 @@ context:
     - AdapterConnection.playbackTimeline no longer exposes direct text/audio queue release wrappers or raw segment-sink wiring; connection-level callers and tests should release playback through PlaybackTimelineRuntime.startSegmentJob with explicit text/audio/motion slots.
     - AdapterAudioRuntime now hides the raw queued-audio consumer behind configureSegmentExecution, so adapter-facing wiring can provide session/text/motion ports without exposing queue consumption outside the audio runtime facade.
     - Audio playback started/duration and active-timeline terminal SessionStore writes now happen through PlaybackTimelineRuntime audio lifecycle session ports; AdapterAudioRuntime's state bridge updates UI playback state for those events.
-    - Motion playback started/terminal SessionStore writes now happen through PlaybackTimelineRuntime motion lifecycle session ports in production when motion timeline events arrive; PlaybackCompletionCoordinator still owns motion playback records, handoff bookkeeping, and playback_finished flushing during migration, but no longer depends on the motion player object or legacy missing-motion timer hooks.
-    - Production desktop wiring now uses the independent MotionPlaybackRecorder for motion history, run tracking, and Motion Lab raw events; the coordinator's old motion-record methods remain only as a migration-era test compatibility surface.
+    - Motion playback started/terminal SessionStore writes now happen through PlaybackTimelineRuntime motion lifecycle session ports; PlaybackCompletionCoordinator now owns only turn-level playback_finished acknowledgement and late-audio reopen.
+    - Production desktop wiring uses the independent MotionPlaybackRecorder for motion history, run tracking, and Motion Lab raw events; PlaybackCompletionCoordinator has no motion-recording dependency.
     - Live2D lip-sync sampling and external mouth-parameter writes now live in frontend/src/live2d/lipSyncTimelineSink.ts; playback-timeline/lipSyncSink.ts keeps only the timeline-facing lifecycle runtime and terminal rules.
     - Playback timeline sink terminal state is now stable once a sink reaches a terminal value, so late cleanup/completion events cannot overwrite a real failure.
     - Missing required playback timeline or sink lifecycle wiring should mark the affected audio/motion segment failed instead of being treated as a warning-only event; late events after a closed timeline may remain diagnostic-only.
@@ -220,7 +220,7 @@ backlog:
     notes:
       - Audio and motion start are now registered as PlaybackTimelineEngine sink callbacks and invoked through startSink.
       - Browser audio release now enters PlaybackTimelineRuntime.startAudioTimelineSink before the actual audio segment sink starts.
-      - Audio lifecycle and ordinary motion started/terminal SessionStore writes now have PlaybackTimelineRuntime lifecycle session ports; production motion history is now outside PlaybackCompletionCoordinator. Remaining work is to delete its migration-era motion-record API and move any remaining handoff bookkeeping without losing playback_finished semantics.
+      - Audio lifecycle and ordinary motion started/terminal SessionStore writes now have PlaybackTimelineRuntime lifecycle session ports; production motion history is outside PlaybackCompletionCoordinator, which now only observes turn settlement and sends playback_finished.
       - Keep SessionStore as the persistent turn/segment fact store, but move execution ownership into timeline sinks.
       - Reduce AdapterAudioRuntime to adapter/session state bridge plus protocol-facing convenience methods.
       - Make missing sink wiring a hard error; do not reintroduce compatibility fallback routes.

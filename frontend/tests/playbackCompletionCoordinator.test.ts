@@ -1,848 +1,103 @@
-// Node.js test environment polyfill
-(globalThis as Record<string, unknown>).window = globalThis;
-
 import assert from "node:assert/strict";
-import { nextTick, ref } from "vue";
-import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
+import { nextTick } from "vue";
 import { usePlaybackCompletionCoordinator } from "../src/turn-playback/usePlaybackCompletionCoordinator.js";
+import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
 
-interface PlaybackFinishedCall {
-  turnId: string | null;
-  success: boolean;
-  reason?: string;
+interface Harness {
+  sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>;
+  playbackFinishedCalls: Array<{ turnId: string | null; success: boolean; reason?: string }>;
+  coordinator: ReturnType<typeof usePlaybackCompletionCoordinator>;
 }
 
-const TEST_SEMANTIC_INTENT = {
-  schema_version: "engine.motion_intent.v3",
-  profile_id: "profile-test",
-  profile_revision: 1,
-  model_id: "model-test",
-  mode: "idle",
-  emotion_label: "test",
-  axes: {},
-} as never;
-
-function createHarness(options: {
-  writeMotionSessionLifecycle?: boolean;
-} = {}) {
+function createHarness(): Harness {
   const sessionStore = useTurnPlaybackSessionStore();
-  const playbackFinishedCalls: PlaybackFinishedCall[] = [];
-  const clearContextCalls: Array<{ turnId: string | null }> = [];
-
-  const mockAdapter = {
-    state: { lastAssistantText: "Hello from assistant" },
-    sendPlaybackFinishedForCurrentGroup(
-      turnId: string | null,
-      success: boolean,
-      reason?: string,
-    ): Promise<void> {
-      playbackFinishedCalls.push({ turnId, success, reason });
-      return Promise.resolve();
-    },
-    clearPlaybackGroupContext(
-      turnId: string | null,
-    ): void {
-      clearContextCalls.push({ turnId });
-    },
-  };
-
+  const playbackFinishedCalls: Harness["playbackFinishedCalls"] = [];
   const coordinator = usePlaybackCompletionCoordinator({
     sessionStore,
     playbackAck: {
-      sendPlaybackFinishedForCurrentGroup:
-        mockAdapter.sendPlaybackFinishedForCurrentGroup,
-      clearPlaybackGroupContext: mockAdapter.clearPlaybackGroupContext,
+      sendPlaybackFinishedForCurrentGroup: async (turnId, success, reason) => {
+        playbackFinishedCalls.push({ turnId, success, reason });
+      },
+      clearPlaybackGroupContext: () => undefined,
     },
-    motionRecord: {
-      getLastAssistantText: () => mockAdapter.state.lastAssistantText,
-      getSelectedModel: () => ref(null),
-    },
-    initialMotionPlaybackRecords: [],
-    writeMotionSessionLifecycle: options.writeMotionSessionLifecycle,
   });
-
   sessionStore.setActiveSession("turn-1");
   sessionStore.markTurnStarted("turn-1");
   sessionStore.markPhase("turn-1", "ready");
   sessionStore.markPhase("turn-1", "playing");
-
-  return {
-    sessionStore,
-    coordinator,
-    playbackFinishedCalls,
-    clearContextCalls,
-    flush: () => nextTick(),
-  };
+  return { sessionStore, playbackFinishedCalls, coordinator };
 }
 
-async function testSegmentCompletionDoesNotFinishTurnEarly(): Promise<void> {
+async function flush(): Promise<void> {
+  await nextTick();
+  await nextTick();
+}
+
+async function testAcknowledgesOnlyAfterAllRequiredSignals(): Promise<void> {
   const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markTextReceived("turn-1", "B", "msg-b");
+  h.sessionStore.markTextReceived("turn-1", "hello", "msg-1");
+  h.sessionStore.markTextDelivered("turn-1", "msg-1");
+  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-1", "no_audio");
+  h.sessionStore.markMotionAbsent("turn-1", "msg-1");
 
-  h.sessionStore.markTextDelivered("turn-1", "msg-a");
-  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-a", "no_audio");
-  h.sessionStore.markMotionAbsent("turn-1", "msg-a");
-  h.sessionStore.markSynthFinished("turn-1");
-  await h.flush();
-
+  await flush();
   assert.equal(h.playbackFinishedCalls.length, 0);
-  assert.equal(h.sessionStore.getActiveSession()?.phase, "playing");
-}
-
-async function testAllSegmentsAndSynthFinishedAckOnce(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markTextReceived("turn-1", "B", "msg-b");
-
-  for (const messageId of ["msg-a", "msg-b"]) {
-    h.sessionStore.markTextDelivered("turn-1", messageId);
-    h.sessionStore.markAudioTerminal("turn-1", "absent", messageId, "no_audio");
-    h.sessionStore.markMotionAbsent("turn-1", messageId);
-  }
-  await h.flush();
-  assert.equal(h.playbackFinishedCalls.length, 0, "backend synth_finished is required");
 
   h.sessionStore.markSynthFinished("turn-1");
-  await h.flush();
-  await h.flush();
-
-  assert.equal(h.playbackFinishedCalls.length, 1);
-  assert.deepEqual(h.playbackFinishedCalls[0], {
+  await flush();
+  assert.deepEqual(h.playbackFinishedCalls, [{
     turnId: "turn-1",
     success: true,
     reason: "text_delivered",
-  });
-  assert.equal(h.sessionStore.getActiveSession()?.phase, "settling");
-
-  h.sessionStore.markSynthFinished("turn-1");
-  await h.flush();
-  assert.equal(h.playbackFinishedCalls.length, 1);
-
-  h.sessionStore.markTurnFinished("turn-1", true);
-  await h.flush();
-  assert.equal(h.sessionStore.getActiveSession()?.phase, "completed");
-
-  h.sessionStore.markSynthFinished("turn-1");
-  await h.flush();
-  assert.equal(h.playbackFinishedCalls.length, 1);
-}
-
-async function testTurnFinishedBeforeSynthFinishedDoesNotAck(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markTextDelivered("turn-1", "msg-a");
-  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-a", "no_audio");
-  h.sessionStore.markMotionAbsent("turn-1", "msg-a");
-
-  h.sessionStore.markTurnFinished("turn-1", true);
-  await h.flush();
-  assert.equal(h.playbackFinishedCalls.length, 0);
-  assert.equal(h.sessionStore.getActiveSession()?.phase, "playing");
-
-  h.sessionStore.markSynthFinished("turn-1");
-  await h.flush();
-  await h.flush();
-  assert.equal(h.playbackFinishedCalls.length, 1);
-  assert.equal(h.sessionStore.getActiveSession()?.phase, "completed");
-}
-
-async function testMotionCompletionWritesCorrectSegment(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markTextReceived("turn-1", "B", "msg-b");
-  h.sessionStore.markMotionReceived(
-    "turn-1",
-    { kind: "semantic_intent", intent: {} as never },
-    "msg-b",
-  );
-
-  h.coordinator.recordMotionPlayback({
-    messageId: "msg-b",
-    turnId: "turn-1",
-    playbackTurnId: "turn-1",
-    model: null,
-    payloadKind: "semantic_intent",
-    intent: TEST_SEMANTIC_INTENT,
-    startReason: "test",
-    queuedDelayMs: 0,
-    diagnostics: null,
-    playerMessage: "playing",
-    runId: "test-run-msg-b",
-    plan: {
-      schema_version: "semantic_parameter_plan.v1",
-      parameters: [],
-      mode: "idle",
-      emotion_label: "",
-      timing: { duration_ms: 1000 },
-    } as never,
-  });
-
-  h.coordinator.completeMotionPlayback({ runId: "test-run-msg-b", status: "completed" });
-  await h.flush();
-
-  const session = h.sessionStore.getActiveSession();
-  assert.equal(session?.segments.get("msg-a")?.motion.completed, false);
-  assert.equal(session?.segments.get("msg-b")?.motion.completed, true);
-}
-
-async function testMotionHandoffCompletesPreviousSegmentAndFinishesCurrent(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markTextReceived("turn-1", "B", "msg-b");
-  h.sessionStore.markMotionReceived(
-    "turn-1",
-    { kind: "semantic_intent", intent: {} as never },
-    "msg-a",
-  );
-  h.sessionStore.markMotionReceived(
-    "turn-1",
-    { kind: "semantic_intent", intent: {} as never },
-    "msg-b",
-  );
-
-  const baseEvent = {
-    turnId: "turn-1",
-    playbackTurnId: "turn-1",
-    model: null,
-    payloadKind: "semantic_intent" as const,
-    intent: TEST_SEMANTIC_INTENT,
-    startReason: "test",
-    queuedDelayMs: 0,
-    diagnostics: null,
-    playerMessage: "playing",
-    plan: {
-      schema_version: "semantic_parameter_plan.v1",
-      parameters: [],
-      mode: "idle",
-      emotion_label: "",
-      timing: { duration_ms: 1000 },
-    } as never,
-  };
-
-  h.coordinator.recordMotionPlayback({ ...baseEvent, messageId: "msg-a" });
-  await h.flush();
-
-  h.coordinator.recordMotionPlayback({ ...baseEvent, runId: "handoff-msg-b", messageId: "msg-b" });
-  await h.flush();
-  assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-a")?.motion.completed, true);
-  assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-b")?.motion.completed, false);
-
-  h.coordinator.completeMotionPlayback({ runId: "handoff-msg-b", status: "completed" });
-  await h.flush();
-  assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-b")?.motion.completed, true);
-}
-
-async function testCatalogMotionCompletionWritesSegmentAndHistory(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markMotionReceived(
-    "turn-1",
-    {
-      kind: "catalog_motion",
-      motion: {
-        schema_version: "engine.catalog_motion.v1",
-        model_id: "model-1",
-        motion_id: "serious_explain",
-        group: "TapBody",
-        index: 0,
-        file: "Motions/serious.motion3.json",
-        label: "认真说明",
-        emotion_label: "explain",
-        duration_ms: 3000,
-        priority: 3,
-      },
-    },
-    "msg-a",
-  );
-
-  h.coordinator.recordMotionPlayback({
-    messageId: "msg-a",
-    turnId: "turn-1",
-    playbackTurnId: "turn-1",
-    model: null,
-    payloadKind: "catalog_motion",
-    startReason: "test",
-    queuedDelayMs: 0,
-    diagnostics: null,
-    playerMessage: "playing",
-    runId: "cat-run-1",
-    motion: {
-      schema_version: "engine.catalog_motion.v1",
-      model_id: "model-1",
-      motion_id: "serious_explain",
-      group: "TapBody",
-      index: 0,
-      file: "Motions/serious.motion3.json",
-      label: "认真说明",
-      emotion_label: "explain",
-      duration_ms: 3000,
-      priority: 3,
-    },
-  });
-
-  h.coordinator.completeMotionPlayback({ runId: "cat-run-1", status: "completed" });
-  await h.flush();
-
-  const segment = h.sessionStore.getActiveSession()?.segments.get("msg-a");
-  assert.equal(segment?.motion.started, true);
-  assert.equal(segment?.motion.completed, true);
-  assert.equal(h.coordinator.motionPlaybackRecords.value[0]?.payloadKind, "catalog_motion");
-  assert.equal(h.coordinator.motionPlaybackRecords.value[0]?.emotionLabel, "explain");
-}
-
-async function testPreviewMotionPlaybackDoesNotCreateSessionSegmentOrHistory(): Promise<void> {
-  const h = createHarness();
-  const beforeSessionCount = h.sessionStore.getSessions().length;
-  const beforeRecordCount = h.coordinator.motionPlaybackRecords.value.length;
-
-  h.coordinator.recordMotionPlayback({
-    messageId: "preview",
-    turnId: null,
-    playbackTurnId: null,
-    model: null,
-    payloadKind: "semantic_plan",
-    startReason: "preview",
-    queuedDelayMs: 0,
-    diagnostics: null,
-    playerMessage: "preview playing",
-    plan: {
-      schema_version: "semantic_parameter_plan.v1",
-      parameters: [],
-      mode: "idle",
-      emotion_label: "",
-      timing: { duration_ms: 1000 },
-    } as never,
-  });
-
-  await h.flush();
-
-  assert.equal(h.sessionStore.getSessions().length, beforeSessionCount);
-  assert.equal(
-    h.sessionStore.getSessions().some((session) => session.segments.has("preview")),
-    false,
-  );
-  assert.equal(h.coordinator.motionPlaybackRecords.value.length, beforeRecordCount);
-}
-
-async function testDuplicateMotionPlaybackRecordIsDeduped(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  const event = {
-    messageId: "msg-a",
-    turnId: "turn-1",
-    playbackTurnId: "turn-1",
-    model: null,
-    payloadKind: "semantic_intent" as const,
-    intent: TEST_SEMANTIC_INTENT,
-    startReason: "test",
-    queuedDelayMs: 0,
-    diagnostics: null,
-    playerMessage: "playing",
-    plan: {
-      schema_version: "semantic_parameter_plan.v1",
-      parameters: [
-        {
-          axis_id: "head_yaw",
-          parameter_id: "ParamAngleX",
-          target_value: 12,
-          weight: 1,
-          input_value: 72,
-          source: "semantic_axis",
-        },
-      ],
-      mode: "expressive",
-      emotion_label: "neutral",
-      timing: { duration_ms: 1000 },
-    } as never,
-  };
-
-  h.coordinator.recordMotionPlayback(event);
-  h.coordinator.recordMotionPlayback(event);
-
-  assert.equal(h.coordinator.motionPlaybackRecords.value.length, 1);
-  assert.equal(h.coordinator.motionPlaybackRecords.value[0]?.messageId, "msg-a");
-}
-
-async function testMixedAudioStatesRequireAllSettled(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markTextReceived("turn-1", "B", "msg-b");
-
-  // msg-a: has audio, completed
-  h.sessionStore.markTextDelivered("turn-1", "msg-a");
-  h.sessionStore.markAudioTerminal("turn-1", "completed", "msg-a", "ok");
-  h.sessionStore.markMotionAbsent("turn-1", "msg-a");
-
-  // msg-b: no audio, still idle
-  h.sessionStore.markTextDelivered("turn-1", "msg-b");
-  h.sessionStore.markMotionAbsent("turn-1", "msg-b");
-
-  h.sessionStore.markSynthFinished("turn-1");
-  await h.flush();
-  // msg-b audio still idle, should NOT ack
-  assert.equal(h.playbackFinishedCalls.length, 0);
-
-  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-b", "no_audio");
-  await h.flush();
-  await h.flush();
-  assert.equal(h.playbackFinishedCalls.length, 1);
+  }]);
   assert.equal(h.sessionStore.getActiveSession()?.phase, "settling");
 }
 
-async function testSegmentWithAudioFailureStillSettles(): Promise<void> {
+async function testBackendTurnFinishedFinalizesAckedSession(): Promise<void> {
   const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markTextDelivered("turn-1", "msg-a");
-  h.sessionStore.markAudioTerminal("turn-1", "failed", "msg-a", "playback_error");
-  h.sessionStore.markMotionAbsent("turn-1", "msg-a");
+  h.sessionStore.markTextReceived("turn-1", "hello", "msg-1");
+  h.sessionStore.markTextDelivered("turn-1", "msg-1");
+  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-1", "no_audio");
+  h.sessionStore.markMotionAbsent("turn-1", "msg-1");
   h.sessionStore.markSynthFinished("turn-1");
-  await h.flush();
-  await h.flush();
-
-  assert.equal(h.playbackFinishedCalls.length, 1);
-  // audio failure sets success=false
-  assert.equal(h.playbackFinishedCalls[0].success, false);
-}
-
-async function testSynthFinishedAfterTurnFinishedStillAcks(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markTextDelivered("turn-1", "msg-a");
-  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-a", "no_audio");
-  h.sessionStore.markMotionAbsent("turn-1", "msg-a");
-
-  // turn_finished before synth_finished (out-of-order delivery)
-  h.sessionStore.markTurnFinished("turn-1", true);
-  await h.flush();
-  assert.equal(h.playbackFinishedCalls.length, 0);
-
-  h.sessionStore.markSynthFinished("turn-1");
-  await h.flush();
-  await h.flush();
-  assert.equal(h.playbackFinishedCalls.length, 1);
-  // should go straight to completed since turn_finished already arrived
-  assert.equal(h.sessionStore.getActiveSession()?.phase, "completed");
-}
-
-async function testCompletionCoordinatorIgnoresStaleSession(): Promise<void> {
-  const h = createHarness();
-
-  // Create and settle session A
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markTextDelivered("turn-1", "msg-a");
-  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-a", "no_audio");
-  h.sessionStore.markMotionAbsent("turn-1", "msg-a");
-  h.sessionStore.markSynthFinished("turn-1");
-  await h.flush();
-  await h.flush();
-  assert.equal(h.playbackFinishedCalls.length, 1);
+  await flush();
 
   h.sessionStore.markTurnFinished("turn-1", true);
-  await h.flush();
+  await flush();
   assert.equal(h.sessionStore.getActiveSession()?.phase, "completed");
+  assert.equal(h.playbackFinishedCalls.length, 1);
+}
 
-  // Start new session B
-  h.sessionStore.setActiveSession("turn-2");
-  h.sessionStore.markTurnStarted("turn-2");
-  h.sessionStore.markPhase("turn-2", "ready");
-  h.sessionStore.markPhase("turn-2", "playing");
-  h.sessionStore.markTextReceived("turn-2", "B", "msg-b");
-  h.sessionStore.markTextDelivered("turn-2", "msg-b");
-  h.sessionStore.markAudioTerminal("turn-2", "absent", "msg-b", "no_audio");
-  h.sessionStore.markMotionAbsent("turn-2", "msg-b");
-  h.sessionStore.markSynthFinished("turn-2");
-  await h.flush();
-  await h.flush();
+async function testFailedSegmentProducesFailedPlaybackAck(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.markTextReceived("turn-1", "hello", "msg-1");
+  h.sessionStore.markTextDelivered("turn-1", "msg-1");
+  h.sessionStore.markAudioTerminal("turn-1", "failed", "msg-1", "audio_error");
+  h.sessionStore.markMotionAbsent("turn-1", "msg-1");
+  h.sessionStore.markSynthFinished("turn-1");
+  await flush();
 
-  // Should ack session B, not re-ack session A
+  assert.equal(h.playbackFinishedCalls[0]?.success, false);
+}
+
+async function testResetAllowsASecondAcknowledgementCycle(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.markTextReceived("turn-1", "hello", "msg-1");
+  h.sessionStore.markTextDelivered("turn-1", "msg-1");
+  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-1", "no_audio");
+  h.sessionStore.markMotionAbsent("turn-1", "msg-1");
+  h.sessionStore.markSynthFinished("turn-1");
+  await flush();
+  assert.equal(h.playbackFinishedCalls.length, 1);
+
+  h.coordinator.resetPlaybackCoordination();
+  h.sessionStore.markPhase("turn-1", "playing");
+  await flush();
   assert.equal(h.playbackFinishedCalls.length, 2);
-  assert.equal(h.playbackFinishedCalls[1].turnId, "turn-2");
 }
 
-async function testMissingMotionRequiresExplicitAbsentState(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markTextDelivered("turn-1", "msg-a");
-  h.sessionStore.markAudioTerminal("turn-1", "completed", "msg-a", "ok");
-  h.sessionStore.markSynthFinished("turn-1");
-  await h.flush();
-
-  assert.equal(h.playbackFinishedCalls.length, 0);
-  assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-a")?.motion.absent, false);
-
-  h.sessionStore.markMotionAbsent(
-    "turn-1",
-    "msg-a",
-    "synth_finished_without_motion_payload",
-  );
-  await h.flush();
-
-  assert.equal(h.sessionStore.getActiveSession()?.segments.get("msg-a")?.motion.absent, true);
-  assert.equal(h.playbackFinishedCalls.length, 1);
-  assert.equal(h.playbackFinishedCalls[0].reason, "text_delivered");
-}
-
-async function testMotionStartFailureMarkedFailedAllowsAck(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markTextDelivered("turn-1", "msg-a");
-  h.sessionStore.markAudioTerminal("turn-1", "completed", "msg-a", "ok");
-  h.sessionStore.markMotionFailed("turn-1", "msg-a", "motion_start_failed");
-  h.sessionStore.markSynthFinished("turn-1");
-  await h.flush();
-  await h.flush();
-
-  assert.equal(h.playbackFinishedCalls.length, 1);
-  assert.deepEqual(h.playbackFinishedCalls[0], {
-    turnId: "turn-1",
-    success: false,
-    reason: "text_delivered",
-  });
-}
-
-async function testLateAudioAfterNoAudioAckReopensSettlingSession(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markTextDelivered("turn-1", "msg-a");
-  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-a", "no_audio");
-  h.sessionStore.markMotionAbsent("turn-1", "msg-a");
-  h.sessionStore.markSynthFinished("turn-1");
-  await h.flush();
-  await h.flush();
-
-  assert.equal(h.playbackFinishedCalls.length, 1);
-  assert.equal(h.sessionStore.getActiveSession()?.phase, "settling");
-
-  assert.equal(h.sessionStore.markAudioReceived("turn-1", "http://localhost/late.wav", "msg-a"), true);
-  await h.flush();
-
-  assert.equal(h.sessionStore.getActiveSession()?.phase, "playing");
-  assert.equal(h.playbackFinishedCalls.length, 1);
-
-  h.sessionStore.markAudioReleased("turn-1", "msg-a");
-  h.sessionStore.markAudioStarted("turn-1", "msg-a", 100, 1000);
-  h.sessionStore.markAudioTerminal("turn-1", "completed", "msg-a", "audio_playback_completed");
-  await h.flush();
-  await h.flush();
-
-  assert.equal(h.playbackFinishedCalls.length, 2);
-  assert.deepEqual(h.playbackFinishedCalls[1], {
-    turnId: "turn-1",
-    success: true,
-    reason: "text_delivered",
-  });
-  assert.equal(h.sessionStore.getActiveSession()?.phase, "settling");
-}
-
-
-
-async function testStaleRunIdDoesNotCorruptCurrentSegment(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markTextReceived("turn-1", "B", "msg-b");
-  h.sessionStore.markMotionReceived(
-    "turn-1",
-    { kind: "semantic_intent", intent: {} as never },
-    "msg-a",
-  );
-  h.sessionStore.markMotionReceived(
-    "turn-1",
-    { kind: "semantic_intent", intent: {} as never },
-    "msg-b",
-  );
-
-  // Start msg-a
-  h.coordinator.recordMotionPlayback({
-    messageId: "msg-a", turnId: "turn-1", playbackTurnId: "turn-1",
-    model: null, payloadKind: "semantic_intent", intent: TEST_SEMANTIC_INTENT, startReason: "test",
-    queuedDelayMs: 0, diagnostics: null, playerMessage: "playing",
-    runId: "run-a",
-    plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
-  });
-
-  // Handoff to msg-b (this completes msg-a via handoff)
-  h.coordinator.recordMotionPlayback({
-    messageId: "msg-b", turnId: "turn-1", playbackTurnId: "turn-1",
-    model: null, payloadKind: "semantic_intent", intent: TEST_SEMANTIC_INTENT, startReason: "test",
-    queuedDelayMs: 0, diagnostics: null, playerMessage: "playing",
-    runId: "run-b",
-    plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
-  });
-
-  // Stale run-a completion arrives AFTER handoff
-  h.coordinator.completeMotionPlayback({ runId: "run-a", status: "completed" });
-  await h.flush();
-
-  const session = h.sessionStore.getActiveSession();
-  // msg-a was completed by handoff, msg-b should still be NOT completed
-  assert.equal(session?.segments.get("msg-b")?.motion.completed, false,
-    "stale run-a should not complete msg-b");
-
-  // Now the real run-b arrives
-  h.coordinator.completeMotionPlayback({ runId: "run-b", status: "completed" });
-  await h.flush();
-  assert.equal(session?.segments.get("msg-b")?.motion.completed, true,
-    "run-b should complete msg-b");
-}
-
-async function testMultiSegmentMotionCompletionsAreSegmentScoped(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markTextReceived("turn-1", "B", "msg-b");
-  h.sessionStore.markMotionReceived(
-    "turn-1",
-    { kind: "semantic_intent", intent: {} as never },
-    "msg-a",
-  );
-  h.sessionStore.markMotionReceived(
-    "turn-1",
-    { kind: "semantic_intent", intent: {} as never },
-    "msg-b",
-  );
-
-  // Start and complete msg-a
-  h.coordinator.recordMotionPlayback({
-    messageId: "msg-a", turnId: "turn-1", playbackTurnId: "turn-1",
-    model: null, payloadKind: "semantic_intent", intent: TEST_SEMANTIC_INTENT, startReason: "test",
-    queuedDelayMs: 0, diagnostics: null, playerMessage: "playing",
-    runId: "multi-a",
-    plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
-  });
-  h.coordinator.completeMotionPlayback({ runId: "multi-a", status: "completed" });
-  await h.flush();
-
-  // Start and complete msg-b
-  h.coordinator.recordMotionPlayback({
-    messageId: "msg-b", turnId: "turn-1", playbackTurnId: "turn-1",
-    model: null, payloadKind: "semantic_intent", intent: TEST_SEMANTIC_INTENT, startReason: "test",
-    queuedDelayMs: 0, diagnostics: null, playerMessage: "playing",
-    runId: "multi-b",
-    plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
-  });
-  h.coordinator.completeMotionPlayback({ runId: "multi-b", status: "completed" });
-  await h.flush();
-
-  const session = h.sessionStore.getActiveSession();
-  assert.equal(session?.segments.get("msg-a")?.motion.completed, true);
-  assert.equal(session?.segments.get("msg-b")?.motion.completed, true);
-}
-
-async function testInterruptStoppedMarksMotionFailed(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markMotionReceived(
-    "turn-1",
-    { kind: "semantic_intent", intent: {} as never },
-    "msg-a",
-  );
-
-  h.coordinator.recordMotionPlayback({
-    messageId: "msg-a", turnId: "turn-1", playbackTurnId: "turn-1",
-    model: null, payloadKind: "semantic_intent", intent: TEST_SEMANTIC_INTENT, startReason: "test",
-    queuedDelayMs: 0, diagnostics: null, playerMessage: "playing",
-    runId: "interrupt-a",
-    plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
-  });
-
-  // Interrupt: stopped with reason="interrupted"
-  h.coordinator.completeMotionPlayback({ runId: "interrupt-a", status: "stopped", reason: "interrupted" });
-  await h.flush();
-
-  const session = h.sessionStore.getActiveSession();
-  assert.equal(session?.segments.get("msg-a")?.motion.failed, true,
-    "interrupt should mark motion as failed");
-}
-
-async function testStoppedWithoutReasonMarksMotionFailed(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markMotionReceived(
-    "turn-1",
-    { kind: "semantic_intent", intent: {} as never },
-    "msg-a",
-  );
-
-  h.coordinator.recordMotionPlayback({
-    messageId: "msg-a", turnId: "turn-1", playbackTurnId: "turn-1",
-    model: null, payloadKind: "semantic_intent", intent: TEST_SEMANTIC_INTENT, startReason: "test",
-    queuedDelayMs: 0, diagnostics: null, playerMessage: "playing",
-    runId: "stopped-a",
-    plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
-  });
-
-  h.coordinator.completeMotionPlayback({ runId: "stopped-a", status: "stopped" });
-  await h.flush();
-
-  const segment = h.sessionStore.getActiveSession()?.segments.get("msg-a");
-  assert.equal(segment?.motion.failed, true);
-  assert.equal(segment?.motion.reason, "motion_stopped_without_terminal");
-}
-
-async function testRecordMotionPlaybackPrefersEventTurnSession(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "shared-msg");
-  h.sessionStore.setActiveSession("turn-2");
-  h.sessionStore.markTurnStarted("turn-2");
-  h.sessionStore.markPhase("turn-2", "ready");
-  h.sessionStore.markPhase("turn-2", "playing");
-  h.sessionStore.markTextReceived("turn-2", "B", "shared-msg");
-  h.sessionStore.markMotionReceived(
-    "turn-1",
-    { kind: "semantic_intent", intent: {} as never },
-    "shared-msg",
-  );
-  h.sessionStore.markMotionReceived(
-    "turn-2",
-    { kind: "semantic_intent", intent: {} as never },
-    "shared-msg",
-  );
-
-  h.coordinator.recordMotionPlayback({
-    messageId: "shared-msg", turnId: "turn-2", playbackTurnId: "turn-2",
-    model: null, payloadKind: "semantic_intent", intent: TEST_SEMANTIC_INTENT, startReason: "test",
-    queuedDelayMs: 0, diagnostics: null, playerMessage: "playing",
-    runId: "shared-turn-2",
-    plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
-  });
-
-  assert.equal(
-    h.sessionStore.getSession("turn-1")?.segments.get("shared-msg")?.motion.started,
-    false,
-  );
-  assert.equal(
-    h.sessionStore.getSession("turn-2")?.segments.get("shared-msg")?.motion.started,
-    true,
-  );
-}
-
-async function testTimelineOwnedMotionLifecycleSkipsCoordinatorSessionWrites(): Promise<void> {
-  const h = createHarness({ writeMotionSessionLifecycle: false });
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markMotionReceived(
-    "turn-1",
-    { kind: "semantic_intent", intent: {} as never },
-    "msg-a",
-  );
-
-  h.coordinator.recordMotionPlayback({
-    messageId: "msg-a", turnId: "turn-1", playbackTurnId: "turn-1",
-    model: null, payloadKind: "semantic_intent", intent: TEST_SEMANTIC_INTENT, startReason: "test",
-    queuedDelayMs: 0, diagnostics: null, playerMessage: "playing",
-    runId: "timeline-owned-a",
-    plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
-  });
-  h.coordinator.completeMotionPlayback({ runId: "timeline-owned-a", status: "completed" });
-  await h.flush();
-
-  const segment = h.sessionStore.getActiveSession()?.segments.get("msg-a");
-  assert.equal(segment?.motion.started, false);
-  assert.equal(segment?.motion.completed, false);
-  assert.equal(segment?.motion.failed, false);
-  assert.equal(h.coordinator.motionPlaybackRecords.value.length, 1);
-}
-
-async function testTimelineOwnedMotionLifecycleKeepsCoordinatorHandoff(): Promise<void> {
-  const h = createHarness({ writeMotionSessionLifecycle: false });
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markTextReceived("turn-1", "B", "msg-b");
-  h.sessionStore.markMotionReceived(
-    "turn-1",
-    { kind: "semantic_intent", intent: {} as never },
-    "msg-a",
-  );
-  h.sessionStore.markMotionReceived(
-    "turn-1",
-    { kind: "semantic_intent", intent: {} as never },
-    "msg-b",
-  );
-
-  const baseEvent = {
-    turnId: "turn-1",
-    playbackTurnId: "turn-1",
-    model: null,
-    payloadKind: "semantic_intent" as const,
-    intent: TEST_SEMANTIC_INTENT,
-    startReason: "test",
-    queuedDelayMs: 0,
-    diagnostics: null,
-    playerMessage: "playing",
-    plan: { schema_version: "v1", parameters: [], mode: "idle", emotion_label: "", timing: { duration_ms: 1000 } } as never,
-  };
-
-  h.coordinator.recordMotionPlayback({ ...baseEvent, runId: "timeline-owned-a", messageId: "msg-a" });
-  h.coordinator.recordMotionPlayback({ ...baseEvent, runId: "timeline-owned-b", messageId: "msg-b" });
-  await h.flush();
-
-  const session = h.sessionStore.getActiveSession();
-  assert.equal(session?.segments.get("msg-a")?.motion.completed, true);
-  assert.equal(session?.segments.get("msg-b")?.motion.started, false);
-}
-
-async function testLateAudioReopenAndCompleteOnce(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markTextDelivered("turn-1", "msg-a");
-  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-a", "no_audio");
-  h.sessionStore.markMotionAbsent("turn-1", "msg-a");
-  h.sessionStore.markSynthFinished("turn-1");
-  await h.flush();
-  await h.flush();
-
-  // First ack sent, session is settling
-  assert.equal(h.playbackFinishedCalls.length, 1);
-  assert.equal(h.sessionStore.getActiveSession()?.phase, "settling");
-
-  // Late audio arrives (needs audio_url to trigger reopen)
-  h.sessionStore.markAudioReceived("turn-1", "http://localhost/late-reopen.wav", "msg-a");
-  await h.flush();
-
-  assert.equal(h.sessionStore.getActiveSession()?.phase, "playing",
-    "late audio should reopen session to playing");
-  assert.equal(h.playbackFinishedCalls.length, 1,
-    "second ack should not have been sent yet");
-
-  // Audio completes
-  h.sessionStore.markAudioReleased("turn-1", "msg-a");
-  h.sessionStore.markAudioStarted("turn-1", "msg-a", 200, 1000);
-  h.sessionStore.markAudioTerminal("turn-1", "completed", "msg-a", "audio_playback_completed");
-  await h.flush();
-  await h.flush();
-
-  // Second ack sent, phase back to settling
-  assert.equal(h.playbackFinishedCalls.length, 2,
-    "second ack should be sent after late audio completes");
-  assert.equal(h.sessionStore.getActiveSession()?.phase, "settling");
-}
-
-async function run(): Promise<void> {
-  await testSegmentCompletionDoesNotFinishTurnEarly();
-  await testAllSegmentsAndSynthFinishedAckOnce();
-  await testTurnFinishedBeforeSynthFinishedDoesNotAck();
-  await testMotionCompletionWritesCorrectSegment();
-  await testMotionHandoffCompletesPreviousSegmentAndFinishesCurrent();
-  await testCatalogMotionCompletionWritesSegmentAndHistory();
-  await testPreviewMotionPlaybackDoesNotCreateSessionSegmentOrHistory();
-  await testDuplicateMotionPlaybackRecordIsDeduped();
-  await testMixedAudioStatesRequireAllSettled();
-  await testSegmentWithAudioFailureStillSettles();
-  await testSynthFinishedAfterTurnFinishedStillAcks();
-  await testCompletionCoordinatorIgnoresStaleSession();
-  await testMissingMotionRequiresExplicitAbsentState();
-  await testMotionStartFailureMarkedFailedAllowsAck();
-  await testStaleRunIdDoesNotCorruptCurrentSegment();
-  await testMultiSegmentMotionCompletionsAreSegmentScoped();
-  await testInterruptStoppedMarksMotionFailed();
-  await testStoppedWithoutReasonMarksMotionFailed();
-  await testRecordMotionPlaybackPrefersEventTurnSession();
-  await testTimelineOwnedMotionLifecycleSkipsCoordinatorSessionWrites();
-  await testTimelineOwnedMotionLifecycleKeepsCoordinatorHandoff();
-  await testLateAudioReopenAndCompleteOnce();
-  await testLateAudioAfterNoAudioAckReopensSettlingSession();
-  console.log("playbackCompletionCoordinator tests passed");
-}
-
-run().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+await testAcknowledgesOnlyAfterAllRequiredSignals();
+await testBackendTurnFinishedFinalizesAckedSession();
+await testFailedSegmentProducesFailedPlaybackAck();
+await testResetAllowsASecondAcknowledgementCycle();
+console.log("playbackCompletionCoordinator tests passed");

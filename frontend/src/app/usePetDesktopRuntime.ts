@@ -77,12 +77,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const playbackCoordinator = usePlaybackCompletionCoordinator({
     sessionStore,
     playbackAck,
-    motionRecord,
-    onMotionLabRawEvent: (payload, turnId) => {
-      adapter.sendMotionLabRawEvent(cloneJson(payload), turnId);
-    },
-    initialMotionPlaybackRecords,
-    writeMotionSessionLifecycle: false,
   });
   const motionPlaybackRecorder = useMotionPlaybackRecorder({
     motionRecord,
