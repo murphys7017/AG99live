@@ -1,4 +1,8 @@
-import type { SemanticAxisCoupling, SemanticAxisDefinition } from "../../../types/semantic-axis-profile.js";
+import type {
+  SemanticAxisDefinition,
+  SemanticAxisProfile,
+  SemanticAxisRelationRule,
+} from "../../../types/semantic-axis-profile.js";
 import type {
   DynamicAxisValues,
   MotionCompileContext,
@@ -28,7 +32,7 @@ export function runSemanticAxisRelationGraphStage(
     adjustments = applyHeadBodyRelations(
       context.state.controlledValues,
       context.state.derivedValues,
-      profile.couplings,
+      profile,
       context.state.axisById,
     );
   } catch (error) {
@@ -55,38 +59,39 @@ export function runSemanticAxisRelationGraphStage(
 function applyHeadBodyRelations(
   controlledValues: DynamicAxisValues,
   derivedValues: DynamicAxisValues,
-  couplings: readonly SemanticAxisCoupling[],
+  profile: SemanticAxisProfile,
   axisById: Map<string, SemanticAxisDefinition>,
 ): MotionAxisRelationAdjustment[] {
   const adjustments: MotionAxisRelationAdjustment[] = [];
+  const relationRules: readonly SemanticAxisRelationRule[] = profile.relation_graph
+    ? profile.relation_graph.edges.filter((edge) => edge.kind === "bounded_ratio")
+    : profile.couplings
+      .filter((coupling) =>
+        coupling.source_axis_id.startsWith("head_")
+        && coupling.target_axis_id.startsWith("body_"),
+      )
+      .map((coupling) => ({ ...coupling, kind: "bounded_ratio" as const }));
   const allValues = {
     ...controlledValues,
     ...derivedValues,
   };
 
-  for (const coupling of couplings) {
-    if (
-      !coupling.source_axis_id.startsWith("head_")
-      || !coupling.target_axis_id.startsWith("body_")
-    ) {
-      continue;
-    }
-
-    const sourceValue = allValues[coupling.source_axis_id];
-    const targetValue = allValues[coupling.target_axis_id];
+  for (const rule of relationRules) {
+    const sourceValue = allValues[rule.source_axis_id];
+    const targetValue = allValues[rule.target_axis_id];
     if (sourceValue === undefined || targetValue === undefined) {
       continue;
     }
 
-    const sourceAxis = axisById.get(coupling.source_axis_id);
-    const targetAxis = axisById.get(coupling.target_axis_id);
+    const sourceAxis = axisById.get(rule.source_axis_id);
+    const targetAxis = axisById.get(rule.target_axis_id);
     if (!sourceAxis || !targetAxis) {
-      throw new Error(`semantic_axis_relation_axis_missing:${coupling.id}`);
+      throw new Error(`semantic_axis_relation_axis_missing:${rule.id}`);
     }
 
     const sourceDelta = sourceValue - sourceAxis.neutral;
     const targetDelta = targetValue - targetAxis.neutral;
-    const hardCap = resolveHardCap(targetAxis, coupling.deadzone, coupling.max_delta);
+    const hardCap = resolveHardCap(targetAxis, rule.deadzone, rule.max_delta);
     const opposite = sourceDelta !== 0
       && targetDelta !== 0
       && sourceDelta * targetDelta < 0;
@@ -94,16 +99,16 @@ function applyHeadBodyRelations(
       ? Math.min(
         hardCap * 0.5,
         Math.max(
-          coupling.deadzone * 0.6,
-          Math.abs(sourceDelta) * (coupling.scale * 0.35)
-            + coupling.deadzone * 0.5,
+          rule.deadzone * 0.6,
+          Math.abs(sourceDelta) * (rule.scale * 0.35)
+            + rule.deadzone * 0.5,
         ),
       )
       : Math.min(
         hardCap,
         Math.max(
-          coupling.deadzone,
-          Math.abs(sourceDelta) * coupling.scale + coupling.deadzone,
+          rule.deadzone,
+          Math.abs(sourceDelta) * rule.scale + rule.deadzone,
         ),
       );
     const constrainedDelta = clamp(targetDelta, -limit, limit);
@@ -117,16 +122,16 @@ function applyHeadBodyRelations(
       continue;
     }
 
-    allValues[coupling.target_axis_id] = constrainedValue;
-    if (Object.prototype.hasOwnProperty.call(controlledValues, coupling.target_axis_id)) {
-      controlledValues[coupling.target_axis_id] = constrainedValue;
+    allValues[rule.target_axis_id] = constrainedValue;
+    if (Object.prototype.hasOwnProperty.call(controlledValues, rule.target_axis_id)) {
+      controlledValues[rule.target_axis_id] = constrainedValue;
     } else {
-      derivedValues[coupling.target_axis_id] = constrainedValue;
+      derivedValues[rule.target_axis_id] = constrainedValue;
     }
     adjustments.push({
-      ruleId: coupling.id,
-      sourceAxisId: coupling.source_axis_id,
-      targetAxisId: coupling.target_axis_id,
+      ruleId: rule.id,
+      sourceAxisId: rule.source_axis_id,
+      targetAxisId: rule.target_axis_id,
       before: targetValue,
       after: constrainedValue,
       reason: opposite ? "opposite_direction_limit" : "follow_direction_limit",

@@ -225,6 +225,11 @@ def test_default_semantic_axis_profile_uses_motion_axis_roles(tmp_path) -> None:
     assert axes["body_pitch"]["parameter_bindings"][0]["parameter_id"] == "BodyAngleY"
     couplings = {coupling["id"]: coupling for coupling in profile["couplings"]}
     assert couplings["head_yaw_to_body_yaw"]["scale"] == 0.5
+    relation_edges = {
+        edge["id"]: edge
+        for edge in profile["relation_graph"]["edges"]
+    }
+    assert relation_edges["head_yaw_to_body_yaw"]["kind"] == "bounded_ratio"
     assert axes["eye_open_left"]["control_role"] == "primary"
     assert axes["eye_open_left"]["neutral"] == 100.0
     assert axes["eye_open_left"]["parameter_bindings"][0]["invert"] is False
@@ -646,6 +651,44 @@ def test_validate_semantic_axis_profile_rejects_duplicate_coupling_id(tmp_path) 
     ]
 
     _expect_profile_error(profile, "Duplicate semantic axis coupling id")
+
+
+def test_validate_semantic_axis_profile_rejects_invalid_relation_graph_kind(tmp_path) -> None:
+    profile = _build_valid_profile(tmp_path)
+    source_axis_id = profile["axes"][0]["id"]
+    target_axis_id = profile["axes"][1]["id"]
+    profile["relation_graph"]["edges"] = [
+        {
+            "id": "invalid_kind",
+            "source_axis_id": source_axis_id,
+            "target_axis_id": target_axis_id,
+            "kind": "unknown",
+            "mode": "same_direction",
+            "scale": 1.0,
+            "deadzone": 0.0,
+            "max_delta": 1.0,
+        }
+    ]
+
+    _expect_profile_error(profile, "relation_graph\\.edge\\.kind")
+
+
+def test_validate_semantic_axis_profile_rejects_relation_graph_unknown_axis(tmp_path) -> None:
+    profile = _build_valid_profile(tmp_path)
+    profile["relation_graph"]["edges"] = [
+        {
+            "id": "unknown_target",
+            "source_axis_id": profile["axes"][0]["id"],
+            "target_axis_id": "missing_axis",
+            "kind": "derive",
+            "mode": "same_direction",
+            "scale": 1.0,
+            "deadzone": 0.0,
+            "max_delta": 1.0,
+        }
+    ]
+
+    _expect_profile_error(profile, "relation rule.*references an unknown axis")
 
 
 @pytest.mark.parametrize(

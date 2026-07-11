@@ -161,6 +161,31 @@ function buildProfile(): SemanticAxisProfile {
         max_delta: 12,
       },
     ],
+    relation_graph: {
+      schema_version: "ag99.semantic_axis_relation_graph.v1",
+      edges: [
+        {
+          id: "gaze_x_to_head_yaw",
+          source_axis_id: "gaze_x",
+          target_axis_id: "head_yaw",
+          kind: "derive",
+          mode: "same_direction",
+          scale: 0.25,
+          deadzone: 4,
+          max_delta: 10,
+        },
+        {
+          id: "head_yaw_to_body_yaw",
+          source_axis_id: "head_yaw",
+          target_axis_id: "body_yaw",
+          kind: "bounded_ratio",
+          mode: "same_direction",
+          scale: 0.35,
+          deadzone: 6,
+          max_delta: 12,
+        },
+      ],
+    },
   };
 }
 
@@ -1510,6 +1535,34 @@ function testRelationGraphLimitsOppositeHeadBodyMotion(): void {
   );
 }
 
+function testExplicitEmptyRelationGraphDoesNotReviveLegacyCouplings(): void {
+  const profile = buildProfile();
+  profile.relation_graph = {
+    schema_version: "ag99.semantic_axis_relation_graph.v1",
+    edges: [],
+  };
+
+  const result = compileMotionIntent(buildIntent({
+    axes: {
+      head_yaw: 80,
+    },
+  }), {
+    model: buildModel(profile),
+    targetDurationMs: 1200,
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.diagnostics.derivedAxes?.includes("body_yaw"), false);
+  assert.equal(
+    result.plan?.parameters.some((item) => item.parameter_id === "ParamBodyAngleX"),
+    false,
+  );
+}
+
 function run(): void {
   testRegistryCoreStageOrder();
   testNormalizeMotionPayloadAcceptsV3FlatAxes();
@@ -1540,6 +1593,7 @@ function run(): void {
   testSpeechPoseDoesNotUseGenericDerivedAxis();
   testSpeechPoseDoesNotOverwriteCouplingDerivedAxis();
   testRelationGraphLimitsOppositeHeadBodyMotion();
+  testExplicitEmptyRelationGraphDoesNotReviveLegacyCouplings();
   console.log("modelEngineCompiler tests passed");
 }
 

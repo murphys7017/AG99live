@@ -1,4 +1,8 @@
-import type { SemanticAxisDefinition } from "../../../types/semantic-axis-profile.js";
+import type {
+  SemanticAxisDefinition,
+  SemanticAxisProfile,
+  SemanticAxisRelationRule,
+} from "../../../types/semantic-axis-profile.js";
 import type {
   DynamicAxisValues,
   MotionCompileContext,
@@ -72,20 +76,25 @@ export function runCouplingStage(
 
 function applySemanticCouplings(
   sourceValues: DynamicAxisValues,
-  profile: NonNullable<MotionCompileContext["state"]["profile"]>,
+  profile: SemanticAxisProfile,
   axisById: Map<string, SemanticAxisDefinition>,
 ): { values: DynamicAxisValues; warnings: string[] } {
+  const couplings: SemanticAxisRelationRule[] = profile.relation_graph
+    ? profile.relation_graph.edges.filter(
+        (edge) => edge.kind === "derive" || edge.kind === "bounded_ratio",
+      )
+    : profile.couplings.map((coupling) => ({ ...coupling, kind: "derive" as const }));
   const baseValues: DynamicAxisValues = { ...sourceValues };
   let resolvedValues: DynamicAxisValues = { ...baseValues };
   const result: DynamicAxisValues = {};
   const warningSet = new Set<string>();
-  const maxPasses = Math.max(1, profile.couplings.length + 1);
+  const maxPasses = Math.max(1, couplings.length + 1);
 
   for (let pass = 0; pass < maxPasses; pass += 1) {
     const nextResolvedValues: DynamicAxisValues = { ...baseValues };
     const nextDerivedValues: DynamicAxisValues = {};
 
-    for (const coupling of profile.couplings) {
+    for (const coupling of couplings) {
       const sourceAxis = axisById.get(coupling.source_axis_id);
       const targetAxis = axisById.get(coupling.target_axis_id);
       if (!sourceAxis || !targetAxis) {

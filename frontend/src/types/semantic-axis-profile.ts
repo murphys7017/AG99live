@@ -1,4 +1,5 @@
 export const SCHEMA_SEMANTIC_AXIS_PROFILE_V1 = "ag99.semantic_axis_profile.v1";
+export const SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1 = "ag99.semantic_axis_relation_graph.v1";
 
 export type SemanticAxisControlRole =
   | "primary"
@@ -48,6 +49,24 @@ export interface SemanticAxisCoupling {
   max_delta: number;
 }
 
+export type SemanticAxisRelationRuleKind = "derive" | "bounded_ratio";
+
+export interface SemanticAxisRelationRule {
+  id: string;
+  source_axis_id: string;
+  target_axis_id: string;
+  kind: SemanticAxisRelationRuleKind;
+  mode: "same_direction" | "opposite_direction";
+  scale: number;
+  deadzone: number;
+  max_delta: number;
+}
+
+export interface SemanticAxisRelationGraph {
+  schema_version: typeof SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1;
+  edges: SemanticAxisRelationRule[];
+}
+
 export interface SemanticAxisProfile {
   schema_version: typeof SCHEMA_SEMANTIC_AXIS_PROFILE_V1;
   profile_id: string;
@@ -61,4 +80,5 @@ export interface SemanticAxisProfile {
   updated_at: string;
   axes: SemanticAxisDefinition[];
   couplings: SemanticAxisCoupling[];
+  relation_graph?: SemanticAxisRelationGraph;
 }

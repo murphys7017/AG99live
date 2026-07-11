@@ -9,10 +9,12 @@ from pathlib import Path
 from typing import Any, Mapping, NotRequired, TypedDict
 
 SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION = "ag99.semantic_axis_profile.v1"
+SEMANTIC_AXIS_RELATION_GRAPH_SCHEMA_VERSION = "ag99.semantic_axis_relation_graph.v1"
 SEMANTIC_AXIS_PROFILE_DIRNAME = "ag99"
 SEMANTIC_AXIS_PROFILE_FILENAME = "semantic_axis_profile.json"
 ALLOWED_CONTROL_ROLES = {"primary", "hint", "derived", "runtime", "ambient", "debug"}
 ALLOWED_COUPLING_MODES = {"same_direction", "opposite_direction"}
+ALLOWED_RELATION_RULE_KINDS = {"derive", "bounded_ratio"}
 AXIS_ID_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 AXIS_ID_MAX_LENGTH = 64
 
@@ -60,6 +62,22 @@ class SemanticAxisCoupling(TypedDict):
     max_delta: float
 
 
+class SemanticAxisRelationRule(TypedDict):
+    id: str
+    source_axis_id: str
+    target_axis_id: str
+    kind: str
+    mode: str
+    scale: float
+    deadzone: float
+    max_delta: float
+
+
+class SemanticAxisRelationGraph(TypedDict):
+    schema_version: str
+    edges: list[SemanticAxisRelationRule]
+
+
 class SemanticAxisProfile(TypedDict):
     schema_version: str
     profile_id: str
@@ -73,6 +91,7 @@ class SemanticAxisProfile(TypedDict):
     updated_at: str
     axes: list[SemanticAxisDefinition]
     couplings: list[SemanticAxisCoupling]
+    relation_graph: SemanticAxisRelationGraph
 
 
 _AXIS_ORDER = (
@@ -548,6 +567,7 @@ def build_default_semantic_axis_profile(
         for item in _COUPLING_DEFAULTS
         if item["source_axis_id"] in axis_ids and item["target_axis_id"] in axis_ids
     ]
+    relation_graph = _build_relation_graph_from_couplings(couplings)
 
     timestamp = _utc_now_iso()
     return {
@@ -563,6 +583,131 @@ def build_default_semantic_axis_profile(
         "updated_at": timestamp,
         "axes": axes,
         "couplings": couplings,
+        "relation_graph": relation_graph,
+    }
+
+
+def _build_relation_graph_from_couplings(
+    couplings: list[SemanticAxisCoupling],
+) -> SemanticAxisRelationGraph:
+    edges: list[SemanticAxisRelationRule] = []
+    for coupling in couplings:
+        source_axis_id = coupling["source_axis_id"]
+        target_axis_id = coupling["target_axis_id"]
+        kind = (
+            "bounded_ratio"
+            if source_axis_id.startswith("head_") and target_axis_id.startswith("body_")
+            else "derive"
+        )
+        edges.append(
+            {
+                "id": coupling["id"],
+                "source_axis_id": source_axis_id,
+                "target_axis_id": target_axis_id,
+                "kind": kind,
+                "mode": coupling["mode"],
+                "scale": coupling["scale"],
+                "deadzone": coupling["deadzone"],
+                "max_delta": coupling["max_delta"],
+            }
+        )
+    return {
+        "schema_version": SEMANTIC_AXIS_RELATION_GRAPH_SCHEMA_VERSION,
+        "edges": edges,
+    }
+
+
+def _normalize_relation_graph(
+    raw_graph: Any,
+    *,
+    axis_ids: set[str],
+) -> SemanticAxisRelationGraph:
+    if not isinstance(raw_graph, Mapping):
+        raise SemanticAxisProfileError("SemanticAxisProfile relation_graph must be an object.")
+    schema_version = str(raw_graph.get("schema_version") or "").strip()
+    if schema_version != SEMANTIC_AXIS_RELATION_GRAPH_SCHEMA_VERSION:
+        raise SemanticAxisProfileError(
+            "SemanticAxisProfile relation_graph has an unsupported schema_version."
+        )
+    raw_edges = raw_graph.get("edges")
+    if not isinstance(raw_edges, list):
+        raise SemanticAxisProfileError("SemanticAxisProfile relation_graph.edges must be an array.")
+
+    normalized_edges: list[SemanticAxisRelationRule] = []
+    seen_ids: set[str] = set()
+    derive_edges: list[SemanticAxisCoupling] = []
+    for raw_edge in raw_edges:
+        if not isinstance(raw_edge, Mapping):
+            raise SemanticAxisProfileError(
+                "SemanticAxisProfile relation_graph edge entries must be objects."
+            )
+        edge_id = _require_non_empty_string(raw_edge.get("id"), field_name="relation_graph.edge.id")
+        if edge_id in seen_ids:
+            raise SemanticAxisProfileError(
+                f"Duplicate semantic axis relation rule id: `{edge_id}`."
+            )
+        seen_ids.add(edge_id)
+        source_axis_id = _require_non_empty_string(
+            raw_edge.get("source_axis_id"),
+            field_name="relation_graph.edge.source_axis_id",
+        )
+        target_axis_id = _require_non_empty_string(
+            raw_edge.get("target_axis_id"),
+            field_name="relation_graph.edge.target_axis_id",
+        )
+        if source_axis_id == target_axis_id:
+            raise SemanticAxisProfileError(
+                f"SemanticAxisProfile relation rule `{edge_id}` cannot target its source axis."
+            )
+        if source_axis_id not in axis_ids or target_axis_id not in axis_ids:
+            raise SemanticAxisProfileError(
+                f"SemanticAxisProfile relation rule `{edge_id}` references an unknown axis."
+            )
+        kind = _require_allowed_string(
+            raw_edge.get("kind"),
+            field_name="relation_graph.edge.kind",
+            allowed_values=ALLOWED_RELATION_RULE_KINDS,
+        )
+        mode = _require_allowed_string(
+            raw_edge.get("mode"),
+            field_name="relation_graph.edge.mode",
+            allowed_values=ALLOWED_COUPLING_MODES,
+        )
+        scale = _coerce_float(raw_edge.get("scale"), field_name="relation_graph.edge.scale")
+        deadzone = _coerce_float(raw_edge.get("deadzone"), field_name="relation_graph.edge.deadzone")
+        max_delta = _coerce_float(raw_edge.get("max_delta"), field_name="relation_graph.edge.max_delta")
+        if min(scale, deadzone, max_delta) < 0.0:
+            raise SemanticAxisProfileError(
+                f"SemanticAxisProfile relation rule `{edge_id}` contains a negative limit."
+            )
+        normalized_edge: SemanticAxisRelationRule = {
+            "id": edge_id,
+            "source_axis_id": source_axis_id,
+            "target_axis_id": target_axis_id,
+            "kind": kind,
+            "mode": mode,
+            "scale": scale,
+            "deadzone": deadzone,
+            "max_delta": max_delta,
+        }
+        normalized_edges.append(normalized_edge)
+        if kind == "derive":
+            derive_edges.append(
+                {
+                    "id": edge_id,
+                    "source_axis_id": source_axis_id,
+                    "target_axis_id": target_axis_id,
+                    "mode": mode,
+                    "scale": scale,
+                    "deadzone": deadzone,
+                    "max_delta": max_delta,
+                }
+            )
+
+    _reject_coupling_cycles(derive_edges)
+    return {
+        "schema_version": SEMANTIC_AXIS_RELATION_GRAPH_SCHEMA_VERSION,
+        "edges": normalized_edges,
     }
 
 
@@ -824,6 +969,14 @@ def validate_semantic_axis_profile(
             coupling_target_owners[target_axis_id] = coupling_id
 
     _reject_coupling_cycles(normalized_couplings)
+    relation_graph = (
+        _build_relation_graph_from_couplings(normalized_couplings)
+        if profile_payload.get("relation_graph") is None
+        else _normalize_relation_graph(
+            profile_payload.get("relation_graph"),
+            axis_ids=seen_axis_ids,
+        )
+    )
 
     return {
         "schema_version": SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION,
@@ -838,6 +991,7 @@ def validate_semantic_axis_profile(
         "updated_at": updated_at,
         "axes": normalized_axes,
         "couplings": normalized_couplings,
+        "relation_graph": relation_graph,
     }
 
 
