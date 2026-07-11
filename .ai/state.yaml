@@ -1,8 +1,8 @@
 task:
   class: refactor
   risk: medium
-  phase: unified_playback_timeline_completion_coordinator_cleanup
-  scope: Frontend playback completion coordinator cleanup during unified timeline migration
+  phase: semantic_motion_model_engine_migration
+  scope: Move semantic motion validation and axis processing into ModelEngine
 context:
   confidence: medium
   assumptions:
@@ -58,10 +58,13 @@ context:
     - motion_catalog.json may enrich fallback pose descriptions and catalog-derived semantic candidates only when the motion can be mapped to semantic axes.
     - fallback_pose_id remains a semantic-axis fallback selector, not a motion3/catalog playback selector.
     - Motion prompt static/dynamic scope metadata improves render-tree selection and diagnostics, but model input token reduction still depends on AstrBot/provider static prefix caching or session-level reuse.
-    - Skeleton repair may add missing head/body/gaze axes from fallback semantic axes and may replace neutralish skeleton axes, but it must not overwrite non-neutral LLM axes.
+    - Main Persona Effect motion no longer performs backend skeleton repair or fallback pose replacement; remaining fallback candidate data is prompt/diagnostic metadata until an explicit Engine-stage policy is implemented.
     - Empty, invalid, or all-neutral motion axes should not be replaced by a fallback pose; those turns should be treated as no valid motion input.
     - AdapterConnection now exposes playback timeline operations through the aggregated playbackTimeline port; production callers should not depend on scattered root-level timeline methods.
     - PetDesktopRuntime now delegates playback timeline motion wiring and segment execution wiring to app-level helpers, keeping the desktop runtime from owning bridge details directly.
+    - Semantic motion processing is now migrating into ModelEngine: the adapter preserves numeric intent values without semantic clamping, fallback pose repair, expressive floor, or head/body constraint rewriting.
+    - ModelEngine now rejects invalid axes and exact-neutral semantic inputs with structured compile feedback, then applies the mounted semantic axis relation graph before plan building.
+    - TurnCoordinator only validates and transports v3 motion payloads; it no longer applies semantic axis constraints.
   unresolved_questions:
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.
@@ -144,6 +147,8 @@ architecture:
     - PlaybackCompletionCoordinator no longer accepts motionPlayer, schedule, or clearSchedule dependencies and no longer keeps an activeMotionSegments shadow set; it observes SessionStore settlement, records motion playback history, and handles current run handoff only.
     - PlaybackTimeline segment job release ordering now lives in playback-timeline/segmentJobExecutor.ts; PlaybackTimelineRuntime supplies timeline sink operations and keeps direct timeline map/engine ownership.
     - TTS/audio expected timeout is an audio failure, not an explicit no-audio segment; it releases only visible text, marks unreleased motion failed, and blocks late audio/motion from reviving the segment.
+    - SemanticAxisRelationGraphStage is the single ModelEngine owner for head/body relation constraints; coupling and speech pose produce candidates before the graph resolves final values.
+    - Motion compile diagnostics now include MotionFeedback and a raw/resolved/derived/constrained/compiled transform trace for Motion Lab correlation.
 verification:
   checks_run:
     - npm run test:playback-timeline

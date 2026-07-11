@@ -3,6 +3,7 @@ import { intentValidatorStage } from "./stages/intentValidator.js";
 import { axisResolverStage } from "./stages/axisResolver.js";
 import { intensityStage } from "./stages/intensityStage.js";
 import { couplingStage } from "./stages/couplingStage.js";
+import { semanticAxisRelationGraphStage } from "./stages/semanticAxisRelationGraphStage.js";
 import { speechPoseStage } from "./stages/speechPoseStage.js";
 import { modeResolverStage } from "./stages/modeResolverStage.js";
 import { timingStage } from "./stages/timingStage.js";
@@ -41,7 +42,7 @@ const registrations: ModelEngineCompileStageRegistration[] = [
     enabled: () => true,
   },
   {
-    id: "coupling",
+    id: "derivedCandidates",
     stage: couplingStage,
     order: 40,
     kind: "core",
@@ -55,23 +56,30 @@ const registrations: ModelEngineCompileStageRegistration[] = [
     enabled: () => true,
   },
   {
+    id: "semanticAxisRelationGraph",
+    stage: semanticAxisRelationGraphStage,
+    order: 50,
+    kind: "core",
+    enabled: () => true,
+  },
+  {
     id: "modeResolver",
     stage: modeResolverStage,
-    order: 50,
+    order: 60,
     kind: "core",
     enabled: () => true,
   },
   {
     id: "timing",
     stage: timingStage,
-    order: 60,
+    order: 70,
     kind: "core",
     enabled: () => true,
   },
   {
     id: "planBuilder",
     stage: planBuilderStage,
-    order: 70,
+    order: 80,
     kind: "core",
     enabled: () => true,
   },

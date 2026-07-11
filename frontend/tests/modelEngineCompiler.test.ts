@@ -826,7 +826,7 @@ function testRevisionMismatchBecomesWarningInsteadOfCompileFailure(): void {
   );
 }
 
-function testCompileSalvagesValidAxesWhenIntentContainsManyInvalidAxes(): void {
+function testCompileRejectsInvalidAxesInsteadOfSalvaging(): void {
   const profile = buildProfile();
   const result = compileMotionIntent(buildIntent({
     axes: {
@@ -843,20 +843,36 @@ function testCompileSalvagesValidAxesWhenIntentContainsManyInvalidAxes(): void {
     },
   });
 
-  assert.equal(result.ok, true);
-  assert.ok(result.plan);
-  assert.equal(
-    result.plan?.parameters.some((item) => item.parameter_id === "ParamMouthForm"),
-    true,
-  );
+  assert.equal(result.ok, false);
+  assert.equal(result.plan, null);
+  assert.equal(result.feedback?.code.startsWith("semantic_axis_validation_failed:"), true);
   assert.equal(
     result.diagnostics.warnings?.includes("semantic_axis_ignored_unknown:unknown_a"),
     true,
   );
   assert.equal(
-    result.diagnostics.warnings?.includes("semantic_axis_error_rate_exceeded_but_salvaged:3/3"),
-    true,
+    result.diagnostics.invalidAxes?.length,
+    3,
   );
+}
+
+function testCompileRejectsAllNeutralSemanticAxes(): void {
+  const result = compileMotionIntent(buildIntent({
+    axes: {
+      head_yaw: 50,
+      mouth_smile: 50,
+    },
+  }), {
+    model: buildModel(buildProfile()),
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "semantic_axes_all_neutral");
+  assert.equal(result.feedback?.code, "semantic_axes_all_neutral");
 }
 
 function testCompileSkipsInvalidBindingsAndKeepsUsableParameters(): void {
@@ -1412,14 +1428,15 @@ function testRegistryCoreStageOrder(): void {
   const coreStages = registrations.filter((r) => r.kind === "core");
   const extensionStages = registrations.filter((r) => r.kind === "extension");
 
-  assert.equal(coreStages.length, 7);
+  assert.equal(coreStages.length, 8);
   assert.equal(extensionStages.length, 1);
 
   const expectedOrder = [
     "intentValidator",
     "axisResolver",
     "intensity",
-    "coupling",
+    "derivedCandidates",
+    "semanticAxisRelationGraph",
     "modeResolver",
     "timing",
     "planBuilder",
@@ -1430,7 +1447,7 @@ function testRegistryCoreStageOrder(): void {
   assert.equal(extensionStages[0].id, "speechPose");
   assert.equal(extensionStages[0].order, 45);
   assert.ok(
-    registrations.find((r) => r.id === "coupling")!.order
+    registrations.find((r) => r.id === "derivedCandidates")!.order
       < extensionStages[0].order,
   );
   assert.ok(
@@ -1450,6 +1467,49 @@ function testRegistryCoreStageOrder(): void {
   }
 }
 
+function testRelationGraphLimitsOppositeHeadBodyMotion(): void {
+  const profile = buildProfile();
+  profile.axes = profile.axes.map((axis) =>
+    axis.id === "body_yaw"
+      ? { ...axis, control_role: "primary" }
+      : axis,
+  );
+
+  const result = compileMotionIntent(buildIntent({
+    axes: {
+      head_yaw: 90,
+      body_yaw: 10,
+    },
+  }), {
+    model: buildModel(profile),
+    targetDurationMs: 1200,
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  const bodyYaw = result.plan?.parameters.find(
+    (item) => item.parameter_id === "ParamBodyAngleX",
+  );
+  assert.ok(bodyYaw);
+  assert.equal(bodyYaw?.input_value, 42.1);
+  assert.equal(
+    result.diagnostics.relationAdjustments?.some(
+      (item) => item.ruleId === "head_yaw_to_body_yaw"
+        && item.targetAxisId === "body_yaw"
+        && item.before === 10
+        && item.after === 42.1,
+    ),
+    true,
+  );
+  assert.equal(
+    result.diagnostics.transformTrace?.constrainedAxes.body_yaw,
+    42.1,
+  );
+}
+
 function run(): void {
   testRegistryCoreStageOrder();
   testNormalizeMotionPayloadAcceptsV3FlatAxes();
@@ -1462,7 +1522,8 @@ function run(): void {
   testExplicitPrimaryAxisIsNotOverwrittenByCoupling();
   testAxisIntensityScaleAffectsOnlyTargetAxis();
   testRevisionMismatchBecomesWarningInsteadOfCompileFailure();
-  testCompileSalvagesValidAxesWhenIntentContainsManyInvalidAxes();
+  testCompileRejectsInvalidAxesInsteadOfSalvaging();
+  testCompileRejectsAllNeutralSemanticAxes();
   testCompileSkipsInvalidBindingsAndKeepsUsableParameters();
   testSpeechPoseAppliesForSpeechLinkedIdleIntent();
   testPerformanceCurveHintAdjustsExpressiveTiming();
@@ -1478,6 +1539,7 @@ function run(): void {
   testSpeechPoseDoesNotApplyWithoutSpeechActive();
   testSpeechPoseDoesNotUseGenericDerivedAxis();
   testSpeechPoseDoesNotOverwriteCouplingDerivedAxis();
+  testRelationGraphLimitsOppositeHeadBodyMotion();
   console.log("modelEngineCompiler tests passed");
 }
 

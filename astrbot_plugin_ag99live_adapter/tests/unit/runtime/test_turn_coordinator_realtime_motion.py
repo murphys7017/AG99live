@@ -988,7 +988,7 @@ def test_broadcast_motion_payload_records_prompt_motion_snapshot(
     assert snapshot["axes"]["mouth_smile"] == 64.0
 
 
-def test_broadcast_motion_payload_applies_engine_axis_constraints(
+def test_broadcast_motion_payload_preserves_axes_for_model_engine(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1041,8 +1041,8 @@ def test_broadcast_motion_payload_applies_engine_axis_constraints(
     assert sent is True
     envelope = sent_payloads[0]
     intent = envelope["payload"]["intent"]
-    assert intent["axes"]["body_yaw"] == 45.15
-    assert intent["summary"]["axis_constraint_adjusted_axes"] == ["body_yaw"]
+    assert intent["axes"]["body_yaw"] == 28.0
+    assert "axis_constraint_adjusted_axes" not in intent["summary"]
 
 
 def test_broadcast_motion_payload_attaches_ready_performance_curve_hint(

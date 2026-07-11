@@ -9,6 +9,7 @@ import type {
 import type {
   CompileDiagnostics,
   CompileOptions,
+  MotionAxisRelationAdjustment,
   MotionTimingResolution,
 } from "./contracts.js";
 import type { ModelEngineSettings } from "../settings.js";
@@ -47,6 +48,8 @@ export interface MotionCompileMutableState {
 
   axisErrorCount: number;
   axisErrorLimit: number;
+
+  relationAdjustments: MotionAxisRelationAdjustment[];
 
   warnings: string[];
 
@@ -94,6 +97,7 @@ export function createInitialCompileState(): MotionCompileMutableState {
     invalidAxes: [],
     axisErrorCount: 0,
     axisErrorLimit: 0,
+    relationAdjustments: [],
     warnings: [],
     resolvedMode: "idle",
     timing: null,

@@ -1,4 +1,5 @@
 import type { CompileDiagnostics, CompileOptions } from "./contracts.js";
+import type { MotionTransformTrace } from "./contracts.js";
 import type { MotionCompileContext } from "./compileContext.js";
 import type { ModelEngineSettings } from "../settings.js";
 
@@ -92,6 +93,19 @@ function buildVisibilityDiagnostics(
     expressiveAxisCount,
     semanticAxisCount: Object.keys(context.state.allAxisValues).length,
     couplingSkippedExplicitTargets: collectCouplingSkippedExplicitTargets(context.state.warnings),
+    relationAdjustments: [...context.state.relationAdjustments],
+    transformTrace: buildTransformTrace(context),
+  };
+}
+
+function buildTransformTrace(context: MotionCompileContext): MotionTransformTrace {
+  return {
+    rawAxes: { ...context.intent.axes },
+    resolvedAxes: { ...context.state.controlledValues },
+    derivedAxes: { ...context.state.derivedValues },
+    constrainedAxes: { ...context.state.allAxisValues },
+    relationAdjustments: [...context.state.relationAdjustments],
+    compiledParameters: context.state.parameters.map((item) => item.parameter_id),
   };
 }
 

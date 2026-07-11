@@ -3,19 +3,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from ..motion.axis_constraints import apply_motion_constraints_to_intent_payload
-from ..motion.fallback_pose import (
-    build_fallback_pose_candidates,
-    repair_motion_axes_with_fallback_pose,
-    resolve_fallback_pose,
-)
 from ..motion.motion_intent import (
-    _apply_semantic_expressive_floor,
     DEFAULT_MOTION_INTENT_DURATION_MS,
     MOTION_INTENT_V3_SCHEMA_VERSION,
     derive_motion_emotion_label,
-    derive_motion_fallback_decision,
-    describe_motion_axes_for_fallback,
     normalize_motion_intent_tags,
     normalize_motion_resource_id,
     resolve_selected_semantic_axis_profile,
@@ -73,9 +64,6 @@ def normalize_motion_arguments_payload(
     emotion_label = derive_motion_emotion_label(intent_tags)
     resource_id = normalize_motion_resource_id(motion_hint.get("resource_id"))
     axes = motion_hint.get("axes")
-    expressive_floor_emotion = emotion_label
-    repair_added_axes: list[str] = []
-    repair_replaced_axes: list[str] = []
     validated_axes, rejected_axes = normalize_plugin_hint_axes(
         axes,
         semantic_profile,
@@ -91,18 +79,9 @@ def normalize_motion_arguments_payload(
             reason,
             "rejected_axes:" + ",".join(rejected_axes),
         )
-    if validated_axes and are_motion_axes_all_neutralish(validated_axes, semantic_profile):
-        validated_axes = None
-        reason = append_resolution_reason(reason, "axes_all_neutral")
     if not validated_axes:
         reason = append_resolution_reason(reason, "axes_empty_or_invalid")
 
-    fallback_candidates = build_fallback_pose_candidates(
-        runtime_state=runtime_state,
-        semantic_profile=semantic_profile,
-        limit=None,
-        require_non_neutral_skeleton=True,
-    )
     resource_candidates = build_motion_resource_candidates(
         runtime_state=runtime_state,
     )
@@ -114,60 +93,8 @@ def normalize_motion_arguments_payload(
     if resource_reason:
         reason = append_resolution_reason(reason, resource_reason)
 
-    fallback_decision = derive_motion_fallback_decision(
-        candidates=fallback_candidates,
-        intent_tags=intent_tags,
-        resource_id=resource_id,
-        axes=validated_axes if isinstance(validated_axes, dict) else axes,
-        describe_axes=lambda value: describe_motion_axes_for_fallback(
-            value,
-            semantic_profile=semantic_profile,
-        ),
-    )
-    fallback_pose_id = fallback_decision.fallback_pose_id
-
-    if not validated_axes:
-        reason = append_resolution_reason(reason, "motion_axes_unusable_no_replacement")
-        return None, reason
-
-    else:
-        fallback_resolution = resolve_fallback_pose(
-            runtime_state=runtime_state,
-            semantic_profile=semantic_profile,
-            fallback_pose_id=fallback_pose_id,
-            require_non_neutral_skeleton=True,
-        )
-        if fallback_resolution is not None:
-            (
-                validated_axes,
-                repair_added_axes,
-                repair_replaced_axes,
-            ) = repair_motion_axes_with_fallback_pose(
-                axes=validated_axes,
-                semantic_profile=semantic_profile,
-                fallback_axes=fallback_resolution.axes,
-            )
-            if repair_added_axes:
-                reason = append_resolution_reason(
-                    reason,
-                    f"skeleton_repair_added:{','.join(repair_added_axes)}",
-                )
-            if repair_replaced_axes:
-                reason = append_resolution_reason(
-                    reason,
-                    f"skeleton_repair_replaced:{','.join(repair_replaced_axes)}",
-                )
-        else:
-            fallback_pose_id = ""
-
     if not validated_axes:
         return None, reason
-
-    validated_axes = _apply_semantic_expressive_floor(
-        axes=validated_axes,
-        emotion=expressive_floor_emotion,
-        semantic_profile=semantic_profile,
-    )
 
     duration_hint_ms = normalize_duration_hint_ms(motion_hint.get("duration_hint_ms"))
     summary = build_motion_visibility_summary(
@@ -175,13 +102,13 @@ def normalize_motion_arguments_payload(
         semantic_profile=semantic_profile,
         intent_tags=intent_tags,
         resource_id=resource_id,
-        fallback_pose_id=fallback_pose_id,
-        fallback_reasons=fallback_decision.reasons,
-        fallback_score=fallback_decision.score,
-        fallback_used=fallback_decision.fallback_missing or not bool(axes),
-        matched_candidate_id=fallback_decision.matched_candidate_id,
-        repair_added_axes=repair_added_axes,
-        repair_replaced_axes=repair_replaced_axes,
+        fallback_pose_id="",
+        fallback_reasons=[],
+        fallback_score=0.0,
+        fallback_used=False,
+        matched_candidate_id="",
+        repair_added_axes=[],
+        repair_replaced_axes=[],
     )
 
     payload = {
@@ -194,19 +121,10 @@ def normalize_motion_arguments_payload(
         "emotion_label": emotion_label,
         "duration_hint_ms": duration_hint_ms,
         "resource_id": resource_id,
-        "fallback_pose_id": fallback_pose_id,
+        "fallback_pose_id": "",
         "axes": validated_axes,
         "summary": summary,
     }
-    payload, constraint_result = apply_motion_constraints_to_intent_payload(
-        payload=payload,
-        semantic_profile=semantic_profile,
-    )
-    if constraint_result.adjusted_axes:
-        reason = append_resolution_reason(
-            reason,
-            "axis_constraints:" + ",".join(constraint_result.adjusted_axes),
-        )
     return payload, reason
 
 
@@ -228,6 +146,7 @@ def are_motion_axes_all_neutralish(
     axes: dict[str, float],
     semantic_profile: dict[str, Any],
 ) -> bool:
+    """Describe neutrality for prompt diagnostics without changing the payload."""
     if not axes:
         return False
     axis_by_id = build_prompt_axis_lookup(semantic_profile)
@@ -249,24 +168,11 @@ def normalize_plugin_hint_axes(
     if not isinstance(axes, dict) or not axes:
         return None, []
 
-    prompt_axes = profile_prompt_axes(semantic_profile)
-    axis_by_id = {
-        str(axis.get("id") or "").strip(): axis
-        for axis in prompt_axes
-        if str(axis.get("id") or "").strip()
-    }
-    if not axis_by_id:
-        return None, []
-
     normalized_axes: dict[str, float] = {}
     rejected_axes: list[str] = []
     for axis_id_raw, axis_value in axes.items():
         axis_id = str(axis_id_raw or "").strip()
         if not axis_id:
-            continue
-        axis = axis_by_id.get(axis_id)
-        if axis is None:
-            rejected_axes.append(axis_id)
             continue
         if isinstance(axis_value, dict):
             rejected_axes.append(axis_id)
@@ -276,7 +182,7 @@ def normalize_plugin_hint_axes(
             rejected_axes.append(axis_id)
             continue
 
-        normalized_axes[axis_id] = coerce_plugin_hint_axis_value(number, axis)
+        normalized_axes[axis_id] = round(number, 4)
 
     if not normalized_axes:
         return None, rejected_axes
@@ -285,9 +191,9 @@ def normalize_plugin_hint_axes(
 
 
 def coerce_plugin_hint_axis_value(raw_value: float, axis: dict[str, Any]) -> float:
-    min_value, max_value = resolve_axis_value_range(axis)
-    clamped = max(min_value, min(max_value, raw_value))
-    return round(clamped, 4)
+    """Keep numeric coercion available to prompt tooling without semantic clamping."""
+    del axis
+    return round(float(raw_value), 4)
 
 
 def _coerce_effect_axis_number(value: Any) -> float | None:

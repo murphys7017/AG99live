@@ -63,6 +63,32 @@ export interface CompileDiagnostics {
   expressiveAxisCount?: number;
   semanticAxisCount?: number;
   couplingSkippedExplicitTargets?: string[];
+  relationAdjustments?: MotionAxisRelationAdjustment[];
+  transformTrace?: MotionTransformTrace;
+}
+
+export interface MotionAxisRelationAdjustment {
+  ruleId: string;
+  sourceAxisId?: string;
+  targetAxisId: string;
+  before: number;
+  after: number;
+  reason: string;
+}
+
+export interface MotionTransformTrace {
+  rawAxes: Record<string, number>;
+  resolvedAxes: Record<string, number>;
+  derivedAxes: Record<string, number>;
+  constrainedAxes: Record<string, number>;
+  relationAdjustments: MotionAxisRelationAdjustment[];
+  compiledParameters: string[];
+}
+
+export interface MotionFeedback {
+  code: string;
+  message: string;
+  fields: string[];
 }
 
 export interface CompileResult {
@@ -70,4 +96,5 @@ export interface CompileResult {
   plan: MotionPlanPayload | null;
   reason: string;
   diagnostics: CompileDiagnostics;
+  feedback?: MotionFeedback;
 }

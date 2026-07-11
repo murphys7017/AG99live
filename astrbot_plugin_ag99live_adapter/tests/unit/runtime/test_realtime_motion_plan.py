@@ -5,7 +5,6 @@ import json
 
 import pytest
 
-from astrbot_plugin_ag99live_adapter.motion.axis_constraints import apply_motion_constraints_to_intent_payload
 from astrbot_plugin_ag99live_adapter.motion.realtime_motion_plan import (
     RealtimeMotionPlanGenerator,
     normalize_motion_intent_payload,
@@ -300,72 +299,6 @@ def test_normalize_motion_intent_payload_rejects_v2_semantic_axes() -> None:
         )
 
 
-def test_apply_motion_constraints_to_intent_payload_limits_opposite_body_yaw() -> None:
-    semantic_profile = {
-        "axes": [
-            {
-                "id": "head_yaw",
-                "neutral": 50,
-                "value_range": [0, 100],
-                "strong_range": [30, 70],
-            },
-            {
-                "id": "body_yaw",
-                "neutral": 50,
-                "value_range": [0, 100],
-                "strong_range": [38, 62],
-            },
-        ],
-        "couplings": [],
-    }
-    payload, constraint_result = apply_motion_constraints_to_intent_payload(
-        payload={
-            "schema_version": "engine.motion_intent.v3",
-            "axes": {
-                "head_yaw": 72.0,
-                "body_yaw": 28.0,
-            },
-            "summary": {
-                "axis_count": 2,
-            },
-        },
-        semantic_profile=semantic_profile,
-    )
-
-    assert constraint_result.adjusted_axes == ["body_yaw"]
-    assert payload["axes"]["body_yaw"] == 45.15
-    assert payload["summary"]["axis_constraint_adjusted_axes"] == ["body_yaw"]
-
-
-def test_apply_motion_constraints_to_intent_payload_keeps_body_only_pose_within_cap() -> None:
-    semantic_profile = {
-        "axes": [
-            {
-                "id": "body_yaw",
-                "neutral": 50,
-                "value_range": [0, 100],
-                "strong_range": [38, 62],
-            },
-        ],
-        "couplings": [],
-    }
-    payload, constraint_result = apply_motion_constraints_to_intent_payload(
-        payload={
-            "schema_version": "engine.motion_intent.v3",
-            "axes": {
-                "body_yaw": 66.0,
-            },
-            "summary": {
-                "axis_count": 1,
-            },
-        },
-        semantic_profile=semantic_profile,
-    )
-
-    assert constraint_result.adjusted_axes == ["body_yaw"]
-    assert payload["axes"]["body_yaw"] == 64.0
-
-
 def test_normalize_motion_intent_v3_accepts_string_number_axis() -> None:
     intent = normalize_motion_intent_payload(
         {
@@ -450,7 +383,7 @@ def test_normalize_motion_intent_v3_rejects_nested_axis_payload() -> None:
         )
 
 
-def test_normalize_selector_output_v3_clamps_out_of_range_axis(caplog) -> None:
+def test_normalize_selector_output_v3_preserves_out_of_range_axis_for_engine_validation() -> None:
     selector = normalize_selector_output(
         {
             "intent_tags": ["curious"],
@@ -460,8 +393,7 @@ def test_normalize_selector_output_v3_clamps_out_of_range_axis(caplog) -> None:
         semantic_profile=_semantic_profile(),
     )
 
-    assert selector["axes"]["head_yaw"] == 100
-    assert "selector_axis_clamped:head_yaw:180->100" in caplog.text
+    assert selector["axes"]["head_yaw"] == 180
 
 
 def test_normalize_selector_output_v3_accepts_string_number_axis() -> None:
@@ -478,7 +410,7 @@ def test_normalize_selector_output_v3_accepts_string_number_axis() -> None:
     assert selector["axes"]["head_yaw"] == 82
 
 
-def test_normalize_selector_output_v3_pushes_exact_neutral_axis_past_soft_range() -> None:
+def test_normalize_selector_output_v3_preserves_exact_neutral_axis() -> None:
     profile = _semantic_profile()
     selector = normalize_selector_output(
         {
@@ -490,16 +422,10 @@ def test_normalize_selector_output_v3_pushes_exact_neutral_axis_past_soft_range(
     )
 
     value = selector["axes"]["head_yaw"]
-    soft_min, soft_max = profile["axes"][0]["soft_range"]
-    min_value, max_value = profile["axes"][0]["value_range"]
-
-    assert value < soft_min or value > soft_max
-    assert value != soft_min
-    assert value != soft_max
-    assert min_value <= value <= max_value
+    assert value == 50
 
 
-def test_normalize_selector_output_v3_pushes_exact_neutral_axis_outside_one_sided_soft_range() -> None:
+def test_normalize_selector_output_v3_preserves_exact_neutral_axis_with_one_sided_soft_range() -> None:
     profile = _semantic_profile()
     profile["axes"][0]["soft_range"] = [50, 100]
 
@@ -513,11 +439,10 @@ def test_normalize_selector_output_v3_pushes_exact_neutral_axis_outside_one_side
     )
 
     value = selector["axes"]["head_yaw"]
-    assert value < 50
-    assert 0 <= value <= 100
+    assert value == 50
 
 
-def test_normalize_selector_output_v3_allows_axis_errors_under_threshold(caplog) -> None:
+def test_normalize_selector_output_v3_preserves_unknown_axes_for_engine_feedback() -> None:
     selector = normalize_selector_output(
         {
             "intent_tags": ["curious"],
@@ -536,25 +461,26 @@ def test_normalize_selector_output_v3_allows_axis_errors_under_threshold(caplog)
         "axis_0": 60,
         "axis_1": 62,
         "axis_2": 64,
+        "unknown_axis": 80,
     }
-    assert "ignored invalid semantic axes within threshold" in caplog.text
 
 
-def test_normalize_selector_output_v3_rejects_axis_errors_over_threshold() -> None:
-    with pytest.raises(ValueError, match="selector_axis_error_rate_exceeded:2/4"):
-        normalize_selector_output(
-            {
-                "intent_tags": ["curious"],
-                "duration_hint_ms": 1200,
-                "axes": {
-                    "axis_0": 60,
-                    "axis_1": 62,
-                    "unknown_axis_a": 80,
-                    "unknown_axis_b": 82,
-                },
+def test_normalize_selector_output_v3_preserves_multiple_unknown_axes_for_engine_feedback() -> None:
+    selector = normalize_selector_output(
+        {
+            "intent_tags": ["curious"],
+            "duration_hint_ms": 1200,
+            "axes": {
+                "axis_0": 60,
+                "axis_1": 62,
+                "unknown_axis_a": 80,
+                "unknown_axis_b": 82,
             },
-            semantic_profile=_semantic_profile_with_prompt_axes(4),
-        )
+        },
+        semantic_profile=_semantic_profile_with_prompt_axes(4),
+    )
+    assert selector["axes"]["unknown_axis_a"] == 80
+    assert selector["axes"]["unknown_axis_b"] == 82
 
 
 def test_normalize_motion_intent_v2_is_not_supported() -> None:
@@ -665,7 +591,7 @@ def test_normalize_selector_output_rejects_missing_emotion() -> None:
         )
 
 
-def test_normalize_selector_output_boosts_subtle_non_neutral_axes() -> None:
+def test_normalize_selector_output_preserves_subtle_non_neutral_axes() -> None:
     selector = normalize_selector_output(
             {
                 "intent_tags": ["playful"],
@@ -674,10 +600,10 @@ def test_normalize_selector_output_boosts_subtle_non_neutral_axes() -> None:
             },
             semantic_profile=_semantic_profile(),
         )
-    assert selector["axes"]["head_yaw"] > 58
+    assert selector["axes"]["head_yaw"] == 54
 
 
-def test_normalize_selector_output_keeps_neutral_near_center_axes() -> None:
+def test_normalize_selector_output_preserves_neutral_near_center_axes() -> None:
     selector = normalize_selector_output(
             {
                 "intent_tags": ["neutral"],
@@ -686,7 +612,7 @@ def test_normalize_selector_output_keeps_neutral_near_center_axes() -> None:
             },
             semantic_profile=_semantic_profile(),
         )
-    assert selector["axes"]["head_yaw"] > 58
+    assert selector["axes"]["head_yaw"] == 54
 
 
 def test_realtime_motion_plan_generator_uses_astrbot_provider() -> None:

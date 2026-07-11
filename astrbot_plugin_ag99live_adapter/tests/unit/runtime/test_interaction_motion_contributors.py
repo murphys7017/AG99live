@@ -1271,7 +1271,8 @@ def test_persona_effect_motion_logs_input_and_output_diagnostics(
     assert "effect_resource_id=serious_explain" in log_line
     assert "payload_axes=head_yaw" in log_line
     assert "payload_resource_id=serious_explain" in log_line
-    assert "payload_fallback_pose_id=serious_explain" in log_line
+    assert "payload_fallback_pose_id=" in log_line
+    assert "payload_fallback_pose_id=serious_explain" not in log_line
     assert "reason=persona_effect:rejected_axes:eye_open_left" in log_line
 
 
@@ -1515,7 +1516,7 @@ def test_result_contributor_reports_missing_motion_for_hybrid_immediate_reply(
     )
 
 
-def test_result_contributor_skips_neutral_persona_effect_motion_in_hybrid_immediate_phase(
+def test_result_contributor_preserves_neutral_persona_effect_for_engine_feedback(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1543,15 +1544,15 @@ def test_result_contributor_skips_neutral_persona_effect_motion_in_hybrid_immedi
 
     assert contribution is not None
     assert scheduled_calls == []
-    assert contribution.client_objects == []
-    assert event.get_extra("ag99live_split_motion_scheduled") is None
+    assert len(contribution.client_objects) == 1
+    assert contribution.client_objects[0]["motion_payload"]["axes"] == {
+        "head_yaw": 55.0,
+    }
+    assert event.get_extra("ag99live_split_motion_scheduled") is True
     metadata = contribution.metadata["ag99live_motion_schedule"]
-    assert metadata["reason"] == "motion_payload_missing"
-    assert metadata["source"] == "interaction_result_immediate"
-    assert (
-        metadata["motion_resolution_reason"]
-        == "persona_effect:axes_all_neutral:axes_empty_or_invalid:motion_axes_unusable_no_replacement:motion_payload_missing"
-    )
+    assert metadata["reason"] == "persona_effect_motion_client_object"
+    assert metadata["source"] == "persona_effect"
+    assert metadata["motion_resolution_reason"].startswith("persona_effect")
 
 
 def test_result_contributor_schedules_final_motion_after_hybrid_immediate_phase(

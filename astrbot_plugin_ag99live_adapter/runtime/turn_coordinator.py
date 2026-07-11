@@ -76,7 +76,6 @@ from ..protocol import (
     parse_inbound_message,
 )
 from ..services.speech_service import SpeechIngressService
-from ..motion.axis_constraints import apply_motion_constraints_to_intent_payload
 from ..motion.motion_intent import (
     normalize_motion_intent_payload,
     resolve_selected_semantic_axis_profile,
@@ -736,17 +735,6 @@ class TurnCoordinator:
                 return False
 
         if str(motion_payload.get("schema_version") or "").strip() == "engine.motion_intent.v3":
-            semantic_profile = None
-            try:
-                semantic_profile = resolve_selected_semantic_axis_profile(
-                    runtime_state=self.runtime_state,
-                )
-            except Exception:  # noqa: BLE001
-                semantic_profile = None
-            motion_payload, _constraint_result = apply_motion_constraints_to_intent_payload(
-                payload=motion_payload,
-                semantic_profile=semantic_profile,
-            )
             motion_payload = self._attach_ready_performance_curve_hint(
                 motion_payload=motion_payload,
                 turn_id=turn_id,

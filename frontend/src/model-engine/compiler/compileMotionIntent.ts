@@ -44,6 +44,14 @@ function failCompile(
     plan: null,
     reason,
     diagnostics: finalizeCompileDiagnostics(context),
+    feedback: {
+      code: reason,
+      message: reason,
+      fields: [
+        ...context.state.invalidAxes,
+        ...context.state.forbiddenAxes,
+      ],
+    },
   };
 }
 

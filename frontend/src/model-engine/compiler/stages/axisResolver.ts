@@ -11,7 +11,6 @@ import type {
 } from "../compileContext.js";
 import { replaceControlledAxisValues } from "../compileContext.js";
 
-const MAX_SEMANTIC_AXIS_ERROR_RATE = 0.30;
 const ALLOWED_LLM_ROLES = new Set(["primary", "hint"]);
 
 // Reads:
@@ -49,7 +48,6 @@ export function runAxisResolver(
   }
 
   const roleAxisIds = buildRoleAxisBuckets(profile);
-  const maxAxisErrors = computeAxisErrorLimit(roleAxisIds);
   const resolvedAxes = resolveAllowedLlmAxisValues(context);
   const missingAxes = collectMissingPrimaryAxes(
     profile,
@@ -65,26 +63,35 @@ export function runAxisResolver(
   context.state.forbiddenAxes = resolvedAxes.forbiddenAxes;
   context.state.invalidAxes = resolvedAxes.invalidAxes;
   context.state.axisErrorCount = axisErrorCount;
-  context.state.axisErrorLimit = maxAxisErrors;
+  context.state.axisErrorLimit = 0;
   context.state.warnings = [
     ...context.state.warnings,
     ...resolvedAxes.warnings,
   ];
-  if (axisErrorCount > maxAxisErrors) {
-    context.state.warnings = [
-      ...context.state.warnings,
-      `semantic_axis_error_rate_exceeded_but_salvaged:${axisErrorCount}/${roleAxisIds.primaryAxes.length + roleAxisIds.hintAxes.length}`,
-    ];
-  }
-
   if (axisErrorCount > 0) {
-    console.warn("[ModelEngine] semantic axes ignored within error threshold.", {
+    console.error("[ModelEngine] semantic axis validation failed.", {
       invalidAxes: resolvedAxes.invalidAxes,
       missingAxes,
       forbiddenAxes: resolvedAxes.forbiddenAxes,
       axisErrorCount,
-      axisErrorLimit: maxAxisErrors,
     });
+    return {
+      ok: false,
+      reason: `semantic_axis_validation_failed:${[...resolvedAxes.invalidAxes, ...resolvedAxes.forbiddenAxes].join(",")}`,
+    };
+  }
+
+  if (
+    Object.keys(context.intent.axes).length > 0
+    && Object.keys(resolvedAxes.controlledValues).length > 0
+    && Object.entries(resolvedAxes.controlledValues).every(([axisId, value]) => {
+      const axis = context.state.axisById.get(axisId);
+      return axis
+        ? Math.abs(value - axis.neutral) <= 0.001
+        : false;
+    })
+  ) {
+    return { ok: false, reason: "semantic_axes_all_neutral" };
   }
 
   return { ok: true };
@@ -154,15 +161,11 @@ function resolveAllowedLlmAxisValues(
     const rangeResult = normalizeSemanticAxisValue(axis, value);
     if (rangeResult.warning) {
       warnings.push(rangeResult.warning);
-      console.warn(
-        "[ModelEngine] semantic axis value clamped:",
-        rangeResult.warning,
-        {
-          axisId,
-          inputValue: value,
-          outputValue: rangeResult.value,
-        },
-      );
+      console.error("[ModelEngine] semantic axis value rejected:", rangeResult.warning);
+    }
+    if (!rangeResult.ok) {
+      invalidAxes.push(axisId);
+      continue;
     }
     controlledValues[axisId] = rangeResult.value;
   }
@@ -173,18 +176,6 @@ function resolveAllowedLlmAxisValues(
     forbiddenAxes,
     invalidAxes,
   };
-}
-
-function computeAxisErrorLimit(
-  buckets: ResolvedAxisRoleBuckets,
-): number {
-  return Math.max(
-    0,
-    Math.floor(
-      (buckets.primaryAxes.length + buckets.hintAxes.length)
-        * MAX_SEMANTIC_AXIS_ERROR_RATE,
-    ),
-  );
 }
 
 function collectMissingPrimaryAxes(
@@ -206,14 +197,14 @@ function collectMissingPrimaryAxes(
 function normalizeSemanticAxisValue(
   axis: SemanticAxisDefinition,
   value: number,
-): { value: number; warning: string } {
+): { ok: boolean; value: number; warning: string } {
   const [minValue, maxValue] = axis.value_range;
   if (value < minValue || value > maxValue) {
-    const clampedValue = value < minValue ? minValue : maxValue;
     return {
-      value: clampedValue,
-      warning: `semantic_axis_value_clamped:${axis.id}:${value}->${clampedValue}`,
+      ok: false,
+      value,
+      warning: `semantic_axis_value_out_of_range:${axis.id}:${value}`,
     };
   }
-  return { value, warning: "" };
+  return { ok: true, value, warning: "" };
 }

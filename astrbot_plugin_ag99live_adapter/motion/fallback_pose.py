@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import Any
 
 from ..prompts.semantic_axis_prompt import profile_prompt_axes
 
-_REPAIR_SKELETON_GROUPS = ("head", "body", "gaze")
-_REPAIR_MAX_AXES_PER_GROUP = 2
+_SKELETON_GROUPS = ("head", "body", "gaze")
 _NON_EMOTIVE_EXPRESSION_TOKENS = {
     "controller",
     "jacketoff",
@@ -18,13 +16,6 @@ _NON_EMOTIVE_EXPRESSION_TOKENS = {
     "tablet",
     "tracking",
 }
-
-
-@dataclass(frozen=True, slots=True)
-class FallbackPoseResolution:
-    id: str
-    source: str
-    axes: dict[str, float]
 
 
 def build_fallback_pose_candidates(
@@ -88,109 +79,6 @@ def build_fallback_pose_candidates(
     if limit is not None:
         return candidates[: max(0, int(limit))]
     return candidates
-
-
-def resolve_fallback_pose_axes(
-    *,
-    runtime_state: Any,
-    semantic_profile: dict[str, Any],
-    fallback_pose_id: Any,
-    require_non_neutral_skeleton: bool = False,
-) -> dict[str, float] | None:
-    resolution = resolve_fallback_pose(
-        runtime_state=runtime_state,
-        semantic_profile=semantic_profile,
-        fallback_pose_id=fallback_pose_id,
-        require_non_neutral_skeleton=require_non_neutral_skeleton,
-    )
-    return dict(resolution.axes) if resolution is not None else None
-
-
-def resolve_fallback_pose(
-    *,
-    runtime_state: Any,
-    semantic_profile: dict[str, Any],
-    fallback_pose_id: Any,
-    require_non_neutral_skeleton: bool = False,
-) -> FallbackPoseResolution | None:
-    normalized_id = _normalize_pose_id(fallback_pose_id)
-    if not normalized_id:
-        return None
-    for candidate in build_fallback_pose_candidates(
-        runtime_state=runtime_state,
-        semantic_profile=semantic_profile,
-        limit=None,
-        require_non_neutral_skeleton=require_non_neutral_skeleton,
-    ):
-        if candidate.get("id") == normalized_id:
-            axes = candidate.get("axes")
-            if not isinstance(axes, dict) or not axes:
-                return None
-            return FallbackPoseResolution(
-                id=normalized_id,
-                source=str(candidate.get("source") or "").strip(),
-                axes=dict(axes),
-            )
-    return None
-
-
-def repair_motion_axes_with_fallback_pose(
-    *,
-    axes: dict[str, float],
-    semantic_profile: dict[str, Any],
-    fallback_axes: dict[str, float] | None,
-) -> tuple[dict[str, float], list[str], list[str]]:
-    """Fill missing semantic skeleton groups from a fallback pose.
-
-    This repairs weak LLM outputs that only contain expression detail axes while
-    preserving non-neutral axes the model already produced.
-    """
-    if not isinstance(axes, dict) or not axes:
-        return axes, [], []
-    if not isinstance(fallback_axes, dict) or not fallback_axes:
-        return dict(axes), [], []
-
-    axis_by_id = _prompt_axis_by_id(semantic_profile)
-    if not axis_by_id:
-        return dict(axes), [], []
-
-    repaired = dict(axes)
-    added: list[str] = []
-    replaced: list[str] = []
-    present_groups = _active_axis_groups(repaired, axis_by_id)
-    missing_groups = [
-        group
-        for group in _REPAIR_SKELETON_GROUPS
-        if group not in present_groups
-    ]
-    if not missing_groups and len(repaired) >= 3:
-        return repaired, [], []
-
-    for group in missing_groups:
-        group_added = 0
-        for axis_id, fallback_value in fallback_axes.items():
-            if group_added >= _REPAIR_MAX_AXES_PER_GROUP:
-                break
-            axis = axis_by_id.get(str(axis_id or "").strip())
-            if axis is None:
-                continue
-            if str(axis.get("semantic_group") or "").strip().lower() != group:
-                continue
-            if _is_axis_neutralish(fallback_value, axis):
-                continue
-            normalized_axis_id = str(axis_id)
-            if normalized_axis_id in repaired:
-                if not _is_axis_neutralish(repaired[normalized_axis_id], axis):
-                    continue
-                repaired[normalized_axis_id] = _coerce_axis_value(fallback_value, axis)
-                replaced.append(normalized_axis_id)
-                group_added += 1
-                continue
-            repaired[str(axis_id)] = _coerce_axis_value(fallback_value, axis)
-            added.append(str(axis_id))
-            group_added += 1
-
-    return repaired, added, replaced
 
 
 def _build_user_tuning_candidates(
@@ -561,7 +449,7 @@ def _has_non_neutral_skeleton_axes(
         if axis is None:
             continue
         group = str(axis.get("semantic_group") or "").strip().lower()
-        if group not in _REPAIR_SKELETON_GROUPS:
+        if group not in _SKELETON_GROUPS:
             continue
         if not _is_axis_neutralish(value, axis):
             return True
@@ -591,23 +479,6 @@ def _prompt_axis_by_id(semantic_profile: dict[str, Any]) -> dict[str, dict[str, 
         for axis in profile_prompt_axes(semantic_profile)
         if str(axis.get("id") or "").strip()
     }
-
-
-def _active_axis_groups(
-    axes: dict[str, float],
-    axis_by_id: dict[str, dict[str, Any]],
-) -> set[str]:
-    groups: set[str] = set()
-    for axis_id, value in axes.items():
-        axis = axis_by_id.get(str(axis_id or "").strip())
-        if not axis:
-            continue
-        if _is_axis_neutralish(value, axis):
-            continue
-        group = str(axis.get("semantic_group") or "").strip().lower()
-        if group:
-            groups.add(group)
-    return groups
 
 
 def _is_axis_neutralish(value: Any, axis: dict[str, Any]) -> bool:

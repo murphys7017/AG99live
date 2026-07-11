@@ -13,6 +13,9 @@ import { mergeDerivedAxisValues, refreshAllAxisValues } from "../compileContext.
 // - context.state.controlledValues
 // - context.state.warnings
 //
+// Writes candidate values only. Final semantic relations are resolved by
+// semanticAxisRelationGraphStage after all candidate sources are collected.
+//
 // Writes:
 // - context.state.derivedValues
 // - context.state.allAxisValues
@@ -23,7 +26,7 @@ import { mergeDerivedAxisValues, refreshAllAxisValues } from "../compileContext.
 // - timing
 // - parameter generation
 export const couplingStage: MotionCompileStage = {
-  id: "coupling",
+  id: "derivedCandidates",
   run: runCouplingStage,
 };
 

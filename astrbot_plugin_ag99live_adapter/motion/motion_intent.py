@@ -25,8 +25,6 @@ PARAMETER_PLAN_SOURCES = {
 }
 
 _REPAIR_STATS_LOG_INTERVAL_SECONDS = 60.0
-_MIN_EXPRESSIVE_MAX_DELTA = 24
-_MIN_EXPRESSIVE_NONZERO_DELTA = 16
 
 
 @dataclass(frozen=True, slots=True)
@@ -535,124 +533,6 @@ def _coerce_finite_number(value: Any) -> float | None:
     if not float("-inf") < number < float("inf"):
         return None
     return number
-
-
-def _apply_semantic_expressive_floor(
-    *,
-    axes: dict[str, float],
-    emotion: str,
-    semantic_profile: dict[str, Any],
-) -> dict[str, float]:
-    """Boost near-neutral expressive motions to be clearly visible in semantic axes."""
-    del emotion
-    if not axes:
-        return axes
-
-    profile_axes: dict[str, dict[str, Any]] = {}
-    for axis in semantic_profile.get("axes") or []:
-        if isinstance(axis, dict):
-            axis_id = str(axis.get("id") or "").strip()
-            if axis_id:
-                profile_axes[axis_id] = axis
-
-    if not profile_axes:
-        return axes
-
-    AxisEntry = tuple[str, float, float, float, float, float, float, float, float]
-    axis_entries: list[AxisEntry] = []
-    has_outside_soft = False
-    for axis_id, value in axes.items():
-        axis = profile_axes.get(axis_id)
-        if not axis:
-            continue
-        neutral = float(axis.get("neutral", 0))
-        soft_range = axis.get("soft_range")
-        if isinstance(soft_range, list) and len(soft_range) == 2:
-            soft_min = float(soft_range[0])
-            soft_max = float(soft_range[1])
-        else:
-            span = 10.0
-            soft_min = neutral - span
-            soft_max = neutral + span
-        value_range = axis.get("value_range")
-        if isinstance(value_range, list) and len(value_range) == 2:
-            vmin = float(value_range[0])
-            vmax = float(value_range[1])
-        else:
-            vmin = 0.0
-            vmax = 100.0
-        if value < soft_min or value > soft_max:
-            has_outside_soft = True
-        delta = value - neutral
-        soft_half_span = max(soft_max - neutral, neutral - soft_min, 1.0)
-        axis_entries.append((axis_id, value, neutral, soft_min, soft_max, soft_half_span, vmin, vmax, delta))
-
-    if has_outside_soft:
-        return axes
-
-    max_abs_delta = max((abs(entry[8]) for entry in axis_entries), default=0)
-
-    boosted: dict[str, float] = {}
-    for entry in axis_entries:
-        axis_id, value, neutral, soft_min, soft_max, soft_half_span, vmin, vmax, delta = entry
-
-        if max_abs_delta < 0.001:
-            positive_soft_span = max(soft_max - neutral, 0.0)
-            positive_candidate = min(vmax, soft_max + max(positive_soft_span * 0.3, 0.001))
-            if positive_candidate > soft_max:
-                candidate = positive_candidate
-            else:
-                negative_soft_span = max(neutral - soft_min, 0.0)
-                negative_candidate = max(vmin, soft_min - max(negative_soft_span * 0.3, 0.001))
-                candidate = negative_candidate if negative_candidate < soft_min else neutral
-        else:
-            scale = (soft_half_span + soft_half_span * 0.3) / max_abs_delta
-            candidate = neutral + delta * scale
-
-        boosted[axis_id] = round(max(vmin, min(vmax, candidate)), 4)
-
-    return boosted
-
-
-def clamp_axis_value(value: Any) -> int:
-    try:
-        number = int(round(float(value)))
-    except (TypeError, ValueError):
-        number = 50
-    return max(0, min(100, number))
-
-
-def _apply_expressive_floor(
-    *,
-    axes: dict[str, int],
-    emotion: str,
-) -> dict[str, int]:
-    del emotion
-    deltas = {
-        axis_name: clamp_axis_value(value) - 50
-        for axis_name, value in axes.items()
-    }
-    nonzero_deltas = [abs(delta) for delta in deltas.values() if delta != 0]
-    max_abs_delta = max(nonzero_deltas) if nonzero_deltas else 0
-    if max_abs_delta >= _MIN_EXPRESSIVE_MAX_DELTA:
-        return axes
-
-    if max_abs_delta == 0:
-        return dict(axes)
-
-    scale = _MIN_EXPRESSIVE_MAX_DELTA / float(max_abs_delta)
-    boosted: dict[str, int] = {}
-    for axis_name, base_value in axes.items():
-        delta = deltas.get(axis_name, 0)
-        if delta == 0:
-            boosted[axis_name] = clamp_axis_value(base_value)
-            continue
-        candidate_delta = int(round(delta * scale))
-        if abs(candidate_delta) < _MIN_EXPRESSIVE_NONZERO_DELTA:
-            candidate_delta = _MIN_EXPRESSIVE_NONZERO_DELTA if delta > 0 else -_MIN_EXPRESSIVE_NONZERO_DELTA
-        boosted[axis_name] = clamp_axis_value(50 + candidate_delta)
-
-    return boosted
 
 
 def validate_motion_intent_payload(intent: Any) -> tuple[bool, str]:
