@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-import logging
 import re
-import time
 from typing import Any
 
 from ..prompts.semantic_axis_prompt import profile_prompt_axes
 from .performance_curve import normalize_performance_curve_hint
-
-LOGGER = logging.getLogger(__name__)
 
 MOTION_INTENT_SCHEMA_VERSION = "engine.motion_intent.v3"
 MOTION_INTENT_V3_SCHEMA_VERSION = "engine.motion_intent.v3"
@@ -22,91 +18,6 @@ PARAMETER_PLAN_SOURCES = {
     "continuity",
     "manual",
 }
-
-_REPAIR_STATS_LOG_INTERVAL_SECONDS = 60.0
-
-
-_repair_stats: dict[str, int] = {}
-_motion_outcome_stats: dict[str, int] = {}
-_stats_revision = 0
-_last_repair_stats_log_at = 0.0
-_last_repair_stats_log_total = 0
-
-
-def _bump_stats_revision() -> None:
-    global _stats_revision
-    _stats_revision += 1
-
-
-def _incr_repair_stat(key: str) -> None:
-    _repair_stats[key] = _repair_stats.get(key, 0) + 1
-    _bump_stats_revision()
-
-
-def _incr_motion_outcome_stat(key: str) -> None:
-    _motion_outcome_stats[key] = _motion_outcome_stats.get(key, 0) + 1
-    _bump_stats_revision()
-
-
-def record_realtime_motion_attempt() -> None:
-    _incr_motion_outcome_stat("attempt_total")
-
-
-def record_realtime_motion_generated() -> None:
-    _incr_motion_outcome_stat("generated_total")
-
-
-def record_realtime_motion_fallback() -> None:
-    _incr_motion_outcome_stat("fallback_total")
-
-
-def get_repair_stats() -> dict[str, Any]:
-    repair_event_total = sum(_repair_stats.values())
-    attempt_total = _motion_outcome_stats.get("attempt_total", 0)
-    fallback_total = _motion_outcome_stats.get("fallback_total", 0)
-    return {
-        "total": repair_event_total,
-        "repair_event_total": repair_event_total,
-        "counts": dict(_repair_stats),
-        "motion_counts": dict(_motion_outcome_stats),
-        "attempt_total": attempt_total,
-        "generated_total": _motion_outcome_stats.get("generated_total", 0),
-        "fallback_total": fallback_total,
-        "stats_revision": _stats_revision,
-        "fallback_rate": round(fallback_total / max(1, attempt_total), 3),
-    }
-
-
-def reset_repair_stats() -> None:
-    global _last_repair_stats_log_at, _last_repair_stats_log_total, _stats_revision
-    _repair_stats.clear()
-    _motion_outcome_stats.clear()
-    _stats_revision = 0
-    _last_repair_stats_log_at = 0.0
-    _last_repair_stats_log_total = 0
-
-
-def maybe_log_repair_stats() -> None:
-    global _last_repair_stats_log_at, _last_repair_stats_log_total
-    stats = get_repair_stats()
-    revision = int(stats.get("stats_revision") or 0)
-    if revision <= 0 or revision == _last_repair_stats_log_total:
-        return
-    now = time.monotonic()
-    if now - _last_repair_stats_log_at < _REPAIR_STATS_LOG_INTERVAL_SECONDS:
-        return
-    _last_repair_stats_log_at = now
-    _last_repair_stats_log_total = revision
-    LOGGER.info(
-        "Motion intent stats: attempts=%s generated=%s fallback=%s fallback_rate=%s repair_events=%s repair_counts=%s",
-        stats.get("attempt_total"),
-        stats.get("generated_total"),
-        stats.get("fallback_total"),
-        stats.get("fallback_rate"),
-        stats.get("repair_event_total"),
-        stats.get("counts"),
-    )
-
 
 def resolve_selected_semantic_axis_profile(*, runtime_state: Any) -> dict[str, Any]:
     model_info = getattr(runtime_state, "model_info", {})
@@ -279,23 +190,18 @@ def derive_motion_emotion_label(intent_tags: Any, *, fallback: str = "motion") -
 
 def _normalize_duration_hint_ms(value: Any) -> int:
     if value is None:
-        _incr_repair_stat("duration_hint_defaulted")
         return DEFAULT_MOTION_INTENT_DURATION_MS
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         try:
             number = float(value)
         except (TypeError, ValueError):
-            _incr_repair_stat("duration_hint_defaulted")
             return DEFAULT_MOTION_INTENT_DURATION_MS
     else:
         number = float(value)
     if not float("-inf") < number < float("inf"):
-        _incr_repair_stat("duration_hint_defaulted")
         return DEFAULT_MOTION_INTENT_DURATION_MS
     duration_hint_ms = int(round(number))
     clamped = max(320, min(15000, duration_hint_ms))
-    if clamped != duration_hint_ms:
-        _incr_repair_stat("duration_hint_clamped")
     return clamped
 
 
