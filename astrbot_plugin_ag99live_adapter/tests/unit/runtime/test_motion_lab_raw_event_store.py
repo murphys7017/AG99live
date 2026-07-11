@@ -108,6 +108,36 @@ def test_motion_lab_recorder_keeps_event_when_raw_contains_non_json_object(
     }
 
 
+def test_motion_lab_recorder_calls_persisted_callback_after_insert(
+    install_fake_astrbot,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.runtime.motion_lab.recorder import MotionLabRecorder
+
+    operations: list[str] = []
+
+    class StoreStub:
+        def insert_events(self, events: list[dict[str, object]]) -> None:
+            assert events[0]["id"] == "event-callback"
+            operations.append("insert")
+
+    async def run() -> None:
+        recorder = MotionLabRecorder(store=StoreStub())  # type: ignore[arg-type]
+        assert recorder.enqueue(
+            {
+                "id": "event-callback",
+                "event_type": "motion.completed",
+                "raw": {},
+            },
+            on_persisted=lambda: operations.append("callback"),
+        )
+        assert operations == []
+        await recorder.close()
+
+    asyncio.run(run())
+    assert operations == ["insert", "callback"]
+
+
 def test_motion_lab_recorder_close_cancels_worker_after_persistent_write_failure(
     install_fake_astrbot,
     tmp_path,

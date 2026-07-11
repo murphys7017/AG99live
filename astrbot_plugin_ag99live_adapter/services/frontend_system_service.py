@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Awaitable, Callable
 from uuid import uuid4
+
+from astrbot.api import logger
 
 from ..live2d.semantic_axis_profile import (
     SemanticAxisProfileError,
@@ -16,6 +19,7 @@ from ..protocol.builder import (
     build_system_history_deleted,
     build_system_history_list,
     build_system_motion_tuning_samples_state,
+    build_system_motion_lab_raw_event_recorded,
     build_system_semantic_axis_profile_save_failed,
     build_system_semantic_axis_profile_saved,
 )
@@ -59,6 +63,40 @@ class FrontendSystemCommandHandler:
         self._history_bridge = history_bridge
         self._runtime_state = runtime_state
         self._history_uid = ""
+        self._motion_lab_ack_tasks: set[asyncio.Task[bool]] = set()
+
+    def _schedule_motion_lab_persisted_ack(
+        self,
+        *,
+        event_id: str,
+        turn_id: str | None,
+        send_json: Callable[[dict], Awaitable[bool]],
+    ) -> None:
+        task = asyncio.create_task(
+            send_json(
+                build_system_motion_lab_raw_event_recorded(
+                    event_id=event_id,
+                    turn_id=turn_id,
+                )
+            )
+        )
+        self._motion_lab_ack_tasks.add(task)
+
+        def handle_done(done_task: asyncio.Task[bool]) -> None:
+            self._motion_lab_ack_tasks.discard(done_task)
+            if done_task.cancelled():
+                return
+            error = done_task.exception()
+            if error is not None:
+                logger.error("MotionLab persisted acknowledgement failed: %s", error)
+                return
+            if not done_task.result():
+                logger.error(
+                    "MotionLab persisted acknowledgement send was rejected: event_id=%s",
+                    event_id,
+                )
+
+        task.add_done_callback(handle_done)
 
     @staticmethod
     def can_handle(msg_type: str | None) -> bool:
@@ -126,9 +164,11 @@ class FrontendSystemCommandHandler:
         elif msg_type == TYPE_SYSTEM_HEARTBEAT:
             await send_json(build_system_heartbeat_ack())
         elif msg_type == TYPE_SYSTEM_MOTION_LAB_RAW_EVENT:
-            enqueue_motion_lab_raw_event(
+            event_id = str(payload.get("event_id") or "").strip()
+            accepted = enqueue_motion_lab_raw_event(
                 self._runtime_state,
                 {
+                    "id": event_id,
                     "event_type": payload.get("event_type"),
                     "turn_id": message.turn_id,
                     "frontend_turn_id": message.turn_id,
@@ -146,7 +186,19 @@ class FrontendSystemCommandHandler:
                         "envelope": message.raw,
                     },
                 },
+                on_persisted=lambda: self._schedule_motion_lab_persisted_ack(
+                    event_id=event_id,
+                    turn_id=message.turn_id,
+                    send_json=send_json,
+                ),
             )
+            if not accepted:
+                await send_json(
+                    build_control_error(
+                        turn_id=message.turn_id,
+                        message=f"motion_lab_event_enqueue_failed:{event_id}",
+                    )
+                )
         elif msg_type == TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE:
             sample = payload.get("sample")
             try:

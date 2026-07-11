@@ -52,6 +52,7 @@ TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE = "system.motion_tuning_sample_save"
 TYPE_SYSTEM_MOTION_TUNING_SAMPLE_DELETE = "system.motion_tuning_sample_delete"
 TYPE_SYSTEM_MOTION_TUNING_SAMPLES_STATE = "system.motion_tuning_samples_state"
 TYPE_SYSTEM_MOTION_LAB_RAW_EVENT = "system.motion_lab_raw_event"
+TYPE_SYSTEM_MOTION_LAB_RAW_EVENT_RECORDED = "system.motion_lab_raw_event_recorded"
 
 TYPE_ENGINE_MOTION_INTENT = "engine.motion_intent"
 TYPE_ENGINE_CATALOG_MOTION = "engine.catalog_motion"
@@ -111,6 +112,7 @@ SYSTEM_TYPES = {
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_DELETE,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLES_STATE,
     TYPE_SYSTEM_MOTION_LAB_RAW_EVENT,
+    TYPE_SYSTEM_MOTION_LAB_RAW_EVENT_RECORDED,
 }
 
 ENGINE_TYPES = {

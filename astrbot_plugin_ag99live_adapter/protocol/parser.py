@@ -274,6 +274,11 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
         return
 
     if message_type == TYPE_SYSTEM_MOTION_LAB_RAW_EVENT:
+        event_id = payload.get("event_id")
+        if not isinstance(event_id, str) or not event_id.strip():
+            raise ProtocolError(
+                "`system.motion_lab_raw_event` requires `payload.event_id` to be a non-empty string."
+            )
         event_type = payload.get("event_type")
         if not isinstance(event_type, str) or not event_type.strip():
             raise ProtocolError(

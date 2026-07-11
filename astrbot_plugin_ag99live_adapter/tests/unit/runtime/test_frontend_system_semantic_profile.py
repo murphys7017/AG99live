@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from typing import Callable
 
 from astrbot_plugin_ag99live_adapter.live2d.semantic_axis_profile import SemanticAxisProfileError
 from astrbot_plugin_ag99live_adapter.services import frontend_system_service
@@ -517,10 +518,18 @@ def test_frontend_system_handler_records_motion_lab_raw_event(monkeypatch) -> No
     )
     recorded_events: list[dict[str, object]] = []
     sent_payloads: list[dict] = []
+    persisted_callbacks: list[Callable[[], None]] = []
 
-    def fake_enqueue_motion_lab_raw_event(runtime_state_arg, event: dict[str, object]) -> bool:
+    def fake_enqueue_motion_lab_raw_event(
+        runtime_state_arg,
+        event: dict[str, object],
+        *,
+        on_persisted: Callable[[], None] | None = None,
+    ) -> bool:
         assert runtime_state_arg is runtime_state
         recorded_events.append(event)
+        assert on_persisted is not None
+        persisted_callbacks.append(on_persisted)
         return True
 
     async def send_json(payload: dict) -> bool:
@@ -536,8 +545,8 @@ def test_frontend_system_handler_records_motion_lab_raw_event(monkeypatch) -> No
         fake_enqueue_motion_lab_raw_event,
     )
 
-    asyncio.run(
-        handler.handle(
+    async def run() -> None:
+        await handler.handle(
             SimpleNamespace(
                 type="system.motion_lab_raw_event",
                 session_id="session",
@@ -545,6 +554,7 @@ def test_frontend_system_handler_records_motion_lab_raw_event(monkeypatch) -> No
                 message_id="message-playback",
                 raw={"type": "system.motion_lab_raw_event", "payload": {"event_type": "motion.playback_started"}},
                 payload={
+                    "event_id": "event-playback-1",
                     "event_type": "motion.playback_started",
                     "message_id": "segment-message-1",
                     "source_route": "frontend_motion_player",
@@ -559,10 +569,18 @@ def test_frontend_system_handler_records_motion_lab_raw_event(monkeypatch) -> No
             send_json=send_json,
             refresh_and_send_model=refresh_and_send_model,
         )
-    )
+        assert sent_payloads == []
+        persisted_callbacks[0]()
+        await asyncio.sleep(0)
 
-    assert sent_payloads == []
+    asyncio.run(run())
+
+    assert len(sent_payloads) == 1
+    assert sent_payloads[0]["type"] == "system.motion_lab_raw_event_recorded"
+    assert sent_payloads[0]["turn_id"] == "turn-playback"
+    assert sent_payloads[0]["payload"] == {"event_id": "event-playback-1"}
     assert len(recorded_events) == 1
+    assert recorded_events[0]["id"] == "event-playback-1"
     assert recorded_events[0]["event_type"] == "motion.playback_started"
     assert recorded_events[0]["turn_id"] == "turn-playback"
     assert recorded_events[0]["message_id"] == "segment-message-1"

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from math import isfinite
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from astrbot.api import logger
@@ -21,17 +21,24 @@ class MotionLabRecorder:
         batch_size: int = 20,
     ) -> None:
         self._store = store
-        self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self._queue: asyncio.Queue[
+            tuple[dict[str, Any], Callable[[], None] | None]
+        ] = asyncio.Queue()
         self._batch_size = max(1, batch_size)
         self._worker_task: asyncio.Task[None] | None = None
         self._closed = False
 
-    def enqueue(self, event: dict[str, Any]) -> bool:
+    def enqueue(
+        self,
+        event: dict[str, Any],
+        *,
+        on_persisted: Callable[[], None] | None = None,
+    ) -> bool:
         if self._closed:
             logger.error("MotionLab raw event rejected after recorder close.")
             return False
         snapshot = _normalize_event(event)
-        self._queue.put_nowait(snapshot)
+        self._queue.put_nowait((snapshot, on_persisted))
         self._ensure_worker()
         return True
 
@@ -57,7 +64,10 @@ class MotionLabRecorder:
             retry_delay_seconds = 0.1
             while True:
                 try:
-                    await asyncio.to_thread(self._store.insert_events, batch)
+                    await asyncio.to_thread(
+                        self._store.insert_events,
+                        [event for event, _callback in batch],
+                    )
                     break
                 except Exception as exc:  # noqa: BLE001
                     logger.error(
@@ -67,7 +77,12 @@ class MotionLabRecorder:
                     )
                     await asyncio.sleep(retry_delay_seconds)
                     retry_delay_seconds = min(retry_delay_seconds * 2, 5.0)
-            for _event in batch:
+            for _event, callback in batch:
+                if callback is not None:
+                    try:
+                        callback()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.error("MotionLab persistence callback failed: %s", exc)
                 self._queue.task_done()
 
     async def close(self, *, timeout_seconds: float = 5.0) -> None:
@@ -102,12 +117,17 @@ class MotionLabRecorder:
                 pass
 
 
-def enqueue_motion_lab_raw_event(runtime_state: Any, event: dict[str, Any]) -> bool:
+def enqueue_motion_lab_raw_event(
+    runtime_state: Any,
+    event: dict[str, Any],
+    *,
+    on_persisted: Callable[[], None] | None = None,
+) -> bool:
     recorder = getattr(runtime_state, "motion_lab_recorder", None)
     if not isinstance(recorder, MotionLabRecorder):
         return False
     try:
-        return recorder.enqueue(event)
+        return recorder.enqueue(event, on_persisted=on_persisted)
     except Exception as exc:  # noqa: BLE001
         logger.warning("MotionLab raw event enqueue failed: %s", exc)
         return False

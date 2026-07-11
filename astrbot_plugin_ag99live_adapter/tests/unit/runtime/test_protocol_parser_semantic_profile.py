@@ -123,6 +123,7 @@ def test_parse_inbound_message_accepts_motion_lab_raw_event() -> None:
         _message(
             "system.motion_lab_raw_event",
             {
+                "event_id": "event-test",
                 "event_type": "motion.playback_started",
                 "message_id": "message-test",
                 "source_route": "split_after_reply",
@@ -135,9 +136,23 @@ def test_parse_inbound_message_accepts_motion_lab_raw_event() -> None:
     )
 
     assert envelope.type == "system.motion_lab_raw_event"
+    assert envelope.payload["event_id"] == "event-test"
     assert envelope.payload["event_type"] == "motion.playback_started"
     assert envelope.payload["message_id"] == "message-test"
     assert envelope.payload["raw"]["messageId"] == "message-test"
+
+
+def test_parse_inbound_message_rejects_motion_lab_event_without_event_id() -> None:
+    with pytest.raises(ProtocolError, match="payload.event_id"):
+        parse_inbound_message(
+            _message(
+                "system.motion_lab_raw_event",
+                {
+                    "event_type": "motion.playback_started",
+                    "raw": {},
+                },
+            )
+        )
 
 
 def test_parse_inbound_message_accepts_raw_audio_data_payload() -> None:

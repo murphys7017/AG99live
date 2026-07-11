@@ -43,11 +43,25 @@ from .constants import (
     TYPE_SYSTEM_HISTORY_LIST,
     TYPE_SYSTEM_MODEL_SYNC,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLES_STATE,
+    TYPE_SYSTEM_MOTION_LAB_RAW_EVENT_RECORDED,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVED,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE_FAILED,
     TYPE_SYSTEM_SERVER_INFO,
 )
 from .parser import build_message_envelope
+
+
+def build_system_motion_lab_raw_event_recorded(
+    *,
+    event_id: str,
+    turn_id: str | None,
+) -> dict[str, Any]:
+    return build_message_envelope(
+        TYPE_SYSTEM_MOTION_LAB_RAW_EVENT_RECORDED,
+        source=SOURCE_ADAPTER,
+        turn_id=turn_id,
+        payload={"event_id": event_id},
+    )
 
 
 def build_system_model_sync(
