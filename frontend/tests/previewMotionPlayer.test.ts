@@ -1,15 +1,10 @@
 // Node.js test environment polyfill
 (globalThis as Record<string, unknown>).window = globalThis;
-(globalThis as Record<string, unknown>).performance = {
-  now: () => mockNowMs,
-};
 
 import assert from "node:assert/strict";
 import { effectScope } from "vue";
 import { usePreviewMotionPlayer } from "../src/live2d-renderer/usePreviewMotionPlayer.js";
 import type { CatalogMotionPayload, SemanticParameterPlan } from "../src/types/protocol.js";
-
-let mockNowMs = 1000;
 
 function buildPlan(): SemanticParameterPlan {
   return {
@@ -114,33 +109,42 @@ function installCatalogMockAdapter(
   };
 }
 
-async function testSoftHandoffDuplicateStillReportsStarted(): Promise<void> {
+async function testSoftHandoffStartsDistinctRunsForDistinctSegments(): Promise<void> {
   const adapter = installMockAdapter();
   const scope = effectScope();
   const player = scope.run(() => usePreviewMotionPlayer());
   assert.ok(player);
-  const startedPlans: SemanticParameterPlan[] = [];
+  const startedRunIds: string[] = [];
+  const firstRunTerminals: Array<{ runId: string; status: string; reason?: string }> = [];
   const plan = buildPlan();
 
-  mockNowMs = 1000;
   assert.equal(player.playPlan(plan, null, {
     softHandoff: true,
-    onStarted: (startedPlan) => {
-      startedPlans.push(startedPlan);
+    onStarted: (_startedPlan, runId) => {
+      assert.ok(runId);
+      startedRunIds.push(runId);
+    },
+    onFinished: (event) => {
+      firstRunTerminals.push(event);
     },
   }), true);
 
-  mockNowMs = 1200;
   assert.equal(player.playPlan(plan, null, {
     softHandoff: true,
-    onStarted: (startedPlan) => {
-      startedPlans.push(startedPlan);
+    onStarted: (_startedPlan, runId) => {
+      assert.ok(runId);
+      startedRunIds.push(runId);
     },
   }), true);
 
-  assert.equal(adapter.startCount(), 1);
-  assert.equal(startedPlans.length, 2);
-  assert.equal(startedPlans[1].emotion_label, "happy");
+  assert.equal(adapter.startCount(), 2);
+  assert.equal(startedRunIds.length, 2);
+  assert.notEqual(startedRunIds[0], startedRunIds[1]);
+  assert.deepEqual(firstRunTerminals, [{
+    runId: startedRunIds[0],
+    status: "stopped",
+    reason: "direct_parameter_plan_replaced",
+  }]);
   scope.stop();
 }
 
@@ -347,7 +351,7 @@ async function testDirectPlanStopReportsStoppedTerminalOnce(): Promise<void> {
 }
 
 async function run(): Promise<void> {
-  await testSoftHandoffDuplicateStillReportsStarted();
+  await testSoftHandoffStartsDistinctRunsForDistinctSegments();
   await testExpressionResourceStartsBeforeDirectPlan();
   await testExpressionResourceFailureDoesNotStartDirectPlan();
   await testCatalogMotionInvalidHandleWithDurationFails();

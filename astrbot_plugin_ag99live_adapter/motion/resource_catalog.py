@@ -210,8 +210,7 @@ def _text_list(value: Any, *, limit: int) -> list[str]:
 
 
 def _normalize_catalog_id(value: Any) -> str:
-    normalized = re.sub(r"[^0-9A-Za-z_\u4e00-\u9fff]+", "_", str(value or "").strip())
-    return normalized.strip("_")[:64]
+    return normalize_resource_id(value)
 
 
 def _resolve_selected_model_payload(runtime_state: Any) -> dict[str, Any]:

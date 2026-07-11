@@ -28,52 +28,6 @@ interface PlayCatalogMotionOptions {
   onFinished?: (event: DirectParameterPlanTerminalEvent) => void;
 }
 
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
-  }
-  if (value && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`);
-    return `{${entries.join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-function buildPlanSignature(plan: SemanticParameterPlan): string {
-  return stableStringify({
-    schema_version: plan.schema_version,
-    profile_id: plan.profile_id,
-    profile_revision: plan.profile_revision,
-    model_id: plan.model_id,
-    mode: plan.mode,
-    emotion_label: plan.emotion_label,
-    timing: plan.timing,
-    parameters: plan.parameters.map((item) => ({
-      axis_id: item.axis_id,
-      parameter_id: item.parameter_id,
-      target_value: Math.round(item.target_value * 10000) / 10000,
-      weight: Math.round(item.weight * 10000) / 10000,
-      input_value: item.input_value === undefined
-        ? undefined
-        : Math.round(item.input_value * 10000) / 10000,
-      source: item.source,
-      modulation: item.modulation
-        ? {
-          kind: item.modulation.kind,
-          neutral: Math.round(item.modulation.neutral * 10000) / 10000,
-          amplitude: Math.round(item.modulation.amplitude * 10000) / 10000,
-          phase: Math.round(item.modulation.phase * 10000) / 10000,
-          frequency_hz: item.modulation.frequency_hz === undefined
-            ? undefined
-            : Math.round(item.modulation.frequency_hz * 10000) / 10000,
-        }
-        : undefined,
-    })).sort((left, right) => left.parameter_id.localeCompare(right.parameter_id)),
-  });
-}
-
 function retimePlanForPlayback(
   parsed: ParsedParameterPlan,
   targetDurationMs: number | null | undefined,
@@ -132,14 +86,9 @@ export function usePreviewMotionPlayer() {
 
   let activeRunId = 0;
   let activeTimerHandles: number[] = [];
-  let lastStartedPlanSignature = "";
-  let lastPlaybackRunId = "";
-  let lastStartedPlanAtMs = 0;
   let activeTerminalRunId = "";
   let activeTerminalCallback: ((event: DirectParameterPlanTerminalEvent) => void) | null = null;
   let activeMotionStop: (() => void) | null = null;
-
-  const PLAN_RESTART_DEDUP_WINDOW_MS = 700;
 
   function parseParameterPlan(plan: unknown): ParsedParameterPlan | null {
     if (!isObject(plan) || normalizeText(plan.schema_version) !== SCHEMA_PARAMETER_PLAN_V2) {
@@ -271,24 +220,6 @@ export function usePreviewMotionPlayer() {
       Boolean(options.softHandoff),
     );
 
-    const planSignature = buildPlanSignature(playbackPlan.plan);
-    const nowMs = performance.now();
-    if (options.softHandoff && state.status === "playing") {
-      const elapsedSinceLastStartMs = Math.max(0, nowMs - lastStartedPlanAtMs);
-      if (
-        planSignature === lastStartedPlanSignature
-        && elapsedSinceLastStartMs <= PLAN_RESTART_DEDUP_WINDOW_MS
-      ) {
-        console.info(
-          "[MotionPlayer] skip duplicate plan restart. elapsedMs=",
-          elapsedSinceLastStartMs,
-        );
-        state.message = `复用当前参数计划（mode=${playbackPlan.plan.mode}, emotion=${playbackPlan.plan.emotion_label}）...`;
-        options.onStarted?.(playbackPlan.plan, lastPlaybackRunId);
-        return true;
-      }
-    }
-
     const adapter = window.getLAppAdapter?.();
     if (!adapter || typeof adapter.startDirectParameterPlan !== "function") {
       const reason = "动作计划无法执行：Live2D 运行时未提供 Direct Parameter 接口。";
@@ -340,7 +271,6 @@ export function usePreviewMotionPlayer() {
 
     console.info("[MotionPlayer] calling startDirectParameterPlan...");
     const playbackRunId = `motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    lastPlaybackRunId = playbackRunId;
     const started = adapter.startDirectParameterPlan(playbackPlan.plan, {
       runId: playbackRunId,
       onTerminal: (event: DirectParameterPlanTerminalEvent) => {
@@ -390,9 +320,11 @@ export function usePreviewMotionPlayer() {
       return false;
     }
 
+    if (options.softHandoff) {
+      notifyActiveStopped("direct_parameter_plan_replaced");
+    }
+
     console.info("[MotionPlayer] plan started successfully. totalDurationMs=", playbackPlan.totalDurationMs);
-    lastStartedPlanSignature = planSignature;
-    lastStartedPlanAtMs = performance.now();
     state.status = "playing";
     state.message = `正在执行参数计划（mode=${playbackPlan.plan.mode}, emotion=${playbackPlan.plan.emotion_label}）...`;
     state.keyAxesCount = playbackPlan.plan.summary?.axis_count ?? playbackPlan.plan.parameters.length;

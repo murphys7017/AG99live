@@ -797,6 +797,36 @@ def test_validate_semantic_axis_profile_rejects_relation_graph_unknown_axis(tmp_
     _expect_profile_error(profile, "relation rule.*references an unknown axis")
 
 
+def test_validate_semantic_axis_profile_rejects_bounded_ratio_cycle(tmp_path) -> None:
+    profile = _build_valid_profile(tmp_path)
+    first_axis_id = profile["axes"][0]["id"]
+    second_axis_id = profile["axes"][1]["id"]
+    profile["relation_graph"]["edges"] = [
+        {
+            "id": "first_to_second",
+            "source_axis_id": first_axis_id,
+            "target_axis_id": second_axis_id,
+            "kind": "bounded_ratio",
+            "mode": "same_direction",
+            "scale": 0.5,
+            "deadzone": 1.0,
+            "max_delta": 10.0,
+        },
+        {
+            "id": "second_to_first",
+            "source_axis_id": second_axis_id,
+            "target_axis_id": first_axis_id,
+            "kind": "bounded_ratio",
+            "mode": "same_direction",
+            "scale": 0.5,
+            "deadzone": 1.0,
+            "max_delta": 10.0,
+        },
+    ]
+
+    _expect_profile_error(profile, "relations must be acyclic")
+
+
 @pytest.mark.parametrize(
     ("source_axis_id", "target_axis_id", "expected_message"),
     [
@@ -919,7 +949,7 @@ def test_validate_semantic_axis_profile_rejects_coupling_cycles(tmp_path) -> Non
         },
     ]
 
-    _expect_profile_error(profile, "couplings must be acyclic")
+    _expect_profile_error(profile, "relations must be acyclic")
 
 
 def test_ensure_semantic_axis_profile_marks_user_modified_profile_stale(tmp_path) -> None:

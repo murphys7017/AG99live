@@ -652,7 +652,6 @@ def _normalize_relation_graph(
 
     normalized_edges: list[SemanticAxisRelationRule] = []
     seen_ids: set[str] = set()
-    derive_edges: list[SemanticAxisCoupling] = []
     for raw_edge in raw_edges:
         if not isinstance(raw_edge, Mapping):
             raise SemanticAxisProfileError(
@@ -708,20 +707,8 @@ def _normalize_relation_graph(
             "max_delta": max_delta,
         }
         normalized_edges.append(normalized_edge)
-        if kind == "derive":
-            derive_edges.append(
-                {
-                    "id": edge_id,
-                    "source_axis_id": source_axis_id,
-                    "target_axis_id": target_axis_id,
-                    "mode": mode,
-                    "scale": scale,
-                    "deadzone": deadzone,
-                    "max_delta": max_delta,
-                }
-            )
 
-    _reject_coupling_cycles(derive_edges)
+    _reject_relation_cycles(normalized_edges)
     return {
         "schema_version": SEMANTIC_AXIS_RELATION_GRAPH_SCHEMA_VERSION,
         "edges": normalized_edges,
@@ -994,7 +981,7 @@ def validate_semantic_axis_profile(
         if enforce_runtime_contracts:
             coupling_target_owners[target_axis_id] = coupling_id
 
-    _reject_coupling_cycles(normalized_couplings)
+    _reject_relation_cycles(normalized_couplings)
     relation_graph = (
         _build_relation_graph_from_couplings(normalized_couplings)
         if profile_payload.get("relation_graph") is None
@@ -1606,10 +1593,12 @@ def _require_range_within_range(
         )
 
 
-def _reject_coupling_cycles(couplings: list[SemanticAxisCoupling]) -> None:
+def _reject_relation_cycles(relations: list[Mapping[str, Any]]) -> None:
     graph: dict[str, list[str]] = {}
-    for coupling in couplings:
-        graph.setdefault(coupling["source_axis_id"], []).append(coupling["target_axis_id"])
+    for relation in relations:
+        graph.setdefault(str(relation["source_axis_id"]), []).append(
+            str(relation["target_axis_id"])
+        )
 
     visiting: set[str] = set()
     visited: set[str] = set()
@@ -1622,7 +1611,7 @@ def _reject_coupling_cycles(couplings: list[SemanticAxisCoupling]) -> None:
             cycle_start = path.index(axis_id) if axis_id in path else 0
             cycle_path = path[cycle_start:] + [axis_id]
             raise SemanticAxisProfileError(
-                "SemanticAxisProfile couplings must be acyclic; detected cycle: "
+                "SemanticAxisProfile relations must be acyclic; detected cycle: "
                 + " -> ".join(cycle_path)
                 + "."
             )

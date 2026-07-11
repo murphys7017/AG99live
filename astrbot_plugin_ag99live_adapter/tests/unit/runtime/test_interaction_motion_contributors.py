@@ -657,6 +657,26 @@ def test_prompt_contributor_hides_resource_id_when_no_resource_candidates(
     assert "必填字段是 intent_tags 和 axis_levels；可选字段只有 duration_hint_ms。" in system.value
 
 
+def test_resource_candidate_preserves_dotted_catalog_id(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+    runtime_state = _build_runtime_state()
+    runtime_state.model_info["models"][0]["constraints"]["expressions"][0][
+        "catalog_id"
+    ] = "expression.smile"
+
+    candidates = module.build_motion_resource_candidates(runtime_state=runtime_state)
+
+    assert any(
+        item["resource_id"] == "expression.smile"
+        and item["resource_type"] == "expression"
+        for item in candidates
+    )
+
+
 def test_invalid_resource_id_rejects_motion_payload_instead_of_clearing_resource(
     install_fake_astrbot,
     monkeypatch,
