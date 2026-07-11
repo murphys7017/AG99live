@@ -251,7 +251,9 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
                 "Generate Live2D motion intent for persona expression. Describe "
                 "the visible performance with intent_tags and choose meaningful "
                 "semantic axis levels for this turn. Select at most one typed resource "
-                "only when a listed expression or complete motion is clearly appropriate."
+                "only when a listed expression or complete motion is clearly appropriate. "
+                "Emit exactly one ag99live.motion effect for an assistant segment; never "
+                "split a movement sequence into multiple effects."
             ),
             parameters={
                 "type": "object",
@@ -535,8 +537,17 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         else ""
     )
     if persona_effect_available:
+        sequence_guidance = (
+            "用户要求动作序列时，优先选择一个能完整表达该序列的 motion_resource_id；"
+            "没有合适资源时，只输出一个最能代表本轮语义的姿态。"
+            if has_motion_resources
+            else "用户要求动作序列时，只输出一个最能代表本轮语义的姿态。"
+        )
         output_contract_text = (
             "你正在控制一个 Live2D 模型，并为本轮回复生成可见动作。"
+            "每个回复片段必须且只能调用一次 ag99live.motion；"
+            "不要用多个动作调用表达连续、往返或分阶段动作。"
+            f"{sequence_guidance}"
             f"{allowed_fields_text}"
         )
         output_shape_text = ""

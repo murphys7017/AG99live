@@ -475,6 +475,9 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert capability.value["axis_value_format"] == "axis_levels"
     assert "你正在控制一个 Live2D 模型" in system.value
     assert "为本轮回复生成可见动作" in system.value
+    assert "每个回复片段必须且只能调用一次 ag99live.motion" in system.value
+    assert "不要用多个动作调用表达连续、往返或分阶段动作" in system.value
+    assert "没有合适资源时，只输出一个最能代表本轮语义的姿态" in system.value
     assert "<@anim" not in system.value
     assert '"plugin_hints":{"ag99live_motion"' not in system.value
     assert "Persona Effect" not in system.value
@@ -2008,6 +2011,8 @@ def test_register_interaction_contributors_uses_available_hooks(
     effect = registered_effects[0]
     assert effect.plugin_id == "astrbot_plugin_ag99live_adapter"
     assert effect.name == "ag99live.motion"
+    assert "Emit exactly one ag99live.motion effect" in effect.description
+    assert "never split a movement sequence into multiple effects" in effect.description
     assert effect.legacy_hint_names == ()
     assert effect.parameters["required"] == ["intent_tags", "axis_levels"]
     assert effect.parameters["additionalProperties"] is False
