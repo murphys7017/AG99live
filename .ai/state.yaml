@@ -1,12 +1,18 @@
 task:
   class: bugfix
   risk: high
-  phase: semantic_motion_v4_lifecycle_hardening
+  phase: end_to_end_lifecycle_closure
   status: complete
-  scope: Close timeline ownership, run identity, profile revision, and typed resource candidate defects found in the 43-commit review
+  scope: Close playback acknowledgement, replacement, disconnect, feedback, lip-sync clock, and Motion Lab delivery defects found in the end-to-end review
 context:
   confidence: high
   assumptions:
+    - Playback acknowledgement is recorded only after the outbound WebSocket send succeeds; send failure makes the frontend session fail visibly.
+    - Disconnect and turn replacement interrupt every owned Timeline with explicit turn_id plus message_id; ModelEngine stops only the matching active run and removes only that segment's pending payload.
+    - Soft handoff keeps the previous run owned until the replacement starts; expression lookup failure preserves both the previous run and expression, while direct-plan replacement failure explicitly settles the previous run.
+    - Production Orchestrator, Timeline, and pending motion keys require non-empty turn_id and message_id; preview remains a separate direct path.
+    - Main-path lip sync uses only the current HTMLAudioElement Web Audio clock; SDK WAV progression is not a fallback clock.
+    - ModelEngine compile failures are persisted as Motion Lab feedback events, and Motion Lab uses local reconnect retry plus backend queue drain on shutdown; a drain timeout cancels the worker and fails visibly after mandatory plugin cleanup.
     - A preparing audio PlaybackTimeline remains the lifecycle owner of its queued motion even though it cannot be used as a timing clock until audio starts.
     - A motion player may report accepted playback only when it synchronously invokes onStarted with a non-empty runId; ModelEngine no longer synthesizes unowned started events.
     - Motion intents whose profile_revision differs from the selected model profile fail compilation instead of being reinterpreted with current anchors and relations.
@@ -186,6 +192,11 @@ architecture:
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
 verification:
   checks_run:
+    - npm test (complete frontend suite passed after end-to-end lifecycle closure)
+    - npm run typecheck (renderer and node typechecks passed)
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (306 passed)
+    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings)
+    - git diff --check
     - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (305 passed)
     - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_interaction_motion_contributors.py -q (42 passed)
     - npm test (complete frontend suite passed after lifecycle hardening)
@@ -257,7 +268,7 @@ backlog:
     status: mvp_implemented
     summary: Add an independent small-model performance curve layer for speech-synchronized motion timing.
     notes:
-      - Performance curve generation now follows the current turn chat Provider; no dedicated provider_id or model-timeout config is exposed.
+      - Performance curve generation supports an independently configured performance_curve_provider_id; leaving it empty intentionally follows the current turn chat Provider, and no model-timeout config is exposed.
       - Curve generation and lookup are bound by turn_id plus message_id to keep multi-segment turns aligned.
       - Symbolic curve hints are generated asynchronously after assistant text is available and never block TTS or playback; if not ready before motion egress, the task is cancelled and playback falls back to default timing.
       - Requested, resolved, failed, and attached curve events are stored in Motion Lab SQLite raw events.
