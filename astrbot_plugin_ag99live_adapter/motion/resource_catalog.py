@@ -15,12 +15,14 @@ def build_motion_resource_candidates(
 
     candidates: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
+    parameter_axis_lookup = _build_parameter_axis_lookup(model)
     for item in constraints.get("motions") or []:
         _append_catalog_resource_candidate(
             candidates,
             seen_ids,
             item,
             resource_type="motion",
+            parameter_axis_lookup=parameter_axis_lookup,
         )
     for item in constraints.get("expressions") or []:
         _append_catalog_resource_candidate(
@@ -28,6 +30,7 @@ def build_motion_resource_candidates(
             seen_ids,
             item,
             resource_type="expression",
+            parameter_axis_lookup=parameter_axis_lookup,
         )
 
     candidates.sort(key=_score_resource_candidate)
@@ -38,6 +41,7 @@ def validate_motion_resource_id(
     resource_id: Any,
     *,
     candidates: list[dict[str, Any]],
+    resource_type: str | None = None,
 ) -> str:
     normalized = normalize_resource_id(resource_id)
     if not normalized:
@@ -46,6 +50,10 @@ def validate_motion_resource_id(
         normalize_resource_id(candidate.get("resource_id")).lower()
         for candidate in candidates
         if isinstance(candidate, dict)
+        and (
+            resource_type is None
+            or str(candidate.get("resource_type") or "").strip() == resource_type
+        )
     }
     if normalized.lower() in candidate_ids:
         return normalized
@@ -62,6 +70,7 @@ def _append_catalog_resource_candidate(
     item: Any,
     *,
     resource_type: str,
+    parameter_axis_lookup: dict[str, list[str]],
 ) -> None:
     if not isinstance(item, dict):
         return
@@ -77,31 +86,81 @@ def _append_catalog_resource_candidate(
     if not resource_id or resource_id in seen_ids:
         return
     seen_ids.add(resource_id)
-    candidates.append(
-        {
-            "resource_id": resource_id,
-            "resource_type": resource_type,
-            "label": str(
-                item.get("catalog_label") or item.get("label") or item.get("name") or resource_id
-            ).strip(),
-            "description": str(
-                item.get("catalog_description") or item.get("description") or ""
-            ).strip(),
-            "tags": _text_list(item.get("catalog_tags") or item.get("tags"), limit=8),
-            "emotion_bias": _text_list(
-                item.get("catalog_emotion_bias") or item.get("emotion_bias"),
-                limit=6,
-            ),
-            "recommended_scenarios": _text_list(
-                item.get("recommended_scenarios"),
-                limit=6,
-            ),
-            "intensity": str(
-                item.get("catalog_intensity") or item.get("intensity") or ""
-            ).strip(),
-            "file": str(item.get("file") or "").strip().replace("\\", "/"),
-        }
-    )
+    candidate = {
+        "resource_id": resource_id,
+        "resource_type": resource_type,
+        "label": str(
+            item.get("catalog_label")
+            or item.get("label")
+            or item.get("name")
+            or resource_id
+        ).strip(),
+        "description": str(
+            item.get("catalog_description") or item.get("description") or ""
+        ).strip(),
+        "tags": _text_list(item.get("catalog_tags") or item.get("tags"), limit=8),
+        "emotion_bias": _text_list(
+            item.get("catalog_emotion_bias") or item.get("emotion_bias"),
+            limit=6,
+        ),
+        "recommended_scenarios": _text_list(
+            item.get("recommended_scenarios"),
+            limit=6,
+        ),
+        "intensity": str(
+            item.get("catalog_intensity") or item.get("intensity") or ""
+        ).strip(),
+        "file": str(item.get("file") or "").strip().replace("\\", "/"),
+    }
+    if resource_type == "expression":
+        parameter_ids = _expression_parameter_ids(item)
+        conflicting_axis_ids = sorted(
+            {
+                axis_id
+                for parameter_id in parameter_ids
+                for axis_id in parameter_axis_lookup.get(parameter_id, [])
+            }
+        )
+        if conflicting_axis_ids:
+            candidate["conflicting_axis_ids"] = conflicting_axis_ids
+    candidates.append(candidate)
+
+
+def _build_parameter_axis_lookup(model: dict[str, Any]) -> dict[str, list[str]]:
+    profile = model.get("semantic_axis_profile")
+    axes = profile.get("axes") if isinstance(profile, dict) else None
+    if not isinstance(axes, list):
+        return {}
+    result: dict[str, list[str]] = {}
+    for axis in axes:
+        if not isinstance(axis, dict):
+            continue
+        axis_id = str(axis.get("id") or "").strip()
+        bindings = axis.get("parameter_bindings")
+        if not axis_id or not isinstance(bindings, list):
+            continue
+        for binding in bindings:
+            if not isinstance(binding, dict):
+                continue
+            parameter_id = str(binding.get("parameter_id") or "").strip()
+            if parameter_id:
+                result.setdefault(parameter_id, []).append(axis_id)
+    return result
+
+
+def _expression_parameter_ids(item: dict[str, Any]) -> set[str]:
+    result = {
+        str(value).strip()
+        for value in item.get("parameter_ids") or []
+        if str(value).strip()
+    }
+    for parameter in item.get("parameters") or []:
+        if not isinstance(parameter, dict):
+            continue
+        parameter_id = str(parameter.get("id") or "").strip()
+        if parameter_id:
+            result.add(parameter_id)
+    return result
 
 
 def _is_exposed_resource(item: dict[str, Any]) -> bool:

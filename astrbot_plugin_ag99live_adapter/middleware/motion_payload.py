@@ -40,6 +40,7 @@ def normalize_motion_arguments_payload(
             "emotion",
             "emotion_label",
             "summary",
+            "resource_id",
         )
         if key in motion_hint
     ]
@@ -69,7 +70,17 @@ def normalize_motion_arguments_payload(
     if not intent_tags:
         return None, append_resolution_reason(base_reason, "intent_tags_empty")
     emotion_label = derive_motion_emotion_label(intent_tags)
-    requested_resource_id = normalize_motion_resource_id(motion_hint.get("resource_id"))
+    requested_expression_resource_id = normalize_motion_resource_id(
+        motion_hint.get("expression_resource_id")
+    )
+    requested_motion_resource_id = normalize_motion_resource_id(
+        motion_hint.get("motion_resource_id")
+    )
+    if requested_expression_resource_id and requested_motion_resource_id:
+        return None, append_resolution_reason(
+            base_reason,
+            "multiple_resource_layers_forbidden",
+        )
     validated_levels, rejected_levels = normalize_effect_axis_levels(
         motion_hint.get("axis_levels"),
     )
@@ -85,14 +96,25 @@ def normalize_motion_arguments_payload(
     resource_candidates = build_motion_resource_candidates(
         runtime_state=runtime_state,
     )
-    resource_id, resource_reason = validate_motion_resource_id_for_payload(
-        requested_resource_id,
+    expression_resource_id, expression_resource_reason = validate_motion_resource_id_for_payload(
+        requested_expression_resource_id,
         candidates=resource_candidates,
+        resource_type="expression",
         sanitize_reason_fragment=sanitize_reason_fragment,
     )
-    if resource_reason:
-        reason = append_resolution_reason(reason, resource_reason)
-        if requested_resource_id and not resource_id:
+    if expression_resource_reason:
+        reason = append_resolution_reason(reason, expression_resource_reason)
+        if requested_expression_resource_id and not expression_resource_id:
+            return None, reason
+    motion_resource_id, motion_resource_reason = validate_motion_resource_id_for_payload(
+        requested_motion_resource_id,
+        candidates=resource_candidates,
+        resource_type="motion",
+        sanitize_reason_fragment=sanitize_reason_fragment,
+    )
+    if motion_resource_reason:
+        reason = append_resolution_reason(reason, motion_resource_reason)
+        if requested_motion_resource_id and not motion_resource_id:
             return None, reason
 
     if not validated_levels:
@@ -111,7 +133,8 @@ def normalize_motion_arguments_payload(
         "intent_tags": intent_tags,
         "emotion_label": emotion_label,
         "duration_hint_ms": duration_hint_ms,
-        "resource_id": resource_id,
+        "expression_resource_id": expression_resource_id,
+        "motion_resource_id": motion_resource_id,
         "summary": {
             "axis_count": len(validated_levels),
             "intent_tag_count": len(intent_tags),
@@ -125,14 +148,22 @@ def validate_motion_resource_id_for_payload(
     resource_id: Any,
     *,
     candidates: list[dict[str, Any]],
+    resource_type: str | None = None,
     sanitize_reason_fragment,
 ) -> tuple[str, str]:
     normalized = normalize_motion_resource_id(resource_id)
     if not normalized:
         return "", ""
-    if validate_motion_resource_id(normalized, candidates=candidates):
-        return normalized, "resource_id_validated"
-    return "", f"resource_id_rejected:{sanitize_reason_fragment(normalized)}"
+    if validate_motion_resource_id(
+        normalized,
+        candidates=candidates,
+        resource_type=resource_type,
+    ):
+        return normalized, f"{resource_type or 'resource'}_id_validated"
+    return "", (
+        f"{resource_type or 'resource'}_id_rejected:"
+        f"{sanitize_reason_fragment(normalized)}"
+    )
 
 
 def are_motion_axes_all_neutralish(

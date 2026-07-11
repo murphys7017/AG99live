@@ -152,7 +152,7 @@ class AG99liveMotionPromptContributor:
             PromptExtension(
                 plugin_id=self.plugin_id,
                 mount="system",
-                title="AG99live Motion Decision Contract",
+                title="Live2D Motion Decision",
                 value_kind="text",
                 value=_build_motion_decision_contract_text(static_capability_payload),
                 order=39,
@@ -164,9 +164,11 @@ class AG99liveMotionPromptContributor:
             PromptExtension(
                 plugin_id=self.plugin_id,
                 mount="capability",
-                title="AG99live Motion Capability",
+                title="Live2D Motion Capability",
                 value_kind="mapping",
-                value=static_capability_payload,
+                value=_build_motion_capability_prompt_payload(
+                    static_capability_payload
+                ),
                 order=40,
                 meta={
                     "scope": "static",
@@ -176,7 +178,7 @@ class AG99liveMotionPromptContributor:
             PromptExtension(
                 plugin_id=self.plugin_id,
                 mount="context",
-                title="AG99live Motion Runtime",
+                title="Live2D Motion Context",
                 value_kind="mapping",
                 value=runtime_payload,
                 order=41,
@@ -248,8 +250,8 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
             description=(
                 "Generate Live2D motion intent for persona expression. Describe "
                 "the visible performance with intent_tags and choose meaningful "
-                "semantic axis levels for this turn. Use resource_id only when a listed "
-                "explicit expression or motion resource is clearly appropriate."
+                "semantic axis levels for this turn. Select at most one typed resource "
+                "only when a listed expression or complete motion is clearly appropriate."
             ),
             parameters={
                 "type": "object",
@@ -269,9 +271,16 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
                         "minProperties": 1,
                     },
                     "duration_hint_ms": {"type": "integer"},
-                    "resource_id": {"type": "string"},
+                    "expression_resource_id": {"type": "string"},
+                    "motion_resource_id": {"type": "string"},
                 },
                 "required": ["intent_tags", "axis_levels"],
+                "not": {
+                    "required": [
+                        "expression_resource_id",
+                        "motion_resource_id",
+                    ],
+                },
             },
         )
     )
@@ -493,126 +502,44 @@ def _build_motion_static_capability_payload(runtime_state: Any) -> dict[str, Any
             if resource_candidates:
                 capability_payload["resource_candidates"] = resource_candidates
 
-        capability_payload["effect_arguments_example"] = (
-            _build_motion_effect_arguments_example(
-                profile_payload,
-                include_resource_id=bool(capability_payload.get("resource_candidates")),
-            )
-        )
-
     return capability_payload
 
 
 def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> str:
-    effect_arguments_example = capability_payload.get("effect_arguments_example")
-    format_json = "{}"
-    if isinstance(effect_arguments_example, dict) and effect_arguments_example:
-        import json
-
-        format_json = json.dumps(
-            effect_arguments_example,
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
-
-    motion_style_prompt = str(capability_payload.get("motion_style_prompt") or "").strip()
-    style_text = ""
-    if motion_style_prompt:
-        style_text = (
-            "角色风格偏好："
-            f"{motion_style_prompt}"
-            "这些偏好来自用户手调样本，用于约束角色表演习惯，不是固定动作模板。"
-        )
-    semantic_profile = capability_payload.get("semantic_profile")
-    axis_prompt = ""
-    if isinstance(semantic_profile, dict):
-        axis_prompt = str(semantic_profile.get("axis_prompt") or "").strip()
-    axis_prompt_text = f"可用语义轴及七级方向含义：\n{axis_prompt}\n" if axis_prompt else ""
-    has_resource_candidates = bool(capability_payload.get("resource_candidates"))
+    resource_candidates = capability_payload.get("resource_candidates")
+    has_expression_resources = any(
+        isinstance(item, dict) and item.get("resource_type") == "expression"
+        for item in resource_candidates or []
+    )
+    has_motion_resources = any(
+        isinstance(item, dict) and item.get("resource_type") == "motion"
+        for item in resource_candidates or []
+    )
     persona_effect_available = bool(capability_payload.get("persona_effect_available", True))
     axis_field_name = "axis_levels" if persona_effect_available else "axes"
+    optional_fields = ["duration_hint_ms"]
+    if has_expression_resources:
+        optional_fields.append("expression_resource_id")
+    if has_motion_resources:
+        optional_fields.append("motion_resource_id")
     allowed_fields_text = (
-        f"必填字段是 intent_tags 和 {axis_field_name}；可选字段只有 resource_id 和 duration_hint_ms。"
-        if has_resource_candidates
-        else f"必填字段是 intent_tags 和 {axis_field_name}；可选字段只有 duration_hint_ms。"
+        f"必填字段是 intent_tags 和 {axis_field_name}；"
+        f"可选字段只有 {'、'.join(optional_fields)}。"
     )
     resource_field_text = (
-        "resource_id 只有在确定要引用明确资源时才填写，不确定就省略。"
-        if has_resource_candidates
+        "expression_resource_id 表示可与不冲突姿态叠加的表情资源；"
+        "motion_resource_id 表示替代普通参数姿态播放的完整动作资源；"
+        "两者不能同时填写；选择 expression 时必须省略该候选 conflicting_axis_ids 中的轴；"
+        "不确定时两个资源字段都省略。"
+        if has_expression_resources or has_motion_resources
         else ""
     )
-    fallback_pose_text = ""
-    fallback_candidates = capability_payload.get("fallback_pose_candidates")
-    if isinstance(fallback_candidates, list) and fallback_candidates:
-        lines = ["可参考的姿态语义样本（只用于理解姿态组合，不要输出这些 id）："]
-        for item in fallback_candidates:
-            if not isinstance(item, dict):
-                continue
-            pose_id = str(item.get("id") or "").strip()
-            if not pose_id:
-                continue
-            label = str(item.get("label") or pose_id).strip()
-            source = str(item.get("source") or "").strip()
-            context_parts = []
-            emotion_bias = _join_prompt_list(item.get("emotion_bias"), limit=3)
-            intensity = str(item.get("intensity") or "").strip()
-            scenarios = _join_prompt_list(item.get("recommended_scenarios"), limit=3)
-            description = _truncate_text(str(item.get("description") or "").strip(), 72)
-            pose_descriptors = _join_prompt_list(item.get("pose_descriptors"), limit=4)
-            key_axes = _format_key_axes_for_prompt(item.get("key_axes"))
-            if emotion_bias:
-                context_parts.append(f"语义={emotion_bias}")
-            if pose_descriptors:
-                context_parts.append(f"姿态={pose_descriptors}")
-            if intensity:
-                context_parts.append(f"强度={intensity}")
-            if scenarios:
-                context_parts.append(f"适用={scenarios}")
-            if description:
-                context_parts.append(f"说明={description}")
-            if key_axes:
-                context_parts.append(f"关键轴={key_axes}")
-            context_text = f"；{'；'.join(context_parts)}" if context_parts else ""
-            lines.append(
-                f"- {label}"
-                + (f" ({source})" if source else "")
-                + context_text
-            )
-        fallback_pose_text = "\n".join(lines) + "\n"
-    resource_text = ""
-    resource_candidates = capability_payload.get("resource_candidates")
-    if isinstance(resource_candidates, list) and resource_candidates:
-        lines = ["可选明确资源（只有需要特定表情/动画时才输出 resource_id；不确定就省略）："]
-        for item in resource_candidates:
-            if not isinstance(item, dict):
-                continue
-            resource_id = str(item.get("resource_id") or "").strip()
-            if not resource_id:
-                continue
-            label = str(item.get("label") or resource_id).strip()
-            context_parts = []
-            tags = _join_prompt_list(item.get("tags"), limit=4)
-            scenarios = _join_prompt_list(item.get("recommended_scenarios"), limit=3)
-            description = _truncate_text(str(item.get("description") or "").strip(), 72)
-            intensity = str(item.get("intensity") or "").strip()
-            if tags:
-                context_parts.append(f"标签={tags}")
-            if scenarios:
-                context_parts.append(f"适用={scenarios}")
-            if intensity:
-                context_parts.append(f"强度={intensity}")
-            if description:
-                context_parts.append(f"说明={description}")
-            context_text = f"；{'；'.join(context_parts)}" if context_parts else ""
-            lines.append(f"- {resource_id}: {label}{context_text}")
-        resource_text = "\n".join(lines) + "\n"
-
     if persona_effect_available:
         output_contract_text = (
-            "你正在控制一个 Live2D 模型；在本轮动作 arguments 中填写动作参数。"
+            "你正在控制一个 Live2D 模型，并为本轮回复生成可见动作。"
             f"{allowed_fields_text}"
         )
-        output_shape_text = f" 输出形状示例：{format_json}"
+        output_shape_text = ""
     else:
         inline_wrapper = {
             "mode": "inline",
@@ -648,19 +575,107 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         "优先选择能表达姿态方向、视线焦点和身体重心的关键轴，再用少量表情轴补充情绪细节。"
         "普通回复也要给轻量姿态参数；明显转身、强调、回避、惊讶、调侃、开心或疑惑时，动作幅度要更明确。"
         "示例只展示结构和数值，不要照抄示例内容。"
-        f"{style_text}"
-        f"{axis_prompt_text}"
-        f"{resource_text}"
-        f"{fallback_pose_text}"
         f"{output_shape_text}"
     )
+
+
+def _build_motion_capability_prompt_payload(
+    capability_payload: dict[str, Any],
+) -> dict[str, Any]:
+    persona_effect_available = bool(
+        capability_payload.get("persona_effect_available", True)
+    )
+    result: dict[str, Any] = {
+        "axis_value_format": "axis_levels" if persona_effect_available else "axes",
+    }
+    if persona_effect_available:
+        result["axis_level_scale"] = {
+            "-3": "强负方向",
+            "-2": "中等负方向",
+            "-1": "轻微负方向",
+            "0": "明确回到中性",
+            "1": "轻微正方向",
+            "2": "中等正方向",
+            "3": "强正方向",
+            "omitted": "本轮不控制该轴",
+        }
+
+    semantic_profile = capability_payload.get("semantic_profile")
+    if isinstance(semantic_profile, dict):
+        prompt_axes = semantic_profile.get("prompt_axes")
+        if isinstance(prompt_axes, list):
+            axis_fields = [
+                "id",
+                "label",
+                "control_role",
+                "negative_semantics",
+                "positive_semantics",
+                "usage_notes",
+            ]
+            if not persona_effect_available:
+                axis_fields.insert(3, "value_range")
+            result["axes"] = [
+                {
+                    key: axis.get(key)
+                    for key in axis_fields
+                    if axis.get(key) not in (None, "", [])
+                }
+                for axis in prompt_axes
+                if isinstance(axis, dict) and str(axis.get("id") or "").strip()
+            ]
+
+    style_prompt = str(capability_payload.get("motion_style_prompt") or "").strip()
+    if style_prompt:
+        result["character_motion_style"] = style_prompt
+
+    references = capability_payload.get("fallback_pose_candidates")
+    if isinstance(references, list):
+        result["pose_references"] = [
+            {
+                key: item.get(key)
+                for key in (
+                    "label",
+                    "description",
+                    "emotion_bias",
+                    "intensity",
+                    "recommended_scenarios",
+                    "pose_descriptors",
+                    "key_axis_levels",
+                )
+                if item.get(key) not in (None, "", [])
+            }
+            for item in references
+            if isinstance(item, dict)
+        ]
+
+    resources = capability_payload.get("resource_candidates")
+    if isinstance(resources, list):
+        result["resources"] = [
+            {
+                key: item.get(key)
+                for key in (
+                    "resource_id",
+                    "resource_type",
+                    "label",
+                    "description",
+                    "tags",
+                    "emotion_bias",
+                    "recommended_scenarios",
+                    "intensity",
+                    "conflicting_axis_ids",
+                )
+                if item.get(key) not in (None, "", [])
+            }
+            for item in resources
+            if isinstance(item, dict)
+        ]
+    return result
 
 
 def _build_official_inline_motion_intent_example(
     capability_payload: dict[str, Any],
 ) -> dict[str, Any]:
     semantic_profile = capability_payload.get("semantic_profile")
-    effect_arguments_example = capability_payload.get("effect_arguments_example")
     intent: dict[str, Any] = {
         "schema_version": "engine.motion_intent.v3",
         "profile_id": "",
@@ -677,49 +692,17 @@ def _build_official_inline_motion_intent_example(
         if isinstance(profile_revision, int) and profile_revision > 0:
             intent["profile_revision"] = profile_revision
         intent["model_id"] = str(semantic_profile.get("model_id") or "")
-    if isinstance(effect_arguments_example, dict):
-        for key in ("intent_tags", "duration_hint_ms", "resource_id", "axes"):
-            if key in effect_arguments_example:
-                intent[key] = effect_arguments_example[key]
-        if "axis_levels" in effect_arguments_example and isinstance(semantic_profile, dict):
-            prompt_axes = semantic_profile.get("prompt_axes")
-            if isinstance(prompt_axes, list):
-                intent["axes"] = {
-                    str(axis.get("id") or "").strip(): _resolve_axis_example_value(axis, index=index)
-                    for index, axis in enumerate(
-                        _select_motion_format_example_axes(prompt_axes, limit=5)
-                    )
-                    if isinstance(axis, dict) and str(axis.get("id") or "").strip()
-                }
+    if isinstance(semantic_profile, dict):
+        prompt_axes = semantic_profile.get("prompt_axes")
+        if isinstance(prompt_axes, list):
+            intent["axes"] = {
+                str(axis.get("id") or "").strip(): _resolve_axis_example_value(axis, index=index)
+                for index, axis in enumerate(
+                    _select_motion_format_example_axes(prompt_axes, limit=5)
+                )
+                if isinstance(axis, dict) and str(axis.get("id") or "").strip()
+            }
     return intent
-
-
-def _build_motion_effect_arguments_example(
-    profile_payload: dict[str, Any],
-    *,
-    include_resource_id: bool,
-) -> dict[str, Any]:
-    prompt_axes = profile_payload.get("prompt_axes")
-    if not isinstance(prompt_axes, list) or not prompt_axes:
-        return {}
-
-    axis_levels: dict[str, int] = {}
-    for index, axis in enumerate(_select_motion_format_example_axes(prompt_axes, limit=5)):
-        if not isinstance(axis, dict):
-            continue
-        axis_id = str(axis.get("id") or "").strip()
-        if not axis_id:
-            continue
-        axis_levels[axis_id] = (-1, 1, 1, -1, 2)[index % 5]
-
-    payload = {
-        "intent_tags": ["语气关键词", "姿态关键词", "场景关键词"],
-        "duration_hint_ms": DEFAULT_MOTION_INTENT_DURATION_MS,
-        "axis_levels": axis_levels,
-    }
-    if include_resource_id:
-        payload["resource_id"] = "可选资源id"
-    return payload
 
 
 def _build_prompt_fallback_pose_candidates(
@@ -756,7 +739,11 @@ def _build_prompt_fallback_pose_candidates(
                     item.get("axes"),
                     axis_by_id=axis_by_id,
                 )[:4],
-                "key_axes": _summarize_key_axes(item.get("axes"), limit=5),
+                "key_axis_levels": _summarize_key_axis_levels(
+                    item.get("axes"),
+                    axis_by_id=axis_by_id,
+                    limit=5,
+                ),
                 "source": source,
             }
         )
@@ -1073,10 +1060,13 @@ def _build_previous_motion_variation_payload(
     if not key_axes:
         return {}
 
-    resource_id = str(snapshot.get("resource_id") or "").strip()
+    expression_resource_id = str(snapshot.get("expression_resource_id") or "").strip()
+    motion_resource_id = str(snapshot.get("motion_resource_id") or "").strip()
     summary_text = "上一动作关键轴：" + "，".join(summary_parts) + "。"
-    if resource_id:
-        summary_text += f" 上一动作 resource_id={resource_id}。"
+    if expression_resource_id:
+        summary_text += f" 上一动作 expression_resource_id={expression_resource_id}。"
+    if motion_resource_id:
+        summary_text += f" 上一动作 motion_resource_id={motion_resource_id}。"
     summary_text += " 参考上一动作，按本轮语义重新选择方向、幅度和重心。"
     return {
         "previous_motion_key_axes": key_axes,
@@ -1183,10 +1173,15 @@ def _normalize_axis_text_list(value: Any) -> list[str]:
 
 
 
-def _summarize_key_axes(value: Any, *, limit: int) -> dict[str, float]:
+def _summarize_key_axis_levels(
+    value: Any,
+    *,
+    axis_by_id: Mapping[str, dict[str, Any]],
+    limit: int,
+) -> dict[str, int]:
     if not isinstance(value, dict):
         return {}
-    result: dict[str, float] = {}
+    result: dict[str, int] = {}
     for axis_id, axis_value in value.items():
         if len(result) >= limit:
             break
@@ -1195,33 +1190,27 @@ def _summarize_key_axes(value: Any, *, limit: int) -> dict[str, float]:
         normalized_axis_id = str(axis_id or "").strip()
         if not normalized_axis_id:
             continue
-        result[normalized_axis_id] = round(float(axis_value), 2)
+        axis = axis_by_id.get(normalized_axis_id)
+        anchors = axis.get("level_anchors") if isinstance(axis, dict) else None
+        if not isinstance(anchors, dict):
+            continue
+        numeric_anchors: list[tuple[int, float]] = []
+        for raw_level, raw_anchor in anchors.items():
+            try:
+                level = int(raw_level)
+                anchor = float(raw_anchor)
+            except (TypeError, ValueError):
+                continue
+            if -3 <= level <= 3:
+                numeric_anchors.append((level, anchor))
+        if len(numeric_anchors) != 7:
+            continue
+        level, _anchor = min(
+            numeric_anchors,
+            key=lambda item: (abs(item[1] - float(axis_value)), abs(item[0])),
+        )
+        result[normalized_axis_id] = level
     return result
-
-
-def _join_prompt_list(value: Any, *, limit: int) -> str:
-    if not isinstance(value, list):
-        return ""
-    items = [
-        _truncate_text(str(item).strip(), 24)
-        for item in value
-        if str(item).strip()
-    ][: max(0, limit)]
-    return ", ".join(items)
-
-
-def _format_key_axes_for_prompt(value: Any) -> str:
-    if not isinstance(value, dict):
-        return ""
-    parts = []
-    for axis_id, axis_value in value.items():
-        if not isinstance(axis_value, (int, float)) or isinstance(axis_value, bool):
-            continue
-        normalized_axis_id = str(axis_id or "").strip()
-        if not normalized_axis_id:
-            continue
-        parts.append(f"{normalized_axis_id}={float(axis_value):g}")
-    return ", ".join(parts)
 
 
 def _normalize_axis_range(value: Any, fallback: list[float] | None) -> list[float] | None:
@@ -1399,7 +1388,8 @@ def _log_persona_effect_motion_resolution(
 
     effect_summary = _summarize_ag99live_motion_effect_arguments(event, view)
     payload_axes_keys: list[str] = []
-    payload_resource_id = ""
+    payload_expression_resource_id = ""
+    payload_motion_resource_id = ""
     if isinstance(payload, dict):
         axes = payload.get("axis_levels")
         if isinstance(axes, dict):
@@ -1408,12 +1398,19 @@ def _log_persona_effect_motion_resolution(
                 for key in axes.keys()
                 if str(key).strip()
             )
-        payload_resource_id = str(payload.get("resource_id") or "").strip()
+        payload_expression_resource_id = str(
+            payload.get("expression_resource_id") or ""
+        ).strip()
+        payload_motion_resource_id = str(
+            payload.get("motion_resource_id") or ""
+        ).strip()
 
     logger.info(
         "WIRING persona_effect_motion phase=%s payload_present=%s reason=%s "
         "effect_names=%s effect_fields=%s effect_axis_keys=%s effect_intent_tags=%s "
-        "effect_resource_id=%s payload_axis_keys=%s payload_resource_id=%s",
+        "effect_expression_resource_id=%s effect_motion_resource_id=%s "
+        "payload_axis_keys=%s payload_expression_resource_id=%s "
+        "payload_motion_resource_id=%s",
         phase or "",
         payload is not None,
         reason,
@@ -1421,9 +1418,11 @@ def _log_persona_effect_motion_resolution(
         ",".join(effect_summary["fields"]),
         ",".join(effect_summary["axis_keys"]),
         ",".join(effect_summary["intent_tags"]),
-        effect_summary["resource_id"],
+        effect_summary["expression_resource_id"],
+        effect_summary["motion_resource_id"],
         ",".join(payload_axes_keys),
-        payload_resource_id,
+        payload_expression_resource_id,
+        payload_motion_resource_id,
     )
 
 
@@ -1496,7 +1495,8 @@ def _summarize_ag99live_motion_effect_arguments(event: Any, view: Any) -> dict[s
         "fields": [],
         "axis_keys": [],
         "intent_tags": [],
-        "resource_id": "",
+        "expression_resource_id": "",
+        "motion_resource_id": "",
     }
     raw_arguments, _reason = _extract_ag99live_motion_effect_arguments(event, view)
     if not isinstance(raw_arguments, dict):
@@ -1523,7 +1523,12 @@ def _summarize_ag99live_motion_effect_arguments(event: Any, view: Any) -> dict[s
         ]
     elif str(raw_intent_tags or "").strip():
         summary["intent_tags"] = [str(raw_intent_tags).strip()]
-    summary["resource_id"] = str(raw_arguments.get("resource_id") or "").strip()
+    summary["expression_resource_id"] = str(
+        raw_arguments.get("expression_resource_id") or ""
+    ).strip()
+    summary["motion_resource_id"] = str(
+        raw_arguments.get("motion_resource_id") or ""
+    ).strip()
     return summary
 
 

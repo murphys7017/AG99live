@@ -123,6 +123,10 @@ def _build_semantic_model_info() -> dict:
                             "value_range": [0, 100],
                             "soft_range": [42, 58],
                             "strong_range": [30, 70],
+                            "level_anchors": {
+                                "-3": 30, "-2": 38, "-1": 45, "0": 50,
+                                "1": 56, "2": 64, "3": 70,
+                            },
                             "positive_semantics": ["turn right"],
                             "negative_semantics": ["turn left"],
                             "usage_notes": "Use for attention direction.",
@@ -147,6 +151,10 @@ def _build_semantic_model_info() -> dict:
                             "value_range": [0, 100],
                             "soft_range": [42, 58],
                             "strong_range": [30, 70],
+                            "level_anchors": {
+                                "-3": 30, "-2": 38, "-1": 45, "0": 50,
+                                "1": 56, "2": 64, "3": 70,
+                            },
                             "positive_semantics": ["open"],
                             "negative_semantics": ["close"],
                             "usage_notes": "Use for wink details.",
@@ -464,9 +472,9 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert system.meta["scope"] == "static"
     assert capability.meta["scope"] == "static"
     assert runtime.meta["scope"] == "dynamic"
-    assert capability.value["persona_effect_available"] is True
+    assert capability.value["axis_value_format"] == "axis_levels"
     assert "你正在控制一个 Live2D 模型" in system.value
-    assert "在本轮动作 arguments 中填写动作参数" in system.value
+    assert "为本轮回复生成可见动作" in system.value
     assert "<@anim" not in system.value
     assert '"plugin_hints":{"ag99live_motion"' not in system.value
     assert "Persona Effect" not in system.value
@@ -477,111 +485,82 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "immediate_spoken_reply" not in system.value
     assert "姿态方向、视线焦点和身体重心" in system.value
     assert "普通回复也要给轻量姿态参数" in system.value
-    assert "角色风格偏好" in system.value
-    assert "中性时偏少轴" in system.value
+    assert "中性时偏少轴" not in system.value
     assert "configured_generation_mode" not in capability.value
-    assert capability.value["motion_style_prompt"] == "中性时偏少轴，开心时优先笑眼和嘴角。"
-    assert capability.value["semantic_profile"]["profile_id"] == "pet.semantic.v1"
-    assert (
-        "负方向会让角色向左扭头；正方向会让角色向右扭头"
-        in capability.value["semantic_profile"]["axis_prompt"]
-    )
-    assert "范围 [0,100]" not in capability.value["semantic_profile"]["axis_prompt"]
-    assert "中性值" not in capability.value["semantic_profile"]["axis_prompt"]
-    assert "使用说明=Use for attention direction." in capability.value["semantic_profile"]["axis_prompt"]
-    assert "负方向会让角色向左扭头；正方向会让角色向右扭头" in system.value
+    assert capability.value["character_motion_style"] == "中性时偏少轴，开心时优先笑眼和嘴角。"
+    assert capability.value["axis_level_scale"]["0"] == "明确回到中性"
+    assert capability.value["axis_level_scale"]["omitted"] == "本轮不控制该轴"
     assert "没有明确方向或表演贡献的轴直接省略" in system.value
     assert "可复用的现成 motion3 动画" not in system.value
     assert "旧表情参考模板" not in system.value
     assert "[动作]" not in system.value
-    assert "head_yaw" in system.value
+    assert "head_yaw" not in system.value
     assert "fallback_pose_id" not in system.value
     assert "intent_tags" in system.value
-    assert "resource_id" in system.value
+    assert "expression_resource_id" in system.value
+    assert "motion_resource_id" in system.value
     assert "axis_levels 是必填对象" in system.value
-    assert "可用语义轴及七级方向含义" in system.value
     assert system.value.count("-3=强负") == 1
-    assert "-3=强负" not in capability.value["semantic_profile"]["axis_prompt"]
     assert "插件会负责" not in system.value
     assert "choice、mode、motion_id" not in system.value
-    assert "可选明确资源" in system.value
-    assert "expr_surprised" in system.value
-    assert "关键轴=head_yaw=80" in system.value
-    assert "姿态更稳定" in system.value
-    assert "eye_open_left" in system.value
-    assert "ParamHairX" not in system.value
-    assert "ParamPhysicsX" not in system.value
-    assert "tablet" not in system.value.lower()
+    assert "expr_surprised" not in system.value
     assert "motion_reference_templates" not in capability.value
     assert "motion_catalog_options" not in capability.value
-    assert "fallback_pose_candidates" in capability.value
-    assert "resource_candidates" in capability.value
+    assert "pose_references" in capability.value
+    assert "resources" in capability.value
     resource_ids = {
-        item["resource_id"] for item in capability.value["resource_candidates"]
+        item["resource_id"] for item in capability.value["resources"]
     }
     assert {"expr_surprised", "serious_explain"}.issubset(resource_ids)
     assert "expr_tablet" not in resource_ids
     resource_candidate = next(
         item
-        for item in capability.value["resource_candidates"]
+        for item in capability.value["resources"]
         if item["resource_id"] == "expr_surprised"
     )
     assert resource_candidate["resource_type"] == "expression"
     assert resource_candidate["recommended_scenarios"] == ["突然被问到", "意外"]
-    assert 2 <= len(capability.value["fallback_pose_candidates"]) <= 4
+    assert resource_candidate["conflicting_axis_ids"] == ["eye_open_left"]
+    assert 2 <= len(capability.value["pose_references"]) <= 4
     assert all(
-        item["id"] != "neutral"
-        for item in capability.value["fallback_pose_candidates"]
+        "id" not in item and "source" not in item
+        for item in capability.value["pose_references"]
     )
     assert all(
         item["pose_descriptors"]
-        for item in capability.value["fallback_pose_candidates"]
+        for item in capability.value["pose_references"]
     )
     catalog_candidate = next(
         item
-        for item in capability.value["fallback_pose_candidates"]
-        if item["id"] == "serious_explain"
+        for item in capability.value["pose_references"]
+        if item["label"] == "认真说明"
     )
-    assert catalog_candidate["source"] == "motion_catalog_semantic_extract"
     assert catalog_candidate["description"] == "姿态更稳定、更像进入解释状态。"
     assert catalog_candidate["emotion_bias"] == ["neutral", "thinking"]
     assert catalog_candidate["recommended_scenarios"] == ["说明问题", "认真解释"]
-    assert catalog_candidate["key_axes"] == {"head_yaw": 80.0}
+    assert catalog_candidate["key_axis_levels"] == {"head_yaw": 3}
     prompt_axis_ids = [
-        item["id"] for item in capability.value["semantic_profile"]["prompt_axes"]
+        item["id"] for item in capability.value["axes"]
     ]
     assert prompt_axis_ids == ["head_yaw", "eye_open_left"]
-    assert capability.value["semantic_profile"]["prompt_axes"][0]["positive_semantics"] == [
+    assert capability.value["axes"][0]["positive_semantics"] == [
         "turn right"
     ]
-    assert capability.value["semantic_profile"]["prompt_axes"][0]["negative_semantics"] == [
+    assert capability.value["axes"][0]["negative_semantics"] == [
         "turn left"
     ]
-    assert capability.value["semantic_profile"]["prompt_axes"][0]["usage_notes"] == (
+    assert capability.value["axes"][0]["usage_notes"] == (
         "Use for attention direction."
     )
     assert all(
         "neutral" not in axis
         and "soft_range" not in axis
         and "strong_range" not in axis
-        for axis in capability.value["semantic_profile"]["prompt_axes"]
+        for axis in capability.value["axes"]
     )
-    assert capability.value["effect_arguments_example"]["axis_levels"]["head_yaw"] == -1
-    assert set(
-        capability.value["effect_arguments_example"]["axis_levels"]
-    ) == {"head_yaw", "eye_open_left"}
-    assert (
-        capability.value["effect_arguments_example"]["intent_tags"]
-        == ["语气关键词", "姿态关键词", "场景关键词"]
-    )
-    assert (
-        capability.value["effect_arguments_example"]["resource_id"]
-        == "可选资源id"
-    )
+    assert "effect_arguments_example" not in capability.value
     assert "intent_tags" in system.value
-    assert "resource_id" in system.value
-    assert "fallback_pose_id" not in capability.value["effect_arguments_example"]
-    assert capability.value["fallback_pose_candidates"][0]["label"] in system.value
+    assert all("file" not in item for item in capability.value["resources"])
     assert runtime.value["configured_generation_mode"] == "single_response_effect"
     assert runtime.value["prompt_purpose"] == "persona_reply"
 
@@ -602,7 +581,7 @@ def test_prompt_contributor_uses_official_inline_anim_contract_when_persona_effe
 
     system = next(item for item in extensions if item.mount == "system")
     capability = next(item for item in extensions if item.mount == "capability")
-    assert capability.value["persona_effect_available"] is False
+    assert capability.value["axis_value_format"] == "axes"
     assert "当前 AstrBot 运行环境不支持动作注入函数" in system.value
     assert "官方兼容标签 <@anim {...}>" in system.value
     assert "内部 intent 字段必须是 engine.motion_intent.v3" in system.value
@@ -613,7 +592,7 @@ def test_prompt_contributor_uses_official_inline_anim_contract_when_persona_effe
     assert '"profile_revision":2' in system.value
     assert '"model_id":"pet"' in system.value
     assert "axes 是必填对象" in system.value
-    assert "范围 [0,100]" in system.value
+    assert capability.value["axes"][0]["value_range"] == [0.0, 100.0]
     assert "等级 -3=强负" not in system.value
     assert '"plugin_hints":{"ag99live_motion"' not in system.value
 
@@ -671,9 +650,10 @@ def test_prompt_contributor_hides_resource_id_when_no_resource_candidates(
     runtime = next(item for item in extensions if item.mount == "context")
     assert capability.meta["scope"] == "static"
     assert runtime.meta["scope"] == "dynamic"
-    assert "resource_candidates" not in capability.value
-    assert "resource_id" not in capability.value["effect_arguments_example"]
-    assert "resource_id 只有在确定要引用明确资源时才填写" not in system.value
+    assert "resources" not in capability.value
+    assert "effect_arguments_example" not in capability.value
+    assert "expression_resource_id" not in system.value
+    assert "motion_resource_id" not in system.value
     assert "必填字段是 intent_tags 和 axis_levels；可选字段只有 duration_hint_ms。" in system.value
 
 
@@ -700,7 +680,58 @@ def test_invalid_resource_id_rejects_motion_payload_instead_of_clearing_resource
     )
 
     assert payload is None
-    assert "resource_id_rejected:resource.missing" in reason
+    assert reason == "forbidden_fields:resource_id"
+
+
+def test_typed_resource_id_rejects_wrong_resource_type(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    payload, reason = module._payload_normalize_motion_arguments_payload(
+        {
+            "intent_tags": ["happy"],
+            "axis_levels": {"head_yaw": 1},
+            "expression_resource_id": "serious_explain",
+        },
+        _build_runtime_state(),
+        base_reason="",
+        append_resolution_reason=lambda base, suffix: ";".join(
+            item for item in (base, suffix) if item
+        ),
+        sanitize_reason_fragment=lambda value: str(value).strip(),
+    )
+
+    assert payload is None
+    assert reason == "expression_id_rejected:serious_explain"
+
+
+def test_persona_effect_rejects_multiple_resource_layers(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    payload, reason = module._payload_normalize_motion_arguments_payload(
+        {
+            "intent_tags": ["surprised"],
+            "axis_levels": {"head_yaw": 2},
+            "expression_resource_id": "expr_surprised",
+            "motion_resource_id": "serious_explain",
+        },
+        _build_runtime_state(),
+        base_reason="",
+        append_resolution_reason=lambda base, suffix: ";".join(
+            item for item in (base, suffix) if item
+        ),
+        sanitize_reason_fragment=lambda value: str(value).strip(),
+    )
+
+    assert payload is None
+    assert reason == "multiple_resource_layers_forbidden"
 
 
 def test_forbidden_legacy_motion_fields_reject_effect_payload(
@@ -803,7 +834,7 @@ def test_prompt_runtime_includes_previous_motion_variation_hint(
     event, _scheduled_calls = _build_event()
     event.adapter.turn_coordinator._last_prompt_motion_snapshot = {
         "schema_version": "engine.motion_intent.v4",
-        "resource_id": "serious_explain",
+        "motion_resource_id": "serious_explain",
         "axis_levels": {
             "head_yaw": 1,
             "body_yaw": -1,
@@ -827,7 +858,7 @@ def test_prompt_runtime_includes_previous_motion_variation_hint(
     ]
     assert "head_yaw=+1" in runtime.value["previous_motion_summary"]
     assert "body_yaw=-1" in runtime.value["previous_motion_summary"]
-    assert "resource_id=serious_explain" in runtime.value["previous_motion_summary"]
+    assert "motion_resource_id=serious_explain" in runtime.value["previous_motion_summary"]
     assert "按本轮语义调整方向与幅度" in runtime.value["previous_motion_variation_instruction"]
     assert "避免在 head_yaw/body_yaw 上重复" not in runtime.value["previous_motion_variation_instruction"]
 
@@ -1314,7 +1345,7 @@ def test_persona_effect_motion_logs_input_and_output_diagnostics(
             _motion_effect_call(
                 {
                     "intent_tags": ["thinking", "explain"],
-                    "resource_id": "serious_explain",
+                    "motion_resource_id": "serious_explain",
                     "axis_levels": {
                         "head_yaw": 2,
                         "eye_open_left": 1,
@@ -1335,14 +1366,14 @@ def test_persona_effect_motion_logs_input_and_output_diagnostics(
     ]
     assert len(persona_effect_logs) == 1
     log_line = persona_effect_logs[0]
-    assert "effect_fields=axis_levels,intent_tags,resource_id" in log_line
+    assert "effect_fields=axis_levels,intent_tags,motion_resource_id" in log_line
     assert "effect_axis_keys=eye_open_left,head_yaw" in log_line
     assert "effect_intent_tags=thinking,explain" in log_line
-    assert "effect_resource_id=serious_explain" in log_line
+    assert "effect_motion_resource_id=serious_explain" in log_line
     assert "payload_axis_keys=eye_open_left,head_yaw" in log_line
-    assert "payload_resource_id=serious_explain" in log_line
+    assert "payload_motion_resource_id=serious_explain" in log_line
     assert "payload_fallback_pose_id" not in log_line
-    assert "reason=persona_effect:resource_id_validated" in log_line
+    assert "reason=persona_effect:motion_id_validated" in log_line
 
 
 def test_result_contributor_schedules_motion_for_immediate_reply(
@@ -1944,5 +1975,10 @@ def test_register_interaction_contributors_uses_available_hooks(
         "intent_tags",
         "axis_levels",
         "duration_hint_ms",
-        "resource_id",
+        "expression_resource_id",
+        "motion_resource_id",
     }
+    assert effect.parameters["not"]["required"] == [
+        "expression_resource_id",
+        "motion_resource_id",
+    ]

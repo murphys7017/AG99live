@@ -298,12 +298,18 @@ def extract_assistant_reply_keywords(text: str, *, limit: int = 8) -> list[str]:
 def summarize_motion_for_curve(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
-    axes = payload.get("axes")
+    axes = payload.get("axis_levels")
+    if not isinstance(axes, dict):
+        axes = payload.get("axes")
     return {
         "intent_tags": _normalize_string_list(payload.get("intent_tags"), limit=8),
         "axis_keys": sorted(str(key).strip() for key in (axes or {}).keys() if str(key).strip())
         if isinstance(axes, dict)
         else [],
+        "expression_resource_id": str(
+            payload.get("expression_resource_id") or ""
+        ).strip(),
+        "motion_resource_id": str(payload.get("motion_resource_id") or "").strip(),
         "resource_id": str(payload.get("resource_id") or "").strip(),
         "mode": str(payload.get("mode") or "").strip(),
     }

@@ -879,13 +879,21 @@ class TurnCoordinator:
         snapshot = {
             "schema_version": schema_version,
             "source": str(source or "").strip(),
-            "resource_id": str(motion_payload.get("resource_id") or "").strip(),
             "intent_tags": normalized_tags,
         }
         if schema_version == "engine.motion_intent.v4":
             snapshot["axis_levels"] = normalized_levels
+            snapshot["expression_resource_id"] = str(
+                motion_payload.get("expression_resource_id") or ""
+            ).strip()
+            snapshot["motion_resource_id"] = str(
+                motion_payload.get("motion_resource_id") or ""
+            ).strip()
         else:
             snapshot["axes"] = normalized_axes
+            snapshot["resource_id"] = str(
+                motion_payload.get("resource_id") or ""
+            ).strip()
         self._last_prompt_motion_snapshot = snapshot
 
     def _record_motion_lab_raw_event(

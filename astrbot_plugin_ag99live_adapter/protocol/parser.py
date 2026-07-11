@@ -284,6 +284,14 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
             raise ProtocolError(
                 "`system.motion_lab_raw_event` requires `payload.raw` to be an object."
             )
+        segment_message_id = payload.get("message_id")
+        if segment_message_id is not None and (
+            not isinstance(segment_message_id, str)
+            or not segment_message_id.strip()
+        ):
+            raise ProtocolError(
+                "`system.motion_lab_raw_event` payload.message_id must be a non-empty string when present."
+            )
         return
 
 

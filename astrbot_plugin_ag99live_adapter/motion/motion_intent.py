@@ -189,6 +189,15 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
         normalized_levels[axis_id] = level
     if "axes" in intent:
         raise ValueError("axis_levels_axes_mutually_exclusive")
+    if "resource_id" in intent:
+        raise ValueError("resource_id_forbidden_use_typed_resource_fields")
+
+    expression_resource_id = normalize_motion_resource_id(
+        intent.get("expression_resource_id")
+    )
+    motion_resource_id = normalize_motion_resource_id(intent.get("motion_resource_id"))
+    if expression_resource_id and motion_resource_id:
+        raise ValueError("multiple_resource_layers_forbidden")
 
     duration_hint_ms = _normalize_duration_hint_ms(intent.get("duration_hint_ms"))
     performance_curve_hint = None
@@ -209,7 +218,8 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
         "intent_tags": intent_tags,
         "emotion_label": derive_motion_emotion_label(intent_tags),
         "duration_hint_ms": duration_hint_ms,
-        "resource_id": normalize_motion_resource_id(intent.get("resource_id")),
+        "expression_resource_id": expression_resource_id,
+        "motion_resource_id": motion_resource_id,
         "axis_levels": normalized_levels,
         "summary": {
             "axis_count": len(normalized_levels),
