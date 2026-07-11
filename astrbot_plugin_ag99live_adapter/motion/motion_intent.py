@@ -190,18 +190,18 @@ def derive_motion_emotion_label(intent_tags: Any, *, fallback: str = "motion") -
 def _normalize_duration_hint_ms(value: Any) -> int:
     if value is None:
         return DEFAULT_MOTION_INTENT_DURATION_MS
-    if not isinstance(value, (int, float)) or isinstance(value, bool):
-        try:
-            number = float(value)
-        except (TypeError, ValueError):
-            return DEFAULT_MOTION_INTENT_DURATION_MS
-    else:
+    if isinstance(value, bool):
+        raise ValueError("duration_hint_ms_not_number")
+    try:
         number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("duration_hint_ms_not_number") from None
     if not float("-inf") < number < float("inf"):
-        return DEFAULT_MOTION_INTENT_DURATION_MS
+        raise ValueError("duration_hint_ms_not_finite")
     duration_hint_ms = int(round(number))
-    clamped = max(320, min(15000, duration_hint_ms))
-    return clamped
+    if duration_hint_ms < 320 or duration_hint_ms > 15000:
+        raise ValueError("duration_hint_ms_out_of_range")
+    return duration_hint_ms
 
 
 def _coerce_finite_number(value: Any) -> float | None:

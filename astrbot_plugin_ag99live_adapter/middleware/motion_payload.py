@@ -4,11 +4,11 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..motion.motion_intent import (
-    DEFAULT_MOTION_INTENT_DURATION_MS,
     MOTION_INTENT_V3_SCHEMA_VERSION,
     derive_motion_emotion_label,
     normalize_motion_intent_tags,
     normalize_motion_resource_id,
+    _normalize_duration_hint_ms,
     resolve_selected_semantic_axis_profile,
 )
 from ..motion.resource_catalog import (
@@ -92,7 +92,10 @@ def normalize_motion_arguments_payload(
     if not validated_axes:
         return None, reason
 
-    duration_hint_ms = normalize_duration_hint_ms(motion_hint.get("duration_hint_ms"))
+    try:
+        duration_hint_ms = _normalize_duration_hint_ms(motion_hint.get("duration_hint_ms"))
+    except ValueError as exc:
+        return None, append_resolution_reason(reason, str(exc))
     summary = build_motion_visibility_summary(
         axes=validated_axes,
         semantic_profile=semantic_profile,
@@ -297,18 +300,6 @@ def resolve_axis_value_range(axis: dict[str, Any]) -> tuple[float, float]:
     ):
         return float(value_range[0]), float(value_range[1])
     return 0.0, 100.0
-
-
-def normalize_duration_hint_ms(value: Any) -> int:
-    if value is None:
-        return DEFAULT_MOTION_INTENT_DURATION_MS
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return DEFAULT_MOTION_INTENT_DURATION_MS
-    if not float("-inf") < number < float("inf"):
-        return DEFAULT_MOTION_INTENT_DURATION_MS
-    return max(320, min(15000, int(round(number))))
 
 
 def describe_fallback_pose_axes(

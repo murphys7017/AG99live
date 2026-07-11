@@ -24,7 +24,6 @@ from .motion_payload import (
     describe_fallback_pose_axes as _payload_describe_fallback_pose_axes,
     describe_fallback_pose_axis_value as _payload_describe_fallback_pose_axis_value,
     is_axis_soft_range_neutral as _payload_is_axis_soft_range_neutral,
-    normalize_duration_hint_ms as _payload_normalize_duration_hint_ms,
     normalize_motion_arguments_payload as _payload_normalize_motion_arguments_payload,
     resolve_axis_descriptor_threshold as _payload_resolve_axis_descriptor_threshold,
     resolve_axis_neutral_delta as _payload_resolve_axis_neutral_delta,
@@ -459,10 +458,6 @@ def _is_axis_soft_range_neutral(value: float, axis: dict[str, Any]) -> bool:
 
 def _resolve_axis_value_range(axis: dict[str, Any]) -> tuple[float, float]:
     return _payload_resolve_axis_value_range(axis)
-
-
-def _normalize_duration_hint_ms(value: Any) -> int:
-    return _payload_normalize_duration_hint_ms(value)
 
 
 def _build_motion_static_capability_payload(runtime_state: Any) -> dict[str, Any]:

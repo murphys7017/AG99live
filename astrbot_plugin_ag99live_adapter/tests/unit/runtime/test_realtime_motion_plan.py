@@ -320,6 +320,38 @@ def test_normalize_motion_intent_v3_accepts_string_number_axis() -> None:
     assert intent["axes"]["head_yaw"] == 72.5
 
 
+def test_normalize_motion_intent_v3_rejects_invalid_duration_hint() -> None:
+    with pytest.raises(ValueError, match="duration_hint_ms_not_number"):
+        normalize_motion_intent_payload(
+            {
+                "schema_version": "engine.motion_intent.v3",
+                "profile_id": "DemoModel.semantic.v1",
+                "profile_revision": 3,
+                "model_id": "DemoModel",
+                "mode": "expressive",
+                "intent_tags": ["curious"],
+                "duration_hint_ms": "not-a-duration",
+                "axes": {"head_yaw": 72.5},
+            }
+        )
+
+
+def test_normalize_motion_intent_v3_rejects_out_of_range_duration_hint() -> None:
+    with pytest.raises(ValueError, match="duration_hint_ms_out_of_range"):
+        normalize_motion_intent_payload(
+            {
+                "schema_version": "engine.motion_intent.v3",
+                "profile_id": "DemoModel.semantic.v1",
+                "profile_revision": 3,
+                "model_id": "DemoModel",
+                "mode": "expressive",
+                "intent_tags": ["curious"],
+                "duration_hint_ms": 20000,
+                "axes": {"head_yaw": 72.5},
+            }
+        )
+
+
 def test_normalize_motion_intent_v3_supports_intent_tags_and_resource_id() -> None:
     intent = normalize_motion_intent_payload(
         {
