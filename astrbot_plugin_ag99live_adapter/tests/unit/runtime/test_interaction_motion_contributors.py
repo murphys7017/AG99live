@@ -675,6 +675,32 @@ def test_prompt_contributor_hides_resource_id_when_no_resource_candidates(
     assert "必填字段是 intent_tags 和 axes；可选字段只有 duration_hint_ms。" in system.value
 
 
+def test_invalid_resource_id_rejects_motion_payload_instead_of_clearing_resource(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+    runtime_state = _build_runtime_state()
+
+    payload, reason = module._payload_normalize_motion_arguments_payload(
+        {
+            "intent_tags": ["happy"],
+            "axes": {"head_yaw": 60},
+            "resource_id": "resource.missing",
+        },
+        runtime_state,
+        base_reason="",
+        append_resolution_reason=lambda base, suffix: ";".join(
+            item for item in (base, suffix) if item
+        ),
+        sanitize_reason_fragment=lambda value: str(value).strip(),
+    )
+
+    assert payload is None
+    assert "resource_id_rejected:resource.missing" in reason
+
+
 def test_prompt_contributor_returns_extensions_for_core_reply_purpose(
     install_fake_astrbot,
     monkeypatch,

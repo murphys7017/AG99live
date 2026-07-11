@@ -61,7 +61,7 @@ def normalize_motion_arguments_payload(
     if not intent_tags:
         return None, append_resolution_reason(base_reason, "intent_tags_empty")
     emotion_label = derive_motion_emotion_label(intent_tags)
-    resource_id = normalize_motion_resource_id(motion_hint.get("resource_id"))
+    requested_resource_id = normalize_motion_resource_id(motion_hint.get("resource_id"))
     axes = motion_hint.get("axes")
     validated_axes, rejected_axes = normalize_effect_axes(axes)
     reason = base_reason
@@ -82,12 +82,14 @@ def normalize_motion_arguments_payload(
         runtime_state=runtime_state,
     )
     resource_id, resource_reason = validate_motion_resource_id_for_payload(
-        resource_id,
+        requested_resource_id,
         candidates=resource_candidates,
         sanitize_reason_fragment=sanitize_reason_fragment,
     )
     if resource_reason:
         reason = append_resolution_reason(reason, resource_reason)
+        if requested_resource_id and not resource_id:
+            return None, reason
 
     if not validated_axes:
         return None, reason
