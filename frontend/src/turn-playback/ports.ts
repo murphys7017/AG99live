@@ -19,7 +19,7 @@ export interface PlaybackAckPort {
     turnId: string | null,
     success: boolean,
     reason?: string,
-  ): Promise<void>;
+  ): Promise<boolean>;
   clearPlaybackGroupContext(
     turnId: string | null,
   ): void;

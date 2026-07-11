@@ -13,6 +13,11 @@ export interface ModelEnginePlaybackTimelineMotionEngine {
     context: PlaybackTimelineMotionContext,
   ): boolean | void;
   notifyCurrentTurnChanged(turnId: string | null): void;
+  interruptPlaybackSegment(
+    turnId: string | null,
+    messageId: string,
+    reason: string,
+  ): void;
 }
 
 export interface MotionTimelineTerminalEvent {
@@ -136,6 +141,9 @@ export function createModelEngineMotionTimelineSink(options: {
     },
     notifyCurrentTurnChanged(turnId) {
       options.motionEngine.notifyCurrentTurnChanged(turnId);
+    },
+    interrupt(turnId, messageId, reason) {
+      options.motionEngine.interruptPlaybackSegment(turnId, messageId, reason);
     },
   };
 }

@@ -14,7 +14,7 @@ import type {
   MotionStartDependencies,
 } from "./runtime/contracts.js";
 import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
-import { normalizeMotionPayload } from "./normalize.js";
+import { normalizeMotionPayload, normalizeTurnId } from "./normalize.js";
 import {
   reportInvalidMotionPayload,
   startNormalizedMotionPayload,
@@ -41,6 +41,8 @@ function setState(
 }
 
 export function useModelEngine(dependencies: ModelEngineDependencies) {
+  let activePlaybackOwner: { turnId: string | null; messageId: string } | null = null;
+
   function pushHistory(
     role: ModelEngineHistoryRole,
     text: string,
@@ -59,7 +61,14 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     playPlan: dependencies.playPlan,
     playCatalogMotion: dependencies.playCatalogMotion,
     getPlayerMessage: dependencies.getPlayerMessage,
-    onPlanStarted: dependencies.onPlanStarted,
+    onPlanStarted: (event) => {
+      activePlaybackOwner = {
+        turnId: normalizeTurnId(event.turnId),
+        messageId: event.messageId.trim(),
+      };
+      dependencies.onPlanStarted(event);
+    },
+    onCompileFailed: dependencies.onCompileFailed,
   };
 
   const runtimeStateController = {
@@ -209,6 +218,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
 
   function stop(reason = "stopped"): void {
     runtimeScheduler.clearAllPendingPayloads();
+    activePlaybackOwner = null;
     dependencies.stopPlan(reason);
     state.lastCompileReason = "";
     setState(
@@ -220,6 +230,24 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     );
   }
 
+  function interruptPlaybackSegment(
+    turnId: string | null,
+    messageId: string,
+    reason: string,
+  ): void {
+    runtimeScheduler.cancelPendingPayloadForSegment(turnId, messageId);
+    if (
+      activePlaybackOwner?.turnId !== normalizeTurnId(turnId)
+      || activePlaybackOwner.messageId !== messageId.trim()
+    ) {
+      return;
+    }
+    activePlaybackOwner = null;
+    dependencies.stopPlan(reason);
+    state.lastCompileReason = "";
+    setState("idle", `动作引擎已停止（${reason}）。`, null);
+  }
+
   return {
     state: readonly(state),
     ingestInboundPayload,
@@ -227,6 +255,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     handlePlaybackTimelineStarted,
     notifyCurrentTurnChanged,
     playPreviewPayload,
+    interruptPlaybackSegment,
     stop,
   };
 }

@@ -30,6 +30,7 @@ interface PlaybackTimelineEntry {
 
 interface PlaybackTimelineSinkStartOptions {
   start?: () => boolean | void;
+  onInterrupt?: (reason: string) => void;
 }
 
 export interface PlaybackTimelineAudioSegment {
@@ -143,6 +144,8 @@ export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
     messageId: string,
     reason: string,
   ) => void;
+  stopTimelinesForTurn: (turnId: string | null, reason: string) => void;
+  stopAllTimelines: (reason: string) => void;
   getTimelineSnapshotForSegment: (
     turnId: string | null,
     messageId: string,
@@ -164,6 +167,12 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
   ): string {
     const normalizedTurnId = normalizeTurnId(turnId);
     const normalizedMessageId = messageId.trim();
+    if (!normalizedTurnId) {
+      throw new Error("Playback timeline requires a non-empty turnId.");
+    }
+    if (!normalizedMessageId) {
+      throw new Error("Playback timeline requires a non-empty messageId.");
+    }
     return `${normalizedTurnId.length}:${normalizedTurnId}:${normalizedMessageId}`;
   }
 
@@ -298,18 +307,18 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
         AUDIO_TIMELINE_SINK_ID,
       );
     },
-    ensureMotionOnlyTimeline(turnId, messageId, start) {
+    ensureMotionOnlyTimeline(turnId, messageId, start, interrupt) {
       return ensureMotionOnlyTimeline(
         turnId,
         messageId,
-        { start },
+        { start, onInterrupt: interrupt },
       ) !== null;
     },
-    ensureMotionTimelineSink(turnId, messageId, start) {
+    ensureMotionTimelineSink(turnId, messageId, start, interrupt) {
       return ensureMotionTimelineSink(
         turnId,
         messageId,
-        { start },
+        { start, onInterrupt: interrupt },
       );
     },
     startMotionSink(turnId, messageId) {
@@ -352,6 +361,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
           id: MOTION_TIMELINE_SINK_ID,
           required: true,
           start: options.start,
+          onInterrupt: options.onInterrupt,
         },
       ],
     );
@@ -502,12 +512,14 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
         id: MOTION_TIMELINE_SINK_ID,
         required: true,
         start: options.start,
+        onInterrupt: options.onInterrupt,
       });
     } else if (options.start) {
       engine.registerSink({
         id: MOTION_TIMELINE_SINK_ID,
         required: true,
         start: options.start,
+        onInterrupt: options.onInterrupt,
       });
     }
     return true;
@@ -618,6 +630,22 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     }
     timeline.engine.interrupt(reason);
     clearTimeline(turnId, messageId);
+  }
+
+  function stopTimelinesForTurn(turnId: string | null, reason: string): void {
+    const normalizedTurnId = normalizeTurnId(turnId);
+    for (const timeline of Array.from(timelines.values())) {
+      if (normalizeTurnId(timeline.turnId) !== normalizedTurnId) {
+        continue;
+      }
+      stopTimelineForSegment(timeline.turnId, timeline.messageId, reason);
+    }
+  }
+
+  function stopAllTimelines(reason: string): void {
+    for (const timeline of Array.from(timelines.values())) {
+      stopTimelineForSegment(timeline.turnId, timeline.messageId, reason);
+    }
   }
 
   function getTimelineSnapshotForSegment(
@@ -821,6 +849,8 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     markMotionTimelineTerminal,
     markAudioTimelineTerminal,
     stopTimelineForSegment,
+    stopTimelinesForTurn,
+    stopAllTimelines,
     getTimelineSnapshotForSegment,
     findActiveAudioTimelineSegments,
     findOpenAudioTimelineSegments,

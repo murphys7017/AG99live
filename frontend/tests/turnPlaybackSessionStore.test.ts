@@ -249,8 +249,10 @@ function testIllegalPhaseTransitionIsRejected(): void {
   store.markPhase("turn-1", "completed");
   assert.equal(store.getActiveSession()?.phase, "completed");
   // completed -> playing is illegal
-  const result = store.markPhase("turn-1", "playing");
-  assert.equal(result, false);
+  assert.throws(
+    () => store.markPhase("turn-1", "playing"),
+    /illegal phase transition/,
+  );
   assert.equal(store.getActiveSession()?.phase, "completed");
 }
 
@@ -260,7 +262,10 @@ function testFailedSessionCannotTransition(): void {
   store.markTurnStarted("turn-1");
   store.markPhase("turn-1", "failed");
   assert.equal(store.getActiveSession()?.phase, "failed");
-  assert.equal(store.markPhase("turn-1", "completed"), false);
+  assert.throws(
+    () => store.markPhase("turn-1", "completed"),
+    /illegal phase transition/,
+  );
   assert.equal(store.getActiveSession()?.phase, "failed");
 }
 
@@ -268,6 +273,7 @@ function testInterruptMarksSessionFailed(): void {
   const store = useTurnPlaybackSessionStore();
   store.setActiveSession("turn-1");
   store.markTurnStarted("turn-1");
+  store.markPhase("turn-1", "ready");
   store.markPhase("turn-1", "playing");
   store.markInterrupt("turn-1");
 

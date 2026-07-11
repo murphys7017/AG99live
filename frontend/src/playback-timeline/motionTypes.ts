@@ -13,6 +13,7 @@ export interface PlaybackTimelineMotionSink<TMotionPayload = unknown> {
     payload: TMotionPayload,
     context: PlaybackTimelineMotionContext,
   ): boolean | void;
+  interrupt(turnId: string | null, messageId: string, reason: string): void;
   notifyCurrentTurnChanged(turnId: string | null): void;
 }
 

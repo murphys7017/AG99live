@@ -221,6 +221,18 @@ function startSemanticIntentPayload(
       diagnostics: compileResult.diagnostics,
     });
     const failureMessage = `动作意图编译失败：${compileResult.reason}`;
+    dependencies.onCompileFailed?.({
+      intent,
+      model: selectedModel,
+      messageId: context.messageId,
+      turnId: context.turnId,
+      playbackTurnId: context.playbackTurnId,
+      startReason: context.startReason,
+      queuedDelayMs: context.queuedDelayMs,
+      reason: compileResult.reason,
+      diagnostics: compileResult.diagnostics,
+      feedback: compileResult.feedback ?? null,
+    });
     state.setState("failed", failureMessage, compileResult.diagnostics);
     state.pushHistory("error", failureMessage);
     return false;

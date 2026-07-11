@@ -11,6 +11,7 @@ import type {
 } from "../contracts.js";
 import type {
   CompileDiagnostics,
+  MotionFeedback,
 } from "../compiler/contracts.js";
 import type { ModelEngineSettings } from "../settings.js";
 
@@ -123,6 +124,20 @@ export interface MotionStartDependencies {
   ) => boolean;
   getPlayerMessage?: () => string;
   onPlanStarted: (event: ModelEnginePlanStartedEvent) => void;
+  onCompileFailed?: (event: ModelEngineCompileFailedEvent) => void;
+}
+
+export interface ModelEngineCompileFailedEvent {
+  intent: SemanticMotionIntent;
+  model: ModelSummary | null;
+  messageId: string;
+  turnId: string | null;
+  playbackTurnId: string | null;
+  startReason: string;
+  queuedDelayMs: number;
+  reason: string;
+  diagnostics: CompileDiagnostics;
+  feedback: MotionFeedback | null;
 }
 
 export interface MotionRuntimeStateController {

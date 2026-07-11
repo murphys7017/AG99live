@@ -60,10 +60,13 @@ export function resolveTurnPlaybackGroupKey(
 ): string {
   const normalizedTurnId = typeof turnId === "string" ? turnId.trim() : "";
   const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
+  if (!normalizedTurnId) {
+    throw new Error("Turn playback group requires a non-empty turnId.");
+  }
   if (!normalizedMessageId) {
     throw new Error("Turn playback group requires a non-empty messageId.");
   }
-  return `segment:${normalizedTurnId || "anonymous"}:${normalizedMessageId}`;
+  return `segment:${normalizedTurnId}:${normalizedMessageId}`;
 }
 
 export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(

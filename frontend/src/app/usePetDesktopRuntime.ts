@@ -6,6 +6,7 @@ import {
   provide,
   reactive,
   ref,
+  watch,
   type ComputedRef,
   type InjectionKey,
 } from "vue";
@@ -70,6 +71,67 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     sendPlaybackFinishedForCurrentGroup: adapter.sendPlaybackFinishedForCurrentGroup,
     clearPlaybackGroupContext: adapter.clearPlaybackGroupContext,
   };
+  type PendingMotionLabEvent = {
+    payload: Parameters<typeof adapter.sendMotionLabRawEvent>[0];
+    turnId: string | null;
+  };
+  const motionLabQueueStorageKey = "ag99live.motion-lab.pending-events.v1";
+  const pendingMotionLabEvents: PendingMotionLabEvent[] = loadPendingMotionLabEvents();
+
+  function loadPendingMotionLabEvents(): PendingMotionLabEvent[] {
+    try {
+      const value = JSON.parse(window.localStorage.getItem(motionLabQueueStorageKey) || "[]");
+      return Array.isArray(value) ? value as PendingMotionLabEvent[] : [];
+    } catch (error) {
+      console.error("[MotionLab] failed to load pending outbound events.", error);
+      return [];
+    }
+  }
+
+  function persistPendingMotionLabEvents(): void {
+    try {
+      window.localStorage.setItem(
+        motionLabQueueStorageKey,
+        JSON.stringify(pendingMotionLabEvents),
+      );
+    } catch (error) {
+      console.error("[MotionLab] failed to persist pending outbound events.", error);
+    }
+  }
+
+  function flushPendingMotionLabEvents(): void {
+    while (pendingMotionLabEvents.length > 0) {
+      const event = pendingMotionLabEvents[0];
+      if (!adapter.sendMotionLabRawEvent(event.payload, event.turnId)) {
+        break;
+      }
+      pendingMotionLabEvents.shift();
+    }
+    persistPendingMotionLabEvents();
+  }
+
+  function sendMotionLabEvent(
+    payload: Parameters<typeof adapter.sendMotionLabRawEvent>[0],
+    turnId: string | null,
+  ): void {
+    const event = {
+      payload: cloneJson(payload),
+      turnId,
+    } as PendingMotionLabEvent;
+    if (pendingMotionLabEvents.length === 0 && adapter.sendMotionLabRawEvent(
+      event.payload,
+      event.turnId,
+    )) {
+      return;
+    }
+    pendingMotionLabEvents.push(event);
+    persistPendingMotionLabEvents();
+    console.error("[MotionLab] outbound event queued for reconnect.", {
+      eventType: payload.event_type,
+      turnId,
+      pendingCount: pendingMotionLabEvents.length,
+    });
+  }
   const motionRecord = {
     getLastAssistantText: () => adapter.state.lastAssistantText,
     getSelectedModel: () => selectedModel,
@@ -85,7 +147,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       messageId,
     ) => playbackTimeline.getPlaybackTimelineSnapshotForSegment(turnId, messageId),
     onMotionLabRawEvent: (payload, turnId) => {
-      adapter.sendMotionLabRawEvent(cloneJson(payload), turnId);
+      sendMotionLabEvent(payload, turnId ?? null);
     },
     initialMotionPlaybackRecords,
   });
@@ -132,6 +194,26 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       motionTimelineRunTracker.recordStarted(event);
       motionPlaybackRecorder.recordMotionPlayback(event);
     },
+    onCompileFailed: (event) => {
+      sendMotionLabEvent({
+        event_type: "motion.frontend_compile_failed",
+        message_id: event.messageId,
+        source_route: event.startReason,
+        phase: "frontend_compile_failed",
+        model_name: event.model?.name ?? "",
+        profile_id: event.intent.profile_id,
+        profile_revision: event.intent.profile_revision,
+        payload_kind: "semantic_intent",
+        raw: {
+          intent: cloneJson(event.intent),
+          feedback: event.feedback ? cloneJson(event.feedback) : null,
+          diagnostics: cloneJson(event.diagnostics),
+          reason: event.reason,
+          playbackTurnId: event.playbackTurnId,
+          queuedDelayMs: event.queuedDelayMs,
+        },
+      }, event.turnId);
+    },
     sessionStore: {
       getActiveSession: () => sessionStore.getActiveSession(),
       getSessionByTurnId: (turnId) => sessionStore.getSession(turnId),
@@ -152,6 +234,15 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       });
     },
   });
+  const stopMotionLabReconnectWatch = watch(
+    () => adapter.state.status,
+    (status) => {
+      if (status === "connected") {
+        flushPendingMotionLabEvents();
+      }
+    },
+    { immediate: true },
+  );
   adapter.setMotionPreviewHandler((payload) => {
     const localPlayed = modelEngine.playPreviewPayload(payload);
     if (!localPlayed) {
@@ -337,6 +428,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   });
 
   onBeforeUnmount(() => {
+    stopMotionLabReconnectWatch();
     playbackTimelineMotionRuntime.dispose();
     pushToTalk.dispose();
     bilibiliLive.dispose();

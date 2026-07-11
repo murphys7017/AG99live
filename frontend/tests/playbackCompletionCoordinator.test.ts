@@ -9,7 +9,7 @@ interface Harness {
   coordinator: ReturnType<typeof usePlaybackCompletionCoordinator>;
 }
 
-function createHarness(): Harness {
+function createHarness(sendResult: boolean | "reject" = true): Harness {
   const sessionStore = useTurnPlaybackSessionStore();
   const playbackFinishedCalls: Harness["playbackFinishedCalls"] = [];
   const coordinator = usePlaybackCompletionCoordinator({
@@ -17,6 +17,10 @@ function createHarness(): Harness {
     playbackAck: {
       sendPlaybackFinishedForCurrentGroup: async (turnId, success, reason) => {
         playbackFinishedCalls.push({ turnId, success, reason });
+        if (sendResult === "reject") {
+          throw new Error("socket_send_failed");
+        }
+        return sendResult;
       },
       clearPlaybackGroupContext: () => undefined,
     },
@@ -26,6 +30,32 @@ function createHarness(): Harness {
   sessionStore.markPhase("turn-1", "ready");
   sessionStore.markPhase("turn-1", "playing");
   return { sessionStore, playbackFinishedCalls, coordinator };
+}
+
+async function testSendFailureFailsSessionInsteadOfAcknowledging(): Promise<void> {
+  const h = createHarness(false);
+  h.sessionStore.markTextReceived("turn-1", "hello", "msg-1");
+  h.sessionStore.markTextDelivered("turn-1", "msg-1");
+  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-1", "no_audio");
+  h.sessionStore.markMotionAbsent("turn-1", "msg-1");
+  h.sessionStore.markSynthFinished("turn-1");
+  await flush();
+
+  const session = h.sessionStore.getActiveSession();
+  assert.equal(session?.phase, "failed");
+  assert.equal(session?.backend.reason, "playback_finished_send_failed");
+}
+
+async function testSendExceptionFailsSessionInsteadOfHanging(): Promise<void> {
+  const h = createHarness("reject");
+  h.sessionStore.markTextReceived("turn-1", "hello", "msg-1");
+  h.sessionStore.markTextDelivered("turn-1", "msg-1");
+  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-1", "no_audio");
+  h.sessionStore.markMotionAbsent("turn-1", "msg-1");
+  h.sessionStore.markSynthFinished("turn-1");
+  await flush();
+
+  assert.equal(h.sessionStore.getActiveSession()?.phase, "failed");
 }
 
 async function flush(): Promise<void> {
@@ -100,4 +130,6 @@ await testAcknowledgesOnlyAfterAllRequiredSignals();
 await testBackendTurnFinishedFinalizesAckedSession();
 await testFailedSegmentProducesFailedPlaybackAck();
 await testResetAllowsASecondAcknowledgementCycle();
+await testSendFailureFailsSessionInsteadOfAcknowledging();
+await testSendExceptionFailsSessionInsteadOfHanging();
 console.log("playbackCompletionCoordinator tests passed");

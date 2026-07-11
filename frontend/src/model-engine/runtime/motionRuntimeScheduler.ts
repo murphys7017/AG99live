@@ -85,7 +85,10 @@ export function createMotionRuntimeScheduler(
     turnId: string | null,
     messageId: string,
   ): string {
-    const normalizedTurnId = normalizeTurnId(turnId) ?? "anonymous";
+    const normalizedTurnId = normalizeTurnId(turnId);
+    if (!normalizedTurnId) {
+      throw new Error("Pending motion payload requires a non-empty turnId.");
+    }
     const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
     if (!normalizedMessageId) {
       throw new Error("Pending motion payload requires a non-empty messageId.");
@@ -132,6 +135,21 @@ export function createMotionRuntimeScheduler(
       dropPendingPayload(entry, "motion_engine_stopped");
     }
     syncPendingState();
+  }
+
+  function cancelPendingPayloadForSegment(
+    turnId: string | null,
+    messageId: string,
+  ): boolean {
+    const key = buildPendingMotionKey(turnId, messageId);
+    const entry = pendingInboundMotionPayloads.get(key);
+    if (!entry) {
+      return false;
+    }
+    clearPendingPayload(entry);
+    pendingInboundMotionPayloads.delete(key);
+    syncPendingState();
+    return true;
   }
 
   function tryStartPendingPayload(
@@ -334,6 +352,7 @@ export function createMotionRuntimeScheduler(
     queueInboundPayload,
     handlePlaybackTimelineStarted,
     notifyCurrentTurnChanged,
+    cancelPendingPayloadForSegment,
     clearAllPendingPayloads,
   };
 }

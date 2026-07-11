@@ -54,6 +54,7 @@ export interface PlaybackTimelineSegmentMotionSink<TMotionPayload = unknown> {
     payload: TMotionPayload,
     context: PlaybackTimelineMotionContext,
   ): boolean | void;
+  interrupt(turnId: string | null, messageId: string, reason: string): void;
 }
 
 export interface PlaybackTimelineSegmentExecutionPorts<

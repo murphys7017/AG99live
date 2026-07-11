@@ -20,6 +20,7 @@ export function usePlaybackCompletionCoordinator(
   options: PlaybackCompletionCoordinatorOptions,
 ) {
   const ackedSessions = new Set<string>();
+  const pendingAckSessions = new Set<string>();
 
   function getSession(sessionId: string | null): TurnPlaybackSession | undefined {
     return sessionId ? options.sessionStore.getSessionById(sessionId) : undefined;
@@ -27,6 +28,7 @@ export function usePlaybackCompletionCoordinator(
 
   function resetPlaybackCoordination(): void {
     ackedSessions.clear();
+    pendingAckSessions.clear();
   }
 
   function finalizeCompletion(sessionId: string): void {
@@ -35,8 +37,8 @@ export function usePlaybackCompletionCoordinator(
       return;
     }
     ackedSessions.delete(sessionId);
-    options.playbackAck.clearPlaybackGroupContext(session.turnId);
     options.sessionStore.markPhase(session.turnId, "completed");
+    options.playbackAck.clearPlaybackGroupContext(session.turnId);
   }
 
   function maybeFlushPlaybackCompletion(
@@ -53,6 +55,9 @@ export function usePlaybackCompletionCoordinator(
     if (!isPlaybackLocallySettled(session) || !session.backend.synthFinished) {
       return;
     }
+    if (pendingAckSessions.has(sessionId)) {
+      return;
+    }
     if (ackedSessions.has(sessionId)) {
       if (session.backend.turnFinished) {
         finalizeCompletion(sessionId);
@@ -67,12 +72,41 @@ export function usePlaybackCompletionCoordinator(
         : true;
     });
     options.sessionStore.markPhase(session.turnId, "settling");
+    pendingAckSessions.add(sessionId);
+    void sendPlaybackFinished(sessionId, success, reason);
+  }
+
+  async function sendPlaybackFinished(
+    sessionId: string,
+    success: boolean,
+    reason?: string,
+  ): Promise<void> {
+    const session = getSession(sessionId);
+    if (!session) {
+      pendingAckSessions.delete(sessionId);
+      return;
+    }
+    let sent = false;
+    try {
+      sent = await options.playbackAck.sendPlaybackFinishedForCurrentGroup(
+        session.turnId,
+        success,
+        reason,
+      );
+    } catch (error) {
+      console.error("[PlaybackCompletionCoordinator] playback acknowledgement failed.", error);
+    }
+    if (!pendingAckSessions.delete(sessionId)) {
+      return;
+    }
+    if (!sent) {
+      options.sessionStore.markSessionFailed(
+        session.turnId,
+        "playback_finished_send_failed",
+      );
+      return;
+    }
     ackedSessions.add(sessionId);
-    void options.playbackAck.sendPlaybackFinishedForCurrentGroup(
-      session.turnId,
-      success,
-      reason,
-    );
     if (session.backend.turnFinished) {
       finalizeCompletion(sessionId);
     }

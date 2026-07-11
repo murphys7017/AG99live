@@ -230,16 +230,16 @@ export function usePreviewMotionPlayer() {
       return false;
     }
 
-    activeRunId += 1;
-    const runId = activeRunId;
-    clearActiveTimers();
+    const hadActiveDirectPlan = Boolean(activeTerminalRunId);
 
     if (activeMotionStop) {
       stopActiveCatalogMotion("direct_parameter_plan_replaced");
     }
 
-    adapter.stopExpression?.();
-    if (playbackPlan.plan.resource?.kind === "expression") {
+    const expressionResource = playbackPlan.plan.resource?.kind === "expression"
+      ? playbackPlan.plan.resource
+      : null;
+    if (expressionResource) {
       if (
         typeof adapter.setExpression !== "function"
         || typeof adapter.getExpressionStartError !== "function"
@@ -251,15 +251,17 @@ export function usePreviewMotionPlayer() {
         return false;
       }
       const expressionStarted = adapter.setExpression(
-        playbackPlan.plan.resource.expression_id,
+        expressionResource.expression_id,
       );
       if (!expressionStarted) {
         const expressionReason = adapter.getExpressionStartError();
-        const reason = `表情资源执行失败：${playbackPlan.plan.resource.resource_id}`
+        const reason = `表情资源执行失败：${expressionResource.resource_id}`
           + (expressionReason ? `（${expressionReason}）` : "");
-        state.status = "failed";
-        state.message = reason;
-        state.finishedAt = new Date().toISOString();
+        if (!hadActiveDirectPlan) {
+          state.status = "failed";
+          state.message = reason;
+          state.finishedAt = new Date().toISOString();
+        }
         return false;
       }
     }
@@ -306,7 +308,9 @@ export function usePreviewMotionPlayer() {
     });
     console.info("[MotionPlayer] startDirectParameterPlan returned:", started);
     if (!started) {
-      adapter.stopExpression?.();
+      if (expressionResource) {
+        adapter.stopExpression?.();
+      }
       const runtimeReason = typeof adapter.getDirectParameterPlanError === "function"
         ? normalizeText(adapter.getDirectParameterPlanError())
         : "";
@@ -314,15 +318,30 @@ export function usePreviewMotionPlayer() {
         ? `动作计划执行失败：${runtimeReason}`
         : "动作计划执行失败：Direct Parameter 计划被运行时拒绝。";
       console.warn("[MotionPlayer]", reason);
+      if (hadActiveDirectPlan) {
+        adapter.stopDirectParameterPlan?.(
+          "direct_parameter_plan_replacement_failed",
+          "stopped",
+        );
+        notifyActiveStopped("direct_parameter_plan_replacement_failed");
+      }
       state.status = "failed";
       state.message = reason;
       state.finishedAt = new Date().toISOString();
       return false;
     }
 
+    if (!expressionResource) {
+      adapter.stopExpression?.();
+    }
+
     if (options.softHandoff) {
       notifyActiveStopped("direct_parameter_plan_replaced");
     }
+
+    activeRunId += 1;
+    const runId = activeRunId;
+    clearActiveTimers();
 
     console.info("[MotionPlayer] plan started successfully. totalDurationMs=", playbackPlan.totalDurationMs);
     state.status = "playing";

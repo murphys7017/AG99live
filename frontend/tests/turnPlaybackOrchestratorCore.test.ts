@@ -250,18 +250,13 @@ function testSameMessageIdDifferentTurnsDoNotShareGroup(): void {
   ]);
 }
 
-function testMissingIdentifiersDoNotShareUnknownGroup(): void {
+function testMissingTurnIdIsRejected(): void {
   const harness = createHarness();
 
-  harness.core.markTextReady("msg-text", null);
-  harness.core.markAudioReady("msg-audio", null);
-  harness.core.markMotionReady("msg-motion", null, "motion-anonymous", 10);
-
-  assert.deepEqual(harness.events, []);
-  assert.equal(harness.pendingTasks().length, 1);
-
-  harness.advanceTo(TEXT_ONLY_RELEASE_WAIT_MS);
-  assert.deepEqual(harness.events, ["text:msg-text:"]);
+  assert.throws(
+    () => harness.core.markTextReady("msg-text", null),
+    /non-empty turnId/,
+  );
 }
 
 function testClearSegmentRemovesReleasedGroup(): void {
@@ -288,7 +283,7 @@ function run(): void {
   testNoAudioWithMotionReleasesTextAndMotion();
   testDifferentMessageGroupsDoNotCrossRelease();
   testSameMessageIdDifferentTurnsDoNotShareGroup();
-  testMissingIdentifiersDoNotShareUnknownGroup();
+testMissingTurnIdIsRejected();
   testClearSegmentRemovesReleasedGroup();
   console.log("turnPlaybackOrchestratorCore tests passed");
 }

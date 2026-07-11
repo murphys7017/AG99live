@@ -346,13 +346,13 @@ export function sendPlaybackFinished(
   turnId: string | null,
   success: boolean,
   reason?: string,
-): void {
+): boolean {
   const payload: { success: boolean; reason?: string } = { success };
   if (reason) {
     payload.reason = reason;
   }
 
-  ctx.outboundClient.send("control.playback_finished", payload, turnId);
+  return ctx.outboundClient.send("control.playback_finished", payload, turnId);
 }
 
 export function sendMotionLabRawEvent(

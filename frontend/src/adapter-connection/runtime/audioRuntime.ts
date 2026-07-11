@@ -115,7 +115,7 @@ export interface AdapterAudioRuntime {
     textSink: PlaybackTimelineSegmentTextSink;
     motionSink: Pick<
       PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload>,
-      "start"
+      "start" | "interrupt"
     >;
   }) => void;
   startSegmentJob: PlaybackTimelineRuntime<NormalizedMotionPayload>["startSegmentJob"];
@@ -273,7 +273,7 @@ export function createAdapterAudioRuntime(
     textSink: PlaybackTimelineSegmentTextSink;
     motionSink: Pick<
       PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload>,
-      "start"
+      "start" | "interrupt"
     >;
   }): void {
     playbackTimelineRuntime.configureSegmentExecution({
@@ -284,6 +284,7 @@ export function createAdapterAudioRuntime(
       },
       motionSink: {
         start: options.motionSink.start,
+        interrupt: options.motionSink.interrupt,
       },
     });
   }
@@ -301,6 +302,8 @@ export function createAdapterAudioRuntime(
     findOpenAudioSegments,
     markAudioPlaybackTerminal,
     stopAudioPlayback,
+    stopTimelinesForTurn: playbackTimelineRuntime.stopTimelinesForTurn,
+    stopAllTimelines: playbackTimelineRuntime.stopAllTimelines,
   });
 
   function findActiveAudioSegment(): ActiveAudioSegment | null {

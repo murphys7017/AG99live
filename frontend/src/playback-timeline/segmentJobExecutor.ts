@@ -27,11 +27,13 @@ export interface PlaybackTimelineSegmentExecutorTimelinePort {
     turnId: string | null,
     messageId: string,
     start: PlaybackTimelineSinkStartCallback,
+    interrupt: (reason: string) => void,
   ): boolean;
   ensureMotionTimelineSink(
     turnId: string | null,
     messageId: string,
     start: PlaybackTimelineSinkStartCallback,
+    interrupt: (reason: string) => void,
   ): boolean;
   startMotionSink(
     turnId: string | null,
@@ -123,11 +125,17 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
         timelineMode,
       },
     );
+    const interruptMotion = (reason: string) => ports.motionSink.interrupt(
+      job.turnId,
+      job.messageId,
+      reason,
+    );
     if (!releasedAudio && timelineMode === "motion_only") {
       const prepared = timeline.ensureMotionOnlyTimeline(
         job.turnId,
         job.messageId,
         startMotion,
+        interruptMotion,
       );
       if (!prepared) {
         ports.session.markMotionFailed(
@@ -146,6 +154,7 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
         job.turnId,
         job.messageId,
         startMotion,
+        interruptMotion,
       );
       if (!prepared) {
         ports.session.markMotionFailed(
@@ -161,18 +170,11 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
       }
     }
     ports.session.markMotionReleased(job.turnId, job.messageId);
-    const accepted = timeline.startMotionSink(
+    timeline.startMotionSink(
       job.turnId,
       job.messageId,
     );
     releasedMotion = true;
-    if (accepted === false) {
-      ports.session.markMotionFailed(
-        job.turnId,
-        job.messageId,
-        "motion_payload_rejected",
-      );
-    }
     ports.session.markPhase(job.turnId, "playing");
   }
 

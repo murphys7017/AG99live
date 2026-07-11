@@ -144,6 +144,7 @@ function configureNoopSegmentExecutionPorts(
     },
     motionSink: {
       start: () => true,
+      interrupt: () => {},
     },
   });
 }
@@ -581,6 +582,7 @@ async function testTimelineAudioReleaseMarksSessionReleasedOnce(): Promise<void>
     },
     motionSink: {
       start: () => true,
+      interrupt: () => {},
     },
   });
 

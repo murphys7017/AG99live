@@ -218,9 +218,9 @@ export function createPlaybackTimelineEngine(
         if (isTerminal(sink.state.terminal)) {
           continue;
         }
-        sink.definition.onInterrupt?.(reason);
         sink.state.terminal = "interrupted";
         sink.state.reason = reason;
+        sink.definition.onInterrupt?.(reason);
       }
       phase = "interrupted";
     },

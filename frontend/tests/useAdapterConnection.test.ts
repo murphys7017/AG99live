@@ -263,6 +263,7 @@ function createConnectedAdapter() {
   adapter.playbackTimeline.configureSegmentExecution({
     motionSink: {
       start: () => true,
+      interrupt: () => {},
     },
   });
   adapter.connect();

@@ -170,6 +170,11 @@ function createHarness(options: {
 
   const timelineRuntime = createPlaybackTimelineRuntime({
     getAudioClock: () => null,
+    motionSession: {
+      markMotionStarted: sessionStore.markMotionStarted,
+      markMotionCompleted: sessionStore.markMotionCompleted,
+      markMotionFailed: sessionStore.markMotionFailed,
+    },
   });
 
   const modelEngine = {
@@ -188,6 +193,7 @@ function createHarness(options: {
     notifyCurrentTurnChanged(turnId: string | null): void {
       turnChanges.push(turnId);
     },
+    interruptPlaybackSegment: () => {},
   };
   const motionTimelineSink = createModelEngineMotionTimelineSink({
     motionEngine: modelEngine,
@@ -205,10 +211,13 @@ function createHarness(options: {
       }
       return timelineRuntime.getTimelineSnapshotForSegment(turnId, messageId);
     },
-    markMotionTimelineTerminal: () => {},
+    markMotionTimelineTerminal: timelineRuntime.markMotionTimelineTerminal,
   });
 
   const recordingMotionSink = {
+    interrupt(turnId: string | null, messageId: string, reason: string) {
+      motionTimelineSink.interrupt(turnId, messageId, reason);
+    },
     start(
       payload: NormalizedMotionPayload,
       context: Parameters<typeof motionTimelineSink.start>[1],
@@ -778,6 +787,7 @@ function testMotionTimelineSinkMarksTimelineFailedWhenEngineRejects(): void {
         return false;
       },
       notifyCurrentTurnChanged: () => {},
+      interruptPlaybackSegment: () => {},
     },
     getPlaybackTimelineSnapshotForSegment: () => matchingTimelineSnapshot,
     markMotionTimelineTerminal: (turnId, messageId, terminal, reason) => {
@@ -809,6 +819,7 @@ function testMotionTimelineSinkUsesPreparedSyntheticTimelineWhenAudioAbsent(): v
         return true;
       },
       notifyCurrentTurnChanged: () => {},
+      interruptPlaybackSegment: () => {},
     },
     getPlaybackTimelineSnapshotForSegment: () => matchingMotionOnlyTimelineSnapshot,
     markMotionTimelineTerminal: () => {},
@@ -837,6 +848,7 @@ function testMotionTimelineSinkRetainsPreparingAudioTimelineOwnership(): void {
         return true;
       },
       notifyCurrentTurnChanged: () => {},
+      interruptPlaybackSegment: () => {},
     },
     getPlaybackTimelineSnapshotForSegment: () => matchingPreparingAudioTimelineSnapshot,
     markMotionTimelineTerminal: () => {},
@@ -868,6 +880,7 @@ function testMotionTimelineSinkRejectsMissingAudioTimeline(): void {
         return true;
       },
       notifyCurrentTurnChanged: () => {},
+      interruptPlaybackSegment: () => {},
     },
     getPlaybackTimelineSnapshotForSegment:
       createMissingMotionTimelineWiring().getPlaybackTimelineSnapshotForSegment,
@@ -901,6 +914,7 @@ function testMotionTimelineSinkRejectsMissingMotionOnlyTimeline(): void {
         return true;
       },
       notifyCurrentTurnChanged: () => {},
+      interruptPlaybackSegment: () => {},
     },
     getPlaybackTimelineSnapshotForSegment:
       createMissingMotionTimelineWiring().getPlaybackTimelineSnapshotForSegment,
@@ -935,6 +949,7 @@ function testMotionTimelineSinkUsesSegmentScopedTimelineLookup(): void {
         return true;
       },
       notifyCurrentTurnChanged: () => {},
+      interruptPlaybackSegment: () => {},
     },
     getPlaybackTimelineSnapshotForSegment: (turnId, messageId) => {
       segmentTimelineLookupCalls.push(`${turnId ?? ""}:${messageId}`);
@@ -1007,6 +1022,7 @@ function testPlaybackTimelineRuntimeRejectsInvalidMotionTimestamp(): void {
     },
     motionSink: {
       start: () => true,
+      interrupt: () => {},
     },
   });
 
@@ -1052,6 +1068,7 @@ function testPlaybackTimelineRuntimeMarksMotionOnlyContext(): void {
       releaseAudioForPlayback: () => true,
     },
     motionSink: {
+      interrupt: () => {},
       start: (_payload, context) => {
         contexts.push({ timelineMode: context.timelineMode });
         return true;
@@ -1118,6 +1135,7 @@ function testPlaybackTimelineRuntimePreparesAudioMotionTimeline(): void {
       },
     },
     motionSink: {
+      interrupt: () => {},
       start: () => {
         events.push("motion_sink");
         return true;
@@ -1187,6 +1205,7 @@ function testPlaybackTimelineRuntimeDoesNotReleaseMotionWhenAudioReleaseFails():
       },
     },
     motionSink: {
+      interrupt: () => {},
       start: () => {
         events.push("motion_sink");
         return true;
@@ -1248,6 +1267,7 @@ function testPlaybackTimelineRuntimeCreatesMotionOnlyTimelineBesideExistingAudio
       releaseAudioForPlayback: () => true,
     },
     motionSink: {
+      interrupt: () => {},
       start: () => {
         events.push("motion_sink");
         return true;

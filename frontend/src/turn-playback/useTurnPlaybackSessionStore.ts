@@ -12,8 +12,8 @@
  * 写入约定：
  *   - 文本/音频/动作这类段级 mark* 会通过 ensureSegment 现场创建缺失段；
  *     后端 turn/synth/finished 信号要求 session 已存在。
- *   - phase 转移统一经 markPhaseInternal 做合法性检查；非法转移只记 warn、
- *     不抛异常，保持事件投递不被打断。
+ *   - phase 转移统一经 markPhaseInternal 做合法性检查；非法转移直接抛错，
+ *     避免协议副作用在状态写入失败后继续执行。
  *   - 大多数段写入不主动推进 phase；例外是晚到 audio 在 settling 阶段会把
  *     session 重新拨回 playing，给补到的媒体一次释放机会。
  *
@@ -542,11 +542,20 @@ export function useTurnPlaybackSessionStore() {
     });
   }
 
+  function markSessionFailed(
+    turnId: string | null,
+    reason: string,
+  ): void {
+    const session = requireSession(turnId);
+    session.backend.reason = reason || session.backend.reason;
+    markPhaseInternal(session, "failed");
+  }
+
   // ── phase ───────────────────────────────────────────────────────
 
   /**
-   * 阶段转移：相同阶段直接返回 true（幂等）；非法转移只记 warn 并返回 false，
-   * 不抛异常、不改 session.phase，避免事件投递被状态机错误打断。合法转移表见
+   * 阶段转移：相同阶段直接返回 true（幂等）；非法转移抛错且不改 session.phase。
+   * 合法转移表见
    * session.ts/VALID_PHASE_TRANSITIONS。
    */
   function markPhaseInternal(
@@ -557,11 +566,10 @@ export function useTurnPlaybackSessionStore() {
       return true; // idempotent
     }
     if (!isValidPhaseTransition(session.phase, phase)) {
-      console.warn(
-        `[TurnPlaybackSessionStore] illegal phase transition: ${session.phase} -> ${phase}`,
-        { sessionId: session.id },
+      throw new Error(
+        `Turn playback session illegal phase transition: ${session.phase} -> ${phase}`
+        + ` (sessionId=${session.id})`,
       );
-      return false;
     }
     session.phase = phase;
     return true;
@@ -658,6 +666,7 @@ export function useTurnPlaybackSessionStore() {
     markSynthFinished,
     markTurnFinished,
     markInterrupt,
+    markSessionFailed,
     markPhase,
     finalizeSession,
     pruneSessions,

@@ -12,7 +12,10 @@ import type {
   NormalizedSemanticMotionIntentV4,
 } from "../src/types/protocol.js";
 import type { SemanticAxisProfile } from "../src/types/semantic-axis-profile.js";
-import type { ModelEnginePlanStartedEvent } from "../src/model-engine/runtime/contracts.js";
+import type {
+  ModelEngineCompileFailedEvent,
+  ModelEnginePlanStartedEvent,
+} from "../src/model-engine/runtime/contracts.js";
 import type { CompileDiagnostics } from "../src/model-engine/compiler/contracts.js";
 
 (globalThis as Record<string, unknown>).window = globalThis;
@@ -425,6 +428,43 @@ function testExplicitPrimaryAxisIsNotOverwrittenByCoupling(): void {
     result.diagnostics.warnings?.includes("semantic_coupling_skipped_explicit_target:gaze_x_to_head_yaw:head_yaw"),
     true,
   );
+}
+
+function testMotionCompileFailureEmitsStructuredFeedback(): void {
+  const failures: ModelEngineCompileFailedEvent[] = [];
+  const started = startNormalizedMotionPayload(
+    {
+      kind: "semantic_intent",
+      intent: buildIntent({ axes: { unknown_axis: 70 } }),
+    },
+    {
+      messageId: "msg-invalid-axis",
+      turnId: "turn-invalid-axis",
+      playbackTurnId: "turn-invalid-axis",
+      startReason: "playback_timeline_started",
+      queuedDelayMs: 90,
+    },
+    {
+      getSelectedModel: () => buildModel(buildProfile()),
+      getSettings: () => ({ motionIntensityScale: 1, axisIntensityScale: {} }),
+      playPlan: () => false,
+      playCatalogMotion: () => false,
+      onPlanStarted: ignorePlanStarted,
+      onCompileFailed: (event) => failures.push(event),
+    },
+    {
+      setState: () => {},
+      setLastCompileReason: () => {},
+      setLastCompileDiagnostics: () => {},
+      setLastStartReason: () => {},
+      pushHistory: () => {},
+    },
+  );
+
+  assert.equal(started, false);
+  assert.equal(failures.length, 1);
+  assert.match(failures[0].reason, /semantic_axis_validation_failed/);
+  assert.deepEqual(failures[0].feedback?.fields, ["unknown_axis"]);
 }
 
 function buildLevelIntent(
@@ -1621,6 +1661,74 @@ function testSpeechOnlyPlaybackCanBeSuppressedForFailedMotionSegment(): void {
   assert.equal(playedPlans.length, 0);
 }
 
+function testSegmentInterruptDoesNotStopNewerMotionOwner(): void {
+  const model = buildModelWithVoiceFollowingProfile(buildProfile());
+  const stopped: string[] = [];
+  let runSequence = 0;
+  const engine = useModelEngine({
+    getSelectedModel: () => model,
+    getSettings: () => ({ motionIntensityScale: 1, axisIntensityScale: {} }),
+    playPlan: (plan, _model, options) => {
+      runSequence += 1;
+      options.onStarted(plan as MotionPlanPayload, `run-${runSequence}`);
+      return true;
+    },
+    playCatalogMotion: () => false,
+    stopPlan: (reason) => stopped.push(reason ?? ""),
+    markMotionTimelineTerminal: () => {},
+    canStartSpeechOnlyMotion: () => true,
+    getCurrentTurnId: () => "turn-b",
+    onPlanStarted: ignorePlanStarted,
+  });
+  const timeline = (turnId: string, messageId: string) => ({
+    timelineId: `timeline-${messageId}`,
+    turnId,
+    messageId,
+    phase: "playing" as const,
+    clockSource: "audio" as const,
+    startedAtMs: 100,
+    currentTimeMs: 100,
+    durationMs: 2000,
+    playbackRate: 1,
+    sinks: [{ id: "audio", required: true, terminal: "started" as const }],
+  });
+
+  assert.equal(engine.handlePlaybackTimelineStarted(timeline("turn-a", "msg-a")), true);
+  assert.equal(engine.handlePlaybackTimelineStarted(timeline("turn-b", "msg-b")), true);
+
+  engine.interruptPlaybackSegment("turn-a", "msg-a", "old_turn_replaced");
+  assert.deepEqual(stopped, []);
+  engine.interruptPlaybackSegment("turn-b", "msg-b", "current_turn_interrupted");
+  assert.deepEqual(stopped, ["current_turn_interrupted"]);
+}
+
+function testSegmentInterruptRemovesItsPendingPayload(): void {
+  const engine = useModelEngine({
+    getSelectedModel: () => buildModel(buildProfile()),
+    getSettings: () => ({ motionIntensityScale: 1, axisIntensityScale: {} }),
+    playPlan: () => false,
+    playCatalogMotion: () => false,
+    stopPlan: () => assert.fail("pending motion must not stop an unrelated active player"),
+    markMotionTimelineTerminal: () => {},
+    canStartSpeechOnlyMotion: () => false,
+    getCurrentTurnId: () => "turn-pending",
+    onPlanStarted: ignorePlanStarted,
+  });
+
+  engine.ingestNormalizedPayload(
+    { kind: "semantic_intent", intent: buildIntent() },
+    {
+      turnId: "turn-pending",
+      playbackTurnId: "turn-pending",
+      messageId: "msg-pending",
+      receivedAtMs: performance.now(),
+    },
+  );
+  assert.equal(engine.state.pendingCount, 1);
+  engine.interruptPlaybackSegment("turn-pending", "msg-pending", "timeline_interrupted");
+  assert.equal(engine.state.pendingCount, 0);
+}
+
 function testTimelineTerminalIsMarkedWhenQueuedMotionFails(): void {
   const profile = buildProfile();
   const model = buildModel(profile);
@@ -1983,6 +2091,7 @@ function run(): void {
   testResourcePolicyRejectsUnknownResource();
   testResourcePolicyRejectsParameterConflict();
   testMotionResourceUsesCatalogPlaybackInsteadOfDirectPlan();
+  testMotionCompileFailureEmitsStructuredFeedback();
   testNormalizeMotionPayloadAcceptsPerformanceCurveHint();
   testNormalizeMotionPayloadRejectsInvalidPerformanceCurveHint();
   testNormalizeMotionPayloadRejectsV3NestedAxes();
@@ -2006,6 +2115,8 @@ function run(): void {
   testSpeechOnlyPayloadRequiresVoiceFollowingProfile();
   testSpeechOnlyPlaybackUsesTimelineDuration();
   testSpeechOnlyPlaybackCanBeSuppressedForFailedMotionSegment();
+  testSegmentInterruptDoesNotStopNewerMotionOwner();
+  testSegmentInterruptRemovesItsPendingPayload();
   testTimelineTerminalIsMarkedWhenQueuedMotionFails();
   testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight();
   testSpeechPoseRejectsVoiceFollowingParameterAlreadyControlledBySemanticAxis();

@@ -148,6 +148,76 @@ async function testSoftHandoffStartsDistinctRunsForDistinctSegments(): Promise<v
   scope.stop();
 }
 
+async function testSoftHandoffExpressionFailureKeepsPreviousRunOwned(): Promise<void> {
+  const active = {
+    terminal: undefined as ((event: { runId: string; status: "completed" }) => void) | undefined,
+    runId: "",
+  };
+  let stopExpressionCount = 0;
+  (globalThis as typeof globalThis & { getLAppAdapter?: () => unknown }).getLAppAdapter = () => ({
+    startDirectParameterPlan: (_plan: unknown, options: { runId: string; onTerminal: typeof active.terminal }) => {
+      active.runId = options.runId;
+      active.terminal = options.onTerminal;
+      return true;
+    },
+    stopDirectParameterPlan: () => {},
+    getDirectParameterPlanError: () => "",
+    stopExpression: () => {
+      stopExpressionCount += 1;
+    },
+    setExpression: () => false,
+    getExpressionStartError: () => "expression_missing",
+  });
+  const scope = effectScope();
+  const player = scope.run(() => usePreviewMotionPlayer());
+  assert.ok(player);
+  const terminals: Array<{ status: string; reason?: string }> = [];
+  assert.equal(player.playPlan(buildPlan(), null, {
+    softHandoff: true,
+    onFinished: (event) => terminals.push(event),
+  }), true);
+
+  const replacement = buildPlan();
+  replacement.resource = {
+    kind: "expression",
+    resource_id: "expression.missing",
+    expression_id: "Missing",
+    parameter_ids: ["ParamMouthForm"],
+  };
+  assert.equal(player.playPlan(replacement, null, { softHandoff: true }), false);
+  assert.equal(terminals.length, 0);
+  assert.equal(stopExpressionCount, 1);
+  active.terminal?.({ runId: active.runId, status: "completed" });
+  assert.equal(terminals[0]?.status, "completed");
+  scope.stop();
+}
+
+async function testSoftHandoffDirectFailureSettlesPreviousRun(): Promise<void> {
+  let startCount = 0;
+  (globalThis as typeof globalThis & { getLAppAdapter?: () => unknown }).getLAppAdapter = () => ({
+    startDirectParameterPlan: () => {
+      startCount += 1;
+      return startCount === 1;
+    },
+    stopDirectParameterPlan: () => {},
+    getDirectParameterPlanError: () => "replacement_rejected",
+    stopExpression: () => {},
+  });
+  const scope = effectScope();
+  const player = scope.run(() => usePreviewMotionPlayer());
+  assert.ok(player);
+  const terminals: Array<{ status: string; reason?: string }> = [];
+  assert.equal(player.playPlan(buildPlan(), null, {
+    softHandoff: true,
+    onFinished: (event) => terminals.push(event),
+  }), true);
+  assert.equal(player.playPlan(buildPlan(), null, { softHandoff: true }), false);
+  assert.equal(terminals.length, 1);
+  assert.equal(terminals[0]?.status, "stopped");
+  assert.equal(terminals[0]?.reason, "direct_parameter_plan_replacement_failed");
+  scope.stop();
+}
+
 async function testExpressionResourceStartsBeforeDirectPlan(): Promise<void> {
   const calls: string[] = [];
   (globalThis as typeof globalThis & { getLAppAdapter?: () => unknown }).getLAppAdapter = () => ({
@@ -352,6 +422,8 @@ async function testDirectPlanStopReportsStoppedTerminalOnce(): Promise<void> {
 
 async function run(): Promise<void> {
   await testSoftHandoffStartsDistinctRunsForDistinctSegments();
+  await testSoftHandoffExpressionFailureKeepsPreviousRunOwned();
+  await testSoftHandoffDirectFailureSettlesPreviousRun();
   await testExpressionResourceStartsBeforeDirectPlan();
   await testExpressionResourceFailureDoesNotStartDirectPlan();
   await testCatalogMotionInvalidHandleWithDurationFails();

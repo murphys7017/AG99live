@@ -18,6 +18,7 @@ type TurnPlaybackSessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 export interface PlaybackTimelineMotionEnginePort {
   ingestNormalizedPayload: PlaybackTimelineMotionSink["start"];
   notifyCurrentTurnChanged(turnId: string | null): void;
+  interruptPlaybackSegment(turnId: string | null, messageId: string, reason: string): void;
   handlePlaybackTimelineStarted(playbackTimeline: PlaybackTimelineSnapshot): boolean | void;
 }
 

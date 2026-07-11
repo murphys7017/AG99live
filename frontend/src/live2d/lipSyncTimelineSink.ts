@@ -8,8 +8,6 @@ interface LiveLipSyncRuntime {
   stop: () => void;
 }
 
-type WavLipSyncPrepareResult = "started" | "unsupported" | "unavailable" | "stale";
-
 export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
   let liveRuntime: LiveLipSyncRuntime | null = null;
   let attachmentSerial = 0;
@@ -52,18 +50,9 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
         options.audio,
         options.isCurrentAudio,
       );
-      void prepareWavLipSync(options).then((result) => {
-        if (!isActiveAttachment()) {
-          return;
-        }
-        if (result === "started") {
-          markStarted();
-          return;
-        }
-        if (!liveRuntime && (result === "unsupported" || result === "unavailable")) {
-          markUnavailable();
-        }
-      });
+      if (!liveRuntime) {
+        markUnavailable();
+      }
     },
     async resume() {
       if (!liveRuntime) {
@@ -78,28 +67,6 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
     },
     stop,
   };
-}
-
-async function prepareWavLipSync(
-  options: PlaybackTimelineLipSyncAttachOptions,
-): Promise<WavLipSyncPrepareResult> {
-  const adapter = window.getLAppAdapter?.();
-  if (!adapter || typeof adapter.loadWavFileForLipSync !== "function") {
-    return "unsupported";
-  }
-
-  try {
-    const lipSyncReady = await adapter.loadWavFileForLipSync(
-      options.audioUrl,
-      Math.max(0, options.getAudioCurrentTimeSeconds()),
-    );
-    if (!options.isCurrentAudio()) {
-      return "stale";
-    }
-    return lipSyncReady === false ? "unavailable" : "started";
-  } catch (_error) {
-    return options.isCurrentAudio() ? "unavailable" : "stale";
-  }
 }
 
 function startLiveLipSync(

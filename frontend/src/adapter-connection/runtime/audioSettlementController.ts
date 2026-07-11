@@ -22,6 +22,8 @@ export interface AdapterAudioSettlementControllerDeps {
     messageId: string | null,
     reason: string,
   ) => void;
+  stopTimelinesForTurn: (turnId: string | null, reason: string) => void;
+  stopAllTimelines: (reason: string) => void;
 }
 
 export function createAdapterAudioSettlementController(
@@ -53,6 +55,7 @@ export function createAdapterAudioSettlementController(
         reason,
       );
     }
+    deps.stopTimelinesForTurn(turnId, reason);
   }
 
   function stopAudioAndSettleAll(reason: string): void {
@@ -68,11 +71,13 @@ export function createAdapterAudioSettlementController(
     }
     if (activeSegments.length === 0) {
       deps.stopAudioPlayback(null, null, reason);
+      deps.stopAllTimelines(reason);
       return;
     }
     for (const activeSegment of activeSegments) {
       deps.stopAudioPlayback(activeSegment.turnId, activeSegment.messageId, reason);
     }
+    deps.stopAllTimelines(reason);
   }
 
   function findOpenAudioSegment(): AudioSettlementSegment | null {

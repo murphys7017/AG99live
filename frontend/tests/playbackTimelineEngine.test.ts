@@ -369,6 +369,9 @@ function configureNoopSegmentExecutionPorts(
       releaseAudioForPlayback: () => true,
     },
     motionSink: {
+      interrupt: (turnId, messageId, reason) => {
+        events.push(`motion_interrupt:${turnId}:${messageId}:${reason}`);
+      },
       start: (_payload, context) => {
         events.push(`motion_sink:${context.timelineMode ?? ""}`);
         return true;
@@ -435,6 +438,41 @@ function testPlaybackTimelineRuntimeCreatesMotionOnlyTimeline(): void {
     "motion_completed",
   );
   assert.equal(runtime.getTimelineSnapshotForSegment("turn-motion", "msg-motion"), null);
+}
+
+function testPlaybackTimelineRuntimeStopsTurnAndAllRemainingTimelines(): void {
+  const failures: string[] = [];
+  const executionEvents: string[] = [];
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => null,
+    motionSession: {
+      markMotionStarted: () => {},
+      markMotionCompleted: () => {},
+      markMotionFailed: (turnId, messageId, reason) => {
+        failures.push(`${turnId}:${messageId}:${reason ?? ""}`);
+      },
+    },
+  });
+
+  startMotionOnlySegment(runtime, "turn-a", "msg-a", executionEvents);
+  startMotionOnlySegment(runtime, "turn-b", "msg-b", executionEvents);
+  runtime.markMotionTimelineStarted("turn-a", "msg-a");
+  runtime.markMotionTimelineStarted("turn-b", "msg-b");
+
+  runtime.stopTimelinesForTurn("turn-a", "connection_closed");
+  assert.equal(runtime.getTimelineSnapshotForSegment("turn-a", "msg-a"), null);
+  assert.ok(runtime.getTimelineSnapshotForSegment("turn-b", "msg-b"));
+
+  runtime.stopAllTimelines("connection_closed");
+  assert.equal(runtime.getTimelineSnapshotForSegment("turn-b", "msg-b"), null);
+  assert.deepEqual(failures, [
+    "turn-a:msg-a:connection_closed",
+    "turn-b:msg-b:connection_closed",
+  ]);
+  assert.deepEqual(executionEvents.filter((item) => item.startsWith("motion_interrupt:")), [
+    "motion_interrupt:turn-a:msg-a:connection_closed",
+    "motion_interrupt:turn-b:msg-b:connection_closed",
+  ]);
 }
 
 function testPlaybackTimelineRuntimePreparesSegmentJobIdempotently(): void {
@@ -570,6 +608,7 @@ function testPlaybackTimelineRuntimeStartsSegmentJobThroughTimelineEntry(): void
       releaseAudioForPlayback: () => true,
     },
     motionSink: {
+      interrupt: () => {},
       start: (_payload, context) => {
         events.push(`motion_sink:${context.timelineMode ?? ""}`);
         return true;
@@ -1150,6 +1189,7 @@ function run(): void {
   testPerformanceCurveTimelineUsesRemainingAudioDuration();
   testPerformanceCurveTimelineRejectsUnavailableAudio();
   testPlaybackTimelineRuntimeCreatesMotionOnlyTimeline();
+  testPlaybackTimelineRuntimeStopsTurnAndAllRemainingTimelines();
   testPlaybackTimelineRuntimePreparesSegmentJobIdempotently();
   testMotionTimelineEventsDoNotPrepareMissingSink();
   testAudioAndLipSyncEventsDoNotMutateMissingSinks();

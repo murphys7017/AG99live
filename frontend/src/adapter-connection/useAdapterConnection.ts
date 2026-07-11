@@ -89,7 +89,7 @@ export interface AdapterPlaybackTimelinePort {
     ) => void) | null,
   ) => void;
   configureSegmentExecution: (options: {
-    motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start">;
+    motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start" | "interrupt">;
   }) => void;
   startSegmentJob: AdapterAudioRuntimeInstance["startSegmentJob"];
   getPlaybackTimelineSnapshotForSegment: AdapterAudioRuntimeInstance["getPlaybackTimelineSnapshotForSegment"];
@@ -128,7 +128,7 @@ export interface AdapterConnectionInstance {
     turnId: string | null,
     success: boolean,
     reason?: string,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   clearPlaybackGroupContext: (turnId: string | null) => void;
   playbackTimeline: AdapterPlaybackTimelinePort;
   toggleMicrophoneCapture: ReturnType<typeof createAdapterMicrophoneRuntime>["toggleMicrophoneCapture"];
@@ -533,7 +533,7 @@ export function createAdapterConnection(
   }
 
   function configureSegmentExecution(options: {
-    motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start">;
+    motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start" | "interrupt">;
   }): void {
     if (!sessionStore) {
       throw new Error("Playback segment execution requires a turn playback session store.");
@@ -551,6 +551,7 @@ export function createAdapterConnection(
       },
       motionSink: {
         start: options.motionSink.start,
+        interrupt: options.motionSink.interrupt,
       },
     });
   }
@@ -622,8 +623,8 @@ export function createAdapterConnection(
     turnId: string | null,
     success: boolean,
     reason?: string,
-  ): Promise<void> {
-    sendPlaybackFinishedAction(outboundCtx, turnId, success, reason);
+  ): Promise<boolean> {
+    return sendPlaybackFinishedAction(outboundCtx, turnId, success, reason);
   }
 
   function clearPlaybackGroupContext(
