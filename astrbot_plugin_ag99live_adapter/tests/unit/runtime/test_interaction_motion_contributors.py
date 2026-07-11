@@ -931,8 +931,6 @@ def test_motion_visibility_summary_includes_pose_descriptors_and_soft_range_axes
     summary = module._build_motion_visibility_summary(
         axes={"head_yaw": 40, "body_pitch": 58, "eye_open_left": 50},
         semantic_profile=semantic_profile,
-        repair_added_axes=["body_pitch"],
-        repair_replaced_axes=[],
     )
 
     assert summary["skeleton_groups"] == ["head", "body"]
@@ -941,7 +939,7 @@ def test_motion_visibility_summary_includes_pose_descriptors_and_soft_range_axes
     assert summary["outside_soft_range_axes"] == ["head_yaw", "body_pitch"]
     assert summary["pose_descriptors"] == ["lean_forward", "look_right"]
     assert summary["neutralish_axes"] == ["eye_open_left"]
-    assert summary["skeleton_repair_added_axes"] == ["body_pitch"]
+    assert "skeleton_repair_added_axes" not in summary
 
 
 def test_fallback_pose_candidates_prioritize_enabled_matching_user_tuning(

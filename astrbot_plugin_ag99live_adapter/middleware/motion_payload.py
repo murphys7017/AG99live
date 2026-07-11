@@ -101,12 +101,6 @@ def normalize_motion_arguments_payload(
         semantic_profile=semantic_profile,
         intent_tags=intent_tags,
         resource_id=resource_id,
-        fallback_reasons=[],
-        fallback_score=0.0,
-        fallback_used=False,
-        matched_candidate_id="",
-        repair_added_axes=[],
-        repair_replaced_axes=[],
     )
 
     payload = {
@@ -213,12 +207,6 @@ def build_motion_visibility_summary(
     semantic_profile: dict[str, Any],
     intent_tags: list[str] | None = None,
     resource_id: str = "",
-    fallback_reasons: list[str] | None = None,
-    fallback_score: float = 0.0,
-    fallback_used: bool = False,
-    matched_candidate_id: str = "",
-    repair_added_axes: list[str] | None = None,
-    repair_replaced_axes: list[str] | None = None,
 ) -> dict[str, Any]:
     axis_by_id = build_prompt_axis_lookup(semantic_profile)
     active_groups: set[str] = set()
@@ -255,10 +243,6 @@ def build_motion_visibility_summary(
         "intent_tags": list(intent_tags or []),
         "intent_tag_count": len(intent_tags or []),
         "resource_id": resource_id,
-        "fallback_used": fallback_used,
-        "fallback_reasons": list(fallback_reasons or []),
-        "fallback_score": round(float(fallback_score or 0.0), 4),
-        "matched_candidate_id": matched_candidate_id,
         "active_groups": sorted(active_groups),
         "skeleton_groups": covered_skeleton_groups,
         "skeleton_groups_present": covered_skeleton_groups,
@@ -269,9 +253,7 @@ def build_motion_visibility_summary(
         "neutralish_axes": neutralish_axes[:12],
         "expressive_axes": expressive_axes[:12],
         "outside_soft_range_axes": outside_soft_range_axes[:12],
-        "pose_descriptors": describe_fallback_pose_axes(axes, axis_by_id=axis_by_id)[:8],
-        "skeleton_repair_added_axes": list(repair_added_axes or []),
-        "skeleton_repair_replaced_axes": list(repair_replaced_axes or []),
+        "pose_descriptors": describe_axis_descriptors(axes, axis_by_id=axis_by_id)[:8],
     }
 
 
@@ -302,7 +284,7 @@ def resolve_axis_value_range(axis: dict[str, Any]) -> tuple[float, float]:
     return 0.0, 100.0
 
 
-def describe_fallback_pose_axes(
+def describe_axis_descriptors(
     value: Any,
     *,
     axis_by_id: Mapping[str, dict[str, Any]] | None = None,
@@ -316,7 +298,7 @@ def describe_fallback_pose_axes(
         axis_name = str(axis_id or "").strip()
         if not axis_name:
             continue
-        descriptor = describe_fallback_pose_axis_value(
+        descriptor = describe_axis_descriptor(
             axis_name,
             float(axis_value),
             axis=axis_by_id.get(axis_name) if axis_by_id else None,
@@ -326,7 +308,7 @@ def describe_fallback_pose_axes(
     return descriptors
 
 
-def describe_fallback_pose_axis_value(
+def describe_axis_descriptor(
     axis_id: str,
     value: float,
     *,

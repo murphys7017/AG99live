@@ -634,8 +634,6 @@ export interface NormalizedSemanticMotionIntent {
     expressive_axes?: string[];
     outside_soft_range_axes?: string[];
     pose_descriptors?: string[];
-    skeleton_repair_added_axes?: string[];
-    skeleton_repair_replaced_axes?: string[];
   };
 }
 
@@ -719,8 +717,6 @@ export interface SemanticParameterPlan {
     expressive_axes?: string[];
     outside_soft_range_axes?: string[];
     pose_descriptors?: string[];
-    skeleton_repair_added_axes?: string[];
-    skeleton_repair_replaced_axes?: string[];
   };
 }
 

@@ -122,8 +122,6 @@ function buildSuccessResultFromContext(
       max_delta_from_neutral: diagnostics.maxDeltaFromNeutral,
       neutralish_axis_count: diagnostics.neutralishAxisCount,
       expressive_axis_count: diagnostics.expressiveAxisCount,
-      skeleton_repair_added_axes: context.intent.summary?.skeleton_repair_added_axes,
-      skeleton_repair_replaced_axes: context.intent.summary?.skeleton_repair_replaced_axes,
     },
   };
 

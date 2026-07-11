@@ -21,8 +21,8 @@ from .motion_payload import (
     build_motion_visibility_summary as _payload_build_motion_visibility_summary,
     build_prompt_axis_lookup as _payload_build_prompt_axis_lookup,
     build_prompt_axis_lookup_from_axes as _payload_build_prompt_axis_lookup_from_axes,
-    describe_fallback_pose_axes as _payload_describe_fallback_pose_axes,
-    describe_fallback_pose_axis_value as _payload_describe_fallback_pose_axis_value,
+    describe_axis_descriptors as _payload_describe_axis_descriptors,
+    describe_axis_descriptor as _payload_describe_axis_descriptor,
     is_axis_soft_range_neutral as _payload_is_axis_soft_range_neutral,
     normalize_motion_arguments_payload as _payload_normalize_motion_arguments_payload,
     resolve_axis_descriptor_threshold as _payload_resolve_axis_descriptor_threshold,
@@ -431,24 +431,12 @@ def _build_motion_visibility_summary(
     semantic_profile: dict[str, Any],
     intent_tags: list[str] | None = None,
     resource_id: str = "",
-    fallback_reasons: list[str] | None = None,
-    fallback_score: float = 0.0,
-    fallback_used: bool = False,
-    matched_candidate_id: str = "",
-    repair_added_axes: list[str] | None = None,
-    repair_replaced_axes: list[str] | None = None,
 ) -> dict[str, Any]:
     return _payload_build_motion_visibility_summary(
         axes=axes,
         semantic_profile=semantic_profile,
         intent_tags=intent_tags,
         resource_id=resource_id,
-        fallback_reasons=fallback_reasons,
-        fallback_score=fallback_score,
-        fallback_used=fallback_used,
-        matched_candidate_id=matched_candidate_id,
-        repair_added_axes=repair_added_axes,
-        repair_replaced_axes=repair_replaced_axes,
     )
 
 
@@ -739,7 +727,7 @@ def _build_prompt_fallback_pose_candidates(
                 "recommended_scenarios": _normalize_axis_text_list(
                     item.get("recommended_scenarios")
                 )[:4],
-                "pose_descriptors": _describe_fallback_pose_axes(
+                "pose_descriptors": _describe_axis_descriptors(
                     item.get("axes"),
                     axis_by_id=axis_by_id,
                 )[:4],
@@ -829,27 +817,27 @@ def _classify_prompt_fallback_pose_signature(
     *,
     axis_by_id: Mapping[str, dict[str, Any]] | None = None,
 ) -> str:
-    descriptors = _describe_fallback_pose_axes(item.get("axes"), axis_by_id=axis_by_id)
+    descriptors = _describe_axis_descriptors(item.get("axes"), axis_by_id=axis_by_id)
     if descriptors:
         return "+".join(descriptors[:3])
     return "metadata:" + _normalize_prompt_fallback_metadata_signature(item)
 
 
-def _describe_fallback_pose_axes(
+def _describe_axis_descriptors(
     value: Any,
     *,
     axis_by_id: Mapping[str, dict[str, Any]] | None = None,
 ) -> list[str]:
-    return _payload_describe_fallback_pose_axes(value, axis_by_id=axis_by_id)
+    return _payload_describe_axis_descriptors(value, axis_by_id=axis_by_id)
 
 
-def _describe_fallback_pose_axis_value(
+def _describe_axis_descriptor(
     axis_id: str,
     value: float,
     *,
     axis: dict[str, Any] | None = None,
 ) -> str:
-    return _payload_describe_fallback_pose_axis_value(axis_id, value, axis=axis)
+    return _payload_describe_axis_descriptor(axis_id, value, axis=axis)
 
 
 def _build_prompt_axis_lookup(
@@ -1035,7 +1023,7 @@ def _build_previous_motion_variation_payload(
         if not isinstance(axis_value, (int, float)) or isinstance(axis_value, bool):
             continue
         axis = axis_by_id.get(axis_id)
-        descriptor = _describe_fallback_pose_axis_value(axis_id, float(axis_value), axis=axis)
+        descriptor = _describe_axis_descriptor(axis_id, float(axis_value), axis=axis)
         if not descriptor:
             descriptor = "neutral_center"
         neutral = _resolve_axis_neutral_value(axis) if isinstance(axis, dict) else 50.0

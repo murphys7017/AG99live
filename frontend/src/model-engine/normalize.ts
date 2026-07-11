@@ -326,7 +326,5 @@ function normalizeMotionVisibilitySummary(value: unknown): SemanticMotionIntent[
     expressive_axes: normalizeStringArray(value.expressive_axes),
     outside_soft_range_axes: normalizeStringArray(value.outside_soft_range_axes),
     pose_descriptors: normalizeStringArray(value.pose_descriptors),
-    skeleton_repair_added_axes: normalizeStringArray(value.skeleton_repair_added_axes),
-    skeleton_repair_replaced_axes: normalizeStringArray(value.skeleton_repair_replaced_axes),
   };
 }
