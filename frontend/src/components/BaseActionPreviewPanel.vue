@@ -5,7 +5,7 @@ import type {
   DesktopBaseActionPreviewAtom,
 } from "../types/desktop";
 import type {
-  SemanticMotionIntent,
+  NormalizedSemanticMotionIntentV3,
 } from "../types/protocol";
 import { SCHEMA_MOTION_INTENT_V3 } from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
@@ -213,7 +213,7 @@ const generatedPlan = computed(() => {
     expressive ? "base_action_preview" : "idle_preview",
     ...[...new Set(selectedAtoms.value.map((atom) => atom.channel))].slice(0, 2),
   ].filter((value, index, array) => Boolean(value) && array.indexOf(value) === index);
-  const intent: SemanticMotionIntent = {
+  const intent: NormalizedSemanticMotionIntentV3 = {
     schema_version: SCHEMA_MOTION_INTENT_V3,
     profile_id: profile?.profile_id ?? "",
     profile_revision: profile?.revision ?? 0,
@@ -368,8 +368,8 @@ function semanticPolarityToDirection(polarity: string): number {
 
 function buildAxisValuesFromAtoms(
   atoms: DesktopBaseActionPreviewAtom[],
-): SemanticMotionIntent["axes"] {
-  const axisValues: SemanticMotionIntent["axes"] = {};
+): NormalizedSemanticMotionIntentV3["axes"] {
+  const axisValues: NormalizedSemanticMotionIntentV3["axes"] = {};
   const strongestByChannel = new Map<string, DesktopBaseActionPreviewAtom>();
   for (const atom of atoms) {
     if (!controllableAxisIds.value.has(atom.channel)) {
@@ -411,7 +411,7 @@ function buildAxisValuesFromAtoms(
 
 function buildSemanticAxisValuesFromAtoms(
   atoms: DesktopBaseActionPreviewAtom[],
-): SemanticMotionIntent["axes"] {
+): NormalizedSemanticMotionIntentV3["axes"] {
   return buildAxisValuesFromAtoms(atoms);
 }
 

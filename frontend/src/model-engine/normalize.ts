@@ -2,12 +2,15 @@ import type {
   CatalogMotionPayload,
   DirectParameterPlanTiming,
   PerformanceCurveHint,
+  MotionAxisLevel,
+  MotionAxisLevelMap,
   SemanticMotionIntent,
   SemanticParameterPlan,
 } from "../types/protocol.js";
 import {
   SCHEMA_CATALOG_MOTION_V1,
   SCHEMA_MOTION_INTENT_V3,
+  SCHEMA_MOTION_INTENT_V4,
   SCHEMA_PARAMETER_PLAN_V2,
 } from "../types/protocol.js";
 import {
@@ -40,6 +43,38 @@ function normalizeDynamicAxesV3(value: unknown): Record<string, number> | null {
   return Object.keys(axes).length > 0 ? axes : null;
 }
 
+function normalizeAxisLevelsV4(value: unknown): MotionAxisLevelMap | null {
+  if (!isObject(value)) {
+    return null;
+  }
+  const levels: MotionAxisLevelMap = {};
+  for (const [axisId, rawLevel] of Object.entries(value)) {
+    const normalizedAxisId = normalizeText(axisId);
+    if (!normalizedAxisId || typeof rawLevel !== "number" || !Number.isInteger(rawLevel)) {
+      return null;
+    }
+    if (rawLevel < -3 || rawLevel > 3) {
+      return null;
+    }
+    levels[normalizedAxisId] = rawLevel as MotionAxisLevel;
+  }
+  return Object.keys(levels).length > 0 ? levels : null;
+}
+
+function normalizeIntentTags(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const tags: string[] = [];
+  for (const item of value) {
+    const tag = normalizeText(item);
+    if (tag && !tags.includes(tag)) {
+      tags.push(tag);
+    }
+  }
+  return tags.length > 0 ? tags.slice(0, 6) : null;
+}
+
 const PERFORMANCE_CURVE_SCHEMA_VERSION = "ag99.performance_curve_hint.v1";
 const CURVE_FAMILIES = [
   "default",
@@ -69,7 +104,7 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
   }
 
   const schemaVersion = normalizeText(value.schema_version);
-  if (schemaVersion !== SCHEMA_MOTION_INTENT_V3) {
+  if (schemaVersion !== SCHEMA_MOTION_INTENT_V3 && schemaVersion !== SCHEMA_MOTION_INTENT_V4) {
     return { ok: false, reason: "motion_intent.invalid_schema_version" };
   }
 
@@ -90,9 +125,18 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
   if (modeRaw !== "idle" && modeRaw !== "expressive") {
     return { ok: false, reason: "motion_intent.invalid_mode" };
   }
+  const mode: "idle" | "expressive" = modeRaw;
 
-  const axes = normalizeDynamicAxesV3(value.axes);
-  if (!axes) {
+  const isV4 = schemaVersion === SCHEMA_MOTION_INTENT_V4;
+  const axisLevels = isV4 ? normalizeAxisLevelsV4(value.axis_levels) : null;
+  if (isV4 && (!axisLevels || Object.prototype.hasOwnProperty.call(value, "axes"))) {
+    return { ok: false, reason: "motion_intent_v4.invalid_axis_levels" };
+  }
+  if (!isV4 && Object.prototype.hasOwnProperty.call(value, "axis_levels")) {
+    return { ok: false, reason: "motion_intent_v3.axis_levels_forbidden" };
+  }
+  const axes = isV4 ? null : normalizeDynamicAxesV3(value.axes);
+  if (!isV4 && !axes) {
     return {
       ok: false,
       reason: "motion_intent_v3.invalid_flat_axes",
@@ -102,6 +146,10 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
   const emotionLabel = normalizeText(value.emotion_label);
   if (!emotionLabel) {
     return { ok: false, reason: "motion_intent.emotion_label_empty" };
+  }
+  const intentTags = normalizeIntentTags(value.intent_tags);
+  if (!intentTags) {
+    return { ok: false, reason: "motion_intent.intent_tags_empty" };
   }
 
   const durationHintRaw = value.duration_hint_ms;
@@ -128,20 +176,40 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
     }
   }
 
+  const common = {
+    profile_id: profileId,
+    profile_revision: Math.round(profileRevision),
+    model_id: modelId,
+    mode,
+    intent_tags: intentTags,
+    emotion_label: emotionLabel,
+    duration_hint_ms: durationHintMs,
+    resource_id: normalizeText(value.resource_id) || undefined,
+    performance_curve_hint: performanceCurveHint,
+    summary: normalizeMotionVisibilitySummary(value.summary),
+  };
+  if (isV4) {
+    if (!axisLevels) {
+      return { ok: false, reason: "motion_intent_v4.invalid_axis_levels" };
+    }
+    return {
+      ok: true,
+      value: {
+        ...common,
+        schema_version: SCHEMA_MOTION_INTENT_V4,
+        axis_levels: axisLevels,
+      },
+    };
+  }
+  if (!axes) {
+    return { ok: false, reason: "motion_intent_v3.invalid_flat_axes" };
+  }
   return {
     ok: true,
     value: {
-      schema_version: schemaVersion,
-      profile_id: profileId,
-      profile_revision: Math.round(profileRevision),
-      model_id: modelId,
-      mode: modeRaw,
-      emotion_label: emotionLabel,
-      duration_hint_ms: durationHintMs,
-      resource_id: normalizeText(value.resource_id) || undefined,
-      performance_curve_hint: performanceCurveHint,
+      ...common,
+      schema_version: SCHEMA_MOTION_INTENT_V3,
       axes,
-      summary: normalizeMotionVisibilitySummary(value.summary),
     },
   };
 }
@@ -271,7 +339,7 @@ export function normalizeMotionPayload(
     return { ok: true, payload: { kind: "catalog_motion", motion: motion.value } };
   }
 
-  if (schemaVersion === SCHEMA_MOTION_INTENT_V3) {
+  if (schemaVersion === SCHEMA_MOTION_INTENT_V3 || schemaVersion === SCHEMA_MOTION_INTENT_V4) {
     const intent = parseSemanticMotionIntent(value);
     if (!intent.ok) {
       warnNormalizeFailure(intent.reason, value);

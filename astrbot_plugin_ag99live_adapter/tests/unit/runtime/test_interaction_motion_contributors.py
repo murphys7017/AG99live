@@ -483,12 +483,13 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert capability.value["motion_style_prompt"] == "中性时偏少轴，开心时优先笑眼和嘴角。"
     assert capability.value["semantic_profile"]["profile_id"] == "pet.semantic.v1"
     assert (
-        "向较小值调整会让角色向左扭头；向较大值调整会让角色向右扭头"
+        "负方向会让角色向左扭头；正方向会让角色向右扭头"
         in capability.value["semantic_profile"]["axis_prompt"]
     )
+    assert "范围 [0,100]" not in capability.value["semantic_profile"]["axis_prompt"]
     assert "中性值" not in capability.value["semantic_profile"]["axis_prompt"]
     assert "使用说明=Use for attention direction." in capability.value["semantic_profile"]["axis_prompt"]
-    assert "向较小值调整会让角色向左扭头；向较大值调整会让角色向右扭头" in system.value
+    assert "负方向会让角色向左扭头；正方向会让角色向右扭头" in system.value
     assert "没有明确方向或表演贡献的轴直接省略" in system.value
     assert "可复用的现成 motion3 动画" not in system.value
     assert "旧表情参考模板" not in system.value
@@ -497,8 +498,8 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "fallback_pose_id" not in system.value
     assert "intent_tags" in system.value
     assert "resource_id" in system.value
-    assert "axes 是必填对象" in system.value
-    assert "可用 axes 参数及语义" in system.value
+    assert "axis_levels 是必填对象" in system.value
+    assert "可用语义轴及七级方向含义" in system.value
     assert "插件会负责" not in system.value
     assert "choice、mode、motion_id" not in system.value
     assert "可选明确资源" in system.value
@@ -563,12 +564,9 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
         and "strong_range" not in axis
         for axis in capability.value["semantic_profile"]["prompt_axes"]
     )
-    assert (
-        capability.value["effect_arguments_example"]["axes"]["head_yaw"]
-        > 58
-    )
+    assert capability.value["effect_arguments_example"]["axis_levels"]["head_yaw"] == -1
     assert set(
-        capability.value["effect_arguments_example"]["axes"]
+        capability.value["effect_arguments_example"]["axis_levels"]
     ) == {"head_yaw", "eye_open_left"}
     assert (
         capability.value["effect_arguments_example"]["intent_tags"]
@@ -613,6 +611,8 @@ def test_prompt_contributor_uses_official_inline_anim_contract_when_persona_effe
     assert '"profile_revision":2' in system.value
     assert '"model_id":"pet"' in system.value
     assert "axes 是必填对象" in system.value
+    assert "范围 [0,100]" in system.value
+    assert "等级 -3=强负" not in system.value
     assert '"plugin_hints":{"ag99live_motion"' not in system.value
 
 
@@ -672,7 +672,7 @@ def test_prompt_contributor_hides_resource_id_when_no_resource_candidates(
     assert "resource_candidates" not in capability.value
     assert "resource_id" not in capability.value["effect_arguments_example"]
     assert "resource_id 只有在确定要引用明确资源时才填写" not in system.value
-    assert "必填字段是 intent_tags 和 axes；可选字段只有 duration_hint_ms。" in system.value
+    assert "必填字段是 intent_tags 和 axis_levels；可选字段只有 duration_hint_ms。" in system.value
 
 
 def test_invalid_resource_id_rejects_motion_payload_instead_of_clearing_resource(
@@ -686,7 +686,7 @@ def test_invalid_resource_id_rejects_motion_payload_instead_of_clearing_resource
     payload, reason = module._payload_normalize_motion_arguments_payload(
         {
             "intent_tags": ["happy"],
-            "axes": {"head_yaw": 60},
+            "axis_levels": {"head_yaw": 1},
             "resource_id": "resource.missing",
         },
         runtime_state,
@@ -712,7 +712,7 @@ def test_forbidden_legacy_motion_fields_reject_effect_payload(
     payload, reason = module._payload_normalize_motion_arguments_payload(
         {
             "intent_tags": ["happy"],
-            "axes": {"head_yaw": 60},
+            "axis_levels": {"head_yaw": 1},
             "mode": "catalog",
         },
         runtime_state,
@@ -725,6 +725,30 @@ def test_forbidden_legacy_motion_fields_reject_effect_payload(
 
     assert payload is None
     assert reason == "forbidden_fields:mode"
+
+
+def test_persona_effect_axes_field_is_rejected_instead_of_emitting_v3(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    payload, reason = module._payload_normalize_motion_arguments_payload(
+        {
+            "intent_tags": ["happy"],
+            "axes": {"head_yaw": 70},
+        },
+        _build_runtime_state(),
+        base_reason="persona_effect",
+        append_resolution_reason=lambda base, suffix: ";".join(
+            item for item in (base, suffix) if item
+        ),
+        sanitize_reason_fragment=lambda value: str(value).strip(),
+    )
+
+    assert payload is None
+    assert reason == "persona_effect;axes_forbidden_use_axis_levels"
 
 
 def test_prompt_contributor_returns_extensions_for_core_reply_purpose(
@@ -776,11 +800,11 @@ def test_prompt_runtime_includes_previous_motion_variation_hint(
     contributor = module.AG99liveMotionPromptContributor()
     event, _scheduled_calls = _build_event()
     event.adapter.turn_coordinator._last_prompt_motion_snapshot = {
-        "schema_version": "engine.motion_intent.v3",
+        "schema_version": "engine.motion_intent.v4",
         "resource_id": "serious_explain",
-        "axes": {
-            "head_yaw": 64.0,
-            "body_yaw": 43.0,
+        "axis_levels": {
+            "head_yaw": 1,
+            "body_yaw": -1,
         },
     }
     view = _build_view(phase="decision", purpose="persona_reply")
@@ -792,19 +816,15 @@ def test_prompt_runtime_includes_previous_motion_variation_hint(
     assert runtime.value["previous_motion_key_axes"] == [
         {
             "axis_id": "head_yaw",
-            "value": 64.0,
-            "descriptor": "look_right",
-            "neutral": 50.0,
+            "level": 1,
         },
         {
             "axis_id": "body_yaw",
-            "value": 43.0,
-            "descriptor": "body_turn_left",
-            "neutral": 50.0,
+            "level": -1,
         },
     ]
-    assert "head_yaw=look_right(64)" in runtime.value["previous_motion_summary"]
-    assert "body_yaw=body_turn_left(43)" in runtime.value["previous_motion_summary"]
+    assert "head_yaw=+1" in runtime.value["previous_motion_summary"]
+    assert "body_yaw=-1" in runtime.value["previous_motion_summary"]
     assert "resource_id=serious_explain" in runtime.value["previous_motion_summary"]
     assert "按本轮语义调整方向与幅度" in runtime.value["previous_motion_variation_instruction"]
     assert "避免在 head_yaw/body_yaw 上重复" not in runtime.value["previous_motion_variation_instruction"]
@@ -1170,7 +1190,7 @@ def test_result_contributor_returns_persona_effect_motion_as_client_object(
             _motion_effect_call(
                 {
                 "intent_tags": ["happy"],
-                "axes": {"head_yaw": 70},
+                "axis_levels": {"head_yaw": 2},
                 }
             )
         ],
@@ -1184,7 +1204,8 @@ def test_result_contributor_returns_persona_effect_motion_as_client_object(
     client_object = contribution.client_objects[0]
     assert client_object["type"] == "ag99live.motion_payload"
     assert client_object["source"] == "persona_effect"
-    assert client_object["motion_payload"]["schema_version"] == "engine.motion_intent.v3"
+    assert client_object["motion_payload"]["schema_version"] == "engine.motion_intent.v4"
+    assert client_object["motion_payload"]["axis_levels"] == {"head_yaw": 2}
     assert contribution.platform_extras == {}
     assert (
         contribution.metadata["ag99live_motion_schedule"]["reason"]
@@ -1192,7 +1213,7 @@ def test_result_contributor_returns_persona_effect_motion_as_client_object(
     )
 
 
-def test_result_contributor_normalizes_numeric_string_axes_from_persona_effect(
+def test_result_contributor_rejects_non_integer_axis_levels_from_persona_effect(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1210,9 +1231,9 @@ def test_result_contributor_normalizes_numeric_string_axes_from_persona_effect(
             _motion_effect_call(
                 {
                     "intent_tags": ["happy"],
-                    "axes": {
-                        "head_yaw": "70",
-                        "eye_open_left": "oops",
+                    "axis_levels": {
+                        "head_yaw": "2",
+                        "eye_open_left": 1.5,
                     },
                 }
             )
@@ -1223,13 +1244,10 @@ def test_result_contributor_normalizes_numeric_string_axes_from_persona_effect(
 
     assert contribution is not None
     assert scheduled_calls == []
-    assert len(contribution.client_objects) == 1
-    motion_payload = contribution.client_objects[0]["motion_payload"]
-    assert motion_payload["axes"]["head_yaw"] == 70.0
-    assert "eye_open_left" not in motion_payload["axes"]
+    assert contribution.client_objects == []
     assert (
         contribution.metadata["ag99live_motion_schedule"]["motion_resolution_reason"]
-        == "persona_effect:rejected_axes:eye_open_left"
+        == "persona_effect:rejected_axis_levels:head_yaw,eye_open_left:self_reply_motion_missing"
     )
 
 
@@ -1248,8 +1266,8 @@ def test_result_contributor_rejects_duplicate_motion_effects(
         final_result="你好呀",
         immediate_reply="你好呀",
         effect_calls=[
-            _motion_effect_call({"intent_tags": ["happy"], "axes": {"head_yaw": 70}}),
-            _motion_effect_call({"intent_tags": ["疑惑"], "axes": {"head_yaw": 40}}),
+            _motion_effect_call({"intent_tags": ["happy"], "axis_levels": {"head_yaw": 2}}),
+            _motion_effect_call({"intent_tags": ["疑惑"], "axis_levels": {"head_yaw": -1}}),
         ],
     )
 
@@ -1295,9 +1313,9 @@ def test_persona_effect_motion_logs_input_and_output_diagnostics(
                 {
                     "intent_tags": ["thinking", "explain"],
                     "resource_id": "serious_explain",
-                    "axes": {
-                        "head_yaw": "70",
-                        "eye_open_left": "oops",
+                    "axis_levels": {
+                        "head_yaw": 2,
+                        "eye_open_left": 1,
                     },
                 }
             )
@@ -1315,14 +1333,14 @@ def test_persona_effect_motion_logs_input_and_output_diagnostics(
     ]
     assert len(persona_effect_logs) == 1
     log_line = persona_effect_logs[0]
-    assert "effect_fields=axes,intent_tags,resource_id" in log_line
+    assert "effect_fields=axis_levels,intent_tags,resource_id" in log_line
     assert "effect_axis_keys=eye_open_left,head_yaw" in log_line
     assert "effect_intent_tags=thinking,explain" in log_line
     assert "effect_resource_id=serious_explain" in log_line
-    assert "payload_axes=head_yaw" in log_line
+    assert "payload_axis_keys=eye_open_left,head_yaw" in log_line
     assert "payload_resource_id=serious_explain" in log_line
     assert "payload_fallback_pose_id" not in log_line
-    assert "reason=persona_effect:rejected_axes:eye_open_left" in log_line
+    assert "reason=persona_effect:resource_id_validated" in log_line
 
 
 def test_result_contributor_schedules_motion_for_immediate_reply(
@@ -1482,7 +1500,7 @@ def test_result_contributor_returns_persona_effect_motion_in_split_final_phase(
             _motion_effect_call(
                 {
                 "intent_tags": ["focused"],
-                "axes": {"head_yaw": 60},
+                "axis_levels": {"head_yaw": 1},
                 }
             )
         ],
@@ -1518,7 +1536,7 @@ def test_result_contributor_ignores_removed_inline_mode_for_final_phase(
             _motion_effect_call(
                 {
                     "intent_tags": ["说明"],
-                    "axes": {"head_yaw": 64, "body_yaw": 56},
+                    "axis_levels": {"head_yaw": 1, "body_yaw": 1},
                 }
             )
         ],
@@ -1583,7 +1601,7 @@ def test_result_contributor_preserves_neutral_persona_effect_for_engine_feedback
             _motion_effect_call(
                 {
                 "intent_tags": ["thinking"],
-                "axes": {"head_yaw": 55},
+                "axis_levels": {"head_yaw": 0},
                 }
             )
         ],
@@ -1594,8 +1612,8 @@ def test_result_contributor_preserves_neutral_persona_effect_for_engine_feedback
     assert contribution is not None
     assert scheduled_calls == []
     assert len(contribution.client_objects) == 1
-    assert contribution.client_objects[0]["motion_payload"]["axes"] == {
-        "head_yaw": 55.0,
+    assert contribution.client_objects[0]["motion_payload"]["axis_levels"] == {
+        "head_yaw": 0,
     }
     assert event.get_extra("ag99live_split_motion_scheduled") is True
     metadata = contribution.metadata["ag99live_motion_schedule"]
@@ -1627,7 +1645,7 @@ def test_result_contributor_schedules_final_motion_after_hybrid_immediate_phase(
                     _motion_effect_call(
                         {
                             "intent_tags": ["happy"],
-                            "axes": {"head_yaw": 70},
+                            "axis_levels": {"head_yaw": 2},
                         }
                     )
                 ],
@@ -1646,7 +1664,7 @@ def test_result_contributor_schedules_final_motion_after_hybrid_immediate_phase(
                     _motion_effect_call(
                         {
                             "intent_tags": ["happy"],
-                            "axes": {"head_yaw": 70},
+                            "axis_levels": {"head_yaw": 2},
                         }
                     )
                 ],
@@ -1680,7 +1698,7 @@ def test_result_contributor_prefers_final_response_effect_calls(
             _motion_effect_call(
                 {
                     "intent_tags": ["final"],
-                    "axes": {"head_yaw": 70},
+                    "axis_levels": {"head_yaw": 2},
                 }
             )
         ],
@@ -1698,7 +1716,7 @@ def test_result_contributor_prefers_final_response_effect_calls(
                     _motion_effect_call(
                         {
                             "intent_tags": ["old"],
-                            "axes": {"head_yaw": 70},
+                            "axis_levels": {"head_yaw": 2},
                         }
                     )
                 ],
@@ -1711,7 +1729,7 @@ def test_result_contributor_prefers_final_response_effect_calls(
     assert len(contribution.client_objects) == 1
     motion_payload = contribution.client_objects[0]["motion_payload"]
     assert motion_payload["intent_tags"] == ["final"]
-    assert motion_payload["axes"]["head_yaw"] == 70.0
+    assert motion_payload["axis_levels"]["head_yaw"] == 2
 
 
 def test_result_contributor_uses_event_turn_state_reply_plan_when_view_plan_missing(
@@ -1794,7 +1812,7 @@ def test_result_contributor_ignores_removed_inline_mode_for_self_reply(
             _motion_effect_call(
                 {
                     "intent_tags": ["轻快"],
-                    "axes": {"head_yaw": 62, "mouth_smile": 65},
+                    "axis_levels": {"head_yaw": 1, "mouth_smile": 1},
                 }
             )
         ],
@@ -1915,12 +1933,14 @@ def test_register_interaction_contributors_uses_available_hooks(
     assert effect.plugin_id == "astrbot_plugin_ag99live_adapter"
     assert effect.name == "ag99live.motion"
     assert effect.legacy_hint_names == ()
-    assert effect.parameters["required"] == ["intent_tags", "axes"]
+    assert effect.parameters["required"] == ["intent_tags", "axis_levels"]
     assert effect.parameters["additionalProperties"] is False
-    assert effect.parameters["properties"]["axes"]["minProperties"] == 1
+    assert effect.parameters["properties"]["axis_levels"]["minProperties"] == 1
+    assert effect.parameters["properties"]["axis_levels"]["additionalProperties"]["minimum"] == -3
+    assert effect.parameters["properties"]["axis_levels"]["additionalProperties"]["maximum"] == 3
     assert set(effect.parameters["properties"]) == {
         "intent_tags",
-        "axes",
+        "axis_levels",
         "duration_hint_ms",
         "resource_id",
     }

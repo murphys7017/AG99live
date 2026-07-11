@@ -717,7 +717,7 @@ class TurnCoordinator:
     ) -> bool:
         """把一份动作载荷以 engine.* 出站到前端。
 
-        - schema 是 engine.motion_intent.v3 时先经 normalize_motion_intent_payload 规范化；
+        - schema 是 engine.motion_intent.v3/v4 时先经 normalize_motion_intent_payload 规范化；
           规范化失败直接拒发。
         - 根据 _resolve_engine_motion_message_type 选择信封类型（intent / catalog），
           并按类型选择 payload 子键 (intent/motion/plan)。
@@ -727,14 +727,20 @@ class TurnCoordinator:
         if not isinstance(motion_payload, dict):
             return False
 
-        if _resolve_motion_payload_schema_version(motion_payload) == "engine.motion_intent.v3":
+        if _resolve_motion_payload_schema_version(motion_payload) in {
+            "engine.motion_intent.v3",
+            "engine.motion_intent.v4",
+        }:
             try:
                 motion_payload = normalize_motion_intent_payload(motion_payload)
             except ValueError as exc:
                 logger.warning("WIRING motion_payload_egress rejected: %s", exc)
                 return False
 
-        if str(motion_payload.get("schema_version") or "").strip() == "engine.motion_intent.v3":
+        if str(motion_payload.get("schema_version") or "").strip() in {
+            "engine.motion_intent.v3",
+            "engine.motion_intent.v4",
+        }:
             motion_payload = self._attach_ready_performance_curve_hint(
                 motion_payload=motion_payload,
                 turn_id=turn_id,
@@ -821,10 +827,13 @@ class TurnCoordinator:
         snapshot = getattr(self, "_last_prompt_motion_snapshot", None)
         if not isinstance(snapshot, dict):
             return None
-        axes = snapshot.get("axes")
         cloned_snapshot = dict(snapshot)
+        axes = snapshot.get("axes")
+        axis_levels = snapshot.get("axis_levels")
         if isinstance(axes, dict):
             cloned_snapshot["axes"] = dict(axes)
+        if isinstance(axis_levels, dict):
+            cloned_snapshot["axis_levels"] = dict(axis_levels)
         return cloned_snapshot
 
     def _record_prompt_motion_snapshot(
@@ -833,22 +842,30 @@ class TurnCoordinator:
         motion_payload: dict[str, Any],
         source: str,
     ) -> None:
-        if str(motion_payload.get("schema_version") or "").strip() != "engine.motion_intent.v3":
+        if str(motion_payload.get("schema_version") or "").strip() not in {
+            "engine.motion_intent.v3",
+            "engine.motion_intent.v4",
+        }:
             return
+        schema_version = str(motion_payload.get("schema_version") or "").strip()
         axes = motion_payload.get("axes")
-        if not isinstance(axes, dict):
+        axis_levels = motion_payload.get("axis_levels")
+        if schema_version == "engine.motion_intent.v4":
+            if not isinstance(axis_levels, dict) or not axis_levels or "axes" in motion_payload:
+                return
+        elif not isinstance(axes, dict) or not axes or "axis_levels" in motion_payload:
             return
 
         normalized_axes: dict[str, float] = {}
-        for axis_id, axis_value in axes.items():
-            if not isinstance(axis_value, (int, float)) or isinstance(axis_value, bool):
-                continue
-            normalized_axis_id = str(axis_id or "").strip()
-            if not normalized_axis_id:
-                continue
-            normalized_axes[normalized_axis_id] = round(float(axis_value), 4)
-        if not normalized_axes:
-            return
+        if isinstance(axes, dict):
+            for axis_id, axis_value in axes.items():
+                if not isinstance(axis_value, (int, float)) or isinstance(axis_value, bool):
+                    continue
+                normalized_axis_id = str(axis_id or "").strip()
+                if not normalized_axis_id:
+                    continue
+                normalized_axes[normalized_axis_id] = round(float(axis_value), 4)
+        normalized_levels = dict(axis_levels) if isinstance(axis_levels, dict) else {}
 
         intent_tags = motion_payload.get("intent_tags")
         normalized_tags = []
@@ -859,13 +876,17 @@ class TurnCoordinator:
                 if str(item).strip()
             ][:6]
 
-        self._last_prompt_motion_snapshot = {
-            "schema_version": "engine.motion_intent.v3",
+        snapshot = {
+            "schema_version": schema_version,
             "source": str(source or "").strip(),
             "resource_id": str(motion_payload.get("resource_id") or "").strip(),
             "intent_tags": normalized_tags,
-            "axes": normalized_axes,
         }
+        if schema_version == "engine.motion_intent.v4":
+            snapshot["axis_levels"] = normalized_levels
+        else:
+            snapshot["axes"] = normalized_axes
+        self._last_prompt_motion_snapshot = snapshot
 
     def _record_motion_lab_raw_event(
         self,
@@ -1026,7 +1047,10 @@ class TurnCoordinator:
         if (
             not normalized_turn_id
             or not normalized_message_id
-            or str(motion_payload.get("schema_version") or "").strip() != "engine.motion_intent.v3"
+            or str(motion_payload.get("schema_version") or "").strip() not in {
+                "engine.motion_intent.v3",
+                "engine.motion_intent.v4",
+            }
         ):
             return
         pending_key = self._performance_curve_pending_key(

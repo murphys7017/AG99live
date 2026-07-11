@@ -1,6 +1,7 @@
 import type {
   DirectParameterPlanTiming,
   ModelSummary,
+  MotionAxisLevelMap,
   MotionPlanPayload,
 } from "../../types/protocol.js";
 import type { ModelEngineSettings } from "../settings.js";
@@ -83,6 +84,7 @@ export interface MotionTransformTrace {
   profileRevision: number;
   profileHash: string;
   rawAxes: Record<string, number>;
+  rawAxisLevels?: MotionAxisLevelMap;
   resourceId?: string;
   resourceType?: "expression" | "motion";
   resourceParameterIds?: string[];

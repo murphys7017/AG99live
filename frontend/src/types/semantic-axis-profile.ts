@@ -33,6 +33,7 @@ export interface SemanticAxisDefinition {
   value_range: [number, number];
   soft_range: [number, number];
   strong_range: [number, number];
+  level_anchors?: Record<string, number>;
   positive_semantics: string[];
   negative_semantics: string[];
   usage_notes: string;

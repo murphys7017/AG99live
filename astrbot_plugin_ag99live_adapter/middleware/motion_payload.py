@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..motion.motion_intent import (
-    MOTION_INTENT_V3_SCHEMA_VERSION,
+    MOTION_INTENT_V4_SCHEMA_VERSION,
     derive_motion_emotion_label,
     normalize_motion_intent_tags,
     normalize_motion_resource_id,
@@ -48,6 +48,11 @@ def normalize_motion_arguments_payload(
             base_reason,
             "forbidden_fields:" + ",".join(forbidden_fields),
         )
+    if "axes" in motion_hint:
+        return None, append_resolution_reason(
+            base_reason,
+            "axes_forbidden_use_axis_levels",
+        )
 
     try:
         semantic_profile = resolve_selected_semantic_axis_profile(
@@ -65,16 +70,17 @@ def normalize_motion_arguments_payload(
         return None, append_resolution_reason(base_reason, "intent_tags_empty")
     emotion_label = derive_motion_emotion_label(intent_tags)
     requested_resource_id = normalize_motion_resource_id(motion_hint.get("resource_id"))
-    axes = motion_hint.get("axes")
-    validated_axes, rejected_axes = normalize_effect_axes(axes)
+    validated_levels, rejected_levels = normalize_effect_axis_levels(
+        motion_hint.get("axis_levels"),
+    )
     reason = base_reason
-    if rejected_axes:
-        reason = append_resolution_reason(
+    if rejected_levels:
+        return None, append_resolution_reason(
             reason,
-            "rejected_axes:" + ",".join(rejected_axes),
+            "rejected_axis_levels:" + ",".join(rejected_levels),
         )
-    if not validated_axes:
-        reason = append_resolution_reason(reason, "axes_empty_or_invalid")
+    if not validated_levels:
+        reason = append_resolution_reason(reason, "axis_levels_empty_or_invalid")
 
     resource_candidates = build_motion_resource_candidates(
         runtime_state=runtime_state,
@@ -89,22 +95,15 @@ def normalize_motion_arguments_payload(
         if requested_resource_id and not resource_id:
             return None, reason
 
-    if not validated_axes:
+    if not validated_levels:
         return None, reason
 
     try:
         duration_hint_ms = _normalize_duration_hint_ms(motion_hint.get("duration_hint_ms"))
     except ValueError as exc:
         return None, append_resolution_reason(reason, str(exc))
-    summary = build_motion_visibility_summary(
-        axes=validated_axes,
-        semantic_profile=semantic_profile,
-        intent_tags=intent_tags,
-        resource_id=resource_id,
-    )
-
     payload = {
-        "schema_version": MOTION_INTENT_V3_SCHEMA_VERSION,
+        "schema_version": MOTION_INTENT_V4_SCHEMA_VERSION,
         "profile_id": profile_id,
         "profile_revision": int(semantic_profile.get("revision") or 0),
         "model_id": str(semantic_profile.get("model_id") or "").strip(),
@@ -113,8 +112,11 @@ def normalize_motion_arguments_payload(
         "emotion_label": emotion_label,
         "duration_hint_ms": duration_hint_ms,
         "resource_id": resource_id,
-        "axes": validated_axes,
-        "summary": summary,
+        "summary": {
+            "axis_count": len(validated_levels),
+            "intent_tag_count": len(intent_tags),
+        },
+        "axis_levels": validated_levels,
     }
     return payload, reason
 
@@ -178,6 +180,33 @@ def normalize_effect_axes(
         return None, rejected_axes
 
     return normalized_axes, rejected_axes
+
+
+def normalize_motion_axis_levels(
+    levels: Any,
+) -> tuple[dict[str, int] | None, list[str]]:
+    if not isinstance(levels, dict) or not levels:
+        return None, []
+    normalized_levels: dict[str, int] = {}
+    rejected_levels: list[str] = []
+    for axis_id_raw, level in levels.items():
+        axis_id = str(axis_id_raw or "").strip()
+        if not axis_id:
+            rejected_levels.append("empty_axis_id")
+            continue
+        if axis_id in normalized_levels:
+            rejected_levels.append(f"duplicate_axis_id:{axis_id}")
+            continue
+        if isinstance(level, bool) or not isinstance(level, int) or level < -3 or level > 3:
+            rejected_levels.append(axis_id)
+            continue
+        normalized_levels[axis_id] = level
+    if not normalized_levels:
+        return None, rejected_levels
+    return normalized_levels, rejected_levels
+
+
+normalize_effect_axis_levels = normalize_motion_axis_levels
 
 
 def _coerce_effect_axis_number(value: Any) -> float | None:

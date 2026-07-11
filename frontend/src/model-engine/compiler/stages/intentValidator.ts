@@ -70,7 +70,10 @@ function validateProfileForIntent(
   if (!intent.emotion_label.trim()) {
     return "emotion_label_empty";
   }
-  if (!speechActive && !Object.keys(intent.axes).length) {
+  const inputAxisCount = intent.schema_version === "engine.motion_intent.v4"
+    ? Object.keys(intent.axis_levels).length
+    : Object.keys(intent.axes).length;
+  if (!speechActive && inputAxisCount === 0) {
     return "semantic_intent_axes_empty";
   }
   return "";

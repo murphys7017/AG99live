@@ -46,6 +46,7 @@ class SemanticAxisDefinition(TypedDict):
     value_range: list[float]
     soft_range: list[float]
     strong_range: list[float]
+    level_anchors: NotRequired[dict[str, float]]
     positive_semantics: list[str]
     negative_semantics: list[str]
     usage_notes: str
@@ -495,6 +496,14 @@ def build_default_semantic_axis_profile(
                 "value_range": [0.0, 100.0],
                 "soft_range": [float(value) for value in axis_defaults["soft_range"]],
                 "strong_range": [float(value) for value in axis_defaults["strong_range"]],
+                "level_anchors": _normalize_level_anchors(
+                    None,
+                    neutral=float(axis_defaults.get("neutral", 50.0)),
+                    soft_range=[float(value) for value in axis_defaults["soft_range"]],
+                    strong_range=[float(value) for value in axis_defaults["strong_range"]],
+                    value_range=[0.0, 100.0],
+                    field_name=f"{axis_id}.level_anchors",
+                ),
                 "positive_semantics": list(axis_defaults["positive_semantics"]),
                 "negative_semantics": list(axis_defaults["negative_semantics"]),
                 "usage_notes": str(axis_defaults["usage_notes"]),
@@ -531,6 +540,14 @@ def build_default_semantic_axis_profile(
                 "value_range": [0.0, 100.0],
                 "soft_range": [45.0, 55.0],
                 "strong_range": [35.0, 65.0],
+                "level_anchors": _normalize_level_anchors(
+                    None,
+                    neutral=50.0,
+                    soft_range=[45.0, 55.0],
+                    strong_range=[35.0, 65.0],
+                    value_range=[0.0, 100.0],
+                    field_name=f"{axis_id}.level_anchors",
+                ),
                 "positive_semantics": [f"increase {parameter_name}"],
                 "negative_semantics": [f"decrease {parameter_name}"],
                 "usage_notes": "Auto-added from model scan. Promote this axis manually before using it in prompt/runtime.",
@@ -863,6 +880,14 @@ def validate_semantic_axis_profile(
             field_name=f"{axis_id}.strong_range",
             container_field_name=f"{axis_id}.value_range",
         )
+        level_anchors = _normalize_level_anchors(
+            raw_axis.get("level_anchors"),
+            neutral=neutral,
+            soft_range=soft_range,
+            strong_range=strong_range,
+            value_range=value_range,
+            field_name=f"{axis_id}.level_anchors",
+        )
 
         normalized_axes.append(
             {
@@ -885,6 +910,7 @@ def validate_semantic_axis_profile(
                 "value_range": value_range,
                 "soft_range": soft_range,
                 "strong_range": strong_range,
+                "level_anchors": level_anchors,
                 "positive_semantics": _normalize_string_list(
                     raw_axis.get("positive_semantics"),
                     field_name=f"{axis_id}.positive_semantics",
@@ -1030,12 +1056,12 @@ def ensure_semantic_axis_profile(
     path = build_semantic_axis_profile_path(model_dir)
     current_source_hash = build_model_source_hash(model_dir)
     if path.exists():
-        needs_relation_graph_migration = _profile_needs_relation_graph_migration(path)
+        needs_schema_normalization = _profile_needs_schema_normalization(path)
         current_profile = load_semantic_axis_profile(
             model_dir=model_dir,
             model_name=model_name,
         )
-        if needs_relation_graph_migration:
+        if needs_schema_normalization:
             current_profile = {
                 **current_profile,
                 "updated_at": _utc_now_iso(),
@@ -1194,12 +1220,29 @@ def _first_binding_parameter_id(axis: Mapping[str, Any]) -> str:
     return str(first_binding.get("parameter_id") or "").strip()
 
 
-def _profile_needs_relation_graph_migration(path: Path) -> bool:
+def _profile_needs_schema_normalization(path: Path) -> bool:
     try:
         raw_payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return False
-    return isinstance(raw_payload, Mapping) and raw_payload.get("relation_graph") is None
+    if not isinstance(raw_payload, Mapping):
+        return False
+    if raw_payload.get("relation_graph") is None:
+        return True
+    axes = raw_payload.get("axes")
+    required_anchor_keys = {"-3", "-2", "-1", "0", "1", "2", "3"}
+    return isinstance(axes, list) and any(
+        isinstance(axis, Mapping)
+        and (
+            not isinstance(axis.get("level_anchors"), Mapping)
+            or {
+                str(key).strip()
+                for key in axis.get("level_anchors", {}).keys()
+            }
+            != required_anchor_keys
+        )
+        for axis in axes
+    )
 
 
 def save_semantic_axis_profile(
@@ -1409,6 +1452,63 @@ def _normalize_range(value: Any, *, field_name: str) -> list[float]:
     if result[0] > result[1]:
         raise SemanticAxisProfileError(f"`{field_name}` minimum must be less than or equal to maximum.")
     return result
+
+
+def _normalize_level_anchors(
+    value: Any,
+    *,
+    neutral: float,
+    soft_range: list[float],
+    strong_range: list[float],
+    value_range: list[float],
+    field_name: str,
+) -> dict[str, float]:
+    derived: dict[str, float] = {
+        "-3": strong_range[0],
+        "-2": (strong_range[0] + soft_range[0]) / 2.0,
+        "-1": soft_range[0],
+        "0": neutral,
+        "1": soft_range[1],
+        "2": (soft_range[1] + strong_range[1]) / 2.0,
+        "3": strong_range[1],
+    }
+    normalized = dict(derived)
+    if value is not None:
+        if not isinstance(value, Mapping):
+            raise SemanticAxisProfileError(f"`{field_name}` must be an object.")
+        raw_anchors: dict[str, Any] = {}
+        for raw_key, raw_number in value.items():
+            key = str(raw_key).strip()
+            if key not in derived:
+                raise SemanticAxisProfileError(
+                    f"`{field_name}` contains unsupported level `{key}`."
+                )
+            if key in raw_anchors:
+                raise SemanticAxisProfileError(
+                    f"`{field_name}` contains duplicate level `{key}`."
+                )
+            raw_anchors[key] = raw_number
+        for key, raw_number in raw_anchors.items():
+            number = _coerce_float(raw_number, field_name=f"{field_name}.{key}")
+            if number < value_range[0] or number > value_range[1]:
+                raise SemanticAxisProfileError(
+                    f"`{field_name}.{key}` must be within value_range."
+                )
+            normalized[key] = number
+
+    if abs(normalized["0"] - neutral) > 1e-6:
+        raise SemanticAxisProfileError(
+            f"`{field_name}.0` must equal the axis neutral value."
+        )
+    ordered_keys = ("-3", "-2", "-1", "0", "1", "2", "3")
+    if any(
+        normalized[left] > normalized[right]
+        for left, right in zip(ordered_keys, ordered_keys[1:])
+    ):
+        raise SemanticAxisProfileError(
+            f"`{field_name}` values must be ordered from -3 through 3."
+        )
+    return {key: round(number, 4) for key, number in normalized.items()}
 
 
 def _normalize_string_list(value: Any, *, field_name: str) -> list[str]:

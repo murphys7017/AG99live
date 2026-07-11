@@ -42,6 +42,7 @@ def format_profile_axis_prompt_line(
     axis: dict[str, Any],
     *,
     truncate_text: Any,
+    use_axis_levels: bool = False,
 ) -> str:
     axis_id = str(axis.get("id") or "").strip()
     label = str(axis.get("label") or axis_id).strip()
@@ -66,6 +67,14 @@ def format_profile_axis_prompt_line(
     notes = truncate_text(str(axis.get("usage_notes") or "").strip(), 160)
     description = truncate_text(str(axis.get("description") or "").strip(), 160)
     suffix = f" 使用说明={notes}" if notes else ""
+    if use_axis_levels:
+        return (
+            f"- {axis_id}（{label}，{role_label}）："
+            f"负方向会让角色{negative_action}；正方向会让角色{positive_action}。"
+            "等级 -3=强负、-2=中负、-1=轻负、0=明确中性、"
+            "+1=轻正、+2=中正、+3=强正。"
+            f"本轮没有对应方向的表达需要时省略此轴。{description}{suffix}"
+        ).strip()
     return (
         f"- {axis_id}（{label}，{role_label}，范围 {range_text}）："
         f"向较小值调整会让角色{negative_action}；"

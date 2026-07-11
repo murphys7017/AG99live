@@ -107,7 +107,12 @@ function buildTransformTrace(context: MotionCompileContext): MotionTransformTrac
     transformVersion: SEMANTIC_MOTION_TRANSFORM_VERSION,
     profileRevision: profile?.revision ?? 0,
     profileHash: profile?.source_hash ?? "",
-    rawAxes: { ...context.intent.axes },
+    rawAxes: context.intent.schema_version === "engine.motion_intent.v3"
+      ? { ...context.intent.axes }
+      : {},
+    rawAxisLevels: context.intent.schema_version === "engine.motion_intent.v4"
+      ? { ...context.intent.axis_levels }
+      : undefined,
     resourceId: context.intent.resource_id,
     resourceType: context.state.resource?.resourceType,
     resourceParameterIds: context.state.resource

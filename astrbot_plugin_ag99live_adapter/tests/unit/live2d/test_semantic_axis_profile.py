@@ -172,6 +172,48 @@ def test_ensure_semantic_axis_profile_creates_backend_owned_profile_file(tmp_pat
     assert profile["status"] == "generated"
     assert profile["user_modified"] is False
     assert profile["axes"]
+    assert set(profile["axes"][0]["level_anchors"]) == {
+        "-3", "-2", "-1", "0", "1", "2", "3"
+    }
+
+
+def test_validate_semantic_axis_profile_accepts_ordered_custom_level_anchors(tmp_path) -> None:
+    profile = _build_valid_profile(tmp_path)
+    axis = profile["axes"][0]
+    neutral = axis["neutral"]
+    axis["level_anchors"] = {
+        "-3": neutral - 20,
+        "-2": neutral - 12,
+        "-1": neutral - 5,
+        "0": neutral,
+        "1": neutral + 5,
+        "2": neutral + 12,
+        "3": neutral + 20,
+    }
+
+    normalized = validate_semantic_axis_profile(profile, model_name="DemoModel")
+
+    assert normalized["axes"][0]["level_anchors"] == axis["level_anchors"]
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected_message"),
+    [
+        (lambda anchors, neutral: anchors.update({"4": neutral}), "unsupported level"),
+        (lambda anchors, neutral: anchors.update({"0": neutral + 1}), "must equal the axis neutral"),
+        (lambda anchors, neutral: anchors.update({"-1": neutral + 1}), "must be ordered"),
+    ],
+)
+def test_validate_semantic_axis_profile_rejects_invalid_level_anchors(
+    tmp_path,
+    mutate,
+    expected_message: str,
+) -> None:
+    profile = _build_valid_profile(tmp_path)
+    axis = profile["axes"][0]
+    mutate(axis["level_anchors"], axis["neutral"])
+
+    _expect_profile_error(profile, expected_message)
 
 
 def test_ensure_semantic_axis_profile_adds_unmapped_parameters_as_debug_axes(tmp_path) -> None:
@@ -345,6 +387,38 @@ def test_ensure_semantic_axis_profile_persists_relation_graph_migration(tmp_path
     assert persisted_payload["axes"] == legacy_payload["axes"]
     assert persisted_payload["couplings"] == legacy_payload["couplings"]
     assert persisted_payload["relation_graph"] == migrated_profile["relation_graph"]
+
+
+def test_ensure_semantic_axis_profile_persists_missing_level_anchors(tmp_path) -> None:
+    model_dir = tmp_path / "DemoModel"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
+    model_payload = _build_model_payload()
+
+    original_profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+    profile_path = build_semantic_axis_profile_path(model_dir)
+    legacy_payload = json.loads(profile_path.read_text(encoding="utf-8"))
+    for axis in legacy_payload["axes"]:
+        axis.pop("level_anchors", None)
+    profile_path.write_text(
+        json.dumps(legacy_payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    migrated_profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+    persisted_payload = json.loads(profile_path.read_text(encoding="utf-8"))
+
+    assert migrated_profile["revision"] == original_profile["revision"]
+    assert all(
+        set(axis["level_anchors"]) == {"-3", "-2", "-1", "0", "1", "2", "3"}
+        for axis in persisted_payload["axes"]
+    )
 
 
 def test_ensure_semantic_axis_profile_refreshes_stale_user_modified_old_default_design(tmp_path) -> None:

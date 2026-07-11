@@ -320,6 +320,71 @@ def test_normalize_motion_intent_v3_accepts_string_number_axis() -> None:
     assert intent["axes"]["head_yaw"] == 72.5
 
 
+def test_normalize_motion_intent_v4_accepts_seven_level_axes() -> None:
+    intent = normalize_motion_intent_payload(
+        {
+            "schema_version": "engine.motion_intent.v4",
+            "profile_id": "DemoModel.semantic.v1",
+            "profile_revision": 3,
+            "model_id": "DemoModel",
+            "mode": "expressive",
+            "intent_tags": ["curious"],
+            "duration_hint_ms": 900,
+            "axis_levels": {
+                "head_yaw": -2,
+                "body_yaw": 1,
+            },
+        }
+    )
+
+    assert intent["schema_version"] == "engine.motion_intent.v4"
+    assert intent["axis_levels"] == {"head_yaw": -2, "body_yaw": 1}
+    assert "axes" not in intent
+    assert intent["summary"]["axis_count"] == 2
+
+
+@pytest.mark.parametrize("invalid_level", [True, "2", 1.5, -4, 4])
+def test_normalize_motion_intent_v4_rejects_invalid_axis_level(invalid_level) -> None:
+    with pytest.raises(ValueError, match="axis_head_yaw_level_invalid"):
+        normalize_motion_intent_payload(
+            {
+                "schema_version": "engine.motion_intent.v4",
+                "profile_id": "DemoModel.semantic.v1",
+                "profile_revision": 3,
+                "model_id": "DemoModel",
+                "intent_tags": ["curious"],
+                "axis_levels": {"head_yaw": invalid_level},
+            }
+        )
+
+
+def test_motion_intent_versions_reject_mixed_axis_contracts() -> None:
+    common = {
+        "profile_id": "DemoModel.semantic.v1",
+        "profile_revision": 3,
+        "model_id": "DemoModel",
+        "intent_tags": ["curious"],
+    }
+    with pytest.raises(ValueError, match="axis_levels_axes_mutually_exclusive"):
+        normalize_motion_intent_payload(
+            {
+                **common,
+                "schema_version": "engine.motion_intent.v4",
+                "axis_levels": {"head_yaw": 1},
+                "axes": {"head_yaw": 60},
+            }
+        )
+    with pytest.raises(ValueError, match="axis_levels_forbidden_for_v3"):
+        normalize_motion_intent_payload(
+            {
+                **common,
+                "schema_version": "engine.motion_intent.v3",
+                "axis_levels": {"head_yaw": 1},
+                "axes": {"head_yaw": 60},
+            }
+        )
+
+
 def test_normalize_motion_intent_v3_rejects_invalid_duration_hint() -> None:
     with pytest.raises(ValueError, match="duration_hint_ms_not_number"):
         normalize_motion_intent_payload(
@@ -393,6 +458,25 @@ def test_summarize_motion_payload_defaults_v3_mode_to_expressive() -> None:
     assert schema_version == "engine.motion_intent.v3"
     assert mode == "expressive"
     assert axis_count == 1
+    assert supplementary_count == 0
+    assert failure_reason == ""
+
+
+def test_summarize_motion_payload_counts_v4_axis_levels() -> None:
+    schema_version, mode, axis_count, supplementary_count, failure_reason = summarize_motion_payload(
+        {
+            "schema_version": "engine.motion_intent.v4",
+            "profile_id": "DemoModel.semantic.v1",
+            "profile_revision": 3,
+            "model_id": "DemoModel",
+            "intent_tags": ["curious"],
+            "axis_levels": {"head_yaw": 1, "body_yaw": -1},
+        }
+    )
+
+    assert schema_version == "engine.motion_intent.v4"
+    assert mode == "expressive"
+    assert axis_count == 2
     assert supplementary_count == 0
     assert failure_reason == ""
 

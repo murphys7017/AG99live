@@ -9,12 +9,13 @@ import type {
   MotionStageResult,
   ResolvedAxisRoleBuckets,
 } from "../compileContext.js";
+import type { MotionAxisLevel } from "../../../types/protocol.js";
 import { replaceControlledAxisValues } from "../compileContext.js";
 
 const ALLOWED_LLM_ROLES = new Set(["primary", "hint"]);
 
 // Reads:
-// - context.intent.axes
+// - context.intent.axes / context.intent.axis_levels
 // - context.state.profile
 // - context.state.axisById
 //
@@ -82,7 +83,7 @@ export function runAxisResolver(
   }
 
   if (
-    Object.keys(context.intent.axes).length > 0
+    resolveInputAxisIds(context).length > 0
     && Object.keys(resolvedAxes.controlledValues).length > 0
     && Object.entries(resolvedAxes.controlledValues).every(([axisId, value]) => {
       const axis = context.state.axisById.get(axisId);
@@ -133,12 +134,21 @@ function resolveAllowedLlmAxisValues(
   const warnings: string[] = [];
   const forbiddenAxes: string[] = [];
   const invalidAxes: string[] = [];
+  const isLevelIntent = context.intent.schema_version === "engine.motion_intent.v4";
+  const inputEntries = context.intent.schema_version === "engine.motion_intent.v4"
+    ? Object.entries(context.intent.axis_levels)
+    : Object.entries(context.intent.axes);
   console.debug("[ModelEngine] received semantic axis payload.", {
-    axisIds: Object.keys(context.intent.axes),
-    axes: context.intent.axes,
+    axisIds: inputEntries.map(([axisId]) => axisId),
+    axes: context.intent.schema_version === "engine.motion_intent.v3"
+      ? context.intent.axes
+      : undefined,
+    axisLevels: context.intent.schema_version === "engine.motion_intent.v4"
+      ? context.intent.axis_levels
+      : undefined,
   });
 
-  for (const [axisId, value] of Object.entries(context.intent.axes)) {
+  for (const [axisId, rawValue] of inputEntries) {
     const axis = context.state.axisById.get(axisId);
     if (!axis) {
       invalidAxes.push(axisId);
@@ -152,6 +162,15 @@ function resolveAllowedLlmAxisValues(
       );
       continue;
     }
+    const levelResult = isLevelIntent
+      ? resolveAxisLevelValue(axis, rawValue as MotionAxisLevel)
+      : null;
+    if (levelResult && !levelResult.ok) {
+      invalidAxes.push(axisId);
+      warnings.push(levelResult.reason);
+      continue;
+    }
+    const value = levelResult?.value ?? rawValue;
     if (typeof value !== "number" || !Number.isFinite(value)) {
       invalidAxes.push(axisId);
       warnings.push(`semantic_axis_ignored_not_number:${axisId}`);
@@ -176,6 +195,26 @@ function resolveAllowedLlmAxisValues(
     forbiddenAxes,
     invalidAxes,
   };
+}
+
+function resolveInputAxisIds(context: MotionCompileContext): string[] {
+  return context.intent.schema_version === "engine.motion_intent.v4"
+    ? Object.keys(context.intent.axis_levels)
+    : Object.keys(context.intent.axes);
+}
+
+function resolveAxisLevelValue(
+  axis: SemanticAxisDefinition,
+  level: MotionAxisLevel,
+): { ok: true; value: number } | { ok: false; reason: string } {
+  const anchoredValue = axis.level_anchors?.[String(level)];
+  if (typeof anchoredValue !== "number" || !Number.isFinite(anchoredValue)) {
+    return {
+      ok: false,
+      reason: `semantic_axis_level_anchor_missing:${axis.id}:${level}`,
+    };
+  }
+  return { ok: true, value: anchoredValue };
 }
 
 function collectMissingPrimaryAxes(

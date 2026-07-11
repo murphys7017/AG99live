@@ -2,6 +2,7 @@ import type { ProtocolEnvelope } from "../../types/protocol.js";
 import {
   SCHEMA_CATALOG_MOTION_V1,
   SCHEMA_MOTION_INTENT_V3,
+  SCHEMA_MOTION_INTENT_V4,
 } from "../../types/protocol.js";
 import {
   normalizeTurnIdForComparison,
@@ -79,7 +80,7 @@ export function applyInboundMotionPayload(
   const allowedSchemaVersions = new Set(
     envelope.type === "engine.catalog_motion"
       ? [SCHEMA_CATALOG_MOTION_V1]
-      : [SCHEMA_MOTION_INTENT_V3],
+      : [SCHEMA_MOTION_INTENT_V3, SCHEMA_MOTION_INTENT_V4],
   );
   if (!allowedSchemaVersions.has(schemaVersion)) {
     console.warn(

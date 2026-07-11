@@ -1,6 +1,7 @@
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
 
 export const SCHEMA_MOTION_INTENT_V3 = "engine.motion_intent.v3";
+export const SCHEMA_MOTION_INTENT_V4 = "engine.motion_intent.v4";
 export const SCHEMA_CATALOG_MOTION_V1 = "engine.catalog_motion.v1";
 export const SCHEMA_PARAMETER_PLAN_V2 = "engine.parameter_plan.v2";
 
@@ -606,11 +607,10 @@ export interface PerformanceCurveHint {
   energy: "low" | "medium" | "high" | "teasing" | "calm";
 }
 
-/**
- * Normalized semantic motion intent consumed by ModelEngine.
- */
-export interface NormalizedSemanticMotionIntent {
-  schema_version: typeof SCHEMA_MOTION_INTENT_V3;
+export type MotionAxisLevel = -3 | -2 | -1 | 0 | 1 | 2 | 3;
+export type MotionAxisLevelMap = Record<string, MotionAxisLevel>;
+
+interface NormalizedSemanticMotionIntentBase {
   profile_id: string;
   profile_revision: number;
   model_id: string;
@@ -620,7 +620,6 @@ export interface NormalizedSemanticMotionIntent {
   duration_hint_ms?: number | null;
   resource_id?: string;
   performance_curve_hint?: PerformanceCurveHint;
-  axes: Record<string, number>;
   summary?: {
     axis_count?: number;
     active_groups?: string[];
@@ -636,6 +635,25 @@ export interface NormalizedSemanticMotionIntent {
     pose_descriptors?: string[];
   };
 }
+
+export interface NormalizedSemanticMotionIntentV3
+  extends NormalizedSemanticMotionIntentBase {
+  schema_version: typeof SCHEMA_MOTION_INTENT_V3;
+  axes: Record<string, number>;
+  axis_levels?: never;
+}
+
+export interface NormalizedSemanticMotionIntentV4
+  extends NormalizedSemanticMotionIntentBase {
+  schema_version: typeof SCHEMA_MOTION_INTENT_V4;
+  axis_levels: MotionAxisLevelMap;
+  axes?: never;
+}
+
+/** Normalized semantic motion intent consumed by ModelEngine. */
+export type NormalizedSemanticMotionIntent =
+  | NormalizedSemanticMotionIntentV3
+  | NormalizedSemanticMotionIntentV4;
 
 export interface DirectParameterPlanTiming {
   duration_ms: number;

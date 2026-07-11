@@ -5,7 +5,12 @@ import { startNormalizedMotionPayload } from "../src/model-engine/runtime/motion
 import { buildSpeechOnlyMotionPayload } from "../src/model-engine/runtime/speechOnlyMotion.js";
 import { useModelEngine } from "../src/model-engine/useModelEngine.js";
 import { listCompileStageRegistrations } from "../src/model-engine/compiler/registry.js";
-import type { ModelSummary, MotionPlanPayload, SemanticMotionIntent } from "../src/types/protocol.js";
+import type {
+  ModelSummary,
+  MotionPlanPayload,
+  NormalizedSemanticMotionIntentV3,
+  NormalizedSemanticMotionIntentV4,
+} from "../src/types/protocol.js";
 import type { SemanticAxisProfile } from "../src/types/semantic-axis-profile.js";
 import type { ModelEnginePlanStartedEvent } from "../src/model-engine/runtime/contracts.js";
 import type { CompileDiagnostics } from "../src/model-engine/compiler/contracts.js";
@@ -373,7 +378,9 @@ function buildModelWithVoiceFollowingProfile(profile: SemanticAxisProfile): Mode
   return model;
 }
 
-function buildIntent(overrides?: Partial<SemanticMotionIntent>): SemanticMotionIntent {
+function buildIntent(
+  overrides?: Partial<NormalizedSemanticMotionIntentV3>,
+): NormalizedSemanticMotionIntentV3 {
   return {
     schema_version: "engine.motion_intent.v3",
     profile_id: "profile-1",
@@ -418,6 +425,24 @@ function testExplicitPrimaryAxisIsNotOverwrittenByCoupling(): void {
   );
 }
 
+function buildLevelIntent(
+  overrides?: Partial<NormalizedSemanticMotionIntentV4>,
+): NormalizedSemanticMotionIntentV4 {
+  return {
+    schema_version: "engine.motion_intent.v4",
+    profile_id: "profile-1",
+    profile_revision: 1,
+    model_id: "model-1",
+    mode: "expressive",
+    emotion_label: "happy",
+    duration_hint_ms: 1200,
+    axis_levels: {
+      head_yaw: 2,
+    },
+    ...overrides,
+  };
+}
+
 function testNormalizeMotionPayloadAcceptsV3FlatAxes(): void {
   const result = normalizeMotionPayload({
     schema_version: "engine.motion_intent.v3",
@@ -442,6 +467,125 @@ function testNormalizeMotionPayloadAcceptsV3FlatAxes(): void {
     mouth_smile: 84,
   });
   assert.equal(result.payload.intent.resource_id, "expression.smile");
+}
+
+function testNormalizeMotionPayloadAcceptsV4AxisLevels(): void {
+  const result = normalizeMotionPayload({
+    schema_version: "engine.motion_intent.v4",
+    profile_id: "profile-1",
+    profile_revision: 1,
+    model_id: "model-1",
+    mode: "expressive",
+    intent_tags: ["happy"],
+    emotion_label: "happy",
+    axis_levels: {
+      head_yaw: -2,
+      mouth_smile: 1,
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.payload.kind, "semantic_intent");
+  assert.equal(result.payload.intent.schema_version, "engine.motion_intent.v4");
+  if (result.payload.intent.schema_version !== "engine.motion_intent.v4") {
+    throw new Error("Expected v4 semantic motion intent.");
+  }
+  assert.deepEqual(result.payload.intent.axis_levels, {
+    head_yaw: -2,
+    mouth_smile: 1,
+  });
+  assert.deepEqual(result.payload.intent.intent_tags, ["happy"]);
+  assert.equal("axes" in result.payload.intent, false);
+}
+
+function testNormalizeMotionPayloadRejectsMixedOrInvalidAxisLevelContracts(): void {
+  const common = {
+    profile_id: "profile-1",
+    profile_revision: 1,
+    model_id: "model-1",
+    mode: "expressive",
+    emotion_label: "happy",
+  };
+  const mixedV4 = normalizeMotionPayload({
+    ...common,
+    schema_version: "engine.motion_intent.v4",
+    axis_levels: { head_yaw: 1 },
+    axes: { head_yaw: 60 },
+  });
+  const invalidV4 = normalizeMotionPayload({
+    ...common,
+    schema_version: "engine.motion_intent.v4",
+    axis_levels: { head_yaw: 1.5 },
+  });
+  const mixedV3 = normalizeMotionPayload({
+    ...common,
+    schema_version: "engine.motion_intent.v3",
+    axes: { head_yaw: 60 },
+    axis_levels: { head_yaw: 1 },
+  });
+
+  assert.equal(mixedV4.ok, false);
+  assert.equal(mixedV4.reason, "motion_intent_v4.invalid_axis_levels");
+  assert.equal(invalidV4.ok, false);
+  assert.equal(invalidV4.reason, "motion_intent_v4.invalid_axis_levels");
+  assert.equal(mixedV3.ok, false);
+  assert.equal(mixedV3.reason, "motion_intent_v3.axis_levels_forbidden");
+}
+
+function testV4AxisLevelsResolveThroughProfileAnchors(): void {
+  const profile = buildProfile();
+  const headYaw = profile.axes.find((axis) => axis.id === "head_yaw");
+  assert.ok(headYaw);
+  headYaw.level_anchors = {
+    "-3": 30,
+    "-2": 38,
+    "-1": 45,
+    "0": 50,
+    "1": 56,
+    "2": 64,
+    "3": 70,
+  };
+
+  const result = compileMotionIntent(buildLevelIntent(), {
+    model: buildModel(profile),
+    targetDurationMs: 1200,
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  const parameter = result.plan?.parameters.find((item) => item.parameter_id === "ParamAngleX");
+  assert.equal(parameter?.input_value, 64);
+  assert.deepEqual(result.diagnostics.transformTrace?.rawAxisLevels, { head_yaw: 2 });
+  assert.deepEqual(result.diagnostics.transformTrace?.rawAxes, {});
+  assert.equal(result.diagnostics.transformTrace?.resolvedAxes.head_yaw, 64);
+}
+
+function testV4AxisLevelsRejectUnknownAxesAndMissingAnchors(): void {
+  const profile = buildProfile();
+  const unknownResult = compileMotionIntent(buildLevelIntent({
+    axis_levels: { unknown_axis: 1 },
+  }), {
+    model: buildModel(profile),
+  });
+  assert.equal(unknownResult.ok, false);
+  assert.equal(
+    unknownResult.reason,
+    "semantic_axis_validation_failed:unknown_axis",
+  );
+
+  const missingAnchorResult = compileMotionIntent(buildLevelIntent(), {
+    model: buildModel(profile),
+  });
+  assert.equal(missingAnchorResult.ok, false);
+  assert.equal(
+    missingAnchorResult.diagnostics.warnings?.includes(
+      "semantic_axis_level_anchor_missing:head_yaw:2",
+    ),
+    true,
+  );
 }
 
 function buildModelWithExpressionResource(
@@ -1732,6 +1876,10 @@ function testExplicitEmptyRelationGraphDoesNotReviveLegacyCouplings(): void {
 function run(): void {
   testRegistryCoreStageOrder();
   testNormalizeMotionPayloadAcceptsV3FlatAxes();
+  testNormalizeMotionPayloadAcceptsV4AxisLevels();
+  testNormalizeMotionPayloadRejectsMixedOrInvalidAxisLevelContracts();
+  testV4AxisLevelsResolveThroughProfileAnchors();
+  testV4AxisLevelsRejectUnknownAxesAndMissingAnchors();
   testCompiledPlanPreservesResourceIntentWithoutPlayingIt();
   testResourcePolicyRejectsUnknownResource();
   testResourcePolicyRejectsParameterConflict();

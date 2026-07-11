@@ -553,7 +553,7 @@ def _extract_debug_motion_payload(
         return motion_payload, TYPE_ENGINE_MOTION_INTENT, ""
 
     schema_version = str(payload.get("schema_version") or "").strip()
-    if schema_version == "engine.motion_intent.v3":
+    if schema_version in {"engine.motion_intent.v3", "engine.motion_intent.v4"}:
         try:
             motion_payload = normalize_motion_intent_payload(payload)
         except ValueError as exc:
