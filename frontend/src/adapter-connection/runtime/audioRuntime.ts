@@ -12,6 +12,7 @@ import type {
 import {
   createAdapterAudioTimelineController,
 } from "./audioTimelineController.js";
+import type { AudioPlaybackTerminalState } from "./audioPlaybackStateBridge.js";
 import type { PendingAudioItem } from "../../playback-timeline/playbackReleaseQueue.js";
 import {
   createPlaybackTimelineAudioReleaseController,
@@ -25,8 +26,6 @@ import type {
   PlaybackTimelineSegmentTextSink,
 } from "../../playback-timeline/segmentJob.js";
 import type { NormalizedMotionPayload } from "../../model-engine/contracts.js";
-
-export type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "absent";
 
 export interface AdapterAudioRuntimeState {
   isPlayingAudio: boolean;

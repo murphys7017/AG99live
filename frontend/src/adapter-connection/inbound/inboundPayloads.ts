@@ -14,6 +14,7 @@ import type {
   SystemSemanticAxisProfileSaveFailedPayload,
   SystemModelSyncPayload,
   SystemMotionTuningSamplesStatePayload,
+  SystemMotionLabRawEventRecordedPayload,
   SystemServerInfoPayload,
 } from "../../types/protocol.js";
 
@@ -188,6 +189,19 @@ export function parseControlErrorPayload(
   if (!record.ok) return record;
   const message = requiredString(envelope.type, record.payload, "message");
   return message.ok ? { ok: true, payload: { message: message.payload } } : message;
+}
+
+export function parseSystemMotionLabRawEventRecordedPayload(
+  envelope: ProtocolEnvelope<unknown>,
+): PayloadParseResult<SystemMotionLabRawEventRecordedPayload> {
+  const record = parseObjectPayload(envelope);
+  if (!record.ok) return record;
+  const eventId = requiredString(envelope.type, record.payload, "event_id");
+  if (!eventId.ok) return eventId;
+  if (!eventId.payload.trim()) {
+    return invalidPayload(envelope.type, "payload.event_id", "non-empty string");
+  }
+  return { ok: true, payload: { event_id: eventId.payload.trim() } };
 }
 
 export function parseSystemServerInfoPayload(

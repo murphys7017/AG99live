@@ -24,6 +24,7 @@ import type {
 import type { AdapterOutboundClient } from "./outboundClient.js";
 
 export interface MotionLabRawEventPayload {
+  event_id: string;
   event_type: string;
   message_id?: string;
   source_route?: string;

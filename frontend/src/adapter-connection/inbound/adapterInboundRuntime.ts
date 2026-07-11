@@ -27,6 +27,7 @@ import type { useAdapterHistory } from "../history/useAdapterHistory.js";
 import type { useAdapterMotionTuning } from "../motion-tuning/useAdapterMotionTuning.js";
 import type { useModelSync } from "../model-sync/useModelSync.js";
 import type { useTurnPlaybackSessionStore } from "../../turn-playback/useTurnPlaybackSessionStore.js";
+import { isTerminalPhase } from "../../turn-playback/session.js";
 
 export interface AdapterInboundRuntimeDeps {
   state: AdapterConnectionState;
@@ -51,6 +52,7 @@ export interface AdapterInboundRuntimeDeps {
   ) => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   playMotionPreviewPayload?: (payload: unknown) => boolean;
+  acknowledgeMotionLabRawEventPersisted: (eventId: string) => void;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
 }
 
@@ -123,6 +125,9 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     if (!session) {
       return true;
     }
+    if (isTerminalPhase(session.phase)) {
+      return false;
+    }
     if (session.segments.has(messageId)) {
       return true;
     }
@@ -132,13 +137,21 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
   function canAcceptSegmentPatch(turnId: string | null, _messageId: string): boolean {
     const sessionStore = deps.getSessionStore();
     const session = sessionStore?.getSession(turnId);
-    return !session?.backend.synthFinished;
+    return Boolean(
+      session
+      && !isTerminalPhase(session.phase)
+      && !session.backend.synthFinished,
+    );
   }
 
   function canQueuePendingMotionForTurn(turnId: string | null): boolean {
     const sessionStore = deps.getSessionStore();
     const session = sessionStore?.getSession(turnId);
-    return Boolean(session && !session.backend.synthFinished);
+    return Boolean(
+      session
+      && !isTerminalPhase(session.phase)
+      && !session.backend.synthFinished,
+    );
   }
 
   function queuePendingMotionForSegment(
@@ -212,7 +225,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     turnId: string | null,
     messageId: string,
   ): void {
-    const message = `${kind}在语音合成完成后到达，已拒绝（turn_id=${turnId ?? "null"}, message_id=${messageId}）。`;
+    const message = `${kind}在输出队列关闭或会话终态后到达，已拒绝（turn_id=${turnId ?? "null"}, message_id=${messageId}）。`;
     deps.state.lastError = message;
     deps.state.statusMessage = message;
     deps.pushHistory("error", message);
@@ -284,7 +297,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     turnId: string | null,
     messageId: string,
   ): void {
-    const message = `${kind}在语音合成完成后创建新输出段，已拒绝（turn_id=${turnId ?? "null"}, message_id=${messageId}）。`;
+    const message = `${kind}在输出队列关闭或会话终态后创建输出段，已拒绝（turn_id=${turnId ?? "null"}, message_id=${messageId}）。`;
     deps.state.lastError = message;
     deps.state.statusMessage = message;
     deps.pushHistory("error", message);
@@ -363,6 +376,8 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       motionTuningAdapter: motionTuningAdapter
         ? { applyMotionTuningSamplesState: (env) => motionTuningAdapter.applyMotionTuningSamplesState(env) }
         : null,
+      acknowledgeMotionLabRawEventPersisted: (eventId) =>
+        deps.acknowledgeMotionLabRawEventPersisted(eventId),
       rewriteModelSyncEnvelope: (env) => rewriteModelSyncEnvelope(env),
       rewriteSocketUrl: (url) => rewriteSocketUrl(url),
       rewriteHttpUrl: (url) => rewriteHttpUrl(url),

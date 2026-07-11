@@ -110,6 +110,7 @@ export interface InboundDispatchDeps {
     applyHistoryDeleted: (envelope: ProtocolEnvelope<SystemHistoryDeletedPayload>) => void;
   } | null;
   motionTuningAdapter: { applyMotionTuningSamplesState: (envelope: ProtocolEnvelope<SystemMotionTuningSamplesStatePayload>) => void } | null;
+  acknowledgeMotionLabRawEventPersisted: (eventId: string) => void;
   // url rewriting
   rewriteModelSyncEnvelope: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => ProtocolEnvelope<SystemModelSyncPayload>;
   rewriteSocketUrl: (rawUrl: string) => string;
@@ -196,11 +197,16 @@ export async function dispatchInboundEvent(
     case "semantic_axis_profile_saved":
     case "semantic_axis_profile_save_failed":
     case "motion_tuning_samples_state":
+    case "motion_lab_raw_event_recorded":
     case "history_list":
     case "history_created":
     case "history_data":
     case "history_deleted":
-      dispatchInboundFeatureEvent(deps, event);
+      if (event.kind === "motion_lab_raw_event_recorded") {
+        deps.acknowledgeMotionLabRawEventPersisted(event.envelope.payload.event_id);
+      } else {
+        dispatchInboundFeatureEvent(deps, event);
+      }
       return;
     case "output_text":
     case "output_audio":

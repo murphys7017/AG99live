@@ -57,6 +57,10 @@ export interface ControlErrorPayload {
   message: string;
 }
 
+export interface SystemMotionLabRawEventRecordedPayload {
+  event_id: string;
+}
+
 export interface SystemSemanticAxisProfileSavedPayload {
   request_id: string;
   model_name: string;

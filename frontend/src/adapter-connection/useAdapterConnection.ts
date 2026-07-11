@@ -124,6 +124,9 @@ export interface AdapterConnectionInstance {
     turnId?: string | null,
   ) => boolean;
   setMotionPreviewHandler: (handler: ((payload: unknown) => boolean) | null) => void;
+  setMotionLabRawEventRecordedHandler: (
+    handler: ((eventId: string) => void) | null,
+  ) => void;
   sendPlaybackFinishedForCurrentGroup: (
     turnId: string | null,
     success: boolean,
@@ -162,6 +165,7 @@ export function createAdapterConnection(
   let historyAdapter: AdapterHistory | null = null;
   let motionTuningAdapter: AdapterMotionTuning | null = null;
   let motionPreviewHandler: ((payload: unknown) => boolean) | null = null;
+  let motionLabRawEventRecordedHandler: ((eventId: string) => void) | null = null;
   let audioTimelineStartedHandler: ((
     turnId: string | null,
     messageId: string,
@@ -275,6 +279,8 @@ export function createAdapterConnection(
       queueAudioForPlayback(url, turnId, messageId),
     findActiveAudioSegment: () => findActiveAudioSegment(),
     playMotionPreviewPayload: (payload) => motionPreviewHandler?.(payload) ?? false,
+    acknowledgeMotionLabRawEventPersisted: (eventId) =>
+      motionLabRawEventRecordedHandler?.(eventId),
     startMicrophoneCapture: (origin) => startMicrophoneCapture(origin),
   });
 
@@ -422,9 +428,22 @@ export function createAdapterConnection(
         state.lastError = "";
         pushHistory("system", `已连接 ${targetAddress}`);
       },
-      onMessage: (rawData) => {
+      onMessage: (nextSocket, rawData) => {
         inboundRuntime.handleSocketMessage(rawData).catch((error) => {
-          console.warn("[useAdapterConnection] unhandled error in message handler:", error);
+          if (socket !== nextSocket || attemptSerial !== connectAttemptSerial) {
+            return;
+          }
+          const details = error instanceof Error ? error.message : String(error);
+          state.status = "error";
+          state.lastError = `入站消息处理失败，连接已关闭：${details}`;
+          state.statusMessage = state.lastError;
+          pushHistory("error", state.lastError);
+          console.error("[useAdapterConnection] fatal inbound message handler error:", error);
+          stopAudioAndSettleAll("inbound_runtime_failure");
+          state.pendingAssistantTexts.clear();
+          state.pendingAudios.clear();
+          state.pendingMotions.clear();
+          nextSocket.close();
         });
       },
       onError: (nextSocket, opened) => {
@@ -497,7 +516,7 @@ export function createAdapterConnection(
       return;
     }
 
-    const dedupeKey = `${turnId}::${text}`;
+    const dedupeKey = `${turnId.length}:${turnId}:${text}`;
     if (assistantHistoryKeySet.has(dedupeKey)) {
       return;
     }
@@ -613,6 +632,12 @@ export function createAdapterConnection(
     motionPreviewHandler = handler;
   }
 
+  function setMotionLabRawEventRecordedHandler(
+    handler: ((eventId: string) => void) | null,
+  ): void {
+    motionLabRawEventRecordedHandler = handler;
+  }
+
   function setAudioTimelineStartedHandler(
     handler: typeof audioTimelineStartedHandler,
   ): void {
@@ -698,6 +723,7 @@ export function createAdapterConnection(
     sendMotionPayloadPreview,
     sendMotionLabRawEvent,
     setMotionPreviewHandler,
+    setMotionLabRawEventRecordedHandler,
     sendPlaybackFinishedForCurrentGroup: sendPlaybackFinished,
     clearPlaybackGroupContext,
     playbackTimeline,

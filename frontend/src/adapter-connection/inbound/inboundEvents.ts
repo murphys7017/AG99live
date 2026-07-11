@@ -26,6 +26,7 @@ import type {
   SystemHistoryListPayload,
   SystemModelSyncPayload,
   SystemMotionTuningSamplesStatePayload,
+  SystemMotionLabRawEventRecordedPayload,
   SystemSemanticAxisProfileSavedPayload,
   SystemSemanticAxisProfileSaveFailedPayload,
   SystemServerInfoPayload,
@@ -40,6 +41,7 @@ import {
   parseHistoryDeletedPayload,
   parseHistoryListPayload,
   parseMotionTuningSamplesStatePayload,
+  parseSystemMotionLabRawEventRecordedPayload,
   parseOutputAudioPayload,
   parseOutputImagePayload,
   parseOutputTextPayload,
@@ -120,6 +122,10 @@ type InboundPassthroughEvent =
     envelope: ProtocolEnvelope<SystemSemanticAxisProfileSaveFailedPayload>;
   }
   | { kind: "motion_tuning_samples_state"; envelope: ProtocolEnvelope<SystemMotionTuningSamplesStatePayload> }
+  | {
+    kind: "motion_lab_raw_event_recorded";
+    envelope: ProtocolEnvelope<SystemMotionLabRawEventRecordedPayload>;
+  }
   | { kind: "history_list"; envelope: ProtocolEnvelope<SystemHistoryListPayload> }
   | { kind: "history_created"; envelope: ProtocolEnvelope<SystemHistoryCreatedPayload> }
   | { kind: "history_data"; envelope: ProtocolEnvelope<SystemHistoryDataPayload> }
@@ -255,6 +261,16 @@ export function mapInboundEnvelopeToEvent(
           envelope: withPayload(envelope, parsed.payload),
         };
       }
+    case INBOUND_MESSAGE_TYPES.SYSTEM_MOTION_LAB_RAW_EVENT_RECORDED: {
+      const parsed = parseSystemMotionLabRawEventRecordedPayload(envelope);
+      if (!parsed.ok) {
+        return protocolPayloadError(envelope, parsed.error);
+      }
+      return {
+        kind: "motion_lab_raw_event_recorded",
+        envelope: withPayload(envelope, parsed.payload),
+      };
+    }
     case INBOUND_MESSAGE_TYPES.SYSTEM_HISTORY_LIST: {
       const parsed = parseHistoryListPayload(envelope);
       if (!parsed.ok) {

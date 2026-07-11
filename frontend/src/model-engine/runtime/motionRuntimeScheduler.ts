@@ -93,7 +93,7 @@ export function createMotionRuntimeScheduler(
     if (!normalizedMessageId) {
       throw new Error("Pending motion payload requires a non-empty messageId.");
     }
-    return `${normalizedTurnId}::${normalizedMessageId}`;
+    return `${normalizedTurnId.length}:${normalizedTurnId}:${normalizedMessageId}`;
   }
 
   function syncPendingState(): void {

@@ -39,6 +39,11 @@ import { createDesktopRuntimeCommandHandler } from "../desktop-bridge/useDesktop
 import { usePushToTalkController } from "./usePushToTalkController";
 import { useBilibiliLiveRuntime } from "../bilibili-live/useBilibiliLiveRuntime";
 import { isTerminalPhase } from "../turn-playback/session";
+import {
+  createIndexedDbMotionLabPendingEventStore,
+  createMotionLabOutboundQueue,
+  type MotionLabRawEventInput,
+} from "../motion-lab/outboundQueue";
 
 export interface PetDesktopRuntime {
   sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>;
@@ -71,65 +76,26 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     sendPlaybackFinishedForCurrentGroup: adapter.sendPlaybackFinishedForCurrentGroup,
     clearPlaybackGroupContext: adapter.clearPlaybackGroupContext,
   };
-  type PendingMotionLabEvent = {
-    payload: Parameters<typeof adapter.sendMotionLabRawEvent>[0];
-    turnId: string | null;
-  };
-  const motionLabQueueStorageKey = "ag99live.motion-lab.pending-events.v1";
-  const pendingMotionLabEvents: PendingMotionLabEvent[] = loadPendingMotionLabEvents();
-
-  function loadPendingMotionLabEvents(): PendingMotionLabEvent[] {
-    try {
-      const value = JSON.parse(window.localStorage.getItem(motionLabQueueStorageKey) || "[]");
-      return Array.isArray(value) ? value as PendingMotionLabEvent[] : [];
-    } catch (error) {
-      console.error("[MotionLab] failed to load pending outbound events.", error);
-      return [];
-    }
-  }
-
-  function persistPendingMotionLabEvents(): void {
-    try {
-      window.localStorage.setItem(
-        motionLabQueueStorageKey,
-        JSON.stringify(pendingMotionLabEvents),
-      );
-    } catch (error) {
-      console.error("[MotionLab] failed to persist pending outbound events.", error);
-    }
-  }
-
-  function flushPendingMotionLabEvents(): void {
-    while (pendingMotionLabEvents.length > 0) {
-      const event = pendingMotionLabEvents[0];
-      if (!adapter.sendMotionLabRawEvent(event.payload, event.turnId)) {
-        break;
-      }
-      pendingMotionLabEvents.shift();
-    }
-    persistPendingMotionLabEvents();
-  }
+  const motionLabOutboundQueue = createMotionLabOutboundQueue({
+    store: createIndexedDbMotionLabPendingEventStore(),
+    send: (payload, turnId) => adapter.sendMotionLabRawEvent(payload, turnId),
+    onError: (message, error) => {
+      const details = error instanceof Error ? error.message : String(error ?? "");
+      const diagnostic = details ? `${message} ${details}` : message;
+      console.error("[MotionLab]", diagnostic, error);
+      adapter.pushHistory("error", diagnostic);
+    },
+  });
 
   function sendMotionLabEvent(
-    payload: Parameters<typeof adapter.sendMotionLabRawEvent>[0],
+    payload: MotionLabRawEventInput,
     turnId: string | null,
   ): void {
-    const event = {
-      payload: cloneJson(payload),
-      turnId,
-    } as PendingMotionLabEvent;
-    if (pendingMotionLabEvents.length === 0 && adapter.sendMotionLabRawEvent(
-      event.payload,
-      event.turnId,
-    )) {
-      return;
-    }
-    pendingMotionLabEvents.push(event);
-    persistPendingMotionLabEvents();
-    console.error("[MotionLab] outbound event queued for reconnect.", {
-      eventType: payload.event_type,
-      turnId,
-      pendingCount: pendingMotionLabEvents.length,
+    void motionLabOutboundQueue.enqueue(payload, turnId).catch((error) => {
+      const details = error instanceof Error ? error.message : String(error);
+      const message = `MotionLab event persistence failed: ${details}`;
+      console.error("[MotionLab]", message, error);
+      adapter.pushHistory("error", message);
     });
   }
   const motionRecord = {
@@ -238,11 +204,21 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     () => adapter.state.status,
     (status) => {
       if (status === "connected") {
-        flushPendingMotionLabEvents();
+        motionLabOutboundQueue.handleConnected();
+      } else {
+        motionLabOutboundQueue.handleDisconnected();
       }
     },
     { immediate: true },
   );
+  adapter.setMotionLabRawEventRecordedHandler((eventId) => {
+    void motionLabOutboundQueue.acknowledgePersisted(eventId).catch((error) => {
+      const details = error instanceof Error ? error.message : String(error);
+      const message = `MotionLab persisted acknowledgement failed: ${details}`;
+      console.error("[MotionLab]", message, error);
+      adapter.pushHistory("error", message);
+    });
+  });
   adapter.setMotionPreviewHandler((payload) => {
     const localPlayed = modelEngine.playPreviewPayload(payload);
     if (!localPlayed) {
@@ -429,6 +405,8 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
 
   onBeforeUnmount(() => {
     stopMotionLabReconnectWatch();
+    adapter.setMotionLabRawEventRecordedHandler(null);
+    motionLabOutboundQueue.dispose();
     playbackTimelineMotionRuntime.dispose();
     pushToTalk.dispose();
     bilibiliLive.dispose();

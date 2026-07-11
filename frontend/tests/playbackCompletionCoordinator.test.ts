@@ -9,7 +9,7 @@ interface Harness {
   coordinator: ReturnType<typeof usePlaybackCompletionCoordinator>;
 }
 
-function createHarness(sendResult: boolean | "reject" = true): Harness {
+function createHarness(sendResult: boolean | "reject" | Promise<boolean> = true): Harness {
   const sessionStore = useTurnPlaybackSessionStore();
   const playbackFinishedCalls: Harness["playbackFinishedCalls"] = [];
   const coordinator = usePlaybackCompletionCoordinator({
@@ -20,7 +20,7 @@ function createHarness(sendResult: boolean | "reject" = true): Harness {
         if (sendResult === "reject") {
           throw new Error("socket_send_failed");
         }
-        return sendResult;
+        return await sendResult;
       },
       clearPlaybackGroupContext: () => undefined,
     },
@@ -30,6 +30,28 @@ function createHarness(sendResult: boolean | "reject" = true): Harness {
   sessionStore.markPhase("turn-1", "ready");
   sessionStore.markPhase("turn-1", "playing");
   return { sessionStore, playbackFinishedCalls, coordinator };
+}
+
+async function testLateAckDoesNotCompleteInterruptedSession(): Promise<void> {
+  let resolveSend!: (sent: boolean) => void;
+  const sendResult = new Promise<boolean>((resolve) => {
+    resolveSend = resolve;
+  });
+  const h = createHarness(sendResult);
+  h.sessionStore.markTextReceived("turn-1", "hello", "msg-1");
+  h.sessionStore.markTextDelivered("turn-1", "msg-1");
+  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-1", "no_audio");
+  h.sessionStore.markMotionAbsent("turn-1", "msg-1");
+  h.sessionStore.markSynthFinished("turn-1");
+  h.sessionStore.markTurnFinished("turn-1", true);
+  await nextTick();
+
+  assert.equal(h.sessionStore.getActiveSession()?.phase, "settling");
+  h.sessionStore.markInterrupt("turn-1");
+  resolveSend(true);
+  await flush();
+
+  assert.equal(h.sessionStore.getActiveSession()?.phase, "failed");
 }
 
 async function testSendFailureFailsSessionInsteadOfAcknowledging(): Promise<void> {
@@ -132,4 +154,5 @@ await testFailedSegmentProducesFailedPlaybackAck();
 await testResetAllowsASecondAcknowledgementCycle();
 await testSendFailureFailsSessionInsteadOfAcknowledging();
 await testSendExceptionFailsSessionInsteadOfHanging();
+await testLateAckDoesNotCompleteInterruptedSession();
 console.log("playbackCompletionCoordinator tests passed");

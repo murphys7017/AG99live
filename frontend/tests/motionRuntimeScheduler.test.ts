@@ -308,6 +308,55 @@ function testSameMessageIdDifferentTurnsStartByCompositeIdentity(): void {
   assert.equal(started[1].turnId, "turn-a");
 }
 
+function testCompositeIdentityDoesNotCollideOnDelimiterText(): void {
+  resetTimers();
+  const session = buildSession("completed");
+  const started: StartPayloadContext[] = [];
+  const scheduler = createMotionRuntimeScheduler(
+    {
+      getCurrentTurnId: () => "a::b",
+      sessionStore: {
+        getActiveSession: () => session,
+        getSessionByTurnId: () => session,
+      },
+    },
+    {
+      onPendingStateChanged: () => {},
+      onPendingStatus: () => {},
+      onStartPayload: (_payload, context) => {
+        started.push(context);
+        return true;
+      },
+    },
+  );
+
+  scheduler.queueInboundPayload(buildPayload(), {
+    turnId: "a",
+    playbackTurnId: "a",
+    messageId: "b::c",
+    receivedAtMs: 900,
+  });
+  scheduler.queueInboundPayload(buildPayload(), {
+    turnId: "a::b",
+    playbackTurnId: "a::b",
+    messageId: "c",
+    receivedAtMs: 910,
+  });
+
+  assert.equal(scheduler.handlePlaybackTimelineStarted(buildTimelineSnapshot({
+    turnId: "a::b",
+    messageId: "c",
+  })), true);
+  assert.equal(scheduler.handlePlaybackTimelineStarted(buildTimelineSnapshot({
+    turnId: "a",
+    messageId: "b::c",
+  })), true);
+  assert.deepEqual(started.map((item) => [item.turnId, item.messageId]), [
+    ["a::b", "c"],
+    ["a", "b::c"],
+  ]);
+}
+
 function testPlaybackTimelineRequiresMatchingTurnWhenMessageIdIsShared(): void {
   resetTimers();
   const activeSession: ModelEnginePlaybackSession = {
@@ -497,6 +546,7 @@ function run(): void {
   testQueuedPayloadFailureRetainsPreparingTimelineOwnership();
   testDroppedPendingPayloadReportsStartFailure();
   testSameMessageIdDifferentTurnsStartByCompositeIdentity();
+  testCompositeIdentityDoesNotCollideOnDelimiterText();
   testPlaybackTimelineRequiresMatchingTurnWhenMessageIdIsShared();
   testTimelineStartReturnsFalseWithoutQueuedMotion();
   testCurvePayloadRequiresTimelineBeforeInitialTimeout();

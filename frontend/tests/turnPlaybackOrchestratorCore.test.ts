@@ -3,7 +3,15 @@ import {
   AUDIO_MOTION_SYNC_WAIT_MS,
   TEXT_ONLY_RELEASE_WAIT_MS,
   createTurnPlaybackOrchestratorCore,
+  resolveTurnPlaybackGroupKey,
 } from "../src/turn-playback/turnPlaybackOrchestratorCore.js";
+
+function testGroupIdentityDoesNotCollideOnDelimiterText(): void {
+  assert.notEqual(
+    resolveTurnPlaybackGroupKey("a", "b:c"),
+    resolveTurnPlaybackGroupKey("a:b", "c"),
+  );
+}
 
 interface ScheduledTask {
   id: number;
@@ -273,6 +281,7 @@ function testClearSegmentRemovesReleasedGroup(): void {
 }
 
 function run(): void {
+  testGroupIdentityDoesNotCollideOnDelimiterText();
   testTextAudioMotionReadyReleaseTogether();
   testAudioWaitsForLateMotionWithinWindow();
   testAudioMotionWaitTimeoutReleasesTextAndAudio();

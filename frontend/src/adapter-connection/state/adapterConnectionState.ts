@@ -10,7 +10,7 @@ import type {
 } from "../../types/desktop.js";
 import type { SystemServerInfoPayload } from "../../types/protocol.js";
 import type { MicrophoneDeviceInfo } from "../runtime/microphoneDevices.js";
-import type { AudioPlaybackTerminalState } from "../runtime/audioRuntime.js";
+import type { AudioPlaybackTerminalState } from "../runtime/audioPlaybackStateBridge.js";
 import type {
   PendingAssistantTextItem,
   PendingAudioItem,

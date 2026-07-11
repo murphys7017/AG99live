@@ -129,13 +129,13 @@ function applyOutputText(
   event: Extract<InboundAdapterEvent, { kind: "output_text" }>,
 ): void {
   const s = deps.state;
-  s.currentTurnId = event.turnId;
   const text = event.text;
   if (text) {
     if (deps.sessionStore && !deps.sessionStore.canAcceptOutputSegment(event.turnId, event.messageId)) {
       deps.rejectOutputAfterSynthFinished("output.text", event.turnId, event.messageId);
       return;
     }
+    s.currentTurnId = event.turnId;
     deps.queuePendingAssistantTextForPlayback(
       s.pendingAssistantTexts,
       text,
@@ -160,11 +160,11 @@ async function applyOutputAudio(
   event: Extract<InboundAdapterEvent, { kind: "output_audio" }>,
 ): Promise<void> {
   const s = deps.state;
-  s.currentTurnId = event.turnId;
   if (deps.sessionStore && !deps.sessionStore.canAcceptOutputSegment(event.turnId, event.messageId)) {
     deps.rejectOutputAfterSynthFinished("output.audio", event.turnId, event.messageId);
     return;
   }
+  s.currentTurnId = event.turnId;
   const existingText = deps.sessionStore
     ?.ensureSegment(event.turnId, event.messageId)
     .text.content;

@@ -8,11 +8,13 @@ export interface AudioPlaybackState {
   audioPlaybackStartedMessageId: string | null;
   audioPlaybackStartedAtMs: number;
   audioPlaybackDurationMs: number | null;
-  audioPlaybackTerminalState: "idle" | "completed" | "failed" | "absent";
+  audioPlaybackTerminalState: AudioPlaybackTerminalState;
   audioPlaybackTerminalReason: string;
   statusMessage: string;
   lastError: string;
 }
+
+export type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "absent";
 
 export interface AudioPlaybackStateBridgeContext {
   state: AudioPlaybackState;

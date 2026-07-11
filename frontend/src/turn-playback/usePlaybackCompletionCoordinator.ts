@@ -99,15 +99,23 @@ export function usePlaybackCompletionCoordinator(
     if (!pendingAckSessions.delete(sessionId)) {
       return;
     }
+    const currentSession = getSession(sessionId);
+    if (
+      !currentSession
+      || currentSession.phase === "completed"
+      || currentSession.phase === "failed"
+    ) {
+      return;
+    }
     if (!sent) {
       options.sessionStore.markSessionFailed(
-        session.turnId,
+        currentSession.turnId,
         "playback_finished_send_failed",
       );
       return;
     }
     ackedSessions.add(sessionId);
-    if (session.backend.turnFinished) {
+    if (currentSession.backend.turnFinished) {
       finalizeCompletion(sessionId);
     }
   }

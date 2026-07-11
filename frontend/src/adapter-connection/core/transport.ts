@@ -1,6 +1,6 @@
 export interface AdapterConnectionTransportOptions {
   onOpen: (socket: WebSocket) => void;
-  onMessage: (rawData: string | ArrayBuffer | Blob) => void;
+  onMessage: (socket: WebSocket, rawData: string | ArrayBuffer | Blob) => void;
   onError: (socket: WebSocket, opened: boolean) => void;
   onClose: (socket: WebSocket, opened: boolean) => void;
 }
@@ -23,7 +23,7 @@ export function openAdapterConnectionTransport(
   });
 
   socket.addEventListener("message", (event) => {
-    options.onMessage(event.data as string | ArrayBuffer | Blob);
+    options.onMessage(socket, event.data as string | ArrayBuffer | Blob);
   });
 
   socket.addEventListener("error", () => {

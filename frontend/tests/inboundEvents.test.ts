@@ -565,6 +565,24 @@ function testInvalidMotionTuningSamplesStatePayloadReturnsProtocolError(): void 
   assert.equal(event.error.path, "payload.samples");
 }
 
+function testMotionLabPersistedAckRequiresEventId(): void {
+  const valid = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.motion_lab_raw_event_recorded", { event_id: " event-1 " }),
+    defaultContext(),
+  );
+  assert.equal(valid.kind, "motion_lab_raw_event_recorded");
+  if (valid.kind !== "motion_lab_raw_event_recorded") {
+    throw new Error("expected motion_lab_raw_event_recorded event");
+  }
+  assert.equal(valid.envelope.payload.event_id, "event-1");
+
+  const invalid = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.motion_lab_raw_event_recorded", { event_id: "" }),
+    defaultContext(),
+  );
+  assert.equal(invalid.kind, "protocol_error");
+}
+
 function run(): void {
   testOutputTextUsesEnvelopeIdentity();
   testOutputTextMapsAudioExpected();
@@ -597,6 +615,7 @@ function run(): void {
   testModelSyncPayloadRuntimeCacheErrorsBadTypeRejected();
   testModelSyncPayloadVoiceFollowingProfileBadTypeRejected();
   testInvalidMotionTuningSamplesStatePayloadReturnsProtocolError();
+  testMotionLabPersistedAckRequiresEventId();
 
   console.log("inboundEvents tests passed");
 }

@@ -29,8 +29,8 @@ import {
   stopAudioSegmentAndBridgeStateForSegment,
   type AudioPlaybackStateBridgeContext,
   type AudioPlaybackState,
+  type AudioPlaybackTerminalState,
 } from "./audioPlaybackStateBridge.js";
-import type { AudioPlaybackTerminalState } from "./audioRuntime.js";
 import type {
   PlaybackTimelineAudioSessionPort,
   PlaybackTimelineMotionSessionPort,

@@ -764,7 +764,7 @@ function testLateOutputTextAfterSynthFinishedForUnknownSegmentIsRejected(): void
       adapter.state.pendingAssistantTexts.has(pendingKey("turn-late-unknown-text", "msg-late-unknown-text")),
       false,
     );
-    assert.match(adapter.state.lastError, /output\.text在语音合成完成后创建新输出段/);
+    assert.match(adapter.state.lastError, /output\.text在输出队列关闭或会话终态后创建输出段/);
   });
 }
 
@@ -787,7 +787,7 @@ function testLateOutputAudioAfterSynthFinishedForUnknownSegmentIsRejected(): voi
       adapter.state.pendingAudios.has(pendingKey("turn-late-unknown-audio", "msg-late-unknown-audio")),
       false,
     );
-    assert.match(adapter.state.lastError, /output\.audio在语音合成完成后创建新输出段/);
+    assert.match(adapter.state.lastError, /output\.audio在输出队列关闭或会话终态后创建输出段/);
   });
 }
 
@@ -1349,7 +1349,7 @@ function testLateOrphanMotionAfterSynthFinishedIsRejectedWithoutPending(): void 
       adapter.state.pendingMotions.has(pendingKey("turn-late-orphan-motion", "m-late-orphan-motion")),
       false,
     );
-    assert.match(adapter.state.lastError, /动作载荷在语音合成完成后到达/);
+    assert.match(adapter.state.lastError, /动作载荷在输出队列关闭或会话终态后到达/);
   });
 }
 
@@ -1377,7 +1377,7 @@ function testLateMotionForExistingSegmentAfterSynthFinishedIsRejected(): void {
     assert.equal(segment?.motion.payload, null);
     assert.equal(segment?.motion.absent, true);
     assert.equal(segment?.motion.reason, "synth_finished_without_motion_payload");
-    assert.match(adapter.state.lastError, /动作载荷在语音合成完成后到达/);
+    assert.match(adapter.state.lastError, /动作载荷在输出队列关闭或会话终态后到达/);
   });
 }
 
@@ -1419,7 +1419,7 @@ function testLatePerformanceCurveHintAfterSynthFinishedIsRejected(): void {
       .getSession("turn-late-curve")
       ?.segments.get("m-late-curve");
     assert.equal(segment?.motion.performanceCurveHint, null);
-    assert.match(adapter.state.lastError, /表演曲线提示在语音合成完成后到达/);
+    assert.match(adapter.state.lastError, /表演曲线提示在输出队列关闭或会话终态后到达/);
   });
 }
 
@@ -2268,6 +2268,76 @@ async function testInterruptMarksPendingAudioSegmentFailedBeforePlaybackStart():
   }
 }
 
+async function testTerminalSessionRejectsLateSegmentMaterials(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket, sessionStore } = harness;
+    sendTurnStarted(socket, "turn-terminal");
+    await flushMicrotasks();
+    socket.emitMessage(JSON.stringify({
+      type: "control.interrupt",
+      version: "v2",
+      message_id: "interrupt-terminal",
+      timestamp: "2026-05-08T00:00:24.000Z",
+      turn_id: "turn-terminal",
+      source: "backend",
+      payload: {},
+    }));
+    await flushMicrotasks();
+    assert.equal(sessionStore.getSession("turn-terminal")?.phase, "failed");
+    assert.equal(adapter.state.currentTurnId, null);
+
+    sendOutputText(socket, {
+      turnId: "turn-terminal",
+      messageId: "late-text",
+      text: "late",
+    });
+    sendOutputAudio(socket, {
+      turnId: "turn-terminal",
+      messageId: "late-audio",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/late.wav",
+    });
+    socket.emitMessage(JSON.stringify(motionIntentEnvelope("late-motion", "turn-terminal")));
+    socket.emitMessage(JSON.stringify(performanceCurveHintEnvelope("late-curve", "turn-terminal")));
+    await flushMicrotasks();
+
+    const session = sessionStore.getSession("turn-terminal");
+    assert.equal(session?.segments.size, 0);
+    assert.equal(adapter.state.pendingAssistantTexts.size, 0);
+    assert.equal(adapter.state.pendingAudios.size, 0);
+    assert.equal(adapter.state.pendingMotions.size, 0);
+    assert.equal(adapter.state.currentTurnId, null);
+  } finally {
+    harness.scope.stop();
+  }
+}
+
+async function testFatalInboundHandlerErrorClosesConnection(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket, sessionStore } = harness;
+    sendTurnStarted(socket, "turn-handler-failure");
+    await flushMicrotasks();
+    sessionStore.markTextReceived = (() => {
+      throw new Error("session_write_failed");
+    }) as typeof sessionStore.markTextReceived;
+
+    sendOutputText(socket, {
+      turnId: "turn-handler-failure",
+      messageId: "msg-handler-failure",
+      text: "must fail",
+    });
+    await flushMicrotasks();
+
+    assert.equal(adapter.state.status, "error");
+    assert.match(adapter.state.lastError, /session_write_failed/);
+    assert.equal(socket.readyState, FakeWebSocket.CLOSED);
+    assert.equal(adapter.state.pendingAssistantTexts.size, 0);
+  } finally {
+    harness.scope.stop();
+  }
+}
+
 async function run(): Promise<void> {
   installWindowStubs();
   installWebSocketStub();
@@ -2329,6 +2399,8 @@ async function run(): Promise<void> {
   await testUserInterruptMarksPlayingAudioSegmentFailedBeforeSending();
   await testUserInterruptMarksPendingAudioSegmentFailedBeforeSending();
   await testInterruptMarksPendingAudioSegmentFailedBeforePlaybackStart();
+  await testTerminalSessionRejectsLateSegmentMaterials();
+  await testFatalInboundHandlerErrorClosesConnection();
 
   console.log("useAdapterConnection tests passed");
 }

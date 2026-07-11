@@ -66,7 +66,7 @@ export function resolveTurnPlaybackGroupKey(
   if (!normalizedMessageId) {
     throw new Error("Turn playback group requires a non-empty messageId.");
   }
-  return `segment:${normalizedTurnId}:${normalizedMessageId}`;
+  return `segment:${normalizedTurnId.length}:${normalizedTurnId}:${normalizedMessageId}`;
 }
 
 export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(

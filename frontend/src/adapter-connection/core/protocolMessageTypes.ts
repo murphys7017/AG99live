@@ -4,6 +4,7 @@ export const INBOUND_MESSAGE_TYPES = {
   SYSTEM_SEMANTIC_AXIS_PROFILE_SAVED: "system.semantic_axis_profile_saved",
   SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE_FAILED: "system.semantic_axis_profile_save_failed",
   SYSTEM_MOTION_TUNING_SAMPLES_STATE: "system.motion_tuning_samples_state",
+  SYSTEM_MOTION_LAB_RAW_EVENT_RECORDED: "system.motion_lab_raw_event_recorded",
   SYSTEM_HISTORY_LIST: "system.history_list",
   SYSTEM_HISTORY_CREATED: "system.history_created",
   SYSTEM_HISTORY_DATA: "system.history_data",
