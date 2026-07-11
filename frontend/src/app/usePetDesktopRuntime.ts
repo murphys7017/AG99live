@@ -80,6 +80,10 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   });
   const motionPlaybackRecorder = useMotionPlaybackRecorder({
     motionRecord,
+    getPlaybackTimelineSnapshot: (
+      turnId,
+      messageId,
+    ) => playbackTimeline.getPlaybackTimelineSnapshotForSegment(turnId, messageId),
     onMotionLabRawEvent: (payload, turnId) => {
       adapter.sendMotionLabRawEvent(cloneJson(payload), turnId);
     },
@@ -93,16 +97,16 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       ...options,
       onFinished: (event) => {
         options?.onFinished?.(event);
-        motionTimelineRunTracker.recordTerminal(event);
         motionPlaybackRecorder.completeMotionPlayback(event);
+        motionTimelineRunTracker.recordTerminal(event);
       },
     }),
     playCatalogMotion: (motion, model, options) => motionPlayer.playCatalogMotion(motion, model, {
       ...options,
       onFinished: (event) => {
         options?.onFinished?.(event);
-        motionTimelineRunTracker.recordTerminal(event);
         motionPlaybackRecorder.completeMotionPlayback(event);
+        motionTimelineRunTracker.recordTerminal(event);
       },
     }),
     stopPlan: (reason) => motionPlayer.stopPlan(reason),

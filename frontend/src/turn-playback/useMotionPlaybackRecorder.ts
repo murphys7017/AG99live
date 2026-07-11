@@ -3,6 +3,7 @@ import type { ModelEnginePlanStartedEvent } from "../model-engine/runtime/contra
 import type { DirectParameterPlanTerminalEvent } from "../types/live2d-runtime.d.ts";
 import type { DesktopMotionPlaybackRecord } from "../types/desktop.js";
 import type { MotionPlaybackRecordPort } from "./ports.js";
+import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
 import { cloneJson } from "../utils/cloneJson.js";
 
 const DEFAULT_MAX_MOTION_PLAYBACK_RECORDS = 5;
@@ -12,9 +13,14 @@ export interface MotionPlaybackRecorderOptions {
   motionRecord: MotionPlaybackRecordPort;
   initialMotionPlaybackRecords?: readonly DesktopMotionPlaybackRecord[];
   maxMotionPlaybackRecords?: number;
+  getPlaybackTimelineSnapshot?: (
+    turnId: string | null,
+    messageId: string,
+  ) => PlaybackTimelineSnapshot | null;
   onMotionLabRawEvent?: (
     payload: {
       event_type: string;
+      message_id?: string;
       source_route?: string;
       phase?: string;
       model_name?: string;
@@ -35,7 +41,14 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
   );
   const maxMotionPlaybackRecords =
     options.maxMotionPlaybackRecords ?? DEFAULT_MAX_MOTION_PLAYBACK_RECORDS;
-  let currentMotionRun: { runId: string; turnId: string | null; messageId: string } | null = null;
+  let currentMotionRun: {
+    runId: string;
+    turnId: string | null;
+    messageId: string;
+    profileId: string;
+    profileRevision?: number;
+    transformTrace: Record<string, unknown> | null;
+  } | null = null;
 
   function recordMotionPlayback(event: ModelEnginePlanStartedEvent): void {
     if (event.startReason === "preview") {
@@ -46,6 +59,13 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       runId: event.runId || `${event.turnId ?? "no-turn"}::${event.messageId}`,
       turnId: event.turnId,
       messageId: event.messageId,
+      profileId: event.payloadKind === "catalog_motion" ? "" : event.plan.profile_id,
+      profileRevision: event.payloadKind === "catalog_motion"
+        ? undefined
+        : event.plan.profile_revision,
+      transformTrace: event.diagnostics?.transformTrace
+        ? cloneJson(event.diagnostics.transformTrace) as unknown as Record<string, unknown>
+        : null,
     };
 
     const now = new Date();
@@ -87,6 +107,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
 
     const startedPayload = {
       event_type: "motion.playback_started",
+      message_id: event.messageId,
       source_route: event.startReason,
       phase: "playback_started",
       model_name: event.model?.name ?? "",
@@ -132,18 +153,44 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       return;
     }
     const run = currentMotionRun;
+    const timeline = options.getPlaybackTimelineSnapshot?.(
+      run.turnId,
+      run.messageId,
+    ) ?? null;
     options.onMotionLabRawEvent?.({
       event_type: event.status === "completed"
         ? "motion.playback_completed"
         : "motion.playback_failed",
+      message_id: run.messageId,
       source_route: "frontend_motion_player",
       phase: "playback_terminal",
+      profile_id: run.profileId,
+      profile_revision: run.profileRevision,
       raw: {
         runId: event.runId,
         status: event.status,
         reason: event.reason ?? "",
         turnId: run.turnId,
         messageId: run.messageId,
+        transform_trace: run.transformTrace,
+        timeline_outcome: {
+          motion: event.status,
+          reason: event.reason ?? "",
+          timeline_phase: timeline?.phase ?? "missing",
+          clock_source: timeline?.clockSource ?? "missing",
+          sinks: Object.fromEntries(
+            (timeline?.sinks ?? []).map((sink) => [
+              sink.id,
+              {
+                required: sink.required,
+                terminal: sink.id === "motion" ? event.status : sink.terminal,
+                reason: sink.id === "motion"
+                  ? event.reason ?? ""
+                  : sink.reason ?? "",
+              },
+            ]),
+          ),
+        },
       },
     }, run.turnId);
     currentMotionRun = null;

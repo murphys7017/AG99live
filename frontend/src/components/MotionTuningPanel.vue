@@ -56,12 +56,17 @@ type MotionTuningSampleSnapshot = Readonly<{
   modelName: string;
   profileId?: string;
   profileRevision?: number;
+  profileHash?: string;
+  transformVersion?: string;
   emotionLabel: string;
   assistantText: string;
   feedback: string;
   tags: readonly string[];
   enabledForLlmReference?: boolean;
   originalAxes: Readonly<Record<string, number>>;
+  rawAxisLevels?: Readonly<Record<string, number>>;
+  resolvedAxes?: Readonly<Record<string, number>>;
+  constrainedAxes?: Readonly<Record<string, number>>;
   adjustedAxes: Readonly<Record<string, number>>;
   adjustedPlan: unknown;
 }>;
@@ -447,12 +452,23 @@ function saveSample(): void {
     modelName: profile.model_id,
     profileId: profile.profile_id,
     profileRevision: profile.revision,
+    profileHash: source.record?.diagnostics?.transformTrace?.profileHash ?? profile.source_hash,
+    transformVersion: source.record?.diagnostics?.transformTrace?.transformVersion ?? "",
     emotionLabel,
     assistantText: source.assistantText,
     feedback: feedbackText.value.trim(),
     tags: parseTags(tagsText.value),
     enabledForLlmReference: enabledForLlmReference.value,
     originalAxes: { ...source.axes },
+    rawAxisLevels: {
+      ...(source.record?.diagnostics?.transformTrace?.rawAxisLevels ?? {}),
+    },
+    resolvedAxes: {
+      ...(source.record?.diagnostics?.transformTrace?.resolvedAxes ?? source.axes),
+    },
+    constrainedAxes: {
+      ...(source.record?.diagnostics?.transformTrace?.constrainedAxes ?? source.axes),
+    },
     adjustedAxes,
     adjustedPlan: buildAdjustedPlan(source, profile, adjustedAxes, emotionLabel),
   };
@@ -471,6 +487,9 @@ function toggleSampleReference(sample: MotionTuningSampleSnapshot, enabled: bool
       ...mutableSample,
       tags: [...mutableSample.tags],
       originalAxes: { ...mutableSample.originalAxes },
+      rawAxisLevels: { ...(mutableSample.rawAxisLevels ?? {}) },
+      resolvedAxes: { ...(mutableSample.resolvedAxes ?? {}) },
+      constrainedAxes: { ...(mutableSample.constrainedAxes ?? {}) },
       adjustedAxes: { ...mutableSample.adjustedAxes },
       adjustedPlan: cloneJson(mutableSample.adjustedPlan),
       enabledForLlmReference: enabled,

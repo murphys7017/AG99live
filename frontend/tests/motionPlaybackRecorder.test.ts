@@ -37,14 +37,35 @@ const baseEvent = {
 } as unknown as ModelEnginePlanStartedEvent;
 
 function createRecorder() {
-  const rawEvents: Array<{ event_type: string; turnId?: string | null }> = [];
+  const rawEvents: Array<{
+    event_type: string;
+    message_id?: string;
+    raw: Record<string, unknown>;
+    turnId?: string | null;
+  }> = [];
   const recorder = useMotionPlaybackRecorder({
     motionRecord: {
       getLastAssistantText: () => "assistant text",
       getSelectedModel: () => ref(null),
     },
+    getPlaybackTimelineSnapshot: (turnId, messageId) => ({
+      timelineId: "timeline-1",
+      turnId,
+      messageId,
+      phase: "playing",
+      clockSource: "audio",
+      startedAtMs: 100,
+      currentTimeMs: 900,
+      durationMs: 1000,
+      playbackRate: 1,
+      sinks: [
+        { id: "audio", required: true, terminal: "completed" },
+        { id: "lip_sync", required: false, terminal: "completed" },
+        { id: "motion", required: true, terminal: "started" },
+      ],
+    }),
     onMotionLabRawEvent: (payload, turnId) => {
-      rawEvents.push({ event_type: payload.event_type, turnId });
+      rawEvents.push({ ...payload, turnId });
     },
   });
   return { recorder, rawEvents };
@@ -69,6 +90,18 @@ function testIgnoresStaleTerminalAndRecordsMatchingTerminal(): void {
 
   recorder.completeMotionPlayback({ runId: "run-1", status: "completed" });
   assert.equal(rawEvents[1]?.event_type, "motion.playback_completed");
+  assert.equal(rawEvents[1]?.message_id, "message-1");
+  assert.deepEqual(rawEvents[1]?.raw.timeline_outcome, {
+    motion: "completed",
+    reason: "",
+    timeline_phase: "playing",
+    clock_source: "audio",
+    sinks: {
+      audio: { required: true, terminal: "completed", reason: "" },
+      lip_sync: { required: false, terminal: "completed", reason: "" },
+      motion: { required: true, terminal: "completed", reason: "" },
+    },
+  });
 }
 
 function testPreviewDoesNotEnterHistory(): void {

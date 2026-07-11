@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class MotionLabRawEventStore:
@@ -22,8 +22,16 @@ class MotionLabRawEventStore:
             return
         self._ensure_initialized()
         inserted_at = _utc_now_iso()
-        rows = [
-            (
+        rows = []
+        for event in events:
+            if not (
+                str(event.get("id") or "").strip()
+                and str(event.get("event_type") or "").strip()
+            ):
+                continue
+            projection = _extract_motion_projection(event.get("raw"))
+            rows.append(
+                (
                 str(event.get("id") or "").strip(),
                 str(event.get("created_at") or "").strip() or inserted_at,
                 str(event.get("event_type") or "").strip(),
@@ -37,16 +45,18 @@ class MotionLabRawEventStore:
                 _optional_text(event.get("model_name")),
                 _optional_text(event.get("profile_id")),
                 _optional_int(event.get("profile_revision")),
+                _optional_text(projection.get("profile_hash")),
+                _optional_text(projection.get("transform_version")),
+                _optional_text(projection.get("run_id")),
                 _optional_text(event.get("user_text")),
                 _optional_text(event.get("assistant_text")),
                 _optional_text(event.get("payload_kind")),
                 _json_dumps(event.get("raw")),
+                _json_dumps(projection.get("transform_trace")),
+                _json_dumps(projection.get("timeline_outcome")),
                 inserted_at,
+                )
             )
-            for event in events
-            if str(event.get("id") or "").strip()
-            and str(event.get("event_type") or "").strip()
-        ]
         if not rows:
             return
         with self._connect() as conn:
@@ -66,12 +76,17 @@ class MotionLabRawEventStore:
                     model_name,
                     profile_id,
                     profile_revision,
+                    profile_hash,
+                    transform_version,
+                    run_id,
                     user_text,
                     assistant_text,
                     payload_kind,
                     raw_json,
+                    transform_trace_json,
+                    timeline_outcome_json,
                     inserted_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 rows,
             )
@@ -114,18 +129,46 @@ class MotionLabRawEventStore:
                     model_name TEXT,
                     profile_id TEXT,
                     profile_revision INTEGER,
+                    profile_hash TEXT,
+                    transform_version TEXT,
+                    run_id TEXT,
                     user_text TEXT,
                     assistant_text TEXT,
                     payload_kind TEXT,
                     raw_json TEXT NOT NULL,
+                    transform_trace_json TEXT NOT NULL DEFAULT '{}',
+                    timeline_outcome_json TEXT NOT NULL DEFAULT '{}',
                     inserted_at TEXT NOT NULL
                 )
                 """
+            )
+            _ensure_columns(
+                conn,
+                "motion_lab_raw_events",
+                {
+                    "profile_hash": "TEXT",
+                    "transform_version": "TEXT",
+                    "run_id": "TEXT",
+                    "transform_trace_json": "TEXT NOT NULL DEFAULT '{}'",
+                    "timeline_outcome_json": "TEXT NOT NULL DEFAULT '{}'",
+                },
             )
             conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_motion_lab_raw_events_created_at
                 ON motion_lab_raw_events(created_at)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_motion_lab_raw_events_segment
+                ON motion_lab_raw_events(turn_id, message_id)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_motion_lab_raw_events_run_id
+                ON motion_lab_raw_events(run_id)
                 """
             )
             conn.execute(
@@ -154,6 +197,65 @@ class MotionLabRawEventStore:
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value if value is not None else {}, ensure_ascii=False, default=str)
+
+
+def _ensure_columns(
+    conn: sqlite3.Connection,
+    table_name: str,
+    columns: dict[str, str],
+) -> None:
+    existing = {
+        str(row[1])
+        for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    for column_name, declaration in columns.items():
+        if column_name in existing:
+            continue
+        conn.execute(
+            f"ALTER TABLE {table_name} ADD COLUMN {column_name} {declaration}"
+        )
+
+
+def _extract_motion_projection(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+
+    candidates = [value]
+    frontend_payload = value.get("frontend_payload")
+    if isinstance(frontend_payload, dict):
+        candidates.append(frontend_payload)
+        frontend_raw = frontend_payload.get("raw")
+        if isinstance(frontend_raw, dict):
+            candidates.append(frontend_raw)
+
+    transform_trace = None
+    timeline_outcome = None
+    run_id = ""
+    for candidate in candidates:
+        if not run_id:
+            run_id = str(candidate.get("runId") or candidate.get("run_id") or "").strip()
+        raw_trace = candidate.get("transform_trace")
+        if isinstance(raw_trace, dict):
+            transform_trace = raw_trace
+        diagnostics = candidate.get("diagnostics")
+        if isinstance(diagnostics, dict) and isinstance(
+            diagnostics.get("transformTrace"), dict
+        ):
+            transform_trace = diagnostics["transformTrace"]
+        raw_outcome = candidate.get("timeline_outcome")
+        if isinstance(raw_outcome, dict):
+            timeline_outcome = raw_outcome
+
+    trace = transform_trace if isinstance(transform_trace, dict) else {}
+    return {
+        "profile_hash": trace.get("profileHash"),
+        "transform_version": trace.get("transformVersion"),
+        "run_id": run_id,
+        "transform_trace": trace,
+        "timeline_outcome": (
+            timeline_outcome if isinstance(timeline_outcome, dict) else {}
+        ),
+    }
 
 
 def _optional_text(value: Any) -> str | None:

@@ -176,6 +176,18 @@ export interface DesktopMotionCompileDiagnostics {
   expressiveAxisCount?: number;
   semanticAxisCount?: number;
   couplingSkippedExplicitTargets?: string[];
+  transformTrace?: {
+    transformVersion: string;
+    profileRevision: number;
+    profileHash: string;
+    rawAxes: Record<string, number>;
+    rawAxisLevels?: Record<string, number>;
+    resolvedAxes: Record<string, number>;
+    derivedAxes: Record<string, number>;
+    constrainedAxes: Record<string, number>;
+    relationAdjustments: unknown[];
+    compiledParameters: string[];
+  };
 }
 
 interface DesktopMotionPlaybackRecordBase {
@@ -215,12 +227,17 @@ export interface DesktopMotionTuningSample {
   modelName: string;
   profileId?: string;
   profileRevision?: number;
+  profileHash?: string;
+  transformVersion?: string;
   emotionLabel: string;
   assistantText: string;
   feedback: string;
   tags: string[];
   enabledForLlmReference?: boolean;
   originalAxes: Record<string, number>;
+  rawAxisLevels?: Record<string, number>;
+  resolvedAxes?: Record<string, number>;
+  constrainedAxes?: Record<string, number>;
   adjustedAxes: Record<string, number>;
   adjustedPlan: MotionPlanPayload;
 }

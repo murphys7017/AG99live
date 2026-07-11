@@ -132,7 +132,8 @@ class FrontendSystemCommandHandler:
                     "event_type": payload.get("event_type"),
                     "turn_id": message.turn_id,
                     "frontend_turn_id": message.turn_id,
-                    "message_id": message.message_id,
+                    "message_id": str(payload.get("message_id") or "").strip()
+                    or message.message_id,
                     "source_route": payload.get("source_route") or "frontend",
                     "phase": payload.get("phase") or "",
                     "model_name": payload.get("model_name") or "",

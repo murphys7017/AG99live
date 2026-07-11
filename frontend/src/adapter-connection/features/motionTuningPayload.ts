@@ -13,12 +13,17 @@ export function serializeMotionTuningSample(
     model_name: sample.modelName,
     profile_id: sample.profileId ?? "",
     profile_revision: sample.profileRevision ?? 0,
+    profile_hash: sample.profileHash ?? "",
+    transform_version: sample.transformVersion ?? "",
     emotion_label: sample.emotionLabel,
     assistant_text: sample.assistantText,
     feedback: sample.feedback,
     tags: [...sample.tags],
     enabled_for_llm_reference: Boolean(sample.enabledForLlmReference),
     original_axes: { ...sample.originalAxes },
+    raw_axis_levels: { ...(sample.rawAxisLevels ?? {}) },
+    resolved_axes: { ...(sample.resolvedAxes ?? {}) },
+    constrained_axes: { ...(sample.constrainedAxes ?? {}) },
     adjusted_axes: { ...sample.adjustedAxes },
     adjusted_plan: cloneJson(sample.adjustedPlan),
   };
@@ -64,6 +69,12 @@ export function normalizeMotionTuningSamplePayload(
     modelName,
     profileId,
     profileRevision,
+    profileHash: typeof candidate.profile_hash === "string"
+      ? candidate.profile_hash.trim()
+      : "",
+    transformVersion: typeof candidate.transform_version === "string"
+      ? candidate.transform_version.trim()
+      : "",
     emotionLabel: typeof candidate.emotion_label === "string" && candidate.emotion_label.trim()
       ? candidate.emotion_label.trim()
       : "manual_tuning",
@@ -76,6 +87,9 @@ export function normalizeMotionTuningSamplePayload(
       : [],
     enabledForLlmReference: Boolean(candidate.enabled_for_llm_reference),
     originalAxes: normalizeMotionTuningAxisRecord(candidate.original_axes),
+    rawAxisLevels: normalizeMotionTuningAxisRecord(candidate.raw_axis_levels),
+    resolvedAxes: normalizeMotionTuningAxisRecord(candidate.resolved_axes),
+    constrainedAxes: normalizeMotionTuningAxisRecord(candidate.constrained_axes),
     adjustedAxes: normalizeMotionTuningAxisRecord(candidate.adjusted_axes),
     adjustedPlan: cloneJson(adjustedPlan),
   };

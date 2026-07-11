@@ -391,6 +391,19 @@ class MotionTuningStore:
             field_name="original_axes",
             require_non_empty=False,
         )
+        raw_axis_levels = self._normalize_axis_levels(
+            sample_payload.get("raw_axis_levels")
+        )
+        resolved_axes = self._normalize_axes(
+            sample_payload.get("resolved_axes", {}),
+            field_name="resolved_axes",
+            require_non_empty=False,
+        )
+        constrained_axes = self._normalize_axes(
+            sample_payload.get("constrained_axes", {}),
+            field_name="constrained_axes",
+            require_non_empty=False,
+        )
         adjusted_plan = self._normalize_adjusted_plan(
             sample_payload.get("adjusted_plan"),
             model_name=model_name,
@@ -398,7 +411,7 @@ class MotionTuningStore:
             profile_revision=profile_revision,
         )
 
-        return {
+        normalized_sample = {
             "id": sample_id,
             "created_at": created_at,
             "source_record_id": source_record_id,
@@ -419,6 +432,23 @@ class MotionTuningStore:
             "adjusted_axes": adjusted_axes,
             "adjusted_plan": adjusted_plan,
         }
+        optional_values = {
+            "profile_hash": str(sample_payload.get("profile_hash") or "").strip(),
+            "transform_version": str(
+                sample_payload.get("transform_version") or ""
+            ).strip(),
+            "raw_axis_levels": raw_axis_levels,
+            "resolved_axes": resolved_axes,
+            "constrained_axes": constrained_axes,
+        }
+        normalized_sample.update(
+            {
+                key: value
+                for key, value in optional_values.items()
+                if value not in ("", {})
+            }
+        )
+        return normalized_sample
 
     def _normalize_adjusted_plan(
         self,
@@ -565,6 +595,29 @@ class MotionTuningStore:
             result[normalized_axis_id] = normalized_value
         if require_non_empty and not result:
             raise ValueError(f"motion_tuning_sample_{field_name}_empty")
+        return result
+
+    @staticmethod
+    def _normalize_axis_levels(value: Any) -> dict[str, int]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("motion_tuning_sample_raw_axis_levels_not_object")
+        result: dict[str, int] = {}
+        for raw_axis_id, raw_level in value.items():
+            axis_id = str(raw_axis_id or "").strip()
+            if not axis_id:
+                raise ValueError("motion_tuning_sample_raw_axis_level_id_empty")
+            if (
+                isinstance(raw_level, bool)
+                or not isinstance(raw_level, int)
+                or raw_level < -3
+                or raw_level > 3
+            ):
+                raise ValueError(
+                    f"motion_tuning_sample_raw_axis_level_invalid:{axis_id}"
+                )
+            result[axis_id] = raw_level
         return result
 
     @staticmethod

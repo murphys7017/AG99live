@@ -103,3 +103,141 @@ def test_motion_lab_recorder_keeps_event_when_raw_contains_non_json_object(
         "value": "non-copyable-value",
         "cycle": {"self": "<cycle>"},
     }
+
+
+def test_motion_lab_store_projects_transform_trace_and_timeline_outcome(
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.runtime.motion_lab.raw_event_store import (
+        MotionLabRawEventStore,
+    )
+
+    db_path = tmp_path / "motion_lab.sqlite3"
+    store = MotionLabRawEventStore(db_path)
+    store.insert_events(
+        [
+            {
+                "id": "event-trace",
+                "event_type": "motion.playback_completed",
+                "turn_id": "turn-1",
+                "message_id": "message-1",
+                "raw": {
+                    "frontend_payload": {
+                        "raw": {
+                            "runId": "run-1",
+                            "transform_trace": {
+                                "transformVersion": "semantic_motion_transform.v1",
+                                "profileHash": "sha256:test",
+                                "rawAxisLevels": {"head_yaw": 2},
+                                "resolvedAxes": {"head_yaw": 64},
+                            },
+                            "timeline_outcome": {"motion": "completed"},
+                        }
+                    }
+                },
+            }
+        ]
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT profile_hash, transform_version, run_id,
+                   transform_trace_json, timeline_outcome_json
+            FROM motion_lab_raw_events
+            WHERE id = 'event-trace'
+            """
+        ).fetchone()
+        schema_version = conn.execute(
+            "SELECT value FROM motion_lab_meta WHERE key = 'schema_version'"
+        ).fetchone()
+
+    assert row is not None
+    assert row[:3] == (
+        "sha256:test",
+        "semantic_motion_transform.v1",
+        "run-1",
+    )
+    assert json.loads(row[3])["rawAxisLevels"] == {"head_yaw": 2}
+    assert json.loads(row[4]) == {"motion": "completed"}
+    assert schema_version == ("2",)
+
+
+def test_motion_lab_store_migrates_existing_v1_table(
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.runtime.motion_lab.raw_event_store import (
+        MotionLabRawEventStore,
+    )
+
+    db_path = tmp_path / "motion_lab.sqlite3"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE motion_lab_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO motion_lab_meta (key, value) VALUES ('schema_version', '1')"
+        )
+        conn.execute(
+            """
+            CREATE TABLE motion_lab_raw_events (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                conversation_uid TEXT,
+                history_uid TEXT,
+                turn_id TEXT,
+                frontend_turn_id TEXT,
+                message_id TEXT,
+                source_route TEXT,
+                phase TEXT,
+                model_name TEXT,
+                profile_id TEXT,
+                profile_revision INTEGER,
+                user_text TEXT,
+                assistant_text TEXT,
+                payload_kind TEXT,
+                raw_json TEXT NOT NULL,
+                inserted_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO motion_lab_raw_events (
+                id, created_at, event_type, raw_json, inserted_at
+            ) VALUES ('legacy-event', '2026-01-01', 'motion.legacy', '{}', '2026-01-01')
+            """
+        )
+
+    store = MotionLabRawEventStore(db_path)
+    store.insert_events(
+        [{"id": "v2-event", "event_type": "motion.v2", "raw": {}}]
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(motion_lab_raw_events)")
+        }
+        event_ids = {
+            row[0]
+            for row in conn.execute("SELECT id FROM motion_lab_raw_events")
+        }
+        schema_version = conn.execute(
+            "SELECT value FROM motion_lab_meta WHERE key = 'schema_version'"
+        ).fetchone()
+
+    assert {
+        "profile_hash",
+        "transform_version",
+        "run_id",
+        "transform_trace_json",
+        "timeline_outcome_json",
+    }.issubset(columns)
+    assert event_ids == {"legacy-event", "v2-event"}
+    assert schema_version == ("2",)

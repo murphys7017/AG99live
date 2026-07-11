@@ -124,6 +124,7 @@ def test_parse_inbound_message_accepts_motion_lab_raw_event() -> None:
             "system.motion_lab_raw_event",
             {
                 "event_type": "motion.playback_started",
+                "message_id": "message-test",
                 "source_route": "split_after_reply",
                 "raw": {
                     "turnId": "turn-test",
@@ -135,6 +136,7 @@ def test_parse_inbound_message_accepts_motion_lab_raw_event() -> None:
 
     assert envelope.type == "system.motion_lab_raw_event"
     assert envelope.payload["event_type"] == "motion.playback_started"
+    assert envelope.payload["message_id"] == "message-test"
     assert envelope.payload["raw"]["messageId"] == "message-test"
 
 

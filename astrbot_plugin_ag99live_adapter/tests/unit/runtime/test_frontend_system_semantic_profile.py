@@ -546,6 +546,7 @@ def test_frontend_system_handler_records_motion_lab_raw_event(monkeypatch) -> No
                 raw={"type": "system.motion_lab_raw_event", "payload": {"event_type": "motion.playback_started"}},
                 payload={
                     "event_type": "motion.playback_started",
+                    "message_id": "segment-message-1",
                     "source_route": "frontend_motion_player",
                     "phase": "playback_started",
                     "profile_id": "DemoModel.semantic.v1",
@@ -564,6 +565,6 @@ def test_frontend_system_handler_records_motion_lab_raw_event(monkeypatch) -> No
     assert len(recorded_events) == 1
     assert recorded_events[0]["event_type"] == "motion.playback_started"
     assert recorded_events[0]["turn_id"] == "turn-playback"
-    assert recorded_events[0]["message_id"] == "message-playback"
+    assert recorded_events[0]["message_id"] == "segment-message-1"
     assert recorded_events[0]["profile_id"] == "DemoModel.semantic.v1"
     assert recorded_events[0]["raw"]["frontend_payload"]["raw"] == {"runId": "run-1"}
