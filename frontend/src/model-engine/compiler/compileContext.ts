@@ -14,6 +14,12 @@ import type {
 } from "./contracts.js";
 import type { ModelEngineSettings } from "../settings.js";
 
+export interface ResolvedMotionResource {
+  resourceId: string;
+  resourceType: "expression" | "motion";
+  parameterIds: string[];
+}
+
 export type DynamicAxisValues = Record<string, number>;
 export type MotionAxisValueSource =
   | "semantic_axis"
@@ -50,6 +56,8 @@ export interface MotionCompileMutableState {
   axisErrorLimit: number;
 
   relationAdjustments: MotionAxisRelationAdjustment[];
+
+  resource: ResolvedMotionResource | null;
 
   warnings: string[];
 
@@ -98,6 +106,7 @@ export function createInitialCompileState(): MotionCompileMutableState {
     axisErrorCount: 0,
     axisErrorLimit: 0,
     relationAdjustments: [],
+    resource: null,
     warnings: [],
     resolvedMode: "idle",
     timing: null,

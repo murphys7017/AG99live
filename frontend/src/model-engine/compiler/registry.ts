@@ -8,6 +8,7 @@ import { speechPoseStage } from "./stages/speechPoseStage.js";
 import { modeResolverStage } from "./stages/modeResolverStage.js";
 import { timingStage } from "./stages/timingStage.js";
 import { planBuilderStage } from "./stages/planBuilder.js";
+import { resourcePolicyStage } from "./stages/resourcePolicyStage.js";
 
 export type ModelEngineStageKind = "core" | "extension";
 
@@ -80,6 +81,13 @@ const registrations: ModelEngineCompileStageRegistration[] = [
     id: "planBuilder",
     stage: planBuilderStage,
     order: 80,
+    kind: "core",
+    enabled: () => true,
+  },
+  {
+    id: "resourcePolicy",
+    stage: resourcePolicyStage,
+    order: 90,
     kind: "core",
     enabled: () => true,
   },

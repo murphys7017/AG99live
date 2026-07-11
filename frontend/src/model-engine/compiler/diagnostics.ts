@@ -109,6 +109,10 @@ function buildTransformTrace(context: MotionCompileContext): MotionTransformTrac
     profileHash: profile?.source_hash ?? "",
     rawAxes: { ...context.intent.axes },
     resourceId: context.intent.resource_id,
+    resourceType: context.state.resource?.resourceType,
+    resourceParameterIds: context.state.resource
+      ? [...context.state.resource.parameterIds]
+      : undefined,
     resolvedAxes: { ...context.state.controlledValues },
     derivedAxes: { ...context.state.derivedValues },
     constrainedAxes: { ...context.state.allAxisValues },

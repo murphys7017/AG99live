@@ -444,11 +444,36 @@ function testNormalizeMotionPayloadAcceptsV3FlatAxes(): void {
   assert.equal(result.payload.intent.resource_id, "expression.smile");
 }
 
+function buildModelWithExpressionResource(
+  profile: SemanticAxisProfile,
+  parameterIds: string[],
+): ModelSummary {
+  const model = buildModel(profile);
+  model.constraints.expressions = [{
+    name: "Smile",
+    file: "Expressions/Smile.exp3.json",
+    catalog_id: "expression.smile",
+    catalog_expose_as_resource: true,
+    category: "positive",
+    parameter_ids: parameterIds,
+    parameter_count: parameterIds.length,
+    affects_channels: ["head_roll"],
+    parameters: [],
+    dominant_parameters: [],
+    dominant_domains: [],
+    dominant_channels: [],
+    blend_modes: [],
+    intensity: "low",
+    touches_non_expression_parameters: false,
+  }];
+  return model;
+}
+
 function testCompiledPlanPreservesResourceIntentWithoutPlayingIt(): void {
   const result = compileMotionIntent(buildIntent({
     resource_id: "expression.smile",
   }), {
-    model: buildModel(buildProfile()),
+    model: buildModelWithExpressionResource(buildProfile(), ["ParamAngleZ"]),
     targetDurationMs: 1200,
     settings: {
       motionIntensityScale: 1,
@@ -465,6 +490,35 @@ function testCompiledPlanPreservesResourceIntentWithoutPlayingIt(): void {
   );
   assert.equal(result.diagnostics.transformTrace?.profileRevision, 1);
   assert.equal(result.diagnostics.transformTrace?.profileHash, "hash");
+  assert.equal(result.diagnostics.transformTrace?.resourceType, "expression");
+  assert.deepEqual(result.diagnostics.transformTrace?.resourceParameterIds, ["ParamAngleZ"]);
+}
+
+function testResourcePolicyRejectsUnknownResource(): void {
+  const result = compileMotionIntent(buildIntent({
+    resource_id: "expression.missing",
+  }), {
+    model: buildModel(buildProfile()),
+    targetDurationMs: 1200,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "resource_not_found:expression.missing");
+}
+
+function testResourcePolicyRejectsParameterConflict(): void {
+  const result = compileMotionIntent(buildIntent({
+    resource_id: "expression.smile",
+  }), {
+    model: buildModelWithExpressionResource(buildProfile(), ["ParamMouthForm"]),
+    targetDurationMs: 1200,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(
+    result.reason,
+    "resource_parameter_conflict:expression.smile:ParamMouthForm",
+  );
 }
 
 function testNormalizeMotionPayloadAcceptsPerformanceCurveHint(): void {
@@ -1540,7 +1594,7 @@ function testRegistryCoreStageOrder(): void {
   const coreStages = registrations.filter((r) => r.kind === "core");
   const extensionStages = registrations.filter((r) => r.kind === "extension");
 
-  assert.equal(coreStages.length, 8);
+  assert.equal(coreStages.length, 9);
   assert.equal(extensionStages.length, 1);
 
   const expectedOrder = [
@@ -1552,6 +1606,7 @@ function testRegistryCoreStageOrder(): void {
     "modeResolver",
     "timing",
     "planBuilder",
+    "resourcePolicy",
   ];
 
   const actualOrder = coreStages.map((r) => r.id);
@@ -1654,6 +1709,8 @@ function run(): void {
   testRegistryCoreStageOrder();
   testNormalizeMotionPayloadAcceptsV3FlatAxes();
   testCompiledPlanPreservesResourceIntentWithoutPlayingIt();
+  testResourcePolicyRejectsUnknownResource();
+  testResourcePolicyRejectsParameterConflict();
   testNormalizeMotionPayloadAcceptsPerformanceCurveHint();
   testNormalizeMotionPayloadRejectsInvalidPerformanceCurveHint();
   testNormalizeMotionPayloadRejectsV3NestedAxes();

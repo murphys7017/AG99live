@@ -156,6 +156,8 @@ export interface VoiceFollowingProfile {
 export interface ExpressionConstraint {
   name: string;
   file: string;
+  catalog_id?: string;
+  catalog_expose_as_resource?: boolean;
   category: string;
   parameter_ids: string[];
   parameter_count: number;
@@ -224,6 +226,8 @@ export interface ResourceScanPayload {
 export interface MotionConstraint {
   name: string;
   file: string;
+  catalog_id?: string;
+  catalog_expose_as_resource?: boolean;
   group: string;
   category: string;
   duration: number;

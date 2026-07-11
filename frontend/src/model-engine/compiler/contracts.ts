@@ -84,6 +84,8 @@ export interface MotionTransformTrace {
   profileHash: string;
   rawAxes: Record<string, number>;
   resourceId?: string;
+  resourceType?: "expression" | "motion";
+  resourceParameterIds?: string[];
   resolvedAxes: Record<string, number>;
   derivedAxes: Record<string, number>;
   constrainedAxes: Record<string, number>;
