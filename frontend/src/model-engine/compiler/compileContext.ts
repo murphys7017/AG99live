@@ -1,4 +1,5 @@
 import type {
+  CatalogMotionPayload,
   SemanticMotionIntent,
   SemanticParameterPlan,
 } from "../../types/protocol.js";
@@ -18,6 +19,8 @@ export interface ResolvedMotionResource {
   resourceId: string;
   resourceType: "expression" | "motion";
   parameterIds: string[];
+  expressionId?: string;
+  motion?: CatalogMotionPayload;
 }
 
 export type DynamicAxisValues = Record<string, number>;

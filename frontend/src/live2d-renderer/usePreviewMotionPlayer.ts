@@ -226,6 +226,7 @@ export function usePreviewMotionPlayer() {
     if (adapter && typeof adapter.stopDirectParameterPlan === "function") {
       adapter.stopDirectParameterPlan(reason, "stopped");
     }
+    adapter?.stopExpression?.();
     stopActiveCatalogMotion(reason);
     notifyActiveStopped(reason);
 
@@ -306,6 +307,32 @@ export function usePreviewMotionPlayer() {
       stopActiveCatalogMotion("direct_parameter_plan_replaced");
     }
 
+    adapter.stopExpression?.();
+    if (playbackPlan.plan.resource?.kind === "expression") {
+      if (
+        typeof adapter.setExpression !== "function"
+        || typeof adapter.getExpressionStartError !== "function"
+      ) {
+        const reason = "表情资源无法执行：Live2D 运行时未提供严格 expression 接口。";
+        state.status = "failed";
+        state.message = reason;
+        state.finishedAt = new Date().toISOString();
+        return false;
+      }
+      const expressionStarted = adapter.setExpression(
+        playbackPlan.plan.resource.expression_id,
+      );
+      if (!expressionStarted) {
+        const expressionReason = adapter.getExpressionStartError();
+        const reason = `表情资源执行失败：${playbackPlan.plan.resource.resource_id}`
+          + (expressionReason ? `（${expressionReason}）` : "");
+        state.status = "failed";
+        state.message = reason;
+        state.finishedAt = new Date().toISOString();
+        return false;
+      }
+    }
+
     if (!options.softHandoff && typeof adapter.stopDirectParameterPlan === "function") {
       adapter.stopDirectParameterPlan();
       notifyActiveStopped("direct_parameter_plan_replaced");
@@ -325,6 +352,7 @@ export function usePreviewMotionPlayer() {
           return;
         }
         if (event.status === "stopped") {
+          adapter.stopExpression?.();
           // 手动停止不是失败，保持 idle 语义
           state.status = "idle";
           state.message = "参数计划已停止。";
@@ -335,6 +363,7 @@ export function usePreviewMotionPlayer() {
           return;
         }
         state.status = event.status === "completed" ? "finished" : "failed";
+        adapter.stopExpression?.();
         state.message = event.reason
           || (event.status === "completed"
             ? "参数计划执行完成。"
@@ -347,6 +376,7 @@ export function usePreviewMotionPlayer() {
     });
     console.info("[MotionPlayer] startDirectParameterPlan returned:", started);
     if (!started) {
+      adapter.stopExpression?.();
       const runtimeReason = typeof adapter.getDirectParameterPlanError === "function"
         ? normalizeText(adapter.getDirectParameterPlanError())
         : "";
@@ -419,6 +449,7 @@ export function usePreviewMotionPlayer() {
     const playbackRunId = `catalog-motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     clearActiveTimers();
     stopActiveCatalogMotion("catalog_motion_replaced");
+    adapter.stopExpression?.();
     if (typeof adapter.stopDirectParameterPlan === "function") {
       adapter.stopDirectParameterPlan();
       notifyActiveStopped("catalog_motion_replaced_direct_plan");

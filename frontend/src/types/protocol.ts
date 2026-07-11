@@ -618,7 +618,6 @@ interface NormalizedSemanticMotionIntentBase {
   intent_tags?: string[];
   emotion_label: string;
   duration_hint_ms?: number | null;
-  resource_id?: string;
   performance_curve_hint?: PerformanceCurveHint;
   summary?: {
     axis_count?: number;
@@ -641,6 +640,9 @@ export interface NormalizedSemanticMotionIntentV3
   schema_version: typeof SCHEMA_MOTION_INTENT_V3;
   axes: Record<string, number>;
   axis_levels?: never;
+  resource_id?: string;
+  expression_resource_id?: never;
+  motion_resource_id?: never;
 }
 
 export interface NormalizedSemanticMotionIntentV4
@@ -648,6 +650,9 @@ export interface NormalizedSemanticMotionIntentV4
   schema_version: typeof SCHEMA_MOTION_INTENT_V4;
   axis_levels: MotionAxisLevelMap;
   axes?: never;
+  resource_id?: never;
+  expression_resource_id?: string;
+  motion_resource_id?: string;
 }
 
 /** Normalized semantic motion intent consumed by ModelEngine. */
@@ -713,8 +718,7 @@ export interface SemanticParameterPlan {
   model_id: string;
   mode: "expressive" | "idle";
   emotion_label: string;
-  /** Validated resource intent; playback is owned by a future asset policy stage. */
-  resource_id?: string;
+  resource?: SemanticPlanResource;
   timing: DirectParameterPlanTiming;
   parameters: SemanticParameterPlanEntry[];
   diagnostics?: {
@@ -737,6 +741,24 @@ export interface SemanticParameterPlan {
     pose_descriptors?: string[];
   };
 }
+
+export interface SemanticExpressionPlanResource {
+  kind: "expression";
+  resource_id: string;
+  expression_id: string;
+  parameter_ids: string[];
+}
+
+export interface SemanticMotionPlanResource {
+  kind: "motion";
+  resource_id: string;
+  parameter_ids: string[];
+  motion: CatalogMotionPayload;
+}
+
+export type SemanticPlanResource =
+  | SemanticExpressionPlanResource
+  | SemanticMotionPlanResource;
 
 export type SemanticMotionIntent = NormalizedSemanticMotionIntent;
 export type MotionIntentPayload = NormalizedSemanticMotionIntent;
@@ -826,12 +848,17 @@ export interface MotionTuningSampleProtocolPayload {
   model_name: string;
   profile_id: string;
   profile_revision: number;
+  profile_hash?: string;
+  transform_version?: string;
   emotion_label: string;
   assistant_text: string;
   feedback: string;
   tags: string[];
   enabled_for_llm_reference?: boolean;
   original_axes: Record<string, number>;
+  raw_axis_levels?: Record<string, number>;
+  resolved_axes?: Record<string, number>;
+  constrained_axes?: Record<string, number>;
   adjusted_axes: Record<string, number>;
   adjusted_plan: MotionPlanPayload;
 }

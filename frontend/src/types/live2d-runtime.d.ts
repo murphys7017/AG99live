@@ -33,6 +33,9 @@ declare global {
       ) => unknown;
       stopMotion?: () => void;
       getMotionStartError?: () => string;
+      setExpression?: (name: string) => boolean;
+      stopExpression?: () => void;
+      getExpressionStartError?: () => string;
       setAmbientMotionEnabled?: (enabled: boolean) => void;
       startDirectParameterPlan?: (
         plan: MotionPlanPayload,

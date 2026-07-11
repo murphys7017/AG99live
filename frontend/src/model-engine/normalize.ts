@@ -184,7 +184,6 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
     intent_tags: intentTags,
     emotion_label: emotionLabel,
     duration_hint_ms: durationHintMs,
-    resource_id: normalizeText(value.resource_id) || undefined,
     performance_curve_hint: performanceCurveHint,
     summary: normalizeMotionVisibilitySummary(value.summary),
   };
@@ -192,17 +191,36 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
     if (!axisLevels) {
       return { ok: false, reason: "motion_intent_v4.invalid_axis_levels" };
     }
+    if (Object.prototype.hasOwnProperty.call(value, "resource_id")) {
+      return {
+        ok: false,
+        reason: "motion_intent_v4.resource_id_forbidden_use_typed_resource_fields",
+      };
+    }
+    const expressionResourceId = normalizeText(value.expression_resource_id) || undefined;
+    const motionResourceId = normalizeText(value.motion_resource_id) || undefined;
+    if (expressionResourceId && motionResourceId) {
+      return { ok: false, reason: "motion_intent_v4.multiple_resource_layers_forbidden" };
+    }
     return {
       ok: true,
       value: {
         ...common,
         schema_version: SCHEMA_MOTION_INTENT_V4,
         axis_levels: axisLevels,
+        expression_resource_id: expressionResourceId,
+        motion_resource_id: motionResourceId,
       },
     };
   }
   if (!axes) {
     return { ok: false, reason: "motion_intent_v3.invalid_flat_axes" };
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(value, "expression_resource_id")
+    || Object.prototype.hasOwnProperty.call(value, "motion_resource_id")
+  ) {
+    return { ok: false, reason: "motion_intent_v3.typed_resource_fields_forbidden" };
   }
   return {
     ok: true,
@@ -210,6 +228,7 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
       ...common,
       schema_version: SCHEMA_MOTION_INTENT_V3,
       axes,
+      resource_id: normalizeText(value.resource_id) || undefined,
     },
   };
 }

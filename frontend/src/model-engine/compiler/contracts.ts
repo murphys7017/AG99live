@@ -85,9 +85,13 @@ export interface MotionTransformTrace {
   profileHash: string;
   rawAxes: Record<string, number>;
   rawAxisLevels?: MotionAxisLevelMap;
-  resourceId?: string;
-  resourceType?: "expression" | "motion";
-  resourceParameterIds?: string[];
+  expressionResourceId?: string;
+  motionResourceId?: string;
+  resolvedResource?: {
+    resourceId: string;
+    resourceType: "expression" | "motion";
+    parameterIds: string[];
+  };
   resolvedAxes: Record<string, number>;
   derivedAxes: Record<string, number>;
   constrainedAxes: Record<string, number>;

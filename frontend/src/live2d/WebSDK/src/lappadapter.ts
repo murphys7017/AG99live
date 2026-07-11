@@ -114,8 +114,16 @@ export class LAppAdapter {
     return this.getModel()?._modelSetting?.getExpressionName(index) ?? '';
   }
 
-  public setExpression(name: string): void {
-    this.getModel()?.setExpression(name);
+  public setExpression(name: string): boolean {
+    return this.getModel()?.setExpression(name) ?? false;
+  }
+
+  public stopExpression(): void {
+    this.getModel()?.stopExpression();
+  }
+
+  public getExpressionStartError(): string {
+    return this.getModel()?.getExpressionStartError() ?? "expression_model_unavailable";
   }
 
   // @deprecated

@@ -113,10 +113,18 @@ function buildTransformTrace(context: MotionCompileContext): MotionTransformTrac
     rawAxisLevels: context.intent.schema_version === "engine.motion_intent.v4"
       ? { ...context.intent.axis_levels }
       : undefined,
-    resourceId: context.intent.resource_id,
-    resourceType: context.state.resource?.resourceType,
-    resourceParameterIds: context.state.resource
-      ? [...context.state.resource.parameterIds]
+    expressionResourceId: context.intent.schema_version === "engine.motion_intent.v4"
+      ? context.intent.expression_resource_id
+      : undefined,
+    motionResourceId: context.intent.schema_version === "engine.motion_intent.v4"
+      ? context.intent.motion_resource_id
+      : undefined,
+    resolvedResource: context.state.resource
+      ? {
+          resourceId: context.state.resource.resourceId,
+          resourceType: context.state.resource.resourceType,
+          parameterIds: [...context.state.resource.parameterIds],
+        }
       : undefined,
     resolvedAxes: { ...context.state.controlledValues },
     derivedAxes: { ...context.state.derivedValues },

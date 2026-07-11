@@ -1,7 +1,9 @@
 import type {
+  CatalogMotionPayload,
   DirectParameterPlanTiming,
   PerformanceCurvePresetName,
   SemanticParameterPlan,
+  SemanticPlanResource,
 } from "../types/protocol.js";
 import {
   SCHEMA_PARAMETER_PLAN_V2,
@@ -69,6 +71,77 @@ function normalizeTiming(value: unknown): DirectParameterPlanTiming | null {
     hold_ms: Math.round(holdMs),
     blend_out_ms: Math.round(blendOutMs),
     curve_preset: curvePreset as PerformanceCurvePresetName | undefined,
+  };
+}
+
+function normalizePlanResource(value: unknown): SemanticPlanResource | undefined | null {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!isObject(value)) {
+    return null;
+  }
+  const resourceId = normalizeText(value.resource_id);
+  const parameterIds = normalizeStringArray(value.parameter_ids) ?? [];
+  if (!resourceId || parameterIds.length === 0) {
+    return null;
+  }
+  if (value.kind === "expression") {
+    const expressionId = normalizeText(value.expression_id);
+    return expressionId
+      ? {
+          kind: "expression",
+          resource_id: resourceId,
+          expression_id: expressionId,
+          parameter_ids: parameterIds,
+        }
+      : null;
+  }
+  if (value.kind === "motion" && isObject(value.motion)) {
+    const motion = normalizeCatalogMotion(value.motion);
+    return motion
+      ? {
+          kind: "motion",
+          resource_id: resourceId,
+          parameter_ids: parameterIds,
+          motion,
+        }
+      : null;
+  }
+  return null;
+}
+
+function normalizeCatalogMotion(value: Record<string, unknown>): CatalogMotionPayload | null {
+  const modelId = normalizeText(value.model_id);
+  const motionId = normalizeText(value.motion_id);
+  const group = normalizeText(value.group);
+  const file = normalizeText(value.file);
+  if (
+    normalizeText(value.schema_version) !== "engine.catalog_motion.v1"
+    || !modelId
+    || !motionId
+    || !group
+    || !file
+    || !isFiniteNumber(value.index)
+    || value.index < 0
+    || !isFiniteNumber(value.priority)
+  ) {
+    return null;
+  }
+  return {
+    schema_version: "engine.catalog_motion.v1",
+    model_id: modelId,
+    motion_id: motionId,
+    group,
+    index: Math.round(value.index),
+    file,
+    label: normalizeText(value.label),
+    emotion_label: normalizeText(value.emotion_label) || motionId,
+    duration_ms: isFiniteNumber(value.duration_ms) ? Math.round(value.duration_ms) : null,
+    priority: Math.round(value.priority),
+    summary: isObject(value.summary)
+      ? { source: normalizeText(value.summary.source) || undefined }
+      : undefined,
   };
 }
 
@@ -171,6 +244,23 @@ export function parseSemanticParameterPlan(
     return { ok: false, reason: "parameter_plan_v2.emotion_label_empty" };
   }
 
+  const resource = normalizePlanResource(value.resource);
+  if (resource === null) {
+    return { ok: false, reason: "parameter_plan_v2.resource_invalid" };
+  }
+  if (resource?.kind === "expression") {
+    const planParameterIds = new Set(parameters.map((item) => item.parameter_id));
+    const conflicts = resource.parameter_ids.filter((parameterId) =>
+      planParameterIds.has(parameterId),
+    );
+    if (conflicts.length > 0) {
+      return {
+        ok: false,
+        reason: `parameter_plan_v2.expression_resource_conflict:${conflicts.join(",")}`,
+      };
+    }
+  }
+
   return {
     ok: true,
     value: {
@@ -180,7 +270,7 @@ export function parseSemanticParameterPlan(
       model_id: modelId,
       mode: modeRaw,
       emotion_label: emotionLabel,
-      resource_id: normalizeText(value.resource_id) || undefined,
+      resource,
       timing,
       parameters,
       diagnostics: isObject(value.diagnostics)
@@ -210,7 +300,7 @@ export function cloneSemanticParameterPlan(plan: unknown): SemanticParameterPlan
     model_id: parsed.model_id,
     mode: parsed.mode,
     emotion_label: parsed.emotion_label,
-    resource_id: parsed.resource_id,
+    resource: parsed.resource,
     timing: parsed.timing,
     parameters: parsed.parameters,
     diagnostics: isObject(planObj.diagnostics)

@@ -995,7 +995,8 @@ export class LAppModel extends CubismUserModel {
    *
    * @param expressionId 表情モーションのID
    */
-  public setExpression(expressionId: string): void {
+  public setExpression(expressionId: string): boolean {
+    this._expressionStartError = '';
     const motion: ACubismMotion = this._expressions.getValue(expressionId);
 
     if (this._debugMode) {
@@ -1003,16 +1004,31 @@ export class LAppModel extends CubismUserModel {
     }
 
     if (motion != null) {
-      this._expressionManager.startMotionPriority(
+      const handle = this._expressionManager.startMotionPriority(
         motion,
         false,
         LAppDefine.PriorityForce
       );
+      if (handle === InvalidMotionQueueEntryHandleValue) {
+        this._expressionStartError = 'expression_start_rejected';
+        return false;
+      }
+      return true;
     } else {
+      this._expressionStartError = 'expression_not_found';
       if (this._debugMode) {
         LAppPal.printMessage(`[APP]expression[${expressionId}] is null`);
       }
+      return false;
     }
+  }
+
+  public stopExpression(): void {
+    this._expressionManager.stopAllMotions();
+  }
+
+  public getExpressionStartError(): string {
+    return this._expressionStartError;
   }
 
   /**
@@ -2992,6 +3008,7 @@ export class LAppModel extends CubismUserModel {
 
   _motions: csmMap<string, ACubismMotion>; // 読み込まれているモーションのリスト
   _expressions: csmMap<string, ACubismMotion>; // 読み込まれている表情のリスト
+  private _expressionStartError = '';
 
   _hitArea: csmVector<csmRect>;
   _userArea: csmVector<csmRect>;

@@ -144,6 +144,68 @@ async function testSoftHandoffDuplicateStillReportsStarted(): Promise<void> {
   scope.stop();
 }
 
+async function testExpressionResourceStartsBeforeDirectPlan(): Promise<void> {
+  const calls: string[] = [];
+  (globalThis as typeof globalThis & { getLAppAdapter?: () => unknown }).getLAppAdapter = () => ({
+    setExpression: (expressionId: string) => {
+      calls.push(`expression:${expressionId}`);
+      return true;
+    },
+    stopExpression: () => {},
+    getExpressionStartError: () => "",
+    startDirectParameterPlan: () => {
+      calls.push("direct_plan");
+      return true;
+    },
+    stopDirectParameterPlan: () => {},
+    getDirectParameterPlanError: () => "",
+  });
+  const scope = effectScope();
+  const player = scope.run(() => usePreviewMotionPlayer());
+  assert.ok(player);
+  const plan = buildPlan();
+  plan.resource = {
+    kind: "expression",
+    resource_id: "expression.smile",
+    expression_id: "Smile",
+    parameter_ids: ["ParamMouthForm"],
+  };
+
+  assert.equal(player.playPlan(plan), true);
+  assert.deepEqual(calls, ["expression:Smile", "direct_plan"]);
+  scope.stop();
+}
+
+async function testExpressionResourceFailureDoesNotStartDirectPlan(): Promise<void> {
+  let directPlanStarts = 0;
+  (globalThis as typeof globalThis & { getLAppAdapter?: () => unknown }).getLAppAdapter = () => ({
+    setExpression: () => false,
+    stopExpression: () => {},
+    getExpressionStartError: () => "expression_not_found",
+    startDirectParameterPlan: () => {
+      directPlanStarts += 1;
+      return true;
+    },
+    stopDirectParameterPlan: () => {},
+    getDirectParameterPlanError: () => "",
+  });
+  const scope = effectScope();
+  const player = scope.run(() => usePreviewMotionPlayer());
+  assert.ok(player);
+  const plan = buildPlan();
+  plan.resource = {
+    kind: "expression",
+    resource_id: "expression.missing",
+    expression_id: "Missing",
+    parameter_ids: ["ParamMouthForm"],
+  };
+
+  assert.equal(player.playPlan(plan), false);
+  assert.equal(directPlanStarts, 0);
+  assert.match(player.state.message, /expression_not_found/);
+  scope.stop();
+}
+
 async function testCatalogMotionInvalidHandleWithDurationFails(): Promise<void> {
   const adapter = installCatalogMockAdapter(-1, { motionStartError: "motion_start_rejected" });
   const scope = effectScope();
@@ -286,6 +348,8 @@ async function testDirectPlanStopReportsStoppedTerminalOnce(): Promise<void> {
 
 async function run(): Promise<void> {
   await testSoftHandoffDuplicateStillReportsStarted();
+  await testExpressionResourceStartsBeforeDirectPlan();
+  await testExpressionResourceFailureDoesNotStartDirectPlan();
   await testCatalogMotionInvalidHandleWithDurationFails();
   await testCatalogMotionInvalidHandleWithoutDurationStillFails();
   await testCatalogMotionAsyncAcceptedFailureReportsFailed();

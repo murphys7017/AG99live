@@ -221,6 +221,17 @@ function startSemanticIntentPayload(
     diagnostics: compileResult.diagnostics,
   });
 
+  if (compileResult.plan.resource?.kind === "motion") {
+    return startCompiledMotionResource(
+      payload,
+      compileResult.plan,
+      compileResult.diagnostics,
+      context,
+      dependencies,
+      state,
+    );
+  }
+
   let notifiedStarted = false;
   const started = dependencies.playPlan(
     compileResult.plan,
@@ -277,6 +288,68 @@ function startSemanticIntentPayload(
   return true;
 }
 
+function startCompiledMotionResource(
+  payload: Extract<NormalizedMotionPayload, { kind: "semantic_intent" }>,
+  plan: MotionPlanPayload,
+  diagnostics: CompileDiagnostics,
+  context: StartPayloadContext,
+  dependencies: MotionStartDependencies,
+  state: MotionRuntimeStateController,
+): boolean {
+  const resource = plan.resource;
+  if (!resource || resource.kind !== "motion") {
+    return false;
+  }
+  const selectedModel = dependencies.getSelectedModel();
+  let notifiedStarted = false;
+  const started = dependencies.playCatalogMotion(resource.motion, selectedModel, {
+    onStarted: (_motion, runId) => {
+      notifiedStarted = true;
+      dependencies.onPlanStarted?.({
+        intent: payload.intent,
+        plan,
+        model: selectedModel,
+        messageId: context.messageId,
+        turnId: context.turnId,
+        playbackTurnId: context.playbackTurnId,
+        startReason: context.startReason,
+        queuedDelayMs: context.queuedDelayMs,
+        payloadKind: payload.kind,
+        diagnostics,
+        playerMessage: buildSuccessMessage(context, dependencies),
+        runId,
+      });
+    },
+  });
+  if (!started) {
+    const failureReason = dependencies.getPlayerMessage?.()
+      || `完整动作资源执行失败：${resource.resource_id}`;
+    state.setLastCompileReason(failureReason);
+    state.setState("failed", failureReason, diagnostics);
+    state.pushHistory("error", failureReason);
+    return false;
+  }
+  const successMessage = buildSuccessMessage(context, dependencies);
+  if (!notifiedStarted) {
+    dependencies.onPlanStarted?.({
+      intent: payload.intent,
+      plan,
+      model: selectedModel,
+      messageId: context.messageId,
+      turnId: context.turnId,
+      playbackTurnId: context.playbackTurnId,
+      startReason: context.startReason,
+      queuedDelayMs: context.queuedDelayMs,
+      payloadKind: payload.kind,
+      diagnostics,
+      playerMessage: successMessage,
+    });
+  }
+  state.setState("playing", successMessage, diagnostics);
+  state.pushHistory("system", `完整动作资源执行中（${successMessage}）。`);
+  return true;
+}
+
 function startDirectPlanPayload(
   payload: Extract<NormalizedMotionPayload, { kind: "semantic_plan" }>,
   context: StartPayloadContext,
@@ -284,6 +357,15 @@ function startDirectPlanPayload(
   state: MotionRuntimeStateController,
 ): boolean {
   const selectedModel = dependencies.getSelectedModel();
+  if (payload.plan.resource?.kind === "motion") {
+    return startDirectPlanMotionResource(
+      payload,
+      context,
+      dependencies,
+      state,
+      selectedModel,
+    );
+  }
   let notifiedStarted = false;
   const started = dependencies.playPlan(
     payload.plan,
@@ -337,6 +419,64 @@ function startDirectPlanPayload(
 
   state.setState("playing", successMessage, null);
   state.pushHistory("system", `动作计划执行中（${successMessage}）。`);
+  return true;
+}
+
+function startDirectPlanMotionResource(
+  payload: Extract<NormalizedMotionPayload, { kind: "semantic_plan" }>,
+  context: StartPayloadContext,
+  dependencies: MotionStartDependencies,
+  state: MotionRuntimeStateController,
+  selectedModel: ReturnType<MotionStartDependencies["getSelectedModel"]>,
+): boolean {
+  const resource = payload.plan.resource;
+  if (!resource || resource.kind !== "motion") {
+    return false;
+  }
+  let notifiedStarted = false;
+  const started = dependencies.playCatalogMotion(resource.motion, selectedModel, {
+    onStarted: (_motion, runId) => {
+      notifiedStarted = true;
+      dependencies.onPlanStarted?.({
+        plan: payload.plan,
+        model: selectedModel,
+        messageId: context.messageId,
+        turnId: context.turnId,
+        playbackTurnId: context.playbackTurnId,
+        startReason: context.startReason,
+        queuedDelayMs: context.queuedDelayMs,
+        payloadKind: payload.kind,
+        diagnostics: null,
+        playerMessage: buildSuccessMessage(context, dependencies),
+        runId,
+      });
+    },
+  });
+  if (!started) {
+    const reason = dependencies.getPlayerMessage?.()
+      || `完整动作资源执行失败：${resource.resource_id}`;
+    state.setLastCompileReason(reason);
+    state.setState("failed", reason, null);
+    state.pushHistory("error", reason);
+    return false;
+  }
+  const successMessage = buildSuccessMessage(context, dependencies);
+  if (!notifiedStarted) {
+    dependencies.onPlanStarted?.({
+      plan: payload.plan,
+      model: selectedModel,
+      messageId: context.messageId,
+      turnId: context.turnId,
+      playbackTurnId: context.playbackTurnId,
+      startReason: context.startReason,
+      queuedDelayMs: context.queuedDelayMs,
+      payloadKind: payload.kind,
+      diagnostics: null,
+      playerMessage: successMessage,
+    });
+  }
+  state.setState("playing", successMessage, null);
+  state.pushHistory("system", `完整动作资源执行中（${successMessage}）。`);
   return true;
 }
 

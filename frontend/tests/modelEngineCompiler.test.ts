@@ -613,7 +613,29 @@ function buildModelWithExpressionResource(
   return model;
 }
 
-function testCompiledPlanPreservesResourceIntentWithoutPlayingIt(): void {
+function buildModelWithMotionResource(profile: SemanticAxisProfile): ModelSummary {
+  const model = buildModel(profile);
+  model.constraints.motions = [{
+    name: "SeriousExplain",
+    file: "Motions/serious.motion3.json",
+    catalog_id: "motion.serious_explain",
+    catalog_expose_as_resource: true,
+    group: "TapBody",
+    category: "explain",
+    duration: 1.8,
+    catalog_label: "认真说明",
+    catalog_intensity: "medium",
+    component_ids: ["component-head-yaw"],
+    driver_component_ids: ["component-head-yaw"],
+  } as unknown as ModelSummary["constraints"]["motions"][number]];
+  model.motion_resource_pool.components = [{
+    id: "component-head-yaw",
+    parameter_id: "ParamAngleX",
+  } as unknown as ModelSummary["motion_resource_pool"]["components"][number]];
+  return model;
+}
+
+function testCompiledPlanResolvesExpressionResourceForPlayback(): void {
   const result = compileMotionIntent(buildIntent({
     resource_id: "expression.smile",
   }), {
@@ -626,16 +648,23 @@ function testCompiledPlanPreservesResourceIntentWithoutPlayingIt(): void {
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.plan?.resource_id, "expression.smile");
-  assert.equal(result.diagnostics.transformTrace?.resourceId, "expression.smile");
+  assert.deepEqual(result.plan?.resource, {
+    kind: "expression",
+    resource_id: "expression.smile",
+    expression_id: "Smile",
+    parameter_ids: ["ParamAngleZ"],
+  });
   assert.equal(
     result.diagnostics.transformTrace?.transformVersion,
     "semantic_motion_transform.v1",
   );
   assert.equal(result.diagnostics.transformTrace?.profileRevision, 1);
   assert.equal(result.diagnostics.transformTrace?.profileHash, "hash");
-  assert.equal(result.diagnostics.transformTrace?.resourceType, "expression");
-  assert.deepEqual(result.diagnostics.transformTrace?.resourceParameterIds, ["ParamAngleZ"]);
+  assert.deepEqual(result.diagnostics.transformTrace?.resolvedResource, {
+    resourceId: "expression.smile",
+    resourceType: "expression",
+    parameterIds: ["ParamAngleZ"],
+  });
 }
 
 function testResourcePolicyRejectsUnknownResource(): void {
@@ -663,6 +692,67 @@ function testResourcePolicyRejectsParameterConflict(): void {
     result.reason,
     "resource_parameter_conflict:expression.smile:ParamMouthForm",
   );
+}
+
+function testMotionResourceUsesCatalogPlaybackInsteadOfDirectPlan(): void {
+  const profile = buildProfile();
+  const headYaw = profile.axes.find((axis) => axis.id === "head_yaw");
+  assert.ok(headYaw);
+  headYaw.level_anchors = {
+    "-3": 30, "-2": 38, "-1": 45, "0": 50, "1": 56, "2": 64, "3": 70,
+  };
+  const model = buildModelWithMotionResource(profile);
+  let directPlanStarts = 0;
+  const catalogMotions: Array<{ motion_id: string; group: string; index: number }> = [];
+  const started = startNormalizedMotionPayload(
+    {
+      kind: "semantic_intent",
+      intent: buildLevelIntent({ motion_resource_id: "motion.serious_explain" }),
+    },
+    {
+      messageId: "msg-motion-resource",
+      turnId: "turn-motion-resource",
+      playbackTurnId: "turn-motion-resource",
+      startReason: "playback_timeline_started",
+      queuedDelayMs: 90,
+    },
+    {
+      getSelectedModel: () => model,
+      getSettings: () => ({ motionIntensityScale: 1, axisIntensityScale: {} }),
+      playPlan: () => {
+        directPlanStarts += 1;
+        return true;
+      },
+      playCatalogMotion: (motion) => {
+        catalogMotions.push(motion);
+        return true;
+      },
+      getPlayerMessage: () => "motion resource playing",
+    },
+    {
+      setState: () => {},
+      setLastCompileReason: () => {},
+      setLastCompileDiagnostics: () => {},
+      setLastStartReason: () => {},
+      pushHistory: () => {},
+    },
+  );
+
+  assert.equal(started, true);
+  assert.equal(directPlanStarts, 0);
+  assert.deepEqual(catalogMotions, [{
+    schema_version: "engine.catalog_motion.v1",
+    model_id: "model-1",
+    motion_id: "motion.serious_explain",
+    group: "TapBody",
+    index: 0,
+    file: "Motions/serious.motion3.json",
+    label: "认真说明",
+    emotion_label: "认真说明",
+    duration_ms: 1800,
+    priority: 3,
+    summary: { source: "semantic_motion_resource" },
+  }]);
 }
 
 function testNormalizeMotionPayloadAcceptsPerformanceCurveHint(): void {
@@ -1880,9 +1970,10 @@ function run(): void {
   testNormalizeMotionPayloadRejectsMixedOrInvalidAxisLevelContracts();
   testV4AxisLevelsResolveThroughProfileAnchors();
   testV4AxisLevelsRejectUnknownAxesAndMissingAnchors();
-  testCompiledPlanPreservesResourceIntentWithoutPlayingIt();
+  testCompiledPlanResolvesExpressionResourceForPlayback();
   testResourcePolicyRejectsUnknownResource();
   testResourcePolicyRejectsParameterConflict();
+  testMotionResourceUsesCatalogPlaybackInsteadOfDirectPlan();
   testNormalizeMotionPayloadAcceptsPerformanceCurveHint();
   testNormalizeMotionPayloadRejectsInvalidPerformanceCurveHint();
   testNormalizeMotionPayloadRejectsV3NestedAxes();

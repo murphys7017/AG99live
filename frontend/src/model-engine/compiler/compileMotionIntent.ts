@@ -106,7 +106,21 @@ function buildSuccessResultFromContext(
     model_id: profile.model_id,
     mode: context.state.resolvedMode,
     emotion_label: context.intent.emotion_label,
-    resource_id: context.intent.resource_id,
+    resource: context.state.resource?.resourceType === "expression"
+      ? {
+          kind: "expression",
+          resource_id: context.state.resource.resourceId,
+          expression_id: context.state.resource.expressionId ?? "",
+          parameter_ids: [...context.state.resource.parameterIds],
+        }
+      : context.state.resource?.resourceType === "motion" && context.state.resource.motion
+        ? {
+            kind: "motion",
+            resource_id: context.state.resource.resourceId,
+            parameter_ids: [...context.state.resource.parameterIds],
+            motion: context.state.resource.motion,
+          }
+        : undefined,
     timing: timing.timing,
     parameters: context.state.parameters,
     diagnostics: {
