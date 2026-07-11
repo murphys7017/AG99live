@@ -932,7 +932,7 @@ function testCompileRejectsAllNeutralSemanticAxes(): void {
   assert.equal(result.feedback?.code, "semantic_axes_all_neutral");
 }
 
-function testCompileSkipsInvalidBindingsAndKeepsUsableParameters(): void {
+function testCompileRejectsInvalidBindingsInsteadOfSkippingThem(): void {
   const profile = buildProfile();
   profile.axes.find((axis) => axis.id === "head_yaw")?.parameter_bindings.push({
     parameter_id: "ParamBroken",
@@ -953,21 +953,44 @@ function testCompileSkipsInvalidBindingsAndKeepsUsableParameters(): void {
     },
   });
 
-  assert.equal(result.ok, true);
-  assert.ok(result.plan);
+  assert.equal(result.ok, false);
+  assert.equal(result.plan, null);
   assert.equal(
-    result.plan?.parameters.some((item) => item.parameter_id === "ParamAngleX"),
-    true,
+    result.reason,
+    "binding_input_range_zero:head_yaw:ParamBroken",
   );
   assert.equal(
-    result.plan?.parameters.some((item) => item.parameter_id === "ParamBroken"),
-    false,
+    result.feedback?.code,
+    "binding_input_range_zero:head_yaw:ParamBroken",
+  );
+}
+
+function testCompileRejectsBindingInputRangeMismatch(): void {
+  const profile = buildProfile();
+  const headYaw = profile.axes.find((axis) => axis.id === "head_yaw");
+  assert.ok(headYaw);
+  headYaw!.parameter_bindings[0].input_range = [0, 60];
+
+  const result = compileMotionIntent(buildIntent({
+    axes: {
+      head_yaw: 80,
+    },
+  }), {
+    model: buildModel(profile),
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(
+    result.reason,
+    "binding_input_value_out_of_range:head_yaw:ParamAngleX",
   );
   assert.equal(
-    result.diagnostics.warnings?.includes(
-      "binding_input_range_zero:head_yaw:ParamBroken_skipped",
-    ),
-    true,
+    result.feedback?.code,
+    "binding_input_value_out_of_range:head_yaw:ParamAngleX",
   );
 }
 
@@ -1610,7 +1633,8 @@ function run(): void {
   testRevisionMismatchBecomesWarningInsteadOfCompileFailure();
   testCompileRejectsInvalidAxesInsteadOfSalvaging();
   testCompileRejectsAllNeutralSemanticAxes();
-  testCompileSkipsInvalidBindingsAndKeepsUsableParameters();
+  testCompileRejectsInvalidBindingsInsteadOfSkippingThem();
+  testCompileRejectsBindingInputRangeMismatch();
   testSpeechPoseAppliesForSpeechLinkedIdleIntent();
   testPerformanceCurveHintAdjustsExpressiveTiming();
   testPerformanceCurveHintAdjustsSpeechIdleTiming();

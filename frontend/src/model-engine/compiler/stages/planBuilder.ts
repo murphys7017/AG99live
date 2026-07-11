@@ -63,17 +63,16 @@ export function runPlanBuilderStage(
   );
   for (const parameter of parameterResult.parameters) {
     if (existingParameterIds.has(parameter.parameter_id)) {
-      context.state.warnings = [
-        ...context.state.warnings,
-        `duplicate_parameter_binding_skipped:${parameter.parameter_id}`,
-      ];
-      continue;
+      return {
+        ok: false,
+        reason: `duplicate_parameter_binding:${parameter.parameter_id}`,
+      };
     }
     existingParameterIds.add(parameter.parameter_id);
     context.state.parameters.push(parameter);
   }
   if (!context.state.parameters.length) {
-    return { ok: false, reason: "semantic_plan_parameters_empty_after_salvage" };
+    return { ok: false, reason: "semantic_plan_parameters_empty" };
   }
   return { ok: true };
 }
@@ -92,23 +91,22 @@ function buildSemanticPlanParameters(
   for (const [axisId, value] of Object.entries(axisValues)) {
     const axis = axisById.get(axisId);
     if (!axis) {
-      warnings.push(`unknown_axis_skipped:${axisId}`);
-      continue;
+      return { ok: false, reason: `unknown_axis:${axisId}` };
     }
     if (!axis.parameter_bindings.length) {
-      warnings.push(`axis_has_no_parameter_binding_skipped:${axisId}`);
-      continue;
+      return { ok: false, reason: `axis_parameter_binding_missing:${axisId}` };
     }
 
     for (const binding of axis.parameter_bindings) {
       const parameter = mapSemanticBindingValue(axis, binding, value);
       if (!parameter.ok) {
-        warnings.push(`${parameter.reason}_skipped`);
-        continue;
+        return parameter;
       }
       if (seenParameterIds.has(binding.parameter_id)) {
-        warnings.push(`duplicate_parameter_binding_skipped:${binding.parameter_id}`);
-        continue;
+        return {
+          ok: false,
+          reason: `duplicate_parameter_binding:${binding.parameter_id}`,
+        };
       }
 
       seenParameterIds.add(binding.parameter_id);
@@ -124,9 +122,7 @@ function buildSemanticPlanParameters(
   }
 
   if (!parameters.length) {
-    return warnings.length
-      ? { ok: false, reason: `semantic_plan_parameters_empty_after_salvage:${warnings.join(",")}` }
-      : { ok: false, reason: "semantic_plan_parameters_empty" };
+    return { ok: false, reason: "semantic_plan_parameters_empty" };
   }
   return { ok: true, parameters, warnings };
 }
@@ -158,9 +154,15 @@ function mapSemanticBindingValue(
     };
   }
 
+  if (value < inputMin || value > inputMax) {
+    return {
+      ok: false,
+      reason: `binding_input_value_out_of_range:${axis.id}:${binding.parameter_id}`,
+    };
+  }
+
   const ratio = (value - inputMin) / (inputMax - inputMin);
-  const clampedRatio = Math.max(0, Math.min(1, ratio));
-  const effectiveRatio = binding.invert ? 1 - clampedRatio : clampedRatio;
+  const effectiveRatio = binding.invert ? 1 - ratio : ratio;
   const targetValue = outputMin + (outputMax - outputMin) * effectiveRatio;
 
   if (!Number.isFinite(targetValue)) {
