@@ -11,7 +11,7 @@ flowchart TD
     H --> I[TurnCoordinator.emit_message_chain 拆回复链]
     I --> J[抽取 output.text]
     I --> K[抽取 output.audio Record]
-    I --> L[抽取/归一化 engine.motion_intent.v3]
+    I --> L[抽取/归一化 engine.motion_intent.v4]
 
     J --> M[发 output.text]
     L --> N[发 engine.motion_intent]

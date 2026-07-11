@@ -145,7 +145,7 @@ control.turn_finished
 
 | 类型 | 方向 | 模式 |
 | --- | --- | --- |
-| `engine.motion_intent` | 双向 | 当前主协议：`engine.motion_intent.v3` |
+| `engine.motion_intent` | 双向 | 主协议：`engine.motion_intent.v4`；官方兼容：v3 |
 
 ## 动作路径
 
@@ -160,15 +160,17 @@ control.turn_finished
 
 后端主路径仅广播 `engine.motion_intent`。
 
-### `engine.motion_intent.v3`
+### `engine.motion_intent.v4`
 
-`engine.motion_intent.v3` 是当前大模型自动动作链路的主协议。
+`engine.motion_intent.v4` 是当前 Persona Effect 自动动作链路的主协议。
 
 约束：
 
-- `intent_tags` 和 `axes` 是主语义输入。
-- `axes` 唯一合法形态是 flat number map：`Record<string, number>`。
-- 轴值范围以当前 `SemanticAxisProfile` 中对应 axis 的 `value_range` 为准。
+- `intent_tags` 和 `axis_levels` 是主语义输入。
+- `axis_levels` 唯一合法形态是 `Record<string, -3|-2|-1|0|1|2|3>`。
+- 省略轴表示本轮不控制，`0` 表示明确回到中性。
+- v4 出现 `axes`、非法等级、未知轴或缺失 profile 锚点时直接失败，不降级为 v3。
+- ModelEngine 使用 `SemanticAxisProfile.level_anchors` 转换等级，再进入关系图约束。
 - 自动动作链路不允许输出 `choice`、`motion_id`、catalog motion、motion3、exp3 或旧播放文件引用。
 - LLM 输出契约不包含 `mode`；Adapter 归一化后会补 `mode: "expressive"` 给现有 ModelEngine 编译链路使用。
 - `idle` 是前端/运行时本底能力，不属于 LLM 本轮动作输出。
@@ -178,7 +180,7 @@ control.turn_finished
 
 ```json
 {
-  "schema_version": "engine.motion_intent.v3",
+  "schema_version": "engine.motion_intent.v4",
   "profile_id": "pet.semantic.v1",
   "profile_revision": 2,
   "model_id": "pet",
@@ -186,18 +188,22 @@ control.turn_finished
   "intent_tags": ["开心", "轻快", "看向用户"],
   "duration_hint_ms": 1000,
   "resource_id": "",
-  "axes": {
-    "head_yaw": 54,
-    "head_pitch": 62,
-    "body_roll": 59,
-    "gaze_x": 54,
-    "mouth_smile": 84
+  "axis_levels": {
+    "head_yaw": 1,
+    "head_pitch": 1,
+    "body_roll": 1,
+    "gaze_x": 1,
+    "mouth_smile": 3
   },
   "emotion_label": "开心-轻快-看向用户"
 }
 ```
 
-`engine.motion_intent.v2` 不再作为当前协议入口维护。动作意图只接受 v3 flat axes。
+### `engine.motion_intent.v3`
+
+v3 使用 flat number `axes`，只保留给官方 `<@anim>` 兼容入口和内部手动预览。它与 v4 进入同一个 ModelEngine，但不是 v4 校验失败后的 fallback。
+
+`engine.motion_intent.v1/v2` 不再作为当前协议入口维护。
 
 ## 后端内部映射
 

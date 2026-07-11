@@ -13,7 +13,7 @@ AG99live V2 的 AstrBot 插件侧实现。该目录负责协议桥接、turn 生
 
 ## 当前路线说明
 
-- 后端当前主职责是产出结构化动作意图 `engine.motion_intent.v3`，并通过 middleware-first 链路稳定送到前端。
+- 后端当前主职责是把 `ag99live.motion` 的七级 `axis_levels` 严格归一化为 `engine.motion_intent.v4`，并通过 middleware-first 链路稳定送到前端。
 - 前端 `ModelEngine` 负责把 intent 编译为 `engine.parameter_plan.v2`。
 - 说话时的 plan 级补偿由前端 compile 侧 `SpeechPoseStage` 承接。
 - 连续多段之间的惯性、衰减、残留、soft handoff 和层间混合由前端 Live2D runtime 侧 `ParameterPresentationLayer` 承接，而不是放回后端动作生成链路。
@@ -44,7 +44,7 @@ astrbot_plugin_ag99live_adapter/
 - 主聊天模型只负责正常回复文本，不输出动作标签。
 - 交互中间件在 prompt contributor 中注入动作能力/运行态上下文，并注册 `ag99live.motion` Persona Effect；result contributor 从 `view.effect_calls` 消费该 effect 并返回 `client_objects`。
 - 后端从 `platform_extras` / `client_objects` 中读取动作载荷，并与文本、音频一起广播到前端。
-- 若 runtime 内部明确启用了额外 fallback 组件，它的结果也必须回到同一条 `engine.motion_*` 协议链路和同一 segment identity。
+- 任何额外动作来源都必须回到同一条 `engine.motion_*` 协议链路和同一 segment identity，不能绕过 ModelEngine 或 PlaybackTimeline。
 
 ### 官方 `<@anim>` 兼容路径
 
@@ -57,8 +57,9 @@ astrbot_plugin_ag99live_adapter/
 
 ### 动作 selector 输出
 
-- 当前主动作载荷为 `engine.motion_intent.v3`，前端 `ModelEngine` 根据 `semantic_axis_profile` 编译为 `engine.parameter_plan.v2` 再执行。
-- v3 的 `axes` 是 flat number map，例如 `"head_yaw": 62`；LLM 契约不包含 `mode`，Adapter 归一化后补 `mode: "expressive"`。
+- 当前 Persona Effect 主动作载荷为 `engine.motion_intent.v4`，前端 `ModelEngine` 根据 `semantic_axis_profile.level_anchors` 把 `axis_levels` 转换为轴值，再编译为 `engine.parameter_plan.v2`。
+- `axis_levels` 只能使用 `-3..3` 整数；省略表示本轮不控制该轴，`0` 表示明确回到中性。混入 `axes`、非法等级或空等级对象会直接拒绝，不会回退到 v3。
+- `engine.motion_intent.v3 + axes` 只保留给官方 `<@anim>` 兼容入口和内部手动预览。
 - 自动动作链路不允许 LLM 输出 `choice`、`motion_id`、catalog motion、motion3、exp3 或旧播放文件引用。
 - `motion_prompt_instruction` 会注入中间件动作上下文或 selector prompt，用于影响动作风格和幅度。
 - 中间件 prompt 只暴露 profile 中的 `primary/hint` axes，禁止输出 `derived/runtime/ambient/debug` axes。
@@ -123,7 +124,7 @@ AG99live 远程执行器当前走任务委托链路：
 
 - 自动动作链路不再把旧 motion/exp3 reference templates 或 catalog motion 作为模型可选项注入。
 - selector prompt 使用当前 `SemanticAxisProfile` 轴说明、动作指令、用户手调样本形成的风格偏好和 fallback pose 候选。
-- fallback pose 候选来源优先级为：用户保存的手调结果 -> `Expressions/*.exp3.json` 显式参数抽取 -> 当前 `SemanticAxisProfile.parameter_bindings` 可映射参数抽取；三层都不可用时才使用默认 neutral pose；最终仍输出 `engine.motion_intent.v3` flat axes。
+- fallback pose 候选只作为 Prompt 姿态参考，不修复非法输入、不替换有效等级，也不会在输入为空时生成默认 neutral pose。
 
 ## 开发与验证
 

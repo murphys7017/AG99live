@@ -100,7 +100,7 @@ AG99live 是一个运行在 Windows 桌面上的 AstrBot + Electron + Live2D AI 
 
 ```text
 ag99live.motion Persona Effect
-  -> engine.motion_intent.v3
+  -> engine.motion_intent.v4 (axis_levels -3..3)
   -> ModelEngine
   -> engine.parameter_plan.v2
   -> Live2D runtime

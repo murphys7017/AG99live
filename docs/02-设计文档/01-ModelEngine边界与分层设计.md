@@ -6,12 +6,12 @@
 
 ModelEngine 是前端的动作语义编译与启动模块。
 
-它接收当前协议中的动作载荷，将 `engine.motion_intent.v3` 编译为 `engine.parameter_plan.v2`，再把参数计划交给 Live2D 参数播放器执行。
+它接收当前协议中的动作载荷，将 Persona Effect 的 `engine.motion_intent.v4` 或官方兼容入口的 v3 编译为 `engine.parameter_plan.v2`，再把参数计划交给 Live2D 参数播放器执行。
 
 主链路：
 
 ```text
-engine.motion_intent.v3 / engine.parameter_plan.v2
+engine.motion_intent.v4 / engine.motion_intent.v3 / engine.parameter_plan.v2
 -> normalizeMotionPayload / parseSemanticParameterPlan
 -> useModelEngine
 -> motionRuntimeScheduler
@@ -25,7 +25,8 @@ engine.motion_intent.v3 / engine.parameter_plan.v2
 
 | Payload | Schema | 说明 |
 | --- | --- | --- |
-| 动作意图 | `engine.motion_intent.v3` | 当前自动动作链路主协议；`axes` 为 flat number map |
+| Persona Effect 动作意图 | `engine.motion_intent.v4` | 当前自动动作主协议；`axis_levels` 为 `-3..3` 整数 map |
+| 官方兼容动作意图 | `engine.motion_intent.v3` | `<@anim>` 和内部手动预览使用；`axes` 为 flat number map |
 | 参数计划 | `engine.parameter_plan.v2` | 前端可直接执行的 Live2D 参数计划 |
 
 ## 2. 负责什么
@@ -58,7 +59,7 @@ ModelEngine 不负责：
 | --- | --- |
 | `useModelEngine.ts` | 引擎 facade：持有状态、装配 runtime/start 依赖、暴露对外 API |
 | `contracts.ts` | 入站动作 payload 归一化后的边界类型 |
-| `normalize.ts` | `engine.motion_intent.v3` 和 `engine.parameter_plan.v2` 入站归一化 |
+| `normalize.ts` | `engine.motion_intent.v3/v4` 和 `engine.parameter_plan.v2` 入站归一化 |
 | `planParser.ts` | `engine.parameter_plan.v2` parser 与 clone |
 | `settings.ts` | 动作强度和单轴强度设置 |
 | `timing.ts` | motion timing resolution，支持 hint/audio_sync/default |
@@ -288,7 +289,7 @@ order: 45
 
 - LLM 只面向当前 `SemanticAxisProfile` 中允许控制的语义轴。
 - 表情态度主要通过 `mouth_smile`、`brow_bias`、`gaze_x`、`gaze_y` 等辅轴表达；需要姿态配合时再组合头部和身体主轴。
-- `Expressions/*.exp3.json` 可以作为 fallback pose 候选的参数抽取来源，但最终仍必须转成 `engine.motion_intent.v3` flat axes，不作为播放 payload。
+- `Expressions/*.exp3.json` 可以作为 Prompt 姿态参考来源，但不修复或替换 `engine.motion_intent.v4`，也不作为播放 payload。
 - `Expressions/*.exp3.json` 不进入 ModelEngine compile pipeline 的直接播放分支。
 - 如果重新接入原生 expression，必须作为独立能力设计，不能混入主轴来源。
 
@@ -363,7 +364,8 @@ Avatar Runtime 不理解语义轴，也不判断表情语义。
 
 ## 15. 维护原则
 
-- 当前自动动作主路径是 `engine.motion_intent.v3 -> engine.parameter_plan.v2`。
+- 当前自动动作主路径是 `engine.motion_intent.v4 axis_levels -> profile anchors -> relation graph -> engine.parameter_plan.v2`。
+- `engine.motion_intent.v3` 只维护官方 `<@anim>` 兼容和内部手动预览，不是 v4 失败后的 fallback。
 - `engine.motion_intent.v2` 不再作为当前自动链路或播放入口维护。
 - 废弃协议回退分支不进入主代码和主文档。
 - 模块按职责维护，扩展通过 stage / registry 挂载。

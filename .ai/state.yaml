@@ -51,7 +51,9 @@ context:
     - Audio playback started events require a real audio clock; missing clock at started time fails the audio sink/session instead of installing a synthetic or unavailable playback clock.
     - ModelEngine no longer consumes audio_unavailable playback timelines for audio-synced duration or speech-active detection, and it will not fall back to SessionStore audio-duration estimates for that failure state.
     - Stopping an already-playing audio segment now writes an audio terminal only when no more specific terminal reason has already been set.
-    - The automatic LLM motion path remains pure engine.motion_intent.v3 semantic axes; catalog motion, motion3, exp3, and choice outputs stay out of this path.
+    - The automatic Persona Effect motion path uses engine.motion_intent.v4 axis_levels exclusively; engine.motion_intent.v3 axes remain only for the official <@anim> compatibility transport and internal manual previews.
+    - Persona Effect v4 never falls back to v3: mixed axes/axis_levels, non-integer levels, out-of-range levels, unknown axes, or missing profile anchors fail visibly.
+    - Semantic profiles persist ordered -3..3 level anchors; ModelEngine converts levels from those anchors and records raw levels plus resolved axes in MotionTransformTrace before relation-graph processing.
     - The automatic motion path is middleware-first only; inline_first is no longer a runtime-selectable motion generation route.
     - engine.motion_intent.v2 is no longer accepted at backend normalization, frontend inbound, preview send, or ModelEngine normalization boundaries.
     - <@anim> remains an official AstrBot compatibility transport only when Persona Effect injection is unavailable; it is not a fallback for invalid ag99live.motion payloads.
@@ -136,7 +138,7 @@ architecture:
     - Adapter runtime no longer exposes inline_first / enable_inline_motion_contract configuration; <@anim> inline motion tags are parsed and broadcast only for the official compatibility path when Persona Effect injection is unavailable.
     - Frontend and adapter motion-intent boundaries are now v3-only; v2 nested axes are treated as invalid input instead of being normalized forward.
     - TurnCoordinator sanitizes hidden legacy motion markup from visible text/captions while preserving raw assistant output in Motion Lab records.
-    - Performance curve timing adds an optional `performance_curve_hint` to `engine.motion_intent.v3`; frontend ModelEngine resolves it into timing plus a validated preset name consumed by the Live2D per-frame easing layer.
+    - Performance curve timing adds an optional `performance_curve_hint` to semantic motion intents v3/v4; frontend ModelEngine resolves it into timing plus a validated preset name consumed by the Live2D per-frame easing layer.
     - Performance curve generation uses the current turn chat Provider as an auxiliary call and does not add the curve request to AstrBot chat history.
     - fallback pose candidates can now include semantic metadata from motion catalog entries and key semantic axes derived from motion_resource_pool driver components.
     - middleware motion prompt now names axes as a semantic-axis target group instead of a plain field and exposes fallback candidate descriptions, scenarios, intensity, emotion bias, and key axes.
