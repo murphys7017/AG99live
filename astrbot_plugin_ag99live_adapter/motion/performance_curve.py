@@ -264,12 +264,12 @@ def normalize_performance_curve_hint(value: Any) -> dict[str, Any]:
 
     return {
         "schema_version": PERFORMANCE_CURVE_HINT_SCHEMA_VERSION,
-        "curve_family": _enum_value(value.get("curve_family"), CURVE_FAMILIES, "default"),
-        "entry": _enum_value(value.get("entry"), ENTRIES, _DEFAULT_HINT["entry"]),
-        "hold": _enum_value(value.get("hold"), HOLDS, _DEFAULT_HINT["hold"]),
-        "exit": _enum_value(value.get("exit"), EXITS, _DEFAULT_HINT["exit"]),
-        "emphasis": _enum_value(value.get("emphasis"), EMPHASES, _DEFAULT_HINT["emphasis"]),
-        "energy": _enum_value(value.get("energy"), ENERGIES, _DEFAULT_HINT["energy"]),
+        "curve_family": _enum_value(value.get("curve_family"), CURVE_FAMILIES, "curve_family"),
+        "entry": _enum_value(value.get("entry"), ENTRIES, "entry"),
+        "hold": _enum_value(value.get("hold"), HOLDS, "hold"),
+        "exit": _enum_value(value.get("exit"), EXITS, "exit"),
+        "emphasis": _enum_value(value.get("emphasis"), EMPHASES, "emphasis"),
+        "energy": _enum_value(value.get("energy"), ENERGIES, "energy"),
     }
 
 
@@ -336,9 +336,11 @@ def _extract_json_object(text: str) -> dict[str, Any]:
     return value
 
 
-def _enum_value(value: Any, allowed: set[str], default: str) -> str:
+def _enum_value(value: Any, allowed: set[str], field_name: str) -> str:
     normalized = str(value or "").strip().lower()
-    return normalized if normalized in allowed else default
+    if normalized not in allowed:
+        raise ValueError(f"performance_curve_hint_invalid_{field_name}")
+    return normalized
 
 
 def _normalize_string_list(value: Any, *, limit: int) -> list[str]:

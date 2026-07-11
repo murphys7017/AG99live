@@ -4,8 +4,10 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import pytest
 
-def test_normalize_performance_curve_hint_defaults_unknown_enums(
+
+def test_normalize_performance_curve_hint_rejects_unknown_enums(
     install_fake_astrbot,
 ) -> None:
     install_fake_astrbot()
@@ -13,27 +15,18 @@ def test_normalize_performance_curve_hint_defaults_unknown_enums(
         normalize_performance_curve_hint,
     )
 
-    hint = normalize_performance_curve_hint(
-        {
-            "schema_version": "ag99.performance_curve_hint.v1",
-            "curve_family": "unknown",
-            "entry": "quick",
-            "hold": "unknown",
-            "exit": "soft",
-            "emphasis": "early",
-            "energy": "strange",
-        }
-    )
-
-    assert hint == {
-        "schema_version": "ag99.performance_curve_hint.v1",
-        "curve_family": "default",
-        "entry": "quick",
-        "hold": "steady",
-        "exit": "soft",
-        "emphasis": "early",
-        "energy": "medium",
-    }
+    with pytest.raises(ValueError, match="performance_curve_hint_invalid_curve_family"):
+        normalize_performance_curve_hint(
+            {
+                "schema_version": "ag99.performance_curve_hint.v1",
+                "curve_family": "unknown",
+                "entry": "quick",
+                "hold": "steady",
+                "exit": "soft",
+                "emphasis": "early",
+                "energy": "medium",
+            }
+        )
 
 
 def test_performance_curve_runtime_resolves_provider_hint(

@@ -74,6 +74,7 @@ context:
     - Frontend ModelEngine requires semantic profile relation_graph and no longer reads legacy couplings; backend legacy normalization exists only to migrate persisted profiles before they cross the frontend boundary.
     - The unused hash-based speech-pose direction fallback has been removed; speech pose direction now comes from explicit voice-following metadata or axis semantics.
     - Legacy repair/fallback counters in motion_intent.py had no callers and have been removed; runtime failures remain visible through structured payload and compiler diagnostics.
+    - Performance curve enum normalization is strict at backend and frontend motion boundaries; invalid curve objects are rejected instead of being rewritten to defaults or silently dropped.
   unresolved_questions:
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.

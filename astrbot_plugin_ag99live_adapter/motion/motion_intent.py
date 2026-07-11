@@ -121,8 +121,8 @@ def normalize_motion_intent_v3_payload(intent: Any) -> dict[str, Any]:
             performance_curve_hint = normalize_performance_curve_hint(
                 intent.get("performance_curve_hint")
             )
-        except ValueError:
-            performance_curve_hint = None
+        except ValueError as exc:
+            raise ValueError(f"performance_curve_hint_invalid:{exc}") from exc
 
     normalized_intent = {
         "schema_version": MOTION_INTENT_V3_SCHEMA_VERSION,

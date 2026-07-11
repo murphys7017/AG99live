@@ -119,6 +119,15 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
     }
   }
 
+  const rawPerformanceCurveHint = value.performance_curve_hint;
+  let performanceCurveHint: PerformanceCurveHint | undefined;
+  if (rawPerformanceCurveHint !== undefined) {
+    performanceCurveHint = normalizePerformanceCurveHint(rawPerformanceCurveHint);
+    if (!performanceCurveHint) {
+      return { ok: false, reason: "motion_intent.performance_curve_hint_invalid" };
+    }
+  }
+
   return {
     ok: true,
     value: {
@@ -131,7 +140,7 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
       duration_hint_ms: durationHintMs,
       fallback_pose_id: normalizeText(value.fallback_pose_id) || undefined,
       resource_id: normalizeText(value.resource_id) || undefined,
-      performance_curve_hint: normalizePerformanceCurveHint(value.performance_curve_hint),
+      performance_curve_hint: performanceCurveHint,
       axes,
       summary: normalizeMotionVisibilitySummary(value.summary),
     },
@@ -145,24 +154,33 @@ export function normalizePerformanceCurveHint(value: unknown): PerformanceCurveH
   if (normalizeText(value.schema_version) !== PERFORMANCE_CURVE_SCHEMA_VERSION) {
     return undefined;
   }
+  const curveFamily = normalizeEnum(value.curve_family, CURVE_FAMILIES);
+  const entry = normalizeEnum(value.entry, CURVE_ENTRIES);
+  const hold = normalizeEnum(value.hold, CURVE_HOLDS);
+  const exit = normalizeEnum(value.exit, CURVE_EXITS);
+  const emphasis = normalizeEnum(value.emphasis, CURVE_EMPHASES);
+  const energy = normalizeEnum(value.energy, CURVE_ENERGIES);
+  if (!curveFamily || !entry || !hold || !exit || !emphasis || !energy) {
+    return undefined;
+  }
+
   return {
     schema_version: PERFORMANCE_CURVE_SCHEMA_VERSION,
-    curve_family: normalizeEnum(value.curve_family, CURVE_FAMILIES, "default"),
-    entry: normalizeEnum(value.entry, CURVE_ENTRIES, "soft"),
-    hold: normalizeEnum(value.hold, CURVE_HOLDS, "steady"),
-    exit: normalizeEnum(value.exit, CURVE_EXITS, "soft"),
-    emphasis: normalizeEnum(value.emphasis, CURVE_EMPHASES, "none"),
-    energy: normalizeEnum(value.energy, CURVE_ENERGIES, "medium"),
+    curve_family: curveFamily,
+    entry,
+    hold,
+    exit,
+    emphasis,
+    energy,
   };
 }
 
 function normalizeEnum<T extends string>(
   value: unknown,
   allowed: readonly T[],
-  fallback: T,
-): T {
+): T | undefined {
   const normalized = normalizeText(value).toLowerCase();
-  return allowed.includes(normalized as T) ? normalized as T : fallback;
+  return allowed.includes(normalized as T) ? normalized as T : undefined;
 }
 
 function parseCatalogMotionPayload(value: unknown): ParseResult<CatalogMotionPayload> {

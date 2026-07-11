@@ -475,6 +475,31 @@ function testNormalizeMotionPayloadAcceptsPerformanceCurveHint(): void {
   assert.equal(result.payload.intent.performance_curve_hint?.curve_family, "quick_in_hold_soft_out");
 }
 
+function testNormalizeMotionPayloadRejectsInvalidPerformanceCurveHint(): void {
+  const result = normalizeMotionPayload({
+    schema_version: "engine.motion_intent.v3",
+    profile_id: "profile-1",
+    profile_revision: 1,
+    model_id: "model-1",
+    mode: "expressive",
+    intent_tags: ["happy"],
+    emotion_label: "happy",
+    performance_curve_hint: {
+      schema_version: "ag99.performance_curve_hint.v1",
+      curve_family: "not-a-curve",
+      entry: "quick",
+      hold: "steady",
+      exit: "soft",
+      emphasis: "early",
+      energy: "medium",
+    },
+    axes: { head_yaw: 62 },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "motion_intent.performance_curve_hint_invalid");
+}
+
 function testNormalizeMotionPayloadRejectsV3NestedAxes(): void {
   const result = normalizeMotionPayload({
     schema_version: "engine.motion_intent.v3",
@@ -1622,6 +1647,7 @@ function run(): void {
   testRegistryCoreStageOrder();
   testNormalizeMotionPayloadAcceptsV3FlatAxes();
   testNormalizeMotionPayloadAcceptsPerformanceCurveHint();
+  testNormalizeMotionPayloadRejectsInvalidPerformanceCurveHint();
   testNormalizeMotionPayloadRejectsV3NestedAxes();
   testMotionStartNotifiesStartedWhenPlayerOmitsCallback();
   testMotionStartUsesPlaybackTimelineDuration();
