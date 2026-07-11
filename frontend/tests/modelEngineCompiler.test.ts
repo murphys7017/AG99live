@@ -828,6 +828,38 @@ function testAxisIntensityScaleAffectsOnlyTargetAxis(): void {
   assert.equal(scaled.diagnostics.intensityApplied, true);
 }
 
+function testAxisRangeConstraintIsOwnedByRelationGraph(): void {
+  const result = compileMotionIntent(buildIntent({
+    axes: {
+      mouth_smile: 60,
+    },
+  }), {
+    model: buildModel(buildProfile()),
+    settings: {
+      motionIntensityScale: 2.5,
+      axisIntensityScale: {
+        mouth_smile: 2.5,
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  const smile = result.plan?.parameters.find(
+    (item) => item.parameter_id === "ParamMouthForm",
+  );
+  assert.ok(smile);
+  assert.equal(smile?.input_value, 100);
+  assert.equal(
+    result.diagnostics.relationAdjustments?.some(
+      (item) => item.ruleId === "axis_value_range:mouth_smile"
+        && item.reason === "axis_value_range_limit"
+        && item.before === 112.5
+        && item.after === 100,
+    ),
+    true,
+  );
+}
+
 function testRevisionMismatchBecomesWarningInsteadOfCompileFailure(): void {
   const profile = buildProfile();
   const result = compileMotionIntent(buildIntent({
@@ -1574,6 +1606,7 @@ function run(): void {
   testPerformanceCurveSkipsAudioUnavailableTimeline();
   testExplicitPrimaryAxisIsNotOverwrittenByCoupling();
   testAxisIntensityScaleAffectsOnlyTargetAxis();
+  testAxisRangeConstraintIsOwnedByRelationGraph();
   testRevisionMismatchBecomesWarningInsteadOfCompileFailure();
   testCompileRejectsInvalidAxesInsteadOfSalvaging();
   testCompileRejectsAllNeutralSemanticAxes();

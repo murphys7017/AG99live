@@ -82,17 +82,9 @@ function applySemanticIntensity(
     return { value, warning: "" };
   }
 
-  const [minValue, maxValue] = axis.value_range;
   const scaled =
     axis.neutral + (value - axis.neutral) * motionIntensityScale * axisIntensityScale;
-
-  if (scaled < minValue || scaled > maxValue) {
-    const clampedValue = Math.max(minValue, Math.min(maxValue, scaled));
-    return {
-      value: clampedValue,
-      warning: `semantic_intensity_clamped:${axis.id}:${scaled}->${clampedValue}`,
-    };
-  }
-
+  // Range constraints belong to the relation graph stage, which is the single
+  // owner of final axis values. Intensity only contributes a candidate.
   return { value: scaled, warning: "" };
 }

@@ -76,6 +76,14 @@ function applyHeadBodyRelations(
     ...derivedValues,
   };
 
+  applyAxisValueRangeConstraints(
+    controlledValues,
+    derivedValues,
+    allValues,
+    axisById,
+    adjustments,
+  );
+
   for (const rule of relationRules) {
     const sourceValue = allValues[rule.source_axis_id];
     const targetValue = allValues[rule.target_axis_id];
@@ -139,6 +147,44 @@ function applyHeadBodyRelations(
   }
 
   return adjustments;
+}
+
+function applyAxisValueRangeConstraints(
+  controlledValues: DynamicAxisValues,
+  derivedValues: DynamicAxisValues,
+  allValues: DynamicAxisValues,
+  axisById: Map<string, SemanticAxisDefinition>,
+  adjustments: MotionAxisRelationAdjustment[],
+): void {
+  for (const [axisId, value] of Object.entries(allValues)) {
+    const axis = axisById.get(axisId);
+    if (!axis) {
+      throw new Error(`semantic_axis_relation_axis_missing:range:${axisId}`);
+    }
+
+    const constrainedValue = clamp(
+      value,
+      axis.value_range[0],
+      axis.value_range[1],
+    );
+    if (Math.abs(constrainedValue - value) <= 0.0001) {
+      continue;
+    }
+
+    allValues[axisId] = constrainedValue;
+    if (Object.prototype.hasOwnProperty.call(controlledValues, axisId)) {
+      controlledValues[axisId] = constrainedValue;
+    } else {
+      derivedValues[axisId] = constrainedValue;
+    }
+    adjustments.push({
+      ruleId: `axis_value_range:${axisId}`,
+      targetAxisId: axisId,
+      before: value,
+      after: constrainedValue,
+      reason: "axis_value_range_limit",
+    });
+  }
 }
 
 function resolveHardCap(
