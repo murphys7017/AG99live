@@ -172,7 +172,50 @@ function collectControlledParameterIds(
       parameterIds.add(binding.parameter_id);
     }
   }
+
+  // The relation graph runs after this stage. Reserve parameters for relation
+  // targets that will be derived from an active source so voice-following
+  // cannot introduce a duplicate binding before the graph is evaluated.
+  const pendingRelationTargets = collectPendingRelationTargetAxisIds(context);
+  for (const axisId of pendingRelationTargets) {
+    const targetAxis = context.state.axisById.get(axisId);
+    if (!targetAxis) {
+      continue;
+    }
+    for (const binding of targetAxis.parameter_bindings) {
+      parameterIds.add(binding.parameter_id);
+    }
+  }
   return parameterIds;
+}
+
+function collectPendingRelationTargetAxisIds(
+  context: MotionCompileContext,
+): Set<string> {
+  const pendingTargets = new Set<string>();
+  const profile = context.state.profile;
+  if (!profile) {
+    return pendingTargets;
+  }
+
+  for (const relation of profile.relation_graph.edges) {
+    if (context.state.allAxisValues[relation.target_axis_id] !== undefined) {
+      continue;
+    }
+    const sourceValue = context.state.allAxisValues[relation.source_axis_id];
+    const sourceAxis = context.state.axisById.get(relation.source_axis_id);
+    const targetAxis = context.state.axisById.get(relation.target_axis_id);
+    if (
+      sourceValue === undefined
+      || !sourceAxis
+      || !targetAxis
+      || Math.abs(sourceValue - sourceAxis.neutral) <= relation.deadzone
+    ) {
+      continue;
+    }
+    pendingTargets.add(relation.target_axis_id);
+  }
+  return pendingTargets;
 }
 
 function isUsableVoiceFollowingChannel(
@@ -278,6 +321,7 @@ function selectSpeechPoseAxes(
   }
 
   const axes: SemanticAxisDefinition[] = [];
+  const pendingRelationTargets = collectPendingRelationTargetAxisIds(context);
   for (const axis of profile.axes) {
     if (!isDedicatedSpeechPoseAxis(axis)) {
       continue;
@@ -290,6 +334,13 @@ function selectSpeechPoseAxes(
       continue;
     }
     if (context.state.derivedValues[axis.id] !== undefined) {
+      context.state.warnings = [
+        ...context.state.warnings,
+        `speech_pose_skipped_existing_axis:${axis.id}`,
+      ];
+      continue;
+    }
+    if (pendingRelationTargets.has(axis.id)) {
       context.state.warnings = [
         ...context.state.warnings,
         `speech_pose_skipped_existing_axis:${axis.id}`,

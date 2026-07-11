@@ -1677,6 +1677,30 @@ function testRelationGraphLimitsOppositeHeadBodyMotion(): void {
   );
 }
 
+function testRelationGraphDerivesBoundedRatioAtFinalStage(): void {
+  const profile = buildProfile();
+  const result = compileMotionIntent(buildIntent({
+    axes: {
+      head_yaw: 80,
+    },
+  }), {
+    model: buildModel(profile),
+    targetDurationMs: 1200,
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.diagnostics.derivedAxes?.includes("body_yaw"), true);
+  const bodyYaw = result.plan?.parameters.find(
+    (item) => item.parameter_id === "ParamBodyAngleX",
+  );
+  assert.ok(bodyYaw);
+  assert.equal(bodyYaw?.source, "coupling");
+}
+
 function testExplicitEmptyRelationGraphDoesNotReviveLegacyCouplings(): void {
   const profile = buildProfile();
   profile.relation_graph = {
@@ -1741,6 +1765,7 @@ function run(): void {
   testSpeechPoseDoesNotUseGenericDerivedAxis();
   testSpeechPoseDoesNotOverwriteCouplingDerivedAxis();
   testRelationGraphLimitsOppositeHeadBodyMotion();
+  testRelationGraphDerivesBoundedRatioAtFinalStage();
   testExplicitEmptyRelationGraphDoesNotReviveLegacyCouplings();
   console.log("modelEngineCompiler tests passed");
 }

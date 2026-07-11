@@ -137,6 +137,7 @@ export function usePreviewMotionPlayer() {
   let lastStartedPlanAtMs = 0;
   let activeTerminalRunId = "";
   let activeTerminalCallback: ((event: DirectParameterPlanTerminalEvent) => void) | null = null;
+  let activeMotionStop: (() => void) | null = null;
 
   const PLAN_RESTART_DEDUP_WINDOW_MS = 700;
 
@@ -200,6 +201,13 @@ export function usePreviewMotionPlayer() {
     });
   }
 
+  function stopActiveCatalogMotion(reason: string): void {
+    const stop = activeMotionStop;
+    activeMotionStop = null;
+    stop?.();
+    notifyActiveStopped(reason);
+  }
+
   function scheduleTimer(runId: number, delayMs: number, fn: () => void): void {
     const timerHandle = window.setTimeout(() => {
       if (runId !== activeRunId) {
@@ -218,6 +226,7 @@ export function usePreviewMotionPlayer() {
     if (adapter && typeof adapter.stopDirectParameterPlan === "function") {
       adapter.stopDirectParameterPlan(reason, "stopped");
     }
+    stopActiveCatalogMotion(reason);
     notifyActiveStopped(reason);
 
     if (state.status === "playing") {
@@ -292,6 +301,10 @@ export function usePreviewMotionPlayer() {
     activeRunId += 1;
     const runId = activeRunId;
     clearActiveTimers();
+
+    if (activeMotionStop) {
+      stopActiveCatalogMotion("direct_parameter_plan_replaced");
+    }
 
     if (!options.softHandoff && typeof adapter.stopDirectParameterPlan === "function") {
       adapter.stopDirectParameterPlan();
@@ -388,8 +401,12 @@ export function usePreviewMotionPlayer() {
     options: PlayCatalogMotionOptions = {},
   ): boolean {
     const adapter = window.getLAppAdapter?.();
-    if (!adapter || typeof adapter.startMotion !== "function") {
-      const reason = "现成 motion 无法执行：Live2D 运行时未提供 startMotion 接口。";
+    if (
+      !adapter
+      || typeof adapter.startMotion !== "function"
+      || typeof adapter.stopMotion !== "function"
+    ) {
+      const reason = "现成 motion 无法执行：Live2D 运行时缺少 startMotion 或 stopMotion 接口。";
       console.warn("[MotionPlayer]", reason);
       state.status = "failed";
       state.message = reason;
@@ -401,6 +418,7 @@ export function usePreviewMotionPlayer() {
     const runId = activeRunId;
     const playbackRunId = `catalog-motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     clearActiveTimers();
+    stopActiveCatalogMotion("catalog_motion_replaced");
     if (typeof adapter.stopDirectParameterPlan === "function") {
       adapter.stopDirectParameterPlan();
       notifyActiveStopped("catalog_motion_replaced_direct_plan");
@@ -420,6 +438,7 @@ export function usePreviewMotionPlayer() {
         if (activeRunId !== runId) {
           return;
         }
+        activeMotionStop = null;
         const motionStartError = getMotionStartError();
         if (motionStartError) {
           const reason = `现成 motion 执行失败：${motion.motion_id}（${motionStartError}）。`;
@@ -459,7 +478,6 @@ export function usePreviewMotionPlayer() {
       return false;
     }
 
-    const durationMs = motion.duration_ms ?? 3000;
     state.status = "playing";
     state.message = `正在执行现成 motion（${motion.label || motion.motion_id}）...`;
     state.keyAxesCount = 0;
@@ -467,19 +485,10 @@ export function usePreviewMotionPlayer() {
     state.startedAt = new Date().toISOString();
     state.finishedAt = "";
     setActiveTerminalCallback(playbackRunId, options.onFinished);
+    activeMotionStop = typeof adapter.stopMotion === "function"
+      ? () => adapter.stopMotion?.()
+      : null;
     options.onStarted?.(motion, playbackRunId);
-
-    scheduleTimer(runId, durationMs + 40, () => {
-      state.status = "finished";
-      state.message = "现成 motion 执行完成。";
-      state.finishedAt = new Date().toISOString();
-      clearActiveTimers();
-      clearActiveTerminalCallback(playbackRunId);
-      options.onFinished?.({
-        runId: playbackRunId,
-        status: "completed",
-      });
-    });
     return true;
   }
 

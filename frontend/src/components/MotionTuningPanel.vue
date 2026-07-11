@@ -105,8 +105,6 @@ type MotionVisibilitySummary = Record<string, unknown> & {
   missing_skeleton_groups?: string[];
   outside_soft_range_axes?: string[];
   pose_descriptors?: string[];
-  skeleton_repair_added_axes?: string[];
-  skeleton_repair_replaced_axes?: string[];
 };
 
 const currentProfile = computed<SemanticAxisProfile | null>(() => props.semanticProfile);
@@ -662,8 +660,6 @@ function buildMotionDiagnosticLines(source: MotionDraftSource | null): string[] 
   appendMetric(lines, "表达轴", pickNumber(summary.expressive_axis_count, diagnostics?.expressiveAxisCount));
   appendList(lines, "越过soft轴", pickStringList(summary.outside_soft_range_axes));
   appendList(lines, "姿态描述", pickStringList(summary.pose_descriptors));
-  appendList(lines, "fallback补轴", pickStringList(summary.skeleton_repair_added_axes));
-  appendList(lines, "fallback替换", pickStringList(summary.skeleton_repair_replaced_axes));
   appendList(lines, "coupling跳过", diagnostics?.couplingSkippedExplicitTargets);
   appendList(lines, "编译/计划警告", warningLines.slice(0, 8));
   return lines;

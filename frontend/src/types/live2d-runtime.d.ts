@@ -31,6 +31,7 @@ declare global {
         priority: number,
         onFinishedMotionHandler?: () => void,
       ) => unknown;
+      stopMotion?: () => void;
       getMotionStartError?: () => string;
       setAmbientMotionEnabled?: (enabled: boolean) => void;
       startDirectParameterPlan?: (

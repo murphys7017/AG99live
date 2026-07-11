@@ -63,6 +63,10 @@ export class LAppAdapter {
     return this.getModel()?.startMotion(group, no, priority, onFinishedMotionHandler) ?? InvalidMotionQueueEntryHandleValue;
   }
 
+  public stopMotion(): void {
+    this.getModel()?.stopMotion();
+  }
+
   public getMotionStartError(): string {
     return this.getModel()?.getMotionStartError?.() ?? "";
   }

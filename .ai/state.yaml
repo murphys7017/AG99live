@@ -114,6 +114,7 @@ architecture:
     - A new PlaybackTimelineMotionSink wraps ModelEngine motion start and attaches only same turnId/messageId timeline snapshots supplied by PlaybackTimelineRuntime to motion contexts.
     - PlaybackTimelineMotionSink now prepares a required motion sink on matched audio timelines and marks it failed when ModelEngine rejects the motion payload before playback starts.
     - PreviewMotionPlayer catalog motion playback now exposes started/terminal callbacks with runId, allowing catalog motions to participate in motion timeline terminal tracking.
+    - Catalog motion terminal state now comes from the Live2D SDK callback; the preview player no longer completes it from duration metadata, and catalog playback requires an explicit stopMotion runtime capability for interruption ownership.
     - PreviewMotionPlayer stores the active terminal callback and emits a single stopped terminal when playback is explicitly stopped before the Live2D runtime reports completion.
     - AdapterAudioRuntime exposes a motion-only timeline preparation path so no-audio motion segments can still run under PlaybackTimelineEngine with a synthetic clock.
     - PlaybackTimelineRuntime owns segment-scoped timelines during migration; AdapterAudioRuntime remains the outer playback compatibility facade.
@@ -170,6 +171,7 @@ architecture:
     - PlaybackTimeline segment job release ordering now lives in playback-timeline/segmentJobExecutor.ts; PlaybackTimelineRuntime supplies timeline sink operations and keeps direct timeline map/engine ownership.
     - TTS/audio expected timeout is an audio failure, not an explicit no-audio segment; it releases only visible text, marks unreleased motion failed, and blocks late audio/motion from reviving the segment.
     - SemanticAxisRelationGraphStage is the single ModelEngine owner for head/body relation constraints; coupling and speech pose produce candidates before the graph resolves final values.
+    - bounded_ratio relation targets are derived and constrained inside SemanticAxisRelationGraphStage; the coupling stage only proposes derive candidates, while speech pose performs a non-mutating future-parameter ownership precheck.
     - Motion compile diagnostics now include MotionFeedback and a raw/resolved/derived/constrained/compiled transform trace for Motion Lab correlation.
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
 verification:

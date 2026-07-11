@@ -51,6 +51,12 @@ export class CubismMotionManager extends CubismMotionQueueManager {
     this._reservePriority = val;
   }
 
+  public stopAllMotions(): void {
+    super.stopAllMotions();
+    this._currentPriority = 0;
+    this._reservePriority = 0;
+  }
+
   /**
    * 優先度を設定してモーションを開始する。
    *

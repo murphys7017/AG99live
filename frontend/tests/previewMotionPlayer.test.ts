@@ -84,11 +84,13 @@ function installMockAdapter(): { startCount: () => number } {
 function installCatalogMockAdapter(
   startMotionResult: unknown,
   options: { finishImmediately?: boolean; motionStartError?: string } = {},
-): { startMotionCount: () => number } {
+): { startMotionCount: () => number; stopMotionCount: () => number } {
   let startMotionCount = 0;
+  let stopMotionCount = 0;
   (globalThis as typeof globalThis & {
     getLAppAdapter?: () => {
       startMotion: (group: string, no: number, priority: number, onFinished?: () => void) => unknown;
+      stopMotion: () => void;
       getMotionStartError: () => string;
       stopDirectParameterPlan: () => void;
     };
@@ -100,11 +102,15 @@ function installCatalogMockAdapter(
       }
       return startMotionResult;
     },
+    stopMotion: () => {
+      stopMotionCount += 1;
+    },
     getMotionStartError: () => options.motionStartError ?? "",
     stopDirectParameterPlan: () => {},
   });
   return {
     startMotionCount: () => startMotionCount,
+    stopMotionCount: () => stopMotionCount,
   };
 }
 
@@ -212,6 +218,39 @@ async function testCatalogMotionReportsStartedAndCompletedCallbacks(): Promise<v
   scope.stop();
 }
 
+async function testCatalogMotionWaitsForSdkTerminalCallback(): Promise<void> {
+  installCatalogMockAdapter({ status: "async_motion_accepted" });
+  const scope = effectScope();
+  const player = scope.run(() => usePreviewMotionPlayer());
+  assert.ok(player);
+
+  assert.equal(player.playCatalogMotion(buildCatalogMotion(1), null), true);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(player.state.status, "playing");
+  scope.stop();
+}
+
+async function testCatalogMotionStopDelegatesToSdkAndReportsStopped(): Promise<void> {
+  const adapter = installCatalogMockAdapter({ status: "async_motion_accepted" });
+  const scope = effectScope();
+  const player = scope.run(() => usePreviewMotionPlayer());
+  assert.ok(player);
+  const finished: Array<{ runId: string; status: string; reason?: string }> = [];
+
+  assert.equal(player.playCatalogMotion(buildCatalogMotion(), null, {
+    onFinished: (event) => {
+      finished.push(event);
+    },
+  }), true);
+  player.stopPlan("manual_stop");
+
+  assert.equal(adapter.stopMotionCount(), 1);
+  assert.equal(finished.length, 1);
+  assert.equal(finished[0].status, "stopped");
+  assert.equal(finished[0].reason, "manual_stop");
+  scope.stop();
+}
+
 async function testDirectPlanStopReportsStoppedTerminalOnce(): Promise<void> {
   installMockAdapter();
   const scope = effectScope();
@@ -251,6 +290,8 @@ async function run(): Promise<void> {
   await testCatalogMotionInvalidHandleWithoutDurationStillFails();
   await testCatalogMotionAsyncAcceptedFailureReportsFailed();
   await testCatalogMotionReportsStartedAndCompletedCallbacks();
+  await testCatalogMotionWaitsForSdkTerminalCallback();
+  await testCatalogMotionStopDelegatesToSdkAndReportsStopped();
   await testDirectPlanStopReportsStoppedTerminalOnce();
   console.log("previewMotionPlayer tests passed");
 }

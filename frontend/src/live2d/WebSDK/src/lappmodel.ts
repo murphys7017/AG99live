@@ -810,6 +810,11 @@ export class LAppModel extends CubismUserModel {
     }
   }
 
+  public stopMotion(): void {
+    this._motionManager.stopAllMotions();
+    this._motionManager.setReservePriority(0);
+  }
+
   /**
    * 引数で指定したモーションの再生を開始する
    * @param group モーショングループ名
