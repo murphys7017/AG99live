@@ -633,7 +633,9 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         output_shape_text = f" 输出标签示例：<@anim {inline_json}>"
 
     axis_instruction = (
-        "每个值必须是 -3 到 3 的整数等级；0 表示明确回到中性，省略表示本轮不控制此轴；没有明确方向或表演贡献的轴直接省略。"
+        "每个值必须是 -3 到 3 的整数等级：-3=强负、-2=中负、-1=轻负、"
+        "0=明确中性、+1=轻正、+2=中正、+3=强正；省略表示本轮不控制此轴；"
+        "没有明确方向或表演贡献的轴直接省略。"
         if persona_effect_available
         else "每个值都直接写成 JSON number；没有明确方向或表演贡献的轴直接省略。"
     )

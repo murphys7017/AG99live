@@ -71,8 +71,6 @@ def format_profile_axis_prompt_line(
         return (
             f"- {axis_id}（{label}，{role_label}）："
             f"负方向会让角色{negative_action}；正方向会让角色{positive_action}。"
-            "等级 -3=强负、-2=中负、-1=轻负、0=明确中性、"
-            "+1=轻正、+2=中正、+3=强正。"
             f"本轮没有对应方向的表达需要时省略此轴。{description}{suffix}"
         ).strip()
     return (

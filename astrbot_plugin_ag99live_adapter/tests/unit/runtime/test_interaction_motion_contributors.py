@@ -500,6 +500,8 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "resource_id" in system.value
     assert "axis_levels 是必填对象" in system.value
     assert "可用语义轴及七级方向含义" in system.value
+    assert system.value.count("-3=强负") == 1
+    assert "-3=强负" not in capability.value["semantic_profile"]["axis_prompt"]
     assert "插件会负责" not in system.value
     assert "choice、mode、motion_id" not in system.value
     assert "可选明确资源" in system.value
