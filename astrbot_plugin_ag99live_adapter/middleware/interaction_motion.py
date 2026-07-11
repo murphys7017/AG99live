@@ -951,18 +951,6 @@ def _score_prompt_fallback_pose_candidate(item: dict[str, Any]) -> tuple[int, in
     return source_score + intensity_score + metadata_score, axis_score, len(label), label
 
 
-def _resolve_motion_format_fallback_pose_id(candidates: Any) -> str | None:
-    if not isinstance(candidates, list):
-        return None
-    for item in candidates:
-        if not isinstance(item, dict):
-            continue
-        pose_id = str(item.get("id") or "").strip()
-        if pose_id:
-            return pose_id
-    return None
-
-
 def _select_motion_format_example_axes(
     prompt_axes: list[dict[str, Any]],
     *,
