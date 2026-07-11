@@ -66,6 +66,7 @@ context:
     - ModelEngine now rejects invalid axes and exact-neutral semantic inputs with structured compile feedback, then applies the mounted semantic axis relation graph before plan building.
     - TurnCoordinator only validates and transports v3 motion payloads; it no longer applies semantic axis constraints.
     - Semantic profiles now carry ag99.semantic_axis_relation_graph.v1 edges; derive and bounded_ratio rules are consumed by ModelEngine, while old couplings are only a migration source for profiles that have not been rewritten yet.
+    - Legacy backend fallback-pose scoring and fallback-axis descriptor helpers are removed from the motion intent path; fallback candidates remain prompt/diagnostic metadata only.
   unresolved_questions:
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.
