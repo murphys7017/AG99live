@@ -64,10 +64,7 @@ def normalize_motion_arguments_payload(
     emotion_label = derive_motion_emotion_label(intent_tags)
     resource_id = normalize_motion_resource_id(motion_hint.get("resource_id"))
     axes = motion_hint.get("axes")
-    validated_axes, rejected_axes = normalize_plugin_hint_axes(
-        axes,
-        semantic_profile,
-    )
+    validated_axes, rejected_axes = normalize_effect_axes(axes)
     reason = base_reason
     if forbidden_fields:
         reason = append_resolution_reason(
@@ -161,9 +158,8 @@ def are_motion_axes_all_neutralish(
     return checked > 0
 
 
-def normalize_plugin_hint_axes(
+def normalize_effect_axes(
     axes: Any,
-    semantic_profile: dict[str, Any],
 ) -> tuple[dict[str, float] | None, list[str]]:
     if not isinstance(axes, dict) or not axes:
         return None, []
@@ -188,12 +184,6 @@ def normalize_plugin_hint_axes(
         return None, rejected_axes
 
     return normalized_axes, rejected_axes
-
-
-def coerce_plugin_hint_axis_value(raw_value: float, axis: dict[str, Any]) -> float:
-    """Keep numeric coercion available to prompt tooling without semantic clamping."""
-    del axis
-    return round(float(raw_value), 4)
 
 
 def _coerce_effect_axis_number(value: Any) -> float | None:

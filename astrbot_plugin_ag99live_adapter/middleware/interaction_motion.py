@@ -21,13 +21,11 @@ from .motion_payload import (
     build_motion_visibility_summary as _payload_build_motion_visibility_summary,
     build_prompt_axis_lookup as _payload_build_prompt_axis_lookup,
     build_prompt_axis_lookup_from_axes as _payload_build_prompt_axis_lookup_from_axes,
-    coerce_plugin_hint_axis_value as _payload_coerce_plugin_hint_axis_value,
     describe_fallback_pose_axes as _payload_describe_fallback_pose_axes,
     describe_fallback_pose_axis_value as _payload_describe_fallback_pose_axis_value,
     is_axis_soft_range_neutral as _payload_is_axis_soft_range_neutral,
     normalize_duration_hint_ms as _payload_normalize_duration_hint_ms,
     normalize_motion_arguments_payload as _payload_normalize_motion_arguments_payload,
-    normalize_plugin_hint_axes as _payload_normalize_plugin_hint_axes,
     resolve_axis_descriptor_threshold as _payload_resolve_axis_descriptor_threshold,
     resolve_axis_neutral_delta as _payload_resolve_axis_neutral_delta,
     resolve_axis_neutral_value as _payload_resolve_axis_neutral_value,
@@ -426,17 +424,6 @@ def _are_motion_axes_all_neutralish(
     semantic_profile: dict[str, Any],
 ) -> bool:
     return _payload_are_motion_axes_all_neutralish(axes, semantic_profile)
-
-
-def _normalize_plugin_hint_axes(
-    axes: Any,
-    semantic_profile: dict[str, Any],
-) -> tuple[dict[str, float] | None, list[str]]:
-    return _payload_normalize_plugin_hint_axes(axes, semantic_profile)
-
-
-def _coerce_plugin_hint_axis_value(raw_value: float, axis: dict[str, Any]) -> float:
-    return _payload_coerce_plugin_hint_axis_value(raw_value, axis)
 
 
 def _build_motion_visibility_summary(
