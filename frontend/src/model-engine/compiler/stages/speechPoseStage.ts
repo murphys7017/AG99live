@@ -338,7 +338,7 @@ function resolveSpeechPoseValue(
 }
 
 /**
- * 从轴元数据推断说话跟随偏移方向。优先读取语义关键词，最后才 fallback 到旧 hash 方法。
+ * 从轴元数据推断说话跟随偏移方向。
  */
 function resolveSpeechPoseAxisDirection(
   axis: SemanticAxisDefinition,
@@ -359,23 +359,4 @@ function resolveSpeechPoseAxisDirection(
   }
 
   return 1;
-}
-
-/**
- * @deprecated 改用 resolveVoiceFollowingDirection() / defaultVoiceFollowingDirection()
- *             或 resolveSpeechPoseAxisDirection()。此函数用字符串 hash 决定方向，
- *             语义不可控，仅作为未迁移模型的兼容 fallback 保留。
- *             命中时会上报 speech_pose_direction_fallback warning。
- */
-function stableAxisDirection(axisId: string): 1 | -1 {
-  console.warn(
-    `[ModelEngine] speech_pose_direction_fallback:${axisId} — ` +
-    "axis direction fell back to hash-based resolution. " +
-    "Add explicit direction to VoiceFollowingChannelProfile or axis metadata.",
-  );
-  let hash = 0;
-  for (let index = 0; index < axisId.length; index += 1) {
-    hash = (hash + axisId.charCodeAt(index)) % 2;
-  }
-  return hash === 0 ? 1 : -1;
 }
