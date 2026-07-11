@@ -172,7 +172,7 @@ control.turn_finished
 - 自动动作链路不允许输出 `choice`、`motion_id`、catalog motion、motion3、exp3 或旧播放文件引用。
 - LLM 输出契约不包含 `mode`；Adapter 归一化后会补 `mode: "expressive"` 给现有 ModelEngine 编译链路使用。
 - `idle` 是前端/运行时本底能力，不属于 LLM 本轮动作输出。
-- `emotion_label`、`fallback_pose_id`、`summary` 只属于后端派生或兼容字段，不是 LLM 输出目标。
+- `emotion_label`、`summary` 只属于系统派生字段，不是 LLM 输出目标。
 
 示例：
 
@@ -193,8 +193,7 @@ control.turn_finished
     "gaze_x": 54,
     "mouth_smile": 84
   },
-  "emotion_label": "开心-轻快-看向用户",
-  "fallback_pose_id": "happy_smile"
+  "emotion_label": "开心-轻快-看向用户"
 }
 ```
 

@@ -193,7 +193,7 @@ def build_selector_user_prompt(
         '  }\n'
         "}\n"
         "生成规则：\n"
-        "- intent_tags 是开放关键词，不要输出 emotion_label 或 fallback_pose_id。\n"
+        "- intent_tags 是开放关键词，不要输出 emotion_label。\n"
         "- 只输出本轮有语义贡献的少量轴，不要全量填 50。\n"
         "- 只使用整数。\n"
         "- 按语义匹配选择数值，不要按固定动作列表套模板。\n"
@@ -254,7 +254,7 @@ def build_selector_user_prompt_v2(
         "  }\n"
         "}\n"
         "生成规则：\n"
-        "- 不要输出 emotion_label、fallback_pose_id、choice、mode、motion_id、动画文件、表情文件或播放资源引用。\n"
+        "- 不要输出 emotion_label、choice、mode、motion_id、动画文件、表情文件或播放资源引用。\n"
         "- 不要生成时间曲线、关键帧、随机抖动或来回摆动；只给目标姿态轴值。\n"
         "- 尽可能输出能支撑本轮语气的相关轴，尤其保留头部、身体和视线的动作骨架；不要为了凑数量输出无关动作。\n"
         "- 只使用数字，并保持在每个轴自己的范围内。\n"

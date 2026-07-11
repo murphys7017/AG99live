@@ -138,7 +138,6 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
       mode: modeRaw,
       emotion_label: emotionLabel,
       duration_hint_ms: durationHintMs,
-      fallback_pose_id: normalizeText(value.fallback_pose_id) || undefined,
       resource_id: normalizeText(value.resource_id) || undefined,
       performance_curve_hint: performanceCurveHint,
       axes,

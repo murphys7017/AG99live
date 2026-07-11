@@ -413,7 +413,6 @@ function buildAdjustedIntent(): SemanticMotionIntent | null {
     intent_tags: intentTags,
     emotion_label: emotionLabel,
     duration_hint_ms: source.durationMs,
-    fallback_pose_id: "neutral",
     axes,
     summary: {
       axis_count: Object.keys(axes).length,

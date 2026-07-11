@@ -39,7 +39,6 @@ def normalize_motion_arguments_payload(
             "kind",
             "emotion",
             "emotion_label",
-            "fallback_pose_id",
             "summary",
         )
         if key in motion_hint
@@ -99,7 +98,6 @@ def normalize_motion_arguments_payload(
         semantic_profile=semantic_profile,
         intent_tags=intent_tags,
         resource_id=resource_id,
-        fallback_pose_id="",
         fallback_reasons=[],
         fallback_score=0.0,
         fallback_used=False,
@@ -118,7 +116,6 @@ def normalize_motion_arguments_payload(
         "emotion_label": emotion_label,
         "duration_hint_ms": duration_hint_ms,
         "resource_id": resource_id,
-        "fallback_pose_id": "",
         "axes": validated_axes,
         "summary": summary,
     }
@@ -213,7 +210,6 @@ def build_motion_visibility_summary(
     semantic_profile: dict[str, Any],
     intent_tags: list[str] | None = None,
     resource_id: str = "",
-    fallback_pose_id: str = "",
     fallback_reasons: list[str] | None = None,
     fallback_score: float = 0.0,
     fallback_used: bool = False,
@@ -256,7 +252,6 @@ def build_motion_visibility_summary(
         "intent_tags": list(intent_tags or []),
         "intent_tag_count": len(intent_tags or []),
         "resource_id": resource_id,
-        "fallback_pose_id": fallback_pose_id,
         "fallback_used": fallback_used,
         "fallback_reasons": list(fallback_reasons or []),
         "fallback_score": round(float(fallback_score or 0.0), 4),

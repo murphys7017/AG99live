@@ -222,7 +222,6 @@ const generatedPlan = computed(() => {
     intent_tags: intentTags,
     emotion_label: selectedAtoms.value[0]?.semanticPolarity || "preview",
     duration_hint_ms: timing.duration_ms,
-    fallback_pose_id: "neutral",
     axes: axisValues,
     summary: {
       axis_count: Object.keys(axisValues).length,

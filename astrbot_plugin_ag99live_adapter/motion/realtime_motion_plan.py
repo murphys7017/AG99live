@@ -208,7 +208,6 @@ def normalize_selector_output_v3(
         "kind",
         "emotion",
         "emotion_label",
-        "fallback_pose_id",
         "summary",
     ):
         if forbidden_key in payload:
@@ -247,7 +246,6 @@ def normalize_selector_output_v3(
         "emotion": emotion,
         "duration_ms": duration_ms,
         "resource_id": normalize_motion_resource_id(payload.get("resource_id")),
-        "fallback_pose_id": "",
         "axes": normalized_axes,
         "warnings": [],
     }
@@ -296,7 +294,6 @@ def build_intent_from_selector_v3(
         "emotion_label": emotion_label,
         "duration_hint_ms": duration_hint_ms,
         "resource_id": normalize_motion_resource_id(selector_output.get("resource_id")),
-        "fallback_pose_id": "",
         "axes": {
             str(axis_id): round(float(value), 4)
             for axis_id, value in axes.items()

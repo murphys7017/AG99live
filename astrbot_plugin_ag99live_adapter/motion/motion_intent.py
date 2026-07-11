@@ -134,7 +134,6 @@ def normalize_motion_intent_v3_payload(intent: Any) -> dict[str, Any]:
         "emotion_label": emotion_label,
         "duration_hint_ms": duration_hint_ms,
         "resource_id": resource_id,
-        "fallback_pose_id": "",
         "axes": normalized_axes,
         "summary": {
             "axis_count": len(normalized_axes),

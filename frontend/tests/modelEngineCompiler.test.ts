@@ -428,7 +428,6 @@ function testNormalizeMotionPayloadAcceptsV3FlatAxes(): void {
     intent_tags: ["happy", "preview"],
     emotion_label: "happy",
     duration_hint_ms: 1000,
-    fallback_pose_id: "neutral",
     resource_id: "expression.smile",
     axes: {
       head_yaw: 62,
@@ -509,7 +508,6 @@ function testNormalizeMotionPayloadRejectsV3NestedAxes(): void {
     mode: "expressive",
     emotion_label: "happy",
     duration_hint_ms: 1000,
-    fallback_pose_id: "neutral",
     axes: {
       head_yaw: { value: 62 },
     },

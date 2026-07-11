@@ -30,15 +30,6 @@ EXITS = {"quick", "soft", "slow"}
 EMPHASES = {"none", "early", "middle", "late", "punctuated"}
 ENERGIES = {"low", "medium", "high", "teasing", "calm"}
 
-_DEFAULT_HINT = {
-    "schema_version": PERFORMANCE_CURVE_HINT_SCHEMA_VERSION,
-    "curve_family": "default",
-    "entry": "soft",
-    "hold": "steady",
-    "exit": "soft",
-    "emphasis": "none",
-    "energy": "medium",
-}
 _MAX_RETAINED_RESULTS = 64
 
 

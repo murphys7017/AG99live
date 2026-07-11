@@ -1271,8 +1271,7 @@ def test_persona_effect_motion_logs_input_and_output_diagnostics(
     assert "effect_resource_id=serious_explain" in log_line
     assert "payload_axes=head_yaw" in log_line
     assert "payload_resource_id=serious_explain" in log_line
-    assert "payload_fallback_pose_id=" in log_line
-    assert "payload_fallback_pose_id=serious_explain" not in log_line
+    assert "payload_fallback_pose_id" not in log_line
     assert "reason=persona_effect:rejected_axes:eye_open_left" in log_line
 
 

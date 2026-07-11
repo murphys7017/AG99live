@@ -432,7 +432,6 @@ def _build_motion_visibility_summary(
     semantic_profile: dict[str, Any],
     intent_tags: list[str] | None = None,
     resource_id: str = "",
-    fallback_pose_id: str = "",
     fallback_reasons: list[str] | None = None,
     fallback_score: float = 0.0,
     fallback_used: bool = False,
@@ -445,7 +444,6 @@ def _build_motion_visibility_summary(
         semantic_profile=semantic_profile,
         intent_tags=intent_tags,
         resource_id=resource_id,
-        fallback_pose_id=fallback_pose_id,
         fallback_reasons=fallback_reasons,
         fallback_score=fallback_score,
         fallback_used=fallback_used,
@@ -1373,7 +1371,6 @@ def _log_persona_effect_motion_resolution(
     effect_summary = _summarize_ag99live_motion_effect_arguments(event, view)
     payload_axes_keys: list[str] = []
     payload_resource_id = ""
-    payload_fallback_pose_id = ""
     if isinstance(payload, dict):
         axes = payload.get("axes")
         if isinstance(axes, dict):
@@ -1383,12 +1380,11 @@ def _log_persona_effect_motion_resolution(
                 if str(key).strip()
             )
         payload_resource_id = str(payload.get("resource_id") or "").strip()
-        payload_fallback_pose_id = str(payload.get("fallback_pose_id") or "").strip()
 
     logger.info(
         "WIRING persona_effect_motion phase=%s payload_present=%s reason=%s "
         "effect_names=%s effect_fields=%s effect_axis_keys=%s effect_intent_tags=%s "
-        "effect_resource_id=%s payload_axes=%s payload_resource_id=%s payload_fallback_pose_id=%s",
+        "effect_resource_id=%s payload_axes=%s payload_resource_id=%s",
         phase or "",
         payload is not None,
         reason,
@@ -1399,7 +1395,6 @@ def _log_persona_effect_motion_resolution(
         effect_summary["resource_id"],
         ",".join(payload_axes_keys),
         payload_resource_id,
-        payload_fallback_pose_id,
     )
 
 
