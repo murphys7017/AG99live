@@ -5,6 +5,8 @@ from copy import Error as CopyError
 import json
 import sqlite3
 
+import pytest
+
 
 def test_motion_lab_raw_event_store_creates_sqlite_and_inserts_events(
     install_fake_astrbot,
@@ -93,7 +95,8 @@ def test_motion_lab_recorder_keeps_event_when_raw_contains_non_json_object(
                 },
             }
         )
-        await recorder._queue.join()
+        await recorder.close()
+        assert recorder.enqueue({"event_type": "motion.after_close"}) is False
         return store
 
     store = asyncio.run(run())
@@ -103,6 +106,32 @@ def test_motion_lab_recorder_keeps_event_when_raw_contains_non_json_object(
         "value": "non-copyable-value",
         "cycle": {"self": "<cycle>"},
     }
+
+
+def test_motion_lab_recorder_close_cancels_worker_after_persistent_write_failure(
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.runtime.motion_lab.raw_event_store import (
+        MotionLabRawEventStore,
+    )
+    from astrbot_plugin_ag99live_adapter.runtime.motion_lab.recorder import MotionLabRecorder
+
+    class FailingStore(MotionLabRawEventStore):
+        def insert_events(self, events: list[dict[str, object]]) -> None:
+            raise OSError("sqlite unavailable")
+
+    async def run() -> None:
+        recorder = MotionLabRecorder(
+            store=FailingStore(tmp_path / "motion_lab.sqlite3"),
+        )
+        assert recorder.enqueue({"event_type": "motion.write_failure"}) is True
+        with pytest.raises(RuntimeError, match="close timed out"):
+            await recorder.close(timeout_seconds=0.1)
+        assert recorder._worker_task is None
+
+    asyncio.run(run())
 
 
 def test_motion_lab_store_projects_transform_trace_and_timeline_outcome(

@@ -411,8 +411,14 @@ class OLVPetPlatformAdapter(Platform):
         logger.info("AG99live adapter terminate() called")
         await self.remote_operator_runtime.stop()
         await self.transport.stop()
-        await asyncio.to_thread(self._debug_server.stop)
-        self._event_loop = None
+        motion_lab_recorder = getattr(self.runtime_state, "motion_lab_recorder", None)
+        close_motion_lab = getattr(motion_lab_recorder, "close", None)
+        try:
+            if callable(close_motion_lab):
+                await close_motion_lab()
+        finally:
+            await asyncio.to_thread(self._debug_server.stop)
+            self._event_loop = None
 
     def spawn_background_task(self, coroutine) -> None:
         if self._event_loop is not None and self._event_loop.is_running():

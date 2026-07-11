@@ -131,7 +131,6 @@ class RuntimeState:
             return None
         return MotionLabRecorder(
             store=MotionLabRawEventStore(self.runtime_cache_dir / "motion_lab.sqlite3"),
-            queue_size=1000,
             batch_size=20,
         )
 

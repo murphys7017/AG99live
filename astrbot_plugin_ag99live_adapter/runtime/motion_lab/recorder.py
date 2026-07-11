@@ -12,33 +12,26 @@ from .raw_event_store import MotionLabRawEventStore
 
 
 class MotionLabRecorder:
-    """Asynchronous, best-effort raw event recorder for motion lab data."""
+    """Asynchronous raw event recorder that drains accepted events on close."""
 
     def __init__(
         self,
         *,
         store: MotionLabRawEventStore,
-        queue_size: int = 1000,
         batch_size: int = 20,
     ) -> None:
         self._store = store
-        self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=max(1, queue_size))
+        self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._batch_size = max(1, batch_size)
         self._worker_task: asyncio.Task[None] | None = None
-        self.dropped_count = 0
+        self._closed = False
 
     def enqueue(self, event: dict[str, Any]) -> bool:
-        snapshot = _normalize_event(event)
-        try:
-            self._queue.put_nowait(snapshot)
-        except asyncio.QueueFull:
-            self.dropped_count += 1
-            if self.dropped_count == 1 or self.dropped_count % 100 == 0:
-                logger.warning(
-                    "MotionLab raw event queue full; dropped_count=%s",
-                    self.dropped_count,
-                )
+        if self._closed:
+            logger.error("MotionLab raw event rejected after recorder close.")
             return False
+        snapshot = _normalize_event(event)
+        self._queue.put_nowait(snapshot)
         self._ensure_worker()
         return True
 
@@ -61,13 +54,52 @@ class MotionLabRecorder:
                     batch.append(self._queue.get_nowait())
                 except asyncio.QueueEmpty:
                     break
+            retry_delay_seconds = 0.1
+            while True:
+                try:
+                    await asyncio.to_thread(self._store.insert_events, batch)
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(
+                        "MotionLab raw event write failed; retrying in %.1fs: %s",
+                        retry_delay_seconds,
+                        exc,
+                    )
+                    await asyncio.sleep(retry_delay_seconds)
+                    retry_delay_seconds = min(retry_delay_seconds * 2, 5.0)
+            for _event in batch:
+                self._queue.task_done()
+
+    async def close(self, *, timeout_seconds: float = 5.0) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if not self._queue.empty():
+            self._ensure_worker()
+        task = self._worker_task
+        try:
+            await asyncio.wait_for(
+                self._queue.join(),
+                timeout=max(float(timeout_seconds), 0.1),
+            )
+        except TimeoutError:
+            if task is not None and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            self._worker_task = None
+            raise RuntimeError(
+                f"MotionLab recorder close timed out with {self._queue.qsize()} queued events."
+            ) from None
+        self._worker_task = None
+        if task is not None and not task.done():
+            task.cancel()
             try:
-                await asyncio.to_thread(self._store.insert_events, batch)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("MotionLab raw event write failed: %s", exc)
-            finally:
-                for _event in batch:
-                    self._queue.task_done()
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 def enqueue_motion_lab_raw_event(runtime_state: Any, event: dict[str, Any]) -> bool:
