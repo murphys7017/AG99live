@@ -13,6 +13,7 @@ const baseEvent = {
   payloadKind: "semantic_plan",
   diagnostics: null,
   playerMessage: "hello",
+  runId: "run-1",
   plan: {
     schema_version: "engine.parameter_plan.v2",
     profile_id: "profile-1",
@@ -84,7 +85,7 @@ function testRecordsPlaybackWithoutSessionWrites(): void {
 
 function testIgnoresStaleTerminalAndRecordsMatchingTerminal(): void {
   const { recorder, rawEvents } = createRecorder();
-  recorder.recordMotionPlayback({ ...baseEvent, runId: "run-1" });
+  recorder.recordMotionPlayback(baseEvent);
   recorder.completeMotionPlayback({ runId: "stale", status: "completed" });
   assert.equal(rawEvents.length, 1);
 

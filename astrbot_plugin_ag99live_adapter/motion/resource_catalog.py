@@ -14,7 +14,7 @@ def build_motion_resource_candidates(
         return []
 
     candidates: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
+    seen_ids: set[tuple[str, str]] = set()
     parameter_axis_lookup = _build_parameter_axis_lookup(model)
     for item in constraints.get("motions") or []:
         _append_catalog_resource_candidate(
@@ -66,7 +66,7 @@ def normalize_resource_id(value: Any) -> str:
 
 def _append_catalog_resource_candidate(
     candidates: list[dict[str, Any]],
-    seen_ids: set[str],
+    seen_ids: set[tuple[str, str]],
     item: Any,
     *,
     resource_type: str,
@@ -83,9 +83,12 @@ def _append_catalog_resource_candidate(
         or item.get("name")
         or item.get("file")
     )
-    if not resource_id or resource_id in seen_ids:
+    if not resource_id:
         return
-    seen_ids.add(resource_id)
+    resource_key = (resource_type, resource_id.lower())
+    if resource_key in seen_ids:
+        return
+    seen_ids.add(resource_key)
     candidate = {
         "resource_id": resource_id,
         "resource_type": resource_type,

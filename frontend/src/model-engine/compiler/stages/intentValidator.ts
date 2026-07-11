@@ -44,10 +44,10 @@ export function runIntentValidator(
     resolvedProfile.axes.map((axis) => [axis.id, axis]),
   );
   if (resolvedProfile.revision !== context.intent.profile_revision) {
-    context.state.warnings = [
-      ...context.state.warnings,
-      `semantic_profile_revision_mismatch:${context.intent.profile_revision}:${resolvedProfile.revision}`,
-    ];
+    return {
+      ok: false,
+      reason: `semantic_profile_revision_mismatch:${context.intent.profile_revision}:${resolvedProfile.revision}`,
+    };
   }
 
   return { ok: true };

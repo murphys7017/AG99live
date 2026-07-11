@@ -17,6 +17,8 @@ import type { CompileDiagnostics } from "../src/model-engine/compiler/contracts.
 
 (globalThis as Record<string, unknown>).window = globalThis;
 
+const ignorePlanStarted = (_event: ModelEnginePlanStartedEvent): void => {};
+
 function buildProfile(): SemanticAxisProfile {
   return {
     schema_version: "ag99.semantic_axis_profile.v1",
@@ -723,11 +725,13 @@ function testMotionResourceUsesCatalogPlaybackInsteadOfDirectPlan(): void {
         directPlanStarts += 1;
         return true;
       },
-      playCatalogMotion: (motion) => {
+      playCatalogMotion: (motion, _model, options) => {
         catalogMotions.push(motion);
+        options.onStarted(motion, "run-motion-resource");
         return true;
       },
       getPlayerMessage: () => "motion resource playing",
+      onPlanStarted: ignorePlanStarted,
     },
     {
       setState: () => {},
@@ -828,7 +832,7 @@ function testNormalizeMotionPayloadRejectsV3NestedAxes(): void {
   assert.equal(result.reason, "motion_intent_v3.invalid_flat_axes");
 }
 
-function testMotionStartNotifiesStartedWhenPlayerOmitsCallback(): void {
+function testMotionStartRejectsPlayerThatOmitsStartedCallback(): void {
   const profile = buildProfile();
   const model = buildModel(profile);
   const compileResult = compileMotionIntent(buildIntent(), {
@@ -879,12 +883,12 @@ function testMotionStartNotifiesStartedWhenPlayerOmitsCallback(): void {
     },
   );
 
-  assert.equal(started, true);
-  assert.equal(startedEvents.length, 1);
-  assert.equal(startedEvents[0].messageId, "msg-plan");
-  assert.equal(startedEvents[0].payloadKind, "semantic_plan");
-  assert.equal(startedEvents[0].playerMessage, "playing without callback");
-  assert.equal(stateChanges.at(-1)?.status, "playing");
+  assert.equal(started, false);
+  assert.equal(startedEvents.length, 0);
+  assert.deepEqual(stateChanges.at(-1), {
+    status: "failed",
+    message: "motion_player_started_without_run_id",
+  });
 }
 
 function testMotionStartUsesPlaybackTimelineDuration(): void {
@@ -938,12 +942,14 @@ function testMotionStartUsesPlaybackTimelineDuration(): void {
         motionIntensityScale: 1,
         axisIntensityScale: {},
       }),
-      playPlan: (plan) => {
+      playPlan: (plan, _model, options) => {
         playedPlans.push(plan as MotionPlanPayload);
+        options.onStarted(plan as MotionPlanPayload, "run-timeline-duration");
         return true;
       },
       playCatalogMotion: () => false,
       getPlayerMessage: () => "timeline duration applied",
+      onPlanStarted: ignorePlanStarted,
     },
     {
       setState: () => {},
@@ -1008,12 +1014,14 @@ function testMotionStartRejectsAudioUnavailableTimelineForTiming(): void {
         motionIntensityScale: 1,
         axisIntensityScale: {},
       }),
-      playPlan: (plan) => {
+      playPlan: (plan, _model, options) => {
         playedPlans.push(plan as MotionPlanPayload);
+        options.onStarted(plan as MotionPlanPayload, "run-audio-unavailable");
         return true;
       },
       playCatalogMotion: () => false,
       getPlayerMessage: () => "audio unavailable timeline rejected",
+      onPlanStarted: ignorePlanStarted,
     },
     {
       setState: () => {},
@@ -1088,6 +1096,7 @@ function testPerformanceCurveFailsWhenAudioTimelineIsUnavailable(): void {
       },
       playCatalogMotion: () => false,
       getPlayerMessage: () => "performance curve skipped",
+      onPlanStarted: ignorePlanStarted,
     },
     {
       setState: () => {},
@@ -1185,7 +1194,7 @@ function testAxisRangeConstraintIsOwnedByRelationGraph(): void {
   );
 }
 
-function testRevisionMismatchBecomesWarningInsteadOfCompileFailure(): void {
+function testRevisionMismatchRejectsCompile(): void {
   const profile = buildProfile();
   const result = compileMotionIntent(buildIntent({
     profile_revision: profile.revision + 2,
@@ -1197,14 +1206,10 @@ function testRevisionMismatchBecomesWarningInsteadOfCompileFailure(): void {
     },
   });
 
-  assert.equal(result.ok, true);
-  assert.ok(result.plan);
-  assert.equal(result.plan?.profile_revision, profile.revision);
+  assert.equal(result.ok, false);
   assert.equal(
-    result.diagnostics.warnings?.includes(
-      `semantic_profile_revision_mismatch:${profile.revision + 2}:${profile.revision}`,
-    ),
-    true,
+    result.reason,
+    `semantic_profile_revision_mismatch:${profile.revision + 2}:${profile.revision}`,
   );
 }
 
@@ -1528,8 +1533,9 @@ function testSpeechOnlyPlaybackUsesTimelineDuration(): void {
       motionIntensityScale: 1,
       axisIntensityScale: {},
     }),
-    playPlan: (plan) => {
+    playPlan: (plan, _model, options) => {
       playedPlans.push(plan as MotionPlanPayload);
+      options.onStarted(plan as MotionPlanPayload, "run-speech-only");
       return true;
     },
     playCatalogMotion: () => false,
@@ -1537,6 +1543,7 @@ function testSpeechOnlyPlaybackUsesTimelineDuration(): void {
     markMotionTimelineTerminal: () => {},
     canStartSpeechOnlyMotion: () => true,
     getCurrentTurnId: () => "turn-speech",
+    onPlanStarted: ignorePlanStarted,
   });
 
   const started = engine.handlePlaybackTimelineStarted({
@@ -1588,6 +1595,7 @@ function testSpeechOnlyPlaybackCanBeSuppressedForFailedMotionSegment(): void {
     markMotionTimelineTerminal: () => {},
     getCurrentTurnId: () => "turn-speech",
     canStartSpeechOnlyMotion: () => false,
+    onPlanStarted: ignorePlanStarted,
   });
 
   const started = engine.handlePlaybackTimelineStarted({
@@ -1633,6 +1641,7 @@ function testTimelineTerminalIsMarkedWhenQueuedMotionFails(): void {
     stopPlan: () => {},
     getCurrentTurnId: () => "turn-failed-timeline",
     canStartSpeechOnlyMotion: () => false,
+    onPlanStarted: ignorePlanStarted,
     markMotionTimelineTerminal: (turnId, messageId, terminal, reason) => {
       failures.push({ turnId, messageId, terminal, reason });
     },
@@ -1977,14 +1986,14 @@ function run(): void {
   testNormalizeMotionPayloadAcceptsPerformanceCurveHint();
   testNormalizeMotionPayloadRejectsInvalidPerformanceCurveHint();
   testNormalizeMotionPayloadRejectsV3NestedAxes();
-  testMotionStartNotifiesStartedWhenPlayerOmitsCallback();
+  testMotionStartRejectsPlayerThatOmitsStartedCallback();
   testMotionStartUsesPlaybackTimelineDuration();
   testMotionStartRejectsAudioUnavailableTimelineForTiming();
   testPerformanceCurveFailsWhenAudioTimelineIsUnavailable();
   testExplicitPrimaryAxisIsNotOverwrittenByCoupling();
   testAxisIntensityScaleAffectsOnlyTargetAxis();
   testAxisRangeConstraintIsOwnedByRelationGraph();
-  testRevisionMismatchBecomesWarningInsteadOfCompileFailure();
+  testRevisionMismatchRejectsCompile();
   testCompileRejectsInvalidAxesInsteadOfSalvaging();
   testCompileRejectsAllNeutralSemanticAxes();
   testCompileRejectsInvalidBindingsInsteadOfSkippingThem();

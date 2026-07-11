@@ -80,7 +80,9 @@ function attachPlaybackTimelineToMotionContext(
 
   return {
     ...context,
-    playbackTimeline: null,
+    // Keep lifecycle ownership while audio is preparing. The scheduler still
+    // waits for a playing audio clock before starting the motion.
+    playbackTimeline: snapshot,
   };
 }
 
@@ -161,12 +163,10 @@ export function createMotionTimelineRunTracker(options: {
         return;
       }
       options.markMotionTimelineStarted(event.turnId, event.messageId);
-      if (event.runId) {
-        runs.set(event.runId, {
-          turnId: event.turnId,
-          messageId: event.messageId,
-        });
-      }
+      runs.set(event.runId, {
+        turnId: event.turnId,
+        messageId: event.messageId,
+      });
     },
     recordTerminal(event) {
       const owner = runs.get(event.runId);

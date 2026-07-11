@@ -19,12 +19,12 @@ interface ParsedParameterPlan {
 interface PlayPlanOptions {
   softHandoff?: boolean;
   targetDurationMs?: number | null;
-  onStarted?: (plan: SemanticParameterPlan, runId?: string) => void;
+  onStarted?: (plan: SemanticParameterPlan, runId: string) => void;
   onFinished?: (event: DirectParameterPlanTerminalEvent) => void;
 }
 
 interface PlayCatalogMotionOptions {
-  onStarted?: (motion: CatalogMotionPayload, runId?: string) => void;
+  onStarted?: (motion: CatalogMotionPayload, runId: string) => void;
   onFinished?: (event: DirectParameterPlanTerminalEvent) => void;
 }
 

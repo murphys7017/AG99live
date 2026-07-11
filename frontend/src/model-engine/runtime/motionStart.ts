@@ -20,6 +20,23 @@ export function reportInvalidMotionPayload(
   state.pushHistory("error", `动作载荷无效：${reason}`);
 }
 
+const MOTION_PLAYER_RUN_ID_MISSING = "motion_player_started_without_run_id";
+
+function normalizeMotionRunId(runId: string): string | null {
+  const normalized = typeof runId === "string" ? runId.trim() : "";
+  return normalized || null;
+}
+
+function rejectMotionStartWithoutRunId(
+  state: MotionRuntimeStateController,
+  diagnostics: CompileDiagnostics | null,
+): false {
+  state.setLastCompileReason(MOTION_PLAYER_RUN_ID_MISSING);
+  state.setState("failed", MOTION_PLAYER_RUN_ID_MISSING, diagnostics);
+  state.pushHistory("error", `动作播放失败：${MOTION_PLAYER_RUN_ID_MISSING}`);
+  return false;
+}
+
 export function startNormalizedMotionPayload(
   payload: NormalizedMotionPayload,
   context: StartPayloadContext,
@@ -110,8 +127,12 @@ function startCatalogMotionPayload(
   let notifiedStarted = false;
   const started = dependencies.playCatalogMotion(payload.motion, selectedModel, {
     onStarted: (_motion, runId) => {
+      const normalizedRunId = normalizeMotionRunId(runId);
+      if (!normalizedRunId) {
+        return;
+      }
       notifiedStarted = true;
-      dependencies.onPlanStarted?.({
+      dependencies.onPlanStarted({
         motion: payload.motion,
         model: selectedModel,
         messageId: context.messageId,
@@ -122,7 +143,7 @@ function startCatalogMotionPayload(
         payloadKind: payload.kind,
         diagnostics: null,
         playerMessage: buildSuccessMessage(context, dependencies),
-        runId,
+        runId: normalizedRunId,
       });
     },
   });
@@ -137,18 +158,7 @@ function startCatalogMotionPayload(
 
   const successMessage = buildSuccessMessage(context, dependencies);
   if (!notifiedStarted) {
-    dependencies.onPlanStarted?.({
-      motion: payload.motion,
-      model: selectedModel,
-      messageId: context.messageId,
-      turnId: context.turnId,
-      playbackTurnId: context.playbackTurnId,
-      startReason: context.startReason,
-      queuedDelayMs: context.queuedDelayMs,
-      payloadKind: payload.kind,
-      diagnostics: null,
-      playerMessage: successMessage,
-    });
+    return rejectMotionStartWithoutRunId(state, null);
   }
   state.setState("playing", successMessage, null);
   state.pushHistory("system", `现成 motion 执行中（${successMessage}）。`);
@@ -239,8 +249,12 @@ function startSemanticIntentPayload(
     {
       softHandoff: true,
       onStarted: (plan, runId) => {
+        const normalizedRunId = normalizeMotionRunId(runId);
+        if (!normalizedRunId) {
+          return;
+        }
         notifiedStarted = true;
-        dependencies.onPlanStarted?.({
+        dependencies.onPlanStarted({
           intent: payload.intent,
           plan,
           model: selectedModel,
@@ -252,7 +266,7 @@ function startSemanticIntentPayload(
           payloadKind: payload.kind,
           diagnostics: compileResult.diagnostics,
           playerMessage: buildSuccessMessage(context, dependencies),
-          runId,
+          runId: normalizedRunId,
         });
       },
     },
@@ -268,19 +282,7 @@ function startSemanticIntentPayload(
 
   const successMessage = buildSuccessMessage(context, dependencies);
   if (!notifiedStarted) {
-    dependencies.onPlanStarted?.({
-      intent: payload.intent,
-      plan: compileResult.plan,
-      model: selectedModel,
-      messageId: context.messageId,
-      turnId: context.turnId,
-      playbackTurnId: context.playbackTurnId,
-      startReason: context.startReason,
-      queuedDelayMs: context.queuedDelayMs,
-      payloadKind: payload.kind,
-      diagnostics: compileResult.diagnostics,
-      playerMessage: successMessage,
-    });
+    return rejectMotionStartWithoutRunId(state, compileResult.diagnostics);
   }
 
   state.setState("playing", successMessage, compileResult.diagnostics);
@@ -304,8 +306,12 @@ function startCompiledMotionResource(
   let notifiedStarted = false;
   const started = dependencies.playCatalogMotion(resource.motion, selectedModel, {
     onStarted: (_motion, runId) => {
+      const normalizedRunId = normalizeMotionRunId(runId);
+      if (!normalizedRunId) {
+        return;
+      }
       notifiedStarted = true;
-      dependencies.onPlanStarted?.({
+      dependencies.onPlanStarted({
         intent: payload.intent,
         plan,
         model: selectedModel,
@@ -317,7 +323,7 @@ function startCompiledMotionResource(
         payloadKind: payload.kind,
         diagnostics,
         playerMessage: buildSuccessMessage(context, dependencies),
-        runId,
+        runId: normalizedRunId,
       });
     },
   });
@@ -331,19 +337,7 @@ function startCompiledMotionResource(
   }
   const successMessage = buildSuccessMessage(context, dependencies);
   if (!notifiedStarted) {
-    dependencies.onPlanStarted?.({
-      intent: payload.intent,
-      plan,
-      model: selectedModel,
-      messageId: context.messageId,
-      turnId: context.turnId,
-      playbackTurnId: context.playbackTurnId,
-      startReason: context.startReason,
-      queuedDelayMs: context.queuedDelayMs,
-      payloadKind: payload.kind,
-      diagnostics,
-      playerMessage: successMessage,
-    });
+    return rejectMotionStartWithoutRunId(state, diagnostics);
   }
   state.setState("playing", successMessage, diagnostics);
   state.pushHistory("system", `完整动作资源执行中（${successMessage}）。`);
@@ -374,8 +368,12 @@ function startDirectPlanPayload(
       softHandoff: true,
       targetDurationMs: resolveMotionTargetDurationMs(context),
       onStarted: (plan, runId) => {
+        const normalizedRunId = normalizeMotionRunId(runId);
+        if (!normalizedRunId) {
+          return;
+        }
         notifiedStarted = true;
-        dependencies.onPlanStarted?.({
+        dependencies.onPlanStarted({
           plan,
           model: selectedModel,
           messageId: context.messageId,
@@ -386,7 +384,7 @@ function startDirectPlanPayload(
           payloadKind: payload.kind,
           diagnostics: null,
           playerMessage: buildSuccessMessage(context, dependencies),
-          runId,
+          runId: normalizedRunId,
         });
       },
     },
@@ -403,18 +401,7 @@ function startDirectPlanPayload(
 
   const successMessage = buildSuccessMessage(context, dependencies);
   if (!notifiedStarted) {
-    dependencies.onPlanStarted?.({
-      plan: payload.plan,
-      model: selectedModel,
-      messageId: context.messageId,
-      turnId: context.turnId,
-      playbackTurnId: context.playbackTurnId,
-      startReason: context.startReason,
-      queuedDelayMs: context.queuedDelayMs,
-      payloadKind: payload.kind,
-      diagnostics: null,
-      playerMessage: successMessage,
-    });
+    return rejectMotionStartWithoutRunId(state, null);
   }
 
   state.setState("playing", successMessage, null);
@@ -436,8 +423,12 @@ function startDirectPlanMotionResource(
   let notifiedStarted = false;
   const started = dependencies.playCatalogMotion(resource.motion, selectedModel, {
     onStarted: (_motion, runId) => {
+      const normalizedRunId = normalizeMotionRunId(runId);
+      if (!normalizedRunId) {
+        return;
+      }
       notifiedStarted = true;
-      dependencies.onPlanStarted?.({
+      dependencies.onPlanStarted({
         plan: payload.plan,
         model: selectedModel,
         messageId: context.messageId,
@@ -448,7 +439,7 @@ function startDirectPlanMotionResource(
         payloadKind: payload.kind,
         diagnostics: null,
         playerMessage: buildSuccessMessage(context, dependencies),
-        runId,
+        runId: normalizedRunId,
       });
     },
   });
@@ -462,18 +453,7 @@ function startDirectPlanMotionResource(
   }
   const successMessage = buildSuccessMessage(context, dependencies);
   if (!notifiedStarted) {
-    dependencies.onPlanStarted?.({
-      plan: payload.plan,
-      model: selectedModel,
-      messageId: context.messageId,
-      turnId: context.turnId,
-      playbackTurnId: context.playbackTurnId,
-      startReason: context.startReason,
-      queuedDelayMs: context.queuedDelayMs,
-      payloadKind: payload.kind,
-      diagnostics: null,
-      playerMessage: successMessage,
-    });
+    return rejectMotionStartWithoutRunId(state, null);
   }
   state.setState("playing", successMessage, null);
   state.pushHistory("system", `完整动作资源执行中（${successMessage}）。`);

@@ -1,12 +1,16 @@
 task:
-  class: feature
+  class: bugfix
   risk: high
-  phase: semantic_motion_v4_complete
+  phase: semantic_motion_v4_lifecycle_hardening
   status: complete
-  scope: Complete the documented seven-level prompt, trace recording, and typed resource playback pipeline
+  scope: Close timeline ownership, run identity, profile revision, and typed resource candidate defects found in the 43-commit review
 context:
   confidence: high
   assumptions:
+    - A preparing audio PlaybackTimeline remains the lifecycle owner of its queued motion even though it cannot be used as a timing clock until audio starts.
+    - A motion player may report accepted playback only when it synchronously invokes onStarted with a non-empty runId; ModelEngine no longer synthesizes unowned started events.
+    - Motion intents whose profile_revision differs from the selected model profile fail compilation instead of being reinterpreted with current anchors and relations.
+    - Resource candidate identity is the pair resource_type plus case-insensitive resource_id, so expression and motion layers may intentionally share a catalog ID.
     - Persona Effect resource intent is split into expression_resource_id and motion_resource_id; legacy resource_id is rejected on the v4 main path while the official <@anim> v3 compatibility contract remains unchanged.
     - Expression resources may layer with a semantic parameter plan only when parameter ownership does not conflict; motion resources are complete-action playback and replace the parameter plan at execution time.
     - Invalid, ambiguous, unowned, or non-playable resource intents fail visibly and never fall back to axis-only playback.
@@ -182,6 +186,12 @@ architecture:
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
 verification:
   checks_run:
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (305 passed)
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_interaction_motion_contributors.py -q (42 passed)
+    - npm test (complete frontend suite passed after lifecycle hardening)
+    - npm run typecheck (renderer and node typechecks passed after lifecycle hardening)
+    - npm run test:motion-runtime-scheduler
+    - npm run test:motion-playback-recorder
     - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (302 passed)
     - npm test (complete frontend suite passed)
     - npm run typecheck (renderer and node typechecks passed)

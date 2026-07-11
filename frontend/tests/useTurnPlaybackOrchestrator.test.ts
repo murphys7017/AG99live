@@ -80,6 +80,19 @@ const matchingMotionOnlyTimelineSnapshot: PlaybackTimelineSnapshot = {
   ],
 };
 
+const matchingPreparingAudioTimelineSnapshot: PlaybackTimelineSnapshot = {
+  ...matchingTimelineSnapshot,
+  timelineId: "timeline-preparing-audio",
+  phase: "preparing",
+  startedAtMs: null,
+  currentTimeMs: 0,
+  durationMs: null,
+  sinks: matchingTimelineSnapshot.sinks.map((sink) => ({
+    ...sink,
+    terminal: "idle",
+  })),
+};
+
 function createMissingMotionTimelineWiring() {
   return {
     getPlaybackTimelineSnapshotForSegment: () => null,
@@ -813,6 +826,36 @@ function testMotionTimelineSinkUsesPreparedSyntheticTimelineWhenAudioAbsent(): v
   assert.equal(contexts[0].playbackTimeline?.clockSource, "synthetic");
 }
 
+function testMotionTimelineSinkRetainsPreparingAudioTimelineOwnership(): void {
+  const contexts: Array<{
+    playbackTimeline?: PlaybackTimelineSnapshot | null;
+  }> = [];
+  const sink = createModelEngineMotionTimelineSink({
+    motionEngine: {
+      ingestNormalizedPayload: (_payload, context) => {
+        contexts.push(context);
+        return true;
+      },
+      notifyCurrentTurnChanged: () => {},
+    },
+    getPlaybackTimelineSnapshotForSegment: () => matchingPreparingAudioTimelineSnapshot,
+    markMotionTimelineTerminal: () => {},
+  });
+
+  const accepted = sink.start(motionPayload, {
+    messageId: "msg-timeline",
+    turnId: "turn-timeline",
+    receivedAtMs: 100,
+  });
+
+  assert.equal(accepted, true);
+  assert.equal(
+    contexts[0].playbackTimeline?.timelineId,
+    "timeline-preparing-audio",
+  );
+  assert.equal(contexts[0].playbackTimeline?.phase, "preparing");
+}
+
 function testMotionTimelineSinkRejectsMissingAudioTimeline(): void {
   const contexts: Array<{
     playbackTimeline?: PlaybackTimelineSnapshot | null;
@@ -1268,6 +1311,7 @@ async function run(): Promise<void> {
   await testAudioExpectedTimerClearsWhenAudioArrives();
   testMotionTimelineSinkMarksTimelineFailedWhenEngineRejects();
   testMotionTimelineSinkUsesPreparedSyntheticTimelineWhenAudioAbsent();
+  testMotionTimelineSinkRetainsPreparingAudioTimelineOwnership();
   testMotionTimelineSinkRejectsMissingAudioTimeline();
   testMotionTimelineSinkRejectsMissingMotionOnlyTimeline();
   testMotionTimelineSinkUsesSegmentScopedTimelineLookup();

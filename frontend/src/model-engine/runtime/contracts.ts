@@ -24,12 +24,12 @@ export type ModelEngineStatus =
 export interface PlayPlanOptions {
   softHandoff?: boolean;
   targetDurationMs?: number | null;
-  onStarted?: (plan: MotionPlanPayload, runId?: string) => void;
+  onStarted: (plan: MotionPlanPayload, runId: string) => void;
   onFinished?: (event: { runId: string; status: string; reason?: string }) => void;
 }
 
 export interface PlayCatalogMotionOptions {
-  onStarted?: (motion: CatalogMotionPayload, runId?: string) => void;
+  onStarted: (motion: CatalogMotionPayload, runId: string) => void;
   onFinished?: (event: { runId: string; status: string; reason?: string }) => void;
 }
 
@@ -44,7 +44,7 @@ interface ModelEnginePlanStartedEventBase {
   diagnostics: CompileDiagnostics | null;
   playerMessage: string;
   /** SDK 分配给本次动作计划的唯一 runId，用于完成事件归属校验。 */
-  runId?: string;
+  runId: string;
 }
 
 export type ModelEnginePlanStartedEvent =
@@ -119,10 +119,10 @@ export interface MotionStartDependencies {
   playCatalogMotion: (
     motion: CatalogMotionPayload,
     model: ModelSummary | null,
-    options?: PlayCatalogMotionOptions,
+    options: PlayCatalogMotionOptions,
   ) => boolean;
   getPlayerMessage?: () => string;
-  onPlanStarted?: (event: ModelEnginePlanStartedEvent) => void;
+  onPlanStarted: (event: ModelEnginePlanStartedEvent) => void;
 }
 
 export interface MotionRuntimeStateController {

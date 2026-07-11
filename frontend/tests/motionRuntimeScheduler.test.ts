@@ -185,6 +185,36 @@ function testQueuedPayloadFailsWhenTimelineDoesNotArrive(): void {
   assert.equal(failed[0].startReason, "playback_timeline_missing_before_motion_start");
 }
 
+function testQueuedPayloadFailureRetainsPreparingTimelineOwnership(): void {
+  resetTimers();
+  const session = buildSession();
+  setAudioWaiting(session);
+  const { scheduler, started, failed } = createHarness(session);
+  const preparingTimeline = buildTimelineSnapshot({
+    phase: "preparing",
+    startedAtMs: null,
+    currentTimeMs: 0,
+    durationMs: null,
+  });
+
+  scheduler.queueInboundPayload(buildPayload(), {
+    messageId: "msg-1",
+    turnId: "turn-1",
+    playbackTurnId: "turn-1",
+    receivedAtMs: 900,
+    playbackTimeline: preparingTimeline,
+  });
+
+  const timer = timers.values().next().value;
+  assert.ok(timer);
+  timer();
+
+  assert.equal(started.length, 0);
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].playbackTimeline?.timelineId, "timeline-1");
+  assert.equal(failed[0].playbackTimeline?.phase, "preparing");
+}
+
 function testDroppedPendingPayloadReportsStartFailure(): void {
   resetTimers();
   const { scheduler, started, failed } = createHarness(buildSession("completed"));
@@ -464,6 +494,7 @@ function testUnavailablePlaybackTimelineFailsPendingMotion(): void {
 
 function run(): void {
   testQueuedPayloadFailsWhenTimelineDoesNotArrive();
+  testQueuedPayloadFailureRetainsPreparingTimelineOwnership();
   testDroppedPendingPayloadReportsStartFailure();
   testSameMessageIdDifferentTurnsStartByCompositeIdentity();
   testPlaybackTimelineRequiresMatchingTurnWhenMessageIdIsShared();

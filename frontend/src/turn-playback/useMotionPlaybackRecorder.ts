@@ -56,7 +56,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
     }
 
     currentMotionRun = {
-      runId: event.runId || `${event.turnId ?? "no-turn"}::${event.messageId}`,
+      runId: event.runId,
       turnId: event.turnId,
       messageId: event.messageId,
       profileId: event.payloadKind === "catalog_motion" ? "" : event.plan.profile_id,
@@ -122,7 +122,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
         motion: event.payloadKind === "catalog_motion" ? cloneJson(event.motion) : null,
         diagnostics: event.diagnostics ? cloneJson(event.diagnostics) : null,
         playerMessage: event.playerMessage,
-        runId: event.runId ?? "",
+        runId: event.runId,
         queuedDelayMs: event.queuedDelayMs,
       },
     };
