@@ -720,11 +720,12 @@ function testMotionStartRejectsAudioUnavailableTimelineForTiming(): void {
   assert.equal(playedPlans[0].timing.duration_ms, 1200);
 }
 
-function testPerformanceCurveSkipsAudioUnavailableTimeline(): void {
+function testPerformanceCurveFailsWhenAudioTimelineIsUnavailable(): void {
   const profile = buildProfile();
   const model = buildModel(profile);
   const playedPlans: MotionPlanPayload[] = [];
   const diagnostics: CompileDiagnostics[] = [];
+  let lastCompileReason = "";
 
   const started = startNormalizedMotionPayload(
     {
@@ -781,7 +782,9 @@ function testPerformanceCurveSkipsAudioUnavailableTimeline(): void {
     },
     {
       setState: () => {},
-      setLastCompileReason: () => {},
+      setLastCompileReason: (reason) => {
+        lastCompileReason = reason;
+      },
       setLastCompileDiagnostics: (nextDiagnostics) => {
         if (nextDiagnostics) {
           diagnostics.push(nextDiagnostics);
@@ -792,25 +795,13 @@ function testPerformanceCurveSkipsAudioUnavailableTimeline(): void {
     },
   );
 
-  assert.equal(started, true);
-  assert.equal(playedPlans.length, 1);
-  assert.deepEqual(playedPlans[0].timing, {
-    duration_ms: 1200,
-    blend_in_ms: 216,
-    hold_ms: 684,
-    blend_out_ms: 300,
-  });
-  const lastDiagnostics = diagnostics.at(-1);
+  assert.equal(started, false);
+  assert.equal(playedPlans.length, 0);
   assert.equal(
-    lastDiagnostics?.warnings?.includes(
-      "performance_curve_skipped:playback_timeline_audio_unavailable",
-    ),
-    true,
+    lastCompileReason,
+    "performance_curve_timeline_unavailable:playback_timeline_audio_unavailable",
   );
-  assert.equal(
-    lastDiagnostics?.warnings?.includes("performance_curve_applied:quick_in_hold_soft_out"),
-    false,
-  );
+  assert.equal(diagnostics.length, 0);
 }
 
 function testAxisIntensityScaleAffectsOnlyTargetAxis(): void {
@@ -1652,7 +1643,7 @@ function run(): void {
   testMotionStartNotifiesStartedWhenPlayerOmitsCallback();
   testMotionStartUsesPlaybackTimelineDuration();
   testMotionStartRejectsAudioUnavailableTimelineForTiming();
-  testPerformanceCurveSkipsAudioUnavailableTimeline();
+  testPerformanceCurveFailsWhenAudioTimelineIsUnavailable();
   testExplicitPrimaryAxisIsNotOverwrittenByCoupling();
   testAxisIntensityScaleAffectsOnlyTargetAxis();
   testAxisRangeConstraintIsOwnedByRelationGraph();

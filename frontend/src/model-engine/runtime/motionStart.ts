@@ -172,7 +172,7 @@ function startSemanticIntentPayload(
   state.setState("compiling", "正在编译动作意图...", null);
   let targetDurationMs = resolveMotionTargetDurationMs(context);
   let speechActive = isSpeechActiveForPayload(context);
-  let intent = payload.intent;
+  const intent = payload.intent;
   const runtimeWarnings: string[] = [];
   const performanceCurveHint = payload.intent.performance_curve_hint ?? null;
   if (performanceCurveHint) {
@@ -186,11 +186,11 @@ function startSemanticIntentPayload(
       speechActive = curveTimeline.speechActive;
       runtimeWarnings.push(`performance_curve_timeline:${curveTimeline.clockSource}`);
     } else {
-      intent = {
-        ...payload.intent,
-      };
-      delete intent.performance_curve_hint;
-      runtimeWarnings.push(`performance_curve_skipped:${curveTimeline.reason}`);
+      const failureReason = `performance_curve_timeline_unavailable:${curveTimeline.reason}`;
+      state.setLastCompileReason(failureReason);
+      state.setState("failed", `动作意图无法使用表演曲线：${curveTimeline.reason}`, null);
+      state.pushHistory("error", `动作意图无法使用表演曲线：${curveTimeline.reason}`);
+      return false;
     }
   }
   const compileResult = compileMotionIntent(intent, {
