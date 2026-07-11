@@ -107,7 +107,7 @@ control.turn_finished
 | 类型 | 载荷 | 需要 `message_id` |
 | --- | --- | --- |
 | `output.text` | `{ text: string, speaker_name: string, avatar: string }` | 是 |
-| `output.audio` | `{ text: string, audio_url: string \| null, speaker_name: string, avatar: string }` | 是 |
+| `output.audio` | `{ caption_text: string, audio_url: string \| null, speaker_name: string, avatar: string }` | 是 |
 | `output.image` | `{ images: string[] }` | 否 |
 | `output.transcription` | `{ text: string }` | 否 |
 
@@ -138,8 +138,12 @@ control.turn_finished
 | `system.semantic_axis_profile_save_failed` | 后端 -> 前端 | 档案保存失败 |
 | `system.history_*` | 双向 | 历史记录增删改查 |
 | `system.motion_tuning_sample_*` | 双向 | 动作调参样本增删改查 |
+| `system.motion_lab_raw_event` | 前端 -> 后端 | 提交带稳定 `event_id` 的原始动作事件 |
+| `system.motion_lab_raw_event_recorded` | 后端 -> 前端 | SQLite 持久化完成确认，载荷为 `{ event_id: string }` |
 
 纯 `system.*` 消息允许 `turn_id = null`。
+
+Motion Lab 事件采用 at-least-once 交付：前端必须先把事件写入 IndexedDB，再通过 WebSocket 发送；WebSocket `send()` 成功不代表记录成功。后端以 `event_id` 作为 SQLite 主键幂等写入，只有插入事务完成后才发送 `system.motion_lab_raw_event_recorded`。前端收到匹配回执后才能删除 IndexedDB 记录；断线重连时使用相同 `event_id` 重发。
 
 ### engine.* （双向）
 

@@ -3,7 +3,7 @@ task:
   risk: high
   phase: end_to_end_lifecycle_closure
   status: complete
-  scope: Close playback acknowledgement, replacement, disconnect, feedback, lip-sync clock, and Motion Lab delivery defects found in the end-to-end review
+  scope: Close end-to-end playback lifecycle defects and make Motion Lab frontend-to-SQLite delivery durable and acknowledged
 context:
   confidence: high
   assumptions:
@@ -12,7 +12,7 @@ context:
     - Soft handoff keeps the previous run owned until the replacement starts; expression lookup failure preserves both the previous run and expression, while direct-plan replacement failure explicitly settles the previous run.
     - Production Orchestrator, Timeline, and pending motion keys require non-empty turn_id and message_id; preview remains a separate direct path.
     - Main-path lip sync uses only the current HTMLAudioElement Web Audio clock; SDK WAV progression is not a fallback clock.
-    - ModelEngine compile failures are persisted as Motion Lab feedback events, and Motion Lab uses local reconnect retry plus backend queue drain on shutdown; a drain timeout cancels the worker and fails visibly after mandatory plugin cleanup.
+    - ModelEngine compile failures are persisted as Motion Lab feedback events; frontend events are written to IndexedDB before send, retained until a SQLite persistence acknowledgement, and resent with a stable event_id after reconnect.
     - A preparing audio PlaybackTimeline remains the lifecycle owner of its queued motion even though it cannot be used as a timing clock until audio starts.
     - A motion player may report accepted playback only when it synchronously invokes onStarted with a non-empty runId; ModelEngine no longer synthesizes unowned started events.
     - Motion intents whose profile_revision differs from the selected model profile fail compilation instead of being reinterpreted with current anchors and relations.
@@ -135,7 +135,8 @@ architecture:
     - AdapterAudioRuntime exposes a motion-only timeline preparation path so no-audio motion segments can still run under PlaybackTimelineEngine with a synthetic clock.
     - PlaybackTimelineRuntime owns segment-scoped timelines during migration; AdapterAudioRuntime remains the outer playback compatibility facade.
     - PlaybackTimelineLipSyncRuntime now owns lip-sync started/unavailable/completed/failed settlement, and PlaybackTimelineRuntime starts the optional lip_sync sink after audio playback starts; AudioSink no longer carries the lip-sync terminal state machine directly.
-    - The Live2D lip-sync timeline sink wraps WAV lip sync preload, live WebAudio RMS sampling, external Live2D lip sync writes, and cleanup; it is still coordinated through the audio segment sink while AdapterAudioRuntime registers lip_sync as an optional PlaybackTimelineEngine sink and records started/failed/completed terminal state.
+    - The Live2D lip-sync timeline sink uses the current HTMLAudioElement WebAudio RMS sampling, external Live2D lip sync writes, and cleanup; no SDK WAV preload/progression path runs in parallel.
+    - Motion Lab backend persistence is idempotent by event_id; system.motion_lab_raw_event_recorded is emitted only after the SQLite insert call completes, and WebSocket send success alone never settles the frontend pending record.
     - PlaybackTimelineEngine ignores late started/terminal events for sinks that are already completed, failed, absent, or interrupted.
     - During early development, fallback behavior should be fail-visible: optional sinks may fail without blocking required playback, but missing capabilities must not be silently reported as started or completed.
     - TimelineClock uses synthetic clock only for explicit no-audio timing; attached audio clock failures are exposed as audio_unavailable rather than hidden behind synthetic.
@@ -250,8 +251,16 @@ verification:
     - npm run test
     - npm run typecheck:renderer
     - npm run typecheck:node
+    - npm test
+    - npm run test:motion-lab-outbound-queue
+    - npm run typecheck
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_frontend_system_semantic_profile.py astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_motion_lab_raw_event_store.py astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_protocol_parser_semantic_profile.py -q
+    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter
+    - frontend TypeScript dependency scan: 138 files, 0 cycles
+    - git diff --check
   checks_failed: []
-  validation_gap: Live AstrBot plus provider logs still need validation to confirm input_tokens decrease; static scope alone may not reduce request tokens without provider/static-prefix caching.
+  validation_gap: Live AstrBot/Electron testing is still needed to verify IndexedDB resend and SQLite acknowledgement across a real socket disconnect; provider logs are still needed to confirm prompt static-scope input token reduction.
 runtime:
   mode: unified_playback_timeline_phase3_motion_timeline_context
 backlog:
