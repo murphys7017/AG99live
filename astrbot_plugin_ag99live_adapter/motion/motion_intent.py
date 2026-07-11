@@ -179,12 +179,11 @@ def normalize_motion_resource_id(value: Any) -> str:
     return str(value or "").strip()
 
 
-def derive_motion_emotion_label(intent_tags: Any, *, fallback: str = "motion") -> str:
+def derive_motion_emotion_label(intent_tags: Any) -> str:
     tags = normalize_motion_intent_tags(intent_tags)
-    if tags:
-        return "-".join(tags)
-    fallback_value = str(fallback or "").strip()
-    return fallback_value or "motion"
+    if not tags:
+        raise ValueError("intent_tags_empty")
+    return "-".join(tags)
 
 
 def _normalize_duration_hint_ms(value: Any) -> int:
