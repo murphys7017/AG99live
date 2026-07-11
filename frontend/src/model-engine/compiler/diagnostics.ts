@@ -1,5 +1,8 @@
 import type { CompileDiagnostics, CompileOptions } from "./contracts.js";
-import type { MotionTransformTrace } from "./contracts.js";
+import {
+  SEMANTIC_MOTION_TRANSFORM_VERSION,
+  type MotionTransformTrace,
+} from "./contracts.js";
 import type { MotionCompileContext } from "./compileContext.js";
 import type { ModelEngineSettings } from "../settings.js";
 
@@ -99,7 +102,11 @@ function buildVisibilityDiagnostics(
 }
 
 function buildTransformTrace(context: MotionCompileContext): MotionTransformTrace {
+  const profile = context.state.profile;
   return {
+    transformVersion: SEMANTIC_MOTION_TRANSFORM_VERSION,
+    profileRevision: profile?.revision ?? 0,
+    profileHash: profile?.source_hash ?? "",
     rawAxes: { ...context.intent.axes },
     resourceId: context.intent.resource_id,
     resolvedAxes: { ...context.state.controlledValues },

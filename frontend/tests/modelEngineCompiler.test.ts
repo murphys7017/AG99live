@@ -459,6 +459,12 @@ function testCompiledPlanPreservesResourceIntentWithoutPlayingIt(): void {
   assert.equal(result.ok, true);
   assert.equal(result.plan?.resource_id, "expression.smile");
   assert.equal(result.diagnostics.transformTrace?.resourceId, "expression.smile");
+  assert.equal(
+    result.diagnostics.transformTrace?.transformVersion,
+    "semantic_motion_transform.v1",
+  );
+  assert.equal(result.diagnostics.transformTrace?.profileRevision, 1);
+  assert.equal(result.diagnostics.transformTrace?.profileHash, "hash");
 }
 
 function testNormalizeMotionPayloadAcceptsPerformanceCurveHint(): void {

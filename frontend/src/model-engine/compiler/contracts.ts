@@ -5,6 +5,8 @@ import type {
 } from "../../types/protocol.js";
 import type { ModelEngineSettings } from "../settings.js";
 
+export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v1";
+
 export interface MotionTimingResolution {
   timing: DirectParameterPlanTiming;
   resolvedDurationMs: number;
@@ -77,6 +79,9 @@ export interface MotionAxisRelationAdjustment {
 }
 
 export interface MotionTransformTrace {
+  transformVersion: typeof SEMANTIC_MOTION_TRANSFORM_VERSION;
+  profileRevision: number;
+  profileHash: string;
   rawAxes: Record<string, number>;
   resourceId?: string;
   resolvedAxes: Record<string, number>;
