@@ -1548,7 +1548,7 @@ def _sanitize_reason_fragment(value: Any) -> str:
 
 def _resolve_motion_generation_mode(runtime_state: Any) -> str:
     del runtime_state
-    return "split_after_reply"
+    return "single_response_effect"
 
 
 def _resolve_result_phase(view: Any) -> str:

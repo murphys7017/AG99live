@@ -582,7 +582,7 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "resource_id" in system.value
     assert "fallback_pose_id" not in capability.value["effect_arguments_example"]
     assert capability.value["fallback_pose_candidates"][0]["label"] in system.value
-    assert runtime.value["configured_generation_mode"] == "split_after_reply"
+    assert runtime.value["configured_generation_mode"] == "single_response_effect"
     assert runtime.value["prompt_purpose"] == "persona_reply"
 
 

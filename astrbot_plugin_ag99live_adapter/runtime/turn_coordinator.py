@@ -543,7 +543,7 @@ class TurnCoordinator:
             set_extra = getattr(event, "set_extra", None)
             if callable(set_extra):
                 set_extra("enable_streaming", False)
-                set_extra("ag99live_motion_generation_mode", "split_after_reply")
+                set_extra("ag99live_motion_generation_mode", "single_response_effect")
             self._apply_raw_message_metadata_to_event(event, message_obj)
             self._commit_event(event)
             self._mark_turn_timing("event_committed_at")

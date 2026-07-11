@@ -607,7 +607,7 @@ def test_runtime_state_ignores_removed_inline_motion_config(
 
     state.refresh()
 
-    assert state.motion_generation_mode == "split_after_reply"
+    assert state.motion_generation_mode == "single_response_effect"
     assert not hasattr(state, "enable_inline_motion_contract")
 
 
@@ -640,7 +640,7 @@ def test_runtime_state_defaults_to_middleware_first_motion_generation(
 
     state.refresh()
 
-    assert state.motion_generation_mode == "split_after_reply"
+    assert state.motion_generation_mode == "single_response_effect"
 
 
 def test_runtime_state_refresh_reads_motion_prompt_instruction(

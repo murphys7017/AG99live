@@ -88,7 +88,7 @@ class RuntimeState:
         self.action_llm_filter_max_atoms_per_channel = 2
         self.action_llm_filter_chunk_max_channels = 8
         self.action_llm_filter_chunk_max_candidates = 96
-        self.motion_generation_mode = "split_after_reply"
+        self.motion_generation_mode = "single_response_effect"
         self.realtime_motion_fewshot_enabled = True
         self.realtime_motion_fewshot_count = 2
         self.realtime_motion_user_fewshot_count = 0
@@ -287,7 +287,7 @@ class RuntimeState:
             _plugin_config_get(
                 self.plugin_config,
                 "motion_generation_mode",
-                "split_after_reply",
+                "single_response_effect",
             )
         )
         self.realtime_motion_fewshot_enabled = bool(
@@ -1365,7 +1365,7 @@ def _normalize_motion_prompt_instruction(value: Any) -> str:
 
 def _normalize_motion_generation_mode(value: Any) -> str:
     del value
-    return "split_after_reply"
+    return "single_response_effect"
 
 
 def _supports_persona_effects(plugin_context: Any) -> bool:
