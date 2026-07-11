@@ -106,6 +106,7 @@ function buildSuccessResultFromContext(
     model_id: profile.model_id,
     mode: context.state.resolvedMode,
     emotion_label: context.intent.emotion_label,
+    resource_id: context.intent.resource_id,
     timing: timing.timing,
     parameters: context.state.parameters,
     diagnostics: {

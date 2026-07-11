@@ -693,6 +693,8 @@ export interface SemanticParameterPlan {
   model_id: string;
   mode: "expressive" | "idle";
   emotion_label: string;
+  /** Validated resource intent; playback is owned by a future asset policy stage. */
+  resource_id?: string;
   timing: DirectParameterPlanTiming;
   parameters: SemanticParameterPlanEntry[];
   diagnostics?: {

@@ -78,6 +78,7 @@ export interface MotionAxisRelationAdjustment {
 
 export interface MotionTransformTrace {
   rawAxes: Record<string, number>;
+  resourceId?: string;
   resolvedAxes: Record<string, number>;
   derivedAxes: Record<string, number>;
   constrainedAxes: Record<string, number>;

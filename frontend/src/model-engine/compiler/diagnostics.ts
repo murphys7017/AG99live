@@ -101,6 +101,7 @@ function buildVisibilityDiagnostics(
 function buildTransformTrace(context: MotionCompileContext): MotionTransformTrace {
   return {
     rawAxes: { ...context.intent.axes },
+    resourceId: context.intent.resource_id,
     resolvedAxes: { ...context.state.controlledValues },
     derivedAxes: { ...context.state.derivedValues },
     constrainedAxes: { ...context.state.allAxisValues },

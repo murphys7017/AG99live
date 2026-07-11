@@ -444,6 +444,23 @@ function testNormalizeMotionPayloadAcceptsV3FlatAxes(): void {
   assert.equal(result.payload.intent.resource_id, "expression.smile");
 }
 
+function testCompiledPlanPreservesResourceIntentWithoutPlayingIt(): void {
+  const result = compileMotionIntent(buildIntent({
+    resource_id: "expression.smile",
+  }), {
+    model: buildModel(buildProfile()),
+    targetDurationMs: 1200,
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.plan?.resource_id, "expression.smile");
+  assert.equal(result.diagnostics.transformTrace?.resourceId, "expression.smile");
+}
+
 function testNormalizeMotionPayloadAcceptsPerformanceCurveHint(): void {
   const result = normalizeMotionPayload({
     schema_version: "engine.motion_intent.v3",
@@ -1400,7 +1417,7 @@ function testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight(): void {
   assert.equal(headPitch?.weight, 0.35);
 }
 
-function testSpeechPoseSkipsVoiceFollowingParameterAlreadyControlledBySemanticAxis(): void {
+function testSpeechPoseRejectsVoiceFollowingParameterAlreadyControlledBySemanticAxis(): void {
   const profile = buildProfile();
   const result = compileMotionIntent(buildIntent({
     axes: {
@@ -1416,13 +1433,8 @@ function testSpeechPoseSkipsVoiceFollowingParameterAlreadyControlledBySemanticAx
     },
   });
 
-  assert.equal(result.ok, true);
-  const semanticHeadYaw = result.plan?.parameters.find((item) => item.parameter_id === "ParamAngleX");
-  const voiceHeadRoll = result.plan?.parameters.find((item) => item.parameter_id === "ParamAngleZ");
-  assert.ok(semanticHeadYaw);
-  assert.ok(voiceHeadRoll);
-  assert.equal(semanticHeadYaw?.source, "semantic_axis");
-  assert.equal(voiceHeadRoll?.source, "speech_pose");
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "speech_pose_parameter_conflict:ParamBodyAngleX");
 }
 
 function testSpeechPoseDoesNotApplyWithoutSpeechActive(): void {
@@ -1635,6 +1647,7 @@ function testExplicitEmptyRelationGraphDoesNotReviveLegacyCouplings(): void {
 function run(): void {
   testRegistryCoreStageOrder();
   testNormalizeMotionPayloadAcceptsV3FlatAxes();
+  testCompiledPlanPreservesResourceIntentWithoutPlayingIt();
   testNormalizeMotionPayloadAcceptsPerformanceCurveHint();
   testNormalizeMotionPayloadRejectsInvalidPerformanceCurveHint();
   testNormalizeMotionPayloadRejectsV3NestedAxes();
@@ -1660,7 +1673,7 @@ function run(): void {
   testSpeechOnlyPlaybackCanBeSuppressedForFailedMotionSegment();
   testTimelineTerminalIsMarkedWhenQueuedMotionFails();
   testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight();
-  testSpeechPoseSkipsVoiceFollowingParameterAlreadyControlledBySemanticAxis();
+  testSpeechPoseRejectsVoiceFollowingParameterAlreadyControlledBySemanticAxis();
   testSpeechPoseDoesNotApplyWithoutSpeechActive();
   testSpeechPoseDoesNotUseGenericDerivedAxis();
   testSpeechPoseDoesNotOverwriteCouplingDerivedAxis();

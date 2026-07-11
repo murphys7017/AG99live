@@ -80,6 +80,8 @@ context:
     - Motion generation metadata now uses single_response_effect; immediate/final remains a response-segment phase distinction and is not used as a generation mode.
     - Explicit duration_hint_ms values are now strict at backend motion boundaries: missing remains optional/defaulted, numeric text is accepted, but non-numeric, non-finite, and out-of-range values fail instead of being defaulted or clamped.
     - Empty intent_tags no longer derive the synthetic emotion label "motion"; label derivation now fails visibly and callers must validate tags before building a payload.
+    - ModelEngine now preserves validated resource_id on engine.parameter_plan.v2 and MotionTransformTrace without triggering catalog or expression playback; resource playback remains reserved for an explicit asset policy and timeline sink.
+    - Voice-following direct parameters now fail compilation when they target a parameter already owned by a semantic or derived axis; the previous silent skip is no longer allowed.
   unresolved_questions:
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.

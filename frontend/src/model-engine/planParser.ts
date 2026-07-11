@@ -180,6 +180,7 @@ export function parseSemanticParameterPlan(
       model_id: modelId,
       mode: modeRaw,
       emotion_label: emotionLabel,
+      resource_id: normalizeText(value.resource_id) || undefined,
       timing,
       parameters,
       diagnostics: isObject(value.diagnostics)
@@ -209,6 +210,7 @@ export function cloneSemanticParameterPlan(plan: unknown): SemanticParameterPlan
     model_id: parsed.model_id,
     mode: parsed.mode,
     emotion_label: parsed.emotion_label,
+    resource_id: parsed.resource_id,
     timing: parsed.timing,
     parameters: parsed.parameters,
     diagnostics: isObject(planObj.diagnostics)

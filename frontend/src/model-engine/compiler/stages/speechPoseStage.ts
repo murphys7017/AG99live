@@ -59,7 +59,15 @@ export function runSpeechPoseStage(
     return { ok: false, reason: "semantic_profile_missing" };
   }
 
-  const directParameters = buildVoiceFollowingParameters(context);
+  const voiceFollowingResult = buildVoiceFollowingParameters(context);
+  if (voiceFollowingResult.conflictingParameterIds.length > 0) {
+    return {
+      ok: false,
+      reason: `speech_pose_parameter_conflict:${voiceFollowingResult.conflictingParameterIds.join(",")}`,
+    };
+  }
+
+  const directParameters = voiceFollowingResult.parameters;
   if (directParameters.length > 0) {
     context.state.parameters = [
       ...context.state.parameters,
@@ -99,13 +107,17 @@ export function runSpeechPoseStage(
 
 function buildVoiceFollowingParameters(
   context: MotionCompileContext,
-): SemanticParameterPlan["parameters"] {
+): {
+  parameters: SemanticParameterPlan["parameters"];
+  conflictingParameterIds: string[];
+} {
   const profile = context.options.model.voice_following_profile;
   if (!profile || profile.schema_version !== "ag99.voice_following_profile.v1") {
-    return [];
+    return { parameters: [], conflictingParameterIds: [] };
   }
 
   const parameters: SemanticParameterPlan["parameters"] = [];
+  const conflictingParameterIds: string[] = [];
   const existingParameterIds = new Set(
     context.state.parameters.map((item) => item.parameter_id),
   );
@@ -118,10 +130,7 @@ function buildVoiceFollowingParameters(
       existingParameterIds.has(channel.parameter_id)
       || controlledParameterIds.has(channel.parameter_id)
     ) {
-      context.state.warnings = [
-        ...context.state.warnings,
-        `speech_pose_skipped_existing_parameter:${channel.parameter_id}`,
-      ];
+      conflictingParameterIds.push(channel.parameter_id);
       continue;
     }
 
@@ -144,7 +153,10 @@ function buildVoiceFollowingParameters(
     });
     existingParameterIds.add(channel.parameter_id);
   }
-  return parameters;
+  return {
+    parameters,
+    conflictingParameterIds: [...new Set(conflictingParameterIds)],
+  };
 }
 
 function collectControlledParameterIds(
