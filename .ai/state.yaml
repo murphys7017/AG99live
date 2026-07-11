@@ -56,7 +56,7 @@ context:
     - engine.motion_intent.v2 is no longer accepted at backend normalization, frontend inbound, preview send, or ModelEngine normalization boundaries.
     - <@anim> remains an official AstrBot compatibility transport only when Persona Effect injection is unavailable; it is not a fallback for invalid ag99live.motion payloads.
     - motion_catalog.json may enrich fallback pose descriptions and catalog-derived semantic candidates only when the motion can be mapped to semantic axes.
-    - fallback_pose_id remains a semantic-axis fallback selector, not a motion3/catalog playback selector.
+    - fallback_pose_id is no longer selected as a semantic pose; it remains empty in the transitional v3 shape and never drives playback.
     - Motion prompt static/dynamic scope metadata improves render-tree selection and diagnostics, but model input token reduction still depends on AstrBot/provider static prefix caching or session-level reuse.
     - Main Persona Effect motion no longer performs backend skeleton repair or fallback pose replacement; remaining fallback candidate data is prompt/diagnostic metadata until an explicit Engine-stage policy is implemented.
     - Empty, invalid, or all-neutral motion axes should not be replaced by a fallback pose; those turns should be treated as no valid motion input.
