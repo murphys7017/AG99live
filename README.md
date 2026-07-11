@@ -73,7 +73,7 @@ AG99live 是一个运行在 Windows 桌面上的 AstrBot + Electron + Live2D AI 
 
 因此，动作不是收到消息就立刻独立播放，而是进入同一段对话表现的时间线上。
 
-### 模型资源用于理解能力，不替代语义动作
+### 模型资源受语义动作引擎统一管理
 
 项目会扫描 Live2D 的 motion、expression 和参数资源，用来分析：
 
@@ -82,7 +82,7 @@ AG99live 是一个运行在 Windows 桌面上的 AstrBot + Electron + Live2D AI 
 - 头部、身体、视线和面部细节之间如何组合。
 - 哪些姿态可以作为受控的语义参考。
 
-当前自动动作主链路仍然输出语义轴，不让模型直接输出 `motion3`、`exp3`、文件路径或旧式动作选择器。
+当前自动动作主链路仍以语义轴为基础，不让模型输出 `motion3`、`exp3`、文件路径或旧式动作选择器。被模型 catalog 显式暴露的资源可以通过 typed resource ID 选择：expression 与无冲突参数计划叠加，完整 motion 替代参数计划；两者都必须经过 ModelEngine，并共享当前 segment 的 Timeline motion sink。
 
 ## 主要能力
 
@@ -102,7 +102,8 @@ AG99live 是一个运行在 Windows 桌面上的 AstrBot + Electron + Live2D AI 
 ag99live.motion Persona Effect
   -> engine.motion_intent.v4 (axis_levels -3..3)
   -> ModelEngine
-  -> engine.parameter_plan.v2
+  -> engine.parameter_plan.v2 / typed motion resource
+  -> PlaybackTimeline motion sink
   -> Live2D runtime
 ```
 
@@ -110,7 +111,7 @@ ag99live.motion Persona Effect
 
 ### 动作实验室
 
-动作实验室用于观察和调校模型生成的动作。它可以查看动作历史、预览参数计划、调整语义轴，并保存人工筛选结果，为后续 Prompt 优化、动作数据积累和模型训练提供基础。
+动作实验室用于观察和调校模型生成的动作。SQLite raw event schema v2 会关联保存原始七级输出、锚点解析值、关系图约束值、最终参数计划、profile hash、transform version、run ID 和播放终态，为后续人工筛选与训练提供可归因数据。
 
 ### 语义轴档案
 

@@ -59,6 +59,7 @@ astrbot_plugin_ag99live_adapter/
 
 - 当前 Persona Effect 主动作载荷为 `engine.motion_intent.v4`，前端 `ModelEngine` 根据 `semantic_axis_profile.level_anchors` 把 `axis_levels` 转换为轴值，再编译为 `engine.parameter_plan.v2`。
 - `axis_levels` 只能使用 `-3..3` 整数；省略表示本轮不控制该轴，`0` 表示明确回到中性。混入 `axes`、非法等级或空等级对象会直接拒绝，不会回退到 v3。
+- 可选资源使用 `expression_resource_id` 或 `motion_resource_id`，一次最多选择一个。expression 只与无参数冲突的计划叠加；motion 作为完整动作替代参数计划，但仍共享当前 segment 的统一 motion sink。
 - `engine.motion_intent.v3 + axes` 只保留给官方 `<@anim>` 兼容入口和内部手动预览。
 - 自动动作链路不允许 LLM 输出 `choice`、`motion_id`、catalog motion、motion3、exp3 或旧播放文件引用。
 - `motion_prompt_instruction` 会注入中间件动作上下文或 selector prompt，用于影响动作风格和幅度。

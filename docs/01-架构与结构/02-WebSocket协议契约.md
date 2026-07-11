@@ -187,7 +187,8 @@ control.turn_finished
   "mode": "expressive",
   "intent_tags": ["开心", "轻快", "看向用户"],
   "duration_hint_ms": 1000,
-  "resource_id": "",
+  "expression_resource_id": "expression.smile",
+  "motion_resource_id": "",
   "axis_levels": {
     "head_yaw": 1,
     "head_pitch": 1,
@@ -198,6 +199,13 @@ control.turn_finished
   "emotion_label": "开心-轻快-看向用户"
 }
 ```
+
+`expression_resource_id` 与 `motion_resource_id` 都是可选字段，但不能同时为非空值：
+
+- expression 资源可与不冲突的参数计划叠加。
+- motion 资源是完整动作主层，播放时替代普通参数计划。
+- 字段存在但资源不存在、类型不匹配、缺少参数所有权或运行时定位信息时，整个 motion segment 失败。
+- v4 不接受旧的单一 `resource_id`；该字段只保留在官方 `<@anim>` v3 兼容协议中。
 
 ### `engine.motion_intent.v3`
 

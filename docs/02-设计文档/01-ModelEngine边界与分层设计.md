@@ -289,7 +289,7 @@ order: 45
 
 - LLM 只面向当前 `SemanticAxisProfile` 中允许控制的语义轴。
 - 表情态度主要通过 `mouth_smile`、`brow_bias`、`gaze_x`、`gaze_y` 等辅轴表达；需要姿态配合时再组合头部和身体主轴。
-- `Expressions/*.exp3.json` 可以作为 Prompt 姿态参考来源，但不修复或替换 `engine.motion_intent.v4`，也不作为播放 payload。
+- `Expressions/*.exp3.json` 可以作为 Prompt 姿态参考来源；被显式暴露并由 `expression_resource_id` 选择时，必须通过 ModelEngine 参数所有权检查，再与参数计划在同一个 motion sink 中叠加。
 - `Expressions/*.exp3.json` 不进入 ModelEngine compile pipeline 的直接播放分支。
 - 如果重新接入原生 expression，必须作为独立能力设计，不能混入主轴来源。
 
@@ -365,6 +365,7 @@ Avatar Runtime 不理解语义轴，也不判断表情语义。
 ## 15. 维护原则
 
 - 当前自动动作主路径是 `engine.motion_intent.v4 axis_levels -> profile anchors -> relation graph -> engine.parameter_plan.v2`。
+- typed resource 仍经过同一 ModelEngine 编译边界：expression 与不冲突 parameter plan 叠加；motion resource 解析成 catalog motion 并替代 parameter plan 执行。两者都由当前 segment 的 PlaybackTimeline motion sink 启动和收口。
 - `engine.motion_intent.v3` 只维护官方 `<@anim>` 兼容和内部手动预览，不是 v4 失败后的 fallback。
 - `engine.motion_intent.v2` 不再作为当前自动链路或播放入口维护。
 - 废弃协议回退分支不进入主代码和主文档。

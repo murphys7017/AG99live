@@ -1,11 +1,15 @@
 task:
-  class: refactor
-  risk: medium
-  phase: semantic_motion_model_engine_migration
-  scope: Move semantic motion validation and axis processing into ModelEngine
+  class: feature
+  risk: high
+  phase: semantic_motion_v4_complete
+  status: complete
+  scope: Complete the documented seven-level prompt, trace recording, and typed resource playback pipeline
 context:
-  confidence: medium
+  confidence: high
   assumptions:
+    - Persona Effect resource intent is split into expression_resource_id and motion_resource_id; legacy resource_id is rejected on the v4 main path while the official <@anim> v3 compatibility contract remains unchanged.
+    - Expression resources may layer with a semantic parameter plan only when parameter ownership does not conflict; motion resources are complete-action playback and replace the parameter plan at execution time.
+    - Invalid, ambiguous, unowned, or non-playable resource intents fail visibly and never fall back to axis-only playback.
     - New unified-clock and protocol work should not preserve legacy playback or motion routes for compatibility; old routes should be deleted or made fail-visible instead of silently falling back.
     - Backend control events that settle or interrupt a turn must carry explicit turn_id; the frontend must not infer turn ownership from currentTurnId or active audio state.
     - Phase 1 pure timeline logic is complete; Phase 2 now lets audioRuntime create a segment PlaybackTimelineEngine for released audio.
@@ -178,6 +182,9 @@ architecture:
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
 verification:
   checks_run:
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (302 passed)
+    - npm test (complete frontend suite passed)
+    - npm run typecheck (renderer and node typechecks passed)
     - npm run test:playback-timeline
     - npm run test:playback-timeline-audio
     - npm run test:adapter-audio-runtime
