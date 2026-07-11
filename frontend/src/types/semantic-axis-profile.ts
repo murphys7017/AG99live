@@ -80,5 +80,5 @@ export interface SemanticAxisProfile {
   updated_at: string;
   axes: SemanticAxisDefinition[];
   couplings: SemanticAxisCoupling[];
-  relation_graph?: SemanticAxisRelationGraph;
+  relation_graph: SemanticAxisRelationGraph;
 }

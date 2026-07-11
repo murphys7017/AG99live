@@ -70,6 +70,7 @@ context:
     - IntensityStage now produces candidate axis values only; SemanticAxisRelationGraphStage owns final semantic axis value-range constraints and records range adjustments in the transform trace.
     - ModelEngine PlanBuilder now rejects invalid parameter bindings, binding input-range mismatches, and duplicate parameter targets instead of skipping them or reporting after_salvage success.
     - ensure_semantic_axis_profile persists the derived relation_graph for legacy profiles on first load without changing user axes, couplings, status, or revision.
+    - Frontend ModelEngine requires semantic profile relation_graph and no longer reads legacy couplings; backend legacy normalization exists only to migrate persisted profiles before they cross the frontend boundary.
   unresolved_questions:
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.

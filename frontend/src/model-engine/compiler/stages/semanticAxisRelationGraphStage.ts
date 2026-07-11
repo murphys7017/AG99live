@@ -63,14 +63,8 @@ function applyHeadBodyRelations(
   axisById: Map<string, SemanticAxisDefinition>,
 ): MotionAxisRelationAdjustment[] {
   const adjustments: MotionAxisRelationAdjustment[] = [];
-  const relationRules: readonly SemanticAxisRelationRule[] = profile.relation_graph
-    ? profile.relation_graph.edges.filter((edge) => edge.kind === "bounded_ratio")
-    : profile.couplings
-      .filter((coupling) =>
-        coupling.source_axis_id.startsWith("head_")
-        && coupling.target_axis_id.startsWith("body_"),
-      )
-      .map((coupling) => ({ ...coupling, kind: "bounded_ratio" as const }));
+  const relationRules: readonly SemanticAxisRelationRule[] =
+    profile.relation_graph.edges.filter((edge) => edge.kind === "bounded_ratio");
   const allValues = {
     ...controlledValues,
     ...derivedValues,

@@ -116,11 +116,9 @@ function cloneSemanticAxisProfile(
       })),
     })),
     couplings: profile.couplings.map((coupling) => ({ ...coupling })),
-    relation_graph: profile.relation_graph
-      ? {
-          schema_version: profile.relation_graph.schema_version,
-          edges: profile.relation_graph.edges.map((edge) => ({ ...edge })),
-        }
-      : undefined,
+    relation_graph: {
+      schema_version: profile.relation_graph.schema_version,
+      edges: profile.relation_graph.edges.map((edge) => ({ ...edge })),
+    },
   };
 }

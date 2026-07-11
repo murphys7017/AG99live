@@ -79,11 +79,9 @@ function applySemanticCouplings(
   profile: SemanticAxisProfile,
   axisById: Map<string, SemanticAxisDefinition>,
 ): { values: DynamicAxisValues; warnings: string[] } {
-  const couplings: SemanticAxisRelationRule[] = profile.relation_graph
-    ? profile.relation_graph.edges.filter(
-        (edge) => edge.kind === "derive" || edge.kind === "bounded_ratio",
-      )
-    : profile.couplings.map((coupling) => ({ ...coupling, kind: "derive" as const }));
+  const couplings: SemanticAxisRelationRule[] = profile.relation_graph.edges.filter(
+    (edge) => edge.kind === "derive" || edge.kind === "bounded_ratio",
+  );
   const baseValues: DynamicAxisValues = { ...sourceValues };
   let resolvedValues: DynamicAxisValues = { ...baseValues };
   const result: DynamicAxisValues = {};
