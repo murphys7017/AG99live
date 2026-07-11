@@ -86,6 +86,7 @@ context:
     - ModelEngine resourcePolicy stage now rejects unknown or unexposed resource IDs, missing resource parameter ownership, and resource/parameter-plan conflicts; it records resource metadata but does not start resource playback.
     - Current v3 motion visibility summaries no longer carry fallback/repair result fields; axis descriptors remain diagnostics, while fallback pose candidates remain isolated to Prompt reference data.
     - Backend effect normalization now rejects an invalid resource_id instead of clearing it and broadcasting the remaining semantic axes.
+    - Persona Effect motion arguments containing legacy catalog/motion wrapper fields now fail with forbidden_fields instead of being stripped and continued; <@anim> remains the separate official compatibility parser.
   unresolved_questions:
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.

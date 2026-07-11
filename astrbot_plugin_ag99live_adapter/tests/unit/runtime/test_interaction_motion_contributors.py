@@ -701,6 +701,32 @@ def test_invalid_resource_id_rejects_motion_payload_instead_of_clearing_resource
     assert "resource_id_rejected:resource.missing" in reason
 
 
+def test_forbidden_legacy_motion_fields_reject_effect_payload(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+    runtime_state = _build_runtime_state()
+
+    payload, reason = module._payload_normalize_motion_arguments_payload(
+        {
+            "intent_tags": ["happy"],
+            "axes": {"head_yaw": 60},
+            "mode": "catalog",
+        },
+        runtime_state,
+        base_reason="",
+        append_resolution_reason=lambda base, suffix: ";".join(
+            item for item in (base, suffix) if item
+        ),
+        sanitize_reason_fragment=lambda value: str(value).strip(),
+    )
+
+    assert payload is None
+    assert reason == "forbidden_fields:mode"
+
+
 def test_prompt_contributor_returns_extensions_for_core_reply_purpose(
     install_fake_astrbot,
     monkeypatch,

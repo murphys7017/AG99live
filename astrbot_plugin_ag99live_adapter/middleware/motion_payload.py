@@ -43,8 +43,11 @@ def normalize_motion_arguments_payload(
         )
         if key in motion_hint
     ]
-    for key in forbidden_fields:
-        motion_hint.pop(key, None)
+    if forbidden_fields:
+        return None, append_resolution_reason(
+            base_reason,
+            "forbidden_fields:" + ",".join(forbidden_fields),
+        )
 
     try:
         semantic_profile = resolve_selected_semantic_axis_profile(
@@ -65,11 +68,6 @@ def normalize_motion_arguments_payload(
     axes = motion_hint.get("axes")
     validated_axes, rejected_axes = normalize_effect_axes(axes)
     reason = base_reason
-    if forbidden_fields:
-        reason = append_resolution_reason(
-            reason,
-            "stripped_forbidden_fields:" + ",".join(forbidden_fields),
-        )
     if rejected_axes:
         reason = append_resolution_reason(
             reason,
