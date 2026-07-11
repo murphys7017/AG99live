@@ -1030,10 +1030,17 @@ def ensure_semantic_axis_profile(
     path = build_semantic_axis_profile_path(model_dir)
     current_source_hash = build_model_source_hash(model_dir)
     if path.exists():
+        needs_relation_graph_migration = _profile_needs_relation_graph_migration(path)
         current_profile = load_semantic_axis_profile(
             model_dir=model_dir,
             model_name=model_name,
         )
+        if needs_relation_graph_migration:
+            current_profile = {
+                **current_profile,
+                "updated_at": _utc_now_iso(),
+            }
+            _write_profile(path, current_profile)
         if str(current_profile["source_hash"]).strip() == current_source_hash:
             current_profile = validate_semantic_axis_profile(
                 current_profile,
@@ -1185,6 +1192,14 @@ def _first_binding_parameter_id(axis: Mapping[str, Any]) -> str:
     if not isinstance(first_binding, Mapping):
         return ""
     return str(first_binding.get("parameter_id") or "").strip()
+
+
+def _profile_needs_relation_graph_migration(path: Path) -> bool:
+    try:
+        raw_payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    return isinstance(raw_payload, Mapping) and raw_payload.get("relation_graph") is None
 
 
 def save_semantic_axis_profile(

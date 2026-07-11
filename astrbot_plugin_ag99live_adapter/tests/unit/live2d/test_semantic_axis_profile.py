@@ -315,6 +315,38 @@ def test_ensure_semantic_axis_profile_migrates_old_generated_default_design(tmp_
     assert "eye_smile_right" in axes
 
 
+def test_ensure_semantic_axis_profile_persists_relation_graph_migration(tmp_path) -> None:
+    model_dir = tmp_path / "DemoModel"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
+    model_payload = _build_model_payload()
+    _add_motion_axis_parameters(model_payload)
+
+    original_profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+    original_path = build_semantic_axis_profile_path(model_dir)
+    legacy_payload = json.loads(original_path.read_text(encoding="utf-8"))
+    legacy_payload.pop("relation_graph", None)
+    original_path.write_text(
+        json.dumps(legacy_payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    migrated_profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+    persisted_payload = json.loads(original_path.read_text(encoding="utf-8"))
+
+    assert migrated_profile["revision"] == original_profile["revision"]
+    assert persisted_payload["revision"] == original_profile["revision"]
+    assert persisted_payload["axes"] == legacy_payload["axes"]
+    assert persisted_payload["couplings"] == legacy_payload["couplings"]
+    assert persisted_payload["relation_graph"] == migrated_profile["relation_graph"]
+
+
 def test_ensure_semantic_axis_profile_refreshes_stale_user_modified_old_default_design(tmp_path) -> None:
     model_dir = tmp_path / "DemoModel"
     model_dir.mkdir(parents=True, exist_ok=True)
