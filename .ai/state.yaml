@@ -1,9 +1,9 @@
 task:
-  class: bugfix
+  class: refactor
   risk: high
-  phase: strict_motion_error_propagation
+  phase: model_engine_boundary_consolidation
   status: complete
-  scope: Remove motion-path fallback behavior, make model readiness authoritative, and preserve failed sink outcomes without false release state
+  scope: Isolate ModelEngine instances, enforce strict production ingress, move clock interpretation and plan retiming into ModelEngine, and provide instance-level stage registries
 context:
   confidence: high
   assumptions:
@@ -26,7 +26,7 @@ context:
     - Audio timeline integration observes and records real audio playback clock state, but does not yet replace turnPlaybackOrchestrator release decisions.
     - Audio playback is now injected through PlaybackTimelineAudioSink instead of separate start/stop/clock functions, making audio execution a concrete timeline sink boundary.
     - PlaybackTimelineRuntime stores timelines only by turnId + messageId; active timeline compatibility APIs and the hidden active segment pointer have been removed.
-    - ModelEngine now consumes handlePlaybackTimelineStarted(PlaybackTimelineSnapshot) as the audio-start motion wakeup entry point; the old notifyAudioPlaybackStarted bridge has been removed.
+    - ModelEngine consumes a narrow MotionPlaybackClockContext projected by the Timeline integration layer; it does not depend on PlaybackTimelineSnapshot or sink state.
     - Motion release now receives a segment-scoped audio timeline snapshot from PlaybackTimelineRuntime when turnId and messageId match; mismatched timeline snapshots are intentionally hidden from the motion sink.
     - Audio-start delayed motion wakeup now lives in PlaybackTimeline AudioStartMotionTimelineBridge and refreshes the segment-scoped playback timeline snapshot at timer fire time, so ModelEngine does not consume stale currentTimeMs.
     - Motion release now registers a required motion sink on the matched active audio timeline; ModelEngine started/finished callbacks write motion started/completed/failed/interrupted terminal state back into that timeline.
@@ -44,7 +44,10 @@ context:
     - Motion-only synthetic timelines now require an explicit release context marked as no-audio; a missing audio timeline is not enough to create synthetic timing.
     - Explicit motion-only contexts fail immediately with motion_only_timeline_unavailable when a synthetic timeline cannot be prepared; they must not queue in ModelEngine waiting for an audio-start timeout.
     - ModelEngine now uses playback timeline duration/currentTime as the only audio-synced motion timing source when the release context carries a usable timeline snapshot.
-    - Performance curve timing now resolves through a playback-timeline curve resolver; valid audio timelines use remaining duration, explicit synthetic timelines may be used only with duration, and audio_unavailable/missing-duration timelines skip the curve with diagnostics instead of being treated as synced timing.
+    - Performance curve timing and direct-plan retiming are owned by ModelEngine; valid audio clocks use remaining duration, sequence keyframes scale with the plan, and Live2D playback no longer rewrites timing.
+    - Each useModelEngine instance owns isolated reactive state and an isolated compile stage registry; core stages cannot be disabled or removed at runtime.
+    - Production motion ingress rejects missing turn_id and duplicate pending turn_id plus message_id payloads; preview remains a direct path without a production turn requirement.
+    - ModelEngine owns rejected-motion terminal reporting through its Timeline callback; the motion sink does not perform a second generic terminal write.
     - Audio-start notifications now refresh pending motion entries with the current matched audio timeline snapshot before starting the payload, avoiding stale release-time timeline snapshots.
     - Speech-only motion now also consumes the matched audio-start timeline snapshot when no queued motion starts, so speech-following plans use real remaining audio duration instead of any SessionStore estimate.
     - Motion release timeline ownership lookup now lives in PlaybackTimelineRuntime; TurnPlaybackOrchestrator no longer reads active audio timeline snapshots directly, and MotionTimelineSink uses segment-scoped lookup when available.
@@ -217,6 +220,10 @@ architecture:
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
 verification:
   checks_run:
+    - npm test (complete frontend suite passed after ModelEngine boundary consolidation)
+    - npm run typecheck
+    - npm run build:web
+    - git diff --check
     - npm test (complete frontend suite passed after lip-sync failure degradation and bounded timeline history changes)
     - npm run build:web (production web build passed after lip-sync failure degradation changes)
     - npm run typecheck (renderer and node typechecks passed)
@@ -321,7 +328,7 @@ verification:
     - frontend TypeScript dependency scan: 138 files, 0 cycles
     - git diff --check
   checks_failed: []
-  validation_gap: Live AstrBot/Electron testing is still needed to verify IndexedDB resend and SQLite acknowledgement across a real socket disconnect; provider logs are still needed to confirm prompt static-scope input token reduction.
+  validation_gap: Live Electron playback is still needed to observe audio-aligned direct-plan retiming and extension-stage behavior against a real Live2D model; existing socket/provider validation gaps remain unchanged.
 runtime:
   mode: unified_playback_timeline_phase3_motion_timeline_context
 backlog:

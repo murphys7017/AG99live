@@ -6,7 +6,7 @@ import type {
 } from "../types/protocol.js";
 import { SCHEMA_PARAMETER_PLAN_V2 } from "../types/protocol.js";
 import type { DirectParameterPlanTerminalEvent } from "../types/live2d-runtime.d.ts";
-import { isFiniteNumber, isObject, normalizeText } from "../utils/guards.js";
+import { isObject, normalizeText } from "../utils/guards.js";
 import { parseSemanticParameterPlan } from "../model-engine/planParser.js";
 
 type PreviewPlayerStatus = "idle" | "playing" | "finished" | "failed";
@@ -18,7 +18,6 @@ interface ParsedParameterPlan {
 
 interface PlayPlanOptions {
   softHandoff?: boolean;
-  targetDurationMs?: number | null;
   onStarted?: (plan: SemanticParameterPlan, runId: string) => void;
   onFinished?: (event: DirectParameterPlanTerminalEvent) => void;
 }
@@ -26,52 +25,6 @@ interface PlayPlanOptions {
 interface PlayCatalogMotionOptions {
   onStarted?: (motion: CatalogMotionPayload, runId: string) => void;
   onFinished?: (event: DirectParameterPlanTerminalEvent) => void;
-}
-
-function retimePlanForPlayback(
-  parsed: ParsedParameterPlan,
-  targetDurationMs: number | null | undefined,
-): ParsedParameterPlan {
-  if (!isFiniteNumber(targetDurationMs)) {
-    return parsed;
-  }
-
-  const requestedDurationMs = Math.max(320, Math.min(15000, Math.round(targetDurationMs)));
-  if (Math.abs(requestedDurationMs - parsed.totalDurationMs) <= 80) {
-    return parsed;
-  }
-
-  const sourceTiming = parsed.plan.timing;
-  const sourceTotalMs = Math.max(
-    parsed.totalDurationMs,
-    sourceTiming.blend_in_ms + sourceTiming.hold_ms + sourceTiming.blend_out_ms,
-    1,
-  );
-  const blendInRatio = sourceTiming.blend_in_ms / sourceTotalMs;
-  const blendOutRatio = sourceTiming.blend_out_ms / sourceTotalMs;
-
-  let blendInMs = Math.max(60, Math.round(requestedDurationMs * blendInRatio));
-  const blendOutMs = Math.max(80, Math.round(requestedDurationMs * blendOutRatio));
-  let holdMs = requestedDurationMs - blendInMs - blendOutMs;
-  let durationMs = requestedDurationMs;
-
-  if (holdMs < 120) {
-    holdMs = 120;
-    durationMs = blendInMs + holdMs + blendOutMs;
-  }
-
-  return {
-    plan: {
-      ...parsed.plan,
-      timing: {
-        duration_ms: durationMs,
-        blend_in_ms: blendInMs,
-        hold_ms: holdMs,
-        blend_out_ms: blendOutMs,
-      },
-    },
-    totalDurationMs: durationMs,
-  };
 }
 
 export function usePreviewMotionPlayer() {
@@ -204,7 +157,7 @@ export function usePreviewMotionPlayer() {
       state.finishedAt = new Date().toISOString();
       return false;
     }
-    const playbackPlan = retimePlanForPlayback(parsed, options.targetDurationMs);
+    const playbackPlan = parsed;
     console.info(
       "[MotionPlayer] parse OK. mode=",
       playbackPlan.plan.mode,
@@ -212,8 +165,6 @@ export function usePreviewMotionPlayer() {
       playbackPlan.plan.emotion_label,
       "parameters=",
       playbackPlan.plan.parameters.length,
-      "targetDurationMs=",
-      options.targetDurationMs ?? "N/A",
       "resolvedDurationMs=",
       playbackPlan.totalDurationMs,
       "softHandoff=",

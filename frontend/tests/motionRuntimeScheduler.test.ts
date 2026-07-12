@@ -13,7 +13,7 @@ import type {
   ModelEnginePlaybackSession,
 } from "../src/model-engine/runtime/contracts.js";
 import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
-import type { PlaybackTimelineSnapshot } from "../src/playback-timeline/contracts.js";
+import type { MotionPlaybackClockContext } from "../src/model-engine/runtime/playbackClock.js";
 
 let mockNowMs = 1000;
 let nextTimerId = 1;
@@ -80,24 +80,16 @@ function buildCurvePayload(): NormalizedMotionPayload {
   };
 }
 
-function buildTimelineSnapshot(overrides: Partial<PlaybackTimelineSnapshot> = {}): PlaybackTimelineSnapshot {
+function buildTimelineSnapshot(overrides: Partial<MotionPlaybackClockContext> = {}): MotionPlaybackClockContext {
   return {
     timelineId: "timeline-1",
     turnId: "turn-1",
     messageId: "msg-1",
     phase: "playing",
-    clockSource: "audio",
+    source: "audio",
     startedAtMs: 1200,
     currentTimeMs: 420,
     durationMs: 2400,
-    playbackRate: 1,
-    sinks: [
-      {
-        id: "audio",
-        required: true,
-        terminal: "started",
-      },
-    ],
     ...overrides,
   };
 }
@@ -202,7 +194,7 @@ function testQueuedPayloadFailureRetainsPreparingTimelineOwnership(): void {
     turnId: "turn-1",
     playbackTurnId: "turn-1",
     receivedAtMs: 900,
-    playbackTimeline: preparingTimeline,
+    playbackClock: preparingTimeline,
   });
 
   const timer = timers.values().next().value;
@@ -211,8 +203,8 @@ function testQueuedPayloadFailureRetainsPreparingTimelineOwnership(): void {
 
   assert.equal(started.length, 0);
   assert.equal(failed.length, 1);
-  assert.equal(failed[0].playbackTimeline?.timelineId, "timeline-1");
-  assert.equal(failed[0].playbackTimeline?.phase, "preparing");
+  assert.equal(failed[0].playbackClock?.timelineId, "timeline-1");
+  assert.equal(failed[0].playbackClock?.phase, "preparing");
 }
 
 function testDroppedPendingPayloadReportsStartFailure(): void {
@@ -233,6 +225,71 @@ function testDroppedPendingPayloadReportsStartFailure(): void {
   assert.equal(failed[0].messageId, "msg-dropped");
   assert.equal(failed[0].turnId, "turn-1");
   assert.equal(failed[0].startReason, "current_turn_changed");
+}
+
+function testMissingTurnIdIsRejectedBeforeQueueing(): void {
+  resetTimers();
+  const { scheduler, started, failed } = createHarness(buildSession());
+
+  const accepted = scheduler.queueInboundPayload(buildPayload(), {
+    messageId: "msg-missing-turn",
+    turnId: " ",
+    receivedAtMs: 900,
+  });
+
+  assert.equal(accepted, false);
+  assert.equal(started.length, 0);
+  assert.equal(timers.size, 0);
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].startReason, "motion_turn_id_missing");
+  assert.equal(failed[0].turnId, null);
+}
+
+function testDuplicatePendingPayloadRejectsBothPayloads(): void {
+  resetTimers();
+  const { scheduler, started, failed } = createHarness(buildSession());
+  const context = {
+    messageId: "msg-duplicate",
+    turnId: "turn-1",
+    playbackTurnId: "turn-1",
+    receivedAtMs: 900,
+  };
+
+  assert.equal(scheduler.queueInboundPayload(buildPayload(), context), true);
+  assert.equal(timers.size, 1);
+  assert.equal(scheduler.queueInboundPayload(buildPayload(), context), false);
+
+  assert.equal(started.length, 0);
+  assert.equal(timers.size, 0);
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].startReason, "duplicate_motion_payload");
+  assert.equal(failed[0].messageId, "msg-duplicate");
+}
+
+function testReadyTimelineReturnsSynchronousStartFailure(): void {
+  resetTimers();
+  const failed: StartPayloadContext[] = [];
+  const scheduler = createMotionRuntimeScheduler(
+    { getCurrentTurnId: () => "turn-1" },
+    {
+      onPendingStateChanged: () => {},
+      onPendingStatus: () => {},
+      onStartPayload: () => false,
+      onStartFailed: (context) => failed.push(context),
+    },
+  );
+
+  const accepted = scheduler.queueInboundPayload(buildPayload(), {
+    messageId: "msg-1",
+    turnId: "turn-1",
+    receivedAtMs: 900,
+    playbackClock: buildTimelineSnapshot(),
+  });
+
+  assert.equal(accepted, false);
+  assert.equal(timers.size, 0);
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].startReason, "playback_timeline_ready");
 }
 
 function testSameMessageIdDifferentTurnsStartByCompositeIdentity(): void {
@@ -506,7 +563,7 @@ function testPlaybackTimelineStartRefreshesPendingPlaybackTimeline(): void {
     turnId: "turn-1",
     playbackTurnId: "turn-1",
     receivedAtMs: 900,
-    playbackTimeline: staleTimeline,
+    playbackClock: staleTimeline,
   });
 
   assert.equal(
@@ -514,8 +571,8 @@ function testPlaybackTimelineStartRefreshesPendingPlaybackTimeline(): void {
     true,
   );
   assert.equal(started.length, 1);
-  assert.equal(started[0].playbackTimeline?.timelineId, "fresh");
-  assert.equal(started[0].playbackTimeline?.durationMs, 2200);
+  assert.equal(started[0].playbackClock?.timelineId, "fresh");
+  assert.equal(started[0].playbackClock?.durationMs, 2200);
   assert.equal(started[0].startReason, "playback_timeline_started");
 }
 
@@ -533,7 +590,7 @@ function testUnavailablePlaybackTimelineFailsPendingMotion(): void {
   });
 
   scheduler.handlePlaybackTimelineStarted(buildTimelineSnapshot({
-    clockSource: "audio_unavailable",
+    source: "audio_unavailable",
   }));
 
   assert.equal(started.length, 0);
@@ -545,6 +602,9 @@ function run(): void {
   testQueuedPayloadFailsWhenTimelineDoesNotArrive();
   testQueuedPayloadFailureRetainsPreparingTimelineOwnership();
   testDroppedPendingPayloadReportsStartFailure();
+  testMissingTurnIdIsRejectedBeforeQueueing();
+  testDuplicatePendingPayloadRejectsBothPayloads();
+  testReadyTimelineReturnsSynchronousStartFailure();
   testSameMessageIdDifferentTurnsStartByCompositeIdentity();
   testCompositeIdentityDoesNotCollideOnDelimiterText();
   testPlaybackTimelineRequiresMatchingTurnWhenMessageIdIsShared();

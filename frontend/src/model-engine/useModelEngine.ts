@@ -13,35 +13,36 @@ import type {
   MotionRuntimeSchedulerDependencies,
   MotionStartDependencies,
 } from "./runtime/contracts.js";
-import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
+import type { MotionPlaybackClockContext } from "./runtime/playbackClock.js";
 import { normalizeMotionPayload, normalizeTurnId } from "./normalize.js";
 import {
   reportInvalidMotionPayload,
   startNormalizedMotionPayload,
 } from "./runtime/motionStart.js";
-
-const state = reactive({
-  status: "idle" as ModelEngineStatus,
-  message: "等待动作输入。",
-  pendingMessageId: "" as string,
-  pendingCount: 0,
-  lastCompileReason: "",
-  lastCompileDiagnostics: null as CompileDiagnostics | null,
-  lastStartReason: "",
-});
-
-function setState(
-  status: ModelEngineStatus,
-  message: string,
-  diagnostics: CompileDiagnostics | null = state.lastCompileDiagnostics,
-): void {
-  state.status = status;
-  state.message = message;
-  state.lastCompileDiagnostics = diagnostics;
-}
+import { createModelEngineStageRegistry } from "./compiler/registry.js";
 
 export function useModelEngine(dependencies: ModelEngineDependencies) {
+  const stageRegistry = createModelEngineStageRegistry();
+  const state = reactive({
+    status: "idle" as ModelEngineStatus,
+    message: "等待动作输入。",
+    pendingMessageId: "",
+    pendingCount: 0,
+    lastCompileReason: "",
+    lastCompileDiagnostics: null as CompileDiagnostics | null,
+    lastStartReason: "",
+  });
   let activePlaybackOwner: { turnId: string | null; messageId: string } | null = null;
+
+  function setState(
+    status: ModelEngineStatus,
+    message: string,
+    diagnostics: CompileDiagnostics | null = state.lastCompileDiagnostics,
+  ): void {
+    state.status = status;
+    state.message = message;
+    state.lastCompileDiagnostics = diagnostics;
+  }
 
   function pushHistory(
     role: ModelEngineHistoryRole,
@@ -69,6 +70,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       dependencies.onPlanStarted(event);
     },
     onCompileFailed: dependencies.onCompileFailed,
+    stageRegistry,
   };
 
   const runtimeStateController = {
@@ -101,7 +103,13 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         runtimeStateController,
       ),
     onStartFailed: (context: StartPayloadContext) => {
-      if (context.playbackTimeline) {
+      if (!normalizeTurnId(context.turnId)) {
+        state.lastCompileReason = context.startReason;
+        setState("failed", `动作启动失败：${context.startReason}`, null);
+        pushHistory("error", `动作启动失败：${context.startReason}`);
+        return;
+      }
+      if (context.playbackClock) {
         dependencies.markMotionTimelineTerminal(
           context.turnId,
           context.messageId,
@@ -132,41 +140,39 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       );
       return false;
     }
-    runtimeScheduler.queueInboundPayload(normalized.payload, context);
-    return true;
+    return runtimeScheduler.queueInboundPayload(normalized.payload, context);
   }
 
   function ingestNormalizedPayload(
     payload: NormalizedMotionPayload,
     context: InboundPayloadContext,
   ): boolean {
-    runtimeScheduler.queueInboundPayload(payload, context);
-    return true;
+    return runtimeScheduler.queueInboundPayload(payload, context);
   }
 
   function handlePlaybackTimelineStarted(
-    playbackTimeline: PlaybackTimelineSnapshot,
+    playbackClock: MotionPlaybackClockContext,
   ): boolean {
     const queuedMotionStarted =
-      runtimeScheduler.handlePlaybackTimelineStarted(playbackTimeline);
+      runtimeScheduler.handlePlaybackTimelineStarted(playbackClock);
     if (queuedMotionStarted) {
       return true;
     }
 
     const normalizedMessageId =
-      typeof playbackTimeline.messageId === "string"
-        ? playbackTimeline.messageId.trim()
+      typeof playbackClock.messageId === "string"
+        ? playbackClock.messageId.trim()
         : "";
     if (!normalizedMessageId) {
       return false;
     }
     if (
-      playbackTimeline.clockSource !== "audio"
-      || (playbackTimeline.phase !== "playing" && playbackTimeline.phase !== "paused")
+      playbackClock.source !== "audio"
+      || (playbackClock.phase !== "playing" && playbackClock.phase !== "paused")
     ) {
       return false;
     }
-    if (!dependencies.canStartSpeechOnlyMotion(playbackTimeline.turnId, normalizedMessageId)) {
+    if (!dependencies.canStartSpeechOnlyMotion(playbackClock.turnId, normalizedMessageId)) {
       return false;
     }
     const speechOnlyPayload = buildSpeechOnlyMotionPayload(
@@ -180,11 +186,11 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       speechOnlyPayload,
       {
         messageId: normalizedMessageId,
-        turnId: playbackTimeline.turnId,
-        playbackTurnId: playbackTimeline.turnId,
+        turnId: playbackClock.turnId,
+        playbackTurnId: playbackClock.turnId,
         startReason: "speech_only",
         queuedDelayMs: 0,
-        playbackTimeline,
+        playbackClock,
       },
       motionStartDependencies,
       runtimeStateController,
@@ -257,5 +263,6 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     playPreviewPayload,
     interruptPlaybackSegment,
     stop,
+    stageRegistry,
   };
 }

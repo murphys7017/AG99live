@@ -4,6 +4,7 @@ import type { PlaybackTimelineMotionSink } from "../playback-timeline/motionType
 import {
   createModelEngineMotionTimelineSink,
   createMotionTimelineRunTracker,
+  projectMotionPlaybackClock,
   type MotionTimelineRunTracker,
 } from "../playback-integrations/modelEngineMotionSink.js";
 import {
@@ -19,7 +20,9 @@ export interface PlaybackTimelineMotionEnginePort {
   ingestNormalizedPayload: PlaybackTimelineMotionSink["start"];
   notifyCurrentTurnChanged(turnId: string | null): void;
   interruptPlaybackSegment(turnId: string | null, messageId: string, reason: string): void;
-  handlePlaybackTimelineStarted(playbackTimeline: PlaybackTimelineSnapshot): boolean | void;
+  handlePlaybackTimelineStarted(
+    playbackTimeline: ReturnType<typeof projectMotionPlaybackClock>,
+  ): boolean | void;
 }
 
 export function createPlaybackTimelineMotionRunTracker(
@@ -72,11 +75,11 @@ export function configurePlaybackTimelineMotionRuntime(options: {
       getPlaybackTimelineSnapshotForSegment: playbackTimeline.getPlaybackTimelineSnapshotForSegment,
       onMissingPlaybackTimeline,
       handlePlaybackTimelineStarted: (turnId, messageId, playbackTimelineSnapshot) =>
-        motionEngine.handlePlaybackTimelineStarted({
+        motionEngine.handlePlaybackTimelineStarted(projectMotionPlaybackClock({
           ...playbackTimelineSnapshot,
           turnId,
           messageId,
-        }),
+        })),
     });
 
   playbackTimeline.setAudioTimelineStartedHandler((turnId, messageId) => {

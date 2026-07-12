@@ -1,9 +1,14 @@
 import { compileMotionIntent } from "../compiler/compileMotionIntent.js";
+import { createModelEngineStageRegistry } from "../compiler/registry.js";
 import { MOTION_MIN_REMAINING_AUDIO_MS } from "../constants.js";
 import type { NormalizedMotionPayload } from "../contracts.js";
 import type { CompileDiagnostics } from "../compiler/contracts.js";
 import type { MotionPlanPayload } from "../../types/protocol.js";
-import { resolvePerformanceCurveTimeline } from "../../playback-timeline/performanceCurveSink.js";
+import {
+  resolvePerformanceCurveTimeline,
+  resolvePlaybackTargetDurationMs,
+  retimeSemanticParameterPlan,
+} from "./playbackClock.js";
 import type {
   ModelEngineStatus,
   MotionRuntimeStateController,
@@ -66,33 +71,10 @@ export function startNormalizedMotionPayload(
 function resolveTimelineTargetDurationMs(
   context: StartPayloadContext,
 ): number | null {
-  const timeline = context.playbackTimeline;
-  if (!timeline) {
-    return null;
-  }
-  if (timeline.clockSource === "audio_unavailable") {
-    return null;
-  }
-  const durationMs = timeline.durationMs;
-  if (
-    typeof durationMs !== "number"
-    || !Number.isFinite(durationMs)
-    || durationMs <= 0
-  ) {
-    return null;
-  }
-
-  if (timeline.phase === "playing" || timeline.phase === "paused") {
-    const currentTimeMs = Number.isFinite(timeline.currentTimeMs)
-      ? Math.max(0, timeline.currentTimeMs)
-      : 0;
-    return Math.max(
-      MOTION_MIN_REMAINING_AUDIO_MS,
-      Math.round(durationMs - currentTimeMs),
-    );
-  }
-
-  return Math.round(durationMs);
+  return resolvePlaybackTargetDurationMs(
+    context.playbackClock,
+    MOTION_MIN_REMAINING_AUDIO_MS,
+  );
 }
 
 function resolveMotionTargetDurationMs(
@@ -104,12 +86,12 @@ function resolveMotionTargetDurationMs(
 function isSpeechActiveForPayload(
   context: StartPayloadContext,
 ): boolean {
-  const timeline = context.playbackTimeline;
-  if (timeline?.clockSource === "audio_unavailable") {
+  const timeline = context.playbackClock;
+  if (timeline?.source === "audio_unavailable") {
     return false;
   }
   if (
-    timeline?.clockSource === "audio"
+    timeline?.source === "audio"
     && (timeline.phase === "playing" || timeline.phase === "paused")
   ) {
     return true;
@@ -188,7 +170,7 @@ function startSemanticIntentPayload(
   if (performanceCurveHint) {
     const curveTimeline = resolvePerformanceCurveTimeline({
       hint: performanceCurveHint,
-      timeline: context.playbackTimeline ?? null,
+      clock: context.playbackClock ?? null,
       minRemainingDurationMs: MOTION_MIN_REMAINING_AUDIO_MS,
     });
     if (curveTimeline.ok) {
@@ -214,7 +196,7 @@ function startSemanticIntentPayload(
       turnId: context.turnId ?? "",
       messageId: context.messageId,
     },
-  });
+  }, dependencies.stageRegistry ?? createModelEngineStageRegistry());
 
   state.setLastCompileReason(compileResult.reason);
   state.setLastCompileDiagnostics(compileResult.diagnostics);
@@ -377,12 +359,26 @@ function startDirectPlanPayload(
     );
   }
   let notifiedStarted = false;
+  let playbackPlan: MotionPlanPayload;
+  try {
+    playbackPlan = retimeSemanticParameterPlan(
+      payload.plan,
+      resolveMotionTargetDurationMs(context),
+    );
+  } catch (error) {
+    const reason = error instanceof Error
+      ? `motion_plan_retime_failed:${error.message}`
+      : "motion_plan_retime_failed";
+    state.setLastCompileReason(reason);
+    state.setState("failed", reason, null);
+    state.pushHistory("error", `动作计划重定时失败：${reason}`);
+    return false;
+  }
   const started = dependencies.playPlan(
-    payload.plan,
+    playbackPlan,
     selectedModel,
     {
       softHandoff: true,
-      targetDurationMs: resolveMotionTargetDurationMs(context),
       onStarted: (plan, runId) => {
         const normalizedRunId = normalizeMotionRunId(runId);
         if (!normalizedRunId) {

@@ -5,7 +5,11 @@ import assert from "node:assert/strict";
 import { effectScope, nextTick } from "vue";
 import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
 import { useTurnPlaybackOrchestrator } from "../src/turn-playback/useTurnPlaybackOrchestrator.js";
-import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
+import type {
+  InboundPayloadContext,
+  NormalizedMotionPayload,
+} from "../src/model-engine/contracts.js";
+import type { MotionPlaybackClockContext } from "../src/model-engine/runtime/playbackClock.js";
 import { createModelEngineMotionTimelineSink } from "../src/playback-integrations/modelEngineMotionSink.js";
 import { createPlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
 import type {
@@ -110,7 +114,7 @@ function createHarness(options: {
   const motionContexts: Array<{
     messageId: string;
     turnId: string | null;
-    playbackTimeline?: PlaybackTimelineSnapshot | null;
+    playbackClock?: MotionPlaybackClockContext | null;
   }> = [];
   const turnChanges: Array<string | null> = [];
   const logs: Array<{ message: string; details: Record<string, unknown> }> = [];
@@ -183,12 +187,21 @@ function createHarness(options: {
       context: {
         messageId: string;
         turnId: string | null;
-        playbackTimeline?: PlaybackTimelineSnapshot | null;
+        playbackClock?: MotionPlaybackClockContext | null;
       },
     ): boolean {
       motionPayloads.push(payload);
       motionContexts.push(context);
-      return options.motionAccepted ?? true;
+      const accepted = options.motionAccepted ?? true;
+      if (!accepted) {
+        timelineRuntime.markMotionTimelineTerminal(
+          context.turnId,
+          context.messageId,
+          "failed",
+          "motion_payload_rejected",
+        );
+      }
+      return accepted;
     },
     notifyCurrentTurnChanged(turnId: string | null): void {
       turnChanges.push(turnId);
@@ -413,11 +426,11 @@ async function testMotionReleaseReceivesMatchingAudioTimeline(): Promise<void> {
   ]);
   assert.equal(h.motionContexts.length, 1);
   assert.equal(
-    h.motionContexts[0].playbackTimeline?.timelineId,
+    h.motionContexts[0].playbackClock?.timelineId,
     "timeline-1",
   );
   assert.equal(
-    h.motionContexts[0].playbackTimeline?.durationMs,
+    h.motionContexts[0].playbackClock?.durationMs,
     1800,
   );
   h.stop();
@@ -775,11 +788,9 @@ async function testAudioExpectedTimerClearsWhenAudioArrives(): Promise<void> {
   h.stop();
 }
 
-function testMotionTimelineSinkMarksTimelineFailedWhenEngineRejects(): void {
+function testMotionTimelineSinkLeavesRejectedTerminalOwnershipToEngine(): void {
   const terminals: string[] = [];
-  const contexts: Array<{
-    playbackTimeline?: PlaybackTimelineSnapshot | null;
-  }> = [];
+  const contexts: InboundPayloadContext[] = [];
   const sink = createModelEngineMotionTimelineSink({
     motionEngine: {
       ingestNormalizedPayload: (_payload, context) => {
@@ -802,16 +813,12 @@ function testMotionTimelineSinkMarksTimelineFailedWhenEngineRejects(): void {
   });
 
   assert.equal(accepted, false);
-  assert.equal(contexts[0].playbackTimeline?.timelineId, "timeline-1");
-  assert.deepEqual(terminals, [
-    "turn-timeline:msg-timeline:failed:motion_payload_rejected",
-  ]);
+  assert.equal(contexts[0].playbackClock?.timelineId, "timeline-1");
+  assert.deepEqual(terminals, []);
 }
 
 function testMotionTimelineSinkUsesPreparedSyntheticTimelineWhenAudioAbsent(): void {
-  const contexts: Array<{
-    playbackTimeline?: PlaybackTimelineSnapshot | null;
-  }> = [];
+  const contexts: InboundPayloadContext[] = [];
   const sink = createModelEngineMotionTimelineSink({
     motionEngine: {
       ingestNormalizedPayload: (_payload, context) => {
@@ -833,14 +840,12 @@ function testMotionTimelineSinkUsesPreparedSyntheticTimelineWhenAudioAbsent(): v
   });
 
   assert.equal(accepted, true);
-  assert.equal(contexts[0].playbackTimeline?.timelineId, "timeline-motion-only");
-  assert.equal(contexts[0].playbackTimeline?.clockSource, "synthetic");
+  assert.equal(contexts[0].playbackClock?.timelineId, "timeline-motion-only");
+  assert.equal(contexts[0].playbackClock?.source, "synthetic");
 }
 
 function testMotionTimelineSinkRetainsPreparingAudioTimelineOwnership(): void {
-  const contexts: Array<{
-    playbackTimeline?: PlaybackTimelineSnapshot | null;
-  }> = [];
+  const contexts: InboundPayloadContext[] = [];
   const sink = createModelEngineMotionTimelineSink({
     motionEngine: {
       ingestNormalizedPayload: (_payload, context) => {
@@ -862,16 +867,14 @@ function testMotionTimelineSinkRetainsPreparingAudioTimelineOwnership(): void {
 
   assert.equal(accepted, true);
   assert.equal(
-    contexts[0].playbackTimeline?.timelineId,
+    contexts[0].playbackClock?.timelineId,
     "timeline-preparing-audio",
   );
-  assert.equal(contexts[0].playbackTimeline?.phase, "preparing");
+  assert.equal(contexts[0].playbackClock?.phase, "preparing");
 }
 
 function testMotionTimelineSinkRejectsMissingAudioTimeline(): void {
-  const contexts: Array<{
-    playbackTimeline?: PlaybackTimelineSnapshot | null;
-  }> = [];
+  const contexts: InboundPayloadContext[] = [];
   const terminals: string[] = [];
   const sink = createModelEngineMotionTimelineSink({
     motionEngine: {
@@ -903,9 +906,7 @@ function testMotionTimelineSinkRejectsMissingAudioTimeline(): void {
 }
 
 function testMotionTimelineSinkRejectsMissingMotionOnlyTimeline(): void {
-  const contexts: Array<{
-    playbackTimeline?: PlaybackTimelineSnapshot | null;
-  }> = [];
+  const contexts: InboundPayloadContext[] = [];
   const terminals: string[] = [];
   const sink = createModelEngineMotionTimelineSink({
     motionEngine: {
@@ -939,9 +940,7 @@ function testMotionTimelineSinkRejectsMissingMotionOnlyTimeline(): void {
 
 function testMotionTimelineSinkUsesSegmentScopedTimelineLookup(): void {
   const segmentTimelineLookupCalls: string[] = [];
-  const contexts: Array<{
-    playbackTimeline?: PlaybackTimelineSnapshot | null;
-  }> = [];
+  const contexts: InboundPayloadContext[] = [];
   const sink = createModelEngineMotionTimelineSink({
     motionEngine: {
       ingestNormalizedPayload: (_payload, context) => {
@@ -968,7 +967,7 @@ function testMotionTimelineSinkUsesSegmentScopedTimelineLookup(): void {
   assert.deepEqual(segmentTimelineLookupCalls, [
     "turn-timeline:msg-timeline",
   ]);
-  assert.equal(contexts[0].playbackTimeline?.timelineId, "timeline-1");
+  assert.equal(contexts[0].playbackClock?.timelineId, "timeline-1");
 }
 
 function createRuntimeWithSegmentExecutionPorts(
@@ -1329,7 +1328,7 @@ async function run(): Promise<void> {
   await testAudioExpectedTimeoutDoesNotReleaseMotionOnly();
   await testAudioExpectedTimeoutRejectsLateMedia();
   await testAudioExpectedTimerClearsWhenAudioArrives();
-  testMotionTimelineSinkMarksTimelineFailedWhenEngineRejects();
+  testMotionTimelineSinkLeavesRejectedTerminalOwnershipToEngine();
   testMotionTimelineSinkUsesPreparedSyntheticTimelineWhenAudioAbsent();
   testMotionTimelineSinkRetainsPreparingAudioTimelineOwnership();
   testMotionTimelineSinkRejectsMissingAudioTimeline();

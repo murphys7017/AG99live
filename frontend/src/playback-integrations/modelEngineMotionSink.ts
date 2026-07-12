@@ -1,5 +1,10 @@
 import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
+import type { InboundPayloadContext } from "../model-engine/contracts.js";
 import type { ModelEnginePlanStartedEvent } from "../model-engine/runtime/contracts.js";
+import type {
+  MotionPlaybackClockContext,
+  MotionPlaybackClockPhase,
+} from "../model-engine/runtime/playbackClock.js";
 import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
 import type {
   MotionTimelineTerminal,
@@ -51,6 +56,31 @@ function hasMotionSink(snapshot: PlaybackTimelineSnapshot): boolean {
   return snapshot.sinks.some((sink) => sink.id === "motion");
 }
 
+export function projectMotionPlaybackClock(
+  snapshot: PlaybackTimelineSnapshot,
+): MotionPlaybackClockContext {
+  let phase: MotionPlaybackClockPhase;
+  if (snapshot.phase === "playing" || snapshot.phase === "paused") {
+    phase = snapshot.phase;
+  } else if (snapshot.phase === "ready") {
+    phase = "ready";
+  } else if (snapshot.phase === "preparing" || snapshot.phase === "idle") {
+    phase = "preparing";
+  } else {
+    phase = "terminal";
+  }
+  return {
+    timelineId: snapshot.timelineId,
+    turnId: snapshot.turnId,
+    messageId: snapshot.messageId,
+    source: snapshot.clockSource,
+    phase,
+    startedAtMs: snapshot.startedAtMs,
+    currentTimeMs: snapshot.currentTimeMs,
+    durationMs: snapshot.durationMs,
+  };
+}
+
 function canAttachTimelineForMotionStart(
   snapshot: PlaybackTimelineSnapshot,
   context: PlaybackTimelineMotionContext,
@@ -67,7 +97,7 @@ function canAttachTimelineForMotionStart(
 function attachPlaybackTimelineToMotionContext(
   context: PlaybackTimelineMotionContext,
   snapshot: PlaybackTimelineSnapshot | null,
-): PlaybackTimelineMotionContext | null {
+): InboundPayloadContext | null {
   if (!snapshot || !matchesMotionContext(snapshot, context) || !hasMotionSink(snapshot)) {
     return null;
   }
@@ -75,7 +105,7 @@ function attachPlaybackTimelineToMotionContext(
   if (canAttachTimelineForMotionStart(snapshot, context)) {
     return {
       ...context,
-      playbackTimeline: snapshot,
+      playbackClock: projectMotionPlaybackClock(snapshot),
     };
   }
 
@@ -87,7 +117,7 @@ function attachPlaybackTimelineToMotionContext(
     ...context,
     // Keep lifecycle ownership while audio is preparing. The scheduler still
     // waits for a playing audio clock before starting the motion.
-    playbackTimeline: snapshot,
+    playbackClock: projectMotionPlaybackClock(snapshot),
   };
 }
 
@@ -129,14 +159,6 @@ export function createModelEngineMotionTimelineSink(options: {
         payload,
         nextContext,
       );
-      if (accepted === false && nextContext.playbackTimeline) {
-        options.markMotionTimelineTerminal(
-          context.turnId,
-          context.messageId,
-          "failed",
-          "motion_payload_rejected",
-        );
-      }
       return accepted;
     },
     notifyCurrentTurnChanged(turnId) {

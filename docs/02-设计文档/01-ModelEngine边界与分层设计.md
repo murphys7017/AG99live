@@ -36,8 +36,9 @@ ModelEngine 负责：
 - 接收已经进入前端运行时的动作 payload。
 - 归一化并校验动作意图和参数计划。
 - 根据当前模型的 `SemanticAxisProfile` 编译参数计划。
-- 根据音频和 turn 上下文决定动作启动时机。
-- 通过静态 stage registry 挂载动作增强能力。
+- 根据 Timeline 投影出的窄时钟上下文决定动作启动时机和最终计划时长。
+- 在计划交给 Live2D 播放器前完成整份计划的重定时，包括序列关键帧。
+- 通过每个引擎实例独立的 stage registry 挂载动作增强能力。
 - 输出 compile diagnostics，支撑调参、测试和定位问题。
 
 ModelEngine 不负责：
@@ -67,12 +68,13 @@ ModelEngine 不负责：
 | `runtime/contracts.ts` | runtime 调度、启动、状态控制和依赖端口类型 |
 | `runtime/motionRuntimeScheduler.ts` | pending queue、音频起播等待、turn 过期清理和启动时机调度 |
 | `runtime/motionStart.ts` | payload 启动、compile 触发、playPlan 调用和启动结果写回 |
+| `runtime/playbackClock.ts` | ModelEngine 时钟契约、剩余时长解析、表演曲线时钟解析和计划重定时 |
 | `compiler/contracts.ts` | compile 输入输出契约、timing、diagnostics 和 result 类型 |
 | `compiler/compileContext.ts` | compile 共享上下文、中间 state 和 state 写入辅助函数 |
 | `compiler/compileMotionIntent.ts` | compile 主入口，创建 context、执行 pipeline、收口结果 |
 | `compiler/diagnostics.ts` | compile diagnostics 构造与收口 |
 | `compiler/pipeline.ts` | stage 顺序执行器 |
-| `compiler/registry.ts` | 静态 compile stage 注册、排序和启用入口 |
+| `compiler/registry.ts` | 实例级 compile stage registry、默认阶段工厂和扩展生命周期 |
 | `compiler/stages/*.ts` | 各 compile stage 的具体逻辑 |
 
 ## 4. 当前 Compile Pipeline
@@ -84,9 +86,12 @@ IntentValidator
 -> AxisResolver
 -> IntensityStage
 -> CouplingStage
+-> SpeechPoseStage
+-> SemanticAxisRelationGraphStage
 -> ModeResolverStage
 -> TimingStage
 -> PlanBuilder
+-> ResourcePolicyStage
 ```
 
 各 stage 职责：
@@ -97,9 +102,12 @@ IntentValidator
 | `AxisResolver` | 解析可由 LLM 控制的 primary/hint 轴，过滤 unknown/forbidden/invalid 轴，并做保护性 range clamp |
 | `IntensityStage` | 对 expressive 动作应用整体强度和单轴强度，并对缩放后的值再次 clamp |
 | `CouplingStage` | 根据 profile couplings 生成 derived 轴值 |
+| `SpeechPoseStage` | 根据显式 voice-following profile 生成说话姿态 modulation |
+| `SemanticAxisRelationGraphStage` | 统一处理轴范围、派生关系和头身等有界比例约束 |
 | `ModeResolverStage` | 根据 intent mode 和 idle deadzone 决定最终 `idle/expressive` |
 | `TimingStage` | 根据 duration hint、音频剩余时长和默认值解析 timing |
 | `PlanBuilder` | 将最终语义轴值映射为 `engine.parameter_plan.v2` 参数列表 |
+| `ResourcePolicyStage` | 校验 expression/motion resource 存在性、可播放性和参数所有权冲突 |
 
 ## 5. Compile State
 
@@ -191,7 +199,7 @@ motion 的角色是帮助判断这个模型真实依赖哪些参数形成动作�
 | `compiledParameters` | 本次 plan 生成的参数 ID |
 | `intensityApplied` | 本次 expressive 动作是否实际应用强度缩放 |
 
-## 8. 静态 Stage Registry
+## 8. 实例级 Stage Registry
 
 `compiler/registry.ts` 是当前 compile stage 的唯一装配入口。
 
@@ -207,26 +215,29 @@ interface ModelEngineCompileStageRegistration {
 }
 ```
 
-当前注册的 core stages：
+每次 `useModelEngine()` 都创建独立 registry，不共享启停状态或扩展项。当前默认阶段：
 
 ```text
 intentValidator  order 10
 axisResolver     order 20
 intensity        order 30
 coupling         order 40
-modeResolver     order 50
-timing           order 60
-planBuilder      order 70
+speechPose       order 45  extension
+semanticAxisRelationGraph order 50
+modeResolver     order 60
+timing           order 70
+planBuilder      order 80
+resourcePolicy   order 90
 ```
 
 registry 规则：
 
-- `compileMotionIntent()` 只调用 `resolveCompileStages(context)`，不直接 import 各 stage。
+- `compileMotionIntent()` 只调用当前实例 registry 的 `resolve(context)`。
 - `pipeline.ts` 只负责按顺序执行 stage 和失败短路。
 - `MotionCompileStage` 不携带 registry metadata。
-- extension stage 通过 `kind: "extension"` 和独立 `order` 接入。
-- `enabled(context)` 是静态开关入口，当前 core stage 始终启用。
-- 不做动态插件加载，不读取外部插件配置，不新增协议字段。
+- extension stage 通过 `kind: "extension"` 和独立 `order` 接入，可按实例注册、启停和移除。
+- core stage 不允许在运行时禁用、替换或移除，避免破坏校验和计划构建不变量。
+- registry 不做全局动态插件加载，不读取外部插件配置，不新增协议字段。
 
 ## 9. 扩展 Stage 规则
 
@@ -238,7 +249,7 @@ registry 规则：
 4. 不播放动作，不访问 WebSocket，不直接写 UI 状态。
 5. 默认写入 `derivedValues` 或专属派生结果，不覆盖 `controlledValues`。
 6. 输出 diagnostics 或 warnings，让调试者知道能力是否应用。
-7. 不改变 `compileMotionIntent()` 对外接口。
+7. 通过引擎实例 registry 装配，不建立全局可变注册状态。
 
 当前扩展顺序：
 
@@ -256,7 +267,7 @@ registry 规则：
 
 - 让说话时人物拥有轻量的头部、身体或肩部姿态。
 - 由运行时音频 started 事实触发，作为 speaking idle 的 plan 级补偿，不要求 `intent.mode === "expressive"`。
-- 优先使用模型扫描生成的 `VoiceFollowingProfile`；legacy dedicated derived 轴只作为兼容 fallback。
+- 只使用模型扫描并显式声明的 `VoiceFollowingProfile`，缺失时不猜测参数或启用旧派生轴。
 - 只做 plan 级增强。
 - 不做音频 RMS、phoneme、viseme 或逐帧口型。
 - 不直接写 Live2D 原始参数。
@@ -268,6 +279,7 @@ registry 规则：
 ```text
 CouplingStage
 -> SpeechPoseStage
+-> SemanticAxisRelationGraphStage
 -> ModeResolverStage
 ```
 

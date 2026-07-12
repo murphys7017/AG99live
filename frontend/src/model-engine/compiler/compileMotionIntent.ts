@@ -13,11 +13,15 @@ import {
   type MotionCompileContext,
 } from "./compileContext.js";
 import { runCompilePipeline } from "./pipeline.js";
-import { resolveCompileStages } from "./registry.js";
+import {
+  createModelEngineStageRegistry,
+  type ModelEngineStageRegistry,
+} from "./registry.js";
 
 export function compileMotionIntent(
   intent: SemanticMotionIntent,
   options: CompileOptions,
+  stageRegistry: ModelEngineStageRegistry = createModelEngineStageRegistry(),
 ): CompileResult {
   if (
     intent.schema_version === "engine.motion_intent.v4"
@@ -28,14 +32,16 @@ export function compileMotionIntent(
         motion_steps: NonNullable<NormalizedSemanticMotionIntentV4["motion_steps"]>;
       },
       options,
+      stageRegistry,
     );
   }
-  return compileSingleMotionIntent(intent, options);
+  return compileSingleMotionIntent(intent, options, stageRegistry);
 }
 
 function compileSingleMotionIntent(
   intent: SemanticMotionIntent,
   options: CompileOptions,
+  stageRegistry: ModelEngineStageRegistry,
 ): CompileResult {
   const normalizedSettings = normalizeModelEngineSettings(options.settings);
   const context: MotionCompileContext = {
@@ -47,7 +53,7 @@ function compileSingleMotionIntent(
   };
   context.state.warnings.push(...(options.runtimeWarnings ?? []));
 
-  const pipelineResult = runCompilePipeline(context, resolveCompileStages(context));
+  const pipelineResult = runCompilePipeline(context, stageRegistry.resolve(context));
   if (!pipelineResult.ok) {
     return failCompile(pipelineResult.reason, context);
   }
@@ -60,6 +66,7 @@ function compileMotionSequenceIntent(
     motion_steps: NonNullable<NormalizedSemanticMotionIntentV4["motion_steps"]>;
   },
   options: CompileOptions,
+  stageRegistry: ModelEngineStageRegistry,
 ): CompileResult {
   const stepResults = intent.motion_steps.map((step) =>
     compileSingleMotionIntent(
@@ -72,6 +79,7 @@ function compileMotionSequenceIntent(
         ...options,
         allowNeutralAxisPose: true,
       },
+      stageRegistry,
     ),
   );
   const failedStepIndex = stepResults.findIndex((result) => !result.ok || !result.plan);

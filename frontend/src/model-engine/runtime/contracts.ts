@@ -14,6 +14,7 @@ import type {
   MotionFeedback,
 } from "../compiler/contracts.js";
 import type { ModelEngineSettings } from "../settings.js";
+import type { ModelEngineStageRegistry } from "../compiler/registry.js";
 
 export type ModelEngineStatus =
   | "idle"
@@ -24,7 +25,6 @@ export type ModelEngineStatus =
 
 export interface PlayPlanOptions {
   softHandoff?: boolean;
-  targetDurationMs?: number | null;
   onStarted: (plan: MotionPlanPayload, runId: string) => void;
   onFinished?: (event: { runId: string; status: string; reason?: string }) => void;
 }
@@ -125,6 +125,7 @@ export interface MotionStartDependencies {
   getPlayerMessage?: () => string;
   onPlanStarted: (event: ModelEnginePlanStartedEvent) => void;
   onCompileFailed?: (event: ModelEngineCompileFailedEvent) => void;
+  stageRegistry?: ModelEngineStageRegistry;
 }
 
 export interface ModelEngineCompileFailedEvent {

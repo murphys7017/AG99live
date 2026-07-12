@@ -4,15 +4,20 @@ import { advanceParameterDynamics } from "../src/live2d/WebSDK/src/parameterdyna
 import { normalizeMotionPayload } from "../src/model-engine/normalize.js";
 import { parseSemanticParameterPlan } from "../src/model-engine/planParser.js";
 import { startNormalizedMotionPayload } from "../src/model-engine/runtime/motionStart.js";
+import { retimeSemanticParameterPlan } from "../src/model-engine/runtime/playbackClock.js";
 import { buildSpeechOnlyMotionPayload } from "../src/model-engine/runtime/speechOnlyMotion.js";
 import { useModelEngine } from "../src/model-engine/useModelEngine.js";
 import { resolveMotionTiming } from "../src/model-engine/timing.js";
-import { listCompileStageRegistrations } from "../src/model-engine/compiler/registry.js";
+import {
+  createModelEngineStageRegistry,
+  listCompileStageRegistrations,
+} from "../src/model-engine/compiler/registry.js";
 import type {
   ModelSummary,
   MotionPlanPayload,
   NormalizedSemanticMotionIntentV3,
   NormalizedSemanticMotionIntentV4,
+  SemanticParameterPlan,
 } from "../src/types/protocol.js";
 import type { SemanticAxisProfile } from "../src/types/semantic-axis-profile.js";
 import type {
@@ -1372,23 +1377,15 @@ function testMotionStartUsesPlaybackTimelineDuration(): void {
       playbackTurnId: "turn-timeline",
       startReason: "playback_timeline_started",
       queuedDelayMs: 0,
-      playbackTimeline: {
+      playbackClock: {
         timelineId: "timeline-1",
         turnId: "turn-timeline",
         messageId: "msg-timeline",
         phase: "playing",
-        clockSource: "audio",
+        source: "audio",
         startedAtMs: 100,
         currentTimeMs: 300,
         durationMs: 2400,
-        playbackRate: 1,
-        sinks: [
-          {
-            id: "audio",
-            required: true,
-            terminal: "started",
-          },
-        ],
       },
     },
     {
@@ -1444,23 +1441,15 @@ function testMotionStartRejectsAudioUnavailableTimelineForTiming(): void {
       playbackTurnId: "turn-audio-unavailable",
       startReason: "playback_timeline_started",
       queuedDelayMs: 0,
-      playbackTimeline: {
+      playbackClock: {
         timelineId: "timeline-audio-unavailable",
         turnId: "turn-audio-unavailable",
         messageId: "msg-audio-unavailable",
         phase: "playing",
-        clockSource: "audio_unavailable",
+        source: "audio_unavailable",
         startedAtMs: 100,
         currentTimeMs: 300,
         durationMs: 2400,
-        playbackRate: 1,
-        sinks: [
-          {
-            id: "audio",
-            required: true,
-            terminal: "started",
-          },
-        ],
       },
     },
     {
@@ -1520,23 +1509,15 @@ function testPerformanceCurveFailsWhenAudioTimelineIsUnavailable(): void {
       playbackTurnId: "turn-curve-unavailable",
       startReason: "playback_timeline_started",
       queuedDelayMs: 0,
-      playbackTimeline: {
+      playbackClock: {
         timelineId: "timeline-curve-unavailable",
         turnId: "turn-curve-unavailable",
         messageId: "msg-curve-unavailable",
         phase: "playing",
-        clockSource: "audio_unavailable",
+        source: "audio_unavailable",
         startedAtMs: 100,
         currentTimeMs: 300,
         durationMs: 2400,
-        playbackRate: 1,
-        sinks: [
-          {
-            id: "audio",
-            required: true,
-            terminal: "started",
-          },
-        ],
       },
     },
     {
@@ -1987,18 +1968,10 @@ function testSpeechOnlyPlaybackUsesTimelineDuration(): void {
     turnId: "turn-speech",
     messageId: "msg-speech",
     phase: "playing",
-    clockSource: "audio",
+    source: "audio",
     startedAtMs: 100,
     currentTimeMs: 250,
     durationMs: 2250,
-    playbackRate: 1,
-    sinks: [
-      {
-        id: "audio",
-        required: true,
-        terminal: "started",
-      },
-    ],
   });
 
   assert.equal(started, true);
@@ -2039,18 +2012,10 @@ function testSpeechOnlyPlaybackCanBeSuppressedForFailedMotionSegment(): void {
     turnId: "turn-speech",
     messageId: "msg-speech",
     phase: "playing",
-    clockSource: "audio",
+    source: "audio",
     startedAtMs: 100,
     currentTimeMs: 250,
     durationMs: 2250,
-    playbackRate: 1,
-    sinks: [
-      {
-        id: "audio",
-        required: true,
-        terminal: "started",
-      },
-    ],
   });
 
   assert.equal(started, false);
@@ -2081,12 +2046,10 @@ function testSegmentInterruptDoesNotStopNewerMotionOwner(): void {
     turnId,
     messageId,
     phase: "playing" as const,
-    clockSource: "audio" as const,
+    source: "audio" as const,
     startedAtMs: 100,
     currentTimeMs: 100,
     durationMs: 2000,
-    playbackRate: 1,
-    sinks: [{ id: "audio", required: true, terminal: "started" as const }],
   });
 
   assert.equal(engine.handlePlaybackTimelineStarted(timeline("turn-a", "msg-a")), true);
@@ -2125,6 +2088,37 @@ function testSegmentInterruptRemovesItsPendingPayload(): void {
   assert.equal(engine.state.pendingCount, 0);
 }
 
+function testModelEngineInstancesKeepIndependentRuntimeState(): void {
+  const createEngine = () => useModelEngine({
+    getSelectedModel: () => buildModel(buildProfile()),
+    getSettings: () => ({ motionIntensityScale: 1, axisIntensityScale: {} }),
+    playPlan: () => false,
+    playCatalogMotion: () => false,
+    stopPlan: () => {},
+    markMotionTimelineTerminal: () => {},
+    canStartSpeechOnlyMotion: () => false,
+    getCurrentTurnId: () => "turn-isolated",
+    onPlanStarted: ignorePlanStarted,
+  });
+  const first = createEngine();
+  const second = createEngine();
+
+  assert.equal(first.ingestNormalizedPayload(
+    { kind: "semantic_intent", intent: buildIntent() },
+    {
+      turnId: "turn-isolated",
+      messageId: "msg-first",
+      receivedAtMs: performance.now(),
+    },
+  ), true);
+
+  assert.equal(first.state.status, "pending");
+  assert.equal(first.state.pendingCount, 1);
+  assert.equal(second.state.status, "idle");
+  assert.equal(second.state.pendingCount, 0);
+  first.stop("test_cleanup");
+}
+
 function testTimelineTerminalIsMarkedWhenQueuedMotionFails(): void {
   const profile = buildProfile();
   const model = buildModel(profile);
@@ -2161,28 +2155,15 @@ function testTimelineTerminalIsMarkedWhenQueuedMotionFails(): void {
       turnId: "turn-failed-timeline",
       playbackTurnId: "turn-failed-timeline",
       receivedAtMs: 100,
-      playbackTimeline: {
+      playbackClock: {
         timelineId: "timeline-failed",
         turnId: "turn-failed-timeline",
         messageId: "msg-failed-timeline",
         phase: "playing",
-        clockSource: "audio_unavailable",
+        source: "audio_unavailable",
         startedAtMs: 100,
         currentTimeMs: 0,
         durationMs: null,
-        playbackRate: 1,
-        sinks: [
-          {
-            id: "audio",
-            required: true,
-            terminal: "started",
-          },
-          {
-            id: "motion",
-            required: true,
-            terminal: "idle",
-          },
-        ],
       },
     },
   );
@@ -2394,6 +2375,73 @@ function testRegistryCoreStageOrder(): void {
   }
 }
 
+function testStageRegistryInstancesKeepExtensionConfigurationIsolated(): void {
+  const first = createModelEngineStageRegistry();
+  const second = createModelEngineStageRegistry();
+  first.setEnabled("speechPose", false);
+  first.register({
+    id: "testExtension",
+    kind: "extension",
+    order: 46,
+    enabled: () => true,
+    stage: { id: "testExtension", run: () => ({ ok: true }) },
+  });
+
+  assert.equal(first.list().some((item) => item.id === "testExtension"), true);
+  assert.equal(second.list().some((item) => item.id === "testExtension"), false);
+  assert.throws(() => first.setEnabled("intentValidator", false), /core stage/);
+}
+
+function testPlanRetimingScalesSequenceKeyframesInsideModelEngine(): void {
+  const plan: SemanticParameterPlan = {
+    schema_version: "engine.parameter_plan.v2",
+    profile_id: "profile-1",
+    profile_revision: 1,
+    model_id: "model-1",
+    mode: "expressive",
+    emotion_label: "sequence",
+    timing: {
+      duration_ms: 1000,
+      blend_in_ms: 100,
+      hold_ms: 700,
+      blend_out_ms: 200,
+      curve_preset: "smooth_hold",
+    },
+    parameters: [{
+      axis_id: "head_yaw",
+      parameter_id: "ParamAngleX",
+      target_value: 10,
+      neutral_target_value: 0,
+      weight: 1,
+      source: "semantic_axis",
+      keyframes: [
+        { at_ms: 0, transition_ms: 0, target_value: 0 },
+        { at_ms: 500, transition_ms: 200, target_value: 10 },
+        { at_ms: 1000, transition_ms: 0, target_value: 0 },
+      ],
+      dynamics: {
+        max_velocity: 60,
+        max_acceleration: 240,
+        life_motion_scale: 0.5,
+        max_speech_offset: 2,
+      },
+    }],
+  };
+
+  const retimed = retimeSemanticParameterPlan(plan, 2000);
+  assert.equal(retimed.timing.duration_ms, 2000);
+  assert.equal(retimed.timing.curve_preset, "smooth_hold");
+  assert.deepEqual(
+    retimed.parameters[0].keyframes?.map(({ at_ms, transition_ms }) => ({ at_ms, transition_ms })),
+    [
+      { at_ms: 0, transition_ms: 0 },
+      { at_ms: 1000, transition_ms: 400 },
+      { at_ms: 2000, transition_ms: 0 },
+    ],
+  );
+  assert.equal(plan.timing.duration_ms, 1000);
+}
+
 function testRelationGraphLimitsOppositeHeadBodyMotion(): void {
   const profile = buildProfile();
   profile.axes = profile.axes.map((axis) =>
@@ -2516,6 +2564,8 @@ function testExplicitEmptyRelationGraphDoesNotReviveLegacyCouplings(): void {
 function run(): void {
   testDefaultMotionDurationMatchesAdapterContract();
   testRegistryCoreStageOrder();
+  testStageRegistryInstancesKeepExtensionConfigurationIsolated();
+  testPlanRetimingScalesSequenceKeyframesInsideModelEngine();
   testNormalizeMotionPayloadAcceptsV3FlatAxes();
   testNormalizeMotionPayloadAcceptsV4AxisLevels();
   testNormalizeMotionPayloadAcceptsV4MotionSequence();
@@ -2559,6 +2609,7 @@ function run(): void {
   testSpeechOnlyPlaybackCanBeSuppressedForFailedMotionSegment();
   testSegmentInterruptDoesNotStopNewerMotionOwner();
   testSegmentInterruptRemovesItsPendingPayload();
+  testModelEngineInstancesKeepIndependentRuntimeState();
   testTimelineTerminalIsMarkedWhenQueuedMotionFails();
   testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight();
   testSpeechPoseComposesWithParameterAlreadyControlledBySemanticAxis();

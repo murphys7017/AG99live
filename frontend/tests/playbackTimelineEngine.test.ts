@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {
   createPlaybackTimelineEngine,
 } from "../src/playback-timeline/playbackTimelineEngine.js";
-import { resolvePerformanceCurveTimeline } from "../src/playback-timeline/performanceCurveSink.js";
+import { resolvePerformanceCurveTimeline } from "../src/model-engine/runtime/playbackClock.js";
 import { createPlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
 import { createTimelineClock } from "../src/playback-timeline/timelineClock.js";
 import { createAudioStartMotionTimelineBridge } from "../src/playback-timeline/audioStartMotionBridge.js";
@@ -264,17 +264,15 @@ function testPerformanceCurveTimelineUsesRemainingAudioDuration(): void {
       energy: "medium",
     },
     minRemainingDurationMs: 180,
-    timeline: {
+    clock: {
       timelineId: "timeline-curve",
       turnId: "turn-curve",
       messageId: "msg-curve",
       phase: "playing",
-      clockSource: "audio",
+      source: "audio",
       startedAtMs: 100,
       currentTimeMs: 450,
       durationMs: 2000,
-      playbackRate: 1,
-      sinks: [],
     },
   });
 
@@ -299,17 +297,15 @@ function testPerformanceCurveTimelineRejectsUnavailableAudio(): void {
       energy: "medium",
     },
     minRemainingDurationMs: 180,
-    timeline: {
+    clock: {
       timelineId: "timeline-curve",
       turnId: "turn-curve",
       messageId: "msg-curve",
       phase: "playing",
-      clockSource: "audio_unavailable",
+      source: "audio_unavailable",
       startedAtMs: 100,
       currentTimeMs: 450,
       durationMs: 2000,
-      playbackRate: 1,
-      sinks: [],
     },
   });
 

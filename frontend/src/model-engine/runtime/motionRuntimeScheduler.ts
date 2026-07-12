@@ -8,7 +8,7 @@ import type {
   InboundPayloadContext,
   MotionRuntimeSchedulerDependencies,
 } from "./contracts.js";
-import type { PlaybackTimelineSnapshot } from "../../playback-timeline/contracts.js";
+import type { MotionPlaybackClockContext } from "./playbackClock.js";
 import { normalizeTurnId } from "../normalize.js";
 
 export interface PendingInboundMotionPayload {
@@ -17,7 +17,7 @@ export interface PendingInboundMotionPayload {
   turnId: string;
   playbackTurnId: string | null;
   receivedAtMs: number;
-  playbackTimeline: PlaybackTimelineSnapshot | null;
+  playbackClock: MotionPlaybackClockContext | null;
   audioWaitTimer: number;
 }
 
@@ -27,7 +27,7 @@ export interface StartPayloadContext {
   playbackTurnId: string | null;
   startReason: string;
   queuedDelayMs: number;
-  playbackTimeline?: PlaybackTimelineSnapshot | null;
+  playbackClock?: MotionPlaybackClockContext | null;
 }
 
 interface MotionRuntimeSchedulerHooks {
@@ -49,7 +49,7 @@ function hasPerformanceCurveHint(payload: NormalizedMotionPayload): boolean {
 
 function matchesPlaybackTimeline(
   entry: PendingInboundMotionPayload,
-  snapshot: PlaybackTimelineSnapshot,
+  snapshot: MotionPlaybackClockContext,
 ): boolean {
   return (
     entry.messageId === snapshot.messageId
@@ -58,21 +58,21 @@ function matchesPlaybackTimeline(
 }
 
 function canStartFromPlaybackTimeline(
-  snapshot: PlaybackTimelineSnapshot,
+  snapshot: MotionPlaybackClockContext,
 ): boolean {
-  if (snapshot.clockSource === "synthetic") {
+  if (snapshot.source === "synthetic") {
     return true;
   }
   return (
-    snapshot.clockSource === "audio"
+    snapshot.source === "audio"
     && (snapshot.phase === "playing" || snapshot.phase === "paused")
   );
 }
 
 function isTimelineUnavailable(
-  snapshot: PlaybackTimelineSnapshot,
+  snapshot: MotionPlaybackClockContext,
 ): boolean {
-  return snapshot.clockSource === "audio_unavailable";
+  return snapshot.source === "audio_unavailable";
 }
 
 export function createMotionRuntimeScheduler(
@@ -117,7 +117,7 @@ export function createMotionRuntimeScheduler(
       messageId: entry.messageId,
       startReason,
       queuedDelayMs: Math.max(0, Math.round(performance.now() - entry.receivedAtMs)),
-      playbackTimeline: entry.playbackTimeline,
+      playbackClock: entry.playbackClock,
     };
   }
 
@@ -156,7 +156,7 @@ export function createMotionRuntimeScheduler(
     turnId: string | null,
     messageId: string,
     startReason: string,
-    playbackTimeline: PlaybackTimelineSnapshot | null = null,
+    playbackClock: MotionPlaybackClockContext | null = null,
   ): boolean {
     const key = buildPendingMotionKey(turnId, messageId);
     const entry = pendingInboundMotionPayloads.get(key);
@@ -164,8 +164,8 @@ export function createMotionRuntimeScheduler(
       return false;
     }
 
-    if (playbackTimeline && matchesPlaybackTimeline(entry, playbackTimeline)) {
-      entry.playbackTimeline = playbackTimeline;
+    if (playbackClock && matchesPlaybackTimeline(entry, playbackClock)) {
+      entry.playbackClock = playbackClock;
     }
     pendingInboundMotionPayloads.delete(key);
     clearPendingPayload(entry);
@@ -179,7 +179,7 @@ export function createMotionRuntimeScheduler(
   }
 
   function failPendingPayloadForTimeline(
-    snapshot: PlaybackTimelineSnapshot,
+    snapshot: MotionPlaybackClockContext,
     reason: string,
   ): boolean {
     const key = buildPendingMotionKey(snapshot.turnId, snapshot.messageId);
@@ -195,35 +195,32 @@ export function createMotionRuntimeScheduler(
   function queueInboundPayload(
     payload: NormalizedMotionPayload,
     context: InboundPayloadContext,
-  ): void {
+  ): boolean {
     const normalizedTurnId = normalizeTurnId(context.turnId);
     const normalizedPlaybackTurnId =
       normalizeTurnId(context.playbackTurnId ?? null) ?? normalizedTurnId;
     if (!normalizedTurnId) {
-      const startContext = {
+      hooks.onStartFailed?.({
         messageId: context.messageId,
         turnId: null,
         playbackTurnId: normalizedPlaybackTurnId,
-        startReason: "missing_turn_id",
+        startReason: "motion_turn_id_missing",
         queuedDelayMs: 0,
-        playbackTimeline: context.playbackTimeline ?? null,
-      };
-      const started = hooks.onStartPayload(payload, startContext);
-      if (!started) {
-        hooks.onStartFailed?.(startContext);
-      }
-      return;
+        playbackClock: context.playbackClock ?? null,
+      });
+      return false;
     }
 
     const pendingKey = buildPendingMotionKey(normalizedTurnId, context.messageId);
     const existing = pendingInboundMotionPayloads.get(pendingKey);
     if (existing) {
-      console.info("[ModelEngine] replacing pending motion payload for turn.", {
+      console.error("[ModelEngine] duplicate pending motion payload rejected.", {
         turnId: normalizedTurnId,
         messageId: context.messageId,
       });
-      clearPendingPayload(existing);
-      pendingInboundMotionPayloads.delete(pendingKey);
+      dropPendingPayload(existing, "duplicate_motion_payload");
+      syncPendingState();
+      return false;
     }
 
     const entry: PendingInboundMotionPayload = {
@@ -232,20 +229,20 @@ export function createMotionRuntimeScheduler(
       turnId: normalizedTurnId,
       playbackTurnId: normalizedPlaybackTurnId,
       receivedAtMs: context.receivedAtMs,
-      playbackTimeline: context.playbackTimeline ?? null,
+      playbackClock: context.playbackClock ?? null,
       audioWaitTimer: 0,
     };
 
-    if (entry.playbackTimeline && !matchesPlaybackTimeline(entry, entry.playbackTimeline)) {
+    if (entry.playbackClock && !matchesPlaybackTimeline(entry, entry.playbackClock)) {
       hooks.onStartFailed?.({
         messageId: entry.messageId,
         turnId: entry.turnId,
         playbackTurnId: entry.playbackTurnId,
         startReason: "playback_timeline_identity_mismatch",
         queuedDelayMs: 0,
-        playbackTimeline: entry.playbackTimeline,
+        playbackClock: entry.playbackClock,
       });
-      return;
+      return false;
     }
 
     entry.audioWaitTimer = window.setTimeout(() => {
@@ -284,49 +281,50 @@ export function createMotionRuntimeScheduler(
       pendingCount: pendingInboundMotionPayloads.size,
     });
 
-    if (entry.playbackTimeline) {
-      if (isTimelineUnavailable(entry.playbackTimeline)) {
+    if (entry.playbackClock) {
+      if (isTimelineUnavailable(entry.playbackClock)) {
         failPendingPayloadForTimeline(
-          entry.playbackTimeline,
+          entry.playbackClock,
           "playback_timeline_audio_unavailable_before_motion_start",
         );
-        return;
+        return false;
       }
-      if (canStartFromPlaybackTimeline(entry.playbackTimeline)) {
-        tryStartPendingPayload(
+      if (canStartFromPlaybackTimeline(entry.playbackClock)) {
+        return tryStartPendingPayload(
           entry.turnId,
           entry.messageId,
-          entry.playbackTimeline.clockSource === "synthetic"
+          entry.playbackClock.source === "synthetic"
             ? "motion_only_timeline_ready"
             : "playback_timeline_ready",
-          entry.playbackTimeline,
+          entry.playbackClock,
         );
       }
     }
+    return true;
   }
 
   function handlePlaybackTimelineStarted(
-    playbackTimeline: PlaybackTimelineSnapshot,
+    playbackClock: MotionPlaybackClockContext,
   ): boolean {
-    if (!canStartFromPlaybackTimeline(playbackTimeline)) {
-      if (isTimelineUnavailable(playbackTimeline)) {
+    if (!canStartFromPlaybackTimeline(playbackClock)) {
+      if (isTimelineUnavailable(playbackClock)) {
         return failPendingPayloadForTimeline(
-          playbackTimeline,
+          playbackClock,
           "playback_timeline_audio_unavailable_before_motion_start",
         );
       }
       return false;
     }
     const started = tryStartPendingPayload(
-      playbackTimeline.turnId,
-      playbackTimeline.messageId,
+      playbackClock.turnId,
+      playbackClock.messageId,
       "playback_timeline_started",
-      playbackTimeline,
+      playbackClock,
     );
     console.info("[ModelEngine] playback timeline start handled.", {
-      turnId: playbackTimeline.turnId,
-      messageId: playbackTimeline.messageId,
-      timelineId: playbackTimeline.timelineId,
+      turnId: playbackClock.turnId,
+      messageId: playbackClock.messageId,
+      timelineId: playbackClock.timelineId,
       started,
       pendingCount: pendingInboundMotionPayloads.size,
     });
