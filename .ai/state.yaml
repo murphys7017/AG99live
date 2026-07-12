@@ -1,9 +1,9 @@
 task:
   class: bugfix
   risk: high
-  phase: direct_parameter_plan_renderer_freeze
+  phase: strict_motion_error_propagation
   status: complete
-  scope: Diagnose a real conversation motion freeze, preserve frame-loop liveness on direct-plan failures, and close the SDK watchdog lifecycle
+  scope: Remove motion-path fallback behavior, make model readiness authoritative, and preserve failed sink outcomes without false release state
 context:
   confidence: high
   assumptions:
@@ -74,6 +74,11 @@ context:
     - Per-frame dynamics decelerate continuously across target reversals and stop exactly at the target when a discrete frame would cross it, preventing target-adjacent oscillation.
     - Exceptions during an active direct parameter plan are owned by that motion run: WebSDK reports a failed terminal and keeps RAF alive; render failures without an active plan remain fail-visible.
     - Direct parameter plan terminal timeout actively stops the SDK plan with a failed terminal instead of leaving a hidden active run after updating UI state.
+    - Live2D renderer readiness is emitted only after the active model reaches Cubism CompleteSetup; Vue nextTick is not a model-ready signal.
+    - Concurrent calls for the same model initialization share one load Promise, while model selection requests are serialized before changing the SDK global model configuration.
+    - A rejected motion sink is handled once as failed and is never recorded as released or retried by the orchestrator.
+    - WebSDK parameter binding, lip-sync parameter selection, and voice-following frequency/direction use explicit profile declarations only; runtime name guessing has been removed.
+    - Parameter plan source, neutral target, and dynamics are mandatory at parser and SDK boundaries and are not defaulted during playback.
     - WebSDK rejects an entire malformed, unbindable, duplicate, or out-of-range parameter plan instead of salvaging playable entries or clamping invalid plan targets.
     - Every engine.parameter_plan.v2 parameter requires neutral_target_value and dynamics; Motion Lab manual plans derive both from the selected semantic axis profile rather than emitting an unconstrained legacy plan.
     - Multi-step motion validates neutral-to-first and inter-step travel against rest-to-rest triangular/trapezoidal velocity profiles; impossible timing fails with motion_sequence_transition_budget_exceeded.
@@ -207,6 +212,11 @@ architecture:
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
 verification:
   checks_run:
+    - python -m pytest (267 adapter tests passed after strict profile and parameter-plan validation)
+    - npm test (complete frontend suite passed after model-readiness and strict sink changes)
+    - npm run typecheck (renderer and node typechecks passed)
+    - npm run build:web (production web build passed)
+    - git diff --check (passed)
     - Motion Lab SQLite incident inspection: turn 0748df0906604719a6503edd68778281 compiled and started a valid 1800ms three-step plan, then failed with direct_parameter_plan_terminal_timeout after no SDK terminal callback
     - npm run test:preview-motion-player (passed with watchdog SDK-stop regression coverage)
     - npm test (complete frontend suite passed after frame-loop containment fix)
