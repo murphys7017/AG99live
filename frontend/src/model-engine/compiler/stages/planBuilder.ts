@@ -109,6 +109,10 @@ function buildSemanticPlanParameters(
     if (!axis.parameter_bindings.length) {
       return { ok: false, reason: `axis_parameter_binding_missing:${axisId}` };
     }
+    const source = axisValueSources[axisId];
+    if (!source) {
+      return { ok: false, reason: `axis_value_source_missing:${axisId}` };
+    }
 
     for (const binding of axis.parameter_bindings) {
       const parameter = mapSemanticBindingValue(axis, binding, value);
@@ -130,7 +134,7 @@ function buildSemanticPlanParameters(
         neutral_target_value: parameter.neutralTargetValue,
         weight: binding.default_weight,
         input_value: value,
-        source: axisValueSources[axisId] ?? "coupling",
+        source,
         modulation: pendingParameterModulations[binding.parameter_id],
         dynamics: mapSemanticBindingDynamics(axis, binding),
       });

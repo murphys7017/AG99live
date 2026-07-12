@@ -701,7 +701,7 @@ export interface SemanticParameterPlanEntry {
   neutral_target_value: number;
   weight: number;
   input_value?: number;
-  source?: SemanticParameterPlanSource;
+  source: SemanticParameterPlanSource;
   keyframes?: Array<{
     at_ms: number;
     transition_ms: number;
@@ -713,8 +713,8 @@ export interface SemanticParameterPlanEntry {
     neutral: number;
     amplitude: number;
     phase: number;
-    frequency_hz?: number;
-    direction?: 1 | -1;
+    frequency_hz: number;
+    direction: 1 | -1;
   };
   dynamics: {
     max_velocity: number;

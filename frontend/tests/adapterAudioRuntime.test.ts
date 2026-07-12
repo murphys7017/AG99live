@@ -306,7 +306,9 @@ async function testRejectedAudioStartSettlesAdapterState(): Promise<void> {
     state,
     audioSink: buildAudioSink({
       start: async () => {
-        throw new Error("autoplay blocked");
+        throw Object.assign(new Error("autoplay blocked"), {
+          name: "NotAllowedError",
+        });
       },
     }),
     pushHistory: (role, text) => {

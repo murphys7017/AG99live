@@ -27,6 +27,18 @@ export interface PlaybackTimelineAudioSegmentRunner {
   ): void;
 }
 
+function resolveAudioStartFailureReason(error: unknown): string {
+  const name = error instanceof Error
+    ? error.name
+    : typeof error === "object" && error !== null && "name" in error
+      ? String(error.name)
+      : "unknown";
+  if (name === "NotAllowedError") {
+    return "audio_autoplay_blocked";
+  }
+  return `audio_sink_start_failed:${name || "unknown"}`;
+}
+
 export function createPlaybackTimelineAudioSegmentRunner<TMotionPayload = unknown>(options: {
   runtime: PlaybackTimelineRuntime<TMotionPayload>;
   audioSegmentSink: PlaybackTimelineAudioSegmentSink;
@@ -76,14 +88,15 @@ export function createPlaybackTimelineAudioSegmentRunner<TMotionPayload = unknow
                   callbacks.onError?.("audio_playback_error");
                 },
               }).catch((error: unknown) => {
+                const reason = resolveAudioStartFailureReason(error);
                 options.runtime.markAudioTimelineTerminal(
                   turnId,
                   messageId,
                   "failed",
-                  "audio_autoplay_blocked",
+                  reason,
                 );
-                callbacks.onError?.("audio_autoplay_blocked");
-                console.warn("[PlaybackTimelineAudioSegmentRunner] audio sink start failed.", error);
+                callbacks.onError?.(reason);
+                console.error("[PlaybackTimelineAudioSegmentRunner] audio sink start failed.", error);
               });
               return true;
             },
@@ -99,11 +112,12 @@ export function createPlaybackTimelineAudioSegmentRunner<TMotionPayload = unknow
           callbacks.onError?.("audio_sink_rejected");
         }
       } catch (error) {
+        const reason = resolveAudioStartFailureReason(error);
         options.runtime.markAudioTimelineTerminal(
           turnId,
           messageId,
           "failed",
-          "audio_autoplay_blocked",
+          reason,
         );
         throw error;
       }

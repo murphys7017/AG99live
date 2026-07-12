@@ -981,6 +981,33 @@ function testParameterPlanRequiresNeutralTargetAndDynamics(): void {
     dynamicsResult.ok ? "" : dynamicsResult.reason,
     "parameter_plan_v2.invalid_dynamics",
   );
+
+  const missingSource = JSON.parse(JSON.stringify(result.plan)) as Record<string, unknown> & {
+    parameters: Array<Record<string, unknown>>;
+  };
+  delete missingSource.parameters[0].source;
+  const sourceResult = parseSemanticParameterPlan(missingSource);
+  assert.equal(sourceResult.ok, false);
+  assert.equal(
+    sourceResult.ok ? "" : sourceResult.reason,
+    "parameter_plan_v2.invalid_parameter_source",
+  );
+
+  const planWithSpeechModulation = JSON.parse(JSON.stringify(result.plan)) as Record<string, unknown> & {
+    parameters: Array<Record<string, unknown>>;
+  };
+  planWithSpeechModulation.parameters[0].modulation = {
+    kind: "speech_pose_cycle",
+    neutral: 0,
+    amplitude: 1,
+    phase: 0,
+  };
+  const modulationResult = parseSemanticParameterPlan(planWithSpeechModulation);
+  assert.equal(modulationResult.ok, false);
+  assert.equal(
+    modulationResult.ok ? "" : modulationResult.reason,
+    "parameter_plan_v2.invalid_modulation",
+  );
 }
 
 function testV4AxisLevelsRejectUnknownAxesAndMissingAnchors(): void {

@@ -349,9 +349,9 @@ function normalizeParameterModulation(
     || !isFiniteNumber(value.amplitude)
     || value.amplitude < 0
     || !isFiniteNumber(value.phase)
-    || (value.frequency_hz !== undefined
-      && (!isFiniteNumber(value.frequency_hz) || value.frequency_hz <= 0))
-    || (value.direction !== undefined && value.direction !== 1 && value.direction !== -1)
+    || !isFiniteNumber(value.frequency_hz)
+    || value.frequency_hz <= 0
+    || (value.direction !== 1 && value.direction !== -1)
   ) {
     return null;
   }
@@ -360,8 +360,8 @@ function normalizeParameterModulation(
     neutral: value.neutral,
     amplitude: value.amplitude,
     phase: value.phase,
-    frequency_hz: isFiniteNumber(value.frequency_hz) ? value.frequency_hz : undefined,
-    direction: value.direction === -1 ? -1 : 1,
+    frequency_hz: value.frequency_hz,
+    direction: value.direction,
   };
 }
 

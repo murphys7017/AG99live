@@ -621,8 +621,8 @@ export class LAppModel extends CubismUserModel {
       ) {
         // テクスチャ名が空文字だった場合はロード・バインド処理をスキップ
         if (this._modelSetting.getTextureFileName(modelTextureNumber) == "") {
-          console.log("getTextureFileName null");
-          continue;
+          this.failModelLoad(`live2d_texture_name_empty:${modelTextureNumber}`);
+          return;
         }
 
         // WebGLのテクスチャユニットにテクスチャをロードする

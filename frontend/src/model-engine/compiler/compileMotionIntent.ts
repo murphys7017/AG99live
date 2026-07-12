@@ -296,9 +296,13 @@ function resolveSequenceTransitionDurations(
     for (const steps of parameterSteps.values()) {
       const previous = steps[index - 1];
       const current = steps[index];
-      const dynamics = current.dynamics ?? previous.dynamics;
+      const dynamics = current.dynamics;
       if (!dynamics) {
-        continue;
+        return {
+          ok: false,
+          reason: `motion_sequence_dynamics_missing:${index}:${current.parameter_id}`,
+          stepIndex: index,
+        };
       }
       const distance = Math.abs(current.target_value - previous.target_value);
       if (distance <= 0.0001) {
