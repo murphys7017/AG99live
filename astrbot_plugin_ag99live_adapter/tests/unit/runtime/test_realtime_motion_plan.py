@@ -481,6 +481,50 @@ def test_summarize_motion_payload_counts_v4_axis_levels() -> None:
     assert failure_reason == ""
 
 
+def test_summarize_motion_payload_counts_v4_motion_sequence_axes() -> None:
+    schema_version, mode, axis_count, supplementary_count, failure_reason = summarize_motion_payload(
+        {
+            "schema_version": "engine.motion_intent.v4",
+            "profile_id": "DemoModel.semantic.v1",
+            "profile_revision": 3,
+            "model_id": "DemoModel",
+            "intent_tags": ["look around"],
+            "motion_steps": [
+                {"axis_levels": {"head_yaw": -2, "gaze_x": -1}, "duration_weight": 1},
+                {"axis_levels": {"head_yaw": 2, "gaze_x": 1}, "duration_weight": 1},
+            ],
+        }
+    )
+
+    assert schema_version == "engine.motion_intent.v4"
+    assert mode == "expressive"
+    assert axis_count == 2
+    assert supplementary_count == 0
+    assert failure_reason == ""
+
+
+def test_summarize_motion_payload_rejects_malformed_sequence_without_raising() -> None:
+    schema_version, mode, axis_count, supplementary_count, failure_reason = summarize_motion_payload(
+        {
+            "schema_version": "engine.motion_intent.v4",
+            "profile_id": "DemoModel.semantic.v1",
+            "profile_revision": 3,
+            "model_id": "DemoModel",
+            "intent_tags": ["invalid"],
+            "motion_steps": [
+                {"axis_levels": ["head_yaw"], "duration_weight": 1},
+                {"axis_levels": {"head_yaw": 2}, "duration_weight": 1},
+            ],
+        }
+    )
+
+    assert schema_version == "engine.motion_intent.v4"
+    assert mode == "expressive"
+    assert axis_count == 1
+    assert supplementary_count == 0
+    assert failure_reason == "axis_levels_not_object"
+
+
 def test_normalize_motion_intent_v3_rejects_nested_axis_payload() -> None:
     with pytest.raises(ValueError, match="axis_payload_invalid:head_yaw"):
         normalize_motion_intent_payload(

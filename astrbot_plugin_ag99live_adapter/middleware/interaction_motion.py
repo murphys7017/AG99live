@@ -148,7 +148,7 @@ class AG99liveMotionPromptContributor:
             view=view,
         )
 
-        return [
+        extensions = [
             PromptExtension(
                 plugin_id=self.plugin_id,
                 mount="system",
@@ -175,19 +175,23 @@ class AG99liveMotionPromptContributor:
                     "node_type": "ag99live_motion_capability",
                 },
             ),
-            PromptExtension(
-                plugin_id=self.plugin_id,
-                mount="context",
-                title="Live2D Motion Context",
-                value_kind="mapping",
-                value=runtime_payload,
-                order=41,
-                meta={
-                    "scope": "dynamic",
-                    "node_type": "ag99live_motion_runtime",
-                },
-            ),
         ]
+        if runtime_payload:
+            extensions.append(
+                PromptExtension(
+                    plugin_id=self.plugin_id,
+                    mount="context",
+                    title="Previous Live2D Motion",
+                    value_kind="mapping",
+                    value=runtime_payload,
+                    order=41,
+                    meta={
+                        "scope": "dynamic",
+                        "node_type": "live2d_previous_motion",
+                    },
+                )
+            )
+        return extensions
 
 
 class AG99liveMotionResultContributor:
@@ -252,7 +256,7 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
                 "the visible performance with intent_tags and choose meaningful "
                 "semantic axis levels for this turn. Select at most one typed resource "
                 "only when a listed expression or complete motion is clearly appropriate. "
-                "Emit exactly one ag99live.motion effect for an assistant segment; never "
+                "Emit exactly one motion effect for an assistant segment; never "
                 "split a movement sequence into multiple effects."
             ),
             parameters={
@@ -272,17 +276,59 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
                         },
                         "minProperties": 1,
                     },
+                    "motion_steps": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 4,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "axis_levels": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                        "type": "integer",
+                                        "minimum": -3,
+                                        "maximum": 3,
+                                    },
+                                    "minProperties": 1,
+                                },
+                                "duration_weight": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 3,
+                                },
+                            },
+                            "required": ["axis_levels", "duration_weight"],
+                        },
+                    },
                     "duration_hint_ms": {"type": "integer"},
                     "expression_resource_id": {"type": "string"},
                     "motion_resource_id": {"type": "string"},
                 },
-                "required": ["intent_tags", "axis_levels"],
-                "not": {
-                    "required": [
-                        "expression_resource_id",
-                        "motion_resource_id",
-                    ],
-                },
+                "required": ["intent_tags"],
+                "oneOf": [
+                    {"required": ["axis_levels"]},
+                    {"required": ["motion_steps"]},
+                ],
+                "allOf": [
+                    {
+                        "not": {
+                            "required": [
+                                "expression_resource_id",
+                                "motion_resource_id",
+                            ],
+                        },
+                    },
+                    {
+                        "not": {
+                            "required": [
+                                "motion_steps",
+                                "motion_resource_id",
+                            ],
+                        },
+                    },
+                ],
             },
         )
     )
@@ -525,7 +571,10 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     if has_motion_resources:
         optional_fields.append("motion_resource_id")
     allowed_fields_text = (
-        f"必填字段是 intent_tags 和 {axis_field_name}；"
+        "必填字段是 intent_tags，并且 axis_levels 与 motion_steps 必须二选一；"
+        f"可选字段只有 {'、'.join(optional_fields)}。"
+        if persona_effect_available
+        else f"必填字段是 intent_tags 和 {axis_field_name}；"
         f"可选字段只有 {'、'.join(optional_fields)}。"
     )
     resource_field_text = (
@@ -538,15 +587,15 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     )
     if persona_effect_available:
         sequence_guidance = (
-            "用户要求动作序列时，优先选择一个能完整表达该序列的 motion_resource_id；"
-            "没有合适资源时，只输出一个最能代表本轮语义的姿态。"
+            "用户明确要求连续、往返或分阶段动作时，优先选择一个能完整表达该序列的 motion_resource_id；"
+            "没有合适资源时使用 motion_steps，按播放顺序输出 2 到 4 步。"
             if has_motion_resources
-            else "用户要求动作序列时，只输出一个最能代表本轮语义的姿态。"
+            else "用户明确要求连续、往返或分阶段动作时使用 motion_steps，按播放顺序输出 2 到 4 步。"
         )
         output_contract_text = (
             "你正在控制一个 Live2D 模型，并为本轮回复生成可见动作。"
-            "每个回复片段必须且只能调用一次 ag99live.motion；"
-            "不要用多个动作调用表达连续、往返或分阶段动作。"
+            "每个回复片段必须且只能调用一次动作效果；"
+            "不要用多个动作调用表达动作序列。"
             f"{sequence_guidance}"
             f"{allowed_fields_text}"
         )
@@ -577,11 +626,18 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         if persona_effect_available
         else "每个值都直接写成 JSON number；没有明确方向或表演贡献的轴直接省略。"
     )
+    axis_shape_text = (
+        "单姿态使用 axis_levels；动作序列使用 motion_steps。两者必须且只能选择一个。"
+        "motion_steps 每步都必须提供 axis_levels 和 duration_weight；所有步骤必须使用完全相同的轴集合，"
+        "duration_weight 只能是 1 到 3 的整数。axis_levels 只能使用下方列出的轴 id。"
+        if persona_effect_available
+        else f"{axis_field_name} 是必填对象，只能使用下方列出的轴 id。"
+    )
     return (
         f"{output_contract_text}"
         "intent_tags 用 2 到 6 个开放关键词概括本轮语气、姿态和场景。"
         f"{resource_field_text}"
-        f"{axis_field_name} 是必填对象，只能使用下方列出的轴 id。"
+        f"{axis_shape_text}"
         f"{axis_instruction}"
         "优先选择能表达姿态方向、视线焦点和身体重心的关键轴，再用少量表情轴补充情绪细节。"
         "普通回复也要给轻量姿态参数；明显转身、强调、回避、惊讶、调侃、开心或疑惑时，动作幅度要更明确。"
@@ -618,6 +674,7 @@ def _build_motion_capability_prompt_payload(
             axis_fields = [
                 "id",
                 "label",
+                "description",
                 "control_role",
                 "negative_semantics",
                 "positive_semantics",
@@ -661,9 +718,22 @@ def _build_motion_capability_prompt_payload(
 
     resources = capability_payload.get("resource_candidates")
     if isinstance(resources, list):
+        allowed_axis_ids = {
+            str(item.get("id") or "").strip()
+            for item in result.get("axes") or []
+            if isinstance(item, dict) and str(item.get("id") or "").strip()
+        }
         result["resources"] = [
             {
-                key: item.get(key)
+                key: (
+                    [
+                        axis_id
+                        for axis_id in item.get("conflicting_axis_ids") or []
+                        if axis_id in allowed_axis_ids
+                    ]
+                    if key == "conflicting_axis_ids"
+                    else item.get(key)
+                )
                 for key in (
                     "resource_id",
                     "resource_type",
@@ -675,12 +745,39 @@ def _build_motion_capability_prompt_payload(
                     "intensity",
                     "conflicting_axis_ids",
                 )
-                if item.get(key) not in (None, "", [])
+                if (
+                    key != "conflicting_axis_ids"
+                    and item.get(key) not in (None, "", [])
+                ) or (
+                    key == "conflicting_axis_ids"
+                    and any(
+                        axis_id in allowed_axis_ids
+                        for axis_id in item.get("conflicting_axis_ids") or []
+                    )
+                )
             }
-            for item in resources
+            for item in _select_prompt_resource_candidates(resources)
             if isinstance(item, dict)
         ]
     return result
+
+
+def _select_prompt_resource_candidates(
+    resources: list[Any],
+    *,
+    limit_per_type: int = 8,
+) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    counts = {"expression": 0, "motion": 0}
+    for item in resources:
+        if not isinstance(item, dict):
+            continue
+        resource_type = str(item.get("resource_type") or "").strip()
+        if resource_type not in counts or counts[resource_type] >= limit_per_type:
+            continue
+        counts[resource_type] += 1
+        selected.append(item)
+    return selected
 
 
 def _build_official_inline_motion_intent_example(
@@ -1006,10 +1103,8 @@ def _build_motion_runtime_payload(
     *,
     view: Any,
 ) -> dict[str, Any]:
-    payload = {
-        "configured_generation_mode": _resolve_motion_generation_mode(runtime_state),
-        "prompt_purpose": _resolve_prompt_purpose(view),
-    }
+    del event, view
+    payload: dict[str, Any] = {}
     previous_motion_payload = _build_previous_motion_variation_payload(
         turn_coordinator,
         runtime_state=runtime_state,
@@ -1029,6 +1124,11 @@ def _build_previous_motion_variation_payload(
         return {}
 
     axis_levels = snapshot.get("axis_levels")
+    motion_steps = snapshot.get("motion_steps")
+    if isinstance(motion_steps, list) and motion_steps:
+        last_step = motion_steps[-1]
+        if isinstance(last_step, dict):
+            axis_levels = last_step.get("axis_levels")
     axes = snapshot.get("axes")
     if not isinstance(axis_levels, dict) and not isinstance(axes, dict):
         return {}
@@ -1041,12 +1141,12 @@ def _build_previous_motion_variation_payload(
     axis_by_id = _build_prompt_axis_lookup(semantic_profile)
 
     key_axes: list[dict[str, Any]] = []
-    summary_parts: list[str] = []
+    key_axis_levels: dict[str, int] = {}
     for axis_id in PROMPT_VARIATION_AXIS_IDS:
         axis_level = axis_levels.get(axis_id) if isinstance(axis_levels, dict) else None
         if isinstance(axis_level, int) and not isinstance(axis_level, bool) and -3 <= axis_level <= 3:
             key_axes.append({"axis_id": axis_id, "level": axis_level})
-            summary_parts.append(f"{axis_id}={axis_level:+d}")
+            key_axis_levels[axis_id] = axis_level
             continue
         if not isinstance(axes, dict):
             continue
@@ -1066,25 +1166,26 @@ def _build_previous_motion_variation_payload(
                 "neutral": round(neutral, 2),
             }
         )
-        summary_parts.append(f"{axis_id}={descriptor}({float(axis_value):g})")
 
     if not key_axes:
         return {}
 
     expression_resource_id = str(snapshot.get("expression_resource_id") or "").strip()
     motion_resource_id = str(snapshot.get("motion_resource_id") or "").strip()
-    summary_text = "上一动作关键轴：" + "，".join(summary_parts) + "。"
-    if expression_resource_id:
-        summary_text += f" 上一动作 expression_resource_id={expression_resource_id}。"
-    if motion_resource_id:
-        summary_text += f" 上一动作 motion_resource_id={motion_resource_id}。"
-    summary_text += " 参考上一动作，按本轮语义重新选择方向、幅度和重心。"
+    previous_motion = {
+        "key_axis_levels": key_axis_levels,
+        "key_axes": key_axes if not key_axis_levels else [],
+        "expression_resource_id": expression_resource_id,
+        "motion_resource_id": motion_resource_id,
+        "was_sequence": bool(motion_steps),
+        "guidance": "参考上一动作，但按本轮语义重新选择方向、幅度和身体重心，避免机械复刻。",
+    }
     return {
-        "previous_motion_key_axes": key_axes,
-        "previous_motion_summary": summary_text,
-        "previous_motion_variation_instruction": (
-            "参考上一动作的 head_yaw/body_yaw，按本轮语义调整方向与幅度。"
-        ),
+        "previous_motion": {
+            key: value
+            for key, value in previous_motion.items()
+            if value not in (None, "", [], {}) or key in {"was_sequence", "guidance"}
+        }
     }
 
 
@@ -1124,6 +1225,9 @@ def _summarize_semantic_profile(
                 {
                     "id": str(axis.get("id") or "").strip(),
                     "label": str(axis.get("label") or axis.get("id") or "").strip(),
+                    "description": _truncate_text(
+                        str(axis.get("description") or "").strip(), 160
+                    ),
                     "control_role": str(axis.get("control_role") or "").strip(),
                     "value_range": _normalize_axis_range(axis.get("value_range"), [0.0, 100.0]),
                     "negative_semantics": _normalize_axis_text_list(axis.get("negative_semantics")),
@@ -1403,12 +1507,15 @@ def _log_persona_effect_motion_resolution(
     payload_motion_resource_id = ""
     if isinstance(payload, dict):
         axes = payload.get("axis_levels")
+        motion_steps = payload.get("motion_steps")
         if isinstance(axes, dict):
             payload_axes_keys = sorted(
                 str(key).strip()
                 for key in axes.keys()
                 if str(key).strip()
             )
+        elif isinstance(motion_steps, list):
+            payload_axes_keys = _collect_motion_step_axis_keys(motion_steps)
         payload_expression_resource_id = str(
             payload.get("expression_resource_id") or ""
         ).strip()
@@ -1519,6 +1626,10 @@ def _summarize_ag99live_motion_effect_arguments(event: Any, view: Any) -> dict[s
         if str(key).strip()
     )
     raw_axes = raw_arguments.get("axis_levels")
+    if not isinstance(raw_axes, Mapping):
+        motion_steps = _thaw_snapshot_value(raw_arguments.get("motion_steps"))
+        if isinstance(motion_steps, list):
+            summary["axis_keys"] = _collect_motion_step_axis_keys(motion_steps)
     if isinstance(raw_axes, Mapping):
         summary["axis_keys"] = sorted(
             str(key).strip()
@@ -1541,6 +1652,20 @@ def _summarize_ag99live_motion_effect_arguments(event: Any, view: Any) -> dict[s
         raw_arguments.get("motion_resource_id") or ""
     ).strip()
     return summary
+
+
+def _collect_motion_step_axis_keys(motion_steps: list[Any]) -> list[str]:
+    axis_ids: set[str] = set()
+    for step in motion_steps:
+        step_axes = step.get("axis_levels") if isinstance(step, dict) else None
+        if not isinstance(step_axes, Mapping):
+            continue
+        axis_ids.update(
+            str(axis_id).strip()
+            for axis_id in step_axes
+            if str(axis_id).strip()
+        )
+    return sorted(axis_ids)
 
 
 def _thaw_snapshot_value(value: Any) -> Any:

@@ -1,9 +1,9 @@
 task:
-  class: bugfix
+  class: feature
   risk: high
-  phase: end_to_end_lifecycle_closure
+  phase: semantic_motion_sequence_and_sampling
   status: complete
-  scope: Close end-to-end playback lifecycle defects and make Motion Lab frontend-to-SQLite delivery durable and acknowledged
+  scope: Add one-effect multi-step semantic motion, deterministic bounded level sampling, prompt compression, and end-to-end parameter keyframe playback
 context:
   confidence: high
   assumptions:
@@ -103,6 +103,10 @@ context:
     - Current v3 motion visibility summaries no longer carry fallback/repair result fields; axis descriptors remain diagnostics, while fallback pose candidates remain isolated to Prompt reference data.
     - Backend effect normalization now rejects an invalid resource_id instead of clearing it and broadcasting the remaining semantic axes.
     - Persona Effect motion arguments containing legacy catalog/motion wrapper fields now fail with forbidden_fields instead of being stripped and continued; <@anim> remains the separate official compatibility parser.
+    - One ag99live.motion Persona Effect may carry either axis_levels or 2-4 ordered motion_steps; the two shapes are exclusive, every step uses the same axis set, and motion_steps cannot be combined with a complete motion resource.
+    - ModelEngine compiles motion_steps into one engine.parameter_plan.v2 with per-parameter keyframes, so the sequence remains one unified-clock run instead of multiple independently scheduled motions.
+    - Semantic level sampling uses the stable identity turn_id plus message_id plus profile source_hash plus semantic_motion_transform.v2; level zero remains exact neutral and nonzero levels receive bounded deterministic shared and per-axis variation.
+    - Missing sampling identity or profile source_hash is a visible v4 compile failure; no random seed fallback is synthesized.
   unresolved_questions:
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.
@@ -193,6 +197,12 @@ architecture:
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
 verification:
   checks_run:
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (312 passed after final sequence diagnostics and profile-hash checks)
+    - npm test (complete frontend suite passed after sequence keyframe and sampling changes)
+    - npm run typecheck (renderer and node typechecks passed after final review)
+    - npm run build:web (production web build passed after final review)
+    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings)
+    - git diff --check
     - npm test (complete frontend suite passed after end-to-end lifecycle closure)
     - npm run typecheck (renderer and node typechecks passed)
     - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (306 passed)

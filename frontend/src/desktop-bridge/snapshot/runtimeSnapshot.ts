@@ -22,6 +22,7 @@ import {
   type BilibiliLiveStatus,
 } from "../../types/bilibili-live.js";
 import { SCHEMA_CATALOG_MOTION_V1 } from "../../types/protocol.js";
+import { cloneJson } from "../../utils/cloneJson.js";
 import {
   cloneNumericRecord,
   isFiniteNumber,
@@ -392,6 +393,11 @@ function cloneMotionCompileDiagnostics(
     expressiveAxisCount: normalizeOptionalInteger(diagnostics.expressiveAxisCount),
     semanticAxisCount: normalizeOptionalInteger(diagnostics.semanticAxisCount),
     couplingSkippedExplicitTargets: normalizeStringArray(diagnostics.couplingSkippedExplicitTargets),
+    transformTrace: isObject(diagnostics.transformTrace)
+      ? cloneJson(diagnostics.transformTrace) as NonNullable<
+          DesktopMotionPlaybackRecord["diagnostics"]
+        >["transformTrace"]
+      : undefined,
   };
 }
 

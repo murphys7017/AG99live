@@ -2,11 +2,12 @@ import type {
   DirectParameterPlanTiming,
   ModelSummary,
   MotionAxisLevelMap,
+  MotionAxisLevelStep,
   MotionPlanPayload,
 } from "../../types/protocol.js";
 import type { ModelEngineSettings } from "../settings.js";
 
-export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v1";
+export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v2";
 
 export interface MotionTimingResolution {
   timing: DirectParameterPlanTiming;
@@ -33,6 +34,11 @@ export interface CompileOptions {
   source?: string;
   settings?: Partial<ModelEngineSettings>;
   runtimeWarnings?: readonly string[];
+  samplingIdentity?: {
+    turnId: string;
+    messageId: string;
+  };
+  allowNeutralAxisPose?: boolean;
 }
 
 export interface CompileDiagnostics {
@@ -85,6 +91,8 @@ export interface MotionTransformTrace {
   profileHash: string;
   rawAxes: Record<string, number>;
   rawAxisLevels?: MotionAxisLevelMap;
+  rawMotionSteps?: MotionAxisLevelStep[];
+  axisSampling?: MotionAxisSamplingTrace;
   expressionResourceId?: string;
   motionResourceId?: string;
   resolvedResource?: {
@@ -97,6 +105,20 @@ export interface MotionTransformTrace {
   constrainedAxes: Record<string, number>;
   relationAdjustments: MotionAxisRelationAdjustment[];
   compiledParameters: string[];
+  sequenceSteps?: Array<{
+    index: number;
+    durationWeight: number;
+    resolvedAxes: Record<string, number>;
+    constrainedAxes: Record<string, number>;
+    axisSampling?: MotionAxisSamplingTrace;
+  }>;
+}
+
+export interface MotionAxisSamplingTrace {
+  seed: string;
+  sharedRandom: number;
+  perAxisRandom: Record<string, number>;
+  sampledValues: Record<string, number>;
 }
 
 export interface MotionFeedback {

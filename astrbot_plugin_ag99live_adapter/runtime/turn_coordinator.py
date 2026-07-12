@@ -830,10 +830,20 @@ class TurnCoordinator:
         cloned_snapshot = dict(snapshot)
         axes = snapshot.get("axes")
         axis_levels = snapshot.get("axis_levels")
+        motion_steps = snapshot.get("motion_steps")
         if isinstance(axes, dict):
             cloned_snapshot["axes"] = dict(axes)
         if isinstance(axis_levels, dict):
             cloned_snapshot["axis_levels"] = dict(axis_levels)
+        if isinstance(motion_steps, list):
+            cloned_snapshot["motion_steps"] = [
+                {
+                    **step,
+                    "axis_levels": dict(step.get("axis_levels") or {}),
+                }
+                for step in motion_steps
+                if isinstance(step, dict)
+            ]
         return cloned_snapshot
 
     def _record_prompt_motion_snapshot(
@@ -850,8 +860,11 @@ class TurnCoordinator:
         schema_version = str(motion_payload.get("schema_version") or "").strip()
         axes = motion_payload.get("axes")
         axis_levels = motion_payload.get("axis_levels")
+        motion_steps = motion_payload.get("motion_steps")
         if schema_version == "engine.motion_intent.v4":
-            if not isinstance(axis_levels, dict) or not axis_levels or "axes" in motion_payload:
+            has_levels = isinstance(axis_levels, dict) and bool(axis_levels)
+            has_steps = isinstance(motion_steps, list) and bool(motion_steps)
+            if has_levels == has_steps or "axes" in motion_payload:
                 return
         elif not isinstance(axes, dict) or not axes or "axis_levels" in motion_payload:
             return
@@ -882,7 +895,17 @@ class TurnCoordinator:
             "intent_tags": normalized_tags,
         }
         if schema_version == "engine.motion_intent.v4":
-            snapshot["axis_levels"] = normalized_levels
+            if normalized_levels:
+                snapshot["axis_levels"] = normalized_levels
+            if isinstance(motion_steps, list):
+                snapshot["motion_steps"] = [
+                    {
+                        "axis_levels": dict(step.get("axis_levels") or {}),
+                        "duration_weight": step.get("duration_weight"),
+                    }
+                    for step in motion_steps
+                    if isinstance(step, dict)
+                ]
             snapshot["expression_resource_id"] = str(
                 motion_payload.get("expression_resource_id") or ""
             ).strip()

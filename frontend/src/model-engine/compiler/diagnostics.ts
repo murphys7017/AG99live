@@ -111,7 +111,15 @@ function buildTransformTrace(context: MotionCompileContext): MotionTransformTrac
       ? { ...context.intent.axes }
       : {},
     rawAxisLevels: context.intent.schema_version === "engine.motion_intent.v4"
+      && context.intent.axis_levels
       ? { ...context.intent.axis_levels }
+      : undefined,
+    axisSampling: context.state.axisSampling
+      ? {
+          ...context.state.axisSampling,
+          perAxisRandom: { ...context.state.axisSampling.perAxisRandom },
+          sampledValues: { ...context.state.axisSampling.sampledValues },
+        }
       : undefined,
     expressionResourceId: context.intent.schema_version === "engine.motion_intent.v4"
       ? context.intent.expression_resource_id

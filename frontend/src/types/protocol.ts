@@ -613,6 +613,10 @@ export interface PerformanceCurveHint {
 
 export type MotionAxisLevel = -3 | -2 | -1 | 0 | 1 | 2 | 3;
 export type MotionAxisLevelMap = Record<string, MotionAxisLevel>;
+export interface MotionAxisLevelStep {
+  axis_levels: MotionAxisLevelMap;
+  duration_weight: 1 | 2 | 3;
+}
 
 interface NormalizedSemanticMotionIntentBase {
   profile_id: string;
@@ -649,15 +653,27 @@ export interface NormalizedSemanticMotionIntentV3
   motion_resource_id?: never;
 }
 
-export interface NormalizedSemanticMotionIntentV4
+interface NormalizedSemanticMotionIntentV4Base
   extends NormalizedSemanticMotionIntentBase {
   schema_version: typeof SCHEMA_MOTION_INTENT_V4;
-  axis_levels: MotionAxisLevelMap;
   axes?: never;
   resource_id?: never;
   expression_resource_id?: string;
   motion_resource_id?: string;
 }
+
+export type NormalizedSemanticMotionIntentV4 =
+  NormalizedSemanticMotionIntentV4Base & (
+    | {
+      axis_levels: MotionAxisLevelMap;
+      motion_steps?: never;
+    }
+    | {
+      axis_levels?: never;
+      motion_steps: MotionAxisLevelStep[];
+      motion_resource_id?: never;
+    }
+  );
 
 /** Normalized semantic motion intent consumed by ModelEngine. */
 export type NormalizedSemanticMotionIntent =
@@ -686,6 +702,12 @@ export interface SemanticParameterPlanEntry {
   weight: number;
   input_value?: number;
   source?: SemanticParameterPlanSource;
+  keyframes?: Array<{
+    at_ms: number;
+    transition_ms: number;
+    target_value: number;
+    input_value?: number;
+  }>;
   modulation?: {
     kind: "speech_pose_cycle";
     neutral: number;

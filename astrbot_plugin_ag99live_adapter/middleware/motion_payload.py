@@ -81,16 +81,33 @@ def normalize_motion_arguments_payload(
             base_reason,
             "multiple_resource_layers_forbidden",
         )
-    validated_levels, rejected_levels = normalize_effect_axis_levels(
-        motion_hint.get("axis_levels"),
-    )
+    has_axis_levels = "axis_levels" in motion_hint
+    has_motion_steps = "motion_steps" in motion_hint
+    if has_axis_levels == has_motion_steps:
+        return None, append_resolution_reason(
+            base_reason,
+            "axis_levels_motion_steps_exclusive",
+        )
+    validated_levels: dict[str, int] | None = None
+    motion_steps: list[dict[str, Any]] | None = None
+    rejected_levels: list[str] = []
     reason = base_reason
+    if has_axis_levels:
+        validated_levels, rejected_levels = normalize_effect_axis_levels(
+            motion_hint.get("axis_levels"),
+        )
+    else:
+        motion_steps, motion_steps_error = normalize_effect_motion_steps(
+            motion_hint.get("motion_steps")
+        )
+        if motion_steps_error:
+            return None, append_resolution_reason(reason, motion_steps_error)
     if rejected_levels:
         return None, append_resolution_reason(
             reason,
             "rejected_axis_levels:" + ",".join(rejected_levels),
         )
-    if not validated_levels:
+    if has_axis_levels and not validated_levels:
         reason = append_resolution_reason(reason, "axis_levels_empty_or_invalid")
 
     resource_candidates = build_motion_resource_candidates(
@@ -117,7 +134,13 @@ def normalize_motion_arguments_payload(
         if requested_motion_resource_id and not motion_resource_id:
             return None, reason
 
-    if not validated_levels:
+    if motion_steps and motion_resource_id:
+        return None, append_resolution_reason(
+            reason,
+            "motion_steps_motion_resource_mutually_exclusive",
+        )
+
+    if has_axis_levels and not validated_levels:
         return None, reason
 
     try:
@@ -136,11 +159,15 @@ def normalize_motion_arguments_payload(
         "expression_resource_id": expression_resource_id,
         "motion_resource_id": motion_resource_id,
         "summary": {
-            "axis_count": len(validated_levels),
+            "axis_count": len(validated_levels or motion_steps[0]["axis_levels"]),
             "intent_tag_count": len(intent_tags),
+            "motion_step_count": len(motion_steps or []),
         },
-        "axis_levels": validated_levels,
     }
+    if validated_levels:
+        payload["axis_levels"] = validated_levels
+    if motion_steps:
+        payload["motion_steps"] = motion_steps
     return payload, reason
 
 
@@ -238,6 +265,46 @@ def normalize_motion_axis_levels(
 
 
 normalize_effect_axis_levels = normalize_motion_axis_levels
+
+
+def normalize_effect_motion_steps(
+    value: Any,
+) -> tuple[list[dict[str, Any]] | None, str]:
+    if not isinstance(value, list) or len(value) < 2 or len(value) > 4:
+        return None, "motion_steps_count_invalid"
+    normalized_steps: list[dict[str, Any]] = []
+    expected_axis_ids: set[str] | None = None
+    for index, step in enumerate(value):
+        if not isinstance(step, dict):
+            return None, f"motion_step_not_object:{index}"
+        unknown_fields = sorted(set(step) - {"axis_levels", "duration_weight"})
+        if unknown_fields:
+            return None, f"motion_step_forbidden_fields:{index}:{','.join(unknown_fields)}"
+        levels, rejected = normalize_motion_axis_levels(step.get("axis_levels"))
+        if rejected:
+            return None, f"motion_step_rejected_axis_levels:{index}:{','.join(rejected)}"
+        if not levels:
+            return None, f"motion_step_axis_levels_empty:{index}"
+        axis_ids = set(levels)
+        if expected_axis_ids is None:
+            expected_axis_ids = axis_ids
+        elif axis_ids != expected_axis_ids:
+            return None, f"motion_step_axis_set_mismatch:{index}"
+        duration_weight = step.get("duration_weight")
+        if (
+            isinstance(duration_weight, bool)
+            or not isinstance(duration_weight, int)
+            or duration_weight < 1
+            or duration_weight > 3
+        ):
+            return None, f"motion_step_duration_weight_invalid:{index}"
+        normalized_steps.append(
+            {
+                "axis_levels": levels,
+                "duration_weight": duration_weight,
+            }
+        )
+    return normalized_steps, ""
 
 
 def _coerce_effect_axis_number(value: Any) -> float | None:

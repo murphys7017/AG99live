@@ -7,6 +7,34 @@ from types import SimpleNamespace
 import pytest
 
 
+def test_summarize_motion_for_curve_includes_sequence_axes(
+    install_fake_astrbot,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.motion.performance_curve import (
+        summarize_motion_for_curve,
+    )
+
+    summary = summarize_motion_for_curve(
+        {
+            "intent_tags": ["测试", "左右扭头"],
+            "motion_steps": [
+                {"axis_levels": {"head_yaw": -3, "gaze_x": -2}, "duration_weight": 1},
+                {"axis_levels": {"head_yaw": 3, "gaze_x": 2}, "duration_weight": 1},
+            ],
+        }
+    )
+
+    assert summary["axis_keys"] == ["gaze_x", "head_yaw"]
+    assert summary["motion_step_count"] == 2
+
+    malformed = summarize_motion_for_curve(
+        {"motion_steps": [{"axis_levels": ["head_yaw"]}]}
+    )
+    assert malformed["axis_keys"] == []
+    assert malformed["motion_step_count"] == 1
+
+
 def test_normalize_performance_curve_hint_rejects_unknown_enums(
     install_fake_astrbot,
 ) -> None:

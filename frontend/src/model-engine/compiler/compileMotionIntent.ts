@@ -1,5 +1,7 @@
 import type {
+  NormalizedSemanticMotionIntentV4,
   SemanticMotionIntent,
+  SemanticParameterPlanEntry,
   SemanticParameterPlan,
 } from "../../types/protocol.js";
 import { SCHEMA_PARAMETER_PLAN_V2 } from "../../types/protocol.js";
@@ -14,6 +16,24 @@ import { runCompilePipeline } from "./pipeline.js";
 import { resolveCompileStages } from "./registry.js";
 
 export function compileMotionIntent(
+  intent: SemanticMotionIntent,
+  options: CompileOptions,
+): CompileResult {
+  if (
+    intent.schema_version === "engine.motion_intent.v4"
+    && Array.isArray(intent.motion_steps)
+  ) {
+    return compileMotionSequenceIntent(
+      intent as NormalizedSemanticMotionIntentV4 & {
+        motion_steps: NonNullable<NormalizedSemanticMotionIntentV4["motion_steps"]>;
+      },
+      options,
+    );
+  }
+  return compileSingleMotionIntent(intent, options);
+}
+
+function compileSingleMotionIntent(
   intent: SemanticMotionIntent,
   options: CompileOptions,
 ): CompileResult {
@@ -33,6 +53,219 @@ export function compileMotionIntent(
   }
 
   return buildSuccessCompileResult(context);
+}
+
+function compileMotionSequenceIntent(
+  intent: NormalizedSemanticMotionIntentV4 & {
+    motion_steps: NonNullable<NormalizedSemanticMotionIntentV4["motion_steps"]>;
+  },
+  options: CompileOptions,
+): CompileResult {
+  const stepResults = intent.motion_steps.map((step) =>
+    compileSingleMotionIntent(
+      {
+        ...intent,
+        axis_levels: step.axis_levels,
+        motion_steps: undefined,
+      } as NormalizedSemanticMotionIntentV4,
+      {
+        ...options,
+        allowNeutralAxisPose: true,
+      },
+    ),
+  );
+  const failedStepIndex = stepResults.findIndex((result) => !result.ok || !result.plan);
+  if (failedStepIndex >= 0) {
+    const failed = stepResults[failedStepIndex];
+    return {
+      ...failed,
+      reason: `motion_sequence_step_failed:${failedStepIndex}:${failed.reason}`,
+      feedback: {
+        code: `motion_sequence_step_failed:${failedStepIndex}`,
+        message: failed.reason,
+        fields: failed.feedback?.fields ?? [],
+      },
+    };
+  }
+
+  const plans = stepResults.map((result) => result.plan!);
+  const stepSignatures = intent.motion_steps.map((step) =>
+    JSON.stringify(Object.entries(step.axis_levels).sort(([left], [right]) =>
+      left.localeCompare(right),
+    )),
+  );
+  const hasTransition = stepSignatures.some(
+    (signature, index) => index > 0 && signature !== stepSignatures[index - 1],
+  );
+  const allNeutral = intent.motion_steps.every((step) =>
+    Object.values(step.axis_levels).every((level) => level === 0),
+  );
+  if (!hasTransition || allNeutral) {
+    const reason = allNeutral
+      ? "motion_sequence_all_neutral"
+      : "motion_sequence_has_no_transition";
+    return {
+      ok: false,
+      plan: null,
+      reason,
+      diagnostics: stepResults[0].diagnostics,
+      feedback: {
+        code: reason,
+        message: reason,
+        fields: [],
+      },
+    };
+  }
+  const firstPlan = plans[0];
+
+  const totalWeight = intent.motion_steps.reduce(
+    (sum, step) => sum + step.duration_weight,
+    0,
+  );
+  const totalDurationMs = firstPlan.timing.duration_ms;
+  let elapsedWeight = 0;
+  const stepStartTimes = intent.motion_steps.map((step, index) => {
+    const atMs = index === 0
+      ? 0
+      : Math.round((elapsedWeight / totalWeight) * totalDurationMs);
+    elapsedWeight += step.duration_weight;
+    return atMs;
+  });
+  const parameterTemplates = new Map<string, SemanticParameterPlanEntry>();
+  for (const plan of plans) {
+    for (const parameter of plan.parameters) {
+      parameterTemplates.set(parameter.parameter_id, parameter);
+    }
+  }
+  const parameters: SemanticParameterPlanEntry[] = [];
+  for (const template of parameterTemplates.values()) {
+    const stepParameters: SemanticParameterPlanEntry[] = [];
+    for (let index = 0; index < plans.length; index += 1) {
+      const existingParameter = plans[index].parameters.find(
+        (item) => item.parameter_id === template.parameter_id,
+      );
+      const parameter = existingParameter
+        ?? resolveNeutralSequenceParameter(template, options);
+      if (!parameter || (!existingParameter && template.source === "semantic_axis")) {
+        return {
+          ok: false,
+          plan: null,
+          reason: `motion_sequence_parameter_set_mismatch:${index}:${template.parameter_id}`,
+          diagnostics: stepResults[index].diagnostics,
+          feedback: {
+            code: "motion_sequence_parameter_set_mismatch",
+            message: `motion_sequence_parameter_set_mismatch:${index}:${template.parameter_id}`,
+            fields: [template.axis_id],
+          },
+        };
+      }
+      stepParameters.push(parameter);
+    }
+    const baseParameter = stepParameters[0];
+    parameters.push({
+      ...baseParameter,
+      keyframes: stepParameters.map((parameter, index) => {
+      const stepEndMs = index + 1 < stepStartTimes.length
+        ? stepStartTimes[index + 1]
+        : totalDurationMs;
+      const stepDurationMs = Math.max(1, stepEndMs - stepStartTimes[index]);
+      return {
+        at_ms: stepStartTimes[index],
+        transition_ms: index === 0
+          ? 0
+          : Math.min(240, Math.max(80, Math.round(stepDurationMs * 0.3))),
+        target_value: parameter.target_value,
+        input_value: parameter.input_value,
+      };
+      }),
+    });
+  }
+
+  const warnings = Array.from(new Set(
+    stepResults.flatMap((result) => result.diagnostics.warnings ?? []),
+  ));
+  const diagnostics = {
+    ...stepResults[0].diagnostics,
+    compiledParameterCount: parameters.length,
+    compiledParameters: parameters.map((item) => item.parameter_id),
+    warnings: [...warnings, `motion_sequence_compiled:${plans.length}`],
+    transformTrace: stepResults[0].diagnostics.transformTrace
+      ? {
+          ...stepResults[0].diagnostics.transformTrace,
+          rawAxisLevels: undefined,
+          compiledParameters: parameters.map((item) => item.parameter_id),
+          rawMotionSteps: intent.motion_steps.map((step) => ({
+            axis_levels: { ...step.axis_levels },
+            duration_weight: step.duration_weight,
+          })),
+          sequenceSteps: stepResults.map((result, index) => ({
+            index,
+            durationWeight: intent.motion_steps[index].duration_weight,
+            resolvedAxes: { ...(result.diagnostics.transformTrace?.resolvedAxes ?? {}) },
+            constrainedAxes: { ...(result.diagnostics.transformTrace?.constrainedAxes ?? {}) },
+            axisSampling: result.diagnostics.transformTrace?.axisSampling
+              ? {
+                  ...result.diagnostics.transformTrace.axisSampling,
+                  perAxisRandom: {
+                    ...result.diagnostics.transformTrace.axisSampling.perAxisRandom,
+                  },
+                  sampledValues: {
+                    ...result.diagnostics.transformTrace.axisSampling.sampledValues,
+                  },
+                }
+              : undefined,
+          })),
+        }
+      : undefined,
+  };
+  return {
+    ok: true,
+    reason: "",
+    diagnostics,
+    plan: {
+      ...firstPlan,
+      parameters,
+      diagnostics: {
+        ...firstPlan.diagnostics,
+        warnings: diagnostics.warnings,
+      },
+      summary: {
+        ...firstPlan.summary,
+        parameter_count: parameters.length,
+      },
+    },
+  };
+}
+
+function resolveNeutralSequenceParameter(
+  template: SemanticParameterPlanEntry,
+  options: CompileOptions,
+): SemanticParameterPlanEntry | null {
+  if (template.source === "semantic_axis") {
+    return null;
+  }
+  const profile = options.model.semantic_axis_profile;
+  const axis = profile?.axes.find((item) => item.id === template.axis_id);
+  const binding = axis?.parameter_bindings.find(
+    (item) => item.parameter_id === template.parameter_id,
+  );
+  if (!axis || !binding) {
+    return null;
+  }
+  const [inputMin, inputMax] = binding.input_range;
+  const [outputMin, outputMax] = binding.output_range;
+  if (inputMax <= inputMin) {
+    return null;
+  }
+  const inputRatio = (axis.neutral - inputMin) / (inputMax - inputMin);
+  const mappedRatio = binding.invert ? 1 - inputRatio : inputRatio;
+  return {
+    ...template,
+    input_value: axis.neutral,
+    target_value: Math.round(
+      (outputMin + (outputMax - outputMin) * mappedRatio) * 1000000,
+    ) / 1000000,
+  };
 }
 
 function failCompile(

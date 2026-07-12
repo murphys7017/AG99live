@@ -465,19 +465,19 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     extensions = asyncio.run(contributor.collect(event, None, view))
 
     assert isinstance(extensions, list)
-    assert len(extensions) == 3
+    assert len(extensions) == 2
     system = next(item for item in extensions if item.mount == "system")
     capability = next(item for item in extensions if item.mount == "capability")
-    runtime = next(item for item in extensions if item.mount == "context")
     assert system.meta["scope"] == "static"
     assert capability.meta["scope"] == "static"
-    assert runtime.meta["scope"] == "dynamic"
     assert capability.value["axis_value_format"] == "axis_levels"
     assert "你正在控制一个 Live2D 模型" in system.value
     assert "为本轮回复生成可见动作" in system.value
-    assert "每个回复片段必须且只能调用一次 ag99live.motion" in system.value
-    assert "不要用多个动作调用表达连续、往返或分阶段动作" in system.value
-    assert "没有合适资源时，只输出一个最能代表本轮语义的姿态" in system.value
+    assert "每个回复片段必须且只能调用一次动作效果" in system.value
+    assert "ag99live" not in system.value.lower()
+    assert "不要用多个动作调用表达动作序列" in system.value
+    assert "没有合适资源时使用 motion_steps" in system.value
+    assert "所有步骤必须使用完全相同的轴集合" in system.value
     assert "<@anim" not in system.value
     assert '"plugin_hints":{"ag99live_motion"' not in system.value
     assert "Persona Effect" not in system.value
@@ -502,7 +502,7 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "intent_tags" in system.value
     assert "expression_resource_id" in system.value
     assert "motion_resource_id" in system.value
-    assert "axis_levels 是必填对象" in system.value
+    assert "单姿态使用 axis_levels；动作序列使用 motion_steps" in system.value
     assert system.value.count("-3=强负") == 1
     assert "插件会负责" not in system.value
     assert "choice、mode、motion_id" not in system.value
@@ -555,6 +555,7 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert capability.value["axes"][0]["usage_notes"] == (
         "Use for attention direction."
     )
+    assert capability.value["axes"][0]["description"] == "turn head left/right"
     assert all(
         "neutral" not in axis
         and "soft_range" not in axis
@@ -564,8 +565,7 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "effect_arguments_example" not in capability.value
     assert "intent_tags" in system.value
     assert all("file" not in item for item in capability.value["resources"])
-    assert runtime.value["configured_generation_mode"] == "single_response_effect"
-    assert runtime.value["prompt_purpose"] == "persona_reply"
+    assert all(item.mount != "context" for item in extensions)
 
 
 def test_prompt_contributor_uses_official_inline_anim_contract_when_persona_effect_unavailable(
@@ -650,14 +650,13 @@ def test_prompt_contributor_hides_resource_id_when_no_resource_candidates(
 
     capability = next(item for item in extensions if item.mount == "capability")
     system = next(item for item in extensions if item.mount == "system")
-    runtime = next(item for item in extensions if item.mount == "context")
     assert capability.meta["scope"] == "static"
-    assert runtime.meta["scope"] == "dynamic"
+    assert all(item.mount != "context" for item in extensions)
     assert "resources" not in capability.value
     assert "effect_arguments_example" not in capability.value
     assert "expression_resource_id" not in system.value
     assert "motion_resource_id" not in system.value
-    assert "必填字段是 intent_tags 和 axis_levels；可选字段只有 duration_hint_ms。" in system.value
+    assert "必填字段是 intent_tags，并且 axis_levels 与 motion_steps 必须二选一" in system.value
 
 
 def test_resource_candidate_preserves_dotted_catalog_id(
@@ -843,10 +842,10 @@ def test_prompt_contributor_returns_extensions_for_core_reply_purpose(
 
     extensions = asyncio.run(contributor.collect(event, None, view))
     assert isinstance(extensions, list)
-    assert len(extensions) == 3
+    assert len(extensions) == 2
 
 
-def test_prompt_purpose_appears_in_runtime_payload(
+def test_prompt_purpose_controls_eligibility_without_entering_runtime_payload(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -865,8 +864,7 @@ def test_prompt_purpose_appears_in_runtime_payload(
         if not expect_present:
             assert extensions is None
             continue
-        runtime = next(item for item in extensions if item.mount == "context")
-        assert runtime.value["prompt_purpose"] == purpose
+        assert all(item.mount != "context" for item in extensions)
 
 
 def test_prompt_runtime_includes_previous_motion_variation_hint(
@@ -891,22 +889,15 @@ def test_prompt_runtime_includes_previous_motion_variation_hint(
     extensions = asyncio.run(contributor.collect(event, None, view))
 
     runtime = next(item for item in extensions if item.mount == "context")
-    assert runtime.value["previous_motion_variation_instruction"]
-    assert runtime.value["previous_motion_key_axes"] == [
-        {
-            "axis_id": "head_yaw",
-            "level": 1,
-        },
-        {
-            "axis_id": "body_yaw",
-            "level": -1,
-        },
-    ]
-    assert "head_yaw=+1" in runtime.value["previous_motion_summary"]
-    assert "body_yaw=-1" in runtime.value["previous_motion_summary"]
-    assert "motion_resource_id=serious_explain" in runtime.value["previous_motion_summary"]
-    assert "按本轮语义调整方向与幅度" in runtime.value["previous_motion_variation_instruction"]
-    assert "避免在 head_yaw/body_yaw 上重复" not in runtime.value["previous_motion_variation_instruction"]
+    previous_motion = runtime.value["previous_motion"]
+    assert previous_motion["key_axis_levels"] == {
+        "head_yaw": 1,
+        "body_yaw": -1,
+    }
+    assert previous_motion["motion_resource_id"] == "serious_explain"
+    assert previous_motion["was_sequence"] is False
+    assert "按本轮语义重新选择方向、幅度和身体重心" in previous_motion["guidance"]
+    assert "previous_motion_summary" not in runtime.value
 
 
 def test_prompt_fallback_candidates_are_representative_by_axis_descriptors(
@@ -1328,6 +1319,57 @@ def test_result_contributor_rejects_non_integer_axis_levels_from_persona_effect(
         contribution.metadata["ag99live_motion_schedule"]["motion_resolution_reason"]
         == "persona_effect:rejected_axis_levels:head_yaw,eye_open_left:self_reply_motion_missing"
     )
+
+
+def test_result_contributor_returns_motion_sequence_in_single_effect(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(raw_turn_id="raw-turn")
+    view = _build_view(
+        phase="immediate",
+        route_mode="self_reply",
+        final_result="左右看看",
+        immediate_reply="左右看看",
+        effect_calls=[
+            _motion_effect_call(
+                {
+                    "intent_tags": ["测试", "左右扭头"],
+                    "motion_steps": [
+                        {
+                            "axis_levels": {"head_yaw": -3, "gaze_x": -2},
+                            "duration_weight": 1,
+                        },
+                        {
+                            "axis_levels": {"head_yaw": 3, "gaze_x": 2},
+                            "duration_weight": 1,
+                        },
+                    ],
+                }
+            )
+        ],
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == []
+    payload = contribution.client_objects[0]["motion_payload"]
+    assert "axis_levels" not in payload
+    assert payload["motion_steps"] == [
+        {
+            "axis_levels": {"head_yaw": -3, "gaze_x": -2},
+            "duration_weight": 1,
+        },
+        {
+            "axis_levels": {"head_yaw": 3, "gaze_x": 2},
+            "duration_weight": 1,
+        },
+    ]
 
 
 def test_result_contributor_rejects_duplicate_motion_effects(
@@ -2011,10 +2053,14 @@ def test_register_interaction_contributors_uses_available_hooks(
     effect = registered_effects[0]
     assert effect.plugin_id == "astrbot_plugin_ag99live_adapter"
     assert effect.name == "ag99live.motion"
-    assert "Emit exactly one ag99live.motion effect" in effect.description
+    assert "Emit exactly one motion effect" in effect.description
     assert "never split a movement sequence into multiple effects" in effect.description
     assert effect.legacy_hint_names == ()
-    assert effect.parameters["required"] == ["intent_tags", "axis_levels"]
+    assert effect.parameters["required"] == ["intent_tags"]
+    assert effect.parameters["oneOf"] == [
+        {"required": ["axis_levels"]},
+        {"required": ["motion_steps"]},
+    ]
     assert effect.parameters["additionalProperties"] is False
     assert effect.parameters["properties"]["axis_levels"]["minProperties"] == 1
     assert effect.parameters["properties"]["axis_levels"]["additionalProperties"]["minimum"] == -3
@@ -2022,11 +2068,20 @@ def test_register_interaction_contributors_uses_available_hooks(
     assert set(effect.parameters["properties"]) == {
         "intent_tags",
         "axis_levels",
+        "motion_steps",
         "duration_hint_ms",
         "expression_resource_id",
         "motion_resource_id",
     }
-    assert effect.parameters["not"]["required"] == [
-        "expression_resource_id",
-        "motion_resource_id",
+    assert effect.parameters["allOf"] == [
+        {
+            "not": {
+                "required": ["expression_resource_id", "motion_resource_id"],
+            },
+        },
+        {
+            "not": {
+                "required": ["motion_steps", "motion_resource_id"],
+            },
+        },
     ]

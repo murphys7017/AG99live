@@ -82,6 +82,8 @@ def normalize_motion_intent_v3_payload(intent: Any) -> dict[str, Any]:
         raise ValueError("invalid_schema_version")
     if "axis_levels" in intent:
         raise ValueError("axis_levels_forbidden_for_v3")
+    if "motion_steps" in intent:
+        raise ValueError("motion_steps_forbidden_for_v3")
 
     profile_id = str(intent.get("profile_id") or "").strip()
     model_id = str(intent.get("model_id") or "").strip()
@@ -174,19 +176,20 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
     intent_tags = normalize_motion_intent_tags(intent.get("intent_tags"))
     if not intent_tags:
         raise ValueError("intent_tags_empty")
-    axis_levels = intent.get("axis_levels")
-    if not isinstance(axis_levels, dict) or not axis_levels:
-        raise ValueError("axis_levels_not_object")
-    normalized_levels: dict[str, int] = {}
-    for axis_id_raw, level in axis_levels.items():
-        axis_id = str(axis_id_raw or "").strip()
-        if not axis_id:
-            raise ValueError("axis_id_empty")
-        if axis_id in normalized_levels:
-            raise ValueError(f"axis_id_duplicate:{axis_id}")
-        if isinstance(level, bool) or not isinstance(level, int) or level < -3 or level > 3:
-            raise ValueError(f"axis_{axis_id}_level_invalid")
-        normalized_levels[axis_id] = level
+    has_axis_levels = "axis_levels" in intent
+    has_motion_steps = "motion_steps" in intent
+    if has_axis_levels == has_motion_steps:
+        raise ValueError("axis_levels_motion_steps_exclusive")
+    normalized_levels = (
+        _normalize_axis_levels(intent.get("axis_levels"))
+        if has_axis_levels
+        else None
+    )
+    normalized_steps = (
+        _normalize_motion_steps(intent.get("motion_steps"))
+        if has_motion_steps
+        else None
+    )
     if "axes" in intent:
         raise ValueError("axis_levels_axes_mutually_exclusive")
     if "resource_id" in intent:
@@ -198,6 +201,8 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
     motion_resource_id = normalize_motion_resource_id(intent.get("motion_resource_id"))
     if expression_resource_id and motion_resource_id:
         raise ValueError("multiple_resource_layers_forbidden")
+    if normalized_steps and motion_resource_id:
+        raise ValueError("motion_steps_motion_resource_mutually_exclusive")
 
     duration_hint_ms = _normalize_duration_hint_ms(intent.get("duration_hint_ms"))
     performance_curve_hint = None
@@ -220,15 +225,70 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
         "duration_hint_ms": duration_hint_ms,
         "expression_resource_id": expression_resource_id,
         "motion_resource_id": motion_resource_id,
-        "axis_levels": normalized_levels,
         "summary": {
-            "axis_count": len(normalized_levels),
+            "axis_count": len(
+                normalized_levels or normalized_steps[0]["axis_levels"]
+            ),
             "intent_tag_count": len(intent_tags),
+            "motion_step_count": len(normalized_steps or []),
         },
     }
+    if normalized_levels:
+        normalized_intent["axis_levels"] = normalized_levels
+    if normalized_steps:
+        normalized_intent["motion_steps"] = normalized_steps
     if performance_curve_hint is not None:
         normalized_intent["performance_curve_hint"] = performance_curve_hint
     return normalized_intent
+
+
+def _normalize_axis_levels(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict) or not value:
+        raise ValueError("axis_levels_not_object")
+    normalized_levels: dict[str, int] = {}
+    for axis_id_raw, level in value.items():
+        axis_id = str(axis_id_raw or "").strip()
+        if not axis_id:
+            raise ValueError("axis_id_empty")
+        if axis_id in normalized_levels:
+            raise ValueError(f"axis_id_duplicate:{axis_id}")
+        if isinstance(level, bool) or not isinstance(level, int) or level < -3 or level > 3:
+            raise ValueError(f"axis_{axis_id}_level_invalid")
+        normalized_levels[axis_id] = level
+    return normalized_levels
+
+
+def _normalize_motion_steps(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or len(value) < 2 or len(value) > 4:
+        raise ValueError("motion_steps_count_invalid")
+    normalized_steps: list[dict[str, Any]] = []
+    expected_axis_ids: set[str] | None = None
+    for index, step in enumerate(value):
+        if not isinstance(step, dict):
+            raise ValueError(f"motion_step_not_object:{index}")
+        if set(step) - {"axis_levels", "duration_weight"}:
+            raise ValueError(f"motion_step_forbidden_fields:{index}")
+        levels = _normalize_axis_levels(step.get("axis_levels"))
+        axis_ids = set(levels)
+        if expected_axis_ids is None:
+            expected_axis_ids = axis_ids
+        elif axis_ids != expected_axis_ids:
+            raise ValueError(f"motion_step_axis_set_mismatch:{index}")
+        duration_weight = step.get("duration_weight")
+        if (
+            isinstance(duration_weight, bool)
+            or not isinstance(duration_weight, int)
+            or duration_weight < 1
+            or duration_weight > 3
+        ):
+            raise ValueError(f"motion_step_duration_weight_invalid:{index}")
+        normalized_steps.append(
+            {
+                "axis_levels": levels,
+                "duration_weight": duration_weight,
+            }
+        )
+    return normalized_steps
 
 
 def normalize_motion_intent_tags(value: Any) -> list[str]:

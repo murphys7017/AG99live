@@ -182,9 +182,31 @@ export interface DesktopMotionCompileDiagnostics {
     profileHash: string;
     rawAxes: Record<string, number>;
     rawAxisLevels?: Record<string, number>;
+    rawMotionSteps?: Array<{
+      axis_levels: Record<string, number>;
+      duration_weight: number;
+    }>;
+    axisSampling?: {
+      seed: string;
+      sharedRandom: number;
+      perAxisRandom: Record<string, number>;
+      sampledValues: Record<string, number>;
+    };
     resolvedAxes: Record<string, number>;
     derivedAxes: Record<string, number>;
     constrainedAxes: Record<string, number>;
+    sequenceSteps?: Array<{
+      index: number;
+      durationWeight: number;
+      resolvedAxes: Record<string, number>;
+      constrainedAxes: Record<string, number>;
+      axisSampling?: {
+        seed: string;
+        sharedRandom: number;
+        perAxisRandom: Record<string, number>;
+        sampledValues: Record<string, number>;
+      };
+    }>;
     relationAdjustments: unknown[];
     compiledParameters: string[];
   };

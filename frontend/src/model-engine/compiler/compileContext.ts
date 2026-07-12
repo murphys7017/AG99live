@@ -10,6 +10,7 @@ import type {
 import type {
   CompileDiagnostics,
   CompileOptions,
+  MotionAxisSamplingTrace,
   MotionAxisRelationAdjustment,
   MotionTimingResolution,
 } from "./contracts.js";
@@ -59,6 +60,7 @@ export interface MotionCompileMutableState {
   axisErrorLimit: number;
 
   relationAdjustments: MotionAxisRelationAdjustment[];
+  axisSampling: MotionAxisSamplingTrace | null;
 
   resource: ResolvedMotionResource | null;
 
@@ -109,6 +111,7 @@ export function createInitialCompileState(): MotionCompileMutableState {
     axisErrorCount: 0,
     axisErrorLimit: 0,
     relationAdjustments: [],
+    axisSampling: null,
     resource: null,
     warnings: [],
     resolvedMode: "idle",

@@ -145,6 +145,58 @@ function normalizeCatalogMotion(value: Record<string, unknown>): CatalogMotionPa
   };
 }
 
+function normalizeParameterKeyframes(
+  value: unknown,
+  durationMs: number,
+): SemanticParameterPlan["parameters"][number]["keyframes"] | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value) || value.length < 2 || value.length > 4) {
+    return null;
+  }
+  let previousAtMs = -1;
+  let previousTransitionEndMs = -1;
+  const keyframes: NonNullable<SemanticParameterPlan["parameters"][number]["keyframes"]> = [];
+  for (const item of value) {
+    if (!isObject(item)) {
+      return null;
+    }
+    const atMs = item.at_ms;
+    const transitionMs = item.transition_ms;
+    const targetValue = item.target_value;
+    const inputValue = item.input_value;
+    if (
+      !isFiniteNumber(atMs)
+      || !Number.isInteger(atMs)
+      || atMs < 0
+      || atMs > durationMs
+      || atMs <= previousAtMs
+      || atMs < previousTransitionEndMs
+      || !isFiniteNumber(transitionMs)
+      || !Number.isInteger(transitionMs)
+      || transitionMs < 0
+      || atMs + transitionMs > durationMs
+      || !isFiniteNumber(targetValue)
+      || (inputValue !== undefined && !isFiniteNumber(inputValue))
+    ) {
+      return null;
+    }
+    previousAtMs = atMs;
+    previousTransitionEndMs = atMs + transitionMs;
+    keyframes.push({
+      at_ms: atMs,
+      transition_ms: transitionMs,
+      target_value: targetValue,
+      input_value: isFiniteNumber(inputValue) ? inputValue : undefined,
+    });
+  }
+  if (keyframes[0].at_ms !== 0 || keyframes[0].transition_ms !== 0) {
+    return null;
+  }
+  return keyframes;
+}
+
 export function parseSemanticParameterPlan(
   value: unknown,
 ): ParseResult<SemanticParameterPlan> {
@@ -204,6 +256,10 @@ export function parseSemanticParameterPlan(
     if (inputValue !== undefined && !isFiniteNumber(inputValue)) {
       return { ok: false, reason: "parameter_plan_v2.input_value_not_number" };
     }
+    const keyframes = normalizeParameterKeyframes(item.keyframes, timing.duration_ms);
+    if (keyframes === null) {
+      return { ok: false, reason: "parameter_plan_v2.invalid_keyframes" };
+    }
     parameterIds.add(parameterId);
     let source: SemanticParameterPlan["parameters"][number]["source"] | undefined;
     if (item.source !== undefined) {
@@ -219,6 +275,7 @@ export function parseSemanticParameterPlan(
       weight,
       input_value: isFiniteNumber(inputValue) ? inputValue : undefined,
       source,
+      keyframes,
       modulation: isObject(item.modulation)
         && normalizeText(item.modulation.kind) === "speech_pose_cycle"
         && isFiniteNumber(item.modulation.neutral)

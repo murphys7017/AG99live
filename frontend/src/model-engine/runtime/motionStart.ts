@@ -210,6 +210,10 @@ function startSemanticIntentPayload(
     source: context.startReason,
     settings: dependencies.getSettings(),
     runtimeWarnings,
+    samplingIdentity: {
+      turnId: context.turnId ?? "",
+      messageId: context.messageId,
+    },
   });
 
   state.setLastCompileReason(compileResult.reason);

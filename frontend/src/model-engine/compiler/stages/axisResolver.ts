@@ -11,6 +11,10 @@ import type {
 } from "../compileContext.js";
 import type { MotionAxisLevel } from "../../../types/protocol.js";
 import { replaceControlledAxisValues } from "../compileContext.js";
+import {
+  SEMANTIC_MOTION_TRANSFORM_VERSION,
+  type MotionAxisSamplingTrace,
+} from "../contracts.js";
 
 const ALLOWED_LLM_ROLES = new Set(["primary", "hint"]);
 
@@ -46,6 +50,16 @@ export function runAxisResolver(
   const profile = context.state.profile;
   if (!profile) {
     return { ok: false, reason: "semantic_profile_missing" };
+  }
+  if (context.intent.schema_version === "engine.motion_intent.v4") {
+    const turnId = context.options.samplingIdentity?.turnId.trim() ?? "";
+    const messageId = context.options.samplingIdentity?.messageId.trim() ?? "";
+    if (!turnId || !messageId) {
+      return { ok: false, reason: "semantic_axis_sampling_identity_missing" };
+    }
+    if (!profile.source_hash.trim()) {
+      return { ok: false, reason: "semantic_axis_sampling_profile_hash_missing" };
+    }
   }
 
   const roleAxisIds = buildRoleAxisBuckets(profile);
@@ -83,6 +97,8 @@ export function runAxisResolver(
   }
 
   if (
+    context.options.allowNeutralAxisPose !== true
+    &&
     resolveInputAxisIds(context).length > 0
     && Object.keys(resolvedAxes.controlledValues).length > 0
     && Object.entries(resolvedAxes.controlledValues).every(([axisId, value]) => {
@@ -135,8 +151,12 @@ function resolveAllowedLlmAxisValues(
   const forbiddenAxes: string[] = [];
   const invalidAxes: string[] = [];
   const isLevelIntent = context.intent.schema_version === "engine.motion_intent.v4";
+  const sampling = isLevelIntent
+    ? createAxisLevelSamplingTrace(context)
+    : null;
+  context.state.axisSampling = sampling;
   const inputEntries = context.intent.schema_version === "engine.motion_intent.v4"
-    ? Object.entries(context.intent.axis_levels)
+    ? Object.entries(context.intent.axis_levels ?? {})
     : Object.entries(context.intent.axes);
   console.debug("[ModelEngine] received semantic axis payload.", {
     axisIds: inputEntries.map(([axisId]) => axisId),
@@ -163,7 +183,7 @@ function resolveAllowedLlmAxisValues(
       continue;
     }
     const levelResult = isLevelIntent
-      ? resolveAxisLevelValue(axis, rawValue as MotionAxisLevel)
+      ? resolveAxisLevelValue(axis, rawValue as MotionAxisLevel, sampling!)
       : null;
     if (levelResult && !levelResult.ok) {
       invalidAxes.push(axisId);
@@ -199,13 +219,14 @@ function resolveAllowedLlmAxisValues(
 
 function resolveInputAxisIds(context: MotionCompileContext): string[] {
   return context.intent.schema_version === "engine.motion_intent.v4"
-    ? Object.keys(context.intent.axis_levels)
+    ? Object.keys(context.intent.axis_levels ?? {})
     : Object.keys(context.intent.axes);
 }
 
 function resolveAxisLevelValue(
   axis: SemanticAxisDefinition,
   level: MotionAxisLevel,
+  sampling: MotionAxisSamplingTrace,
 ): { ok: true; value: number } | { ok: false; reason: string } {
   const anchoredValue = axis.level_anchors?.[String(level)];
   if (typeof anchoredValue !== "number" || !Number.isFinite(anchoredValue)) {
@@ -214,7 +235,97 @@ function resolveAxisLevelValue(
       reason: `semantic_axis_level_anchor_missing:${axis.id}:${level}`,
     };
   }
-  return { ok: true, value: anchoredValue };
+  if (level === 0) {
+    const neutral = roundAxisSample(axis.neutral);
+    sampling.perAxisRandom[axis.id] = 0;
+    sampling.sampledValues[axis.id] = neutral;
+    return { ok: true, value: neutral };
+  }
+  const bounds = resolveAxisLevelSampleBounds(axis, level, anchoredValue);
+  if (!bounds) {
+    return {
+      ok: false,
+      reason: `semantic_axis_level_anchor_order_invalid:${axis.id}:${level}`,
+    };
+  }
+  const axisRandom = seededSignedUnit(`${sampling.seed}|axis:${axis.id}`);
+  const combinedRandom = Math.max(
+    -1,
+    Math.min(1, sampling.sharedRandom * 0.65 + axisRandom * 0.35),
+  );
+  const sampledValue = combinedRandom < 0
+    ? anchoredValue + combinedRandom * (anchoredValue - bounds.min)
+    : anchoredValue + combinedRandom * (bounds.max - anchoredValue);
+  const roundedValue = roundAxisSample(sampledValue);
+  sampling.perAxisRandom[axis.id] = roundAxisSample(axisRandom);
+  sampling.sampledValues[axis.id] = roundedValue;
+  return { ok: true, value: roundedValue };
+}
+
+function createAxisLevelSamplingTrace(
+  context: MotionCompileContext,
+): MotionAxisSamplingTrace {
+  const identity = context.options.samplingIdentity!;
+  const profileHash = context.state.profile?.source_hash ?? "";
+  const seed = [
+    identity.turnId.trim(),
+    identity.messageId.trim(),
+    profileHash,
+    SEMANTIC_MOTION_TRANSFORM_VERSION,
+  ].join("|");
+  return {
+    seed,
+    sharedRandom: roundAxisSample(seededSignedUnit(`${seed}|shared`)),
+    perAxisRandom: {},
+    sampledValues: {},
+  };
+}
+
+function resolveAxisLevelSampleBounds(
+  axis: SemanticAxisDefinition,
+  level: MotionAxisLevel,
+  anchor: number,
+): { min: number; max: number } | null {
+  const levels: MotionAxisLevel[] = [-3, -2, -1, 0, 1, 2, 3];
+  const index = levels.indexOf(level);
+  const previousAnchor = index > 0
+    ? axis.level_anchors?.[String(levels[index - 1])]
+    : undefined;
+  const nextAnchor = index + 1 < levels.length
+    ? axis.level_anchors?.[String(levels[index + 1])]
+    : undefined;
+  if (
+    (previousAnchor !== undefined
+      && (typeof previousAnchor !== "number" || !Number.isFinite(previousAnchor) || previousAnchor >= anchor))
+    || (nextAnchor !== undefined
+      && (typeof nextAnchor !== "number" || !Number.isFinite(nextAnchor) || nextAnchor <= anchor))
+  ) {
+    return null;
+  }
+  const [rangeMin, rangeMax] = axis.value_range;
+  const min = previousAnchor === undefined
+    ? anchor - ((nextAnchor ?? anchor) - anchor) / 2
+    : (previousAnchor + anchor) / 2;
+  const max = nextAnchor === undefined
+    ? anchor + (anchor - (previousAnchor ?? anchor)) / 2
+    : (anchor + nextAnchor) / 2;
+  return {
+    min: Math.max(rangeMin, min),
+    max: Math.min(rangeMax, max),
+  };
+}
+
+function seededSignedUnit(seed: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return ((hash >>> 0) / 0xffffffff) * 2 - 1;
+}
+
+function roundAxisSample(value: number): number {
+  return Math.round(value * 10000) / 10000;
 }
 
 function collectMissingPrimaryAxes(

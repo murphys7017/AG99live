@@ -299,6 +299,19 @@ def summarize_motion_for_curve(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
     axes = payload.get("axis_levels")
+    motion_steps = payload.get("motion_steps")
+    if not isinstance(axes, dict) and isinstance(motion_steps, list):
+        sequence_axis_ids: set[str] = set()
+        for step in motion_steps:
+            step_axes = step.get("axis_levels") if isinstance(step, dict) else None
+            if not isinstance(step_axes, dict):
+                continue
+            sequence_axis_ids.update(
+                str(axis_id).strip()
+                for axis_id in step_axes
+                if str(axis_id).strip()
+            )
+        axes = {axis_id: 0 for axis_id in sequence_axis_ids}
     if not isinstance(axes, dict):
         axes = payload.get("axes")
     return {
@@ -306,6 +319,7 @@ def summarize_motion_for_curve(payload: Any) -> dict[str, Any]:
         "axis_keys": sorted(str(key).strip() for key in (axes or {}).keys() if str(key).strip())
         if isinstance(axes, dict)
         else [],
+        "motion_step_count": len(motion_steps) if isinstance(motion_steps, list) else 0,
         "expression_resource_id": str(
             payload.get("expression_resource_id") or ""
         ).strip(),

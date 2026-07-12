@@ -148,6 +148,11 @@ interface DirectSemanticParameterBinding {
   weight: number;
   inputValue: number | null;
   source: string;
+  keyframes: Array<{
+    atMs: number;
+    transitionMs: number;
+    targetValue: number;
+  }>;
   modulationPhase: number;
   modulationAmplitude: number;
   modulationFrequencyHz: number;
@@ -1632,6 +1637,16 @@ export class LAppModel extends CubismUserModel {
         weight: Number(item.weight),
         inputValue: Number.isFinite(Number(item.input_value)) ? Number(item.input_value) : null,
         source: String(item.source || "semantic_axis"),
+        keyframes: Array.isArray(item.keyframes)
+          ? item.keyframes.map((keyframe: any) => ({
+              atMs: Number(keyframe.at_ms),
+              transitionMs: Number(keyframe.transition_ms),
+              targetValue: Math.max(
+                minValue,
+                Math.min(maxValue, Number(keyframe.target_value)),
+              ),
+            }))
+          : [],
         modulationPhase: this.resolveSpeechPosePhase(axisId),
         modulationAmplitude: 0,
         modulationFrequencyHz: this.resolveSpeechPoseFrequency(axisId),
@@ -2083,21 +2098,26 @@ export class LAppModel extends CubismUserModel {
     minValue: number,
     maxValue: number,
   ): number {
+    const sequenceTargetValue = this.resolveSemanticSequenceTarget(
+      item,
+      elapsedMs,
+      fallbackTargetValue,
+    );
     if (!item.source.startsWith("speech_pose")) {
       if (item.lifeMotionAmplitude <= 0 || item.lifeMotionFrequencyHz <= 0) {
-        return fallbackTargetValue;
+        return sequenceTargetValue;
       }
       const cycleRadians = ((elapsedMs / 1000) * item.lifeMotionFrequencyHz * Math.PI * 2) + item.lifeMotionPhase;
       const secondaryCycleRadians = ((elapsedMs / 1000) * item.lifeMotionFrequencyHz * 0.47 * Math.PI * 2) + item.lifeMotionPhase * 0.37;
       const modulatedValue =
-        fallbackTargetValue
+        sequenceTargetValue
         + Math.sin(cycleRadians) * item.lifeMotionAmplitude
         + Math.sin(secondaryCycleRadians) * item.lifeMotionAmplitude * 0.35;
       return Math.max(minValue, Math.min(maxValue, modulatedValue));
     }
 
     if (item.modulationAmplitude <= 0) {
-      return fallbackTargetValue;
+      return sequenceTargetValue;
     }
 
     const frequencyHz = item.modulationFrequencyHz > 0
@@ -2112,6 +2132,34 @@ export class LAppModel extends CubismUserModel {
         * item.modulationDirection
         * audioGain;
     return Math.max(minValue, Math.min(maxValue, modulatedValue));
+  }
+
+  private resolveSemanticSequenceTarget(
+    item: DirectSemanticParameterBinding,
+    elapsedMs: number,
+    fallbackTargetValue: number,
+  ): number {
+    const keyframes = item.keyframes;
+    if (keyframes.length < 2) {
+      return fallbackTargetValue;
+    }
+    let previous = keyframes[0];
+    for (let index = 1; index < keyframes.length; index += 1) {
+      const next = keyframes[index];
+      if (elapsedMs < next.atMs) {
+        return previous.targetValue;
+      }
+      const transitionEndMs = next.atMs + next.transitionMs;
+      if (next.transitionMs > 0 && elapsedMs < transitionEndMs) {
+        const progress = this.smoothstep(
+          (elapsedMs - next.atMs) / next.transitionMs,
+        );
+        return previous.targetValue
+          + (next.targetValue - previous.targetValue) * progress;
+      }
+      previous = next;
+    }
+    return previous.targetValue;
   }
 
   private easeOutBack(value: number): number {
@@ -2848,6 +2896,12 @@ export class LAppModel extends CubismUserModel {
       weight: number;
       input_value: number | null;
       source: string;
+      keyframes?: Array<{
+        at_ms: number;
+        transition_ms: number;
+        target_value: number;
+        input_value?: number;
+      }>;
     }> = [];
     for (const [index, item] of parametersPayload.entries()) {
       if (!item || typeof item !== "object") {
@@ -2888,6 +2942,56 @@ export class LAppModel extends CubismUserModel {
         warnings.push(`v2_parameter_skipped_source_invalid:${axisId}:${parameterId}`);
         continue;
       }
+      let keyframes: Array<{
+        at_ms: number;
+        transition_ms: number;
+        target_value: number;
+        input_value?: number;
+      }> | undefined;
+      if (item.keyframes !== undefined) {
+        if (!Array.isArray(item.keyframes) || item.keyframes.length < 2 || item.keyframes.length > 4) {
+          warnings.push(`v2_parameter_skipped_invalid_keyframes:${axisId}:${parameterId}`);
+          continue;
+        }
+        keyframes = [];
+        let previousAtMs = -1;
+        let previousTransitionEndMs = -1;
+        for (const keyframe of item.keyframes) {
+          const atMs = keyframe?.at_ms;
+          const transitionMs = keyframe?.transition_ms;
+          const keyframeTarget = keyframe?.target_value;
+          const keyframeInput = keyframe?.input_value;
+          if (
+            !Number.isInteger(atMs)
+            || atMs < 0
+            || atMs > timing.durationMs
+            || atMs <= previousAtMs
+            || atMs < previousTransitionEndMs
+            || !Number.isInteger(transitionMs)
+            || transitionMs < 0
+            || atMs + transitionMs > timing.durationMs
+            || typeof keyframeTarget !== "number"
+            || !Number.isFinite(keyframeTarget)
+            || (keyframeInput !== undefined
+              && (typeof keyframeInput !== "number" || !Number.isFinite(keyframeInput)))
+          ) {
+            keyframes = undefined;
+            break;
+          }
+          previousAtMs = atMs;
+          previousTransitionEndMs = atMs + transitionMs;
+          keyframes.push({
+            at_ms: atMs,
+            transition_ms: transitionMs,
+            target_value: keyframeTarget,
+            input_value: keyframeInput,
+          });
+        }
+        if (!keyframes || keyframes[0].at_ms !== 0 || keyframes[0].transition_ms !== 0) {
+          warnings.push(`v2_parameter_skipped_invalid_keyframes:${axisId}:${parameterId}`);
+          continue;
+        }
+      }
       parameterIds.add(parameterId);
       parameters.push({
         axis_id: axisId,
@@ -2896,6 +3000,7 @@ export class LAppModel extends CubismUserModel {
         weight,
         input_value: inputValue,
         source,
+        keyframes,
       });
     }
     if (parameters.length === 0) {

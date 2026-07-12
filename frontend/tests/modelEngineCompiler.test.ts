@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { compileMotionIntent } from "../src/model-engine/compiler/compileMotionIntent.js";
 import { normalizeMotionPayload } from "../src/model-engine/normalize.js";
+import { parseSemanticParameterPlan } from "../src/model-engine/planParser.js";
 import { startNormalizedMotionPayload } from "../src/model-engine/runtime/motionStart.js";
 import { buildSpeechOnlyMotionPayload } from "../src/model-engine/runtime/speechOnlyMotion.js";
 import { useModelEngine } from "../src/model-engine/useModelEngine.js";
@@ -21,6 +22,10 @@ import type { CompileDiagnostics } from "../src/model-engine/compiler/contracts.
 (globalThis as Record<string, unknown>).window = globalThis;
 
 const ignorePlanStarted = (_event: ModelEnginePlanStartedEvent): void => {};
+const samplingIdentity = {
+  turnId: "turn-level-test",
+  messageId: "message-level-test",
+};
 
 function buildProfile(): SemanticAxisProfile {
   return {
@@ -482,7 +487,7 @@ function buildLevelIntent(
       head_yaw: 2,
     },
     ...overrides,
-  };
+  } as NormalizedSemanticMotionIntentV4;
 }
 
 function testNormalizeMotionPayloadAcceptsV3FlatAxes(): void {
@@ -540,6 +545,37 @@ function testNormalizeMotionPayloadAcceptsV4AxisLevels(): void {
   assert.equal("axes" in result.payload.intent, false);
 }
 
+function testNormalizeMotionPayloadAcceptsV4MotionSequence(): void {
+  const result = normalizeMotionPayload({
+    schema_version: "engine.motion_intent.v4",
+    profile_id: "profile-1",
+    profile_revision: 1,
+    model_id: "model-1",
+    mode: "expressive",
+    intent_tags: ["测试", "左右扭头"],
+    emotion_label: "测试",
+    motion_steps: [
+      { axis_levels: { head_yaw: -3 }, duration_weight: 1 },
+      { axis_levels: { head_yaw: 3 }, duration_weight: 2 },
+    ],
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.payload.kind, "semantic_intent");
+  if (
+    result.payload.kind !== "semantic_intent"
+    || result.payload.intent.schema_version !== "engine.motion_intent.v4"
+    || !result.payload.intent.motion_steps
+  ) {
+    throw new Error("Expected v4 semantic motion sequence.");
+  }
+  assert.deepEqual(result.payload.intent.motion_steps, [
+    { axis_levels: { head_yaw: -3 }, duration_weight: 1 },
+    { axis_levels: { head_yaw: 3 }, duration_weight: 2 },
+  ]);
+  assert.equal("axis_levels" in result.payload.intent, false);
+}
+
 function testNormalizeMotionPayloadRejectsMixedOrInvalidAxisLevelContracts(): void {
   const common = {
     profile_id: "profile-1",
@@ -591,6 +627,7 @@ function testV4AxisLevelsResolveThroughProfileAnchors(): void {
   const result = compileMotionIntent(buildLevelIntent(), {
     model: buildModel(profile),
     targetDurationMs: 1200,
+    samplingIdentity,
     settings: {
       motionIntensityScale: 1,
       axisIntensityScale: {},
@@ -599,10 +636,173 @@ function testV4AxisLevelsResolveThroughProfileAnchors(): void {
 
   assert.equal(result.ok, true);
   const parameter = result.plan?.parameters.find((item) => item.parameter_id === "ParamAngleX");
-  assert.equal(parameter?.input_value, 64);
+  assert.ok((parameter?.input_value ?? 0) >= 60);
+  assert.ok((parameter?.input_value ?? 100) <= 67);
   assert.deepEqual(result.diagnostics.transformTrace?.rawAxisLevels, { head_yaw: 2 });
   assert.deepEqual(result.diagnostics.transformTrace?.rawAxes, {});
-  assert.equal(result.diagnostics.transformTrace?.resolvedAxes.head_yaw, 64);
+  assert.equal(
+    result.diagnostics.transformTrace?.resolvedAxes.head_yaw,
+    parameter?.input_value,
+  );
+  assert.equal(
+    result.diagnostics.transformTrace?.axisSampling?.seed,
+    "turn-level-test|message-level-test|hash|semantic_motion_transform.v2",
+  );
+
+  const replay = compileMotionIntent(buildLevelIntent(), {
+    model: buildModel(profile),
+    targetDurationMs: 1200,
+    samplingIdentity,
+    settings: { motionIntensityScale: 1, axisIntensityScale: {} },
+  });
+  assert.equal(
+    replay.diagnostics.transformTrace?.resolvedAxes.head_yaw,
+    result.diagnostics.transformTrace?.resolvedAxes.head_yaw,
+  );
+  const differentMessage = compileMotionIntent(buildLevelIntent(), {
+    model: buildModel(profile),
+    targetDurationMs: 1200,
+    samplingIdentity: {
+      ...samplingIdentity,
+      messageId: "message-level-test-2",
+    },
+    settings: { motionIntensityScale: 1, axisIntensityScale: {} },
+  });
+  assert.notEqual(
+    differentMessage.diagnostics.transformTrace?.resolvedAxes.head_yaw,
+    result.diagnostics.transformTrace?.resolvedAxes.head_yaw,
+  );
+}
+
+function testV4AxisSamplingRequiresIdentityAndKeepsNeutralExact(): void {
+  const profile = buildProfile();
+  const headYaw = profile.axes.find((axis) => axis.id === "head_yaw");
+  assert.ok(headYaw);
+  headYaw.level_anchors = {
+    "-3": 30, "-2": 38, "-1": 45, "0": 50, "1": 56, "2": 64, "3": 70,
+  };
+
+  const missingIdentity = compileMotionIntent(buildLevelIntent(), {
+    model: buildModel(profile),
+  });
+  assert.equal(missingIdentity.ok, false);
+  assert.equal(missingIdentity.reason, "semantic_axis_sampling_identity_missing");
+
+  const neutral = compileMotionIntent(buildLevelIntent({
+    axis_levels: { head_yaw: 0 },
+  }), {
+    model: buildModel(profile),
+    samplingIdentity,
+  });
+  assert.equal(neutral.ok, false);
+  assert.equal(neutral.reason, "semantic_axes_all_neutral");
+  assert.equal(
+    neutral.diagnostics.transformTrace?.axisSampling?.sampledValues.head_yaw,
+    50,
+  );
+
+  profile.source_hash = "";
+  const missingProfileHash = compileMotionIntent(buildLevelIntent(), {
+    model: buildModel(profile),
+    samplingIdentity,
+  });
+  assert.equal(missingProfileHash.ok, false);
+  assert.equal(
+    missingProfileHash.reason,
+    "semantic_axis_sampling_profile_hash_missing",
+  );
+}
+
+function testV4MotionSequenceCompilesToParameterKeyframes(): void {
+  const profile = buildProfile();
+  const headYaw = profile.axes.find((axis) => axis.id === "head_yaw");
+  assert.ok(headYaw);
+  headYaw.level_anchors = {
+    "-3": 30,
+    "-2": 38,
+    "-1": 45,
+    "0": 50,
+    "1": 56,
+    "2": 64,
+    "3": 70,
+  };
+  const intent = buildLevelIntent() as NormalizedSemanticMotionIntentV4;
+  delete (intent as { axis_levels?: unknown }).axis_levels;
+  (intent as { motion_steps: unknown }).motion_steps = [
+    { axis_levels: { head_yaw: -3 }, duration_weight: 1 },
+    { axis_levels: { head_yaw: 3 }, duration_weight: 1 },
+  ];
+
+  const result = compileMotionIntent(intent, {
+    model: buildModel(profile),
+    targetDurationMs: 1200,
+    samplingIdentity,
+    settings: {
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  const headParameter = result.plan?.parameters.find(
+    (item) => item.parameter_id === "ParamAngleX",
+  );
+  assert.equal(headParameter?.keyframes?.[0].at_ms, 0);
+  assert.equal(headParameter?.keyframes?.[0].transition_ms, 0);
+  assert.ok((headParameter?.keyframes?.[0].input_value ?? 100) < 35);
+  assert.ok((headParameter?.keyframes?.[0].target_value ?? 100) < 0);
+  assert.equal(headParameter?.keyframes?.[1].at_ms, 600);
+  assert.equal(headParameter?.keyframes?.[1].transition_ms, 180);
+  assert.ok((headParameter?.keyframes?.[1].input_value ?? 0) > 66);
+  assert.ok((headParameter?.keyframes?.[1].target_value ?? -100) > 0);
+  assert.equal(
+    result.diagnostics.warnings?.includes("motion_sequence_compiled:2"),
+    true,
+  );
+  assert.deepEqual(result.diagnostics.transformTrace?.rawMotionSteps, [
+    { axis_levels: { head_yaw: -3 }, duration_weight: 1 },
+    { axis_levels: { head_yaw: 3 }, duration_weight: 1 },
+  ]);
+  const parsedPlan = parseSemanticParameterPlan(result.plan);
+  if (!parsedPlan.ok) {
+    throw new Error(parsedPlan.reason);
+  }
+  assert.equal(parsedPlan.ok, true);
+  assert.equal(
+    parsedPlan.value.parameters.find((item) => item.parameter_id === "ParamAngleX")
+      ?.keyframes?.length,
+    2,
+  );
+}
+
+function testV4MotionSequenceAllowsExplicitNeutralWaypoint(): void {
+  const profile = buildProfile();
+  const headYaw = profile.axes.find((axis) => axis.id === "head_yaw");
+  assert.ok(headYaw);
+  headYaw.level_anchors = {
+    "-3": 30, "-2": 38, "-1": 45, "0": 50, "1": 56, "2": 64, "3": 70,
+  };
+  const intent = buildLevelIntent() as NormalizedSemanticMotionIntentV4;
+  delete (intent as { axis_levels?: unknown }).axis_levels;
+  (intent as { motion_steps: unknown }).motion_steps = [
+    { axis_levels: { head_yaw: -2 }, duration_weight: 1 },
+    { axis_levels: { head_yaw: 0 }, duration_weight: 1 },
+    { axis_levels: { head_yaw: 2 }, duration_weight: 1 },
+  ];
+
+  const result = compileMotionIntent(intent, {
+    model: buildModel(profile),
+    targetDurationMs: 1200,
+    samplingIdentity,
+    settings: { motionIntensityScale: 1, axisIntensityScale: {} },
+  });
+
+  assert.equal(result.ok, true);
+  const headParameter = result.plan?.parameters.find(
+    (item) => item.parameter_id === "ParamAngleX",
+  );
+  assert.equal(headParameter?.keyframes?.length, 3);
+  assert.equal(headParameter?.keyframes?.[1].input_value, 50);
 }
 
 function testV4AxisLevelsRejectUnknownAxesAndMissingAnchors(): void {
@@ -611,6 +811,7 @@ function testV4AxisLevelsRejectUnknownAxesAndMissingAnchors(): void {
     axis_levels: { unknown_axis: 1 },
   }), {
     model: buildModel(profile),
+    samplingIdentity,
   });
   assert.equal(unknownResult.ok, false);
   assert.equal(
@@ -620,6 +821,7 @@ function testV4AxisLevelsRejectUnknownAxesAndMissingAnchors(): void {
 
   const missingAnchorResult = compileMotionIntent(buildLevelIntent(), {
     model: buildModel(profile),
+    samplingIdentity,
   });
   assert.equal(missingAnchorResult.ok, false);
   assert.equal(
@@ -698,7 +900,7 @@ function testCompiledPlanResolvesExpressionResourceForPlayback(): void {
   });
   assert.equal(
     result.diagnostics.transformTrace?.transformVersion,
-    "semantic_motion_transform.v1",
+    "semantic_motion_transform.v2",
   );
   assert.equal(result.diagnostics.transformTrace?.profileRevision, 1);
   assert.equal(result.diagnostics.transformTrace?.profileHash, "hash");
@@ -2084,8 +2286,12 @@ function run(): void {
   testRegistryCoreStageOrder();
   testNormalizeMotionPayloadAcceptsV3FlatAxes();
   testNormalizeMotionPayloadAcceptsV4AxisLevels();
+  testNormalizeMotionPayloadAcceptsV4MotionSequence();
   testNormalizeMotionPayloadRejectsMixedOrInvalidAxisLevelContracts();
   testV4AxisLevelsResolveThroughProfileAnchors();
+  testV4AxisSamplingRequiresIdentityAndKeepsNeutralExact();
+  testV4MotionSequenceCompilesToParameterKeyframes();
+  testV4MotionSequenceAllowsExplicitNeutralWaypoint();
   testV4AxisLevelsRejectUnknownAxesAndMissingAnchors();
   testCompiledPlanResolvesExpressionResourceForPlayback();
   testResourcePolicyRejectsUnknownResource();
