@@ -228,18 +228,26 @@ async function testLiveLipSyncPublishesIndependentSpeechEnergyFromAnalyser(): Pr
     async close(): Promise<void> {}
   }
 
+  const adapter = {
+    lipSyncValues,
+    speechEnergyValues,
+    setExternalLipSyncValue(value: number) {
+      this.lipSyncValues.push(value);
+    },
+    setExternalSpeechEnergyValue(value: number) {
+      this.speechEnergyValues.push(value);
+    },
+    clearExternalLipSyncValue: () => {
+      lipSyncCleared = true;
+    },
+    clearExternalSpeechEnergyValue: () => {
+      speechEnergyCleared = true;
+    },
+    hasConfiguredLipSyncParameters: () => hasLipSyncParameters,
+  };
+
   (globalThis as { window?: unknown }).window = {
-    getLAppAdapter: () => ({
-      setExternalLipSyncValue: (value: number) => lipSyncValues.push(value),
-      setExternalSpeechEnergyValue: (value: number) => speechEnergyValues.push(value),
-      clearExternalLipSyncValue: () => {
-        lipSyncCleared = true;
-      },
-      clearExternalSpeechEnergyValue: () => {
-        speechEnergyCleared = true;
-      },
-      hasConfiguredLipSyncParameters: () => hasLipSyncParameters,
-    }),
+    getLAppAdapter: () => adapter,
     AudioContext: FakeAudioContext,
     requestAnimationFrame: (callback: FrameRequestCallback) => {
       frame.callback = callback;

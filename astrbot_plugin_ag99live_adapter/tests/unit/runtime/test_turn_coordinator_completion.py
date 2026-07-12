@@ -94,6 +94,12 @@ def test_close_turn_output_queue_sends_synth_finished(
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.session_state = _create_session_state_stub(current_turn_id="turn-1")
+    cancelled_curve_turns: list[str] = []
+    coordinator.runtime_state = types.SimpleNamespace(
+        performance_curve_runtime=types.SimpleNamespace(
+            cancel_turn=lambda turn_id: cancelled_curve_turns.append(turn_id)
+        )
+    )
 
     sent_payloads: list[dict[str, object]] = []
 
@@ -108,6 +114,7 @@ def test_close_turn_output_queue_sends_synth_finished(
     assert len(sent_payloads) == 1
     assert sent_payloads[0].get("type") == "control.synth_finished"
     assert sent_payloads[0].get("turn_id") == "turn-1"
+    assert cancelled_curve_turns == ["turn-1"]
 
 
 def test_close_turn_output_queue_skips_when_no_turn_id(

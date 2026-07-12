@@ -7,6 +7,20 @@ from astrbot.api.message_components import Image, Plain, Record
 
 
 def resolve_platform_segment_message_id(platform_extras: dict[str, Any]) -> str:
+    logical_message_id = platform_extras.get("logical_message_id")
+    if isinstance(logical_message_id, str) and logical_message_id.strip():
+        return logical_message_id.strip()
+
+    visible_message_id = platform_extras.get("visible_message_id")
+    message_kind = platform_extras.get("message_kind")
+    if isinstance(visible_message_id, str) and isinstance(message_kind, str):
+        normalized_visible_id = visible_message_id.strip()
+        normalized_kind = message_kind.strip()
+        marker = f"::{normalized_kind}::"
+        prefix, separator, sequence = normalized_visible_id.rpartition(marker)
+        if separator and prefix and sequence.isdigit():
+            return f"{prefix}::{normalized_kind}"
+
     for key in ("visible_message_id", "composite_message_id", "message_id"):
         value = platform_extras.get(key)
         if isinstance(value, str) and value.strip():

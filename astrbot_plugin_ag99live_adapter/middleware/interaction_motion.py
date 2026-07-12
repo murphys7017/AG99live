@@ -61,6 +61,7 @@ from ..runtime.motion_lab import enqueue_motion_lab_raw_event
 AG99LIVE_PLUGIN_ID = "astrbot_plugin_ag99live_adapter"
 AG99LIVE_MOTION_EFFECT_NAME = "ag99live.motion"
 PROMPT_VARIATION_AXIS_IDS = ("head_yaw", "body_yaw")
+INTERACTION_ROUTE_DECISION_EXTRA_KEY = "_interaction_route_decision"
 
 
 @dataclass(slots=True)
@@ -2023,14 +2024,19 @@ def _resolve_interaction_reply_plan_snapshot(
         return snapshot
 
     snapshot = _coerce_interaction_reply_plan_snapshot(
-        _call_event_method(event, "get_extra", "_interaction_decision", None),
+        _call_event_method(
+            event,
+            "get_extra",
+            INTERACTION_ROUTE_DECISION_EXTRA_KEY,
+            None,
+        ),
         source="event_extra",
     )
     if snapshot is not None:
         return snapshot
 
     return _coerce_interaction_reply_plan_snapshot(
-        getattr(view, "decision", None),
+        getattr(view, "route_decision", None),
         source="view",
     )
 

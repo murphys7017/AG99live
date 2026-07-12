@@ -815,10 +815,13 @@ def test_emit_message_chain_dedupes_motion_client_object_for_segmented_output(
     ]
 
     assert len(text_payloads) == 2
-    assert len(motion_payloads) == 2
+    assert len(motion_payloads) == 1
     assert [payload["message_id"] for payload in motion_payloads] == [
-        "visible-msg::core_reply::0001",
-        "visible-msg::core_reply::0002",
+        "visible-msg::core_reply",
+    ]
+    assert [payload["message_id"] for payload in text_payloads] == [
+        "visible-msg::core_reply",
+        "visible-msg::core_reply",
     ]
 
 

@@ -163,3 +163,43 @@ def test_performance_curve_runtime_fails_not_ready_request(
 
     assert failed is True
     assert hint is None
+
+
+def test_performance_curve_runtime_starts_logical_message_only_once(
+    install_fake_astrbot,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.motion.performance_curve import (
+        PerformanceCurveInput,
+        PerformanceCurveRuntime,
+    )
+
+    class SlowProvider:
+        async def text_chat(self, *, prompt: str, system_prompt: str):
+            del prompt, system_prompt
+            await asyncio.sleep(60)
+            return SimpleNamespace(completion_text="{}")
+
+    async def run_case() -> tuple[bool, bool]:
+        runtime = PerformanceCurveRuntime(
+            runtime_state=SimpleNamespace(
+                enable_performance_curve=True,
+                selected_performance_curve_provider=SlowProvider(),
+                motion_lab_recorder=None,
+            )
+        )
+        request = PerformanceCurveInput(
+            turn_id="turn-1",
+            message_id="message-1",
+            assistant_text="同一句回复。",
+            assistant_reply_keywords=["同一句回复"],
+            motion_intent_tags=[],
+            motion_effect_summary={},
+            chat_context=[],
+        )
+        first = runtime.start(request)
+        second = runtime.start(request)
+        runtime.cancel_turn("turn-1")
+        return first, second
+
+    assert asyncio.run(run_case()) == (True, False)

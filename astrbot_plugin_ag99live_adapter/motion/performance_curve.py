@@ -52,6 +52,7 @@ class PerformanceCurveRuntime:
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._results: dict[str, dict[str, Any]] = {}
         self._requests: dict[str, PerformanceCurveInput] = {}
+        self._requested_keys: set[str] = set()
 
     def start(self, request: PerformanceCurveInput) -> bool:
         if not self._is_enabled():
@@ -59,10 +60,9 @@ class PerformanceCurveRuntime:
         key = _build_curve_key(request.turn_id, request.message_id)
         if not key or not request.assistant_text.strip():
             return False
-
-        existing = self._tasks.get(key)
-        if existing is not None and not existing.done():
-            existing.cancel()
+        if key in self._requested_keys:
+            return False
+        self._requested_keys.add(key)
 
         self._record_event(
             "performance_curve.requested",
@@ -138,6 +138,9 @@ class PerformanceCurveRuntime:
             self._tasks.pop(key, None)
             self._results.pop(key, None)
             self._requests.pop(key, None)
+        self._requested_keys = {
+            key for key in self._requested_keys if not key.startswith(prefix)
+        }
 
     async def _run(self, key: str, request: PerformanceCurveInput) -> None:
         provider = getattr(self.runtime_state, "selected_performance_curve_provider", None)

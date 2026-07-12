@@ -103,9 +103,9 @@ function startLiveLipSync(
   ) {
     return reportLipSyncFailure("speech_audio_adapter_unavailable");
   }
-  const setLipSyncValue = adapter.setExternalLipSyncValue;
-  const setSpeechEnergyValue = adapter.setExternalSpeechEnergyValue;
-  const clearSpeechEnergyValue = adapter.clearExternalSpeechEnergyValue;
+  const setLipSyncValue = adapter.setExternalLipSyncValue.bind(adapter);
+  const setSpeechEnergyValue = adapter.setExternalSpeechEnergyValue.bind(adapter);
+  const clearSpeechEnergyValue = adapter.clearExternalSpeechEnergyValue.bind(adapter);
   let hasLipSyncParameters = false;
   try {
     hasLipSyncParameters = adapter.hasConfiguredLipSyncParameters?.() === true;
@@ -162,10 +162,22 @@ function startLiveLipSync(
       const rms = Math.sqrt(squareSum / samples.length);
       const mouthValue = Math.max(0, Math.min(1, (rms - 0.012) * 7.5));
       const speechEnergyValue = Math.max(0, Math.min(1, (rms - 0.008) * 5.5));
-      if (hasLipSyncParameters) {
-        setLipSyncValue(mouthValue);
+      try {
+        if (hasLipSyncParameters) {
+          setLipSyncValue(mouthValue);
+        }
+        setSpeechEnergyValue(speechEnergyValue);
+      } catch (error) {
+        stopped = true;
+        animationFrameId = null;
+        adapter.clearExternalLipSyncValue?.();
+        clearSpeechEnergyValue();
+        console.error("[Live2D] lip sync frame write failed.", {
+          reason: "lip_sync_parameter_write_failed",
+          error,
+        });
+        return;
       }
-      setSpeechEnergyValue(speechEnergyValue);
       animationFrameId = window.requestAnimationFrame(tick);
     };
 

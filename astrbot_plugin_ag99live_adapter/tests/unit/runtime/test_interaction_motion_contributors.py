@@ -84,6 +84,7 @@ def _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
 
     interaction_module.InteractionResultContribution = InteractionResultContribution
     interaction_module.PersonaEffectSpec = PersonaEffectSpec
+    interaction_module.get_interaction_route_decision = lambda _event: None
     interaction_module.get_interaction_decision = (
         lambda event: event.get_extra("_interaction_decision", None)
     )
@@ -439,13 +440,13 @@ def _build_view(
     purpose: str | None = None,
     effect_calls: object | None = None,
 ):
-    decision = None
+    route_decision = None
     if route_mode is not None or should_emit_immediate_reply is not None:
-        decision = {}
+        route_decision = {}
         if route_mode is not None:
-            decision["route_mode"] = route_mode
+            route_decision["route_mode"] = route_mode
         if should_emit_immediate_reply is not None:
-            decision["should_emit_immediate_reply"] = should_emit_immediate_reply
+            route_decision["should_emit_immediate_reply"] = should_emit_immediate_reply
     metadata: dict[str, object] = {"phase": phase}
     if purpose is not None:
         metadata["purpose"] = purpose
@@ -455,7 +456,7 @@ def _build_view(
         {
             "turn_id": "interaction-turn",
             "session_id": "olv_pet_adapter:friend_message:desktop-client",
-            "decision": decision,
+            "route_decision": route_decision,
             "final_result": final_result,
             "core_result": core_result,
             "immediate_reply": immediate_reply,
@@ -2120,7 +2121,7 @@ def test_result_contributor_prefers_final_response_effect_calls(
     assert motion_payload["axis_levels"]["head_yaw"] == 2
 
 
-def test_result_contributor_uses_event_turn_state_reply_plan_when_view_plan_missing(
+def test_result_contributor_uses_official_event_extra_reply_plan_when_view_plan_missing(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -2130,7 +2131,7 @@ def test_result_contributor_uses_event_turn_state_reply_plan_when_view_plan_miss
     contributor = module.AG99liveMotionResultContributor()
     event, scheduled_calls = _build_event(mode="split_after_reply", raw_turn_id="raw-turn")
     event.set_extra(
-        "_interaction_decision",
+        "_interaction_route_decision",
         {
             "route_mode": "self_reply",
             "should_emit_immediate_reply": True,
@@ -2149,11 +2150,45 @@ def test_result_contributor_uses_event_turn_state_reply_plan_when_view_plan_miss
     # Secondary motion scheduling is disabled across all modes
     assert scheduled_calls == []
     metadata = contribution.metadata["ag99live_motion_schedule"]
-    assert metadata["reply_plan_source"] == "event_turn_state"
+    assert metadata["reply_plan_source"] == "event_extra"
     assert metadata["reply_plan_route_mode"] == "self_reply"
     assert metadata["reason"] == "motion_payload_missing"
     assert metadata["scheduled"] is False
     assert contribution.client_objects == []
+
+
+def test_result_contributor_uses_result_view_route_decision(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, _scheduled_calls = _build_event(raw_turn_id="raw-turn")
+    view = _build_view(
+        phase="immediate",
+        route_mode="self_reply",
+        final_result="你好呀",
+        immediate_reply="你好呀",
+        effect_calls=[
+            _motion_effect_call(
+                {
+                    "intent_tags": ["轻快"],
+                    "axis_levels": {"head_yaw": 2},
+                }
+            )
+        ],
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert len(contribution.client_objects) == 1
+    metadata = contribution.metadata["ag99live_motion_schedule"]
+    assert metadata["reply_plan_source"] == "view"
+    assert metadata["reply_plan_route_mode"] == "self_reply"
+    assert metadata["scheduled"] is True
 
 
 def test_result_contributor_does_not_silently_schedule_immediate_phase_without_reply_plan(

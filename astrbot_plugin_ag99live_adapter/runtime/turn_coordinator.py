@@ -448,6 +448,15 @@ class TurnCoordinator:
                 turn_id=current_turn_id,
             )
         )
+        runtime_state = getattr(self, "runtime_state", None)
+        performance_curve_runtime = getattr(
+            runtime_state,
+            "performance_curve_runtime",
+            None,
+        )
+        cancel_curve_turn = getattr(performance_curve_runtime, "cancel_turn", None)
+        if callable(cancel_curve_turn):
+            cancel_curve_turn(current_turn_id)
         self._mark_turn_playing()
 
     def _mark_turn_synthesizing(self) -> None:
