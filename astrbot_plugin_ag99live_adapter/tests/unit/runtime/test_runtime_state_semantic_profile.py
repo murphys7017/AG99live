@@ -144,7 +144,9 @@ def test_runtime_state_invalidates_old_scan_cache_version(
             {
                 "schema_version": "live2d_runtime_cache.v1",
                 "scan_cache": {
-                    "cache_version": "motion_reference_templates.v1",
+                    # This was the cache marker used while model snapshots still
+                    # contained ag99.voice_following_profile.v1.
+                    "cache_version": "voice_following_tuning.v2",
                     "live2d_dir_md5": "sig-current",
                     "base_url": "http://127.0.0.1:12397",
                     "model_info": {"selected_model": "CachedOnly", "models": []},

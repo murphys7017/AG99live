@@ -46,7 +46,7 @@ from ..prompts.motion_selector import (
 from .motion_state import MotionTuningStore
 from .motion_lab import MotionLabRawEventStore, MotionLabRecorder
 
-LIVE2D_SCAN_CACHE_VERSION = "voice_following_tuning.v2"
+LIVE2D_SCAN_CACHE_VERSION = "voice_following_profile.v2"
 
 
 class RuntimeState:
