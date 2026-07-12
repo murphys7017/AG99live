@@ -62,12 +62,18 @@ function buildCatalogMotion(durationMs: number | null = 3000): CatalogMotionPayl
   };
 }
 
-function installMockAdapter(): { startCount: () => number } {
+function installMockAdapter(): {
+  startCount: () => number;
+  stopCount: () => number;
+  stopEvents: () => Array<{ reason?: string; status?: string }>;
+} {
   let startDirectParameterPlanCount = 0;
+  let stopDirectParameterPlanCount = 0;
+  const directPlanStopEvents: Array<{ reason?: string; status?: string }> = [];
   (globalThis as typeof globalThis & {
     getLAppAdapter?: () => {
       startDirectParameterPlan: (plan: SemanticParameterPlan) => boolean;
-      stopDirectParameterPlan: () => void;
+      stopDirectParameterPlan: (reason?: string, status?: string) => void;
       getDirectParameterPlanError: () => string;
     };
   }).getLAppAdapter = () => ({
@@ -75,11 +81,16 @@ function installMockAdapter(): { startCount: () => number } {
       startDirectParameterPlanCount += 1;
       return true;
     },
-    stopDirectParameterPlan: () => {},
+    stopDirectParameterPlan: (reason, status) => {
+      stopDirectParameterPlanCount += 1;
+      directPlanStopEvents.push({ reason, status });
+    },
     getDirectParameterPlanError: () => "",
   });
   return {
     startCount: () => startDirectParameterPlanCount,
+    stopCount: () => stopDirectParameterPlanCount,
+    stopEvents: () => [...directPlanStopEvents],
   };
 }
 
@@ -311,6 +322,32 @@ async function testCatalogMotionInvalidHandleWithoutDurationStillFails(): Promis
   scope.stop();
 }
 
+async function testDirectPlanWatchdogStopsSdkPlan(): Promise<void> {
+  const adapter = installMockAdapter();
+  const scope = effectScope();
+  const player = scope.run(() => usePreviewMotionPlayer());
+  assert.ok(player);
+  const plan = buildPlan();
+  plan.timing = {
+    duration_ms: 320,
+    blend_in_ms: 60,
+    hold_ms: 180,
+    blend_out_ms: 80,
+  };
+
+  assert.equal(player.playPlan(plan, null), true);
+  const stopCountAfterStart = adapter.stopCount();
+  await new Promise((resolve) => setTimeout(resolve, 1150));
+
+  assert.equal(player.state.status, "failed");
+  assert.equal(adapter.stopCount(), stopCountAfterStart + 1);
+  assert.deepEqual(adapter.stopEvents().at(-1), {
+    reason: "direct_parameter_plan_terminal_timeout",
+    status: "failed",
+  });
+  scope.stop();
+}
+
 async function testCatalogMotionAsyncAcceptedFailureReportsFailed(): Promise<void> {
   const adapter = installCatalogMockAdapter(
     { status: "async_motion_accepted" },
@@ -435,6 +472,7 @@ async function run(): Promise<void> {
   await testExpressionResourceFailureDoesNotStartDirectPlan();
   await testCatalogMotionInvalidHandleWithDurationFails();
   await testCatalogMotionInvalidHandleWithoutDurationStillFails();
+  await testDirectPlanWatchdogStopsSdkPlan();
   await testCatalogMotionAsyncAcceptedFailureReportsFailed();
   await testCatalogMotionReportsStartedAndCompletedCallbacks();
   await testCatalogMotionWaitsForSdkTerminalCallback();

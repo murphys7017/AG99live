@@ -779,9 +779,16 @@ export class LAppModel extends CubismUserModel {
 
     // Direct parameter overlay should run before physics so physics-driven
     // output parameters can consume these values in the same frame.
-    const directPlanFailure = this.applyDirectParameterPlanOverlay();
+    let directPlanFailure: string | null = null;
+    try {
+      directPlanFailure = this.applyDirectParameterPlanOverlay();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      directPlanFailure = `v2_parameter_frame_exception:${message || "unknown_error"}`;
+      console.error("[LAppModel] Direct parameter frame execution failed.", error);
+    }
     if (directPlanFailure) {
-      this.stopDirectParameterPlan(directPlanFailure);
+      this.stopDirectParameterPlan(directPlanFailure, "failed");
     }
 
     // 物理演算の設定
@@ -1595,6 +1602,10 @@ export class LAppModel extends CubismUserModel {
 
   public getDirectParameterPlanError(): string {
     return this._directParameterPlanError || "";
+  }
+
+  public hasActiveDirectParameterPlan(): boolean {
+    return this._directParameterPlanState !== null;
   }
 
   private startSemanticParameterPlan(parsed: {

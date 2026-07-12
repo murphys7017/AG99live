@@ -355,10 +355,15 @@ export function usePreviewMotionPlayer() {
     // watchdog：SDK 完成事件的超时保护
     scheduleTimer(runId, playbackPlan.totalDurationMs + 800, () => {
       if (state.status === "playing") {
+        const reason = "direct_parameter_plan_terminal_timeout";
         console.warn(
           "[MotionPlayer] direct parameter plan terminal timeout. runId=",
           playbackRunId,
         );
+        adapter.stopDirectParameterPlan?.(reason, "failed");
+        if (state.status !== "playing") {
+          return;
+        }
         state.status = "failed";
         state.message = "参数计划完成事件超时。";
         state.finishedAt = new Date().toISOString();
@@ -367,7 +372,7 @@ export function usePreviewMotionPlayer() {
         options.onFinished?.({
           runId: playbackRunId,
           status: "failed",
-          reason: "direct_parameter_plan_terminal_timeout",
+          reason,
         });
       }
     });
