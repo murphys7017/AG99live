@@ -1,9 +1,9 @@
 task:
-  class: feature
+  class: review
   risk: high
-  phase: semantic_motion_dynamics_and_composition
+  phase: semantic_motion_cross_layer_review
   status: complete
-  scope: Complete bounded level sampling, semantic/speech modulation composition, per-axis dynamics, strict WebSDK plan execution, relation diagnostics, and obsolete selector cleanup
+  scope: Review the adapter-to-WebSDK semantic motion changes, correct discrete dynamics overshoot, and align implementation documentation
 context:
   confidence: high
   assumptions:
@@ -71,6 +71,7 @@ context:
     - Non-neutral axis levels are deterministically sampled inside the selected level's midpoint bounds using turn_id, message_id, profile hash, and transform version; intensity scaling cannot cross those recorded sample bounds.
     - Semantic pose and speech following share one parameter owner: ModelEngine attaches speech following as modulation on the compiled semantic parameter instead of rejecting overlap or creating a second writer.
     - Semantic axis profiles own max velocity, max acceleration, life-motion scale, and maximum speech-offset ratio; PlanBuilder maps these values into Cubism parameter space and WebSDK limits the final per-frame target after all modulation and easing are composed.
+    - Per-frame dynamics decelerate continuously across target reversals and stop exactly at the target when a discrete frame would cross it, preventing target-adjacent oscillation.
     - WebSDK rejects an entire malformed, unbindable, duplicate, or out-of-range parameter plan instead of salvaging playable entries or clamping invalid plan targets.
     - Every engine.parameter_plan.v2 parameter requires neutral_target_value and dynamics; Motion Lab manual plans derive both from the selected semantic axis profile rather than emitting an unconstrained legacy plan.
     - Multi-step motion validates neutral-to-first and inter-step travel against rest-to-rest triangular/trapezoidal velocity profiles; impossible timing fails with motion_sequence_transition_budget_exceeded.
@@ -204,6 +205,11 @@ architecture:
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
 verification:
   checks_run:
+    - npm test (complete frontend suite passed after cross-layer review fix)
+    - npm run build:web (production web build passed after cross-layer review fix)
+    - npm run test:model-engine (passed after discrete target-crossing dynamics fix)
+    - npm run typecheck (renderer and node typechecks passed after cross-layer review)
+    - git diff --check (passed after review fixes and documentation update)
     - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (267 passed after final dynamics, strict-plan, and obsolete-selector cleanup)
     - npm test (complete frontend suite passed after final dynamics and strict-plan review)
     - npm run typecheck (renderer and node typechecks passed after final review)
