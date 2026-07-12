@@ -1,9 +1,9 @@
 task:
   class: feature
   risk: high
-  phase: semantic_motion_sequence_and_sampling
+  phase: semantic_motion_dynamics_and_composition
   status: complete
-  scope: Add one-effect multi-step semantic motion, deterministic bounded level sampling, prompt compression, and end-to-end parameter keyframe playback
+  scope: Complete bounded level sampling, semantic/speech modulation composition, per-axis dynamics, strict WebSDK plan execution, relation diagnostics, and obsolete selector cleanup
 context:
   confidence: high
   assumptions:
@@ -68,6 +68,14 @@ context:
     - The automatic Persona Effect motion path uses engine.motion_intent.v4 axis_levels exclusively; engine.motion_intent.v3 axes remain only for the official <@anim> compatibility transport and internal manual previews.
     - Persona Effect v4 never falls back to v3: mixed axes/axis_levels, non-integer levels, out-of-range levels, unknown axes, or missing profile anchors fail visibly.
     - Semantic profiles persist ordered -3..3 level anchors; ModelEngine converts levels from those anchors and records raw levels plus resolved axes in MotionTransformTrace before relation-graph processing.
+    - Non-neutral axis levels are deterministically sampled inside the selected level's midpoint bounds using turn_id, message_id, profile hash, and transform version; intensity scaling cannot cross those recorded sample bounds.
+    - Semantic pose and speech following share one parameter owner: ModelEngine attaches speech following as modulation on the compiled semantic parameter instead of rejecting overlap or creating a second writer.
+    - Semantic axis profiles own max velocity, max acceleration, life-motion scale, and maximum speech-offset ratio; PlanBuilder maps these values into Cubism parameter space and WebSDK limits the final per-frame target after all modulation and easing are composed.
+    - WebSDK rejects an entire malformed, unbindable, duplicate, or out-of-range parameter plan instead of salvaging playable entries or clamping invalid plan targets.
+    - Every engine.parameter_plan.v2 parameter requires neutral_target_value and dynamics; Motion Lab manual plans derive both from the selected semantic axis profile rather than emitting an unconstrained legacy plan.
+    - Multi-step motion validates neutral-to-first and inter-step travel against rest-to-rest triangular/trapezoidal velocity profiles; impossible timing fails with motion_sequence_transition_budget_exceeded.
+    - Motion relation diagnostics record within_limit, derived, constrained, and skipped outcomes independently from actual value-changing adjustments; stabilization passes do not overwrite an earlier derived or constrained outcome.
+    - The unused RealtimeMotionPlan generator, its dedicated tests, hidden realtime selector settings, and SDK WAV lip-sync analyzer have been removed; the Persona Effect path and official <@anim> compatibility path remain the only automatic motion inputs.
     - The automatic motion path is middleware-first only; inline_first is no longer a runtime-selectable motion generation route.
     - engine.motion_intent.v2 is no longer accepted at backend normalization, frontend inbound, preview send, or ModelEngine normalization boundaries.
     - <@anim> remains an official AstrBot compatibility transport only when Persona Effect injection is unavailable; it is not a fallback for invalid ag99live.motion payloads.
@@ -79,9 +87,9 @@ context:
     - Empty, invalid, or all-neutral motion axes should not be replaced by a fallback pose; those turns should be treated as no valid motion input.
     - AdapterConnection now exposes playback timeline operations through the aggregated playbackTimeline port; production callers should not depend on scattered root-level timeline methods.
     - PetDesktopRuntime now delegates playback timeline motion wiring and segment execution wiring to app-level helpers, keeping the desktop runtime from owning bridge details directly.
-    - Semantic motion processing is now migrating into ModelEngine: the adapter preserves numeric intent values without semantic clamping, fallback pose repair, expressive floor, or head/body constraint rewriting.
+    - Semantic motion processing lives in ModelEngine: the adapter validates and transports semantic intent without semantic clamping, fallback pose repair, expressive floor, or head/body constraint rewriting.
     - ModelEngine now rejects invalid axes and exact-neutral semantic inputs with structured compile feedback, then applies the mounted semantic axis relation graph before plan building.
-    - TurnCoordinator only validates and transports v3 motion payloads; it no longer applies semantic axis constraints.
+    - TurnCoordinator validates and transports Persona Effect v4 payloads plus official <@anim> v3 compatibility payloads; it does not apply semantic axis constraints.
     - Semantic profiles now carry ag99.semantic_axis_relation_graph.v1 edges; derive and bounded_ratio rules are consumed by ModelEngine, while old couplings are only a migration source for profiles that have not been rewritten yet.
     - Legacy backend fallback-pose scoring and fallback-axis descriptor helpers are removed from the motion intent path; fallback candidates remain prompt/diagnostic metadata only.
     - IntensityStage now produces candidate axis values only; SemanticAxisRelationGraphStage owns final semantic axis value-range constraints and records range adjustments in the transform trace.
@@ -100,7 +108,7 @@ context:
     - Voice-following direct parameters now fail compilation when they target a parameter already owned by a semantic or derived axis; the previous silent skip is no longer allowed.
     - MotionTransformTrace now records the semantic transform version plus profile revision/source hash, so Motion Lab can distinguish results produced by different relation-graph profile versions.
     - ModelEngine resourcePolicy stage now rejects unknown or unexposed resource IDs, missing resource parameter ownership, and resource/parameter-plan conflicts; it records resource metadata but does not start resource playback.
-    - Current v3 motion visibility summaries no longer carry fallback/repair result fields; axis descriptors remain diagnostics, while fallback pose candidates remain isolated to Prompt reference data.
+    - Motion visibility summaries no longer carry fallback/repair result fields; axis descriptors remain diagnostics, while fallback pose candidates remain isolated to Prompt reference data.
     - Backend effect normalization now rejects an invalid resource_id instead of clearing it and broadcasting the remaining semantic axes.
     - Persona Effect motion arguments containing legacy catalog/motion wrapper fields now fail with forbidden_fields instead of being stripped and continued; <@anim> remains the separate official compatibility parser.
     - One ag99live.motion Persona Effect may carry either axis_levels or 2-4 ordered motion_steps; the two shapes are exclusive, every step uses the same axis set, and motion_steps cannot be combined with a complete motion resource.
@@ -162,7 +170,6 @@ architecture:
     - fallback pose candidates can now include semantic metadata from motion catalog entries and key semantic axes derived from motion_resource_pool driver components.
     - middleware motion prompt now names axes as a semantic-axis target group instead of a plain field and exposes fallback candidate descriptions, scenarios, intensity, emotion bias, and key axes.
     - middleware motion prompt examples should use a small set of visible non-neutral axis values and show 2-4 non-default fallback pose candidates selected by axis/pose descriptors rather than coarse emotion labels.
-    - middleware-first valid v3 motion intents use fallback-pose skeleton repair and expressive-floor ordering for weak semantic axis outputs.
     - plugin_hints JSON parsing now tolerates outer-format issues such as fenced JSON, text-wrapped objects, and trailing commas while preserving strict v3 axis semantics.
     - fallback candidate selection and motion visibility summaries now derive pose descriptors from each axis profile's own neutral and soft_range values instead of assuming a global midpoint of 50.
     - frontend motion diagnostics now surface pose_descriptors, outside_soft_range_axes, and skeleton_groups_present from semantic motion summaries so prompt tuning can be compared against runtime-visible motion coverage.
@@ -197,6 +204,12 @@ architecture:
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
 verification:
   checks_run:
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (267 passed after final dynamics, strict-plan, and obsolete-selector cleanup)
+    - npm test (complete frontend suite passed after final dynamics and strict-plan review)
+    - npm run typecheck (renderer and node typechecks passed after final review)
+    - npm run build:web (production web build passed after final review)
+    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings after final review)
+    - git diff --check (passed after final review)
     - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (312 passed after final sequence diagnostics and profile-hash checks)
     - npm test (complete frontend suite passed after sequence keyframe and sampling changes)
     - npm run typecheck (renderer and node typechecks passed after final review)

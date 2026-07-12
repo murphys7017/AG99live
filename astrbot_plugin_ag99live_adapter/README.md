@@ -55,14 +55,14 @@ astrbot_plugin_ag99live_adapter/
 - 不可用时，prompt 才要求把动作包装进 `<@anim {"mode":"inline","intent":...}>`，其中 `intent` 必须是完整 `engine.motion_intent.v3`。
 - 如果 `<@anim>` 内部 JSON、schema 或 v3 payload 无效，后端只记录拒绝原因，不生成替代动作。
 
-### 动作 selector 输出
+### 动作效果输出
 
 - 当前 Persona Effect 主动作载荷为 `engine.motion_intent.v4`，前端 `ModelEngine` 根据 `semantic_axis_profile.level_anchors` 把 `axis_levels` 转换为轴值，再编译为 `engine.parameter_plan.v2`。
 - `axis_levels` 只能使用 `-3..3` 整数；省略表示本轮不控制该轴，`0` 表示明确回到中性。混入 `axes`、非法等级或空等级对象会直接拒绝，不会回退到 v3。
 - 可选资源使用 `expression_resource_id` 或 `motion_resource_id`，一次最多选择一个。expression 只与无参数冲突的计划叠加；motion 作为完整动作替代参数计划，但仍共享当前 segment 的统一 motion sink。
 - `engine.motion_intent.v3 + axes` 只保留给官方 `<@anim>` 兼容入口和内部手动预览。
 - 自动动作链路不允许 LLM 输出 `choice`、`motion_id`、catalog motion、motion3、exp3 或旧播放文件引用。
-- `motion_prompt_instruction` 会注入中间件动作上下文或 selector prompt，用于影响动作风格和幅度。
+- `motion_prompt_instruction` 会注入 Persona Effect 动作能力上下文，用于影响动作风格和幅度。
 - 中间件 prompt 只暴露 profile 中的 `primary/hint` axes，禁止输出 `derived/runtime/ambient/debug` axes。
 
 ## 与前端协同的关键点
@@ -116,15 +116,15 @@ AG99live 远程执行器当前走任务委托链路：
 
 ## 关键配置
 
-- `motion_analysis_provider_id`：动作分析 / realtime motion selector 使用的 Provider。
+- `motion_analysis_provider_id`：基础动作库分析和筛选使用的 Provider。
 - `motion_prompt_instruction`：动作 intent 生成的补充指令，默认要求 Live2D 表现更夸张。
 - `remote_operator_default_computer` / `remote_operator_computer_entries`：远程执行器路由和后端配置；支持 `codex_app_server` 与 `opencode`。
 - `remote_operator_default_profile` / `remote_operator_profiles`：远程执行器执行档位。Codex app-server 后端使用该档位选择 turn 模型与 effort；OpenCode 后端使用 entry 内固定的 `model` / `variant`。
 
-当前 realtime motion selector 的参考策略：
+当前 Persona Effect 的参考策略：
 
 - 自动动作链路不再把旧 motion/exp3 reference templates 或 catalog motion 作为模型可选项注入。
-- selector prompt 使用当前 `SemanticAxisProfile` 轴说明、动作指令、用户手调样本形成的风格偏好和 fallback pose 候选。
+- 动作 Prompt 使用当前 `SemanticAxisProfile` 轴说明、动作指令、用户手调样本形成的风格偏好和姿态参考候选。
 - fallback pose 候选只作为 Prompt 姿态参考，不修复非法输入、不替换有效等级，也不会在输入为空时生成默认 neutral pose。
 
 ## 开发与验证
