@@ -94,10 +94,15 @@ def format_axis_semantics(values: Any, *, truncate_text: Any) -> str:
 
 
 def _format_available_level_range(axis: dict[str, Any]) -> str:
+    effective_levels = resolve_available_axis_levels(axis)
+    return f"{min(effective_levels)}..{max(effective_levels)}"
+
+
+def resolve_available_axis_levels(axis: dict[str, Any]) -> list[int]:
     anchors = axis.get("level_anchors")
     neutral = axis.get("neutral")
     if not isinstance(anchors, dict) or not isinstance(neutral, (int, float)):
-        return "-4..4"
+        raise ValueError("semantic_axis_level_anchors_unavailable")
     effective_levels: list[int] = [0]
     for raw_level, raw_anchor in anchors.items():
         try:
@@ -107,7 +112,7 @@ def _format_available_level_range(axis: dict[str, Any]) -> str:
             continue
         if -4 <= level <= 4 and abs(anchor - float(neutral)) > 1e-6:
             effective_levels.append(level)
-    return f"{min(effective_levels)}..{max(effective_levels)}"
+    return sorted(set(effective_levels))
 
 
 def format_control_role_label(role: str) -> str:

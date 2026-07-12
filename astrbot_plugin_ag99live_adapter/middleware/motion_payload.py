@@ -15,7 +15,10 @@ from ..motion.resource_catalog import (
     build_motion_resource_candidates,
     validate_motion_resource_id,
 )
-from ..prompts.semantic_axis_prompt import profile_prompt_axes
+from ..prompts.semantic_axis_prompt import (
+    profile_prompt_axes,
+    resolve_available_axis_levels,
+)
 
 
 def normalize_motion_arguments_payload(
@@ -109,11 +112,13 @@ def normalize_motion_arguments_payload(
             reason,
             "rejected_axis_levels:" + ",".join(rejected_levels),
         )
-    allowed_axis_ids = {
-        str(axis.get("id") or "").strip()
-        for axis in profile_prompt_axes(semantic_profile)
+    prompt_axes = profile_prompt_axes(semantic_profile)
+    axis_by_id = {
+        str(axis.get("id") or "").strip(): axis
+        for axis in prompt_axes
         if str(axis.get("id") or "").strip()
     }
+    allowed_axis_ids = set(axis_by_id)
     used_axis_ids = set(validated_levels or {})
     if motion_steps:
         used_axis_ids.update(motion_steps[0]["axis_levels"])
@@ -122,6 +127,16 @@ def normalize_motion_arguments_payload(
         return None, append_resolution_reason(
             reason,
             "unknown_axis_levels:" + ",".join(unknown_axis_ids),
+        )
+    unavailable_levels = find_unavailable_axis_levels(
+        validated_levels=validated_levels,
+        motion_steps=motion_steps,
+        axis_by_id=axis_by_id,
+    )
+    if unavailable_levels:
+        return None, append_resolution_reason(
+            reason,
+            "unavailable_axis_levels:" + ",".join(unavailable_levels),
         )
     if len(used_axis_ids) > 6:
         return None, append_resolution_reason(reason, "axis_level_count_exceeded")
@@ -187,6 +202,26 @@ def normalize_motion_arguments_payload(
     if motion_steps:
         payload["motion_steps"] = motion_steps
     return payload, reason
+
+
+def find_unavailable_axis_levels(
+    *,
+    validated_levels: dict[str, int] | None,
+    motion_steps: list[dict[str, Any]] | None,
+    axis_by_id: dict[str, dict[str, Any]],
+) -> list[str]:
+    level_maps = [validated_levels] if validated_levels is not None else []
+    if motion_steps:
+        level_maps.extend(step["axis_levels"] for step in motion_steps)
+    unavailable: set[str] = set()
+    for level_map in level_maps:
+        for axis_id, level in level_map.items():
+            axis = axis_by_id.get(axis_id)
+            if axis is None:
+                continue
+            if level not in resolve_available_axis_levels(axis):
+                unavailable.add(f"{axis_id}:{level}")
+    return sorted(unavailable)
 
 
 def validate_motion_resource_id_for_payload(

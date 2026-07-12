@@ -43,7 +43,7 @@ const samplingIdentity = {
 
 function buildProfile(): SemanticAxisProfile {
   return {
-    schema_version: "ag99.semantic_axis_profile.v1",
+    schema_version: "ag99.semantic_axis_profile.v2",
     profile_id: "profile-1",
     model_id: "model-1",
     source_hash: "hash",
@@ -64,6 +64,7 @@ function buildProfile(): SemanticAxisProfile {
         value_range: [0, 100],
         soft_range: [44, 56],
         strong_range: [30, 70],
+        extreme_range: [16, 84],
         positive_semantics: ["right"],
         negative_semantics: ["left"],
         usage_notes: "Drive eye direction.",
@@ -93,6 +94,7 @@ function buildProfile(): SemanticAxisProfile {
         value_range: [0, 100],
         soft_range: [42, 58],
         strong_range: [30, 70],
+        extreme_range: [18, 82],
         positive_semantics: ["turn right"],
         negative_semantics: ["turn left"],
         usage_notes: "Drive head direction.",
@@ -122,6 +124,7 @@ function buildProfile(): SemanticAxisProfile {
         value_range: [0, 100],
         soft_range: [46, 54],
         strong_range: [38, 62],
+        extreme_range: [30, 70],
         positive_semantics: ["body right"],
         negative_semantics: ["body left"],
         usage_notes: "Follow head direction.",
@@ -151,6 +154,7 @@ function buildProfile(): SemanticAxisProfile {
         value_range: [0, 100],
         soft_range: [46, 54],
         strong_range: [36, 64],
+        extreme_range: [26, 74],
         positive_semantics: ["speaking head motion"],
         negative_semantics: ["speaking head motion opposite"],
         usage_notes: "Dedicated speech pose compensation axis.",
@@ -180,6 +184,7 @@ function buildProfile(): SemanticAxisProfile {
         value_range: [0, 100],
         soft_range: [44, 60],
         strong_range: [30, 75],
+        extreme_range: [16, 90],
         positive_semantics: ["smile"],
         negative_semantics: ["frown"],
         usage_notes: "Primary smile axis.",

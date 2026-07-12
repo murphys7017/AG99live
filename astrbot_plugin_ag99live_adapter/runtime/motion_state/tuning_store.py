@@ -136,6 +136,7 @@ class MotionTuningStore:
 
         normalized_examples: list[dict[str, Any]] = []
         style_samples: list[dict[str, Any]] = []
+        projection_diagnostics: list[str] = []
         for sample in self.samples:
             if not isinstance(sample, dict):
                 continue
@@ -162,6 +163,18 @@ class MotionTuningStore:
                 axis_by_id=prompt_axis_by_id,
             )
             if not adjusted_levels:
+                continue
+            intent_tags = self._build_sample_intent_tags(sample)
+            reference_error = self._validate_reference_effect_fields(
+                intent_tags=intent_tags,
+                adjusted_plan=adjusted_plan,
+            )
+            if reference_error:
+                projection_diagnostics.append(
+                    "motion_tuning_reference_sample_rejected:"
+                    f"id={str(sample.get('id') or '').strip() or '<empty>'}:"
+                    f"reason={reference_error}"
+                )
                 continue
             style_samples.append(
                 {
@@ -190,13 +203,18 @@ class MotionTuningStore:
                     duration_ms = timing.get("duration_ms")
             normalized_examples.append(
                 {
+                    "category": str(sample.get("emotion_label") or "custom").strip()
+                    or "custom",
                     "input": self._build_sample_input_text(sample),
                     "output": {
-                        "emotion": str(sample.get("emotion_label") or "custom").strip()
-                        or "custom",
-                        "mode": mode,
-                        "duration_ms": duration_ms,
-                        "axes": filtered_axes,
+                        "intent_tags": intent_tags,
+                        "axis_levels": adjusted_levels,
+                        **(
+                            {"duration_hint_ms": int(round(float(duration_ms)))}
+                            if isinstance(duration_ms, (int, float))
+                            and not isinstance(duration_ms, bool)
+                            else {}
+                        ),
                     },
                     "source": "desktop_motion_tuning_sample_store",
                     "feedback": str(sample.get("feedback") or "").strip(),
@@ -212,6 +230,43 @@ class MotionTuningStore:
         self.reference_examples = normalized_examples
         self.style_prompt = self._build_style_prompt(style_samples)
         self._refresh_effective_examples()
+        self.fewshot_diagnostics.extend(projection_diagnostics)
+
+    @staticmethod
+    def _build_sample_intent_tags(sample: dict[str, Any]) -> list[str]:
+        tags = (
+            [str(tag).strip() for tag in sample.get("tags", [])]
+            if isinstance(sample.get("tags"), list)
+            else []
+        )
+        emotion = str(sample.get("emotion_label") or "").strip()
+        if emotion and emotion not in tags:
+            tags.insert(0, emotion)
+        return tags
+
+    @staticmethod
+    def _validate_reference_effect_fields(
+        *,
+        intent_tags: list[str],
+        adjusted_plan: Any,
+    ) -> str:
+        if not 1 <= len(intent_tags) <= 6:
+            return "intent_tag_count_invalid"
+        if any(not tag or len(tag) > 48 for tag in intent_tags):
+            return "intent_tag_invalid"
+        if len(set(intent_tags)) != len(intent_tags):
+            return "intent_tags_not_unique"
+        if not isinstance(adjusted_plan, dict):
+            return "adjusted_plan_invalid"
+        timing = adjusted_plan.get("timing")
+        duration_ms = timing.get("duration_ms") if isinstance(timing, dict) else None
+        if (
+            not isinstance(duration_ms, (int, float))
+            or isinstance(duration_ms, bool)
+            or not 320 <= float(duration_ms) <= 15000
+        ):
+            return "duration_hint_ms_out_of_range"
+        return ""
 
     def _refresh_effective_examples(self) -> None:
         self.effective_examples = deepcopy(
@@ -658,15 +713,7 @@ class MotionTuningStore:
     def _normalize_tags(tags_payload: Any) -> list[str]:
         if not isinstance(tags_payload, list):
             return []
-        result: list[str] = []
-        seen: set[str] = set()
-        for tag in tags_payload:
-            normalized_tag = str(tag or "").strip()
-            if not normalized_tag or normalized_tag in seen:
-                continue
-            seen.add(normalized_tag)
-            result.append(normalized_tag)
-        return result
+        return [str(tag or "").strip() for tag in tags_payload]
 
     @staticmethod
     def _build_sample_input_text(sample: dict[str, Any]) -> str:

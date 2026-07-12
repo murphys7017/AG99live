@@ -125,7 +125,7 @@ def test_frontend_system_handler_saves_semantic_profile_and_refreshes() -> None:
                     "model_name": "DemoModel",
                     "profile_id": "DemoModel.semantic.v1",
                     "expected_revision": 3,
-                    "profile": {"schema_version": "ag99.semantic_axis_profile.v1"},
+                    "profile": {"schema_version": "ag99.semantic_axis_profile.v2"},
                 },
             ),
             send_json=send_json,
@@ -136,7 +136,7 @@ def test_frontend_system_handler_saves_semantic_profile_and_refreshes() -> None:
     assert runtime_state.calls == [
         {
             "model_name": "DemoModel",
-            "profile_payload": {"schema_version": "ag99.semantic_axis_profile.v1"},
+            "profile_payload": {"schema_version": "ag99.semantic_axis_profile.v2"},
             "expected_revision": 3,
         }
     ]
@@ -181,7 +181,7 @@ def test_frontend_system_handler_returns_control_error_on_save_failure() -> None
                     "model_name": "DemoModel",
                     "profile_id": "DemoModel.semantic.v1",
                     "expected_revision": 1,
-                    "profile": {"schema_version": "ag99.semantic_axis_profile.v1"},
+                    "profile": {"schema_version": "ag99.semantic_axis_profile.v2"},
                 },
             ),
             send_json=send_json,
@@ -225,7 +225,7 @@ def test_frontend_system_handler_returns_control_error_on_missing_profile_file()
                     "model_name": "DemoModel",
                     "profile_id": "DemoModel.semantic.v1",
                     "expected_revision": 1,
-                    "profile": {"schema_version": "ag99.semantic_axis_profile.v1"},
+                    "profile": {"schema_version": "ag99.semantic_axis_profile.v2"},
                 },
             ),
             send_json=send_json,

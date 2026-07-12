@@ -4,11 +4,13 @@ import hashlib
 import json
 import math
 import re
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, NotRequired, TypedDict
 
-SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION = "ag99.semantic_axis_profile.v1"
+SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION = "ag99.semantic_axis_profile.v2"
+LEGACY_SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION = "ag99.semantic_axis_profile.v1"
 SEMANTIC_AXIS_RELATION_GRAPH_SCHEMA_VERSION = "ag99.semantic_axis_relation_graph.v1"
 SEMANTIC_AXIS_PROFILE_DIRNAME = "ag99"
 SEMANTIC_AXIS_PROFILE_FILENAME = "semantic_axis_profile.json"
@@ -53,6 +55,7 @@ class SemanticAxisDefinition(TypedDict):
     value_range: list[float]
     soft_range: list[float]
     strong_range: list[float]
+    extreme_range: list[float]
     level_anchors: NotRequired[dict[str, float]]
     positive_semantics: list[str]
     negative_semantics: list[str]
@@ -137,6 +140,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [-30.0, 30.0],
         "soft_range": [40.0, 60.0],
         "strong_range": [25.0, 75.0],
+        "extreme_range": [10.0, 90.0],
     },
     "head_pitch": {
         "label": "Head Pitch",
@@ -149,6 +153,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [-30.0, 30.0],
         "soft_range": [41.0, 59.0],
         "strong_range": [28.0, 72.0],
+        "extreme_range": [15.0, 85.0],
     },
     "head_roll": {
         "label": "Head Roll",
@@ -161,6 +166,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [-30.0, 30.0],
         "soft_range": [42.0, 58.0],
         "strong_range": [30.0, 70.0],
+        "extreme_range": [18.0, 82.0],
     },
     "body_yaw": {
         "label": "Body Yaw",
@@ -173,6 +179,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [-10.0, 10.0],
         "soft_range": [44.0, 56.0],
         "strong_range": [34.0, 66.0],
+        "extreme_range": [24.0, 76.0],
     },
     "body_roll": {
         "label": "Body Roll",
@@ -185,6 +192,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [-10.0, 10.0],
         "soft_range": [44.0, 56.0],
         "strong_range": [34.0, 66.0],
+        "extreme_range": [24.0, 76.0],
     },
     "body_pitch": {
         "label": "Body Pitch",
@@ -197,6 +205,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [-10.0, 10.0],
         "soft_range": [45.0, 55.0],
         "strong_range": [36.0, 64.0],
+        "extreme_range": [27.0, 73.0],
     },
     "gaze_x": {
         "label": "Gaze X",
@@ -209,6 +218,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [-1.0, 1.0],
         "soft_range": [40.0, 60.0],
         "strong_range": [25.0, 75.0],
+        "extreme_range": [10.0, 90.0],
     },
     "gaze_y": {
         "label": "Gaze Y",
@@ -221,6 +231,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [-1.0, 1.0],
         "soft_range": [40.0, 60.0],
         "strong_range": [25.0, 75.0],
+        "extreme_range": [10.0, 90.0],
     },
     "eye_open_left": {
         "label": "Eye Open Left",
@@ -234,6 +245,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [0.0, 1.0],
         "soft_range": [70.0, 100.0],
         "strong_range": [20.0, 100.0],
+        "extreme_range": [0.0, 100.0],
         "invert": False,
     },
     "eye_open_right": {
@@ -248,6 +260,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [0.0, 1.0],
         "soft_range": [70.0, 100.0],
         "strong_range": [20.0, 100.0],
+        "extreme_range": [0.0, 100.0],
         "invert": False,
     },
     "eye_smile_left": {
@@ -262,6 +275,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [0.0, 1.0],
         "soft_range": [0.0, 30.0],
         "strong_range": [0.0, 80.0],
+        "extreme_range": [0.0, 100.0],
         "invert": False,
     },
     "eye_smile_right": {
@@ -276,6 +290,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [0.0, 1.0],
         "soft_range": [0.0, 30.0],
         "strong_range": [0.0, 80.0],
+        "extreme_range": [0.0, 100.0],
         "invert": False,
     },
     "mouth_open": {
@@ -289,6 +304,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [0.0, 1.0],
         "soft_range": [48.0, 72.0],
         "strong_range": [40.0, 100.0],
+        "extreme_range": [32.0, 100.0],
     },
     "mouth_smile": {
         "label": "Mouth Smile",
@@ -301,6 +317,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [-1.0, 1.0],
         "soft_range": [42.0, 62.0],
         "strong_range": [28.0, 78.0],
+        "extreme_range": [14.0, 94.0],
     },
     "mouth_x": {
         "label": "Mouth X",
@@ -313,6 +330,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [-1.0, 1.0],
         "soft_range": [42.0, 58.0],
         "strong_range": [28.0, 72.0],
+        "extreme_range": [14.0, 86.0],
     },
     "brow_bias": {
         "label": "Brow Bias",
@@ -325,6 +343,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [-1.0, 1.0],
         "soft_range": [42.0, 58.0],
         "strong_range": [30.0, 70.0],
+        "extreme_range": [18.0, 82.0],
     },
     "brow_left_detail": {
         "label": "Brow Left Detail",
@@ -337,6 +356,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [-1.0, 1.0],
         "soft_range": [43.0, 57.0],
         "strong_range": [30.0, 70.0],
+        "extreme_range": [17.0, 83.0],
     },
     "brow_right_detail": {
         "label": "Brow Right Detail",
@@ -349,6 +369,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [-1.0, 1.0],
         "soft_range": [43.0, 57.0],
         "strong_range": [30.0, 70.0],
+        "extreme_range": [17.0, 83.0],
     },
     "breath": {
         "label": "Breath",
@@ -361,6 +382,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "output_range": [0.0, 1.0],
         "soft_range": [45.0, 55.0],
         "strong_range": [35.0, 65.0],
+        "extreme_range": [25.0, 75.0],
     },
 }
 
@@ -566,11 +588,13 @@ def build_default_semantic_axis_profile(
                 "value_range": [0.0, 100.0],
                 "soft_range": [float(value) for value in axis_defaults["soft_range"]],
                 "strong_range": [float(value) for value in axis_defaults["strong_range"]],
+                "extreme_range": [float(value) for value in axis_defaults["extreme_range"]],
                 "level_anchors": _normalize_level_anchors(
                     None,
                     neutral=float(axis_defaults.get("neutral", 50.0)),
                     soft_range=[float(value) for value in axis_defaults["soft_range"]],
                     strong_range=[float(value) for value in axis_defaults["strong_range"]],
+                    extreme_range=[float(value) for value in axis_defaults["extreme_range"]],
                     value_range=[0.0, 100.0],
                     field_name=f"{axis_id}.level_anchors",
                 ),
@@ -614,11 +638,13 @@ def build_default_semantic_axis_profile(
                 "value_range": [0.0, 100.0],
                 "soft_range": [45.0, 55.0],
                 "strong_range": [35.0, 65.0],
+                "extreme_range": [25.0, 75.0],
                 "level_anchors": _normalize_level_anchors(
                     None,
                     neutral=50.0,
                     soft_range=[45.0, 55.0],
                     strong_range=[35.0, 65.0],
+                    extreme_range=[25.0, 75.0],
                     value_range=[0.0, 100.0],
                     field_name=f"{axis_id}.level_anchors",
                 ),
@@ -924,6 +950,10 @@ def validate_semantic_axis_profile(
             raw_axis.get("strong_range"),
             field_name=f"{axis_id}.strong_range",
         )
+        extreme_range = _normalize_range(
+            raw_axis.get("extreme_range"),
+            field_name=f"{axis_id}.extreme_range",
+        )
         _require_value_in_range(
             neutral,
             value_range,
@@ -931,22 +961,29 @@ def validate_semantic_axis_profile(
             range_field_name=f"{axis_id}.value_range",
         )
         _require_range_within_range(
-            soft_range,
+            extreme_range,
             value_range,
-            field_name=f"{axis_id}.soft_range",
+            field_name=f"{axis_id}.extreme_range",
             container_field_name=f"{axis_id}.value_range",
         )
         _require_range_within_range(
             strong_range,
-            value_range,
+            extreme_range,
             field_name=f"{axis_id}.strong_range",
-            container_field_name=f"{axis_id}.value_range",
+            container_field_name=f"{axis_id}.extreme_range",
+        )
+        _require_range_within_range(
+            soft_range,
+            strong_range,
+            field_name=f"{axis_id}.soft_range",
+            container_field_name=f"{axis_id}.strong_range",
         )
         level_anchors = _normalize_level_anchors(
             raw_axis.get("level_anchors"),
             neutral=neutral,
             soft_range=soft_range,
             strong_range=strong_range,
+            extreme_range=extreme_range,
             value_range=value_range,
             field_name=f"{axis_id}.level_anchors",
         )
@@ -978,6 +1015,7 @@ def validate_semantic_axis_profile(
                 "value_range": value_range,
                 "soft_range": soft_range,
                 "strong_range": strong_range,
+                "extreme_range": extreme_range,
                 "level_anchors": level_anchors,
                 "positive_semantics": _normalize_string_list(
                     raw_axis.get("positive_semantics"),
@@ -1105,11 +1143,70 @@ def load_semantic_axis_profile(
         raise SemanticAxisProfileError(
             f"Failed to read SemanticAxisProfile from `{path}`: {exc}"
         ) from exc
+    payload = _migrate_legacy_semantic_axis_profile(payload)
     return validate_semantic_axis_profile(
         payload,
         model_name=model_name,
         known_parameter_ids=known_parameter_ids,
     )
+
+
+def _migrate_legacy_semantic_axis_profile(payload: Any) -> Any:
+    if not isinstance(payload, Mapping):
+        return payload
+    schema_version = str(payload.get("schema_version") or "").strip()
+    if schema_version != LEGACY_SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION:
+        return payload
+    upgraded = deepcopy(payload)
+    upgraded["schema_version"] = SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION
+    axes = upgraded.get("axes")
+    if not isinstance(axes, list):
+        return upgraded
+    for raw_axis in axes:
+        if not isinstance(raw_axis, dict):
+            continue
+        axis_id = str(raw_axis.get("id") or "").strip() or "unknown_axis"
+        value_range = _normalize_range(
+            raw_axis.get("value_range"),
+            field_name=f"{axis_id}.value_range",
+        )
+        anchors = raw_axis.get("level_anchors")
+        if "extreme_range" not in raw_axis and isinstance(anchors, Mapping):
+            negative = anchors.get("-4")
+            positive = anchors.get("4")
+            if (
+                isinstance(negative, (int, float))
+                and not isinstance(negative, bool)
+                and isinstance(positive, (int, float))
+                and not isinstance(positive, bool)
+            ):
+                raw_axis["extreme_range"] = [float(negative), float(positive)]
+        soft_range = _normalize_range(
+            raw_axis.get("soft_range"),
+            field_name=f"{axis_id}.soft_range",
+        )
+        strong_range = _normalize_range(
+            raw_axis.get("strong_range"),
+            field_name=f"{axis_id}.strong_range",
+        )
+        if "extreme_range" not in raw_axis:
+            raw_axis["extreme_range"] = [
+                max(value_range[0], strong_range[0] - (soft_range[0] - strong_range[0])),
+                min(value_range[1], strong_range[1] + (strong_range[1] - soft_range[1])),
+            ]
+        raw_axis["level_anchors"] = _normalize_level_anchors(
+            None,
+            neutral=_coerce_float(
+                raw_axis.get("neutral"),
+                field_name=f"{axis_id}.neutral",
+            ),
+            soft_range=soft_range,
+            strong_range=strong_range,
+            extreme_range=raw_axis["extreme_range"],
+            value_range=value_range,
+            field_name=f"{axis_id}.level_anchors",
+        )
+    return upgraded
 
 
 def ensure_semantic_axis_profile(
@@ -1261,6 +1358,8 @@ def _profile_needs_default_design_migration(
                 return True
             if current_axis.get("strong_range") != expected_axis.get("strong_range"):
                 return True
+            if current_axis.get("extreme_range") != expected_axis.get("extreme_range"):
+                return True
             if current_axis.get("level_anchors") != expected_axis.get("level_anchors"):
                 return True
     return False
@@ -1303,6 +1402,11 @@ def _profile_needs_schema_normalization(path: Path) -> bool:
         return False
     if not isinstance(raw_payload, Mapping):
         return False
+    if (
+        str(raw_payload.get("schema_version") or "").strip()
+        == LEGACY_SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION
+    ):
+        return True
     if raw_payload.get("relation_graph") is None:
         return True
     axes = raw_payload.get("axes")
@@ -1311,6 +1415,8 @@ def _profile_needs_schema_normalization(path: Path) -> bool:
         isinstance(axis, Mapping)
         and (
             not isinstance(axis.get("dynamics"), Mapping)
+            or
+            not isinstance(axis.get("extreme_range"), list)
             or
             not isinstance(axis.get("level_anchors"), Mapping)
             or {
@@ -1538,13 +1644,12 @@ def _normalize_level_anchors(
     neutral: float,
     soft_range: list[float],
     strong_range: list[float],
+    extreme_range: list[float],
     value_range: list[float],
     field_name: str,
 ) -> dict[str, float]:
-    negative_span = soft_range[0] - strong_range[0]
-    positive_span = strong_range[1] - soft_range[1]
     derived: dict[str, float] = {
-        "-4": max(value_range[0], strong_range[0] - negative_span),
+        "-4": extreme_range[0],
         "-3": strong_range[0],
         "-2": (strong_range[0] + soft_range[0]) / 2.0,
         "-1": soft_range[0],
@@ -1552,7 +1657,7 @@ def _normalize_level_anchors(
         "1": soft_range[1],
         "2": (soft_range[1] + strong_range[1]) / 2.0,
         "3": strong_range[1],
-        "4": min(value_range[1], strong_range[1] + positive_span),
+        "4": extreme_range[1],
     }
     normalized = dict(derived)
     if value is not None:
@@ -1570,13 +1675,20 @@ def _normalize_level_anchors(
                     f"`{field_name}` contains duplicate level `{key}`."
                 )
             raw_anchors[key] = raw_number
+        if set(raw_anchors) != set(derived):
+            raise SemanticAxisProfileError(
+                f"`{field_name}` must contain every level from -4 through 4."
+            )
         for key, raw_number in raw_anchors.items():
             number = _coerce_float(raw_number, field_name=f"{field_name}.{key}")
             if number < value_range[0] or number > value_range[1]:
                 raise SemanticAxisProfileError(
                     f"`{field_name}.{key}` must be within value_range."
                 )
-            normalized[key] = number
+            if abs(number - derived[key]) > 1e-6:
+                raise SemanticAxisProfileError(
+                    f"`{field_name}.{key}` must match the configured semantic ranges."
+                )
 
     if abs(normalized["0"] - neutral) > 1e-6:
         raise SemanticAxisProfileError(

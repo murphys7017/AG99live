@@ -31,9 +31,10 @@ export const PROFILE_ROLE_GUIDE: Array<{ role: string; description: string }> = 
 
 export const PROFILE_FIELD_GUIDE: Array<{ label: string; description: string }> = [
   { label: "Neutral", description: "静止中心点。没有明显动作时，轴值应尽量靠近这里。" },
-  { label: "Value Range", description: "这个 axis 的完整合法范围；soft/strong 都必须落在它里面。" },
+  { label: "Value Range", description: "这个 axis 的完整合法范围；soft/strong/extreme 都必须落在它里面。" },
   { label: "Soft Range", description: "轻微活动区。如果 expressive 输出仍全部落在 soft_range 内，前端可能判回 idle。" },
-  { label: "Strong Range", description: "强表达参考区，主要给提示词和调参参考，不是硬阈值。" },
+  { label: "Strong Range", description: "Live2D 默认可见表演区，对应三级动作锚点。" },
+  { label: "Extreme Range", description: "短时夸张表演区，对应四级动作锚点，必须包含 strong_range。" },
   { label: "Positive / Negative Semantics", description: "分别描述轴值变大、变小时代表什么语义，用来帮 LLM 理解方向。" },
 ];
 

@@ -7,6 +7,8 @@ import sys
 import types
 from unittest.mock import patch
 
+import pytest
+
 
 def _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
     install_fake_astrbot()
@@ -102,7 +104,7 @@ def _build_semantic_model_info() -> dict:
             {
                 "name": "pet",
                 "semantic_axis_profile": {
-                    "schema_version": "ag99.semantic_axis_profile.v1",
+                    "schema_version": "ag99.semantic_axis_profile.v2",
                     "profile_id": "pet.semantic.v1",
                     "model_id": "pet",
                     "source_hash": "hash",
@@ -407,6 +409,25 @@ def _build_event(*, mode: str = "split_after_reply", raw_turn_id: str = "front-t
     return EventStub(), scheduled_calls
 
 
+def _make_left_eye_open_axis_one_sided(event) -> None:
+    profile = event.adapter.turn_coordinator.runtime_state.model_info["models"][0][
+        "semantic_axis_profile"
+    ]
+    axis = next(item for item in profile["axes"] if item["id"] == "eye_open_left")
+    axis["neutral"] = 100
+    axis["level_anchors"] = {
+        "-4": 0,
+        "-3": 20,
+        "-2": 45,
+        "-1": 70,
+        "0": 100,
+        "1": 100,
+        "2": 100,
+        "3": 100,
+        "4": 100,
+    }
+
+
 def _build_view(
     *,
     phase: str,
@@ -460,6 +481,15 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
 
     contributor = module.AG99liveMotionPromptContributor()
     event, _scheduled_calls = _build_event()
+    event.adapter.turn_coordinator.runtime_state.list_effective_motion_tuning_examples = lambda: [
+        {
+            "input": "场景：清晰可见地向右看。",
+            "output": {
+                "intent_tags": ["向右确认"],
+                "axis_levels": {"head_yaw": 3, "unknown_axis": 4},
+            },
+        }
+    ]
     view = _build_view(phase="decision", route_mode="delegate_to_core", purpose="persona_reply")
 
     extensions = asyncio.run(contributor.collect(event, None, view))
@@ -471,6 +501,15 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert system.meta["scope"] == "static"
     assert capability.meta["scope"] == "static"
     assert capability.value["axis_value_format"] == "axis_levels"
+    assert capability.value["reference_examples"] == [
+        {
+            "input": "场景：清晰可见地向右看。",
+            "output": {
+                "intent_tags": ["向右确认"],
+                "axis_levels": {"head_yaw": 3},
+            },
+        }
+    ]
     assert "你正在控制一个 Live2D 模型" in system.value
     assert "为本轮回复生成可见动作" in system.value
     assert "每个回复片段必须且只能调用一次动作效果" in system.value
@@ -487,7 +526,7 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert '"motion_id"' not in system.value
     assert "immediate_spoken_reply" not in system.value
     assert "姿态方向、视线焦点和身体重心" in system.value
-    assert "普通回复也要给轻量姿态参数" in system.value
+    assert "普通回复的主要姿态轴从 3 级开始" in system.value
     assert "中性时偏少轴" not in system.value
     assert "configured_generation_mode" not in capability.value
     assert capability.value["character_motion_style"] == "中性时偏少轴，开心时优先笑眼和嘴角。"
@@ -503,7 +542,7 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "expression_resource_id" in system.value
     assert "motion_resource_id" in system.value
     assert "单姿态使用 axis_levels；动作序列使用 motion_steps" in system.value
-    assert system.value.count("-4=极强负") == 1
+    assert system.value.count("-4=夸张负") == 1
     assert "插件会负责" not in system.value
     assert "choice、mode、motion_id" not in system.value
     assert "expr_surprised" not in system.value
@@ -568,6 +607,96 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert all(item.mount != "context" for item in extensions)
 
 
+def test_prompt_capability_exposes_only_available_levels_for_one_sided_axis(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+    contributor = module.AG99liveMotionPromptContributor()
+    event, _scheduled_calls = _build_event()
+    _make_left_eye_open_axis_one_sided(event)
+    view = _build_view(
+        phase="decision",
+        route_mode="delegate_to_core",
+        purpose="persona_reply",
+    )
+
+    extensions = asyncio.run(contributor.collect(event, None, view))
+
+    capability = next(item for item in extensions if item.mount == "capability")
+    eye_axis = next(
+        item for item in capability.value["axes"] if item["id"] == "eye_open_left"
+    )
+    assert eye_axis["available_levels"] == [-4, -3, -2, -1, 0]
+
+
+@pytest.mark.parametrize(
+    ("output_patch", "expected_error"),
+    [
+        ({"intent_tags": ["duplicate", "duplicate"]}, "intent_tags_invalid"),
+        ({"intent_tags": ["x" * 49]}, "intent_tags_invalid"),
+        ({"duration_hint_ms": 200}, "duration_invalid"),
+    ],
+)
+def test_prompt_capability_rejects_reference_examples_outside_effect_schema(
+    install_fake_astrbot,
+    monkeypatch,
+    output_patch,
+    expected_error,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+    contributor = module.AG99liveMotionPromptContributor()
+    event, _scheduled_calls = _build_event()
+    event.adapter.turn_coordinator.runtime_state.list_effective_motion_tuning_examples = lambda: [
+        {
+            "input": "invalid example",
+            "output": {
+                "intent_tags": ["valid"],
+                "axis_levels": {"head_yaw": 3},
+                **output_patch,
+            },
+        }
+    ]
+    view = _build_view(
+        phase="decision",
+        route_mode="delegate_to_core",
+        purpose="persona_reply",
+    )
+
+    with pytest.raises(ValueError, match=expected_error):
+        asyncio.run(contributor.collect(event, None, view))
+
+
+def test_prompt_capability_rejects_reference_level_unavailable_for_one_sided_axis(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+    contributor = module.AG99liveMotionPromptContributor()
+    event, _scheduled_calls = _build_event()
+    _make_left_eye_open_axis_one_sided(event)
+    event.adapter.turn_coordinator.runtime_state.list_effective_motion_tuning_examples = lambda: [
+        {
+            "input": "invalid eye direction",
+            "output": {
+                "intent_tags": ["invalid"],
+                "axis_levels": {"eye_open_left": 3},
+            },
+        }
+    ]
+    view = _build_view(
+        phase="decision",
+        route_mode="delegate_to_core",
+        purpose="persona_reply",
+    )
+
+    with pytest.raises(ValueError, match="axis_level_unavailable:eye_open_left:3"):
+        asyncio.run(contributor.collect(event, None, view))
+
+
 def test_prompt_contributor_uses_official_inline_anim_contract_when_persona_effect_unavailable(
     install_fake_astrbot,
     monkeypatch,
@@ -596,6 +725,8 @@ def test_prompt_contributor_uses_official_inline_anim_contract_when_persona_effe
     assert '"model_id":"pet"' in system.value
     assert "axes 是必填对象" in system.value
     assert capability.value["axes"][0]["value_range"] == [0.0, 100.0]
+    assert "available_levels" not in capability.value["axes"][0]
+    assert "reference_examples" not in capability.value
     assert "等级 -3=强负" not in system.value
     assert '"plugin_hints":{"ag99live_motion"' not in system.value
 
@@ -925,6 +1056,42 @@ def test_prompt_runtime_includes_previous_motion_variation_hint(
     assert previous_motion["was_sequence"] is False
     assert "按本轮语义重新选择方向、幅度和身体重心" in previous_motion["guidance"]
     assert "previous_motion_summary" not in runtime.value
+
+
+def test_prompt_reference_projection_supports_sequence_and_current_axes_only(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    projected = module._project_reference_examples_for_prompt(
+        [
+            {
+                "input": "先左后右。",
+                "output": {
+                    "intent_tags": ["连续动作"],
+                    "motion_steps": [
+                        {
+                            "axis_levels": {"head_yaw": -3, "unknown_axis": -4},
+                            "duration_weight": 1,
+                        },
+                        {
+                            "axis_levels": {"head_yaw": 3, "unknown_axis": 4},
+                            "duration_weight": 1,
+                        },
+                    ],
+                },
+            }
+        ],
+        allowed_axis_ids={"head_yaw"},
+        available_levels_by_axis={"head_yaw": set(range(-4, 5))},
+    )
+
+    assert projected[0]["output"]["motion_steps"] == [
+        {"axis_levels": {"head_yaw": -3}, "duration_weight": 1},
+        {"axis_levels": {"head_yaw": 3}, "duration_weight": 1},
+    ]
 
 
 def test_prompt_fallback_candidates_are_representative_by_axis_descriptors(
@@ -1346,6 +1513,79 @@ def test_result_contributor_rejects_non_integer_axis_levels_from_persona_effect(
         contribution.metadata["ag99live_motion_schedule"]["motion_resolution_reason"]
         == "persona_effect:rejected_axis_levels:head_yaw,eye_open_left:self_reply_motion_missing"
     )
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"intent_tags": ["wink"], "axis_levels": {"eye_open_left": 3}},
+        {
+            "intent_tags": ["wink sequence"],
+            "motion_steps": [
+                {"axis_levels": {"eye_open_left": -3}, "duration_weight": 1},
+                {"axis_levels": {"eye_open_left": 3}, "duration_weight": 1},
+            ],
+        },
+    ],
+)
+def test_result_contributor_rejects_unavailable_one_sided_axis_levels(
+    install_fake_astrbot,
+    monkeypatch,
+    arguments,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(raw_turn_id="raw-turn")
+    _make_left_eye_open_axis_one_sided(event)
+    view = _build_view(
+        phase="immediate",
+        route_mode="self_reply",
+        final_result="眨眼",
+        immediate_reply="眨眼",
+        effect_calls=[_motion_effect_call(arguments)],
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == []
+    assert contribution.client_objects == []
+    assert "unavailable_axis_levels:eye_open_left:3" in contribution.metadata[
+        "ag99live_motion_schedule"
+    ]["motion_resolution_reason"]
+
+
+@pytest.mark.parametrize("level", [-3, 0])
+def test_result_contributor_accepts_available_one_sided_axis_levels(
+    install_fake_astrbot,
+    monkeypatch,
+    level,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+    contributor = module.AG99liveMotionResultContributor()
+    event, scheduled_calls = _build_event(raw_turn_id="raw-turn")
+    _make_left_eye_open_axis_one_sided(event)
+    view = _build_view(
+        phase="immediate",
+        route_mode="self_reply",
+        final_result="眨眼",
+        immediate_reply="眨眼",
+        effect_calls=[
+            _motion_effect_call(
+                {"intent_tags": ["wink"], "axis_levels": {"eye_open_left": level}}
+            )
+        ],
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution is not None
+    assert scheduled_calls == []
+    assert contribution.client_objects[0]["motion_payload"]["axis_levels"] == {
+        "eye_open_left": level
+    }
 
 
 def test_result_contributor_returns_motion_sequence_in_single_effect(

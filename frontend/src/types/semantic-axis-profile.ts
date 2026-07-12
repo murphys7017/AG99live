@@ -1,4 +1,4 @@
-export const SCHEMA_SEMANTIC_AXIS_PROFILE_V1 = "ag99.semantic_axis_profile.v1";
+export const SCHEMA_SEMANTIC_AXIS_PROFILE_V2 = "ag99.semantic_axis_profile.v2";
 export const SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1 = "ag99.semantic_axis_relation_graph.v1";
 
 export type SemanticAxisControlRole =
@@ -40,6 +40,7 @@ export interface SemanticAxisDefinition {
   value_range: [number, number];
   soft_range: [number, number];
   strong_range: [number, number];
+  extreme_range: [number, number];
   level_anchors?: Record<string, number>;
   positive_semantics: string[];
   negative_semantics: string[];
@@ -77,7 +78,7 @@ export interface SemanticAxisRelationGraph {
 }
 
 export interface SemanticAxisProfile {
-  schema_version: typeof SCHEMA_SEMANTIC_AXIS_PROFILE_V1;
+  schema_version: typeof SCHEMA_SEMANTIC_AXIS_PROFILE_V2;
   profile_id: string;
   model_id: string;
   source_hash: string;

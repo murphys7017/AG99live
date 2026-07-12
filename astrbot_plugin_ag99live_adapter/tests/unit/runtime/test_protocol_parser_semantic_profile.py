@@ -26,7 +26,7 @@ def test_parse_inbound_message_accepts_semantic_axis_profile_save() -> None:
                 "model_name": "DemoModel",
                 "profile_id": "DemoModel.semantic.v1",
                 "expected_revision": 3,
-                "profile": {"schema_version": "ag99.semantic_axis_profile.v1"},
+                "profile": {"schema_version": "ag99.semantic_axis_profile.v2"},
             },
         ),
     )
@@ -46,7 +46,7 @@ def test_parse_inbound_message_rejects_invalid_semantic_axis_profile_save_payloa
                     "request_id": "request-1",
                     "model_name": "DemoModel",
                     "expected_revision": "3",
-                    "profile": {"schema_version": "ag99.semantic_axis_profile.v1"},
+                    "profile": {"schema_version": "ag99.semantic_axis_profile.v2"},
                 },
             ),
         )

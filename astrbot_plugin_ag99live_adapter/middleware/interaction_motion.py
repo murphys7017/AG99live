@@ -49,6 +49,7 @@ from ..prompts.motion_selector import (
 from ..prompts.semantic_axis_prompt import (
     format_profile_axis_prompt_line,
     profile_prompt_axes,
+    resolve_available_axis_levels,
 )
 from ..runtime.motion_lab import enqueue_motion_lab_raw_event
 
@@ -544,6 +545,15 @@ def _build_motion_static_capability_payload(runtime_state: Any) -> dict[str, Any
         style_prompt = str(build_style_prompt() or "").strip()
         if style_prompt:
             capability_payload["motion_style_prompt"] = style_prompt
+    list_reference_examples = getattr(
+        runtime_state,
+        "list_effective_motion_tuning_examples",
+        None,
+    )
+    if callable(list_reference_examples):
+        reference_examples = list_reference_examples()
+        if reference_examples:
+            capability_payload["reference_examples"] = reference_examples
 
     profile_payload, profile_error = _summarize_semantic_profile(
         runtime_state,
@@ -645,8 +655,8 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         output_shape_text = f" 输出标签示例：<@anim {inline_json}>"
 
     axis_instruction = (
-        "每个值必须是 -4 到 4 的整数等级：-4=极强负、-3=强负、-2=中负、-1=轻负、"
-        "0=明确中性、+1=轻正、+2=中正、+3=强正、+4=极强正；省略表示本轮不控制此轴；"
+        "每个值必须是 -4 到 4 的整数等级：-4=夸张负、-3=清晰可见负、-2=克制负、-1=细节负、"
+        "0=明确中性、+1=细节正、+2=克制正、+3=清晰可见正、+4=夸张正；省略表示本轮不控制此轴；"
         "没有明确方向或表演贡献的轴直接省略。"
         if persona_effect_available
         else "每个值都直接写成 JSON number；没有明确方向或表演贡献的轴直接省略。"
@@ -666,7 +676,7 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         f"{axis_instruction}"
         "只输出本轮直接需要控制的轴，最多 6 个；关系图可派生的跟随轴不要为了凑完整而重复输出。"
         "优先选择能表达姿态方向、视线焦点和身体重心的关键轴，再用少量表情轴补充情绪细节。"
-        "普通回复也要给轻量姿态参数；明显转身、强调、回避、惊讶、调侃、开心或疑惑时，动作幅度要更明确。"
+        "普通回复的主要姿态轴从 3 级开始；2 级用于克制表达，1 级仅用于细节，4 级用于短暂夸张表演。"
         "示例只展示结构和数值，不要照抄示例内容。"
         f"{output_shape_text}"
     )
@@ -683,15 +693,15 @@ def _build_motion_capability_prompt_payload(
     }
     if persona_effect_available:
         result["axis_level_scale"] = {
-            "-4": "极强负方向",
-            "-3": "强负方向",
-            "-2": "中等负方向",
-            "-1": "轻微负方向",
+            "-4": "短时夸张负方向",
+            "-3": "普通 Live2D 清晰可见负方向",
+            "-2": "克制负方向",
+            "-1": "局部细节或缓入负方向",
             "0": "明确回到中性",
-            "1": "轻微正方向",
-            "2": "中等正方向",
-            "3": "强正方向",
-            "4": "极强正方向",
+            "1": "局部细节或缓入正方向",
+            "2": "克制正方向",
+            "3": "普通 Live2D 清晰可见正方向",
+            "4": "短时夸张正方向",
             "omitted": "本轮不控制该轴",
         }
 
@@ -708,7 +718,9 @@ def _build_motion_capability_prompt_payload(
                 "positive_semantics",
                 "usage_notes",
             ]
-            if not persona_effect_available:
+            if persona_effect_available:
+                axis_fields.append("available_levels")
+            else:
                 axis_fields.insert(3, "value_range")
             result["axes"] = [
                 {
@@ -726,6 +738,26 @@ def _build_motion_capability_prompt_payload(
     motion_instruction = str(capability_payload.get("motion_instruction") or "").strip()
     if motion_instruction:
         result["motion_generation_guidance"] = motion_instruction
+
+    reference_examples = capability_payload.get("reference_examples")
+    if persona_effect_available and isinstance(reference_examples, list):
+        allowed_axis_ids = {
+            str(item.get("id") or "").strip()
+            for item in result.get("axes") or []
+            if isinstance(item, dict) and str(item.get("id") or "").strip()
+        }
+        available_levels_by_axis = {
+            str(item.get("id") or "").strip(): set(item.get("available_levels") or [])
+            for item in result.get("axes") or []
+            if isinstance(item, dict) and str(item.get("id") or "").strip()
+        }
+        projected_examples = _project_reference_examples_for_prompt(
+            reference_examples,
+            allowed_axis_ids=allowed_axis_ids,
+            available_levels_by_axis=available_levels_by_axis,
+        )
+        if projected_examples:
+            result["reference_examples"] = projected_examples
 
     references = capability_payload.get("fallback_pose_candidates")
     if isinstance(references, list):
@@ -790,6 +822,133 @@ def _build_motion_capability_prompt_payload(
             for item in _select_prompt_resource_candidates(resources)
             if isinstance(item, dict)
         ]
+    return result
+
+
+def _project_reference_examples_for_prompt(
+    examples: list[Any],
+    *,
+    allowed_axis_ids: set[str],
+    available_levels_by_axis: dict[str, set[int]],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for item in examples:
+        if not isinstance(item, dict):
+            raise ValueError("motion_reference_example_shape_invalid")
+        input_text = str(item.get("input") or "").strip()
+        output = item.get("output")
+        if not input_text or not isinstance(output, dict):
+            raise ValueError("motion_reference_example_shape_invalid")
+        raw_intent_tags = output.get("intent_tags")
+        if not isinstance(raw_intent_tags, list):
+            raise ValueError("motion_reference_example_intent_tags_invalid")
+        if any(not isinstance(tag, str) for tag in raw_intent_tags):
+            raise ValueError("motion_reference_example_intent_tags_invalid")
+        intent_tags = [tag.strip() for tag in raw_intent_tags if tag.strip()]
+        if (
+            not 1 <= len(intent_tags) <= 6
+            or len(set(intent_tags)) != len(intent_tags)
+            or any(len(tag) > 48 for tag in intent_tags)
+        ):
+            raise ValueError("motion_reference_example_intent_tags_invalid")
+        has_axis_levels = "axis_levels" in output
+        has_motion_steps = "motion_steps" in output
+        if has_axis_levels == has_motion_steps:
+            raise ValueError("motion_reference_example_motion_shape_invalid")
+        projected_output: dict[str, Any] = {
+            "intent_tags": intent_tags,
+        }
+        duration_hint_ms = output.get("duration_hint_ms")
+        if (
+            isinstance(duration_hint_ms, int)
+            and not isinstance(duration_hint_ms, bool)
+            and 320 <= duration_hint_ms <= 15000
+        ):
+            projected_output["duration_hint_ms"] = duration_hint_ms
+        elif duration_hint_ms is not None:
+            raise ValueError("motion_reference_example_duration_invalid")
+        axis_levels = (
+            _project_example_axis_levels(
+                output.get("axis_levels"),
+                allowed_axis_ids=allowed_axis_ids,
+                available_levels_by_axis=available_levels_by_axis,
+            )
+            if has_axis_levels
+            else {}
+        )
+        if axis_levels:
+            projected_output["axis_levels"] = axis_levels
+        else:
+            motion_steps = output.get("motion_steps")
+            projected_steps: list[dict[str, Any]] = []
+            if isinstance(motion_steps, list) and 2 <= len(motion_steps) <= 4:
+                for step in motion_steps:
+                    if not isinstance(step, dict):
+                        raise ValueError("motion_reference_example_step_invalid")
+                    step_levels = _project_example_axis_levels(
+                        step.get("axis_levels"),
+                        allowed_axis_ids=allowed_axis_ids,
+                        available_levels_by_axis=available_levels_by_axis,
+                    )
+                    if not step_levels:
+                        projected_steps = []
+                        break
+                    duration_weight = step.get("duration_weight")
+                    if (
+                        not isinstance(duration_weight, int)
+                        or isinstance(duration_weight, bool)
+                        or not 1 <= duration_weight <= 3
+                    ):
+                        raise ValueError("motion_reference_example_step_invalid")
+                    projected_steps.append(
+                        {
+                            "axis_levels": step_levels,
+                            "duration_weight": duration_weight,
+                        }
+                    )
+                projected_axis_sets = {
+                    tuple(step["axis_levels"].keys())
+                    for step in projected_steps
+                }
+                if len(projected_axis_sets) > 1:
+                    raise ValueError("motion_reference_example_step_axes_mismatch")
+            elif motion_steps is not None:
+                raise ValueError("motion_reference_example_steps_invalid")
+            if projected_steps:
+                projected_output["motion_steps"] = projected_steps
+            else:
+                continue
+        result.append({"input": input_text, "output": projected_output})
+    return result
+
+
+def _project_example_axis_levels(
+    value: Any,
+    *,
+    allowed_axis_ids: set[str],
+    available_levels_by_axis: dict[str, set[int]],
+) -> dict[str, int]:
+    if not isinstance(value, dict):
+        raise ValueError("motion_reference_example_axis_levels_invalid")
+    result: dict[str, int] = {}
+    for axis_id, level in value.items():
+        normalized_axis_id = str(axis_id).strip()
+        if normalized_axis_id not in allowed_axis_ids:
+            continue
+        if (
+            not isinstance(level, int)
+            or isinstance(level, bool)
+            or not -4 <= level <= 4
+        ):
+            raise ValueError(
+                f"motion_reference_example_axis_level_invalid:{normalized_axis_id}"
+            )
+        if level not in available_levels_by_axis.get(normalized_axis_id, set()):
+            raise ValueError(
+                "motion_reference_example_axis_level_unavailable:"
+                f"{normalized_axis_id}:{level}"
+            )
+        result[normalized_axis_id] = level
     return result
 
 
@@ -1257,6 +1416,7 @@ def _summarize_semantic_profile(
                     "negative_semantics": _normalize_axis_text_list(axis.get("negative_semantics")),
                     "positive_semantics": _normalize_axis_text_list(axis.get("positive_semantics")),
                     "usage_notes": _truncate_text(str(axis.get("usage_notes") or "").strip(), 160),
+                    "available_levels": resolve_available_axis_levels(axis),
                 }
                 for axis in prompt_axes
                 if str(axis.get("id") or "").strip()

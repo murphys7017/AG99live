@@ -339,6 +339,7 @@ function addCustomAxis(): void {
     value_range: [0, 100],
     soft_range: [35, 65],
     strong_range: [15, 85],
+    extreme_range: [0, 100],
     positive_semantics: [],
     negative_semantics: [],
     usage_notes: "",
@@ -531,6 +532,7 @@ function validateDraftProfile(profile: SemanticAxisProfile): string[] {
     validateRange(errors, `${axisLabel}.value_range`, axis.value_range);
     validateRange(errors, `${axisLabel}.soft_range`, axis.soft_range);
     validateRange(errors, `${axisLabel}.strong_range`, axis.strong_range);
+    validateRange(errors, `${axisLabel}.extreme_range`, axis.extreme_range);
     validateFinite(errors, `${axisLabel}.neutral`, axis.neutral);
     if (
       isValidRange(axis.value_range)
@@ -539,8 +541,9 @@ function validateDraftProfile(profile: SemanticAxisProfile): string[] {
     ) {
       errors.push(`${axisLabel}: neutral 必须位于 value_range 内。`);
     }
-    validateContainedRange(errors, `${axisLabel}.soft_range`, axis.soft_range, axis.value_range);
-    validateContainedRange(errors, `${axisLabel}.strong_range`, axis.strong_range, axis.value_range);
+    validateContainedRange(errors, `${axisLabel}.extreme_range`, axis.extreme_range, axis.value_range);
+    validateContainedRange(errors, `${axisLabel}.strong_range`, axis.strong_range, axis.extreme_range);
+    validateContainedRange(errors, `${axisLabel}.soft_range`, axis.soft_range, axis.strong_range);
     validatePositive(errors, `${axisLabel}.dynamics.max_velocity`, axis.dynamics.max_velocity);
     validatePositive(errors, `${axisLabel}.dynamics.max_acceleration`, axis.dynamics.max_acceleration);
     validateUnitInterval(

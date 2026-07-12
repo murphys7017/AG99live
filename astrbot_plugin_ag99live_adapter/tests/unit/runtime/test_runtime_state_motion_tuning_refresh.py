@@ -4,10 +4,12 @@ import importlib
 import json
 import sys
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 
 from astrbot_plugin_ag99live_adapter.prompts.motion_selector import (
+    DEFAULT_MOTION_REFERENCE_EXAMPLES,
     resolve_motion_reference_examples,
 )
 from astrbot_plugin_ag99live_adapter.runtime.motion_state.tuning_store import MotionTuningStore
@@ -20,6 +22,74 @@ def test_motion_tuning_store_accepts_nine_level_extremes() -> None:
     ) == {"head_yaw": -4, "body_yaw": 4}
     with pytest.raises(ValueError, match="raw_axis_level_invalid:head_yaw"):
         MotionTuningStore._normalize_axis_levels({"head_yaw": 5})
+
+
+def test_default_motion_reference_examples_use_v4_effect_contract() -> None:
+    assert len(DEFAULT_MOTION_REFERENCE_EXAMPLES) == 7
+    assert {item["category"] for item in DEFAULT_MOTION_REFERENCE_EXAMPLES} == {
+        "neutral",
+        "explain",
+        "soothe",
+        "confused",
+        "happy",
+        "surprised",
+        "sequence",
+    }
+    for item in DEFAULT_MOTION_REFERENCE_EXAMPLES:
+        output = item["output"]
+        assert "axes" not in output
+        assert "emotion" not in output
+        assert "mode" not in output
+        assert "duration_ms" not in output
+        assert output["intent_tags"]
+        assert ("axis_levels" in output) != ("motion_steps" in output)
+    surprised = next(
+        item for item in DEFAULT_MOTION_REFERENCE_EXAMPLES
+        if item["category"] == "surprised"
+    )
+    assert 4 in surprised["output"]["axis_levels"].values()
+
+
+def test_motion_reference_selection_preserves_required_structure_examples_with_three_user_samples() -> None:
+    user_examples = [
+        {
+            "category": f"custom-{index}",
+            "input": f"custom input {index}",
+            "output": {
+                "intent_tags": [f"custom-{index}"],
+                "axis_levels": {"head_yaw": 3},
+            },
+        }
+        for index in range(3)
+    ]
+    state = SimpleNamespace(
+        motion_tuning_fewshot_enabled=True,
+        motion_tuning_fewshot_count=7,
+        motion_tuning_user_fewshot_count=3,
+        motion_tuning_reference_examples=user_examples,
+        motion_tuning_fewshot_diagnostics=[],
+        motion_tuning_effective_examples=[],
+    )
+
+    resolved = resolve_motion_reference_examples(runtime_state=state)
+
+    categories = {item["category"] for item in resolved}
+    assert {"explain", "surprised", "sequence"}.issubset(categories)
+    assert all(item in resolved for item in user_examples)
+
+
+def test_motion_reference_selection_rejects_budget_below_required_coverage() -> None:
+    state = SimpleNamespace(
+        motion_tuning_fewshot_enabled=True,
+        motion_tuning_fewshot_count=2,
+        motion_tuning_user_fewshot_count=0,
+        motion_tuning_reference_examples=[],
+        motion_tuning_fewshot_diagnostics=[],
+        motion_tuning_effective_examples=[],
+    )
+
+    with pytest.raises(ValueError, match="budget_below_required"):
+        resolve_motion_reference_examples(runtime_state=state)
 
 
 def test_motion_tuning_store_projects_axes_to_nine_level_extremes() -> None:
@@ -139,12 +209,12 @@ def test_runtime_state_persists_motion_tuning_samples_across_refresh_and_rebuild
     )
 
     assert state.list_motion_tuning_samples() == [saved_sample]
-    assert state.motion_tuning_reference_examples[0]["output"]["axes"]["head_yaw"] == 80.0
+    assert state.motion_tuning_reference_examples[0]["output"]["axis_levels"]["head_yaw"] == 3
 
     state.refresh()
 
     assert state.list_motion_tuning_samples() == [saved_sample]
-    assert state.motion_tuning_reference_examples[0]["output"]["axes"]["head_yaw"] == 80.0
+    assert state.motion_tuning_reference_examples[0]["output"]["axis_levels"]["head_yaw"] == 3
 
     reloaded_state = runtime_state.RuntimeState(
         platform_config={},
@@ -165,7 +235,7 @@ def test_runtime_state_persists_motion_tuning_samples_across_refresh_and_rebuild
     reloaded_state.refresh()
 
     assert reloaded_state.list_motion_tuning_samples() == [saved_sample]
-    assert reloaded_state.motion_tuning_reference_examples[0]["output"]["axes"]["head_yaw"] == 80.0
+    assert reloaded_state.motion_tuning_reference_examples[0]["output"]["axis_levels"]["head_yaw"] == 3
 
 
 def test_runtime_state_filters_few_shot_examples_by_current_profile_revision(
@@ -212,7 +282,7 @@ def test_runtime_state_filters_few_shot_examples_by_current_profile_revision(
 
     assert len(state.list_motion_tuning_samples()) == 2
     assert len(state.motion_tuning_reference_examples) == 1
-    assert state.motion_tuning_reference_examples[0]["output"]["axes"]["head_yaw"] == 80.0
+    assert state.motion_tuning_reference_examples[0]["output"]["axis_levels"]["head_yaw"] == 3
 
 
 def test_runtime_state_filters_few_shot_axes_to_current_prompt_axes(
@@ -266,8 +336,8 @@ def test_runtime_state_filters_few_shot_axes_to_current_prompt_axes(
     state.save_motion_tuning_sample(sample)
 
     assert len(state.motion_tuning_reference_examples) == 1
-    assert state.motion_tuning_reference_examples[0]["output"]["axes"] == {
-        "head_yaw": 80.0
+    assert state.motion_tuning_reference_examples[0]["output"]["axis_levels"] == {
+        "head_yaw": 3
     }
 
 
@@ -485,12 +555,67 @@ def test_runtime_state_exposes_fewshot_shortage_diagnostics(
     resolved_examples = resolve_motion_reference_examples(runtime_state=state)
     assert len(resolved_examples) == 3
     assert state.list_motion_tuning_fewshot_diagnostics() == [
-        "motion_tuning_user_samples_insufficient:requested=3:user_available=1:user_selected=0",
         "motion_tuning_default_backfill_applied:count=3",
     ]
     assert state.list_effective_motion_tuning_examples() == resolved_examples
     assert "这个角色更常用这些轴来组织动作" in state.build_motion_tuning_style_prompt()
     assert "已记录的调参偏好" in state.build_motion_tuning_style_prompt()
+
+
+def test_runtime_state_rejects_invalid_effect_fields_from_llm_reference_examples(
+    monkeypatch,
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    runtime_state = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+    seed_model_info = build_seed_model_info()
+    monkeypatch.setattr(
+        runtime_state,
+        "scan_live2d_models",
+        lambda **kwargs: deepcopy(seed_model_info),
+    )
+    live2ds_dir = tmp_path / "live2ds"
+    (live2ds_dir / "DemoModel").mkdir(parents=True, exist_ok=True)
+    state = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=None,
+        plugin_config={"live2d_model_name": "DemoModel"},
+        plugin_config_loader=None,
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=live2ds_dir,
+    )
+    state.refresh()
+    revision = int(
+        state.model_info["models"][0]["semantic_axis_profile"]["revision"]
+    )
+    short_duration = _build_motion_tuning_sample(
+        sample_id="short-duration",
+        profile_revision=revision,
+    )
+    short_duration["adjusted_plan"]["timing"]["duration_ms"] = 200
+    long_tag = _build_motion_tuning_sample(
+        sample_id="long-tag",
+        profile_revision=revision,
+    )
+    long_tag["tags"] = ["x" * 49]
+
+    state.save_motion_tuning_sample(short_duration)
+    state.save_motion_tuning_sample(long_tag)
+
+    assert state.motion_tuning_reference_examples == []
+    diagnostics = state.list_motion_tuning_fewshot_diagnostics()
+    assert (
+        "motion_tuning_reference_sample_rejected:"
+        "id=short-duration:reason=duration_hint_ms_out_of_range"
+    ) in diagnostics
+    assert (
+        "motion_tuning_reference_sample_rejected:"
+        "id=long-tag:reason=intent_tag_invalid"
+    ) in diagnostics
 
 
 def test_runtime_state_effective_examples_query_is_read_only(

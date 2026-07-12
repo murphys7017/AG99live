@@ -85,7 +85,7 @@ def _build_semantic_model_info() -> dict:
             {
                 "name": "pet",
                 "semantic_axis_profile": {
-                    "schema_version": "ag99.semantic_axis_profile.v1",
+                    "schema_version": "ag99.semantic_axis_profile.v2",
                     "profile_id": "pet.semantic.v1",
                     "model_id": "pet",
                     "source_hash": "hash",

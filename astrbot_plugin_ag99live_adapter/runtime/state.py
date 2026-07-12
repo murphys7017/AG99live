@@ -90,8 +90,8 @@ class RuntimeState:
         self.action_llm_filter_chunk_max_candidates = 96
         self.motion_generation_mode = "single_response_effect"
         self.motion_tuning_fewshot_enabled = True
-        self.motion_tuning_fewshot_count = 2
-        self.motion_tuning_user_fewshot_count = 0
+        self.motion_tuning_fewshot_count = 7
+        self.motion_tuning_user_fewshot_count = 3
         self.runtime_cache_root_error = ""
         self.runtime_cache_segment_errors: dict[str, str] = {}
         self._motion_tuning_store = MotionTuningStore(

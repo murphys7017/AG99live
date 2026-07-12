@@ -1,14 +1,17 @@
 task:
   class: refactor
   risk: high
-  phase: nine_level_motion_calibration
+  phase: live2d_extreme_range_and_prompt_examples
   status: complete
-  scope: Expand Persona Effect axis levels to -4..4, recalibrate semantic profile ranges, migrate generated profiles, and preserve deterministic sampling and hard relation constraints
+  scope: Give level four an independent per-axis extreme range, make level three the normal visible Live2D baseline, and inject strict v4 reference examples into the motion capability
 context:
   confidence: high
   assumptions:
     - Persona Effect v4 axis_levels use the nine-level -4..4 contract; transform version v4 distinguishes recalibrated samples from historical seven-level data.
-    - Level anchors map ±1 to soft-range edges, ±2 to soft/strong midpoints, ±3 to strong-range edges, and ±4 to one bounded outward span; relation-graph and parameter hard ranges remain authoritative.
+    - Level anchors map ±1 to soft-range edges, ±2 to soft/strong midpoints, ±3 to strong-range edges, and ±4 to independently configured extreme-range edges; relation-graph and parameter hard ranges remain authoritative.
+    - Ordinary Live2D primary pose axes start at level three for visual readability; level two is restrained, level one is detail or transition, and level four is brief exaggerated performance.
+    - Motion capability examples use only current Persona Effect v4 arguments; built-in level-three, level-four, and sequence examples reserve structural coverage, then up to three valid current-revision user samples fill the seven-example budget.
+    - SemanticAxisProfile v2 requires extreme_range; only on-disk v1 profiles pass through the explicit migration boundary, while malformed v2 profiles fail validation.
     - Generated seven-level profiles migrate automatically with a revision bump; user-modified profiles preserve their calibrated soft/strong ranges and derive only the new ±4 anchors instead of being overwritten.
     - Playback acknowledgement is recorded only after the outbound WebSocket send succeeds; send failure makes the frontend session fail visibly.
     - Disconnect and turn replacement interrupt every owned Timeline with explicit turn_id plus message_id; ModelEngine stops only the matching active run and removes only that segment's pending payload.
@@ -223,6 +226,12 @@ architecture:
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
 verification:
   checks_run:
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (286 passed for independent extreme ranges, strict v4 examples, and profile v2 migration)
+    - npm test (complete frontend suite passed after extreme-range editor integration)
+    - npm run typecheck
+    - npm run build:web
+    - python -m compileall astrbot_plugin_ag99live_adapter
+    - git diff --check
     - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (268 passed for nine-level motion contract)
     - npm test (complete frontend suite passed for nine-level motion contract)
     - npm run typecheck

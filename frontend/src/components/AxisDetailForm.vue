@@ -11,7 +11,7 @@ import {
   PROFILE_COUPLING_GUIDE,
 } from "../data/profileEditorGuide";
 
-type EditableAxisRangeKey = "value_range" | "soft_range" | "strong_range";
+type EditableAxisRangeKey = "value_range" | "soft_range" | "strong_range" | "extreme_range";
 type EditableBindingRangeKey = "input_range" | "output_range";
 
 const props = defineProps<{
@@ -40,7 +40,7 @@ function readFiniteNumber(event: Event): number | null {
 }
 
 function updateRange(
-  targetRangeOwner: Pick<SemanticAxisDefinition, EditableAxisRangeKey>,
+  targetRangeOwner: SemanticAxisDefinition,
   rangeKey: EditableAxisRangeKey,
   index: 0 | 1,
   event: Event,
@@ -48,6 +48,7 @@ function updateRange(
   const value = readFiniteNumber(event);
   if (value === null) return;
   targetRangeOwner[rangeKey][index] = value;
+  delete targetRangeOwner.level_anchors;
   emit("markDirty");
 }
 
@@ -263,6 +264,26 @@ function onRemoveBinding(index: number): void {
             type="number"
             step="0.1"
             @input="updateRange(axis, 'strong_range', 1, $event)"
+          />
+        </div>
+      </label>
+
+      <label class="action-preview__field">
+        <span>Extreme Range（短时夸张表演区）</span>
+        <div class="profile-editor__range-row">
+          <input
+            :value="axis.extreme_range[0]"
+            class="settings-card__input"
+            type="number"
+            step="0.1"
+            @input="updateRange(axis, 'extreme_range', 0, $event)"
+          />
+          <input
+            :value="axis.extreme_range[1]"
+            class="settings-card__input"
+            type="number"
+            step="0.1"
+            @input="updateRange(axis, 'extreme_range', 1, $event)"
           />
         </div>
       </label>

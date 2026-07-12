@@ -45,7 +45,7 @@ def resolve_selected_semantic_axis_profile(*, runtime_state: Any) -> dict[str, A
         model_id = str(profile.get("model_id") or "").strip()
         status = str(profile.get("status") or "").strip()
         revision = profile.get("revision")
-        if schema_version != "ag99.semantic_axis_profile.v1":
+        if schema_version != "ag99.semantic_axis_profile.v2":
             raise RuntimeError("SemanticAxisProfile invalid: unsupported schema_version.")
         if not profile_id or not model_id:
             raise RuntimeError("SemanticAxisProfile invalid: profile_id/model_id is empty.")

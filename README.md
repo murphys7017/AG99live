@@ -115,6 +115,8 @@ ag99live.motion Persona Effect
 
 ### 语义轴档案
 
+每个 Live2D 模型通过 `soft_range / strong_range / extreme_range` 独立校准九级动作。普通主要姿态从三级开始以保证可见性，四级使用独立夸张范围；确定性采样让同一 segment 可复现，同时保留不同回复之间的细微变化。
+
 每个 Live2D 模型可以拥有自己的 `SemanticAxisProfile`，描述语义轴到模型参数的映射、范围、中性值、主轴/辅轴角色和关系约束。
 
 这使动作系统不依赖某一个固定模型，也不把某个模型的参数名直接暴露为对话层协议。
