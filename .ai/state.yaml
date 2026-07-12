@@ -82,6 +82,8 @@ context:
     - Mk6 declares ParamMouthOpenY in its model3 LipSync group; lip sync uses only manifest-declared parameter IDs.
     - Speech modulation frequency and direction, sequence-step dynamics, and parameter source are all mandatory across parser and compiler boundaries; missing values fail rather than inheriting or defaulting.
     - Audio start failures distinguish browser NotAllowedError from generic sink failures, and an empty manifest texture entry fails model loading explicitly.
+    - Lip-sync failures retain a concrete timeline reason. When WebAudio analysis fails but declared model lip-sync parameters remain writable, a logged random mouth animation runs only until the current audio ends while the lip-sync sink remains failed.
+    - Closed playback timeline identity history is bounded to 512 recent segments, and the frontend motion-duration default matches the adapter contract at 1000 ms.
     - WebSDK rejects an entire malformed, unbindable, duplicate, or out-of-range parameter plan instead of salvaging playable entries or clamping invalid plan targets.
     - Every engine.parameter_plan.v2 parameter requires neutral_target_value and dynamics; Motion Lab manual plans derive both from the selected semantic axis profile rather than emitting an unconstrained legacy plan.
     - Multi-step motion validates neutral-to-first and inter-step travel against rest-to-rest triangular/trapezoidal velocity profiles; impossible timing fails with motion_sequence_transition_budget_exceeded.
@@ -215,6 +217,9 @@ architecture:
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
 verification:
   checks_run:
+    - npm test (complete frontend suite passed after lip-sync failure degradation and bounded timeline history changes)
+    - npm run build:web (production web build passed after lip-sync failure degradation changes)
+    - npm run typecheck (renderer and node typechecks passed)
     - npm test (complete frontend suite passed after manifest and parser-contract fixes)
     - npm run typecheck (renderer and node typechecks passed)
     - npm run build:web (production web build passed)
