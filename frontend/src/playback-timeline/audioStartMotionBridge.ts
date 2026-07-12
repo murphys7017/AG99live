@@ -10,6 +10,10 @@ export interface AudioStartMotionTimelineBridgeDeps {
     turnId: string,
     messageId: string,
   ) => boolean;
+  ensureMotionTimelineSinkForSegment: (
+    turnId: string,
+    messageId: string,
+  ) => boolean;
   getPlaybackTimelineSnapshotForSegment: (
     turnId: string,
     messageId: string,
@@ -60,6 +64,12 @@ export function createAudioStartMotionTimelineBridge(
         deps.canStartMotionForAudioTimeline
         && !deps.canStartMotionForAudioTimeline(normalizedTurnId, normalizedMessageId)
       ) {
+        return;
+      }
+      if (!deps.ensureMotionTimelineSinkForSegment(
+        normalizedTurnId,
+        normalizedMessageId,
+      )) {
         return;
       }
       const latestPlaybackTimeline = deps.getPlaybackTimelineSnapshotForSegment(

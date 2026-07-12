@@ -2191,7 +2191,7 @@ def test_result_contributor_uses_result_view_route_decision(
     assert metadata["scheduled"] is True
 
 
-def test_result_contributor_does_not_silently_schedule_immediate_phase_without_reply_plan(
+def test_result_contributor_schedules_immediate_effect_before_reply_plan_is_persisted(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -2205,16 +2205,26 @@ def test_result_contributor_does_not_silently_schedule_immediate_phase_without_r
         route_mode=None,
         final_result="你好呀",
         immediate_reply="你好呀",
+        effect_calls=[
+            _motion_effect_call(
+                {
+                    "intent_tags": ["轻快"],
+                    "axis_levels": {"head_yaw": 2},
+                }
+            )
+        ],
     )
 
     contribution = asyncio.run(contributor.collect(event, None, view))
 
     assert contribution is not None
     assert scheduled_calls == []
-    assert (
-        contribution.metadata["ag99live_motion_schedule"]["reason"]
-        == "immediate_phase_reply_plan_unresolved"
-    )
+    assert len(contribution.client_objects) == 1
+    metadata = contribution.metadata["ag99live_motion_schedule"]
+    assert metadata["reply_plan_source"] is None
+    assert metadata["reply_plan_route_mode"] is None
+    assert metadata["reason"] == "persona_effect_motion_client_object"
+    assert metadata["scheduled"] is True
 
 
 def test_result_contributor_ignores_removed_inline_mode_for_self_reply(

@@ -134,6 +134,10 @@ export interface AdapterAudioRuntime {
     turnId: string | null,
     messageId: string,
   ) => PlaybackTimelineSnapshot | null;
+  ensureMotionTimelineSinkForSegment: (
+    turnId: string | null,
+    messageId: string,
+  ) => boolean;
   markMotionTimelineStarted: (
     turnId: string | null,
     messageId: string,
@@ -183,6 +187,7 @@ export function createAdapterAudioRuntime(
     startSegmentJob,
     markMotionTimelineStarted,
     markMotionTimelineTerminal,
+    ensureMotionTimelineSinkForSegment,
     findActiveAudioTimelineSegments,
     findOpenAudioTimelineSegments,
     getTimelineSnapshotForSegment: getPlaybackTimelineSnapshotForSegment,
@@ -330,6 +335,7 @@ export function createAdapterAudioRuntime(
     findActiveAudioSegment,
     findOpenAudioSegment: audioSettlementController.findOpenAudioSegment,
     getPlaybackTimelineSnapshotForSegment,
+    ensureMotionTimelineSinkForSegment,
     markMotionTimelineStarted,
     markMotionTimelineTerminal,
   };

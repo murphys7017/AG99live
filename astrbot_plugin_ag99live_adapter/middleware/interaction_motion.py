@@ -1933,7 +1933,7 @@ def _resolve_motion_schedule_policy(
     reply_plan: _InteractionReplyPlanSnapshot | None,
 ) -> _MotionSchedulePolicy:
     if phase == "immediate":
-        return _resolve_immediate_phase_policy(reply_plan, motion_generation_mode=motion_generation_mode)
+        return _resolve_immediate_phase_policy()
     if phase == "final":
         return _resolve_final_phase_policy(
             event,
@@ -1948,38 +1948,11 @@ def _resolve_motion_schedule_policy(
 
 
 def _resolve_immediate_phase_policy(
-    reply_plan: _InteractionReplyPlanSnapshot | None,
-    *,
-    motion_generation_mode: str,
 ) -> _MotionSchedulePolicy:
-    if reply_plan is None:
-        return _MotionSchedulePolicy(
-            should_schedule=False,
-            source=None,
-            reason="immediate_phase_reply_plan_unresolved",
-        )
-    if reply_plan.route_mode == "self_reply":
-        return _MotionSchedulePolicy(
-            should_schedule=True,
-            source="interaction_result_immediate",
-            reason="schedule_self_reply_immediate",
-        )
-    if reply_plan.route_mode in {"hybrid", "delegate_to_core"}:
-        return _MotionSchedulePolicy(
-            should_schedule=True,
-            source="interaction_result_immediate",
-            reason="schedule_hybrid_immediate",
-        )
-    if reply_plan.route_mode:
-        return _MotionSchedulePolicy(
-            should_schedule=False,
-            source=None,
-            reason="immediate_phase_route_unresolved",
-        )
     return _MotionSchedulePolicy(
-        should_schedule=False,
-        source=None,
-        reason="immediate_phase_reply_plan_unresolved",
+        should_schedule=True,
+        source="interaction_result_immediate",
+        reason="schedule_immediate_persona_reply",
     )
 
 

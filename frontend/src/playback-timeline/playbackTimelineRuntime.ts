@@ -103,6 +103,10 @@ export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
     messageId: string,
     start: () => boolean | void,
   ) => boolean | void;
+  ensureMotionTimelineSinkForSegment: (
+    turnId: string | null,
+    messageId: string,
+  ) => boolean;
   markAudioTimelineDuration: (
     turnId: string | null,
     messageId: string,
@@ -850,6 +854,8 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     startSegmentJob,
     startAudioTimelineSink,
     startLipSyncTimelineSink,
+    ensureMotionTimelineSinkForSegment: (turnId, messageId) =>
+      ensureMotionTimelineSink(turnId, messageId),
     markAudioTimelineDuration,
     markAudioTimelineStarted,
     markLipSyncTimelineStarted,

@@ -1,14 +1,15 @@
 task:
   class: bugfix
   risk: high
-  phase: logical_reply_motion_and_lipsync_repair
+  phase: immediate_motion_and_speech_only_timeline_repair
   status: complete
-  scope: Restore AstrBot self-reply Persona Effect scheduling, deduplicate performance-curve work by logical reply identity, and repair bound Live2D lip-sync writes
+  scope: Schedule valid immediate Persona Effects before asynchronous route persistence and register speech-only motion in the owning audio timeline
 context:
   confidence: high
   assumptions:
     - AstrBot physical Record and Plain parts sharing turn plus message_kind are one logical assistant segment; AG99 normalizes their numbered visible_message_id suffix before text/audio/motion/curve aggregation.
-    - Persona Effect scheduling resolves the official AstrBot route decision from turn state first, then _interaction_route_decision, then InteractionResultView.route_decision; an unresolved decision remains a visible scheduling failure.
+    - Immediate Persona Effect scheduling is phase-owned because AstrBot parallel fast response emits before route persistence; final scheduling may still use the persisted route decision.
+    - Speech-only motion must upgrade the current audio segment with a required motion sink before ModelEngine starts its plan.
     - Performance curve generation is at-most-once per logical turn_id plus message_id and is not retried by a later physical output part.
     - Performance curve at-most-once keys and retained work are cleared when control.synth_finished successfully closes the owning turn output queue.
     - Live2D lip-sync analyser callbacks invoke adapter methods with their instance binding preserved; frame write exceptions stop sampling and emit lip_sync_parameter_write_failed.
@@ -234,6 +235,13 @@ architecture:
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
 verification:
   checks_run:
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (288 passed after immediate Persona Effect scheduling repair)
+    - npm test (complete frontend suite passed after speech-only motion sink ownership repair)
+    - npm run typecheck (renderer and node typechecks passed)
+    - npm run build:web (production web build passed)
+    - python -m compileall astrbot_plugin_ag99live_adapter
+    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings)
+    - git diff --check (passed)
     - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (288 passed after logical reply, route-decision, and performance-curve repair)
     - npm test (complete frontend suite passed after bound lip-sync write repair)
     - npm run typecheck (renderer and node typechecks passed)

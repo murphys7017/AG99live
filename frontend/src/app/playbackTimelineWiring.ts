@@ -72,14 +72,25 @@ export function configurePlaybackTimelineMotionRuntime(options: {
           && segment.audio.terminal === "idle",
         );
       },
-      getPlaybackTimelineSnapshotForSegment: playbackTimeline.getPlaybackTimelineSnapshotForSegment,
-      onMissingPlaybackTimeline,
-      handlePlaybackTimelineStarted: (turnId, messageId, playbackTimelineSnapshot) =>
-        motionEngine.handlePlaybackTimelineStarted(projectMotionPlaybackClock({
-          ...playbackTimelineSnapshot,
+      ensureMotionTimelineSinkForSegment: (turnId, messageId) => {
+        const prepared = playbackTimeline.ensureMotionTimelineSinkForSegment(
           turnId,
           messageId,
-        })),
+        );
+        if (!prepared) {
+          console.error("[PlaybackTimeline] failed to register motion sink before audio wakeup.", {
+            turnId,
+            messageId,
+          });
+        }
+        return prepared;
+      },
+      getPlaybackTimelineSnapshotForSegment: playbackTimeline.getPlaybackTimelineSnapshotForSegment,
+      onMissingPlaybackTimeline,
+      handlePlaybackTimelineStarted: (_turnId, _messageId, preparedTimeline) =>
+        motionEngine.handlePlaybackTimelineStarted(
+          projectMotionPlaybackClock(preparedTimeline),
+        ),
     });
 
   playbackTimeline.setAudioTimelineStartedHandler((turnId, messageId) => {

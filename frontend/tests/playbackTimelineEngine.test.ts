@@ -1009,6 +1009,7 @@ function testAudioStartMotionBridgeRefreshesTimelineAtFireTime(): void {
   const scheduled: Array<() => void> = [];
   let snapshot = buildTimelineSnapshot(100);
   const started: PlaybackTimelineSnapshot[] = [];
+  const lifecycleOrder: string[] = [];
   const bridge = createAudioStartMotionTimelineBridge({
     delayMs: 90,
     schedule: (_delayMs, fn) => {
@@ -1016,8 +1017,20 @@ function testAudioStartMotionBridgeRefreshesTimelineAtFireTime(): void {
       return "timer-1";
     },
     clearSchedule: () => {},
-    getPlaybackTimelineSnapshotForSegment: () => snapshot,
+    ensureMotionTimelineSinkForSegment: () => {
+      lifecycleOrder.push("ensure-motion-sink");
+      snapshot = {
+        ...snapshot,
+        sinks: [{ id: "motion", required: true, terminal: "idle" }],
+      };
+      return true;
+    },
+    getPlaybackTimelineSnapshotForSegment: () => {
+      lifecycleOrder.push("refresh-timeline");
+      return snapshot;
+    },
     handlePlaybackTimelineStarted: (_turnId, _messageId, playbackTimeline) => {
+      lifecycleOrder.push("start-model-engine");
       if (playbackTimeline) {
         started.push(playbackTimeline);
       }
@@ -1030,6 +1043,13 @@ function testAudioStartMotionBridgeRefreshesTimelineAtFireTime(): void {
 
   assert.equal(started.length, 1);
   assert.equal(started[0].currentTimeMs, 220);
+  assert.deepEqual(lifecycleOrder, [
+    "ensure-motion-sink",
+    "refresh-timeline",
+    "start-model-engine",
+  ]);
+  assert.equal(started[0].sinks[0]?.id, "motion");
+  assert.equal(started[0].sinks[0]?.required, true);
 }
 
 function testAudioStartMotionBridgeCanCancelPendingWakeup(): void {
@@ -1044,6 +1064,7 @@ function testAudioStartMotionBridgeCanCancelPendingWakeup(): void {
     clearSchedule: (timer) => {
       cleared.push(timer);
     },
+    ensureMotionTimelineSinkForSegment: () => true,
     getPlaybackTimelineSnapshotForSegment: () => buildTimelineSnapshot(0),
     handlePlaybackTimelineStarted: () => {
       started = true;
@@ -1068,6 +1089,7 @@ function testAudioStartMotionBridgeSkipsStaleSegment(): void {
     },
     clearSchedule: () => {},
     canStartMotionForAudioTimeline: () => false,
+    ensureMotionTimelineSinkForSegment: () => true,
     getPlaybackTimelineSnapshotForSegment: () => buildTimelineSnapshot(0),
     handlePlaybackTimelineStarted: () => {
       started = true;
@@ -1090,6 +1112,7 @@ function testAudioStartMotionBridgeReportsMissingTimeline(): void {
       return "timer-missing";
     },
     clearSchedule: () => {},
+    ensureMotionTimelineSinkForSegment: () => true,
     getPlaybackTimelineSnapshotForSegment: () => null,
     onMissingPlaybackTimeline: (turnId, messageId) => {
       missing.push({ turnId, messageId });
