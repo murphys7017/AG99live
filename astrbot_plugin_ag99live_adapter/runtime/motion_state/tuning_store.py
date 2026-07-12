@@ -4,7 +4,7 @@ from copy import deepcopy
 from typing import Any, Callable
 
 from ...motion.motion_intent import PARAMETER_PLAN_SOURCES
-from ...prompts.motion_selector import resolve_selector_few_shot_examples
+from ...prompts.motion_selector import resolve_motion_reference_examples
 from ...prompts.semantic_axis_prompt import profile_prompt_axes
 
 
@@ -114,9 +114,15 @@ class MotionTuningStore:
             self._refresh_effective_examples()
             return
         try:
+            prompt_axes = profile_prompt_axes(profile)
             prompt_axis_ids = {
                 str(axis.get("id") or "").strip()
-                for axis in profile_prompt_axes(profile)
+                for axis in prompt_axes
+                if str(axis.get("id") or "").strip()
+            }
+            prompt_axis_by_id = {
+                str(axis.get("id") or "").strip(): axis
+                for axis in prompt_axes
                 if str(axis.get("id") or "").strip()
             }
         except Exception:
@@ -151,6 +157,12 @@ class MotionTuningStore:
                 continue
             if not self._example_matches_adjusted_plan(filtered_axes, adjusted_plan):
                 continue
+            adjusted_levels = self._project_axes_to_levels(
+                filtered_axes,
+                axis_by_id=prompt_axis_by_id,
+            )
+            if not adjusted_levels:
+                continue
             style_samples.append(
                 {
                     "emotion_label": str(sample.get("emotion_label") or "").strip(),
@@ -166,7 +178,7 @@ class MotionTuningStore:
                     or "expressive"
                     if isinstance(adjusted_plan, dict)
                     else "expressive",
-                    "axes": dict(filtered_axes),
+                    "axis_levels": adjusted_levels,
                 }
             )
             duration_ms = None
@@ -203,7 +215,7 @@ class MotionTuningStore:
 
     def _refresh_effective_examples(self) -> None:
         self.effective_examples = deepcopy(
-            resolve_selector_few_shot_examples(
+            resolve_motion_reference_examples(
                 runtime_state=self._runtime_state,
                 update_runtime_state=True,
             )
@@ -256,7 +268,7 @@ class MotionTuningStore:
         emotion_preferences: dict[str, list[str]] = {}
 
         for sample in samples:
-            axes = sample.get("axes")
+            axes = sample.get("axis_levels")
             if not isinstance(axes, dict) or not axes:
                 continue
             mode = str(sample.get("mode") or "expressive").strip().lower()
@@ -279,7 +291,7 @@ class MotionTuningStore:
                 preferred_axes = sorted(
                     axis_ids,
                     key=lambda axis_id: (
-                        -abs(float(axes.get(axis_id, 0.0)) - 50.0),
+                        -abs(float(axes.get(axis_id, 0.0))),
                         axis_id,
                     ),
                 )[:3]
@@ -346,6 +358,28 @@ class MotionTuningStore:
 
         lines.append("每次仍应先理解这轮对话语气，再在上述风格范围内自由生成。")
         return "\n".join(lines)
+
+    @staticmethod
+    def _project_axes_to_levels(
+        axes: dict[str, float],
+        *,
+        axis_by_id: dict[str, dict[str, Any]],
+    ) -> dict[str, int]:
+        result: dict[str, int] = {}
+        for axis_id, value in axes.items():
+            axis = axis_by_id.get(axis_id)
+            anchors = axis.get("level_anchors") if isinstance(axis, dict) else None
+            if not isinstance(anchors, dict):
+                continue
+            candidates: list[tuple[float, int]] = []
+            for level in range(-3, 4):
+                anchor = anchors.get(str(level))
+                if isinstance(anchor, (int, float)):
+                    candidates.append((abs(float(value) - float(anchor)), level))
+            if not candidates:
+                continue
+            result[axis_id] = min(candidates, key=lambda item: (item[0], abs(item[1])))[1]
+        return result
 
     def normalize_sample(self, sample_payload: Any) -> dict[str, Any]:
         if not isinstance(sample_payload, dict):

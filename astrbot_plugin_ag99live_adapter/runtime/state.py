@@ -89,10 +89,9 @@ class RuntimeState:
         self.action_llm_filter_chunk_max_channels = 8
         self.action_llm_filter_chunk_max_candidates = 96
         self.motion_generation_mode = "single_response_effect"
-        self.realtime_motion_fewshot_enabled = True
-        self.realtime_motion_fewshot_count = 2
-        self.realtime_motion_user_fewshot_count = 0
-        self.realtime_motion_fixed_fewshot_with_reference_templates = False
+        self.motion_tuning_fewshot_enabled = True
+        self.motion_tuning_fewshot_count = 2
+        self.motion_tuning_user_fewshot_count = 0
         self.runtime_cache_root_error = ""
         self.runtime_cache_segment_errors: dict[str, str] = {}
         self._motion_tuning_store = MotionTuningStore(
@@ -102,8 +101,6 @@ class RuntimeState:
             persist_cache=self._persist_runtime_cache_payload,
         )
         self.motion_lab_recorder = self._build_motion_lab_recorder()
-        self.realtime_motion_platform_context_enabled = True
-        self.realtime_motion_platform_description = ""
         self.motion_prompt_instruction = DEFAULT_MOTION_PROMPT_INSTRUCTION
         self.vad_model = "silero_vad"
         self.vad_config: dict[str, Any] = {}
@@ -289,39 +286,6 @@ class RuntimeState:
                 "single_response_effect",
             )
         )
-        self.realtime_motion_fewshot_enabled = bool(
-            _plugin_config_get(self.plugin_config, "realtime_motion_fewshot_enabled", True)
-        )
-        self.realtime_motion_fewshot_count = max(
-            0,
-            int(_plugin_config_get(self.plugin_config, "realtime_motion_fewshot_count", 2)),
-        )
-        self.realtime_motion_user_fewshot_count = max(
-            0,
-            int(_plugin_config_get(self.plugin_config, "realtime_motion_user_fewshot_count", 0)),
-        )
-        self.realtime_motion_fixed_fewshot_with_reference_templates = bool(
-            _plugin_config_get(
-                self.plugin_config,
-                "realtime_motion_fixed_fewshot_with_reference_templates",
-                False,
-            )
-        )
-        self.realtime_motion_platform_context_enabled = bool(
-            _plugin_config_get(
-                self.plugin_config,
-                "realtime_motion_platform_context_enabled",
-                True,
-            )
-        )
-        self.realtime_motion_platform_description = str(
-            _plugin_config_get(
-                self.plugin_config,
-                "realtime_motion_platform_description",
-                "",
-            )
-            or ""
-        ).strip()
         self.motion_prompt_instruction = _normalize_motion_prompt_instruction(
             _plugin_config_get(
                 self.plugin_config,

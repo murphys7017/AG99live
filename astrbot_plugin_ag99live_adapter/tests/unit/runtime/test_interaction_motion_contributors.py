@@ -329,10 +329,8 @@ def _build_runtime_state(*, mode: str = "split_after_reply"):
         (),
         {
             "motion_generation_mode": mode,
-            "enable_realtime_motion_plan": True,
             "ag99live_motion_persona_effect_available": True,
             "selected_motion_analysis_provider": None,
-            "realtime_motion_timeout_seconds": 2.0,
             "motion_prompt_instruction": "Use readable exaggerated head and smile motion.",
             "model_info": _build_semantic_model_info(),
         },
@@ -827,6 +825,33 @@ def test_persona_effect_axes_field_is_rejected_instead_of_emitting_v3(
 
     assert payload is None
     assert reason == "persona_effect;axes_forbidden_use_axis_levels"
+
+
+def test_persona_effect_rejects_axis_not_exposed_by_selected_profile(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    payload, reason = module._payload_normalize_motion_arguments_payload(
+        {
+            "intent_tags": ["happy"],
+            "axis_levels": {
+                "head_yaw": 1,
+                "unknown_axis": 2,
+            },
+        },
+        _build_runtime_state(),
+        base_reason="persona_effect",
+        append_resolution_reason=lambda base, suffix: ";".join(
+            item for item in (base, suffix) if item
+        ),
+        sanitize_reason_fragment=lambda value: str(value).strip(),
+    )
+
+    assert payload is None
+    assert reason == "persona_effect;unknown_axis_levels:unknown_axis"
 
 
 def test_prompt_contributor_returns_extensions_for_core_reply_purpose(
@@ -1341,11 +1366,11 @@ def test_result_contributor_returns_motion_sequence_in_single_effect(
                     "intent_tags": ["测试", "左右扭头"],
                     "motion_steps": [
                         {
-                            "axis_levels": {"head_yaw": -3, "gaze_x": -2},
+                            "axis_levels": {"head_yaw": -3, "eye_open_left": -2},
                             "duration_weight": 1,
                         },
                         {
-                            "axis_levels": {"head_yaw": 3, "gaze_x": 2},
+                            "axis_levels": {"head_yaw": 3, "eye_open_left": 2},
                             "duration_weight": 1,
                         },
                     ],
@@ -1362,11 +1387,11 @@ def test_result_contributor_returns_motion_sequence_in_single_effect(
     assert "axis_levels" not in payload
     assert payload["motion_steps"] == [
         {
-            "axis_levels": {"head_yaw": -3, "gaze_x": -2},
+            "axis_levels": {"head_yaw": -3, "eye_open_left": -2},
             "duration_weight": 1,
         },
         {
-            "axis_levels": {"head_yaw": 3, "gaze_x": 2},
+            "axis_levels": {"head_yaw": 3, "eye_open_left": 2},
             "duration_weight": 1,
         },
     ]
@@ -1657,7 +1682,7 @@ def test_result_contributor_ignores_removed_inline_mode_for_final_phase(
             _motion_effect_call(
                 {
                     "intent_tags": ["说明"],
-                    "axis_levels": {"head_yaw": 1, "body_yaw": 1},
+                    "axis_levels": {"head_yaw": 1, "eye_open_left": 1},
                 }
             )
         ],
@@ -1933,7 +1958,7 @@ def test_result_contributor_ignores_removed_inline_mode_for_self_reply(
             _motion_effect_call(
                 {
                     "intent_tags": ["轻快"],
-                    "axis_levels": {"head_yaw": 1, "mouth_smile": 1},
+                    "axis_levels": {"head_yaw": 1, "eye_open_left": 1},
                 }
             )
         ],
@@ -2063,8 +2088,17 @@ def test_register_interaction_contributors_uses_available_hooks(
     ]
     assert effect.parameters["additionalProperties"] is False
     assert effect.parameters["properties"]["axis_levels"]["minProperties"] == 1
+    assert effect.parameters["properties"]["axis_levels"]["maxProperties"] == 6
     assert effect.parameters["properties"]["axis_levels"]["additionalProperties"]["minimum"] == -3
     assert effect.parameters["properties"]["axis_levels"]["additionalProperties"]["maximum"] == 3
+    assert effect.parameters["properties"]["intent_tags"]["minItems"] == 1
+    assert effect.parameters["properties"]["intent_tags"]["maxItems"] == 6
+    assert effect.parameters["properties"]["intent_tags"]["uniqueItems"] is True
+    assert effect.parameters["properties"]["duration_hint_ms"] == {
+        "type": "integer",
+        "minimum": 320,
+        "maximum": 15000,
+    }
     assert set(effect.parameters["properties"]) == {
         "intent_tags",
         "axis_levels",

@@ -421,6 +421,44 @@ def test_ensure_semantic_axis_profile_persists_missing_level_anchors(tmp_path) -
     )
 
 
+def test_ensure_semantic_axis_profile_persists_missing_axis_dynamics(tmp_path) -> None:
+    model_dir = tmp_path / "DemoModel"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
+    model_payload = _build_model_payload()
+
+    original_profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+    profile_path = build_semantic_axis_profile_path(model_dir)
+    legacy_payload = json.loads(profile_path.read_text(encoding="utf-8"))
+    for axis in legacy_payload["axes"]:
+        axis.pop("dynamics", None)
+    profile_path.write_text(
+        json.dumps(legacy_payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    migrated_profile = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+    persisted_payload = json.loads(profile_path.read_text(encoding="utf-8"))
+
+    assert migrated_profile["revision"] == original_profile["revision"]
+    assert all(
+        set(axis["dynamics"])
+        == {
+            "max_velocity",
+            "max_acceleration",
+            "life_motion_scale",
+            "max_speech_offset_ratio",
+        }
+        for axis in persisted_payload["axes"]
+    )
+
+
 def test_ensure_semantic_axis_profile_refreshes_stale_user_modified_old_default_design(tmp_path) -> None:
     model_dir = tmp_path / "DemoModel"
     model_dir.mkdir(parents=True, exist_ok=True)

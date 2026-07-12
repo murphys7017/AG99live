@@ -17,7 +17,7 @@ def build_example_axes(axis_names: list[str], **overrides: int) -> dict[str, int
     return axes
 
 
-def create_default_selector_few_shot_examples(axis_names: list[str]) -> list[dict[str, Any]]:
+def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict[str, Any]]:
     return [
         {
             "input": (
@@ -154,14 +154,14 @@ CORE_EXAMPLE_CATEGORY_GROUPS: list[tuple[str, ...]] = [
 ]
 
 
-def resolve_selector_few_shot_examples(
+def resolve_motion_reference_examples(
     *,
     runtime_state: Any,
     default_examples: list[dict[str, Any]],
     normalize_emotion_key: Callable[[str], str],
     update_runtime_state: bool = True,
 ) -> list[dict[str, Any]]:
-    enabled = bool(getattr(runtime_state, "realtime_motion_fewshot_enabled", True))
+    enabled = bool(getattr(runtime_state, "motion_tuning_fewshot_enabled", True))
     if not enabled:
         if update_runtime_state and hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
             runtime_state.motion_tuning_fewshot_diagnostics = []
@@ -169,7 +169,7 @@ def resolve_selector_few_shot_examples(
             runtime_state.motion_tuning_effective_examples = []
         return []
 
-    count = int(getattr(runtime_state, "realtime_motion_fewshot_count", 2))
+    count = int(getattr(runtime_state, "motion_tuning_fewshot_count", 2))
     count = max(0, count)
     if count == 0:
         if update_runtime_state and hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
@@ -183,7 +183,7 @@ def resolve_selector_few_shot_examples(
         for item in getattr(runtime_state, "motion_tuning_reference_examples", [])
         if isinstance(item, dict)
     ]
-    user_example_count = int(getattr(runtime_state, "realtime_motion_user_fewshot_count", 0))
+    user_example_count = int(getattr(runtime_state, "motion_tuning_user_fewshot_count", 0))
     user_example_count = max(0, min(count, user_example_count))
     selected_user_examples = raw_user_examples[:user_example_count]
 

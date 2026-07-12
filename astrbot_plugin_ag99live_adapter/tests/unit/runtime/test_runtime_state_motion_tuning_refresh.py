@@ -8,7 +8,7 @@ from copy import deepcopy
 import pytest
 
 from astrbot_plugin_ag99live_adapter.prompts.motion_selector import (
-    resolve_selector_few_shot_examples,
+    resolve_motion_reference_examples,
 )
 from astrbot_plugin_ag99live_adapter.tests.unit.live2d.test_support import build_seed_model_info
 
@@ -434,10 +434,7 @@ def test_runtime_state_exposes_fewshot_shortage_diagnostics(
     state = runtime_state.RuntimeState(
         platform_config={},
         plugin_context=None,
-        plugin_config={
-            "live2d_model_name": "DemoModel",
-            "realtime_motion_fewshot_count": 3,
-        },
+        plugin_config={"live2d_model_name": "DemoModel"},
         plugin_config_loader=None,
         host="127.0.0.1",
         http_port=12397,
@@ -445,6 +442,7 @@ def test_runtime_state_exposes_fewshot_shortage_diagnostics(
         live2ds_dir=live2ds_dir,
     )
     state.refresh()
+    state.motion_tuning_fewshot_count = 3
     current_revision = int(
         state.model_info["models"][0]["semantic_axis_profile"]["revision"]
     )
@@ -452,7 +450,7 @@ def test_runtime_state_exposes_fewshot_shortage_diagnostics(
         _build_motion_tuning_sample(profile_revision=current_revision)
     )
 
-    resolved_examples = resolve_selector_few_shot_examples(runtime_state=state)
+    resolved_examples = resolve_motion_reference_examples(runtime_state=state)
     assert len(resolved_examples) == 3
     assert state.list_motion_tuning_fewshot_diagnostics() == [
         "motion_tuning_user_samples_insufficient:requested=3:user_available=1:user_selected=0",
@@ -483,10 +481,7 @@ def test_runtime_state_effective_examples_query_is_read_only(
     state = runtime_state.RuntimeState(
         platform_config={},
         plugin_context=None,
-        plugin_config={
-            "live2d_model_name": "DemoModel",
-            "realtime_motion_fewshot_count": 3,
-        },
+        plugin_config={"live2d_model_name": "DemoModel"},
         plugin_config_loader=None,
         host="127.0.0.1",
         http_port=12397,
@@ -494,6 +489,7 @@ def test_runtime_state_effective_examples_query_is_read_only(
         live2ds_dir=live2ds_dir,
     )
     state.refresh()
+    state.motion_tuning_fewshot_count = 3
     current_revision = int(
         state.model_info["models"][0]["semantic_axis_profile"]["revision"]
     )

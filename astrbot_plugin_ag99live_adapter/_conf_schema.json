@@ -183,7 +183,7 @@
     "_special": "select_provider_stt"
   },
   "motion_analysis_provider_id": {
-    "description": "动作分析与 realtime motion selector 使用的聊天 Provider。留空时跟随当前 AstrBot 会话聊天模型。",
+    "description": "基础动作库分析和筛选使用的聊天 Provider。留空时跟随当前 AstrBot 会话聊天模型。",
     "type": "string",
     "default": "",
     "_special": "select_provider"
@@ -229,55 +229,10 @@
     "type": "int",
     "default": 96
   },
-  "enable_realtime_motion_plan": {
-    "description": "是否启用 runtime 内部的 realtime motion fallback 组件。该组件不是当前文档主线里的默认动作来源；如果被显式调用，产物仍必须回到同一条 `engine.motion_*` 协议链路与同一 segment identity。",
-    "type": "bool",
-    "default": true
-  },
-  "realtime_motion_mode": {
-    "description": "下发给前端的动作模式标识（例如 realtime、preview）。",
-    "type": "string",
-    "default": "realtime"
-  },
-  "realtime_motion_timeout_seconds": {
-    "description": "实时动作计划生成超时时间（秒，AstrBot Provider 模式）。",
-    "type": "float",
-    "default": 8.0
-  },
-  "realtime_motion_fewshot_enabled": {
-    "description": "是否为实时动作 selector 注入 Few-shot 示例。",
-    "type": "bool",
-    "default": true
-  },
-  "realtime_motion_fewshot_count": {
-    "description": "实时动作 selector 使用的 Few-shot 示例数量（0 表示关闭）。",
-    "type": "int",
-    "default": 2
-  },
-  "realtime_motion_user_fewshot_count": {
-    "description": "允许用户调参样本直接作为 Few-shot 示例的数量。默认 0，用户样本主要汇总为角色风格偏好，避免形成固定动作模板。",
-    "type": "int",
-    "default": 0
-  },
-  "realtime_motion_fixed_fewshot_with_reference_templates": {
-    "description": "当旧动作/表情参考模板可用时，是否仍向 realtime motion fallback selector 注入内置固定 Few-shot。默认关闭，避免固定示例压过真实模板；模板为空时固定 Few-shot 仍会作为 fallback。",
-    "type": "bool",
-    "default": false
-  },
-  "realtime_motion_platform_context_enabled": {
-    "description": "是否在实时动作 selector Prompt 中注入平台交互描述。",
-    "type": "bool",
-    "default": true
-  },
-  "realtime_motion_platform_description": {
-    "description": "实时动作 selector 的自定义平台描述（留空使用内置默认描述）。",
-    "type": "string",
-    "default": ""
-  },
   "motion_prompt_instruction": {
     "description": "补充给动作 intent 生成模型的指令，用于控制动作风格和幅度。留空时使用内置默认指令。",
     "type": "string",
-    "default": "Live2D 表现需要比真人更夸张。非中性情绪下，请让头部、眼睛、嘴部或眉毛至少 2 到 3 个轴明显偏离 50，避免输出几乎无动作的 45 到 55 区间。"
+    "default": "根据回复的真实语气选择直接动作意图。只输出有明确表演贡献的轴；头身跟随等派生关系由运行时关系图处理，不要为了凑完整而重复填写。普通说明使用少量轻级别，明确情绪再提高到中强等级。"
   },
   "vad_model": {
     "description": "前端原始音频断句使用的 VAD 模型。",

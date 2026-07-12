@@ -147,7 +147,6 @@ def _runtime_state_stub(
             "motion_generation_mode": mode,
             "enable_inline_motion_contract": enable_inline_motion_contract,
             "ag99live_motion_persona_effect_available": persona_effect_available,
-            "enable_realtime_motion_plan": True,
             "model_info": _build_semantic_model_info(),
             "motion_prompt_instruction": "Use readable exaggerated head and smile motion.",
         },

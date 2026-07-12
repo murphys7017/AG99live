@@ -69,6 +69,8 @@ def normalize_motion_arguments_payload(
     intent_tags = normalize_motion_intent_tags(motion_hint.get("intent_tags"))
     if not intent_tags:
         return None, append_resolution_reason(base_reason, "intent_tags_empty")
+    if len(intent_tags) > 6 or any(len(tag) > 48 for tag in intent_tags):
+        return None, append_resolution_reason(base_reason, "intent_tags_invalid")
     emotion_label = derive_motion_emotion_label(intent_tags)
     requested_expression_resource_id = normalize_motion_resource_id(
         motion_hint.get("expression_resource_id")
@@ -107,6 +109,22 @@ def normalize_motion_arguments_payload(
             reason,
             "rejected_axis_levels:" + ",".join(rejected_levels),
         )
+    allowed_axis_ids = {
+        str(axis.get("id") or "").strip()
+        for axis in profile_prompt_axes(semantic_profile)
+        if str(axis.get("id") or "").strip()
+    }
+    used_axis_ids = set(validated_levels or {})
+    if motion_steps:
+        used_axis_ids.update(motion_steps[0]["axis_levels"])
+    unknown_axis_ids = sorted(used_axis_ids - allowed_axis_ids)
+    if unknown_axis_ids:
+        return None, append_resolution_reason(
+            reason,
+            "unknown_axis_levels:" + ",".join(unknown_axis_ids),
+        )
+    if len(used_axis_ids) > 6:
+        return None, append_resolution_reason(reason, "axis_level_count_exceeded")
     if has_axis_levels and not validated_levels:
         reason = append_resolution_reason(reason, "axis_levels_empty_or_invalid")
 

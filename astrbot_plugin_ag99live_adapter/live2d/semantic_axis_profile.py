@@ -36,6 +36,13 @@ class SemanticAxisParameterBinding(TypedDict):
     parameter_name: NotRequired[str]
 
 
+class SemanticAxisDynamics(TypedDict):
+    max_velocity: float
+    max_acceleration: float
+    life_motion_scale: float
+    max_speech_offset_ratio: float
+
+
 class SemanticAxisDefinition(TypedDict):
     id: str
     label: str
@@ -50,6 +57,7 @@ class SemanticAxisDefinition(TypedDict):
     positive_semantics: list[str]
     negative_semantics: list[str]
     usage_notes: str
+    dynamics: SemanticAxisDynamics
     parameter_bindings: list[SemanticAxisParameterBinding]
 
 
@@ -396,6 +404,68 @@ _COUPLING_DEFAULTS = (
 )
 
 
+def _default_axis_dynamics(axis_id: str, semantic_group: str) -> SemanticAxisDynamics:
+    if semantic_group == "head":
+        values = (120.0, 600.0, 0.55, 0.08)
+    elif semantic_group in {"body", "torso", "shoulder"}:
+        values = (70.0, 300.0, 0.30, 0.06)
+    elif semantic_group == "gaze":
+        values = (180.0, 900.0, 0.20, 0.04)
+    elif semantic_group in {"eye", "mouth", "brow"}:
+        values = (160.0, 800.0, 0.12, 0.03)
+    else:
+        values = (100.0, 500.0, 0.0, 0.0)
+    if axis_id in {"mouth_open", "breath"}:
+        values = (180.0, 900.0, 0.0, 0.0)
+    return {
+        "max_velocity": values[0],
+        "max_acceleration": values[1],
+        "life_motion_scale": values[2],
+        "max_speech_offset_ratio": values[3],
+    }
+
+
+def _normalize_axis_dynamics(
+    value: Any,
+    *,
+    axis_id: str,
+    semantic_group: str,
+) -> SemanticAxisDynamics:
+    defaults = _default_axis_dynamics(axis_id, semantic_group)
+    if value is None:
+        return defaults
+    if not isinstance(value, Mapping):
+        raise SemanticAxisProfileError(f"`{axis_id}.dynamics` must be an object.")
+    result: SemanticAxisDynamics = {
+        "max_velocity": _coerce_float(
+            value.get("max_velocity"), field_name=f"{axis_id}.dynamics.max_velocity"
+        ),
+        "max_acceleration": _coerce_float(
+            value.get("max_acceleration"), field_name=f"{axis_id}.dynamics.max_acceleration"
+        ),
+        "life_motion_scale": _coerce_float(
+            value.get("life_motion_scale"), field_name=f"{axis_id}.dynamics.life_motion_scale"
+        ),
+        "max_speech_offset_ratio": _coerce_float(
+            value.get("max_speech_offset_ratio"),
+            field_name=f"{axis_id}.dynamics.max_speech_offset_ratio",
+        ),
+    }
+    if result["max_velocity"] <= 0 or result["max_acceleration"] <= 0:
+        raise SemanticAxisProfileError(
+            f"`{axis_id}.dynamics` velocity and acceleration must be positive."
+        )
+    if not 0 <= result["life_motion_scale"] <= 1:
+        raise SemanticAxisProfileError(
+            f"`{axis_id}.dynamics.life_motion_scale` must be within [0, 1]."
+        )
+    if not 0 <= result["max_speech_offset_ratio"] <= 0.5:
+        raise SemanticAxisProfileError(
+            f"`{axis_id}.dynamics.max_speech_offset_ratio` must be within [0, 0.5]."
+        )
+    return result
+
+
 def build_semantic_axis_profile_path(model_dir: Path) -> Path:
     return model_dir / SEMANTIC_AXIS_PROFILE_DIRNAME / SEMANTIC_AXIS_PROFILE_FILENAME
 
@@ -507,6 +577,10 @@ def build_default_semantic_axis_profile(
                 "positive_semantics": list(axis_defaults["positive_semantics"]),
                 "negative_semantics": list(axis_defaults["negative_semantics"]),
                 "usage_notes": str(axis_defaults["usage_notes"]),
+                "dynamics": _default_axis_dynamics(
+                    axis_id,
+                    str(axis_defaults["semantic_group"]),
+                ),
                 "parameter_bindings": parameter_bindings,
             }
         )
@@ -551,6 +625,7 @@ def build_default_semantic_axis_profile(
                 "positive_semantics": [f"increase {parameter_name}"],
                 "negative_semantics": [f"decrease {parameter_name}"],
                 "usage_notes": "Auto-added from model scan. Promote this axis manually before using it in prompt/runtime.",
+                "dynamics": _default_axis_dynamics(axis_id, semantic_group),
                 "parameter_bindings": [
                     {
                         "parameter_id": parameter_id,
@@ -875,6 +950,15 @@ def validate_semantic_axis_profile(
             value_range=value_range,
             field_name=f"{axis_id}.level_anchors",
         )
+        semantic_group = _require_non_empty_string(
+            raw_axis.get("semantic_group"),
+            field_name=f"{axis_id}.semantic_group",
+        )
+        dynamics = _normalize_axis_dynamics(
+            raw_axis.get("dynamics"),
+            axis_id=axis_id,
+            semantic_group=semantic_group,
+        )
 
         normalized_axes.append(
             {
@@ -884,10 +968,7 @@ def validate_semantic_axis_profile(
                     raw_axis.get("description"),
                     field_name=f"{axis_id}.description",
                 ),
-                "semantic_group": _require_non_empty_string(
-                    raw_axis.get("semantic_group"),
-                    field_name=f"{axis_id}.semantic_group",
-                ),
+                "semantic_group": semantic_group,
                 "control_role": _require_allowed_string(
                     raw_axis.get("control_role"),
                     field_name=f"{axis_id}.control_role",
@@ -910,6 +991,7 @@ def validate_semantic_axis_profile(
                     raw_axis.get("usage_notes"),
                     field_name=f"{axis_id}.usage_notes",
                 ),
+                "dynamics": dynamics,
                 "parameter_bindings": normalized_bindings,
             }
         )
@@ -1221,6 +1303,8 @@ def _profile_needs_schema_normalization(path: Path) -> bool:
     return isinstance(axes, list) and any(
         isinstance(axis, Mapping)
         and (
+            not isinstance(axis.get("dynamics"), Mapping)
+            or
             not isinstance(axis.get("level_anchors"), Mapping)
             or {
                 str(key).strip()

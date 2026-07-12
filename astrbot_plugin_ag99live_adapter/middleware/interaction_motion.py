@@ -265,7 +265,14 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
                 "properties": {
                     "intent_tags": {
                         "type": "array",
-                        "items": {"type": "string"},
+                        "minItems": 1,
+                        "maxItems": 6,
+                        "uniqueItems": True,
+                        "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 48,
+                        },
                     },
                     "axis_levels": {
                         "type": "object",
@@ -275,6 +282,7 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
                             "maximum": 3,
                         },
                         "minProperties": 1,
+                        "maxProperties": 6,
                     },
                     "motion_steps": {
                         "type": "array",
@@ -292,6 +300,7 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
                                         "maximum": 3,
                                     },
                                     "minProperties": 1,
+                                    "maxProperties": 6,
                                 },
                                 "duration_weight": {
                                     "type": "integer",
@@ -302,9 +311,21 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
                             "required": ["axis_levels", "duration_weight"],
                         },
                     },
-                    "duration_hint_ms": {"type": "integer"},
-                    "expression_resource_id": {"type": "string"},
-                    "motion_resource_id": {"type": "string"},
+                    "duration_hint_ms": {
+                        "type": "integer",
+                        "minimum": 320,
+                        "maximum": 15000,
+                    },
+                    "expression_resource_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160,
+                    },
+                    "motion_resource_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160,
+                    },
                 },
                 "required": ["intent_tags"],
                 "oneOf": [
@@ -635,10 +656,11 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     )
     return (
         f"{output_contract_text}"
-        "intent_tags 用 2 到 6 个开放关键词概括本轮语气、姿态和场景。"
+        "intent_tags 用 1 到 6 个开放关键词概括本轮语气、姿态和场景。"
         f"{resource_field_text}"
         f"{axis_shape_text}"
         f"{axis_instruction}"
+        "只输出本轮直接需要控制的轴，最多 6 个；关系图可派生的跟随轴不要为了凑完整而重复输出。"
         "优先选择能表达姿态方向、视线焦点和身体重心的关键轴，再用少量表情轴补充情绪细节。"
         "普通回复也要给轻量姿态参数；明显转身、强调、回避、惊讶、调侃、开心或疑惑时，动作幅度要更明确。"
         "示例只展示结构和数值，不要照抄示例内容。"
@@ -695,6 +717,9 @@ def _build_motion_capability_prompt_payload(
     style_prompt = str(capability_payload.get("motion_style_prompt") or "").strip()
     if style_prompt:
         result["character_motion_style"] = style_prompt
+    motion_instruction = str(capability_payload.get("motion_instruction") or "").strip()
+    if motion_instruction:
+        result["motion_generation_guidance"] = motion_instruction
 
     references = capability_payload.get("fallback_pose_candidates")
     if isinstance(references, list):
