@@ -424,7 +424,7 @@ def validate_parameter_plan_v2_payload(plan: Any) -> tuple[bool, str]:
         if parameter_id in seen_parameter_ids:
             return False, f"duplicate_parameter_id:{parameter_id}"
         seen_parameter_ids.add(parameter_id)
-        for key in ("target_value", "weight"):
+        for key in ("target_value", "neutral_target_value", "weight"):
             value = item.get(key)
             if not isinstance(value, (int, float)):
                 return False, f"parameter_{key}_not_number"
@@ -434,7 +434,29 @@ def validate_parameter_plan_v2_payload(plan: Any) -> tuple[bool, str]:
         if weight < 0.0 or weight > 1.0:
             return False, "parameter_weight_out_of_range"
         source = item.get("source")
-        if source is not None and source not in PARAMETER_PLAN_SOURCES:
+        if source not in PARAMETER_PLAN_SOURCES:
             return False, f"parameter_source_invalid:{source}"
+        dynamics = item.get("dynamics")
+        if not isinstance(dynamics, dict):
+            return False, "parameter_dynamics_not_object"
+        for key in (
+            "max_velocity",
+            "max_acceleration",
+            "life_motion_scale",
+            "max_speech_offset",
+        ):
+            value = dynamics.get(key)
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                return False, f"parameter_dynamics_{key}_not_number"
+            if not float("-inf") < float(value) < float("inf"):
+                return False, f"parameter_dynamics_{key}_not_finite"
+        if float(dynamics["max_velocity"]) <= 0:
+            return False, "parameter_dynamics_max_velocity_invalid"
+        if float(dynamics["max_acceleration"]) <= 0:
+            return False, "parameter_dynamics_max_acceleration_invalid"
+        if not 0 <= float(dynamics["life_motion_scale"]) <= 1:
+            return False, "parameter_dynamics_life_motion_scale_invalid"
+        if float(dynamics["max_speech_offset"]) < 0:
+            return False, "parameter_dynamics_max_speech_offset_invalid"
 
     return True, ""

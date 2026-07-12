@@ -273,12 +273,8 @@ export function parseSemanticParameterPlan(
       return { ok: false, reason: "parameter_plan_v2.invalid_modulation" };
     }
     parameterIds.add(parameterId);
-    let source: SemanticParameterPlan["parameters"][number]["source"] | undefined;
-    if (item.source !== undefined) {
-      if (!isSemanticParameterPlanSource(item.source)) {
-        return { ok: false, reason: "parameter_plan_v2.invalid_parameter_source" };
-      }
-      source = item.source;
+    if (!isSemanticParameterPlanSource(item.source)) {
+      return { ok: false, reason: "parameter_plan_v2.invalid_parameter_source" };
     }
     parameters.push({
       axis_id: axisId,
@@ -287,7 +283,7 @@ export function parseSemanticParameterPlan(
       neutral_target_value: neutralTargetValue,
       weight,
       input_value: isFiniteNumber(inputValue) ? inputValue : undefined,
-      source,
+      source: item.source,
       keyframes,
       modulation,
       dynamics,

@@ -75,6 +75,11 @@ function startLiveLipSync(
 ): LiveLipSyncRuntime | null {
   const adapter = window.getLAppAdapter?.();
   if (!adapter || typeof adapter.setExternalLipSyncValue !== "function") {
+    console.error("[Live2D] lip sync adapter is unavailable.");
+    return null;
+  }
+  if (adapter.hasConfiguredLipSyncParameters?.() !== true) {
+    console.error("[Live2D] model has no configured lip sync parameters.");
     return null;
   }
 
@@ -146,7 +151,7 @@ function startLiveLipSync(
       },
     };
   } catch (error) {
-    console.warn("[Live2D] live lip sync analyser unavailable.", error);
+    console.error("[Live2D] live lip sync analyser failed.", error);
     return null;
   }
 }

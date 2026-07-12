@@ -169,11 +169,19 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
         };
       }
     }
-    ports.session.markMotionReleased(job.turnId, job.messageId);
-    timeline.startMotionSink(
+    const motionStarted = timeline.startMotionSink(
       job.turnId,
       job.messageId,
-    );
+    ) === true;
+    if (!motionStarted) {
+      return {
+        releasedText,
+        releasedAudio,
+        releasedMotion: false,
+        handledMotion: true,
+      };
+    }
+    ports.session.markMotionReleased(job.turnId, job.messageId);
     releasedMotion = true;
     ports.session.markPhase(job.turnId, "playing");
   }

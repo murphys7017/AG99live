@@ -21,6 +21,8 @@ export interface PlaybackTimelineSegmentExecutionResult {
   releasedText: boolean;
   releasedAudio: boolean;
   releasedMotion: boolean;
+  /** Motion payload reached a terminal decision and must not be retried. */
+  handledMotion?: boolean;
 }
 
 export interface PlaybackTimelineSegmentSessionPort {

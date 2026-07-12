@@ -47,6 +47,7 @@ declare global {
       stopDirectParameterPlan?: (reason?: string, status?: DirectParameterPlanTerminalStatus) => void;
       getDirectParameterPlanError?: () => string;
       setExternalLipSyncValue?: (value: number) => void;
+      hasConfiguredLipSyncParameters?: () => boolean;
       clearExternalLipSyncValue?: () => void;
     };
     LAppDelegate?: {

@@ -45,6 +45,11 @@ import { LAppPal } from "./lapppal";
 import { advanceParameterDynamics } from "./parameterdynamics";
 import { TextureInfo } from "./lapptexturemanager";
 import { CubismMoc } from "@framework/model/cubismmoc";
+import {
+  getLive2DModelLoadState,
+  markLive2DModelFailed,
+  markLive2DModelReady,
+} from "./modelreadiness";
 
 const AsyncMotionAcceptedHandle = { status: "async_motion_accepted" };
 
@@ -241,6 +246,23 @@ interface DirectParameterPlanState {
  * モデル生成、機能コンポーネント生成、更新処理とレンダリングの呼び出しを行う。
  */
 export class LAppModel extends CubismUserModel {
+  private readonly _loadGeneration = getLive2DModelLoadState().generation;
+
+  private failModelLoad(reason: string, error?: unknown): void {
+    const details = error instanceof Error ? error.message : String(error ?? "");
+    const message = details ? `${reason}:${details}` : reason;
+    CubismLogError(message);
+    markLive2DModelFailed(this._loadGeneration, message);
+  }
+
+  private async fetchRequiredArrayBuffer(path: string): Promise<ArrayBuffer> {
+    const response = await fetch(path);
+    if (!response.ok) {
+      throw new Error(`http_${response.status}:${path}`);
+    }
+    return response.arrayBuffer();
+  }
+
   /**
    * model3.jsonが置かれたディレクトリとファイルパスからモデルを生成する
    * @param dir
@@ -250,7 +272,12 @@ export class LAppModel extends CubismUserModel {
     this._modelHomeDir = dir;
 
     fetch(`${this._modelHomeDir}${fileName}`)
-      .then((response) => response.arrayBuffer())
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`http_${response.status}`);
+        }
+        return response.arrayBuffer();
+      })
       .then((arrayBuffer) => {
         const setting: ICubismModelSetting = new CubismModelSettingJson(
           arrayBuffer,
@@ -264,8 +291,7 @@ export class LAppModel extends CubismUserModel {
         this.setupModel(setting);
       })
       .catch((error) => {
-        // model3.json読み込みでエラーが発生した時点で描画は不可能なので、setupせずエラーをcatchして何もしない
-        CubismLogError(`Failed to load file ${this._modelHomeDir}${fileName}`);
+        this.failModelLoad(`live2d_model_setting_load_failed:${this._modelHomeDir}${fileName}`, error);
       });
   }
 
@@ -289,24 +315,15 @@ export class LAppModel extends CubismUserModel {
     if (this._modelSetting.getModelFileName() != "") {
       const modelFileName = this._modelSetting.getModelFileName();
 
-      fetch(`${this._modelHomeDir}${modelFileName}`)
-        .then((response) => {
-          if (response.ok) {
-            return response.arrayBuffer();
-          } else if (response.status >= 400) {
-            CubismLogError(
-              `Failed to load file ${this._modelHomeDir}${modelFileName}`
-            );
-            return new ArrayBuffer(0);
-          }
-        })
+      this.fetchRequiredArrayBuffer(`${this._modelHomeDir}${modelFileName}`)
         .then((arrayBuffer) => {
           this.loadModel(arrayBuffer, this._mocConsistency, LAppDefine.CurrentKScale);
           this._state = LoadStep.LoadExpression;
 
           // callback
           loadCubismExpression();
-        });
+        })
+        .catch((error) => this.failModelLoad("live2d_moc_load_failed", error));
 
       this._state = LoadStep.WaitLoadModel;
     } else {
@@ -323,18 +340,7 @@ export class LAppModel extends CubismUserModel {
           const expressionFileName =
             this._modelSetting.getExpressionFileName(i);
 
-          fetch(`${this._modelHomeDir}${expressionFileName}`)
-            .then((response) => {
-              if (response.ok) {
-                return response.arrayBuffer();
-              } else if (response.status >= 400) {
-                CubismLogError(
-                  `Failed to load file ${this._modelHomeDir}${expressionFileName}`
-                );
-                // ファイルが存在しなくてもresponseはnullを返却しないため、空のArrayBufferで対応する
-                return new ArrayBuffer(0);
-              }
-            })
+          this.fetchRequiredArrayBuffer(`${this._modelHomeDir}${expressionFileName}`)
             .then((arrayBuffer) => {
               const motion: ACubismMotion = this.loadExpression(
                 arrayBuffer,
@@ -359,7 +365,8 @@ export class LAppModel extends CubismUserModel {
                 // callback
                 loadCubismPhysics();
               }
-            });
+            })
+            .catch((error) => this.failModelLoad("live2d_expression_load_failed", error));
         }
         this._state = LoadStep.WaitLoadExpression;
       } else {
@@ -375,17 +382,7 @@ export class LAppModel extends CubismUserModel {
       if (this._modelSetting.getPhysicsFileName() != "") {
         const physicsFileName = this._modelSetting.getPhysicsFileName();
 
-        fetch(`${this._modelHomeDir}${physicsFileName}`)
-          .then((response) => {
-            if (response.ok) {
-              return response.arrayBuffer();
-            } else if (response.status >= 400) {
-              CubismLogError(
-                `Failed to load file ${this._modelHomeDir}${physicsFileName}`
-              );
-              return new ArrayBuffer(0);
-            }
-          })
+        this.fetchRequiredArrayBuffer(`${this._modelHomeDir}${physicsFileName}`)
           .then((arrayBuffer) => {
             this.loadPhysics(arrayBuffer, arrayBuffer.byteLength);
 
@@ -393,7 +390,8 @@ export class LAppModel extends CubismUserModel {
 
             // callback
             loadCubismPose();
-          });
+          })
+          .catch((error) => this.failModelLoad("live2d_physics_load_failed", error));
         this._state = LoadStep.WaitLoadPhysics;
       } else {
         this._state = LoadStep.LoadPose;
@@ -408,17 +406,7 @@ export class LAppModel extends CubismUserModel {
       if (this._modelSetting.getPoseFileName() != "") {
         const poseFileName = this._modelSetting.getPoseFileName();
 
-        fetch(`${this._modelHomeDir}${poseFileName}`)
-          .then((response) => {
-            if (response.ok) {
-              return response.arrayBuffer();
-            } else if (response.status >= 400) {
-              CubismLogError(
-                `Failed to load file ${this._modelHomeDir}${poseFileName}`
-              );
-              return new ArrayBuffer(0);
-            }
-          })
+        this.fetchRequiredArrayBuffer(`${this._modelHomeDir}${poseFileName}`)
           .then((arrayBuffer) => {
             this.loadPose(arrayBuffer, arrayBuffer.byteLength);
 
@@ -426,7 +414,8 @@ export class LAppModel extends CubismUserModel {
 
             // callback
             setupEyeBlink();
-          });
+          })
+          .catch((error) => this.failModelLoad("live2d_pose_load_failed", error));
         this._state = LoadStep.WaitLoadPose;
       } else {
         this._state = LoadStep.SetupEyeBlink;
@@ -488,17 +477,7 @@ export class LAppModel extends CubismUserModel {
       if (this._modelSetting.getUserDataFile() != "") {
         const userDataFile = this._modelSetting.getUserDataFile();
 
-        fetch(`${this._modelHomeDir}${userDataFile}`)
-          .then((response) => {
-            if (response.ok) {
-              return response.arrayBuffer();
-            } else if (response.status >= 400) {
-              CubismLogError(
-                `Failed to load file ${this._modelHomeDir}${userDataFile}`
-              );
-              return new ArrayBuffer(0);
-            }
-          })
+        this.fetchRequiredArrayBuffer(`${this._modelHomeDir}${userDataFile}`)
           .then((arrayBuffer) => {
             this.loadUserData(arrayBuffer, arrayBuffer.byteLength);
 
@@ -506,7 +485,8 @@ export class LAppModel extends CubismUserModel {
 
             // callback
             setupEyeBlinkIds();
-          });
+          })
+          .catch((error) => this.failModelLoad("live2d_user_data_load_failed", error));
 
         this._state = LoadStep.WaitLoadUserData;
       } else {
@@ -542,21 +522,6 @@ export class LAppModel extends CubismUserModel {
 
       for (let i = 0; i < lipSyncIdCount; ++i) {
         this._lipSyncIds.pushBack(this._modelSetting.getLipSyncParameterId(i));
-      }
-
-      if (this._lipSyncIds.getSize() === 0) {
-        const fallbackLipSyncIds = this.findLipSyncFallbackIds();
-
-        for (const fallbackLipSyncId of fallbackLipSyncIds) {
-          this._lipSyncIds.pushBack(fallbackLipSyncId);
-        }
-
-        if (LAppDefine.DebugLogEnable && fallbackLipSyncIds.length > 0) {
-          console.info(
-            '[Fallback] Added lip sync fallback parameter ids:',
-            fallbackLipSyncIds.map((id) => id?.getString?.().s ?? '<unknown>'),
-          );
-        }
       }
 
       this._state = LoadStep.SetupLayout;
@@ -674,17 +639,28 @@ export class LAppModel extends CubismUserModel {
           if (this._textureCount >= textureCount) {
             // ロード完了
             this._state = LoadStep.CompleteSetup;
+            markLive2DModelReady(this._loadGeneration);
           }
         };
 
         // 読み込み
         LAppDelegate.getInstance()
           .getTextureManager()
-          .createTextureFromPngFile(texturePath, usePremultiply, onLoad);
+          .createTextureFromPngFile(
+            texturePath,
+            usePremultiply,
+            onLoad,
+            (error) => this.failModelLoad(`live2d_texture_load_failed:${texturePath}`, error),
+          );
         this.getRenderer().setIsPremultipliedAlpha(usePremultiply);
       }
 
       this._state = LoadStep.WaitLoadTexture;
+
+      if (textureCount === 0) {
+        this._state = LoadStep.CompleteSetup;
+        markLive2DModelReady(this._loadGeneration);
+      }
     }
   }
 
@@ -1073,60 +1049,6 @@ export class LAppModel extends CubismUserModel {
     return parameterIndex >= 0 && parameterIndex < this._model.getParameterCount();
   }
 
-  private findLipSyncFallbackIds(): CubismIdHandle[] {
-    const fallbackIds: CubismIdHandle[] = [];
-    const seen = new Set<string>();
-    const idManager = CubismFramework.getIdManager();
-
-    const pushIfValid = (parameterId: CubismIdHandle | null) => {
-      if (!parameterId || !this.hasModelParameter(parameterId)) {
-        return;
-      }
-
-      const key = parameterId.getString?.().s ?? '';
-      if (!key || seen.has(key)) {
-        return;
-      }
-
-      seen.add(key);
-      fallbackIds.push(parameterId);
-    };
-
-    if (idManager) {
-      [
-        CubismDefaultParameterId.ParamMouthOpenY,
-        'PARAM_MOUTH_OPEN_Y',
-        'ParamMouthOpen',
-        'PARAM_MOUTH_OPEN',
-      ].forEach((parameterName) => {
-        pushIfValid(idManager.getId(parameterName));
-      });
-    }
-
-    if (fallbackIds.length > 0) {
-      return fallbackIds;
-    }
-
-    const parameterIds = this._model?._parameterIds;
-    const parameterCount = this._model?.getParameterCount?.() ?? 0;
-    for (let i = 0; i < parameterCount; i += 1) {
-      const parameterId = parameterIds?.at?.(i) ?? null;
-      const parameterName = parameterId?.getString?.().s ?? '';
-
-      if (!/(mouth.*open|open.*mouth)/i.test(parameterName)) {
-        continue;
-      }
-
-      pushIfValid(parameterId);
-    }
-
-    if (LAppDefine.DebugLogEnable && fallbackIds.length === 0) {
-      console.info('[Fallback] No usable lip sync parameter ids were found on the model.');
-    }
-
-    return fallbackIds;
-  }
-
   /**
    * イベントの発火を受け取る
    */
@@ -1259,10 +1181,9 @@ export class LAppModel extends CubismUserModel {
           this.completeMotionLoadingIfReady();
         })
         .catch((error) => {
-          CubismLogError(`Failed to load motion: ${error}`);
           this._updating = false;
           this._initialized = false;
-          throw error;
+          this.failModelLoad("live2d_motion_load_failed", error);
         });
     }
   }
@@ -1672,7 +1593,7 @@ export class LAppModel extends CubismUserModel {
         neutralTargetValue,
         weight: Number(item.weight),
         inputValue: Number.isFinite(Number(item.input_value)) ? Number(item.input_value) : null,
-        source: String(item.source || "semantic_axis"),
+        source: String(item.source),
         keyframes,
         modulationPhase: this.resolveSpeechPosePhase(axisId),
         modulationAmplitude: 0,
@@ -1700,18 +1621,10 @@ export class LAppModel extends CubismUserModel {
             direction: item.modulation.direction === -1 ? -1 : 1,
           }
           : null,
-        maxVelocity: Number.isFinite(item.dynamics?.max_velocity)
-          ? Number(item.dynamics.max_velocity)
-          : 0,
-        maxAcceleration: Number.isFinite(item.dynamics?.max_acceleration)
-          ? Number(item.dynamics.max_acceleration)
-          : 0,
-        lifeMotionScale: Number.isFinite(item.dynamics?.life_motion_scale)
-          ? Number(item.dynamics.life_motion_scale)
-          : 0,
-        maxSpeechOffset: Number.isFinite(item.dynamics?.max_speech_offset)
-          ? Number(item.dynamics.max_speech_offset)
-          : 0,
+        maxVelocity: Number(item.dynamics.max_velocity),
+        maxAcceleration: Number(item.dynamics.max_acceleration),
+        lifeMotionScale: Number(item.dynamics.life_motion_scale),
+        maxSpeechOffset: Number(item.dynamics.max_speech_offset),
         parameterId: resolved.parameterId,
         parameterIndex: resolved.parameterIndex,
         dynamicallyLimitedValue: null,
@@ -1782,6 +1695,10 @@ export class LAppModel extends CubismUserModel {
   public clearExternalLipSyncValue(): void {
     this._externalLipSyncValue = null;
     this._externalLipSyncUpdatedAtMs = 0;
+  }
+
+  public hasConfiguredLipSyncParameters(): boolean {
+    return this._lipSyncIds.getSize() > 0;
   }
 
   private applyDirectParameterPlanOverlay(): string | null {
@@ -2444,68 +2361,13 @@ export class LAppModel extends CubismUserModel {
           }
           return { parameterId, parameterIndex };
         }
-        console.warn(`[LAppModel] resolveWritableParameter('${parameterName}'): idManager index=${parameterIndex} not writable (model paramCount=${this._model.getParameterCount()}). trying model-id fallback...`);
+        console.error(`[LAppModel] resolveWritableParameter('${parameterName}'): parameter is not writable (index=${parameterIndex}, model paramCount=${this._model.getParameterCount()}).`);
       }
     } else {
-      console.warn(`[LAppModel] resolveWritableParameter('${parameterName}'): no idManager. trying model-id fallback...`);
+      console.error(`[LAppModel] resolveWritableParameter('${parameterName}'): Cubism id manager is unavailable.`);
     }
-
-    const fallback = this.resolveModelParameterByName(normalizedName);
-    if (fallback) {
-      if (LAppDefine.DebugLogEnable) {
-        const resolvedName = fallback.parameterId?.getString?.().s ?? "";
-        console.info(`[LAppModel] resolveWritableParameter: resolved '${normalizedName}' via model fallback -> '${resolvedName}' index=${fallback.parameterIndex}`);
-      }
-      return fallback;
-    }
-
-    console.warn(`[LAppModel] resolveWritableParameter('${parameterName}'): unresolved after fallback`);
+    console.error(`[LAppModel] resolveWritableParameter('${parameterName}'): exact parameter binding was not found.`);
     return null;
-  }
-
-  private resolveModelParameterByName(parameterName: string): {
-    parameterId: CubismIdHandle;
-    parameterIndex: number;
-  } | null {
-    if (!this._model) {
-      return null;
-    }
-
-    const exact = String(parameterName || "").trim();
-    if (!exact) {
-      return null;
-    }
-    const exactLower = exact.toLowerCase();
-    const canonical = this.normalizeParameterKey(exact);
-    const parameterCount = this._model.getParameterCount();
-    for (let index = 0; index < parameterCount; index += 1) {
-      const parameterId = this._model.getParameterId(index);
-      const rawName = String(parameterId?.getString?.().s ?? "").trim();
-      if (!rawName) {
-        continue;
-      }
-      if (rawName === exact || rawName.toLowerCase() === exactLower) {
-        return {
-          parameterId,
-          parameterIndex: index,
-        };
-      }
-      if (canonical && this.normalizeParameterKey(rawName) === canonical) {
-        return {
-          parameterId,
-          parameterIndex: index,
-        };
-      }
-    }
-
-    return null;
-  }
-
-  private normalizeParameterKey(value: string): string {
-    return String(value || "")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "");
   }
 
   private mergeDirectParameterCalibrationProfiles(
@@ -3004,9 +2866,7 @@ export class LAppModel extends CubismUserModel {
       if (weight < 0 || weight > 1) {
         return fail(`v2_parameter_weight_out_of_range:${axisId}:${parameterId}`);
       }
-      const source = item.source === undefined || item.source === null
-        ? "semantic_axis"
-        : String(item.source || "").trim();
+      const source = String(item.source || "").trim();
       if (!isSemanticParameterPlanSource(source)) {
         return fail(`v2_parameter_source_invalid:${axisId}:${parameterId}`);
       }
@@ -3069,8 +2929,8 @@ export class LAppModel extends CubismUserModel {
         neutral: number;
         amplitude: number;
         phase: number;
-        frequency_hz?: number;
-        direction?: 1 | -1;
+        frequency_hz: number;
+        direction: 1 | -1;
       } | undefined;
       if (item.modulation !== undefined) {
         const raw = item.modulation;
@@ -3082,9 +2942,9 @@ export class LAppModel extends CubismUserModel {
           || !Number.isFinite(raw.amplitude)
           || raw.amplitude < 0
           || !Number.isFinite(raw.phase)
-          || (raw.frequency_hz !== undefined
-            && (!Number.isFinite(raw.frequency_hz) || raw.frequency_hz <= 0))
-          || (raw.direction !== undefined && raw.direction !== 1 && raw.direction !== -1)
+          || !Number.isFinite(raw.frequency_hz)
+          || raw.frequency_hz <= 0
+          || (raw.direction !== 1 && raw.direction !== -1)
         ) {
           return fail(`v2_parameter_invalid_modulation:${axisId}:${parameterId}`);
         }
@@ -3093,9 +2953,7 @@ export class LAppModel extends CubismUserModel {
           neutral: Number(raw.neutral),
           amplitude: Number(raw.amplitude),
           phase: Number(raw.phase),
-          frequency_hz: raw.frequency_hz === undefined
-            ? undefined
-            : Number(raw.frequency_hz),
+          frequency_hz: Number(raw.frequency_hz),
           direction: raw.direction === -1 ? -1 : 1,
         };
       }

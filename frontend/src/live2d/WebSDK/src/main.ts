@@ -12,9 +12,14 @@ import * as LAppDefine from "./lappdefine";
 import { LAppAdapter } from "./lappadapter";
 import { LAppGlManager } from "./lappglmanager";
 import { LAppLive2DManager } from "./lapplive2dmanager";
+import {
+  beginLive2DModelLoad,
+  markLive2DModelFailed,
+  waitForLive2DModelLoad,
+} from "./modelreadiness";
 
 let isInitializingLive2D = false;
-let pendingInitializeLive2D = false;
+let currentInitializationPromise: Promise<void> | null = null;
 let boundPointerTarget: HTMLElement | null = null;
 let boundPointerMoveHandler: ((event: PointerEvent) => void) | null = null;
 let boundPointerDownHandler: ((event: PointerEvent) => void) | null = null;
@@ -99,19 +104,22 @@ function cleanupHitTestPointerHandlers(): void {
 /**
  * Initialize the Live2D application
  */
-export function initializeLive2D(): void {
-  if (isInitializingLive2D) {
-    pendingInitializeLive2D = true;
-    return;
+export function initializeLive2D(): Promise<void> {
+  if (currentInitializationPromise) {
+    return currentInitializationPromise;
   }
+  currentInitializationPromise = initializeLive2DOnce().finally(() => {
+    currentInitializationPromise = null;
+  });
+  return currentInitializationPromise;
+}
+
+async function initializeLive2DOnce(): Promise<void> {
   isInitializingLive2D = true;
+  const loadGeneration = beginLive2DModelLoad();
 
   const finishInitialize = () => {
     isInitializingLive2D = false;
-    if (pendingInitializeLive2D) {
-      pendingInitializeLive2D = false;
-      setTimeout(() => initializeLive2D(), 0);
-    }
   };
 
   console.log(
@@ -122,18 +130,10 @@ export function initializeLive2D(): void {
 
   const canvasElement = document.getElementById('canvas');
   if (!canvasElement) {
-    // Canvas may not be mounted yet when model info arrives very early.
-    setTimeout(() => {
-      const retryCanvas = document.getElementById('canvas');
-      if (!retryCanvas) {
-        console.error('Live2D initialization skipped: canvas element not found.');
-        finishInitialize();
-        return;
-      }
-      initializeLive2D();
-      finishInitialize();
-    }, 120);
-    return;
+    const reason = 'live2d_canvas_missing';
+    markLive2DModelFailed(loadGeneration, reason);
+    finishInitialize();
+    throw new Error(reason);
   }
 
   // Clean up any existing instances first.
@@ -147,9 +147,10 @@ export function initializeLive2D(): void {
     !LAppGlManager.getInstance() ||
     !LAppDelegate.getInstance().initialize()
   ) {
-    console.error("Failed to initialize Live2D");
+    const reason = "live2d_framework_initialization_failed";
+    markLive2DModelFailed(loadGeneration, reason);
     finishInitialize();
-    return;
+    throw new Error(reason);
   }
 
   LAppDelegate.getInstance().run();
@@ -220,7 +221,11 @@ export function initializeLive2D(): void {
     }
   }
 
-  finishInitialize();
+  try {
+    await waitForLive2DModelLoad(loadGeneration);
+  } finally {
+    finishInitialize();
+  }
 }
 
 /**

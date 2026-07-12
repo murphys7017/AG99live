@@ -105,6 +105,7 @@ export function useLive2dRenderer(
   let disposeForceRedrawListener: (() => void) | null = null;
   let lastCanvasWidth = 0;
   let lastCanvasHeight = 0;
+  let modelLoadQueue = Promise.resolve();
 
   const statusLabel = computed(() => {
     if (renderStatus.value === "ready") {
@@ -189,7 +190,7 @@ export function useLive2dRenderer(
 
       const { baseUrl, modelDir, modelFileName } = parseModelUrl(model.model_url);
       updateModelConfig(baseUrl, modelDir, modelFileName);
-      initializeLive2D();
+      await initializeLive2D();
       await nextTick();
       const didResizeCanvas = syncCanvasSize();
       resizeLive2D.value = () => LAppDelegate.getInstance().onResize();
@@ -232,7 +233,7 @@ export function useLive2dRenderer(
 
   watch(
     () => selectedModel.value?.model_url ?? "",
-    async (nextUrl) => {
+    (nextUrl) => {
       if (!nextUrl) {
         mountedModelUrl.value = "";
         resizeLive2D.value = null;
@@ -248,8 +249,13 @@ export function useLive2dRenderer(
       if (!selectedModel.value) {
         return;
       }
-
-      await loadModel(selectedModel.value);
+      const requestedModel = selectedModel.value;
+      modelLoadQueue = modelLoadQueue.then(async () => {
+        if (selectedModel.value?.model_url !== requestedModel.model_url) {
+          return;
+        }
+        await loadModel(requestedModel);
+      });
     },
     { immediate: true },
   );

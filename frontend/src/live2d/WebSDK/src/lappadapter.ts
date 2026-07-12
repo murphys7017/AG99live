@@ -18,6 +18,7 @@ import { deprecate } from "util";
 export let s_adapter_instance : LAppAdapter | null | undefined = null;
 
 export class LAppAdapter {
+  private _directParameterPlanError = "";
   public static getInstance(): LAppAdapter {
     if (s_adapter_instance == null) {
       s_adapter_instance = new LAppAdapter();
@@ -77,7 +78,16 @@ export class LAppAdapter {
   }
 
   public startDirectParameterPlan(plan: unknown, options?: unknown): boolean {
-    return this.getModel()?.startDirectParameterPlan(plan, options) ?? false;
+    const model = this.getModel();
+    if (!model) {
+      this._directParameterPlanError = "live2d_model_unavailable";
+      return false;
+    }
+    const started = model.startDirectParameterPlan(plan, options);
+    this._directParameterPlanError = started
+      ? ""
+      : model.getDirectParameterPlanError() || "direct_parameter_plan_rejected";
+    return started;
   }
 
   public stopDirectParameterPlan(reason?: string, status?: string): void {
@@ -85,11 +95,24 @@ export class LAppAdapter {
   }
 
   public getDirectParameterPlanError(): string {
-    return this.getModel()?.getDirectParameterPlanError?.() ?? "";
+    return this.getModel()?.getDirectParameterPlanError?.()
+      || this._directParameterPlanError;
   }
 
   public setExternalLipSyncValue(value: number): void {
-    this.getModel()?.setExternalLipSyncValue(value);
+    const model = this.getModel();
+    if (!model) {
+      throw new Error("live2d_model_unavailable");
+    }
+    model.setExternalLipSyncValue(value);
+  }
+
+  public hasConfiguredLipSyncParameters(): boolean {
+    const model = this.getModel();
+    if (!model) {
+      throw new Error("live2d_model_unavailable");
+    }
+    return model.hasConfiguredLipSyncParameters();
   }
 
   public clearExternalLipSyncValue(): void {

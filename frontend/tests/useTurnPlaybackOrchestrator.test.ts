@@ -1168,8 +1168,8 @@ function testPlaybackTimelineRuntimePreparesAudioMotionTimeline(): void {
   assert.deepEqual(events, [
     "audio_sink",
     "audio_released",
-    "motion_released",
     "motion_sink",
+    "motion_released",
     "phase:playing",
   ]);
   const snapshot = runtime.getTimelineSnapshotForSegment(
@@ -1299,8 +1299,8 @@ function testPlaybackTimelineRuntimeCreatesMotionOnlyTimelineBesideExistingAudio
     releasedMotion: true,
   });
   assert.deepEqual(events, [
-    "motion_released",
     "motion_sink",
+    "motion_released",
     "phase:playing",
   ]);
   assert.equal(

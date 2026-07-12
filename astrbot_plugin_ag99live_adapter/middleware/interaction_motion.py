@@ -545,31 +545,35 @@ def _build_motion_static_capability_payload(runtime_state: Any) -> dict[str, Any
         if style_prompt:
             capability_payload["motion_style_prompt"] = style_prompt
 
-    profile_payload, _profile_error = _summarize_semantic_profile(
+    profile_payload, profile_error = _summarize_semantic_profile(
         runtime_state,
         use_axis_levels=capability_payload["persona_effect_available"],
     )
-    if profile_payload is not None:
-        raw_profile = profile_payload.pop("raw_profile", None)
-        capability_payload["semantic_profile"] = profile_payload
-        if isinstance(raw_profile, dict):
-            fallback_candidates = build_fallback_pose_candidates(
-                runtime_state=runtime_state,
-                semantic_profile=raw_profile,
-                limit=None,
-            )
-            prompt_fallback_candidates = _build_prompt_fallback_pose_candidates(
-                fallback_candidates,
-                semantic_profile=raw_profile,
-                limit=4,
-            )
-            if prompt_fallback_candidates:
-                capability_payload["fallback_pose_candidates"] = prompt_fallback_candidates
-            resource_candidates = build_motion_resource_candidates(
-                runtime_state=runtime_state,
-            )
-            if resource_candidates:
-                capability_payload["resource_candidates"] = resource_candidates
+    if profile_payload is None:
+        raise RuntimeError(
+            f"semantic_motion_prompt_profile_unavailable:{profile_error or 'unknown_error'}"
+        )
+    raw_profile = profile_payload.pop("raw_profile", None)
+    if not isinstance(raw_profile, dict):
+        raise RuntimeError("semantic_motion_prompt_profile_payload_invalid")
+    capability_payload["semantic_profile"] = profile_payload
+    fallback_candidates = build_fallback_pose_candidates(
+        runtime_state=runtime_state,
+        semantic_profile=raw_profile,
+        limit=None,
+    )
+    prompt_fallback_candidates = _build_prompt_fallback_pose_candidates(
+        fallback_candidates,
+        semantic_profile=raw_profile,
+        limit=4,
+    )
+    if prompt_fallback_candidates:
+        capability_payload["fallback_pose_candidates"] = prompt_fallback_candidates
+    resource_candidates = build_motion_resource_candidates(
+        runtime_state=runtime_state,
+    )
+    if resource_candidates:
+        capability_payload["resource_candidates"] = resource_candidates
 
     return capability_payload
 
@@ -1158,11 +1162,7 @@ def _build_previous_motion_variation_payload(
     if not isinstance(axis_levels, dict) and not isinstance(axes, dict):
         return {}
 
-    semantic_profile = None
-    try:
-        semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
-    except Exception:  # noqa: BLE001
-        semantic_profile = None
+    semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
     axis_by_id = _build_prompt_axis_lookup(semantic_profile)
 
     key_axes: list[dict[str, Any]] = []
@@ -1218,10 +1218,7 @@ def _resolve_previous_motion_prompt_snapshot(turn_coordinator: Any) -> dict[str,
     getter = getattr(turn_coordinator, "get_last_prompt_motion_snapshot", None)
     snapshot = None
     if callable(getter):
-        try:
-            snapshot = getter()
-        except Exception:  # noqa: BLE001
-            snapshot = None
+        snapshot = getter()
     if snapshot is None:
         snapshot = getattr(turn_coordinator, "_last_prompt_motion_snapshot", None)
     if not isinstance(snapshot, dict):

@@ -46,7 +46,8 @@ export class LAppTextureManager {
   public createTextureFromPngFile(
     fileName: string,
     usePremultiply: boolean,
-    callback: (textureInfo: TextureInfo) => void
+    callback: (textureInfo: TextureInfo) => void,
+    onError: (error: Error) => void,
   ): void {
     // search loaded texture already
     for (
@@ -67,6 +68,11 @@ export class LAppTextureManager {
           .img.addEventListener("load", (): void => callback(ite.ptr()), {
             passive: true,
           });
+        ite.ptr().img.addEventListener(
+          "error",
+          (): void => onError(new Error(`texture_image_load_failed:${fileName}`)),
+          { once: true },
+        );
         ite.ptr().img.src = fileName;
         return;
       }
@@ -75,6 +81,11 @@ export class LAppTextureManager {
     // データのオンロードをトリガーにする
     const img = new Image();
     img.crossOrigin = "anonymous";
+    img.addEventListener(
+      "error",
+      (): void => onError(new Error(`texture_image_load_failed:${fileName}`)),
+      { once: true },
+    );
     img.addEventListener(
       "load",
       (): void => {

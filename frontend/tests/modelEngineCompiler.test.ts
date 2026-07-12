@@ -384,6 +384,7 @@ function buildModelWithVoiceFollowingProfile(profile: SemanticAxisProfile): Mode
         weight: 0.35,
         phase: 0.35,
         frequency_hz: 0.48,
+        direction: -1,
       },
       body_yaw: {
         channel: "body_yaw",
@@ -396,6 +397,7 @@ function buildModelWithVoiceFollowingProfile(profile: SemanticAxisProfile): Mode
         weight: 0.35,
         phase: 0.2,
         frequency_hz: 0.26,
+        direction: 1,
       },
       body_roll: {
         channel: "body_roll",
@@ -1742,7 +1744,7 @@ function testCompileRejectsBindingInputRangeMismatch(): void {
   );
 }
 
-function testSpeechPoseAppliesForSpeechLinkedIdleIntent(): void {
+function testSpeechPoseRequiresExplicitVoiceFollowingProfile(): void {
   const profile = buildProfile();
   const result = compileMotionIntent(buildIntent({
     mode: "idle",
@@ -1757,27 +1759,8 @@ function testSpeechPoseAppliesForSpeechLinkedIdleIntent(): void {
     },
   });
 
-  assert.equal(result.ok, true);
-  assert.ok(result.plan);
-  assert.equal(result.plan?.mode, "idle");
-  assert.equal(result.plan?.timing.duration_ms, 5000);
-  assert.equal(result.diagnostics.speechActive, true);
-  assert.equal(result.diagnostics.timingSource, "audio_sync");
-  assert.equal(
-    result.diagnostics.appliedDerivedAxes?.includes("speech_head_sway"),
-    true,
-  );
-
-  const speechPose = result.plan?.parameters.find(
-    (item) => item.parameter_id === "ParamSpeechHeadSway",
-  );
-  assert.ok(speechPose);
-  assert.equal(speechPose?.source, "speech_pose");
-  assert.notEqual(speechPose?.input_value, 50);
-  assert.equal(
-    result.diagnostics.warnings?.includes("speech_pose_applied:speech_head_sway"),
-    true,
-  );
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "semantic_plan_parameters_empty");
 }
 
 function testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes(): void {
@@ -2288,7 +2271,7 @@ function testSpeechPoseDoesNotUseGenericDerivedAxis(): void {
   assert.equal(result.reason, "semantic_plan_parameters_empty");
   assert.equal(
     result.diagnostics.warnings?.includes("speech_pose_skipped_no_candidate_axis"),
-    true,
+    false,
   );
 }
 
@@ -2327,7 +2310,7 @@ function testSpeechPoseDoesNotOverwriteCouplingDerivedAxis(): void {
   assert.equal(bodyYaw?.source, "coupling");
   assert.equal(
     result.diagnostics.warnings?.includes("speech_pose_skipped_existing_axis:body_yaw"),
-    true,
+    false,
   );
 }
 
@@ -2530,7 +2513,7 @@ function run(): void {
   testCompileRejectsAllNeutralSemanticAxes();
   testCompileRejectsInvalidBindingsInsteadOfSkippingThem();
   testCompileRejectsBindingInputRangeMismatch();
-  testSpeechPoseAppliesForSpeechLinkedIdleIntent();
+  testSpeechPoseRequiresExplicitVoiceFollowingProfile();
   testPerformanceCurveHintAdjustsExpressiveTiming();
   testPerformanceCurveHintAdjustsSpeechIdleTiming();
   testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes();

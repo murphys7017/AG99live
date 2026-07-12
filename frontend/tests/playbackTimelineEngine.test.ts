@@ -651,8 +651,8 @@ function testPlaybackTimelineRuntimeStartsSegmentJobThroughTimelineEntry(): void
     releasedMotion: true,
   });
   assert.deepEqual(events, [
-    "motion_released",
     "motion_sink:motion_only",
+    "motion_released",
     "phase:playing",
   ]);
   assert.equal(

@@ -42,6 +42,7 @@ export interface TurnPlaybackSegmentReleaseResult {
   releasedText: boolean;
   releasedAudio: boolean;
   releasedMotion: boolean;
+  handledMotion?: boolean;
 }
 
 export interface TurnPlaybackOrchestratorCoreOptions<TMotionPayload = unknown> {
@@ -220,7 +221,7 @@ export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
     if (optionsForJob.releaseAudio) {
       group.audioReady = !result.releasedAudio;
     }
-    if (result.releasedMotion) {
+    if (result.releasedMotion || result.handledMotion) {
       group.motionPayload = null;
       group.motionReady = false;
     }
