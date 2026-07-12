@@ -68,9 +68,11 @@ def format_profile_axis_prompt_line(
     description = truncate_text(str(axis.get("description") or "").strip(), 160)
     suffix = f" 使用说明={notes}" if notes else ""
     if use_axis_levels:
+        level_range = _format_available_level_range(axis)
         return (
             f"- {axis_id}（{label}，{role_label}）："
             f"负方向会让角色{negative_action}；正方向会让角色{positive_action}。"
+            f"可用等级={level_range}；超出该范围的方向对这个轴没有效果。"
             f"本轮没有对应方向的表达需要时省略此轴。{description}{suffix}"
         ).strip()
     return (
@@ -89,6 +91,23 @@ def format_axis_semantics(values: Any, *, truncate_text: Any) -> str:
         for item in values
         if str(item).strip()
     )
+
+
+def _format_available_level_range(axis: dict[str, Any]) -> str:
+    anchors = axis.get("level_anchors")
+    neutral = axis.get("neutral")
+    if not isinstance(anchors, dict) or not isinstance(neutral, (int, float)):
+        return "-4..4"
+    effective_levels: list[int] = [0]
+    for raw_level, raw_anchor in anchors.items():
+        try:
+            level = int(raw_level)
+            anchor = float(raw_anchor)
+        except (TypeError, ValueError):
+            continue
+        if -4 <= level <= 4 and abs(anchor - float(neutral)) > 1e-6:
+            effective_levels.append(level)
+    return f"{min(effective_levels)}..{max(effective_levels)}"
 
 
 def format_control_role_label(role: str) -> str:

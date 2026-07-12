@@ -252,7 +252,7 @@ def _normalize_axis_levels(value: Any) -> dict[str, int]:
             raise ValueError("axis_id_empty")
         if axis_id in normalized_levels:
             raise ValueError(f"axis_id_duplicate:{axis_id}")
-        if isinstance(level, bool) or not isinstance(level, int) or level < -3 or level > 3:
+        if isinstance(level, bool) or not isinstance(level, int) or level < -4 or level > 4:
             raise ValueError(f"axis_{axis_id}_level_invalid")
         normalized_levels[axis_id] = level
     return normalized_levels

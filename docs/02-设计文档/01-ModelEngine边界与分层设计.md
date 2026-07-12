@@ -25,7 +25,7 @@ engine.motion_intent.v4 / engine.motion_intent.v3 / engine.parameter_plan.v2
 
 | Payload | Schema | 说明 |
 | --- | --- | --- |
-| Persona Effect 动作意图 | `engine.motion_intent.v4` | 当前自动动作主协议；`axis_levels` 为 `-3..3` 整数 map |
+| Persona Effect 动作意图 | `engine.motion_intent.v4` | 当前自动动作主协议；`axis_levels` 为 `-4..4` 整数 map |
 | 官方兼容动作意图 | `engine.motion_intent.v3` | `<@anim>` 和内部手动预览使用；`axes` 为 flat number map |
 | 参数计划 | `engine.parameter_plan.v2` | 前端可直接执行的 Live2D 参数计划 |
 

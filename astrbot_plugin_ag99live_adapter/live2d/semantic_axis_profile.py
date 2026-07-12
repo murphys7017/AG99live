@@ -135,8 +135,8 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "negative_semantics": ["look left", "turn left", "avoid left"],
         "usage_notes": "Keep near neutral during ordinary speech.",
         "output_range": [-30.0, 30.0],
-        "soft_range": [42.0, 58.0],
-        "strong_range": [30.0, 70.0],
+        "soft_range": [40.0, 60.0],
+        "strong_range": [25.0, 75.0],
     },
     "head_pitch": {
         "label": "Head Pitch",
@@ -147,8 +147,8 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "negative_semantics": ["look down", "lower chin", "bashful drop"],
         "usage_notes": "Avoid holding extreme pitch for long spans.",
         "output_range": [-30.0, 30.0],
-        "soft_range": [43.0, 57.0],
-        "strong_range": [32.0, 68.0],
+        "soft_range": [41.0, 59.0],
+        "strong_range": [28.0, 72.0],
     },
     "head_roll": {
         "label": "Head Roll",
@@ -159,8 +159,8 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "negative_semantics": ["tilt left", "skeptical lean", "guarded angle"],
         "usage_notes": "Use in short accents rather than sustained loops.",
         "output_range": [-30.0, 30.0],
-        "soft_range": [44.0, 56.0],
-        "strong_range": [34.0, 66.0],
+        "soft_range": [42.0, 58.0],
+        "strong_range": [30.0, 70.0],
     },
     "body_yaw": {
         "label": "Body Yaw",
@@ -171,8 +171,8 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "negative_semantics": ["body turns left", "left-side emphasis", "strong left follow-through"],
         "usage_notes": "Use with head_yaw to express body posture and emotion strength. For explicit turns, emphasis, surprise, teasing, or avoidance, body yaw should be visibly readable instead of only a tiny follow-through.",
         "output_range": [-10.0, 10.0],
-        "soft_range": [46.0, 54.0],
-        "strong_range": [38.0, 62.0],
+        "soft_range": [44.0, 56.0],
+        "strong_range": [34.0, 66.0],
     },
     "body_roll": {
         "label": "Body Roll",
@@ -183,8 +183,8 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "negative_semantics": ["body tilts left", "left sway", "guarded left lean"],
         "usage_notes": "Use for sway, weight shift, confusion, teasing, or emotional follow-through. Clear emotion can use a visible torso lean while keeping face detail secondary.",
         "output_range": [-10.0, 10.0],
-        "soft_range": [46.0, 54.0],
-        "strong_range": [38.0, 62.0],
+        "soft_range": [44.0, 56.0],
+        "strong_range": [34.0, 66.0],
     },
     "body_pitch": {
         "label": "Body Pitch",
@@ -195,8 +195,8 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "negative_semantics": ["lean forward", "drop posture", "low-energy slump"],
         "usage_notes": "First-version body depth/lift axis. Prefer BodyAngleY when available; use carefully until preview confirms the model feel.",
         "output_range": [-10.0, 10.0],
-        "soft_range": [46.0, 54.0],
-        "strong_range": [38.0, 62.0],
+        "soft_range": [45.0, 55.0],
+        "strong_range": [36.0, 64.0],
     },
     "gaze_x": {
         "label": "Gaze X",
@@ -207,8 +207,8 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "negative_semantics": ["eyes left", "track left"],
         "usage_notes": "Usually leads head yaw by a small amount.",
         "output_range": [-1.0, 1.0],
-        "soft_range": [44.0, 56.0],
-        "strong_range": [30.0, 70.0],
+        "soft_range": [40.0, 60.0],
+        "strong_range": [25.0, 75.0],
     },
     "gaze_y": {
         "label": "Gaze Y",
@@ -219,8 +219,8 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "negative_semantics": ["eyes down", "drop gaze"],
         "usage_notes": "Combine with pitch sparingly to avoid overacting.",
         "output_range": [-1.0, 1.0],
-        "soft_range": [44.0, 56.0],
-        "strong_range": [30.0, 70.0],
+        "soft_range": [40.0, 60.0],
+        "strong_range": [25.0, 75.0],
     },
     "eye_open_left": {
         "label": "Eye Open Left",
@@ -233,7 +233,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "neutral": 100.0,
         "output_range": [0.0, 1.0],
         "soft_range": [70.0, 100.0],
-        "strong_range": [0.0, 100.0],
+        "strong_range": [20.0, 100.0],
         "invert": False,
     },
     "eye_open_right": {
@@ -247,7 +247,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "neutral": 100.0,
         "output_range": [0.0, 1.0],
         "soft_range": [70.0, 100.0],
-        "strong_range": [0.0, 100.0],
+        "strong_range": [20.0, 100.0],
         "invert": False,
     },
     "eye_smile_left": {
@@ -260,8 +260,8 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "usage_notes": "Use with eye_smile_right for smile eyes, or asymmetrically for teasing and skepticism.",
         "neutral": 0.0,
         "output_range": [0.0, 1.0],
-        "soft_range": [0.0, 35.0],
-        "strong_range": [0.0, 100.0],
+        "soft_range": [0.0, 30.0],
+        "strong_range": [0.0, 80.0],
         "invert": False,
     },
     "eye_smile_right": {
@@ -274,8 +274,8 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "usage_notes": "Use with eye_smile_left for smile eyes, or asymmetrically for teasing and skepticism.",
         "neutral": 0.0,
         "output_range": [0.0, 1.0],
-        "soft_range": [0.0, 35.0],
-        "strong_range": [0.0, 100.0],
+        "soft_range": [0.0, 30.0],
+        "strong_range": [0.0, 80.0],
         "invert": False,
     },
     "mouth_open": {
@@ -299,8 +299,8 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "negative_semantics": ["frown", "tight mouth", "reduce smile intensity"],
         "usage_notes": "Expression detail. Use higher values for visible smiles and lower values for frowns; keep mouth_open runtime-owned for lip sync.",
         "output_range": [-1.0, 1.0],
-        "soft_range": [44.0, 60.0],
-        "strong_range": [30.0, 75.0],
+        "soft_range": [42.0, 62.0],
+        "strong_range": [28.0, 78.0],
     },
     "mouth_x": {
         "label": "Mouth X",
@@ -311,8 +311,8 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "negative_semantics": ["mouth shifts left", "left smirk", "asymmetric grin left"],
         "usage_notes": "Use sparingly for smirk, awkwardness, teasing, or asymmetric mouth detail.",
         "output_range": [-1.0, 1.0],
-        "soft_range": [44.0, 56.0],
-        "strong_range": [30.0, 70.0],
+        "soft_range": [42.0, 58.0],
+        "strong_range": [28.0, 72.0],
     },
     "brow_bias": {
         "label": "Brow Bias",
@@ -323,8 +323,8 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "negative_semantics": ["furrow brow", "tense brow"],
         "usage_notes": "Best used as a secondary emotional hint.",
         "output_range": [-1.0, 1.0],
-        "soft_range": [44.0, 56.0],
-        "strong_range": [34.0, 66.0],
+        "soft_range": [42.0, 58.0],
+        "strong_range": [30.0, 70.0],
     },
     "brow_left_detail": {
         "label": "Brow Left Detail",
@@ -335,7 +335,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "negative_semantics": ["lower left brow detail", "left brow tense down"],
         "usage_notes": "Candidate first-version detail axis. Prefer subtle values and verify visually on the model.",
         "output_range": [-1.0, 1.0],
-        "soft_range": [44.0, 56.0],
+        "soft_range": [43.0, 57.0],
         "strong_range": [30.0, 70.0],
     },
     "brow_right_detail": {
@@ -347,7 +347,7 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "negative_semantics": ["lower right brow detail", "right brow tense down"],
         "usage_notes": "Candidate first-version detail axis. Prefer subtle values and verify visually on the model.",
         "output_range": [-1.0, 1.0],
-        "soft_range": [44.0, 56.0],
+        "soft_range": [43.0, 57.0],
         "strong_range": [30.0, 70.0],
     },
     "breath": {
@@ -1256,6 +1256,13 @@ def _profile_needs_default_design_migration(
             return True
         if _first_binding_parameter_id(current_axis) != _first_binding_parameter_id(expected_axis):
             return True
+        if not bool(current_profile.get("user_modified")):
+            if current_axis.get("soft_range") != expected_axis.get("soft_range"):
+                return True
+            if current_axis.get("strong_range") != expected_axis.get("strong_range"):
+                return True
+            if current_axis.get("level_anchors") != expected_axis.get("level_anchors"):
+                return True
     return False
 
 
@@ -1299,7 +1306,7 @@ def _profile_needs_schema_normalization(path: Path) -> bool:
     if raw_payload.get("relation_graph") is None:
         return True
     axes = raw_payload.get("axes")
-    required_anchor_keys = {"-3", "-2", "-1", "0", "1", "2", "3"}
+    required_anchor_keys = {"-4", "-3", "-2", "-1", "0", "1", "2", "3", "4"}
     return isinstance(axes, list) and any(
         isinstance(axis, Mapping)
         and (
@@ -1534,7 +1541,10 @@ def _normalize_level_anchors(
     value_range: list[float],
     field_name: str,
 ) -> dict[str, float]:
+    negative_span = soft_range[0] - strong_range[0]
+    positive_span = strong_range[1] - soft_range[1]
     derived: dict[str, float] = {
+        "-4": max(value_range[0], strong_range[0] - negative_span),
         "-3": strong_range[0],
         "-2": (strong_range[0] + soft_range[0]) / 2.0,
         "-1": soft_range[0],
@@ -1542,6 +1552,7 @@ def _normalize_level_anchors(
         "1": soft_range[1],
         "2": (soft_range[1] + strong_range[1]) / 2.0,
         "3": strong_range[1],
+        "4": min(value_range[1], strong_range[1] + positive_span),
     }
     normalized = dict(derived)
     if value is not None:
@@ -1571,13 +1582,13 @@ def _normalize_level_anchors(
         raise SemanticAxisProfileError(
             f"`{field_name}.0` must equal the axis neutral value."
         )
-    ordered_keys = ("-3", "-2", "-1", "0", "1", "2", "3")
+    ordered_keys = ("-4", "-3", "-2", "-1", "0", "1", "2", "3", "4")
     if any(
         normalized[left] > normalized[right]
         for left, right in zip(ordered_keys, ordered_keys[1:])
     ):
         raise SemanticAxisProfileError(
-            f"`{field_name}` values must be ordered from -3 through 3."
+            f"`{field_name}` values must be ordered from -4 through 4."
         )
     return {key: round(number, 4) for key, number in normalized.items()}
 

@@ -572,8 +572,8 @@ function testNormalizeMotionPayloadAcceptsV4AxisLevels(): void {
     intent_tags: ["happy"],
     emotion_label: "happy",
     axis_levels: {
-      head_yaw: -2,
-      mouth_smile: 1,
+      head_yaw: -4,
+      mouth_smile: 4,
     },
   });
 
@@ -584,8 +584,8 @@ function testNormalizeMotionPayloadAcceptsV4AxisLevels(): void {
     throw new Error("Expected v4 semantic motion intent.");
   }
   assert.deepEqual(result.payload.intent.axis_levels, {
-    head_yaw: -2,
-    mouth_smile: 1,
+    head_yaw: -4,
+    mouth_smile: 4,
   });
   assert.deepEqual(result.payload.intent.intent_tags, ["happy"]);
   assert.equal("axes" in result.payload.intent, false);
@@ -641,6 +641,11 @@ function testNormalizeMotionPayloadRejectsMixedOrInvalidAxisLevelContracts(): vo
     schema_version: "engine.motion_intent.v4",
     axis_levels: { head_yaw: 1.5 },
   });
+  const outOfRangeV4 = normalizeMotionPayload({
+    ...common,
+    schema_version: "engine.motion_intent.v4",
+    axis_levels: { head_yaw: 5 },
+  });
   const mixedV3 = normalizeMotionPayload({
     ...common,
     schema_version: "engine.motion_intent.v3",
@@ -652,6 +657,8 @@ function testNormalizeMotionPayloadRejectsMixedOrInvalidAxisLevelContracts(): vo
   assert.equal(mixedV4.reason, "motion_intent_v4.invalid_axis_levels");
   assert.equal(invalidV4.ok, false);
   assert.equal(invalidV4.reason, "motion_intent_v4.invalid_axis_levels");
+  assert.equal(outOfRangeV4.ok, false);
+  assert.equal(outOfRangeV4.reason, "motion_intent_v4.invalid_axis_levels");
   assert.equal(mixedV3.ok, false);
   assert.equal(mixedV3.reason, "motion_intent_v3.axis_levels_forbidden");
 }
@@ -661,6 +668,7 @@ function testV4AxisLevelsResolveThroughProfileAnchors(): void {
   const headYaw = profile.axes.find((axis) => axis.id === "head_yaw");
   assert.ok(headYaw);
   headYaw.level_anchors = {
+    "-4": 20,
     "-3": 30,
     "-2": 38,
     "-1": 45,
@@ -668,6 +676,7 @@ function testV4AxisLevelsResolveThroughProfileAnchors(): void {
     "1": 56,
     "2": 64,
     "3": 70,
+    "4": 80,
   };
 
   const result = compileMotionIntent(buildLevelIntent(), {
@@ -695,8 +704,23 @@ function testV4AxisLevelsResolveThroughProfileAnchors(): void {
   assert.equal(parameter?.dynamics?.max_acceleration, 360);
   assert.equal(
     result.diagnostics.transformTrace?.axisSampling?.seed,
-    "turn-level-test|message-level-test|hash|semantic_motion_transform.v3",
+    "turn-level-test|message-level-test|hash|semantic_motion_transform.v4",
   );
+
+  const extreme = compileMotionIntent(buildLevelIntent({
+    axis_levels: { head_yaw: 4 },
+  }), {
+    model: buildModel(profile),
+    targetDurationMs: 1200,
+    samplingIdentity: { ...samplingIdentity, messageId: "message-level-extreme" },
+    settings: { motionIntensityScale: 1, axisIntensityScale: {} },
+  });
+  assert.equal(extreme.ok, true);
+  const extremeValue = extreme.plan?.parameters.find(
+    (item) => item.parameter_id === "ParamAngleX",
+  )?.input_value;
+  assert.ok((extremeValue ?? 0) >= 75);
+  assert.ok((extremeValue ?? 100) <= 90);
 
   const replay = compileMotionIntent(buildLevelIntent(), {
     model: buildModel(profile),
@@ -1118,7 +1142,7 @@ function testCompiledPlanResolvesExpressionResourceForPlayback(): void {
   });
   assert.equal(
     result.diagnostics.transformTrace?.transformVersion,
-    "semantic_motion_transform.v3",
+    "semantic_motion_transform.v4",
   );
   assert.equal(result.diagnostics.transformTrace?.profileRevision, 1);
   assert.equal(result.diagnostics.transformTrace?.profileHash, "hash");

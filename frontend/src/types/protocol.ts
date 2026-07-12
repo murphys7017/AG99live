@@ -610,7 +610,7 @@ export interface PerformanceCurveHint {
   energy: "low" | "medium" | "high" | "teasing" | "calm";
 }
 
-export type MotionAxisLevel = -3 | -2 | -1 | 0 | 1 | 2 | 3;
+export type MotionAxisLevel = -4 | -3 | -2 | -1 | 0 | 1 | 2 | 3 | 4;
 export type MotionAxisLevelMap = Record<string, MotionAxisLevel>;
 export interface MotionAxisLevelStep {
   axis_levels: MotionAxisLevelMap;

@@ -100,7 +100,7 @@ AG99live 是一个运行在 Windows 桌面上的 AstrBot + Electron + Live2D AI 
 
 ```text
 ag99live.motion Persona Effect
-  -> engine.motion_intent.v4 (axis_levels -3..3)
+  -> engine.motion_intent.v4 (axis_levels -4..4)
   -> ModelEngine
   -> engine.parameter_plan.v2 / typed motion resource
   -> PlaybackTimeline motion sink
@@ -111,7 +111,7 @@ ag99live.motion Persona Effect
 
 ### 动作实验室
 
-动作实验室用于观察和调校模型生成的动作。SQLite raw event schema v2 会关联保存原始七级输出、锚点解析值、关系图约束值、最终参数计划、profile hash、transform version、run ID 和播放终态，为后续人工筛选与训练提供可归因数据。
+动作实验室用于观察和调校模型生成的动作。SQLite raw event schema v2 会关联保存原始九级输出、锚点解析值、关系图约束值、最终参数计划、profile hash、transform version、run ID 和播放终态，为后续人工筛选与训练提供可归因数据。
 
 ### 语义轴档案
 

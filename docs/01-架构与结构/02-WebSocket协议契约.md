@@ -171,7 +171,7 @@ Motion Lab 事件采用 at-least-once 交付：前端必须先把事件写入 In
 约束：
 
 - `intent_tags` 和 `axis_levels` 是主语义输入。
-- `axis_levels` 唯一合法形态是 `Record<string, -3|-2|-1|0|1|2|3>`。
+- `axis_levels` 唯一合法形态是 `Record<string, -4|-3|-2|-1|0|1|2|3|4>`。
 - 省略轴表示本轮不控制，`0` 表示明确回到中性。
 - v4 出现 `axes`、非法等级、未知轴或缺失 profile 锚点时直接失败，不降级为 v3。
 - ModelEngine 使用 `SemanticAxisProfile.level_anchors` 转换等级，再进入关系图约束。

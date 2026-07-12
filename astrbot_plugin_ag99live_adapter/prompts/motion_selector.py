@@ -33,7 +33,8 @@ REFERENCE_AXIS_IDS = [
 DEFAULT_MOTION_PROMPT_INSTRUCTION = (
     "根据回复的真实语气选择直接动作意图。只输出有明确表演贡献的轴；"
     "头身跟随等派生关系由运行时关系图处理，不要为了凑完整而重复填写。"
-    "普通说明使用少量轻级别，明确转身、强调、回避、惊讶、调侃或开心时再提高到中强等级。"
+    "普通对话使用清晰可见的轻到中等级；只有确实轻微的陪伴动作才使用 1 级。"
+    "明确转身、强调、回避、惊讶、调侃或开心时使用 3 级，极强且短暂的舞台化强调才使用 4 级。"
 )
 
 DEFAULT_MOTION_REFERENCE_EXAMPLES = create_default_motion_reference_examples(

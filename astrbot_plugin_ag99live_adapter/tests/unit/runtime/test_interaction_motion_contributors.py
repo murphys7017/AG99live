@@ -124,8 +124,9 @@ def _build_semantic_model_info() -> dict:
                             "soft_range": [42, 58],
                             "strong_range": [30, 70],
                             "level_anchors": {
+                                "-4": 20,
                                 "-3": 30, "-2": 38, "-1": 45, "0": 50,
-                                "1": 56, "2": 64, "3": 70,
+                                "1": 56, "2": 64, "3": 70, "4": 80,
                             },
                             "positive_semantics": ["turn right"],
                             "negative_semantics": ["turn left"],
@@ -152,8 +153,9 @@ def _build_semantic_model_info() -> dict:
                             "soft_range": [42, 58],
                             "strong_range": [30, 70],
                             "level_anchors": {
+                                "-4": 20,
                                 "-3": 30, "-2": 38, "-1": 45, "0": 50,
-                                "1": 56, "2": 64, "3": 70,
+                                "1": 56, "2": 64, "3": 70, "4": 80,
                             },
                             "positive_semantics": ["open"],
                             "negative_semantics": ["close"],
@@ -501,7 +503,7 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert "expression_resource_id" in system.value
     assert "motion_resource_id" in system.value
     assert "单姿态使用 axis_levels；动作序列使用 motion_steps" in system.value
-    assert system.value.count("-3=强负") == 1
+    assert system.value.count("-4=极强负") == 1
     assert "插件会负责" not in system.value
     assert "choice、mode、motion_id" not in system.value
     assert "expr_surprised" not in system.value
@@ -539,7 +541,7 @@ def test_prompt_contributor_returns_capability_and_runtime_extensions(
     assert catalog_candidate["description"] == "姿态更稳定、更像进入解释状态。"
     assert catalog_candidate["emotion_bias"] == ["neutral", "thinking"]
     assert catalog_candidate["recommended_scenarios"] == ["说明问题", "认真解释"]
-    assert catalog_candidate["key_axis_levels"] == {"head_yaw": 3}
+    assert catalog_candidate["key_axis_levels"] == {"head_yaw": 4}
     prompt_axis_ids = [
         item["id"] for item in capability.value["axes"]
     ]
@@ -905,8 +907,8 @@ def test_prompt_runtime_includes_previous_motion_variation_hint(
         "schema_version": "engine.motion_intent.v4",
         "motion_resource_id": "serious_explain",
         "axis_levels": {
-            "head_yaw": 1,
-            "body_yaw": -1,
+            "head_yaw": 4,
+            "body_yaw": -4,
         },
     }
     view = _build_view(phase="decision", purpose="persona_reply")
@@ -916,8 +918,8 @@ def test_prompt_runtime_includes_previous_motion_variation_hint(
     runtime = next(item for item in extensions if item.mount == "context")
     previous_motion = runtime.value["previous_motion"]
     assert previous_motion["key_axis_levels"] == {
-        "head_yaw": 1,
-        "body_yaw": -1,
+        "head_yaw": 4,
+        "body_yaw": -4,
     }
     assert previous_motion["motion_resource_id"] == "serious_explain"
     assert previous_motion["was_sequence"] is False
@@ -1285,7 +1287,7 @@ def test_result_contributor_returns_persona_effect_motion_as_client_object(
             _motion_effect_call(
                 {
                 "intent_tags": ["happy"],
-                "axis_levels": {"head_yaw": 2},
+                "axis_levels": {"head_yaw": 4},
                 }
             )
         ],
@@ -1300,7 +1302,7 @@ def test_result_contributor_returns_persona_effect_motion_as_client_object(
     assert client_object["type"] == "ag99live.motion_payload"
     assert client_object["source"] == "persona_effect"
     assert client_object["motion_payload"]["schema_version"] == "engine.motion_intent.v4"
-    assert client_object["motion_payload"]["axis_levels"] == {"head_yaw": 2}
+    assert client_object["motion_payload"]["axis_levels"] == {"head_yaw": 4}
     assert contribution.platform_extras == {}
     assert (
         contribution.metadata["ag99live_motion_schedule"]["reason"]
@@ -2089,8 +2091,8 @@ def test_register_interaction_contributors_uses_available_hooks(
     assert effect.parameters["additionalProperties"] is False
     assert effect.parameters["properties"]["axis_levels"]["minProperties"] == 1
     assert effect.parameters["properties"]["axis_levels"]["maxProperties"] == 6
-    assert effect.parameters["properties"]["axis_levels"]["additionalProperties"]["minimum"] == -3
-    assert effect.parameters["properties"]["axis_levels"]["additionalProperties"]["maximum"] == 3
+    assert effect.parameters["properties"]["axis_levels"]["additionalProperties"]["minimum"] == -4
+    assert effect.parameters["properties"]["axis_levels"]["additionalProperties"]["maximum"] == 4
     assert effect.parameters["properties"]["intent_tags"]["minItems"] == 1
     assert effect.parameters["properties"]["intent_tags"]["maxItems"] == 6
     assert effect.parameters["properties"]["intent_tags"]["uniqueItems"] is True

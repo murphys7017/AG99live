@@ -292,7 +292,7 @@ function resolveAxisLevelSampleBounds(
   level: MotionAxisLevel,
   anchor: number,
 ): { min: number; max: number } | null {
-  const levels: MotionAxisLevel[] = [-3, -2, -1, 0, 1, 2, 3];
+  const levels: MotionAxisLevel[] = [-4, -3, -2, -1, 0, 1, 2, 3, 4];
   const index = levels.indexOf(level);
   const previousAnchor = index > 0
     ? axis.level_anchors?.[String(levels[index - 1])]

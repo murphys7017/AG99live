@@ -273,7 +273,7 @@ def normalize_motion_axis_levels(
         if axis_id in normalized_levels:
             rejected_levels.append(f"duplicate_axis_id:{axis_id}")
             continue
-        if isinstance(level, bool) or not isinstance(level, int) or level < -3 or level > 3:
+        if isinstance(level, bool) or not isinstance(level, int) or level < -4 or level > 4:
             rejected_levels.append(axis_id)
             continue
         normalized_levels[axis_id] = level

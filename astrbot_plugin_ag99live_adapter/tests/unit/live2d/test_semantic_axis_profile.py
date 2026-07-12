@@ -173,7 +173,7 @@ def test_ensure_semantic_axis_profile_creates_backend_owned_profile_file(tmp_pat
     assert profile["user_modified"] is False
     assert profile["axes"]
     assert set(profile["axes"][0]["level_anchors"]) == {
-        "-3", "-2", "-1", "0", "1", "2", "3"
+        "-4", "-3", "-2", "-1", "0", "1", "2", "3", "4"
     }
 
 
@@ -182,6 +182,7 @@ def test_validate_semantic_axis_profile_accepts_ordered_custom_level_anchors(tmp
     axis = profile["axes"][0]
     neutral = axis["neutral"]
     axis["level_anchors"] = {
+        "-4": neutral - 30,
         "-3": neutral - 20,
         "-2": neutral - 12,
         "-1": neutral - 5,
@@ -189,6 +190,7 @@ def test_validate_semantic_axis_profile_accepts_ordered_custom_level_anchors(tmp
         "1": neutral + 5,
         "2": neutral + 12,
         "3": neutral + 20,
+        "4": neutral + 30,
     }
 
     normalized = validate_semantic_axis_profile(profile, model_name="DemoModel")
@@ -199,7 +201,7 @@ def test_validate_semantic_axis_profile_accepts_ordered_custom_level_anchors(tmp
 @pytest.mark.parametrize(
     ("mutate", "expected_message"),
     [
-        (lambda anchors, neutral: anchors.update({"4": neutral}), "unsupported level"),
+        (lambda anchors, neutral: anchors.update({"5": neutral}), "unsupported level"),
         (lambda anchors, neutral: anchors.update({"0": neutral + 1}), "must equal the axis neutral"),
         (lambda anchors, neutral: anchors.update({"-1": neutral + 1}), "must be ordered"),
     ],
@@ -416,9 +418,44 @@ def test_ensure_semantic_axis_profile_persists_missing_level_anchors(tmp_path) -
 
     assert migrated_profile["revision"] == original_profile["revision"]
     assert all(
-        set(axis["level_anchors"]) == {"-3", "-2", "-1", "0", "1", "2", "3"}
+        set(axis["level_anchors"])
+        == {"-4", "-3", "-2", "-1", "0", "1", "2", "3", "4"}
         for axis in persisted_payload["axes"]
     )
+
+
+def test_ensure_semantic_axis_profile_migrates_generated_seven_level_design(tmp_path) -> None:
+    model_dir = tmp_path / "DemoModel"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "Demo.model3.json").write_text("{}", encoding="utf-8")
+    model_payload = _build_model_payload()
+    original = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+    profile_path = build_semantic_axis_profile_path(model_dir)
+    legacy = json.loads(profile_path.read_text(encoding="utf-8"))
+    head_yaw = next(axis for axis in legacy["axes"] if axis["id"] == "head_yaw")
+    head_yaw["soft_range"] = [42.0, 58.0]
+    head_yaw["strong_range"] = [30.0, 70.0]
+    head_yaw["level_anchors"] = {
+        key: value
+        for key, value in head_yaw["level_anchors"].items()
+        if key not in {"-4", "4"}
+    }
+    profile_path.write_text(json.dumps(legacy), encoding="utf-8")
+
+    migrated = ensure_semantic_axis_profile(
+        model_dir=model_dir,
+        model_payload=model_payload,
+    )
+    migrated_head = next(axis for axis in migrated["axes"] if axis["id"] == "head_yaw")
+
+    assert migrated["revision"] == original["revision"] + 1
+    assert migrated_head["soft_range"] == [40.0, 60.0]
+    assert migrated_head["strong_range"] == [25.0, 75.0]
+    assert migrated_head["level_anchors"]["-4"] == 10.0
+    assert migrated_head["level_anchors"]["4"] == 90.0
 
 
 def test_ensure_semantic_axis_profile_persists_missing_axis_dynamics(tmp_path) -> None:

@@ -278,8 +278,8 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
                         "type": "object",
                         "additionalProperties": {
                             "type": "integer",
-                            "minimum": -3,
-                            "maximum": 3,
+                            "minimum": -4,
+                            "maximum": 4,
                         },
                         "minProperties": 1,
                         "maxProperties": 6,
@@ -296,8 +296,8 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
                                     "type": "object",
                                     "additionalProperties": {
                                         "type": "integer",
-                                        "minimum": -3,
-                                        "maximum": 3,
+                                        "minimum": -4,
+                                        "maximum": 4,
                                     },
                                     "minProperties": 1,
                                     "maxProperties": 6,
@@ -645,8 +645,8 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         output_shape_text = f" 输出标签示例：<@anim {inline_json}>"
 
     axis_instruction = (
-        "每个值必须是 -3 到 3 的整数等级：-3=强负、-2=中负、-1=轻负、"
-        "0=明确中性、+1=轻正、+2=中正、+3=强正；省略表示本轮不控制此轴；"
+        "每个值必须是 -4 到 4 的整数等级：-4=极强负、-3=强负、-2=中负、-1=轻负、"
+        "0=明确中性、+1=轻正、+2=中正、+3=强正、+4=极强正；省略表示本轮不控制此轴；"
         "没有明确方向或表演贡献的轴直接省略。"
         if persona_effect_available
         else "每个值都直接写成 JSON number；没有明确方向或表演贡献的轴直接省略。"
@@ -683,6 +683,7 @@ def _build_motion_capability_prompt_payload(
     }
     if persona_effect_available:
         result["axis_level_scale"] = {
+            "-4": "极强负方向",
             "-3": "强负方向",
             "-2": "中等负方向",
             "-1": "轻微负方向",
@@ -690,6 +691,7 @@ def _build_motion_capability_prompt_payload(
             "1": "轻微正方向",
             "2": "中等正方向",
             "3": "强正方向",
+            "4": "极强正方向",
             "omitted": "本轮不控制该轴",
         }
 
@@ -1169,7 +1171,7 @@ def _build_previous_motion_variation_payload(
     key_axis_levels: dict[str, int] = {}
     for axis_id in PROMPT_VARIATION_AXIS_IDS:
         axis_level = axis_levels.get(axis_id) if isinstance(axis_levels, dict) else None
-        if isinstance(axis_level, int) and not isinstance(axis_level, bool) and -3 <= axis_level <= 3:
+        if isinstance(axis_level, int) and not isinstance(axis_level, bool) and -4 <= axis_level <= 4:
             key_axes.append({"axis_id": axis_id, "level": axis_level})
             key_axis_levels[axis_id] = axis_level
             continue
@@ -1338,9 +1340,9 @@ def _summarize_key_axis_levels(
                 anchor = float(raw_anchor)
             except (TypeError, ValueError):
                 continue
-            if -3 <= level <= 3:
+            if -4 <= level <= 4:
                 numeric_anchors.append((level, anchor))
-        if len(numeric_anchors) != 7:
+        if len(numeric_anchors) != 9:
             continue
         level, _anchor = min(
             numeric_anchors,

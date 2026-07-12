@@ -372,7 +372,7 @@ class MotionTuningStore:
             if not isinstance(anchors, dict):
                 continue
             candidates: list[tuple[float, int]] = []
-            for level in range(-3, 4):
+            for level in range(-4, 5):
                 anchor = anchors.get(str(level))
                 if isinstance(anchor, (int, float)):
                     candidates.append((abs(float(value) - float(anchor)), level))
@@ -645,8 +645,8 @@ class MotionTuningStore:
             if (
                 isinstance(raw_level, bool)
                 or not isinstance(raw_level, int)
-                or raw_level < -3
-                or raw_level > 3
+                or raw_level < -4
+                or raw_level > 4
             ):
                 raise ValueError(
                     f"motion_tuning_sample_raw_axis_level_invalid:{axis_id}"

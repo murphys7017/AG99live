@@ -54,7 +54,7 @@ function normalizeAxisLevelsV4(value: unknown): MotionAxisLevelMap | null {
     if (!normalizedAxisId || typeof rawLevel !== "number" || !Number.isInteger(rawLevel)) {
       return null;
     }
-    if (rawLevel < -3 || rawLevel > 3) {
+    if (rawLevel < -4 || rawLevel > 4) {
       return null;
     }
     levels[normalizedAxisId] = rawLevel as MotionAxisLevel;

@@ -7,7 +7,7 @@ import type {
 } from "../../types/protocol.js";
 import type { ModelEngineSettings } from "../settings.js";
 
-export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v3";
+export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v4";
 
 export interface MotionTimingResolution {
   timing: DirectParameterPlanTiming;

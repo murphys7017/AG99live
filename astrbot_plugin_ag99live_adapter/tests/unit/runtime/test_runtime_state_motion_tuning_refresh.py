@@ -10,7 +10,39 @@ import pytest
 from astrbot_plugin_ag99live_adapter.prompts.motion_selector import (
     resolve_motion_reference_examples,
 )
+from astrbot_plugin_ag99live_adapter.runtime.motion_state.tuning_store import MotionTuningStore
 from astrbot_plugin_ag99live_adapter.tests.unit.live2d.test_support import build_seed_model_info
+
+
+def test_motion_tuning_store_accepts_nine_level_extremes() -> None:
+    assert MotionTuningStore._normalize_axis_levels(
+        {"head_yaw": -4, "body_yaw": 4},
+    ) == {"head_yaw": -4, "body_yaw": 4}
+    with pytest.raises(ValueError, match="raw_axis_level_invalid:head_yaw"):
+        MotionTuningStore._normalize_axis_levels({"head_yaw": 5})
+
+
+def test_motion_tuning_store_projects_axes_to_nine_level_extremes() -> None:
+    axis_by_id = {
+        "head_yaw": {
+            "level_anchors": {
+                "-4": 10.0,
+                "-3": 25.0,
+                "-2": 32.5,
+                "-1": 40.0,
+                "0": 50.0,
+                "1": 60.0,
+                "2": 67.5,
+                "3": 75.0,
+                "4": 90.0,
+            }
+        }
+    }
+
+    assert MotionTuningStore._project_axes_to_levels(
+        {"head_yaw": 90.0},
+        axis_by_id=axis_by_id,
+    ) == {"head_yaw": 4}
 
 
 def _import_runtime_state_with_fake_astrbot(
