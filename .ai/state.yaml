@@ -79,6 +79,9 @@ context:
     - A rejected motion sink is handled once as failed and is never recorded as released or retried by the orchestrator.
     - WebSDK parameter binding, lip-sync parameter selection, and voice-following frequency/direction use explicit profile declarations only; runtime name guessing has been removed.
     - Parameter plan source, neutral target, and dynamics are mandatory at parser and SDK boundaries and are not defaulted during playback.
+    - Mk6 declares ParamMouthOpenY in its model3 LipSync group; lip sync uses only manifest-declared parameter IDs.
+    - Speech modulation frequency and direction, sequence-step dynamics, and parameter source are all mandatory across parser and compiler boundaries; missing values fail rather than inheriting or defaulting.
+    - Audio start failures distinguish browser NotAllowedError from generic sink failures, and an empty manifest texture entry fails model loading explicitly.
     - WebSDK rejects an entire malformed, unbindable, duplicate, or out-of-range parameter plan instead of salvaging playable entries or clamping invalid plan targets.
     - Every engine.parameter_plan.v2 parameter requires neutral_target_value and dynamics; Motion Lab manual plans derive both from the selected semantic axis profile rather than emitting an unconstrained legacy plan.
     - Multi-step motion validates neutral-to-first and inter-step travel against rest-to-rest triangular/trapezoidal velocity profiles; impossible timing fails with motion_sequence_transition_budget_exceeded.
@@ -212,6 +215,12 @@ architecture:
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
 verification:
   checks_run:
+    - npm test (complete frontend suite passed after manifest and parser-contract fixes)
+    - npm run typecheck (renderer and node typechecks passed)
+    - npm run build:web (production web build passed)
+    - python -m pytest (267 adapter tests passed)
+    - AstrBot plugin checker (0 errors, 0 warnings)
+    - git diff --check (passed)
     - python -m pytest (267 adapter tests passed after strict profile and parameter-plan validation)
     - npm test (complete frontend suite passed after model-readiness and strict sink changes)
     - npm run typecheck (renderer and node typechecks passed)
