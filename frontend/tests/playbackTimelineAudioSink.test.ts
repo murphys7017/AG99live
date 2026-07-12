@@ -14,6 +14,7 @@ import {
   createPlaybackTimelineLipSyncRuntime,
   type PlaybackTimelineLipSyncSink,
 } from "../src/playback-timeline/lipSyncSink.js";
+import { createLive2DLipSyncTimelineSink } from "../src/live2d/lipSyncTimelineSink.js";
 
 class FakeAudio {
   static instances: FakeAudio[] = [];
@@ -113,7 +114,7 @@ function testLipSyncRuntimeKeepsUnavailableTerminalStable(): void {
     stop: () => {},
   };
   const runtime = createPlaybackTimelineLipSyncRuntime(sink, {
-    onUnavailable: () => events.push("unavailable"),
+    onUnavailable: (reason, degraded) => events.push(`unavailable:${reason}:${degraded}`),
     onTerminal: (terminal, reason) => events.push(`${terminal}:${reason}`),
   });
 
@@ -123,13 +124,64 @@ function testLipSyncRuntimeKeepsUnavailableTerminalStable(): void {
     getAudioCurrentTimeSeconds: () => 0,
     isCurrentAudio: () => true,
   });
-  attachedOptions[0]?.onUnavailable();
+  attachedOptions[0]?.onUnavailable("lip_sync_audio_context_unavailable", true);
   runtime.completeAfterAudioEnded();
 
   assert.deepEqual(events, [
-    "unavailable",
-    "failed:lip_sync_unavailable",
+    "unavailable:lip_sync_audio_context_unavailable:true",
+    "failed:lip_sync_audio_context_unavailable",
   ]);
+}
+
+async function testLiveLipSyncUsesRandomFallbackWhenWebAudioIsUnavailable(): Promise<void> {
+  const originalWindow = (globalThis as { window?: unknown }).window;
+  const values: number[] = [];
+  let cleared = false;
+  const scheduled = new Map<number, () => void>();
+  let nextTimerId = 1;
+  (globalThis as { window?: unknown }).window = {
+    getLAppAdapter: () => ({
+      setExternalLipSyncValue: (value: number) => values.push(value),
+      clearExternalLipSyncValue: () => {
+        cleared = true;
+      },
+      hasConfiguredLipSyncParameters: () => true,
+    }),
+    AudioContext: undefined,
+    webkitAudioContext: undefined,
+    setTimeout: (callback: () => void) => {
+      const timerId = nextTimerId++;
+      scheduled.set(timerId, callback);
+      return timerId;
+    },
+    clearTimeout: (timerId: number) => {
+      scheduled.delete(timerId);
+    },
+  };
+
+  const unavailable: string[] = [];
+  try {
+    const sink = createLive2DLipSyncTimelineSink();
+    sink.attachAudio({
+      audioUrl: "http://127.0.0.1/audio.wav",
+      audio: {} as HTMLAudioElement,
+      getAudioCurrentTimeSeconds: () => 0,
+      isCurrentAudio: () => true,
+      onStarted: () => unavailable.push("unexpected_started"),
+      onUnavailable: (reason, degraded) => unavailable.push(`${reason}:${degraded}`),
+    });
+    await sink.resume();
+
+    assert.deepEqual(unavailable, ["lip_sync_audio_context_unavailable:true"]);
+    assert.equal(values.length, 1);
+    assert.equal(scheduled.size, 1);
+
+    sink.stop();
+    assert.equal(cleared, true);
+    assert.equal(scheduled.size, 0);
+  } finally {
+    (globalThis as { window?: unknown }).window = originalWindow;
+  }
 }
 
 async function testBrowserAudioSinkDoesNotOwnLipSyncCallbacks(): Promise<void> {
@@ -210,6 +262,7 @@ async function run(): Promise<void> {
   testAudioElementPlaybackClockHandlesInvalidValues();
   testLipSyncRuntimeFailsWhenAudioEndsBeforeStart();
   testLipSyncRuntimeKeepsUnavailableTerminalStable();
+  await testLiveLipSyncUsesRandomFallbackWhenWebAudioIsUnavailable();
   await testBrowserAudioSinkDoesNotOwnLipSyncCallbacks();
   await testAudioSegmentSinkOwnsLipSyncEventOrdering();
   console.log("playbackTimelineAudioSink tests passed");

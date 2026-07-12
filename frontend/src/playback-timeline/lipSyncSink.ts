@@ -4,7 +4,7 @@ export interface PlaybackTimelineLipSyncAttachOptions {
   getAudioCurrentTimeSeconds: () => number;
   isCurrentAudio: () => boolean;
   onStarted: () => void;
-  onUnavailable: () => void;
+  onUnavailable: (reason: string, degraded: boolean) => void;
 }
 
 export interface PlaybackTimelineLipSyncSink {
@@ -14,7 +14,7 @@ export interface PlaybackTimelineLipSyncSink {
 }
 
 export interface PlaybackTimelineLipSyncRuntimeCallbacks {
-  onUnavailable?: () => void;
+  onUnavailable?: (reason: string, degraded: boolean) => void;
   onStarted?: () => void;
   onTerminal?: (
     terminal: "completed" | "failed" | "interrupted",
@@ -67,17 +67,20 @@ export function createPlaybackTimelineLipSyncRuntime(
           started = true;
           callbacks.onStarted?.();
         },
-        onUnavailable: () => {
-          callbacks.onUnavailable?.();
-          settleTerminal("failed", "lip_sync_unavailable");
+        onUnavailable: (reason, degraded) => {
+          callbacks.onUnavailable?.(reason, degraded);
+          settleTerminal("failed", reason);
         },
       });
     },
     async resume() {
       try {
         await sink.resume();
-      } catch (_error) {
-        settleTerminal("failed", "lip_sync_resume_failed");
+      } catch (error) {
+        const name = error instanceof Error && error.name
+          ? error.name
+          : "unknown";
+        settleTerminal("failed", `lip_sync_resume_failed:${name}`);
       }
     },
     completeAfterAudioEnded() {

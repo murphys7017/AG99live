@@ -4,15 +4,20 @@ import type {
 } from "../playback-timeline/lipSyncSink.js";
 
 interface LiveLipSyncRuntime {
-  resume: () => Promise<void>;
+  resume: () => Promise<string | null>;
   stop: () => void;
+}
+
+interface LiveLipSyncStartResult {
+  runtime: LiveLipSyncRuntime | null;
+  failureReason: string | null;
 }
 
 export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
   let liveRuntime: LiveLipSyncRuntime | null = null;
   let attachmentSerial = 0;
   let markActiveStarted: (() => void) | null = null;
-  let markActiveUnavailable: (() => void) | null = null;
+  let markActiveUnavailable: ((reason: string, degraded: boolean) => void) | null = null;
 
   function stop(): void {
     attachmentSerial += 1;
@@ -37,21 +42,22 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
         settled = true;
         options.onStarted();
       };
-      const markUnavailable = () => {
+      const markUnavailable = (reason: string, degraded: boolean) => {
         if (!isActiveAttachment() || settled) {
           return;
         }
         settled = true;
-        options.onUnavailable();
+        options.onUnavailable(reason, degraded);
       };
       markActiveStarted = markStarted;
       markActiveUnavailable = markUnavailable;
-      liveRuntime = startLiveLipSync(
+      const result = startLiveLipSync(
         options.audio,
         options.isCurrentAudio,
       );
-      if (!liveRuntime) {
-        markUnavailable();
+      liveRuntime = result.runtime;
+      if (result.failureReason) {
+        markUnavailable(result.failureReason, result.runtime !== null);
       }
     },
     async resume() {
@@ -59,10 +65,24 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
         return;
       }
       try {
-        await liveRuntime.resume();
+        const degradedReason = await liveRuntime.resume();
+        if (degradedReason) {
+          console.error("[Live2D] lip sync failed during resume.", {
+            reason: degradedReason,
+          });
+          markActiveUnavailable?.(degradedReason, true);
+          return;
+        }
         markActiveStarted?.();
-      } catch (_error) {
-        markActiveUnavailable?.();
+      } catch (error) {
+        const name = error instanceof Error && error.name
+          ? error.name
+          : "unknown";
+        console.error("[Live2D] lip sync resume failed without degradation.", {
+          reason: `lip_sync_resume_failed:${name}`,
+          error,
+        });
+        markActiveUnavailable?.(`lip_sync_resume_failed:${name}`, false);
       }
     },
     stop,
@@ -72,28 +92,40 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
 function startLiveLipSync(
   audio: HTMLAudioElement,
   isCurrentAudio: () => boolean,
-): LiveLipSyncRuntime | null {
+): LiveLipSyncStartResult {
   const adapter = window.getLAppAdapter?.();
   if (!adapter || typeof adapter.setExternalLipSyncValue !== "function") {
-    console.error("[Live2D] lip sync adapter is unavailable.");
-    return null;
+    return reportLipSyncFailure("lip_sync_adapter_unavailable");
   }
-  if (adapter.hasConfiguredLipSyncParameters?.() !== true) {
-    console.error("[Live2D] model has no configured lip sync parameters.");
-    return null;
+  try {
+    if (adapter.hasConfiguredLipSyncParameters?.() !== true) {
+      return reportLipSyncFailure("lip_sync_parameters_unconfigured");
+    }
+  } catch (error) {
+    return reportLipSyncFailure("lip_sync_model_unavailable", error);
   }
+
+  const degradedRuntime = () => createRandomLipSyncRuntime(adapter, isCurrentAudio);
 
   const AudioContextCtor = window.AudioContext
     ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!AudioContextCtor) {
-    return null;
+    return reportLipSyncFailure(
+      "lip_sync_audio_context_unavailable",
+      undefined,
+      degradedRuntime(),
+    );
   }
 
   try {
     const audioContext = new AudioContextCtor();
     if (typeof audioContext.createMediaElementSource !== "function") {
       void audioContext.close?.();
-      return null;
+      return reportLipSyncFailure(
+        "lip_sync_media_element_source_unavailable",
+        undefined,
+        degradedRuntime(),
+      );
     }
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 1024;
@@ -105,6 +137,7 @@ function startLiveLipSync(
     const samples = new Uint8Array(analyser.fftSize);
     let animationFrameId: number | null = null;
     let stopped = false;
+    let resumeFallback: LiveLipSyncRuntime | null = null;
 
     const tick = () => {
       if (stopped || !isCurrentAudio()) {
@@ -124,14 +157,31 @@ function startLiveLipSync(
 
     animationFrameId = window.requestAnimationFrame(tick);
 
-    return {
+    return { runtime: {
       resume: async () => {
         if (audioContext.state === "suspended") {
-          await audioContext.resume();
+          try {
+            await audioContext.resume();
+          } catch (error) {
+            stopped = true;
+            if (animationFrameId !== null) {
+              window.cancelAnimationFrame(animationFrameId);
+              animationFrameId = null;
+            }
+            const name = error instanceof Error && error.name
+              ? error.name
+              : "unknown";
+            resumeFallback = degradedRuntime();
+            await resumeFallback.resume();
+            return `lip_sync_resume_failed:${name}`;
+          }
         }
+        return null;
       },
       stop: () => {
         stopped = true;
+        resumeFallback?.stop();
+        resumeFallback = null;
         if (animationFrameId !== null) {
           window.cancelAnimationFrame(animationFrameId);
           animationFrameId = null;
@@ -149,9 +199,67 @@ function startLiveLipSync(
         }
         void audioContext.close?.();
       },
-    };
+    }, failureReason: null };
   } catch (error) {
-    console.error("[Live2D] live lip sync analyser failed.", error);
-    return null;
+    return reportLipSyncFailure(
+      "lip_sync_analyser_failed",
+      error,
+      degradedRuntime(),
+    );
   }
+}
+
+function reportLipSyncFailure(
+  reason: string,
+  error?: unknown,
+  runtime: LiveLipSyncRuntime | null = null,
+): LiveLipSyncStartResult {
+  console.error("[Live2D] lip sync failed.", { reason, error });
+  return { runtime, failureReason: reason };
+}
+
+function createRandomLipSyncRuntime(
+  adapter: NonNullable<ReturnType<NonNullable<Window["getLAppAdapter"]>>>,
+  isCurrentAudio: () => boolean,
+): LiveLipSyncRuntime {
+  let timerId: number | null = null;
+  let stopped = false;
+
+  const scheduleNext = (): void => {
+    if (stopped || !isCurrentAudio()) {
+      return;
+    }
+    const open = Math.random() >= 0.45;
+    const value = open ? 0.35 + Math.random() * 0.5 : 0;
+    try {
+      adapter.setExternalLipSyncValue?.(value);
+    } catch (error) {
+      stopped = true;
+      timerId = null;
+      console.error("[Live2D] random lip sync fallback failed.", {
+        reason: "lip_sync_random_fallback_parameter_write_failed",
+        error,
+      });
+      return;
+    }
+    timerId = window.setTimeout(scheduleNext, 90 + Math.round(Math.random() * 140));
+  };
+
+  return {
+    resume: async () => {
+      if (stopped || timerId !== null) {
+        return null;
+      }
+      scheduleNext();
+      return null;
+    },
+    stop: () => {
+      stopped = true;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+        timerId = null;
+      }
+      adapter.clearExternalLipSyncValue?.();
+    },
+  };
 }

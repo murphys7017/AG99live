@@ -35,8 +35,13 @@ export function createPlaybackTimelineAudioLipSyncSink(options: {
   ) => void;
 }): PlaybackTimelineAudioLipSyncSink {
   const lipSyncRuntime = options.createLipSyncRuntime({
-    onUnavailable: () => {
-      options.pushHistory("system", "嘴型同步加载失败，音频播放将无对应张嘴动作。");
+    onUnavailable: (reason, degraded) => {
+      options.pushHistory(
+        "system",
+        degraded
+          ? `嘴型同步加载失败：${reason}。已切换为随机开合。`
+          : `嘴型同步加载失败：${reason}。`,
+      );
     },
     onStarted: () => {
       options.markLipSyncTimelineStarted(

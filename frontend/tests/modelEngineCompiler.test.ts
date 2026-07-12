@@ -6,6 +6,7 @@ import { parseSemanticParameterPlan } from "../src/model-engine/planParser.js";
 import { startNormalizedMotionPayload } from "../src/model-engine/runtime/motionStart.js";
 import { buildSpeechOnlyMotionPayload } from "../src/model-engine/runtime/speechOnlyMotion.js";
 import { useModelEngine } from "../src/model-engine/useModelEngine.js";
+import { resolveMotionTiming } from "../src/model-engine/timing.js";
 import { listCompileStageRegistrations } from "../src/model-engine/compiler/registry.js";
 import type {
   ModelSummary,
@@ -21,6 +22,13 @@ import type {
 import type { CompileDiagnostics } from "../src/model-engine/compiler/contracts.js";
 
 (globalThis as Record<string, unknown>).window = globalThis;
+
+function testDefaultMotionDurationMatchesAdapterContract(): void {
+  const resolved = resolveMotionTiming({ mode: "expressive" });
+  assert.equal(resolved.resolvedDurationMs, 1000);
+  assert.equal(resolved.timing.duration_ms, 1000);
+  assert.equal(resolved.timingSource, "default");
+}
 
 const ignorePlanStarted = (_event: ModelEnginePlanStartedEvent): void => {};
 const samplingIdentity = {
@@ -2506,6 +2514,7 @@ function testExplicitEmptyRelationGraphDoesNotReviveLegacyCouplings(): void {
 }
 
 function run(): void {
+  testDefaultMotionDurationMatchesAdapterContract();
   testRegistryCoreStageOrder();
   testNormalizeMotionPayloadAcceptsV3FlatAxes();
   testNormalizeMotionPayloadAcceptsV4AxisLevels();

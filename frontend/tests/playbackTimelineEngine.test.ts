@@ -952,6 +952,46 @@ function testTerminalSinkEventsAreStable(): void {
   assert.equal(lipSyncSink?.reason, "lip_sync_unavailable");
 }
 
+function testClosedTimelineHistoryIsBounded(): void {
+  const failures: string[] = [];
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => null,
+    motionSession: {
+      markMotionStarted: () => {},
+      markMotionCompleted: () => {},
+      markMotionFailed: (_turnId, messageId, reason) => {
+        failures.push(`${messageId}:${reason ?? ""}`);
+      },
+    },
+  });
+  for (let index = 0; index < 513; index += 1) {
+    const messageId = `msg-closed-${index}`;
+    startMotionOnlySegment(runtime, "turn-closed-history", messageId);
+    runtime.stopTimelineForSegment(
+      "turn-closed-history",
+      messageId,
+      "test_cleanup",
+    );
+  }
+  failures.length = 0;
+
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  console.error = () => {};
+  console.warn = () => {};
+  try {
+    runtime.markMotionTimelineStarted("turn-closed-history", "msg-closed-0");
+    runtime.markMotionTimelineStarted("turn-closed-history", "msg-closed-512");
+  } finally {
+    console.error = originalError;
+    console.warn = originalWarn;
+  }
+
+  assert.deepEqual(failures, [
+    "msg-closed-0:playback_timeline_missing_motion_sink:motion.started",
+  ]);
+}
+
 function buildTimelineSnapshot(
   currentTimeMs: number,
 ): PlaybackTimelineSnapshot {
@@ -1204,6 +1244,7 @@ function run(): void {
   testPlaybackTimelineRuntimeDoesNotRewriteAudioSessionTerminal();
   testPlaybackTimelineRuntimeWritesMotionSessionLifecycle();
   testTerminalSinkEventsAreStable();
+  testClosedTimelineHistoryIsBounded();
   testAudioStartMotionBridgeRefreshesTimelineAtFireTime();
   testAudioStartMotionBridgeCanCancelPendingWakeup();
   testAudioStartMotionBridgeSkipsStaleSegment();

@@ -18,6 +18,7 @@ import {
 
 const AUDIO_TIMELINE_SINK_ID = "audio";
 const LIP_SYNC_TIMELINE_SINK_ID = "lip_sync";
+const MAX_CLOSED_TIMELINE_KEYS = 512;
 const MOTION_TIMELINE_SINK_ID = "motion";
 
 type TimelineTerminal = "completed" | "failed" | "interrupted";
@@ -744,7 +745,15 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
   ): void {
     const key = resolveTimelineKey(turnId, messageId);
     timelines.delete(key);
+    closedTimelineKeys.delete(key);
     closedTimelineKeys.add(key);
+    while (closedTimelineKeys.size > MAX_CLOSED_TIMELINE_KEYS) {
+      const oldestKey = closedTimelineKeys.values().next().value;
+      if (typeof oldestKey !== "string") {
+        break;
+      }
+      closedTimelineKeys.delete(oldestKey);
+    }
   }
 
   function isTimelineTerminalPhase(timeline: PlaybackTimelineEntry): boolean {
