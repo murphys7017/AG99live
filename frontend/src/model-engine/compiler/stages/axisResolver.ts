@@ -239,6 +239,7 @@ function resolveAxisLevelValue(
     const neutral = roundAxisSample(axis.neutral);
     sampling.perAxisRandom[axis.id] = 0;
     sampling.sampledValues[axis.id] = neutral;
+    sampling.sampleBounds[axis.id] = { min: neutral, max: neutral };
     return { ok: true, value: neutral };
   }
   const bounds = resolveAxisLevelSampleBounds(axis, level, anchoredValue);
@@ -259,6 +260,10 @@ function resolveAxisLevelValue(
   const roundedValue = roundAxisSample(sampledValue);
   sampling.perAxisRandom[axis.id] = roundAxisSample(axisRandom);
   sampling.sampledValues[axis.id] = roundedValue;
+  sampling.sampleBounds[axis.id] = {
+    min: roundAxisSample(bounds.min),
+    max: roundAxisSample(bounds.max),
+  };
   return { ok: true, value: roundedValue };
 }
 
@@ -278,6 +283,7 @@ function createAxisLevelSamplingTrace(
     sharedRandom: roundAxisSample(seededSignedUnit(`${seed}|shared`)),
     perAxisRandom: {},
     sampledValues: {},
+    sampleBounds: {},
   };
 }
 

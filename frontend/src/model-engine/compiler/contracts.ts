@@ -7,7 +7,7 @@ import type {
 } from "../../types/protocol.js";
 import type { ModelEngineSettings } from "../settings.js";
 
-export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v2";
+export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v3";
 
 export interface MotionTimingResolution {
   timing: DirectParameterPlanTiming;
@@ -73,6 +73,7 @@ export interface CompileDiagnostics {
   semanticAxisCount?: number;
   couplingSkippedExplicitTargets?: string[];
   relationAdjustments?: MotionAxisRelationAdjustment[];
+  relationEvaluations?: MotionAxisRelationEvaluation[];
   transformTrace?: MotionTransformTrace;
 }
 
@@ -82,6 +83,19 @@ export interface MotionAxisRelationAdjustment {
   targetAxisId: string;
   before: number;
   after: number;
+  reason: string;
+}
+
+export interface MotionAxisRelationEvaluation {
+  ruleId: string;
+  kind: "axis_range" | "derive" | "bounded_ratio";
+  status: "within_limit" | "derived" | "constrained" | "skipped";
+  sourceAxisId?: string;
+  targetAxisId: string;
+  sourceValue?: number;
+  targetBefore?: number;
+  targetAfter?: number;
+  limit?: number;
   reason: string;
 }
 
@@ -104,6 +118,7 @@ export interface MotionTransformTrace {
   derivedAxes: Record<string, number>;
   constrainedAxes: Record<string, number>;
   relationAdjustments: MotionAxisRelationAdjustment[];
+  relationEvaluations: MotionAxisRelationEvaluation[];
   compiledParameters: string[];
   sequenceSteps?: Array<{
     index: number;
@@ -119,6 +134,7 @@ export interface MotionAxisSamplingTrace {
   sharedRandom: number;
   perAxisRandom: Record<string, number>;
   sampledValues: Record<string, number>;
+  sampleBounds: Record<string, { min: number; max: number }>;
 }
 
 export interface MotionFeedback {

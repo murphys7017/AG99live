@@ -97,6 +97,7 @@ function buildVisibilityDiagnostics(
     semanticAxisCount: Object.keys(context.state.allAxisValues).length,
     couplingSkippedExplicitTargets: collectCouplingSkippedExplicitTargets(context.state.warnings),
     relationAdjustments: [...context.state.relationAdjustments],
+    relationEvaluations: context.state.relationEvaluations.map((item) => ({ ...item })),
     transformTrace: buildTransformTrace(context),
   };
 }
@@ -119,6 +120,11 @@ function buildTransformTrace(context: MotionCompileContext): MotionTransformTrac
           ...context.state.axisSampling,
           perAxisRandom: { ...context.state.axisSampling.perAxisRandom },
           sampledValues: { ...context.state.axisSampling.sampledValues },
+          sampleBounds: Object.fromEntries(
+            Object.entries(context.state.axisSampling.sampleBounds).map(
+              ([axisId, bounds]) => [axisId, { ...bounds }],
+            ),
+          ),
         }
       : undefined,
     expressionResourceId: context.intent.schema_version === "engine.motion_intent.v4"
@@ -138,6 +144,7 @@ function buildTransformTrace(context: MotionCompileContext): MotionTransformTrac
     derivedAxes: { ...context.state.derivedValues },
     constrainedAxes: { ...context.state.allAxisValues },
     relationAdjustments: [...context.state.relationAdjustments],
+    relationEvaluations: context.state.relationEvaluations.map((item) => ({ ...item })),
     compiledParameters: context.state.parameters.map((item) => item.parameter_id),
   };
 }

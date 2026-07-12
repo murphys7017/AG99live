@@ -9,7 +9,10 @@ import type {
   MotionCompileStage,
   MotionStageResult,
 } from "../compileContext.js";
-import type { MotionAxisRelationAdjustment } from "../contracts.js";
+import type {
+  MotionAxisRelationAdjustment,
+  MotionAxisRelationEvaluation,
+} from "../contracts.js";
 import { refreshAllAxisValues } from "../compileContext.js";
 
 // This stage is the single owner of semantic axis relations. Candidate stages
@@ -28,9 +31,12 @@ export function runSemanticAxisRelationGraphStage(
   }
 
   const derivedAxesBefore = new Set(Object.keys(context.state.derivedValues));
-  let adjustments: MotionAxisRelationAdjustment[];
+  let result: {
+    adjustments: MotionAxisRelationAdjustment[];
+    evaluations: MotionAxisRelationEvaluation[];
+  };
   try {
-    adjustments = applyHeadBodyRelations(
+    result = applyHeadBodyRelations(
       context.state.controlledValues,
       context.state.derivedValues,
       profile,
@@ -45,7 +51,11 @@ export function runSemanticAxisRelationGraphStage(
     };
   }
 
-  for (const adjustment of adjustments) {
+  context.state.relationEvaluations = [
+    ...context.state.relationEvaluations,
+    ...result.evaluations,
+  ];
+  for (const adjustment of result.adjustments) {
     context.state.relationAdjustments.push(adjustment);
     context.state.warnings = [
       ...context.state.warnings,
@@ -72,8 +82,12 @@ function applyHeadBodyRelations(
   derivedValues: DynamicAxisValues,
   profile: SemanticAxisProfile,
   axisById: Map<string, SemanticAxisDefinition>,
-): MotionAxisRelationAdjustment[] {
+): {
+  adjustments: MotionAxisRelationAdjustment[];
+  evaluations: MotionAxisRelationEvaluation[];
+} {
   const adjustments: MotionAxisRelationAdjustment[] = [];
+  const evaluationByRuleId = new Map<string, MotionAxisRelationEvaluation>();
   const relationRules: readonly SemanticAxisRelationRule[] =
     profile.relation_graph.edges.filter((edge) => edge.kind === "bounded_ratio");
   const allValues = {
@@ -87,6 +101,7 @@ function applyHeadBodyRelations(
     allValues,
     axisById,
     adjustments,
+    evaluationByRuleId,
   );
 
   const maxPasses = Math.max(1, relationRules.length + 1);
@@ -96,6 +111,14 @@ function applyHeadBodyRelations(
     for (const rule of relationRules) {
       const sourceValue = allValues[rule.source_axis_id];
       if (sourceValue === undefined) {
+        evaluationByRuleId.set(rule.id, {
+          ruleId: rule.id,
+          kind: "bounded_ratio",
+          status: "skipped",
+          sourceAxisId: rule.source_axis_id,
+          targetAxisId: rule.target_axis_id,
+          reason: "source_axis_missing",
+        });
         continue;
       }
 
@@ -109,6 +132,15 @@ function applyHeadBodyRelations(
       const targetValue = allValues[rule.target_axis_id];
       if (targetValue === undefined) {
         if (Math.abs(sourceDelta) <= rule.deadzone) {
+          evaluationByRuleId.set(rule.id, {
+            ruleId: rule.id,
+            kind: "bounded_ratio",
+            status: "skipped",
+            sourceAxisId: rule.source_axis_id,
+            targetAxisId: rule.target_axis_id,
+            sourceValue,
+            reason: "source_within_deadzone",
+          });
           continue;
         }
         const direction = rule.mode === "opposite_direction" ? -1 : 1;
@@ -124,6 +156,17 @@ function applyHeadBodyRelations(
         );
         allValues[rule.target_axis_id] = derivedValue;
         derivedValues[rule.target_axis_id] = derivedValue;
+        evaluationByRuleId.set(rule.id, {
+          ruleId: rule.id,
+          kind: "bounded_ratio",
+          status: "derived",
+          sourceAxisId: rule.source_axis_id,
+          targetAxisId: rule.target_axis_id,
+          sourceValue,
+          targetAfter: derivedValue,
+          limit: rule.max_delta,
+          reason: "target_axis_derived",
+        });
         changed = true;
         continue;
       }
@@ -157,6 +200,18 @@ function applyHeadBodyRelations(
       );
 
       if (Math.abs(constrainedValue - targetValue) <= 0.0001) {
+        recordRelationEvaluation(evaluationByRuleId, {
+          ruleId: rule.id,
+          kind: "bounded_ratio",
+          status: "within_limit",
+          sourceAxisId: rule.source_axis_id,
+          targetAxisId: rule.target_axis_id,
+          sourceValue,
+          targetBefore: targetValue,
+          targetAfter: targetValue,
+          limit,
+          reason: opposite ? "opposite_direction_within_limit" : "follow_direction_within_limit",
+        });
         continue;
       }
 
@@ -175,10 +230,25 @@ function applyHeadBodyRelations(
         after: constrainedValue,
         reason: opposite ? "opposite_direction_limit" : "follow_direction_limit",
       });
+      evaluationByRuleId.set(rule.id, {
+        ruleId: rule.id,
+        kind: "bounded_ratio",
+        status: "constrained",
+        sourceAxisId: rule.source_axis_id,
+        targetAxisId: rule.target_axis_id,
+        sourceValue,
+        targetBefore: targetValue,
+        targetAfter: constrainedValue,
+        limit,
+        reason: opposite ? "opposite_direction_limit" : "follow_direction_limit",
+      });
     }
 
     if (!changed) {
-      return adjustments;
+      return {
+        adjustments,
+        evaluations: [...evaluationByRuleId.values()],
+      };
     }
   }
 
@@ -191,6 +261,7 @@ function applyAxisValueRangeConstraints(
   allValues: DynamicAxisValues,
   axisById: Map<string, SemanticAxisDefinition>,
   adjustments: MotionAxisRelationAdjustment[],
+  evaluationByRuleId: Map<string, MotionAxisRelationEvaluation>,
 ): void {
   for (const [axisId, value] of Object.entries(allValues)) {
     const axis = axisById.get(axisId);
@@ -204,6 +275,15 @@ function applyAxisValueRangeConstraints(
       axis.value_range[1],
     );
     if (Math.abs(constrainedValue - value) <= 0.0001) {
+      evaluationByRuleId.set(`axis_value_range:${axisId}`, {
+        ruleId: `axis_value_range:${axisId}`,
+        kind: "axis_range",
+        status: "within_limit",
+        targetAxisId: axisId,
+        targetBefore: value,
+        targetAfter: value,
+        reason: "axis_value_within_range",
+      });
       continue;
     }
 
@@ -220,6 +300,15 @@ function applyAxisValueRangeConstraints(
       after: constrainedValue,
       reason: "axis_value_range_limit",
     });
+    evaluationByRuleId.set(`axis_value_range:${axisId}`, {
+      ruleId: `axis_value_range:${axisId}`,
+      kind: "axis_range",
+      status: "constrained",
+      targetAxisId: axisId,
+      targetBefore: value,
+      targetAfter: constrainedValue,
+      reason: "axis_value_range_limit",
+    });
   }
 }
 
@@ -233,6 +322,20 @@ function resolveHardCap(
     Math.abs(axis.neutral - axis.strong_range[0]),
   );
   return Math.max(maxDelta, strongHalfSpan + Math.min(deadzone, 6));
+}
+
+function recordRelationEvaluation(
+  evaluations: Map<string, MotionAxisRelationEvaluation>,
+  next: MotionAxisRelationEvaluation,
+): void {
+  const previous = evaluations.get(next.ruleId);
+  if (
+    next.status === "within_limit"
+    && (previous?.status === "derived" || previous?.status === "constrained")
+  ) {
+    return;
+  }
+  evaluations.set(next.ruleId, next);
 }
 
 function clamp(value: number, min: number, max: number): number {

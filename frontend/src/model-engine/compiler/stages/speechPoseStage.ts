@@ -60,15 +60,19 @@ export function runSpeechPoseStage(
   }
 
   const voiceFollowingResult = buildVoiceFollowingParameters(context);
-  if (voiceFollowingResult.conflictingParameterIds.length > 0) {
+  if (voiceFollowingResult.invalidParameterIds.length > 0) {
     return {
       ok: false,
-      reason: `speech_pose_parameter_conflict:${voiceFollowingResult.conflictingParameterIds.join(",")}`,
+      reason: `speech_pose_parameter_duplicate:${voiceFollowingResult.invalidParameterIds.join(",")}`,
     };
   }
 
   const directParameters = voiceFollowingResult.parameters;
-  if (directParameters.length > 0) {
+  context.state.pendingParameterModulations = {
+    ...context.state.pendingParameterModulations,
+    ...voiceFollowingResult.pendingModulations,
+  };
+  if (directParameters.length > 0 || Object.keys(voiceFollowingResult.pendingModulations).length > 0) {
     context.state.parameters = [
       ...context.state.parameters,
       ...directParameters,
@@ -76,6 +80,9 @@ export function runSpeechPoseStage(
     context.state.warnings = [
       ...context.state.warnings,
       ...directParameters.map((item) => `speech_pose_applied:${item.parameter_id}`),
+      ...Object.keys(voiceFollowingResult.pendingModulations).map(
+        (parameterId) => `speech_pose_modulation_pending:${parameterId}`,
+      ),
     ];
     return { ok: true };
   }
@@ -109,15 +116,17 @@ function buildVoiceFollowingParameters(
   context: MotionCompileContext,
 ): {
   parameters: SemanticParameterPlan["parameters"];
-  conflictingParameterIds: string[];
+  pendingModulations: MotionCompileContext["state"]["pendingParameterModulations"];
+  invalidParameterIds: string[];
 } {
   const profile = context.options.model.voice_following_profile;
   if (!profile || profile.schema_version !== "ag99.voice_following_profile.v1") {
-    return { parameters: [], conflictingParameterIds: [] };
+    return { parameters: [], pendingModulations: {}, invalidParameterIds: [] };
   }
 
   const parameters: SemanticParameterPlan["parameters"] = [];
-  const conflictingParameterIds: string[] = [];
+  const pendingModulations: MotionCompileContext["state"]["pendingParameterModulations"] = {};
+  const invalidParameterIds: string[] = [];
   const existingParameterIds = new Set(
     context.state.parameters.map((item) => item.parameter_id),
   );
@@ -126,36 +135,69 @@ function buildVoiceFollowingParameters(
     if (!isUsableVoiceFollowingChannel(channel)) {
       continue;
     }
-    if (
-      existingParameterIds.has(channel.parameter_id)
-      || controlledParameterIds.has(channel.parameter_id)
-    ) {
-      conflictingParameterIds.push(channel.parameter_id);
+    const modulation: NonNullable<SemanticParameterPlan["parameters"][number]["modulation"]> = {
+      kind: "speech_pose_cycle",
+      neutral: channel.neutral,
+      amplitude: channel.amplitude * channel.weight,
+      phase: channel.phase,
+      frequency_hz: resolveVoiceFollowingFrequencyHz(channel),
+      direction: resolveVoiceFollowingDirection(channel),
+    };
+    if (existingParameterIds.has(channel.parameter_id)) {
+      const existing = parameters.find((item) => item.parameter_id === channel.parameter_id)
+        ?? context.state.parameters.find((item) => item.parameter_id === channel.parameter_id);
+      if (!existing || existing.modulation) {
+        invalidParameterIds.push(channel.parameter_id);
+      } else {
+        existing.modulation = modulation;
+      }
+      continue;
+    }
+    if (controlledParameterIds.has(channel.parameter_id)) {
+      if (pendingModulations[channel.parameter_id]) {
+        invalidParameterIds.push(channel.parameter_id);
+      } else {
+        pendingModulations[channel.parameter_id] = modulation;
+      }
       continue;
     }
 
-    const targetValue = resolveVoiceFollowingTargetValue(channel);
     parameters.push({
       axis_id: `voice_following.${channel.channel}`,
       parameter_id: channel.parameter_id,
-      target_value: targetValue,
+      target_value: channel.neutral,
+      neutral_target_value: channel.neutral,
       weight: channel.weight,
       input_value: channel.neutral,
       source: "speech_pose",
-      modulation: {
-        kind: "speech_pose_cycle",
-        neutral: channel.neutral,
-        amplitude: channel.amplitude,
-        phase: channel.phase,
-        frequency_hz: resolveVoiceFollowingFrequencyHz(channel),
-        direction: resolveVoiceFollowingDirection(channel),
-      },
+      modulation,
+      dynamics: buildVoiceFollowingDynamics(channel),
     });
     existingParameterIds.add(channel.parameter_id);
   }
   return {
     parameters,
-    conflictingParameterIds: [...new Set(conflictingParameterIds)],
+    pendingModulations,
+    invalidParameterIds: [...new Set(invalidParameterIds)],
+  };
+}
+
+function buildVoiceFollowingDynamics(
+  channel: VoiceFollowingChannelProfile,
+): NonNullable<SemanticParameterPlan["parameters"][number]["dynamics"]> {
+  const weightedAmplitude = channel.amplitude * channel.weight;
+  const angularFrequency = Math.PI * 2 * resolveVoiceFollowingFrequencyHz(channel);
+  return {
+    max_velocity: Math.max(0.01, weightedAmplitude * angularFrequency * 1.25),
+    max_acceleration: Math.max(
+      0.01,
+      weightedAmplitude * angularFrequency * angularFrequency * 1.25,
+    ),
+    life_motion_scale: 0,
+    max_speech_offset: Math.min(
+      weightedAmplitude,
+      Math.max(0, (channel.output_range.max - channel.output_range.min) / 2),
+    ),
   };
 }
 
@@ -274,16 +316,6 @@ function defaultVoiceFollowingFrequencyHz(channelName: string): number {
     default:
       return 0.40;
   }
-}
-
-function resolveVoiceFollowingTargetValue(
-  channel: VoiceFollowingChannelProfile,
-): number {
-  const minValue = channel.output_range.min;
-  const maxValue = channel.output_range.max;
-  const direction = resolveVoiceFollowingDirection(channel);
-  const rawTarget = channel.neutral + direction * channel.amplitude;
-  return Math.max(minValue, Math.min(maxValue, rawTarget));
 }
 
 function resolveVoiceFollowingDirection(

@@ -25,9 +25,16 @@ function buildPlan(): SemanticParameterPlan {
         axis_id: "head_yaw",
         parameter_id: "ParamAngleX",
         target_value: 10,
+        neutral_target_value: 0,
         weight: 1,
         input_value: 70,
         source: "semantic_axis",
+        dynamics: {
+          max_velocity: 72,
+          max_acceleration: 360,
+          life_motion_scale: 0.5,
+          max_speech_offset: 3,
+        },
       },
     ],
     diagnostics: {

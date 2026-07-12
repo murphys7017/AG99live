@@ -61,6 +61,24 @@ function validateProfileForIntent(
   if (!profile) {
     return "semantic_profile_missing";
   }
+  for (const axis of profile.axes) {
+    const dynamics = axis.dynamics;
+    if (
+      !dynamics
+      || !Number.isFinite(dynamics.max_velocity)
+      || dynamics.max_velocity <= 0
+      || !Number.isFinite(dynamics.max_acceleration)
+      || dynamics.max_acceleration <= 0
+      || !Number.isFinite(dynamics.life_motion_scale)
+      || dynamics.life_motion_scale < 0
+      || dynamics.life_motion_scale > 1
+      || !Number.isFinite(dynamics.max_speech_offset_ratio)
+      || dynamics.max_speech_offset_ratio < 0
+      || dynamics.max_speech_offset_ratio > 0.5
+    ) {
+      return `semantic_axis_dynamics_invalid:${axis.id}`;
+    }
+  }
   if (profile.profile_id !== intent.profile_id) {
     return `semantic_profile_id_mismatch:${intent.profile_id}`;
   }

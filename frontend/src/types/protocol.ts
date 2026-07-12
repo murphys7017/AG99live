@@ -699,6 +699,7 @@ export interface SemanticParameterPlanEntry {
   axis_id: string;
   parameter_id: string;
   target_value: number;
+  neutral_target_value: number;
   weight: number;
   input_value?: number;
   source?: SemanticParameterPlanSource;
@@ -715,6 +716,12 @@ export interface SemanticParameterPlanEntry {
     phase: number;
     frequency_hz?: number;
     direction?: 1 | -1;
+  };
+  dynamics: {
+    max_velocity: number;
+    max_acceleration: number;
+    life_motion_scale: number;
+    max_speech_offset: number;
   };
 }
 

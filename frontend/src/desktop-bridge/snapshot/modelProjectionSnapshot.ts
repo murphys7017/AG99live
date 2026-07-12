@@ -107,6 +107,7 @@ function cloneSemanticAxisProfile(
       value_range: [...axis.value_range] as [number, number],
       soft_range: [...axis.soft_range] as [number, number],
       strong_range: [...axis.strong_range] as [number, number],
+      dynamics: { ...axis.dynamics },
       positive_semantics: [...axis.positive_semantics],
       negative_semantics: [...axis.negative_semantics],
       parameter_bindings: axis.parameter_bindings.map((binding) => ({

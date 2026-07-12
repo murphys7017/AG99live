@@ -12,6 +12,7 @@ import type {
   CompileOptions,
   MotionAxisSamplingTrace,
   MotionAxisRelationAdjustment,
+  MotionAxisRelationEvaluation,
   MotionTimingResolution,
 } from "./contracts.js";
 import type { ModelEngineSettings } from "../settings.js";
@@ -60,6 +61,7 @@ export interface MotionCompileMutableState {
   axisErrorLimit: number;
 
   relationAdjustments: MotionAxisRelationAdjustment[];
+  relationEvaluations: MotionAxisRelationEvaluation[];
   axisSampling: MotionAxisSamplingTrace | null;
 
   resource: ResolvedMotionResource | null;
@@ -70,6 +72,10 @@ export interface MotionCompileMutableState {
   timing: MotionTimingResolution | null;
 
   parameters: SemanticParameterPlan["parameters"];
+  pendingParameterModulations: Record<
+    string,
+    NonNullable<SemanticParameterPlan["parameters"][number]["modulation"]>
+  >;
 }
 
 export interface MotionCompileContext {
@@ -111,12 +117,14 @@ export function createInitialCompileState(): MotionCompileMutableState {
     axisErrorCount: 0,
     axisErrorLimit: 0,
     relationAdjustments: [],
+    relationEvaluations: [],
     axisSampling: null,
     resource: null,
     warnings: [],
     resolvedMode: "idle",
     timing: null,
     parameters: [],
+    pendingParameterModulations: {},
   };
 }
 

@@ -191,6 +191,7 @@ export interface DesktopMotionCompileDiagnostics {
       sharedRandom: number;
       perAxisRandom: Record<string, number>;
       sampledValues: Record<string, number>;
+      sampleBounds: Record<string, { min: number; max: number }>;
     };
     resolvedAxes: Record<string, number>;
     derivedAxes: Record<string, number>;
@@ -205,6 +206,7 @@ export interface DesktopMotionCompileDiagnostics {
         sharedRandom: number;
         perAxisRandom: Record<string, number>;
         sampledValues: Record<string, number>;
+        sampleBounds: Record<string, { min: number; max: number }>;
       };
     }>;
     relationAdjustments: unknown[];

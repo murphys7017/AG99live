@@ -41,6 +41,7 @@ export function runPlanBuilderStage(
     context.state.allAxisValues,
     context.state.axisById,
     context.state.axisValueSources,
+    context.state.pendingParameterModulations,
   );
   if (!parameterResult.ok) {
     if (
@@ -74,6 +75,17 @@ export function runPlanBuilderStage(
   if (!context.state.parameters.length) {
     return { ok: false, reason: "semantic_plan_parameters_empty" };
   }
+  for (const parameterId of Object.keys(context.state.pendingParameterModulations)) {
+    const owner = context.state.parameters.find(
+      (item) => item.parameter_id === parameterId && item.modulation,
+    );
+    if (!owner) {
+      return {
+        ok: false,
+        reason: `speech_pose_modulation_owner_missing:${parameterId}`,
+      };
+    }
+  }
   return { ok: true };
 }
 
@@ -81,6 +93,7 @@ function buildSemanticPlanParameters(
   axisValues: DynamicAxisValues,
   axisById: Map<string, SemanticAxisDefinition>,
   axisValueSources: MotionAxisValueSourceMap,
+  pendingParameterModulations: MotionCompileContext["state"]["pendingParameterModulations"],
 ):
   | { ok: true; parameters: SemanticParameterPlan["parameters"]; warnings: string[] }
   | { ok: false; reason: string } {
@@ -114,9 +127,12 @@ function buildSemanticPlanParameters(
         axis_id: axisId,
         parameter_id: binding.parameter_id,
         target_value: parameter.targetValue,
+        neutral_target_value: parameter.neutralTargetValue,
         weight: binding.default_weight,
         input_value: value,
         source: axisValueSources[axisId] ?? "coupling",
+        modulation: pendingParameterModulations[binding.parameter_id],
+        dynamics: mapSemanticBindingDynamics(axis, binding),
       });
     }
   }
@@ -127,12 +143,27 @@ function buildSemanticPlanParameters(
   return { ok: true, parameters, warnings };
 }
 
+function mapSemanticBindingDynamics(
+  axis: SemanticAxisDefinition,
+  binding: SemanticAxisParameterBinding,
+): NonNullable<SemanticParameterPlan["parameters"][number]["dynamics"]> {
+  const inputSpan = Math.abs(binding.input_range[1] - binding.input_range[0]);
+  const outputSpan = Math.abs(binding.output_range[1] - binding.output_range[0]);
+  const outputPerInput = inputSpan > 0 ? outputSpan / inputSpan : 0;
+  return {
+    max_velocity: axis.dynamics.max_velocity * outputPerInput,
+    max_acceleration: axis.dynamics.max_acceleration * outputPerInput,
+    life_motion_scale: axis.dynamics.life_motion_scale,
+    max_speech_offset: outputSpan * axis.dynamics.max_speech_offset_ratio,
+  };
+}
+
 function mapSemanticBindingValue(
   axis: SemanticAxisDefinition,
   binding: SemanticAxisParameterBinding,
   value: number,
 ):
-  | { ok: true; targetValue: number }
+  | { ok: true; targetValue: number; neutralTargetValue: number }
   | { ok: false; reason: string } {
   const [inputMin, inputMax] = binding.input_range;
   const [outputMin, outputMax] = binding.output_range;
@@ -164,13 +195,17 @@ function mapSemanticBindingValue(
   const ratio = (value - inputMin) / (inputMax - inputMin);
   const effectiveRatio = binding.invert ? 1 - ratio : ratio;
   const targetValue = outputMin + (outputMax - outputMin) * effectiveRatio;
+  const neutralRatio = (axis.neutral - inputMin) / (inputMax - inputMin);
+  const effectiveNeutralRatio = binding.invert ? 1 - neutralRatio : neutralRatio;
+  const neutralTargetValue = outputMin
+    + (outputMax - outputMin) * effectiveNeutralRatio;
 
-  if (!Number.isFinite(targetValue)) {
+  if (!Number.isFinite(targetValue) || !Number.isFinite(neutralTargetValue)) {
     return {
       ok: false,
       reason: `binding_target_not_finite:${axis.id}:${binding.parameter_id}`,
     };
   }
 
-  return { ok: true, targetValue };
+  return { ok: true, targetValue, neutralTargetValue };
 }

@@ -591,13 +591,28 @@ function buildManualPlanParameter(
   binding: SemanticAxisParameterBinding,
   axisValue: number,
 ): SemanticParameterPlan["parameters"][number] {
+  const inputSpan = Math.abs(binding.input_range[1] - binding.input_range[0]);
+  const outputSpan = Math.abs(binding.output_range[1] - binding.output_range[0]);
+  const outputPerInput = outputSpan / inputSpan;
   return {
     axis_id: axis.id,
     parameter_id: binding.parameter_id,
     target_value: mapBindingValue(axisValue, binding.input_range, binding.output_range, binding.invert),
+    neutral_target_value: mapBindingValue(
+      axis.neutral,
+      binding.input_range,
+      binding.output_range,
+      binding.invert,
+    ),
     weight: binding.default_weight,
     input_value: axisValue,
     source: "manual",
+    dynamics: {
+      max_velocity: axis.dynamics.max_velocity * outputPerInput,
+      max_acceleration: axis.dynamics.max_acceleration * outputPerInput,
+      life_motion_scale: axis.dynamics.life_motion_scale,
+      max_speech_offset: outputSpan * axis.dynamics.max_speech_offset_ratio,
+    },
   };
 }
 

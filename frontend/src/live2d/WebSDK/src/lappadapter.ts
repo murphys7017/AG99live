@@ -88,14 +88,6 @@ export class LAppAdapter {
     return this.getModel()?.getDirectParameterPlanError?.() ?? "";
   }
 
-  public async loadWavFileForLipSync(url: string, offsetSeconds = 0): Promise<boolean> {
-    const model = this.getModel();
-    if (!model) {
-      return false;
-    }
-    return model.loadWavFileForLipSync(url, offsetSeconds);
-  }
-
   public setExternalLipSyncValue(value: number): void {
     this.getModel()?.setExternalLipSyncValue(value);
   }

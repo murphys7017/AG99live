@@ -42,8 +42,8 @@ import * as LAppDefine from "./lappdefine";
 import { frameBuffer, LAppDelegate } from "./lappdelegate";
 import { canvas, gl } from "./lappglmanager";
 import { LAppPal } from "./lapppal";
+import { advanceParameterDynamics } from "./parameterdynamics";
 import { TextureInfo } from "./lapptexturemanager";
-import { LAppWavFileHandler } from "./lappwavfilehandler";
 import { CubismMoc } from "@framework/model/cubismmoc";
 
 const AsyncMotionAcceptedHandle = { status: "async_motion_accepted" };
@@ -110,16 +110,17 @@ const DIRECT_LIFE_MOTION_AXIS_CONFIG: Record<string, { amplitudeRatio: number; m
   gaze_x: { amplitudeRatio: 0.08, minAmplitude: 0.08, maxAmplitude: 0.45, frequencyHz: 0.75 },
   gaze_y: { amplitudeRatio: 0.08, minAmplitude: 0.08, maxAmplitude: 0.45, frequencyHz: 0.68 },
 };
-const SPEECH_AUDIO_ENVELOPE_ATTACK_PER_SECOND = 12.0;
-const SPEECH_AUDIO_ENVELOPE_RELEASE_PER_SECOND = 4.5;
-const SPEECH_AUDIO_RMS_GAIN = 5.0;
+const SPEECH_HEAD_ENVELOPE_ATTACK_PER_SECOND = 8.0;
+const SPEECH_HEAD_ENVELOPE_RELEASE_PER_SECOND = 3.0;
+const SPEECH_BODY_ENVELOPE_ATTACK_PER_SECOND = 2.5;
+const SPEECH_BODY_ENVELOPE_RELEASE_PER_SECOND = 1.2;
 const SPEECH_AUDIO_GAIN_FLOOR = 0.16;
 const SPEECH_AUDIO_GAIN_SPAN = 1.24;
 const SPEECH_AUDIO_GAIN_MAX = 1.4;
 const SPEECH_AUDIO_PITCH_GAIN_MAX = 1.0;
-const BODY_SPEECH_FOLLOW_RESPONSE_PER_SECOND = 2.2;
-const BODY_SPEECH_FOLLOW_MAX_SPEED_PER_SECOND = 4.0;
-
+const SPEECH_BODY_GAIN_FLOOR = 0.08;
+const SPEECH_BODY_GAIN_SPAN = 0.72;
+const SPEECH_BODY_GAIN_MAX = 0.8;
 interface DirectParameterAxisBinding {
   axisName: string;
   axisValue: number;
@@ -145,6 +146,7 @@ interface DirectSemanticParameterBinding {
   axisId: string;
   parameterIdRaw: string;
   targetValue: number;
+  neutralTargetValue: number;
   weight: number;
   inputValue: number | null;
   source: string;
@@ -169,10 +171,15 @@ interface DirectSemanticParameterBinding {
     frequencyHz: number | null;
     direction: number | null;
   } | null;
+  maxVelocity: number;
+  maxAcceleration: number;
+  lifeMotionScale: number;
+  maxSpeechOffset: number;
   parameterId: CubismIdHandle;
   parameterIndex: number;
-  smoothedSpeechTargetValue: number | null;
-  lastSpeechTargetElapsedMs: number | null;
+  dynamicallyLimitedValue: number | null;
+  dynamicVelocity: number;
+  lastDynamicElapsedMs: number | null;
 }
 
 interface DirectParameterCalibrationRange {
@@ -706,14 +713,9 @@ export class LAppModel extends CubismUserModel {
     let lipSyncValue = 0.0;
     let speechEnergyValue = 0.0;
     if (this._lipsync) {
-      this._wavFileHandler.update(deltaTimeSeconds);
-      const rms = this._wavFileHandler.getRms();
-      const wavLipSyncValue = Math.min(1.0, rms * 1.5);
       const liveLipSyncValue = this.resolveExternalLipSyncValue();
-      lipSyncValue = liveLipSyncValue ?? wavLipSyncValue;
-      speechEnergyValue = liveLipSyncValue !== null
-        ? liveLipSyncValue
-        : Math.min(1.0, rms * SPEECH_AUDIO_RMS_GAIN);
+      lipSyncValue = liveLipSyncValue ?? 0;
+      speechEnergyValue = liveLipSyncValue ?? 0;
     }
     this.updateSpeechAudioEnvelope(speechEnergyValue, deltaTimeSeconds);
 
@@ -1611,47 +1613,61 @@ export class LAppModel extends CubismUserModel {
       const axisId = String(item.axis_id || "").trim();
       const resolved = this.resolveWritableParameter(parameterIdRaw);
       if (!resolved) {
-        bindingWarnings.push(`v2_parameter_skipped_missing_runtime_parameter:${axisId}:${parameterIdRaw || index}`);
-        continue;
+        this.stopDirectParameterPlan(
+          `v2_parameter_missing_runtime_parameter:${axisId}:${parameterIdRaw || index}`,
+        );
+        return false;
       }
       if (seenParameterIndices.has(resolved.parameterIndex)) {
-        bindingWarnings.push(`v2_parameter_skipped_duplicate_runtime_parameter:${axisId}:${parameterIdRaw}`);
-        continue;
+        this.stopDirectParameterPlan(
+          `v2_parameter_duplicate_runtime_parameter:${axisId}:${parameterIdRaw}`,
+        );
+        return false;
       }
       if (!this.isParameterIndexWritable(resolved.parameterIndex)) {
-        bindingWarnings.push(`v2_parameter_skipped_not_writable:${axisId}:${parameterIdRaw}`);
-        continue;
+        this.stopDirectParameterPlan(
+          `v2_parameter_not_writable:${axisId}:${parameterIdRaw}`,
+        );
+        return false;
       }
       const minValue = this._model.getParameterMinimumValue(resolved.parameterIndex);
       const maxValue = this._model.getParameterMaximumValue(resolved.parameterIndex);
       const targetValue = Number(item.target_value);
-      const clampedTargetValue = Math.max(minValue, Math.min(maxValue, targetValue));
-      if (clampedTargetValue !== targetValue) {
-        console.warn(`[LAppModel] v2 target clamped axis=${axisId} param=${parameterIdRaw} target=${targetValue} min=${minValue} max=${maxValue} clamped=${clampedTargetValue}`);
+      if (targetValue < minValue || targetValue > maxValue) {
+        this.stopDirectParameterPlan(`v2_parameter_target_out_of_runtime_range:${parameterIdRaw}`);
+        return false;
+      }
+      const neutralTargetValue = Number(item.neutral_target_value);
+      if (neutralTargetValue < minValue || neutralTargetValue > maxValue) {
+        this.stopDirectParameterPlan(`v2_parameter_neutral_out_of_runtime_range:${parameterIdRaw}`);
+        return false;
+      }
+      const keyframes = Array.isArray(item.keyframes)
+        ? item.keyframes.map((keyframe: any) => ({
+            atMs: Number(keyframe.at_ms),
+            transitionMs: Number(keyframe.transition_ms),
+            targetValue: Number(keyframe.target_value),
+          }))
+        : [];
+      if (keyframes.some((keyframe) => keyframe.targetValue < minValue || keyframe.targetValue > maxValue)) {
+        this.stopDirectParameterPlan(`v2_parameter_keyframe_out_of_runtime_range:${parameterIdRaw}`);
+        return false;
       }
       seenParameterIndices.add(resolved.parameterIndex);
       semanticBindings.push({
         axisId,
         parameterIdRaw,
-        targetValue: clampedTargetValue,
+        targetValue,
+        neutralTargetValue,
         weight: Number(item.weight),
         inputValue: Number.isFinite(Number(item.input_value)) ? Number(item.input_value) : null,
         source: String(item.source || "semantic_axis"),
-        keyframes: Array.isArray(item.keyframes)
-          ? item.keyframes.map((keyframe: any) => ({
-              atMs: Number(keyframe.at_ms),
-              transitionMs: Number(keyframe.transition_ms),
-              targetValue: Math.max(
-                minValue,
-                Math.min(maxValue, Number(keyframe.target_value)),
-              ),
-            }))
-          : [],
+        keyframes,
         modulationPhase: this.resolveSpeechPosePhase(axisId),
         modulationAmplitude: 0,
         modulationFrequencyHz: this.resolveSpeechPoseFrequency(axisId),
         modulationDirection: 1,
-        neutralValue: clampedTargetValue,
+        neutralValue: neutralTargetValue ?? targetValue,
         lifeMotionPhase: this.resolveLifeMotionPhase(axisId, parameterIdRaw),
         lifeMotionAmplitude: 0,
         lifeMotionFrequencyHz: 0,
@@ -1673,22 +1689,31 @@ export class LAppModel extends CubismUserModel {
             direction: item.modulation.direction === -1 ? -1 : 1,
           }
           : null,
+        maxVelocity: Number.isFinite(item.dynamics?.max_velocity)
+          ? Number(item.dynamics.max_velocity)
+          : 0,
+        maxAcceleration: Number.isFinite(item.dynamics?.max_acceleration)
+          ? Number(item.dynamics.max_acceleration)
+          : 0,
+        lifeMotionScale: Number.isFinite(item.dynamics?.life_motion_scale)
+          ? Number(item.dynamics.life_motion_scale)
+          : 0,
+        maxSpeechOffset: Number.isFinite(item.dynamics?.max_speech_offset)
+          ? Number(item.dynamics.max_speech_offset)
+          : 0,
         parameterId: resolved.parameterId,
         parameterIndex: resolved.parameterIndex,
-        smoothedSpeechTargetValue: null,
-        lastSpeechTargetElapsedMs: null,
+        dynamicallyLimitedValue: null,
+        dynamicVelocity: 0,
+        lastDynamicElapsedMs: null,
       });
     }
 
     if (semanticBindings.length === 0) {
-      if (bindingWarnings.length > 0) {
-        console.warn("[LAppModel] Semantic parameter plan had no playable runtime parameters.", bindingWarnings);
-      }
       this.stopDirectParameterPlan("v2_parameters_empty_after_runtime_filter");
       return false;
     }
     if (bindingWarnings.length > 0) {
-      console.warn("[LAppModel] Semantic parameter bindings skipped invalid runtime parameters.", bindingWarnings);
       if (!parsed.plan.diagnostics || typeof parsed.plan.diagnostics !== "object") {
         parsed.plan.diagnostics = {};
       }
@@ -1700,14 +1725,15 @@ export class LAppModel extends CubismUserModel {
         const lifeMotion = this.resolveSemanticLifeMotion(item);
         item.lifeMotionAmplitude = lifeMotion.amplitude;
         item.lifeMotionFrequencyHz = lifeMotion.frequencyHz;
-        continue;
       }
-      const modulation = this.resolveSpeechPoseModulation(item);
-      item.modulationAmplitude = modulation.amplitude;
-      item.modulationPhase = modulation.phase;
-      item.modulationFrequencyHz = modulation.frequencyHz;
-      item.modulationDirection = modulation.direction;
-      item.neutralValue = modulation.neutralValue;
+      if (item.modulation) {
+        const modulation = this.resolveSpeechPoseModulation(item);
+        item.modulationAmplitude = modulation.amplitude;
+        item.modulationPhase = modulation.phase;
+        item.modulationFrequencyHz = modulation.frequencyHz;
+        item.modulationDirection = modulation.direction;
+        item.neutralValue = modulation.neutralValue;
+      }
     }
 
     console.info("[LAppModel] Semantic parameter bindings ready. Activating v2 plan.", {
@@ -1732,17 +1758,6 @@ export class LAppModel extends CubismUserModel {
     };
     this._directParameterPlanError = "";
     return true;
-  }
-
-  public async loadWavFileForLipSync(url: string, offsetSeconds = 0): Promise<boolean> {
-    try {
-      await this._wavFileHandler.loadWavFile(url);
-      this._wavFileHandler.seekPlaybackCursor(offsetSeconds);
-      return true;
-    } catch (e) {
-      console.warn("[LAppModel] Failed to load wav for lip sync:", e);
-      return false;
-    }
   }
 
   public setExternalLipSyncValue(value: number): void {
@@ -1779,38 +1794,38 @@ export class LAppModel extends CubismUserModel {
 
       const minValue = this._model.getParameterMinimumValue(item.parameterIndex);
       const maxValue = this._model.getParameterMaximumValue(item.parameterIndex);
-      const effectiveTargetValue = Math.max(minValue, Math.min(maxValue, item.targetValue));
-      if (effectiveTargetValue !== item.targetValue) {
-        console.warn(`[LAppModel] applyDirectParameterPlanOverlay: v2 target clamped axis=${item.axisId} param=${item.parameterIdRaw} target=${item.targetValue} min=${minValue} max=${maxValue} clamped=${effectiveTargetValue}`);
+      if (item.targetValue < minValue || item.targetValue > maxValue) {
+        return `v2_parameter_target_out_of_runtime_range:${item.parameterIdRaw}`;
       }
 
       const baseValue = this._model.getParameterValueByIndex(item.parameterIndex);
       const rawFrameTargetValue = this.resolveSemanticBindingFrameTarget(
         item,
         elapsedMs,
-        effectiveTargetValue,
+        item.targetValue,
         minValue,
         maxValue,
       );
-      const frameTargetValue = this.resolveSmoothedSpeechBodyTarget(
+      const easedFrameTargetValue = baseValue
+        + (rawFrameTargetValue - baseValue) * easing;
+      const frameTargetValue = this.resolveDynamicallyLimitedTarget(
         item,
-        rawFrameTargetValue,
+        easedFrameTargetValue,
         baseValue,
         elapsedMs,
         minValue,
         maxValue,
       );
-      const blendedValue = baseValue + (frameTargetValue - baseValue) * easing;
-      this._model.setParameterValueById(item.parameterId, blendedValue);
+      this._model.setParameterValueById(item.parameterId, frameTargetValue);
       const readbackValue = this._model.getParameterValueByIndex(item.parameterIndex);
-      if (Math.abs(readbackValue - blendedValue) > 0.001) {
+      if (Math.abs(readbackValue - frameTargetValue) > 0.001) {
         console.warn(
-          `[LAppModel] v2 setParam readback mismatch axis=${item.axisId} param=${item.parameterIdRaw} wrote=${blendedValue} readback=${readbackValue}`,
+          `[LAppModel] v2 setParam readback mismatch axis=${item.axisId} param=${item.parameterIdRaw} wrote=${frameTargetValue} readback=${readbackValue}`,
         );
         return `v2_parameter_write_mismatch:${item.parameterIdRaw}`;
       }
       if (shouldLogFrame) {
-        console.info(`[LAppModel] v2 setParam axis=${item.axisId} param=${item.parameterIdRaw} input=${item.inputValue} base=${baseValue} target=${frameTargetValue} weight=${item.weight} eased=${blendedValue} readback=${readbackValue} easing=${easing}`);
+        console.info(`[LAppModel] v2 setParam axis=${item.axisId} param=${item.parameterIdRaw} input=${item.inputValue} base=${baseValue} rawTarget=${rawFrameTargetValue} easedTarget=${easedFrameTargetValue} limitedTarget=${frameTargetValue} weight=${item.weight} readback=${readbackValue} easing=${easing}`);
       }
     }
 
@@ -2068,24 +2083,53 @@ export class LAppModel extends CubismUserModel {
     deltaTimeSeconds: number,
   ): void {
     const target = this.smoothstep(Math.max(0, Math.min(1, lipSyncValue)));
-    const rate = target > this._speechAudioEnvelope
-      ? SPEECH_AUDIO_ENVELOPE_ATTACK_PER_SECOND
-      : SPEECH_AUDIO_ENVELOPE_RELEASE_PER_SECOND;
-    const blend = 1 - Math.exp(-Math.max(0, deltaTimeSeconds) * rate);
-    this._speechAudioEnvelope += (target - this._speechAudioEnvelope) * blend;
+    this._speechAudioEnvelope = this.updateEnvelopeValue(
+      this._speechAudioEnvelope,
+      target,
+      deltaTimeSeconds,
+      SPEECH_HEAD_ENVELOPE_ATTACK_PER_SECOND,
+      SPEECH_HEAD_ENVELOPE_RELEASE_PER_SECOND,
+    );
+    this._speechBodyEnvelope = this.updateEnvelopeValue(
+      this._speechBodyEnvelope,
+      target,
+      deltaTimeSeconds,
+      SPEECH_BODY_ENVELOPE_ATTACK_PER_SECOND,
+      SPEECH_BODY_ENVELOPE_RELEASE_PER_SECOND,
+    );
     if (this._speechAudioEnvelope < 0.001) {
       this._speechAudioEnvelope = 0;
     }
+    if (this._speechBodyEnvelope < 0.001) {
+      this._speechBodyEnvelope = 0;
+    }
+  }
+
+  private updateEnvelopeValue(
+    current: number,
+    target: number,
+    deltaTimeSeconds: number,
+    attackPerSecond: number,
+    releasePerSecond: number,
+  ): number {
+    const rate = target > current ? attackPerSecond : releasePerSecond;
+    const blend = 1 - Math.exp(-Math.max(0, deltaTimeSeconds) * rate);
+    return current + (target - current) * blend;
   }
 
   private resolveSpeechAudioGain(item: DirectSemanticParameterBinding): number {
     const channelName = item.axisId.startsWith("voice_following.")
       ? item.axisId.slice("voice_following.".length).split("|")[0]
       : item.axisId;
-    const rawGain = Math.min(
-      SPEECH_AUDIO_GAIN_MAX,
-      SPEECH_AUDIO_GAIN_FLOOR + this._speechAudioEnvelope * SPEECH_AUDIO_GAIN_SPAN,
-    );
+    const rawGain = channelName.startsWith("body_")
+      ? Math.min(
+          SPEECH_BODY_GAIN_MAX,
+          SPEECH_BODY_GAIN_FLOOR + this._speechBodyEnvelope * SPEECH_BODY_GAIN_SPAN,
+        )
+      : Math.min(
+          SPEECH_AUDIO_GAIN_MAX,
+          SPEECH_AUDIO_GAIN_FLOOR + this._speechAudioEnvelope * SPEECH_AUDIO_GAIN_SPAN,
+        );
     return channelName.includes("pitch")
       ? Math.min(SPEECH_AUDIO_PITCH_GAIN_MAX, rawGain)
       : rawGain;
@@ -2103,21 +2147,22 @@ export class LAppModel extends CubismUserModel {
       elapsedMs,
       fallbackTargetValue,
     );
+    let resolvedTargetValue = sequenceTargetValue;
     if (!item.source.startsWith("speech_pose")) {
       if (item.lifeMotionAmplitude <= 0 || item.lifeMotionFrequencyHz <= 0) {
-        return sequenceTargetValue;
+        resolvedTargetValue = sequenceTargetValue;
+      } else {
+        const cycleRadians = ((elapsedMs / 1000) * item.lifeMotionFrequencyHz * Math.PI * 2) + item.lifeMotionPhase;
+        const secondaryCycleRadians = ((elapsedMs / 1000) * item.lifeMotionFrequencyHz * 0.47 * Math.PI * 2) + item.lifeMotionPhase * 0.37;
+        resolvedTargetValue =
+          sequenceTargetValue
+          + Math.sin(cycleRadians) * item.lifeMotionAmplitude
+          + Math.sin(secondaryCycleRadians) * item.lifeMotionAmplitude * 0.35;
       }
-      const cycleRadians = ((elapsedMs / 1000) * item.lifeMotionFrequencyHz * Math.PI * 2) + item.lifeMotionPhase;
-      const secondaryCycleRadians = ((elapsedMs / 1000) * item.lifeMotionFrequencyHz * 0.47 * Math.PI * 2) + item.lifeMotionPhase * 0.37;
-      const modulatedValue =
-        sequenceTargetValue
-        + Math.sin(cycleRadians) * item.lifeMotionAmplitude
-        + Math.sin(secondaryCycleRadians) * item.lifeMotionAmplitude * 0.35;
-      return Math.max(minValue, Math.min(maxValue, modulatedValue));
     }
 
     if (item.modulationAmplitude <= 0) {
-      return sequenceTargetValue;
+      return Math.max(minValue, Math.min(maxValue, resolvedTargetValue));
     }
 
     const frequencyHz = item.modulationFrequencyHz > 0
@@ -2126,7 +2171,7 @@ export class LAppModel extends CubismUserModel {
     const cycleRadians = ((elapsedMs / 1000) * frequencyHz * Math.PI * 2) + item.modulationPhase;
     const audioGain = this.resolveSpeechAudioGain(item);
     const modulatedValue =
-      item.neutralValue
+      resolvedTargetValue
       + Math.sin(cycleRadians)
         * item.modulationAmplitude
         * item.modulationDirection
@@ -2178,7 +2223,7 @@ export class LAppModel extends CubismUserModel {
     return this._externalLipSyncValue;
   }
 
-  private resolveSmoothedSpeechBodyTarget(
+  private resolveDynamicallyLimitedTarget(
     item: DirectSemanticParameterBinding,
     rawTargetValue: number,
     currentValue: number,
@@ -2186,45 +2231,42 @@ export class LAppModel extends CubismUserModel {
     minValue: number,
     maxValue: number,
   ): number {
-    if (!this.isBodySpeechFollowingBinding(item)) {
+    if (item.maxVelocity <= 0 || item.maxAcceleration <= 0) {
       return rawTargetValue;
     }
 
-    const previousValue = Number.isFinite(item.smoothedSpeechTargetValue)
-      ? Number(item.smoothedSpeechTargetValue)
+    const previousValue = Number.isFinite(item.dynamicallyLimitedValue)
+      ? Number(item.dynamicallyLimitedValue)
       : currentValue;
-    const previousElapsedMs = Number.isFinite(item.lastSpeechTargetElapsedMs)
-      ? Number(item.lastSpeechTargetElapsedMs)
+    const previousElapsedMs = Number.isFinite(item.lastDynamicElapsedMs)
+      ? Number(item.lastDynamicElapsedMs)
       : null;
-    item.lastSpeechTargetElapsedMs = elapsedMs;
+    item.lastDynamicElapsedMs = elapsedMs;
 
     if (previousElapsedMs === null || elapsedMs <= previousElapsedMs) {
       const initialized = this.clampNumber(previousValue, minValue, maxValue);
-      item.smoothedSpeechTargetValue = initialized;
+      item.dynamicallyLimitedValue = initialized;
+      item.dynamicVelocity = 0;
       return initialized;
     }
 
     const deltaSeconds = Math.max(0, (elapsedMs - previousElapsedMs) / 1000);
-    const response = 1 - Math.exp(-deltaSeconds * BODY_SPEECH_FOLLOW_RESPONSE_PER_SECOND);
-    const lowPassValue = previousValue + (rawTargetValue - previousValue) * response;
-    const maxDelta = BODY_SPEECH_FOLLOW_MAX_SPEED_PER_SECOND * deltaSeconds;
-    const speedLimitedValue = this.clampNumber(
-      lowPassValue,
-      previousValue - maxDelta,
-      previousValue + maxDelta,
-    );
-    const nextValue = this.clampNumber(speedLimitedValue, minValue, maxValue);
-    item.smoothedSpeechTargetValue = nextValue;
-    return nextValue;
-  }
-
-  private isBodySpeechFollowingBinding(item: DirectSemanticParameterBinding): boolean {
-    if (!item.source.startsWith("speech_pose")) {
-      return false;
+    if (deltaSeconds <= 0) {
+      return previousValue;
     }
-    const channelName = this.resolveSpeechFollowingChannelName(item.axisId);
-    return channelName.startsWith("body_")
-      || item.parameterIdRaw.toLowerCase().includes("body");
+    const next = advanceParameterDynamics(
+      previousValue,
+      rawTargetValue,
+      item.dynamicVelocity,
+      deltaSeconds,
+      item.maxVelocity,
+      item.maxAcceleration,
+      minValue,
+      maxValue,
+    );
+    item.dynamicallyLimitedValue = next.value;
+    item.dynamicVelocity = next.velocity;
+    return next.value;
   }
 
   private resolveSpeechFollowingChannelName(axisId: string): string {
@@ -2246,8 +2288,7 @@ export class LAppModel extends CubismUserModel {
     if (!config) {
       return { amplitude: 0, frequencyHz: 0 };
     }
-    const inputValue = this.inputValueOr(item, 50.0);
-    const distance = Math.abs(item.targetValue - inputValue);
+    const distance = Math.abs(item.targetValue - item.neutralTargetValue);
     if (distance <= 0.001) {
       return { amplitude: 0, frequencyHz: 0 };
     }
@@ -2255,7 +2296,7 @@ export class LAppModel extends CubismUserModel {
     const amplitude = Math.min(
       config.maxAmplitude,
       Math.max(config.minAmplitude, distance * config.amplitudeRatio),
-    ) * weight;
+    ) * weight * item.lifeMotionScale;
     return {
       amplitude,
       frequencyHz: config.frequencyHz,
@@ -2273,9 +2314,9 @@ export class LAppModel extends CubismUserModel {
   } {
     const modulation = this.parseSpeechPoseModulation(item);
     const neutralValue = modulation.neutralValue ?? this.inputValueOr(item, item.targetValue);
-    const amplitude = Math.max(
-      0,
-      (modulation.amplitude ?? Math.abs(item.targetValue - neutralValue)) * item.weight,
+    const amplitude = Math.min(
+      item.maxSpeechOffset,
+      Math.max(0, modulation.amplitude ?? Math.abs(item.targetValue - neutralValue)),
     );
     return {
       amplitude,
@@ -2893,6 +2934,7 @@ export class LAppModel extends CubismUserModel {
       axis_id: string;
       parameter_id: string;
       target_value: number;
+      neutral_target_value: number;
       weight: number;
       input_value: number | null;
       source: string;
@@ -2902,45 +2944,66 @@ export class LAppModel extends CubismUserModel {
         target_value: number;
         input_value?: number;
       }>;
+      modulation?: {
+        kind: "speech_pose_cycle";
+        neutral: number;
+        amplitude: number;
+        phase: number;
+        frequency_hz?: number;
+        direction?: 1 | -1;
+      };
+      dynamics?: {
+        max_velocity: number;
+        max_acceleration: number;
+        life_motion_scale: number;
+        max_speech_offset: number;
+      };
     }> = [];
     for (const [index, item] of parametersPayload.entries()) {
       if (!item || typeof item !== "object") {
-        warnings.push(`v2_parameter_item_skipped_not_object:${index}`);
-        continue;
+        return fail(`v2_parameter_item_not_object:${index}`);
       }
       const axisId = String(item.axis_id || "").trim();
       const parameterId = String(item.parameter_id || "").trim();
       const targetValue = item.target_value;
+      const neutralTargetValue = item.neutral_target_value;
       const weight = item.weight;
       const inputValue = item.input_value === undefined || item.input_value === null
         ? null
         : item.input_value;
       if (!axisId || !parameterId) {
-        warnings.push(`v2_parameter_skipped_required_field_missing:${index}`);
-        continue;
+        return fail(`v2_parameter_required_field_missing:${index}`);
       }
       if (parameterIds.has(parameterId)) {
-        warnings.push(`v2_parameter_skipped_duplicate:${parameterId}`);
-        continue;
+        return fail(`v2_parameter_duplicate:${parameterId}`);
       }
-      if (typeof targetValue !== "number" || typeof weight !== "number" || !Number.isFinite(targetValue) || !Number.isFinite(weight)) {
-        warnings.push(`v2_parameter_skipped_not_number:${axisId}:${parameterId}`);
-        continue;
+      if (
+        typeof targetValue !== "number"
+        || typeof neutralTargetValue !== "number"
+        || typeof weight !== "number"
+        || !Number.isFinite(targetValue)
+        || !Number.isFinite(neutralTargetValue)
+        || !Number.isFinite(weight)
+      ) {
+        return fail(`v2_parameter_not_number:${axisId}:${parameterId}`);
       }
       if (inputValue !== null && (typeof inputValue !== "number" || !Number.isFinite(inputValue))) {
-        warnings.push(`v2_parameter_skipped_input_value_not_number:${axisId}:${parameterId}`);
-        continue;
+        return fail(`v2_parameter_input_value_not_number:${axisId}:${parameterId}`);
       }
       if (weight < 0 || weight > 1) {
-        warnings.push(`v2_parameter_skipped_weight_out_of_range:${axisId}:${parameterId}`);
-        continue;
+        return fail(`v2_parameter_weight_out_of_range:${axisId}:${parameterId}`);
       }
       const source = item.source === undefined || item.source === null
         ? "semantic_axis"
         : String(item.source || "").trim();
       if (!isSemanticParameterPlanSource(source)) {
-        warnings.push(`v2_parameter_skipped_source_invalid:${axisId}:${parameterId}`);
-        continue;
+        return fail(`v2_parameter_source_invalid:${axisId}:${parameterId}`);
+      }
+      if (
+        neutralTargetValue !== undefined
+        && (typeof neutralTargetValue !== "number" || !Number.isFinite(neutralTargetValue))
+      ) {
+        return fail(`v2_parameter_neutral_target_not_number:${axisId}:${parameterId}`);
       }
       let keyframes: Array<{
         at_ms: number;
@@ -2950,8 +3013,7 @@ export class LAppModel extends CubismUserModel {
       }> | undefined;
       if (item.keyframes !== undefined) {
         if (!Array.isArray(item.keyframes) || item.keyframes.length < 2 || item.keyframes.length > 4) {
-          warnings.push(`v2_parameter_skipped_invalid_keyframes:${axisId}:${parameterId}`);
-          continue;
+          return fail(`v2_parameter_invalid_keyframes:${axisId}:${parameterId}`);
         }
         keyframes = [];
         let previousAtMs = -1;
@@ -2988,26 +3050,96 @@ export class LAppModel extends CubismUserModel {
           });
         }
         if (!keyframes || keyframes[0].at_ms !== 0 || keyframes[0].transition_ms !== 0) {
-          warnings.push(`v2_parameter_skipped_invalid_keyframes:${axisId}:${parameterId}`);
-          continue;
+          return fail(`v2_parameter_invalid_keyframes:${axisId}:${parameterId}`);
         }
+      }
+      let modulation: {
+        kind: "speech_pose_cycle";
+        neutral: number;
+        amplitude: number;
+        phase: number;
+        frequency_hz?: number;
+        direction?: 1 | -1;
+      } | undefined;
+      if (item.modulation !== undefined) {
+        const raw = item.modulation;
+        if (
+          !raw
+          || typeof raw !== "object"
+          || raw.kind !== "speech_pose_cycle"
+          || !Number.isFinite(raw.neutral)
+          || !Number.isFinite(raw.amplitude)
+          || raw.amplitude < 0
+          || !Number.isFinite(raw.phase)
+          || (raw.frequency_hz !== undefined
+            && (!Number.isFinite(raw.frequency_hz) || raw.frequency_hz <= 0))
+          || (raw.direction !== undefined && raw.direction !== 1 && raw.direction !== -1)
+        ) {
+          return fail(`v2_parameter_invalid_modulation:${axisId}:${parameterId}`);
+        }
+        modulation = {
+          kind: "speech_pose_cycle",
+          neutral: Number(raw.neutral),
+          amplitude: Number(raw.amplitude),
+          phase: Number(raw.phase),
+          frequency_hz: raw.frequency_hz === undefined
+            ? undefined
+            : Number(raw.frequency_hz),
+          direction: raw.direction === -1 ? -1 : 1,
+        };
+      }
+      let dynamics: {
+        max_velocity: number;
+        max_acceleration: number;
+        life_motion_scale: number;
+        max_speech_offset: number;
+      } | undefined;
+      if (item.dynamics !== undefined) {
+        const raw = item.dynamics;
+        if (
+          !raw
+          || typeof raw !== "object"
+          || !Number.isFinite(raw.max_velocity)
+          || raw.max_velocity <= 0
+          || !Number.isFinite(raw.max_acceleration)
+          || raw.max_acceleration <= 0
+          || !Number.isFinite(raw.life_motion_scale)
+          || raw.life_motion_scale < 0
+          || raw.life_motion_scale > 1
+          || !Number.isFinite(raw.max_speech_offset)
+          || raw.max_speech_offset < 0
+        ) {
+          return fail(`v2_parameter_invalid_dynamics:${axisId}:${parameterId}`);
+        }
+        dynamics = {
+          max_velocity: Number(raw.max_velocity),
+          max_acceleration: Number(raw.max_acceleration),
+          life_motion_scale: Number(raw.life_motion_scale),
+          max_speech_offset: Number(raw.max_speech_offset),
+        };
+      }
+      if (!dynamics) {
+        return fail(`v2_parameter_dynamics_missing:${axisId}:${parameterId}`);
       }
       parameterIds.add(parameterId);
       parameters.push({
         axis_id: axisId,
         parameter_id: parameterId,
         target_value: targetValue,
+        neutral_target_value: neutralTargetValue,
         weight,
         input_value: inputValue,
         source,
         keyframes,
+        modulation,
+        dynamics,
       });
     }
     if (parameters.length === 0) {
-      return fail("v2_parameters_empty_after_salvage");
+      return fail("v2_parameters_empty");
     }
     if (warnings.length > 0) {
-      console.warn("[LAppModel] parseDirectParameterPlan salvaged playable parameters.", warnings);
+      console.info("[LAppModel] parameter plan diagnostics.", warnings);
     }
 
     return {
@@ -3094,12 +3226,12 @@ export class LAppModel extends CubismUserModel {
     this._textureCount = 0;
     this._motionCount = 0;
     this._allMotionCount = 0;
-    this._wavFileHandler = new LAppWavFileHandler();
     this._consistency = false;
     this._directParameterPlanState = null;
     this._directParameterPlanError = "";
     this._motionStartError = "";
     this._speechAudioEnvelope = 0.0;
+    this._speechBodyEnvelope = 0.0;
     this._externalLipSyncValue = null;
     this._externalLipSyncUpdatedAtMs = 0;
   }
@@ -3130,12 +3262,12 @@ export class LAppModel extends CubismUserModel {
   _textureCount: number; // テクスチャカウント
   _motionCount: number; // モーションデータカウント
   _allMotionCount: number; // モーション総数
-  _wavFileHandler: LAppWavFileHandler; //wavファイルハンドラ
   _consistency: boolean; // MOC3一貫性チェック管理用
   _directParameterPlanState: DirectParameterPlanState | null;
   _directParameterPlanError: string;
   _motionStartError: string;
   _speechAudioEnvelope: number;
+  _speechBodyEnvelope: number;
   _externalLipSyncValue: number | null;
   _externalLipSyncUpdatedAtMs: number;
 }

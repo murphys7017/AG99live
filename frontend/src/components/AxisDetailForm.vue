@@ -70,6 +70,16 @@ function updateBindingWeight(binding: SemanticAxisParameterBinding, event: Event
   emit("markDirty");
 }
 
+function updateDynamicsNumber(
+  key: keyof SemanticAxisDefinition["dynamics"],
+  event: Event,
+): void {
+  const value = readFiniteNumber(event);
+  if (value === null) return;
+  props.axis.dynamics[key] = value;
+  emit("markDirty");
+}
+
 function updateCouplingNumber(
   coupling: SemanticAxisCoupling,
   key: "scale" | "deadzone" | "max_delta",
@@ -255,6 +265,56 @@ function onRemoveBinding(index: number): void {
             @input="updateRange(axis, 'strong_range', 1, $event)"
           />
         </div>
+      </label>
+
+      <label class="action-preview__field">
+        <span>Max Velocity（语义单位/秒）</span>
+        <input
+          :value="axis.dynamics.max_velocity"
+          class="settings-card__input"
+          type="number"
+          min="0.01"
+          step="1"
+          @input="updateDynamicsNumber('max_velocity', $event)"
+        />
+      </label>
+
+      <label class="action-preview__field">
+        <span>Max Acceleration（语义单位/秒²）</span>
+        <input
+          :value="axis.dynamics.max_acceleration"
+          class="settings-card__input"
+          type="number"
+          min="0.01"
+          step="1"
+          @input="updateDynamicsNumber('max_acceleration', $event)"
+        />
+      </label>
+
+      <label class="action-preview__field">
+        <span>Life Motion Scale（生命感比例）</span>
+        <input
+          :value="axis.dynamics.life_motion_scale"
+          class="settings-card__input"
+          type="number"
+          min="0"
+          max="1"
+          step="0.05"
+          @input="updateDynamicsNumber('life_motion_scale', $event)"
+        />
+      </label>
+
+      <label class="action-preview__field">
+        <span>Speech Offset Ratio（说话偏移预算）</span>
+        <input
+          :value="axis.dynamics.max_speech_offset_ratio"
+          class="settings-card__input"
+          type="number"
+          min="0"
+          max="0.5"
+          step="0.01"
+          @input="updateDynamicsNumber('max_speech_offset_ratio', $event)"
+        />
       </label>
 
       <label class="action-preview__field profile-editor__field--full">

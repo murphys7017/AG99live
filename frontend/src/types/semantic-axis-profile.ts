@@ -23,6 +23,13 @@ export interface SemanticAxisParameterBinding {
   invert: boolean;
 }
 
+export interface SemanticAxisDynamics {
+  max_velocity: number;
+  max_acceleration: number;
+  life_motion_scale: number;
+  max_speech_offset_ratio: number;
+}
+
 export interface SemanticAxisDefinition {
   id: string;
   label: string;
@@ -37,6 +44,7 @@ export interface SemanticAxisDefinition {
   positive_semantics: string[];
   negative_semantics: string[];
   usage_notes: string;
+  dynamics: SemanticAxisDynamics;
   parameter_bindings: SemanticAxisParameterBinding[];
 }
 

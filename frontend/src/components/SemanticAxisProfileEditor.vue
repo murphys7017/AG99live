@@ -342,6 +342,12 @@ function addCustomAxis(): void {
     positive_semantics: [],
     negative_semantics: [],
     usage_notes: "",
+    dynamics: {
+      max_velocity: 100,
+      max_acceleration: 500,
+      life_motion_scale: 0,
+      max_speech_offset_ratio: 0,
+    },
     parameter_bindings: [
       {
         parameter_id: "",
@@ -535,6 +541,20 @@ function validateDraftProfile(profile: SemanticAxisProfile): string[] {
     }
     validateContainedRange(errors, `${axisLabel}.soft_range`, axis.soft_range, axis.value_range);
     validateContainedRange(errors, `${axisLabel}.strong_range`, axis.strong_range, axis.value_range);
+    validatePositive(errors, `${axisLabel}.dynamics.max_velocity`, axis.dynamics.max_velocity);
+    validatePositive(errors, `${axisLabel}.dynamics.max_acceleration`, axis.dynamics.max_acceleration);
+    validateUnitInterval(
+      errors,
+      `${axisLabel}.dynamics.life_motion_scale`,
+      axis.dynamics.life_motion_scale,
+    );
+    validateRangeValue(
+      errors,
+      `${axisLabel}.dynamics.max_speech_offset_ratio`,
+      axis.dynamics.max_speech_offset_ratio,
+      0,
+      0.5,
+    );
 
     if (!axis.parameter_bindings.length) {
       errors.push(`${axisLabel}: parameter_bindings 至少需要一条。`);
@@ -630,6 +650,26 @@ function validateNonNegativeFinite(errors: string[], label: string, value: numbe
   validateFinite(errors, label, value);
   if (Number.isFinite(value) && value < 0) {
     errors.push(`${label} 不能为负数。`);
+  }
+}
+
+function validatePositive(errors: string[], label: string, value: number): void {
+  validateFinite(errors, label, value);
+  if (Number.isFinite(value) && value <= 0) {
+    errors.push(`${label} 必须大于 0。`);
+  }
+}
+
+function validateRangeValue(
+  errors: string[],
+  label: string,
+  value: number,
+  min: number,
+  max: number,
+): void {
+  validateFinite(errors, label, value);
+  if (Number.isFinite(value) && (value < min || value > max)) {
+    errors.push(`${label} 必须位于 ${min}..${max} 之间。`);
   }
 }
 

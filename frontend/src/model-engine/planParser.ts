@@ -239,6 +239,7 @@ export function parseSemanticParameterPlan(
     const axisId = normalizeText(item.axis_id);
     const parameterId = normalizeText(item.parameter_id);
     const targetValue = item.target_value;
+    const neutralTargetValue = item.neutral_target_value;
     const weight = item.weight;
     const inputValue = item.input_value;
     if (!axisId || !parameterId) {
@@ -256,9 +257,20 @@ export function parseSemanticParameterPlan(
     if (inputValue !== undefined && !isFiniteNumber(inputValue)) {
       return { ok: false, reason: "parameter_plan_v2.input_value_not_number" };
     }
+    if (!isFiniteNumber(neutralTargetValue)) {
+      return { ok: false, reason: "parameter_plan_v2.neutral_target_value_not_number" };
+    }
     const keyframes = normalizeParameterKeyframes(item.keyframes, timing.duration_ms);
     if (keyframes === null) {
       return { ok: false, reason: "parameter_plan_v2.invalid_keyframes" };
+    }
+    const dynamics = normalizeParameterDynamics(item.dynamics);
+    if (!dynamics) {
+      return { ok: false, reason: "parameter_plan_v2.invalid_dynamics" };
+    }
+    const modulation = normalizeParameterModulation(item.modulation);
+    if (modulation === null || (modulation && !dynamics)) {
+      return { ok: false, reason: "parameter_plan_v2.invalid_modulation" };
     }
     parameterIds.add(parameterId);
     let source: SemanticParameterPlan["parameters"][number]["source"] | undefined;
@@ -272,27 +284,13 @@ export function parseSemanticParameterPlan(
       axis_id: axisId,
       parameter_id: parameterId,
       target_value: targetValue,
+      neutral_target_value: neutralTargetValue,
       weight,
       input_value: isFiniteNumber(inputValue) ? inputValue : undefined,
       source,
       keyframes,
-      modulation: isObject(item.modulation)
-        && normalizeText(item.modulation.kind) === "speech_pose_cycle"
-        && isFiniteNumber(item.modulation.neutral)
-        && isFiniteNumber(item.modulation.amplitude)
-        && isFiniteNumber(item.modulation.phase)
-        ? {
-          kind: "speech_pose_cycle",
-          neutral: Number(item.modulation.neutral),
-          amplitude: Number(item.modulation.amplitude),
-          phase: Number(item.modulation.phase),
-          frequency_hz: isFiniteNumber(item.modulation.frequency_hz)
-            && item.modulation.frequency_hz > 0
-            ? Number(item.modulation.frequency_hz)
-            : undefined,
-          direction: item.modulation.direction === -1 ? -1 : 1,
-        }
-        : undefined,
+      modulation,
+      dynamics,
     });
   }
 
@@ -339,6 +337,69 @@ export function parseSemanticParameterPlan(
         : undefined,
       summary: normalizePlanSummary(value.summary),
     },
+  };
+}
+
+function normalizeParameterModulation(
+  value: unknown,
+): SemanticParameterPlan["parameters"][number]["modulation"] | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (
+    !isObject(value)
+    || normalizeText(value.kind) !== "speech_pose_cycle"
+    || !isFiniteNumber(value.neutral)
+    || !isFiniteNumber(value.amplitude)
+    || value.amplitude < 0
+    || !isFiniteNumber(value.phase)
+    || (value.frequency_hz !== undefined
+      && (!isFiniteNumber(value.frequency_hz) || value.frequency_hz <= 0))
+    || (value.direction !== undefined && value.direction !== 1 && value.direction !== -1)
+  ) {
+    return null;
+  }
+  return {
+    kind: "speech_pose_cycle",
+    neutral: value.neutral,
+    amplitude: value.amplitude,
+    phase: value.phase,
+    frequency_hz: isFiniteNumber(value.frequency_hz) ? value.frequency_hz : undefined,
+    direction: value.direction === -1 ? -1 : 1,
+  };
+}
+
+function normalizeParameterDynamics(
+  value: unknown,
+): SemanticParameterPlan["parameters"][number]["dynamics"] | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isObject(value)) {
+    return null;
+  }
+  const maxVelocity = value.max_velocity;
+  const maxAcceleration = value.max_acceleration;
+  const lifeMotionScale = value.life_motion_scale;
+  const maxSpeechOffset = value.max_speech_offset;
+  if (
+    !isFiniteNumber(maxVelocity)
+    || maxVelocity <= 0
+    || !isFiniteNumber(maxAcceleration)
+    || maxAcceleration <= 0
+    || !isFiniteNumber(lifeMotionScale)
+    || lifeMotionScale < 0
+    || lifeMotionScale > 1
+    || !isFiniteNumber(maxSpeechOffset)
+    || maxSpeechOffset < 0
+  ) {
+    return null;
+  }
+  return {
+    max_velocity: maxVelocity,
+    max_acceleration: maxAcceleration,
+    life_motion_scale: lifeMotionScale,
+    max_speech_offset: maxSpeechOffset,
   };
 }
 

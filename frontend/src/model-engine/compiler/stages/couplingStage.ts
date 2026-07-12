@@ -10,6 +10,7 @@ import type {
   MotionStageResult,
 } from "../compileContext.js";
 import { mergeDerivedAxisValues, refreshAllAxisValues } from "../compileContext.js";
+import type { MotionAxisRelationEvaluation } from "../contracts.js";
 
 // Reads:
 // - context.state.profile
@@ -42,7 +43,11 @@ export function runCouplingStage(
     return { ok: false, reason: "semantic_profile_missing" };
   }
 
-  let couplingResult: { values: DynamicAxisValues; warnings: string[] };
+  let couplingResult: {
+    values: DynamicAxisValues;
+    warnings: string[];
+    evaluations: MotionAxisRelationEvaluation[];
+  };
   try {
     couplingResult = applySemanticCouplings(
       context.state.controlledValues,
@@ -69,6 +74,10 @@ export function runCouplingStage(
   }
 
   mergeDerivedAxisValues(context.state, couplingResult.values, "coupling");
+  context.state.relationEvaluations = [
+    ...context.state.relationEvaluations,
+    ...couplingResult.evaluations,
+  ];
   refreshAllAxisValues(context.state);
 
   return { ok: true };
@@ -78,7 +87,11 @@ function applySemanticCouplings(
   sourceValues: DynamicAxisValues,
   profile: SemanticAxisProfile,
   axisById: Map<string, SemanticAxisDefinition>,
-): { values: DynamicAxisValues; warnings: string[] } {
+): {
+  values: DynamicAxisValues;
+  warnings: string[];
+  evaluations: MotionAxisRelationEvaluation[];
+} {
   const couplings: SemanticAxisRelationRule[] = profile.relation_graph.edges.filter(
     (edge) => edge.kind === "derive",
   );
@@ -86,6 +99,7 @@ function applySemanticCouplings(
   let resolvedValues: DynamicAxisValues = { ...baseValues };
   const result: DynamicAxisValues = {};
   const warningSet = new Set<string>();
+  const evaluationByRuleId = new Map<string, MotionAxisRelationEvaluation>();
   const maxPasses = Math.max(1, couplings.length + 1);
 
   for (let pass = 0; pass < maxPasses; pass += 1) {
@@ -101,17 +115,45 @@ function applySemanticCouplings(
 
       const sourceValue = resolvedValues[coupling.source_axis_id];
       if (sourceValue === undefined) {
+        evaluationByRuleId.set(coupling.id, {
+          ruleId: coupling.id,
+          kind: "derive",
+          status: "skipped",
+          sourceAxisId: coupling.source_axis_id,
+          targetAxisId: coupling.target_axis_id,
+          reason: "source_axis_missing",
+        });
         continue;
       }
       if (baseValues[coupling.target_axis_id] !== undefined) {
         warningSet.add(
           `semantic_coupling_skipped_explicit_target:${coupling.id}:${coupling.target_axis_id}`,
         );
+        evaluationByRuleId.set(coupling.id, {
+          ruleId: coupling.id,
+          kind: "derive",
+          status: "skipped",
+          sourceAxisId: coupling.source_axis_id,
+          targetAxisId: coupling.target_axis_id,
+          sourceValue,
+          targetBefore: baseValues[coupling.target_axis_id],
+          targetAfter: baseValues[coupling.target_axis_id],
+          reason: "explicit_target_owned",
+        });
         continue;
       }
 
       const sourceDelta = sourceValue - sourceAxis.neutral;
       if (Math.abs(sourceDelta) <= coupling.deadzone) {
+        evaluationByRuleId.set(coupling.id, {
+          ruleId: coupling.id,
+          kind: "derive",
+          status: "skipped",
+          sourceAxisId: coupling.source_axis_id,
+          targetAxisId: coupling.target_axis_id,
+          sourceValue,
+          reason: "source_within_deadzone",
+        });
         continue;
       }
 
@@ -133,11 +175,26 @@ function applySemanticCouplings(
 
       nextResolvedValues[coupling.target_axis_id] = clampedTargetValue;
       nextDerivedValues[coupling.target_axis_id] = clampedTargetValue;
+      evaluationByRuleId.set(coupling.id, {
+        ruleId: coupling.id,
+        kind: "derive",
+        status: "derived",
+        sourceAxisId: coupling.source_axis_id,
+        targetAxisId: coupling.target_axis_id,
+        sourceValue,
+        targetAfter: clampedTargetValue,
+        limit: coupling.max_delta,
+        reason: "target_axis_derived",
+      });
     }
 
     const changed = !dynamicAxisValuesEqual(resolvedValues, nextResolvedValues);
     if (!changed) {
-      return { values: nextDerivedValues, warnings: [...warningSet] };
+      return {
+        values: nextDerivedValues,
+        warnings: [...warningSet],
+        evaluations: [...evaluationByRuleId.values()],
+      };
     }
 
     resolvedValues = nextResolvedValues;

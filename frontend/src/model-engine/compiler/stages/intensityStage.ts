@@ -47,6 +47,7 @@ export function runIntensityStage(
       context.intent.mode,
       context.settings.motionIntensityScale,
       context.settings.axisIntensityScale[axisId] ?? 1,
+      context.state.axisSampling?.sampleBounds[axisId],
     );
     nextControlledValues[axisId] = intensityResult.value;
 
@@ -77,6 +78,7 @@ function applySemanticIntensity(
   mode: SemanticMotionIntent["mode"],
   motionIntensityScale: number,
   axisIntensityScale: number,
+  levelBounds?: { min: number; max: number },
 ): { value: number; warning: string } {
   if (mode !== "expressive") {
     return { value, warning: "" };
@@ -84,6 +86,15 @@ function applySemanticIntensity(
 
   const scaled =
     axis.neutral + (value - axis.neutral) * motionIntensityScale * axisIntensityScale;
+  if (levelBounds && axisIntensityScale > 0) {
+    const bounded = Math.max(levelBounds.min, Math.min(levelBounds.max, scaled));
+    return {
+      value: bounded,
+      warning: Math.abs(bounded - scaled) > 0.0001
+        ? `semantic_intensity_limited_to_level:${axis.id}:${scaled}->${bounded}`
+        : "",
+    };
+  }
   // Range constraints belong to the relation graph stage, which is the single
   // owner of final axis values. Intensity only contributes a candidate.
   return { value: scaled, warning: "" };

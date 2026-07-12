@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { compileMotionIntent } from "../src/model-engine/compiler/compileMotionIntent.js";
+import { advanceParameterDynamics } from "../src/live2d/WebSDK/src/parameterdynamics.js";
 import { normalizeMotionPayload } from "../src/model-engine/normalize.js";
 import { parseSemanticParameterPlan } from "../src/model-engine/planParser.js";
 import { startNormalizedMotionPayload } from "../src/model-engine/runtime/motionStart.js";
@@ -53,6 +54,12 @@ function buildProfile(): SemanticAxisProfile {
         positive_semantics: ["right"],
         negative_semantics: ["left"],
         usage_notes: "Drive eye direction.",
+        dynamics: {
+          max_velocity: 180,
+          max_acceleration: 900,
+          life_motion_scale: 0.2,
+          max_speech_offset_ratio: 0.04,
+        },
         parameter_bindings: [
           {
             parameter_id: "ParamEyeBallX",
@@ -76,6 +83,12 @@ function buildProfile(): SemanticAxisProfile {
         positive_semantics: ["turn right"],
         negative_semantics: ["turn left"],
         usage_notes: "Drive head direction.",
+        dynamics: {
+          max_velocity: 120,
+          max_acceleration: 600,
+          life_motion_scale: 0.55,
+          max_speech_offset_ratio: 0.08,
+        },
         parameter_bindings: [
           {
             parameter_id: "ParamAngleX",
@@ -99,6 +112,12 @@ function buildProfile(): SemanticAxisProfile {
         positive_semantics: ["body right"],
         negative_semantics: ["body left"],
         usage_notes: "Follow head direction.",
+        dynamics: {
+          max_velocity: 70,
+          max_acceleration: 300,
+          life_motion_scale: 0.3,
+          max_speech_offset_ratio: 0.06,
+        },
         parameter_bindings: [
           {
             parameter_id: "ParamBodyAngleX",
@@ -122,6 +141,12 @@ function buildProfile(): SemanticAxisProfile {
         positive_semantics: ["speaking head motion"],
         negative_semantics: ["speaking head motion opposite"],
         usage_notes: "Dedicated speech pose compensation axis.",
+        dynamics: {
+          max_velocity: 120,
+          max_acceleration: 600,
+          life_motion_scale: 0,
+          max_speech_offset_ratio: 0.08,
+        },
         parameter_bindings: [
           {
             parameter_id: "ParamSpeechHeadSway",
@@ -145,6 +170,12 @@ function buildProfile(): SemanticAxisProfile {
         positive_semantics: ["smile"],
         negative_semantics: ["frown"],
         usage_notes: "Primary smile axis.",
+        dynamics: {
+          max_velocity: 160,
+          max_acceleration: 800,
+          life_motion_scale: 0.12,
+          max_speech_offset_ratio: 0.03,
+        },
         parameter_bindings: [
           {
             parameter_id: "ParamMouthForm",
@@ -644,9 +675,12 @@ function testV4AxisLevelsResolveThroughProfileAnchors(): void {
     result.diagnostics.transformTrace?.resolvedAxes.head_yaw,
     parameter?.input_value,
   );
+  assert.equal(parameter?.neutral_target_value, 0);
+  assert.equal(parameter?.dynamics?.max_velocity, 72);
+  assert.equal(parameter?.dynamics?.max_acceleration, 360);
   assert.equal(
     result.diagnostics.transformTrace?.axisSampling?.seed,
-    "turn-level-test|message-level-test|hash|semantic_motion_transform.v2",
+    "turn-level-test|message-level-test|hash|semantic_motion_transform.v3",
   );
 
   const replay = compileMotionIntent(buildLevelIntent(), {
@@ -671,6 +705,26 @@ function testV4AxisLevelsResolveThroughProfileAnchors(): void {
   assert.notEqual(
     differentMessage.diagnostics.transformTrace?.resolvedAxes.head_yaw,
     result.diagnostics.transformTrace?.resolvedAxes.head_yaw,
+  );
+
+  const amplified = compileMotionIntent(buildLevelIntent(), {
+    model: buildModel(profile),
+    targetDurationMs: 1200,
+    samplingIdentity,
+    settings: { motionIntensityScale: 2.5, axisIntensityScale: {} },
+  });
+  const amplifiedValue = amplified.diagnostics.transformTrace?.resolvedAxes.head_yaw;
+  const amplifiedBounds = amplified.diagnostics.transformTrace?.axisSampling
+    ?.sampleBounds.head_yaw;
+  assert.equal(amplified.ok, true);
+  assert.ok(amplifiedBounds);
+  assert.ok((amplifiedValue ?? -Infinity) >= amplifiedBounds!.min);
+  assert.ok((amplifiedValue ?? Infinity) <= amplifiedBounds!.max);
+  assert.equal(
+    amplified.diagnostics.warnings?.some((warning) =>
+      warning.startsWith("semantic_intensity_limited_to_level:head_yaw:"),
+    ),
+    true,
   );
 }
 
@@ -752,7 +806,8 @@ function testV4MotionSequenceCompilesToParameterKeyframes(): void {
   assert.ok((headParameter?.keyframes?.[0].input_value ?? 100) < 35);
   assert.ok((headParameter?.keyframes?.[0].target_value ?? 100) < 0);
   assert.equal(headParameter?.keyframes?.[1].at_ms, 600);
-  assert.equal(headParameter?.keyframes?.[1].transition_ms, 180);
+  assert.ok((headParameter?.keyframes?.[1].transition_ms ?? 0) >= 500);
+  assert.ok((headParameter?.keyframes?.[1].transition_ms ?? 1000) <= 600);
   assert.ok((headParameter?.keyframes?.[1].input_value ?? 0) > 66);
   assert.ok((headParameter?.keyframes?.[1].target_value ?? -100) > 0);
   assert.equal(
@@ -803,6 +858,112 @@ function testV4MotionSequenceAllowsExplicitNeutralWaypoint(): void {
   );
   assert.equal(headParameter?.keyframes?.length, 3);
   assert.equal(headParameter?.keyframes?.[1].input_value, 50);
+}
+
+function testV4MotionSequenceRejectsTrapezoidalTransitionBudgetOverflow(): void {
+  const profile = buildProfile();
+  const headYaw = profile.axes.find((axis) => axis.id === "head_yaw");
+  assert.ok(headYaw);
+  headYaw.level_anchors = {
+    "-3": 30, "-2": 38, "-1": 45, "0": 50, "1": 56, "2": 64, "3": 70,
+  };
+  headYaw.dynamics.max_velocity = 50;
+  headYaw.dynamics.max_acceleration = 500;
+  const intent = buildLevelIntent() as NormalizedSemanticMotionIntentV4;
+  delete (intent as { axis_levels?: unknown }).axis_levels;
+  (intent as { motion_steps: unknown }).motion_steps = [
+    { axis_levels: { head_yaw: -3 }, duration_weight: 1 },
+    { axis_levels: { head_yaw: 3 }, duration_weight: 1 },
+  ];
+
+  const result = compileMotionIntent(intent, {
+    model: buildModel(profile),
+    targetDurationMs: 1400,
+    samplingIdentity,
+    settings: { motionIntensityScale: 1, axisIntensityScale: {} },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.feedback?.code, "motion_sequence_transition_budget_exceeded");
+  assert.match(result.reason, /^motion_sequence_transition_budget_exceeded:1:/);
+}
+
+function testParameterDynamicsLimitsAccelerationDuringTargetReversal(): void {
+  const deltaSeconds = 1 / 60;
+  const maxAcceleration = 12;
+  let value = 0;
+  let velocity = 0;
+  for (let index = 0; index < 30; index += 1) {
+    const next = advanceParameterDynamics(
+      value,
+      10,
+      velocity,
+      deltaSeconds,
+      4,
+      maxAcceleration,
+      -20,
+      20,
+    );
+    assert.ok(Math.abs(next.velocity - velocity) <= maxAcceleration * deltaSeconds + 1e-9);
+    value = next.value;
+    velocity = next.velocity;
+  }
+
+  const beforeReverseValue = value;
+  const beforeReverseVelocity = velocity;
+  const reversed = advanceParameterDynamics(
+    value,
+    -10,
+    velocity,
+    deltaSeconds,
+    4,
+    maxAcceleration,
+    -20,
+    20,
+  );
+  assert.ok(reversed.value > -10);
+  assert.ok(reversed.value >= beforeReverseValue);
+  assert.ok(
+    Math.abs(reversed.velocity - beforeReverseVelocity)
+      <= maxAcceleration * deltaSeconds + 1e-9,
+  );
+}
+
+function testParameterPlanRequiresNeutralTargetAndDynamics(): void {
+  const profile = buildProfile();
+  const headYaw = profile.axes.find((axis) => axis.id === "head_yaw");
+  assert.ok(headYaw);
+  headYaw.level_anchors = {
+    "-3": 30, "-2": 38, "-1": 45, "0": 50, "1": 56, "2": 64, "3": 70,
+  };
+  const result = compileMotionIntent(buildLevelIntent(), {
+    model: buildModel(profile),
+    samplingIdentity,
+  });
+  assert.equal(result.ok, true);
+  assert.ok(result.plan);
+
+  const missingNeutral = JSON.parse(JSON.stringify(result.plan)) as Record<string, unknown> & {
+    parameters: Array<Record<string, unknown>>;
+  };
+  delete missingNeutral.parameters[0].neutral_target_value;
+  const neutralResult = parseSemanticParameterPlan(missingNeutral);
+  assert.equal(neutralResult.ok, false);
+  assert.equal(
+    neutralResult.ok ? "" : neutralResult.reason,
+    "parameter_plan_v2.neutral_target_value_not_number",
+  );
+
+  const missingDynamics = JSON.parse(JSON.stringify(result.plan)) as Record<string, unknown> & {
+    parameters: Array<Record<string, unknown>>;
+  };
+  delete missingDynamics.parameters[0].dynamics;
+  const dynamicsResult = parseSemanticParameterPlan(missingDynamics);
+  assert.equal(dynamicsResult.ok, false);
+  assert.equal(
+    dynamicsResult.ok ? "" : dynamicsResult.reason,
+    "parameter_plan_v2.invalid_dynamics",
+  );
 }
 
 function testV4AxisLevelsRejectUnknownAxesAndMissingAnchors(): void {
@@ -900,7 +1061,7 @@ function testCompiledPlanResolvesExpressionResourceForPlayback(): void {
   });
   assert.equal(
     result.diagnostics.transformTrace?.transformVersion,
-    "semantic_motion_transform.v2",
+    "semantic_motion_transform.v3",
   );
   assert.equal(result.diagnostics.transformTrace?.profileRevision, 1);
   assert.equal(result.diagnostics.transformTrace?.profileHash, "hash");
@@ -1641,7 +1802,7 @@ function testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes(): void {
   assert.deepEqual(headRoll?.modulation, {
     kind: "speech_pose_cycle",
     neutral: 0,
-    amplitude: 2.8,
+    amplitude: 2.8 * 0.75,
     phase: 0,
     frequency_hz: 0.56,
     direction: -1,
@@ -2021,16 +2182,18 @@ function testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight(): void {
   assert.equal(result.ok, true);
   const bodyRoll = result.plan?.parameters.find((item) => item.parameter_id === "ParamBodyAngleZ");
   assert.ok(bodyRoll);
-  assert.equal(bodyRoll?.target_value, -1.2);
+  assert.equal(bodyRoll?.target_value, 0);
   assert.equal(bodyRoll?.weight, 0.45);
+  assert.equal(bodyRoll?.modulation?.amplitude, 1.2 * 0.45);
   assert.equal(bodyRoll?.modulation?.direction, -1);
   const headPitch = result.plan?.parameters.find((item) => item.parameter_id === "ParamAngleY");
   assert.ok(headPitch);
-  assert.equal(Math.abs(headPitch?.target_value ?? 0), 1.0);
+  assert.equal(headPitch?.target_value, 0);
+  assert.equal(headPitch?.modulation?.amplitude, 1.0 * 0.35);
   assert.equal(headPitch?.weight, 0.35);
 }
 
-function testSpeechPoseRejectsVoiceFollowingParameterAlreadyControlledBySemanticAxis(): void {
+function testSpeechPoseComposesWithParameterAlreadyControlledBySemanticAxis(): void {
   const profile = buildProfile();
   const result = compileMotionIntent(buildIntent({
     axes: {
@@ -2046,8 +2209,19 @@ function testSpeechPoseRejectsVoiceFollowingParameterAlreadyControlledBySemantic
     },
   });
 
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, "speech_pose_parameter_conflict:ParamBodyAngleX");
+  assert.equal(result.ok, true);
+  const bodyYawParameters = result.plan?.parameters.filter(
+    (item) => item.parameter_id === "ParamBodyAngleX",
+  ) ?? [];
+  assert.equal(bodyYawParameters.length, 1);
+  assert.equal(bodyYawParameters[0].source, "coupling");
+  assert.equal(bodyYawParameters[0].modulation?.amplitude, 0.9 * 0.35);
+  assert.equal(
+    result.diagnostics.warnings?.includes(
+      "speech_pose_modulation_pending:ParamBodyAngleX",
+    ),
+    true,
+  );
 }
 
 function testSpeechPoseDoesNotApplyWithoutSpeechActive(): void {
@@ -2228,6 +2402,14 @@ function testRelationGraphLimitsOppositeHeadBodyMotion(): void {
     result.diagnostics.transformTrace?.constrainedAxes.body_yaw,
     42.1,
   );
+  assert.equal(
+    result.diagnostics.relationEvaluations?.some(
+      (item) => item.ruleId === "head_yaw_to_body_yaw"
+        && item.status === "constrained"
+        && item.reason === "opposite_direction_limit",
+    ),
+    true,
+  );
 }
 
 function testRelationGraphDerivesBoundedRatioAtFinalStage(): void {
@@ -2252,6 +2434,22 @@ function testRelationGraphDerivesBoundedRatioAtFinalStage(): void {
   );
   assert.ok(bodyYaw);
   assert.equal(bodyYaw?.source, "coupling");
+  assert.equal(
+    result.diagnostics.relationEvaluations?.some(
+      (item) => item.ruleId === "head_yaw_to_body_yaw"
+        && item.status === "derived"
+        && item.reason === "target_axis_derived",
+    ),
+    true,
+  );
+  assert.equal(
+    result.diagnostics.relationEvaluations?.some(
+      (item) => item.ruleId === "gaze_x_to_head_yaw"
+        && item.status === "skipped"
+        && item.reason === "source_axis_missing",
+    ),
+    true,
+  );
 }
 
 function testExplicitEmptyRelationGraphDoesNotReviveLegacyCouplings(): void {
@@ -2292,6 +2490,9 @@ function run(): void {
   testV4AxisSamplingRequiresIdentityAndKeepsNeutralExact();
   testV4MotionSequenceCompilesToParameterKeyframes();
   testV4MotionSequenceAllowsExplicitNeutralWaypoint();
+  testV4MotionSequenceRejectsTrapezoidalTransitionBudgetOverflow();
+  testParameterDynamicsLimitsAccelerationDuringTargetReversal();
+  testParameterPlanRequiresNeutralTargetAndDynamics();
   testV4AxisLevelsRejectUnknownAxesAndMissingAnchors();
   testCompiledPlanResolvesExpressionResourceForPlayback();
   testResourcePolicyRejectsUnknownResource();
@@ -2325,7 +2526,7 @@ function run(): void {
   testSegmentInterruptRemovesItsPendingPayload();
   testTimelineTerminalIsMarkedWhenQueuedMotionFails();
   testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight();
-  testSpeechPoseRejectsVoiceFollowingParameterAlreadyControlledBySemanticAxis();
+  testSpeechPoseComposesWithParameterAlreadyControlledBySemanticAxis();
   testSpeechPoseDoesNotApplyWithoutSpeechActive();
   testSpeechPoseDoesNotUseGenericDerivedAxis();
   testSpeechPoseDoesNotOverwriteCouplingDerivedAxis();

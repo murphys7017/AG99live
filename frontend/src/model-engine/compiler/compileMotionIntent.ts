@@ -137,7 +137,7 @@ function compileMotionSequenceIntent(
       parameterTemplates.set(parameter.parameter_id, parameter);
     }
   }
-  const parameters: SemanticParameterPlanEntry[] = [];
+  const resolvedParameterSteps = new Map<string, SemanticParameterPlanEntry[]>();
   for (const template of parameterTemplates.values()) {
     const stepParameters: SemanticParameterPlanEntry[] = [];
     for (let index = 0; index < plans.length; index += 1) {
@@ -161,22 +161,38 @@ function compileMotionSequenceIntent(
       }
       stepParameters.push(parameter);
     }
+    resolvedParameterSteps.set(template.parameter_id, stepParameters);
+  }
+  const transitionDurations = resolveSequenceTransitionDurations(
+    resolvedParameterSteps,
+    stepStartTimes,
+    totalDurationMs,
+  );
+  if (!transitionDurations.ok) {
+    return {
+      ok: false,
+      plan: null,
+      reason: transitionDurations.reason,
+      diagnostics: stepResults[transitionDurations.stepIndex].diagnostics,
+      feedback: {
+        code: "motion_sequence_transition_budget_exceeded",
+        message: transitionDurations.reason,
+        fields: [],
+      },
+    };
+  }
+  const parameters: SemanticParameterPlanEntry[] = [];
+  for (const stepParameters of resolvedParameterSteps.values()) {
     const baseParameter = stepParameters[0];
     parameters.push({
       ...baseParameter,
       keyframes: stepParameters.map((parameter, index) => {
-      const stepEndMs = index + 1 < stepStartTimes.length
-        ? stepStartTimes[index + 1]
-        : totalDurationMs;
-      const stepDurationMs = Math.max(1, stepEndMs - stepStartTimes[index]);
-      return {
-        at_ms: stepStartTimes[index],
-        transition_ms: index === 0
-          ? 0
-          : Math.min(240, Math.max(80, Math.round(stepDurationMs * 0.3))),
-        target_value: parameter.target_value,
-        input_value: parameter.input_value,
-      };
+        return {
+          at_ms: stepStartTimes[index],
+          transition_ms: transitionDurations.values[index],
+          target_value: parameter.target_value,
+          input_value: parameter.input_value,
+        };
       }),
     });
   }
@@ -212,6 +228,11 @@ function compileMotionSequenceIntent(
                   sampledValues: {
                     ...result.diagnostics.transformTrace.axisSampling.sampledValues,
                   },
+                  sampleBounds: Object.fromEntries(
+                    Object.entries(
+                      result.diagnostics.transformTrace.axisSampling.sampleBounds,
+                    ).map(([axisId, bounds]) => [axisId, { ...bounds }]),
+                  ),
                 }
               : undefined,
           })),
@@ -235,6 +256,85 @@ function compileMotionSequenceIntent(
       },
     },
   };
+}
+
+function resolveSequenceTransitionDurations(
+  parameterSteps: Map<string, SemanticParameterPlanEntry[]>,
+  stepStartTimes: number[],
+  totalDurationMs: number,
+): { ok: true; values: number[] } | { ok: false; reason: string; stepIndex: number } {
+  const values: number[] = stepStartTimes.map((_, index) => index === 0 ? 0 : 80);
+  const initialAvailableMs = stepStartTimes[1] ?? totalDurationMs;
+  let initialRequiredMs = 0;
+  for (const steps of parameterSteps.values()) {
+    const first = steps[0];
+    if (!first.dynamics || first.neutral_target_value === undefined) {
+      continue;
+    }
+    initialRequiredMs = Math.max(
+      initialRequiredMs,
+      resolveMinimumRestToRestTransitionMs(
+        Math.abs(first.target_value - first.neutral_target_value),
+        first.dynamics.max_velocity,
+        first.dynamics.max_acceleration,
+      ),
+    );
+  }
+  if (initialRequiredMs > initialAvailableMs) {
+    return {
+      ok: false,
+      reason: `motion_sequence_transition_budget_exceeded:0:${initialRequiredMs}:${initialAvailableMs}`,
+      stepIndex: 0,
+    };
+  }
+  for (let index = 1; index < stepStartTimes.length; index += 1) {
+    const stepEndMs = index + 1 < stepStartTimes.length
+      ? stepStartTimes[index + 1]
+      : totalDurationMs;
+    const availableMs = Math.max(1, stepEndMs - stepStartTimes[index]);
+    let requiredMs = Math.max(80, Math.round(availableMs * 0.3));
+    for (const steps of parameterSteps.values()) {
+      const previous = steps[index - 1];
+      const current = steps[index];
+      const dynamics = current.dynamics ?? previous.dynamics;
+      if (!dynamics) {
+        continue;
+      }
+      const distance = Math.abs(current.target_value - previous.target_value);
+      if (distance <= 0.0001) {
+        continue;
+      }
+      requiredMs = Math.max(
+        requiredMs,
+        resolveMinimumRestToRestTransitionMs(
+          distance,
+          dynamics.max_velocity,
+          dynamics.max_acceleration,
+        ),
+      );
+    }
+    if (requiredMs > availableMs) {
+      return {
+        ok: false,
+        reason: `motion_sequence_transition_budget_exceeded:${index}:${requiredMs}:${availableMs}`,
+        stepIndex: index,
+      };
+    }
+    values[index] = requiredMs;
+  }
+  return { ok: true, values };
+}
+
+function resolveMinimumRestToRestTransitionMs(
+  distance: number,
+  maxVelocity: number,
+  maxAcceleration: number,
+): number {
+  const accelerationDistanceAtMaxVelocity = (maxVelocity * maxVelocity) / maxAcceleration;
+  const seconds = distance <= accelerationDistanceAtMaxVelocity
+    ? 2 * Math.sqrt(distance / maxAcceleration)
+    : distance / maxVelocity + maxVelocity / maxAcceleration;
+  return Math.ceil(seconds * 1000);
 }
 
 function resolveNeutralSequenceParameter(
