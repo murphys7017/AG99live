@@ -6,10 +6,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from astrbot.api import logger
-from astrbot.core.interaction import (
-    InteractionResultContribution,
-    get_interaction_decision as get_interaction_reply_plan,
-)
+from astrbot.core.interaction import InteractionResultContribution
+try:
+    from astrbot.core.interaction import (
+        get_interaction_route_decision as get_interaction_reply_plan,
+    )
+except ImportError:  # pragma: no cover - only older AstrBot cores expose the legacy name.
+    from astrbot.core.interaction import (
+        get_interaction_decision as get_interaction_reply_plan,
+    )
 try:
     from astrbot.core.interaction import PersonaEffectSpec
 except ImportError:  # pragma: no cover - older AstrBot cores do not expose it.

@@ -39,7 +39,8 @@ def set_plugin_config(config: Any) -> None:
     global _plugin_config
     global _plugin_config_path
     with _state_lock:
-        _plugin_config = deepcopy(config)
+        # AstrBotConfig is a dict subclass with framework-owned state that is not deepcopy-safe.
+        _plugin_config = dict(config) if isinstance(config, dict) else config
         config_path = getattr(config, "config_path", None)
         _plugin_config_path = config_path if isinstance(config_path, str) and config_path else None
 
