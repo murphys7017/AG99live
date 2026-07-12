@@ -1,9 +1,9 @@
 task:
-  class: review
+  class: bugfix
   risk: high
-  phase: semantic_motion_cross_layer_review
+  phase: direct_parameter_plan_renderer_freeze
   status: complete
-  scope: Review the adapter-to-WebSDK semantic motion changes, correct discrete dynamics overshoot, and align implementation documentation
+  scope: Diagnose a real conversation motion freeze, preserve frame-loop liveness on direct-plan failures, and close the SDK watchdog lifecycle
 context:
   confidence: high
   assumptions:
@@ -72,6 +72,8 @@ context:
     - Semantic pose and speech following share one parameter owner: ModelEngine attaches speech following as modulation on the compiled semantic parameter instead of rejecting overlap or creating a second writer.
     - Semantic axis profiles own max velocity, max acceleration, life-motion scale, and maximum speech-offset ratio; PlanBuilder maps these values into Cubism parameter space and WebSDK limits the final per-frame target after all modulation and easing are composed.
     - Per-frame dynamics decelerate continuously across target reversals and stop exactly at the target when a discrete frame would cross it, preventing target-adjacent oscillation.
+    - Exceptions during an active direct parameter plan are owned by that motion run: WebSDK reports a failed terminal and keeps RAF alive; render failures without an active plan remain fail-visible.
+    - Direct parameter plan terminal timeout actively stops the SDK plan with a failed terminal instead of leaving a hidden active run after updating UI state.
     - WebSDK rejects an entire malformed, unbindable, duplicate, or out-of-range parameter plan instead of salvaging playable entries or clamping invalid plan targets.
     - Every engine.parameter_plan.v2 parameter requires neutral_target_value and dynamics; Motion Lab manual plans derive both from the selected semantic axis profile rather than emitting an unconstrained legacy plan.
     - Multi-step motion validates neutral-to-first and inter-step travel against rest-to-rest triangular/trapezoidal velocity profiles; impossible timing fails with motion_sequence_transition_budget_exceeded.
@@ -205,6 +207,12 @@ architecture:
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
 verification:
   checks_run:
+    - Motion Lab SQLite incident inspection: turn 0748df0906604719a6503edd68778281 compiled and started a valid 1800ms three-step plan, then failed with direct_parameter_plan_terminal_timeout after no SDK terminal callback
+    - npm run test:preview-motion-player (passed with watchdog SDK-stop regression coverage)
+    - npm test (complete frontend suite passed after frame-loop containment fix)
+    - npm run typecheck (renderer and node typechecks passed after freeze fix)
+    - npm run build:web (production web build passed after freeze fix)
+    - git diff --check (passed after freeze fix)
     - npm test (complete frontend suite passed after cross-layer review fix)
     - npm run build:web (production web build passed after cross-layer review fix)
     - npm run test:model-engine (passed after discrete target-crossing dynamics fix)
