@@ -929,6 +929,21 @@ function testParameterDynamicsLimitsAccelerationDuringTargetReversal(): void {
   );
 }
 
+function testParameterDynamicsStopsAtTargetWithoutOvershoot(): void {
+  const next = advanceParameterDynamics(
+    0.99,
+    1,
+    2,
+    1 / 60,
+    4,
+    12,
+    -20,
+    20,
+  );
+
+  assert.deepEqual(next, { value: 1, velocity: 0 });
+}
+
 function testParameterPlanRequiresNeutralTargetAndDynamics(): void {
   const profile = buildProfile();
   const headYaw = profile.axes.find((axis) => axis.id === "head_yaw");
@@ -2492,6 +2507,7 @@ function run(): void {
   testV4MotionSequenceAllowsExplicitNeutralWaypoint();
   testV4MotionSequenceRejectsTrapezoidalTransitionBudgetOverflow();
   testParameterDynamicsLimitsAccelerationDuringTargetReversal();
+  testParameterDynamicsStopsAtTargetWithoutOvershoot();
   testParameterPlanRequiresNeutralTargetAndDynamics();
   testV4AxisLevelsRejectUnknownAxesAndMissingAnchors();
   testCompiledPlanResolvesExpressionResourceForPlayback();

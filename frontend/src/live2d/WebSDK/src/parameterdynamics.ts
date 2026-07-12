@@ -28,6 +28,11 @@ export function advanceParameterDynamics(
     previousVelocity + velocityDelta,
   );
   const unboundedValue = previousValue + nextVelocity * deltaSeconds;
+  const crossedTarget = direction !== 0
+    && Math.sign(targetValue - unboundedValue) !== direction;
+  if (crossedTarget) {
+    return { value: targetValue, velocity: 0 };
+  }
   const nextValue = clamp(unboundedValue, minValue, maxValue);
   if (nextValue !== unboundedValue) {
     return { value: nextValue, velocity: 0 };
