@@ -137,13 +137,21 @@ async function testLiveLipSyncUsesRandomFallbackWhenWebAudioIsUnavailable(): Pro
   const originalWindow = (globalThis as { window?: unknown }).window;
   const values: number[] = [];
   let cleared = false;
+  let speechEnergyWrites = 0;
+  let speechEnergyCleared = false;
   const scheduled = new Map<number, () => void>();
   let nextTimerId = 1;
   (globalThis as { window?: unknown }).window = {
     getLAppAdapter: () => ({
       setExternalLipSyncValue: (value: number) => values.push(value),
+      setExternalSpeechEnergyValue: () => {
+        speechEnergyWrites += 1;
+      },
       clearExternalLipSyncValue: () => {
         cleared = true;
+      },
+      clearExternalSpeechEnergyValue: () => {
+        speechEnergyCleared = true;
       },
       hasConfiguredLipSyncParameters: () => true,
     }),
@@ -174,11 +182,120 @@ async function testLiveLipSyncUsesRandomFallbackWhenWebAudioIsUnavailable(): Pro
 
     assert.deepEqual(unavailable, ["lip_sync_audio_context_unavailable:true"]);
     assert.equal(values.length, 1);
+    assert.equal(speechEnergyWrites, 0);
     assert.equal(scheduled.size, 1);
 
     sink.stop();
     assert.equal(cleared, true);
+    assert.equal(speechEnergyCleared, true);
     assert.equal(scheduled.size, 0);
+  } finally {
+    (globalThis as { window?: unknown }).window = originalWindow;
+  }
+}
+
+async function testLiveLipSyncPublishesIndependentSpeechEnergyFromAnalyser(): Promise<void> {
+  const originalWindow = (globalThis as { window?: unknown }).window;
+  const lipSyncValues: number[] = [];
+  const speechEnergyValues: number[] = [];
+  let lipSyncCleared = false;
+  let speechEnergyCleared = false;
+  let hasLipSyncParameters = true;
+  const frame: { callback: FrameRequestCallback | null } = { callback: null };
+
+  class FakeAudioContext {
+    state = "running";
+    destination = {};
+
+    createAnalyser() {
+      return {
+        fftSize: 0,
+        smoothingTimeConstant: 0,
+        connect: () => {},
+        disconnect: () => {},
+        getByteTimeDomainData: (samples: Uint8Array) => samples.fill(148),
+      };
+    }
+
+    createMediaElementSource() {
+      return {
+        connect: () => {},
+        disconnect: () => {},
+      };
+    }
+
+    async resume(): Promise<void> {}
+    async close(): Promise<void> {}
+  }
+
+  (globalThis as { window?: unknown }).window = {
+    getLAppAdapter: () => ({
+      setExternalLipSyncValue: (value: number) => lipSyncValues.push(value),
+      setExternalSpeechEnergyValue: (value: number) => speechEnergyValues.push(value),
+      clearExternalLipSyncValue: () => {
+        lipSyncCleared = true;
+      },
+      clearExternalSpeechEnergyValue: () => {
+        speechEnergyCleared = true;
+      },
+      hasConfiguredLipSyncParameters: () => hasLipSyncParameters,
+    }),
+    AudioContext: FakeAudioContext,
+    requestAnimationFrame: (callback: FrameRequestCallback) => {
+      frame.callback = callback;
+      return 1;
+    },
+    cancelAnimationFrame: () => {
+      frame.callback = null;
+    },
+  };
+
+  try {
+    const sink = createLive2DLipSyncTimelineSink();
+    sink.attachAudio({
+      audioUrl: "http://127.0.0.1/audio.wav",
+      audio: {} as HTMLAudioElement,
+      getAudioCurrentTimeSeconds: () => 0,
+      isCurrentAudio: () => true,
+      onStarted: () => {},
+      onUnavailable: (reason) => assert.fail(`unexpected lip-sync failure: ${reason}`),
+    });
+    await sink.resume();
+    const callback = frame.callback;
+    assert.ok(callback);
+    callback(16);
+
+    assert.equal(lipSyncValues.length, 1);
+    assert.equal(speechEnergyValues.length, 1);
+    assert.ok(lipSyncValues[0] > speechEnergyValues[0]);
+    assert.ok(speechEnergyValues[0] > 0);
+
+    sink.stop();
+    assert.equal(lipSyncCleared, true);
+    assert.equal(speechEnergyCleared, true);
+
+    hasLipSyncParameters = false;
+    const unavailable: string[] = [];
+    const energyCount = speechEnergyValues.length;
+    const lipSyncCount = lipSyncValues.length;
+    const energyOnlySink = createLive2DLipSyncTimelineSink();
+    energyOnlySink.attachAudio({
+      audioUrl: "http://127.0.0.1/audio.wav",
+      audio: {} as HTMLAudioElement,
+      getAudioCurrentTimeSeconds: () => 0,
+      isCurrentAudio: () => true,
+      onStarted: () => {},
+      onUnavailable: (reason, degraded) => unavailable.push(`${reason}:${degraded}`),
+    });
+    await energyOnlySink.resume();
+    const energyOnlyCallback = frame.callback;
+    assert.ok(energyOnlyCallback);
+    energyOnlyCallback(32);
+
+    assert.deepEqual(unavailable, ["lip_sync_parameters_unconfigured:true"]);
+    assert.equal(lipSyncValues.length, lipSyncCount);
+    assert.equal(speechEnergyValues.length, energyCount + 1);
+    energyOnlySink.stop();
   } finally {
     (globalThis as { window?: unknown }).window = originalWindow;
   }
@@ -263,6 +380,7 @@ async function run(): Promise<void> {
   testLipSyncRuntimeFailsWhenAudioEndsBeforeStart();
   testLipSyncRuntimeKeepsUnavailableTerminalStable();
   await testLiveLipSyncUsesRandomFallbackWhenWebAudioIsUnavailable();
+  await testLiveLipSyncPublishesIndependentSpeechEnergyFromAnalyser();
   await testBrowserAudioSinkDoesNotOwnLipSyncCallbacks();
   await testAudioSegmentSinkOwnsLipSyncEventOrdering();
   console.log("playbackTimelineAudioSink tests passed");

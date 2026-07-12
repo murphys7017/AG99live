@@ -26,6 +26,7 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
     markActiveStarted = null;
     markActiveUnavailable = null;
     window.getLAppAdapter?.()?.clearExternalLipSyncValue?.();
+    window.getLAppAdapter?.()?.clearExternalSpeechEnergyValue?.();
   }
 
   return {
@@ -94,18 +95,27 @@ function startLiveLipSync(
   isCurrentAudio: () => boolean,
 ): LiveLipSyncStartResult {
   const adapter = window.getLAppAdapter?.();
-  if (!adapter || typeof adapter.setExternalLipSyncValue !== "function") {
-    return reportLipSyncFailure("lip_sync_adapter_unavailable");
+  if (
+    !adapter
+    || typeof adapter.setExternalLipSyncValue !== "function"
+    || typeof adapter.setExternalSpeechEnergyValue !== "function"
+    || typeof adapter.clearExternalSpeechEnergyValue !== "function"
+  ) {
+    return reportLipSyncFailure("speech_audio_adapter_unavailable");
   }
+  const setLipSyncValue = adapter.setExternalLipSyncValue;
+  const setSpeechEnergyValue = adapter.setExternalSpeechEnergyValue;
+  const clearSpeechEnergyValue = adapter.clearExternalSpeechEnergyValue;
+  let hasLipSyncParameters = false;
   try {
-    if (adapter.hasConfiguredLipSyncParameters?.() !== true) {
-      return reportLipSyncFailure("lip_sync_parameters_unconfigured");
-    }
+    hasLipSyncParameters = adapter.hasConfiguredLipSyncParameters?.() === true;
   } catch (error) {
     return reportLipSyncFailure("lip_sync_model_unavailable", error);
   }
 
-  const degradedRuntime = () => createRandomLipSyncRuntime(adapter, isCurrentAudio);
+  const degradedRuntime = () => hasLipSyncParameters
+    ? createRandomLipSyncRuntime(adapter, isCurrentAudio)
+    : null;
 
   const AudioContextCtor = window.AudioContext
     ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -151,7 +161,11 @@ function startLiveLipSync(
       }
       const rms = Math.sqrt(squareSum / samples.length);
       const mouthValue = Math.max(0, Math.min(1, (rms - 0.012) * 7.5));
-      adapter.setExternalLipSyncValue?.(mouthValue);
+      const speechEnergyValue = Math.max(0, Math.min(1, (rms - 0.008) * 5.5));
+      if (hasLipSyncParameters) {
+        setLipSyncValue(mouthValue);
+      }
+      setSpeechEnergyValue(speechEnergyValue);
       animationFrameId = window.requestAnimationFrame(tick);
     };
 
@@ -171,8 +185,9 @@ function startLiveLipSync(
             const name = error instanceof Error && error.name
               ? error.name
               : "unknown";
+            clearSpeechEnergyValue();
             resumeFallback = degradedRuntime();
-            await resumeFallback.resume();
+            await resumeFallback?.resume();
             return `lip_sync_resume_failed:${name}`;
           }
         }
@@ -187,6 +202,7 @@ function startLiveLipSync(
           animationFrameId = null;
         }
         adapter.clearExternalLipSyncValue?.();
+        clearSpeechEnergyValue();
         try {
           source.disconnect();
         } catch (_error) {
@@ -199,7 +215,7 @@ function startLiveLipSync(
         }
         void audioContext.close?.();
       },
-    }, failureReason: null };
+    }, failureReason: hasLipSyncParameters ? null : "lip_sync_parameters_unconfigured" };
   } catch (error) {
     return reportLipSyncFailure(
       "lip_sync_analyser_failed",

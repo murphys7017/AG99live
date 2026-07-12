@@ -1,5 +1,7 @@
 # SpeechPoseStage 设计
 
+> 状态：历史设计记录。本文第 1-9 节描述的 `frequency_hz`、`phase`、`speech_pose_cycle` 和 derived-axis 兼容路径已经被移除，不可作为当前实现依据。当前权威契约见 [13-动作处理链路修复与轴关系图设计](./13-动作处理链路修复与轴关系图设计.md) 第 3.10 节：`ag99.voice_following_profile.v2` 只提供模型能力与延迟，ModelEngine 生成确定性的 `speech_gesture_track`，WebSDK 按独立 speech energy 逐帧执行。
+
 ## 1. 目标
 
 `SpeechPoseStage` 是 ModelEngine 当前扩展路线中的第一个增强 stage。

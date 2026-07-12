@@ -160,21 +160,28 @@ interface DirectSemanticParameterBinding {
     transitionMs: number;
     targetValue: number;
   }>;
-  modulationPhase: number;
   modulationAmplitude: number;
-  modulationFrequencyHz: number;
   modulationDirection: number;
-  neutralValue: number;
+  modulationDelayMs: number;
+  modulationPoints: Array<{
+    atMs: number;
+    transitionMs: number;
+    value: number;
+  }>;
   lifeMotionPhase: number;
   lifeMotionAmplitude: number;
   lifeMotionFrequencyHz: number;
   modulation: {
     kind: string;
-    neutral: number | null;
+    preset: string;
     amplitude: number | null;
-    phase: number | null;
-    frequencyHz: number | null;
     direction: number | null;
+    delayMs: number | null;
+    points: Array<{
+      atMs: number;
+      transitionMs: number;
+      value: number;
+    }>;
   } | null;
   maxVelocity: number;
   maxAcceleration: number;
@@ -691,8 +698,8 @@ export class LAppModel extends CubismUserModel {
     if (this._lipsync) {
       const liveLipSyncValue = this.resolveExternalLipSyncValue();
       lipSyncValue = liveLipSyncValue ?? 0;
-      speechEnergyValue = liveLipSyncValue ?? 0;
     }
+    speechEnergyValue = this.resolveExternalSpeechEnergyValue() ?? 0;
     this.updateSpeechAudioEnvelope(speechEnergyValue, deltaTimeSeconds);
 
     // モーションによるパラメータ更新の有無
@@ -1595,30 +1602,31 @@ export class LAppModel extends CubismUserModel {
         inputValue: Number.isFinite(Number(item.input_value)) ? Number(item.input_value) : null,
         source: String(item.source),
         keyframes,
-        modulationPhase: this.resolveSpeechPosePhase(axisId),
         modulationAmplitude: 0,
-        modulationFrequencyHz: this.resolveSpeechPoseFrequency(axisId),
         modulationDirection: 1,
-        neutralValue: neutralTargetValue ?? targetValue,
+        modulationDelayMs: 0,
+        modulationPoints: [],
         lifeMotionPhase: this.resolveLifeMotionPhase(axisId, parameterIdRaw),
         lifeMotionAmplitude: 0,
         lifeMotionFrequencyHz: 0,
         modulation: item.modulation && typeof item.modulation === "object"
           ? {
             kind: String(item.modulation.kind || "").trim(),
-            neutral: Number.isFinite(item.modulation.neutral)
-              ? Number(item.modulation.neutral)
-              : null,
+            preset: String(item.modulation.preset || "").trim(),
             amplitude: Number.isFinite(item.modulation.amplitude)
               ? Number(item.modulation.amplitude)
               : null,
-            phase: Number.isFinite(item.modulation.phase)
-              ? Number(item.modulation.phase)
-              : null,
-            frequencyHz: Number.isFinite(item.modulation.frequency_hz)
-              ? Number(item.modulation.frequency_hz)
-              : null,
             direction: item.modulation.direction === -1 ? -1 : 1,
+            delayMs: Number.isFinite(item.modulation.delay_ms)
+              ? Number(item.modulation.delay_ms)
+              : null,
+            points: Array.isArray(item.modulation.points)
+              ? item.modulation.points.map((point: any) => ({
+                atMs: Number(point.at_ms),
+                transitionMs: Number(point.transition_ms),
+                value: Number(point.value),
+              }))
+              : [],
           }
           : null,
         maxVelocity: Number(item.dynamics.max_velocity),
@@ -1653,10 +1661,9 @@ export class LAppModel extends CubismUserModel {
       if (item.modulation) {
         const modulation = this.resolveSpeechPoseModulation(item);
         item.modulationAmplitude = modulation.amplitude;
-        item.modulationPhase = modulation.phase;
-        item.modulationFrequencyHz = modulation.frequencyHz;
         item.modulationDirection = modulation.direction;
-        item.neutralValue = modulation.neutralValue;
+        item.modulationDelayMs = modulation.delayMs;
+        item.modulationPoints = modulation.points;
       }
     }
 
@@ -1695,6 +1702,19 @@ export class LAppModel extends CubismUserModel {
   public clearExternalLipSyncValue(): void {
     this._externalLipSyncValue = null;
     this._externalLipSyncUpdatedAtMs = 0;
+  }
+
+  public setExternalSpeechEnergyValue(value: number): void {
+    if (!Number.isFinite(value)) {
+      return;
+    }
+    this._externalSpeechEnergyValue = Math.max(0, Math.min(1, value));
+    this._externalSpeechEnergyUpdatedAtMs = performance.now();
+  }
+
+  public clearExternalSpeechEnergyValue(): void {
+    this._externalSpeechEnergyValue = null;
+    this._externalSpeechEnergyUpdatedAtMs = 0;
   }
 
   public hasConfiguredLipSyncParameters(): boolean {
@@ -2093,14 +2113,11 @@ export class LAppModel extends CubismUserModel {
       return Math.max(minValue, Math.min(maxValue, resolvedTargetValue));
     }
 
-    const frequencyHz = item.modulationFrequencyHz > 0
-      ? item.modulationFrequencyHz
-      : this.resolveSpeechPoseFrequency(item.axisId);
-    const cycleRadians = ((elapsedMs / 1000) * frequencyHz * Math.PI * 2) + item.modulationPhase;
+    const gestureValue = this.resolveSpeechGestureTrackValue(item, elapsedMs);
     const audioGain = this.resolveSpeechAudioGain(item);
     const modulatedValue =
       resolvedTargetValue
-      + Math.sin(cycleRadians)
+      + gestureValue
         * item.modulationAmplitude
         * item.modulationDirection
         * audioGain;
@@ -2149,6 +2166,17 @@ export class LAppModel extends CubismUserModel {
       return null;
     }
     return this._externalLipSyncValue;
+  }
+
+  private resolveExternalSpeechEnergyValue(): number | null {
+    if (this._externalSpeechEnergyValue === null) {
+      return null;
+    }
+    if (performance.now() - this._externalSpeechEnergyUpdatedAtMs > 180) {
+      this.clearExternalSpeechEnergyValue();
+      return null;
+    }
+    return this._externalSpeechEnergyValue;
   }
 
   private resolveDynamicallyLimitedTarget(
@@ -2235,54 +2263,48 @@ export class LAppModel extends CubismUserModel {
     item: DirectSemanticParameterBinding,
   ): {
     amplitude: number;
-    phase: number;
-    frequencyHz: number;
     direction: number;
-    neutralValue: number;
+    delayMs: number;
+    points: DirectSemanticParameterBinding["modulationPoints"];
   } {
     const modulation = this.parseSpeechPoseModulation(item);
-    const neutralValue = modulation.neutralValue ?? this.inputValueOr(item, item.targetValue);
     const amplitude = Math.min(
       item.maxSpeechOffset,
-      Math.max(0, modulation.amplitude ?? Math.abs(item.targetValue - neutralValue)),
+      Math.max(0, modulation.amplitude ?? 0),
     );
     return {
       amplitude,
-      phase: modulation.phase ?? item.modulationPhase,
-      frequencyHz: modulation.frequencyHz ?? item.modulationFrequencyHz,
-      direction: modulation.direction ?? item.modulationDirection,
-      neutralValue,
+      direction: modulation.direction ?? 1,
+      delayMs: modulation.delayMs ?? 0,
+      points: modulation.points,
     };
   }
 
-  private resolveSpeechPosePhase(axisId: string): number {
-    const channelName = this.resolveSpeechFollowingChannelName(axisId);
-
-    let hash = 0;
-    for (let index = 0; index < channelName.length; index += 1) {
-      hash = (hash + channelName.charCodeAt(index)) % 360;
+  private resolveSpeechGestureTrackValue(
+    item: DirectSemanticParameterBinding,
+    elapsedMs: number,
+  ): number {
+    const points = item.modulationPoints;
+    if (points.length < 2) {
+      return 0;
     }
-    return (hash / 180) * Math.PI;
-  }
-
-  private resolveSpeechPoseFrequency(axisId: string): number {
-    const channelName = this.resolveSpeechFollowingChannelName(axisId);
-    switch (channelName) {
-      case "head_pitch":
-      case "pitch":
-      case "body_pitch":
-        return channelName === "body_pitch" ? 0.30 : 0.48;
-      case "head_yaw":
-        return 0.48;
-      case "head_roll":
-        return 0.56;
-      case "body_yaw":
-        return 0.26;
-      case "body_roll":
-        return 0.30;
-      default:
-        return axisId.toLowerCase().includes("pitch") ? 0.42 : 0.40;
+    const delayedElapsedMs = Math.max(0, elapsedMs - item.modulationDelayMs);
+    let previous = points[0];
+    for (let index = 1; index < points.length; index += 1) {
+      const next = points[index];
+      if (delayedElapsedMs < next.atMs) {
+        return previous.value;
+      }
+      const transitionEndMs = next.atMs + next.transitionMs;
+      if (next.transitionMs > 0 && delayedElapsedMs < transitionEndMs) {
+        const progress = this.smoothstep(
+          (delayedElapsedMs - next.atMs) / next.transitionMs,
+        );
+        return previous.value + (next.value - previous.value) * progress;
+      }
+      previous = next;
     }
+    return previous.value;
   }
 
   private resolveLifeMotionPhase(axisId: string, parameterId: string): number {
@@ -2294,39 +2316,27 @@ export class LAppModel extends CubismUserModel {
     return (hash / 180) * Math.PI;
   }
 
-  private inputValueOr(
-    item: DirectSemanticParameterBinding,
-    fallbackValue: number,
-  ): number {
-    return item.inputValue !== null ? item.inputValue : fallbackValue;
-  }
-
   private parseSpeechPoseModulation(item: DirectSemanticParameterBinding): {
-    phase: number | null;
-    neutralValue: number | null;
     amplitude: number | null;
-    frequencyHz: number | null;
     direction: number | null;
+    delayMs: number | null;
+    points: DirectSemanticParameterBinding["modulationPoints"];
   } {
     const modulation = item.modulation;
-    if (!modulation || modulation.kind !== "speech_pose_cycle") {
+    if (!modulation || modulation.kind !== "speech_gesture_track") {
       return {
-        phase: null,
-        neutralValue: null,
         amplitude: null,
-        frequencyHz: null,
         direction: null,
+        delayMs: null,
+        points: [],
       };
     }
 
     return {
-      phase: modulation.phase !== null ? modulation.phase * Math.PI * 2 : null,
-      neutralValue: modulation.neutral,
       amplitude: modulation.amplitude,
-      frequencyHz: modulation.frequencyHz !== null && modulation.frequencyHz > 0
-        ? modulation.frequencyHz
-        : null,
       direction: modulation.direction === -1 ? -1 : 1,
+      delayMs: modulation.delayMs,
+      points: modulation.points,
     };
   }
 
@@ -2818,12 +2828,16 @@ export class LAppModel extends CubismUserModel {
         input_value?: number;
       }>;
       modulation?: {
-        kind: "speech_pose_cycle";
-        neutral: number;
+        kind: "speech_gesture_track";
+        preset: "calm_explain" | "lively_chat" | "gentle_support" | "emphatic";
         amplitude: number;
-        phase: number;
-        frequency_hz?: number;
         direction?: 1 | -1;
+        delay_ms: number;
+        points: Array<{
+          at_ms: number;
+          transition_ms: number;
+          value: number;
+        }>;
       };
       dynamics?: {
         max_velocity: number;
@@ -2925,36 +2939,81 @@ export class LAppModel extends CubismUserModel {
         }
       }
       let modulation: {
-        kind: "speech_pose_cycle";
-        neutral: number;
+        kind: "speech_gesture_track";
+        preset: "calm_explain" | "lively_chat" | "gentle_support" | "emphatic";
         amplitude: number;
-        phase: number;
-        frequency_hz: number;
         direction: 1 | -1;
+        delay_ms: number;
+        points: Array<{
+          at_ms: number;
+          transition_ms: number;
+          value: number;
+        }>;
       } | undefined;
       if (item.modulation !== undefined) {
         const raw = item.modulation;
+        const allowedPresets = new Set([
+          "calm_explain",
+          "lively_chat",
+          "gentle_support",
+          "emphatic",
+        ]);
         if (
           !raw
           || typeof raw !== "object"
-          || raw.kind !== "speech_pose_cycle"
-          || !Number.isFinite(raw.neutral)
+          || raw.kind !== "speech_gesture_track"
+          || !allowedPresets.has(raw.preset)
           || !Number.isFinite(raw.amplitude)
           || raw.amplitude < 0
-          || !Number.isFinite(raw.phase)
-          || !Number.isFinite(raw.frequency_hz)
-          || raw.frequency_hz <= 0
           || (raw.direction !== 1 && raw.direction !== -1)
+          || !Number.isInteger(raw.delay_ms)
+          || raw.delay_ms < 0
+          || raw.delay_ms > 600
+          || !Array.isArray(raw.points)
+          || raw.points.length < 3
+          || raw.points.length > 8
         ) {
           return fail(`v2_parameter_invalid_modulation:${axisId}:${parameterId}`);
         }
+        const points: Array<{ at_ms: number; transition_ms: number; value: number }> = [];
+        let previousAtMs = -1;
+        let previousTransitionEndMs = -1;
+        for (const point of raw.points) {
+          if (
+            !point
+            || typeof point !== "object"
+            || !Number.isInteger(point.at_ms)
+            || point.at_ms < 0
+            || point.at_ms > timing.durationMs
+            || point.at_ms <= previousAtMs
+            || point.at_ms < previousTransitionEndMs
+            || !Number.isInteger(point.transition_ms)
+            || point.transition_ms < 0
+            || point.at_ms + point.transition_ms + raw.delay_ms > timing.durationMs
+            || !Number.isFinite(point.value)
+            || point.value < -1
+            || point.value > 1
+          ) {
+            return fail(`v2_parameter_invalid_modulation:${axisId}:${parameterId}`);
+          }
+          previousAtMs = point.at_ms;
+          previousTransitionEndMs = point.at_ms + point.transition_ms;
+          points.push({
+            at_ms: Number(point.at_ms),
+            transition_ms: Number(point.transition_ms),
+            value: Number(point.value),
+          });
+        }
+        if (points[0].at_ms !== 0 || points[0].transition_ms !== 0 || points[0].value !== 0) {
+          return fail(`v2_parameter_invalid_modulation:${axisId}:${parameterId}`);
+        }
         modulation = {
-          kind: "speech_pose_cycle",
-          neutral: Number(raw.neutral),
+          kind: "speech_gesture_track",
+          preset: raw.preset,
           amplitude: Number(raw.amplitude),
-          phase: Number(raw.phase),
-          frequency_hz: Number(raw.frequency_hz),
           direction: raw.direction === -1 ? -1 : 1,
+          delay_ms: Number(raw.delay_ms),
+          points,
         };
       }
       let dynamics: {
@@ -3103,6 +3162,8 @@ export class LAppModel extends CubismUserModel {
     this._speechBodyEnvelope = 0.0;
     this._externalLipSyncValue = null;
     this._externalLipSyncUpdatedAtMs = 0;
+    this._externalSpeechEnergyValue = null;
+    this._externalSpeechEnergyUpdatedAtMs = 0;
   }
 
   _modelSetting: ICubismModelSetting; // モデルセッティング情報
@@ -3139,4 +3200,6 @@ export class LAppModel extends CubismUserModel {
   _speechBodyEnvelope: number;
   _externalLipSyncValue: number | null;
   _externalLipSyncUpdatedAtMs: number;
+  _externalSpeechEnergyValue: number | null;
+  _externalSpeechEnergyUpdatedAtMs: number;
 }

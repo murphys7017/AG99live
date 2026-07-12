@@ -12,7 +12,7 @@ export function buildSpeechOnlyMotionPayload(
   if (
     !profile
     || !voiceFollowingProfile
-    || voiceFollowingProfile.schema_version !== "ag99.voice_following_profile.v1"
+    || voiceFollowingProfile.schema_version !== "ag99.voice_following_profile.v2"
     || !Object.values(voiceFollowingProfile.channels ?? {}).some(
       (channel) =>
         typeof channel?.parameter_id === "string"

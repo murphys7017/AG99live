@@ -268,7 +268,7 @@ export function parseSemanticParameterPlan(
     if (!dynamics) {
       return { ok: false, reason: "parameter_plan_v2.invalid_dynamics" };
     }
-    const modulation = normalizeParameterModulation(item.modulation);
+    const modulation = normalizeParameterModulation(item.modulation, timing.duration_ms);
     if (modulation === null || (modulation && !dynamics)) {
       return { ok: false, reason: "parameter_plan_v2.invalid_modulation" };
     }
@@ -338,31 +338,86 @@ export function parseSemanticParameterPlan(
 
 function normalizeParameterModulation(
   value: unknown,
+  durationMs: number,
 ): SemanticParameterPlan["parameters"][number]["modulation"] | null | undefined {
   if (value === undefined) {
     return undefined;
   }
+  if (!isObject(value)) {
+    return null;
+  }
+  const preset = normalizeText(value.preset);
+  const delayMs = value.delay_ms;
   if (
-    !isObject(value)
-    || normalizeText(value.kind) !== "speech_pose_cycle"
-    || !isFiniteNumber(value.neutral)
+    normalizeText(value.kind) !== "speech_gesture_track"
+    || !isSpeechGesturePreset(preset)
     || !isFiniteNumber(value.amplitude)
     || value.amplitude < 0
-    || !isFiniteNumber(value.phase)
-    || !isFiniteNumber(value.frequency_hz)
-    || value.frequency_hz <= 0
     || (value.direction !== 1 && value.direction !== -1)
+    || typeof delayMs !== "number"
+    || !Number.isInteger(delayMs)
+    || delayMs < 0
+    || delayMs > 600
+    || !Array.isArray(value.points)
+    || value.points.length < 3
+    || value.points.length > 8
   ) {
     return null;
   }
+  const points: NonNullable<SemanticParameterPlan["parameters"][number]["modulation"]>["points"] = [];
+  let previousAtMs = -1;
+  let previousTransitionEndMs = -1;
+  for (const point of value.points) {
+    if (!isObject(point)) {
+      return null;
+    }
+    const atMs = point.at_ms;
+    const transitionMs = point.transition_ms;
+    const pointValue = point.value;
+    if (
+      typeof atMs !== "number"
+      || !Number.isInteger(atMs)
+      || atMs < 0
+      || atMs <= previousAtMs
+      || atMs < previousTransitionEndMs
+      || typeof transitionMs !== "number"
+      || !Number.isInteger(transitionMs)
+      || transitionMs < 0
+      || atMs + transitionMs + delayMs > durationMs
+      || !isFiniteNumber(pointValue)
+      || pointValue < -1
+      || pointValue > 1
+    ) {
+      return null;
+    }
+    previousAtMs = atMs;
+    previousTransitionEndMs = atMs + transitionMs;
+    points.push({
+      at_ms: atMs,
+      transition_ms: transitionMs,
+      value: pointValue,
+    });
+  }
+  if (points[0].at_ms !== 0 || points[0].transition_ms !== 0 || points[0].value !== 0) {
+    return null;
+  }
   return {
-    kind: "speech_pose_cycle",
-    neutral: value.neutral,
+    kind: "speech_gesture_track",
+    preset,
     amplitude: value.amplitude,
-    phase: value.phase,
-    frequency_hz: value.frequency_hz,
     direction: value.direction,
+    delay_ms: delayMs,
+    points,
   };
+}
+
+function isSpeechGesturePreset(
+  value: string,
+): value is NonNullable<SemanticParameterPlan["parameters"][number]["modulation"]>["preset"] {
+  return value === "calm_explain"
+    || value === "lively_chat"
+    || value === "gentle_support"
+    || value === "emphatic";
 }
 
 function normalizeParameterDynamics(

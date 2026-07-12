@@ -1,12 +1,15 @@
 task:
-  class: refactor
+  class: feature
   risk: high
-  phase: live2d_extreme_range_and_prompt_examples
+  phase: speech_gesture_track_runtime
   status: complete
-  scope: Give level four an independent per-axis extreme range, make level three the normal visible Live2D baseline, and inject strict v4 reference examples into the motion capability
+  scope: Replace periodic speech pose cycles with deterministic non-periodic gesture tracks, separate speech energy from lip-sync degradation, and close profile/timing/capability contract gaps
 context:
   confidence: high
   assumptions:
+    - Speech following profile v2 and speech_gesture_track replace the v1 cycle contract without runtime compatibility.
+    - ModelEngine owns deterministic gesture selection and control-point planning; WebSDK owns per-frame interpolation and dynamics.
+    - Real audio RMS may feed both mouth and speech energy, but random lip-sync degradation must never feed speech energy.
     - Persona Effect v4 axis_levels use the nine-level -4..4 contract; transform version v4 distinguishes recalibrated samples from historical seven-level data.
     - Level anchors map ±1 to soft-range edges, ±2 to soft/strong midpoints, ±3 to strong-range edges, and ±4 to independently configured extreme-range edges; relation-graph and parameter hard ranges remain authoritative.
     - Ordinary Live2D primary pose axes start at level three for visual readability; level two is restrained, level one is detail or transition, and level four is brief exaggerated performance.
@@ -226,6 +229,18 @@ architecture:
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
 verification:
   checks_run:
+    - npm test (complete frontend suite passed after speech gesture contract closure)
+    - npm run build:web (production web build passed after speech audio analysis decoupling)
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (286 passed)
+    - python -m compileall astrbot_plugin_ag99live_adapter
+    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings)
+    - git diff --check (passed)
+    - npm test (complete frontend suite passed after deterministic speech gesture track migration)
+    - npm run build:web (production web build passed after speech energy separation)
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (286 passed)
+    - python -m compileall astrbot_plugin_ag99live_adapter
+    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings)
+    - git diff --check (passed)
     - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (286 passed for independent extreme ranges, strict v4 examples, and profile v2 migration)
     - npm test (complete frontend suite passed after extreme-range editor integration)
     - npm run typecheck

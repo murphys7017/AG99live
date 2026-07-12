@@ -119,6 +119,18 @@ export class LAppAdapter {
     this.getModel()?.clearExternalLipSyncValue();
   }
 
+  public setExternalSpeechEnergyValue(value: number): void {
+    const model = this.getModel();
+    if (!model) {
+      throw new Error("live2d_model_unavailable");
+    }
+    model.setExternalSpeechEnergyValue(value);
+  }
+
+  public clearExternalSpeechEnergyValue(): void {
+    this.getModel()?.clearExternalSpeechEnergyValue();
+  }
+
   /* expression */
 
   public getExpressionCount(): number {

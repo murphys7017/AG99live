@@ -222,10 +222,10 @@ intentValidator  order 10
 axisResolver     order 20
 intensity        order 30
 coupling         order 40
-speechPose       order 45  extension
+modeResolver     order 45  core
+timing           order 46  core
+speechPose       order 47  extension
 semanticAxisRelationGraph order 50
-modeResolver     order 60
-timing           order 70
 planBuilder      order 80
 resourcePolicy   order 90
 ```

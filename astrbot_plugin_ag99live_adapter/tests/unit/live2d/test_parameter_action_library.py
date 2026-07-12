@@ -205,8 +205,7 @@ def test_seed_model_info_summary_embeds_adaptive_parameter_profile() -> None:
         "output_range": {"min": -8.0, "max": 8.0},
         "amplitude": 2.2,
         "weight": 0.65,
-        "phase": 0.0,
-        "frequency_hz": 0.48,
+        "follow_delay_ms": 0,
     }
     assert model["summary"]["schema_version"] == live2d_scan.MODEL_SUMMARY_SCHEMA_VERSION
     assert model["summary"]["adaptive_parameter_profile"]["schema_version"] == (
@@ -230,22 +229,18 @@ def test_seed_model_info_summary_embeds_adaptive_parameter_profile() -> None:
 
 
 def test_voice_following_lateral_channels_preserve_body_hierarchy() -> None:
-    tuning = live2d_scan.VOICE_FOLLOWING_TUNING
     specs = {
         str(item["name"]): item
         for item in live2d_scan.VOICE_FOLLOWING_CHANNEL_SPECS
     }
 
     for group_name in ("yaw", "roll"):
-        group = tuning[group_name]
-        assert not isinstance(group["phase"], dict)
-        assert isinstance(group["frequency_hz"], dict)
         head_name = f"head_{group_name}"
         body_name = f"body_{group_name}"
         head = specs[head_name]
         body = specs[body_name]
-        assert head["phase"] == body["phase"]
-        assert head["frequency_hz"] > body["frequency_hz"]
+        assert head["follow_delay_ms"] == 0
+        assert 120 <= body["follow_delay_ms"] <= 300
         assert float(head["amplitude"]) * float(head["weight"]) > (
             float(body["amplitude"]) * float(body["weight"])
         )
@@ -273,7 +268,7 @@ def test_voice_following_ignores_unsafe_calibration_direction() -> None:
     assert "direction" not in profile["channels"]["head_yaw"]
 
 
-def test_seed_model_info_with_reinforced_primary_observations_exports_safe_calibration() -> None:
+def test_seed_model_info_with_reinforced_primary_observations_keeps_voice_following_orientation_free() -> None:
     model_info = build_seed_model_info_with_options(reinforce_primary_observations=True)
     model = model_info["models"][0]
 
@@ -284,7 +279,7 @@ def test_seed_model_info_with_reinforced_primary_observations_exports_safe_calib
         "max": 0.7,
     }
     assert model["calibration_profile"]["axes"]["head_yaw"]["direction"] == 1
-    assert model["voice_following_profile"]["channels"]["head_yaw"]["direction"] == 1
+    assert "direction" not in model["voice_following_profile"]["channels"]["head_yaw"]
     assert model["adaptive_parameter_profile"]["runtime_summary"]["axis_parameter_map"] == {
         "head_yaw": "ParamAngleX",
     }

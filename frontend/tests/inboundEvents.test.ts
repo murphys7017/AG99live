@@ -565,6 +565,34 @@ function testInvalidMotionTuningSamplesStatePayloadReturnsProtocolError(): void 
   assert.equal(event.error.path, "payload.samples");
 }
 
+function testModelSyncPayloadOldVoiceFollowingProfileRejected(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.model_sync", {
+      model_info: {
+        selected_model: "model-a",
+        models: [{
+          name: "model-a",
+          voice_following_profile: {
+            schema_version: "ag99.voice_following_profile.v1",
+            channels: {},
+          },
+        }],
+      },
+      conf_name: "default",
+      conf_uid: "conf-1",
+      client_uid: "client-1",
+    }),
+    defaultContext(),
+  );
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind === "protocol_error") {
+    assert.equal(
+      event.error.path,
+      "payload.model_info.models[].voice_following_profile.schema_version",
+    );
+  }
+}
+
 function testMotionLabPersistedAckRequiresEventId(): void {
   const valid = mapInboundEnvelopeToEvent(
     makeEnvelope("system.motion_lab_raw_event_recorded", { event_id: " event-1 " }),
@@ -614,6 +642,7 @@ function run(): void {
 
   testModelSyncPayloadRuntimeCacheErrorsBadTypeRejected();
   testModelSyncPayloadVoiceFollowingProfileBadTypeRejected();
+  testModelSyncPayloadOldVoiceFollowingProfileRejected();
   testInvalidMotionTuningSamplesStatePayloadReturnsProtocolError();
   testMotionLabPersistedAckRequiresEventId();
 

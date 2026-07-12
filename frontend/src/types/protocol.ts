@@ -140,14 +140,11 @@ export interface VoiceFollowingChannelProfile {
   };
   amplitude: number;
   weight: number;
-  phase: number;
-  frequency_hz: number;
-  /** 1 = 正向偏移，-1 = 反向偏移。 */
-  direction: 1 | -1;
+  follow_delay_ms: number;
 }
 
 export interface VoiceFollowingProfile {
-  schema_version: "ag99.voice_following_profile.v1";
+  schema_version: "ag99.voice_following_profile.v2";
   model_id: string;
   revision: number;
   channels: Record<string, VoiceFollowingChannelProfile>;
@@ -709,12 +706,16 @@ export interface SemanticParameterPlanEntry {
     input_value?: number;
   }>;
   modulation?: {
-    kind: "speech_pose_cycle";
-    neutral: number;
+    kind: "speech_gesture_track";
+    preset: "calm_explain" | "lively_chat" | "gentle_support" | "emphatic";
     amplitude: number;
-    phase: number;
-    frequency_hz: number;
     direction: 1 | -1;
+    delay_ms: number;
+    points: Array<{
+      at_ms: number;
+      transition_ms: number;
+      value: number;
+    }>;
   };
   dynamics: {
     max_velocity: number;

@@ -164,33 +164,24 @@ BASE_ACTION_LIBRARY_SCHEMA_VERSION = "base_action_library.v1"
 PARAMETER_ACTION_LIBRARY_SCHEMA_VERSION = "parameter_action_library.v1"
 ADAPTIVE_PARAMETER_PROFILE_SCHEMA_VERSION = "adaptive_parameter_profile.v1"
 CALIBRATION_PROFILE_SCHEMA_VERSION = "direct_parameter_calibration.v1"
-VOICE_FOLLOWING_PROFILE_SCHEMA_VERSION = "ag99.voice_following_profile.v1"
+VOICE_FOLLOWING_PROFILE_SCHEMA_VERSION = "ag99.voice_following_profile.v2"
 MODEL_SUMMARY_SCHEMA_VERSION = "live2d_model_summary.v1"
 PARAMETER_ACTION_MAX_ATOMS_PER_PARAMETER = 24
 
-# Speech-following style tuning. Keep head/body present, but make the layer
-# feel like restrained speech inertia instead of a full-body rhythmic sway.
+# Speech-following capability tuning. Gesture timing is planned by ModelEngine;
+# the model profile only owns parameter amplitude and body-follow delay.
 VOICE_FOLLOWING_TUNING: dict[str, dict[str, Any]] = {
-    # Lateral sway: visible on the head, subtle and slower on the body.
     "roll": {
-        "frequency_hz": {"head": 0.56, "body": 0.30},
-        "phase": 0.35,
-        "head": {"amplitude": 2.8, "weight": 0.75},
-        "body": {"amplitude": 1.2, "weight": 0.45},
+        "head": {"amplitude": 2.8, "weight": 0.75, "follow_delay_ms": 0},
+        "body": {"amplitude": 1.2, "weight": 0.45, "follow_delay_ms": 180},
     },
-    # Horizontal twist: supporting motion, kept smaller than roll.
     "yaw": {
-        "frequency_hz": {"head": 0.48, "body": 0.26},
-        "phase": 0.0,
-        "head": {"amplitude": 2.2, "weight": 0.65},
-        "body": {"amplitude": 0.9, "weight": 0.35},
+        "head": {"amplitude": 2.2, "weight": 0.65, "follow_delay_ms": 0},
+        "body": {"amplitude": 0.9, "weight": 0.35, "follow_delay_ms": 220},
     },
-    # Vertical nodding: deliberately restrained during ordinary speech.
     "pitch": {
-        "frequency_hz": {"head": 0.48, "body": 0.30},
-        "phase": {"head": 0.35, "body": 0.55},
-        "head": {"amplitude": 1.0, "weight": 0.35},
-        "body": {"amplitude": 0.5, "weight": 0.20},
+        "head": {"amplitude": 1.0, "weight": 0.35, "follow_delay_ms": 0},
+        "body": {"amplitude": 0.5, "weight": 0.20, "follow_delay_ms": 160},
     },
 }
 
@@ -201,18 +192,13 @@ def _build_voice_following_channel_specs() -> tuple[dict[str, Any], ...]:
         group = VOICE_FOLLOWING_TUNING[group_name]
         for layer in ("head", "body"):
             layer_tuning = group[layer]
-            frequency = group["frequency_hz"]
-            phase = group["phase"]
             specs.append(
                 {
                     "name": f"{layer}_{group_name}",
                     "layer": layer,
                     "amplitude": float(layer_tuning["amplitude"]),
                     "weight": float(layer_tuning["weight"]),
-                    "phase": float(phase[layer] if isinstance(phase, dict) else phase),
-                    "frequency_hz": float(
-                        frequency[layer] if isinstance(frequency, dict) else frequency
-                    ),
+                    "follow_delay_ms": int(layer_tuning["follow_delay_ms"]),
                 }
             )
     return tuple(specs)
@@ -1956,12 +1942,8 @@ def _build_voice_following_profile(
             "output_range": output_range,
             "amplitude": _round_float(spec["amplitude"]),
             "weight": _round_float(spec["weight"]),
-            "phase": _round_float(spec["phase"]),
-            "frequency_hz": _round_float(spec["frequency_hz"]),
+            "follow_delay_ms": int(spec["follow_delay_ms"]),
         }
-        calibration_direction = calibration_axis.get("direction")
-        if calibration_axis.get("safe_to_apply") is True and calibration_direction in {-1, 1}:
-            channel_profile["direction"] = int(calibration_direction)
         channels[channel_name] = channel_profile
 
     return {

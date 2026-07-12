@@ -16,6 +16,8 @@ AG99live V2 的 AstrBot 插件侧实现。该目录负责协议桥接、turn 生
 - 后端当前主职责是把 `ag99live.motion` 的九级 `axis_levels` 严格归一化为 `engine.motion_intent.v4`，并通过 middleware-first 链路稳定送到前端。
 - 前端 `ModelEngine` 负责把 intent 编译为 `engine.parameter_plan.v2`。
 - 说话时的 plan 级补偿由前端 compile 侧 `SpeechPoseStage` 承接。
+- 扫描器下发 `ag99.voice_following_profile.v2`，只描述模型通道幅度、权重、范围和头身跟随延迟；非周期手势预设与控制点由前端 ModelEngine 生成。
+- 旧 `voice_following_profile.v1` 和 `speech_pose_cycle` 不属于兼容协议，前端入站会显式拒绝。
 - 连续多段之间的惯性、衰减、残留、soft handoff 和层间混合由前端 Live2D runtime 侧 `ParameterPresentationLayer` 承接，而不是放回后端动作生成链路。
 
 ## 目录结构

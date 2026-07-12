@@ -307,11 +307,19 @@ function parseModelSummarySnapshot(
     model.semantic_axis_profile = parsedProfile;
   }
 
-  // voice_following_profile 只需是 object | null
+  // The voice-following contract is internal and version-locked. Reject stale
+  // profiles at ingress so they cannot silently disable speech gestures later.
   if (record.voice_following_profile !== undefined && record.voice_following_profile !== null) {
     const vf = asRecord(record.voice_following_profile);
     if (!vf) {
       return invalidPayload(type, "payload.model_info.models[].voice_following_profile", "object | null");
+    }
+    if (vf.schema_version !== "ag99.voice_following_profile.v2") {
+      return invalidPayload(
+        type,
+        "payload.model_info.models[].voice_following_profile.schema_version",
+        "ag99.voice_following_profile.v2",
+      );
     }
   }
 

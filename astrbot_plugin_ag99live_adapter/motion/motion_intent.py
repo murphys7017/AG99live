@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
@@ -436,6 +437,73 @@ def validate_parameter_plan_v2_payload(plan: Any) -> tuple[bool, str]:
         source = item.get("source")
         if source not in PARAMETER_PLAN_SOURCES:
             return False, f"parameter_source_invalid:{source}"
+        modulation = item.get("modulation")
+        if modulation is not None:
+            if not isinstance(modulation, dict):
+                return False, "parameter_modulation_not_object"
+            if modulation.get("kind") != "speech_gesture_track":
+                return False, "parameter_modulation_kind_invalid"
+            if modulation.get("preset") not in {
+                "calm_explain",
+                "lively_chat",
+                "gentle_support",
+                "emphatic",
+            }:
+                return False, "parameter_modulation_preset_invalid"
+            amplitude = modulation.get("amplitude")
+            if (
+                not isinstance(amplitude, (int, float))
+                or isinstance(amplitude, bool)
+                or not math.isfinite(float(amplitude))
+                or float(amplitude) < 0
+            ):
+                return False, "parameter_modulation_amplitude_invalid"
+            if modulation.get("direction") not in {-1, 1}:
+                return False, "parameter_modulation_direction_invalid"
+            delay_ms = modulation.get("delay_ms")
+            if (
+                not isinstance(delay_ms, int)
+                or isinstance(delay_ms, bool)
+                or not 0 <= delay_ms <= 600
+            ):
+                return False, "parameter_modulation_delay_invalid"
+            points = modulation.get("points")
+            if not isinstance(points, list) or not 3 <= len(points) <= 8:
+                return False, "parameter_modulation_points_invalid"
+            previous_at_ms = -1
+            previous_transition_end_ms = -1
+            for point_index, point in enumerate(points):
+                if not isinstance(point, dict):
+                    return False, "parameter_modulation_point_not_object"
+                at_ms = point.get("at_ms")
+                transition_ms = point.get("transition_ms")
+                point_value = point.get("value")
+                if (
+                    not isinstance(at_ms, int)
+                    or isinstance(at_ms, bool)
+                    or at_ms < 0
+                    or at_ms <= previous_at_ms
+                    or at_ms < previous_transition_end_ms
+                    or not isinstance(transition_ms, int)
+                    or isinstance(transition_ms, bool)
+                    or transition_ms < 0
+                    or at_ms + transition_ms + delay_ms
+                    > float(timing["duration_ms"])
+                    or not isinstance(point_value, (int, float))
+                    or isinstance(point_value, bool)
+                    or not math.isfinite(float(point_value))
+                    or not -1 <= float(point_value) <= 1
+                ):
+                    return False, f"parameter_modulation_point_invalid:{point_index}"
+                previous_at_ms = at_ms
+                previous_transition_end_ms = at_ms + transition_ms
+            first_point = points[0]
+            if (
+                first_point.get("at_ms") != 0
+                or first_point.get("transition_ms") != 0
+                or float(first_point.get("value")) != 0
+            ):
+                return False, "parameter_modulation_first_point_invalid"
         dynamics = item.get("dynamics")
         if not isinstance(dynamics, dict):
             return False, "parameter_dynamics_not_object"

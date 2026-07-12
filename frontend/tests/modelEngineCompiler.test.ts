@@ -374,7 +374,7 @@ function buildModel(profile: SemanticAxisProfile): ModelSummary {
 function buildModelWithVoiceFollowingProfile(profile: SemanticAxisProfile): ModelSummary {
   const model = buildModel(profile);
   model.voice_following_profile = {
-    schema_version: "ag99.voice_following_profile.v1",
+    schema_version: "ag99.voice_following_profile.v2",
     model_id: "model-1",
     revision: 1,
     channels: {
@@ -387,9 +387,7 @@ function buildModelWithVoiceFollowingProfile(profile: SemanticAxisProfile): Mode
         output_range: { min: -30, max: 30 },
         amplitude: 2.8,
         weight: 0.75,
-        phase: 0,
-        frequency_hz: 0.56,
-        direction: -1,
+        follow_delay_ms: 0,
       },
       head_pitch: {
         channel: "head_pitch",
@@ -400,9 +398,18 @@ function buildModelWithVoiceFollowingProfile(profile: SemanticAxisProfile): Mode
         output_range: { min: -30, max: 30 },
         amplitude: 1.0,
         weight: 0.35,
-        phase: 0.35,
-        frequency_hz: 0.48,
-        direction: -1,
+        follow_delay_ms: 0,
+      },
+      head_yaw: {
+        channel: "head_yaw",
+        parameter_id: "ParamAngleX",
+        parameter_name: "ParamAngleX",
+        layer: "head",
+        neutral: 0,
+        output_range: { min: -30, max: 30 },
+        amplitude: 2.4,
+        weight: 0.7,
+        follow_delay_ms: 0,
       },
       body_yaw: {
         channel: "body_yaw",
@@ -413,9 +420,7 @@ function buildModelWithVoiceFollowingProfile(profile: SemanticAxisProfile): Mode
         output_range: { min: -10, max: 10 },
         amplitude: 0.9,
         weight: 0.35,
-        phase: 0.2,
-        frequency_hz: 0.26,
-        direction: 1,
+        follow_delay_ms: 220,
       },
       body_roll: {
         channel: "body_roll",
@@ -426,14 +431,30 @@ function buildModelWithVoiceFollowingProfile(profile: SemanticAxisProfile): Mode
         output_range: { min: -10, max: 10 },
         amplitude: 1.2,
         weight: 0.45,
-        phase: 0.5,
-        frequency_hz: 0.30,
-        direction: -1,
+        follow_delay_ms: 180,
+      },
+      body_pitch: {
+        channel: "body_pitch",
+        parameter_id: "ParamBodyAngleY",
+        parameter_name: "ParamBodyAngleY",
+        layer: "body",
+        neutral: 0,
+        output_range: { min: -10, max: 10 },
+        amplitude: 0.8,
+        weight: 0.3,
+        follow_delay_ms: 160,
       },
     },
     summary: {
-      channel_count: 4,
-      available_channels: ["head_roll", "head_pitch", "body_yaw", "body_roll"],
+      channel_count: 6,
+      available_channels: [
+        "head_roll",
+        "head_pitch",
+        "head_yaw",
+        "body_yaw",
+        "body_roll",
+        "body_pitch",
+      ],
     },
   };
   return model;
@@ -1812,11 +1833,22 @@ function testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes(): void {
   const profile = buildProfile();
   const result = compileMotionIntent(buildIntent({
     mode: "idle",
+    intent_tags: ["explain"],
     axes: {},
+    performance_curve_hint: {
+      schema_version: "ag99.performance_curve_hint.v1",
+      curve_family: "soft_breathe",
+      entry: "soft",
+      hold: "breathing",
+      exit: "soft",
+      emphasis: "none",
+      energy: "calm",
+    },
   }), {
     model: buildModelWithVoiceFollowingProfile(profile),
     targetDurationMs: 5000,
     speechActive: true,
+    samplingIdentity,
     settings: {
       motionIntensityScale: 1,
       axisIntensityScale: {},
@@ -1842,24 +1874,215 @@ function testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes(): void {
   assert.equal(headPitch?.input_value, 0);
   assert.equal(bodyRoll?.input_value, 0);
   assert.equal(headRoll?.axis_id, "voice_following.head_roll");
-  assert.deepEqual(headRoll?.modulation, {
-    kind: "speech_pose_cycle",
-    neutral: 0,
-    amplitude: 2.8 * 0.75,
-    phase: 0,
-    frequency_hz: 0.56,
-    direction: -1,
-  });
-  assert.equal(headPitch?.modulation?.frequency_hz, 0.48);
-  assert.ok(
-    (headPitch?.modulation?.frequency_hz ?? 0) < (headRoll?.modulation?.frequency_hz ?? 0),
-  );
+  assert.equal(headRoll?.modulation?.kind, "speech_gesture_track");
+  assert.equal(headRoll?.modulation?.preset, "gentle_support");
+  assert.equal(headRoll?.modulation?.amplitude, 2.8 * 0.75);
+  assert.equal(headRoll?.modulation?.delay_ms, 0);
+  assert.equal(headRoll?.modulation?.direction, 1);
+  assert.equal(headRoll?.modulation?.points[0].value, 0);
+  assert.equal(headRoll?.modulation?.points.at(-1)?.value, 0);
+  assert.ok((headRoll?.modulation?.points.length ?? 0) >= 4);
+  assert.equal(headPitch?.modulation?.kind, "speech_gesture_track");
+  assert.equal(bodyRoll?.modulation?.delay_ms, 180);
   assert.ok((headPitch?.weight ?? 1) < (headRoll?.weight ?? 0));
   assert.equal(legacySpeechAxis, undefined);
   assert.equal(
     result.diagnostics.warnings?.includes("speech_pose_applied:ParamAngleZ"),
     true,
   );
+}
+
+function testSpeechGestureTracksAreDeterministicAndTimelineBounded(): void {
+  const profile = buildProfile();
+  const model = buildModelWithVoiceFollowingProfile(profile);
+  const compile = (messageId: string) => compileMotionIntent(buildIntent({
+    mode: "idle",
+    intent_tags: [],
+    axes: {},
+    duration_hint_ms: 2400,
+  }), {
+    model,
+    targetDurationMs: 2400,
+    speechActive: true,
+    samplingIdentity: { turnId: "turn-deterministic", messageId },
+    settings: { motionIntensityScale: 1, axisIntensityScale: {} },
+  });
+
+  const first = compile("message-same");
+  const repeated = compile("message-same");
+  assert.equal(first.ok, true);
+  assert.equal(repeated.ok, true);
+  assert.deepEqual(first.plan?.parameters, repeated.plan?.parameters);
+
+  const signatures = new Set<string>();
+  for (let index = 0; index < 12; index += 1) {
+    const result = compile(`message-${index}`);
+    assert.equal(result.ok, true);
+    signatures.add(JSON.stringify(
+      result.plan?.parameters.map((parameter) => ({
+        axis: parameter.axis_id,
+        preset: parameter.modulation?.preset,
+        direction: parameter.modulation?.points[1]?.value,
+      })),
+    ));
+    for (const parameter of result.plan?.parameters ?? []) {
+      const modulation = parameter.modulation;
+      if (!modulation) continue;
+      let previousEndMs = -1;
+      for (const point of modulation.points) {
+        assert.ok(point.at_ms >= previousEndMs);
+        previousEndMs = point.at_ms + point.transition_ms;
+      }
+      assert.ok(previousEndMs + modulation.delay_ms <= (result.plan?.timing.duration_ms ?? 0));
+    }
+  }
+  assert.ok(signatures.size > 1);
+}
+
+function testSpeechGesturePresetSelectionUsesSemanticHints(): void {
+  const profile = buildProfile();
+  const model = buildModelWithVoiceFollowingProfile(profile);
+  const cases: Array<{
+    intent: Partial<NormalizedSemanticMotionIntentV3>;
+    expected: string;
+  }> = [
+    {
+      intent: {
+        performance_curve_hint: {
+          schema_version: "ag99.performance_curve_hint.v1",
+          curve_family: "pulse_then_settle",
+          entry: "quick",
+          hold: "steady",
+          exit: "soft",
+          emphasis: "early",
+          energy: "high",
+        },
+      },
+      expected: "emphatic",
+    },
+    {
+      intent: {
+        performance_curve_hint: {
+          schema_version: "ag99.performance_curve_hint.v1",
+          curve_family: "soft_breathe",
+          entry: "soft",
+          hold: "breathing",
+          exit: "soft",
+          emphasis: "none",
+          energy: "calm",
+        },
+      },
+      expected: "gentle_support",
+    },
+    {
+      intent: {
+        performance_curve_hint: {
+          schema_version: "ag99.performance_curve_hint.v1",
+          curve_family: "quick_in_hold_soft_out",
+          entry: "quick",
+          hold: "steady",
+          exit: "soft",
+          emphasis: "early",
+          energy: "teasing",
+        },
+      },
+      expected: "lively_chat",
+    },
+    { intent: { intent_tags: ["解释", "认真"] }, expected: "calm_explain" },
+  ];
+
+  for (const [index, testCase] of cases.entries()) {
+    const result = compileMotionIntent(buildIntent({
+      mode: "idle",
+      axes: {},
+      duration_hint_ms: 2400,
+      ...testCase.intent,
+    }), {
+      model,
+      targetDurationMs: 2400,
+      speechActive: true,
+      samplingIdentity: { turnId: "turn-preset", messageId: `message-${index}` },
+      settings: { motionIntensityScale: 1, axisIntensityScale: {} },
+    });
+    assert.equal(result.ok, true);
+    const modulations = (result.plan?.parameters ?? [])
+      .map((parameter) => parameter.modulation)
+      .filter(Boolean);
+    assert.ok(modulations.length >= 2);
+    assert.equal(modulations.every((modulation) => modulation?.preset === testCase.expected), true);
+    const headDelay = Math.min(...(result.plan?.parameters ?? [])
+      .filter((parameter) => parameter.axis_id.startsWith("voice_following.head_"))
+      .map((parameter) => parameter.modulation?.delay_ms ?? 0));
+    const bodyDelays = (result.plan?.parameters ?? [])
+      .filter((parameter) => parameter.axis_id.startsWith("voice_following.body_"))
+      .map((parameter) => parameter.modulation?.delay_ms ?? 0);
+    if (bodyDelays.length > 0) {
+      assert.ok(bodyDelays.every((delay) => delay > headDelay));
+    }
+  }
+}
+
+function testSpeechGestureUsesAvailableChannelsForSparseModel(): void {
+  const profile = buildProfile();
+  const model = buildModelWithVoiceFollowingProfile(profile);
+  const headYaw = model.voice_following_profile?.channels.head_yaw;
+  assert.ok(headYaw);
+  model.voice_following_profile = {
+    ...model.voice_following_profile!,
+    channels: { head_yaw: headYaw },
+  };
+
+  const result = compileMotionIntent(buildIntent({
+    mode: "idle",
+    axes: {},
+    performance_curve_hint: {
+      schema_version: "ag99.performance_curve_hint.v1",
+      curve_family: "soft_breathe",
+      entry: "soft",
+      hold: "breathing",
+      exit: "soft",
+      emphasis: "none",
+      energy: "calm",
+    },
+  }), {
+    model,
+    targetDurationMs: 1800,
+    speechActive: true,
+    samplingIdentity,
+    settings: { motionIntensityScale: 1, axisIntensityScale: {} },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.plan?.parameters.map((parameter) => parameter.parameter_id), ["ParamAngleX"]);
+  assert.equal(result.plan?.parameters[0]?.modulation?.preset, "gentle_support");
+}
+
+function testSpeechGestureSkipsDelayedBodyChannelsForShortAudio(): void {
+  const profile = buildProfile();
+  const result = compileMotionIntent(buildIntent({
+    mode: "idle",
+    axes: {},
+  }), {
+    model: buildModelWithVoiceFollowingProfile(profile),
+    targetDurationMs: 320,
+    speechActive: true,
+    samplingIdentity,
+    settings: { motionIntensityScale: 1, axisIntensityScale: {} },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.plan?.timing.duration_ms, 320);
+  assert.equal(
+    result.plan?.parameters.some((parameter) => parameter.axis_id.startsWith("voice_following.body_")),
+    false,
+  );
+  for (const parameter of result.plan?.parameters ?? []) {
+    const modulation = parameter.modulation;
+    assert.ok(modulation);
+    const last = modulation?.points.at(-1);
+    assert.ok(last);
+    assert.ok((last?.at_ms ?? 0) + (last?.transition_ms ?? 0) + (modulation?.delay_ms ?? 0) <= 320);
+  }
 }
 
 function testPerformanceCurveHintAdjustsExpressiveTiming(): void {
@@ -2211,6 +2434,7 @@ function testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight(): void {
   const profile = buildProfile();
   const result = compileMotionIntent(buildIntent({
     mode: "idle",
+    intent_tags: ["explain"],
     axes: {},
   }), {
     model: buildModelWithVoiceFollowingProfile(profile),
@@ -2223,12 +2447,13 @@ function testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight(): void {
   });
 
   assert.equal(result.ok, true);
-  const bodyRoll = result.plan?.parameters.find((item) => item.parameter_id === "ParamBodyAngleZ");
-  assert.ok(bodyRoll);
-  assert.equal(bodyRoll?.target_value, 0);
-  assert.equal(bodyRoll?.weight, 0.45);
-  assert.equal(bodyRoll?.modulation?.amplitude, 1.2 * 0.45);
-  assert.equal(bodyRoll?.modulation?.direction, -1);
+  const bodyYaw = result.plan?.parameters.find((item) => item.parameter_id === "ParamBodyAngleX");
+  assert.ok(bodyYaw);
+  assert.equal(bodyYaw?.target_value, 0);
+  assert.equal(bodyYaw?.weight, 0.35);
+  assert.equal(bodyYaw?.modulation?.amplitude, 0.9 * 0.35);
+  assert.equal(bodyYaw?.modulation?.direction, 1);
+  assert.equal(bodyYaw?.modulation?.delay_ms, 220);
   const headPitch = result.plan?.parameters.find((item) => item.parameter_id === "ParamAngleY");
   assert.ok(headPitch);
   assert.equal(headPitch?.target_value, 0);
@@ -2239,6 +2464,7 @@ function testSpeechPoseVoiceFollowingTargetDoesNotDoubleApplyWeight(): void {
 function testSpeechPoseComposesWithParameterAlreadyControlledBySemanticAxis(): void {
   const profile = buildProfile();
   const result = compileMotionIntent(buildIntent({
+    intent_tags: ["explain"],
     axes: {
       head_yaw: 80,
     },
@@ -2372,9 +2598,9 @@ function testRegistryCoreStageOrder(): void {
     "axisResolver",
     "intensity",
     "derivedCandidates",
-    "semanticAxisRelationGraph",
     "modeResolver",
     "timing",
+    "semanticAxisRelationGraph",
     "planBuilder",
     "resourcePolicy",
   ];
@@ -2382,14 +2608,14 @@ function testRegistryCoreStageOrder(): void {
   const actualOrder = coreStages.map((r) => r.id);
   assert.deepEqual(actualOrder, expectedOrder);
   assert.equal(extensionStages[0].id, "speechPose");
-  assert.equal(extensionStages[0].order, 45);
+  assert.equal(extensionStages[0].order, 47);
   assert.ok(
     registrations.find((r) => r.id === "derivedCandidates")!.order
       < extensionStages[0].order,
   );
   assert.ok(
-    extensionStages[0].order
-      < registrations.find((r) => r.id === "modeResolver")!.order,
+    registrations.find((r) => r.id === "timing")!.order
+      < extensionStages[0].order,
   );
 
   for (let i = 1; i < coreStages.length; i++) {
@@ -2448,6 +2674,18 @@ function testPlanRetimingScalesSequenceKeyframesInsideModelEngine(): void {
         { at_ms: 500, transition_ms: 200, target_value: 10 },
         { at_ms: 1000, transition_ms: 0, target_value: 0 },
       ],
+      modulation: {
+        kind: "speech_gesture_track",
+        preset: "calm_explain",
+        amplitude: 1,
+        direction: 1,
+        delay_ms: 100,
+        points: [
+          { at_ms: 0, transition_ms: 0, value: 0 },
+          { at_ms: 400, transition_ms: 100, value: 0.5 },
+          { at_ms: 800, transition_ms: 100, value: 0 },
+        ],
+      },
       dynamics: {
         max_velocity: 60,
         max_acceleration: 240,
@@ -2469,6 +2707,18 @@ function testPlanRetimingScalesSequenceKeyframesInsideModelEngine(): void {
     ],
   );
   assert.equal(plan.timing.duration_ms, 1000);
+  assert.equal(retimed.parameters[0].modulation?.delay_ms, 100);
+  assert.deepEqual(
+    retimed.parameters[0].modulation?.points.map(({ at_ms, transition_ms }) => ({
+      at_ms,
+      transition_ms,
+    })),
+    [
+      { at_ms: 0, transition_ms: 0 },
+      { at_ms: 844, transition_ms: 211 },
+      { at_ms: 1689, transition_ms: 211 },
+    ],
+  );
 }
 
 function testRelationGraphLimitsOppositeHeadBodyMotion(): void {
@@ -2632,6 +2882,10 @@ function run(): void {
   testPerformanceCurveHintAdjustsExpressiveTiming();
   testPerformanceCurveHintAdjustsSpeechIdleTiming();
   testSpeechPoseUsesVoiceFollowingProfileBeforeDerivedAxes();
+  testSpeechGestureTracksAreDeterministicAndTimelineBounded();
+  testSpeechGesturePresetSelectionUsesSemanticHints();
+  testSpeechGestureUsesAvailableChannelsForSparseModel();
+  testSpeechGestureSkipsDelayedBodyChannelsForShortAudio();
   testSpeechOnlyPayloadUsesSelectedModelProfile();
   testSpeechOnlyPayloadRequiresVoiceFollowingProfile();
   testSpeechOnlyPlaybackUsesTimelineDuration();

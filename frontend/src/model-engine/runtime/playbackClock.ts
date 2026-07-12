@@ -151,6 +151,13 @@ export function retimeSemanticParameterPlan(
         at_ms: Math.min(durationMs, Math.round(keyframe.at_ms * scale)),
         transition_ms: Math.round(keyframe.transition_ms * scale),
       })),
+      modulation: parameter.modulation
+        ? retimeSpeechGestureTrack(
+          parameter.modulation,
+          sourceDurationMs,
+          durationMs,
+        )
+        : undefined,
     })),
   };
   const parsed = parseSemanticParameterPlan(retimed);
@@ -158,4 +165,25 @@ export function retimeSemanticParameterPlan(
     throw new Error(`Retimed motion plan is invalid: ${parsed.reason}`);
   }
   return parsed.value;
+}
+
+function retimeSpeechGestureTrack(
+  modulation: NonNullable<SemanticParameterPlan["parameters"][number]["modulation"]>,
+  sourceDurationMs: number,
+  targetDurationMs: number,
+): NonNullable<SemanticParameterPlan["parameters"][number]["modulation"]> {
+  const sourceActiveDurationMs = sourceDurationMs - modulation.delay_ms;
+  const targetActiveDurationMs = targetDurationMs - modulation.delay_ms;
+  if (sourceActiveDurationMs <= 0 || targetActiveDurationMs <= 0) {
+    throw new Error("Speech gesture delay must be shorter than the motion duration.");
+  }
+  const activeScale = targetActiveDurationMs / sourceActiveDurationMs;
+  return {
+    ...modulation,
+    points: modulation.points.map((point) => ({
+      ...point,
+      at_ms: Math.round(point.at_ms * activeScale),
+      transition_ms: Math.round(point.transition_ms * activeScale),
+    })),
+  };
 }

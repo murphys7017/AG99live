@@ -35,10 +35,10 @@ export function createDefaultCompileStageRegistrations(): ModelEngineCompileStag
     { id: "axisResolver", stage: axisResolverStage, order: 20, kind: "core", enabled: always },
     { id: "intensity", stage: intensityStage, order: 30, kind: "core", enabled: always },
     { id: "derivedCandidates", stage: couplingStage, order: 40, kind: "core", enabled: always },
-    { id: "speechPose", stage: speechPoseStage, order: 45, kind: "extension", enabled: always },
+    { id: "modeResolver", stage: modeResolverStage, order: 45, kind: "core", enabled: always },
+    { id: "timing", stage: timingStage, order: 46, kind: "core", enabled: always },
+    { id: "speechPose", stage: speechPoseStage, order: 47, kind: "extension", enabled: always },
     { id: "semanticAxisRelationGraph", stage: semanticAxisRelationGraphStage, order: 50, kind: "core", enabled: always },
-    { id: "modeResolver", stage: modeResolverStage, order: 60, kind: "core", enabled: always },
-    { id: "timing", stage: timingStage, order: 70, kind: "core", enabled: always },
     { id: "planBuilder", stage: planBuilderStage, order: 80, kind: "core", enabled: always },
     { id: "resourcePolicy", stage: resourcePolicyStage, order: 90, kind: "core", enabled: always },
   ];
