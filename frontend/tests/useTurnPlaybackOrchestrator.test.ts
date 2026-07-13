@@ -399,6 +399,56 @@ async function testAudioCaptionOnlySegmentDoesNotReleaseVisibleText(): Promise<v
   h.stop();
 }
 
+async function testVisibleTextArrivingAfterAudioCaptionIsReleasedOnce(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.setActiveSession("turn-late-visible-text");
+  h.sessionStore.markTurnStarted("turn-late-visible-text");
+
+  h.sessionStore.markAudioReceived(
+    "turn-late-visible-text",
+    "http://localhost/late-visible-text.wav",
+    "msg-late-visible-text",
+    "subtitle only",
+  );
+  h.sessionStore.markTextDelivered(
+    "turn-late-visible-text",
+    "msg-late-visible-text",
+  );
+  h.sessionStore.markMotionReceived(
+    "turn-late-visible-text",
+    motionPayload,
+    "msg-late-visible-text",
+  );
+
+  await h.flush();
+  await h.flush();
+
+  assert.deepEqual(h.released, [
+    "audio:msg-late-visible-text:turn-late-visible-text",
+  ]);
+  assert.deepEqual(h.motionSinkStarts, [
+    "motion:msg-late-visible-text:turn-late-visible-text",
+  ]);
+
+  h.sessionStore.markTextReceived(
+    "turn-late-visible-text",
+    "visible reply",
+    "msg-late-visible-text",
+  );
+
+  await h.flush();
+  await h.flush();
+
+  assert.deepEqual(h.released, [
+    "audio:msg-late-visible-text:turn-late-visible-text",
+    "text:msg-late-visible-text:turn-late-visible-text",
+  ]);
+  assert.deepEqual(h.motionSinkStarts, [
+    "motion:msg-late-visible-text:turn-late-visible-text",
+  ]);
+  h.stop();
+}
+
 async function testMotionReleaseReceivesMatchingAudioTimeline(): Promise<void> {
   const h = createHarness({
     audioTimelineAfterRelease: matchingTimelineSnapshot,
@@ -1318,6 +1368,7 @@ async function run(): Promise<void> {
   await testSegmentsReleaseSequentiallyWithinTurn();
   await testTextAndMotionReleaseWhenAudioIsAbsent();
   await testAudioCaptionOnlySegmentDoesNotReleaseVisibleText();
+  await testVisibleTextArrivingAfterAudioCaptionIsReleasedOnce();
   await testMotionReleaseReceivesMatchingAudioTimeline();
   await testMotionReleaseRejectsMismatchedAudioTimeline();
   await testRejectedMotionReleaseMarksSegmentFailed();

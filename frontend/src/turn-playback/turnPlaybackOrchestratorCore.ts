@@ -243,10 +243,11 @@ export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
       if (group.audioFailed) {
         return;
       }
-      if (group.motionReady || group.audioReady) {
+      const lateTextReady = group.textReady && !group.textReleased;
+      if (lateTextReady || group.motionReady || group.audioReady) {
         releaseSegmentJob(group, {
           reason: `late_release_after_${reason}`,
-          releaseText: false,
+          releaseText: lateTextReady,
           releaseAudio: group.audioReady,
           releaseMotion: group.motionReady && group.motionPayload !== null,
         });
@@ -317,7 +318,7 @@ export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
     ) => {
       const group = getOrCreateGroup(messageId, turnId);
       group.textReady = true;
-      group.textReleased = group.textReleased || alreadyReleased;
+      group.textReleased = alreadyReleased;
       evaluateGroup(group, "text_ready");
     },
     markAudioReady: (

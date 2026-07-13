@@ -1,15 +1,17 @@
 task:
   class: bugfix
   risk: high
-  phase: immediate_motion_and_speech_only_timeline_repair
+  phase: logical_reply_late_text_release_repair
   status: complete
-  scope: Schedule valid immediate Persona Effects before asynchronous route persistence and register speech-only motion in the owning audio timeline
+  scope: Preserve audio-owned motion timing and release visible text that arrives after the same logical segment's audio caption
 context:
   confidence: high
   assumptions:
     - AstrBot physical Record and Plain parts sharing turn plus message_kind are one logical assistant segment; AG99 normalizes their numbered visible_message_id suffix before text/audio/motion/curve aggregation.
     - Immediate Persona Effect scheduling is phase-owned because AstrBot parallel fast response emits before route persistence; final scheduling may still use the persisted route decision.
     - Speech-only motion must upgrade the current audio segment with a required motion sink before ModelEngine starts its plan.
+    - A synthetic clock may start pending motion only when the segment is explicitly motion-only; an audio-owned segment remains pending until its real audio clock is playing or paused.
+    - Record.caption may mark a textless audio segment delivered so audio can start, but a later visible output.text for the same logical segment must reset and then release text without replaying audio or motion.
     - Performance curve generation is at-most-once per logical turn_id plus message_id and is not retried by a later physical output part.
     - Performance curve at-most-once keys and retained work are cleared when control.synth_finished successfully closes the owning turn output queue.
     - Live2D lip-sync analyser callbacks invoke adapter methods with their instance binding preserved; frame write exceptions stop sampling and emit lip_sync_parameter_write_failed.
@@ -235,6 +237,17 @@ architecture:
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
 verification:
   checks_run:
+    - Motion Lab SQLite incident inspection: turn bb72564dff244ab0b873ce82632e7dab emitted Record audio/motion before Plain visible text for one normalized immediate_reply segment, leaving the released core group with newly undelivered text.
+    - npm run test:turn-orchestrator (passed with late visible text after audio-caption release coverage)
+    - npm run test:orchestration, npm run test:adapter-connection, npm run test:motion-runtime-scheduler, and npm run typecheck (passed)
+    - npm test (complete frontend suite passed after late visible-text release repair)
+    - npm run build (Electron main, preload, and renderer production build passed after final repair)
+    - git diff --check (passed)
+    - Motion Lab SQLite incident inspection: turn d601b724f05f42f58b1f47aa9693e401 sent and compiled valid v4 motion, but started it as motion_only_timeline_ready before the audio clock because scheduler discarded timelineMode.
+    - npm run test:motion-runtime-scheduler (passed with audio-owned synthetic-wait and explicit motion-only synthetic-start coverage)
+    - npm test (complete frontend suite passed after timeline-mode ownership repair)
+    - npm run build (Electron main, preload, and renderer production build passed)
+    - git diff --check (passed)
     - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (288 passed after immediate Persona Effect scheduling repair)
     - npm test (complete frontend suite passed after speech-only motion sink ownership repair)
     - npm run typecheck (renderer and node typechecks passed)
