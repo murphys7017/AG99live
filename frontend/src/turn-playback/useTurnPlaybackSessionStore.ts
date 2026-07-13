@@ -252,7 +252,9 @@ export function useTurnPlaybackSessionStore() {
     segment.text.receivedAtMs = performance.now();
     segment.text.released = false;
     segment.text.delivered = false;
-    segment.audio.expected = Boolean(audioExpected);
+    // Once audio is expected or received, a later text-only physical part must
+    // not erase that established fact for the same logical segment.
+    segment.audio.expected = segment.audio.expected || Boolean(audioExpected);
     if (!session.backend.turnStarted) {
       session.backend.turnStarted = true;
     }

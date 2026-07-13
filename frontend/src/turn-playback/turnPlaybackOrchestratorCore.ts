@@ -240,16 +240,17 @@ export function createTurnPlaybackOrchestratorCore<TMotionPayload = unknown>(
     reason: string,
   ): void {
     if (group.released) {
-      if (group.audioFailed) {
-        return;
-      }
       const lateTextReady = group.textReady && !group.textReleased;
-      if (lateTextReady || group.motionReady || group.audioReady) {
+      const lateAudioReady = !group.audioFailed && group.audioReady;
+      const lateMotionReady = !group.audioFailed
+        && group.motionReady
+        && group.motionPayload !== null;
+      if (lateTextReady || lateMotionReady || lateAudioReady) {
         releaseSegmentJob(group, {
           reason: `late_release_after_${reason}`,
           releaseText: lateTextReady,
-          releaseAudio: group.audioReady,
-          releaseMotion: group.motionReady && group.motionPayload !== null,
+          releaseAudio: lateAudioReady,
+          releaseMotion: lateMotionReady,
         });
       }
       return;

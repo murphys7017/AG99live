@@ -150,6 +150,22 @@ function testLateMotionAfterReleaseIsForwarded(): void {
   ]);
 }
 
+function testLateTextAfterAudioFailureIsStillReleased(): void {
+  const harness = createHarness();
+
+  harness.core.markTextReady("msg-1", "turn-1", true);
+  harness.core.markAudioReady("msg-1", "turn-1");
+  harness.core.markMotionReady("msg-1", "turn-1", "motion-1", 900);
+  harness.core.markAudioFailed("msg-1", "turn-1", "audio_playback_failed");
+  harness.core.markTextReady("msg-1", "turn-1", false);
+
+  assert.deepEqual(harness.events, [
+    "audio:msg-1:turn-1",
+    "motion:motion-1:msg-1:turn-1",
+    "text:msg-1:turn-1",
+  ]);
+}
+
 function testAudioReleaseFailureKeepsGroupRetryable(): void {
   let nowMs = 0;
   const events: string[] = [];
@@ -286,6 +302,7 @@ function run(): void {
   testAudioWaitsForLateMotionWithinWindow();
   testAudioMotionWaitTimeoutReleasesTextAndAudio();
   testLateMotionAfterReleaseIsForwarded();
+  testLateTextAfterAudioFailureIsStillReleased();
   testAudioReleaseFailureKeepsGroupRetryable();
   testTextOnlyReleasesAfterShortWait();
   testLateAudioAfterTextReleaseDoesNotReleaseTextAgain();

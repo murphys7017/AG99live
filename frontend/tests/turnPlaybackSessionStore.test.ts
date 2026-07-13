@@ -359,6 +359,18 @@ function testDifferentAudioUrlDoesNotResetCompletedSegment(): void {
   assert.equal(segment?.audio.started, true);
 }
 
+function testLateTextCannotClearEstablishedAudioExpectation(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.setActiveSession("turn-1");
+  store.markTextReceived("turn-1", "First", "msg-1", "replace", true);
+  store.markTextReceived("turn-1", "Visible reply", "msg-1", "replace", false);
+
+  assert.equal(
+    store.getSession("turn-1")?.segments.get("msg-1")?.audio.expected,
+    true,
+  );
+}
+
 function testDuplicateMotionReceiveDoesNotResetReleasedSegment(): void {
   const store = useTurnPlaybackSessionStore();
   store.setActiveSession("turn-1");
@@ -394,6 +406,7 @@ function run(): void {
   testAudioTerminalHandlesAllStates();
   testDuplicateAudioReceiveDoesNotResetCompletedSegment();
   testDifferentAudioUrlDoesNotResetCompletedSegment();
+  testLateTextCannotClearEstablishedAudioExpectation();
   testDuplicateMotionReceiveDoesNotResetReleasedSegment();
   console.log("turnPlaybackSessionStore tests passed");
 }
