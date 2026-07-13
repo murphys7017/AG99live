@@ -1,28 +1,22 @@
 flowchart LR
-    A[前端 input.text] --> B[TurnCoordinator]
-    B --> C[AstrBot 主回复 + middleware 动作结果]
-    C --> D[output.text]
-    C --> E[engine.motion_intent]
-    C --> F[output.audio]
-    C --> G[可选 performance_curve_hint]
+    classDef a fill:#e8f1f2,stroke:#2f5d62,color:#163438
+    classDef b fill:#fff3d6,stroke:#9a6b14,color:#513807
+    classDef c fill:#e8edf7,stroke:#3e5f93,color:#1d3154
+    classDef d fill:#f8e7df,stroke:#9b4d2d,color:#542717
+    classDef e fill:#e9f3df,stroke:#557a35,color:#2e431d
 
-    D --> H[SessionStore]
-    E --> H
-    F --> H
-    G --> H
-
-    H --> I[TurnPlaybackOrchestrator]
-    I --> J[文本释放]
-    I --> K[音频释放]
-    I --> L[动作释放]
-
-    L --> M[ModelEngine 编译 timing/parameter plan]
-    M --> N[Live2D 播放]
-    K --> O[Audio 播放]
-
-    B --> P[control.synth_finished]
-    N --> Q[前端本地 settled]
-    O --> Q
-    P --> Q
-    Q --> R[control.playback_finished]
-    R --> S[control.turn_finished]
+    A[用户输入]:::b --> B[AstrBot Persona Runtime]:::a
+    B --> C[spoken_reply + ag99live.motion]:::a
+    C --> D[output.text / output.audio / motion_intent.v4]:::b
+    D --> E[SessionStore<br/>turn_id + message_id]:::c
+    E --> F[TurnPlaybackOrchestrator<br/>决定 release]:::c
+    F --> G[PlaybackTimelineRuntime<br/>统一生命周期与时钟]:::d
+    G --> H[HTMLAudioElement<br/>真实 audio clock]:::d
+    H --> I[90ms 后启动动作]:::d
+    I --> J[ModelEngine<br/>编译 parameter_plan.v2]:::e
+    J --> K[Live2D WebSDK<br/>逐帧写参]:::e
+    H --> L[Lip sync<br/>同一音频元素]:::e
+    K --> M[本地终态聚合]:::c
+    L --> M
+    H --> M
+    M --> N[playback_finished → turn_finished]:::b

@@ -1,74 +1,80 @@
 flowchart TD
-    A[前端用户发送 input.text] --> B[WebSocket 发到 AG99live adapter]
-    B --> C[TurnCoordinator.handle_msg]
-    C --> D[绑定或确认 turn_id]
-    D --> E[_commit_inbound_message 提交给 AstrBot]
+    classDef backend fill:#e8f1f2,stroke:#2f5d62,color:#163438
+    classDef protocol fill:#fff3d6,stroke:#9a6b14,color:#513807
+    classDef state fill:#e8edf7,stroke:#3e5f93,color:#1d3154
+    classDef timeline fill:#f8e7df,stroke:#9b4d2d,color:#542717
+    classDef engine fill:#e9f3df,stroke:#557a35,color:#2e431d
+    classDef terminal fill:#f3e6ec,stroke:#8b4865,color:#4b2637
+    classDef failure fill:#fde7e3,stroke:#b33a2b,color:#681d14
 
-    E --> F[AstrBot 主回复生成]
-    F --> G[interaction middleware 注入动作能力]
-    G --> H[主模型返回文本 + effect_calls/ag99live.motion]
+    subgraph B[后端生成与协议出站]
+        U[input.text / input.audio]:::protocol --> TC[TurnCoordinator<br/>确认 turn_id]:::backend
+        TC --> AR[AstrBot Persona Runtime<br/>构建系统 / capability / context Prompt]:::backend
+        AR --> LLM[主模型一次生成<br/>spoken_reply + effect_calls]:::backend
+        LLM --> RC[AG99 result contributor<br/>读取 view.effect_calls]:::backend
+        RC --> MI[校验并构建<br/>engine.motion_intent.v4]:::protocol
+        LLM --> TTS[AstrBot TTS<br/>生成 Record WAV]:::backend
+        LLM --> PT[Plain 可见文本链]:::backend
+        TTS --> CO[TurnCoordinator.emit_message_chain]:::backend
+        PT --> CO
+        MI --> CO
+        CO --> ID[归一化逻辑身份<br/>turn_id + message_id]:::protocol
+        ID --> OT[output.text<br/>仅可见正文]:::protocol
+        ID --> OM[engine.motion_intent<br/>或 performance_curve_hint]:::protocol
+        ID --> OA[output.audio<br/>audio_url + caption_text]:::protocol
+        CO --> PC[独立小模型异步选择<br/>performance curve]:::backend
+        PC -->|音频出站前完成| OM
+        PC -->|未完成| PS[记录 skipped<br/>不阻塞音频]:::terminal
+        CO --> SF[control.synth_finished]:::protocol
+    end
 
-    H --> I[TurnCoordinator.emit_message_chain 拆回复链]
-    I --> J[抽取 output.text]
-    I --> K[抽取 output.audio Record]
-    I --> L[抽取/归一化 engine.motion_intent.v4]
+    subgraph F[前端协议接收与事实聚合]
+        OT --> PARSE[Inbound strict parser]:::protocol
+        OM --> PARSE
+        OA --> PARSE
+        SF --> PARSE
+        PARSE --> SS[TurnPlaybackSessionStore<br/>segments turn_id + message_id]:::state
+        SS --> ORCH[TurnPlaybackOrchestrator<br/>只决定何时 release]:::state
+        ORCH -->|audio expected 且未到| WAIT3[最多等待 3000ms]:::state
+        WAIT3 -->|超时| AF[audio failed<br/>正文可释放 媒体终止]:::failure
+        ORCH -->|text + audio, motion 未到| WAIT820[等待动作 820ms]:::state
+        ORCH -->|纯文本候选| WAIT260[等待媒体 260ms]:::state
+        ORCH --> JOB[PlaybackTimelineSegmentJob<br/>text / audio / motion slots]:::timeline
+        AF --> JOB
+    end
 
-    J --> M[发 output.text]
-    L --> N[发 engine.motion_intent]
-    H --> O{启用 performance curve?}
-    O -->|是| P[异步请求 performance curve provider]
-    O -->|否| Q[跳过]
+    subgraph P[统一时间线执行]
+        JOB --> TEXT[Text sink<br/>显示可见正文]:::timeline
+        JOB --> AUDIO[Audio sink<br/>HTMLAudioElement]:::timeline
+        AUDIO --> LIP[Lip-sync sink<br/>同一 AudioElement + WebAudio RMS]:::timeline
+        AUDIO --> CLOCK[真实 audio clock<br/>currentTime / duration / rate]:::timeline
+        JOB --> MSINK[Motion sink<br/>登记为 required sink]:::timeline
+        CLOCK --> PLAYING[audio playing]:::timeline
+        PLAYING --> D90[AudioStartMotionBridge<br/>延迟 90ms]:::timeline
+        D90 --> MSINK
+    end
 
-    P --> R{音频出站前 ready?}
-    R -->|随 motion 一起 ready| S[附加到 motion intent]
-    R -->|稍晚 ready| T[发 engine.performance_curve_hint]
-    R -->|未 ready| U[记录 failed 并回退默认 timing]
+    subgraph M[动作编译与 Live2D 表现]
+        MSINK --> ME[ModelEngine]:::engine
+        ME --> VAL[协议 / profile / resource 校验]:::engine
+        VAL --> AXIS[九级 axis_levels 确定性采样<br/>强度 + 关系图 + 参数映射]:::engine
+        AXIS --> SPEECH[SpeechPoseStage<br/>非周期 speech_gesture_track]:::engine
+        SPEECH --> PLAN[engine.parameter_plan.v2]:::engine
+        PLAN --> SDK[Live2D WebSDK<br/>逐帧曲线 / dynamics / 写参]:::engine
+        LIP --> SDK
+        SDK --> MODEL[Live2D Model + Physics]:::engine
+    end
 
-    K --> V[缓存/准备 audio_url]
-    V --> W[发 output.audio]
-    M --> X[前端 adapterInboundRuntime 收消息]
-    N --> X
-    S --> X
-    T --> X
-    W --> X
+    subgraph C[终态与轮次收口]
+        TEXT --> SETTLE[SessionStore segment facts]:::terminal
+        AUDIO -->|completed / failed / interrupted| SETTLE
+        LIP -->|optional terminal| SETTLE
+        SDK -->|motion terminal| SETTLE
+        SF --> SETTLE
+        SETTLE -->|本地 settled 且 synth_finished| PF[control.playback_finished]:::protocol
+        PF --> BT[后端 finalize_turn]:::backend
+        BT --> TF[control.turn_finished]:::protocol
+        TF --> DONE[Session completed / failed]:::terminal
+    end
 
-    X --> Y[按 turn_id + message_id 写入 TurnPlaybackSessionStore]
-    Y --> Z[useTurnPlaybackOrchestrator 观察 active segment]
-
-    Z --> AA{文本/音频/动作是否齐备}
-    AA -->|齐备| AB[释放 text + motion + audio]
-    AA -->|音频先到 动作未到| AC[等待 820ms 再决定]
-    AA -->|只有文本| AD[等待 260ms 再决定]
-    AA -->|无音频确认| AE[按 text-only 或 text+motion 释放]
-
-    AB --> AF[releaseAssistantTextForPlayback]
-    AB --> AG[releaseAudioForPlayback]
-    AB --> AH[modelEngine.ingestNormalizedPayload]
-
-    AC --> AH
-    AD --> AF
-    AE --> AF
-    AE --> AH
-
-    AH --> AI[ModelEngine normalize + compile]
-    T --> AI
-    S --> AI
-    AI --> AJ[TimingStage 按 audio duration + performance_curve_hint 求 timing]
-    AJ --> AK[生成 engine.parameter_plan.v2]
-    AK --> AL[usePreviewMotionPlayer 驱动 Live2D 写参]
-
-    AG --> AM[浏览器 Audio 播放]
-    AM --> AN[lip sync / 播放终态更新]
-    AL --> AO[动作完成回调]
-
-    I --> AP[后端发 control.synth_finished]
-    AP --> AQ[前端标记后端输出队列关闭]
-
-    AQ --> AR[usePlaybackCompletionCoordinator 检查所有 segment 是否 settled]
-    AN --> AR
-    AO --> AR
-
-    AR -->|全部完成| AS[前端回发 control.playback_finished]
-    AS --> AT[后端 finalize_turn]
-    AT --> AU[后端发 control.turn_finished]
-    AU --> AV[前端 session 标记 completed 并清理]
+    MODEL -. 下一帧 .-> SDK

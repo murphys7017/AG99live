@@ -1,0 +1,65 @@
+sequenceDiagram
+    autonumber
+    actor User as 用户
+    participant UI as 前端输入
+    participant Adapter as AG99 Adapter
+    participant AstrBot as AstrBot Persona Runtime
+    participant LLM as 主模型
+    participant TTS as TTS
+    participant Store as SessionStore
+    participant Orch as Orchestrator
+    participant Timeline as PlaybackTimeline
+    participant Audio as HTMLAudioElement
+    participant Lip as Lip-sync
+    participant Engine as ModelEngine
+    participant SDK as Live2D WebSDK
+    participant Done as CompletionCoordinator
+
+    User->>UI: 输入消息
+    UI->>Adapter: input.text(turn_id)
+    Adapter->>AstrBot: 提交本轮消息并注入动作能力
+    AstrBot->>LLM: system + capability + context
+    LLM-->>AstrBot: spoken_reply + effect_calls[ag99live.motion]
+    AstrBot->>TTS: spoken_reply
+    par 动作结果
+        AstrBot->>Adapter: view.effect_calls
+        Adapter->>Adapter: 校验并生成 motion_intent.v4
+    and 语音合成
+        TTS-->>Adapter: Record(WAV, caption)
+    end
+
+    Adapter-->>Store: engine.motion_intent(turn_id, message_id)
+    Adapter-->>Store: output.audio(audio_url, caption_text)
+    Adapter-->>Store: output.text(visible text)
+    Adapter-->>Store: control.synth_finished
+    Note over Store: Record 与 Plain 可以物理分开发送<br/>但必须归并到同一逻辑 segment
+
+    Store->>Orch: text/audio/motion facts changed
+    Orch->>Timeline: startSegmentJob(text, audio, motion)
+    Timeline->>UI: release visible text
+    Timeline->>Audio: start(audio_url)
+    Audio->>Lip: attach same HTMLAudioElement
+    Timeline->>Timeline: register required motion sink
+    Audio-->>Timeline: loadedmetadata(duration)
+    Audio-->>Timeline: playing(real audio clock)
+    Timeline->>Lip: start RMS sampling
+    Timeline->>Timeline: wait 90ms
+    Timeline->>Engine: start motion with matching timeline snapshot
+    Engine->>Engine: validate → axis sample → relation graph → timing
+    Engine->>SDK: parameter_plan.v2 + runId
+
+    loop 每个动画帧
+        Audio-->>Lip: WebAudio RMS
+        Lip->>SDK: mouth value + speech energy
+        Timeline-->>SDK: audio currentTime
+        SDK->>SDK: gesture interpolation + dynamics + physics
+    end
+
+    Audio-->>Timeline: audio completed
+    Lip-->>Timeline: lip_sync completed/failed
+    SDK-->>Timeline: motion completed/failed
+    Timeline-->>Store: sink terminals
+    Store->>Done: locally settled + synth_finished
+    Done->>Adapter: control.playback_finished(success)
+    Adapter-->>Store: control.turn_finished
+    Store-->>UI: session completed
