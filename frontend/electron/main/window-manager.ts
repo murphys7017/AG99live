@@ -836,12 +836,14 @@ export class WindowManager {
 
     if (this.activeDragState?.targetWindow === overlayWindow) {
       this.activeDragState.lockedHeight = nextHeight;
+      this.invalidateTransparentWindowSurface(overlayWindow);
       return;
     }
 
     if (this.overlayFollowsPet) {
       this.positionOverlayWindow();
     }
+    this.invalidateTransparentWindowSurface(overlayWindow);
   }
 
   private translateOverlayWindow(deltaX: number, deltaY: number): void {
@@ -889,7 +891,18 @@ export class WindowManager {
       this.activeDragState.lockedHeight = expectedHeight;
     }
 
+    this.invalidateTransparentWindowSurface(targetWindow);
     return true;
+  }
+
+  private invalidateTransparentWindowSurface(targetWindow: BrowserWindow): void {
+    // Windows can retain transparent pixels after resizing a frameless surface.
+    setImmediate(() => {
+      if (targetWindow.isDestroyed() || targetWindow.webContents.isDestroyed()) {
+        return;
+      }
+      targetWindow.webContents.invalidate();
+    });
   }
 
   private flushDeferredTransparentWindowRecovery(): void {
