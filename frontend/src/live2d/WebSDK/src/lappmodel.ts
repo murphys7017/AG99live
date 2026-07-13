@@ -46,7 +46,9 @@ import { advanceParameterDynamics } from "./parameterdynamics";
 import { TextureInfo } from "./lapptexturemanager";
 import { CubismMoc } from "@framework/model/cubismmoc";
 import {
+  cancelLive2DModelLoad,
   getLive2DModelLoadState,
+  isLive2DModelLoadActive,
   markLive2DModelFailed,
   markLive2DModelReady,
 } from "./modelreadiness";
@@ -254,20 +256,61 @@ interface DirectParameterPlanState {
  */
 export class LAppModel extends CubismUserModel {
   private readonly _loadGeneration = getLive2DModelLoadState().generation;
+  private _released = false;
 
   private failModelLoad(reason: string, error?: unknown): void {
+    if (!this.isLoadActive()) {
+      return;
+    }
     const details = error instanceof Error ? error.message : String(error ?? "");
     const message = details ? `${reason}:${details}` : reason;
     CubismLogError(message);
     markLive2DModelFailed(this._loadGeneration, message);
   }
 
+  private isLoadActive(): boolean {
+    return !this._released && isLive2DModelLoadActive(this._loadGeneration);
+  }
+
+  private requireActiveLoad(): void {
+    if (!this.isLoadActive()) {
+      throw new Error("live2d_model_load_cancelled");
+    }
+  }
+
   private async fetchRequiredArrayBuffer(path: string): Promise<ArrayBuffer> {
+    this.requireActiveLoad();
     const response = await fetch(path);
     if (!response.ok) {
       throw new Error(`http_${response.status}:${path}`);
     }
-    return response.arrayBuffer();
+    const arrayBuffer = await response.arrayBuffer();
+    this.requireActiveLoad();
+    return arrayBuffer;
+  }
+
+  private async fetchRuntimeArrayBuffer(path: string): Promise<ArrayBuffer> {
+    if (this._released) {
+      throw new Error("live2d_model_released");
+    }
+    const response = await fetch(path);
+    if (!response.ok) {
+      throw new Error(`http_${response.status}:${path}`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    if (this._released) {
+      throw new Error("live2d_model_released");
+    }
+    return arrayBuffer;
+  }
+
+  public override release(): void {
+    if (this._released) {
+      return;
+    }
+    this._released = true;
+    cancelLive2DModelLoad(this._loadGeneration, "live2d_model_load_released");
+    super.release();
   }
 
   /**
@@ -278,13 +321,7 @@ export class LAppModel extends CubismUserModel {
   public loadAssets(dir: string, fileName: string): void {
     this._modelHomeDir = dir;
 
-    fetch(`${this._modelHomeDir}${fileName}`)
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`http_${response.status}`);
-        }
-        return response.arrayBuffer();
-      })
+    this.fetchRequiredArrayBuffer(`${this._modelHomeDir}${fileName}`)
       .then((arrayBuffer) => {
         const setting: ICubismModelSetting = new CubismModelSettingJson(
           arrayBuffer,
@@ -639,6 +676,9 @@ export class LAppModel extends CubismUserModel {
 
         // ロード完了時に呼び出すコールバック関数
         const onLoad = (textureInfo: TextureInfo): void => {
+          if (!this.isLoadActive()) {
+            return;
+          }
           this.getRenderer().bindTexture(modelTextureNumber, textureInfo.id);
 
           this._textureCount++;
@@ -827,6 +867,10 @@ export class LAppModel extends CubismUserModel {
     onFinishedMotionHandler?: FinishedMotionCallback
   ): CubismMotionQueueEntryHandle {
     this._motionStartError = "";
+    if (this._released || !this._motionManager) {
+      this._motionStartError = "motion_model_released";
+      return InvalidMotionQueueEntryHandleValue;
+    }
 
     // Add a log specifically when trying to start a tap motion (which uses priority 3)
     if (priority === 3 && LAppDefine.DebugLogEnable) {
@@ -850,6 +894,9 @@ export class LAppModel extends CubismUserModel {
     let motion: CubismMotion = this._motions.getValue(name) as CubismMotion;
     let autoDelete = false;
     const finishAsyncMotionWithoutStart = (reason: string): void => {
+      if (this._released || !this._motionManager) {
+        return;
+      }
       this._motionStartError = reason;
       if (this._motionManager.getReservePriority() === priority) {
         this._motionManager.setReservePriority(0);
@@ -861,20 +908,9 @@ export class LAppModel extends CubismUserModel {
       if (LAppDefine.DebugLogEnable) {
         console.log(`[APP] startMotion: Motion '${name}' not found in cache, fetching: ${motionFileName}`);
       }
-      fetch(`${this._modelHomeDir}${motionFileName}`)
-        .then((response) => {
-          if (response.ok) {
-            return response.arrayBuffer();
-          } else if (response.status >= 400) {
-            CubismLogError(
-              `Failed to load file ${this._modelHomeDir}${motionFileName}`
-            );
-            return new ArrayBuffer(0);
-          }
-        })
+      this.fetchRuntimeArrayBuffer(`${this._modelHomeDir}${motionFileName}`)
         .then((arrayBuffer) => {
-          if (!(arrayBuffer instanceof ArrayBuffer)) {
-            finishAsyncMotionWithoutStart("motion_fetch_no_data");
+          if (this._released || !this._motionManager) {
             return;
           }
           motion = this.loadMotion(
@@ -924,6 +960,9 @@ export class LAppModel extends CubismUserModel {
           }
         })
         .catch((error) => {
+          if (this._released) {
+            return;
+          }
           if (LAppDefine.DebugLogEnable) {
             console.error(`[APP] startMotion: Failed to fetch motion '${name}'`, error);
           }
@@ -1145,14 +1184,7 @@ export class LAppModel extends CubismUserModel {
         );
       }
 
-      fetch(`${this._modelHomeDir}${motionFileName}`)
-        .then((response) => {
-          if (response.ok) {
-            return response.arrayBuffer();
-          }
-
-          throw new Error(`Failed to load file ${this._modelHomeDir}${motionFileName}`);
-        })
+      this.fetchRequiredArrayBuffer(`${this._modelHomeDir}${motionFileName}`)
         .then((arrayBuffer) => {
           const tmpMotion: CubismMotion = this.loadMotion(
             arrayBuffer,

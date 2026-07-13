@@ -1,12 +1,15 @@
 task:
   class: bugfix
   risk: high
-  phase: logical_reply_late_text_release_repair
+  phase: live2d_load_generation_and_playback_fact_repair
   status: complete
-  scope: Preserve audio-owned motion timing and release visible text that arrives after the same logical segment's audio caption
+  scope: Cancel stale Live2D model loads and preserve late text plus monotonic audio expectations across logical reply parts
 context:
   confidence: high
   assumptions:
+    - Live2D model replacement cancels the previous load generation before Cubism teardown; every asynchronous model, texture, and uncached-motion callback must reject stale or released instance ownership before touching SDK managers.
+    - Audio failure prevents late audio or motion release but does not prevent visible text for the same logical segment from being released.
+    - Audio expectation is a monotonic segment fact once declared or established by an audio payload; later physical text parts cannot clear it.
     - AstrBot physical Record and Plain parts sharing turn plus message_kind are one logical assistant segment; AG99 normalizes their numbered visible_message_id suffix before text/audio/motion/curve aggregation.
     - Immediate Persona Effect scheduling is phase-owned because AstrBot parallel fast response emits before route persistence; final scheduling may still use the persisted route decision.
     - Speech-only motion must upgrade the current audio segment with a required motion sink before ModelEngine starts its plan.
@@ -393,6 +396,13 @@ verification:
     - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter
     - frontend TypeScript dependency scan: 138 files, 0 cycles
     - git diff --check
+    - npm test (complete frontend suite passed after playback fact fixes; final Live2D runtime cancellation adjustment was subsequently covered by typecheck and production build)
+    - npm run test:orchestration (passed with late-text-after-audio-failure regression)
+    - npm run test:session (passed with monotonic audio expectation regression)
+    - npm run test:model-readiness (passed with cancelled and replaced generation regressions)
+    - npm run typecheck (renderer and node passed after final Live2D runtime cancellation adjustment)
+    - npm run build (Electron production build passed after final review)
+    - git diff --check (passed after final review)
   checks_failed: []
   validation_gap: Live Electron playback is still needed to observe audio-aligned direct-plan retiming and extension-stage behavior against a real Live2D model; existing socket/provider validation gaps remain unchanged.
 runtime:

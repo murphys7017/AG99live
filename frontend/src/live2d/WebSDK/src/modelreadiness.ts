@@ -25,6 +25,32 @@ export function beginLive2DModelLoad(): number {
   return generation;
 }
 
+export function cancelLive2DModelLoad(
+  generation: number,
+  reason = "live2d_model_load_cancelled",
+): boolean {
+  if (generation !== state.generation || state.status !== "loading") {
+    return false;
+  }
+  const message = reason.trim() || "live2d_model_load_cancelled";
+  rejectCurrent?.(new Error(message));
+  state = { generation, status: "idle", error: "" };
+  resolveCurrent = null;
+  rejectCurrent = null;
+  currentPromise = null;
+  return true;
+}
+
+export function cancelCurrentLive2DModelLoad(
+  reason = "live2d_model_load_cancelled",
+): boolean {
+  return cancelLive2DModelLoad(state.generation, reason);
+}
+
+export function isLive2DModelLoadActive(generation: number): boolean {
+  return generation === state.generation && state.status === "loading";
+}
+
 export function markLive2DModelReady(generation: number): void {
   if (generation !== state.generation || state.status !== "loading") {
     return;

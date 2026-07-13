@@ -14,6 +14,7 @@ import { LAppGlManager } from "./lappglmanager";
 import { LAppLive2DManager } from "./lapplive2dmanager";
 import {
   beginLive2DModelLoad,
+  cancelCurrentLive2DModelLoad,
   markLive2DModelFailed,
   waitForLive2DModelLoad,
 } from "./modelreadiness";
@@ -116,11 +117,21 @@ export function initializeLive2D(): Promise<void> {
 
 async function initializeLive2DOnce(): Promise<void> {
   isInitializingLive2D = true;
-  const loadGeneration = beginLive2DModelLoad();
 
   const finishInitialize = () => {
     isInitializingLive2D = false;
   };
+
+  cancelCurrentLive2DModelLoad("live2d_model_load_replaced");
+
+  // Release the previous Cubism instance before assigning the next load
+  // generation, so stale model teardown cannot cancel the new generation.
+  cleanupHitTestPointerHandlers();
+  LAppDelegate.releaseInstance();
+  LAppLive2DManager.releaseInstance();
+  LAppGlManager.releaseInstance();
+
+  const loadGeneration = beginLive2DModelLoad();
 
   console.log(
     "Initializing Live2D with resourcePath:",
@@ -135,13 +146,6 @@ async function initializeLive2DOnce(): Promise<void> {
     finishInitialize();
     throw new Error(reason);
   }
-
-  // Clean up any existing instances first.
-  // Repeated initialize without full delegate release can spawn multiple RAF loops.
-  cleanupHitTestPointerHandlers();
-  LAppDelegate.releaseInstance();
-  LAppLive2DManager.releaseInstance();
-  LAppGlManager.releaseInstance();
 
   if (
     !LAppGlManager.getInstance() ||
