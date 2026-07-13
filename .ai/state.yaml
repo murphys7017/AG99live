@@ -3,23 +3,26 @@ task:
   risk: high
   phase: atomic_output_segment_and_timeline_ownership
   status: complete
-  scope: Replace fragmented reply materials with one atomic output segment and remove late-patch playback state
+  scope: Harden atomic output segment closure, identity, failure semantics, and playback lifecycle invariants
 context:
   confidence: high
   assumptions:
-    - AstrBot physical Plain, Record, image, and motion objects are aggregated only inside the adapter; the frontend receives one output.segment.v1 per turn_id plus message_id.
+    - AstrBot physical Plain, Record, image, and motion objects are aggregated only inside the adapter; the frontend receives one output.segment.v2 per turn_id plus message_id.
+    - Standard AstrBot send() physical parts share the explicit standard_reply logical message ID; only complete_visible_turn() closes the output queue.
+    - Output queue close ownership is bound to the exact turn_id; zero-segment close and synth_finished send failure are hard errors, and closed state is committed only after send success.
+    - Performance curve execution has one source at motion.payload.performance_curve_hint; output.segment.v2 rejects the removed top-level performance_curve slot.
     - SessionStore commitOutputSegment is the only production segment creation boundary; protocol and motion validation complete before Store or release-queue mutation.
+    - SessionStore lifecycle mark methods require an existing committed turn_id plus message_id segment; they cannot create segments or reopen acknowledged material.
     - control.synth_finished asserts every segment is complete and never infers absent audio or motion from missing late patches.
     - Production frontend motion and performance-curve patches have been removed; independent engine messages remain only for manual preview.
+    - AstrBot interaction output may expose numbered visible_message_id values plus message_kind for one logical reply; adapter-side normalization is an external runtime bridge, not a frontend protocol compatibility route.
     - PlaybackTimelineRuntime receives immutable execution sinks at construction, and TurnPlaybackOrchestrator does not own fragment wait timers or mirrored readiness.
     - Live2D model replacement cancels the previous load generation before Cubism teardown; every asynchronous model, texture, and uncached-motion callback must reject stale or released instance ownership before touching SDK managers.
     - Audio failure prevents late audio or motion release but does not prevent visible text for the same logical segment from being released.
     - Audio expectation is a monotonic segment fact once declared or established by an audio payload; later physical text parts cannot clear it.
-    - AstrBot physical Record and Plain parts sharing turn plus message_kind are one logical assistant segment; AG99 normalizes their numbered visible_message_id suffix before text/audio/motion/curve aggregation.
     - Immediate Persona Effect scheduling is phase-owned because AstrBot parallel fast response emits before route persistence; final scheduling may still use the persisted route decision.
     - Speech-only motion must upgrade the current audio segment with a required motion sink before ModelEngine starts its plan.
     - A synthetic clock may start pending motion only when the segment is explicitly motion-only; an audio-owned segment remains pending until its real audio clock is playing or paused.
-    - Record.caption may mark a textless audio segment delivered so audio can start, but a later visible output.text for the same logical segment must reset and then release text without replaying audio or motion.
     - Performance curve generation is at-most-once per logical turn_id plus message_id and is not retried by a later physical output part.
     - Performance curve at-most-once keys and retained work are cleared when control.synth_finished successfully closes the owning turn output queue.
     - Live2D lip-sync analyser callbacks invoke adapter methods with their instance binding preserved; frame write exceptions stop sampling and emit lip_sync_parameter_write_failed.
@@ -232,7 +235,7 @@ architecture:
     - Audio playback stop now interrupts the explicit turnId + messageId playback segment; missing segment identity is surfaced as an error instead of stopping an arbitrary active timeline.
     - PlaybackTimelineEngine now owns sink start callbacks for audio/motion via startSink; remaining direct-sink migration should move prepare/terminal and SessionStore coordination out of migration-era segment-sink wiring.
     - Audio/lip_sync/motion timeline duration/started/terminal events no longer implicitly register or mutate a missing sink; missing segment timeline or sink wiring is diagnosed and the event is dropped.
-    - control.synth_finished marks existing output segments without motion payload as explicit motion.absent; motion and performance-curve patches after synth_finished are rejected.
+    - control.synth_finished validates that at least one complete atomic segment exists and never infers absent materials; late motion and performance-curve patches are rejected.
     - control.synth_finished missing-audio settlement now lives in inbound protocol queue-close handling; AdapterAudioRuntime no longer exposes a missing-audio settlement API or scans all sessions for this case.
     - Target direction: performance curve playback should first support a small preset library of per-frame curve shapes selected by hint, before considering real-time generated custom curves.
     - PlaybackTimeline core no longer imports ModelEngine motion types; pure motion context/sink contracts live in playback-timeline/motionTypes.ts, while the ModelEngine-specific motion sink and run tracker live in playback-integrations/modelEngineMotionSink.ts.
@@ -329,6 +332,15 @@ verification:
     - npm run build:web (production web build passed after final review)
     - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings after final review)
     - git diff --check (passed after final review)
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (283 passed after atomic lifecycle hardening)
+    - npm test (complete frontend suite passed after output.segment.v2 lifecycle hardening)
+    - npm run typecheck (renderer and node typechecks passed)
+    - npm run build:web (production web build passed)
+    - python -m compileall -q astrbot_plugin_ag99live_adapter (passed)
+    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings, 3 informational notices)
+    - Mermaid CLI 11.12.0 rendered the three updated playback flow diagrams to SVG and 2x PNG
+    - production residue scan found no output.segment.v1, top-level output.segment.performance_curve, obsolete curve parser/type, or old queue-close marker
+    - git diff --check (passed after output.segment.v2 final review)
     - npm test (complete frontend suite passed for atomic output.segment migration)
     - npm run typecheck (renderer and node typechecks passed for atomic segment contracts)
     - npm run build:web (production web build passed after flow documentation update)
@@ -417,6 +429,15 @@ verification:
     - npm run typecheck (renderer and node passed after final Live2D runtime cancellation adjustment)
     - npm run build (Electron production build passed after final review)
     - git diff --check (passed after final review)
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (283 passed after obsolete output lifecycle cleanup)
+    - npm test (complete frontend suite passed after atomic segment ownership cleanup)
+    - npm run typecheck (renderer and node typechecks passed)
+    - npm run build:web (production web build passed)
+    - npm run test:adapter-connection (passed after migrating and enabling four audio-interrupt regressions)
+    - python -m compileall -q astrbot_plugin_ag99live_adapter (passed)
+    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings, 3 informational notices)
+    - production and test residue scan found no fragmented output types, independent performance-curve envelope, implicit segment creation API, late-material reopening, or uncalled adapter tests
+    - git diff --check (passed after obsolete path and test cleanup)
   checks_failed: []
   validation_gap: A live Electron end-to-end conversation is still needed to verify output.segment delivery, real audio-clock release, lip sync, and motion start against an installed AstrBot instance and Live2D model.
 runtime:

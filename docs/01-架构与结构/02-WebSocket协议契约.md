@@ -106,14 +106,14 @@ control.turn_finished
 
 | 类型 | 载荷 | 需要 `message_id` |
 | --- | --- | --- |
-| `output.segment` | `output.segment.v1` 原子段，见下文 | 是 |
+| `output.segment` | `output.segment.v2` 原子段，见下文 | 是 |
 | `output.transcription` | `{ text: string }` | 否 |
 
-`output.segment.v1` 的结构：
+`output.segment.v2` 的结构：
 
 ```json
 {
-  "schema_version": "output.segment.v1",
+  "schema_version": "output.segment.v2",
   "text": { "state": "present", "content": "可见正文" },
   "audio": {
     "state": "present",
@@ -125,18 +125,24 @@ control.turn_finished
     "message_type": "engine.motion_intent",
     "mode": "expressive",
     "source": "persona_effect",
-    "payload": { "schema_version": "engine.motion_intent.v4" }
+    "payload": {
+      "schema_version": "engine.motion_intent.v4",
+      "performance_curve_hint": {}
+    }
   },
-  "performance_curve": { "state": "ready", "hint": {} },
   "images": [],
   "speaker_name": "Alice",
   "avatar": ""
 }
 ```
 
-`text`、`audio`、`motion` 都必须使用显式 tagged slot：`present | absent | failed`。`performance_curve` 使用 `ready | skipped | disabled`。不得省略 slot，也不得在段发送后用独立协议 patch 修改它。
+`text`、`audio`、`motion` 都必须使用显式 tagged slot：`present | absent | failed`，不得省略。表演曲线只有一个执行来源：`motion.payload.performance_curve_hint`；顶层 `performance_curve` 和段发送后的独立曲线 patch 都属于非法协议。
 
-AstrBot 内部 Plain、Record、图片与 motion client object 可以物理分离，但 Adapter 必须先按 `turn_id + message_id` 聚合，再发送一个 `output.segment`。`Record.text` 只写入 `audio.caption_text`，不生成第二份可见正文。
+`output.segment.v1` 不再兼容接收；前后端必须同时使用 v2，避免同一 schema 版本代表两种结构。
+
+AstrBot 内部 Plain、Record、图片与 motion client object 可以物理分离，但 Adapter 必须先按 `turn_id + message_id` 聚合，再发送一个 `output.segment`。标准 AstrBot `send()` 的多个物理分片共享 `standard_reply` 逻辑 ID，只有 `complete_visible_turn()` 可以关闭输出队列。`Record.text` 只写入 `audio.caption_text`，不生成第二份可见正文。
+
+`control.synth_finished` 只能在至少一个 `output.segment` 成功发送后发送；其 WebSocket 发送成功后，后端才能提交 `output_queue_closed`。零段收口或发送失败必须显式报错。
 
 `audio.url` 指向 Adapter HTTP 静态资源，常见路径为 `/cache/audio/*.wav`。前端可以按当前连接重写 host；如果 URL 无法 fetch，属于音频交付 / 静态资源服务问题，不等同于 TTS 生成失败。
 

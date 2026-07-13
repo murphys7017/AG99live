@@ -18,7 +18,7 @@ flowchart TD
         TTS --> BUF
         PT --> BUF
         BUF --> CHECK[冲突 / 多音频 / motion / curve 校验]:::backend
-        CHECK --> SEG[单个 output.segment.v1<br/>完整 tagged slots]:::protocol
+        CHECK --> SEG[单个 output.segment.v2<br/>完整 tagged slots]:::protocol
         SEG --> SF[随后 control.synth_finished]:::protocol
     end
 

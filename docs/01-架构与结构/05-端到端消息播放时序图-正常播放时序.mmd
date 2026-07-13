@@ -31,7 +31,7 @@ sequenceDiagram
         AstrBot-->>Buffer: Plain(visible text)
     end
     Buffer->>Buffer: 按 turn_id + message_id 合并并校验冲突
-    Buffer-->>Store: output.segment.v1(text/audio/motion/curve/images)
+    Buffer-->>Store: output.segment.v2(text/audio/motion/images)
     Note over Buffer,Store: 前端只接收一个完整逻辑段
     Adapter-->>Store: control.synth_finished
 

@@ -8,7 +8,7 @@ flowchart LR
     A[用户输入]:::b --> B[Persona Runtime<br/>spoken_reply + effect_calls]:::a
     B --> C[TTS WAV + Plain + motion]:::a
     C --> D[后端 PendingOutputSegment<br/>turn_id + message_id]:::b
-    D --> E[单个 output.segment.v1]:::b
+    D --> E[单个 output.segment.v2]:::b
     E --> F[严格预校验]:::c
     F --> G[SessionStore<br/>原子提交]:::c
     G --> H[Orchestrator<br/>单次 SegmentJob]:::c
