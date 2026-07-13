@@ -18,6 +18,7 @@ export interface PendingInboundMotionPayload {
   playbackTurnId: string | null;
   receivedAtMs: number;
   playbackClock: MotionPlaybackClockContext | null;
+  timelineMode: InboundPayloadContext["timelineMode"];
   audioWaitTimer: number;
 }
 
@@ -58,10 +59,11 @@ function matchesPlaybackTimeline(
 }
 
 function canStartFromPlaybackTimeline(
+  entry: PendingInboundMotionPayload,
   snapshot: MotionPlaybackClockContext,
 ): boolean {
   if (snapshot.source === "synthetic") {
-    return true;
+    return entry.timelineMode === "motion_only";
   }
   return (
     snapshot.source === "audio"
@@ -230,6 +232,7 @@ export function createMotionRuntimeScheduler(
       playbackTurnId: normalizedPlaybackTurnId,
       receivedAtMs: context.receivedAtMs,
       playbackClock: context.playbackClock ?? null,
+      timelineMode: context.timelineMode,
       audioWaitTimer: 0,
     };
 
@@ -289,7 +292,7 @@ export function createMotionRuntimeScheduler(
         );
         return false;
       }
-      if (canStartFromPlaybackTimeline(entry.playbackClock)) {
+      if (canStartFromPlaybackTimeline(entry, entry.playbackClock)) {
         return tryStartPendingPayload(
           entry.turnId,
           entry.messageId,
@@ -306,7 +309,13 @@ export function createMotionRuntimeScheduler(
   function handlePlaybackTimelineStarted(
     playbackClock: MotionPlaybackClockContext,
   ): boolean {
-    if (!canStartFromPlaybackTimeline(playbackClock)) {
+    const entry = pendingInboundMotionPayloads.get(
+      buildPendingMotionKey(playbackClock.turnId, playbackClock.messageId),
+    );
+    if (!entry) {
+      return false;
+    }
+    if (!canStartFromPlaybackTimeline(entry, playbackClock)) {
       if (isTimelineUnavailable(playbackClock)) {
         return failPendingPayloadForTimeline(
           playbackClock,

@@ -292,6 +292,64 @@ function testReadyTimelineReturnsSynchronousStartFailure(): void {
   assert.equal(failed[0].startReason, "playback_timeline_ready");
 }
 
+function testAudioTimelineWaitsForRealAudioClock(): void {
+  resetTimers();
+  const session = buildSession();
+  setAudioWaiting(session);
+  const { scheduler, started, failed } = createHarness(session);
+  const syntheticTimeline = buildTimelineSnapshot({
+    source: "synthetic",
+    phase: "playing",
+    startedAtMs: 1000,
+    currentTimeMs: 0,
+  });
+
+  const accepted = scheduler.queueInboundPayload(buildPayload(), {
+    messageId: "msg-1",
+    turnId: "turn-1",
+    playbackTurnId: "turn-1",
+    receivedAtMs: 900,
+    timelineMode: "audio",
+    playbackClock: syntheticTimeline,
+  });
+
+  assert.equal(accepted, true);
+  assert.equal(started.length, 0);
+  assert.equal(failed.length, 0);
+
+  const startedFromAudio = scheduler.handlePlaybackTimelineStarted(
+    buildTimelineSnapshot({ source: "audio", phase: "playing" }),
+  );
+  assert.equal(startedFromAudio, true);
+  assert.equal(started.length, 1);
+  assert.equal(started[0].startReason, "playback_timeline_started");
+  assert.equal(started[0].playbackClock?.source, "audio");
+}
+
+function testMotionOnlyTimelineCanStartFromSyntheticClock(): void {
+  resetTimers();
+  const { scheduler, started, failed } = createHarness(buildSession("completed"));
+
+  const accepted = scheduler.queueInboundPayload(buildPayload(), {
+    messageId: "msg-1",
+    turnId: "turn-1",
+    playbackTurnId: "turn-1",
+    receivedAtMs: 900,
+    timelineMode: "motion_only",
+    playbackClock: buildTimelineSnapshot({
+      source: "synthetic",
+      phase: "playing",
+      startedAtMs: 1000,
+      currentTimeMs: 0,
+    }),
+  });
+
+  assert.equal(accepted, true);
+  assert.equal(started.length, 1);
+  assert.equal(failed.length, 0);
+  assert.equal(started[0].startReason, "motion_only_timeline_ready");
+}
+
 function testSameMessageIdDifferentTurnsStartByCompositeIdentity(): void {
   resetTimers();
   const session = buildSession("completed");
@@ -605,6 +663,8 @@ function run(): void {
   testMissingTurnIdIsRejectedBeforeQueueing();
   testDuplicatePendingPayloadRejectsBothPayloads();
   testReadyTimelineReturnsSynchronousStartFailure();
+  testAudioTimelineWaitsForRealAudioClock();
+  testMotionOnlyTimelineCanStartFromSyntheticClock();
   testSameMessageIdDifferentTurnsStartByCompositeIdentity();
   testCompositeIdentityDoesNotCollideOnDelimiterText();
   testPlaybackTimelineRequiresMatchingTurnWhenMessageIdIsShared();
