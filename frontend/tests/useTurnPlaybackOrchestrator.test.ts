@@ -11,12 +11,63 @@ import type {
 } from "../src/model-engine/contracts.js";
 import type { MotionPlaybackClockContext } from "../src/model-engine/runtime/playbackClock.js";
 import { createModelEngineMotionTimelineSink } from "../src/playback-integrations/modelEngineMotionSink.js";
-import { createPlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
+import {
+  createPlaybackTimelineRuntime as createStrictPlaybackTimelineRuntime,
+} from "../src/playback-timeline/playbackTimelineRuntime.js";
 import type {
   PlaybackTimelineSegmentExecutionPorts,
 } from "../src/playback-timeline/segmentJob.js";
 import type { PlaybackTimelineSnapshot } from "../src/playback-timeline/contracts.js";
 import type { PerformanceCurveHint } from "../src/types/protocol.js";
+
+function createPlaybackTimelineRuntime(
+  deps: Omit<
+    Parameters<typeof createStrictPlaybackTimelineRuntime>[0],
+    "segmentExecution"
+  >,
+) {
+  let ports: PlaybackTimelineSegmentExecutionPorts = {
+    session: {
+      markTextReleased: () => {},
+      markAudioReleased: () => {},
+      markMotionReleased: () => {},
+      markMotionFailed: () => {},
+      markPhase: () => true,
+    },
+    textSink: { releaseAssistantTextForPlayback: () => true },
+    audioSink: { releaseAudioForPlayback: () => true },
+    motionSink: { start: () => true, interrupt: () => {} },
+  };
+  const runtime = createStrictPlaybackTimelineRuntime({
+    ...deps,
+    segmentExecution: {
+      session: {
+        markTextReleased: (...args) => ports.session.markTextReleased(...args),
+        markAudioReleased: (...args) => ports.session.markAudioReleased(...args),
+        markMotionReleased: (...args) => ports.session.markMotionReleased(...args),
+        markMotionFailed: (...args) => ports.session.markMotionFailed(...args),
+        markPhase: (...args) => ports.session.markPhase(...args),
+      },
+      textSink: {
+        releaseAssistantTextForPlayback: (...args) =>
+          ports.textSink.releaseAssistantTextForPlayback(...args),
+      },
+      audioSink: {
+        releaseAudioForPlayback: (...args) =>
+          ports.audioSink.releaseAudioForPlayback(...args),
+      },
+      motionSink: {
+        start: (...args) => ports.motionSink.start(...args),
+        interrupt: (...args) => ports.motionSink.interrupt(...args),
+      },
+    },
+  });
+  return Object.assign(runtime, {
+    configureSegmentExecution(next: PlaybackTimelineSegmentExecutionPorts) {
+      ports = next;
+    },
+  });
+}
 
 const motionPayload: NormalizedMotionPayload = {
   kind: "semantic_intent",
@@ -588,10 +639,19 @@ async function testPerformanceCurveHintIsMergedBeforeMotionRelease(): Promise<vo
   const h = createHarness();
   h.sessionStore.setActiveSession("turn-curve");
   h.sessionStore.markTurnStarted("turn-curve");
+  if (motionPayload.kind !== "semantic_intent") {
+    throw new Error("expected semantic_intent fixture");
+  }
+  const payloadWithCurve: NormalizedMotionPayload = {
+    kind: "semantic_intent",
+    intent: {
+      ...motionPayload.intent,
+      performance_curve_hint: curveHint,
+    },
+  };
 
   h.sessionStore.markTextReceived("turn-curve", "hello", "msg-curve");
-  h.sessionStore.markMotionReceived("turn-curve", motionPayload, "msg-curve");
-  h.sessionStore.markPerformanceCurveHintReceived("turn-curve", curveHint, "msg-curve");
+  h.sessionStore.markMotionReceived("turn-curve", payloadWithCurve, "msg-curve");
   h.sessionStore.markSynthFinished("turn-curve");
   h.sessionStore.markAudioTerminal(
     "turn-curve",
@@ -618,223 +678,7 @@ async function testPerformanceCurveHintIsMergedBeforeMotionRelease(): Promise<vo
   if (storedPayload?.kind !== "semantic_intent") {
     throw new Error("expected stored semantic_intent payload");
   }
-  assert.equal(storedPayload.intent.performance_curve_hint, undefined);
-  h.stop();
-}
-
-async function testLateAudioAfterTextReleaseOnlyReleasesAudio(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.setActiveSession("turn-late-audio");
-  h.sessionStore.markTurnStarted("turn-late-audio");
-
-  h.sessionStore.markTextReceived("turn-late-audio", "hello", "msg-late-audio");
-  h.sessionStore.markSynthFinished("turn-late-audio");
-  h.sessionStore.markAudioTerminal(
-    "turn-late-audio",
-    "absent",
-    "msg-late-audio",
-    "synth_finished_without_audio_playback",
-  );
-
-  await h.flush();
-  await h.flush();
-  assert.deepEqual(h.released, [
-    "text:msg-late-audio:turn-late-audio",
-  ]);
-
-  assert.equal(
-    h.sessionStore.markAudioReceived(
-      "turn-late-audio",
-      "http://localhost/late.wav",
-      "msg-late-audio",
-    ),
-    true,
-  );
-
-  await h.flush();
-  await h.flush();
-
-  assert.deepEqual(h.released, [
-    "text:msg-late-audio:turn-late-audio",
-    "audio:msg-late-audio:turn-late-audio",
-  ]);
-  h.stop();
-}
-
-async function testAudioExpectedDoesNotReleaseTextOnlyBeforeTimeout(): Promise<void> {
-  const h = createHarness({ installFakeTimers: true });
-  h.sessionStore.setActiveSession("turn-audio-expected");
-  h.sessionStore.markTurnStarted("turn-audio-expected");
-
-  h.sessionStore.markTextReceived(
-    "turn-audio-expected",
-    "hello",
-    "msg-audio-expected",
-    "replace",
-    true,
-  );
-
-  await h.flush();
-  await h.flush();
-  assert.deepEqual(h.released, []);
-  assert.equal(h.fakeTimers.size, 1);
-
-  const timeoutTimer = [...h.fakeTimers.keys()][0];
-  h.runFakeTimer(timeoutTimer);
-  await h.flush();
-  await h.flush();
-
-  const segment = h.sessionStore
-    .getSession("turn-audio-expected")
-    ?.segments.get("msg-audio-expected");
-  assert.equal(segment?.audio.terminal, "failed");
-  assert.equal(segment?.audio.reason, "audio_expected_timeout");
-  assert.deepEqual(h.released, [
-    "text:msg-audio-expected:turn-audio-expected",
-  ]);
-  h.stop();
-}
-
-async function testAudioExpectedTimeoutDoesNotReleaseMotionOnly(): Promise<void> {
-  const h = createHarness({ installFakeTimers: true });
-  h.sessionStore.setActiveSession("turn-audio-timeout-motion");
-  h.sessionStore.markTurnStarted("turn-audio-timeout-motion");
-
-  h.sessionStore.markTextReceived(
-    "turn-audio-timeout-motion",
-    "hello",
-    "msg-audio-timeout-motion",
-    "replace",
-    true,
-  );
-  h.sessionStore.markMotionReceived(
-    "turn-audio-timeout-motion",
-    motionPayload,
-    "msg-audio-timeout-motion",
-  );
-
-  await h.flush();
-  await h.flush();
-  assert.deepEqual(h.released, []);
-  assert.equal(h.fakeTimers.size, 1);
-
-  const timeoutTimer = [...h.fakeTimers.keys()][0];
-  h.runFakeTimer(timeoutTimer);
-  await h.flush();
-  await h.flush();
-
-  const segment = h.sessionStore
-    .getSession("turn-audio-timeout-motion")
-    ?.segments.get("msg-audio-timeout-motion");
-  assert.equal(segment?.audio.terminal, "failed");
-  assert.equal(segment?.audio.reason, "audio_expected_timeout");
-  assert.equal(segment?.motion.failed, true);
-  assert.equal(
-    segment?.motion.reason,
-    "audio_failed_before_motion_release:audio_expected_timeout",
-  );
-  assert.deepEqual(h.released, [
-    "text:msg-audio-timeout-motion:turn-audio-timeout-motion",
-  ]);
-  assert.deepEqual(h.motionSinkStarts, []);
-  h.stop();
-}
-
-async function testAudioExpectedTimeoutRejectsLateMedia(): Promise<void> {
-  const h = createHarness({ installFakeTimers: true });
-  h.sessionStore.setActiveSession("turn-audio-timeout-late-media");
-  h.sessionStore.markTurnStarted("turn-audio-timeout-late-media");
-
-  h.sessionStore.markTextReceived(
-    "turn-audio-timeout-late-media",
-    "hello",
-    "msg-audio-timeout-late-media",
-    "replace",
-    true,
-  );
-
-  await h.flush();
-  await h.flush();
-  assert.equal(h.fakeTimers.size, 1);
-
-  const timeoutTimer = [...h.fakeTimers.keys()][0];
-  h.runFakeTimer(timeoutTimer);
-  await h.flush();
-  await h.flush();
-
-  assert.equal(
-    h.sessionStore.markAudioReceived(
-      "turn-audio-timeout-late-media",
-      "http://localhost/late.wav",
-      "msg-audio-timeout-late-media",
-    ),
-    false,
-  );
-  h.sessionStore.markMotionReceived(
-    "turn-audio-timeout-late-media",
-    motionPayload,
-    "msg-audio-timeout-late-media",
-  );
-  await h.flush();
-  await h.flush();
-
-  const segment = h.sessionStore
-    .getSession("turn-audio-timeout-late-media")
-    ?.segments.get("msg-audio-timeout-late-media");
-  assert.equal(segment?.audio.terminal, "failed");
-  assert.equal(segment?.audio.url, null);
-  assert.equal(segment?.motion.failed, true);
-  assert.equal(segment?.motion.payload, null);
-  assert.deepEqual(h.released, [
-    "text:msg-audio-timeout-late-media:turn-audio-timeout-late-media",
-  ]);
-  assert.deepEqual(h.motionSinkStarts, []);
-  h.stop();
-}
-
-async function testAudioExpectedTimerClearsWhenAudioArrives(): Promise<void> {
-  const h = createHarness({ installFakeTimers: true });
-  h.sessionStore.setActiveSession("turn-audio-arrives");
-  h.sessionStore.markTurnStarted("turn-audio-arrives");
-
-  h.sessionStore.markTextReceived(
-    "turn-audio-arrives",
-    "hello",
-    "msg-audio-arrives",
-    "replace",
-    true,
-  );
-  h.sessionStore.markMotionReceived(
-    "turn-audio-arrives",
-    motionPayload,
-    "msg-audio-arrives",
-  );
-  await h.flush();
-  await h.flush();
-  assert.equal(h.fakeTimers.size, 1);
-
-  h.sessionStore.markAudioReceived(
-    "turn-audio-arrives",
-    "http://localhost/audio-arrives.wav",
-    "msg-audio-arrives",
-  );
-  await h.flush();
-  await h.flush();
-
-  const segmentBeforeRelease = h.sessionStore
-    .getSession("turn-audio-arrives")
-    ?.segments.get("msg-audio-arrives");
-  assert.equal(segmentBeforeRelease?.audio.terminal, "idle");
-  assert.notEqual(segmentBeforeRelease?.audio.reason, "audio_expected_timeout");
-  assert.equal(h.fakeTimers.size, 0);
-
-  assert.deepEqual(h.released, [
-    "text:msg-audio-arrives:turn-audio-arrives",
-    "audio:msg-audio-arrives:turn-audio-arrives",
-  ]);
-  assert.deepEqual(h.motionSinkStarts, [
-    "motion:msg-audio-arrives:turn-audio-arrives",
-  ]);
+  assert.deepEqual(storedPayload.intent.performance_curve_hint, curveHint);
   h.stop();
 }
 
@@ -1374,11 +1218,6 @@ async function run(): Promise<void> {
   await testRejectedMotionReleaseMarksSegmentFailed();
   await testMotionWithoutReceivedAtMarksSegmentFailed();
   await testPerformanceCurveHintIsMergedBeforeMotionRelease();
-  await testLateAudioAfterTextReleaseOnlyReleasesAudio();
-  await testAudioExpectedDoesNotReleaseTextOnlyBeforeTimeout();
-  await testAudioExpectedTimeoutDoesNotReleaseMotionOnly();
-  await testAudioExpectedTimeoutRejectsLateMedia();
-  await testAudioExpectedTimerClearsWhenAudioArrives();
   testMotionTimelineSinkLeavesRejectedTerminalOwnershipToEngine();
   testMotionTimelineSinkUsesPreparedSyntheticTimelineWhenAudioAbsent();
   testMotionTimelineSinkRetainsPreparingAudioTimelineOwnership();

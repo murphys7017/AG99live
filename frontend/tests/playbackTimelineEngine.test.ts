@@ -3,7 +3,9 @@ import {
   createPlaybackTimelineEngine,
 } from "../src/playback-timeline/playbackTimelineEngine.js";
 import { resolvePerformanceCurveTimeline } from "../src/model-engine/runtime/playbackClock.js";
-import { createPlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
+import {
+  createPlaybackTimelineRuntime as createStrictPlaybackTimelineRuntime,
+} from "../src/playback-timeline/playbackTimelineRuntime.js";
 import { createTimelineClock } from "../src/playback-timeline/timelineClock.js";
 import { createAudioStartMotionTimelineBridge } from "../src/playback-timeline/audioStartMotionBridge.js";
 import { createMotionTimelineRunTracker } from "../src/playback-integrations/modelEngineMotionSink.js";
@@ -16,6 +18,47 @@ import type {
   PlaybackTimelineSnapshot,
 } from "../src/playback-timeline/contracts.js";
 import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
+import type {
+  PlaybackTimelineSegmentExecutionPorts,
+} from "../src/playback-timeline/segmentJob.js";
+
+function createPlaybackTimelineRuntime(
+  deps: Omit<
+    Parameters<typeof createStrictPlaybackTimelineRuntime>[0],
+    "segmentExecution"
+  >,
+) {
+  let ports = createNoopSegmentExecutionPorts();
+  const runtime = createStrictPlaybackTimelineRuntime({
+    ...deps,
+    segmentExecution: {
+      session: {
+        markTextReleased: (...args) => ports.session.markTextReleased(...args),
+        markAudioReleased: (...args) => ports.session.markAudioReleased(...args),
+        markMotionReleased: (...args) => ports.session.markMotionReleased(...args),
+        markMotionFailed: (...args) => ports.session.markMotionFailed(...args),
+        markPhase: (...args) => ports.session.markPhase(...args),
+      },
+      textSink: {
+        releaseAssistantTextForPlayback: (...args) =>
+          ports.textSink.releaseAssistantTextForPlayback(...args),
+      },
+      audioSink: {
+        releaseAudioForPlayback: (...args) =>
+          ports.audioSink.releaseAudioForPlayback(...args),
+      },
+      motionSink: {
+        start: (...args) => ports.motionSink.start(...args),
+        interrupt: (...args) => ports.motionSink.interrupt(...args),
+      },
+    },
+  });
+  return Object.assign(runtime, {
+    configureSegmentExecution(next: PlaybackTimelineSegmentExecutionPorts) {
+      ports = next;
+    },
+  });
+}
 
 function testSyntheticClockLifecycle(): void {
   let nowMs = 100;
@@ -342,11 +385,10 @@ function createTestAudioClock(options: {
   };
 }
 
-function configureNoopSegmentExecutionPorts(
-  runtime: ReturnType<typeof createPlaybackTimelineRuntime>,
+function createNoopSegmentExecutionPorts(
   events: string[] = [],
-): void {
-  runtime.configureSegmentExecution({
+): PlaybackTimelineSegmentExecutionPorts {
+  return {
     session: {
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
@@ -373,7 +415,14 @@ function configureNoopSegmentExecutionPorts(
         return true;
       },
     },
-  });
+  };
+}
+
+function configureNoopSegmentExecutionPorts(
+  runtime: ReturnType<typeof createPlaybackTimelineRuntime>,
+  events: string[] = [],
+): void {
+  runtime.configureSegmentExecution(createNoopSegmentExecutionPorts(events));
 }
 
 function startMotionOnlySegment(

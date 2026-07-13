@@ -1,12 +1,17 @@
 task:
-  class: bugfix
+  class: refactor
   risk: high
-  phase: live2d_load_generation_and_playback_fact_repair
+  phase: atomic_output_segment_and_timeline_ownership
   status: complete
-  scope: Cancel stale Live2D model loads and preserve late text plus monotonic audio expectations across logical reply parts
+  scope: Replace fragmented reply materials with one atomic output segment and remove late-patch playback state
 context:
   confidence: high
   assumptions:
+    - AstrBot physical Plain, Record, image, and motion objects are aggregated only inside the adapter; the frontend receives one output.segment.v1 per turn_id plus message_id.
+    - SessionStore commitOutputSegment is the only production segment creation boundary; protocol and motion validation complete before Store or release-queue mutation.
+    - control.synth_finished asserts every segment is complete and never infers absent audio or motion from missing late patches.
+    - Production frontend motion and performance-curve patches have been removed; independent engine messages remain only for manual preview.
+    - PlaybackTimelineRuntime receives immutable execution sinks at construction, and TurnPlaybackOrchestrator does not own fragment wait timers or mirrored readiness.
     - Live2D model replacement cancels the previous load generation before Cubism teardown; every asynchronous model, texture, and uncached-motion callback must reject stale or released instance ownership before touching SDK managers.
     - Audio failure prevents late audio or motion release but does not prevent visible text for the same logical segment from being released.
     - Audio expectation is a monotonic segment fact once declared or established by an audio payload; later physical text parts cannot clear it.
@@ -324,6 +329,15 @@ verification:
     - npm run build:web (production web build passed after final review)
     - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings after final review)
     - git diff --check (passed after final review)
+    - npm test (complete frontend suite passed for atomic output.segment migration)
+    - npm run typecheck (renderer and node typechecks passed for atomic segment contracts)
+    - npm run build:web (production web build passed after flow documentation update)
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (280 passed)
+    - python -m compileall -q astrbot_plugin_ag99live_adapter (passed)
+    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings, 3 informational notices)
+    - Mermaid CLI 11.16.0 rendered four updated flow sources to SVG and PNG
+    - production protocol residue scan found no output.text/output.audio/output.image, independent performance-curve patch, old orchestrator, or fragment wait timer
+    - git diff --check (passed after atomic protocol and diagram review)
     - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (312 passed after final sequence diagnostics and profile-hash checks)
     - npm test (complete frontend suite passed after sequence keyframe and sampling changes)
     - npm run typecheck (renderer and node typechecks passed after final review)
@@ -404,7 +418,7 @@ verification:
     - npm run build (Electron production build passed after final review)
     - git diff --check (passed after final review)
   checks_failed: []
-  validation_gap: Live Electron playback is still needed to observe audio-aligned direct-plan retiming and extension-stage behavior against a real Live2D model; existing socket/provider validation gaps remain unchanged.
+  validation_gap: A live Electron end-to-end conversation is still needed to verify output.segment delivery, real audio-clock release, lip sync, and motion start against an installed AstrBot instance and Live2D model.
 runtime:
   mode: unified_playback_timeline_phase3_motion_timeline_context
 backlog:

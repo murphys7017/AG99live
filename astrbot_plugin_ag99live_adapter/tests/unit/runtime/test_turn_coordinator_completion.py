@@ -265,10 +265,14 @@ def test_emit_message_chain_converts_audio_off_thread(
             message_chain=[Record(file="voice.wav")],
         )
     )
+    asyncio.run(coordinator._flush_pending_output_segments())
 
     assert to_thread_calls
     assert media_service.calls == ["voice.wav"]
-    assert any(payload.get("type") == "output.audio" for payload in sent_payloads)
+    segment = next(
+        payload for payload in sent_payloads if payload.get("type") == "output.segment"
+    )
+    assert segment["payload"]["audio"]["state"] == "present"
 
 
 # ── finalize_turn ───────────────────────────────────────────────────

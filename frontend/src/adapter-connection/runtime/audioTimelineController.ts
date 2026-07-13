@@ -35,13 +35,17 @@ import type {
   PlaybackTimelineAudioSessionPort,
   PlaybackTimelineMotionSessionPort,
 } from "../../playback-timeline/playbackTimelineRuntime.js";
+import type {
+  PlaybackTimelineSegmentExecutionPorts,
+} from "../../playback-timeline/segmentJob.js";
 
-export interface AdapterAudioTimelineControllerDeps {
+export interface AdapterAudioTimelineControllerDeps<TMotionPayload = unknown> {
   state: AudioPlaybackState;
   audioSink: PlaybackTimelineAudioSink;
   pushHistory: (role: string, text: string) => void;
   getAudioSession: () => PlaybackTimelineAudioSessionPort | undefined;
   getMotionSession: () => PlaybackTimelineMotionSessionPort | undefined;
+  segmentExecution: PlaybackTimelineSegmentExecutionPorts<TMotionPayload>;
   createLipSyncRuntime?: (
     callbacks: PlaybackTimelineLipSyncRuntimeCallbacks,
   ) => PlaybackTimelineLipSyncRuntime;
@@ -60,12 +64,13 @@ export interface AdapterAudioTimelineControllerDeps {
 }
 
 export function createAdapterAudioTimelineController<TMotionPayload = unknown>(
-  deps: AdapterAudioTimelineControllerDeps,
+  deps: AdapterAudioTimelineControllerDeps<TMotionPayload>,
 ) {
   const live2dLipSyncSink = createLive2DLipSyncTimelineSink();
   let activeLipSyncRuntime: PlaybackTimelineLipSyncRuntime | null = null;
   const playbackTimelineRuntime = createPlaybackTimelineRuntime<TMotionPayload>({
     getAudioClock: () => deps.audioSink.getClock(),
+    segmentExecution: deps.segmentExecution,
     get audioSession() {
       return deps.getAudioSession();
     },

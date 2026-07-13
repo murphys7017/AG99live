@@ -21,22 +21,41 @@ export interface SystemServerInfoPayload {
   auto_start_mic: boolean;
 }
 
-export interface OutputTextPayload {
-  text: string;
-  speaker_name: string;
-  avatar: string;
-  audio_expected: boolean;
-}
+export type OutputSegmentTextSlot =
+  | { state: "present"; content: string }
+  | { state: "absent" }
+  | { state: "failed"; reason: string };
 
-export interface OutputAudioPayload {
-  audio_url: string | null;
-  caption_text: string;
-  speaker_name: string;
-  avatar: string;
-}
+export type OutputSegmentAudioSlot =
+  | { state: "present"; url: string; caption_text: string }
+  | { state: "absent" }
+  | { state: "failed"; reason: string };
 
-export interface OutputImagePayload {
+export type OutputSegmentMotionSlot =
+  | {
+    state: "present";
+    message_type: "engine.motion_intent" | "engine.catalog_motion";
+    mode: string;
+    source: string;
+    payload: Record<string, unknown>;
+  }
+  | { state: "absent" }
+  | { state: "failed"; reason: string };
+
+export type OutputSegmentPerformanceCurveSlot =
+  | { state: "ready"; hint: PerformanceCurveHint }
+  | { state: "skipped"; reason: string }
+  | { state: "disabled" };
+
+export interface OutputSegmentPayload {
+  schema_version: "output.segment.v1";
+  text: OutputSegmentTextSlot;
+  audio: OutputSegmentAudioSlot;
+  motion: OutputSegmentMotionSlot;
+  performance_curve: OutputSegmentPerformanceCurveSlot;
   images: string[];
+  speaker_name: string;
+  avatar: string;
 }
 
 export interface OutputTranscriptionPayload {

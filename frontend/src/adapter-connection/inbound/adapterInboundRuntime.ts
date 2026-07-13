@@ -1,5 +1,4 @@
 import type { ProtocolEnvelope, SystemModelSyncPayload } from "../../types/protocol.js";
-import type { NormalizedMotionPayload } from "../../model-engine/contracts.js";
 import { normalizeMotionPayload } from "../../model-engine/normalize.js";
 import type { AdapterConnectionState } from "../state/adapterConnectionState.js";
 import { parseInboundEnvelope } from "./inboundProtocol.js";
@@ -12,7 +11,6 @@ import {
   dispatchInboundEvent as dispatchInboundEventToDeps,
   type InboundDispatchDeps,
 } from "./inboundDispatcher.js";
-import { applyInboundMotionPayload } from "./inboundMotion.js";
 import {
   rewriteHttpUrl as rewriteHttpUrlWithActiveHost,
   rewriteModelSyncEnvelope as rewriteModelSyncEnvelopeWithActiveHost,
@@ -20,14 +18,12 @@ import {
 } from "../features/modelSyncRewrite.js";
 import {
   buildPendingPlaybackKey,
-  matchesPlaybackGroup,
   queueAssistantTextForPlayback as queuePendingAssistantTextForPlayback,
 } from "../../playback-timeline/playbackReleaseQueue.js";
 import type { useAdapterHistory } from "../history/useAdapterHistory.js";
 import type { useAdapterMotionTuning } from "../motion-tuning/useAdapterMotionTuning.js";
 import type { useModelSync } from "../model-sync/useModelSync.js";
 import type { useTurnPlaybackSessionStore } from "../../turn-playback/useTurnPlaybackSessionStore.js";
-import { isTerminalPhase } from "../../turn-playback/session.js";
 
 export interface AdapterInboundRuntimeDeps {
   state: AdapterConnectionState;
@@ -38,12 +34,6 @@ export interface AdapterInboundRuntimeDeps {
   pushHistory: (role: string, text: string) => void;
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
-  markAudioPlaybackTerminal: (
-    terminalState: "completed" | "failed" | "absent",
-    turnId: string | null,
-    reason?: string,
-    messageId?: string | null,
-  ) => void;
   hasPendingAudioForTurn: (turnId: string | null) => boolean;
   queueAudioForPlayback: (
     url: string,
@@ -113,211 +103,6 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     };
   }
 
-  function hasPlaybackSegment(turnId: string | null, messageId: string): boolean {
-    const sessionStore = deps.getSessionStore();
-    const session = sessionStore?.getSession(turnId);
-    return Boolean(session?.segments.has(messageId));
-  }
-
-  function canAcceptOutputSegment(turnId: string | null, messageId: string): boolean {
-    const sessionStore = deps.getSessionStore();
-    const session = sessionStore?.getSession(turnId);
-    if (!session) {
-      return true;
-    }
-    if (isTerminalPhase(session.phase)) {
-      return false;
-    }
-    if (session.segments.has(messageId)) {
-      return true;
-    }
-    return !session.backend.synthFinished;
-  }
-
-  function canAcceptSegmentPatch(turnId: string | null, _messageId: string): boolean {
-    const sessionStore = deps.getSessionStore();
-    const session = sessionStore?.getSession(turnId);
-    return Boolean(
-      session
-      && !isTerminalPhase(session.phase)
-      && !session.backend.synthFinished,
-    );
-  }
-
-  function canQueuePendingMotionForTurn(turnId: string | null): boolean {
-    const sessionStore = deps.getSessionStore();
-    const session = sessionStore?.getSession(turnId);
-    return Boolean(
-      session
-      && !isTerminalPhase(session.phase)
-      && !session.backend.synthFinished,
-    );
-  }
-
-  function queuePendingMotionForSegment(
-    turnId: string | null,
-    messageId: string,
-    payload: NormalizedMotionPayload,
-  ): void {
-    deps.state.pendingMotions.set(buildPendingPlaybackKey(turnId, messageId), {
-      turnId,
-      messageId,
-      payload,
-      receivedAtMs: performance.now(),
-    });
-    deps.state.statusMessage = "动作载荷先于同段输出到达，已暂存等待配对。";
-  }
-
-  function flushPendingMotionForSegment(
-    turnId: string | null,
-    messageId: string,
-  ): void {
-    const key = buildPendingPlaybackKey(turnId, messageId);
-    const pending = deps.state.pendingMotions.get(key);
-    if (!pending || !hasPlaybackSegment(turnId, messageId)) {
-      return;
-    }
-    deps.state.pendingMotions.delete(key);
-    deps.getSessionStore()?.markMotionReceived(
-      pending.turnId,
-      pending.payload,
-      pending.messageId,
-    );
-  }
-
-  function clearPendingMotionsForTurn(turnId: string | null, reason: string): void {
-    for (const [key, pending] of Array.from(deps.state.pendingMotions.entries())) {
-      if (!matchesPendingTurn(pending.turnId, turnId)) {
-        continue;
-      }
-      deps.state.pendingMotions.delete(key);
-      const message = `动作载荷缺少同段输出，已拒绝（turn_id=${turnId ?? "null"}, message_id=${pending.messageId}, reason=${reason}）。`;
-      deps.state.lastError = message;
-      deps.state.statusMessage = message;
-      deps.pushHistory("error", message);
-      console.warn("[Connection] rejected orphan motion payload.", {
-        turnId,
-        messageId: pending.messageId,
-        reason,
-        receivedAtMs: pending.receivedAtMs,
-      });
-    }
-  }
-
-  function rejectSegmentPatchWithoutOutput(
-    kind: string,
-    turnId: string | null,
-    messageId: string,
-  ): void {
-    const message = `${kind}缺少同段输出，已拒绝（turn_id=${turnId ?? "null"}, message_id=${messageId}）。`;
-    deps.state.lastError = message;
-    deps.state.statusMessage = message;
-    deps.pushHistory("error", message);
-    console.warn("[Connection] rejected segment patch without output segment.", {
-      kind,
-      turnId,
-      messageId,
-    });
-  }
-
-  function rejectSegmentPatchAfterSynthFinished(
-    kind: string,
-    turnId: string | null,
-    messageId: string,
-  ): void {
-    const message = `${kind}在输出队列关闭或会话终态后到达，已拒绝（turn_id=${turnId ?? "null"}, message_id=${messageId}）。`;
-    deps.state.lastError = message;
-    deps.state.statusMessage = message;
-    deps.pushHistory("error", message);
-    console.warn("[Connection] rejected segment patch after synth finished.", {
-      kind,
-      turnId,
-      messageId,
-    });
-  }
-
-  function markMissingAudiosForTurn(turnId: string | null, reason: string): void {
-    const sessionStore = deps.getSessionStore();
-    if (!sessionStore) {
-      return;
-    }
-    const session = sessionStore.getSession(turnId);
-    if (!session) {
-      return;
-    }
-    for (const messageId of session.segmentOrder) {
-      const segment = session.segments.get(messageId);
-      if (
-        !segment
-        || segment.audio.terminal !== "idle"
-        || segment.audio.url
-        || segment.audio.expected
-        || segment.audio.released
-        || segment.audio.started
-      ) {
-        continue;
-      }
-      sessionStore.markAudioTerminal(
-        segment.turnId,
-        "absent",
-        segment.messageId,
-        reason,
-      );
-    }
-  }
-
-  function markMissingMotionsForTurn(turnId: string | null, reason: string): void {
-    const sessionStore = deps.getSessionStore();
-    if (!sessionStore) {
-      return;
-    }
-    const session = sessionStore.getSession(turnId);
-    if (!session) {
-      return;
-    }
-    for (const messageId of session.segmentOrder) {
-      const segment = session.segments.get(messageId);
-      if (
-        !segment
-        || segment.motion.payload !== null
-        || segment.motion.absent
-        || segment.motion.released
-        || segment.motion.started
-        || segment.motion.completed
-        || segment.motion.failed
-      ) {
-        continue;
-      }
-      sessionStore.markMotionAbsent(segment.turnId, segment.messageId, reason);
-    }
-  }
-
-  function rejectOutputAfterSynthFinished(
-    kind: string,
-    turnId: string | null,
-    messageId: string,
-  ): void {
-    const message = `${kind}在输出队列关闭或会话终态后创建输出段，已拒绝（turn_id=${turnId ?? "null"}, message_id=${messageId}）。`;
-    deps.state.lastError = message;
-    deps.state.statusMessage = message;
-    deps.pushHistory("error", message);
-    console.warn("[Connection] rejected output segment after synth finished.", {
-      kind,
-      turnId,
-      messageId,
-    });
-  }
-
-  function matchesPendingTurn(
-    candidateTurnId: string | null,
-    targetTurnId: string | null,
-  ): boolean {
-    if (matchesPlaybackGroup(candidateTurnId, targetTurnId)) {
-      return true;
-    }
-    return !candidateTurnId && !targetTurnId;
-  }
-
   async function dispatchInboundEvent(
     event: InboundAdapterEvent,
   ): Promise<void> {
@@ -339,23 +124,10 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
             markSynthFinished: (tId) => sessionStore.markSynthFinished(tId),
             markTurnFinished: (tId, success, reason) => sessionStore.markTurnFinished(tId, success, reason),
             markInterrupt: (tId) => sessionStore.markInterrupt(tId),
-            markTextReceived: (tId, text, msgId, mode, audioExpected) =>
-              sessionStore.markTextReceived(
-                tId,
-                text,
-                msgId,
-                mode as "replace" | "append",
-                audioExpected,
-              ),
-            markTextDelivered: (tId, msgId) => sessionStore.markTextDelivered(tId, msgId),
-            markAudioReceived: (tId, url, msgId, captionText) =>
-              sessionStore.markAudioReceived(tId, url, msgId, captionText),
-            markAudioTerminal: (tId, terminal, msgId, reason) => sessionStore.markAudioTerminal(tId, terminal as "completed" | "failed" | "absent", msgId, reason),
-            markMotionReceived: (tId, payload, msgId) => sessionStore.markMotionReceived(tId, payload as NormalizedMotionPayload, msgId),
-            markPerformanceCurveHintReceived: (tId, hint, msgId) => sessionStore.markPerformanceCurveHintReceived(tId, hint, msgId),
-            canAcceptOutputSegment,
-            ensureSegment: (tId, msgId) => sessionStore.ensureSegment(tId, msgId),
-            getSessions: () => sessionStore.getSessions(),
+            assertOutputSegmentsResolved: (tId) =>
+              sessionStore.assertOutputSegmentsResolved(tId),
+            commitOutputSegment: (tId, msgId, material) =>
+              sessionStore.commitOutputSegment(tId, msgId, material),
           }
         : undefined,
       pushHistory: deps.pushHistory,
@@ -384,17 +156,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       stopAudioAndSettleTurn: (turnId, reason) =>
         deps.stopAudioAndSettleTurn(turnId, reason),
       resetAudioPlaybackTerminal: () => deps.resetAudioPlaybackTerminal(),
-      markAudioPlaybackTerminal: (terminalState, turnId, reason, messageId) =>
-        deps.markAudioPlaybackTerminal(
-          terminalState as "completed" | "failed" | "absent",
-          turnId,
-          reason,
-          messageId,
-        ),
       hasPendingAudioForTurn: (turnId) => deps.hasPendingAudioForTurn(turnId),
-      markMissingAudiosForTurn,
-      markMissingMotionsForTurn,
-      clearPendingMotionsForTurn,
       reportRuntimeProtocolViolation,
       queuePendingAssistantTextForPlayback: (map, text, turnId, messageId) =>
         queuePendingAssistantTextForPlayback(map, text, turnId, messageId),
@@ -410,19 +172,9 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
           receivedAtMs: performance.now(),
         });
       },
-      flushPendingMotionForSegment,
-      rejectSegmentPatchWithoutOutput,
-      rejectSegmentPatchAfterSynthFinished,
-      rejectOutputAfterSynthFinished,
       findActiveAudioSegment: () => deps.findActiveAudioSegment(),
       playMotionPreviewPayload: deps.playMotionPreviewPayload,
-      hasPlaybackSegment,
-      canAcceptSegmentPatch,
-      canQueuePendingMotionForTurn,
-      queuePendingMotionForSegment,
       normalizeMotionPayload: (payload) => normalizeMotionPayload(payload),
-      applyInboundMotionPayload: (ctx, envelope) =>
-        applyInboundMotionPayload(ctx, envelope),
       startMicrophoneCapture: (origin) => deps.startMicrophoneCapture(origin),
       reportedProtocolWarnings,
       buildInboundEventContext: () => buildInboundEventContext(),

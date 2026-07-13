@@ -9,9 +9,7 @@ export const INBOUND_MESSAGE_TYPES = {
   SYSTEM_HISTORY_CREATED: "system.history_created",
   SYSTEM_HISTORY_DATA: "system.history_data",
   SYSTEM_HISTORY_DELETED: "system.history_deleted",
-  OUTPUT_TEXT: "output.text",
-  OUTPUT_AUDIO: "output.audio",
-  OUTPUT_IMAGE: "output.image",
+  OUTPUT_SEGMENT: "output.segment",
   OUTPUT_TRANSCRIPTION: "output.transcription",
   CONTROL_TURN_STARTED: "control.turn_started",
   CONTROL_TURN_FINISHED: "control.turn_finished",
@@ -19,10 +17,7 @@ export const INBOUND_MESSAGE_TYPES = {
   CONTROL_START_MIC: "control.start_mic",
   CONTROL_SYNTH_FINISHED: "control.synth_finished",
   CONTROL_ERROR: "control.error",
-  ENGINE_MOTION_INTENT: "engine.motion_intent",
-  ENGINE_CATALOG_MOTION: "engine.catalog_motion",
   ENGINE_MOTION_PREVIEW: "engine.motion_preview",
-  ENGINE_PERFORMANCE_CURVE_HINT: "engine.performance_curve_hint",
 } as const;
 
 export const OUTBOUND_MESSAGE_TYPES = {

@@ -10,12 +10,14 @@
  *   三个子状态 + turnId/messageId 的组合。
  *
  * 写入约定：
- *   - 文本/音频/动作这类段级 mark* 会通过 ensureSegment 现场创建缺失段；
- *     后端 turn/synth/finished 信号要求 session 已存在。
+ *   - 正式协议只通过 commitOutputSegment 一次性创建完整段；段级 mark* 仅供
+ *     timeline 生命周期回写和显式本地入口使用。
+ *   - 后端 turn/synth/finished 信号要求 session 已存在，synth_finished 不推断
+ *     缺失材料，也不把未解析状态改写为 absent。
  *   - phase 转移统一经 markPhaseInternal 做合法性检查；非法转移直接抛错，
  *     避免协议副作用在状态写入失败后继续执行。
- *   - 大多数段写入不主动推进 phase；例外是晚到 audio 在 settling 阶段会把
- *     session 重新拨回 playing，给补到的媒体一次释放机会。
+ *   - 段写入不通过计时器猜测 readiness；phase 只由原子提交、timeline 生命周期
+ *     和完成协调器显式推进。
  *
  * 边界：
  *   - 不知道协议形状，也不收发任何消息。
@@ -30,17 +32,18 @@ import type {
   TextReceiveMode,
   AudioTerminalState,
   TurnPlaybackSegment,
+  OutputSegmentMaterial,
 } from "./session.js";
 import {
   createTurnPlaybackSession,
   createTurnPlaybackSegment,
   resolveSessionId,
+  isTerminalPhase,
   isValidPhaseTransition,
   isSegmentLocallySettled,
 } from "./session.js";
 import { getActivePlaybackSegment } from "./selectors.js";
 import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
-import type { PerformanceCurveHint } from "../types/protocol.js";
 
 // ── Store state ────────────────────────────────────────────────────
 
@@ -224,9 +227,108 @@ export function useTurnPlaybackSessionStore() {
     return Boolean(segment && isSegmentLocallySettled(segment));
   }
 
+  function assertOutputSegmentsResolved(turnId: string | null): void {
+    const session = requireSession(turnId);
+    for (const messageId of session.segmentOrder) {
+      const segment = session.segments.get(messageId);
+      if (!segment) {
+        throw new Error(`Turn playback segment order is corrupt: messageId=${messageId}.`);
+      }
+      const textResolved = Boolean(segment.text.content) || segment.text.delivered;
+      const audioResolved = Boolean(segment.audio.url) || segment.audio.terminal !== "idle";
+      const motionResolved = Boolean(segment.motion.payload)
+        || segment.motion.absent
+        || segment.motion.failed;
+      if (!textResolved || !audioResolved || !motionResolved) {
+        throw new Error(
+          `Incomplete atomic output segment before synth_finished: turnId=${turnId}, messageId=${messageId}.`,
+        );
+      }
+    }
+  }
+
   function getActiveSegment(sessionId: string | null): TurnPlaybackSegment | null {
     const session = getSessionById(sessionId);
     return session ? getActivePlaybackSegment(session) : null;
+  }
+
+  /**
+   * 一次性提交已经完整校验的 output.segment。
+   *
+   * 这里是正式入站段唯一的创建边界。先在局部对象中构建全部子状态，所有
+   * 前置条件通过后才把段放入 session Map，避免动作校验或重复段错误留下
+   * 已显示文本、已排队音频等半提交状态。
+   */
+  function commitOutputSegment(
+    turnId: string | null,
+    messageId: string,
+    material: OutputSegmentMaterial,
+  ): TurnPlaybackSegment {
+    const session = requireSession(turnId);
+    const segmentId = normalizeRequiredMessageId(messageId);
+    if (isTerminalPhase(session.phase)) {
+      throw new Error(
+        `Cannot commit output segment to terminal session: turnId=${turnId}, messageId=${segmentId}.`,
+      );
+    }
+    if (session.backend.synthFinished) {
+      throw new Error(
+        `Cannot commit output segment after synth_finished: turnId=${turnId}, messageId=${segmentId}.`,
+      );
+    }
+    if (session.segments.has(segmentId)) {
+      throw new Error(
+        `Duplicate output segment: turnId=${turnId}, messageId=${segmentId}.`,
+      );
+    }
+
+    const receivedAtMs = performance.now();
+    const segment = createTurnPlaybackSegment(segmentId, turnId);
+
+    if (material.text.state === "present") {
+      segment.text.content = material.text.content;
+      segment.text.receivedAtMs = receivedAtMs;
+      segment.text.receiveMode = "replace";
+    } else {
+      segment.text.released = true;
+      segment.text.delivered = true;
+    }
+
+    if (material.audio.state === "present") {
+      segment.audio.url = material.audio.url;
+      segment.audio.captionText = material.audio.captionText || null;
+      segment.audio.receivedAtMs = receivedAtMs;
+    } else {
+      segment.audio.released = true;
+      segment.audio.terminal = material.audio.state;
+      segment.audio.reason = material.audio.state === "failed"
+        ? material.audio.reason
+        : "output_segment_audio_absent";
+    }
+
+    if (material.motion.state === "present") {
+      segment.motion.payload = material.motion.payload;
+      segment.motion.receivedAtMs = receivedAtMs;
+    } else if (material.motion.state === "absent") {
+      segment.motion.absent = true;
+      segment.motion.reason = "output_segment_motion_absent";
+    } else {
+      segment.motion.released = true;
+      segment.motion.failed = true;
+      segment.motion.reason = material.motion.reason;
+    }
+
+    session.segments.set(segmentId, segment);
+    session.segmentOrder.push(segmentId);
+    log("atomic output segment committed", {
+      sessionId: session.id,
+      messageId: segmentId,
+      turnId,
+      textState: material.text.state,
+      audioState: material.audio.state,
+      motionState: material.motion.state,
+    });
+    return segment;
   }
 
   // ── text ────────────────────────────────────────────────────────
@@ -236,7 +338,6 @@ export function useTurnPlaybackSessionStore() {
     text: string,
     messageId: string,
     mode: TextReceiveMode = "replace",
-    audioExpected = false,
   ): void {
     const trimmed = text.trim();
     if (!trimmed) {
@@ -252,9 +353,6 @@ export function useTurnPlaybackSessionStore() {
     segment.text.receivedAtMs = performance.now();
     segment.text.released = false;
     segment.text.delivered = false;
-    // Once audio is expected or received, a later text-only physical part must
-    // not erase that established fact for the same logical segment.
-    segment.audio.expected = segment.audio.expected || Boolean(audioExpected);
     if (!session.backend.turnStarted) {
       session.backend.turnStarted = true;
     }
@@ -317,7 +415,6 @@ export function useTurnPlaybackSessionStore() {
     segment.audio.url = trimmed;
     const normalizedCaption = captionText.trim();
     segment.audio.captionText = normalizedCaption || segment.audio.captionText;
-    segment.audio.expected = true;
     segment.audio.receivedAtMs = performance.now();
     segment.audio.released = false;
     segment.audio.terminal = "idle";
@@ -415,26 +512,6 @@ export function useTurnPlaybackSessionStore() {
     segment.motion.reason = "";
   }
 
-  function markPerformanceCurveHintReceived(
-    turnId: string | null,
-    hint: PerformanceCurveHint,
-    messageId: string,
-  ): void {
-    if (!hint) {
-      return;
-    }
-    const { segment } = getSegmentSession(turnId, messageId);
-    if (
-      segment.motion.released
-      || segment.motion.started
-      || segment.motion.completed
-    ) {
-      return;
-    }
-    segment.motion.performanceCurveHint = hint;
-    segment.motion.performanceCurveHintReceivedAtMs = performance.now();
-  }
-
   function markMotionAbsent(
     turnId: string | null,
     messageId: string,
@@ -443,8 +520,6 @@ export function useTurnPlaybackSessionStore() {
     const { segment } = getSegmentSession(turnId, messageId);
     segment.motion.payload = null;
     segment.motion.receivedAtMs = null;
-    segment.motion.performanceCurveHint = null;
-    segment.motion.performanceCurveHintReceivedAtMs = null;
     segment.motion.absent = true;
     segment.motion.released = false;
     segment.motion.started = false;
@@ -646,9 +721,11 @@ export function useTurnPlaybackSessionStore() {
     getActiveSegment,
     getUnsettledSegments,
     isSegmentSettled,
+    assertOutputSegmentsResolved,
     getSessions,
     getActiveSession,
     setActiveSession,
+    commitOutputSegment,
     markTextReceived,
     markTextReleased,
     markTextDelivered,
@@ -658,7 +735,6 @@ export function useTurnPlaybackSessionStore() {
     markAudioDuration,
     markAudioTerminal,
     markMotionReceived,
-    markPerformanceCurveHintReceived,
     markMotionAbsent,
     markMotionFailed,
     markMotionReleased,

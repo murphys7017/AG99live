@@ -6,8 +6,8 @@
  * sessionStore、追加历史；并非每个事件都会触碰三者。
  *
  * 音频收口只发生在需要它的控制路径：interrupt 会按目标 turn 调
- * deps.stopAudioAndSettleTurn；synth_finished 会把本轮缺失音频标 absent；
- * turn_finished 只收口 turn 状态，不直接停播或结算音频段。
+ * deps.stopAudioAndSettleTurn；synth_finished 只验证原子段并关闭后端输出队列，
+ * 不推断缺失音频；turn_finished 只收口 turn 状态，不直接停播或结算音频段。
  *
  * 边界：不发协议、不解析信封、不直接持有 WebSocket；所有副作用都通过 deps 注入。
  */
@@ -19,7 +19,6 @@ import {
   type PendingAssistantTextItem,
   type PendingAudioItem,
 } from "../../playback-timeline/playbackReleaseQueue.js";
-import type { PendingMotionItem } from "./pendingMotionIngress.js";
 
 export interface InboundRuntimeDispatchState {
   currentTurnId: string | null;
@@ -32,7 +31,6 @@ export interface InboundRuntimeDispatchState {
   pttModeEnabled: boolean;
   pendingAssistantTexts: Map<string, PendingAssistantTextItem>;
   pendingAudios: Map<string, PendingAudioItem>;
-  pendingMotions: Map<string, PendingMotionItem>;
 }
 
 export interface InboundRuntimeDispatchDeps {
@@ -43,26 +41,12 @@ export interface InboundRuntimeDispatchDeps {
     markSynthFinished: (turnId: string | null) => void;
     markTurnFinished: (turnId: string | null, success: boolean, reason?: string) => void;
     markInterrupt: (turnId: string | null) => void;
+    assertOutputSegmentsResolved: (turnId: string | null) => void;
   } | undefined;
   pushHistory: (role: string, text: string) => void;
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
-  markAudioPlaybackTerminal: (
-    terminalState: string,
-    turnId: string | null,
-    reason?: string,
-    messageId?: string | null,
-  ) => void;
   hasPendingAudioForTurn: (turnId: string | null) => boolean;
-  markMissingAudiosForTurn: (
-    turnId: string | null,
-    reason: string,
-  ) => void;
-  markMissingMotionsForTurn: (
-    turnId: string | null,
-    reason: string,
-  ) => void;
-  clearPendingMotionsForTurn: (turnId: string | null, reason: string) => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
   reportRuntimeProtocolViolation: (message: string) => void;
@@ -82,7 +66,7 @@ type InboundRuntimeEvent = Extract<
  * 运行时事件的内部 switch，按 event.kind 调对应 apply* 处理函数。
  *
  * 同步执行（applyStartMic 内部以 void 启动 startMicrophoneCapture，不 await）。
- * 不抛异常，单条事件失败不影响后续事件投递。
+ * 协议生命周期错误会交给 reportRuntimeProtocolViolation 显式上报，不创建缺失会话。
  */
 export function dispatchInboundRuntimeEvent(
   deps: InboundRuntimeDispatchDeps,
@@ -121,7 +105,6 @@ function applyTurnStarted(
   deps.resetAudioPlaybackTerminal();
   s.pendingAssistantTexts.clear();
   s.pendingAudios.clear();
-  s.pendingMotions.clear();
   s.turnFinishedTurnId = null;
   s.turnFinishedSuccess = true;
   s.turnFinishedReason = "";
@@ -144,19 +127,10 @@ function applyTurnFinished(
       s.turnFinishedReason,
     );
   } catch (error) {
-    if (isCurrentTurnEvent(s.currentTurnId, s.turnFinishedTurnId)) {
-      deps.sessionStore?.markTurnStarted(s.turnFinishedTurnId);
-      deps.sessionStore?.markTurnFinished(
-        s.turnFinishedTurnId,
-        s.turnFinishedSuccess,
-        s.turnFinishedReason,
-      );
-    } else {
-      deps.reportRuntimeProtocolViolation(
-        error instanceof Error ? error.message : "turn_finished arrived for unknown session.",
-      );
-      return;
-    }
+    deps.reportRuntimeProtocolViolation(
+      error instanceof Error ? error.message : "turn_finished arrived for unknown session.",
+    );
+    return;
   }
 
   if (event.success) {
@@ -190,7 +164,6 @@ function applyInterrupt(
   deps.resetAudioPlaybackTerminal();
   deletePendingItemsForTurn(s.pendingAssistantTexts, interruptedTurnId);
   deletePendingItemsForTurn(s.pendingAudios, interruptedTurnId);
-  deletePendingItemsForTurn(s.pendingMotions, interruptedTurnId);
   if (matchesTurn(s.currentTurnId, interruptedTurnId)) {
     s.currentTurnId = null;
   }
@@ -217,30 +190,14 @@ function applySynthFinished(
 ): void {
   const s = deps.state;
   try {
+    deps.sessionStore?.assertOutputSegmentsResolved(event.turnId);
     deps.sessionStore?.markSynthFinished(event.turnId);
   } catch (error) {
-    if (isCurrentTurnEvent(s.currentTurnId, event.turnId)) {
-      deps.sessionStore?.markTurnStarted(event.turnId);
-      deps.sessionStore?.markSynthFinished(event.turnId);
-    } else {
-      deps.reportRuntimeProtocolViolation(
-        error instanceof Error ? error.message : "synth_finished arrived for unknown session.",
-      );
-      return;
-    }
+    deps.reportRuntimeProtocolViolation(
+      error instanceof Error ? error.message : "synth_finished arrived for invalid session.",
+    );
+    return;
   }
-  deps.markMissingAudiosForTurn(
-    event.turnId,
-    "synth_finished_without_audio_playback",
-  );
-  deps.markMissingMotionsForTurn(
-    event.turnId,
-    "synth_finished_without_motion_payload",
-  );
-  deps.clearPendingMotionsForTurn(
-    event.turnId,
-    "synth_finished_without_matching_output_segment",
-  );
   const activeAudioSegment = deps.findActiveAudioSegment();
   const hasActiveAudioForTurn = Boolean(
     activeAudioSegment && matchesTurn(activeAudioSegment.turnId, event.turnId),
@@ -250,13 +207,6 @@ function applySynthFinished(
       ? "语音已准备同步播放。"
       : "语音合成已完成。";
   deps.pushHistory("system", s.statusMessage);
-}
-
-function isCurrentTurnEvent(
-  currentTurnId: string | null,
-  eventTurnId: string | null,
-): boolean {
-  return Boolean(currentTurnId && eventTurnId && currentTurnId === eventTurnId);
 }
 
 function deletePendingItemsForTurn<TItem extends { turnId: string | null }>(

@@ -5,18 +5,19 @@ flowchart LR
     classDef d fill:#f8e7df,stroke:#9b4d2d,color:#542717
     classDef e fill:#e9f3df,stroke:#557a35,color:#2e431d
 
-    A[用户输入]:::b --> B[AstrBot Persona Runtime]:::a
-    B --> C[spoken_reply + ag99live.motion]:::a
-    C --> D[output.text / output.audio / motion_intent.v4]:::b
-    D --> E[SessionStore<br/>turn_id + message_id]:::c
-    E --> F[TurnPlaybackOrchestrator<br/>决定 release]:::c
-    F --> G[PlaybackTimelineRuntime<br/>统一生命周期与时钟]:::d
-    G --> H[HTMLAudioElement<br/>真实 audio clock]:::d
-    H --> I[90ms 后启动动作]:::d
-    I --> J[ModelEngine<br/>编译 parameter_plan.v2]:::e
-    J --> K[Live2D WebSDK<br/>逐帧写参]:::e
-    H --> L[Lip sync<br/>同一音频元素]:::e
-    K --> M[本地终态聚合]:::c
-    L --> M
-    H --> M
-    M --> N[playback_finished → turn_finished]:::b
+    A[用户输入]:::b --> B[Persona Runtime<br/>spoken_reply + effect_calls]:::a
+    B --> C[TTS WAV + Plain + motion]:::a
+    C --> D[后端 PendingOutputSegment<br/>turn_id + message_id]:::b
+    D --> E[单个 output.segment.v1]:::b
+    E --> F[严格预校验]:::c
+    F --> G[SessionStore<br/>原子提交]:::c
+    G --> H[Orchestrator<br/>单次 SegmentJob]:::c
+    H --> I[PlaybackTimelineRuntime<br/>固定 sinks + 统一时钟]:::d
+    I --> J[HTMLAudioElement<br/>真实 audio clock]:::d
+    J --> K[约 90ms 后启动 ModelEngine]:::e
+    J --> L[Lip sync<br/>同一 AudioElement]:::e
+    K --> M[Live2D WebSDK<br/>逐帧写参]:::e
+    L --> N[Timeline 终态聚合]:::c
+    M --> N
+    J --> N
+    N --> O[playback_finished → turn_finished]:::b

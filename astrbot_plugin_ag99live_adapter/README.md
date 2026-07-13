@@ -71,15 +71,14 @@ astrbot_plugin_ag99live_adapter/
 ## 与前端协同的关键点
 
 - 每条交互消息都带 `turn_id`，前后端只按这一个轮次 ID 做会话协调。
-- 每个 assistant segment 的 `output.text / output.audio / engine.motion_*` 都必须携带非空 `message_id`；前端用它把这些消息聚合到同一个 `TurnPlaybackSegment`。
-- 当前后端主链路只广播 `engine.motion_intent`；前端负责把 intent 编译为 `engine.parameter_plan.v2` 后执行。
+- 每个 assistant segment 由非空 `turn_id + message_id` 标识；Adapter 先聚合 Plain、Record、图片和 motion client object，再发送一个 `output.segment.v1`。
+- 正式动作位于 `output.segment.motion.payload`；前端原子提交完整段后，由 ModelEngine 把 intent 编译为 `engine.parameter_plan.v2`。
 - `semantic_axis_profile` / `calibration_profile` / `voice_following_profile` / `parameter_action_library` / `base_action_library` 由 `system.model_sync` 下发。
 - `system.semantic_axis_profile_saved` / `system.semantic_axis_profile_save_failed` 用于 Profile Editor 保存结果确认，不再依赖 `system.model_sync` 推断保存成败。
 - 一个 user input 对应一个 turn，但一个 turn 内可能输出多个 assistant segment。
-- `control.synth_finished` 表示该 turn 的输出队列逻辑关闭，不应再追加新的 `output.*` / `engine.motion_*` segment；它不要求早于所有前端播放完成。
-- 为容忍传输和调度顺序，同一 `turn_id / message_id` 的晚到媒体可在前端最终结算前补齐已知 segment；这不允许创建新 segment，也不允许重复播放已 release / started / terminal 的音频。
+- `control.synth_finished` 表示该 turn 的原子输出队列关闭；到达前所有 segment 必须完整声明，到达后不接受新段或 late slot patch。
 - 前端在 `synth_finished` 已到且所有 segment 播放完成后回传 `control.playback_finished`；后端收到后再发 `control.turn_finished`。
-- `output.audio.audio_url` 指向插件侧 HTTP 静态资源，通常是 `/cache/audio/*.wav`；有 TTS 文件但前端无声时，应先验证该 URL 在配置的 `host / http_port` 上是否可达。
+- `output.segment.audio.url` 指向插件侧 HTTP 静态资源，通常是 `/cache/audio/*.wav`；有 TTS 文件但前端无声时，应先验证该 URL 在配置的 `host / http_port` 上是否可达。
 - 麦克风输入现在按“单段录音”组织：一段采集内的 `input.audio_stream_start`、WebSocket binary PCM16LE chunk 与 `input.audio_stream_end` 共享同一个新的 `turn_id` 和 `stream_id`；后端 STT ingress 按 `stream_id` 汇总音频，不再把不同输入段混到一个全局缓冲。
 - 若前端检测到发送积压，会在 `input.audio_stream_end` 中带上 `dropped: true`，后端直接丢弃该段转写。
 - 切换麦克风设备时，前端会先正常结束旧输入段，再启动新输入段；收到 `control.interrupt` 时，前端会把已释放的 segment 音频写成失败终态后再清理播放 runtime。

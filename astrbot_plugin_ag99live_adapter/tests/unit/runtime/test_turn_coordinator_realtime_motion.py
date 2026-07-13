@@ -4,6 +4,8 @@ import asyncio
 import importlib
 import json
 
+import pytest
+
 
 _AXIS_NAMES = [
     "head_yaw",
@@ -506,13 +508,14 @@ def test_emit_message_chain_ignores_inline_anim_when_persona_effect_is_available
             ],
         )
     )
+    asyncio.run(coordinator._flush_pending_output_segments())
 
     assert inline_broadcast == {}
     assert "reply_text" not in scheduled
-    assert sent_payloads
-    output_text_payload = sent_payloads[0]
-    assert output_text_payload.get("type") == "output.text"
-    output_text = str(output_text_payload.get("payload", {}).get("text", "")).lower()
+    assert [item.get("type") for item in sent_payloads] == ["output.segment"]
+    output_payload = sent_payloads[0]["payload"]
+    assert output_payload["motion"]["state"] == "absent"
+    output_text = str(output_payload["text"]["content"]).lower()
     assert "<@anim" not in output_text
     assert "hello" in output_text
     assert "world" in output_text
@@ -583,19 +586,20 @@ def test_emit_message_chain_dispatches_official_inline_anim_when_persona_effect_
             raw_reply_text_override=f"hello <@anim {tag_payload}> world",
         )
     )
+    asyncio.run(coordinator._flush_pending_output_segments())
 
-    assert inline_broadcast["mode"] == "preview"
-    assert inline_broadcast["source"] == "official_inline_anim_compat"
-    assert inline_broadcast["turn_id"] == "turn-inline-compat"
-    assert isinstance(inline_broadcast["message_id"], str)
-    assert inline_broadcast["message_id"]
-    motion_payload = inline_broadcast["motion_payload"]
+    assert inline_broadcast == {}
+    assert [item.get("type") for item in sent_payloads] == ["output.segment"]
+    output_payload = sent_payloads[0]["payload"]
+    motion_slot = output_payload["motion"]
+    assert motion_slot["mode"] == "preview"
+    assert motion_slot["source"] == "official_inline_anim_compat"
+    motion_payload = motion_slot["payload"]
     assert motion_payload["schema_version"] == "engine.motion_intent.v3"
     assert motion_payload["mode"] == "expressive"
     assert motion_payload["axes"] == {"head_yaw": 62.0, "mouth_smile": 64.0}
 
-    assert sent_payloads
-    output_text = str(sent_payloads[0].get("payload", {}).get("text", ""))
+    output_text = str(output_payload["text"]["content"])
     assert "<@anim" not in output_text.lower()
     assert "hello" in output_text.lower()
     assert "world" in output_text.lower()
@@ -666,14 +670,15 @@ def test_emit_message_chain_reuses_platform_visible_message_id_for_segment_outpu
             },
         )
     )
+    asyncio.run(coordinator._flush_pending_output_segments())
 
-    by_type = {str(payload.get("type")): payload for payload in sent_payloads}
-    assert by_type["output.text"]["message_id"] == "visible-msg-1"
-    assert by_type["engine.motion_intent"]["message_id"] == "visible-msg-1"
-    assert by_type["output.audio"]["message_id"] == "visible-msg-1"
-    assert by_type["output.text"]["turn_id"] == "turn-segment"
-    assert by_type["engine.motion_intent"]["turn_id"] == "turn-segment"
-    assert by_type["output.audio"]["turn_id"] == "turn-segment"
+    assert [item.get("type") for item in sent_payloads] == ["output.segment"]
+    output_segment = sent_payloads[0]
+    assert output_segment["message_id"] == "visible-msg-1"
+    assert output_segment["turn_id"] == "turn-segment"
+    assert output_segment["payload"]["text"]["state"] == "present"
+    assert output_segment["payload"]["audio"]["state"] == "present"
+    assert output_segment["payload"]["motion"]["state"] == "present"
 
 
 def test_emit_message_chain_uses_record_text_only_as_audio_caption(
@@ -733,15 +738,17 @@ def test_emit_message_chain_uses_record_text_only_as_audio_caption(
             platform_extras={"visible_message_id": "visible-audio-1"},
         )
     )
+    asyncio.run(coordinator._flush_pending_output_segments())
 
-    assert [payload.get("type") for payload in sent_payloads] == ["output.audio"]
-    audio_payload = sent_payloads[0]["payload"]
+    assert [payload.get("type") for payload in sent_payloads] == ["output.segment"]
+    segment_payload = sent_payloads[0]["payload"]
+    assert segment_payload["text"]["state"] == "absent"
+    audio_payload = segment_payload["audio"]
     assert audio_payload["caption_text"] == "字幕文本"
-    assert "text" not in audio_payload
     assert sent_payloads[0]["message_id"] == "visible-audio-1"
     assert recorded_events[0]["assistant_text"] == ""
     assert recorded_events[0]["raw"]["audio_caption_text"] == "字幕文本"
-    assert curve_contexts[0]["assistant_text"] == ""
+    assert curve_contexts == []
 
 
 def test_emit_message_chain_dedupes_motion_client_object_for_segmented_output(
@@ -802,27 +809,11 @@ def test_emit_message_chain_dedupes_motion_client_object_for_segmented_output(
 
     asyncio.run(emit_segment("visible-msg::core_reply::0001"))
     asyncio.run(emit_segment("visible-msg::core_reply::0002"))
+    asyncio.run(coordinator._flush_pending_output_segments())
 
-    motion_payloads = [
-        payload
-        for payload in sent_payloads
-        if payload.get("type") == "engine.motion_intent"
-    ]
-    text_payloads = [
-        payload
-        for payload in sent_payloads
-        if payload.get("type") == "output.text"
-    ]
-
-    assert len(text_payloads) == 2
-    assert len(motion_payloads) == 1
-    assert [payload["message_id"] for payload in motion_payloads] == [
-        "visible-msg::core_reply",
-    ]
-    assert [payload["message_id"] for payload in text_payloads] == [
-        "visible-msg::core_reply",
-        "visible-msg::core_reply",
-    ]
+    assert [payload.get("type") for payload in sent_payloads] == ["output.segment"]
+    assert sent_payloads[0]["message_id"] == "visible-msg::core_reply"
+    assert sent_payloads[0]["payload"]["motion"]["state"] == "present"
 
 
 def test_emit_message_chain_treats_inline_payload_as_visible_text_only_when_persona_effect_available(
@@ -892,564 +883,14 @@ def test_emit_message_chain_treats_inline_payload_as_visible_text_only_when_pers
             message_chain=[Plain(f"hello <@anim {tag_payload}> world")],
         )
     )
+    asyncio.run(coordinator._flush_pending_output_segments())
 
     assert inline_broadcast == {}
-    assert sent_payloads
-    output_text = str(sent_payloads[0].get("payload", {}).get("text", ""))
+    assert [item.get("type") for item in sent_payloads] == ["output.segment"]
+    output_text = str(sent_payloads[0]["payload"]["text"]["content"])
     assert "<@anim" not in output_text.lower()
     assert "hello" in output_text.lower()
     assert "world" in output_text.lower()
-
-
-def test_broadcast_motion_payload_uses_intent_key_for_motion_intent(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-    TurnCoordinator = module.TurnCoordinator
-
-    coordinator = TurnCoordinator.__new__(TurnCoordinator)
-    coordinator.session_state = type(
-        "SessionStateStub",
-        (),
-        {
-            "client_uid": "desktop-client",
-            "current_turn_id": "turn-intent",
-        },
-    )()
-
-    sent_payloads: list[dict[str, object]] = []
-
-    async def fake_send_json(payload):
-        sent_payloads.append(payload)
-        return True
-
-    coordinator._send_json = fake_send_json
-
-    sent = asyncio.run(
-        coordinator.broadcast_motion_payload(
-            motion_payload=_build_valid_motion_intent(),
-            mode="preview",
-            source="test.intent",
-            turn_id="turn-intent",
-        )
-    )
-
-    assert sent is True
-    assert sent_payloads
-    envelope = sent_payloads[0]
-    assert envelope["type"] == "engine.motion_intent"
-    assert "intent" in envelope["payload"]
-    assert "plan" not in envelope["payload"]
-
-
-def test_broadcast_motion_payload_records_prompt_motion_snapshot(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-    TurnCoordinator = module.TurnCoordinator
-
-    coordinator = TurnCoordinator.__new__(TurnCoordinator)
-    coordinator.session_state = type(
-        "SessionStateStub",
-        (),
-        {
-            "client_uid": "desktop-client",
-            "current_turn_id": "turn-intent",
-        },
-    )()
-
-    sent_payloads: list[dict[str, object]] = []
-
-    async def fake_send_json(payload):
-        sent_payloads.append(payload)
-        return True
-
-    coordinator._send_json = fake_send_json
-
-    sent = asyncio.run(
-        coordinator.broadcast_motion_payload(
-            motion_payload=_build_valid_motion_intent(),
-            mode="preview",
-            source="test.intent",
-            turn_id="turn-intent",
-        )
-    )
-
-    assert sent is True
-    assert sent_payloads
-    snapshot = coordinator.get_last_prompt_motion_snapshot()
-    assert snapshot is not None
-    assert snapshot["schema_version"] == "engine.motion_intent.v3"
-    assert snapshot["source"] == "test.intent"
-    assert snapshot["intent_tags"] == ["test", "motion"]
-    assert snapshot["axes"]["head_yaw"] == 62.0
-    assert snapshot["axes"]["mouth_smile"] == 64.0
-
-
-def test_broadcast_motion_payload_preserves_axes_for_model_engine(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-    TurnCoordinator = module.TurnCoordinator
-
-    coordinator = TurnCoordinator.__new__(TurnCoordinator)
-    coordinator.session_state = type(
-        "SessionStateStub",
-        (),
-        {
-            "client_uid": "desktop-client",
-            "current_turn_id": "turn-intent",
-        },
-    )()
-    coordinator.runtime_state = _runtime_state_stub_with_motion_tuning_fallback()
-
-    sent_payloads: list[dict[str, object]] = []
-
-    async def fake_send_json(payload):
-        sent_payloads.append(payload)
-        return True
-
-    coordinator._send_json = fake_send_json
-
-    sent = asyncio.run(
-        coordinator.broadcast_motion_payload(
-            motion_payload={
-                "schema_version": "engine.motion_intent.v3",
-                "profile_id": "pet.semantic.v1",
-                "profile_revision": 2,
-                "model_id": "pet",
-                "intent_tags": ["test", "motion"],
-                "duration_hint_ms": 1200,
-                "axes": {
-                    "head_yaw": 72.0,
-                    "body_yaw": 28.0,
-                },
-                "summary": {
-                    "axis_count": 2,
-                },
-            },
-            mode="preview",
-            source="test.intent",
-            turn_id="turn-intent",
-        )
-    )
-
-    assert sent is True
-    envelope = sent_payloads[0]
-    intent = envelope["payload"]["intent"]
-    assert intent["axes"]["body_yaw"] == 28.0
-    assert "axis_constraint_adjusted_axes" not in intent["summary"]
-
-
-def test_broadcast_motion_payload_attaches_ready_performance_curve_hint(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-    TurnCoordinator = module.TurnCoordinator
-
-    class PerformanceCurveRuntimeStub:
-        def get_ready(self, *, turn_id: str | None, message_id: str | None):
-            assert turn_id == "turn-intent"
-            assert message_id == "message-intent"
-            return {
-                "schema_version": "ag99.performance_curve_hint.v1",
-                "curve_family": "quick_in_hold_soft_out",
-                "entry": "quick",
-                "hold": "steady",
-                "exit": "soft",
-                "emphasis": "early",
-                "energy": "medium",
-            }
-
-        def start(self, request):
-            raise AssertionError("ready curve hint should not restart provider request")
-
-    runtime_state = _runtime_state_stub()
-    runtime_state.performance_curve_runtime = PerformanceCurveRuntimeStub()
-
-    coordinator = TurnCoordinator.__new__(TurnCoordinator)
-    coordinator.session_state = type(
-        "SessionStateStub",
-        (),
-        {
-            "client_uid": "desktop-client",
-            "current_turn_id": "turn-intent",
-        },
-    )()
-    coordinator.runtime_state = runtime_state
-    coordinator._current_performance_curve_context = {
-        "assistant_text": "hello",
-    }
-
-    sent_payloads: list[dict[str, object]] = []
-
-    async def fake_send_json(payload):
-        sent_payloads.append(payload)
-        return True
-
-    coordinator._send_json = fake_send_json
-
-    sent = asyncio.run(
-        coordinator.broadcast_motion_payload(
-            motion_payload=_build_valid_motion_intent(),
-            mode="preview",
-            source="test.intent",
-            turn_id="turn-intent",
-            message_id="message-intent",
-        )
-    )
-
-    assert sent is True
-    intent = sent_payloads[0]["payload"]["intent"]
-    assert intent["performance_curve_hint"]["curve_family"] == "quick_in_hold_soft_out"
-    assert intent["performance_curve_hint"]["entry"] == "quick"
-
-
-def test_broadcast_motion_payload_defers_performance_curve_failure_until_audio(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-    TurnCoordinator = module.TurnCoordinator
-
-    class PerformanceCurveRuntimeStub:
-        def get_ready(self, *, turn_id: str | None, message_id: str | None):
-            assert turn_id == "turn-intent"
-            assert message_id == "message-intent"
-            return None
-
-        def fail_if_not_ready(self, *, turn_id: str | None, message_id: str | None, reason: str):
-            raise AssertionError("performance curve should not fail at motion egress")
-
-    runtime_state = _runtime_state_stub()
-    runtime_state.performance_curve_runtime = PerformanceCurveRuntimeStub()
-
-    coordinator = TurnCoordinator.__new__(TurnCoordinator)
-    coordinator.session_state = type(
-        "SessionStateStub",
-        (),
-        {
-            "client_uid": "desktop-client",
-            "current_turn_id": "turn-intent",
-        },
-    )()
-    coordinator.runtime_state = runtime_state
-
-    sent_payloads: list[dict[str, object]] = []
-
-    async def fake_send_json(payload):
-        sent_payloads.append(payload)
-        return True
-
-    coordinator._send_json = fake_send_json
-
-    sent = asyncio.run(
-        coordinator.broadcast_motion_payload(
-            motion_payload=_build_valid_motion_intent(),
-            mode="preview",
-            source="test.intent",
-            turn_id="turn-intent",
-            message_id="message-intent",
-        )
-    )
-
-    assert sent is True
-    intent = sent_payloads[0]["payload"]["intent"]
-    assert "performance_curve_hint" not in intent
-    pending = coordinator._pending_performance_curve_motions["turn-intent:message-intent"]
-    assert pending["turn_id"] == "turn-intent"
-    assert pending["message_id"] == "message-intent"
-
-
-def test_flush_performance_curve_before_audio_sends_hint_patch(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-    TurnCoordinator = module.TurnCoordinator
-
-    class PerformanceCurveRuntimeStub:
-        ready = False
-        failed = False
-        cleared = False
-
-        def get_ready(self, *, turn_id: str | None, message_id: str | None):
-            assert turn_id == "turn-intent"
-            assert message_id == "message-intent"
-            if not self.ready:
-                return None
-            return {
-                "schema_version": "ag99.performance_curve_hint.v1",
-                "curve_family": "quick_in_hold_soft_out",
-                "entry": "quick",
-                "hold": "steady",
-                "exit": "soft",
-                "emphasis": "early",
-                "energy": "medium",
-            }
-
-        def clear(self, *, turn_id: str | None, message_id: str | None):
-            assert turn_id == "turn-intent"
-            assert message_id == "message-intent"
-            self.cleared = True
-
-        def fail_if_not_ready(self, *, turn_id: str | None, message_id: str | None, reason: str):
-            self.failed = True
-            return True
-
-    curve_runtime = PerformanceCurveRuntimeStub()
-    runtime_state = _runtime_state_stub()
-    runtime_state.performance_curve_runtime = curve_runtime
-
-    coordinator = TurnCoordinator.__new__(TurnCoordinator)
-    coordinator.session_state = type(
-        "SessionStateStub",
-        (),
-        {
-            "client_uid": "desktop-client",
-            "current_turn_id": "turn-intent",
-        },
-    )()
-    coordinator.runtime_state = runtime_state
-
-    sent_payloads: list[dict[str, object]] = []
-
-    async def fake_send_json(payload):
-        sent_payloads.append(payload)
-        return True
-
-    coordinator._send_json = fake_send_json
-
-    first_sent = asyncio.run(
-        coordinator.broadcast_motion_payload(
-            motion_payload=_build_valid_motion_intent(),
-            mode="preview",
-            source="test.intent",
-            turn_id="turn-intent",
-            message_id="message-intent",
-        )
-    )
-    assert first_sent is True
-    assert "performance_curve_hint" not in sent_payloads[0]["payload"]["intent"]
-
-    curve_runtime.ready = True
-    flushed = asyncio.run(
-        coordinator._flush_performance_curve_motion_before_audio(
-            turn_id="turn-intent",
-            message_id="message-intent",
-        )
-    )
-
-    assert flushed is True
-    assert curve_runtime.failed is False
-    assert curve_runtime.cleared is True
-    assert coordinator._pending_performance_curve_motions == {}
-    assert len(sent_payloads) == 2
-    updated_envelope = sent_payloads[1]
-    assert updated_envelope["type"] == "engine.performance_curve_hint"
-    assert updated_envelope["turn_id"] == "turn-intent"
-    assert updated_envelope["message_id"] == "message-intent"
-    assert updated_envelope["payload"]["entry"] == "quick"
-
-
-def test_flush_performance_curve_before_audio_skips_when_hint_not_ready(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-    TurnCoordinator = module.TurnCoordinator
-
-    class PerformanceCurveRuntimeStub:
-        failed = False
-        cleared = False
-
-        def get_ready(self, *, turn_id: str | None, message_id: str | None):
-            assert turn_id == "turn-intent"
-            assert message_id == "message-intent"
-            return None
-
-        def clear(self, *, turn_id: str | None, message_id: str | None):
-            assert turn_id == "turn-intent"
-            assert message_id == "message-intent"
-            self.cleared = True
-
-        def fail_if_not_ready(self, *, turn_id: str | None, message_id: str | None, reason: str):
-            self.failed = True
-            return True
-
-    curve_runtime = PerformanceCurveRuntimeStub()
-    runtime_state = _runtime_state_stub()
-    runtime_state.performance_curve_runtime = curve_runtime
-
-    coordinator = TurnCoordinator.__new__(TurnCoordinator)
-    coordinator.session_state = type(
-        "SessionStateStub",
-        (),
-        {
-            "client_uid": "desktop-client",
-            "current_turn_id": "turn-intent",
-        },
-    )()
-    coordinator.runtime_state = runtime_state
-
-    sent_payloads: list[dict[str, object]] = []
-    recorded_events: list[dict[str, object]] = []
-
-    async def fake_send_json(payload):
-        sent_payloads.append(payload)
-        return True
-
-    coordinator._send_json = fake_send_json
-    coordinator._record_motion_lab_raw_event = lambda **kwargs: recorded_events.append(kwargs)
-
-    assert asyncio.run(
-        coordinator.broadcast_motion_payload(
-            motion_payload=_build_valid_motion_intent(),
-            mode="preview",
-            source="test.intent",
-            turn_id="turn-intent",
-            message_id="message-intent",
-        )
-    ) is True
-    assert "performance_curve_hint" not in sent_payloads[0]["payload"]["intent"]
-
-    flushed = asyncio.run(
-        coordinator._flush_performance_curve_motion_before_audio(
-            turn_id="turn-intent",
-            message_id="message-intent",
-        )
-    )
-
-    assert flushed is False
-    assert curve_runtime.failed is False
-    assert curve_runtime.cleared is True
-    assert coordinator._pending_performance_curve_motions == {}
-    assert len(sent_payloads) == 1
-    skipped_events = [
-        event
-        for event in recorded_events
-        if event.get("event_type") == "performance_curve.skipped"
-    ]
-    assert len(skipped_events) == 1
-    assert skipped_events[0]["raw"]["reason"] == "not_ready_before_audio_egress"
-
-
-def test_pending_performance_curve_motions_are_tracked_per_segment(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-    TurnCoordinator = module.TurnCoordinator
-
-    class PerformanceCurveRuntimeStub:
-        def __init__(self) -> None:
-            self.ready_messages: set[str] = set()
-            self.cleared_messages: list[str] = []
-
-        def get_ready(self, *, turn_id: str | None, message_id: str | None):
-            assert turn_id == "turn-intent"
-            if message_id not in self.ready_messages:
-                return None
-            return {
-                "schema_version": "ag99.performance_curve_hint.v1",
-                "curve_family": "quick_in_hold_soft_out",
-                "entry": "quick",
-                "hold": "steady",
-                "exit": "soft",
-                "emphasis": "early",
-                "energy": "medium",
-            }
-
-        def clear(self, *, turn_id: str | None, message_id: str | None):
-            assert turn_id == "turn-intent"
-            self.cleared_messages.append(str(message_id or ""))
-
-        def fail_if_not_ready(self, *, turn_id: str | None, message_id: str | None, reason: str):
-            raise AssertionError("ready segment should not fail")
-
-    curve_runtime = PerformanceCurveRuntimeStub()
-    runtime_state = _runtime_state_stub()
-    runtime_state.performance_curve_runtime = curve_runtime
-
-    coordinator = TurnCoordinator.__new__(TurnCoordinator)
-    coordinator.session_state = type(
-        "SessionStateStub",
-        (),
-        {
-            "client_uid": "desktop-client",
-            "current_turn_id": "turn-intent",
-        },
-    )()
-    coordinator.runtime_state = runtime_state
-
-    sent_payloads: list[dict[str, object]] = []
-
-    async def fake_send_json(payload):
-        sent_payloads.append(payload)
-        return True
-
-    coordinator._send_json = fake_send_json
-
-    for message_id in ("message-a", "message-b"):
-        assert asyncio.run(
-            coordinator.broadcast_motion_payload(
-                motion_payload=_build_valid_motion_intent(),
-                mode="preview",
-                source="test.intent",
-                turn_id="turn-intent",
-                message_id=message_id,
-            )
-        ) is True
-
-    assert sorted(coordinator._pending_performance_curve_motions) == [
-        "turn-intent:message-a",
-        "turn-intent:message-b",
-    ]
-
-    curve_runtime.ready_messages.add("message-a")
-    assert asyncio.run(
-        coordinator._flush_performance_curve_motion_before_audio(
-            turn_id="turn-intent",
-            message_id="message-a",
-        )
-    ) is True
-
-    assert sorted(coordinator._pending_performance_curve_motions) == [
-        "turn-intent:message-b",
-    ]
-    assert curve_runtime.cleared_messages == ["message-a"]
-
-    curve_runtime.ready_messages.add("message-b")
-    assert asyncio.run(
-        coordinator._flush_performance_curve_motion_before_audio(
-            turn_id="turn-intent",
-            message_id="message-b",
-        )
-    ) is True
-
-    assert coordinator._pending_performance_curve_motions == {}
-    assert curve_runtime.cleared_messages == ["message-a", "message-b"]
-    hint_patches = [
-        payload
-        for payload in sent_payloads
-        if payload.get("type") == "engine.performance_curve_hint"
-    ]
-    assert [payload["message_id"] for payload in hint_patches] == [
-        "message-a",
-        "message-b",
-    ]
 
 
 def test_build_engine_motion_preview_uses_preview_envelope() -> None:
@@ -1612,15 +1053,14 @@ def test_emit_message_chain_raw_reply_text_override_uses_official_inline_anim_co
             raw_reply_text_override=raw_reply_text,
         )
     )
+    asyncio.run(coordinator._flush_pending_output_segments())
 
-    assert inline_broadcast["mode"] == "preview"
-    assert inline_broadcast["source"] == "official_inline_anim_compat"
-    assert inline_broadcast["turn_id"] == "turn-inline-override"
-    assert inline_broadcast["motion_payload"]["schema_version"] == "engine.motion_intent.v3"
-    assert sent_payloads
-    output_text_payload = sent_payloads[0]
-    assert output_text_payload.get("type") == "output.text"
-    output_text = str(output_text_payload.get("payload", {}).get("text", ""))
+    assert inline_broadcast == {}
+    assert [item.get("type") for item in sent_payloads] == ["output.segment"]
+    segment_payload = sent_payloads[0]["payload"]
+    assert segment_payload["motion"]["source"] == "official_inline_anim_compat"
+    assert segment_payload["motion"]["payload"]["schema_version"] == "engine.motion_intent.v3"
+    output_text = str(segment_payload["text"]["content"])
     assert "<@anim" not in output_text.lower()
     assert "hello" in output_text.lower()
     assert "world" in output_text.lower()
@@ -1679,12 +1119,13 @@ def test_emit_message_chain_inline_invalid_v3_intent_does_not_broadcast_replacem
     )
     raw_reply_text = f"hello <@anim {tag_payload}> world"
 
-    asyncio.run(
-        coordinator.emit_message_chain(
-            message_chain=[Plain("hello world")],
-            raw_reply_text_override=raw_reply_text,
+    with pytest.raises(ValueError, match="official_inline_anim_compat_rejected"):
+        asyncio.run(
+            coordinator.emit_message_chain(
+                message_chain=[Plain("hello world")],
+                raw_reply_text_override=raw_reply_text,
+            )
         )
-    )
 
     assert inline_broadcast == {}
 
@@ -1756,12 +1197,13 @@ def test_emit_message_chain_inline_v1_intent_is_rejected(
         separators=(",", ":"),
     ) + ">"
 
-    asyncio.run(
-        coordinator.emit_message_chain(
-            message_chain=[Plain("hello")],
-            raw_reply_text_override=raw_reply_text,
+    with pytest.raises(ValueError, match="official_inline_anim_compat_rejected"):
+        asyncio.run(
+            coordinator.emit_message_chain(
+                message_chain=[Plain("hello")],
+                raw_reply_text_override=raw_reply_text,
+            )
         )
-    )
 
     assert inline_broadcast == {}
 
@@ -1778,13 +1220,13 @@ def test_handle_msg_emits_control_error_for_unhandled_allowed_message_type(
     monkeypatch.setattr(
         constants,
         "INBOUND_ALLOWED_TYPES",
-        set(constants.INBOUND_ALLOWED_TYPES) | {constants.TYPE_OUTPUT_TEXT},
+        set(constants.INBOUND_ALLOWED_TYPES) | {constants.TYPE_OUTPUT_SEGMENT},
     )
     parser_module = importlib.import_module("astrbot_plugin_ag99live_adapter.protocol.parser")
     monkeypatch.setattr(
         parser_module,
         "INBOUND_ALLOWED_TYPES",
-        set(parser_module.INBOUND_ALLOWED_TYPES) | {constants.TYPE_OUTPUT_TEXT},
+        set(parser_module.INBOUND_ALLOWED_TYPES) | {constants.TYPE_OUTPUT_SEGMENT},
     )
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
@@ -1819,7 +1261,7 @@ def test_handle_msg_emits_control_error_for_unhandled_allowed_message_type(
     asyncio.run(
         coordinator.handle_msg(
                 {
-                    "type": constants.TYPE_OUTPUT_TEXT,
+                    "type": constants.TYPE_OUTPUT_SEGMENT,
                     "version": constants.PROTOCOL_VERSION,
                     "message_id": "message-unhandled",
                     "turn_id": "turn-unhandled",

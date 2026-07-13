@@ -30,9 +30,7 @@ from .constants import (
     TYPE_CONTROL_TURN_STARTED,
     TYPE_ENGINE_CATALOG_MOTION,
     TYPE_ENGINE_MOTION_PREVIEW,
-    TYPE_OUTPUT_AUDIO,
-    TYPE_OUTPUT_IMAGE,
-    TYPE_OUTPUT_TEXT,
+    TYPE_OUTPUT_SEGMENT,
     TYPE_OUTPUT_TRANSCRIPTION,
     TYPE_SYSTEM_BACKGROUND_LIST,
     TYPE_SYSTEM_GROUP_UPDATE,
@@ -287,62 +285,33 @@ def build_system_motion_tuning_samples_state(
     )
 
 
-def build_output_text(
+def build_output_segment(
     *,
     turn_id: str | None,
-    message_id: str | None = None,
-    text: str,
-    speaker_name: str,
-    avatar: str,
-    audio_expected: bool = False,
-) -> dict[str, Any]:
-    return build_message_envelope(
-        TYPE_OUTPUT_TEXT,
-        turn_id=turn_id,
-        message_id=message_id,
-        source=SOURCE_ADAPTER,
-        payload={
-            "text": text,
-            "speaker_name": speaker_name,
-            "avatar": avatar,
-            "audio_expected": bool(audio_expected),
-        },
-    )
-
-
-def build_output_audio(
-    *,
-    turn_id: str | None,
-    message_id: str | None = None,
-    audio_url: str | None,
-    caption_text: str,
-    speaker_name: str,
-    avatar: str,
-) -> dict[str, Any]:
-    return build_message_envelope(
-        TYPE_OUTPUT_AUDIO,
-        turn_id=turn_id,
-        message_id=message_id,
-        source=SOURCE_ADAPTER,
-        payload={
-            "audio_url": audio_url,
-            "caption_text": caption_text,
-            "speaker_name": speaker_name,
-            "avatar": avatar,
-        },
-    )
-
-
-def build_output_image(
-    *,
-    turn_id: str | None,
+    message_id: str,
+    text: dict[str, Any],
+    audio: dict[str, Any],
+    motion: dict[str, Any],
+    performance_curve: dict[str, Any],
     images: list[str],
+    speaker_name: str,
+    avatar: str,
 ) -> dict[str, Any]:
     return build_message_envelope(
-        TYPE_OUTPUT_IMAGE,
+        TYPE_OUTPUT_SEGMENT,
         turn_id=turn_id,
+        message_id=message_id,
         source=SOURCE_ADAPTER,
-        payload={"images": images},
+        payload={
+            "schema_version": "output.segment.v1",
+            "text": text,
+            "audio": audio,
+            "motion": motion,
+            "performance_curve": performance_curve,
+            "images": images,
+            "speaker_name": speaker_name,
+            "avatar": avatar,
+        },
     )
 
 

@@ -15,9 +15,7 @@
 import type {
   ControlErrorPayload,
   ControlTurnFinishedPayload,
-  OutputAudioPayload,
-  OutputImagePayload,
-  OutputTextPayload,
+  OutputSegmentPayload,
   OutputTranscriptionPayload,
   ProtocolEnvelope,
   SystemHistoryCreatedPayload,
@@ -42,9 +40,7 @@ import {
   parseHistoryListPayload,
   parseMotionTuningSamplesStatePayload,
   parseSystemMotionLabRawEventRecordedPayload,
-  parseOutputAudioPayload,
-  parseOutputImagePayload,
-  parseOutputTextPayload,
+  parseOutputSegmentPayload,
   parseOutputTranscriptionPayload,
   parseSemanticAxisProfileSaveFailedPayload,
   parseSemanticAxisProfileSavedPayload,
@@ -130,7 +126,6 @@ type InboundPassthroughEvent =
   | { kind: "history_created"; envelope: ProtocolEnvelope<SystemHistoryCreatedPayload> }
   | { kind: "history_data"; envelope: ProtocolEnvelope<SystemHistoryDataPayload> }
   | { kind: "history_deleted"; envelope: ProtocolEnvelope<SystemHistoryDeletedPayload> }
-  | { kind: "output_image"; envelope: ProtocolEnvelope<OutputImagePayload> }
   | { kind: "output_transcription"; envelope: ProtocolEnvelope<OutputTranscriptionPayload> }
   | { kind: "control_error"; envelope: ProtocolEnvelope<ControlErrorPayload> }
   | { kind: "start_mic"; envelope: ProtocolEnvelope<unknown> }
@@ -145,20 +140,11 @@ type InboundPassthroughEvent =
 export type InboundAdapterEvent =
   | InboundPassthroughEvent
   | {
-    kind: "output_text";
+    kind: "output_segment";
     messageId: string;
     turnId: string;
-    text: string;
-    audioExpected: boolean;
-    envelope: ProtocolEnvelope<OutputTextPayload>;
-  }
-  | {
-    kind: "output_audio";
-    messageId: string;
-    turnId: string;
-    captionText: string;
-    audioUrl: string | null;
-    envelope: ProtocolEnvelope<OutputAudioPayload>;
+    payload: OutputSegmentPayload;
+    envelope: ProtocolEnvelope<OutputSegmentPayload>;
   }
   | {
     kind: "turn_started";
@@ -183,19 +169,7 @@ export type InboundAdapterEvent =
     envelope: ProtocolEnvelope<unknown>;
   }
   | {
-    kind: "engine_motion_payload";
-    messageId: string;
-    turnId: string;
-    envelope: ProtocolEnvelope<Record<string, unknown>>;
-  }
-  | {
     kind: "engine_motion_preview";
-    envelope: ProtocolEnvelope<Record<string, unknown>>;
-  }
-  | {
-    kind: "engine_performance_curve_hint";
-    messageId: string;
-    turnId: string;
     envelope: ProtocolEnvelope<Record<string, unknown>>;
   };
 
@@ -311,12 +285,11 @@ export function mapInboundEnvelopeToEvent(
         envelope: withPayload(envelope, parsed.payload),
       };
     }
-    case INBOUND_MESSAGE_TYPES.OUTPUT_TEXT: {
-      const parsed = parseOutputTextPayload(envelope);
+    case INBOUND_MESSAGE_TYPES.OUTPUT_SEGMENT: {
+      const parsed = parseOutputSegmentPayload(envelope);
       if (!parsed.ok) {
         return protocolPayloadError(envelope, parsed.error);
       }
-      const payload = parsed.payload;
       const turnId = requireSegmentTurnId(envelope);
       if (!turnId.ok) {
         return turnId.event;
@@ -326,48 +299,10 @@ export function mapInboundEnvelopeToEvent(
         return messageId.event;
       }
       return {
-        kind: "output_text",
+        kind: "output_segment",
         messageId: messageId.messageId,
         turnId: turnId.turnId,
-        text: payload.text.trim(),
-        audioExpected: payload.audio_expected,
-        envelope: withPayload(envelope, payload),
-      };
-    }
-    case INBOUND_MESSAGE_TYPES.OUTPUT_AUDIO: {
-      const parsed = parseOutputAudioPayload(envelope);
-      if (!parsed.ok) {
-        return protocolPayloadError(envelope, parsed.error);
-      }
-      const payload = parsed.payload;
-      const normalizedAudioUrl =
-        typeof payload.audio_url === "string" && payload.audio_url.trim()
-          ? payload.audio_url.trim()
-          : null;
-      const turnId = requireSegmentTurnId(envelope);
-      if (!turnId.ok) {
-        return turnId.event;
-      }
-      const messageId = requireSegmentMessageId(envelope);
-      if (!messageId.ok) {
-        return messageId.event;
-      }
-      return {
-        kind: "output_audio",
-        messageId: messageId.messageId,
-        turnId: turnId.turnId,
-        captionText: payload.caption_text.trim(),
-        audioUrl: normalizedAudioUrl,
-        envelope: withPayload(envelope, payload),
-      };
-    }
-    case INBOUND_MESSAGE_TYPES.OUTPUT_IMAGE: {
-      const parsed = parseOutputImagePayload(envelope);
-      if (!parsed.ok) {
-        return protocolPayloadError(envelope, parsed.error);
-      }
-      return {
-        kind: "output_image",
+        payload: parsed.payload,
         envelope: withPayload(envelope, parsed.payload),
       };
     }
@@ -444,44 +379,11 @@ export function mapInboundEnvelopeToEvent(
         envelope: withPayload(envelope, parsed.payload),
       };
     }
-    case INBOUND_MESSAGE_TYPES.ENGINE_MOTION_INTENT:
-    case INBOUND_MESSAGE_TYPES.ENGINE_CATALOG_MOTION: {
-      const turnId = requireSegmentTurnId(envelope);
-      if (!turnId.ok) {
-        return turnId.event;
-      }
-      const messageId = requireSegmentMessageId(envelope);
-      if (!messageId.ok) {
-        return messageId.event;
-      }
-      return {
-        kind: "engine_motion_payload",
-        messageId: messageId.messageId,
-        turnId: turnId.turnId,
-        envelope: envelope as ProtocolEnvelope<Record<string, unknown>>,
-      };
-    }
     case INBOUND_MESSAGE_TYPES.ENGINE_MOTION_PREVIEW:
       return {
         kind: "engine_motion_preview",
         envelope: envelope as ProtocolEnvelope<Record<string, unknown>>,
       };
-    case INBOUND_MESSAGE_TYPES.ENGINE_PERFORMANCE_CURVE_HINT: {
-      const turnId = requireSegmentTurnId(envelope);
-      if (!turnId.ok) {
-        return turnId.event;
-      }
-      const messageId = requireSegmentMessageId(envelope);
-      if (!messageId.ok) {
-        return messageId.event;
-      }
-      return {
-        kind: "engine_performance_curve_hint",
-        messageId: messageId.messageId,
-        turnId: turnId.turnId,
-        envelope: envelope as ProtocolEnvelope<Record<string, unknown>>,
-      };
-    }
     default:
       return {
         kind: "unhandled",

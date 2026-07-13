@@ -89,6 +89,52 @@ function testSameMessageIdGroupsTextAudioMotion(): void {
   assert.deepEqual(segment.motion.payload, motionPayload);
 }
 
+function testAtomicOutputSegmentCommitsOnce(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.markTurnStarted("turn-atomic");
+  store.commitOutputSegment("turn-atomic", "msg-atomic", {
+    text: { state: "present", content: "Atomic reply" },
+    audio: {
+      state: "present",
+      url: "http://localhost/atomic.wav",
+      captionText: "Atomic reply",
+    },
+    motion: { state: "present", payload: motionPayload },
+  });
+
+  const segment = store.getSession("turn-atomic")?.segments.get("msg-atomic");
+  assert.equal(segment?.text.content, "Atomic reply");
+  assert.equal(segment?.audio.url, "http://localhost/atomic.wav");
+  assert.deepEqual(segment?.motion.payload, motionPayload);
+
+  assert.throws(
+    () => store.commitOutputSegment("turn-atomic", "msg-atomic", {
+      text: { state: "present", content: "Replacement" },
+      audio: { state: "absent" },
+      motion: { state: "absent" },
+    }),
+    /Duplicate output segment/,
+  );
+  assert.equal(segment?.text.content, "Atomic reply");
+  assert.equal(store.getSession("turn-atomic")?.segmentOrder.length, 1);
+}
+
+function testAtomicOutputSegmentRejectsClosedQueueWithoutCreatingSegment(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.markTurnStarted("turn-closed");
+  store.markSynthFinished("turn-closed");
+
+  assert.throws(
+    () => store.commitOutputSegment("turn-closed", "msg-late", {
+      text: { state: "present", content: "Late reply" },
+      audio: { state: "absent" },
+      motion: { state: "absent" },
+    }),
+    /after synth_finished/,
+  );
+  assert.equal(store.getSession("turn-closed")?.segments.size, 0);
+}
+
 function testCatalogMotionPayloadCanBeStored(): void {
   const store = useTurnPlaybackSessionStore();
   store.markMotionReceived("turn-1", catalogMotionPayload, "msg-1");
@@ -97,18 +143,28 @@ function testCatalogMotionPayloadCanBeStored(): void {
   assert.equal(segment.motion.payload?.kind, "catalog_motion");
 }
 
-function testPerformanceCurveHintCanBeStoredOnSegment(): void {
+function testPerformanceCurveHintStaysAttachedToMotionPayload(): void {
   const store = useTurnPlaybackSessionStore();
-  store.markPerformanceCurveHintReceived("turn-1", curveHint, "msg-1");
-  store.markMotionReceived("turn-1", motionPayload, "msg-1");
+  if (motionPayload.kind !== "semantic_intent") {
+    throw new Error("expected semantic_intent fixture");
+  }
+  store.markMotionReceived("turn-1", {
+    kind: "semantic_intent",
+    intent: {
+      ...motionPayload.intent,
+      performance_curve_hint: curveHint,
+    },
+  }, "msg-1");
 
   const segment = getSegment(store, "msg-1");
-  assert.deepEqual(segment.motion.performanceCurveHint, curveHint);
-  assert.equal(typeof segment.motion.performanceCurveHintReceivedAtMs, "number");
+  assert.equal(segment.motion.payload?.kind, "semantic_intent");
+  if (segment.motion.payload?.kind !== "semantic_intent") {
+    throw new Error("expected semantic_intent payload");
+  }
+  assert.deepEqual(segment.motion.payload.intent.performance_curve_hint, curveHint);
 
   store.markMotionAbsent("turn-1", "msg-1");
-  assert.equal(segment.motion.performanceCurveHint, null);
-  assert.equal(segment.motion.performanceCurveHintReceivedAtMs, null);
+  assert.equal(segment.motion.payload, null);
   assert.equal(segment.motion.absent, true);
   assert.equal(segment.motion.completed, false);
 }
@@ -256,6 +312,18 @@ function testIllegalPhaseTransitionIsRejected(): void {
   assert.equal(store.getActiveSession()?.phase, "completed");
 }
 
+function testReadySessionCanSettleWithoutPlaybackSinks(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.markTurnStarted("turn-no-sinks");
+  store.commitOutputSegment("turn-no-sinks", "msg-no-sinks", {
+    text: { state: "absent" },
+    audio: { state: "absent" },
+    motion: { state: "absent" },
+  });
+  store.markPhase("turn-no-sinks", "ready");
+  assert.equal(store.markPhase("turn-no-sinks", "settling"), true);
+}
+
 function testFailedSessionCannotTransition(): void {
   const store = useTurnPlaybackSessionStore();
   store.setActiveSession("turn-1");
@@ -359,18 +427,6 @@ function testDifferentAudioUrlDoesNotResetCompletedSegment(): void {
   assert.equal(segment?.audio.started, true);
 }
 
-function testLateTextCannotClearEstablishedAudioExpectation(): void {
-  const store = useTurnPlaybackSessionStore();
-  store.setActiveSession("turn-1");
-  store.markTextReceived("turn-1", "First", "msg-1", "replace", true);
-  store.markTextReceived("turn-1", "Visible reply", "msg-1", "replace", false);
-
-  assert.equal(
-    store.getSession("turn-1")?.segments.get("msg-1")?.audio.expected,
-    true,
-  );
-}
-
 function testDuplicateMotionReceiveDoesNotResetReleasedSegment(): void {
   const store = useTurnPlaybackSessionStore();
   store.setActiveSession("turn-1");
@@ -387,8 +443,10 @@ function testDuplicateMotionReceiveDoesNotResetReleasedSegment(): void {
 function run(): void {
   testSessionStartsWithoutTurnLevelPlaybackSlots();
   testSameMessageIdGroupsTextAudioMotion();
+  testAtomicOutputSegmentCommitsOnce();
+  testAtomicOutputSegmentRejectsClosedQueueWithoutCreatingSegment();
   testCatalogMotionPayloadCanBeStored();
-  testPerformanceCurveHintCanBeStoredOnSegment();
+  testPerformanceCurveHintStaysAttachedToMotionPayload();
   testMultipleMessageIdsKeepArrivalOrder();
   testSelectorsOperateOnSegments();
   testSegmentSettlementAndTurnSettlement();
@@ -399,6 +457,7 @@ function run(): void {
   testTurnOnlySessionRemainsTurnScoped();
   testGetUnsettledSegmentsReturnsOnlyUnsettledSegments();
   testIllegalPhaseTransitionIsRejected();
+  testReadySessionCanSettleWithoutPlaybackSinks();
   testFailedSessionCannotTransition();
   testInterruptMarksSessionFailed();
   testInterruptDoesNotCreateNewSession();
@@ -406,7 +465,6 @@ function run(): void {
   testAudioTerminalHandlesAllStates();
   testDuplicateAudioReceiveDoesNotResetCompletedSegment();
   testDifferentAudioUrlDoesNotResetCompletedSegment();
-  testLateTextCannotClearEstablishedAudioExpectation();
   testDuplicateMotionReceiveDoesNotResetReleasedSegment();
   console.log("turnPlaybackSessionStore tests passed");
 }

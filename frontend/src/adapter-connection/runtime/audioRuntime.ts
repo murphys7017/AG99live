@@ -21,9 +21,7 @@ import {
   createAdapterAudioSettlementController,
 } from "./audioSettlementController.js";
 import type {
-  PlaybackTimelineSegmentMotionSink,
-  PlaybackTimelineSegmentSessionPort,
-  PlaybackTimelineSegmentTextSink,
+  PlaybackTimelineSegmentExecutionPorts,
 } from "../../playback-timeline/segmentJob.js";
 import type { NormalizedMotionPayload } from "../../model-engine/contracts.js";
 
@@ -84,6 +82,10 @@ export interface AdapterAudioRuntimeDeps {
   audioSink: PlaybackTimelineAudioSink;
   pushHistory: (role: string, text: string) => void;
   getSessionStore: () => AdapterAudioRuntimeSessionStore | undefined;
+  segmentExecution: Omit<
+    PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload>,
+    "audioSink"
+  >;
   createLipSyncRuntime?: (
     callbacks: PlaybackTimelineLipSyncRuntimeCallbacks,
   ) => PlaybackTimelineLipSyncRuntime;
@@ -109,14 +111,6 @@ export interface AdapterAudioRuntime {
     messageId: string,
     turnId: string | null,
   ) => boolean;
-  configureSegmentExecution: (options: {
-    session: PlaybackTimelineSegmentSessionPort;
-    textSink: PlaybackTimelineSegmentTextSink;
-    motionSink: Pick<
-      PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload>,
-      "start" | "interrupt"
-    >;
-  }) => void;
   startSegmentJob: PlaybackTimelineRuntime<NormalizedMotionPayload>["startSegmentJob"];
   hasPendingAudioForTurn: (turnId: string | null) => boolean;
   markAudioPlaybackTerminal: (
@@ -176,6 +170,12 @@ export function createAdapterAudioRuntime(
             markMotionFailed: sessionStore.markMotionFailed,
           }
         : undefined;
+    },
+    segmentExecution: {
+      ...deps.segmentExecution,
+      audioSink: {
+        releaseAudioForPlayback: releaseQueuedAudioForTimelinePlayback,
+      },
     },
     createLipSyncRuntime: deps.createLipSyncRuntime,
     onAudioTimelineStarted: deps.onAudioTimelineStarted,
@@ -272,27 +272,6 @@ export function createAdapterAudioRuntime(
     return released;
   }
 
-  function configureSegmentExecution(options: {
-    session: PlaybackTimelineSegmentSessionPort;
-    textSink: PlaybackTimelineSegmentTextSink;
-    motionSink: Pick<
-      PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload>,
-      "start" | "interrupt"
-    >;
-  }): void {
-    playbackTimelineRuntime.configureSegmentExecution({
-      session: options.session,
-      textSink: options.textSink,
-      audioSink: {
-        releaseAudioForPlayback: releaseQueuedAudioForTimelinePlayback,
-      },
-      motionSink: {
-        start: options.motionSink.start,
-        interrupt: options.motionSink.interrupt,
-      },
-    });
-  }
-
   function stopAudioPlayback(
     turnId: string | null,
     messageId: string | null,
@@ -325,7 +304,6 @@ export function createAdapterAudioRuntime(
   return {
     queueAudioForPlayback: audioReleaseController.queueAudioForPlayback,
     releaseAudioForPlayback,
-    configureSegmentExecution,
     startSegmentJob,
     hasPendingAudioForTurn: audioSettlementController.hasPendingAudioForTurn,
     markAudioPlaybackTerminal,

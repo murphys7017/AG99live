@@ -23,19 +23,16 @@ import type {
   SystemHistoryListPayload,
   SystemModelSyncPayload,
   SystemMotionTuningSamplesStatePayload,
-  PerformanceCurveHint,
 } from "../../types/protocol.js";
 import type { InboundAdapterEvent, InboundEventMappingContext } from "./inboundEvents.js";
 import { mapInboundEnvelopeToEvent } from "./inboundEvents.js";
 import type { PendingAssistantTextItem, PendingAudioItem } from "../../playback-timeline/playbackReleaseQueue.js";
 import type { NormalizedMotionPayload } from "../../model-engine/contracts.js";
-import type { PendingMotionItem } from "./pendingMotionIngress.js";
+import type { OutputSegmentMaterial } from "../../turn-playback/session.js";
 import { dispatchInboundConnectionEvent } from "./inboundConnectionDispatcher.js";
 import { dispatchInboundFeatureEvent } from "./inboundFeatureDispatcher.js";
 import {
-  dispatchInboundMotionEvent,
   dispatchInboundMotionPreviewEvent,
-  dispatchInboundPerformanceCurveHintEvent,
 } from "./inboundMotionDispatcher.js";
 import { dispatchInboundOutputEvent } from "./inboundOutputDispatcher.js";
 import {
@@ -73,7 +70,6 @@ export interface InboundDispatchState {
   // pending queues
   pendingAssistantTexts: Map<string, PendingAssistantTextItem>;
   pendingAudios: Map<string, PendingAudioItem>;
-  pendingMotions: Map<string, PendingMotionItem>;
   // motion plan
   inboundMotionPlan: unknown;
   inboundMotionPlanTurnId: string | null;
@@ -88,15 +84,12 @@ export interface InboundDispatchDeps {
     markSynthFinished: (turnId: string | null) => void;
     markTurnFinished: (turnId: string | null, success: boolean, reason?: string) => void;
     markInterrupt: (turnId: string | null) => void;
-    markTextReceived: (turnId: string | null, text: string, messageId: string, mode?: string, audioExpected?: boolean) => void;
-    markTextDelivered: (turnId: string | null, messageId: string) => void;
-    markAudioReceived: (turnId: string | null, url: string, messageId: string, captionText?: string) => boolean;
-    markAudioTerminal: (turnId: string | null, terminal: string, messageId: string, reason?: string) => void;
-    markMotionReceived: (turnId: string | null, payload: NormalizedMotionPayload, messageId: string) => void;
-    markPerformanceCurveHintReceived: (turnId: string | null, hint: PerformanceCurveHint, messageId: string) => void;
-    canAcceptOutputSegment: (turnId: string | null, messageId: string) => boolean;
-    ensureSegment: (turnId: string | null, messageId: string) => { text: { content: string | null } };
-    getSessions: () => Array<{ segmentOrder: string[]; segments: Map<string, { messageId: string; turnId: string | null }> }>;
+    assertOutputSegmentsResolved: (turnId: string | null) => void;
+    commitOutputSegment: (
+      turnId: string | null,
+      messageId: string,
+      material: OutputSegmentMaterial,
+    ) => void;
   } | undefined;
   pushHistory: (role: string, text: string) => void;
   modelSyncAdapter: {
@@ -118,57 +111,14 @@ export interface InboundDispatchDeps {
   // audio
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
-  markAudioPlaybackTerminal: (terminalState: string, turnId: string | null, reason?: string, messageId?: string | null) => void;
   hasPendingAudioForTurn: (turnId: string | null) => boolean;
-  markMissingAudiosForTurn: (turnId: string | null, reason: string) => void;
-  markMissingMotionsForTurn: (turnId: string | null, reason: string) => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   reportRuntimeProtocolViolation: (message: string) => void;
   // text / audio queue
   queuePendingAssistantTextForPlayback: (map: Map<string, PendingAssistantTextItem>, text: string, turnId: string | null, messageId: string) => void;
   queuePendingAudioForPlayback: (map: Map<string, PendingAudioItem>, url: string, turnId: string | null, messageId: string) => void;
-  flushPendingMotionForSegment: (turnId: string | null, messageId: string) => void;
   playMotionPreviewPayload?: (payload: unknown) => boolean;
-  // motion
-  hasPlaybackSegment: (turnId: string | null, messageId: string) => boolean;
-  canQueuePendingMotionForTurn: (turnId: string | null) => boolean;
-  canAcceptSegmentPatch: (turnId: string | null, messageId: string) => boolean;
-  queuePendingMotionForSegment: (
-    turnId: string | null,
-    messageId: string,
-    payload: NormalizedMotionPayload,
-  ) => void;
-  clearPendingMotionsForTurn: (turnId: string | null, reason: string) => void;
-  rejectSegmentPatchWithoutOutput: (
-    kind: string,
-    turnId: string | null,
-    messageId: string,
-  ) => void;
-  rejectSegmentPatchAfterSynthFinished: (
-    kind: string,
-    turnId: string | null,
-    messageId: string,
-  ) => void;
-  rejectOutputAfterSynthFinished: (
-    kind: string,
-    turnId: string | null,
-    messageId: string,
-  ) => void;
   normalizeMotionPayload: (payload: unknown) => { ok: true; payload: NormalizedMotionPayload } | { ok: false };
-  applyInboundMotionPayload: (
-    ctx: {
-      state: {
-        currentTurnId: string | null;
-        statusMessage: string;
-        lastError: string;
-        inboundMotionPlan: unknown;
-        inboundMotionPlanTurnId: string | null;
-        inboundMotionPlanReceivedAtMs: number;
-      };
-      pushHistory: (role: "system" | "error", text: string) => void;
-    },
-    envelope: ProtocolEnvelope<Record<string, unknown>>,
-  ) => { accepted: false } | { accepted: true; rawPlan: Record<string, unknown> };
   // mic
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
   // protocol warnings
@@ -208,9 +158,7 @@ export async function dispatchInboundEvent(
         dispatchInboundFeatureEvent(deps, event);
       }
       return;
-    case "output_text":
-    case "output_audio":
-    case "output_image":
+    case "output_segment":
     case "output_transcription":
       await dispatchInboundOutputEvent(deps, event);
       return;
@@ -225,14 +173,8 @@ export async function dispatchInboundEvent(
     case "protocol_error":
       reportInboundProtocolError(deps, event);
       return;
-    case "engine_motion_payload":
-      dispatchInboundMotionEvent(deps, event);
-      return;
     case "engine_motion_preview":
       dispatchInboundMotionPreviewEvent(deps, event);
-      return;
-    case "engine_performance_curve_hint":
-      dispatchInboundPerformanceCurveHintEvent(deps, event);
       return;
     case "unhandled":
       reportUnhandledInboundEnvelope(deps, event.envelope);

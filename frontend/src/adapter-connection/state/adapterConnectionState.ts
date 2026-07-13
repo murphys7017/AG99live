@@ -15,7 +15,6 @@ import type {
   PendingAssistantTextItem,
   PendingAudioItem,
 } from "../../playback-timeline/playbackReleaseQueue.js";
-import type { PendingMotionItem } from "../inbound/pendingMotionIngress.js";
 import {
   loadDesktopScreenshotOnSendEnabled,
   loadStoredAdapterAddress,
@@ -66,7 +65,6 @@ export function createAdapterConnectionState() {
     inboundMotionPlan: null as unknown | null,
     inboundMotionPlanTurnId: null as string | null,
     inboundMotionPlanReceivedAtMs: 0,
-    pendingMotions: new Map<string, PendingMotionItem>(),
     pendingAssistantTexts: new Map<string, PendingAssistantTextItem>(),
     pendingAudios: new Map<string, PendingAudioItem>(),
     audioPlaybackStartedTurnId: null as string | null,

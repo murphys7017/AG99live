@@ -24,7 +24,7 @@
 
 | 标识符 | 层级 | 所有者 | 作用 | 是否必须 |
 | --- | --- | --- | --- | --- |
-| `message_id` | 片段 | 协议 | 绑定一个助手回复片段 | `output.text`、`output.audio`、`engine.motion_intent` 中必须 |
+| `message_id` | 片段 | 协议 | 绑定一个原子助手回复片段 | `output.segment` 中必须；预览消息按自身契约使用 |
 | `turn_id` | 轮次 | 前端创建，后后端回传 | 贯穿输入、输出、动作、打断、播放完成、轮次结束 | 所有交互链路消息必须；纯 `system.*` 可为 `null` |
 
 约束：
@@ -39,8 +39,8 @@
 
 ```text
 control.synth_finished
-= 后端输出队列关闭
-= 此轮次不应再追加新的 output.* 或 engine.motion_intent segment
+= 后端原子输出队列关闭
+= 此轮次不应再追加新的 output.segment
 
 control.playback_finished
 = 前端本地播放已稳定
@@ -51,7 +51,7 @@ control.turn_finished
 = 后端收到 playback_finished 后发出
 ```
 
-`synth_finished` 是 turn 级输出队列关闭信号，不是单条音频生成完成信号。为容忍传输顺序，同一 `turn_id / message_id` 的晚到媒体可以补齐已知 segment，但不得创建新 segment，也不得让已 release / started / terminal 的音频重复播放。
+`synth_finished` 是 turn 级输出队列关闭信号，不是单条音频生成完成信号。它到达前，每个已知 segment 必须已经由一个完整 `output.segment` 声明；到达后不接受新段，也不存在晚到 slot 补齐。
 
 ## 消息类型
 
@@ -106,14 +106,39 @@ control.turn_finished
 
 | 类型 | 载荷 | 需要 `message_id` |
 | --- | --- | --- |
-| `output.text` | `{ text: string, speaker_name: string, avatar: string }` | 是 |
-| `output.audio` | `{ caption_text: string, audio_url: string \| null, speaker_name: string, avatar: string }` | 是 |
-| `output.image` | `{ images: string[] }` | 否 |
+| `output.segment` | `output.segment.v1` 原子段，见下文 | 是 |
 | `output.transcription` | `{ text: string }` | 否 |
 
-同一回复片段的 `output.text`、`output.audio`、`engine.motion_intent` 必须共享同一个 `turn_id`，并各自带独立 `message_id`。
+`output.segment.v1` 的结构：
 
-`output.audio.audio_url` 指向 Adapter HTTP 静态资源，常见路径为 `/cache/audio/*.wav`。前端可以按当前连接重写 host；如果 URL 无法 fetch，属于音频交付 / 静态资源服务问题，不等同于 TTS 生成失败。
+```json
+{
+  "schema_version": "output.segment.v1",
+  "text": { "state": "present", "content": "可见正文" },
+  "audio": {
+    "state": "present",
+    "url": "/cache/audio/reply.wav",
+    "caption_text": "语音字幕"
+  },
+  "motion": {
+    "state": "present",
+    "message_type": "engine.motion_intent",
+    "mode": "expressive",
+    "source": "persona_effect",
+    "payload": { "schema_version": "engine.motion_intent.v4" }
+  },
+  "performance_curve": { "state": "ready", "hint": {} },
+  "images": [],
+  "speaker_name": "Alice",
+  "avatar": ""
+}
+```
+
+`text`、`audio`、`motion` 都必须使用显式 tagged slot：`present | absent | failed`。`performance_curve` 使用 `ready | skipped | disabled`。不得省略 slot，也不得在段发送后用独立协议 patch 修改它。
+
+AstrBot 内部 Plain、Record、图片与 motion client object 可以物理分离，但 Adapter 必须先按 `turn_id + message_id` 聚合，再发送一个 `output.segment`。`Record.text` 只写入 `audio.caption_text`，不生成第二份可见正文。
+
+`audio.url` 指向 Adapter HTTP 静态资源，常见路径为 `/cache/audio/*.wav`。前端可以按当前连接重写 host；如果 URL 无法 fetch，属于音频交付 / 静态资源服务问题，不等同于 TTS 生成失败。
 
 ### control.* （双向）
 
@@ -149,20 +174,22 @@ Motion Lab 事件采用 at-least-once 交付：前端必须先把事件写入 In
 
 | 类型 | 方向 | 模式 |
 | --- | --- | --- |
-| `engine.motion_intent` | 双向 | 主协议：`engine.motion_intent.v4`；官方兼容：v3 |
+| `engine.motion_intent` | 前端 -> 后端 | 动作实验室 / 手动预览请求 |
+| `engine.catalog_motion` | 前端 -> 后端 | catalog motion 手动预览请求 |
+| `engine.motion_preview` | 后端 -> 前端 | 独立预览结果，不参与正式 turn 播放 |
 
 ## 动作路径
 
-当前外部动作协议路径：
+当前正式动作路径：
 
 ```text
-后端发出 engine.motion_intent
--> 前端归一化意图
+后端把 motion intent 放入 output.segment.motion.payload
+-> 前端在原子段预校验阶段归一化意图
 -> 前端动作引擎在本地将意图编译为 engine.parameter_plan.v2
 -> 前端运行时执行计划
 ```
 
-后端主路径仅广播 `engine.motion_intent`。
+后端不再为正式回复独立广播 `engine.motion_intent` 或 `engine.performance_curve_hint`。独立 `engine.*` 仅服务手动预览边界。
 
 ### `engine.motion_intent.v4`
 

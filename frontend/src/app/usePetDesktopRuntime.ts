@@ -44,6 +44,10 @@ import {
   createMotionLabOutboundQueue,
   type MotionLabRawEventInput,
 } from "../motion-lab/outboundQueue";
+import type {
+  PlaybackTimelineSegmentMotionSink,
+} from "../playback-timeline/segmentJob";
+import type { NormalizedMotionPayload } from "../model-engine/contracts";
 
 export interface PetDesktopRuntime {
   sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>;
@@ -60,7 +64,26 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const sessionStore = useTurnPlaybackSessionStore();
   const modelSync = useModelSync(createModelSync());
   const { state, selectedModel, selectedSemanticAxisProfile } = modelSync;
-  const adapter = useAdapterConnection(sessionStore, modelSync);
+  let motionTimelineSinkTarget: PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload> | null = null;
+  const requiredMotionTimelineSink: PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload> = {
+    start(payload, context) {
+      if (!motionTimelineSinkTarget) {
+        throw new Error("ModelEngine motion timeline sink is not initialized.");
+      }
+      return motionTimelineSinkTarget.start(payload, context);
+    },
+    interrupt(turnId, messageId, reason) {
+      if (!motionTimelineSinkTarget) {
+        throw new Error("ModelEngine motion timeline sink is not initialized.");
+      }
+      motionTimelineSinkTarget.interrupt(turnId, messageId, reason);
+    },
+  };
+  const adapter = useAdapterConnection(
+    sessionStore,
+    modelSync,
+    requiredMotionTimelineSink,
+  );
   const playbackTimeline = adapter.playbackTimeline;
   const bridge = useDesktopBridge();
   const motionPlayer = usePreviewMotionPlayer();
@@ -227,10 +250,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     return localPlayed;
   });
   const motionTimelineSink = playbackTimelineMotionRuntime.motionTimelineSink;
-
-  playbackTimeline.configureSegmentExecution({
-    motionSink: motionTimelineSink,
-  });
+  motionTimelineSinkTarget = motionTimelineSink;
 
   useTurnPlaybackOrchestrator({
     sessionStore,
@@ -408,6 +428,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     adapter.setMotionLabRawEventRecordedHandler(null);
     motionLabOutboundQueue.dispose();
     playbackTimelineMotionRuntime.dispose();
+    motionTimelineSinkTarget = null;
     pushToTalk.dispose();
     bilibiliLive.dispose();
     playbackCoordinator.resetPlaybackCoordination();

@@ -28,98 +28,54 @@ function defaultContext() {
   };
 }
 
-function testOutputTextUsesEnvelopeIdentity(): void {
+function makeAtomicSegmentPayload() {
+  return {
+    schema_version: "output.segment.v1",
+    text: { state: "present", content: "hello" },
+    audio: {
+      state: "present",
+      url: "https://example.com/a.wav",
+      caption_text: "hello",
+    },
+    motion: {
+      state: "present",
+      message_type: "engine.motion_intent",
+      mode: "expressive",
+      source: "persona_effect",
+      payload: {
+        mode: "expressive",
+        intent: { schema_version: "engine.motion_intent.v3" },
+      },
+    },
+    performance_curve: { state: "disabled" },
+    images: [],
+    speaker_name: "assistant",
+    avatar: "",
+  };
+}
+
+function testOutputSegmentUsesEnvelopeIdentity(): void {
   const event = mapInboundEnvelopeToEvent(
-    makeEnvelope("output.text", {
-      text: " hello ",
-      speaker_name: "assistant",
-      avatar: "",
-    }, {
+    makeEnvelope("output.segment", makeAtomicSegmentPayload(), {
       turnId: "turn-1",
     }),
     defaultContext(),
   );
 
-  assert.equal(event.kind, "output_text");
-  if (event.kind !== "output_text") {
-    throw new Error("expected output_text event");
+  assert.equal(event.kind, "output_segment");
+  if (event.kind !== "output_segment") {
+    throw new Error("expected output_segment event");
   }
   assert.equal(event.turnId, "turn-1");
   assert.equal(event.messageId, "m-1");
-  assert.equal(event.text, "hello");
-  assert.equal(event.audioExpected, false);
+  assert.deepEqual(event.payload.text, { state: "present", content: "hello" });
+  assert.equal(event.payload.audio.state, "present");
+  assert.equal(event.payload.motion.state, "present");
 }
 
-function testOutputTextMapsAudioExpected(): void {
+function testOutputSegmentRequiresTurnId(): void {
   const event = mapInboundEnvelopeToEvent(
-    makeEnvelope("output.text", {
-      text: " hello ",
-      speaker_name: "assistant",
-      avatar: "",
-      audio_expected: true,
-    }, {
-      turnId: "turn-1",
-    }),
-    defaultContext(),
-  );
-
-  assert.equal(event.kind, "output_text");
-  if (event.kind !== "output_text") {
-    throw new Error("expected output_text event");
-  }
-  assert.equal(event.audioExpected, true);
-}
-
-function testOutputAudioUsesEnvelopeIdentity(): void {
-  const event = mapInboundEnvelopeToEvent(
-    makeEnvelope("output.audio", {
-      caption_text: " hi ",
-      audio_url: " https://example.com/a.wav ",
-      speaker_name: "assistant",
-      avatar: "",
-    }, {
-      turnId: "turn-2",
-    }),
-    defaultContext(),
-  );
-
-  assert.equal(event.kind, "output_audio");
-  if (event.kind !== "output_audio") {
-    throw new Error("expected output_audio event");
-  }
-  assert.equal(event.turnId, "turn-2");
-  assert.equal(event.messageId, "m-1");
-  assert.equal(event.captionText, "hi");
-  assert.equal(event.audioUrl, "https://example.com/a.wav");
-}
-
-function testOutputTextRequiresTurnId(): void {
-  const event = mapInboundEnvelopeToEvent(
-    makeEnvelope("output.text", {
-      text: " hello ",
-      speaker_name: "assistant",
-      avatar: "",
-    }, {
-      turnId: null,
-    }),
-    defaultContext(),
-  );
-
-  assert.equal(event.kind, "protocol_error");
-  if (event.kind !== "protocol_error") {
-    throw new Error("expected protocol_error event");
-  }
-  assert.equal(event.error.path, "turn_id");
-}
-
-function testOutputAudioRequiresTurnId(): void {
-  const event = mapInboundEnvelopeToEvent(
-    makeEnvelope("output.audio", {
-      caption_text: " hi ",
-      audio_url: "https://example.com/a.wav",
-      speaker_name: "assistant",
-      avatar: "",
-    }, {
+    makeEnvelope("output.segment", makeAtomicSegmentPayload(), {
       turnId: null,
     }),
     defaultContext(),
@@ -210,27 +166,7 @@ function testSynthFinishedWithoutTurnIdIsRejected(): void {
   assert.equal(event.error.path, "turn_id");
 }
 
-function testEngineMotionRequiresTurnId(): void {
-  const event = mapInboundEnvelopeToEvent(
-    makeEnvelope("engine.motion_intent", {
-      mode: "preview",
-      intent: {
-        schema_version: "engine.motion_intent.v3",
-      },
-    }, {
-      turnId: null,
-    }),
-    defaultContext(),
-  );
-
-  assert.equal(event.kind, "protocol_error");
-  if (event.kind !== "protocol_error") {
-    throw new Error("expected protocol_error event");
-  }
-  assert.equal(event.error.path, "turn_id");
-}
-
-function testEngineCatalogMotionMapsAsMotionPayload(): void {
+function testOldProductionMotionTypeIsUnhandled(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("engine.catalog_motion", {
       mode: "preview",
@@ -243,12 +179,7 @@ function testEngineCatalogMotionMapsAsMotionPayload(): void {
     defaultContext(),
   );
 
-  assert.equal(event.kind, "engine_motion_payload");
-  if (event.kind !== "engine_motion_payload") {
-    throw new Error("expected engine_motion_payload event");
-  }
-  assert.equal(event.turnId, "turn-1");
-  assert.equal(event.messageId, "m-1");
+  assert.equal(event.kind, "unhandled");
 }
 
 function testEngineMotionPreviewDoesNotRequireSegmentMessageId(): void {
@@ -268,82 +199,19 @@ function testEngineMotionPreviewDoesNotRequireSegmentMessageId(): void {
   assert.equal(event.kind, "engine_motion_preview");
 }
 
-function testPerformanceCurveHintMapsAsSegmentPatch(): void {
-  const event = mapInboundEnvelopeToEvent(
-    makeEnvelope("engine.performance_curve_hint", {
-      schema_version: "ag99.performance_curve_hint.v1",
-      curve_family: "quick_in_hold_soft_out",
-      entry: "quick",
-      hold: "steady",
-      exit: "soft",
-      emphasis: "early",
-      energy: "medium",
-    }, {
-      turnId: "turn-curve",
-    }),
-    defaultContext(),
-  );
+function testMissingSegmentMessageIdReturnsProtocolError(): void {
+  const envelope = makeEnvelope("output.segment", makeAtomicSegmentPayload(), {
+    turnId: "turn-legacy",
+  });
+  envelope.message_id = "";
 
-  assert.equal(event.kind, "engine_performance_curve_hint");
-  if (event.kind !== "engine_performance_curve_hint") {
-    throw new Error("expected engine_performance_curve_hint event");
-  }
-  assert.equal(event.turnId, "turn-curve");
-  assert.equal(event.messageId, "m-1");
-}
-
-function testPerformanceCurveHintRequiresTurnId(): void {
-  const event = mapInboundEnvelopeToEvent(
-    makeEnvelope("engine.performance_curve_hint", {
-      schema_version: "ag99.performance_curve_hint.v1",
-      curve_family: "quick_in_hold_soft_out",
-      entry: "quick",
-      hold: "steady",
-      exit: "soft",
-      emphasis: "early",
-      energy: "medium",
-    }, {
-      turnId: null,
-    }),
-    defaultContext(),
-  );
+  const event = mapInboundEnvelopeToEvent(envelope, defaultContext());
 
   assert.equal(event.kind, "protocol_error");
   if (event.kind !== "protocol_error") {
     throw new Error("expected protocol_error event");
   }
-  assert.equal(event.error.path, "turn_id");
-}
-
-function testMissingSegmentMessageIdReturnsProtocolError(): void {
-  const envelopeA = makeEnvelope("output.text", {
-    text: " first ",
-    speaker_name: "assistant",
-    avatar: "",
-  }, {
-    turnId: "turn-legacy",
-  });
-  const envelopeB = makeEnvelope("engine.motion_intent", {
-    mode: "preview",
-    intent: {
-      schema_version: "engine.motion_intent.v3",
-    },
-  }, {
-    turnId: "turn-legacy",
-  });
-  envelopeA.message_id = "";
-  envelopeB.message_id = "";
-
-  const eventA = mapInboundEnvelopeToEvent(envelopeA, defaultContext());
-  const eventB = mapInboundEnvelopeToEvent(envelopeB, defaultContext());
-
-  assert.equal(eventA.kind, "protocol_error");
-  assert.equal(eventB.kind, "protocol_error");
-  if (eventA.kind !== "protocol_error" || eventB.kind !== "protocol_error") {
-    throw new Error("expected protocol_error events");
-  }
-  assert.equal(eventA.error.path, "message_id");
-  assert.equal(eventB.error.path, "message_id");
+  assert.equal(event.error.path, "message_id");
 }
 
 function testUnhandledTypeReturnsUnhandled(): void {
@@ -355,11 +223,11 @@ function testUnhandledTypeReturnsUnhandled(): void {
   assert.equal(event.kind, "unhandled");
 }
 
-function testInvalidOutputTextPayloadReturnsProtocolError(): void {
+function testInvalidOutputSegmentSlotReturnsProtocolError(): void {
+  const payload = makeAtomicSegmentPayload();
+  payload.audio = { state: "present", url: "", caption_text: "hello" };
   const event = mapInboundEnvelopeToEvent(
-    makeEnvelope("output.text", {
-      text: 123,
-    }),
+    makeEnvelope("output.segment", payload, { turnId: "turn-1" }),
     defaultContext(),
   );
 
@@ -368,45 +236,8 @@ function testInvalidOutputTextPayloadReturnsProtocolError(): void {
     throw new Error("expected protocol_error event");
   }
   assert.equal(event.error.code, "invalid_payload");
-  assert.equal(event.error.path, "payload.text");
-  assert.equal(event.warningKey, "payload:output.text:payload.text");
-}
-
-function testInvalidOutputTextAudioExpectedReturnsProtocolError(): void {
-  const event = mapInboundEnvelopeToEvent(
-    makeEnvelope("output.text", {
-      text: "hello",
-      audio_expected: "true",
-    }),
-    defaultContext(),
-  );
-
-  assert.equal(event.kind, "protocol_error");
-  if (event.kind !== "protocol_error") {
-    throw new Error("expected protocol_error event");
-  }
-  assert.equal(event.error.code, "invalid_payload");
-  assert.equal(event.error.path, "payload.audio_expected");
-}
-
-function testOutputAudioRejectsVisibleTextPayloadField(): void {
-  const event = mapInboundEnvelopeToEvent(
-    makeEnvelope("output.audio", {
-      text: "legacy visible text field",
-      audio_url: "https://example.com/a.wav",
-      speaker_name: "assistant",
-      avatar: "",
-    }),
-    defaultContext(),
-  );
-
-  assert.equal(event.kind, "protocol_error");
-  if (event.kind !== "protocol_error") {
-    throw new Error("expected protocol_error event");
-  }
-  assert.equal(event.error.code, "invalid_payload");
-  assert.equal(event.error.path, "payload.caption_text");
-  assert.equal(event.warningKey, "payload:output.audio:payload.caption_text");
+  assert.equal(event.error.path, "payload.audio");
+  assert.equal(event.warningKey, "payload:output.segment:payload.audio");
 }
 
 function testInvalidTurnFinishedReasonReturnsProtocolError(): void {
@@ -612,26 +443,18 @@ function testMotionLabPersistedAckRequiresEventId(): void {
 }
 
 function run(): void {
-  testOutputTextUsesEnvelopeIdentity();
-  testOutputTextMapsAudioExpected();
-  testOutputAudioUsesEnvelopeIdentity();
-  testOutputTextRequiresTurnId();
-  testOutputAudioRequiresTurnId();
+  testOutputSegmentUsesEnvelopeIdentity();
+  testOutputSegmentRequiresTurnId();
   testTurnFinishedWithoutTurnIdIsRejected();
   testTurnStartedDoesNotInheritCurrentIdentity();
   testInterruptUsesEnvelopeIdentity();
   testInterruptWithoutTurnIdIsRejected();
   testSynthFinishedWithoutTurnIdIsRejected();
-  testEngineMotionRequiresTurnId();
-  testEngineCatalogMotionMapsAsMotionPayload();
+  testOldProductionMotionTypeIsUnhandled();
   testEngineMotionPreviewDoesNotRequireSegmentMessageId();
-  testPerformanceCurveHintMapsAsSegmentPatch();
-  testPerformanceCurveHintRequiresTurnId();
   testMissingSegmentMessageIdReturnsProtocolError();
   testUnhandledTypeReturnsUnhandled();
-  testInvalidOutputTextPayloadReturnsProtocolError();
-  testInvalidOutputTextAudioExpectedReturnsProtocolError();
-  testOutputAudioRejectsVisibleTextPayloadField();
+  testInvalidOutputSegmentSlotReturnsProtocolError();
   testInvalidTurnFinishedReasonReturnsProtocolError();
   testInvalidHistoryCreatedPayloadReturnsProtocolError();
   testModelSyncPayloadMissingSelectedModelRejected();

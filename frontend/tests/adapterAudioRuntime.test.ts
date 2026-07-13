@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { createAdapterAudioRuntime } from "../src/adapter-connection/runtime/audioRuntime.js";
+import {
+  createAdapterAudioRuntime as createStrictAdapterAudioRuntime,
+} from "../src/adapter-connection/runtime/audioRuntime.js";
 import type {
   PlaybackTimelineAudioSink,
   PlaybackTimelineAudioStartCallbacks,
@@ -10,6 +12,46 @@ import type {
 } from "../src/playback-timeline/lipSyncSink.js";
 import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
 import type { AdapterAudioRuntimeSessionStore } from "../src/adapter-connection/runtime/audioRuntime.js";
+import type {
+  PlaybackTimelineSegmentExecutionPorts,
+} from "../src/playback-timeline/segmentJob.js";
+
+function createAdapterAudioRuntime(
+  deps: Omit<
+    Parameters<typeof createStrictAdapterAudioRuntime>[0],
+    "segmentExecution"
+  >,
+) {
+  let ports: Omit<
+    PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload>,
+    "audioSink"
+  > = createNoopSegmentExecutionPorts();
+  const runtime = createStrictAdapterAudioRuntime({
+    ...deps,
+    segmentExecution: {
+      session: {
+        markTextReleased: (...args) => ports.session.markTextReleased(...args),
+        markAudioReleased: (...args) => ports.session.markAudioReleased(...args),
+        markMotionReleased: (...args) => ports.session.markMotionReleased(...args),
+        markMotionFailed: (...args) => ports.session.markMotionFailed(...args),
+        markPhase: (...args) => ports.session.markPhase(...args),
+      },
+      textSink: {
+        releaseAssistantTextForPlayback: (...args) =>
+          ports.textSink.releaseAssistantTextForPlayback(...args),
+      },
+      motionSink: {
+        start: (...args) => ports.motionSink.start(...args),
+        interrupt: (...args) => ports.motionSink.interrupt(...args),
+      },
+    },
+  });
+  return Object.assign(runtime, {
+    configureSegmentExecution(next: typeof ports) {
+      ports = next;
+    },
+  });
+}
 
 const motionPayload: NormalizedMotionPayload = {
   kind: "semantic_intent",
@@ -128,10 +170,11 @@ function getSegmentTimelineSnapshot(
   return runtime.getPlaybackTimelineSnapshotForSegment(turnId, messageId);
 }
 
-function configureNoopSegmentExecutionPorts(
-  runtime: ReturnType<typeof createAdapterAudioRuntime>,
-): void {
-  runtime.configureSegmentExecution({
+function createNoopSegmentExecutionPorts(): Omit<
+  PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload>,
+  "audioSink"
+> {
+  return {
     session: {
       markTextReleased: () => {},
       markAudioReleased: () => {},
@@ -146,7 +189,13 @@ function configureNoopSegmentExecutionPorts(
       start: () => true,
       interrupt: () => {},
     },
-  });
+  };
+}
+
+function configureNoopSegmentExecutionPorts(
+  runtime: ReturnType<typeof createAdapterAudioRuntime>,
+): void {
+  runtime.configureSegmentExecution(createNoopSegmentExecutionPorts());
 }
 
 async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {

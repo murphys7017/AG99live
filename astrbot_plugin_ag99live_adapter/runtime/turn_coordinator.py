@@ -18,9 +18,8 @@ TurnCoordinator 把"前端协议消息 ↔ AstrBot 事件总线 ↔ 出站回放
        后端 turn_id 互相绑定。
 
 出站
-    4. emit_message_chain 把 AstrBot 平台回复链拆成 output.text / engine.motion_* /
-       output.image / output.audio 依次发送。
-    5. close_turn_output_queue 发 control.synth_finished。
+    4. emit_message_chain 把 AstrBot 物理回复链合并为 logical output segment。
+    5. close_turn_output_queue 原子发送 output.segment，再发 control.synth_finished。
     6. finalize_turn → _finish_turn 在收到前端 control.playback_finished（或被打断）
        后发 control.turn_finished 并把 session_state 切回 idle。
 
@@ -52,19 +51,15 @@ from ..protocol.builder import (
     build_control_synth_finished,
     build_control_turn_finished,
     build_control_turn_started,
-    build_output_audio,
-    build_output_image,
-    build_output_text,
+    build_output_segment,
 )
 from ..protocol.binary_audio import parse_binary_audio_frame
 from ..protocol import (
     SOURCE_ADAPTER,
-    SOURCE_ENGINE,
     TYPE_ENGINE_CATALOG_MOTION,
     TYPE_CONTROL_INTERRUPT,
     TYPE_CONTROL_PLAYBACK_FINISHED,
     TYPE_ENGINE_MOTION_INTENT,
-    TYPE_ENGINE_PERFORMANCE_CURVE_HINT,
     TYPE_INPUT_AUDIO_STREAM_CHUNK,
     TYPE_INPUT_AUDIO_STREAM_END,
     TYPE_INPUT_AUDIO_STREAM_START,
@@ -105,6 +100,7 @@ from .image_diagnostics import (
     emit_image_input_diagnostics,
 )
 from .motion_lab import enqueue_motion_lab_raw_event
+from .output_segment import PendingOutputSegment
 
 class TurnCoordinator:
     """后端单连接的协议+轮次编排器。
@@ -159,10 +155,9 @@ class TurnCoordinator:
         self._turn_lock = asyncio.Lock()
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._turn_timing: dict[str, Any] = {}
-        self._dispatched_platform_motion_keys: set[str] = set()
         self._last_prompt_motion_snapshot: dict[str, Any] | None = None
         self._current_performance_curve_context: dict[str, Any] | None = None
-        self._pending_performance_curve_motions: dict[str, dict[str, Any]] = {}
+        self._pending_output_segments: dict[str, PendingOutputSegment] = {}
 
     async def handle_msg(self, raw_message: dict[str, Any]) -> None:
         """入站文本协议消息的顶层路由。
@@ -255,26 +250,14 @@ class TurnCoordinator:
         raw_reply_text_override: str | None = None,
         platform_extras: dict[str, Any] | None = None,
     ) -> None:
-        """把 AstrBot 平台层产出的回复链拆成出站消息序列发给前端。
-
-        发送顺序固定为 text → motion → image → audio：
-            1. _extract_outbound_message_parts 抽出文本/图片/音频路径；
-            2. 若有可见文本，写聊天缓存并发 output.text。
-            3. _broadcast_platform_motion_client_objects 优先派发平台 motion client object；
-               Persona Effect / middleware result contributor 生成的动作会以 client object
-               进入这里。只有当前 AstrBot 不支持 Persona Effect 注入时，才允许解析
-               官方 <@anim> 兼容标签，并且仍要求标签内是 engine.motion_intent.v3。
-            4. 有图片就发 output.image。
-            5. 有音频文件就 media_service.cache_audio_file → 取 URL → 发 output.audio，
-               并把会话状态推进到 synthesizing → playing。
-        无音频时直接 mark_playing，不进入 synthesizing 阶段。
-        """
+        """Merge one physical AstrBot chain into its logical output segment."""
         del unified_msg_origin
 
-        turn_id = self.session_state.current_turn_id
+        turn_id = str(self.session_state.current_turn_id or "").strip()
+        if not turn_id:
+            raise ValueError("output_segment_requires_turn_id")
         platform_extras_dict = platform_extras if isinstance(platform_extras, dict) else {}
         segment_message_id = _resolve_platform_segment_message_id(platform_extras_dict)
-
         self._mark_turn_timing("emit_started_at")
         texts, picture_paths, record_paths, record_texts = _extract_outbound_message_parts(message_chain)
         logger.info(
@@ -285,143 +268,225 @@ class TurnCoordinator:
             len(picture_paths),
             len(record_paths),
         )
-        override_text = str(raw_reply_text_override or "").strip()
-        raw_reply_text = override_text or "\n".join(texts).strip()
+        raw_reply_text = str(raw_reply_text_override or "").strip() or "\n".join(texts).strip()
         raw_record_text = "\n".join(record_texts).strip()
         audio_caption_text = sanitize_assistant_output_text(raw_record_text)
-        reply_text = sanitize_assistant_output_text(raw_reply_text)
+        reply_text = sanitize_assistant_output_text("\n".join(texts).strip())
         semantic_text = str(platform_extras_dict.get("semantic_text") or "").strip()
         assistant_semantic_text = sanitize_assistant_output_text(
             semantic_text or reply_text or raw_reply_text
         )
-
-        if reply_text:
-            self.chat_buffer.add("assistant", reply_text)
-            await self._send_json(
-                build_output_text(
-                    turn_id=turn_id,
-                    message_id=segment_message_id,
-                    text=reply_text,
-                    speaker_name=self.speaker_name,
-                    avatar="",
-                    audio_expected=bool(record_paths),
-                )
+        segment = self._get_pending_output_segment(turn_id, segment_message_id)
+        segment.merge_text(reply_text)
+        segment.merge_semantic_text(assistant_semantic_text)
+        segment.merge_images(picture_paths)
+        if len(record_paths) > 1:
+            raise ValueError(f"output_segment_multiple_audio_files:{segment_message_id}")
+        if record_paths:
+            segment.merge_audio(
+                path=record_paths[0],
+                caption_text=audio_caption_text,
             )
 
+        motion_candidate = self._resolve_output_segment_motion(
+            platform_extras=platform_extras_dict,
+            raw_reply_text=raw_reply_text,
+        )
+        if motion_candidate is not None:
+            segment.merge_motion(**motion_candidate)
+        if segment.motion_payload is not None and not segment.curve_requested:
+            self._current_performance_curve_context = {
+                "turn_id": turn_id,
+                "message_id": segment_message_id,
+                "assistant_text": segment.semantic_text,
+                "assistant_reply_keywords": extract_assistant_reply_keywords(
+                    segment.semantic_text
+                ),
+                "chat_context": self._motion_lab_chat_context(),
+                "platform_extras": platform_extras_dict,
+            }
+            self._start_performance_curve_request(
+                motion_payload=segment.motion_payload,
+            )
+            segment.curve_requested = True
+            self._current_performance_curve_context = None
+
+    def _get_pending_output_segment(
+        self,
+        turn_id: str,
+        message_id: str,
+    ) -> PendingOutputSegment:
+        segments = getattr(self, "_pending_output_segments", None)
+        if not isinstance(segments, dict):
+            segments = {}
+            self._pending_output_segments = segments
+        key = f"{turn_id}|{message_id}"
+        segment = segments.get(key)
+        if segment is None:
+            segment = PendingOutputSegment(turn_id=turn_id, message_id=message_id)
+            segments[key] = segment
+        return segment
+
+    def _resolve_output_segment_motion(
+        self,
+        *,
+        platform_extras: dict[str, Any],
+        raw_reply_text: str,
+    ) -> dict[str, Any] | None:
+        candidates = _iter_platform_motion_client_objects(platform_extras)
+        if len(candidates) > 1:
+            raise ValueError("output_segment_multiple_motion_objects")
+        if candidates:
+            motion_object = candidates[0]
+            payload = motion_object.get("motion_payload")
+            if not isinstance(payload, dict):
+                payload = motion_object.get("intent")
+            if not isinstance(payload, dict):
+                payload = motion_object.get("plan")
+            if not isinstance(payload, dict):
+                raise ValueError("output_segment_motion_payload_missing")
+            return {
+                "payload": payload,
+                "mode": str(motion_object.get("mode") or "preview"),
+                "source": str(motion_object.get("source") or "platform_extras"),
+            }
+        if not self._allows_official_inline_anim_compat():
+            return None
+        payload, reason = extract_official_inline_anim_motion_intent(raw_reply_text)
+        if payload is None:
+            if reason != "inline_anim_missing":
+                raise ValueError(f"official_inline_anim_compat_rejected:{reason}")
+            return None
+        return {
+            "payload": payload,
+            "mode": "preview",
+            "source": "official_inline_anim_compat",
+        }
+
+    async def _flush_pending_output_segments(self) -> None:
+        segments = getattr(self, "_pending_output_segments", None)
+        if not isinstance(segments, dict) or not segments:
+            return
+        for key, segment in list(segments.items()):
+            await self._flush_output_segment(segment)
+            segments.pop(key, None)
+
+    async def _flush_output_segment(self, segment: PendingOutputSegment) -> None:
+        audio_slot: dict[str, Any] = {"state": "absent"}
+        if segment.audio_path:
+            _, audio_url = await asyncio.to_thread(
+                self.media_service.cache_audio_file,
+                segment.audio_path,
+            )
+            audio_slot = {
+                "state": "present",
+                "url": audio_url,
+                "caption_text": segment.audio_caption_text,
+            }
+
+        motion_slot, curve_slot = self._build_output_segment_motion_slots(segment)
+        text_slot = (
+            {"state": "present", "content": segment.text}
+            if segment.text
+            else {"state": "absent"}
+        )
+        sent = await self._send_json(
+            build_output_segment(
+                turn_id=segment.turn_id,
+                message_id=segment.message_id,
+                text=text_slot,
+                audio=audio_slot,
+                motion=motion_slot,
+                performance_curve=curve_slot,
+                images=segment.images,
+                speaker_name=self.speaker_name,
+                avatar="",
+            )
+        )
+        if not sent:
+            raise RuntimeError(f"output_segment_send_failed:{segment.message_id}")
+        if segment.text:
+            self.chat_buffer.add("assistant", segment.text)
         self._record_motion_lab_raw_event(
             event_type="turn.assistant_output",
-            turn_id=turn_id,
-            message_id=segment_message_id,
-            source_route="emit_message_chain",
+            turn_id=segment.turn_id,
+            message_id=segment.message_id,
+            source_route="output.segment",
             phase="assistant_output",
-            assistant_text=assistant_semantic_text,
+            assistant_text=segment.semantic_text,
             raw={
-                "raw_reply_text": raw_reply_text,
-                "record_text": raw_record_text,
-                "visible_reply_text": reply_text,
-                "audio_caption_text": audio_caption_text,
-                "semantic_text": semantic_text,
-                "text_count": len(texts),
-                "image_count": len(picture_paths),
-                "record_count": len(record_paths),
-                "platform_extras": platform_extras_dict,
+                "visible_reply_text": segment.text,
+                "audio_caption_text": segment.audio_caption_text,
+                "images": list(segment.images),
+                "motion": motion_slot,
+                "performance_curve": curve_slot,
                 "chat_context": self._motion_lab_chat_context(),
             },
         )
-        self._current_performance_curve_context = {
-            "turn_id": turn_id,
-            "message_id": segment_message_id,
-            "assistant_text": assistant_semantic_text,
-            "assistant_reply_keywords": extract_assistant_reply_keywords(
-                assistant_semantic_text
-            ),
-            "chat_context": self._motion_lab_chat_context(),
-            "platform_extras": platform_extras_dict,
-        }
-        self._start_performance_curve_request(
-            motion_payload=_resolve_initial_performance_curve_motion_payload(
-                platform_extras=platform_extras_dict,
-            )
-        )
-
-        logger.info(
-            "WIRING motion_plan turn_id=%s route=persona_effect_client_object",
-            turn_id or "",
-        )
-
-        platform_motion_dispatched = await self._broadcast_platform_motion_client_objects(
-            platform_extras=platform_extras_dict,
-            turn_id=turn_id,
-            message_id=segment_message_id,
-        )
-        if not platform_motion_dispatched:
-            inline_motion_dispatched = await self._broadcast_official_inline_anim_motion_payload(
-                raw_reply_text=raw_reply_text,
-                turn_id=turn_id,
-                message_id=segment_message_id,
-            )
-            if not inline_motion_dispatched:
-                logger.debug(
-                    "WIRING motion_plan turn_id=%s client_object_present=false inline_compat_dispatched=false",
-                    turn_id or "",
-                )
-
-        if picture_paths:
-            await self._send_json(
-                build_output_image(
-                    turn_id=turn_id,
-                    images=picture_paths,
-                )
-            )
-
-        if record_paths:
-            record_path = record_paths[0]
-            try:
-                _, audio_url = await asyncio.to_thread(
-                    self.media_service.cache_audio_file,
-                    record_path,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "WIRING audio_payload_egress_failed turn_id=%s message_id=%s error=%s",
-                    turn_id or "",
-                    segment_message_id or "",
-                    exc,
-                )
-                raise
-            await self._flush_performance_curve_motion_before_audio(
-                turn_id=turn_id,
-                message_id=segment_message_id,
-            )
-            await self._send_json(
-                build_output_audio(
-                    turn_id=turn_id,
-                    message_id=segment_message_id,
-                    audio_url=audio_url,
-                    caption_text=audio_caption_text,
-                    speaker_name=self.speaker_name,
-                    avatar="",
-                )
-            )
-            logger.info(
-                "WIRING audio_payload_egress turn_id=%s message_id=%s audio_url=%s",
-                turn_id or "",
-                segment_message_id or "",
-                audio_url,
-            )
+        if audio_slot["state"] == "present":
             self._mark_turn_timing("audio_payload_sent_at")
             self._mark_turn_synthesizing()
-            self._mark_turn_playing()
-            self._current_performance_curve_context = None
-            return
-
         self._mark_turn_playing()
-        self._fail_pending_performance_curve_motion(
-            turn_id=turn_id,
-            message_id=segment_message_id,
-            reason="audio_absent_before_curve_check",
+
+    def _build_output_segment_motion_slots(
+        self,
+        segment: PendingOutputSegment,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        if segment.motion_payload is None:
+            return {"state": "absent"}, {"state": "disabled"}
+        payload = segment.motion_payload
+        if _resolve_motion_payload_schema_version(payload) in {
+            "engine.motion_intent.v3",
+            "engine.motion_intent.v4",
+        }:
+            payload = normalize_motion_intent_payload(payload)
+        message_type = _resolve_engine_motion_message_type(payload)
+        if message_type not in {TYPE_ENGINE_MOTION_INTENT, TYPE_ENGINE_CATALOG_MOTION}:
+            raise ValueError("output_segment_motion_type_invalid")
+        payload = self._attach_ready_performance_curve_hint(
+            motion_payload=payload,
+            turn_id=segment.turn_id,
+            message_id=segment.message_id,
         )
-        self._current_performance_curve_context = None
+        hint = payload.get("performance_curve_hint")
+        curve_slot = (
+            {"state": "ready", "hint": hint}
+            if isinstance(hint, dict)
+            else {"state": "skipped", "reason": "not_ready_before_segment_egress"}
+        )
+        runtime = getattr(getattr(self, "runtime_state", None), "performance_curve_runtime", None)
+        if curve_slot["state"] == "skipped":
+            fail_if_not_ready = getattr(runtime, "fail_if_not_ready", None)
+            if callable(fail_if_not_ready):
+                fail_if_not_ready(
+                    turn_id=segment.turn_id,
+                    message_id=segment.message_id,
+                    reason=curve_slot["reason"],
+                )
+            self._record_motion_lab_raw_event(
+                event_type="performance_curve.skipped",
+                turn_id=segment.turn_id,
+                message_id=segment.message_id,
+                source_route="output.segment",
+                phase="performance_curve",
+                assistant_text=segment.semantic_text,
+                payload_kind="ag99.performance_curve_hint.v1",
+                raw={"reason": curve_slot["reason"]},
+            )
+        clear = getattr(runtime, "clear", None)
+        if callable(clear):
+            clear(turn_id=segment.turn_id, message_id=segment.message_id)
+        self._record_prompt_motion_snapshot(
+            motion_payload=payload,
+            source=segment.motion_source,
+        )
+        return {
+            "state": "present",
+            "message_type": message_type,
+            "mode": segment.motion_mode,
+            "source": segment.motion_source,
+            "payload": payload,
+        }, curve_slot
 
     async def close_turn_output_queue(self) -> None:
         """发 control.synth_finished。
@@ -433,6 +498,8 @@ class TurnCoordinator:
         current_turn_id = self.session_state.current_turn_id
         if current_turn_id is None:
             return
+
+        await self._flush_pending_output_segments()
 
         mark_closed = getattr(self.session_state, "mark_output_queue_closed", None)
         if callable(mark_closed):
@@ -522,7 +589,6 @@ class TurnCoordinator:
                 message_obj.message_str,
                 turn_id=normalized_turn_id,
             )
-            self._get_dispatched_platform_motion_keys().clear()
             self._begin_turn_timing(message_obj.message_str)
             self.chat_buffer.add("user", message_obj.message_str)
             self._record_motion_lab_raw_event(
@@ -714,123 +780,6 @@ class TurnCoordinator:
         # Frontend-origin preview payloads are validated here; playback happens
         # locally in the desktop frontend, so the adapter only records ingress.
         return
-
-    async def broadcast_motion_payload(
-        self,
-        *,
-        motion_payload: Any,
-        mode: str = "preview",
-        source: str = "engine.motion_payload",
-        turn_id: str | None = None,
-        message_id: str | None = None,
-    ) -> bool:
-        """把一份动作载荷以 engine.* 出站到前端。
-
-        - schema 是 engine.motion_intent.v3/v4 时先经 normalize_motion_intent_payload 规范化；
-          规范化失败直接拒发。
-        - 根据 _resolve_engine_motion_message_type 选择信封类型（intent / catalog），
-          并按类型选择 payload 子键 (intent/motion/plan)。
-        - source 字段表明这份载荷的来源（persona_effect、catalog、platform_extras 等），用于诊断。
-        返回 True 表示已成功提交到 send_json。
-        """
-        if not isinstance(motion_payload, dict):
-            return False
-
-        if _resolve_motion_payload_schema_version(motion_payload) in {
-            "engine.motion_intent.v3",
-            "engine.motion_intent.v4",
-        }:
-            try:
-                motion_payload = normalize_motion_intent_payload(motion_payload)
-            except ValueError as exc:
-                logger.warning("WIRING motion_payload_egress rejected: %s", exc)
-                return False
-
-        if str(motion_payload.get("schema_version") or "").strip() in {
-            "engine.motion_intent.v3",
-            "engine.motion_intent.v4",
-        }:
-            motion_payload = self._attach_ready_performance_curve_hint(
-                motion_payload=motion_payload,
-                turn_id=turn_id,
-                message_id=message_id,
-            )
-            if "performance_curve_hint" in motion_payload:
-                self._clear_pending_performance_curve_motion(
-                    turn_id=turn_id,
-                    message_id=message_id,
-                )
-            else:
-                self._record_pending_performance_curve_motion(
-                    motion_payload=motion_payload,
-                    mode=mode,
-                    source=source,
-                    turn_id=turn_id,
-                    message_id=message_id,
-                )
-
-        message_type = _resolve_engine_motion_message_type(motion_payload)
-        if not message_type:
-            return False
-
-        resolved_turn_id = turn_id if turn_id is not None else self.session_state.current_turn_id
-        if message_type == TYPE_ENGINE_MOTION_INTENT:
-            payload_key = "intent"
-        elif message_type == TYPE_ENGINE_CATALOG_MOTION:
-            payload_key = "motion"
-        else:
-            payload_key = "plan"
-        payload = {
-            "mode": str(mode or "preview"),
-            payload_key: motion_payload,
-            "source": str(source or "engine.motion_payload"),
-        }
-        sent = await self._send_json(
-            build_message_envelope(
-                message_type,
-                turn_id=resolved_turn_id,
-                message_id=message_id,
-                source=SOURCE_ENGINE,
-                payload=payload,
-            )
-        )
-        if sent:
-            self._record_prompt_motion_snapshot(
-                motion_payload=motion_payload,
-                source=payload["source"],
-            )
-            self._record_motion_lab_raw_event(
-                event_type="motion.egress_sent",
-                turn_id=resolved_turn_id,
-                message_id=message_id,
-                source_route=payload["source"],
-                phase="egress",
-                payload_kind=payload_key,
-                raw={
-                    "message_type": message_type,
-                    "mode": payload["mode"],
-                    "payload_key": payload_key,
-                    "motion_payload": motion_payload,
-                    "envelope_payload": payload,
-                },
-            )
-            schema_version, resolved_mode, axis_count, supplementary_count, failure_reason = (
-                _summarize_motion_payload(motion_payload)
-            )
-            logger.info(
-                "WIRING motion_payload_egress type=%s source=%s mode=%s turn_id=%s "
-                "plan_schema=%s plan_mode=%s axis_count=%s supplementary_count=%s failure_reason=%s",
-                message_type,
-                payload["source"],
-                payload["mode"],
-                resolved_turn_id or "",
-                schema_version,
-                resolved_mode,
-                axis_count,
-                supplementary_count,
-                failure_reason,
-            )
-        return sent
 
     def get_last_prompt_motion_snapshot(self) -> dict[str, Any] | None:
         snapshot = getattr(self, "_last_prompt_motion_snapshot", None)
@@ -1073,300 +1022,6 @@ class TurnCoordinator:
             clear(turn_id=turn_id, message_id=message_id)
         return next_payload
 
-    def _record_pending_performance_curve_motion(
-        self,
-        *,
-        motion_payload: dict[str, Any],
-        mode: str,
-        source: str,
-        turn_id: str | None,
-        message_id: str | None,
-    ) -> None:
-        normalized_turn_id = str(turn_id or "").strip()
-        normalized_message_id = str(message_id or "").strip()
-        if (
-            not normalized_turn_id
-            or not normalized_message_id
-            or str(motion_payload.get("schema_version") or "").strip() not in {
-                "engine.motion_intent.v3",
-                "engine.motion_intent.v4",
-            }
-        ):
-            return
-        pending_key = self._performance_curve_pending_key(
-            turn_id=normalized_turn_id,
-            message_id=normalized_message_id,
-        )
-        if not pending_key:
-            return
-        pending_motions = getattr(self, "_pending_performance_curve_motions", None)
-        if not isinstance(pending_motions, dict):
-            pending_motions = {}
-            self._pending_performance_curve_motions = pending_motions
-        pending_motions[pending_key] = {
-            "turn_id": normalized_turn_id,
-            "message_id": normalized_message_id,
-            "mode": str(mode or "preview").strip() or "preview",
-            "source": str(source or "engine.motion_payload").strip() or "engine.motion_payload",
-            "motion_payload": dict(motion_payload),
-        }
-
-    @staticmethod
-    def _performance_curve_pending_key(
-        *,
-        turn_id: str | None,
-        message_id: str | None,
-    ) -> str:
-        normalized_turn_id = str(turn_id or "").strip()
-        normalized_message_id = str(message_id or "").strip()
-        if not normalized_turn_id or not normalized_message_id:
-            return ""
-        return f"{normalized_turn_id}:{normalized_message_id}"
-
-    def _clear_pending_performance_curve_motion(
-        self,
-        *,
-        turn_id: str | None,
-        message_id: str | None,
-    ) -> None:
-        pending_motions = getattr(self, "_pending_performance_curve_motions", None)
-        if not isinstance(pending_motions, dict):
-            return
-        pending_key = self._performance_curve_pending_key(
-            turn_id=turn_id,
-            message_id=message_id,
-        )
-        if pending_key:
-            pending_motions.pop(pending_key, None)
-
-    async def _flush_performance_curve_motion_before_audio(
-        self,
-        *,
-        turn_id: str | None,
-        message_id: str | None,
-    ) -> bool:
-        pending_motions = getattr(self, "_pending_performance_curve_motions", None)
-        if not isinstance(pending_motions, dict):
-            return False
-        normalized_turn_id = str(turn_id or "").strip()
-        normalized_message_id = str(message_id or "").strip()
-        pending_key = self._performance_curve_pending_key(
-            turn_id=normalized_turn_id,
-            message_id=normalized_message_id,
-        )
-        if not pending_key:
-            return False
-        pending = pending_motions.get(pending_key)
-        if not isinstance(pending, dict):
-            return False
-
-        motion_payload = pending.get("motion_payload")
-        if not isinstance(motion_payload, dict):
-            pending_motions.pop(pending_key, None)
-            return False
-
-        runtime_state = getattr(self, "runtime_state", None)
-        runtime = getattr(runtime_state, "performance_curve_runtime", None)
-        get_ready = getattr(runtime, "get_ready", None)
-        hint = get_ready(
-            turn_id=normalized_turn_id,
-            message_id=normalized_message_id,
-        ) if callable(get_ready) else None
-        _updated_payload, curve_hint = attach_performance_curve_hint(
-            dict(motion_payload),
-            hint,
-        )
-        if curve_hint is None:
-            pending_motions.pop(pending_key, None)
-            clear = getattr(runtime, "clear", None)
-            if callable(clear):
-                clear(turn_id=normalized_turn_id, message_id=normalized_message_id)
-            self._record_motion_lab_raw_event(
-                event_type="performance_curve.skipped",
-                turn_id=normalized_turn_id,
-                message_id=normalized_message_id,
-                source_route=f"{str(pending.get('source') or 'engine.motion_payload')}.performance_curve_hint",
-                phase="performance_curve",
-                payload_kind="ag99.performance_curve_hint.v1",
-                raw={
-                    "reason": "not_ready_before_audio_egress",
-                    "motion_intent_tags": [
-                        str(item).strip()
-                        for item in motion_payload.get("intent_tags", [])
-                        if str(item).strip()
-                    ],
-                },
-            )
-            logger.info(
-                "WIRING performance_curve_hint_skipped turn_id=%s message_id=%s reason=%s",
-                normalized_turn_id,
-                normalized_message_id,
-                "not_ready_before_audio_egress",
-            )
-            return False
-        clear = getattr(runtime, "clear", None)
-        if callable(clear):
-            clear(turn_id=normalized_turn_id, message_id=normalized_message_id)
-
-        pending_motions.pop(pending_key, None)
-        sent = await self._send_json(
-            build_message_envelope(
-                TYPE_ENGINE_PERFORMANCE_CURVE_HINT,
-                turn_id=normalized_turn_id,
-                message_id=normalized_message_id,
-                source=SOURCE_ENGINE,
-                payload=curve_hint,
-            )
-        )
-        if sent:
-            self._record_motion_lab_raw_event(
-                event_type="performance_curve.egress_sent",
-                turn_id=normalized_turn_id,
-                message_id=normalized_message_id,
-                source_route=f"{str(pending.get('source') or 'engine.motion_payload')}.performance_curve_hint",
-                phase="performance_curve",
-                payload_kind="ag99.performance_curve_hint.v1",
-                raw={
-                    "curve_hint": curve_hint,
-                    "motion_intent_tags": [
-                        str(item).strip()
-                        for item in motion_payload.get("intent_tags", [])
-                        if str(item).strip()
-                    ],
-                },
-            )
-            logger.info(
-                "WIRING performance_curve_hint_egress turn_id=%s message_id=%s source=%s",
-                normalized_turn_id,
-                normalized_message_id,
-                str(pending.get("source") or "engine.motion_payload"),
-            )
-        return sent
-
-    def _fail_pending_performance_curve_motion(
-        self,
-        *,
-        turn_id: str | None,
-        message_id: str | None,
-        reason: str,
-    ) -> bool:
-        pending_motions = getattr(self, "_pending_performance_curve_motions", None)
-        if not isinstance(pending_motions, dict):
-            return False
-        pending_key = self._performance_curve_pending_key(
-            turn_id=turn_id,
-            message_id=message_id,
-        )
-        pending = pending_motions.get(pending_key) if pending_key else None
-        if not isinstance(pending, dict):
-            return False
-        pending_motions.pop(pending_key, None)
-        return self._fail_pending_performance_curve_if_not_ready(
-            turn_id=turn_id,
-            message_id=message_id,
-            reason=reason,
-        )
-
-    def _fail_pending_performance_curve_if_not_ready(
-        self,
-        *,
-        turn_id: str | None,
-        message_id: str | None,
-        reason: str,
-    ) -> bool:
-        runtime_state = getattr(self, "runtime_state", None)
-        runtime = getattr(runtime_state, "performance_curve_runtime", None)
-        fail_if_not_ready = getattr(runtime, "fail_if_not_ready", None)
-        if not callable(fail_if_not_ready):
-            return False
-        return bool(
-            fail_if_not_ready(
-                turn_id=turn_id,
-                message_id=message_id,
-                reason=reason,
-            )
-        )
-
-    async def _broadcast_platform_motion_client_objects(
-        self,
-        *,
-        platform_extras: dict[str, Any],
-        turn_id: str | None,
-        message_id: str,
-    ) -> bool:
-        dispatched = False
-        for motion_object in _iter_platform_motion_client_objects(platform_extras):
-            motion_payload = motion_object.get("motion_payload")
-            if not isinstance(motion_payload, dict):
-                motion_payload = motion_object.get("intent")
-            if not isinstance(motion_payload, dict):
-                motion_payload = motion_object.get("plan")
-            if not isinstance(motion_payload, dict):
-                continue
-
-            dispatch_key = self._resolve_platform_motion_dispatch_key(
-                turn_id=turn_id,
-                message_id=message_id,
-            )
-            dispatched_keys = self._get_dispatched_platform_motion_keys()
-            if dispatch_key in dispatched_keys:
-                logger.info(
-                    "WIRING motion_payload_egress skipped_duplicate_segment_motion "
-                    "turn_id=%s message_id=%s message_kind=%s",
-                    turn_id or "",
-                    message_id or "",
-                    str(platform_extras.get("message_kind") or ""),
-                )
-                continue
-
-            sent = await self.broadcast_motion_payload(
-                motion_payload=motion_payload,
-                mode=str(motion_object.get("mode") or "preview"),
-                source=str(motion_object.get("source") or "platform_extras"),
-                turn_id=turn_id,
-                message_id=message_id,
-            )
-            if sent:
-                dispatched_keys.add(dispatch_key)
-            dispatched = dispatched or sent
-        return dispatched
-
-    async def _broadcast_official_inline_anim_motion_payload(
-        self,
-        *,
-        raw_reply_text: str,
-        turn_id: str | None,
-        message_id: str,
-    ) -> bool:
-        if not self._allows_official_inline_anim_compat():
-            return False
-
-        motion_payload, reason = extract_official_inline_anim_motion_intent(raw_reply_text)
-        if motion_payload is None:
-            if reason != "inline_anim_missing":
-                logger.warning(
-                    "WIRING official_inline_anim_compat rejected turn_id=%s message_id=%s reason=%s",
-                    turn_id or "",
-                    message_id or "",
-                    reason,
-                )
-            return False
-
-        sent = await self.broadcast_motion_payload(
-            motion_payload=motion_payload,
-            mode="preview",
-            source="official_inline_anim_compat",
-            turn_id=turn_id,
-            message_id=message_id,
-        )
-        if sent:
-            logger.info(
-                "WIRING official_inline_anim_compat dispatched turn_id=%s message_id=%s",
-                turn_id or "",
-                message_id or "",
-            )
-        return sent
-
     def _allows_official_inline_anim_compat(self) -> bool:
         runtime_state = getattr(self, "runtime_state", None)
         return (
@@ -1377,25 +1032,6 @@ class TurnCoordinator:
             )
             is False
         )
-
-    def _get_dispatched_platform_motion_keys(self) -> set[str]:
-        keys = getattr(self, "_dispatched_platform_motion_keys", None)
-        if not isinstance(keys, set):
-            keys = set()
-            self._dispatched_platform_motion_keys = keys
-        return keys
-
-    @staticmethod
-    def _resolve_platform_motion_dispatch_key(
-        *,
-        turn_id: str | None,
-        message_id: str,
-    ) -> str:
-        normalized_turn_id = str(turn_id or "").strip()
-        normalized_message_id = str(message_id or "").strip()
-        if not normalized_message_id:
-            raise ValueError("motion dispatch requires a non-empty segment message_id")
-        return f"{normalized_turn_id}|{normalized_message_id}"
 
     def _spawn_background_task(self, coroutine: Awaitable[None]) -> None:
         task = asyncio.create_task(coroutine)
@@ -1433,7 +1069,9 @@ class TurnCoordinator:
             self.session_state.mark_playback_complete()
         else:
             self.session_state.reset_to_idle()
-        self._get_dispatched_platform_motion_keys().clear()
+        pending_segments = getattr(self, "_pending_output_segments", None)
+        if isinstance(pending_segments, dict):
+            pending_segments.clear()
 
     def _resolve_backend_turn_id(
         self,

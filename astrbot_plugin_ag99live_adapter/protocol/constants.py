@@ -17,9 +17,7 @@ TYPE_INPUT_MIC_AUDIO_DATA = "input.mic_audio_data"
 TYPE_INPUT_RAW_AUDIO_DATA = "input.raw_audio_data"
 TYPE_INPUT_MIC_AUDIO_END = "input.mic_audio_end"
 
-TYPE_OUTPUT_TEXT = "output.text"
-TYPE_OUTPUT_AUDIO = "output.audio"
-TYPE_OUTPUT_IMAGE = "output.image"
+TYPE_OUTPUT_SEGMENT = "output.segment"
 TYPE_OUTPUT_TRANSCRIPTION = "output.transcription"
 
 TYPE_CONTROL_TURN_STARTED = "control.turn_started"
@@ -57,7 +55,6 @@ TYPE_SYSTEM_MOTION_LAB_RAW_EVENT_RECORDED = "system.motion_lab_raw_event_recorde
 TYPE_ENGINE_MOTION_INTENT = "engine.motion_intent"
 TYPE_ENGINE_CATALOG_MOTION = "engine.catalog_motion"
 TYPE_ENGINE_MOTION_PREVIEW = "engine.motion_preview"
-TYPE_ENGINE_PERFORMANCE_CURVE_HINT = "engine.performance_curve_hint"
 TYPE_ENGINE_EXPRESSION_PLAN = "engine.expression_plan"
 TYPE_ENGINE_IDLE_STATE = "engine.idle_state"
 TYPE_ENGINE_LOOK_TARGET = "engine.look_target"
@@ -73,9 +70,7 @@ INPUT_TYPES = {
 }
 
 OUTPUT_TYPES = {
-    TYPE_OUTPUT_TEXT,
-    TYPE_OUTPUT_AUDIO,
-    TYPE_OUTPUT_IMAGE,
+    TYPE_OUTPUT_SEGMENT,
     TYPE_OUTPUT_TRANSCRIPTION,
 }
 
@@ -119,7 +114,6 @@ ENGINE_TYPES = {
     TYPE_ENGINE_MOTION_INTENT,
     TYPE_ENGINE_CATALOG_MOTION,
     TYPE_ENGINE_MOTION_PREVIEW,
-    TYPE_ENGINE_PERFORMANCE_CURVE_HINT,
     TYPE_ENGINE_EXPRESSION_PLAN,
     TYPE_ENGINE_IDLE_STATE,
     TYPE_ENGINE_LOOK_TARGET,

@@ -11,7 +11,6 @@
     "typecheck": "npm run typecheck:renderer && npm run typecheck:node",
     "typecheck:renderer": "vue-tsc --noEmit -p tsconfig.json",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
-    "test:orchestration": "tsc -p tsconfig.test.json --outDir .test-out-orchestration && node --experimental-specifier-resolution=node .test-out-orchestration/tests/turnPlaybackOrchestratorCore.test.js",
     "test:session": "tsc -p tsconfig.test.json --outDir .test-out-session && node --experimental-specifier-resolution=node .test-out-session/tests/turnPlaybackSessionStore.test.js",
     "test:turn-orchestrator": "tsc -p tsconfig.test.json --outDir .test-out-turn-orchestrator && node --experimental-specifier-resolution=node .test-out-turn-orchestrator/tests/useTurnPlaybackOrchestrator.test.js",
     "test:coordinator": "tsc -p tsconfig.test.json --outDir .test-out-coordinator && node --experimental-specifier-resolution=node .test-out-coordinator/tests/playbackCompletionCoordinator.test.js",
@@ -31,7 +30,7 @@
     "test:adapter-audio-runtime": "tsc -p tsconfig.test.json --outDir .test-out-adapter-audio-runtime && node --experimental-specifier-resolution=node .test-out-adapter-audio-runtime/tests/adapterAudioRuntime.test.js",
     "test:adapter-connection": "tsc -p tsconfig.test.json --outDir .test-out-adapter-connection && node --experimental-specifier-resolution=node .test-out-adapter-connection/tests/useAdapterConnection.test.js",
     "test:model-readiness": "tsc -p tsconfig.test.json --outDir .test-out-model-readiness && node --experimental-specifier-resolution=node .test-out-model-readiness/tests/modelReadiness.test.js",
-    "test": "npm run test:orchestration && npm run test:session && npm run test:turn-orchestrator && npm run test:coordinator && npm run test:motion-playback-recorder && npm run test:motion-lab-outbound-queue && npm run test:preview-motion-player && npm run test:desktop-profile-scope && npm run test:desktop-bridge-clone && npm run test:push-to-talk-controller && npm run test:bilibili-live && npm run test:inbound-protocol && npm run test:inbound-events && npm run test:motion-runtime-scheduler && npm run test:model-engine && npm run test:playback-timeline && npm run test:playback-timeline-audio && npm run test:adapter-audio-runtime && npm run test:adapter-connection && npm run test:model-readiness",
+    "test": "npm run test:session && npm run test:turn-orchestrator && npm run test:coordinator && npm run test:motion-playback-recorder && npm run test:motion-lab-outbound-queue && npm run test:preview-motion-player && npm run test:desktop-profile-scope && npm run test:desktop-bridge-clone && npm run test:push-to-talk-controller && npm run test:bilibili-live && npm run test:inbound-protocol && npm run test:inbound-events && npm run test:motion-runtime-scheduler && npm run test:model-engine && npm run test:playback-timeline && npm run test:playback-timeline-audio && npm run test:adapter-audio-runtime && npm run test:adapter-connection && npm run test:model-readiness",
     "build": "npm run typecheck && electron-vite build",
     "build:web": "vue-tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview"

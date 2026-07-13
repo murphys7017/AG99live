@@ -1,58 +1,54 @@
 sequenceDiagram
     autonumber
-    participant Backend as 后端物理输出
+    participant Backend as Adapter 聚合器
+    participant Parser as 前端严格解析
     participant Store as SessionStore
-    participant Orch as Orchestrator
+    participant Queue as 播放释放队列
     participant Timeline as PlaybackTimeline
-    participant Audio as Audio sink
-    participant Motion as Motion sink
-    participant Live2D as Live2D runtime
-    participant UI as 可见文本
-
-    rect rgb(239, 246, 249)
-        Note over Backend,UI: Record 先到，Plain 正文晚到
-        Backend->>Store: output.audio(caption_text)
-        Backend->>Store: motion_intent
-        Store->>Store: caption 只写 audio.captionText<br/>不创建可见正文
-        Store->>Orch: text delivered marker + audio + motion ready
-        Orch->>Timeline: release audio + motion
-        Timeline->>Audio: start
-        Timeline->>Motion: register, wait for audio clock
-        Backend->>Store: output.text(visible reply)
-        Store->>Orch: textReady, alreadyReleased=false
-        Orch->>UI: late text only
-        Note over Orch,Timeline: 不重放 audio / motion
-    end
+    participant UI as 前端状态
 
     rect rgb(253, 239, 235)
-        Note over Backend,UI: TTS 被声明为 expected，但 3000ms 内未到
-        Backend->>Store: output.text(audio_expected=true)
-        Store->>Orch: audio expected
-        Orch->>Orch: wait 3000ms
-        Orch->>Store: audio terminal=failed
-        Orch->>Motion: mark failed, 不启动 motion-only
-        Orch->>UI: release visible text
-        Note over Orch,UI: failed 不伪装成 absent
+        Note over Backend,UI: motion 结构合法但领域校验失败
+        Backend->>Parser: output.segment(text + audio + invalid motion)
+        Parser->>Parser: 先归一化全部 slots
+        Parser--xStore: 不提交
+        Parser--xQueue: 不排队文本或音频
+        Parser->>UI: fatal protocol error / close connection
     end
 
     rect rgb(247, 241, 230)
-        Note over Backend,UI: 音频失败后 Plain 正文才到
-        Audio-->>Timeline: failed
-        Timeline-->>Store: audio failed
-        Store->>Orch: audioFailed=true
-        Backend->>Store: late output.text
-        Store->>Orch: late text ready
-        Orch->>UI: release late text only
-        Orch-xAudio: 禁止晚到音频重放
-        Orch-xMotion: 禁止晚到动作启动
+        Note over Backend,UI: 重复 turn_id + message_id
+        Backend->>Parser: duplicate output.segment
+        Parser->>Store: commitOutputSegment
+        Store--xParser: Duplicate output segment
+        Note over Store,Queue: 旧段保持不变，第二段零副作用
+        Parser->>UI: fatal protocol error
+    end
+
+    rect rgb(239, 246, 249)
+        Note over Backend,UI: synth_finished 前发现内部不完整段
+        Backend->>Store: control.synth_finished
+        Store->>Store: assertOutputSegmentsResolved
+        Store--xBackend: incomplete atomic segment
+        Note over Store: 不把 idle audio/motion 自动标记 absent
+        Store->>UI: protocol consistency error
     end
 
     rect rgb(235, 244, 232)
-        Note over Backend,UI: Live2D 模型在异步加载期间被替换
-        Timeline->>Motion: interrupt old segment
-        Motion->>Live2D: stop old run / replace model
-        Live2D->>Live2D: cancel old load generation
-        Live2D->>Live2D: release old Cubism managers
-        Live2D->>Live2D: begin new generation
-        Note over Live2D: 旧 fetch / texture / motion callback<br/>代际校验失败后退出
+        Note over Backend,UI: 合法的 absent 与 failed
+        Backend->>Parser: output.segment(audio=absent)
+        Parser->>Store: atomic commit
+        Store->>Timeline: motion-only / text-only 可执行
+        Backend->>Parser: output.segment(audio=failed)
+        Parser->>Store: atomic commit
+        Store->>Timeline: 文本可释放，动作标记失败
+        Note over Store,Timeline: failed 不转换为 absent
+    end
+
+    rect rgb(245, 235, 241)
+        Note over Backend,UI: output queue 已关闭
+        Backend->>Parser: late output.segment
+        Parser->>Store: commitOutputSegment
+        Store--xParser: reject after synth_finished
+        Note over Parser,UI: 不存在 late slot 补播
     end

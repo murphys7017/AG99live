@@ -8,7 +8,7 @@
  *
  * 会话阶段（phase）走有限状态机：
  *   collecting → ready → playing → settling → completed
- *                                      ↘ playing （settling 还可以回到 playing）
+ *                    ↘ settling       ↘ playing （settling 还可以回到 playing）
  *   任意非终态阶段都可以失败到 failed。
  *   终态：completed / failed（isTerminalPhase）；终态后不接受任何转移。
  *
@@ -19,7 +19,6 @@
  *     motion 已 absent/completed/failed 三者之一。
  */
 
-import type { PerformanceCurveHint } from "../types/protocol.js";
 import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
 
 // ── Phase ──────────────────────────────────────────────────────────
@@ -34,7 +33,7 @@ export type TurnPlaybackPhase =
 
 const VALID_PHASE_TRANSITIONS: Record<TurnPlaybackPhase, TurnPlaybackPhase[]> = {
   collecting: ["ready", "failed"],
-  ready: ["playing", "failed"],
+  ready: ["playing", "settling", "failed"],
   playing: ["settling", "failed"],
   settling: ["playing", "completed", "failed"],
   completed: [],
@@ -57,7 +56,8 @@ export function isTerminalPhase(phase: TurnPlaybackPhase): boolean {
  * 阶段转移合法性查询。
  *
  * 终态 from 一律返回 false；其余按 VALID_PHASE_TRANSITIONS 表查询。
- * 注意 settling → playing 是允许的（晚到媒体重新激活段时回到 playing）。
+ * ready → settling 用于没有任何可执行 sink 的完整原子段；settling → playing
+ * 保留给已经由 timeline 持有、随后重新进入执行态的段。
  */
 export function isValidPhaseTransition(
   from: TurnPlaybackPhase,
@@ -106,7 +106,6 @@ export interface TurnPlaybackSessionText {
 export interface TurnPlaybackSessionAudio {
   url: string | null;
   captionText: string | null;
-  expected: boolean;
   receivedAtMs: number | null;
   released: boolean;
   started: boolean;
@@ -129,14 +128,36 @@ export interface TurnPlaybackSessionAudio {
 export interface TurnPlaybackSessionMotion {
   payload: NormalizedMotionPayload | null;
   receivedAtMs: number | null;
-  performanceCurveHint: PerformanceCurveHint | null;
-  performanceCurveHintReceivedAtMs: number | null;
   released: boolean;
   started: boolean;
   completed: boolean;
   absent: boolean;
   failed: boolean;
   reason: string;
+}
+
+export type OutputSegmentTextMaterial =
+  | { state: "present"; content: string }
+  | { state: "absent" }
+  | { state: "failed"; reason: string };
+
+export type OutputSegmentAudioMaterial =
+  | { state: "present"; url: string; captionText: string }
+  | { state: "absent" }
+  | { state: "failed"; reason: string };
+
+export type OutputSegmentMotionMaterial =
+  | { state: "present"; payload: NormalizedMotionPayload }
+  | { state: "absent" }
+  | { state: "failed"; reason: string };
+
+/**
+ * 已通过协议和领域校验、可以一次性写入 SessionStore 的完整逻辑段。
+ */
+export interface OutputSegmentMaterial {
+  text: OutputSegmentTextMaterial;
+  audio: OutputSegmentAudioMaterial;
+  motion: OutputSegmentMotionMaterial;
 }
 
 /**
@@ -206,7 +227,6 @@ export function createEmptyAudioState(): TurnPlaybackSessionAudio {
   return {
     url: null,
     captionText: null,
-    expected: false,
     receivedAtMs: null,
     released: false,
     started: false,
@@ -221,8 +241,6 @@ export function createEmptyMotionState(): TurnPlaybackSessionMotion {
   return {
     payload: null,
     receivedAtMs: null,
-    performanceCurveHint: null,
-    performanceCurveHintReceivedAtMs: null,
     released: false,
     started: false,
     completed: false,
