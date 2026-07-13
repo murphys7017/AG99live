@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
 
 from astrbot.api.message_components import Image, Plain, Record
 
@@ -25,7 +24,7 @@ def resolve_platform_segment_message_id(platform_extras: dict[str, Any]) -> str:
         value = platform_extras.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
-    return uuid4().hex
+    raise ValueError("output_segment_message_id_missing")
 
 
 def iter_platform_motion_client_objects(

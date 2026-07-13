@@ -506,8 +506,10 @@ def test_emit_message_chain_ignores_inline_anim_when_persona_effect_is_available
             message_chain=[
                 Plain(f"hello <@anim {tag_payload}> world")
             ],
+            platform_extras={"logical_message_id": "standard_reply"},
         )
     )
+    coordinator._flushed_output_segment_count = 0
     asyncio.run(coordinator._flush_pending_output_segments())
 
     assert inline_broadcast == {}
@@ -584,8 +586,10 @@ def test_emit_message_chain_dispatches_official_inline_anim_when_persona_effect_
         coordinator.emit_message_chain(
             message_chain=[Plain("hello world")],
             raw_reply_text_override=f"hello <@anim {tag_payload}> world",
+            platform_extras={"logical_message_id": "standard_reply"},
         )
     )
+    coordinator._flushed_output_segment_count = 0
     asyncio.run(coordinator._flush_pending_output_segments())
 
     assert inline_broadcast == {}
@@ -670,6 +674,7 @@ def test_emit_message_chain_reuses_platform_visible_message_id_for_segment_outpu
             },
         )
     )
+    coordinator._flushed_output_segment_count = 0
     asyncio.run(coordinator._flush_pending_output_segments())
 
     assert [item.get("type") for item in sent_payloads] == ["output.segment"]
@@ -738,6 +743,7 @@ def test_emit_message_chain_uses_record_text_only_as_audio_caption(
             platform_extras={"visible_message_id": "visible-audio-1"},
         )
     )
+    coordinator._flushed_output_segment_count = 0
     asyncio.run(coordinator._flush_pending_output_segments())
 
     assert [payload.get("type") for payload in sent_payloads] == ["output.segment"]
@@ -809,6 +815,7 @@ def test_emit_message_chain_dedupes_motion_client_object_for_segmented_output(
 
     asyncio.run(emit_segment("visible-msg::core_reply::0001"))
     asyncio.run(emit_segment("visible-msg::core_reply::0002"))
+    coordinator._flushed_output_segment_count = 0
     asyncio.run(coordinator._flush_pending_output_segments())
 
     assert [payload.get("type") for payload in sent_payloads] == ["output.segment"]
@@ -881,8 +888,10 @@ def test_emit_message_chain_treats_inline_payload_as_visible_text_only_when_pers
     asyncio.run(
         coordinator.emit_message_chain(
             message_chain=[Plain(f"hello <@anim {tag_payload}> world")],
+            platform_extras={"logical_message_id": "standard_reply"},
         )
     )
+    coordinator._flushed_output_segment_count = 0
     asyncio.run(coordinator._flush_pending_output_segments())
 
     assert inline_broadcast == {}
@@ -1051,8 +1060,10 @@ def test_emit_message_chain_raw_reply_text_override_uses_official_inline_anim_co
         coordinator.emit_message_chain(
             message_chain=[Plain("hello world")],
             raw_reply_text_override=raw_reply_text,
+            platform_extras={"logical_message_id": "standard_reply"},
         )
     )
+    coordinator._flushed_output_segment_count = 0
     asyncio.run(coordinator._flush_pending_output_segments())
 
     assert inline_broadcast == {}
@@ -1124,6 +1135,7 @@ def test_emit_message_chain_inline_invalid_v3_intent_does_not_broadcast_replacem
             coordinator.emit_message_chain(
                 message_chain=[Plain("hello world")],
                 raw_reply_text_override=raw_reply_text,
+                platform_extras={"logical_message_id": "standard_reply"},
             )
         )
 
@@ -1202,6 +1214,7 @@ def test_emit_message_chain_inline_v1_intent_is_rejected(
             coordinator.emit_message_chain(
                 message_chain=[Plain("hello")],
                 raw_reply_text_override=raw_reply_text,
+                platform_extras={"logical_message_id": "standard_reply"},
             )
         )
 

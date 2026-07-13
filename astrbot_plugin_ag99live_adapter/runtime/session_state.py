@@ -24,6 +24,7 @@ class SessionState:
       last_user_text                最近一次 begin_turn 写入的原文
       waiting_for_playback_complete 等待前端 control.playback_finished 的标志
       output_queue_closed           输出队列已关闭（与 control.synth_finished 配套）
+      output_queue_closing_turn_id  正在发送 control.synth_finished 的轮次所有权
       current_turn_id               正在处理的 turn_id；idle 时为 None
     """
 
@@ -33,6 +34,7 @@ class SessionState:
     last_user_text: str = ""
     waiting_for_playback_complete: bool = False
     output_queue_closed: bool = False
+    output_queue_closing_turn_id: str | None = None
     current_turn_id: str | None = None
 
     def begin_turn(
@@ -54,6 +56,7 @@ class SessionState:
         self.stage = SessionStage.THINKING
         self.waiting_for_playback_complete = False
         self.output_queue_closed = False
+        self.output_queue_closing_turn_id = None
         self.current_turn_id = normalized_turn_id
         return self.current_turn_id
 
@@ -69,16 +72,30 @@ class SessionState:
         self.stage = SessionStage.PLAYING
         self.waiting_for_playback_complete = True
 
-    def mark_output_queue_closed(self) -> bool:
-        """幂等关闭输出队列：首次调用返回 True，重复调用返回 False。
-
-        与 control.synth_finished 配套：第一次 close_turn_output_queue 调用时
-        允许真正发出 control.synth_finished 消息，避免重复关闭。
-        """
-        if self.output_queue_closed:
+    def begin_output_queue_close(self, turn_id: str) -> bool:
+        """获取输出队列关闭所有权，已关闭或正在关闭时返回 False。"""
+        normalized_turn_id = str(turn_id or "").strip()
+        if not normalized_turn_id or normalized_turn_id != self.current_turn_id:
+            raise RuntimeError("output_queue_close_turn_mismatch")
+        if self.output_queue_closed or self.output_queue_closing_turn_id is not None:
             return False
-        self.output_queue_closed = True
+        self.output_queue_closing_turn_id = normalized_turn_id
         return True
+
+    def complete_output_queue_close(self, turn_id: str) -> None:
+        """仅在 control.synth_finished 发送成功后提交关闭状态。"""
+        if (
+            self.output_queue_closing_turn_id != turn_id
+            or self.current_turn_id != turn_id
+        ):
+            raise RuntimeError("output_queue_close_turn_mismatch")
+        self.output_queue_closing_turn_id = None
+        self.output_queue_closed = True
+
+    def abort_output_queue_close(self, turn_id: str) -> None:
+        """发送失败时释放关闭所有权，允许上层显式重试。"""
+        if self.output_queue_closing_turn_id == turn_id:
+            self.output_queue_closing_turn_id = None
 
     def mark_playback_complete(self) -> None:
         """完成收口：清 waiting_for_playback_complete 与 output_queue_closed，
@@ -87,11 +104,13 @@ class SessionState:
         """
         self.waiting_for_playback_complete = False
         self.output_queue_closed = False
+        self.output_queue_closing_turn_id = None
         self.stage = SessionStage.IDLE
         self.current_turn_id = None
 
     def reset_to_idle(self) -> None:
         self.waiting_for_playback_complete = False
         self.output_queue_closed = False
+        self.output_queue_closing_turn_id = None
         self.stage = SessionStage.IDLE
         self.current_turn_id = None

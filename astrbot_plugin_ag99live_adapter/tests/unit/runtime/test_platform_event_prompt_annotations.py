@@ -59,9 +59,16 @@ class Image:
 class AdapterStub:
     def __init__(self) -> None:
         self.emit_calls = []
+        self.closed_output_queues = 0
+        self.turn_coordinator = types.SimpleNamespace(
+            close_turn_output_queue=self._close_turn_output_queue,
+        )
 
     async def emit_message_chain(self, **kwargs) -> None:
         self.emit_calls.append(kwargs)
+
+    async def _close_turn_output_queue(self) -> None:
+        self.closed_output_queues += 1
 
 
 def _build_event(module, *, images: list[dict] | None):
@@ -180,3 +187,25 @@ def test_send_interaction_message_only_uses_adapter_emit_path(
     assert len(adapter.emit_calls) == 1
     assert adapter.emit_calls[0]["platform_extras"] == {"visible_message_id": "msg-1"}
     assert event._has_send_oper is True
+
+
+def test_standard_send_aggregates_parts_without_closing_output_queue(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_platform_event_module()
+    event = _build_event(module, images=[])
+    adapter = event.adapter
+
+    asyncio.run(event.send([Plain("first")]))
+    asyncio.run(event.send([Plain("second")]))
+
+    assert adapter.closed_output_queues == 0
+    assert [
+        call["platform_extras"]["logical_message_id"]
+        for call in adapter.emit_calls
+    ] == ["standard_reply", "standard_reply"]
+
+    asyncio.run(event.complete_visible_turn())
+    assert adapter.closed_output_queues == 1

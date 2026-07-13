@@ -158,6 +158,7 @@ class TurnCoordinator:
         self._last_prompt_motion_snapshot: dict[str, Any] | None = None
         self._current_performance_curve_context: dict[str, Any] | None = None
         self._pending_output_segments: dict[str, PendingOutputSegment] = {}
+        self._flushed_output_segment_count = 0
 
     async def handle_msg(self, raw_message: dict[str, Any]) -> None:
         """入站文本协议消息的顶层路由。
@@ -370,6 +371,7 @@ class TurnCoordinator:
         for key, segment in list(segments.items()):
             await self._flush_output_segment(segment)
             segments.pop(key, None)
+            self._flushed_output_segment_count += 1
 
     async def _flush_output_segment(self, segment: PendingOutputSegment) -> None:
         audio_slot: dict[str, Any] = {"state": "absent"}
@@ -384,7 +386,7 @@ class TurnCoordinator:
                 "caption_text": segment.audio_caption_text,
             }
 
-        motion_slot, curve_slot = self._build_output_segment_motion_slots(segment)
+        motion_slot = self._build_output_segment_motion_slot(segment)
         text_slot = (
             {"state": "present", "content": segment.text}
             if segment.text
@@ -397,7 +399,6 @@ class TurnCoordinator:
                 text=text_slot,
                 audio=audio_slot,
                 motion=motion_slot,
-                performance_curve=curve_slot,
                 images=segment.images,
                 speaker_name=self.speaker_name,
                 avatar="",
@@ -419,7 +420,6 @@ class TurnCoordinator:
                 "audio_caption_text": segment.audio_caption_text,
                 "images": list(segment.images),
                 "motion": motion_slot,
-                "performance_curve": curve_slot,
                 "chat_context": self._motion_lab_chat_context(),
             },
         )
@@ -428,12 +428,12 @@ class TurnCoordinator:
             self._mark_turn_synthesizing()
         self._mark_turn_playing()
 
-    def _build_output_segment_motion_slots(
+    def _build_output_segment_motion_slot(
         self,
         segment: PendingOutputSegment,
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
+    ) -> dict[str, Any]:
         if segment.motion_payload is None:
-            return {"state": "absent"}, {"state": "disabled"}
+            return {"state": "absent"}
         payload = segment.motion_payload
         if _resolve_motion_payload_schema_version(payload) in {
             "engine.motion_intent.v3",
@@ -449,19 +449,15 @@ class TurnCoordinator:
             message_id=segment.message_id,
         )
         hint = payload.get("performance_curve_hint")
-        curve_slot = (
-            {"state": "ready", "hint": hint}
-            if isinstance(hint, dict)
-            else {"state": "skipped", "reason": "not_ready_before_segment_egress"}
-        )
         runtime = getattr(getattr(self, "runtime_state", None), "performance_curve_runtime", None)
-        if curve_slot["state"] == "skipped":
+        if not isinstance(hint, dict):
+            reason = "not_ready_before_segment_egress"
             fail_if_not_ready = getattr(runtime, "fail_if_not_ready", None)
             if callable(fail_if_not_ready):
                 fail_if_not_ready(
                     turn_id=segment.turn_id,
                     message_id=segment.message_id,
-                    reason=curve_slot["reason"],
+                    reason=reason,
                 )
             self._record_motion_lab_raw_event(
                 event_type="performance_curve.skipped",
@@ -471,7 +467,7 @@ class TurnCoordinator:
                 phase="performance_curve",
                 assistant_text=segment.semantic_text,
                 payload_kind="ag99.performance_curve_hint.v1",
-                raw={"reason": curve_slot["reason"]},
+                raw={"reason": reason},
             )
         clear = getattr(runtime, "clear", None)
         if callable(clear):
@@ -486,35 +482,31 @@ class TurnCoordinator:
             "mode": segment.motion_mode,
             "source": segment.motion_source,
             "payload": payload,
-        }, curve_slot
+        }
 
     async def close_turn_output_queue(self) -> None:
-        """发 control.synth_finished。
-
-        借助 session_state.mark_output_queue_closed 做幂等保护：第一次调用时它会
-        返回 True 并允许发送，重复调用直接 return；老 session_state 没有该方法时
-        退化成读写 output_queue_closed 属性。current_turn_id 为 None 时不发。
-        """
+        """Flush at least one atomic segment, then transactionally close its queue."""
         current_turn_id = self.session_state.current_turn_id
         if current_turn_id is None:
             return
 
-        await self._flush_pending_output_segments()
-
-        mark_closed = getattr(self.session_state, "mark_output_queue_closed", None)
-        if callable(mark_closed):
-            if not mark_closed():
-                return
-        else:
-            if bool(getattr(self.session_state, "output_queue_closed", False)):
-                return
-            setattr(self.session_state, "output_queue_closed", True)
-
-        await self._send_json(
-            build_control_synth_finished(
-                turn_id=current_turn_id,
+        if not self.session_state.begin_output_queue_close(current_turn_id):
+            return
+        try:
+            await self._flush_pending_output_segments()
+            if self._flushed_output_segment_count < 1:
+                raise RuntimeError(f"output_segment_missing:{current_turn_id}")
+            sent = await self._send_json(
+                build_control_synth_finished(
+                    turn_id=current_turn_id,
+                )
             )
-        )
+            if not sent:
+                raise RuntimeError(f"synth_finished_send_failed:{current_turn_id}")
+        except Exception:
+            self.session_state.abort_output_queue_close(current_turn_id)
+            raise
+        self.session_state.complete_output_queue_close(current_turn_id)
         runtime_state = getattr(self, "runtime_state", None)
         performance_curve_runtime = getattr(
             runtime_state,
@@ -607,6 +599,7 @@ class TurnCoordinator:
                     "chat_context": self._motion_lab_chat_context(),
                 },
             )
+            self._flushed_output_segment_count = 0
             await self._send_json(
                 build_control_turn_started(
                     turn_id=current_turn_id,
@@ -1072,6 +1065,7 @@ class TurnCoordinator:
         pending_segments = getattr(self, "_pending_output_segments", None)
         if isinstance(pending_segments, dict):
             pending_segments.clear()
+        self._flushed_output_segment_count = 0
 
     def _resolve_backend_turn_id(
         self,
@@ -1160,22 +1154,6 @@ class TurnCoordinator:
         if not normalized:
             raise ValueError("Interactive protocol messages require a non-empty turn_id.")
         return normalized
-
-
-def _resolve_initial_performance_curve_motion_payload(
-    *,
-    platform_extras: dict[str, Any],
-) -> dict[str, Any] | None:
-    for motion_object in _iter_platform_motion_client_objects(platform_extras):
-        motion_payload = motion_object.get("motion_payload")
-        if not isinstance(motion_payload, dict):
-            motion_payload = motion_object.get("intent")
-        if not isinstance(motion_payload, dict):
-            motion_payload = motion_object.get("plan")
-        if isinstance(motion_payload, dict):
-            return motion_payload
-    return None
-
 
 def _coerce_perf_counter(value: Any) -> float | None:
     if isinstance(value, (int, float)):

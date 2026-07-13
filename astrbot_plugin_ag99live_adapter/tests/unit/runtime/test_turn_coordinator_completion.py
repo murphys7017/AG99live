@@ -5,6 +5,8 @@ import importlib
 import sys
 import types
 
+import pytest
+
 
 def _install_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
     install_fake_astrbot()
@@ -73,6 +75,30 @@ def _create_session_state_stub(
         },
     )()
     st.mark_playback_complete = lambda: setattr(st, "waiting_for_playback_complete", False)
+    st.output_queue_closing_turn_id = None
+    st.output_queue_closed = False
+
+    def begin_output_queue_close(turn_id: str) -> bool:
+        if turn_id != st.current_turn_id:
+            raise RuntimeError("output_queue_close_turn_mismatch")
+        if st.output_queue_closing_turn_id is not None or st.output_queue_closed:
+            return False
+        st.output_queue_closing_turn_id = turn_id
+        return True
+
+    def complete_output_queue_close(turn_id: str) -> None:
+        if st.output_queue_closing_turn_id != turn_id or st.current_turn_id != turn_id:
+            raise RuntimeError("output_queue_close_turn_mismatch")
+        st.output_queue_closing_turn_id = None
+        st.output_queue_closed = True
+
+    st.begin_output_queue_close = begin_output_queue_close
+    st.complete_output_queue_close = complete_output_queue_close
+    st.abort_output_queue_close = lambda turn_id: (
+        setattr(st, "output_queue_closing_turn_id", None)
+        if st.output_queue_closing_turn_id == turn_id
+        else None
+    )
     return st
 
 
@@ -108,6 +134,7 @@ def test_close_turn_output_queue_sends_synth_finished(
         return True
 
     coordinator._send_json = fake_send_json
+    coordinator._flushed_output_segment_count = 1
 
     asyncio.run(coordinator.close_turn_output_queue())
 
@@ -138,22 +165,13 @@ def test_close_turn_output_queue_skips_when_no_turn_id(
     assert len(sent_payloads) == 0
 
 
-def test_close_turn_output_queue_is_idempotent_via_mark_flag(
+def test_close_turn_output_queue_is_idempotent(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
     TurnCoordinator = _load_module(install_fake_astrbot, monkeypatch)
 
-    closed: list[bool] = [False]
     st = _create_session_state_stub(current_turn_id="turn-1")
-
-    def mark_closed() -> bool:
-        if closed[0]:
-            return False
-        closed[0] = True
-        return True
-
-    st.mark_output_queue_closed = mark_closed
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.session_state = st
@@ -165,6 +183,7 @@ def test_close_turn_output_queue_is_idempotent_via_mark_flag(
         return True
 
     coordinator._send_json = fake_send_json
+    coordinator._flushed_output_segment_count = 1
 
     asyncio.run(coordinator.close_turn_output_queue())
     assert len(sent_payloads) == 1
@@ -173,32 +192,57 @@ def test_close_turn_output_queue_is_idempotent_via_mark_flag(
     assert len(sent_payloads) == 1
 
 
-def test_close_turn_output_queue_is_idempotent_via_attr_flag(
+def test_close_turn_output_queue_send_failure_keeps_queue_open(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
     TurnCoordinator = _load_module(install_fake_astrbot, monkeypatch)
 
     st = _create_session_state_stub(current_turn_id="turn-1")
-    st.output_queue_closed = False
-
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.session_state = st
 
-    sent_payloads: list[dict[str, object]] = []
-
     async def fake_send_json(payload):
-        sent_payloads.append(payload)
-        return True
+        del payload
+        return False
 
     coordinator._send_json = fake_send_json
+    coordinator._flushed_output_segment_count = 1
 
-    asyncio.run(coordinator.close_turn_output_queue())
-    assert len(sent_payloads) == 1
-    assert st.output_queue_closed is True
+    with pytest.raises(RuntimeError, match="synth_finished_send_failed"):
+        asyncio.run(coordinator.close_turn_output_queue())
+    assert st.output_queue_closed is False
+    assert st.output_queue_closing_turn_id is None
 
-    asyncio.run(coordinator.close_turn_output_queue())
-    assert len(sent_payloads) == 1
+
+def test_close_turn_output_queue_rejects_zero_segments(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    TurnCoordinator = _load_module(install_fake_astrbot, monkeypatch)
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.session_state = _create_session_state_stub(current_turn_id="turn-1")
+    coordinator._flushed_output_segment_count = 0
+
+    with pytest.raises(RuntimeError, match="output_segment_missing"):
+        asyncio.run(coordinator.close_turn_output_queue())
+
+
+def test_output_queue_close_ownership_cannot_cross_turns() -> None:
+    from astrbot_plugin_ag99live_adapter.runtime.session_state import SessionState
+
+    state = SessionState()
+    state.begin_turn("first", turn_id="turn-1")
+    assert state.begin_output_queue_close("turn-1") is True
+
+    state.begin_turn("second", turn_id="turn-2")
+    state.abort_output_queue_close("turn-1")
+    with pytest.raises(RuntimeError, match="output_queue_close_turn_mismatch"):
+        state.complete_output_queue_close("turn-1")
+
+    assert state.current_turn_id == "turn-2"
+    assert state.output_queue_closed is False
+    assert state.output_queue_closing_turn_id is None
 
 
 def test_emit_message_chain_converts_audio_off_thread(
@@ -219,27 +263,13 @@ def test_emit_message_chain_converts_audio_off_thread(
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.runtime_state = type("RuntimeStateStub", (), {})()
     coordinator.session_state = _create_session_state_stub(current_turn_id="turn-1")
+    coordinator._flushed_output_segment_count = 0
     coordinator.chat_buffer = type("ChatBufferStub", (), {"add": lambda self, *_args: None})()
     coordinator.speaker_name = "assistant"
     coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
-    async def _broadcast_platform_motion_client_objects(**_kwargs):
-        return False
-
-    coordinator._broadcast_platform_motion_client_objects = _broadcast_platform_motion_client_objects
-
-    async def broadcast_motion_payload(**_kwargs):
-        return False
-
-    coordinator.broadcast_motion_payload = broadcast_motion_payload
-    coordinator._resolve_initial_performance_curve_motion_payload = lambda **_kwargs: None
-    async def _flush_performance_curve_motion_before_audio(**_kwargs):
-        return None
-
-    coordinator._flush_performance_curve_motion_before_audio = _flush_performance_curve_motion_before_audio
     coordinator._record_motion_lab_raw_event = lambda **_kwargs: None
     coordinator._motion_lab_chat_context = lambda: {}
     coordinator._start_performance_curve_request = lambda **_kwargs: None
-    coordinator._fail_pending_performance_curve_motion = lambda **_kwargs: None
 
     class MediaServiceStub:
         def __init__(self) -> None:
@@ -263,6 +293,7 @@ def test_emit_message_chain_converts_audio_off_thread(
     asyncio.run(
         coordinator.emit_message_chain(
             message_chain=[Record(file="voice.wav")],
+            platform_extras={"logical_message_id": "standard_reply"},
         )
     )
     asyncio.run(coordinator._flush_pending_output_segments())

@@ -25,6 +25,9 @@ class OLVPetPlatformEvent(AstrMessageEvent):
     def __init__(self, message_str, message_obj, platform_meta, session_id, adapter):
         super().__init__(message_str, message_obj, platform_meta, session_id)
         self.adapter = adapter
+        self._standard_output_platform_extras = {
+            "logical_message_id": "standard_reply",
+        }
         self._attach_prompt_annotations(message_obj=message_obj)
 
     async def send(self, message):
@@ -33,9 +36,9 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             unified_msg_origin=self.unified_msg_origin,
             raw_reply_text_override=str(self.get_extra("ag99live_raw_reply_text", "") or "").strip()
             or None,
+            platform_extras=self._standard_output_platform_extras,
         )
         await super().send(message)
-        await self._close_frontend_turn_output_queue()
 
     async def send_interaction_message(
         self,
