@@ -4,9 +4,6 @@ export interface InboundMotionPreviewDispatchDeps {
   state: {
     statusMessage: string;
     lastError: string;
-    inboundMotionPlan: unknown;
-    inboundMotionPlanTurnId: string | null;
-    inboundMotionPlanReceivedAtMs: number;
   };
   pushHistory: (role: string, text: string) => void;
   playMotionPreviewPayload?: (payload: unknown) => boolean;
@@ -35,10 +32,6 @@ export function dispatchInboundMotionPreviewEvent(
     deps.pushHistory("error", deps.state.lastError);
     return;
   }
-
-  deps.state.inboundMotionPlan = rawPlan;
-  deps.state.inboundMotionPlanTurnId = null;
-  deps.state.inboundMotionPlanReceivedAtMs = performance.now();
 
   const played = deps.playMotionPreviewPayload?.(rawPlan) ?? false;
   if (!played) {

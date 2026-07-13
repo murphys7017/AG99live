@@ -356,11 +356,10 @@ function sendOutputSegment(
     turn_id: options.turnId,
     source: "backend",
     payload: {
-      schema_version: "output.segment.v1",
+      schema_version: "output.segment.v2",
       text: options.text,
       audio: options.audio,
       motion: options.motion,
-      performance_curve: { state: "disabled" },
       images: [],
       speaker_name: "Alice",
       avatar: "",
@@ -440,48 +439,17 @@ function releaseAudioSegment(
   }).releasedAudio;
 }
 
-function motionIntentEnvelope(messageId: string, turnId: string | null) {
+function motionIntentPayload() {
   return {
-    type: "engine.motion_intent",
-    version: "v2",
-    message_id: messageId,
-    timestamp: "2026-05-08T00:00:03.000Z",
-    turn_id: turnId,
-    source: "backend",
-    payload: {
-      mode: "preview",
-      intent: {
-        schema_version: "engine.motion_intent.v3",
-        profile_id: "profile-1",
-        profile_revision: 1,
-        model_id: "model-1",
-        mode: "expressive",
-        intent_tags: ["happy"],
-        emotion_label: "happy",
-        axes: {
-          mouth_smile: 80,
-        },
-      },
-    },
-  };
-}
-
-function performanceCurveHintEnvelope(messageId: string, turnId: string | null) {
-  return {
-    type: "engine.performance_curve_hint",
-    version: "v2",
-    message_id: messageId,
-    timestamp: "2026-05-08T00:00:03.000Z",
-    turn_id: turnId,
-    source: "backend",
-    payload: {
-      schema_version: "ag99.performance_curve_hint.v1",
-      curve_family: "quick_in_hold_soft_out",
-      entry: "quick",
-      hold: "steady",
-      exit: "soft",
-      emphasis: "early",
-      energy: "medium",
+    schema_version: "engine.motion_intent.v3",
+    profile_id: "profile-1",
+    profile_revision: 1,
+    model_id: "model-1",
+    mode: "expressive",
+    intent_tags: ["happy"],
+    emotion_label: "happy",
+    axes: {
+      mouth_smile: 80,
     },
   };
 }
@@ -500,13 +468,19 @@ function testInvalidJsonMessage(): void {
 function testVersionMismatchMessageDedupesHistory(): void {
   withConnectedAdapter(({ adapter, socket }) => {
     const payload = JSON.stringify({
-      type: "output.text",
+      type: "output.segment",
       version: "wrong",
       message_id: "m-1",
       timestamp: "2026-05-08T00:00:00.000Z",
       turn_id: "turn-1",
       source: "backend",
-      payload: { text: "hello", speaker_name: "", avatar: "" },
+      payload: {
+        schema_version: "output.segment.v2",
+        text: { state: "present", content: "hello" },
+        audio: { state: "absent" },
+        motion: { state: "absent" },
+        images: [],
+      },
     });
     const initialHistoryLength = adapter.state.historyEntries.length;
     socket.emitMessage(payload);
@@ -531,11 +505,10 @@ function testInvalidPayloadDoesNotEnterPlaybackState(): void {
       turn_id: "turn-invalid-payload",
       source: "backend",
       payload: {
-        schema_version: "output.segment.v1",
+        schema_version: "output.segment.v2",
         text: 123,
         audio: { state: "absent" },
         motion: { state: "absent" },
-        performance_curve: { state: "disabled" },
         images: [],
       },
     }));
@@ -559,7 +532,7 @@ function testInvalidPayloadDoesNotEnterPlaybackState(): void {
 function testTextAudioMotionWithSameMessageIdShareSegment(): void {
   withConnectedAdapter(({ adapter, socket, sessionStore }) => {
     sendTurnStarted(socket, "turn-segment");
-    const motionEnvelope = motionIntentEnvelope("m-segment-1", "turn-segment");
+    const motionPayload = motionIntentPayload();
     sendOutputSegment(socket, {
       turnId: "turn-segment",
       messageId: "m-segment-1",
@@ -574,7 +547,7 @@ function testTextAudioMotionWithSameMessageIdShareSegment(): void {
         message_type: "engine.motion_intent",
         mode: "preview",
         source: "persona_effect",
-        payload: motionEnvelope.payload.intent,
+        payload: motionPayload,
       },
     });
 
@@ -662,14 +635,9 @@ function testOutputAudioWithoutTurnIdIsRejected(): void {
   });
 }
 
-function testSynthFinishedRejectsIncompleteSegmentWithoutFallback(): void {
+function testSynthFinishedRejectsMissingAtomicSegmentWithoutFallback(): void {
   withConnectedAdapter(({ adapter, socket, sessionStore }) => {
     sendTurnStarted(socket, "turn-synth-finished");
-    sessionStore.markTextReceived(
-      "turn-synth-finished",
-      "incomplete internal segment",
-      "m-incomplete",
-    );
     socket.emitMessage(JSON.stringify({
       type: "control.synth_finished",
       version: "v2",
@@ -681,137 +649,10 @@ function testSynthFinishedRejectsIncompleteSegmentWithoutFallback(): void {
     }));
 
     const session = sessionStore.getSession("turn-synth-finished");
-    const segment = session?.segments.get("m-incomplete");
     assert.equal(session?.backend.synthFinished, false);
-    assert.equal(segment?.audio.terminal, "idle");
-    assert.equal(segment?.motion.absent, false);
-    assert.match(adapter.state.lastError, /Incomplete atomic output segment/);
+    assert.equal(session?.segments.size, 0);
+    assert.match(adapter.state.lastError, /Atomic output segment missing/);
   });
-}
-
-function testSynthFinishedDoesNotMarkReleasedAudioAbsent(): void {
-  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-released-audio");
-    sessionStore.markAudioReceived(
-      "turn-released-audio",
-      "http://localhost/audio.wav",
-      "m-released-audio",
-    );
-    sessionStore.markAudioStarted(
-      "turn-released-audio",
-      "m-released-audio",
-      100,
-      1000,
-    );
-    assert.equal(adapter.state.pendingAudios.size, 0);
-
-    socket.emitMessage(JSON.stringify({
-      type: "control.synth_finished",
-      version: "v2",
-      message_id: "m-synth-finished-released-audio",
-      timestamp: "2026-05-08T00:00:02.000Z",
-      turn_id: "turn-released-audio",
-      source: "backend",
-      payload: {},
-    }));
-
-    const session = sessionStore.getSession("turn-released-audio");
-    const segment = session?.segments.get("m-released-audio");
-    assert.equal(segment?.audio.released, true);
-    assert.notEqual(segment?.audio.terminal, "absent");
-  });
-}
-
-function testLateOutputTextAfterSynthFinishedForUnknownSegmentIsRejected(): void {
-  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-late-unknown-text");
-    sendSynthFinished(socket, "turn-late-unknown-text", "synth-late-unknown-text");
-
-    sendOutputText(socket, {
-      turnId: "turn-late-unknown-text",
-      messageId: "msg-late-unknown-text",
-      text: "too late",
-    });
-
-    assert.equal(
-      sessionStore.getSession("turn-late-unknown-text")?.segments.has("msg-late-unknown-text"),
-      false,
-    );
-    assert.equal(
-      adapter.state.pendingAssistantTexts.has(pendingKey("turn-late-unknown-text", "msg-late-unknown-text")),
-      false,
-    );
-    assert.match(adapter.state.lastError, /output\.text在输出队列关闭或会话终态后创建输出段/);
-  });
-}
-
-function testLateOutputAudioAfterSynthFinishedForUnknownSegmentIsRejected(): void {
-  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-late-unknown-audio");
-    sendSynthFinished(socket, "turn-late-unknown-audio", "synth-late-unknown-audio");
-
-    sendOutputAudio(socket, {
-      turnId: "turn-late-unknown-audio",
-      messageId: "msg-late-unknown-audio",
-      audioUrl: "http://127.0.0.1:12397/cache/audio/too-late.wav",
-    });
-
-    assert.equal(
-      sessionStore.getSession("turn-late-unknown-audio")?.segments.has("msg-late-unknown-audio"),
-      false,
-    );
-    assert.equal(
-      adapter.state.pendingAudios.has(pendingKey("turn-late-unknown-audio", "msg-late-unknown-audio")),
-      false,
-    );
-    assert.match(adapter.state.lastError, /output\.audio在输出队列关闭或会话终态后创建输出段/);
-  });
-}
-
-async function testLateAudioAfterSynthFinishedStillPlaysOnce(): Promise<void> {
-  const harness = createConnectedAdapter();
-  try {
-    const { adapter, socket, sessionStore } = harness;
-    sendTurnStarted(socket, "turn-late-audio");
-    socket.emitMessage(JSON.stringify({
-      type: "output.text",
-      version: "v2",
-      message_id: "msg-late-audio",
-      timestamp: "2026-05-08T00:00:01.000Z",
-      turn_id: "turn-late-audio",
-      source: "backend",
-      payload: { text: "late audio", speaker_name: "assistant", avatar: "" },
-    }));
-
-    sendSynthFinished(socket, "turn-late-audio", "synth-late-audio");
-    await flushMicrotasks();
-
-    const beforeAudio = sessionStore.getSession("turn-late-audio")?.segments.get("msg-late-audio");
-    assert.equal(beforeAudio?.audio.terminal, "absent");
-
-    sendOutputAudio(socket, {
-      turnId: "turn-late-audio",
-      messageId: "msg-late-audio",
-      audioUrl: "http://127.0.0.1:12397/cache/audio/late.wav",
-      captionText: "late audio",
-    });
-    await flushMicrotasks();
-
-    const queuedAudio = sessionStore.getSession("turn-late-audio")?.segments.get("msg-late-audio");
-    assert.equal(queuedAudio?.audio.terminal, "idle");
-    assert.equal(adapter.state.pendingAudios.size, 1);
-    assert.equal(releaseAudioSegment(adapter, "msg-late-audio", "turn-late-audio"), true);
-    await flushMicrotasks();
-
-    const afterAudio = sessionStore.getSession("turn-late-audio")?.segments.get("msg-late-audio");
-    assert.equal(FakeAudio.instances.length, 1);
-    assert.equal(adapter.state.isPlayingAudio, true);
-    assert.equal(afterAudio?.audio.started, true);
-    assert.equal(afterAudio?.audio.terminal, "idle");
-    assert.equal(adapter.state.pendingAudios.size, 0);
-  } finally {
-    harness.scope.stop();
-  }
 }
 
 async function testAudioTimelineStartedHandlerReceivesStartedSnapshot(): Promise<void> {
@@ -937,49 +778,6 @@ async function testChangedUrlOutputAudioDoesNotReplayCompletedSegment(): Promise
   }
 }
 
-function testTurnFinishedDoesNotMarkMissingSegmentAudioAbsent(): void {
-  withConnectedAdapter(({ socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-finished");
-    socket.emitMessage(JSON.stringify({
-      type: "output.text",
-      version: "v2",
-      message_id: "m-no-audio-turn-finished",
-      timestamp: "2026-05-08T00:00:01.000Z",
-      turn_id: "turn-finished",
-      source: "backend",
-      payload: { text: "no audio", speaker_name: "assistant", avatar: "" },
-    }));
-    socket.emitMessage(JSON.stringify({
-      type: "control.turn_finished",
-      version: "v2",
-      message_id: "m-turn-finished",
-      timestamp: "2026-05-08T00:00:02.000Z",
-      turn_id: "turn-finished",
-      source: "backend",
-      payload: { success: true },
-    }));
-
-    const session = sessionStore.getSession("turn-finished");
-    assert.equal(session?.backend.turnFinished, true);
-    assert.equal(
-      session?.segments.get("m-no-audio-turn-finished")?.audio.terminal,
-      "idle",
-    );
-  });
-}
-
-function testMotionWithoutTurnIdIsRejected(): void {
-  withConnectedAdapter(({ socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-motion");
-    socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-motion", null)));
-
-    const session = sessionStore.getSession("turn-motion");
-    assert.ok(session);
-    assert.equal(session?.segments.has("m-motion"), false);
-    assert.equal(sessionStore.getSessions().some((item) => item.id === "turn:turn-motion"), true);
-  });
-}
-
 function testStaleSynthFinishedReportsProtocolViolation(): void {
   withConnectedAdapter(({ adapter, socket, sessionStore }) => {
     sendTurnStarted(socket, "turn-current");
@@ -1076,72 +874,6 @@ async function testSynthFinishedWithoutStartedSessionIsRejected(): Promise<void>
   } finally {
     harness.scope.stop();
   }
-}
-
-function testInvalidMotionDoesNotRewritePreviousSegment(): void {
-  withConnectedAdapter(({ socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-motion-old");
-    socket.emitMessage(JSON.stringify({
-      type: "output.segment",
-      version: "v2",
-      message_id: "m-motion-valid",
-      timestamp: "2026-05-08T00:00:01.000Z",
-      turn_id: "turn-motion-old",
-      source: "backend",
-      payload: { text: "motion segment", speaker_name: "assistant", avatar: "" },
-    }));
-    socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-motion-valid", "turn-motion-old")));
-
-    const beforeSessionCount = sessionStore.getSessions().length;
-    const previousPayload =
-      sessionStore.getSession("turn-motion-old")?.segments.get("m-motion-valid")?.motion.payload;
-
-    socket.emitMessage(JSON.stringify({
-      type: "engine.motion_intent",
-      version: "v2",
-      message_id: "m-motion-invalid",
-      timestamp: "2026-05-08T00:00:04.000Z",
-      turn_id: "turn-motion-old",
-      source: "backend",
-      payload: {
-        mode: "preview",
-        intent: { schema_version: "engine.motion_intent.v1" },
-      },
-    }));
-
-    assert.deepEqual(
-      sessionStore.getSession("turn-motion-old")?.segments.get("m-motion-valid")?.motion.payload,
-      previousPayload,
-    );
-    assert.equal(sessionStore.getSessions().length, beforeSessionCount);
-  });
-}
-
-function testBackToBackTurnsDoNotSharePendingState(): void {
-  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
-    // Turn A
-    sendTurnStarted(socket, "turn-a");
-    socket.emitMessage(JSON.stringify({
-      type: "output.text",
-      version: "v2",
-      message_id: "m-a",
-      timestamp: "2026-05-08T00:00:01.000Z",
-      turn_id: "turn-a",
-      source: "backend",
-      payload: { text: "text a", speaker_name: "assistant", avatar: "" },
-    }));
-
-    assert.ok(adapter.state.pendingAssistantTexts.has(pendingKey("turn-a", "m-a")));
-
-    // Turn B starts, should clear Turn A's pending state
-    sendTurnStarted(socket, "turn-b");
-    assert.equal(adapter.state.currentTurnId, "turn-b");
-    assert.equal(adapter.state.pendingAssistantTexts.size, 0);
-    assert.equal(adapter.state.pendingAudios.size, 0);
-
-    // Turn A's session should still exist for diagnostics
-    assert.ok(sessionStore.getSession("turn-a"));
-  });
 }
 
 function testStaleTurnFinishedDoesNotMarkCurrentTurnCompleted(): void {
@@ -1247,125 +979,6 @@ function testSendMotionPreviewUsesOutboundProtocolEnvelope(): void {
       },
     });
     assert.equal(adapter.state.statusMessage, "已发送动作测试载荷（engine.motion_intent）。");
-  });
-}
-
-function testLateMotionForExistingSegmentAfterSynthFinishedIsRejected(): void {
-  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-late-existing-motion");
-    socket.emitMessage(JSON.stringify({
-      type: "output.text",
-      version: "v2",
-      message_id: "m-late-existing-motion",
-      timestamp: "2026-05-08T00:00:01.000Z",
-      turn_id: "turn-late-existing-motion",
-      source: "backend",
-      payload: { text: "late motion target", speaker_name: "assistant", avatar: "" },
-    }));
-    sendSynthFinished(socket, "turn-late-existing-motion", "synth-late-existing-motion");
-    socket.emitMessage(JSON.stringify(motionIntentEnvelope(
-      "m-late-existing-motion",
-      "turn-late-existing-motion",
-    )));
-
-    const segment = sessionStore
-      .getSession("turn-late-existing-motion")
-      ?.segments.get("m-late-existing-motion");
-    assert.equal(segment?.motion.payload, null);
-    assert.equal(segment?.motion.absent, true);
-    assert.equal(segment?.motion.reason, "synth_finished_without_motion_payload");
-    assert.match(adapter.state.lastError, /动作载荷在输出队列关闭或会话终态后到达/);
-  });
-}
-
-function testPerformanceCurveHintWithoutSegmentIsRejected(): void {
-  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-orphan-curve");
-    socket.emitMessage(JSON.stringify(performanceCurveHintEnvelope(
-      "m-orphan-curve",
-      "turn-orphan-curve",
-    )));
-
-    assert.equal(
-      sessionStore.getSession("turn-orphan-curve")?.segments.has("m-orphan-curve"),
-      false,
-    );
-    assert.match(adapter.state.lastError, /表演曲线提示缺少同段输出/);
-  });
-}
-
-function testLatePerformanceCurveHintAfterSynthFinishedIsRejected(): void {
-  withConnectedAdapter(({ adapter, socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-late-curve");
-    socket.emitMessage(JSON.stringify({
-      type: "output.text",
-      version: "v2",
-      message_id: "m-late-curve",
-      timestamp: "2026-05-08T00:00:01.000Z",
-      turn_id: "turn-late-curve",
-      source: "backend",
-      payload: { text: "late curve target", speaker_name: "assistant", avatar: "" },
-    }));
-    sendSynthFinished(socket, "turn-late-curve", "synth-late-curve");
-    socket.emitMessage(JSON.stringify(performanceCurveHintEnvelope(
-      "m-late-curve",
-      "turn-late-curve",
-    )));
-
-    const segment = sessionStore
-      .getSession("turn-late-curve")
-      ?.segments.get("m-late-curve");
-    assert.equal(segment?.motion.payload, null);
-    assert.match(adapter.state.lastError, /表演曲线提示在输出队列关闭或会话终态后到达/);
-  });
-}
-
-function testPerformanceCurveHintAppliesToExistingSegment(): void {
-  withConnectedAdapter(({ socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-curve-segment");
-    socket.emitMessage(JSON.stringify({
-      type: "output.text",
-      version: "v2",
-      message_id: "m-curve-segment",
-      timestamp: "2026-05-08T00:00:01.000Z",
-      turn_id: "turn-curve-segment",
-      source: "backend",
-      payload: { text: "curve segment", speaker_name: "assistant", avatar: "" },
-    }));
-    socket.emitMessage(JSON.stringify(performanceCurveHintEnvelope(
-      "m-curve-segment",
-      "turn-curve-segment",
-    )));
-
-    const segment = sessionStore
-      .getSession("turn-curve-segment")
-      ?.segments.get("m-curve-segment");
-    assert.equal(segment?.motion.payload, null);
-  });
-}
-
-function testLateMotionUsesEnvelopeSegmentIdentityWithoutActiveAudio(): void {
-  withConnectedAdapter(({ socket, sessionStore }) => {
-    sendTurnStarted(socket, "turn-old-motion");
-    socket.emitMessage(JSON.stringify({
-      type: "output.text",
-      version: "v2",
-      message_id: "m-old-motion",
-      timestamp: "2026-05-08T00:00:01.000Z",
-      turn_id: "turn-old-motion",
-      source: "backend",
-      payload: { text: "old turn", speaker_name: "assistant", avatar: "" },
-    }));
-    sendTurnStarted(socket, "turn-current-motion");
-
-    socket.emitMessage(JSON.stringify(motionIntentEnvelope("m-old-motion", "turn-old-motion")));
-
-    const oldSegment = sessionStore
-      .getSession("turn-old-motion")
-      ?.segments.get("m-old-motion");
-    const currentSession = sessionStore.getSession("turn-current-motion");
-    assert.equal(oldSegment?.motion.payload?.kind, "semantic_intent");
-    assert.equal(currentSession?.segments.has("m-old-motion"), false);
   });
 }
 
@@ -1968,20 +1581,12 @@ async function testInterruptMarksPlayingAudioSegmentFailed(): Promise<void> {
   try {
     const { adapter, socket, sessionStore } = harness;
     sendTurnStarted(socket, "turn-interrupt");
-    socket.emitMessage(JSON.stringify({
-      type: "output.audio",
-      version: "v2",
-      message_id: "msg-interrupt-audio",
-      timestamp: "2026-05-08T00:00:20.000Z",
-      turn_id: "turn-interrupt",
-      source: "backend",
-      payload: {
-        audio_url: "http://127.0.0.1:12397/cache/audio/test.wav",
-        caption_text: "hello",
-        speaker_name: "Alice",
-        avatar: "",
-      },
-    }));
+    sendOutputAudio(socket, {
+      turnId: "turn-interrupt",
+      messageId: "msg-interrupt-audio",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/test.wav",
+      captionText: "hello",
+    });
 
     const released = releaseAudioSegment(
       adapter,
@@ -2108,20 +1713,12 @@ async function testInterruptMarksPendingAudioSegmentFailedBeforePlaybackStart():
   try {
     const { adapter, socket, sessionStore } = harness;
     sendTurnStarted(socket, "turn-interrupt-pending");
-    socket.emitMessage(JSON.stringify({
-      type: "output.audio",
-      version: "v2",
-      message_id: "msg-interrupt-pending-audio",
-      timestamp: "2026-05-08T00:00:22.000Z",
-      turn_id: "turn-interrupt-pending",
-      source: "backend",
-      payload: {
-        audio_url: "http://127.0.0.1:12397/cache/audio/test-pending.wav",
-        caption_text: "hello pending",
-        speaker_name: "Alice",
-        avatar: "",
-      },
-    }));
+    sendOutputAudio(socket, {
+      turnId: "turn-interrupt-pending",
+      messageId: "msg-interrupt-pending-audio",
+      audioUrl: "http://127.0.0.1:12397/cache/audio/test-pending.wav",
+      captionText: "hello pending",
+    });
 
     FakeAudio.nextPlayShouldStall = true;
     const released = releaseAudioSegment(
@@ -2180,8 +1777,6 @@ async function testTerminalSessionRejectsLateSegmentMaterials(): Promise<void> {
       messageId: "late-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/late.wav",
     });
-    socket.emitMessage(JSON.stringify(motionIntentEnvelope("late-motion", "turn-terminal")));
-    socket.emitMessage(JSON.stringify(performanceCurveHintEnvelope("late-curve", "turn-terminal")));
     await flushMicrotasks();
 
     const session = sessionStore.getSession("turn-terminal");
@@ -2270,7 +1865,7 @@ async function run(): Promise<void> {
   testMultipleMessageIdsDoNotOverwritePendingItems();
   testSameMessageIdAcrossTurnsDoesNotOverwritePendingItems();
   testOutputAudioWithoutTurnIdIsRejected();
-  testSynthFinishedRejectsIncompleteSegmentWithoutFallback();
+  testSynthFinishedRejectsMissingAtomicSegmentWithoutFallback();
   await testAudioTimelineStartedHandlerReceivesStartedSnapshot();
   await testDuplicateOutputAudioDoesNotReplayCompletedSegment();
   await testChangedUrlOutputAudioDoesNotReplayCompletedSegment();
@@ -2297,7 +1892,11 @@ async function run(): Promise<void> {
   await testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd();
   await testPttReleaseDuringStartupStopsCaptureAfterStart();
   await testDeviceChangeEndsPreviousMicSegmentBeforeRestart();
+  await testInterruptMarksPlayingAudioSegmentFailed();
   testUserInterruptWithoutTurnIdentityIsRejected();
+  await testUserInterruptMarksPlayingAudioSegmentFailedBeforeSending();
+  await testUserInterruptMarksPendingAudioSegmentFailedBeforeSending();
+  await testInterruptMarksPendingAudioSegmentFailedBeforePlaybackStart();
   await testTerminalSessionRejectsLateSegmentMaterials();
   await testFatalInboundHandlerErrorClosesConnection();
   await testInvalidMotionRejectsWholeAtomicSegment();

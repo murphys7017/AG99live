@@ -92,6 +92,8 @@ export interface TurnPlaybackSessionText {
   receiveMode: TextReceiveMode;
   released: boolean;
   delivered: boolean;
+  failed: boolean;
+  reason: string;
 }
 
 /**
@@ -220,6 +222,8 @@ export function createEmptyTextState(): TurnPlaybackSessionText {
     receiveMode: "replace",
     released: false,
     delivered: false,
+    failed: false,
+    reason: "",
   };
 }
 

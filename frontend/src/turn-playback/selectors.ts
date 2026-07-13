@@ -50,26 +50,6 @@ export function canReleaseMotion(segment: TurnPlaybackSegment): boolean {
 }
 
 /**
- * Whether the orchestrator should keep a wider sync window open
- * for a late motion plan to join the current playback group.
- *
- * Returns true when a motion payload has been received but not yet
- * started or completed — the group should wait.
- */
-export function shouldWaitForLateMotion(
-  segment: TurnPlaybackSegment,
-  _nowMs: number,
-): boolean {
-  if (segment.motion.absent) {
-    return false;
-  }
-  if (segment.motion.released || segment.motion.completed || segment.motion.failed) {
-    return false;
-  }
-  return segment.motion.payload !== null;
-}
-
-/**
  * Whether local playback has fully settled on the frontend side.
  *
  * Requires:

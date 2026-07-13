@@ -4,6 +4,7 @@ import type { NormalizedMotionPayload } from "../model-engine/contracts";
 import { canReleaseAudio, canReleaseMotion, getActivePlaybackSegment } from "./selectors.js";
 import type { MotionPayloadPort } from "./ports.js";
 import type { PlaybackTimelineSegmentStartPort } from "../playback-timeline/segmentJob.js";
+import type { TurnPlaybackSegment } from "./session.js";
 
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 
@@ -125,7 +126,7 @@ export function useTurnPlaybackOrchestrator(
 }
 
 function isAtomicSegmentResolved(
-  segment: ReturnType<SessionStore["ensureSegment"]>,
+  segment: TurnPlaybackSegment,
 ): boolean {
   const textResolved = Boolean(segment.text.content) || segment.text.delivered;
   const audioResolved = Boolean(segment.audio.url) || segment.audio.terminal !== "idle";

@@ -32,16 +32,25 @@ function createHarness(sendResult: boolean | "reject" | Promise<boolean> = true)
   return { sessionStore, playbackFinishedCalls, coordinator };
 }
 
+function commitSettledReply(
+  h: Harness,
+  audio: { state: "absent" } | { state: "failed"; reason: string } = { state: "absent" },
+): void {
+  h.sessionStore.commitOutputSegment("turn-1", "msg-1", {
+    text: { state: "present", content: "hello" },
+    audio,
+    motion: { state: "absent" },
+  });
+  h.sessionStore.markTextDelivered("turn-1", "msg-1");
+}
+
 async function testLateAckDoesNotCompleteInterruptedSession(): Promise<void> {
   let resolveSend!: (sent: boolean) => void;
   const sendResult = new Promise<boolean>((resolve) => {
     resolveSend = resolve;
   });
   const h = createHarness(sendResult);
-  h.sessionStore.markTextReceived("turn-1", "hello", "msg-1");
-  h.sessionStore.markTextDelivered("turn-1", "msg-1");
-  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-1", "no_audio");
-  h.sessionStore.markMotionAbsent("turn-1", "msg-1");
+  commitSettledReply(h);
   h.sessionStore.markSynthFinished("turn-1");
   h.sessionStore.markTurnFinished("turn-1", true);
   await nextTick();
@@ -56,10 +65,7 @@ async function testLateAckDoesNotCompleteInterruptedSession(): Promise<void> {
 
 async function testSendFailureFailsSessionInsteadOfAcknowledging(): Promise<void> {
   const h = createHarness(false);
-  h.sessionStore.markTextReceived("turn-1", "hello", "msg-1");
-  h.sessionStore.markTextDelivered("turn-1", "msg-1");
-  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-1", "no_audio");
-  h.sessionStore.markMotionAbsent("turn-1", "msg-1");
+  commitSettledReply(h);
   h.sessionStore.markSynthFinished("turn-1");
   await flush();
 
@@ -70,10 +76,7 @@ async function testSendFailureFailsSessionInsteadOfAcknowledging(): Promise<void
 
 async function testSendExceptionFailsSessionInsteadOfHanging(): Promise<void> {
   const h = createHarness("reject");
-  h.sessionStore.markTextReceived("turn-1", "hello", "msg-1");
-  h.sessionStore.markTextDelivered("turn-1", "msg-1");
-  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-1", "no_audio");
-  h.sessionStore.markMotionAbsent("turn-1", "msg-1");
+  commitSettledReply(h);
   h.sessionStore.markSynthFinished("turn-1");
   await flush();
 
@@ -87,10 +90,7 @@ async function flush(): Promise<void> {
 
 async function testAcknowledgesOnlyAfterAllRequiredSignals(): Promise<void> {
   const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "hello", "msg-1");
-  h.sessionStore.markTextDelivered("turn-1", "msg-1");
-  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-1", "no_audio");
-  h.sessionStore.markMotionAbsent("turn-1", "msg-1");
+  commitSettledReply(h);
 
   await flush();
   assert.equal(h.playbackFinishedCalls.length, 0);
@@ -107,10 +107,7 @@ async function testAcknowledgesOnlyAfterAllRequiredSignals(): Promise<void> {
 
 async function testBackendTurnFinishedFinalizesAckedSession(): Promise<void> {
   const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "hello", "msg-1");
-  h.sessionStore.markTextDelivered("turn-1", "msg-1");
-  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-1", "no_audio");
-  h.sessionStore.markMotionAbsent("turn-1", "msg-1");
+  commitSettledReply(h);
   h.sessionStore.markSynthFinished("turn-1");
   await flush();
 
@@ -122,10 +119,20 @@ async function testBackendTurnFinishedFinalizesAckedSession(): Promise<void> {
 
 async function testFailedSegmentProducesFailedPlaybackAck(): Promise<void> {
   const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "hello", "msg-1");
-  h.sessionStore.markTextDelivered("turn-1", "msg-1");
-  h.sessionStore.markAudioTerminal("turn-1", "failed", "msg-1", "audio_error");
-  h.sessionStore.markMotionAbsent("turn-1", "msg-1");
+  commitSettledReply(h, { state: "failed", reason: "audio_error" });
+  h.sessionStore.markSynthFinished("turn-1");
+  await flush();
+
+  assert.equal(h.playbackFinishedCalls[0]?.success, false);
+}
+
+async function testFailedTextProducesFailedPlaybackAck(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.commitOutputSegment("turn-1", "msg-text-failed", {
+    text: { state: "failed", reason: "text_invalid" },
+    audio: { state: "absent" },
+    motion: { state: "absent" },
+  });
   h.sessionStore.markSynthFinished("turn-1");
   await flush();
 
@@ -134,10 +141,7 @@ async function testFailedSegmentProducesFailedPlaybackAck(): Promise<void> {
 
 async function testResetAllowsASecondAcknowledgementCycle(): Promise<void> {
   const h = createHarness();
-  h.sessionStore.markTextReceived("turn-1", "hello", "msg-1");
-  h.sessionStore.markTextDelivered("turn-1", "msg-1");
-  h.sessionStore.markAudioTerminal("turn-1", "absent", "msg-1", "no_audio");
-  h.sessionStore.markMotionAbsent("turn-1", "msg-1");
+  commitSettledReply(h);
   h.sessionStore.markSynthFinished("turn-1");
   await flush();
   assert.equal(h.playbackFinishedCalls.length, 1);
@@ -151,6 +155,7 @@ async function testResetAllowsASecondAcknowledgementCycle(): Promise<void> {
 await testAcknowledgesOnlyAfterAllRequiredSignals();
 await testBackendTurnFinishedFinalizesAckedSession();
 await testFailedSegmentProducesFailedPlaybackAck();
+await testFailedTextProducesFailedPlaybackAck();
 await testResetAllowsASecondAcknowledgementCycle();
 await testSendFailureFailsSessionInsteadOfAcknowledging();
 await testSendExceptionFailsSessionInsteadOfHanging();

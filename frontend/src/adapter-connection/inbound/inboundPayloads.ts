@@ -2,7 +2,6 @@ import type {
   ControlErrorPayload,
   ControlTurnFinishedPayload,
   OutputSegmentPayload,
-  PerformanceCurveHint,
   OutputTranscriptionPayload,
   ProtocolEnvelope,
   SystemHistoryCreatedPayload,
@@ -101,8 +100,15 @@ export function parseOutputSegmentPayload(
 ): PayloadParseResult<OutputSegmentPayload> {
   const record = parseObjectPayload(envelope);
   if (!record.ok) return record;
-  if (record.payload.schema_version !== "output.segment.v1") {
-    return invalidPayload(envelope.type, "payload.schema_version", "output.segment.v1");
+  if (record.payload.schema_version !== "output.segment.v2") {
+    return invalidPayload(envelope.type, "payload.schema_version", "output.segment.v2");
+  }
+  if ("performance_curve" in record.payload) {
+    return invalidPayload(
+      envelope.type,
+      "payload.performance_curve",
+      "removed; use motion.payload.performance_curve_hint",
+    );
   }
   const text = parseSegmentTextSlot(envelope.type, record.payload.text);
   if (!text.ok) return text;
@@ -110,8 +116,6 @@ export function parseOutputSegmentPayload(
   if (!audio.ok) return audio;
   const motion = parseSegmentMotionSlot(envelope.type, record.payload.motion);
   if (!motion.ok) return motion;
-  const curve = parseSegmentCurveSlot(envelope.type, record.payload.performance_curve);
-  if (!curve.ok) return curve;
   const images = record.payload.images;
   if (!Array.isArray(images) || !images.every((item) => typeof item === "string")) {
     return invalidPayload(envelope.type, "payload.images", "string[]");
@@ -119,11 +123,10 @@ export function parseOutputSegmentPayload(
   return {
     ok: true,
     payload: {
-      schema_version: "output.segment.v1",
+      schema_version: "output.segment.v2",
       text: text.payload,
       audio: audio.payload,
       motion: motion.payload,
-      performance_curve: curve.payload,
       images,
       speaker_name: optionalString(record.payload.speaker_name) ?? "",
       avatar: optionalString(record.payload.avatar) ?? "",
@@ -173,9 +176,16 @@ function parseSegmentMotionSlot(type: string, value: unknown): PayloadParseResul
     return { ok: true, payload: { state: "failed", reason: slot.reason.trim() } };
   }
   const payload = asRecord(slot.payload);
+  const schemaVersion = payload?.schema_version;
+  const expectedMessageType = schemaVersion === "engine.catalog_motion.v1"
+    ? "engine.catalog_motion"
+    : schemaVersion === "engine.motion_intent.v3" || schemaVersion === "engine.motion_intent.v4"
+      ? "engine.motion_intent"
+      : null;
   if (
     slot.state === "present"
     && (slot.message_type === "engine.motion_intent" || slot.message_type === "engine.catalog_motion")
+    && slot.message_type === expectedMessageType
     && typeof slot.mode === "string"
     && typeof slot.source === "string"
     && payload
@@ -192,20 +202,6 @@ function parseSegmentMotionSlot(type: string, value: unknown): PayloadParseResul
     };
   }
   return invalidPayload(type, "payload.motion", "valid tagged motion slot");
-}
-
-function parseSegmentCurveSlot(type: string, value: unknown): PayloadParseResult<OutputSegmentPayload["performance_curve"]> {
-  const slot = asRecord(value);
-  if (!slot) return invalidPayload(type, "payload.performance_curve", "segment curve slot");
-  if (slot.state === "disabled") return { ok: true, payload: { state: "disabled" } };
-  if (slot.state === "skipped" && typeof slot.reason === "string" && slot.reason.trim()) {
-    return { ok: true, payload: { state: "skipped", reason: slot.reason.trim() } };
-  }
-  const hint = asRecord(slot.hint);
-  if (slot.state === "ready" && hint) {
-    return { ok: true, payload: { state: "ready", hint: hint as unknown as PerformanceCurveHint } };
-  }
-  return invalidPayload(type, "payload.performance_curve", "valid tagged curve slot");
 }
 
 export function parseOutputTranscriptionPayload(

@@ -30,7 +30,7 @@ function defaultContext() {
 
 function makeAtomicSegmentPayload() {
   return {
-    schema_version: "output.segment.v1",
+    schema_version: "output.segment.v2",
     text: { state: "present", content: "hello" },
     audio: {
       state: "present",
@@ -43,11 +43,9 @@ function makeAtomicSegmentPayload() {
       mode: "expressive",
       source: "persona_effect",
       payload: {
-        mode: "expressive",
-        intent: { schema_version: "engine.motion_intent.v3" },
+        schema_version: "engine.motion_intent.v3",
       },
     },
-    performance_curve: { state: "disabled" },
     images: [],
     speaker_name: "assistant",
     avatar: "",
@@ -86,6 +84,53 @@ function testOutputSegmentRequiresTurnId(): void {
     throw new Error("expected protocol_error event");
   }
   assert.equal(event.error.path, "turn_id");
+}
+
+function testOutputSegmentRejectsRemovedTopLevelPerformanceCurve(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("output.segment", {
+      ...makeAtomicSegmentPayload(),
+      performance_curve: { state: "disabled" },
+    }, { turnId: "turn-1" }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
+  }
+  assert.equal(event.error.path, "payload.performance_curve");
+}
+
+function testOutputSegmentRejectsV1Schema(): void {
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("output.segment", {
+      ...makeAtomicSegmentPayload(),
+      schema_version: "output.segment.v1",
+    }, { turnId: "turn-1" }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
+  }
+  assert.equal(event.error.path, "payload.schema_version");
+}
+
+function testOutputSegmentRejectsMotionMessageTypeMismatch(): void {
+  const payload = makeAtomicSegmentPayload();
+  payload.motion.message_type = "engine.catalog_motion";
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("output.segment", payload, { turnId: "turn-1" }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
+  }
+  assert.equal(event.error.path, "payload.motion");
 }
 
 function testTurnFinishedWithoutTurnIdIsRejected(): void {
@@ -445,6 +490,9 @@ function testMotionLabPersistedAckRequiresEventId(): void {
 function run(): void {
   testOutputSegmentUsesEnvelopeIdentity();
   testOutputSegmentRequiresTurnId();
+  testOutputSegmentRejectsRemovedTopLevelPerformanceCurve();
+  testOutputSegmentRejectsV1Schema();
+  testOutputSegmentRejectsMotionMessageTypeMismatch();
   testTurnFinishedWithoutTurnIdIsRejected();
   testTurnStartedDoesNotInheritCurrentIdentity();
   testInterruptUsesEnvelopeIdentity();

@@ -26,7 +26,7 @@ function testInvalidEnvelope(): void {
 
 function testInvalidEnvelopeTopLevelFields(): void {
   const base = {
-    type: "output.text",
+    type: "output.segment",
     version: "v2",
     message_id: "m-1",
     timestamp: "2026-05-08T00:00:00.000Z",
@@ -59,7 +59,7 @@ function testInvalidEnvelopeTopLevelFields(): void {
 
 function testVersionMismatch(): void {
   const result = parseInboundEnvelope(JSON.stringify({
-    type: "output.text",
+    type: "output.segment",
     version: "wrong",
     message_id: "m-1",
     timestamp: "2026-05-08T00:00:00.000Z",
@@ -81,7 +81,7 @@ function testVersionMismatch(): void {
 
 function testValidEnvelope(): void {
   const result = parseInboundEnvelope(JSON.stringify({
-    type: "output.text",
+    type: "output.segment",
     version: "v2",
     message_id: "m-1",
     timestamp: "2026-05-08T00:00:00.000Z",
@@ -93,12 +93,12 @@ function testValidEnvelope(): void {
   if (!result.ok) {
     throw new Error("expected valid envelope");
   }
-  assert.equal(result.envelope.type, "output.text");
+  assert.equal(result.envelope.type, "output.segment");
 }
 
 function testValidEnvelopeNormalizesTurnId(): void {
   const result = parseInboundEnvelope(JSON.stringify({
-    type: "output.text",
+    type: "output.segment",
     version: "v2",
     message_id: "m-1",
     timestamp: "2026-05-08T00:00:00.000Z",

@@ -5,9 +5,9 @@
  * event.kind 转发到下列五个领域分发器之一：
  *   - inboundConnectionDispatcher   server_info
  *   - inboundFeatureDispatcher      model_sync / 语义轴档案 / 动作样本 / 历史
- *   - inboundOutputDispatcher       output_text / output_audio / output_image / output_transcription
+ *   - inboundOutputDispatcher       output_segment / output_transcription
  *   - inboundRuntimeDispatcher      turn_started / turn_finished / interrupt / start_mic / synth_finished / control_error
- *   - inboundMotionDispatcher       engine_motion_payload / engine_motion_preview
+ *   - inboundMotionDispatcher       engine_motion_preview
  * protocol_error 和 unhandled 走 inboundProtocolDiagnostics 上报。
  *
  * 自身不写状态、不发协议、不调用任何业务行为，只做 switch + forward；状态写回
@@ -70,10 +70,6 @@ export interface InboundDispatchState {
   // pending queues
   pendingAssistantTexts: Map<string, PendingAssistantTextItem>;
   pendingAudios: Map<string, PendingAudioItem>;
-  // motion plan
-  inboundMotionPlan: unknown;
-  inboundMotionPlanTurnId: string | null;
-  inboundMotionPlanReceivedAtMs: number;
 }
 
 export interface InboundDispatchDeps {

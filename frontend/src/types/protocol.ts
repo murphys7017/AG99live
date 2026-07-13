@@ -42,17 +42,11 @@ export type OutputSegmentMotionSlot =
   | { state: "absent" }
   | { state: "failed"; reason: string };
 
-export type OutputSegmentPerformanceCurveSlot =
-  | { state: "ready"; hint: PerformanceCurveHint }
-  | { state: "skipped"; reason: string }
-  | { state: "disabled" };
-
 export interface OutputSegmentPayload {
-  schema_version: "output.segment.v1";
+  schema_version: "output.segment.v2";
   text: OutputSegmentTextSlot;
   audio: OutputSegmentAudioSlot;
   motion: OutputSegmentMotionSlot;
-  performance_curve: OutputSegmentPerformanceCurveSlot;
   images: string[];
   speaker_name: string;
   avatar: string;

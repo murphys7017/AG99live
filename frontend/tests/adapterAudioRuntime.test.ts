@@ -30,6 +30,7 @@ function createAdapterAudioRuntime(
     ...deps,
     segmentExecution: {
       session: {
+        markSessionFailed: (...args) => ports.session.markSessionFailed(...args),
         markTextReleased: (...args) => ports.session.markTextReleased(...args),
         markAudioReleased: (...args) => ports.session.markAudioReleased(...args),
         markMotionReleased: (...args) => ports.session.markMotionReleased(...args),
@@ -176,6 +177,7 @@ function createNoopSegmentExecutionPorts(): Omit<
 > {
   return {
     session: {
+      markSessionFailed: () => {},
       markTextReleased: () => {},
       markAudioReleased: () => {},
       markMotionReleased: () => {},
@@ -620,6 +622,7 @@ async function testTimelineAudioReleaseMarksSessionReleasedOnce(): Promise<void>
   });
   runtime.configureSegmentExecution({
     session: {
+      markSessionFailed: () => {},
       markTextReleased: () => {},
       markAudioReleased: (turnId, messageId) => {
         releasedEvents.push({ turnId, messageId });

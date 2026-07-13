@@ -56,6 +56,13 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
       job.messageId,
       job.turnId,
     );
+    if (!releasedText) {
+      ports.session.markSessionFailed(
+        job.turnId,
+        `text_release_queue_invariant_failed:${job.messageId}`,
+      );
+      return { releasedText: false, releasedAudio: false, releasedMotion: false };
+    }
   }
   if (releasedText) {
     ports.session.markTextReleased(job.turnId, job.messageId);
@@ -74,6 +81,11 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
     ) === true;
     if (!releasedAudio) {
       timeline.clearAudioSinkIfIdle(job.turnId, job.messageId);
+      ports.session.markSessionFailed(
+        job.turnId,
+        `audio_release_queue_invariant_failed:${job.messageId}`,
+      );
+      return { releasedText, releasedAudio: false, releasedMotion: false };
     }
   }
   if (releasedAudio) {

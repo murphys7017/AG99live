@@ -243,6 +243,7 @@ export function createAdapterConnection(
     getSessionStore: () => sessionStore,
     segmentExecution: {
       session: {
+        markSessionFailed: sessionStore.markSessionFailed,
         markTextReleased: sessionStore.markTextReleased,
         markAudioReleased: sessionStore.markAudioReleased,
         markMotionReleased: sessionStore.markMotionReleased,

@@ -33,6 +33,7 @@ function createPlaybackTimelineRuntime(
     ...deps,
     segmentExecution: {
       session: {
+        markSessionFailed: (...args) => ports.session.markSessionFailed(...args),
         markTextReleased: (...args) => ports.session.markTextReleased(...args),
         markAudioReleased: (...args) => ports.session.markAudioReleased(...args),
         markMotionReleased: (...args) => ports.session.markMotionReleased(...args),
@@ -390,6 +391,7 @@ function createNoopSegmentExecutionPorts(
 ): PlaybackTimelineSegmentExecutionPorts {
   return {
     session: {
+      markSessionFailed: () => events.push("session_failed"),
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
       markMotionReleased: () => events.push("motion_released"),
@@ -637,6 +639,7 @@ function testPlaybackTimelineRuntimeStartsSegmentJobThroughTimelineEntry(): void
   const events: string[] = [];
   runtime.configureSegmentExecution({
     session: {
+      markSessionFailed: () => events.push("session_failed"),
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
       markMotionReleased: () => events.push("motion_released"),

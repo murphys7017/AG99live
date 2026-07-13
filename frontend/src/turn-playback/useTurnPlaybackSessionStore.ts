@@ -10,8 +10,8 @@
  *   三个子状态 + turnId/messageId 的组合。
  *
  * 写入约定：
- *   - 正式协议只通过 commitOutputSegment 一次性创建完整段；段级 mark* 仅供
- *     timeline 生命周期回写和显式本地入口使用。
+ *   - 正式协议只通过 commitOutputSegment 一次性创建完整段；段级 mark* 只更新
+ *     已提交段的 timeline 生命周期，缺段时直接抛错。
  *   - 后端 turn/synth/finished 信号要求 session 已存在，synth_finished 不推断
  *     缺失材料，也不把未解析状态改写为 absent。
  *   - phase 转移统一经 markPhaseInternal 做合法性检查；非法转移直接抛错，
@@ -29,7 +29,6 @@ import { reactive, readonly } from "vue";
 import type {
   TurnPlaybackSession,
   TurnPlaybackPhase,
-  TextReceiveMode,
   AudioTerminalState,
   TurnPlaybackSegment,
   OutputSegmentMaterial,
@@ -43,7 +42,6 @@ import {
   isSegmentLocallySettled,
 } from "./session.js";
 import { getActivePlaybackSegment } from "./selectors.js";
-import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
 
 // ── Store state ────────────────────────────────────────────────────
 
@@ -159,45 +157,18 @@ export function useTurnPlaybackSessionStore() {
 
   // ── segments ────────────────────────────────────────────────────
 
-  function ensureSegment(
-    turnId: string | null,
-    messageId: string,
-  ): TurnPlaybackSegment {
-    const session = ensureSession(turnId);
-    return ensureSegmentForSession(session, turnId, messageId);
-  }
-
-  function ensureSegmentForSession(
-    session: TurnPlaybackSession,
-    turnId: string | null,
-    messageId: string,
-  ): TurnPlaybackSegment {
-    const segmentId = normalizeRequiredMessageId(messageId);
-    const existing = session.segments.get(segmentId);
-    if (existing) {
-      if (!existing.turnId && turnId) {
-        existing.turnId = turnId;
-      }
-      return existing;
-    }
-
-    const segment = createTurnPlaybackSegment(segmentId, turnId);
-    session.segments.set(segmentId, segment);
-    session.segmentOrder.push(segmentId);
-    log("segment created", {
-      sessionId: session.id,
-      messageId: segmentId,
-      turnId,
-    });
-    return segment;
-  }
-
   function getSegmentSession(
     turnId: string | null,
     messageId: string,
   ): { session: TurnPlaybackSession; segment: TurnPlaybackSegment } {
-    const session = ensureSession(turnId);
-    const segment = ensureSegmentForSession(session, turnId, messageId);
+    const session = requireSession(turnId);
+    const segmentId = normalizeRequiredMessageId(messageId);
+    const segment = session.segments.get(segmentId);
+    if (!segment) {
+      throw new Error(
+        `Playback lifecycle update requires committed segment: turnId=${turnId}, messageId=${segmentId}.`,
+      );
+    }
     return { session, segment };
   }
 
@@ -229,6 +200,9 @@ export function useTurnPlaybackSessionStore() {
 
   function assertOutputSegmentsResolved(turnId: string | null): void {
     const session = requireSession(turnId);
+    if (session.segmentOrder.length === 0) {
+      throw new Error(`Atomic output segment missing before synth_finished: turnId=${turnId}.`);
+    }
     for (const messageId of session.segmentOrder) {
       const segment = session.segments.get(messageId);
       if (!segment) {
@@ -289,9 +263,15 @@ export function useTurnPlaybackSessionStore() {
       segment.text.content = material.text.content;
       segment.text.receivedAtMs = receivedAtMs;
       segment.text.receiveMode = "replace";
+    } else if (material.text.state === "absent") {
+      segment.text.released = true;
+      segment.text.delivered = true;
+      segment.text.reason = "output_segment_text_absent";
     } else {
       segment.text.released = true;
       segment.text.delivered = true;
+      segment.text.failed = true;
+      segment.text.reason = material.text.reason;
     }
 
     if (material.audio.state === "present") {
@@ -320,6 +300,9 @@ export function useTurnPlaybackSessionStore() {
 
     session.segments.set(segmentId, segment);
     session.segmentOrder.push(segmentId);
+    if (session.phase === "collecting") {
+      markPhaseInternal(session, "ready");
+    }
     log("atomic output segment committed", {
       sessionId: session.id,
       messageId: segmentId,
@@ -332,31 +315,6 @@ export function useTurnPlaybackSessionStore() {
   }
 
   // ── text ────────────────────────────────────────────────────────
-
-  function markTextReceived(
-    turnId: string | null,
-    text: string,
-    messageId: string,
-    mode: TextReceiveMode = "replace",
-  ): void {
-    const trimmed = text.trim();
-    if (!trimmed) {
-      return;
-    }
-    const { session, segment } = getSegmentSession(turnId, messageId);
-    if (mode === "append" && segment.text.content) {
-      segment.text.content = segment.text.content + trimmed;
-    } else {
-      segment.text.content = trimmed;
-    }
-    segment.text.receiveMode = mode;
-    segment.text.receivedAtMs = performance.now();
-    segment.text.released = false;
-    segment.text.delivered = false;
-    if (!session.backend.turnStarted) {
-      session.backend.turnStarted = true;
-    }
-  }
 
   function markTextReleased(
     turnId: string | null,
@@ -373,60 +331,11 @@ export function useTurnPlaybackSessionStore() {
     const { segment } = getSegmentSession(turnId, messageId);
     segment.text.delivered = true;
     segment.text.released = true; // delivery implies release
+    segment.text.failed = false;
+    segment.text.reason = "";
   }
 
   // ── audio ───────────────────────────────────────────────────────
-
-  /**
-   * 收到新音频：写入 url 并把段重置为可播状态。
-   *
-   * 段已 started/failed/completed 或已有 url 时，视为迟到/重复音频，
-   * 返回 false 由调用方决定是否上报"已忽略音频"。会话若处于 settling，
-   * 收到一份仍可补齐的新 url 会把 phase 拨回 playing，给晚到媒体一次补齐机会。
-   */
-  function markAudioReceived(
-    turnId: string | null,
-    url: string,
-    messageId: string,
-    captionText = "",
-  ): boolean {
-    const trimmed = url.trim();
-    if (!trimmed) {
-      return false;
-    }
-    const { session, segment } = getSegmentSession(turnId, messageId);
-    const hasExistingAudioUrl =
-      typeof segment.audio.url === "string"
-      && segment.audio.url.trim().length > 0;
-    const canFillAbsentAudio =
-      segment.audio.terminal === "absent"
-      && !segment.audio.started
-      && !hasExistingAudioUrl;
-    if (
-      hasExistingAudioUrl
-      || segment.audio.started
-      || (
-        segment.audio.terminal !== "idle"
-        && !canFillAbsentAudio
-      )
-    ) {
-      return false;
-    }
-    segment.audio.url = trimmed;
-    const normalizedCaption = captionText.trim();
-    segment.audio.captionText = normalizedCaption || segment.audio.captionText;
-    segment.audio.receivedAtMs = performance.now();
-    segment.audio.released = false;
-    segment.audio.terminal = "idle";
-    segment.audio.reason = "";
-    segment.audio.started = false;
-    segment.audio.startedAtMs = null;
-    segment.audio.durationMs = null;
-    if (session.phase === "settling") {
-      markPhaseInternal(session, "playing");
-    }
-    return true;
-  }
 
   function markAudioStarted(
     turnId: string | null,
@@ -480,37 +389,6 @@ export function useTurnPlaybackSessionStore() {
   }
 
   // ── motion ──────────────────────────────────────────────────────
-
-  /**
-   * 收到一份动作载荷。如果段动作已经 released/started/completed，直接 return，
-   * 不覆盖正在播或已收口的动作。写入会同时清掉 absent/failed/reason 标记，
-   * 让段重新具备"等待动作播放"的语义。
-   */
-  function markMotionReceived(
-    turnId: string | null,
-    payload: NormalizedMotionPayload,
-    messageId: string,
-  ): void {
-    if (!payload) {
-      return;
-    }
-    const { segment } = getSegmentSession(turnId, messageId);
-    if (
-      segment.motion.released
-      || segment.motion.started
-      || segment.motion.completed
-    ) {
-      return;
-    }
-    segment.motion.payload = payload;
-    segment.motion.receivedAtMs = performance.now();
-    segment.motion.absent = false;
-    segment.motion.released = false;
-    segment.motion.started = false;
-    segment.motion.completed = false;
-    segment.motion.failed = false;
-    segment.motion.reason = "";
-  }
 
   function markMotionAbsent(
     turnId: string | null,
@@ -714,7 +592,6 @@ export function useTurnPlaybackSessionStore() {
     state: readonly(state),
     ensureSession,
     requireSession,
-    ensureSegment,
     getSession,
     getSessionById,
     getSegment,
@@ -726,15 +603,12 @@ export function useTurnPlaybackSessionStore() {
     getActiveSession,
     setActiveSession,
     commitOutputSegment,
-    markTextReceived,
     markTextReleased,
     markTextDelivered,
-    markAudioReceived,
     markAudioReleased,
     markAudioStarted,
     markAudioDuration,
     markAudioTerminal,
-    markMotionReceived,
     markMotionAbsent,
     markMotionFailed,
     markMotionReleased,

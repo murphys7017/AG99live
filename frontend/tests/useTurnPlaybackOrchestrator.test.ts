@@ -28,6 +28,7 @@ function createPlaybackTimelineRuntime(
 ) {
   let ports: PlaybackTimelineSegmentExecutionPorts = {
     session: {
+      markSessionFailed: () => {},
       markTextReleased: () => {},
       markAudioReleased: () => {},
       markMotionReleased: () => {},
@@ -42,6 +43,7 @@ function createPlaybackTimelineRuntime(
     ...deps,
     segmentExecution: {
       session: {
+        markSessionFailed: (...args) => ports.session.markSessionFailed(...args),
         markTextReleased: (...args) => ports.session.markTextReleased(...args),
         markAudioReleased: (...args) => ports.session.markAudioReleased(...args),
         markMotionReleased: (...args) => ports.session.markMotionReleased(...args),
@@ -293,6 +295,7 @@ function createHarness(options: {
 
   timelineRuntime.configureSegmentExecution({
     session: {
+      markSessionFailed: sessionStore.markSessionFailed,
       markTextReleased: sessionStore.markTextReleased,
       markAudioReleased: sessionStore.markAudioReleased,
       markMotionReleased: sessionStore.markMotionReleased,
@@ -341,18 +344,49 @@ function createHarness(options: {
   };
 }
 
+function commitSegment(
+  sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>,
+  turnId: string,
+  messageId: string,
+  options: {
+    text?: string;
+    audioUrl?: string;
+    captionText?: string;
+    motion?: NormalizedMotionPayload;
+  },
+): void {
+  sessionStore.commitOutputSegment(turnId, messageId, {
+    text: options.text
+      ? { state: "present", content: options.text }
+      : { state: "absent" },
+    audio: options.audioUrl
+      ? {
+          state: "present",
+          url: options.audioUrl,
+          captionText: options.captionText ?? "",
+        }
+      : { state: "absent" },
+    motion: options.motion
+      ? { state: "present", payload: options.motion }
+      : { state: "absent" },
+  });
+}
+
 async function testSegmentsReleaseSequentiallyWithinTurn(): Promise<void> {
   const h = createHarness();
   h.sessionStore.setActiveSession("turn-1");
   h.sessionStore.markTurnStarted("turn-1");
 
-  h.sessionStore.markTextReceived("turn-1", "A", "msg-a");
-  h.sessionStore.markAudioReceived("turn-1", "http://localhost/a.wav", "msg-a");
-  h.sessionStore.markMotionReceived("turn-1", motionPayload, "msg-a");
-
-  h.sessionStore.markTextReceived("turn-1", "B", "msg-b");
-  h.sessionStore.markAudioReceived("turn-1", "http://localhost/b.wav", "msg-b");
-  h.sessionStore.markMotionReceived("turn-1", motionPayload, "msg-b");
+  commitSegment(h.sessionStore, "turn-1", "msg-a", {
+    text: "A",
+    audioUrl: "http://localhost/a.wav",
+    motion: motionPayload,
+  });
+  commitSegment(h.sessionStore, "turn-1", "msg-b", {
+    text: "B",
+    audioUrl: "http://localhost/b.wav",
+    motion: motionPayload,
+  });
 
   await h.flush();
   await h.flush();
@@ -390,15 +424,11 @@ async function testTextAndMotionReleaseWhenAudioIsAbsent(): Promise<void> {
   h.sessionStore.setActiveSession("turn-text-motion");
   h.sessionStore.markTurnStarted("turn-text-motion");
 
-  h.sessionStore.markTextReceived("turn-text-motion", "hello", "msg-text-motion");
-  h.sessionStore.markMotionReceived("turn-text-motion", motionPayload, "msg-text-motion");
+  commitSegment(h.sessionStore, "turn-text-motion", "msg-text-motion", {
+    text: "hello",
+    motion: motionPayload,
+  });
   h.sessionStore.markSynthFinished("turn-text-motion");
-  h.sessionStore.markAudioTerminal(
-    "turn-text-motion",
-    "absent",
-    "msg-text-motion",
-    "synth_finished_without_audio_playback",
-  );
 
   await h.flush();
   await h.flush();
@@ -424,14 +454,11 @@ async function testAudioCaptionOnlySegmentDoesNotReleaseVisibleText(): Promise<v
   h.sessionStore.setActiveSession("turn-audio-caption");
   h.sessionStore.markTurnStarted("turn-audio-caption");
 
-  h.sessionStore.markAudioReceived(
-    "turn-audio-caption",
-    "http://localhost/caption.wav",
-    "msg-audio-caption",
-    "subtitle only",
-  );
-  h.sessionStore.markTextDelivered("turn-audio-caption", "msg-audio-caption");
-  h.sessionStore.markMotionReceived("turn-audio-caption", motionPayload, "msg-audio-caption");
+  commitSegment(h.sessionStore, "turn-audio-caption", "msg-audio-caption", {
+    audioUrl: "http://localhost/caption.wav",
+    captionText: "subtitle only",
+    motion: motionPayload,
+  });
 
   await h.flush();
   await h.flush();
@@ -450,56 +477,6 @@ async function testAudioCaptionOnlySegmentDoesNotReleaseVisibleText(): Promise<v
   h.stop();
 }
 
-async function testVisibleTextArrivingAfterAudioCaptionIsReleasedOnce(): Promise<void> {
-  const h = createHarness();
-  h.sessionStore.setActiveSession("turn-late-visible-text");
-  h.sessionStore.markTurnStarted("turn-late-visible-text");
-
-  h.sessionStore.markAudioReceived(
-    "turn-late-visible-text",
-    "http://localhost/late-visible-text.wav",
-    "msg-late-visible-text",
-    "subtitle only",
-  );
-  h.sessionStore.markTextDelivered(
-    "turn-late-visible-text",
-    "msg-late-visible-text",
-  );
-  h.sessionStore.markMotionReceived(
-    "turn-late-visible-text",
-    motionPayload,
-    "msg-late-visible-text",
-  );
-
-  await h.flush();
-  await h.flush();
-
-  assert.deepEqual(h.released, [
-    "audio:msg-late-visible-text:turn-late-visible-text",
-  ]);
-  assert.deepEqual(h.motionSinkStarts, [
-    "motion:msg-late-visible-text:turn-late-visible-text",
-  ]);
-
-  h.sessionStore.markTextReceived(
-    "turn-late-visible-text",
-    "visible reply",
-    "msg-late-visible-text",
-  );
-
-  await h.flush();
-  await h.flush();
-
-  assert.deepEqual(h.released, [
-    "audio:msg-late-visible-text:turn-late-visible-text",
-    "text:msg-late-visible-text:turn-late-visible-text",
-  ]);
-  assert.deepEqual(h.motionSinkStarts, [
-    "motion:msg-late-visible-text:turn-late-visible-text",
-  ]);
-  h.stop();
-}
-
 async function testMotionReleaseReceivesMatchingAudioTimeline(): Promise<void> {
   const h = createHarness({
     audioTimelineAfterRelease: matchingTimelineSnapshot,
@@ -507,13 +484,11 @@ async function testMotionReleaseReceivesMatchingAudioTimeline(): Promise<void> {
   h.sessionStore.setActiveSession("turn-timeline");
   h.sessionStore.markTurnStarted("turn-timeline");
 
-  h.sessionStore.markTextReceived("turn-timeline", "hello", "msg-timeline");
-  h.sessionStore.markAudioReceived(
-    "turn-timeline",
-    "http://localhost/timeline.wav",
-    "msg-timeline",
-  );
-  h.sessionStore.markMotionReceived("turn-timeline", motionPayload, "msg-timeline");
+  commitSegment(h.sessionStore, "turn-timeline", "msg-timeline", {
+    text: "hello",
+    audioUrl: "http://localhost/timeline.wav",
+    motion: motionPayload,
+  });
 
   await h.flush();
   await h.flush();
@@ -547,13 +522,11 @@ async function testMotionReleaseRejectsMismatchedAudioTimeline(): Promise<void> 
   h.sessionStore.setActiveSession("turn-timeline");
   h.sessionStore.markTurnStarted("turn-timeline");
 
-  h.sessionStore.markTextReceived("turn-timeline", "hello", "msg-timeline");
-  h.sessionStore.markAudioReceived(
-    "turn-timeline",
-    "http://localhost/timeline.wav",
-    "msg-timeline",
-  );
-  h.sessionStore.markMotionReceived("turn-timeline", motionPayload, "msg-timeline");
+  commitSegment(h.sessionStore, "turn-timeline", "msg-timeline", {
+    text: "hello",
+    audioUrl: "http://localhost/timeline.wav",
+    motion: motionPayload,
+  });
 
   await h.flush();
   await h.flush();
@@ -570,15 +543,11 @@ async function testRejectedMotionReleaseMarksSegmentFailed(): Promise<void> {
   h.sessionStore.setActiveSession("turn-motion-rejected");
   h.sessionStore.markTurnStarted("turn-motion-rejected");
 
-  h.sessionStore.markTextReceived("turn-motion-rejected", "hello", "msg-motion-rejected");
-  h.sessionStore.markMotionReceived("turn-motion-rejected", motionPayload, "msg-motion-rejected");
+  commitSegment(h.sessionStore, "turn-motion-rejected", "msg-motion-rejected", {
+    text: "hello",
+    motion: motionPayload,
+  });
   h.sessionStore.markSynthFinished("turn-motion-rejected");
-  h.sessionStore.markAudioTerminal(
-    "turn-motion-rejected",
-    "absent",
-    "msg-motion-rejected",
-    "synth_finished_without_audio_playback",
-  );
 
   await h.flush();
   await h.flush();
@@ -602,12 +571,10 @@ async function testMotionWithoutReceivedAtMarksSegmentFailed(): Promise<void> {
   h.sessionStore.setActiveSession("turn-motion-missing-time");
   h.sessionStore.markTurnStarted("turn-motion-missing-time");
 
-  h.sessionStore.markTextReceived("turn-motion-missing-time", "hello", "msg-motion-missing-time");
-  h.sessionStore.markMotionReceived(
-    "turn-motion-missing-time",
-    motionPayload,
-    "msg-motion-missing-time",
-  );
+  commitSegment(h.sessionStore, "turn-motion-missing-time", "msg-motion-missing-time", {
+    text: "hello",
+    motion: motionPayload,
+  });
   const segment = h.sessionStore
     .getSession("turn-motion-missing-time")
     ?.segments.get("msg-motion-missing-time");
@@ -616,12 +583,6 @@ async function testMotionWithoutReceivedAtMarksSegmentFailed(): Promise<void> {
   }
   segment.motion.receivedAtMs = null;
   h.sessionStore.markSynthFinished("turn-motion-missing-time");
-  h.sessionStore.markAudioTerminal(
-    "turn-motion-missing-time",
-    "absent",
-    "msg-motion-missing-time",
-    "synth_finished_without_audio_playback",
-  );
 
   await h.flush();
   await h.flush();
@@ -650,15 +611,11 @@ async function testPerformanceCurveHintIsMergedBeforeMotionRelease(): Promise<vo
     },
   };
 
-  h.sessionStore.markTextReceived("turn-curve", "hello", "msg-curve");
-  h.sessionStore.markMotionReceived("turn-curve", payloadWithCurve, "msg-curve");
+  commitSegment(h.sessionStore, "turn-curve", "msg-curve", {
+    text: "hello",
+    motion: payloadWithCurve,
+  });
   h.sessionStore.markSynthFinished("turn-curve");
-  h.sessionStore.markAudioTerminal(
-    "turn-curve",
-    "absent",
-    "msg-curve",
-    "synth_finished_without_audio_playback",
-  );
 
   await h.flush();
   await h.flush();
@@ -888,19 +845,14 @@ function testPlaybackTimelineRuntimeRejectsInvalidMotionTimestamp(): void {
   const sessionStore = useTurnPlaybackSessionStore();
   sessionStore.setActiveSession("turn-invalid-motion-time");
   sessionStore.markTurnStarted("turn-invalid-motion-time");
-  sessionStore.markTextReceived(
-    "turn-invalid-motion-time",
-    "hello",
-    "msg-invalid-motion-time",
-  );
-  sessionStore.markMotionReceived(
-    "turn-invalid-motion-time",
-    motionPayload,
-    "msg-invalid-motion-time",
-  );
+  commitSegment(sessionStore, "turn-invalid-motion-time", "msg-invalid-motion-time", {
+    text: "hello",
+    motion: motionPayload,
+  });
 
   const runtime = createRuntimeWithSegmentExecutionPorts({
     session: {
+      markSessionFailed: sessionStore.markSessionFailed,
       markTextReleased: sessionStore.markTextReleased,
       markAudioReleased: sessionStore.markAudioReleased,
       markMotionReleased: sessionStore.markMotionReleased,
@@ -945,6 +897,7 @@ function testPlaybackTimelineRuntimeMarksMotionOnlyContext(): void {
   const contexts: Array<{ timelineMode?: string }> = [];
   const runtime = createRuntimeWithSegmentExecutionPorts({
     session: {
+      markSessionFailed: () => events.push("session_failed"),
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
       markMotionReleased: () => events.push("motion_released"),
@@ -1009,6 +962,7 @@ function testPlaybackTimelineRuntimePreparesAudioMotionTimeline(): void {
   const events: string[] = [];
   const runtime = createRuntimeWithSegmentExecutionPorts({
     session: {
+      markSessionFailed: () => events.push("session_failed"),
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
       markMotionReleased: () => events.push("motion_released"),
@@ -1078,6 +1032,7 @@ function testPlaybackTimelineRuntimeDoesNotReleaseMotionWhenAudioReleaseFails():
   const events: string[] = [];
   const runtime = createRuntimeWithSegmentExecutionPorts({
     session: {
+      markSessionFailed: () => events.push("session_failed"),
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
       markMotionReleased: () => events.push("motion_released"),
@@ -1130,6 +1085,7 @@ function testPlaybackTimelineRuntimeDoesNotReleaseMotionWhenAudioReleaseFails():
   });
   assert.deepEqual(events, [
     "audio_sink",
+    "session_failed",
   ]);
   assert.equal(
     runtime.getTimelineSnapshotForSegment(
@@ -1143,6 +1099,7 @@ function testPlaybackTimelineRuntimeCreatesMotionOnlyTimelineBesideExistingAudio
   const events: string[] = [];
   const runtime = createRuntimeWithSegmentExecutionPorts({
     session: {
+      markSessionFailed: () => events.push("session_failed"),
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
       markMotionReleased: () => events.push("motion_released"),
@@ -1208,11 +1165,52 @@ function testPlaybackTimelineRuntimeCreatesMotionOnlyTimelineBesideExistingAudio
     "msg-motion-only-missing-timeline",
   );
 }
+function testPlaybackTimelineRuntimeFailsSessionWhenTextQueueItemIsMissing(): void {
+  const events: string[] = [];
+  const runtime = createRuntimeWithSegmentExecutionPorts({
+    session: {
+      markSessionFailed: (_turnId, reason) => events.push(`session_failed:${reason}`),
+      markTextReleased: () => events.push("text_released"),
+      markAudioReleased: () => events.push("audio_released"),
+      markMotionReleased: () => events.push("motion_released"),
+      markMotionFailed: () => events.push("motion_failed"),
+      markPhase: () => true,
+    },
+    textSink: {
+      releaseAssistantTextForPlayback: () => false,
+    },
+    audioSink: {
+      releaseAudioForPlayback: () => true,
+    },
+    motionSink: {
+      interrupt: () => {},
+      start: () => true,
+    },
+  });
+
+  const result = runtime.startSegmentJob({
+    messageId: "msg-missing-text",
+    turnId: "turn-missing-text",
+    reason: "test",
+    text: { release: true },
+    audio: { release: false, noAudioConfirmed: true },
+    motion: { payload: null, receivedAtMs: null },
+  });
+
+  assert.deepEqual(result, {
+    releasedText: false,
+    releasedAudio: false,
+    releasedMotion: false,
+  });
+  assert.deepEqual(events, [
+    "session_failed:text_release_queue_invariant_failed:msg-missing-text",
+  ]);
+}
+
 async function run(): Promise<void> {
   await testSegmentsReleaseSequentiallyWithinTurn();
   await testTextAndMotionReleaseWhenAudioIsAbsent();
   await testAudioCaptionOnlySegmentDoesNotReleaseVisibleText();
-  await testVisibleTextArrivingAfterAudioCaptionIsReleasedOnce();
   await testMotionReleaseReceivesMatchingAudioTimeline();
   await testMotionReleaseRejectsMismatchedAudioTimeline();
   await testRejectedMotionReleaseMarksSegmentFailed();
@@ -1228,6 +1226,7 @@ async function run(): Promise<void> {
   testPlaybackTimelineRuntimeMarksMotionOnlyContext();
   testPlaybackTimelineRuntimePreparesAudioMotionTimeline();
   testPlaybackTimelineRuntimeDoesNotReleaseMotionWhenAudioReleaseFails();
+  testPlaybackTimelineRuntimeFailsSessionWhenTextQueueItemIsMissing();
   testPlaybackTimelineRuntimeCreatesMotionOnlyTimelineBesideExistingAudioTimeline();
   console.log("useTurnPlaybackOrchestrator tests passed");
 }

@@ -60,6 +60,18 @@ function getSegment(
   return segment;
 }
 
+function commitSegment(
+  store: ReturnType<typeof useTurnPlaybackSessionStore>,
+  turnId: string,
+  messageId: string,
+  material: Parameters<typeof store.commitOutputSegment>[2],
+): void {
+  if (!store.getSession(turnId)) {
+    store.markTurnStarted(turnId);
+  }
+  store.commitOutputSegment(turnId, messageId, material);
+}
+
 function testSessionStartsWithoutTurnLevelPlaybackSlots(): void {
   const session = createTurnPlaybackSession("turn-1");
   assert.equal(session.id, "turn:turn-1");
@@ -75,9 +87,11 @@ function testSessionStartsWithoutTurnLevelPlaybackSlots(): void {
 
 function testSameMessageIdGroupsTextAudioMotion(): void {
   const store = useTurnPlaybackSessionStore();
-  store.markTextReceived("turn-1", "Hello", "msg-1");
-  store.markAudioReceived("turn-1", "http://localhost/a.wav", "msg-1");
-  store.markMotionReceived("turn-1", motionPayload, "msg-1");
+  commitSegment(store, "turn-1", "msg-1", {
+    text: { state: "present", content: "Hello" },
+    audio: { state: "present", url: "http://localhost/a.wav", captionText: "Hello" },
+    motion: { state: "present", payload: motionPayload },
+  });
 
   const session = getOnlySession(store);
   assert.equal(session.segments.size, 1);
@@ -106,6 +120,7 @@ function testAtomicOutputSegmentCommitsOnce(): void {
   assert.equal(segment?.text.content, "Atomic reply");
   assert.equal(segment?.audio.url, "http://localhost/atomic.wav");
   assert.deepEqual(segment?.motion.payload, motionPayload);
+  assert.equal(store.getSession("turn-atomic")?.phase, "ready");
 
   assert.throws(
     () => store.commitOutputSegment("turn-atomic", "msg-atomic", {
@@ -137,7 +152,11 @@ function testAtomicOutputSegmentRejectsClosedQueueWithoutCreatingSegment(): void
 
 function testCatalogMotionPayloadCanBeStored(): void {
   const store = useTurnPlaybackSessionStore();
-  store.markMotionReceived("turn-1", catalogMotionPayload, "msg-1");
+  commitSegment(store, "turn-1", "msg-1", {
+    text: { state: "absent" },
+    audio: { state: "absent" },
+    motion: { state: "present", payload: catalogMotionPayload },
+  });
 
   const segment = getSegment(store, "msg-1");
   assert.equal(segment.motion.payload?.kind, "catalog_motion");
@@ -148,13 +167,20 @@ function testPerformanceCurveHintStaysAttachedToMotionPayload(): void {
   if (motionPayload.kind !== "semantic_intent") {
     throw new Error("expected semantic_intent fixture");
   }
-  store.markMotionReceived("turn-1", {
-    kind: "semantic_intent",
-    intent: {
-      ...motionPayload.intent,
-      performance_curve_hint: curveHint,
+  commitSegment(store, "turn-1", "msg-1", {
+    text: { state: "absent" },
+    audio: { state: "absent" },
+    motion: {
+      state: "present",
+      payload: {
+        kind: "semantic_intent",
+        intent: {
+          ...motionPayload.intent,
+          performance_curve_hint: curveHint,
+        },
+      },
     },
-  }, "msg-1");
+  });
 
   const segment = getSegment(store, "msg-1");
   assert.equal(segment.motion.payload?.kind, "semantic_intent");
@@ -171,9 +197,16 @@ function testPerformanceCurveHintStaysAttachedToMotionPayload(): void {
 
 function testMultipleMessageIdsKeepArrivalOrder(): void {
   const store = useTurnPlaybackSessionStore();
-  store.markTextReceived("turn-1", "First", "msg-1");
-  store.markTextReceived("turn-1", "Second", "msg-2");
-  store.markAudioReceived("turn-1", "http://localhost/second.wav", "msg-2");
+  commitSegment(store, "turn-1", "msg-1", {
+    text: { state: "present", content: "First" },
+    audio: { state: "absent" },
+    motion: { state: "absent" },
+  });
+  commitSegment(store, "turn-1", "msg-2", {
+    text: { state: "present", content: "Second" },
+    audio: { state: "present", url: "http://localhost/second.wav", captionText: "Second" },
+    motion: { state: "absent" },
+  });
 
   const session = getOnlySession(store);
   assert.deepEqual(session.segmentOrder, ["msg-1", "msg-2"]);
@@ -183,9 +216,11 @@ function testMultipleMessageIdsKeepArrivalOrder(): void {
 
 function testSelectorsOperateOnSegments(): void {
   const store = useTurnPlaybackSessionStore();
-  store.markTextReceived("turn-1", "Hello", "msg-1");
-  store.markAudioReceived("turn-1", "http://localhost/a.wav", "msg-1");
-  store.markMotionReceived("turn-1", motionPayload, "msg-1");
+  commitSegment(store, "turn-1", "msg-1", {
+    text: { state: "present", content: "Hello" },
+    audio: { state: "present", url: "http://localhost/a.wav", captionText: "Hello" },
+    motion: { state: "present", payload: motionPayload },
+  });
 
   const segment = getSegment(store, "msg-1");
   assert.equal(canReleaseText(segment), true);
@@ -202,22 +237,26 @@ function testSelectorsOperateOnSegments(): void {
 
 function testSegmentSettlementAndTurnSettlement(): void {
   const store = useTurnPlaybackSessionStore();
-  store.markTextReceived("turn-1", "First", "msg-1");
-  store.markTextReceived("turn-1", "Second", "msg-2");
+  commitSegment(store, "turn-1", "msg-1", {
+    text: { state: "present", content: "First" },
+    audio: { state: "absent" },
+    motion: { state: "absent" },
+  });
+  commitSegment(store, "turn-1", "msg-2", {
+    text: { state: "present", content: "Second" },
+    audio: { state: "absent" },
+    motion: { state: "absent" },
+  });
 
   const session = getOnlySession(store);
   assert.equal(isPlaybackLocallySettled(session), false);
 
   store.markTextDelivered("turn-1", "msg-1");
-  store.markAudioTerminal("turn-1", "absent", "msg-1", "no_audio");
-  store.markMotionAbsent("turn-1", "msg-1");
   assert.equal(store.isSegmentSettled(session.id, "msg-1"), true);
   assert.equal(isSegmentLocallySettled(session.segments.get("msg-1")!), true);
   assert.equal(isPlaybackLocallySettled(session), false);
 
   store.markTextDelivered("turn-1", "msg-2");
-  store.markAudioTerminal("turn-1", "absent", "msg-2", "no_audio");
-  store.markMotionAbsent("turn-1", "msg-2");
   assert.equal(isPlaybackLocallySettled(session), true);
 }
 
@@ -257,8 +296,13 @@ function testTurnFinishedRequiresExistingSession(): void {
 
 function testRequiredMessageIdIsEnforced(): void {
   const store = useTurnPlaybackSessionStore();
+  store.markTurnStarted("turn-1");
   assert.throws(
-    () => store.markTextReceived("turn-1", "Hello", "   "),
+    () => store.commitOutputSegment("turn-1", "   ", {
+      text: { state: "present", content: "Hello" },
+      audio: { state: "absent" },
+      motion: { state: "absent" },
+    }),
     /messageId/,
   );
 }
@@ -266,8 +310,11 @@ function testRequiredMessageIdIsEnforced(): void {
 function testTurnOnlySessionRemainsTurnScoped(): void {
   const store = useTurnPlaybackSessionStore();
   store.setActiveSession("turn-1");
-  store.markTextReceived("turn-1", "Early", "msg-1");
-  store.markAudioReceived("turn-1", "http://localhost/audio.wav", "msg-1");
+  commitSegment(store, "turn-1", "msg-1", {
+    text: { state: "present", content: "Early" },
+    audio: { state: "present", url: "http://localhost/audio.wav", captionText: "Early" },
+    motion: { state: "absent" },
+  });
 
   const session = store.getSession("turn-1");
   assert.ok(session);
@@ -282,11 +329,17 @@ function testTurnOnlySessionRemainsTurnScoped(): void {
 
 function testGetUnsettledSegmentsReturnsOnlyUnsettledSegments(): void {
   const store = useTurnPlaybackSessionStore();
-  store.markTextReceived("turn-1", "First", "msg-1");
-  store.markTextReceived("turn-1", "Second", "msg-2");
+  commitSegment(store, "turn-1", "msg-1", {
+    text: { state: "present", content: "First" },
+    audio: { state: "absent" },
+    motion: { state: "absent" },
+  });
+  commitSegment(store, "turn-1", "msg-2", {
+    text: { state: "present", content: "Second" },
+    audio: { state: "absent" },
+    motion: { state: "absent" },
+  });
   store.markTextDelivered("turn-1", "msg-1");
-  store.markAudioTerminal("turn-1", "absent", "msg-1", "no_audio");
-  store.markMotionAbsent("turn-1", "msg-1");
 
   assert.deepEqual(
     store.getUnsettledSegments().map((segment) => segment.messageId),
@@ -320,8 +373,44 @@ function testReadySessionCanSettleWithoutPlaybackSinks(): void {
     audio: { state: "absent" },
     motion: { state: "absent" },
   });
-  store.markPhase("turn-no-sinks", "ready");
+  assert.equal(store.getSession("turn-no-sinks")?.phase, "ready");
   assert.equal(store.markPhase("turn-no-sinks", "settling"), true);
+}
+
+function testSynthFinishedRejectsTurnWithoutAtomicSegment(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.markTurnStarted("turn-empty");
+
+  assert.throws(
+    () => store.assertOutputSegmentsResolved("turn-empty"),
+    /Atomic output segment missing/,
+  );
+}
+
+function testLifecycleUpdateRejectsMissingCommittedSegment(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.markTurnStarted("turn-missing-segment");
+
+  assert.throws(
+    () => store.markTextDelivered("turn-missing-segment", "msg-missing"),
+    /requires committed segment/,
+  );
+  assert.equal(store.getSession("turn-missing-segment")?.segments.size, 0);
+}
+
+function testFailedTextMaterialRemainsAnExplicitFailure(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.markTurnStarted("turn-text-failed");
+  store.commitOutputSegment("turn-text-failed", "msg-text-failed", {
+    text: { state: "failed", reason: "text_material_invalid" },
+    audio: { state: "absent" },
+    motion: { state: "absent" },
+  });
+
+  const segment = store.getSession("turn-text-failed")?.segments.get("msg-text-failed");
+  assert.equal(segment?.text.delivered, true);
+  assert.equal(segment?.text.failed, true);
+  assert.equal(segment?.text.reason, "text_material_invalid");
 }
 
 function testFailedSessionCannotTransition(): void {
@@ -383,8 +472,11 @@ function testInterruptTargetsRequestedSession(): void {
 
 function testAudioTerminalHandlesAllStates(): void {
   const store = useTurnPlaybackSessionStore();
-  store.setActiveSession("turn-1");
-  store.markTextReceived("turn-1", "Hello", "msg-1");
+  commitSegment(store, "turn-1", "msg-1", {
+    text: { state: "present", content: "Hello" },
+    audio: { state: "present", url: "http://localhost/a.wav", captionText: "Hello" },
+    motion: { state: "absent" },
+  });
 
   store.markAudioTerminal("turn-1", "completed", "msg-1", "ok");
   assert.equal(store.getSession("turn-1")?.segments.get("msg-1")?.audio.terminal, "completed");
@@ -392,52 +484,6 @@ function testAudioTerminalHandlesAllStates(): void {
   store.markAudioTerminal("turn-1", "failed", "msg-1", "error");
   assert.equal(store.getSession("turn-1")?.segments.get("msg-1")?.audio.terminal, "failed");
   assert.equal(store.getSession("turn-1")?.segments.get("msg-1")?.audio.reason, "error");
-}
-
-function testDuplicateAudioReceiveDoesNotResetCompletedSegment(): void {
-  const store = useTurnPlaybackSessionStore();
-  store.setActiveSession("turn-1");
-  store.markTextReceived("turn-1", "Hello", "msg-1");
-
-  assert.equal(store.markAudioReceived("turn-1", "http://localhost/a.wav", "msg-1"), true);
-  store.markAudioReleased("turn-1", "msg-1");
-  store.markAudioStarted("turn-1", "msg-1", 100, 1000);
-  store.markAudioTerminal("turn-1", "completed", "msg-1", "ok");
-
-  assert.equal(store.markAudioReceived("turn-1", "http://localhost/a.wav", "msg-1"), false);
-  const segment = store.getSession("turn-1")?.segments.get("msg-1");
-  assert.equal(segment?.audio.terminal, "completed");
-  assert.equal(segment?.audio.started, true);
-}
-
-function testDifferentAudioUrlDoesNotResetCompletedSegment(): void {
-  const store = useTurnPlaybackSessionStore();
-  store.setActiveSession("turn-1");
-  store.markTextReceived("turn-1", "Hello", "msg-1");
-
-  assert.equal(store.markAudioReceived("turn-1", "http://localhost/a.wav", "msg-1"), true);
-  store.markAudioReleased("turn-1", "msg-1");
-  store.markAudioStarted("turn-1", "msg-1", 100, 1000);
-  store.markAudioTerminal("turn-1", "completed", "msg-1", "ok");
-
-  assert.equal(store.markAudioReceived("turn-1", "http://localhost/a-v2.wav", "msg-1"), false);
-  const segment = store.getSession("turn-1")?.segments.get("msg-1");
-  assert.equal(segment?.audio.url, "http://localhost/a.wav");
-  assert.equal(segment?.audio.terminal, "completed");
-  assert.equal(segment?.audio.started, true);
-}
-
-function testDuplicateMotionReceiveDoesNotResetReleasedSegment(): void {
-  const store = useTurnPlaybackSessionStore();
-  store.setActiveSession("turn-1");
-  store.markTextReceived("turn-1", "Hello", "msg-1");
-  store.markMotionReceived("turn-1", motionPayload, "msg-1");
-  store.markMotionReleased("turn-1", "msg-1");
-
-  store.markMotionReceived("turn-1", catalogMotionPayload, "msg-1");
-  const segment = store.getSession("turn-1")?.segments.get("msg-1");
-  assert.deepEqual(segment?.motion.payload, motionPayload);
-  assert.equal(segment?.motion.released, true);
 }
 
 function run(): void {
@@ -458,14 +504,14 @@ function run(): void {
   testGetUnsettledSegmentsReturnsOnlyUnsettledSegments();
   testIllegalPhaseTransitionIsRejected();
   testReadySessionCanSettleWithoutPlaybackSinks();
+  testSynthFinishedRejectsTurnWithoutAtomicSegment();
+  testLifecycleUpdateRejectsMissingCommittedSegment();
+  testFailedTextMaterialRemainsAnExplicitFailure();
   testFailedSessionCannotTransition();
   testInterruptMarksSessionFailed();
   testInterruptDoesNotCreateNewSession();
   testInterruptTargetsRequestedSession();
   testAudioTerminalHandlesAllStates();
-  testDuplicateAudioReceiveDoesNotResetCompletedSegment();
-  testDifferentAudioUrlDoesNotResetCompletedSegment();
-  testDuplicateMotionReceiveDoesNotResetReleasedSegment();
   console.log("turnPlaybackSessionStore tests passed");
 }
 
