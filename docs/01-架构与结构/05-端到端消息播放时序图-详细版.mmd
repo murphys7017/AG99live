@@ -1,75 +1,148 @@
-flowchart TD
-    classDef backend fill:#e8f1f2,stroke:#2f5d62,color:#163438
-    classDef protocol fill:#fff3d6,stroke:#9a6b14,color:#513807
-    classDef state fill:#e8edf7,stroke:#3e5f93,color:#1d3154
-    classDef timeline fill:#f8e7df,stroke:#9b4d2d,color:#542717
-    classDef engine fill:#e9f3df,stroke:#557a35,color:#2e431d
-    classDef terminal fill:#f3e6ec,stroke:#8b4865,color:#4b2637
-    classDef failure fill:#fde7e3,stroke:#b33a2b,color:#681d14
+sequenceDiagram
+    autonumber
+    actor User as 用户 / UI
+    participant Adapter as AG99 Adapter<br/>TurnCoordinator
+    participant Persona as Persona Runtime
+    participant LLM as 主模型
+    participant TTS as TTS
+    participant Buffer as PendingOutputSegment
+    participant Inbound as Inbound Dispatcher
+    participant Store as SessionStore
+    participant Queue as Text / Audio Queue
+    participant Orch as Playback Orchestrator
+    participant Timeline as PlaybackTimelineRuntime
+    participant Audio as HTMLAudioElement
+    participant Lip as Lip-sync Sink
+    participant Engine as ModelEngine
+    participant SDK as Live2D WebSDK
+    participant Completion as CompletionCoordinator
 
-    subgraph B[后端生成与原子出站]
-        U[input.text / input.audio]:::protocol --> TC[TurnCoordinator<br/>确认 turn_id]:::backend
-        TC --> AR[Persona Runtime<br/>构建 Prompt 与 effect schema]:::backend
-        AR --> LLM[主模型一次生成<br/>spoken_reply + effect_calls]:::backend
-        LLM --> RC[result contributor<br/>motion_intent.v4]:::backend
-        LLM --> TTS[TTS<br/>Record WAV + caption]:::backend
-        LLM --> PT[Plain 可见文本]:::backend
-        RC --> BUF[PendingOutputSegment<br/>turn_id + message_id]:::backend
-        TTS --> BUF
-        PT --> BUF
-        BUF --> CHECK[冲突 / 多音频 / motion / curve 校验]:::backend
-        CHECK --> SEG[单个 output.segment.v2<br/>完整 tagged slots]:::protocol
-        SEG --> SF[随后 control.synth_finished]:::protocol
+    User->>Adapter: input.text / input.audio
+    Adapter->>Inbound: control.turn_started(turn_id)
+    Inbound->>Store: 创建本轮 Session
+    Adapter->>Persona: 构建 Prompt、effect schema 与本轮上下文
+    Persona->>LLM: 生成可见回复与动作决策
+    LLM-->>Persona: spoken_reply + effect_calls
+    Persona->>Adapter: result contributor 生成 motion_intent.v4
+    Persona->>TTS: spoken_reply
+    TTS-->>Adapter: WAV Record + Record.text
+    Note over Adapter,Buffer: AstrBot 可以将 Plain、Record、图片和 client object 物理拆分；<br/>拆分仅存在于后端内部。Plain / semantic text / Record.text 必须归一为同一 canonical text。
+    Adapter->>Buffer: 按 turn_id + message_id 合并物理组件
+    Buffer->>Buffer: 校验文本冲突、多音频、motion 与 curve
+
+    loop 每个完整逻辑段
+        Buffer->>Inbound: output.segment.v3<br/>唯一 text / audio URL / motion / images 完整 slots
+        Inbound->>Inbound: 校验信封、slot、URL 和 motion payload
+        alt 任一字段或领域校验失败
+            Inbound--xStore: 拒绝整段，不写入 Store
+            Inbound--xQueue: 不创建任何待释放项
+            Note over Inbound,Store: 协议错误显式暴露，不将失败解释为 absent
+        else 整段预校验通过
+            Inbound->>Store: commitOutputSegment() 原子提交
+            Inbound->>Queue: 提交后才加入 text / audio queue
+            Store-->>Orch: 已解析段状态变更
+            Note over Orch,Completion: 段提交后可立即起播；不等待 synth_finished
+            Orch->>Timeline: startSegmentJob(turn_id, message_id)
+
+            alt audio.state = present
+                Timeline->>Queue: 释放音频
+                Queue->>Audio: 创建并播放同一 HTMLAudioElement
+                Audio->>Timeline: loadedmetadata / duration ready
+                alt motion.state = present
+                    Timeline->>Engine: 预编译本段语义动作
+                    Engine-->>Timeline: prepared / failed
+                else motion.state = absent 且模型支持说话随动
+                    Timeline->>Engine: 预编译 speech-only motion
+                    Engine-->>Timeline: prepared / not_applicable / failed
+                else 无可播动作
+                    Note over Timeline,Engine: 不创建动作计划，也不伪造默认动作
+                end
+                opt 动作准备结果 = prepared
+                    Timeline->>Timeline: 注册 required motion sink
+                end
+                Audio->>Timeline: playing + 真实 audio clock
+                opt text.state = present
+                    Timeline->>Queue: 释放唯一 canonical text 作为字幕
+                    alt 字幕释放成功
+                        Queue-->>Store: text delivered
+                    else 字幕队列不变量失败
+                        Timeline->>Audio: 停止当前 HTMLAudioElement
+                        Timeline->>Engine: 中断本段动作
+                        Timeline->>Lip: 中断本段口型
+                        Timeline->>Store: 标记 segment failed
+                    end
+                end
+                Timeline->>Lip: 在同一 AudioElement 上启动 WebAudio RMS
+                opt required motion sink 已注册且仍为 idle
+                    Timeline->>Engine: 立即启动已准备计划<br/>视觉入场由 performance curve 控制
+                end
+            else audio.state = absent 且 motion.state = present
+                opt text.state = present
+                    Timeline->>Queue: 立即释放 canonical text
+                    Queue-->>Store: text delivered
+                end
+                Timeline->>Timeline: 创建 synthetic motion-only clock
+                Timeline->>Engine: 启动本段语义动作
+            else audio.state = absent
+                opt text.state = present
+                    Timeline->>Queue: 立即释放 canonical text
+                    Queue-->>Store: text delivered
+                end
+            else audio.state = failed
+                Timeline->>Store: 标记 audio failed
+                opt text.state = present
+                    Timeline->>Store: 标记待显示字幕 failed
+                end
+                opt motion.state = present
+                    Timeline->>Store: 标记 motion failed<br/>不转换为 audio absent
+                end
+            end
+
+            opt Audio metadata 阶段准备语义动作 / speech-only 动作
+                Engine->>Engine: 协议 / profile / resource 校验
+                Engine->>Engine: 九级采样 + relation graph + timing
+                Engine->>Engine: 按音频总时长合成 speech gesture 与 parameter_plan.v2
+            end
+
+            opt Audio playing 时已有准备计划
+                Engine->>SDK: 立即启动准备计划<br/>视觉入场由计划曲线表达
+            end
+
+            opt 无音频但存在语义动作
+                Engine->>Engine: 使用 synthetic clock 同步编译 motion-only plan
+                Engine->>SDK: 启动 motion-only plan
+            end
+
+            opt 已启动语义动作 / speech-only 动作
+                loop 每个渲染帧
+                    SDK->>SDK: 曲线采样、动力学、冲突解析和参数写入
+                end
+            end
+
+            opt audio.state = present
+                Audio->>Lip: 实时 RMS / 口型值
+                Lip->>SDK: 每帧写入口型参数
+                Audio-->>Timeline: completed / failed / interrupted
+                Lip-->>Timeline: completed / failed / interrupted<br/>可选 sink 终态
+            end
+            opt 语义动作或 speech-only 动作已启动
+                SDK-->>Timeline: motion completed / failed / interrupted
+            end
+            Timeline->>Store: 回写 audio / motion segment facts
+        end
     end
 
-    subgraph F[前端严格接收与唯一事实源]
-        SEG --> PARSE[信封与 slot parser]:::protocol
-        PARSE --> PRE[URL 重写 + motion 归一化<br/>全部前置校验]:::protocol
-        PRE -->|任何失败| REJECT[拒绝整段<br/>零 Store / Queue 副作用]:::failure
-        PRE --> COMMIT[SessionStore.commitOutputSegment]:::state
-        COMMIT --> QUEUE[提交后加入 text / audio release queue]:::state
-        COMMIT --> ORCH[TurnPlaybackOrchestrator<br/>不等待分片 不设超时器]:::state
-        SF --> ASSERT[assertOutputSegmentsResolved]:::state
-        ASSERT -->|不完整| REJECT
-        ASSERT -->|完整| ORCH
-        ORCH --> JOB[一个 PlaybackTimelineSegmentJob]:::timeline
+    Adapter->>Inbound: control.synth_finished(turn_id)<br/>所有 output.segment 发送完成后
+    Inbound->>Store: assertOutputSegmentsResolved()
+    alt 存在未解析段或不完整事实
+        Store--xInbound: 协议一致性错误
+    else 输出队列已完整关闭
+        Inbound->>Store: backend.synthFinished = true
     end
 
-    subgraph P[统一时间线执行]
-        JOB --> TEXT[Text sink]:::timeline
-        JOB --> AUDIO[Audio sink<br/>HTMLAudioElement]:::timeline
-        AUDIO --> LIP[Lip-sync sink<br/>同一 AudioElement + RMS]:::timeline
-        AUDIO --> CLOCK[真实 audio clock]:::timeline
-        JOB --> MSINK[Required motion sink]:::timeline
-        CLOCK --> PLAYING[audio playing]:::timeline
-        PLAYING --> D90[AudioStartMotionBridge<br/>约 90ms]:::timeline
-        D90 --> MSINK
-        JOB -->|audio absent| SYNTH[Synthetic motion-only clock]:::timeline
-        JOB -->|audio failed| MFAIL[动作失败 不转 absent]:::failure
-    end
-
-    subgraph M[动作编译与 Live2D]
-        MSINK --> ME[ModelEngine]:::engine
-        SYNTH --> ME
-        ME --> VAL[协议 / profile / resource 校验]:::engine
-        VAL --> AXIS[九级采样 + relation graph]:::engine
-        AXIS --> SPEECH[Speech gesture track]:::engine
-        SPEECH --> PLAN[parameter_plan.v2]:::engine
-        PLAN --> SDK[Live2D WebSDK<br/>逐帧曲线 / dynamics / 写参]:::engine
-        LIP --> SDK
-        SDK --> MODEL[Live2D Model + Physics]:::engine
-    end
-
-    subgraph C[终态与轮次收口]
-        TEXT --> SETTLE[SessionStore segment facts]:::terminal
-        AUDIO --> SETTLE
-        LIP --> SETTLE
-        SDK --> SETTLE
-        MFAIL --> SETTLE
-        SF --> SETTLE
-        SETTLE -->|本地 settled 且 synth_finished| PF[control.playback_finished]:::protocol
-        PF --> TF[control.turn_finished]:::protocol
-        TF --> DONE[Session completed / failed]:::terminal
-    end
-
-    MODEL -. 下一帧 .-> SDK
+    Note over Store,Completion: 口型终态归 Timeline 管理；<br/>SessionStore 段收口依据是 text / audio / motion facts
+    Store-->>Completion: 本地段全部 settled + synthFinished
+    Completion->>Adapter: control.playback_finished(success, error)
+    Adapter-->>Inbound: control.turn_finished
+    Inbound->>Store: 标记后端轮次结束
+    Store-->>User: session completed / failed

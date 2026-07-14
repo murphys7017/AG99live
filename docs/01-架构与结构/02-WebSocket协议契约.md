@@ -106,19 +106,18 @@ control.turn_finished
 
 | 类型 | 载荷 | 需要 `message_id` |
 | --- | --- | --- |
-| `output.segment` | `output.segment.v2` 原子段，见下文 | 是 |
+| `output.segment` | `output.segment.v3` 原子段，见下文 | 是 |
 | `output.transcription` | `{ text: string }` | 否 |
 
-`output.segment.v2` 的结构：
+`output.segment.v3` 的结构：
 
 ```json
 {
-  "schema_version": "output.segment.v2",
-  "text": { "state": "present", "content": "可见正文" },
+  "schema_version": "output.segment.v3",
+  "text": { "state": "present", "content": "唯一助手文本 / 语音字幕" },
   "audio": {
     "state": "present",
-    "url": "/cache/audio/reply.wav",
-    "caption_text": "语音字幕"
+    "url": "/cache/audio/reply.wav"
   },
   "motion": {
     "state": "present",
@@ -138,9 +137,13 @@ control.turn_finished
 
 `text`、`audio`、`motion` 都必须使用显式 tagged slot：`present | absent | failed`，不得省略。表演曲线只有一个执行来源：`motion.payload.performance_curve_hint`；顶层 `performance_curve` 和段发送后的独立曲线 patch 都属于非法协议。
 
-`output.segment.v1` 不再兼容接收；前后端必须同时使用 v2，避免同一 schema 版本代表两种结构。
+`output.segment.v1/v2` 不再兼容接收；前后端必须同时使用 v3，避免同时维护正文和音频字幕两份文本事实。
 
-AstrBot 内部 Plain、Record、图片与 motion client object 可以物理分离，但 Adapter 必须先按 `turn_id + message_id` 聚合，再发送一个 `output.segment`。标准 AstrBot `send()` 的多个物理分片共享 `standard_reply` 逻辑 ID，只有 `complete_visible_turn()` 可以关闭输出队列。`Record.text` 只写入 `audio.caption_text`，不生成第二份可见正文。
+`output.segment.v3` 是封闭协议：根对象以及 `text`、`audio`、`motion` slot 只允许契约声明字段。`caption_text`、`performance_curve` 或其他未知字段必须在前端入站边界直接拒绝，不得静默丢弃。
+
+AstrBot 内部 Plain、Record、图片与 motion client object 可以物理分离，但 Adapter 必须先按 `turn_id + message_id` 聚合，再发送一个 `output.segment`。标准 AstrBot `send()` 的多个物理分片共享 `standard_reply` 逻辑 ID，只有 `complete_visible_turn()` 可以关闭输出队列。Plain 文本、Persona semantic text 与 `Record.text` 都归一化到同一个 `text.content`；值不一致时整段报冲突。`audio` slot 只承载媒体 URL，不再拥有第二份 caption。
+
+当 `audio.state = present` 时，`text.state` 也必须为 `present`。前端在真实 Audio `playing` 前只保留这份 canonical text，起播时才把它显示为字幕；audio 明确 `absent` 时才立即显示 text。audio 在起播前失败时字幕也显式失败，不伪装成正常 text-only 回复。
 
 `control.synth_finished` 只能在至少一个 `output.segment` 成功发送后发送；其 WebSocket 发送成功后，后端才能提交 `output_queue_closed`。零段收口或发送失败必须显式报错。
 

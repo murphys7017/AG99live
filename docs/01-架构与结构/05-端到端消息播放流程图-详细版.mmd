@@ -1,0 +1,166 @@
+flowchart TD
+    classDef backend fill:#e8f1f2,stroke:#2f5d62,color:#163438
+    classDef protocol fill:#fff3d6,stroke:#9a6b14,color:#513807
+    classDef state fill:#e8edf7,stroke:#3e5f93,color:#1d3154
+    classDef timeline fill:#f8e7df,stroke:#9b4d2d,color:#542717
+    classDef engine fill:#e9f3df,stroke:#557a35,color:#2e431d
+    classDef terminal fill:#f3e6ec,stroke:#8b4865,color:#4b2637
+    classDef failure fill:#fde7e3,stroke:#b33a2b,color:#681d14
+
+    subgraph B[后端生成与原子段聚合]
+        INPUT[input.text / input.audio]:::protocol
+        TURN[TurnCoordinator<br/>生成 turn_id]:::backend
+        START[control.turn_started]:::protocol
+        PERSONA[Persona Runtime<br/>构建 Prompt 与 effect schema]:::backend
+        LLM[主模型一次生成<br/>spoken_reply + effect_calls]:::backend
+        EFFECT[result contributor<br/>motion_intent.v4]:::backend
+        TTS[TTS<br/>WAV Record + Record.text]:::backend
+        PLAIN[Plain / semantic text<br/>canonical text 候选]:::backend
+        BUFFER[PendingOutputSegment<br/>turn_id + message_id]:::backend
+        BCHECK[文本冲突 / 多音频 / motion / curve 校验]:::backend
+        SEGMENT[output.segment.v3<br/>唯一 text + audio URL + motion]:::protocol
+        SYNTH[control.synth_finished<br/>所有段发送完成后]:::protocol
+
+        INPUT --> TURN
+        TURN --> START
+        TURN --> PERSONA --> LLM
+        LLM --> EFFECT
+        LLM --> TTS
+        LLM --> PLAIN
+        EFFECT --> BUFFER
+        TTS --> BUFFER
+        PLAIN --> BUFFER
+        BUFFER --> BCHECK --> SEGMENT
+        SEGMENT -. 可存在多个完整逻辑段 .-> SYNTH
+    end
+
+    subgraph I[前端协议入口与原子提交]
+        STARTIN[Inbound Dispatcher<br/>control.turn_started]:::protocol
+        CREATE[创建 TurnPlaybackSession]:::state
+        SEGIN[Inbound Dispatcher<br/>output.segment.v3]:::protocol
+        PARSE[信封与 slot parser]:::protocol
+        PRECHECK[URL 重写 + motion 归一化<br/>完成所有前置校验]:::protocol
+        VALID{整段是否合法？}:::protocol
+        REJECT[拒绝整段<br/>零 Store / Queue 副作用]:::failure
+        COMMIT[SessionStore.commitOutputSegment<br/>原子写入 text / audio / motion 事实]:::state
+        QUEUE[提交后加入<br/>text / audio release queue]:::state
+
+        START --> STARTIN --> CREATE
+        SEGMENT --> SEGIN --> PARSE --> PRECHECK --> VALID
+        VALID -->|否| REJECT
+        VALID -->|是| COMMIT
+        COMMIT --> QUEUE
+    end
+
+    subgraph O[唯一事实源与播放编排]
+        READY[SessionStore 已解析段]:::state
+        ORCH[TurnPlaybackOrchestrator<br/>不等待 synth_finished]:::state
+        JOB[单个 PlaybackTimelineSegmentJob<br/>turn_id + message_id]:::timeline
+        TEXTSTATE{text.state}:::state
+        TEXTRELEASE[释放唯一 canonical text]:::timeline
+        AUDIOSTATE{audio.state}:::state
+
+        COMMIT --> READY --> ORCH --> JOB
+        JOB --> TEXTSTATE --> AUDIOSTATE
+    end
+
+    subgraph P[统一 Timeline 与执行分支]
+        AUDIOSTART[Audio sink<br/>播放 HTMLAudioElement]:::timeline
+        DURATION[loadedmetadata / duration ready]:::timeline
+        PREPARE[ModelEngine 预编译<br/>semantic / speech-only plan]:::engine
+        PREPRESULT{动作准备结果}:::engine
+        REGSINK[仅 prepared 时注册<br/>required motion sink]:::timeline
+        PREPFAIL[显式动作准备失败<br/>写入 motion failed]:::failure
+        PLAYING[Audio playing<br/>取得真实 audio clock]:::timeline
+        SUBTITLE[若 text present<br/>释放 canonical subtitle]:::timeline
+        SUBTITLEFAIL[字幕队列不变量失败<br/>原子停止整段所有 sink]:::failure
+        LIPSINK[Lip-sync sink<br/>同一 AudioElement + WebAudio RMS]:::timeline
+        MOTIONSTATE{motion.state}:::state
+        SEMANTIC[立即启动已准备语义动作<br/>入场由 performance curve 控制]:::timeline
+        SPEECHCHECK{模型是否支持<br/>voice-following profile？}:::timeline
+        SPEECHONLY[立即启动已准备<br/>speech-only motion]:::timeline
+        NOMOTION[仅播放音频与口型<br/>不伪造默认动作]:::timeline
+        ABSENTMOTION{motion.state = present？}:::state
+        SYNTHCLOCK[Synthetic motion-only clock]:::timeline
+        SYNTHMOTION[同步编译并启动<br/>motion-only 语义动作]:::timeline
+        AUDIOFAILED[标记 audio failed]:::failure
+        MOTIONFAILED[已声明 motion 同步失败<br/>不转换为 absent]:::failure
+        EMPTY[text-only / empty legal segment<br/>无需播放时钟]:::timeline
+
+        AUDIOSTATE -->|present| AUDIOSTART --> DURATION --> PREPARE --> PREPRESULT
+        PREPRESULT -->|prepared| REGSINK --> PLAYING
+        PREPRESULT -->|not_applicable| PLAYING
+        PREPRESULT -->|failed| PREPFAIL --> PLAYING
+        PLAYING --> SUBTITLE
+        SUBTITLE -. release failed .-> SUBTITLEFAIL
+        PLAYING --> LIPSINK
+        PLAYING --> MOTIONSTATE
+        MOTIONSTATE -->|present 且 sink 已注册| SEMANTIC
+        MOTIONSTATE -->|absent| SPEECHCHECK
+        SPEECHCHECK -->|是| SPEECHONLY
+        SPEECHCHECK -->|否| NOMOTION
+
+        AUDIOSTATE -->|absent| TEXTRELEASE --> ABSENTMOTION
+        ABSENTMOTION -->|是| SYNTHCLOCK --> SYNTHMOTION
+        ABSENTMOTION -->|否| EMPTY
+
+        AUDIOSTATE -->|failed| AUDIOFAILED
+        TEXTSTATE -. present 且 audio failed .-> AUDIOFAILED
+        AUDIOFAILED -->|motion present| MOTIONFAILED
+        AUDIOFAILED -->|motion absent / failed| EMPTY
+    end
+
+    subgraph M[ModelEngine 编译与 Live2D 逐帧执行]
+        ENGINE[ModelEngine 动作入口]:::engine
+        EVALID[协议 / profile / resource 校验]:::engine
+        SAMPLE[九级确定性采样]:::engine
+        GRAPH[Relation graph<br/>轴关系计算与约束]:::engine
+        GESTURE[Speech gesture track<br/>非周期预设与头身延迟]:::engine
+        TIMING[Timing / performance curve]:::engine
+        PLAN[parameter_plan.v2]:::engine
+        SDK[Live2D WebSDK<br/>曲线采样 / dynamics / 冲突解析 / 写参]:::engine
+        MODEL[Live2D Model + Physics]:::engine
+
+        PREPARE --> ENGINE
+        ENGINE --> EVALID --> SAMPLE --> GRAPH --> GESTURE --> TIMING --> PLAN --> SDK --> MODEL
+        SEMANTIC --> PLAN
+        SPEECHONLY --> PLAN
+        SYNTHMOTION --> ENGINE
+        LIPSINK --> SDK
+        MODEL -. 下一渲染帧 .-> SDK
+    end
+
+    subgraph C[终态回写与轮次收口]
+        TLTERM[Timeline sink terminal<br/>completed / failed / interrupted]:::terminal
+        FACTS[SessionStore segment facts<br/>text / audio / motion]:::terminal
+        ASSERT[assertOutputSegmentsResolved]:::state
+        SYNTHIN[Inbound Dispatcher<br/>control.synth_finished]:::protocol
+        COMPLETE{所有后端段是否完整？}:::state
+        PROTOCOLFAIL[协议一致性错误]:::failure
+        SYNTHDONE[backend.synthFinished = true]:::state
+        SETTLED{本地段全部 settled<br/>且 synthFinished？}:::terminal
+        PLAYBACKFINISHED[control.playback_finished<br/>success / error]:::protocol
+        BACKACK[TurnCoordinator<br/>校验播放回执]:::backend
+        TURNFINISHED[control.turn_finished]:::protocol
+        TURNIN[Inbound Dispatcher<br/>control.turn_finished]:::protocol
+        SESSIONDONE[Session completed / failed]:::terminal
+
+        TEXTRELEASE --> FACTS
+        SUBTITLE --> FACTS
+        AUDIOSTART --> TLTERM
+        LIPSINK --> TLTERM
+        SDK --> TLTERM
+        AUDIOFAILED --> FACTS
+        MOTIONFAILED --> FACTS
+        TLTERM --> FACTS
+
+        SYNTH --> SYNTHIN --> ASSERT --> COMPLETE
+        COMPLETE -->|否| PROTOCOLFAIL
+        COMPLETE -->|是| SYNTHDONE
+        FACTS --> SETTLED
+        SYNTHDONE --> SETTLED
+        SETTLED -->|是| PLAYBACKFINISHED --> BACKACK --> TURNFINISHED --> TURNIN
+        TURNIN --> SESSIONDONE
+    end
+
+    LIPSINK -. 可选 sink 终态归 Timeline，<br/>不是第四种 segment fact .-> TLTERM
