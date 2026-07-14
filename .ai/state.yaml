@@ -1,9 +1,9 @@
 task:
-  class: refactor
-  risk: high
-  phase: playback_ownership_deduplication
+  class: documentation
+  risk: medium
+  phase: architecture_diagram_atlas
   status: complete
-  scope: Remove duplicate playback terminal ownership, move Timeline composition out of Adapter, and consolidate backend motion validation and observation boundaries
+  scope: Build a detailed Mermaid atlas for system structure, dependencies, runtime ownership, message flow, motion processing, playback timing, state machines, and diagnostics
 context:
   confidence: high
   assumptions:
@@ -470,8 +470,10 @@ verification:
     - python -m pytest astrbot_plugin_ag99live_adapter/tests -q (286 passed after canonical motion validation and Motion Lab observation-port consolidation)
     - npm run test:playback-timeline (passed after final exactly-once required-audio rejection cleanup)
     - git diff --check (passed)
+    - Mermaid CLI 11.16.0 parsed and rendered all 17 docs/04-流程图与分析图/*.mmd sources successfully; temporary SVG validation outputs were removed
+    - architecture atlas hygiene scan found no empty files, trailing whitespace, stale diagram paths, or committed PNG/SVG/PDF derivatives
   checks_failed: []
-  validation_gap: A live Electron end-to-end conversation is still needed to verify output.segment delivery, real audio-clock release, lip sync, and motion start against an installed AstrBot instance and Live2D model; the latest detailed Mermaid annotations were not CLI-rendered because mmdc is unavailable locally.
+  validation_gap: A live Electron end-to-end conversation is still needed to verify output.segment delivery, real audio-clock release, lip sync, and motion start against an installed AstrBot instance and Live2D model.
 runtime:
   mode: unified_playback_timeline_phase3_motion_timeline_context
 backlog:

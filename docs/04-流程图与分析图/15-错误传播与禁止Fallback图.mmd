@@ -1,0 +1,121 @@
+flowchart TD
+    classDef input fill:#fff3d6,stroke:#9a6b14,color:#513807
+    classDef check fill:#e8edf7,stroke:#3e5f93,color:#1d3154
+    classDef owner fill:#e8f1f2,stroke:#2f5d62,color:#163438
+    classDef terminal fill:#e9f3df,stroke:#557a35,color:#2e431d
+    classDef failure fill:#fde7e3,stroke:#b33a2b,color:#681d14
+
+    START[外部输入 / 模型输出 / 播放事件]:::input
+
+    subgraph BACKEND[后端错误边界]
+        EFFECT{Persona Effect arguments 合法？}:::check
+        PROFILE{SemanticAxisProfile 可用？}:::check
+        RESOURCE{轴等级和 resource 属于当前模型？}:::check
+        AGG{物理组件能聚合成唯一原子段？}:::check
+        BFAIL[拒绝 motion 或输出段<br/>记录明确 reason]:::failure
+        SEG[output.segment.v3]:::terminal
+
+        START --> EFFECT
+        EFFECT -->|否| BFAIL
+        EFFECT -->|是| PROFILE
+        PROFILE -->|否| BFAIL
+        PROFILE -->|是| RESOURCE
+        RESOURCE -->|否| BFAIL
+        RESOURCE -->|是| AGG
+        AGG -->|文本冲突/多音频/重复对象| BFAIL
+        AGG -->|唯一完整段| SEG
+    end
+
+    subgraph INBOUND[前端协议与提交边界]
+        ENVELOPE{信封版本和身份有效？}:::check
+        SLOTS{所有 slot 严格可解析？}:::check
+        MOTION{motion payload 可归一化？}:::check
+        ATOMIC[SessionStore 原子提交]:::owner
+        PFAIL[拒绝整段<br/>关闭/报告协议错误<br/>零 queue 副作用]:::failure
+
+        SEG --> ENVELOPE
+        ENVELOPE -->|否| PFAIL
+        ENVELOPE -->|是| SLOTS
+        SLOTS -->|否| PFAIL
+        SLOTS -->|是| MOTION
+        MOTION -->|否| PFAIL
+        MOTION -->|是| ATOMIC
+    end
+
+    subgraph RELEASE[释放与 Timeline 边界]
+        JOB{SegmentJob 可执行？}:::check
+        QUEUE{对应 queue item 存在且身份匹配？}:::check
+        CLOCK{音频 playing 后真实 clock 可用？}:::check
+        SINK{required sink 已注册且可启动？}:::check
+        TFAIL[Timeline / segment failed<br/>停止仍 open 的 required sinks]:::failure
+        RUN[Timeline running]:::terminal
+
+        ATOMIC --> JOB
+        JOB -->|turn/message/time 非法| TFAIL
+        JOB -->|合法| QUEUE
+        QUEUE -->|否| TFAIL
+        QUEUE -->|是| CLOCK
+        CLOCK -->|音频不存在但协议 absent| SINK
+        CLOCK -->|音频声明 present 但 clock 缺失| TFAIL
+        CLOCK -->|真实 clock| SINK
+        SINK -->|否| TFAIL
+        SINK -->|是| RUN
+    end
+
+    subgraph COMPILE[ModelEngine 边界]
+        CONTRACT{intent/profile revision 合法？}:::check
+        GRAPH{轴图、resource、binding 可编译？}:::check
+        STARTOK{播放器同步确认 onStarted/runId？}:::check
+        MFAIL[MotionFeedback + motion failed<br/>不启动或停止本段动作]:::failure
+        PLAY[动作运行]:::terminal
+
+        RUN --> CONTRACT
+        CONTRACT -->|否| MFAIL
+        CONTRACT -->|是| GRAPH
+        GRAPH -->|否| MFAIL
+        GRAPH -->|是| STARTOK
+        STARTOK -->|否| MFAIL
+        STARTOK -->|是| PLAY
+    end
+
+    subgraph LIP[Lip-sync 可选能力]
+        ATTACH{WebAudio analyser 和嘴部参数可用？}:::check
+        LFAIL[记录 lip_sync failed<br/>日志 + Timeline optional terminal]:::failure
+        DEGRADE{允许随机嘴部视觉降级？}:::check
+        RANDOM[有界随机开合至音频结束<br/>不能驱动 speech gesture]:::owner
+        NORMAL[真实 RMS 口型]:::terminal
+
+        RUN --> ATTACH
+        ATTACH -->|是| NORMAL
+        ATTACH -->|否| LFAIL
+        LFAIL --> DEGRADE
+        DEGRADE -->|当前显式策略允许| RANDOM
+        DEGRADE -->|不允许/参数不可写| LIPEND[仅音频继续，口型失败可见]:::failure
+    end
+
+    subgraph NO[明确禁止的 fallback]
+        N1[v4 非法 -> v3]:::failure
+        N2[axes 空/非法 -> 默认 pose]:::failure
+        N3[audio failed -> absent/motion-only]:::failure
+        N4[真实 audio clock 缺失 -> 模拟 playing clock]:::failure
+        N5[缺少 turn/message -> currentTurnId 猜测]:::failure
+        N6[resource 不可播放 -> 静默 axis-only]:::failure
+        N7[Timeline 缺失 -> ModelEngine 直接播放]:::failure
+        N8[数据库记录失败 -> 修改当前回复结果]:::failure
+    end
+
+    BFAIL -.禁止.-> N1
+    BFAIL -.禁止.-> N2
+    TFAIL -.禁止.-> N3
+    TFAIL -.禁止.-> N4
+    PFAIL -.禁止.-> N5
+    MFAIL -.禁止.-> N6
+    MFAIL -.禁止.-> N7
+    LAB[Motion Lab 异步观察]:::owner -.禁止.-> N8
+
+    OBS[错误可观察性<br/>日志 reason + SessionStore terminal<br/>Timeline snapshot + MotionFeedback<br/>Motion Lab raw event]:::owner
+    BFAIL --> OBS
+    PFAIL --> OBS
+    TFAIL --> OBS
+    MFAIL --> OBS
+    LFAIL --> OBS

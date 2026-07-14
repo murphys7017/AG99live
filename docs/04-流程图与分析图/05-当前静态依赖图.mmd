@@ -1,0 +1,100 @@
+flowchart LR
+    classDef backend fill:#e8f1f2,stroke:#2f5d62,color:#163438
+    classDef frontend fill:#e9f3df,stroke:#557a35,color:#2e431d
+    classDef shared fill:#fff3d6,stroke:#9a6b14,color:#513807
+    classDef hotspot fill:#fde7e3,stroke:#b33a2b,color:#681d14
+
+    subgraph BACKEND[Python Adapter 当前主要依赖]
+        BENTRY[main / platform adapter]:::backend
+        BMW[middleware]:::hotspot
+        BMOTION[motion domain]:::backend
+        BRUNTIME[runtime]:::hotspot
+        BSERV[services]:::backend
+        BPROTO[protocol]:::shared
+        BTRANS[transport]:::shared
+        BLIVE[live2d profile/scanner]:::backend
+        BASSET[live2ds resources]:::shared
+
+        BENTRY --> BMW
+        BENTRY --> BRUNTIME
+        BENTRY --> BSERV
+        BENTRY --> BTRANS
+        BMW --> BMOTION
+        BMW --> BRUNTIME
+        BMW --> BLIVE
+        BRUNTIME --> BMOTION
+        BRUNTIME --> BPROTO
+        BRUNTIME --> BSERV
+        BRUNTIME --> BLIVE
+        BSERV --> BPROTO
+        BSERV --> BRUNTIME
+        BSERV --> BLIVE
+        BTRANS --> BPROTO
+        BTRANS --> BSERV
+        BTRANS --> BRUNTIME
+        BLIVE --> BASSET
+    end
+
+    subgraph FRONTEND[Renderer 当前主要依赖]
+        FAPP[app composition]:::frontend
+        FUI[views/components]:::frontend
+        FADAPTER[adapter-connection]:::hotspot
+        FTURN[turn-playback]:::frontend
+        FTL[playback-timeline]:::hotspot
+        FINT[playback-integrations]:::frontend
+        FENGINE[model-engine]:::hotspot
+        FLIVE[live2d / renderer]:::hotspot
+        FSDK[Live2D WebSDK]:::shared
+        FTYPES[types/protocol]:::shared
+        FLAB[motion-lab/action-lab]:::frontend
+        FDESKTOP[desktop-bridge/settings]:::frontend
+        FFEATURE[bilibili/obs/esp32]:::frontend
+
+        FAPP --> FADAPTER
+        FAPP --> FTURN
+        FAPP --> FTL
+        FAPP --> FINT
+        FAPP --> FENGINE
+        FAPP --> FLIVE
+        FAPP --> FLAB
+        FAPP --> FDESKTOP
+        FAPP --> FFEATURE
+
+        FUI --> FAPP
+        FUI --> FADAPTER
+        FUI --> FENGINE
+        FUI --> FLIVE
+        FUI --> FLAB
+
+        FADAPTER --> FTURN
+        FADAPTER --> FTL
+        FADAPTER --> FENGINE
+        FADAPTER --> FTYPES
+        FTURN --> FENGINE
+        FTURN --> FTL
+        FTURN --> FTYPES
+        FTL --> FTYPES
+        FINT --> FTL
+        FINT --> FENGINE
+        FENGINE --> FTYPES
+        FLIVE --> FTL
+        FLIVE --> FENGINE
+        FLIVE --> FSDK
+        FSDK --> FTYPES
+        FLAB --> FTYPES
+        FFEATURE --> FADAPTER
+    end
+
+    BTRANS <-->|WebSocket v2| FADAPTER
+    BPROTO -.同一协议概念<br/>分别实现类型与校验.-> FTYPES
+    BASSET -.HTTP static resources.-> FLIVE
+
+    HOT[当前高耦合热点<br/>interaction_motion.py<br/>turn_coordinator.py<br/>useAdapterConnection.ts<br/>playbackTimelineRuntime.ts<br/>useModelEngine.ts<br/>WebSDK/lappmodel.ts]:::hotspot
+    HOT -.审查重点.-> BMW
+    HOT -.审查重点.-> BRUNTIME
+    HOT -.审查重点.-> FADAPTER
+    HOT -.审查重点.-> FTL
+    HOT -.审查重点.-> FENGINE
+    HOT -.审查重点.-> FSDK
+
+    NOTE[本图只描述主要静态依赖。<br/>它不表示依赖都合理，也不表示运行时事实所有权。]:::shared

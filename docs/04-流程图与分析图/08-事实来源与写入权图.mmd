@@ -1,0 +1,80 @@
+flowchart LR
+    classDef producer fill:#f7ead7,stroke:#8a5a20,color:#3e280d
+    classDef fact fill:#e8edf7,stroke:#3e5f93,color:#1d3154
+    classDef executor fill:#e8f1f2,stroke:#2f5d62,color:#163438
+    classDef derived fill:#e9f3df,stroke:#557a35,color:#2e431d
+    classDef forbidden fill:#fde7e3,stroke:#b33a2b,color:#681d14
+
+    BACKEND[AstrBot Adapter]:::producer
+    INBOUND[Frontend Inbound Runtime]:::producer
+    ORCH[TurnPlaybackOrchestrator]:::producer
+    EXEC[Timeline Segment Executor]:::executor
+    PROJ[Timeline SessionProjection]:::executor
+    COMPLETE[CompletionCoordinator]:::producer
+    ENGINE[ModelEngine]:::derived
+    PLAYER[Motion Player / WebSDK]:::executor
+    LAB[Motion Lab Observation]:::derived
+    AUDIOUI[Adapter audio UI state]:::derived
+
+    subgraph STORE[TurnPlaybackSessionStore：持久事实]
+        TURN[turn identity / created]:::fact
+        BACK[backend turnStarted / synthFinished / turnFinished]:::fact
+        MATERIAL[text/audio/motion material state]:::fact
+        READY[session ready / playing / settling / completed / failed]:::fact
+        RELEASE[text/audio/motion released]:::fact
+        AUDIO[audio duration / started / terminal]:::fact
+        MOTION[motion started / completed / failed]:::fact
+    end
+
+    subgraph TLF[PlaybackTimeline：执行事实]
+        TIDENT[segment identity]:::fact
+        TCLOCK[currentTime / duration / playing]:::fact
+        TSINK[sink registered / started / terminal]:::fact
+        TPHASE[timeline phase]:::fact
+    end
+
+    subgraph MOTION_FACTS[动作派生结果]
+        INTENT[normalized motion intent]:::derived
+        TRACE[MotionTransformTrace]:::derived
+        PLAN[parameter_plan.v2]:::derived
+        RUN[Live2D motion run terminal]:::derived
+    end
+
+    BACKEND -->|唯一生成| TURN
+    BACKEND -->|协议声明| MATERIAL
+    INBOUND -->|唯一提交| TURN
+    INBOUND -->|唯一提交| BACK
+    INBOUND -->|commitOutputSegment| MATERIAL
+    ORCH -->|只推进 ready| READY
+    EXEC -->|唯一释放| RELEASE
+    EXEC -->|playing phase| READY
+    PROJ -->|唯一投影| AUDIO
+    PROJ -->|唯一投影| MOTION
+    COMPLETE -->|settling / completed / ACK failure| READY
+
+    EXEC --> TIDENT
+    EXEC --> TSINK
+    PROJ -.读取 terminal.-> TSINK
+    PLAYER -->|播放器事件| TSINK
+    TSINK --> TPHASE
+    TLF --> TCLOCK
+
+    MATERIAL --> ENGINE
+    ENGINE --> INTENT --> TRACE --> PLAN
+    PLAN --> PLAYER --> RUN
+    RUN -.必须先回 Timeline.-> TSINK
+    TRACE -.观察，不反写执行状态.-> LAB
+    STORE -.观察，不创建动作.-> LAB
+    TLF -.观察 snapshot.-> LAB
+
+    N1[禁止：ModelEngine 直接写 SessionStore]:::forbidden
+    N2[禁止：Adapter audio state 直接写 audio terminal]:::forbidden
+    N3[禁止：Player terminal 绕过 Timeline]:::forbidden
+    N4[禁止：Motion Lab 事件改变播放结果]:::forbidden
+    N5[禁止：超时把 failed 改成 absent]:::forbidden
+
+    ENGINE -.禁止.-> N1
+    AUDIOUI -.禁止.-> N2
+    PLAYER -.禁止.-> N3
+    LAB -.禁止.-> N4
+    MATERIAL -.禁止.-> N5

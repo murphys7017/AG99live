@@ -1,0 +1,73 @@
+stateDiagram-v2
+    direction TB
+
+    [*] --> Missing
+    Missing --> Preparing: startSegmentJob(turn_id,message_id)
+    Preparing --> Ready: required sinks registered
+    Preparing --> Failed: preparation invariant failed
+    Ready --> Running: engine.start / first required sink started
+    Ready --> Failed: required sink start failed
+    Running --> Running: duration / clock / optional sink events
+    Running --> Completed: all required sinks completed or absent
+    Running --> Failed: any required sink failed
+    Running --> Interrupted: explicit exact-segment stop
+    Ready --> Interrupted: explicit exact-segment stop
+    Completed --> Closed: remove active entry, retain bounded closed key
+    Failed --> Closed: stop every still-open sink
+    Interrupted --> Closed: stop every still-open sink
+    Closed --> [*]
+
+    state Preparing {
+        [*] --> IdentityValidated
+        IdentityValidated --> EngineLoaded: PlaybackTimelineEngine.load
+        EngineLoaded --> AudioPrepared: audio present
+        EngineLoaded --> MotionOnlyPrepared: audio absent + motion present
+        EngineLoaded --> NoMediaPrepared: no media sink
+        AudioPrepared --> [*]
+        MotionOnlyPrepared --> [*]
+        NoMediaPrepared --> [*]
+    }
+
+    state "Required Sink Lifecycle" as RequiredSink {
+        [*] --> SinkRegistered
+        SinkRegistered --> SinkStarted: startSink callback accepted
+        SinkRegistered --> SinkFailed: start rejected / missing wiring
+        SinkStarted --> SinkCompleted: completed
+        SinkStarted --> SinkFailed: runtime failure
+        SinkRegistered --> SinkInterrupted: timeline interrupted
+        SinkStarted --> SinkInterrupted: timeline interrupted
+        SinkCompleted --> [*]
+        SinkFailed --> [*]
+        SinkInterrupted --> [*]
+    }
+
+    state "Optional LipSync Sink" as OptionalSink {
+        [*] --> LipRegistered
+        LipRegistered --> LipStarted: analyser attached and sampling
+        LipRegistered --> LipFailed: unavailable / never started
+        LipStarted --> LipCompleted: audio ended
+        LipStarted --> LipFailed: sampling / parameter write failed
+        LipStarted --> LipInterrupted: explicit interruption
+        LipCompleted --> [*]
+        LipFailed --> [*]
+        LipInterrupted --> [*]
+    }
+
+    note right of Ready
+        Audio-backed timeline uses the real
+        HTMLAudioElement clock only after playing.
+        Motion-only uses an explicitly declared
+        synthetic clock, never an audio fallback.
+    end note
+
+    note right of Running
+        Sink terminal values are stable.
+        Late terminal events cannot overwrite
+        completed/failed/interrupted.
+    end note
+
+    note right of Failed
+        Required sink failure fails the timeline.
+        Optional lip-sync failure remains visible
+        but does not by itself stop required audio.
+    end note

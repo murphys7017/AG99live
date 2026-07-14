@@ -1,0 +1,111 @@
+flowchart TB
+    classDef entry fill:#f7ead7,stroke:#8a5a20,color:#3e280d
+    classDef boundary fill:#fff3d6,stroke:#9a6b14,color:#513807
+    classDef domain fill:#e9f3df,stroke:#557a35,color:#2e431d
+    classDef runtime fill:#e8f1f2,stroke:#2f5d62,color:#163438
+    classDef support fill:#e8edf7,stroke:#3e5f93,color:#1d3154
+    classDef storage fill:#f3e6ec,stroke:#8b4865,color:#4b2637
+
+    MAIN[main.py<br/>插件生命周期与 contributor 注册]:::entry
+    PLATFORM[platform_adapter.py / platform_event.py<br/>AstrBot 平台边界]:::entry
+
+    subgraph MW[middleware：Persona 交互边界]
+        EFFECT[Persona Effect 注册<br/>ag99live.motion schema]:::boundary
+        PROMPT[Prompt Contributor<br/>能力 / profile / 上一动作 / 样本]:::boundary
+        RESULT[Result Contributor<br/>effect_calls -> motion intent]:::boundary
+        MPAY[motion_payload.py<br/>profile 能力与 resource 白名单校验]:::boundary
+        REMOTEOP[remote_operator.py<br/>远程能力 Prompt]:::boundary
+        EFFECT --> PROMPT
+        RESULT --> MPAY
+    end
+
+    subgraph MOTION[motion：动作领域规则]
+        INTENT[motion_intent.py<br/>v3/v4 canonical contract]:::domain
+        INLINE[inline_motion.py<br/>官方 <@anim> v3 兼容解析]:::domain
+        CATALOG[catalog_motion.py + resource_catalog.py<br/>typed resource]:::domain
+        CURVE[performance_curve.py<br/>独立 Provider 请求生命周期]:::domain
+        SANITIZE[output_sanitizer.py<br/>可见文本清理]:::domain
+        DISPATCH[payload_dispatch.py<br/>动作消息构造]:::domain
+    end
+
+    subgraph RUNTIME[runtime：轮次和输出编排]
+        COORD[TurnCoordinator<br/>turn identity / physical parts / close]:::runtime
+        SEG[PendingOutputSegment<br/>原子 text/audio/motion/images 聚合]:::runtime
+        SESSION[SessionState + TurnIdentityMap]:::runtime
+        MSG[message_utils.py<br/>AstrBot 组件分类]:::runtime
+        STATE[state.py / plugin_runtime.py<br/>运行配置与共享能力]:::runtime
+        LAB[Motion Lab Observation Port]:::runtime
+        REC[MotionLabRecorder<br/>异步队列]:::runtime
+        COORD --> SEG
+        COORD --> SESSION
+        COORD --> MSG
+        LAB --> REC
+    end
+
+    subgraph SERVICES[services：用例服务]
+        FRONT[frontend_system_service.py<br/>profile/history/Motion Lab 命令]:::support
+        AUDIO[audio_runtime.py / media_service.py<br/>WAV 与媒体 URL]:::support
+        SPEECH[speech_service.py<br/>TTS 协作]:::support
+        HISTORY[history_service.py]:::support
+        REMOTE[remote_operator_runtime.py]:::support
+    end
+
+    subgraph PROTOCOL[protocol + transport：传输边界]
+        PARSER[protocol/parser.py<br/>入站严格解析]:::boundary
+        BUILDER[protocol/builder.py<br/>出站信封]:::boundary
+        TYPES[constants.py / models.py<br/>协议类型]:::boundary
+        WS[transport/websocket_server.py]:::boundary
+        STATIC[static_routes.py / static_resources.py]:::boundary
+        WS --> PARSER
+        BUILDER --> WS
+    end
+
+    subgraph DATA[数据与 Live2D 资源]
+        PROFILE[live2d/semantic_axis_profile.py]:::storage
+        SCAN[live2d/scanner]:::storage
+        CACHE[live2d/cache]:::storage
+        SQLITE[MotionLabRawEventStore / SQLite]:::storage
+        TUNING[motion_state/tuning_store.py]:::storage
+        MODELS[live2ds/**]:::storage
+    end
+
+    MAIN --> EFFECT
+    MAIN --> COORD
+    MAIN --> FRONT
+    MAIN --> WS
+    PLATFORM --> COORD
+    PLATFORM --> BUILDER
+
+    PROMPT --> PROFILE
+    PROMPT --> CATALOG
+    PROMPT --> TUNING
+    MPAY --> INTENT
+    MPAY --> CATALOG
+    RESULT --> COORD
+    INLINE --> INTENT
+    CURVE --> LAB
+    COORD --> INTENT
+    COORD --> INLINE
+    COORD --> CURVE
+    COORD --> SANITIZE
+    COORD --> DISPATCH
+    COORD --> LAB
+
+    FRONT --> PROFILE
+    FRONT --> TUNING
+    FRONT --> LAB
+    REC --> SQLITE
+    SCAN --> MODELS
+    SCAN --> PROFILE
+    CACHE --> MODELS
+    STATE --> SCAN
+    WS --> FRONT
+    WS --> COORD
+    AUDIO --> BUILDER
+    SPEECH --> AUDIO
+
+    RULES[后端所有权规则<br/>motion_intent 定义协议合法性<br/>middleware 定义当前模型能力<br/>TurnCoordinator 定义输出聚合<br/>protocol/transport 定义网络边界]:::entry
+    RULES -.约束.-> INTENT
+    RULES -.约束.-> MPAY
+    RULES -.约束.-> COORD
+    RULES -.约束.-> WS

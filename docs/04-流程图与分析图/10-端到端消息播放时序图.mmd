@@ -11,6 +11,7 @@ sequenceDiagram
     participant Queue as Text / Audio Queue
     participant Orch as Playback Orchestrator
     participant Timeline as PlaybackTimelineRuntime
+    participant Projection as Timeline SessionProjection
     participant Audio as HTMLAudioElement
     participant Lip as Lip-sync Sink
     participant Engine as ModelEngine
@@ -89,12 +90,15 @@ sequenceDiagram
                     Queue-->>Store: text delivered
                 end
             else audio.state = failed
-                Timeline->>Store: 标记 audio failed
+                Timeline->>Projection: 投影 audio failed
+                Projection->>Store: audio.failed
                 opt text.state = present
-                    Timeline->>Store: 标记待显示字幕 failed
+                    Timeline->>Queue: 拒绝待显示字幕
+                    Queue->>Store: text.failed
                 end
                 opt motion.state = present
-                    Timeline->>Store: 标记 motion failed<br/>不转换为 audio absent
+                    Timeline->>Projection: 投影 motion failed<br/>不转换为 audio absent
+                    Projection->>Store: motion.failed
                 end
             end
 
@@ -128,7 +132,8 @@ sequenceDiagram
             opt 语义动作或 speech-only 动作已启动
                 SDK-->>Timeline: motion completed / failed / interrupted
             end
-            Timeline->>Store: 回写 audio / motion segment facts
+            Timeline->>Projection: 投影稳定的 audio / motion terminal
+            Projection->>Store: 回写 segment execution facts
         end
     end
 

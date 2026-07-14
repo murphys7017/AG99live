@@ -1,0 +1,85 @@
+flowchart TB
+    classDef owner fill:#f7ead7,stroke:#8a5a20,color:#3e280d
+    classDef singleton fill:#e8f1f2,stroke:#2f5d62,color:#163438
+    classDef adapter fill:#fff3d6,stroke:#9a6b14,color:#513807
+    classDef engine fill:#e9f3df,stroke:#557a35,color:#2e431d
+    classDef resource fill:#f3e6ec,stroke:#8b4865,color:#4b2637
+
+    ROOT[providePetDesktopRuntime<br/>App Composition Root]:::owner
+
+    STORE[TurnPlaybackSessionStore<br/>单例：turn/segment facts]:::singleton
+    ADAPTER[AdapterConnection<br/>单例：WebSocket 与 inbound]:::adapter
+    TL[PlaybackTimelineRuntime<br/>单例：segment timeline registry]:::singleton
+    ENGINE[ModelEngine<br/>单例：动作编译与 pending scheduler]:::engine
+    PLAYER[PreviewMotionPlayer<br/>单例：当前 motion run owner]:::engine
+    RECORDER[MotionPlaybackRecorder<br/>单例：动作观察记录]:::engine
+    COMPLETE[PlaybackCompletionCoordinator<br/>单例：playback ACK]:::singleton
+
+    ROOT -->|创建并持有| STORE
+    ROOT -->|创建并持有| ADAPTER
+    ROOT -->|提供唯一 factory 并持有引用| TL
+    ROOT -->|创建并持有| ENGINE
+    ROOT -->|创建并持有| PLAYER
+    ROOT -->|创建并持有| RECORDER
+    ROOT -->|创建并持有| COMPLETE
+
+    subgraph ADAPTER_OWNED[Adapter 内部适配资源]
+        TRANSPORT[WebSocket transport]:::adapter
+        INBOUND[InboundRuntime]:::adapter
+        AUDIOSTATE[Adapter audio UI state]:::adapter
+        QUEUES[Pending text/audio queues]:::adapter
+        ATC[AudioTimelineController]:::adapter
+        BROWSERAUDIO[BrowserAudioTimelineSink<br/>每次播放持有 AudioElement]:::resource
+        LIPRUNTIME[LipSyncRuntime<br/>每个音频 segment]:::resource
+    end
+
+    ADAPTER --> TRANSPORT
+    ADAPTER --> INBOUND
+    ADAPTER --> AUDIOSTATE
+    ADAPTER --> QUEUES
+    ADAPTER --> ATC
+    ATC -->|注入 audio clock / execution ports| TL
+    ATC --> BROWSERAUDIO
+    ATC --> LIPRUNTIME
+
+    subgraph TIMELINES[Timeline 按段持有]
+        ENTRY[PlaybackTimelineEntry<br/>key = turn_id + message_id]:::singleton
+        TENGINE[PlaybackTimelineEngine<br/>每个 segment 一个]:::singleton
+        ACLOCK[AudioClock 或 explicit synthetic clock]:::resource
+        SINKS[registered sinks<br/>audio / motion / lip_sync]:::resource
+        PROJ[SessionProjection<br/>单例：Store lifecycle port]:::singleton
+        ENTRY --> TENGINE
+        TENGINE --> ACLOCK
+        TENGINE --> SINKS
+        TL --> ENTRY
+        TL --> PROJ
+    end
+
+    INBOUND -->|commit protocol facts| STORE
+    PROJ -->|project execution facts| STORE
+    STORE -.完整 segment.-> TL
+    TL -->|motion sink start| ENGINE
+    ENGINE -->|parameter plan| PLAYER
+    PLAYER -->|Live2D adapter| MODEL[当前 Live2D Model Instance]:::resource
+    PLAYER -.run started/terminal.-> TL
+    BROWSERAUDIO -.duration/playing/terminal.-> TL
+    LIPRUNTIME -.started/terminal.-> TL
+    COMPLETE -->|读取 settled facts| STORE
+    COMPLETE -->|control.playback_finished| ADAPTER
+    RECORDER -.观察 player/timeline.-> TL
+
+    subgraph LIFETIME[销毁规则]
+        D1[App scope dispose<br/>断开 transport / 清理 watchers]:::owner
+        D2[Turn interrupt/replacement<br/>停止对应 segment timelines]:::owner
+        D3[Audio terminal<br/>释放 AudioElement 与 WebAudio graph]:::owner
+        D4[Model replacement<br/>取消旧 load generation 后 dispose]:::owner
+    end
+
+    D1 -.销毁.-> ADAPTER
+    D1 -.销毁.-> TL
+    D2 -.按身份停止.-> ENTRY
+    D3 -.释放.-> BROWSERAUDIO
+    D3 -.释放.-> LIPRUNTIME
+    D4 -.替换.-> MODEL
+
+    RULE[实例规则<br/>不得创建第二个 Timeline Runtime<br/>不得使用全局 active segment 猜身份<br/>所有中断必须携带 turn_id + message_id]:::owner

@@ -1,0 +1,75 @@
+stateDiagram-v2
+    direction TB
+
+    [*] --> Unloaded
+    Unloaded --> Selecting: selectedModel changed
+    Selecting --> LoadingManifest: allocate new load generation
+    LoadingManifest --> LoadingMoc: model3.json accepted
+    LoadingManifest --> LoadFailed: manifest/network/schema error
+    LoadingMoc --> LoadingTextures: moc3/model instance accepted
+    LoadingMoc --> LoadFailed: moc3/Core error
+    LoadingTextures --> LoadingResources: required textures ready
+    LoadingTextures --> LoadFailed: texture generation error
+    LoadingResources --> Ready: physics/pose/motions/expressions/profile bound
+    LoadingResources --> LoadFailed: required resource invalid
+
+    Ready --> Running: renderer frame loop owns model
+    Running --> Running: parameter plan / lip sync / physics / input
+    Ready --> Replacing: selectedModel changed
+    Running --> Replacing: selectedModel changed
+    LoadingManifest --> Cancelled: newer generation selected
+    LoadingMoc --> Cancelled: newer generation selected
+    LoadingTextures --> Cancelled: newer generation selected
+    LoadingResources --> Cancelled: newer generation selected
+
+    Replacing --> CancellingOld: invalidate old generation token
+    CancellingOld --> StoppingRuns: stop exact active motion/lip-sync resources
+    StoppingRuns --> DisposingRenderer: detach frame ownership
+    DisposingRenderer --> DisposingModel: release Cubism model/managers/textures
+    DisposingModel --> Selecting: begin new selected generation
+
+    Cancelled --> DisposingPartial: release only resources owned by stale generation
+    DisposingPartial --> Selecting: latest selection still pending
+
+    Running --> Disposing: app scope dispose / renderer shutdown
+    Ready --> Disposing: app scope dispose / renderer shutdown
+    LoadFailed --> Unloaded: failure reported, explicit retry required
+    Disposing --> [*]
+
+    state Running {
+        [*] --> FrameScheduled
+        FrameScheduled --> ValidateOwnership: requestAnimationFrame tick
+        ValidateOwnership --> ApplyMotion: generation/model still current
+        ValidateOwnership --> FrameStopped: stale/released
+        ApplyMotion --> ApplyLipSync: parameter plan and gesture track
+        ApplyLipSync --> ApplyPhysics: external mouth value
+        ApplyPhysics --> Render: Cubism physics/pose/renderer
+        Render --> FrameScheduled: next frame
+        FrameStopped --> [*]
+    }
+
+    state "Async Callback Gate" as Gate {
+        [*] --> CallbackArrives
+        CallbackArrives --> Accepted: generation matches and model not released
+        CallbackArrives --> Rejected: stale generation or released owner
+        Accepted --> [*]
+        Rejected --> [*]
+    }
+
+    note right of LoadingTextures
+        Every model, texture and uncached-motion
+        callback must carry generation ownership.
+        A stale callback cannot touch SDK managers.
+    end note
+
+    note right of Replacing
+        Invalidate ownership before Cubism dispose.
+        Stop frame/audio/lip/motion callbacks before
+        releasing the model they reference.
+    end note
+
+    note right of LoadFailed
+        Do not silently retain a half-loaded model.
+        Report the exact failed stage and require
+        an explicit retry or new model selection.
+    end note

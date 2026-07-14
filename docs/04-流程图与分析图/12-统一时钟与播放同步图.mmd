@@ -1,0 +1,118 @@
+sequenceDiagram
+    autonumber
+    participant Store as SessionStore
+    participant Orch as TurnPlaybackOrchestrator
+    participant TL as PlaybackTimelineRuntime
+    participant Queue as Text/Audio Queues
+    participant Audio as HTMLAudioElement
+    participant Clock as Timeline AudioClock
+    participant Engine as ModelEngine
+    participant Lip as LipSync Sink
+    participant SDK as Live2D WebSDK
+    participant Projection as SessionProjection
+
+    Store-->>Orch: 原子 segment ready(turn_id, message_id)
+    Orch->>TL: startSegmentJob(text, audio, motion)
+
+    alt audio.state = present
+        TL->>TL: 创建 segment timeline，注册 audio required sink
+        opt motion payload 已声明
+            TL->>TL: 注册 motion required sink
+        end
+        TL->>Queue: release queued audio
+        Queue->>Audio: 创建 AudioElement，load/play
+
+        Audio-->>TL: loadedmetadata(duration)
+        TL->>Clock: set expected duration
+        TL->>Projection: markAudioDuration
+        Projection->>Store: audio.duration
+
+        alt motion.state = present
+            TL->>Engine: prepare semantic motion with duration snapshot
+            Engine->>Engine: 编译 axis graph / gesture / timing / curve
+            Engine-->>TL: prepared plan / explicit failure
+        else motion.state = absent 且 voice-following 可用
+            TL->>Engine: prepare speech-only plan
+            Engine-->>TL: prepared / not_applicable / failure
+            opt prepared
+                TL->>TL: 升级并注册 required motion sink
+            end
+        end
+
+        Note over Audio,TL: loadedmetadata 只用于准备；<br/>不能作为“声音已开始”的事实。
+
+        Audio-->>TL: playing
+        TL->>Clock: attach current AudioElement clock
+        Clock-->>TL: currentTime/duration/playbackRate/playing
+        TL->>Projection: markAudioStarted(startedAt,duration)
+        Projection->>Store: audio.started
+
+        par 同一个 playing 事实释放字幕
+            TL->>Queue: release canonical subtitle
+            Queue-->>Store: text.delivered
+        and 启动口型
+            TL->>Lip: attach/start same AudioElement
+            Lip->>Lip: WebAudio analyser RMS
+            Lip->>SDK: external mouth value per frame
+            Lip-->>TL: lip_sync.started
+        and 唤醒已准备动作
+            TL->>Engine: handlePlaybackTimelineStarted(latest clock)
+            Engine->>SDK: start prepared parameter plan
+            SDK-->>TL: motion.started(runId)
+            TL->>Projection: markMotionStarted
+            Projection->>Store: motion.started
+        end
+
+        Note over Engine,SDK: 不添加固定 90ms/260ms 延迟。<br/>视觉入场延迟只来自 parameter plan / performance curve。
+
+        loop 每个渲染帧
+            Clock-->>Engine: 可用的 segment-scoped 时间上下文
+            SDK->>SDK: 采样 plan / speech gesture / dynamics
+            Lip->>SDK: 同一音频 RMS 对应的 mouth value
+        end
+
+        alt Audio ended
+            Audio-->>TL: completed
+            Lip-->>TL: completed 或已记录的 failed
+            SDK-->>TL: motion completed / failed
+        else Audio error
+            Audio-->>TL: failed(reason)
+            TL->>SDK: interrupt still-open required motion
+            TL->>Lip: stop lip-sync
+        else 用户/新 turn 中断
+            TL->>Audio: stop exact segment
+            TL->>SDK: interrupt exact turn+message run
+            TL->>Lip: interrupt exact segment
+        end
+
+        TL->>Projection: project stable audio/motion terminal
+        Projection->>Store: segment execution facts
+
+    else audio.state = absent 且 motion.state = present
+        opt text.state = present
+            TL->>Queue: 立即释放 text
+            Queue-->>Store: text.delivered
+        end
+        TL->>Clock: 创建 explicit synthetic motion-only clock
+        TL->>Engine: compile/start motion-only plan
+        Engine->>SDK: parameter plan
+        SDK-->>TL: motion started/terminal
+        TL->>Projection: project motion facts
+
+    else audio.state = absent 且 motion 非 present
+        opt text.state = present
+            TL->>Queue: 立即释放 text
+            Queue-->>Store: text.delivered
+        end
+        Note over TL,Store: 无媒体时钟，不伪造 synthetic audio。
+
+    else audio.state = failed
+        TL->>Projection: audio failed
+        opt motion.state = present
+            TL->>Projection: motion failed<br/>不改走 motion-only
+        end
+        opt text 是等待音频的字幕
+            TL->>Queue: reject waiting subtitle
+            Queue->>Store: text failed<br/>不转成独立气泡
+        end
+    end

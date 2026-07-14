@@ -1,0 +1,104 @@
+flowchart TB
+    classDef state fill:#e8edf7,stroke:#3e5f93,color:#1d3154
+    classDef slot fill:#e8f1f2,stroke:#2f5d62,color:#163438
+    classDef terminal fill:#e9f3df,stroke:#557a35,color:#2e431d
+    classDef failure fill:#fde7e3,stroke:#b33a2b,color:#681d14
+    classDef event fill:#fff3d6,stroke:#9a6b14,color:#513807
+
+    subgraph TURN[TurnPlaybackSession 状态机]
+        T0([不存在]):::state
+        COL[collecting<br/>turn_started 已提交]:::state
+        READY[ready<br/>至少一个完整段可释放]:::state
+        PLAY[playing<br/>段已释放或 sink started]:::state
+        SETTLE[settling<br/>本地 settled，发送 playback_finished]:::state
+        DONE[completed<br/>playback ACK 成功且 turn_finished]:::terminal
+        FAIL[failed]:::failure
+        INTERRUPT[interrupted]:::failure
+
+        T0 -->|control.turn_started| COL
+        COL -->|完整 output.segment 提交| READY
+        READY -->|segment job release| PLAY
+        COL -->|零 sink 且 synth_finished| SETTLE
+        READY -->|所有段本地 settled + synth_finished| SETTLE
+        PLAY -->|所有段本地 settled + synth_finished| SETTLE
+        SETTLE -->|playback_finished 已发送 + turn_finished| DONE
+
+        COL -->|协议/Store 不变量失败| FAIL
+        READY -->|协议/播放不变量失败| FAIL
+        PLAY -->|required sink / ACK 失败| FAIL
+        SETTLE -->|playback_finished 发送失败| FAIL
+        COL -->|用户中断 / turn replacement| INTERRUPT
+        READY -->|用户中断 / turn replacement| INTERRUPT
+        PLAY -->|用户中断 / turn replacement| INTERRUPT
+    end
+
+    subgraph SEG[每个 output.segment.v3 的槽位事实]
+        SNEW[segment 尚未提交]:::slot
+        PRE[协议预校验<br/>text/audio/motion/images 全部构造]:::event
+        COMMIT[commitOutputSegment<br/>一次性写入 Map]:::slot
+        REJECT[整段拒绝<br/>无 Store/Queue 副作用]:::failure
+        SNEW --> PRE
+        PRE -->|任一 slot 非法| REJECT
+        PRE -->|全部合法| COMMIT
+    end
+
+    subgraph TEXT[text slot]
+        TI[text idle/pending]:::slot
+        TR[text released]:::slot
+        TD[text delivered]:::terminal
+        TF[text failed]:::failure
+        TA[text absent<br/>视为已收口]:::terminal
+        TI -->|text-only 或 audio playing| TR --> TD
+        TI -->|subtitle/audio 不变量失败| TF
+        COMMIT -->|present| TI
+        COMMIT -->|absent| TA
+        COMMIT -->|failed| TF
+    end
+
+    subgraph AUDIO[audio slot]
+        AI[audio idle/pending]:::slot
+        AR[audio released]:::slot
+        AS[audio started<br/>duration/startedAt 可用]:::slot
+        AC[audio completed]:::terminal
+        AF[audio failed]:::failure
+        AA[audio absent]:::terminal
+        AI -->|segment job| AR
+        AR -->|HTMLAudioElement playing| AS
+        AS -->|ended| AC
+        AR -->|load/play/clock failure| AF
+        AS -->|error| AF
+        COMMIT -->|present| AI
+        COMMIT -->|absent| AA
+        COMMIT -->|failed| AF
+    end
+
+    subgraph MOTION[motion slot]
+        MI[motion present/pending]:::slot
+        MR[motion released/prepared]:::slot
+        MS[motion started/runId]:::slot
+        MC[motion completed]:::terminal
+        MF[motion failed]:::failure
+        MA[motion absent]:::terminal
+        MI -->|segment job + timeline prepared| MR
+        MR -->|player onStarted| MS
+        MS -->|player terminal completed| MC
+        MI -->|contract/timeline/compile failure| MF
+        MR -->|start rejected/timeout| MF
+        MS -->|failed/interrupted| MF
+        COMMIT -->|present| MI
+        COMMIT -->|absent| MA
+        COMMIT -->|failed| MF
+    end
+
+    TD --> LOCAL{本段本地 settled?}:::event
+    TF --> LOCAL
+    TA --> LOCAL
+    AC --> LOCAL
+    AF --> LOCAL
+    AA --> LOCAL
+    MC --> LOCAL
+    MF --> LOCAL
+    MA --> LOCAL
+    LOCAL -->|所有存在槽位均终态| SETTLE
+
+    RULE[禁止状态变化<br/>重复 message_id 不覆盖<br/>终态 session 不接收新段<br/>synth_finished 后不补材料<br/>failed 不改写为 absent]:::failure

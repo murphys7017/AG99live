@@ -1,0 +1,72 @@
+flowchart TB
+    classDef allowed fill:#e9f3df,stroke:#557a35,color:#2e431d
+    classDef boundary fill:#fff3d6,stroke:#9a6b14,color:#513807
+    classDef core fill:#e8f1f2,stroke:#2f5d62,color:#163438
+    classDef forbidden fill:#fde7e3,stroke:#b33a2b,color:#681d14
+
+    subgraph BACK[后端目标依赖]
+        BHOST[AstrBot Host / Plugin Entry]:::boundary
+        BUSE[Use Cases<br/>middleware contributors / services / TurnCoordinator]:::core
+        BDOMAIN[Domain<br/>motion intent / resource / performance curve contracts]:::allowed
+        BPORT[Ports<br/>protocol DTO / observation / provider interfaces]:::boundary
+        BADAPTER[Adapters<br/>WebSocket / SQLite / filesystem / AstrBot API]:::boundary
+
+        BHOST --> BUSE
+        BUSE --> BDOMAIN
+        BUSE --> BPORT
+        BADAPTER --> BPORT
+        BADAPTER --> BDOMAIN
+    end
+
+    subgraph FRONT[前端目标依赖]
+        FROOT[App Composition Root]:::boundary
+        FINBOUND[Protocol Adapter<br/>adapter-connection]:::boundary
+        FFACT[Turn Facts<br/>SessionStore]:::core
+        FORCH[Release Policy<br/>TurnPlaybackOrchestrator]:::core
+        FTL[Execution Lifecycle<br/>PlaybackTimeline]:::core
+        FME[Motion Compiler<br/>ModelEngine]:::allowed
+        FLIVE[Presentation Adapter<br/>Live2D boundary]:::boundary
+        FSDK[Cubism WebSDK]:::boundary
+        FPORT[Pure Contracts / Ports]:::allowed
+
+        FROOT --> FINBOUND
+        FROOT --> FFACT
+        FROOT --> FORCH
+        FROOT --> FTL
+        FROOT --> FME
+        FROOT --> FLIVE
+
+        FINBOUND --> FPORT
+        FINBOUND --> FFACT
+        FORCH --> FFACT
+        FORCH --> FTL
+        FTL --> FPORT
+        FTL --> FME
+        FTL --> FLIVE
+        FME --> FPORT
+        FLIVE --> FSDK
+    end
+
+    BPORT <-->|output.segment.v3 / control / input| FPORT
+
+    subgraph NO[禁止的反向依赖]
+        N1[ModelEngine -> SessionStore<br/>禁止直接写播放事实]:::forbidden
+        N2[WebSDK -> TurnPlayback<br/>禁止读取 turn/session]:::forbidden
+        N3[Adapter -> ModelEngine concrete internals<br/>只能依赖 motion port / DTO]:::forbidden
+        N4[Timeline -> semantic profile rules<br/>Timeline 不解释动作语义]:::forbidden
+        N5[Middleware -> SQLite schema<br/>只能使用 observation port]:::forbidden
+        N6[Domain -> AstrBot/WebSocket/Electron<br/>领域规则不依赖框架]:::forbidden
+        N7[CompletionCoordinator -> media player<br/>只负责 ACK]:::forbidden
+        N8[多个模块 -> 同一 Session fact<br/>禁止第二写入者]:::forbidden
+    end
+
+    FME -.禁止.-> N1
+    FSDK -.禁止.-> N2
+    FINBOUND -.禁止.-> N3
+    FTL -.禁止.-> N4
+    BUSE -.禁止.-> N5
+    BDOMAIN -.禁止.-> N6
+    FORCH -.禁止.-> N7
+    FFACT -.禁止.-> N8
+
+    RULE[判定方法<br/>跨层调用必须通过窄 port<br/>状态变化必须能指出唯一 owner<br/>适配器可以依赖 core port，core 不依赖适配器实现]:::allowed

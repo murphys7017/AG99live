@@ -1,0 +1,127 @@
+flowchart TD
+    classDef prompt fill:#f7ead7,stroke:#8a5a20,color:#3e280d
+    classDef contract fill:#fff3d6,stroke:#9a6b14,color:#513807
+    classDef backend fill:#e8f1f2,stroke:#2f5d62,color:#163438
+    classDef engine fill:#e9f3df,stroke:#557a35,color:#2e431d
+    classDef runtime fill:#e8edf7,stroke:#3e5f93,color:#1d3154
+    classDef failure fill:#fde7e3,stroke:#b33a2b,color:#681d14
+
+    subgraph PROMPT[1. Persona Prompt 构建]
+        SYS[System Mount<br/>控制 Live2D 角色的任务与选择原则]:::prompt
+        CAP[Capability Mount<br/>当前模型轴定义 / -4..4 等级语义<br/>typed resources / 参考样本]:::prompt
+        CTX[Context Mount<br/>本轮对话 / 回复用途<br/>上一动作关键轴等级]:::prompt
+        SCHEMA[Persona Effect Schema<br/>ag99live.motion]:::contract
+        SYS --> REQUEST[主模型一次推理]:::prompt
+        CAP --> REQUEST
+        CTX --> REQUEST
+        SCHEMA --> REQUEST
+    end
+
+    subgraph OUTPUT[2. 模型结构化输出]
+        REPLY[spoken_reply]:::contract
+        CALL[effect_calls.ag99live.motion.arguments]:::contract
+        TAGS[intent_tags<br/>动作语义]:::contract
+        CHOICE{动作表示方式}:::contract
+        LEVELS[axis_levels<br/>单姿态，-4..4 整数]:::contract
+        STEPS[motion_steps<br/>2-4 个同轴集合步骤<br/>duration_weight 1-3]:::contract
+        RES{typed resource}:::contract
+        EXP[expression_resource_id<br/>表情层]:::contract
+        MOT[motion_resource_id<br/>完整动作层]:::contract
+        REQUEST --> REPLY
+        REQUEST --> CALL
+        CALL --> TAGS --> CHOICE
+        CHOICE --> LEVELS
+        CHOICE --> STEPS
+        CALL --> RES
+        RES --> EXP
+        RES --> MOT
+    end
+
+    subgraph BACKEND[3. Adapter 严格规范化]
+        STRUCT[motion_intent.py<br/>v4 结构 / 类型 / 互斥 / 时长<br/>唯一 contract 规则源]:::backend
+        VALID{canonical contract 合法？}:::backend
+        FEEDBACK1[记录明确拒绝 reason<br/>不生成默认动作]:::failure
+        PROFILE[当前 SemanticAxisProfile v2]:::backend
+        CAPCHECK[motion_payload.py<br/>轴存在 / 等级可用 / 数量限制<br/>resource 类型与白名单]:::backend
+        CAPOK{当前模型可执行？}:::backend
+        INTENT[engine.motion_intent.v4<br/>canonical payload]:::contract
+        CALL --> STRUCT --> VALID
+        VALID -->|否| FEEDBACK1
+        VALID -->|是| CAPCHECK
+        PROFILE --> CAPCHECK
+        CAPCHECK --> CAPOK
+        CAPOK -->|否| FEEDBACK1
+        CAPOK -->|是| INTENT
+    end
+
+    subgraph TRANSPORT[4. 原子消息与前端入站]
+        SEG[output.segment.v3.motion<br/>与 canonical text/audio 同段]:::contract
+        PARSE[Frontend motion parser<br/>schema/profile/finite fields]:::runtime
+        FVALID{前端 DTO 合法？}:::runtime
+        REJECTSEG[拒绝整个原子 segment<br/>零队列副作用]:::failure
+        NORMAL[NormalizedMotionPayload]:::runtime
+        INTENT --> SEG --> PARSE --> FVALID
+        FVALID -->|否| REJECTSEG
+        FVALID -->|是| NORMAL
+    end
+
+    subgraph COMPILE[5. ModelEngine 编译阶段]
+        ID[Identity/Profile Stage<br/>turn/message/profile revision]:::engine
+        AXIS[Axis Resolver<br/>识别输入轴与明确中性]:::engine
+        SAMPLE[Level Sampling<br/>profile 锚点 + 确定性有界扰动<br/>seed=turn+message+axis+transform]:::engine
+        CAND[Candidate Stages<br/>direct / derived / speech gesture candidates]:::engine
+        GRAPH[SemanticAxisRelationGraphStage<br/>轴关系 / 影响系数 / 硬范围<br/>头身比例与有限反向平衡]:::engine
+        POLICY[ResourcePolicyStage<br/>参数所有权冲突检查]:::engine
+        TIMING[Timing Stage<br/>音频剩余时长 + performance curve]:::engine
+        BUILD[PlanBuilder<br/>轴值 -> Live2D parameter binding]:::engine
+        PLAN[engine.parameter_plan.v2]:::contract
+        TRACE[MotionTransformTrace<br/>raw/resolved/derived/constrained/compiled]:::runtime
+        CFAIL[MotionFeedback<br/>编译失败，不启动播放器]:::failure
+
+        NORMAL --> ID --> AXIS --> SAMPLE --> CAND --> GRAPH --> POLICY --> TIMING --> BUILD --> PLAN
+        ID -.失败.-> CFAIL
+        AXIS -.空/非法/全中性.-> CFAIL
+        SAMPLE -.profile anchor 缺失.-> CFAIL
+        GRAPH -.关系图或范围错误.-> CFAIL
+        POLICY -.资源冲突/不可播放.-> CFAIL
+        BUILD -.binding 无效.-> CFAIL
+        AXIS -.记录.-> TRACE
+        SAMPLE -.记录.-> TRACE
+        CAND -.记录.-> TRACE
+        GRAPH -.记录.-> TRACE
+        BUILD -.记录.-> TRACE
+    end
+
+    subgraph RESOURCE[6. Resource 分层]
+        RDEC{资源执行类型}:::engine
+        PARAM[无 motion resource<br/>执行参数计划]:::engine
+        EXPLAYER[expression resource<br/>与无冲突参数姿态组合]:::engine
+        MOTPLAYER[motion resource<br/>完整动作主层，替代参数计划]:::engine
+        POLICY --> RDEC
+        RDEC --> PARAM
+        RDEC --> EXPLAYER
+        RDEC --> MOTPLAYER
+    end
+
+    subgraph SDK[7. Live2D 逐帧表现]
+        PLAYER[PreviewMotionPlayer<br/>runId 与 terminal ownership]:::runtime
+        LAPP[WebSDK lappmodel<br/>曲线 / gesture track / dynamics]:::engine
+        MIX[参数冲突解析<br/>semantic + expression + lip sync + life motion]:::engine
+        WRITE[Cubism setParameterValueById]:::engine
+        PHYS[Physics / Pose / Renderer]:::engine
+        MODEL[最终可见 Live2D 表现]:::engine
+
+        PLAN --> PARAM --> PLAYER
+        PLAN --> EXPLAYER --> PLAYER
+        MOTPLAYER --> PLAYER
+        PLAYER --> LAPP --> MIX --> WRITE --> PHYS --> MODEL
+    end
+
+    TRACE -.Motion Lab observation.-> LAB[Motion Lab SQLite]:::runtime
+    CFAIL -.Motion Lab compile_failed.-> LAB
+    PLAYER -.started/terminal.-> LAB
+    PLAYER -.started/terminal 先回 Timeline.-> TL[PlaybackTimeline]:::runtime
+
+    RULE[不允许的修复方式<br/>非法输入不补默认 pose<br/>不把 v4 降级为 v3<br/>不部分保留非法轴<br/>不在后端和前端重复 clamp]:::failure
+    FEEDBACK1 -.遵守.-> RULE
+    CFAIL -.遵守.-> RULE

@@ -1,0 +1,67 @@
+flowchart LR
+    classDef person fill:#f7ead7,stroke:#8a5a20,color:#3e280d
+    classDef external fill:#e8edf7,stroke:#3e5f93,color:#1d3154
+    classDef system fill:#e8f1f2,stroke:#2f5d62,color:#163438
+    classDef frontend fill:#e9f3df,stroke:#557a35,color:#2e431d
+    classDef storage fill:#fff3d6,stroke:#9a6b14,color:#513807
+    classDef device fill:#f3e6ec,stroke:#8b4865,color:#4b2637
+
+    USER[用户 / 主播]:::person
+    AUDIENCE[直播间观众]:::person
+
+    subgraph ASTR[ AstrBot 运行环境 ]
+        CORE[AstrBot Core<br/>事件总线 / Router / Persona Runtime / TTS]:::external
+        PROVIDER[聊天模型与 TTS Provider]:::external
+        AG99[AG99live Adapter Plugin<br/>Prompt / Effect / 原子段 / 协议服务]:::system
+    end
+
+    subgraph DESKTOP[ AG99live 桌面端 ]
+        ELECTRON[Electron Main<br/>桌面能力 / 配置持久化]:::frontend
+        RENDERER[Electron Renderer<br/>交互 UI / Session / Timeline / ModelEngine]:::frontend
+        LIVE2D[Live2D Cubism WebSDK<br/>模型加载 / 每帧参数 / Physics]:::frontend
+        AUDIO[浏览器媒体环境<br/>HTMLAudioElement / WebAudio]:::frontend
+    end
+
+    subgraph DATA[ 本地数据 ]
+        PROFILE[Live2D 模型资源<br/>model3 / motion3 / exp3 / textures]:::storage
+        SQLITE[Motion Lab SQLite<br/>原始观察事件]:::storage
+        INDEXED[IndexedDB<br/>待确认 Motion Lab 事件]:::storage
+        CONFIG[桌面配置与动作记录]:::storage
+    end
+
+    OBS[OBS / 直播采集]:::external
+    BILI[Bilibili Live API]:::external
+    ESP[ESP32 辅助显示]:::device
+    REMOTE[远程执行器 / Codex App Server]:::external
+
+    USER -->|文本 / 麦克风 / PTT| RENDERER
+    USER -->|AstrBot 原生入口| CORE
+    AUDIENCE -->|弹幕 / 互动| BILI
+    BILI --> RENDERER
+
+    CORE -->|调用| PROVIDER
+    PROVIDER -->|回复 / 音频| CORE
+    CORE -->|事件、Persona hooks、MessageChain| AG99
+    AG99 -->|WebSocket v2<br/>output.segment.v3| RENDERER
+    RENDERER -->|input / control / profile / Motion Lab| AG99
+
+    ELECTRON <--> RENDERER
+    RENDERER --> LIVE2D
+    RENDERER --> AUDIO
+    AUDIO -.真实音频时钟与 RMS.-> RENDERER
+    LIVE2D -->|Canvas| OBS
+    RENDERER -->|窗口 / 字幕 / UI| OBS
+
+    PROFILE --> LIVE2D
+    PROFILE -.扫描与 semantic profile.-> AG99
+    RENDERER -->|先写待确认事件| INDEXED
+    INDEXED -.以相同 event_id 重发.-> RENDERER
+    AG99 -->|异步持久化| SQLITE
+    SQLITE -.persisted event_id.-> AG99
+    AG99 -.recorded ACK.-> RENDERER
+    RENDERER -.ACK 后删除.-> INDEXED
+    ELECTRON --> CONFIG
+    CONFIG --> RENDERER
+
+    RENDERER -.状态输出.-> ESP
+    AG99 -.受控任务委托.-> REMOTE

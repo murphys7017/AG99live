@@ -1,0 +1,117 @@
+flowchart TB
+    classDef root fill:#f7ead7,stroke:#8a5a20,color:#3e280d
+    classDef boundary fill:#fff3d6,stroke:#9a6b14,color:#513807
+    classDef state fill:#e8edf7,stroke:#3e5f93,color:#1d3154
+    classDef runtime fill:#e8f1f2,stroke:#2f5d62,color:#163438
+    classDef engine fill:#e9f3df,stroke:#557a35,color:#2e431d
+    classDef sdk fill:#f3e6ec,stroke:#8b4865,color:#4b2637
+
+    APP[app/usePetDesktopRuntime.ts<br/>Composition Root]:::root
+    UI[views + components<br/>交互、字幕、设置、实验室]:::root
+
+    subgraph CONNECTION[adapter-connection：网络与协议适配]
+        CONN[useAdapterConnection.ts<br/>连接 facade]:::boundary
+        TRANS[core/transport<br/>WebSocket 生命周期]:::boundary
+        INBOUND[inbound/**<br/>严格解析与原子提交]:::boundary
+        ARUN[runtime/**<br/>audio queues / settlement / UI bridge]:::boundary
+        MSYNC[model-sync/**<br/>模型与 profile 同步]:::boundary
+        CONN --> TRANS
+        CONN --> INBOUND
+        CONN --> ARUN
+        CONN --> MSYNC
+    end
+
+    subgraph TURN[turn-playback：持久播放事实与释放决策]
+        STORE[useTurnPlaybackSessionStore<br/>Turn / Segment facts]:::state
+        ORCH[useTurnPlaybackOrchestrator<br/>完整段 -> SegmentJob]:::state
+        COMPLETE[PlaybackCompletionCoordinator<br/>settled / ACK / completed]:::state
+        SELECTOR[selectors + session contracts]:::state
+        STORE --> ORCH
+        STORE --> COMPLETE
+        SELECTOR --> ORCH
+        SELECTOR --> COMPLETE
+    end
+
+    subgraph TIMELINE[playback-timeline：执行生命周期与统一时钟]
+        TLR[PlaybackTimelineRuntime<br/>segment registry / sink lifecycle]:::runtime
+        TLE[PlaybackTimelineEngine<br/>单段状态机]:::runtime
+        CLOCK[TimelineClock<br/>audio / synthetic]:::runtime
+        JOB[segmentJobExecutor<br/>text/audio/motion release]:::runtime
+        PROJ[sessionProjection<br/>audio/motion facts 唯一出口]:::runtime
+        ASINK[audioSink + audioSegmentSink]:::runtime
+        LIPSINK[lipSyncSink contract]:::runtime
+        TLR --> TLE
+        TLE --> CLOCK
+        TLR --> JOB
+        TLR --> PROJ
+        TLE --> ASINK
+        TLE --> LIPSINK
+    end
+
+    subgraph INTEGRATION[playback-integrations：跨域适配]
+        MOTIONSINK[modelEngineMotionSink<br/>Timeline -> ModelEngine]:::runtime
+        RUNTRACK[motionTimelineRunTracker<br/>Player -> Timeline terminal]:::runtime
+    end
+
+    subgraph ENGINE[model-engine：动作编译]
+        ENTRY[useModelEngine<br/>ingress / prepare / start]:::engine
+        NORMAL[normalize + strict contracts]:::engine
+        STAGES[compiler stages<br/>axis resolve / sample / graph / resource / timing]:::engine
+        PLAN[parameter_plan.v2]:::engine
+        SCHED[motionRuntimeScheduler<br/>segment pending ownership]:::engine
+        ENTRY --> NORMAL --> STAGES --> PLAN
+        ENTRY --> SCHED
+    end
+
+    subgraph LIVE[live2d + live2d-renderer：模型执行边界]
+        PREVIEW[usePreviewMotionPlayer<br/>run ownership / watchdog]:::sdk
+        ADAPTER[Live2D adapter<br/>start plan / catalog motion]:::sdk
+        LIPLIVE[lipSyncTimelineSink<br/>WebAudio RMS / mouth write]:::sdk
+        WEBSDK[WebSDK/lappmodel.ts<br/>每帧插值 / dynamics / 参数冲突]:::sdk
+        CUBISM[Cubism Model / Physics / Renderer]:::sdk
+        PREVIEW --> ADAPTER --> WEBSDK --> CUBISM
+        LIPLIVE --> WEBSDK
+    end
+
+    subgraph SUPPORT[独立功能域]
+        LAB[motion-lab<br/>IndexedDB outbound queue]:::state
+        ACTION[action-lab<br/>参数实验与预览]:::state
+        DESKTOP[desktop-bridge<br/>Electron IPC]:::boundary
+        SETTINGS[settings / data]:::state
+        BILI[bilibili-live]:::boundary
+        OBS[obs-output]:::boundary
+        ESP[esp32-display]:::boundary
+    end
+
+    APP --> CONN
+    APP --> STORE
+    APP --> TLR
+    APP --> ENTRY
+    APP --> PREVIEW
+    APP --> UI
+    APP --> LAB
+    APP --> DESKTOP
+
+    INBOUND --> STORE
+    ORCH --> TLR
+    TLR --> MOTIONSINK --> ENTRY
+    PLAN --> PREVIEW
+    PREVIEW -.started / terminal.-> RUNTRACK --> TLR
+    ASINK -.playing / duration / terminal.-> TLR
+    ASINK --> LIPLIVE
+    PROJ --> STORE
+    COMPLETE --> CONN
+    LAB --> CONN
+    MSYNC --> ENTRY
+    ACTION --> ENTRY
+    DESKTOP --> SETTINGS
+    BILI --> CONN
+    UI --> OBS
+    UI --> ESP
+
+    RULE[边界规则<br/>Adapter 不编译动作<br/>TurnPlayback 不播放媒体<br/>Timeline 不解释语义轴<br/>ModelEngine 不写 SessionStore<br/>WebSDK 不读取 turn/session]:::root
+    RULE -.约束.-> CONN
+    RULE -.约束.-> STORE
+    RULE -.约束.-> TLR
+    RULE -.约束.-> ENTRY
+    RULE -.约束.-> WEBSDK

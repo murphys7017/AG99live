@@ -1,0 +1,88 @@
+flowchart TB
+    classDef process fill:#e8f1f2,stroke:#2f5d62,color:#163438
+    classDef module fill:#e8edf7,stroke:#3e5f93,color:#1d3154
+    classDef runtime fill:#e9f3df,stroke:#557a35,color:#2e431d
+    classDef io fill:#fff3d6,stroke:#9a6b14,color:#513807
+    classDef external fill:#f3e6ec,stroke:#8b4865,color:#4b2637
+
+    subgraph PY[Python 进程：AstrBot]
+        direction TB
+        PYCORE[AstrBot Core<br/>EventBus / Interaction / Provider / TTS]:::process
+        PLUGIN[astrbot_plugin_ag99live_adapter]:::module
+        MW[middleware<br/>Persona Effect / Prompt / Result]:::module
+        RT[runtime<br/>TurnCoordinator / Output Segment / Motion Lab]:::module
+        SVC[services<br/>系统命令 / 音频 / 历史 / 远程执行器]:::module
+        PROTO[protocol + transport<br/>parser / builder / WebSocket server]:::module
+        PYCORE --> PLUGIN
+        PLUGIN --> MW
+        PLUGIN --> RT
+        PLUGIN --> SVC
+        PLUGIN --> PROTO
+    end
+
+    subgraph MAIN[Electron Main 进程]
+        MAINPROC[Electron Main]:::process
+        IPC[IPC handlers<br/>配置 / 窗口 / 文件 / 桌面能力]:::module
+        MAINPROC --> IPC
+    end
+
+    subgraph RENDER[Electron Renderer 进程]
+        APP[Vue App Composition Root]:::process
+        ADAPTER[adapter-connection<br/>WebSocket / inbound / queues]:::module
+        STORE[TurnPlaybackSessionStore]:::runtime
+        TL[PlaybackTimelineRuntime]:::runtime
+        ENGINE[ModelEngine]:::runtime
+        PLAYER[PreviewMotionPlayer]:::runtime
+        L2D[Live2D Renderer Adapter]:::runtime
+        APP --> ADAPTER
+        APP --> STORE
+        APP --> TL
+        APP --> ENGINE
+        APP --> PLAYER
+        APP --> L2D
+    end
+
+    subgraph BROWSER[Renderer 内浏览器媒体与图形运行时]
+        MEDIA[HTMLAudioElement]:::io
+        WEBAUDIO[WebAudio Analyser]:::io
+        WEBGL[WebGL Canvas]:::io
+        CUBISM[Cubism SDK for Web]:::io
+        RAF[requestAnimationFrame]:::io
+        MEDIA --> WEBAUDIO
+        CUBISM --> WEBGL
+        RAF --> CUBISM
+    end
+
+    subgraph FS[本地文件与数据库]
+        MODELS[live2ds/**<br/>moc3 / model3 / textures / motions]:::io
+        DB[Motion Lab SQLite]:::io
+        IDB[Renderer IndexedDB]:::io
+        SETTINGS[桌面设置 / 动作历史]:::io
+    end
+
+    PROVIDERS[远程 LLM / TTS Provider]:::external
+    OBS[OBS / Desktop Capture]:::external
+    DEVICE[麦克风 / 键盘钩子 / ESP32]:::external
+
+    PYCORE <--> PROVIDERS
+    PROTO <-->|ws://.../ws<br/>JSON + binary audio| ADAPTER
+    IPC <-->|Electron IPC| APP
+    ADAPTER --> TL
+    TL --> MEDIA
+    MEDIA -.playing / time / terminal.-> TL
+    WEBAUDIO -.RMS.-> L2D
+    ENGINE --> PLAYER --> L2D --> CUBISM
+    TL -.audio-start snapshot.-> ENGINE
+    CUBISM --> WEBGL --> OBS
+
+    MODELS --> CUBISM
+    MODELS -.scanner / profile.-> PLUGIN
+    RT --> DB
+    APP --> IDB
+    IPC --> SETTINGS
+    DEVICE <--> APP
+
+    note1[进程边界规则：<br/>Python 不持有浏览器音频时钟；<br/>Renderer 不读取 AstrBot 内部对象；<br/>Main 不参与播放状态机。]:::external
+    note1 -.约束.-> PYCORE
+    note1 -.约束.-> APP
+    note1 -.约束.-> MAINPROC
