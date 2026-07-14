@@ -292,7 +292,7 @@ def test_emit_message_chain_converts_audio_off_thread(
 
     asyncio.run(
         coordinator.emit_message_chain(
-            message_chain=[Record(file="voice.wav")],
+            message_chain=[Record(file="voice.wav", text="assistant reply")],
             platform_extras={"logical_message_id": "standard_reply"},
         )
     )
@@ -303,6 +303,10 @@ def test_emit_message_chain_converts_audio_off_thread(
     segment = next(
         payload for payload in sent_payloads if payload.get("type") == "output.segment"
     )
+    assert segment["payload"]["text"] == {
+        "state": "present",
+        "content": "assistant reply",
+    }
     assert segment["payload"]["audio"]["state"] == "present"
 
 

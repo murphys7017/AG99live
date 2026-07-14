@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 
 class OutputSegmentConflictError(ValueError):
@@ -15,13 +15,14 @@ class PendingOutputSegment:
     message_id: str
     text: str = ""
     semantic_text: str = ""
-    audio_caption_text: str = ""
     audio_path: str = ""
     images: list[str] = field(default_factory=list)
     motion_payload: dict[str, Any] | None = None
     motion_mode: str = "preview"
     motion_source: str = ""
-    curve_requested: bool = False
+    curve_request_state: Literal["pending", "started", "disabled", "failed"] = (
+        "pending"
+    )
 
     def merge_text(self, value: str) -> None:
         self.text = _merge_unique_text(self.text, value, "text")
@@ -33,13 +34,8 @@ class PendingOutputSegment:
             "semantic_text",
         )
 
-    def merge_audio(self, *, path: str, caption_text: str) -> None:
+    def merge_audio(self, *, path: str) -> None:
         self.audio_path = _merge_unique_text(self.audio_path, path, "audio_path")
-        self.audio_caption_text = _merge_unique_text(
-            self.audio_caption_text,
-            caption_text,
-            "audio_caption_text",
-        )
 
     def merge_images(self, values: list[str]) -> None:
         for value in values:

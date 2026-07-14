@@ -71,7 +71,7 @@ astrbot_plugin_ag99live_adapter/
 ## 与前端协同的关键点
 
 - 每条交互消息都带 `turn_id`，前后端只按这一个轮次 ID 做会话协调。
-- 每个 assistant segment 由非空 `turn_id + message_id` 标识；Adapter 先聚合 Plain、Record、图片和 motion client object，再发送一个 `output.segment.v2`。
+- 每个 assistant segment 由非空 `turn_id + message_id` 标识；Adapter 先把 Plain、Record.text 与 semantic text 归一化为唯一 canonical text，再聚合音频、图片和 motion client object，发送一个 `output.segment.v3`。
 - 正式动作位于 `output.segment.motion.payload`；前端原子提交完整段后，由 ModelEngine 把 intent 编译为 `engine.parameter_plan.v2`。
 - `semantic_axis_profile` / `calibration_profile` / `voice_following_profile` / `parameter_action_library` / `base_action_library` 由 `system.model_sync` 下发。
 - `system.semantic_axis_profile_saved` / `system.semantic_axis_profile_save_failed` 用于 Profile Editor 保存结果确认，不再依赖 `system.model_sync` 推断保存成败。

@@ -686,7 +686,7 @@ def test_emit_message_chain_reuses_platform_visible_message_id_for_segment_outpu
     assert output_segment["payload"]["motion"]["state"] == "present"
 
 
-def test_emit_message_chain_uses_record_text_only_as_audio_caption(
+def test_emit_message_chain_uses_record_text_as_canonical_segment_text(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -748,13 +748,49 @@ def test_emit_message_chain_uses_record_text_only_as_audio_caption(
 
     assert [payload.get("type") for payload in sent_payloads] == ["output.segment"]
     segment_payload = sent_payloads[0]["payload"]
-    assert segment_payload["text"]["state"] == "absent"
+    assert segment_payload["text"] == {
+        "state": "present",
+        "content": "字幕文本",
+    }
     audio_payload = segment_payload["audio"]
-    assert audio_payload["caption_text"] == "字幕文本"
+    assert audio_payload == {
+        "state": "present",
+        "url": "/cache/audio.wav",
+    }
     assert sent_payloads[0]["message_id"] == "visible-audio-1"
-    assert recorded_events[0]["assistant_text"] == ""
-    assert recorded_events[0]["raw"]["audio_caption_text"] == "字幕文本"
+    assert recorded_events[0]["assistant_text"] == "字幕文本"
+    assert recorded_events[0]["raw"]["reply_text"] == "字幕文本"
     assert curve_contexts == []
+
+
+def test_emit_message_chain_rejects_conflicting_canonical_text_sources(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+    Plain = module.Plain
+    Record = module.Record
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {"current_turn_id": "turn-conflicting-text"},
+    )()
+    coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
+
+    with pytest.raises(ValueError, match="output_segment_canonical_text_conflict"):
+        asyncio.run(
+            coordinator.emit_message_chain(
+                message_chain=[
+                    Plain("visible text"),
+                    Record(file="voice.wav", text="different spoken text"),
+                ],
+                platform_extras={"visible_message_id": "visible-conflict-1"},
+            )
+        )
 
 
 def test_emit_message_chain_dedupes_motion_client_object_for_segmented_output(
@@ -821,6 +857,79 @@ def test_emit_message_chain_dedupes_motion_client_object_for_segmented_output(
     assert [payload.get("type") for payload in sent_payloads] == ["output.segment"]
     assert sent_payloads[0]["message_id"] == "visible-msg::core_reply"
     assert sent_payloads[0]["payload"]["motion"]["state"] == "present"
+
+
+@pytest.mark.parametrize("first_part", ["motion", "text"])
+def test_performance_curve_request_waits_for_text_and_motion_in_any_order(
+    install_fake_astrbot,
+    monkeypatch,
+    first_part: str,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+    Plain = module.Plain
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
+    coordinator.runtime_state.enable_performance_curve = True
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {"current_turn_id": "turn-curve-order"},
+    )()
+    coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
+    coordinator._motion_lab_chat_context = lambda: []
+    contexts: list[dict[str, object]] = []
+
+    def start_curve(**_kwargs) -> bool:
+        contexts.append(dict(coordinator._current_performance_curve_context))
+        return True
+
+    coordinator._start_performance_curve_request = start_curve
+    motion_extras = {
+        "visible_message_id": "visible-curve::core_reply::0001",
+        "message_kind": "core_reply",
+        "client_objects": [
+            {
+                "type": "ag99live.motion_payload",
+                "motion_payload": _build_valid_motion_intent(),
+                "mode": "preview",
+                "source": "persona_effect",
+            }
+        ],
+    }
+    text_extras = {
+        "visible_message_id": "visible-curve::core_reply::0002",
+        "message_kind": "core_reply",
+        "semantic_text": "canonical reply",
+    }
+
+    async def emit_parts() -> None:
+        if first_part == "motion":
+            await coordinator.emit_message_chain(message_chain=[], platform_extras=motion_extras)
+            assert contexts == []
+            await coordinator.emit_message_chain(
+                message_chain=[Plain("canonical reply")],
+                platform_extras=text_extras,
+            )
+        else:
+            await coordinator.emit_message_chain(
+                message_chain=[Plain("canonical reply")],
+                platform_extras=text_extras,
+            )
+            assert contexts == []
+            await coordinator.emit_message_chain(message_chain=[], platform_extras=motion_extras)
+
+    asyncio.run(emit_parts())
+
+    assert len(contexts) == 1
+    assert contexts[0]["assistant_text"] == "canonical reply"
+    segment = coordinator._get_pending_output_segment(
+        "turn-curve-order",
+        "visible-curve::core_reply",
+    )
+    assert segment.curve_request_state == "started"
 
 
 def test_emit_message_chain_treats_inline_payload_as_visible_text_only_when_persona_effect_available(

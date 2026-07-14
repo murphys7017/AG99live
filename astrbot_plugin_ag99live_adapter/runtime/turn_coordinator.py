@@ -271,23 +271,23 @@ class TurnCoordinator:
         )
         raw_reply_text = str(raw_reply_text_override or "").strip() or "\n".join(texts).strip()
         raw_record_text = "\n".join(record_texts).strip()
-        audio_caption_text = sanitize_assistant_output_text(raw_record_text)
+        record_text = sanitize_assistant_output_text(raw_record_text)
         reply_text = sanitize_assistant_output_text("\n".join(texts).strip())
         semantic_text = str(platform_extras_dict.get("semantic_text") or "").strip()
-        assistant_semantic_text = sanitize_assistant_output_text(
-            semantic_text or reply_text or raw_reply_text
+        canonical_text = _resolve_canonical_assistant_text(
+            semantic_text=semantic_text,
+            plain_text=reply_text,
+            record_text=record_text,
+            raw_reply_text=raw_reply_text,
         )
         segment = self._get_pending_output_segment(turn_id, segment_message_id)
-        segment.merge_text(reply_text)
-        segment.merge_semantic_text(assistant_semantic_text)
+        segment.merge_text(canonical_text)
+        segment.merge_semantic_text(canonical_text)
         segment.merge_images(picture_paths)
         if len(record_paths) > 1:
             raise ValueError(f"output_segment_multiple_audio_files:{segment_message_id}")
         if record_paths:
-            segment.merge_audio(
-                path=record_paths[0],
-                caption_text=audio_caption_text,
-            )
+            segment.merge_audio(path=record_paths[0])
 
         motion_candidate = self._resolve_output_segment_motion(
             platform_extras=platform_extras_dict,
@@ -295,22 +295,10 @@ class TurnCoordinator:
         )
         if motion_candidate is not None:
             segment.merge_motion(**motion_candidate)
-        if segment.motion_payload is not None and not segment.curve_requested:
-            self._current_performance_curve_context = {
-                "turn_id": turn_id,
-                "message_id": segment_message_id,
-                "assistant_text": segment.semantic_text,
-                "assistant_reply_keywords": extract_assistant_reply_keywords(
-                    segment.semantic_text
-                ),
-                "chat_context": self._motion_lab_chat_context(),
-                "platform_extras": platform_extras_dict,
-            }
-            self._start_performance_curve_request(
-                motion_payload=segment.motion_payload,
-            )
-            segment.curve_requested = True
-            self._current_performance_curve_context = None
+        self._try_start_performance_curve_request(
+            segment=segment,
+            platform_extras=platform_extras_dict,
+        )
 
     def _get_pending_output_segment(
         self,
@@ -376,6 +364,10 @@ class TurnCoordinator:
     async def _flush_output_segment(self, segment: PendingOutputSegment) -> None:
         audio_slot: dict[str, Any] = {"state": "absent"}
         if segment.audio_path:
+            if not segment.text:
+                raise ValueError(
+                    f"output_segment_audio_text_missing:{segment.message_id}"
+                )
             _, audio_url = await asyncio.to_thread(
                 self.media_service.cache_audio_file,
                 segment.audio_path,
@@ -383,7 +375,6 @@ class TurnCoordinator:
             audio_slot = {
                 "state": "present",
                 "url": audio_url,
-                "caption_text": segment.audio_caption_text,
             }
 
         motion_slot = self._build_output_segment_motion_slot(segment)
@@ -416,8 +407,7 @@ class TurnCoordinator:
             phase="assistant_output",
             assistant_text=segment.semantic_text,
             raw={
-                "visible_reply_text": segment.text,
-                "audio_caption_text": segment.audio_caption_text,
+                "reply_text": segment.text,
                 "images": list(segment.images),
                 "motion": motion_slot,
                 "chat_context": self._motion_lab_chat_context(),
@@ -451,9 +441,16 @@ class TurnCoordinator:
         hint = payload.get("performance_curve_hint")
         runtime = getattr(getattr(self, "runtime_state", None), "performance_curve_runtime", None)
         if not isinstance(hint, dict):
-            reason = "not_ready_before_segment_egress"
+            reason = {
+                "disabled": "performance_curve_disabled",
+                "failed": "performance_curve_request_rejected",
+                "pending": "performance_curve_request_not_started",
+            }.get(
+                segment.curve_request_state,
+                "not_ready_before_segment_egress",
+            )
             fail_if_not_ready = getattr(runtime, "fail_if_not_ready", None)
-            if callable(fail_if_not_ready):
+            if segment.curve_request_state == "started" and callable(fail_if_not_ready):
                 fail_if_not_ready(
                     turn_id=segment.turn_id,
                     message_id=segment.message_id,
@@ -968,6 +965,47 @@ class TurnCoordinator:
         )
         return bool(start(request))
 
+    def _try_start_performance_curve_request(
+        self,
+        *,
+        segment: PendingOutputSegment,
+        platform_extras: dict[str, Any],
+    ) -> None:
+        if segment.curve_request_state != "pending":
+            return
+        if segment.motion_payload is None or not segment.semantic_text:
+            return
+
+        runtime_state = getattr(self, "runtime_state", None)
+        if not bool(getattr(runtime_state, "enable_performance_curve", False)):
+            segment.curve_request_state = "disabled"
+            return
+
+        self._current_performance_curve_context = {
+            "turn_id": segment.turn_id,
+            "message_id": segment.message_id,
+            "assistant_text": segment.semantic_text,
+            "assistant_reply_keywords": extract_assistant_reply_keywords(
+                segment.semantic_text
+            ),
+            "chat_context": self._motion_lab_chat_context(),
+            "platform_extras": platform_extras,
+        }
+        try:
+            started = self._start_performance_curve_request(
+                motion_payload=segment.motion_payload,
+            )
+        finally:
+            self._current_performance_curve_context = None
+        segment.curve_request_state = "started" if started else "failed"
+        if not started:
+            logger.error(
+                "Performance curve request rejected after canonical text and motion "
+                "were ready. turn_id=%s message_id=%s",
+                segment.turn_id,
+                segment.message_id,
+            )
+
     def _attach_ready_performance_curve_hint(
         self,
         *,
@@ -1159,3 +1197,25 @@ def _coerce_perf_counter(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     return None
+
+
+def _resolve_canonical_assistant_text(
+    *,
+    semantic_text: str,
+    plain_text: str,
+    record_text: str,
+    raw_reply_text: str,
+) -> str:
+    candidates = [
+        ("semantic_text", sanitize_assistant_output_text(semantic_text)),
+        ("plain_text", sanitize_assistant_output_text(plain_text)),
+        ("record_text", sanitize_assistant_output_text(record_text)),
+    ]
+    populated = [(source, value) for source, value in candidates if value]
+    distinct_values = {value for _source, value in populated}
+    if len(distinct_values) > 1:
+        sources = ",".join(source for source, _value in populated)
+        raise ValueError(f"output_segment_canonical_text_conflict:{sources}")
+    if populated:
+        return populated[0][1]
+    return sanitize_assistant_output_text(raw_reply_text)

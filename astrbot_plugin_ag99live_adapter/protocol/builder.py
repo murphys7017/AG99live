@@ -302,7 +302,7 @@ def build_output_segment(
         message_id=message_id,
         source=SOURCE_ADAPTER,
         payload={
-            "schema_version": "output.segment.v2",
+            "schema_version": "output.segment.v3",
             "text": text,
             "audio": audio,
             "motion": motion,
