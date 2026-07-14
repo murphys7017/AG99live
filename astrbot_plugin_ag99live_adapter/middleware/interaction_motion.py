@@ -39,7 +39,6 @@ from .motion_payload import (
 )
 from ..motion.output_sanitizer import sanitize_assistant_output_text
 from ..motion.motion_intent import (
-    DEFAULT_MOTION_INTENT_DURATION_MS,
     resolve_selected_semantic_axis_profile,
 )
 from ..motion.resource_catalog import (
@@ -358,7 +357,8 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
                     },
                 ],
             },
-        )
+        ),
+        event_filter=_is_ag99live_motion_effect_event,
     )
 
 
@@ -379,6 +379,25 @@ def _resolve_motion_runtime_bundle(event: Any) -> _MotionRuntimeBundle | None:
         turn_coordinator=turn_coordinator,
         runtime_state=runtime_state,
     )
+
+
+def _is_ag99live_motion_effect_event(event: Any) -> bool:
+    if _resolve_motion_runtime_bundle(event) is None:
+        return False
+
+    get_extra = getattr(event, "get_extra", None)
+    if callable(get_extra):
+        try:
+            if get_extra("ag99live_input_source") == "remote_operator_result":
+                return False
+        except Exception:  # noqa: BLE001
+            return False
+
+    message_obj = getattr(event, "message_obj", None)
+    raw_message = getattr(message_obj, "raw_message", None)
+    if isinstance(raw_message, Mapping):
+        return raw_message.get("ag99live_input_source") != "remote_operator_result"
+    return True
 
 
 def _resolve_persona_effect_motion_payload(

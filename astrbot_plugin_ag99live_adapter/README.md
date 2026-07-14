@@ -44,7 +44,7 @@ astrbot_plugin_ag99live_adapter/
 ### 统一主路径（middleware-first）
 
 - 主聊天模型只负责正常回复文本，不输出动作标签。
-- 交互中间件在 prompt contributor 中注入动作能力/运行态上下文，并注册 `ag99live.motion` Persona Effect；result contributor 从 `view.effect_calls` 消费该 effect 并返回 `client_objects`。
+- 交互中间件在 prompt contributor 中注入动作能力/运行态上下文，并注册 `ag99live.motion` Persona Effect；该 effect 只对具备 AG99live motion runtime 的直接前端会话开放，不进入其他平台或 Remote Operator 回灌事件的 Persona 契约。result contributor 从 `view.effect_calls` 消费该 effect 并返回 `client_objects`。
 - 后端从 `platform_extras` / `client_objects` 中读取动作载荷，并与文本、音频一起广播到前端。
 - 任何额外动作来源都必须回到同一条 `engine.motion_*` 协议链路和同一 segment identity，不能绕过 ModelEngine 或 PlaybackTimeline。
 

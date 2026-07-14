@@ -5,7 +5,6 @@ import importlib
 import json
 import sys
 import types
-from unittest.mock import patch
 
 import pytest
 
@@ -2341,6 +2340,7 @@ def test_register_interaction_contributors_uses_available_hooks(
     result_contributors: list[object] = []
     unregistered_effect_plugins: list[str | None] = []
     registered_effects: list[object] = []
+    registered_effect_filters: list[object] = []
 
     class ContextStub:
         def unregister_persona_effects(self, *, plugin_id=None, module_prefix=None) -> int:
@@ -2348,8 +2348,9 @@ def test_register_interaction_contributors_uses_available_hooks(
             unregistered_effect_plugins.append(plugin_id)
             return 0
 
-        def register_persona_effect(self, effect) -> None:
+        def register_persona_effect(self, effect, *, event_filter=None) -> None:
             registered_effects.append(effect)
+            registered_effect_filters.append(event_filter)
 
         def register_interaction_prompt_contributor(self, contributor) -> None:
             prompt_contributors.append(contributor)
@@ -2363,6 +2364,31 @@ def test_register_interaction_contributors_uses_available_hooks(
     assert len(result_contributors) == 1
     assert unregistered_effect_plugins == ["astrbot_plugin_ag99live_adapter"]
     assert len(registered_effects) == 1
+    assert len(registered_effect_filters) == 1
+    event_filter = registered_effect_filters[0]
+    assert callable(event_filter)
+    ag99live_event, _ = _build_event()
+    assert event_filter(ag99live_event) is True
+    ag99live_event.set_extra("ag99live_input_source", "remote_operator_result")
+    assert event_filter(ag99live_event) is False
+    non_ag99live_event = type(
+        "NonAG99liveEvent",
+        (),
+        {
+            "get_platform_id": lambda self: "aiocqhttp",
+            "get_platform_name": lambda self: "aiocqhttp",
+        },
+    )()
+    assert event_filter(non_ag99live_event) is False
+    ag99live_without_runtime = type(
+        "AG99liveEventWithoutRuntime",
+        (),
+        {
+            "get_platform_id": lambda self: "olv_pet_adapter",
+            "get_platform_name": lambda self: "olv_pet_adapter",
+        },
+    )()
+    assert event_filter(ag99live_without_runtime) is False
     effect = registered_effects[0]
     assert effect.plugin_id == "astrbot_plugin_ag99live_adapter"
     assert effect.name == "ag99live.motion"
