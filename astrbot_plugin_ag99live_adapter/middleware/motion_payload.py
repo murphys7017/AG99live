@@ -5,10 +5,8 @@ from typing import Any
 
 from ..motion.motion_intent import (
     MOTION_INTENT_V4_SCHEMA_VERSION,
-    derive_motion_emotion_label,
-    normalize_motion_intent_tags,
+    normalize_motion_intent_v4_payload,
     normalize_motion_resource_id,
-    _normalize_duration_hint_ms,
     resolve_selected_semantic_axis_profile,
 )
 from ..motion.resource_catalog import (
@@ -65,53 +63,36 @@ def normalize_motion_arguments_payload(
     except Exception as exc:  # noqa: BLE001
         return None, f"semantic_profile_unresolved:{exc}"
 
-    profile_id = str(semantic_profile.get("profile_id") or "").strip()
-    if not profile_id:
-        return None, "profile_id_empty"
-
-    intent_tags = normalize_motion_intent_tags(motion_hint.get("intent_tags"))
-    if not intent_tags:
-        return None, append_resolution_reason(base_reason, "intent_tags_empty")
-    if len(intent_tags) > 6 or any(len(tag) > 48 for tag in intent_tags):
-        return None, append_resolution_reason(base_reason, "intent_tags_invalid")
-    emotion_label = derive_motion_emotion_label(intent_tags)
-    requested_expression_resource_id = normalize_motion_resource_id(
-        motion_hint.get("expression_resource_id")
-    )
-    requested_motion_resource_id = normalize_motion_resource_id(
-        motion_hint.get("motion_resource_id")
-    )
-    if requested_expression_resource_id and requested_motion_resource_id:
-        return None, append_resolution_reason(
-            base_reason,
-            "multiple_resource_layers_forbidden",
-        )
     has_axis_levels = "axis_levels" in motion_hint
     has_motion_steps = "motion_steps" in motion_hint
-    if has_axis_levels == has_motion_steps:
-        return None, append_resolution_reason(
-            base_reason,
-            "axis_levels_motion_steps_exclusive",
-        )
-    validated_levels: dict[str, int] | None = None
-    motion_steps: list[dict[str, Any]] | None = None
-    rejected_levels: list[str] = []
-    reason = base_reason
+    contract_payload = {
+        "schema_version": MOTION_INTENT_V4_SCHEMA_VERSION,
+        "profile_id": semantic_profile.get("profile_id"),
+        "profile_revision": semantic_profile.get("revision"),
+        "model_id": semantic_profile.get("model_id"),
+        "mode": "expressive",
+        "intent_tags": motion_hint.get("intent_tags"),
+        "duration_hint_ms": motion_hint.get("duration_hint_ms"),
+        "expression_resource_id": motion_hint.get("expression_resource_id"),
+        "motion_resource_id": motion_hint.get("motion_resource_id"),
+    }
     if has_axis_levels:
-        validated_levels, rejected_levels = normalize_effect_axis_levels(
-            motion_hint.get("axis_levels"),
-        )
-    else:
-        motion_steps, motion_steps_error = normalize_effect_motion_steps(
-            motion_hint.get("motion_steps")
-        )
-        if motion_steps_error:
-            return None, append_resolution_reason(reason, motion_steps_error)
-    if rejected_levels:
-        return None, append_resolution_reason(
-            reason,
-            "rejected_axis_levels:" + ",".join(rejected_levels),
-        )
+        contract_payload["axis_levels"] = motion_hint.get("axis_levels")
+    if has_motion_steps:
+        contract_payload["motion_steps"] = motion_hint.get("motion_steps")
+    try:
+        payload = normalize_motion_intent_v4_payload(contract_payload)
+    except ValueError as exc:
+        return None, append_resolution_reason(base_reason, str(exc))
+
+    intent_tags = payload["intent_tags"]
+    if len(intent_tags) > 6 or any(len(tag) > 48 for tag in intent_tags):
+        return None, append_resolution_reason(base_reason, "intent_tags_invalid")
+    requested_expression_resource_id = payload["expression_resource_id"]
+    requested_motion_resource_id = payload["motion_resource_id"]
+    validated_levels = payload.get("axis_levels")
+    motion_steps = payload.get("motion_steps")
+    reason = base_reason
     prompt_axes = profile_prompt_axes(semantic_profile)
     axis_by_id = {
         str(axis.get("id") or "").strip(): axis
@@ -140,9 +121,6 @@ def normalize_motion_arguments_payload(
         )
     if len(used_axis_ids) > 6:
         return None, append_resolution_reason(reason, "axis_level_count_exceeded")
-    if has_axis_levels and not validated_levels:
-        reason = append_resolution_reason(reason, "axis_levels_empty_or_invalid")
-
     resource_candidates = build_motion_resource_candidates(
         runtime_state=runtime_state,
     )
@@ -167,40 +145,8 @@ def normalize_motion_arguments_payload(
         if requested_motion_resource_id and not motion_resource_id:
             return None, reason
 
-    if motion_steps and motion_resource_id:
-        return None, append_resolution_reason(
-            reason,
-            "motion_steps_motion_resource_mutually_exclusive",
-        )
-
-    if has_axis_levels and not validated_levels:
-        return None, reason
-
-    try:
-        duration_hint_ms = _normalize_duration_hint_ms(motion_hint.get("duration_hint_ms"))
-    except ValueError as exc:
-        return None, append_resolution_reason(reason, str(exc))
-    payload = {
-        "schema_version": MOTION_INTENT_V4_SCHEMA_VERSION,
-        "profile_id": profile_id,
-        "profile_revision": int(semantic_profile.get("revision") or 0),
-        "model_id": str(semantic_profile.get("model_id") or "").strip(),
-        "mode": "expressive",
-        "intent_tags": intent_tags,
-        "emotion_label": emotion_label,
-        "duration_hint_ms": duration_hint_ms,
-        "expression_resource_id": expression_resource_id,
-        "motion_resource_id": motion_resource_id,
-        "summary": {
-            "axis_count": len(validated_levels or motion_steps[0]["axis_levels"]),
-            "intent_tag_count": len(intent_tags),
-            "motion_step_count": len(motion_steps or []),
-        },
-    }
-    if validated_levels:
-        payload["axis_levels"] = validated_levels
-    if motion_steps:
-        payload["motion_steps"] = motion_steps
+    payload["expression_resource_id"] = expression_resource_id
+    payload["motion_resource_id"] = motion_resource_id
     return payload, reason
 
 
@@ -291,73 +237,6 @@ def normalize_effect_axes(
         return None, rejected_axes
 
     return normalized_axes, rejected_axes
-
-
-def normalize_motion_axis_levels(
-    levels: Any,
-) -> tuple[dict[str, int] | None, list[str]]:
-    if not isinstance(levels, dict) or not levels:
-        return None, []
-    normalized_levels: dict[str, int] = {}
-    rejected_levels: list[str] = []
-    for axis_id_raw, level in levels.items():
-        axis_id = str(axis_id_raw or "").strip()
-        if not axis_id:
-            rejected_levels.append("empty_axis_id")
-            continue
-        if axis_id in normalized_levels:
-            rejected_levels.append(f"duplicate_axis_id:{axis_id}")
-            continue
-        if isinstance(level, bool) or not isinstance(level, int) or level < -4 or level > 4:
-            rejected_levels.append(axis_id)
-            continue
-        normalized_levels[axis_id] = level
-    if not normalized_levels:
-        return None, rejected_levels
-    return normalized_levels, rejected_levels
-
-
-normalize_effect_axis_levels = normalize_motion_axis_levels
-
-
-def normalize_effect_motion_steps(
-    value: Any,
-) -> tuple[list[dict[str, Any]] | None, str]:
-    if not isinstance(value, list) or len(value) < 2 or len(value) > 4:
-        return None, "motion_steps_count_invalid"
-    normalized_steps: list[dict[str, Any]] = []
-    expected_axis_ids: set[str] | None = None
-    for index, step in enumerate(value):
-        if not isinstance(step, dict):
-            return None, f"motion_step_not_object:{index}"
-        unknown_fields = sorted(set(step) - {"axis_levels", "duration_weight"})
-        if unknown_fields:
-            return None, f"motion_step_forbidden_fields:{index}:{','.join(unknown_fields)}"
-        levels, rejected = normalize_motion_axis_levels(step.get("axis_levels"))
-        if rejected:
-            return None, f"motion_step_rejected_axis_levels:{index}:{','.join(rejected)}"
-        if not levels:
-            return None, f"motion_step_axis_levels_empty:{index}"
-        axis_ids = set(levels)
-        if expected_axis_ids is None:
-            expected_axis_ids = axis_ids
-        elif axis_ids != expected_axis_ids:
-            return None, f"motion_step_axis_set_mismatch:{index}"
-        duration_weight = step.get("duration_weight")
-        if (
-            isinstance(duration_weight, bool)
-            or not isinstance(duration_weight, int)
-            or duration_weight < 1
-            or duration_weight > 3
-        ):
-            return None, f"motion_step_duration_weight_invalid:{index}"
-        normalized_steps.append(
-            {
-                "axis_levels": levels,
-                "duration_weight": duration_weight,
-            }
-        )
-    return normalized_steps, ""
 
 
 def _coerce_effect_axis_number(value: Any) -> float | None:

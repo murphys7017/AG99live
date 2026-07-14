@@ -71,7 +71,6 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
 
   const runtimeSchedulerDependencies: MotionRuntimeSchedulerDependencies = {
     getCurrentTurnId: dependencies.getCurrentTurnId,
-    sessionStore: dependencies.sessionStore,
   };
 
   const motionStartDependencies: MotionStartDependencies = {
@@ -134,20 +133,11 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         pushHistory("error", `动作启动失败：${context.startReason}`);
         return;
       }
-      if (context.playbackClock) {
-        dependencies.markMotionTimelineTerminal(
-          context.turnId,
-          context.messageId,
-          "failed",
-          context.startReason,
-        );
-        return;
-      }
-      runtimeSchedulerDependencies.sessionStore?.markMotionFailed?.(
-        context.turnId,
-        context.messageId,
-        context.startReason,
-      );
+      dependencies.onMotionRejected({
+        turnId: normalizeTurnId(context.turnId) as string,
+        messageId: context.messageId,
+        reason: context.startReason,
+      });
     },
   });
 
@@ -158,11 +148,14 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     const normalized = normalizeMotionPayload(payload);
     if (!normalized.ok) {
       reportInvalidMotionPayload(normalized.reason, runtimeStateController);
-      runtimeSchedulerDependencies.sessionStore?.markMotionFailed?.(
-        context.turnId,
-        context.messageId,
-        normalized.reason,
-      );
+      const turnId = normalizeTurnId(context.turnId);
+      if (turnId) {
+        dependencies.onMotionRejected({
+          turnId,
+          messageId: context.messageId,
+          reason: normalized.reason,
+        });
+      }
       return false;
     }
     return runtimeScheduler.queueInboundPayload(normalized.payload, context);
@@ -225,12 +218,15 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       prepared,
     );
     if (!started) {
-      dependencies.markMotionTimelineTerminal(
-        playbackClock.turnId,
-        normalizedMessageId,
-        "failed",
-        state.lastCompileReason || "speech_only_motion_start_failed",
-      );
+      const turnId = normalizeTurnId(playbackClock.turnId);
+      if (!turnId) {
+        throw new Error("Speech-only motion rejection requires a turnId.");
+      }
+      dependencies.onMotionRejected({
+        turnId,
+        messageId: normalizedMessageId,
+        reason: state.lastCompileReason || "speech_only_motion_start_failed",
+      });
     }
     return started;
   }

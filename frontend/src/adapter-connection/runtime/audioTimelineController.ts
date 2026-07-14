@@ -20,8 +20,9 @@ import {
 import type {
   PlaybackTimelineSnapshot,
 } from "../../playback-timeline/contracts.js";
-import {
-  createPlaybackTimelineRuntime,
+import type {
+  PlaybackTimelineRuntime,
+  PlaybackTimelineRuntimeDeps,
 } from "../../playback-timeline/playbackTimelineRuntime.js";
 import {
   startAudioSegmentAndBridgeState,
@@ -46,6 +47,9 @@ export interface AdapterAudioTimelineControllerDeps<TMotionPayload = unknown> {
   getAudioSession: () => PlaybackTimelineAudioSessionPort | undefined;
   getMotionSession: () => PlaybackTimelineMotionSessionPort | undefined;
   segmentExecution: PlaybackTimelineSegmentExecutionPorts<TMotionPayload>;
+  createPlaybackTimelineRuntime: (
+    deps: PlaybackTimelineRuntimeDeps<TMotionPayload>,
+  ) => PlaybackTimelineRuntime<TMotionPayload>;
   createLipSyncRuntime?: (
     callbacks: PlaybackTimelineLipSyncRuntimeCallbacks,
   ) => PlaybackTimelineLipSyncRuntime;
@@ -73,7 +77,7 @@ export function createAdapterAudioTimelineController<TMotionPayload = unknown>(
 ) {
   const live2dLipSyncSink = createLive2DLipSyncTimelineSink();
   let activeLipSyncRuntime: PlaybackTimelineLipSyncRuntime | null = null;
-  const playbackTimelineRuntime = createPlaybackTimelineRuntime<TMotionPayload>({
+  const playbackTimelineRuntime = deps.createPlaybackTimelineRuntime({
     getAudioClock: () => deps.audioSink.getClock(),
     segmentExecution: deps.segmentExecution,
     get audioSession() {

@@ -1,9 +1,9 @@
 task:
   class: refactor
   risk: high
-  phase: atomic_playback_lifecycle_hardening
+  phase: playback_ownership_deduplication
   status: complete
-  scope: Close remaining motion preparation, subtitle failure, strict v3 parsing, and performance-curve request lifecycle gaps
+  scope: Remove duplicate playback terminal ownership, move Timeline composition out of Adapter, and consolidate backend motion validation and observation boundaries
 context:
   confidence: high
   assumptions:
@@ -465,6 +465,11 @@ verification:
     - performance-curve order regressions passed for both motion-first and text-first physical output parts
     - playback timeline regressions passed for fatal sink shutdown and suppression of lip-sync startup after timeline rejection
     - production residue scan found no curve_requested boolean, fixed-delay motion bridge, audio caption field, or old production speech-cycle contract
+    - npm test (complete frontend suite passed after playback lifecycle ownership deduplication)
+    - npm run build:web (production web build passed after app-owned timeline and session projection changes)
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests -q (286 passed after canonical motion validation and Motion Lab observation-port consolidation)
+    - npm run test:playback-timeline (passed after final exactly-once required-audio rejection cleanup)
+    - git diff --check (passed)
   checks_failed: []
   validation_gap: A live Electron end-to-end conversation is still needed to verify output.segment delivery, real audio-clock release, lip sync, and motion start against an installed AstrBot instance and Live2D model; the latest detailed Mermaid annotations were not CLI-rendered because mmdc is unavailable locally.
 runtime:

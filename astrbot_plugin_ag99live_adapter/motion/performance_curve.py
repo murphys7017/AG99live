@@ -13,7 +13,7 @@ from ..prompts.performance_curve import (
     PERFORMANCE_CURVE_SYSTEM_PROMPT,
     build_performance_curve_prompt,
 )
-from ..runtime.motion_lab import enqueue_motion_lab_raw_event
+from ..runtime.motion_lab import record_motion_lab_observation
 
 PERFORMANCE_CURVE_HINT_SCHEMA_VERSION = "ag99.performance_curve_hint.v1"
 
@@ -215,18 +215,16 @@ class PerformanceCurveRuntime:
         payload_kind: str,
         raw: dict[str, Any],
     ) -> bool:
-        return enqueue_motion_lab_raw_event(
+        return record_motion_lab_observation(
             self.runtime_state,
-            {
-                "event_type": event_type,
-                "turn_id": request.turn_id,
-                "message_id": request.message_id,
-                "source_route": "performance_curve_provider",
-                "phase": "performance_curve",
-                "assistant_text": request.assistant_text,
-                "payload_kind": payload_kind,
-                "raw": raw,
-            },
+            event_type=event_type,
+            turn_id=request.turn_id,
+            message_id=request.message_id,
+            source_route="performance_curve_provider",
+            phase="performance_curve",
+            assistant_text=request.assistant_text,
+            payload_kind=payload_kind,
+            raw=raw,
         )
 
     def _is_enabled(self) -> bool:

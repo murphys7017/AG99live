@@ -244,37 +244,76 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
 
 
 def _normalize_axis_levels(value: Any) -> dict[str, int]:
-    if not isinstance(value, dict) or not value:
+    normalized_levels, rejected_levels = normalize_motion_axis_levels(value)
+    if rejected_levels:
+        raise ValueError("rejected_axis_levels:" + ",".join(rejected_levels))
+    if not normalized_levels:
         raise ValueError("axis_levels_not_object")
-    normalized_levels: dict[str, int] = {}
-    for axis_id_raw, level in value.items():
-        axis_id = str(axis_id_raw or "").strip()
-        if not axis_id:
-            raise ValueError("axis_id_empty")
-        if axis_id in normalized_levels:
-            raise ValueError(f"axis_id_duplicate:{axis_id}")
-        if isinstance(level, bool) or not isinstance(level, int) or level < -4 or level > 4:
-            raise ValueError(f"axis_{axis_id}_level_invalid")
-        normalized_levels[axis_id] = level
     return normalized_levels
 
 
+def normalize_motion_axis_levels(
+    value: Any,
+) -> tuple[dict[str, int] | None, list[str]]:
+    if not isinstance(value, dict) or not value:
+        return None, []
+    normalized_levels: dict[str, int] = {}
+    rejected_levels: list[str] = []
+    for axis_id_raw, level in value.items():
+        axis_id = str(axis_id_raw or "").strip()
+        if not axis_id:
+            rejected_levels.append("empty_axis_id")
+            continue
+        if axis_id in normalized_levels:
+            rejected_levels.append(f"duplicate_axis_id:{axis_id}")
+            continue
+        if isinstance(level, bool) or not isinstance(level, int) or level < -4 or level > 4:
+            rejected_levels.append(axis_id)
+            continue
+        normalized_levels[axis_id] = level
+    if not normalized_levels:
+        return None, rejected_levels
+    return normalized_levels, rejected_levels
+
+
 def _normalize_motion_steps(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list) or len(value) < 2 or len(value) > 4:
+    normalized_steps, error = normalize_motion_steps(value)
+    if error:
+        raise ValueError(error)
+    if normalized_steps is None:
         raise ValueError("motion_steps_count_invalid")
+    return normalized_steps
+
+
+def normalize_motion_steps(
+    value: Any,
+) -> tuple[list[dict[str, Any]] | None, str]:
+    if not isinstance(value, list) or len(value) < 2 or len(value) > 4:
+        return None, "motion_steps_count_invalid"
     normalized_steps: list[dict[str, Any]] = []
     expected_axis_ids: set[str] | None = None
     for index, step in enumerate(value):
         if not isinstance(step, dict):
-            raise ValueError(f"motion_step_not_object:{index}")
-        if set(step) - {"axis_levels", "duration_weight"}:
-            raise ValueError(f"motion_step_forbidden_fields:{index}")
-        levels = _normalize_axis_levels(step.get("axis_levels"))
+            return None, f"motion_step_not_object:{index}"
+        unknown_fields = sorted(set(step) - {"axis_levels", "duration_weight"})
+        if unknown_fields:
+            return (
+                None,
+                f"motion_step_forbidden_fields:{index}:{','.join(unknown_fields)}",
+            )
+        levels, rejected = normalize_motion_axis_levels(step.get("axis_levels"))
+        if rejected:
+            return (
+                None,
+                f"motion_step_rejected_axis_levels:{index}:{','.join(rejected)}",
+            )
+        if not levels:
+            return None, f"motion_step_axis_levels_empty:{index}"
         axis_ids = set(levels)
         if expected_axis_ids is None:
             expected_axis_ids = axis_ids
         elif axis_ids != expected_axis_ids:
-            raise ValueError(f"motion_step_axis_set_mismatch:{index}")
+            return None, f"motion_step_axis_set_mismatch:{index}"
         duration_weight = step.get("duration_weight")
         if (
             isinstance(duration_weight, bool)
@@ -282,14 +321,14 @@ def _normalize_motion_steps(value: Any) -> list[dict[str, Any]]:
             or duration_weight < 1
             or duration_weight > 3
         ):
-            raise ValueError(f"motion_step_duration_weight_invalid:{index}")
+            return None, f"motion_step_duration_weight_invalid:{index}"
         normalized_steps.append(
             {
                 "axis_levels": levels,
                 "duration_weight": duration_weight,
             }
         )
-    return normalized_steps
+    return normalized_steps, ""
 
 
 def normalize_motion_intent_tags(value: Any) -> list[str]:

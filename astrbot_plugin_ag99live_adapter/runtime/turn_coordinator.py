@@ -99,7 +99,7 @@ from .message_utils import (
 from .image_diagnostics import (
     emit_image_input_diagnostics,
 )
-from .motion_lab import enqueue_motion_lab_raw_event
+from .motion_lab import record_motion_lab_observation
 from .output_segment import PendingOutputSegment
 
 class TurnCoordinator:
@@ -889,24 +889,22 @@ class TurnCoordinator:
             profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
         except Exception:  # noqa: BLE001
             profile = None
-        return enqueue_motion_lab_raw_event(
+        return record_motion_lab_observation(
             runtime_state,
-            {
-                "event_type": event_type,
-                "conversation_uid": getattr(self.session_state, "client_uid", None),
-                "turn_id": turn_id if turn_id is not None else self.session_state.current_turn_id,
-                "frontend_turn_id": frontend_turn_id,
-                "message_id": message_id,
-                "source_route": source_route,
-                "phase": phase,
-                "model_name": str((profile or {}).get("model_id") or "").strip(),
-                "profile_id": str((profile or {}).get("profile_id") or "").strip(),
-                "profile_revision": (profile or {}).get("revision"),
-                "user_text": user_text,
-                "assistant_text": assistant_text,
-                "payload_kind": payload_kind,
-                "raw": raw or {},
-            },
+            event_type=event_type,
+            conversation_uid=getattr(self.session_state, "client_uid", None),
+            turn_id=turn_id if turn_id is not None else self.session_state.current_turn_id,
+            frontend_turn_id=frontend_turn_id,
+            message_id=message_id,
+            source_route=source_route,
+            phase=phase,
+            model_name=str((profile or {}).get("model_id") or "").strip(),
+            profile_id=str((profile or {}).get("profile_id") or "").strip(),
+            profile_revision=(profile or {}).get("revision"),
+            user_text=user_text,
+            assistant_text=assistant_text,
+            payload_kind=payload_kind,
+            raw=raw or {},
         )
 
     def _motion_lab_chat_context(self) -> list[dict[str, str]]:

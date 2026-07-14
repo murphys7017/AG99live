@@ -8,6 +8,7 @@ import type {
 } from "../../playback-timeline/contracts.js";
 import type {
   PlaybackTimelineRuntime,
+  PlaybackTimelineRuntimeDeps,
 } from "../../playback-timeline/playbackTimelineRuntime.js";
 import {
   createAdapterAudioTimelineController,
@@ -86,6 +87,9 @@ export interface AdapterAudioRuntimeDeps {
     PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload>,
     "audioSink"
   >;
+  createPlaybackTimelineRuntime: (
+    deps: PlaybackTimelineRuntimeDeps<NormalizedMotionPayload>,
+  ) => PlaybackTimelineRuntime<NormalizedMotionPayload>;
   createLipSyncRuntime?: (
     callbacks: PlaybackTimelineLipSyncRuntimeCallbacks,
   ) => PlaybackTimelineLipSyncRuntime;
@@ -117,13 +121,9 @@ export interface AdapterAudioRuntime {
     turnId: string | null,
   ) => boolean;
   startSegmentJob: PlaybackTimelineRuntime<NormalizedMotionPayload>["startSegmentJob"];
+  rejectAudioBeforeStart: PlaybackTimelineRuntime<NormalizedMotionPayload>["rejectAudioBeforeStart"];
+  rejectMotionBeforeStart: PlaybackTimelineRuntime<NormalizedMotionPayload>["rejectMotionBeforeStart"];
   hasPendingAudioForTurn: (turnId: string | null) => boolean;
-  markAudioPlaybackTerminal: (
-    terminalState: Exclude<AudioPlaybackTerminalState, "idle">,
-    turnId: string | null,
-    reason?: string,
-    messageId?: string | null,
-  ) => void;
   resetAudioPlaybackTerminal: () => void;
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   stopAudioAndSettleAll: (reason: string) => void;
@@ -183,6 +183,7 @@ export function createAdapterAudioRuntime(
         releaseAudioForPlayback: releaseQueuedAudioForTimelinePlayback,
       },
     },
+    createPlaybackTimelineRuntime: deps.createPlaybackTimelineRuntime,
     createLipSyncRuntime: deps.createLipSyncRuntime,
     onAudioTimelineStarted: deps.onAudioTimelineStarted,
     onAudioTimelineDurationReady: deps.onAudioTimelineDurationReady,
@@ -192,6 +193,8 @@ export function createAdapterAudioRuntime(
   const { playbackTimelineRuntime } = timelineController;
   const {
     startSegmentJob,
+    rejectAudioBeforeStart,
+    rejectMotionBeforeStart,
     markMotionTimelineStarted,
     markMotionTimelineTerminal,
     ensureMotionTimelineSinkForSegment,
@@ -199,27 +202,6 @@ export function createAdapterAudioRuntime(
     findOpenAudioTimelineSegments,
     getTimelineSnapshotForSegment: getPlaybackTimelineSnapshotForSegment,
   } = playbackTimelineRuntime;
-
-  function markAudioPlaybackTerminal(
-    terminalState: Exclude<AudioPlaybackTerminalState, "idle">,
-    turnId: string | null,
-    reason = "",
-    messageId: string | null = null,
-  ): void {
-    deps.state.audioPlaybackTerminalState = terminalState;
-    deps.state.audioPlaybackTerminalTurnId = turnId;
-    deps.state.audioPlaybackTerminalReason = reason;
-
-    if (!messageId) {
-      return;
-    }
-    deps.getSessionStore()?.markAudioTerminal(
-      turnId,
-      terminalState,
-      messageId,
-      reason,
-    );
-  }
 
   function markAudioPlaybackTerminalState(
     terminalState: Exclude<AudioPlaybackTerminalState, "idle">,
@@ -290,7 +272,7 @@ export function createAdapterAudioRuntime(
   const audioSettlementController = createAdapterAudioSettlementController({
     pendingAudios: deps.state.pendingAudios,
     findOpenAudioSegments,
-    markAudioPlaybackTerminal,
+    rejectAudioBeforeStart,
     stopAudioPlayback,
     stopTimelinesForTurn: playbackTimelineRuntime.stopTimelinesForTurn,
     stopAllTimelines: playbackTimelineRuntime.stopAllTimelines,
@@ -312,8 +294,9 @@ export function createAdapterAudioRuntime(
     queueAudioForPlayback: audioReleaseController.queueAudioForPlayback,
     releaseAudioForPlayback,
     startSegmentJob,
+    rejectAudioBeforeStart,
+    rejectMotionBeforeStart,
     hasPendingAudioForTurn: audioSettlementController.hasPendingAudioForTurn,
-    markAudioPlaybackTerminal,
     resetAudioPlaybackTerminal,
     stopAudioAndSettleTurn: audioSettlementController.stopAudioAndSettleTurn,
     stopAudioAndSettleAll: audioSettlementController.stopAudioAndSettleAll,

@@ -32,7 +32,6 @@ function createPlaybackTimelineRuntime(
       markTextReleased: () => {},
       markAudioReleased: () => {},
       markMotionReleased: () => {},
-      markMotionFailed: () => {},
       markPhase: () => true,
     },
     textSink: {
@@ -50,7 +49,6 @@ function createPlaybackTimelineRuntime(
         markTextReleased: (...args) => ports.session.markTextReleased(...args),
         markAudioReleased: (...args) => ports.session.markAudioReleased(...args),
         markMotionReleased: (...args) => ports.session.markMotionReleased(...args),
-        markMotionFailed: (...args) => ports.session.markMotionFailed(...args),
         markPhase: (...args) => ports.session.markPhase(...args),
       },
       textSink: {
@@ -312,7 +310,6 @@ function createHarness(options: {
       markTextReleased: sessionStore.markTextReleased,
       markAudioReleased: sessionStore.markAudioReleased,
       markMotionReleased: sessionStore.markMotionReleased,
-      markMotionFailed: sessionStore.markMotionFailed,
       markPhase: sessionStore.markPhase,
     },
     textSink: adapter,
@@ -864,7 +861,6 @@ function testPlaybackTimelineRuntimeRejectsInvalidMotionTimestamp(): void {
       markTextReleased: sessionStore.markTextReleased,
       markAudioReleased: sessionStore.markAudioReleased,
       markMotionReleased: sessionStore.markMotionReleased,
-      markMotionFailed: sessionStore.markMotionFailed,
       markPhase: sessionStore.markPhase,
     },
     textSink: {
@@ -910,7 +906,6 @@ function testPlaybackTimelineRuntimeMarksMotionOnlyContext(): void {
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
       markMotionReleased: () => events.push("motion_released"),
-      markMotionFailed: () => events.push("motion_failed"),
       markPhase: (_turnId, phase) => {
         events.push(`phase:${phase}`);
         return true;
@@ -976,7 +971,6 @@ function testPlaybackTimelineRuntimePreparesAudioMotionTimeline(): void {
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
       markMotionReleased: () => events.push("motion_released"),
-      markMotionFailed: () => events.push("motion_failed"),
       markPhase: (_turnId, phase) => {
         events.push(`phase:${phase}`);
         return true;
@@ -1047,8 +1041,6 @@ function testPlaybackTimelineRuntimeDoesNotReleaseMotionWhenAudioReleaseFails():
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
       markMotionReleased: () => events.push("motion_released"),
-      markMotionFailed: (_turnId, _messageId, reason) =>
-        events.push(`motion_failed:${reason ?? ""}`),
       markPhase: (_turnId, phase) => {
         events.push(`phase:${phase}`);
         return true;
@@ -1115,8 +1107,6 @@ function testPlaybackTimelineRuntimeCreatesMotionOnlyTimelineBesideExistingAudio
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
       markMotionReleased: () => events.push("motion_released"),
-      markMotionFailed: (_turnId, _messageId, reason) =>
-        events.push(`motion_failed:${reason ?? ""}`),
       markPhase: (_turnId, phase) => {
         events.push(`phase:${phase}`);
         return true;
@@ -1186,7 +1176,6 @@ function testPlaybackTimelineRuntimeFailsSessionWhenTextQueueItemIsMissing(): vo
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
       markMotionReleased: () => events.push("motion_released"),
-      markMotionFailed: () => events.push("motion_failed"),
       markPhase: () => true,
     },
     textSink: {

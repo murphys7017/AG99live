@@ -45,6 +45,16 @@ export interface PlaybackTimelineSegmentExecutorTimelinePort {
     turnId: string | null,
     messageId: string,
   ): boolean | void;
+  rejectMotionBeforeStart(
+    turnId: string | null,
+    messageId: string,
+    reason: string,
+  ): void;
+  rejectAudioBeforeStart(
+    turnId: string | null,
+    messageId: string,
+    reason: string,
+  ): void;
 }
 
 export function executePlaybackTimelineSegmentJob<TMotionPayload>(
@@ -126,6 +136,11 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
     ) === true;
     if (!releasedAudio) {
       timeline.clearAudioSinkIfIdle(job.turnId, job.messageId);
+      timeline.rejectAudioBeforeStart(
+        job.turnId,
+        job.messageId,
+        `audio_release_queue_invariant_failed:${job.messageId}`,
+      );
       ports.session.markSessionFailed(
         job.turnId,
         `audio_release_queue_invariant_failed:${job.messageId}`,
@@ -195,7 +210,7 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
         interruptMotion,
       );
       if (!prepared) {
-        ports.session.markMotionFailed(
+        timeline.rejectMotionBeforeStart(
           job.turnId,
           job.messageId,
           "motion_only_timeline_unavailable",
@@ -214,7 +229,7 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
         interruptMotion,
       );
       if (!prepared) {
-        ports.session.markMotionFailed(
+        timeline.rejectMotionBeforeStart(
           job.turnId,
           job.messageId,
           "motion_timeline_unavailable",

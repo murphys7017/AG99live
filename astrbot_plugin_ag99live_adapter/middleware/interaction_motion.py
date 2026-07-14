@@ -56,7 +56,7 @@ from ..prompts.semantic_axis_prompt import (
     profile_prompt_axes,
     resolve_available_axis_levels,
 )
-from ..runtime.motion_lab import enqueue_motion_lab_raw_event
+from ..runtime.motion_lab import record_motion_lab_observation
 
 AG99LIVE_PLUGIN_ID = "astrbot_plugin_ag99live_adapter"
 AG99LIVE_MOTION_EFFECT_NAME = "ag99live.motion"
@@ -1752,7 +1752,7 @@ def _record_motion_lab_interaction_event(
         profile = None
     effect_calls = [_thaw_snapshot_value(item) for item in _extract_effect_calls_for_motion(event, view)]
     turn_id = identity.scheduled_frontend_turn_id
-    base_event = {
+    observation_context = {
         "conversation_uid": getattr(getattr(bundle.turn_coordinator, "session_state", None), "client_uid", None),
         "turn_id": turn_id,
         "frontend_turn_id": identity.event_frontend_turn_id,
@@ -1763,37 +1763,33 @@ def _record_motion_lab_interaction_event(
         "profile_revision": (profile or {}).get("revision"),
         "assistant_text": assistant_text,
     }
-    enqueue_motion_lab_raw_event(
+    record_motion_lab_observation(
         bundle.runtime_state,
-        {
-            **base_event,
-            "event_type": "motion.persona_effect_received",
-            "payload_kind": "effect_calls",
-            "raw": {
-                "effect_calls": effect_calls,
-                "effect_summary": _summarize_ag99live_motion_effect_arguments(event, view),
-                "view_metadata": _thaw_snapshot_value(getattr(view, "metadata", None)),
-                "reply_plan": _thaw_snapshot_value(get_interaction_reply_plan(event)),
-                "original_user_text": _call_event_method(event, "get_extra", "ag99live_original_message_str", ""),
-            },
+        **observation_context,
+        event_type="motion.persona_effect_received",
+        payload_kind="effect_calls",
+        raw={
+            "effect_calls": effect_calls,
+            "effect_summary": _summarize_ag99live_motion_effect_arguments(event, view),
+            "view_metadata": _thaw_snapshot_value(getattr(view, "metadata", None)),
+            "reply_plan": _thaw_snapshot_value(get_interaction_reply_plan(event)),
+            "original_user_text": _call_event_method(event, "get_extra", "ag99live_original_message_str", ""),
         },
     )
-    enqueue_motion_lab_raw_event(
+    record_motion_lab_observation(
         bundle.runtime_state,
-        {
-            **base_event,
-            "event_type": "motion.intent_resolved",
-            "payload_kind": (
-                str(motion_payload.get("schema_version") or "").strip()
-                if isinstance(motion_payload, dict)
-                else ""
-            ),
-            "raw": {
-                "motion_payload": motion_payload,
-                "motion_reason": motion_reason,
-                "effect_calls": effect_calls,
-                "assistant_text": assistant_text,
-            },
+        **observation_context,
+        event_type="motion.intent_resolved",
+        payload_kind=(
+            str(motion_payload.get("schema_version") or "").strip()
+            if isinstance(motion_payload, dict)
+            else ""
+        ),
+        raw={
+            "motion_payload": motion_payload,
+            "motion_reason": motion_reason,
+            "effect_calls": effect_calls,
+            "assistant_text": assistant_text,
         },
     )
 

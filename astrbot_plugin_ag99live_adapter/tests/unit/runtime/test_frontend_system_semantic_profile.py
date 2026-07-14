@@ -520,11 +520,11 @@ def test_frontend_system_handler_records_motion_lab_raw_event(monkeypatch) -> No
     sent_payloads: list[dict] = []
     persisted_callbacks: list[Callable[[], None]] = []
 
-    def fake_enqueue_motion_lab_raw_event(
+    def fake_record_motion_lab_observation(
         runtime_state_arg,
-        event: dict[str, object],
         *,
         on_persisted: Callable[[], None] | None = None,
+        **event,
     ) -> bool:
         assert runtime_state_arg is runtime_state
         recorded_events.append(event)
@@ -541,8 +541,8 @@ def test_frontend_system_handler_records_motion_lab_raw_event(monkeypatch) -> No
 
     monkeypatch.setattr(
         frontend_system_service,
-        "enqueue_motion_lab_raw_event",
-        fake_enqueue_motion_lab_raw_event,
+        "record_motion_lab_observation",
+        fake_record_motion_lab_observation,
     )
 
     async def run() -> None:
@@ -580,7 +580,7 @@ def test_frontend_system_handler_records_motion_lab_raw_event(monkeypatch) -> No
     assert sent_payloads[0]["turn_id"] == "turn-playback"
     assert sent_payloads[0]["payload"] == {"event_id": "event-playback-1"}
     assert len(recorded_events) == 1
-    assert recorded_events[0]["id"] == "event-playback-1"
+    assert recorded_events[0]["event_id"] == "event-playback-1"
     assert recorded_events[0]["event_type"] == "motion.playback_started"
     assert recorded_events[0]["turn_id"] == "turn-playback"
     assert recorded_events[0]["message_id"] == "segment-message-1"

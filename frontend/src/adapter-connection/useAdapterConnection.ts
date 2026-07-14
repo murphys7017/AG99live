@@ -37,6 +37,10 @@ import {
 import type {
   PlaybackTimelineSnapshot,
 } from "../playback-timeline/contracts.js";
+import type {
+  PlaybackTimelineRuntime,
+  PlaybackTimelineRuntimeDeps,
+} from "../playback-timeline/playbackTimelineRuntime.js";
 import {
   buildConnectFailureMessage,
   buildConnectionCandidates,
@@ -64,6 +68,7 @@ import {
 import type {
   PlaybackTimelineSegmentMotionSink,
 } from "../playback-timeline/segmentJob.js";
+import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
 import {
   type ModelSyncInstance,
 } from "./model-sync/useModelSync.js";
@@ -78,29 +83,16 @@ import { createAdapterInboundRuntime } from "./inbound/adapterInboundRuntime.js"
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 type AdapterHistory = ReturnType<typeof useAdapterHistory>;
 type AdapterMotionTuning = ReturnType<typeof useAdapterMotionTuning>;
-type AdapterAudioRuntimeInstance = ReturnType<typeof createAdapterAudioRuntime>;
-
-export interface AdapterPlaybackTimelinePort {
-  setAudioTimelineDurationReadyHandler: (
-    handler: ((
-      turnId: string | null,
-      messageId: string,
-      playbackTimeline: PlaybackTimelineSnapshot,
-    ) => void) | null,
-  ) => void;
-  setAudioTimelineStartedHandler: (
-    handler: ((
-      turnId: string | null,
-      messageId: string,
-      playbackTimeline: PlaybackTimelineSnapshot | null,
-    ) => void) | null,
-  ) => void;
-  startSegmentJob: AdapterAudioRuntimeInstance["startSegmentJob"];
-  getPlaybackTimelineSnapshotForSegment: AdapterAudioRuntimeInstance["getPlaybackTimelineSnapshotForSegment"];
-  ensureMotionTimelineSinkForSegment: AdapterAudioRuntimeInstance["ensureMotionTimelineSinkForSegment"];
-  markMotionTimelineStarted: AdapterAudioRuntimeInstance["markMotionTimelineStarted"];
-  markMotionTimelineTerminal: AdapterAudioRuntimeInstance["markMotionTimelineTerminal"];
-}
+type AudioTimelineStartedHandler = (
+  turnId: string | null,
+  messageId: string,
+  playbackTimeline: PlaybackTimelineSnapshot | null,
+) => void;
+type AudioTimelineDurationReadyHandler = (
+  turnId: string | null,
+  messageId: string,
+  playbackTimeline: PlaybackTimelineSnapshot,
+) => void;
 
 export interface AdapterConnectionInstance {
   readonly state: DeepReadonly<ReturnType<typeof createAdapterConnectionState>>;
@@ -138,7 +130,12 @@ export interface AdapterConnectionInstance {
     reason?: string,
   ) => Promise<boolean>;
   clearPlaybackGroupContext: (turnId: string | null) => void;
-  playbackTimeline: AdapterPlaybackTimelinePort;
+  setAudioTimelineDurationReadyHandler: (
+    handler: AudioTimelineDurationReadyHandler | null,
+  ) => void;
+  setAudioTimelineStartedHandler: (
+    handler: AudioTimelineStartedHandler | null,
+  ) => void;
   toggleMicrophoneCapture: ReturnType<typeof createAdapterMicrophoneRuntime>["toggleMicrophoneCapture"];
   setPttMode: ReturnType<typeof createAdapterMicrophoneRuntime>["setPttMode"];
   setPttKeyBinding: ReturnType<typeof createAdapterMicrophoneRuntime>["setPttKeyBinding"];
@@ -151,6 +148,9 @@ interface CreateAdapterConnectionOptions {
   sessionStore: SessionStore;
   modelSync: ModelSyncInstance;
   motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start" | "interrupt">;
+  createPlaybackTimelineRuntime: (
+    deps: PlaybackTimelineRuntimeDeps<NormalizedMotionPayload>,
+  ) => PlaybackTimelineRuntime<NormalizedMotionPayload>;
 }
 
 export function createAdapterConnection(
@@ -172,16 +172,8 @@ export function createAdapterConnection(
   let motionTuningAdapter: AdapterMotionTuning | null = null;
   let motionPreviewHandler: ((payload: unknown) => boolean) | null = null;
   let motionLabRawEventRecordedHandler: ((eventId: string) => void) | null = null;
-  let audioTimelineStartedHandler: ((
-    turnId: string | null,
-    messageId: string,
-    playbackTimeline: PlaybackTimelineSnapshot | null,
-  ) => void) | null = null;
-  let audioTimelineDurationReadyHandler: ((
-    turnId: string | null,
-    messageId: string,
-    playbackTimeline: PlaybackTimelineSnapshot,
-  ) => void) | null = null;
+  let audioTimelineStartedHandler: AudioTimelineStartedHandler | null = null;
+  let audioTimelineDurationReadyHandler: AudioTimelineDurationReadyHandler | null = null;
   let detachPttHookStatusListener: (() => void) | null = null;
 
   function buildMessageEnvelope<TPayload>(
@@ -259,7 +251,6 @@ export function createAdapterConnection(
         markTextReleased: sessionStore.markTextReleased,
         markAudioReleased: sessionStore.markAudioReleased,
         markMotionReleased: sessionStore.markMotionReleased,
-        markMotionFailed: sessionStore.markMotionFailed,
         markPhase: sessionStore.markPhase,
       },
       textSink: {
@@ -273,6 +264,7 @@ export function createAdapterConnection(
       },
       motionSink: options.motionSink,
     },
+    createPlaybackTimelineRuntime: options.createPlaybackTimelineRuntime,
     onAudioTimelineStarted: (turnId, messageId, playbackTimeline) =>
       audioTimelineStartedHandler?.(turnId, messageId, playbackTimeline),
     onAudioTimelineDurationReady: (turnId, messageId, playbackTimeline) =>
@@ -281,11 +273,6 @@ export function createAdapterConnection(
 
   const {
     queueAudioForPlayback,
-    startSegmentJob,
-    getPlaybackTimelineSnapshotForSegment,
-    ensureMotionTimelineSinkForSegment,
-    markMotionTimelineStarted,
-    markMotionTimelineTerminal,
     hasPendingAudioForTurn,
     resetAudioPlaybackTerminal,
     stopAudioAndSettleTurn,
@@ -671,16 +658,6 @@ export function createAdapterConnection(
     clearPlaybackGroup(outboundCtx, turnId);
   }
 
-  const playbackTimeline: AdapterPlaybackTimelinePort = {
-    setAudioTimelineDurationReadyHandler,
-    setAudioTimelineStartedHandler,
-    startSegmentJob,
-    getPlaybackTimelineSnapshotForSegment,
-    ensureMotionTimelineSinkForSegment,
-    markMotionTimelineStarted,
-    markMotionTimelineTerminal,
-  };
-
   historyAdapter = useAdapterHistory(
     state,
     {
@@ -740,7 +717,8 @@ export function createAdapterConnection(
     setMotionLabRawEventRecordedHandler,
     sendPlaybackFinishedForCurrentGroup: sendPlaybackFinished,
     clearPlaybackGroupContext,
-    playbackTimeline,
+    setAudioTimelineDurationReadyHandler,
+    setAudioTimelineStartedHandler,
     toggleMicrophoneCapture,
     setPttMode,
     setPttKeyBinding,
@@ -754,11 +732,13 @@ export function useAdapterConnection(
   sessionStore: SessionStore,
   modelSync: ModelSyncInstance,
   motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start" | "interrupt">,
+  createPlaybackTimelineRuntime: CreateAdapterConnectionOptions["createPlaybackTimelineRuntime"],
 ): AdapterConnectionInstance {
   const connection = createAdapterConnection({
     sessionStore,
     modelSync,
     motionSink,
+    createPlaybackTimelineRuntime,
   });
 
   onScopeDispose(() => {

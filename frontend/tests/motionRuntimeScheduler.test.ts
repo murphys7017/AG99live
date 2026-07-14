@@ -9,9 +9,6 @@ import {
   createMotionRuntimeScheduler,
   type StartPayloadContext,
 } from "../src/model-engine/runtime/motionRuntimeScheduler.js";
-import type {
-  ModelEnginePlaybackSession,
-} from "../src/model-engine/runtime/contracts.js";
 import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
 import type { MotionPlaybackClockContext } from "../src/model-engine/runtime/playbackClock.js";
 
@@ -94,7 +91,24 @@ function buildTimelineSnapshot(overrides: Partial<MotionPlaybackClockContext> = 
   };
 }
 
-function buildSession(audioTerminal: "idle" | "completed" = "idle"): ModelEnginePlaybackSession {
+interface TestPlaybackSession {
+  id: string;
+  turnId: string | null;
+  segmentOrder: string[];
+  segments: Map<string, {
+    messageId: string;
+    turnId: string | null;
+    audio: {
+      released: boolean;
+      started: boolean;
+      startedAtMs: number | null;
+      durationMs: number | null;
+      terminal: "idle" | "completed";
+    };
+  }>;
+}
+
+function buildSession(audioTerminal: "idle" | "completed" = "idle"): TestPlaybackSession {
   return {
     id: "turn:turn-1",
     turnId: "turn-1",
@@ -118,16 +132,12 @@ function buildSession(audioTerminal: "idle" | "completed" = "idle"): ModelEngine
   };
 }
 
-function createHarness(session: ModelEnginePlaybackSession) {
+function createHarness(session: TestPlaybackSession) {
   const started: StartPayloadContext[] = [];
   const failed: StartPayloadContext[] = [];
   const scheduler = createMotionRuntimeScheduler(
     {
-      getCurrentTurnId: () => "turn-1",
-      sessionStore: {
-        getActiveSession: () => session,
-        getSessionByTurnId: () => session,
-      },
+      getCurrentTurnId: () => session.turnId,
     },
     {
       onPendingStateChanged: () => {},
@@ -144,7 +154,7 @@ function createHarness(session: ModelEnginePlaybackSession) {
   return { scheduler, started, failed };
 }
 
-function setAudioWaiting(session: ModelEnginePlaybackSession): void {
+function setAudioWaiting(session: TestPlaybackSession): void {
   const segment = session.segments.get("msg-1");
   if (!segment) {
     throw new Error("missing test segment");
@@ -352,36 +362,10 @@ function testMotionOnlyTimelineCanStartFromSyntheticClock(): void {
 
 function testSameMessageIdDifferentTurnsStartByCompositeIdentity(): void {
   resetTimers();
-  const session = buildSession("completed");
   const started: StartPayloadContext[] = [];
   const scheduler = createMotionRuntimeScheduler(
     {
       getCurrentTurnId: () => "turn-1",
-      sessionStore: {
-        getActiveSession: () => session,
-        getSessionByTurnId: (turnId) => ({
-          ...session,
-          id: `turn:${turnId ?? ""}`,
-          turnId,
-          segmentOrder: ["shared-msg"],
-          segments: new Map([
-            [
-              "shared-msg",
-              {
-                messageId: "shared-msg",
-                turnId,
-                audio: {
-                  released: true,
-                  started: false,
-                  startedAtMs: null,
-                  durationMs: null,
-                  terminal: "idle",
-                },
-              },
-            ],
-          ]),
-        }),
-      },
     },
     {
       onPendingStateChanged: () => {},
@@ -425,15 +409,10 @@ function testSameMessageIdDifferentTurnsStartByCompositeIdentity(): void {
 
 function testCompositeIdentityDoesNotCollideOnDelimiterText(): void {
   resetTimers();
-  const session = buildSession("completed");
   const started: StartPayloadContext[] = [];
   const scheduler = createMotionRuntimeScheduler(
     {
       getCurrentTurnId: () => "a::b",
-      sessionStore: {
-        getActiveSession: () => session,
-        getSessionByTurnId: () => session,
-      },
     },
     {
       onPendingStateChanged: () => {},
@@ -474,57 +453,10 @@ function testCompositeIdentityDoesNotCollideOnDelimiterText(): void {
 
 function testPlaybackTimelineRequiresMatchingTurnWhenMessageIdIsShared(): void {
   resetTimers();
-  const activeSession: ModelEnginePlaybackSession = {
-    id: "turn:turn-active",
-    turnId: "turn-active",
-    segmentOrder: ["shared-msg"],
-    segments: new Map([
-      [
-        "shared-msg",
-        {
-          messageId: "shared-msg",
-          turnId: "turn-active",
-          audio: {
-            released: true,
-            started: true,
-            startedAtMs: 800,
-            durationMs: 2000,
-            terminal: "idle",
-          },
-        },
-      ],
-    ]),
-  };
-  const targetSession: ModelEnginePlaybackSession = {
-    id: "turn:turn-target",
-    turnId: "turn-target",
-    segmentOrder: ["shared-msg"],
-    segments: new Map([
-      [
-        "shared-msg",
-        {
-          messageId: "shared-msg",
-          turnId: "turn-target",
-          audio: {
-            released: true,
-            started: false,
-            startedAtMs: null,
-            durationMs: null,
-            terminal: "idle",
-          },
-        },
-      ],
-    ]),
-  };
   const started: StartPayloadContext[] = [];
   const scheduler = createMotionRuntimeScheduler(
     {
       getCurrentTurnId: () => "turn-target",
-      sessionStore: {
-        getActiveSession: () => activeSession,
-        getSessionByTurnId: (turnId) =>
-          turnId === "turn-target" ? targetSession : activeSession,
-      },
     },
     {
       onPendingStateChanged: () => {},

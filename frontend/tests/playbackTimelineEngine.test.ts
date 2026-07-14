@@ -37,7 +37,6 @@ function createPlaybackTimelineRuntime(
         markTextReleased: (...args) => ports.session.markTextReleased(...args),
         markAudioReleased: (...args) => ports.session.markAudioReleased(...args),
         markMotionReleased: (...args) => ports.session.markMotionReleased(...args),
-        markMotionFailed: (...args) => ports.session.markMotionFailed(...args),
         markPhase: (...args) => ports.session.markPhase(...args),
       },
       textSink: {
@@ -438,8 +437,6 @@ function createNoopSegmentExecutionPorts(
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
       markMotionReleased: () => events.push("motion_released"),
-      markMotionFailed: (_turnId, _messageId, reason) =>
-        events.push(`motion_failed:${reason ?? ""}`),
       markPhase: (_turnId, phase) => {
         events.push(`phase:${phase}`);
         return true;
@@ -687,7 +684,6 @@ function testPlaybackTimelineRuntimeStartsSegmentJobThroughTimelineEntry(): void
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
       markMotionReleased: () => events.push("motion_released"),
-      markMotionFailed: () => events.push("motion_failed"),
       markPhase: (_turnId, phase) => {
         events.push(`phase:${phase}`);
         return true;
@@ -770,7 +766,6 @@ function testAudioTimelineOwnsCanonicalTextUntilRealPlaybackStarts(): void {
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
       markMotionReleased: () => events.push("motion_released"),
-      markMotionFailed: () => events.push("motion_failed"),
       markPhase: () => true,
     },
     textSink: {
@@ -863,7 +858,6 @@ function testSubtitleReleaseFailureAtomicallyFailsPlaybackSegment(): void {
         markTextReleased: () => events.push("text_released"),
         markAudioReleased: () => events.push("audio_released"),
         markMotionReleased: () => events.push("motion_released"),
-        markMotionFailed: () => events.push("motion_failed"),
         markPhase: () => true,
     },
     textSink: {
@@ -939,7 +933,6 @@ function testAudioFailureBeforeStartFailsDeferredCanonicalText(): void {
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
       markMotionReleased: () => events.push("motion_released"),
-      markMotionFailed: () => events.push("motion_failed"),
       markPhase: () => true,
     },
     textSink: {
@@ -1000,7 +993,6 @@ function testAudioFailureTerminatesAndInterruptsOwnedMotion(): void {
       markTextReleased: () => events.push("text_released"),
       markAudioReleased: () => events.push("audio_released"),
       markMotionReleased: () => events.push("motion_released"),
-      markMotionFailed: () => events.push("motion_failed"),
       markPhase: () => true,
     },
     textSink: {
@@ -1324,6 +1316,52 @@ function testPlaybackTimelineRuntimeWritesMotionSessionLifecycle(): void {
   ]);
 }
 
+function testPlaybackTimelineRuntimeRejectsMotionBeforeStartExactlyOnce(): void {
+  const failures: string[] = [];
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => null,
+    motionSession: {
+      markMotionStarted: () => {},
+      markMotionCompleted: () => {},
+      markMotionFailed: (_turnId, messageId, reason) => {
+        failures.push(`${messageId}:${reason ?? ""}`);
+      },
+    },
+  });
+
+  runtime.rejectMotionBeforeStart("turn-rejected", "msg-rejected", "first_failure");
+  runtime.rejectMotionBeforeStart("turn-rejected", "msg-rejected", "late_failure");
+
+  assert.deepEqual(failures, ["msg-rejected:first_failure"]);
+}
+
+function testPlaybackTimelineRuntimeRejectsAudioBeforeStartExactlyOnce(): void {
+  const failures: string[] = [];
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => null,
+    audioSession: {
+      markAudioStarted: () => {},
+      markAudioDuration: () => {},
+      markAudioTerminal: (_turnId, terminal, messageId, reason) => {
+        failures.push(`${terminal}:${messageId}:${reason ?? ""}`);
+      },
+    },
+  });
+
+  runtime.rejectAudioBeforeStart(
+    "turn-audio-rejected",
+    "msg-audio-rejected",
+    "first_failure",
+  );
+  runtime.rejectAudioBeforeStart(
+    "turn-audio-rejected",
+    "msg-audio-rejected",
+    "late_failure",
+  );
+
+  assert.deepEqual(failures, ["failed:msg-audio-rejected:first_failure"]);
+}
+
 function testTerminalSinkEventsAreStable(): void {
   const engine = createPlaybackTimelineEngine({ now: () => 0 });
   engine.load(
@@ -1605,6 +1643,8 @@ function run(): void {
   testPlaybackTimelineRuntimeFindsOpenAudioSegments();
   testPlaybackTimelineRuntimeDoesNotRewriteAudioSessionTerminal();
   testPlaybackTimelineRuntimeWritesMotionSessionLifecycle();
+  testPlaybackTimelineRuntimeRejectsMotionBeforeStartExactlyOnce();
+  testPlaybackTimelineRuntimeRejectsAudioBeforeStartExactlyOnce();
   testTerminalSinkEventsAreStable();
   testClosedTimelineHistoryIsBounded();
   testAudioMotionBridgeStartsFromCurrentTimeline();

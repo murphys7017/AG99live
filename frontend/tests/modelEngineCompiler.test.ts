@@ -2240,7 +2240,7 @@ function testSpeechOnlyPlaybackUsesTimelineDuration(): void {
     },
     playCatalogMotion: () => false,
     stopPlan: () => {},
-    markMotionTimelineTerminal: () => {},
+    onMotionRejected: () => {},
     canStartSpeechOnlyMotion: () => true,
     getCurrentTurnId: () => "turn-speech",
     onPlanStarted: ignorePlanStarted,
@@ -2295,7 +2295,7 @@ function testSpeechOnlyPlaybackCanBeSuppressedForFailedMotionSegment(): void {
     },
     playCatalogMotion: () => false,
     stopPlan: () => {},
-    markMotionTimelineTerminal: () => {},
+    onMotionRejected: () => {},
     getCurrentTurnId: () => "turn-speech",
     canStartSpeechOnlyMotion: () => false,
     onPlanStarted: ignorePlanStarted,
@@ -2323,7 +2323,7 @@ function testSpeechOnlyPreparationIsNotApplicableWithoutModelCapability(): void 
     playPlan: () => false,
     playCatalogMotion: () => false,
     stopPlan: () => {},
-    markMotionTimelineTerminal: () => {},
+    onMotionRejected: () => {},
     getCurrentTurnId: () => "turn-no-speech-profile",
     canStartSpeechOnlyMotion: () => true,
     onPlanStarted: ignorePlanStarted,
@@ -2361,7 +2361,7 @@ function testSegmentInterruptDoesNotStopNewerMotionOwner(): void {
     },
     playCatalogMotion: () => false,
     stopPlan: (reason) => stopped.push(reason ?? ""),
-    markMotionTimelineTerminal: () => {},
+    onMotionRejected: () => {},
     canStartSpeechOnlyMotion: () => true,
     getCurrentTurnId: () => "turn-b",
     onPlanStarted: ignorePlanStarted,
@@ -2405,7 +2405,7 @@ function testSegmentInterruptRemovesItsPendingPayload(): void {
     playPlan: () => false,
     playCatalogMotion: () => false,
     stopPlan: () => assert.fail("pending motion must not stop an unrelated active player"),
-    markMotionTimelineTerminal: () => {},
+    onMotionRejected: () => {},
     canStartSpeechOnlyMotion: () => false,
     getCurrentTurnId: () => "turn-pending",
     onPlanStarted: ignorePlanStarted,
@@ -2432,7 +2432,7 @@ function testModelEngineInstancesKeepIndependentRuntimeState(): void {
     playPlan: () => false,
     playCatalogMotion: () => false,
     stopPlan: () => {},
-    markMotionTimelineTerminal: () => {},
+    onMotionRejected: () => {},
     canStartSpeechOnlyMotion: () => false,
     getCurrentTurnId: () => "turn-isolated",
     onPlanStarted: ignorePlanStarted,
@@ -2477,8 +2477,8 @@ function testTimelineTerminalIsMarkedWhenQueuedMotionFails(): void {
     getCurrentTurnId: () => "turn-failed-timeline",
     canStartSpeechOnlyMotion: () => false,
     onPlanStarted: ignorePlanStarted,
-    markMotionTimelineTerminal: (turnId, messageId, terminal, reason) => {
-      failures.push({ turnId, messageId, terminal, reason });
+    onMotionRejected: ({ turnId, messageId, reason }) => {
+      failures.push({ turnId, messageId, terminal: "failed", reason });
     },
   });
 

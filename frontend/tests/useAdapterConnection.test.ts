@@ -6,6 +6,9 @@ import { effectScope } from "vue";
 import { useAdapterConnection } from "../src/adapter-connection/useAdapterConnection.js";
 import { createModelSync } from "../src/adapter-connection/model-sync/useModelSync.js";
 import { buildPendingPlaybackKey } from "../src/playback-timeline/playbackReleaseQueue.js";
+import { createPlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
+import type { PlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
+import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
 import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
 
 interface ListenerMap {
@@ -256,6 +259,7 @@ function createConnectedAdapter() {
   const sessionStore = useTurnPlaybackSessionStore();
   const modelSync = createModelSync();
   const scope = effectScope();
+  let playbackTimeline: PlaybackTimelineRuntime<NormalizedMotionPayload> | null = null;
   const adapter = scope.run(() => useAdapterConnection(
     sessionStore,
     modelSync,
@@ -263,10 +267,18 @@ function createConnectedAdapter() {
       start: () => true,
       interrupt: () => {},
     },
+    (deps) => {
+      playbackTimeline = createPlaybackTimelineRuntime(deps);
+      return playbackTimeline;
+    },
   ));
   if (!adapter) {
     throw new Error("expected adapter instance");
   }
+  if (!playbackTimeline) {
+    throw new Error("expected playback timeline runtime");
+  }
+  playbackTimelineByAdapter.set(adapter, playbackTimeline);
   adapter.connect();
   const socket = FakeWebSocket.instances[0];
   if (!socket) {
@@ -319,6 +331,11 @@ function sendSynthFinished(socket: FakeWebSocket, turnId: string | null, message
     payload: {},
   }));
 }
+
+const playbackTimelineByAdapter = new WeakMap<
+  object,
+  PlaybackTimelineRuntime<NormalizedMotionPayload>
+>();
 
 function sendOutputText(
   socket: FakeWebSocket,
@@ -420,7 +437,11 @@ function releaseAudioSegment(
   messageId: string,
   turnId: string | null,
 ): boolean {
-  return adapter.playbackTimeline.startSegmentJob({
+  const playbackTimeline = playbackTimelineByAdapter.get(adapter);
+  if (!playbackTimeline) {
+    throw new Error("missing test playback timeline runtime");
+  }
+  return playbackTimeline.startSegmentJob({
     messageId,
     turnId,
     reason: "test_audio_release",
@@ -662,7 +683,7 @@ async function testAudioTimelineStartedHandlerReceivesStartedSnapshot(): Promise
       clockSource: string | undefined;
       durationMs: number | null | undefined;
     }> = [];
-    adapter.playbackTimeline.setAudioTimelineStartedHandler((turnId, messageId, playbackTimeline) => {
+    adapter.setAudioTimelineStartedHandler((turnId, messageId, playbackTimeline) => {
       started.push({
         turnId,
         messageId,

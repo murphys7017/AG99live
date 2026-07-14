@@ -33,6 +33,7 @@ import { useAmbientMotionPreference } from "./useAmbientMotionPreference";
 import {
   configurePlaybackTimelineMotionRuntime,
   createPlaybackTimelineMotionRunTracker,
+  type PlaybackTimelineWiringPort,
 } from "./playbackTimelineWiring";
 import { useDesktopContextMenu } from "./useDesktopContextMenu";
 import { createDesktopRuntimeCommandHandler } from "../desktop-bridge/useDesktopRuntimeCommandHandler";
@@ -47,6 +48,8 @@ import {
 import type {
   PlaybackTimelineSegmentMotionSink,
 } from "../playback-timeline/segmentJob";
+import { createPlaybackTimelineRuntime } from "../playback-timeline/playbackTimelineRuntime";
+import type { PlaybackTimelineRuntime } from "../playback-timeline/playbackTimelineRuntime";
 import type { NormalizedMotionPayload } from "../model-engine/contracts";
 
 export interface PetDesktopRuntime {
@@ -79,12 +82,31 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       motionTimelineSinkTarget.interrupt(turnId, messageId, reason);
     },
   };
+  const playbackTimelineHolder: {
+    runtime: PlaybackTimelineRuntime<NormalizedMotionPayload> | null;
+  } = { runtime: null };
   const adapter = useAdapterConnection(
     sessionStore,
     modelSync,
     requiredMotionTimelineSink,
+    (deps) => {
+      if (playbackTimelineHolder.runtime) {
+        throw new Error("PlaybackTimelineRuntime may only be created once.");
+      }
+      const runtime = createPlaybackTimelineRuntime(deps);
+      playbackTimelineHolder.runtime = runtime;
+      return runtime;
+    },
   );
-  const playbackTimeline = adapter.playbackTimeline;
+  const appPlaybackTimelineRuntime = playbackTimelineHolder.runtime;
+  if (!appPlaybackTimelineRuntime) {
+    throw new Error("Adapter did not request the app-owned PlaybackTimelineRuntime.");
+  }
+  const playbackTimeline: PlaybackTimelineWiringPort = {
+    ...appPlaybackTimelineRuntime,
+    setAudioTimelineDurationReadyHandler: adapter.setAudioTimelineDurationReadyHandler,
+    setAudioTimelineStartedHandler: adapter.setAudioTimelineStartedHandler,
+  };
   const bridge = useDesktopBridge();
   const motionPlayer = usePreviewMotionPlayer();
   const motionEngineSettings = reactive(
@@ -134,7 +156,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     getPlaybackTimelineSnapshot: (
       turnId,
       messageId,
-    ) => playbackTimeline.getPlaybackTimelineSnapshotForSegment(turnId, messageId),
+    ) => playbackTimeline.getTimelineSnapshotForSegment(turnId, messageId),
     onMotionLabRawEvent: (payload, turnId) => {
       sendMotionLabEvent(payload, turnId ?? null);
     },
@@ -161,7 +183,8 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       },
     }),
     stopPlan: (reason) => motionPlayer.stopPlan(reason),
-    markMotionTimelineTerminal: playbackTimeline.markMotionTimelineTerminal,
+    onMotionRejected: ({ turnId, messageId, reason }) =>
+      playbackTimeline.rejectMotionBeforeStart(turnId, messageId, reason),
     canStartSpeechOnlyMotion: (turnId, messageId) => {
       const session = sessionStore.getSession(turnId);
       const segment = session?.segments.get(messageId);
@@ -202,12 +225,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
           queuedDelayMs: event.queuedDelayMs,
         },
       }, event.turnId);
-    },
-    sessionStore: {
-      getActiveSession: () => sessionStore.getActiveSession(),
-      getSessionByTurnId: (turnId) => sessionStore.getSession(turnId),
-      markMotionAbsent: (turnId, messageId) => sessionStore.markMotionAbsent(turnId, messageId),
-      markMotionFailed: (turnId, messageId, reason) => sessionStore.markMotionFailed(turnId, messageId, reason),
     },
   });
   const playbackTimelineMotionRuntime = configurePlaybackTimelineMotionRuntime({
@@ -253,6 +270,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     sessionStore,
     timelineRuntime: {
       startSegmentJob: playbackTimeline.startSegmentJob,
+      rejectMotionBeforeStart: playbackTimeline.rejectMotionBeforeStart,
     },
     motionPayload: {
       notifyCurrentTurnChanged: motionTimelineSink.notifyCurrentTurnChanged,

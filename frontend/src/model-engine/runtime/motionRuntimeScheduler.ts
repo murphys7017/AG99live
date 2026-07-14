@@ -259,10 +259,7 @@ export function createMotionRuntimeScheduler(
         return;
       }
 
-      const activeSession = dependencies.sessionStore?.getActiveSession();
-      const currentTurnId = normalizeTurnId(
-        activeSession?.turnId ?? dependencies.getCurrentTurnId(),
-      );
+      const currentTurnId = normalizeTurnId(dependencies.getCurrentTurnId());
 
       if (currentTurnId && currentTurnId !== normalizedTurnId) {
         dropPendingPayload(entry, "stale_turn_dropped");

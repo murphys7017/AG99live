@@ -36,7 +36,7 @@ export function useTurnPlaybackOrchestrator(
         && !segment.motion.failed
         && !segment.motion.released
       ) {
-        options.sessionStore.markMotionFailed(
+        options.timelineRuntime.rejectMotionBeforeStart(
           segment.turnId,
           segment.messageId,
           `audio_failed_before_motion_release:${segment.audio.reason || "audio_failed"}`,
@@ -65,7 +65,7 @@ export function useTurnPlaybackOrchestrator(
           || receivedAtMs < 0
         )
       ) {
-        options.sessionStore.markMotionFailed(
+        options.timelineRuntime.rejectMotionBeforeStart(
           segment.turnId,
           segment.messageId,
           "motion_received_at_missing",

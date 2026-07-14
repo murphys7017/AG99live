@@ -35,7 +35,7 @@ from ..protocol import (
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE,
 )
-from ..runtime.motion_lab import enqueue_motion_lab_raw_event
+from ..runtime.motion_lab import record_motion_lab_observation
 
 SUPPORTED_SYSTEM_MESSAGE_TYPES = {
     TYPE_SYSTEM_BACKGROUND_LIST_REQUEST,
@@ -165,26 +165,24 @@ class FrontendSystemCommandHandler:
             await send_json(build_system_heartbeat_ack())
         elif msg_type == TYPE_SYSTEM_MOTION_LAB_RAW_EVENT:
             event_id = str(payload.get("event_id") or "").strip()
-            accepted = enqueue_motion_lab_raw_event(
+            accepted = record_motion_lab_observation(
                 self._runtime_state,
-                {
-                    "id": event_id,
-                    "event_type": payload.get("event_type"),
-                    "turn_id": message.turn_id,
-                    "frontend_turn_id": message.turn_id,
-                    "message_id": str(payload.get("message_id") or "").strip()
-                    or message.message_id,
-                    "source_route": payload.get("source_route") or "frontend",
-                    "phase": payload.get("phase") or "",
-                    "model_name": payload.get("model_name") or "",
-                    "profile_id": payload.get("profile_id") or "",
-                    "profile_revision": payload.get("profile_revision"),
-                    "assistant_text": payload.get("assistant_text") or "",
-                    "payload_kind": payload.get("payload_kind") or "",
-                    "raw": {
-                        "frontend_payload": payload,
-                        "envelope": message.raw,
-                    },
+                event_id=event_id,
+                event_type=payload.get("event_type"),
+                turn_id=message.turn_id,
+                frontend_turn_id=message.turn_id,
+                message_id=str(payload.get("message_id") or "").strip()
+                or message.message_id,
+                source_route=payload.get("source_route") or "frontend",
+                phase=payload.get("phase") or "",
+                model_name=payload.get("model_name") or "",
+                profile_id=payload.get("profile_id") or "",
+                profile_revision=payload.get("profile_revision"),
+                assistant_text=payload.get("assistant_text") or "",
+                payload_kind=payload.get("payload_kind") or "",
+                raw={
+                    "frontend_payload": payload,
+                    "envelope": message.raw,
                 },
                 on_persisted=lambda: self._schedule_motion_lab_persisted_ack(
                     event_id=event_id,

@@ -11,11 +11,10 @@ export interface AudioSettlementSegment {
 export interface AdapterAudioSettlementControllerDeps {
   pendingAudios: Map<string, PendingAudioItem>;
   findOpenAudioSegments: () => AudioSettlementSegment[];
-  markAudioPlaybackTerminal: (
-    terminalState: "completed" | "failed" | "absent",
+  rejectAudioBeforeStart: (
     turnId: string | null,
-    reason?: string,
-    messageId?: string | null,
+    messageId: string,
+    reason: string,
   ) => void;
   stopAudioPlayback: (
     turnId: string | null,
@@ -61,11 +60,10 @@ export function createAdapterAudioSettlementController(
   function stopAudioAndSettleAll(reason: string): void {
     const activeSegments = deps.findOpenAudioSegments();
     for (const [queueKey, item] of Array.from(deps.pendingAudios.entries())) {
-      deps.markAudioPlaybackTerminal(
-        "failed",
+      deps.rejectAudioBeforeStart(
         item.turnId,
-        reason,
         item.messageId,
+        reason,
       );
       deps.pendingAudios.delete(queueKey);
     }
@@ -92,11 +90,10 @@ export function createAdapterAudioSettlementController(
       if (!matchesTurn(item.turnId, turnId)) {
         continue;
       }
-      deps.markAudioPlaybackTerminal(
-        "failed",
+      deps.rejectAudioBeforeStart(
         item.turnId,
-        reason,
         item.messageId,
+        reason,
       );
       deps.pendingAudios.delete(queueKey);
     }

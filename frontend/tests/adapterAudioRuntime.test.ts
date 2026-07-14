@@ -15,11 +15,12 @@ import type { AdapterAudioRuntimeSessionStore } from "../src/adapter-connection/
 import type {
   PlaybackTimelineSegmentExecutionPorts,
 } from "../src/playback-timeline/segmentJob.js";
+import { createPlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
 
 function createAdapterAudioRuntime(
   deps: Omit<
     Parameters<typeof createStrictAdapterAudioRuntime>[0],
-    "segmentExecution"
+    "segmentExecution" | "createPlaybackTimelineRuntime"
   >,
 ) {
   let ports: Omit<
@@ -28,13 +29,13 @@ function createAdapterAudioRuntime(
   > = createNoopSegmentExecutionPorts();
   const runtime = createStrictAdapterAudioRuntime({
     ...deps,
+    createPlaybackTimelineRuntime,
     segmentExecution: {
       session: {
         markSessionFailed: (...args) => ports.session.markSessionFailed(...args),
         markTextReleased: (...args) => ports.session.markTextReleased(...args),
         markAudioReleased: (...args) => ports.session.markAudioReleased(...args),
         markMotionReleased: (...args) => ports.session.markMotionReleased(...args),
-        markMotionFailed: (...args) => ports.session.markMotionFailed(...args),
         markPhase: (...args) => ports.session.markPhase(...args),
       },
       textSink: {
@@ -183,7 +184,6 @@ function createNoopSegmentExecutionPorts(): Omit<
       markTextReleased: () => {},
       markAudioReleased: () => {},
       markMotionReleased: () => {},
-      markMotionFailed: () => {},
       markPhase: () => true,
     },
     textSink: {
@@ -631,7 +631,6 @@ async function testTimelineAudioReleaseMarksSessionReleasedOnce(): Promise<void>
         releasedEvents.push({ turnId, messageId });
       },
       markMotionReleased: () => {},
-      markMotionFailed: () => {},
       markPhase: () => true,
     },
     textSink: {

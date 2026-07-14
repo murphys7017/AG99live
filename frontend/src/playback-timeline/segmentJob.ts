@@ -30,11 +30,6 @@ export interface PlaybackTimelineSegmentSessionPort {
   markTextReleased(turnId: string | null, messageId: string): void;
   markAudioReleased(turnId: string | null, messageId: string): void;
   markMotionReleased(turnId: string | null, messageId: string): void;
-  markMotionFailed(
-    turnId: string | null,
-    messageId: string,
-    reason?: string,
-  ): void;
   markPhase(turnId: string | null, phase: "playing"): boolean;
 }
 
@@ -79,6 +74,11 @@ export interface PlaybackTimelineSegmentStartPort<
   startSegmentJob(
     job: PlaybackTimelineSegmentJob<TMotionPayload>,
   ): PlaybackTimelineSegmentExecutionResult;
+  rejectMotionBeforeStart(
+    turnId: string | null,
+    messageId: string,
+    reason: string,
+  ): void;
 }
 
 export interface PlaybackTimelineSegmentRunnerPort<

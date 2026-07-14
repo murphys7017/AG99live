@@ -1,6 +1,7 @@
-import type { AdapterPlaybackTimelinePort } from "../adapter-connection/useAdapterConnection.js";
+import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
 import type { MotionTimelinePreparationResult } from "../model-engine/runtime/playbackClock.js";
 import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
+import type { PlaybackTimelineRuntime } from "../playback-timeline/playbackTimelineRuntime.js";
 import type { PlaybackTimelineMotionSink } from "../playback-timeline/motionTypes.js";
 import {
   createModelEngineMotionTimelineSink,
@@ -12,6 +13,23 @@ import {
   createAudioMotionTimelineBridge,
   type AudioMotionTimelineBridge,
 } from "../playback-timeline/audioMotionStartBridge.js";
+
+export type PlaybackTimelineWiringPort = PlaybackTimelineRuntime<NormalizedMotionPayload> & {
+  setAudioTimelineDurationReadyHandler: (
+    handler: ((
+      turnId: string | null,
+      messageId: string,
+      playbackTimeline: PlaybackTimelineSnapshot,
+    ) => void) | null,
+  ) => void;
+  setAudioTimelineStartedHandler: (
+    handler: ((
+      turnId: string | null,
+      messageId: string,
+      playbackTimeline: PlaybackTimelineSnapshot | null,
+    ) => void) | null,
+  ) => void;
+};
 export interface PlaybackTimelineMotionEnginePort {
   ingestNormalizedPayload: PlaybackTimelineMotionSink["start"];
   notifyCurrentTurnChanged(turnId: string | null): void;
@@ -25,7 +43,7 @@ export interface PlaybackTimelineMotionEnginePort {
 }
 
 export function createPlaybackTimelineMotionRunTracker(
-  playbackTimeline: AdapterPlaybackTimelinePort,
+  playbackTimeline: PlaybackTimelineWiringPort,
 ): MotionTimelineRunTracker {
   return createMotionTimelineRunTracker({
     markMotionTimelineStarted: playbackTimeline.markMotionTimelineStarted,
@@ -34,7 +52,7 @@ export function createPlaybackTimelineMotionRunTracker(
 }
 
 export function configurePlaybackTimelineMotionRuntime(options: {
-  playbackTimeline: AdapterPlaybackTimelinePort;
+  playbackTimeline: PlaybackTimelineWiringPort;
   motionEngine: PlaybackTimelineMotionEnginePort;
   onMissingPlaybackTimeline?: (
     turnId: string,
@@ -52,7 +70,7 @@ export function configurePlaybackTimelineMotionRuntime(options: {
 
   const audioMotionBridge: AudioMotionTimelineBridge =
     createAudioMotionTimelineBridge({
-      getPlaybackTimelineSnapshotForSegment: playbackTimeline.getPlaybackTimelineSnapshotForSegment,
+      getPlaybackTimelineSnapshotForSegment: playbackTimeline.getTimelineSnapshotForSegment,
       onMissingPlaybackTimeline,
       handlePlaybackTimelineStarted: (_turnId, _messageId, preparedTimeline) =>
         motionEngine.handlePlaybackTimelineStarted(
@@ -106,7 +124,7 @@ export function configurePlaybackTimelineMotionRuntime(options: {
 
   const motionTimelineSink = createModelEngineMotionTimelineSink({
     motionEngine,
-    getPlaybackTimelineSnapshotForSegment: playbackTimeline.getPlaybackTimelineSnapshotForSegment,
+    getPlaybackTimelineSnapshotForSegment: playbackTimeline.getTimelineSnapshotForSegment,
     markMotionTimelineTerminal: playbackTimeline.markMotionTimelineTerminal,
   });
 

@@ -16,13 +16,24 @@ import {
   type PlaybackTimelineDeferredTextRelease,
   type PlaybackTimelineSegmentExecutorTimelinePort,
 } from "./segmentJobExecutor.js";
+import {
+  createPlaybackTimelineSessionProjection,
+  type PlaybackTimelineAudioSessionPort,
+  type PlaybackTimelineMotionSessionPort,
+  type PlaybackTimelineTerminal,
+} from "./sessionProjection.js";
+
+export type {
+  PlaybackTimelineAudioSessionPort,
+  PlaybackTimelineMotionSessionPort,
+} from "./sessionProjection.js";
 
 const AUDIO_TIMELINE_SINK_ID = "audio";
 const LIP_SYNC_TIMELINE_SINK_ID = "lip_sync";
 const MAX_CLOSED_TIMELINE_KEYS = 512;
 const MOTION_TIMELINE_SINK_ID = "motion";
 
-type TimelineTerminal = "completed" | "failed" | "interrupted";
+type TimelineTerminal = PlaybackTimelineTerminal;
 
 interface PlaybackTimelineEntry {
   turnId: string | null;
@@ -59,46 +70,20 @@ export interface PlaybackTimelineRuntimeDeps<TMotionPayload = unknown> {
   ) => void;
 }
 
-export interface PlaybackTimelineAudioSessionPort {
-  markAudioStarted: (
-    turnId: string | null,
-    messageId: string,
-    startedAtMs?: number | null,
-    durationMs?: number | null,
-  ) => void;
-  markAudioDuration: (
-    turnId: string | null,
-    messageId: string,
-    durationMs: number | null,
-  ) => void;
-  markAudioTerminal: (
-    turnId: string | null,
-    terminal: "completed" | "failed" | "absent",
-    messageId: string,
-    reason?: string,
-  ) => void;
-}
-
-export interface PlaybackTimelineMotionSessionPort {
-  markMotionStarted: (
-    turnId: string | null,
-    messageId: string,
-  ) => void;
-  markMotionCompleted: (
-    turnId: string | null,
-    messageId: string,
-  ) => void;
-  markMotionFailed: (
-    turnId: string | null,
-    messageId: string,
-    reason?: string,
-  ) => void;
-}
-
 export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
   startSegmentJob: (
     job: PlaybackTimelineSegmentJob<TMotionPayload>,
   ) => PlaybackTimelineSegmentExecutionResult;
+  rejectMotionBeforeStart: (
+    turnId: string | null,
+    messageId: string,
+    reason: string,
+  ) => void;
+  rejectAudioBeforeStart: (
+    turnId: string | null,
+    messageId: string,
+    reason: string,
+  ) => void;
   startAudioTimelineSink: (
     turnId: string | null,
     messageId: string,
@@ -171,6 +156,10 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
 ): PlaybackTimelineRuntime<TMotionPayload> {
   const timelines = new Map<string, PlaybackTimelineEntry>();
   const closedTimelineKeys = new Set<string>();
+  const sessionProjection = createPlaybackTimelineSessionProjection({
+    audioSession: deps.audioSession,
+    motionSession: deps.motionSession,
+  });
 
   function resolveTimelineKey(
     turnId: string | null,
@@ -339,7 +328,66 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
         MOTION_TIMELINE_SINK_ID,
       );
     },
+    rejectMotionBeforeStart,
+    rejectAudioBeforeStart,
   };
+
+  function rejectAudioBeforeStart(
+    turnId: string | null,
+    messageId: string,
+    reason: string,
+  ): void {
+    const key = resolveTimelineKey(turnId, messageId);
+    if (!sessionProjection.claimAudioRejection(key)) {
+      return;
+    }
+    const timeline = getTimeline(turnId, messageId);
+    if (timeline?.engine.hasSink(AUDIO_TIMELINE_SINK_ID)) {
+      const audioSink = timeline.engine.getSnapshot()?.sinks.find(
+        (sink) => sink.id === AUDIO_TIMELINE_SINK_ID,
+      );
+      if (audioSink && !isTerminalSinkValue(audioSink.terminal)) {
+        markAudioTimelineTerminal(turnId, messageId, "failed", reason);
+      }
+      return;
+    }
+    sessionProjection.markAudioTerminal(
+      turnId,
+      messageId,
+      "failed",
+      reason,
+    );
+  }
+
+  function rejectMotionBeforeStart(
+    turnId: string | null,
+    messageId: string,
+    reason: string,
+  ): void {
+    const key = resolveTimelineKey(turnId, messageId);
+    if (!sessionProjection.claimMotionRejection(key)) {
+      return;
+    }
+    const timeline = getTimeline(turnId, messageId);
+    if (timeline) {
+      const motionSink = timeline.engine.getSnapshot()?.sinks.find(
+        (sink) => sink.id === MOTION_TIMELINE_SINK_ID,
+      );
+      if (motionSink && !isTerminalSinkValue(motionSink.terminal)) {
+        markMotionTimelineTerminal(turnId, messageId, "failed", reason);
+        return;
+      }
+      if (motionSink) {
+        return;
+      }
+    }
+    sessionProjection.markMotionTerminal(
+      turnId,
+      messageId,
+      "failed",
+      reason,
+    );
+  }
 
   function startTimelineSink(
     turnId: string | null,
@@ -403,7 +451,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       return;
     }
     timeline.engine.setExpectedDurationMs(durationMs);
-    deps.audioSession?.markAudioDuration(
+    sessionProjection.markAudioDuration(
       turnId,
       messageId,
       durationMs,
@@ -456,7 +504,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     if (engine.getPhase() === "ready") {
       engine.start(startedAtMs);
     }
-    deps.audioSession?.markAudioStarted(
+    sessionProjection.markAudioStarted(
       turnId,
       messageId,
       startedAtMs,
@@ -563,7 +611,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     }
     const engine = timeline.engine;
     if (hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID)) {
-      deps.motionSession?.markMotionStarted(turnId, messageId);
+      sessionProjection.markMotionStarted(turnId, messageId);
     }
     engine.markSinkStarted(MOTION_TIMELINE_SINK_ID);
     if (engine.getPhase() === "ready") {
@@ -808,15 +856,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
   ): void {
     const key = resolveTimelineKey(turnId, messageId);
     timelines.delete(key);
-    closedTimelineKeys.delete(key);
-    closedTimelineKeys.add(key);
-    while (closedTimelineKeys.size > MAX_CLOSED_TIMELINE_KEYS) {
-      const oldestKey = closedTimelineKeys.values().next().value;
-      if (typeof oldestKey !== "string") {
-        break;
-      }
-      closedTimelineKeys.delete(oldestKey);
-    }
+    rememberBoundedKey(closedTimelineKeys, key);
   }
 
   function isTimelineTerminalPhase(timeline: PlaybackTimelineEntry): boolean {
@@ -830,10 +870,10 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     terminal: TimelineTerminal,
     reason: string,
   ): void {
-    deps.audioSession?.markAudioTerminal(
+    sessionProjection.markAudioTerminal(
       turnId,
-      terminal === "completed" ? "completed" : "failed",
       messageId,
+      terminal,
       reason,
     );
   }
@@ -844,11 +884,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     terminal: TimelineTerminal,
     reason: string,
   ): void {
-    if (terminal === "completed") {
-      deps.motionSession?.markMotionCompleted(turnId, messageId);
-      return;
-    }
-    deps.motionSession?.markMotionFailed(turnId, messageId, reason);
+    sessionProjection.markMotionTerminal(turnId, messageId, terminal, reason);
   }
 
   function failOpenMotionAfterAudioFailure(
@@ -935,21 +971,18 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
   ): void {
     const reason = `playback_timeline_missing_${sinkId}_sink:${event}`;
     if (sinkId === AUDIO_TIMELINE_SINK_ID) {
-      deps.audioSession?.markAudioTerminal(
-        turnId,
-        "failed",
-        messageId,
-        reason,
-      );
+      rejectAudioBeforeStart(turnId, messageId, reason);
       return;
     }
     if (sinkId === MOTION_TIMELINE_SINK_ID) {
-      deps.motionSession?.markMotionFailed(turnId, messageId, reason);
+      rejectMotionBeforeStart(turnId, messageId, reason);
     }
   }
 
   return {
     startSegmentJob,
+    rejectAudioBeforeStart,
+    rejectMotionBeforeStart,
     startAudioTimelineSink,
     startLipSyncTimelineSink,
     ensureMotionTimelineSinkForSegment: (turnId, messageId, onInterrupt) =>
@@ -968,6 +1001,18 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     findActiveAudioTimelineSegments,
     findOpenAudioTimelineSegments,
   };
+}
+
+function rememberBoundedKey(keys: Set<string>, key: string): void {
+  keys.delete(key);
+  keys.add(key);
+  while (keys.size > MAX_CLOSED_TIMELINE_KEYS) {
+    const oldestKey = keys.values().next().value;
+    if (typeof oldestKey !== "string") {
+      break;
+    }
+    keys.delete(oldestKey);
+  }
 }
 
 function normalizeTurnId(value: string | null): string {

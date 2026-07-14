@@ -69,44 +69,8 @@ export type ModelEnginePlanStartedEvent =
 export type ModelEngineHistoryRole =
   Extract<DesktopHistoryEntry["role"], "system" | "error">;
 
-export interface ModelEnginePlaybackSegment {
-  messageId: string;
-  turnId: string | null;
-  audio: {
-    released: boolean;
-    started: boolean;
-    startedAtMs: number | null;
-    durationMs: number | null;
-    terminal: "idle" | "completed" | "failed" | "absent";
-  };
-}
-
-export interface ModelEnginePlaybackSession {
-  id: string;
-  turnId: string | null;
-  segmentOrder: string[];
-  segments: Map<string, ModelEnginePlaybackSegment>;
-}
-
-export interface ModelEngineSessionStorePort {
-  getActiveSession: () => ModelEnginePlaybackSession | undefined;
-  getSessionByTurnId?: (
-    turnId: string | null,
-  ) => ModelEnginePlaybackSession | undefined;
-  markMotionAbsent?: (
-    turnId: string | null,
-    messageId: string,
-  ) => void;
-  markMotionFailed?: (
-    turnId: string | null,
-    messageId: string,
-    reason?: string,
-  ) => void;
-}
-
 export interface MotionRuntimeSchedulerDependencies {
   getCurrentTurnId: () => string | null;
-  sessionStore?: ModelEngineSessionStorePort;
 }
 
 export interface MotionStartDependencies {
@@ -159,12 +123,11 @@ export interface MotionRuntimeStateController {
 export interface ModelEngineDependencies
   extends MotionRuntimeSchedulerDependencies, MotionStartDependencies {
   stopPlan: (reason?: string) => void;
-  markMotionTimelineTerminal: (
-    turnId: string | null,
-    messageId: string,
-    terminal: "completed" | "failed" | "interrupted",
-    reason: string,
-  ) => void;
+  onMotionRejected: (event: {
+    turnId: string;
+    messageId: string;
+    reason: string;
+  }) => void;
   canStartSpeechOnlyMotion: (
     turnId: string | null,
     messageId: string,
