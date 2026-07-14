@@ -67,25 +67,27 @@ flowchart TD
     subgraph P[统一 Timeline 与执行分支]
         AUDIOSTART[Audio sink<br/>播放 HTMLAudioElement]:::timeline
         DURATION[loadedmetadata / duration ready]:::timeline
-        PREPARE[ModelEngine 预编译<br/>semantic / speech-only plan]:::engine
+        PREPARE[ModelEngine 预编译<br/>semantic intent / internal speech_only request]:::engine
         PREPRESULT{动作准备结果}:::engine
         REGSINK[仅 prepared 时注册<br/>required motion sink]:::timeline
         PREPFAIL[显式动作准备失败<br/>写入 motion failed]:::failure
-        PLAYING[Audio playing<br/>取得真实 audio clock]:::timeline
+        PLAYING[Audio playing<br/>事件携带本段 AudioElement clock]:::timeline
         SUBTITLE[若 text present<br/>释放 canonical subtitle]:::timeline
         SUBTITLEFAIL[字幕队列不变量失败<br/>原子停止整段所有 sink]:::failure
         LIPSINK[Lip-sync sink<br/>同一 AudioElement + WebAudio RMS]:::timeline
         MOTIONSTATE{motion.state}:::state
         SEMANTIC[立即启动已准备语义动作<br/>入场由 performance curve 控制]:::timeline
         SPEECHCHECK{模型是否支持<br/>voice-following profile？}:::timeline
-        SPEECHONLY[立即启动已准备<br/>speech-only motion]:::timeline
+        SPEECHONLY[立即启动已准备<br/>internal speech_only plan]:::timeline
         NOMOTION[仅播放音频与口型<br/>不伪造默认动作]:::timeline
         ABSENTMOTION{motion.state = present？}:::state
         SYNTHCLOCK[Synthetic motion-only clock]:::timeline
         SYNTHMOTION[同步编译并启动<br/>motion-only 语义动作]:::timeline
         AUDIOFAILED[标记 audio failed]:::failure
+        AUDIOCAPTIONFAILED[拒绝待显示 audio-backed subtitle<br/>标记 text failed]:::failure
         MOTIONFAILED[已声明 motion 同步失败<br/>不转换为 absent]:::failure
         EMPTY[text-only / empty legal segment<br/>无需播放时钟]:::timeline
+        FAILEDSETTLED[失败段收口<br/>不创建播放时钟]:::failure
 
         AUDIOSTATE -->|present| AUDIOSTART --> DURATION --> PREPARE --> PREPRESULT
         PREPRESULT -->|prepared| REGSINK --> PLAYING
@@ -105,9 +107,10 @@ flowchart TD
         ABSENTMOTION -->|否| EMPTY
 
         AUDIOSTATE -->|failed| AUDIOFAILED
-        TEXTSTATE -. present 且 audio failed .-> AUDIOFAILED
+        TEXTSTATE -. present 且 audio failed .-> AUDIOCAPTIONFAILED
+        AUDIOCAPTIONFAILED --> AUDIOFAILED
         AUDIOFAILED -->|motion present| MOTIONFAILED
-        AUDIOFAILED -->|motion absent / failed| EMPTY
+        AUDIOFAILED -->|motion absent / failed| FAILEDSETTLED
     end
 
     subgraph M[ModelEngine 编译与 Live2D 逐帧执行]
@@ -151,6 +154,7 @@ flowchart TD
         LIPSINK --> TLTERM
         SDK --> TLTERM
         AUDIOFAILED --> FACTS
+        AUDIOCAPTIONFAILED --> FACTS
         MOTIONFAILED --> FACTS
         TLTERM --> FACTS
 

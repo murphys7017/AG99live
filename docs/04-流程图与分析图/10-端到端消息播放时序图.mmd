@@ -53,7 +53,7 @@ sequenceDiagram
                     Timeline->>Engine: 预编译本段语义动作
                     Engine-->>Timeline: prepared / failed
                 else motion.state = absent 且模型支持说话随动
-                    Timeline->>Engine: 预编译 speech-only motion
+                    Timeline->>Engine: 预编译 internal speech_only request
                     Engine-->>Timeline: prepared / not_applicable / failed
                 else 无可播动作
                     Note over Timeline,Engine: 不创建动作计划，也不伪造默认动作
@@ -61,7 +61,7 @@ sequenceDiagram
                 opt 动作准备结果 = prepared
                     Timeline->>Timeline: 注册 required motion sink
                 end
-                Audio->>Timeline: playing + 真实 audio clock
+                Audio->>Timeline: playing + 本 AudioElement 绑定的真实 clock
                 opt text.state = present
                     Timeline->>Queue: 释放唯一 canonical text 作为字幕
                     alt 字幕释放成功
