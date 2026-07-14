@@ -3,6 +3,7 @@ import type { AudioPlaybackClock } from "./contracts.js";
 export interface AudioPlaybackStartedEvent {
   startedAtMs: number;
   durationMs: number | null;
+  clock: AudioPlaybackClock;
 }
 
 export interface RuntimeAudioPlaybackClock {
@@ -23,7 +24,7 @@ export interface PlaybackTimelineAudioStartCallbacks {
   onAudioElementCreated?: (event: PlaybackTimelineAudioElementContext) => void;
   onAudioElementDisposed?: () => void;
   onDurationChanged?: (durationMs: number | null) => void;
-  onPlaybackStarted?: (event: { startedAtMs: number; durationMs: number | null }) => void;
+  onPlaybackStarted?: (event: AudioPlaybackStartedEvent) => void;
   onEnded?: () => void;
   onError?: () => void;
 }
@@ -31,7 +32,6 @@ export interface PlaybackTimelineAudioStartCallbacks {
 export interface PlaybackTimelineAudioSink {
   start(audioUrl: string, callbacks?: PlaybackTimelineAudioStartCallbacks): Promise<void>;
   stop(): void;
-  getClock(): AudioPlaybackClock | null;
 }
 
 let activeAudioElement: HTMLAudioElement | null = null;
@@ -70,13 +70,6 @@ function adaptClock(clock: RuntimeAudioPlaybackClock): AudioPlaybackClock {
   };
 }
 
-function getActiveAudioPlaybackClock(): RuntimeAudioPlaybackClock | null {
-  if (!activeAudioElement) {
-    return null;
-  }
-  return createAudioElementPlaybackClock(activeAudioElement);
-}
-
 async function startBrowserAudioPlayback(
   audioUrl: string,
   callbacks: PlaybackTimelineAudioStartCallbacks,
@@ -87,6 +80,7 @@ async function startBrowserAudioPlayback(
   audio.crossOrigin = "anonymous";
   audio.src = audioUrl;
   activeAudioElement = audio;
+  const clock = adaptClock(createAudioElementPlaybackClock(audio));
   callbacks.onAudioElementCreated?.({
     audioUrl,
     audio,
@@ -120,12 +114,16 @@ async function startBrowserAudioPlayback(
     callbacks.onPlaybackStarted?.({
       startedAtMs: performance.now(),
       durationMs: resolvedDurationMs,
+      clock,
     });
   };
 
   audio.addEventListener(
     "loadedmetadata",
     () => {
+      if (activeAudioElement !== audio) {
+        return;
+      }
       syncDurationFromElement();
     },
     { once: true },
@@ -200,10 +198,6 @@ export function createBrowserAudioTimelineSink(): PlaybackTimelineAudioSink {
     },
     stop() {
       stopBrowserAudioPlayback();
-    },
-    getClock() {
-      const clock = getActiveAudioPlaybackClock();
-      return clock ? adaptClock(clock) : null;
     },
   };
 }

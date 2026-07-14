@@ -15,6 +15,7 @@ import type {
 } from "../compiler/contracts.js";
 import type { ModelEngineSettings } from "../settings.js";
 import type { ModelEngineStageRegistry } from "../compiler/registry.js";
+import type { SpeechOnlyMotionRequest } from "./speechOnlyMotion.js";
 
 export type ModelEngineStatus =
   | "idle"
@@ -41,7 +42,7 @@ interface ModelEnginePlanStartedEventBase {
   playbackTurnId: string | null;
   startReason: string;
   queuedDelayMs: number;
-  payloadKind: NormalizedMotionPayload["kind"];
+  payloadKind: NormalizedMotionPayload["kind"] | "speech_only";
   diagnostics: CompileDiagnostics | null;
   playerMessage: string;
   /** SDK 分配给本次动作计划的唯一 runId，用于完成事件归属校验。 */
@@ -52,6 +53,12 @@ export type ModelEnginePlanStartedEvent =
   | (ModelEnginePlanStartedEventBase & {
     payloadKind: "semantic_intent";
     intent: SemanticMotionIntent;
+    plan: MotionPlanPayload;
+    motion?: null;
+  })
+  | (ModelEnginePlanStartedEventBase & {
+    payloadKind: "speech_only";
+    request: SpeechOnlyMotionRequest;
     plan: MotionPlanPayload;
     motion?: null;
   })
@@ -92,8 +99,7 @@ export interface MotionStartDependencies {
   stageRegistry?: ModelEngineStageRegistry;
 }
 
-export interface ModelEngineCompileFailedEvent {
-  intent: SemanticMotionIntent;
+interface ModelEngineCompileFailedEventBase {
   model: ModelSummary | null;
   messageId: string;
   turnId: string | null;
@@ -104,6 +110,16 @@ export interface ModelEngineCompileFailedEvent {
   diagnostics: CompileDiagnostics;
   feedback: MotionFeedback | null;
 }
+
+export type ModelEngineCompileFailedEvent =
+  | (ModelEngineCompileFailedEventBase & {
+    payloadKind: "semantic_intent";
+    intent: SemanticMotionIntent;
+  })
+  | (ModelEngineCompileFailedEventBase & {
+    payloadKind: "speech_only";
+    request: SpeechOnlyMotionRequest;
+  });
 
 export interface MotionRuntimeStateController {
   setState: (

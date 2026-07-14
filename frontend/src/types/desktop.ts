@@ -218,7 +218,7 @@ interface DesktopMotionPlaybackRecordBase {
   id: string;
   createdAt: string;
   source: string;
-  payloadKind: "semantic_intent" | "semantic_plan" | "catalog_motion";
+  payloadKind: "semantic_intent" | "semantic_plan" | "catalog_motion" | "speech_only";
   messageId: string;
   turnId: string | null;
   playbackTurnId: string | null;
@@ -234,7 +234,7 @@ interface DesktopMotionPlaybackRecordBase {
 
 export type DesktopMotionPlaybackRecord =
   | (DesktopMotionPlaybackRecordBase & {
-    payloadKind: "semantic_intent" | "semantic_plan";
+    payloadKind: "semantic_intent" | "semantic_plan" | "speech_only";
     plan: MotionPlanPayload;
     motion?: null;
   })
@@ -360,9 +360,9 @@ export type DesktopProfileAuthoringCommand = {
 
 export interface DesktopRuntimeSnapshot {
   /** 快照发布者标识符（窗口实例 mount 时随机生成） */
-  _publisherId?: string;
+  _publisherId: string;
   /** 单调递增的快照版本号（每次 publish 自增，值大的优先） */
-  _revision?: number;
+  _revision: number;
   adapterAddress: string;
   desktopScreenshotOnSendEnabled: boolean;
   microphoneDeviceId: string;

@@ -54,7 +54,6 @@ export interface PlaybackTimelineAudioSegment {
 }
 
 export interface PlaybackTimelineRuntimeDeps<TMotionPayload = unknown> {
-  getAudioClock: () => AudioPlaybackClock | null;
   segmentExecution: PlaybackTimelineSegmentExecutionPorts<TMotionPayload>;
   audioSession?: PlaybackTimelineAudioSessionPort;
   motionSession?: PlaybackTimelineMotionSessionPort;
@@ -109,6 +108,7 @@ export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
     messageId: string,
     startedAtMs: number,
     durationMs: number | null,
+    audioClock: AudioPlaybackClock,
   ) => boolean;
   markLipSyncTimelineStarted: (
     turnId: string | null,
@@ -474,6 +474,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     messageId: string,
     startedAtMs: number,
     durationMs: number | null,
+    audioClock: AudioPlaybackClock,
   ): boolean {
     const timeline = getTimelineWithSink(
       "audio.started",
@@ -490,15 +491,6 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     }
     const engine = timeline.engine;
     engine.setExpectedDurationMs(durationMs);
-    const audioClock = deps.getAudioClock();
-    if (!audioClock) {
-      failDeferredText(
-        timeline,
-        "subtitle_audio_clock_unavailable_on_started",
-      );
-      failTimelineSegment(timeline, "audio_clock_unavailable_on_started");
-      return false;
-    }
     engine.attachAudioClock(audioClock);
     engine.markSinkStarted(AUDIO_TIMELINE_SINK_ID);
     if (engine.getPhase() === "ready") {
@@ -1049,25 +1041,6 @@ function reportMissingTimelineWiring(
 ): void {
   console.error(
     "[PlaybackTimelineRuntime] missing segment timeline for required lifecycle event.",
-    {
-      event,
-      sinkId,
-      turnId,
-      messageId,
-      ...details,
-    },
-  );
-}
-
-function warnMissingSink(
-  event: string,
-  sinkId: string,
-  turnId: string | null,
-  messageId: string,
-  details: Record<string, unknown> = {},
-): void {
-  console.warn(
-    "[PlaybackTimelineRuntime] dropped timeline event for missing segment sink.",
     {
       event,
       sinkId,

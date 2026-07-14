@@ -49,6 +49,10 @@ from .motion_lab import MotionLabRawEventStore, MotionLabRecorder
 LIVE2D_SCAN_CACHE_VERSION = "voice_following_profile.v2"
 
 
+class RuntimeStateConfigurationError(RuntimeError):
+    """Raised when an explicitly enabled runtime capability is misconfigured."""
+
+
 class RuntimeState:
     def __init__(
         self,
@@ -197,15 +201,16 @@ class RuntimeState:
                     None,
                 )
                 if persona is None:
-                    logger.warning(
-                        "Configured persona `%s` not found, fallback to default persona.",
-                        configured_persona_id,
+                    raise RuntimeStateConfigurationError(
+                        f"Configured persona `{configured_persona_id}` was not found."
                     )
 
             if persona is None:
                 persona = await self.plugin_context.persona_manager.get_default_persona_v3(
                     umo=self.client_uid
                 )
+        except RuntimeStateConfigurationError:
+            raise
         except Exception as exc:
             logger.warning("Failed to load default persona: %s", exc)
             return
@@ -477,39 +482,24 @@ class RuntimeState:
                 logger.info("Using current chat provider for motion analysis: %s", provider.meta().id)
 
         if self.enable_performance_curve:
-            provider = None
-            if self.performance_curve_provider_id:
-                provider = self.plugin_context.get_provider_by_id(self.performance_curve_provider_id)
-                if isinstance(provider, Provider):
-                    self.selected_performance_curve_provider = provider
-                    logger.info(
-                        "Loaded performance curve provider from plugin config: %s",
-                        self.performance_curve_provider_id,
-                    )
-                else:
-                    logger.warning(
-                        "Configured performance curve provider `%s` not found or not a chat Provider.",
-                        self.performance_curve_provider_id,
-                    )
-            else:
-                try:
-                    provider = self.plugin_context.get_using_provider(umo=self.client_uid)
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to get current chat provider for performance curve: %s",
-                        exc,
-                    )
-                    provider = None
-                if isinstance(provider, Provider):
-                    self.selected_performance_curve_provider = provider
-                    logger.info(
-                        "Using current chat provider for performance curve: %s",
-                        provider.meta().id,
-                    )
-                else:
-                    logger.warning(
-                        "Current chat provider unavailable; performance curve generation is disabled for now.",
-                    )
+            if not self.performance_curve_provider_id:
+                raise RuntimeStateConfigurationError(
+                    "Performance curve generation is enabled but "
+                    "`performance_curve_provider_id` is empty."
+                )
+            provider = self.plugin_context.get_provider_by_id(
+                self.performance_curve_provider_id
+            )
+            if not isinstance(provider, Provider):
+                raise RuntimeStateConfigurationError(
+                    "Configured performance curve provider "
+                    f"`{self.performance_curve_provider_id}` was not found or is not a chat Provider."
+                )
+            self.selected_performance_curve_provider = provider
+            logger.info(
+                "Loaded performance curve provider from plugin config: %s",
+                self.performance_curve_provider_id,
+            )
 
     def build_current_model_payload(
         self,

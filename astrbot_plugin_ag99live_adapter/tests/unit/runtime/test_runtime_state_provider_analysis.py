@@ -6,6 +6,8 @@ import json
 import sys
 from copy import deepcopy
 
+import pytest
+
 from astrbot_plugin_ag99live_adapter.tests.unit.live2d.test_support import build_seed_model_info
 
 
@@ -742,10 +744,19 @@ def test_runtime_state_loads_dedicated_performance_curve_provider(
     assert state.selected_performance_curve_provider is dedicated_provider
 
 
-def test_runtime_state_falls_back_to_current_chat_provider_for_performance_curve(
+@pytest.mark.parametrize(
+    ("provider_id", "error_pattern"),
+    (
+        ("", "performance_curve_provider_id.*empty"),
+        ("missing-curve-provider", "missing-curve-provider.*not found"),
+    ),
+)
+def test_runtime_state_rejects_missing_or_invalid_performance_curve_provider(
     monkeypatch,
     install_fake_astrbot,
     tmp_path,
+    provider_id,
+    error_pattern,
 ) -> None:
     runtime_state, provider_cls = _import_runtime_state_with_fake_astrbot(
         install_fake_astrbot=install_fake_astrbot,
@@ -759,6 +770,7 @@ def test_runtime_state_falls_back_to_current_chat_provider_for_performance_curve
             return ProviderMeta()
 
     chat_provider = ChatProvider()
+    current_provider_requests = 0
 
     class PluginContext:
         def get_provider_by_id(self, provider_id: str):
@@ -770,7 +782,9 @@ def test_runtime_state_falls_back_to_current_chat_provider_for_performance_curve
             return None
 
         def get_using_provider(self, umo: str):
+            nonlocal current_provider_requests
             del umo
+            current_provider_requests += 1
             return chat_provider
 
     seed_model_info = build_seed_model_info()
@@ -785,6 +799,7 @@ def test_runtime_state_falls_back_to_current_chat_provider_for_performance_curve
         plugin_context=PluginContext(),
         plugin_config={
             "enable_performance_curve": True,
+            "performance_curve_provider_id": provider_id,
         },
         plugin_config_loader=None,
         host="127.0.0.1",
@@ -793,10 +808,53 @@ def test_runtime_state_falls_back_to_current_chat_provider_for_performance_curve
         live2ds_dir=tmp_path / "live2ds",
     )
 
-    state.refresh()
+    with pytest.raises(
+        runtime_state.RuntimeStateConfigurationError,
+        match=error_pattern,
+    ):
+        state.refresh()
 
-    assert state.performance_curve_provider_id == ""
-    assert state.selected_performance_curve_provider is chat_provider
+    assert state.performance_curve_provider_id == provider_id
+    assert state.selected_performance_curve_provider is None
+    assert current_provider_requests == 1
+
+
+def test_runtime_state_rejects_unknown_configured_persona(
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    runtime_state, _ = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+
+    class PersonaManager:
+        personas_v3 = [{"name": "default", "prompt": "default prompt"}]
+
+        async def get_default_persona_v3(self, *, umo: str):
+            del umo
+            return self.personas_v3[0]
+
+    class PluginContext:
+        persona_manager = PersonaManager()
+
+    state = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=PluginContext(),
+        plugin_config={"persona_id": "missing-persona"},
+        plugin_config_loader=None,
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=tmp_path / "live2ds",
+    )
+
+    with pytest.raises(
+        runtime_state.RuntimeStateConfigurationError,
+        match="missing-persona.*not found",
+    ):
+        asyncio.run(state.load_default_persona())
+
+    assert state.default_persona is None
 
 
 def test_runtime_state_persists_scan_and_action_filter_cache_across_instances(

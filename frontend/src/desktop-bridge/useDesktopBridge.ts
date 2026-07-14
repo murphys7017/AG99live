@@ -289,10 +289,10 @@ export function createDesktopBridge(): DesktopBridgeInstance {
             return;
           }
           // Revision 守卫：同一 publisher 只接受 revision 严格递增的快照
-          const nextPub = nextSnapshot._publisherId ?? "";
-          const currentPub = state.snapshot._publisherId ?? "legacy";
-          const nextRev = nextSnapshot._revision ?? -1;
-          const currentRev = state.snapshot._revision ?? -1;
+          const nextPub = nextSnapshot._publisherId;
+          const currentPub = state.snapshot._publisherId;
+          const nextRev = nextSnapshot._revision;
+          const currentRev = state.snapshot._revision;
           if (nextPub === currentPub && nextRev <= currentRev) {
             return;
           }

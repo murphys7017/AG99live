@@ -66,6 +66,7 @@ export function createPlaybackTimelineAudioSegmentRunner<TMotionPayload = unknow
                     messageId,
                     event.startedAtMs,
                     event.durationMs,
+                    event.clock,
                   );
                   if (!timelineActive) {
                     return false;

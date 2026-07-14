@@ -1,12 +1,18 @@
-import type { NormalizedMotionPayload } from "../contracts.js";
 import type {
   ModelSummary,
-  SemanticMotionIntent,
+  NormalizedSemanticMotionIntentV4,
 } from "../../types/protocol.js";
 
-export function buildSpeechOnlyMotionPayload(
+export interface SpeechOnlyMotionRequest {
+  kind: "speech_only";
+  profileId: string;
+  profileRevision: number;
+  modelId: string;
+}
+
+export function buildSpeechOnlyMotionRequest(
   model: ModelSummary | null,
-): Extract<NormalizedMotionPayload, { kind: "semantic_intent" }> | null {
+): SpeechOnlyMotionRequest | null {
   const profile = model?.semantic_axis_profile;
   const voiceFollowingProfile = model?.voice_following_profile;
   if (
@@ -28,18 +34,28 @@ export function buildSpeechOnlyMotionPayload(
     return null;
   }
 
-  const intent: SemanticMotionIntent = {
-    schema_version: "engine.motion_intent.v3",
-    profile_id: profile.profile_id,
-    profile_revision: profile.revision,
-    model_id: profile.model_id,
+  return {
+    kind: "speech_only",
+    profileId: profile.profile_id,
+    profileRevision: profile.revision,
+    modelId: profile.model_id,
+  };
+}
+
+// The compiler pipeline currently operates on semantic intent fields. This
+// adapter stays inside ModelEngine and never enters protocol normalization.
+export function buildSpeechOnlyCompilerIntent(
+  request: SpeechOnlyMotionRequest,
+): NormalizedSemanticMotionIntentV4 {
+  return {
+    schema_version: "engine.motion_intent.v4",
+    profile_id: request.profileId,
+    profile_revision: request.profileRevision,
+    model_id: request.modelId,
     mode: "idle",
     emotion_label: "speech",
+    intent_tags: ["speech"],
     duration_hint_ms: null,
-    axes: {},
-  };
-  return {
-    kind: "semantic_intent",
-    intent,
+    axis_levels: {},
   };
 }

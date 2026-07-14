@@ -788,7 +788,8 @@ def test_prompt_contributor_hides_resource_id_when_no_resource_candidates(
     assert "effect_arguments_example" not in capability.value
     assert "expression_resource_id" not in system.value
     assert "motion_resource_id" not in system.value
-    assert "必填字段是 intent_tags，并且 axis_levels 与 motion_steps 必须二选一" in system.value
+    assert "单姿态使用 axis_levels；动作序列使用 motion_steps" in system.value
+    assert "必填字段是 intent_tags" not in system.value
 
 
 def test_resource_candidate_preserves_dotted_catalog_id(

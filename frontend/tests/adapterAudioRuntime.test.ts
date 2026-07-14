@@ -11,25 +11,38 @@ import type {
   PlaybackTimelineLipSyncRuntimeCallbacks,
 } from "../src/playback-timeline/lipSyncSink.js";
 import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
-import type { AdapterAudioRuntimeSessionStore } from "../src/adapter-connection/runtime/audioRuntime.js";
 import type {
   PlaybackTimelineSegmentExecutionPorts,
 } from "../src/playback-timeline/segmentJob.js";
 import { createPlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
+import type {
+  PlaybackTimelineAudioSessionPort,
+  PlaybackTimelineMotionSessionPort,
+  PlaybackTimelineRuntimeDeps,
+} from "../src/playback-timeline/playbackTimelineRuntime.js";
+
+interface TestSessionStore
+  extends PlaybackTimelineAudioSessionPort, PlaybackTimelineMotionSessionPort {
+  markAudioReleased: (turnId: string | null, messageId: string) => void;
+}
 
 function createAdapterAudioRuntime(
   deps: Omit<
     Parameters<typeof createStrictAdapterAudioRuntime>[0],
-    "segmentExecution" | "createPlaybackTimelineRuntime"
-  >,
+    "playbackTimelineRuntime"
+  > & Pick<
+    PlaybackTimelineRuntimeDeps<NormalizedMotionPayload>,
+    "onAudioTimelineStarted" | "onAudioTimelineDurationReady"
+  > & {
+    getSessionStore: () => TestSessionStore | undefined;
+  },
 ) {
   let ports: Omit<
     PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload>,
     "audioSink"
   > = createNoopSegmentExecutionPorts();
-  const runtime = createStrictAdapterAudioRuntime({
-    ...deps,
-    createPlaybackTimelineRuntime,
+  let runtime: ReturnType<typeof createStrictAdapterAudioRuntime> | null = null;
+  const playbackTimelineRuntime = createPlaybackTimelineRuntime<NormalizedMotionPayload>({
     segmentExecution: {
       session: {
         markSessionFailed: (...args) => ports.session.markSessionFailed(...args),
@@ -48,9 +61,42 @@ function createAdapterAudioRuntime(
         start: (...args) => ports.motionSink.start(...args),
         interrupt: (...args) => ports.motionSink.interrupt(...args),
       },
+      audioSink: {
+        releaseAudioForPlayback: (...args) => {
+          if (!runtime) {
+            throw new Error("Adapter audio runtime is not attached.");
+          }
+          return runtime.releaseQueuedAudioForTimelinePlayback(...args);
+        },
+      },
     },
+    get audioSession() {
+      return deps.getSessionStore();
+    },
+    get motionSession() {
+      return deps.getSessionStore();
+    },
+    onAudioTimelineStarted: deps.onAudioTimelineStarted,
+    onAudioTimelineDurationReady: deps.onAudioTimelineDurationReady,
+  });
+  const {
+    onAudioTimelineStarted: _onAudioTimelineStarted,
+    onAudioTimelineDurationReady: _onAudioTimelineDurationReady,
+    getSessionStore: _getSessionStore,
+    ...audioRuntimeDeps
+  } = deps;
+  runtime = createStrictAdapterAudioRuntime({
+    ...audioRuntimeDeps,
+    playbackTimelineRuntime,
   });
   return Object.assign(runtime, {
+    releaseAudioForPlayback(messageId: string, turnId: string | null): boolean {
+      const released = runtime?.releaseQueuedAudioForTimelinePlayback(messageId, turnId) ?? false;
+      if (released) {
+        deps.getSessionStore()?.markAudioReleased(turnId, messageId);
+      }
+      return released;
+    },
     configureSegmentExecution(next: typeof ports) {
       ports = next;
     },
@@ -137,23 +183,28 @@ function emitFakeAudioElementCreated(
 function buildAudioSink(options: {
   start: (url: string, callbacks: PlaybackTimelineAudioStartCallbacks) => Promise<void>;
   stop?: () => void;
-  getClock?: () => AudioPlaybackClock | null;
 }): PlaybackTimelineAudioSink {
   return {
     start: options.start,
     stop: options.stop ?? (() => {}),
-    getClock: options.getClock ?? (() => ({
-      getCurrentTimeMs: () => 0,
-      getDurationMs: () => 1000,
-      getPlaybackRate: () => 1,
-      isPlaying: () => true,
-    })),
+  };
+}
+
+function createTestAudioClock(
+  currentTimeMs = 0,
+  durationMs = 1000,
+): AudioPlaybackClock {
+  return {
+    getCurrentTimeMs: () => currentTimeMs,
+    getDurationMs: () => durationMs,
+    getPlaybackRate: () => 1,
+    isPlaying: () => true,
   };
 }
 
 function buildSessionStoreMock(
-  overrides: Partial<AdapterAudioRuntimeSessionStore> = {},
-): AdapterAudioRuntimeSessionStore {
+  overrides: Partial<TestSessionStore> = {},
+): TestSessionStore {
   return {
     markAudioReleased: () => {},
     markAudioStarted: () => {},
@@ -223,14 +274,9 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
         callbacks.onPlaybackStarted?.({
           startedAtMs: 100,
           durationMs: 1250,
+          clock: createTestAudioClock(320, 1250),
         });
       },
-      getClock: () => ({
-        getCurrentTimeMs: () => 320,
-        getDurationMs: () => 1250,
-        getPlaybackRate: () => 1,
-        isPlaying: () => true,
-      }),
     }),
     pushHistory: () => {},
     getSessionStore: () => buildSessionStoreMock({
@@ -304,14 +350,9 @@ async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
         callbacks.onPlaybackStarted?.({
           startedAtMs: 50,
           durationMs: 900,
+          clock: createTestAudioClock(900, 900),
         });
       },
-      getClock: () => ({
-        getCurrentTimeMs: () => 900,
-        getDurationMs: () => 900,
-        getPlaybackRate: () => 1,
-        isPlaying: () => true,
-      }),
     }),
     pushHistory: () => {},
     getSessionStore: () => buildSessionStoreMock({
@@ -415,14 +456,9 @@ async function testLipSyncFailureRemainsVisibleUntilAudioCompletes(): Promise<vo
         callbacks.onPlaybackStarted?.({
           startedAtMs: 80,
           durationMs: 1000,
+          clock: createTestAudioClock(100, 1000),
         });
       },
-      getClock: () => ({
-        getCurrentTimeMs: () => 100,
-        getDurationMs: () => 1000,
-        getPlaybackRate: () => 1,
-        isPlaying: () => true,
-      }),
     }),
     pushHistory: () => {},
     getSessionStore: () => undefined,
@@ -556,6 +592,7 @@ async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise
         callbacks.onPlaybackStarted?.({
           startedAtMs: 100,
           durationMs: 1000,
+          clock: createTestAudioClock(),
         });
         return new Promise<void>(() => {});
       },
@@ -612,6 +649,7 @@ async function testTimelineAudioReleaseMarksSessionReleasedOnce(): Promise<void>
         callbacks.onPlaybackStarted?.({
           startedAtMs: 100,
           durationMs: 1000,
+          clock: createTestAudioClock(),
         });
       },
     }),
@@ -684,14 +722,9 @@ async function testMotionSinkKeepsTimelineOpenAfterAudioCompletes(): Promise<voi
         callbacks.onPlaybackStarted?.({
           startedAtMs: 50,
           durationMs: 900,
+          clock: createTestAudioClock(500, 900),
         });
       },
-      getClock: () => ({
-        getCurrentTimeMs: () => 500,
-        getDurationMs: () => 900,
-        getPlaybackRate: () => 1,
-        isPlaying: () => true,
-      }),
     }),
     pushHistory: () => {},
     getSessionStore: () => undefined,

@@ -49,7 +49,7 @@ import type {
   PlaybackTimelineSegmentMotionSink,
 } from "../playback-timeline/segmentJob";
 import { createPlaybackTimelineRuntime } from "../playback-timeline/playbackTimelineRuntime";
-import type { PlaybackTimelineRuntime } from "../playback-timeline/playbackTimelineRuntime";
+import { createBrowserAudioTimelineSink } from "../playback-timeline/audioSink";
 import type { NormalizedMotionPayload } from "../model-engine/contracts";
 
 export interface PetDesktopRuntime {
@@ -82,26 +82,17 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       motionTimelineSinkTarget.interrupt(turnId, messageId, reason);
     },
   };
-  const playbackTimelineHolder: {
-    runtime: PlaybackTimelineRuntime<NormalizedMotionPayload> | null;
-  } = { runtime: null };
   const adapter = useAdapterConnection(
     sessionStore,
     modelSync,
-    requiredMotionTimelineSink,
-    (deps) => {
-      if (playbackTimelineHolder.runtime) {
-        throw new Error("PlaybackTimelineRuntime may only be created once.");
-      }
-      const runtime = createPlaybackTimelineRuntime(deps);
-      playbackTimelineHolder.runtime = runtime;
-      return runtime;
-    },
   );
-  const appPlaybackTimelineRuntime = playbackTimelineHolder.runtime;
-  if (!appPlaybackTimelineRuntime) {
-    throw new Error("Adapter did not request the app-owned PlaybackTimelineRuntime.");
-  }
+  const appPlaybackTimelineRuntime = createPlaybackTimelineRuntime(
+    adapter.buildPlaybackTimelineRuntimeDeps(requiredMotionTimelineSink),
+  );
+  adapter.attachPlaybackTimelineRuntime(
+    appPlaybackTimelineRuntime,
+    createBrowserAudioTimelineSink(),
+  );
   const playbackTimeline: PlaybackTimelineWiringPort = {
     ...appPlaybackTimelineRuntime,
     setAudioTimelineDurationReadyHandler: adapter.setAudioTimelineDurationReadyHandler,
@@ -213,11 +204,18 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
         source_route: event.startReason,
         phase: "frontend_compile_failed",
         model_name: event.model?.name ?? "",
-        profile_id: event.intent.profile_id,
-        profile_revision: event.intent.profile_revision,
-        payload_kind: "semantic_intent",
+        profile_id: event.payloadKind === "speech_only"
+          ? event.request.profileId
+          : event.intent.profile_id,
+        profile_revision: event.payloadKind === "speech_only"
+          ? event.request.profileRevision
+          : event.intent.profile_revision,
+        payload_kind: event.payloadKind,
         raw: {
-          intent: cloneJson(event.intent),
+          intent: event.payloadKind === "semantic_intent" ? cloneJson(event.intent) : null,
+          speechOnlyRequest: event.payloadKind === "speech_only"
+            ? cloneJson(event.request)
+            : null,
           feedback: event.feedback ? cloneJson(event.feedback) : null,
           diagnostics: cloneJson(event.diagnostics),
           reason: event.reason,

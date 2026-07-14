@@ -3,7 +3,10 @@ import {
   createMotionRuntimeScheduler,
   type StartPayloadContext,
 } from "./runtime/motionRuntimeScheduler.js";
-import { buildSpeechOnlyMotionPayload } from "./runtime/speechOnlyMotion.js";
+import {
+  buildSpeechOnlyMotionRequest,
+  type SpeechOnlyMotionRequest,
+} from "./runtime/speechOnlyMotion.js";
 import type { InboundPayloadContext, NormalizedMotionPayload } from "./contracts.js";
 import type { CompileDiagnostics } from "./compiler/contracts.js";
 import type {
@@ -20,8 +23,10 @@ import type {
 import { normalizeMotionPayload, normalizeTurnId } from "./normalize.js";
 import {
   prepareSemanticMotionPayload,
+  prepareSpeechOnlyMotionRequest,
   reportInvalidMotionPayload,
   startNormalizedMotionPayload,
+  startSpeechOnlyMotionRequest,
   type PreparedSemanticMotionPayload,
 } from "./runtime/motionStart.js";
 import { createModelEngineStageRegistry } from "./compiler/registry.js";
@@ -193,18 +198,18 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     if (!dependencies.canStartSpeechOnlyMotion(playbackClock.turnId, normalizedMessageId)) {
       return false;
     }
-    const speechOnlyPayload = buildSpeechOnlyMotionPayload(
+    const speechOnlyRequest = buildSpeechOnlyMotionRequest(
       dependencies.getSelectedModel(),
     );
-    if (!speechOnlyPayload) {
+    if (!speechOnlyRequest) {
       return false;
     }
 
     const key = buildSegmentKey(playbackClock.turnId, normalizedMessageId);
     const prepared = preparedSemanticMotions.get(key)?.prepared ?? null;
     preparedSemanticMotions.delete(key);
-    const started = startNormalizedMotionPayload(
-      speechOnlyPayload,
+    const started = startSpeechOnlyMotionRequest(
+      speechOnlyRequest,
       {
         messageId: normalizedMessageId,
         turnId: playbackClock.turnId,
@@ -257,6 +262,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     const key = buildSegmentKey(playbackClock.turnId, normalizedMessageId);
     const preparation = runtimeScheduler.getPendingPayloadForTimeline(playbackClock);
     let payload: Extract<NormalizedMotionPayload, { kind: "semantic_intent" }> | null = null;
+    let speechOnlyRequest: SpeechOnlyMotionRequest | null = null;
     let context: StartPayloadContext;
     let source: "queued_motion" | "speech_only";
 
@@ -274,8 +280,8 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
           reason: "speech_only_motion_not_required",
         };
       }
-      payload = buildSpeechOnlyMotionPayload(dependencies.getSelectedModel());
-      if (!payload) {
+      speechOnlyRequest = buildSpeechOnlyMotionRequest(dependencies.getSelectedModel());
+      if (!speechOnlyRequest) {
         return {
           status: "not_applicable",
           reason: "speech_only_motion_profile_unavailable",
@@ -303,12 +309,19 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       return { status: "prepared", source };
     }
 
-    const prepared = prepareSemanticMotionPayload(
-      payload,
-      context,
-      motionStartDependencies,
-      runtimeStateController,
-    );
+    const prepared = source === "speech_only"
+      ? prepareSpeechOnlyMotionRequest(
+          speechOnlyRequest as SpeechOnlyMotionRequest,
+          context,
+          motionStartDependencies,
+          runtimeStateController,
+        )
+      : prepareSemanticMotionPayload(
+          payload as Extract<NormalizedMotionPayload, { kind: "semantic_intent" }>,
+          context,
+          motionStartDependencies,
+          runtimeStateController,
+        );
     if (!prepared) {
       preparedSemanticMotions.delete(key);
       return {

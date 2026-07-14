@@ -4,12 +4,9 @@ import type {
   PlaybackTimelineLipSyncRuntimeCallbacks,
 } from "../../playback-timeline/lipSyncSink.js";
 import type {
-  PlaybackTimelineSnapshot,
-} from "../../playback-timeline/contracts.js";
-import type {
   PlaybackTimelineRuntime,
-  PlaybackTimelineRuntimeDeps,
 } from "../../playback-timeline/playbackTimelineRuntime.js";
+import type { PlaybackTimelineSnapshot } from "../../playback-timeline/contracts.js";
 import {
   createAdapterAudioTimelineController,
 } from "./audioTimelineController.js";
@@ -21,9 +18,6 @@ import {
 import {
   createAdapterAudioSettlementController,
 } from "./audioSettlementController.js";
-import type {
-  PlaybackTimelineSegmentExecutionPorts,
-} from "../../playback-timeline/segmentJob.js";
 import type { NormalizedMotionPayload } from "../../model-engine/contracts.js";
 
 export interface AdapterAudioRuntimeState {
@@ -41,68 +35,14 @@ export interface AdapterAudioRuntimeState {
   audioPlaybackTerminalReason: string;
 }
 
-export interface AdapterAudioRuntimeSessionStore {
-  markAudioReleased: (
-    turnId: string | null,
-    messageId: string,
-  ) => void;
-  markAudioStarted: (
-    turnId: string | null,
-    messageId: string,
-    startedAtMs?: number | null,
-    durationMs?: number | null,
-  ) => void;
-  markAudioDuration: (
-    turnId: string | null,
-    messageId: string,
-    durationMs: number | null,
-  ) => void;
-  markAudioTerminal: (
-    turnId: string | null,
-    terminal: Exclude<AudioPlaybackTerminalState, "idle">,
-    messageId: string,
-    reason?: string,
-  ) => void;
-  markMotionStarted: (
-    turnId: string | null,
-    messageId: string,
-  ) => void;
-  markMotionCompleted: (
-    turnId: string | null,
-    messageId: string,
-  ) => void;
-  markMotionFailed: (
-    turnId: string | null,
-    messageId: string,
-    reason?: string,
-  ) => void;
-}
-
 export interface AdapterAudioRuntimeDeps {
   state: AdapterAudioRuntimeState;
   audioSink: PlaybackTimelineAudioSink;
+  playbackTimelineRuntime: PlaybackTimelineRuntime<NormalizedMotionPayload>;
   pushHistory: (role: string, text: string) => void;
-  getSessionStore: () => AdapterAudioRuntimeSessionStore | undefined;
-  segmentExecution: Omit<
-    PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload>,
-    "audioSink"
-  >;
-  createPlaybackTimelineRuntime: (
-    deps: PlaybackTimelineRuntimeDeps<NormalizedMotionPayload>,
-  ) => PlaybackTimelineRuntime<NormalizedMotionPayload>;
   createLipSyncRuntime?: (
     callbacks: PlaybackTimelineLipSyncRuntimeCallbacks,
   ) => PlaybackTimelineLipSyncRuntime;
-  onAudioTimelineStarted?: (
-    turnId: string | null,
-    messageId: string,
-    playbackTimeline: PlaybackTimelineSnapshot | null,
-  ) => void;
-  onAudioTimelineDurationReady?: (
-    turnId: string | null,
-    messageId: string,
-    playbackTimeline: PlaybackTimelineSnapshot,
-  ) => void;
 }
 
 export interface ActiveAudioSegment {
@@ -116,7 +56,7 @@ export interface AdapterAudioRuntime {
     turnId: string | null,
     messageId: string,
   ) => void;
-  releaseAudioForPlayback: (
+  releaseQueuedAudioForTimelinePlayback: (
     messageId: string,
     turnId: string | null,
   ) => boolean;
@@ -156,37 +96,9 @@ export function createAdapterAudioRuntime(
   const timelineController = createAdapterAudioTimelineController<NormalizedMotionPayload>({
     state: deps.state,
     audioSink: deps.audioSink,
+    playbackTimelineRuntime: deps.playbackTimelineRuntime,
     pushHistory: deps.pushHistory,
-    getAudioSession: () => {
-      const sessionStore = deps.getSessionStore();
-      return sessionStore
-        ? {
-            markAudioStarted: sessionStore.markAudioStarted,
-            markAudioDuration: sessionStore.markAudioDuration,
-            markAudioTerminal: sessionStore.markAudioTerminal,
-          }
-        : undefined;
-    },
-    getMotionSession: () => {
-      const sessionStore = deps.getSessionStore();
-      return sessionStore
-        ? {
-            markMotionStarted: sessionStore.markMotionStarted,
-            markMotionCompleted: sessionStore.markMotionCompleted,
-            markMotionFailed: sessionStore.markMotionFailed,
-          }
-        : undefined;
-    },
-    segmentExecution: {
-      ...deps.segmentExecution,
-      audioSink: {
-        releaseAudioForPlayback: releaseQueuedAudioForTimelinePlayback,
-      },
-    },
-    createPlaybackTimelineRuntime: deps.createPlaybackTimelineRuntime,
     createLipSyncRuntime: deps.createLipSyncRuntime,
-    onAudioTimelineStarted: deps.onAudioTimelineStarted,
-    onAudioTimelineDurationReady: deps.onAudioTimelineDurationReady,
     markTerminal: markAudioPlaybackTerminalState,
     resetTerminal: resetAudioPlaybackTerminal,
   });
@@ -250,17 +162,6 @@ export function createAdapterAudioRuntime(
     return audioReleaseController.releaseAudioForPlayback(messageId, turnId);
   }
 
-  function releaseAudioForPlayback(
-    messageId: string,
-    turnId: string | null,
-  ): boolean {
-    const released = releaseQueuedAudioForTimelinePlayback(messageId, turnId);
-    if (released) {
-      deps.getSessionStore()?.markAudioReleased(turnId, messageId);
-    }
-    return released;
-  }
-
   function stopAudioPlayback(
     turnId: string | null,
     messageId: string | null,
@@ -292,7 +193,7 @@ export function createAdapterAudioRuntime(
 
   return {
     queueAudioForPlayback: audioReleaseController.queueAudioForPlayback,
-    releaseAudioForPlayback,
+    releaseQueuedAudioForTimelinePlayback,
     startSegmentJob,
     rejectAudioBeforeStart,
     rejectMotionBeforeStart,

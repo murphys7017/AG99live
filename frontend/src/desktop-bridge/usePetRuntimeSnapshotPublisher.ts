@@ -10,6 +10,7 @@ import type {
   DesktopMotionPlaybackRecord,
   DesktopPttKeyBinding,
   DesktopPttHookStatus,
+  DesktopRuntimeSnapshot,
   DesktopSemanticAxisProfileSaveResult,
   DesktopMotionTuningSamplesStatus,
   DesktopMotionTuningSample,
@@ -66,7 +67,7 @@ interface PetRuntimeSnapshotAdapterPort {
 }
 
 interface PetRuntimeSnapshotBridgePort {
-  publishSnapshot: (snapshot: ReturnType<typeof buildDesktopRuntimeSnapshot>) => void;
+  publishSnapshot: (snapshot: DesktopRuntimeSnapshot) => void;
   publishMotionTuningSamples: (
     samples: unknown,
     status: DesktopMotionTuningSamplesStatus,

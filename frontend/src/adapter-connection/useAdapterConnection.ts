@@ -26,14 +26,13 @@ import {
 import { createAdapterOutboundClient } from "./outbound/outboundClient.js";
 import {
   createAdapterAudioRuntime,
+  type AdapterAudioRuntime,
 } from "./runtime/audioRuntime.js";
 import { useAdapterMotionTuning } from "./motion-tuning/useAdapterMotionTuning.js";
 import {
   createAdapterMicrophoneRuntime,
 } from "./runtime/microphoneRuntime.js";
-import {
-  createBrowserAudioTimelineSink,
-} from "../playback-timeline/audioSink.js";
+import type { PlaybackTimelineAudioSink } from "../playback-timeline/audioSink.js";
 import type {
   PlaybackTimelineSnapshot,
 } from "../playback-timeline/contracts.js";
@@ -142,15 +141,18 @@ export interface AdapterConnectionInstance {
   startPttCapture: ReturnType<typeof createAdapterMicrophoneRuntime>["startPttCapture"];
   stopPttCapture: ReturnType<typeof createAdapterMicrophoneRuntime>["stopPttCapture"];
   pushHistory: (role: DesktopHistoryEntry["role"], text: string) => void;
+  buildPlaybackTimelineRuntimeDeps: (
+    motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start" | "interrupt">,
+  ) => PlaybackTimelineRuntimeDeps<NormalizedMotionPayload>;
+  attachPlaybackTimelineRuntime: (
+    runtime: PlaybackTimelineRuntime<NormalizedMotionPayload>,
+    audioSink: PlaybackTimelineAudioSink,
+  ) => void;
 }
 
 interface CreateAdapterConnectionOptions {
   sessionStore: SessionStore;
   modelSync: ModelSyncInstance;
-  motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start" | "interrupt">;
-  createPlaybackTimelineRuntime: (
-    deps: PlaybackTimelineRuntimeDeps<NormalizedMotionPayload>,
-  ) => PlaybackTimelineRuntime<NormalizedMotionPayload>;
 }
 
 export function createAdapterConnection(
@@ -175,6 +177,7 @@ export function createAdapterConnection(
   let audioTimelineStartedHandler: AudioTimelineStartedHandler | null = null;
   let audioTimelineDurationReadyHandler: AudioTimelineDurationReadyHandler | null = null;
   let detachPttHookStatusListener: (() => void) | null = null;
+  let audioRuntime: AdapterAudioRuntime | null = null;
 
   function buildMessageEnvelope<TPayload>(
     type: string,
@@ -240,46 +243,106 @@ export function createAdapterConnection(
     stopPttCapture,
   } = microphoneRuntime;
 
-  const audioRuntime = createAdapterAudioRuntime({
-    state,
-    audioSink: createBrowserAudioTimelineSink(),
-    pushHistory: pushHistory as (role: string, text: string) => void,
-    getSessionStore: () => sessionStore,
-    segmentExecution: {
-      session: {
-        markSessionFailed: sessionStore.markSessionFailed,
-        markTextReleased: sessionStore.markTextReleased,
-        markAudioReleased: sessionStore.markAudioReleased,
-        markMotionReleased: sessionStore.markMotionReleased,
-        markPhase: sessionStore.markPhase,
-      },
-      textSink: {
-        releaseAssistantTextForPlayback,
-        failAssistantTextForPlayback: (messageId, turnId, reason) =>
-          queuedTextSegmentSink.failAssistantTextForPlayback(
-            messageId,
-            turnId,
-            reason,
-          ),
-      },
-      motionSink: options.motionSink,
-    },
-    createPlaybackTimelineRuntime: options.createPlaybackTimelineRuntime,
-    onAudioTimelineStarted: (turnId, messageId, playbackTimeline) =>
-      audioTimelineStartedHandler?.(turnId, messageId, playbackTimeline),
-    onAudioTimelineDurationReady: (turnId, messageId, playbackTimeline) =>
-      audioTimelineDurationReadyHandler?.(turnId, messageId, playbackTimeline),
-  });
+  function requireAudioRuntime(): AdapterAudioRuntime {
+    if (!audioRuntime) {
+      throw new Error("PlaybackTimelineRuntime has not been attached to the adapter.");
+    }
+    return audioRuntime;
+  }
 
-  const {
-    queueAudioForPlayback,
-    hasPendingAudioForTurn,
-    resetAudioPlaybackTerminal,
-    stopAudioAndSettleTurn,
-    stopAudioAndSettleAll,
-    findActiveAudioSegment,
-    findOpenAudioSegment,
-  } = audioRuntime;
+  function buildPlaybackTimelineRuntimeDeps(
+    motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start" | "interrupt">,
+  ): PlaybackTimelineRuntimeDeps<NormalizedMotionPayload> {
+    if (audioRuntime) {
+      throw new Error("PlaybackTimelineRuntime is already attached to the adapter.");
+    }
+    return {
+      segmentExecution: {
+        session: {
+          markSessionFailed: sessionStore.markSessionFailed,
+          markTextReleased: sessionStore.markTextReleased,
+          markAudioReleased: sessionStore.markAudioReleased,
+          markMotionReleased: sessionStore.markMotionReleased,
+          markPhase: sessionStore.markPhase,
+        },
+        textSink: {
+          releaseAssistantTextForPlayback,
+          failAssistantTextForPlayback: (messageId, turnId, reason) =>
+            queuedTextSegmentSink.failAssistantTextForPlayback(
+              messageId,
+              turnId,
+              reason,
+            ),
+        },
+        audioSink: {
+          releaseAudioForPlayback: (messageId, turnId) =>
+            requireAudioRuntime().releaseQueuedAudioForTimelinePlayback(messageId, turnId),
+        },
+        motionSink,
+      },
+      audioSession: {
+        markAudioStarted: sessionStore.markAudioStarted,
+        markAudioDuration: sessionStore.markAudioDuration,
+        markAudioTerminal: sessionStore.markAudioTerminal,
+      },
+      motionSession: {
+        markMotionStarted: sessionStore.markMotionStarted,
+        markMotionCompleted: sessionStore.markMotionCompleted,
+        markMotionFailed: sessionStore.markMotionFailed,
+      },
+      onAudioTimelineStarted: (turnId, messageId, playbackTimeline) =>
+        audioTimelineStartedHandler?.(turnId, messageId, playbackTimeline),
+      onAudioTimelineDurationReady: (turnId, messageId, playbackTimeline) =>
+        audioTimelineDurationReadyHandler?.(turnId, messageId, playbackTimeline),
+    };
+  }
+
+  function attachPlaybackTimelineRuntime(
+    playbackTimelineRuntime: PlaybackTimelineRuntime<NormalizedMotionPayload>,
+    audioSink: PlaybackTimelineAudioSink,
+  ): void {
+    if (audioRuntime) {
+      throw new Error("PlaybackTimelineRuntime may only be attached once.");
+    }
+    audioRuntime = createAdapterAudioRuntime({
+      state,
+      audioSink,
+      playbackTimelineRuntime,
+      pushHistory: pushHistory as (role: string, text: string) => void,
+    });
+  }
+
+  function queueAudioForPlayback(
+    audioUrl: string,
+    turnId: string | null,
+    messageId: string,
+  ): void {
+    requireAudioRuntime().queueAudioForPlayback(audioUrl, turnId, messageId);
+  }
+
+  function hasPendingAudioForTurn(turnId: string | null): boolean {
+    return requireAudioRuntime().hasPendingAudioForTurn(turnId);
+  }
+
+  function resetAudioPlaybackTerminal(): void {
+    requireAudioRuntime().resetAudioPlaybackTerminal();
+  }
+
+  function stopAudioAndSettleTurn(turnId: string | null, reason: string): void {
+    requireAudioRuntime().stopAudioAndSettleTurn(turnId, reason);
+  }
+
+  function stopAudioAndSettleAll(reason: string): void {
+    requireAudioRuntime().stopAudioAndSettleAll(reason);
+  }
+
+  function findActiveAudioSegment() {
+    return requireAudioRuntime().findActiveAudioSegment();
+  }
+
+  function findOpenAudioSegment() {
+    return requireAudioRuntime().findOpenAudioSegment();
+  }
 
   const inboundRuntime = createAdapterInboundRuntime({
     state,
@@ -725,20 +788,18 @@ export function createAdapterConnection(
     startPttCapture,
     stopPttCapture,
     pushHistory,
+    buildPlaybackTimelineRuntimeDeps,
+    attachPlaybackTimelineRuntime,
   };
 }
 
 export function useAdapterConnection(
   sessionStore: SessionStore,
   modelSync: ModelSyncInstance,
-  motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start" | "interrupt">,
-  createPlaybackTimelineRuntime: CreateAdapterConnectionOptions["createPlaybackTimelineRuntime"],
 ): AdapterConnectionInstance {
   const connection = createAdapterConnection({
     sessionStore,
     modelSync,
-    motionSink,
-    createPlaybackTimelineRuntime,
   });
 
   onScopeDispose(() => {

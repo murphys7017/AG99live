@@ -1,9 +1,9 @@
 task:
-  class: documentation
-  risk: medium
-  phase: architecture_diagram_atlas
+  class: refactor
+  risk: high
+  phase: architecture_boundary_cleanup
   status: complete
-  scope: Build a detailed Mermaid atlas for system structure, dependencies, runtime ownership, message flow, motion processing, playback timing, state machines, and diagnostics
+  scope: Remove six confirmed ownership, protocol, prompt-contract, and error-masking defects across the adapter, ModelEngine, PlaybackTimeline, and App composition root
 context:
   confidence: high
   assumptions:
@@ -218,7 +218,7 @@ architecture:
     - Frontend and adapter motion-intent boundaries are now v3-only; v2 nested axes are treated as invalid input instead of being normalized forward.
     - TurnCoordinator sanitizes hidden motion markup, requires Plain, semantic text, and Record.text candidates to agree, and emits one canonical segment text while preserving raw assistant output in Motion Lab records.
     - Performance curve timing adds an optional `performance_curve_hint` to semantic motion intents v3/v4; frontend ModelEngine resolves it into timing plus a validated preset name consumed by the Live2D per-frame easing layer.
-    - Performance curve generation uses the current turn chat Provider as an auxiliary call and does not add the curve request to AstrBot chat history.
+    - Performance curve generation requires an explicitly configured dedicated chat Provider and never reuses the current turn chat Provider; the auxiliary request is not added to AstrBot chat history.
     - fallback pose candidates can now include semantic metadata from motion catalog entries and key semantic axes derived from motion_resource_pool driver components.
     - middleware motion prompt now names axes as a semantic-axis target group instead of a plain field and exposes fallback candidate descriptions, scenarios, intensity, emotion bias, and key axes.
     - middleware motion prompt examples should use a small set of visible non-neutral axis values and show 2-4 non-default fallback pose candidates selected by axis/pose descriptors rather than coarse emotion labels.
@@ -472,6 +472,12 @@ verification:
     - git diff --check (passed)
     - Mermaid CLI 11.16.0 parsed and rendered all 17 docs/04-流程图与分析图/*.mmd sources successfully; temporary SVG validation outputs were removed
     - architecture atlas hygiene scan found no empty files, trailing whitespace, stale diagram paths, or committed PNG/SVG/PDF derivatives
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests -q (288 passed after strict Provider, scanner, prompt, and legacy-path cleanup)
+    - npm test (complete frontend suite passed after app-owned Timeline, segment-bound audio clock, speech-only request, snapshot, and release ownership cleanup)
+    - npm run typecheck and npm run build:web (passed after final review)
+    - python -m compileall -q astrbot_plugin_ag99live_adapter and AstrBot plugin checker (passed; checker reported 0 errors and 0 warnings)
+    - Mermaid CLI 11.16.0 parsed the two updated ownership and unified-clock diagrams successfully; temporary SVG outputs were removed
+    - git diff --check (passed after final review)
   checks_failed: []
   validation_gap: A live Electron end-to-end conversation is still needed to verify output.segment delivery, real audio-clock release, lip sync, and motion start against an installed AstrBot instance and Live2D model.
 runtime:
@@ -490,7 +496,7 @@ backlog:
     status: mvp_implemented
     summary: Add an independent small-model performance curve layer for speech-synchronized motion timing.
     notes:
-      - Performance curve generation supports an independently configured performance_curve_provider_id; leaving it empty intentionally follows the current turn chat Provider, and no model-timeout config is exposed.
+      - Performance curve generation requires an independently configured performance_curve_provider_id; empty, missing, or non-chat Provider bindings fail configuration and never reuse the current turn chat Provider.
       - Curve generation and lookup are bound by turn_id plus message_id to keep multi-segment turns aligned.
       - Symbolic curve hints are generated asynchronously after assistant text is available and never block TTS or playback; if not ready before motion egress, the task is cancelled and playback falls back to default timing.
       - Requested, resolved, failed, and attached curve events are stored in Motion Lab SQLite raw events.

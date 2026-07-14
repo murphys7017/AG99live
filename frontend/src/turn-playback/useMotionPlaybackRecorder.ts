@@ -118,6 +118,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       raw: {
         record,
         intent: event.payloadKind === "semantic_intent" ? cloneJson(event.intent) : null,
+        speechOnlyRequest: event.payloadKind === "speech_only" ? cloneJson(event.request) : null,
         plan: event.payloadKind === "catalog_motion" ? null : cloneJson(event.plan),
         motion: event.payloadKind === "catalog_motion" ? cloneJson(event.motion) : null,
         diagnostics: event.diagnostics ? cloneJson(event.diagnostics) : null,
@@ -127,14 +128,17 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       },
     };
     options.onMotionLabRawEvent?.(startedPayload, event.turnId);
-    if (event.payloadKind === "semantic_intent") {
+    if (event.payloadKind === "semantic_intent" || event.payloadKind === "speech_only") {
       options.onMotionLabRawEvent?.({
         ...startedPayload,
         event_type: "motion.frontend_compiled",
         phase: "frontend_compiled",
         raw: {
           ...startedPayload.raw,
-          intent: cloneJson(event.intent),
+          intent: event.payloadKind === "semantic_intent" ? cloneJson(event.intent) : null,
+          speechOnlyRequest: event.payloadKind === "speech_only"
+            ? cloneJson(event.request)
+            : null,
           plan: cloneJson(event.plan),
         },
       }, event.turnId);

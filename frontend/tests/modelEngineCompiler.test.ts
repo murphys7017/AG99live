@@ -8,7 +8,7 @@ import {
   startNormalizedMotionPayload,
 } from "../src/model-engine/runtime/motionStart.js";
 import { retimeSemanticParameterPlan } from "../src/model-engine/runtime/playbackClock.js";
-import { buildSpeechOnlyMotionPayload } from "../src/model-engine/runtime/speechOnlyMotion.js";
+import { buildSpeechOnlyMotionRequest } from "../src/model-engine/runtime/speechOnlyMotion.js";
 import { useModelEngine } from "../src/model-engine/useModelEngine.js";
 import { resolveMotionTiming } from "../src/model-engine/timing.js";
 import {
@@ -2202,25 +2202,23 @@ function testPerformanceCurveHintAdjustsSpeechIdleTiming(): void {
 
 function testSpeechOnlyPayloadUsesSelectedModelProfile(): void {
   const profile = buildProfile();
-  const payload = buildSpeechOnlyMotionPayload(
+  const request = buildSpeechOnlyMotionRequest(
     buildModelWithVoiceFollowingProfile(profile),
   );
 
-  assert.ok(payload);
-  assert.equal(payload.kind, "semantic_intent");
-  assert.equal(payload.intent.profile_id, profile.profile_id);
-  assert.equal(payload.intent.profile_revision, profile.revision);
-  assert.equal(payload.intent.model_id, profile.model_id);
-  assert.equal(payload.intent.mode, "idle");
-  assert.equal(payload.intent.emotion_label, "speech");
-  assert.deepEqual(payload.intent.axes, {});
+  assert.deepEqual(request, {
+    kind: "speech_only",
+    profileId: profile.profile_id,
+    profileRevision: profile.revision,
+    modelId: profile.model_id,
+  });
 }
 
 function testSpeechOnlyPayloadRequiresVoiceFollowingProfile(): void {
   const profile = buildProfile();
 
-  assert.equal(buildSpeechOnlyMotionPayload(buildModel(profile)), null);
-  assert.equal(buildSpeechOnlyMotionPayload(null), null);
+  assert.equal(buildSpeechOnlyMotionRequest(buildModel(profile)), null);
+  assert.equal(buildSpeechOnlyMotionRequest(null), null);
 }
 
 function testSpeechOnlyPlaybackUsesTimelineDuration(): void {

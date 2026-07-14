@@ -440,36 +440,14 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
         parameter_lookup=parameter_lookup,
         motion_catalog=motion_catalog.get("motions", {}),
     )
-    try:
-        base_action_library = _build_base_action_library(
-            parameter_scan=parameter_scan,
-            motions=motions,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Failed to build base action library for model `%s`, fallback to empty seed: %s",
-            model_dir.name,
-            exc,
-        )
-        base_action_library = _build_empty_base_action_library(
-            parameter_scan=parameter_scan,
-            error=str(exc),
-        )
-    try:
-        parameter_action_library = _build_parameter_action_library(
-            parameter_scan=parameter_scan,
-            motions=motions,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Failed to build parameter action library for model `%s`, fallback to empty seed: %s",
-            model_dir.name,
-            exc,
-        )
-        parameter_action_library = _build_empty_parameter_action_library(
-            parameter_scan=parameter_scan,
-            error=str(exc),
-        )
+    base_action_library = _build_base_action_library(
+        parameter_scan=parameter_scan,
+        motions=motions,
+    )
+    parameter_action_library = _build_parameter_action_library(
+        parameter_scan=parameter_scan,
+        motions=motions,
+    )
     adaptive_parameter_profile = _build_adaptive_parameter_profile(
         parameter_scan=parameter_scan,
         motions=motions,
@@ -1164,105 +1142,6 @@ def _build_base_action_library(
     }
 
 
-def _build_empty_base_action_library(
-    *,
-    parameter_scan: dict[str, Any],
-    error: str,
-) -> dict[str, Any]:
-    standard_channels = parameter_scan.get("standard_channels", {})
-    channel_rank = {
-        spec["name"]: index for index, spec in enumerate(CORE_BASE_ACTION_CHANNEL_SPECS)
-    }
-    family_entries: dict[str, dict[str, Any]] = {}
-    channel_entries: list[dict[str, Any]] = []
-
-    for spec in CORE_BASE_ACTION_CHANNEL_SPECS:
-        family_payload = family_entries.setdefault(
-            str(spec["family"]),
-            {
-                "name": spec["family"],
-                "label": spec["family_label"],
-                "channels": [],
-                "atom_ids": [],
-            },
-        )
-        channel_name = str(spec["name"])
-        if channel_name not in family_payload["channels"]:
-            family_payload["channels"].append(channel_name)
-
-        standard_entry = standard_channels.get(channel_name, {})
-        channel_entries.append(
-            {
-                "name": channel_name,
-                "label": spec["label"],
-                "family": spec["family"],
-                "family_label": spec["family_label"],
-                "domain": spec["domain"],
-                "available": bool(standard_entry.get("available")),
-                "primary_parameter_id": str(
-                    standard_entry.get("primary_parameter_id") or ""
-                ).strip(),
-                "primary_parameter_name": str(
-                    standard_entry.get("primary_parameter_name") or ""
-                ).strip(),
-                "candidate_parameter_ids": list(
-                    standard_entry.get("candidate_parameter_ids", [])
-                ),
-                "candidate_component_count": 0,
-                "selected_atom_count": 0,
-                "polarity_modes": [],
-                "atom_ids": [],
-            }
-        )
-
-    family_rank = {
-        spec["family"]: index for index, spec in enumerate(CORE_BASE_ACTION_CHANNEL_SPECS)
-    }
-    families = sorted(
-        (
-            {
-                "name": payload["name"],
-                "label": payload["label"],
-                "channels": sorted(
-                    payload["channels"],
-                    key=lambda channel_name: channel_rank.get(channel_name, 999),
-                ),
-                "atom_ids": [],
-                "atom_count": 0,
-            }
-            for payload in family_entries.values()
-        ),
-        key=lambda item: (family_rank.get(item["name"], 999), item["name"]),
-    )
-
-    return {
-        "schema_version": BASE_ACTION_LIBRARY_SCHEMA_VERSION,
-        "extraction_mode": "rule_seed",
-        "analysis": {
-            "status": "failed",
-            "mode": "rule_seed",
-            "provider_id": "",
-            "error": error,
-        },
-        "focus_channels": [spec["name"] for spec in CORE_BASE_ACTION_CHANNEL_SPECS],
-        "focus_domains": sorted({spec["domain"] for spec in CORE_BASE_ACTION_CHANNEL_SPECS}),
-        "ignored_domains": ["hair", "accessory", "limb", "physics", "marker", "other"],
-        "summary": {
-            "motion_count": 0,
-            "available_channel_count": len(
-                [item for item in channel_entries if item["available"]]
-            ),
-            "selected_channel_count": 0,
-            "candidate_component_count": 0,
-            "selected_atom_count": 0,
-            "family_count": len(families),
-        },
-        "families": families,
-        "channels": channel_entries,
-        "atoms": [],
-    }
-
-
 def _build_parameter_action_library(
     *,
     parameter_scan: dict[str, Any],
@@ -1412,49 +1291,6 @@ def _build_parameter_action_library(
         "channels": _counter_to_ranked_list(channel_counts),
         "parameters": parameter_entries,
         "atoms": atoms,
-    }
-
-
-def _build_empty_parameter_action_library(
-    *,
-    parameter_scan: dict[str, Any],
-    error: str,
-) -> dict[str, Any]:
-    domains = Counter(
-        str(item.get("domain") or "other")
-        for item in parameter_scan.get("parameters", [])
-        if isinstance(item, dict)
-    )
-    channels = Counter(
-        channel_name
-        for item in parameter_scan.get("parameters", [])
-        if isinstance(item, dict)
-        for channel_name in item.get("channels", [])
-        if channel_name
-    )
-    return {
-        "schema_version": PARAMETER_ACTION_LIBRARY_SCHEMA_VERSION,
-        "extraction_mode": "rule_seed",
-        "analysis": {
-            "status": "failed",
-            "mode": "parameter_track",
-            "provider_id": "",
-            "error": error,
-        },
-        "summary": {
-            "motion_count": 0,
-            "driver_component_count": 0,
-            "candidate_atom_count": 0,
-            "selected_atom_count": 0,
-            "candidate_parameter_count": 0,
-            "selected_parameter_count": 0,
-            "domain_count": len(domains),
-            "channel_count": len(channels),
-        },
-        "domains": _counter_to_ranked_list(domains),
-        "channels": _counter_to_ranked_list(channels),
-        "parameters": [],
-        "atoms": [],
     }
 
 

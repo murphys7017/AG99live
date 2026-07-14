@@ -14,13 +14,9 @@ _plugin_context: Any = None
 _plugin_config: Any = None
 _plugin_config_path: str | None = None
 PLUGIN_CONFIG_BASENAME = "astrbot_plugin_ag99live_adapter_config.json"
-LEGACY_PLUGIN_CONFIG_BASENAMES = (
-    "adapter_config.json",
-    "astrbot_plugin_self_open_llm_vtuber_config.json",
-)
 _default_plugin_config_paths = tuple(
     os.path.join(get_astrbot_config_path(), filename)
-    for filename in (PLUGIN_CONFIG_BASENAME, *LEGACY_PLUGIN_CONFIG_BASENAMES)
+    for filename in (PLUGIN_CONFIG_BASENAME,)
 )
 
 

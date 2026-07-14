@@ -606,18 +606,6 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     )
     persona_effect_available = bool(capability_payload.get("persona_effect_available", True))
     axis_field_name = "axis_levels" if persona_effect_available else "axes"
-    optional_fields = ["duration_hint_ms"]
-    if has_expression_resources:
-        optional_fields.append("expression_resource_id")
-    if has_motion_resources:
-        optional_fields.append("motion_resource_id")
-    allowed_fields_text = (
-        "必填字段是 intent_tags，并且 axis_levels 与 motion_steps 必须二选一；"
-        f"可选字段只有 {'、'.join(optional_fields)}。"
-        if persona_effect_available
-        else f"必填字段是 intent_tags 和 {axis_field_name}；"
-        f"可选字段只有 {'、'.join(optional_fields)}。"
-    )
     resource_field_text = (
         "expression_resource_id 表示可与不冲突姿态叠加的表情资源；"
         "motion_resource_id 表示替代普通参数姿态播放的完整动作资源；"
@@ -638,7 +626,6 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
             "每个回复片段必须且只能调用一次动作效果；"
             "不要用多个动作调用表达动作序列。"
             f"{sequence_guidance}"
-            f"{allowed_fields_text}"
         )
         output_shape_text = ""
     else:
@@ -656,12 +643,12 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         output_contract_text = (
             "当前 AstrBot 运行环境不支持动作注入函数；请把动作参数放入官方兼容标签 "
             "<@anim {...}>，并追加在回复末尾。标签外层只作为传输包装，内部 intent "
-            f"字段必须是 engine.motion_intent.v3，且遵循当前动作参数契约。{allowed_fields_text}"
+            "字段必须是 engine.motion_intent.v3，且遵循当前动作参数契约。"
         )
         output_shape_text = f" 输出标签示例：<@anim {inline_json}>"
 
     axis_instruction = (
-        "每个值必须是 -4 到 4 的整数等级：-4=夸张负、-3=清晰可见负、-2=克制负、-1=细节负、"
+        "等级语义是：-4=夸张负、-3=清晰可见负、-2=克制负、-1=细节负、"
         "0=明确中性、+1=细节正、+2=克制正、+3=清晰可见正、+4=夸张正；省略表示本轮不控制此轴；"
         "没有明确方向或表演贡献的轴直接省略。"
         if persona_effect_available
@@ -669,18 +656,17 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     )
     axis_shape_text = (
         "单姿态使用 axis_levels；动作序列使用 motion_steps。两者必须且只能选择一个。"
-        "motion_steps 每步都必须提供 axis_levels 和 duration_weight；所有步骤必须使用完全相同的轴集合，"
-        "duration_weight 只能是 1 到 3 的整数。axis_levels 只能使用下方列出的轴 id。"
+        "motion_steps 的所有步骤必须使用完全相同的轴集合。axis_levels 只能使用下方列出的轴 id。"
         if persona_effect_available
         else f"{axis_field_name} 是必填对象，只能使用下方列出的轴 id。"
     )
     return (
         f"{output_contract_text}"
-        "intent_tags 用 1 到 6 个开放关键词概括本轮语气、姿态和场景。"
+        "intent_tags 用开放关键词概括本轮语气、姿态和场景。"
         f"{resource_field_text}"
         f"{axis_shape_text}"
         f"{axis_instruction}"
-        "只输出本轮直接需要控制的轴，最多 6 个；关系图可派生的跟随轴不要为了凑完整而重复输出。"
+        "只输出本轮直接需要控制的轴；关系图可派生的跟随轴不要为了凑完整而重复输出。"
         "优先选择能表达姿态方向、视线焦点和身体重心的关键轴，再用少量表情轴补充情绪细节。"
         "普通回复的主要姿态轴从 3 级开始；2 级用于克制表达，1 级仅用于细节，4 级用于短暂夸张表演。"
         "示例只展示结构和数值，不要照抄示例内容。"

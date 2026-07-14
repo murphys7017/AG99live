@@ -194,7 +194,7 @@
     "default": false
   },
   "performance_curve_provider_id": {
-    "description": "表演曲线提示生成使用的聊天 Provider。留空时回退到当前 AstrBot 会话聊天模型。",
+    "description": "表演曲线提示生成专用的聊天 Provider。启用表演曲线时必须选择，且不会复用当前会话聊天模型。",
     "type": "string",
     "default": "",
     "_special": "select_provider"

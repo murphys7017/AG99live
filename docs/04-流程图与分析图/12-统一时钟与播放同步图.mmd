@@ -32,7 +32,8 @@ sequenceDiagram
             Engine->>Engine: 编译 axis graph / gesture / timing / curve
             Engine-->>TL: prepared plan / explicit failure
         else motion.state = absent 且 voice-following 可用
-            TL->>Engine: prepare speech-only plan
+            TL->>Engine: prepare internal speech_only request
+            Engine->>Engine: 在编译边界适配为 parameter plan
             Engine-->>TL: prepared / not_applicable / failure
             opt prepared
                 TL->>TL: 升级并注册 required motion sink
@@ -41,8 +42,8 @@ sequenceDiagram
 
         Note over Audio,TL: loadedmetadata 只用于准备；<br/>不能作为“声音已开始”的事实。
 
-        Audio-->>TL: playing
-        TL->>Clock: attach current AudioElement clock
+        Audio-->>TL: playing(startedAt, duration, segment-bound clock)
+        TL->>Clock: attach event 携带的 AudioElement clock
         Clock-->>TL: currentTime/duration/playbackRate/playing
         TL->>Projection: markAudioStarted(startedAt,duration)
         Projection->>Store: audio.started
@@ -63,6 +64,7 @@ sequenceDiagram
             Projection->>Store: motion.started
         end
 
+        Note over Audio,Clock: Clock 永久绑定该 segment 创建的 AudioElement；<br/>禁止查询全局 active audio element。
         Note over Engine,SDK: 不添加固定 90ms/260ms 延迟。<br/>视觉入场延迟只来自 parameter plan / performance curve。
 
         loop 每个渲染帧

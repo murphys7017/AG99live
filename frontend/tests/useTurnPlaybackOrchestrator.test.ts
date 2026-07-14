@@ -237,7 +237,6 @@ function createHarness(options: {
   };
 
   const timelineRuntime = createPlaybackTimelineRuntime({
-    getAudioClock: () => null,
     motionSession: {
       markMotionStarted: sessionStore.markMotionStarted,
       markMotionCompleted: sessionStore.markMotionCompleted,
@@ -830,7 +829,6 @@ function createRuntimeWithSegmentExecutionPorts(
   ports: PlaybackTimelineSegmentExecutionPorts<NormalizedMotionPayload>,
 ) {
   const runtime = createPlaybackTimelineRuntime({
-    getAudioClock: () => null,
   });
   runtime.configureSegmentExecution(ports);
   return runtime;

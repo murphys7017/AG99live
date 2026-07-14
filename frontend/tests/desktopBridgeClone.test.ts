@@ -3,7 +3,10 @@
 
 import assert from "node:assert/strict";
 import { createDesktopBridge } from "../src/desktop-bridge/useDesktopBridge.js";
-import { defaultSnapshot } from "../src/desktop-bridge/snapshot/runtimeSnapshot.js";
+import {
+  defaultSnapshot,
+  normalizeSnapshot,
+} from "../src/desktop-bridge/snapshot/runtimeSnapshot.js";
 import type { DesktopRuntimeSnapshot } from "../src/types/desktop.js";
 
 class StrictBroadcastChannel {
@@ -113,6 +116,52 @@ function testPublishSnapshotStripsUncloneableRuntimeValues(): void {
         },
         plan: null,
       },
+      {
+        id: "motion-speech-only",
+        createdAt: "2026-06-05T00:00:01.000Z",
+        source: "playback_timeline_started",
+        payloadKind: "speech_only",
+        messageId: "message-speech-only",
+        turnId: "turn-1",
+        playbackTurnId: "turn-1",
+        modelName: "model-1",
+        emotionLabel: "speech",
+        mode: "idle",
+        startReason: "speech_only",
+        queuedDelayMs: 0,
+        assistantText: "hello",
+        playerMessage: "playing",
+        diagnostics: null,
+        plan: {
+          schema_version: "engine.parameter_plan.v2",
+          profile_id: "profile-1",
+          profile_revision: 1,
+          model_id: "model-1",
+          mode: "idle",
+          emotion_label: "speech",
+          timing: {
+            duration_ms: 1000,
+            blend_in_ms: 100,
+            hold_ms: 700,
+            blend_out_ms: 200,
+          },
+          parameters: [{
+            axis_id: "head_yaw",
+            parameter_id: "ParamAngleX",
+            target_value: 3,
+            neutral_target_value: 0,
+            weight: 1,
+            input_value: 53,
+            source: "speech_pose",
+            dynamics: {
+              max_velocity: 24,
+              max_acceleration: 72,
+              life_motion_scale: 0.2,
+              max_speech_offset: 4,
+            },
+          }],
+        },
+      },
     ],
     historyEntries: [
       {
@@ -143,9 +192,27 @@ function testPublishSnapshotStripsUncloneableRuntimeValues(): void {
       ?.axisSampling?.sampledValues.head_yaw,
     64.2,
   );
+  assert.equal(message.snapshot.motionPlaybackRecords[1]?.payloadKind, "speech_only");
 
   bridge.dispose();
 }
 
+function testRuntimeSnapshotRequiresPublisherIdentity(): void {
+  const missingPublisher = { ...defaultSnapshot } as Partial<DesktopRuntimeSnapshot>;
+  delete missingPublisher._publisherId;
+  assert.throws(
+    () => normalizeSnapshot(missingPublisher as DesktopRuntimeSnapshot),
+    /runtime_snapshot_publisher_id_missing/,
+  );
+
+  const missingRevision = { ...defaultSnapshot } as Partial<DesktopRuntimeSnapshot>;
+  delete missingRevision._revision;
+  assert.throws(
+    () => normalizeSnapshot(missingRevision as DesktopRuntimeSnapshot),
+    /runtime_snapshot_revision_invalid/,
+  );
+}
+
 testPublishSnapshotStripsUncloneableRuntimeValues();
+testRuntimeSnapshotRequiresPublisherIdentity();
 console.log("desktopBridgeClone tests passed");

@@ -3,7 +3,7 @@ import { createModelEngineStageRegistry } from "../compiler/registry.js";
 import { MOTION_MIN_REMAINING_AUDIO_MS } from "../constants.js";
 import type { NormalizedMotionPayload } from "../contracts.js";
 import type { CompileDiagnostics } from "../compiler/contracts.js";
-import type { MotionPlanPayload } from "../../types/protocol.js";
+import type { MotionPlanPayload, SemanticMotionIntent } from "../../types/protocol.js";
 import {
   resolvePerformanceCurveTimeline,
   resolvePlaybackTargetDurationMs,
@@ -15,12 +15,28 @@ import type {
   MotionStartDependencies,
 } from "./contracts.js";
 import type { StartPayloadContext } from "./motionRuntimeScheduler.js";
+import {
+  buildSpeechOnlyCompilerIntent,
+  type SpeechOnlyMotionRequest,
+} from "./speechOnlyMotion.js";
 
 export interface PreparedSemanticMotionPayload {
   modelPath: string;
   plan: MotionPlanPayload;
   diagnostics: CompileDiagnostics;
 }
+
+type SemanticIntentPayload = Extract<
+  NormalizedMotionPayload,
+  { kind: "semantic_intent" }
+>;
+
+interface SpeechOnlyPayload {
+  kind: "speech_only";
+  request: SpeechOnlyMotionRequest;
+}
+
+type CompilableMotionPayload = SemanticIntentPayload | SpeechOnlyPayload;
 
 export function reportInvalidMotionPayload(
   reason: string,
@@ -66,7 +82,7 @@ export function startNormalizedMotionPayload(
   });
 
   if (payload.kind === "semantic_intent") {
-    return startSemanticIntentPayload(
+    return startCompilableMotionPayload(
       payload,
       context,
       dependencies,
@@ -79,6 +95,22 @@ export function startNormalizedMotionPayload(
   }
 
   return startDirectPlanPayload(payload, context, dependencies, state);
+}
+
+export function startSpeechOnlyMotionRequest(
+  request: SpeechOnlyMotionRequest,
+  context: StartPayloadContext,
+  dependencies: MotionStartDependencies,
+  state: MotionRuntimeStateController,
+  preparedSemanticMotion: PreparedSemanticMotionPayload | null,
+): boolean {
+  return startCompilableMotionPayload(
+    { kind: "speech_only", request },
+    context,
+    dependencies,
+    state,
+    preparedSemanticMotion,
+  );
 }
 
 function resolveTimelineTargetDurationMs(
@@ -107,7 +139,30 @@ function isSpeechActiveForPayload(
 }
 
 export function prepareSemanticMotionPayload(
-  payload: Extract<NormalizedMotionPayload, { kind: "semantic_intent" }>,
+  payload: SemanticIntentPayload,
+  context: StartPayloadContext,
+  dependencies: MotionStartDependencies,
+  state: MotionRuntimeStateController,
+): PreparedSemanticMotionPayload | null {
+  return prepareCompilableMotionPayload(payload, context, dependencies, state);
+}
+
+export function prepareSpeechOnlyMotionRequest(
+  request: SpeechOnlyMotionRequest,
+  context: StartPayloadContext,
+  dependencies: MotionStartDependencies,
+  state: MotionRuntimeStateController,
+): PreparedSemanticMotionPayload | null {
+  return prepareCompilableMotionPayload(
+    { kind: "speech_only", request },
+    context,
+    dependencies,
+    state,
+  );
+}
+
+function prepareCompilableMotionPayload(
+  payload: CompilableMotionPayload,
   context: StartPayloadContext,
   dependencies: MotionStartDependencies,
   state: MotionRuntimeStateController,
@@ -124,9 +179,9 @@ export function prepareSemanticMotionPayload(
   state.setState("compiling", "正在编译动作意图...", null);
   let targetDurationMs = resolveMotionTargetDurationMs(context);
   let speechActive = isSpeechActiveForPayload(context);
-  const intent = payload.intent;
+  const intent = resolveCompilerIntent(payload);
   const runtimeWarnings: string[] = [];
-  const performanceCurveHint = payload.intent.performance_curve_hint ?? null;
+  const performanceCurveHint = intent.performance_curve_hint ?? null;
   if (performanceCurveHint) {
     const curveTimeline = resolvePerformanceCurveTimeline({
       hint: performanceCurveHint,
@@ -167,8 +222,7 @@ export function prepareSemanticMotionPayload(
       diagnostics: compileResult.diagnostics,
     });
     const failureMessage = `动作意图编译失败：${compileResult.reason}`;
-    dependencies.onCompileFailed?.({
-      intent,
+    const failureEventBase = {
       model: selectedModel,
       messageId: context.messageId,
       turnId: context.turnId,
@@ -178,7 +232,20 @@ export function prepareSemanticMotionPayload(
       reason: compileResult.reason,
       diagnostics: compileResult.diagnostics,
       feedback: compileResult.feedback ?? null,
-    });
+    };
+    dependencies.onCompileFailed?.(
+      payload.kind === "speech_only"
+        ? {
+            ...failureEventBase,
+            payloadKind: "speech_only",
+            request: payload.request,
+          }
+        : {
+            ...failureEventBase,
+            payloadKind: "semantic_intent",
+            intent,
+          },
+    );
     state.setState("failed", failureMessage, compileResult.diagnostics);
     state.pushHistory("error", failureMessage);
     return null;
@@ -196,6 +263,12 @@ export function prepareSemanticMotionPayload(
     plan: compileResult.plan,
     diagnostics: compileResult.diagnostics,
   };
+}
+
+function resolveCompilerIntent(payload: CompilableMotionPayload): SemanticMotionIntent {
+  return payload.kind === "speech_only"
+    ? buildSpeechOnlyCompilerIntent(payload.request)
+    : payload.intent;
 }
 
 function startCatalogMotionPayload(
@@ -246,8 +319,8 @@ function startCatalogMotionPayload(
   return true;
 }
 
-function startSemanticIntentPayload(
-  payload: Extract<NormalizedMotionPayload, { kind: "semantic_intent" }>,
+function startCompilableMotionPayload(
+  payload: CompilableMotionPayload,
   context: StartPayloadContext,
   dependencies: MotionStartDependencies,
   state: MotionRuntimeStateController,
@@ -269,7 +342,7 @@ function startSemanticIntentPayload(
       state.pushHistory("error", `动作启动失败：${reason}`);
       return false;
     }
-    prepared = prepareSemanticMotionPayload(
+    prepared = prepareCompilableMotionPayload(
       payload,
       context,
       dependencies,
@@ -287,7 +360,7 @@ function startSemanticIntentPayload(
     return false;
   }
 
-  if (prepared.plan.resource?.kind === "motion") {
+  if (payload.kind === "semantic_intent" && prepared.plan.resource?.kind === "motion") {
     return startCompiledMotionResource(
       payload,
       prepared.plan,
@@ -310,8 +383,7 @@ function startSemanticIntentPayload(
           return;
         }
         notifiedStarted = true;
-        dependencies.onPlanStarted({
-          intent: payload.intent,
+        const eventBase = {
           plan,
           model: selectedModel,
           messageId: context.messageId,
@@ -323,7 +395,20 @@ function startSemanticIntentPayload(
           diagnostics: prepared.diagnostics,
           playerMessage: buildSuccessMessage(context, dependencies),
           runId: normalizedRunId,
-        });
+        };
+        dependencies.onPlanStarted(
+          payload.kind === "speech_only"
+            ? {
+                ...eventBase,
+                payloadKind: "speech_only",
+                request: payload.request,
+              }
+            : {
+                ...eventBase,
+                payloadKind: "semantic_intent",
+                intent: payload.intent,
+              },
+        );
       },
     },
   );

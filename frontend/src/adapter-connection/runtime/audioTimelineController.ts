@@ -18,11 +18,7 @@ import {
   createLive2DLipSyncTimelineSink,
 } from "../../live2d/lipSyncTimelineSink.js";
 import type {
-  PlaybackTimelineSnapshot,
-} from "../../playback-timeline/contracts.js";
-import type {
   PlaybackTimelineRuntime,
-  PlaybackTimelineRuntimeDeps,
 } from "../../playback-timeline/playbackTimelineRuntime.js";
 import {
   startAudioSegmentAndBridgeState,
@@ -32,37 +28,15 @@ import {
   type AudioPlaybackState,
   type AudioPlaybackTerminalState,
 } from "./audioPlaybackStateBridge.js";
-import type {
-  PlaybackTimelineAudioSessionPort,
-  PlaybackTimelineMotionSessionPort,
-} from "../../playback-timeline/playbackTimelineRuntime.js";
-import type {
-  PlaybackTimelineSegmentExecutionPorts,
-} from "../../playback-timeline/segmentJob.js";
 
 export interface AdapterAudioTimelineControllerDeps<TMotionPayload = unknown> {
   state: AudioPlaybackState;
   audioSink: PlaybackTimelineAudioSink;
+  playbackTimelineRuntime: PlaybackTimelineRuntime<TMotionPayload>;
   pushHistory: (role: string, text: string) => void;
-  getAudioSession: () => PlaybackTimelineAudioSessionPort | undefined;
-  getMotionSession: () => PlaybackTimelineMotionSessionPort | undefined;
-  segmentExecution: PlaybackTimelineSegmentExecutionPorts<TMotionPayload>;
-  createPlaybackTimelineRuntime: (
-    deps: PlaybackTimelineRuntimeDeps<TMotionPayload>,
-  ) => PlaybackTimelineRuntime<TMotionPayload>;
   createLipSyncRuntime?: (
     callbacks: PlaybackTimelineLipSyncRuntimeCallbacks,
   ) => PlaybackTimelineLipSyncRuntime;
-  onAudioTimelineStarted?: (
-    turnId: string | null,
-    messageId: string,
-    playbackTimeline: PlaybackTimelineSnapshot | null,
-  ) => void;
-  onAudioTimelineDurationReady?: (
-    turnId: string | null,
-    messageId: string,
-    playbackTimeline: PlaybackTimelineSnapshot,
-  ) => void;
   markTerminal: (
     terminalState: Exclude<AudioPlaybackTerminalState, "idle">,
     turnId: string | null,
@@ -77,18 +51,7 @@ export function createAdapterAudioTimelineController<TMotionPayload = unknown>(
 ) {
   const live2dLipSyncSink = createLive2DLipSyncTimelineSink();
   let activeLipSyncRuntime: PlaybackTimelineLipSyncRuntime | null = null;
-  const playbackTimelineRuntime = deps.createPlaybackTimelineRuntime({
-    getAudioClock: () => deps.audioSink.getClock(),
-    segmentExecution: deps.segmentExecution,
-    get audioSession() {
-      return deps.getAudioSession();
-    },
-    get motionSession() {
-      return deps.getMotionSession();
-    },
-    onAudioTimelineStarted: deps.onAudioTimelineStarted,
-    onAudioTimelineDurationReady: deps.onAudioTimelineDurationReady,
-  });
+  const playbackTimelineRuntime = deps.playbackTimelineRuntime;
 
   const createLipSyncRuntime = (
     callbacks: PlaybackTimelineLipSyncRuntimeCallbacks,

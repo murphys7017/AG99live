@@ -45,14 +45,14 @@ def test_parameter_action_library_is_parameter_granular() -> None:
         assert sorted(item["id"] for item in atoms_by_parameter[parameter_id]) == sorted(atom_ids)
 
 
-def test_empty_parameter_action_library_stays_structurally_valid() -> None:
+def test_parameter_action_library_with_no_motions_stays_structurally_valid() -> None:
     parameter_scan, _ = build_seed_inputs()
-    library = live2d_scan._build_empty_parameter_action_library(
+    library = live2d_scan._build_parameter_action_library(
         parameter_scan=deepcopy(parameter_scan),
-        error="demo failure",
+        motions=[],
     )
 
-    assert library["analysis"]["status"] == "failed"
+    assert library["analysis"]["status"] == "seeded"
     assert library["analysis"]["mode"] == "parameter_track"
     assert library["summary"]["selected_atom_count"] == 0
     assert library["summary"]["candidate_atom_count"] == 0
@@ -287,9 +287,9 @@ def test_seed_model_info_with_reinforced_primary_observations_keeps_voice_follow
 
 def test_adaptive_parameter_profile_returns_legal_empty_structure_with_low_data() -> None:
     parameter_scan, _ = build_seed_inputs()
-    empty_library = live2d_scan._build_empty_parameter_action_library(
+    empty_library = live2d_scan._build_parameter_action_library(
         parameter_scan=deepcopy(parameter_scan),
-        error="seed-empty",
+        motions=[],
     )
     profile = live2d_scan._build_adaptive_parameter_profile(
         parameter_scan=deepcopy(parameter_scan),

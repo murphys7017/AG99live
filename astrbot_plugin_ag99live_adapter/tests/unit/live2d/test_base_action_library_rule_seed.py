@@ -83,22 +83,3 @@ def test_atom_selection_and_summary_fields_are_stable() -> None:
     assert summary["selected_atom_count"] == len(library_a["atoms"])
     assert len(library_a["atoms"]) == len({item["id"] for item in library_a["atoms"]})
 
-
-def test_empty_base_action_library_stays_structurally_valid() -> None:
-    parameter_scan, _ = build_seed_inputs()
-    library = live2d_scan._build_empty_base_action_library(
-        parameter_scan=deepcopy(parameter_scan),
-        error="demo failure",
-    )
-
-    assert library["analysis"]["status"] == "failed"
-    assert library["analysis"]["mode"] == "rule_seed"
-    assert library["atoms"] == []
-    assert library["summary"]["selected_atom_count"] == 0
-    assert library["summary"]["candidate_component_count"] == 0
-    assert library["summary"]["selected_channel_count"] == 0
-
-    family_names = {item["name"] for item in library["families"]}
-    for channel in library["channels"]:
-        assert channel["family"] in family_names
-

@@ -124,6 +124,12 @@ export function safeNormalizeSnapshot(
 
 export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnapshot {
   rejectUnsupportedRuntimeSnapshotFields(snapshot);
+  if (typeof snapshot._publisherId !== "string" || !snapshot._publisherId.trim()) {
+    throw new Error("runtime_snapshot_publisher_id_missing");
+  }
+  if (!Number.isInteger(snapshot._revision) || snapshot._revision < 0) {
+    throw new Error("runtime_snapshot_revision_invalid");
+  }
   const {
     selectedModelName: _selectedModelName,
     selectedModelIconUrl: _selectedModelIconUrl,
@@ -150,6 +156,8 @@ export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRunt
   return {
     ...defaultSnapshot,
     ...runtimeSnapshot,
+    _publisherId: snapshot._publisherId.trim(),
+    _revision: snapshot._revision,
     motionEngineSettings: cloneModelEngineSettings(
       normalizeModelEngineSettings(snapshot.motionEngineSettings),
     ),
@@ -277,6 +285,17 @@ function cloneMotionPlaybackRecord(
         plan: null,
       } satisfies DesktopMotionPlaybackRecord;
     }
+    const payloadKind = normalizeText(record.payloadKind);
+    if (
+      payloadKind !== "semantic_intent"
+      && payloadKind !== "semantic_plan"
+      && payloadKind !== "speech_only"
+    ) {
+      console.warn("[DesktopBridge] unknown motion playback payload kind ignored.", {
+        payloadKind,
+      });
+      return null;
+    }
     const plan = cloneSemanticParameterPlan(record.plan);
     if (!plan) {
       console.warn("[DesktopBridge] invalid motion playback record ignored.", {
@@ -288,9 +307,7 @@ function cloneMotionPlaybackRecord(
     }
     return {
       ...(record as unknown as DesktopMotionPlaybackRecord),
-      payloadKind: normalizeText(record.payloadKind) === "semantic_plan"
-        ? "semantic_plan"
-        : "semantic_intent",
+      payloadKind,
       messageId: normalizeText(record.messageId),
       playbackTurnId,
       emotionLabel: normalizeText(record.emotionLabel) || plan.emotion_label,

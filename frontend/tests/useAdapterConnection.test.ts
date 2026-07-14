@@ -7,6 +7,7 @@ import { useAdapterConnection } from "../src/adapter-connection/useAdapterConnec
 import { createModelSync } from "../src/adapter-connection/model-sync/useModelSync.js";
 import { buildPendingPlaybackKey } from "../src/playback-timeline/playbackReleaseQueue.js";
 import { createPlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
+import { createBrowserAudioTimelineSink } from "../src/playback-timeline/audioSink.js";
 import type { PlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
 import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
 import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
@@ -259,25 +260,23 @@ function createConnectedAdapter() {
   const sessionStore = useTurnPlaybackSessionStore();
   const modelSync = createModelSync();
   const scope = effectScope();
-  let playbackTimeline: PlaybackTimelineRuntime<NormalizedMotionPayload> | null = null;
   const adapter = scope.run(() => useAdapterConnection(
     sessionStore,
     modelSync,
-    {
-      start: () => true,
-      interrupt: () => {},
-    },
-    (deps) => {
-      playbackTimeline = createPlaybackTimelineRuntime(deps);
-      return playbackTimeline;
-    },
   ));
   if (!adapter) {
     throw new Error("expected adapter instance");
   }
-  if (!playbackTimeline) {
-    throw new Error("expected playback timeline runtime");
-  }
+  const playbackTimeline = createPlaybackTimelineRuntime(
+    adapter.buildPlaybackTimelineRuntimeDeps({
+      start: () => true,
+      interrupt: () => {},
+    }),
+  );
+  adapter.attachPlaybackTimelineRuntime(
+    playbackTimeline,
+    createBrowserAudioTimelineSink(),
+  );
   playbackTimelineByAdapter.set(adapter, playbackTimeline);
   adapter.connect();
   const socket = FakeWebSocket.instances[0];

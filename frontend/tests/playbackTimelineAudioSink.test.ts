@@ -334,6 +334,41 @@ async function testBrowserAudioSinkDoesNotOwnLipSyncCallbacks(): Promise<void> {
   }
 }
 
+async function testBrowserAudioSinkPublishesSegmentBoundClocks(): Promise<void> {
+  const originalWindow = (globalThis as { window?: unknown }).window;
+  const originalAudio = (globalThis as { Audio?: unknown }).Audio;
+  (globalThis as { window?: unknown }).window = globalThis;
+  (globalThis as { Audio?: unknown }).Audio = FakeAudio;
+  FakeAudio.instances.length = 0;
+
+  const clocks: Array<Parameters<
+    NonNullable<PlaybackTimelineAudioStartCallbacks["onPlaybackStarted"]>
+  >[0]["clock"]> = [];
+  try {
+    const audioSink = createBrowserAudioTimelineSink();
+    await audioSink.start("http://127.0.0.1/first.wav", {
+      onPlaybackStarted: (event) => clocks.push(event.clock),
+    });
+    await audioSink.start("http://127.0.0.1/second.wav", {
+      onPlaybackStarted: (event) => clocks.push(event.clock),
+    });
+
+    const firstAudio = FakeAudio.instances[0];
+    const secondAudio = FakeAudio.instances[1];
+    firstAudio.currentTime = 0.4;
+    secondAudio.currentTime = 1.1;
+
+    assert.equal(clocks.length, 2);
+    assert.equal(clocks[0]?.getCurrentTimeMs(), 400);
+    assert.equal(clocks[1]?.getCurrentTimeMs(), 1100);
+    assert.equal(clocks[0]?.isPlaying(), false);
+    assert.equal(clocks[1]?.isPlaying(), true);
+  } finally {
+    (globalThis as { window?: unknown }).window = originalWindow;
+    (globalThis as { Audio?: unknown }).Audio = originalAudio;
+  }
+}
+
 async function testAudioSegmentSinkOwnsLipSyncEventOrdering(): Promise<void> {
   const events: string[] = [];
   let callbacksRef: PlaybackTimelineAudioStartCallbacks | null = null;
@@ -349,11 +384,17 @@ async function testAudioSegmentSinkOwnsLipSyncEventOrdering(): Promise<void> {
       callbacks.onPlaybackStarted?.({
         startedAtMs: 10,
         durationMs: 500,
+        clock: createAudioElementPlaybackClock({
+          currentTime: 0,
+          duration: 0.5,
+          playbackRate: 1,
+          paused: false,
+          ended: false,
+        }),
       });
       callbacks.onEnded?.();
     },
     stop: () => events.push("audio:stop"),
-    getClock: () => null,
   };
 
   const segmentSink = createPlaybackTimelineAudioSegmentSink({
@@ -394,10 +435,19 @@ async function testAudioSegmentSinkDoesNotStartLipSyncAfterTimelineRejection(): 
         getAudioCurrentTimeSeconds: () => 0,
         isCurrentAudio: () => true,
       });
-      callbacks.onPlaybackStarted?.({ startedAtMs: 10, durationMs: 500 });
+      callbacks.onPlaybackStarted?.({
+        startedAtMs: 10,
+        durationMs: 500,
+        clock: createAudioElementPlaybackClock({
+          currentTime: 0,
+          duration: 0.5,
+          playbackRate: 1,
+          paused: false,
+          ended: false,
+        }),
+      });
     },
     stop: () => events.push("audio:stop"),
-    getClock: () => null,
   };
   const segmentSink = createPlaybackTimelineAudioSegmentSink({
     audioSink,
@@ -428,6 +478,7 @@ async function run(): Promise<void> {
   await testLiveLipSyncUsesRandomFallbackWhenWebAudioIsUnavailable();
   await testLiveLipSyncPublishesIndependentSpeechEnergyFromAnalyser();
   await testBrowserAudioSinkDoesNotOwnLipSyncCallbacks();
+  await testBrowserAudioSinkPublishesSegmentBoundClocks();
   await testAudioSegmentSinkOwnsLipSyncEventOrdering();
   await testAudioSegmentSinkDoesNotStartLipSyncAfterTimelineRejection();
   console.log("playbackTimelineAudioSink tests passed");
