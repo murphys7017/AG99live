@@ -43,7 +43,12 @@ export function useTurnPlaybackOrchestrator(
         );
       }
 
-      const releaseText = Boolean(segment.text.content) && !segment.text.released;
+      const textOwnedByReleasedAudioTimeline = Boolean(segment.audio.url)
+        && segment.audio.released
+        && segment.audio.terminal === "idle";
+      const releaseText = Boolean(segment.text.content)
+        && !segment.text.released
+        && !textOwnedByReleasedAudioTimeline;
       const releaseAudio = canReleaseAudio(segment);
       const releaseMotion = canReleaseMotion(segment)
         && segment.motion.payload !== null

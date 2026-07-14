@@ -30,12 +30,11 @@ function defaultContext() {
 
 function makeAtomicSegmentPayload() {
   return {
-    schema_version: "output.segment.v2",
+    schema_version: "output.segment.v3",
     text: { state: "present", content: "hello" },
     audio: {
       state: "present",
       url: "https://example.com/a.wav",
-      caption_text: "hello",
     },
     motion: {
       state: "present",
@@ -100,6 +99,46 @@ function testOutputSegmentRejectsRemovedTopLevelPerformanceCurve(): void {
     throw new Error("expected protocol_error event");
   }
   assert.equal(event.error.path, "payload.performance_curve");
+}
+
+function testOutputSegmentRejectsRemovedAudioCaptionText(): void {
+  const payload = makeAtomicSegmentPayload();
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("output.segment", {
+      ...payload,
+      audio: {
+        ...payload.audio,
+        caption_text: "legacy duplicate",
+      },
+    }, { turnId: "turn-1" }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
+  }
+  assert.equal(event.error.path, "payload.audio.caption_text");
+}
+
+function testOutputSegmentRejectsUnknownSlotField(): void {
+  const payload = makeAtomicSegmentPayload();
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("output.segment", {
+      ...payload,
+      text: {
+        ...payload.text,
+        legacy_text: "duplicate",
+      },
+    }, { turnId: "turn-1" }),
+    defaultContext(),
+  );
+
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind !== "protocol_error") {
+    throw new Error("expected protocol_error event");
+  }
+  assert.equal(event.error.path, "payload.text.legacy_text");
 }
 
 function testOutputSegmentRejectsV1Schema(): void {
@@ -270,7 +309,7 @@ function testUnhandledTypeReturnsUnhandled(): void {
 
 function testInvalidOutputSegmentSlotReturnsProtocolError(): void {
   const payload = makeAtomicSegmentPayload();
-  payload.audio = { state: "present", url: "", caption_text: "hello" };
+  payload.audio = { state: "present", url: "" };
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("output.segment", payload, { turnId: "turn-1" }),
     defaultContext(),
@@ -491,6 +530,8 @@ function run(): void {
   testOutputSegmentUsesEnvelopeIdentity();
   testOutputSegmentRequiresTurnId();
   testOutputSegmentRejectsRemovedTopLevelPerformanceCurve();
+  testOutputSegmentRejectsRemovedAudioCaptionText();
+  testOutputSegmentRejectsUnknownSlotField();
   testOutputSegmentRejectsV1Schema();
   testOutputSegmentRejectsMotionMessageTypeMismatch();
   testTurnFinishedWithoutTurnIdIsRejected();

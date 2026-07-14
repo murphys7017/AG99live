@@ -43,6 +43,20 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function validateExactKeys(
+  type: string,
+  path: string,
+  record: Record<string, unknown>,
+  allowedKeys: readonly string[],
+): PayloadParseResult<null> {
+  const allowed = new Set(allowedKeys);
+  const unknownKey = Object.keys(record).find((key) => !allowed.has(key));
+  if (unknownKey) {
+    return invalidPayload(type, `${path}.${unknownKey}`, "declared protocol field");
+  }
+  return { ok: true, payload: null };
+}
+
 function requiredString(
   type: string,
   record: Record<string, unknown>,
@@ -100,30 +114,42 @@ export function parseOutputSegmentPayload(
 ): PayloadParseResult<OutputSegmentPayload> {
   const record = parseObjectPayload(envelope);
   if (!record.ok) return record;
-  if (record.payload.schema_version !== "output.segment.v2") {
-    return invalidPayload(envelope.type, "payload.schema_version", "output.segment.v2");
+  if (record.payload.schema_version !== "output.segment.v3") {
+    return invalidPayload(envelope.type, "payload.schema_version", "output.segment.v3");
   }
-  if ("performance_curve" in record.payload) {
-    return invalidPayload(
-      envelope.type,
-      "payload.performance_curve",
-      "removed; use motion.payload.performance_curve_hint",
-    );
-  }
+  const rootKeys = validateExactKeys(
+    envelope.type,
+    "payload",
+    record.payload,
+    ["schema_version", "text", "audio", "motion", "images", "speaker_name", "avatar"],
+  );
+  if (!rootKeys.ok) return rootKeys;
   const text = parseSegmentTextSlot(envelope.type, record.payload.text);
   if (!text.ok) return text;
   const audio = parseSegmentAudioSlot(envelope.type, record.payload.audio);
   if (!audio.ok) return audio;
+  if (audio.payload.state === "present" && text.payload.state !== "present") {
+    return invalidPayload(
+      envelope.type,
+      "payload.text",
+      "present canonical text when audio is present",
+    );
+  }
   const motion = parseSegmentMotionSlot(envelope.type, record.payload.motion);
   if (!motion.ok) return motion;
   const images = record.payload.images;
   if (!Array.isArray(images) || !images.every((item) => typeof item === "string")) {
     return invalidPayload(envelope.type, "payload.images", "string[]");
   }
+  for (const key of ["speaker_name", "avatar"] as const) {
+    if (key in record.payload && typeof record.payload[key] !== "string") {
+      return invalidPayload(envelope.type, `payload.${key}`, "string");
+    }
+  }
   return {
     ok: true,
     payload: {
-      schema_version: "output.segment.v2",
+      schema_version: "output.segment.v3",
       text: text.payload,
       audio: audio.payload,
       motion: motion.payload,
@@ -137,11 +163,18 @@ export function parseOutputSegmentPayload(
 function parseSegmentTextSlot(type: string, value: unknown): PayloadParseResult<OutputSegmentPayload["text"]> {
   const slot = asRecord(value);
   if (!slot) return invalidPayload(type, "payload.text", "segment text slot");
-  if (slot.state === "absent") return { ok: true, payload: { state: "absent" } };
+  if (slot.state === "absent") {
+    const keys = validateExactKeys(type, "payload.text", slot, ["state"]);
+    return keys.ok ? { ok: true, payload: { state: "absent" } } : keys;
+  }
   if (slot.state === "present" && typeof slot.content === "string" && slot.content.trim()) {
+    const keys = validateExactKeys(type, "payload.text", slot, ["state", "content"]);
+    if (!keys.ok) return keys;
     return { ok: true, payload: { state: "present", content: slot.content.trim() } };
   }
   if (slot.state === "failed" && typeof slot.reason === "string" && slot.reason.trim()) {
+    const keys = validateExactKeys(type, "payload.text", slot, ["state", "reason"]);
+    if (!keys.ok) return keys;
     return { ok: true, payload: { state: "failed", reason: slot.reason.trim() } };
   }
   return invalidPayload(type, "payload.text", "valid tagged text slot");
@@ -150,19 +183,25 @@ function parseSegmentTextSlot(type: string, value: unknown): PayloadParseResult<
 function parseSegmentAudioSlot(type: string, value: unknown): PayloadParseResult<OutputSegmentPayload["audio"]> {
   const slot = asRecord(value);
   if (!slot) return invalidPayload(type, "payload.audio", "segment audio slot");
-  if (slot.state === "absent") return { ok: true, payload: { state: "absent" } };
+  if (slot.state === "absent") {
+    const keys = validateExactKeys(type, "payload.audio", slot, ["state"]);
+    return keys.ok ? { ok: true, payload: { state: "absent" } } : keys;
+  }
   if (
     slot.state === "present"
     && typeof slot.url === "string"
     && slot.url.trim()
-    && typeof slot.caption_text === "string"
   ) {
+    const keys = validateExactKeys(type, "payload.audio", slot, ["state", "url"]);
+    if (!keys.ok) return keys;
     return {
       ok: true,
-      payload: { state: "present", url: slot.url.trim(), caption_text: slot.caption_text.trim() },
+      payload: { state: "present", url: slot.url.trim() },
     };
   }
   if (slot.state === "failed" && typeof slot.reason === "string" && slot.reason.trim()) {
+    const keys = validateExactKeys(type, "payload.audio", slot, ["state", "reason"]);
+    if (!keys.ok) return keys;
     return { ok: true, payload: { state: "failed", reason: slot.reason.trim() } };
   }
   return invalidPayload(type, "payload.audio", "valid tagged audio slot");
@@ -171,8 +210,13 @@ function parseSegmentAudioSlot(type: string, value: unknown): PayloadParseResult
 function parseSegmentMotionSlot(type: string, value: unknown): PayloadParseResult<OutputSegmentPayload["motion"]> {
   const slot = asRecord(value);
   if (!slot) return invalidPayload(type, "payload.motion", "segment motion slot");
-  if (slot.state === "absent") return { ok: true, payload: { state: "absent" } };
+  if (slot.state === "absent") {
+    const keys = validateExactKeys(type, "payload.motion", slot, ["state"]);
+    return keys.ok ? { ok: true, payload: { state: "absent" } } : keys;
+  }
   if (slot.state === "failed" && typeof slot.reason === "string" && slot.reason.trim()) {
+    const keys = validateExactKeys(type, "payload.motion", slot, ["state", "reason"]);
+    if (!keys.ok) return keys;
     return { ok: true, payload: { state: "failed", reason: slot.reason.trim() } };
   }
   const payload = asRecord(slot.payload);
@@ -190,6 +234,13 @@ function parseSegmentMotionSlot(type: string, value: unknown): PayloadParseResul
     && typeof slot.source === "string"
     && payload
   ) {
+    const keys = validateExactKeys(
+      type,
+      "payload.motion",
+      slot,
+      ["state", "message_type", "mode", "source", "payload"],
+    );
+    if (!keys.ok) return keys;
     return {
       ok: true,
       payload: {

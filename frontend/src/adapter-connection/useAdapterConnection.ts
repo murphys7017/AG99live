@@ -81,6 +81,13 @@ type AdapterMotionTuning = ReturnType<typeof useAdapterMotionTuning>;
 type AdapterAudioRuntimeInstance = ReturnType<typeof createAdapterAudioRuntime>;
 
 export interface AdapterPlaybackTimelinePort {
+  setAudioTimelineDurationReadyHandler: (
+    handler: ((
+      turnId: string | null,
+      messageId: string,
+      playbackTimeline: PlaybackTimelineSnapshot,
+    ) => void) | null,
+  ) => void;
   setAudioTimelineStartedHandler: (
     handler: ((
       turnId: string | null,
@@ -170,6 +177,11 @@ export function createAdapterConnection(
     messageId: string,
     playbackTimeline: PlaybackTimelineSnapshot | null,
   ) => void) | null = null;
+  let audioTimelineDurationReadyHandler: ((
+    turnId: string | null,
+    messageId: string,
+    playbackTimeline: PlaybackTimelineSnapshot,
+  ) => void) | null = null;
   let detachPttHookStatusListener: (() => void) | null = null;
 
   function buildMessageEnvelope<TPayload>(
@@ -252,11 +264,19 @@ export function createAdapterConnection(
       },
       textSink: {
         releaseAssistantTextForPlayback,
+        failAssistantTextForPlayback: (messageId, turnId, reason) =>
+          queuedTextSegmentSink.failAssistantTextForPlayback(
+            messageId,
+            turnId,
+            reason,
+          ),
       },
       motionSink: options.motionSink,
     },
     onAudioTimelineStarted: (turnId, messageId, playbackTimeline) =>
       audioTimelineStartedHandler?.(turnId, messageId, playbackTimeline),
+    onAudioTimelineDurationReady: (turnId, messageId, playbackTimeline) =>
+      audioTimelineDurationReadyHandler?.(turnId, messageId, playbackTimeline),
   });
 
   const {
@@ -547,6 +567,9 @@ export function createAdapterConnection(
     markTextDelivered: (turnId, messageId) => {
       sessionStore?.markTextDelivered(turnId, messageId);
     },
+    markTextFailed: (turnId, messageId, reason) => {
+      sessionStore?.markTextFailed(turnId, messageId, reason);
+    },
   });
 
   function releaseAssistantTextForPlayback(
@@ -628,6 +651,12 @@ export function createAdapterConnection(
     audioTimelineStartedHandler = handler;
   }
 
+  function setAudioTimelineDurationReadyHandler(
+    handler: typeof audioTimelineDurationReadyHandler,
+  ): void {
+    audioTimelineDurationReadyHandler = handler;
+  }
+
   async function sendPlaybackFinished(
     turnId: string | null,
     success: boolean,
@@ -643,6 +672,7 @@ export function createAdapterConnection(
   }
 
   const playbackTimeline: AdapterPlaybackTimelinePort = {
+    setAudioTimelineDurationReadyHandler,
     setAudioTimelineStartedHandler,
     startSegmentJob,
     getPlaybackTimelineSnapshotForSegment,

@@ -99,7 +99,6 @@ export interface TurnPlaybackSessionText {
 /**
  * 段的音频子状态。
  *   url        音频地址，未收到为 null
- *   captionText 音频播放字幕文本；不等同于 assistant 可见文本
  *   released   是否已经把音频交给播放器（pending 出队）
  *   started    本地音频是否真正开播
  *   terminal   播放终态：idle/completed/failed/absent，详见 AudioTerminalState
@@ -107,7 +106,6 @@ export interface TurnPlaybackSessionText {
  */
 export interface TurnPlaybackSessionAudio {
   url: string | null;
-  captionText: string | null;
   receivedAtMs: number | null;
   released: boolean;
   started: boolean;
@@ -144,7 +142,7 @@ export type OutputSegmentTextMaterial =
   | { state: "failed"; reason: string };
 
 export type OutputSegmentAudioMaterial =
-  | { state: "present"; url: string; captionText: string }
+  | { state: "present"; url: string }
   | { state: "absent" }
   | { state: "failed"; reason: string };
 
@@ -230,7 +228,6 @@ export function createEmptyTextState(): TurnPlaybackSessionText {
 export function createEmptyAudioState(): TurnPlaybackSessionAudio {
   return {
     url: null,
-    captionText: null,
     receivedAtMs: null,
     released: false,
     started: false,

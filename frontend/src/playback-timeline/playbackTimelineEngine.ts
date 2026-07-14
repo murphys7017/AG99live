@@ -27,6 +27,7 @@ export interface PlaybackTimelineEngine {
   resume(): void;
   stop(reason?: string): void;
   interrupt(reason: string): void;
+  fail(reason: string): void;
   registerSink(sink: PlaybackTimelineSinkDefinition): void;
   hasSink(sinkId: string): boolean;
   attachAudioClock(clock: AudioPlaybackClock): void;
@@ -223,6 +224,23 @@ export function createPlaybackTimelineEngine(
         sink.definition.onInterrupt?.(reason);
       }
       phase = "interrupted";
+    },
+    fail(reason) {
+      ensureLoaded();
+      if (isTerminalPhase(phase)) {
+        return;
+      }
+      phase = "stopping";
+      clock.stop();
+      for (const sink of sinks.values()) {
+        if (isTerminal(sink.state.terminal)) {
+          continue;
+        }
+        sink.state.terminal = sink.definition.required ? "failed" : "interrupted";
+        sink.state.reason = reason;
+        sink.definition.onInterrupt?.(reason);
+      }
+      phase = "failed";
     },
     registerSink(definition) {
       ensureLoaded();

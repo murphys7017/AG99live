@@ -212,10 +212,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   });
   const playbackTimelineMotionRuntime = configurePlaybackTimelineMotionRuntime({
     playbackTimeline,
-    sessionStore,
     motionEngine: modelEngine,
-    schedule: (delayMs, fn) => window.setTimeout(fn, delayMs),
-    clearSchedule: (timer) => window.clearTimeout(timer as number),
     onMissingPlaybackTimeline: (turnId, messageId) => {
       console.error("[AG99live] audio timeline started without matching playback timeline.", {
         turnId,

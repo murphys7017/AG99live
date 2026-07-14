@@ -89,7 +89,7 @@ function testSameMessageIdGroupsTextAudioMotion(): void {
   const store = useTurnPlaybackSessionStore();
   commitSegment(store, "turn-1", "msg-1", {
     text: { state: "present", content: "Hello" },
-    audio: { state: "present", url: "http://localhost/a.wav", captionText: "Hello" },
+    audio: { state: "present", url: "http://localhost/a.wav" },
     motion: { state: "present", payload: motionPayload },
   });
 
@@ -111,7 +111,6 @@ function testAtomicOutputSegmentCommitsOnce(): void {
     audio: {
       state: "present",
       url: "http://localhost/atomic.wav",
-      captionText: "Atomic reply",
     },
     motion: { state: "present", payload: motionPayload },
   });
@@ -204,7 +203,7 @@ function testMultipleMessageIdsKeepArrivalOrder(): void {
   });
   commitSegment(store, "turn-1", "msg-2", {
     text: { state: "present", content: "Second" },
-    audio: { state: "present", url: "http://localhost/second.wav", captionText: "Second" },
+    audio: { state: "present", url: "http://localhost/second.wav" },
     motion: { state: "absent" },
   });
 
@@ -218,7 +217,7 @@ function testSelectorsOperateOnSegments(): void {
   const store = useTurnPlaybackSessionStore();
   commitSegment(store, "turn-1", "msg-1", {
     text: { state: "present", content: "Hello" },
-    audio: { state: "present", url: "http://localhost/a.wav", captionText: "Hello" },
+    audio: { state: "present", url: "http://localhost/a.wav" },
     motion: { state: "present", payload: motionPayload },
   });
 
@@ -312,7 +311,7 @@ function testTurnOnlySessionRemainsTurnScoped(): void {
   store.setActiveSession("turn-1");
   commitSegment(store, "turn-1", "msg-1", {
     text: { state: "present", content: "Early" },
-    audio: { state: "present", url: "http://localhost/audio.wav", captionText: "Early" },
+    audio: { state: "present", url: "http://localhost/audio.wav" },
     motion: { state: "absent" },
   });
 
@@ -474,7 +473,7 @@ function testAudioTerminalHandlesAllStates(): void {
   const store = useTurnPlaybackSessionStore();
   commitSegment(store, "turn-1", "msg-1", {
     text: { state: "present", content: "Hello" },
-    audio: { state: "present", url: "http://localhost/a.wav", captionText: "Hello" },
+    audio: { state: "present", url: "http://localhost/a.wav" },
     motion: { state: "absent" },
   });
 

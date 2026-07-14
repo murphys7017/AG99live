@@ -54,6 +54,11 @@ export interface AdapterAudioTimelineControllerDeps<TMotionPayload = unknown> {
     messageId: string,
     playbackTimeline: PlaybackTimelineSnapshot | null,
   ) => void;
+  onAudioTimelineDurationReady?: (
+    turnId: string | null,
+    messageId: string,
+    playbackTimeline: PlaybackTimelineSnapshot,
+  ) => void;
   markTerminal: (
     terminalState: Exclude<AudioPlaybackTerminalState, "idle">,
     turnId: string | null,
@@ -78,6 +83,7 @@ export function createAdapterAudioTimelineController<TMotionPayload = unknown>(
       return deps.getMotionSession();
     },
     onAudioTimelineStarted: deps.onAudioTimelineStarted,
+    onAudioTimelineDurationReady: deps.onAudioTimelineDurationReady,
   });
 
   const createLipSyncRuntime = (

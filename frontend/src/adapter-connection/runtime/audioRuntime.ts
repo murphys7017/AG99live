@@ -94,6 +94,11 @@ export interface AdapterAudioRuntimeDeps {
     messageId: string,
     playbackTimeline: PlaybackTimelineSnapshot | null,
   ) => void;
+  onAudioTimelineDurationReady?: (
+    turnId: string | null,
+    messageId: string,
+    playbackTimeline: PlaybackTimelineSnapshot,
+  ) => void;
 }
 
 export interface ActiveAudioSegment {
@@ -131,6 +136,7 @@ export interface AdapterAudioRuntime {
   ensureMotionTimelineSinkForSegment: (
     turnId: string | null,
     messageId: string,
+    onInterrupt?: (reason: string) => void,
   ) => boolean;
   markMotionTimelineStarted: (
     turnId: string | null,
@@ -179,6 +185,7 @@ export function createAdapterAudioRuntime(
     },
     createLipSyncRuntime: deps.createLipSyncRuntime,
     onAudioTimelineStarted: deps.onAudioTimelineStarted,
+    onAudioTimelineDurationReady: deps.onAudioTimelineDurationReady,
     markTerminal: markAudioPlaybackTerminalState,
     resetTerminal: resetAudioPlaybackTerminal,
   });

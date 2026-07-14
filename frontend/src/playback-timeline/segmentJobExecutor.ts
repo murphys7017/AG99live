@@ -6,11 +6,17 @@ import type {
 
 type PlaybackTimelineSinkStartCallback = () => boolean | void;
 
+export interface PlaybackTimelineDeferredTextRelease {
+  release: () => boolean;
+  fail: (reason: string) => boolean;
+}
+
 export interface PlaybackTimelineSegmentExecutorTimelinePort {
   startAudioSink(
     turnId: string | null,
     messageId: string,
     start: PlaybackTimelineSinkStartCallback,
+    deferredText?: PlaybackTimelineDeferredTextRelease,
   ): boolean | void;
   ensureAudioSegmentTimeline(
     turnId: string | null,
@@ -50,8 +56,9 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
 ): PlaybackTimelineSegmentExecutionResult {
   const { job, ports, timeline } = options;
 
+  const deferTextUntilAudioStarted = job.text.release && job.audio.release;
   let releasedText = false;
-  if (job.text.release) {
+  if (job.text.release && job.audio.noAudioConfirmed) {
     releasedText = ports.textSink.releaseAssistantTextForPlayback(
       job.messageId,
       job.turnId,
@@ -69,6 +76,25 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
     ports.session.markPhase(job.turnId, "playing");
   }
 
+  if (
+    job.text.release
+    && !job.audio.release
+    && !job.audio.noAudioConfirmed
+  ) {
+    const failed = ports.textSink.failAssistantTextForPlayback(
+      job.messageId,
+      job.turnId,
+      "subtitle_audio_unavailable_before_start",
+    );
+    if (!failed) {
+      ports.session.markSessionFailed(
+        job.turnId,
+        `text_failure_queue_invariant_failed:${job.messageId}`,
+      );
+      return { releasedText: false, releasedAudio: false, releasedMotion: false };
+    }
+  }
+
   let releasedAudio = false;
   if (job.audio.release) {
     releasedAudio = timeline.startAudioSink(
@@ -78,6 +104,25 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
         job.messageId,
         job.turnId,
       ),
+      deferTextUntilAudioStarted
+        ? {
+            release: () => {
+              const released = ports.textSink.releaseAssistantTextForPlayback(
+                job.messageId,
+                job.turnId,
+              );
+              if (released) {
+                ports.session.markTextReleased(job.turnId, job.messageId);
+              }
+              return released;
+            },
+            fail: (reason) => ports.textSink.failAssistantTextForPlayback(
+              job.messageId,
+              job.turnId,
+              reason,
+            ),
+          }
+        : undefined,
     ) === true;
     if (!releasedAudio) {
       timeline.clearAudioSinkIfIdle(job.turnId, job.messageId);

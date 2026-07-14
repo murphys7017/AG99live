@@ -35,7 +35,10 @@ function createPlaybackTimelineRuntime(
       markMotionFailed: () => {},
       markPhase: () => true,
     },
-    textSink: { releaseAssistantTextForPlayback: () => true },
+    textSink: {
+      releaseAssistantTextForPlayback: () => true,
+      failAssistantTextForPlayback: () => true,
+    },
     audioSink: { releaseAudioForPlayback: () => true },
     motionSink: { start: () => true, interrupt: () => {} },
   };
@@ -53,6 +56,8 @@ function createPlaybackTimelineRuntime(
       textSink: {
         releaseAssistantTextForPlayback: (...args) =>
           ports.textSink.releaseAssistantTextForPlayback(...args),
+        failAssistantTextForPlayback: (...args) =>
+          ports.textSink.failAssistantTextForPlayback(...args),
       },
       audioSink: {
         releaseAudioForPlayback: (...args) =>
@@ -216,6 +221,14 @@ function createHarness(options: {
       released.push(`text:${messageId}:${turnId ?? ""}`);
       return true;
     },
+    failAssistantTextForPlayback(
+      messageId: string,
+      turnId: string | null,
+      reason: string,
+    ): boolean {
+      released.push(`text_failed:${messageId}:${turnId ?? ""}:${reason}`);
+      return true;
+    },
     releaseAudioForPlayback(
       messageId: string,
       turnId: string | null,
@@ -351,7 +364,6 @@ function commitSegment(
   options: {
     text?: string;
     audioUrl?: string;
-    captionText?: string;
     motion?: NormalizedMotionPayload;
   },
 ): void {
@@ -363,7 +375,6 @@ function commitSegment(
       ? {
           state: "present",
           url: options.audioUrl,
-          captionText: options.captionText ?? "",
         }
       : { state: "absent" },
     motion: options.motion
@@ -392,7 +403,6 @@ async function testSegmentsReleaseSequentiallyWithinTurn(): Promise<void> {
   await h.flush();
 
   assert.deepEqual(h.released, [
-    "text:msg-a:turn-1",
     "audio:msg-a:turn-1",
   ]);
   assert.deepEqual(h.motionSinkStarts, [
@@ -407,9 +417,7 @@ async function testSegmentsReleaseSequentiallyWithinTurn(): Promise<void> {
   await h.flush();
 
   assert.deepEqual(h.released, [
-    "text:msg-a:turn-1",
     "audio:msg-a:turn-1",
-    "text:msg-b:turn-1",
     "audio:msg-b:turn-1",
   ]);
   assert.deepEqual(h.motionSinkStarts, [
@@ -449,14 +457,14 @@ async function testTextAndMotionReleaseWhenAudioIsAbsent(): Promise<void> {
   h.stop();
 }
 
-async function testAudioCaptionOnlySegmentDoesNotReleaseVisibleText(): Promise<void> {
+async function testAudioSegmentDefersCanonicalTextUntilPlaybackStarts(): Promise<void> {
   const h = createHarness();
-  h.sessionStore.setActiveSession("turn-audio-caption");
-  h.sessionStore.markTurnStarted("turn-audio-caption");
+  h.sessionStore.setActiveSession("turn-audio-subtitle");
+  h.sessionStore.markTurnStarted("turn-audio-subtitle");
 
-  commitSegment(h.sessionStore, "turn-audio-caption", "msg-audio-caption", {
-    audioUrl: "http://localhost/caption.wav",
-    captionText: "subtitle only",
+  commitSegment(h.sessionStore, "turn-audio-subtitle", "msg-audio-subtitle", {
+    text: "subtitle only",
+    audioUrl: "http://localhost/subtitle.wav",
     motion: motionPayload,
   });
 
@@ -464,16 +472,17 @@ async function testAudioCaptionOnlySegmentDoesNotReleaseVisibleText(): Promise<v
   await h.flush();
 
   assert.deepEqual(h.released, [
-    "audio:msg-audio-caption:turn-audio-caption",
+    "audio:msg-audio-subtitle:turn-audio-subtitle",
   ]);
   assert.deepEqual(h.motionSinkStarts, [
-    "motion:msg-audio-caption:turn-audio-caption",
+    "motion:msg-audio-subtitle:turn-audio-subtitle",
   ]);
   const segment = h.sessionStore
-    .getSession("turn-audio-caption")
-    ?.segments.get("msg-audio-caption");
-  assert.equal(segment?.text.content, null);
-  assert.equal(segment?.audio.captionText, "subtitle only");
+    .getSession("turn-audio-subtitle")
+    ?.segments.get("msg-audio-subtitle");
+  assert.equal(segment?.text.content, "subtitle only");
+  assert.equal(segment?.text.released, false);
+  assert.equal(segment?.text.delivered, false);
   h.stop();
 }
 
@@ -494,7 +503,6 @@ async function testMotionReleaseReceivesMatchingAudioTimeline(): Promise<void> {
   await h.flush();
 
   assert.deepEqual(h.released, [
-    "text:msg-timeline:turn-timeline",
     "audio:msg-timeline:turn-timeline",
   ]);
   assert.deepEqual(h.motionSinkStarts, [
@@ -861,6 +869,7 @@ function testPlaybackTimelineRuntimeRejectsInvalidMotionTimestamp(): void {
     },
     textSink: {
       releaseAssistantTextForPlayback: () => true,
+      failAssistantTextForPlayback: () => true,
     },
     audioSink: {
       releaseAudioForPlayback: () => true,
@@ -909,6 +918,7 @@ function testPlaybackTimelineRuntimeMarksMotionOnlyContext(): void {
     },
     textSink: {
       releaseAssistantTextForPlayback: () => true,
+      failAssistantTextForPlayback: () => true,
     },
     audioSink: {
       releaseAudioForPlayback: () => true,
@@ -974,6 +984,7 @@ function testPlaybackTimelineRuntimePreparesAudioMotionTimeline(): void {
     },
     textSink: {
       releaseAssistantTextForPlayback: () => true,
+      failAssistantTextForPlayback: () => true,
     },
     audioSink: {
       releaseAudioForPlayback: () => {
@@ -1045,6 +1056,7 @@ function testPlaybackTimelineRuntimeDoesNotReleaseMotionWhenAudioReleaseFails():
     },
     textSink: {
       releaseAssistantTextForPlayback: () => true,
+      failAssistantTextForPlayback: () => true,
     },
     audioSink: {
       releaseAudioForPlayback: () => {
@@ -1112,6 +1124,7 @@ function testPlaybackTimelineRuntimeCreatesMotionOnlyTimelineBesideExistingAudio
     },
     textSink: {
       releaseAssistantTextForPlayback: () => true,
+      failAssistantTextForPlayback: () => true,
     },
     audioSink: {
       releaseAudioForPlayback: () => true,
@@ -1178,6 +1191,7 @@ function testPlaybackTimelineRuntimeFailsSessionWhenTextQueueItemIsMissing(): vo
     },
     textSink: {
       releaseAssistantTextForPlayback: () => false,
+      failAssistantTextForPlayback: () => true,
     },
     audioSink: {
       releaseAudioForPlayback: () => true,
@@ -1210,7 +1224,7 @@ function testPlaybackTimelineRuntimeFailsSessionWhenTextQueueItemIsMissing(): vo
 async function run(): Promise<void> {
   await testSegmentsReleaseSequentiallyWithinTurn();
   await testTextAndMotionReleaseWhenAudioIsAbsent();
-  await testAudioCaptionOnlySegmentDoesNotReleaseVisibleText();
+  await testAudioSegmentDefersCanonicalTextUntilPlaybackStarts();
   await testMotionReleaseReceivesMatchingAudioTimeline();
   await testMotionReleaseRejectsMismatchedAudioTimeline();
   await testRejectedMotionReleaseMarksSegmentFailed();

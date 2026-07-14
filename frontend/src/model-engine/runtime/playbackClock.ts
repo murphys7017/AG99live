@@ -23,6 +23,20 @@ export interface MotionPlaybackClockContext {
   durationMs: number | null;
 }
 
+export type MotionTimelinePreparationResult =
+  | {
+    status: "prepared";
+    source: "queued_motion" | "speech_only";
+  }
+  | {
+    status: "not_applicable";
+    reason: string;
+  }
+  | {
+    status: "failed";
+    reason: string;
+  };
+
 export type PerformanceCurveTimelineResolution =
   | {
     ok: true;
@@ -99,7 +113,7 @@ export function resolvePerformanceCurveTimeline(options: {
     targetDurationMs,
     speechActive:
       clock.source === "audio"
-      && (clock.phase === "playing" || clock.phase === "paused"),
+      && clock.phase !== "terminal",
   };
 }
 

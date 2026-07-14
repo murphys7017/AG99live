@@ -356,7 +356,7 @@ function sendOutputSegment(
     turn_id: options.turnId,
     source: "backend",
     payload: {
-      schema_version: "output.segment.v2",
+      schema_version: "output.segment.v3",
       text: options.text,
       audio: options.audio,
       motion: options.motion,
@@ -373,17 +373,16 @@ function sendOutputAudio(
     turnId: string;
     messageId: string;
     audioUrl: string;
-    captionText?: string;
+    canonicalText?: string;
   },
 ): void {
   sendOutputSegment(socket, {
     turnId: options.turnId,
     messageId: options.messageId,
-    text: { state: "absent" },
+    text: { state: "present", content: options.canonicalText ?? "hello" },
     audio: {
       state: "present",
       url: options.audioUrl,
-      caption_text: options.captionText ?? "hello",
     },
     motion: { state: "absent" },
   });
@@ -475,7 +474,7 @@ function testVersionMismatchMessageDedupesHistory(): void {
       turn_id: "turn-1",
       source: "backend",
       payload: {
-        schema_version: "output.segment.v2",
+        schema_version: "output.segment.v3",
         text: { state: "present", content: "hello" },
         audio: { state: "absent" },
         motion: { state: "absent" },
@@ -505,7 +504,7 @@ function testInvalidPayloadDoesNotEnterPlaybackState(): void {
       turn_id: "turn-invalid-payload",
       source: "backend",
       payload: {
-        schema_version: "output.segment.v2",
+        schema_version: "output.segment.v3",
         text: 123,
         audio: { state: "absent" },
         motion: { state: "absent" },
@@ -539,7 +538,6 @@ function testTextAudioMotionWithSameMessageIdShareSegment(): void {
       text: { state: "present", content: " segment text " },
       audio: {
         state: "present",
-        caption_text: " audio fallback should not overwrite ",
         url: "http://localhost/segment.wav",
       },
       motion: {
@@ -567,7 +565,6 @@ function testTextAudioMotionWithSameMessageIdShareSegment(): void {
     const segment = session?.segments.get("m-segment-1");
     assert.equal(segment?.text.content, "segment text");
     assert.equal(segment?.audio.url, "http://127.0.0.1/segment.wav");
-    assert.equal(segment?.audio.captionText, "audio fallback should not overwrite");
     assert.equal(segment?.motion.payload?.kind, "semantic_intent");
   });
 }
@@ -610,10 +607,9 @@ function testOutputAudioWithoutTurnIdIsRejected(): void {
     sendOutputSegment(socket, {
       turnId: null,
       messageId: "m-audio-missing-turn",
-      text: { state: "absent" },
+      text: { state: "present", content: "audio text" },
       audio: {
         state: "present",
-        caption_text: " audio text ",
         url: "http://localhost/audio-fallback.wav",
       },
       motion: { state: "absent" },
@@ -709,7 +705,7 @@ async function testDuplicateOutputAudioDoesNotReplayCompletedSegment(): Promise<
       turnId: "turn-duplicate-audio",
       messageId: "msg-duplicate-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/repeat.wav",
-      captionText: "repeat audio",
+      canonicalText: "repeat audio",
     });
 
     assert.equal(releaseAudioSegment(adapter, "msg-duplicate-audio", "turn-duplicate-audio"), true);
@@ -725,7 +721,7 @@ async function testDuplicateOutputAudioDoesNotReplayCompletedSegment(): Promise<
       turnId: "turn-duplicate-audio",
       messageId: "msg-duplicate-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/repeat.wav",
-      captionText: "repeat audio",
+      canonicalText: "repeat audio",
     });
     await flushMicrotasks();
 
@@ -747,7 +743,7 @@ async function testChangedUrlOutputAudioDoesNotReplayCompletedSegment(): Promise
       turnId: "turn-changed-audio",
       messageId: "msg-changed-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/first.wav",
-      captionText: "repeat audio",
+      canonicalText: "repeat audio",
     });
 
     assert.equal(releaseAudioSegment(adapter, "msg-changed-audio", "turn-changed-audio"), true);
@@ -764,7 +760,7 @@ async function testChangedUrlOutputAudioDoesNotReplayCompletedSegment(): Promise
       turnId: "turn-changed-audio",
       messageId: "msg-changed-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/second.wav",
-      captionText: "repeat audio",
+      canonicalText: "repeat audio",
     });
     await flushMicrotasks();
 
@@ -1585,7 +1581,7 @@ async function testInterruptMarksPlayingAudioSegmentFailed(): Promise<void> {
       turnId: "turn-interrupt",
       messageId: "msg-interrupt-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/test.wav",
-      captionText: "hello",
+      canonicalText: "hello",
     });
 
     const released = releaseAudioSegment(
@@ -1717,7 +1713,7 @@ async function testInterruptMarksPendingAudioSegmentFailedBeforePlaybackStart():
       turnId: "turn-interrupt-pending",
       messageId: "msg-interrupt-pending-audio",
       audioUrl: "http://127.0.0.1:12397/cache/audio/test-pending.wav",
-      captionText: "hello pending",
+      canonicalText: "hello pending",
     });
 
     FakeAudio.nextPlayShouldStall = true;
@@ -1829,7 +1825,6 @@ async function testInvalidMotionRejectsWholeAtomicSegment(): Promise<void> {
       audio: {
         state: "present",
         url: "http://localhost/must-not-play.wav",
-        caption_text: "must not play",
       },
       motion: {
         state: "present",

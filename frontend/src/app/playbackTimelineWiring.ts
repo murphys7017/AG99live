@@ -1,4 +1,5 @@
 import type { AdapterPlaybackTimelinePort } from "../adapter-connection/useAdapterConnection.js";
+import type { MotionTimelinePreparationResult } from "../model-engine/runtime/playbackClock.js";
 import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
 import type { PlaybackTimelineMotionSink } from "../playback-timeline/motionTypes.js";
 import {
@@ -8,18 +9,16 @@ import {
   type MotionTimelineRunTracker,
 } from "../playback-integrations/modelEngineMotionSink.js";
 import {
-  createAudioStartMotionTimelineBridge,
-  type AudioStartMotionTimelineBridge,
-} from "../playback-timeline/audioStartMotionBridge.js";
-import type { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore.js";
-import { isTerminalPhase } from "../turn-playback/session.js";
-
-type TurnPlaybackSessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
-
+  createAudioMotionTimelineBridge,
+  type AudioMotionTimelineBridge,
+} from "../playback-timeline/audioMotionStartBridge.js";
 export interface PlaybackTimelineMotionEnginePort {
   ingestNormalizedPayload: PlaybackTimelineMotionSink["start"];
   notifyCurrentTurnChanged(turnId: string | null): void;
   interruptPlaybackSegment(turnId: string | null, messageId: string, reason: string): void;
+  preparePlaybackTimeline(
+    playbackTimeline: ReturnType<typeof projectMotionPlaybackClock>,
+  ): MotionTimelinePreparationResult;
   handlePlaybackTimelineStarted(
     playbackTimeline: ReturnType<typeof projectMotionPlaybackClock>,
   ): boolean | void;
@@ -36,10 +35,7 @@ export function createPlaybackTimelineMotionRunTracker(
 
 export function configurePlaybackTimelineMotionRuntime(options: {
   playbackTimeline: AdapterPlaybackTimelinePort;
-  sessionStore: TurnPlaybackSessionStore;
   motionEngine: PlaybackTimelineMotionEnginePort;
-  schedule: (delayMs: number, fn: () => void) => unknown;
-  clearSchedule: (timer: unknown) => void;
   onMissingPlaybackTimeline?: (
     turnId: string,
     messageId: string,
@@ -50,41 +46,12 @@ export function configurePlaybackTimelineMotionRuntime(options: {
 } {
   const {
     playbackTimeline,
-    sessionStore,
     motionEngine,
-    schedule,
-    clearSchedule,
     onMissingPlaybackTimeline,
   } = options;
 
-  const audioStartMotionBridge: AudioStartMotionTimelineBridge =
-    createAudioStartMotionTimelineBridge({
-      schedule,
-      clearSchedule,
-      canStartMotionForAudioTimeline: (turnId, messageId) => {
-        const session = sessionStore.getSession(turnId);
-        const segment = session?.segments.get(messageId);
-        return Boolean(
-          session
-          && segment
-          && !isTerminalPhase(session.phase)
-          && segment.audio.started
-          && segment.audio.terminal === "idle",
-        );
-      },
-      ensureMotionTimelineSinkForSegment: (turnId, messageId) => {
-        const prepared = playbackTimeline.ensureMotionTimelineSinkForSegment(
-          turnId,
-          messageId,
-        );
-        if (!prepared) {
-          console.error("[PlaybackTimeline] failed to register motion sink before audio wakeup.", {
-            turnId,
-            messageId,
-          });
-        }
-        return prepared;
-      },
+  const audioMotionBridge: AudioMotionTimelineBridge =
+    createAudioMotionTimelineBridge({
       getPlaybackTimelineSnapshotForSegment: playbackTimeline.getPlaybackTimelineSnapshotForSegment,
       onMissingPlaybackTimeline,
       handlePlaybackTimelineStarted: (_turnId, _messageId, preparedTimeline) =>
@@ -94,8 +61,48 @@ export function configurePlaybackTimelineMotionRuntime(options: {
     });
 
   playbackTimeline.setAudioTimelineStartedHandler((turnId, messageId) => {
-    audioStartMotionBridge.handleAudioTimelineStarted(turnId, messageId);
+    audioMotionBridge.handleAudioTimelineStarted(turnId, messageId);
   });
+  playbackTimeline.setAudioTimelineDurationReadyHandler(
+    (turnId, messageId, preparedTimeline) => {
+      const result = motionEngine.preparePlaybackTimeline(
+        projectMotionPlaybackClock(preparedTimeline),
+      );
+      if (result.status === "not_applicable") {
+        return;
+      }
+      if (result.status === "failed") {
+        const motionSink = preparedTimeline.sinks.find((sink) => sink.id === "motion");
+        if (motionSink && (motionSink.terminal === "idle" || motionSink.terminal === "started")) {
+          playbackTimeline.markMotionTimelineTerminal(
+            turnId,
+            messageId,
+            "failed",
+            result.reason,
+          );
+        } else {
+          console.error("[ModelEngine] speech-only motion preparation failed.", {
+            turnId,
+            messageId,
+            reason: result.reason,
+          });
+        }
+        return;
+      }
+      const registered = playbackTimeline.ensureMotionTimelineSinkForSegment(
+        turnId,
+        messageId,
+        (reason) => motionEngine.interruptPlaybackSegment(
+          turnId,
+          messageId,
+          reason,
+        ),
+      );
+      if (!registered) {
+        throw new Error("Prepared motion could not register its timeline sink.");
+      }
+    },
+  );
 
   const motionTimelineSink = createModelEngineMotionTimelineSink({
     motionEngine,
@@ -106,7 +113,7 @@ export function configurePlaybackTimelineMotionRuntime(options: {
   return {
     motionTimelineSink,
     dispose() {
-      audioStartMotionBridge.clear();
+      playbackTimeline.setAudioTimelineDurationReadyHandler(null);
       playbackTimeline.setAudioTimelineStartedHandler(null);
     },
   };

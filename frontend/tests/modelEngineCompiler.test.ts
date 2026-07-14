@@ -3,7 +3,10 @@ import { compileMotionIntent } from "../src/model-engine/compiler/compileMotionI
 import { advanceParameterDynamics } from "../src/live2d/WebSDK/src/parameterdynamics.js";
 import { normalizeMotionPayload } from "../src/model-engine/normalize.js";
 import { parseSemanticParameterPlan } from "../src/model-engine/planParser.js";
-import { startNormalizedMotionPayload } from "../src/model-engine/runtime/motionStart.js";
+import {
+  prepareSemanticMotionPayload,
+  startNormalizedMotionPayload,
+} from "../src/model-engine/runtime/motionStart.js";
 import { retimeSemanticParameterPlan } from "../src/model-engine/runtime/playbackClock.js";
 import { buildSpeechOnlyMotionPayload } from "../src/model-engine/runtime/speechOnlyMotion.js";
 import { useModelEngine } from "../src/model-engine/useModelEngine.js";
@@ -1405,22 +1408,69 @@ function testMotionStartUsesPlaybackTimelineDuration(): void {
   const profile = buildProfile();
   const model = buildModel(profile);
   const playedPlans: MotionPlanPayload[] = [];
-
-  const started = startNormalizedMotionPayload(
-    {
-      kind: "semantic_intent",
-      intent: buildIntent({
-        performance_curve_hint: {
-          schema_version: "ag99.performance_curve_hint.v1",
-          curve_family: "quick_in_hold_soft_out",
-          entry: "quick",
-          hold: "steady",
-          exit: "soft",
-          emphasis: "early",
-          energy: "medium",
-        },
-      }),
+  const payload = {
+    kind: "semantic_intent" as const,
+    intent: buildIntent({
+      performance_curve_hint: {
+        schema_version: "ag99.performance_curve_hint.v1" as const,
+        curve_family: "quick_in_hold_soft_out" as const,
+        entry: "quick" as const,
+        hold: "steady" as const,
+        exit: "soft" as const,
+        emphasis: "early" as const,
+        energy: "medium" as const,
+      },
+    }),
+  };
+  const dependencies = {
+    getSelectedModel: () => model,
+    getSettings: () => ({
+      motionIntensityScale: 1,
+      axisIntensityScale: {},
+    }),
+    playPlan: (plan: unknown, _model: ModelSummary | null, options: {
+      onStarted: (plan: MotionPlanPayload, runId: string) => void;
+    }) => {
+      playedPlans.push(plan as MotionPlanPayload);
+      options.onStarted(plan as MotionPlanPayload, "run-timeline-duration");
+      return true;
     },
+    playCatalogMotion: () => false,
+    getPlayerMessage: () => "timeline duration applied",
+    onPlanStarted: ignorePlanStarted,
+  };
+  const state = {
+    setState: () => {},
+    setLastCompileReason: () => {},
+    setLastCompileDiagnostics: () => {},
+    setLastStartReason: () => {},
+    pushHistory: () => {},
+  };
+  const prepared = prepareSemanticMotionPayload(
+    payload,
+    {
+      messageId: "msg-timeline",
+      turnId: "turn-timeline",
+      playbackTurnId: "turn-timeline",
+      startReason: "playback_timeline_preparing",
+      queuedDelayMs: 0,
+      playbackClock: {
+        timelineId: "timeline-1",
+        turnId: "turn-timeline",
+        messageId: "msg-timeline",
+        phase: "ready",
+        source: "audio",
+        startedAtMs: null,
+        currentTimeMs: 0,
+        durationMs: 2400,
+      },
+    },
+    dependencies,
+    state,
+  );
+  assert.ok(prepared);
+  const started = startNormalizedMotionPayload(
+    payload,
     {
       messageId: "msg-timeline",
       turnId: "turn-timeline",
@@ -1434,43 +1484,24 @@ function testMotionStartUsesPlaybackTimelineDuration(): void {
         phase: "playing",
         source: "audio",
         startedAtMs: 100,
-        currentTimeMs: 300,
+        currentTimeMs: 0,
         durationMs: 2400,
       },
     },
-    {
-      getSelectedModel: () => model,
-      getSettings: () => ({
-        motionIntensityScale: 1,
-        axisIntensityScale: {},
-      }),
-      playPlan: (plan, _model, options) => {
-        playedPlans.push(plan as MotionPlanPayload);
-        options.onStarted(plan as MotionPlanPayload, "run-timeline-duration");
-        return true;
-      },
-      playCatalogMotion: () => false,
-      getPlayerMessage: () => "timeline duration applied",
-      onPlanStarted: ignorePlanStarted,
-    },
-    {
-      setState: () => {},
-      setLastCompileReason: () => {},
-      setLastCompileDiagnostics: () => {},
-      setLastStartReason: () => {},
-      pushHistory: () => {},
-    },
+    dependencies,
+    state,
+    prepared,
   );
 
   assert.equal(started, true);
   const playedPlan = playedPlans[0];
   assert.ok(playedPlan);
-  assert.equal(playedPlan?.timing.duration_ms, 2100);
+  assert.equal(playedPlan?.timing.duration_ms, 2400);
   assert.deepEqual(playedPlan?.timing, {
-    duration_ms: 2100,
-    blend_in_ms: 210,
-    hold_ms: 1428,
-    blend_out_ms: 462,
+    duration_ms: 2400,
+    blend_in_ms: 240,
+    hold_ms: 1632,
+    blend_out_ms: 528,
     curve_preset: "snap_hold_soft_release",
   });
 }
@@ -2215,6 +2246,17 @@ function testSpeechOnlyPlaybackUsesTimelineDuration(): void {
     onPlanStarted: ignorePlanStarted,
   });
 
+  const prepared = engine.preparePlaybackTimeline({
+    timelineId: "timeline-speech",
+    turnId: "turn-speech",
+    messageId: "msg-speech",
+    phase: "ready",
+    source: "audio",
+    startedAtMs: null,
+    currentTimeMs: 0,
+    durationMs: 2250,
+  });
+  assert.deepEqual(prepared, { status: "prepared", source: "speech_only" });
   const started = engine.handlePlaybackTimelineStarted({
     timelineId: "timeline-speech",
     turnId: "turn-speech",
@@ -2222,7 +2264,7 @@ function testSpeechOnlyPlaybackUsesTimelineDuration(): void {
     phase: "playing",
     source: "audio",
     startedAtMs: 100,
-    currentTimeMs: 250,
+    currentTimeMs: 0,
     durationMs: 2250,
   });
 
@@ -2230,7 +2272,7 @@ function testSpeechOnlyPlaybackUsesTimelineDuration(): void {
   const plan = playedPlans[0];
   assert.ok(plan);
   assert.equal(plan.mode, "idle");
-  assert.equal(plan.timing.duration_ms, 2000);
+  assert.equal(plan.timing.duration_ms, 2250);
   assert.equal(
     plan.parameters.some((item) => item.source === "speech_pose"),
     true,
@@ -2274,6 +2316,37 @@ function testSpeechOnlyPlaybackCanBeSuppressedForFailedMotionSegment(): void {
   assert.equal(playedPlans.length, 0);
 }
 
+function testSpeechOnlyPreparationIsNotApplicableWithoutModelCapability(): void {
+  const engine = useModelEngine({
+    getSelectedModel: () => buildModel(buildProfile()),
+    getSettings: () => ({ motionIntensityScale: 1, axisIntensityScale: {} }),
+    playPlan: () => false,
+    playCatalogMotion: () => false,
+    stopPlan: () => {},
+    markMotionTimelineTerminal: () => {},
+    getCurrentTurnId: () => "turn-no-speech-profile",
+    canStartSpeechOnlyMotion: () => true,
+    onPlanStarted: ignorePlanStarted,
+  });
+
+  assert.deepEqual(
+    engine.preparePlaybackTimeline({
+      timelineId: "timeline-no-speech-profile",
+      turnId: "turn-no-speech-profile",
+      messageId: "msg-no-speech-profile",
+      phase: "ready",
+      source: "audio",
+      startedAtMs: null,
+      currentTimeMs: 0,
+      durationMs: 1800,
+    }),
+    {
+      status: "not_applicable",
+      reason: "speech_only_motion_profile_unavailable",
+    },
+  );
+}
+
 function testSegmentInterruptDoesNotStopNewerMotionOwner(): void {
   const model = buildModelWithVoiceFollowingProfile(buildProfile());
   const stopped: string[] = [];
@@ -2293,19 +2366,31 @@ function testSegmentInterruptDoesNotStopNewerMotionOwner(): void {
     getCurrentTurnId: () => "turn-b",
     onPlanStarted: ignorePlanStarted,
   });
-  const timeline = (turnId: string, messageId: string) => ({
+  const timeline = (
+    turnId: string,
+    messageId: string,
+    phase: "ready" | "playing",
+  ) => ({
     timelineId: `timeline-${messageId}`,
     turnId,
     messageId,
-    phase: "playing" as const,
+    phase,
     source: "audio" as const,
-    startedAtMs: 100,
-    currentTimeMs: 100,
+    startedAtMs: phase === "playing" ? 100 : null,
+    currentTimeMs: 0,
     durationMs: 2000,
   });
 
-  assert.equal(engine.handlePlaybackTimelineStarted(timeline("turn-a", "msg-a")), true);
-  assert.equal(engine.handlePlaybackTimelineStarted(timeline("turn-b", "msg-b")), true);
+  assert.deepEqual(
+    engine.preparePlaybackTimeline(timeline("turn-a", "msg-a", "ready")),
+    { status: "prepared", source: "speech_only" },
+  );
+  assert.equal(engine.handlePlaybackTimelineStarted(timeline("turn-a", "msg-a", "playing")), true);
+  assert.deepEqual(
+    engine.preparePlaybackTimeline(timeline("turn-b", "msg-b", "ready")),
+    { status: "prepared", source: "speech_only" },
+  );
+  assert.equal(engine.handlePlaybackTimelineStarted(timeline("turn-b", "msg-b", "playing")), true);
 
   engine.interruptPlaybackSegment("turn-a", "msg-a", "old_turn_replaced");
   assert.deepEqual(stopped, []);
@@ -2890,6 +2975,7 @@ function run(): void {
   testSpeechOnlyPayloadRequiresVoiceFollowingProfile();
   testSpeechOnlyPlaybackUsesTimelineDuration();
   testSpeechOnlyPlaybackCanBeSuppressedForFailedMotionSegment();
+  testSpeechOnlyPreparationIsNotApplicableWithoutModelCapability();
   testSegmentInterruptDoesNotStopNewerMotionOwner();
   testSegmentInterruptRemovesItsPendingPayload();
   testModelEngineInstancesKeepIndependentRuntimeState();

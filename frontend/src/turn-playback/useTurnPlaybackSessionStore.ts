@@ -276,7 +276,6 @@ export function useTurnPlaybackSessionStore() {
 
     if (material.audio.state === "present") {
       segment.audio.url = material.audio.url;
-      segment.audio.captionText = material.audio.captionText || null;
       segment.audio.receivedAtMs = receivedAtMs;
     } else {
       segment.audio.released = true;
@@ -335,6 +334,18 @@ export function useTurnPlaybackSessionStore() {
     segment.text.reason = "";
   }
 
+  function markTextFailed(
+    turnId: string | null,
+    messageId: string,
+    reason: string,
+  ): void {
+    const { segment } = getSegmentSession(turnId, messageId);
+    segment.text.released = true;
+    segment.text.delivered = true;
+    segment.text.failed = true;
+    segment.text.reason = reason;
+  }
+
   // ── audio ───────────────────────────────────────────────────────
 
   function markAudioStarted(
@@ -343,7 +354,7 @@ export function useTurnPlaybackSessionStore() {
     startedAtMs?: number | null,
     durationMs?: number | null,
   ): void {
-    const { segment } = getSegmentSession(turnId, messageId);
+    const { segment, session } = getSegmentSession(turnId, messageId);
     segment.audio.released = true;
     segment.audio.started = true;
     segment.audio.startedAtMs =
@@ -354,6 +365,9 @@ export function useTurnPlaybackSessionStore() {
       typeof durationMs === "number" && Number.isFinite(durationMs)
         ? durationMs
         : null;
+    if (session.phase === "ready" || session.phase === "settling") {
+      markPhaseInternal(session, "playing");
+    }
   }
 
   function markAudioDuration(
@@ -605,6 +619,7 @@ export function useTurnPlaybackSessionStore() {
     commitOutputSegment,
     markTextReleased,
     markTextDelivered,
+    markTextFailed,
     markAudioReleased,
     markAudioStarted,
     markAudioDuration,

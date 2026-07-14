@@ -43,6 +43,11 @@ export interface PlaybackTimelineSegmentTextSink {
     messageId: string,
     turnId: string | null,
   ): boolean;
+  failAssistantTextForPlayback(
+    messageId: string,
+    turnId: string | null,
+    reason: string,
+  ): boolean;
 }
 
 export interface PlaybackTimelineSegmentAudioSink {

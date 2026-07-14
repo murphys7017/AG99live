@@ -31,6 +31,11 @@ export interface StartPayloadContext {
   playbackClock?: MotionPlaybackClockContext | null;
 }
 
+export interface PendingMotionPreparation {
+  payload: NormalizedMotionPayload;
+  context: StartPayloadContext;
+}
+
 interface MotionRuntimeSchedulerHooks {
   onPendingStateChanged: (pendingCount: number, pendingMessageId: string) => void;
   onPendingStatus: (message: string) => void;
@@ -340,6 +345,25 @@ export function createMotionRuntimeScheduler(
     return started;
   }
 
+  function getPendingPayloadForTimeline(
+    playbackClock: MotionPlaybackClockContext,
+  ): PendingMotionPreparation | null {
+    const entry = pendingInboundMotionPayloads.get(
+      buildPendingMotionKey(playbackClock.turnId, playbackClock.messageId),
+    );
+    if (!entry || !matchesPlaybackTimeline(entry, playbackClock)) {
+      return null;
+    }
+    if (playbackClock.source === "audio_unavailable") {
+      return null;
+    }
+    entry.playbackClock = playbackClock;
+    return {
+      payload: entry.payload,
+      context: buildStartContext(entry, "playback_timeline_preparing"),
+    };
+  }
+
   function notifyCurrentTurnChanged(turnId: string | null): void {
     const currentTurnId = normalizeTurnId(turnId);
     if (!currentTurnId) {
@@ -357,6 +381,7 @@ export function createMotionRuntimeScheduler(
 
   return {
     queueInboundPayload,
+    getPendingPayloadForTimeline,
     handlePlaybackTimelineStarted,
     notifyCurrentTurnChanged,
     cancelPendingPayloadForSegment,

@@ -23,6 +23,11 @@ export interface QueuedTextSegmentSinkOptions {
     turnId: string | null,
     messageId: string,
   ): void;
+  markTextFailed(
+    turnId: string | null,
+    messageId: string,
+    reason: string,
+  ): void;
 }
 
 export interface QueuedAudioSegmentSinkState {
@@ -69,6 +74,25 @@ export function createQueuedTextSegmentSink(
       options.state.assistantTextDeliveryTurnId = releasedTurnId;
       options.markTextDelivered(releasedTurnId, messageId);
       options.state.statusMessage = "文本回复已进入同步播放。";
+      return true;
+    },
+    failAssistantTextForPlayback(messageId, turnId, reason) {
+      const item = getPendingPlaybackItem(
+        options.state.pendingAssistantTexts,
+        turnId,
+        messageId,
+      );
+      if (!item || !matchesPlaybackGroup(item.turnId, turnId)) {
+        return false;
+      }
+      const failedTurnId = item.turnId ?? turnId;
+      deletePendingPlaybackItem(
+        options.state.pendingAssistantTexts,
+        turnId,
+        messageId,
+      );
+      options.markTextFailed(failedTurnId, messageId, reason);
+      options.state.statusMessage = "字幕未能随音频开始播放。";
       return true;
     },
   };

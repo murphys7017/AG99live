@@ -16,6 +16,12 @@ import type {
 } from "./contracts.js";
 import type { StartPayloadContext } from "./motionRuntimeScheduler.js";
 
+export interface PreparedSemanticMotionPayload {
+  modelPath: string;
+  plan: MotionPlanPayload;
+  diagnostics: CompileDiagnostics;
+}
+
 export function reportInvalidMotionPayload(
   reason: string,
   state: MotionRuntimeStateController,
@@ -47,6 +53,7 @@ export function startNormalizedMotionPayload(
   context: StartPayloadContext,
   dependencies: MotionStartDependencies,
   state: MotionRuntimeStateController,
+  preparedSemanticMotion: PreparedSemanticMotionPayload | null = null,
 ): boolean {
   state.setLastStartReason(context.startReason);
   console.info("[ModelEngine] starting motion payload.", {
@@ -59,7 +66,13 @@ export function startNormalizedMotionPayload(
   });
 
   if (payload.kind === "semantic_intent") {
-    return startSemanticIntentPayload(payload, context, dependencies, state);
+    return startSemanticIntentPayload(
+      payload,
+      context,
+      dependencies,
+      state,
+      preparedSemanticMotion,
+    );
   }
   if (payload.kind === "catalog_motion") {
     return startCatalogMotionPayload(payload, context, dependencies, state);
@@ -90,13 +103,99 @@ function isSpeechActiveForPayload(
   if (timeline?.source === "audio_unavailable") {
     return false;
   }
-  if (
-    timeline?.source === "audio"
-    && (timeline.phase === "playing" || timeline.phase === "paused")
-  ) {
-    return true;
+  return timeline?.source === "audio" && timeline.phase !== "terminal";
+}
+
+export function prepareSemanticMotionPayload(
+  payload: Extract<NormalizedMotionPayload, { kind: "semantic_intent" }>,
+  context: StartPayloadContext,
+  dependencies: MotionStartDependencies,
+  state: MotionRuntimeStateController,
+): PreparedSemanticMotionPayload | null {
+  const selectedModel = dependencies.getSelectedModel();
+  if (!selectedModel) {
+    state.setLastCompileReason("missing_selected_model");
+    state.setState("failed", "动作意图无法编译：当前未选中模型。", null);
+    state.pushHistory("error", "动作意图无法编译：当前未选中模型。");
+    return null;
   }
-  return false;
+
+  const modelPath = selectedModel.model_path.trim();
+  state.setState("compiling", "正在编译动作意图...", null);
+  let targetDurationMs = resolveMotionTargetDurationMs(context);
+  let speechActive = isSpeechActiveForPayload(context);
+  const intent = payload.intent;
+  const runtimeWarnings: string[] = [];
+  const performanceCurveHint = payload.intent.performance_curve_hint ?? null;
+  if (performanceCurveHint) {
+    const curveTimeline = resolvePerformanceCurveTimeline({
+      hint: performanceCurveHint,
+      clock: context.playbackClock ?? null,
+      minRemainingDurationMs: MOTION_MIN_REMAINING_AUDIO_MS,
+    });
+    if (curveTimeline.ok) {
+      targetDurationMs = curveTimeline.targetDurationMs;
+      speechActive = curveTimeline.speechActive;
+      runtimeWarnings.push(`performance_curve_timeline:${curveTimeline.clockSource}`);
+    } else {
+      const failureReason = `performance_curve_timeline_unavailable:${curveTimeline.reason}`;
+      state.setLastCompileReason(failureReason);
+      state.setState("failed", `动作意图无法使用表演曲线：${curveTimeline.reason}`, null);
+      state.pushHistory("error", `动作意图无法使用表演曲线：${curveTimeline.reason}`);
+      return null;
+    }
+  }
+  const compileResult = compileMotionIntent(intent, {
+    model: selectedModel,
+    targetDurationMs,
+    speechActive,
+    source: context.startReason,
+    settings: dependencies.getSettings(),
+    runtimeWarnings,
+    samplingIdentity: {
+      turnId: context.turnId ?? "",
+      messageId: context.messageId,
+    },
+  }, dependencies.stageRegistry ?? createModelEngineStageRegistry());
+
+  state.setLastCompileReason(compileResult.reason);
+  state.setLastCompileDiagnostics(compileResult.diagnostics);
+
+  if (!compileResult.ok || !compileResult.plan) {
+    console.warn("[ModelEngine] semantic intent compile failed.", {
+      reason: compileResult.reason,
+      diagnostics: compileResult.diagnostics,
+    });
+    const failureMessage = `动作意图编译失败：${compileResult.reason}`;
+    dependencies.onCompileFailed?.({
+      intent,
+      model: selectedModel,
+      messageId: context.messageId,
+      turnId: context.turnId,
+      playbackTurnId: context.playbackTurnId,
+      startReason: context.startReason,
+      queuedDelayMs: context.queuedDelayMs,
+      reason: compileResult.reason,
+      diagnostics: compileResult.diagnostics,
+      feedback: compileResult.feedback ?? null,
+    });
+    state.setState("failed", failureMessage, compileResult.diagnostics);
+    state.pushHistory("error", failureMessage);
+    return null;
+  }
+
+  console.info("[ModelEngine] semantic intent prepared.", {
+    parameterCount: compileResult.plan.parameters.length,
+    diagnostics: compileResult.diagnostics,
+    messageId: context.messageId,
+    turnId: context.turnId,
+  });
+  state.setState("pending", "动作计划已准备，等待音频起播。", compileResult.diagnostics);
+  return {
+    modelPath,
+    plan: compileResult.plan,
+    diagnostics: compileResult.diagnostics,
+  };
 }
 
 function startCatalogMotionPayload(
@@ -152,6 +251,7 @@ function startSemanticIntentPayload(
   context: StartPayloadContext,
   dependencies: MotionStartDependencies,
   state: MotionRuntimeStateController,
+  preparedSemanticMotion: PreparedSemanticMotionPayload | null,
 ): boolean {
   const selectedModel = dependencies.getSelectedModel();
   if (!selectedModel) {
@@ -160,80 +260,38 @@ function startSemanticIntentPayload(
     state.pushHistory("error", "动作意图无法编译：当前未选中模型。");
     return false;
   }
-
-  state.setState("compiling", "正在编译动作意图...", null);
-  let targetDurationMs = resolveMotionTargetDurationMs(context);
-  let speechActive = isSpeechActiveForPayload(context);
-  const intent = payload.intent;
-  const runtimeWarnings: string[] = [];
-  const performanceCurveHint = payload.intent.performance_curve_hint ?? null;
-  if (performanceCurveHint) {
-    const curveTimeline = resolvePerformanceCurveTimeline({
-      hint: performanceCurveHint,
-      clock: context.playbackClock ?? null,
-      minRemainingDurationMs: MOTION_MIN_REMAINING_AUDIO_MS,
-    });
-    if (curveTimeline.ok) {
-      targetDurationMs = curveTimeline.targetDurationMs;
-      speechActive = curveTimeline.speechActive;
-      runtimeWarnings.push(`performance_curve_timeline:${curveTimeline.clockSource}`);
-    } else {
-      const failureReason = `performance_curve_timeline_unavailable:${curveTimeline.reason}`;
-      state.setLastCompileReason(failureReason);
-      state.setState("failed", `动作意图无法使用表演曲线：${curveTimeline.reason}`, null);
-      state.pushHistory("error", `动作意图无法使用表演曲线：${curveTimeline.reason}`);
+  let prepared = preparedSemanticMotion;
+  if (!prepared) {
+    if (context.playbackClock?.source === "audio") {
+      const reason = "motion_plan_not_prepared_before_audio_start";
+      state.setLastCompileReason(reason);
+      state.setState("failed", `动作启动失败：${reason}`, null);
+      state.pushHistory("error", `动作启动失败：${reason}`);
+      return false;
+    }
+    prepared = prepareSemanticMotionPayload(
+      payload,
+      context,
+      dependencies,
+      state,
+    );
+    if (!prepared) {
       return false;
     }
   }
-  const compileResult = compileMotionIntent(intent, {
-    model: selectedModel,
-    targetDurationMs,
-    speechActive,
-    source: context.startReason,
-    settings: dependencies.getSettings(),
-    runtimeWarnings,
-    samplingIdentity: {
-      turnId: context.turnId ?? "",
-      messageId: context.messageId,
-    },
-  }, dependencies.stageRegistry ?? createModelEngineStageRegistry());
-
-  state.setLastCompileReason(compileResult.reason);
-  state.setLastCompileDiagnostics(compileResult.diagnostics);
-
-  if (!compileResult.ok || !compileResult.plan) {
-    console.warn("[ModelEngine] semantic intent compile failed.", {
-      reason: compileResult.reason,
-      diagnostics: compileResult.diagnostics,
-    });
-    const failureMessage = `动作意图编译失败：${compileResult.reason}`;
-    dependencies.onCompileFailed?.({
-      intent,
-      model: selectedModel,
-      messageId: context.messageId,
-      turnId: context.turnId,
-      playbackTurnId: context.playbackTurnId,
-      startReason: context.startReason,
-      queuedDelayMs: context.queuedDelayMs,
-      reason: compileResult.reason,
-      diagnostics: compileResult.diagnostics,
-      feedback: compileResult.feedback ?? null,
-    });
-    state.setState("failed", failureMessage, compileResult.diagnostics);
-    state.pushHistory("error", failureMessage);
+  if (selectedModel.model_path.trim() !== prepared.modelPath) {
+    const reason = "prepared_motion_model_changed_before_start";
+    state.setLastCompileReason(reason);
+    state.setState("failed", `动作启动失败：${reason}`, prepared.diagnostics);
+    state.pushHistory("error", `动作启动失败：${reason}`);
     return false;
   }
 
-  console.info("[ModelEngine] semantic intent compiled.", {
-    parameterCount: compileResult.plan.parameters.length,
-    diagnostics: compileResult.diagnostics,
-  });
-
-  if (compileResult.plan.resource?.kind === "motion") {
+  if (prepared.plan.resource?.kind === "motion") {
     return startCompiledMotionResource(
       payload,
-      compileResult.plan,
-      compileResult.diagnostics,
+      prepared.plan,
+      prepared.diagnostics,
       context,
       dependencies,
       state,
@@ -242,7 +300,7 @@ function startSemanticIntentPayload(
 
   let notifiedStarted = false;
   const started = dependencies.playPlan(
-    compileResult.plan,
+    prepared.plan,
     selectedModel,
     {
       softHandoff: true,
@@ -262,7 +320,7 @@ function startSemanticIntentPayload(
           startReason: context.startReason,
           queuedDelayMs: context.queuedDelayMs,
           payloadKind: payload.kind,
-          diagnostics: compileResult.diagnostics,
+          diagnostics: prepared.diagnostics,
           playerMessage: buildSuccessMessage(context, dependencies),
           runId: normalizedRunId,
         });
@@ -273,17 +331,17 @@ function startSemanticIntentPayload(
   if (!started) {
     const failureReason = dependencies.getPlayerMessage?.()
       || "动作意图编译成功，但运行时拒绝执行。";
-    state.setState("failed", failureReason, compileResult.diagnostics);
+    state.setState("failed", failureReason, prepared.diagnostics);
     state.pushHistory("error", `动作播放失败：${failureReason}`);
     return false;
   }
 
   const successMessage = buildSuccessMessage(context, dependencies);
   if (!notifiedStarted) {
-    return rejectMotionStartWithoutRunId(state, compileResult.diagnostics);
+    return rejectMotionStartWithoutRunId(state, prepared.diagnostics);
   }
 
-  state.setState("playing", successMessage, compileResult.diagnostics);
+  state.setState("playing", successMessage, prepared.diagnostics);
   state.pushHistory("system", `动作计划执行中（${successMessage}）。`);
   return true;
 }

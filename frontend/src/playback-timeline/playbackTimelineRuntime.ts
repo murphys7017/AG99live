@@ -13,6 +13,7 @@ import type {
 } from "./segmentJob.js";
 import {
   executePlaybackTimelineSegmentJob,
+  type PlaybackTimelineDeferredTextRelease,
   type PlaybackTimelineSegmentExecutorTimelinePort,
 } from "./segmentJobExecutor.js";
 
@@ -27,11 +28,13 @@ interface PlaybackTimelineEntry {
   turnId: string | null;
   messageId: string;
   engine: PlaybackTimelineEngine;
+  deferredText: PlaybackTimelineDeferredTextRelease | null;
 }
 
 interface PlaybackTimelineSinkStartOptions {
   start?: () => boolean | void;
   onInterrupt?: (reason: string) => void;
+  deferredText?: PlaybackTimelineDeferredTextRelease;
 }
 
 export interface PlaybackTimelineAudioSegment {
@@ -48,6 +51,11 @@ export interface PlaybackTimelineRuntimeDeps<TMotionPayload = unknown> {
     turnId: string | null,
     messageId: string,
     playbackTimeline: PlaybackTimelineSnapshot | null,
+  ) => void;
+  onAudioTimelineDurationReady?: (
+    turnId: string | null,
+    messageId: string,
+    playbackTimeline: PlaybackTimelineSnapshot,
   ) => void;
 }
 
@@ -104,6 +112,7 @@ export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
   ensureMotionTimelineSinkForSegment: (
     turnId: string | null,
     messageId: string,
+    onInterrupt?: (reason: string) => void,
   ) => boolean;
   markAudioTimelineDuration: (
     turnId: string | null,
@@ -115,7 +124,7 @@ export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
     messageId: string,
     startedAtMs: number,
     durationMs: number | null,
-  ) => void;
+  ) => boolean;
   markLipSyncTimelineStarted: (
     turnId: string | null,
     messageId: string,
@@ -202,10 +211,17 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
   ): void {
     const existing = getTimeline(turnId, messageId);
     if (existing?.engine.hasSink(AUDIO_TIMELINE_SINK_ID)) {
+      if (options.deferredText) {
+        if (existing.deferredText) {
+          throw new Error("Playback timeline subtitle release already registered.");
+        }
+        existing.deferredText = options.deferredText;
+      }
       existing.engine.registerSink({
         id: AUDIO_TIMELINE_SINK_ID,
         required: true,
         start: options.start,
+        onInterrupt: options.onInterrupt,
       });
       if (!existing.engine.hasSink(LIP_SYNC_TIMELINE_SINK_ID)) {
         existing.engine.registerSink({
@@ -223,6 +239,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
           id: AUDIO_TIMELINE_SINK_ID,
           required: true,
           start: options.start,
+          onInterrupt: options.onInterrupt,
         },
         { id: LIP_SYNC_TIMELINE_SINK_ID, required: false },
       ],
@@ -231,6 +248,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       turnId,
       messageId,
       engine,
+      deferredText: options.deferredText ?? null,
     });
   }
 
@@ -289,8 +307,8 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
   }
 
   const segmentExecutorTimelinePort: PlaybackTimelineSegmentExecutorTimelinePort = {
-    startAudioSink(turnId, messageId, start) {
-      return startAudioTimelineSink(turnId, messageId, { start });
+    startAudioSink(turnId, messageId, start, deferredText) {
+      return startAudioTimelineSink(turnId, messageId, { start, deferredText });
     },
     ensureAudioSegmentTimeline,
     clearAudioSinkIfIdle(turnId, messageId) {
@@ -362,6 +380,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       turnId,
       messageId,
       engine,
+      deferredText: null,
     });
     return engine.getSnapshot();
   }
@@ -389,6 +408,17 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       messageId,
       durationMs,
     );
+    if (
+      typeof durationMs === "number"
+      && Number.isFinite(durationMs)
+      && durationMs > 0
+    ) {
+      const snapshot = timeline.engine.getSnapshot();
+      if (!snapshot) {
+        throw new Error("Playback timeline snapshot missing after audio duration update.");
+      }
+      deps.onAudioTimelineDurationReady?.(turnId, messageId, snapshot);
+    }
   }
 
   function markAudioTimelineStarted(
@@ -396,7 +426,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     messageId: string,
     startedAtMs: number,
     durationMs: number | null,
-  ): void {
+  ): boolean {
     const timeline = getTimelineWithSink(
       "audio.started",
       AUDIO_TIMELINE_SINK_ID,
@@ -408,27 +438,18 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       },
     );
     if (!timeline) {
-      return;
+      return false;
     }
     const engine = timeline.engine;
     engine.setExpectedDurationMs(durationMs);
     const audioClock = deps.getAudioClock();
     if (!audioClock) {
-      if (hasOpenSink(timeline, AUDIO_TIMELINE_SINK_ID)) {
-        markAudioSessionTerminal(
-          turnId,
-          messageId,
-          "failed",
-          "audio_clock_unavailable_on_started",
-        );
-      }
-      engine.markSinkTerminal(
-        AUDIO_TIMELINE_SINK_ID,
-        "failed",
-        "audio_clock_unavailable_on_started",
+      failDeferredText(
+        timeline,
+        "subtitle_audio_clock_unavailable_on_started",
       );
-      clearTimelineIfTerminal(turnId, messageId);
-      return;
+      failTimelineSegment(timeline, "audio_clock_unavailable_on_started");
+      return false;
     }
     engine.attachAudioClock(audioClock);
     engine.markSinkStarted(AUDIO_TIMELINE_SINK_ID);
@@ -441,11 +462,20 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       startedAtMs,
       durationMs,
     );
+    if (!releaseDeferredText(timeline)) {
+      failTimelineSegment(timeline, "subtitle_release_queue_invariant_failed");
+      deps.segmentExecution.session.markSessionFailed(
+        turnId,
+        `subtitle_release_queue_invariant_failed:${messageId}`,
+      );
+      return false;
+    }
     deps.onAudioTimelineStarted?.(
       turnId,
       messageId,
       engine.getSnapshot(),
     );
+    return true;
   }
 
   function markLipSyncTimelineStarted(
@@ -590,11 +620,20 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     if (!timeline) {
       return;
     }
+    failDeferredText(
+      timeline,
+      `subtitle_audio_${terminal}_before_start:${reason}`,
+    );
+    if (terminal === "failed") {
+      failTimelineSegment(timeline, reason);
+      return;
+    }
     const engine = timeline.engine;
     if (hasOpenSink(timeline, AUDIO_TIMELINE_SINK_ID)) {
       markAudioSessionTerminal(turnId, messageId, terminal, reason);
     }
     if (terminal === "interrupted") {
+      failOpenMotionAfterAudioFailure(timeline, reason);
       engine.interrupt(reason);
     } else {
       engine.detachAudioClock();
@@ -615,6 +654,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       });
       return;
     }
+    failDeferredText(timeline, `subtitle_timeline_stopped:${reason}`);
     if (hasOpenSink(timeline, AUDIO_TIMELINE_SINK_ID)) {
       markAudioSessionTerminal(turnId, messageId, "interrupted", reason);
     }
@@ -708,7 +748,38 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       item.id === sinkId
     );
     if (sink?.terminal === "idle") {
+      failDeferredText(timeline, "subtitle_audio_release_failed");
       clearTimeline(turnId, messageId);
+    }
+  }
+
+  function releaseDeferredText(timeline: PlaybackTimelineEntry): boolean {
+    const deferred = timeline.deferredText;
+    if (!deferred) {
+      return true;
+    }
+    timeline.deferredText = null;
+    if (deferred.release()) {
+      return true;
+    }
+    deferred.fail("subtitle_release_queue_invariant_failed");
+    return false;
+  }
+
+  function failDeferredText(
+    timeline: PlaybackTimelineEntry,
+    reason: string,
+  ): void {
+    const deferred = timeline.deferredText;
+    if (!deferred) {
+      return;
+    }
+    timeline.deferredText = null;
+    if (!deferred.fail(reason)) {
+      deps.segmentExecution.session.markSessionFailed(
+        timeline.turnId,
+        `subtitle_failure_queue_invariant_failed:${timeline.messageId}`,
+      );
     }
   }
 
@@ -780,6 +851,46 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     deps.motionSession?.markMotionFailed(turnId, messageId, reason);
   }
 
+  function failOpenMotionAfterAudioFailure(
+    timeline: PlaybackTimelineEntry,
+    reason: string,
+  ): boolean {
+    if (!hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID)) {
+      return false;
+    }
+    markMotionSessionTerminal(
+      timeline.turnId,
+      timeline.messageId,
+      "failed",
+      reason,
+    );
+    return true;
+  }
+
+  function failTimelineSegment(
+    timeline: PlaybackTimelineEntry,
+    reason: string,
+  ): void {
+    if (hasOpenSink(timeline, AUDIO_TIMELINE_SINK_ID)) {
+      markAudioSessionTerminal(
+        timeline.turnId,
+        timeline.messageId,
+        "failed",
+        reason,
+      );
+    }
+    if (hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID)) {
+      markMotionSessionTerminal(
+        timeline.turnId,
+        timeline.messageId,
+        "failed",
+        reason,
+      );
+    }
+    timeline.engine.fail(reason);
+    clearTimelineIfTerminal(timeline.turnId, timeline.messageId);
+  }
+
   function hasOpenSink(
     timeline: PlaybackTimelineEntry,
     sinkId: string,
@@ -841,8 +952,8 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     startSegmentJob,
     startAudioTimelineSink,
     startLipSyncTimelineSink,
-    ensureMotionTimelineSinkForSegment: (turnId, messageId) =>
-      ensureMotionTimelineSink(turnId, messageId),
+    ensureMotionTimelineSinkForSegment: (turnId, messageId, onInterrupt) =>
+      ensureMotionTimelineSink(turnId, messageId, { onInterrupt }),
     markAudioTimelineDuration,
     markAudioTimelineStarted,
     markLipSyncTimelineStarted,

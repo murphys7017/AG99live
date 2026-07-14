@@ -61,13 +61,17 @@ export function createPlaybackTimelineAudioSegmentRunner<TMotionPayload = unknow
                   callbacks.onDurationChanged?.(durationMs);
                 },
                 onPlaybackStarted: (event) => {
-                  options.runtime.markAudioTimelineStarted(
+                  const timelineActive = options.runtime.markAudioTimelineStarted(
                     turnId,
                     messageId,
                     event.startedAtMs,
                     event.durationMs,
                   );
+                  if (!timelineActive) {
+                    return false;
+                  }
                   callbacks.onPlaybackStarted?.(event);
+                  return true;
                 },
                 onEnded: () => {
                   options.runtime.markAudioTimelineTerminal(
@@ -100,6 +104,7 @@ export function createPlaybackTimelineAudioSegmentRunner<TMotionPayload = unknow
               });
               return true;
             },
+            onInterrupt: () => options.audioSegmentSink.stop(),
           },
         );
         if (accepted !== true) {

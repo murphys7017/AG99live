@@ -368,18 +368,56 @@ async function testAudioSegmentSinkOwnsLipSyncEventOrdering(): Promise<void> {
   });
 
   await segmentSink.start("http://127.0.0.1/audio.wav", "turn-audio", "msg-audio", {
-    onPlaybackStarted: () => events.push("audio:started"),
+    onPlaybackStarted: () => {
+      events.push("audio:started");
+    },
     onEnded: () => events.push("audio:ended"),
   });
 
   assert.ok(callbacksRef);
   assert.deepEqual(events, [
     "lip:attach",
-    "lip:start",
     "audio:started",
+    "lip:start",
     "lip:complete",
     "audio:ended",
   ]);
+}
+
+async function testAudioSegmentSinkDoesNotStartLipSyncAfterTimelineRejection(): Promise<void> {
+  const events: string[] = [];
+  const audioSink: PlaybackTimelineAudioSink = {
+    start: async (_audioUrl, callbacks = {}) => {
+      callbacks.onAudioElementCreated?.({
+        audioUrl: "http://127.0.0.1/audio.wav",
+        audio: {} as HTMLAudioElement,
+        getAudioCurrentTimeSeconds: () => 0,
+        isCurrentAudio: () => true,
+      });
+      callbacks.onPlaybackStarted?.({ startedAtMs: 10, durationMs: 500 });
+    },
+    stop: () => events.push("audio:stop"),
+    getClock: () => null,
+  };
+  const segmentSink = createPlaybackTimelineAudioSegmentSink({
+    audioSink,
+    createLipSyncSink: () => ({
+      attachAudio: () => events.push("lip:attach"),
+      start: () => events.push("lip:start"),
+      completeAfterAudioEnded: () => {},
+      failAfterAudioError: () => {},
+      stop: () => {},
+    }),
+  });
+
+  await segmentSink.start("http://127.0.0.1/audio.wav", "turn-rejected", "msg-rejected", {
+    onPlaybackStarted: () => {
+      events.push("timeline:rejected");
+      return false;
+    },
+  });
+
+  assert.deepEqual(events, ["lip:attach", "timeline:rejected"]);
 }
 
 async function run(): Promise<void> {
@@ -391,6 +429,7 @@ async function run(): Promise<void> {
   await testLiveLipSyncPublishesIndependentSpeechEnergyFromAnalyser();
   await testBrowserAudioSinkDoesNotOwnLipSyncCallbacks();
   await testAudioSegmentSinkOwnsLipSyncEventOrdering();
+  await testAudioSegmentSinkDoesNotStartLipSyncAfterTimelineRejection();
   console.log("playbackTimelineAudioSink tests passed");
 }
 

@@ -8,7 +8,9 @@ import type {
 
 export interface PlaybackTimelineAudioSegmentSinkCallbacks {
   onDurationChanged?: PlaybackTimelineAudioStartCallbacks["onDurationChanged"];
-  onPlaybackStarted?: PlaybackTimelineAudioStartCallbacks["onPlaybackStarted"];
+  onPlaybackStarted?: (
+    event: Parameters<NonNullable<PlaybackTimelineAudioStartCallbacks["onPlaybackStarted"]>>[0],
+  ) => boolean | void;
   onEnded?: () => void;
   onError?: () => void;
 }
@@ -68,6 +70,9 @@ export function createPlaybackTimelineAudioSegmentSink(options: {
           },
           onDurationChanged: callbacks.onDurationChanged,
           onPlaybackStarted: (event) => {
+            if (callbacks.onPlaybackStarted?.(event) === false) {
+              return;
+            }
             if (options.startLipSyncTimelineSink) {
               options.startLipSyncTimelineSink(
                 turnId,
@@ -80,7 +85,6 @@ export function createPlaybackTimelineAudioSegmentSink(options: {
             } else {
               lipSyncSink.start();
             }
-            callbacks.onPlaybackStarted?.(event);
           },
           onEnded: () => {
             lipSyncSink.completeAfterAudioEnded();

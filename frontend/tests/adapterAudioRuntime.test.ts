@@ -40,6 +40,8 @@ function createAdapterAudioRuntime(
       textSink: {
         releaseAssistantTextForPlayback: (...args) =>
           ports.textSink.releaseAssistantTextForPlayback(...args),
+        failAssistantTextForPlayback: (...args) =>
+          ports.textSink.failAssistantTextForPlayback(...args),
       },
       motionSink: {
         start: (...args) => ports.motionSink.start(...args),
@@ -186,6 +188,7 @@ function createNoopSegmentExecutionPorts(): Omit<
     },
     textSink: {
       releaseAssistantTextForPlayback: () => true,
+      failAssistantTextForPlayback: () => true,
     },
     motionSink: {
       start: () => true,
@@ -633,6 +636,7 @@ async function testTimelineAudioReleaseMarksSessionReleasedOnce(): Promise<void>
     },
     textSink: {
       releaseAssistantTextForPlayback: () => true,
+      failAssistantTextForPlayback: () => true,
     },
     motionSink: {
       start: () => true,

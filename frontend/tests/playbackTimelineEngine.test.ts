@@ -7,7 +7,7 @@ import {
   createPlaybackTimelineRuntime as createStrictPlaybackTimelineRuntime,
 } from "../src/playback-timeline/playbackTimelineRuntime.js";
 import { createTimelineClock } from "../src/playback-timeline/timelineClock.js";
-import { createAudioStartMotionTimelineBridge } from "../src/playback-timeline/audioStartMotionBridge.js";
+import { createAudioMotionTimelineBridge } from "../src/playback-timeline/audioMotionStartBridge.js";
 import { createMotionTimelineRunTracker } from "../src/playback-integrations/modelEngineMotionSink.js";
 import {
   createQueuedAudioSegmentSink,
@@ -43,6 +43,8 @@ function createPlaybackTimelineRuntime(
       textSink: {
         releaseAssistantTextForPlayback: (...args) =>
           ports.textSink.releaseAssistantTextForPlayback(...args),
+        failAssistantTextForPlayback: (...args) =>
+          ports.textSink.failAssistantTextForPlayback(...args),
       },
       audioSink: {
         releaseAudioForPlayback: (...args) =>
@@ -266,6 +268,47 @@ function testInterruptPropagatesToActiveSinks(): void {
   );
 }
 
+function testFatalTimelineFailureStopsSinksAndMarksRequiredFailures(): void {
+  const stopped: string[] = [];
+  const engine = createPlaybackTimelineEngine({ now: () => 0 });
+  engine.load(
+    { turnId: "turn-fatal", messageId: "msg-fatal" },
+    [
+      {
+        id: "audio",
+        required: true,
+        onInterrupt: (reason) => stopped.push(`audio:${reason}`),
+      },
+      {
+        id: "motion",
+        required: true,
+        onInterrupt: (reason) => stopped.push(`motion:${reason}`),
+      },
+      {
+        id: "lip_sync",
+        required: false,
+        onInterrupt: (reason) => stopped.push(`lip_sync:${reason}`),
+      },
+    ],
+  );
+  engine.markSinkStarted("audio");
+  engine.markSinkStarted("motion");
+  engine.start();
+
+  engine.fail("subtitle_release_queue_invariant_failed");
+
+  assert.equal(engine.getPhase(), "failed");
+  assert.deepEqual(stopped, [
+    "audio:subtitle_release_queue_invariant_failed",
+    "motion:subtitle_release_queue_invariant_failed",
+    "lip_sync:subtitle_release_queue_invariant_failed",
+  ]);
+  const snapshot = engine.getSnapshot();
+  assert.equal(snapshot?.sinks.find((sink) => sink.id === "audio")?.terminal, "failed");
+  assert.equal(snapshot?.sinks.find((sink) => sink.id === "motion")?.terminal, "failed");
+  assert.equal(snapshot?.sinks.find((sink) => sink.id === "lip_sync")?.terminal, "interrupted");
+}
+
 function testLateSinkEventsDoNotRewriteTerminalTimeline(): void {
   const engine = createPlaybackTimelineEngine({ now: () => 0 });
   engine.load(
@@ -404,6 +447,7 @@ function createNoopSegmentExecutionPorts(
     },
     textSink: {
       releaseAssistantTextForPlayback: () => true,
+      failAssistantTextForPlayback: () => true,
     },
     audioSink: {
       releaseAudioForPlayback: () => true,
@@ -651,6 +695,7 @@ function testPlaybackTimelineRuntimeStartsSegmentJobThroughTimelineEntry(): void
     },
     textSink: {
       releaseAssistantTextForPlayback: () => true,
+      failAssistantTextForPlayback: () => true,
     },
     audioSink: {
       releaseAudioForPlayback: () => true,
@@ -710,6 +755,303 @@ function testPlaybackTimelineRuntimeStartsSegmentJobThroughTimelineEntry(): void
   );
 }
 
+function testAudioTimelineOwnsCanonicalTextUntilRealPlaybackStarts(): void {
+  const events: string[] = [];
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => createTestAudioClock(),
+    onAudioTimelineDurationReady: (_turnId, _messageId, snapshot) => {
+      events.push(`duration_ready:${snapshot.durationMs ?? 0}`);
+    },
+    onAudioTimelineStarted: () => events.push("timeline_started"),
+  });
+  runtime.configureSegmentExecution({
+    session: {
+      markSessionFailed: (_turnId, reason) => events.push(`session_failed:${reason}`),
+      markTextReleased: () => events.push("text_released"),
+      markAudioReleased: () => events.push("audio_released"),
+      markMotionReleased: () => events.push("motion_released"),
+      markMotionFailed: () => events.push("motion_failed"),
+      markPhase: () => true,
+    },
+    textSink: {
+      releaseAssistantTextForPlayback: () => {
+        events.push("text_sink");
+        return true;
+      },
+      failAssistantTextForPlayback: (_messageId, _turnId, reason) => {
+        events.push(`text_failed:${reason}`);
+        return true;
+      },
+    },
+    audioSink: {
+      releaseAudioForPlayback: () => {
+        events.push("audio_sink");
+        return true;
+      },
+    },
+    motionSink: {
+      start: () => true,
+      interrupt: () => {},
+    },
+  });
+
+  const result = runtime.startSegmentJob({
+    messageId: "msg-canonical-text",
+    turnId: "turn-canonical-text",
+    reason: "test",
+    text: { release: true },
+    audio: { release: true, noAudioConfirmed: false },
+    motion: { payload: null, receivedAtMs: null },
+  });
+
+  assert.deepEqual(result, {
+    releasedText: false,
+    releasedAudio: true,
+    releasedMotion: false,
+  });
+  assert.deepEqual(events, ["audio_sink", "audio_released"]);
+
+  runtime.markAudioTimelineDuration(
+    "turn-canonical-text",
+    "msg-canonical-text",
+    1200,
+  );
+  assert.deepEqual(events, [
+    "audio_sink",
+    "audio_released",
+    "duration_ready:1200",
+  ]);
+
+  runtime.markAudioTimelineStarted(
+    "turn-canonical-text",
+    "msg-canonical-text",
+    100,
+    1200,
+  );
+  assert.deepEqual(events, [
+    "audio_sink",
+    "audio_released",
+    "duration_ready:1200",
+    "text_sink",
+    "text_released",
+    "timeline_started",
+  ]);
+}
+
+function testSubtitleReleaseFailureAtomicallyFailsPlaybackSegment(): void {
+  const events: string[] = [];
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => createTestAudioClock(),
+    audioSession: {
+      markAudioStarted: () => {},
+      markAudioDuration: () => {},
+      markAudioTerminal: (_turnId, terminal, _messageId, reason) => {
+        events.push(`audio_session:${terminal}:${reason ?? ""}`);
+      },
+    },
+    motionSession: {
+      markMotionStarted: () => {},
+      markMotionCompleted: () => {},
+      markMotionFailed: (_turnId, _messageId, reason) => {
+        events.push(`motion_session:failed:${reason ?? ""}`);
+      },
+    },
+  });
+  runtime.configureSegmentExecution({
+    session: {
+        markSessionFailed: (_turnId, reason) => events.push(`session_failed:${reason}`),
+        markTextReleased: () => events.push("text_released"),
+        markAudioReleased: () => events.push("audio_released"),
+        markMotionReleased: () => events.push("motion_released"),
+        markMotionFailed: () => events.push("motion_failed"),
+        markPhase: () => true,
+    },
+    textSink: {
+        releaseAssistantTextForPlayback: () => {
+          events.push("subtitle_release_rejected");
+          return false;
+        },
+        failAssistantTextForPlayback: (_messageId, _turnId, reason) => {
+          events.push(`subtitle_failed:${reason}`);
+          return true;
+        },
+    },
+    audioSink: {
+        releaseAudioForPlayback: (_messageId, turnId) => {
+          runtime.startAudioTimelineSink(turnId, "msg-subtitle-fatal", {
+            start: () => true,
+            onInterrupt: (reason) => events.push(`audio_stopped:${reason}`),
+          });
+          return true;
+        },
+    },
+    motionSink: {
+        start: () => true,
+        interrupt: (_turnId, _messageId, reason) => {
+          events.push(`motion_stopped:${reason}`);
+        },
+    },
+  });
+
+  runtime.startSegmentJob({
+    messageId: "msg-subtitle-fatal",
+    turnId: "turn-subtitle-fatal",
+    reason: "test",
+    text: { release: true },
+    audio: { release: true, noAudioConfirmed: false },
+    motion: { payload: testMotionPayload, receivedAtMs: 10 },
+  });
+  runtime.markAudioTimelineStarted(
+    "turn-subtitle-fatal",
+    "msg-subtitle-fatal",
+    100,
+    1200,
+  );
+
+  assert.equal(
+    runtime.getTimelineSnapshotForSegment("turn-subtitle-fatal", "msg-subtitle-fatal"),
+    null,
+  );
+  assert.equal(events.includes("audio_stopped:subtitle_release_queue_invariant_failed"), true);
+  assert.equal(events.includes("motion_stopped:subtitle_release_queue_invariant_failed"), true);
+  assert.equal(
+    events.includes("audio_session:failed:subtitle_release_queue_invariant_failed"),
+    true,
+  );
+  assert.equal(
+    events.includes("motion_session:failed:subtitle_release_queue_invariant_failed"),
+    true,
+  );
+  assert.equal(
+    events.includes("session_failed:subtitle_release_queue_invariant_failed:msg-subtitle-fatal"),
+    true,
+  );
+}
+
+function testAudioFailureBeforeStartFailsDeferredCanonicalText(): void {
+  const events: string[] = [];
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => createTestAudioClock(),
+  });
+  runtime.configureSegmentExecution({
+    session: {
+      markSessionFailed: (_turnId, reason) => events.push(`session_failed:${reason}`),
+      markTextReleased: () => events.push("text_released"),
+      markAudioReleased: () => events.push("audio_released"),
+      markMotionReleased: () => events.push("motion_released"),
+      markMotionFailed: () => events.push("motion_failed"),
+      markPhase: () => true,
+    },
+    textSink: {
+      releaseAssistantTextForPlayback: () => {
+        events.push("text_sink");
+        return true;
+      },
+      failAssistantTextForPlayback: (_messageId, _turnId, reason) => {
+        events.push(`text_failed:${reason}`);
+        return true;
+      },
+    },
+    audioSink: {
+      releaseAudioForPlayback: () => true,
+    },
+    motionSink: {
+      start: () => true,
+      interrupt: () => {},
+    },
+  });
+
+  runtime.startSegmentJob({
+    messageId: "msg-audio-failed",
+    turnId: "turn-audio-failed",
+    reason: "test",
+    text: { release: true },
+    audio: { release: true, noAudioConfirmed: false },
+    motion: { payload: null, receivedAtMs: null },
+  });
+  runtime.markAudioTimelineTerminal(
+    "turn-audio-failed",
+    "msg-audio-failed",
+    "failed",
+    "audio_playback_error",
+  );
+
+  assert.deepEqual(events, [
+    "audio_released",
+    "text_failed:subtitle_audio_failed_before_start:audio_playback_error",
+  ]);
+}
+
+function testAudioFailureTerminatesAndInterruptsOwnedMotion(): void {
+  const events: string[] = [];
+  const runtime = createPlaybackTimelineRuntime({
+    getAudioClock: () => createTestAudioClock(),
+    motionSession: {
+      markMotionStarted: () => events.push("motion_session_started"),
+      markMotionCompleted: () => events.push("motion_session_completed"),
+      markMotionFailed: (_turnId, _messageId, reason) => {
+        events.push(`motion_session_failed:${reason ?? ""}`);
+      },
+    },
+  });
+  runtime.configureSegmentExecution({
+    session: {
+      markSessionFailed: (_turnId, reason) => events.push(`session_failed:${reason}`),
+      markTextReleased: () => events.push("text_released"),
+      markAudioReleased: () => events.push("audio_released"),
+      markMotionReleased: () => events.push("motion_released"),
+      markMotionFailed: () => events.push("motion_failed"),
+      markPhase: () => true,
+    },
+    textSink: {
+      releaseAssistantTextForPlayback: () => true,
+      failAssistantTextForPlayback: () => true,
+    },
+    audioSink: {
+      releaseAudioForPlayback: () => true,
+    },
+    motionSink: {
+      start: () => {
+        events.push("motion_queued");
+        return true;
+      },
+      interrupt: (_turnId, _messageId, reason) => {
+        events.push(`motion_interrupted:${reason}`);
+      },
+    },
+  });
+
+  runtime.startSegmentJob({
+    messageId: "msg-audio-motion-failed",
+    turnId: "turn-audio-motion-failed",
+    reason: "test",
+    text: { release: false },
+    audio: { release: true, noAudioConfirmed: false },
+    motion: { payload: testMotionPayload, receivedAtMs: 10 },
+  });
+  runtime.markAudioTimelineTerminal(
+    "turn-audio-motion-failed",
+    "msg-audio-motion-failed",
+    "failed",
+    "audio_playback_error",
+  );
+
+  assert.deepEqual(events, [
+    "audio_released",
+    "motion_queued",
+    "motion_released",
+    "motion_session_failed:audio_playback_error",
+    "motion_interrupted:audio_playback_error",
+  ]);
+  assert.equal(
+    runtime.getTimelineSnapshotForSegment(
+      "turn-audio-motion-failed",
+      "msg-audio-motion-failed",
+    ),
+    null,
+  );
+}
+
 function testQueuedSegmentReleaseSinksConsumePendingItems(): void {
   const pendingAssistantTexts = new Map();
   const pendingAudios = new Map();
@@ -738,6 +1080,9 @@ function testQueuedSegmentReleaseSinksConsumePendingItems(): void {
     },
     markTextDelivered: (turnId, messageId) => {
       events.push(`text_delivered:${turnId ?? ""}:${messageId}`);
+    },
+    markTextFailed: (turnId, messageId, reason) => {
+      events.push(`text_failed:${turnId ?? ""}:${messageId}:${reason}`);
     },
   });
   const audioSink = createQueuedAudioSegmentSink({
@@ -1057,26 +1402,14 @@ function buildTimelineSnapshot(
   };
 }
 
-function testAudioStartMotionBridgeRefreshesTimelineAtFireTime(): void {
-  const scheduled: Array<() => void> = [];
-  let snapshot = buildTimelineSnapshot(100);
+function testAudioMotionBridgeStartsFromCurrentTimeline(): void {
+  const snapshot = {
+    ...buildTimelineSnapshot(100),
+    sinks: [{ id: "motion", required: true, terminal: "idle" as const }],
+  };
   const started: PlaybackTimelineSnapshot[] = [];
   const lifecycleOrder: string[] = [];
-  const bridge = createAudioStartMotionTimelineBridge({
-    delayMs: 90,
-    schedule: (_delayMs, fn) => {
-      scheduled.push(fn);
-      return "timer-1";
-    },
-    clearSchedule: () => {},
-    ensureMotionTimelineSinkForSegment: () => {
-      lifecycleOrder.push("ensure-motion-sink");
-      snapshot = {
-        ...snapshot,
-        sinks: [{ id: "motion", required: true, terminal: "idle" }],
-      };
-      return true;
-    },
+  const bridge = createAudioMotionTimelineBridge({
     getPlaybackTimelineSnapshotForSegment: () => {
       lifecycleOrder.push("refresh-timeline");
       return snapshot;
@@ -1090,13 +1423,10 @@ function testAudioStartMotionBridgeRefreshesTimelineAtFireTime(): void {
   });
 
   bridge.handleAudioTimelineStarted("turn-audio", "msg-audio");
-  snapshot = buildTimelineSnapshot(220);
-  scheduled[0]?.();
 
   assert.equal(started.length, 1);
-  assert.equal(started[0].currentTimeMs, 220);
+  assert.equal(started[0].currentTimeMs, 100);
   assert.deepEqual(lifecycleOrder, [
-    "ensure-motion-sink",
     "refresh-timeline",
     "start-model-engine",
   ]);
@@ -1104,19 +1434,9 @@ function testAudioStartMotionBridgeRefreshesTimelineAtFireTime(): void {
   assert.equal(started[0].sinks[0]?.required, true);
 }
 
-function testAudioStartMotionBridgeCanCancelPendingWakeup(): void {
-  const cleared: unknown[] = [];
-  const scheduled: Array<() => void> = [];
+function testAudioMotionBridgeSkipsTimelineWithoutPreparedMotionSink(): void {
   let started = false;
-  const bridge = createAudioStartMotionTimelineBridge({
-    schedule: (_delayMs, fn) => {
-      scheduled.push(fn);
-      return "timer-clear";
-    },
-    clearSchedule: (timer) => {
-      cleared.push(timer);
-    },
-    ensureMotionTimelineSinkForSegment: () => true,
+  const bridge = createAudioMotionTimelineBridge({
     getPlaybackTimelineSnapshotForSegment: () => buildTimelineSnapshot(0),
     handlePlaybackTimelineStarted: () => {
       started = true;
@@ -1124,47 +1444,14 @@ function testAudioStartMotionBridgeCanCancelPendingWakeup(): void {
   });
 
   bridge.handleAudioTimelineStarted("turn-audio", "msg-audio");
-  bridge.clear();
-  scheduled[0]?.();
-
-  assert.deepEqual(cleared, ["timer-clear"]);
-  assert.equal(started, false);
-}
-
-function testAudioStartMotionBridgeSkipsStaleSegment(): void {
-  const scheduled: Array<() => void> = [];
-  let started = false;
-  const bridge = createAudioStartMotionTimelineBridge({
-    schedule: (_delayMs, fn) => {
-      scheduled.push(fn);
-      return "timer-stale";
-    },
-    clearSchedule: () => {},
-    canStartMotionForAudioTimeline: () => false,
-    ensureMotionTimelineSinkForSegment: () => true,
-    getPlaybackTimelineSnapshotForSegment: () => buildTimelineSnapshot(0),
-    handlePlaybackTimelineStarted: () => {
-      started = true;
-    },
-  });
-
-  bridge.handleAudioTimelineStarted("turn-audio", "msg-audio");
-  scheduled[0]?.();
 
   assert.equal(started, false);
 }
 
-function testAudioStartMotionBridgeReportsMissingTimeline(): void {
-  const scheduled: Array<() => void> = [];
+function testAudioMotionBridgeReportsMissingTimeline(): void {
   let started = false;
   const missing: Array<{ turnId: string; messageId: string }> = [];
-  const bridge = createAudioStartMotionTimelineBridge({
-    schedule: (_delayMs, fn) => {
-      scheduled.push(fn);
-      return "timer-missing";
-    },
-    clearSchedule: () => {},
-    ensureMotionTimelineSinkForSegment: () => true,
+  const bridge = createAudioMotionTimelineBridge({
     getPlaybackTimelineSnapshotForSegment: () => null,
     onMissingPlaybackTimeline: (turnId, messageId) => {
       missing.push({ turnId, messageId });
@@ -1175,7 +1462,6 @@ function testAudioStartMotionBridgeReportsMissingTimeline(): void {
   });
 
   bridge.handleAudioTimelineStarted("turn-audio", "msg-audio");
-  scheduled[0]?.();
 
   assert.equal(started, false);
   assert.deepEqual(missing, [{ turnId: "turn-audio", messageId: "msg-audio" }]);
@@ -1296,6 +1582,7 @@ function run(): void {
   testEngineStartsSinkCallbacksAndPreservesThemAcrossRegister();
   testTimelineFailsWhenRequiredSinkFails();
   testInterruptPropagatesToActiveSinks();
+  testFatalTimelineFailureStopsSinksAndMarksRequiredFailures();
   testLateSinkEventsDoNotRewriteTerminalTimeline();
   testPerformanceCurveTimelineUsesRemainingAudioDuration();
   testPerformanceCurveTimelineRejectsUnavailableAudio();
@@ -1305,6 +1592,10 @@ function run(): void {
   testMotionTimelineEventsDoNotPrepareMissingSink();
   testAudioAndLipSyncEventsDoNotMutateMissingSinks();
   testPlaybackTimelineRuntimeStartsSegmentJobThroughTimelineEntry();
+  testAudioTimelineOwnsCanonicalTextUntilRealPlaybackStarts();
+  testSubtitleReleaseFailureAtomicallyFailsPlaybackSegment();
+  testAudioFailureBeforeStartFailsDeferredCanonicalText();
+  testAudioFailureTerminatesAndInterruptsOwnedMotion();
   testQueuedSegmentReleaseSinksConsumePendingItems();
   testPlaybackTimelineRuntimeKeepsMismatchedSegmentTimelinesSeparate();
   testPlaybackTimelineRuntimeClearsOnlyTerminalSegmentTimeline();
@@ -1316,10 +1607,9 @@ function run(): void {
   testPlaybackTimelineRuntimeWritesMotionSessionLifecycle();
   testTerminalSinkEventsAreStable();
   testClosedTimelineHistoryIsBounded();
-  testAudioStartMotionBridgeRefreshesTimelineAtFireTime();
-  testAudioStartMotionBridgeCanCancelPendingWakeup();
-  testAudioStartMotionBridgeSkipsStaleSegment();
-  testAudioStartMotionBridgeReportsMissingTimeline();
+  testAudioMotionBridgeStartsFromCurrentTimeline();
+  testAudioMotionBridgeSkipsTimelineWithoutPreparedMotionSink();
+  testAudioMotionBridgeReportsMissingTimeline();
   testMotionTimelineRunTrackerMarksStartedAndTerminalByRunId();
   testMotionTimelineRunTrackerIgnoresPreviewUnknownAndClearedRuns();
   console.log("playbackTimelineEngine tests passed");

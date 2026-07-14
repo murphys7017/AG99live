@@ -99,7 +99,6 @@ function applyOutputSegment(
       ? {
           state: "present",
           url: resolvedAudioUrl!,
-          captionText: payload.audio.caption_text,
         }
       : payload.audio,
     motion: payload.motion.state === "present"

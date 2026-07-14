@@ -27,7 +27,7 @@ export type OutputSegmentTextSlot =
   | { state: "failed"; reason: string };
 
 export type OutputSegmentAudioSlot =
-  | { state: "present"; url: string; caption_text: string }
+  | { state: "present"; url: string }
   | { state: "absent" }
   | { state: "failed"; reason: string };
 
@@ -43,7 +43,7 @@ export type OutputSegmentMotionSlot =
   | { state: "failed"; reason: string };
 
 export interface OutputSegmentPayload {
-  schema_version: "output.segment.v2";
+  schema_version: "output.segment.v3";
   text: OutputSegmentTextSlot;
   audio: OutputSegmentAudioSlot;
   motion: OutputSegmentMotionSlot;
