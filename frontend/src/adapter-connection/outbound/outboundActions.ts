@@ -68,6 +68,7 @@ export interface OutboundActionContext {
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
   findOpenAudioSegment: () => { turnId: string | null; messageId: string } | null;
+  findOpenExecutionSegment: () => { turnId: string | null; messageId: string } | null;
   createMessageId: () => string;
 }
 
@@ -82,7 +83,7 @@ interface DesktopCaptureImagePayload {
  * 发送文本输入到 AstrBot 适配器，开启新一轮对话。
  *
  * 行为：
- *   1. 若当前还有可被打断的播放轮次（音频已起播 / 还有 pending 文本或音频），
+ *   1. 若当前还有可被打断的播放轮次（Timeline required sink 或 pending material），
  *      先发 `control.interrupt` 并就地把当前音频段标 failed，避免新旧轮次混播。
  *   2. 为新一轮分配新的 turn_id（与 messageId 同体），重置音频终态。
  *   3. 若用户启用了“发送时附带桌面截图”，调用 Electron preload 抓一张 JPEG，
@@ -100,30 +101,37 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
     return false;
   }
 
+  const desktopCapture = ctx.state.desktopScreenshotOnSendEnabled
+    ? await captureRealtimeDesktopScreenshot()
+    : null;
   const interruptedTurnId = getInterruptibleTurnId(ctx);
   if (interruptedTurnId) {
-    ctx.outboundClient.send("control.interrupt", {}, interruptedTurnId);
+    const interruptSent = ctx.outboundClient.send("control.interrupt", {}, interruptedTurnId);
     ctx.stopAudioAndSettleTurn(
       interruptedTurnId,
       "audio_playback_replaced_by_new_input",
     );
+    if (!interruptSent) {
+      ctx.state.lastError = "旧轮次已在本地停止，但中断请求未能发送，新文本未发送。";
+      ctx.state.statusMessage = ctx.state.lastError;
+      ctx.pushHistory("error", ctx.state.lastError);
+      return false;
+    }
   }
-  ctx.state.currentTurnId = ctx.createMessageId();
-  ctx.resetAudioPlaybackTerminal();
-  const desktopCapture = ctx.state.desktopScreenshotOnSendEnabled
-    ? await captureRealtimeDesktopScreenshot()
-    : null;
+  const turnId = ctx.createMessageId();
   const outboundText = buildDesktopAwareText(message, desktopCapture);
   const sent = ctx.outboundClient.send("input.text", {
     text: outboundText,
     images: desktopCapture ? [desktopCapture] : [],
-  }, ctx.state.currentTurnId);
+  }, turnId);
   if (!sent) {
     ctx.state.lastError = "当前还没有连上适配器，文本未发送。";
     ctx.state.statusMessage = ctx.state.lastError;
     ctx.pushHistory("error", ctx.state.lastError);
     return false;
   }
+  ctx.state.currentTurnId = turnId;
+  ctx.resetAudioPlaybackTerminal();
   ctx.state.lastError = "";
   ctx.state.statusMessage = desktopCapture
     ? "文本和实时桌面截图已发送，等待后端回复。"
@@ -140,6 +148,12 @@ function getInterruptibleTurnId(ctx: OutboundActionContext): string | null {
   );
   if (openAudioTurnId && (!currentTurnId || openAudioTurnId === currentTurnId)) {
     return openAudioTurnId;
+  }
+  const openExecutionTurnId = normalizeTurnIdForComparison(
+    ctx.findOpenExecutionSegment()?.turnId ?? null,
+  );
+  if (openExecutionTurnId && (!currentTurnId || openExecutionTurnId === currentTurnId)) {
+    return openExecutionTurnId;
   }
 
   if (!currentTurnId) {

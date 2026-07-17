@@ -14,6 +14,13 @@ export interface DirectParameterPlanTerminalEvent {
   reason?: string;
 }
 
+export interface CatalogMotionLifecycleCallbacks {
+  onStarted?: () => void;
+  onFinished?: () => void;
+  onFailed?: (reason: string) => void;
+  onInterrupted?: (reason: string) => void;
+}
+
 export {};
 
 declare global {
@@ -29,9 +36,9 @@ declare global {
         group: string,
         no: number,
         priority: number,
-        onFinishedMotionHandler?: () => void,
+        callbacks?: CatalogMotionLifecycleCallbacks,
       ) => unknown;
-      stopMotion?: () => void;
+      stopMotion?: (reason?: string) => void;
       getMotionStartError?: () => string;
       setExpression?: (name: string) => boolean;
       stopExpression?: () => void;

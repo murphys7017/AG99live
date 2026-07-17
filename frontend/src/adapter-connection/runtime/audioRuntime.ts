@@ -69,6 +69,7 @@ export interface AdapterAudioRuntime {
   stopAudioAndSettleAll: (reason: string) => void;
   findActiveAudioSegment: () => ActiveAudioSegment | null;
   findOpenAudioSegment: () => ActiveAudioSegment | null;
+  findOpenExecutionSegment: () => ActiveAudioSegment | null;
   getPlaybackTimelineSnapshotForSegment: (
     turnId: string | null,
     messageId: string,
@@ -112,6 +113,7 @@ export function createAdapterAudioRuntime(
     ensureMotionTimelineSinkForSegment,
     findActiveAudioTimelineSegments,
     findOpenAudioTimelineSegments,
+    findOpenExecutionTimelineSegments,
     getTimelineSnapshotForSegment: getPlaybackTimelineSnapshotForSegment,
   } = playbackTimelineRuntime;
 
@@ -191,6 +193,10 @@ export function createAdapterAudioRuntime(
     return findOpenAudioTimelineSegments();
   }
 
+  function findOpenExecutionSegment(): ActiveAudioSegment | null {
+    return findOpenExecutionTimelineSegments()[0] ?? null;
+  }
+
   return {
     queueAudioForPlayback: audioReleaseController.queueAudioForPlayback,
     releaseQueuedAudioForTimelinePlayback,
@@ -203,6 +209,7 @@ export function createAdapterAudioRuntime(
     stopAudioAndSettleAll: audioSettlementController.stopAudioAndSettleAll,
     findActiveAudioSegment,
     findOpenAudioSegment: audioSettlementController.findOpenAudioSegment,
+    findOpenExecutionSegment,
     getPlaybackTimelineSnapshotForSegment,
     ensureMotionTimelineSinkForSegment,
     markMotionTimelineStarted,

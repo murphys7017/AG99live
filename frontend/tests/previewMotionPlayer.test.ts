@@ -96,27 +96,58 @@ function installMockAdapter(): {
 
 function installCatalogMockAdapter(
   startMotionResult: unknown,
-  options: { finishImmediately?: boolean; motionStartError?: string } = {},
+  options: {
+    finishImmediately?: boolean;
+    motionStartError?: string;
+    interruptSynchronouslyOnStop?: boolean;
+  } = {},
 ): { startMotionCount: () => number; stopMotionCount: () => number } {
   let startMotionCount = 0;
   let stopMotionCount = 0;
+  let activeCallbacks: {
+    onStarted?: () => void;
+    onFinished?: () => void;
+    onFailed?: (reason: string) => void;
+    onInterrupted?: (reason: string) => void;
+  } | undefined;
   (globalThis as typeof globalThis & {
     getLAppAdapter?: () => {
-      startMotion: (group: string, no: number, priority: number, onFinished?: () => void) => unknown;
+      startMotion: (
+        group: string,
+        no: number,
+        priority: number,
+        callbacks?: {
+          onStarted?: () => void;
+          onFinished?: () => void;
+          onFailed?: (reason: string) => void;
+          onInterrupted?: (reason: string) => void;
+        },
+      ) => unknown;
       stopMotion: () => void;
       getMotionStartError: () => string;
       stopDirectParameterPlan: () => void;
     };
   }).getLAppAdapter = () => ({
-    startMotion: (_group, _no, _priority, onFinished) => {
+    startMotion: (_group, _no, _priority, callbacks) => {
       startMotionCount += 1;
+      activeCallbacks = callbacks;
+      callbacks?.onStarted?.();
       if (options.finishImmediately) {
-        queueMicrotask(() => onFinished?.());
+        queueMicrotask(() => {
+          if (options.motionStartError) {
+            callbacks?.onFailed?.(options.motionStartError);
+            return;
+          }
+          callbacks?.onFinished?.();
+        });
       }
       return startMotionResult;
     },
     stopMotion: () => {
       stopMotionCount += 1;
+      if (options.interruptSynchronouslyOnStop) {
+        activeCallbacks?.onInterrupted?.("motion_stopped");
+      }
     },
     getMotionStartError: () => options.motionStartError ?? "",
     stopDirectParameterPlan: () => {},
@@ -410,6 +441,28 @@ async function testCatalogMotionWaitsForSdkTerminalCallback(): Promise<void> {
   scope.stop();
 }
 
+async function testCatalogMotionWatchdogReportsExactlyOneFailedTerminal(): Promise<void> {
+  installCatalogMockAdapter(
+    { status: "async_motion_accepted" },
+    { interruptSynchronouslyOnStop: true },
+  );
+  const scope = effectScope();
+  const player = scope.run(() => usePreviewMotionPlayer());
+  assert.ok(player);
+  const finished: Array<{ runId: string; status: string; reason?: string }> = [];
+
+  assert.equal(player.playCatalogMotion(buildCatalogMotion(1), null, {
+    onFinished: (event) => finished.push(event),
+  }), true);
+  await new Promise((resolve) => setTimeout(resolve, 850));
+
+  assert.equal(player.state.status, "failed");
+  assert.equal(finished.length, 1);
+  assert.equal(finished[0].status, "failed");
+  assert.equal(finished[0].reason, "catalog_motion_terminal_timeout");
+  scope.stop();
+}
+
 async function testCatalogMotionStopDelegatesToSdkAndReportsStopped(): Promise<void> {
   const adapter = installCatalogMockAdapter({ status: "async_motion_accepted" });
   const scope = effectScope();
@@ -476,6 +529,7 @@ async function run(): Promise<void> {
   await testCatalogMotionAsyncAcceptedFailureReportsFailed();
   await testCatalogMotionReportsStartedAndCompletedCallbacks();
   await testCatalogMotionWaitsForSdkTerminalCallback();
+  await testCatalogMotionWatchdogReportsExactlyOneFailedTerminal();
   await testCatalogMotionStopDelegatesToSdkAndReportsStopped();
   await testDirectPlanStopReportsStoppedTerminalOnce();
   console.log("previewMotionPlayer tests passed");

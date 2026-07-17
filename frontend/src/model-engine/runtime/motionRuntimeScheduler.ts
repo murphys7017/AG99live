@@ -1,6 +1,3 @@
-import {
-  MOTION_SYNC_WAIT_FOR_AUDIO_MS,
-} from "../constants.js";
 import type {
   NormalizedMotionPayload,
 } from "../contracts.js";
@@ -19,7 +16,6 @@ export interface PendingInboundMotionPayload {
   receivedAtMs: number;
   playbackClock: MotionPlaybackClockContext | null;
   timelineMode: InboundPayloadContext["timelineMode"];
-  audioWaitTimer: number;
 }
 
 export interface StartPayloadContext {
@@ -44,13 +40,6 @@ interface MotionRuntimeSchedulerHooks {
     context: StartPayloadContext,
   ) => boolean;
   onStartFailed?: (context: StartPayloadContext) => void;
-}
-
-function hasPerformanceCurveHint(payload: NormalizedMotionPayload): boolean {
-  return (
-    payload.kind === "semantic_intent"
-    && payload.intent.performance_curve_hint?.schema_version === "ag99.performance_curve_hint.v1"
-  );
 }
 
 function matchesPlaybackTimeline(
@@ -110,10 +99,6 @@ export function createMotionRuntimeScheduler(
     );
   }
 
-  function clearPendingPayload(entry: PendingInboundMotionPayload): void {
-    window.clearTimeout(entry.audioWaitTimer);
-  }
-
   function buildStartContext(
     entry: PendingInboundMotionPayload,
     startReason: string,
@@ -132,7 +117,6 @@ export function createMotionRuntimeScheduler(
     entry: PendingInboundMotionPayload,
     startReason: string,
   ): void {
-    clearPendingPayload(entry);
     pendingInboundMotionPayloads.delete(buildPendingMotionKey(entry.turnId, entry.messageId));
     hooks.onStartFailed?.(buildStartContext(entry, startReason));
   }
@@ -153,7 +137,6 @@ export function createMotionRuntimeScheduler(
     if (!entry) {
       return false;
     }
-    clearPendingPayload(entry);
     pendingInboundMotionPayloads.delete(key);
     syncPendingState();
     return true;
@@ -175,7 +158,6 @@ export function createMotionRuntimeScheduler(
       entry.playbackClock = playbackClock;
     }
     pendingInboundMotionPayloads.delete(key);
-    clearPendingPayload(entry);
     syncPendingState();
     const context = buildStartContext(entry, startReason);
     const started = hooks.onStartPayload(entry.payload, context);
@@ -238,7 +220,6 @@ export function createMotionRuntimeScheduler(
       receivedAtMs: context.receivedAtMs,
       playbackClock: context.playbackClock ?? null,
       timelineMode: context.timelineMode,
-      audioWaitTimer: 0,
     };
 
     if (entry.playbackClock && !matchesPlaybackTimeline(entry, entry.playbackClock)) {
@@ -252,29 +233,6 @@ export function createMotionRuntimeScheduler(
       });
       return false;
     }
-
-    entry.audioWaitTimer = window.setTimeout(() => {
-      const latest = pendingInboundMotionPayloads.get(pendingKey);
-      if (!latest || latest !== entry) {
-        return;
-      }
-
-      const currentTurnId = normalizeTurnId(dependencies.getCurrentTurnId());
-
-      if (currentTurnId && currentTurnId !== normalizedTurnId) {
-        dropPendingPayload(entry, "stale_turn_dropped");
-        syncPendingState();
-        return;
-      }
-
-      dropPendingPayload(
-        entry,
-        hasPerformanceCurveHint(entry.payload)
-          ? "playback_timeline_missing_before_curve_motion_start"
-          : "playback_timeline_missing_before_motion_start",
-      );
-      syncPendingState();
-    }, MOTION_SYNC_WAIT_FOR_AUDIO_MS);
 
     pendingInboundMotionPayloads.set(pendingKey, entry);
     syncPendingState();

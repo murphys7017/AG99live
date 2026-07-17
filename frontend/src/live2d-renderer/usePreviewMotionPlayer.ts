@@ -9,7 +9,7 @@ import type { DirectParameterPlanTerminalEvent } from "../types/live2d-runtime.d
 import { isObject, normalizeText } from "../utils/guards.js";
 import { parseSemanticParameterPlan } from "../model-engine/planParser.js";
 
-type PreviewPlayerStatus = "idle" | "playing" | "finished" | "failed";
+type PreviewPlayerStatus = "idle" | "preparing" | "playing" | "finished" | "failed";
 
 interface ParsedParameterPlan {
   plan: SemanticParameterPlan;
@@ -132,7 +132,7 @@ export function usePreviewMotionPlayer() {
     stopActiveCatalogMotion(reason);
     notifyActiveStopped(reason);
 
-    if (state.status === "playing") {
+    if (state.status === "playing" || state.status === "preparing") {
       state.status = "idle";
       state.message = reason === "stopped"
         ? "参数计划已停止。"
@@ -337,6 +337,18 @@ export function usePreviewMotionPlayer() {
     _model: ModelSummary | null = null,
     options: PlayCatalogMotionOptions = {},
   ): boolean {
+    const catalogDurationMs = motion.duration_ms;
+    if (
+      typeof catalogDurationMs !== "number"
+      || !Number.isFinite(catalogDurationMs)
+      || catalogDurationMs <= 0
+    ) {
+      const reason = `现成 motion 缺少有效 duration_ms：${motion.motion_id}。`;
+      state.status = "failed";
+      state.message = reason;
+      state.finishedAt = new Date().toISOString();
+      return false;
+    }
     const adapter = window.getLAppAdapter?.();
     if (
       !adapter
@@ -368,40 +380,81 @@ export function usePreviewMotionPlayer() {
         : ""
     );
 
+    const failCatalogMotion = (reason: string) => {
+      if (activeRunId !== runId || activeTerminalRunId !== playbackRunId) {
+        return;
+      }
+      activeMotionStop = null;
+      state.status = "failed";
+      state.message = `现成 motion 执行失败：${motion.motion_id}（${reason}）。`;
+      state.finishedAt = new Date().toISOString();
+      clearActiveTimers();
+      clearActiveTerminalCallback(playbackRunId);
+      options.onFinished?.({ runId: playbackRunId, status: "failed", reason });
+    };
+    const completeCatalogMotion = () => {
+      if (activeRunId !== runId || activeTerminalRunId !== playbackRunId) {
+        return;
+      }
+      activeMotionStop = null;
+      state.status = "finished";
+      state.message = "现成 motion 执行完成。";
+      state.finishedAt = new Date().toISOString();
+      clearActiveTimers();
+      clearActiveTerminalCallback(playbackRunId);
+      options.onFinished?.({ runId: playbackRunId, status: "completed" });
+    };
+
+    state.status = "preparing";
+    state.message = `正在准备现成 motion（${motion.label || motion.motion_id}）...`;
+    state.keyAxesCount = 0;
+    state.parameterCount = 0;
+    state.startedAt = "";
+    state.finishedAt = "";
+    setActiveTerminalCallback(playbackRunId, options.onFinished);
+
     const handle = adapter.startMotion(
       motion.group,
       motion.index,
       motion.priority || 3,
-      () => {
-        if (activeRunId !== runId) {
-          return;
-        }
-        activeMotionStop = null;
-        const motionStartError = getMotionStartError();
-        if (motionStartError) {
-          const reason = `现成 motion 执行失败：${motion.motion_id}（${motionStartError}）。`;
-          console.warn("[MotionPlayer]", reason);
-          state.status = "failed";
-          state.message = reason;
+      {
+        onStarted: () => {
+          if (activeRunId !== runId) {
+            return;
+          }
+          state.status = "playing";
+          state.message = `正在执行现成 motion（${motion.label || motion.motion_id}）...`;
+          state.startedAt = new Date().toISOString();
+          activeMotionStop = () => adapter.stopMotion?.();
+          scheduleTimer(runId, catalogDurationMs + 800, () => {
+            if (state.status === "playing") {
+              failCatalogMotion("catalog_motion_terminal_timeout");
+              adapter.stopMotion?.();
+            }
+          });
+          options.onStarted?.(motion, playbackRunId);
+        },
+        onFinished: () => {
+          const motionStartError = getMotionStartError();
+          if (motionStartError) {
+            failCatalogMotion(motionStartError);
+            return;
+          }
+          completeCatalogMotion();
+        },
+        onFailed: failCatalogMotion,
+        onInterrupted: (reason) => {
+          if (activeRunId !== runId || activeTerminalRunId !== playbackRunId) {
+            return;
+          }
+          activeMotionStop = null;
+          state.status = "idle";
+          state.message = `现成 motion 已停止（${reason}）。`;
           state.finishedAt = new Date().toISOString();
           clearActiveTimers();
           clearActiveTerminalCallback(playbackRunId);
-          options.onFinished?.({
-            runId: playbackRunId,
-            status: "failed",
-            reason,
-          });
-          return;
-        }
-        state.status = "finished";
-        state.message = "现成 motion 执行完成。";
-        state.finishedAt = new Date().toISOString();
-        clearActiveTimers();
-        clearActiveTerminalCallback(playbackRunId);
-        options.onFinished?.({
-          runId: playbackRunId,
-          status: "completed",
-        });
+          options.onFinished?.({ runId: playbackRunId, status: "stopped", reason });
+        },
       },
     );
     if (handle === -1) {
@@ -413,20 +466,18 @@ export function usePreviewMotionPlayer() {
       state.status = "failed";
       state.message = reason;
       state.finishedAt = new Date().toISOString();
+      clearActiveTerminalCallback(playbackRunId);
       return false;
     }
-
-    state.status = "playing";
-    state.message = `正在执行现成 motion（${motion.label || motion.motion_id}）...`;
-    state.keyAxesCount = 0;
-    state.parameterCount = 0;
-    state.startedAt = new Date().toISOString();
-    state.finishedAt = "";
-    setActiveTerminalCallback(playbackRunId, options.onFinished);
-    activeMotionStop = typeof adapter.stopMotion === "function"
-      ? () => adapter.stopMotion?.()
-      : null;
-    options.onStarted?.(motion, playbackRunId);
+    if (state.status === "preparing") {
+      activeMotionStop = () => adapter.stopMotion?.();
+      scheduleTimer(runId, 3000, () => {
+        if (state.status === "preparing") {
+          failCatalogMotion("catalog_motion_start_timeout");
+          adapter.stopMotion?.();
+        }
+      });
+    }
     return true;
   }
 

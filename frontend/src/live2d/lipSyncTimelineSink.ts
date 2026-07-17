@@ -33,21 +33,22 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
     attachAudio(options) {
       stop();
       const serial = attachmentSerial;
-      let settled = false;
+      let started = false;
+      let unavailable = false;
       const isActiveAttachment = () =>
         serial === attachmentSerial && options.isCurrentAudio();
       const markStarted = () => {
-        if (!isActiveAttachment() || settled) {
+        if (!isActiveAttachment() || started || unavailable) {
           return;
         }
-        settled = true;
+        started = true;
         options.onStarted();
       };
       const markUnavailable = (reason: string, degraded: boolean) => {
-        if (!isActiveAttachment() || settled) {
+        if (!isActiveAttachment() || unavailable) {
           return;
         }
-        settled = true;
+        unavailable = true;
         options.onUnavailable(reason, degraded);
       };
       markActiveStarted = markStarted;
@@ -55,6 +56,7 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
       const result = startLiveLipSync(
         options.audio,
         options.isCurrentAudio,
+        markUnavailable,
       );
       liveRuntime = result.runtime;
       if (result.failureReason) {
@@ -93,6 +95,7 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
 function startLiveLipSync(
   audio: HTMLAudioElement,
   isCurrentAudio: () => boolean,
+  onRuntimeFailure: (reason: string, degraded: boolean) => void,
 ): LiveLipSyncStartResult {
   const adapter = window.getLAppAdapter?.();
   if (
@@ -176,6 +179,12 @@ function startLiveLipSync(
           reason: "lip_sync_parameter_write_failed",
           error,
         });
+        resumeFallback = degradedRuntime();
+        void resumeFallback?.resume();
+        onRuntimeFailure(
+          "lip_sync_parameter_write_failed",
+          resumeFallback !== null,
+        );
         return;
       }
       animationFrameId = window.requestAnimationFrame(tick);

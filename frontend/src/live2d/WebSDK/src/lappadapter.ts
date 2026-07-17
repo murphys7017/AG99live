@@ -15,6 +15,13 @@ import {
 import { CubismFramework } from '@framework/live2dcubismframework';
 import { deprecate } from "util";
 
+export interface CatalogMotionLifecycleCallbacks {
+  onStarted?: () => void;
+  onFinished?: () => void;
+  onFailed?: (reason: string) => void;
+  onInterrupted?: (reason: string) => void;
+}
+
 export let s_adapter_instance : LAppAdapter | null | undefined = null;
 
 export class LAppAdapter {
@@ -59,13 +66,13 @@ export class LAppAdapter {
     group: string,
     no: number,
     priority: number,
-    onFinishedMotionHandler?: FinishedMotionCallback
+    callbacks?: CatalogMotionLifecycleCallbacks
   ): CubismMotionQueueEntryHandle {
-    return this.getModel()?.startMotion(group, no, priority, onFinishedMotionHandler) ?? InvalidMotionQueueEntryHandleValue;
+    return this.getModel()?.startMotion(group, no, priority, callbacks) ?? InvalidMotionQueueEntryHandleValue;
   }
 
-  public stopMotion(): void {
-    this.getModel()?.stopMotion();
+  public stopMotion(reason?: string): void {
+    this.getModel()?.stopMotion(reason);
   }
 
   public getMotionStartError(): string {

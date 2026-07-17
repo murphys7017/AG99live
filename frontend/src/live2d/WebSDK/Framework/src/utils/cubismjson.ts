@@ -11,6 +11,18 @@ import { csmString } from '../type/csmstring';
 import { csmVector, iterator as csmVector_iterator } from '../type/csmvector';
 import { CubismLogInfo } from './cubismdebug';
 
+export type JsonCompatibleValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonCompatibleValue[]
+  | { [key: string]: JsonCompatibleValue };
+
+export type JsonCompatibleObject = {
+  [key: string]: JsonCompatibleValue;
+};
+
 // StaticInitializeNotForClientCall()で初期化する
 const CSM_JSON_ERROR_TYPE_MISMATCH = 'Error: type mismatch';
 const CSM_JSON_ERROR_INDEX_OF_BOUNDS = 'Error: index out of bounds';
@@ -759,7 +771,7 @@ export class CubismJson {
 }
 
 interface parseJsonObject {
-  (obj: Value, map: JsonMap): JsonMap;
+  (obj: JsonCompatibleObject, map: JsonMap): JsonMap;
 }
 
 /**

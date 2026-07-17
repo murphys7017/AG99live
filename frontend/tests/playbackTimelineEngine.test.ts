@@ -4,6 +4,7 @@ import {
 } from "../src/playback-timeline/playbackTimelineEngine.js";
 import { resolvePerformanceCurveTimeline } from "../src/model-engine/runtime/playbackClock.js";
 import {
+  AUDIO_TIMELINE_START_TIMEOUT_MS,
   createPlaybackTimelineRuntime as createStrictPlaybackTimelineRuntime,
 } from "../src/playback-timeline/playbackTimelineRuntime.js";
 import { createTimelineClock } from "../src/playback-timeline/timelineClock.js";
@@ -501,6 +502,88 @@ function prepareTestAudioTimeline(
   runtime.startAudioTimelineSink(turnId, messageId, {
     start: () => true,
   });
+}
+
+function testAudioStartFailureClearsStartDeadline(): void {
+  const runtime = createPlaybackTimelineRuntime({});
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timeoutHandle = 9123 as unknown as ReturnType<typeof globalThis.setTimeout>;
+  const clearedHandles: Array<ReturnType<typeof globalThis.setTimeout>> = [];
+  globalThis.setTimeout = ((_: TimerHandler, _delay?: number) => (
+    timeoutHandle
+  )) as unknown as typeof globalThis.setTimeout;
+  globalThis.clearTimeout = ((handle: ReturnType<typeof globalThis.setTimeout>) => {
+    clearedHandles.push(handle);
+  }) as typeof globalThis.clearTimeout;
+
+  try {
+    assert.throws(
+      () => runtime.startAudioTimelineSink("turn-start-throws", "msg-start-throws", {
+        start: () => {
+          throw new Error("audio_sink_start_failed");
+        },
+      }),
+      /audio_sink_start_failed/,
+    );
+    assert.deepEqual(clearedHandles, [timeoutHandle]);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+    runtime.stopAllTimelines("test_cleanup");
+  }
+}
+
+async function testAudioStartTimeoutStopsSinkAndFailsRequiredLifecycle(): Promise<void> {
+  const events: string[] = [];
+  const runtime = createPlaybackTimelineRuntime({
+    audioSession: {
+      markAudioStarted: () => {},
+      markAudioDuration: () => {},
+      markAudioTerminal: (_turnId, terminal, _messageId, reason) => {
+        events.push(`audio:${terminal}:${reason ?? ""}`);
+      },
+    },
+    motionSession: {
+      markMotionStarted: () => {},
+      markMotionCompleted: () => {},
+      markMotionFailed: (_turnId, _messageId, reason) => {
+        events.push(`motion:failed:${reason ?? ""}`);
+      },
+    },
+  });
+  runtime.startAudioTimelineSink("turn-audio-timeout", "msg-audio-timeout", {
+    start: () => true,
+    onInterrupt: (reason) => events.push(`audio:interrupt:${reason}`),
+  });
+  runtime.ensureMotionTimelineSinkForSegment(
+    "turn-audio-timeout",
+    "msg-audio-timeout",
+    (reason) => events.push(`motion:interrupt:${reason}`),
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, AUDIO_TIMELINE_START_TIMEOUT_MS + 50));
+
+  assert.equal(
+    events.includes("audio:failed:audio_start_timeout"),
+    true,
+  );
+  assert.equal(
+    events.includes("motion:failed:audio_start_timeout"),
+    true,
+  );
+  assert.equal(
+    events.includes("motion:interrupt:audio_start_timeout"),
+    true,
+  );
+  assert.equal(
+    events.includes("audio:interrupt:audio_start_timeout"),
+    true,
+  );
+  assert.equal(
+    runtime.getTimelineSnapshotForSegment("turn-audio-timeout", "msg-audio-timeout"),
+    null,
+  );
 }
 
 function testPlaybackTimelineRuntimeCreatesMotionOnlyTimeline(): void {
@@ -1255,6 +1338,28 @@ function testPlaybackTimelineRuntimeFindsOpenAudioSegments(): void {
   assert.deepEqual(runtime.findOpenAudioTimelineSegments(), []);
 }
 
+function testPlaybackTimelineRuntimeFindsOpenRequiredExecutionSegments(): void {
+  const runtime = createPlaybackTimelineRuntime({});
+
+  startMotionOnlySegment(runtime, "turn-motion-open", "msg-motion-open");
+  assert.deepEqual(runtime.findOpenExecutionTimelineSegments(), [
+    { turnId: "turn-motion-open", messageId: "msg-motion-open" },
+  ]);
+
+  runtime.markMotionTimelineStarted("turn-motion-open", "msg-motion-open");
+  assert.deepEqual(runtime.findOpenExecutionTimelineSegments(), [
+    { turnId: "turn-motion-open", messageId: "msg-motion-open" },
+  ]);
+
+  runtime.markMotionTimelineTerminal(
+    "turn-motion-open",
+    "msg-motion-open",
+    "completed",
+    "motion_completed",
+  );
+  assert.deepEqual(runtime.findOpenExecutionTimelineSegments(), []);
+}
+
 function testPlaybackTimelineRuntimeDoesNotRewriteAudioSessionTerminal(): void {
   const events: string[] = [];
   const runtime = createPlaybackTimelineRuntime({
@@ -1623,7 +1728,7 @@ function testMotionTimelineRunTrackerIgnoresPreviewUnknownAndClearedRuns(): void
 
   assert.deepEqual(events, ["started:turn-clear:msg-clear"]);
 }
-function run(): void {
+async function run(): Promise<void> {
   testSyntheticClockLifecycle();
   testAudioClockTakesPriorityAndExposesUnavailableState();
   testClockResetClearsPreviousAudioBindingAndDuration();
@@ -1636,6 +1741,8 @@ function run(): void {
   testPerformanceCurveTimelineUsesRemainingAudioDuration();
   testPerformanceCurveTimelineRejectsUnavailableAudio();
   testPlaybackTimelineRuntimeCreatesMotionOnlyTimeline();
+  testAudioStartFailureClearsStartDeadline();
+  await testAudioStartTimeoutStopsSinkAndFailsRequiredLifecycle();
   testPlaybackTimelineRuntimeStopsTurnAndAllRemainingTimelines();
   testPlaybackTimelineRuntimePreparesSegmentJobIdempotently();
   testMotionTimelineEventsDoNotPrepareMissingSink();
@@ -1652,6 +1759,7 @@ function run(): void {
   testPlaybackTimelineRuntimeStopsOnlyRequestedSegmentTimeline();
   testPlaybackTimelineRuntimeFindsActiveAudioSegments();
   testPlaybackTimelineRuntimeFindsOpenAudioSegments();
+  testPlaybackTimelineRuntimeFindsOpenRequiredExecutionSegments();
   testPlaybackTimelineRuntimeDoesNotRewriteAudioSessionTerminal();
   testPlaybackTimelineRuntimeWritesMotionSessionLifecycle();
   testPlaybackTimelineRuntimeRejectsMotionBeforeStartExactlyOnce();
@@ -1666,4 +1774,4 @@ function run(): void {
   console.log("playbackTimelineEngine tests passed");
 }
 
-run();
+void run();

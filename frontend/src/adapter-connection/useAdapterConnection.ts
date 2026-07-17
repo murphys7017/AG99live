@@ -379,6 +379,7 @@ export function createAdapterConnection(
       stopAudioAndSettleTurn(turnId, reason),
     resetAudioPlaybackTerminal,
     findOpenAudioSegment: () => findOpenAudioSegment(),
+    findOpenExecutionSegment: () => requireAudioRuntime().findOpenExecutionSegment(),
     createMessageId,
   };
 
@@ -632,8 +633,16 @@ export function createAdapterConnection(
     );
   }
 
+  let textSendQueue: Promise<void> = Promise.resolve();
+
   async function sendText(text: string): Promise<boolean> {
-    return sendTextAction(outboundCtx, text);
+    let result = false;
+    const run = async () => {
+      result = await sendTextAction(outboundCtx, text);
+    };
+    textSendQueue = textSendQueue.then(run, run);
+    await textSendQueue;
+    return result;
   }
 
   function interruptCurrentTurn(): boolean {

@@ -564,7 +564,19 @@ class TurnCoordinator:
     async def _commit_inbound_message(self, message_obj, *, turn_id: str | None = None) -> None:
         async with self._turn_lock:
             if self.session_state.waiting_for_playback_complete:
-                await self.finalize_turn(turn_id=self.session_state.current_turn_id)
+                await self._send_json(
+                    build_control_error(
+                        turn_id=turn_id,
+                        message="input_turn_replacement_requires_interrupt",
+                    )
+                )
+                logger.error(
+                    "Rejecting input turn=%s while prior turn=%s still waits for playback; "
+                    "control.interrupt is required first.",
+                    turn_id,
+                    self.session_state.current_turn_id,
+                )
+                return
 
             normalized_turn_id = self._require_turn_id_value(turn_id)
             backend_turn_id = self._resolve_backend_turn_id(message_obj, frontend_turn_id=normalized_turn_id)

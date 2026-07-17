@@ -1290,6 +1290,61 @@ async function testSendTextSettlesPlayingAudioBeforeNewInput(): Promise<void> {
   }
 }
 
+async function testConcurrentSendTextSerializesDesktopCaptureAndTurnIdentity(): Promise<void> {
+  const harness = createConnectedAdapter();
+  const captureResolvers: Array<() => void> = [];
+  let captureCount = 0;
+  window.ag99desktop = {
+    getLocalAdapterHosts: () => ["127.0.0.1"],
+    captureDesktopScreenshot: () => {
+      captureCount += 1;
+      return new Promise<null>((resolve) => {
+        captureResolvers.push(() => resolve(null));
+      });
+    },
+  };
+
+  try {
+    const { adapter, socket } = harness;
+    adapter.setDesktopScreenshotOnSendEnabled(true);
+    socket.sent.length = 0;
+
+    const firstSend = adapter.sendText("first concurrent input");
+    const secondSend = adapter.sendText("second concurrent input");
+    await flushMicrotasks();
+
+    assert.equal(captureCount, 1);
+    assert.equal(parseSentJsonMessages(socket).length, 0);
+
+    captureResolvers.shift()?.();
+    await flushMicrotasks();
+    assert.equal(captureCount, 2);
+    assert.deepEqual(
+      parseSentJsonMessages(socket).map((message) => message.payload),
+      [{ text: "first concurrent input", images: [] }],
+    );
+
+    captureResolvers.shift()?.();
+    assert.deepEqual(await Promise.all([firstSend, secondSend]), [true, true]);
+
+    const sentMessages = parseSentJsonMessages(socket);
+    assert.deepEqual(
+      sentMessages.map((message) => message.payload),
+      [
+        { text: "first concurrent input", images: [] },
+        { text: "second concurrent input", images: [] },
+      ],
+    );
+    assert.notEqual(sentMessages[0]?.turn_id, sentMessages[1]?.turn_id);
+    assert.equal(adapter.state.currentTurnId, sentMessages[1]?.turn_id);
+  } finally {
+    window.ag99desktop = {
+      getLocalAdapterHosts: () => ["127.0.0.1"],
+    };
+    harness.scope.stop();
+  }
+}
+
 async function testSendTextSettlesPreparingAudioBeforeNewInput(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
@@ -1891,6 +1946,7 @@ async function run(): Promise<void> {
   testStaleInterruptReportsProtocolViolationWithoutClearingCurrentPlayback();
   testScopeDisposeDisconnectsAdapterRuntime();
   await testSendTextUsesOutboundProtocolEnvelope();
+  await testConcurrentSendTextSerializesDesktopCaptureAndTurnIdentity();
   await testSendTextDoesNotInterruptIdleCurrentTurn();
   await testSendTextSettlesPlayingAudioBeforeNewInput();
   await testSendTextSettlesPreparingAudioBeforeNewInput();

@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "noEmit": true,
+    "noImplicitAny": true,
+    "useUnknownInCatchVariables": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@framework/*": ["src/live2d/WebSDK/Framework/src/*"]
+    }
+  },
+  "include": [
+    "src/live2d/WebSDK/Core/live2dcubismcore.d.ts",
+    "src/types/protocol.ts",
+    "src/live2d/WebSDK/src/**/*.ts"
+  ],
+  "exclude": ["src/live2d/WebSDK/Framework/**/*"]
+}

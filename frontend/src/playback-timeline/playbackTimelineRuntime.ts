@@ -29,6 +29,7 @@ export type {
 } from "./sessionProjection.js";
 
 const AUDIO_TIMELINE_SINK_ID = "audio";
+export const AUDIO_TIMELINE_START_TIMEOUT_MS = 3000;
 const LIP_SYNC_TIMELINE_SINK_ID = "lip_sync";
 const MAX_CLOSED_TIMELINE_KEYS = 512;
 const MOTION_TIMELINE_SINK_ID = "motion";
@@ -40,6 +41,7 @@ interface PlaybackTimelineEntry {
   messageId: string;
   engine: PlaybackTimelineEngine;
   deferredText: PlaybackTimelineDeferredTextRelease | null;
+  audioStartTimeoutHandle: ReturnType<typeof globalThis.setTimeout> | null;
 }
 
 interface PlaybackTimelineSinkStartOptions {
@@ -49,6 +51,11 @@ interface PlaybackTimelineSinkStartOptions {
 }
 
 export interface PlaybackTimelineAudioSegment {
+  turnId: string | null;
+  messageId: string;
+}
+
+export interface PlaybackTimelineExecutionSegment {
   turnId: string | null;
   messageId: string;
 }
@@ -149,6 +156,7 @@ export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
   ) => PlaybackTimelineSnapshot | null;
   findActiveAudioTimelineSegments: () => PlaybackTimelineAudioSegment[];
   findOpenAudioTimelineSegments: () => PlaybackTimelineAudioSegment[];
+  findOpenExecutionTimelineSegments: () => PlaybackTimelineExecutionSegment[];
 }
 
 export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
@@ -238,6 +246,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       messageId,
       engine,
       deferredText: options.deferredText ?? null,
+      audioStartTimeoutHandle: null,
     });
   }
 
@@ -261,11 +270,26 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     options: PlaybackTimelineSinkStartOptions,
   ): boolean | void {
     prepareAudioTimeline(turnId, messageId, options);
-    return startTimelineSink(
-      turnId,
-      messageId,
-      AUDIO_TIMELINE_SINK_ID,
-    );
+    const timeline = getTimeline(turnId, messageId);
+    if (!timeline) {
+      throw new Error("Playback timeline missing after audio sink preparation.");
+    }
+    armAudioStartTimeout(timeline);
+    let accepted: boolean | void;
+    try {
+      accepted = startTimelineSink(
+        turnId,
+        messageId,
+        AUDIO_TIMELINE_SINK_ID,
+      );
+    } catch (error) {
+      clearAudioStartTimeout(timeline);
+      throw error;
+    }
+    if (accepted === false) {
+      clearAudioStartTimeout(timeline);
+    }
+    return accepted;
   }
 
   function startLipSyncTimelineSink(
@@ -429,6 +453,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       messageId,
       engine,
       deferredText: null,
+      audioStartTimeoutHandle: null,
     });
     return engine.getSnapshot();
   }
@@ -490,6 +515,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       return false;
     }
     const engine = timeline.engine;
+    clearAudioStartTimeout(timeline);
     engine.setExpectedDurationMs(durationMs);
     engine.attachAudioClock(audioClock);
     engine.markSinkStarted(AUDIO_TIMELINE_SINK_ID);
@@ -738,6 +764,24 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     );
   }
 
+  function findOpenExecutionTimelineSegments(): PlaybackTimelineExecutionSegment[] {
+    const segments: PlaybackTimelineExecutionSegment[] = [];
+    for (const timeline of timelines.values()) {
+      const snapshot = timeline.engine.getSnapshot();
+      if (!snapshot || isTimelineTerminalPhase(timeline)) {
+        continue;
+      }
+      if (!snapshot.sinks.some((sink) => sink.required && !isTerminalSinkValue(sink.terminal))) {
+        continue;
+      }
+      segments.push({
+        turnId: timeline.turnId,
+        messageId: timeline.messageId,
+      });
+    }
+    return segments;
+  }
+
   function findAudioTimelineSegments(
     predicate: (
       audioSink: PlaybackTimelineSnapshot["sinks"][number] | undefined,
@@ -847,8 +891,41 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     messageId: string,
   ): void {
     const key = resolveTimelineKey(turnId, messageId);
-    timelines.delete(key);
+    const timeline = timelines.get(key);
+    if (timeline) {
+      clearAudioStartTimeout(timeline);
+      timelines.delete(key);
+    }
     rememberBoundedKey(closedTimelineKeys, key);
+  }
+
+  function armAudioStartTimeout(timeline: PlaybackTimelineEntry): void {
+    clearAudioStartTimeout(timeline);
+    const timeoutHandle = globalThis.setTimeout(() => {
+      const activeTimeline = getTimeline(timeline.turnId, timeline.messageId);
+      if (activeTimeline !== timeline || !hasOpenSink(timeline, AUDIO_TIMELINE_SINK_ID)) {
+        return;
+      }
+      console.error("[PlaybackTimelineRuntime] audio did not reach playing before deadline.", {
+        turnId: timeline.turnId,
+        messageId: timeline.messageId,
+        timeoutMs: AUDIO_TIMELINE_START_TIMEOUT_MS,
+      });
+      failDeferredText(timeline, "subtitle_audio_start_timeout");
+      failTimelineSegment(timeline, "audio_start_timeout");
+    }, AUDIO_TIMELINE_START_TIMEOUT_MS);
+    // Node-based tests must not remain alive solely for a browser playback deadline.
+    const nodeTimeoutHandle = timeoutHandle as unknown as { unref?: () => void };
+    nodeTimeoutHandle.unref?.();
+    timeline.audioStartTimeoutHandle = timeoutHandle;
+  }
+
+  function clearAudioStartTimeout(timeline: PlaybackTimelineEntry): void {
+    if (timeline.audioStartTimeoutHandle === null) {
+      return;
+    }
+    globalThis.clearTimeout(timeline.audioStartTimeoutHandle);
+    timeline.audioStartTimeoutHandle = null;
   }
 
   function isTimelineTerminalPhase(timeline: PlaybackTimelineEntry): boolean {
@@ -992,6 +1069,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     getTimelineSnapshotForSegment,
     findActiveAudioTimelineSegments,
     findOpenAudioTimelineSegments,
+    findOpenExecutionTimelineSegments,
   };
 }
 

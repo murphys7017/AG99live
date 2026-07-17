@@ -55,6 +55,13 @@ import {
 
 const AsyncMotionAcceptedHandle = { status: "async_motion_accepted" };
 
+interface CatalogMotionLifecycleCallbacks {
+  onStarted?: () => void;
+  onFinished?: () => void;
+  onFailed?: (reason: string) => void;
+  onInterrupted?: (reason: string) => void;
+}
+
 enum LoadStep {
   LoadAssets,
   LoadModel,
@@ -257,6 +264,8 @@ interface DirectParameterPlanState {
 export class LAppModel extends CubismUserModel {
   private readonly _loadGeneration = getLive2DModelLoadState().generation;
   private _released = false;
+  private _catalogMotionRequestGeneration = 0;
+  private _activeCatalogMotionStop: ((reason: string) => void) | null = null;
 
   private failModelLoad(reason: string, error?: unknown): void {
     if (!this.isLoadActive()) {
@@ -308,6 +317,7 @@ export class LAppModel extends CubismUserModel {
     if (this._released) {
       return;
     }
+    this.stopMotion("motion_model_released");
     this._released = true;
     cancelLive2DModelLoad(this._loadGeneration, "live2d_model_load_released");
     super.release();
@@ -843,11 +853,15 @@ export class LAppModel extends CubismUserModel {
   public setAmbientMotionEnabled(enabled: boolean): void {
     LAppDefine.setAmbientMotionEnabled(enabled);
     if (!enabled) {
-      this._motionManager.stopAllMotions();
+      this.stopMotion();
     }
   }
 
-  public stopMotion(): void {
+  public stopMotion(reason = "motion_stopped"): void {
+    const activeStop = this._activeCatalogMotionStop;
+    this._activeCatalogMotionStop = null;
+    activeStop?.(reason);
+    this._catalogMotionRequestGeneration += 1;
     this._motionManager.stopAllMotions();
     this._motionManager.setReservePriority(0);
   }
@@ -864,11 +878,47 @@ export class LAppModel extends CubismUserModel {
     group: string,
     no: number,
     priority: number,
-    onFinishedMotionHandler?: FinishedMotionCallback
+    callbacks?: CatalogMotionLifecycleCallbacks | FinishedMotionCallback
   ): CubismMotionQueueEntryHandle {
+    const lifecycleCallbacks = typeof callbacks === "function"
+      ? { onFinished: callbacks }
+      : callbacks;
+    const requestGeneration = ++this._catalogMotionRequestGeneration;
+    let terminalSettled = false;
+    let activeStop: ((reason: string) => void) | null = null;
+    const isCurrentRequest = () =>
+      !this._released && this._catalogMotionRequestGeneration === requestGeneration;
+    const clearActiveStop = () => {
+      if (this._activeCatalogMotionStop === activeStop) {
+        this._activeCatalogMotionStop = null;
+      }
+    };
+    const finish = () => {
+      if (terminalSettled) {
+        return;
+      }
+      terminalSettled = true;
+      clearActiveStop();
+      lifecycleCallbacks?.onFinished?.();
+    };
+    const fail = (reason: string) => {
+      if (terminalSettled) {
+        return;
+      }
+      terminalSettled = true;
+      clearActiveStop();
+      lifecycleCallbacks?.onFailed?.(reason);
+    };
+    const start = () => {
+      if (terminalSettled) {
+        return;
+      }
+      lifecycleCallbacks?.onStarted?.();
+    };
     this._motionStartError = "";
     if (this._released || !this._motionManager) {
       this._motionStartError = "motion_model_released";
+      fail(this._motionStartError);
       return InvalidMotionQueueEntryHandleValue;
     }
 
@@ -884,8 +934,22 @@ export class LAppModel extends CubismUserModel {
         LAppPal.printMessage("[APP]can't start motion.");
       }
       this._motionStartError = "motion_priority_rejected";
+      fail(this._motionStartError);
       return InvalidMotionQueueEntryHandleValue;
     }
+
+    const previousActiveStop = this._activeCatalogMotionStop;
+    this._activeCatalogMotionStop = null;
+    previousActiveStop?.("motion_replaced");
+    activeStop = (reason: string) => {
+      if (terminalSettled) {
+        return;
+      }
+      terminalSettled = true;
+      clearActiveStop();
+      lifecycleCallbacks?.onInterrupted?.(reason);
+    };
+    this._activeCatalogMotionStop = activeStop;
 
     const motionFileName = this._modelSetting.getMotionFileName(group, no);
 
@@ -894,14 +958,11 @@ export class LAppModel extends CubismUserModel {
     let motion: CubismMotion = this._motions.getValue(name) as CubismMotion;
     let autoDelete = false;
     const finishAsyncMotionWithoutStart = (reason: string): void => {
-      if (this._released || !this._motionManager) {
-        return;
-      }
       this._motionStartError = reason;
-      if (this._motionManager.getReservePriority() === priority) {
+      if (this._motionManager && this._motionManager.getReservePriority() === priority) {
         this._motionManager.setReservePriority(0);
       }
-      onFinishedMotionHandler?.();
+      fail(reason);
     };
 
     if (motion == null) {
@@ -910,14 +971,15 @@ export class LAppModel extends CubismUserModel {
       }
       this.fetchRuntimeArrayBuffer(`${this._modelHomeDir}${motionFileName}`)
         .then((arrayBuffer) => {
-          if (this._released || !this._motionManager) {
+          if (!isCurrentRequest() || !this._motionManager) {
+            fail("motion_model_released");
             return;
           }
           motion = this.loadMotion(
             arrayBuffer,
             arrayBuffer.byteLength,
             null, // Pass null for name here? Original code did. Let's keep it for now.
-            onFinishedMotionHandler
+            finish
           );
 
           if (motion == null) {
@@ -943,7 +1005,7 @@ export class LAppModel extends CubismUserModel {
           }
 
           motion.setEffectIds(this._eyeBlinkIds, this._lipSyncIds);
-          motion.setFinishedMotionHandler(onFinishedMotionHandler);
+          motion.setFinishedMotionHandler(finish);
           autoDelete = true; // 終了時にメモリから削除
 
           // Start the motion *after* it's loaded (moved from outside)
@@ -957,10 +1019,13 @@ export class LAppModel extends CubismUserModel {
           );
           if (loadedHandle === InvalidMotionQueueEntryHandleValue) {
             finishAsyncMotionWithoutStart("motion_start_rejected");
+            return;
           }
+          start();
         })
         .catch((error) => {
-          if (this._released) {
+          if (!isCurrentRequest()) {
+            fail("motion_model_released");
             return;
           }
           if (LAppDefine.DebugLogEnable) {
@@ -973,7 +1038,7 @@ export class LAppModel extends CubismUserModel {
       if (LAppDefine.DebugLogEnable) {
         console.log(`[APP] startMotion: Motion '${name}' found in cache. Starting.`);
       }
-      motion.setFinishedMotionHandler(onFinishedMotionHandler);
+      motion.setFinishedMotionHandler(finish);
       // Start the motion if found in cache
       const handle = this._motionManager.startMotionPriority(
           motion,
@@ -982,6 +1047,9 @@ export class LAppModel extends CubismUserModel {
       );
       if (handle === InvalidMotionQueueEntryHandleValue) {
         this._motionStartError = "motion_start_rejected";
+        fail(this._motionStartError);
+      } else {
+        start();
       }
       return handle;
     }

@@ -1,9 +1,9 @@
 task:
-  class: refactor
+  class: bugfix
   risk: high
-  phase: architecture_boundary_cleanup
+  phase: playback_lifecycle_boundary_repair
   status: complete
-  scope: Remove six confirmed ownership, protocol, prompt-contract, and error-masking defects across the adapter, ModelEngine, PlaybackTimeline, and App composition root
+  scope: Repair confirmed Timeline deadline, turn replacement, catalog motion lifecycle, outbound identity, lip-sync failure, and WebSDK typecheck ownership defects
 context:
   confidence: high
   assumptions:
@@ -254,6 +254,10 @@ architecture:
     - bounded_ratio relation targets are derived and constrained inside SemanticAxisRelationGraphStage; the coupling stage only proposes derive candidates, while speech pose performs a non-mutating future-parameter ownership precheck.
     - Motion compile diagnostics now include MotionFeedback and a raw/resolved/derived/constrained/compiled transform trace for Motion Lab correlation.
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
+    - PlaybackTimeline owns the 3000ms real-audio-start deadline; ModelEngine has no independent audio wait timer, and timeout fails subtitle plus every still-open required sink.
+    - A replacement input must be preceded by control.interrupt while the previous backend turn still awaits playback completion; the backend rejects implicit success finalization.
+    - Catalog motion accepted, started, and terminal are distinct lifecycle facts; WebSDK owns interruption from accepted priority reservation through asynchronous loading, playback, replacement, and model release.
+    - Text sends are serialized across asynchronous desktop capture, and currentTurnId advances only after the matching input.text envelope is sent successfully.
 verification:
   checks_run:
     - npm test (complete frontend suite passed after required audio failure terminal semantics were unified)
@@ -478,8 +482,14 @@ verification:
     - python -m compileall -q astrbot_plugin_ag99live_adapter and AstrBot plugin checker (passed; checker reported 0 errors and 0 warnings)
     - Mermaid CLI 11.16.0 parsed the two updated ownership and unified-clock diagrams successfully; temporary SVG outputs were removed
     - git diff --check (passed after final review)
+    - npm test (complete frontend suite passed after lifecycle deadline, catalog terminal, open-execution, and serialized-send regressions)
+    - npm run build (renderer, WebSDK, and node typechecks plus Electron production build passed)
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (289 passed)
+    - python -m compileall -q astrbot_plugin_ag99live_adapter (passed)
+    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings, 3 informational notices)
+    - git diff --check (passed after final lifecycle review)
   checks_failed: []
-  validation_gap: A live Electron end-to-end conversation is still needed to verify output.segment delivery, real audio-clock release, lip sync, and motion start against an installed AstrBot instance and Live2D model.
+  validation_gap: A live Electron end-to-end conversation is still needed to verify output.segment delivery, real audio-clock release, lip sync, and motion start against an installed AstrBot instance and Live2D model. Six historical custom WebSDK entry files still use @ts-nocheck, so their complete static-type migration remains separate technical debt.
 runtime:
   mode: unified_playback_timeline_phase3_motion_timeline_context
 backlog:

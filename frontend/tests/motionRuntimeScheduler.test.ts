@@ -165,7 +165,7 @@ function setAudioWaiting(session: TestPlaybackSession): void {
   segment.audio.terminal = "idle";
 }
 
-function testQueuedPayloadFailsWhenTimelineDoesNotArrive(): void {
+function testQueuedPayloadRemainsOwnedUntilTimelineSettles(): void {
   resetTimers();
   const { scheduler, started, failed } = createHarness(buildSession("completed"));
 
@@ -176,18 +176,12 @@ function testQueuedPayloadFailsWhenTimelineDoesNotArrive(): void {
     receivedAtMs: 900,
   });
 
-  const timer = timers.values().next().value;
-  assert.ok(timer);
-  timer();
-
+  assert.equal(timers.size, 0);
   assert.equal(started.length, 0);
-  assert.equal(failed.length, 1);
-  assert.equal(failed[0].turnId, "turn-1");
-  assert.equal(failed[0].playbackTurnId, "turn-1");
-  assert.equal(failed[0].startReason, "playback_timeline_missing_before_motion_start");
+  assert.equal(failed.length, 0);
 }
 
-function testQueuedPayloadFailureRetainsPreparingTimelineOwnership(): void {
+function testQueuedPayloadWaitsForPreparingTimelineWithoutIndependentDeadline(): void {
   resetTimers();
   const session = buildSession();
   setAudioWaiting(session);
@@ -207,14 +201,9 @@ function testQueuedPayloadFailureRetainsPreparingTimelineOwnership(): void {
     playbackClock: preparingTimeline,
   });
 
-  const timer = timers.values().next().value;
-  assert.ok(timer);
-  timer();
-
+  assert.equal(timers.size, 0);
   assert.equal(started.length, 0);
-  assert.equal(failed.length, 1);
-  assert.equal(failed[0].playbackClock?.timelineId, "timeline-1");
-  assert.equal(failed[0].playbackClock?.phase, "preparing");
+  assert.equal(failed.length, 0);
 }
 
 function testDroppedPendingPayloadReportsStartFailure(): void {
@@ -266,7 +255,7 @@ function testDuplicatePendingPayloadRejectsBothPayloads(): void {
   };
 
   assert.equal(scheduler.queueInboundPayload(buildPayload(), context), true);
-  assert.equal(timers.size, 1);
+  assert.equal(timers.size, 0);
   assert.equal(scheduler.queueInboundPayload(buildPayload(), context), false);
 
   assert.equal(started.length, 0);
@@ -521,13 +510,9 @@ function testCurvePayloadRequiresTimelineBeforeInitialTimeout(): void {
     receivedAtMs: 900,
   });
 
-  const timer = timers.values().next().value;
-  assert.ok(timer);
-  timer();
-
+  assert.equal(timers.size, 0);
   assert.equal(started.length, 0);
-  assert.equal(failed.length, 1);
-  assert.equal(failed[0].startReason, "playback_timeline_missing_before_curve_motion_start");
+  assert.equal(failed.length, 0);
 }
 
 function testPlaybackTimelineStartRefreshesPendingPlaybackTimeline(): void {
@@ -589,8 +574,8 @@ function testUnavailablePlaybackTimelineFailsPendingMotion(): void {
 }
 
 function run(): void {
-  testQueuedPayloadFailsWhenTimelineDoesNotArrive();
-  testQueuedPayloadFailureRetainsPreparingTimelineOwnership();
+  testQueuedPayloadRemainsOwnedUntilTimelineSettles();
+  testQueuedPayloadWaitsForPreparingTimelineWithoutIndependentDeadline();
   testDroppedPendingPayloadReportsStartFailure();
   testMissingTurnIdIsRejectedBeforeQueueing();
   testDuplicatePendingPayloadRejectsBothPayloads();

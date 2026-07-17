@@ -21,7 +21,7 @@ export function beginLive2DModelLoad(): number {
     resolveCurrent = resolve;
     rejectCurrent = reject;
   });
-  currentPromise.catch(() => undefined);
+  void currentPromise.catch((): void => {});
   return generation;
 }
 

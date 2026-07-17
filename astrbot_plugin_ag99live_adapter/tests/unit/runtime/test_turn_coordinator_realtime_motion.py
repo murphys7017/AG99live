@@ -342,6 +342,44 @@ def test_commit_inbound_message_disables_streaming_in_split_mode(
     assert "ag99live_inline_motion_contract_applied" not in event.extras
 
 
+def test_commit_inbound_message_rejects_replacement_without_interrupt(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    TurnCoordinator = module.TurnCoordinator
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator._turn_lock = asyncio.Lock()
+
+    class SessionStateStub:
+        client_uid = "desktop-client"
+        current_turn_id = "turn-active"
+        waiting_for_playback_complete = True
+
+    coordinator.session_state = SessionStateStub()
+    sent_payloads: list[dict[str, object]] = []
+
+    async def send_json(payload: dict[str, object]) -> bool:
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = send_json
+    message_obj = type("MessageObjectStub", (), {"message_str": "replacement"})()
+
+    asyncio.run(coordinator._commit_inbound_message(message_obj, turn_id="turn-next"))
+
+    assert len(sent_payloads) == 1
+    assert sent_payloads[0]["type"] == "control.error"
+    assert sent_payloads[0]["turn_id"] == "turn-next"
+    assert sent_payloads[0]["payload"] == {
+        "message": "input_turn_replacement_requires_interrupt"
+    }
+    assert coordinator.session_state.current_turn_id == "turn-active"
+    assert coordinator.session_state.waiting_for_playback_complete is True
+
+
 def test_submit_system_text_input_commits_remote_operator_metadata(
     install_fake_astrbot,
     monkeypatch,
