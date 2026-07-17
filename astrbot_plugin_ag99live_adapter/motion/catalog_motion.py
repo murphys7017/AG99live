@@ -4,7 +4,7 @@ from typing import Any
 
 from ..protocol import TYPE_ENGINE_CATALOG_MOTION
 
-CATALOG_MOTION_SCHEMA_VERSION = "engine.catalog_motion.v1"
+from ..protocol.schema_versions import CATALOG_MOTION_SCHEMA_VERSION
 
 
 def normalize_catalog_motion_payload(payload: Any) -> dict[str, Any]:

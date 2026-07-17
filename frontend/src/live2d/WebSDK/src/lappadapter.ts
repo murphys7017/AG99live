@@ -14,6 +14,7 @@ import {
 } from '@framework/motion/cubismmotionqueuemanager';
 import { CubismFramework } from '@framework/live2dcubismframework';
 import { deprecate } from "util";
+import type { SemanticParameterPlan } from "../../../types/protocol";
 
 export interface CatalogMotionLifecycleCallbacks {
   onStarted?: () => void;
@@ -84,7 +85,7 @@ export class LAppAdapter {
     this.getModel()?.setAmbientMotionEnabled(enabled);
   }
 
-  public startDirectParameterPlan(plan: unknown, options?: unknown): boolean {
+  public startDirectParameterPlan(plan: SemanticParameterPlan, options?: unknown): boolean {
     const model = this.getModel();
     if (!model) {
       this._directParameterPlanError = "live2d_model_unavailable";

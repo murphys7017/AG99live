@@ -1,8 +1,5 @@
 import type { Ref } from "vue";
-import type { ModelEnginePlanStartedEvent } from "../model-engine/runtime/contracts.js";
-import type {
-  NormalizedMotionPayload,
-} from "../model-engine/contracts.js";
+import type { NormalizedMotionPayload } from "../playback-integrations/motionPayload.js";
 import type { ModelSummary } from "../types/protocol.js";
 import type { PlaybackTimelineMotionContext } from "../playback-timeline/motionTypes.js";
 
@@ -29,7 +26,3 @@ export interface MotionPlaybackRecordPort {
   getLastAssistantText(): string;
   getSelectedModel(): Ref<ModelSummary | null>;
 }
-
-export type MotionPlaybackRecorder = (
-  event: ModelEnginePlanStartedEvent,
-) => void;

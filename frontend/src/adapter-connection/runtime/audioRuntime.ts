@@ -18,7 +18,7 @@ import {
 import {
   createAdapterAudioSettlementController,
 } from "./audioSettlementController.js";
-import type { NormalizedMotionPayload } from "../../model-engine/contracts.js";
+import type { NormalizedMotionPayload } from "../../playback-integrations/motionPayload.js";
 
 export interface AdapterAudioRuntimeState {
   isPlayingAudio: boolean;

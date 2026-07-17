@@ -224,12 +224,9 @@ const hasContextIsolation = Boolean(
 
 if (hasContextIsolation) {
   contextBridge.exposeInMainWorld("ag99desktop", api);
-  contextBridge.exposeInMainWorld("api", api);
 } else {
   const target = window as Window & {
     ag99desktop?: typeof api;
-    api?: typeof api;
   };
   target.ag99desktop = api;
-  target.api = api;
 }

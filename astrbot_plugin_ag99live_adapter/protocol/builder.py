@@ -46,6 +46,7 @@ from .constants import (
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE_FAILED,
     TYPE_SYSTEM_SERVER_INFO,
 )
+from .schema_versions import OUTPUT_SEGMENT_SCHEMA_VERSION
 from .parser import build_message_envelope
 
 
@@ -302,7 +303,7 @@ def build_output_segment(
         message_id=message_id,
         source=SOURCE_ADAPTER,
         payload={
-            "schema_version": "output.segment.v3",
+            "schema_version": OUTPUT_SEGMENT_SCHEMA_VERSION,
             "text": text,
             "audio": audio,
             "motion": motion,

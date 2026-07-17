@@ -1,14 +1,7 @@
-import type {
-  CatalogMotionPayload,
-  SemanticMotionIntent,
-  SemanticParameterPlan,
-} from "../types/protocol";
+import type { NormalizedMotionPayload } from "../playback-integrations/motionPayload.js";
 import type { MotionPlaybackClockContext } from "./runtime/playbackClock.js";
 
-export type NormalizedMotionPayload =
-  | { kind: "catalog_motion"; motion: CatalogMotionPayload }
-  | { kind: "semantic_intent"; intent: SemanticMotionIntent }
-  | { kind: "semantic_plan"; plan: SemanticParameterPlan };
+export type { NormalizedMotionPayload } from "../playback-integrations/motionPayload.js";
 
 export interface InboundPayloadContext {
   messageId: string;

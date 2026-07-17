@@ -469,7 +469,7 @@ function testInterruptTargetsRequestedSession(): void {
   assert.equal(store.getSession("turn-active")?.phase, "playing");
 }
 
-function testAudioTerminalHandlesAllStates(): void {
+function testMaterialTerminalsAreStable(): void {
   const store = useTurnPlaybackSessionStore();
   commitSegment(store, "turn-1", "msg-1", {
     text: { state: "present", content: "Hello" },
@@ -480,9 +480,25 @@ function testAudioTerminalHandlesAllStates(): void {
   store.markAudioTerminal("turn-1", "completed", "msg-1", "ok");
   assert.equal(store.getSession("turn-1")?.segments.get("msg-1")?.audio.terminal, "completed");
 
-  store.markAudioTerminal("turn-1", "failed", "msg-1", "error");
-  assert.equal(store.getSession("turn-1")?.segments.get("msg-1")?.audio.terminal, "failed");
-  assert.equal(store.getSession("turn-1")?.segments.get("msg-1")?.audio.reason, "error");
+  store.markAudioTerminal("turn-1", "completed", "msg-1", "late duplicate");
+  assert.throws(
+    () => store.markAudioTerminal("turn-1", "failed", "msg-1", "error"),
+    /audio terminal is stable.*completed -> failed/,
+  );
+  assert.equal(store.getSession("turn-1")?.segments.get("msg-1")?.audio.terminal, "completed");
+  assert.equal(store.getSession("turn-1")?.segments.get("msg-1")?.audio.reason, "ok");
+
+  store.markTextDelivered("turn-1", "msg-1");
+  assert.throws(
+    () => store.markTextFailed("turn-1", "msg-1", "late text failure"),
+    /text terminal is stable.*delivered -> failed/,
+  );
+
+  store.markMotionAbsent("turn-1", "msg-1");
+  assert.throws(
+    () => store.markMotionFailed("turn-1", "msg-1", "late motion failure"),
+    /motion terminal is stable.*absent -> failed/,
+  );
 }
 
 function run(): void {
@@ -510,7 +526,7 @@ function run(): void {
   testInterruptMarksSessionFailed();
   testInterruptDoesNotCreateNewSession();
   testInterruptTargetsRequestedSession();
-  testAudioTerminalHandlesAllStates();
+  testMaterialTerminalsAreStable();
   console.log("turnPlaybackSessionStore tests passed");
 }
 

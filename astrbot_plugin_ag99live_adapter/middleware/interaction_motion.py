@@ -44,8 +44,8 @@ from ..motion.motion_intent import (
 from ..motion.resource_catalog import (
     build_motion_resource_candidates,
 )
-from ..motion.fallback_pose import (
-    build_fallback_pose_candidates,
+from ..motion.pose_reference import (
+    build_pose_reference_candidates,
 )
 from ..prompts.motion_selector import (
     resolve_motion_prompt_instruction,
@@ -55,7 +55,7 @@ from ..prompts.semantic_axis_prompt import (
     profile_prompt_axes,
     resolve_available_axis_levels,
 )
-from ..runtime.motion_lab import record_motion_lab_observation
+from ..motion.observation import record_motion_observation
 
 AG99LIVE_PLUGIN_ID = "astrbot_plugin_ag99live_adapter"
 AG99LIVE_MOTION_EFFECT_NAME = "ag99live.motion"
@@ -104,7 +104,6 @@ class _MotionScheduleAttempt:
     reply_plan_route_mode: str | None
     reply_plan_should_emit_immediate_reply: bool | None
     reply_plan_source: str | None
-    motion_generation_mode: str
     scheduled: bool
     reason: str
     assistant_text: str
@@ -121,7 +120,6 @@ class _MotionScheduleAttempt:
             "reply_plan_route_mode": self.reply_plan_route_mode,
             "reply_plan_should_emit_immediate_reply": self.reply_plan_should_emit_immediate_reply,
             "reply_plan_source": self.reply_plan_source,
-            "motion_generation_mode": self.motion_generation_mode,
             "scheduled": self.scheduled,
             "reason": self.reason,
         }
@@ -592,18 +590,18 @@ def _build_motion_static_capability_payload(runtime_state: Any) -> dict[str, Any
     if not isinstance(raw_profile, dict):
         raise RuntimeError("semantic_motion_prompt_profile_payload_invalid")
     capability_payload["semantic_profile"] = profile_payload
-    fallback_candidates = build_fallback_pose_candidates(
+    pose_reference_candidates = build_pose_reference_candidates(
         runtime_state=runtime_state,
         semantic_profile=raw_profile,
         limit=None,
     )
-    prompt_fallback_candidates = _build_prompt_fallback_pose_candidates(
-        fallback_candidates,
+    prompt_pose_references = _build_prompt_pose_reference_candidates(
+        pose_reference_candidates,
         semantic_profile=raw_profile,
         limit=4,
     )
-    if prompt_fallback_candidates:
-        capability_payload["fallback_pose_candidates"] = prompt_fallback_candidates
+    if prompt_pose_references:
+        capability_payload["pose_reference_candidates"] = prompt_pose_references
     resource_candidates = build_motion_resource_candidates(
         runtime_state=runtime_state,
     )
@@ -770,7 +768,7 @@ def _build_motion_capability_prompt_payload(
         if projected_examples:
             result["reference_examples"] = projected_examples
 
-    references = capability_payload.get("fallback_pose_candidates")
+    references = capability_payload.get("pose_reference_candidates")
     if isinstance(references, list):
         result["pose_references"] = [
             {
@@ -1014,15 +1012,15 @@ def _build_official_inline_motion_intent_example(
     return intent
 
 
-def _build_prompt_fallback_pose_candidates(
-    fallback_candidates: list[dict[str, Any]],
+def _build_prompt_pose_reference_candidates(
+    pose_reference_candidates: list[dict[str, Any]],
     *,
     semantic_profile: dict[str, Any] | None = None,
     limit: int,
 ) -> list[dict[str, Any]]:
     axis_by_id = _build_prompt_axis_lookup(semantic_profile)
-    selected_candidates = _select_representative_fallback_pose_candidates(
-        fallback_candidates,
+    selected_candidates = _select_representative_pose_reference_candidates(
+        pose_reference_candidates,
         axis_by_id=axis_by_id,
         limit=limit,
     )
@@ -1059,8 +1057,8 @@ def _build_prompt_fallback_pose_candidates(
     return result
 
 
-def _select_representative_fallback_pose_candidates(
-    fallback_candidates: list[dict[str, Any]],
+def _select_representative_pose_reference_candidates(
+    pose_reference_candidates: list[dict[str, Any]],
     *,
     axis_by_id: Mapping[str, dict[str, Any]] | None = None,
     limit: int,
@@ -1071,20 +1069,20 @@ def _select_representative_fallback_pose_candidates(
 
     candidates = [
         item
-        for item in fallback_candidates
-        if _is_prompt_fallback_pose_candidate(item)
+        for item in pose_reference_candidates
+        if _is_prompt_pose_reference_candidate(item)
     ]
     if not candidates:
         return []
 
     by_signature: dict[str, list[dict[str, Any]]] = {}
     for item in candidates:
-        signature = _classify_prompt_fallback_pose_signature(item, axis_by_id=axis_by_id)
+        signature = _classify_prompt_pose_reference_signature(item, axis_by_id=axis_by_id)
         by_signature.setdefault(signature, []).append(item)
 
     for signature_candidates in by_signature.values():
         signature_candidates.sort(
-            key=_score_prompt_fallback_pose_candidate,
+            key=_score_prompt_pose_reference_candidate,
             reverse=True,
         )
 
@@ -1092,7 +1090,7 @@ def _select_representative_fallback_pose_candidates(
     selected_ids: set[str] = set()
     ranked_signatures = sorted(
         by_signature.items(),
-        key=lambda entry: _score_prompt_fallback_signature(entry[0], entry[1]),
+        key=lambda entry: _score_prompt_pose_reference_signature(entry[0], entry[1]),
         reverse=True,
     )
     for _signature, signature_candidates in ranked_signatures:
@@ -1108,7 +1106,7 @@ def _select_representative_fallback_pose_candidates(
     if len(selected) < min(2, max_items):
         ranked = sorted(
             candidates,
-            key=_score_prompt_fallback_pose_candidate,
+            key=_score_prompt_pose_reference_candidate,
             reverse=True,
         )
         for item in ranked:
@@ -1123,7 +1121,7 @@ def _select_representative_fallback_pose_candidates(
     return selected[:max_items]
 
 
-def _is_prompt_fallback_pose_candidate(item: Any) -> bool:
+def _is_prompt_pose_reference_candidate(item: Any) -> bool:
     if not isinstance(item, dict):
         return False
     pose_id = str(item.get("id") or "").strip()
@@ -1133,7 +1131,7 @@ def _is_prompt_fallback_pose_candidate(item: Any) -> bool:
     return isinstance(axes, dict) and bool(axes)
 
 
-def _classify_prompt_fallback_pose_signature(
+def _classify_prompt_pose_reference_signature(
     item: dict[str, Any],
     *,
     axis_by_id: Mapping[str, dict[str, Any]] | None = None,
@@ -1141,7 +1139,7 @@ def _classify_prompt_fallback_pose_signature(
     descriptors = _describe_axis_descriptors(item.get("axes"), axis_by_id=axis_by_id)
     if descriptors:
         return "+".join(descriptors[:3])
-    return "metadata:" + _normalize_prompt_fallback_metadata_signature(item)
+    return "metadata:" + _normalize_prompt_pose_reference_metadata_signature(item)
 
 
 def _describe_axis_descriptors(
@@ -1185,7 +1183,7 @@ def _resolve_axis_descriptor_threshold(axis: dict[str, Any] | None) -> float:
     return _payload_resolve_axis_descriptor_threshold(axis)
 
 
-def _normalize_prompt_fallback_metadata_signature(item: dict[str, Any]) -> str:
+def _normalize_prompt_pose_reference_metadata_signature(item: dict[str, Any]) -> str:
     for key in ("label", "emotion_label", "id"):
         value = re.sub(r"[^0-9A-Za-z_\u4e00-\u9fff]+", "_", str(item.get(key) or "").strip())
         if value:
@@ -1193,7 +1191,7 @@ def _normalize_prompt_fallback_metadata_signature(item: dict[str, Any]) -> str:
     return "unknown"
 
 
-def _score_prompt_fallback_signature(
+def _score_prompt_pose_reference_signature(
     signature: str,
     candidates: list[dict[str, Any]],
 ) -> tuple[int, int, str]:
@@ -1207,13 +1205,13 @@ def _score_prompt_fallback_signature(
     if any("eye" in part or "mouth" in part or "brow" in part for part in descriptors):
         skeleton_score += 5
     best_candidate_score = max(
-        (_score_prompt_fallback_pose_candidate(item)[0] for item in candidates),
+        (_score_prompt_pose_reference_candidate(item)[0] for item in candidates),
         default=0,
     )
     return descriptor_score + skeleton_score, best_candidate_score, signature
 
 
-def _score_prompt_fallback_pose_candidate(item: dict[str, Any]) -> tuple[int, int, int, str]:
+def _score_prompt_pose_reference_candidate(item: dict[str, Any]) -> tuple[int, int, int, str]:
     source = str(item.get("source") or "").strip()
     source_score = {
         "motion_tuning_sample": 90,
@@ -1542,7 +1540,6 @@ async def _schedule_motion_from_interaction_result(
     if bundle is None:
         return None
 
-    motion_generation_mode = _resolve_motion_generation_mode(bundle.runtime_state)
     phase = _resolve_result_phase(view)
     assistant_text = _extract_assistant_text(view)
     identity = _resolve_frontend_identity_snapshot(event, bundle.turn_coordinator)
@@ -1572,7 +1569,6 @@ async def _schedule_motion_from_interaction_result(
     policy = _resolve_motion_schedule_policy(
         event,
         phase=phase,
-        motion_generation_mode=motion_generation_mode,
         reply_plan=reply_plan,
     )
 
@@ -1589,7 +1585,6 @@ async def _schedule_motion_from_interaction_result(
                 reply_plan.should_emit_immediate_reply if reply_plan is not None else None
             ),
             reply_plan_source=reply_plan.source if reply_plan is not None else None,
-            motion_generation_mode=motion_generation_mode,
             scheduled=True,
             reason="persona_effect_motion_client_object",
             assistant_text=assistant_text,
@@ -1609,7 +1604,6 @@ async def _schedule_motion_from_interaction_result(
                 reply_plan.should_emit_immediate_reply if reply_plan is not None else None
             ),
             reply_plan_source=reply_plan.source if reply_plan is not None else None,
-            motion_generation_mode=motion_generation_mode,
             scheduled=False,
             reason="assistant_text_empty",
             assistant_text=assistant_text,
@@ -1628,7 +1622,6 @@ async def _schedule_motion_from_interaction_result(
                 reply_plan.should_emit_immediate_reply if reply_plan is not None else None
             ),
             reply_plan_source=reply_plan.source if reply_plan is not None else None,
-            motion_generation_mode=motion_generation_mode,
             scheduled=False,
             reason=policy.reason,
             assistant_text=assistant_text,
@@ -1655,7 +1648,6 @@ async def _schedule_motion_from_interaction_result(
                 reply_plan.should_emit_immediate_reply if reply_plan is not None else None
             ),
             reply_plan_source=reply_plan.source if reply_plan is not None else None,
-            motion_generation_mode=motion_generation_mode,
             scheduled=False,
             reason="motion_payload_missing",
             assistant_text=assistant_text,
@@ -1673,7 +1665,6 @@ async def _schedule_motion_from_interaction_result(
             reply_plan.should_emit_immediate_reply if reply_plan is not None else None
         ),
         reply_plan_source=reply_plan.source if reply_plan is not None else None,
-        motion_generation_mode=motion_generation_mode,
         scheduled=False,
         reason=policy.reason,
         assistant_text=assistant_text,
@@ -1768,8 +1759,8 @@ def _record_motion_lab_interaction_event(
         "profile_revision": (profile or {}).get("revision"),
         "assistant_text": assistant_text,
     }
-    record_motion_lab_observation(
-        bundle.runtime_state,
+    record_motion_observation(
+        getattr(bundle.runtime_state, "motion_lab_recorder", None),
         **observation_context,
         event_type="motion.persona_effect_received",
         payload_kind="effect_calls",
@@ -1781,8 +1772,8 @@ def _record_motion_lab_interaction_event(
             "original_user_text": _call_event_method(event, "get_extra", "ag99live_original_message_str", ""),
         },
     )
-    record_motion_lab_observation(
-        bundle.runtime_state,
+    record_motion_observation(
+        getattr(bundle.runtime_state, "motion_lab_recorder", None),
         **observation_context,
         event_type="motion.intent_resolved",
         payload_kind=(
@@ -1911,11 +1902,6 @@ def _sanitize_reason_fragment(value: Any) -> str:
     return fragment[:80] or "unknown"
 
 
-def _resolve_motion_generation_mode(runtime_state: Any) -> str:
-    del runtime_state
-    return "single_response_effect"
-
-
 def _resolve_result_phase(view: Any) -> str:
     metadata = getattr(view, "metadata", None)
     if isinstance(metadata, Mapping):
@@ -1930,7 +1916,6 @@ def _resolve_motion_schedule_policy(
     event: Any,
     *,
     phase: str,
-    motion_generation_mode: str,
     reply_plan: _InteractionReplyPlanSnapshot | None,
 ) -> _MotionSchedulePolicy:
     if phase == "immediate":
@@ -1938,7 +1923,6 @@ def _resolve_motion_schedule_policy(
     if phase == "final":
         return _resolve_final_phase_policy(
             event,
-            motion_generation_mode=motion_generation_mode,
             reply_plan=reply_plan,
         )
     return _MotionSchedulePolicy(
@@ -1960,7 +1944,6 @@ def _resolve_immediate_phase_policy(
 def _resolve_final_phase_policy(
     event: Any,
     *,
-    motion_generation_mode: str,
     reply_plan: _InteractionReplyPlanSnapshot | None,
 ) -> _MotionSchedulePolicy:
     if reply_plan is not None and reply_plan.route_mode == "self_reply":

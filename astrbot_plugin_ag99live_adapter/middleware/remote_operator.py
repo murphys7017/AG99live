@@ -5,12 +5,19 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 import json
 import re
-import threading
 from typing import Any
 
 from astrbot.api import logger
 from astrbot.core.interaction import InteractionResultContribution
 from astrbot.core.prompt import PromptExtension
+
+from ..protocol.remote_operator import RemoteOperatorRequest
+from ..runtime.remote_operator_registry import (
+    get_remote_operator_online_computers,
+    mark_remote_operator_computer_offline,
+    mark_remote_operator_computer_online,
+    set_remote_operator_online_computers,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,9 +28,6 @@ class RemoteOperatorConfig:
     default_profile: str
     profiles: dict[str, str]
 
-
-_registry_lock = threading.RLock()
-_online_computer_keys: set[str] = set()
 
 REMOTE_OPERATOR_CONFLICTING_TOOL_NAMES = frozenset(
     {
@@ -347,40 +351,6 @@ def collect_remote_operator_prompt_extension(
     )
 
 
-def set_remote_operator_online_computers(computer_keys: Any) -> None:
-    next_keys: set[str] = set()
-    if isinstance(computer_keys, (list, tuple, set)):
-        for item in computer_keys:
-            key = _normalize_key(item)
-            if key:
-                next_keys.add(key)
-
-    with _registry_lock:
-        _online_computer_keys.clear()
-        _online_computer_keys.update(next_keys)
-
-
-def mark_remote_operator_computer_online(computer_key: Any) -> None:
-    key = _normalize_key(computer_key)
-    if not key:
-        return
-    with _registry_lock:
-        _online_computer_keys.add(key)
-
-
-def mark_remote_operator_computer_offline(computer_key: Any) -> None:
-    key = _normalize_key(computer_key)
-    if not key:
-        return
-    with _registry_lock:
-        _online_computer_keys.discard(key)
-
-
-def get_remote_operator_online_computers() -> set[str]:
-    with _registry_lock:
-        return set(_online_computer_keys)
-
-
 def resolve_remote_operator_config(config: Any) -> RemoteOperatorConfig | None:
     if not isinstance(config, Mapping):
         return None
@@ -501,8 +471,6 @@ def parse_remote_operator_request_from_view(
         return None, "computer_unavailable"
     if profile not in online_config.profiles:
         return None, "profile_unavailable"
-
-    from ..services.remote_operator_runtime import RemoteOperatorRequest
 
     return RemoteOperatorRequest(computer=computer, profile=profile, prompt=prompt), "ok"
 

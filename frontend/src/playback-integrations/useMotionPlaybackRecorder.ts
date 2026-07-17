@@ -2,7 +2,7 @@ import { ref, shallowReadonly } from "vue";
 import type { ModelEnginePlanStartedEvent } from "../model-engine/runtime/contracts.js";
 import type { DirectParameterPlanTerminalEvent } from "../types/live2d-runtime.d.ts";
 import type { DesktopMotionPlaybackRecord } from "../types/desktop.js";
-import type { MotionPlaybackRecordPort } from "./ports.js";
+import type { MotionPlaybackRecordPort } from "../turn-playback/ports.js";
 import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
 import { cloneJson } from "../utils/cloneJson.js";
 

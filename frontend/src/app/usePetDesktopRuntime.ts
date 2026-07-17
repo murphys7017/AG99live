@@ -17,10 +17,11 @@ import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRuntimeSnapshotPublisher";
 import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
+import { normalizeMotionPayload } from "../model-engine/normalize";
 import { cloneModelEngineSettings } from "../model-engine/settings";
 import type { ModelEngineSettings } from "../model-engine/settings";
 import { usePlaybackCompletionCoordinator } from "../turn-playback/usePlaybackCompletionCoordinator";
-import { useMotionPlaybackRecorder } from "../turn-playback/useMotionPlaybackRecorder";
+import { useMotionPlaybackRecorder } from "../playback-integrations/useMotionPlaybackRecorder";
 import { useTurnPlaybackOrchestrator } from "../turn-playback/useTurnPlaybackOrchestrator";
 import { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore";
 import type {
@@ -32,6 +33,7 @@ import { applyMotionEngineSettingsSnapshot } from "./motionEngineSettingsSnapsho
 import { useAmbientMotionPreference } from "./useAmbientMotionPreference";
 import {
   configurePlaybackTimelineMotionRuntime,
+  createAppPlaybackTimelineRuntime,
   createPlaybackTimelineMotionRunTracker,
   type PlaybackTimelineWiringPort,
 } from "./playbackTimelineWiring";
@@ -48,9 +50,8 @@ import {
 import type {
   PlaybackTimelineSegmentMotionSink,
 } from "../playback-timeline/segmentJob";
-import { createPlaybackTimelineRuntime } from "../playback-timeline/playbackTimelineRuntime";
 import { createBrowserAudioTimelineSink } from "../playback-timeline/audioSink";
-import type { NormalizedMotionPayload } from "../model-engine/contracts";
+import type { NormalizedMotionPayload } from "../playback-integrations/motionPayload";
 
 export interface PetDesktopRuntime {
   sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>;
@@ -85,19 +86,15 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const adapter = useAdapterConnection(
     sessionStore,
     modelSync,
+    normalizeMotionPayload,
   );
-  const appPlaybackTimelineRuntime = createPlaybackTimelineRuntime(
-    adapter.buildPlaybackTimelineRuntimeDeps(requiredMotionTimelineSink),
-  );
-  adapter.attachPlaybackTimelineRuntime(
-    appPlaybackTimelineRuntime,
-    createBrowserAudioTimelineSink(),
-  );
-  const playbackTimeline: PlaybackTimelineWiringPort = {
-    ...appPlaybackTimelineRuntime,
-    setAudioTimelineDurationReadyHandler: adapter.setAudioTimelineDurationReadyHandler,
-    setAudioTimelineStartedHandler: adapter.setAudioTimelineStartedHandler,
-  };
+  const playbackTimeline: PlaybackTimelineWiringPort =
+    createAppPlaybackTimelineRuntime({
+      sessionStore,
+      adapterPlayback: adapter.playback,
+      motionSink: requiredMotionTimelineSink,
+      audioSink: createBrowserAudioTimelineSink(),
+    });
   const bridge = useDesktopBridge();
   const motionPlayer = usePreviewMotionPlayer();
   const motionEngineSettings = reactive(

@@ -1,6 +1,6 @@
 import { watch } from "vue";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
-import type { NormalizedMotionPayload } from "../model-engine/contracts";
+import type { NormalizedMotionPayload } from "../playback-integrations/motionPayload";
 import { canReleaseAudio, canReleaseMotion, getActivePlaybackSegment } from "./selectors.js";
 import type { MotionPayloadPort } from "./ports.js";
 import type { PlaybackTimelineSegmentStartPort } from "../playback-timeline/segmentJob.js";

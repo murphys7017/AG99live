@@ -9,13 +9,13 @@ from typing import Any
 
 from astrbot.api import logger
 
+from ..protocol.schema_versions import PERFORMANCE_CURVE_HINT_SCHEMA_VERSION
+
 from ..prompts.performance_curve import (
     PERFORMANCE_CURVE_SYSTEM_PROMPT,
     build_performance_curve_prompt,
 )
-from ..runtime.motion_lab import record_motion_lab_observation
-
-PERFORMANCE_CURVE_HINT_SCHEMA_VERSION = "ag99.performance_curve_hint.v1"
+from .observation import record_motion_observation
 
 CURVE_FAMILIES = {
     "default",
@@ -215,8 +215,8 @@ class PerformanceCurveRuntime:
         payload_kind: str,
         raw: dict[str, Any],
     ) -> bool:
-        return record_motion_lab_observation(
-            self.runtime_state,
+        return record_motion_observation(
+            getattr(self.runtime_state, "motion_lab_recorder", None),
             event_type=event_type,
             turn_id=request.turn_id,
             message_id=request.message_id,

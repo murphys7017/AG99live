@@ -35,7 +35,7 @@ from ..protocol import (
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE,
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE,
 )
-from ..runtime.motion_lab import record_motion_lab_observation
+from ..motion.observation import record_motion_observation
 
 SUPPORTED_SYSTEM_MESSAGE_TYPES = {
     TYPE_SYSTEM_BACKGROUND_LIST_REQUEST,
@@ -165,8 +165,8 @@ class FrontendSystemCommandHandler:
             await send_json(build_system_heartbeat_ack())
         elif msg_type == TYPE_SYSTEM_MOTION_LAB_RAW_EVENT:
             event_id = str(payload.get("event_id") or "").strip()
-            accepted = record_motion_lab_observation(
-                self._runtime_state,
+            accepted = record_motion_observation(
+                getattr(self._runtime_state, "motion_lab_recorder", None),
                 event_id=event_id,
                 event_type=payload.get("event_type"),
                 turn_id=message.turn_id,

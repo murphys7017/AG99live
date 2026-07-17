@@ -24,8 +24,6 @@ export const OUTBOUND_MESSAGE_TYPES = {
   INPUT_TEXT: "input.text",
   INPUT_AUDIO_STREAM_START: "input.audio_stream_start",
   INPUT_AUDIO_STREAM_END: "input.audio_stream_end",
-  INPUT_RAW_AUDIO_DATA: "input.raw_audio_data",
-  INPUT_MIC_AUDIO_END: "input.mic_audio_end",
   CONTROL_INTERRUPT: "control.interrupt",
   CONTROL_PLAYBACK_FINISHED: "control.playback_finished",
   SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE: "system.semantic_axis_profile_save",

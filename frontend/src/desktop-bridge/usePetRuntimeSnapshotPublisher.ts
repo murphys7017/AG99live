@@ -13,7 +13,6 @@ import type {
   DesktopRuntimeSnapshot,
   DesktopSemanticAxisProfileSaveResult,
   DesktopMotionTuningSamplesStatus,
-  DesktopMotionTuningSample,
 } from "../types/desktop";
 import type { BilibiliLiveStatus } from "../types/bilibili-live";
 import type { ModelSummary, SystemServerInfoPayload } from "../types/protocol";
@@ -177,10 +176,6 @@ export function createPetRuntimeSnapshotPublisher(
         activeBackendHistoryUid: a.activeBackendHistoryUid,
         backendHistoryLoading: a.backendHistoryLoading,
         backendHistoryStatusMessage: a.backendHistoryStatusMessage,
-        motionTuningSamples: a.motionTuningSamples.map((s) =>
-          cloneJson(s),
-        ) as DesktopMotionTuningSample[],
-        motionTuningSamplesStatus: cloneJson(a.motionTuningSamplesStatus) as DesktopMotionTuningSamplesStatus,
         bilibiliLiveStatus: options.bilibiliLiveStatus(),
       });
 

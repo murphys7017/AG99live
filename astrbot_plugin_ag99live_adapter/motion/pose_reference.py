@@ -18,7 +18,7 @@ _NON_EMOTIVE_EXPRESSION_TOKENS = {
 }
 
 
-def build_fallback_pose_candidates(
+def build_pose_reference_candidates(
     *,
     runtime_state: Any,
     semantic_profile: dict[str, Any],

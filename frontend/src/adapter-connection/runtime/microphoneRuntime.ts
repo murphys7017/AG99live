@@ -383,26 +383,28 @@ export function createAdapterMicrophoneRuntime(
     const inputTurnId = activeMicTurnId ?? createRootInputTurnId();
     const inputStreamId = activeMicStreamId;
     const socket = deps.getSocket();
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      const endType = audioStreamStarted && inputStreamId
-        ? "input.audio_stream_end"
-        : "input.mic_audio_end";
-      const payload = audioStreamStarted && inputStreamId
-        ? {
+    let protocolError: Error | null = null;
+    if (socket && socket.readyState === WebSocket.OPEN && audioStreamStarted) {
+      if (!inputStreamId) {
+        protocolError = new Error("audio_stream_started_without_stream_id");
+      } else {
+        socket.send(JSON.stringify(deps.buildEnvelope(
+          "input.audio_stream_end",
+          {
             stream_id: inputStreamId,
             reason,
             dropped: audioSequenceBroken,
             last_seq: activeMicSeq - 1,
             capture_mode: resolveMicrophoneCaptureMode(),
-          }
-        : {
-            reason,
-            dropped: audioSequenceBroken,
-            capture_mode: resolveMicrophoneCaptureMode(),
-          };
-      socket.send(JSON.stringify(deps.buildEnvelope(endType, payload, inputTurnId)));
+          },
+          inputTurnId,
+        )));
+      }
     }
     clearMicCaptureSession();
+    if (protocolError) {
+      throw protocolError;
+    }
 
     if (reason === "device_change") {
       return true;

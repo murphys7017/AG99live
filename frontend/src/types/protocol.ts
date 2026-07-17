@@ -1,9 +1,17 @@
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
 
-export const SCHEMA_MOTION_INTENT_V3 = "engine.motion_intent.v3";
-export const SCHEMA_MOTION_INTENT_V4 = "engine.motion_intent.v4";
-export const SCHEMA_CATALOG_MOTION_V1 = "engine.catalog_motion.v1";
-export const SCHEMA_PARAMETER_PLAN_V2 = "engine.parameter_plan.v2";
+export {
+  SCHEMA_CATALOG_MOTION_V1,
+  SCHEMA_MOTION_INTENT_V3,
+  SCHEMA_MOTION_INTENT_V4,
+  SCHEMA_PARAMETER_PLAN_V2,
+} from "./protocolSchema.generated.js";
+import {
+  SCHEMA_CATALOG_MOTION_V1,
+  SCHEMA_MOTION_INTENT_V3,
+  SCHEMA_MOTION_INTENT_V4,
+  SCHEMA_PARAMETER_PLAN_V2,
+} from "./protocolSchema.generated.js";
 
 export interface ProtocolEnvelope<TPayload = unknown> {
   type: string;

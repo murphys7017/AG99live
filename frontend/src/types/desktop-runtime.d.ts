@@ -70,7 +70,6 @@ export interface Ag99DesktopApi {
 declare global {
   interface Window {
     ag99desktop?: Ag99DesktopApi;
-    api?: Ag99DesktopApi;
   }
 }
 

@@ -11,7 +11,6 @@ TurnCoordinator 把"前端协议消息 ↔ AstrBot 事件总线 ↔ 出站回放
          - control.playback_finished                       → finalize_turn
          - control.interrupt                               → _handle_interrupt_signal
          - input.audio_stream_*                            → SpeechIngressService
-         - input.mic_audio_data / input.raw_audio_data     → 旧的非流式麦克风入口
          - input.text                                      → _commit_inbound_message
     3. 除 system.* 与 engine preview 入口外，交互类 message.type 都要求 turn_id 非空
        （_require_interactive_turn_id）；前端 turn_id 通过 turn_identity_map 与
@@ -63,9 +62,6 @@ from ..protocol import (
     TYPE_INPUT_AUDIO_STREAM_CHUNK,
     TYPE_INPUT_AUDIO_STREAM_END,
     TYPE_INPUT_AUDIO_STREAM_START,
-    TYPE_INPUT_MIC_AUDIO_DATA,
-    TYPE_INPUT_MIC_AUDIO_END,
-    TYPE_INPUT_RAW_AUDIO_DATA,
     TYPE_INPUT_TEXT,
     build_message_envelope,
     parse_inbound_message,
@@ -99,7 +95,7 @@ from .message_utils import (
 from .image_diagnostics import (
     emit_image_input_diagnostics,
 )
-from .motion_lab import record_motion_lab_observation
+from ..motion.observation import record_motion_observation
 from .output_segment import PendingOutputSegment
 
 class TurnCoordinator:
@@ -203,20 +199,6 @@ class TurnCoordinator:
             message_obj = await self.speech_ingress.handle_audio_stream_end(message)
             if message_obj is not None:
                 await self._commit_inbound_message(message_obj, turn_id=turn_id)
-            return
-
-        if message.type == TYPE_INPUT_MIC_AUDIO_DATA:
-            await self.speech_ingress.handle_audio_data(message)
-            return
-
-        if message.type == TYPE_INPUT_RAW_AUDIO_DATA:
-            message_obj = await self.speech_ingress.handle_raw_audio_data(message)
-            if message_obj is not None:
-                await self._commit_inbound_message(message_obj, turn_id=turn_id)
-            return
-
-        if message.type == TYPE_INPUT_MIC_AUDIO_END:
-            await self._handle_audio_end(message)
             return
 
         if message.type == TYPE_INPUT_TEXT:
@@ -620,7 +602,6 @@ class TurnCoordinator:
             set_extra = getattr(event, "set_extra", None)
             if callable(set_extra):
                 set_extra("enable_streaming", False)
-                set_extra("ag99live_motion_generation_mode", "single_response_effect")
             self._apply_raw_message_metadata_to_event(event, message_obj)
             self._commit_event(event)
             self._mark_turn_timing("event_committed_at")
@@ -688,12 +669,6 @@ class TurnCoordinator:
             current_turn_id=self.session_state.current_turn_id,
             send_json=self._send_json,
         )
-
-    async def _handle_audio_end(self, message) -> None:
-        message_obj = await self.speech_ingress.handle_audio_end(message)
-        if message_obj is None:
-            return
-        await self._commit_inbound_message(message_obj, turn_id=message.turn_id)
 
     async def _handle_interrupt_signal(self, turn_id: str | None) -> None:
         current_turn_id = self.session_state.current_turn_id
@@ -901,8 +876,8 @@ class TurnCoordinator:
             profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
         except Exception:  # noqa: BLE001
             profile = None
-        return record_motion_lab_observation(
-            runtime_state,
+        return record_motion_observation(
+            getattr(runtime_state, "motion_lab_recorder", None),
             event_type=event_type,
             conversation_uid=getattr(self.session_state, "client_uid", None),
             turn_id=turn_id if turn_id is not None else self.session_state.current_turn_id,

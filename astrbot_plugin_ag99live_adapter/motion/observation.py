@@ -1,12 +1,21 @@
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
-from .recorder import enqueue_motion_lab_raw_event
+from astrbot.api import logger
 
 
-def record_motion_lab_observation(
-    runtime_state: Any,
+class MotionObservationPort(Protocol):
+    def enqueue(
+        self,
+        event: dict[str, Any],
+        *,
+        on_persisted: Callable[[], None] | None = None,
+    ) -> bool: ...
+
+
+def record_motion_observation(
+    recorder: MotionObservationPort | None,
     *,
     event_type: str,
     raw: dict[str, Any],
@@ -25,7 +34,8 @@ def record_motion_lab_observation(
     payload_kind: str = "",
     on_persisted: Callable[[], None] | None = None,
 ) -> bool:
-    """Write one normalized Motion Lab observation through the async recorder port."""
+    if recorder is None:
+        return False
     event = {
         "event_type": event_type,
         "conversation_uid": conversation_uid,
@@ -44,8 +54,8 @@ def record_motion_lab_observation(
     }
     if event_id:
         event["id"] = event_id
-    return enqueue_motion_lab_raw_event(
-        runtime_state,
-        event,
-        on_persisted=on_persisted,
-    )
+    try:
+        return recorder.enqueue(event, on_persisted=on_persisted)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Motion observation port rejected event: %s", exc)
+        return False

@@ -84,7 +84,7 @@ astrbot_plugin_ag99live_adapter/
 - 若前端检测到发送积压，会在 `input.audio_stream_end` 中带上 `dropped: true`，后端直接丢弃该段转写。
 - 切换麦克风设备时，前端会先正常结束旧输入段，再启动新输入段；收到 `control.interrupt` 时，前端会把已释放的 segment 音频写成失败终态后再清理播放 runtime。
 - Windows / Electron 前端现在优先使用主进程 DirectShow/ffmpeg 原生麦克风枚举与采集；原生路径直接采集 `s16le`，渲染进程通过二进制音频帧发送给插件侧。
-- `input.raw_audio_data` / `input.mic_audio_end` 仍保留为旧前端和调试脚本兼容路径，不是当前 Electron 前端主路径。
+- 非流式 JSON 数组音频协议已删除；麦克风输入只接受当前流式协议。
 - 按键说话模式会以 `reason="ptt_release"` 结束本段录音；对插件侧来说它仍是一段普通麦克风输入。
 
 ## 远程执行器 / Windows 操作

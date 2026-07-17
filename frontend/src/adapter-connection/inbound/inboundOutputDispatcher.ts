@@ -2,7 +2,7 @@ import type {
   OutputTranscriptionPayload,
   ProtocolEnvelope,
 } from "../../types/protocol.js";
-import type { NormalizedMotionPayload } from "../../model-engine/contracts.js";
+import type { NormalizedMotionPayload } from "../../playback-integrations/motionPayload.js";
 import type { OutputSegmentMaterial } from "../../turn-playback/session.js";
 import type { InboundAdapterEvent } from "./inboundEvents.js";
 import type {

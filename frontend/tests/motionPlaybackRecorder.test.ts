@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { ref } from "vue";
-import { useMotionPlaybackRecorder } from "../src/turn-playback/useMotionPlaybackRecorder.js";
+import { useMotionPlaybackRecorder } from "../src/playback-integrations/useMotionPlaybackRecorder.js";
 import type { ModelEnginePlanStartedEvent } from "../src/model-engine/runtime/contracts.js";
 
 const baseEvent = {

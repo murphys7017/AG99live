@@ -167,7 +167,7 @@ async function initializeLive2DOnce(): Promise<void> {
     (window as any).getLAppAdapter = () => LAppAdapter.getInstance();
   }
 
-  const setIgnoreMouseEvents = (window as any).api?.setIgnoreMouseEvents;
+  const setIgnoreMouseEvents = (window as any).ag99desktop?.setIgnoreMouseEvents;
   if (typeof setIgnoreMouseEvents === 'function') {
     setIgnoreMouseEventsBridge = setIgnoreMouseEvents;
     (window as any).__ag99SetPetMouseIgnoreState = applyMouseIgnoreState;

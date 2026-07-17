@@ -7,10 +7,13 @@ from typing import Any
 from ..prompts.semantic_axis_prompt import profile_prompt_axes
 from .performance_curve import normalize_performance_curve_hint
 
-MOTION_INTENT_SCHEMA_VERSION = "engine.motion_intent.v3"
-MOTION_INTENT_V3_SCHEMA_VERSION = "engine.motion_intent.v3"
-MOTION_INTENT_V4_SCHEMA_VERSION = "engine.motion_intent.v4"
-PARAMETER_PLAN_V2_SCHEMA_VERSION = "engine.parameter_plan.v2"
+from ..protocol.schema_versions import (
+    MOTION_INTENT_V3_SCHEMA_VERSION,
+    MOTION_INTENT_V4_SCHEMA_VERSION,
+    PARAMETER_PLAN_V2_SCHEMA_VERSION,
+)
+
+MOTION_INTENT_SCHEMA_VERSION = MOTION_INTENT_V3_SCHEMA_VERSION
 DEFAULT_MOTION_INTENT_DURATION_MS = 1000
 PARAMETER_PLAN_SOURCES = {
     "semantic_axis",

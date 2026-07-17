@@ -180,6 +180,31 @@ export function useTurnPlaybackSessionStore() {
     return getSessionById(sessionId)?.segments.get(segmentId);
   }
 
+  function getMotionTerminal(
+    segment: TurnPlaybackSegment,
+  ): "absent" | "completed" | "failed" | null {
+    if (segment.motion.absent) {
+      return "absent";
+    }
+    if (segment.motion.completed) {
+      return "completed";
+    }
+    if (segment.motion.failed) {
+      return "failed";
+    }
+    return null;
+  }
+
+  function rejectTerminalRewrite(
+    material: "text" | "audio" | "motion",
+    current: string,
+    next: string,
+  ): never {
+    throw new Error(
+      `Playback ${material} terminal is stable and cannot change: ${current} -> ${next}.`,
+    );
+  }
+
   function getUnsettledSegments(): TurnPlaybackSegment[] {
     const unsettled: TurnPlaybackSegment[] = [];
     for (const session of state.sessions.values()) {
@@ -328,6 +353,12 @@ export function useTurnPlaybackSessionStore() {
     messageId: string,
   ): void {
     const { segment } = getSegmentSession(turnId, messageId);
+    if (segment.text.delivered) {
+      if (segment.text.failed) {
+        rejectTerminalRewrite("text", "failed", "delivered");
+      }
+      return;
+    }
     segment.text.delivered = true;
     segment.text.released = true; // delivery implies release
     segment.text.failed = false;
@@ -340,6 +371,12 @@ export function useTurnPlaybackSessionStore() {
     reason: string,
   ): void {
     const { segment } = getSegmentSession(turnId, messageId);
+    if (segment.text.delivered) {
+      if (segment.text.failed) {
+        return;
+      }
+      rejectTerminalRewrite("text", "delivered", "failed");
+    }
     segment.text.released = true;
     segment.text.delivered = true;
     segment.text.failed = true;
@@ -355,6 +392,9 @@ export function useTurnPlaybackSessionStore() {
     durationMs?: number | null,
   ): void {
     const { segment, session } = getSegmentSession(turnId, messageId);
+    if (segment.audio.terminal !== "idle") {
+      rejectTerminalRewrite("audio", segment.audio.terminal, "started");
+    }
     segment.audio.released = true;
     segment.audio.started = true;
     segment.audio.startedAtMs =
@@ -389,6 +429,12 @@ export function useTurnPlaybackSessionStore() {
     reason = "",
   ): void {
     const { segment } = getSegmentSession(turnId, messageId);
+    if (segment.audio.terminal !== "idle") {
+      if (segment.audio.terminal === terminal) {
+        return;
+      }
+      rejectTerminalRewrite("audio", segment.audio.terminal, terminal);
+    }
     segment.audio.released = true;
     segment.audio.terminal = terminal;
     segment.audio.reason = reason || segment.audio.reason;
@@ -399,6 +445,9 @@ export function useTurnPlaybackSessionStore() {
     messageId: string,
   ): void {
     const { segment } = getSegmentSession(turnId, messageId);
+    if (segment.audio.terminal !== "idle") {
+      rejectTerminalRewrite("audio", segment.audio.terminal, "released");
+    }
     segment.audio.released = true;
   }
 
@@ -410,6 +459,13 @@ export function useTurnPlaybackSessionStore() {
     reason = "",
   ): void {
     const { segment } = getSegmentSession(turnId, messageId);
+    const currentTerminal = getMotionTerminal(segment);
+    if (currentTerminal) {
+      if (currentTerminal === "absent") {
+        return;
+      }
+      rejectTerminalRewrite("motion", currentTerminal, "absent");
+    }
     segment.motion.payload = null;
     segment.motion.receivedAtMs = null;
     segment.motion.absent = true;
@@ -426,6 +482,13 @@ export function useTurnPlaybackSessionStore() {
     reason = "",
   ): void {
     const { segment } = getSegmentSession(turnId, messageId);
+    const currentTerminal = getMotionTerminal(segment);
+    if (currentTerminal) {
+      if (currentTerminal === "failed") {
+        return;
+      }
+      rejectTerminalRewrite("motion", currentTerminal, "failed");
+    }
     segment.motion.absent = false;
     segment.motion.released = true;
     segment.motion.started = false;
@@ -439,6 +502,10 @@ export function useTurnPlaybackSessionStore() {
     messageId: string,
   ): void {
     const { segment } = getSegmentSession(turnId, messageId);
+    const currentTerminal = getMotionTerminal(segment);
+    if (currentTerminal) {
+      rejectTerminalRewrite("motion", currentTerminal, "released");
+    }
     segment.motion.absent = false;
     segment.motion.failed = false;
     segment.motion.reason = "";
@@ -450,6 +517,10 @@ export function useTurnPlaybackSessionStore() {
     messageId: string,
   ): void {
     const { segment } = getSegmentSession(turnId, messageId);
+    const currentTerminal = getMotionTerminal(segment);
+    if (currentTerminal) {
+      rejectTerminalRewrite("motion", currentTerminal, "started");
+    }
     segment.motion.absent = false;
     segment.motion.failed = false;
     segment.motion.reason = "";
@@ -462,6 +533,13 @@ export function useTurnPlaybackSessionStore() {
     messageId: string,
   ): void {
     const { segment } = getSegmentSession(turnId, messageId);
+    const currentTerminal = getMotionTerminal(segment);
+    if (currentTerminal) {
+      if (currentTerminal === "completed") {
+        return;
+      }
+      rejectTerminalRewrite("motion", currentTerminal, "completed");
+    }
     segment.motion.absent = false;
     segment.motion.failed = false;
     segment.motion.reason = "";

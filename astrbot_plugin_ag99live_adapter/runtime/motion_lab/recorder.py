@@ -117,22 +117,6 @@ class MotionLabRecorder:
                 pass
 
 
-def enqueue_motion_lab_raw_event(
-    runtime_state: Any,
-    event: dict[str, Any],
-    *,
-    on_persisted: Callable[[], None] | None = None,
-) -> bool:
-    recorder = getattr(runtime_state, "motion_lab_recorder", None)
-    if not isinstance(recorder, MotionLabRecorder):
-        return False
-    try:
-        return recorder.enqueue(event, on_persisted=on_persisted)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("MotionLab raw event enqueue failed: %s", exc)
-        return False
-
-
 def _normalize_event(event: dict[str, Any]) -> dict[str, Any]:
     now = datetime.now(timezone.utc).isoformat()
     normalized = _json_safe_snapshot(event)

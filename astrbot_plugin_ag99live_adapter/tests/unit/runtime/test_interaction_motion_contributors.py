@@ -1170,7 +1170,7 @@ def test_prompt_fallback_candidates_are_representative_by_axis_descriptors(
         },
     ]
 
-    selected = module._build_prompt_fallback_pose_candidates(candidates, limit=4)
+    selected = module._build_prompt_pose_reference_candidates(candidates, limit=4)
     selected_ids = [item["id"] for item in selected]
     selected_descriptors = {
         descriptor
@@ -1220,7 +1220,7 @@ def test_prompt_fallback_descriptors_follow_profile_neutral_not_fixed_50(
         }
     ]
 
-    selected = module._build_prompt_fallback_pose_candidates(
+    selected = module._build_prompt_pose_reference_candidates(
         candidates,
         semantic_profile=semantic_profile,
         limit=4,
@@ -1322,7 +1322,7 @@ def test_fallback_pose_candidates_prioritize_enabled_matching_user_tuning(
         },
     ]
 
-    candidates = module.build_fallback_pose_candidates(
+    candidates = module.build_pose_reference_candidates(
         runtime_state=runtime_state,
         semantic_profile=semantic_profile,
         limit=None,
@@ -1372,7 +1372,7 @@ def test_fallback_pose_candidates_use_expression_dominant_parameter_ids(
         ],
     }
 
-    candidates = module.build_fallback_pose_candidates(
+    candidates = module.build_pose_reference_candidates(
         runtime_state=runtime_state,
         semantic_profile=semantic_profile,
         limit=None,
@@ -1397,7 +1397,7 @@ def test_fallback_pose_candidates_exclude_neutral_for_skeleton_repair(
 
     runtime_state = _build_runtime_state()
     semantic_profile = runtime_state.model_info["models"][0]["semantic_axis_profile"]
-    candidates = module.build_fallback_pose_candidates(
+    candidates = module.build_pose_reference_candidates(
         runtime_state=runtime_state,
         semantic_profile=semantic_profile,
         limit=None,
@@ -1417,7 +1417,7 @@ def test_fallback_pose_candidates_use_motion_catalog_metadata_only_when_axes_exi
     runtime_state = _build_runtime_state()
     semantic_profile = runtime_state.model_info["models"][0]["semantic_axis_profile"]
 
-    candidates = module.build_fallback_pose_candidates(
+    candidates = module.build_pose_reference_candidates(
         runtime_state=runtime_state,
         semantic_profile=semantic_profile,
         limit=None,

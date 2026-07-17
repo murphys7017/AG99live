@@ -63,8 +63,6 @@ control.turn_finished
 | `input.audio_stream_start` | `{ stream_id: string, source: string, device_id?: string, encoding: "pcm16le", sample_rate: number, channels: 1 }` |
 | WebSocket 二进制音频块 | `AG99` 二进制帧，见下文 |
 | `input.audio_stream_end` | `{ stream_id: string, reason: string, dropped?: boolean, last_seq?: number }` |
-| `input.raw_audio_data` | 兼容旧路径：`{ audio: number[], sample_rate: number, channels: 1 }` |
-| `input.mic_audio_end` | 兼容旧路径：`{ reason: string, dropped?: boolean }` |
 
 麦克风输入规则：
 
@@ -75,7 +73,7 @@ control.turn_finished
 - 如果 `dropped === true`，后端丢弃该 turn 的本次音频并立即终结该 turn。
 - Electron / Windows 桌面端的设备枚举和采集可以来自主进程 DirectShow/ffmpeg，也可以回退到浏览器 `MediaDevices`。原生路径直接让 ffmpeg 输出 `s16le`，Web Audio 路径在 renderer 内把 Float32 转成 PCM16LE。
 - 按键说话模式只改变采集开始/结束时机。按下配置按键等价于开始一段麦克风采集，松开按键等价于发送该段 `input.audio_stream_end(reason="ptt_release")`。
-- `input.raw_audio_data` / `input.mic_audio_end` 仍保留给旧前端或调试脚本，但不是当前 Electron 前端主路径。
+- 非流式 JSON 数组音频协议已删除；未知旧类型会作为不受支持的消息拒绝。
 
 二进制音频块格式：
 

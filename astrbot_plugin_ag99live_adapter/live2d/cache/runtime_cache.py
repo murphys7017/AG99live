@@ -35,12 +35,7 @@ def build_live2d_directory_md5(live2ds_dir: Path) -> str:
 
         stat = entry.stat()
         digest.update(str(stat.st_size).encode("utf-8"))
-        with entry.open("rb") as handle:
-            while True:
-                chunk = handle.read(1024 * 1024)
-                if not chunk:
-                    break
-                digest.update(chunk)
+        digest.update(str(stat.st_mtime_ns).encode("utf-8"))
 
     return digest.hexdigest()
 

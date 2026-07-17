@@ -92,7 +92,6 @@ class RuntimeState:
         self.action_llm_filter_max_atoms_per_channel = 2
         self.action_llm_filter_chunk_max_channels = 8
         self.action_llm_filter_chunk_max_candidates = 96
-        self.motion_generation_mode = "single_response_effect"
         self.motion_tuning_fewshot_enabled = True
         self.motion_tuning_fewshot_count = 7
         self.motion_tuning_user_fewshot_count = 3
@@ -283,13 +282,6 @@ class RuntimeState:
         self.action_llm_filter_chunk_max_candidates = max(
             int(_plugin_config_get(self.plugin_config, "action_llm_filter_chunk_max_candidates", 96)),
             1,
-        )
-        self.motion_generation_mode = _normalize_motion_generation_mode(
-            _plugin_config_get(
-                self.plugin_config,
-                "motion_generation_mode",
-                "single_response_effect",
-            )
         )
         self.motion_prompt_instruction = _normalize_motion_prompt_instruction(
             _plugin_config_get(
@@ -1314,11 +1306,6 @@ def _normalize_motion_prompt_instruction(value: Any) -> str:
     if len(text) > 800:
         return text[:800].rstrip()
     return text
-
-
-def _normalize_motion_generation_mode(value: Any) -> str:
-    del value
-    return "single_response_effect"
 
 
 def _supports_persona_effects(plugin_context: Any) -> bool:

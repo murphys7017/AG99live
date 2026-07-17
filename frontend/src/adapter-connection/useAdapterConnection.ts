@@ -38,7 +38,6 @@ import type {
 } from "../playback-timeline/contracts.js";
 import type {
   PlaybackTimelineRuntime,
-  PlaybackTimelineRuntimeDeps,
 } from "../playback-timeline/playbackTimelineRuntime.js";
 import {
   buildConnectFailureMessage,
@@ -65,9 +64,9 @@ import {
   createQueuedTextSegmentSink,
 } from "../playback-timeline/segmentReleaseSinks.js";
 import type {
-  PlaybackTimelineSegmentMotionSink,
-} from "../playback-timeline/segmentJob.js";
-import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
+  MotionPayloadNormalizer,
+  NormalizedMotionPayload,
+} from "../playback-integrations/motionPayload.js";
 import {
   type ModelSyncInstance,
 } from "./model-sync/useModelSync.js";
@@ -129,30 +128,47 @@ export interface AdapterConnectionInstance {
     reason?: string,
   ) => Promise<boolean>;
   clearPlaybackGroupContext: (turnId: string | null) => void;
-  setAudioTimelineDurationReadyHandler: (
-    handler: AudioTimelineDurationReadyHandler | null,
-  ) => void;
-  setAudioTimelineStartedHandler: (
-    handler: AudioTimelineStartedHandler | null,
-  ) => void;
   toggleMicrophoneCapture: ReturnType<typeof createAdapterMicrophoneRuntime>["toggleMicrophoneCapture"];
   setPttMode: ReturnType<typeof createAdapterMicrophoneRuntime>["setPttMode"];
   setPttKeyBinding: ReturnType<typeof createAdapterMicrophoneRuntime>["setPttKeyBinding"];
   startPttCapture: ReturnType<typeof createAdapterMicrophoneRuntime>["startPttCapture"];
   stopPttCapture: ReturnType<typeof createAdapterMicrophoneRuntime>["stopPttCapture"];
   pushHistory: (role: DesktopHistoryEntry["role"], text: string) => void;
-  buildPlaybackTimelineRuntimeDeps: (
-    motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start" | "interrupt">,
-  ) => PlaybackTimelineRuntimeDeps<NormalizedMotionPayload>;
-  attachPlaybackTimelineRuntime: (
+  playback: AdapterPlaybackCompositionPort;
+}
+
+export interface AdapterPlaybackCompositionPort {
+  releaseAssistantTextForPlayback: (
+    messageId: string,
+    turnId: string | null,
+  ) => boolean;
+  failAssistantTextForPlayback: (
+    messageId: string,
+    turnId: string | null,
+    reason: string,
+  ) => boolean;
+  releaseQueuedAudioForTimelinePlayback: (
+    messageId: string,
+    turnId: string | null,
+  ) => boolean;
+  initializeAudioRuntime: (
     runtime: PlaybackTimelineRuntime<NormalizedMotionPayload>,
     audioSink: PlaybackTimelineAudioSink,
+  ) => void;
+  notifyAudioTimelineDurationReady: AudioTimelineDurationReadyHandler;
+  notifyAudioTimelineStarted: AudioTimelineStartedHandler;
+  setAudioTimelineDurationReadyHandler: (
+    handler: AudioTimelineDurationReadyHandler | null,
+  ) => void;
+  setAudioTimelineStartedHandler: (
+    handler: AudioTimelineStartedHandler | null,
   ) => void;
 }
 
 interface CreateAdapterConnectionOptions {
   sessionStore: SessionStore;
   modelSync: ModelSyncInstance;
+  normalizeMotionPayload: MotionPayloadNormalizer;
 }
 
 export function createAdapterConnection(
@@ -250,54 +266,7 @@ export function createAdapterConnection(
     return audioRuntime;
   }
 
-  function buildPlaybackTimelineRuntimeDeps(
-    motionSink: Pick<PlaybackTimelineSegmentMotionSink, "start" | "interrupt">,
-  ): PlaybackTimelineRuntimeDeps<NormalizedMotionPayload> {
-    if (audioRuntime) {
-      throw new Error("PlaybackTimelineRuntime is already attached to the adapter.");
-    }
-    return {
-      segmentExecution: {
-        session: {
-          markSessionFailed: sessionStore.markSessionFailed,
-          markTextReleased: sessionStore.markTextReleased,
-          markAudioReleased: sessionStore.markAudioReleased,
-          markMotionReleased: sessionStore.markMotionReleased,
-          markPhase: sessionStore.markPhase,
-        },
-        textSink: {
-          releaseAssistantTextForPlayback,
-          failAssistantTextForPlayback: (messageId, turnId, reason) =>
-            queuedTextSegmentSink.failAssistantTextForPlayback(
-              messageId,
-              turnId,
-              reason,
-            ),
-        },
-        audioSink: {
-          releaseAudioForPlayback: (messageId, turnId) =>
-            requireAudioRuntime().releaseQueuedAudioForTimelinePlayback(messageId, turnId),
-        },
-        motionSink,
-      },
-      audioSession: {
-        markAudioStarted: sessionStore.markAudioStarted,
-        markAudioDuration: sessionStore.markAudioDuration,
-        markAudioTerminal: sessionStore.markAudioTerminal,
-      },
-      motionSession: {
-        markMotionStarted: sessionStore.markMotionStarted,
-        markMotionCompleted: sessionStore.markMotionCompleted,
-        markMotionFailed: sessionStore.markMotionFailed,
-      },
-      onAudioTimelineStarted: (turnId, messageId, playbackTimeline) =>
-        audioTimelineStartedHandler?.(turnId, messageId, playbackTimeline),
-      onAudioTimelineDurationReady: (turnId, messageId, playbackTimeline) =>
-        audioTimelineDurationReadyHandler?.(turnId, messageId, playbackTimeline),
-    };
-  }
-
-  function attachPlaybackTimelineRuntime(
+  function initializeAudioRuntime(
     playbackTimelineRuntime: PlaybackTimelineRuntime<NormalizedMotionPayload>,
     audioSink: PlaybackTimelineAudioSink,
   ): void {
@@ -362,6 +331,7 @@ export function createAdapterConnection(
     acknowledgeMotionLabRawEventPersisted: (eventId) =>
       motionLabRawEventRecordedHandler?.(eventId),
     startMicrophoneCapture: (origin) => startMicrophoneCapture(origin),
+    normalizeMotionPayload: options.normalizeMotionPayload,
   });
 
   const outboundClient = createAdapterOutboundClient({
@@ -633,6 +603,28 @@ export function createAdapterConnection(
     );
   }
 
+  function failAssistantTextForPlayback(
+    messageId: string,
+    turnId: string | null,
+    reason: string,
+  ): boolean {
+    return queuedTextSegmentSink.failAssistantTextForPlayback(
+      messageId,
+      turnId,
+      reason,
+    );
+  }
+
+  function releaseQueuedAudioForTimelinePlayback(
+    messageId: string,
+    turnId: string | null,
+  ): boolean {
+    return requireAudioRuntime().releaseQueuedAudioForTimelinePlayback(
+      messageId,
+      turnId,
+    );
+  }
+
   let textSendQueue: Promise<void> = Promise.resolve();
 
   async function sendText(text: string): Promise<boolean> {
@@ -716,6 +708,22 @@ export function createAdapterConnection(
     audioTimelineDurationReadyHandler = handler;
   }
 
+  function notifyAudioTimelineStarted(
+    turnId: string | null,
+    messageId: string,
+    playbackTimeline: PlaybackTimelineSnapshot | null,
+  ): void {
+    audioTimelineStartedHandler?.(turnId, messageId, playbackTimeline);
+  }
+
+  function notifyAudioTimelineDurationReady(
+    turnId: string | null,
+    messageId: string,
+    playbackTimeline: PlaybackTimelineSnapshot,
+  ): void {
+    audioTimelineDurationReadyHandler?.(turnId, messageId, playbackTimeline);
+  }
+
   async function sendPlaybackFinished(
     turnId: string | null,
     success: boolean,
@@ -789,26 +797,34 @@ export function createAdapterConnection(
     setMotionLabRawEventRecordedHandler,
     sendPlaybackFinishedForCurrentGroup: sendPlaybackFinished,
     clearPlaybackGroupContext,
-    setAudioTimelineDurationReadyHandler,
-    setAudioTimelineStartedHandler,
     toggleMicrophoneCapture,
     setPttMode,
     setPttKeyBinding,
     startPttCapture,
     stopPttCapture,
     pushHistory,
-    buildPlaybackTimelineRuntimeDeps,
-    attachPlaybackTimelineRuntime,
+    playback: {
+      releaseAssistantTextForPlayback,
+      failAssistantTextForPlayback,
+      releaseQueuedAudioForTimelinePlayback,
+      initializeAudioRuntime,
+      notifyAudioTimelineDurationReady,
+      notifyAudioTimelineStarted,
+      setAudioTimelineDurationReadyHandler,
+      setAudioTimelineStartedHandler,
+    },
   };
 }
 
 export function useAdapterConnection(
   sessionStore: SessionStore,
   modelSync: ModelSyncInstance,
+  normalizeMotionPayload: MotionPayloadNormalizer,
 ): AdapterConnectionInstance {
   const connection = createAdapterConnection({
     sessionStore,
     modelSync,
+    normalizeMotionPayload,
   });
 
   onScopeDispose(() => {

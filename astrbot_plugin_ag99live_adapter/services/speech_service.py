@@ -307,49 +307,6 @@ class SpeechIngressService:
 
         self._audio_streams.clear()
 
-    async def handle_audio_data(self, message) -> None:
-        audio_data = message.payload.get("audio", [])
-        if not isinstance(audio_data, list) or not audio_data:
-            return
-
-        chunk = np.array(audio_data, dtype=np.float32)
-        await self.media_service.append_audio_chunk(
-            chunk,
-            segment_id=self._resolve_audio_segment_id(message),
-        )
-
-    async def handle_raw_audio_data(self, message):
-        audio_data = message.payload.get("audio", [])
-        if not isinstance(audio_data, list) or not audio_data:
-            return None
-
-        try:
-            vad_engine = self._ensure_vad_engine()
-        except Exception as exc:
-            logger.error("Failed to initialize VAD engine: %s", exc)
-            await self._emit_terminal_turn_signal(
-                turn_id=message.turn_id,
-                reason="vad_unavailable",
-                error_message=f"VAD unavailable: {exc}",
-            )
-            return None
-
-        built_message = None
-        segment_id = self._resolve_audio_segment_id(message)
-        for audio_bytes in vad_engine.detect_speech(audio_data):
-            if audio_bytes == b"<|PAUSE|>":
-                built_message = await self._build_interrupt_message(message)
-            elif audio_bytes == b"<|RESUME|>":
-                continue
-            elif len(audio_bytes) > 1024:
-                chunk = (
-                    np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-                )
-                await self.media_service.append_audio_chunk(chunk, segment_id=segment_id)
-                built_message = await self._build_message_from_vad_segment(message)
-
-        return built_message
-
     async def _handle_vad_pcm16_chunk(
         self,
         chunk_bytes: bytes,
@@ -394,45 +351,6 @@ class SpeechIngressService:
                 if built_message is not None:
                     return built_message
         return None
-
-    async def handle_audio_end(self, message):
-        """处理 input.mic_audio_end（旧非流式路径）。
-
-        drain MediaService 里按 message.turn_id 分桶的缓冲；empty 时按
-        _consume_vad_turn_counter 决定是否走 terminal_turn_signal；非空时
-        _build_message_from_audio_buffer。
-        """
-        segment_id = self._resolve_audio_segment_id(message)
-        dropped = bool(message.payload.get("dropped", False))
-        if dropped:
-            await self.media_service.clear_audio_buffer(segment_id=segment_id)
-            logger.warning("Dropping microphone audio segment because frontend reported chunk loss.")
-            await self._emit_terminal_turn_signal(
-                turn_id=message.turn_id,
-                reason="microphone_audio_dropped",
-                error_message="Microphone audio segment dropped before transcription.",
-            )
-            return None
-
-        audio_buffer = await self.media_service.drain_audio_buffer(segment_id=segment_id)
-
-        if audio_buffer.size == 0:
-            if self._consume_vad_turn_counter(segment_id):
-                logger.debug("Ignoring empty root microphone end after VAD child turns.")
-                return None
-            logger.debug("Ignoring `input.mic_audio_end` with empty buffer.")
-            await self._emit_terminal_turn_signal(
-                turn_id=message.turn_id,
-                reason="microphone_audio_empty",
-                error_message="Microphone audio segment was empty before transcription.",
-            )
-            return None
-
-        return await self._build_message_from_audio_buffer(
-            audio_buffer,
-            raw_message=message.raw,
-            turn_id=message.turn_id,
-        )
 
     async def _build_interrupt_message(self, message):
         await self._send_json(

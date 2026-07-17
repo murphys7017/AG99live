@@ -7,8 +7,6 @@ import type {
   DesktopMotionPlaybackRecord,
   DesktopPttHookStatus,
   DesktopPttKeyBinding,
-  DesktopMotionTuningSamplesStatus,
-  DesktopMotionTuningSample,
 } from "../types/desktop.js";
 import { cloneModelEngineSettings, type ModelEngineSettings } from "../model-engine/settings.js";
 import type { TurnPlaybackSegment } from "../turn-playback/session.js";
@@ -40,8 +38,6 @@ export interface AdapterRuntimeProjection {
   activeBackendHistoryUid: string;
   backendHistoryLoading: boolean;
   backendHistoryStatusMessage: string;
-  motionTuningSamples: DesktopMotionTuningSample[];
-  motionTuningSamplesStatus: DesktopMotionTuningSamplesStatus;
   bilibiliLiveStatus: BilibiliLiveStatus;
 }
 
@@ -69,8 +65,6 @@ export interface AdapterRuntimeProjectionInput {
   activeBackendHistoryUid: string;
   backendHistoryLoading: boolean;
   backendHistoryStatusMessage: string;
-  motionTuningSamples: DesktopMotionTuningSample[];
-  motionTuningSamplesStatus: DesktopMotionTuningSamplesStatus;
   bilibiliLiveStatus: BilibiliLiveStatus;
 }
 
@@ -176,8 +170,6 @@ export function buildAdapterRuntimeProjection(
     activeBackendHistoryUid: input.activeBackendHistoryUid,
     backendHistoryLoading: input.backendHistoryLoading,
     backendHistoryStatusMessage: input.backendHistoryStatusMessage,
-    motionTuningSamples: input.motionTuningSamples,
-    motionTuningSamplesStatus: input.motionTuningSamplesStatus,
     bilibiliLiveStatus: { ...input.bilibiliLiveStatus },
   };
 }

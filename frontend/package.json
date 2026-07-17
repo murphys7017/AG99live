@@ -31,7 +31,8 @@
     "test:adapter-audio-runtime": "tsc -p tsconfig.test.json --outDir .test-out-adapter-audio-runtime && node --experimental-specifier-resolution=node .test-out-adapter-audio-runtime/tests/adapterAudioRuntime.test.js",
     "test:adapter-connection": "tsc -p tsconfig.test.json --outDir .test-out-adapter-connection && node --experimental-specifier-resolution=node .test-out-adapter-connection/tests/useAdapterConnection.test.js",
     "test:model-readiness": "tsc -p tsconfig.test.json --outDir .test-out-model-readiness && node --experimental-specifier-resolution=node .test-out-model-readiness/tests/modelReadiness.test.js",
-    "test": "npm run test:session && npm run test:turn-orchestrator && npm run test:coordinator && npm run test:motion-playback-recorder && npm run test:motion-lab-outbound-queue && npm run test:preview-motion-player && npm run test:desktop-profile-scope && npm run test:desktop-bridge-clone && npm run test:push-to-talk-controller && npm run test:bilibili-live && npm run test:inbound-protocol && npm run test:inbound-events && npm run test:motion-runtime-scheduler && npm run test:model-engine && npm run test:playback-timeline && npm run test:playback-timeline-audio && npm run test:adapter-audio-runtime && npm run test:adapter-connection && npm run test:model-readiness",
+    "test:compile": "node scripts/compile-tests.cjs",
+    "test": "npm run test:compile && node scripts/run-compiled-tests.cjs",
     "build": "npm run typecheck && electron-vite build",
     "build:web": "vue-tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview"

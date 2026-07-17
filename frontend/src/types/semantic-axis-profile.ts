@@ -1,5 +1,11 @@
-export const SCHEMA_SEMANTIC_AXIS_PROFILE_V2 = "ag99.semantic_axis_profile.v2";
-export const SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1 = "ag99.semantic_axis_relation_graph.v1";
+export {
+  SCHEMA_SEMANTIC_AXIS_PROFILE_V2,
+  SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
+} from "./protocolSchema.generated.js";
+import {
+  SCHEMA_SEMANTIC_AXIS_PROFILE_V2,
+  SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
+} from "./protocolSchema.generated.js";
 
 export type SemanticAxisControlRole =
   | "primary"

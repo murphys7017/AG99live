@@ -6,10 +6,11 @@ import { effectScope } from "vue";
 import { useAdapterConnection } from "../src/adapter-connection/useAdapterConnection.js";
 import { createModelSync } from "../src/adapter-connection/model-sync/useModelSync.js";
 import { buildPendingPlaybackKey } from "../src/playback-timeline/playbackReleaseQueue.js";
-import { createPlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
 import { createBrowserAudioTimelineSink } from "../src/playback-timeline/audioSink.js";
 import type { PlaybackTimelineRuntime } from "../src/playback-timeline/playbackTimelineRuntime.js";
-import type { NormalizedMotionPayload } from "../src/model-engine/contracts.js";
+import type { NormalizedMotionPayload } from "../src/playback-integrations/motionPayload.js";
+import { normalizeMotionPayload } from "../src/model-engine/normalize.js";
+import { createAppPlaybackTimelineRuntime } from "../src/app/playbackTimelineWiring.js";
 import { useTurnPlaybackSessionStore } from "../src/turn-playback/useTurnPlaybackSessionStore.js";
 
 interface ListenerMap {
@@ -263,20 +264,20 @@ function createConnectedAdapter() {
   const adapter = scope.run(() => useAdapterConnection(
     sessionStore,
     modelSync,
+    normalizeMotionPayload,
   ));
   if (!adapter) {
     throw new Error("expected adapter instance");
   }
-  const playbackTimeline = createPlaybackTimelineRuntime(
-    adapter.buildPlaybackTimelineRuntimeDeps({
+  const playbackTimeline = createAppPlaybackTimelineRuntime({
+    sessionStore,
+    adapterPlayback: adapter.playback,
+    motionSink: {
       start: () => true,
       interrupt: () => {},
-    }),
-  );
-  adapter.attachPlaybackTimelineRuntime(
-    playbackTimeline,
-    createBrowserAudioTimelineSink(),
-  );
+    },
+    audioSink: createBrowserAudioTimelineSink(),
+  });
   playbackTimelineByAdapter.set(adapter, playbackTimeline);
   adapter.connect();
   const socket = FakeWebSocket.instances[0];
@@ -682,7 +683,7 @@ async function testAudioTimelineStartedHandlerReceivesStartedSnapshot(): Promise
       clockSource: string | undefined;
       durationMs: number | null | undefined;
     }> = [];
-    adapter.setAudioTimelineStartedHandler((turnId, messageId, playbackTimeline) => {
+    adapter.playback.setAudioTimelineStartedHandler((turnId, messageId, playbackTimeline) => {
       started.push({
         turnId,
         messageId,
@@ -1177,7 +1178,7 @@ async function testManualMicAudioStreamsBinaryFramesForVad(): Promise<void> {
   }
 }
 
-async function testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd(): Promise<void> {
+async function testMicAudioDropBeforeStreamStartDoesNotEmitUnownedEnd(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
     const { adapter, socket } = harness;
@@ -1207,23 +1208,7 @@ async function testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd(): Promis
     socket.bufferedAmount = 0;
     await adapter.toggleMicrophoneCapture();
 
-    const micEndMessage = parseSentJsonMessages(socket)
-      .find((item) => item.type === "input.mic_audio_end");
-    const streamEndMessage = parseSentJsonMessages(socket)
-      .find((item) => item.type === "input.audio_stream_end");
-    assert.ok(streamEndMessage ?? micEndMessage);
-    const endPayload = (streamEndMessage ?? micEndMessage)?.payload as Record<string, unknown>;
-    assert.equal(endPayload.dropped, true);
-    assert.equal(endPayload.capture_mode, "manual");
-    assert.equal(endPayload.reason, "manual_stop");
-    if (streamEndMessage) {
-      return;
-    }
-    assert.deepEqual(micEndMessage?.payload, {
-      reason: "manual_stop",
-      dropped: true,
-      capture_mode: "manual",
-    });
+    assert.equal(parseSentJsonMessages(socket).length, 0);
   } finally {
     harness.scope.stop();
   }
@@ -1960,7 +1945,7 @@ async function run(): Promise<void> {
   await testAutoStartMicIsIgnoredInPttMode();
   await testAutoStartMicDoesNotDuplicateCaptureStart();
   await testManualMicAudioStreamsBinaryFramesForVad();
-  await testMicAudioDropMarksBrokenSequenceAndReportsDroppedEnd();
+  await testMicAudioDropBeforeStreamStartDoesNotEmitUnownedEnd();
   await testPttReleaseDuringStartupStopsCaptureAfterStart();
   await testDeviceChangeEndsPreviousMicSegmentBeforeRestart();
   await testInterruptMarksPlayingAudioSegmentFailed();

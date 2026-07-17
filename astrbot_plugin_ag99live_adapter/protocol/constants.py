@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-PROTOCOL_VERSION = "v2"
+from .schema_versions import PROTOCOL_VERSION
 
 SOURCE_FRONTEND = "frontend"
 SOURCE_ADAPTER = "adapter"
@@ -13,9 +13,6 @@ TYPE_INPUT_TEXT = "input.text"
 TYPE_INPUT_AUDIO_STREAM_START = "input.audio_stream_start"
 TYPE_INPUT_AUDIO_STREAM_CHUNK = "input.audio_stream_chunk"
 TYPE_INPUT_AUDIO_STREAM_END = "input.audio_stream_end"
-TYPE_INPUT_MIC_AUDIO_DATA = "input.mic_audio_data"
-TYPE_INPUT_RAW_AUDIO_DATA = "input.raw_audio_data"
-TYPE_INPUT_MIC_AUDIO_END = "input.mic_audio_end"
 
 TYPE_OUTPUT_SEGMENT = "output.segment"
 TYPE_OUTPUT_TRANSCRIPTION = "output.transcription"
@@ -64,9 +61,6 @@ INPUT_TYPES = {
     TYPE_INPUT_AUDIO_STREAM_START,
     TYPE_INPUT_AUDIO_STREAM_CHUNK,
     TYPE_INPUT_AUDIO_STREAM_END,
-    TYPE_INPUT_MIC_AUDIO_DATA,
-    TYPE_INPUT_RAW_AUDIO_DATA,
-    TYPE_INPUT_MIC_AUDIO_END,
 }
 
 OUTPUT_TYPES = {

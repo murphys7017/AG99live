@@ -1,9 +1,9 @@
 task:
-  class: bugfix
+  class: refactor
   risk: high
-  phase: playback_lifecycle_boundary_repair
+  phase: review_complete
   status: complete
-  scope: Repair confirmed Timeline deadline, turn replacement, catalog motion lifecycle, outbound identity, lip-sync failure, and WebSDK typecheck ownership defects
+  scope: Enforce global playback invariants, remove cross-layer dependency inversions, consolidate protocol ownership, and eliminate duplicated runtime work
 context:
   confidence: high
   assumptions:
@@ -57,6 +57,10 @@ context:
     - Expression resources may layer with a semantic parameter plan only when parameter ownership does not conflict; motion resources are complete-action playback and replace the parameter plan at execution time.
     - Invalid, ambiguous, unowned, or non-playable resource intents fail visibly and never fall back to axis-only playback.
     - New unified-clock and protocol work should not preserve legacy playback or motion routes for compatibility; old routes should be deleted or made fail-visible instead of silently falling back.
+    - The application layer is the only PlaybackTimeline composition root; Adapter exposes narrow queue and audio execution ports and receives motion normalization as an injected dependency.
+    - ModelEngine validates engine.parameter_plan.v2 once before WebSDK execution; WebSDK owns runtime parameter resolution and per-frame execution but does not parse the transport schema again.
+    - Non-streaming JSON microphone protocols are removed; microphone ingress uses only audio_stream_start, binary PCM16LE chunks, and audio_stream_end.
+    - Motion pose candidates are prompt references, not fallback execution; invalid or empty model motion output remains a visible failure.
     - Backend control events that settle or interrupt a turn must carry explicit turn_id; the frontend must not infer turn ownership from currentTurnId or active audio state.
     - Phase 1 pure timeline logic is complete; Phase 2 now lets audioRuntime create a segment PlaybackTimelineEngine for released audio.
     - Audio timeline integration observes and records real audio playback clock state, but does not yet replace turnPlaybackOrchestrator release decisions.

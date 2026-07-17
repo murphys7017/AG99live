@@ -1,8 +1,15 @@
-import type { NormalizedMotionPayload } from "../model-engine/contracts.js";
+import type { NormalizedMotionPayload } from "../playback-integrations/motionPayload.js";
+import type { AdapterPlaybackCompositionPort } from "../adapter-connection/useAdapterConnection.js";
 import type { MotionTimelinePreparationResult } from "../model-engine/runtime/playbackClock.js";
+import type { PlaybackTimelineAudioSink } from "../playback-timeline/audioSink.js";
 import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
-import type { PlaybackTimelineRuntime } from "../playback-timeline/playbackTimelineRuntime.js";
+import {
+  createPlaybackTimelineRuntime,
+  type PlaybackTimelineRuntime,
+} from "../playback-timeline/playbackTimelineRuntime.js";
+import type { PlaybackTimelineSegmentMotionSink } from "../playback-timeline/segmentJob.js";
 import type { PlaybackTimelineMotionSink } from "../playback-timeline/motionTypes.js";
+import type { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore.js";
 import {
   createModelEngineMotionTimelineSink,
   createMotionTimelineRunTracker,
@@ -40,6 +47,65 @@ export interface PlaybackTimelineMotionEnginePort {
   handlePlaybackTimelineStarted(
     playbackTimeline: ReturnType<typeof projectMotionPlaybackClock>,
   ): boolean | void;
+}
+
+type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
+
+export function createAppPlaybackTimelineRuntime(options: {
+  sessionStore: SessionStore;
+  adapterPlayback: AdapterPlaybackCompositionPort;
+  motionSink: Pick<
+    PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload>,
+    "start" | "interrupt"
+  >;
+  audioSink: PlaybackTimelineAudioSink;
+}): PlaybackTimelineWiringPort {
+  const { sessionStore, adapterPlayback } = options;
+  const runtime = createPlaybackTimelineRuntime<NormalizedMotionPayload>({
+    segmentExecution: {
+      session: {
+        markSessionFailed: sessionStore.markSessionFailed,
+        markTextReleased: sessionStore.markTextReleased,
+        markAudioReleased: sessionStore.markAudioReleased,
+        markMotionReleased: sessionStore.markMotionReleased,
+        markPhase: sessionStore.markPhase,
+      },
+      textSink: {
+        releaseAssistantTextForPlayback:
+          adapterPlayback.releaseAssistantTextForPlayback,
+        failAssistantTextForPlayback:
+          adapterPlayback.failAssistantTextForPlayback,
+      },
+      audioSink: {
+        releaseAudioForPlayback:
+          adapterPlayback.releaseQueuedAudioForTimelinePlayback,
+      },
+      motionSink: options.motionSink,
+    },
+    audioSession: {
+      markAudioStarted: sessionStore.markAudioStarted,
+      markAudioDuration: sessionStore.markAudioDuration,
+      markAudioTerminal: sessionStore.markAudioTerminal,
+    },
+    motionSession: {
+      markMotionStarted: sessionStore.markMotionStarted,
+      markMotionCompleted: sessionStore.markMotionCompleted,
+      markMotionFailed: sessionStore.markMotionFailed,
+    },
+    onAudioTimelineStarted: adapterPlayback.notifyAudioTimelineStarted,
+    onAudioTimelineDurationReady:
+      adapterPlayback.notifyAudioTimelineDurationReady,
+  });
+
+  adapterPlayback.initializeAudioRuntime(runtime, options.audioSink);
+
+  return {
+    ...runtime,
+    setAudioTimelineDurationReadyHandler:
+      adapterPlayback.setAudioTimelineDurationReadyHandler,
+    setAudioTimelineStartedHandler:
+      adapterPlayback.setAudioTimelineStartedHandler,
+  };
 }
 
 export function createPlaybackTimelineMotionRunTracker(

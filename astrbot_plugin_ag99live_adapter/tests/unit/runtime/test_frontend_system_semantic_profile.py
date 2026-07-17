@@ -26,6 +26,7 @@ class _RuntimeStateStub:
         self.motion_tuning_fewshot_diagnostics: list[str] = []
         self.motion_tuning_effective_examples: list[dict[str, object]] = []
         self.runtime_cache_root_error = ""
+        self.motion_lab_recorder = object()
 
     def save_semantic_axis_profile_update(
         self,
@@ -520,13 +521,13 @@ def test_frontend_system_handler_records_motion_lab_raw_event(monkeypatch) -> No
     sent_payloads: list[dict] = []
     persisted_callbacks: list[Callable[[], None]] = []
 
-    def fake_record_motion_lab_observation(
-        runtime_state_arg,
+    def fake_record_motion_observation(
+        recorder,
         *,
         on_persisted: Callable[[], None] | None = None,
         **event,
     ) -> bool:
-        assert runtime_state_arg is runtime_state
+        assert recorder is runtime_state.motion_lab_recorder
         recorded_events.append(event)
         assert on_persisted is not None
         persisted_callbacks.append(on_persisted)
@@ -541,8 +542,8 @@ def test_frontend_system_handler_records_motion_lab_raw_event(monkeypatch) -> No
 
     monkeypatch.setattr(
         frontend_system_service,
-        "record_motion_lab_observation",
-        fake_record_motion_lab_observation,
+        "record_motion_observation",
+        fake_record_motion_observation,
     )
 
     async def run() -> None:

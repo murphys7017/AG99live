@@ -338,7 +338,7 @@ def test_commit_inbound_message_disables_streaming_in_split_mode(
     assert committed == [event]
     assert event.message_str == "hello"
     assert event.extras["enable_streaming"] is False
-    assert event.extras["ag99live_motion_generation_mode"] == "single_response_effect"
+    assert "ag99live_motion_generation_mode" not in event.extras
     assert "ag99live_inline_motion_contract_applied" not in event.extras
 
 

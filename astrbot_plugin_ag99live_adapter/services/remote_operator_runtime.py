@@ -12,7 +12,8 @@ from uuid import uuid4
 
 from astrbot.api import logger
 
-from ..middleware.remote_operator import (
+from ..protocol.remote_operator import RemoteOperatorRequest
+from ..runtime.remote_operator_registry import (
     mark_remote_operator_computer_offline,
     mark_remote_operator_computer_online,
     set_remote_operator_online_computers,
@@ -43,13 +44,6 @@ class RemoteOperatorTarget:
     model: str
     variant: str
     description: str
-
-
-@dataclass(frozen=True, slots=True)
-class RemoteOperatorRequest:
-    computer: str
-    profile: str
-    prompt: str
 
 
 @dataclass(frozen=True, slots=True)
