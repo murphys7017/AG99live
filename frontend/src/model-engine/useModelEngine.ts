@@ -186,7 +186,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     }
     if (
       playbackClock.source !== "audio"
-      || (playbackClock.phase !== "playing" && playbackClock.phase !== "paused")
+      || playbackClock.phase === "terminal"
     ) {
       return false;
     }

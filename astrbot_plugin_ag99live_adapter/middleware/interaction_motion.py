@@ -2036,8 +2036,8 @@ def _normalize_optional_string(value: Any) -> str | None:
 def _resolve_prompt_purpose(view: Any) -> str:
     """Read the prompt purpose from the AstrBot view.
 
-    Returns one of ``"router"``, ``"persona_reply"``, ``"core_reply"``,
-    or ``"unknown"``.
+    Returns ``"context_collection"`` or ``"unknown"`` under the current
+    AstrBot prompt-contributor contract.
     """
     purpose = _normalize_optional_string(getattr(view, "purpose", None))
     if purpose:
@@ -2053,12 +2053,11 @@ def _resolve_prompt_purpose(view: Any) -> str:
 
 
 def _should_contribute_motion_prompt(view: Any) -> bool:
-    """Only inject motion capability into persona_reply / core_reply prompts.
+    """Inject motion capability while AstrBot collects persona-targeted context.
 
     This keeps router and other prompt lanes clean of ag99live motion metadata.
     """
-    purpose = _resolve_prompt_purpose(view)
-    return purpose in {"persona_reply", "core_reply"}
+    return _resolve_prompt_purpose(view) == "context_collection"
 
 
 def _call_event_method(event: Any, method_name: str, *args: Any) -> Any:

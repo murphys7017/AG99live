@@ -2271,7 +2271,7 @@ function testSpeechOnlyPlaybackUsesTimelineDuration(): void {
     timelineId: "timeline-speech",
     turnId: "turn-speech",
     messageId: "msg-speech",
-    phase: "playing",
+    phase: "preparing",
     source: "audio",
     startedAtMs: 100,
     currentTimeMs: 0,

@@ -1014,8 +1014,9 @@ def test_prompt_purpose_controls_eligibility_without_entering_runtime_payload(
     contributor = module.AG99liveMotionPromptContributor()
     event, _scheduled_calls = _build_event()
     for purpose, expect_present in [
-        ("persona_reply", True),
-        ("core_reply", True),
+        ("context_collection", True),
+        ("persona_reply", False),
+        ("core_reply", False),
         ("router", False),
     ]:
         view = _build_view(phase="decision", purpose=purpose)
