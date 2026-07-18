@@ -95,6 +95,8 @@ def test_performance_curve_runtime_resolves_provider_hint(
         started = runtime.start(
             PerformanceCurveInput(
                 turn_id="turn-1",
+                tts_turn_id="tts-turn-1",
+                message_id="message-1",
                 request_id="request-1",
                 assistant_text="今天我们轻快一点。",
                 assistant_reply_keywords=["轻快"],
@@ -143,6 +145,8 @@ def test_performance_curve_runtime_discards_not_ready_request(
         runtime.start(
             PerformanceCurveInput(
                 turn_id="turn-1",
+                tts_turn_id="tts-turn-1",
+                message_id="message-1",
                 request_id="request-1",
                 assistant_text="今天我们轻快一点。",
                 assistant_reply_keywords=["轻快"],
@@ -156,6 +160,7 @@ def test_performance_curve_runtime_discards_not_ready_request(
             turn_id="turn-1",
             request_id="request-1",
         )
+        assert runtime.owns_request(turn_id="turn-1", request_id="request-1") is False
         return discarded, runtime.get_ready(
             turn_id="turn-1",
             request_id="request-1",
@@ -192,6 +197,8 @@ def test_performance_curve_runtime_starts_logical_message_only_once(
         )
         request = PerformanceCurveInput(
             turn_id="turn-1",
+            tts_turn_id="tts-turn-1",
+            message_id="message-1",
             request_id="request-1",
             assistant_text="同一句回复。",
             assistant_reply_keywords=["同一句回复"],
@@ -201,7 +208,12 @@ def test_performance_curve_runtime_starts_logical_message_only_once(
         )
         first = runtime.start(request)
         second = runtime.start(request)
+        assert runtime.owns_request(turn_id="turn-1", request_id="request-1") is True
         runtime.cancel_turn("turn-1")
+        assert runtime._tasks == {}
+        assert runtime._results == {}
+        assert runtime._requests == {}
+        assert runtime._requested_keys == set()
         return first, second
 
     assert asyncio.run(run_case()) == (True, False)

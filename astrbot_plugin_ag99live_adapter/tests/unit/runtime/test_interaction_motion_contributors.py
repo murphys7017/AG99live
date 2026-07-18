@@ -1428,7 +1428,7 @@ def test_result_contributor_returns_persona_effect_motion_as_client_object(
     )
 
 
-def test_result_contributor_starts_optional_performance_curve_before_tts(
+def test_result_contributor_defers_optional_performance_curve_until_tts_generating(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -1462,14 +1462,86 @@ def test_result_contributor_starts_optional_performance_curve_before_tts(
     )
 
     contribution = asyncio.run(contributor.collect(event, None, view))
+    assert requests == []
+    request_id = module.start_deferred_performance_curve_request(
+        event,
+        turn_id="backend-turn",
+        message_id="message-1",
+        tts_request_id="tts-1",
+        external_correlation_id="front-turn",
+    )
 
-    assert contribution.platform_extras == {
-        "performance_curve_request_id": "curve-request-1"
-    }
+    assert contribution.platform_extras == {}
+    assert request_id == "curve-request-1"
     assert len(requests) == 1
     assert requests[0]["turn_id"] == "front-turn"
+    assert requests[0]["tts_turn_id"] == "backend-turn"
+    assert requests[0]["message_id"] == "message-1"
+    assert requests[0]["request_id"] == "tts-1"
     assert requests[0]["assistant_text"] == "你好呀"
     assert requests[0]["motion_payload"]["axis_levels"] == {"head_yaw": 4}
+
+
+def test_deferred_performance_curve_is_bound_per_result_phase(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+    contributor = module.AG99liveMotionResultContributor()
+    event, _scheduled_calls = _build_event(raw_turn_id="front-turn")
+    requests: list[dict[str, object]] = []
+
+    def start_performance_curve_request(**kwargs) -> str:
+        requests.append(kwargs)
+        return f"curve-request-{len(requests)}"
+
+    event.adapter.turn_coordinator.start_performance_curve_request = (
+        start_performance_curve_request
+    )
+    effect_calls = [
+        _motion_effect_call(
+            {
+                "intent_tags": ["happy"],
+                "axis_levels": {"head_yaw": 4},
+            }
+        )
+    ]
+
+    immediate = _build_view(
+        phase="immediate",
+        route_mode="hybrid",
+        final_result="第一句",
+        immediate_reply="第一句",
+        effect_calls=effect_calls,
+    )
+    asyncio.run(contributor.collect(event, None, immediate))
+    assert module.start_deferred_performance_curve_request(
+        event,
+        turn_id="backend-turn",
+        message_id="message-1",
+        tts_request_id="tts-1",
+        external_correlation_id="front-turn",
+    ) == "curve-request-1"
+
+    event.set_extra("ag99live_raw_reply_text", '<@anim {"mode":"inline"}>')
+    final = _build_view(
+        phase="final",
+        route_mode="hybrid",
+        final_result="第二句",
+        immediate_reply="第一句",
+        effect_calls=effect_calls,
+    )
+    asyncio.run(contributor.collect(event, None, final))
+    assert event.get_extra("ag99live_raw_reply_text") is None
+    assert module.start_deferred_performance_curve_request(
+        event,
+        turn_id="backend-turn",
+        message_id="message-2",
+        tts_request_id="tts-2",
+        external_correlation_id="front-turn",
+    ) == "curve-request-2"
+    assert [request["assistant_text"] for request in requests] == ["第一句", "第二句"]
 
 
 def test_result_contributor_rejects_non_integer_axis_levels_from_persona_effect(
@@ -1744,6 +1816,10 @@ def test_result_contributor_schedules_motion_for_immediate_reply(
     contribution = asyncio.run(contributor.collect(event, None, view))
 
     assert contribution is not None
+    assert contribution.final_text_override == "你好呀"
+    assert event.get_extra("ag99live_raw_reply_text") == (
+        '你好呀 <@anim {"mode":"inline"}>'
+    )
     # Secondary motion scheduling is disabled; inline contract handles it
     assert scheduled_calls == []
     assert (

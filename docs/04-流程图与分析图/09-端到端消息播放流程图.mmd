@@ -14,6 +14,9 @@ flowchart TD
         PERSONA[Persona Runtime<br/>构建 Prompt 与 effect schema]:::backend
         LLM[主模型一次生成<br/>spoken_reply + effect_calls]:::backend
         EFFECT[result contributor<br/>motion_intent.v4]:::backend
+        CURVEPENDING[登记当前回复阶段的<br/>pending curve input]:::backend
+        NORMALIZE[输出规范化<br/>清洗隐藏传输标记]:::backend
+        TTSSTATE[on_tts_state_changed<br/>generating]:::backend
         CURVE[可选 Performance Curve Provider<br/>后台请求]:::backend
         CURVECHECK{段出站时<br/>curve 已 ready？}:::backend
         TTS[TTS<br/>WAV Record + Record.text]:::backend
@@ -27,9 +30,11 @@ flowchart TD
         TURN --> START
         TURN --> PERSONA --> LLM
         LLM --> EFFECT
-        EFFECT --> CURVE
-        EFFECT --> TTS
         LLM --> PLAIN
+        EFFECT --> CURVEPENDING
+        PLAIN --> NORMALIZE --> TTSSTATE --> TTS
+        CURVEPENDING -. 仅随当前阶段 TTS 消费 .-> TTSSTATE
+        TTSSTATE -->|tts_request_id| CURVE
         EFFECT --> BUFFER
         TTS --> BUFFER
         PLAIN --> BUFFER

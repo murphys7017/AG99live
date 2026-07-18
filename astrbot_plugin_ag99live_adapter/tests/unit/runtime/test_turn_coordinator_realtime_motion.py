@@ -142,7 +142,7 @@ def _runtime_state_stub(
     enable_inline_motion_contract: bool = True,
     persona_effect_available: bool = True,
 ):
-    return type(
+    state = type(
         "RuntimeStateStub",
         (),
         {
@@ -153,6 +153,12 @@ def _runtime_state_stub(
             "motion_prompt_instruction": "Use readable exaggerated head and smile motion.",
         },
     )()
+    state.performance_curve_runtime = type(
+        "PerformanceCurveRuntimeStub",
+        (),
+        {"owns_request": lambda self, *, turn_id, request_id: False},
+    )()
+    return state
 
 
 def _runtime_state_stub_with_motion_tuning_fallback():
@@ -708,11 +714,25 @@ def test_emit_message_chain_reuses_platform_visible_message_id_for_segment_outpu
         AssertionError("platform motion client object should satisfy inline motion")
     )
 
+    tts_segment = {
+        "turn_id": "tts-turn-segment",
+        "message_id": "visible-msg-1",
+        "external_correlation_id": "turn-segment",
+        "tts": {
+            "turn_id": "tts-turn-segment",
+            "message_id": "visible-msg-1",
+            "tts_request_id": "tts-visible-msg-1",
+            "status": "succeeded",
+            "failure_code": "",
+            "external_correlation_id": "turn-segment",
+        },
+    }
     asyncio.run(
         coordinator.emit_message_chain(
-            message_chain=[Plain("hello"), Record(file="voice.wav")],
+            message_chain=[Record(file="voice.wav", text="hello")],
             platform_extras={
-                "visible_message_id": "visible-msg-1",
+                "output_segment": tts_segment,
+                "audio_attachment": "present",
                 "client_objects": [
                     {
                         "type": "ag99live.motion_payload",
@@ -721,6 +741,15 @@ def test_emit_message_chain_reuses_platform_visible_message_id_for_segment_outpu
                         "source": "persona_effect",
                     }
                 ],
+            },
+        )
+    )
+    asyncio.run(
+        coordinator.emit_message_chain(
+            message_chain=[Plain("hello")],
+            platform_extras={
+                "output_segment": tts_segment,
+                "audio_attachment": "absent",
             },
         )
     )
@@ -806,6 +835,137 @@ def test_emit_message_chain_uses_record_text_as_canonical_segment_text(
     assert sent_payloads[0]["message_id"] == "visible-audio-1"
     assert recorded_events[0]["assistant_text"] == "字幕文本"
     assert recorded_events[0]["raw"]["reply_text"] == "字幕文本"
+
+
+def test_tts_failure_emits_explicit_audio_failed_slot(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_turn_coordinator_module()
+    Plain = _load_message_components_module().Plain
+    coordinator = module.TurnCoordinator.__new__(module.TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {
+            "client_uid": "desktop-client",
+            "current_turn_id": "turn-tts-failed",
+            "last_user_text": "user text",
+            "mark_playing": lambda self: None,
+        },
+    )()
+    coordinator.chat_buffer = type(
+        "ChatBufferStub",
+        (),
+        {"add": lambda self, role, text: None},
+    )()
+    coordinator.speaker_name = "assistant"
+    coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+    asyncio.run(
+        coordinator.emit_message_chain(
+            message_chain=[Plain("语音生成失败")],
+            platform_extras={
+                "visible_message_id": "message-tts-failed",
+                "output_segment": {
+                    "turn_id": "tts-turn-failed",
+                    "message_id": "message-tts-failed",
+                    "external_correlation_id": "turn-tts-failed",
+                    "tts": {
+                        "turn_id": "tts-turn-failed",
+                        "message_id": "message-tts-failed",
+                        "tts_request_id": "tts-failed-1",
+                        "status": "failed",
+                        "failure_code": "provider_error",
+                        "external_correlation_id": "turn-tts-failed",
+                    },
+                },
+                "audio_attachment": "absent",
+            },
+        )
+    )
+    coordinator._flushed_output_segment_count = 0
+    asyncio.run(coordinator._flush_pending_output_segments())
+
+    assert sent_payloads[0]["payload"]["audio"] == {
+        "state": "failed",
+        "reason": "provider_error",
+    }
+
+
+def test_output_send_failure_does_not_commit_motion_side_effects(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_turn_coordinator_module()
+    coordinator = module.TurnCoordinator.__new__(module.TurnCoordinator)
+    hint = {
+        "schema_version": "ag99.performance_curve_hint.v1",
+        "curve_family": "quick_in_hold_soft_out",
+        "entry": "quick",
+        "hold": "steady",
+        "exit": "soft",
+        "emphasis": "early",
+        "energy": "medium",
+    }
+    cleared: list[tuple[str, str]] = []
+
+    class CurveRuntimeStub:
+        def get_ready(self, *, turn_id, request_id):
+            return hint
+
+        def clear(self, *, turn_id, request_id):
+            cleared.append((turn_id, request_id))
+
+    coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
+    coordinator.runtime_state.performance_curve_runtime = CurveRuntimeStub()
+    coordinator.session_state = type(
+        "SessionStateStub",
+        (),
+        {"client_uid": "desktop-client", "current_turn_id": "turn-send-failed"},
+    )()
+    coordinator.speaker_name = "assistant"
+
+    async def fail_send_json(_payload):
+        return False
+
+    coordinator._send_json = fail_send_json
+    recorded_events: list[dict[str, object]] = []
+    recorded_snapshots: list[dict[str, object]] = []
+    coordinator._record_motion_lab_raw_event = lambda **kwargs: recorded_events.append(
+        kwargs
+    )
+    coordinator._record_prompt_motion_snapshot = lambda **kwargs: recorded_snapshots.append(
+        kwargs
+    )
+    segment = module.PendingOutputSegment(
+        turn_id="turn-send-failed",
+        message_id="message-send-failed",
+        text="不会发送",
+        semantic_text="不会发送",
+    )
+    segment.merge_motion(
+        payload=_build_valid_motion_intent(),
+        mode="preview",
+        source="persona_effect",
+    )
+    segment.bind_performance_curve_request("curve-send-failed")
+
+    with pytest.raises(RuntimeError, match="output_segment_send_failed"):
+        asyncio.run(coordinator._flush_output_segment(segment))
+
+    assert cleared == []
+    assert recorded_events == []
+    assert recorded_snapshots == []
 
 
 def test_emit_message_chain_rejects_conflicting_canonical_text_sources(
@@ -905,7 +1065,7 @@ def test_emit_message_chain_dedupes_motion_client_object_for_segmented_output(
 
 
 @pytest.mark.parametrize("first_part", ["motion", "text"])
-def test_emit_message_chain_binds_prestarted_performance_curve_request(
+def test_emit_message_chain_binds_curve_from_tts_request_identity(
     install_fake_astrbot,
     monkeypatch,
     first_part: str,
@@ -914,19 +1074,41 @@ def test_emit_message_chain_binds_prestarted_performance_curve_request(
     module = _load_turn_coordinator_module()
     TurnCoordinator = module.TurnCoordinator
     Plain = _load_message_components_module().Plain
+    Record = _load_message_components_module().Record
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
+    coordinator.runtime_state.performance_curve_runtime = type(
+        "PerformanceCurveRuntimeStub",
+        (),
+        {
+            "owns_request": lambda self, *, turn_id, request_id: (
+                turn_id == "turn-curve-order" and request_id == "curve-request-1"
+            ),
+        },
+    )()
     coordinator.session_state = type(
         "SessionStateStub",
         (),
         {"current_turn_id": "turn-curve-order"},
     )()
     coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
+    tts_segment = {
+        "turn_id": "backend-turn",
+        "message_id": "visible-curve::core_reply",
+        "external_correlation_id": "turn-curve-order",
+        "tts": {
+            "turn_id": "backend-turn",
+            "message_id": "visible-curve::core_reply",
+            "tts_request_id": "curve-request-1",
+            "status": "succeeded",
+            "failure_code": "",
+            "external_correlation_id": "turn-curve-order",
+        },
+    }
     motion_extras = {
-        "visible_message_id": "visible-curve::core_reply::0001",
-        "message_kind": "core_reply",
-        "performance_curve_request_id": "curve-request-1",
+        "output_segment": tts_segment,
+        "audio_attachment": "present",
         "client_objects": [
             {
                 "type": "ag99live.motion_payload",
@@ -937,15 +1119,16 @@ def test_emit_message_chain_binds_prestarted_performance_curve_request(
         ],
     }
     text_extras = {
-        "visible_message_id": "visible-curve::core_reply::0002",
-        "message_kind": "core_reply",
-        "semantic_text": "canonical reply",
-        "performance_curve_request_id": "curve-request-1",
+        "output_segment": tts_segment,
+        "audio_attachment": "absent",
     }
 
     async def emit_parts() -> None:
         if first_part == "motion":
-            await coordinator.emit_message_chain(message_chain=[], platform_extras=motion_extras)
+            await coordinator.emit_message_chain(
+                message_chain=[Record(file="voice.wav", text="canonical reply")],
+                platform_extras=motion_extras,
+            )
             await coordinator.emit_message_chain(
                 message_chain=[Plain("canonical reply")],
                 platform_extras=text_extras,
@@ -955,7 +1138,10 @@ def test_emit_message_chain_binds_prestarted_performance_curve_request(
                 message_chain=[Plain("canonical reply")],
                 platform_extras=text_extras,
             )
-            await coordinator.emit_message_chain(message_chain=[], platform_extras=motion_extras)
+            await coordinator.emit_message_chain(
+                message_chain=[Record(file="voice.wav", text="canonical reply")],
+                platform_extras=motion_extras,
+            )
 
     asyncio.run(emit_parts())
 
@@ -991,13 +1177,18 @@ def test_start_performance_curve_request_builds_independent_request(
 
     request_id = coordinator.start_performance_curve_request(
         turn_id="turn-curve-start",
+        tts_turn_id="tts-turn-curve-start",
+        message_id="message-curve-start",
+        request_id="tts-curve-start",
         assistant_text="你好呀",
         motion_payload=_build_valid_motion_intent(),
     )
 
-    assert request_id
+    assert request_id == "tts-curve-start"
     assert len(requests) == 1
     assert requests[0].turn_id == "turn-curve-start"
+    assert requests[0].tts_turn_id == "tts-turn-curve-start"
+    assert requests[0].message_id == "message-curve-start"
     assert requests[0].request_id == request_id
     assert requests[0].assistant_text == "你好呀"
     assert requests[0].motion_intent_tags == ["test", "motion"]
@@ -1048,12 +1239,14 @@ def test_output_segment_skips_pending_performance_curve_without_blocking_motion(
     segment.bind_performance_curve_request("curve-request-pending")
 
     motion_slot = coordinator._build_output_segment_motion_slot(segment)
+    coordinator._commit_motion_output_side_effects(segment, motion_slot)
 
     assert motion_slot["state"] == "present"
     assert "performance_curve_hint" not in motion_slot["payload"]
     assert runtime_calls == [
         ("get_ready", "turn-curve-egress", "curve-request-pending"),
         ("discard", "turn-curve-egress", "curve-request-pending"),
+        ("clear", "turn-curve-egress", "curve-request-pending"),
     ]
     assert recorded_events[0]["event_type"] == "performance_curve.skipped"
     assert recorded_events[0]["raw"] == {
@@ -1112,6 +1305,7 @@ def test_output_segment_attaches_ready_performance_curve(
     segment.bind_performance_curve_request("curve-request-ready")
 
     motion_slot = coordinator._build_output_segment_motion_slot(segment)
+    coordinator._commit_motion_output_side_effects(segment, motion_slot)
 
     assert motion_slot["payload"]["performance_curve_hint"] == hint
     assert cleared == [("turn-curve-ready", "curve-request-ready")]

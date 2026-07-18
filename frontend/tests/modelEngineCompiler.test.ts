@@ -1568,7 +1568,7 @@ function testMotionStartRejectsAudioUnavailableTimelineForTiming(): void {
   assert.equal(playedPlans[0].timing.duration_ms, 1200);
 }
 
-function testPerformanceCurveFailsWhenAudioTimelineIsUnavailable(): void {
+function testPerformanceCurveIsSkippedWhenAudioTimelineIsUnavailable(): void {
   const profile = buildProfile();
   const model = buildModel(profile);
   const playedPlans: MotionPlanPayload[] = [];
@@ -1614,8 +1614,9 @@ function testPerformanceCurveFailsWhenAudioTimelineIsUnavailable(): void {
         motionIntensityScale: 1,
         axisIntensityScale: {},
       }),
-      playPlan: (plan) => {
+      playPlan: (plan, _model, options) => {
         playedPlans.push(plan as MotionPlanPayload);
+        options.onStarted(plan as MotionPlanPayload, "run-curve-skipped");
         return true;
       },
       playCatalogMotion: () => false,
@@ -1637,13 +1638,18 @@ function testPerformanceCurveFailsWhenAudioTimelineIsUnavailable(): void {
     },
   );
 
-  assert.equal(started, false);
-  assert.equal(playedPlans.length, 0);
-  assert.equal(
+  assert.equal(started, true);
+  assert.equal(playedPlans.length, 1);
+  assert.notEqual(
     lastCompileReason,
     "performance_curve_timeline_unavailable:playback_timeline_audio_unavailable",
   );
-  assert.equal(diagnostics.length, 0);
+  assert.equal(diagnostics.length, 1);
+  assert.ok(
+    diagnostics[0].warnings?.includes(
+      "performance_curve_skipped:playback_timeline_audio_unavailable",
+    ),
+  );
 }
 
 function testAxisIntensityScaleAffectsOnlyTargetAxis(): void {
@@ -2980,7 +2986,7 @@ function run(): void {
   testMotionStartRejectsPlayerThatOmitsStartedCallback();
   testMotionStartUsesPlaybackTimelineDuration();
   testMotionStartRejectsAudioUnavailableTimelineForTiming();
-  testPerformanceCurveFailsWhenAudioTimelineIsUnavailable();
+  testPerformanceCurveIsSkippedWhenAudioTimelineIsUnavailable();
   testExplicitPrimaryAxisIsNotOverwrittenByCoupling();
   testAxisIntensityScaleAffectsOnlyTargetAxis();
   testAxisRangeConstraintIsOwnedByRelationGraph();

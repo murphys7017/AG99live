@@ -16,6 +16,9 @@ class PendingOutputSegment:
     text: str = ""
     semantic_text: str = ""
     audio_path: str = ""
+    audio_failure_reason: str = ""
+    tts_request_id: str = ""
+    tts_status: str = ""
     images: list[str] = field(default_factory=list)
     motion_payload: dict[str, Any] | None = None
     motion_mode: str = "preview"
@@ -33,7 +36,46 @@ class PendingOutputSegment:
         )
 
     def merge_audio(self, *, path: str) -> None:
+        if self.audio_failure_reason:
+            raise OutputSegmentConflictError(
+                f"output_segment_audio_state_conflict:{self.message_id}"
+            )
         self.audio_path = _merge_unique_text(self.audio_path, path, "audio_path")
+
+    def merge_tts_terminal_state(
+        self,
+        *,
+        request_id: str,
+        status: str,
+        failure_code: str,
+    ) -> None:
+        normalized_request_id = str(request_id or "").strip()
+        normalized_status = str(status or "").strip().lower()
+        normalized_failure_code = str(failure_code or "").strip()
+        if not normalized_request_id:
+            raise ValueError("output_segment_tts_request_id_missing")
+        if normalized_status not in {"succeeded", "failed"}:
+            raise ValueError(f"output_segment_tts_terminal_status_invalid:{normalized_status}")
+        if normalized_status == "failed" and not normalized_failure_code:
+            raise ValueError("output_segment_tts_failure_code_missing")
+        if normalized_status == "succeeded" and normalized_failure_code:
+            raise ValueError("output_segment_tts_failure_code_without_failure")
+        self.tts_request_id = _merge_unique_text(
+            self.tts_request_id,
+            normalized_request_id,
+            "tts_request_id",
+        )
+        self.tts_status = _merge_unique_text(
+            self.tts_status,
+            normalized_status,
+            "tts_status",
+        )
+        if normalized_failure_code:
+            self.audio_failure_reason = _merge_unique_text(
+                self.audio_failure_reason,
+                normalized_failure_code,
+                "audio_failure_reason",
+            )
 
     def merge_images(self, values: list[str]) -> None:
         for value in values:

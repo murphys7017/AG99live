@@ -16,6 +16,24 @@ export interface AudioPlaybackState {
 
 export type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "absent";
 
+function resolveAudioBridgeFailureReason(error: unknown): string {
+  const name = error instanceof Error
+    ? error.name
+    : typeof error === "object" && error !== null && "name" in error
+      ? String(error.name)
+      : "unknown";
+  if (name === "NotAllowedError") {
+    return "audio_autoplay_blocked";
+  }
+  if (name === "NotSupportedError") {
+    return "audio_source_not_supported";
+  }
+  if (name === "AbortError") {
+    return "audio_playback_aborted";
+  }
+  return "audio_playback_start_failed";
+}
+
 export interface AudioPlaybackStateBridgeContext {
   state: AudioPlaybackState;
   audioSegmentRunner: PlaybackTimelineAudioSegmentRunner;
@@ -98,19 +116,22 @@ export async function startAudioSegmentAndBridgeState(
       },
     });
   } catch (error) {
+    console.error("[Connection] audio playback start failed.", error);
     ctx.state.isPlayingAudio = false;
     ctx.state.audioPlaybackStartedTurnId = null;
     ctx.state.audioPlaybackStartedMessageId = null;
     ctx.state.audioPlaybackStartedAtMs = 0;
     ctx.state.audioPlaybackDurationMs = null;
-    ctx.state.lastError =
-      error instanceof Error ? error.message : "浏览器拒绝自动播放语音。";
+    const reason = resolveAudioBridgeFailureReason(error);
+    ctx.state.lastError = reason === "audio_autoplay_blocked"
+      ? "浏览器拒绝自动播放语音。"
+      : "音频播放失败。";
     ctx.state.statusMessage = "语音播放失败，已回传结束状态。";
-    ctx.pushHistory("error", ctx.state.statusMessage);
+    ctx.pushHistory("error", ctx.state.lastError);
     ctx.markTerminal(
       "failed",
       turnId,
-      "audio_autoplay_blocked",
+      reason,
       messageId,
     );
   }

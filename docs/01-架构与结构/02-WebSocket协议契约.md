@@ -139,7 +139,7 @@ control.turn_finished
 
 `output.segment.v3` 是封闭协议：根对象以及 `text`、`audio`、`motion` slot 只允许契约声明字段。`caption_text`、`performance_curve` 或其他未知字段必须在前端入站边界直接拒绝，不得静默丢弃。
 
-AstrBot 内部 Plain、Record、图片与 motion client object 可以物理分离，但 Adapter 必须先按 `turn_id + message_id` 聚合，再发送一个 `output.segment`。标准 AstrBot `send()` 的多个物理分片共享 `standard_reply` 逻辑 ID，只有 `complete_visible_turn()` 可以关闭输出队列。Plain 文本、Persona semantic text 与 `Record.text` 都归一化到同一个 `text.content`；值不一致时整段报冲突。`audio` slot 只承载媒体 URL，不再拥有第二份 caption。
+AstrBot 内部 Plain、Record、图片与 motion client object 可以物理分离，但 Adapter 必须先按 `turn_id + message_id` 聚合，再发送一个 `output.segment`。TTS 物理分片通过组件 `delivery_metadata.output_segment.message_id` 归入各自逻辑段；其中 AstrBot TTS turn、逻辑 message、`tts_request_id` 与 AG99 前端 turn correlation 必须一致，不一致时拒绝整段。没有段级元数据的普通标准输出才使用 `standard_reply`。只有 `complete_visible_turn()` 可以关闭输出队列。Plain 文本、Persona semantic text 与 `Record.text` 都归一化到同一个 `text.content`；值不一致时整段报冲突。`audio` slot 只承载媒体 URL，不再拥有第二份 caption。
 
 当 `audio.state = present` 时，`text.state` 也必须为 `present`。前端在真实 Audio `playing` 前只保留这份 canonical text，起播时才把它显示为字幕；audio 明确 `absent` 时才立即显示 text。audio 在起播前失败时字幕也显式失败，不伪装成正常 text-only 回复。
 

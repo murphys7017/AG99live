@@ -1,9 +1,9 @@
 task:
-  class: maintenance
+  class: bugfix
   risk: high
   phase: validation_complete
   status: complete
-  scope: Remove zero-reference frontend, adapter, protocol, prompt, and AG99-owned WebSDK sample code without changing current runtime behavior or official compatibility boundaries
+  scope: Consume AstrBot read-only TTS generation states in AG99live, bind optional curve work to TTS identity, and keep output text normalization outside the TTS lifecycle hook
 context:
   confidence: high
   assumptions:
@@ -19,9 +19,10 @@ context:
     - Subtitle release failure is a segment-fatal invariant violation and must stop audio, motion, lip sync, and the owning timeline atomically.
     - A failed required audio sink fails the owning timeline and every still-open required sink; it must not be recorded as an interrupted timeline after SessionStore records failure.
     - output.segment.v3 is a closed protocol; unknown or removed fields are rejected instead of silently discarded.
-    - Performance curve request state advances only after the runtime accepts a request with both canonical text and motion available.
+    - Result contribution only registers pending curve input; request state advances only from the read-only TTS generating notification and uses its tts_request_id.
     - AstrBot physical Plain, Record, image, and motion objects are aggregated only inside the adapter; the frontend receives one output.segment.v3 per turn_id plus message_id.
-    - Standard AstrBot send() physical parts share the explicit standard_reply logical message ID; only complete_visible_turn() closes the output queue.
+    - TTS physical parts use AstrBot delivery_metadata.output_segment.message_id; only standard outputs without segment metadata share standard_reply, and only complete_visible_turn() closes the output queue.
+    - Adapter delivery aggregation rejects mismatched AstrBot TTS turn, logical message, tts_request_id lifecycle, or AG99 frontend external_correlation_id instead of attaching them to the current segment.
     - Output queue close ownership is bound to the exact turn_id; zero-segment close and synth_finished send failure are hard errors, and closed state is committed only after send success.
     - Performance curve execution has one source at motion.payload.performance_curve_hint; output.segment.v3 rejects the removed top-level performance_curve slot.
     - SessionStore commitOutputSegment is the only production segment creation boundary; protocol and motion validation complete before Store or release-queue mutation.
@@ -36,8 +37,9 @@ context:
     - Immediate Persona Effect scheduling is phase-owned because AstrBot parallel fast response emits before route persistence; final scheduling may still use the persisted route decision.
     - Speech-only motion must upgrade the current audio segment with a required motion sink before ModelEngine starts its plan.
     - A synthetic clock may start pending motion only when the segment is explicitly motion-only; an audio-owned segment remains pending until its real audio clock is playing or paused.
-    - Performance curve generation starts only after canonical text and motion are both present; later physical parts may complete those prerequisites, but the runtime accepts at most one request per logical turn_id plus message_id.
-    - Performance curve at-most-once keys and retained work are cleared when control.synth_finished successfully closes the owning turn output queue.
+    - Performance curve generation is phase-scoped: hybrid immediate and final replies receive independent request IDs, and no request starts for a phase that never enters TTS.
+    - Output segments bind performance curves directly from their own TTS request identity after runtime ownership validation; event-level curve request IDs are forbidden because they can leak across multiple TTS segments.
+    - Performance curve at-most-once keys and retained work are cleared after successful segment send or when the owning turn closes; send failure preserves state for retry.
     - Live2D lip-sync analyser callbacks invoke adapter methods with their instance binding preserved; frame write exceptions stop sampling and emit lip_sync_parameter_write_failed.
     - Speech following profile v2 and speech_gesture_track replace the v1 cycle contract without runtime compatibility.
     - ModelEngine owns deterministic gesture selection and control-point planning; WebSDK owns per-frame interpolation and dynamics.
@@ -160,7 +162,7 @@ context:
     - The unused hash-based speech-pose direction fallback has been removed; speech pose direction now comes from explicit voice-following metadata or axis semantics.
     - Legacy repair/fallback counters in motion_intent.py had no callers and have been removed; runtime failures remain visible through structured payload and compiler diagnostics.
     - Performance curve enum normalization is strict at backend and frontend motion boundaries; invalid curve objects are rejected instead of being rewritten to defaults or silently dropped.
-    - A present performance curve hint must be resolvable against the segment PlaybackTimeline; ModelEngine now fails that motion segment when the required timeline/clock data is unavailable instead of deleting the hint and continuing with fallback timing.
+    - A performance curve hint is optional timing metadata: when the matched Timeline cannot resolve it, ModelEngine records performance_curve_skipped, removes only that hint, and compiles the otherwise valid base motion without inventing a clock or default curve.
     - fallback_pose_id has been removed from the current v3 runtime payload, frontend protocol type, manual preview builders, and diagnostics; old-field fixtures remain only in rejection-boundary tests.
     - Motion generation metadata now uses single_response_effect; immediate/final remains a response-segment phase distinction and is not used as a generation mode.
     - Explicit duration_hint_ms values are now strict at backend motion boundaries: missing remains optional/defaulted, numeric text is accepted, but non-numeric, non-finite, and out-of-range values fail instead of being defaulted or clamped.
@@ -179,7 +181,7 @@ context:
   unresolved_questions:
     - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
     - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.
-    - For earlier curve generation during actual TTS synthesis, identify an AstrBot hook before message-chain Record creation; current MVP starts from emit_message_chain and never blocks playback.
+    - A live AstrBot run still needs to verify read-only TTS generating notifications, tts_request_id binding, and hybrid immediate/final output against the installed Provider.
     - Lip-sync remains an optional timeline sink; PlaybackTimelineEngine interrupt now supplies its interrupted terminal state, while the Live2D boundary remains responsible for sampling and parameter writes.
 architecture:
   stability: evolving
@@ -281,6 +283,8 @@ verification:
     - npm run typecheck (renderer, WebSDK, and node typechecks passed)
     - npm run build (Electron production build passed)
     - git diff --check (passed)
+    - Targeted AG99live TTS delivery checks (7 passed after strict identity validation and standard non-TTS send routing)
+    - Targeted AG99live send and performance-curve cleanup checks (12 passed after removing the legacy send alias, duplicate send implementation, and mirrored curve status table)
     - npm test (complete frontend suite passed after required audio failure terminal semantics were unified)
     - npm run typecheck and npm run build:web (passed after final review)
     - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (286 passed after final review)
@@ -509,8 +513,20 @@ verification:
     - python -m compileall -q astrbot_plugin_ag99live_adapter (passed)
     - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings, 3 informational notices)
     - git diff --check (passed after final lifecycle review)
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests -q (288 passed after pre-TTS curve triggering, explicit TTS failure state, send-transaction, and curve cleanup changes)
+    - uv run pytest tests/unit/test_interaction_output_controller.py tests/unit/test_voice_service.py -q in AstrBot (59 passed; existing aiosqlite event-loop-close warnings remain)
+    - npm test (complete frontend suite passed after optional curve-clock skip and audio failure reason fixes)
+    - npm run build (renderer, WebSDK, node typechecks and Electron production build passed)
+    - python -m compileall -q astrbot_plugin_ag99live_adapter and uv run python -m compileall -q astrbot (passed)
+    - AstrBot plugin checker (0 errors, 0 warnings, 3 informational notices)
+    - git diff --check in AG99live and AstrBot (passed)
+    - python -m pytest on the five affected AG99live runtime test modules (93 passed after read-only TTS state consumption and TTS identity binding)
+    - python -m compileall -q astrbot_plugin_ag99live_adapter (passed)
+    - AstrBot plugin checker (0 errors, 0 warnings, 3 informational notices)
+    - git diff --check (passed)
+    - targeted performance-curve, TTS identity, send-transaction, and cleanup regressions (13 passed after final ownership review)
   checks_failed: []
-  validation_gap: A live Electron end-to-end conversation is still needed to verify output.segment delivery, real audio-clock release, lip sync, and motion start against an installed AstrBot instance and Live2D model. Six historical custom WebSDK entry files still use @ts-nocheck, so their complete static-type migration remains separate technical debt.
+  validation_gap: A live Electron end-to-end conversation is still needed to verify the installed AstrBot read-only TTS state hook, output.segment delivery, real audio-clock release, lip sync, and motion start against a real TTS Provider and Live2D model. Mermaid CLI was unavailable in the current frontend toolchain, so the two updated .mmd files were reviewed but not parser-rendered. Six historical custom WebSDK entry files still use @ts-nocheck, so their complete static-type migration remains separate technical debt.
 runtime:
   mode: unified_playback_timeline_phase3_motion_timeline_context
 backlog:
@@ -528,10 +544,10 @@ backlog:
     summary: Add an independent small-model performance curve layer for speech-synchronized motion timing.
     notes:
       - Performance curve generation requires an independently configured performance_curve_provider_id; empty, missing, or non-chat Provider bindings fail configuration and never reuse the current turn chat Provider.
-      - Curve generation and lookup are bound by turn_id plus message_id to keep multi-segment turns aligned.
-      - Symbolic curve hints are generated asynchronously after assistant text is available and never block TTS or playback; if not ready before motion egress, the task is cancelled and playback falls back to default timing.
+      - Curve generation uses the AG99 frontend turn from external_correlation_id plus the phase's tts_request_id, and separately records AstrBot tts_turn_id plus logical message_id.
+      - Result contribution registers pending input, while the read-only AstrBot TTS state hook starts generation only on generating; if not ready before motion egress, the task is cancelled and the original motion keeps its own valid timing.
       - Requested, resolved, failed, and attached curve events are stored in Motion Lab SQLite raw events.
-      - Frontend ModelEngine evaluates the hint against real audio duration and falls back to current timing when missing or invalid.
+      - Frontend protocol parsing rejects invalid hints; a valid optional hint that cannot use the matched clock is explicitly skipped while the base motion keeps its own timing.
       - A five-preset per-frame curve library is now selected by curve family; real-time generated custom curves remain intentionally out of scope.
   - id: unified_timeline_direct_sink_execution
     status: in_progress

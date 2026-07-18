@@ -26,18 +26,27 @@ sequenceDiagram
     Persona->>LLM: 生成可见回复与动作决策
     LLM-->>Persona: spoken_reply + effect_calls
     Persona->>Adapter: result contributor 生成 motion_intent.v4
-    Adapter->>Curve: 后台启动曲线请求(request_id)
-    Persona->>TTS: spoken_reply
-    Note over Curve,TTS: 两个请求并行；TTS 与基础 motion 不等待曲线
-    TTS-->>Adapter: WAV Record + Record.text
+    Adapter->>Adapter: 登记当前回复阶段的 pending curve input
+    Adapter->>Adapter: 输出规范化阶段清洗隐藏传输标记
+    Persona->>TTS: materialize spoken_reply
+    TTS->>Adapter: on_tts_state_changed(generating, identities)
+    opt 当前阶段存在 pending curve input
+        Adapter->>Curve: 后台启动曲线请求(tts_request_id)
+    end
+    Note over Curve,TTS: 曲线与 TTS Provider 并行；TTS 与基础 motion 不等待曲线
+    alt TTS 成功
+        TTS-->>Adapter: WAV Record + Record.text + tts_status=succeeded
+    else TTS 失败
+        TTS-->>Adapter: canonical text + tts_status=failed + reason
+    end
     Note over Adapter,Buffer: AstrBot 可以将 Plain、Record、图片和 client object 物理拆分；<br/>拆分仅存在于后端内部。Plain / semantic text / Record.text 必须归一为同一 canonical text。
     Adapter->>Buffer: 按 turn_id + message_id 合并物理组件
     Buffer->>Buffer: 校验文本冲突、多音频、motion 与 curve
     alt 曲线在段出站前 ready
         Curve-->>Buffer: 附加 performance_curve_hint
-    else 曲线仍 pending 或已失败
+    else 曲线未启动、仍 pending 或已失败
         Buffer-->>Curve: 取消/清理请求
-        Note over Buffer,Curve: 记录 skipped，原 motion 直接出站；不生成默认曲线
+        Note over Buffer,Curve: pending 记录 skipped；失败保留 failed 事实；<br/>原 motion 直接出站，不生成默认曲线
     end
 
     loop 每个完整逻辑段

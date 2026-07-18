@@ -182,7 +182,7 @@ function prepareCompilableMotionPayload(
   state.setState("compiling", "正在编译动作意图...", null);
   let targetDurationMs = resolveMotionTargetDurationMs(context);
   let speechActive = isSpeechActiveForPayload(context);
-  const intent = resolveCompilerIntent(payload);
+  let intent = resolveCompilerIntent(payload);
   const runtimeWarnings: string[] = [];
   const performanceCurveHint = intent.performance_curve_hint ?? null;
   if (performanceCurveHint) {
@@ -197,10 +197,16 @@ function prepareCompilableMotionPayload(
       runtimeWarnings.push(`performance_curve_timeline:${curveTimeline.clockSource}`);
     } else {
       const failureReason = `performance_curve_timeline_unavailable:${curveTimeline.reason}`;
-      state.setLastCompileReason(failureReason);
-      state.setState("failed", `动作意图无法使用表演曲线：${curveTimeline.reason}`, null);
-      state.pushHistory("error", `动作意图无法使用表演曲线：${curveTimeline.reason}`);
-      return null;
+      runtimeWarnings.push(`performance_curve_skipped:${curveTimeline.reason}`);
+      console.warn("[ModelEngine] optional performance curve skipped.", {
+        turnId: context.turnId,
+        messageId: context.messageId,
+        reason: failureReason,
+      });
+      intent = {
+        ...intent,
+        performance_curve_hint: undefined,
+      };
     }
   }
   const compileResult = compileMotionIntent(intent, {

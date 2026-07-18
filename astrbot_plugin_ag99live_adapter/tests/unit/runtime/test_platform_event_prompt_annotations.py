@@ -20,6 +20,7 @@ def _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch) -> 
             self.unified_msg_origin = "olv_pet_adapter:friend_message:desktop-client"
             self._extras = {}
             self._has_send_oper = False
+            self.send_operation_count = 0
 
         def set_extra(self, key: str, value) -> None:
             self._extras[key] = value
@@ -29,6 +30,10 @@ def _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch) -> 
 
         async def send(self, message) -> None:
             del message
+            await self._record_send_operation()
+
+        async def _record_send_operation(self) -> None:
+            self.send_operation_count += 1
             self._has_send_oper = True
 
     event_module.AstrMessageEvent = AstrMessageEvent
@@ -153,7 +158,7 @@ def test_prompt_annotations_mark_screen_image_as_desktop_snapshot(
     assert annotations["message.1"]["semantic_type"] == "desktop_snapshot"
 
 
-def test_send_interaction_message_only_uses_adapter_emit_path(
+def test_send_message_with_extras_only_uses_adapter_emit_path(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -175,18 +180,21 @@ def test_send_interaction_message_only_uses_adapter_emit_path(
         "desktop-client",
         adapter,
     )
+    platform_extras = {"visible_message_id": "msg-1"}
 
     asyncio.run(
-        event.send_interaction_message(
+        event.send_message_with_extras(
             [Plain("hi")],
-            platform_extras={"visible_message_id": "msg-1"},
+            platform_extras=platform_extras,
             record_send_operation=True,
         )
     )
 
     assert len(adapter.emit_calls) == 1
     assert adapter.emit_calls[0]["platform_extras"] == {"visible_message_id": "msg-1"}
+    assert platform_extras == {"visible_message_id": "msg-1"}
     assert event._has_send_oper is True
+    assert event.send_operation_count == 1
 
 
 def test_standard_send_aggregates_parts_without_closing_output_queue(
@@ -200,12 +208,13 @@ def test_standard_send_aggregates_parts_without_closing_output_queue(
 
     asyncio.run(event.send([Plain("first")]))
     asyncio.run(event.send([Plain("second")]))
+    asyncio.run(event.send_message_with_extras([Plain("third")], platform_extras={}))
 
     assert adapter.closed_output_queues == 0
     assert [
         call["platform_extras"]["logical_message_id"]
         for call in adapter.emit_calls
-    ] == ["standard_reply", "standard_reply"]
+    ] == ["standard_reply", "standard_reply", "standard_reply"]
 
     asyncio.run(event.complete_visible_turn())
     assert adapter.closed_output_queues == 1

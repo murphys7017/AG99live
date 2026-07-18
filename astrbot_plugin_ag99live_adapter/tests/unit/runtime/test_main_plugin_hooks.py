@@ -20,6 +20,13 @@ def _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
             return decorator
 
         @staticmethod
+        def on_tts_state_changed():
+            def decorator(fn):
+                return fn
+
+            return decorator
+
+        @staticmethod
         def on_llm_request():
             def decorator(fn):
                 return fn
@@ -36,7 +43,16 @@ def _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
     class AstrMessageEvent:
         pass
 
+    class TTSState:
+        def __init__(self, *, status: str) -> None:
+            self.turn_id = "turn-1"
+            self.message_id = "message-1"
+            self.tts_request_id = "tts-1"
+            self.external_correlation_id = "frontend-turn-1"
+            self.status = status
+
     event_module.AstrMessageEvent = AstrMessageEvent
+    event_module.TTSState = TTSState
     event_module.filter = _Filter()
     monkeypatch.setitem(sys.modules, "astrbot.api.event", event_module)
 
@@ -83,7 +99,7 @@ def _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
     )
 
 
-def test_main_plugin_sanitizes_hidden_output_markup_before_tts(
+def test_main_plugin_normalizes_output_and_starts_curve_on_tts_generating(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -107,6 +123,24 @@ def test_main_plugin_sanitizes_hidden_output_markup_before_tts(
         "astrbot_plugin_ag99live_adapter.middleware",
         middleware_module,
     )
+    curve_starts: list[dict[str, str]] = []
+    interaction_motion_module = types.ModuleType(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion"
+    )
+
+    def start_deferred_performance_curve_request(event, **identity) -> None:
+        assert event.get_extra("ag99live_raw_reply_text")
+        curve_starts.append(identity)
+        event.set_extra("_ag99live_pending_performance_curve", None)
+
+    interaction_motion_module.start_deferred_performance_curve_request = (
+        start_deferred_performance_curve_request
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion",
+        interaction_motion_module,
+    )
 
     platform_adapter_module = types.ModuleType("astrbot_plugin_ag99live_adapter.platform_adapter")
     platform_adapter_module.OLVPetPlatformAdapter = object
@@ -118,7 +152,6 @@ def test_main_plugin_sanitizes_hidden_output_markup_before_tts(
 
     sys.modules.pop("astrbot_plugin_ag99live_adapter.main", None)
     module = importlib.import_module("astrbot_plugin_ag99live_adapter.main")
-    Plain = module.Plain
     MyPlugin = module.MyPlugin
 
     plugin = MyPlugin(context=module.Context(), config={})
@@ -127,22 +160,46 @@ def test_main_plugin_sanitizes_hidden_output_markup_before_tts(
 
     class ResultStub:
         def __init__(self) -> None:
-            self.chain = [Plain('hello <@anim {"mode":"inline","intent":{}}>' )]
+            self.chain = [module.Plain('hello <@anim {"mode":"inline","intent":{}}>')]
 
     class EventStub:
         def get_platform_name(self) -> str:
             return "olv_pet_adapter"
 
         def get_result(self):
-            return ResultStub()
+            return self.result
+
+        def get_extra(self, key: str, default=None):
+            return extras.get(key, default)
 
         def set_extra(self, key: str, value: object) -> None:
             extras[key] = value
 
     event = EventStub()
-    asyncio.run(plugin.sanitize_hidden_output_markup_before_tts(event))
+    event.result = ResultStub()
+    asyncio.run(plugin.sanitize_hidden_output_markup(event))
 
     assert extras.get("ag99live_raw_reply_text") == 'hello <@anim {"mode":"inline","intent":{}}>'
+    assert event.result.chain[0].text == "hello"
+
+    asyncio.run(
+        plugin.handle_tts_generation_state(event, module.TTSState(status="requested"))
+    )
+    asyncio.run(
+        plugin.handle_tts_generation_state(event, module.TTSState(status="generating"))
+    )
+    asyncio.run(
+        plugin.handle_tts_generation_state(event, module.TTSState(status="succeeded"))
+    )
+
+    assert curve_starts == [
+        {
+            "turn_id": "turn-1",
+            "message_id": "message-1",
+            "tts_request_id": "tts-1",
+            "external_correlation_id": "frontend-turn-1",
+        }
+    ]
 
 
 def test_main_plugin_registers_interaction_contributors_during_init(

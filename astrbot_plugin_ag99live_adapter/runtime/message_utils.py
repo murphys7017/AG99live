@@ -6,6 +6,12 @@ from astrbot.api.message_components import Image, Plain, Record
 
 
 def resolve_platform_segment_message_id(platform_extras: dict[str, Any]) -> str:
+    output_segment = platform_extras.get("output_segment")
+    if isinstance(output_segment, dict):
+        message_id = output_segment.get("message_id")
+        if isinstance(message_id, str) and message_id.strip():
+            return message_id.strip()
+
     logical_message_id = platform_extras.get("logical_message_id")
     if isinstance(logical_message_id, str) and logical_message_id.strip():
         return logical_message_id.strip()

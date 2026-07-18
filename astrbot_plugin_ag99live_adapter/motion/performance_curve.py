@@ -34,6 +34,8 @@ _MAX_RETAINED_RESULTS = 64
 @dataclass(slots=True)
 class PerformanceCurveInput:
     turn_id: str
+    tts_turn_id: str
+    message_id: str
     request_id: str
     assistant_text: str
     assistant_reply_keywords: list[str]
@@ -90,6 +92,10 @@ class PerformanceCurveRuntime:
             return None
         return dict(result)
 
+    def owns_request(self, *, turn_id: str | None, request_id: str | None) -> bool:
+        key = _build_curve_key(turn_id, request_id)
+        return bool(key and key in self._requested_keys)
+
     def clear(self, *, turn_id: str | None, request_id: str | None) -> None:
         key = _build_curve_key(turn_id, request_id)
         if not key:
@@ -100,6 +106,7 @@ class PerformanceCurveRuntime:
         self._tasks.pop(key, None)
         self._results.pop(key, None)
         self._requests.pop(key, None)
+        self._requested_keys.discard(key)
 
     def discard_if_not_ready(
         self,
@@ -118,7 +125,7 @@ class PerformanceCurveRuntime:
             return False
         if task is not None and not task.done():
             task.cancel()
-        self.clear(turn_id=turn_id, request_id=request_id)
+        self._drop_cached_key(key)
         return True
 
     def cancel_turn(self, turn_id: str | None) -> None:
@@ -126,10 +133,19 @@ class PerformanceCurveRuntime:
         if not normalized_turn_id:
             return
         prefix = f"{normalized_turn_id}:"
-        for key, task in list(self._tasks.items()):
-            if not key.startswith(prefix):
-                continue
-            if not task.done():
+        turn_keys = {
+            key
+            for key in (
+                set(self._tasks)
+                | set(self._results)
+                | set(self._requests)
+                | self._requested_keys
+            )
+            if key.startswith(prefix)
+        }
+        for key in turn_keys:
+            task = self._tasks.get(key)
+            if task is not None and not task.done():
                 task.cancel()
             self._tasks.pop(key, None)
             self._results.pop(key, None)
@@ -147,7 +163,7 @@ class PerformanceCurveRuntime:
 
         prompt = build_performance_curve_prompt(
             turn_id=request.turn_id,
-            message_id=request.request_id,
+            message_id=request.message_id,
             assistant_text=request.assistant_text,
             assistant_reply_keywords=request.assistant_reply_keywords,
             motion_intent_tags=request.motion_intent_tags,
@@ -215,12 +231,16 @@ class PerformanceCurveRuntime:
             getattr(self.runtime_state, "motion_lab_recorder", None),
             event_type=event_type,
             turn_id=request.turn_id,
-            message_id=request.request_id,
+            message_id=request.message_id,
             source_route="performance_curve_provider",
             phase="performance_curve",
             assistant_text=request.assistant_text,
             payload_kind=payload_kind,
-            raw=raw,
+            raw={
+                **raw,
+                "tts_turn_id": request.tts_turn_id,
+                "tts_request_id": request.request_id,
+            },
         )
 
     def _is_enabled(self) -> bool:
@@ -235,12 +255,14 @@ class PerformanceCurveRuntime:
         self._drop_current_task(key)
         self._results.pop(key, None)
         self._requests.pop(key, None)
+        self._requested_keys.discard(key)
 
     def _prune_retained_results(self) -> None:
         while len(self._results) > _MAX_RETAINED_RESULTS:
             key = next(iter(self._results))
             self._results.pop(key, None)
             self._requests.pop(key, None)
+            self._requested_keys.discard(key)
 
 
 def normalize_performance_curve_hint(value: Any) -> dict[str, Any]:

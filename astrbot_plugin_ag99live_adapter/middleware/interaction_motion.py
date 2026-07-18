@@ -29,7 +29,10 @@ from .motion_payload import (
     resolve_axis_neutral_value as _payload_resolve_axis_neutral_value,
     resolve_axis_value_range as _payload_resolve_axis_value_range,
 )
-from ..motion.output_sanitizer import sanitize_assistant_output_text
+from ..motion.output_sanitizer import (
+    contains_hidden_output_markup,
+    sanitize_assistant_output_text,
+)
 from ..motion.motion_intent import (
     resolve_selected_semantic_axis_profile,
 )
@@ -196,13 +199,19 @@ class AG99liveMotionResultContributor:
 
     async def collect(self, event, plugin_context, view):
         del plugin_context
+        event.set_extra("_ag99live_pending_performance_curve", None)
+        event.set_extra("ag99live_raw_reply_text", None)
 
         attempt = await _schedule_motion_from_interaction_result(event, view)
         if attempt is None:
             return None
 
         client_objects = []
-        platform_extras: dict[str, Any] = {}
+        raw_assistant_text = _extract_raw_assistant_text(view)
+        final_text_override = None
+        if contains_hidden_output_markup(raw_assistant_text):
+            event.set_extra("ag99live_raw_reply_text", raw_assistant_text)
+            final_text_override = sanitize_assistant_output_text(raw_assistant_text)
         if attempt.motion_payload is not None:
             client_objects.append(
                 {
@@ -212,41 +221,67 @@ class AG99liveMotionResultContributor:
                     "source": attempt.source or "persona_effect",
                 }
             )
-            request_id = _start_optional_performance_curve_request(
-                event,
-                attempt=attempt,
-            )
-            if request_id:
-                platform_extras["performance_curve_request_id"] = request_id
+            _defer_optional_performance_curve_request(event, attempt=attempt)
         return InteractionResultContribution(
             plugin_id=self.plugin_id,
-            platform_extras=platform_extras,
+            final_text_override=final_text_override,
             client_objects=client_objects,
             metadata={"ag99live_motion_schedule": attempt.to_metadata()},
             priority=self.priority,
         )
 
 
-def _start_optional_performance_curve_request(
+def _defer_optional_performance_curve_request(
     event: Any,
     *,
     attempt: _MotionScheduleAttempt,
+) -> None:
+    if attempt.motion_payload is None or not attempt.assistant_text:
+        return
+    event.set_extra(
+        "_ag99live_pending_performance_curve",
+        {
+            "assistant_text": attempt.assistant_text,
+            "motion_payload": attempt.motion_payload,
+        },
+    )
+
+
+def start_deferred_performance_curve_request(
+    event: Any,
+    *,
+    turn_id: str,
+    message_id: str,
+    tts_request_id: str,
+    external_correlation_id: str | None,
 ) -> str | None:
+    pending = event.get_extra("_ag99live_pending_performance_curve")
+    if not isinstance(pending, dict):
+        return None
+    event.set_extra("_ag99live_pending_performance_curve", None)
     bundle = _resolve_motion_runtime_bundle(event)
-    if bundle is None or attempt.motion_payload is None or not attempt.assistant_text:
-        return None
-    start = getattr(
-        bundle.turn_coordinator,
-        "start_performance_curve_request",
-        None,
+    if bundle is None:
+        raise RuntimeError("ag99live_motion_runtime_unavailable")
+    motion_payload = pending.get("motion_payload")
+    if not isinstance(motion_payload, dict):
+        raise ValueError("performance_curve_pending_motion_payload_invalid")
+    request_id = bundle.turn_coordinator.start_performance_curve_request(
+        turn_id=external_correlation_id,
+        tts_turn_id=turn_id,
+        message_id=message_id,
+        request_id=tts_request_id,
+        assistant_text=str(pending.get("assistant_text") or ""),
+        motion_payload=motion_payload,
     )
-    if not callable(start):
-        return None
-    return start(
-        turn_id=attempt.scheduled_frontend_turn_id,
-        assistant_text=attempt.assistant_text,
-        motion_payload=attempt.motion_payload,
-    )
+    if request_id:
+        logger.info(
+            "WIRING performance_curve_started turn_id=%s message_id=%s "
+            "tts_request_id=%s",
+            turn_id,
+            message_id,
+            tts_request_id,
+        )
+    return request_id
 
 
 def register_ag99live_interaction_contributors(context: Any) -> None:
@@ -1826,12 +1861,16 @@ def _append_resolution_reason(base: str | None, suffix: str) -> str:
 
 
 def _extract_assistant_text(view: Any) -> str:
+    return sanitize_assistant_output_text(_extract_raw_assistant_text(view)).strip()
+
+
+def _extract_raw_assistant_text(view: Any) -> str:
     for value in (
         getattr(view, "final_result", None),
         getattr(view, "core_result", None),
         getattr(view, "immediate_reply", None),
     ):
-        text = sanitize_assistant_output_text(str(value or "")).strip()
+        text = str(value or "").strip()
         if text:
             return text
     return ""

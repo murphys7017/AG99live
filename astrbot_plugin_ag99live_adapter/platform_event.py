@@ -31,16 +31,9 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         self._attach_prompt_annotations(message_obj=message_obj)
 
     async def send(self, message):
-        await self.adapter.emit_message_chain(
-            message_chain=message,
-            unified_msg_origin=self.unified_msg_origin,
-            raw_reply_text_override=str(self.get_extra("ag99live_raw_reply_text", "") or "").strip()
-            or None,
-            platform_extras=self._standard_output_platform_extras,
-        )
-        await super().send(message)
+        await self.send_message_with_extras(message)
 
-    async def send_interaction_message(
+    async def send_message_with_extras(
         self,
         message,
         *,
@@ -48,17 +41,28 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         record_send_operation: bool = True,
     ) -> None:
         previous_has_send_oper = self._has_send_oper
+        resolved_platform_extras = dict(platform_extras or {})
+        if not any(
+            key in resolved_platform_extras
+            for key in (
+                "output_segment",
+                "logical_message_id",
+                "visible_message_id",
+                "message_id",
+            )
+        ):
+            resolved_platform_extras.update(self._standard_output_platform_extras)
         await self.adapter.emit_message_chain(
             message_chain=message,
             unified_msg_origin=self.unified_msg_origin,
             raw_reply_text_override=str(self.get_extra("ag99live_raw_reply_text", "") or "").strip()
             or None,
-            platform_extras=platform_extras,
+            platform_extras=resolved_platform_extras,
         )
         if not record_send_operation:
             self._has_send_oper = previous_has_send_oper
         else:
-            self._has_send_oper = True
+            await self._record_send_operation()
 
     async def complete_visible_turn(self) -> None:
         base_complete = getattr(super(), "complete_visible_turn", None)
