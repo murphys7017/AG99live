@@ -124,8 +124,8 @@ sequenceDiagram
 
             opt Audio metadata 阶段准备语义动作 / speech-only 动作
                 Engine->>Engine: 协议 / profile / resource 校验
-                Engine->>Engine: 九级采样 + relation graph + timing
-                Engine->>Engine: 按音频总时长合成 speech gesture 与 parameter_plan.v2
+                Engine->>Engine: 九级采样 + intensity/coupling + timing/speech gesture
+                Engine->>Engine: relation graph + parameter_plan.v2 + resource policy
             end
 
             opt Audio playing 时已有准备计划

@@ -66,28 +66,31 @@ flowchart TD
     end
 
     subgraph COMPILE[5. ModelEngine 编译阶段]
-        ID[Identity/Profile Stage<br/>turn/message/profile revision]:::engine
-        AXIS[Axis Resolver<br/>识别输入轴与明确中性]:::engine
-        SAMPLE[Level Sampling<br/>profile 锚点 + 确定性有界扰动<br/>seed=turn+message+axis+transform]:::engine
-        CAND[Candidate Stages<br/>direct / derived / speech gesture candidates]:::engine
+        ID[IntentValidator order 10<br/>schema / model / profile revision]:::engine
+        AXIS[AxisResolver order 20<br/>等级锚点 + 确定性有界采样<br/>segment seed + per-axis seed]:::engine
+        INTENSITY[IntensityStage order 30<br/>整体与单轴强度]:::engine
+        COUPLING[CouplingStage order 40<br/>显式派生候选]:::engine
+        MODE[ModeResolver order 45<br/>idle / expressive]:::engine
+        TIMING[TimingStage order 46<br/>音频剩余时长 + performance curve]:::engine
+        SPEECH[SpeechPoseStage order 47<br/>speech gesture track]:::engine
         GRAPH[SemanticAxisRelationGraphStage<br/>轴关系 / 影响系数 / 硬范围<br/>头身比例与有限反向平衡]:::engine
-        POLICY[ResourcePolicyStage<br/>参数所有权冲突检查]:::engine
-        TIMING[Timing Stage<br/>音频剩余时长 + performance curve]:::engine
-        BUILD[PlanBuilder<br/>轴值 -> Live2D parameter binding]:::engine
+        BUILD[PlanBuilder order 80<br/>轴值 -> Live2D parameter binding]:::engine
+        POLICY[ResourcePolicyStage order 90<br/>参数所有权冲突与执行策略]:::engine
         PLAN[engine.parameter_plan.v2]:::contract
         TRACE[MotionTransformTrace<br/>raw/resolved/derived/constrained/compiled]:::runtime
         CFAIL[MotionFeedback<br/>编译失败，不启动播放器]:::failure
 
-        NORMAL --> ID --> AXIS --> SAMPLE --> CAND --> GRAPH --> POLICY --> TIMING --> BUILD --> PLAN
+        NORMAL --> ID --> AXIS --> INTENSITY --> COUPLING --> MODE --> TIMING --> SPEECH --> GRAPH --> BUILD --> POLICY --> PLAN
         ID -.失败.-> CFAIL
         AXIS -.空/非法/全中性.-> CFAIL
-        SAMPLE -.profile anchor 缺失.-> CFAIL
+        AXIS -.profile anchor 缺失.-> CFAIL
         GRAPH -.关系图或范围错误.-> CFAIL
         POLICY -.资源冲突/不可播放.-> CFAIL
         BUILD -.binding 无效.-> CFAIL
         AXIS -.记录.-> TRACE
-        SAMPLE -.记录.-> TRACE
-        CAND -.记录.-> TRACE
+        INTENSITY -.记录.-> TRACE
+        COUPLING -.记录.-> TRACE
+        SPEECH -.记录.-> TRACE
         GRAPH -.记录.-> TRACE
         BUILD -.记录.-> TRACE
     end

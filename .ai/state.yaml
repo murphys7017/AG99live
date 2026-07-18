@@ -1,577 +1,87 @@
 task:
-  class: bugfix
-  risk: high
-  phase: validation_complete
+  class: maintenance
+  risk: medium
+  phase: review_complete
   status: complete
-  scope: Consume AstrBot read-only TTS generation states in AG99live, bind optional curve work to TTS identity, and keep output text normalization outside the TTS lifecycle hook
+  scope: Keep one current architecture, remove historical documents and stale guidance, and align documentation with the live message, motion, and playback chain.
+
 context:
   confidence: high
   assumptions:
-    - The official AstrBot <@anim> v3 compatibility entry and internal v3 manual preview remain supported; they are not historical fallback paths.
-    - Live2D Cubism Framework sources remain vendor-owned and are excluded from dead-code cleanup; only AG99-owned WebSDK sample remnants are removed.
-    - Performance curve hint v1 is the current schema name, and random lip-sync degradation is an explicit runtime policy rather than obsolete compatibility code.
-    - system.model_sync is accepted only when the selected model, model inventory, runtime-consumed model fields, semantic profile, voice-following profile, resource ownership data, and duplicated runtime cache diagnostics are structurally consistent.
-    - selected_model must name an entry in models; the frontend never substitutes the first model when backend selection is invalid.
-    - output.segment carries one canonical assistant text source; audio does not carry a second caption copy.
-    - Audio-backed text is a subtitle and becomes visible only when the matched audio timeline starts; text-only segments display immediately.
-    - Performance-curve timing owns intentional motion entrance delay, so the audio-start bridge must not add a fixed timer.
-    - A required motion sink may be registered only for an explicit motion payload or after ModelEngine has successfully prepared speech-only motion.
-    - Subtitle release failure is a segment-fatal invariant violation and must stop audio, motion, lip sync, and the owning timeline atomically.
-    - A failed required audio sink fails the owning timeline and every still-open required sink; it must not be recorded as an interrupted timeline after SessionStore records failure.
-    - output.segment.v3 is a closed protocol; unknown or removed fields are rejected instead of silently discarded.
-    - Result contribution only registers pending curve input; request state advances only from the read-only TTS generating notification and uses its tts_request_id.
-    - AstrBot physical Plain, Record, image, and motion objects are aggregated only inside the adapter; the frontend receives one output.segment.v3 per turn_id plus message_id.
-    - TTS physical parts use AstrBot delivery_metadata.output_segment.message_id; only standard outputs without segment metadata share standard_reply, and only complete_visible_turn() closes the output queue.
-    - Adapter delivery aggregation rejects mismatched AstrBot TTS turn, logical message, tts_request_id lifecycle, or AG99 frontend external_correlation_id instead of attaching them to the current segment.
-    - Output queue close ownership is bound to the exact turn_id; zero-segment close and synth_finished send failure are hard errors, and closed state is committed only after send success.
-    - Performance curve execution has one source at motion.payload.performance_curve_hint; output.segment.v3 rejects the removed top-level performance_curve slot.
-    - SessionStore commitOutputSegment is the only production segment creation boundary; protocol and motion validation complete before the sole Store write.
-    - SessionStore lifecycle mark methods require an existing committed turn_id plus message_id segment; they cannot create segments or reopen acknowledged material.
-    - control.synth_finished asserts every segment is complete and never infers absent audio or motion from missing late patches.
-    - Production frontend motion and performance-curve patches have been removed; independent engine messages remain only for manual preview.
-    - AstrBot interaction output may expose numbered visible_message_id values plus message_kind for one logical reply; adapter-side normalization is an external runtime bridge, not a frontend protocol compatibility route.
-    - PlaybackTimelineRuntime receives immutable execution sinks at construction, and TurnPlaybackOrchestrator does not own fragment wait timers or mirrored readiness.
-    - Live2D model replacement cancels the previous load generation before Cubism teardown; every asynchronous model, texture, and uncached-motion callback must reject stale or released instance ownership before touching SDK managers.
-    - Audio-backed canonical text is a subtitle owned by the matched Timeline; audio failure before start fails that subtitle and motion instead of converting the segment to text-only or motion-only playback.
-    - Audio expectation is a monotonic segment fact once declared or established by an audio payload; later physical text parts cannot clear it.
-    - Immediate Persona Effect scheduling is phase-owned because AstrBot parallel fast response emits before route persistence; final scheduling may still use the persisted route decision.
-    - Speech-only motion must upgrade the current audio segment with a required motion sink before ModelEngine starts its plan.
-    - A synthetic clock may start pending motion only when the segment is explicitly motion-only; an audio-owned segment remains pending until its real audio clock is playing or paused.
-    - Performance curve generation is phase-scoped: hybrid immediate and final replies receive independent request IDs, and no request starts for a phase that never enters TTS.
-    - Output segments bind performance curves directly from their own TTS request identity after runtime ownership validation; event-level curve request IDs are forbidden because they can leak across multiple TTS segments.
-    - Performance curve at-most-once keys and retained work are cleared after successful segment send or when the owning turn closes; send failure preserves state for retry.
-    - Live2D lip-sync analyser callbacks invoke adapter methods with their instance binding preserved; frame write exceptions stop sampling and emit lip_sync_parameter_write_failed.
-    - Speech following profile v2 and speech_gesture_track replace the v1 cycle contract without runtime compatibility.
-    - ModelEngine owns deterministic gesture selection and control-point planning; WebSDK owns per-frame interpolation and dynamics.
-    - Real audio RMS may feed both mouth and speech energy, but random lip-sync degradation must never feed speech energy.
-    - Persona Effect v4 axis_levels use the nine-level -4..4 contract; transform version v4 distinguishes recalibrated samples from historical seven-level data.
-    - Level anchors map ±1 to soft-range edges, ±2 to soft/strong midpoints, ±3 to strong-range edges, and ±4 to independently configured extreme-range edges; relation-graph and parameter hard ranges remain authoritative.
-    - Ordinary Live2D primary pose axes start at level three for visual readability; level two is restrained, level one is detail or transition, and level four is brief exaggerated performance.
-    - Motion capability examples use only current Persona Effect v4 arguments; built-in level-three, level-four, and sequence examples reserve structural coverage, then up to three valid current-revision user samples fill the seven-example budget.
-    - SemanticAxisProfile v2 requires extreme_range; only on-disk v1 profiles pass through the explicit migration boundary, while malformed v2 profiles fail validation.
-    - Generated seven-level profiles migrate automatically with a revision bump; user-modified profiles preserve their calibrated soft/strong ranges and derive only the new ±4 anchors instead of being overwritten.
-    - Playback acknowledgement is recorded only after the outbound WebSocket send succeeds; send failure makes the frontend session fail visibly.
-    - Disconnect and turn replacement interrupt every owned Timeline with explicit turn_id plus message_id; ModelEngine stops only the matching active run and removes only that segment's pending payload.
-    - Soft handoff keeps the previous run owned until the replacement starts; expression lookup failure preserves both the previous run and expression, while direct-plan replacement failure explicitly settles the previous run.
-    - Production Orchestrator, Timeline, and pending motion keys require non-empty turn_id and message_id; preview remains a separate direct path.
-    - Main-path lip sync uses only the current HTMLAudioElement Web Audio clock; SDK WAV progression is not a fallback clock.
-    - ModelEngine compile failures are persisted as Motion Lab feedback events; frontend events are written to IndexedDB before send, retained until a SQLite persistence acknowledgement, and resent with a stable event_id after reconnect.
-    - A preparing audio PlaybackTimeline remains the lifecycle owner of its queued motion even though it cannot be used as a timing clock until audio starts.
-    - A motion player may report accepted playback only when it synchronously invokes onStarted with a non-empty runId; ModelEngine no longer synthesizes unowned started events.
-    - Motion intents whose profile_revision differs from the selected model profile fail compilation instead of being reinterpreted with current anchors and relations.
-    - Resource candidate identity is the pair resource_type plus case-insensitive resource_id, so expression and motion layers may intentionally share a catalog ID.
-    - Persona Effect resource intent is split into expression_resource_id and motion_resource_id; legacy resource_id is rejected on the v4 main path while the official <@anim> v3 compatibility contract remains unchanged.
-    - Expression resources may layer with a semantic parameter plan only when parameter ownership does not conflict; motion resources are complete-action playback and replace the parameter plan at execution time.
-    - Invalid, ambiguous, unowned, or non-playable resource intents fail visibly and never fall back to axis-only playback.
-    - New unified-clock and protocol work should not preserve legacy playback or motion routes for compatibility; old routes should be deleted or made fail-visible instead of silently falling back.
-    - The application layer is the only PlaybackTimeline composition root; Adapter exposes narrow queue and audio execution ports and receives motion normalization as an injected dependency.
-    - ModelEngine validates engine.parameter_plan.v2 once before WebSDK execution; WebSDK owns runtime parameter resolution and per-frame execution but does not parse the transport schema again.
-    - Non-streaming JSON microphone protocols are removed; microphone ingress uses only audio_stream_start, binary PCM16LE chunks, and audio_stream_end.
-    - Motion pose candidates are prompt references, not fallback execution; invalid or empty model motion output remains a visible failure.
-    - Backend control events that settle or interrupt a turn must carry explicit turn_id; the frontend must not infer turn ownership from currentTurnId or active audio state.
-    - Phase 1 pure timeline logic is complete; Phase 2 now lets audioRuntime create a segment PlaybackTimelineEngine for released audio.
-    - Audio timeline integration observes and records real audio playback clock state, but does not yet replace turnPlaybackOrchestrator release decisions.
-    - Audio playback is now injected through PlaybackTimelineAudioSink instead of separate start/stop/clock functions, making audio execution a concrete timeline sink boundary.
-    - PlaybackTimelineRuntime stores timelines only by turnId + messageId; active timeline compatibility APIs and the hidden active segment pointer have been removed.
-    - ModelEngine consumes a narrow MotionPlaybackClockContext projected by the Timeline integration layer; it does not depend on PlaybackTimelineSnapshot or sink state.
-    - Motion release now receives a segment-scoped audio timeline snapshot from PlaybackTimelineRuntime when turnId and messageId match; mismatched timeline snapshots are intentionally hidden from the motion sink.
-    - Audio metadata supplies duration for ModelEngine preparation; the real Audio playing event refreshes the segment-scoped snapshot and immediately starts the prepared plan without a fixed wakeup timer.
-    - Motion release now registers a required motion sink on the matched active audio timeline; ModelEngine started/finished callbacks write motion started/completed/failed/interrupted terminal state back into that timeline.
-    - Active audio timelines are retained after audio completion when a required motion sink is still running, and are cleared only after the timeline reaches completed/failed/interrupted.
-    - Active playback timeline lifecycle has been extracted from AdapterAudioRuntime into PlaybackTimelineRuntime; AdapterAudioRuntime now delegates audio timeline, motion-only timeline, and motion/lip-sync sink terminal updates.
-    - TurnPlaybackOrchestratorCore now emits a typed segment release job with explicit text/audio/motion slots instead of separately owning text/audio/motion release calls; PlaybackTimelineRuntime owns that job's execution semantics while turn-playback only forwards the job.
-    - Segment job execution semantics now live inside PlaybackTimelineRuntime.startSegmentJob; useTurnPlaybackOrchestrator forwards segment jobs directly into the timeline runtime, while segmentJob defines job/sink contracts.
-    - PlaybackTimelineRuntime exposes startSegmentJob as the segment-level start entry point; immutable text/audio/motion/session execution ports are injected at construction, and missing ports are a hard wiring error.
-    - SessionStore is the sole owner of complete text/audio/motion segment material; the orchestrator passes that material directly to timeline-owned sinks, and the duplicate pending text/audio maps and release queue helpers have been removed.
-    - PlaybackTimelineRuntime no longer exposes segment, motion, or audio preparation APIs publicly; motion timeline preparation is owned by startSegmentJob, while audio preparation is private behind startAudioTimelineSink.
-    - Playback timeline runtime wiring is no longer optional for segment release; missing timelineRuntime is a type-level wiring error instead of a silent preparation bypass.
-    - AudioPlaybackActions and MotionSink timeline wiring are now required dependencies, so missing audio timeline callbacks or motion timeline lookup/terminal callbacks are type-level wiring errors instead of silent timeline bypasses; motion preparation is not exposed through adapter-facing ports.
-    - PreviewMotionPlayer now reports stopped terminal events for explicit motion stops and direct-plan replacement, so motion timeline sinks do not depend on silent local cleanup.
-    - Explicit no-audio motion-only segments create a synthetic playback timeline with motion as the required sink.
-    - Motion-only synthetic timelines now require an explicit release context marked as no-audio; a missing audio timeline is not enough to create synthetic timing.
-    - Explicit motion-only contexts fail immediately with motion_only_timeline_unavailable when a synthetic timeline cannot be prepared; they must not queue in ModelEngine waiting for an audio-start timeout.
-    - ModelEngine now uses playback timeline duration/currentTime as the only audio-synced motion timing source when the release context carries a usable timeline snapshot.
-    - Performance curve timing and direct-plan retiming are owned by ModelEngine; valid audio clocks use remaining duration, sequence keyframes scale with the plan, and Live2D playback no longer rewrites timing.
-    - Each useModelEngine instance owns isolated reactive state and an isolated compile stage registry; core stages cannot be disabled or removed at runtime.
-    - Production motion ingress rejects missing turn_id and duplicate pending turn_id plus message_id payloads; preview remains a direct path without a production turn requirement.
-    - ModelEngine owns rejected-motion terminal reporting through its Timeline callback; the motion sink does not perform a second generic terminal write.
-    - Audio-start notifications now refresh pending motion entries with the current matched audio timeline snapshot before starting the payload, avoiding stale release-time timeline snapshots.
-    - Speech-only motion now also consumes the matched audio-start timeline snapshot when no queued motion starts, so speech-following plans use real remaining audio duration instead of any SessionStore estimate.
-    - Motion release timeline ownership lookup now lives in PlaybackTimelineRuntime; TurnPlaybackOrchestrator no longer reads active audio timeline snapshots directly, and MotionTimelineSink uses segment-scoped lookup when available.
-    - Lip sync runtime has been moved behind an independent PlaybackTimelineAudioLipSyncSink boundary, and PlaybackTimelineAudioSegmentSink now owns audio element event ordering plus lip-sync attach/start/terminal/stop while audio playback actions only update adapter/session state.
-    - Audio segment runner now starts browser audio through PlaybackTimelineRuntime.startAudioTimelineSink, so released audio enters the PlaybackTimelineEngine sink-start callback path instead of runner-local prepare plus direct sink start.
-    - AdapterAudioRuntime accepts the selected segment audio URL only through the timeline release port; PlaybackTimelineRuntime remains the sole owner of audio.released lifecycle projection.
-    - AdapterConnection.playbackTimeline no longer exposes direct text/audio queue release wrappers or raw segment-sink wiring; connection-level callers and tests should release playback through PlaybackTimelineRuntime.startSegmentJob with explicit text/audio/motion slots.
-    - Ready segments are released through one frontend playback lane in SessionStore insertion order, so a later turn cannot replace an earlier turn's active audio or ModelEngine motion ownership.
-    - Audio playback started/duration and active-timeline terminal SessionStore writes now happen through PlaybackTimelineRuntime audio lifecycle session ports; AdapterAudioRuntime's state bridge updates UI playback state for those events.
-    - Motion playback started/terminal SessionStore writes now happen through PlaybackTimelineRuntime motion lifecycle session ports; PlaybackCompletionCoordinator now owns only turn-level playback_finished acknowledgement and late-audio reopen.
-    - Production desktop wiring uses the independent MotionPlaybackRecorder for motion history, run tracking, and Motion Lab raw events; PlaybackCompletionCoordinator has no motion-recording dependency.
-    - Live2D lip-sync sampling and external mouth-parameter writes now live in frontend/src/live2d/lipSyncTimelineSink.ts; playback-timeline/lipSyncSink.ts keeps only the timeline-facing lifecycle runtime and terminal rules.
-    - Playback timeline sink terminal state is now stable once a sink reaches a terminal value, so late cleanup/completion events cannot overwrite a real failure.
-    - Missing required playback timeline or sink lifecycle wiring should mark the affected audio/motion segment failed instead of being treated as a warning-only event; late events after a closed timeline may remain diagnostic-only.
-    - Lip sync can only complete after it has explicitly started; if audio ends before lip sync starts, the lip_sync sink fails with lip_sync_not_started_before_audio_end.
-    - Lip-sync resource disposal is distinct from business interruption: normal audio element disposal does not emit interrupted, while replacement or explicit stop does.
-    - Timeline snapshots now expose audio_unavailable when an attached or expected audio clock cannot provide a playable audio-time snapshot, keeping text-only synthetic timing separate from audio-clock failures.
-    - Audio playback started events require a real audio clock; missing clock at started time fails the audio sink/session instead of installing a synthetic or unavailable playback clock.
-    - ModelEngine no longer consumes audio_unavailable playback timelines for audio-synced duration or speech-active detection, and it will not fall back to SessionStore audio-duration estimates for that failure state.
-    - Stopping an already-playing audio segment now writes an audio terminal only when no more specific terminal reason has already been set.
-    - The automatic Persona Effect motion path uses engine.motion_intent.v4 axis_levels exclusively; engine.motion_intent.v3 axes remain only for the official <@anim> compatibility transport and internal manual previews.
-    - Persona Effect v4 never falls back to v3: mixed axes/axis_levels, non-integer levels, out-of-range levels, unknown axes, or missing profile anchors fail visibly.
-    - Semantic profiles persist ordered -3..3 level anchors; ModelEngine converts levels from those anchors and records raw levels plus resolved axes in MotionTransformTrace before relation-graph processing.
-    - Non-neutral axis levels are deterministically sampled inside the selected level's midpoint bounds using turn_id, message_id, profile hash, and transform version; intensity scaling cannot cross those recorded sample bounds.
-    - Semantic pose and speech following share one parameter owner: ModelEngine attaches speech following as modulation on the compiled semantic parameter instead of rejecting overlap or creating a second writer.
-    - Semantic axis profiles own max velocity, max acceleration, life-motion scale, and maximum speech-offset ratio; PlanBuilder maps these values into Cubism parameter space and WebSDK limits the final per-frame target after all modulation and easing are composed.
-    - Per-frame dynamics decelerate continuously across target reversals and stop exactly at the target when a discrete frame would cross it, preventing target-adjacent oscillation.
-    - Exceptions during an active direct parameter plan are owned by that motion run: WebSDK reports a failed terminal and keeps RAF alive; render failures without an active plan remain fail-visible.
-    - Direct parameter plan terminal timeout actively stops the SDK plan with a failed terminal instead of leaving a hidden active run after updating UI state.
-    - Live2D renderer readiness is emitted only after the active model reaches Cubism CompleteSetup; Vue nextTick is not a model-ready signal.
-    - Concurrent calls for the same model initialization share one load Promise, while model selection requests are serialized before changing the SDK global model configuration.
-    - A rejected motion sink is handled once as failed and is never recorded as released or retried by the orchestrator.
-    - WebSDK parameter binding, lip-sync parameter selection, and voice-following frequency/direction use explicit profile declarations only; runtime name guessing has been removed.
-    - Parameter plan source, neutral target, and dynamics are mandatory at parser and SDK boundaries and are not defaulted during playback.
-    - Mk6 declares ParamMouthOpenY in its model3 LipSync group; lip sync uses only manifest-declared parameter IDs.
-    - Speech modulation frequency and direction, sequence-step dynamics, and parameter source are all mandatory across parser and compiler boundaries; missing values fail rather than inheriting or defaulting.
-    - Audio start failures distinguish browser NotAllowedError from generic sink failures, and an empty manifest texture entry fails model loading explicitly.
-    - Lip-sync failures retain a concrete timeline reason. When WebAudio analysis fails but declared model lip-sync parameters remain writable, a logged random mouth animation runs only until the current audio ends while the lip-sync sink remains failed.
-    - Closed playback timeline identity history is bounded to 512 recent segments, and the frontend motion-duration default matches the adapter contract at 1000 ms.
-    - WebSDK rejects an entire malformed, unbindable, duplicate, or out-of-range parameter plan instead of salvaging playable entries or clamping invalid plan targets.
-    - Every engine.parameter_plan.v2 parameter requires neutral_target_value and dynamics; Motion Lab manual plans derive both from the selected semantic axis profile rather than emitting an unconstrained legacy plan.
-    - Multi-step motion validates neutral-to-first and inter-step travel against rest-to-rest triangular/trapezoidal velocity profiles; impossible timing fails with motion_sequence_transition_budget_exceeded.
-    - Motion relation diagnostics record within_limit, derived, constrained, and skipped outcomes independently from actual value-changing adjustments; stabilization passes do not overwrite an earlier derived or constrained outcome.
-    - The unused RealtimeMotionPlan generator, its dedicated tests, hidden realtime selector settings, and SDK WAV lip-sync analyzer have been removed; the Persona Effect path and official <@anim> compatibility path remain the only automatic motion inputs.
-    - The automatic motion path is middleware-first only; inline_first is no longer a runtime-selectable motion generation route.
-    - engine.motion_intent.v2 is no longer accepted at backend normalization, frontend inbound, preview send, or ModelEngine normalization boundaries.
-    - <@anim> remains an official AstrBot compatibility transport only when Persona Effect injection is unavailable; it is not a fallback for invalid ag99live.motion payloads.
-    - motion_catalog.json may enrich fallback pose descriptions and catalog-derived semantic candidates only when the motion can be mapped to semantic axes.
-    - fallback_pose_id is no longer selected as a semantic pose; it remains empty in the transitional v3 shape and never drives playback.
-    - The unused middleware helper that selected the first fallback pose candidate has been removed; candidate ordering remains prompt-only.
-    - Motion prompt static/dynamic scope metadata improves render-tree selection and diagnostics, but model input token reduction still depends on AstrBot/provider static prefix caching or session-level reuse.
-    - Main Persona Effect motion no longer performs backend skeleton repair or fallback pose replacement; remaining fallback candidate data is prompt/diagnostic metadata until an explicit Engine-stage policy is implemented.
-    - Empty, invalid, or all-neutral motion axes should not be replaced by a fallback pose; those turns should be treated as no valid motion input.
-    - AdapterConnection now exposes playback timeline operations through the aggregated playbackTimeline port; production callers should not depend on scattered root-level timeline methods.
-    - PetDesktopRuntime now delegates playback timeline motion wiring and segment execution wiring to app-level helpers, keeping the desktop runtime from owning bridge details directly.
-    - Semantic motion processing lives in ModelEngine: the adapter validates and transports semantic intent without semantic clamping, fallback pose repair, expressive floor, or head/body constraint rewriting.
-    - ModelEngine now rejects invalid axes and exact-neutral semantic inputs with structured compile feedback, then applies the mounted semantic axis relation graph before plan building.
-    - TurnCoordinator validates and transports Persona Effect v4 payloads plus official <@anim> v3 compatibility payloads; it does not apply semantic axis constraints.
-    - Semantic profiles now carry ag99.semantic_axis_relation_graph.v1 edges; derive and bounded_ratio rules are consumed by ModelEngine, while old couplings are only a migration source for profiles that have not been rewritten yet.
-    - Legacy backend fallback-pose scoring and fallback-axis descriptor helpers are removed from the motion intent path; fallback candidates remain prompt/diagnostic metadata only.
-    - IntensityStage now produces candidate axis values only; SemanticAxisRelationGraphStage owns final semantic axis value-range constraints and records range adjustments in the transform trace.
-    - ModelEngine PlanBuilder now rejects invalid parameter bindings, binding input-range mismatches, and duplicate parameter targets instead of skipping them or reporting after_salvage success.
-    - ensure_semantic_axis_profile persists the derived relation_graph for legacy profiles on first load without changing user axes, couplings, status, or revision.
-    - Frontend ModelEngine requires semantic profile relation_graph and no longer reads legacy couplings; backend legacy normalization exists only to migrate persisted profiles before they cross the frontend boundary.
-    - The unused hash-based speech-pose direction fallback has been removed; speech pose direction now comes from explicit voice-following metadata or axis semantics.
-    - Legacy repair/fallback counters in motion_intent.py had no callers and have been removed; runtime failures remain visible through structured payload and compiler diagnostics.
-    - Performance curve enum normalization is strict at backend and frontend motion boundaries; invalid curve objects are rejected instead of being rewritten to defaults or silently dropped.
-    - A performance curve hint is optional timing metadata: when the matched Timeline cannot resolve it, ModelEngine records performance_curve_skipped, removes only that hint, and compiles the otherwise valid base motion without inventing a clock or default curve.
-    - fallback_pose_id has been removed from the current v3 runtime payload, frontend protocol type, manual preview builders, and diagnostics; old-field fixtures remain only in rejection-boundary tests.
-    - Motion generation metadata now uses single_response_effect; immediate/final remains a response-segment phase distinction and is not used as a generation mode.
-    - Explicit duration_hint_ms values are now strict at backend motion boundaries: missing remains optional/defaulted, numeric text is accepted, but non-numeric, non-finite, and out-of-range values fail instead of being defaulted or clamped.
-    - Empty intent_tags no longer derive the synthetic emotion label "motion"; label derivation now fails visibly and callers must validate tags before building a payload.
-    - ModelEngine now preserves validated resource_id on engine.parameter_plan.v2 and MotionTransformTrace without triggering catalog or expression playback; resource playback remains reserved for an explicit asset policy and timeline sink.
-    - Voice-following direct parameters now fail compilation when they target a parameter already owned by a semantic or derived axis; the previous silent skip is no longer allowed.
-    - MotionTransformTrace now records the semantic transform version plus profile revision/source hash, so Motion Lab can distinguish results produced by different relation-graph profile versions.
-    - ModelEngine resourcePolicy stage now rejects unknown or unexposed resource IDs, missing resource parameter ownership, and resource/parameter-plan conflicts; it records resource metadata but does not start resource playback.
-    - Motion visibility summaries no longer carry fallback/repair result fields; axis descriptors remain diagnostics, while fallback pose candidates remain isolated to Prompt reference data.
-    - Backend effect normalization now rejects an invalid resource_id instead of clearing it and broadcasting the remaining semantic axes.
-    - Persona Effect motion arguments containing legacy catalog/motion wrapper fields now fail with forbidden_fields instead of being stripped and continued; <@anim> remains the separate official compatibility parser.
-    - One ag99live.motion Persona Effect may carry either axis_levels or 2-4 ordered motion_steps; the two shapes are exclusive, every step uses the same axis set, and motion_steps cannot be combined with a complete motion resource.
-    - ModelEngine compiles motion_steps into one engine.parameter_plan.v2 with per-parameter keyframes, so the sequence remains one unified-clock run instead of multiple independently scheduled motions.
-    - Semantic level sampling uses the stable identity turn_id plus message_id plus profile source_hash plus semantic_motion_transform.v2; level zero remains exact neutral and nonzero levels receive bounded deterministic shared and per-axis variation.
-    - Missing sampling identity or profile source_hash is a visible v4 compile failure; no random seed fallback is synthesized.
-  unresolved_questions:
-    - Runtime validation still needs a fresh AstrBot + Electron run to confirm detail-only MiniMax outputs are repaired into visible motion.
-    - Plan frontend execution feedback loop for motion prompts: record resolvedMode and expressive_intent_resolved_to_idle_deadzone outcomes, then use those results to tune motion prompt examples and candidate selection.
-    - A live AstrBot run still needs to verify read-only TTS generating notifications, tts_request_id binding, and hybrid immediate/final output against the installed Provider.
-    - Lip-sync remains an optional timeline sink; PlaybackTimelineEngine interrupt now supplies its interrupted terminal state, while the Live2D boundary remains responsible for sampling and parameter writes.
+    - AG99live is an active-development desktop Live2D system; obsolete documents, code, and tests are deleted instead of archived in the repository.
+    - The main model emits assistant text and one ag99live.motion Persona Effect in the same logical response.
+    - The official AstrBot <@anim> v3 entry exists only when Persona Effect injection is unavailable; it is not a recovery path for invalid v4 motion.
+    - Remote computer control remains because AstrBot may run on a server while the Electron client runs on the user's computer.
+    - Performance curve generation is optional and never delays TTS or segment release.
+
 architecture:
-  stability: evolving
-  boundary_changes:
-    - Legacy playback/motion compatibility paths are not part of the target architecture; migration work should converge on one strict route rather than keeping old alternate chains alive.
-    - Inbound control.turn_finished, control.synth_finished, and control.interrupt now reject missing turn_id at protocol mapping instead of falling back to current or active audio turn identity.
-    - Frontend now has a new playback-timeline module that defines a reusable segment timeline contract, synthetic/audio clock abstraction, and sink terminal state machine without yet changing real playback integration.
-    - Audio runtime now creates a segment-scoped playback timeline for each released audio segment, attaches the HTMLAudioElement playback clock on playback start, and clears only that segment timeline on completion, failure, or interruption.
-    - AdapterAudioRuntime depends on PlaybackTimelineAudioSink for audio start/stop/clock access, while the browser HTMLAudioElement implementation now lives inside playback-timeline/audioSink.ts behind createBrowserAudioTimelineSink.
-    - TurnPlaybackOrchestrator now releases audio before motion for the same ready segment so audioRuntime can create an active timeline before ModelEngine ingests the motion payload.
-    - Segment playback release is now a dedicated playback-timeline runtime boundary; motion release requires a valid receivedAtMs and fails visibly instead of substituting a local fallback timestamp.
-    - Segment release side effects are now isolated behind PlaybackTimelineRuntime.startSegmentJob; useTurnPlaybackOrchestrator submits typed segment jobs and no longer routes through a turn-playback compatibility adapter.
-    - The obsolete turn-playback/segmentPlaybackRelease forwarding layer has been removed; useTurnPlaybackOrchestrator invokes PlaybackTimelineRuntime.startSegmentJob(job) without carrying sink implementations, moving the public segment execution entry and execution-port ownership to the timeline runtime while preserving existing sink behavior.
-    - PlaybackTimelineRuntime is now the segment job execution boundary; it still invokes configured text/audio/motion execution ports during migration, but owns the release context shape such as explicit motion_only timeline mode.
-    - PlaybackTimelineRuntime asks itself to prepare audio+motion or explicit motion-only segment timelines before motion execution; motion-only preparation failure is marked as motion_only_timeline_unavailable instead of being hidden by ModelEngine ingestion.
-    - PlaybackTimelineRuntime and useTurnPlaybackOrchestrator now require the timeline runtime start/preparation boundary so segment release cannot silently skip unified timeline preparation.
-    - PlaybackTimelineRuntime.prepareAudioTimeline is idempotent for the same active audio segment so segment-level preparation cannot wipe an already registered motion sink when audio playback also prepares the same timeline.
-    - PlaybackTimelineRuntime.startAudioTimelineSink is now the audio sink start boundary used by both segment jobs and the audio segment runner; audio runner no longer starts browser audio outside the engine sink callback path.
-    - AudioPlaybackActions now requires timeline lifecycle callbacks for audio duration, started, terminal, lip-sync terminal, and active timeline stop; MotionSink now requires segment-scoped timeline lookup plus audio/motion-only prepare callbacks.
-    - AdapterConnection no longer exposes getActiveAudioTimelineSnapshot publicly; upper layers use segment-scoped timeline lookup instead.
-    - A new PlaybackTimelineMotionSink wraps ModelEngine motion start and attaches only same turnId/messageId timeline snapshots supplied by PlaybackTimelineRuntime to motion contexts.
-    - PlaybackTimelineMotionSink now prepares a required motion sink on matched audio timelines and marks it failed when ModelEngine rejects the motion payload before playback starts.
-    - PreviewMotionPlayer catalog motion playback now exposes started/terminal callbacks with runId, allowing catalog motions to participate in motion timeline terminal tracking.
-    - Catalog motion terminal state now comes from the Live2D SDK callback; the preview player no longer completes it from duration metadata, and catalog playback requires an explicit stopMotion runtime capability for interruption ownership.
-    - PreviewMotionPlayer stores the active terminal callback and emits a single stopped terminal when playback is explicitly stopped before the Live2D runtime reports completion.
-    - AdapterAudioRuntime exposes a motion-only timeline preparation path so no-audio motion segments can still run under PlaybackTimelineEngine with a synthetic clock.
-    - PlaybackTimelineRuntime owns segment-scoped timelines during migration; AdapterAudioRuntime remains the outer playback compatibility facade.
-    - PlaybackTimelineLipSyncRuntime now owns lip-sync started/unavailable/completed/failed settlement, and PlaybackTimelineRuntime starts the optional lip_sync sink after audio playback starts; AudioSink no longer carries the lip-sync terminal state machine directly.
-    - The Live2D lip-sync timeline sink uses the current HTMLAudioElement WebAudio RMS sampling, external Live2D lip sync writes, and cleanup; no SDK WAV preload/progression path runs in parallel.
-    - Motion Lab backend persistence is idempotent by event_id; system.motion_lab_raw_event_recorded is emitted only after the SQLite insert call completes, and WebSocket send success alone never settles the frontend pending record.
-    - PlaybackTimelineEngine ignores late started/terminal events for sinks that are already completed, failed, absent, or interrupted.
-    - During early development, fallback behavior should be fail-visible: optional sinks may fail without blocking required playback, but missing capabilities must not be silently reported as started or completed.
-    - TimelineClock uses synthetic clock only for explicit no-audio timing; attached audio clock failures are exposed as audio_unavailable rather than hidden behind synthetic.
-    - PlaybackTimeline snapshots with clockSource=audio_unavailable are diagnostic failure contexts, not usable timing sources for motion compilation or speech-following.
-    - Performance curve hints are consumed only after the current playback timeline proves a usable duration; skipped curves remain visible as `performance_curve_skipped:*` compiler diagnostics.
-    - AdapterConnection exposes setAudioTimelineStartedHandler so PetDesktopRuntime can drive ModelEngine motion wakeup from the real audio timeline started event instead of CompletionCoordinator session watching.
-    - Frontend motion ingest context can carry an optional playbackTimeline snapshot; ModelEngine pending scheduler preserves it and motionStart uses only usable timeline timing, failing pending audio-synced motion when no matching timeline arrives.
-    - Pending audio-synced motion failures now also mark the attached playback timeline motion sink failed, so required sinks do not remain idle after scheduler rejection.
-    - ModelEngine pending motion entries refresh their playbackTimeline from the AdapterAudioRuntime audio timeline started event when a same turnId/messageId audio timeline is available.
-    - ModelEngine speech-only audio-start path now receives a same turnId/messageId playbackTimeline snapshot from the audio timeline started bridge, keeping speech-only timing on the same timeline contract as queued motion.
-    - ModelEngine requires injected timeline-terminal reporting and speech-only gating dependencies; speech-only motion is suppressed when the same segment already has a failed/released/started/completed formal motion state, preventing it from masking motion timeline failures during development.
-    - Generic audio stop cleanup no longer overwrites a more specific terminal reason such as audio_playback_replaced_by_new_input.
-    - PlaybackCompletionCoordinator no longer owns timer-based missing-motion settlement; motion absence is established by the protocol queue close path instead of a frontend delay guess.
-    - Adapter runtime no longer exposes inline_first / enable_inline_motion_contract configuration; <@anim> inline motion tags are parsed and broadcast only for the official compatibility path when Persona Effect injection is unavailable.
-    - Frontend and adapter motion-intent boundaries are now v3-only; v2 nested axes are treated as invalid input instead of being normalized forward.
-    - TurnCoordinator sanitizes hidden motion markup, requires Plain, semantic text, and Record.text candidates to agree, and emits one canonical segment text while preserving raw assistant output in Motion Lab records.
-    - Performance curve timing adds an optional `performance_curve_hint` to semantic motion intents v3/v4; frontend ModelEngine resolves it into timing plus a validated preset name consumed by the Live2D per-frame easing layer.
-    - Performance curve generation requires an explicitly configured dedicated chat Provider and never reuses the current turn chat Provider; the auxiliary request is not added to AstrBot chat history.
-    - fallback pose candidates can now include semantic metadata from motion catalog entries and key semantic axes derived from motion_resource_pool driver components.
-    - middleware motion prompt now names axes as a semantic-axis target group instead of a plain field and exposes fallback candidate descriptions, scenarios, intensity, emotion bias, and key axes.
-    - middleware motion prompt examples should use a small set of visible non-neutral axis values and show 2-4 non-default fallback pose candidates selected by axis/pose descriptors rather than coarse emotion labels.
-    - plugin_hints JSON parsing now tolerates outer-format issues such as fenced JSON, text-wrapped objects, and trailing commas while preserving strict v3 axis semantics.
-    - fallback candidate selection and motion visibility summaries now derive pose descriptors from each axis profile's own neutral and soft_range values instead of assuming a global midpoint of 50.
-    - frontend motion diagnostics now surface pose_descriptors, outside_soft_range_axes, and skeleton_groups_present from semantic motion summaries so prompt tuning can be compared against runtime-visible motion coverage.
-    - middleware motion prompt now marks the decision contract and capability payload as static, keeps per-turn runtime data dynamic, and keeps configured_generation_mode out of the static capability mapping.
-    - middleware-first route disables fallback-pose replacement for unusable motion axes while preserving skeleton repair for otherwise valid axes.
-    - AdapterConnection playback timeline controls and audio timeline started subscription are grouped under adapter.playbackTimeline, keeping the unified clock boundary out of the general adapter facade.
-    - PlaybackTimeline segment job start semantics live in PlaybackTimelineRuntime, which now owns timeline preparation, segment sink release, sink lifecycle, and terminal state.
-    - AdapterAudioRuntime no longer exposes a global active audio timeline snapshot; tests and callers use segment-scoped playback timeline lookup.
-    - AdapterAudioRuntime receives selected Segment audio material directly from PlaybackTimelineRuntime; the obsolete audio release controller and duplicate pending-audio storage have been removed.
-    - AdapterAudioRuntime settlement responsibilities are isolated behind an audio settlement controller for active timelines, while SessionStore owns unresolved-session failure state.
-    - AdapterAudioBridge has been removed; AdapterAudioRuntime writes adapter audio terminal UI state directly, while PlaybackTimelineRuntime writes active-timeline audio terminal facts.
-    - Audio playback actions now delegate audio element plus lip-sync lifecycle handling to PlaybackTimelineAudioSegmentSink instead of owning audio element callback ordering or lip-sync runtime/callback wiring inline.
-    - Browser HTMLAudioElement playback ownership has moved from adapter-connection/runtime into playback-timeline/audioSink.ts, so adapter runtime no longer owns the raw audio element player.
-    - AdapterAudioRuntime no longer exposes playAudioAndAcknowledge as a public method; production enters audio playback through SegmentJob only.
-    - PlaybackTimelineAudioSegmentRunner now bridges audio segment duration/started/terminal events into PlaybackTimelineRuntime, so audioPlaybackActions no longer owns audio element event ordering.
-    - AudioPlaybackStateBridge no longer writes SessionStore audio.released/audio.started/audio.duration/audio.terminal; all execution facts are recorded by PlaybackTimelineRuntime, while unresolved material remains owned by SessionStore.
-    - PlaybackTimelineRuntime now has a motion lifecycle session port for motion.started and motion.terminal events, guarded by open-sink checks so late terminal callbacks cannot rewrite motion SessionStore state after the timeline has settled; production disables the coordinator's duplicate ordinary motion lifecycle writes but keeps coordinator-owned handoff settlement.
-    - Adapter playback ports expose direct text/audio sinks to PlaybackTimelineRuntime; SegmentJob is the only production release entry and carries its own material.
-    - Audio playback stop now interrupts the explicit turnId + messageId playback segment; missing segment identity is surfaced as an error instead of stopping an arbitrary active timeline.
-    - PlaybackTimelineEngine now owns sink start callbacks for audio/motion via startSink; remaining direct-sink migration should move prepare/terminal and SessionStore coordination out of migration-era segment-sink wiring.
-    - Audio/lip_sync/motion timeline duration/started/terminal events no longer implicitly register or mutate a missing sink; missing segment timeline or sink wiring is diagnosed and the event is dropped.
-    - control.synth_finished validates that at least one complete atomic segment exists and never infers absent materials; late motion and performance-curve patches are rejected.
-    - control.synth_finished missing-audio settlement now lives in inbound protocol queue-close handling; AdapterAudioRuntime no longer exposes a missing-audio settlement API or scans all sessions for this case.
-    - Target direction: performance curve playback should first support a small preset library of per-frame curve shapes selected by hint, before considering real-time generated custom curves.
-    - PlaybackTimeline core no longer imports ModelEngine motion types; pure motion context/sink contracts live in playback-timeline/motionTypes.ts, while the ModelEngine-specific motion sink and run tracker live in playback-integrations/modelEngineMotionSink.ts.
-    - PlaybackCompletionCoordinator no longer accepts motionPlayer, schedule, or clearSchedule dependencies and no longer keeps an activeMotionSegments shadow set; it observes SessionStore settlement, records motion playback history, and handles current run handoff only.
-    - PlaybackTimeline segment job release ordering now lives in playback-timeline/segmentJobExecutor.ts; PlaybackTimelineRuntime supplies timeline sink operations and keeps direct timeline map/engine ownership.
-    - TTS/audio expected timeout is an audio failure, not an explicit no-audio segment; it fails the pending canonical subtitle and unreleased motion, and blocks late audio/motion from reviving the segment.
-    - SemanticAxisRelationGraphStage is the single ModelEngine owner for head/body relation constraints; coupling and speech pose produce candidates before the graph resolves final values.
-    - bounded_ratio relation targets are derived and constrained inside SemanticAxisRelationGraphStage; the coupling stage only proposes derive candidates, while speech pose performs a non-mutating future-parameter ownership precheck.
-    - Motion compile diagnostics now include MotionFeedback and a raw/resolved/derived/constrained/compiled transform trace for Motion Lab correlation.
-    - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
-    - PlaybackTimeline owns the 3000ms real-audio-start deadline; ModelEngine has no independent audio wait timer, and timeout fails subtitle plus every still-open required sink.
-    - AG99live never queues or rejects a valid new input because an earlier turn is still playing; it immediately commits the event to AstrBot's own queue and uses the event's output_correlation_id to keep output, synth_finished, playback_finished, and turn_finished bound to the correct frontend turn.
-    - control.interrupt remains session-scoped because AstrBot active_event_registry only exposes UMO-wide stop operations; exact queued/active Turn cancellation must not be inferred from AG99live's latest submitted turn.
-    - Catalog motion accepted, started, and terminal are distinct lifecycle facts; WebSDK owns interruption from accepted priority reservation through asynchronous loading, playback, replacement, and model release.
-    - Text sends are serialized across asynchronous desktop capture, and currentTurnId advances only after the matching input.text envelope is sent successfully.
+  product_flow:
+    - User input is forwarded to AstrBot without an AG99-owned busy queue or input rejection gate.
+    - AstrBot produces canonical assistant text, TTS generation state, audio material, and Persona Effect data.
+    - The adapter aggregates one output.segment.v3 per turn_id plus message_id and sends it atomically.
+    - The frontend SessionStore commits the segment once; the orchestrator releases one segment job.
+    - PlaybackTimeline owns audio, subtitle, motion, and lip-sync sink lifecycle.
+    - ModelEngine compiles semantic motion into a parameter plan or typed resource execution.
+    - Live2D WebSDK owns model readiness, per-frame parameter writes, speech energy, lip sync, dynamics, and physics.
+  identity:
+    turn_id: Conversation turn identity shared across AstrBot, adapter, frontend, and Motion Lab.
+    message_id: Logical assistant output segment identity; immediate and final outputs are distinct segments.
+    tts_request_id: One TTS generation lifecycle, including retries or multiple audio segments.
+    run_id: One accepted motion execution owned by one segment.
+  protocols:
+    output: output.segment.v3
+    persona_motion: engine.motion_intent.v4
+    official_inline_motion: engine.motion_intent.v3
+    parameter_plan: engine.parameter_plan.v2
+    performance_curve: ag99.performance_curve_hint.v1
+    voice_following: ag99.voice_following_profile.v2
+  motion_ownership:
+    llm: intent_tags, axis_levels from -4 to 4, motion_steps, and optional typed resource intent.
+    adapter: Persona Effect registration, strict schema/profile/resource validation, identity binding, and transport.
+    model_engine: Level sampling, intensity, coupling, timing, speech gesture planning, relation graph constraints, plan building, and resource policy.
+    playback_timeline: Segment-scoped clock and required/optional sink lifecycle.
+    live2d_websdk: Exact parameter resolution, per-frame interpolation, lip sync, speech energy, dynamics, and physics.
+  playback_rules:
+    - Audio-backed subtitle, motion, and lip sync use the matched HTMLAudioElement playing fact.
+    - Explicit motion-only segments may use a segment-owned synthetic clock.
+    - Expected audio failure fails the segment; it never becomes normal no-audio playback.
+    - Missing required wiring, invalid payloads, and impossible lifecycle transitions fail visibly.
+    - Optional performance curve failure or lateness is recorded as skipped and does not modify the valid base motion.
+  data_rules:
+    - Motion Lab records raw model output, resolved levels, derived and constrained axes, compiled plans, timing, run identity, and terminal outcome.
+    - Runtime facts are persisted asynchronously and do not block the active conversation.
+    - Stage diagnostics preserve value sources so final motion remains attributable.
+
 verification:
+  policy:
+    - Automated tests are limited to the smallest public-boundary input/output smoke checks.
+    - Tests are not evidence that the end-to-end interaction is correct.
+    - Source tracing, structured runtime logs, Motion Lab records, and a live Electron conversation are the primary evidence.
+    - Do not run full regression suites by default and do not add mocks to compensate for missing live verification.
   checks_run:
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (281 passed after historical-code cleanup)
-    - python scripts/check_protocol_schema_manifest.py and python -m compileall -q astrbot_plugin_ag99live_adapter (passed)
-    - python -m pyflakes on every changed adapter production module (passed with no findings)
-    - Adapter top-level function reference scan found no zero-reference production functions
-    - npm test and npm run build (complete frontend suite, TypeScript typechecks, WebSDK, and Electron production build passed)
-    - npx tsc --noEmit -p tsconfig.json --noUnusedLocals --noUnusedParameters (passed)
-    - npm run test:inbound-events (passed with strict model summary, selected model, semantic profile, voice-following channel, model URL, and runtime cache diagnostics regressions)
-    - Real Mk6 scanner output plus ensured semantic_axis_profile was accepted by the compiled frontend model_sync parser
-    - npm test (complete frontend suite passed after strict model_sync boundary changes)
-    - npm run typecheck (renderer, WebSDK, and node typechecks passed)
-    - npm run build (Electron production build passed)
-    - git diff --check (passed)
-    - Targeted AG99live TTS delivery checks (7 passed after strict identity validation and standard non-TTS send routing)
-    - Targeted AG99live send and performance-curve cleanup checks (12 passed after removing the legacy send alias, duplicate send implementation, and mirrored curve status table)
-    - npm test (complete frontend suite passed after required audio failure terminal semantics were unified)
-    - npm run typecheck and npm run build:web (passed after final review)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (286 passed after final review)
-    - python -m compileall -q astrbot_plugin_ag99live_adapter and AstrBot plugin checker (passed; checker reported 0 errors and 0 warnings)
-    - npm test (complete frontend suite passed for canonical segment text, deferred subtitle release, prepared motion start, and removed fixed delay)
-    - npm run typecheck (renderer and node typechecks passed)
-    - npm run build:web (production web build passed)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (284 passed)
-    - python -m compileall -q astrbot_plugin_ag99live_adapter (passed)
-    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings, 3 informational notices)
-    - Earlier detailed Mermaid sources rendered successfully; the latest lifecycle annotations were source-reviewed because Mermaid CLI is not installed in the current frontend workspace
-    - production residue scan found no audio caption copy, old output.segment.v2 parser, fixed 90ms bridge, or old audio-start motion bridge
-    - git diff --check (passed)
-    - Motion Lab SQLite incident inspection: turn bb72564dff244ab0b873ce82632e7dab emitted Record audio/motion before Plain visible text for one normalized immediate_reply segment, leaving the released core group with newly undelivered text.
-    - npm run test:turn-orchestrator (passed with late visible text after audio-caption release coverage)
-    - npm run test:orchestration, npm run test:adapter-connection, npm run test:motion-runtime-scheduler, and npm run typecheck (passed)
-    - npm test (complete frontend suite passed after late visible-text release repair)
-    - npm run build (Electron main, preload, and renderer production build passed after final repair)
-    - git diff --check (passed)
-    - Motion Lab SQLite incident inspection: turn d601b724f05f42f58b1f47aa9693e401 sent and compiled valid v4 motion, but started it as motion_only_timeline_ready before the audio clock because scheduler discarded timelineMode.
-    - npm run test:motion-runtime-scheduler (passed with audio-owned synthetic-wait and explicit motion-only synthetic-start coverage)
-    - npm test (complete frontend suite passed after timeline-mode ownership repair)
-    - npm run build (Electron main, preload, and renderer production build passed)
-    - git diff --check (passed)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (288 passed after immediate Persona Effect scheduling repair)
-    - npm test (complete frontend suite passed after speech-only motion sink ownership repair)
-    - npm run typecheck (renderer and node typechecks passed)
-    - npm run build:web (production web build passed)
-    - python -m compileall astrbot_plugin_ag99live_adapter
-    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings)
-    - git diff --check (passed)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (288 passed after logical reply, route-decision, and performance-curve repair)
-    - npm test (complete frontend suite passed after bound lip-sync write repair)
-    - npm run typecheck (renderer and node typechecks passed)
-    - npm run build:web (production web build passed)
-    - python -m compileall astrbot_plugin_ag99live_adapter
-    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings)
-    - git diff --check (passed)
-    - npm test (complete frontend suite passed after speech gesture contract closure)
-    - npm run build:web (production web build passed after speech audio analysis decoupling)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (286 passed)
-    - python -m compileall astrbot_plugin_ag99live_adapter
-    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings)
-    - git diff --check (passed)
-    - npm test (complete frontend suite passed after deterministic speech gesture track migration)
-    - npm run build:web (production web build passed after speech energy separation)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (286 passed)
-    - python -m compileall astrbot_plugin_ag99live_adapter
-    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings)
-    - git diff --check (passed)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (286 passed for independent extreme ranges, strict v4 examples, and profile v2 migration)
-    - npm test (complete frontend suite passed after extreme-range editor integration)
-    - npm run typecheck
-    - npm run build:web
-    - python -m compileall astrbot_plugin_ag99live_adapter
-    - git diff --check
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (268 passed for nine-level motion contract)
-    - npm test (complete frontend suite passed for nine-level motion contract)
-    - npm run typecheck
-    - npm run build:web
-    - python -m compileall astrbot_plugin_ag99live_adapter
-    - git diff --check
-    - npm test (complete frontend suite passed after ModelEngine boundary consolidation)
-    - npm run typecheck
-    - npm run build:web
-    - git diff --check
-    - npm test (complete frontend suite passed after lip-sync failure degradation and bounded timeline history changes)
-    - npm run build:web (production web build passed after lip-sync failure degradation changes)
-    - npm run typecheck (renderer and node typechecks passed)
-    - npm test (complete frontend suite passed after manifest and parser-contract fixes)
-    - npm run typecheck (renderer and node typechecks passed)
-    - npm run build:web (production web build passed)
-    - python -m pytest (267 adapter tests passed)
-    - AstrBot plugin checker (0 errors, 0 warnings)
-    - git diff --check (passed)
-    - python -m pytest (267 adapter tests passed after strict profile and parameter-plan validation)
-    - npm test (complete frontend suite passed after model-readiness and strict sink changes)
-    - npm run typecheck (renderer and node typechecks passed)
-    - npm run build:web (production web build passed)
-    - git diff --check (passed)
-    - Motion Lab SQLite incident inspection: turn 0748df0906604719a6503edd68778281 compiled and started a valid 1800ms three-step plan, then failed with direct_parameter_plan_terminal_timeout after no SDK terminal callback
-    - npm run test:preview-motion-player (passed with watchdog SDK-stop regression coverage)
-    - npm test (complete frontend suite passed after frame-loop containment fix)
-    - npm run typecheck (renderer and node typechecks passed after freeze fix)
-    - npm run build:web (production web build passed after freeze fix)
-    - git diff --check (passed after freeze fix)
-    - npm test (complete frontend suite passed after cross-layer review fix)
-    - npm run build:web (production web build passed after cross-layer review fix)
-    - npm run test:model-engine (passed after discrete target-crossing dynamics fix)
-    - npm run typecheck (renderer and node typechecks passed after cross-layer review)
-    - git diff --check (passed after review fixes and documentation update)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (267 passed after final dynamics, strict-plan, and obsolete-selector cleanup)
-    - npm test (complete frontend suite passed after final dynamics and strict-plan review)
-    - npm run typecheck (renderer and node typechecks passed after final review)
-    - npm run build:web (production web build passed after final review)
-    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings after final review)
-    - git diff --check (passed after final review)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (283 passed after atomic lifecycle hardening)
-    - npm test (complete frontend suite passed after output.segment.v2 lifecycle hardening)
-    - npm run typecheck (renderer and node typechecks passed)
-    - npm run build:web (production web build passed)
-    - python -m compileall -q astrbot_plugin_ag99live_adapter (passed)
-    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings, 3 informational notices)
-    - Mermaid CLI 11.12.0 rendered the three updated playback flow diagrams to SVG and 2x PNG
-    - production residue scan found no output.segment.v1, top-level output.segment.performance_curve, obsolete curve parser/type, or old queue-close marker
-    - git diff --check (passed after output.segment.v2 final review)
-    - npm test (complete frontend suite passed for atomic output.segment migration)
-    - npm run typecheck (renderer and node typechecks passed for atomic segment contracts)
-    - npm run build:web (production web build passed after flow documentation update)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (280 passed)
-    - python -m compileall -q astrbot_plugin_ag99live_adapter (passed)
-    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings, 3 informational notices)
-    - Mermaid CLI 11.16.0 rendered four updated flow sources to SVG and PNG
-    - production protocol residue scan found no output.text/output.audio/output.image, independent performance-curve patch, old orchestrator, or fragment wait timer
-    - git diff --check (passed after atomic protocol and diagram review)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (312 passed after final sequence diagnostics and profile-hash checks)
-    - npm test (complete frontend suite passed after sequence keyframe and sampling changes)
-    - npm run typecheck (renderer and node typechecks passed after final review)
-    - npm run build:web (production web build passed after final review)
-    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings)
-    - git diff --check
-    - npm test (complete frontend suite passed after end-to-end lifecycle closure)
-    - npm run typecheck (renderer and node typechecks passed)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (306 passed)
-    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings)
-    - git diff --check
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (305 passed)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_interaction_motion_contributors.py -q (42 passed)
-    - npm test (complete frontend suite passed after lifecycle hardening)
-    - npm run typecheck (renderer and node typechecks passed after lifecycle hardening)
-    - npm run test:motion-runtime-scheduler
-    - npm run test:motion-playback-recorder
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (302 passed)
-    - npm test (complete frontend suite passed)
-    - npm run typecheck (renderer and node typechecks passed)
-    - npm run test:playback-timeline
-    - npm run test:playback-timeline-audio
-    - npm run test:adapter-audio-runtime
-    - npm run test:orchestration
-    - npm run test:turn-orchestrator
-    - npm run test:model-engine
-    - npm run test:adapter-connection
-    - npm run test:motion-runtime-scheduler
-    - npm run typecheck:renderer
-    - git diff --check
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_runtime_state_provider_analysis.py::test_runtime_state_ignores_removed_inline_motion_config astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_result_contributor_ignores_removed_inline_mode_for_final_phase astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_result_contributor_ignores_removed_inline_mode_for_self_reply -q
-    - python -m py_compile astrbot_plugin_ag99live_adapter\runtime\turn_coordinator.py astrbot_plugin_ag99live_adapter\runtime\state.py astrbot_plugin_ag99live_adapter\middleware\interaction_motion.py
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py -q
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_interaction_motion_contributors.py
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_turn_coordinator_realtime_motion.py::test_extract_inline_motion_plan_rejects_invalid_intent_without_replacement astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_turn_coordinator_realtime_motion.py::test_emit_message_chain_inline_invalid_v3_intent_does_not_broadcast_replacement
-    - python -m py_compile astrbot_plugin_ag99live_adapter/middleware/motion_payload.py astrbot_plugin_ag99live_adapter/motion/inline_motion.py
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_prompt_contributor_returns_capability_and_runtime_extensions astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_prompt_contributor_hides_resource_id_when_no_resource_candidates astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_prompt_contributor_returns_extensions_for_core_reply_purpose astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_prompt_purpose_appears_in_runtime_payload astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py::test_prompt_runtime_includes_previous_motion_variation_hint -q
-    - python -m compileall astrbot_plugin_ag99live_adapter\middleware\interaction_motion.py
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_performance_curve.py -q
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_runtime_state_provider_analysis.py -q
-    - npm run test:model-engine
-    - npm run typecheck:renderer
-    - npm run typecheck:node
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py -q
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py -q
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_realtime_motion_plan.py -q
-    - python -m pytest astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_realtime_motion_plan.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_turn_coordinator_realtime_motion.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_interaction_motion_contributors.py astrbot_plugin_ag99live_adapter\tests\unit\runtime\test_runtime_state_provider_analysis.py -q
-    - python -m compileall astrbot_plugin_ag99live_adapter
-    - git diff --check
-    - npm run test:inbound-events
-    - npm run test:adapter-connection
-    - npm run test:playback-timeline
-    - npm run test:playback-timeline-audio
-    - npm run test:coordinator
-    - npm run test:turn-orchestrator
-    - npm run test:session
-    - npm run test:adapter-audio-runtime
-    - npm run test:inbound-events
-    - npm run test:adapter-audio-runtime
-    - npm run test:adapter-connection
-    - npm run test:playback-timeline
-    - npm run test
-    - npm run typecheck:renderer
-    - npm run typecheck:node
-    - npm test
-    - npm run test:motion-lab-outbound-queue
-    - npm run typecheck
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_frontend_system_semantic_profile.py astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_motion_lab_raw_event_store.py astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_protocol_parser_semantic_profile.py -q
-    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter
-    - frontend TypeScript dependency scan: 138 files, 0 cycles
-    - git diff --check
-    - npm test (complete frontend suite passed after playback fact fixes; final Live2D runtime cancellation adjustment was subsequently covered by typecheck and production build)
-    - npm run test:orchestration (passed with late-text-after-audio-failure regression)
-    - npm run test:session (passed with monotonic audio expectation regression)
-    - npm run test:model-readiness (passed with cancelled and replaced generation regressions)
-    - npm run typecheck (renderer and node passed after final Live2D runtime cancellation adjustment)
-    - npm run build (Electron production build passed after final review)
-    - git diff --check (passed after final review)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (283 passed after obsolete output lifecycle cleanup)
-    - npm test (complete frontend suite passed after atomic segment ownership cleanup)
-    - npm run typecheck (renderer and node typechecks passed)
-    - npm run build:web (production web build passed)
-    - npm run test:adapter-connection (passed after migrating and enabling four audio-interrupt regressions)
-    - python -m compileall -q astrbot_plugin_ag99live_adapter (passed)
-    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings, 3 informational notices)
-    - production and test residue scan found no fragmented output types, independent performance-curve envelope, implicit segment creation API, late-material reopening, or uncalled adapter tests
-    - git diff --check (passed after obsolete path and test cleanup)
-    - npm test (complete frontend suite passed after conditional motion-sink registration, atomic subtitle failure, and closed v3 parsing)
-    - npm run typecheck and npm run build:web (passed after final lifecycle review)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (286 passed)
-    - performance-curve order regressions passed for both motion-first and text-first physical output parts
-    - playback timeline regressions passed for fatal sink shutdown and suppression of lip-sync startup after timeline rejection
-    - production residue scan found no curve_requested boolean, fixed-delay motion bridge, audio caption field, or old production speech-cycle contract
-    - npm test (complete frontend suite passed after playback lifecycle ownership deduplication)
-    - npm run build:web (production web build passed after app-owned timeline and session projection changes)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests -q (286 passed after canonical motion validation and Motion Lab observation-port consolidation)
-    - npm run test:playback-timeline (passed after final exactly-once required-audio rejection cleanup)
-    - git diff --check (passed)
-    - Mermaid CLI 11.16.0 parsed and rendered all 17 docs/04-流程图与分析图/*.mmd sources successfully; temporary SVG validation outputs were removed
-    - architecture atlas hygiene scan found no empty files, trailing whitespace, stale diagram paths, or committed PNG/SVG/PDF derivatives
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests -q (288 passed after strict Provider, scanner, prompt, and legacy-path cleanup)
-    - npm test (complete frontend suite passed after app-owned Timeline, segment-bound audio clock, speech-only request, snapshot, and release ownership cleanup)
-    - npm run typecheck and npm run build:web (passed after final review)
-    - python -m compileall -q astrbot_plugin_ag99live_adapter and AstrBot plugin checker (passed; checker reported 0 errors and 0 warnings)
-    - Mermaid CLI 11.16.0 parsed the two updated ownership and unified-clock diagrams successfully; temporary SVG outputs were removed
-    - git diff --check (passed after final review)
-    - npm test (complete frontend suite passed after lifecycle deadline, catalog terminal, open-execution, and serialized-send regressions)
-    - npm run build (renderer, WebSDK, and node typechecks plus Electron production build passed)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (289 passed)
-    - python -m compileall -q astrbot_plugin_ag99live_adapter (passed)
-    - python C:\Users\Administrator\.codex\skills\astrbot-dev\scripts\check_astrbot_plugin.py astrbot_plugin_ag99live_adapter (0 errors, 0 warnings, 3 informational notices)
-    - git diff --check (passed after final lifecycle review)
-    - python -m pytest astrbot_plugin_ag99live_adapter/tests -q (288 passed after pre-TTS curve triggering, explicit TTS failure state, send-transaction, and curve cleanup changes)
-    - uv run pytest tests/unit/test_interaction_output_controller.py tests/unit/test_voice_service.py -q in AstrBot (59 passed; existing aiosqlite event-loop-close warnings remain)
-    - npm test (complete frontend suite passed after optional curve-clock skip and audio failure reason fixes)
-    - npm run build (renderer, WebSDK, node typechecks and Electron production build passed)
-    - python -m compileall -q astrbot_plugin_ag99live_adapter and uv run python -m compileall -q astrbot (passed)
-    - AstrBot plugin checker (0 errors, 0 warnings, 3 informational notices)
-    - git diff --check in AG99live and AstrBot (passed)
-    - python -m pytest on the five affected AG99live runtime test modules (93 passed after read-only TTS state consumption and TTS identity binding)
-    - python -m compileall -q astrbot_plugin_ag99live_adapter (passed)
-    - AstrBot plugin checker (0 errors, 0 warnings, 3 informational notices)
-    - git diff --check (passed)
-    - targeted performance-curve, TTS identity, send-transaction, and cleanup regressions (13 passed after final ownership review)
-    - targeted inbound forwarding, turn-scoped output/playback lifecycle, disconnect cleanup, and PlatformEvent correlation regressions (42 passed)
-    - npm run typecheck:renderer (passed after single playback lane and duplicate material ownership cleanup)
-    - npm run test:turn-orchestrator (passed with cross-turn serial release coverage)
-    - npm run test:adapter-audio-runtime and npm run test:adapter-connection (passed after direct Segment material release)
-    - npm run test:playback-timeline and npm run test:bilibili-live (passed after sink error-code and redundant busy-gate cleanup)
-    - git diff --check (passed)
-  checks_failed: []
-  validation_gap: Automated tests are intentionally limited to basic boundary input/output smoke checks and are not accepted as evidence that the end-to-end interaction is correct. A live Electron conversation is required to verify AstrBot prompt construction and Persona Effect output, adapter output.segment delivery, real TTS/audio-clock release, lip sync, motion start, and Live2D parameter writes as one continuous chain. Mermaid CLI was unavailable in the current frontend toolchain, so the two updated .mmd files were reviewed but not parser-rendered. Six historical custom WebSDK entry files still use @ts-nocheck, so their complete static-type migration remains separate technical debt.
-runtime:
-  mode: unified_playback_timeline_phase3_motion_timeline_context
+    - All retained local Markdown links resolve to current files.
+    - Deleted-document and full-test-guidance references are absent from README, docs, and AI state.
+    - Current ModelEngine stage order in architecture text and Mermaid sources matches compiler/registry.ts.
+    - git diff --check reports no whitespace errors.
+  validation_gap:
+    - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
+    - Current code still auto-detects common lip-sync parameter names when model3 omits the LipSync group, which conflicts with the documented exact-capability boundary.
+    - Current v4 motion-step capability validation checks unknown axis IDs from the first step when building used_axis_ids; later steps require a direct source review before the strict all-step contract can be considered closed.
+
 backlog:
-  - id: motion_lab_history_sample_workbench
+  - id: motion_lab_training_workbench
+    status: planned
+    summary: Build a separate UI for querying, replaying, reviewing, and curating persisted Motion Lab records.
+  - id: speech_performance_quality
+    status: active
+    summary: Improve non-periodic speech gestures and Live2D physical expressiveness without adding a parallel playback clock.
+  - id: remote_operator_plugin_split
+    status: deferred
+    summary: Move remote computer execution into a separate AstrBot plugin after the server-side AstrBot architecture is stable.
+  - id: strict_runtime_residue_cleanup
     status: todo
-    summary: Build a standalone historical motion sample workbench separate from the current Action Lab sandbox.
+    summary: Remove current compatibility residue that conflicts with strict model capability ownership.
     notes:
-      - Query saved Motion Lab SQLite raw events instead of relying only on in-memory recent motionPlaybackRecords.
-      - Default the UI to useful training candidates such as turn.assistant_output, with optional expansion of all events for the same turn_id.
-      - Support filtering by event_type, turn_id, profile_id/profile_revision, and conversation context.
-      - Reuse the existing preview_motion_payload playback path so selected or adjusted historical samples can be observed on Live2D.
-      - Save curated and adjusted samples back into the existing motion tuning sample flow for later LLM reference or training export.
-  - id: performance_curve_timing_layer
-    status: mvp_implemented
-    summary: Add an independent small-model performance curve layer for speech-synchronized motion timing.
-    notes:
-      - Performance curve generation requires an independently configured performance_curve_provider_id; empty, missing, or non-chat Provider bindings fail configuration and never reuse the current turn chat Provider.
-      - Curve generation uses the AG99 frontend turn from external_correlation_id plus the phase's tts_request_id, and separately records AstrBot tts_turn_id plus logical message_id.
-      - Result contribution registers pending input, while the read-only AstrBot TTS state hook starts generation only on generating; if not ready before motion egress, the task is cancelled and the original motion keeps its own valid timing.
-      - Requested, resolved, failed, and attached curve events are stored in Motion Lab SQLite raw events.
-      - Frontend protocol parsing rejects invalid hints; a valid optional hint that cannot use the matched clock is explicitly skipped while the base motion keeps its own timing.
-      - A five-preset per-frame curve library is now selected by curve family; real-time generated custom curves remain intentionally out of scope.
-  - id: unified_timeline_direct_sink_execution
-    status: in_progress
-    summary: Move remaining prepare/terminal and SessionStore coordination from migration-era segment-sink wiring toward PlaybackTimelineEngine-driven sink lifecycle.
-    notes:
-      - Audio and motion start are now registered as PlaybackTimelineEngine sink callbacks and invoked through startSink.
-      - Browser audio release now enters PlaybackTimelineRuntime.startAudioTimelineSink before the actual audio segment sink starts.
-      - Audio lifecycle and ordinary motion started/terminal SessionStore writes now have PlaybackTimelineRuntime lifecycle session ports; production motion history is outside PlaybackCompletionCoordinator, which now only observes turn settlement and sends playback_finished.
-      - Keep SessionStore as the persistent turn/segment fact store, but move execution ownership into timeline sinks.
-      - Reduce AdapterAudioRuntime to adapter/session state bridge plus protocol-facing convenience methods.
-      - Make missing sink wiring a hard error; do not reintroduce compatibility fallback routes.
-      - Start with audio and motion sink execution before text/subtitle and lip sync are fully independent.
-  - id: lip_sync_live2d_websdk_boundary
-    status: in_progress
-    summary: Evaluate moving low-level lip-sync sampling and Live2D parameter writes into the Live2D WebSDK adapter/runtime boundary.
-    notes:
-      - PlaybackTimeline schedules and starts lip_sync as an optional sink; the audio segment adapter now only supplies the audio-element event and distinguishes disposal from interruption.
-      - Live2D boundary now owns mouth-value sampling, WebAudio graph details, external lip-sync parameter writes, and cleanup.
-      - The boundary must still report started/failed/completed/interrupted back to the timeline; silent success is not acceptable during migration.
-      - Keep the shared HTMLAudioElement/audio clock ownership explicit to avoid desynchronizing mouth movement from sound.
+      - Remove Live2D mouth-parameter name auto-detection after every supported model declares its LipSync group.
+      - Validate every motion_steps entry against the current profile, not only the first step's axis identity set.
+      - Remove legacy semantic-profile migration and old-action wording after active profile files are confirmed current.

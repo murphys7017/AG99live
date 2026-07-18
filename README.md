@@ -6,8 +6,6 @@
 
 不是预设表情播放器，而是一套面向对话表演的语义动作系统。
 
-![AG99live 预览](./docs/images/image.png)
-
 [快速开始](#快速开始) · [核心理念](#核心理念) · [技术文档](./docs/README.md)
 
 </div>
@@ -32,15 +30,15 @@ AG99live 是一个运行在 Windows 桌面上的 AstrBot + Electron + Live2D AI 
 ```json
 {
   "intent_tags": ["疑惑", "轻微调侃"],
-  "axes": {
-    "head_yaw": 62,
-    "body_yaw": 47,
-    "brow_bias": 61
+  "axis_levels": {
+    "head_yaw": 3,
+    "body_yaw": -2,
+    "brow_bias": 3
   }
 }
 ```
 
-这些值还不是最终的 Live2D 参数。它们会经过当前模型的语义轴档案、动作引擎编译、轴之间的关系约束和播放时序，最终变成角色在这一轮对话中的动作表现。
+这些九级语义强度还不是最终的 Live2D 参数。它们会经过当前模型的语义轴档案、确定性区间采样、轴关系图和播放时序，最终变成角色在这一轮对话中的动作表现。
 
 ## 核心理念
 
@@ -176,20 +174,6 @@ npm install
 npm run dev
 ```
 
-### 运行前端测试和类型检查
-
-```powershell
-cd frontend
-npm run typecheck
-npm test
-```
-
-### 运行插件后端测试
-
-```powershell
-python -m pytest astrbot_plugin_ag99live_adapter/tests -q
-```
-
 ### 部署 AstrBot 适配器
 
 将 `astrbot_plugin_ag99live_adapter/` 目录放入 AstrBot 插件目录：
@@ -210,13 +194,13 @@ Copy-Item -Recurse .\astrbot_plugin_ag99live_adapter "C:\path\to\AstrBot\data\pl
 - [播放同步编排设计](./docs/01-架构与结构/04-播放同步编排设计.md)
 - [ModelEngine 边界与分层设计](./docs/02-设计文档/01-ModelEngine边界与分层设计.md)
 - [动作意图标签化与资源派生设计](./docs/02-设计文档/10-动作意图标签化与资源派生设计.md)
-- [动作处理链路修复与轴关系图设计](./docs/02-设计文档/13-动作处理链路修复与轴关系图设计.md)
-- [统一时钟引擎改造设计](./docs/02-设计文档/12-统一时钟引擎改造设计.md)
+- [动作参数处理与轴关系图](./docs/02-设计文档/13-动作参数处理与轴关系图.md)
+- [统一时钟引擎设计](./docs/02-设计文档/12-统一时钟引擎设计.md)
 
-## 当前定位
+## 开发方向
 
-AG99live 目前是一个持续开发中的本地实验型桌宠系统，重点不是做一个固定动作播放器，而是探索：
+AG99live 是一个持续开发的本地桌面角色系统，重点不是固定动作播放器，而是让模型生成的语言和动作共同构成可执行的 Live2D 表演：
 
 > 如何让一个对话模型的语言、动作、语音和口型共同组成一段可解释、可调试、可持续优化的 Live2D 表演。
 
-当前正在继续收紧动作协议、统一后处理所有权、完善轴关系图和 Motion Lab 数据记录。未来会在稳定的动作数据基础上，再评估更专门的小模型和训练方案。
+项目坚持单一主链路、明确所有权和错误可见：主模型表达语义动作，ModelEngine 负责参数计算，PlaybackTimeline 负责同步，Live2D WebSDK 负责逐帧执行。旧协议、旧播放链和失效文档不会作为兼容负担继续保留。

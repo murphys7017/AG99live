@@ -126,19 +126,20 @@ flowchart TD
 
     subgraph M[ModelEngine 编译与 Live2D 逐帧执行]
         ENGINE[ModelEngine 动作入口]:::engine
-        EVALID[协议 / profile / resource 校验]:::engine
-        SAMPLE[九级确定性采样]:::engine
+        EVALID[IntentValidator<br/>协议 / 模型 / profile 校验]:::engine
+        SAMPLE[AxisResolver + Intensity<br/>九级确定性采样与强度]:::engine
+        CAND[Coupling + Mode + Timing<br/>派生候选与时序]:::engine
+        GESTURE[SpeechPoseStage<br/>非周期 speech gesture track]:::engine
         GRAPH[Relation graph<br/>轴关系计算与约束]:::engine
-        GESTURE[Speech gesture track<br/>非周期预设与头身延迟]:::engine
-        TIMING[Timing / performance curve]:::engine
-        PLAN[parameter_plan.v2]:::engine
+        PLAN[PlanBuilder<br/>parameter_plan.v2]:::engine
+        POLICY[ResourcePolicy<br/>资源冲突与执行策略]:::engine
         SDK[Live2D WebSDK<br/>曲线采样 / dynamics / 冲突解析 / 写参]:::engine
         MODEL[Live2D Model + Physics]:::engine
 
         PREPARE --> ENGINE
-        ENGINE --> EVALID --> SAMPLE --> GRAPH --> GESTURE --> TIMING --> PLAN --> SDK --> MODEL
-        SEMANTIC --> PLAN
-        SPEECHONLY --> PLAN
+        ENGINE --> EVALID --> SAMPLE --> CAND --> GESTURE --> GRAPH --> PLAN --> POLICY --> SDK --> MODEL
+        SEMANTIC --> SDK
+        SPEECHONLY --> SDK
         SYNTHMOTION --> ENGINE
         LIPSINK --> SDK
         MODEL -. 下一渲染帧 .-> SDK
