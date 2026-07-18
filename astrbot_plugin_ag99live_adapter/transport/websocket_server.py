@@ -204,8 +204,14 @@ class WebSocketTransport:
                     raise
                 except Exception as exc:
                     logger.warning("Failed to process inbound websocket payload: %s", exc)
+                    turn_id = parsed.get("turn_id")
                     await self.send_json(
                         build_control_error(
+                            turn_id=(
+                                turn_id.strip()
+                                if isinstance(turn_id, str) and turn_id.strip()
+                                else None
+                            ),
                             message=f"Failed to process message: {exc}",
                         )
                     )

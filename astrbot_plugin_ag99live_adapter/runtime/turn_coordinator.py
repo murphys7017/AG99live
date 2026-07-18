@@ -179,7 +179,11 @@ class TurnCoordinator:
             success_raw = message.payload.get("success", True)
             success = success_raw if isinstance(success_raw, bool) else True
             reason_raw = message.payload.get("reason")
-            reason = reason_raw.strip() if isinstance(reason_raw, str) and reason_raw.strip() else None
+            reason = (
+                reason_raw.strip()
+                if isinstance(reason_raw, str) and reason_raw.strip()
+                else None
+            )
             await self.finalize_turn(turn_id=turn_id, success=success, reason=reason)
             return
 
@@ -187,31 +191,55 @@ class TurnCoordinator:
             await self._handle_interrupt_signal(turn_id)
             return
 
-        if message.type == TYPE_INPUT_AUDIO_STREAM_START:
-            await self.speech_ingress.handle_audio_stream_start(message)
-            return
+        try:
+            if message.type == TYPE_INPUT_AUDIO_STREAM_START:
+                await self.speech_ingress.handle_audio_stream_start(message)
+                return
 
-        if message.type == TYPE_INPUT_AUDIO_STREAM_CHUNK:
-            await self.speech_ingress.handle_audio_stream_chunk(message)
-            return
+            if message.type == TYPE_INPUT_AUDIO_STREAM_CHUNK:
+                await self.speech_ingress.handle_audio_stream_chunk(message)
+                return
 
-        if message.type == TYPE_INPUT_AUDIO_STREAM_END:
-            message_obj = await self.speech_ingress.handle_audio_stream_end(message)
-            if message_obj is not None:
+            if message.type == TYPE_INPUT_AUDIO_STREAM_END:
+                message_obj = await self.speech_ingress.handle_audio_stream_end(message)
+                if message_obj is not None:
+                    await self._commit_inbound_message(message_obj, turn_id=turn_id)
+                return
+
+            if message.type == TYPE_INPUT_TEXT:
+                message_obj = self._convert_message(message.raw)
                 await self._commit_inbound_message(message_obj, turn_id=turn_id)
-            return
+                return
 
-        if message.type == TYPE_INPUT_TEXT:
-            message_obj = self._convert_message(message.raw)
-            await self._commit_inbound_message(message_obj, turn_id=turn_id)
-            return
-
-        await self._send_json(
-            build_control_error(
-                turn_id=turn_id,
-                message=f"Unhandled message type: {message.type}",
+            await self._send_json(
+                build_control_error(
+                    turn_id=turn_id,
+                    message=f"Unhandled message type: {message.type}",
+                )
             )
-        )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception(
+                "Inbound turn message failed: type=%s turn_id=%s",
+                message.type,
+                turn_id,
+            )
+            try:
+                await self._finish_turn(
+                    turn_id=turn_id,
+                    success=False,
+                    reason=f"inbound_message_processing_failed:{message.type}",
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to publish terminal state after inbound turn error: "
+                    "type=%s turn_id=%s original_error=%s",
+                    message.type,
+                    turn_id,
+                    exc,
+                )
+            raise
 
     def reset_turn_tracking(self) -> None:
         """Discard connection-scoped Turn bookkeeping after transport disconnect."""

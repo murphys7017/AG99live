@@ -572,6 +572,9 @@ export function useTurnPlaybackSessionStore() {
     session.backend.turnFinished = true;
     session.backend.success = success;
     session.backend.reason = reason || session.backend.reason;
+    if (!success) {
+      markPhaseInternal(session, "failed");
+    }
   }
 
   // ── interrupt ───────────────────────────────────────────────────

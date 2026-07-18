@@ -42,6 +42,7 @@ interface PlaybackTimelineEntry {
   engine: PlaybackTimelineEngine;
   deferredText: PlaybackTimelineDeferredTextRelease | null;
   audioStartTimeoutHandle: ReturnType<typeof globalThis.setTimeout> | null;
+  audioInterruptHandler: ((reason: string) => void) | null;
 }
 
 interface PlaybackTimelineSinkStartOptions {
@@ -95,6 +96,11 @@ export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
     messageId: string,
     options: PlaybackTimelineSinkStartOptions,
   ) => boolean | void;
+  setAudioTimelineInterruptHandler: (
+    turnId: string | null,
+    messageId: string,
+    onInterrupt: (reason: string) => void,
+  ) => void;
   startLipSyncTimelineSink: (
     turnId: string | null,
     messageId: string,
@@ -219,11 +225,13 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
         }
         existing.deferredText = options.deferredText;
       }
+      if (options.onInterrupt) {
+        existing.audioInterruptHandler = options.onInterrupt;
+      }
       existing.engine.registerSink({
         id: AUDIO_TIMELINE_SINK_ID,
         required: true,
         start: options.start,
-        onInterrupt: options.onInterrupt,
       });
       if (!existing.engine.hasSink(LIP_SYNC_TIMELINE_SINK_ID)) {
         existing.engine.registerSink({
@@ -234,6 +242,14 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       return;
     }
     const engine = createPlaybackTimelineEngine();
+    const entry: PlaybackTimelineEntry = {
+      turnId,
+      messageId,
+      engine,
+      deferredText: options.deferredText ?? null,
+      audioStartTimeoutHandle: null,
+      audioInterruptHandler: options.onInterrupt ?? null,
+    };
     engine.load(
       { turnId, messageId },
       [
@@ -241,18 +257,12 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
           id: AUDIO_TIMELINE_SINK_ID,
           required: true,
           start: options.start,
-          onInterrupt: options.onInterrupt,
+          onInterrupt: (reason) => entry.audioInterruptHandler?.(reason),
         },
         { id: LIP_SYNC_TIMELINE_SINK_ID, required: false },
       ],
     );
-    setTimeline(turnId, messageId, {
-      turnId,
-      messageId,
-      engine,
-      deferredText: options.deferredText ?? null,
-      audioStartTimeoutHandle: null,
-    });
+    setTimeline(turnId, messageId, entry);
   }
 
   function ensureAudioSegmentTimeline(
@@ -295,6 +305,23 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       clearAudioStartTimeout(timeline);
     }
     return accepted;
+  }
+
+  function setAudioTimelineInterruptHandler(
+    turnId: string | null,
+    messageId: string,
+    onInterrupt: (reason: string) => void,
+  ): void {
+    const timeline = getTimelineWithSink(
+      "audio.interrupt_handler",
+      AUDIO_TIMELINE_SINK_ID,
+      turnId,
+      messageId,
+    );
+    if (!timeline) {
+      throw new Error("Playback timeline audio sink is missing before player start.");
+    }
+    timeline.audioInterruptHandler = onInterrupt;
   }
 
   function startLipSyncTimelineSink(
@@ -459,6 +486,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       engine,
       deferredText: null,
       audioStartTimeoutHandle: null,
+      audioInterruptHandler: null,
     });
     return engine.getSnapshot();
   }
@@ -1082,6 +1110,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     rejectAudioBeforeStart,
     rejectMotionBeforeStart,
     startAudioTimelineSink,
+    setAudioTimelineInterruptHandler,
     startLipSyncTimelineSink,
     attachAudioTimelineClock,
     ensureMotionTimelineSinkForSegment: (turnId, messageId, onInterrupt) =>

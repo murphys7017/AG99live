@@ -41,8 +41,11 @@ class FakeAudio {
   async play(): Promise<void> {
     this.paused = false;
     await Promise.resolve();
-    this.emit("loadedmetadata");
     this.emit("playing");
+  }
+
+  load(): void {
+    this.emit("loadedmetadata");
   }
 
   pause(): void {

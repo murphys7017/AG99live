@@ -95,11 +95,14 @@ function createAdapterAudioRuntime(
       messageId: string,
       turnId: string | null,
     ): boolean {
-      const released = runtime?.releaseAudioForTimelinePlayback(
-        audioUrl,
-        messageId,
+      const released = runtime?.startSegmentJob({
         turnId,
-      ) ?? false;
+        messageId,
+        reason: "test_audio_release",
+        text: { release: false, content: null },
+        audio: { release: true, url: audioUrl, noAudioConfirmed: false },
+        motion: { payload: null, receivedAtMs: null },
+      }).releasedAudio ?? false;
       if (released) {
         deps.getSessionStore()?.markAudioReleased(turnId, messageId);
       }

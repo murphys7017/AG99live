@@ -36,6 +36,7 @@ export interface PlaybackTimelineAudioSink {
 }
 
 let activeAudioElement: HTMLAudioElement | null = null;
+let activeAudioStartCancel: (() => void) | null = null;
 
 interface AudioElementClockSource {
   currentTime: number;
@@ -91,20 +92,42 @@ async function startBrowserAudioPlayback(
   });
   let resolvedDurationMs: number | null = null;
   let playbackStartNotified = false;
+  let disposed = false;
+
+  let resolveDurationReady!: () => void;
+  let rejectDurationReady!: (error: unknown) => void;
+  const durationReady = new Promise<void>((resolve, reject) => {
+    resolveDurationReady = resolve;
+    rejectDurationReady = reject;
+  });
+  const cancelStart = () => {
+    rejectDurationReady(new DOMException("Audio playback stopped before start.", "AbortError"));
+  };
+  activeAudioStartCancel = cancelStart;
 
   const cleanup = () => {
+    if (disposed) {
+      return;
+    }
+    disposed = true;
     if (activeAudioElement === audio) {
       activeAudioElement = null;
+    }
+    if (activeAudioStartCancel === cancelStart) {
+      activeAudioStartCancel = null;
     }
     callbacks.onAudioElementDisposed?.();
   };
 
-  const syncDurationFromElement = () => {
+  const syncDurationFromElement = (): boolean => {
     const durationSeconds = Number(audio.duration);
     if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
       resolvedDurationMs = Math.round(durationSeconds * 1000);
       callbacks.onDurationChanged?.(resolvedDurationMs);
+      resolveDurationReady();
+      return true;
     }
+    return false;
   };
 
   const markPlaybackStarted = () => {
@@ -130,6 +153,12 @@ async function startBrowserAudioPlayback(
     },
     { once: true },
   );
+
+  audio.addEventListener("durationchange", () => {
+    if (activeAudioElement === audio && resolvedDurationMs === null) {
+      syncDurationFromElement();
+    }
+  });
 
   audio.addEventListener(
     "playing",
@@ -164,13 +193,21 @@ async function startBrowserAudioPlayback(
         networkState: audio.networkState,
         readyState: audio.readyState,
       });
+      rejectDurationReady(new Error("Audio metadata could not be loaded."));
       cleanup();
-      callbacks.onError?.();
+      if (playbackStartNotified) {
+        callbacks.onError?.();
+      }
     },
     { once: true },
   );
 
   try {
+    audio.load();
+    await durationReady;
+    if (activeAudioElement !== audio) {
+      throw new DOMException("Audio playback stopped before start.", "AbortError");
+    }
     await audio.play();
     markPlaybackStarted();
   } catch (error) {
@@ -186,11 +223,15 @@ async function startBrowserAudioPlayback(
 }
 
 function stopBrowserAudioPlayback(): void {
-  if (activeAudioElement) {
-    activeAudioElement.pause();
-    activeAudioElement.currentTime = 0;
-  }
+  const audio = activeAudioElement;
+  const cancelStart = activeAudioStartCancel;
   activeAudioElement = null;
+  activeAudioStartCancel = null;
+  if (audio) {
+    audio.pause();
+    audio.currentTime = 0;
+  }
+  cancelStart?.();
 }
 
 export function createBrowserAudioTimelineSink(): PlaybackTimelineAudioSink {

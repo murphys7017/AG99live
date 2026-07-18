@@ -277,6 +277,19 @@ function testBackendCompletionSignalsAreSeparate(): void {
   assert.equal(session.backend.success, true);
 }
 
+function testFailedBackendCompletionTerminatesTheSession(): void {
+  const store = useTurnPlaybackSessionStore();
+  store.markTurnStarted("turn-failed");
+
+  store.markTurnFinished("turn-failed", false, "backend_failed");
+
+  const session = getOnlySession(store);
+  assert.equal(session.backend.turnFinished, true);
+  assert.equal(session.backend.success, false);
+  assert.equal(session.backend.reason, "backend_failed");
+  assert.equal(session.phase, "failed");
+}
+
 function testSynthFinishedRequiresExistingSession(): void {
   const store = useTurnPlaybackSessionStore();
   assert.throws(
@@ -512,6 +525,7 @@ function run(): void {
   testSelectorsOperateOnSegments();
   testSegmentSettlementAndTurnSettlement();
   testBackendCompletionSignalsAreSeparate();
+  testFailedBackendCompletionTerminatesTheSession();
   testSynthFinishedRequiresExistingSession();
   testTurnFinishedRequiresExistingSession();
   testRequiredMessageIdIsEnforced();
