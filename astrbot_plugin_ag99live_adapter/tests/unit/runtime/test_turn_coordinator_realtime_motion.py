@@ -308,7 +308,6 @@ def test_commit_inbound_message_disables_streaming_in_split_mode(
     class SessionStateStub:
         client_uid = "desktop-client"
         current_turn_id = None
-        waiting_for_playback_complete = False
 
         def begin_turn(self, _message_str: str, *, turn_id: str | None = None) -> str:
             self.current_turn_id = turn_id or "turn-split"
@@ -322,7 +321,9 @@ def test_commit_inbound_message_disables_streaming_in_split_mode(
     )()
     coordinator._begin_turn_timing = lambda *_args, **_kwargs: None
     coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
-    coordinator._emit_image_input_diagnostics = lambda _message_obj: _noop_async()
+    coordinator._emit_image_input_diagnostics = (
+        lambda _message_obj, *, turn_id: _noop_async()
+    )
     coordinator._send_json = lambda _payload: _return_true_async()
 
     class EventStub:
@@ -348,7 +349,7 @@ def test_commit_inbound_message_disables_streaming_in_split_mode(
     assert "ag99live_inline_motion_contract_applied" not in event.extras
 
 
-def test_commit_inbound_message_rejects_replacement_without_interrupt(
+def test_commit_inbound_message_forwards_next_turn_while_prior_playback_is_active(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -357,14 +358,29 @@ def test_commit_inbound_message_rejects_replacement_without_interrupt(
     TurnCoordinator = module.TurnCoordinator
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
     coordinator._turn_lock = asyncio.Lock()
+    coordinator.turn_identity_map = None
 
     class SessionStateStub:
         client_uid = "desktop-client"
         current_turn_id = "turn-active"
-        waiting_for_playback_complete = True
+
+        def begin_turn(self, _message_str: str, *, turn_id: str) -> str:
+            self.current_turn_id = turn_id
+            return turn_id
 
     coordinator.session_state = SessionStateStub()
+    coordinator.chat_buffer = type(
+        "ChatBufferStub",
+        (),
+        {"add": lambda self, role, text: None},
+    )()
+    coordinator._begin_turn_timing = lambda *_args, **_kwargs: None
+    coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
+    coordinator._emit_image_input_diagnostics = (
+        lambda _message_obj, *, turn_id: _noop_async()
+    )
     sent_payloads: list[dict[str, object]] = []
 
     async def send_json(payload: dict[str, object]) -> bool:
@@ -372,18 +388,28 @@ def test_commit_inbound_message_rejects_replacement_without_interrupt(
         return True
 
     coordinator._send_json = send_json
+    committed: list[object] = []
+    event = type(
+        "EventStub",
+        (),
+        {
+            "extras": None,
+            "set_extra": lambda self, key, value: self.extras.__setitem__(key, value),
+        },
+    )()
+    event.extras = {}
+    coordinator._build_platform_event = lambda _message_obj: event
+    coordinator._commit_event = lambda committed_event: committed.append(committed_event)
     message_obj = type("MessageObjectStub", (), {"message_str": "replacement"})()
 
     asyncio.run(coordinator._commit_inbound_message(message_obj, turn_id="turn-next"))
 
     assert len(sent_payloads) == 1
-    assert sent_payloads[0]["type"] == "control.error"
+    assert sent_payloads[0]["type"] == "control.turn_started"
     assert sent_payloads[0]["turn_id"] == "turn-next"
-    assert sent_payloads[0]["payload"] == {
-        "message": "input_turn_replacement_requires_interrupt"
-    }
-    assert coordinator.session_state.current_turn_id == "turn-active"
-    assert coordinator.session_state.waiting_for_playback_complete is True
+    assert committed == [event]
+    assert event.extras["output_correlation_id"] == "turn-next"
+    assert coordinator.session_state.current_turn_id == "turn-next"
 
 
 def test_submit_system_text_input_commits_remote_operator_metadata(
@@ -402,7 +428,6 @@ def test_submit_system_text_input_commits_remote_operator_metadata(
     class SessionStateStub:
         client_uid = "desktop-client"
         current_turn_id = None
-        waiting_for_playback_complete = False
 
         def begin_turn(self, _message_str: str, *, turn_id: str | None = None) -> str:
             self.current_turn_id = turn_id or "turn-system"
@@ -416,7 +441,9 @@ def test_submit_system_text_input_commits_remote_operator_metadata(
     )()
     coordinator._begin_turn_timing = lambda *_args, **_kwargs: None
     coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
-    coordinator._emit_image_input_diagnostics = lambda _message_obj: _noop_async()
+    coordinator._emit_image_input_diagnostics = (
+        lambda _message_obj, *, turn_id: _noop_async()
+    )
     coordinator._send_json = lambda _payload: _return_true_async()
 
     class EventStub:
@@ -562,11 +589,11 @@ def test_emit_message_chain_ignores_inline_anim_when_persona_effect_is_available
             message_chain=[
                 Plain(f"hello <@anim {tag_payload}> world")
             ],
+            turn_id="turn-inline",
             platform_extras={"logical_message_id": "standard_reply"},
         )
     )
-    coordinator._flushed_output_segment_count = 0
-    asyncio.run(coordinator._flush_pending_output_segments())
+    asyncio.run(coordinator._flush_pending_output_segments(turn_id="turn-inline"))
 
     assert inline_broadcast == {}
     assert "reply_text" not in scheduled
@@ -641,12 +668,14 @@ def test_emit_message_chain_dispatches_official_inline_anim_when_persona_effect_
     asyncio.run(
         coordinator.emit_message_chain(
             message_chain=[Plain("hello world")],
+            turn_id="turn-inline-compat",
             raw_reply_text_override=f"hello <@anim {tag_payload}> world",
             platform_extras={"logical_message_id": "standard_reply"},
         )
     )
-    coordinator._flushed_output_segment_count = 0
-    asyncio.run(coordinator._flush_pending_output_segments())
+    asyncio.run(
+        coordinator._flush_pending_output_segments(turn_id="turn-inline-compat")
+    )
 
     assert inline_broadcast == {}
     assert [item.get("type") for item in sent_payloads] == ["output.segment"]
@@ -730,6 +759,7 @@ def test_emit_message_chain_reuses_platform_visible_message_id_for_segment_outpu
     asyncio.run(
         coordinator.emit_message_chain(
             message_chain=[Record(file="voice.wav", text="hello")],
+            turn_id="turn-segment",
             platform_extras={
                 "output_segment": tts_segment,
                 "audio_attachment": "present",
@@ -747,14 +777,14 @@ def test_emit_message_chain_reuses_platform_visible_message_id_for_segment_outpu
     asyncio.run(
         coordinator.emit_message_chain(
             message_chain=[Plain("hello")],
+            turn_id="turn-segment",
             platform_extras={
                 "output_segment": tts_segment,
                 "audio_attachment": "absent",
             },
         )
     )
-    coordinator._flushed_output_segment_count = 0
-    asyncio.run(coordinator._flush_pending_output_segments())
+    asyncio.run(coordinator._flush_pending_output_segments(turn_id="turn-segment"))
 
     assert [item.get("type") for item in sent_payloads] == ["output.segment"]
     output_segment = sent_payloads[0]
@@ -815,11 +845,11 @@ def test_emit_message_chain_uses_record_text_as_canonical_segment_text(
     asyncio.run(
         coordinator.emit_message_chain(
             message_chain=[Record(file="voice.wav", text="字幕文本")],
+            turn_id="turn-record",
             platform_extras={"visible_message_id": "visible-audio-1"},
         )
     )
-    coordinator._flushed_output_segment_count = 0
-    asyncio.run(coordinator._flush_pending_output_segments())
+    asyncio.run(coordinator._flush_pending_output_segments(turn_id="turn-record"))
 
     assert [payload.get("type") for payload in sent_payloads] == ["output.segment"]
     segment_payload = sent_payloads[0]["payload"]
@@ -873,6 +903,7 @@ def test_tts_failure_emits_explicit_audio_failed_slot(
     asyncio.run(
         coordinator.emit_message_chain(
             message_chain=[Plain("语音生成失败")],
+            turn_id="turn-tts-failed",
             platform_extras={
                 "visible_message_id": "message-tts-failed",
                 "output_segment": {
@@ -892,8 +923,9 @@ def test_tts_failure_emits_explicit_audio_failed_slot(
             },
         )
     )
-    coordinator._flushed_output_segment_count = 0
-    asyncio.run(coordinator._flush_pending_output_segments())
+    asyncio.run(
+        coordinator._flush_pending_output_segments(turn_id="turn-tts-failed")
+    )
 
     assert sent_payloads[0]["payload"]["audio"] == {
         "state": "failed",
@@ -993,6 +1025,7 @@ def test_emit_message_chain_rejects_conflicting_canonical_text_sources(
                     Plain("visible text"),
                     Record(file="voice.wav", text="different spoken text"),
                 ],
+                turn_id="turn-conflicting-text",
                 platform_extras={"visible_message_id": "visible-conflict-1"},
             )
         )
@@ -1043,9 +1076,10 @@ def test_emit_message_chain_dedupes_motion_client_object_for_segmented_output(
         "source": "persona_effect",
     }
 
-    async def emit_segment(message_id: str) -> None:
+    async def emit_segment(message_id: str, *, turn_id: str = "turn-segmented") -> None:
         await coordinator.emit_message_chain(
             message_chain=[Plain("hello")],
+            turn_id=turn_id,
             platform_extras={
                 "visible_message_id": message_id,
                 "message_kind": "core_reply",
@@ -1056,12 +1090,18 @@ def test_emit_message_chain_dedupes_motion_client_object_for_segmented_output(
 
     asyncio.run(emit_segment("visible-msg::core_reply::0001"))
     asyncio.run(emit_segment("visible-msg::core_reply::0002"))
-    coordinator._flushed_output_segment_count = 0
-    asyncio.run(coordinator._flush_pending_output_segments())
+    asyncio.run(
+        emit_segment(
+            "visible-other::core_reply::0001",
+            turn_id="turn-other",
+        )
+    )
+    asyncio.run(coordinator._flush_pending_output_segments(turn_id="turn-segmented"))
 
     assert [payload.get("type") for payload in sent_payloads] == ["output.segment"]
     assert sent_payloads[0]["message_id"] == "visible-msg::core_reply"
     assert sent_payloads[0]["payload"]["motion"]["state"] == "present"
+    assert "turn-other|visible-other::core_reply" in coordinator._pending_output_segments
 
 
 @pytest.mark.parametrize("first_part", ["motion", "text"])
@@ -1127,19 +1167,23 @@ def test_emit_message_chain_binds_curve_from_tts_request_identity(
         if first_part == "motion":
             await coordinator.emit_message_chain(
                 message_chain=[Record(file="voice.wav", text="canonical reply")],
+                turn_id="turn-curve-order",
                 platform_extras=motion_extras,
             )
             await coordinator.emit_message_chain(
                 message_chain=[Plain("canonical reply")],
+                turn_id="turn-curve-order",
                 platform_extras=text_extras,
             )
         else:
             await coordinator.emit_message_chain(
                 message_chain=[Plain("canonical reply")],
+                turn_id="turn-curve-order",
                 platform_extras=text_extras,
             )
             await coordinator.emit_message_chain(
                 message_chain=[Record(file="voice.wav", text="canonical reply")],
+                turn_id="turn-curve-order",
                 platform_extras=motion_extras,
             )
 
@@ -1381,11 +1425,11 @@ def test_emit_message_chain_treats_inline_payload_as_visible_text_only_when_pers
     asyncio.run(
         coordinator.emit_message_chain(
             message_chain=[Plain(f"hello <@anim {tag_payload}> world")],
+            turn_id="turn-split",
             platform_extras={"logical_message_id": "standard_reply"},
         )
     )
-    coordinator._flushed_output_segment_count = 0
-    asyncio.run(coordinator._flush_pending_output_segments())
+    asyncio.run(coordinator._flush_pending_output_segments(turn_id="turn-split"))
 
     assert inline_broadcast == {}
     assert [item.get("type") for item in sent_payloads] == ["output.segment"]
@@ -1552,12 +1596,14 @@ def test_emit_message_chain_raw_reply_text_override_uses_official_inline_anim_co
     asyncio.run(
         coordinator.emit_message_chain(
             message_chain=[Plain("hello world")],
+            turn_id="turn-inline-override",
             raw_reply_text_override=raw_reply_text,
             platform_extras={"logical_message_id": "standard_reply"},
         )
     )
-    coordinator._flushed_output_segment_count = 0
-    asyncio.run(coordinator._flush_pending_output_segments())
+    asyncio.run(
+        coordinator._flush_pending_output_segments(turn_id="turn-inline-override")
+    )
 
     assert inline_broadcast == {}
     assert [item.get("type") for item in sent_payloads] == ["output.segment"]
@@ -1627,6 +1673,7 @@ def test_emit_message_chain_inline_invalid_v3_intent_does_not_broadcast_replacem
         asyncio.run(
             coordinator.emit_message_chain(
                 message_chain=[Plain("hello world")],
+                turn_id="turn-inline-fallback",
                 raw_reply_text_override=raw_reply_text,
                 platform_extras={"logical_message_id": "standard_reply"},
             )
@@ -1706,6 +1753,7 @@ def test_emit_message_chain_inline_v1_intent_is_rejected(
         asyncio.run(
             coordinator.emit_message_chain(
                 message_chain=[Plain("hello")],
+                turn_id="turn-inline-partial",
                 raw_reply_text_override=raw_reply_text,
                 platform_extras={"logical_message_id": "standard_reply"},
             )

@@ -40,6 +40,9 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         platform_extras: dict[str, Any] | None = None,
         record_send_operation: bool = True,
     ) -> None:
+        turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
+        if not turn_id:
+            raise RuntimeError("output_event_turn_id_missing")
         previous_has_send_oper = self._has_send_oper
         resolved_platform_extras = dict(platform_extras or {})
         if not any(
@@ -54,6 +57,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             resolved_platform_extras.update(self._standard_output_platform_extras)
         await self.adapter.emit_message_chain(
             message_chain=message,
+            turn_id=turn_id,
             unified_msg_origin=self.unified_msg_origin,
             raw_reply_text_override=str(self.get_extra("ag99live_raw_reply_text", "") or "").strip()
             or None,
@@ -73,10 +77,13 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         await self._close_frontend_turn_output_queue()
 
     async def _close_frontend_turn_output_queue(self) -> None:
+        turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
+        if not turn_id:
+            raise RuntimeError("output_event_turn_id_missing")
         turn_coordinator = getattr(self.adapter, "turn_coordinator", None)
         close_queue = getattr(turn_coordinator, "close_turn_output_queue", None)
         if callable(close_queue):
-            await close_queue()
+            await close_queue(turn_id=turn_id)
 
     def _attach_prompt_annotations(self, *, message_obj: Any) -> None:
         annotations: dict[str, dict[str, str]] = {

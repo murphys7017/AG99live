@@ -266,7 +266,8 @@ architecture:
     - Motion compile diagnostics now include MotionFeedback and a raw/resolved/derived/constrained/compiled transform trace for Motion Lab correlation.
     - SemanticAxisProfile relation_graph is preserved by desktop runtime snapshot cloning so restored profiles cannot silently lose relation constraints.
     - PlaybackTimeline owns the 3000ms real-audio-start deadline; ModelEngine has no independent audio wait timer, and timeout fails subtitle plus every still-open required sink.
-    - A replacement input must be preceded by control.interrupt while the previous backend turn still awaits playback completion; the backend rejects implicit success finalization.
+    - AG99live never queues or rejects a valid new input because an earlier turn is still playing; it immediately commits the event to AstrBot's own queue and uses the event's output_correlation_id to keep output, synth_finished, playback_finished, and turn_finished bound to the correct frontend turn.
+    - control.interrupt remains session-scoped because AstrBot active_event_registry only exposes UMO-wide stop operations; exact queued/active Turn cancellation must not be inferred from AG99live's latest submitted turn.
     - Catalog motion accepted, started, and terminal are distinct lifecycle facts; WebSDK owns interruption from accepted priority reservation through asynchronous loading, playback, replacement, and model release.
     - Text sends are serialized across asynchronous desktop capture, and currentTurnId advances only after the matching input.text envelope is sent successfully.
 verification:
@@ -525,6 +526,7 @@ verification:
     - AstrBot plugin checker (0 errors, 0 warnings, 3 informational notices)
     - git diff --check (passed)
     - targeted performance-curve, TTS identity, send-transaction, and cleanup regressions (13 passed after final ownership review)
+    - targeted inbound forwarding, turn-scoped output/playback lifecycle, disconnect cleanup, and PlatformEvent correlation regressions (42 passed)
   checks_failed: []
   validation_gap: A live Electron end-to-end conversation is still needed to verify the installed AstrBot read-only TTS state hook, output.segment delivery, real audio-clock release, lip sync, and motion start against a real TTS Provider and Live2D model. Mermaid CLI was unavailable in the current frontend toolchain, so the two updated .mmd files were reviewed but not parser-rendered. Six historical custom WebSDK entry files still use @ts-nocheck, so their complete static-type migration remains separate technical debt.
 runtime:

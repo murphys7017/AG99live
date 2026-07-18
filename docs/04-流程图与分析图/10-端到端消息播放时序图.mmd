@@ -2,6 +2,7 @@ sequenceDiagram
     autonumber
     actor User as 用户 / UI
     participant Adapter as AG99 Adapter<br/>TurnCoordinator
+    participant CoreQueue as AstrBot EventBus /<br/>Personal Runtime Queue
     participant Persona as Persona Runtime
     participant LLM as 主模型
     participant Curve as 可选 Performance Curve Provider
@@ -22,7 +23,10 @@ sequenceDiagram
     User->>Adapter: input.text / input.audio
     Adapter->>Inbound: control.turn_started(turn_id)
     Inbound->>Store: 创建本轮 Session
-    Adapter->>Persona: 构建 Prompt、effect schema 与本轮上下文
+    Adapter->>CoreQueue: commit_event(event, output_correlation_id=turn_id)
+    Note over Adapter,CoreQueue: 不等待较早 Turn 播放完成，AG99 不维护输入 FIFO
+    CoreQueue->>Persona: 按 AstrBot 官方队列调度
+    Persona->>Persona: 构建 Prompt、effect schema 与本轮上下文
     Persona->>LLM: 生成可见回复与动作决策
     LLM-->>Persona: spoken_reply + effect_calls
     Persona->>Adapter: result contributor 生成 motion_intent.v4

@@ -63,7 +63,6 @@ def _create_session_state_stub(
     *,
     client_uid: str = "test-client",
     current_turn_id: str | None = "turn-1",
-    waiting_for_playback_complete: bool = False,
 ):
     st = type(
         "SessionStateStub",
@@ -71,34 +70,13 @@ def _create_session_state_stub(
         {
             "client_uid": client_uid,
             "current_turn_id": current_turn_id,
-            "waiting_for_playback_complete": waiting_for_playback_complete,
         },
     )()
-    st.mark_playback_complete = lambda: setattr(st, "waiting_for_playback_complete", False)
-    st.output_queue_closing_turn_id = None
-    st.output_queue_closed = False
 
-    def begin_output_queue_close(turn_id: str) -> bool:
-        if turn_id != st.current_turn_id:
-            raise RuntimeError("output_queue_close_turn_mismatch")
-        if st.output_queue_closing_turn_id is not None or st.output_queue_closed:
-            return False
-        st.output_queue_closing_turn_id = turn_id
-        return True
+    def reset_to_idle() -> None:
+        st.current_turn_id = None
 
-    def complete_output_queue_close(turn_id: str) -> None:
-        if st.output_queue_closing_turn_id != turn_id or st.current_turn_id != turn_id:
-            raise RuntimeError("output_queue_close_turn_mismatch")
-        st.output_queue_closing_turn_id = None
-        st.output_queue_closed = True
-
-    st.begin_output_queue_close = begin_output_queue_close
-    st.complete_output_queue_close = complete_output_queue_close
-    st.abort_output_queue_close = lambda turn_id: (
-        setattr(st, "output_queue_closing_turn_id", None)
-        if st.output_queue_closing_turn_id == turn_id
-        else None
-    )
+    st.reset_to_idle = reset_to_idle
     return st
 
 
@@ -108,6 +86,46 @@ def _load_module(install_fake_astrbot, monkeypatch):
         "astrbot_plugin_ag99live_adapter.runtime.turn_coordinator"
     )
     return module.TurnCoordinator
+
+
+def _prepare_turn_finalization(coordinator) -> None:
+    coordinator._pending_output_segments = {}
+    coordinator._closing_output_turn_ids = set()
+    coordinator._closed_output_turn_ids = set()
+    coordinator._output_emitted_turn_ids = set()
+    coordinator._turn_timings = {}
+
+
+def test_reset_turn_tracking_clears_connection_owned_state(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    TurnCoordinator = _load_module(install_fake_astrbot, monkeypatch)
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    cancelled_turns: list[str] = []
+    coordinator.runtime_state = types.SimpleNamespace(
+        performance_curve_runtime=types.SimpleNamespace(
+            cancel_turn=lambda turn_id: cancelled_turns.append(turn_id)
+        )
+    )
+    coordinator._turn_timings = {"turn-1": {}}
+    coordinator._pending_output_segments = {
+        "turn-2|message-1": types.SimpleNamespace(turn_id="turn-2")
+    }
+    coordinator._closing_output_turn_ids = {"turn-2"}
+    coordinator._closed_output_turn_ids = {"turn-1"}
+    coordinator._output_emitted_turn_ids = {"turn-1", "turn-2"}
+    coordinator._last_prompt_motion_snapshot = {"turn_id": "turn-1"}
+
+    coordinator.reset_turn_tracking()
+
+    assert set(cancelled_turns) == {"turn-1", "turn-2"}
+    assert coordinator._turn_timings == {}
+    assert coordinator._pending_output_segments == {}
+    assert coordinator._closing_output_turn_ids == set()
+    assert coordinator._closed_output_turn_ids == set()
+    assert coordinator._output_emitted_turn_ids == set()
+    assert coordinator._last_prompt_motion_snapshot is None
 
 
 # ── close_turn_output_queue ────────────────────────────────────────
@@ -134,9 +152,17 @@ def test_close_turn_output_queue_sends_synth_finished(
         return True
 
     coordinator._send_json = fake_send_json
-    coordinator._flushed_output_segment_count = 1
+    coordinator._closing_output_turn_ids = set()
+    coordinator._closed_output_turn_ids = set()
+    coordinator._output_emitted_turn_ids = set()
 
-    asyncio.run(coordinator.close_turn_output_queue())
+    async def flush_segments(*, turn_id: str) -> int:
+        assert turn_id == "turn-1"
+        return 1
+
+    coordinator._flush_pending_output_segments = flush_segments
+
+    asyncio.run(coordinator.close_turn_output_queue(turn_id="turn-1"))
 
     assert len(sent_payloads) == 1
     assert sent_payloads[0].get("type") == "control.synth_finished"
@@ -144,25 +170,19 @@ def test_close_turn_output_queue_sends_synth_finished(
     assert cancelled_curve_turns == ["turn-1"]
 
 
-def test_close_turn_output_queue_skips_when_no_turn_id(
+def test_close_turn_output_queue_requires_turn_id(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
     TurnCoordinator = _load_module(install_fake_astrbot, monkeypatch)
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
-    coordinator.session_state = _create_session_state_stub(current_turn_id=None)
+    coordinator._closing_output_turn_ids = set()
+    coordinator._closed_output_turn_ids = set()
+    coordinator._output_emitted_turn_ids = set()
 
-    sent_payloads: list[dict[str, object]] = []
-
-    async def fake_send_json(payload):
-        sent_payloads.append(payload)
-        return True
-
-    coordinator._send_json = fake_send_json
-
-    asyncio.run(coordinator.close_turn_output_queue())
-    assert len(sent_payloads) == 0
+    with pytest.raises(ValueError, match="non-empty turn_id"):
+        asyncio.run(coordinator.close_turn_output_queue(turn_id=""))
 
 
 def test_close_turn_output_queue_is_idempotent(
@@ -175,6 +195,7 @@ def test_close_turn_output_queue_is_idempotent(
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.session_state = st
+    _prepare_turn_finalization(coordinator)
 
     sent_payloads: list[dict[str, object]] = []
 
@@ -183,16 +204,24 @@ def test_close_turn_output_queue_is_idempotent(
         return True
 
     coordinator._send_json = fake_send_json
-    coordinator._flushed_output_segment_count = 1
+    coordinator._closing_output_turn_ids = set()
+    coordinator._closed_output_turn_ids = set()
+    coordinator._output_emitted_turn_ids = set()
 
-    asyncio.run(coordinator.close_turn_output_queue())
+    async def flush_segments(*, turn_id: str) -> int:
+        assert turn_id == "turn-1"
+        return 1
+
+    coordinator._flush_pending_output_segments = flush_segments
+
+    asyncio.run(coordinator.close_turn_output_queue(turn_id="turn-1"))
     assert len(sent_payloads) == 1
 
-    asyncio.run(coordinator.close_turn_output_queue())
+    asyncio.run(coordinator.close_turn_output_queue(turn_id="turn-1"))
     assert len(sent_payloads) == 1
 
 
-def test_close_turn_output_queue_send_failure_keeps_queue_open(
+def test_close_turn_output_queue_retries_only_synth_finished_after_send_failure(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -202,17 +231,38 @@ def test_close_turn_output_queue_send_failure_keeps_queue_open(
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.session_state = st
 
+    send_attempts = 0
+
     async def fake_send_json(payload):
+        nonlocal send_attempts
         del payload
-        return False
+        send_attempts += 1
+        return send_attempts > 1
 
     coordinator._send_json = fake_send_json
-    coordinator._flushed_output_segment_count = 1
+    coordinator._closing_output_turn_ids = set()
+    coordinator._closed_output_turn_ids = set()
+    coordinator._output_emitted_turn_ids = set()
+
+    flush_attempts = 0
+
+    async def flush_segments(*, turn_id: str) -> int:
+        nonlocal flush_attempts
+        assert turn_id == "turn-1"
+        flush_attempts += 1
+        return 1 if flush_attempts == 1 else 0
+
+    coordinator._flush_pending_output_segments = flush_segments
 
     with pytest.raises(RuntimeError, match="synth_finished_send_failed"):
-        asyncio.run(coordinator.close_turn_output_queue())
-    assert st.output_queue_closed is False
-    assert st.output_queue_closing_turn_id is None
+        asyncio.run(coordinator.close_turn_output_queue(turn_id="turn-1"))
+    assert coordinator._closed_output_turn_ids == set()
+    assert coordinator._closing_output_turn_ids == set()
+
+    asyncio.run(coordinator.close_turn_output_queue(turn_id="turn-1"))
+    assert send_attempts == 2
+    assert flush_attempts == 2
+    assert coordinator._closed_output_turn_ids == {"turn-1"}
 
 
 def test_close_turn_output_queue_rejects_zero_segments(
@@ -222,27 +272,18 @@ def test_close_turn_output_queue_rejects_zero_segments(
     TurnCoordinator = _load_module(install_fake_astrbot, monkeypatch)
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.session_state = _create_session_state_stub(current_turn_id="turn-1")
-    coordinator._flushed_output_segment_count = 0
+    coordinator._closing_output_turn_ids = set()
+    coordinator._closed_output_turn_ids = set()
+    coordinator._output_emitted_turn_ids = set()
+
+    async def flush_segments(*, turn_id: str) -> int:
+        assert turn_id == "turn-1"
+        return 0
+
+    coordinator._flush_pending_output_segments = flush_segments
 
     with pytest.raises(RuntimeError, match="output_segment_missing"):
-        asyncio.run(coordinator.close_turn_output_queue())
-
-
-def test_output_queue_close_ownership_cannot_cross_turns() -> None:
-    from astrbot_plugin_ag99live_adapter.runtime.session_state import SessionState
-
-    state = SessionState()
-    state.begin_turn("first", turn_id="turn-1")
-    assert state.begin_output_queue_close("turn-1") is True
-
-    state.begin_turn("second", turn_id="turn-2")
-    state.abort_output_queue_close("turn-1")
-    with pytest.raises(RuntimeError, match="output_queue_close_turn_mismatch"):
-        state.complete_output_queue_close("turn-1")
-
-    assert state.current_turn_id == "turn-2"
-    assert state.output_queue_closed is False
-    assert state.output_queue_closing_turn_id is None
+        asyncio.run(coordinator.close_turn_output_queue(turn_id="turn-1"))
 
 
 def test_emit_message_chain_converts_audio_off_thread(
@@ -268,7 +309,6 @@ def test_emit_message_chain_converts_audio_off_thread(
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.runtime_state = type("RuntimeStateStub", (), {})()
     coordinator.session_state = _create_session_state_stub(current_turn_id="turn-1")
-    coordinator._flushed_output_segment_count = 0
     coordinator.chat_buffer = type("ChatBufferStub", (), {"add": lambda self, *_args: None})()
     coordinator.speaker_name = "assistant"
     coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
@@ -297,10 +337,11 @@ def test_emit_message_chain_converts_audio_off_thread(
     asyncio.run(
         coordinator.emit_message_chain(
             message_chain=[Record(file="voice.wav", text="assistant reply")],
+            turn_id="turn-1",
             platform_extras={"logical_message_id": "standard_reply"},
         )
     )
-    asyncio.run(coordinator._flush_pending_output_segments())
+    asyncio.run(coordinator._flush_pending_output_segments(turn_id="turn-1"))
 
     assert to_thread_calls
     assert media_service.calls == ["voice.wav"]
@@ -316,18 +357,16 @@ def test_emit_message_chain_converts_audio_off_thread(
 
 # ── finalize_turn ───────────────────────────────────────────────────
 
-def test_finalize_turn_sends_turn_finished_and_clears_waiting_flag(
+def test_finalize_turn_sends_turn_finished_and_resets_latest_projection(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
     TurnCoordinator = _load_module(install_fake_astrbot, monkeypatch)
 
-    st = _create_session_state_stub(
-        current_turn_id="turn-1",
-        waiting_for_playback_complete=True,
-    )
+    st = _create_session_state_stub(current_turn_id="turn-1")
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.session_state = st
+    _prepare_turn_finalization(coordinator)
 
     sent_payloads: list[dict[str, object]] = []
 
@@ -349,21 +388,19 @@ def test_finalize_turn_sends_turn_finished_and_clears_waiting_flag(
     assert isinstance(payload, dict)
     assert payload.get("success") is True
     assert payload.get("reason") == "ok"
-    assert st.waiting_for_playback_complete is False
+    assert st.current_turn_id is None
 
 
-def test_finalize_turn_ignores_when_not_waiting(
+def test_finalize_turn_uses_explicit_turn_id(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
     TurnCoordinator = _load_module(install_fake_astrbot, monkeypatch)
 
-    st = _create_session_state_stub(
-        current_turn_id="turn-1",
-        waiting_for_playback_complete=False,
-    )
+    st = _create_session_state_stub(current_turn_id="turn-1")
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.session_state = st
+    _prepare_turn_finalization(coordinator)
 
     sent_payloads: list[dict[str, object]] = []
 
@@ -372,23 +409,24 @@ def test_finalize_turn_ignores_when_not_waiting(
         return True
 
     coordinator._send_json = fake_send_json
+    coordinator._mark_turn_timing = lambda *args, **kwargs: None
+    coordinator._elapsed_ms = lambda *args: 100.0
 
     asyncio.run(coordinator.finalize_turn(turn_id="turn-1", success=True))
-    assert len(sent_payloads) == 0
+    assert len(sent_payloads) == 1
+    assert sent_payloads[0].get("turn_id") == "turn-1"
 
 
-def test_finalize_turn_ignores_stale_turn_id(
+def test_finalize_older_turn_does_not_reset_latest_turn(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
     TurnCoordinator = _load_module(install_fake_astrbot, monkeypatch)
 
-    st = _create_session_state_stub(
-        current_turn_id="turn-current",
-        waiting_for_playback_complete=True,
-    )
+    st = _create_session_state_stub(current_turn_id="turn-current")
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.session_state = st
+    _prepare_turn_finalization(coordinator)
 
     sent_payloads: list[dict[str, object]] = []
 
@@ -397,9 +435,13 @@ def test_finalize_turn_ignores_stale_turn_id(
         return True
 
     coordinator._send_json = fake_send_json
+    coordinator._mark_turn_timing = lambda *args, **kwargs: None
+    coordinator._elapsed_ms = lambda *args: 100.0
 
     asyncio.run(coordinator.finalize_turn(turn_id="turn-other", success=True))
-    assert len(sent_payloads) == 0
+    assert len(sent_payloads) == 1
+    assert sent_payloads[0].get("turn_id") == "turn-other"
+    assert st.current_turn_id == "turn-current"
 
 
 # ── handle_msg routes playback_finished ─────────────────────────────
@@ -410,12 +452,10 @@ def test_handle_msg_routes_playback_finished_to_finalize_turn(
 ) -> None:
     TurnCoordinator = _load_module(install_fake_astrbot, monkeypatch)
 
-    st = _create_session_state_stub(
-        current_turn_id="turn-1",
-        waiting_for_playback_complete=True,
-    )
+    st = _create_session_state_stub(current_turn_id="turn-1")
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.session_state = st
+    _prepare_turn_finalization(coordinator)
 
     sent_payloads: list[dict[str, object]] = []
 
@@ -447,18 +487,16 @@ def test_handle_msg_routes_playback_finished_to_finalize_turn(
     assert turn_payload.get("reason") == "text_delivered"
 
 
-def test_handle_msg_playback_finished_respects_not_waiting(
+def test_handle_msg_playback_finished_uses_explicit_turn_id(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
     TurnCoordinator = _load_module(install_fake_astrbot, monkeypatch)
 
-    st = _create_session_state_stub(
-        current_turn_id="turn-1",
-        waiting_for_playback_complete=False,
-    )
+    st = _create_session_state_stub(current_turn_id="turn-1")
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.session_state = st
+    _prepare_turn_finalization(coordinator)
 
     sent_payloads: list[dict[str, object]] = []
 
@@ -467,6 +505,8 @@ def test_handle_msg_playback_finished_respects_not_waiting(
         return True
 
     coordinator._send_json = fake_send_json
+    coordinator._mark_turn_timing = lambda *args, **kwargs: None
+    coordinator._elapsed_ms = lambda *args: 100.0
 
     raw_message = {
         "type": "control.playback_finished",
@@ -478,4 +518,5 @@ def test_handle_msg_playback_finished_respects_not_waiting(
     }
 
     asyncio.run(coordinator.handle_msg(raw_message))
-    assert len(sent_payloads) == 0
+    assert len(sent_payloads) == 1
+    assert sent_payloads[0].get("turn_id") == "turn-1"

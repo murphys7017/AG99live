@@ -64,6 +64,8 @@ control.turn_finished
 | WebSocket 二进制音频块 | `AG99` 二进制帧，见下文 |
 | `input.audio_stream_end` | `{ stream_id: string, reason: string, dropped?: boolean, last_seq?: number }` |
 
+`input.text` 通过协议校验后必须立即携带其前端 `turn_id` 提交 AstrBot EventBus。Adapter 不因较早 Turn 仍在前端播放而拒绝输入，也不维护第二套输入 FIFO；排队与串行处理由 AstrBot EventBus / Personal Runtime 负责。每个 `PlatformEvent` 保存自己的 `output_correlation_id`，后续物理输出聚合、`control.synth_finished`、`control.playback_finished` 和 `control.turn_finished` 都按该 ID 独立关联，禁止从最新的全局 Turn 推断旧事件身份。
+
 麦克风输入规则：
 
 - 一段采集期只使用一个新的 `turn_id`。
@@ -158,6 +160,8 @@ AstrBot 内部 Plain、Record、图片与 motion client object 可以物理分�
 | `control.interrupt` | 双向 | `{}` |
 | `control.start_mic` | 后端 -> 前端 | `{}` |
 | `control.error` | 后端 -> 前端 | `{ message: string }` |
+
+`control.playback_finished` 只收口信封中的 `turn_id`，较早 Turn 的播放完成不得重置或清理较新的后端 Turn。`control.interrupt` 仍属于会话级活动事件中断；AstrBot 当前只提供按 UMO 停止全部活动事件的能力，因此本次输入直送改造不把它伪装成精确的逐 Turn 取消。
 
 ### system.* （双向）
 

@@ -330,6 +330,7 @@ class OLVPetPlatformAdapter(Platform):
     async def emit_message_chain(
         self,
         message_chain,
+        turn_id: str,
         unified_msg_origin: str | None = None,
         raw_reply_text_override: str | None = None,
         platform_extras: dict[str, Any] | None = None,
@@ -341,6 +342,7 @@ class OLVPetPlatformAdapter(Platform):
         """
         await self.turn_coordinator.emit_message_chain(
             message_chain=message_chain,
+            turn_id=turn_id,
             unified_msg_origin=unified_msg_origin,
             raw_reply_text_override=raw_reply_text_override,
             platform_extras=platform_extras,
@@ -439,11 +441,12 @@ class OLVPetPlatformAdapter(Platform):
     async def _handle_transport_disconnect(self) -> None:
         """WebSocket 断开时调用的清理钩子。
 
-        顺序固定：session_state → idle，turn_identity_map 全清，调
+        顺序固定：清理 TurnCoordinator 连接级状态，session_state → idle，
+        turn_identity_map 全清，调
         speech_ingress.handle_audio_stream_interrupt 中断所有在飞的音频流，
-        media_service.clear_audio_buffer 丢弃缓冲。turn_coordinator 的轮次状态
-        在它自己的逻辑里随下一次 begin_turn 重建。
+        media_service.clear_audio_buffer 丢弃缓冲。
         """
+        self.turn_coordinator.reset_turn_tracking()
         self.session_state.reset_to_idle()
         self.turn_identity_map.clear_all()
         await self.turn_coordinator.speech_ingress.handle_audio_stream_interrupt()

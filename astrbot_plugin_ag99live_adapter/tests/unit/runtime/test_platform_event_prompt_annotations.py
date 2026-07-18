@@ -64,7 +64,7 @@ class Image:
 class AdapterStub:
     def __init__(self) -> None:
         self.emit_calls = []
-        self.closed_output_queues = 0
+        self.closed_output_queues: list[str] = []
         self.turn_coordinator = types.SimpleNamespace(
             close_turn_output_queue=self._close_turn_output_queue,
         )
@@ -72,8 +72,8 @@ class AdapterStub:
     async def emit_message_chain(self, **kwargs) -> None:
         self.emit_calls.append(kwargs)
 
-    async def _close_turn_output_queue(self) -> None:
-        self.closed_output_queues += 1
+    async def _close_turn_output_queue(self, *, turn_id: str) -> None:
+        self.closed_output_queues.append(turn_id)
 
 
 def _build_event(module, *, images: list[dict] | None):
@@ -88,13 +88,15 @@ def _build_event(module, *, images: list[dict] | None):
             "raw_message": {"payload": payload},
         },
     )()
-    return module.OLVPetPlatformEvent(
+    event = module.OLVPetPlatformEvent(
         "hello",
         message_obj,
         {},
         "desktop-client",
         AdapterStub(),
     )
+    event.set_extra("output_correlation_id", "turn-1")
+    return event
 
 
 def test_prompt_annotations_skip_desktop_snapshot_without_screen_image(
@@ -180,6 +182,7 @@ def test_send_message_with_extras_only_uses_adapter_emit_path(
         "desktop-client",
         adapter,
     )
+    event.set_extra("output_correlation_id", "turn-1")
     platform_extras = {"visible_message_id": "msg-1"}
 
     asyncio.run(
@@ -191,6 +194,7 @@ def test_send_message_with_extras_only_uses_adapter_emit_path(
     )
 
     assert len(adapter.emit_calls) == 1
+    assert adapter.emit_calls[0]["turn_id"] == "turn-1"
     assert adapter.emit_calls[0]["platform_extras"] == {"visible_message_id": "msg-1"}
     assert platform_extras == {"visible_message_id": "msg-1"}
     assert event._has_send_oper is True
@@ -210,11 +214,11 @@ def test_standard_send_aggregates_parts_without_closing_output_queue(
     asyncio.run(event.send([Plain("second")]))
     asyncio.run(event.send_message_with_extras([Plain("third")], platform_extras={}))
 
-    assert adapter.closed_output_queues == 0
+    assert adapter.closed_output_queues == []
     assert [
         call["platform_extras"]["logical_message_id"]
         for call in adapter.emit_calls
     ] == ["standard_reply", "standard_reply", "standard_reply"]
 
     asyncio.run(event.complete_visible_turn())
-    assert adapter.closed_output_queues == 1
+    assert adapter.closed_output_queues == ["turn-1"]

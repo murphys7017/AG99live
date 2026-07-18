@@ -9,7 +9,8 @@ flowchart TD
 
     subgraph B[后端生成与原子段聚合]
         INPUT[input.text / input.audio]:::protocol
-        TURN[TurnCoordinator<br/>生成 turn_id]:::backend
+        TURN[TurnCoordinator<br/>校验并绑定前端 turn_id]:::backend
+        COREQUEUE[AstrBot EventBus / Personal Runtime<br/>官方输入队列]:::backend
         START[control.turn_started]:::protocol
         PERSONA[Persona Runtime<br/>构建 Prompt 与 effect schema]:::backend
         LLM[主模型一次生成<br/>spoken_reply + effect_calls]:::backend
@@ -28,7 +29,8 @@ flowchart TD
 
         INPUT --> TURN
         TURN --> START
-        TURN --> PERSONA --> LLM
+        TURN -->|立即 commit_event，不等待旧轮播放| COREQUEUE
+        COREQUEUE --> PERSONA --> LLM
         LLM --> EFFECT
         LLM --> PLAIN
         EFFECT --> CURVEPENDING

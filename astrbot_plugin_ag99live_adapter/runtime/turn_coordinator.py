@@ -149,10 +149,12 @@ class TurnCoordinator:
 
         self._turn_lock = asyncio.Lock()
         self._background_tasks: set[asyncio.Task[Any]] = set()
-        self._turn_timing: dict[str, Any] = {}
+        self._turn_timings: dict[str, dict[str, Any]] = {}
         self._last_prompt_motion_snapshot: dict[str, Any] | None = None
         self._pending_output_segments: dict[str, PendingOutputSegment] = {}
-        self._flushed_output_segment_count = 0
+        self._closing_output_turn_ids: set[str] = set()
+        self._closed_output_turn_ids: set[str] = set()
+        self._output_emitted_turn_ids: set[str] = set()
 
     async def handle_msg(self, raw_message: dict[str, Any]) -> None:
         """入站文本协议消息的顶层路由。
@@ -211,6 +213,32 @@ class TurnCoordinator:
             )
         )
 
+    def reset_turn_tracking(self) -> None:
+        """Discard connection-scoped Turn bookkeeping after transport disconnect."""
+        tracked_turn_ids = set(self._turn_timings)
+        tracked_turn_ids.update(self._closing_output_turn_ids)
+        tracked_turn_ids.update(self._closed_output_turn_ids)
+        tracked_turn_ids.update(self._output_emitted_turn_ids)
+        tracked_turn_ids.update(
+            segment.turn_id for segment in self._pending_output_segments.values()
+        )
+        performance_curve_runtime = getattr(
+            self.runtime_state,
+            "performance_curve_runtime",
+            None,
+        )
+        cancel_curve_turn = getattr(performance_curve_runtime, "cancel_turn", None)
+        if callable(cancel_curve_turn):
+            for turn_id in tracked_turn_ids:
+                cancel_curve_turn(turn_id)
+
+        self._turn_timings.clear()
+        self._pending_output_segments.clear()
+        self._closing_output_turn_ids.clear()
+        self._closed_output_turn_ids.clear()
+        self._output_emitted_turn_ids.clear()
+        self._last_prompt_motion_snapshot = None
+
     async def handle_binary_msg(self, raw_message: bytes) -> None:
         """WebSocket 二进制帧入口：解析 AG99 麦克风音频帧并交给语音入口。
 
@@ -227,6 +255,7 @@ class TurnCoordinator:
     async def emit_message_chain(
         self,
         message_chain,
+        turn_id: str,
         unified_msg_origin: str | None = None,
         raw_reply_text_override: str | None = None,
         platform_extras: dict[str, Any] | None = None,
@@ -234,12 +263,10 @@ class TurnCoordinator:
         """Merge one physical AstrBot chain into its logical output segment."""
         del unified_msg_origin
 
-        turn_id = str(self.session_state.current_turn_id or "").strip()
-        if not turn_id:
-            raise ValueError("output_segment_requires_turn_id")
+        turn_id = self._require_turn_id_value(turn_id)
         platform_extras_dict = platform_extras if isinstance(platform_extras, dict) else {}
         segment_message_id = _resolve_platform_segment_message_id(platform_extras_dict)
-        self._mark_turn_timing("emit_started_at")
+        self._mark_turn_timing(turn_id, "emit_started_at")
         texts, picture_paths, record_paths, record_texts = _extract_outbound_message_parts(message_chain)
         logger.info(
             "WIRING output_parts turn_id=%s message_id=%s text_count=%s image_count=%s record_count=%s",
@@ -348,14 +375,18 @@ class TurnCoordinator:
             "source": "official_inline_anim_compat",
         }
 
-    async def _flush_pending_output_segments(self) -> None:
+    async def _flush_pending_output_segments(self, *, turn_id: str) -> int:
         segments = getattr(self, "_pending_output_segments", None)
         if not isinstance(segments, dict) or not segments:
-            return
+            return 0
+        flushed_count = 0
         for key, segment in list(segments.items()):
+            if segment.turn_id != turn_id:
+                continue
             await self._flush_output_segment(segment)
             segments.pop(key, None)
-            self._flushed_output_segment_count += 1
+            flushed_count += 1
+        return flushed_count
 
     async def _flush_output_segment(self, segment: PendingOutputSegment) -> None:
         if segment.tts_status == "succeeded" and not segment.audio_path:
@@ -424,9 +455,9 @@ class TurnCoordinator:
             },
         )
         if audio_slot["state"] == "present":
-            self._mark_turn_timing("audio_payload_sent_at")
-            self._mark_turn_synthesizing()
-        self._mark_turn_playing()
+            self._mark_turn_timing(segment.turn_id, "audio_payload_sent_at")
+            self._mark_turn_synthesizing(segment.turn_id)
+        self._mark_turn_playing(segment.turn_id)
 
     def _build_output_segment_motion_slot(
         self,
@@ -513,17 +544,21 @@ class TurnCoordinator:
             source=segment.motion_source,
         )
 
-    async def close_turn_output_queue(self) -> None:
+    async def close_turn_output_queue(self, *, turn_id: str) -> None:
         """Flush at least one atomic segment, then transactionally close its queue."""
-        current_turn_id = self.session_state.current_turn_id
-        if current_turn_id is None:
+        current_turn_id = self._require_turn_id_value(turn_id)
+        if current_turn_id in self._closed_output_turn_ids:
             return
-
-        if not self.session_state.begin_output_queue_close(current_turn_id):
+        if current_turn_id in self._closing_output_turn_ids:
             return
+        self._closing_output_turn_ids.add(current_turn_id)
         try:
-            await self._flush_pending_output_segments()
-            if self._flushed_output_segment_count < 1:
+            flushed_count = await self._flush_pending_output_segments(
+                turn_id=current_turn_id
+            )
+            if flushed_count > 0:
+                self._output_emitted_turn_ids.add(current_turn_id)
+            if current_turn_id not in self._output_emitted_turn_ids:
                 raise RuntimeError(f"output_segment_missing:{current_turn_id}")
             sent = await self._send_json(
                 build_control_synth_finished(
@@ -533,9 +568,10 @@ class TurnCoordinator:
             if not sent:
                 raise RuntimeError(f"synth_finished_send_failed:{current_turn_id}")
         except Exception:
-            self.session_state.abort_output_queue_close(current_turn_id)
+            self._closing_output_turn_ids.discard(current_turn_id)
             raise
-        self.session_state.complete_output_queue_close(current_turn_id)
+        self._closing_output_turn_ids.discard(current_turn_id)
+        self._closed_output_turn_ids.add(current_turn_id)
         runtime_state = getattr(self, "runtime_state", None)
         performance_curve_runtime = getattr(
             runtime_state,
@@ -545,14 +581,18 @@ class TurnCoordinator:
         cancel_curve_turn = getattr(performance_curve_runtime, "cancel_turn", None)
         if callable(cancel_curve_turn):
             cancel_curve_turn(current_turn_id)
-        self._mark_turn_playing()
+        self._mark_turn_playing(current_turn_id)
 
-    def _mark_turn_synthesizing(self) -> None:
+    def _mark_turn_synthesizing(self, turn_id: str) -> None:
+        if self.session_state.current_turn_id != turn_id:
+            return
         mark_synthesizing = getattr(self.session_state, "mark_synthesizing", None)
         if callable(mark_synthesizing):
             mark_synthesizing()
 
-    def _mark_turn_playing(self) -> None:
+    def _mark_turn_playing(self, turn_id: str) -> None:
+        if self.session_state.current_turn_id != turn_id:
+            return
         mark_playing = getattr(self.session_state, "mark_playing", None)
         if callable(mark_playing):
             mark_playing()
@@ -566,50 +606,39 @@ class TurnCoordinator:
     ) -> None:
         """收到 control.playback_finished 后收口本轮。
 
-        只在 session_state.waiting_for_playback_complete=True 时生效，避免把还在
-        合成中或已 idle 的轮次误结束。若信号携带的 turn_id 不属于当前轮（脏数据
-        或乱序），直接忽略。
+        播放完成信号按自身 turn_id 收口，不依赖最新输入轮次。这样 AstrBot 队列可以
+        继续接收后续输入，而较早轮次仍能独立完成前端播放生命周期。
         """
-        current_turn_id = self.session_state.current_turn_id
-        if not self.session_state.waiting_for_playback_complete:
-            return
         resolved_turn_id = self._resolve_frontend_turn_id(turn_id) if turn_id else None
-        if resolved_turn_id and current_turn_id and resolved_turn_id != current_turn_id:
-            logger.debug(
-                "Ignoring playback-finished for stale turn_id=%s current_turn_id=%s",
-                turn_id,
-                current_turn_id,
-            )
-            return
+        if not resolved_turn_id:
+            raise ValueError("playback_finished_turn_id_missing")
 
-        await self._finish_turn(success=success, reason=reason)
-        self._mark_turn_timing("playback_completed_at")
+        self._mark_turn_timing(resolved_turn_id, "playback_completed_at")
+        await self._finish_turn(
+            turn_id=resolved_turn_id,
+            success=success,
+            reason=reason,
+        )
         logger.debug(
-            "Turn timing playback: turn=%s playback_ms=%.1f total_ms=%.1f success=%s reason=%s",
-            self._current_turn_index(),
-            self._elapsed_ms("audio_payload_sent_at", "playback_completed_at"),
-            self._elapsed_ms("received_at", "playback_completed_at"),
+            "Turn timing playback: turn_id=%s playback_ms=%.1f total_ms=%.1f success=%s reason=%s",
+            resolved_turn_id,
+            self._elapsed_ms(
+                resolved_turn_id,
+                "audio_payload_sent_at",
+                "playback_completed_at",
+            ),
+            self._elapsed_ms(
+                resolved_turn_id,
+                "received_at",
+                "playback_completed_at",
+            ),
             success,
             reason or "",
         )
+        self._turn_timings.pop(resolved_turn_id, None)
 
     async def _commit_inbound_message(self, message_obj, *, turn_id: str | None = None) -> None:
         async with self._turn_lock:
-            if self.session_state.waiting_for_playback_complete:
-                await self._send_json(
-                    build_control_error(
-                        turn_id=turn_id,
-                        message="input_turn_replacement_requires_interrupt",
-                    )
-                )
-                logger.error(
-                    "Rejecting input turn=%s while prior turn=%s still waits for playback; "
-                    "control.interrupt is required first.",
-                    turn_id,
-                    self.session_state.current_turn_id,
-                )
-                return
-
             normalized_turn_id = self._require_turn_id_value(turn_id)
             backend_turn_id = self._resolve_backend_turn_id(message_obj, frontend_turn_id=normalized_turn_id)
             turn_identity_map = getattr(self, "turn_identity_map", None)
@@ -622,7 +651,7 @@ class TurnCoordinator:
                 message_obj.message_str,
                 turn_id=normalized_turn_id,
             )
-            self._begin_turn_timing(message_obj.message_str)
+            self._begin_turn_timing(current_turn_id, message_obj.message_str)
             self.chat_buffer.add("user", message_obj.message_str)
             self._record_motion_lab_raw_event(
                 event_type="turn.input_received",
@@ -640,13 +669,15 @@ class TurnCoordinator:
                     "chat_context": self._motion_lab_chat_context(),
                 },
             )
-            self._flushed_output_segment_count = 0
             await self._send_json(
                 build_control_turn_started(
                     turn_id=current_turn_id,
                 )
             )
-            await self._emit_image_input_diagnostics(message_obj)
+            await self._emit_image_input_diagnostics(
+                message_obj,
+                turn_id=current_turn_id,
+            )
 
             event = self._build_platform_event(message_obj)
             set_extra = getattr(event, "set_extra", None)
@@ -655,7 +686,7 @@ class TurnCoordinator:
                 set_extra("output_correlation_id", current_turn_id)
             self._apply_raw_message_metadata_to_event(event, message_obj)
             self._commit_event(event)
-            self._mark_turn_timing("event_committed_at")
+            self._mark_turn_timing(current_turn_id, "event_committed_at")
             logger.debug(
                 "Turn timing start: turn=%s text_len=%d turn_id=%s",
                 self._current_turn_index(),
@@ -713,11 +744,16 @@ class TurnCoordinator:
             if key in raw_message:
                 set_extra(key, raw_message[key])
 
-    async def _emit_image_input_diagnostics(self, message_obj) -> None:
+    async def _emit_image_input_diagnostics(
+        self,
+        message_obj,
+        *,
+        turn_id: str,
+    ) -> None:
         await emit_image_input_diagnostics(
             message_obj=message_obj,
             client_uid=self.session_state.client_uid,
-            current_turn_id=self.session_state.current_turn_id,
+            current_turn_id=turn_id,
             send_json=self._send_json,
         )
 
@@ -758,7 +794,13 @@ class TurnCoordinator:
                 turn_id=current_turn_id,
             )
         )
-        await self._finish_turn(success=False, reason="interrupted")
+        if current_turn_id is not None:
+            await self._finish_turn(
+                turn_id=current_turn_id,
+                success=False,
+                reason="interrupted",
+            )
+            self._turn_timings.pop(current_turn_id, None)
 
         logger.info(
             "Processed control.interrupt for turn=%s stopped_events=%s umo=%s",
@@ -909,7 +951,7 @@ class TurnCoordinator:
         self,
         *,
         event_type: str,
-        turn_id: str | None = None,
+        turn_id: str,
         frontend_turn_id: str | None = None,
         message_id: str | None = None,
         source_route: str = "",
@@ -931,7 +973,7 @@ class TurnCoordinator:
             getattr(runtime_state, "motion_lab_recorder", None),
             event_type=event_type,
             conversation_uid=getattr(self.session_state, "client_uid", None),
-            turn_id=turn_id if turn_id is not None else self.session_state.current_turn_id,
+            turn_id=self._require_turn_id_value(turn_id),
             frontend_turn_id=frontend_turn_id,
             message_id=message_id,
             source_route=source_route,
@@ -1068,31 +1110,36 @@ class TurnCoordinator:
 
         task.add_done_callback(_on_done)
 
-    async def _finish_turn(self, *, success: bool, reason: str | None) -> None:
-        current_turn_id = self.session_state.current_turn_id
-        if current_turn_id is None:
-            self.session_state.reset_to_idle()
-            return
-
+    async def _finish_turn(
+        self,
+        *,
+        turn_id: str,
+        success: bool,
+        reason: str | None,
+    ) -> None:
+        resolved_turn_id = self._require_turn_id_value(turn_id)
         await self._send_json(
             build_control_turn_finished(
-                turn_id=current_turn_id,
+                turn_id=resolved_turn_id,
                 success=success,
                 reason=reason,
             )
         )
-        self._mark_turn_timing("turn_completed_at")
+        self._mark_turn_timing(resolved_turn_id, "turn_completed_at")
         turn_identity_map = getattr(self, "turn_identity_map", None)
         if turn_identity_map is not None:
-            turn_identity_map.clear_frontend_turn(current_turn_id)
-        if self.session_state.waiting_for_playback_complete:
-            self.session_state.mark_playback_complete()
-        else:
+            turn_identity_map.clear_frontend_turn(resolved_turn_id)
+        if self.session_state.current_turn_id == resolved_turn_id:
             self.session_state.reset_to_idle()
         pending_segments = getattr(self, "_pending_output_segments", None)
         if isinstance(pending_segments, dict):
-            pending_segments.clear()
-        self._flushed_output_segment_count = 0
+            prefix = f"{resolved_turn_id}|"
+            for key in tuple(pending_segments):
+                if key.startswith(prefix):
+                    pending_segments.pop(key, None)
+        self._closing_output_turn_ids.discard(resolved_turn_id)
+        self._closed_output_turn_ids.discard(resolved_turn_id)
+        self._output_emitted_turn_ids.discard(resolved_turn_id)
 
     def _resolve_backend_turn_id(
         self,
@@ -1147,8 +1194,8 @@ class TurnCoordinator:
             )
         )
 
-    def _begin_turn_timing(self, user_text: str) -> None:
-        self._turn_timing = {
+    def _begin_turn_timing(self, turn_id: str, user_text: str) -> None:
+        self._turn_timings[turn_id] = {
             "turn_index": self._current_turn_index(),
             "received_at": time.perf_counter(),
             "user_text_len": len(user_text or ""),
@@ -1156,16 +1203,20 @@ class TurnCoordinator:
 
     def _mark_turn_timing(
         self,
+        turn_id: str,
         key: str,
         value: float | None = None,
     ) -> None:
-        if not self._turn_timing:
-            self._turn_timing = {"turn_index": self._current_turn_index()}
-        self._turn_timing[key] = time.perf_counter() if value is None else value
+        timing = self._turn_timings.setdefault(
+            turn_id,
+            {"turn_index": self._current_turn_index()},
+        )
+        timing[key] = time.perf_counter() if value is None else value
 
-    def _elapsed_ms(self, start_key: str, end_key: str) -> float:
-        start_value = _coerce_perf_counter(self._turn_timing.get(start_key))
-        end_value = _coerce_perf_counter(self._turn_timing.get(end_key))
+    def _elapsed_ms(self, turn_id: str, start_key: str, end_key: str) -> float:
+        timing = self._turn_timings.get(turn_id, {})
+        start_value = _coerce_perf_counter(timing.get(start_key))
+        end_value = _coerce_perf_counter(timing.get(end_key))
         if start_value is None or end_value is None:
             return -1.0
         return max((end_value - start_value) * 1000.0, 0.0)
