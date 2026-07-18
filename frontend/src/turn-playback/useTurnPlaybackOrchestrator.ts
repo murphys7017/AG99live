@@ -10,7 +10,6 @@ type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 
 interface TurnPlaybackOrchestratorOptions {
   sessionStore: SessionStore;
-  motionPayload: Pick<MotionPayloadPort, "notifyCurrentTurnChanged">;
   timelineRuntime: PlaybackTimelineSegmentStartPort<NormalizedMotionPayload>;
 }
 
@@ -82,7 +81,6 @@ export function useTurnPlaybackOrchestrator(
       return;
     }
 
-    options.motionPayload.notifyCurrentTurnChanged(segment.turnId);
     options.timelineRuntime.startSegmentJob({
       turnId: segment.turnId,
       messageId: segment.messageId,

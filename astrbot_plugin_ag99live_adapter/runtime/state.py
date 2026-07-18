@@ -40,9 +40,6 @@ from ..live2d.semantic_axis_profile import (
     save_semantic_axis_profile,
 )
 from ..protocol.builder import build_system_model_sync
-from ..prompts.motion_selector import (
-    DEFAULT_MOTION_PROMPT_INSTRUCTION,
-)
 from .motion_state import MotionTuningStore
 from .motion_lab import MotionLabRawEventStore, MotionLabRecorder
 
@@ -104,7 +101,6 @@ class RuntimeState:
             persist_cache=self._persist_runtime_cache_payload,
         )
         self.motion_lab_recorder = self._build_motion_lab_recorder()
-        self.motion_prompt_instruction = DEFAULT_MOTION_PROMPT_INSTRUCTION
         self.vad_model = "silero_vad"
         self.vad_config: dict[str, Any] = {}
         self.model_info: dict[str, Any] = {}
@@ -282,13 +278,6 @@ class RuntimeState:
         self.action_llm_filter_chunk_max_candidates = max(
             int(_plugin_config_get(self.plugin_config, "action_llm_filter_chunk_max_candidates", 96)),
             1,
-        )
-        self.motion_prompt_instruction = _normalize_motion_prompt_instruction(
-            _plugin_config_get(
-                self.plugin_config,
-                "motion_prompt_instruction",
-                DEFAULT_MOTION_PROMPT_INSTRUCTION,
-            )
         )
         self.vad_model = _plugin_config_get(self.plugin_config, "vad_model", "silero_vad")
         self.vad_config = {
@@ -1297,15 +1286,6 @@ def _plugin_config_get(config: Any, key: str, default: Any) -> Any:
         value = config.get(key, default)
         return default if value is None else value
     return default
-
-
-def _normalize_motion_prompt_instruction(value: Any) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return DEFAULT_MOTION_PROMPT_INSTRUCTION
-    if len(text) > 800:
-        return text[:800].rstrip()
-    return text
 
 
 def _supports_persona_effects(plugin_context: Any) -> bool:

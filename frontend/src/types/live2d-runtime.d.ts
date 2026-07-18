@@ -15,6 +15,7 @@ export interface DirectParameterPlanTerminalEvent {
 }
 
 export interface CatalogMotionLifecycleCallbacks {
+  playbackClockReader?: { getElapsedMs: () => number | null };
   onStarted?: () => void;
   onFinished?: () => void;
   onFailed?: (reason: string) => void;
@@ -48,6 +49,7 @@ declare global {
         plan: MotionPlanPayload,
         options?: {
           runId?: string;
+          playbackClockReader?: { getElapsedMs: () => number | null };
           onTerminal?: (event: DirectParameterPlanTerminalEvent) => void;
         },
       ) => boolean;

@@ -15,6 +15,7 @@ import { CubismFramework } from '@framework/live2dcubismframework';
 import type { SemanticParameterPlan } from "../../../types/protocol";
 
 export interface CatalogMotionLifecycleCallbacks {
+  playbackClockReader?: { getElapsedMs: () => number | null };
   onStarted?: () => void;
   onFinished?: () => void;
   onFailed?: (reason: string) => void;

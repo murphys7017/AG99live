@@ -72,3 +72,11 @@ export interface PlaybackTimelineSnapshot {
   playbackRate: number;
   sinks: PlaybackTimelineSinkState[];
 }
+
+/**
+ * Live read access to one segment's authoritative Timeline clock.
+ * Consumers must not substitute wall-clock time when this reader is present.
+ */
+export interface PlaybackTimelineClockReader {
+  getSnapshot(): PlaybackTimelineSnapshot | null;
+}

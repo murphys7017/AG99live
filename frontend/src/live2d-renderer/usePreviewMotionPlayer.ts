@@ -8,6 +8,7 @@ import { SCHEMA_PARAMETER_PLAN_V2 } from "../types/protocol.js";
 import type { DirectParameterPlanTerminalEvent } from "../types/live2d-runtime.d.ts";
 import { isObject, normalizeText } from "../utils/guards.js";
 import { parseSemanticParameterPlan } from "../model-engine/planParser.js";
+import type { MotionPlaybackClockReader } from "../model-engine/contracts.js";
 
 type PreviewPlayerStatus = "idle" | "preparing" | "playing" | "finished" | "failed";
 
@@ -18,11 +19,15 @@ interface ParsedParameterPlan {
 
 interface PlayPlanOptions {
   softHandoff?: boolean;
+  playbackClockReader?: MotionPlaybackClockReader | null;
+  requiresPlaybackClock?: boolean;
   onStarted?: (plan: SemanticParameterPlan, runId: string) => void;
   onFinished?: (event: DirectParameterPlanTerminalEvent) => void;
 }
 
 interface PlayCatalogMotionOptions {
+  playbackClockReader?: MotionPlaybackClockReader | null;
+  requiresPlaybackClock?: boolean;
   onStarted?: (motion: CatalogMotionPayload, runId: string) => void;
   onFinished?: (event: DirectParameterPlanTerminalEvent) => void;
 }
@@ -38,7 +43,6 @@ export function usePreviewMotionPlayer() {
   });
 
   let activeRunId = 0;
-  let activeTimerHandles: number[] = [];
   let activeTerminalRunId = "";
   let activeTerminalCallback: ((event: DirectParameterPlanTerminalEvent) => void) | null = null;
   let activeMotionStop: (() => void) | null = null;
@@ -63,13 +67,6 @@ export function usePreviewMotionPlayer() {
       plan: result.value,
       totalDurationMs,
     };
-  }
-
-  function clearActiveTimers(): void {
-    for (const handle of activeTimerHandles) {
-      window.clearTimeout(handle);
-    }
-    activeTimerHandles = [];
   }
 
   function setActiveTerminalCallback(
@@ -110,19 +107,8 @@ export function usePreviewMotionPlayer() {
     notifyActiveStopped(reason);
   }
 
-  function scheduleTimer(runId: number, delayMs: number, fn: () => void): void {
-    const timerHandle = window.setTimeout(() => {
-      if (runId !== activeRunId) {
-        return;
-      }
-      fn();
-    }, Math.max(0, Math.round(delayMs)));
-    activeTimerHandles.push(timerHandle);
-  }
-
   function stopPlan(reason = "stopped"): void {
     activeRunId += 1;
-    clearActiveTimers();
 
     const adapter = window.getLAppAdapter?.();
     if (adapter && typeof adapter.stopDirectParameterPlan === "function") {
@@ -158,6 +144,20 @@ export function usePreviewMotionPlayer() {
       return false;
     }
     const playbackPlan = parsed;
+    const manualPreviewStartedAtMs = performance.now();
+    const playbackClockReader = options.playbackClockReader ?? (
+      options.requiresPlaybackClock
+        ? null
+        : { getElapsedMs: () => performance.now() - manualPreviewStartedAtMs }
+    );
+    if (!playbackClockReader) {
+      const reason = "动作计划无法执行：会话 Timeline 时钟缺失。";
+      state.status = "failed";
+      state.message = reason;
+      state.finishedAt = new Date().toISOString();
+      console.error("[MotionPlayer]", reason);
+      return false;
+    }
     console.info(
       "[MotionPlayer] parse OK. mode=",
       playbackPlan.plan.mode,
@@ -226,6 +226,7 @@ export function usePreviewMotionPlayer() {
     const playbackRunId = `motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const started = adapter.startDirectParameterPlan(playbackPlan.plan, {
       runId: playbackRunId,
+      playbackClockReader,
       onTerminal: (event: DirectParameterPlanTerminalEvent) => {
         // 校验 runId 避免 stale callback 收错段
         if (event.runId !== playbackRunId) {
@@ -240,7 +241,6 @@ export function usePreviewMotionPlayer() {
           state.status = "idle";
           state.message = "参数计划已停止。";
           state.finishedAt = new Date().toISOString();
-          clearActiveTimers();
           clearActiveTerminalCallback(playbackRunId);
           options.onFinished?.(event);
           return;
@@ -252,7 +252,6 @@ export function usePreviewMotionPlayer() {
             ? "参数计划执行完成。"
             : `参数计划执行失败：${event.status}`);
         state.finishedAt = new Date().toISOString();
-        clearActiveTimers();
         clearActiveTerminalCallback(playbackRunId);
         options.onFinished?.(event);
       },
@@ -292,7 +291,6 @@ export function usePreviewMotionPlayer() {
 
     activeRunId += 1;
     const runId = activeRunId;
-    clearActiveTimers();
 
     console.info("[MotionPlayer] plan started successfully. totalDurationMs=", playbackPlan.totalDurationMs);
     state.status = "playing";
@@ -303,31 +301,6 @@ export function usePreviewMotionPlayer() {
     state.finishedAt = "";
     setActiveTerminalCallback(playbackRunId, options.onFinished);
 
-    // watchdog：SDK 完成事件的超时保护
-    scheduleTimer(runId, playbackPlan.totalDurationMs + 800, () => {
-      if (state.status === "playing") {
-        const reason = "direct_parameter_plan_terminal_timeout";
-        console.warn(
-          "[MotionPlayer] direct parameter plan terminal timeout. runId=",
-          playbackRunId,
-        );
-        adapter.stopDirectParameterPlan?.(reason, "failed");
-        if (state.status !== "playing") {
-          return;
-        }
-        state.status = "failed";
-        state.message = "参数计划完成事件超时。";
-        state.finishedAt = new Date().toISOString();
-        clearActiveTimers();
-        clearActiveTerminalCallback(playbackRunId);
-        options.onFinished?.({
-          runId: playbackRunId,
-          status: "failed",
-          reason,
-        });
-      }
-    });
-
     options.onStarted?.(playbackPlan.plan, playbackRunId);
     return true;
   }
@@ -337,6 +310,20 @@ export function usePreviewMotionPlayer() {
     _model: ModelSummary | null = null,
     options: PlayCatalogMotionOptions = {},
   ): boolean {
+    const manualPreviewStartedAtMs = performance.now();
+    const playbackClockReader = options.playbackClockReader ?? (
+      options.requiresPlaybackClock
+        ? null
+        : { getElapsedMs: () => performance.now() - manualPreviewStartedAtMs }
+    );
+    if (!playbackClockReader) {
+      const reason = "现成 motion 无法执行：会话 Timeline 时钟缺失。";
+      state.status = "failed";
+      state.message = reason;
+      state.finishedAt = new Date().toISOString();
+      console.error("[MotionPlayer]", reason);
+      return false;
+    }
     const catalogDurationMs = motion.duration_ms;
     if (
       typeof catalogDurationMs !== "number"
@@ -366,7 +353,6 @@ export function usePreviewMotionPlayer() {
     activeRunId += 1;
     const runId = activeRunId;
     const playbackRunId = `catalog-motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    clearActiveTimers();
     stopActiveCatalogMotion("catalog_motion_replaced");
     adapter.stopExpression?.();
     if (typeof adapter.stopDirectParameterPlan === "function") {
@@ -388,7 +374,6 @@ export function usePreviewMotionPlayer() {
       state.status = "failed";
       state.message = `现成 motion 执行失败：${motion.motion_id}（${reason}）。`;
       state.finishedAt = new Date().toISOString();
-      clearActiveTimers();
       clearActiveTerminalCallback(playbackRunId);
       options.onFinished?.({ runId: playbackRunId, status: "failed", reason });
     };
@@ -400,7 +385,6 @@ export function usePreviewMotionPlayer() {
       state.status = "finished";
       state.message = "现成 motion 执行完成。";
       state.finishedAt = new Date().toISOString();
-      clearActiveTimers();
       clearActiveTerminalCallback(playbackRunId);
       options.onFinished?.({ runId: playbackRunId, status: "completed" });
     };
@@ -418,6 +402,7 @@ export function usePreviewMotionPlayer() {
       motion.index,
       motion.priority || 3,
       {
+        playbackClockReader,
         onStarted: () => {
           if (activeRunId !== runId) {
             return;
@@ -426,12 +411,6 @@ export function usePreviewMotionPlayer() {
           state.message = `正在执行现成 motion（${motion.label || motion.motion_id}）...`;
           state.startedAt = new Date().toISOString();
           activeMotionStop = () => adapter.stopMotion?.();
-          scheduleTimer(runId, catalogDurationMs + 800, () => {
-            if (state.status === "playing") {
-              failCatalogMotion("catalog_motion_terminal_timeout");
-              adapter.stopMotion?.();
-            }
-          });
           options.onStarted?.(motion, playbackRunId);
         },
         onFinished: () => {
@@ -451,7 +430,6 @@ export function usePreviewMotionPlayer() {
           state.status = "idle";
           state.message = `现成 motion 已停止（${reason}）。`;
           state.finishedAt = new Date().toISOString();
-          clearActiveTimers();
           clearActiveTerminalCallback(playbackRunId);
           options.onFinished?.({ runId: playbackRunId, status: "stopped", reason });
         },
@@ -471,12 +449,6 @@ export function usePreviewMotionPlayer() {
     }
     if (state.status === "preparing") {
       activeMotionStop = () => adapter.stopMotion?.();
-      scheduleTimer(runId, 3000, () => {
-        if (state.status === "preparing") {
-          failCatalogMotion("catalog_motion_start_timeout");
-          adapter.stopMotion?.();
-        }
-      });
     }
     return true;
   }

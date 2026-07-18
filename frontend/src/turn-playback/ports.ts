@@ -8,7 +8,6 @@ export interface MotionPayloadPort {
     payload: NormalizedMotionPayload,
     context: PlaybackTimelineMotionContext,
   ): boolean | void;
-  notifyCurrentTurnChanged(turnId: string | null): void;
 }
 
 export interface PlaybackAckPort {

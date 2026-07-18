@@ -57,6 +57,7 @@ import {
 const AsyncMotionAcceptedHandle = { status: "async_motion_accepted" };
 
 interface CatalogMotionLifecycleCallbacks {
+  playbackClockReader?: { getElapsedMs: () => number | null };
   onStarted?: () => void;
   onFinished?: () => void;
   onFailed?: (reason: string) => void;
@@ -244,7 +245,7 @@ interface DirectParameterPlanState {
   semanticBindings: DirectSemanticParameterBinding[];
   usesCalibration: boolean;
   usesBindingProfile: boolean;
-  startedAtMs: number;
+  playbackClockReader: { getElapsedMs: () => number | null };
   diagnosticFrameCount: number;
   /** 本次参数计划的唯一标识符。由 startDirectParameterPlan 生成并回传。 */
   runId: string;
@@ -267,6 +268,8 @@ export class LAppModel extends CubismUserModel {
   private _released = false;
   private _catalogMotionRequestGeneration = 0;
   private _activeCatalogMotionStop: ((reason: string) => void) | null = null;
+  private _activeCatalogMotionClockReader: { getElapsedMs: () => number | null } | null = null;
+  private _activeCatalogMotionClockElapsedMs: number | null = null;
 
   private failModelLoad(reason: string, error?: unknown): void {
     if (!this.isLoadActive()) {
@@ -579,39 +582,9 @@ export class LAppModel extends CubismUserModel {
         this._lipSyncIds.pushBack(this._modelSetting.getLipSyncParameterId(i));
       }
 
-      // Some valid models expose a writable mouth parameter but omit the
-      // optional LipSync group from model3.json. Discover that capability
-      // explicitly so audio lip sync does not silently become energy-only.
-      if (this._lipSyncIds.getSize() === 0 && this._model != null) {
-        const idManager = CubismFramework.getIdManager();
-        const mouthParameterNames = [
-          "ParamMouthOpenY",
-          "PARAM_MOUTH_OPEN_Y",
-          "ParamMouthOpen",
-          "PARAM_MOUTH_OPEN",
-        ];
-        for (const parameterName of mouthParameterNames) {
-          const parameterId = idManager?.getId(parameterName);
-          if (!parameterId) {
-            continue;
-          }
-          const parameterIndex = this._model.getParameterIndex(parameterId);
-          if (
-            parameterIndex >= 0
-            && parameterIndex < this._model.getParameterCount()
-          ) {
-            this._lipSyncIds.pushBack(parameterId);
-            console.info(
-              `[LAppModel] lip sync parameter auto-detected: ${parameterName}`,
-            );
-            break;
-          }
-        }
-      }
-
       if (this._lipSyncIds.getSize() === 0) {
         console.error(
-          "[LAppModel] no writable lip sync parameter is configured or discoverable.",
+          "[LAppModel] model3.json does not declare a LipSync parameter group.",
         );
       }
 
@@ -803,9 +776,12 @@ export class LAppModel extends CubismUserModel {
         );
       }
     } else {
+      const motionDeltaTimeSeconds = this.resolveCatalogMotionDeltaTime(
+        deltaTimeSeconds,
+      );
       motionUpdated = this._motionManager.updateMotion(
         this._model,
-        deltaTimeSeconds
+        motionDeltaTimeSeconds
       ); // モーションを更新
     }
     this._model.saveParameters(); // 状態を保存
@@ -897,6 +873,8 @@ export class LAppModel extends CubismUserModel {
   public stopMotion(reason = "motion_stopped"): void {
     const activeStop = this._activeCatalogMotionStop;
     this._activeCatalogMotionStop = null;
+    this._activeCatalogMotionClockReader = null;
+    this._activeCatalogMotionClockElapsedMs = null;
     activeStop?.(reason);
     this._catalogMotionRequestGeneration += 1;
     this._motionManager.stopAllMotions();
@@ -936,6 +914,7 @@ export class LAppModel extends CubismUserModel {
       }
       terminalSettled = true;
       clearActiveStop();
+      this.clearCatalogMotionClock();
       lifecycleCallbacks?.onFinished?.();
     };
     const fail = (reason: string) => {
@@ -944,11 +923,24 @@ export class LAppModel extends CubismUserModel {
       }
       terminalSettled = true;
       clearActiveStop();
+      this.clearCatalogMotionClock();
       lifecycleCallbacks?.onFailed?.(reason);
     };
     const start = () => {
       if (terminalSettled) {
         return;
+      }
+      const clockReader = lifecycleCallbacks?.playbackClockReader;
+      if (clockReader) {
+        const elapsedMs = clockReader.getElapsedMs();
+        if (elapsedMs === null || !Number.isFinite(elapsedMs)) {
+          fail("catalog_motion_clock_unavailable");
+          this._motionManager.stopAllMotions();
+          this._motionManager.setReservePriority(0);
+          return;
+        }
+        this._activeCatalogMotionClockReader = clockReader;
+        this._activeCatalogMotionClockElapsedMs = elapsedMs;
       }
       lifecycleCallbacks?.onStarted?.();
     };
@@ -957,6 +949,15 @@ export class LAppModel extends CubismUserModel {
       this._motionStartError = "motion_model_released";
       fail(this._motionStartError);
       return InvalidMotionQueueEntryHandleValue;
+    }
+    const requestedClockReader = lifecycleCallbacks?.playbackClockReader;
+    if (requestedClockReader) {
+      const elapsedMs = requestedClockReader.getElapsedMs();
+      if (elapsedMs === null || !Number.isFinite(elapsedMs)) {
+        this._motionStartError = "catalog_motion_clock_unavailable";
+        fail(this._motionStartError);
+        return InvalidMotionQueueEntryHandleValue;
+      }
     }
 
     // Add a log specifically when trying to start a tap motion (which uses priority 3)
@@ -1162,6 +1163,26 @@ export class LAppModel extends CubismUserModel {
       }
       return false;
     }
+  }
+
+  private resolveCatalogMotionDeltaTime(renderDeltaTimeSeconds: number): number {
+    const reader = this._activeCatalogMotionClockReader;
+    if (!reader) {
+      return renderDeltaTimeSeconds;
+    }
+    const elapsedMs = reader.getElapsedMs();
+    if (elapsedMs === null || !Number.isFinite(elapsedMs)) {
+      this.stopMotion("catalog_motion_clock_unavailable");
+      return 0;
+    }
+    const previousElapsedMs = this._activeCatalogMotionClockElapsedMs ?? elapsedMs;
+    this._activeCatalogMotionClockElapsedMs = elapsedMs;
+    return Math.max(0, (elapsedMs - previousElapsedMs) / 1000);
+  }
+
+  private clearCatalogMotionClock(): void {
+    this._activeCatalogMotionClockReader = null;
+    this._activeCatalogMotionClockElapsedMs = null;
   }
 
   public stopExpression(): void {
@@ -1635,8 +1656,13 @@ export class LAppModel extends CubismUserModel {
     const opts = (options && typeof options === 'object') ? options : {};
     const runId = opts.runId || ('direct-plan-' + Date.now() + '-' + Math.random().toString(36).slice(2));
     const onTerminal = typeof opts.onTerminal === 'function' ? opts.onTerminal : undefined;
+    const playbackClockReader = opts.playbackClockReader;
+    if (!playbackClockReader || typeof playbackClockReader.getElapsedMs !== "function") {
+      this._directParameterPlanError = "v2_parameter_clock_missing";
+      return false;
+    }
 
-    return this.startSemanticParameterPlan(execution, runId, onTerminal);
+    return this.startSemanticParameterPlan(execution, runId, onTerminal, playbackClockReader);
   }
 
   public stopDirectParameterPlan(reason = "", status = "stopped"): void {
@@ -1671,7 +1697,7 @@ export class LAppModel extends CubismUserModel {
     plan: any;
     timing: DirectParameterPlanState["timing"];
     reason: string;
-  }, runId?: string, onTerminal?: (event: any) => void): boolean {
+  }, runId?: string, onTerminal?: (event: any) => void, playbackClockReader?: { getElapsedMs: () => number | null }): boolean {
     const semanticBindings: DirectSemanticParameterBinding[] = [];
     const seenParameterIndices = new Set<number>();
     const bindingWarnings = Array.isArray(parsed.plan.diagnostics?.warnings)
@@ -1812,7 +1838,7 @@ export class LAppModel extends CubismUserModel {
       semanticBindings,
       usesCalibration: false,
       usesBindingProfile: true,
-      startedAtMs: performance.now(),
+      playbackClockReader: playbackClockReader!,
       diagnosticFrameCount: 0,
       runId: runId || ('direct-plan-' + Date.now() + '-' + Math.random().toString(36).slice(2)),
       onTerminal: onTerminal,
@@ -1858,7 +1884,10 @@ export class LAppModel extends CubismUserModel {
     }
 
     const planState = this._directParameterPlanState;
-    const elapsedMs = Math.max(0, performance.now() - planState.startedAtMs);
+    const elapsedMs = planState.playbackClockReader.getElapsedMs();
+    if (elapsedMs === null || !Number.isFinite(elapsedMs)) {
+      return "v2_parameter_clock_unavailable";
+    }
     const easing = this.resolvePlanEasing(elapsedMs, planState.timing);
     const shouldLogFrame = planState.diagnosticFrameCount < 2;
     if (shouldLogFrame) {

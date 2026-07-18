@@ -18,7 +18,7 @@ interface ResolveMotionTimingOptions {
   performanceCurveHint?: PerformanceCurveHint | null;
 }
 
-function coerceDuration(value: number | null | undefined): number | null {
+function coerceDurationHint(value: number | null | undefined): number | null {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     return null;
   }
@@ -39,8 +39,8 @@ export function buildParameterPlanTiming(
 export function resolveMotionTiming(
   options: ResolveMotionTimingOptions,
 ): MotionTimingResolution {
-  const syncedDuration = coerceDuration(options.targetDurationMs);
-  const hintedDuration = coerceDuration(options.durationHintMs);
+  const syncedDuration = coerceTimelineDuration(options.targetDurationMs);
+  const hintedDuration = coerceDurationHint(options.durationHintMs);
   let resolvedDurationMs = DEFAULT_MOTION_INTENT_DURATION_MS;
   let timingSource: MotionTimingResolution["timingSource"] = "default";
 
@@ -128,6 +128,13 @@ export function resolveMotionTiming(
   };
 }
 
+function coerceTimelineDuration(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  return Math.max(MIN_MOTION_DURATION_MS, Math.round(value));
+}
+
 interface ResolvePerformanceCurveTimingOptions {
   durationMs: number;
   hint?: PerformanceCurveHint | null;
@@ -141,7 +148,7 @@ export function resolvePerformanceCurveTiming(
     return null;
   }
 
-  const durationMs = coerceDuration(options.durationMs);
+  const durationMs = coerceTimelineDuration(options.durationMs);
   if (durationMs === null) {
     return null;
   }

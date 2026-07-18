@@ -14,7 +14,6 @@ export interface PlaybackTimelineMotionSink<TMotionPayload = unknown> {
     context: PlaybackTimelineMotionContext,
   ): boolean | void;
   interrupt(turnId: string | null, messageId: string, reason: string): void;
-  notifyCurrentTurnChanged(turnId: string | null): void;
 }
 
 export type MotionTimelineTerminal = "completed" | "failed" | "interrupted";

@@ -334,19 +334,6 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     return { status: "prepared", source };
   }
 
-  function notifyCurrentTurnChanged(turnId: string | null): void {
-    runtimeScheduler.notifyCurrentTurnChanged(turnId);
-    const normalizedTurnId = normalizeTurnId(turnId);
-    if (!normalizedTurnId) {
-      return;
-    }
-    for (const key of preparedSemanticMotions.keys()) {
-      if (!key.startsWith(`${normalizedTurnId.length}:${normalizedTurnId}:`)) {
-        preparedSemanticMotions.delete(key);
-      }
-    }
-  }
-
   function playPreviewPayload(payload: unknown): boolean {
     const normalized = normalizeMotionPayload(payload);
     if (!normalized.ok) {
@@ -409,7 +396,6 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     ingestNormalizedPayload,
     preparePlaybackTimeline,
     handlePlaybackTimelineStarted,
-    notifyCurrentTurnChanged,
     playPreviewPayload,
     interruptPlaybackSegment,
     stop,

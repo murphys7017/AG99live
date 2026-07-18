@@ -39,7 +39,6 @@ export type PlaybackTimelineWiringPort = PlaybackTimelineRuntime<NormalizedMotio
 };
 export interface PlaybackTimelineMotionEnginePort {
   ingestNormalizedPayload: PlaybackTimelineMotionSink["start"];
-  notifyCurrentTurnChanged(turnId: string | null): void;
   interruptPlaybackSegment(turnId: string | null, messageId: string, reason: string): void;
   preparePlaybackTimeline(
     playbackTimeline: ReturnType<typeof projectMotionPlaybackClock>,
@@ -200,6 +199,8 @@ export function configurePlaybackTimelineMotionRuntime(options: {
   const motionTimelineSink = createModelEngineMotionTimelineSink({
     motionEngine,
     getPlaybackTimelineSnapshotForSegment: playbackTimeline.getTimelineSnapshotForSegment,
+    getPlaybackTimelineClockReaderForSegment:
+      playbackTimeline.getTimelineClockReaderForSegment,
     markMotionTimelineTerminal: playbackTimeline.markMotionTimelineTerminal,
   });
 

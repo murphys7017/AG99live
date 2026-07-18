@@ -279,9 +279,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       startSegmentJob: playbackTimeline.startSegmentJob,
       rejectMotionBeforeStart: playbackTimeline.rejectMotionBeforeStart,
     },
-    motionPayload: {
-      notifyCurrentTurnChanged: motionTimelineSink.notifyCurrentTurnChanged,
-    },
   });
 
   applyMotionEngineSettingsSnapshot(motionEngineSettings, bridge.state.snapshot.motionEngineSettings);

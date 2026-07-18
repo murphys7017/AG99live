@@ -7,6 +7,7 @@ import type {
 } from "../../types/protocol.js";
 import type {
   InboundPayloadContext,
+  MotionPlaybackClockReader,
   NormalizedMotionPayload,
 } from "../contracts.js";
 import type {
@@ -28,11 +29,15 @@ export type ModelEnginePlaybackOrigin = "conversation" | "manual_preview";
 
 export interface PlayPlanOptions {
   softHandoff?: boolean;
+  playbackClockReader?: MotionPlaybackClockReader | null;
+  requiresPlaybackClock?: boolean;
   onStarted: (plan: MotionPlanPayload, runId: string) => void;
   onFinished?: (event: { runId: string; status: string; reason?: string }) => void;
 }
 
 export interface PlayCatalogMotionOptions {
+  playbackClockReader?: MotionPlaybackClockReader | null;
+  requiresPlaybackClock?: boolean;
   onStarted: (motion: CatalogMotionPayload, runId: string) => void;
   onFinished?: (event: { runId: string; status: string; reason?: string }) => void;
 }

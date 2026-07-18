@@ -1,5 +1,6 @@
 import type {
   AudioPlaybackClock,
+  PlaybackTimelineClockReader,
   PlaybackTimelineSnapshot,
 } from "./contracts.js";
 import {
@@ -165,6 +166,10 @@ export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
     turnId: string | null,
     messageId: string,
   ) => PlaybackTimelineSnapshot | null;
+  getTimelineClockReaderForSegment: (
+    turnId: string | null,
+    messageId: string,
+  ) => PlaybackTimelineClockReader | null;
   findActiveAudioTimelineSegments: () => PlaybackTimelineAudioSegment[];
   findOpenAudioTimelineSegments: () => PlaybackTimelineAudioSegment[];
   findOpenExecutionTimelineSegments: () => PlaybackTimelineExecutionSegment[];
@@ -811,6 +816,24 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     return getTimeline(turnId, messageId)?.engine.getSnapshot() ?? null;
   }
 
+  function getTimelineClockReaderForSegment(
+    turnId: string | null,
+    messageId: string,
+  ): PlaybackTimelineClockReader | null {
+    const entry = getTimeline(turnId, messageId);
+    if (!entry) {
+      return null;
+    }
+    return {
+      getSnapshot: () => {
+        if (getTimeline(turnId, messageId) !== entry) {
+          return null;
+        }
+        return entry.engine.getSnapshot();
+      },
+    };
+  }
+
   function findActiveAudioTimelineSegments(): PlaybackTimelineAudioSegment[] {
     return findAudioTimelineSegments((audioSink) => audioSink?.terminal === "started");
   }
@@ -1126,6 +1149,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     stopTimelinesForTurn,
     stopAllTimelines,
     getTimelineSnapshotForSegment,
+    getTimelineClockReaderForSegment,
     findActiveAudioTimelineSegments,
     findOpenAudioTimelineSegments,
     findOpenExecutionTimelineSegments,

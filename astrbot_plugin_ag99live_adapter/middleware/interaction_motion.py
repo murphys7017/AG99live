@@ -6,15 +6,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from astrbot.api import logger
-from astrbot.core.interaction import InteractionResultContribution
-try:
-    from astrbot.core.interaction import (
-        get_interaction_route_decision as get_interaction_reply_plan,
-    )
-except ImportError:  # pragma: no cover - only older AstrBot cores expose the legacy name.
-    from astrbot.core.interaction import (
-        get_interaction_decision as get_interaction_reply_plan,
-    )
+from astrbot.core.interaction import (
+    InteractionResultContribution,
+    get_interaction_route_decision as get_interaction_reply_plan,
+)
 try:
     from astrbot.core.interaction import PersonaEffectSpec
 except ImportError:  # pragma: no cover - older AstrBot cores do not expose it.
@@ -41,9 +36,6 @@ from ..motion.resource_catalog import (
 )
 from ..motion.pose_reference import (
     build_pose_reference_candidates,
-)
-from ..prompts.motion_selector import (
-    resolve_motion_prompt_instruction,
 )
 from ..prompts.semantic_axis_prompt import (
     format_profile_axis_prompt_line,
@@ -563,9 +555,6 @@ def _build_motion_static_capability_payload(runtime_state: Any) -> dict[str, Any
     capability_payload: dict[str, Any] = {
         "persona_effect_available": bool(
             getattr(runtime_state, "ag99live_motion_persona_effect_available", True)
-        ),
-        "motion_instruction": resolve_motion_prompt_instruction(
-            runtime_state=runtime_state
         ),
     }
     build_style_prompt = getattr(runtime_state, "build_motion_tuning_style_prompt", None)

@@ -290,6 +290,8 @@ function startCatalogMotionPayload(
   const selectedModel = dependencies.getSelectedModel();
   let notifiedStarted = false;
   const started = dependencies.playCatalogMotion(payload.motion, selectedModel, {
+    playbackClockReader: context.playbackClockReader,
+    requiresPlaybackClock: context.playbackOrigin === "conversation",
     onStarted: (_motion, runId) => {
       const normalizedRunId = normalizeMotionRunId(runId);
       if (!normalizedRunId) {
@@ -391,6 +393,8 @@ function startCompilableMotionPayload(
     selectedModel,
     {
       softHandoff: true,
+      playbackClockReader: context.playbackClockReader,
+      requiresPlaybackClock: context.playbackOrigin === "conversation",
       onStarted: (plan, runId) => {
         const normalizedRunId = normalizeMotionRunId(runId);
         if (!normalizedRunId) {
@@ -461,6 +465,8 @@ function startCompiledMotionResource(
   const selectedModel = dependencies.getSelectedModel();
   let notifiedStarted = false;
   const started = dependencies.playCatalogMotion(resource.motion, selectedModel, {
+    playbackClockReader: context.playbackClockReader,
+    requiresPlaybackClock: context.playbackOrigin === "conversation",
     onStarted: (_motion, runId) => {
       const normalizedRunId = normalizeMotionRunId(runId);
       if (!normalizedRunId) {
@@ -538,6 +544,8 @@ function startDirectPlanPayload(
     selectedModel,
     {
       softHandoff: true,
+      playbackClockReader: context.playbackClockReader,
+      requiresPlaybackClock: context.playbackOrigin === "conversation",
       onStarted: (plan, runId) => {
         const normalizedRunId = normalizeMotionRunId(runId);
         if (!normalizedRunId) {
@@ -594,6 +602,8 @@ function startDirectPlanMotionResource(
   }
   let notifiedStarted = false;
   const started = dependencies.playCatalogMotion(resource.motion, selectedModel, {
+    playbackClockReader: context.playbackClockReader,
+    requiresPlaybackClock: context.playbackOrigin === "conversation",
     onStarted: (_motion, runId) => {
       const normalizedRunId = normalizeMotionRunId(runId);
       if (!normalizedRunId) {

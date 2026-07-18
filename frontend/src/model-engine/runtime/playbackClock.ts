@@ -131,7 +131,7 @@ export function retimeSemanticParameterPlan(
   if (!Number.isFinite(targetDurationMs) || targetDurationMs <= 0) {
     throw new Error("Motion plan target duration must be a positive finite number.");
   }
-  const requestedDurationMs = Math.max(320, Math.min(15000, Math.round(targetDurationMs)));
+  const requestedDurationMs = Math.max(320, Math.round(targetDurationMs));
   if (Math.abs(requestedDurationMs - plan.timing.duration_ms) <= 80) {
     return plan;
   }

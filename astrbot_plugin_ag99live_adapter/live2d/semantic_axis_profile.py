@@ -4,13 +4,11 @@ import hashlib
 import json
 import math
 import re
-from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, NotRequired, TypedDict
 
 SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION = "ag99.semantic_axis_profile.v2"
-LEGACY_SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION = "ag99.semantic_axis_profile.v1"
 SEMANTIC_AXIS_RELATION_GRAPH_SCHEMA_VERSION = "ag99.semantic_axis_relation_graph.v1"
 SEMANTIC_AXIS_PROFILE_DIRNAME = "ag99"
 SEMANTIC_AXIS_PROFILE_FILENAME = "semantic_axis_profile.json"
@@ -1143,71 +1141,11 @@ def load_semantic_axis_profile(
         raise SemanticAxisProfileError(
             f"Failed to read SemanticAxisProfile from `{path}`: {exc}"
         ) from exc
-    payload = _migrate_legacy_semantic_axis_profile(payload)
     return validate_semantic_axis_profile(
         payload,
         model_name=model_name,
         known_parameter_ids=known_parameter_ids,
     )
-
-
-def _migrate_legacy_semantic_axis_profile(payload: Any) -> Any:
-    if not isinstance(payload, Mapping):
-        return payload
-    schema_version = str(payload.get("schema_version") or "").strip()
-    if schema_version != LEGACY_SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION:
-        return payload
-    upgraded = deepcopy(payload)
-    upgraded["schema_version"] = SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION
-    axes = upgraded.get("axes")
-    if not isinstance(axes, list):
-        return upgraded
-    for raw_axis in axes:
-        if not isinstance(raw_axis, dict):
-            continue
-        axis_id = str(raw_axis.get("id") or "").strip() or "unknown_axis"
-        value_range = _normalize_range(
-            raw_axis.get("value_range"),
-            field_name=f"{axis_id}.value_range",
-        )
-        anchors = raw_axis.get("level_anchors")
-        if "extreme_range" not in raw_axis and isinstance(anchors, Mapping):
-            negative = anchors.get("-4")
-            positive = anchors.get("4")
-            if (
-                isinstance(negative, (int, float))
-                and not isinstance(negative, bool)
-                and isinstance(positive, (int, float))
-                and not isinstance(positive, bool)
-            ):
-                raw_axis["extreme_range"] = [float(negative), float(positive)]
-        soft_range = _normalize_range(
-            raw_axis.get("soft_range"),
-            field_name=f"{axis_id}.soft_range",
-        )
-        strong_range = _normalize_range(
-            raw_axis.get("strong_range"),
-            field_name=f"{axis_id}.strong_range",
-        )
-        if "extreme_range" not in raw_axis:
-            raw_axis["extreme_range"] = [
-                max(value_range[0], strong_range[0] - (soft_range[0] - strong_range[0])),
-                min(value_range[1], strong_range[1] + (strong_range[1] - soft_range[1])),
-            ]
-        raw_axis["level_anchors"] = _normalize_level_anchors(
-            None,
-            neutral=_coerce_float(
-                raw_axis.get("neutral"),
-                field_name=f"{axis_id}.neutral",
-            ),
-            soft_range=soft_range,
-            strong_range=strong_range,
-            extreme_range=raw_axis["extreme_range"],
-            value_range=value_range,
-            field_name=f"{axis_id}.level_anchors",
-        )
-    return upgraded
-
 
 def ensure_semantic_axis_profile(
     *,
@@ -1402,11 +1340,6 @@ def _profile_needs_schema_normalization(path: Path) -> bool:
         return False
     if not isinstance(raw_payload, Mapping):
         return False
-    if (
-        str(raw_payload.get("schema_version") or "").strip()
-        == LEGACY_SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION
-    ):
-        return True
     if raw_payload.get("relation_graph") is None:
         return True
     axes = raw_payload.get("axes")

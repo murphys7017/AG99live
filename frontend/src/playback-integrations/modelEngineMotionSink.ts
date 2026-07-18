@@ -5,7 +5,11 @@ import type {
   MotionPlaybackClockContext,
   MotionPlaybackClockPhase,
 } from "../model-engine/runtime/playbackClock.js";
-import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
+import type {
+  PlaybackTimelineClockReader,
+  PlaybackTimelineSnapshot,
+} from "../playback-timeline/contracts.js";
+import type { MotionPlaybackClockReader } from "../model-engine/contracts.js";
 import type {
   MotionTimelineTerminal,
   PlaybackTimelineMotionContext,
@@ -17,7 +21,6 @@ export interface ModelEnginePlaybackTimelineMotionEngine {
     payload: NormalizedMotionPayload,
     context: PlaybackTimelineMotionContext,
   ): boolean | void;
-  notifyCurrentTurnChanged(turnId: string | null): void;
   interruptPlaybackSegment(
     turnId: string | null,
     messageId: string,
@@ -94,11 +97,26 @@ function canAttachTimelineForMotionStart(
   );
 }
 
+function projectMotionPlaybackClockReader(
+  reader: PlaybackTimelineClockReader,
+): MotionPlaybackClockReader {
+  return {
+    getElapsedMs() {
+      const snapshot = reader.getSnapshot();
+      if (!snapshot || snapshot.clockSource === "audio_unavailable") {
+        return null;
+      }
+      return snapshot.currentTimeMs;
+    },
+  };
+}
+
 function attachPlaybackTimelineToMotionContext(
   context: PlaybackTimelineMotionContext,
   snapshot: PlaybackTimelineSnapshot | null,
+  reader: PlaybackTimelineClockReader | null,
 ): InboundPayloadContext | null {
-  if (!snapshot || !matchesMotionContext(snapshot, context) || !hasMotionSink(snapshot)) {
+  if (!snapshot || !reader || !matchesMotionContext(snapshot, context) || !hasMotionSink(snapshot)) {
     return null;
   }
 
@@ -106,6 +124,7 @@ function attachPlaybackTimelineToMotionContext(
     return {
       ...context,
       playbackClock: projectMotionPlaybackClock(snapshot),
+      playbackClockReader: projectMotionPlaybackClockReader(reader),
     };
   }
 
@@ -118,6 +137,7 @@ function attachPlaybackTimelineToMotionContext(
     // Keep lifecycle ownership while audio is preparing. The scheduler still
     // waits for a playing audio clock before starting the motion.
     playbackClock: projectMotionPlaybackClock(snapshot),
+    playbackClockReader: projectMotionPlaybackClockReader(reader),
   };
 }
 
@@ -127,6 +147,10 @@ export function createModelEngineMotionTimelineSink(options: {
     turnId: string | null,
     messageId: string,
   ) => PlaybackTimelineSnapshot | null;
+  getPlaybackTimelineClockReaderForSegment: (
+    turnId: string | null,
+    messageId: string,
+  ) => PlaybackTimelineClockReader | null;
   markMotionTimelineTerminal: (
     turnId: string | null,
     messageId: string,
@@ -140,9 +164,14 @@ export function createModelEngineMotionTimelineSink(options: {
         context.turnId,
         context.messageId,
       );
+      const playbackTimelineClockReader = options.getPlaybackTimelineClockReaderForSegment(
+        context.turnId,
+        context.messageId,
+      );
       const nextContext = attachPlaybackTimelineToMotionContext(
         context,
         playbackTimelineSnapshot,
+        playbackTimelineClockReader,
       );
       if (!nextContext) {
         options.markMotionTimelineTerminal(
@@ -160,9 +189,6 @@ export function createModelEngineMotionTimelineSink(options: {
         nextContext,
       );
       return accepted;
-    },
-    notifyCurrentTurnChanged(turnId) {
-      options.motionEngine.notifyCurrentTurnChanged(turnId);
     },
     interrupt(turnId, messageId, reason) {
       options.motionEngine.interruptPlaybackSegment(turnId, messageId, reason);

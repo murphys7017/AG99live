@@ -4,6 +4,7 @@ import type {
 import type {
   InboundPayloadContext,
 } from "./contracts.js";
+import type { MotionPlaybackClockReader } from "../contracts.js";
 import type { MotionPlaybackClockContext } from "./playbackClock.js";
 import { normalizeTurnId } from "../normalize.js";
 import type { ModelEnginePlaybackOrigin } from "./contracts.js";
@@ -15,6 +16,7 @@ export interface PendingInboundMotionPayload {
   playbackTurnId: string | null;
   receivedAtMs: number;
   playbackClock: MotionPlaybackClockContext | null;
+  playbackClockReader: MotionPlaybackClockReader | null;
   timelineMode: InboundPayloadContext["timelineMode"];
 }
 
@@ -26,6 +28,7 @@ export interface StartPayloadContext {
   startReason: string;
   queuedDelayMs: number;
   playbackClock?: MotionPlaybackClockContext | null;
+  playbackClockReader?: MotionPlaybackClockReader | null;
 }
 
 export interface PendingMotionPreparation {
@@ -111,6 +114,7 @@ export function createMotionRuntimeScheduler(
       startReason,
       queuedDelayMs: Math.max(0, Math.round(performance.now() - entry.receivedAtMs)),
       playbackClock: entry.playbackClock,
+      playbackClockReader: entry.playbackClockReader,
     };
   }
 
@@ -198,6 +202,7 @@ export function createMotionRuntimeScheduler(
         startReason: "motion_turn_id_missing",
         queuedDelayMs: 0,
         playbackClock: context.playbackClock ?? null,
+        playbackClockReader: context.playbackClockReader ?? null,
       });
       return false;
     }
@@ -221,6 +226,7 @@ export function createMotionRuntimeScheduler(
       playbackTurnId: normalizedPlaybackTurnId,
       receivedAtMs: context.receivedAtMs,
       playbackClock: context.playbackClock ?? null,
+      playbackClockReader: context.playbackClockReader ?? null,
       timelineMode: context.timelineMode,
     };
 
@@ -233,6 +239,7 @@ export function createMotionRuntimeScheduler(
         startReason: "playback_timeline_identity_mismatch",
         queuedDelayMs: 0,
         playbackClock: entry.playbackClock,
+        playbackClockReader: entry.playbackClockReader,
       });
       return false;
     }
@@ -328,26 +335,10 @@ export function createMotionRuntimeScheduler(
     };
   }
 
-  function notifyCurrentTurnChanged(turnId: string | null): void {
-    const currentTurnId = normalizeTurnId(turnId);
-    if (!currentTurnId) {
-      return;
-    }
-
-    for (const entry of Array.from(pendingInboundMotionPayloads.values())) {
-      if (entry.turnId === currentTurnId) {
-        continue;
-      }
-      dropPendingPayload(entry, "current_turn_changed");
-    }
-    syncPendingState();
-  }
-
   return {
     queueInboundPayload,
     getPendingPayloadForTimeline,
     handlePlaybackTimelineStarted,
-    notifyCurrentTurnChanged,
     cancelPendingPayloadForSegment,
     clearAllPendingPayloads,
   };

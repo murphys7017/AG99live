@@ -42,7 +42,7 @@ export function createTimelineClock(
     if (pausedAtMs !== null || stoppedAtMs !== null) {
       return null;
     }
-    if (!audioClock || !audioClock.isPlaying()) {
+    if (!audioClock) {
       return null;
     }
     const currentTimeMs = audioClock.getCurrentTimeMs();
@@ -55,7 +55,7 @@ export function createTimelineClock(
       durationMs: audioClock.getDurationMs() ?? expectedDurationMs,
       playbackRate: audioClock.getPlaybackRate(),
       clockSource: "audio",
-      paused: pausedAtMs !== null,
+      paused: !audioClock.isPlaying(),
       stopped: stoppedAtMs !== null,
     };
   }
