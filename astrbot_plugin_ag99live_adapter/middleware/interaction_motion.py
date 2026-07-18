@@ -253,17 +253,21 @@ def start_deferred_performance_curve_request(
     event.set_extra("_ag99live_pending_performance_curve", None)
     bundle = _resolve_motion_runtime_bundle(event)
     if bundle is None:
-        raise RuntimeError("ag99live_motion_runtime_unavailable")
-    motion_payload = pending.get("motion_payload")
-    if not isinstance(motion_payload, dict):
-        raise ValueError("performance_curve_pending_motion_payload_invalid")
+        logger.warning(
+            "WIRING performance_curve.skipped reason=motion_runtime_unavailable "
+            "turn_id=%s message_id=%s tts_request_id=%s",
+            external_correlation_id or "<missing>",
+            message_id or "<missing>",
+            tts_request_id or "<missing>",
+        )
+        return None
     request_id = bundle.turn_coordinator.start_performance_curve_request(
         turn_id=external_correlation_id,
         tts_turn_id=turn_id,
         message_id=message_id,
         request_id=tts_request_id,
         assistant_text=str(pending.get("assistant_text") or ""),
-        motion_payload=motion_payload,
+        motion_payload=pending.get("motion_payload"),
     )
     if request_id:
         logger.info(

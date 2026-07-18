@@ -15,14 +15,19 @@ class SessionStage(str, Enum):
 
 @dataclass
 class SessionState:
-    """单一 AstrBot 会话侧的轮次状态容器：stage + turn 索引 + 当前 turn_id 等。
+    """连接 UI 的最新提交轮次投影，不是权威的多轮生命周期存储。
+
+    AstrBot 负责输入及 Personal Runtime 队列；TurnIdentityMap、待发送输出段和
+    前端 PlaybackTimeline 分别保有按轮次的真实关联与播放状态。这里的 stage 和
+    current_turn_id 仅供单连接 UI 展示最新提交的轮次，不能用来拒绝输入、关联历史
+    轮次，或驱动跨轮清理。
 
     字段语义：
       client_uid                    端侧客户端标识（用于历史/平台事件）
       stage                         idle → thinking → synthesizing → playing 状态机当前值
       turn_index                    累计轮次计数（自增，不在 reset 时回退）
       last_user_text                最近一次 begin_turn 写入的原文
-      current_turn_id               最新提交的 turn_id；idle 时为 None
+      current_turn_id               最新提交轮次的 UI 投影；idle 时为 None
     """
 
     client_uid: str = "single-client"

@@ -29,6 +29,7 @@ architecture:
     tts_request_id: One TTS generation lifecycle, including retries or multiple audio segments.
     run_id: One accepted motion execution owned by one segment.
   protocols:
+    schema_manifest: astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json is the single source for protocol and schema versions; frontend constants are checked against it.
     output: output.segment.v3
     persona_motion: engine.motion_intent.v4
     official_inline_motion: engine.motion_intent.v3
@@ -59,9 +60,11 @@ verification:
     - Source tracing, structured runtime logs, Motion Lab records, and a live Electron conversation are the primary evidence.
     - Do not run full regression suites by default and do not add mocks to compensate for missing live verification.
   checks_run:
+    - `python scripts/check_protocol_schema_manifest.py` passed.
     - `npm run typecheck:renderer` passed in frontend.
     - `npm run typecheck:websdk` passed in frontend.
     - `python -m compileall -q astrbot_plugin_ag99live_adapter` passed.
+    - `check_astrbot_plugin.py astrbot_plugin_ag99live_adapter` reported 0 errors and 0 warnings.
     - git diff --check reports no whitespace errors.
   validation_gap:
     - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
@@ -77,10 +80,3 @@ backlog:
   - id: remote_operator_plugin_split
     status: deferred
     summary: Move remote computer execution into a separate AstrBot plugin after the server-side AstrBot architecture is stable.
-  - id: strict_runtime_residue_cleanup
-    status: todo
-    summary: Remove current compatibility residue that conflicts with strict model capability ownership.
-    notes:
-      - Remove Live2D mouth-parameter name auto-detection after every supported model declares its LipSync group.
-      - Validate every motion_steps entry against the current profile, not only the first step's axis identity set.
-      - Remove legacy semantic-profile migration and old-action wording after active profile files are confirmed current.

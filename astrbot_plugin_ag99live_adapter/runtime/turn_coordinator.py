@@ -505,6 +505,7 @@ class TurnCoordinator:
         payload = self._attach_ready_performance_curve_hint(
             motion_payload=payload,
             turn_id=segment.turn_id,
+            message_id=segment.message_id,
             request_id=segment.performance_curve_request_id,
         )
         return {
@@ -527,46 +528,70 @@ class TurnCoordinator:
         request_id = segment.performance_curve_request_id
         if request_id:
             hint = payload.get("performance_curve_hint")
-            runtime = self.runtime_state.performance_curve_runtime
-            if isinstance(hint, dict):
-                self._record_motion_lab_raw_event(
-                    event_type="performance_curve.attached",
-                    turn_id=segment.turn_id,
-                    message_id=segment.message_id,
-                    source_route="performance_curve_provider",
-                    phase="performance_curve",
-                    assistant_text=segment.semantic_text,
-                    payload_kind="ag99.performance_curve_hint.v1",
-                    raw={
-                        "performance_curve_request_id": request_id,
-                        "curve_hint": hint,
-                        "motion_intent_tags": [
-                            str(item).strip()
-                            for item in payload.get("intent_tags", [])
-                            if str(item).strip()
-                        ],
-                    },
-                )
-            else:
-                discarded = runtime.discard_if_not_ready(
-                    turn_id=segment.turn_id,
-                    request_id=request_id,
-                )
-                if discarded:
+            runtime = getattr(self.runtime_state, "performance_curve_runtime", None)
+            try:
+                if isinstance(hint, dict):
                     self._record_motion_lab_raw_event(
-                        event_type="performance_curve.skipped",
+                        event_type="performance_curve.attached",
                         turn_id=segment.turn_id,
                         message_id=segment.message_id,
-                        source_route="output.segment",
+                        source_route="performance_curve_provider",
                         phase="performance_curve",
                         assistant_text=segment.semantic_text,
                         payload_kind="ag99.performance_curve_hint.v1",
                         raw={
-                            "reason": "not_ready_before_segment_egress",
                             "performance_curve_request_id": request_id,
+                            "curve_hint": hint,
+                            "motion_intent_tags": [
+                                str(item).strip()
+                                for item in payload.get("intent_tags", [])
+                                if str(item).strip()
+                            ],
                         },
                     )
-            runtime.clear(turn_id=segment.turn_id, request_id=request_id)
+                elif runtime is not None:
+                    discarded = runtime.discard_if_not_ready(
+                        turn_id=segment.turn_id,
+                        request_id=request_id,
+                    )
+                    if discarded:
+                        self._record_motion_lab_raw_event(
+                            event_type="performance_curve.skipped",
+                            turn_id=segment.turn_id,
+                            message_id=segment.message_id,
+                            source_route="output.segment",
+                            phase="performance_curve",
+                            assistant_text=segment.semantic_text,
+                            payload_kind="ag99.performance_curve_hint.v1",
+                            raw={
+                                "reason": "not_ready_before_segment_egress",
+                                "performance_curve_request_id": request_id,
+                            },
+                        )
+            except Exception as exc:  # noqa: BLE001 - optional curve cannot block turn closure.
+                self._record_performance_curve_outcome(
+                    event_type="performance_curve.failed",
+                    reason=f"cleanup_exception:{exc}",
+                    turn_id=segment.turn_id,
+                    message_id=segment.message_id,
+                    assistant_text=segment.semantic_text,
+                    tts_turn_id="",
+                    request_id=request_id,
+                )
+            finally:
+                if runtime is not None:
+                    try:
+                        runtime.clear(turn_id=segment.turn_id, request_id=request_id)
+                    except Exception as exc:  # noqa: BLE001 - optional curve cleanup.
+                        self._record_performance_curve_outcome(
+                            event_type="performance_curve.failed",
+                            reason=f"clear_exception:{exc}",
+                            turn_id=segment.turn_id,
+                            message_id=segment.message_id,
+                            assistant_text=segment.semantic_text,
+                            tts_turn_id="",
+                            request_id=request_id,
+                        )
         self._record_prompt_motion_snapshot(
             motion_payload=payload,
             source=segment.motion_source,
@@ -1034,83 +1059,181 @@ class TurnCoordinator:
         message_id: str | None,
         request_id: str | None,
         assistant_text: str,
-        motion_payload: dict[str, Any],
+        motion_payload: Any,
     ) -> str | None:
         runtime_state = self.runtime_state
         if not runtime_state.enable_performance_curve:
             return None
-        runtime = runtime_state.performance_curve_runtime
-        if runtime is None:
-            raise RuntimeError("performance_curve_runtime_unavailable")
 
         normalized_turn_id = str(turn_id or "").strip()
         normalized_tts_turn_id = str(tts_turn_id or "").strip()
         normalized_message_id = str(message_id or "").strip()
         normalized_request_id = str(request_id or "").strip()
         normalized_assistant_text = str(assistant_text or "").strip()
-        if (
-            not normalized_turn_id
-            or not normalized_tts_turn_id
-            or not normalized_message_id
-            or not normalized_request_id
-            or not normalized_assistant_text
-        ):
-            raise ValueError(
-                "performance_curve_request_identity_missing:"
-                f"turn_id={normalized_turn_id}:"
-                f"tts_turn_id={normalized_tts_turn_id}:"
-                f"message_id={normalized_message_id}:"
-                f"request_id={normalized_request_id}:"
-                f"assistant_text_present={bool(normalized_assistant_text)}"
+        runtime = getattr(runtime_state, "performance_curve_runtime", None)
+        skip_reason = ""
+        if runtime is None:
+            skip_reason = "runtime_unavailable"
+        elif not isinstance(motion_payload, dict):
+            skip_reason = "pending_motion_payload_invalid"
+        elif not normalized_turn_id:
+            skip_reason = "turn_id_missing"
+        elif not normalized_tts_turn_id:
+            skip_reason = "tts_turn_id_missing"
+        elif not normalized_message_id:
+            skip_reason = "message_id_missing"
+        elif not normalized_request_id:
+            skip_reason = "tts_request_id_missing"
+        elif not normalized_assistant_text:
+            skip_reason = "assistant_text_missing"
+        if skip_reason:
+            self._record_performance_curve_outcome(
+                event_type="performance_curve.skipped",
+                reason=skip_reason,
+                turn_id=normalized_turn_id,
+                message_id=normalized_message_id,
+                assistant_text=normalized_assistant_text,
+                tts_turn_id=normalized_tts_turn_id,
+                request_id=normalized_request_id,
             )
+            return None
 
-        motion_summary = summarize_motion_for_curve(motion_payload)
-        motion_intent_tags = [
-            str(item).strip()
-            for item in motion_summary.get("intent_tags", [])
-            if str(item).strip()
-        ]
-        request = PerformanceCurveInput(
-            turn_id=normalized_turn_id,
-            tts_turn_id=normalized_tts_turn_id,
-            message_id=normalized_message_id,
-            request_id=normalized_request_id,
-            assistant_text=normalized_assistant_text,
-            assistant_reply_keywords=extract_assistant_reply_keywords(
-                normalized_assistant_text
-            ),
-            motion_intent_tags=motion_intent_tags,
-            motion_effect_summary=motion_summary,
-            chat_context=self._motion_lab_chat_context(),
-        )
-        if not runtime.start(request):
-            raise RuntimeError(
-                "performance_curve_request_rejected:"
-                f"{normalized_turn_id}:{normalized_request_id}"
+        try:
+            motion_summary = summarize_motion_for_curve(motion_payload)
+            motion_intent_tags = [
+                str(item).strip()
+                for item in motion_summary.get("intent_tags", [])
+                if str(item).strip()
+            ]
+            request = PerformanceCurveInput(
+                turn_id=normalized_turn_id,
+                tts_turn_id=normalized_tts_turn_id,
+                message_id=normalized_message_id,
+                request_id=normalized_request_id,
+                assistant_text=normalized_assistant_text,
+                assistant_reply_keywords=extract_assistant_reply_keywords(
+                    normalized_assistant_text
+                ),
+                motion_intent_tags=motion_intent_tags,
+                motion_effect_summary=motion_summary,
+                chat_context=self._motion_lab_chat_context(),
             )
-        return normalized_request_id
+            if runtime.start(request):
+                return normalized_request_id
+        except Exception as exc:  # noqa: BLE001
+            self._record_performance_curve_outcome(
+                event_type="performance_curve.failed",
+                reason=f"start_exception:{exc}",
+                turn_id=normalized_turn_id,
+                message_id=normalized_message_id,
+                assistant_text=normalized_assistant_text,
+                tts_turn_id=normalized_tts_turn_id,
+                request_id=normalized_request_id,
+            )
+            return None
+
+        self._record_performance_curve_outcome(
+            event_type="performance_curve.skipped",
+            reason="request_rejected",
+            turn_id=normalized_turn_id,
+            message_id=normalized_message_id,
+            assistant_text=normalized_assistant_text,
+            tts_turn_id=normalized_tts_turn_id,
+            request_id=normalized_request_id,
+        )
+        return None
+
+    def _record_performance_curve_outcome(
+        self,
+        *,
+        event_type: str,
+        reason: str,
+        turn_id: str,
+        message_id: str,
+        assistant_text: str,
+        tts_turn_id: str,
+        request_id: str,
+    ) -> None:
+        logger.warning(
+            "WIRING %s reason=%s turn_id=%s message_id=%s tts_request_id=%s",
+            event_type,
+            reason,
+            turn_id or "<missing>",
+            message_id or "<missing>",
+            request_id or "<missing>",
+        )
+        if not turn_id:
+            return
+        self._record_motion_lab_raw_event(
+            event_type=event_type,
+            turn_id=turn_id,
+            message_id=message_id or None,
+            source_route="performance_curve_provider",
+            phase="performance_curve",
+            assistant_text=assistant_text,
+            payload_kind="ag99.performance_curve_hint.v1",
+            raw={
+                "reason": reason,
+                "tts_turn_id": tts_turn_id,
+                "tts_request_id": request_id,
+            },
+        )
 
     def _attach_ready_performance_curve_hint(
         self,
         *,
         motion_payload: dict[str, Any],
         turn_id: str | None,
+        message_id: str,
         request_id: str | None,
     ) -> dict[str, Any]:
         normalized_request_id = str(request_id or "").strip()
         if not normalized_request_id:
             return motion_payload
-        runtime = self.runtime_state.performance_curve_runtime
+        runtime = getattr(self.runtime_state, "performance_curve_runtime", None)
         if runtime is None:
-            raise RuntimeError("performance_curve_runtime_unavailable")
-        hint = runtime.get_ready(turn_id=turn_id, request_id=normalized_request_id)
+            self._record_performance_curve_outcome(
+                event_type="performance_curve.skipped",
+                reason="runtime_unavailable_before_egress",
+                turn_id=str(turn_id or "").strip(),
+                message_id=message_id,
+                assistant_text="",
+                tts_turn_id="",
+                request_id=normalized_request_id,
+            )
+            return motion_payload
+        try:
+            hint = runtime.get_ready(turn_id=turn_id, request_id=normalized_request_id)
+        except Exception as exc:  # noqa: BLE001
+            self._record_performance_curve_outcome(
+                event_type="performance_curve.failed",
+                reason=f"result_lookup_exception:{exc}",
+                turn_id=str(turn_id or "").strip(),
+                message_id=message_id,
+                assistant_text="",
+                tts_turn_id="",
+                request_id=normalized_request_id,
+            )
+            return motion_payload
         if not isinstance(hint, dict):
             return motion_payload
 
-        next_payload, attached_hint = attach_performance_curve_hint(motion_payload, hint)
-        if attached_hint is None:
-            raise ValueError("performance_curve_runtime_hint_invalid")
-        return next_payload
+        try:
+            next_payload, attached_hint = attach_performance_curve_hint(motion_payload, hint)
+            if attached_hint is None:
+                raise ValueError("performance_curve_runtime_hint_invalid")
+            return next_payload
+        except Exception as exc:  # noqa: BLE001 - optional curve must not block egress.
+            self._record_performance_curve_outcome(
+                event_type="performance_curve.failed",
+                reason=f"hint_invalid:{exc}",
+                turn_id=str(turn_id or "").strip(),
+                message_id=message_id,
+                assistant_text="",
+                tts_turn_id="",
+                request_id=normalized_request_id,
+            )
+            return motion_payload
 
     def _allows_official_inline_anim_compat(self) -> bool:
         runtime_state = getattr(self, "runtime_state", None)
