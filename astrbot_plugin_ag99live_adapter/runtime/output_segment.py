@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
 
 class OutputSegmentConflictError(ValueError):
@@ -20,9 +20,7 @@ class PendingOutputSegment:
     motion_payload: dict[str, Any] | None = None
     motion_mode: str = "preview"
     motion_source: str = ""
-    curve_request_state: Literal["pending", "started", "disabled", "failed"] = (
-        "pending"
-    )
+    performance_curve_request_id: str = ""
 
     def merge_text(self, value: str) -> None:
         self.text = _merge_unique_text(self.text, value, "text")
@@ -58,6 +56,13 @@ class PendingOutputSegment:
         self.motion_payload = candidate
         self.motion_mode = str(mode or "preview").strip() or "preview"
         self.motion_source = str(source or "").strip()
+
+    def bind_performance_curve_request(self, request_id: str) -> None:
+        self.performance_curve_request_id = _merge_unique_text(
+            self.performance_curve_request_id,
+            request_id,
+            "performance_curve_request_id",
+        )
 
 
 def _merge_unique_text(current: str, incoming: str, field_name: str) -> str:

@@ -274,7 +274,6 @@ def test_emit_message_chain_converts_audio_off_thread(
     coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
     coordinator._record_motion_lab_raw_event = lambda **_kwargs: None
     coordinator._motion_lab_chat_context = lambda: {}
-    coordinator._start_performance_curve_request = lambda **_kwargs: None
 
     class MediaServiceStub:
         def __init__(self) -> None:

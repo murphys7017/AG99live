@@ -14,6 +14,8 @@ flowchart TD
         PERSONA[Persona Runtime<br/>构建 Prompt 与 effect schema]:::backend
         LLM[主模型一次生成<br/>spoken_reply + effect_calls]:::backend
         EFFECT[result contributor<br/>motion_intent.v4]:::backend
+        CURVE[可选 Performance Curve Provider<br/>后台请求]:::backend
+        CURVECHECK{段出站时<br/>curve 已 ready？}:::backend
         TTS[TTS<br/>WAV Record + Record.text]:::backend
         PLAIN[Plain / semantic text<br/>canonical text 候选]:::backend
         BUFFER[PendingOutputSegment<br/>turn_id + message_id]:::backend
@@ -25,12 +27,16 @@ flowchart TD
         TURN --> START
         TURN --> PERSONA --> LLM
         LLM --> EFFECT
-        LLM --> TTS
+        EFFECT --> CURVE
+        EFFECT --> TTS
         LLM --> PLAIN
         EFFECT --> BUFFER
         TTS --> BUFFER
         PLAIN --> BUFFER
-        BUFFER --> BCHECK --> SEGMENT
+        BUFFER --> BCHECK --> CURVECHECK
+        CURVE -. 已完成结果 .-> CURVECHECK
+        CURVECHECK -->|ready: 附加 hint| SEGMENT
+        CURVECHECK -->|未 ready: 取消并跳过| SEGMENT
         SEGMENT -. 可存在多个完整逻辑段 .-> SYNTH
     end
 

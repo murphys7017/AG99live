@@ -202,6 +202,7 @@ class AG99liveMotionResultContributor:
             return None
 
         client_objects = []
+        platform_extras: dict[str, Any] = {}
         if attempt.motion_payload is not None:
             client_objects.append(
                 {
@@ -211,12 +212,41 @@ class AG99liveMotionResultContributor:
                     "source": attempt.source or "persona_effect",
                 }
             )
+            request_id = _start_optional_performance_curve_request(
+                event,
+                attempt=attempt,
+            )
+            if request_id:
+                platform_extras["performance_curve_request_id"] = request_id
         return InteractionResultContribution(
             plugin_id=self.plugin_id,
+            platform_extras=platform_extras,
             client_objects=client_objects,
             metadata={"ag99live_motion_schedule": attempt.to_metadata()},
             priority=self.priority,
         )
+
+
+def _start_optional_performance_curve_request(
+    event: Any,
+    *,
+    attempt: _MotionScheduleAttempt,
+) -> str | None:
+    bundle = _resolve_motion_runtime_bundle(event)
+    if bundle is None or attempt.motion_payload is None or not attempt.assistant_text:
+        return None
+    start = getattr(
+        bundle.turn_coordinator,
+        "start_performance_curve_request",
+        None,
+    )
+    if not callable(start):
+        return None
+    return start(
+        turn_id=attempt.scheduled_frontend_turn_id,
+        assistant_text=attempt.assistant_text,
+        motion_payload=attempt.motion_payload,
+    )
 
 
 def register_ag99live_interaction_contributors(context: Any) -> None:

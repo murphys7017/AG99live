@@ -151,7 +151,6 @@ class TurnCoordinator:
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._turn_timing: dict[str, Any] = {}
         self._last_prompt_motion_snapshot: dict[str, Any] | None = None
-        self._current_performance_curve_context: dict[str, Any] | None = None
         self._pending_output_segments: dict[str, PendingOutputSegment] = {}
         self._flushed_output_segment_count = 0
 
@@ -276,10 +275,11 @@ class TurnCoordinator:
         )
         if motion_candidate is not None:
             segment.merge_motion(**motion_candidate)
-        self._try_start_performance_curve_request(
-            segment=segment,
-            platform_extras=platform_extras_dict,
-        )
+        curve_request_id = str(
+            platform_extras_dict.get("performance_curve_request_id") or ""
+        ).strip()
+        if curve_request_id:
+            segment.bind_performance_curve_request(curve_request_id)
 
     def _get_pending_output_segment(
         self,
@@ -418,25 +418,22 @@ class TurnCoordinator:
             motion_payload=payload,
             turn_id=segment.turn_id,
             message_id=segment.message_id,
+            request_id=segment.performance_curve_request_id,
+            assistant_text=segment.semantic_text,
         )
         hint = payload.get("performance_curve_hint")
         runtime = getattr(getattr(self, "runtime_state", None), "performance_curve_runtime", None)
-        if not isinstance(hint, dict):
-            reason = {
-                "disabled": "performance_curve_disabled",
-                "failed": "performance_curve_request_rejected",
-                "pending": "performance_curve_request_not_started",
-            }.get(
-                segment.curve_request_state,
-                "not_ready_before_segment_egress",
-            )
-            fail_if_not_ready = getattr(runtime, "fail_if_not_ready", None)
-            if segment.curve_request_state == "started" and callable(fail_if_not_ready):
-                fail_if_not_ready(
+        request_id = segment.performance_curve_request_id
+        clear = getattr(runtime, "clear", None)
+        if request_id and not isinstance(hint, dict):
+            discard_if_not_ready = getattr(runtime, "discard_if_not_ready", None)
+            if callable(discard_if_not_ready):
+                discard_if_not_ready(
                     turn_id=segment.turn_id,
-                    message_id=segment.message_id,
-                    reason=reason,
+                    request_id=request_id,
                 )
+            elif callable(clear):
+                clear(turn_id=segment.turn_id, request_id=request_id)
             self._record_motion_lab_raw_event(
                 event_type="performance_curve.skipped",
                 turn_id=segment.turn_id,
@@ -445,11 +442,13 @@ class TurnCoordinator:
                 phase="performance_curve",
                 assistant_text=segment.semantic_text,
                 payload_kind="ag99.performance_curve_hint.v1",
-                raw={"reason": reason},
+                raw={
+                    "reason": "not_ready_before_segment_egress",
+                    "performance_curve_request_id": request_id,
+                },
             )
-        clear = getattr(runtime, "clear", None)
-        if callable(clear):
-            clear(turn_id=segment.turn_id, message_id=segment.message_id)
+        elif request_id and callable(clear):
+            clear(turn_id=segment.turn_id, request_id=request_id)
         self._record_prompt_motion_snapshot(
             motion_payload=payload,
             source=segment.motion_source,
@@ -904,25 +903,32 @@ class TurnCoordinator:
             return []
         return value if isinstance(value, list) else []
 
-    def _start_performance_curve_request(
+    def start_performance_curve_request(
         self,
         *,
-        motion_payload: dict[str, Any] | None,
-    ) -> bool:
-        context = getattr(self, "_current_performance_curve_context", None)
-        if not isinstance(context, dict):
-            return False
+        turn_id: str | None,
+        assistant_text: str,
+        motion_payload: dict[str, Any],
+    ) -> str | None:
         runtime_state = getattr(self, "runtime_state", None)
+        if not bool(getattr(runtime_state, "enable_performance_curve", False)):
+            return None
         runtime = getattr(runtime_state, "performance_curve_runtime", None)
         start = getattr(runtime, "start", None)
         if not callable(start):
-            return False
+            logger.error("Performance curve runtime is unavailable while enabled.")
+            return None
 
-        turn_id = str(context.get("turn_id") or "").strip()
-        message_id = str(context.get("message_id") or "").strip()
-        assistant_text = str(context.get("assistant_text") or "").strip()
-        if not turn_id or not assistant_text:
-            return False
+        normalized_turn_id = str(turn_id or "").strip()
+        normalized_assistant_text = str(assistant_text or "").strip()
+        if not normalized_turn_id or not normalized_assistant_text:
+            logger.error(
+                "Performance curve request requires turn identity and assistant text. "
+                "turn_id=%s",
+                normalized_turn_id,
+            )
+            return None
+        request_id = uuid4().hex
 
         motion_summary = summarize_motion_for_curve(motion_payload)
         motion_intent_tags = [
@@ -931,64 +937,24 @@ class TurnCoordinator:
             if str(item).strip()
         ]
         request = PerformanceCurveInput(
-            turn_id=turn_id,
-            message_id=message_id,
-            assistant_text=assistant_text,
-            assistant_reply_keywords=[
-                str(item).strip()
-                for item in context.get("assistant_reply_keywords", [])
-                if str(item).strip()
-            ],
+            turn_id=normalized_turn_id,
+            request_id=request_id,
+            assistant_text=normalized_assistant_text,
+            assistant_reply_keywords=extract_assistant_reply_keywords(
+                normalized_assistant_text
+            ),
             motion_intent_tags=motion_intent_tags,
             motion_effect_summary=motion_summary,
-            chat_context=[
-                item
-                for item in context.get("chat_context", [])
-                if isinstance(item, dict)
-            ],
+            chat_context=self._motion_lab_chat_context(),
         )
-        return bool(start(request))
-
-    def _try_start_performance_curve_request(
-        self,
-        *,
-        segment: PendingOutputSegment,
-        platform_extras: dict[str, Any],
-    ) -> None:
-        if segment.curve_request_state != "pending":
-            return
-        if segment.motion_payload is None or not segment.semantic_text:
-            return
-
-        runtime_state = getattr(self, "runtime_state", None)
-        if not bool(getattr(runtime_state, "enable_performance_curve", False)):
-            segment.curve_request_state = "disabled"
-            return
-
-        self._current_performance_curve_context = {
-            "turn_id": segment.turn_id,
-            "message_id": segment.message_id,
-            "assistant_text": segment.semantic_text,
-            "assistant_reply_keywords": extract_assistant_reply_keywords(
-                segment.semantic_text
-            ),
-            "chat_context": self._motion_lab_chat_context(),
-            "platform_extras": platform_extras,
-        }
-        try:
-            started = self._start_performance_curve_request(
-                motion_payload=segment.motion_payload,
-            )
-        finally:
-            self._current_performance_curve_context = None
-        segment.curve_request_state = "started" if started else "failed"
-        if not started:
+        if not start(request):
             logger.error(
-                "Performance curve request rejected after canonical text and motion "
-                "were ready. turn_id=%s message_id=%s",
-                segment.turn_id,
-                segment.message_id,
+                "Performance curve request rejected before TTS. turn_id=%s request_id=%s",
+                normalized_turn_id,
+                request_id,
             )
+            return None
+        return request_id
 
     def _attach_ready_performance_curve_hint(
         self,
@@ -996,14 +962,19 @@ class TurnCoordinator:
         motion_payload: dict[str, Any],
         turn_id: str | None,
         message_id: str | None,
+        request_id: str | None,
+        assistant_text: str,
     ) -> dict[str, Any]:
+        normalized_request_id = str(request_id or "").strip()
+        if not normalized_request_id:
+            return motion_payload
         runtime_state = getattr(self, "runtime_state", None)
         runtime = getattr(runtime_state, "performance_curve_runtime", None)
         get_ready = getattr(runtime, "get_ready", None)
         if not callable(get_ready):
             return motion_payload
 
-        hint = get_ready(turn_id=turn_id, message_id=message_id)
+        hint = get_ready(turn_id=turn_id, request_id=normalized_request_id)
         if not isinstance(hint, dict):
             return motion_payload
 
@@ -1016,14 +987,10 @@ class TurnCoordinator:
             message_id=message_id,
             source_route="performance_curve_provider",
             phase="performance_curve",
-            assistant_text=str(
-                (getattr(self, "_current_performance_curve_context", None) or {}).get(
-                    "assistant_text",
-                    "",
-                )
-            ),
+            assistant_text=assistant_text,
             payload_kind="ag99.performance_curve_hint.v1",
             raw={
+                "performance_curve_request_id": normalized_request_id,
                 "curve_hint": attached_hint,
                 "motion_intent_tags": [
                     str(item).strip()
@@ -1032,9 +999,6 @@ class TurnCoordinator:
                 ],
             },
         )
-        clear = getattr(runtime, "clear", None)
-        if callable(clear):
-            clear(turn_id=turn_id, message_id=message_id)
         return next_payload
 
     def _allows_official_inline_anim_compat(self) -> bool:

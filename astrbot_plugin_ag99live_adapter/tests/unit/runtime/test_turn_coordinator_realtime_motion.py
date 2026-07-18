@@ -775,7 +775,6 @@ def test_emit_message_chain_uses_record_text_as_canonical_segment_text(
 
     sent_payloads: list[dict[str, object]] = []
     recorded_events: list[dict[str, object]] = []
-    curve_contexts: list[dict[str, object]] = []
 
     async def fake_send_json(payload):
         sent_payloads.append(payload)
@@ -783,9 +782,6 @@ def test_emit_message_chain_uses_record_text_as_canonical_segment_text(
 
     coordinator._send_json = fake_send_json
     coordinator._record_motion_lab_raw_event = lambda **kwargs: recorded_events.append(kwargs)
-    coordinator._start_performance_curve_request = lambda **_kwargs: curve_contexts.append(
-        dict(coordinator._current_performance_curve_context)
-    )
 
     asyncio.run(
         coordinator.emit_message_chain(
@@ -810,7 +806,6 @@ def test_emit_message_chain_uses_record_text_as_canonical_segment_text(
     assert sent_payloads[0]["message_id"] == "visible-audio-1"
     assert recorded_events[0]["assistant_text"] == "字幕文本"
     assert recorded_events[0]["raw"]["reply_text"] == "字幕文本"
-    assert curve_contexts == []
 
 
 def test_emit_message_chain_rejects_conflicting_canonical_text_sources(
@@ -910,7 +905,7 @@ def test_emit_message_chain_dedupes_motion_client_object_for_segmented_output(
 
 
 @pytest.mark.parametrize("first_part", ["motion", "text"])
-def test_performance_curve_request_waits_for_text_and_motion_in_any_order(
+def test_emit_message_chain_binds_prestarted_performance_curve_request(
     install_fake_astrbot,
     monkeypatch,
     first_part: str,
@@ -922,24 +917,16 @@ def test_performance_curve_request_waits_for_text_and_motion_in_any_order(
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
-    coordinator.runtime_state.enable_performance_curve = True
     coordinator.session_state = type(
         "SessionStateStub",
         (),
         {"current_turn_id": "turn-curve-order"},
     )()
     coordinator._mark_turn_timing = lambda *_args, **_kwargs: None
-    coordinator._motion_lab_chat_context = lambda: []
-    contexts: list[dict[str, object]] = []
-
-    def start_curve(**_kwargs) -> bool:
-        contexts.append(dict(coordinator._current_performance_curve_context))
-        return True
-
-    coordinator._start_performance_curve_request = start_curve
     motion_extras = {
         "visible_message_id": "visible-curve::core_reply::0001",
         "message_kind": "core_reply",
+        "performance_curve_request_id": "curve-request-1",
         "client_objects": [
             {
                 "type": "ag99live.motion_payload",
@@ -953,12 +940,12 @@ def test_performance_curve_request_waits_for_text_and_motion_in_any_order(
         "visible_message_id": "visible-curve::core_reply::0002",
         "message_kind": "core_reply",
         "semantic_text": "canonical reply",
+        "performance_curve_request_id": "curve-request-1",
     }
 
     async def emit_parts() -> None:
         if first_part == "motion":
             await coordinator.emit_message_chain(message_chain=[], platform_extras=motion_extras)
-            assert contexts == []
             await coordinator.emit_message_chain(
                 message_chain=[Plain("canonical reply")],
                 platform_extras=text_extras,
@@ -968,18 +955,171 @@ def test_performance_curve_request_waits_for_text_and_motion_in_any_order(
                 message_chain=[Plain("canonical reply")],
                 platform_extras=text_extras,
             )
-            assert contexts == []
             await coordinator.emit_message_chain(message_chain=[], platform_extras=motion_extras)
 
     asyncio.run(emit_parts())
 
-    assert len(contexts) == 1
-    assert contexts[0]["assistant_text"] == "canonical reply"
     segment = coordinator._get_pending_output_segment(
         "turn-curve-order",
         "visible-curve::core_reply",
     )
-    assert segment.curve_request_state == "started"
+    assert segment.performance_curve_request_id == "curve-request-1"
+
+
+def test_start_performance_curve_request_builds_independent_request(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_turn_coordinator_module()
+    TurnCoordinator = module.TurnCoordinator
+
+    requests = []
+
+    class PerformanceCurveRuntimeStub:
+        def start(self, request) -> bool:
+            requests.append(request)
+            return True
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
+    coordinator.runtime_state.enable_performance_curve = True
+    coordinator.runtime_state.performance_curve_runtime = PerformanceCurveRuntimeStub()
+    coordinator._motion_lab_chat_context = lambda: [
+        {"role": "user", "content": "你好"}
+    ]
+
+    request_id = coordinator.start_performance_curve_request(
+        turn_id="turn-curve-start",
+        assistant_text="你好呀",
+        motion_payload=_build_valid_motion_intent(),
+    )
+
+    assert request_id
+    assert len(requests) == 1
+    assert requests[0].turn_id == "turn-curve-start"
+    assert requests[0].request_id == request_id
+    assert requests[0].assistant_text == "你好呀"
+    assert requests[0].motion_intent_tags == ["test", "motion"]
+
+
+def test_output_segment_skips_pending_performance_curve_without_blocking_motion(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_turn_coordinator_module()
+    TurnCoordinator = module.TurnCoordinator
+
+    runtime_calls: list[tuple[str, str, str]] = []
+
+    class PerformanceCurveRuntimeStub:
+        def get_ready(self, *, turn_id, request_id):
+            runtime_calls.append(("get_ready", turn_id, request_id))
+            return None
+
+        def discard_if_not_ready(self, *, turn_id, request_id) -> bool:
+            runtime_calls.append(("discard", turn_id, request_id))
+            return True
+
+        def clear(self, *, turn_id, request_id) -> None:
+            runtime_calls.append(("clear", turn_id, request_id))
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
+    coordinator.runtime_state.performance_curve_runtime = PerformanceCurveRuntimeStub()
+    recorded_events: list[dict[str, object]] = []
+    coordinator._record_motion_lab_raw_event = lambda **kwargs: recorded_events.append(
+        kwargs
+    )
+    coordinator._record_prompt_motion_snapshot = lambda **_kwargs: None
+
+    segment = module.PendingOutputSegment(
+        turn_id="turn-curve-egress",
+        message_id="message-curve-egress",
+        text="你好呀",
+        semantic_text="你好呀",
+    )
+    segment.merge_motion(
+        payload=_build_valid_motion_intent(),
+        mode="preview",
+        source="persona_effect",
+    )
+    segment.bind_performance_curve_request("curve-request-pending")
+
+    motion_slot = coordinator._build_output_segment_motion_slot(segment)
+
+    assert motion_slot["state"] == "present"
+    assert "performance_curve_hint" not in motion_slot["payload"]
+    assert runtime_calls == [
+        ("get_ready", "turn-curve-egress", "curve-request-pending"),
+        ("discard", "turn-curve-egress", "curve-request-pending"),
+    ]
+    assert recorded_events[0]["event_type"] == "performance_curve.skipped"
+    assert recorded_events[0]["raw"] == {
+        "reason": "not_ready_before_segment_egress",
+        "performance_curve_request_id": "curve-request-pending",
+    }
+
+
+def test_output_segment_attaches_ready_performance_curve(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_turn_coordinator_module()
+    TurnCoordinator = module.TurnCoordinator
+    hint = {
+        "schema_version": "ag99.performance_curve_hint.v1",
+        "curve_family": "quick_in_hold_soft_out",
+        "entry": "quick",
+        "hold": "steady",
+        "exit": "soft",
+        "emphasis": "early",
+        "energy": "medium",
+    }
+    cleared: list[tuple[str, str]] = []
+
+    class PerformanceCurveRuntimeStub:
+        def get_ready(self, *, turn_id, request_id):
+            assert turn_id == "turn-curve-ready"
+            assert request_id == "curve-request-ready"
+            return hint
+
+        def clear(self, *, turn_id, request_id) -> None:
+            cleared.append((turn_id, request_id))
+
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
+    coordinator.runtime_state.performance_curve_runtime = PerformanceCurveRuntimeStub()
+    recorded_events: list[dict[str, object]] = []
+    coordinator._record_motion_lab_raw_event = lambda **kwargs: recorded_events.append(
+        kwargs
+    )
+    coordinator._record_prompt_motion_snapshot = lambda **_kwargs: None
+
+    segment = module.PendingOutputSegment(
+        turn_id="turn-curve-ready",
+        message_id="message-curve-ready",
+        text="你好呀",
+        semantic_text="你好呀",
+    )
+    segment.merge_motion(
+        payload=_build_valid_motion_intent(),
+        mode="preview",
+        source="persona_effect",
+    )
+    segment.bind_performance_curve_request("curve-request-ready")
+
+    motion_slot = coordinator._build_output_segment_motion_slot(segment)
+
+    assert motion_slot["payload"]["performance_curve_hint"] == hint
+    assert cleared == [("turn-curve-ready", "curve-request-ready")]
+    assert recorded_events[0]["event_type"] == "performance_curve.attached"
+    assert recorded_events[0]["message_id"] == "message-curve-ready"
+    assert recorded_events[0]["raw"]["performance_curve_request_id"] == (
+        "curve-request-ready"
+    )
 
 
 def test_emit_message_chain_treats_inline_payload_as_visible_text_only_when_persona_effect_available(

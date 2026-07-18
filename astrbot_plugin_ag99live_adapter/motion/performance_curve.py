@@ -34,7 +34,7 @@ _MAX_RETAINED_RESULTS = 64
 @dataclass(slots=True)
 class PerformanceCurveInput:
     turn_id: str
-    message_id: str
+    request_id: str
     assistant_text: str
     assistant_reply_keywords: list[str]
     motion_intent_tags: list[str]
@@ -55,7 +55,7 @@ class PerformanceCurveRuntime:
     def start(self, request: PerformanceCurveInput) -> bool:
         if not self._is_enabled():
             return False
-        key = _build_curve_key(request.turn_id, request.message_id)
+        key = _build_curve_key(request.turn_id, request.request_id)
         if not key or not request.assistant_text.strip():
             return False
         if key in self._requested_keys:
@@ -78,8 +78,8 @@ class PerformanceCurveRuntime:
         self._prune_retained_results()
         return True
 
-    def get_ready(self, *, turn_id: str | None, message_id: str | None) -> dict[str, Any] | None:
-        key = _build_curve_key(turn_id, message_id)
+    def get_ready(self, *, turn_id: str | None, request_id: str | None) -> dict[str, Any] | None:
+        key = _build_curve_key(turn_id, request_id)
         if not key:
             return None
         task = self._tasks.get(key)
@@ -90,8 +90,8 @@ class PerformanceCurveRuntime:
             return None
         return dict(result)
 
-    def clear(self, *, turn_id: str | None, message_id: str | None) -> None:
-        key = _build_curve_key(turn_id, message_id)
+    def clear(self, *, turn_id: str | None, request_id: str | None) -> None:
+        key = _build_curve_key(turn_id, request_id)
         if not key:
             return
         task = self._tasks.get(key)
@@ -101,14 +101,13 @@ class PerformanceCurveRuntime:
         self._results.pop(key, None)
         self._requests.pop(key, None)
 
-    def fail_if_not_ready(
+    def discard_if_not_ready(
         self,
         *,
         turn_id: str | None,
-        message_id: str | None,
-        reason: str,
+        request_id: str | None,
     ) -> bool:
-        key = _build_curve_key(turn_id, message_id)
+        key = _build_curve_key(turn_id, request_id)
         if not key:
             return False
         task = self._tasks.get(key)
@@ -119,8 +118,7 @@ class PerformanceCurveRuntime:
             return False
         if task is not None and not task.done():
             task.cancel()
-        self._record_failed(request, reason, latency_ms=0)
-        self.clear(turn_id=turn_id, message_id=message_id)
+        self.clear(turn_id=turn_id, request_id=request_id)
         return True
 
     def cancel_turn(self, turn_id: str | None) -> None:
@@ -149,7 +147,7 @@ class PerformanceCurveRuntime:
 
         prompt = build_performance_curve_prompt(
             turn_id=request.turn_id,
-            message_id=request.message_id,
+            message_id=request.request_id,
             assistant_text=request.assistant_text,
             assistant_reply_keywords=request.assistant_reply_keywords,
             motion_intent_tags=request.motion_intent_tags,
@@ -217,7 +215,7 @@ class PerformanceCurveRuntime:
             getattr(self.runtime_state, "motion_lab_recorder", None),
             event_type=event_type,
             turn_id=request.turn_id,
-            message_id=request.message_id,
+            message_id=request.request_id,
             source_route="performance_curve_provider",
             phase="performance_curve",
             assistant_text=request.assistant_text,
@@ -369,12 +367,12 @@ def _normalize_string_list(value: Any, *, limit: int) -> list[str]:
     return result
 
 
-def _build_curve_key(turn_id: str | None, message_id: str | None) -> str:
+def _build_curve_key(turn_id: str | None, request_id: str | None) -> str:
     normalized_turn_id = str(turn_id or "").strip()
-    normalized_message_id = str(message_id or "").strip() or "__default__"
-    if not normalized_turn_id:
+    normalized_request_id = str(request_id or "").strip()
+    if not normalized_turn_id or not normalized_request_id:
         return ""
-    return f"{normalized_turn_id}:{normalized_message_id}"
+    return f"{normalized_turn_id}:{normalized_request_id}"
 
 
 def _get_provider_id(provider: Any) -> str:

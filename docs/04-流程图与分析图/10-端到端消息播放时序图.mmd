@@ -4,6 +4,7 @@ sequenceDiagram
     participant Adapter as AG99 Adapter<br/>TurnCoordinator
     participant Persona as Persona Runtime
     participant LLM as 主模型
+    participant Curve as 可选 Performance Curve Provider
     participant TTS as TTS
     participant Buffer as PendingOutputSegment
     participant Inbound as Inbound Dispatcher
@@ -25,11 +26,19 @@ sequenceDiagram
     Persona->>LLM: 生成可见回复与动作决策
     LLM-->>Persona: spoken_reply + effect_calls
     Persona->>Adapter: result contributor 生成 motion_intent.v4
+    Adapter->>Curve: 后台启动曲线请求(request_id)
     Persona->>TTS: spoken_reply
+    Note over Curve,TTS: 两个请求并行；TTS 与基础 motion 不等待曲线
     TTS-->>Adapter: WAV Record + Record.text
     Note over Adapter,Buffer: AstrBot 可以将 Plain、Record、图片和 client object 物理拆分；<br/>拆分仅存在于后端内部。Plain / semantic text / Record.text 必须归一为同一 canonical text。
     Adapter->>Buffer: 按 turn_id + message_id 合并物理组件
     Buffer->>Buffer: 校验文本冲突、多音频、motion 与 curve
+    alt 曲线在段出站前 ready
+        Curve-->>Buffer: 附加 performance_curve_hint
+    else 曲线仍 pending 或已失败
+        Buffer-->>Curve: 取消/清理请求
+        Note over Buffer,Curve: 记录 skipped，原 motion 直接出站；不生成默认曲线
+    end
 
     loop 每个完整逻辑段
         Buffer->>Inbound: output.segment.v3<br/>唯一 text / audio URL / motion / images 完整 slots

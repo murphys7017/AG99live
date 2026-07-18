@@ -95,7 +95,7 @@ def test_performance_curve_runtime_resolves_provider_hint(
         started = runtime.start(
             PerformanceCurveInput(
                 turn_id="turn-1",
-                message_id="message-1",
+                request_id="request-1",
                 assistant_text="今天我们轻快一点。",
                 assistant_reply_keywords=["轻快"],
                 motion_intent_tags=["happy"],
@@ -106,9 +106,9 @@ def test_performance_curve_runtime_resolves_provider_hint(
         assert started is True
         for _ in range(10):
             await asyncio.sleep(0)
-            if runtime.get_ready(turn_id="turn-1", message_id="message-1") is not None:
+            if runtime.get_ready(turn_id="turn-1", request_id="request-1") is not None:
                 break
-        hint = runtime.get_ready(turn_id="turn-1", message_id="message-1")
+        hint = runtime.get_ready(turn_id="turn-1", request_id="request-1")
         assert hint is not None
         return hint
 
@@ -118,7 +118,7 @@ def test_performance_curve_runtime_resolves_provider_hint(
     assert hint["entry"] == "quick"
 
 
-def test_performance_curve_runtime_fails_not_ready_request(
+def test_performance_curve_runtime_discards_not_ready_request(
     install_fake_astrbot,
 ) -> None:
     install_fake_astrbot()
@@ -143,7 +143,7 @@ def test_performance_curve_runtime_fails_not_ready_request(
         runtime.start(
             PerformanceCurveInput(
                 turn_id="turn-1",
-                message_id="message-1",
+                request_id="request-1",
                 assistant_text="今天我们轻快一点。",
                 assistant_reply_keywords=["轻快"],
                 motion_intent_tags=["happy"],
@@ -152,16 +152,18 @@ def test_performance_curve_runtime_fails_not_ready_request(
             )
         )
         await asyncio.sleep(0)
-        failed = runtime.fail_if_not_ready(
+        discarded = runtime.discard_if_not_ready(
             turn_id="turn-1",
-            message_id="message-1",
-            reason="not_ready_before_audio_egress",
+            request_id="request-1",
         )
-        return failed, runtime.get_ready(turn_id="turn-1", message_id="message-1")
+        return discarded, runtime.get_ready(
+            turn_id="turn-1",
+            request_id="request-1",
+        )
 
-    failed, hint = asyncio.run(run_case())
+    discarded, hint = asyncio.run(run_case())
 
-    assert failed is True
+    assert discarded is True
     assert hint is None
 
 
@@ -190,7 +192,7 @@ def test_performance_curve_runtime_starts_logical_message_only_once(
         )
         request = PerformanceCurveInput(
             turn_id="turn-1",
-            message_id="message-1",
+            request_id="request-1",
             assistant_text="同一句回复。",
             assistant_reply_keywords=["同一句回复"],
             motion_intent_tags=[],

@@ -1428,6 +1428,50 @@ def test_result_contributor_returns_persona_effect_motion_as_client_object(
     )
 
 
+def test_result_contributor_starts_optional_performance_curve_before_tts(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_interaction_motion_module()
+
+    contributor = module.AG99liveMotionResultContributor()
+    event, _scheduled_calls = _build_event(raw_turn_id="front-turn")
+    requests: list[dict[str, object]] = []
+
+    def start_performance_curve_request(**kwargs) -> str:
+        requests.append(kwargs)
+        return "curve-request-1"
+
+    event.adapter.turn_coordinator.start_performance_curve_request = (
+        start_performance_curve_request
+    )
+    view = _build_view(
+        phase="immediate",
+        route_mode="self_reply",
+        final_result="你好呀",
+        immediate_reply="你好呀",
+        effect_calls=[
+            _motion_effect_call(
+                {
+                    "intent_tags": ["happy"],
+                    "axis_levels": {"head_yaw": 4},
+                }
+            )
+        ],
+    )
+
+    contribution = asyncio.run(contributor.collect(event, None, view))
+
+    assert contribution.platform_extras == {
+        "performance_curve_request_id": "curve-request-1"
+    }
+    assert len(requests) == 1
+    assert requests[0]["turn_id"] == "front-turn"
+    assert requests[0]["assistant_text"] == "你好呀"
+    assert requests[0]["motion_payload"]["axis_levels"] == {"head_yaw": 4}
+
+
 def test_result_contributor_rejects_non_integer_axis_levels_from_persona_effect(
     install_fake_astrbot,
     monkeypatch,
