@@ -45,6 +45,7 @@ const PET_OVERLAY_MIN_HEIGHT = 112;
 const PET_OVERLAY_MAX_HEIGHT = 168;
 const PET_OVERLAY_GAP = 16;
 const OVERLAY_DRAG_DETACH_THRESHOLD_PX = 12;
+const APP_ICON_PATH = path.resolve(__dirname, "../../resources/app-icon.png");
 const WIN32_TRANSPARENT_WINDOW_COMPAT_OPTIONS: BrowserWindowConstructorOptions =
   process.platform === "win32"
     ? {
@@ -430,6 +431,7 @@ export class WindowManager {
     const petWindow = new BrowserWindow({
       width: PET_WINDOW_WIDTH,
       height: PET_WINDOW_HEIGHT,
+      icon: APP_ICON_PATH,
       title: "",
       frame: false,
       transparent: true,
@@ -517,6 +519,7 @@ export class WindowManager {
     const overlayWindow = new BrowserWindow({
       width: PET_OVERLAY_WIDTH,
       height: this.overlayWindowHeight,
+      icon: APP_ICON_PATH,
       title: "",
       frame: false,
       transparent: true,
@@ -612,6 +615,7 @@ export class WindowManager {
     const utilityWindow = new BrowserWindow({
       width,
       height,
+      icon: APP_ICON_PATH,
       show: false,
       title,
       autoHideMenuBar: true,
