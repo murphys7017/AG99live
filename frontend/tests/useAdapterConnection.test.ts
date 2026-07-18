@@ -1233,7 +1233,7 @@ async function testSendTextDoesNotInterruptIdleCurrentTurn(): Promise<void> {
   }
 }
 
-async function testSendTextSettlesPlayingAudioBeforeNewInput(): Promise<void> {
+async function testSendTextPreservesPlayingAudioBeforeNewInput(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
     const { adapter, socket, sessionStore } = harness;
@@ -1259,23 +1259,45 @@ async function testSendTextSettlesPlayingAudioBeforeNewInput(): Promise<void> {
     socket.sent.length = 0;
     const sent = await adapter.sendText("new input while speaking");
     assert.equal(sent, true);
+    const newTurnId = String(parseSentJsonMessages(socket)[0]?.turn_id ?? "");
+    sendTurnStarted(socket, newTurnId);
 
     const afterSegment = sessionStore
       .getSession("turn-before-new-input")
       ?.segments.get("msg-before-new-input");
-    assert.equal(afterSegment?.audio.terminal, "failed");
-    assert.equal(afterSegment?.audio.reason, "audio_playback_replaced_by_new_input");
-    assert.equal(adapter.state.isPlayingAudio, false);
+    assert.equal(afterSegment?.audio.terminal, "idle");
+    assert.equal(adapter.state.isPlayingAudio, true);
+    assert.equal(adapter.state.currentTurnId, newTurnId);
     assert.deepEqual(
       parseSentJsonMessages(socket).map((item) => item.type),
-      ["control.interrupt", "input.text"],
+      ["input.text"],
     );
   } finally {
     harness.scope.stop();
   }
 }
 
-async function testConcurrentSendTextSerializesDesktopCaptureAndTurnIdentity(): Promise<void> {
+async function testOlderOutputDoesNotReplaceCurrentTurnIdentity(): Promise<void> {
+  const harness = createConnectedAdapter();
+  try {
+    const { adapter, socket } = harness;
+    sendTurnStarted(socket, "turn-older-output");
+    sendTurnStarted(socket, "turn-current-input");
+
+    sendOutputText(socket, {
+      turnId: "turn-older-output",
+      messageId: "msg-older-output",
+      text: "older output",
+    });
+    await flushMicrotasks();
+
+    assert.equal(adapter.state.currentTurnId, "turn-current-input");
+  } finally {
+    harness.scope.stop();
+  }
+}
+
+async function testConcurrentSendTextDoesNotCreateLocalInputQueue(): Promise<void> {
   const harness = createConnectedAdapter();
   const captureResolvers: Array<() => void> = [];
   let captureCount = 0;
@@ -1298,26 +1320,25 @@ async function testConcurrentSendTextSerializesDesktopCaptureAndTurnIdentity(): 
     const secondSend = adapter.sendText("second concurrent input");
     await flushMicrotasks();
 
-    assert.equal(captureCount, 1);
+    assert.equal(captureCount, 2);
     assert.equal(parseSentJsonMessages(socket).length, 0);
 
-    captureResolvers.shift()?.();
+    captureResolvers[1]?.();
     await flushMicrotasks();
-    assert.equal(captureCount, 2);
     assert.deepEqual(
       parseSentJsonMessages(socket).map((message) => message.payload),
-      [{ text: "first concurrent input", images: [] }],
+      [{ text: "second concurrent input", images: [] }],
     );
 
-    captureResolvers.shift()?.();
+    captureResolvers[0]?.();
     assert.deepEqual(await Promise.all([firstSend, secondSend]), [true, true]);
 
     const sentMessages = parseSentJsonMessages(socket);
     assert.deepEqual(
       sentMessages.map((message) => message.payload),
       [
-        { text: "first concurrent input", images: [] },
         { text: "second concurrent input", images: [] },
+        { text: "first concurrent input", images: [] },
       ],
     );
     assert.notEqual(sentMessages[0]?.turn_id, sentMessages[1]?.turn_id);
@@ -1330,7 +1351,7 @@ async function testConcurrentSendTextSerializesDesktopCaptureAndTurnIdentity(): 
   }
 }
 
-async function testSendTextSettlesPreparingAudioBeforeNewInput(): Promise<void> {
+async function testSendTextPreservesPreparingAudioBeforeNewInput(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
     const { adapter, socket, sessionStore } = harness;
@@ -1364,22 +1385,25 @@ async function testSendTextSettlesPreparingAudioBeforeNewInput(): Promise<void> 
 
     socket.sent.length = 0;
     assert.equal(await adapter.sendText("new input while audio preparing"), true);
+    const newTurnId = String(parseSentJsonMessages(socket)[0]?.turn_id ?? "");
+    sendTurnStarted(socket, newTurnId);
 
     const afterSegment = sessionStore
       .getSession("turn-preparing-before-new-input")
       ?.segments.get("msg-preparing-before-new-input");
-    assert.equal(afterSegment?.audio.terminal, "failed");
-    assert.equal(afterSegment?.audio.reason, "audio_playback_replaced_by_new_input");
+    assert.equal(afterSegment?.audio.terminal, "idle");
+    assert.equal(adapter.state.isPlayingAudio, true);
+    assert.equal(adapter.state.currentTurnId, newTurnId);
     assert.deepEqual(
       parseSentJsonMessages(socket).map((item) => item.type),
-      ["control.interrupt", "input.text"],
+      ["input.text"],
     );
   } finally {
     harness.scope.stop();
   }
 }
 
-async function testSendTextSettlesPendingAudioBeforeNewInput(): Promise<void> {
+async function testSendTextPreservesPendingAudioBeforeNewInput(): Promise<void> {
   const harness = createConnectedAdapter();
   try {
     const { adapter, socket, sessionStore } = harness;
@@ -1396,19 +1420,21 @@ async function testSendTextSettlesPendingAudioBeforeNewInput(): Promise<void> {
 
     socket.sent.length = 0;
     assert.equal(await adapter.sendText("new input while audio pending"), true);
+    const newTurnId = String(parseSentJsonMessages(socket)[0]?.turn_id ?? "");
+    sendTurnStarted(socket, newTurnId);
 
     const segment = sessionStore
       .getSession("turn-pending-before-new-input")
       ?.segments.get("msg-pending-before-new-input");
-    assert.equal(segment?.audio.terminal, "failed");
-    assert.equal(segment?.audio.reason, "audio_playback_replaced_by_new_input");
+    assert.equal(segment?.audio.terminal, "idle");
     assert.equal(
       adapter.state.pendingAudios.has(pendingKey("turn-pending-before-new-input", "msg-pending-before-new-input")),
-      false,
+      true,
     );
+    assert.equal(adapter.state.currentTurnId, newTurnId);
     assert.deepEqual(
       parseSentJsonMessages(socket).map((item) => item.type),
-      ["control.interrupt", "input.text"],
+      ["input.text"],
     );
   } finally {
     harness.scope.stop();
@@ -1931,11 +1957,12 @@ async function run(): Promise<void> {
   testStaleInterruptReportsProtocolViolationWithoutClearingCurrentPlayback();
   testScopeDisposeDisconnectsAdapterRuntime();
   await testSendTextUsesOutboundProtocolEnvelope();
-  await testConcurrentSendTextSerializesDesktopCaptureAndTurnIdentity();
+  await testConcurrentSendTextDoesNotCreateLocalInputQueue();
   await testSendTextDoesNotInterruptIdleCurrentTurn();
-  await testSendTextSettlesPlayingAudioBeforeNewInput();
-  await testSendTextSettlesPreparingAudioBeforeNewInput();
-  await testSendTextSettlesPendingAudioBeforeNewInput();
+  await testSendTextPreservesPlayingAudioBeforeNewInput();
+  await testOlderOutputDoesNotReplaceCurrentTurnIdentity();
+  await testSendTextPreservesPreparingAudioBeforeNewInput();
+  await testSendTextPreservesPendingAudioBeforeNewInput();
   await testClearPlaybackGroupOnlySettlesTargetTurnAudio();
   await testInboundInterruptOnlySettlesTargetTurnAudio();
   testDisconnectSettlesPendingAudioBeforeClearingQueue();

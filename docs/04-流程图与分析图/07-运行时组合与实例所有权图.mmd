@@ -74,7 +74,7 @@ flowchart TB
 
     subgraph LIFETIME[销毁规则]
         D1[App scope dispose<br/>断开 transport / 清理 watchers]:::owner
-        D2[Turn interrupt/replacement<br/>停止对应 segment timelines]:::owner
+        D2[用户显式中断 Turn<br/>停止对应 segment timelines]:::owner
         D3[Audio terminal<br/>释放 AudioElement 与 WebAudio graph]:::owner
         D4[Model replacement<br/>取消旧 load generation 后 dispose]:::owner
     end

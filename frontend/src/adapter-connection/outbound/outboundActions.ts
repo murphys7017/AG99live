@@ -83,12 +83,13 @@ interface DesktopCaptureImagePayload {
  * 发送文本输入到 AstrBot 适配器，开启新一轮对话。
  *
  * 行为：
- *   1. 若当前还有可被打断的播放轮次（Timeline required sink 或 pending material），
- *      先发 `control.interrupt` 并就地把当前音频段标 failed，避免新旧轮次混播。
- *   2. 为新一轮分配新的 turn_id（与 messageId 同体），重置音频终态。
- *   3. 若用户启用了“发送时附带桌面截图”，调用 Electron preload 抓一张 JPEG，
+ *   1. 为新一轮分配新的 turn_id（与 messageId 同体）。
+ *   2. 若用户启用了“发送时附带桌面截图”，调用 Electron preload 抓一张 JPEG，
  *      失败时静默回退到纯文本（截图能力不可用不应阻断发消息）。
- *   4. 发送 `input.text` 信封，同步更新 statusMessage / 历史记录。
+ *   3. 发送 `input.text` 信封，同步更新 statusMessage / 历史记录。
+ *
+ * 新输入与用户主动中断是两个独立操作。旧轮的播放和终态继续由 Timeline 管理，
+ * 本函数不得发送 `control.interrupt` 或修改旧播放段。
  *
  * 返回 true 表示信封已成功投递到底层 WebSocket（不代表后端已确认）。
  */
@@ -104,20 +105,6 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
   const desktopCapture = ctx.state.desktopScreenshotOnSendEnabled
     ? await captureRealtimeDesktopScreenshot()
     : null;
-  const interruptedTurnId = getInterruptibleTurnId(ctx);
-  if (interruptedTurnId) {
-    const interruptSent = ctx.outboundClient.send("control.interrupt", {}, interruptedTurnId);
-    ctx.stopAudioAndSettleTurn(
-      interruptedTurnId,
-      "audio_playback_replaced_by_new_input",
-    );
-    if (!interruptSent) {
-      ctx.state.lastError = "旧轮次已在本地停止，但中断请求未能发送，新文本未发送。";
-      ctx.state.statusMessage = ctx.state.lastError;
-      ctx.pushHistory("error", ctx.state.lastError);
-      return false;
-    }
-  }
   const turnId = ctx.createMessageId();
   const outboundText = buildDesktopAwareText(message, desktopCapture);
   const sent = ctx.outboundClient.send("input.text", {

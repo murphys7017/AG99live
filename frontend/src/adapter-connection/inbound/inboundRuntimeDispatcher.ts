@@ -103,8 +103,6 @@ function applyTurnStarted(
   deps.sessionStore?.setActiveSession(s.currentTurnId);
   deps.sessionStore?.markTurnStarted(s.currentTurnId);
   deps.resetAudioPlaybackTerminal();
-  s.pendingAssistantTexts.clear();
-  s.pendingAudios.clear();
   s.turnFinishedTurnId = null;
   s.turnFinishedSuccess = true;
   s.turnFinishedReason = "";

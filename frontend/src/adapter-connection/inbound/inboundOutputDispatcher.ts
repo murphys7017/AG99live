@@ -11,7 +11,6 @@ import type {
 } from "../../playback-timeline/playbackReleaseQueue.js";
 
 export interface InboundOutputDispatchState {
-  currentTurnId: string | null;
   statusMessage: string;
   lastError: string;
   lastTranscription: string;
@@ -108,7 +107,6 @@ function applyOutputSegment(
 
   // SessionStore commits the complete segment before any release queue is changed.
   deps.sessionStore.commitOutputSegment(event.turnId, event.messageId, material);
-  state.currentTurnId = event.turnId;
 
   if (payload.text.state === "present") {
     deps.queuePendingAssistantTextForPlayback(

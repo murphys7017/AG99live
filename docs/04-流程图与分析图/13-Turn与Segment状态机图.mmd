@@ -27,9 +27,9 @@ flowchart TB
         READY -->|协议/播放不变量失败| FAIL
         PLAY -->|required sink / ACK 失败| FAIL
         SETTLE -->|playback_finished 发送失败| FAIL
-        COL -->|用户中断 / turn replacement| INTERRUPT
-        READY -->|用户中断 / turn replacement| INTERRUPT
-        PLAY -->|用户中断 / turn replacement| INTERRUPT
+        COL -->|用户显式中断| INTERRUPT
+        READY -->|用户显式中断| INTERRUPT
+        PLAY -->|用户显式中断| INTERRUPT
     end
 
     subgraph SEG[每个 output.segment.v3 的槽位事实]
