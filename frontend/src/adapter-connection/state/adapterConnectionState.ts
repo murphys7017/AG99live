@@ -11,10 +11,6 @@ import type {
 import type { SystemServerInfoPayload } from "../../types/protocol.js";
 import type { MicrophoneDeviceInfo } from "../runtime/microphoneDevices.js";
 import type { AudioPlaybackTerminalState } from "../runtime/audioPlaybackStateBridge.js";
-import type {
-  PendingAssistantTextItem,
-  PendingAudioItem,
-} from "../../playback-timeline/playbackReleaseQueue.js";
 import {
   loadDesktopScreenshotOnSendEnabled,
   loadStoredAdapterAddress,
@@ -62,8 +58,6 @@ export function createAdapterConnectionState() {
     activeBackendHistoryUid: "",
     backendHistoryLoading: false,
     backendHistoryStatusMessage: "等待历史窗口请求后端历史。",
-    pendingAssistantTexts: new Map<string, PendingAssistantTextItem>(),
-    pendingAudios: new Map<string, PendingAudioItem>(),
     audioPlaybackStartedTurnId: null as string | null,
     audioPlaybackStartedMessageId: null as string | null,
     audioPlaybackStartedAtMs: 0,

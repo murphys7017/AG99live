@@ -5,18 +5,12 @@ import type {
 import type { NormalizedMotionPayload } from "../../playback-integrations/motionPayload.js";
 import type { OutputSegmentMaterial } from "../../turn-playback/session.js";
 import type { InboundAdapterEvent } from "./inboundEvents.js";
-import type {
-  PendingAssistantTextItem,
-  PendingAudioItem,
-} from "../../playback-timeline/playbackReleaseQueue.js";
 
 export interface InboundOutputDispatchState {
   statusMessage: string;
   lastError: string;
   lastTranscription: string;
   lastImageCount: number;
-  pendingAssistantTexts: Map<string, PendingAssistantTextItem>;
-  pendingAudios: Map<string, PendingAudioItem>;
 }
 
 export interface InboundOutputDispatchDeps {
@@ -30,18 +24,6 @@ export interface InboundOutputDispatchDeps {
   } | undefined;
   pushHistory: (role: string, text: string) => void;
   rewriteHttpUrl: (rawUrl: string | null) => string;
-  queuePendingAssistantTextForPlayback: (
-    map: Map<string, PendingAssistantTextItem>,
-    text: string,
-    turnId: string | null,
-    messageId: string,
-  ) => void;
-  queuePendingAudioForPlayback: (
-    map: Map<string, PendingAudioItem>,
-    url: string,
-    turnId: string | null,
-    messageId: string,
-  ) => void;
   normalizeMotionPayload: (
     payload: unknown,
   ) => { ok: true; payload: NormalizedMotionPayload } | { ok: false };
@@ -105,26 +87,8 @@ function applyOutputSegment(
       : payload.motion,
   };
 
-  // SessionStore commits the complete segment before any release queue is changed.
+  // SessionStore is the sole owner of the complete segment material.
   deps.sessionStore.commitOutputSegment(event.turnId, event.messageId, material);
-
-  if (payload.text.state === "present") {
-    deps.queuePendingAssistantTextForPlayback(
-      state.pendingAssistantTexts,
-      payload.text.content,
-      event.turnId,
-      event.messageId,
-    );
-  }
-
-  if (payload.audio.state === "present" && resolvedAudioUrl) {
-    deps.queuePendingAudioForPlayback(
-      state.pendingAudios,
-      resolvedAudioUrl,
-      event.turnId,
-      event.messageId,
-    );
-  }
 
   state.lastImageCount = payload.images.length;
   const failures = [

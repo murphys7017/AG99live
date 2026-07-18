@@ -54,15 +54,13 @@ flowchart TD
         PARSE[信封与 slot parser]:::protocol
         PRECHECK[URL 重写 + motion 归一化<br/>完成所有前置校验]:::protocol
         VALID{整段是否合法？}:::protocol
-        REJECT[拒绝整段<br/>零 Store / Queue 副作用]:::failure
+        REJECT[拒绝整段<br/>零 Store 副作用]:::failure
         COMMIT[SessionStore.commitOutputSegment<br/>原子写入 text / audio / motion 事实]:::state
-        QUEUE[提交后加入<br/>text / audio release queue]:::state
 
         START --> STARTIN --> CREATE
         SEGMENT --> SEGIN --> PARSE --> PRECHECK --> VALID
         VALID -->|否| REJECT
         VALID -->|是| COMMIT
-        COMMIT --> QUEUE
     end
 
     subgraph O[唯一事实源与播放编排]

@@ -11,8 +11,7 @@ import { createTimelineClock } from "../src/playback-timeline/timelineClock.js";
 import { createAudioMotionTimelineBridge } from "../src/playback-timeline/audioMotionStartBridge.js";
 import { createMotionTimelineRunTracker } from "../src/playback-integrations/modelEngineMotionSink.js";
 import {
-  createQueuedAudioSegmentSink,
-  createQueuedTextSegmentSink,
+  createTextSegmentSink,
 } from "../src/playback-timeline/segmentReleaseSinks.js";
 import type {
   AudioPlaybackClock,
@@ -315,13 +314,13 @@ function testFatalTimelineFailureStopsSinksAndMarksRequiredFailures(): void {
   engine.markSinkStarted("motion");
   engine.start();
 
-  engine.fail("subtitle_release_queue_invariant_failed");
+  engine.fail("subtitle_sink_release_failed");
 
   assert.equal(engine.getPhase(), "failed");
   assert.deepEqual(stopped, [
-    "audio:subtitle_release_queue_invariant_failed",
-    "motion:subtitle_release_queue_invariant_failed",
-    "lip_sync:subtitle_release_queue_invariant_failed",
+    "audio:subtitle_sink_release_failed",
+    "motion:subtitle_sink_release_failed",
+    "lip_sync:subtitle_sink_release_failed",
   ]);
   const snapshot = engine.getSnapshot();
   assert.equal(snapshot?.sinks.find((sink) => sink.id === "audio")?.terminal, "failed");
@@ -502,9 +501,11 @@ function startMotionOnlySegment(
     reason: "test",
     text: {
       release: false,
+      content: null,
     },
     audio: {
       release: false,
+      url: null,
       noAudioConfirmed: true,
     },
     motion: {
@@ -683,9 +684,11 @@ function testPlaybackTimelineRuntimePreparesSegmentJobIdempotently(): void {
     reason: "test",
     text: {
       release: false,
+      content: null,
     },
     audio: {
       release: false,
+      url: null,
       noAudioConfirmed: false,
     },
     motion: {
@@ -814,9 +817,11 @@ function testPlaybackTimelineRuntimeStartsSegmentJobThroughTimelineEntry(): void
       reason: "test",
       text: {
         release: false,
+        content: null,
       },
       audio: {
         release: false,
+        url: null,
         noAudioConfirmed: true,
       },
       motion: {
@@ -896,8 +901,8 @@ function testAudioTimelineOwnsCanonicalTextUntilRealPlaybackStarts(): void {
     messageId: "msg-canonical-text",
     turnId: "turn-canonical-text",
     reason: "test",
-    text: { release: true },
-    audio: { release: true, noAudioConfirmed: false },
+    text: { release: true, content: "subtitle" },
+    audio: { release: true, url: "audio.wav", noAudioConfirmed: false },
     motion: { payload: null, receivedAtMs: null },
   });
 
@@ -973,7 +978,7 @@ function testSubtitleReleaseFailureAtomicallyFailsPlaybackSegment(): void {
         },
     },
     audioSink: {
-        releaseAudioForPlayback: (_messageId, turnId) => {
+        releaseAudioForPlayback: (_audioUrl, _messageId, turnId) => {
           runtime.startAudioTimelineSink(turnId, "msg-subtitle-fatal", {
             start: () => true,
             onInterrupt: (reason) => events.push(`audio_stopped:${reason}`),
@@ -993,8 +998,8 @@ function testSubtitleReleaseFailureAtomicallyFailsPlaybackSegment(): void {
     messageId: "msg-subtitle-fatal",
     turnId: "turn-subtitle-fatal",
     reason: "test",
-    text: { release: true },
-    audio: { release: true, noAudioConfirmed: false },
+    text: { release: true, content: "subtitle" },
+    audio: { release: true, url: "audio.wav", noAudioConfirmed: false },
     motion: { payload: testMotionPayload, receivedAtMs: 10 },
   });
   runtime.markAudioTimelineStarted(
@@ -1009,18 +1014,18 @@ function testSubtitleReleaseFailureAtomicallyFailsPlaybackSegment(): void {
     runtime.getTimelineSnapshotForSegment("turn-subtitle-fatal", "msg-subtitle-fatal"),
     null,
   );
-  assert.equal(events.includes("audio_stopped:subtitle_release_queue_invariant_failed"), true);
-  assert.equal(events.includes("motion_stopped:subtitle_release_queue_invariant_failed"), true);
+  assert.equal(events.includes("audio_stopped:subtitle_sink_release_failed"), true);
+  assert.equal(events.includes("motion_stopped:subtitle_sink_release_failed"), true);
   assert.equal(
-    events.includes("audio_session:failed:subtitle_release_queue_invariant_failed"),
+    events.includes("audio_session:failed:subtitle_sink_release_failed"),
     true,
   );
   assert.equal(
-    events.includes("motion_session:failed:subtitle_release_queue_invariant_failed"),
+    events.includes("motion_session:failed:subtitle_sink_release_failed"),
     true,
   );
   assert.equal(
-    events.includes("session_failed:subtitle_release_queue_invariant_failed:msg-subtitle-fatal"),
+    events.includes("session_failed:subtitle_sink_release_failed:msg-subtitle-fatal"),
     true,
   );
 }
@@ -1060,8 +1065,8 @@ function testAudioFailureBeforeStartFailsDeferredCanonicalText(): void {
     messageId: "msg-audio-failed",
     turnId: "turn-audio-failed",
     reason: "test",
-    text: { release: true },
-    audio: { release: true, noAudioConfirmed: false },
+    text: { release: true, content: "subtitle" },
+    audio: { release: true, url: "audio.wav", noAudioConfirmed: false },
     motion: { payload: null, receivedAtMs: null },
   });
   runtime.markAudioTimelineTerminal(
@@ -1118,8 +1123,8 @@ function testAudioFailureTerminatesAndInterruptsOwnedMotion(): void {
     messageId: "msg-audio-motion-failed",
     turnId: "turn-audio-motion-failed",
     reason: "test",
-    text: { release: false },
-    audio: { release: true, noAudioConfirmed: false },
+    text: { release: false, content: null },
+    audio: { release: true, url: "audio.wav", noAudioConfirmed: false },
     motion: { payload: testMotionPayload, receivedAtMs: 10 },
   });
   runtime.markAudioTimelineTerminal(
@@ -1145,26 +1150,10 @@ function testAudioFailureTerminatesAndInterruptsOwnedMotion(): void {
   );
 }
 
-function testQueuedSegmentReleaseSinksConsumePendingItems(): void {
-  const pendingAssistantTexts = new Map();
-  const pendingAudios = new Map();
-  pendingAssistantTexts.set("6:turn-q:msg-q", {
-    turnId: "turn-q",
-    messageId: "msg-q",
-    receivedAtMs: 1,
-    text: "  hello timeline  ",
-  });
-  pendingAudios.set("6:turn-q:msg-q", {
-    turnId: "turn-q",
-    messageId: "msg-q",
-    receivedAtMs: 2,
-    audioUrl: "  http://127.0.0.1/audio.wav  ",
-  });
-
+function testTextSegmentSinkConsumesSegmentMaterial(): void {
   const events: string[] = [];
-  const textSink = createQueuedTextSegmentSink({
+  const textSink = createTextSegmentSink({
     state: {
-      pendingAssistantTexts,
       assistantTextDeliveryTurnId: null,
       statusMessage: "",
     },
@@ -1178,23 +1167,14 @@ function testQueuedSegmentReleaseSinksConsumePendingItems(): void {
       events.push(`text_failed:${turnId ?? ""}:${messageId}:${reason}`);
     },
   });
-  const audioSink = createQueuedAudioSegmentSink({
-    state: {
-      pendingAudios,
-    },
-    startAudioPlayback: (audioUrl, turnId, messageId) => {
-      events.push(`audio:${turnId ?? ""}:${messageId}:${audioUrl}`);
-    },
-  });
-
-  assert.equal(textSink.releaseAssistantTextForPlayback("msg-q", "turn-q"), true);
-  assert.equal(audioSink.releaseAudioForPlayback("msg-q", "turn-q"), true);
-  assert.equal(pendingAssistantTexts.size, 0);
-  assert.equal(pendingAudios.size, 0);
+  assert.equal(textSink.releaseAssistantTextForPlayback(
+    "  hello timeline  ",
+    "msg-q",
+    "turn-q",
+  ), true);
   assert.deepEqual(events, [
     "text:turn-q:hello timeline",
     "text_delivered:turn-q:msg-q",
-    "audio:turn-q:msg-q:http://127.0.0.1/audio.wav",
   ]);
 }
 
@@ -1776,7 +1756,7 @@ async function run(): Promise<void> {
   testSubtitleReleaseFailureAtomicallyFailsPlaybackSegment();
   testAudioFailureBeforeStartFailsDeferredCanonicalText();
   testAudioFailureTerminatesAndInterruptsOwnedMotion();
-  testQueuedSegmentReleaseSinksConsumePendingItems();
+  testTextSegmentSinkConsumesSegmentMaterial();
   testPlaybackTimelineRuntimeKeepsMismatchedSegmentTimelinesSeparate();
   testPlaybackTimelineRuntimeClearsOnlyTerminalSegmentTimeline();
   testPlaybackTimelineRuntimeAttachesSegmentAudioClock();

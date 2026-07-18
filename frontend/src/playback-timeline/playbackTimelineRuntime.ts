@@ -534,10 +534,10 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       durationMs,
     );
     if (!releaseDeferredText(timeline)) {
-      failTimelineSegment(timeline, "subtitle_release_queue_invariant_failed");
+      failTimelineSegment(timeline, "subtitle_sink_release_failed");
       deps.segmentExecution.session.markSessionFailed(
         turnId,
-        `subtitle_release_queue_invariant_failed:${messageId}`,
+        `subtitle_sink_release_failed:${messageId}`,
       );
       return false;
     }
@@ -875,7 +875,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     if (deferred.release()) {
       return true;
     }
-    deferred.fail("subtitle_release_queue_invariant_failed");
+    deferred.fail("subtitle_sink_release_failed");
     return false;
   }
 
@@ -891,7 +891,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     if (!deferred.fail(reason)) {
       deps.segmentExecution.session.markSessionFailed(
         timeline.turnId,
-        `subtitle_failure_queue_invariant_failed:${timeline.messageId}`,
+        `subtitle_failure_projection_failed:${timeline.messageId}`,
       );
     }
   }

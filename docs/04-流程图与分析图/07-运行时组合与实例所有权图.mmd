@@ -27,7 +27,6 @@ flowchart TB
         TRANSPORT[WebSocket transport]:::adapter
         INBOUND[InboundRuntime]:::adapter
         AUDIOSTATE[Adapter audio UI state]:::adapter
-        QUEUES[Pending text/audio queues]:::adapter
         ATC[AudioTimelineController]:::adapter
         LIPRUNTIME[LipSyncRuntime<br/>每个音频 segment]:::resource
     end
@@ -37,10 +36,9 @@ flowchart TB
     ADAPTER --> TRANSPORT
     ADAPTER --> INBOUND
     ADAPTER --> AUDIOSTATE
-    ADAPTER --> QUEUES
     ADAPTER --> ATC
     ROOT -->|创建并附加| BROWSERAUDIO
-    ADAPTER -->|提供 queued segment / SessionStore ports| TL
+    ADAPTER -->|提供 text/audio sinks 与 UI ports| TL
     TL -->|启动 segment audio sink| ATC
     ATC --> BROWSERAUDIO
     ATC --> LIPRUNTIME
@@ -60,7 +58,7 @@ flowchart TB
 
     INBOUND -->|commit protocol facts| STORE
     PROJ -->|project execution facts| STORE
-    STORE -.完整 segment.-> TL
+    STORE -.完整 segment 唯一素材源.-> TL
     TL -->|motion sink start| ENGINE
     ENGINE -->|parameter plan| PLAYER
     PLAYER -->|Live2D adapter| MODEL[当前 Live2D Model Instance]:::resource

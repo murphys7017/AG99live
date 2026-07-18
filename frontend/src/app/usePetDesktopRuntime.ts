@@ -338,10 +338,10 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     if (adapter.state.status === "error") {
       return "error";
     }
-    if (adapter.state.currentTurnId && adapter.state.isPlayingAudio) {
+    if (adapter.state.isPlayingAudio) {
       return "speaking";
     }
-    if (adapter.state.currentTurnId) {
+    if (sessionStore.getSessions().some((session) => !isTerminalPhase(session.phase))) {
       return "thinking";
     }
     if (adapter.state.micCapturing) {
@@ -369,13 +369,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   let snapshotPublisher: ReturnType<typeof createPetRuntimeSnapshotPublisher> | null = null;
   const bilibiliLive = useBilibiliLiveRuntime({
     sendText: (text) => adapter.sendText(text),
-    isInteractionBusy: () => {
-      const activeSession = sessionStore.getActiveSession();
-      if (adapter.state.currentTurnId) {
-        return true;
-      }
-      return Boolean(activeSession && !isTerminalPhase(activeSession.phase));
-    },
     pushHistory: (role, text) => adapter.pushHistory(role, text),
     onStatusChanged: () => {
       snapshotPublisher?.publishRuntimeSnapshot();

@@ -57,7 +57,7 @@ import {
   saveStoredAdapterAddress,
 } from "./core/preferences.js";
 import {
-  createQueuedTextSegmentSink,
+  createTextSegmentSink,
 } from "../playback-timeline/segmentReleaseSinks.js";
 import type {
   MotionPayloadNormalizer,
@@ -135,6 +135,7 @@ export interface AdapterConnectionInstance {
 
 export interface AdapterPlaybackCompositionPort {
   releaseAssistantTextForPlayback: (
+    text: string,
     messageId: string,
     turnId: string | null,
   ) => boolean;
@@ -143,7 +144,8 @@ export interface AdapterPlaybackCompositionPort {
     turnId: string | null,
     reason: string,
   ) => boolean;
-  releaseQueuedAudioForTimelinePlayback: (
+  releaseAudioForTimelinePlayback: (
+    audioUrl: string,
     messageId: string,
     turnId: string | null,
   ) => boolean;
@@ -277,18 +279,6 @@ export function createAdapterConnection(
     });
   }
 
-  function queueAudioForPlayback(
-    audioUrl: string,
-    turnId: string | null,
-    messageId: string,
-  ): void {
-    requireAudioRuntime().queueAudioForPlayback(audioUrl, turnId, messageId);
-  }
-
-  function hasPendingAudioForTurn(turnId: string | null): boolean {
-    return requireAudioRuntime().hasPendingAudioForTurn(turnId);
-  }
-
   function resetAudioPlaybackTerminal(): void {
     requireAudioRuntime().resetAudioPlaybackTerminal();
   }
@@ -319,9 +309,6 @@ export function createAdapterConnection(
     stopAudioAndSettleTurn: (turnId, reason) =>
       stopAudioAndSettleTurn(turnId, reason),
     resetAudioPlaybackTerminal: () => resetAudioPlaybackTerminal(),
-    hasPendingAudioForTurn: (turnId) => hasPendingAudioForTurn(turnId),
-    queueAudioForPlayback: (url, turnId, messageId) =>
-      queueAudioForPlayback(url, turnId, messageId),
     findActiveAudioSegment: () => findActiveAudioSegment(),
     playMotionPreviewPayload: (payload) => motionPreviewHandler?.(payload) ?? false,
     acknowledgeMotionLabRawEventPersisted: (eventId) =>
@@ -346,6 +333,11 @@ export function createAdapterConnection(
     resetAudioPlaybackTerminal,
     findOpenAudioSegment: () => findOpenAudioSegment(),
     findOpenExecutionSegment: () => requireAudioRuntime().findOpenExecutionSegment(),
+    markTurnInterrupted: (turnId: string | null) => {
+      if (sessionStore.getSession(turnId)) {
+        sessionStore.markInterrupt(turnId);
+      }
+    },
     createMessageId,
   };
 
@@ -429,7 +421,9 @@ export function createAdapterConnection(
     connectAttemptSerial += 1;
     microphoneRuntime.clearPendingStart();
     void stopMicrophoneCapture(markManualClose ? "manual_disconnect" : "connection_reset");
-    stopAudioAndSettleAll(markManualClose ? "manual_disconnect" : "connection_reset");
+    const reason = markManualClose ? "manual_disconnect" : "connection_reset";
+    stopAudioAndSettleAll(reason);
+    failUnresolvedSessions(reason);
     if (socket) {
       const currentSocket = socket;
       socket = null;
@@ -486,8 +480,7 @@ export function createAdapterConnection(
           pushHistory("error", state.lastError);
           console.error("[useAdapterConnection] fatal inbound message handler error:", error);
           stopAudioAndSettleAll("inbound_runtime_failure");
-          state.pendingAssistantTexts.clear();
-          state.pendingAudios.clear();
+          failUnresolvedSessions("inbound_runtime_failure");
           nextSocket.close();
         });
       },
@@ -543,6 +536,7 @@ export function createAdapterConnection(
   }
 
   function resetConnectionRuntimeState(): void {
+    failUnresolvedSessions("connection_closed");
     resetConnectionRuntime({
       state,
       stopMicrophoneCapture,
@@ -551,6 +545,14 @@ export function createAdapterConnection(
       modelSyncAdapter: modelSync,
       resetAudioPlaybackTerminal,
     });
+  }
+
+  function failUnresolvedSessions(reason: string): void {
+    for (const session of sessionStore.getSessions()) {
+      if (session.phase !== "completed" && session.phase !== "failed") {
+        sessionStore.markSessionFailed(session.turnId, reason);
+      }
+    }
   }
 
   function updateAssistantText(text: string, turnId: string | null): void {
@@ -578,7 +580,7 @@ export function createAdapterConnection(
     pushHistory("assistant", text);
   }
 
-  const queuedTextSegmentSink = createQueuedTextSegmentSink({
+  const textSegmentSink = createTextSegmentSink({
     state,
     updateAssistantText,
     markTextDelivered: (turnId, messageId) => {
@@ -590,10 +592,12 @@ export function createAdapterConnection(
   });
 
   function releaseAssistantTextForPlayback(
+    text: string,
     messageId: string,
     turnId: string | null,
   ): boolean {
-    return queuedTextSegmentSink.releaseAssistantTextForPlayback(
+    return textSegmentSink.releaseAssistantTextForPlayback(
+      text,
       messageId,
       turnId,
     );
@@ -604,18 +608,20 @@ export function createAdapterConnection(
     turnId: string | null,
     reason: string,
   ): boolean {
-    return queuedTextSegmentSink.failAssistantTextForPlayback(
+    return textSegmentSink.failAssistantTextForPlayback(
       messageId,
       turnId,
       reason,
     );
   }
 
-  function releaseQueuedAudioForTimelinePlayback(
+  function releaseAudioForTimelinePlayback(
+    audioUrl: string,
     messageId: string,
     turnId: string | null,
   ): boolean {
-    return requireAudioRuntime().releaseQueuedAudioForTimelinePlayback(
+    return requireAudioRuntime().releaseAudioForTimelinePlayback(
+      audioUrl,
       messageId,
       turnId,
     );
@@ -794,7 +800,7 @@ export function createAdapterConnection(
     playback: {
       releaseAssistantTextForPlayback,
       failAssistantTextForPlayback,
-      releaseQueuedAudioForTimelinePlayback,
+      releaseAudioForTimelinePlayback,
       initializeAudioRuntime,
       notifyAudioTimelineDurationReady,
       notifyAudioTimelineStarted,

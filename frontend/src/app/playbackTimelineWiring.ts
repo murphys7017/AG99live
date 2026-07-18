@@ -78,7 +78,7 @@ export function createAppPlaybackTimelineRuntime(options: {
       },
       audioSink: {
         releaseAudioForPlayback:
-          adapterPlayback.releaseQueuedAudioForTimelinePlayback,
+          adapterPlayback.releaseAudioForTimelinePlayback,
       },
       motionSink: options.motionSink,
     },

@@ -25,7 +25,7 @@ context:
     - Adapter delivery aggregation rejects mismatched AstrBot TTS turn, logical message, tts_request_id lifecycle, or AG99 frontend external_correlation_id instead of attaching them to the current segment.
     - Output queue close ownership is bound to the exact turn_id; zero-segment close and synth_finished send failure are hard errors, and closed state is committed only after send success.
     - Performance curve execution has one source at motion.payload.performance_curve_hint; output.segment.v3 rejects the removed top-level performance_curve slot.
-    - SessionStore commitOutputSegment is the only production segment creation boundary; protocol and motion validation complete before Store or release-queue mutation.
+    - SessionStore commitOutputSegment is the only production segment creation boundary; protocol and motion validation complete before the sole Store write.
     - SessionStore lifecycle mark methods require an existing committed turn_id plus message_id segment; they cannot create segments or reopen acknowledged material.
     - control.synth_finished asserts every segment is complete and never infers absent audio or motion from missing late patches.
     - Production frontend motion and performance-curve patches have been removed; independent engine messages remain only for manual preview.
@@ -82,7 +82,7 @@ context:
     - TurnPlaybackOrchestratorCore now emits a typed segment release job with explicit text/audio/motion slots instead of separately owning text/audio/motion release calls; PlaybackTimelineRuntime owns that job's execution semantics while turn-playback only forwards the job.
     - Segment job execution semantics now live inside PlaybackTimelineRuntime.startSegmentJob; useTurnPlaybackOrchestrator forwards segment jobs directly into the timeline runtime, while segmentJob defines job/sink contracts.
     - PlaybackTimelineRuntime exposes startSegmentJob as the segment-level start entry point; immutable text/audio/motion/session execution ports are injected at construction, and missing ports are a hard wiring error.
-    - Queued text/audio segment release logic now lives in playback-timeline/segmentReleaseSinks, with pending playback queue helpers moved to playback-timeline/playbackReleaseQueue; adapter code supplies pending queues and side-effect callbacks while the timeline segment executor calls timeline-owned sinks.
+    - SessionStore is the sole owner of complete text/audio/motion segment material; the orchestrator passes that material directly to timeline-owned sinks, and the duplicate pending text/audio maps and release queue helpers have been removed.
     - PlaybackTimelineRuntime no longer exposes segment, motion, or audio preparation APIs publicly; motion timeline preparation is owned by startSegmentJob, while audio preparation is private behind startAudioTimelineSink.
     - Playback timeline runtime wiring is no longer optional for segment release; missing timelineRuntime is a type-level wiring error instead of a silent preparation bypass.
     - AudioPlaybackActions and MotionSink timeline wiring are now required dependencies, so missing audio timeline callbacks or motion timeline lookup/terminal callbacks are type-level wiring errors instead of silent timeline bypasses; motion preparation is not exposed through adapter-facing ports.
@@ -100,9 +100,9 @@ context:
     - Motion release timeline ownership lookup now lives in PlaybackTimelineRuntime; TurnPlaybackOrchestrator no longer reads active audio timeline snapshots directly, and MotionTimelineSink uses segment-scoped lookup when available.
     - Lip sync runtime has been moved behind an independent PlaybackTimelineAudioLipSyncSink boundary, and PlaybackTimelineAudioSegmentSink now owns audio element event ordering plus lip-sync attach/start/terminal/stop while audio playback actions only update adapter/session state.
     - Audio segment runner now starts browser audio through PlaybackTimelineRuntime.startAudioTimelineSink, so released audio enters the PlaybackTimelineEngine sink-start callback path instead of runner-local prepare plus direct sink start.
-    - AdapterAudioRuntime now separates direct adapter audio release from timeline job queue consumption: direct release marks SessionStore audio.released itself, while timeline segment jobs consume queued audio through a raw queue-release port and let PlaybackTimelineRuntime mark audio.released once.
+    - AdapterAudioRuntime accepts the selected segment audio URL only through the timeline release port; PlaybackTimelineRuntime remains the sole owner of audio.released lifecycle projection.
     - AdapterConnection.playbackTimeline no longer exposes direct text/audio queue release wrappers or raw segment-sink wiring; connection-level callers and tests should release playback through PlaybackTimelineRuntime.startSegmentJob with explicit text/audio/motion slots.
-    - AdapterAudioRuntime now hides the raw queued-audio consumer behind configureSegmentExecution, so adapter-facing wiring can provide session/text/motion ports without exposing queue consumption outside the audio runtime facade.
+    - Ready segments are released through one frontend playback lane in SessionStore insertion order, so a later turn cannot replace an earlier turn's active audio or ModelEngine motion ownership.
     - Audio playback started/duration and active-timeline terminal SessionStore writes now happen through PlaybackTimelineRuntime audio lifecycle session ports; AdapterAudioRuntime's state bridge updates UI playback state for those events.
     - Motion playback started/terminal SessionStore writes now happen through PlaybackTimelineRuntime motion lifecycle session ports; PlaybackCompletionCoordinator now owns only turn-level playback_finished acknowledgement and late-audio reopen.
     - Production desktop wiring uses the independent MotionPlaybackRecorder for motion history, run tracking, and Motion Lab raw events; PlaybackCompletionCoordinator has no motion-recording dependency.
@@ -241,16 +241,16 @@ architecture:
     - AdapterConnection playback timeline controls and audio timeline started subscription are grouped under adapter.playbackTimeline, keeping the unified clock boundary out of the general adapter facade.
     - PlaybackTimeline segment job start semantics live in PlaybackTimelineRuntime, which now owns timeline preparation, segment sink release, sink lifecycle, and terminal state.
     - AdapterAudioRuntime no longer exposes a global active audio timeline snapshot; tests and callers use segment-scoped playback timeline lookup.
-    - AdapterAudioRuntime audio queue/release responsibilities are delegated to PlaybackTimelineAudioReleaseController; the old adapter audio queue controller has been removed.
-    - AdapterAudioRuntime pending-audio settlement responsibilities are isolated behind an audio settlement controller, so turn/all audio cleanup no longer lives inline in the runtime facade.
-    - AdapterAudioBridge has been removed; AdapterAudioRuntime writes adapter audio terminal UI state directly, while PlaybackTimelineRuntime writes active-timeline audio terminal facts and the audio settlement controller owns pending-audio queue queries.
+    - AdapterAudioRuntime receives selected Segment audio material directly from PlaybackTimelineRuntime; the obsolete audio release controller and duplicate pending-audio storage have been removed.
+    - AdapterAudioRuntime settlement responsibilities are isolated behind an audio settlement controller for active timelines, while SessionStore owns unresolved-session failure state.
+    - AdapterAudioBridge has been removed; AdapterAudioRuntime writes adapter audio terminal UI state directly, while PlaybackTimelineRuntime writes active-timeline audio terminal facts.
     - Audio playback actions now delegate audio element plus lip-sync lifecycle handling to PlaybackTimelineAudioSegmentSink instead of owning audio element callback ordering or lip-sync runtime/callback wiring inline.
     - Browser HTMLAudioElement playback ownership has moved from adapter-connection/runtime into playback-timeline/audioSink.ts, so adapter runtime no longer owns the raw audio element player.
-    - AdapterAudioRuntime no longer exposes playAudioAndAcknowledge as a public method; production and tests enter audio playback through queue/release or segment job paths.
+    - AdapterAudioRuntime no longer exposes playAudioAndAcknowledge as a public method; production enters audio playback through SegmentJob only.
     - PlaybackTimelineAudioSegmentRunner now bridges audio segment duration/started/terminal events into PlaybackTimelineRuntime, so audioPlaybackActions no longer owns audio element event ordering.
-    - AudioPlaybackStateBridge no longer writes SessionStore audio.released/audio.started/audio.duration/audio.terminal for active timeline playback; started/duration/terminal facts are recorded by PlaybackTimelineRuntime when audio timeline events arrive, release ownership stays with the direct adapter release wrapper or PlaybackTimelineRuntime.startSegmentJob, and non-timeline pending/missing-audio terminal settlement remains in adapter handling.
+    - AudioPlaybackStateBridge no longer writes SessionStore audio.released/audio.started/audio.duration/audio.terminal; all execution facts are recorded by PlaybackTimelineRuntime, while unresolved material remains owned by SessionStore.
     - PlaybackTimelineRuntime now has a motion lifecycle session port for motion.started and motion.terminal events, guarded by open-sink checks so late terminal callbacks cannot rewrite motion SessionStore state after the timeline has settled; production disables the coordinator's duplicate ordinary motion lifecycle writes but keeps coordinator-owned handoff settlement.
-    - AdapterPlaybackTimelinePort keeps only segment execution configuration and startSegmentJob; raw queued-audio consumption is private to AdapterAudioRuntime's configured segment execution ports.
+    - Adapter playback ports expose direct text/audio sinks to PlaybackTimelineRuntime; SegmentJob is the only production release entry and carries its own material.
     - Audio playback stop now interrupts the explicit turnId + messageId playback segment; missing segment identity is surfaced as an error instead of stopping an arbitrary active timeline.
     - PlaybackTimelineEngine now owns sink start callbacks for audio/motion via startSink; remaining direct-sink migration should move prepare/terminal and SessionStore coordination out of migration-era segment-sink wiring.
     - Audio/lip_sync/motion timeline duration/started/terminal events no longer implicitly register or mutate a missing sink; missing segment timeline or sink wiring is diagnosed and the event is dropped.
@@ -527,6 +527,11 @@ verification:
     - git diff --check (passed)
     - targeted performance-curve, TTS identity, send-transaction, and cleanup regressions (13 passed after final ownership review)
     - targeted inbound forwarding, turn-scoped output/playback lifecycle, disconnect cleanup, and PlatformEvent correlation regressions (42 passed)
+    - npm run typecheck:renderer (passed after single playback lane and duplicate material ownership cleanup)
+    - npm run test:turn-orchestrator (passed with cross-turn serial release coverage)
+    - npm run test:adapter-audio-runtime and npm run test:adapter-connection (passed after direct Segment material release)
+    - npm run test:playback-timeline and npm run test:bilibili-live (passed after sink error-code and redundant busy-gate cleanup)
+    - git diff --check (passed)
   checks_failed: []
   validation_gap: A live Electron end-to-end conversation is still needed to verify the installed AstrBot read-only TTS state hook, output.segment delivery, real audio-clock release, lip sync, and motion start against a real TTS Provider and Live2D model. Mermaid CLI was unavailable in the current frontend toolchain, so the two updated .mmd files were reviewed but not parser-rendered. Six historical custom WebSDK entry files still use @ts-nocheck, so their complete static-type migration remains separate technical debt.
 runtime:

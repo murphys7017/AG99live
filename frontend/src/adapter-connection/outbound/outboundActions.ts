@@ -17,10 +17,6 @@ import type { SystemSemanticAxisProfileSavePayload } from "../../types/protocol.
 import {
   normalizeTurnIdForComparison,
 } from "../core/turnIds.js";
-import type {
-  PendingAssistantTextItem,
-  PendingAudioItem,
-} from "../../playback-timeline/playbackReleaseQueue.js";
 import type { AdapterOutboundClient } from "./outboundClient.js";
 
 export interface MotionLabRawEventPayload {
@@ -41,14 +37,10 @@ export interface MotionLabRawEventPayload {
  * 出站动作共享的轻量状态视图。
  *
  * 由 useAdapterConnection 持有真实对象，函数只读取/写回，不创建新实例。
- * pendingAssistantTexts / pendingAudios 的键由 `buildPendingPlaybackKey(turnId, messageId)`
- * 决定，详见 playback-timeline/playbackReleaseQueue.ts。
  */
 export interface OutboundActionState {
   currentTurnId: string | null;
   audioPlaybackTerminalTurnId: string | null;
-  pendingAssistantTexts: Map<string, PendingAssistantTextItem>;
-  pendingAudios: Map<string, PendingAudioItem>;
   desktopScreenshotOnSendEnabled: boolean;
   lastError: string;
   statusMessage: string;
@@ -69,6 +61,7 @@ export interface OutboundActionContext {
   resetAudioPlaybackTerminal: () => void;
   findOpenAudioSegment: () => { turnId: string | null; messageId: string } | null;
   findOpenExecutionSegment: () => { turnId: string | null; messageId: string } | null;
+  markTurnInterrupted: (turnId: string | null) => void;
   createMessageId: () => string;
 }
 
@@ -128,44 +121,19 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
 }
 
 function getInterruptibleTurnId(ctx: OutboundActionContext): string | null {
-  const state = ctx.state;
-  const currentTurnId = normalizeTurnIdForComparison(state.currentTurnId);
   const openAudioTurnId = normalizeTurnIdForComparison(
     ctx.findOpenAudioSegment()?.turnId ?? null,
   );
-  if (openAudioTurnId && (!currentTurnId || openAudioTurnId === currentTurnId)) {
+  if (openAudioTurnId) {
     return openAudioTurnId;
   }
   const openExecutionTurnId = normalizeTurnIdForComparison(
     ctx.findOpenExecutionSegment()?.turnId ?? null,
   );
-  if (openExecutionTurnId && (!currentTurnId || openExecutionTurnId === currentTurnId)) {
+  if (openExecutionTurnId) {
     return openExecutionTurnId;
   }
-
-  if (!currentTurnId) {
-    return null;
-  }
-
-  if (hasPendingPlaybackForTurn(state.pendingAssistantTexts, currentTurnId)) {
-    return currentTurnId;
-  }
-  if (hasPendingPlaybackForTurn(state.pendingAudios, currentTurnId)) {
-    return currentTurnId;
-  }
-  return null;
-}
-
-function hasPendingPlaybackForTurn(
-  pendingItems: Map<string, { turnId: string | null }>,
-  turnId: string,
-): boolean {
-  for (const item of pendingItems.values()) {
-    if (normalizeTurnIdForComparison(item.turnId) === turnId) {
-      return true;
-    }
-  }
-  return false;
+  return normalizeTurnIdForComparison(ctx.state.currentTurnId);
 }
 
 async function captureRealtimeDesktopScreenshot(): Promise<DesktopCaptureImagePayload | null> {
@@ -238,6 +206,7 @@ export function interruptCurrentTurn(ctx: OutboundActionContext): boolean {
     ctx.pushHistory("error", ctx.state.lastError);
     return false;
   }
+  ctx.markTurnInterrupted(interruptTurnId);
   ctx.state.statusMessage = "已发送中断请求。";
   ctx.pushHistory("system", ctx.state.statusMessage);
   return true;

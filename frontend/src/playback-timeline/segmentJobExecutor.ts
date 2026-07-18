@@ -70,13 +70,14 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
   let releasedText = false;
   if (job.text.release && job.audio.noAudioConfirmed) {
     releasedText = ports.textSink.releaseAssistantTextForPlayback(
+      job.text.content ?? "",
       job.messageId,
       job.turnId,
     );
     if (!releasedText) {
       ports.session.markSessionFailed(
         job.turnId,
-        `text_release_queue_invariant_failed:${job.messageId}`,
+        `text_sink_release_failed:${job.messageId}`,
       );
       return { releasedText: false, releasedAudio: false, releasedMotion: false };
     }
@@ -99,7 +100,7 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
     if (!failed) {
       ports.session.markSessionFailed(
         job.turnId,
-        `text_failure_queue_invariant_failed:${job.messageId}`,
+        `text_sink_failure_projection_failed:${job.messageId}`,
       );
       return { releasedText: false, releasedAudio: false, releasedMotion: false };
     }
@@ -111,6 +112,7 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
       job.turnId,
       job.messageId,
       () => ports.audioSink.releaseAudioForPlayback(
+        job.audio.url ?? "",
         job.messageId,
         job.turnId,
       ),
@@ -118,6 +120,7 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
         ? {
             release: () => {
               const released = ports.textSink.releaseAssistantTextForPlayback(
+                job.text.content ?? "",
                 job.messageId,
                 job.turnId,
               );
@@ -139,11 +142,11 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
       timeline.rejectAudioBeforeStart(
         job.turnId,
         job.messageId,
-        `audio_release_queue_invariant_failed:${job.messageId}`,
+        `audio_sink_release_failed:${job.messageId}`,
       );
       ports.session.markSessionFailed(
         job.turnId,
-        `audio_release_queue_invariant_failed:${job.messageId}`,
+        `audio_sink_release_failed:${job.messageId}`,
       );
       return { releasedText, releasedAudio: false, releasedMotion: false };
     }

@@ -14,11 +14,6 @@
 
 import type { ControlErrorPayload, ProtocolEnvelope } from "../../types/protocol.js";
 import type { InboundAdapterEvent } from "./inboundEvents.js";
-import {
-  matchesPlaybackGroup,
-  type PendingAssistantTextItem,
-  type PendingAudioItem,
-} from "../../playback-timeline/playbackReleaseQueue.js";
 
 export interface InboundRuntimeDispatchState {
   currentTurnId: string | null;
@@ -29,8 +24,6 @@ export interface InboundRuntimeDispatchState {
   turnFinishedReason: string;
   micRequested: boolean;
   pttModeEnabled: boolean;
-  pendingAssistantTexts: Map<string, PendingAssistantTextItem>;
-  pendingAudios: Map<string, PendingAudioItem>;
 }
 
 export interface InboundRuntimeDispatchDeps {
@@ -46,7 +39,6 @@ export interface InboundRuntimeDispatchDeps {
   pushHistory: (role: string, text: string) => void;
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
-  hasPendingAudioForTurn: (turnId: string | null) => boolean;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
   reportRuntimeProtocolViolation: (message: string) => void;
@@ -160,9 +152,7 @@ function applyInterrupt(
   }
   deps.stopAudioAndSettleTurn(interruptedTurnId, "audio_playback_interrupted");
   deps.resetAudioPlaybackTerminal();
-  deletePendingItemsForTurn(s.pendingAssistantTexts, interruptedTurnId);
-  deletePendingItemsForTurn(s.pendingAudios, interruptedTurnId);
-  if (matchesTurn(s.currentTurnId, interruptedTurnId)) {
+  if (s.currentTurnId === interruptedTurnId) {
     s.currentTurnId = null;
   }
   s.statusMessage = "当前轮次已中断。";
@@ -197,36 +187,14 @@ function applySynthFinished(
     return;
   }
   const activeAudioSegment = deps.findActiveAudioSegment();
-  const hasActiveAudioForTurn = Boolean(
-    activeAudioSegment && matchesTurn(activeAudioSegment.turnId, event.turnId),
-  );
+  const hasActiveAudioForTurn = activeAudioSegment?.turnId === event.turnId;
   s.statusMessage =
-    hasActiveAudioForTurn || deps.hasPendingAudioForTurn(event.turnId)
+    hasActiveAudioForTurn
       ? "语音已准备同步播放。"
       : "语音合成已完成。";
   deps.pushHistory("system", s.statusMessage);
 }
 
-function deletePendingItemsForTurn<TItem extends { turnId: string | null }>(
-  pendingItems: Map<string, TItem>,
-  turnId: string | null,
-): void {
-  for (const [key, item] of Array.from(pendingItems.entries())) {
-    if (matchesTurn(item.turnId, turnId)) {
-      pendingItems.delete(key);
-    }
-  }
-}
-
-function matchesTurn(
-  candidateTurnId: string | null,
-  targetTurnId: string | null,
-): boolean {
-  if (matchesPlaybackGroup(candidateTurnId, targetTurnId)) {
-    return true;
-  }
-  return !candidateTurnId && !targetTurnId;
-}
 
 function applyControlError(
   deps: InboundRuntimeDispatchDeps,

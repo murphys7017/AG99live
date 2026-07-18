@@ -213,6 +213,7 @@ function createHarness(options: {
 
   const adapter = {
     releaseAssistantTextForPlayback(
+      _text: string,
       messageId: string,
       turnId: string | null,
     ): boolean {
@@ -228,6 +229,7 @@ function createHarness(options: {
       return true;
     },
     releaseAudioForPlayback(
+      _audioUrl: string,
       messageId: string,
       turnId: string | null,
     ): boolean {
@@ -420,6 +422,52 @@ async function testSegmentsReleaseSequentiallyWithinTurn(): Promise<void> {
     "motion:msg-a:turn-1",
     "motion:msg-b:turn-1",
   ]);
+  h.stop();
+}
+
+async function testSegmentsReleaseSequentiallyAcrossTurns(): Promise<void> {
+  const h = createHarness();
+  h.sessionStore.setActiveSession("turn-a");
+  h.sessionStore.markTurnStarted("turn-a");
+  commitSegment(h.sessionStore, "turn-a", "msg-a", {
+    text: "A",
+    audioUrl: "http://localhost/a.wav",
+    motion: motionPayload,
+  });
+  h.sessionStore.markSynthFinished("turn-a");
+
+  h.sessionStore.setActiveSession("turn-b");
+  h.sessionStore.markTurnStarted("turn-b");
+  commitSegment(h.sessionStore, "turn-b", "msg-b", {
+    text: "B",
+    audioUrl: "http://localhost/b.wav",
+    motion: motionPayload,
+  });
+  h.sessionStore.markSynthFinished("turn-b");
+
+  await h.flush();
+  await h.flush();
+
+  assert.deepEqual(h.released, ["audio:msg-a:turn-a"]);
+  assert.deepEqual(h.motionSinkStarts, ["motion:msg-a:turn-a"]);
+  assert.deepEqual(h.turnChanges, ["turn-a"]);
+
+  h.sessionStore.markTextDelivered("turn-a", "msg-a");
+  h.sessionStore.markAudioTerminal("turn-a", "completed", "msg-a");
+  h.sessionStore.markMotionCompleted("turn-a", "msg-a");
+
+  await h.flush();
+  await h.flush();
+
+  assert.deepEqual(h.released, [
+    "audio:msg-a:turn-a",
+    "audio:msg-b:turn-b",
+  ]);
+  assert.deepEqual(h.motionSinkStarts, [
+    "motion:msg-a:turn-a",
+    "motion:msg-b:turn-b",
+  ]);
+  assert.deepEqual(h.turnChanges, ["turn-a", "turn-b"]);
   h.stop();
 }
 
@@ -881,9 +929,11 @@ function testPlaybackTimelineRuntimeRejectsInvalidMotionTimestamp(): void {
       reason: "test",
       text: {
         release: false,
+        content: null,
       },
       audio: {
         release: false,
+        url: null,
         noAudioConfirmed: false,
       },
       motion: {
@@ -931,9 +981,11 @@ function testPlaybackTimelineRuntimeMarksMotionOnlyContext(): void {
     reason: "test",
     text: {
       release: false,
+      content: null,
     },
     audio: {
       release: false,
+      url: null,
       noAudioConfirmed: true,
     },
     motion: {
@@ -999,9 +1051,11 @@ function testPlaybackTimelineRuntimePreparesAudioMotionTimeline(): void {
     reason: "test",
     text: {
       release: false,
+      content: null,
     },
     audio: {
       release: true,
+      url: "audio.wav",
       noAudioConfirmed: false,
     },
     motion: {
@@ -1069,9 +1123,11 @@ function testPlaybackTimelineRuntimeDoesNotReleaseMotionWhenAudioReleaseFails():
     reason: "test",
     text: {
       release: false,
+      content: null,
     },
     audio: {
       release: true,
+      url: "audio.wav",
       noAudioConfirmed: false,
     },
     motion: {
@@ -1133,9 +1189,11 @@ function testPlaybackTimelineRuntimeCreatesMotionOnlyTimelineBesideExistingAudio
     reason: "test",
     text: {
       release: false,
+      content: null,
     },
     audio: {
       release: false,
+      url: null,
       noAudioConfirmed: true,
     },
     motion: {
@@ -1193,8 +1251,8 @@ function testPlaybackTimelineRuntimeFailsSessionWhenTextQueueItemIsMissing(): vo
     messageId: "msg-missing-text",
     turnId: "turn-missing-text",
     reason: "test",
-    text: { release: true },
-    audio: { release: false, noAudioConfirmed: true },
+    text: { release: true, content: "subtitle" },
+    audio: { release: false, url: null, noAudioConfirmed: true },
     motion: { payload: null, receivedAtMs: null },
   });
 
@@ -1204,12 +1262,13 @@ function testPlaybackTimelineRuntimeFailsSessionWhenTextQueueItemIsMissing(): vo
     releasedMotion: false,
   });
   assert.deepEqual(events, [
-    "session_failed:text_release_queue_invariant_failed:msg-missing-text",
+    "session_failed:text_sink_release_failed:msg-missing-text",
   ]);
 }
 
 async function run(): Promise<void> {
   await testSegmentsReleaseSequentiallyWithinTurn();
+  await testSegmentsReleaseSequentiallyAcrossTurns();
   await testTextAndMotionReleaseWhenAudioIsAbsent();
   await testAudioSegmentDefersCanonicalTextUntilPlaybackStarts();
   await testMotionReleaseReceivesMatchingAudioTimeline();

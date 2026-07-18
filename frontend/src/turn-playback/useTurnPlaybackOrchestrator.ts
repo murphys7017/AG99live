@@ -18,82 +18,96 @@ export function useTurnPlaybackOrchestrator(
   options: TurnPlaybackOrchestratorOptions,
 ) {
   function scheduleReadySegments(): void {
+    let segment: TurnPlaybackSegment | null = null;
     for (const session of options.sessionStore.getSessions()) {
       if (session.phase === "completed" || session.phase === "failed") {
         continue;
       }
-      const segment = getActivePlaybackSegment(session);
-      if (!segment || !isAtomicSegmentResolved(segment)) {
-        continue;
+      segment = getActivePlaybackSegment(session);
+      if (segment) {
+        break;
       }
-      if (session.phase === "collecting") {
-        options.sessionStore.markPhase(segment.turnId, "ready");
+      if (!session.backend.synthFinished) {
+        return;
       }
-
-      if (
-        segment.audio.terminal === "failed"
-        && segment.motion.payload
-        && !segment.motion.failed
-        && !segment.motion.released
-      ) {
-        options.timelineRuntime.rejectMotionBeforeStart(
-          segment.turnId,
-          segment.messageId,
-          `audio_failed_before_motion_release:${segment.audio.reason || "audio_failed"}`,
-        );
-      }
-
-      const textOwnedByReleasedAudioTimeline = Boolean(segment.audio.url)
-        && segment.audio.released
-        && segment.audio.terminal === "idle";
-      const releaseText = Boolean(segment.text.content)
-        && !segment.text.released
-        && !textOwnedByReleasedAudioTimeline;
-      const releaseAudio = canReleaseAudio(segment);
-      const releaseMotion = canReleaseMotion(segment)
-        && segment.motion.payload !== null
-        && segment.audio.terminal !== "failed";
-      if (!releaseText && !releaseAudio && !releaseMotion) {
-        continue;
-      }
-      const receivedAtMs = releaseMotion ? segment.motion.receivedAtMs : null;
-      if (
-        releaseMotion
-        && (
-          receivedAtMs === null
-          || !Number.isFinite(receivedAtMs)
-          || receivedAtMs < 0
-        )
-      ) {
-        options.timelineRuntime.rejectMotionBeforeStart(
-          segment.turnId,
-          segment.messageId,
-          "motion_received_at_missing",
-        );
-        continue;
-      }
-
-      options.timelineRuntime.startSegmentJob({
-        turnId: segment.turnId,
-        messageId: segment.messageId,
-        reason: "atomic_output_segment_ready",
-        text: { release: releaseText },
-        audio: {
-          release: releaseAudio,
-          noAudioConfirmed: segment.audio.terminal === "absent",
-        },
-        motion: {
-          payload: releaseMotion ? segment.motion.payload : null,
-          receivedAtMs,
-        },
-      });
     }
+    if (!segment || !isAtomicSegmentResolved(segment)) {
+      return;
+    }
+    const session = options.sessionStore.getSession(segment.turnId);
+    if (session?.phase === "collecting") {
+      options.sessionStore.markPhase(segment.turnId, "ready");
+    }
+
+    if (
+      segment.audio.terminal === "failed"
+      && segment.motion.payload
+      && !segment.motion.failed
+      && !segment.motion.released
+    ) {
+      options.timelineRuntime.rejectMotionBeforeStart(
+        segment.turnId,
+        segment.messageId,
+        `audio_failed_before_motion_release:${segment.audio.reason || "audio_failed"}`,
+      );
+    }
+
+    const textOwnedByReleasedAudioTimeline = Boolean(segment.audio.url)
+      && segment.audio.released
+      && segment.audio.terminal === "idle";
+    const releaseText = Boolean(segment.text.content)
+      && !segment.text.released
+      && !textOwnedByReleasedAudioTimeline;
+    const releaseAudio = canReleaseAudio(segment);
+    const releaseMotion = canReleaseMotion(segment)
+      && segment.motion.payload !== null
+      && segment.audio.terminal !== "failed";
+    if (!releaseText && !releaseAudio && !releaseMotion) {
+      return;
+    }
+    const receivedAtMs = releaseMotion ? segment.motion.receivedAtMs : null;
+    if (
+      releaseMotion
+      && (
+        receivedAtMs === null
+        || !Number.isFinite(receivedAtMs)
+        || receivedAtMs < 0
+      )
+    ) {
+      options.timelineRuntime.rejectMotionBeforeStart(
+        segment.turnId,
+        segment.messageId,
+        "motion_received_at_missing",
+      );
+      return;
+    }
+
+    options.motionPayload.notifyCurrentTurnChanged(segment.turnId);
+    options.timelineRuntime.startSegmentJob({
+      turnId: segment.turnId,
+      messageId: segment.messageId,
+      reason: "atomic_output_segment_ready",
+      text: {
+        release: releaseText,
+        content: segment.text.content,
+      },
+      audio: {
+        release: releaseAudio,
+        url: segment.audio.url,
+        noAudioConfirmed: segment.audio.terminal === "absent",
+      },
+      motion: {
+        payload: releaseMotion ? segment.motion.payload : null,
+        receivedAtMs,
+      },
+    });
   }
 
   watch(
     () => options.sessionStore.getSessions().map((session) => ({
       id: session.id,
       phase: session.phase,
+      backendSynthFinished: session.backend.synthFinished,
       segments: session.segmentOrder.map((messageId) => {
         const segment = session.segments.get(messageId);
         return segment ? {
@@ -114,17 +128,6 @@ export function useTurnPlaybackOrchestrator(
     })),
     scheduleReadySegments,
     { deep: true },
-  );
-
-  watch(
-    () => options.sessionStore.state.activeSessionId,
-    (sessionId) => {
-      const session = sessionId
-        ? options.sessionStore.state.sessions.get(sessionId)
-        : undefined;
-      options.motionPayload.notifyCurrentTurnChanged(session?.turnId ?? null);
-      scheduleReadySegments();
-    },
   );
 
   return { flush: scheduleReadySegments };

@@ -3,7 +3,7 @@ sequenceDiagram
     participant Store as SessionStore
     participant Orch as TurnPlaybackOrchestrator
     participant TL as PlaybackTimelineRuntime
-    participant Queue as Text/Audio Queues
+    participant Sinks as Text/Audio Sinks
     participant Audio as HTMLAudioElement
     participant Clock as Timeline AudioClock
     participant Engine as ModelEngine
@@ -19,8 +19,8 @@ sequenceDiagram
         opt motion payload 已声明
             TL->>TL: 注册 motion required sink
         end
-        TL->>Queue: release queued audio
-        Queue->>Audio: 创建 AudioElement，load/play
+        TL->>Sinks: release segment audio URL
+        Sinks->>Audio: 创建 AudioElement，load/play
 
         Audio-->>TL: loadedmetadata(duration)
         TL->>Clock: set expected duration
@@ -49,8 +49,8 @@ sequenceDiagram
         Projection->>Store: audio.started
 
         par 同一个 playing 事实释放字幕
-            TL->>Queue: release canonical subtitle
-            Queue-->>Store: text.delivered
+            TL->>Sinks: release segment canonical subtitle
+            Sinks-->>Store: text.delivered
         and 启动口型
             TL->>Lip: attach/start same AudioElement
             Lip->>Lip: WebAudio analyser RMS
@@ -81,7 +81,7 @@ sequenceDiagram
             Audio-->>TL: failed(reason)
             TL->>SDK: interrupt still-open required motion
             TL->>Lip: stop lip-sync
-        else 用户/新 turn 中断
+        else 用户或后端显式中断
             TL->>Audio: stop exact segment
             TL->>SDK: interrupt exact turn+message run
             TL->>Lip: interrupt exact segment
@@ -92,8 +92,8 @@ sequenceDiagram
 
     else audio.state = absent 且 motion.state = present
         opt text.state = present
-            TL->>Queue: 立即释放 text
-            Queue-->>Store: text.delivered
+            TL->>Sinks: 立即释放 text
+            Sinks-->>Store: text.delivered
         end
         TL->>Clock: 创建 explicit synthetic motion-only clock
         TL->>Engine: compile/start motion-only plan
@@ -103,8 +103,8 @@ sequenceDiagram
 
     else audio.state = absent 且 motion 非 present
         opt text.state = present
-            TL->>Queue: 立即释放 text
-            Queue-->>Store: text.delivered
+            TL->>Sinks: 立即释放 text
+            Sinks-->>Store: text.delivered
         end
         Note over TL,Store: 无媒体时钟，不伪造 synthetic audio。
 
@@ -114,7 +114,7 @@ sequenceDiagram
             TL->>Projection: motion failed<br/>不改走 motion-only
         end
         opt text 是等待音频的字幕
-            TL->>Queue: reject waiting subtitle
-            Queue->>Store: text failed<br/>不转成独立气泡
+            TL->>Sinks: reject waiting subtitle
+            Sinks->>Store: text failed<br/>不转成独立气泡
         end
     end

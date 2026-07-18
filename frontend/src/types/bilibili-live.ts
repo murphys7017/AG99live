@@ -8,7 +8,7 @@ export interface BilibiliLiveSettings {
 export interface BilibiliLiveStatus {
   enabled: boolean;
   connected: boolean;
-  status: "disabled" | "idle" | "connecting" | "connected" | "waiting" | "error";
+  status: "disabled" | "idle" | "connecting" | "connected" | "error";
   roomId: string;
   realRoomId: number | null;
   bufferedCount: number;

@@ -16,10 +16,6 @@ import {
   rewriteModelSyncEnvelope as rewriteModelSyncEnvelopeWithActiveHost,
   rewriteSocketUrl as rewriteSocketUrlWithActiveHost,
 } from "../features/modelSyncRewrite.js";
-import {
-  buildPendingPlaybackKey,
-  queueAssistantTextForPlayback as queuePendingAssistantTextForPlayback,
-} from "../../playback-timeline/playbackReleaseQueue.js";
 import type { useAdapterHistory } from "../history/useAdapterHistory.js";
 import type { useAdapterMotionTuning } from "../motion-tuning/useAdapterMotionTuning.js";
 import type { useModelSync } from "../model-sync/useModelSync.js";
@@ -34,12 +30,6 @@ export interface AdapterInboundRuntimeDeps {
   pushHistory: (role: string, text: string) => void;
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
-  hasPendingAudioForTurn: (turnId: string | null) => boolean;
-  queueAudioForPlayback: (
-    url: string,
-    turnId: string | null,
-    messageId: string,
-  ) => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   playMotionPreviewPayload?: (payload: unknown) => boolean;
   acknowledgeMotionLabRawEventPersisted: (eventId: string) => void;
@@ -157,22 +147,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       stopAudioAndSettleTurn: (turnId, reason) =>
         deps.stopAudioAndSettleTurn(turnId, reason),
       resetAudioPlaybackTerminal: () => deps.resetAudioPlaybackTerminal(),
-      hasPendingAudioForTurn: (turnId) => deps.hasPendingAudioForTurn(turnId),
       reportRuntimeProtocolViolation,
-      queuePendingAssistantTextForPlayback: (map, text, turnId, messageId) =>
-        queuePendingAssistantTextForPlayback(map, text, turnId, messageId),
-      queuePendingAudioForPlayback: (map, url, turnId, messageId) => {
-        if (map === deps.state.pendingAudios) {
-          deps.queueAudioForPlayback(url, turnId, messageId);
-          return;
-        }
-        map.set(buildPendingPlaybackKey(turnId, messageId), {
-          audioUrl: url,
-          turnId,
-          messageId,
-          receivedAtMs: performance.now(),
-        });
-      },
       findActiveAudioSegment: () => deps.findActiveAudioSegment(),
       playMotionPreviewPayload: deps.playMotionPreviewPayload,
       normalizeMotionPayload: deps.normalizeMotionPayload,

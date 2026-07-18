@@ -12,7 +12,7 @@
  *
  * 自身不写状态、不发协议、不调用任何业务行为，只做 switch + forward；状态写回
  * 由各领域分发器完成。InboundDispatchDeps 是它们共享的依赖集合（session 写回、
- * 音频运行时、URL 重写、pending 队列工具等），由 createAdapterInboundRuntime 装配。
+ * 音频运行时、URL 重写等），由 createAdapterInboundRuntime 装配。
  */
 
 import type {
@@ -25,7 +25,6 @@ import type {
   SystemMotionTuningSamplesStatePayload,
 } from "../../types/protocol.js";
 import type { InboundAdapterEvent, InboundEventMappingContext } from "./inboundEvents.js";
-import type { PendingAssistantTextItem, PendingAudioItem } from "../../playback-timeline/playbackReleaseQueue.js";
 import type { NormalizedMotionPayload } from "../../playback-integrations/motionPayload.js";
 import type { OutputSegmentMaterial } from "../../turn-playback/session.js";
 import { dispatchInboundConnectionEvent } from "./inboundConnectionDispatcher.js";
@@ -66,9 +65,6 @@ export interface InboundDispatchState {
   } | null;
   // profile save result
   latestSemanticAxisProfileSaveResult: unknown;
-  // pending queues
-  pendingAssistantTexts: Map<string, PendingAssistantTextItem>;
-  pendingAudios: Map<string, PendingAudioItem>;
 }
 
 export interface InboundDispatchDeps {
@@ -106,12 +102,8 @@ export interface InboundDispatchDeps {
   // audio
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
-  hasPendingAudioForTurn: (turnId: string | null) => boolean;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   reportRuntimeProtocolViolation: (message: string) => void;
-  // text / audio queue
-  queuePendingAssistantTextForPlayback: (map: Map<string, PendingAssistantTextItem>, text: string, turnId: string | null, messageId: string) => void;
-  queuePendingAudioForPlayback: (map: Map<string, PendingAudioItem>, url: string, turnId: string | null, messageId: string) => void;
   playMotionPreviewPayload?: (payload: unknown) => boolean;
   normalizeMotionPayload: (payload: unknown) => { ok: true; payload: NormalizedMotionPayload } | { ok: false };
   // mic

@@ -10,7 +10,7 @@ sequenceDiagram
     participant Buffer as PendingOutputSegment
     participant Inbound as Inbound Dispatcher
     participant Store as SessionStore
-    participant Queue as Text / Audio Queue
+    participant Sinks as Text / Audio Sinks
     participant Orch as Playback Orchestrator
     participant Timeline as PlaybackTimelineRuntime
     participant Projection as Timeline SessionProjection
@@ -58,18 +58,16 @@ sequenceDiagram
         Inbound->>Inbound: 校验信封、slot、URL 和 motion payload
         alt 任一字段或领域校验失败
             Inbound--xStore: 拒绝整段，不写入 Store
-            Inbound--xQueue: 不创建任何待释放项
             Note over Inbound,Store: 协议错误显式暴露，不将失败解释为 absent
         else 整段预校验通过
             Inbound->>Store: commitOutputSegment() 原子提交
-            Inbound->>Queue: 提交后才加入 text / audio queue
             Store-->>Orch: 已解析段状态变更
             Note over Orch,Completion: 段提交后可立即起播；不等待 synth_finished
             Orch->>Timeline: startSegmentJob(turn_id, message_id)
 
             alt audio.state = present
-                Timeline->>Queue: 释放音频
-                Queue->>Audio: 创建并播放同一 HTMLAudioElement
+                Timeline->>Sinks: 释放 Segment 自带音频 URL
+                Sinks->>Audio: 创建并播放同一 HTMLAudioElement
                 Audio->>Timeline: loadedmetadata / duration ready
                 alt motion.state = present
                     Timeline->>Engine: 预编译本段语义动作
@@ -85,10 +83,10 @@ sequenceDiagram
                 end
                 Audio->>Timeline: playing + 本 AudioElement 绑定的真实 clock
                 opt text.state = present
-                    Timeline->>Queue: 释放唯一 canonical text 作为字幕
+                    Timeline->>Sinks: 释放 Segment 的唯一 canonical text 作为字幕
                     alt 字幕释放成功
-                        Queue-->>Store: text delivered
-                    else 字幕队列不变量失败
+                        Sinks-->>Store: text delivered
+                    else 字幕 sink 不变量失败
                         Timeline->>Audio: 停止当前 HTMLAudioElement
                         Timeline->>Engine: 中断本段动作
                         Timeline->>Lip: 中断本段口型
@@ -101,22 +99,22 @@ sequenceDiagram
                 end
             else audio.state = absent 且 motion.state = present
                 opt text.state = present
-                    Timeline->>Queue: 立即释放 canonical text
-                    Queue-->>Store: text delivered
+                    Timeline->>Sinks: 立即释放 canonical text
+                    Sinks-->>Store: text delivered
                 end
                 Timeline->>Timeline: 创建 synthetic motion-only clock
                 Timeline->>Engine: 启动本段语义动作
             else audio.state = absent
                 opt text.state = present
-                    Timeline->>Queue: 立即释放 canonical text
-                    Queue-->>Store: text delivered
+                    Timeline->>Sinks: 立即释放 canonical text
+                    Sinks-->>Store: text delivered
                 end
             else audio.state = failed
                 Timeline->>Projection: 投影 audio failed
                 Projection->>Store: audio.failed
                 opt text.state = present
-                    Timeline->>Queue: 拒绝待显示字幕
-                    Queue->>Store: text.failed
+                    Timeline->>Sinks: 拒绝待显示字幕
+                    Sinks->>Store: text.failed
                 end
                 opt motion.state = present
                     Timeline->>Projection: 投影 motion failed<br/>不转换为 audio absent

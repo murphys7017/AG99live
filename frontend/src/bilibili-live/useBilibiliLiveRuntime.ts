@@ -18,7 +18,6 @@ const MAX_BUFFER_SIZE = 80;
 
 interface BilibiliLiveRuntimeOptions {
   sendText: (text: string) => Promise<boolean>;
-  isInteractionBusy: () => boolean;
   pushHistory: (role: "system" | "error", text: string) => void;
   onStatusChanged?: () => void;
 }
@@ -145,15 +144,6 @@ export function useBilibiliLiveRuntime(options: BilibiliLiveRuntimeOptions) {
       return;
     }
     if (Date.now() - lastFlushAt < settings.responseIntervalSeconds * 1000) {
-      if (status.status === "waiting" && !options.isInteractionBusy()) {
-        status.status = status.connected ? "connected" : "connecting";
-        notifyStatusChanged();
-      }
-      return;
-    }
-    if (options.isInteractionBusy()) {
-      status.status = "waiting";
-      notifyStatusChanged();
       return;
     }
 

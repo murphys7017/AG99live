@@ -5,8 +5,6 @@ export interface ConnectionRuntimeState {
   activeWsAddress: string;
   micRequested: boolean;
   micCapturing: boolean;
-  pendingAssistantTexts: { clear(): void };
-  pendingAudios: { clear(): void };
   audioPlaybackStartedTurnId: string | null;
   audioPlaybackStartedMessageId: string | null;
   audioPlaybackStartedAtMs: number;
@@ -38,8 +36,6 @@ export function resetConnectionRuntimeState(deps: ConnectionRuntimeDeps): void {
   s.activeWsAddress = "";
   s.micRequested = false;
   s.micCapturing = false;
-  s.pendingAssistantTexts.clear();
-  s.pendingAudios.clear();
   s.audioPlaybackStartedTurnId = null;
   s.audioPlaybackStartedMessageId = null;
   s.audioPlaybackStartedAtMs = 0;

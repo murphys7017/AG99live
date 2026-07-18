@@ -230,7 +230,6 @@ function normalizeBilibiliLiveStatusKind(
     normalized === "idle"
     || normalized === "connecting"
     || normalized === "connected"
-    || normalized === "waiting"
     || normalized === "error"
   ) {
     return normalized;

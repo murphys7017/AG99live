@@ -6,9 +6,11 @@ export interface PlaybackTimelineSegmentJob<TMotionPayload = unknown> {
   reason: string;
   text: {
     release: boolean;
+    content: string | null;
   };
   audio: {
     release: boolean;
+    url: string | null;
     noAudioConfirmed: boolean;
   };
   motion: {
@@ -35,6 +37,7 @@ export interface PlaybackTimelineSegmentSessionPort {
 
 export interface PlaybackTimelineSegmentTextSink {
   releaseAssistantTextForPlayback(
+    text: string,
     messageId: string,
     turnId: string | null,
   ): boolean;
@@ -47,6 +50,7 @@ export interface PlaybackTimelineSegmentTextSink {
 
 export interface PlaybackTimelineSegmentAudioSink {
   releaseAudioForPlayback(
+    audioUrl: string,
     messageId: string,
     turnId: string | null,
   ): boolean;

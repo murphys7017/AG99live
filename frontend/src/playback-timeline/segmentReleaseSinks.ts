@@ -1,23 +1,14 @@
-import {
-  deletePendingPlaybackItem,
-  getPendingPlaybackItem,
-  matchesPlaybackGroup,
-  type PendingAssistantTextItem,
-  type PendingAudioItem,
-} from "./playbackReleaseQueue.js";
 import type {
-  PlaybackTimelineSegmentAudioSink,
   PlaybackTimelineSegmentTextSink,
 } from "./segmentJob.js";
 
-export interface QueuedTextSegmentSinkState {
-  pendingAssistantTexts: Map<string, PendingAssistantTextItem>;
+export interface TextSegmentSinkState {
   assistantTextDeliveryTurnId: string | null;
   statusMessage: string;
 }
 
-export interface QueuedTextSegmentSinkOptions {
-  state: QueuedTextSegmentSinkState;
+export interface TextSegmentSinkOptions {
+  state: TextSegmentSinkState;
   updateAssistantText(text: string, turnId: string | null): void;
   markTextDelivered(
     turnId: string | null,
@@ -30,102 +21,24 @@ export interface QueuedTextSegmentSinkOptions {
   ): void;
 }
 
-export interface QueuedAudioSegmentSinkState {
-  pendingAudios: Map<string, PendingAudioItem>;
-}
-
-export interface QueuedAudioSegmentSinkOptions {
-  state: QueuedAudioSegmentSinkState;
-  startAudioPlayback(
-    audioUrl: string,
-    turnId: string | null,
-    messageId: string,
-  ): void;
-}
-
-export function createQueuedTextSegmentSink(
-  options: QueuedTextSegmentSinkOptions,
+export function createTextSegmentSink(
+  options: TextSegmentSinkOptions,
 ): PlaybackTimelineSegmentTextSink {
   return {
-    releaseAssistantTextForPlayback(messageId, turnId) {
-      const item = getPendingPlaybackItem(
-        options.state.pendingAssistantTexts,
-        turnId,
-        messageId,
-      );
-      if (!item) {
-        return false;
-      }
-      const text = item.text.trim();
+    releaseAssistantTextForPlayback(textValue, messageId, turnId) {
+      const text = textValue.trim();
       if (!text) {
         return false;
       }
-      if (!matchesPlaybackGroup(item.turnId, turnId)) {
-        return false;
-      }
-
-      const releasedTurnId = item.turnId ?? turnId;
-      deletePendingPlaybackItem(
-        options.state.pendingAssistantTexts,
-        turnId,
-        messageId,
-      );
-      options.updateAssistantText(text, releasedTurnId);
-      options.state.assistantTextDeliveryTurnId = releasedTurnId;
-      options.markTextDelivered(releasedTurnId, messageId);
+      options.updateAssistantText(text, turnId);
+      options.state.assistantTextDeliveryTurnId = turnId;
+      options.markTextDelivered(turnId, messageId);
       options.state.statusMessage = "文本回复已进入同步播放。";
       return true;
     },
     failAssistantTextForPlayback(messageId, turnId, reason) {
-      const item = getPendingPlaybackItem(
-        options.state.pendingAssistantTexts,
-        turnId,
-        messageId,
-      );
-      if (!item || !matchesPlaybackGroup(item.turnId, turnId)) {
-        return false;
-      }
-      const failedTurnId = item.turnId ?? turnId;
-      deletePendingPlaybackItem(
-        options.state.pendingAssistantTexts,
-        turnId,
-        messageId,
-      );
-      options.markTextFailed(failedTurnId, messageId, reason);
+      options.markTextFailed(turnId, messageId, reason);
       options.state.statusMessage = "字幕未能随音频开始播放。";
-      return true;
-    },
-  };
-}
-
-export function createQueuedAudioSegmentSink(
-  options: QueuedAudioSegmentSinkOptions,
-): PlaybackTimelineSegmentAudioSink {
-  return {
-    releaseAudioForPlayback(messageId, turnId) {
-      const item = getPendingPlaybackItem(
-        options.state.pendingAudios,
-        turnId,
-        messageId,
-      );
-      if (!item) {
-        return false;
-      }
-      const audioUrl = item.audioUrl.trim();
-      if (!audioUrl) {
-        return false;
-      }
-      if (!matchesPlaybackGroup(item.turnId, turnId)) {
-        return false;
-      }
-
-      const releasedTurnId = item.turnId ?? turnId;
-      deletePendingPlaybackItem(
-        options.state.pendingAudios,
-        turnId,
-        messageId,
-      );
-      options.startAudioPlayback(audioUrl, releasedTurnId, messageId);
       return true;
     },
   };

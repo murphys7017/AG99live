@@ -66,7 +66,7 @@ function createAdapterAudioRuntime(
           if (!runtime) {
             throw new Error("Adapter audio runtime is not attached.");
           }
-          return runtime.releaseQueuedAudioForTimelinePlayback(...args);
+          return runtime.releaseAudioForTimelinePlayback(...args);
         },
       },
     },
@@ -90,8 +90,16 @@ function createAdapterAudioRuntime(
     playbackTimelineRuntime,
   });
   return Object.assign(runtime, {
-    releaseAudioForPlayback(messageId: string, turnId: string | null): boolean {
-      const released = runtime?.releaseQueuedAudioForTimelinePlayback(messageId, turnId) ?? false;
+    releaseAudioForPlayback(
+      audioUrl: string,
+      messageId: string,
+      turnId: string | null,
+    ): boolean {
+      const released = runtime?.releaseAudioForTimelinePlayback(
+        audioUrl,
+        messageId,
+        turnId,
+      ) ?? false;
       if (released) {
         deps.getSessionStore()?.markAudioReleased(turnId, messageId);
       }
@@ -122,7 +130,6 @@ function buildState() {
     currentTurnId: null as string | null,
     statusMessage: "",
     lastError: "",
-    pendingAudios: new Map(),
     audioPlaybackStartedTurnId: null as string | null,
     audioPlaybackStartedMessageId: null as string | null,
     audioPlaybackStartedAtMs: 0,
@@ -313,8 +320,11 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
     },
   });
 
-  runtime.queueAudioForPlayback("http://127.0.0.1/audio.wav", "turn-1", "msg-1");
-  assert.equal(runtime.releaseAudioForPlayback("msg-1", "turn-1"), true);
+  assert.equal(runtime.releaseAudioForPlayback(
+    "http://127.0.0.1/audio.wav",
+    "msg-1",
+    "turn-1",
+  ), true);
   await flushMicrotasks();
 
   assert.ok(startOptionsRef.current);
@@ -379,8 +389,11 @@ async function testAudioTimelineCompletesOnAudioEnded(): Promise<void> {
     createLipSyncRuntime: buildLipSyncRuntimeFactory(),
   });
 
-  runtime.queueAudioForPlayback("http://127.0.0.1/audio.wav", "turn-2", "msg-2");
-  assert.equal(runtime.releaseAudioForPlayback("msg-2", "turn-2"), true);
+  assert.equal(runtime.releaseAudioForPlayback(
+    "http://127.0.0.1/audio.wav",
+    "msg-2",
+    "turn-2",
+  ), true);
   await flushMicrotasks();
   assert.ok(getSegmentTimelineSnapshot(runtime, "turn-2", "msg-2"));
 
@@ -433,8 +446,11 @@ async function testRejectedAudioStartSettlesAdapterState(): Promise<void> {
     createLipSyncRuntime: buildLipSyncRuntimeFactory(),
   });
 
-  runtime.queueAudioForPlayback("http://127.0.0.1/blocked.wav", "turn-blocked", "msg-blocked");
-  assert.equal(runtime.releaseAudioForPlayback("msg-blocked", "turn-blocked"), true);
+  assert.equal(runtime.releaseAudioForPlayback(
+    "http://127.0.0.1/blocked.wav",
+    "msg-blocked",
+    "turn-blocked",
+  ), true);
   await flushMicrotasks();
 
   assert.equal(state.isPlayingAudio, false);
@@ -482,8 +498,11 @@ async function testLipSyncFailureRemainsVisibleUntilAudioCompletes(): Promise<vo
     }),
   });
 
-  runtime.queueAudioForPlayback("http://127.0.0.1/audio.wav", "turn-lip", "msg-lip");
-  assert.equal(runtime.releaseAudioForPlayback("msg-lip", "turn-lip"), true);
+  assert.equal(runtime.releaseAudioForPlayback(
+    "http://127.0.0.1/audio.wav",
+    "msg-lip",
+    "turn-lip",
+  ), true);
   await flushMicrotasks();
 
   const snapshot = getSegmentTimelineSnapshot(runtime, "turn-lip", "msg-lip");
@@ -521,8 +540,11 @@ async function testAudioTimelineInterruptsPreparedAudioOnStopAll(): Promise<void
     createLipSyncRuntime: buildLipSyncRuntimeFactory(),
   });
 
-  runtime.queueAudioForPlayback("http://127.0.0.1/audio.wav", "turn-3", "msg-3");
-  assert.equal(runtime.releaseAudioForPlayback("msg-3", "turn-3"), true);
+  assert.equal(runtime.releaseAudioForPlayback(
+    "http://127.0.0.1/audio.wav",
+    "msg-3",
+    "turn-3",
+  ), true);
   await flushMicrotasks();
   assert.equal(getSegmentTimelineSnapshot(runtime, "turn-3", "msg-3")?.phase, "preparing");
 
@@ -535,50 +557,6 @@ async function testAudioTimelineInterruptsPreparedAudioOnStopAll(): Promise<void
       terminal: "failed",
       messageId: "msg-3",
       reason: "test_stop_all",
-    },
-  ]);
-}
-
-async function testStopAudioAndSettleTurnFailsOnlyMatchingPendingAudio(): Promise<void> {
-  const state = buildState();
-  const terminalEvents: Array<{
-    turnId: string | null;
-    terminal: string;
-    messageId: string;
-    reason?: string;
-  }> = [];
-  const runtime = createAdapterAudioRuntime({
-    state,
-    audioSink: buildAudioSink({
-      start: async () => {},
-    }),
-    pushHistory: () => {},
-    getSessionStore: () => buildSessionStoreMock({
-      markAudioTerminal: (turnId, terminal, messageId, reason) => {
-        terminalEvents.push({
-          turnId,
-          terminal,
-          messageId,
-          reason,
-        });
-      },
-    }),
-    createLipSyncRuntime: buildLipSyncRuntimeFactory(),
-  });
-
-  runtime.queueAudioForPlayback("http://127.0.0.1/target.wav", "turn-target", "msg-target");
-  runtime.queueAudioForPlayback("http://127.0.0.1/other.wav", "turn-other", "msg-other");
-
-  runtime.stopAudioAndSettleTurn("turn-target", "test_turn_settle");
-
-  assert.equal(runtime.hasPendingAudioForTurn("turn-target"), false);
-  assert.equal(runtime.hasPendingAudioForTurn("turn-other"), true);
-  assert.deepEqual(terminalEvents, [
-    {
-      turnId: "turn-target",
-      terminal: "failed",
-      messageId: "msg-target",
-      reason: "test_turn_settle",
     },
   ]);
 }
@@ -625,8 +603,11 @@ async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise
     }),
   });
 
-  runtime.queueAudioForPlayback("http://127.0.0.1/first.wav", "turn-4", "msg-4a");
-  assert.equal(runtime.releaseAudioForPlayback("msg-4a", "turn-4"), true);
+  assert.equal(runtime.releaseAudioForPlayback(
+    "http://127.0.0.1/first.wav",
+    "msg-4a",
+    "turn-4",
+  ), true);
   await flushMicrotasks();
   assert.equal(state.audioPlaybackStartedMessageId, "msg-4a");
   assert.deepEqual(releasedEvents[0], {
@@ -634,8 +615,11 @@ async function testStartingNextAudioSettlesInterruptedPreviousSegment(): Promise
     messageId: "msg-4a",
   });
 
-  runtime.queueAudioForPlayback("http://127.0.0.1/second.wav", "turn-4", "msg-4b");
-  assert.equal(runtime.releaseAudioForPlayback("msg-4b", "turn-4"), true);
+  assert.equal(runtime.releaseAudioForPlayback(
+    "http://127.0.0.1/second.wav",
+    "msg-4b",
+    "turn-4",
+  ), true);
   await flushMicrotasks();
 
   assert.deepEqual(terminalEvents[0], {
@@ -692,16 +676,17 @@ async function testTimelineAudioReleaseMarksSessionReleasedOnce(): Promise<void>
     },
   });
 
-  runtime.queueAudioForPlayback("http://127.0.0.1/timeline.wav", "turn-timeline-audio", "msg-timeline-audio");
   const result = runtime.startSegmentJob({
     messageId: "msg-timeline-audio",
     turnId: "turn-timeline-audio",
     reason: "test_timeline_audio_release",
     text: {
       release: false,
+      content: null,
     },
     audio: {
       release: true,
+      url: "http://127.0.0.1/timeline.wav",
       noAudioConfirmed: false,
     },
     motion: {
@@ -743,8 +728,11 @@ async function testMotionSinkKeepsTimelineOpenAfterAudioCompletes(): Promise<voi
   });
   configureNoopSegmentExecutionPorts(runtime);
 
-  runtime.queueAudioForPlayback("http://127.0.0.1/audio.wav", "turn-motion", "msg-motion");
-  assert.equal(runtime.releaseAudioForPlayback("msg-motion", "turn-motion"), true);
+  assert.equal(runtime.releaseAudioForPlayback(
+    "http://127.0.0.1/audio.wav",
+    "msg-motion",
+    "turn-motion",
+  ), true);
   await flushMicrotasks();
 
   runtime.startSegmentJob({
@@ -753,9 +741,11 @@ async function testMotionSinkKeepsTimelineOpenAfterAudioCompletes(): Promise<voi
     reason: "test_motion_after_audio",
     text: {
       release: false,
+      content: null,
     },
     audio: {
       release: false,
+      url: null,
       noAudioConfirmed: false,
     },
     motion: {
@@ -801,9 +791,11 @@ async function testMotionOnlyTimelineUsesSyntheticClock(): Promise<void> {
     reason: "test_motion_only",
     text: {
       release: false,
+      content: null,
     },
     audio: {
       release: false,
+      url: null,
       noAudioConfirmed: true,
     },
     motion: {
@@ -838,7 +830,6 @@ async function run(): Promise<void> {
   await testRejectedAudioStartSettlesAdapterState();
   await testLipSyncFailureRemainsVisibleUntilAudioCompletes();
   await testAudioTimelineInterruptsPreparedAudioOnStopAll();
-  await testStopAudioAndSettleTurnFailsOnlyMatchingPendingAudio();
   await testStartingNextAudioSettlesInterruptedPreviousSegment();
   await testTimelineAudioReleaseMarksSessionReleasedOnce();
   await testMotionSinkKeepsTimelineOpenAfterAudioCompletes();

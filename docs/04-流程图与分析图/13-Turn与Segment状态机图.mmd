@@ -36,7 +36,7 @@ flowchart TB
         SNEW[segment 尚未提交]:::slot
         PRE[协议预校验<br/>text/audio/motion/images 全部构造]:::event
         COMMIT[commitOutputSegment<br/>一次性写入 Map]:::slot
-        REJECT[整段拒绝<br/>无 Store/Queue 副作用]:::failure
+        REJECT[整段拒绝<br/>无 Store 副作用]:::failure
         SNEW --> PRE
         PRE -->|任一 slot 非法| REJECT
         PRE -->|全部合法| COMMIT

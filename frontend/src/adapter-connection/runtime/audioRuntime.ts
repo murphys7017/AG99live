@@ -11,10 +11,6 @@ import {
   createAdapterAudioTimelineController,
 } from "./audioTimelineController.js";
 import type { AudioPlaybackTerminalState } from "./audioPlaybackStateBridge.js";
-import type { PendingAudioItem } from "../../playback-timeline/playbackReleaseQueue.js";
-import {
-  createPlaybackTimelineAudioReleaseController,
-} from "../../playback-timeline/audioReleaseController.js";
 import {
   createAdapterAudioSettlementController,
 } from "./audioSettlementController.js";
@@ -25,7 +21,6 @@ export interface AdapterAudioRuntimeState {
   currentTurnId: string | null;
   statusMessage: string;
   lastError: string;
-  pendingAudios: Map<string, PendingAudioItem>;
   audioPlaybackStartedTurnId: string | null;
   audioPlaybackStartedMessageId: string | null;
   audioPlaybackStartedAtMs: number;
@@ -51,19 +46,14 @@ export interface ActiveAudioSegment {
 }
 
 export interface AdapterAudioRuntime {
-  queueAudioForPlayback: (
+  releaseAudioForTimelinePlayback: (
     audioUrl: string,
-    turnId: string | null,
-    messageId: string,
-  ) => void;
-  releaseQueuedAudioForTimelinePlayback: (
     messageId: string,
     turnId: string | null,
   ) => boolean;
   startSegmentJob: PlaybackTimelineRuntime<NormalizedMotionPayload>["startSegmentJob"];
   rejectAudioBeforeStart: PlaybackTimelineRuntime<NormalizedMotionPayload>["rejectAudioBeforeStart"];
   rejectMotionBeforeStart: PlaybackTimelineRuntime<NormalizedMotionPayload>["rejectMotionBeforeStart"];
-  hasPendingAudioForTurn: (turnId: string | null) => boolean;
   resetAudioPlaybackTerminal: () => void;
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   stopAudioAndSettleAll: (reason: string) => void;
@@ -142,26 +132,16 @@ export function createAdapterAudioRuntime(
     return timelineController.startAudioSegmentPlayback(audioUrl, turnId, messageId);
   }
 
-  const audioReleaseController = createPlaybackTimelineAudioReleaseController({
-    state: deps.state,
-    startAudioPlayback: (audioUrl, turnId, messageId) => {
-      void startAudioSegmentPlayback(
-        audioUrl,
-        turnId,
-        messageId,
-      );
-    },
-    onAudioQueued: () => {
-      deps.state.statusMessage = "收到语音回复，等待同步播放。";
-      deps.pushHistory("system", deps.state.statusMessage);
-    },
-  });
-
-  function releaseQueuedAudioForTimelinePlayback(
+  function releaseAudioForTimelinePlayback(
+    audioUrl: string,
     messageId: string,
     turnId: string | null,
   ): boolean {
-    return audioReleaseController.releaseAudioForPlayback(messageId, turnId);
+    if (!audioUrl.trim()) {
+      return false;
+    }
+    void startAudioSegmentPlayback(audioUrl, turnId, messageId);
+    return true;
   }
 
   function stopAudioPlayback(
@@ -173,9 +153,7 @@ export function createAdapterAudioRuntime(
   }
 
   const audioSettlementController = createAdapterAudioSettlementController({
-    pendingAudios: deps.state.pendingAudios,
     findOpenAudioSegments,
-    rejectAudioBeforeStart,
     stopAudioPlayback,
     stopTimelinesForTurn: playbackTimelineRuntime.stopTimelinesForTurn,
     stopAllTimelines: playbackTimelineRuntime.stopAllTimelines,
@@ -198,12 +176,10 @@ export function createAdapterAudioRuntime(
   }
 
   return {
-    queueAudioForPlayback: audioReleaseController.queueAudioForPlayback,
-    releaseQueuedAudioForTimelinePlayback,
+    releaseAudioForTimelinePlayback,
     startSegmentJob,
     rejectAudioBeforeStart,
     rejectMotionBeforeStart,
-    hasPendingAudioForTurn: audioSettlementController.hasPendingAudioForTurn,
     resetAudioPlaybackTerminal,
     stopAudioAndSettleTurn: audioSettlementController.stopAudioAndSettleTurn,
     stopAudioAndSettleAll: audioSettlementController.stopAudioAndSettleAll,
