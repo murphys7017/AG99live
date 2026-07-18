@@ -173,9 +173,10 @@ export function configurePlaybackTimelineMotionRuntime(options: {
             result.reason,
           );
         } else {
-          console.error("[ModelEngine] speech-only motion preparation failed.", {
+          console.error("[ModelEngine] motion preparation failed.", {
             turnId,
             messageId,
+            source: result.source ?? "unknown",
             reason: result.reason,
           });
         }

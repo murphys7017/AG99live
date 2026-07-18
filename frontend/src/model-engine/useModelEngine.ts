@@ -328,6 +328,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       return {
         status: "failed",
         reason: state.lastCompileReason || "motion_preparation_failed",
+        source,
       };
     }
     preparedSemanticMotions.set(key, { durationMs, prepared });

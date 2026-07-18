@@ -1,4 +1,5 @@
 import type {
+  DirectParameterPlanTiming,
   NormalizedSemanticMotionIntentV4,
   SemanticMotionIntent,
   SemanticParameterPlanEntry,
@@ -124,21 +125,11 @@ function compileMotionSequenceIntent(
       },
     };
   }
-  const firstPlan = plans[0];
-
   const totalWeight = intent.motion_steps.reduce(
     (sum, step) => sum + step.duration_weight,
     0,
   );
-  const totalDurationMs = firstPlan.timing.duration_ms;
-  let elapsedWeight = 0;
-  const stepStartTimes = intent.motion_steps.map((step, index) => {
-    const atMs = index === 0
-      ? 0
-      : Math.round((elapsedWeight / totalWeight) * totalDurationMs);
-    elapsedWeight += step.duration_weight;
-    return atMs;
-  });
+  const firstPlan = plans[0];
   const parameterTemplates = new Map<string, SemanticParameterPlanEntry>();
   for (const plan of plans) {
     for (const parameter of plan.parameters) {
@@ -171,6 +162,38 @@ function compileMotionSequenceIntent(
     }
     resolvedParameterSteps.set(template.parameter_id, stepParameters);
   }
+  const minimumDurationResult = resolveMinimumSequenceDurationMs(
+    resolvedParameterSteps,
+    intent.motion_steps.map((step) => step.duration_weight),
+  );
+  if (!minimumDurationResult.ok) {
+    return {
+      ok: false,
+      plan: null,
+      reason: minimumDurationResult.reason,
+      diagnostics: stepResults[minimumDurationResult.stepIndex].diagnostics,
+      feedback: {
+        code: minimumDurationResult.code,
+        message: minimumDurationResult.reason,
+        fields: minimumDurationResult.parameterId
+          ? [minimumDurationResult.parameterId]
+          : [],
+      },
+    };
+  }
+  const baseDurationMs = firstPlan.timing.duration_ms;
+  const totalDurationMs = Math.max(
+    baseDurationMs,
+    minimumDurationResult.durationMs,
+  );
+  let elapsedWeight = 0;
+  const stepStartTimes = intent.motion_steps.map((step, index) => {
+    const atMs = index === 0
+      ? 0
+      : Math.round((elapsedWeight / totalWeight) * totalDurationMs);
+    elapsedWeight += step.duration_weight;
+    return atMs;
+  });
   const transitionDurations = resolveSequenceTransitionDurations(
     resolvedParameterSteps,
     stepStartTimes,
@@ -208,6 +231,11 @@ function compileMotionSequenceIntent(
   const warnings = Array.from(new Set(
     stepResults.flatMap((result) => result.diagnostics.warnings ?? []),
   ));
+  if (totalDurationMs > baseDurationMs) {
+    warnings.push(
+      `motion_sequence_duration_extended:${baseDurationMs}->${totalDurationMs}`,
+    );
+  }
   const diagnostics = {
     ...stepResults[0].diagnostics,
     compiledParameterCount: parameters.length,
@@ -253,6 +281,7 @@ function compileMotionSequenceIntent(
     diagnostics,
     plan: {
       ...firstPlan,
+      timing: retimeSequencePlanTiming(firstPlan.timing, totalDurationMs),
       parameters,
       diagnostics: {
         ...firstPlan.diagnostics,
@@ -261,8 +290,144 @@ function compileMotionSequenceIntent(
       summary: {
         ...firstPlan.summary,
         parameter_count: parameters.length,
+        target_duration_ms: totalDurationMs,
       },
     },
+  };
+}
+
+interface SequenceTransitionRequirement {
+  requiredMs: number;
+  stepIndex: number;
+  parameterId?: string;
+}
+
+type MinimumSequenceDurationResult =
+  | { ok: true; durationMs: number }
+  | {
+    ok: false;
+    reason: string;
+    code: string;
+    stepIndex: number;
+    parameterId?: string;
+  };
+
+type SequenceTransitionRequirementsResult =
+  | { ok: true; requirements: SequenceTransitionRequirement[] }
+  | {
+    ok: false;
+    reason: string;
+    code: string;
+    stepIndex: number;
+    parameterId?: string;
+  };
+
+function resolveMinimumSequenceDurationMs(
+  parameterSteps: Map<string, SemanticParameterPlanEntry[]>,
+  durationWeights: number[],
+): MinimumSequenceDurationResult {
+  const totalWeight = durationWeights.reduce((sum, weight) => sum + weight, 0);
+  if (totalWeight <= 0 || durationWeights.length === 0) {
+    return {
+      ok: false,
+      reason: "motion_sequence_duration_weights_invalid",
+      code: "motion_sequence_duration_weights_invalid",
+      stepIndex: 0,
+    };
+  }
+
+  const requirementsResult = resolveSequenceTransitionRequirements(
+    parameterSteps,
+    durationWeights.length,
+  );
+  if (!requirementsResult.ok) {
+    return requirementsResult;
+  }
+
+  const durationMs = requirementsResult.requirements.reduce(
+    (minimum, requirement, segmentIndex) => Math.max(
+      minimum,
+      Math.ceil(
+        (requirement.requiredMs * totalWeight) / durationWeights[segmentIndex],
+      ),
+    ),
+    0,
+  );
+  return { ok: true, durationMs };
+}
+
+function resolveSequenceTransitionRequirements(
+  parameterSteps: Map<string, SemanticParameterPlanEntry[]>,
+  stepCount: number,
+): SequenceTransitionRequirementsResult {
+  const requirements: SequenceTransitionRequirement[] = [];
+  let initialRequirement: SequenceTransitionRequirement = {
+    requiredMs: 0,
+    stepIndex: 0,
+  };
+  for (const [parameterId, steps] of parameterSteps.entries()) {
+    const first = steps[0];
+    if (!first.dynamics || first.neutral_target_value === undefined) {
+      continue;
+    }
+    const requiredMs = resolveMinimumRestToRestTransitionMs(
+      Math.abs(first.target_value - first.neutral_target_value),
+      first.dynamics.max_velocity,
+      first.dynamics.max_acceleration,
+    );
+    if (requiredMs > initialRequirement.requiredMs) {
+      initialRequirement = { requiredMs, stepIndex: 0, parameterId };
+    }
+  }
+  requirements.push(initialRequirement);
+
+  for (let index = 1; index < stepCount; index += 1) {
+    let requirement: SequenceTransitionRequirement = {
+      requiredMs: 80,
+      stepIndex: index,
+    };
+    for (const [parameterId, steps] of parameterSteps.entries()) {
+      const previous = steps[index - 1];
+      const current = steps[index];
+      if (!current?.dynamics) {
+        return {
+          ok: false,
+          reason: `motion_sequence_dynamics_missing:${index}:${current?.parameter_id ?? parameterId}`,
+          code: "motion_sequence_dynamics_missing",
+          stepIndex: index,
+          parameterId: current?.parameter_id ?? parameterId,
+        };
+      }
+      const requiredMs = resolveMinimumRestToRestTransitionMs(
+        Math.abs(current.target_value - previous.target_value),
+        current.dynamics.max_velocity,
+        current.dynamics.max_acceleration,
+      );
+      if (requiredMs > requirement.requiredMs) {
+        requirement = { requiredMs, stepIndex: index, parameterId };
+      }
+    }
+    requirements.push(requirement);
+  }
+  return { ok: true, requirements };
+}
+
+function retimeSequencePlanTiming(
+  timing: DirectParameterPlanTiming,
+  durationMs: number,
+): DirectParameterPlanTiming {
+  if (durationMs <= timing.duration_ms) {
+    return timing;
+  }
+  const scale = durationMs / timing.duration_ms;
+  const blendInMs = Math.round(timing.blend_in_ms * scale);
+  const blendOutMs = Math.round(timing.blend_out_ms * scale);
+  return {
+    ...timing,
+    duration_ms: durationMs,
+    blend_in_ms: blendInMs,
+    hold_ms: Math.max(0, durationMs - blendInMs - blendOutMs),
+    blend_out_ms: blendOutMs,
   };
 }
 
@@ -272,22 +437,19 @@ function resolveSequenceTransitionDurations(
   totalDurationMs: number,
 ): { ok: true; values: number[] } | { ok: false; reason: string; stepIndex: number } {
   const values: number[] = stepStartTimes.map((_, index) => index === 0 ? 0 : 80);
-  const initialAvailableMs = stepStartTimes[1] ?? totalDurationMs;
-  let initialRequiredMs = 0;
-  for (const steps of parameterSteps.values()) {
-    const first = steps[0];
-    if (!first.dynamics || first.neutral_target_value === undefined) {
-      continue;
-    }
-    initialRequiredMs = Math.max(
-      initialRequiredMs,
-      resolveMinimumRestToRestTransitionMs(
-        Math.abs(first.target_value - first.neutral_target_value),
-        first.dynamics.max_velocity,
-        first.dynamics.max_acceleration,
-      ),
-    );
+  const requirementsResult = resolveSequenceTransitionRequirements(
+    parameterSteps,
+    stepStartTimes.length,
+  );
+  if (!requirementsResult.ok) {
+    return {
+      ok: false,
+      reason: requirementsResult.reason,
+      stepIndex: requirementsResult.stepIndex,
+    };
   }
+  const initialAvailableMs = stepStartTimes[1] ?? totalDurationMs;
+  const initialRequiredMs = requirementsResult.requirements[0].requiredMs;
   if (initialRequiredMs > initialAvailableMs) {
     return {
       ok: false,
@@ -300,31 +462,10 @@ function resolveSequenceTransitionDurations(
       ? stepStartTimes[index + 1]
       : totalDurationMs;
     const availableMs = Math.max(1, stepEndMs - stepStartTimes[index]);
-    let requiredMs = Math.max(80, Math.round(availableMs * 0.3));
-    for (const steps of parameterSteps.values()) {
-      const previous = steps[index - 1];
-      const current = steps[index];
-      const dynamics = current.dynamics;
-      if (!dynamics) {
-        return {
-          ok: false,
-          reason: `motion_sequence_dynamics_missing:${index}:${current.parameter_id}`,
-          stepIndex: index,
-        };
-      }
-      const distance = Math.abs(current.target_value - previous.target_value);
-      if (distance <= 0.0001) {
-        continue;
-      }
-      requiredMs = Math.max(
-        requiredMs,
-        resolveMinimumRestToRestTransitionMs(
-          distance,
-          dynamics.max_velocity,
-          dynamics.max_acceleration,
-        ),
-      );
-    }
+    const requiredMs = Math.max(
+      requirementsResult.requirements[index].requiredMs,
+      Math.round(availableMs * 0.3),
+    );
     if (requiredMs > availableMs) {
       return {
         ok: false,

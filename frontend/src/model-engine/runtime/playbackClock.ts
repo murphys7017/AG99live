@@ -39,6 +39,7 @@ export type MotionTimelinePreparationResult =
   | {
     status: "failed";
     reason: string;
+    source?: "queued_motion" | "speech_only";
   };
 
 export type PerformanceCurveTimelineResolution =
