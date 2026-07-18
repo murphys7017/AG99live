@@ -77,11 +77,7 @@ export function createModelSync(): ModelSyncInstance {
     if (!modelInfo) {
       return null;
     }
-    return (
-      modelInfo.models.find((item) => item.name === modelInfo.selected_model) ??
-      modelInfo.models[0] ??
-      null
-    );
+    return modelInfo.models.find((item) => item.name === modelInfo.selected_model) ?? null;
   });
 
   const selectedSemanticAxisProfile = computed(() => {

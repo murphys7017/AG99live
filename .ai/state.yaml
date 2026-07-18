@@ -1,12 +1,14 @@
 task:
-  class: refactor
-  risk: high
-  phase: review_complete
+  class: bugfix
+  risk: medium
+  phase: validation_complete
   status: complete
-  scope: Enforce global playback invariants, remove cross-layer dependency inversions, consolidate protocol ownership, and eliminate duplicated runtime work
+  scope: Make system.model_sync a strict runtime boundary and remove malformed-model preservation and selected-model fallback behavior
 context:
   confidence: high
   assumptions:
+    - system.model_sync is accepted only when the selected model, model inventory, runtime-consumed model fields, semantic profile, voice-following profile, resource ownership data, and duplicated runtime cache diagnostics are structurally consistent.
+    - selected_model must name an entry in models; the frontend never substitutes the first model when backend selection is invalid.
     - output.segment carries one canonical assistant text source; audio does not carry a second caption copy.
     - Audio-backed text is a subtitle and becomes visible only when the matched audio timeline starts; text-only segments display immediately.
     - Performance-curve timing owns intentional motion entrance delay, so the audio-start bridge must not add a fixed timer.
@@ -264,6 +266,12 @@ architecture:
     - Text sends are serialized across asynchronous desktop capture, and currentTurnId advances only after the matching input.text envelope is sent successfully.
 verification:
   checks_run:
+    - npm run test:inbound-events (passed with strict model summary, selected model, semantic profile, voice-following channel, model URL, and runtime cache diagnostics regressions)
+    - Real Mk6 scanner output plus ensured semantic_axis_profile was accepted by the compiled frontend model_sync parser
+    - npm test (complete frontend suite passed after strict model_sync boundary changes)
+    - npm run typecheck (renderer, WebSDK, and node typechecks passed)
+    - npm run build (Electron production build passed)
+    - git diff --check (passed)
     - npm test (complete frontend suite passed after required audio failure terminal semantics were unified)
     - npm run typecheck and npm run build:web (passed after final review)
     - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (286 passed after final review)

@@ -10,94 +10,24 @@ import type {
   SystemHistoryListPayload,
   SystemSemanticAxisProfileSavedPayload,
   SystemSemanticAxisProfileSaveFailedPayload,
-  SystemModelSyncPayload,
   SystemMotionTuningSamplesStatePayload,
   SystemMotionLabRawEventRecordedPayload,
   SystemServerInfoPayload,
 } from "../../types/protocol.js";
+import {
+  asRecord,
+  invalidPayload,
+  optionalString,
+  requiredBoolean,
+  requiredNumber,
+  requiredString,
+  validateExactKeys,
+  type PayloadParseError,
+  type PayloadParseResult,
+} from "./payloadValidation.js";
 
-export interface PayloadParseError {
-  code: "invalid_payload";
-  message: string;
-  path: string;
-}
-
-export type PayloadParseResult<TPayload> =
-  | { ok: true; payload: TPayload }
-  | { ok: false; error: PayloadParseError };
-
-function invalidPayload(type: string, path: string, expected: string): PayloadParseResult<never> {
-  return {
-    ok: false,
-    error: {
-      code: "invalid_payload",
-      path,
-      message: `收到非法协议载荷（type=${type}, path=${path}, expected=${expected}）。`,
-    },
-  };
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
-
-function validateExactKeys(
-  type: string,
-  path: string,
-  record: Record<string, unknown>,
-  allowedKeys: readonly string[],
-): PayloadParseResult<null> {
-  const allowed = new Set(allowedKeys);
-  const unknownKey = Object.keys(record).find((key) => !allowed.has(key));
-  if (unknownKey) {
-    return invalidPayload(type, `${path}.${unknownKey}`, "declared protocol field");
-  }
-  return { ok: true, payload: null };
-}
-
-function requiredString(
-  type: string,
-  record: Record<string, unknown>,
-  key: string,
-): PayloadParseResult<string> {
-  const value = record[key];
-  if (typeof value !== "string") {
-    return invalidPayload(type, `payload.${key}`, "string");
-  }
-  return { ok: true, payload: value };
-}
-
-function optionalString(
-  value: unknown,
-): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-function requiredBoolean(
-  type: string,
-  record: Record<string, unknown>,
-  key: string,
-): PayloadParseResult<boolean> {
-  const value = record[key];
-  if (typeof value !== "boolean") {
-    return invalidPayload(type, `payload.${key}`, "boolean");
-  }
-  return { ok: true, payload: value };
-}
-
-function requiredNumber(
-  type: string,
-  record: Record<string, unknown>,
-  key: string,
-): PayloadParseResult<number> {
-  const value = record[key];
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return invalidPayload(type, `payload.${key}`, "finite number");
-  }
-  return { ok: true, payload: value };
-}
+export type { PayloadParseError, PayloadParseResult } from "./payloadValidation.js";
+export { parseSystemModelSyncPayload } from "./modelSyncPayload.js";
 
 function parseObjectPayload<TPayload>(
   envelope: ProtocolEnvelope<unknown>,
@@ -325,150 +255,6 @@ export function parseSystemServerInfoPayload(
       auto_start_mic: autoStartMic.payload,
     },
   };
-}
-
-export function parseSystemModelSyncPayload(
-  envelope: ProtocolEnvelope<unknown>,
-): PayloadParseResult<SystemModelSyncPayload> {
-  const record = parseObjectPayload(envelope);
-  if (!record.ok) return record;
-
-  const confName = requiredString(envelope.type, record.payload, "conf_name");
-  if (!confName.ok) return confName;
-  const confUid = requiredString(envelope.type, record.payload, "conf_uid");
-  if (!confUid.ok) return confUid;
-  const clientUid = requiredString(envelope.type, record.payload, "client_uid");
-  if (!clientUid.ok) return clientUid;
-
-  const modelInfoRecord = asRecord(record.payload.model_info);
-  if (!modelInfoRecord) {
-    return invalidPayload(envelope.type, "payload.model_info", "object");
-  }
-
-  // Parse model_info.selected_model (required string)
-  const selectedModel = requiredString(envelope.type, modelInfoRecord, "selected_model");
-  if (!selectedModel.ok) return selectedModel;
-
-  // Parse model_info.models (required non-empty array of ModelSummary-like objects)
-  const modelsRaw = modelInfoRecord.models;
-  if (!Array.isArray(modelsRaw) || modelsRaw.length < 1) {
-    return invalidPayload(envelope.type, "payload.model_info.models", "non-empty array");
-  }
-  const models: SystemModelSyncPayload["model_info"]["models"] = [];
-  for (const item of modelsRaw) {
-    const parsed = parseModelSummarySnapshot(envelope.type, item);
-    if (!parsed.ok) return parsed;
-    models.push(parsed.payload);
-  }
-
-  // Parse runtime_cache_errors (optional object)
-  const runtimeCacheErrors = parseRuntimeCacheErrorsPayload(envelope.type, record.payload.runtime_cache_errors);
-  if (!runtimeCacheErrors.ok) return runtimeCacheErrors;
-
-  return {
-    ok: true,
-    payload: {
-      model_info: {
-        ...modelInfoRecord,
-        selected_model: selectedModel.payload,
-        models,
-        runtime_cache_errors: runtimeCacheErrors.payload,
-      } as SystemModelSyncPayload["model_info"],
-      runtime_cache_errors: runtimeCacheErrors.payload,
-      conf_name: confName.payload,
-      conf_uid: confUid.payload,
-      client_uid: clientUid.payload,
-    },
-  };
-}
-
-function parseModelSummarySnapshot(
-  type: string,
-  value: unknown,
-): PayloadParseResult<SystemModelSyncPayload["model_info"]["models"][number]> {
-  const record = asRecord(value);
-  if (!record) {
-    return invalidPayload(type, "payload.model_info.models[]", "object");
-  }
-  const name = requiredString(type, record, "name");
-  if (!name.ok) return name;
-
-  // 校验必要字段后保留原始对象，不重建空壳。
-  // 后端返回的复杂字段（engine_hints、constraints、resource_scan 等）
-  // 由业务层按 ModelSummary 类型读取，parser 只保证 name 存在。
-  // URL 字段做基本文本清洗。
-  const model: Record<string, unknown> = { ...record };
-  model.name = name.payload;
-
-  // 浅校验 semantic_axis_profile 结构完整性。
-  // 如果解析失败但原始值非空（看似有效），保留原始值保护存量 profile 不被误清掉。
-  const parsedProfile = parseSemanticAxisProfileSnapshot(record.semantic_axis_profile);
-  const parsedFailed = parsedProfile === null;
-  const originalHasContent = record.semantic_axis_profile !== undefined && record.semantic_axis_profile !== null;
-  if (!parsedFailed || !originalHasContent) {
-    model.semantic_axis_profile = parsedProfile;
-  }
-
-  // The voice-following contract is internal and version-locked. Reject stale
-  // profiles at ingress so they cannot silently disable speech gestures later.
-  if (record.voice_following_profile !== undefined && record.voice_following_profile !== null) {
-    const vf = asRecord(record.voice_following_profile);
-    if (!vf) {
-      return invalidPayload(type, "payload.model_info.models[].voice_following_profile", "object | null");
-    }
-    if (vf.schema_version !== "ag99.voice_following_profile.v2") {
-      return invalidPayload(
-        type,
-        "payload.model_info.models[].voice_following_profile.schema_version",
-        "ag99.voice_following_profile.v2",
-      );
-    }
-  }
-
-  return {
-    ok: true,
-    payload: { ...model } as unknown as SystemModelSyncPayload["model_info"]["models"][number],
-  };
-}
-
-function parseSemanticAxisProfileSnapshot(
-  value: unknown,
-): SystemModelSyncPayload["model_info"]["models"][number]["semantic_axis_profile"] {
-  const record = asRecord(value);
-  if (!record) return null;
-  const profileId = record.profile_id;
-  if (typeof profileId !== "string") return null;
-  const revision = record.revision;
-  if (typeof revision !== "number" || !Number.isFinite(revision)) return null;
-  const axes = record.axes;
-  if (!Array.isArray(axes)) return null;
-  // 浅校验 axes 至少包含 id 字段即可接受，深层语义校验由 feature 层负责
-  for (const axis of axes) {
-    const axisRecord = asRecord(axis);
-    if (!axisRecord || typeof axisRecord.id !== "string") return null;
-  }
-  return value as SystemModelSyncPayload["model_info"]["models"][number]["semantic_axis_profile"];
-}
-
-function parseRuntimeCacheErrorsPayload(
-  type: string,
-  value: unknown,
-): PayloadParseResult<Record<string, string> | undefined> {
-  if (value === undefined || value === null) {
-    return { ok: true, payload: undefined };
-  }
-  const record = asRecord(value);
-  if (!record) {
-    return invalidPayload(type, "payload.runtime_cache_errors", "object | undefined");
-  }
-  const result: Record<string, string> = {};
-  for (const [key, val] of Object.entries(record)) {
-    if (typeof val === "string") {
-      result[key] = val;
-    }
-    // 非 string 字段直接丢弃，不整体 reject
-  }
-  return { ok: true, payload: Object.keys(result).length > 0 ? result : undefined };
 }
 
 export function parseMotionTuningSamplesStatePayload(

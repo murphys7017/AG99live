@@ -3,6 +3,12 @@
 import assert from "node:assert/strict";
 import { mapInboundEnvelopeToEvent } from "../src/adapter-connection/inbound/inboundEvents.js";
 import type { ProtocolEnvelope } from "../src/types/protocol.js";
+import {
+  makeValidModelSummary,
+  makeValidModelSyncPayload,
+  makeValidSemanticAxisProfile,
+  makeValidVoiceFollowingProfile,
+} from "./fixtures/modelSyncFixture.js";
 
 function makeEnvelope<TPayload>(
   type: string,
@@ -419,12 +425,7 @@ function testModelSyncPayloadModelMissingNameRejected(): void {
 
 function testValidModelSyncPayloadPasses(): void {
   const event = mapInboundEnvelopeToEvent(
-    makeEnvelope("system.model_sync", {
-      model_info: { selected_model: "model-a", models: [{ name: "model-a" }] },
-      conf_name: "default",
-      conf_uid: "conf-1",
-      client_uid: "client-1",
-    }),
+    makeEnvelope("system.model_sync", makeValidModelSyncPayload()),
     defaultContext(),
   );
   assert.equal(event.kind, "model_sync");
@@ -433,16 +434,17 @@ function testValidModelSyncPayloadPasses(): void {
 
 
 function testModelSyncPayloadVoiceFollowingProfileBadTypeRejected(): void {
+  const model = makeValidModelSummary({ voice_following_profile: "bad-string" });
   const event = mapInboundEnvelopeToEvent(
-    makeEnvelope("system.model_sync", {
+    makeEnvelope("system.model_sync", makeValidModelSyncPayload({
       model_info: {
-        selected_model: "model-a",
-        models: [{ name: "model-a", voice_following_profile: "bad-string" }],
+        schema_version: "live2d_scan.v1",
+        driver_priority: ["parameters", "expression", "motion"],
+        selected_model: model.name,
+        available_models: [model.name],
+        models: [model],
       },
-      conf_name: "default",
-      conf_uid: "conf-1",
-      client_uid: "client-1",
-    }),
+    })),
     defaultContext(),
   );
   assert.equal(event.kind, "protocol_error");
@@ -450,16 +452,9 @@ function testModelSyncPayloadVoiceFollowingProfileBadTypeRejected(): void {
 
 function testModelSyncPayloadRuntimeCacheErrorsBadTypeRejected(): void {
   const event = mapInboundEnvelopeToEvent(
-    makeEnvelope("system.model_sync", {
-      model_info: {
-        selected_model: "model-a",
-        models: [{ name: "model-a" }],
-      },
+    makeEnvelope("system.model_sync", makeValidModelSyncPayload({
       runtime_cache_errors: "bad-string",
-      conf_name: "default",
-      conf_uid: "conf-1",
-      client_uid: "client-1",
-    }),
+    })),
     defaultContext(),
   );
   assert.equal(event.kind, "protocol_error");
@@ -481,31 +476,188 @@ function testInvalidMotionTuningSamplesStatePayloadReturnsProtocolError(): void 
 }
 
 function testModelSyncPayloadOldVoiceFollowingProfileRejected(): void {
+  const model = makeValidModelSummary({
+    voice_following_profile: {
+      schema_version: "ag99.voice_following_profile.v1",
+      channels: {},
+    },
+  });
   const event = mapInboundEnvelopeToEvent(
-    makeEnvelope("system.model_sync", {
+    makeEnvelope("system.model_sync", makeValidModelSyncPayload({
       model_info: {
-        selected_model: "model-a",
-        models: [{
-          name: "model-a",
-          voice_following_profile: {
-            schema_version: "ag99.voice_following_profile.v1",
-            channels: {},
-          },
-        }],
+        schema_version: "live2d_scan.v1",
+        driver_priority: ["parameters", "expression", "motion"],
+        selected_model: model.name,
+        available_models: [model.name],
+        models: [model],
       },
-      conf_name: "default",
-      conf_uid: "conf-1",
-      client_uid: "client-1",
-    }),
+    })),
     defaultContext(),
   );
   assert.equal(event.kind, "protocol_error");
   if (event.kind === "protocol_error") {
     assert.equal(
       event.error.path,
-      "payload.model_info.models[].voice_following_profile.schema_version",
+      "payload.model_info.models[0].voice_following_profile.schema_version",
     );
   }
+}
+
+function testModelSyncPayloadRejectsUnknownSelectedModel(): void {
+  const payload = makeValidModelSyncPayload();
+  const modelInfo = payload.model_info;
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.model_sync", {
+      ...payload,
+      model_info: { ...modelInfo, selected_model: "missing-model" },
+    }),
+    defaultContext(),
+  );
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind === "protocol_error") {
+    assert.equal(event.error.path, "payload.model_info.selected_model");
+  }
+}
+
+function testModelSyncPayloadRejectsMalformedSemanticAxisProfile(): void {
+  const model = makeValidModelSummary({
+    semantic_axis_profile: {
+      ...makeValidSemanticAxisProfile(),
+      revision: "1",
+    },
+  });
+  const payload = makeValidModelSyncPayload({
+    model_info: {
+      schema_version: "live2d_scan.v1",
+      driver_priority: ["parameters", "expression", "motion"],
+      selected_model: model.name,
+      available_models: [model.name],
+      models: [model],
+    },
+  });
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.model_sync", payload),
+    defaultContext(),
+  );
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind === "protocol_error") {
+    assert.equal(event.error.path, "payload.model_info.models[0].semantic_axis_profile.revision");
+  }
+}
+
+function testModelSyncPayloadRejectsMalformedVoiceFollowingChannel(): void {
+  const profile = makeValidVoiceFollowingProfile();
+  profile.channels.head_yaw.weight = 2;
+  const model = makeValidModelSummary({ voice_following_profile: profile });
+  const payload = makeValidModelSyncPayload({
+    model_info: {
+      schema_version: "live2d_scan.v1",
+      driver_priority: ["parameters", "expression", "motion"],
+      selected_model: model.name,
+      available_models: [model.name],
+      models: [model],
+    },
+  });
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.model_sync", payload),
+    defaultContext(),
+  );
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind === "protocol_error") {
+    assert.equal(
+      event.error.path,
+      "payload.model_info.models[0].voice_following_profile.channels.head_yaw.weight",
+    );
+  }
+}
+
+function testModelSyncPayloadRejectsNonStringRuntimeCacheError(): void {
+  const payload = makeValidModelSyncPayload({
+    runtime_cache_errors: { scan_cache: 42 },
+  });
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.model_sync", payload),
+    defaultContext(),
+  );
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind === "protocol_error") {
+    assert.equal(event.error.path, "payload.runtime_cache_errors.scan_cache");
+  }
+}
+
+function testModelSyncPayloadRejectsMissingModelUrl(): void {
+  const model = makeValidModelSummary({ model_url: null });
+  const payload = makeValidModelSyncPayload({
+    model_info: {
+      schema_version: "live2d_scan.v1",
+      driver_priority: ["parameters", "expression", "motion"],
+      selected_model: model.name,
+      available_models: [model.name],
+      models: [model],
+    },
+  });
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.model_sync", payload),
+    defaultContext(),
+  );
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind === "protocol_error") {
+    assert.equal(event.error.path, "payload.model_info.models[0].model_url");
+  }
+}
+
+function testModelSyncPayloadRejectsMalformedModelUrl(): void {
+  const model = makeValidModelSummary({ model_url: "not-a-url" });
+  const payload = makeValidModelSyncPayload({
+    model_info: {
+      schema_version: "live2d_scan.v1",
+      driver_priority: ["parameters", "expression", "motion"],
+      selected_model: model.name,
+      available_models: [model.name],
+      models: [model],
+    },
+  });
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.model_sync", payload),
+    defaultContext(),
+  );
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind === "protocol_error") {
+    assert.equal(event.error.path, "payload.model_info.models[0].model_url");
+  }
+}
+
+function testModelSyncPayloadRejectsInconsistentRuntimeCacheErrors(): void {
+  const payload = makeValidModelSyncPayload({
+    runtime_cache_errors: { scan_cache: "outer" },
+  });
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.model_sync", {
+      ...payload,
+      model_info: {
+        ...payload.model_info,
+        runtime_cache_errors: { scan_cache: "inner" },
+      },
+    }),
+    defaultContext(),
+  );
+  assert.equal(event.kind, "protocol_error");
+  if (event.kind === "protocol_error") {
+    assert.equal(event.error.path, "payload.model_info.runtime_cache_errors");
+  }
+}
+
+function testModelSyncPayloadAcceptsMatchingRuntimeCacheErrors(): void {
+  const errors = { scan_cache: "scan failed" };
+  const payload = makeValidModelSyncPayload({ runtime_cache_errors: errors });
+  const event = mapInboundEnvelopeToEvent(
+    makeEnvelope("system.model_sync", {
+      ...payload,
+      model_info: { ...payload.model_info, runtime_cache_errors: errors },
+    }),
+    defaultContext(),
+  );
+  assert.equal(event.kind, "model_sync");
 }
 
 function testMotionLabPersistedAckRequiresEventId(): void {
@@ -555,6 +707,14 @@ function run(): void {
   testModelSyncPayloadRuntimeCacheErrorsBadTypeRejected();
   testModelSyncPayloadVoiceFollowingProfileBadTypeRejected();
   testModelSyncPayloadOldVoiceFollowingProfileRejected();
+  testModelSyncPayloadRejectsUnknownSelectedModel();
+  testModelSyncPayloadRejectsMalformedSemanticAxisProfile();
+  testModelSyncPayloadRejectsMalformedVoiceFollowingChannel();
+  testModelSyncPayloadRejectsNonStringRuntimeCacheError();
+  testModelSyncPayloadRejectsMissingModelUrl();
+  testModelSyncPayloadRejectsMalformedModelUrl();
+  testModelSyncPayloadRejectsInconsistentRuntimeCacheErrors();
+  testModelSyncPayloadAcceptsMatchingRuntimeCacheErrors();
   testInvalidMotionTuningSamplesStatePayloadReturnsProtocolError();
   testMotionLabPersistedAckRequiresEventId();
 
