@@ -313,12 +313,13 @@ function testAudioTimelineWaitsForRealAudioClock(): void {
   assert.equal(failed.length, 0);
 
   const startedFromAudio = scheduler.handlePlaybackTimelineStarted(
-    buildTimelineSnapshot({ source: "audio", phase: "playing" }),
+    buildTimelineSnapshot({ source: "audio", phase: "preparing" }),
   );
   assert.equal(startedFromAudio, true);
   assert.equal(started.length, 1);
   assert.equal(started[0].startReason, "playback_timeline_started");
   assert.equal(started[0].playbackClock?.source, "audio");
+  assert.equal(started[0].playbackClock?.phase, "preparing");
 }
 
 function testMotionOnlyTimelineCanStartFromSyntheticClock(): void {

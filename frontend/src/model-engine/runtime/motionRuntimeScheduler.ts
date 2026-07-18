@@ -278,7 +278,13 @@ export function createMotionRuntimeScheduler(
     if (!entry) {
       return false;
     }
-    if (!canStartFromPlaybackTimeline(entry, playbackClock)) {
+    // This callback is emitted by the real audio "started" event. The shared
+    // timeline can still be preparing until motion reports that it started,
+    // so requiring the aggregate timeline to be playing creates a deadlock.
+    if (
+      playbackClock.source !== "audio"
+      || playbackClock.phase === "terminal"
+    ) {
       if (isTimelineUnavailable(playbackClock)) {
         return failPendingPayloadForTimeline(
           playbackClock,
