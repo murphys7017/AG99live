@@ -533,7 +533,7 @@ verification:
     - npm run test:playback-timeline and npm run test:bilibili-live (passed after sink error-code and redundant busy-gate cleanup)
     - git diff --check (passed)
   checks_failed: []
-  validation_gap: A live Electron end-to-end conversation is still needed to verify the installed AstrBot read-only TTS state hook, output.segment delivery, real audio-clock release, lip sync, and motion start against a real TTS Provider and Live2D model. Mermaid CLI was unavailable in the current frontend toolchain, so the two updated .mmd files were reviewed but not parser-rendered. Six historical custom WebSDK entry files still use @ts-nocheck, so their complete static-type migration remains separate technical debt.
+  validation_gap: Automated tests are intentionally limited to basic boundary input/output smoke checks and are not accepted as evidence that the end-to-end interaction is correct. A live Electron conversation is required to verify AstrBot prompt construction and Persona Effect output, adapter output.segment delivery, real TTS/audio-clock release, lip sync, motion start, and Live2D parameter writes as one continuous chain. Mermaid CLI was unavailable in the current frontend toolchain, so the two updated .mmd files were reviewed but not parser-rendered. Six historical custom WebSDK entry files still use @ts-nocheck, so their complete static-type migration remains separate technical debt.
 runtime:
   mode: unified_playback_timeline_phase3_motion_timeline_context
 backlog:
