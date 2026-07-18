@@ -58,6 +58,11 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
         markUnavailable,
       );
       liveRuntime = result.runtime;
+      console.info("[Live2D] lip sync attachment evaluated.", {
+        audioUrl: options.audioUrl,
+        runtimeAvailable: result.runtime !== null,
+        failureReason: result.failureReason,
+      });
       if (result.failureReason) {
         markUnavailable(result.failureReason, result.runtime !== null);
       }
@@ -115,6 +120,18 @@ function startLiveLipSync(
     return reportLipSyncFailure("lip_sync_model_unavailable", error);
   }
 
+  console.info("[Live2D] lip sync model capability checked.", {
+    hasLipSyncParameters,
+    hasAudioContext: Boolean(
+      window.AudioContext
+      || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext,
+    ),
+  });
+
+  if (!hasLipSyncParameters) {
+    return reportLipSyncFailure("lip_sync_parameters_unconfigured");
+  }
+
   const degradedRuntime = () => hasLipSyncParameters
     ? createRandomLipSyncRuntime(adapter, isCurrentAudio)
     : null;
@@ -150,6 +167,7 @@ function startLiveLipSync(
     let animationFrameId: number | null = null;
     let stopped = false;
     let resumeFallback: LiveLipSyncRuntime | null = null;
+    let firstFrameLogged = false;
 
     const tick = () => {
       if (stopped || !isCurrentAudio()) {
@@ -169,6 +187,14 @@ function startLiveLipSync(
           setLipSyncValue(mouthValue);
         }
         setSpeechEnergyValue(speechEnergyValue);
+        if (!firstFrameLogged) {
+          firstFrameLogged = true;
+          console.info("[Live2D] lip sync first frame written.", {
+            hasLipSyncParameters,
+            mouthValue,
+            speechEnergyValue,
+          });
+        }
       } catch (error) {
         stopped = true;
         animationFrameId = null;

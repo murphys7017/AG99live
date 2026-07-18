@@ -7,6 +7,7 @@ import type {
 } from "./playbackTimelineRuntime.js";
 
 export interface PlaybackTimelineAudioSegmentRunnerCallbacks {
+  onAudioElementCreated?: PlaybackTimelineAudioSegmentSinkCallbacks["onAudioElementCreated"];
   onDurationChanged?: PlaybackTimelineAudioSegmentSinkCallbacks["onDurationChanged"];
   onPlaybackStarted?: PlaybackTimelineAudioSegmentSinkCallbacks["onPlaybackStarted"];
   onEnded?: () => void;
@@ -52,6 +53,14 @@ export function createPlaybackTimelineAudioSegmentRunner<TMotionPayload = unknow
           {
             start: () => {
               void options.audioSegmentSink.start(audioUrl, turnId, messageId, {
+                onAudioElementCreated: (event) => {
+                  options.runtime.attachAudioTimelineClock(
+                    turnId,
+                    messageId,
+                    event.clock,
+                  );
+                  callbacks.onAudioElementCreated?.(event);
+                },
                 onDurationChanged: (durationMs) => {
                   options.runtime.markAudioTimelineDuration(
                     turnId,

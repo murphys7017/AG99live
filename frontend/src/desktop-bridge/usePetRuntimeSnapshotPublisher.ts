@@ -150,6 +150,7 @@ export function createPetRuntimeSnapshotPublisher(
   const snapshotDebounce = createDebounce();
   const modelProjectionDebounce = createDebounce();
   const profileDebounce = createDebounce();
+  let lastPublishedMotionRecordId: string | null = null;
   function buildRuntimeSnapshotInput() {
       const a = options.adapter.state;
       const adapterProjection = buildAdapterRuntimeProjection({
@@ -211,6 +212,16 @@ export function createPetRuntimeSnapshotPublisher(
 
   function publishSnapshotWithRevision(input: ReturnType<typeof buildRuntimeSnapshotInput>): void {
     const snap = buildDesktopRuntimeSnapshot(input);
+    const latestMotionRecord = snap.motionPlaybackRecords[0] ?? null;
+    if (latestMotionRecord?.id !== lastPublishedMotionRecordId) {
+      console.info("[MotionLab] runtime snapshot motion history updated.", {
+        recordCount: snap.motionPlaybackRecords.length,
+        latestRecordId: latestMotionRecord?.id ?? null,
+        latestTurnId: latestMotionRecord?.turnId ?? null,
+        latestMessageId: latestMotionRecord?.messageId ?? null,
+      });
+      lastPublishedMotionRecordId = latestMotionRecord?.id ?? null;
+    }
     options.bridge.publishSnapshot({
       ...snap,
       _publisherId: getPublisherId(),

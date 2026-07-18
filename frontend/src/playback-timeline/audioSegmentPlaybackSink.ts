@@ -7,6 +7,7 @@ import type {
 } from "./audioLipSyncCoordinator.js";
 
 export interface PlaybackTimelineAudioSegmentSinkCallbacks {
+  onAudioElementCreated?: PlaybackTimelineAudioStartCallbacks["onAudioElementCreated"];
   onDurationChanged?: PlaybackTimelineAudioStartCallbacks["onDurationChanged"];
   onPlaybackStarted?: (
     event: Parameters<NonNullable<PlaybackTimelineAudioStartCallbacks["onPlaybackStarted"]>>[0],
@@ -56,7 +57,13 @@ export function createPlaybackTimelineAudioSegmentSink(options: {
       try {
         await options.audioSink.start(audioUrl, {
           onAudioElementCreated: (event) => {
+            console.info("[PlaybackTimeline] audio element created; attaching lip sync.", {
+              turnId,
+              messageId,
+              audioUrl,
+            });
             lipSyncSink.attachAudio(event);
+            callbacks.onAudioElementCreated?.(event);
           },
           onAudioElementDisposed: () => {
             if (lipSyncSink.dispose) {
@@ -70,11 +77,23 @@ export function createPlaybackTimelineAudioSegmentSink(options: {
           },
           onDurationChanged: callbacks.onDurationChanged,
           onPlaybackStarted: (event) => {
-            if (callbacks.onPlaybackStarted?.(event) === false) {
+            const timelineActive = callbacks.onPlaybackStarted?.(event) !== false;
+            console.info("[PlaybackTimeline] audio playback callback received.", {
+              turnId,
+              messageId,
+              startedAtMs: event.startedAtMs,
+              durationMs: event.durationMs,
+              timelineActive,
+            });
+            if (!timelineActive) {
+              console.error("[PlaybackTimeline] lip sync start skipped because audio timeline is inactive.", {
+                turnId,
+                messageId,
+              });
               return;
             }
             if (options.startLipSyncTimelineSink) {
-              options.startLipSyncTimelineSink(
+              const accepted = options.startLipSyncTimelineSink(
                 turnId,
                 messageId,
                 () => {
@@ -82,6 +101,11 @@ export function createPlaybackTimelineAudioSegmentSink(options: {
                   return true;
                 },
               );
+              console.info("[PlaybackTimeline] lip sync timeline start requested.", {
+                turnId,
+                messageId,
+                accepted: accepted !== false,
+              });
             } else {
               lipSyncSink.start();
             }

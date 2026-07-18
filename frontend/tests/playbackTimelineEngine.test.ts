@@ -121,6 +121,26 @@ function testAudioClockTakesPriorityAndExposesUnavailableState(): void {
   assert.equal(snapshot.currentTimeMs, 480);
 }
 
+function testAudioClockReportsPendingBeforeTimelineStart(): void {
+  let audioPlaying = false;
+  const clock = createTimelineClock();
+  const audioClock: AudioPlaybackClock = {
+    getCurrentTimeMs: () => 0,
+    getDurationMs: () => 1200,
+    getPlaybackRate: () => 1,
+    isPlaying: () => audioPlaying,
+  };
+
+  clock.attachAudioClock(audioClock);
+  clock.setExpectedDurationMs(1200);
+  assert.equal(clock.snapshot().clockSource, "audio_pending");
+  assert.equal(clock.snapshot().durationMs, 1200);
+
+  clock.start();
+  audioPlaying = true;
+  assert.equal(clock.snapshot().clockSource, "audio");
+}
+
 function testClockResetClearsPreviousAudioBindingAndDuration(): void {
   let nowMs = 0;
   const clock = createTimelineClock({ now: () => nowMs });
@@ -1637,6 +1657,7 @@ function testMotionTimelineRunTrackerMarksStartedAndTerminalByRunId(): void {
     messageId: "msg-motion",
     turnId: "turn-motion",
     playbackTurnId: "turn-motion",
+    playbackOrigin: "conversation",
     startReason: "timeline",
     queuedDelayMs: 0,
     payloadKind: "semantic_plan",
@@ -1679,6 +1700,7 @@ function testMotionTimelineRunTrackerIgnoresPreviewUnknownAndClearedRuns(): void
     messageId: "msg-preview",
     turnId: "turn-preview",
     playbackTurnId: "turn-preview",
+    playbackOrigin: "manual_preview",
     startReason: "preview",
     queuedDelayMs: 0,
     payloadKind: "semantic_plan",
@@ -1705,6 +1727,7 @@ function testMotionTimelineRunTrackerIgnoresPreviewUnknownAndClearedRuns(): void
     messageId: "msg-clear",
     turnId: "turn-clear",
     playbackTurnId: "turn-clear",
+    playbackOrigin: "conversation",
     startReason: "timeline",
     queuedDelayMs: 0,
     payloadKind: "semantic_plan",
@@ -1731,6 +1754,7 @@ function testMotionTimelineRunTrackerIgnoresPreviewUnknownAndClearedRuns(): void
 async function run(): Promise<void> {
   testSyntheticClockLifecycle();
   testAudioClockTakesPriorityAndExposesUnavailableState();
+  testAudioClockReportsPendingBeforeTimelineStart();
   testClockResetClearsPreviousAudioBindingAndDuration();
   testTimelineCompletesWhenRequiredSinksSettle();
   testEngineStartsSinkCallbacksAndPreservesThemAcrossRegister();

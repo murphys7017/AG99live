@@ -521,6 +521,7 @@ function testMotionCompileFailureEmitsStructuredFeedback(): void {
       messageId: "msg-invalid-axis",
       turnId: "turn-invalid-axis",
       playbackTurnId: "turn-invalid-axis",
+      playbackOrigin: "conversation",
       startReason: "playback_timeline_started",
       queuedDelayMs: 90,
     },
@@ -1228,6 +1229,7 @@ function testMotionResourceUsesCatalogPlaybackInsteadOfDirectPlan(): void {
       messageId: "msg-motion-resource",
       turnId: "turn-motion-resource",
       playbackTurnId: "turn-motion-resource",
+      playbackOrigin: "conversation",
       startReason: "playback_timeline_started",
       queuedDelayMs: 90,
     },
@@ -1369,6 +1371,7 @@ function testMotionStartRejectsPlayerThatOmitsStartedCallback(): void {
       messageId: "msg-plan",
       turnId: "turn-plan",
       playbackTurnId: "turn-plan",
+      playbackOrigin: "conversation",
       startReason: "test",
       queuedDelayMs: 0,
     },
@@ -1452,6 +1455,7 @@ function testMotionStartUsesPlaybackTimelineDuration(): void {
       messageId: "msg-timeline",
       turnId: "turn-timeline",
       playbackTurnId: "turn-timeline",
+      playbackOrigin: "conversation",
       startReason: "playback_timeline_preparing",
       queuedDelayMs: 0,
       playbackClock: {
@@ -1475,6 +1479,7 @@ function testMotionStartUsesPlaybackTimelineDuration(): void {
       messageId: "msg-timeline",
       turnId: "turn-timeline",
       playbackTurnId: "turn-timeline",
+      playbackOrigin: "conversation",
       startReason: "playback_timeline_started",
       queuedDelayMs: 0,
       playbackClock: {
@@ -1520,6 +1525,7 @@ function testMotionStartRejectsAudioUnavailableTimelineForTiming(): void {
       messageId: "msg-audio-unavailable",
       turnId: "turn-audio-unavailable",
       playbackTurnId: "turn-audio-unavailable",
+      playbackOrigin: "conversation",
       startReason: "playback_timeline_started",
       queuedDelayMs: 0,
       playbackClock: {
@@ -1588,6 +1594,7 @@ function testPerformanceCurveFailsWhenAudioTimelineIsUnavailable(): void {
       messageId: "msg-curve-unavailable",
       turnId: "turn-curve-unavailable",
       playbackTurnId: "turn-curve-unavailable",
+      playbackOrigin: "conversation",
       startReason: "playback_timeline_started",
       queuedDelayMs: 0,
       playbackClock: {
@@ -2273,6 +2280,34 @@ function testSpeechOnlyPlaybackUsesTimelineDuration(): void {
   assert.equal(
     plan.parameters.some((item) => item.source === "speech_pose"),
     true,
+  );
+}
+
+function testSpeechOnlyPreparationAcceptsPendingAudioClock(): void {
+  const profile = buildProfile();
+  const engine = useModelEngine({
+    getSelectedModel: () => buildModelWithVoiceFollowingProfile(profile),
+    getSettings: () => ({ motionIntensityScale: 1, axisIntensityScale: {} }),
+    playPlan: () => true,
+    playCatalogMotion: () => false,
+    stopPlan: () => {},
+    onMotionRejected: () => {},
+    canStartSpeechOnlyMotion: () => true,
+    onPlanStarted: ignorePlanStarted,
+  });
+
+  assert.deepEqual(
+    engine.preparePlaybackTimeline({
+      timelineId: "timeline-pending-audio",
+      turnId: "turn-pending-audio",
+      messageId: "msg-pending-audio",
+      phase: "preparing",
+      source: "audio_pending",
+      startedAtMs: null,
+      currentTimeMs: 0,
+      durationMs: 2250,
+    }),
+    { status: "prepared", source: "speech_only" },
   );
 }
 
@@ -2965,6 +3000,7 @@ function run(): void {
   testSpeechOnlyPayloadUsesSelectedModelProfile();
   testSpeechOnlyPayloadRequiresVoiceFollowingProfile();
   testSpeechOnlyPlaybackUsesTimelineDuration();
+  testSpeechOnlyPreparationAcceptsPendingAudioClock();
   testSpeechOnlyPlaybackCanBeSuppressedForFailedMotionSegment();
   testSpeechOnlyPreparationIsNotApplicableWithoutModelCapability();
   testSegmentInterruptDoesNotStopNewerMotionOwner();

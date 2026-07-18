@@ -6,6 +6,7 @@ import type {
 } from "./contracts.js";
 import type { MotionPlaybackClockContext } from "./playbackClock.js";
 import { normalizeTurnId } from "../normalize.js";
+import type { ModelEnginePlaybackOrigin } from "./contracts.js";
 
 export interface PendingInboundMotionPayload {
   payload: NormalizedMotionPayload;
@@ -21,6 +22,7 @@ export interface StartPayloadContext {
   messageId: string;
   turnId: string | null;
   playbackTurnId: string | null;
+  playbackOrigin: ModelEnginePlaybackOrigin;
   startReason: string;
   queuedDelayMs: number;
   playbackClock?: MotionPlaybackClockContext | null;
@@ -105,6 +107,7 @@ export function createMotionRuntimeScheduler(
       turnId: entry.turnId,
       playbackTurnId: entry.playbackTurnId,
       messageId: entry.messageId,
+      playbackOrigin: "conversation",
       startReason,
       queuedDelayMs: Math.max(0, Math.round(performance.now() - entry.receivedAtMs)),
       playbackClock: entry.playbackClock,
@@ -191,6 +194,7 @@ export function createMotionRuntimeScheduler(
         messageId: context.messageId,
         turnId: null,
         playbackTurnId: normalizedPlaybackTurnId,
+        playbackOrigin: "conversation",
         startReason: "motion_turn_id_missing",
         queuedDelayMs: 0,
         playbackClock: context.playbackClock ?? null,
@@ -225,6 +229,7 @@ export function createMotionRuntimeScheduler(
         messageId: entry.messageId,
         turnId: entry.turnId,
         playbackTurnId: entry.playbackTurnId,
+        playbackOrigin: "conversation",
         startReason: "playback_timeline_identity_mismatch",
         queuedDelayMs: 0,
         playbackClock: entry.playbackClock,

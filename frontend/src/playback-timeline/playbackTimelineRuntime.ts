@@ -100,6 +100,11 @@ export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
     messageId: string,
     start: () => boolean | void,
   ) => boolean | void;
+  attachAudioTimelineClock: (
+    turnId: string | null,
+    messageId: string,
+    audioClock: AudioPlaybackClock,
+  ) => void;
   ensureMotionTimelineSinkForSegment: (
     turnId: string | null,
     messageId: string,
@@ -542,6 +547,30 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       engine.getSnapshot(),
     );
     return true;
+  }
+
+  function attachAudioTimelineClock(
+    turnId: string | null,
+    messageId: string,
+    audioClock: AudioPlaybackClock,
+  ): void {
+    const timeline = getTimelineWithSink(
+      "audio.clock_attached",
+      AUDIO_TIMELINE_SINK_ID,
+      turnId,
+      messageId,
+    );
+    if (!timeline) {
+      throw new Error(
+        `Playback timeline missing while attaching audio clock: ${messageId}`,
+      );
+    }
+    timeline.engine.attachAudioClock(audioClock);
+    console.info("[PlaybackTimeline] audio clock attached before playback.", {
+      turnId,
+      messageId,
+      timelineId: timeline.engine.getSnapshot()?.timelineId ?? null,
+    });
   }
 
   function markLipSyncTimelineStarted(
@@ -1054,6 +1083,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     rejectMotionBeforeStart,
     startAudioTimelineSink,
     startLipSyncTimelineSink,
+    attachAudioTimelineClock,
     ensureMotionTimelineSinkForSegment: (turnId, messageId, onInterrupt) =>
       ensureMotionTimelineSink(turnId, messageId, { onInterrupt }),
     markAudioTimelineDuration,

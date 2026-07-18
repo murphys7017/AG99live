@@ -17,7 +17,7 @@ export interface MotionPlaybackRecorderOptions {
     turnId: string | null,
     messageId: string,
   ) => PlaybackTimelineSnapshot | null;
-  onMotionLabRawEvent?: (
+  onMotionLabRawEvent: (
     payload: {
       event_type: string;
       message_id?: string;
@@ -45,13 +45,27 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
     runId: string;
     turnId: string | null;
     messageId: string;
+    playbackOrigin: ModelEnginePlanStartedEvent["playbackOrigin"];
     profileId: string;
     profileRevision?: number;
     transformTrace: Record<string, unknown> | null;
   } | null = null;
 
   function recordMotionPlayback(event: ModelEnginePlanStartedEvent): void {
-    if (event.startReason === "preview") {
+    console.info("[MotionLab] playback plan started.", {
+      playbackOrigin: event.playbackOrigin,
+      startReason: event.startReason,
+      turnId: event.turnId,
+      playbackTurnId: event.playbackTurnId,
+      messageId: event.messageId,
+      runId: event.runId,
+      payloadKind: event.payloadKind,
+    });
+    if (event.playbackOrigin === "manual_preview") {
+      console.info("[MotionLab] manual preview excluded from conversation history.", {
+        messageId: event.messageId,
+        runId: event.runId,
+      });
       return;
     }
 
@@ -59,6 +73,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       runId: event.runId,
       turnId: event.turnId,
       messageId: event.messageId,
+      playbackOrigin: event.playbackOrigin,
       profileId: event.payloadKind === "catalog_motion" ? "" : event.plan.profile_id,
       profileRevision: event.payloadKind === "catalog_motion"
         ? undefined
@@ -116,6 +131,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       assistant_text: record.assistantText,
       payload_kind: event.payloadKind,
       raw: {
+        playbackOrigin: event.playbackOrigin,
         record,
         intent: event.payloadKind === "semantic_intent" ? cloneJson(event.intent) : null,
         speechOnlyRequest: event.payloadKind === "speech_only" ? cloneJson(event.request) : null,
@@ -127,14 +143,15 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
         queuedDelayMs: event.queuedDelayMs,
       },
     };
-    options.onMotionLabRawEvent?.(startedPayload, event.turnId);
+    options.onMotionLabRawEvent(startedPayload, event.turnId);
     if (event.payloadKind === "semantic_intent" || event.payloadKind === "speech_only") {
-      options.onMotionLabRawEvent?.({
+      options.onMotionLabRawEvent({
         ...startedPayload,
         event_type: "motion.frontend_compiled",
         phase: "frontend_compiled",
         raw: {
           ...startedPayload.raw,
+          playbackOrigin: event.playbackOrigin,
           intent: event.payloadKind === "semantic_intent" ? cloneJson(event.intent) : null,
           speechOnlyRequest: event.payloadKind === "speech_only"
             ? cloneJson(event.request)
@@ -161,7 +178,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       run.turnId,
       run.messageId,
     ) ?? null;
-    options.onMotionLabRawEvent?.({
+    options.onMotionLabRawEvent({
       event_type: event.status === "completed"
         ? "motion.playback_completed"
         : "motion.playback_failed",
@@ -171,6 +188,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       profile_id: run.profileId,
       profile_revision: run.profileRevision,
       raw: {
+        playbackOrigin: run.playbackOrigin,
         runId: event.runId,
         status: event.status,
         reason: event.reason ?? "",

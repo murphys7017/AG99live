@@ -4,7 +4,11 @@ import type {
 } from "../../types/protocol.js";
 import { parseSemanticParameterPlan } from "../planParser.js";
 
-export type MotionPlaybackClockSource = "audio" | "synthetic" | "audio_unavailable";
+export type MotionPlaybackClockSource =
+  | "audio"
+  | "audio_pending"
+  | "synthetic"
+  | "audio_unavailable";
 export type MotionPlaybackClockPhase =
   | "preparing"
   | "ready"
@@ -40,7 +44,7 @@ export type MotionTimelinePreparationResult =
 export type PerformanceCurveTimelineResolution =
   | {
     ok: true;
-    clockSource: "audio" | "synthetic";
+    clockSource: "audio" | "audio_pending" | "synthetic";
     targetDurationMs: number;
     speechActive: boolean;
   }
@@ -112,7 +116,7 @@ export function resolvePerformanceCurveTimeline(options: {
     clockSource: clock.source,
     targetDurationMs,
     speechActive:
-      clock.source === "audio"
+      (clock.source === "audio" || clock.source === "audio_pending")
       && clock.phase !== "terminal",
   };
 }

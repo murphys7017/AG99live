@@ -16,6 +16,7 @@ export interface RuntimeAudioPlaybackClock {
 export interface PlaybackTimelineAudioElementContext {
   audioUrl: string;
   audio: HTMLAudioElement;
+  clock: AudioPlaybackClock;
   getAudioCurrentTimeSeconds: () => number;
   isCurrentAudio: () => boolean;
 }
@@ -84,6 +85,7 @@ async function startBrowserAudioPlayback(
   callbacks.onAudioElementCreated?.({
     audioUrl,
     audio,
+    clock,
     getAudioCurrentTimeSeconds: () => Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
     isCurrentAudio: () => activeAudioElement === audio,
   });

@@ -189,7 +189,7 @@ export function createMotionTimelineRunTracker(options: {
 
   return {
     recordStarted(event) {
-      if (event.startReason === "preview") {
+      if (event.playbackOrigin === "manual_preview") {
         return;
       }
       options.markMotionTimelineStarted(event.turnId, event.messageId);

@@ -36,6 +36,12 @@ export function createPlaybackTimelineAudioLipSyncSink(options: {
 }): PlaybackTimelineAudioLipSyncSink {
   const lipSyncRuntime = options.createLipSyncRuntime({
     onUnavailable: (reason, degraded) => {
+      console.error("[PlaybackTimeline] lip sync unavailable.", {
+        turnId: options.turnId,
+        messageId: options.messageId,
+        reason,
+        degraded,
+      });
       options.pushHistory(
         "system",
         degraded
@@ -44,12 +50,22 @@ export function createPlaybackTimelineAudioLipSyncSink(options: {
       );
     },
     onStarted: () => {
+      console.info("[PlaybackTimeline] lip sync started.", {
+        turnId: options.turnId,
+        messageId: options.messageId,
+      });
       options.markLipSyncTimelineStarted(
         options.turnId,
         options.messageId,
       );
     },
     onTerminal: (terminal, reason) => {
+      console.info("[PlaybackTimeline] lip sync terminal.", {
+        turnId: options.turnId,
+        messageId: options.messageId,
+        terminal,
+        reason,
+      });
       options.markLipSyncTimelineTerminal(
         options.turnId,
         options.messageId,
@@ -61,6 +77,11 @@ export function createPlaybackTimelineAudioLipSyncSink(options: {
 
   return {
     attachAudio(event) {
+      console.info("[PlaybackTimeline] lip sync audio attached.", {
+        turnId: options.turnId,
+        messageId: options.messageId,
+        audioUrl: event.audioUrl,
+      });
       lipSyncRuntime.attachAudio({
         audioUrl: event.audioUrl,
         audio: event.audio,

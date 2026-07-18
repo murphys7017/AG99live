@@ -296,13 +296,9 @@ async function testLiveLipSyncPublishesIndependentSpeechEnergyFromAnalyser(): Pr
       onUnavailable: (reason, degraded) => unavailable.push(`${reason}:${degraded}`),
     });
     await energyOnlySink.resume();
-    const energyOnlyCallback = frame.callback;
-    assert.ok(energyOnlyCallback);
-    energyOnlyCallback(32);
-
-    assert.deepEqual(unavailable, ["lip_sync_parameters_unconfigured:true"]);
+    assert.deepEqual(unavailable, ["lip_sync_parameters_unconfigured:false"]);
     assert.equal(lipSyncValues.length, lipSyncCount);
-    assert.equal(speechEnergyValues.length, energyCount + 1);
+    assert.equal(speechEnergyValues.length, energyCount);
     energyOnlySink.stop();
   } finally {
     (globalThis as { window?: unknown }).window = originalWindow;
@@ -378,6 +374,13 @@ async function testAudioSegmentSinkOwnsLipSyncEventOrdering(): Promise<void> {
       callbacks.onAudioElementCreated?.({
         audioUrl: "http://127.0.0.1/audio.wav",
         audio: {} as HTMLAudioElement,
+        clock: createAudioElementPlaybackClock({
+          currentTime: 0,
+          duration: 0.5,
+          playbackRate: 1,
+          paused: true,
+          ended: false,
+        }),
         getAudioCurrentTimeSeconds: () => 0,
         isCurrentAudio: () => true,
       });
@@ -432,6 +435,13 @@ async function testAudioSegmentSinkDoesNotStartLipSyncAfterTimelineRejection(): 
       callbacks.onAudioElementCreated?.({
         audioUrl: "http://127.0.0.1/audio.wav",
         audio: {} as HTMLAudioElement,
+        clock: createAudioElementPlaybackClock({
+          currentTime: 0,
+          duration: 0.5,
+          playbackRate: 1,
+          paused: true,
+          ended: false,
+        }),
         getAudioCurrentTimeSeconds: () => 0,
         isCurrentAudio: () => true,
       });

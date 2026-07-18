@@ -76,6 +76,7 @@ export function startNormalizedMotionPayload(
     messageId: context.messageId,
     turnId: context.turnId,
     playbackTurnId: context.playbackTurnId,
+    playbackOrigin: context.playbackOrigin,
     startReason: context.startReason,
     queuedDelayMs: context.queuedDelayMs,
   });
@@ -134,7 +135,10 @@ function isSpeechActiveForPayload(
   if (timeline?.source === "audio_unavailable") {
     return false;
   }
-  return timeline?.source === "audio" && timeline.phase !== "terminal";
+  return (
+    (timeline?.source === "audio" || timeline?.source === "audio_pending")
+    && timeline.phase !== "terminal"
+  );
 }
 
 export function prepareSemanticMotionPayload(
@@ -226,6 +230,7 @@ function prepareCompilableMotionPayload(
       messageId: context.messageId,
       turnId: context.turnId,
       playbackTurnId: context.playbackTurnId,
+      playbackOrigin: context.playbackOrigin,
       startReason: context.startReason,
       queuedDelayMs: context.queuedDelayMs,
       reason: compileResult.reason,
@@ -291,6 +296,7 @@ function startCatalogMotionPayload(
         messageId: context.messageId,
         turnId: context.turnId,
         playbackTurnId: context.playbackTurnId,
+        playbackOrigin: context.playbackOrigin,
         startReason: context.startReason,
         queuedDelayMs: context.queuedDelayMs,
         payloadKind: payload.kind,
@@ -334,7 +340,10 @@ function startCompilableMotionPayload(
   }
   let prepared = preparedSemanticMotion;
   if (!prepared) {
-    if (context.playbackClock?.source === "audio") {
+    if (
+      context.playbackClock?.source === "audio"
+      || context.playbackClock?.source === "audio_pending"
+    ) {
       const reason = "motion_plan_not_prepared_before_audio_start";
       state.setLastCompileReason(reason);
       state.setState("failed", `动作启动失败：${reason}`, null);
@@ -388,6 +397,7 @@ function startCompilableMotionPayload(
           messageId: context.messageId,
           turnId: context.turnId,
           playbackTurnId: context.playbackTurnId,
+          playbackOrigin: context.playbackOrigin,
           startReason: context.startReason,
           queuedDelayMs: context.queuedDelayMs,
           payloadKind: payload.kind,
@@ -458,6 +468,7 @@ function startCompiledMotionResource(
         messageId: context.messageId,
         turnId: context.turnId,
         playbackTurnId: context.playbackTurnId,
+        playbackOrigin: context.playbackOrigin,
         startReason: context.startReason,
         queuedDelayMs: context.queuedDelayMs,
         payloadKind: payload.kind,
@@ -533,6 +544,7 @@ function startDirectPlanPayload(
           messageId: context.messageId,
           turnId: context.turnId,
           playbackTurnId: context.playbackTurnId,
+          playbackOrigin: context.playbackOrigin,
           startReason: context.startReason,
           queuedDelayMs: context.queuedDelayMs,
           payloadKind: payload.kind,
@@ -588,6 +600,7 @@ function startDirectPlanMotionResource(
         messageId: context.messageId,
         turnId: context.turnId,
         playbackTurnId: context.playbackTurnId,
+        playbackOrigin: context.playbackOrigin,
         startReason: context.startReason,
         queuedDelayMs: context.queuedDelayMs,
         payloadKind: payload.kind,

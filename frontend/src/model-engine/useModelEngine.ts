@@ -209,6 +209,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         messageId: normalizedMessageId,
         turnId: playbackClock.turnId,
         playbackTurnId: playbackClock.turnId,
+        playbackOrigin: "conversation",
         startReason: "speech_only",
         queuedDelayMs: 0,
         playbackClock,
@@ -234,12 +235,16 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   function preparePlaybackTimeline(
     playbackClock: MotionPlaybackClockContext,
   ): MotionTimelinePreparationResult {
+    const audioDurationMs = typeof playbackClock.durationMs === "number"
+      && Number.isFinite(playbackClock.durationMs)
+      && playbackClock.durationMs > 0
+      ? playbackClock.durationMs
+      : null;
     if (
-      playbackClock.source !== "audio"
+      playbackClock.source !== "audio_pending"
+      && playbackClock.source !== "audio"
       || playbackClock.phase === "terminal"
-      || typeof playbackClock.durationMs !== "number"
-      || !Number.isFinite(playbackClock.durationMs)
-      || playbackClock.durationMs <= 0
+      || audioDurationMs === null
     ) {
       return {
         status: "failed",
@@ -287,13 +292,14 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         messageId: normalizedMessageId,
         turnId: playbackClock.turnId,
         playbackTurnId: playbackClock.turnId,
+        playbackOrigin: "conversation",
         startReason: "speech_only_preparing",
         queuedDelayMs: 0,
         playbackClock,
       };
     }
 
-    const durationMs = Math.round(playbackClock.durationMs);
+    const durationMs = Math.round(audioDurationMs);
     const selectedModelPath = dependencies.getSelectedModel()?.model_path.trim() ?? "";
     const cached = preparedSemanticMotions.get(key);
     if (
@@ -354,6 +360,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         messageId: "preview",
         turnId: null,
         playbackTurnId: null,
+        playbackOrigin: "manual_preview",
         startReason: "preview",
         queuedDelayMs: 0,
       },

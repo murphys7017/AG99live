@@ -149,6 +149,15 @@ export function configurePlaybackTimelineMotionRuntime(options: {
   });
   playbackTimeline.setAudioTimelineDurationReadyHandler(
     (turnId, messageId, preparedTimeline) => {
+      console.info("[ModelEngine] audio timeline duration ready for motion preparation.", {
+        turnId,
+        messageId,
+        timelineId: preparedTimeline.timelineId,
+        phase: preparedTimeline.phase,
+        clockSource: preparedTimeline.clockSource,
+        durationMs: preparedTimeline.durationMs,
+        sinks: preparedTimeline.sinks,
+      });
       const result = motionEngine.preparePlaybackTimeline(
         projectMotionPlaybackClock(preparedTimeline),
       );

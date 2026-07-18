@@ -8,6 +8,7 @@ const baseEvent = {
   messageId: "message-1",
   turnId: "turn-1",
   playbackTurnId: "turn-1",
+  playbackOrigin: "conversation",
   startReason: "audio_started",
   queuedDelayMs: 0,
   payloadKind: "semantic_plan",
@@ -107,12 +108,28 @@ function testIgnoresStaleTerminalAndRecordsMatchingTerminal(): void {
 
 function testPreviewDoesNotEnterHistory(): void {
   const { recorder, rawEvents } = createRecorder();
-  recorder.recordMotionPlayback({ ...baseEvent, startReason: "preview" });
+  recorder.recordMotionPlayback({
+    ...baseEvent,
+    playbackOrigin: "manual_preview",
+    startReason: "preview",
+  });
   assert.equal(recorder.motionPlaybackRecords.value.length, 0);
   assert.equal(rawEvents.length, 0);
+}
+
+function testConversationPlaybackIsRecordedEvenWithPreviewLikeReason(): void {
+  const { recorder, rawEvents } = createRecorder();
+  recorder.recordMotionPlayback({
+    ...baseEvent,
+    playbackOrigin: "conversation",
+    startReason: "preview",
+  });
+  assert.equal(recorder.motionPlaybackRecords.value.length, 1);
+  assert.equal(rawEvents[0]?.event_type, "motion.playback_started");
 }
 
 testRecordsPlaybackWithoutSessionWrites();
 testIgnoresStaleTerminalAndRecordsMatchingTerminal();
 testPreviewDoesNotEnterHistory();
+testConversationPlaybackIsRecordedEvenWithPreviewLikeReason();
 console.log("motionPlaybackRecorder tests passed");

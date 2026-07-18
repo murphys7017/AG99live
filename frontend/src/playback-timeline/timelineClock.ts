@@ -118,12 +118,17 @@ export function createTimelineClock(
         && pausedAtMs === null
         && stoppedAtMs === null,
       );
+      const audioPending = audioClock !== null && startedAtMs === null;
       return {
         startedAtMs,
         currentTimeMs: getSyntheticCurrentTimeMs(atMs),
         durationMs: expectedDurationMs,
         playbackRate: 1,
-        clockSource: audioUnavailable ? "audio_unavailable" : "synthetic",
+        clockSource: audioPending
+          ? "audio_pending"
+          : audioUnavailable
+            ? "audio_unavailable"
+            : "synthetic",
         paused: pausedAtMs !== null,
         stopped: stoppedAtMs !== null,
       };

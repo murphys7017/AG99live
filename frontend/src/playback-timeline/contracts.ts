@@ -9,7 +9,11 @@ export type TimelinePhase =
   | "failed"
   | "interrupted";
 
-export type TimelineClockSource = "audio" | "synthetic" | "audio_unavailable";
+export type TimelineClockSource =
+  | "audio"
+  | "audio_pending"
+  | "synthetic"
+  | "audio_unavailable";
 
 export type SinkTerminal =
   | "idle"

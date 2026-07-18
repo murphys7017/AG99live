@@ -560,6 +560,43 @@ function testUnavailablePlaybackTimelineFailsPendingMotion(): void {
   assert.equal(failed[0].startReason, "playback_timeline_audio_unavailable_before_motion_start");
 }
 
+function testPendingAudioTimelineKeepsMotionUntilAudioStarts(): void {
+  resetTimers();
+  const session = buildSession();
+  setAudioWaiting(session);
+  const { scheduler, started, failed } = createHarness(session);
+
+  assert.equal(
+    scheduler.queueInboundPayload(buildCurvePayload(), {
+      messageId: "msg-1",
+      turnId: "turn-1",
+      playbackTurnId: "turn-1",
+      receivedAtMs: 900,
+      playbackClock: buildTimelineSnapshot({
+        phase: "preparing",
+        source: "audio_pending",
+        startedAtMs: null,
+        currentTimeMs: 0,
+      }),
+    }),
+    true,
+  );
+  assert.equal(started.length, 0);
+  assert.equal(failed.length, 0);
+
+  assert.equal(
+    scheduler.handlePlaybackTimelineStarted(buildTimelineSnapshot({
+      phase: "playing",
+      source: "audio",
+      startedAtMs: 1200,
+      currentTimeMs: 0,
+    })),
+    true,
+  );
+  assert.equal(started.length, 1);
+  assert.equal(failed.length, 0);
+}
+
 function run(): void {
   testQueuedPayloadRemainsOwnedUntilTimelineSettles();
   testQueuedPayloadWaitsForPreparingTimelineWithoutIndependentDeadline();
@@ -575,6 +612,7 @@ function run(): void {
   testTimelineStartReturnsFalseWithoutQueuedMotion();
   testCurvePayloadRequiresTimelineBeforeInitialTimeout();
   testPlaybackTimelineStartRefreshesPendingPlaybackTimeline();
+  testPendingAudioTimelineKeepsMotionUntilAudioStarts();
   testUnavailablePlaybackTimelineFailsPendingMotion();
   console.log("motionRuntimeScheduler tests passed");
 }

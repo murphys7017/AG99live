@@ -65,6 +65,12 @@ export function createMotionLabOutboundQueue(options: {
           reportError(`MotionLab event send rejected; retained for reconnect (event_id=${event.eventId}).`);
           return;
         }
+        console.info("[MotionLab] raw event sent to adapter.", {
+          eventId: event.eventId,
+          eventType: event.payload.event_type,
+          turnId: event.turnId,
+          messageId: event.payload.message_id ?? "",
+        });
         inFlight.add(event.eventId);
       }
     } finally {
@@ -87,8 +93,19 @@ export function createMotionLabOutboundQueue(options: {
         },
         turnId,
       };
+      console.info("[MotionLab] enqueueing raw event.", {
+        eventType: payload.event_type,
+        turnId,
+        messageId: payload.message_id ?? "",
+      });
       await options.store.put(event);
       pending.set(eventId, event);
+      console.info("[MotionLab] raw event persisted locally.", {
+        eventId,
+        eventType: payload.event_type,
+        turnId,
+        messageId: payload.message_id ?? "",
+      });
       void flush().catch((error) => reportError("MotionLab queue flush failed.", error));
       return eventId;
     },

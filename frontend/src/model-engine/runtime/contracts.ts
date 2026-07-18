@@ -24,6 +24,8 @@ export type ModelEngineStatus =
   | "playing"
   | "failed";
 
+export type ModelEnginePlaybackOrigin = "conversation" | "manual_preview";
+
 export interface PlayPlanOptions {
   softHandoff?: boolean;
   onStarted: (plan: MotionPlanPayload, runId: string) => void;
@@ -40,6 +42,7 @@ interface ModelEnginePlanStartedEventBase {
   messageId: string;
   turnId: string | null;
   playbackTurnId: string | null;
+  playbackOrigin: ModelEnginePlaybackOrigin;
   startReason: string;
   queuedDelayMs: number;
   payloadKind: NormalizedMotionPayload["kind"] | "speech_only";
@@ -100,6 +103,7 @@ interface ModelEngineCompileFailedEventBase {
   messageId: string;
   turnId: string | null;
   playbackTurnId: string | null;
+  playbackOrigin: ModelEnginePlaybackOrigin;
   startReason: string;
   queuedDelayMs: number;
   reason: string;

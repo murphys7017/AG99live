@@ -296,6 +296,17 @@ export function createDesktopBridge(): DesktopBridgeInstance {
           if (nextPub === currentPub && nextRev <= currentRev) {
             return;
           }
+          const previousLatestRecordId = state.snapshot.motionPlaybackRecords[0]?.id ?? null;
+          const nextLatestRecordId = nextSnapshot.motionPlaybackRecords[0]?.id ?? null;
+          if (previousLatestRecordId !== nextLatestRecordId) {
+            console.info("[MotionLab] runtime snapshot received by window.", {
+              windowRole: document.documentElement.dataset.windowRole ?? "unknown",
+              recordCount: nextSnapshot.motionPlaybackRecords.length,
+              latestRecordId: nextLatestRecordId,
+              latestTurnId: nextSnapshot.motionPlaybackRecords[0]?.turnId ?? null,
+              latestMessageId: nextSnapshot.motionPlaybackRecords[0]?.messageId ?? null,
+            });
+          }
           const stabilizedSnapshot = reuseStableRuntimeSnapshotCollections(
             state.snapshot,
             nextSnapshot,

@@ -175,6 +175,12 @@ function emitFakeAudioElementCreated(
   callbacks.onAudioElementCreated?.({
     audioUrl,
     audio: {} as HTMLAudioElement,
+    clock: {
+      getCurrentTimeMs: () => 0,
+      getDurationMs: () => 1000,
+      getPlaybackRate: () => 1,
+      isPlaying: () => false,
+    },
     getAudioCurrentTimeSeconds: () => 0,
     isCurrentAudio: () => true,
   });
@@ -258,6 +264,7 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
   const state = buildState();
   const startOptionsRef: { current: PlaybackTimelineAudioStartCallbacks | null } = { current: null };
   const sessionEvents: string[] = [];
+  const clockSourcesBeforeAudioStart: string[] = [];
   const audioTimelineStarted: Array<{
     turnId: string | null;
     messageId: string;
@@ -269,6 +276,9 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
     audioSink: buildAudioSink({
       start: async (url, callbacks) => {
         emitFakeAudioElementCreated(callbacks, url);
+        clockSourcesBeforeAudioStart.push(
+          getSegmentTimelineSnapshot(runtime, "turn-1", "msg-1")?.clockSource ?? "missing",
+        );
         startOptionsRef.current = callbacks;
         callbacks.onDurationChanged?.(1250);
         callbacks.onPlaybackStarted?.({
@@ -308,6 +318,7 @@ async function testAudioPlaybackCreatesAudioClockTimeline(): Promise<void> {
   await flushMicrotasks();
 
   assert.ok(startOptionsRef.current);
+  assert.deepEqual(clockSourcesBeforeAudioStart, ["audio_pending"]);
   const snapshot = getSegmentTimelineSnapshot(runtime, "turn-1", "msg-1");
   assert.ok(snapshot);
   assert.equal(snapshot?.phase, "playing");

@@ -579,6 +579,42 @@ export class LAppModel extends CubismUserModel {
         this._lipSyncIds.pushBack(this._modelSetting.getLipSyncParameterId(i));
       }
 
+      // Some valid models expose a writable mouth parameter but omit the
+      // optional LipSync group from model3.json. Discover that capability
+      // explicitly so audio lip sync does not silently become energy-only.
+      if (this._lipSyncIds.getSize() === 0 && this._model != null) {
+        const idManager = CubismFramework.getIdManager();
+        const mouthParameterNames = [
+          "ParamMouthOpenY",
+          "PARAM_MOUTH_OPEN_Y",
+          "ParamMouthOpen",
+          "PARAM_MOUTH_OPEN",
+        ];
+        for (const parameterName of mouthParameterNames) {
+          const parameterId = idManager?.getId(parameterName);
+          if (!parameterId) {
+            continue;
+          }
+          const parameterIndex = this._model.getParameterIndex(parameterId);
+          if (
+            parameterIndex >= 0
+            && parameterIndex < this._model.getParameterCount()
+          ) {
+            this._lipSyncIds.pushBack(parameterId);
+            console.info(
+              `[LAppModel] lip sync parameter auto-detected: ${parameterName}`,
+            );
+            break;
+          }
+        }
+      }
+
+      if (this._lipSyncIds.getSize() === 0) {
+        console.error(
+          "[LAppModel] no writable lip sync parameter is configured or discoverable.",
+        );
+      }
+
       this._state = LoadStep.SetupLayout;
 
       // callback

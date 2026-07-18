@@ -190,6 +190,15 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     pushHistory: (role, text) => adapter.pushHistory(role, text),
     getPlayerMessage: () => motionPlayer.state.message,
     onPlanStarted: (event) => {
+      console.info("[MotionLifecycle] plan started callback received.", {
+        playbackOrigin: event.playbackOrigin,
+        startReason: event.startReason,
+        turnId: event.turnId,
+        playbackTurnId: event.playbackTurnId,
+        messageId: event.messageId,
+        runId: event.runId,
+        payloadKind: event.payloadKind,
+      });
       motionTimelineRunTracker.recordStarted(event);
       motionPlaybackRecorder.recordMotionPlayback(event);
     },
@@ -214,6 +223,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
             : null,
           feedback: event.feedback ? cloneJson(event.feedback) : null,
           diagnostics: cloneJson(event.diagnostics),
+          playbackOrigin: event.playbackOrigin,
           reason: event.reason,
           playbackTurnId: event.playbackTurnId,
           queuedDelayMs: event.queuedDelayMs,
@@ -243,6 +253,9 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     { immediate: true },
   );
   adapter.setMotionLabRawEventRecordedHandler((eventId) => {
+    console.info("[MotionLab] backend persistence acknowledged.", {
+      eventId,
+    });
     void motionLabOutboundQueue.acknowledgePersisted(eventId).catch((error) => {
       const details = error instanceof Error ? error.message : String(error);
       const message = `MotionLab persisted acknowledgement failed: ${details}`;
