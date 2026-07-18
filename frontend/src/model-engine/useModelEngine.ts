@@ -13,7 +13,6 @@ import type {
   ModelEngineDependencies,
   ModelEngineHistoryRole,
   ModelEngineStatus,
-  MotionRuntimeSchedulerDependencies,
   MotionStartDependencies,
 } from "./runtime/contracts.js";
 import type {
@@ -74,10 +73,6 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     dependencies.pushHistory?.(role, text);
   }
 
-  const runtimeSchedulerDependencies: MotionRuntimeSchedulerDependencies = {
-    getCurrentTurnId: dependencies.getCurrentTurnId,
-  };
-
   const motionStartDependencies: MotionStartDependencies = {
     getSelectedModel: dependencies.getSelectedModel,
     getSettings: dependencies.getSettings,
@@ -109,7 +104,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     pushHistory,
   };
 
-  const runtimeScheduler = createMotionRuntimeScheduler(runtimeSchedulerDependencies, {
+  const runtimeScheduler = createMotionRuntimeScheduler({
     onPendingStateChanged: (pendingCount, pendingMessageId) => {
       state.pendingCount = pendingCount;
       state.pendingMessageId = pendingMessageId;

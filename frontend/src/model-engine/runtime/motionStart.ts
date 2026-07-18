@@ -10,7 +10,6 @@ import {
   retimeSemanticParameterPlan,
 } from "./playbackClock.js";
 import type {
-  ModelEngineStatus,
   MotionRuntimeStateController,
   MotionStartDependencies,
 } from "./contracts.js";

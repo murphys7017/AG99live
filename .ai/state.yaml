@@ -1,12 +1,15 @@
 task:
-  class: bugfix
-  risk: medium
+  class: maintenance
+  risk: high
   phase: validation_complete
   status: complete
-  scope: Make system.model_sync a strict runtime boundary and remove malformed-model preservation and selected-model fallback behavior
+  scope: Remove zero-reference frontend, adapter, protocol, prompt, and AG99-owned WebSDK sample code without changing current runtime behavior or official compatibility boundaries
 context:
   confidence: high
   assumptions:
+    - The official AstrBot <@anim> v3 compatibility entry and internal v3 manual preview remain supported; they are not historical fallback paths.
+    - Live2D Cubism Framework sources remain vendor-owned and are excluded from dead-code cleanup; only AG99-owned WebSDK sample remnants are removed.
+    - Performance curve hint v1 is the current schema name, and random lip-sync degradation is an explicit runtime policy rather than obsolete compatibility code.
     - system.model_sync is accepted only when the selected model, model inventory, runtime-consumed model fields, semantic profile, voice-following profile, resource ownership data, and duplicated runtime cache diagnostics are structurally consistent.
     - selected_model must name an entry in models; the frontend never substitutes the first model when backend selection is invalid.
     - output.segment carries one canonical assistant text source; audio does not carry a second caption copy.
@@ -266,6 +269,12 @@ architecture:
     - Text sends are serialized across asynchronous desktop capture, and currentTurnId advances only after the matching input.text envelope is sent successfully.
 verification:
   checks_run:
+    - python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q (281 passed after historical-code cleanup)
+    - python scripts/check_protocol_schema_manifest.py and python -m compileall -q astrbot_plugin_ag99live_adapter (passed)
+    - python -m pyflakes on every changed adapter production module (passed with no findings)
+    - Adapter top-level function reference scan found no zero-reference production functions
+    - npm test and npm run build (complete frontend suite, TypeScript typechecks, WebSDK, and Electron production build passed)
+    - npx tsc --noEmit -p tsconfig.json --noUnusedLocals --noUnusedParameters (passed)
     - npm run test:inbound-events (passed with strict model summary, selected model, semantic profile, voice-following channel, model URL, and runtime cache diagnostics regressions)
     - Real Mk6 scanner output plus ensured semantic_axis_profile was accepted by the compiled frontend model_sync parser
     - npm test (complete frontend suite passed after strict model_sync boundary changes)

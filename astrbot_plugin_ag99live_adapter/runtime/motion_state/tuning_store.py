@@ -3,9 +3,12 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Callable
 
-from ...motion.motion_intent import PARAMETER_PLAN_SOURCES
 from ...prompts.motion_selector import resolve_motion_reference_examples
 from ...prompts.semantic_axis_prompt import profile_prompt_axes
+
+PARAMETER_PLAN_SOURCES = frozenset(
+    {"semantic_axis", "coupling", "speech_pose", "expression", "continuity", "manual"}
+)
 
 
 class MotionTuningStore:
@@ -195,9 +198,7 @@ class MotionTuningStore:
                 }
             )
             duration_ms = None
-            mode = "expressive"
             if isinstance(adjusted_plan, dict):
-                mode = str(adjusted_plan.get("mode") or "expressive").strip() or "expressive"
                 timing = adjusted_plan.get("timing")
                 if isinstance(timing, dict):
                     duration_ms = timing.get("duration_ms")

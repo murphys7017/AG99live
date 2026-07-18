@@ -46,21 +46,7 @@ export function updateModelConfig(resourcePath: string, modelDirectory: string, 
   if (kScale !== undefined) {
     CurrentKScale = kScale;
   }
-  // Update ModelDirSize when ModelDir changes
-  ModelDirSize = ModelDir.length;
 }
-
-// Export ModelDirSize as a variable instead of a constant
-export let ModelDirSize = ModelDir.length;
-
-// モデルの後ろにある背景の画像ファイル
-export const BackImageName = 'back_class_normal.png';
-
-// 歯車
-export const GearImageName = 'icon_gear.png';
-
-// 終了ボタン
-export const PowerImageName = 'CloseNormal.png';
 
 // モデル定義---------------------------------------------
 // モデルを配置したディレクトリ名の配列

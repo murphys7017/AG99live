@@ -250,8 +250,13 @@ def test_emit_message_chain_converts_audio_off_thread(
     monkeypatch,
 ) -> None:
     TurnCoordinator = _load_module(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
-    Record = module.Record
+    module = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.runtime.turn_coordinator"
+    )
+    message_utils = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.runtime.message_utils"
+    )
+    Record = message_utils.Record
     to_thread_calls: list[tuple[object, tuple[object, ...]]] = []
 
     async def fake_to_thread(func, *args):

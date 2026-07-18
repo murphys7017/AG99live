@@ -64,6 +64,13 @@ def _load_module():
     return importlib.reload(module)
 
 
+def _set_remote_operator_online_computers(computers: list[str]) -> None:
+    registry = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.runtime.remote_operator_registry"
+    )
+    registry.set_remote_operator_online_computers(computers)
+
+
 class EventStub:
     def __init__(
         self,
@@ -104,7 +111,7 @@ def test_prompt_contributor_skips_when_no_online_computer(
             ],
         },
     )
-    module.set_remote_operator_online_computers([])
+    _set_remote_operator_online_computers([])
 
     contributor = module.AG99liveRemoteOperatorPromptContributor()
     payload = asyncio.run(contributor.collect(EventStub(), None, None))
@@ -129,7 +136,7 @@ def test_prompt_contributor_injects_only_online_computer_keys(
             ],
         },
     )
-    module.set_remote_operator_online_computers(["work", "unknown"])
+    _set_remote_operator_online_computers(["work", "unknown"])
 
     contributor = module.AG99liveRemoteOperatorPromptContributor()
     extension = asyncio.run(contributor.collect(EventStub(), None, None))
@@ -169,7 +176,7 @@ def test_prompt_contributor_reads_computer_entries(
             ],
         },
     )
-    module.set_remote_operator_online_computers(["work"])
+    _set_remote_operator_online_computers(["work"])
 
     contributor = module.AG99liveRemoteOperatorPromptContributor()
     extension = asyncio.run(contributor.collect(EventStub(), None, None))
@@ -203,7 +210,7 @@ def test_prompt_contributor_describes_opencode_target_without_execution_settings
             ],
         },
     )
-    module.set_remote_operator_online_computers(["code"])
+    _set_remote_operator_online_computers(["code"])
 
     contributor = module.AG99liveRemoteOperatorPromptContributor()
     extension = asyncio.run(contributor.collect(EventStub(), None, None))
@@ -232,7 +239,7 @@ def test_prompt_contributor_uses_configured_default_when_online(
             ],
         },
     )
-    module.set_remote_operator_online_computers(["server", "work"])
+    _set_remote_operator_online_computers(["server", "work"])
 
     contributor = module.AG99liveRemoteOperatorPromptContributor()
     extension = asyncio.run(contributor.collect(EventStub(), None, None))
@@ -258,7 +265,7 @@ def test_prompt_contributor_skips_non_ag99live_events(
             ],
         },
     )
-    module.set_remote_operator_online_computers(["work"])
+    _set_remote_operator_online_computers(["work"])
 
     contributor = module.AG99liveRemoteOperatorPromptContributor()
     payload = asyncio.run(contributor.collect(EventStub("other_platform"), None, None))
@@ -282,7 +289,7 @@ def test_parse_remote_operator_request_accepts_remote_operator_json(
             ],
         },
     )
-    module.set_remote_operator_online_computers(["work"])
+    _set_remote_operator_online_computers(["work"])
     view = types.SimpleNamespace(
         final_result='{"computer":"work","profile":"simple","prompt":"打开浏览器并搜索天气"}',
         core_result=None,
@@ -315,7 +322,7 @@ def test_parse_remote_operator_request_rejects_extra_field(
             ],
         },
     )
-    module.set_remote_operator_online_computers(["work"])
+    _set_remote_operator_online_computers(["work"])
     view = types.SimpleNamespace(
         final_result='{"computer":"work","profile":"simple","prompt":"do it","steps":[]}',
         core_result=None,
@@ -347,7 +354,7 @@ def test_parse_remote_operator_request_rejects_unavailable_computer(
             ],
         },
     )
-    module.set_remote_operator_online_computers(["work"])
+    _set_remote_operator_online_computers(["work"])
     view = types.SimpleNamespace(
         final_result='{"computer":"server","profile":"simple","prompt":"检查服务"}',
         core_result=None,
@@ -378,7 +385,7 @@ def test_parse_remote_operator_request_rejects_unknown_profile(
             ],
         },
     )
-    module.set_remote_operator_online_computers(["work"])
+    _set_remote_operator_online_computers(["work"])
     view = types.SimpleNamespace(
         final_result='{"computer":"work","profile":"ultra","prompt":"检查服务"}',
         core_result=None,
@@ -409,7 +416,7 @@ def test_prompt_contributor_skips_remote_operator_result_event(
             ],
         },
     )
-    module.set_remote_operator_online_computers(["work"])
+    _set_remote_operator_online_computers(["work"])
 
     class ResultEventStub(EventStub):
         def get_extra(self, key):
@@ -439,7 +446,7 @@ def test_result_contributor_schedules_remote_operator_task(
             ],
         },
     )
-    module.set_remote_operator_online_computers(["work"])
+    _set_remote_operator_online_computers(["work"])
 
     scheduled = []
 
@@ -535,7 +542,7 @@ def test_main_prompt_collector_accepts_astrbot_collector_signature(
             ],
         },
     )
-    module.set_remote_operator_online_computers(["work"])
+    _set_remote_operator_online_computers(["work"])
 
     collector = module.AG99liveRemoteOperatorPromptExtensionCollector()
     extensions = asyncio.run(
@@ -570,7 +577,7 @@ def test_tool_arbitration_removes_conflicting_tools_for_desktop_action(
             ],
         },
     )
-    module.set_remote_operator_online_computers(["work"])
+    _set_remote_operator_online_computers(["work"])
 
     class Tool:
         def __init__(self, name):
@@ -639,7 +646,7 @@ def test_tool_arbitration_removes_conflicting_tools_for_code_action(
             ],
         },
     )
-    module.set_remote_operator_online_computers(["code"])
+    _set_remote_operator_online_computers(["code"])
 
     class ToolSet:
         def __init__(self):
@@ -686,7 +693,7 @@ def test_tool_arbitration_appends_override_even_without_tools(
             ],
         },
     )
-    module.set_remote_operator_online_computers(["work"])
+    _set_remote_operator_online_computers(["work"])
     event = EventStub()
     request = types.SimpleNamespace(
         prompt="帮我关闭Edge",
@@ -719,7 +726,7 @@ def test_tool_arbitration_skips_when_remote_operator_offline(
             ],
         },
     )
-    module.set_remote_operator_online_computers([])
+    _set_remote_operator_online_computers([])
     tool = types.SimpleNamespace(name="astrbot_execute_shell")
     request = types.SimpleNamespace(
         prompt="帮我打开钉钉",
@@ -750,7 +757,7 @@ def test_tool_arbitration_skips_non_ag99live_event(
             ],
         },
     )
-    module.set_remote_operator_online_computers(["work"])
+    _set_remote_operator_online_computers(["work"])
     tool = types.SimpleNamespace(name="astrbot_execute_shell")
     request = types.SimpleNamespace(
         prompt="帮我打开钉钉",
@@ -784,7 +791,7 @@ def test_tool_arbitration_skips_non_desktop_action_text(
             ],
         },
     )
-    module.set_remote_operator_online_computers(["work"])
+    _set_remote_operator_online_computers(["work"])
     tool = types.SimpleNamespace(name="astrbot_execute_shell")
     request = types.SimpleNamespace(
         prompt="今天天气怎么样",

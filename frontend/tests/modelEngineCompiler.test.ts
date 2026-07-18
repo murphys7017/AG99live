@@ -2240,7 +2240,6 @@ function testSpeechOnlyPlaybackUsesTimelineDuration(): void {
     stopPlan: () => {},
     onMotionRejected: () => {},
     canStartSpeechOnlyMotion: () => true,
-    getCurrentTurnId: () => "turn-speech",
     onPlanStarted: ignorePlanStarted,
   });
 
@@ -2294,7 +2293,6 @@ function testSpeechOnlyPlaybackCanBeSuppressedForFailedMotionSegment(): void {
     playCatalogMotion: () => false,
     stopPlan: () => {},
     onMotionRejected: () => {},
-    getCurrentTurnId: () => "turn-speech",
     canStartSpeechOnlyMotion: () => false,
     onPlanStarted: ignorePlanStarted,
   });
@@ -2322,7 +2320,6 @@ function testSpeechOnlyPreparationIsNotApplicableWithoutModelCapability(): void 
     playCatalogMotion: () => false,
     stopPlan: () => {},
     onMotionRejected: () => {},
-    getCurrentTurnId: () => "turn-no-speech-profile",
     canStartSpeechOnlyMotion: () => true,
     onPlanStarted: ignorePlanStarted,
   });
@@ -2361,7 +2358,6 @@ function testSegmentInterruptDoesNotStopNewerMotionOwner(): void {
     stopPlan: (reason) => stopped.push(reason ?? ""),
     onMotionRejected: () => {},
     canStartSpeechOnlyMotion: () => true,
-    getCurrentTurnId: () => "turn-b",
     onPlanStarted: ignorePlanStarted,
   });
   const timeline = (
@@ -2405,7 +2401,6 @@ function testSegmentInterruptRemovesItsPendingPayload(): void {
     stopPlan: () => assert.fail("pending motion must not stop an unrelated active player"),
     onMotionRejected: () => {},
     canStartSpeechOnlyMotion: () => false,
-    getCurrentTurnId: () => "turn-pending",
     onPlanStarted: ignorePlanStarted,
   });
 
@@ -2432,7 +2427,6 @@ function testModelEngineInstancesKeepIndependentRuntimeState(): void {
     stopPlan: () => {},
     onMotionRejected: () => {},
     canStartSpeechOnlyMotion: () => false,
-    getCurrentTurnId: () => "turn-isolated",
     onPlanStarted: ignorePlanStarted,
   });
   const first = createEngine();
@@ -2472,7 +2466,6 @@ function testTimelineTerminalIsMarkedWhenQueuedMotionFails(): void {
     playPlan: () => true,
     playCatalogMotion: () => false,
     stopPlan: () => {},
-    getCurrentTurnId: () => "turn-failed-timeline",
     canStartSpeechOnlyMotion: () => false,
     onPlanStarted: ignorePlanStarted,
     onMotionRejected: ({ turnId, messageId, reason }) => {

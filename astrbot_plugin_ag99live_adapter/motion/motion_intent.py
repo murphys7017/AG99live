@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import re
 from typing import Any
 
@@ -10,19 +9,11 @@ from .performance_curve import normalize_performance_curve_hint
 from ..protocol.schema_versions import (
     MOTION_INTENT_V3_SCHEMA_VERSION,
     MOTION_INTENT_V4_SCHEMA_VERSION,
-    PARAMETER_PLAN_V2_SCHEMA_VERSION,
 )
 
 MOTION_INTENT_SCHEMA_VERSION = MOTION_INTENT_V3_SCHEMA_VERSION
 DEFAULT_MOTION_INTENT_DURATION_MS = 1000
-PARAMETER_PLAN_SOURCES = {
-    "semantic_axis",
-    "coupling",
-    "speech_pose",
-    "expression",
-    "continuity",
-    "manual",
-}
+
 
 def resolve_selected_semantic_axis_profile(*, runtime_state: Any) -> dict[str, Any]:
     model_info = getattr(runtime_state, "model_info", {})
@@ -414,159 +405,4 @@ def validate_motion_intent_payload(intent: Any) -> tuple[bool, str]:
         normalize_motion_intent_payload(intent)
     except ValueError as exc:
         return False, str(exc)
-    return True, ""
-
-
-def validate_parameter_plan_payload(plan: Any) -> tuple[bool, str]:
-    return validate_parameter_plan_v2_payload(plan)
-
-
-def validate_parameter_plan_v2_payload(plan: Any) -> tuple[bool, str]:
-    if not isinstance(plan, dict):
-        return False, "plan_not_object"
-
-    schema_version = str(plan.get("schema_version") or "").strip()
-    if schema_version != PARAMETER_PLAN_V2_SCHEMA_VERSION:
-        return False, "invalid_schema_version"
-
-    mode = str(plan.get("mode") or "").strip().lower()
-    if mode not in {"expressive", "idle"}:
-        return False, "invalid_mode"
-
-    for key in ("profile_id", "model_id", "emotion_label"):
-        value = str(plan.get(key) or "").strip()
-        if not value:
-            return False, f"{key}_empty"
-    profile_revision = plan.get("profile_revision")
-    if not isinstance(profile_revision, int) or profile_revision <= 0:
-        return False, "profile_revision_invalid"
-
-    timing = plan.get("timing")
-    if not isinstance(timing, dict):
-        return False, "timing_not_object"
-    for key in ("duration_ms", "blend_in_ms", "hold_ms", "blend_out_ms"):
-        value = timing.get(key)
-        if not isinstance(value, (int, float)):
-            return False, f"timing_{key}_not_number"
-        if float(value) < 0:
-            return False, f"timing_{key}_negative"
-
-    parameters = plan.get("parameters")
-    if not isinstance(parameters, list) or not parameters:
-        return False, "parameters_not_list"
-    seen_parameter_ids: set[str] = set()
-    for item in parameters:
-        if not isinstance(item, dict):
-            return False, "parameter_item_not_object"
-        axis_id = str(item.get("axis_id") or "").strip()
-        parameter_id = str(item.get("parameter_id") or "").strip()
-        if not axis_id:
-            return False, "parameter_axis_id_empty"
-        if not parameter_id:
-            return False, "parameter_id_empty"
-        if parameter_id in seen_parameter_ids:
-            return False, f"duplicate_parameter_id:{parameter_id}"
-        seen_parameter_ids.add(parameter_id)
-        for key in ("target_value", "neutral_target_value", "weight"):
-            value = item.get(key)
-            if not isinstance(value, (int, float)):
-                return False, f"parameter_{key}_not_number"
-            if not float("-inf") < float(value) < float("inf"):
-                return False, f"parameter_{key}_not_finite"
-        weight = float(item.get("weight"))
-        if weight < 0.0 or weight > 1.0:
-            return False, "parameter_weight_out_of_range"
-        source = item.get("source")
-        if source not in PARAMETER_PLAN_SOURCES:
-            return False, f"parameter_source_invalid:{source}"
-        modulation = item.get("modulation")
-        if modulation is not None:
-            if not isinstance(modulation, dict):
-                return False, "parameter_modulation_not_object"
-            if modulation.get("kind") != "speech_gesture_track":
-                return False, "parameter_modulation_kind_invalid"
-            if modulation.get("preset") not in {
-                "calm_explain",
-                "lively_chat",
-                "gentle_support",
-                "emphatic",
-            }:
-                return False, "parameter_modulation_preset_invalid"
-            amplitude = modulation.get("amplitude")
-            if (
-                not isinstance(amplitude, (int, float))
-                or isinstance(amplitude, bool)
-                or not math.isfinite(float(amplitude))
-                or float(amplitude) < 0
-            ):
-                return False, "parameter_modulation_amplitude_invalid"
-            if modulation.get("direction") not in {-1, 1}:
-                return False, "parameter_modulation_direction_invalid"
-            delay_ms = modulation.get("delay_ms")
-            if (
-                not isinstance(delay_ms, int)
-                or isinstance(delay_ms, bool)
-                or not 0 <= delay_ms <= 600
-            ):
-                return False, "parameter_modulation_delay_invalid"
-            points = modulation.get("points")
-            if not isinstance(points, list) or not 3 <= len(points) <= 8:
-                return False, "parameter_modulation_points_invalid"
-            previous_at_ms = -1
-            previous_transition_end_ms = -1
-            for point_index, point in enumerate(points):
-                if not isinstance(point, dict):
-                    return False, "parameter_modulation_point_not_object"
-                at_ms = point.get("at_ms")
-                transition_ms = point.get("transition_ms")
-                point_value = point.get("value")
-                if (
-                    not isinstance(at_ms, int)
-                    or isinstance(at_ms, bool)
-                    or at_ms < 0
-                    or at_ms <= previous_at_ms
-                    or at_ms < previous_transition_end_ms
-                    or not isinstance(transition_ms, int)
-                    or isinstance(transition_ms, bool)
-                    or transition_ms < 0
-                    or at_ms + transition_ms + delay_ms
-                    > float(timing["duration_ms"])
-                    or not isinstance(point_value, (int, float))
-                    or isinstance(point_value, bool)
-                    or not math.isfinite(float(point_value))
-                    or not -1 <= float(point_value) <= 1
-                ):
-                    return False, f"parameter_modulation_point_invalid:{point_index}"
-                previous_at_ms = at_ms
-                previous_transition_end_ms = at_ms + transition_ms
-            first_point = points[0]
-            if (
-                first_point.get("at_ms") != 0
-                or first_point.get("transition_ms") != 0
-                or float(first_point.get("value")) != 0
-            ):
-                return False, "parameter_modulation_first_point_invalid"
-        dynamics = item.get("dynamics")
-        if not isinstance(dynamics, dict):
-            return False, "parameter_dynamics_not_object"
-        for key in (
-            "max_velocity",
-            "max_acceleration",
-            "life_motion_scale",
-            "max_speech_offset",
-        ):
-            value = dynamics.get(key)
-            if not isinstance(value, (int, float)) or isinstance(value, bool):
-                return False, f"parameter_dynamics_{key}_not_number"
-            if not float("-inf") < float(value) < float("inf"):
-                return False, f"parameter_dynamics_{key}_not_finite"
-        if float(dynamics["max_velocity"]) <= 0:
-            return False, "parameter_dynamics_max_velocity_invalid"
-        if float(dynamics["max_acceleration"]) <= 0:
-            return False, "parameter_dynamics_max_acceleration_invalid"
-        if not 0 <= float(dynamics["life_motion_scale"]) <= 1:
-            return False, "parameter_dynamics_life_motion_scale_invalid"
-        if float(dynamics["max_speech_offset"]) < 0:
-            return False, "parameter_dynamics_max_speech_offset_invalid"
-
     return True, ""

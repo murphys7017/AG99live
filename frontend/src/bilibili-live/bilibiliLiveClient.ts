@@ -455,17 +455,6 @@ function add32(left: number, right: number): number {
   return (left + right) >>> 0;
 }
 
-function readPath(value: unknown, path: readonly string[]): unknown {
-  let cursor = value;
-  for (const key of path) {
-    if (!cursor || typeof cursor !== "object" || Array.isArray(cursor)) {
-      return undefined;
-    }
-    cursor = (cursor as Record<string, unknown>)[key];
-  }
-  return cursor;
-}
-
 function extractCookie(cookie: string, name: string): string {
   const parts = cookie.split(";").map((part) => part.trim());
   for (const part of parts) {
@@ -487,11 +476,6 @@ function extractNumericCookie(cookie: string, name: string): number | null {
   }
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
-}
-
-function createFallbackBuvid(): string {
-  const random = Math.random().toString(36).slice(2, 12).toUpperCase();
-  return `AG99LIVE${random}${Date.now().toString(36).toUpperCase()}`;
 }
 
 export const BILIBILI_LIVE_CLIENT_TEST_ONLY = {

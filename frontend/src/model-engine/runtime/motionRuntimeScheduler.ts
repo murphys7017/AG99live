@@ -3,7 +3,6 @@ import type {
 } from "../contracts.js";
 import type {
   InboundPayloadContext,
-  MotionRuntimeSchedulerDependencies,
 } from "./contracts.js";
 import type { MotionPlaybackClockContext } from "./playbackClock.js";
 import { normalizeTurnId } from "../normalize.js";
@@ -72,7 +71,6 @@ function isTimelineUnavailable(
 }
 
 export function createMotionRuntimeScheduler(
-  dependencies: MotionRuntimeSchedulerDependencies,
   hooks: MotionRuntimeSchedulerHooks,
 ) {
   const pendingInboundMotionPayloads = new Map<string, PendingInboundMotionPayload>();

@@ -24,20 +24,6 @@ def profile_prompt_axes(semantic_profile: dict[str, Any]) -> list[dict[str, Any]
     return result
 
 
-def build_profile_axis_prompt_block(
-    semantic_profile: dict[str, Any],
-    *,
-    truncate_text: Any,
-) -> tuple[str, list[str]]:
-    prompt_axes = profile_prompt_axes(semantic_profile)
-    axis_block = "\n".join(
-        format_profile_axis_prompt_line(axis, truncate_text=truncate_text)
-        for axis in prompt_axes
-    )
-    allowed_axis_ids = [str(axis.get("id") or "").strip() for axis in prompt_axes]
-    return axis_block, allowed_axis_ids
-
-
 def format_profile_axis_prompt_line(
     axis: dict[str, Any],
     *,

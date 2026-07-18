@@ -2,7 +2,6 @@
 import { LAppLive2DManager } from "./lapplive2dmanager";
 import { LAppModel } from "./lappmodel";
 import * as LAppDefine from './lappdefine';
-import { LAppPal } from "./lapppal";
 
 import {
   ACubismMotion,
@@ -13,7 +12,6 @@ import {
   InvalidMotionQueueEntryHandleValue
 } from '@framework/motion/cubismmotionqueuemanager';
 import { CubismFramework } from '@framework/live2dcubismframework';
-import { deprecate } from "util";
 import type { SemanticParameterPlan } from "../../../types/protocol";
 
 export interface CatalogMotionLifecycleCallbacks {
@@ -159,25 +157,6 @@ export class LAppAdapter {
 
   public getExpressionStartError(): string {
     return this.getModel()?.getExpressionStartError() ?? "expression_model_unavailable";
-  }
-
-  // @deprecated
-  public nextChara(): void {
-    this.getMgr().nextScene();
-  }
-
-  public setChara(ModelDir: string, ModelName: string): void {
-    const modelPath = (ModelDir.endsWith('/') ? ModelDir : ModelDir + '/') + ModelName + '/';
-    const modelJsonName = ModelName + '.model3.json';
-
-    if (LAppDefine.DebugLogEnable) {
-      LAppPal.printMessage(`[APP]model Dir: ${modelPath}`);
-    }
-
-    this.getMgr().releaseAllModel();
-    this.getMgr()._models.pushBack(new LAppModel());
-    this.getMgr()._models.at(0)?.setAmbientMotionEnabled(LAppDefine.AMBIENT_MOTION_ENABLED);
-    this.getMgr()._models.at(0)?.loadAssets(modelPath, modelJsonName);
   }
 
   /* model position manipulation */

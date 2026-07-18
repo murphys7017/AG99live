@@ -25,7 +25,6 @@ import type {
   SystemMotionTuningSamplesStatePayload,
 } from "../../types/protocol.js";
 import type { InboundAdapterEvent, InboundEventMappingContext } from "./inboundEvents.js";
-import { mapInboundEnvelopeToEvent } from "./inboundEvents.js";
 import type { PendingAssistantTextItem, PendingAudioItem } from "../../playback-timeline/playbackReleaseQueue.js";
 import type { NormalizedMotionPayload } from "../../playback-integrations/motionPayload.js";
 import type { OutputSegmentMaterial } from "../../turn-playback/session.js";

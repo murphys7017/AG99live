@@ -1,4 +1,3 @@
-import type { NormalizedMotionPayload } from "../playback-integrations/motionPayload.js";
 import type { MotionPlaybackClockContext } from "./runtime/playbackClock.js";
 
 export type { NormalizedMotionPayload } from "../playback-integrations/motionPayload.js";

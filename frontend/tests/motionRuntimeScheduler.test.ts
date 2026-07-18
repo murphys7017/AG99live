@@ -137,9 +137,6 @@ function createHarness(session: TestPlaybackSession) {
   const failed: StartPayloadContext[] = [];
   const scheduler = createMotionRuntimeScheduler(
     {
-      getCurrentTurnId: () => session.turnId,
-    },
-    {
       onPendingStateChanged: () => {},
       onPendingStatus: () => {},
       onStartPayload: (_payload, context) => {
@@ -269,7 +266,6 @@ function testReadyTimelineReturnsSynchronousStartFailure(): void {
   resetTimers();
   const failed: StartPayloadContext[] = [];
   const scheduler = createMotionRuntimeScheduler(
-    { getCurrentTurnId: () => "turn-1" },
     {
       onPendingStateChanged: () => {},
       onPendingStatus: () => {},
@@ -354,9 +350,6 @@ function testSameMessageIdDifferentTurnsStartByCompositeIdentity(): void {
   const started: StartPayloadContext[] = [];
   const scheduler = createMotionRuntimeScheduler(
     {
-      getCurrentTurnId: () => "turn-1",
-    },
-    {
       onPendingStateChanged: () => {},
       onPendingStatus: () => {},
       onStartPayload: (_payload, context) => {
@@ -401,9 +394,6 @@ function testCompositeIdentityDoesNotCollideOnDelimiterText(): void {
   const started: StartPayloadContext[] = [];
   const scheduler = createMotionRuntimeScheduler(
     {
-      getCurrentTurnId: () => "a::b",
-    },
-    {
       onPendingStateChanged: () => {},
       onPendingStatus: () => {},
       onStartPayload: (_payload, context) => {
@@ -444,9 +434,6 @@ function testPlaybackTimelineRequiresMatchingTurnWhenMessageIdIsShared(): void {
   resetTimers();
   const started: StartPayloadContext[] = [];
   const scheduler = createMotionRuntimeScheduler(
-    {
-      getCurrentTurnId: () => "turn-target",
-    },
     {
       onPendingStateChanged: () => {},
       onPendingStatus: () => {},

@@ -57,10 +57,6 @@ import {
   saveStoredAdapterAddress,
 } from "./core/preferences.js";
 import {
-  matchesPlaybackGroup,
-  queueAssistantTextForPlayback as queuePendingAssistantTextForPlayback,
-} from "../playback-timeline/playbackReleaseQueue.js";
-import {
   createQueuedTextSegmentSink,
 } from "../playback-timeline/segmentReleaseSinks.js";
 import type {

@@ -1229,56 +1229,6 @@ def test_prompt_fallback_descriptors_follow_profile_neutral_not_fixed_50(
     assert selected[0]["pose_descriptors"] == ["lean_forward", "look_right"]
 
 
-def test_motion_visibility_summary_includes_pose_descriptors_and_soft_range_axes(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_interaction_motion_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = _load_interaction_motion_module()
-
-    semantic_profile = {
-        "axes": [
-            {
-                "id": "head_yaw",
-                "control_role": "primary",
-                "semantic_group": "head",
-                "neutral": 30,
-                "value_range": [0, 100],
-                "soft_range": [24, 36],
-            },
-            {
-                "id": "body_pitch",
-                "control_role": "primary",
-                "semantic_group": "body",
-                "neutral": 70,
-                "value_range": [0, 100],
-                "soft_range": [66, 74],
-            },
-            {
-                "id": "eye_open_left",
-                "control_role": "hint",
-                "semantic_group": "eye",
-                "neutral": 50,
-                "value_range": [0, 100],
-                "soft_range": [45, 55],
-            },
-        ]
-    }
-
-    summary = module._build_motion_visibility_summary(
-        axes={"head_yaw": 40, "body_pitch": 58, "eye_open_left": 50},
-        semantic_profile=semantic_profile,
-    )
-
-    assert summary["skeleton_groups"] == ["head", "body"]
-    assert summary["skeleton_groups_present"] == ["head", "body"]
-    assert summary["missing_skeleton_groups"] == ["gaze"]
-    assert summary["outside_soft_range_axes"] == ["head_yaw", "body_pitch"]
-    assert summary["pose_descriptors"] == ["lean_forward", "look_right"]
-    assert summary["neutralish_axes"] == ["eye_open_left"]
-    assert "skeleton_repair_added_axes" not in summary
-
-
 def test_fallback_pose_candidates_prioritize_enabled_matching_user_tuning(
     install_fake_astrbot,
     monkeypatch,

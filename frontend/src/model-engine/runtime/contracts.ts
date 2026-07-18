@@ -76,10 +76,6 @@ export type ModelEnginePlanStartedEvent =
 export type ModelEngineHistoryRole =
   Extract<DesktopHistoryEntry["role"], "system" | "error">;
 
-export interface MotionRuntimeSchedulerDependencies {
-  getCurrentTurnId: () => string | null;
-}
-
 export interface MotionStartDependencies {
   getSelectedModel: () => ModelSummary | null;
   getSettings: () => Partial<ModelEngineSettings>;
@@ -137,7 +133,7 @@ export interface MotionRuntimeStateController {
 }
 
 export interface ModelEngineDependencies
-  extends MotionRuntimeSchedulerDependencies, MotionStartDependencies {
+  extends MotionStartDependencies {
   stopPlan: (reason?: string) => void;
   onMotionRejected: (event: {
     turnId: string;

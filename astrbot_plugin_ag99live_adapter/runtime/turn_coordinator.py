@@ -39,7 +39,6 @@ from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
 from astrbot.api import logger
-from astrbot.api.message_components import Plain, Record  # re-exported for test access
 from astrbot.core.platform.message_session import MessageSession
 from astrbot.core.platform.message_type import MessageType
 from astrbot.core.utils.active_event_registry import active_event_registry

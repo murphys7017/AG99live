@@ -38,9 +38,7 @@ export class LAppGlManager {
   }
 
   constructor() {
-    // Use existing canvas instead of creating a new one
     canvas = document.getElementById('canvas') as HTMLCanvasElement;
-    // canvas = document.createElement("canvas");
 
     if (!canvas) {
       console.warn("Canvas element not found during LAppGlManager initialization");

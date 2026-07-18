@@ -22,14 +22,13 @@ import {
   requiredNumber,
   requiredString,
   validateExactKeys,
-  type PayloadParseError,
   type PayloadParseResult,
 } from "./payloadValidation.js";
 
 export type { PayloadParseError, PayloadParseResult } from "./payloadValidation.js";
 export { parseSystemModelSyncPayload } from "./modelSyncPayload.js";
 
-function parseObjectPayload<TPayload>(
+function parseObjectPayload(
   envelope: ProtocolEnvelope<unknown>,
 ): PayloadParseResult<Record<string, unknown>> {
   const record = asRecord(envelope.payload);

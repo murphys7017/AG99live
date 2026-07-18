@@ -45,7 +45,6 @@ export class LAppPal {
   public static updateTime(modifyLastFrameTime: boolean = true): void {
     this.s_currentFrame = Date.now();
     this.s_deltaTime = (this.s_currentFrame - this.s_lastFrame) / 1000;
-    // this.s_lastFrame = this.s_currentFrame;
     if (modifyLastFrameTime === true) {
       this.s_lastFrame = this.s_currentFrame;
     }

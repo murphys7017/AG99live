@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..protocol import TYPE_ENGINE_CATALOG_MOTION
-
 from ..protocol.schema_versions import CATALOG_MOTION_SCHEMA_VERSION
 
 
@@ -79,15 +77,6 @@ def validate_catalog_motion_payload(payload: Any) -> tuple[bool, str]:
     except ValueError as exc:
         return False, str(exc)
     return True, ""
-
-
-def resolve_catalog_motion_message_type(payload: Any) -> str:
-    if not isinstance(payload, dict):
-        return ""
-    schema_version = str(payload.get("schema_version") or "").strip()
-    if schema_version == CATALOG_MOTION_SCHEMA_VERSION:
-        return TYPE_ENGINE_CATALOG_MOTION
-    return ""
 
 
 def summarize_catalog_motion_payload(payload: Any) -> tuple[str, str, str, str]:

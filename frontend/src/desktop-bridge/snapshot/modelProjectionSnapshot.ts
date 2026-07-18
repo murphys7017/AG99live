@@ -5,7 +5,6 @@ import type {
 import type { SemanticAxisProfile } from "../../types/semantic-axis-profile.js";
 import { cloneMotionTuningEffectiveExample } from "./motionTuningSnapshot.js";
 import {
-  cloneNumericRecord,
   isObject,
   isPresent,
   normalizeText,

@@ -403,7 +403,7 @@ function failCompile(
 function buildSuccessCompileResult(
   context: MotionCompileContext,
 ): CompileResult {
-  const { intent, settings, state } = context;
+  const { state } = context;
   const semanticProfile = state.profile;
   if (!semanticProfile) {
     return failCompile("semantic_profile_missing", context);

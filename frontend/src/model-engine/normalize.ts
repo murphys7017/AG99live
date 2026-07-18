@@ -1,12 +1,10 @@
 import type {
   CatalogMotionPayload,
-  DirectParameterPlanTiming,
   PerformanceCurveHint,
   MotionAxisLevel,
   MotionAxisLevelMap,
   MotionAxisLevelStep,
   SemanticMotionIntent,
-  SemanticParameterPlan,
 } from "../types/protocol.js";
 import {
   SCHEMA_CATALOG_MOTION_V1,

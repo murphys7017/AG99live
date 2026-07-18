@@ -187,7 +187,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
         && !segment.motion.completed
       );
     },
-    getCurrentTurnId: () => adapter.state.currentTurnId,
     pushHistory: (role, text) => adapter.pushHistory(role, text),
     getPlayerMessage: () => motionPlayer.state.message,
     onPlanStarted: (event) => {

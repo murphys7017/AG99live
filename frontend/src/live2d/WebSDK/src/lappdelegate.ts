@@ -68,14 +68,6 @@ export class LAppDelegate {
       return false;
     }
 
-    // Comment out the following code since canvas already exists in DOM
-    // let parent = document.getElementById('live2d');
-    // if (parent) {
-    //   parent.appendChild(canvas!);
-    // } else {
-    //   document.body.appendChild(canvas!);
-    // }
-
     if (LAppDefine.CanvasSize === 'auto') {
       this._resizeCanvas();
     } else {
@@ -139,7 +131,7 @@ export class LAppDelegate {
     this._lastResizeWidth = width;
     this._lastResizeHeight = height;
     this._view.initialize();
-    this._view.initializeSprite();
+    this._view.initializeShader();
   }
 
   /**
@@ -368,7 +360,7 @@ export class LAppDelegate {
 
     LAppPal.updateTime();
 
-    this._view!.initializeSprite();
+    this._view!.initializeShader();
   }
 
   /**

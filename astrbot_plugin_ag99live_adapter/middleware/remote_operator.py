@@ -14,9 +14,6 @@ from astrbot.core.prompt import PromptExtension
 from ..protocol.remote_operator import RemoteOperatorRequest
 from ..runtime.remote_operator_registry import (
     get_remote_operator_online_computers,
-    mark_remote_operator_computer_offline,
-    mark_remote_operator_computer_online,
-    set_remote_operator_online_computers,
 )
 
 
@@ -274,10 +271,6 @@ def remote_operator_available() -> bool:
     if config is None:
         return False
     return filter_online_remote_operator_config(config) is not None
-
-
-def is_remote_operator_desktop_action_text(text: Any) -> bool:
-    return is_remote_operator_action_text(text)
 
 
 def is_remote_operator_action_text(text: Any) -> bool:

@@ -1,5 +1,4 @@
 import type {
-  PlaybackTimelineLipSyncAttachOptions,
   PlaybackTimelineLipSyncSink,
 } from "../playback-timeline/lipSyncSink.js";
 

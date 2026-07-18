@@ -1310,7 +1310,10 @@ def _normalize_motion_prompt_instruction(value: Any) -> str:
 
 def _supports_persona_effects(plugin_context: Any) -> bool:
     try:
-        from astrbot.core.interaction import PersonaEffectSpec  # noqa: F401
+        from astrbot.core import interaction as interaction_module
     except ImportError:
         return False
-    return callable(getattr(plugin_context, "register_persona_effect", None))
+    return (
+        getattr(interaction_module, "PersonaEffectSpec", None) is not None
+        and callable(getattr(plugin_context, "register_persona_effect", None))
+    )

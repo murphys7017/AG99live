@@ -7,8 +7,6 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from astrbot.api import logger
-
 from ..protocol.schema_versions import PERFORMANCE_CURVE_HINT_SCHEMA_VERSION
 
 from ..prompts.performance_curve import (

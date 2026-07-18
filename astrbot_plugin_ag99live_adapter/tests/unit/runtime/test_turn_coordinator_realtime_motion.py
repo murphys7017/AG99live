@@ -290,7 +290,7 @@ def test_commit_inbound_message_disables_streaming_in_split_mode(
     monkeypatch,
 ) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     TurnCoordinator = module.TurnCoordinator
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
@@ -347,7 +347,7 @@ def test_commit_inbound_message_rejects_replacement_without_interrupt(
     monkeypatch,
 ) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     TurnCoordinator = module.TurnCoordinator
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
@@ -385,7 +385,7 @@ def test_submit_system_text_input_commits_remote_operator_metadata(
     monkeypatch,
 ) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     TurnCoordinator = module.TurnCoordinator
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
@@ -463,14 +463,26 @@ def test_submit_system_text_input_commits_remote_operator_metadata(
     assert event.extras["remote_operator"]["computer"] == "work"
 
 
+def _load_turn_coordinator_module():
+    return importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.runtime.turn_coordinator"
+    )
+
+
+def _load_message_components_module():
+    return importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.runtime.message_utils"
+    )
+
+
 def test_emit_message_chain_ignores_inline_anim_when_persona_effect_is_available(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     TurnCoordinator = module.TurnCoordinator
-    Plain = module.Plain
+    Plain = _load_message_components_module().Plain
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.runtime_state = _runtime_state_stub(
@@ -566,9 +578,9 @@ def test_emit_message_chain_dispatches_official_inline_anim_when_persona_effect_
     monkeypatch,
 ) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     TurnCoordinator = module.TurnCoordinator
-    Plain = module.Plain
+    Plain = _load_message_components_module().Plain
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.runtime_state = _runtime_state_stub(
@@ -652,10 +664,10 @@ def test_emit_message_chain_reuses_platform_visible_message_id_for_segment_outpu
     monkeypatch,
 ) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     TurnCoordinator = module.TurnCoordinator
-    Plain = module.Plain
-    Record = module.Record
+    Plain = _load_message_components_module().Plain
+    Record = _load_message_components_module().Record
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.runtime_state = _runtime_state_stub(mode="inline_first")
@@ -729,9 +741,9 @@ def test_emit_message_chain_uses_record_text_as_canonical_segment_text(
     monkeypatch,
 ) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     TurnCoordinator = module.TurnCoordinator
-    Record = module.Record
+    Record = _load_message_components_module().Record
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
@@ -806,10 +818,10 @@ def test_emit_message_chain_rejects_conflicting_canonical_text_sources(
     monkeypatch,
 ) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     TurnCoordinator = module.TurnCoordinator
-    Plain = module.Plain
-    Record = module.Record
+    Plain = _load_message_components_module().Plain
+    Record = _load_message_components_module().Record
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.session_state = type(
@@ -836,9 +848,9 @@ def test_emit_message_chain_dedupes_motion_client_object_for_segmented_output(
     monkeypatch,
 ) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     TurnCoordinator = module.TurnCoordinator
-    Plain = module.Plain
+    Plain = _load_message_components_module().Plain
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
@@ -904,9 +916,9 @@ def test_performance_curve_request_waits_for_text_and_motion_in_any_order(
     first_part: str,
 ) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     TurnCoordinator = module.TurnCoordinator
-    Plain = module.Plain
+    Plain = _load_message_components_module().Plain
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.runtime_state = _runtime_state_stub(mode="split_after_reply")
@@ -975,9 +987,9 @@ def test_emit_message_chain_treats_inline_payload_as_visible_text_only_when_pers
     monkeypatch,
 ) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     TurnCoordinator = module.TurnCoordinator
-    Plain = module.Plain
+    Plain = _load_message_components_module().Plain
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.runtime_state = _runtime_state_stub(
@@ -1070,7 +1082,7 @@ def test_handle_engine_motion_payload_preview_rejects_missing_intent_key(
     monkeypatch,
 ) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     TurnCoordinator = module.TurnCoordinator
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
@@ -1107,7 +1119,7 @@ def test_handle_msg_accepts_motion_intent_preview_without_turn_id(
     monkeypatch,
 ) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     constants = importlib.import_module("astrbot_plugin_ag99live_adapter.protocol.constants")
     TurnCoordinator = module.TurnCoordinator
 
@@ -1146,9 +1158,9 @@ def test_emit_message_chain_raw_reply_text_override_uses_official_inline_anim_co
     monkeypatch,
 ) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     TurnCoordinator = module.TurnCoordinator
-    Plain = module.Plain
+    Plain = _load_message_components_module().Plain
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.runtime_state = _runtime_state_stub(
@@ -1229,9 +1241,9 @@ def test_emit_message_chain_inline_invalid_v3_intent_does_not_broadcast_replacem
     monkeypatch,
 ) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     TurnCoordinator = module.TurnCoordinator
-    Plain = module.Plain
+    Plain = _load_message_components_module().Plain
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.runtime_state = _runtime_state_stub(
@@ -1294,9 +1306,9 @@ def test_emit_message_chain_inline_v1_intent_is_rejected(
     monkeypatch,
 ) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     TurnCoordinator = module.TurnCoordinator
-    Plain = module.Plain
+    Plain = _load_message_components_module().Plain
 
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     coordinator.runtime_state = _runtime_state_stub(
@@ -1373,7 +1385,7 @@ def test_handle_msg_emits_control_error_for_unhandled_allowed_message_type(
     monkeypatch,
 ) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     constants = importlib.import_module("astrbot_plugin_ag99live_adapter.protocol.constants")
     TurnCoordinator = module.TurnCoordinator
 
@@ -1440,7 +1452,7 @@ def test_handle_msg_emits_control_error_for_unhandled_allowed_message_type(
 
 def test_handle_binary_msg_commits_vad_message(install_fake_astrbot, monkeypatch) -> None:
     _install_turn_coordinator_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.turn_coordinator")
+    module = _load_turn_coordinator_module()
     TurnCoordinator = module.TurnCoordinator
 
     committed: list[tuple[object, str | None]] = []

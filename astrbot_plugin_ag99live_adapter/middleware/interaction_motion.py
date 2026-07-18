@@ -22,20 +22,12 @@ except ImportError:  # pragma: no cover - older AstrBot cores do not expose it.
 from astrbot.core.prompt import PromptExtension
 
 from .motion_payload import (
-    are_motion_axes_all_neutralish as _payload_are_motion_axes_all_neutralish,
-    build_motion_visibility_summary as _payload_build_motion_visibility_summary,
     build_prompt_axis_lookup as _payload_build_prompt_axis_lookup,
-    build_prompt_axis_lookup_from_axes as _payload_build_prompt_axis_lookup_from_axes,
     describe_axis_descriptors as _payload_describe_axis_descriptors,
     describe_axis_descriptor as _payload_describe_axis_descriptor,
-    is_axis_soft_range_neutral as _payload_is_axis_soft_range_neutral,
     normalize_motion_arguments_payload as _payload_normalize_motion_arguments_payload,
-    resolve_axis_descriptor_threshold as _payload_resolve_axis_descriptor_threshold,
-    resolve_axis_neutral_delta as _payload_resolve_axis_neutral_delta,
     resolve_axis_neutral_value as _payload_resolve_axis_neutral_value,
-    resolve_axis_soft_range as _payload_resolve_axis_soft_range,
     resolve_axis_value_range as _payload_resolve_axis_value_range,
-    validate_motion_resource_id_for_payload as _payload_validate_motion_resource_id,
 )
 from ..motion.output_sanitizer import sanitize_assistant_output_text
 from ..motion.motion_intent import (
@@ -398,20 +390,6 @@ def _is_ag99live_motion_effect_event(event: Any) -> bool:
     return True
 
 
-def _resolve_persona_effect_motion_payload(
-    event: Any,
-    runtime_state: Any,
-    *,
-    view: Any = None,
-) -> dict[str, Any] | None:
-    payload, _reason = _resolve_persona_effect_motion_payload_with_reason(
-        event,
-        runtime_state,
-        view=view,
-    )
-    return payload
-
-
 def _resolve_persona_effect_motion_payload_with_reason(
     event: Any,
     runtime_state: Any,
@@ -510,44 +488,6 @@ def _effect_call_get(call: Any, key: str) -> Any:
     if isinstance(call, Mapping):
         return call.get(key)
     return getattr(call, key, None)
-
-
-def _validate_motion_resource_id(
-    resource_id: Any,
-    *,
-    candidates: list[dict[str, Any]],
-) -> tuple[str, str]:
-    return _payload_validate_motion_resource_id(
-        resource_id,
-        candidates=candidates,
-        sanitize_reason_fragment=_sanitize_reason_fragment,
-    )
-
-
-def _are_motion_axes_all_neutralish(
-    axes: dict[str, float],
-    semantic_profile: dict[str, Any],
-) -> bool:
-    return _payload_are_motion_axes_all_neutralish(axes, semantic_profile)
-
-
-def _build_motion_visibility_summary(
-    *,
-    axes: dict[str, float],
-    semantic_profile: dict[str, Any],
-    intent_tags: list[str] | None = None,
-    resource_id: str = "",
-) -> dict[str, Any]:
-    return _payload_build_motion_visibility_summary(
-        axes=axes,
-        semantic_profile=semantic_profile,
-        intent_tags=intent_tags,
-        resource_id=resource_id,
-    )
-
-
-def _is_axis_soft_range_neutral(value: float, axis: dict[str, Any]) -> bool:
-    return _payload_is_axis_soft_range_neutral(value, axis)
 
 
 def _resolve_axis_value_range(axis: dict[str, Any]) -> tuple[float, float]:
@@ -1163,24 +1103,6 @@ def _build_prompt_axis_lookup(
     semantic_profile: dict[str, Any] | None,
 ) -> dict[str, dict[str, Any]]:
     return _payload_build_prompt_axis_lookup(semantic_profile)
-
-
-def _build_prompt_axis_lookup_from_axes(
-    prompt_axes: list[dict[str, Any]] | None,
-) -> dict[str, dict[str, Any]]:
-    return _payload_build_prompt_axis_lookup_from_axes(prompt_axes)
-
-
-def _resolve_axis_soft_range(axis: dict[str, Any] | None) -> tuple[float, float] | None:
-    return _payload_resolve_axis_soft_range(axis)
-
-
-def _resolve_axis_neutral_delta(value: float, axis: dict[str, Any] | None) -> float:
-    return _payload_resolve_axis_neutral_delta(value, axis)
-
-
-def _resolve_axis_descriptor_threshold(axis: dict[str, Any] | None) -> float:
-    return _payload_resolve_axis_descriptor_threshold(axis)
 
 
 def _normalize_prompt_pose_reference_metadata_signature(item: dict[str, Any]) -> str:
@@ -1880,18 +1802,6 @@ def _extract_assistant_text(view: Any) -> str:
         getattr(view, "immediate_reply", None),
     ):
         text = sanitize_assistant_output_text(str(value or "")).strip()
-        if text:
-            return text
-    return ""
-
-
-def _extract_user_text(event: Any) -> str:
-    for value in (
-        _call_event_method(event, "get_extra", "ag99live_original_message_str"),
-        getattr(event, "message_str", None),
-        getattr(getattr(event, "message_obj", None), "message_str", None),
-    ):
-        text = str(value or "").strip()
         if text:
             return text
     return ""

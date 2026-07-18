@@ -192,13 +192,7 @@ async function initializeLive2DOnce(): Promise<void> {
         return;
       }
 
-      // Check if mouse is over the Live2D model
-      const isHit = typeof model?.anyHitTestWithFallback === "function"
-        ? model.anyHitTestWithFallback(coordinates.x, coordinates.y)
-        : Boolean(
-          model?.anyhitTest(coordinates.x, coordinates.y)
-            || model?.isHitOnModel(coordinates.x, coordinates.y),
-        );
+      const isHit = model?.anyHitTestWithFallback(coordinates.x, coordinates.y) ?? false;
       updateMouseIgnoreState(!isHit);
     };
 
@@ -231,20 +225,6 @@ async function initializeLive2DOnce(): Promise<void> {
     finishInitialize();
   }
 }
-
-/**
- * Keep the original window.load handler for backwards compatibility
- * (for the standalone HTML file)
- */
-/* // Comment out the window.load listener
-window.addEventListener(
-  "load",
-  (): void => {
-    initializeLive2D();
-  },
-  { passive: true }
-);
-*/
 
 /**
  * 終了時の処理
