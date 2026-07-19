@@ -1,9 +1,9 @@
 task:
   class: bugfix
-  risk: high
+  risk: medium
   phase: implementation_complete
   status: complete
-  scope: Make Motion Lab previews local, strictly typed, lifecycle-observable, and unable to interrupt active conversation motion; remove the obsolete frontend Adapter preview path.
+  scope: Give transparent desktop windows stable capture identities and replace threshold-based frame skipping with a deadline-based 60 FPS render cadence.
 
 context:
   confidence: high
@@ -73,12 +73,16 @@ verification:
     - `npm run typecheck:renderer` passed for the Motion Lab replay ownership change.
     - `npm run typecheck:node` passed for the strict desktop bridge command change.
     - Obsolete frontend preview command and Adapter outbound API references were confirmed absent with `rg`.
+    - `npm run typecheck:renderer` and `npm run typecheck:node` passed after assigning stable capture titles to the Live2D and input windows.
+    - `npm run typecheck:websdk` passed after replacing the Live2D frame limiter with accumulated frame deadlines.
   validation_gap:
     - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
     - Live AstrBot plus Provider plus TTS plus Electron plus Live2D validation is still required after the clock migration, including a long audio segment and a paused audio segment.
     - Live Electron plus Mk6 validation is required to confirm that physicsResponseScale changes terminal hair, clothing, and accessory response without changing semantic head/body input ranges.
     - Motion Lab must be checked with an explicit neutral axis and a derived non-neutral axis to confirm only the original explicit axis is replayed and saved.
     - Live Electron validation is required to confirm historical sequence replay starts the preserved parameter plan, reports its real terminal status, and rejects previews while conversation motion is active.
+    - OBS must be restarted and its Window Capture source refreshed to confirm `AG99live Live2D` and `AG99live Input` replace the previous null window identity.
+    - Live Electron observation on the 180 Hz display is required to confirm the renderer remains near its 60 FPS target under the real model workload.
 
 backlog:
   - id: motion_lab_sequence_tuning

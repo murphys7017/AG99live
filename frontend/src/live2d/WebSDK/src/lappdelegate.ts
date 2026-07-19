@@ -180,6 +180,8 @@ export class LAppDelegate {
       return;
     }
     this._isRunning = true;
+    let nextFrameDeadlineMs = performance.now();
+    let scheduledFrameRate = 0;
 
     // メインループ
     // 主循环
@@ -203,10 +205,23 @@ export class LAppDelegate {
           )
           : LAppDefine.LIMITED_FRAME_RATE;
 
-        LAppPal.updateTime(false);
-        if (LAppPal.getDeltaTime() < 1 / targetFrameRate) {
+        const frameIntervalMs = 1000 / targetFrameRate;
+        if (scheduledFrameRate !== targetFrameRate) {
+          scheduledFrameRate = targetFrameRate;
+          nextFrameDeadlineMs = performance.now();
+        }
+        const nowMs = performance.now();
+        // RAF may arrive a fraction of a millisecond before the deadline.
+        // Use a small tolerance and an accumulated deadline so high-refresh
+        // displays do not lose an entire frame because of timer quantization.
+        if (nowMs + 0.5 < nextFrameDeadlineMs) {
           this._rafId = requestAnimationFrame(loop);
           return;
+        }
+        if (nowMs - nextFrameDeadlineMs > frameIntervalMs * 2) {
+          nextFrameDeadlineMs = nowMs + frameIntervalMs;
+        } else {
+          nextFrameDeadlineMs += frameIntervalMs;
         }
       }
 

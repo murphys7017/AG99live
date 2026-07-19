@@ -39,8 +39,10 @@ interface OverlayDragOrigin {
 
 const PET_WINDOW_WIDTH = 540;
 const PET_WINDOW_HEIGHT = 820;
+const PET_WINDOW_TITLE = "AG99live Live2D";
 const PET_WINDOW_MARGIN = 24;
 const PET_OVERLAY_WIDTH = 420;
+const PET_OVERLAY_WINDOW_TITLE = "AG99live Input";
 const PET_OVERLAY_MIN_HEIGHT = 112;
 const PET_OVERLAY_MAX_HEIGHT = 168;
 const PET_OVERLAY_GAP = 16;
@@ -432,7 +434,7 @@ export class WindowManager {
       width: PET_WINDOW_WIDTH,
       height: PET_WINDOW_HEIGHT,
       icon: APP_ICON_PATH,
-      title: "",
+      title: PET_WINDOW_TITLE,
       frame: false,
       transparent: true,
       show: false,
@@ -520,7 +522,7 @@ export class WindowManager {
       width: PET_OVERLAY_WIDTH,
       height: this.overlayWindowHeight,
       icon: APP_ICON_PATH,
-      title: "",
+      title: PET_OVERLAY_WINDOW_TITLE,
       frame: false,
       transparent: true,
       show: false,

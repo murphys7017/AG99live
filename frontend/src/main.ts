@@ -6,8 +6,8 @@ import "./style.css";
 
 const role = getWindowRole();
 const roleTitles: Record<string, string> = {
-  pet: "",
-  overlay: "",
+  pet: "AG99live Live2D",
+  overlay: "AG99live Input",
   settings: "AG99live 设置",
   history: "AG99live 历史",
   action_lab: "AG99live 动作实验室",
