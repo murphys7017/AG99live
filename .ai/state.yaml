@@ -3,7 +3,7 @@ task:
   risk: high
   phase: implementation_complete
   status: complete
-  scope: Make Timeline the live playback-clock owner through Live2D execution, remove stale motion-policy ownership and strict-capability violations, and make Motion Lab persistence failures explicit.
+  scope: Correct terminal Cubism Physics response scaling, preserve Motion Lab explicit-axis semantics, and separate ModelEngine settings from Live2D presentation settings without legacy compatibility paths.
 
 context:
   confidence: high
@@ -42,6 +42,9 @@ architecture:
     model_engine: Level sampling, intensity, coupling, timing, speech gesture planning, relation graph constraints, plan building, and resource policy.
     playback_timeline: Segment-scoped clock and required/optional sink lifecycle.
     live2d_websdk: Exact parameter resolution, per-frame interpolation, lip sync, speech energy, dynamics, and physics.
+  settings_ownership:
+    model_engine: motionIntensityScale only.
+    live2d_presentation: ambientMotionEnabled, physicsResponseScale, and renderDprCap; applied by the renderer before model initialization and atomically through the WebSDK Adapter at runtime.
   playback_rules:
     - Audio-backed subtitle, motion, and lip sync use the matched HTMLAudioElement playing fact.
     - Explicit motion-only segments may use a segment-owned synthetic clock.
@@ -63,14 +66,20 @@ verification:
     - `python scripts/check_protocol_schema_manifest.py` passed.
     - `npm run typecheck:renderer` passed in frontend.
     - `npm run typecheck:websdk` passed in frontend.
+    - `npm run typecheck:node` passed in frontend.
     - `python -m compileall -q astrbot_plugin_ag99live_adapter` passed.
     - `check_astrbot_plugin.py astrbot_plugin_ag99live_adapter` reported 0 errors and 0 warnings.
     - git diff --check reports no whitespace errors.
   validation_gap:
     - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
     - Live AstrBot plus Provider plus TTS plus Electron plus Live2D validation is still required after the clock migration, including a long audio segment and a paused audio segment.
+    - Live Electron plus Mk6 validation is required to confirm that physicsResponseScale changes terminal hair, clothing, and accessory response without changing semantic head/body input ranges.
+    - Motion Lab must be checked with an explicit neutral axis and a derived non-neutral axis to confirm only the original explicit axis is replayed and saved.
 
 backlog:
+  - id: motion_lab_sequence_tuning
+    status: planned
+    summary: Upgrade Motion Lab drafts, persisted samples, and backend few-shot projection to preserve and edit v4 motion_steps without flattening them into one pose.
   - id: motion_lab_training_workbench
     status: planned
     summary: Build a separate UI for querying, replaying, reviewing, and curating persisted Motion Lab records.

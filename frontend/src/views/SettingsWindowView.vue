@@ -10,12 +10,12 @@ const {
   desktopScreenshotOnSendEnabled,
   microphoneDeviceId,
   microphoneDeviceStatus,
-  ambientMotionEnabled,
   pttModeEnabled,
   pttKeyBinding,
   pttKeyCaptureActive,
   pttKeyStatus,
   motionEngineSettings,
+  live2dPresentationSettings,
   bilibiliLiveSettings,
   statusLabel,
   profileEditorButtonLabel,
@@ -23,9 +23,12 @@ const {
   motionIntensityMin,
   motionIntensityMax,
   motionIntensityStep,
-  live2dRenderDprCapMin,
-  live2dRenderDprCapMax,
-  live2dRenderDprCapStep,
+  physicsResponseMin,
+  physicsResponseMax,
+  physicsResponseStep,
+  renderDprCapMin,
+  renderDprCapMax,
+  renderDprCapStep,
   applyAddress,
   connectAdapter,
   disconnectAdapter,
@@ -35,11 +38,12 @@ const {
   applyDesktopScreenshotOnSend,
   applyMicrophoneDevice,
   refreshMicrophoneDevices,
-  applyAmbientMotionEnabled,
+  applyLive2dPresentationSettings,
   applyPttModeEnabled,
   startPttKeyCapture,
   capturePttKey,
   applyMotionEngineSettings,
+  resetLive2dPresentationSettings,
   resetMotionEngineSettings,
   applyBilibiliLiveSettings,
   requestModelProjectionSync,
@@ -134,11 +138,11 @@ onMounted(() => {
       <article class="settings-card settings-card--wide">
         <div class="settings-card__header">
           <div>
-            <p class="settings-card__eyebrow">渲染</p>
-            <h2>Live2D 清晰度</h2>
+            <p class="settings-card__eyebrow">渲染表现</p>
+            <h2>Live2D 画面与物理</h2>
           </div>
           <span class="settings-card__badge">
-            x{{ formatScale(motionEngineSettings.live2dRenderDprCap) }}
+            x{{ formatScale(live2dPresentationSettings.renderDprCap) }}
           </span>
         </div>
 
@@ -149,18 +153,49 @@ onMounted(() => {
               <p>数值越高越清晰，也会增加显卡负载。</p>
             </div>
             <span class="settings-slider__value">
-              x{{ formatScale(motionEngineSettings.live2dRenderDprCap) }}
+              x{{ formatScale(live2dPresentationSettings.renderDprCap) }}
             </span>
           </div>
           <input
-            v-model.number="motionEngineSettings.live2dRenderDprCap"
+            v-model.number="live2dPresentationSettings.renderDprCap"
             class="settings-slider__input"
             type="range"
-            :min="live2dRenderDprCapMin"
-            :max="live2dRenderDprCapMax"
-            :step="live2dRenderDprCapStep"
-            @input="applyMotionEngineSettings"
+            :min="renderDprCapMin"
+            :max="renderDprCapMax"
+            :step="renderDprCapStep"
+            @input="applyLive2dPresentationSettings"
           />
+        </div>
+
+        <div class="settings-slider">
+          <div class="settings-slider__header">
+            <div>
+              <strong>物理响应强度</strong>
+              <p>放大 Cubism Physics 对模型参数产生的逐帧变化，不改变动作输入范围。</p>
+            </div>
+            <span class="settings-slider__value">
+              x{{ formatScale(live2dPresentationSettings.physicsResponseScale) }}
+            </span>
+          </div>
+          <input
+            v-model.number="live2dPresentationSettings.physicsResponseScale"
+            class="settings-slider__input"
+            type="range"
+            :min="physicsResponseMin"
+            :max="physicsResponseMax"
+            :step="physicsResponseStep"
+            @input="applyLive2dPresentationSettings"
+          />
+        </div>
+
+        <div class="settings-card__actions">
+          <button
+            type="button"
+            class="settings-card__button settings-card__button--ghost"
+            @click="resetLive2dPresentationSettings"
+          >
+            重置渲染表现
+          </button>
         </div>
       </article>
 
@@ -322,16 +357,16 @@ onMounted(() => {
             <h2>默认待机动作</h2>
           </div>
           <span class="settings-card__badge">
-            {{ ambientMotionEnabled ? "enabled" : "disabled" }}
+            {{ live2dPresentationSettings.ambientMotionEnabled ? "enabled" : "disabled" }}
           </span>
         </div>
 
         <label class="settings-toggle">
           <input
-            v-model="ambientMotionEnabled"
+            v-model="live2dPresentationSettings.ambientMotionEnabled"
             class="settings-toggle__input"
             type="checkbox"
-            @change="applyAmbientMotionEnabled"
+            @change="applyLive2dPresentationSettings"
           />
           <span class="settings-toggle__control" aria-hidden="true"></span>
           <span class="settings-toggle__copy">
@@ -434,7 +469,7 @@ onMounted(() => {
         </div>
 
         <p class="settings-card__hint">
-          当前只保留会真正影响动态主轴 v2 的全局强度。旧 12 轴逐轴倍率已从设置界面下线，避免出现能调但不生效的兼容项。
+          动作强度只由 ModelEngine 在语义轴编译阶段应用。
         </p>
       </article>
 

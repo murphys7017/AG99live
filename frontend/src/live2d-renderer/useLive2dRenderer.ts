@@ -9,7 +9,10 @@ import {
   type Ref,
 } from "vue";
 import type { ModelSummary } from "../types/protocol";
-import type { ModelEngineSettings } from "../model-engine/settings";
+import {
+  selectLive2dRuntimeEffectsSettings,
+  type Live2dPresentationSettings,
+} from "./settings";
 
 type RenderStatus = "idle" | "loading" | "ready" | "error";
 
@@ -93,7 +96,7 @@ function ensureLive2DCoreLoaded(): Promise<void> {
 
 export function useLive2dRenderer(
   selectedModel: Ref<ModelSummary | null>,
-  settings: Ref<ModelEngineSettings>,
+  settings: Ref<Live2dPresentationSettings>,
 ) {
   const containerRef = ref<HTMLDivElement | null>(null);
   const canvasRef = ref<HTMLCanvasElement | null>(null);
@@ -106,6 +109,7 @@ export function useLive2dRenderer(
   let lastCanvasWidth = 0;
   let lastCanvasHeight = 0;
   let modelLoadQueue = Promise.resolve();
+  let rendererReleasePromise: Promise<void> | null = null;
 
   const statusLabel = computed(() => {
     if (renderStatus.value === "ready") {
@@ -136,9 +140,7 @@ export function useLive2dRenderer(
     const rect = container.getBoundingClientRect();
     const width = Math.max(rect.width, 1);
     const height = Math.max(rect.height, 1);
-    const dprCap = Number.isFinite(settings.value.live2dRenderDprCap)
-      ? Math.max(1, settings.value.live2dRenderDprCap)
-      : 1.25;
+    const dprCap = settings.value.renderDprCap;
     const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, dprCap));
     const nextCanvasWidth = Math.round(width * dpr);
     const nextCanvasHeight = Math.round(height * dpr);
@@ -172,6 +174,14 @@ export function useLive2dRenderer(
     });
   }
 
+  function releaseRenderer(): Promise<void> {
+    if (!rendererReleasePromise) {
+      rendererReleasePromise = import("@cubismsdksamples/lappdelegate")
+        .then(({ LAppDelegate }) => LAppDelegate.releaseInstance());
+    }
+    return rendererReleasePromise;
+  }
+
   async function loadModel(model: ModelSummary) {
     renderStatus.value = "loading";
     renderError.value = "";
@@ -181,7 +191,11 @@ export function useLive2dRenderer(
       syncCanvasSize();
       await ensureLive2DCoreLoaded();
 
-      const [{ initializeLive2D }, { updateModelConfig }, { LAppDelegate }] =
+      const [
+        { initializeLive2D },
+        { updateModelConfig, applyRuntimeEffectsSettings },
+        { LAppDelegate },
+      ] =
         await Promise.all([
           import("@cubismsdksamples/main"),
           import("@cubismsdksamples/lappdefine"),
@@ -189,6 +203,7 @@ export function useLive2dRenderer(
         ]);
 
       const { baseUrl, modelDir, modelFileName } = parseModelUrl(model.model_url);
+      applyRuntimeEffectsSettings(selectLive2dRuntimeEffectsSettings(settings.value));
       updateModelConfig(baseUrl, modelDir, modelFileName);
       await initializeLive2D();
       await nextTick();
@@ -261,10 +276,30 @@ export function useLive2dRenderer(
   );
 
   watch(
-    () => settings.value.live2dRenderDprCap,
-    () => {
+    () => ({ ...settings.value }),
+    (nextSettings) => {
       forceLive2DRedraw();
+      if (renderStatus.value !== "ready") {
+        return;
+      }
+      const adapter = window.getLAppAdapter?.();
+      if (!adapter?.applyRuntimeEffectsSettings) {
+        const error = "live2d_runtime_effects_adapter_unavailable";
+        console.error(`[AG99live] ${error}`);
+        renderError.value = error;
+        renderStatus.value = "error";
+        mountedModelUrl.value = "";
+        resizeLive2D.value = null;
+        void releaseRenderer().catch((releaseError) => {
+          console.error("[AG99live] Failed to terminate Live2D renderer", releaseError);
+        });
+        return;
+      }
+      adapter.applyRuntimeEffectsSettings(
+        selectLive2dRuntimeEffectsSettings(nextSettings),
+      );
     },
+    { deep: true },
   );
 
   onBeforeUnmount(async () => {
@@ -278,8 +313,7 @@ export function useLive2dRenderer(
     lastCanvasHeight = 0;
 
     try {
-      const { LAppDelegate } = await import("@cubismsdksamples/lappdelegate");
-      LAppDelegate.releaseInstance();
+      await releaseRenderer();
     } catch (error) {
       console.warn("[AG99live] Failed to release Live2D delegate cleanly", error);
     }

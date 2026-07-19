@@ -47,6 +47,7 @@ const feedbackText = ref("");
 const tagsText = ref("");
 const enabledForLlmReference = ref(true);
 const draftAxes = reactive<Record<string, number>>({});
+const explicitDraftAxisIds = reactive(new Set<string>());
 const playStatusText = ref("");
 const saveStatusText = ref("");
 type MotionTuningSampleSnapshot = Readonly<{
@@ -89,6 +90,8 @@ type MotionDraftSource = Readonly<{
   createdAt: string;
   sourceLabel: string;
   axes: Record<string, number>;
+  explicitAxisIds: readonly string[];
+  error?: string;
   durationMs: number;
   record?: DesktopMotionPlaybackRecord & { plan: SemanticParameterPlan };
   sample?: DesktopMotionTuningSample;
@@ -136,22 +139,7 @@ const recentSemanticRecords = computed(() =>
   },
 );
 const historyDraftSources = computed<MotionDraftSource[]>(() =>
-  recentSemanticRecords.value.map((record) => ({
-    id: `record:${record.id}`,
-    mode: record.mode,
-    emotionLabel: record.emotionLabel || "motion",
-    assistantText: record.assistantText || record.startReason,
-    createdAt: record.createdAt,
-    sourceLabel: "历史动作",
-    axes: extractPlanAxisValues(record.plan),
-    durationMs: record.plan.timing.duration_ms,
-    record,
-  })),
-);
-const selectedRecord = computed(() =>
-  recentSemanticRecords.value.find((record) => `record:${record.id}` === selectedRecordId.value)
-    ?? recentSemanticRecords.value[0]
-    ?? null,
+  recentSemanticRecords.value.map(buildHistoryDraftSource),
 );
 const llmReferenceSampleCount = computed(() =>
   llmReferenceEntries.value.filter((entry) => entry.enabled).length,
@@ -213,6 +201,7 @@ const savedDraftSources = computed<MotionDraftSource[]>(() =>
     createdAt: "",
     sourceLabel: entry.sourceLabel,
     axes: { ...entry.axes },
+    explicitAxisIds: Object.keys(entry.axes),
     durationMs: 1200,
     sample: entry.sample,
   })),
@@ -226,21 +215,9 @@ const selectedDraftSource = computed<MotionDraftSource | null>(() => {
   if (activeSourceTab.value === "saved") {
     return selectedSavedSource.value;
   }
-  const record = selectedRecord.value;
-  if (!record || record.plan.schema_version !== SCHEMA_PARAMETER_PLAN_V2) {
-    return null;
-  }
-  return {
-    id: `record:${record.id}`,
-    mode: record.mode,
-    emotionLabel: record.emotionLabel || "motion",
-    assistantText: record.assistantText || record.startReason,
-    createdAt: record.createdAt,
-    sourceLabel: "历史动作",
-    axes: extractPlanAxisValues(record.plan),
-    durationMs: record.plan.timing.duration_ms,
-    record,
-  };
+  return historyDraftSources.value.find(
+    (source) => source.id === selectedRecordId.value,
+  ) ?? historyDraftSources.value[0] ?? null;
 });
 const selectedMotionDiagnosticLines = computed(() =>
   buildMotionDiagnosticLines(selectedDraftSource.value),
@@ -337,24 +314,78 @@ function resetDraftAxes(source: MotionDraftSource | null): void {
   for (const key of Object.keys(draftAxes)) {
     delete draftAxes[key];
   }
+  explicitDraftAxisIds.clear();
   if (!source) {
     return;
   }
 
+  const sourceExplicitAxisIds = new Set(source.explicitAxisIds);
   for (const axis of promptAxes.value) {
-    draftAxes[axis.id] = source.axes[axis.id] ?? axis.neutral;
+    const sourceValue = source.axes[axis.id];
+    const value = sourceValue ?? axis.neutral;
+    draftAxes[axis.id] = value;
+    if (sourceExplicitAxisIds.has(axis.id)) {
+      explicitDraftAxisIds.add(axis.id);
+    }
   }
 }
 
-function extractPlanAxisValues(plan: SemanticParameterPlan): Record<string, number> {
-  const values: Record<string, number> = {};
-  for (const parameter of plan.parameters) {
-    if (parameter.input_value === undefined || values[parameter.axis_id] !== undefined) {
-      continue;
-    }
-    values[parameter.axis_id] = parameter.input_value;
+function buildHistoryDraftSource(record: SemanticMotionPlaybackRecord): MotionDraftSource {
+  const trace = record.diagnostics?.transformTrace;
+  const base = {
+    id: `record:${record.id}`,
+    mode: record.mode,
+    emotionLabel: record.emotionLabel || "motion",
+    assistantText: record.assistantText || record.startReason,
+    createdAt: record.createdAt,
+    sourceLabel: "历史动作",
+    durationMs: record.plan.timing.duration_ms,
+    record,
+  } as const;
+  if (!trace) {
+    return {
+      ...base,
+      axes: {},
+      explicitAxisIds: [],
+      error: "motion_tuning_transform_trace_missing",
+    };
   }
-  return values;
+  if (trace.rawMotionSteps?.length) {
+    return {
+      ...base,
+      axes: {},
+      explicitAxisIds: [],
+      error: "motion_tuning_sequence_source_not_supported",
+    };
+  }
+
+  const explicitAxisIds = Object.keys(
+    Object.keys(trace.rawAxisLevels ?? {}).length
+      ? trace.rawAxisLevels ?? {}
+      : trace.rawAxes,
+  );
+  const axes: Record<string, number> = {};
+  for (const axisId of explicitAxisIds) {
+    const value = trace.constrainedAxes[axisId];
+    if (!Number.isFinite(value)) {
+      return {
+        ...base,
+        axes: {},
+        explicitAxisIds: [],
+        error: `motion_tuning_explicit_axis_value_missing:${axisId}`,
+      };
+    }
+    axes[axisId] = value;
+  }
+  if (!explicitAxisIds.length) {
+    return {
+      ...base,
+      axes: {},
+      explicitAxisIds: [],
+      error: "motion_tuning_explicit_axes_missing",
+    };
+  }
+  return { ...base, axes, explicitAxisIds };
 }
 
 function isSemanticMotionPlaybackRecord(
@@ -377,6 +408,7 @@ function updateAxisValue(axis: SemanticAxisDefinition, event: Event): void {
     return;
   }
   draftAxes[axis.id] = clamp(value, axis.value_range[0], axis.value_range[1]);
+  explicitDraftAxisIds.add(axis.id);
 }
 
 function buildAdjustedIntent(): SemanticMotionIntent | null {
@@ -385,9 +417,15 @@ function buildAdjustedIntent(): SemanticMotionIntent | null {
   if (!profile || !source) {
     return null;
   }
+  if (source.error) {
+    return null;
+  }
 
   const axes: SemanticMotionIntent["axes"] = {};
   for (const axis of promptAxes.value) {
+    if (!explicitDraftAxisIds.has(axis.id)) {
+      continue;
+    }
     const value = Number(draftAxes[axis.id] ?? axis.neutral);
     if (!Number.isFinite(value)) {
       continue;
@@ -424,6 +462,10 @@ function buildAdjustedIntent(): SemanticMotionIntent | null {
 }
 
 function playAdjustedIntent(): void {
+  if (selectedDraftSource.value?.error) {
+    playStatusText.value = `当前记录不可编辑：${selectedDraftSource.value.error}`;
+    return;
+  }
   const intent = buildAdjustedIntent();
   if (!intent) {
     playStatusText.value = "当前没有可播放的语义主轴草稿。";
@@ -439,6 +481,10 @@ function saveSample(): void {
   const profile = currentProfile.value;
   if (!source || !profile) {
     saveStatusText.value = "当前没有可保存的动作参考或主轴 profile。";
+    return;
+  }
+  if (source.error) {
+    saveStatusText.value = `当前记录不可保存：${source.error}`;
     return;
   }
 
@@ -512,6 +558,9 @@ function normalizeDraftAxes(currentProfile: SemanticAxisProfile): Record<string,
   const result: Record<string, number> = {};
   for (const axis of currentProfile.axes) {
     if (axis.control_role !== "primary" && axis.control_role !== "hint") {
+      continue;
+    }
+    if (!explicitDraftAxisIds.has(axis.id)) {
       continue;
     }
     const value = Number(draftAxes[axis.id] ?? axis.neutral);
@@ -673,7 +722,7 @@ function buildMotionDiagnosticLines(source: MotionDraftSource | null): string[] 
   if (!record) {
     return [];
   }
-  const lines: string[] = [];
+  const lines: string[] = source.error ? [`不可编辑: ${source.error}`] : [];
   const summary = (record.plan.summary ?? {}) as MotionVisibilitySummary;
   const diagnostics = record.diagnostics;
   const warningLines = uniqueStrings([

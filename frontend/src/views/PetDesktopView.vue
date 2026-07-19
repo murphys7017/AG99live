@@ -2,7 +2,12 @@
 import DesktopPetCanvas from "../components/DesktopPetCanvas.vue";
 import { providePetDesktopRuntime } from "../app/usePetDesktopRuntime";
 
-const { selectedModel, motionEngineSettings, stageMessage, showContextMenu } = providePetDesktopRuntime();
+const {
+  selectedModel,
+  live2dPresentationSettings,
+  stageMessage,
+  showContextMenu,
+} = providePetDesktopRuntime();
 </script>
 
 <template>
@@ -12,7 +17,7 @@ const { selectedModel, motionEngineSettings, stageMessage, showContextMenu } = p
   >
     <DesktopPetCanvas
       :selected-model="selectedModel"
-      :motion-engine-settings="motionEngineSettings"
+      :live2d-presentation-settings="live2dPresentationSettings"
       :stage-message="stageMessage"
     />
   </main>

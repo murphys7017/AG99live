@@ -1,20 +1,20 @@
 <script setup lang="ts">
 import { toRef } from "vue";
 import type { ModelSummary } from "../types/protocol";
-import type { ModelEngineSettings } from "../model-engine/settings";
+import type { Live2dPresentationSettings } from "../live2d-renderer/settings";
 import { useLive2dRenderer } from "../live2d-renderer/useLive2dRenderer";
 import { usePetWindowDrag } from "../app/usePetWindowDrag";
 
 const props = defineProps<{
   selectedModel: ModelSummary | null;
-  motionEngineSettings: ModelEngineSettings;
+  live2dPresentationSettings: Live2dPresentationSettings;
   stageMessage: string;
 }>();
 
 const selectedModelRef = toRef(props, "selectedModel");
-const motionEngineSettingsRef = toRef(props, "motionEngineSettings");
+const live2dPresentationSettingsRef = toRef(props, "live2dPresentationSettings");
 const { containerRef, canvasRef, renderError } =
-  useLive2dRenderer(selectedModelRef, motionEngineSettingsRef);
+  useLive2dRenderer(selectedModelRef, live2dPresentationSettingsRef);
 const {
   isDragging,
   finishWindowDrag,

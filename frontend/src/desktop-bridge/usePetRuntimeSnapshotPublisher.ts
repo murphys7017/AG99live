@@ -1,5 +1,9 @@
 import { watch, type ComputedRef, type Ref } from "vue";
 import { cloneModelEngineSettings, type ModelEngineSettings } from "../model-engine/settings";
+import {
+  cloneLive2dPresentationSettings,
+  type Live2dPresentationSettings,
+} from "../live2d-renderer/settings";
 import type {
   DesktopBaseActionPreview,
   DesktopBackendHistoryMessage,
@@ -83,8 +87,8 @@ interface PetRuntimeSnapshotPublisherOptions {
   modelSyncState: ModelSync["state"];
   selectedModel: Ref<ModelSummary | null>;
   selectedSemanticAxisProfile: Ref<SemanticAxisProfile | null>;
-  ambientMotionEnabled: Ref<boolean>;
   motionEngineSettings: ModelEngineSettings;
+  live2dPresentationSettings: Live2dPresentationSettings;
   motionPlaybackRecords: { readonly value: readonly DesktopMotionPlaybackRecord[] };
   parameterActionPreview: ComputedRef<DesktopBaseActionPreview | null>;
   connectionState: ComputedRef<string>;
@@ -196,8 +200,10 @@ export function createPetRuntimeSnapshotPublisher(
       return {
         adapter: adapterProjection,
         session: sessionProjection,
-        ambientMotionEnabled: options.ambientMotionEnabled.value,
         motionEngineSettings: cloneModelEngineSettings(options.motionEngineSettings),
+        live2dPresentationSettings: cloneLive2dPresentationSettings(
+          options.live2dPresentationSettings,
+        ),
         motionPlaybackRecords: options.motionPlaybackRecords.value.map((record) =>
           cloneJson(record),
         ) as DesktopMotionPlaybackRecord[],

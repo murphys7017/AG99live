@@ -1,4 +1,3 @@
-import type { Ref } from "vue";
 import type {
   DesktopMicrophoneDevice,
   DesktopMotionTuningSample,
@@ -9,8 +8,14 @@ import type {
 } from "../types/desktop.js";
 import type { SystemSemanticAxisProfileSavePayload } from "../types/protocol.js";
 import { cloneJson } from "../utils/cloneJson.js";
-import { applyMotionEngineSettingsSnapshot } from "../app/motionEngineSettingsSnapshot.js";
-import type { ModelEngineSettings } from "../model-engine/settings.js";
+import {
+  applyModelEngineSettings,
+  type ModelEngineSettings,
+} from "../model-engine/settings.js";
+import {
+  applyLive2dPresentationSettingsSnapshot,
+  type Live2dPresentationSettings,
+} from "../live2d-renderer/settings.js";
 import type { BilibiliLiveSettings } from "../types/bilibili-live.js";
 
 interface DesktopRuntimeCommandAdapterPort {
@@ -45,8 +50,8 @@ interface DesktopRuntimeSnapshotPublisherPort {
 
 export interface DesktopRuntimeCommandDeps {
   adapter: DesktopRuntimeCommandAdapterPort;
-  ambientMotionEnabled: Ref<boolean>;
   motionEngineSettings: ModelEngineSettings;
+  live2dPresentationSettings: Live2dPresentationSettings;
   modelEngine: {
     stop: (reason: string) => void;
     playPreviewPayload: (plan: unknown) => boolean;
@@ -55,7 +60,6 @@ export interface DesktopRuntimeCommandDeps {
   saveMotionTuningSample: (sample: DesktopMotionTuningSample) => void;
   deleteMotionTuningSample: (sampleId: string) => void;
   handlePreviewMotionPlan: (plan: unknown) => void;
-  applyAmbientMotionPreference: () => void;
   setBilibiliLiveSettings: (settings: BilibiliLiveSettings) => void;
 }
 
@@ -82,12 +86,14 @@ export function createDesktopRuntimeCommandHandler(
       case "refresh_microphone_devices":
         void deps.adapter.refreshMicrophoneDevices();
         return;
-      case "set_ambient_motion_enabled":
-        deps.ambientMotionEnabled.value = command.enabled;
-        deps.applyAmbientMotionPreference();
-        return;
       case "set_motion_engine_settings":
-        applyMotionEngineSettingsSnapshot(deps.motionEngineSettings, command.settings);
+        applyModelEngineSettings(deps.motionEngineSettings, command.settings);
+        return;
+      case "set_live2d_presentation_settings":
+        applyLive2dPresentationSettingsSnapshot(
+          deps.live2dPresentationSettings,
+          command.settings,
+        );
         return;
       case "request_model_projection_sync":
         deps.snapshotPublisher.publishModelProjectionSnapshot();

@@ -11,6 +11,10 @@ declare module "@cubismsdksamples/lappdefine" {
     modelFileName: string,
     kScale?: number,
   ): void;
+  export function applyRuntimeEffectsSettings(settings: {
+    ambientMotionEnabled: boolean;
+    physicsResponseScale: number;
+  }): void;
 }
 
 declare module "@cubismsdksamples/lappdelegate" {

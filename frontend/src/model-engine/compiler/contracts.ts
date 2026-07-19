@@ -63,7 +63,6 @@ export interface CompileDiagnostics {
   compiledParameters?: string[];
   intensityApplied: boolean;
   motionIntensityScale: number;
-  axisIntensityScale: Record<string, number>;
   activeGroups?: string[];
   skeletonGroups?: string[];
   missingSkeletonGroups?: string[];

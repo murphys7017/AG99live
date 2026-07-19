@@ -81,7 +81,6 @@ function testPublishSnapshotStripsUncloneableRuntimeValues(): void {
           resolvedMode: "expressive",
           intensityApplied: false,
           motionIntensityScale: 1,
-          axisIntensityScale: {},
           transformTrace: {
             transformVersion: "semantic_motion_transform.v3",
             profileRevision: 2,

@@ -79,9 +79,16 @@ export class LAppAdapter {
     return this.getModel()?.getMotionStartError?.() ?? "";
   }
 
-  public setAmbientMotionEnabled(enabled: boolean): void {
-    LAppDefine.setAmbientMotionEnabled(enabled);
-    this.getModel()?.setAmbientMotionEnabled(enabled);
+  public applyRuntimeEffectsSettings(settings: {
+    ambientMotionEnabled: boolean;
+    physicsResponseScale: number;
+  }): void {
+    LAppDefine.applyRuntimeEffectsSettings(settings);
+    const model = this.getModel();
+    if (!settings.ambientMotionEnabled) {
+      model?.stopAmbientMotion();
+    }
+    model?.setPhysicsResponseScale(settings.physicsResponseScale);
   }
 
   public startDirectParameterPlan(plan: SemanticParameterPlan, options?: unknown): boolean {

@@ -44,7 +44,10 @@ declare global {
       setExpression?: (name: string) => boolean;
       stopExpression?: () => void;
       getExpressionStartError?: () => string;
-      setAmbientMotionEnabled?: (enabled: boolean) => void;
+      applyRuntimeEffectsSettings: (settings: {
+        ambientMotionEnabled: boolean;
+        physicsResponseScale: number;
+      }) => void;
       startDirectParameterPlan?: (
         plan: MotionPlanPayload,
         options?: {

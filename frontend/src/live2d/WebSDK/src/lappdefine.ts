@@ -88,22 +88,23 @@ export const RenderTargetWidth = 1900;
 export const RenderTargetHeight = 1000;
 
 export const ENABLE_LIMITED_FRAME_RATE = true;
-export let LIMITED_FRAME_RATE = 24;
-export let BACKGROUND_FRAME_RATE = 12;
+export let LIMITED_FRAME_RATE = 60;
+export let BACKGROUND_FRAME_RATE = 60;
 export let MAX_RENDER_DEVICE_PIXEL_RATIO = 1.25;
 export let AMBIENT_MOTION_ENABLED = true;
+export let PHYSICS_RESPONSE_SCALE = 1.0;
 
 export function setLimitedFrameRate(nextFrameRate: number) {
   const normalizedFrameRate = Number.isFinite(nextFrameRate)
     ? Math.max(1, Math.min(60, Math.round(nextFrameRate)))
-    : 24;
+    : 60;
   LIMITED_FRAME_RATE = normalizedFrameRate;
 }
 
 export function setBackgroundFrameRate(nextFrameRate: number) {
   const normalizedFrameRate = Number.isFinite(nextFrameRate)
     ? Math.max(1, Math.min(60, Math.round(nextFrameRate)))
-    : 12;
+    : 60;
   BACKGROUND_FRAME_RATE = normalizedFrameRate;
 }
 
@@ -123,6 +124,21 @@ export function getRenderDevicePixelRatio(): number {
   return Math.max(1, Math.min(raw, MAX_RENDER_DEVICE_PIXEL_RATIO));
 }
 
-export function setAmbientMotionEnabled(enabled: boolean) {
+function setAmbientMotionEnabled(enabled: boolean) {
   AMBIENT_MOTION_ENABLED = enabled !== false;
+}
+
+function setPhysicsResponseScale(scale: number) {
+  if (!Number.isFinite(scale) || scale < 0.5 || scale > 2.0) {
+    throw new RangeError('physics_response_scale_out_of_range');
+  }
+  PHYSICS_RESPONSE_SCALE = scale;
+}
+
+export function applyRuntimeEffectsSettings(settings: {
+  ambientMotionEnabled: boolean;
+  physicsResponseScale: number;
+}) {
+  setAmbientMotionEnabled(settings.ambientMotionEnabled);
+  setPhysicsResponseScale(settings.physicsResponseScale);
 }

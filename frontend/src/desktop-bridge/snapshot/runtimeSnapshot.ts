@@ -11,6 +11,10 @@ import {
   cloneModelEngineSettings,
   normalizeModelEngineSettings,
 } from "../../model-engine/settings.js";
+import {
+  buildDefaultLive2dPresentationSettings,
+  cloneLive2dPresentationSettings,
+} from "../../live2d-renderer/settings.js";
 import { cloneSemanticParameterPlan } from "../../model-engine/planParser.js";
 import { DEFAULT_ADAPTER_ADDRESS } from "../../adapter-connection/core/address.js";
 import {
@@ -62,8 +66,8 @@ export const defaultSnapshot: DesktopRuntimeSnapshot = {
   desktopScreenshotOnSendEnabled: true,
   microphoneDeviceId: "",
   microphoneDevices: [],
-  ambientMotionEnabled: true,
   motionEngineSettings: buildDefaultModelEngineSettings(),
+  live2dPresentationSettings: buildDefaultLive2dPresentationSettings(),
   motionPlaybackRecords: [],
   connectionState: "disconnected",
   connectionLabel: "未连接",
@@ -160,6 +164,9 @@ export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRunt
     _revision: snapshot._revision,
     motionEngineSettings: cloneModelEngineSettings(
       normalizeModelEngineSettings(snapshot.motionEngineSettings),
+    ),
+    live2dPresentationSettings: cloneLive2dPresentationSettings(
+      snapshot.live2dPresentationSettings,
     ),
     motionPlaybackRecords: Array.isArray(snapshot.motionPlaybackRecords)
       ? snapshot.motionPlaybackRecords.map(cloneMotionPlaybackRecord).filter(isPresent)
@@ -398,7 +405,6 @@ function cloneMotionCompileDiagnostics(
     motionIntensityScale: isFiniteNumber(diagnostics.motionIntensityScale)
       ? diagnostics.motionIntensityScale
       : 1,
-    axisIntensityScale: cloneNumericRecord(diagnostics.axisIntensityScale),
     activeGroups: normalizeStringArray(diagnostics.activeGroups),
     skeletonGroups: normalizeStringArray(diagnostics.skeletonGroups),
     missingSkeletonGroups: normalizeStringArray(diagnostics.missingSkeletonGroups),

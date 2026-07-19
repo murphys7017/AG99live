@@ -19,7 +19,6 @@ export function buildBaseCompileDiagnostics(
     source: options.source,
     intensityApplied: false,
     motionIntensityScale: settings.motionIntensityScale,
-    axisIntensityScale: { ...settings.axisIntensityScale },
     warnings: [],
   };
 }

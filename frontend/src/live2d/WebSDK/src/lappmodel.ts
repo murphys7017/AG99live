@@ -443,6 +443,9 @@ export class LAppModel extends CubismUserModel {
         this.fetchRequiredArrayBuffer(`${this._modelHomeDir}${physicsFileName}`)
           .then((arrayBuffer) => {
             this.loadPhysics(arrayBuffer, arrayBuffer.byteLength);
+            this._physics?.setTerminalOutputResponseScale(
+              LAppDefine.PHYSICS_RESPONSE_SCALE
+            );
 
             this._state = LoadStep.LoadPose;
 
@@ -863,10 +866,16 @@ export class LAppModel extends CubismUserModel {
     this._model.update();
   }
 
-  public setAmbientMotionEnabled(enabled: boolean): void {
-    LAppDefine.setAmbientMotionEnabled(enabled);
-    if (!enabled) {
-      this.stopMotion();
+  public setPhysicsResponseScale(scale: number): void {
+    this._physics?.setTerminalOutputResponseScale(scale);
+  }
+
+  public stopAmbientMotion(): void {
+    const isIdleMotion =
+      this._motionManager.getCurrentPriority() === LAppDefine.PriorityIdle
+      || this._motionManager.getReservePriority() === LAppDefine.PriorityIdle;
+    if (isIdleMotion) {
+      this.stopMotion("ambient_motion_disabled");
     }
   }
 

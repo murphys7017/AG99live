@@ -10,7 +10,6 @@ import { refreshAllAxisValues, replaceControlledAxisValues } from "../compileCon
 // Reads:
 // - context.intent.mode
 // - context.settings.motionIntensityScale
-// - context.settings.axisIntensityScale
 // - context.state.axisById
 // - context.state.controlledValues
 // - context.state.warnings
@@ -46,7 +45,6 @@ export function runIntensityStage(
       axis,
       context.intent.mode,
       context.settings.motionIntensityScale,
-      context.settings.axisIntensityScale[axisId] ?? 1,
       context.state.axisSampling?.sampleBounds[axisId],
     );
     nextControlledValues[axisId] = intensityResult.value;
@@ -77,7 +75,6 @@ function applySemanticIntensity(
   axis: SemanticAxisDefinition,
   mode: SemanticMotionIntent["mode"],
   motionIntensityScale: number,
-  axisIntensityScale: number,
   levelBounds?: { min: number; max: number },
 ): { value: number; warning: string } {
   if (mode !== "expressive") {
@@ -85,8 +82,8 @@ function applySemanticIntensity(
   }
 
   const scaled =
-    axis.neutral + (value - axis.neutral) * motionIntensityScale * axisIntensityScale;
-  if (levelBounds && axisIntensityScale > 0) {
+    axis.neutral + (value - axis.neutral) * motionIntensityScale;
+  if (levelBounds) {
     const bounded = Math.max(levelBounds.min, Math.min(levelBounds.max, scaled));
     return {
       value: bounded,

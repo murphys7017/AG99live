@@ -16,9 +16,16 @@ import { createModelSync, useModelSync } from "../adapter-connection/model-sync/
 import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRuntimeSnapshotPublisher";
 import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
+import {
+  cloneLive2dPresentationSettings,
+  type Live2dPresentationSettings,
+} from "../live2d-renderer/settings";
 import { useModelEngine } from "../model-engine/useModelEngine";
 import { normalizeMotionPayload } from "../model-engine/normalize";
-import { cloneModelEngineSettings } from "../model-engine/settings";
+import {
+  applyModelEngineSettings,
+  cloneModelEngineSettings,
+} from "../model-engine/settings";
 import type { ModelEngineSettings } from "../model-engine/settings";
 import { usePlaybackCompletionCoordinator } from "../turn-playback/usePlaybackCompletionCoordinator";
 import { useMotionPlaybackRecorder } from "../playback-integrations/useMotionPlaybackRecorder";
@@ -29,8 +36,6 @@ import type {
   DesktopMotionTuningSample,
 } from "../types/desktop";
 import { cloneJson } from "../utils/cloneJson";
-import { applyMotionEngineSettingsSnapshot } from "./motionEngineSettingsSnapshot";
-import { useAmbientMotionPreference } from "./useAmbientMotionPreference";
 import {
   configurePlaybackTimelineMotionRuntime,
   createAppPlaybackTimelineRuntime,
@@ -57,6 +62,7 @@ export interface PetDesktopRuntime {
   sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>;
   selectedModel: ReturnType<typeof createModelSync>["selectedModel"];
   motionEngineSettings: ModelEngineSettings;
+  live2dPresentationSettings: Live2dPresentationSettings;
   stageMessage: ComputedRef<string>;
   showContextMenu: ReturnType<typeof useDesktopContextMenu>["showContextMenu"];
 }
@@ -100,10 +106,14 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const motionEngineSettings = reactive(
     cloneModelEngineSettings(bridge.state.snapshot.motionEngineSettings),
   );
+  const live2dPresentationSettings = reactive(
+    cloneLive2dPresentationSettings(
+      bridge.state.snapshot.live2dPresentationSettings,
+    ),
+  );
   const initialMotionPlaybackRecords: DesktopMotionPlaybackRecord[] =
     bridge.state.snapshot.motionPlaybackRecords.map((record) =>
       cloneJson(record) as DesktopMotionPlaybackRecord);
-  const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
   const { showContextMenu } = useDesktopContextMenu();
   const playbackAck = {
     sendPlaybackFinishedForCurrentGroup: adapter.sendPlaybackFinishedForCurrentGroup,
@@ -281,7 +291,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     },
   });
 
-  applyMotionEngineSettingsSnapshot(motionEngineSettings, bridge.state.snapshot.motionEngineSettings);
+  applyModelEngineSettings(motionEngineSettings, bridge.state.snapshot.motionEngineSettings);
 
   const connectionState = computed(() => {
     if (adapter.state.status === "connecting") {
@@ -356,12 +366,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       state.modelInfo?.runtime_cache_errors,
     ),
   );
-  const { applyAmbientMotionPreference } = useAmbientMotionPreference(
-    ambientMotionEnabled,
-    {
-      getModelUrl: () => selectedModel.value?.model_url ?? "",
-    },
-  );
   const pushToTalk = usePushToTalkController(adapter);
   let snapshotPublisher: ReturnType<typeof createPetRuntimeSnapshotPublisher> | null = null;
   const bilibiliLive = useBilibiliLiveRuntime({
@@ -375,7 +379,11 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   function handlePreviewMotionPlan(plan: unknown): void {
     const localPlayed = modelEngine.playPreviewPayload(plan);
     if (!localPlayed) {
-      console.warn("[AG99live] Local motion preview playback failed to start.");
+      console.error("[AG99live] Local motion preview playback failed to start.", {
+        reason: modelEngine.state.lastCompileReason,
+        diagnostics: modelEngine.state.lastCompileDiagnostics,
+      });
+      return;
     }
     adapter.sendMotionPayloadPreview(plan);
   }
@@ -394,8 +402,8 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     modelSyncState: state,
     selectedModel,
     selectedSemanticAxisProfile,
-    ambientMotionEnabled,
     motionEngineSettings,
+    live2dPresentationSettings,
     motionPlaybackRecords: motionPlaybackRecorder.motionPlaybackRecords,
     parameterActionPreview,
     connectionState,
@@ -408,8 +416,8 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
 
   const commandHandler = createDesktopRuntimeCommandHandler({
     adapter,
-    ambientMotionEnabled,
     motionEngineSettings,
+    live2dPresentationSettings,
     modelEngine: {
       stop: (reason) => modelEngine.stop(reason),
       playPreviewPayload: (plan) => modelEngine.playPreviewPayload(plan),
@@ -418,7 +426,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     saveMotionTuningSample,
     deleteMotionTuningSample,
     handlePreviewMotionPlan,
-    applyAmbientMotionPreference,
     setBilibiliLiveSettings: bilibiliLive.applySettings,
   });
 
@@ -430,7 +437,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   onMounted(async () => {
     await adapter.initialize();
     adapter.connect();
-    applyAmbientMotionPreference();
     pushToTalk.install();
     bilibiliLive.start();
   });
@@ -456,6 +462,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     sessionStore,
     selectedModel,
     motionEngineSettings,
+    live2dPresentationSettings,
     stageMessage,
     showContextMenu,
   };

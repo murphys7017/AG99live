@@ -10,12 +10,19 @@ import {
   MAX_MOTION_INTENSITY_SCALE,
   MIN_MOTION_INTENSITY_SCALE,
   MOTION_INTENSITY_SCALE_STEP,
+  applyModelEngineSettings,
+  cloneModelEngineSettings,
+} from "../model-engine/settings";
+import {
+  MAX_PHYSICS_RESPONSE_SCALE,
+  MIN_PHYSICS_RESPONSE_SCALE,
+  PHYSICS_RESPONSE_SCALE_STEP,
   MAX_LIVE2D_RENDER_DPR_CAP,
   MIN_LIVE2D_RENDER_DPR_CAP,
   LIVE2D_RENDER_DPR_CAP_STEP,
-  cloneModelEngineSettings,
-} from "../model-engine/settings";
-import { applyMotionEngineSettingsSnapshot } from "../app/motionEngineSettingsSnapshot";
+  applyLive2dPresentationSettingsSnapshot,
+  cloneLive2dPresentationSettings,
+} from "../live2d-renderer/settings";
 import {
   loadBilibiliLiveSettings,
   normalizeBilibiliLiveSettings,
@@ -29,7 +36,6 @@ export function useSettingsWindow() {
   );
   const microphoneDeviceId = ref(bridge.state.snapshot.microphoneDeviceId);
   const microphoneDeviceStatus = ref("");
-  const ambientMotionEnabled = ref(bridge.state.snapshot.ambientMotionEnabled);
   const pttModeEnabled = ref(bridge.state.snapshot.pttModeEnabled);
   const pttKeyBinding = ref(
     normalizePttKeyBinding(bridge.state.snapshot.pttKeyBinding),
@@ -38,6 +44,11 @@ export function useSettingsWindow() {
   const pttKeyStatus = ref("");
   const motionEngineSettings = reactive(
     cloneModelEngineSettings(bridge.state.snapshot.motionEngineSettings),
+  );
+  const live2dPresentationSettings = reactive(
+    cloneLive2dPresentationSettings(
+      bridge.state.snapshot.live2dPresentationSettings,
+    ),
   );
   const bilibiliLiveSettings = reactive(loadBilibiliLiveSettings());
   let removePttCaptureListener: (() => void) | null = null;
@@ -64,13 +75,6 @@ export function useSettingsWindow() {
   );
 
   watch(
-    () => bridge.state.snapshot.ambientMotionEnabled,
-    (nextValue) => {
-      ambientMotionEnabled.value = nextValue;
-    },
-  );
-
-  watch(
     () => bridge.state.snapshot.pttModeEnabled,
     (nextValue) => {
       pttModeEnabled.value = nextValue;
@@ -88,7 +92,18 @@ export function useSettingsWindow() {
   watch(
     () => bridge.state.snapshot.motionEngineSettings,
     (nextValue) => {
-      applyMotionEngineSettingsSnapshot(motionEngineSettings, nextValue);
+      applyModelEngineSettings(motionEngineSettings, nextValue);
+    },
+    { deep: true },
+  );
+
+  watch(
+    () => bridge.state.snapshot.live2dPresentationSettings,
+    (nextValue) => {
+      applyLive2dPresentationSettingsSnapshot(
+        live2dPresentationSettings,
+        nextValue,
+      );
     },
     { deep: true },
   );
@@ -172,10 +187,10 @@ export function useSettingsWindow() {
     }
   }
 
-  function applyAmbientMotionEnabled(): void {
+  function applyLive2dPresentationSettings(): void {
     bridge.sendCommand({
-      type: "set_ambient_motion_enabled",
-      enabled: ambientMotionEnabled.value,
+      type: "set_live2d_presentation_settings",
+      settings: cloneLive2dPresentationSettings(live2dPresentationSettings),
     });
   }
 
@@ -249,8 +264,13 @@ export function useSettingsWindow() {
   }
 
   function resetMotionEngineSettings(): void {
-    applyMotionEngineSettingsSnapshot(motionEngineSettings, undefined);
+    applyModelEngineSettings(motionEngineSettings, undefined);
     applyMotionEngineSettings();
+  }
+
+  function resetLive2dPresentationSettings(): void {
+    applyLive2dPresentationSettingsSnapshot(live2dPresentationSettings, undefined);
+    applyLive2dPresentationSettings();
   }
 
   return {
@@ -259,12 +279,12 @@ export function useSettingsWindow() {
     desktopScreenshotOnSendEnabled,
     microphoneDeviceId,
     microphoneDeviceStatus,
-    ambientMotionEnabled,
     pttModeEnabled,
     pttKeyBinding,
     pttKeyCaptureActive,
     pttKeyStatus,
     motionEngineSettings,
+    live2dPresentationSettings,
     bilibiliLiveSettings,
     statusLabel,
     profileEditorButtonLabel,
@@ -272,9 +292,12 @@ export function useSettingsWindow() {
     motionIntensityMin: MIN_MOTION_INTENSITY_SCALE,
     motionIntensityMax: MAX_MOTION_INTENSITY_SCALE,
     motionIntensityStep: MOTION_INTENSITY_SCALE_STEP,
-    live2dRenderDprCapMin: MIN_LIVE2D_RENDER_DPR_CAP,
-    live2dRenderDprCapMax: MAX_LIVE2D_RENDER_DPR_CAP,
-    live2dRenderDprCapStep: LIVE2D_RENDER_DPR_CAP_STEP,
+    physicsResponseMin: MIN_PHYSICS_RESPONSE_SCALE,
+    physicsResponseMax: MAX_PHYSICS_RESPONSE_SCALE,
+    physicsResponseStep: PHYSICS_RESPONSE_SCALE_STEP,
+    renderDprCapMin: MIN_LIVE2D_RENDER_DPR_CAP,
+    renderDprCapMax: MAX_LIVE2D_RENDER_DPR_CAP,
+    renderDprCapStep: LIVE2D_RENDER_DPR_CAP_STEP,
     applyAddress,
     connectAdapter,
     disconnectAdapter,
@@ -284,12 +307,13 @@ export function useSettingsWindow() {
     applyDesktopScreenshotOnSend,
     applyMicrophoneDevice,
     refreshMicrophoneDevices,
-    applyAmbientMotionEnabled,
+    applyLive2dPresentationSettings,
     applyPttModeEnabled,
     startPttKeyCapture,
     capturePttKey,
     applyMotionEngineSettings,
     resetMotionEngineSettings,
+    resetLive2dPresentationSettings,
     applyBilibiliLiveSettings,
     requestModelProjectionSync,
     formatScale,

@@ -9,6 +9,10 @@ import type {
   DesktopPttKeyBinding,
 } from "../types/desktop.js";
 import { cloneModelEngineSettings, type ModelEngineSettings } from "../model-engine/settings.js";
+import {
+  cloneLive2dPresentationSettings,
+  type Live2dPresentationSettings,
+} from "../live2d-renderer/settings.js";
 import type { TurnPlaybackSegment } from "../turn-playback/session.js";
 import type { BilibiliLiveStatus } from "../types/bilibili-live.js";
 
@@ -82,8 +86,8 @@ export interface SessionProjectionInput {
 export interface DesktopRuntimeSnapshotInput {
   adapter: AdapterRuntimeProjection;
   session: SessionProjectionInput;
-  ambientMotionEnabled: boolean;
   motionEngineSettings: ModelEngineSettings;
+  live2dPresentationSettings: Live2dPresentationSettings;
   motionPlaybackRecords: readonly DesktopMotionPlaybackRecord[];
   connectionState: string;
   connectionLabel: string;
@@ -98,8 +102,8 @@ export interface DesktopRuntimeSnapshotOutput {
   desktopScreenshotOnSendEnabled: boolean;
   microphoneDeviceId: string;
   microphoneDevices: DesktopMicrophoneDevice[];
-  ambientMotionEnabled: boolean;
   motionEngineSettings: ModelEngineSettings;
+  live2dPresentationSettings: Live2dPresentationSettings;
   motionPlaybackRecords: DesktopMotionPlaybackRecord[];
   connectionState: string;
   connectionLabel: string;
@@ -238,8 +242,10 @@ export function buildDesktopRuntimeSnapshot(
     desktopScreenshotOnSendEnabled: p.desktopScreenshotOnSendEnabled,
     microphoneDeviceId: p.microphoneDeviceId,
     microphoneDevices: p.microphoneDevices.map((device) => ({ ...device })),
-    ambientMotionEnabled: input.ambientMotionEnabled,
     motionEngineSettings: cloneModelEngineSettings(input.motionEngineSettings),
+    live2dPresentationSettings: cloneLive2dPresentationSettings(
+      input.live2dPresentationSettings,
+    ),
     motionPlaybackRecords: input.motionPlaybackRecords.map((r) =>
       cloneJson(r),
     ),

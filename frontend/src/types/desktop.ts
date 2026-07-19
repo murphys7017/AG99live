@@ -142,8 +142,12 @@ export interface DesktopBaseActionPreview {
 
 export interface DesktopMotionEngineSettings {
   motionIntensityScale: number;
-  axisIntensityScale: Record<string, number>;
-  live2dRenderDprCap: number;
+}
+
+export interface DesktopLive2dPresentationSettings {
+  ambientMotionEnabled: boolean;
+  physicsResponseScale: number;
+  renderDprCap: number;
 }
 
 export interface DesktopMotionCompileDiagnostics {
@@ -167,7 +171,6 @@ export interface DesktopMotionCompileDiagnostics {
   compiledParameters?: string[];
   intensityApplied: boolean;
   motionIntensityScale: number;
-  axisIntensityScale: Record<string, number>;
   activeGroups?: string[];
   skeletonGroups?: string[];
   missingSkeletonGroups?: string[];
@@ -367,8 +370,8 @@ export interface DesktopRuntimeSnapshot {
   desktopScreenshotOnSendEnabled: boolean;
   microphoneDeviceId: string;
   microphoneDevices: DesktopMicrophoneDevice[];
-  ambientMotionEnabled: boolean;
   motionEngineSettings: DesktopMotionEngineSettings;
+  live2dPresentationSettings: DesktopLive2dPresentationSettings;
   motionPlaybackRecords: DesktopMotionPlaybackRecord[];
   connectionState: string;
   connectionLabel: string;
@@ -470,8 +473,8 @@ export type DesktopRuntimeCommand =
   | { type: "set_microphone_device"; deviceId: string }
   | { type: "set_microphone_devices"; devices: DesktopMicrophoneDevice[] }
   | { type: "refresh_microphone_devices" }
-  | { type: "set_ambient_motion_enabled"; enabled: boolean }
   | { type: "set_motion_engine_settings"; settings: DesktopMotionEngineSettings }
+  | { type: "set_live2d_presentation_settings"; settings: DesktopLive2dPresentationSettings }
   | { type: "request_model_projection_sync" }
   | { type: "request_motion_tuning_samples_sync" }
   | { type: "save_motion_tuning_sample"; sample: DesktopMotionTuningSample }

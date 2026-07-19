@@ -100,7 +100,6 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       diagnostics: event.diagnostics
         ? {
             ...event.diagnostics,
-            axisIntensityScale: { ...event.diagnostics.axisIntensityScale },
           }
         : null,
     };
