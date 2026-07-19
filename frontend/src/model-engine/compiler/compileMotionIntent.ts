@@ -7,17 +7,14 @@ import type {
 } from "../../types/protocol.js";
 import { SCHEMA_PARAMETER_PLAN_V2 } from "../../types/protocol.js";
 import type { CompileOptions, CompileResult } from "./contracts.js";
-import { normalizeModelEngineSettings } from "../settings.js";
-import { buildBaseCompileDiagnostics, finalizeCompileDiagnostics } from "./diagnostics.js";
-import {
-  createInitialCompileState,
-  type MotionCompileContext,
-} from "./compileContext.js";
+import { finalizeCompileDiagnostics } from "./diagnostics.js";
+import type { MotionCompileContext } from "./compileContext.js";
 import { runCompilePipeline } from "./pipeline.js";
 import {
   createModelEngineStageRegistry,
   type ModelEngineStageRegistry,
 } from "./registry.js";
+import { compileSemanticPoseContext } from "./compileSemanticMotion.js";
 
 export function compileMotionIntent(
   intent: SemanticMotionIntent,
@@ -44,17 +41,19 @@ function compileSingleMotionIntent(
   options: CompileOptions,
   stageRegistry: ModelEngineStageRegistry,
 ): CompileResult {
-  const normalizedSettings = normalizeModelEngineSettings(options.settings);
-  const context: MotionCompileContext = {
-    intent,
-    options,
-    settings: normalizedSettings,
-    baseDiagnostics: buildBaseCompileDiagnostics(options, normalizedSettings),
-    state: createInitialCompileState(),
-  };
-  context.state.warnings.push(...(options.runtimeWarnings ?? []));
-
-  const pipelineResult = runCompilePipeline(context, stageRegistry.resolve(context));
+  const semanticResult = compileSemanticPoseContext(intent, options, stageRegistry);
+  if (!semanticResult.ok) {
+    return {
+      ok: false,
+      plan: null,
+      reason: semanticResult.reason,
+      diagnostics: semanticResult.diagnostics,
+      feedback: semanticResult.feedback,
+    };
+  }
+  const context = semanticResult.context;
+  const modelParameterStages = stageRegistry.resolve(context, "model_parameter");
+  const pipelineResult = runCompilePipeline(context, modelParameterStages);
   if (!pipelineResult.ok) {
     return failCompile(pipelineResult.reason, context);
   }

@@ -9,6 +9,18 @@ import type { ModelEngineSettings } from "../settings.js";
 
 export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v4";
 
+export type MotionAxisValueSource =
+  | "semantic_axis"
+  | "coupling"
+  | "speech_pose"
+  | "expression"
+  | "continuity";
+
+export type CompiledSemanticAxisSource = Extract<
+  MotionAxisValueSource,
+  "semantic_axis" | "coupling"
+>;
+
 export interface MotionTimingResolution {
   timing: DirectParameterPlanTiming;
   resolvedDurationMs: number;
@@ -149,3 +161,51 @@ export interface CompileResult {
   diagnostics: CompileDiagnostics;
   feedback?: MotionFeedback;
 }
+
+export interface CompiledSemanticAxis {
+  axisId: string;
+  value: number;
+  neutralValue: number;
+  source: CompiledSemanticAxisSource;
+}
+
+export interface CompiledSemanticMotionStep {
+  durationWeight: number;
+  axes: CompiledSemanticAxis[];
+}
+
+interface CompiledSemanticMotionBase {
+  schemaVersion: "engine.compiled_semantic_motion.v1";
+  profileId: string;
+  profileRevision: number;
+  modelId: string;
+  mode: "idle" | "expressive";
+  emotionLabel: string;
+  timing: MotionTimingResolution;
+  diagnostics: CompileDiagnostics;
+}
+
+export type CompiledSemanticMotion = CompiledSemanticMotionBase & (
+  | {
+    kind: "pose";
+    axes: CompiledSemanticAxis[];
+  }
+  | {
+    kind: "sequence";
+    steps: CompiledSemanticMotionStep[];
+  }
+);
+
+export type CompileSemanticMotionResult =
+  | {
+    ok: true;
+    motion: CompiledSemanticMotion;
+    reason: "";
+  }
+  | {
+    ok: false;
+    motion: null;
+    reason: string;
+    diagnostics: CompileDiagnostics;
+    feedback: MotionFeedback;
+  };

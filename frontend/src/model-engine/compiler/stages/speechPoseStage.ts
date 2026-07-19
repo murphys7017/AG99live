@@ -303,7 +303,8 @@ function buildVoiceFollowingDynamics(
 
 function collectControlledParameterIds(context: MotionCompileContext): Set<string> {
   const parameterIds = new Set<string>();
-  for (const axisId of Object.keys(context.state.allAxisValues)) {
+  for (const semanticAxis of context.state.compiledSemanticAxes) {
+    const axisId = semanticAxis.axisId;
     const axis = context.state.axisById.get(axisId);
     for (const binding of axis?.parameter_bindings ?? []) {
       parameterIds.add(binding.parameter_id);
@@ -324,11 +325,14 @@ function collectPendingRelationTargetAxisIds(context: MotionCompileContext): Set
   if (!profile) {
     return pendingTargets;
   }
+  const semanticValueByAxisId = new Map(
+    context.state.compiledSemanticAxes.map((axis) => [axis.axisId, axis.value]),
+  );
   for (const relation of profile.relation_graph.edges) {
-    if (context.state.allAxisValues[relation.target_axis_id] !== undefined) {
+    if (semanticValueByAxisId.has(relation.target_axis_id)) {
       continue;
     }
-    const sourceValue = context.state.allAxisValues[relation.source_axis_id];
+    const sourceValue = semanticValueByAxisId.get(relation.source_axis_id);
     const sourceAxis = context.state.axisById.get(relation.source_axis_id);
     const targetAxis = context.state.axisById.get(relation.target_axis_id);
     if (

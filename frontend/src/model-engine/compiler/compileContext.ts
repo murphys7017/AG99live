@@ -10,9 +10,11 @@ import type {
 import type {
   CompileDiagnostics,
   CompileOptions,
+  CompiledSemanticAxis,
   MotionAxisSamplingTrace,
   MotionAxisRelationAdjustment,
   MotionAxisRelationEvaluation,
+  MotionAxisValueSource,
   MotionTimingResolution,
 } from "./contracts.js";
 import type { ModelEngineSettings } from "../settings.js";
@@ -26,12 +28,6 @@ export interface ResolvedMotionResource {
 }
 
 export type DynamicAxisValues = Record<string, number>;
-export type MotionAxisValueSource =
-  | "semantic_axis"
-  | "coupling"
-  | "speech_pose"
-  | "expression"
-  | "continuity";
 export type MotionAxisValueSourceMap = Record<string, MotionAxisValueSource>;
 
 export interface ResolvedAxisRoleBuckets {
@@ -51,6 +47,7 @@ export interface MotionCompileMutableState {
   derivedValues: DynamicAxisValues;
   allAxisValues: DynamicAxisValues;
   axisValueSources: MotionAxisValueSourceMap;
+  compiledSemanticAxes: CompiledSemanticAxis[];
   appliedDerivedAxes: string[];
 
   missingAxes: string[];
@@ -110,6 +107,7 @@ export function createInitialCompileState(): MotionCompileMutableState {
     derivedValues: {},
     allAxisValues: {},
     axisValueSources: {},
+    compiledSemanticAxes: [],
     appliedDerivedAxes: [],
     missingAxes: [],
     forbiddenAxes: [],

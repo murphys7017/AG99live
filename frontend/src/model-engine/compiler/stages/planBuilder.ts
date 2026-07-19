@@ -4,18 +4,15 @@ import type {
   SemanticAxisParameterBinding,
 } from "../../../types/semantic-axis-profile.js";
 import type {
-  DynamicAxisValues,
   MotionCompileContext,
   MotionCompileStage,
-  MotionAxisValueSourceMap,
   MotionStageResult,
 } from "../compileContext.js";
 
 // Reads:
 // - context.state.profile
 // - context.state.axisById
-// - context.state.allAxisValues
-// - context.state.controlledValues
+// - context.state.compiledSemanticAxes
 // - context.state.parameters
 //
 // Writes:
@@ -38,9 +35,8 @@ export function runPlanBuilderStage(
   }
 
   const parameterResult = buildSemanticPlanParameters(
-    context.state.allAxisValues,
+    context.state.compiledSemanticAxes,
     context.state.axisById,
-    context.state.axisValueSources,
     context.state.pendingParameterModulations,
   );
   if (!parameterResult.ok) {
@@ -90,9 +86,8 @@ export function runPlanBuilderStage(
 }
 
 function buildSemanticPlanParameters(
-  axisValues: DynamicAxisValues,
+  semanticAxes: MotionCompileContext["state"]["compiledSemanticAxes"],
   axisById: Map<string, SemanticAxisDefinition>,
-  axisValueSources: MotionAxisValueSourceMap,
   pendingParameterModulations: MotionCompileContext["state"]["pendingParameterModulations"],
 ):
   | { ok: true; parameters: SemanticParameterPlan["parameters"]; warnings: string[] }
@@ -101,7 +96,8 @@ function buildSemanticPlanParameters(
   const seenParameterIds = new Set<string>();
   const warnings: string[] = [];
 
-  for (const [axisId, value] of Object.entries(axisValues)) {
+  for (const semanticAxis of semanticAxes) {
+    const { axisId, value, source } = semanticAxis;
     const axis = axisById.get(axisId);
     if (!axis) {
       return { ok: false, reason: `unknown_axis:${axisId}` };
@@ -109,11 +105,6 @@ function buildSemanticPlanParameters(
     if (!axis.parameter_bindings.length) {
       return { ok: false, reason: `axis_parameter_binding_missing:${axisId}` };
     }
-    const source = axisValueSources[axisId];
-    if (!source) {
-      return { ok: false, reason: `axis_value_source_missing:${axisId}` };
-    }
-
     for (const binding of axis.parameter_bindings) {
       const parameter = mapSemanticBindingValue(axis, binding, value);
       if (!parameter.ok) {

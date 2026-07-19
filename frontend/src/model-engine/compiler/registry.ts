@@ -11,17 +11,22 @@ import { planBuilderStage } from "./stages/planBuilder.js";
 import { resourcePolicyStage } from "./stages/resourcePolicyStage.js";
 
 export type ModelEngineStageKind = "core" | "extension";
+export type ModelEngineCompilePhase = "semantic" | "model_parameter";
 
 export interface ModelEngineCompileStageRegistration {
   id: string;
   stage: MotionCompileStage;
+  phase: ModelEngineCompilePhase;
   order: number;
   kind: ModelEngineStageKind;
   enabled: (context: MotionCompileContext) => boolean;
 }
 
 export interface ModelEngineStageRegistry {
-  resolve(context: MotionCompileContext): MotionCompileStage[];
+  resolve(
+    context: MotionCompileContext,
+    phase: ModelEngineCompilePhase,
+  ): MotionCompileStage[];
   list(): ReadonlyArray<ModelEngineCompileStageRegistration>;
   register(registration: ModelEngineCompileStageRegistration): void;
   unregister(id: string): void;
@@ -31,16 +36,16 @@ export interface ModelEngineStageRegistry {
 export function createDefaultCompileStageRegistrations(): ModelEngineCompileStageRegistration[] {
   const always = () => true;
   return [
-    { id: "intentValidator", stage: intentValidatorStage, order: 10, kind: "core", enabled: always },
-    { id: "axisResolver", stage: axisResolverStage, order: 20, kind: "core", enabled: always },
-    { id: "intensity", stage: intensityStage, order: 30, kind: "core", enabled: always },
-    { id: "derivedCandidates", stage: couplingStage, order: 40, kind: "core", enabled: always },
-    { id: "modeResolver", stage: modeResolverStage, order: 45, kind: "core", enabled: always },
-    { id: "timing", stage: timingStage, order: 46, kind: "core", enabled: always },
-    { id: "speechPose", stage: speechPoseStage, order: 47, kind: "extension", enabled: always },
-    { id: "semanticAxisRelationGraph", stage: semanticAxisRelationGraphStage, order: 50, kind: "core", enabled: always },
-    { id: "planBuilder", stage: planBuilderStage, order: 80, kind: "core", enabled: always },
-    { id: "resourcePolicy", stage: resourcePolicyStage, order: 90, kind: "core", enabled: always },
+    { id: "intentValidator", stage: intentValidatorStage, phase: "semantic", order: 10, kind: "core", enabled: always },
+    { id: "axisResolver", stage: axisResolverStage, phase: "semantic", order: 20, kind: "core", enabled: always },
+    { id: "intensity", stage: intensityStage, phase: "semantic", order: 30, kind: "core", enabled: always },
+    { id: "derivedCandidates", stage: couplingStage, phase: "semantic", order: 40, kind: "core", enabled: always },
+    { id: "modeResolver", stage: modeResolverStage, phase: "semantic", order: 45, kind: "core", enabled: always },
+    { id: "timing", stage: timingStage, phase: "semantic", order: 46, kind: "core", enabled: always },
+    { id: "semanticAxisRelationGraph", stage: semanticAxisRelationGraphStage, phase: "semantic", order: 50, kind: "core", enabled: always },
+    { id: "speechPose", stage: speechPoseStage, phase: "model_parameter", order: 60, kind: "extension", enabled: always },
+    { id: "planBuilder", stage: planBuilderStage, phase: "model_parameter", order: 80, kind: "core", enabled: always },
+    { id: "resourcePolicy", stage: resourcePolicyStage, phase: "model_parameter", order: 90, kind: "core", enabled: always },
   ];
 }
 
@@ -79,10 +84,12 @@ export function createModelEngineStageRegistry(
   }
 
   return {
-    resolve(context) {
+    resolve(context, phase) {
       return Array.from(registrations.values())
         .filter((registration) =>
-          !disabledExtensions.has(registration.id) && registration.enabled(context),
+          registration.phase === phase
+          && !disabledExtensions.has(registration.id)
+          && registration.enabled(context),
         )
         .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
         .map((registration) => registration.stage);
