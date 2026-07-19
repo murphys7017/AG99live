@@ -9,6 +9,7 @@ import type {
 } from "vue";
 import type {
   DesktopModelProjectionSnapshot,
+  DesktopMotionPreviewStatus,
   DesktopProfileAuthoringCommand,
   DesktopProfileAuthoringSnapshot,
   DesktopMotionTuningSample,
@@ -45,6 +46,7 @@ type RuntimeBridgeMessage =
     samples: DesktopMotionTuningSample[];
     status?: DesktopMotionTuningSamplesStatus;
   }
+  | { kind: "motion_preview_status"; status: DesktopMotionPreviewStatus }
   | { kind: "command"; command: DesktopRuntimeCommand };
 
 type ProfileAuthoringBridgeMessage =
@@ -62,6 +64,7 @@ interface DesktopBridgeState {
   modelProjectionSnapshot: DesktopModelProjectionSnapshot;
   motionTuningSamples: DesktopMotionTuningSample[];
   motionTuningSamplesStatus: DesktopMotionTuningSamplesStatus;
+  motionPreviewStatus: DesktopMotionPreviewStatus | null;
   profileAuthoringSnapshot: DesktopProfileAuthoringSnapshot;
   windowState: DesktopWindowVisibilityState;
 }
@@ -76,6 +79,7 @@ export interface DesktopBridgeInstance {
     samples: unknown,
     status?: DesktopMotionTuningSamplesStatus,
   ) => void;
+  publishMotionPreviewStatus: (status: DesktopMotionPreviewStatus) => void;
   publishProfileAuthoringSnapshot: (
     snapshot: DesktopProfileAuthoringSnapshot,
   ) => void;
@@ -254,6 +258,7 @@ export function createDesktopBridge(): DesktopBridgeInstance {
       diagnostics: [],
       effectiveExamples: [],
     },
+    motionPreviewStatus: null,
     profileAuthoringSnapshot: loadProfileAuthoringSnapshot(),
     windowState: defaultWindowState,
   });
@@ -331,6 +336,11 @@ export function createDesktopBridge(): DesktopBridgeInstance {
         if (payload.kind === "motion_tuning_samples") {
           state.motionTuningSamples = normalizeMotionTuningSamples(payload.samples);
           state.motionTuningSamplesStatus = normalizeMotionTuningSamplesStatus(payload.status);
+          return;
+        }
+
+        if (payload.kind === "motion_preview_status") {
+          state.motionPreviewStatus = cloneJson(payload.status);
           return;
         }
 
@@ -478,6 +488,15 @@ export function createDesktopBridge(): DesktopBridgeInstance {
     } satisfies RuntimeBridgeMessage);
   }
 
+  function publishMotionPreviewStatus(status: DesktopMotionPreviewStatus): void {
+    const nextStatus = cloneJson(status);
+    state.motionPreviewStatus = nextStatus;
+    runtimeChannel?.postMessage({
+      kind: "motion_preview_status",
+      status: nextStatus,
+    } satisfies RuntimeBridgeMessage);
+  }
+
   function publishProfileAuthoringSnapshot(
     snapshot: DesktopProfileAuthoringSnapshot,
   ): void {
@@ -533,6 +552,7 @@ export function createDesktopBridge(): DesktopBridgeInstance {
     publishSnapshot,
     publishModelProjectionSnapshot,
     publishMotionTuningSamples,
+    publishMotionPreviewStatus,
     publishProfileAuthoringSnapshot,
     sendCommand,
     sendProfileAuthoringCommand,

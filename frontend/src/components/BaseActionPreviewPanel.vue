@@ -19,7 +19,7 @@ const props = defineProps<{
   allowPlay?: boolean;
 }>();
 const emit = defineEmits<{
-  previewMotionPayload: [payload: unknown];
+  previewMotionIntent: [intent: NormalizedSemanticMotionIntentV3];
 }>();
 
 const selectedChannel = ref("all");
@@ -336,8 +336,8 @@ function playPreviewPlan(): void {
       : "当前模型还没有 semantic profile，无法生成 v2 动作预览。";
     return;
   }
-  emit("previewMotionPayload", generatedPlan.value);
-  playStatusText.value = `已发送测试播放计划（${selectedAtoms.value.length} steps）`;
+  emit("previewMotionIntent", generatedPlan.value);
+  playStatusText.value = "";
 }
 
 function strengthToBaseIntensity(strength: string): number {

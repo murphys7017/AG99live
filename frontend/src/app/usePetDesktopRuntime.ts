@@ -32,9 +32,11 @@ import { useMotionPlaybackRecorder } from "../playback-integrations/useMotionPla
 import { useTurnPlaybackOrchestrator } from "../turn-playback/useTurnPlaybackOrchestrator";
 import { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore";
 import type {
+  DesktopMotionPreviewStatus,
   DesktopMotionPlaybackRecord,
   DesktopMotionTuningSample,
 } from "../types/desktop";
+import type { DirectParameterPlanTerminalEvent } from "../types/live2d-runtime.d.ts";
 import { cloneJson } from "../utils/cloneJson";
 import {
   configurePlaybackTimelineMotionRuntime,
@@ -161,6 +163,20 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     initialMotionPlaybackRecords,
   });
   const motionTimelineRunTracker = createPlaybackTimelineMotionRunTracker(playbackTimeline);
+  function handleMotionTerminal(event: DirectParameterPlanTerminalEvent): void {
+    const completedRun = modelEngine.handlePlaybackTerminal(event);
+    if (completedRun?.origin !== "manual_preview") {
+      return;
+    }
+    const status: DesktopMotionPreviewStatus["status"] = event.status;
+    bridge.publishMotionPreviewStatus({
+      requestId: completedRun.messageId,
+      source: completedRun.payloadKind === "semantic_intent" ? "intent" : "recorded_plan",
+      status,
+      runId: event.runId,
+      ...(event.reason ? { reason: event.reason } : {}),
+    });
+  }
   const modelEngine = useModelEngine({
     getSelectedModel: () => selectedModel.value,
     getSettings: () => cloneModelEngineSettings(motionEngineSettings),
@@ -168,6 +184,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       ...options,
       onFinished: (event) => {
         options?.onFinished?.(event);
+        handleMotionTerminal(event);
         motionPlaybackRecorder.completeMotionPlayback(event);
         motionTimelineRunTracker.recordTerminal(event);
       },
@@ -176,6 +193,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       ...options,
       onFinished: (event) => {
         options?.onFinished?.(event);
+        handleMotionTerminal(event);
         motionPlaybackRecorder.completeMotionPlayback(event);
         motionTimelineRunTracker.recordTerminal(event);
       },
@@ -211,6 +229,14 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       });
       motionTimelineRunTracker.recordStarted(event);
       motionPlaybackRecorder.recordMotionPlayback(event);
+      if (event.playbackOrigin === "manual_preview") {
+        bridge.publishMotionPreviewStatus({
+          requestId: event.messageId,
+          source: event.payloadKind === "semantic_intent" ? "intent" : "recorded_plan",
+          status: "started",
+          runId: event.runId,
+        });
+      }
     },
     onCompileFailed: (event) => {
       sendMotionLabEvent({
@@ -274,7 +300,20 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     });
   });
   adapter.setMotionPreviewHandler((payload) => {
-    const localPlayed = modelEngine.playPreviewPayload(payload);
+    const normalized = normalizeMotionPayload(payload);
+    if (!normalized.ok || normalized.payload.kind !== "semantic_intent") {
+      console.error("[AG99live] Remote motion preview rejected.", {
+        reason: normalized.ok
+          ? `unsupported_preview_kind:${normalized.payload.kind}`
+          : normalized.reason,
+      });
+      return false;
+    }
+    const requestId = `remote-preview-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const localPlayed = modelEngine.playPreviewIntent(
+      normalized.payload.intent,
+      requestId,
+    );
     if (!localPlayed) {
       console.warn("[AG99live] Remote motion preview playback failed to start.");
     }
@@ -376,18 +415,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     },
   });
 
-  function handlePreviewMotionPlan(plan: unknown): void {
-    const localPlayed = modelEngine.playPreviewPayload(plan);
-    if (!localPlayed) {
-      console.error("[AG99live] Local motion preview playback failed to start.", {
-        reason: modelEngine.state.lastCompileReason,
-        diagnostics: modelEngine.state.lastCompileDiagnostics,
-      });
-      return;
-    }
-    adapter.sendMotionPayloadPreview(plan);
-  }
-
   function saveMotionTuningSample(sample: DesktopMotionTuningSample): void {
     adapter.saveMotionTuningSample(cloneJson(sample));
   }
@@ -420,12 +447,14 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     live2dPresentationSettings,
     modelEngine: {
       stop: (reason) => modelEngine.stop(reason),
-      playPreviewPayload: (plan) => modelEngine.playPreviewPayload(plan),
+      state: modelEngine.state,
+      playPreviewIntent: modelEngine.playPreviewIntent,
+      replayParameterPlan: modelEngine.replayParameterPlan,
     },
     snapshotPublisher,
     saveMotionTuningSample,
     deleteMotionTuningSample,
-    handlePreviewMotionPlan,
+    publishMotionPreviewStatus: bridge.publishMotionPreviewStatus,
     setBilibiliLiveSettings: bilibiliLive.applySettings,
   });
 

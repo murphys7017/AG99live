@@ -3,7 +3,7 @@ task:
   risk: high
   phase: implementation_complete
   status: complete
-  scope: Correct terminal Cubism Physics response scaling, preserve Motion Lab explicit-axis semantics, and separate ModelEngine settings from Live2D presentation settings without legacy compatibility paths.
+  scope: Make Motion Lab previews local, strictly typed, lifecycle-observable, and unable to interrupt active conversation motion; remove the obsolete frontend Adapter preview path.
 
 context:
   confidence: high
@@ -70,11 +70,15 @@ verification:
     - `python -m compileall -q astrbot_plugin_ag99live_adapter` passed.
     - `check_astrbot_plugin.py astrbot_plugin_ag99live_adapter` reported 0 errors and 0 warnings.
     - git diff --check reports no whitespace errors.
+    - `npm run typecheck:renderer` passed for the Motion Lab replay ownership change.
+    - `npm run typecheck:node` passed for the strict desktop bridge command change.
+    - Obsolete frontend preview command and Adapter outbound API references were confirmed absent with `rg`.
   validation_gap:
     - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
     - Live AstrBot plus Provider plus TTS plus Electron plus Live2D validation is still required after the clock migration, including a long audio segment and a paused audio segment.
     - Live Electron plus Mk6 validation is required to confirm that physicsResponseScale changes terminal hair, clothing, and accessory response without changing semantic head/body input ranges.
     - Motion Lab must be checked with an explicit neutral axis and a derived non-neutral axis to confirm only the original explicit axis is replayed and saved.
+    - Live Electron validation is required to confirm historical sequence replay starts the preserved parameter plan, reports its real terminal status, and rejects previews while conversation motion is active.
 
 backlog:
   - id: motion_lab_sequence_tuning

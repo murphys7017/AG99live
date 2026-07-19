@@ -1,4 +1,5 @@
 import type { DesktopHistoryEntry } from "../../types/desktop.js";
+import type { DirectParameterPlanTerminalEvent } from "../../types/live2d-runtime.d.ts";
 import type {
   CatalogMotionPayload,
   ModelSummary,
@@ -27,19 +28,29 @@ export type ModelEngineStatus =
 
 export type ModelEnginePlaybackOrigin = "conversation" | "manual_preview";
 
+export interface ModelEngineActivePlaybackRun {
+  runId: string;
+  origin: ModelEnginePlaybackOrigin;
+  turnId: string | null;
+  messageId: string;
+  payloadKind: NormalizedMotionPayload["kind"] | "speech_only";
+}
+
+export type ModelEnginePlaybackTerminalEvent = DirectParameterPlanTerminalEvent;
+
 export interface PlayPlanOptions {
   softHandoff?: boolean;
   playbackClockReader?: MotionPlaybackClockReader | null;
   requiresPlaybackClock?: boolean;
   onStarted: (plan: MotionPlanPayload, runId: string) => void;
-  onFinished?: (event: { runId: string; status: string; reason?: string }) => void;
+  onFinished?: (event: DirectParameterPlanTerminalEvent) => void;
 }
 
 export interface PlayCatalogMotionOptions {
   playbackClockReader?: MotionPlaybackClockReader | null;
   requiresPlaybackClock?: boolean;
   onStarted: (motion: CatalogMotionPayload, runId: string) => void;
-  onFinished?: (event: { runId: string; status: string; reason?: string }) => void;
+  onFinished?: (event: DirectParameterPlanTerminalEvent) => void;
 }
 
 interface ModelEnginePlanStartedEventBase {

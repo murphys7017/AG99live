@@ -12,13 +12,9 @@ import type {
   SystemSemanticAxisProfileSavePayload,
 } from "../types/protocol";
 import {
-  SCHEMA_MOTION_INTENT_V3,
-} from "../types/protocol.js";
-import {
   clearPlaybackGroupContext as clearPlaybackGroup,
   interruptCurrentTurn as sendInterrupt,
   sendMotionLabRawEvent as sendMotionLabRawEventAction,
-  sendMotionPayloadPreview as sendMotionPreview,
   sendPlaybackFinished as sendPlaybackFinishedAction,
   sendSemanticAxisProfileSave as sendProfileSave,
   sendText as sendTextAction,
@@ -109,7 +105,6 @@ export interface AdapterConnectionInstance {
   deleteHistory: (historyUid: string, options?: { announce?: boolean }) => boolean;
   saveMotionTuningSample: (sample: DesktopMotionTuningSample) => boolean;
   deleteMotionTuningSample: (sampleId: string) => boolean;
-  sendMotionPayloadPreview: (payload: unknown) => boolean;
   sendMotionLabRawEvent: (
     payload: Parameters<typeof sendMotionLabRawEventAction>[1],
     turnId?: string | null,
@@ -672,12 +667,6 @@ export function createAdapterConnection(
     return sendMotionLabRawEventAction(outboundCtx, payload, turnId);
   }
 
-  function sendMotionPayloadPreview(payload: unknown): boolean {
-    return sendMotionPreview(outboundCtx, payload, [
-      SCHEMA_MOTION_INTENT_V3,
-    ]);
-  }
-
   function setMotionPreviewHandler(
     handler: ((payload: unknown) => boolean) | null,
   ): void {
@@ -785,7 +774,6 @@ export function createAdapterConnection(
     deleteHistory,
     saveMotionTuningSample,
     deleteMotionTuningSample,
-    sendMotionPayloadPreview,
     sendMotionLabRawEvent,
     setMotionPreviewHandler,
     setMotionLabRawEventRecordedHandler,

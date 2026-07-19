@@ -1,6 +1,7 @@
 import type {
   CatalogMotionPayload,
   MotionPlanPayload,
+  SemanticMotionIntent,
 } from "./protocol";
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
 import type {
@@ -467,6 +468,20 @@ export interface DesktopMotionTuningSamplesStatus {
   effectiveExamples: readonly DesktopMotionTuningEffectiveExample[];
 }
 
+export interface DesktopMotionPreviewStatus {
+  requestId: string;
+  source: "intent" | "recorded_plan";
+  status:
+    | "requested"
+    | "started"
+    | "rejected"
+    | "completed"
+    | "failed"
+    | "stopped";
+  runId?: string;
+  reason?: string;
+}
+
 export type DesktopRuntimeCommand =
   | { type: "set_address"; address: string }
   | { type: "set_desktop_screenshot_on_send"; enabled: boolean }
@@ -491,4 +506,13 @@ export type DesktopRuntimeCommand =
   | { type: "set_ptt_mode"; enabled: boolean }
   | { type: "set_ptt_key_binding"; binding: DesktopPttKeyBinding }
   | { type: "set_bilibili_live_settings"; settings: BilibiliLiveSettings }
-  | { type: "preview_motion_payload"; payload: unknown };
+  | {
+    type: "preview_motion_intent";
+    requestId: string;
+    intent: SemanticMotionIntent;
+  }
+  | {
+    type: "replay_parameter_plan";
+    requestId: string;
+    plan: MotionPlanPayload;
+  };

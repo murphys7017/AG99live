@@ -7,11 +7,20 @@ import {
   buildSpeechOnlyMotionRequest,
   type SpeechOnlyMotionRequest,
 } from "./runtime/speechOnlyMotion.js";
-import type { InboundPayloadContext, NormalizedMotionPayload } from "./contracts.js";
+import type {
+  InboundPayloadContext,
+  NormalizedMotionPayload,
+} from "./contracts.js";
+import type {
+  MotionPlanPayload,
+  SemanticMotionIntent,
+} from "../types/protocol.js";
 import type { CompileDiagnostics } from "./compiler/contracts.js";
 import type {
   ModelEngineDependencies,
+  ModelEngineActivePlaybackRun,
   ModelEngineHistoryRole,
+  ModelEnginePlaybackTerminalEvent,
   ModelEngineStatus,
   MotionStartDependencies,
 } from "./runtime/contracts.js";
@@ -41,7 +50,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     lastCompileDiagnostics: null as CompileDiagnostics | null,
     lastStartReason: "",
   });
-  let activePlaybackOwner: { turnId: string | null; messageId: string } | null = null;
+  let activePlaybackRun: ModelEngineActivePlaybackRun | null = null;
   const preparedSemanticMotions = new Map<string, {
     durationMs: number;
     prepared: PreparedSemanticMotionPayload;
@@ -80,9 +89,12 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     playCatalogMotion: dependencies.playCatalogMotion,
     getPlayerMessage: dependencies.getPlayerMessage,
     onPlanStarted: (event) => {
-      activePlaybackOwner = {
+      activePlaybackRun = {
+        runId: event.runId,
+        origin: event.playbackOrigin,
         turnId: normalizeTurnId(event.turnId),
         messageId: event.messageId.trim(),
+        payloadKind: event.payloadKind,
       };
       dependencies.onPlanStarted(event);
     },
@@ -335,7 +347,21 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     return { status: "prepared", source };
   }
 
-  function playPreviewPayload(payload: unknown): boolean {
+  function startManualPreview(
+    payload: SemanticMotionIntent | MotionPlanPayload,
+    requestId: string,
+  ): boolean {
+    const normalizedRequestId = requestId.trim();
+    if (!normalizedRequestId) {
+      state.lastCompileReason = "manual_preview_request_id_missing";
+      return false;
+    }
+    if (activePlaybackRun?.origin === "conversation") {
+      state.lastCompileReason = "manual_preview_rejected_conversation_motion_active";
+      pushHistory("error", "动作预览被拒绝：当前会话动作仍在播放。");
+      return false;
+    }
+
     const normalized = normalizeMotionPayload(payload);
     if (!normalized.ok) {
       reportInvalidMotionPayload(normalized.reason, runtimeStateController);
@@ -345,7 +371,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     return startNormalizedMotionPayload(
       normalized.payload,
       {
-        messageId: "preview",
+        messageId: normalizedRequestId,
         turnId: null,
         playbackTurnId: null,
         playbackOrigin: "manual_preview",
@@ -357,11 +383,43 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     );
   }
 
+  function playPreviewIntent(intent: SemanticMotionIntent, requestId: string): boolean {
+    return startManualPreview(intent, requestId);
+  }
+
+  function replayParameterPlan(plan: MotionPlanPayload, requestId: string): boolean {
+    return startManualPreview(plan, requestId);
+  }
+
+  function handlePlaybackTerminal(
+    event: ModelEnginePlaybackTerminalEvent,
+  ): ModelEngineActivePlaybackRun | null {
+    if (!activePlaybackRun || activePlaybackRun.runId !== event.runId) {
+      return null;
+    }
+    const completedRun = activePlaybackRun;
+    activePlaybackRun = null;
+    if (event.status === "failed" || event.status === "rejected") {
+      setState(
+        "failed",
+        event.reason || "动作执行失败。",
+        state.lastCompileDiagnostics,
+      );
+    } else {
+      setState(
+        "idle",
+        event.reason ? `动作已停止（${event.reason}）。` : "动作执行完成。",
+        null,
+      );
+    }
+    return completedRun;
+  }
+
   function stop(reason = "stopped"): void {
     runtimeScheduler.clearAllPendingPayloads();
     preparedSemanticMotions.clear();
-    activePlaybackOwner = null;
     dependencies.stopPlan(reason);
+    activePlaybackRun = null;
     state.lastCompileReason = "";
     setState(
       "idle",
@@ -380,13 +438,13 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     runtimeScheduler.cancelPendingPayloadForSegment(turnId, messageId);
     preparedSemanticMotions.delete(buildSegmentKey(turnId, messageId));
     if (
-      activePlaybackOwner?.turnId !== normalizeTurnId(turnId)
-      || activePlaybackOwner.messageId !== messageId.trim()
+      activePlaybackRun?.turnId !== normalizeTurnId(turnId)
+      || activePlaybackRun.messageId !== messageId.trim()
     ) {
       return;
     }
-    activePlaybackOwner = null;
     dependencies.stopPlan(reason);
+    activePlaybackRun = null;
     state.lastCompileReason = "";
     setState("idle", `动作引擎已停止（${reason}）。`, null);
   }
@@ -397,7 +455,9 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     ingestNormalizedPayload,
     preparePlaybackTimeline,
     handlePlaybackTimelineStarted,
-    playPreviewPayload,
+    playPreviewIntent,
+    replayParameterPlan,
+    handlePlaybackTerminal,
     interruptPlaybackSegment,
     stop,
     stageRegistry,

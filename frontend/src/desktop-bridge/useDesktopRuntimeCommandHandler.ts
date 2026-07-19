@@ -1,12 +1,17 @@
 import type {
   DesktopMicrophoneDevice,
+  DesktopMotionPreviewStatus,
   DesktopMotionTuningSample,
   DesktopMotionTuningSamplesStatus,
   DesktopPttKeyBinding,
   DesktopProfileAuthoringCommand,
   DesktopRuntimeCommand,
 } from "../types/desktop.js";
-import type { SystemSemanticAxisProfileSavePayload } from "../types/protocol.js";
+import type {
+  MotionPlanPayload,
+  SemanticMotionIntent,
+  SystemSemanticAxisProfileSavePayload,
+} from "../types/protocol.js";
 import { cloneJson } from "../utils/cloneJson.js";
 import {
   applyModelEngineSettings,
@@ -54,12 +59,17 @@ export interface DesktopRuntimeCommandDeps {
   live2dPresentationSettings: Live2dPresentationSettings;
   modelEngine: {
     stop: (reason: string) => void;
-    playPreviewPayload: (plan: unknown) => boolean;
+    readonly state: {
+      readonly lastCompileReason: string;
+      readonly message: string;
+    };
+    playPreviewIntent: (intent: SemanticMotionIntent, requestId: string) => boolean;
+    replayParameterPlan: (plan: MotionPlanPayload, requestId: string) => boolean;
   };
   snapshotPublisher: DesktopRuntimeSnapshotPublisherPort;
   saveMotionTuningSample: (sample: DesktopMotionTuningSample) => void;
   deleteMotionTuningSample: (sampleId: string) => void;
-  handlePreviewMotionPlan: (plan: unknown) => void;
+  publishMotionPreviewStatus: (status: DesktopMotionPreviewStatus) => void;
   setBilibiliLiveSettings: (settings: BilibiliLiveSettings) => void;
 }
 
@@ -147,9 +157,38 @@ export function createDesktopRuntimeCommandHandler(
       case "set_bilibili_live_settings":
         deps.setBilibiliLiveSettings(command.settings);
         return;
-      case "preview_motion_payload":
-        deps.handlePreviewMotionPlan(command.payload);
+      case "preview_motion_intent": {
+        deps.publishMotionPreviewStatus({
+          requestId: command.requestId,
+          source: "intent",
+          status: "requested",
+        });
+        if (!deps.modelEngine.playPreviewIntent(command.intent, command.requestId)) {
+          deps.publishMotionPreviewStatus({
+            requestId: command.requestId,
+            source: "intent",
+            status: "rejected",
+            reason: deps.modelEngine.state.lastCompileReason || deps.modelEngine.state.message,
+          });
+        }
         return;
+      }
+      case "replay_parameter_plan": {
+        deps.publishMotionPreviewStatus({
+          requestId: command.requestId,
+          source: "recorded_plan",
+          status: "requested",
+        });
+        if (!deps.modelEngine.replayParameterPlan(command.plan, command.requestId)) {
+          deps.publishMotionPreviewStatus({
+            requestId: command.requestId,
+            source: "recorded_plan",
+            status: "rejected",
+            reason: deps.modelEngine.state.lastCompileReason || deps.modelEngine.state.message,
+          });
+        }
+        return;
+      }
     }
   }
 

@@ -35,7 +35,8 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   requestMotionTuningSamplesSync: [];
-  previewMotionPayload: [payload: unknown];
+  previewMotionIntent: [intent: SemanticMotionIntent];
+  replayParameterPlan: [plan: SemanticParameterPlan];
   saveMotionTuningSample: [sample: DesktopMotionTuningSample];
   deleteMotionTuningSample: [sampleId: string];
 }>();
@@ -472,8 +473,19 @@ function playAdjustedIntent(): void {
     return;
   }
 
-  emit("previewMotionPayload", intent);
-  playStatusText.value = "已发送手调主轴预览，请观察 Live2D 效果。";
+  emit("previewMotionIntent", intent);
+  playStatusText.value = "";
+}
+
+function playRecordedPlan(): void {
+  const record = selectedDraftSource.value?.record;
+  if (!record?.plan) {
+    playStatusText.value = "当前没有可重放的历史动作计划。";
+    return;
+  }
+
+  emit("replayParameterPlan", cloneJson(record.plan));
+  playStatusText.value = "";
 }
 
 function saveSample(): void {
@@ -978,7 +990,7 @@ function normalizeEmotionKey(value: string): string {
               </li>
             </ul>
           </details>
-          <div class="motion-tuning__axis-grid">
+          <div v-if="!selectedDraftSource?.error" class="motion-tuning__axis-grid">
             <label
               v-for="axis in promptAxes"
               :key="axis.id"
@@ -1006,7 +1018,14 @@ function normalizeEmotionKey(value: string): string {
             </label>
           </div>
 
-          <label class="action-preview__field profile-editor__field--full">
+          <p v-if="selectedDraftSource?.error" class="history-empty">
+            当前记录仅支持原始重放：{{ selectedDraftSource.error }}
+          </p>
+
+          <label
+            v-if="!selectedDraftSource?.error"
+            class="action-preview__field profile-editor__field--full"
+          >
             <span>Emotion label / 表情标签</span>
             <input
               v-model="emotionLabelText"
@@ -1016,7 +1035,10 @@ function normalizeEmotionKey(value: string): string {
             />
           </label>
 
-          <label class="action-preview__field profile-editor__field--full">
+          <label
+            v-if="!selectedDraftSource?.error"
+            class="action-preview__field profile-editor__field--full"
+          >
             <span>样本说明 / 调参反馈</span>
             <textarea
               v-model="feedbackText"
@@ -1025,7 +1047,7 @@ function normalizeEmotionKey(value: string): string {
             />
           </label>
 
-          <label class="action-preview__field">
+          <label v-if="!selectedDraftSource?.error" class="action-preview__field">
             <span>标签</span>
             <input
               v-model="tagsText"
@@ -1034,7 +1056,7 @@ function normalizeEmotionKey(value: string): string {
             />
           </label>
 
-          <label class="settings-toggle">
+          <label v-if="!selectedDraftSource?.error" class="settings-toggle">
             <input
               v-model="enabledForLlmReference"
               class="settings-toggle__input"
@@ -1047,10 +1069,28 @@ function normalizeEmotionKey(value: string): string {
           </label>
 
           <div class="settings-card__actions">
-            <button type="button" class="settings-card__button" @click="playAdjustedIntent">
+            <button
+              v-if="selectedDraftSource?.record"
+              type="button"
+              class="settings-card__button settings-card__button--ghost"
+              @click="playRecordedPlan"
+            >
+              播放原始记录
+            </button>
+            <button
+              v-if="!selectedDraftSource?.error"
+              type="button"
+              class="settings-card__button"
+              @click="playAdjustedIntent"
+            >
               播放手调效果
             </button>
-            <button type="button" class="settings-card__button" @click="saveSample">
+            <button
+              v-if="!selectedDraftSource?.error"
+              type="button"
+              class="settings-card__button"
+              @click="saveSample"
+            >
               保存样本
             </button>
             <span>{{ playStatusText || saveStatusText }}</span>

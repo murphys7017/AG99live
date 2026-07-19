@@ -9,6 +9,10 @@ import type {
   DesktopMotionPlaybackRecord,
   DesktopMotionTuningSample,
 } from "../types/desktop";
+import type {
+  MotionPlanPayload,
+  SemanticMotionIntent,
+} from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 
 const bridge = useDesktopBridge();
@@ -35,10 +39,39 @@ function sendRuntimeCommand(type: "request_model_projection_sync" | "request_mot
   bridge.sendCommand({ type });
 }
 
-function previewMotionPayload(payload: unknown): void {
+const motionPreviewStatusText = computed(() => {
+  const status = bridge.state.motionPreviewStatus;
+  if (!status) {
+    return "";
+  }
+  const labels = {
+    requested: "已请求",
+    started: "播放中",
+    rejected: "已拒绝",
+    completed: "播放完成",
+    failed: "播放失败",
+    stopped: "已停止",
+  } as const;
+  return `${labels[status.status]}${status.reason ? `：${status.reason}` : ""}`;
+});
+
+function createPreviewRequestId(): string {
+  return `motion-preview-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function previewMotionIntent(intent: SemanticMotionIntent): void {
   bridge.sendCommand({
-    type: "preview_motion_payload",
-    payload,
+    type: "preview_motion_intent",
+    requestId: createPreviewRequestId(),
+    intent,
+  });
+}
+
+function replayParameterPlan(plan: MotionPlanPayload): void {
+  bridge.sendCommand({
+    type: "replay_parameter_plan",
+    requestId: createPreviewRequestId(),
+    plan,
   });
 }
 
@@ -63,6 +96,9 @@ onMounted(() => {
 
 <template>
   <DesktopWindowPanel title="动作实验室" subtitle="Motion Plan Sandbox">
+    <p v-if="motionPreviewStatusText" class="history-empty">
+      {{ motionPreviewStatusText }}
+    </p>
     <section class="settings-grid">
       <MotionTuningPanel
         :semantic-profile="semanticProfile"
@@ -71,7 +107,8 @@ onMounted(() => {
         :motion-tuning-samples-status="motionTuningSamplesStatus"
         :effective-examples="effectiveExamples"
         @request-motion-tuning-samples-sync="sendRuntimeCommand('request_motion_tuning_samples_sync')"
-        @preview-motion-payload="previewMotionPayload"
+        @preview-motion-intent="previewMotionIntent"
+        @replay-parameter-plan="replayParameterPlan"
         @save-motion-tuning-sample="saveMotionTuningSample"
         @delete-motion-tuning-sample="deleteMotionTuningSample"
       />
@@ -79,7 +116,7 @@ onMounted(() => {
         :preview="parameterActionPreview"
         :semantic-profile="semanticProfile"
         :allow-play="true"
-        @preview-motion-payload="previewMotionPayload"
+        @preview-motion-intent="previewMotionIntent"
       />
     </section>
   </DesktopWindowPanel>
