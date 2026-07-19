@@ -175,7 +175,7 @@ export function compileSemanticPoseContext(
         source,
       };
     });
-  if (axes.length === 0) {
+  if (axes.length === 0 && options.speechActive !== true) {
     return failSemanticCompile("semantic_compile_axes_empty", context);
   }
   context.state.compiledSemanticAxes = axes;
