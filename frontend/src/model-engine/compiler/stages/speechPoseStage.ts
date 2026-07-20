@@ -50,12 +50,13 @@ const GESTURE_TEMPLATES: Record<SpeechGesturePreset, NormalizedGesturePoint[]> =
   ],
 };
 
-// Ordered capability mappings. A preset uses the first channels the current
-// model exposes; this is explicit capability selection, not a fallback pose.
+// Ordered capability mappings. Everyday speech favors visible lateral weight
+// shifts and head tilt. Pitch remains available for capability-limited models,
+// but is intentionally reserved as the primary gesture only for emphasis.
 const PRESET_CHANNELS: Record<SpeechGesturePreset, string[]> = {
-  calm_explain: ["head_yaw", "head_pitch", "head_roll", "body_yaw", "body_pitch"],
+  calm_explain: ["head_roll", "head_yaw", "head_pitch", "body_roll", "body_yaw"],
   lively_chat: ["head_roll", "head_yaw", "head_pitch", "body_roll", "body_yaw"],
-  gentle_support: ["head_roll", "head_pitch", "head_yaw", "body_roll", "body_yaw"],
+  gentle_support: ["head_roll", "head_yaw", "head_pitch", "body_roll", "body_yaw"],
   emphatic: ["head_pitch", "head_yaw", "head_roll", "body_pitch", "body_yaw"],
 };
 

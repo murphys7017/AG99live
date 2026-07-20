@@ -21,7 +21,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
             "category": "neutral",
             "input": (
                 "场景：用户确认收到信息，助手只做短确认。参考旧动作：默认待机/平和。"
-                "抽象方式：剔除呼吸、物理、头发和附件曲线，只保留接近中性的头部轻点与嘴角轻微友好；"
+                "抽象方式：剔除呼吸、物理、头发和附件曲线，只保留接近中性的轻微侧倾与嘴角友好；"
                 "不要把 idle 误做成完全静止。"
             ),
             "output": {
@@ -29,7 +29,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                 "duration_hint_ms": 1100,
                 "axis_levels": build_example_axis_levels(
                     axis_names,
-                    head_pitch=-3,
+                    head_roll=2,
                     mouth_smile=2,
                 ),
             },
@@ -37,8 +37,8 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
         {
             "category": "explain",
             "input": (
-                "场景：助手认真说明一件事，语气稳定但不是无动作。参考旧动作：认真说明/温和点头。"
-                "抽象方式：保留头部朝向、轻微点头、上身随头部同向的可读骨架；剔除手、头发、物理和口型运行时曲线。"
+                "场景：助手认真说明一件事，语气稳定但不是无动作。参考旧动作：认真说明/温和摇晃。"
+                "抽象方式：保留头部朝向、轻微侧倾、上身随头部同向的可读骨架；剔除手、头发、物理和口型运行时曲线。"
                 "说明类动作应像进入解释状态，而不是随便给几个接近 50 的表情数。"
             ),
             "output": {
@@ -47,7 +47,8 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                 "axis_levels": build_example_axis_levels(
                     axis_names,
                     head_yaw=3,
-                    head_pitch=3,
+                    head_roll=2,
+                    body_roll=1,
                     gaze_x=3,
                     brow_bias=2,
                 ),
@@ -57,7 +58,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
             "category": "soothe",
             "input": (
                 "场景：助手安抚用户或表示理解。参考旧动作：温和点头/感到舒适/温和摇晃。"
-                "抽象方式：保留下沉的头部、柔和侧倾和身体跟随，嘴角只作为温和细节；"
+                "抽象方式：保留柔和侧倾和身体跟随，嘴角只作为温和细节；"
                 "不要混入强开心、惊讶后缩或生气前倾这类互斥动作。"
             ),
             "output": {
@@ -65,8 +66,8 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                 "duration_hint_ms": 1400,
                 "axis_levels": build_example_axis_levels(
                     axis_names,
-                    head_pitch=-3,
                     head_roll=-3,
+                    body_roll=-2,
                     gaze_y=-2,
                     mouth_smile=2,
                 ),
@@ -94,7 +95,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
             "category": "happy",
             "input": (
                 "场景：助手给出正向反馈、满意或轻松调侃。参考旧动作：微笑/开心轻晃/微笑左偏头/歪头坏笑。"
-                "抽象方式：保留抬头、身体轻晃或偏头、笑眼和嘴角；调侃时可加一点非对称头身倾斜。"
+                "抽象方式：保留身体轻晃或偏头、笑眼和嘴角；调侃时可加一点非对称头身倾斜。"
                 "开心不是只提高 mouth_smile，头身也要承担动作骨架。"
             ),
             "output": {
@@ -102,8 +103,8 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                 "duration_hint_ms": 1200,
                 "axis_levels": build_example_axis_levels(
                     axis_names,
-                    head_pitch=3,
                     head_roll=3,
+                    body_roll=2,
                     eye_smile_left=4,
                     eye_smile_right=4,
                     mouth_smile=4,
