@@ -8,7 +8,7 @@ export interface ParameterPresentationNode {
   maxValue: number;
   maxVelocity: number;
   maxAcceleration: number;
-  value: number | null;
+  drivenValue: number | null;
   velocity: number;
   lastElapsedMs: number | null;
 }
@@ -22,12 +22,13 @@ export interface ParameterPresentationTrackPoint {
 export interface ParameterPresentationFrame {
   targetValue: number;
   value: number;
-  settled: boolean;
+  released: boolean;
 }
 
 export function resolveParameterPresentationFrame(
   node: ParameterPresentationNode,
   frameTargetValue: number,
+  baseValue: number,
   elapsedMs: number,
   timing: DirectParameterExecutionPlan["timing"],
 ): ParameterPresentationFrame {
@@ -36,17 +37,18 @@ export function resolveParameterPresentationFrame(
     node.minValue,
     node.maxValue,
   );
-  const previousValue = node.value ?? node.initialValue;
+  const previousValue = node.drivenValue ?? node.initialValue;
   const previousElapsedMs = node.lastElapsedMs;
   node.lastElapsedMs = elapsedMs;
 
   if (previousElapsedMs === null || elapsedMs <= previousElapsedMs) {
-    node.value = clamp(previousValue, node.minValue, node.maxValue);
+    node.drivenValue = clamp(previousValue, node.minValue, node.maxValue);
     node.velocity = 0;
+    const ownershipWeight = resolveOwnershipWeight(elapsedMs, timing);
     return {
       targetValue,
-      value: node.value,
-      settled: isSettled(node.value, node.neutralValue, node.velocity),
+      value: blendWithBaseValue(baseValue, node.drivenValue, ownershipWeight, node),
+      released: ownershipWeight === 0,
     };
   }
 
@@ -61,12 +63,13 @@ export function resolveParameterPresentationFrame(
     node.minValue,
     node.maxValue,
   );
-  node.value = next.value;
+  node.drivenValue = next.value;
   node.velocity = next.velocity;
+  const ownershipWeight = resolveOwnershipWeight(elapsedMs, timing);
   return {
     targetValue,
-    value: next.value,
-    settled: isSettled(next.value, node.neutralValue, next.velocity),
+    value: blendWithBaseValue(baseValue, next.value, ownershipWeight, node),
+    released: ownershipWeight === 0,
   };
 }
 
@@ -97,8 +100,32 @@ export function resolveParameterPresentationTrack(
   return previous.value;
 }
 
-function isSettled(value: number, neutralValue: number, velocity: number): boolean {
-  return Math.abs(value - neutralValue) <= 0.001 && Math.abs(velocity) <= 0.001;
+function blendWithBaseValue(
+  baseValue: number,
+  drivenValue: number,
+  ownershipWeight: number,
+  node: ParameterPresentationNode,
+): number {
+  return clamp(
+    interpolate(baseValue, drivenValue, ownershipWeight),
+    node.minValue,
+    node.maxValue,
+  );
+}
+
+function resolveOwnershipWeight(
+  elapsedMs: number,
+  timing: DirectParameterExecutionPlan["timing"],
+): number {
+  const blendOutMs = Math.max(0, timing.blendOutMs);
+  const releaseStartMs = Math.max(0, timing.totalMs - blendOutMs);
+  if (elapsedMs < releaseStartMs) {
+    return 1;
+  }
+  if (blendOutMs === 0 || elapsedMs >= timing.totalMs) {
+    return 0;
+  }
+  return smoothstep(1 - (elapsedMs - releaseStartMs) / blendOutMs);
 }
 
 function resolveTrajectoryEnvelope(
@@ -110,7 +137,6 @@ function resolveTrajectoryEnvelope(
   const elapsed = Math.max(0, elapsedMs);
   const blendInMs = Math.max(0, timing.blendInMs);
   const holdMs = Math.max(0, timing.holdMs);
-  const blendOutMs = Math.max(0, timing.blendOutMs);
 
   if (blendInMs > 0 && elapsed < blendInMs) {
     const progress = elapsed / blendInMs;
@@ -142,15 +168,7 @@ function resolveTrajectoryEnvelope(
     return frameTargetValue;
   }
 
-  if (blendOutMs > 0 && elapsed < blendInMs + holdMs + blendOutMs) {
-    const progress = (elapsed - blendInMs - holdMs) / blendOutMs;
-    return interpolate(
-      node.neutralValue,
-      frameTargetValue,
-      smoothstep(Math.max(0, 1 - progress)),
-    );
-  }
-  return node.neutralValue;
+  return frameTargetValue;
 }
 
 function advanceParameterDynamics(

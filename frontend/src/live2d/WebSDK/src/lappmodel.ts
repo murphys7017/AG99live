@@ -1705,7 +1705,7 @@ export class LAppModel extends CubismUserModel {
           maxValue,
           maxVelocity: Number(item.dynamics.max_velocity),
           maxAcceleration: Number(item.dynamics.max_acceleration),
-          value: null,
+          drivenValue: null,
           velocity: 0,
           lastElapsedMs: null,
         },
@@ -1794,7 +1794,7 @@ export class LAppModel extends CubismUserModel {
       return "v2_parameter_clock_unavailable";
     }
     const shouldLogFrame = planState.diagnosticFrameCount < 2;
-    let presentationSettled = true;
+    let presentationReleased = true;
     if (shouldLogFrame) {
       console.info(`[LAppModel] applyDirectParameterPlanOverlay: mode=${planState.mode}, emotion=${planState.emotionLabel}, totalMs=${planState.timing.totalMs}, blendIn=${planState.timing.blendInMs}, hold=${planState.timing.holdMs}, blendOut=${planState.timing.blendOutMs}, semanticCount=${planState.semanticBindings.length}`);
     }
@@ -1822,11 +1822,12 @@ export class LAppModel extends CubismUserModel {
       const presentationFrame = resolveParameterPresentationFrame(
         item.presentation,
         rawFrameTargetValue,
+        baseValue,
         elapsedMs,
         planState.timing,
       );
       const frameTargetValue = presentationFrame.value;
-      presentationSettled = presentationSettled && presentationFrame.settled;
+      presentationReleased = presentationReleased && presentationFrame.released;
       this._model.setParameterValueById(item.parameterId, frameTargetValue);
       const readbackValue = this._model.getParameterValueByIndex(item.parameterIndex);
       if (Math.abs(readbackValue - frameTargetValue) > 0.001) {
@@ -1844,8 +1845,8 @@ export class LAppModel extends CubismUserModel {
       planState.diagnosticFrameCount += 1;
     }
 
-    if (elapsedMs >= planState.timing.totalMs && presentationSettled) {
-      console.info(`[LAppModel] applyDirectParameterPlanOverlay: plan settled at ${elapsedMs}ms, stopping.`);
+    if (elapsedMs >= planState.timing.totalMs && presentationReleased) {
+      console.info(`[LAppModel] applyDirectParameterPlanOverlay: plan released at ${elapsedMs}ms, stopping.`);
       this.stopDirectParameterPlan("", "completed");
     }
     return null;
