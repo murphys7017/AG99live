@@ -1160,118 +1160,64 @@ def ensure_semantic_axis_profile(
     path = build_semantic_axis_profile_path(model_dir)
     current_source_hash = build_model_source_hash(model_dir)
     if path.exists():
-        needs_schema_normalization = _profile_needs_schema_normalization(path)
         current_profile = load_semantic_axis_profile(
             model_dir=model_dir,
             model_name=model_name,
         )
-        if needs_schema_normalization:
-            current_profile = {
-                **current_profile,
-                "updated_at": _utc_now_iso(),
-            }
-            _write_profile(path, current_profile)
         if str(current_profile["source_hash"]).strip() == current_source_hash:
-            current_profile = validate_semantic_axis_profile(
-                current_profile,
-                model_name=model_name,
-                known_parameter_ids=known_parameter_ids,
-            )
             expected_profile = build_default_semantic_axis_profile(
                 model_name=model_name,
                 model_payload=model_payload,
                 source_hash=current_source_hash,
             )
-            if _profile_needs_default_design_migration(
+            if not _profile_requires_regeneration(
                 current_profile=current_profile,
                 expected_profile=expected_profile,
             ):
-                if current_profile["user_modified"]:
-                    if (
-                        current_profile["status"] == "stale"
-                        and str(current_profile["last_scanned_hash"]).strip() == current_source_hash
-                    ):
-                        migrated_profile = _migrate_generated_profile_to_default_design(
-                            current_profile=current_profile,
-                            expected_profile=expected_profile,
-                        )
-                        _write_profile(path, migrated_profile)
-                        return migrated_profile
-                    return _mark_profile_stale_if_needed(
-                        path=path,
-                        current_profile=current_profile,
-                        current_source_hash=current_source_hash,
-                    )
-
-                migrated_profile = _migrate_generated_profile_to_default_design(
-                    current_profile=current_profile,
-                    expected_profile=expected_profile,
+                return validate_semantic_axis_profile(
+                    current_profile,
+                    model_name=model_name,
+                    known_parameter_ids=known_parameter_ids,
                 )
-                _write_profile(path, migrated_profile)
-                return migrated_profile
 
-            if current_profile["status"] == "stale" and not current_profile["user_modified"]:
-                refreshed_profile: SemanticAxisProfile = {
-                    **current_profile,
-                    "status": "generated",
-                    "last_scanned_hash": current_source_hash,
-                    "updated_at": _utc_now_iso(),
-                }
-                _write_profile(path, refreshed_profile)
-                return refreshed_profile
-            return current_profile
-
-        if current_profile["user_modified"]:
-            return _mark_profile_stale_if_needed(
-                path=path,
-                current_profile=current_profile,
-                current_source_hash=current_source_hash,
-            )
-
-        profile = build_default_semantic_axis_profile(
-            model_name=model_name,
-            model_payload=model_payload,
-            source_hash=current_source_hash,
-        )
-        _write_profile(path, profile)
-        return profile
-
-    profile = build_default_semantic_axis_profile(
+    return _generate_semantic_axis_profile(
+        path=path,
         model_name=model_name,
         model_payload=model_payload,
         source_hash=current_source_hash,
+    )
+
+
+def _generate_semantic_axis_profile(
+    *,
+    path: Path,
+    model_name: str,
+    model_payload: Mapping[str, Any],
+    source_hash: str,
+) -> SemanticAxisProfile:
+    profile = build_default_semantic_axis_profile(
+        model_name=model_name,
+        model_payload=model_payload,
+        source_hash=source_hash,
     )
     _write_profile(path, profile)
     return profile
 
 
-def _mark_profile_stale_if_needed(
-    *,
-    path: Path,
-    current_profile: SemanticAxisProfile,
-    current_source_hash: str,
-) -> SemanticAxisProfile:
-    if (
-        current_profile["status"] == "stale"
-        and str(current_profile["last_scanned_hash"]).strip() == current_source_hash
-    ):
-        return current_profile
-
-    stale_profile: SemanticAxisProfile = {
-        **current_profile,
-        "status": "stale",
-        "last_scanned_hash": current_source_hash,
-        "updated_at": _utc_now_iso(),
-    }
-    _write_profile(path, stale_profile)
-    return stale_profile
-
-
-def _profile_needs_default_design_migration(
+def _profile_requires_regeneration(
     *,
     current_profile: Mapping[str, Any],
     expected_profile: Mapping[str, Any],
 ) -> bool:
+    if str(current_profile.get("status") or "").strip() == "stale":
+        return True
+
+    if not bool(current_profile.get("user_modified")):
+        return any(
+            current_profile.get(field_name) != expected_profile.get(field_name)
+            for field_name in ("axes", "couplings", "relation_graph")
+        )
+
     current_axes = {
         str(axis.get("id") or "").strip(): axis
         for axis in _as_list(current_profile.get("axes"))
@@ -1291,36 +1237,7 @@ def _profile_needs_default_design_migration(
             return True
         if _first_binding_parameter_id(current_axis) != _first_binding_parameter_id(expected_axis):
             return True
-        if not bool(current_profile.get("user_modified")):
-            if current_axis.get("soft_range") != expected_axis.get("soft_range"):
-                return True
-            if current_axis.get("strong_range") != expected_axis.get("strong_range"):
-                return True
-            if current_axis.get("extreme_range") != expected_axis.get("extreme_range"):
-                return True
-            if current_axis.get("level_anchors") != expected_axis.get("level_anchors"):
-                return True
     return False
-
-
-def _migrate_generated_profile_to_default_design(
-    *,
-    current_profile: Mapping[str, Any],
-    expected_profile: SemanticAxisProfile,
-) -> SemanticAxisProfile:
-    try:
-        current_revision = int(current_profile.get("revision") or 0)
-    except (TypeError, ValueError):
-        current_revision = 0
-    migrated_revision = max(int(expected_profile["revision"]), current_revision + 1)
-    return {
-        **expected_profile,
-        "revision": migrated_revision,
-        "status": "generated",
-        "user_modified": False,
-        "generated_at": str(current_profile.get("generated_at") or expected_profile["generated_at"]),
-        "updated_at": _utc_now_iso(),
-    }
 
 
 def _first_binding_parameter_id(axis: Mapping[str, Any]) -> str:
@@ -1331,35 +1248,6 @@ def _first_binding_parameter_id(axis: Mapping[str, Any]) -> str:
     if not isinstance(first_binding, Mapping):
         return ""
     return str(first_binding.get("parameter_id") or "").strip()
-
-
-def _profile_needs_schema_normalization(path: Path) -> bool:
-    try:
-        raw_payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return False
-    if not isinstance(raw_payload, Mapping):
-        return False
-    if raw_payload.get("relation_graph") is None:
-        return True
-    axes = raw_payload.get("axes")
-    required_anchor_keys = {"-4", "-3", "-2", "-1", "0", "1", "2", "3", "4"}
-    return isinstance(axes, list) and any(
-        isinstance(axis, Mapping)
-        and (
-            not isinstance(axis.get("dynamics"), Mapping)
-            or
-            not isinstance(axis.get("extreme_range"), list)
-            or
-            not isinstance(axis.get("level_anchors"), Mapping)
-            or {
-                str(key).strip()
-                for key in axis.get("level_anchors", {}).keys()
-            }
-            != required_anchor_keys
-        )
-        for axis in axes
-    )
 
 
 def save_semantic_axis_profile(
