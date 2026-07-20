@@ -310,41 +310,7 @@ function collectControlledParameterIds(context: ModelParameterCompileContext): S
       parameterIds.add(binding.parameter_id);
     }
   }
-  for (const axisId of collectPendingRelationTargetAxisIds(context)) {
-    const targetAxis = context.state.axisById.get(axisId);
-    for (const binding of targetAxis?.parameter_bindings ?? []) {
-      parameterIds.add(binding.parameter_id);
-    }
-  }
   return parameterIds;
-}
-
-function collectPendingRelationTargetAxisIds(context: ModelParameterCompileContext): Set<string> {
-  const pendingTargets = new Set<string>();
-  const profile = context.state.profile;
-  if (!profile) {
-    return pendingTargets;
-  }
-  const semanticValueByAxisId = new Map(
-    context.semanticMotion.axes.map((axis) => [axis.axisId, axis.value]),
-  );
-  for (const relation of profile.relation_graph.edges) {
-    if (semanticValueByAxisId.has(relation.target_axis_id)) {
-      continue;
-    }
-    const sourceValue = semanticValueByAxisId.get(relation.source_axis_id);
-    const sourceAxis = context.state.axisById.get(relation.source_axis_id);
-    const targetAxis = context.state.axisById.get(relation.target_axis_id);
-    if (
-      sourceValue !== undefined
-      && sourceAxis
-      && targetAxis
-      && Math.abs(sourceValue - sourceAxis.neutral) > relation.deadzone
-    ) {
-      pendingTargets.add(relation.target_axis_id);
-    }
-  }
-  return pendingTargets;
 }
 
 function isUsableVoiceFollowingChannel(channel: VoiceFollowingChannelProfile): boolean {

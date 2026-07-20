@@ -21,12 +21,12 @@ import type {
 // Does not own:
 // - final plan assembly
 // - diagnostics finalization
-export const planBuilderStage: ModelParameterCompileStage = {
-  id: "planBuilder",
-  run: runPlanBuilderStage,
+export const modelParameterBindingStage: ModelParameterCompileStage = {
+  id: "modelParameterBinding",
+  run: runModelParameterBindingStage,
 };
 
-export function runPlanBuilderStage(
+export function runModelParameterBindingStage(
   context: ModelParameterCompileContext,
 ): ModelParameterStageResult {
   const profile = context.state.profile;

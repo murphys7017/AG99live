@@ -11,7 +11,7 @@ import { semanticAxisRelationGraphStage } from "./stages/semanticAxisRelationGra
 import { speechPoseStage } from "./stages/speechPoseStage.js";
 import { modeResolverStage } from "./stages/modeResolverStage.js";
 import { timingStage } from "./stages/timingStage.js";
-import { planBuilderStage } from "./stages/planBuilder.js";
+import { modelParameterBindingStage } from "./stages/modelParameterBindingStage.js";
 import { resourcePolicyStage } from "./stages/resourcePolicyStage.js";
 
 export type ModelEngineStageKind = "core" | "extension";
@@ -64,7 +64,7 @@ export function createDefaultCompileStageRegistrations(): AnyStageRegistration[]
     { id: "timing", stage: timingStage, phase: "semantic", order: 46, kind: "core", enabled: always },
     { id: "semanticAxisRelationGraph", stage: semanticAxisRelationGraphStage, phase: "semantic", order: 50, kind: "core", enabled: always },
     { id: "speechPose", stage: speechPoseStage, phase: "model_parameter", order: 60, kind: "extension", enabled: always },
-    { id: "planBuilder", stage: planBuilderStage, phase: "model_parameter", order: 80, kind: "core", enabled: always },
+    { id: "modelParameterBinding", stage: modelParameterBindingStage, phase: "model_parameter", order: 80, kind: "core", enabled: always },
     { id: "resourcePolicy", stage: resourcePolicyStage, phase: "model_parameter", order: 90, kind: "core", enabled: always },
   ];
 }
