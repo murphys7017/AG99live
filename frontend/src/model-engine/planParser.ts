@@ -431,16 +431,12 @@ function normalizeParameterDynamics(
   }
   const maxVelocity = value.max_velocity;
   const maxAcceleration = value.max_acceleration;
-  const lifeMotionScale = value.life_motion_scale;
   const maxSpeechOffset = value.max_speech_offset;
   if (
     !isFiniteNumber(maxVelocity)
     || maxVelocity <= 0
     || !isFiniteNumber(maxAcceleration)
     || maxAcceleration <= 0
-    || !isFiniteNumber(lifeMotionScale)
-    || lifeMotionScale < 0
-    || lifeMotionScale > 1
     || !isFiniteNumber(maxSpeechOffset)
     || maxSpeechOffset < 0
   ) {
@@ -449,7 +445,6 @@ function normalizeParameterDynamics(
   return {
     max_velocity: maxVelocity,
     max_acceleration: maxAcceleration,
-    life_motion_scale: lifeMotionScale,
     max_speech_offset: maxSpeechOffset,
   };
 }

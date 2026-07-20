@@ -727,7 +727,6 @@ export interface SemanticParameterPlanEntry {
   dynamics: {
     max_velocity: number;
     max_acceleration: number;
-    life_motion_scale: number;
     max_speech_offset: number;
   };
 }

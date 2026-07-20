@@ -32,7 +32,6 @@ export interface SemanticAxisParameterBinding {
 export interface SemanticAxisDynamics {
   max_velocity: number;
   max_acceleration: number;
-  life_motion_scale: number;
   max_speech_offset_ratio: number;
 }
 

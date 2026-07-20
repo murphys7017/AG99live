@@ -148,7 +148,6 @@ function mapSemanticBindingDynamics(
   return {
     max_velocity: axis.dynamics.max_velocity * outputPerInput,
     max_acceleration: axis.dynamics.max_acceleration * outputPerInput,
-    life_motion_scale: axis.dynamics.life_motion_scale,
     max_speech_offset: outputSpan * axis.dynamics.max_speech_offset_ratio,
   };
 }

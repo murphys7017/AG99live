@@ -109,7 +109,7 @@ flowchart TD
     subgraph SDK[7. Live2D 逐帧表现]
         PLAYER[PreviewMotionPlayer<br/>runId 与 terminal ownership]:::runtime
         LAPP[WebSDK lappmodel<br/>曲线 / gesture track / dynamics]:::engine
-        MIX[参数冲突解析<br/>semantic + expression + lip sync + life motion]:::engine
+        MIX[参数冲突解析<br/>semantic + expression + lip sync + Cubism physics]:::engine
         WRITE[Cubism setParameterValueById]:::engine
         PHYS[Physics / Pose / Renderer]:::engine
         MODEL[最终可见 Live2D 表现]:::engine

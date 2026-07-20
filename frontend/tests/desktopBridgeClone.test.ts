@@ -155,7 +155,6 @@ function testPublishSnapshotStripsUncloneableRuntimeValues(): void {
             dynamics: {
               max_velocity: 24,
               max_acceleration: 72,
-              life_motion_scale: 0.2,
               max_speech_offset: 4,
             },
           }],

@@ -39,7 +39,6 @@ class SemanticAxisParameterBinding(TypedDict):
 class SemanticAxisDynamics(TypedDict):
     max_velocity: float
     max_acceleration: float
-    life_motion_scale: float
     max_speech_offset_ratio: float
 
 
@@ -426,22 +425,21 @@ _COUPLING_DEFAULTS = (
 
 def _default_axis_dynamics(axis_id: str, semantic_group: str) -> SemanticAxisDynamics:
     if semantic_group == "head":
-        values = (120.0, 600.0, 0.55, 0.08)
+        values = (120.0, 600.0, 0.08)
     elif semantic_group in {"body", "torso", "shoulder"}:
-        values = (70.0, 300.0, 0.30, 0.06)
+        values = (70.0, 300.0, 0.06)
     elif semantic_group == "gaze":
-        values = (180.0, 900.0, 0.20, 0.04)
+        values = (180.0, 900.0, 0.04)
     elif semantic_group in {"eye", "mouth", "brow"}:
-        values = (160.0, 800.0, 0.12, 0.03)
+        values = (160.0, 800.0, 0.03)
     else:
-        values = (100.0, 500.0, 0.0, 0.0)
+        values = (100.0, 500.0, 0.0)
     if axis_id in {"mouth_open", "breath"}:
-        values = (180.0, 900.0, 0.0, 0.0)
+        values = (180.0, 900.0, 0.0)
     return {
         "max_velocity": values[0],
         "max_acceleration": values[1],
-        "life_motion_scale": values[2],
-        "max_speech_offset_ratio": values[3],
+        "max_speech_offset_ratio": values[2],
     }
 
 
@@ -463,9 +461,6 @@ def _normalize_axis_dynamics(
         "max_acceleration": _coerce_float(
             value.get("max_acceleration"), field_name=f"{axis_id}.dynamics.max_acceleration"
         ),
-        "life_motion_scale": _coerce_float(
-            value.get("life_motion_scale"), field_name=f"{axis_id}.dynamics.life_motion_scale"
-        ),
         "max_speech_offset_ratio": _coerce_float(
             value.get("max_speech_offset_ratio"),
             field_name=f"{axis_id}.dynamics.max_speech_offset_ratio",
@@ -474,10 +469,6 @@ def _normalize_axis_dynamics(
     if result["max_velocity"] <= 0 or result["max_acceleration"] <= 0:
         raise SemanticAxisProfileError(
             f"`{axis_id}.dynamics` velocity and acceleration must be positive."
-        )
-    if not 0 <= result["life_motion_scale"] <= 1:
-        raise SemanticAxisProfileError(
-            f"`{axis_id}.dynamics.life_motion_scale` must be within [0, 1]."
         )
     if not 0 <= result["max_speech_offset_ratio"] <= 0.5:
         raise SemanticAxisProfileError(
@@ -610,6 +601,8 @@ def build_default_semantic_axis_profile(
     used_axis_ids = {axis["id"] for axis in axes}
     for parameter in _as_list(parameter_scan.get("parameters")):
         if not isinstance(parameter, Mapping):
+            continue
+        if str(parameter.get("kind") or "").strip() in {"marker", "physics"}:
             continue
         parameter_id = str(parameter.get("id") or "").strip()
         if not parameter_id or parameter_id in bound_parameter_ids:

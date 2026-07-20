@@ -313,19 +313,6 @@ function onRemoveBinding(index: number): void {
       </label>
 
       <label class="action-preview__field">
-        <span>Life Motion Scale（生命感比例）</span>
-        <input
-          :value="axis.dynamics.life_motion_scale"
-          class="settings-card__input"
-          type="number"
-          min="0"
-          max="1"
-          step="0.05"
-          @input="updateDynamicsNumber('life_motion_scale', $event)"
-        />
-      </label>
-
-      <label class="action-preview__field">
         <span>Speech Offset Ratio（说话偏移预算）</span>
         <input
           :value="axis.dynamics.max_speech_offset_ratio"

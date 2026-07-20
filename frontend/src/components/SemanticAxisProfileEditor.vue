@@ -346,7 +346,6 @@ function addCustomAxis(): void {
     dynamics: {
       max_velocity: 100,
       max_acceleration: 500,
-      life_motion_scale: 0,
       max_speech_offset_ratio: 0,
     },
     parameter_bindings: [
@@ -546,11 +545,6 @@ function validateDraftProfile(profile: SemanticAxisProfile): string[] {
     validateContainedRange(errors, `${axisLabel}.soft_range`, axis.soft_range, axis.strong_range);
     validatePositive(errors, `${axisLabel}.dynamics.max_velocity`, axis.dynamics.max_velocity);
     validatePositive(errors, `${axisLabel}.dynamics.max_acceleration`, axis.dynamics.max_acceleration);
-    validateUnitInterval(
-      errors,
-      `${axisLabel}.dynamics.life_motion_scale`,
-      axis.dynamics.life_motion_scale,
-    );
     validateRangeValue(
       errors,
       `${axisLabel}.dynamics.max_speech_offset_ratio`,

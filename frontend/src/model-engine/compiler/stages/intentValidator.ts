@@ -69,9 +69,6 @@ function validateProfileForIntent(
       || dynamics.max_velocity <= 0
       || !Number.isFinite(dynamics.max_acceleration)
       || dynamics.max_acceleration <= 0
-      || !Number.isFinite(dynamics.life_motion_scale)
-      || dynamics.life_motion_scale < 0
-      || dynamics.life_motion_scale > 1
       || !Number.isFinite(dynamics.max_speech_offset_ratio)
       || dynamics.max_speech_offset_ratio < 0
       || dynamics.max_speech_offset_ratio > 0.5

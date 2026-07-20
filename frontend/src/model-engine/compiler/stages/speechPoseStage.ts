@@ -294,7 +294,6 @@ function buildVoiceFollowingDynamics(
   return {
     max_velocity: Math.max(0.01, weightedAmplitude / transitionSeconds * 1.25),
     max_acceleration: Math.max(0.01, weightedAmplitude / (transitionSeconds * transitionSeconds) * 1.25),
-    life_motion_scale: 0,
     max_speech_offset: Math.min(
       weightedAmplitude,
       Math.max(0, (channel.output_range.max - channel.output_range.min) / 2),
