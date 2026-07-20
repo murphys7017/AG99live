@@ -45,7 +45,7 @@ def load_live2d_runtime_cache(cache_path: Path) -> tuple[dict[str, Any], dict[st
         return _build_empty_cache_payload(), {}
 
     try:
-        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        payload = json.loads(cache_path.read_text(encoding="utf-8-sig"))
     except Exception as exc:
         logger.warning("Failed to load Live2D runtime cache `%s`: %s", cache_path, exc)
         return _build_empty_cache_payload(), {
