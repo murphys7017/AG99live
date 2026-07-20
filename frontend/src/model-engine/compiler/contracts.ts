@@ -172,6 +172,7 @@ export interface CompiledSemanticAxis {
 export interface CompiledSemanticMotionStep {
   durationWeight: number;
   axes: CompiledSemanticAxis[];
+  diagnostics: CompileDiagnostics;
 }
 
 interface CompiledSemanticMotionBase {

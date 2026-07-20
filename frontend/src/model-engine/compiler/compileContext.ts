@@ -1,7 +1,5 @@
 import type {
-  CatalogMotionPayload,
   SemanticMotionIntent,
-  SemanticParameterPlan,
 } from "../../types/protocol.js";
 import type {
   SemanticAxisDefinition,
@@ -10,7 +8,6 @@ import type {
 import type {
   CompileDiagnostics,
   CompileOptions,
-  CompiledSemanticAxis,
   MotionAxisSamplingTrace,
   MotionAxisRelationAdjustment,
   MotionAxisRelationEvaluation,
@@ -18,14 +15,6 @@ import type {
   MotionTimingResolution,
 } from "./contracts.js";
 import type { ModelEngineSettings } from "../settings.js";
-
-export interface ResolvedMotionResource {
-  resourceId: string;
-  resourceType: "expression" | "motion";
-  parameterIds: string[];
-  expressionId?: string;
-  motion?: CatalogMotionPayload;
-}
 
 export type DynamicAxisValues = Record<string, number>;
 export type MotionAxisValueSourceMap = Record<string, MotionAxisValueSource>;
@@ -47,7 +36,6 @@ export interface MotionCompileMutableState {
   derivedValues: DynamicAxisValues;
   allAxisValues: DynamicAxisValues;
   axisValueSources: MotionAxisValueSourceMap;
-  compiledSemanticAxes: CompiledSemanticAxis[];
   appliedDerivedAxes: string[];
 
   missingAxes: string[];
@@ -61,18 +49,11 @@ export interface MotionCompileMutableState {
   relationEvaluations: MotionAxisRelationEvaluation[];
   axisSampling: MotionAxisSamplingTrace | null;
 
-  resource: ResolvedMotionResource | null;
-
   warnings: string[];
 
   resolvedMode: "idle" | "expressive";
   timing: MotionTimingResolution | null;
 
-  parameters: SemanticParameterPlan["parameters"];
-  pendingParameterModulations: Record<
-    string,
-    NonNullable<SemanticParameterPlan["parameters"][number]["modulation"]>
-  >;
 }
 
 export interface MotionCompileContext {
@@ -107,7 +88,6 @@ export function createInitialCompileState(): MotionCompileMutableState {
     derivedValues: {},
     allAxisValues: {},
     axisValueSources: {},
-    compiledSemanticAxes: [],
     appliedDerivedAxes: [],
     missingAxes: [],
     forbiddenAxes: [],
@@ -117,12 +97,9 @@ export function createInitialCompileState(): MotionCompileMutableState {
     relationAdjustments: [],
     relationEvaluations: [],
     axisSampling: null,
-    resource: null,
     warnings: [],
     resolvedMode: "idle",
     timing: null,
-    parameters: [],
-    pendingParameterModulations: {},
   };
 }
 

@@ -4,15 +4,15 @@ import type {
   SemanticAxisParameterBinding,
 } from "../../../types/semantic-axis-profile.js";
 import type {
-  MotionCompileContext,
-  MotionCompileStage,
-  MotionStageResult,
-} from "../compileContext.js";
+  ModelParameterCompileContext,
+  ModelParameterCompileStage,
+  ModelParameterStageResult,
+} from "../modelParameterCompileContext.js";
 
 // Reads:
 // - context.state.profile
 // - context.state.axisById
-// - context.state.compiledSemanticAxes
+// - context.semanticMotion.axes
 // - context.state.parameters
 //
 // Writes:
@@ -21,21 +21,21 @@ import type {
 // Does not own:
 // - final plan assembly
 // - diagnostics finalization
-export const planBuilderStage: MotionCompileStage = {
+export const planBuilderStage: ModelParameterCompileStage = {
   id: "planBuilder",
   run: runPlanBuilderStage,
 };
 
 export function runPlanBuilderStage(
-  context: MotionCompileContext,
-): MotionStageResult {
+  context: ModelParameterCompileContext,
+): ModelParameterStageResult {
   const profile = context.state.profile;
   if (!profile) {
     return { ok: false, reason: "semantic_profile_missing" };
   }
 
   const parameterResult = buildSemanticPlanParameters(
-    context.state.compiledSemanticAxes,
+    context.semanticMotion.axes,
     context.state.axisById,
     context.state.pendingParameterModulations,
   );
@@ -86,9 +86,9 @@ export function runPlanBuilderStage(
 }
 
 function buildSemanticPlanParameters(
-  semanticAxes: MotionCompileContext["state"]["compiledSemanticAxes"],
+  semanticAxes: ModelParameterCompileContext["semanticMotion"]["axes"],
   axisById: Map<string, SemanticAxisDefinition>,
-  pendingParameterModulations: MotionCompileContext["state"]["pendingParameterModulations"],
+  pendingParameterModulations: ModelParameterCompileContext["state"]["pendingParameterModulations"],
 ):
   | { ok: true; parameters: SemanticParameterPlan["parameters"]; warnings: string[] }
   | { ok: false; reason: string } {

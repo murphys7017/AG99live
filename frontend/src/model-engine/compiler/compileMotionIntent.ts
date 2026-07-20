@@ -6,42 +6,29 @@ import type {
   SemanticParameterPlan,
 } from "../../types/protocol.js";
 import { SCHEMA_PARAMETER_PLAN_V2 } from "../../types/protocol.js";
-import type { CompileOptions, CompileResult } from "./contracts.js";
-import { finalizeCompileDiagnostics } from "./diagnostics.js";
-import type { MotionCompileContext } from "./compileContext.js";
+import type {
+  CompileOptions,
+  CompileResult,
+  CompiledSemanticMotion,
+} from "./contracts.js";
 import { runCompilePipeline } from "./pipeline.js";
 import {
   createModelEngineStageRegistry,
   type ModelEngineStageRegistry,
 } from "./registry.js";
-import { compileSemanticPoseContext } from "./compileSemanticMotion.js";
+import { compileSemanticMotion } from "./compileSemanticMotion.js";
+import {
+  createModelParameterCompileContext,
+  type ModelParameterCompileContext,
+} from "./modelParameterCompileContext.js";
+import { normalizeModelEngineSettings } from "../settings.js";
 
 export function compileMotionIntent(
   intent: SemanticMotionIntent,
   options: CompileOptions,
   stageRegistry: ModelEngineStageRegistry = createModelEngineStageRegistry(),
 ): CompileResult {
-  if (
-    intent.schema_version === "engine.motion_intent.v4"
-    && Array.isArray(intent.motion_steps)
-  ) {
-    return compileMotionSequenceIntent(
-      intent as NormalizedSemanticMotionIntentV4 & {
-        motion_steps: NonNullable<NormalizedSemanticMotionIntentV4["motion_steps"]>;
-      },
-      options,
-      stageRegistry,
-    );
-  }
-  return compileSingleMotionIntent(intent, options, stageRegistry);
-}
-
-function compileSingleMotionIntent(
-  intent: SemanticMotionIntent,
-  options: CompileOptions,
-  stageRegistry: ModelEngineStageRegistry,
-): CompileResult {
-  const semanticResult = compileSemanticPoseContext(intent, options, stageRegistry);
+  const semanticResult = compileSemanticMotion(intent, options, stageRegistry);
   if (!semanticResult.ok) {
     return {
       ok: false,
@@ -51,28 +38,72 @@ function compileSingleMotionIntent(
       feedback: semanticResult.feedback,
     };
   }
-  const context = semanticResult.context;
+  if (semanticResult.motion.kind === "sequence") {
+    return compileMotionSequenceIntent(
+      semanticResult.motion,
+      intent as NormalizedSemanticMotionIntentV4 & {
+        motion_steps: NonNullable<NormalizedSemanticMotionIntentV4["motion_steps"]>;
+      },
+      options,
+      stageRegistry,
+    );
+  }
+  return compileModelParameterPose(
+    semanticResult.motion,
+    intent,
+    options,
+    stageRegistry,
+  );
+}
+
+function compileModelParameterPose(
+  semanticMotion: Extract<CompiledSemanticMotion, { kind: "pose" }>,
+  intent: SemanticMotionIntent,
+  options: CompileOptions,
+  stageRegistry: ModelEngineStageRegistry,
+): CompileResult {
+  let context: ModelParameterCompileContext;
+  try {
+    context = createModelParameterCompileContext(
+      semanticMotion,
+      intent,
+      options,
+      normalizeModelEngineSettings(options.settings),
+    );
+  } catch (error) {
+    return failCompile(
+      error instanceof Error ? error.message : "model_parameter_context_invalid",
+      semanticMotion,
+    );
+  }
   const modelParameterStages = stageRegistry.resolve(context, "model_parameter");
   const pipelineResult = runCompilePipeline(context, modelParameterStages);
   if (!pipelineResult.ok) {
-    return failCompile(pipelineResult.reason, context);
+    return failCompile(pipelineResult.reason, semanticMotion, context);
   }
 
   return buildSuccessCompileResult(context);
 }
 
 function compileMotionSequenceIntent(
+  semanticMotion: Extract<CompiledSemanticMotion, { kind: "sequence" }>,
   intent: NormalizedSemanticMotionIntentV4 & {
     motion_steps: NonNullable<NormalizedSemanticMotionIntentV4["motion_steps"]>;
   },
   options: CompileOptions,
   stageRegistry: ModelEngineStageRegistry,
 ): CompileResult {
-  const stepResults = intent.motion_steps.map((step) =>
-    compileSingleMotionIntent(
+  const stepResults = semanticMotion.steps.map((step, index) =>
+    compileModelParameterPose(
+      {
+        ...semanticMotion,
+        kind: "pose",
+        axes: step.axes,
+        diagnostics: step.diagnostics,
+      },
       {
         ...intent,
-        axis_levels: step.axis_levels,
+        axis_levels: intent.motion_steps[index].axis_levels,
         motion_steps: undefined,
       } as NormalizedSemanticMotionIntentV4,
       {
@@ -97,33 +128,6 @@ function compileMotionSequenceIntent(
   }
 
   const plans = stepResults.map((result) => result.plan!);
-  const stepSignatures = intent.motion_steps.map((step) =>
-    JSON.stringify(Object.entries(step.axis_levels).sort(([left], [right]) =>
-      left.localeCompare(right),
-    )),
-  );
-  const hasTransition = stepSignatures.some(
-    (signature, index) => index > 0 && signature !== stepSignatures[index - 1],
-  );
-  const allNeutral = intent.motion_steps.every((step) =>
-    Object.values(step.axis_levels).every((level) => level === 0),
-  );
-  if (!hasTransition || allNeutral) {
-    const reason = allNeutral
-      ? "motion_sequence_all_neutral"
-      : "motion_sequence_has_no_transition";
-    return {
-      ok: false,
-      plan: null,
-      reason,
-      diagnostics: stepResults[0].diagnostics,
-      feedback: {
-        code: reason,
-        message: reason,
-        fields: [],
-      },
-    };
-  }
   const totalWeight = intent.motion_steps.reduce(
     (sum, step) => sum + step.duration_weight,
     0,
@@ -522,68 +526,36 @@ function resolveNeutralSequenceParameter(
 
 function failCompile(
   reason: string,
-  context: MotionCompileContext,
+  semanticMotion: CompiledSemanticMotion,
+  context?: ModelParameterCompileContext,
 ): CompileResult {
+  const diagnostics = buildModelParameterDiagnostics(semanticMotion, context);
   return {
     ok: false,
     plan: null,
     reason,
-    diagnostics: finalizeCompileDiagnostics(context),
+    diagnostics,
     feedback: {
       code: reason,
       message: reason,
-      fields: [
-        ...context.state.invalidAxes,
-        ...context.state.forbiddenAxes,
-      ],
+      fields: [],
     },
   };
 }
 
 function buildSuccessCompileResult(
-  context: MotionCompileContext,
-): CompileResult {
-  const { state } = context;
-  const semanticProfile = state.profile;
-  if (!semanticProfile) {
-    return failCompile("semantic_profile_missing", context);
-  }
-  const timing = state.timing;
-  if (!timing) {
-    return failCompile("compile_pipeline_missing_required_state", context);
-  }
-
-  return buildSuccessResultFromContext(context, {
-    intensityApplied: hasAppliedEffectiveIntensity(context),
-  });
-}
-
-function hasAppliedEffectiveIntensity(
-  context: MotionCompileContext,
-): boolean {
-  return context.intent.mode === "expressive"
-    && context.settings.motionIntensityScale !== 1;
-}
-
-function buildSuccessResultFromContext(
-  context: MotionCompileContext,
-  extra: Partial<CompileResult["diagnostics"]> = {},
+  context: ModelParameterCompileContext,
 ): CompileResult {
   const profile = context.state.profile;
-  const timing = context.state.timing;
-
-  if (!profile || !timing) {
-    return failCompile("compile_pipeline_missing_required_state", context);
-  }
-
-  const diagnostics = finalizeCompileDiagnostics(context, extra);
+  const semanticMotion = context.semanticMotion;
+  const diagnostics = buildModelParameterDiagnostics(semanticMotion, context);
   const plan: SemanticParameterPlan = {
     schema_version: SCHEMA_PARAMETER_PLAN_V2,
     profile_id: profile.profile_id,
     profile_revision: profile.revision,
     model_id: profile.model_id,
-    mode: context.state.resolvedMode,
-    emotion_label: context.intent.emotion_label,
+    mode: semanticMotion.mode,
+    emotion_label: semanticMotion.emotionLabel,
     resource: context.state.resource?.resourceType === "expression"
       ? {
           kind: "expression",
@@ -599,15 +571,15 @@ function buildSuccessResultFromContext(
             motion: context.state.resource.motion,
           }
         : undefined,
-    timing: timing.timing,
+    timing: semanticMotion.timing.timing,
     parameters: context.state.parameters,
     diagnostics: {
       warnings: [...context.state.warnings],
     },
     summary: {
-      axis_count: Object.keys(context.state.allAxisValues).length,
+      axis_count: semanticMotion.axes.length,
       parameter_count: context.state.parameters.length,
-      target_duration_ms: timing.resolvedDurationMs,
+      target_duration_ms: semanticMotion.timing.resolvedDurationMs,
       active_groups: diagnostics.activeGroups,
       skeleton_groups: diagnostics.skeletonGroups,
       missing_skeleton_groups: diagnostics.missingSkeletonGroups,
@@ -622,5 +594,34 @@ function buildSuccessResultFromContext(
     plan,
     reason: "",
     diagnostics,
+  };
+}
+
+function buildModelParameterDiagnostics(
+  semanticMotion: CompiledSemanticMotion,
+  context?: ModelParameterCompileContext,
+): CompileResult["diagnostics"] {
+  const parameters = context?.state.parameters ?? [];
+  const resource = context?.state.resource;
+  return {
+    ...semanticMotion.diagnostics,
+    compiledParameterCount: parameters.length,
+    compiledParameters: parameters.map((item) => item.parameter_id),
+    warnings: context
+      ? [...context.state.warnings]
+      : [...(semanticMotion.diagnostics.warnings ?? [])],
+    transformTrace: semanticMotion.diagnostics.transformTrace
+      ? {
+          ...semanticMotion.diagnostics.transformTrace,
+          resolvedResource: resource
+            ? {
+                resourceId: resource.resourceId,
+                resourceType: resource.resourceType,
+                parameterIds: [...resource.parameterIds],
+              }
+            : undefined,
+          compiledParameters: parameters.map((item) => item.parameter_id),
+        }
+      : undefined,
   };
 }

@@ -4,10 +4,10 @@ import type {
   VoiceFollowingProfile,
 } from "../../../types/protocol.js";
 import type {
-  MotionCompileContext,
-  MotionCompileStage,
-  MotionStageResult,
-} from "../compileContext.js";
+  ModelParameterCompileContext,
+  ModelParameterCompileStage,
+  ModelParameterStageResult,
+} from "../modelParameterCompileContext.js";
 
 type SpeechGesturePreset = NonNullable<
   SemanticParameterPlan["parameters"][number]["modulation"]
@@ -59,14 +59,14 @@ const PRESET_CHANNELS: Record<SpeechGesturePreset, string[]> = {
   emphatic: ["head_pitch", "head_yaw", "head_roll", "body_pitch", "body_yaw"],
 };
 
-export const speechPoseStage: MotionCompileStage = {
+export const speechPoseStage: ModelParameterCompileStage = {
   id: "speechPose",
   run: runSpeechPoseStage,
 };
 
 export function runSpeechPoseStage(
-  context: MotionCompileContext,
-): MotionStageResult {
+  context: ModelParameterCompileContext,
+): ModelParameterStageResult {
   if (context.options.speechActive !== true) {
     return { ok: true };
   }
@@ -135,17 +135,17 @@ export function runSpeechPoseStage(
 }
 
 function buildVoiceFollowingParameters(
-  context: MotionCompileContext,
+  context: ModelParameterCompileContext,
   channels: VoiceFollowingChannelProfile[],
   preset: SpeechGesturePreset,
   durationMs: number,
 ): {
   parameters: SemanticParameterPlan["parameters"];
-  pendingModulations: MotionCompileContext["state"]["pendingParameterModulations"];
+  pendingModulations: ModelParameterCompileContext["state"]["pendingParameterModulations"];
   invalidParameterIds: string[];
 } {
   const parameters: SemanticParameterPlan["parameters"] = [];
-  const pendingModulations: MotionCompileContext["state"]["pendingParameterModulations"] = {};
+  const pendingModulations: ModelParameterCompileContext["state"]["pendingParameterModulations"] = {};
   const invalidParameterIds: string[] = [];
   const existingParameterIds = new Set(context.state.parameters.map((item) => item.parameter_id));
   const controlledParameterIds = collectControlledParameterIds(context);
@@ -217,7 +217,7 @@ function buildGestureTrack(
   };
 }
 
-function resolveSpeechGesturePreset(context: MotionCompileContext): SpeechGesturePreset {
+function resolveSpeechGesturePreset(context: ModelParameterCompileContext): SpeechGesturePreset {
   const hint = context.intent.performance_curve_hint;
   if (hint?.energy === "high" || hint?.curve_family === "pulse_then_settle") {
     return "emphatic";
@@ -276,8 +276,8 @@ function selectGestureChannels(
   return selected;
 }
 
-function resolveGestureDurationMs(context: MotionCompileContext): number | null {
-  const durationMs = context.state.timing?.timing.duration_ms;
+function resolveGestureDurationMs(context: ModelParameterCompileContext): number | null {
+  const durationMs = context.semanticMotion.timing.timing.duration_ms;
   if (!Number.isFinite(durationMs) || !durationMs || durationMs <= 0) {
     return null;
   }
@@ -301,9 +301,9 @@ function buildVoiceFollowingDynamics(
   };
 }
 
-function collectControlledParameterIds(context: MotionCompileContext): Set<string> {
+function collectControlledParameterIds(context: ModelParameterCompileContext): Set<string> {
   const parameterIds = new Set<string>();
-  for (const semanticAxis of context.state.compiledSemanticAxes) {
+  for (const semanticAxis of context.semanticMotion.axes) {
     const axisId = semanticAxis.axisId;
     const axis = context.state.axisById.get(axisId);
     for (const binding of axis?.parameter_bindings ?? []) {
@@ -319,14 +319,14 @@ function collectControlledParameterIds(context: MotionCompileContext): Set<strin
   return parameterIds;
 }
 
-function collectPendingRelationTargetAxisIds(context: MotionCompileContext): Set<string> {
+function collectPendingRelationTargetAxisIds(context: ModelParameterCompileContext): Set<string> {
   const pendingTargets = new Set<string>();
   const profile = context.state.profile;
   if (!profile) {
     return pendingTargets;
   }
   const semanticValueByAxisId = new Map(
-    context.state.compiledSemanticAxes.map((axis) => [axis.axisId, axis.value]),
+    context.semanticMotion.axes.map((axis) => [axis.axisId, axis.value]),
   );
   for (const relation of profile.relation_graph.edges) {
     if (semanticValueByAxisId.has(relation.target_axis_id)) {

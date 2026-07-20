@@ -5,21 +5,21 @@ import type {
   MotionResourceComponent,
 } from "../../../types/protocol.js";
 import type {
-  MotionCompileContext,
-  MotionCompileStage,
-  MotionStageResult,
-} from "../compileContext.js";
+  ModelParameterCompileContext,
+  ModelParameterCompileStage,
+  ModelParameterStageResult,
+} from "../modelParameterCompileContext.js";
 
 // Resource intent is validated after parameter compilation so the policy can
 // compare the resource-owned parameters with the final semantic plan.
-export const resourcePolicyStage: MotionCompileStage = {
+export const resourcePolicyStage: ModelParameterCompileStage = {
   id: "resourcePolicy",
   run: runResourcePolicyStage,
 };
 
 export function runResourcePolicyStage(
-  context: MotionCompileContext,
-): MotionStageResult {
+  context: ModelParameterCompileContext,
+): ModelParameterStageResult {
   const expressionResourceId = context.intent.schema_version === "engine.motion_intent.v4"
     ? context.intent.expression_resource_id?.trim()
     : undefined;

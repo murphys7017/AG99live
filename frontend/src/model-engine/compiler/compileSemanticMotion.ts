@@ -24,7 +24,7 @@ import {
   type ModelEngineStageRegistry,
 } from "./registry.js";
 
-export type CompileSemanticPoseContextResult =
+type CompileSemanticPoseContextResult =
   | {
     ok: true;
     context: MotionCompileContext;
@@ -127,12 +127,13 @@ function compileSemanticSequence(
       steps: successfulSteps.map((step, index) => ({
         durationWeight: intent.motion_steps[index].duration_weight,
         axes: step.axes,
+        diagnostics: step.diagnostics,
       })),
     }),
   };
 }
 
-export function compileSemanticPoseContext(
+function compileSemanticPoseContext(
   intent: SemanticMotionIntent,
   options: CompileOptions,
   stageRegistry: ModelEngineStageRegistry,
@@ -178,13 +179,14 @@ export function compileSemanticPoseContext(
   if (axes.length === 0 && options.speechActive !== true) {
     return failSemanticCompile("semantic_compile_axes_empty", context);
   }
-  context.state.compiledSemanticAxes = axes;
-
   return {
     ok: true,
     context,
     axes,
-    diagnostics: finalizeCompileDiagnostics(context),
+    diagnostics: finalizeCompileDiagnostics(context, {
+      intensityApplied: context.intent.mode === "expressive"
+        && context.settings.motionIntensityScale !== 1,
+    }),
   };
 }
 

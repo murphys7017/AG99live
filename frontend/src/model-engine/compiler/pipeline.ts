@@ -1,13 +1,10 @@
-import type {
-  MotionCompileContext,
-  MotionCompileStage,
-  MotionStageResult,
-} from "./compileContext.js";
-
-export function runCompilePipeline(
-  context: MotionCompileContext,
-  stages: MotionCompileStage[],
-): MotionStageResult {
+export function runCompilePipeline<
+  Context,
+  Result extends { ok: boolean },
+>(
+  context: Context,
+  stages: Array<{ run(context: Context): Result }>,
+): Result | { ok: true } {
   for (const stage of stages) {
     const result = stage.run(context);
     if (!result.ok) {

@@ -1,4 +1,8 @@
 import type { MotionCompileContext, MotionCompileStage } from "./compileContext.js";
+import type {
+  ModelParameterCompileContext,
+  ModelParameterCompileStage,
+} from "./modelParameterCompileContext.js";
 import { intentValidatorStage } from "./stages/intentValidator.js";
 import { axisResolverStage } from "./stages/axisResolver.js";
 import { intensityStage } from "./stages/intensityStage.js";
@@ -13,27 +17,43 @@ import { resourcePolicyStage } from "./stages/resourcePolicyStage.js";
 export type ModelEngineStageKind = "core" | "extension";
 export type ModelEngineCompilePhase = "semantic" | "model_parameter";
 
-export interface ModelEngineCompileStageRegistration {
-  id: string;
-  stage: MotionCompileStage;
-  phase: ModelEngineCompilePhase;
-  order: number;
-  kind: ModelEngineStageKind;
-  enabled: (context: MotionCompileContext) => boolean;
+interface CompileContextByPhase {
+  semantic: MotionCompileContext;
+  model_parameter: ModelParameterCompileContext;
 }
 
+interface CompileStageByPhase {
+  semantic: MotionCompileStage;
+  model_parameter: ModelParameterCompileStage;
+}
+
+export interface ModelEngineCompileStageRegistration<
+  Phase extends ModelEngineCompilePhase = ModelEngineCompilePhase,
+> {
+  id: string;
+  stage: CompileStageByPhase[Phase];
+  phase: Phase;
+  order: number;
+  kind: ModelEngineStageKind;
+  enabled: (context: CompileContextByPhase[Phase]) => boolean;
+}
+
+type AnyStageRegistration =
+  | ModelEngineCompileStageRegistration<"semantic">
+  | ModelEngineCompileStageRegistration<"model_parameter">;
+
 export interface ModelEngineStageRegistry {
-  resolve(
-    context: MotionCompileContext,
-    phase: ModelEngineCompilePhase,
-  ): MotionCompileStage[];
-  list(): ReadonlyArray<ModelEngineCompileStageRegistration>;
-  register(registration: ModelEngineCompileStageRegistration): void;
+  resolve<Phase extends ModelEngineCompilePhase>(
+    context: CompileContextByPhase[Phase],
+    phase: Phase,
+  ): CompileStageByPhase[Phase][];
+  list(): ReadonlyArray<AnyStageRegistration>;
+  register(registration: AnyStageRegistration): void;
   unregister(id: string): void;
   setEnabled(id: string, enabled: boolean): void;
 }
 
-export function createDefaultCompileStageRegistrations(): ModelEngineCompileStageRegistration[] {
+export function createDefaultCompileStageRegistrations(): AnyStageRegistration[] {
   const always = () => true;
   return [
     { id: "intentValidator", stage: intentValidatorStage, phase: "semantic", order: 10, kind: "core", enabled: always },
@@ -52,13 +72,13 @@ export function createDefaultCompileStageRegistrations(): ModelEngineCompileStag
 export function createModelEngineStageRegistry(
   initial = createDefaultCompileStageRegistrations(),
 ): ModelEngineStageRegistry {
-  const registrations = new Map<string, ModelEngineCompileStageRegistration>();
+  const registrations = new Map<string, AnyStageRegistration>();
   const disabledExtensions = new Set<string>();
   for (const registration of initial) {
     addRegistration(registration);
   }
 
-  function addRegistration(registration: ModelEngineCompileStageRegistration): void {
+  function addRegistration(registration: AnyStageRegistration): void {
     const id = registration.id.trim();
     if (!id) {
       throw new Error("ModelEngine stage id must not be empty.");
@@ -72,7 +92,7 @@ export function createModelEngineStageRegistry(
     registrations.set(id, { ...registration, id });
   }
 
-  function requireExtension(id: string): ModelEngineCompileStageRegistration {
+  function requireExtension(id: string): AnyStageRegistration {
     const registration = registrations.get(id);
     if (!registration) {
       throw new Error(`ModelEngine stage '${id}' is not registered.`);
@@ -84,15 +104,18 @@ export function createModelEngineStageRegistry(
   }
 
   return {
-    resolve(context, phase) {
+    resolve<Phase extends ModelEngineCompilePhase>(
+      context: CompileContextByPhase[Phase],
+      phase: Phase,
+    ): CompileStageByPhase[Phase][] {
       return Array.from(registrations.values())
         .filter((registration) =>
           registration.phase === phase
           && !disabledExtensions.has(registration.id)
-          && registration.enabled(context),
+          && registration.enabled(context as never),
         )
         .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
-        .map((registration) => registration.stage);
+        .map((registration) => registration.stage as CompileStageByPhase[Phase]);
     },
     list() {
       return Array.from(registrations.values())
@@ -121,6 +144,6 @@ export function createModelEngineStageRegistry(
   };
 }
 
-export function listCompileStageRegistrations(): ReadonlyArray<ModelEngineCompileStageRegistration> {
+export function listCompileStageRegistrations(): ReadonlyArray<AnyStageRegistration> {
   return createDefaultCompileStageRegistrations();
 }

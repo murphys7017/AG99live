@@ -28,7 +28,6 @@ export function finalizeCompileDiagnostics(
   extra: Partial<CompileDiagnostics> = {},
 ): CompileDiagnostics {
   const { baseDiagnostics, state } = context;
-  const compiledParameters = state.parameters.map((item) => item.parameter_id);
   const appliedDerivedAxes = [...state.appliedDerivedAxes];
   const visibility = buildVisibilityDiagnostics(context);
 
@@ -36,7 +35,7 @@ export function finalizeCompileDiagnostics(
     ...baseDiagnostics,
     timingSource: state.timing?.timingSource ?? baseDiagnostics.timingSource,
     resolvedMode: state.resolvedMode,
-    compiledParameterCount: state.parameters.length,
+    compiledParameterCount: 0,
     warnings: [...state.warnings],
     primaryAxes: [...state.roleAxisIds.primaryAxes],
     hintAxes: [...state.roleAxisIds.hintAxes],
@@ -49,7 +48,7 @@ export function finalizeCompileDiagnostics(
     invalidAxes: [...state.invalidAxes],
     axisErrorCount: state.axisErrorCount,
     axisErrorLimit: state.axisErrorLimit,
-    compiledParameters,
+    compiledParameters: [],
     ...visibility,
     ...extra,
   };
@@ -132,19 +131,13 @@ function buildTransformTrace(context: MotionCompileContext): MotionTransformTrac
     motionResourceId: context.intent.schema_version === "engine.motion_intent.v4"
       ? context.intent.motion_resource_id
       : undefined,
-    resolvedResource: context.state.resource
-      ? {
-          resourceId: context.state.resource.resourceId,
-          resourceType: context.state.resource.resourceType,
-          parameterIds: [...context.state.resource.parameterIds],
-        }
-      : undefined,
+    resolvedResource: undefined,
     resolvedAxes: { ...context.state.controlledValues },
     derivedAxes: { ...context.state.derivedValues },
     constrainedAxes: { ...context.state.allAxisValues },
     relationAdjustments: [...context.state.relationAdjustments],
     relationEvaluations: context.state.relationEvaluations.map((item) => ({ ...item })),
-    compiledParameters: context.state.parameters.map((item) => item.parameter_id),
+    compiledParameters: [],
   };
 }
 
