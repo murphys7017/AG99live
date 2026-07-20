@@ -13,15 +13,15 @@ flowchart TB
         EFFECT[Persona Effect 注册<br/>ag99live.motion schema]:::boundary
         PROMPT[Prompt Contributor<br/>能力 / profile / 上一动作 / 样本]:::boundary
         RESULT[Result Contributor<br/>effect_calls -> motion intent]:::boundary
-        MPAY[motion_payload.py<br/>profile 能力与 resource 白名单校验]:::boundary
+        MPAY[payload_validation.py<br/>profile 能力与 resource 白名单校验]:::boundary
         REMOTEOP[remote_operator.py<br/>远程能力 Prompt]:::boundary
         EFFECT --> PROMPT
         RESULT --> MPAY
     end
 
     subgraph MOTION[motion：动作领域规则]
-        INTENT[motion_intent.py<br/>v3/v4 canonical contract]:::domain
-        INLINE[inline_motion.py<br/>官方 <@anim> v3 兼容解析]:::domain
+        INTENT[motion_intent.py<br/>v4 canonical contract]:::domain
+        INLINE[inline_motion.py<br/>官方 <@anim> v4 兼容解析]:::domain
         CATALOG[catalog_motion.py + resource_catalog.py<br/>typed resource]:::domain
         CURVE[performance_curve.py<br/>独立 Provider 请求生命周期]:::domain
         SANITIZE[output_sanitizer.py<br/>可见文本清理]:::domain

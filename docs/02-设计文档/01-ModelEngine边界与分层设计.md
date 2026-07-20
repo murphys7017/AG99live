@@ -64,7 +64,7 @@ ModelEngine 不负责：
 | 位置 | 职责 |
 | --- | --- |
 | `useModelEngine.ts` | facade 与实例组合根 |
-| `normalize.ts` | v3/v4/parameter-plan 入站解析 |
+| `normalize.ts` | V4 motion intent 与 typed catalog motion 的严格入站解析 |
 | `planParser.ts` | `engine.parameter_plan.v2` 严格解析 |
 | `compiler/compileMotionIntent.ts` | compiler 主入口与结果收口 |
 | `compiler/compileContext.ts` | stage 共享 state |

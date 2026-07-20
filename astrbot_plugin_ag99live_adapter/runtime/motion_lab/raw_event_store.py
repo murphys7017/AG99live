@@ -108,13 +108,6 @@ class MotionLabRawEventStore:
             )
             conn.execute(
                 """
-                INSERT OR REPLACE INTO motion_lab_meta (key, value)
-                VALUES ('schema_version', ?)
-                """,
-                (str(SCHEMA_VERSION),),
-            )
-            conn.execute(
-                """
                 CREATE TABLE IF NOT EXISTS motion_lab_raw_events (
                     id TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL,
@@ -142,17 +135,8 @@ class MotionLabRawEventStore:
                 )
                 """
             )
-            _ensure_columns(
-                conn,
-                "motion_lab_raw_events",
-                {
-                    "profile_hash": "TEXT",
-                    "transform_version": "TEXT",
-                    "run_id": "TEXT",
-                    "transform_trace_json": "TEXT NOT NULL DEFAULT '{}'",
-                    "timeline_outcome_json": "TEXT NOT NULL DEFAULT '{}'",
-                },
-            )
+            _require_schema_version(conn)
+            _require_current_event_columns(conn)
             conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_motion_lab_raw_events_created_at
@@ -199,20 +183,56 @@ def _json_dumps(value: Any) -> str:
     return json.dumps(value if value is not None else {}, ensure_ascii=False, default=str)
 
 
-def _ensure_columns(
-    conn: sqlite3.Connection,
-    table_name: str,
-    columns: dict[str, str],
-) -> None:
-    existing = {
-        str(row[1])
-        for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-    }
-    for column_name, declaration in columns.items():
-        if column_name in existing:
-            continue
+def _require_schema_version(conn: sqlite3.Connection) -> None:
+    row = conn.execute(
+        "SELECT value FROM motion_lab_meta WHERE key = 'schema_version'"
+    ).fetchone()
+    if row is None:
         conn.execute(
-            f"ALTER TABLE {table_name} ADD COLUMN {column_name} {declaration}"
+            "INSERT INTO motion_lab_meta (key, value) VALUES ('schema_version', ?)",
+            (str(SCHEMA_VERSION),),
+        )
+        return
+    if str(row[0]) != str(SCHEMA_VERSION):
+        raise RuntimeError(
+            f"motion_lab_schema_version_mismatch:{row[0]}:{SCHEMA_VERSION}"
+        )
+
+
+def _require_current_event_columns(conn: sqlite3.Connection) -> None:
+    required_columns = {
+        "id",
+        "created_at",
+        "event_type",
+        "conversation_uid",
+        "history_uid",
+        "turn_id",
+        "frontend_turn_id",
+        "message_id",
+        "source_route",
+        "phase",
+        "model_name",
+        "profile_id",
+        "profile_revision",
+        "profile_hash",
+        "transform_version",
+        "run_id",
+        "user_text",
+        "assistant_text",
+        "payload_kind",
+        "raw_json",
+        "transform_trace_json",
+        "timeline_outcome_json",
+        "inserted_at",
+    }
+    actual_columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(motion_lab_raw_events)").fetchall()
+    }
+    missing_columns = sorted(required_columns - actual_columns)
+    if missing_columns:
+        raise RuntimeError(
+            "motion_lab_schema_columns_missing:" + ",".join(missing_columns)
         )
 
 

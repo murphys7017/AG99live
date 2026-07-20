@@ -36,7 +36,6 @@ import { cloneJson } from "../utils/cloneJson.js";
 const RUNTIME_CHANNEL_NAME = "ag99live.desktop.runtime";
 const PROFILE_AUTHORING_CHANNEL_NAME = "ag99live.desktop.profile_authoring";
 const RUNTIME_SNAPSHOT_STORAGE_KEY = "ag99live.desktop.snapshot.v2";
-const OBSOLETE_RUNTIME_SNAPSHOT_STORAGE_KEY = "ag99live.desktop.snapshot";
 const PROFILE_AUTHORING_SNAPSHOT_STORAGE_KEY = "ag99live.desktop.profile_authoring.snapshot";
 
 type RuntimeBridgeMessage =
@@ -108,7 +107,6 @@ function loadRuntimeSnapshot(): DesktopRuntimeSnapshot {
     return defaultSnapshot;
   }
 
-  window.localStorage.removeItem(OBSOLETE_RUNTIME_SNAPSHOT_STORAGE_KEY);
   const rawValue = window.localStorage.getItem(RUNTIME_SNAPSHOT_STORAGE_KEY);
   if (!rawValue) {
     return defaultSnapshot;

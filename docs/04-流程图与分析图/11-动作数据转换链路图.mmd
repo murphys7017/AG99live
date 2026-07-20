@@ -42,7 +42,7 @@ flowchart TD
         VALID{canonical contract 合法？}:::backend
         FEEDBACK1[记录明确拒绝 reason<br/>不生成默认动作]:::failure
         PROFILE[当前 SemanticAxisProfile v2]:::backend
-        CAPCHECK[motion_payload.py<br/>轴存在 / 等级可用 / 数量限制<br/>resource 类型与白名单]:::backend
+        CAPCHECK[payload_validation.py<br/>轴存在 / 等级可用 / 数量限制<br/>resource 类型与白名单]:::backend
         CAPOK{当前模型可执行？}:::backend
         INTENT[engine.motion_intent.v4<br/>canonical payload]:::contract
         CALL --> STRUCT --> VALID

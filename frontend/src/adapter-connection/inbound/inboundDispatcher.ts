@@ -2,12 +2,11 @@
  * 入站事件分发的顶层路由。
  *
  * 上游 inboundEvents.ts 把原始信封映射成判别联合 InboundAdapterEvent；本文件按
- * event.kind 转发到下列五个领域分发器之一：
+ * event.kind 转发到下列领域分发器之一：
  *   - inboundConnectionDispatcher   server_info
  *   - inboundFeatureDispatcher      model_sync / 语义轴档案 / 动作样本 / 历史
  *   - inboundOutputDispatcher       output_segment / output_transcription
  *   - inboundRuntimeDispatcher      turn_started / turn_finished / interrupt / start_mic / synth_finished / control_error
- *   - inboundMotionDispatcher       engine_motion_preview
  * protocol_error 和 unhandled 走 inboundProtocolDiagnostics 上报。
  *
  * 自身不写状态、不发协议、不调用任何业务行为，只做 switch + forward；状态写回
