@@ -42,8 +42,14 @@ import * as LAppDefine from "./lappdefine";
 import { frameBuffer, LAppDelegate } from "./lappdelegate";
 import { canvas, gl } from "./lappglmanager";
 import { LAppPal } from "./lapppal";
-import { advanceParameterDynamics } from "./parameterdynamics";
-import { prepareDirectParameterExecution } from "./directparameterplan";
+import {
+  resolveParameterPresentationFrame,
+  type ParameterPresentationNode,
+} from "./parameterpresentation";
+import {
+  prepareDirectParameterExecution,
+  type DirectParameterExecutionPlan,
+} from "./directparameterplan";
 import { TextureInfo } from "./lapptexturemanager";
 import { CubismMoc } from "@framework/model/cubismmoc";
 import {
@@ -106,7 +112,6 @@ const SPEECH_BODY_GAIN_MAX = 0.8;
 interface DirectSemanticParameterBinding {
   axisId: string;
   parameterIdRaw: string;
-  initialValue: number;
   targetValue: number;
   neutralTargetValue: number;
   weight: number;
@@ -137,27 +142,16 @@ interface DirectSemanticParameterBinding {
       value: number;
     }>;
   } | null;
-  maxVelocity: number;
-  maxAcceleration: number;
   maxSpeechOffset: number;
   parameterId: CubismIdHandle;
   parameterIndex: number;
-  dynamicallyLimitedValue: number | null;
-  dynamicVelocity: number;
-  lastDynamicElapsedMs: number | null;
+  presentation: ParameterPresentationNode;
 }
 
 interface DirectParameterPlanState {
   mode: "expressive" | "idle";
   emotionLabel: string;
-  timing: {
-    durationMs: number;
-    blendInMs: number;
-    holdMs: number;
-    blendOutMs: number;
-    curvePreset: "smooth_hold" | "snap_hold_soft_release" | "slow_build_quick_release" | "pulse_settle" | "breathing_swell";
-    totalMs: number;
-  };
+  timing: DirectParameterExecutionPlan["timing"];
   semanticBindings: DirectSemanticParameterBinding[];
   playbackClockReader: { getElapsedMs: () => number | null };
   diagnosticFrameCount: number;
@@ -1676,7 +1670,6 @@ export class LAppModel extends CubismUserModel {
       semanticBindings.push({
         axisId,
         parameterIdRaw,
-        initialValue: this._model.getParameterValueByIndex(resolved.parameterIndex),
         targetValue,
         neutralTargetValue,
         weight: Number(item.weight),
@@ -1707,14 +1700,21 @@ export class LAppModel extends CubismUserModel {
               : [],
           }
           : null,
-        maxVelocity: Number(item.dynamics.max_velocity),
-        maxAcceleration: Number(item.dynamics.max_acceleration),
         maxSpeechOffset: Number(item.dynamics.max_speech_offset),
         parameterId: resolved.parameterId,
         parameterIndex: resolved.parameterIndex,
-        dynamicallyLimitedValue: null,
-        dynamicVelocity: 0,
-        lastDynamicElapsedMs: null,
+        presentation: {
+          parameterId: parameterIdRaw,
+          initialValue: this._model.getParameterValueByIndex(resolved.parameterIndex),
+          neutralValue: neutralTargetValue,
+          minValue,
+          maxValue,
+          maxVelocity: Number(item.dynamics.max_velocity),
+          maxAcceleration: Number(item.dynamics.max_acceleration),
+          value: null,
+          velocity: 0,
+          lastElapsedMs: null,
+        },
       });
     }
 
@@ -1800,6 +1800,7 @@ export class LAppModel extends CubismUserModel {
       return "v2_parameter_clock_unavailable";
     }
     const shouldLogFrame = planState.diagnosticFrameCount < 2;
+    let presentationSettled = true;
     if (shouldLogFrame) {
       console.info(`[LAppModel] applyDirectParameterPlanOverlay: mode=${planState.mode}, emotion=${planState.emotionLabel}, totalMs=${planState.timing.totalMs}, blendIn=${planState.timing.blendInMs}, hold=${planState.timing.holdMs}, blendOut=${planState.timing.blendOutMs}, semanticCount=${planState.semanticBindings.length}`);
     }
@@ -1824,20 +1825,14 @@ export class LAppModel extends CubismUserModel {
         minValue,
         maxValue,
       );
-      const presentedTargetValue = this.resolvePlanPresentationTarget(
-        item,
+      const presentationFrame = resolveParameterPresentationFrame(
+        item.presentation,
         rawFrameTargetValue,
         elapsedMs,
         planState.timing,
       );
-      const frameTargetValue = this.resolveDynamicallyLimitedTarget(
-        item,
-        presentedTargetValue,
-        baseValue,
-        elapsedMs,
-        minValue,
-        maxValue,
-      );
+      const frameTargetValue = presentationFrame.value;
+      presentationSettled = presentationSettled && presentationFrame.settled;
       this._model.setParameterValueById(item.parameterId, frameTargetValue);
       const readbackValue = this._model.getParameterValueByIndex(item.parameterIndex);
       if (Math.abs(readbackValue - frameTargetValue) > 0.001) {
@@ -1847,7 +1842,7 @@ export class LAppModel extends CubismUserModel {
         return `v2_parameter_write_mismatch:${item.parameterIdRaw}`;
       }
       if (shouldLogFrame) {
-        console.info(`[LAppModel] v2 setParam axis=${item.axisId} param=${item.parameterIdRaw} input=${item.inputValue} base=${baseValue} rawTarget=${rawFrameTargetValue} presentedTarget=${presentedTargetValue} limitedTarget=${frameTargetValue} weight=${item.weight} readback=${readbackValue}`);
+        console.info(`[LAppModel] v2 setParam axis=${item.axisId} param=${item.parameterIdRaw} input=${item.inputValue} base=${baseValue} rawTarget=${rawFrameTargetValue} presentedTarget=${presentationFrame.targetValue} output=${frameTargetValue} weight=${item.weight} readback=${readbackValue}`);
       }
     }
 
@@ -1855,78 +1850,11 @@ export class LAppModel extends CubismUserModel {
       planState.diagnosticFrameCount += 1;
     }
 
-    if (elapsedMs >= planState.timing.totalMs) {
-      console.info(`[LAppModel] applyDirectParameterPlanOverlay: plan complete at ${elapsedMs}ms >= ${planState.timing.totalMs}ms, stopping.`);
+    if (elapsedMs >= planState.timing.totalMs && presentationSettled) {
+      console.info(`[LAppModel] applyDirectParameterPlanOverlay: plan settled at ${elapsedMs}ms, stopping.`);
       this.stopDirectParameterPlan("", "completed");
     }
     return null;
-  }
-
-  private clampNumber(value: number, minValue: number, maxValue: number): number {
-    return Math.min(maxValue, Math.max(minValue, Number(value)));
-  }
-
-  private resolvePlanPresentationTarget(
-    item: DirectSemanticParameterBinding,
-    frameTargetValue: number,
-    elapsedMs: number,
-    timing: DirectParameterPlanState["timing"],
-  ): number {
-    const elapsed = Math.max(0, elapsedMs);
-    const blendInMs = Math.max(0, timing.blendInMs);
-    const holdMs = Math.max(0, timing.holdMs);
-    const blendOutMs = Math.max(0, timing.blendOutMs);
-
-    if (blendInMs > 0 && elapsed < blendInMs) {
-      const progress = elapsed / blendInMs;
-      if (timing.curvePreset === "slow_build_quick_release") {
-        return this.interpolateValue(item.initialValue, frameTargetValue, progress * progress);
-      }
-      if (timing.curvePreset === "pulse_settle") {
-        return this.interpolateValue(
-          item.initialValue,
-          frameTargetValue,
-          Math.min(1.08, this.easeOutBack(progress)),
-        );
-      }
-      return this.interpolateValue(
-        item.initialValue,
-        frameTargetValue,
-        this.smoothstep(progress),
-      );
-    }
-    if (elapsed < blendInMs + holdMs) {
-      if (timing.curvePreset === "breathing_swell") {
-        const progress = holdMs > 0 ? (elapsed - blendInMs) / holdMs : 1;
-        return this.interpolateValue(
-          item.neutralTargetValue,
-          frameTargetValue,
-          1 - 0.06 * Math.sin(Math.PI * progress),
-        );
-      }
-      if (timing.curvePreset === "pulse_settle") {
-        const progress = holdMs > 0 ? (elapsed - blendInMs) / holdMs : 1;
-        return this.interpolateValue(
-          item.neutralTargetValue,
-          frameTargetValue,
-          1 - 0.06 * Math.sin(Math.PI * progress),
-        );
-      }
-      return frameTargetValue;
-    }
-    if (blendOutMs > 0 && elapsed < blendInMs + holdMs + blendOutMs) {
-      const outProgress = (elapsed - blendInMs - holdMs) / blendOutMs;
-      return this.interpolateValue(
-        item.neutralTargetValue,
-        frameTargetValue,
-        this.smoothstep(Math.max(0, 1 - outProgress)),
-      );
-    }
-    return item.neutralTargetValue;
-  }
-
-  private interpolateValue(start: number, end: number, progress: number): number {
-    return start + (end - start) * progress;
   }
 
   private smoothstep(value: number): number {
@@ -2046,11 +1974,6 @@ export class LAppModel extends CubismUserModel {
     return previous.targetValue;
   }
 
-  private easeOutBack(value: number): number {
-    const x = Math.max(0, Math.min(1, value)) - 1;
-    return 1 + 2.70158 * x * x * x + 1.70158 * x * x;
-  }
-
   private resolveExternalLipSyncValue(): number | null {
     if (this._externalLipSyncValue === null) {
       return null;
@@ -2071,52 +1994,6 @@ export class LAppModel extends CubismUserModel {
       return null;
     }
     return this._externalSpeechEnergyValue;
-  }
-
-  private resolveDynamicallyLimitedTarget(
-    item: DirectSemanticParameterBinding,
-    rawTargetValue: number,
-    currentValue: number,
-    elapsedMs: number,
-    minValue: number,
-    maxValue: number,
-  ): number {
-    if (item.maxVelocity <= 0 || item.maxAcceleration <= 0) {
-      return rawTargetValue;
-    }
-
-    const previousValue = Number.isFinite(item.dynamicallyLimitedValue)
-      ? Number(item.dynamicallyLimitedValue)
-      : currentValue;
-    const previousElapsedMs = Number.isFinite(item.lastDynamicElapsedMs)
-      ? Number(item.lastDynamicElapsedMs)
-      : null;
-    item.lastDynamicElapsedMs = elapsedMs;
-
-    if (previousElapsedMs === null || elapsedMs <= previousElapsedMs) {
-      const initialized = this.clampNumber(previousValue, minValue, maxValue);
-      item.dynamicallyLimitedValue = initialized;
-      item.dynamicVelocity = 0;
-      return initialized;
-    }
-
-    const deltaSeconds = Math.max(0, (elapsedMs - previousElapsedMs) / 1000);
-    if (deltaSeconds <= 0) {
-      return previousValue;
-    }
-    const next = advanceParameterDynamics(
-      previousValue,
-      rawTargetValue,
-      item.dynamicVelocity,
-      deltaSeconds,
-      item.maxVelocity,
-      item.maxAcceleration,
-      minValue,
-      maxValue,
-    );
-    item.dynamicallyLimitedValue = next.value;
-    item.dynamicVelocity = next.velocity;
-    return next.value;
   }
 
   private resolveSpeechFollowingChannelName(axisId: string): string {

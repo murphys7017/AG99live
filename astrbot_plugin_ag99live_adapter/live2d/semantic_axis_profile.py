@@ -811,7 +811,7 @@ def validate_semantic_axis_profile(
     profile_payload: Any,
     *,
     model_name: str,
-    known_parameter_ids: set[str] | None = None,
+    bindable_parameter_ids: set[str] | None = None,
     enforce_runtime_contracts: bool = False,
 ) -> SemanticAxisProfile:
     if not isinstance(profile_payload, Mapping):
@@ -891,9 +891,9 @@ def validate_semantic_axis_profile(
                 raise SemanticAxisProfileError(
                     f"Semantic axis `{axis_id}` contains duplicate parameter_id `{parameter_id}`."
                 )
-            if known_parameter_ids is not None and parameter_id not in known_parameter_ids:
+            if bindable_parameter_ids is not None and parameter_id not in bindable_parameter_ids:
                 raise SemanticAxisProfileError(
-                    f"Semantic axis `{axis_id}` references unknown parameter_id `{parameter_id}`."
+                    f"Semantic axis `{axis_id}` references non-bindable parameter_id `{parameter_id}`."
                 )
             if enforce_runtime_contracts:
                 existing_owner = global_binding_owners.get(parameter_id)
@@ -1123,7 +1123,7 @@ def load_semantic_axis_profile(
     *,
     model_dir: Path,
     model_name: str,
-    known_parameter_ids: set[str] | None = None,
+    bindable_parameter_ids: set[str],
 ) -> SemanticAxisProfile:
     path = build_semantic_axis_profile_path(model_dir)
     if not path.exists():
@@ -1137,7 +1137,7 @@ def load_semantic_axis_profile(
     return validate_semantic_axis_profile(
         payload,
         model_name=model_name,
-        known_parameter_ids=known_parameter_ids,
+        bindable_parameter_ids=bindable_parameter_ids,
     )
 
 def ensure_semantic_axis_profile(
@@ -1149,13 +1149,14 @@ def ensure_semantic_axis_profile(
     if not model_name:
         raise SemanticAxisProfileError("Model payload is missing `name`, cannot resolve SemanticAxisProfile.")
 
-    known_parameter_ids = collect_known_parameter_ids(model_payload)
+    bindable_parameter_ids = collect_bindable_parameter_ids(model_payload)
     path = build_semantic_axis_profile_path(model_dir)
     current_source_hash = build_model_source_hash(model_dir)
     if path.exists():
         current_profile = load_semantic_axis_profile(
             model_dir=model_dir,
             model_name=model_name,
+            bindable_parameter_ids=bindable_parameter_ids,
         )
         if str(current_profile["source_hash"]).strip() == current_source_hash:
             expected_profile = build_default_semantic_axis_profile(
@@ -1170,7 +1171,7 @@ def ensure_semantic_axis_profile(
                 return validate_semantic_axis_profile(
                     current_profile,
                     model_name=model_name,
-                    known_parameter_ids=known_parameter_ids,
+                    bindable_parameter_ids=bindable_parameter_ids,
                 )
 
     return _generate_semantic_axis_profile(
@@ -1249,7 +1250,7 @@ def save_semantic_axis_profile(
     model_name: str,
     profile_payload: Any,
     expected_revision: Any,
-    known_parameter_ids: set[str] | None = None,
+    bindable_parameter_ids: set[str],
 ) -> SemanticAxisProfile:
     path = build_semantic_axis_profile_path(model_dir)
     current_source_hash = build_model_source_hash(model_dir)
@@ -1261,6 +1262,7 @@ def save_semantic_axis_profile(
         current_profile = load_semantic_axis_profile(
             model_dir=model_dir,
             model_name=model_name,
+            bindable_parameter_ids=bindable_parameter_ids,
         )
         if str(current_profile["source_hash"]).strip() != current_source_hash:
             raise SemanticAxisProfileRevisionError(
@@ -1270,7 +1272,7 @@ def save_semantic_axis_profile(
         current_profile = validate_semantic_axis_profile(
             current_profile,
             model_name=model_name,
-            known_parameter_ids=known_parameter_ids,
+            bindable_parameter_ids=bindable_parameter_ids,
         )
         current_revision = int(current_profile["revision"])
         if normalized_expected_revision != current_revision:
@@ -1282,14 +1284,14 @@ def save_semantic_axis_profile(
         current_profile = validate_semantic_axis_profile(
             profile_payload,
             model_name=model_name,
-            known_parameter_ids=known_parameter_ids,
+            bindable_parameter_ids=bindable_parameter_ids,
         )
         current_revision = normalized_expected_revision
 
     normalized_profile = validate_semantic_axis_profile(
         profile_payload,
         model_name=model_name,
-        known_parameter_ids=known_parameter_ids,
+        bindable_parameter_ids=bindable_parameter_ids,
         enforce_runtime_contracts=True,
     )
     incoming_source_hash = str(normalized_profile["source_hash"]).strip()
@@ -1317,11 +1319,13 @@ def save_semantic_axis_profile(
     return saved_profile
 
 
-def collect_known_parameter_ids(model_payload: Mapping[str, Any]) -> set[str]:
+def collect_bindable_parameter_ids(model_payload: Mapping[str, Any]) -> set[str]:
     parameter_scan = _as_mapping(model_payload.get("parameter_scan"))
     result: set[str] = set()
     for item in _as_list(parameter_scan.get("parameters")):
         if not isinstance(item, Mapping):
+            continue
+        if str(item.get("kind") or "").strip() in {"marker", "physics"}:
             continue
         parameter_id = str(item.get("id") or "").strip()
         if parameter_id:

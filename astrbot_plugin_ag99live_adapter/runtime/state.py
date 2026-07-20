@@ -35,7 +35,7 @@ from ..live2d.scanner.scan import scan_live2d_models
 from ..live2d.semantic_axis_profile import (
     SemanticAxisProfile,
     SemanticAxisProfileError,
-    collect_known_parameter_ids,
+    collect_bindable_parameter_ids,
     ensure_semantic_axis_profile,
     save_semantic_axis_profile,
 )
@@ -522,7 +522,7 @@ class RuntimeState:
             model_name=model_name,
             profile_payload=profile_payload,
             expected_revision=expected_revision,
-            known_parameter_ids=collect_known_parameter_ids(model),
+            bindable_parameter_ids=collect_bindable_parameter_ids(model),
         )
         model["semantic_axis_profile"] = deepcopy(saved_profile)
         self._refresh_motion_tuning_reference_examples_from_samples()
