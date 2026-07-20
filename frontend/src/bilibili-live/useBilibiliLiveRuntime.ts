@@ -211,7 +211,7 @@ export function useBilibiliLiveRuntime(options: BilibiliLiveRuntimeOptions) {
 
 function formatDanmakuBatch(messages: readonly BilibiliDanmakuMessage[]): string {
   const lines = messages.map((message) =>
-    `- ${sanitizeInlineText(message.uname || "观众")}：${sanitizeInlineText(message.text)}`,
+    `- ${formatViewerIdentity(message)}：${sanitizeInlineText(message.text)}`,
   );
   return [
     "[直播弹幕输入]",
@@ -220,6 +220,11 @@ function formatDanmakuBatch(messages: readonly BilibiliDanmakuMessage[]): string
     "",
     "请以桌宠/主播搭档身份自然回应直播间观众。优先回应其中有意思或适合互动的内容，保持简短，不要逐条机械复读。",
   ].join("\n");
+}
+
+function formatViewerIdentity(message: BilibiliDanmakuMessage): string {
+  const displayName = sanitizeInlineText(message.uname || "观众");
+  return message.uid > 0 ? `${displayName}（UID ${message.uid}）` : displayName;
 }
 
 function sanitizeInlineText(value: string): string {
