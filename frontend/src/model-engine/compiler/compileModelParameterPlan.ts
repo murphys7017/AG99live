@@ -60,7 +60,12 @@ function compileModelParameterPose(
   const modelParameterStages = stageRegistry.resolve(context, "model_parameter");
   const pipelineResult = runCompilePipeline(context, modelParameterStages);
   if (!pipelineResult.ok) {
-    return failCompile(pipelineResult.reason, semanticMotion, context);
+    return failCompile(
+      pipelineResult.reason,
+      semanticMotion,
+      context,
+      pipelineResult.stageId,
+    );
   }
 
   return buildSuccessCompileResult(context);
@@ -499,8 +504,9 @@ function failCompile(
   reason: string,
   semanticMotion: CompiledSemanticMotion,
   context?: ModelParameterCompileContext,
+  failureStage?: string,
 ): CompileResult {
-  const diagnostics = buildModelParameterDiagnostics(semanticMotion, context);
+  const diagnostics = buildModelParameterDiagnostics(semanticMotion, context, failureStage);
   return {
     ok: false,
     plan: null,
@@ -572,6 +578,7 @@ function buildSuccessCompileResult(
 function buildModelParameterDiagnostics(
   semanticMotion: CompiledSemanticMotion,
   context?: ModelParameterCompileContext,
+  failureStage?: string,
 ): CompileResult["diagnostics"] {
   const parameters = context?.state.parameters ?? [];
   const resource = context?.state.resource;
@@ -579,6 +586,7 @@ function buildModelParameterDiagnostics(
     ...semanticMotion.diagnostics,
     compiledParameterCount: parameters.length,
     compiledParameters: parameters.map((item) => item.parameter_id),
+    failureStage,
     warnings: context
       ? [...context.state.warnings]
       : [...(semanticMotion.diagnostics.warnings ?? [])],

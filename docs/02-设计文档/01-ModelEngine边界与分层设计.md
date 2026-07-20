@@ -87,8 +87,9 @@ IntentValidator                 10 core
 -> CouplingStage               40 core
 -> ModeResolverStage           45 core
 -> TimingStage                 46 core
--> SpeechPoseStage             47 extension
 -> SemanticAxisRelationGraph   50 core
+-> CompiledSemanticMotion
+-> SpeechPoseStage             60 extension
 -> PlanBuilder                 80 core
 -> ResourcePolicyStage         90 core
 ```

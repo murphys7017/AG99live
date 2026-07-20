@@ -83,6 +83,7 @@ export interface CompileDiagnostics {
   neutralishAxisCount?: number;
   expressiveAxisCount?: number;
   semanticAxisCount?: number;
+  failureStage?: string;
   couplingSkippedExplicitTargets?: string[];
   relationAdjustments?: MotionAxisRelationAdjustment[];
   relationEvaluations?: MotionAxisRelationEvaluation[];

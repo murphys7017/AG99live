@@ -179,6 +179,7 @@ export interface DesktopMotionCompileDiagnostics {
   neutralishAxisCount?: number;
   expressiveAxisCount?: number;
   semanticAxisCount?: number;
+  failureStage?: string;
   couplingSkippedExplicitTargets?: string[];
   transformTrace?: {
     transformVersion: string;

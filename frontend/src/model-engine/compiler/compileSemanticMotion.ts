@@ -151,7 +151,7 @@ function compileSemanticPoseContext(
   const stages = stageRegistry.resolve(context, "semantic");
   const pipelineResult = runCompilePipeline(context, stages);
   if (!pipelineResult.ok) {
-    return failSemanticCompile(pipelineResult.reason, context);
+    return failSemanticCompile(pipelineResult.reason, context, pipelineResult.stageId);
   }
   const profile = context.state.profile;
   if (!profile || !context.state.timing) {
@@ -229,12 +229,13 @@ function buildMotionBase(
 function failSemanticCompile(
   reason: string,
   context: MotionCompileContext,
+  failureStage?: string,
 ): Extract<CompileSemanticMotionResult, { ok: false }> {
   return {
     ok: false,
     motion: null,
     reason,
-    diagnostics: finalizeCompileDiagnostics(context),
+    diagnostics: finalizeCompileDiagnostics(context, { failureStage }),
     feedback: {
       code: reason,
       message: reason,
