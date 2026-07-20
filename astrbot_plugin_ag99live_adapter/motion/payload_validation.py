@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import re
 from typing import Any
 
-from ..motion.motion_intent import (
+from .motion_intent import (
     MOTION_INTENT_V4_SCHEMA_VERSION,
     normalize_motion_intent_v4_payload,
     normalize_motion_resource_id,
     resolve_selected_semantic_axis_profile,
 )
-from ..motion.resource_catalog import (
+from .resource_catalog import (
     build_motion_resource_candidates,
     validate_motion_resource_id,
 )
@@ -85,6 +86,51 @@ def normalize_motion_arguments_payload(
     except ValueError as exc:
         return None, append_resolution_reason(base_reason, str(exc))
 
+    return validate_normalized_motion_intent_payload(
+        payload,
+        runtime_state,
+        base_reason=base_reason,
+        append_resolution_reason=append_resolution_reason,
+        sanitize_reason_fragment=sanitize_reason_fragment,
+        semantic_profile=semantic_profile,
+    )
+
+
+def validate_normalized_motion_intent_payload(
+    payload: dict[str, Any],
+    runtime_state: Any,
+    *,
+    base_reason: str,
+    append_resolution_reason=None,
+    sanitize_reason_fragment=None,
+    semantic_profile: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any] | None, str]:
+    append_resolution_reason = append_resolution_reason or _append_resolution_reason
+    sanitize_reason_fragment = sanitize_reason_fragment or _sanitize_reason_fragment
+    if semantic_profile is None:
+        try:
+            semantic_profile = resolve_selected_semantic_axis_profile(
+                runtime_state=runtime_state
+            )
+        except Exception as exc:  # noqa: BLE001
+            return None, f"semantic_profile_unresolved:{exc}"
+
+    expected_identity = (
+        str(semantic_profile.get("profile_id") or "").strip(),
+        semantic_profile.get("revision"),
+        str(semantic_profile.get("model_id") or "").strip(),
+    )
+    payload_identity = (
+        str(payload.get("profile_id") or "").strip(),
+        payload.get("profile_revision"),
+        str(payload.get("model_id") or "").strip(),
+    )
+    if payload_identity != expected_identity:
+        return None, append_resolution_reason(
+            base_reason,
+            "semantic_profile_identity_mismatch",
+        )
+
     intent_tags = payload["intent_tags"]
     if len(intent_tags) > 6 or any(len(tag) > 48 for tag in intent_tags):
         return None, append_resolution_reason(base_reason, "intent_tags_invalid")
@@ -148,6 +194,21 @@ def normalize_motion_arguments_payload(
     payload["expression_resource_id"] = expression_resource_id
     payload["motion_resource_id"] = motion_resource_id
     return payload, reason
+
+
+def _append_resolution_reason(base: str | None, suffix: str) -> str:
+    normalized_base = str(base or "").strip()
+    normalized_suffix = str(suffix or "").strip()
+    if not normalized_base or normalized_base == "ok":
+        return normalized_suffix or "ok"
+    if not normalized_suffix or normalized_suffix == "ok":
+        return normalized_base
+    return f"{normalized_base}:{normalized_suffix}"
+
+
+def _sanitize_reason_fragment(value: Any) -> str:
+    fragment = re.sub(r"[^0-9A-Za-z_.:-]+", "_", str(value or "").strip())
+    return fragment[:80] or "unknown"
 
 
 def find_unavailable_axis_levels(

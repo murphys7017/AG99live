@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover - older AstrBot cores do not expose it.
     PersonaEffectSpec = None  # type: ignore[assignment]
 from astrbot.core.prompt import PromptExtension
 
-from .motion_payload import (
+from ..motion.payload_validation import (
     build_prompt_axis_lookup as _payload_build_prompt_axis_lookup,
     describe_axis_descriptors as _payload_describe_axis_descriptors,
     describe_axis_descriptor as _payload_describe_axis_descriptor,
@@ -576,10 +576,7 @@ def _build_motion_static_capability_payload(runtime_state: Any) -> dict[str, Any
         if reference_examples:
             capability_payload["reference_examples"] = reference_examples
 
-    profile_payload, profile_error = _summarize_semantic_profile(
-        runtime_state,
-        use_axis_levels=capability_payload["persona_effect_available"],
-    )
+    profile_payload, profile_error = _summarize_semantic_profile(runtime_state)
     if profile_payload is None:
         raise RuntimeError(
             f"semantic_motion_prompt_profile_unavailable:{profile_error or 'unknown_error'}"
@@ -620,7 +617,6 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         for item in resource_candidates or []
     )
     persona_effect_available = bool(capability_payload.get("persona_effect_available", True))
-    axis_field_name = "axis_levels" if persona_effect_available else "axes"
     resource_field_text = (
         "expression_resource_id 表示可与不冲突姿态叠加的表情资源；"
         "motion_resource_id 表示替代普通参数姿态播放的完整动作资源；"
@@ -629,13 +625,13 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         if has_expression_resources or has_motion_resources
         else ""
     )
+    sequence_guidance = (
+        "用户明确要求连续、往返或分阶段动作时，优先选择一个能完整表达该序列的 motion_resource_id；"
+        "没有合适资源时使用 motion_steps，按播放顺序输出 2 到 4 步。"
+        if has_motion_resources
+        else "用户明确要求连续、往返或分阶段动作时使用 motion_steps，按播放顺序输出 2 到 4 步。"
+    )
     if persona_effect_available:
-        sequence_guidance = (
-            "用户明确要求连续、往返或分阶段动作时，优先选择一个能完整表达该序列的 motion_resource_id；"
-            "没有合适资源时使用 motion_steps，按播放顺序输出 2 到 4 步。"
-            if has_motion_resources
-            else "用户明确要求连续、往返或分阶段动作时使用 motion_steps，按播放顺序输出 2 到 4 步。"
-        )
         output_contract_text = (
             "你正在控制一个 Live2D 模型，并为本轮回复生成可见动作。"
             "每个回复片段必须且只能调用一次动作效果；"
@@ -658,7 +654,8 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         output_contract_text = (
             "当前 AstrBot 运行环境不支持动作注入函数；请把动作参数放入官方兼容标签 "
             "<@anim {...}>，并追加在回复末尾。标签外层只作为传输包装，内部 intent "
-            "字段必须是 engine.motion_intent.v3，且遵循当前动作参数契约。"
+            "字段必须是 engine.motion_intent.v4，且遵循当前动作参数契约。"
+            f"{sequence_guidance}"
         )
         output_shape_text = f" 输出标签示例：<@anim {inline_json}>"
 
@@ -666,14 +663,10 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         "等级语义是：-4=夸张负、-3=清晰可见负、-2=克制负、-1=细节负、"
         "0=明确中性、+1=细节正、+2=克制正、+3=清晰可见正、+4=夸张正；省略表示本轮不控制此轴；"
         "没有明确方向或表演贡献的轴直接省略。"
-        if persona_effect_available
-        else "每个值都直接写成 JSON number；没有明确方向或表演贡献的轴直接省略。"
     )
     axis_shape_text = (
         "单姿态使用 axis_levels；动作序列使用 motion_steps。两者必须且只能选择一个。"
         "motion_steps 的所有步骤必须使用完全相同的轴集合。axis_levels 只能使用下方列出的轴 id。"
-        if persona_effect_available
-        else f"{axis_field_name} 是必填对象，只能使用下方列出的轴 id。"
     )
     return (
         f"{output_contract_text}"
@@ -692,14 +685,9 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
 def _build_motion_capability_prompt_payload(
     capability_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    persona_effect_available = bool(
-        capability_payload.get("persona_effect_available", True)
-    )
     result: dict[str, Any] = {
-        "axis_value_format": "axis_levels" if persona_effect_available else "axes",
-    }
-    if persona_effect_available:
-        result["axis_level_scale"] = {
+        "axis_value_format": "axis_levels",
+        "axis_level_scale": {
             "-4": "短时夸张负方向",
             "-3": "普通 Live2D 清晰可见负方向",
             "-2": "克制负方向",
@@ -710,7 +698,8 @@ def _build_motion_capability_prompt_payload(
             "3": "普通 Live2D 清晰可见正方向",
             "4": "短时夸张正方向",
             "omitted": "本轮不控制该轴",
-        }
+        },
+    }
 
     semantic_profile = capability_payload.get("semantic_profile")
     if isinstance(semantic_profile, dict):
@@ -725,10 +714,7 @@ def _build_motion_capability_prompt_payload(
                 "positive_semantics",
                 "usage_notes",
             ]
-            if persona_effect_available:
-                axis_fields.append("available_levels")
-            else:
-                axis_fields.insert(3, "value_range")
+            axis_fields.append("available_levels")
             result["axes"] = [
                 {
                     key: axis.get(key)
@@ -747,7 +733,7 @@ def _build_motion_capability_prompt_payload(
         result["motion_generation_guidance"] = motion_instruction
 
     reference_examples = capability_payload.get("reference_examples")
-    if persona_effect_available and isinstance(reference_examples, list):
+    if isinstance(reference_examples, list):
         allowed_axis_ids = {
             str(item.get("id") or "").strip()
             for item in result.get("axes") or []
@@ -982,14 +968,14 @@ def _build_official_inline_motion_intent_example(
 ) -> dict[str, Any]:
     semantic_profile = capability_payload.get("semantic_profile")
     intent: dict[str, Any] = {
-        "schema_version": "engine.motion_intent.v3",
+        "schema_version": "engine.motion_intent.v4",
         "profile_id": "",
         "profile_revision": 1,
         "model_id": "",
         "mode": "expressive",
         "intent_tags": ["语气关键词", "姿态关键词", "场景关键词"],
         "duration_hint_ms": 1000,
-        "axes": {},
+        "axis_levels": {},
     }
     if isinstance(semantic_profile, dict):
         intent["profile_id"] = str(semantic_profile.get("profile_id") or "")
@@ -1000,14 +986,31 @@ def _build_official_inline_motion_intent_example(
     if isinstance(semantic_profile, dict):
         prompt_axes = semantic_profile.get("prompt_axes")
         if isinstance(prompt_axes, list):
-            intent["axes"] = {
-                str(axis.get("id") or "").strip(): _resolve_axis_example_value(axis, index=index)
+            intent["axis_levels"] = {
+                str(axis.get("id") or "").strip(): _resolve_axis_example_level(
+                    axis,
+                    index=index,
+                )
                 for index, axis in enumerate(
                     _select_motion_format_example_axes(prompt_axes, limit=5)
                 )
                 if isinstance(axis, dict) and str(axis.get("id") or "").strip()
             }
     return intent
+
+
+def _resolve_axis_example_level(axis: dict[str, Any], *, index: int) -> int:
+    raw_levels = axis.get("available_levels")
+    available_levels = {
+        level
+        for level in raw_levels
+        if isinstance(level, int) and not isinstance(level, bool) and -4 <= level <= 4
+    } if isinstance(raw_levels, list) else set(range(-4, 5))
+    preferred = (3, -3, 2, -2, 1, -1, 0) if index % 2 == 0 else (-3, 3, -2, 2, -1, 1, 0)
+    for level in preferred:
+        if level in available_levels:
+            return level
+    raise ValueError("official_inline_example_axis_has_no_available_level")
 
 
 def _build_prompt_pose_reference_candidates(
@@ -1378,8 +1381,6 @@ def _resolve_previous_motion_prompt_snapshot(turn_coordinator: Any) -> dict[str,
 
 def _summarize_semantic_profile(
     runtime_state: Any,
-    *,
-    use_axis_levels: bool,
 ) -> tuple[dict[str, Any] | None, str | None]:
     try:
         semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
@@ -1412,7 +1413,6 @@ def _summarize_semantic_profile(
             ],
             "axis_prompt": _build_middleware_axis_prompt(
                 prompt_axes,
-                use_axis_levels=use_axis_levels,
             ),
         },
         None,
@@ -1421,14 +1421,12 @@ def _summarize_semantic_profile(
 
 def _build_middleware_axis_prompt(
     prompt_axes: list[dict[str, Any]],
-    *,
-    use_axis_levels: bool,
 ) -> str:
     return "\n".join(
         format_profile_axis_prompt_line(
             axis,
             truncate_text=_truncate_text,
-            use_axis_levels=use_axis_levels,
+            use_axis_levels=True,
         )
         for axis in prompt_axes
     )

@@ -17,7 +17,7 @@ TYPESCRIPT_PATH = ROOT / "frontend" / "src" / "types" / "protocolSchema.generate
 EXPORT_NAMES = {
     "protocol_version": "PROTOCOL_VERSION",
     "catalog_motion": "SCHEMA_CATALOG_MOTION_V1",
-    "motion_intent_compat": "SCHEMA_MOTION_INTENT_V3",
+    "motion_intent_preview": "SCHEMA_MOTION_INTENT_V3",
     "motion_intent": "SCHEMA_MOTION_INTENT_V4",
     "output_segment": "SCHEMA_OUTPUT_SEGMENT_V3",
     "parameter_plan": "SCHEMA_PARAMETER_PLAN_V2",

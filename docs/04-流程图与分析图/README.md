@@ -56,7 +56,7 @@
 - `turn_id + message_id` 是正式播放段的统一身份。
 - `output.segment.v3` 是前后端正式回复的唯一原子消息。
 - `engine.motion_intent.v4` 是 Persona Effect 主动作协议。
-- `engine.motion_intent.v3` 只用于官方 `<@anim>` 兼容入口和手动预览。
+- `engine.motion_intent.v3` 只用于手动预览；官方 `<@anim>` 内部使用 v4。
 - SessionStore 是持久播放事实源，PlaybackTimeline 是执行生命周期所有者。
 - ModelEngine 编译动作，Live2D WebSDK 逐帧执行参数计划。
 
@@ -67,5 +67,5 @@
 3. 修改动作生成或编译时同步检查图 03、11、15、16。
 4. 修改模型加载或 WebSDK 时同步检查图 02、04、12、17。
 5. 图中不得加入已删除链路或“为了说明历史”的兼容分支。
-6. 只有官方 AstrBot `<@anim>` 入口可以保留 v3 兼容说明。
+6. 官方 AstrBot `<@anim>` 只保留运输兼容说明，内部动作契约必须是 v4。
 7. 新增模块前先确认它是否创造了第二个事实源、第二个时钟或第二个状态机。

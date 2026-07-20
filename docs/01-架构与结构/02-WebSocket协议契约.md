@@ -247,11 +247,11 @@ Motion Lab 事件采用 at-least-once 交付：前端必须先把事件写入 In
 - expression 资源可与不冲突的参数计划叠加。
 - motion 资源是完整动作主层，播放时替代普通参数计划。
 - 字段存在但资源不存在、类型不匹配、缺少参数所有权或运行时定位信息时，整个 motion segment 失败。
-- v4 不接受旧的单一 `resource_id`；该字段只保留在官方 `<@anim>` v3 兼容协议中。
+- v4 不接受旧的单一 `resource_id`；官方 `<@anim>` 兼容运输同样使用 typed resource 字段。
 
 ### `engine.motion_intent.v3`
 
-v3 使用 flat number `axes`，只保留给官方 `<@anim>` 兼容入口和内部手动预览。它与 v4 进入同一个 ModelEngine，但不是 v4 校验失败后的 fallback。
+v3 使用 flat number `axes`，只保留给内部手动预览。官方 `<@anim>` 仅兼容运输形式，内部 intent 使用 v4。
 
 `engine.motion_intent.v1/v2` 不再作为当前协议入口维护。
 

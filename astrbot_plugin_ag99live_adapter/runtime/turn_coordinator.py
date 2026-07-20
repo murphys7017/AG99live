@@ -79,6 +79,7 @@ from ..motion.performance_curve import (
 from ..motion.inline_motion import (
     extract_official_inline_anim_motion_intent,
 )
+from ..motion.payload_validation import validate_normalized_motion_intent_payload
 from ..motion.payload_dispatch import (
     extract_message_motion_payload as _extract_message_motion_payload,
     resolve_engine_motion_message_type as _resolve_engine_motion_message_type,
@@ -397,6 +398,15 @@ class TurnCoordinator:
             if reason != "inline_anim_missing":
                 raise ValueError(f"official_inline_anim_compat_rejected:{reason}")
             return None
+        payload, validation_reason = validate_normalized_motion_intent_payload(
+            payload,
+            self.runtime_state,
+            base_reason=reason,
+        )
+        if payload is None:
+            raise ValueError(
+                f"official_inline_anim_compat_rejected:{validation_reason}"
+            )
         return {
             "payload": payload,
             "mode": "preview",

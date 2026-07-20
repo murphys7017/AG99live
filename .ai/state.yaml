@@ -10,7 +10,7 @@ context:
   assumptions:
     - AG99live is an active-development desktop Live2D system; obsolete documents, code, and tests are deleted instead of archived in the repository.
     - The main model emits assistant text and one ag99live.motion Persona Effect in the same logical response.
-    - The official AstrBot <@anim> v3 entry exists only when Persona Effect injection is unavailable; it is not a recovery path for invalid v4 motion.
+    - The official AstrBot <@anim> transport exists only when Persona Effect injection is unavailable; its inner intent uses v4 and it is not a recovery path for invalid motion.
     - Remote computer control remains because AstrBot may run on a server while the Electron client runs on the user's computer.
     - Performance curve generation is optional and never delays TTS or segment release.
 
@@ -32,7 +32,7 @@ architecture:
     schema_manifest: astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json is the single source for protocol and schema versions; frontend constants are checked against it.
     output: output.segment.v3
     persona_motion: engine.motion_intent.v4
-    official_inline_motion: engine.motion_intent.v3
+    official_inline_motion: engine.motion_intent.v4 inside the <@anim> transport wrapper
     parameter_plan: engine.parameter_plan.v2
     performance_curve: ag99.performance_curve_hint.v1
     voice_following: ag99.voice_following_profile.v2

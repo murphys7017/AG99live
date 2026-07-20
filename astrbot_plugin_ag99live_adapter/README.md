@@ -55,8 +55,8 @@ astrbot_plugin_ag99live_adapter/
 
 - RuntimeState 会检测 `astrbot.core.interaction.PersonaEffectSpec` 和 `context.register_persona_effect` 是否可用。
 - 可用时，prompt 要求模型填写 `ag99live.motion` effect arguments，并且 TurnCoordinator 不解析 `<@anim>`。
-- 不可用时，prompt 才要求把动作包装进 `<@anim {"mode":"inline","intent":...}>`，其中 `intent` 必须是完整 `engine.motion_intent.v3`。
-- 如果 `<@anim>` 内部 JSON、schema 或 v3 payload 无效，后端只记录拒绝原因，不生成替代动作。
+- 不可用时，prompt 才要求把动作包装进 `<@anim {"mode":"inline","intent":...}>`，其中 `intent` 必须是完整 `engine.motion_intent.v4`。
+- 如果 `<@anim>` 内部 JSON、schema 或 v4 payload 无效，后端只记录拒绝原因，不生成替代动作。
 
 ### 动作效果输出
 
@@ -64,7 +64,7 @@ astrbot_plugin_ag99live_adapter/
 - `axis_levels` 只能使用 `-4..4` 整数；省略表示本轮不控制该轴，`0` 表示明确回到中性。混入 `axes`、非法等级或空等级对象会直接拒绝，不会回退到 v3。
 - 普通 Live2D 主要姿态默认从三级开始；四级由每轴独立 `extreme_range` 定义，用于短时夸张表演。内置七类 v4 示例和当前 profile revision 的人工筛选样本会注入 capability。
 - 可选资源使用 `expression_resource_id` 或 `motion_resource_id`，一次最多选择一个。expression 只与无参数冲突的计划叠加；motion 作为完整动作替代参数计划，但仍共享当前 segment 的统一 motion sink。
-- `engine.motion_intent.v3 + axes` 只保留给官方 `<@anim>` 兼容入口和内部手动预览。
+- `engine.motion_intent.v3 + axes` 只保留给内部手动预览。
 - 自动动作链路不允许 LLM 输出 `choice`、`motion_id`、catalog motion、motion3、exp3 或旧播放文件引用。
 - 中间件 prompt 只暴露 profile 中的 `primary/hint` axes，禁止输出 `derived/runtime/ambient/debug` axes。
 

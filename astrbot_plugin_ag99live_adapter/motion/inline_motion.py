@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from .motion_intent import MOTION_INTENT_V3_SCHEMA_VERSION, normalize_motion_intent_payload
+from .motion_intent import MOTION_INTENT_V4_SCHEMA_VERSION, normalize_motion_intent_payload
 
 
 INLINE_ANIM_TAG_CAPTURE_PATTERN = re.compile(
@@ -40,7 +40,7 @@ def extract_official_inline_anim_motion_intent(
         return None, "inline_anim_intent_missing"
 
     schema_version = str(raw_intent.get("schema_version") or "").strip()
-    if schema_version != MOTION_INTENT_V3_SCHEMA_VERSION:
+    if schema_version != MOTION_INTENT_V4_SCHEMA_VERSION:
         return None, f"inline_anim_unsupported_schema:{schema_version or 'missing'}"
 
     try:
@@ -50,7 +50,7 @@ def extract_official_inline_anim_motion_intent(
 
 
 def _resolve_inline_motion_intent_object(wrapper: dict[str, Any]) -> Any:
-    if str(wrapper.get("schema_version") or "").strip() == MOTION_INTENT_V3_SCHEMA_VERSION:
+    if str(wrapper.get("schema_version") or "").strip() == MOTION_INTENT_V4_SCHEMA_VERSION:
         return wrapper
     for key in ("motion_payload", "intent", "plan"):
         value = wrapper.get(key)
