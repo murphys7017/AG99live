@@ -56,6 +56,7 @@ astrbot_plugin_ag99live_adapter/
 - RuntimeState 会检测 `astrbot.core.interaction.PersonaEffectSpec` 和 `context.register_persona_effect` 是否可用。
 - 可用时，prompt 要求模型填写 `ag99live.motion` effect arguments，并且 TurnCoordinator 不解析 `<@anim>`。
 - 不可用时，prompt 才要求把动作包装进 `<@anim {"mode":"inline","intent":...}>`，其中 `intent` 必须是完整 `engine.motion_intent.v4`。
+- 标签外层只接受 `mode="inline"` 与 `intent`；裸 intent、`motion_payload`、`plan` 和其他历史包装字段会被拒绝。
 - 如果 `<@anim>` 内部 JSON、schema 或 v4 payload 无效，后端只记录拒绝原因，不生成替代动作。
 
 ### 动作效果输出

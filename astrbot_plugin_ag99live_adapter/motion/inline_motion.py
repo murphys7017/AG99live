@@ -35,7 +35,13 @@ def extract_official_inline_anim_motion_intent(
     if not isinstance(wrapper, dict):
         return None, "inline_anim_payload_not_object"
 
-    raw_intent = _resolve_inline_motion_intent_object(wrapper)
+    if set(wrapper) != {"mode", "intent"}:
+        return None, "inline_anim_wrapper_fields_invalid"
+
+    if wrapper.get("mode") != "inline":
+        return None, "inline_anim_mode_invalid"
+
+    raw_intent = wrapper.get("intent")
     if not isinstance(raw_intent, dict):
         return None, "inline_anim_intent_missing"
 
@@ -47,13 +53,3 @@ def extract_official_inline_anim_motion_intent(
         return normalize_motion_intent_payload(raw_intent), "official_inline_anim"
     except ValueError as exc:
         return None, f"inline_anim_invalid:{exc}"
-
-
-def _resolve_inline_motion_intent_object(wrapper: dict[str, Any]) -> Any:
-    if str(wrapper.get("schema_version") or "").strip() == MOTION_INTENT_V4_SCHEMA_VERSION:
-        return wrapper
-    for key in ("motion_payload", "intent", "plan"):
-        value = wrapper.get(key)
-        if isinstance(value, dict):
-            return value
-    return None
