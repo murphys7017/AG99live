@@ -28,9 +28,14 @@ export function createTimelineClock(
   let stoppedAtMs: number | null = null;
   let pausedOffsetMs = 0;
   let audioClock: AudioPlaybackClock | null = null;
+  let audioTailStartedAtMs: number | null = null;
+  let audioTailElapsedMs: number | null = null;
   let expectedDurationMs: number | null = null;
 
   function getSyntheticCurrentTimeMs(atMs: number): number {
+    if (audioTailStartedAtMs !== null && audioTailElapsedMs !== null) {
+      return Math.max(0, audioTailElapsedMs + Math.max(0, atMs - audioTailStartedAtMs));
+    }
     if (startedAtMs === null) {
       return 0;
     }
@@ -67,6 +72,8 @@ export function createTimelineClock(
       stoppedAtMs = null;
       pausedOffsetMs = 0;
       audioClock = null;
+      audioTailStartedAtMs = null;
+      audioTailElapsedMs = null;
       expectedDurationMs = null;
     },
     start(startedAtMsOverride) {
@@ -75,6 +82,8 @@ export function createTimelineClock(
       pausedAtMs = null;
       stoppedAtMs = null;
       pausedOffsetMs = 0;
+      audioTailStartedAtMs = null;
+      audioTailElapsedMs = null;
     },
     pause(pausedAtMsOverride) {
       if (startedAtMs === null || pausedAtMs !== null || stoppedAtMs !== null) {
@@ -98,8 +107,17 @@ export function createTimelineClock(
     },
     attachAudioClock(clock) {
       audioClock = clock;
+      audioTailStartedAtMs = null;
+      audioTailElapsedMs = null;
     },
     detachAudioClock() {
+      if (audioClock) {
+        const elapsedMs = audioClock.getCurrentTimeMs();
+        if (elapsedMs !== null && Number.isFinite(elapsedMs)) {
+          audioTailElapsedMs = Math.max(0, elapsedMs);
+          audioTailStartedAtMs = now();
+        }
+      }
       audioClock = null;
     },
     setExpectedDurationMs(durationMs) {
@@ -128,6 +146,8 @@ export function createTimelineClock(
           ? "audio_pending"
           : audioUnavailable
             ? "audio_unavailable"
+            : audioTailStartedAtMs !== null
+              ? "audio_tail_continuation"
             : "synthetic",
         paused: pausedAtMs !== null,
         stopped: stoppedAtMs !== null,

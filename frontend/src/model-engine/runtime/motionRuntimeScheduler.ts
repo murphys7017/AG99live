@@ -147,6 +147,21 @@ export function createMotionRuntimeScheduler(
     return true;
   }
 
+  function failPendingPayloadForSegment(
+    turnId: string | null,
+    messageId: string,
+    reason: string,
+  ): boolean {
+    const key = buildPendingMotionKey(turnId, messageId);
+    const entry = pendingInboundMotionPayloads.get(key);
+    if (!entry) {
+      return false;
+    }
+    dropPendingPayload(entry, reason);
+    syncPendingState();
+    return true;
+  }
+
   function tryStartPendingPayload(
     turnId: string | null,
     messageId: string,
@@ -339,6 +354,7 @@ export function createMotionRuntimeScheduler(
     queueInboundPayload,
     getPendingPayloadForTimeline,
     handlePlaybackTimelineStarted,
+    failPendingPayloadForSegment,
     cancelPendingPayloadForSegment,
     clearAllPendingPayloads,
   };

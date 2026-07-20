@@ -6,6 +6,7 @@ import { parseSemanticParameterPlan } from "../planParser.js";
 
 export type MotionPlaybackClockSource =
   | "audio"
+  | "audio_tail_continuation"
   | "audio_pending"
   | "synthetic"
   | "audio_unavailable";
@@ -45,7 +46,7 @@ export type MotionTimelinePreparationResult =
 export type PerformanceCurveTimelineResolution =
   | {
     ok: true;
-    clockSource: "audio" | "audio_pending" | "synthetic";
+      clockSource: "audio" | "audio_tail_continuation" | "audio_pending" | "synthetic";
     targetDurationMs: number;
     speechActive: boolean;
   }

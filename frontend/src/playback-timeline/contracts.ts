@@ -11,6 +11,7 @@ export type TimelinePhase =
 
 export type TimelineClockSource =
   | "audio"
+  | "audio_tail_continuation"
   | "audio_pending"
   | "synthetic"
   | "audio_unavailable";

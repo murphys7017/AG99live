@@ -164,22 +164,12 @@ export function configurePlaybackTimelineMotionRuntime(options: {
         return;
       }
       if (result.status === "failed") {
-        const motionSink = preparedTimeline.sinks.find((sink) => sink.id === "motion");
-        if (motionSink && (motionSink.terminal === "idle" || motionSink.terminal === "started")) {
-          playbackTimeline.markMotionTimelineTerminal(
-            turnId,
-            messageId,
-            "failed",
-            result.reason,
-          );
-        } else {
-          console.error("[ModelEngine] motion preparation failed.", {
-            turnId,
-            messageId,
-            source: result.source ?? "unknown",
-            reason: result.reason,
-          });
-        }
+        console.error("[ModelEngine] motion preparation failed.", {
+          turnId,
+          messageId,
+          source: result.source ?? "unknown",
+          reason: result.reason,
+        });
         return;
       }
       const registered = playbackTimeline.ensureMotionTimelineSinkForSegment(

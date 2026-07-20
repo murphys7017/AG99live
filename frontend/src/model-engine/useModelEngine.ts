@@ -337,9 +337,27 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         );
     if (!prepared) {
       preparedSemanticMotions.delete(key);
+      const reason = state.lastCompileReason || "motion_preparation_failed";
+      if (source === "queued_motion") {
+        runtimeScheduler.failPendingPayloadForSegment(
+          playbackClock.turnId,
+          normalizedMessageId,
+          reason,
+        );
+      } else {
+        const turnId = normalizeTurnId(playbackClock.turnId);
+        if (!turnId) {
+          throw new Error("Speech-only motion preparation failure requires a turnId.");
+        }
+        dependencies.onMotionRejected({
+          turnId,
+          messageId: normalizedMessageId,
+          reason,
+        });
+      }
       return {
         status: "failed",
-        reason: state.lastCompileReason || "motion_preparation_failed",
+        reason,
         source,
       };
     }
