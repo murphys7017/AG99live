@@ -1,7 +1,7 @@
 import { cloneJson } from "../../utils/cloneJson.js";
 import type { DesktopMotionTuningSample } from "../../types/desktop.js";
 import type { MotionTuningSampleProtocolPayload } from "../../types/protocol.js";
-import { SCHEMA_PARAMETER_PLAN_V2 } from "../../types/protocol.js";
+import { cloneCompiledSemanticMotion } from "../../model-engine/compiler/compiledSemanticMotionParser.js";
 
 export function serializeMotionTuningSample(
   sample: DesktopMotionTuningSample,
@@ -25,7 +25,7 @@ export function serializeMotionTuningSample(
     resolved_axes: { ...(sample.resolvedAxes ?? {}) },
     constrained_axes: { ...(sample.constrainedAxes ?? {}) },
     adjusted_axes: { ...sample.adjustedAxes },
-    adjusted_plan: cloneJson(sample.adjustedPlan),
+    compiled_semantic_motion: cloneJson(sample.compiledSemanticMotion),
   };
 }
 
@@ -53,12 +53,8 @@ export function normalizeMotionTuningSamplePayload(
     return null;
   }
 
-  const adjustedPlan = candidate.adjusted_plan;
-  if (
-    !adjustedPlan
-    || typeof adjustedPlan !== "object"
-    || adjustedPlan.schema_version !== SCHEMA_PARAMETER_PLAN_V2
-  ) {
+  const compiledSemanticMotion = cloneCompiledSemanticMotion(candidate.compiled_semantic_motion);
+  if (!compiledSemanticMotion) {
     return null;
   }
 
@@ -91,7 +87,7 @@ export function normalizeMotionTuningSamplePayload(
     resolvedAxes: normalizeMotionTuningAxisRecord(candidate.resolved_axes),
     constrainedAxes: normalizeMotionTuningAxisRecord(candidate.constrained_axes),
     adjustedAxes: normalizeMotionTuningAxisRecord(candidate.adjusted_axes),
-    adjustedPlan: cloneJson(adjustedPlan),
+    compiledSemanticMotion,
   };
 }
 

@@ -8,39 +8,20 @@ import type {
 } from "../types/protocol.js";
 import {
   SCHEMA_CATALOG_MOTION_V1,
-  SCHEMA_MOTION_INTENT_V3,
   SCHEMA_MOTION_INTENT_V4,
-  SCHEMA_PARAMETER_PLAN_V2,
 } from "../types/protocol.js";
 import {
   MAX_MOTION_DURATION_MS,
   MIN_MOTION_DURATION_MS,
 } from "./constants.js";
 import type { NormalizedMotionPayload } from "./contracts.js";
-import { parseSemanticParameterPlan, type ParseResult } from "./planParser.js";
+import type { ParseResult } from "./planParser.js";
 import {
   isFiniteNumber,
   isObject,
   normalizeStringArray,
   normalizeText,
 } from "../utils/guards.js";
-
-function normalizeDynamicAxesV3(value: unknown): Record<string, number> | null {
-  if (!isObject(value)) {
-    return null;
-  }
-
-  const axes: Record<string, number> = {};
-  for (const [axisId, axisValue] of Object.entries(value)) {
-    const normalizedAxisId = normalizeText(axisId);
-    if (!normalizedAxisId || isObject(axisValue) || !isFiniteNumber(axisValue)) {
-      return null;
-    }
-    axes[normalizedAxisId] = axisValue;
-  }
-
-  return Object.keys(axes).length > 0 ? axes : null;
-}
 
 function normalizeAxisLevelsV4(value: unknown): MotionAxisLevelMap | null {
   if (!isObject(value)) {
@@ -147,7 +128,7 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
   }
 
   const schemaVersion = normalizeText(value.schema_version);
-  if (schemaVersion !== SCHEMA_MOTION_INTENT_V3 && schemaVersion !== SCHEMA_MOTION_INTENT_V4) {
+  if (schemaVersion !== SCHEMA_MOTION_INTENT_V4) {
     return { ok: false, reason: "motion_intent.invalid_schema_version" };
   }
 
@@ -170,34 +151,21 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
   }
   const mode: "idle" | "expressive" = modeRaw;
 
-  const isV4 = schemaVersion === SCHEMA_MOTION_INTENT_V4;
   const hasAxisLevels = Object.prototype.hasOwnProperty.call(value, "axis_levels");
   const hasMotionSteps = Object.prototype.hasOwnProperty.call(value, "motion_steps");
-  const axisLevels = isV4 && hasAxisLevels ? normalizeAxisLevelsV4(value.axis_levels) : null;
-  const motionSteps = isV4 && hasMotionSteps ? normalizeMotionStepsV4(value.motion_steps) : null;
-  if (isV4 && hasAxisLevels && !hasMotionSteps && !axisLevels) {
+  const axisLevels = hasAxisLevels ? normalizeAxisLevelsV4(value.axis_levels) : null;
+  const motionSteps = hasMotionSteps ? normalizeMotionStepsV4(value.motion_steps) : null;
+  if (hasAxisLevels && !hasMotionSteps && !axisLevels) {
     return { ok: false, reason: "motion_intent_v4.invalid_axis_levels" };
   }
-  if (isV4 && hasMotionSteps && !hasAxisLevels && !motionSteps) {
+  if (hasMotionSteps && !hasAxisLevels && !motionSteps) {
     return { ok: false, reason: "motion_intent_v4.invalid_motion_steps" };
   }
-  if (isV4 && Object.prototype.hasOwnProperty.call(value, "axes")) {
+  if (Object.prototype.hasOwnProperty.call(value, "axes")) {
     return { ok: false, reason: "motion_intent_v4.invalid_axis_levels" };
   }
-  if (isV4 && (
-    hasAxisLevels === hasMotionSteps
-  )) {
+  if (hasAxisLevels === hasMotionSteps) {
     return { ok: false, reason: "motion_intent_v4.invalid_motion_shape" };
-  }
-  if (!isV4 && (hasAxisLevels || hasMotionSteps)) {
-    return { ok: false, reason: "motion_intent_v3.axis_levels_forbidden" };
-  }
-  const axes = isV4 ? null : normalizeDynamicAxesV3(value.axes);
-  if (!isV4 && !axes) {
-    return {
-      ok: false,
-      reason: "motion_intent_v3.invalid_flat_axes",
-    };
   }
 
   const emotionLabel = normalizeText(value.emotion_label);
@@ -244,14 +212,13 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
     performance_curve_hint: performanceCurveHint,
     summary: normalizeMotionVisibilitySummary(value.summary),
   };
-  if (isV4) {
-    if (Object.prototype.hasOwnProperty.call(value, "resource_id")) {
+  if (Object.prototype.hasOwnProperty.call(value, "resource_id")) {
       return {
         ok: false,
         reason: "motion_intent_v4.resource_id_forbidden_use_typed_resource_fields",
       };
-    }
-    const expressionResourceId = normalizeText(value.expression_resource_id) || undefined;
+  }
+  const expressionResourceId = normalizeText(value.expression_resource_id) || undefined;
     const motionResourceId = normalizeText(value.motion_resource_id) || undefined;
     if (expressionResourceId && motionResourceId) {
       return { ok: false, reason: "motion_intent_v4.multiple_resource_layers_forbidden" };
@@ -259,7 +226,7 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
     if (motionSteps && motionResourceId) {
       return { ok: false, reason: "motion_intent_v4.motion_steps_motion_resource_conflict" };
     }
-    if (motionSteps) {
+  if (motionSteps) {
       return {
         ok: true,
         value: {
@@ -269,8 +236,8 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
           expression_resource_id: expressionResourceId,
         },
       };
-    }
-    return {
+  }
+  return {
       ok: true,
       value: {
         ...common,
@@ -279,25 +246,6 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
         expression_resource_id: expressionResourceId,
         motion_resource_id: motionResourceId,
       },
-    };
-  }
-  if (!axes) {
-    return { ok: false, reason: "motion_intent_v3.invalid_flat_axes" };
-  }
-  if (
-    Object.prototype.hasOwnProperty.call(value, "expression_resource_id")
-    || Object.prototype.hasOwnProperty.call(value, "motion_resource_id")
-  ) {
-    return { ok: false, reason: "motion_intent_v3.typed_resource_fields_forbidden" };
-  }
-  return {
-    ok: true,
-    value: {
-      ...common,
-      schema_version: SCHEMA_MOTION_INTENT_V3,
-      axes,
-      resource_id: normalizeText(value.resource_id) || undefined,
-    },
   };
 }
 
@@ -426,22 +374,13 @@ export function normalizeMotionPayload(
     return { ok: true, payload: { kind: "catalog_motion", motion: motion.value } };
   }
 
-  if (schemaVersion === SCHEMA_MOTION_INTENT_V3 || schemaVersion === SCHEMA_MOTION_INTENT_V4) {
+  if (schemaVersion === SCHEMA_MOTION_INTENT_V4) {
     const intent = parseSemanticMotionIntent(value);
     if (!intent.ok) {
       warnNormalizeFailure(intent.reason, value);
       return { ok: false, reason: intent.reason };
     }
     return { ok: true, payload: { kind: "semantic_intent", intent: intent.value } };
-  }
-
-  if (schemaVersion === SCHEMA_PARAMETER_PLAN_V2) {
-    const plan = parseSemanticParameterPlan(value);
-    if (!plan.ok) {
-      warnNormalizeFailure(plan.reason, value);
-      return { ok: false, reason: plan.reason };
-    }
-    return { ok: true, payload: { kind: "semantic_plan", plan: plan.value } };
   }
 
   warnNormalizeFailure(

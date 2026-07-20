@@ -7,11 +7,10 @@ from ..prompts.semantic_axis_prompt import profile_prompt_axes
 from .performance_curve import normalize_performance_curve_hint
 
 from ..protocol.schema_versions import (
-    MOTION_INTENT_V3_SCHEMA_VERSION,
     MOTION_INTENT_V4_SCHEMA_VERSION,
 )
 
-MOTION_INTENT_SCHEMA_VERSION = MOTION_INTENT_V3_SCHEMA_VERSION
+MOTION_INTENT_SCHEMA_VERSION = MOTION_INTENT_V4_SCHEMA_VERSION
 DEFAULT_MOTION_INTENT_DURATION_MS = 1000
 
 
@@ -61,92 +60,9 @@ def normalize_motion_intent_payload(intent: Any) -> dict[str, Any]:
         raise ValueError("intent_not_object")
 
     schema_version = str(intent.get("schema_version") or "").strip()
-    if schema_version == MOTION_INTENT_V3_SCHEMA_VERSION:
-        return normalize_motion_intent_v3_payload(intent)
     if schema_version == MOTION_INTENT_V4_SCHEMA_VERSION:
         return normalize_motion_intent_v4_payload(intent)
     raise ValueError("invalid_schema_version")
-
-
-def normalize_motion_intent_v3_payload(intent: Any) -> dict[str, Any]:
-    if not isinstance(intent, dict):
-        raise ValueError("intent_not_object")
-
-    schema_version = str(intent.get("schema_version") or "").strip()
-    if schema_version != MOTION_INTENT_V3_SCHEMA_VERSION:
-        raise ValueError("invalid_schema_version")
-    if "axis_levels" in intent:
-        raise ValueError("axis_levels_forbidden_for_v3")
-    if "motion_steps" in intent:
-        raise ValueError("motion_steps_forbidden_for_v3")
-
-    profile_id = str(intent.get("profile_id") or "").strip()
-    model_id = str(intent.get("model_id") or "").strip()
-    if not profile_id:
-        raise ValueError("profile_id_empty")
-    if not model_id:
-        raise ValueError("model_id_empty")
-    profile_revision_raw = intent.get("profile_revision")
-    if not isinstance(profile_revision_raw, int) or profile_revision_raw <= 0:
-        raise ValueError("profile_revision_invalid")
-
-    mode = str(intent.get("mode") or "expressive").strip().lower()
-    if mode not in {"expressive", "idle"}:
-        raise ValueError("invalid_mode")
-
-    intent_tags = normalize_motion_intent_tags(intent.get("intent_tags"))
-    if not intent_tags:
-        raise ValueError("intent_tags_empty")
-    emotion_label = derive_motion_emotion_label(intent_tags)
-    resource_id = normalize_motion_resource_id(intent.get("resource_id"))
-
-    axes = intent.get("axes")
-    if not isinstance(axes, dict) or not axes:
-        raise ValueError("axes_not_object")
-
-    normalized_axes: dict[str, float] = {}
-    for axis_id_raw, axis_value in axes.items():
-        axis_id = str(axis_id_raw or "").strip()
-        if not axis_id:
-            raise ValueError("axis_id_empty")
-        if axis_id in normalized_axes:
-            raise ValueError(f"axis_id_duplicate:{axis_id}")
-        if isinstance(axis_value, dict):
-            raise ValueError(f"axis_payload_invalid:{axis_id}")
-        value = _coerce_finite_number(axis_value)
-        if value is None:
-            raise ValueError(f"axis_{axis_id}_value_not_number")
-        normalized_axes[axis_id] = round(value, 4)
-
-    duration_hint_ms = _normalize_duration_hint_ms(intent.get("duration_hint_ms"))
-    performance_curve_hint = None
-    if "performance_curve_hint" in intent:
-        try:
-            performance_curve_hint = normalize_performance_curve_hint(
-                intent.get("performance_curve_hint")
-            )
-        except ValueError as exc:
-            raise ValueError(f"performance_curve_hint_invalid:{exc}") from exc
-
-    normalized_intent = {
-        "schema_version": MOTION_INTENT_V3_SCHEMA_VERSION,
-        "profile_id": profile_id,
-        "profile_revision": profile_revision_raw,
-        "model_id": model_id,
-        "mode": mode,
-        "intent_tags": intent_tags,
-        "emotion_label": emotion_label,
-        "duration_hint_ms": duration_hint_ms,
-        "resource_id": resource_id,
-        "axes": normalized_axes,
-        "summary": {
-            "axis_count": len(normalized_axes),
-            "intent_tag_count": len(intent_tags),
-        },
-    }
-    if performance_curve_hint is not None:
-        normalized_intent["performance_curve_hint"] = performance_curve_hint
-    return normalized_intent
 
 
 def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:

@@ -20,16 +20,9 @@ export const resourcePolicyStage: ModelParameterCompileStage = {
 export function runResourcePolicyStage(
   context: ModelParameterCompileContext,
 ): ModelParameterStageResult {
-  const expressionResourceId = context.intent.schema_version === "engine.motion_intent.v4"
-    ? context.intent.expression_resource_id?.trim()
-    : undefined;
-  const motionResourceId = context.intent.schema_version === "engine.motion_intent.v4"
-    ? context.intent.motion_resource_id?.trim()
-    : undefined;
-  const legacyResourceId = context.intent.schema_version === "engine.motion_intent.v3"
-    ? context.intent.resource_id?.trim()
-    : undefined;
-  const resourceId = expressionResourceId || motionResourceId || legacyResourceId;
+  const expressionResourceId = context.semanticMotion.expressionResourceId?.trim();
+  const motionResourceId = context.semanticMotion.motionResourceId?.trim();
+  const resourceId = expressionResourceId || motionResourceId;
   if (!resourceId) {
     return { ok: true };
   }
@@ -38,7 +31,7 @@ export function runResourcePolicyStage(
     ? "expression"
     : motionResourceId
       ? "motion"
-      : null;
+      : "motion";
 
   const candidates = collectResourceCandidates(context.options.model);
   const matches = candidates.filter(

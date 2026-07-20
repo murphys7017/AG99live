@@ -35,8 +35,9 @@ def test_motion_lab_raw_event_store_creates_sqlite_and_inserts_events(
                 "payload_kind": "intent",
                 "raw": {
                     "motion_payload": {
-                        "schema_version": "engine.motion_intent.v3",
+                        "schema_version": "engine.motion_intent.v4",
                         "intent_tags": ["hello"],
+                        "axis_levels": {"head_yaw": 1},
                     },
                 },
             }

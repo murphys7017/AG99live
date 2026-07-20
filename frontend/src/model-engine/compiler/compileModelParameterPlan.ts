@@ -1,7 +1,5 @@
 import type {
   DirectParameterPlanTiming,
-  NormalizedSemanticMotionIntentV4,
-  SemanticMotionIntent,
   SemanticParameterPlanEntry,
   SemanticParameterPlan,
 } from "../../types/protocol.js";
@@ -24,29 +22,18 @@ import { normalizeModelEngineSettings } from "../settings.js";
 
 export function compileModelParameterPlan(
   semanticMotion: CompiledSemanticMotion,
-  intent: SemanticMotionIntent,
   options: CompileOptions,
   stageRegistry: ModelEngineStageRegistry = createModelEngineStageRegistry(),
 ): CompileResult {
   if (semanticMotion.kind === "sequence") {
-    if (
-      intent.schema_version !== "engine.motion_intent.v4"
-      || !Array.isArray(intent.motion_steps)
-    ) {
-      return failCompile("model_parameter_sequence_intent_missing", semanticMotion);
-    }
     return compileMotionSequenceIntent(
       semanticMotion,
-      intent as NormalizedSemanticMotionIntentV4 & {
-        motion_steps: NonNullable<NormalizedSemanticMotionIntentV4["motion_steps"]>;
-      },
       options,
       stageRegistry,
     );
   }
   return compileModelParameterPose(
     semanticMotion,
-    intent,
     options,
     stageRegistry,
   );
@@ -54,7 +41,6 @@ export function compileModelParameterPlan(
 
 function compileModelParameterPose(
   semanticMotion: Extract<CompiledSemanticMotion, { kind: "pose" }>,
-  intent: SemanticMotionIntent,
   options: CompileOptions,
   stageRegistry: ModelEngineStageRegistry,
 ): CompileResult {
@@ -62,7 +48,6 @@ function compileModelParameterPose(
   try {
     context = createModelParameterCompileContext(
       semanticMotion,
-      intent,
       options,
       normalizeModelEngineSettings(options.settings),
     );
@@ -83,9 +68,6 @@ function compileModelParameterPose(
 
 function compileMotionSequenceIntent(
   semanticMotion: Extract<CompiledSemanticMotion, { kind: "sequence" }>,
-  intent: NormalizedSemanticMotionIntentV4 & {
-    motion_steps: NonNullable<NormalizedSemanticMotionIntentV4["motion_steps"]>;
-  },
   options: CompileOptions,
   stageRegistry: ModelEngineStageRegistry,
 ): CompileResult {
@@ -97,11 +79,6 @@ function compileMotionSequenceIntent(
         axes: step.axes,
         diagnostics: step.diagnostics,
       },
-      {
-        ...intent,
-        axis_levels: intent.motion_steps[index].axis_levels,
-        motion_steps: undefined,
-      } as NormalizedSemanticMotionIntentV4,
       {
         ...options,
         allowNeutralAxisPose: true,
@@ -124,8 +101,8 @@ function compileMotionSequenceIntent(
   }
 
   const plans = stepResults.map((result) => result.plan!);
-  const totalWeight = intent.motion_steps.reduce(
-    (sum, step) => sum + step.duration_weight,
+  const totalWeight = semanticMotion.steps.reduce(
+    (sum, step) => sum + step.durationWeight,
     0,
   );
   const firstPlan = plans[0];
@@ -163,7 +140,7 @@ function compileMotionSequenceIntent(
   }
   const minimumDurationResult = resolveMinimumSequenceDurationMs(
     resolvedParameterSteps,
-    intent.motion_steps.map((step) => step.duration_weight),
+    semanticMotion.steps.map((step) => step.durationWeight),
   );
   if (!minimumDurationResult.ok) {
     return {
@@ -186,11 +163,11 @@ function compileMotionSequenceIntent(
     minimumDurationResult.durationMs,
   );
   let elapsedWeight = 0;
-  const stepStartTimes = intent.motion_steps.map((step, index) => {
+  const stepStartTimes = semanticMotion.steps.map((step, index) => {
     const atMs = index === 0
       ? 0
       : Math.round((elapsedWeight / totalWeight) * totalDurationMs);
-    elapsedWeight += step.duration_weight;
+    elapsedWeight += step.durationWeight;
     return atMs;
   });
   const transitionDurations = resolveSequenceTransitionDurations(
@@ -245,13 +222,10 @@ function compileMotionSequenceIntent(
           ...stepResults[0].diagnostics.transformTrace,
           rawAxisLevels: undefined,
           compiledParameters: parameters.map((item) => item.parameter_id),
-          rawMotionSteps: intent.motion_steps.map((step) => ({
-            axis_levels: { ...step.axis_levels },
-            duration_weight: step.duration_weight,
-          })),
+          rawMotionSteps: undefined,
           sequenceSteps: stepResults.map((result, index) => ({
             index,
-            durationWeight: intent.motion_steps[index].duration_weight,
+            durationWeight: semanticMotion.steps[index].durationWeight,
             resolvedAxes: { ...(result.diagnostics.transformTrace?.resolvedAxes ?? {}) },
             constrainedAxes: { ...(result.diagnostics.transformTrace?.constrainedAxes ?? {}) },
             axisSampling: result.diagnostics.transformTrace?.axisSampling
@@ -278,6 +252,7 @@ function compileMotionSequenceIntent(
     ok: true,
     reason: "",
     diagnostics,
+    semanticMotion,
     plan: {
       ...firstPlan,
       timing: retimeSequencePlanTiming(firstPlan.timing, totalDurationMs),
@@ -590,6 +565,7 @@ function buildSuccessCompileResult(
     plan,
     reason: "",
     diagnostics,
+    semanticMotion,
   };
 }
 

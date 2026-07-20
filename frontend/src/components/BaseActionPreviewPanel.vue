@@ -4,10 +4,6 @@ import type {
   DesktopBaseActionPreview,
   DesktopBaseActionPreviewAtom,
 } from "../types/desktop";
-import type {
-  NormalizedSemanticMotionIntentV3,
-} from "../types/protocol";
-import { SCHEMA_MOTION_INTENT_V3 } from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 import { useParameterExcludeKeywords } from "../action-lab/parameterExcludeKeywords";
 import { buildParameterPlanTiming } from "../model-engine/timing";
@@ -16,10 +12,6 @@ import { roundTo } from "../utils/number";
 const props = defineProps<{
   preview: DesktopBaseActionPreview | null;
   semanticProfile: SemanticAxisProfile | null;
-  allowPlay?: boolean;
-}>();
-const emit = defineEmits<{
-  previewMotionIntent: [intent: NormalizedSemanticMotionIntentV3];
 }>();
 
 const selectedChannel = ref("all");
@@ -213,8 +205,8 @@ const generatedPlan = computed(() => {
     expressive ? "base_action_preview" : "idle_preview",
     ...[...new Set(selectedAtoms.value.map((atom) => atom.channel))].slice(0, 2),
   ].filter((value, index, array) => Boolean(value) && array.indexOf(value) === index);
-  const intent: NormalizedSemanticMotionIntentV3 = {
-    schema_version: SCHEMA_MOTION_INTENT_V3,
+  const intent = {
+    schema_version: "action_lab.axis_draft.v1",
     profile_id: profile?.profile_id ?? "",
     profile_revision: profile?.revision ?? 0,
     model_id: profile?.model_id ?? "",
@@ -249,15 +241,6 @@ const generatedPlan = computed(() => {
 const generatedPlanText = computed(() =>
   JSON.stringify(generatedPlan.value, null, 2),
 );
-const playButtonEnabled = computed(
-  () =>
-    Boolean(props.allowPlay)
-    && actionLibraryReady.value
-    && Boolean(props.semanticProfile)
-    && selectedAtoms.value.length > 0
-    && Object.keys(buildSemanticAxisValuesFromAtoms(selectedAtoms.value)).length > 0,
-);
-const playStatusText = ref("");
 const visibleAtoms = computed(() =>
   filteredAtoms.value.slice(0, visibleAtomLimit.value),
 );
@@ -327,19 +310,6 @@ function atomMatchesExcludedParameterKeyword(
   return keywords.some((keyword) => haystack.includes(keyword));
 }
 
-function playPreviewPlan(): void {
-  if (!playButtonEnabled.value) {
-    playStatusText.value = actionLibraryFailed.value
-      ? "动作库构建失败，请先处理上方错误后再测试播放。"
-      : props.semanticProfile
-      ? "请至少选择一个能映射到主轴/提示轴的动作原子。"
-      : "当前模型还没有 semantic profile，无法生成 v2 动作预览。";
-    return;
-  }
-  emit("previewMotionIntent", generatedPlan.value);
-  playStatusText.value = "";
-}
-
 function strengthToBaseIntensity(strength: string): number {
   switch (strength) {
     case "none":
@@ -368,8 +338,8 @@ function semanticPolarityToDirection(polarity: string): number {
 
 function buildAxisValuesFromAtoms(
   atoms: DesktopBaseActionPreviewAtom[],
-): NormalizedSemanticMotionIntentV3["axes"] {
-  const axisValues: NormalizedSemanticMotionIntentV3["axes"] = {};
+): Record<string, number> {
+  const axisValues: Record<string, number> = {};
   const strongestByChannel = new Map<string, DesktopBaseActionPreviewAtom>();
   for (const atom of atoms) {
     if (!controllableAxisIds.value.has(atom.channel)) {
@@ -411,7 +381,7 @@ function buildAxisValuesFromAtoms(
 
 function buildSemanticAxisValuesFromAtoms(
   atoms: DesktopBaseActionPreviewAtom[],
-): NormalizedSemanticMotionIntentV3["axes"] {
+): Record<string, number> {
   return buildAxisValuesFromAtoms(atoms);
 }
 
@@ -656,17 +626,6 @@ function buildSemanticAxisValuesFromAtoms(
           :value="generatedPlanText"
           readonly
         />
-        <div v-if="allowPlay" class="action-preview__plan-actions">
-          <button
-            type="button"
-            class="settings-card__button"
-            :disabled="!playButtonEnabled"
-            @click="playPreviewPlan"
-          >
-            播放测试
-          </button>
-          <span>{{ playStatusText }}</span>
-        </div>
       </section>
     </template>
 

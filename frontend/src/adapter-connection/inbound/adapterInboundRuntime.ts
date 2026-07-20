@@ -31,7 +31,6 @@ export interface AdapterInboundRuntimeDeps {
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
-  playMotionPreviewPayload?: (payload: unknown) => boolean;
   acknowledgeMotionLabRawEventPersisted: (eventId: string) => void;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
   normalizeMotionPayload: MotionPayloadNormalizer;
@@ -149,7 +148,6 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       resetAudioPlaybackTerminal: () => deps.resetAudioPlaybackTerminal(),
       reportRuntimeProtocolViolation,
       findActiveAudioSegment: () => deps.findActiveAudioSegment(),
-      playMotionPreviewPayload: deps.playMotionPreviewPayload,
       normalizeMotionPayload: deps.normalizeMotionPayload,
       startMicrophoneCapture: (origin) => deps.startMicrophoneCapture(origin),
       reportedProtocolWarnings,

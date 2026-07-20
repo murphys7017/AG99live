@@ -218,7 +218,7 @@ function buildGestureTrack(
 }
 
 function resolveSpeechGesturePreset(context: ModelParameterCompileContext): SpeechGesturePreset {
-  const hint = context.intent.performance_curve_hint;
+  const hint = context.semanticMotion.performanceCurveHint;
   if (hint?.energy === "high" || hint?.curve_family === "pulse_then_settle") {
     return "emphatic";
   }
@@ -228,7 +228,7 @@ function resolveSpeechGesturePreset(context: ModelParameterCompileContext): Spee
   if (hint?.energy === "teasing") {
     return "lively_chat";
   }
-  const tags = (context.intent.intent_tags ?? []).join(" ").toLowerCase();
+  const tags = context.semanticMotion.intentTags.join(" ").toLowerCase();
   if (/surpris|angry|惊讶|生气|强调|激动/.test(tags)) {
     return "emphatic";
   }

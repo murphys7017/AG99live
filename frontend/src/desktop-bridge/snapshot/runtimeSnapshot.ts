@@ -16,6 +16,7 @@ import {
   cloneLive2dPresentationSettings,
 } from "../../live2d-renderer/settings.js";
 import { cloneSemanticParameterPlan } from "../../model-engine/planParser.js";
+import { cloneCompiledSemanticMotion } from "../../model-engine/compiler/compiledSemanticMotionParser.js";
 import { DEFAULT_ADAPTER_ADDRESS } from "../../adapter-connection/core/address.js";
 import {
   DEFAULT_PTT_KEY_BINDING,
@@ -294,7 +295,6 @@ function cloneMotionPlaybackRecord(
     const payloadKind = normalizeText(record.payloadKind);
     if (
       payloadKind !== "semantic_intent"
-      && payloadKind !== "semantic_plan"
       && payloadKind !== "speech_only"
     ) {
       console.warn("[DesktopBridge] unknown motion playback payload kind ignored.", {
@@ -303,7 +303,8 @@ function cloneMotionPlaybackRecord(
       return null;
     }
     const plan = cloneSemanticParameterPlan(record.plan);
-    if (!plan) {
+    const semanticMotion = cloneCompiledSemanticMotion(record.semanticMotion);
+    if (!plan || !semanticMotion) {
       console.warn("[DesktopBridge] invalid motion playback record ignored.", {
         schemaVersion: isObject(record.plan)
           ? normalizeText(record.plan.schema_version)
@@ -320,6 +321,7 @@ function cloneMotionPlaybackRecord(
       mode: plan.mode,
       diagnostics: diagnostics as DesktopMotionPlaybackRecord["diagnostics"],
       plan,
+      semanticMotion,
       motion: null,
     } satisfies DesktopMotionPlaybackRecord;
   } catch (error) {

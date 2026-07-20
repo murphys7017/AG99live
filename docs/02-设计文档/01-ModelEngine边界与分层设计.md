@@ -14,7 +14,7 @@ engine.motion_intent.v4
   -> Live2D WebSDK
 ```
 
-`engine.motion_intent.v3` 只来自手动预览；官方 `<@anim>` 兼容入口内部同样使用 v4，并进入同一个 ModelEngine。
+正式对话与官方 `<@anim>` 兼容入口只产生 `engine.motion_intent.v4`。手动预览不构造协议 intent，而是保存并重放第一阶段编译结果 `CompiledSemanticMotion`。
 
 ## 2. 职责
 
@@ -45,7 +45,7 @@ ModelEngine 不负责：
 | 输入 | 用途 |
 | --- | --- |
 | `engine.motion_intent.v4` | Persona Effect 主动作；九级 `axis_levels` |
-| `engine.motion_intent.v3` | 手动预览；flat number `axes` |
+| `CompiledSemanticMotion` | ModelEngine 第一阶段输出，也是手动预览唯一输入 |
 | `engine.parameter_plan.v2` | 已完成语义编译的内部/工具计划 |
 | `MotionPlaybackClockContext` | 当前 segment 的窄时钟投影 |
 | model summary/profile/catalog | 当前模型能力事实 |

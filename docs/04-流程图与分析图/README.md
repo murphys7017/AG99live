@@ -56,7 +56,7 @@
 - `turn_id + message_id` 是正式播放段的统一身份。
 - `output.segment.v3` 是前后端正式回复的唯一原子消息。
 - `engine.motion_intent.v4` 是 Persona Effect 主动作协议。
-- `engine.motion_intent.v3` 只用于手动预览；官方 `<@anim>` 内部使用 v4。
+- 正式动作输入与官方 `<@anim>` 兼容入口统一使用 v4；手动预览从本地 `CompiledSemanticMotion` 直接进入第二阶段编译。
 - SessionStore 是持久播放事实源，PlaybackTimeline 是执行生命周期所有者。
 - ModelEngine 编译动作，Live2D WebSDK 逐帧执行参数计划。
 

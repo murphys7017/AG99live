@@ -12,16 +12,12 @@ import type {
   DesktopMotionTuningSamplesStatus,
 } from "../types/desktop";
 import type {
-  SemanticMotionIntent,
   SemanticParameterPlan,
 } from "../types/protocol";
-import {
-  SCHEMA_MOTION_INTENT_V3,
-  SCHEMA_PARAMETER_PLAN_V2,
-} from "../types/protocol";
+import { SCHEMA_PARAMETER_PLAN_V2 } from "../types/protocol";
+import type { CompiledSemanticMotion } from "../model-engine/compiler/contracts";
 import type {
   SemanticAxisDefinition,
-  SemanticAxisParameterBinding,
   SemanticAxisProfile,
 } from "../types/semantic-axis-profile";
 
@@ -35,8 +31,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   requestMotionTuningSamplesSync: [];
-  previewMotionIntent: [intent: SemanticMotionIntent];
-  replayParameterPlan: [plan: SemanticParameterPlan];
+  previewCompiledSemanticMotion: [semanticMotion: CompiledSemanticMotion];
   saveMotionTuningSample: [sample: DesktopMotionTuningSample];
   deleteMotionTuningSample: [sampleId: string];
 }>();
@@ -70,7 +65,7 @@ type MotionTuningSampleSnapshot = Readonly<{
   resolvedAxes?: Readonly<Record<string, number>>;
   constrainedAxes?: Readonly<Record<string, number>>;
   adjustedAxes: Readonly<Record<string, number>>;
-  adjustedPlan: unknown;
+  compiledSemanticMotion: CompiledSemanticMotion;
 }>;
 type LlmReferenceEntry = Readonly<{
   id: string;
@@ -99,7 +94,7 @@ type MotionDraftSource = Readonly<{
 }>;
 
 type SemanticMotionPlaybackRecord = DesktopMotionPlaybackRecord & {
-  payloadKind: "semantic_intent" | "semantic_plan";
+  payloadKind: "semantic_intent" | "speech_only";
   plan: SemanticParameterPlan;
 };
 type MotionVisibilitySummary = Record<string, unknown> & {
@@ -194,7 +189,7 @@ const llmReferenceEntries = computed<LlmReferenceEntry[]>(() => {
   return entries;
 });
 const savedDraftSources = computed<MotionDraftSource[]>(() =>
-  llmReferenceEntries.value.map((entry) => ({
+  llmReferenceEntries.value.filter((entry) => Boolean(entry.sample)).map((entry) => ({
     id: entry.id,
     mode: "expressive",
     emotionLabel: entry.title || "reference",
@@ -412,7 +407,7 @@ function updateAxisValue(axis: SemanticAxisDefinition, event: Event): void {
   explicitDraftAxisIds.add(axis.id);
 }
 
-function buildAdjustedIntent(): SemanticMotionIntent | null {
+function buildAdjustedSemanticMotion(): CompiledSemanticMotion | null {
   const profile = currentProfile.value;
   const source = selectedDraftSource.value;
   if (!profile || !source) {
@@ -422,7 +417,7 @@ function buildAdjustedIntent(): SemanticMotionIntent | null {
     return null;
   }
 
-  const axes: SemanticMotionIntent["axes"] = {};
+  const axes: Record<string, number> = {};
   for (const axis of promptAxes.value) {
     if (!explicitDraftAxisIds.has(axis.id)) {
       continue;
@@ -438,27 +433,21 @@ function buildAdjustedIntent(): SemanticMotionIntent | null {
     return null;
   }
 
-  const emotionLabel = normalizeEmotionLabel(emotionLabelText.value, source.emotionLabel);
-  const parsedTags = parseTags(tagsText.value);
-  const intentTags = [
-    ...parsedTags,
-    emotionLabel,
-    source.mode === "idle" ? "manual_tuning_idle" : "manual_tuning",
-  ].filter((value, index, array) => Boolean(value) && array.indexOf(value) === index);
-
+  const recorded = source.record?.semanticMotion ?? source.sample?.compiledSemanticMotion;
+  if (!recorded) {
+    return null;
+  }
   return {
-    schema_version: SCHEMA_MOTION_INTENT_V3,
-    profile_id: profile.profile_id,
-    profile_revision: profile.revision,
-    model_id: profile.model_id,
-    mode: source.mode,
-    intent_tags: intentTags,
-    emotion_label: emotionLabel,
-    duration_hint_ms: source.durationMs,
-    axes,
-    summary: {
-      axis_count: Object.keys(axes).length,
-    },
+    ...cloneJson(recorded),
+    kind: "pose",
+    emotionLabel: normalizeEmotionLabel(emotionLabelText.value, source.emotionLabel),
+    intentTags: parseTags(tagsText.value),
+    axes: Object.entries(axes).map(([axisId, value]) => ({
+      axisId,
+      value,
+      neutralValue: profile.axes.find((axis) => axis.id === axisId)?.neutral ?? 0,
+      source: "semantic_axis" as const,
+    })),
   };
 }
 
@@ -467,24 +456,24 @@ function playAdjustedIntent(): void {
     playStatusText.value = `当前记录不可编辑：${selectedDraftSource.value.error}`;
     return;
   }
-  const intent = buildAdjustedIntent();
-  if (!intent) {
+  const semanticMotion = buildAdjustedSemanticMotion();
+  if (!semanticMotion) {
     playStatusText.value = "当前没有可播放的语义主轴草稿。";
     return;
   }
 
-  emit("previewMotionIntent", intent);
+  emit("previewCompiledSemanticMotion", semanticMotion);
   playStatusText.value = "";
 }
 
 function playRecordedPlan(): void {
   const record = selectedDraftSource.value?.record;
-  if (!record?.plan) {
+  if (!record?.semanticMotion) {
     playStatusText.value = "当前没有可重放的历史动作计划。";
     return;
   }
 
-  emit("replayParameterPlan", cloneJson(record.plan));
+  emit("previewCompiledSemanticMotion", cloneJson(record.semanticMotion));
   playStatusText.value = "";
 }
 
@@ -501,6 +490,11 @@ function saveSample(): void {
   }
 
   const adjustedAxes = normalizeDraftAxes(profile);
+  const compiledSemanticMotion = buildAdjustedSemanticMotion();
+  if (!compiledSemanticMotion) {
+    saveStatusText.value = "当前第一阶段动作结果无效，无法保存。";
+    return;
+  }
   const now = new Date();
   const emotionLabel = normalizeEmotionLabel(emotionLabelText.value, source.emotionLabel);
   const sample: DesktopMotionTuningSample = {
@@ -528,7 +522,7 @@ function saveSample(): void {
       ...(source.record?.diagnostics?.transformTrace?.constrainedAxes ?? source.axes),
     },
     adjustedAxes,
-    adjustedPlan: buildAdjustedPlan(source, profile, adjustedAxes, emotionLabel),
+    compiledSemanticMotion,
   };
 
   emit("saveMotionTuningSample", sample);
@@ -549,7 +543,7 @@ function toggleSampleReference(sample: MotionTuningSampleSnapshot, enabled: bool
       resolvedAxes: { ...(mutableSample.resolvedAxes ?? {}) },
       constrainedAxes: { ...(mutableSample.constrainedAxes ?? {}) },
       adjustedAxes: { ...mutableSample.adjustedAxes },
-      adjustedPlan: cloneJson(mutableSample.adjustedPlan),
+      compiledSemanticMotion: cloneJson(mutableSample.compiledSemanticMotion),
       enabledForLlmReference: enabled,
     },
   );
@@ -581,116 +575,6 @@ function normalizeDraftAxes(currentProfile: SemanticAxisProfile): Record<string,
   return result;
 }
 
-function buildAdjustedPlan(
-  source: MotionDraftSource,
-  currentProfile: SemanticAxisProfile,
-  adjustedAxes: Record<string, number>,
-  emotionLabel: string,
-): SemanticParameterPlan {
-  const parameters: SemanticParameterPlan["parameters"] = [];
-  const seenParameterIds = new Set<string>();
-  const promptAxisIds = new Set(promptAxes.value.map((axis) => axis.id));
-
-  for (const axis of currentProfile.axes) {
-    if (!promptAxisIds.has(axis.id)) {
-      continue;
-    }
-
-    const axisValue = adjustedAxes[axis.id];
-    if (!Number.isFinite(axisValue)) {
-      continue;
-    }
-
-    for (const binding of axis.parameter_bindings) {
-      if (seenParameterIds.has(binding.parameter_id)) {
-        continue;
-      }
-
-      seenParameterIds.add(binding.parameter_id);
-      parameters.push(buildManualPlanParameter(axis, binding, axisValue));
-    }
-  }
-
-  const basePlan = source.record?.plan ?? null;
-  return {
-    schema_version: SCHEMA_PARAMETER_PLAN_V2,
-    profile_id: currentProfile.profile_id,
-    profile_revision: currentProfile.revision,
-    model_id: currentProfile.model_id,
-    mode: source.mode,
-    emotion_label: emotionLabel,
-    timing: basePlan ? cloneJson(basePlan.timing) : buildDefaultDraftTiming(source.durationMs),
-    parameters,
-    diagnostics: {
-      warnings: [
-        ...(basePlan?.diagnostics?.warnings ?? []),
-        "manual_motion_tuning_sample",
-      ],
-    },
-    summary: {
-      ...(basePlan?.summary ?? {}),
-      axis_count: Object.keys(adjustedAxes).length,
-      parameter_count: parameters.length,
-    },
-  };
-}
-
-function buildDefaultDraftTiming(durationMs: number): SemanticParameterPlan["timing"] {
-  const safeDurationMs = Math.max(500, Math.round(durationMs || 1200));
-  const blendInMs = Math.min(180, Math.round(safeDurationMs * 0.2));
-  const blendOutMs = Math.min(260, Math.round(safeDurationMs * 0.25));
-  return {
-    duration_ms: safeDurationMs,
-    blend_in_ms: blendInMs,
-    hold_ms: Math.max(0, safeDurationMs - blendInMs - blendOutMs),
-    blend_out_ms: blendOutMs,
-  };
-}
-
-function buildManualPlanParameter(
-  axis: SemanticAxisDefinition,
-  binding: SemanticAxisParameterBinding,
-  axisValue: number,
-): SemanticParameterPlan["parameters"][number] {
-  const inputSpan = Math.abs(binding.input_range[1] - binding.input_range[0]);
-  const outputSpan = Math.abs(binding.output_range[1] - binding.output_range[0]);
-  const outputPerInput = outputSpan / inputSpan;
-  return {
-    axis_id: axis.id,
-    parameter_id: binding.parameter_id,
-    target_value: mapBindingValue(axisValue, binding.input_range, binding.output_range, binding.invert),
-    neutral_target_value: mapBindingValue(
-      axis.neutral,
-      binding.input_range,
-      binding.output_range,
-      binding.invert,
-    ),
-    weight: binding.default_weight,
-    input_value: axisValue,
-    source: "manual",
-    dynamics: {
-      max_velocity: axis.dynamics.max_velocity * outputPerInput,
-      max_acceleration: axis.dynamics.max_acceleration * outputPerInput,
-      life_motion_scale: axis.dynamics.life_motion_scale,
-      max_speech_offset: outputSpan * axis.dynamics.max_speech_offset_ratio,
-    },
-  };
-}
-
-function mapBindingValue(
-  value: number,
-  inputRange: [number, number],
-  outputRange: [number, number],
-  invert: boolean,
-): number {
-  const [inputMin, inputMax] = inputRange;
-  if (inputMax === inputMin) {
-    return outputRange[0];
-  }
-  const ratio = clamp((value - inputMin) / (inputMax - inputMin), 0, 1);
-  const effectiveRatio = invert ? 1 - ratio : ratio;
-  return roundTo(outputRange[0] + (outputRange[1] - outputRange[0]) * effectiveRatio, 4);
-}
 
 function parseTags(value: string): string[] {
   const seen = new Set<string>();

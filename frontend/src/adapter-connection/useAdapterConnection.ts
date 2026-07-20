@@ -109,7 +109,6 @@ export interface AdapterConnectionInstance {
     payload: Parameters<typeof sendMotionLabRawEventAction>[1],
     turnId?: string | null,
   ) => boolean;
-  setMotionPreviewHandler: (handler: ((payload: unknown) => boolean) | null) => void;
   setMotionLabRawEventRecordedHandler: (
     handler: ((eventId: string) => void) | null,
   ) => void;
@@ -181,7 +180,6 @@ export function createAdapterConnection(
   const sessionStore = options.sessionStore;
   let historyAdapter: AdapterHistory | null = null;
   let motionTuningAdapter: AdapterMotionTuning | null = null;
-  let motionPreviewHandler: ((payload: unknown) => boolean) | null = null;
   let motionLabRawEventRecordedHandler: ((eventId: string) => void) | null = null;
   let audioTimelineStartedHandler: AudioTimelineStartedHandler | null = null;
   let audioTimelineDurationReadyHandler: AudioTimelineDurationReadyHandler | null = null;
@@ -305,7 +303,6 @@ export function createAdapterConnection(
       stopAudioAndSettleTurn(turnId, reason),
     resetAudioPlaybackTerminal: () => resetAudioPlaybackTerminal(),
     findActiveAudioSegment: () => findActiveAudioSegment(),
-    playMotionPreviewPayload: (payload) => motionPreviewHandler?.(payload) ?? false,
     acknowledgeMotionLabRawEventPersisted: (eventId) =>
       motionLabRawEventRecordedHandler?.(eventId),
     startMicrophoneCapture: (origin) => startMicrophoneCapture(origin),
@@ -667,11 +664,6 @@ export function createAdapterConnection(
     return sendMotionLabRawEventAction(outboundCtx, payload, turnId);
   }
 
-  function setMotionPreviewHandler(
-    handler: ((payload: unknown) => boolean) | null,
-  ): void {
-    motionPreviewHandler = handler;
-  }
 
   function setMotionLabRawEventRecordedHandler(
     handler: ((eventId: string) => void) | null,
@@ -775,7 +767,6 @@ export function createAdapterConnection(
     saveMotionTuningSample,
     deleteMotionTuningSample,
     sendMotionLabRawEvent,
-    setMotionPreviewHandler,
     setMotionLabRawEventRecordedHandler,
     sendPlaybackFinishedForCurrentGroup: sendPlaybackFinished,
     clearPlaybackGroupContext,

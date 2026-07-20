@@ -3,7 +3,7 @@ import type {
   DesktopMotionTuningSample,
   DesktopMotionTuningSamplesStatus,
 } from "../../types/desktop.js";
-import { cloneSemanticParameterPlan } from "../../model-engine/planParser.js";
+import { cloneCompiledSemanticMotion } from "../../model-engine/compiler/compiledSemanticMotionParser.js";
 import {
   cloneNumericRecord,
   isObject,
@@ -78,19 +78,18 @@ function cloneMotionTuningSample(
     if (!isObject(sample)) {
       return null;
     }
-    const adjustedPlan = cloneSemanticParameterPlan(sample.adjustedPlan);
-    if (!adjustedPlan) {
+    const compiledSemanticMotion = cloneCompiledSemanticMotion(sample.compiledSemanticMotion);
+    if (!compiledSemanticMotion) {
       console.warn("[DesktopBridge] invalid motion tuning sample ignored.", {
-        schemaVersion: isObject(sample.adjustedPlan)
-          ? normalizeText(sample.adjustedPlan.schema_version)
+        schemaVersion: isObject(sample.compiledSemanticMotion)
+          ? normalizeText(sample.compiledSemanticMotion.schemaVersion)
           : "",
       });
       return null;
     }
-    // Treat the embedded adjusted plan as the canonical identity for upgraded samples.
-    const modelName = adjustedPlan.model_id;
-    const profileId = adjustedPlan.profile_id;
-    const profileRevision = Math.round(adjustedPlan.profile_revision);
+    const modelName = compiledSemanticMotion.modelId;
+    const profileId = compiledSemanticMotion.profileId;
+    const profileRevision = Math.round(compiledSemanticMotion.profileRevision);
     return {
       ...(sample as unknown as DesktopMotionTuningSample),
       modelName,
@@ -102,7 +101,7 @@ function cloneMotionTuningSample(
       enabledForLlmReference: Boolean(sample.enabledForLlmReference),
       originalAxes: cloneNumericRecord(sample.originalAxes),
       adjustedAxes: cloneNumericRecord(sample.adjustedAxes),
-      adjustedPlan,
+      compiledSemanticMotion,
     } satisfies DesktopMotionTuningSample;
   } catch (error) {
     console.warn("[DesktopBridge] motion tuning sample rejected.", error, sample);

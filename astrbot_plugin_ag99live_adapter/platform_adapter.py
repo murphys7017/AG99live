@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
 import traceback
 from typing import Any
@@ -30,23 +29,7 @@ from .services.remote_operator_runtime import RemoteOperatorRuntime
 from .transport.static_routes import build_static_routes, list_background_files
 from .runtime.plugin_runtime import get_plugin_config, get_plugin_context
 from .runtime.state import RuntimeState
-from .motion.motion_intent import (
-    normalize_motion_intent_payload,
-    validate_motion_intent_payload,
-)
-from .protocol.builder import (
-    build_engine_motion_preview,
-    build_system_motion_tuning_samples_state,
-)
-from .protocol.constants import (
-    TYPE_ENGINE_CATALOG_MOTION,
-    TYPE_ENGINE_MOTION_INTENT,
-    TYPE_ENGINE_MOTION_PREVIEW,
-)
-from .motion.catalog_motion import (
-    normalize_catalog_motion_payload,
-    validate_catalog_motion_payload,
-)
+from .protocol.builder import build_system_motion_tuning_samples_state
 from .runtime.session_state import SessionState
 from .runtime.turn_identity_map import TurnIdentityMap
 from .transport.websocket_server import WebSocketTransport
@@ -157,7 +140,6 @@ class OLVPetPlatformAdapter(Platform):
             host=self.host,
             port=self.debug_port,
             routes={},
-            api_handler=self._handle_debug_api_request,
         )
         self.media_service = MediaService(
             host=self.host,
@@ -452,85 +434,6 @@ class OLVPetPlatformAdapter(Platform):
         await self.turn_coordinator.speech_ingress.handle_audio_stream_interrupt()
         await self.media_service.clear_audio_buffer()
 
-    def _handle_debug_api_request(
-        self,
-        path: str,
-        payload: dict[str, Any],
-    ) -> tuple[int, dict[str, Any]]:
-        """调试 HTTP 端点：/api/engine/motion_payload_preview。
-
-        把请求中的 motion intent/catalog payload 规范化、校验后作为
-        engine.motion_preview 发送给前端。preview-only 信封不继承当前 turn，
-        不创建播放段，也不参与 playback_finished。
-        """
-        normalized_path = path.rstrip("/")
-        if normalized_path not in {
-            "/api/engine/motion_payload_preview",
-        }:
-            return 404, {"ok": False, "error": "Unknown debug API endpoint."}
-
-        if not isinstance(payload, dict):
-            return 400, {"ok": False, "error": "Payload must be an object."}
-
-        motion_payload, message_type, failure_reason = _extract_debug_motion_payload(payload)
-        if failure_reason:
-            return 400, {"ok": False, "error": failure_reason}
-
-        mode = str(payload.get("mode") or "preview").strip() or "preview"
-        source = str(payload.get("source") or "analysis.notebook").strip() or "analysis.notebook"
-
-        loop = self._event_loop
-        if loop is None:
-            return 503, {"ok": False, "error": "Adapter event loop is not ready."}
-
-        future = asyncio.run_coroutine_threadsafe(
-            self._broadcast_debug_motion_preview(
-                motion_payload=motion_payload,
-                motion_type=message_type,
-                mode=mode,
-                source=source,
-            ),
-            loop,
-        )
-        try:
-            sent = bool(future.result(timeout=5.0))
-        except FutureTimeoutError:
-            return 504, {"ok": False, "error": "Timed out while dispatching motion payload preview."}
-        except Exception as exc:
-            return 500, {"ok": False, "error": f"Failed to dispatch motion payload preview: {exc}"}
-
-        if not sent:
-            return 409, {
-                "ok": False,
-                "error": "No active frontend websocket connection.",
-            }
-
-        return 200, {
-            "ok": True,
-            "status": "dispatched",
-            "endpoint": normalized_path,
-            "type": TYPE_ENGINE_MOTION_PREVIEW,
-            "motion_type": message_type,
-            "mode": mode,
-            "source": source,
-        }
-
-    async def _broadcast_debug_motion_preview(
-        self,
-        *,
-        motion_payload: dict[str, Any],
-        motion_type: str,
-        mode: str,
-        source: str,
-    ) -> bool:
-        return await self._send_json(
-            build_engine_motion_preview(
-                motion_payload=motion_payload,
-                motion_type=motion_type,
-                mode=mode,
-                source=source,
-            )
-        )
     def _sync_client_profile_from_runtime_state(self) -> None:
         self.client_uid = normalize_client_uid(
             getattr(self.runtime_state, "client_uid", self.client_uid),
@@ -546,43 +449,6 @@ class OLVPetPlatformAdapter(Platform):
             self.client_nickname,
         )
         self.history_bridge.set_client_uid(self.client_uid)
-
-
-def _extract_debug_motion_payload(
-    payload: dict[str, Any],
-) -> tuple[dict[str, Any] | None, str, str]:
-    if isinstance(payload.get("intent"), dict):
-        try:
-            motion_payload = normalize_motion_intent_payload(payload["intent"])
-        except ValueError as exc:
-            return None, TYPE_ENGINE_MOTION_INTENT, f"Invalid intent payload: {exc}"
-        valid, reason = validate_motion_intent_payload(motion_payload)
-        if not valid:
-            return None, TYPE_ENGINE_MOTION_INTENT, f"Invalid intent payload: {reason}"
-        return motion_payload, TYPE_ENGINE_MOTION_INTENT, ""
-
-    schema_version = str(payload.get("schema_version") or "").strip()
-    if schema_version in {"engine.motion_intent.v3", "engine.motion_intent.v4"}:
-        try:
-            motion_payload = normalize_motion_intent_payload(payload)
-        except ValueError as exc:
-            return None, TYPE_ENGINE_MOTION_INTENT, f"Invalid intent payload: {exc}"
-        valid, reason = validate_motion_intent_payload(motion_payload)
-        if not valid:
-            return None, TYPE_ENGINE_MOTION_INTENT, f"Invalid intent payload: {reason}"
-        return motion_payload, TYPE_ENGINE_MOTION_INTENT, ""
-
-    if schema_version == "engine.catalog_motion.v1":
-        try:
-            motion_payload = normalize_catalog_motion_payload(payload)
-        except ValueError as exc:
-            return None, TYPE_ENGINE_CATALOG_MOTION, f"Invalid catalog motion payload: {exc}"
-        valid, reason = validate_catalog_motion_payload(motion_payload)
-        if not valid:
-            return None, TYPE_ENGINE_CATALOG_MOTION, f"Invalid catalog motion payload: {reason}"
-        return motion_payload, TYPE_ENGINE_CATALOG_MOTION, ""
-
-    return None, "", "`intent` must be a valid motion payload object."
 
 
 def _config_get(config: Any, key: str, default: Any) -> Any:

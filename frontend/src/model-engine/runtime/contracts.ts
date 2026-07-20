@@ -13,6 +13,7 @@ import type {
 } from "../contracts.js";
 import type {
   CompileDiagnostics,
+  CompiledSemanticMotion,
   MotionFeedback,
 } from "../compiler/contracts.js";
 import type { ModelEngineSettings } from "../settings.js";
@@ -33,7 +34,7 @@ export interface ModelEngineActivePlaybackRun {
   origin: ModelEnginePlaybackOrigin;
   turnId: string | null;
   messageId: string;
-  payloadKind: NormalizedMotionPayload["kind"] | "speech_only";
+  payloadKind: NormalizedMotionPayload["kind"] | "speech_only" | "compiled_semantic_motion";
 }
 
 export type ModelEnginePlaybackTerminalEvent = DirectParameterPlanTerminalEvent;
@@ -61,7 +62,7 @@ interface ModelEnginePlanStartedEventBase {
   playbackOrigin: ModelEnginePlaybackOrigin;
   startReason: string;
   queuedDelayMs: number;
-  payloadKind: NormalizedMotionPayload["kind"] | "speech_only";
+  payloadKind: NormalizedMotionPayload["kind"] | "speech_only" | "compiled_semantic_motion";
   diagnostics: CompileDiagnostics | null;
   playerMessage: string;
   /** SDK 分配给本次动作计划的唯一 runId，用于完成事件归属校验。 */
@@ -70,19 +71,22 @@ interface ModelEnginePlanStartedEventBase {
 
 export type ModelEnginePlanStartedEvent =
   | (ModelEnginePlanStartedEventBase & {
+    payloadKind: "compiled_semantic_motion";
+    semanticMotion: CompiledSemanticMotion;
+    plan: MotionPlanPayload;
+    motion?: null;
+  })
+  | (ModelEnginePlanStartedEventBase & {
     payloadKind: "semantic_intent";
     intent: SemanticMotionIntent;
+    semanticMotion: CompiledSemanticMotion;
     plan: MotionPlanPayload;
     motion?: null;
   })
   | (ModelEnginePlanStartedEventBase & {
     payloadKind: "speech_only";
     request: SpeechOnlyMotionRequest;
-    plan: MotionPlanPayload;
-    motion?: null;
-  })
-  | (ModelEnginePlanStartedEventBase & {
-    payloadKind: "semantic_plan";
+    semanticMotion: CompiledSemanticMotion;
     plan: MotionPlanPayload;
     motion?: null;
   })

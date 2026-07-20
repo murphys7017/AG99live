@@ -17,7 +17,6 @@ export const INBOUND_MESSAGE_TYPES = {
   CONTROL_START_MIC: "control.start_mic",
   CONTROL_SYNTH_FINISHED: "control.synth_finished",
   CONTROL_ERROR: "control.error",
-  ENGINE_MOTION_PREVIEW: "engine.motion_preview",
 } as const;
 
 export const OUTBOUND_MESSAGE_TYPES = {

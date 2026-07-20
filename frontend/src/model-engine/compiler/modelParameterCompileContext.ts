@@ -1,6 +1,5 @@
 import type {
   CatalogMotionPayload,
-  SemanticMotionIntent,
   SemanticParameterPlan,
 } from "../../types/protocol.js";
 import type {
@@ -34,7 +33,6 @@ export interface ModelParameterCompileState {
 }
 
 export interface ModelParameterCompileContext {
-  intent: SemanticMotionIntent;
   semanticMotion: Extract<CompiledSemanticMotion, { kind: "pose" }>;
   options: CompileOptions;
   settings: ModelEngineSettings;
@@ -52,7 +50,6 @@ export interface ModelParameterCompileStage {
 
 export function createModelParameterCompileContext(
   semanticMotion: Extract<CompiledSemanticMotion, { kind: "pose" }>,
-  intent: SemanticMotionIntent,
   options: CompileOptions,
   settings: ModelEngineSettings,
 ): ModelParameterCompileContext {
@@ -66,7 +63,6 @@ export function createModelParameterCompileContext(
     throw new Error("model_parameter_semantic_profile_mismatch");
   }
   return {
-    intent,
     semanticMotion,
     options,
     settings,

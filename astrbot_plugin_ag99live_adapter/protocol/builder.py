@@ -21,15 +21,12 @@ from typing import Any
 
 from .constants import (
     SOURCE_ADAPTER,
-    SOURCE_ENGINE,
     TYPE_CONTROL_ERROR,
     TYPE_CONTROL_INTERRUPT,
     TYPE_CONTROL_START_MIC,
     TYPE_CONTROL_SYNTH_FINISHED,
     TYPE_CONTROL_TURN_FINISHED,
     TYPE_CONTROL_TURN_STARTED,
-    TYPE_ENGINE_CATALOG_MOTION,
-    TYPE_ENGINE_MOTION_PREVIEW,
     TYPE_OUTPUT_SEGMENT,
     TYPE_OUTPUT_TRANSCRIPTION,
     TYPE_SYSTEM_BACKGROUND_LIST,
@@ -101,27 +98,6 @@ def build_system_server_info(
             "ws_url": ws_url,
             "http_base_url": http_base_url,
             "auto_start_mic": auto_start_mic,
-        },
-    )
-
-
-def build_engine_motion_preview(
-    *,
-    motion_payload: dict[str, Any],
-    motion_type: str,
-    mode: str,
-    source: str,
-) -> dict[str, Any]:
-    payload_key = "motion" if motion_type == TYPE_ENGINE_CATALOG_MOTION else "intent"
-    return build_message_envelope(
-        TYPE_ENGINE_MOTION_PREVIEW,
-        source=SOURCE_ENGINE,
-        turn_id=None,
-        payload={
-            "mode": str(mode or "preview"),
-            "source": str(source or "analysis.notebook"),
-            "motion_type": str(motion_type or ""),
-            payload_key: motion_payload,
         },
     )
 

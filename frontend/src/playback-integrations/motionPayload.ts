@@ -1,13 +1,11 @@
 import type {
   CatalogMotionPayload,
   SemanticMotionIntent,
-  SemanticParameterPlan,
 } from "../types/protocol.js";
 
 export type NormalizedMotionPayload =
   | { kind: "catalog_motion"; motion: CatalogMotionPayload }
-  | { kind: "semantic_intent"; intent: SemanticMotionIntent }
-  | { kind: "semantic_plan"; plan: SemanticParameterPlan };
+  | { kind: "semantic_intent"; intent: SemanticMotionIntent };
 
 export type MotionPayloadNormalizationResult =
   | { ok: true; payload: NormalizedMotionPayload }

@@ -41,7 +41,7 @@ export function runModelParameterBindingStage(
   );
   if (!parameterResult.ok) {
     if (
-      parameterResult.reason === "semantic_plan_parameters_empty"
+      parameterResult.reason === "parameter_binding_parameters_empty"
       && context.state.parameters.length > 0
     ) {
       return { ok: true };
@@ -69,7 +69,7 @@ export function runModelParameterBindingStage(
     context.state.parameters.push(parameter);
   }
   if (!context.state.parameters.length) {
-    return { ok: false, reason: "semantic_plan_parameters_empty" };
+    return { ok: false, reason: "parameter_binding_parameters_empty" };
   }
   for (const parameterId of Object.keys(context.state.pendingParameterModulations)) {
     const owner = context.state.parameters.find(
@@ -133,7 +133,7 @@ function buildSemanticPlanParameters(
   }
 
   if (!parameters.length) {
-    return { ok: false, reason: "semantic_plan_parameters_empty" };
+    return { ok: false, reason: "parameter_binding_parameters_empty" };
   }
   return { ok: true, parameters, warnings };
 }

@@ -29,9 +29,6 @@ import type { NormalizedMotionPayload } from "../../playback-integrations/motion
 import type { OutputSegmentMaterial } from "../../turn-playback/session.js";
 import { dispatchInboundConnectionEvent } from "./inboundConnectionDispatcher.js";
 import { dispatchInboundFeatureEvent } from "./inboundFeatureDispatcher.js";
-import {
-  dispatchInboundMotionPreviewEvent,
-} from "./inboundMotionDispatcher.js";
 import { dispatchInboundOutputEvent } from "./inboundOutputDispatcher.js";
 import {
   reportInboundProtocolError,
@@ -104,7 +101,6 @@ export interface InboundDispatchDeps {
   resetAudioPlaybackTerminal: () => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   reportRuntimeProtocolViolation: (message: string) => void;
-  playMotionPreviewPayload?: (payload: unknown) => boolean;
   normalizeMotionPayload: (payload: unknown) => { ok: true; payload: NormalizedMotionPayload } | { ok: false };
   // mic
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
@@ -159,9 +155,6 @@ export async function dispatchInboundEvent(
       return;
     case "protocol_error":
       reportInboundProtocolError(deps, event);
-      return;
-    case "engine_motion_preview":
-      dispatchInboundMotionPreviewEvent(deps, event);
       return;
     case "unhandled":
       reportUnhandledInboundEnvelope(deps, event.envelope);

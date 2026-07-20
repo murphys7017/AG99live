@@ -203,15 +203,23 @@ function buildMotionBase(
     throw new Error("semantic_compile_missing_required_state");
   }
   const base = {
-    schemaVersion: "engine.compiled_semantic_motion.v1",
+    schemaVersion: "engine.compiled_semantic_motion.v1" as const,
     profileId: profile.profile_id,
     profileRevision: profile.revision,
     modelId: profile.model_id,
     mode: context.state.resolvedMode,
     emotionLabel: context.intent.emotion_label,
+    intentTags: [...(context.intent.intent_tags ?? [])],
+    performanceCurveHint: context.intent.performance_curve_hint,
+    expressionResourceId: context.intent.schema_version === "engine.motion_intent.v4"
+      ? context.intent.expression_resource_id
+      : undefined,
+    motionResourceId: context.intent.schema_version === "engine.motion_intent.v4"
+      ? context.intent.motion_resource_id
+      : undefined,
     timing,
     diagnostics,
-  } as const;
+  };
   if (payload.kind === "pose") {
     return { ...base, kind: "pose", axes: payload.axes };
   }

@@ -64,7 +64,7 @@ astrbot_plugin_ag99live_adapter/
 - `axis_levels` 只能使用 `-4..4` 整数；省略表示本轮不控制该轴，`0` 表示明确回到中性。混入 `axes`、非法等级或空等级对象会直接拒绝，不会回退到 v3。
 - 普通 Live2D 主要姿态默认从三级开始；四级由每轴独立 `extreme_range` 定义，用于短时夸张表演。内置七类 v4 示例和当前 profile revision 的人工筛选样本会注入 capability。
 - 可选资源使用 `expression_resource_id` 或 `motion_resource_id`，一次最多选择一个。expression 只与无参数冲突的计划叠加；motion 作为完整动作替代参数计划，但仍共享当前 segment 的统一 motion sink。
-- `engine.motion_intent.v3 + axes` 只保留给内部手动预览。
+- 正式动作输入唯一使用 `engine.motion_intent.v4`。手动预览保存并重放第一阶段的 `CompiledSemanticMotion`，直接进入模型参数编译，不经过 WebSocket 动作协议。
 - 自动动作链路不允许 LLM 输出 `choice`、`motion_id`、catalog motion、motion3、exp3 或旧播放文件引用。
 - 中间件 prompt 只暴露 profile 中的 `primary/hint` axes，禁止输出 `derived/runtime/ambient/debug` axes。
 

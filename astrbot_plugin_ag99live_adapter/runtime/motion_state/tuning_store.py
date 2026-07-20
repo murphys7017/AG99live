@@ -6,11 +6,6 @@ from typing import Any, Callable
 from ...prompts.motion_selector import resolve_motion_reference_examples
 from ...prompts.semantic_axis_prompt import profile_prompt_axes
 
-PARAMETER_PLAN_SOURCES = frozenset(
-    {"semantic_axis", "coupling", "speech_pose", "expression", "continuity", "manual"}
-)
-
-
 class MotionTuningStore:
     """Owns persisted motion-tuning samples and their prompt projections."""
 
@@ -51,6 +46,7 @@ class MotionTuningStore:
                 )
                 self.samples = []
                 self.reference_examples = []
+                self._persist_cache()
                 return
         self.samples = normalized_samples
 
@@ -152,14 +148,12 @@ class MotionTuningStore:
             adjusted_axes = sample.get("adjusted_axes")
             if not isinstance(adjusted_axes, dict) or not adjusted_axes:
                 continue
-            adjusted_plan = sample.get("adjusted_plan")
+            compiled_motion = sample.get("compiled_semantic_motion")
             filtered_axes = self._filter_example_axes(
                 adjusted_axes,
                 allowed_axis_ids=prompt_axis_ids,
             )
             if not filtered_axes:
-                continue
-            if not self._example_matches_adjusted_plan(filtered_axes, adjusted_plan):
                 continue
             adjusted_levels = self._project_axes_to_levels(
                 filtered_axes,
@@ -170,7 +164,7 @@ class MotionTuningStore:
             intent_tags = self._build_sample_intent_tags(sample)
             reference_error = self._validate_reference_effect_fields(
                 intent_tags=intent_tags,
-                adjusted_plan=adjusted_plan,
+                compiled_motion=compiled_motion,
             )
             if reference_error:
                 projection_diagnostics.append(
@@ -190,18 +184,18 @@ class MotionTuningStore:
                     ]
                     if isinstance(sample.get("tags"), list)
                     else [],
-                    "mode": str(adjusted_plan.get("mode") or "expressive").strip()
+                    "mode": str(compiled_motion.get("mode") or "expressive").strip()
                     or "expressive"
-                    if isinstance(adjusted_plan, dict)
+                    if isinstance(compiled_motion, dict)
                     else "expressive",
                     "axis_levels": adjusted_levels,
                 }
             )
             duration_ms = None
-            if isinstance(adjusted_plan, dict):
-                timing = adjusted_plan.get("timing")
+            if isinstance(compiled_motion, dict):
+                timing = compiled_motion.get("timing")
                 if isinstance(timing, dict):
-                    duration_ms = timing.get("duration_ms")
+                    duration_ms = timing.get("resolvedDurationMs")
             normalized_examples.append(
                 {
                     "category": str(sample.get("emotion_label") or "custom").strip()
@@ -249,7 +243,7 @@ class MotionTuningStore:
     def _validate_reference_effect_fields(
         *,
         intent_tags: list[str],
-        adjusted_plan: Any,
+        compiled_motion: Any,
     ) -> str:
         if not 1 <= len(intent_tags) <= 6:
             return "intent_tag_count_invalid"
@@ -257,10 +251,10 @@ class MotionTuningStore:
             return "intent_tag_invalid"
         if len(set(intent_tags)) != len(intent_tags):
             return "intent_tags_not_unique"
-        if not isinstance(adjusted_plan, dict):
-            return "adjusted_plan_invalid"
-        timing = adjusted_plan.get("timing")
-        duration_ms = timing.get("duration_ms") if isinstance(timing, dict) else None
+        if not isinstance(compiled_motion, dict):
+            return "compiled_semantic_motion_invalid"
+        timing = compiled_motion.get("timing")
+        duration_ms = timing.get("resolvedDurationMs") if isinstance(timing, dict) else None
         if (
             not isinstance(duration_ms, (int, float))
             or isinstance(duration_ms, bool)
@@ -293,25 +287,6 @@ class MotionTuningStore:
                 continue
             result[normalized_axis_id] = normalized_value
         return result
-
-    @staticmethod
-    def _example_matches_adjusted_plan(
-        filtered_axes: dict[str, float],
-        adjusted_plan: Any,
-    ) -> bool:
-        if not isinstance(adjusted_plan, dict):
-            return False
-        raw_parameters = adjusted_plan.get("parameters")
-        if not isinstance(raw_parameters, list) or not raw_parameters:
-            return False
-        plan_axis_ids = {
-            str(parameter.get("axis_id") or "").strip()
-            for parameter in raw_parameters
-            if isinstance(parameter, dict) and str(parameter.get("axis_id") or "").strip()
-        }
-        if not plan_axis_ids:
-            return False
-        return set(filtered_axes.keys()).issubset(plan_axis_ids)
 
     @staticmethod
     def _build_style_prompt(samples: list[dict[str, Any]]) -> str:
@@ -494,8 +469,8 @@ class MotionTuningStore:
             field_name="constrained_axes",
             require_non_empty=False,
         )
-        adjusted_plan = self._normalize_adjusted_plan(
-            sample_payload.get("adjusted_plan"),
+        compiled_motion = self._normalize_compiled_semantic_motion(
+            sample_payload.get("compiled_semantic_motion"),
             model_name=model_name,
             profile_id=profile_id,
             profile_revision=profile_revision,
@@ -520,7 +495,7 @@ class MotionTuningStore:
             ),
             "original_axes": original_axes,
             "adjusted_axes": adjusted_axes,
-            "adjusted_plan": adjusted_plan,
+            "compiled_semantic_motion": compiled_motion,
         }
         optional_values = {
             "profile_hash": str(sample_payload.get("profile_hash") or "").strip(),
@@ -540,132 +515,170 @@ class MotionTuningStore:
         )
         return normalized_sample
 
-    def _normalize_adjusted_plan(
+    def _normalize_compiled_semantic_motion(
         self,
-        plan_payload: Any,
+        motion_payload: Any,
         *,
         model_name: str,
         profile_id: str,
         profile_revision: int,
     ) -> dict[str, Any]:
-        if not isinstance(plan_payload, dict):
-            raise ValueError("motion_tuning_sample_adjusted_plan_not_object")
-        if str(plan_payload.get("schema_version") or "").strip() != "engine.parameter_plan.v2":
-            raise ValueError("motion_tuning_sample_adjusted_plan_schema_invalid")
-        if str(plan_payload.get("model_id") or "").strip() != model_name:
-            raise ValueError("motion_tuning_sample_adjusted_plan_model_mismatch")
-        if str(plan_payload.get("profile_id") or "").strip() != profile_id:
-            raise ValueError("motion_tuning_sample_adjusted_plan_profile_mismatch")
+        if not isinstance(motion_payload, dict):
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_not_object")
+        if motion_payload.get("schemaVersion") != "engine.compiled_semantic_motion.v1":
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_schema_invalid")
+        if str(motion_payload.get("modelId") or "").strip() != model_name:
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_model_mismatch")
+        if str(motion_payload.get("profileId") or "").strip() != profile_id:
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_profile_mismatch")
+        motion_profile_revision = motion_payload.get("profileRevision")
+        if (
+            isinstance(motion_profile_revision, bool)
+            or motion_profile_revision != profile_revision
+        ):
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_revision_mismatch")
+        if motion_payload.get("kind") not in {"pose", "sequence"}:
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_kind_invalid")
+        if motion_payload.get("mode") not in {"idle", "expressive"}:
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_mode_invalid")
+        if not str(motion_payload.get("emotionLabel") or "").strip():
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_emotion_invalid")
+        intent_tags = motion_payload.get("intentTags")
+        if (
+            not isinstance(intent_tags, list)
+            or not 1 <= len(intent_tags) <= 6
+            or not all(isinstance(tag, str) and tag.strip() for tag in intent_tags)
+            or len(set(intent_tags)) != len(intent_tags)
+        ):
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_tags_invalid")
+        expression_resource_raw = motion_payload.get("expressionResourceId")
+        motion_resource_raw = motion_payload.get("motionResourceId")
+        if expression_resource_raw is not None and (
+            not isinstance(expression_resource_raw, str)
+            or not expression_resource_raw.strip()
+        ):
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_resource_invalid")
+        if motion_resource_raw is not None and (
+            not isinstance(motion_resource_raw, str)
+            or not motion_resource_raw.strip()
+        ):
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_resource_invalid")
+        expression_resource_id = str(expression_resource_raw or "").strip()
+        motion_resource_id = str(motion_resource_raw or "").strip()
+        if expression_resource_id and motion_resource_id:
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_resource_conflict")
+        self._validate_performance_curve_hint(
+            motion_payload.get("performanceCurveHint")
+        )
+        self._validate_compiled_motion_timing(motion_payload.get("timing"))
+        self._validate_compiled_motion_diagnostics(motion_payload.get("diagnostics"))
+        if motion_payload["kind"] == "pose":
+            self._validate_compiled_motion_axes(motion_payload.get("axes"))
+        else:
+            steps = motion_payload.get("steps")
+            if not isinstance(steps, list) or not steps:
+                raise ValueError("motion_tuning_sample_compiled_semantic_motion_steps_invalid")
+            for step in steps:
+                if not isinstance(step, dict):
+                    raise ValueError("motion_tuning_sample_compiled_semantic_motion_step_invalid")
+                duration_weight = _coerce_finite_number(step.get("durationWeight"))
+                if duration_weight is None or duration_weight <= 0:
+                    raise ValueError(
+                        "motion_tuning_sample_compiled_semantic_motion_step_weight_invalid"
+                    )
+                self._validate_compiled_motion_axes(step.get("axes"))
+                self._validate_compiled_motion_diagnostics(step.get("diagnostics"))
+        return deepcopy(motion_payload)
 
-        plan_profile_revision_raw = plan_payload.get("profile_revision")
-        if isinstance(plan_profile_revision_raw, bool):
-            raise ValueError("motion_tuning_sample_adjusted_plan_revision_invalid")
-        try:
-            plan_profile_revision = int(plan_profile_revision_raw)
-        except (TypeError, ValueError):
-            raise ValueError("motion_tuning_sample_adjusted_plan_revision_invalid") from None
-        if plan_profile_revision != profile_revision:
-            raise ValueError("motion_tuning_sample_adjusted_plan_revision_mismatch")
+    @staticmethod
+    def _validate_performance_curve_hint(hint_payload: Any) -> None:
+        if hint_payload is None:
+            return
+        if (
+            not isinstance(hint_payload, dict)
+            or hint_payload.get("schema_version") != "ag99.performance_curve_hint.v1"
+            or hint_payload.get("curve_family")
+            not in {
+                "default",
+                "quick_in_hold_soft_out",
+                "slow_in_hold_quick_out",
+                "pulse_then_settle",
+                "soft_breathe",
+            }
+            or hint_payload.get("entry") not in {"instant", "quick", "soft", "slow"}
+            or hint_payload.get("hold") not in {"short", "steady", "long", "breathing"}
+            or hint_payload.get("exit") not in {"quick", "soft", "slow"}
+            or hint_payload.get("emphasis")
+            not in {"none", "early", "middle", "late", "punctuated"}
+            or hint_payload.get("energy")
+            not in {"low", "medium", "high", "teasing", "calm"}
+        ):
+            raise ValueError(
+                "motion_tuning_sample_compiled_semantic_motion_performance_curve_invalid"
+            )
 
-        mode = str(plan_payload.get("mode") or "").strip()
-        if mode not in {"idle", "expressive"}:
-            raise ValueError("motion_tuning_sample_adjusted_plan_mode_invalid")
-
-        timing_payload = plan_payload.get("timing")
-        if not isinstance(timing_payload, dict):
-            raise ValueError("motion_tuning_sample_adjusted_plan_timing_invalid")
-
-        timing: dict[str, int] = {}
-        for key in ("duration_ms", "blend_in_ms", "hold_ms", "blend_out_ms"):
-            raw_value = timing_payload.get(key)
-            if isinstance(raw_value, bool):
-                raise ValueError(f"motion_tuning_sample_adjusted_plan_{key}_invalid")
-            try:
-                normalized_value = int(raw_value)
-            except (TypeError, ValueError):
-                raise ValueError(
-                    f"motion_tuning_sample_adjusted_plan_{key}_invalid"
-                ) from None
-            if normalized_value < 0:
-                raise ValueError(f"motion_tuning_sample_adjusted_plan_{key}_invalid")
-            timing[key] = normalized_value
-
-        raw_parameters = plan_payload.get("parameters")
-        if not isinstance(raw_parameters, list) or not raw_parameters:
-            raise ValueError("motion_tuning_sample_adjusted_plan_parameters_invalid")
-
-        parameters: list[dict[str, Any]] = []
-        for parameter in raw_parameters:
-            if not isinstance(parameter, dict):
-                raise ValueError("motion_tuning_sample_adjusted_plan_parameter_not_object")
-            axis_id = str(parameter.get("axis_id") or "").strip()
-            parameter_id = str(parameter.get("parameter_id") or "").strip()
-            target_value = _coerce_finite_number(parameter.get("target_value"))
-            weight = _coerce_finite_number(parameter.get("weight"))
+    @staticmethod
+    def _validate_compiled_motion_axes(axes_payload: Any) -> None:
+        if not isinstance(axes_payload, list) or not axes_payload:
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_axes_invalid")
+        axis_ids: set[str] = set()
+        for axis in axes_payload:
+            if not isinstance(axis, dict):
+                raise ValueError("motion_tuning_sample_compiled_semantic_motion_axis_invalid")
+            axis_id = str(axis.get("axisId") or "").strip()
+            value = _coerce_finite_number(axis.get("value"))
+            neutral_value = _coerce_finite_number(axis.get("neutralValue"))
             if (
                 not axis_id
-                or not parameter_id
-                or target_value is None
-                or weight is None
-                or weight < 0
-                or weight > 1
+                or axis_id in axis_ids
+                or value is None
+                or neutral_value is None
+                or axis.get("source") not in {"semantic_axis", "coupling"}
             ):
-                raise ValueError("motion_tuning_sample_adjusted_plan_parameter_invalid")
-            input_value_raw = parameter.get("input_value")
-            input_value = _coerce_finite_number(input_value_raw)
-            if input_value_raw is not None and input_value is None:
-                raise ValueError("motion_tuning_sample_adjusted_plan_input_value_invalid")
-            source = str(parameter.get("source") or "").strip()
-            normalized_parameter = {
-                "axis_id": axis_id,
-                "parameter_id": parameter_id,
-                "target_value": target_value,
-                "weight": weight,
-            }
-            if input_value is not None:
-                normalized_parameter["input_value"] = input_value
-            if source in PARAMETER_PLAN_SOURCES:
-                normalized_parameter["source"] = source
-            parameters.append(normalized_parameter)
+                raise ValueError("motion_tuning_sample_compiled_semantic_motion_axis_invalid")
+            axis_ids.add(axis_id)
 
-        normalized_plan: dict[str, Any] = {
-            "schema_version": "engine.parameter_plan.v2",
-            "profile_id": profile_id,
-            "profile_revision": profile_revision,
-            "model_id": model_name,
-            "mode": mode,
-            "emotion_label": str(
-                plan_payload.get("emotion_label") or ""
-            ).strip()
-            or "manual_tuning",
-            "timing": timing,
-            "parameters": parameters,
-        }
-        diagnostics = plan_payload.get("diagnostics")
-        if isinstance(diagnostics, dict):
-            warnings = diagnostics.get("warnings")
-            normalized_diagnostics: dict[str, Any] = {}
-            if isinstance(warnings, list):
-                normalized_diagnostics["warnings"] = [
-                    str(item).strip() for item in warnings if str(item).strip()
-                ]
-            if normalized_diagnostics:
-                normalized_plan["diagnostics"] = normalized_diagnostics
-        summary = plan_payload.get("summary")
-        if isinstance(summary, dict):
-            normalized_summary: dict[str, Any] = {}
-            for key in ("axis_count", "parameter_count", "target_duration_ms"):
-                raw_value = summary.get(key)
-                if isinstance(raw_value, bool):
-                    continue
-                try:
-                    normalized_value = int(raw_value)
-                except (TypeError, ValueError):
-                    continue
-                normalized_summary[key] = normalized_value
-            if normalized_summary:
-                normalized_plan["summary"] = normalized_summary
-        return normalized_plan
+    @staticmethod
+    def _validate_compiled_motion_timing(timing_payload: Any) -> None:
+        if not isinstance(timing_payload, dict):
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_timing_invalid")
+        resolved_duration = _coerce_finite_number(timing_payload.get("resolvedDurationMs"))
+        if resolved_duration is None or resolved_duration <= 0:
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_duration_invalid")
+        if timing_payload.get("timingSource") not in {"hint", "audio_sync", "default"}:
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_timing_source_invalid")
+        timing = timing_payload.get("timing")
+        if not isinstance(timing, dict):
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_timing_invalid")
+        for field_name in ("duration_ms", "blend_in_ms", "hold_ms", "blend_out_ms"):
+            field_value = _coerce_finite_number(timing.get(field_name))
+            if field_value is None or field_value < 0:
+                raise ValueError(
+                    f"motion_tuning_sample_compiled_semantic_motion_{field_name}_invalid"
+                )
+
+    @staticmethod
+    def _validate_compiled_motion_diagnostics(diagnostics_payload: Any) -> None:
+        if not isinstance(diagnostics_payload, dict):
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_diagnostics_invalid")
+        compiled_count = _coerce_finite_number(
+            diagnostics_payload.get("compiledParameterCount")
+        )
+        intensity_scale = _coerce_finite_number(
+            diagnostics_payload.get("motionIntensityScale")
+        )
+        if (
+            not isinstance(diagnostics_payload.get("usedActionLibrary"), bool)
+            or compiled_count is None
+            or compiled_count < 0
+            or int(compiled_count) != compiled_count
+            or diagnostics_payload.get("timingSource")
+            not in {"hint", "audio_sync", "default"}
+            or diagnostics_payload.get("resolvedMode") not in {"idle", "expressive"}
+            or not isinstance(diagnostics_payload.get("intensityApplied"), bool)
+            or intensity_scale is None
+        ):
+            raise ValueError("motion_tuning_sample_compiled_semantic_motion_diagnostics_invalid")
 
     @staticmethod
     def _normalize_axes(

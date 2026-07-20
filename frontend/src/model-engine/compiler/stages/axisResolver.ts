@@ -155,17 +155,10 @@ function resolveAllowedLlmAxisValues(
     ? createAxisLevelSamplingTrace(context)
     : null;
   context.state.axisSampling = sampling;
-  const inputEntries = context.intent.schema_version === "engine.motion_intent.v4"
-    ? Object.entries(context.intent.axis_levels ?? {})
-    : Object.entries(context.intent.axes);
+  const inputEntries = Object.entries(context.intent.axis_levels ?? {});
   console.debug("[ModelEngine] received semantic axis payload.", {
     axisIds: inputEntries.map(([axisId]) => axisId),
-    axes: context.intent.schema_version === "engine.motion_intent.v3"
-      ? context.intent.axes
-      : undefined,
-    axisLevels: context.intent.schema_version === "engine.motion_intent.v4"
-      ? context.intent.axis_levels
-      : undefined,
+    axisLevels: context.intent.axis_levels,
   });
 
   for (const [axisId, rawValue] of inputEntries) {
@@ -218,9 +211,7 @@ function resolveAllowedLlmAxisValues(
 }
 
 function resolveInputAxisIds(context: MotionCompileContext): string[] {
-  return context.intent.schema_version === "engine.motion_intent.v4"
-    ? Object.keys(context.intent.axis_levels ?? {})
-    : Object.keys(context.intent.axes);
+  return Object.keys(context.intent.axis_levels ?? {});
 }
 
 function resolveAxisLevelValue(

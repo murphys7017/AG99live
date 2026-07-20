@@ -237,10 +237,10 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
             raise ProtocolError(
                 "`system.motion_tuning_sample_save` requires `payload.sample.profile_revision` to be a positive integer."
             )
-        adjusted_plan = sample.get("adjusted_plan")
-        if not isinstance(adjusted_plan, Mapping):
+        compiled_semantic_motion = sample.get("compiled_semantic_motion")
+        if not isinstance(compiled_semantic_motion, Mapping):
             raise ProtocolError(
-                "`system.motion_tuning_sample_save` requires `payload.sample.adjusted_plan` to be an object."
+                "`system.motion_tuning_sample_save` requires `payload.sample.compiled_semantic_motion` to be an object."
             )
         adjusted_axes = sample.get("adjusted_axes")
         if not isinstance(adjusted_axes, Mapping):

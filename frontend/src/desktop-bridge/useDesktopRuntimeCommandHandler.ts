@@ -8,10 +8,9 @@ import type {
   DesktopRuntimeCommand,
 } from "../types/desktop.js";
 import type {
-  MotionPlanPayload,
-  SemanticMotionIntent,
   SystemSemanticAxisProfileSavePayload,
 } from "../types/protocol.js";
+import type { CompiledSemanticMotion } from "../model-engine/compiler/contracts.js";
 import { cloneJson } from "../utils/cloneJson.js";
 import {
   applyModelEngineSettings,
@@ -63,8 +62,10 @@ export interface DesktopRuntimeCommandDeps {
       readonly lastCompileReason: string;
       readonly message: string;
     };
-    playPreviewIntent: (intent: SemanticMotionIntent, requestId: string) => boolean;
-    replayParameterPlan: (plan: MotionPlanPayload, requestId: string) => boolean;
+    previewCompiledSemanticMotion: (
+      semanticMotion: CompiledSemanticMotion,
+      requestId: string,
+    ) => boolean;
   };
   snapshotPublisher: DesktopRuntimeSnapshotPublisherPort;
   saveMotionTuningSample: (sample: DesktopMotionTuningSample) => void;
@@ -157,32 +158,19 @@ export function createDesktopRuntimeCommandHandler(
       case "set_bilibili_live_settings":
         deps.setBilibiliLiveSettings(command.settings);
         return;
-      case "preview_motion_intent": {
+      case "preview_compiled_semantic_motion": {
         deps.publishMotionPreviewStatus({
           requestId: command.requestId,
-          source: "intent",
+          source: "compiled_semantic_motion",
           status: "requested",
         });
-        if (!deps.modelEngine.playPreviewIntent(command.intent, command.requestId)) {
+        if (!deps.modelEngine.previewCompiledSemanticMotion(
+          command.semanticMotion,
+          command.requestId,
+        )) {
           deps.publishMotionPreviewStatus({
             requestId: command.requestId,
-            source: "intent",
-            status: "rejected",
-            reason: deps.modelEngine.state.lastCompileReason || deps.modelEngine.state.message,
-          });
-        }
-        return;
-      }
-      case "replay_parameter_plan": {
-        deps.publishMotionPreviewStatus({
-          requestId: command.requestId,
-          source: "recorded_plan",
-          status: "requested",
-        });
-        if (!deps.modelEngine.replayParameterPlan(command.plan, command.requestId)) {
-          deps.publishMotionPreviewStatus({
-            requestId: command.requestId,
-            source: "recorded_plan",
+            source: "compiled_semantic_motion",
             status: "rejected",
             reason: deps.modelEngine.state.lastCompileReason || deps.modelEngine.state.message,
           });

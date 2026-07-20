@@ -1,9 +1,9 @@
 import type {
   CatalogMotionPayload,
   MotionPlanPayload,
-  SemanticMotionIntent,
 } from "./protocol";
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
+import type { CompiledSemanticMotion } from "../model-engine/compiler/contracts";
 import type {
   BilibiliLiveSettings,
   BilibiliLiveStatus,
@@ -222,7 +222,7 @@ interface DesktopMotionPlaybackRecordBase {
   id: string;
   createdAt: string;
   source: string;
-  payloadKind: "semantic_intent" | "semantic_plan" | "catalog_motion" | "speech_only";
+  payloadKind: "semantic_intent" | "catalog_motion" | "speech_only";
   messageId: string;
   turnId: string | null;
   playbackTurnId: string | null;
@@ -238,8 +238,9 @@ interface DesktopMotionPlaybackRecordBase {
 
 export type DesktopMotionPlaybackRecord =
   | (DesktopMotionPlaybackRecordBase & {
-    payloadKind: "semantic_intent" | "semantic_plan" | "speech_only";
+    payloadKind: "semantic_intent" | "speech_only";
     plan: MotionPlanPayload;
+    semanticMotion: CompiledSemanticMotion;
     motion?: null;
   })
   | (DesktopMotionPlaybackRecordBase & {
@@ -267,7 +268,7 @@ export interface DesktopMotionTuningSample {
   resolvedAxes?: Record<string, number>;
   constrainedAxes?: Record<string, number>;
   adjustedAxes: Record<string, number>;
-  adjustedPlan: MotionPlanPayload;
+  compiledSemanticMotion: CompiledSemanticMotion;
 }
 
 export interface DesktopMotionTuningEffectiveExample {
@@ -470,7 +471,7 @@ export interface DesktopMotionTuningSamplesStatus {
 
 export interface DesktopMotionPreviewStatus {
   requestId: string;
-  source: "intent" | "recorded_plan";
+  source: "compiled_semantic_motion";
   status:
     | "requested"
     | "started"
@@ -507,12 +508,7 @@ export type DesktopRuntimeCommand =
   | { type: "set_ptt_key_binding"; binding: DesktopPttKeyBinding }
   | { type: "set_bilibili_live_settings"; settings: BilibiliLiveSettings }
   | {
-    type: "preview_motion_intent";
+    type: "preview_compiled_semantic_motion";
     requestId: string;
-    intent: SemanticMotionIntent;
-  }
-  | {
-    type: "replay_parameter_plan";
-    requestId: string;
-    plan: MotionPlanPayload;
+    semanticMotion: CompiledSemanticMotion;
   };

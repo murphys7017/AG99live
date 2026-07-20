@@ -11,7 +11,6 @@ _SCHEMAS = _MANIFEST["schemas"]
 
 PROTOCOL_VERSION: Final[str] = _MANIFEST["protocol_version"]
 CATALOG_MOTION_SCHEMA_VERSION: Final[str] = _SCHEMAS["catalog_motion"]
-MOTION_INTENT_V3_SCHEMA_VERSION: Final[str] = _SCHEMAS["motion_intent_preview"]
 MOTION_INTENT_V4_SCHEMA_VERSION: Final[str] = _SCHEMAS["motion_intent"]
 OUTPUT_SEGMENT_SCHEMA_VERSION: Final[str] = _SCHEMAS["output_segment"]
 PARAMETER_PLAN_V2_SCHEMA_VERSION: Final[str] = _SCHEMAS["parameter_plan"]

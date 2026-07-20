@@ -13,9 +13,9 @@ import type {
 } from "./contracts.js";
 import type {
   MotionPlanPayload,
-  SemanticMotionIntent,
 } from "../types/protocol.js";
-import type { CompileDiagnostics } from "./compiler/contracts.js";
+import type { CompileDiagnostics, CompiledSemanticMotion } from "./compiler/contracts.js";
+import { compileModelParameterPlan } from "./compiler/compileModelParameterPlan.js";
 import type {
   ModelEngineDependencies,
   ModelEngineActivePlaybackRun,
@@ -347,8 +347,9 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     return { status: "prepared", source };
   }
 
-  function startManualPreview(
-    payload: SemanticMotionIntent | MotionPlanPayload,
+  function startCompiledPreviewPlan(
+    plan: MotionPlanPayload,
+    semanticMotion: CompiledSemanticMotion,
     requestId: string,
   ): boolean {
     const normalizedRequestId = requestId.trim();
@@ -362,33 +363,79 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       return false;
     }
 
-    const normalized = normalizeMotionPayload(payload);
-    if (!normalized.ok) {
-      reportInvalidMotionPayload(normalized.reason, runtimeStateController);
+    const selectedModel = dependencies.getSelectedModel();
+    if (!selectedModel) {
+      state.lastCompileReason = "missing_selected_model";
       return false;
     }
-
-    return startNormalizedMotionPayload(
-      normalized.payload,
-      {
+    let notifiedStarted = false;
+    const notifyStarted = (runId: string, startedPlan: MotionPlanPayload): void => {
+      const normalizedRunId = runId.trim();
+      if (!normalizedRunId) {
+        return;
+      }
+      notifiedStarted = true;
+      motionStartDependencies.onPlanStarted({
+        model: selectedModel,
         messageId: normalizedRequestId,
         turnId: null,
         playbackTurnId: null,
         playbackOrigin: "manual_preview",
-        startReason: "preview",
+        startReason: "compiled_semantic_motion_preview",
         queuedDelayMs: 0,
+        payloadKind: "compiled_semantic_motion",
+        diagnostics: semanticMotion.diagnostics,
+        semanticMotion,
+        plan: startedPlan,
+        playerMessage: dependencies.getPlayerMessage?.() || "动作预览播放中。",
+        runId: normalizedRunId,
+      });
+    };
+    const started = plan.resource?.kind === "motion"
+      ? dependencies.playCatalogMotion(plan.resource.motion, selectedModel, {
+          requiresPlaybackClock: false,
+          onStarted: (_motion, runId) => notifyStarted(runId, plan),
+        })
+      : dependencies.playPlan(plan, selectedModel, {
+          softHandoff: true,
+          requiresPlaybackClock: false,
+          onStarted: (startedPlan, runId) => notifyStarted(runId, startedPlan),
+        });
+    if (!started || !notifiedStarted) {
+      state.lastCompileReason = dependencies.getPlayerMessage?.()
+        || "compiled_semantic_motion_preview_start_failed";
+      setState("failed", state.lastCompileReason, semanticMotion.diagnostics);
+      return false;
+    }
+    setState("playing", "动作预览播放中。", semanticMotion.diagnostics);
+    return true;
+  }
+
+  function previewCompiledSemanticMotion(
+    semanticMotion: CompiledSemanticMotion,
+    requestId: string,
+  ): boolean {
+    const selectedModel = dependencies.getSelectedModel();
+    if (!selectedModel) {
+      state.lastCompileReason = "missing_selected_model";
+      return false;
+    }
+    const result = compileModelParameterPlan(
+      semanticMotion,
+      {
+        model: selectedModel,
+        source: "manual_preview",
+        settings: dependencies.getSettings(),
+        samplingIdentity: { turnId: "", messageId: requestId.trim() },
       },
-      motionStartDependencies,
-      runtimeStateController,
+      stageRegistry,
     );
-  }
-
-  function playPreviewIntent(intent: SemanticMotionIntent, requestId: string): boolean {
-    return startManualPreview(intent, requestId);
-  }
-
-  function replayParameterPlan(plan: MotionPlanPayload, requestId: string): boolean {
-    return startManualPreview(plan, requestId);
+    state.lastCompileReason = result.reason;
+    state.lastCompileDiagnostics = result.diagnostics;
+    if (!result.ok || !result.plan) {
+      return false;
+    }
+    return startCompiledPreviewPlan(result.plan, semanticMotion, requestId);
   }
 
   function handlePlaybackTerminal(
@@ -455,8 +502,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     ingestNormalizedPayload,
     preparePlaybackTimeline,
     handlePlaybackTimelineStarted,
-    playPreviewIntent,
-    replayParameterPlan,
+    previewCompiledSemanticMotion,
     handlePlaybackTerminal,
     interruptPlaybackSegment,
     stop,

@@ -94,9 +94,7 @@ function validateProfileForIntent(
   ) {
     return "motion_sequence_must_compile_at_root";
   }
-  const inputAxisCount = intent.schema_version === "engine.motion_intent.v4"
-    ? Object.keys(intent.axis_levels ?? {}).length
-    : Object.keys(intent.axes).length;
+  const inputAxisCount = Object.keys(intent.axis_levels ?? {}).length;
   if (!speechActive && inputAxisCount === 0) {
     return "semantic_intent_axes_empty";
   }

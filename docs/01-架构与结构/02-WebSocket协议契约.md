@@ -181,14 +181,6 @@ AstrBot 内部 Plain、Record、图片与 motion client object 可以物理分�
 
 Motion Lab 事件采用 at-least-once 交付：前端必须先把事件写入 IndexedDB，再通过 WebSocket 发送；WebSocket `send()` 成功不代表记录成功。后端以 `event_id` 作为 SQLite 主键幂等写入，只有插入事务完成后才发送 `system.motion_lab_raw_event_recorded`。前端收到匹配回执后才能删除 IndexedDB 记录；断线重连时使用相同 `event_id` 重发。
 
-### engine.* （双向）
-
-| 类型 | 方向 | 模式 |
-| --- | --- | --- |
-| `engine.motion_intent` | 前端 -> 后端 | 动作实验室 / 手动预览请求 |
-| `engine.catalog_motion` | 前端 -> 后端 | catalog motion 手动预览请求 |
-| `engine.motion_preview` | 后端 -> 前端 | 独立预览结果，不参与正式 turn 播放 |
-
 ## 动作路径
 
 当前正式动作路径：
@@ -200,7 +192,7 @@ Motion Lab 事件采用 at-least-once 交付：前端必须先把事件写入 In
 -> 前端运行时执行计划
 ```
 
-后端不再为正式回复独立广播 `engine.motion_intent` 或 `engine.performance_curve_hint`。独立 `engine.*` 仅服务手动预览边界。
+后端不再为正式回复独立广播 `engine.motion_intent` 或 `engine.performance_curve_hint`。手动预览是前端本地能力：保存的 `CompiledSemanticMotion` 直接进入第二阶段参数编译，不经过 WebSocket。
 
 ### `engine.motion_intent.v4`
 
@@ -248,12 +240,6 @@ Motion Lab 事件采用 at-least-once 交付：前端必须先把事件写入 In
 - motion 资源是完整动作主层，播放时替代普通参数计划。
 - 字段存在但资源不存在、类型不匹配、缺少参数所有权或运行时定位信息时，整个 motion segment 失败。
 - v4 不接受旧的单一 `resource_id`；官方 `<@anim>` 兼容运输同样使用 typed resource 字段。
-
-### `engine.motion_intent.v3`
-
-v3 使用 flat number `axes`，只保留给内部手动预览。官方 `<@anim>` 仅兼容运输形式，内部 intent 使用 v4。
-
-`engine.motion_intent.v1/v2` 不再作为当前协议入口维护。
 
 ## 后端内部映射
 

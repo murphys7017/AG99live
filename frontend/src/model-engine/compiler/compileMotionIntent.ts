@@ -24,7 +24,6 @@ export function compileMotionIntent(
   }
   return compileModelParameterPlan(
     semanticResult.motion,
-    intent,
     options,
     stageRegistry,
   );

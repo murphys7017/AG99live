@@ -171,7 +171,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     const status: DesktopMotionPreviewStatus["status"] = event.status;
     bridge.publishMotionPreviewStatus({
       requestId: completedRun.messageId,
-      source: completedRun.payloadKind === "semantic_intent" ? "intent" : "recorded_plan",
+      source: "compiled_semantic_motion",
       status,
       runId: event.runId,
       ...(event.reason ? { reason: event.reason } : {}),
@@ -232,7 +232,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       if (event.playbackOrigin === "manual_preview") {
         bridge.publishMotionPreviewStatus({
           requestId: event.messageId,
-          source: event.payloadKind === "semantic_intent" ? "intent" : "recorded_plan",
+          source: "compiled_semantic_motion",
           status: "started",
           runId: event.runId,
         });
@@ -298,26 +298,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       console.error("[MotionLab]", message, error);
       adapter.pushHistory("error", message);
     });
-  });
-  adapter.setMotionPreviewHandler((payload) => {
-    const normalized = normalizeMotionPayload(payload);
-    if (!normalized.ok || normalized.payload.kind !== "semantic_intent") {
-      console.error("[AG99live] Remote motion preview rejected.", {
-        reason: normalized.ok
-          ? `unsupported_preview_kind:${normalized.payload.kind}`
-          : normalized.reason,
-      });
-      return false;
-    }
-    const requestId = `remote-preview-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const localPlayed = modelEngine.playPreviewIntent(
-      normalized.payload.intent,
-      requestId,
-    );
-    if (!localPlayed) {
-      console.warn("[AG99live] Remote motion preview playback failed to start.");
-    }
-    return localPlayed;
   });
   const motionTimelineSink = playbackTimelineMotionRuntime.motionTimelineSink;
   motionTimelineSinkTarget = motionTimelineSink;
@@ -448,8 +428,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     modelEngine: {
       stop: (reason) => modelEngine.stop(reason),
       state: modelEngine.state,
-      playPreviewIntent: modelEngine.playPreviewIntent,
-      replayParameterPlan: modelEngine.replayParameterPlan,
+      previewCompiledSemanticMotion: modelEngine.previewCompiledSemanticMotion,
     },
     snapshotPublisher,
     saveMotionTuningSample,

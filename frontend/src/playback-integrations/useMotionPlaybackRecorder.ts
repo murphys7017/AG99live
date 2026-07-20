@@ -61,7 +61,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       runId: event.runId,
       payloadKind: event.payloadKind,
     });
-    if (event.playbackOrigin === "manual_preview") {
+    if (event.playbackOrigin === "manual_preview" || event.payloadKind === "compiled_semantic_motion") {
       console.info("[MotionLab] manual preview excluded from conversation history.", {
         messageId: event.messageId,
         runId: event.runId,
@@ -117,6 +117,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
           emotionLabel: event.plan.emotion_label,
           mode: event.plan.mode,
           plan: cloneJson(event.plan),
+          semanticMotion: cloneJson(event.semanticMotion),
         };
 
     const startedPayload = {
@@ -135,6 +136,9 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
         intent: event.payloadKind === "semantic_intent" ? cloneJson(event.intent) : null,
         speechOnlyRequest: event.payloadKind === "speech_only" ? cloneJson(event.request) : null,
         plan: event.payloadKind === "catalog_motion" ? null : cloneJson(event.plan),
+        semanticMotion: event.payloadKind === "catalog_motion"
+          ? null
+          : cloneJson(event.semanticMotion),
         motion: event.payloadKind === "catalog_motion" ? cloneJson(event.motion) : null,
         diagnostics: event.diagnostics ? cloneJson(event.diagnostics) : null,
         playerMessage: event.playerMessage,

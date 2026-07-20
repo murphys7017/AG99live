@@ -2,12 +2,11 @@ import { compileMotionIntent } from "../compiler/compileMotionIntent.js";
 import { createModelEngineStageRegistry } from "../compiler/registry.js";
 import { MOTION_MIN_REMAINING_AUDIO_MS } from "../constants.js";
 import type { NormalizedMotionPayload } from "../contracts.js";
-import type { CompileDiagnostics } from "../compiler/contracts.js";
+import type { CompileDiagnostics, CompiledSemanticMotion } from "../compiler/contracts.js";
 import type { MotionPlanPayload, SemanticMotionIntent } from "../../types/protocol.js";
 import {
   resolvePerformanceCurveTimeline,
   resolvePlaybackTargetDurationMs,
-  retimeSemanticParameterPlan,
 } from "./playbackClock.js";
 import type {
   MotionRuntimeStateController,
@@ -23,6 +22,7 @@ export interface PreparedSemanticMotionPayload {
   modelPath: string;
   plan: MotionPlanPayload;
   diagnostics: CompileDiagnostics;
+  semanticMotion: CompiledSemanticMotion;
 }
 
 type SemanticIntentPayload = Extract<
@@ -94,7 +94,7 @@ export function startNormalizedMotionPayload(
     return startCatalogMotionPayload(payload, context, dependencies, state);
   }
 
-  return startDirectPlanPayload(payload, context, dependencies, state);
+  return startCatalogMotionPayload(payload, context, dependencies, state);
 }
 
 export function startSpeechOnlyMotionRequest(
@@ -272,6 +272,7 @@ function prepareCompilableMotionPayload(
     modelPath,
     plan: compileResult.plan,
     diagnostics: compileResult.diagnostics,
+    semanticMotion: compileResult.semanticMotion!,
   };
 }
 
@@ -381,6 +382,7 @@ function startCompilableMotionPayload(
       payload,
       prepared.plan,
       prepared.diagnostics,
+      prepared.semanticMotion,
       context,
       dependencies,
       state,
@@ -412,6 +414,7 @@ function startCompilableMotionPayload(
           queuedDelayMs: context.queuedDelayMs,
           payloadKind: payload.kind,
           diagnostics: prepared.diagnostics,
+          semanticMotion: prepared.semanticMotion,
           playerMessage: buildSuccessMessage(context, dependencies),
           runId: normalizedRunId,
         };
@@ -454,6 +457,7 @@ function startCompiledMotionResource(
   payload: Extract<NormalizedMotionPayload, { kind: "semantic_intent" }>,
   plan: MotionPlanPayload,
   diagnostics: CompileDiagnostics,
+  semanticMotion: CompiledSemanticMotion,
   context: StartPayloadContext,
   dependencies: MotionStartDependencies,
   state: MotionRuntimeStateController,
@@ -485,6 +489,7 @@ function startCompiledMotionResource(
         queuedDelayMs: context.queuedDelayMs,
         payloadKind: payload.kind,
         diagnostics,
+        semanticMotion,
         playerMessage: buildSuccessMessage(context, dependencies),
         runId: normalizedRunId,
       });
@@ -503,142 +508,6 @@ function startCompiledMotionResource(
     return rejectMotionStartWithoutRunId(state, diagnostics);
   }
   state.setState("playing", successMessage, diagnostics);
-  state.pushHistory("system", `完整动作资源执行中（${successMessage}）。`);
-  return true;
-}
-
-function startDirectPlanPayload(
-  payload: Extract<NormalizedMotionPayload, { kind: "semantic_plan" }>,
-  context: StartPayloadContext,
-  dependencies: MotionStartDependencies,
-  state: MotionRuntimeStateController,
-): boolean {
-  const selectedModel = dependencies.getSelectedModel();
-  if (payload.plan.resource?.kind === "motion") {
-    return startDirectPlanMotionResource(
-      payload,
-      context,
-      dependencies,
-      state,
-      selectedModel,
-    );
-  }
-  let notifiedStarted = false;
-  let playbackPlan: MotionPlanPayload;
-  try {
-    playbackPlan = retimeSemanticParameterPlan(
-      payload.plan,
-      resolveMotionTargetDurationMs(context),
-    );
-  } catch (error) {
-    const reason = error instanceof Error
-      ? `motion_plan_retime_failed:${error.message}`
-      : "motion_plan_retime_failed";
-    state.setLastCompileReason(reason);
-    state.setState("failed", reason, null);
-    state.pushHistory("error", `动作计划重定时失败：${reason}`);
-    return false;
-  }
-  const started = dependencies.playPlan(
-    playbackPlan,
-    selectedModel,
-    {
-      softHandoff: true,
-      playbackClockReader: context.playbackClockReader,
-      requiresPlaybackClock: context.playbackOrigin === "conversation",
-      onStarted: (plan, runId) => {
-        const normalizedRunId = normalizeMotionRunId(runId);
-        if (!normalizedRunId) {
-          return;
-        }
-        notifiedStarted = true;
-        dependencies.onPlanStarted({
-          plan,
-          model: selectedModel,
-          messageId: context.messageId,
-          turnId: context.turnId,
-          playbackTurnId: context.playbackTurnId,
-          playbackOrigin: context.playbackOrigin,
-          startReason: context.startReason,
-          queuedDelayMs: context.queuedDelayMs,
-          payloadKind: payload.kind,
-          diagnostics: null,
-          playerMessage: buildSuccessMessage(context, dependencies),
-          runId: normalizedRunId,
-        });
-      },
-    },
-  );
-
-  if (!started) {
-    const failureReason = dependencies.getPlayerMessage?.()
-      || "动作计划被运行时拒绝执行。";
-    state.setLastCompileReason(failureReason);
-    state.setState("failed", failureReason, null);
-    state.pushHistory("error", `动作播放失败：${failureReason}`);
-    return false;
-  }
-
-  const successMessage = buildSuccessMessage(context, dependencies);
-  if (!notifiedStarted) {
-    return rejectMotionStartWithoutRunId(state, null);
-  }
-
-  state.setState("playing", successMessage, null);
-  state.pushHistory("system", `动作计划执行中（${successMessage}）。`);
-  return true;
-}
-
-function startDirectPlanMotionResource(
-  payload: Extract<NormalizedMotionPayload, { kind: "semantic_plan" }>,
-  context: StartPayloadContext,
-  dependencies: MotionStartDependencies,
-  state: MotionRuntimeStateController,
-  selectedModel: ReturnType<MotionStartDependencies["getSelectedModel"]>,
-): boolean {
-  const resource = payload.plan.resource;
-  if (!resource || resource.kind !== "motion") {
-    return false;
-  }
-  let notifiedStarted = false;
-  const started = dependencies.playCatalogMotion(resource.motion, selectedModel, {
-    playbackClockReader: context.playbackClockReader,
-    requiresPlaybackClock: context.playbackOrigin === "conversation",
-    onStarted: (_motion, runId) => {
-      const normalizedRunId = normalizeMotionRunId(runId);
-      if (!normalizedRunId) {
-        return;
-      }
-      notifiedStarted = true;
-      dependencies.onPlanStarted({
-        plan: payload.plan,
-        model: selectedModel,
-        messageId: context.messageId,
-        turnId: context.turnId,
-        playbackTurnId: context.playbackTurnId,
-        playbackOrigin: context.playbackOrigin,
-        startReason: context.startReason,
-        queuedDelayMs: context.queuedDelayMs,
-        payloadKind: payload.kind,
-        diagnostics: null,
-        playerMessage: buildSuccessMessage(context, dependencies),
-        runId: normalizedRunId,
-      });
-    },
-  });
-  if (!started) {
-    const reason = dependencies.getPlayerMessage?.()
-      || `完整动作资源执行失败：${resource.resource_id}`;
-    state.setLastCompileReason(reason);
-    state.setState("failed", reason, null);
-    state.pushHistory("error", reason);
-    return false;
-  }
-  const successMessage = buildSuccessMessage(context, dependencies);
-  if (!notifiedStarted) {
-    return rejectMotionStartWithoutRunId(state, null);
-  }
-  state.setState("playing", successMessage, null);
   state.pushHistory("system", `完整动作资源执行中（${successMessage}）。`);
   return true;
 }

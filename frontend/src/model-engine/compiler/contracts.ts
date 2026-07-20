@@ -4,6 +4,7 @@ import type {
   MotionAxisLevelMap,
   MotionAxisLevelStep,
   MotionPlanPayload,
+  PerformanceCurveHint,
 } from "../../types/protocol.js";
 import type { ModelEngineSettings } from "../settings.js";
 
@@ -160,6 +161,7 @@ export interface CompileResult {
   reason: string;
   diagnostics: CompileDiagnostics;
   feedback?: MotionFeedback;
+  semanticMotion?: CompiledSemanticMotion;
 }
 
 export interface CompiledSemanticAxis {
@@ -182,6 +184,10 @@ interface CompiledSemanticMotionBase {
   modelId: string;
   mode: "idle" | "expressive";
   emotionLabel: string;
+  intentTags: string[];
+  performanceCurveHint?: PerformanceCurveHint;
+  expressionResourceId?: string;
+  motionResourceId?: string;
   timing: MotionTimingResolution;
   diagnostics: CompileDiagnostics;
 }

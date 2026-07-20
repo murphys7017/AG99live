@@ -9,10 +9,7 @@ import type {
   DesktopMotionPlaybackRecord,
   DesktopMotionTuningSample,
 } from "../types/desktop";
-import type {
-  MotionPlanPayload,
-  SemanticMotionIntent,
-} from "../types/protocol";
+import type { CompiledSemanticMotion } from "../model-engine/compiler/contracts";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 
 const bridge = useDesktopBridge();
@@ -59,19 +56,11 @@ function createPreviewRequestId(): string {
   return `motion-preview-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function previewMotionIntent(intent: SemanticMotionIntent): void {
+function previewCompiledSemanticMotion(semanticMotion: CompiledSemanticMotion): void {
   bridge.sendCommand({
-    type: "preview_motion_intent",
+    type: "preview_compiled_semantic_motion",
     requestId: createPreviewRequestId(),
-    intent,
-  });
-}
-
-function replayParameterPlan(plan: MotionPlanPayload): void {
-  bridge.sendCommand({
-    type: "replay_parameter_plan",
-    requestId: createPreviewRequestId(),
-    plan,
+    semanticMotion,
   });
 }
 
@@ -107,16 +96,13 @@ onMounted(() => {
         :motion-tuning-samples-status="motionTuningSamplesStatus"
         :effective-examples="effectiveExamples"
         @request-motion-tuning-samples-sync="sendRuntimeCommand('request_motion_tuning_samples_sync')"
-        @preview-motion-intent="previewMotionIntent"
-        @replay-parameter-plan="replayParameterPlan"
+        @preview-compiled-semantic-motion="previewCompiledSemanticMotion"
         @save-motion-tuning-sample="saveMotionTuningSample"
         @delete-motion-tuning-sample="deleteMotionTuningSample"
       />
       <BaseActionPreviewPanel
         :preview="parameterActionPreview"
         :semantic-profile="semanticProfile"
-        :allow-play="true"
-        @preview-motion-intent="previewMotionIntent"
       />
     </section>
   </DesktopWindowPanel>

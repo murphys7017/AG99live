@@ -7,12 +7,11 @@ TurnCoordinator 把"前端协议消息 ↔ AstrBot 事件总线 ↔ 出站回放
     1. 接收 transport 解码出的 JSON dict / 二进制帧，并在本层完成协议解析。
     2. handle_msg 按 message.type 路由：
          - system.*                                        → _handle_frontend_system
-         - engine.motion_intent / engine.catalog_motion    → _handle_engine_motion_payload_preview
          - control.playback_finished                       → finalize_turn
          - control.interrupt                               → _handle_interrupt_signal
          - input.audio_stream_*                            → SpeechIngressService
          - input.text                                      → _commit_inbound_message
-    3. 除 system.* 与 engine preview 入口外，交互类 message.type 都要求 turn_id 非空
+    3. 除 system.* 外，交互类 message.type 都要求 turn_id 非空
        （_require_interactive_turn_id）；前端 turn_id 通过 turn_identity_map 与
        后端 turn_id 互相绑定。
 
@@ -25,8 +24,7 @@ TurnCoordinator 把"前端协议消息 ↔ AstrBot 事件总线 ↔ 出站回放
 边界
     - 不直接读写 WebSocket：所有出站都走注入的 send_json 回调。
     - 信封形状解析集中交给 protocol/parser.py，由本层在入口调用。
-    - 大多数出站信封交给 protocol/builder.py；engine preview/egress 少量路径直接使用
-      build_message_envelope。
+    - 出站信封交给 protocol/builder.py；动作作为 output.segment 的一个原子槽位发送。
     - 不感知动作语义内部细节：动作 payload 的提取、规范化在 motion/* 与 middleware/*，
       本中枢只决定"何时把动作 payload 广播给前端"。
 """
@@ -81,10 +79,8 @@ from ..motion.inline_motion import (
 )
 from ..motion.payload_validation import validate_normalized_motion_intent_payload
 from ..motion.payload_dispatch import (
-    extract_message_motion_payload as _extract_message_motion_payload,
     resolve_engine_motion_message_type as _resolve_engine_motion_message_type,
     resolve_motion_payload_schema_version as _resolve_motion_payload_schema_version,
-    summarize_motion_payload as _summarize_motion_payload,
 )
 from ..motion.output_sanitizer import sanitize_assistant_output_text
 from .message_utils import (
@@ -170,9 +166,6 @@ class TurnCoordinator:
             await self._handle_frontend_system(message)
             return
 
-        if message.type in {TYPE_ENGINE_MOTION_INTENT, TYPE_ENGINE_CATALOG_MOTION}:
-            await self._handle_engine_motion_payload_preview(message)
-            return
 
         turn_id = self._require_interactive_turn_id(message)
 
@@ -504,10 +497,7 @@ class TurnCoordinator:
         if segment.motion_payload is None:
             return {"state": "absent"}
         payload = segment.motion_payload
-        if _resolve_motion_payload_schema_version(payload) in {
-            "engine.motion_intent.v3",
-            "engine.motion_intent.v4",
-        }:
+        if _resolve_motion_payload_schema_version(payload) == "engine.motion_intent.v4":
             payload = normalize_motion_intent_payload(payload)
         message_type = _resolve_engine_motion_message_type(payload)
         if message_type not in {TYPE_ENGINE_MOTION_INTENT, TYPE_ENGINE_CATALOG_MOTION}:
@@ -872,48 +862,6 @@ class TurnCoordinator:
             umo,
         )
 
-    async def _handle_engine_motion_payload_preview(self, message) -> None:
-        payload = message.payload if isinstance(message.payload, dict) else {}
-        motion_payload, failure_reason = _extract_message_motion_payload(
-            message.type,
-            payload,
-        )
-        mode = str(payload.get("mode") or "preview")
-        if failure_reason:
-            logger.warning(
-                "WIRING motion_payload_ingress rejected type=%s mode=%s turn_id=%s failure_reason=%s",
-                message.type,
-                mode,
-                message.turn_id or "",
-                failure_reason,
-            )
-            await self._send_json(
-                build_control_error(
-                    turn_id=message.turn_id,
-                    message=f"Invalid {message.type} payload: {failure_reason}",
-                )
-            )
-            return
-        schema_version, resolved_mode, axis_count, supplementary_count, failure_reason = _summarize_motion_payload(
-            motion_payload
-        )
-
-        logger.info(
-            "WIRING motion_payload_ingress type=%s mode=%s turn_id=%s "
-            "plan_schema=%s plan_mode=%s axis_count=%s supplementary_count=%s failure_reason=%s",
-            message.type,
-            mode,
-            message.turn_id or "",
-            schema_version,
-            resolved_mode,
-            axis_count,
-            supplementary_count,
-            failure_reason,
-        )
-        # Frontend-origin preview payloads are validated here; playback happens
-        # locally in the desktop frontend, so the adapter only records ingress.
-        return
-
     def get_last_prompt_motion_snapshot(self) -> dict[str, Any] | None:
         snapshot = getattr(self, "_last_prompt_motion_snapshot", None)
         if not isinstance(snapshot, dict):
@@ -943,32 +891,14 @@ class TurnCoordinator:
         motion_payload: dict[str, Any],
         source: str,
     ) -> None:
-        if str(motion_payload.get("schema_version") or "").strip() not in {
-            "engine.motion_intent.v3",
-            "engine.motion_intent.v4",
-        }:
+        if str(motion_payload.get("schema_version") or "").strip() != "engine.motion_intent.v4":
             return
-        schema_version = str(motion_payload.get("schema_version") or "").strip()
-        axes = motion_payload.get("axes")
         axis_levels = motion_payload.get("axis_levels")
         motion_steps = motion_payload.get("motion_steps")
-        if schema_version == "engine.motion_intent.v4":
-            has_levels = isinstance(axis_levels, dict) and bool(axis_levels)
-            has_steps = isinstance(motion_steps, list) and bool(motion_steps)
-            if has_levels == has_steps or "axes" in motion_payload:
-                return
-        elif not isinstance(axes, dict) or not axes or "axis_levels" in motion_payload:
+        has_levels = isinstance(axis_levels, dict) and bool(axis_levels)
+        has_steps = isinstance(motion_steps, list) and bool(motion_steps)
+        if has_levels == has_steps or "axes" in motion_payload:
             return
-
-        normalized_axes: dict[str, float] = {}
-        if isinstance(axes, dict):
-            for axis_id, axis_value in axes.items():
-                if not isinstance(axis_value, (int, float)) or isinstance(axis_value, bool):
-                    continue
-                normalized_axis_id = str(axis_id or "").strip()
-                if not normalized_axis_id:
-                    continue
-                normalized_axes[normalized_axis_id] = round(float(axis_value), 4)
         normalized_levels = dict(axis_levels) if isinstance(axis_levels, dict) else {}
 
         intent_tags = motion_payload.get("intent_tags")
@@ -981,33 +911,27 @@ class TurnCoordinator:
             ][:6]
 
         snapshot = {
-            "schema_version": schema_version,
+            "schema_version": "engine.motion_intent.v4",
             "source": str(source or "").strip(),
             "intent_tags": normalized_tags,
         }
-        if schema_version == "engine.motion_intent.v4":
-            if normalized_levels:
-                snapshot["axis_levels"] = normalized_levels
-            if isinstance(motion_steps, list):
-                snapshot["motion_steps"] = [
-                    {
-                        "axis_levels": dict(step.get("axis_levels") or {}),
-                        "duration_weight": step.get("duration_weight"),
-                    }
-                    for step in motion_steps
-                    if isinstance(step, dict)
-                ]
-            snapshot["expression_resource_id"] = str(
-                motion_payload.get("expression_resource_id") or ""
-            ).strip()
-            snapshot["motion_resource_id"] = str(
-                motion_payload.get("motion_resource_id") or ""
-            ).strip()
-        else:
-            snapshot["axes"] = normalized_axes
-            snapshot["resource_id"] = str(
-                motion_payload.get("resource_id") or ""
-            ).strip()
+        if normalized_levels:
+            snapshot["axis_levels"] = normalized_levels
+        if isinstance(motion_steps, list):
+            snapshot["motion_steps"] = [
+                {
+                    "axis_levels": dict(step.get("axis_levels") or {}),
+                    "duration_weight": step.get("duration_weight"),
+                }
+                for step in motion_steps
+                if isinstance(step, dict)
+            ]
+        snapshot["expression_resource_id"] = str(
+            motion_payload.get("expression_resource_id") or ""
+        ).strip()
+        snapshot["motion_resource_id"] = str(
+            motion_payload.get("motion_resource_id") or ""
+        ).strip()
         self._last_prompt_motion_snapshot = snapshot
 
     def _record_motion_lab_raw_event(

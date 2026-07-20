@@ -12,7 +12,6 @@ from .catalog_motion import (
     validate_catalog_motion_payload,
 )
 from .motion_intent import (
-    MOTION_INTENT_V3_SCHEMA_VERSION,
     MOTION_INTENT_V4_SCHEMA_VERSION,
     normalize_motion_intent_payload,
     validate_motion_intent_payload,
@@ -27,7 +26,7 @@ def resolve_motion_payload_schema_version(payload: Any) -> str:
 
 def validate_motion_payload(payload: Any) -> tuple[bool, str]:
     schema_version = resolve_motion_payload_schema_version(payload)
-    if schema_version in {MOTION_INTENT_V3_SCHEMA_VERSION, MOTION_INTENT_V4_SCHEMA_VERSION}:
+    if schema_version == MOTION_INTENT_V4_SCHEMA_VERSION:
         return validate_motion_intent_payload(payload)
     if schema_version == "engine.catalog_motion.v1":
         return validate_catalog_motion_payload(payload)
@@ -36,7 +35,7 @@ def validate_motion_payload(payload: Any) -> tuple[bool, str]:
 
 def resolve_engine_motion_message_type(payload: Any) -> str:
     schema_version = resolve_motion_payload_schema_version(payload)
-    if schema_version in {MOTION_INTENT_V3_SCHEMA_VERSION, MOTION_INTENT_V4_SCHEMA_VERSION}:
+    if schema_version == MOTION_INTENT_V4_SCHEMA_VERSION:
         return TYPE_ENGINE_MOTION_INTENT
     if schema_version == "engine.catalog_motion.v1":
         return TYPE_ENGINE_CATALOG_MOTION
@@ -53,7 +52,7 @@ def summarize_motion_payload(plan: Any) -> tuple[str, str, int, int, str]:
         return catalog_schema, motion_id or emotion_label, 0, 0, failure_reason
 
     mode = str(plan.get("mode") or "").strip().lower()
-    if schema_version in {MOTION_INTENT_V3_SCHEMA_VERSION, MOTION_INTENT_V4_SCHEMA_VERSION} and not mode:
+    if schema_version == MOTION_INTENT_V4_SCHEMA_VERSION and not mode:
         mode = "expressive"
     axes = plan.get("axes")
     if axes is None:

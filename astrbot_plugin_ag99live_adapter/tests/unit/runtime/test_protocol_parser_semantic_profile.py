@@ -71,27 +71,25 @@ def test_parse_inbound_message_accepts_motion_tuning_sample_save() -> None:
                     "enabled_for_llm_reference": True,
                     "original_axes": {"mouth_smile": 0.6},
                     "adjusted_axes": {"mouth_smile": 0.8},
-                    "adjusted_plan": {
-                        "schema_version": "engine.parameter_plan.v2",
-                        "profile_id": "DemoModel.semantic.v1",
-                        "profile_revision": 3,
-                        "model_id": "DemoModel",
+                    "compiled_semantic_motion": {
+                        "schemaVersion": "engine.compiled_semantic_motion.v1",
+                        "profileId": "DemoModel.semantic.v1",
+                        "profileRevision": 3,
+                        "modelId": "DemoModel",
+                        "kind": "pose",
                         "mode": "expressive",
-                        "emotion_label": "joy",
+                        "emotionLabel": "joy",
+                        "intentTags": ["smile"],
                         "timing": {
-                            "duration_ms": 1200,
-                            "blend_in_ms": 120,
-                            "hold_ms": 800,
-                            "blend_out_ms": 280,
+                            "resolvedDurationMs": 1200,
                         },
-                        "parameters": [
+                        "diagnostics": {},
+                        "axes": [
                             {
-                                "axis_id": "mouth_smile",
-                                "parameter_id": "ParamMouthSmile",
-                                "target_value": 0.8,
-                                "weight": 1.0,
-                                "input_value": 0.8,
-                                "source": "manual",
+                                "axisId": "mouth_smile",
+                                "value": 0.8,
+                                "neutralValue": 0.0,
+                                "source": "semantic_axis",
                             }
                         ],
                     },

@@ -168,10 +168,7 @@ export type InboundAdapterEvent =
     turnId: string | null;
     envelope: ProtocolEnvelope<unknown>;
   }
-  | {
-    kind: "engine_motion_preview";
-    envelope: ProtocolEnvelope<Record<string, unknown>>;
-  };
+  ;
 
 /**
  * 折叠一份 envelope。任何 payload 校验失败、message_id 缺失，都折叠为
@@ -379,11 +376,6 @@ export function mapInboundEnvelopeToEvent(
         envelope: withPayload(envelope, parsed.payload),
       };
     }
-    case INBOUND_MESSAGE_TYPES.ENGINE_MOTION_PREVIEW:
-      return {
-        kind: "engine_motion_preview",
-        envelope: envelope as ProtocolEnvelope<Record<string, unknown>>,
-      };
     default:
       return {
         kind: "unhandled",

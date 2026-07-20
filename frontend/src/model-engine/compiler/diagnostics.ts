@@ -106,11 +106,8 @@ function buildTransformTrace(context: MotionCompileContext): MotionTransformTrac
     transformVersion: SEMANTIC_MOTION_TRANSFORM_VERSION,
     profileRevision: profile?.revision ?? 0,
     profileHash: profile?.source_hash ?? "",
-    rawAxes: context.intent.schema_version === "engine.motion_intent.v3"
-      ? { ...context.intent.axes }
-      : {},
-    rawAxisLevels: context.intent.schema_version === "engine.motion_intent.v4"
-      && context.intent.axis_levels
+    rawAxes: {},
+    rawAxisLevels: context.intent.axis_levels
       ? { ...context.intent.axis_levels }
       : undefined,
     axisSampling: context.state.axisSampling

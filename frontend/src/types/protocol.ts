@@ -2,13 +2,11 @@ import type { SemanticAxisProfile } from "./semantic-axis-profile";
 
 export {
   SCHEMA_CATALOG_MOTION_V1,
-  SCHEMA_MOTION_INTENT_V3,
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_PARAMETER_PLAN_V2,
 } from "./protocolSchema.generated.js";
 import {
   SCHEMA_CATALOG_MOTION_V1,
-  SCHEMA_MOTION_INTENT_V3,
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_PARAMETER_PLAN_V2,
 } from "./protocolSchema.generated.js";
@@ -660,16 +658,6 @@ interface NormalizedSemanticMotionIntentBase {
   };
 }
 
-export interface NormalizedSemanticMotionIntentV3
-  extends NormalizedSemanticMotionIntentBase {
-  schema_version: typeof SCHEMA_MOTION_INTENT_V3;
-  axes: Record<string, number>;
-  axis_levels?: never;
-  resource_id?: string;
-  expression_resource_id?: never;
-  motion_resource_id?: never;
-}
-
 interface NormalizedSemanticMotionIntentV4Base
   extends NormalizedSemanticMotionIntentBase {
   schema_version: typeof SCHEMA_MOTION_INTENT_V4;
@@ -693,9 +681,7 @@ export type NormalizedSemanticMotionIntentV4 =
   );
 
 /** Normalized semantic motion intent consumed by ModelEngine. */
-export type NormalizedSemanticMotionIntent =
-  | NormalizedSemanticMotionIntentV3
-  | NormalizedSemanticMotionIntentV4;
+export type NormalizedSemanticMotionIntent = NormalizedSemanticMotionIntentV4;
 
 export interface DirectParameterPlanTiming {
   duration_ms: number;
@@ -914,7 +900,7 @@ export interface MotionTuningSampleProtocolPayload {
   resolved_axes?: Record<string, number>;
   constrained_axes?: Record<string, number>;
   adjusted_axes: Record<string, number>;
-  adjusted_plan: MotionPlanPayload;
+  compiled_semantic_motion: unknown;
 }
 
 export interface SystemMotionTuningSampleSavePayload {

@@ -152,7 +152,7 @@ function parseSegmentMotionSlot(type: string, value: unknown): PayloadParseResul
   const schemaVersion = payload?.schema_version;
   const expectedMessageType = schemaVersion === "engine.catalog_motion.v1"
     ? "engine.catalog_motion"
-    : schemaVersion === "engine.motion_intent.v3" || schemaVersion === "engine.motion_intent.v4"
+    : schemaVersion === "engine.motion_intent.v4"
       ? "engine.motion_intent"
       : null;
   if (
