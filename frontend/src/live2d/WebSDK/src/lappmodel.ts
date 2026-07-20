@@ -44,7 +44,9 @@ import { canvas, gl } from "./lappglmanager";
 import { LAppPal } from "./lapppal";
 import {
   resolveParameterPresentationFrame,
+  resolveParameterPresentationTrack,
   type ParameterPresentationNode,
+  type ParameterPresentationTrackPoint,
 } from "./parameterpresentation";
 import {
   prepareDirectParameterExecution,
@@ -117,19 +119,11 @@ interface DirectSemanticParameterBinding {
   weight: number;
   inputValue: number | null;
   source: string;
-  keyframes: Array<{
-    atMs: number;
-    transitionMs: number;
-    targetValue: number;
-  }>;
+  keyframes: ParameterPresentationTrackPoint[];
   modulationAmplitude: number;
   modulationDirection: number;
   modulationDelayMs: number;
-  modulationPoints: Array<{
-    atMs: number;
-    transitionMs: number;
-    value: number;
-  }>;
+  modulationPoints: ParameterPresentationTrackPoint[];
   modulation: {
     kind: string;
     preset: string;
@@ -1659,10 +1653,10 @@ export class LAppModel extends CubismUserModel {
         ? item.keyframes.map((keyframe: any) => ({
             atMs: Number(keyframe.at_ms),
             transitionMs: Number(keyframe.transition_ms),
-            targetValue: Number(keyframe.target_value),
+            value: Number(keyframe.target_value),
           }))
         : [];
-      if (keyframes.some((keyframe) => keyframe.targetValue < minValue || keyframe.targetValue > maxValue)) {
+      if (keyframes.some((keyframe) => keyframe.value < minValue || keyframe.value > maxValue)) {
         this.stopDirectParameterPlan(`v2_parameter_keyframe_out_of_runtime_range:${parameterIdRaw}`);
         return false;
       }
@@ -1857,16 +1851,11 @@ export class LAppModel extends CubismUserModel {
     return null;
   }
 
-  private smoothstep(value: number): number {
-    const x = Math.max(0, Math.min(1, value));
-    return x * x * (3 - 2 * x);
-  }
-
   private updateSpeechAudioEnvelope(
-    lipSyncValue: number,
+    speechEnergyValue: number,
     deltaTimeSeconds: number,
   ): void {
-    const target = this.smoothstep(Math.max(0, Math.min(1, lipSyncValue)));
+    const target = Math.max(0, Math.min(1, speechEnergyValue));
     this._speechAudioEnvelope = this.updateEnvelopeValue(
       this._speechAudioEnvelope,
       target,
@@ -1926,8 +1915,8 @@ export class LAppModel extends CubismUserModel {
     minValue: number,
     maxValue: number,
   ): number {
-    const sequenceTargetValue = this.resolveSemanticSequenceTarget(
-      item,
+    const sequenceTargetValue = resolveParameterPresentationTrack(
+      item.keyframes,
       elapsedMs,
       fallbackTargetValue,
     );
@@ -1935,7 +1924,11 @@ export class LAppModel extends CubismUserModel {
       return Math.max(minValue, Math.min(maxValue, sequenceTargetValue));
     }
 
-    const gestureValue = this.resolveSpeechGestureTrackValue(item, elapsedMs);
+    const gestureValue = resolveParameterPresentationTrack(
+      item.modulationPoints,
+      Math.max(0, elapsedMs - item.modulationDelayMs),
+      0,
+    );
     const audioGain = this.resolveSpeechAudioGain(item);
     const modulatedValue =
       sequenceTargetValue
@@ -1944,34 +1937,6 @@ export class LAppModel extends CubismUserModel {
         * item.modulationDirection
         * audioGain;
     return Math.max(minValue, Math.min(maxValue, modulatedValue));
-  }
-
-  private resolveSemanticSequenceTarget(
-    item: DirectSemanticParameterBinding,
-    elapsedMs: number,
-    fallbackTargetValue: number,
-  ): number {
-    const keyframes = item.keyframes;
-    if (keyframes.length < 2) {
-      return fallbackTargetValue;
-    }
-    let previous = keyframes[0];
-    for (let index = 1; index < keyframes.length; index += 1) {
-      const next = keyframes[index];
-      if (elapsedMs < next.atMs) {
-        return previous.targetValue;
-      }
-      const transitionEndMs = next.atMs + next.transitionMs;
-      if (next.transitionMs > 0 && elapsedMs < transitionEndMs) {
-        const progress = this.smoothstep(
-          (elapsedMs - next.atMs) / next.transitionMs,
-        );
-        return previous.targetValue
-          + (next.targetValue - previous.targetValue) * progress;
-      }
-      previous = next;
-    }
-    return previous.targetValue;
   }
 
   private resolveExternalLipSyncValue(): number | null {
@@ -2021,33 +1986,6 @@ export class LAppModel extends CubismUserModel {
       delayMs: modulation.delayMs ?? 0,
       points: modulation.points,
     };
-  }
-
-  private resolveSpeechGestureTrackValue(
-    item: DirectSemanticParameterBinding,
-    elapsedMs: number,
-  ): number {
-    const points = item.modulationPoints;
-    if (points.length < 2) {
-      return 0;
-    }
-    const delayedElapsedMs = Math.max(0, elapsedMs - item.modulationDelayMs);
-    let previous = points[0];
-    for (let index = 1; index < points.length; index += 1) {
-      const next = points[index];
-      if (delayedElapsedMs < next.atMs) {
-        return previous.value;
-      }
-      const transitionEndMs = next.atMs + next.transitionMs;
-      if (next.transitionMs > 0 && delayedElapsedMs < transitionEndMs) {
-        const progress = this.smoothstep(
-          (delayedElapsedMs - next.atMs) / next.transitionMs,
-        );
-        return previous.value + (next.value - previous.value) * progress;
-      }
-      previous = next;
-    }
-    return previous.value;
   }
 
   private parseSpeechPoseModulation(item: DirectSemanticParameterBinding): {

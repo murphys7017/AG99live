@@ -13,6 +13,12 @@ export interface ParameterPresentationNode {
   lastElapsedMs: number | null;
 }
 
+export interface ParameterPresentationTrackPoint {
+  atMs: number;
+  transitionMs: number;
+  value: number;
+}
+
 export interface ParameterPresentationFrame {
   targetValue: number;
   value: number;
@@ -62,6 +68,33 @@ export function resolveParameterPresentationFrame(
     value: next.value,
     settled: isSettled(next.value, node.neutralValue, next.velocity),
   };
+}
+
+export function resolveParameterPresentationTrack(
+  points: ParameterPresentationTrackPoint[],
+  elapsedMs: number,
+  fallbackValue: number,
+): number {
+  if (points.length < 2) {
+    return fallbackValue;
+  }
+  let previous = points[0];
+  for (let index = 1; index < points.length; index += 1) {
+    const next = points[index];
+    if (elapsedMs < next.atMs) {
+      return previous.value;
+    }
+    const transitionEndMs = next.atMs + next.transitionMs;
+    if (next.transitionMs > 0 && elapsedMs < transitionEndMs) {
+      return interpolate(
+        previous.value,
+        next.value,
+        smoothstep((elapsedMs - next.atMs) / next.transitionMs),
+      );
+    }
+    previous = next;
+  }
+  return previous.value;
 }
 
 function isSettled(value: number, neutralValue: number, velocity: number): boolean {
