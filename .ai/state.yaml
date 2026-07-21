@@ -1,9 +1,9 @@
 task:
-  class: feature
-  risk: high
+  class: documentation
+  risk: medium
   phase: implementation_complete
   status: complete
-  scope: Increase Live2D semantic pose readability and speech-following expressiveness without changing model hard limits or Cubism Physics ownership.
+  scope: Rewrite the root README as the public Phase 1 project introduction, using current code and documentation as the source of truth and the two user-selected product screenshots.
 
 context:
   confidence: high
@@ -66,6 +66,7 @@ verification:
     - Source tracing, structured runtime logs, Motion Lab records, and a live Electron conversation are the primary evidence.
     - Do not run full regression suites by default and do not add mocks to compensate for missing live verification.
   checks_run:
+    - Root README protocol names, feature claims, startup paths, documentation links, and image paths were checked against current source and repository files; the two user-selected screenshots were inspected visually.
     - `python scripts/check_protocol_schema_manifest.py` passed.
     - `npm run typecheck:renderer` passed in frontend.
     - `npm run typecheck:websdk` passed in frontend.
