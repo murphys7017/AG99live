@@ -42,7 +42,7 @@ flowchart LR
     CORE -->|调用| PROVIDER
     PROVIDER -->|回复 / 音频| CORE
     CORE -->|事件、Persona hooks、MessageChain| AG99
-    AG99 -->|WebSocket v2<br/>output.segment.v3| RENDERER
+    AG99 -->|WebSocket v2<br/>server_info manifest<br/>live2d_scan.v2<br/>output.segment.v3| RENDERER
     RENDERER -->|input / control / profile / Motion Lab| AG99
 
     ELECTRON <--> RENDERER
@@ -53,7 +53,7 @@ flowchart LR
     RENDERER -->|窗口 / 字幕 / UI| OBS
 
     PROFILE --> LIVE2D
-    PROFILE -.扫描与 semantic profile.-> AG99
+    PROFILE -.完整扫描 / semantic profile / runtime cache.-> AG99
     RENDERER -->|先写待确认事件| INDEXED
     INDEXED -.以相同 event_id 重发.-> RENDERER
     AG99 -->|异步持久化| SQLITE

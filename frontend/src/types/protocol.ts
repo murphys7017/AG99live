@@ -6,6 +6,7 @@ export {
   SCHEMA_PARAMETER_PLAN_V2,
 } from "./protocolSchema.generated.js";
 import {
+  PROTOCOL_VERSION,
   SCHEMA_CATALOG_MOTION_V1,
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_PARAMETER_PLAN_V2,
@@ -25,6 +26,22 @@ export interface SystemServerInfoPayload {
   ws_url: string;
   http_base_url: string;
   auto_start_mic: boolean;
+  schema_manifest: ProtocolSchemaManifest;
+}
+
+export interface ProtocolSchemaManifest {
+  protocol_version: typeof PROTOCOL_VERSION;
+  schemas: {
+    catalog_motion: string;
+    model_info: string;
+    motion_intent: string;
+    output_segment: string;
+    parameter_plan: string;
+    performance_curve_hint: string;
+    semantic_axis_profile: string;
+    semantic_axis_relation_graph: string;
+    voice_following_profile: string;
+  };
 }
 
 export type OutputSegmentTextSlot =
@@ -169,36 +186,9 @@ export interface VoiceFollowingProfile {
 export interface ExpressionConstraint {
   name: string;
   file: string;
-  catalog_id?: string;
-  catalog_expose_as_resource?: boolean;
-  category: string;
+  catalog_id: string;
+  catalog_expose_as_resource: boolean;
   parameter_ids: string[];
-  parameter_count: number;
-  affects_channels: string[];
-  parameters: Array<{
-    id: string;
-    name: string;
-    group_name: string;
-    kind: string;
-    domain: string;
-    channels: string[];
-    value: number;
-    abs_value: number;
-    blend: string;
-    intensity: string;
-  }>;
-  dominant_parameters: Array<{
-    id: string;
-    value: number;
-    blend: string;
-    domain: string;
-    channels: string[];
-  }>;
-  dominant_domains: string[];
-  dominant_channels: string[];
-  blend_modes: string[];
-  intensity: string;
-  touches_non_expression_parameters: boolean;
 }
 
 export interface ExpressionScanPayload {
@@ -239,228 +229,13 @@ export interface ResourceScanPayload {
 export interface MotionConstraint {
   name: string;
   file: string;
-  catalog_id?: string;
-  catalog_expose_as_resource?: boolean;
+  catalog_id: string;
+  catalog_expose_as_resource: boolean;
   group: string;
-  category: string;
   duration: number;
-  curve_count: number;
-  parameter_count: number;
-  affects_channels: string[];
-  uses_expression_parameters: boolean;
-  uses_physics_parameters: boolean;
+  parameter_ids: string[];
   catalog_label: string;
-  catalog_tags: string[];
   catalog_intensity: string;
-  decomposition_level: string;
-  component_count: number;
-  component_ids: string[];
-  driver_component_count: number;
-  driver_component_ids: string[];
-  dominant_channels: string[];
-  dominant_domains: string[];
-  channel_weights: Array<{ name: string; count: number }>;
-  domain_weights: Array<{ name: string; count: number }>;
-  kind_counts: Array<{ name: string; count: number }>;
-  segment_types: Array<{ name: string; count: number }>;
-  timeline_profile: {
-    intro_energy: number;
-    middle_energy: number;
-    outro_energy: number;
-    peak_window: { start_ratio: number; end_ratio: number };
-    motion_trait: string;
-  };
-  motion_windows: Array<{ start_ratio: number; end_ratio: number }>;
-  loop: boolean;
-  fps: number;
-}
-
-export interface MotionResourceComponent {
-  id: string;
-  source_motion: string;
-  source_file: string;
-  source_group: string;
-  source_category: string;
-  curve_index: number;
-  parameter_id: string;
-  parameter_name: string;
-  kind: string;
-  domain: string;
-  engine_role: string;
-  channels: string[];
-  group_name: string;
-  duration: number;
-  fps: number;
-  loop: boolean;
-  strength: string;
-  trait: string;
-  segment_types: string[];
-  sample_count: number;
-  value_profile: {
-    start: number;
-    end: number;
-    min: number;
-    max: number;
-    baseline: number;
-    span: number;
-  };
-  peak_abs_value: number;
-  peak_time_ratio: number;
-  active_ratio: number;
-  energy_score: number;
-  windows: Array<{ start_ratio: number; end_ratio: number }>;
-}
-
-export interface MotionResourcePool {
-  decomposition_level: string;
-  summary: {
-    motion_count: number;
-    component_count: number;
-    driver_component_count: number;
-    overlay_component_count: number;
-    channel_pool_count: number;
-    domain_pool_count: number;
-    parameter_pool_count: number;
-  };
-  components: MotionResourceComponent[];
-  driver_components: MotionResourceComponent[];
-  channel_pool: Array<{
-    pool_type: string;
-    name: string;
-    component_count: number;
-    strength_counts: Array<{ name: string; count: number }>;
-    trait_counts: Array<{ name: string; count: number }>;
-    source_motions: string[];
-    component_ids: string[];
-  }>;
-  domain_pool: Array<{
-    pool_type: string;
-    name: string;
-    component_count: number;
-    strength_counts: Array<{ name: string; count: number }>;
-    trait_counts: Array<{ name: string; count: number }>;
-    source_motions: string[];
-    component_ids: string[];
-  }>;
-  parameter_pool: Array<{
-    pool_type: string;
-    name: string;
-    component_count: number;
-    strength_counts: Array<{ name: string; count: number }>;
-    trait_counts: Array<{ name: string; count: number }>;
-    source_motions: string[];
-    component_ids: string[];
-  }>;
-  motion_presets: Array<{
-    motion_name: string;
-    motion_file: string;
-    category: string;
-    group: string;
-    component_ids: string[];
-    dominant_channels: string[];
-    dominant_domains: string[];
-    intensity: string;
-    timeline_profile: {
-      intro_energy: number;
-      middle_energy: number;
-      outro_energy: number;
-      peak_window: { start_ratio: number; end_ratio: number };
-      motion_trait: string;
-    };
-    catalog_tags: string[];
-  }>;
-}
-
-export interface BaseActionAnalysis {
-  status: string;
-  mode: string;
-  provider_id: string;
-  input_signature?: string;
-  latency_ms?: number;
-  cache_hit?: boolean;
-  selected_channel_count?: number;
-  error?: string;
-  fallback_reason?: string;
-}
-
-export interface BaseActionFamily {
-  name: string;
-  label: string;
-  channels: string[];
-  atom_ids: string[];
-  atom_count: number;
-}
-
-export interface BaseActionChannel {
-  name: string;
-  label: string;
-  family: string;
-  family_label: string;
-  domain: string;
-  available: boolean;
-  primary_parameter_id: string;
-  primary_parameter_name: string;
-  candidate_parameter_ids: string[];
-  candidate_component_count: number;
-  selected_atom_count: number;
-  polarity_modes: string[];
-  atom_ids: string[];
-}
-
-export interface BaseActionAtom {
-  id: string;
-  name: string;
-  label: string;
-  channel: string;
-  channel_label: string;
-  family: string;
-  family_label: string;
-  domain: string;
-  polarity: string;
-  semantic_polarity: string;
-  trait: string;
-  strength: string;
-  score: number;
-  primary_parameter_match: boolean;
-  channel_purity: number;
-  primary_parameter_id: string;
-  parameter_id: string;
-  parameter_name: string;
-  group_name: string;
-  source_component_id: string;
-  source_motion: string;
-  source_file: string;
-  source_group: string;
-  source_category: string;
-  source_tags: string[];
-  duration: number;
-  fps: number;
-  loop: boolean;
-  energy_score: number;
-  peak_abs_value: number;
-  peak_time_ratio: number;
-  active_ratio: number;
-  intensity: string;
-}
-
-export interface BaseActionLibrary {
-  schema_version: string;
-  extraction_mode: string;
-  analysis: BaseActionAnalysis;
-  focus_channels: string[];
-  focus_domains: string[];
-  ignored_domains: string[];
-  summary: {
-    motion_count: number;
-    available_channel_count: number;
-    selected_channel_count: number;
-    candidate_component_count: number;
-    selected_atom_count: number;
-    family_count: number;
-  };
-  families: BaseActionFamily[];
-  channels: BaseActionChannel[];
-  atoms: BaseActionAtom[];
 }
 
 export interface ParameterActionCounterEntry {
@@ -541,67 +316,6 @@ export interface ParameterActionLibrary {
   channels: ParameterActionCounterEntry[];
   parameters: ParameterActionParameterEntry[];
   atoms: ParameterActionAtom[];
-}
-
-export type DirectParameterAxisName =
-  | "head_yaw"
-  | "head_roll"
-  | "head_pitch"
-  | "body_yaw"
-  | "body_roll"
-  | "body_pitch"
-  | "eye_open_left"
-  | "eye_open_right"
-  | "eye_smile_left"
-  | "eye_smile_right"
-  | "gaze_x"
-  | "gaze_y"
-  | "mouth_smile"
-  | "mouth_x"
-  | "brow_bias"
-  | "brow_left_detail"
-  | "brow_right_detail"
-  | "mouth_open"
-  | "breath";
-
-export interface DirectParameterCalibrationRange {
-  min?: number | null;
-  max?: number | null;
-}
-
-export interface DirectParameterAxisCalibration {
-  parameter_id?: string;
-  parameter_ids?: string[];
-  direction?: number | string | null;
-  baseline?: number | null;
-  clip_min?: number | null;
-  clip_max?: number | null;
-  output_min?: number | null;
-  output_max?: number | null;
-  value_min?: number | null;
-  value_max?: number | null;
-  recommended_range?: DirectParameterCalibrationRange | null;
-  observed_range?: DirectParameterCalibrationRange | null;
-  confidence?: string | null;
-  source?: string | null;
-  recommended?: boolean | null;
-  safe_to_apply?: boolean | null;
-  skip_reason?: string | null;
-  supplementary_preferred_parameter_ids?: string[];
-  preferred_parameter_ids?: string[];
-  supplementary_blocked_parameter_ids?: string[];
-  supplementary_excluded_parameter_ids?: string[];
-  blocked_parameter_ids?: string[];
-  supplementary_max_atoms?: number | null;
-  supplementary_top_k?: number | null;
-  supplementary_weight_scale?: number | null;
-  supplementary_target_scale?: number | null;
-}
-
-export interface DirectParameterCalibrationProfile {
-  schema_version?: string;
-  axes?: Partial<Record<DirectParameterAxisName, DirectParameterAxisCalibration | null>>;
-  axis_calibrations?: Partial<Record<DirectParameterAxisName, DirectParameterAxisCalibration | null>>;
 }
 
 export interface PerformanceCurveHint {
@@ -821,15 +535,12 @@ export interface ModelSummary {
   resource_scan: ResourceScanPayload;
   parameter_scan: ParameterScanPayload;
   expression_scan: ExpressionScanPayload;
-  base_action_library: BaseActionLibrary;
   parameter_action_library: ParameterActionLibrary;
-  motion_resource_pool: MotionResourcePool;
   constraints: {
     expressions: ExpressionConstraint[];
     motions: MotionConstraint[];
   };
   semantic_axis_profile?: SemanticAxisProfile | null;
-  calibration_profile?: DirectParameterCalibrationProfile | null;
   voice_following_profile?: VoiceFollowingProfile | null;
   engine_hints: {
     driver_priority: string[];
@@ -854,12 +565,11 @@ export interface ModelSyncInfo {
   selected_model: string;
   available_models: string[];
   models: ModelSummary[];
-  runtime_cache_errors?: RuntimeCacheErrorsPayload;
 }
 
 export interface SystemModelSyncPayload {
   model_info: ModelSyncInfo;
-  runtime_cache_errors?: RuntimeCacheErrorsPayload;
+  runtime_cache_errors: RuntimeCacheErrorsPayload;
   conf_name: string;
   conf_uid: string;
   client_uid: string;

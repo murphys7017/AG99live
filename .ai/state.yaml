@@ -3,7 +3,7 @@ task:
   risk: high
   phase: implementation_complete
   status: complete
-  scope: Remove the parallel speech-following parameter path so semantic motion and speech-only gestures share one semantic profile binding, range, dynamics, and presentation pipeline.
+  scope: Enforce protocol manifest handshake, project only frontend-owned model capability data, remove duplicate and bypass ModelSync ingress, guard reconnect identity, compact the Live2D scan cache, and update architecture documentation from current code.
 
 context:
   confidence: high
@@ -36,6 +36,8 @@ architecture:
     parameter_plan: engine.parameter_plan.v2
     performance_curve: ag99.performance_curve_hint.v1
     voice_following: ag99.voice_following_profile.v3
+    model_info: live2d_scan.v2
+    handshake: system.server_info carries the complete schema manifest; the frontend rejects all later messages until every version matches.
   motion_ownership:
     llm: intent_tags, axis_levels from -4 to 4, motion_steps, and optional typed resource intent.
     adapter: Persona Effect registration, strict schema/profile/resource validation, identity binding, and transport.
@@ -76,6 +78,10 @@ verification:
     - `npm run typecheck:renderer` and `npm run typecheck:node` passed after assigning stable capture titles to the Live2D and input windows.
     - `npm run typecheck:websdk` passed after replacing the Live2D frame limiter with accumulated frame deadlines.
     - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `npm run typecheck:node` passed after unifying speech gesture parameter binding.
+    - `npm run typecheck:renderer` and `npm run typecheck:node` passed after the protocol, ModelSync ownership, and documentation review.
+    - `python scripts/check_protocol_schema_manifest.py` passed after adding `live2d_scan.v2` to the strict handshake manifest.
+    - Targeted `python -m py_compile` passed for every modified Adapter runtime, scanner, protocol, and transport module.
+    - Mermaid sources were reviewed against current code; no Mermaid CLI is installed, so diagram rendering was not validated automatically.
     - Python syntax checks passed for the scanner and runtime cache changes.
     - The previous v2 Electron production build passed before the atomic voice-following V3 migration.
     - `npm run build` passed for the atomic V3 migration; the generated renderer contains only `ag99.voice_following_profile.v3`.

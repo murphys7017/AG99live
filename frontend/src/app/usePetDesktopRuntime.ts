@@ -12,7 +12,7 @@ import {
 } from "vue";
 import { buildParameterActionPreview } from "../action-lab/parameterActionPreview";
 import { useAdapterConnection } from "../adapter-connection/useAdapterConnection";
-import { createModelSync, useModelSync } from "../adapter-connection/model-sync/useModelSync";
+import { createModelSync } from "../adapter-connection/model-sync/useModelSync";
 import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRuntimeSnapshotPublisher";
 import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
@@ -74,7 +74,7 @@ export const petDesktopRuntimeKey: InjectionKey<PetDesktopRuntime> =
 
 export function providePetDesktopRuntime(): PetDesktopRuntime {
   const sessionStore = useTurnPlaybackSessionStore();
-  const modelSync = useModelSync(createModelSync());
+  const modelSync = createModelSync();
   const { state, selectedModel, selectedSemanticAxisProfile } = modelSync;
   let motionTimelineSinkTarget: PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload> | null = null;
   const requiredMotionTimelineSink: PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload> = {
@@ -382,7 +382,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const parameterActionPreview = computed(() =>
     buildParameterActionPreview(
       selectedModel.value?.parameter_action_library,
-      state.modelInfo?.runtime_cache_errors,
+      state.runtimeCacheErrors,
     ),
   );
   const pushToTalk = usePushToTalkController(adapter);

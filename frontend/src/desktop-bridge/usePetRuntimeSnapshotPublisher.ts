@@ -21,7 +21,7 @@ import type {
 import type { BilibiliLiveStatus } from "../types/bilibili-live";
 import type { ModelSummary, SystemServerInfoPayload } from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
-import type { useModelSync } from "../adapter-connection/model-sync/useModelSync";
+import type { ModelSyncInstance } from "../adapter-connection/model-sync/useModelSync";
 import type { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore";
 import {
   buildAdapterRuntimeProjection,
@@ -34,8 +34,6 @@ import {
   getPublisherId,
 } from "./snapshot/runtimeSnapshot.js";
 import { cloneJson } from "../utils/cloneJson.js";
-
-type ModelSync = ReturnType<typeof useModelSync>;
 
 const SNAPSHOT_DEBOUNCE_MS = 60;
 
@@ -84,7 +82,7 @@ interface PetRuntimeSnapshotBridgePort {
 interface PetRuntimeSnapshotPublisherOptions {
   adapter: PetRuntimeSnapshotAdapterPort;
   bridge: PetRuntimeSnapshotBridgePort;
-  modelSyncState: ModelSync["state"];
+  modelSyncState: ModelSyncInstance["state"];
   selectedModel: Ref<ModelSummary | null>;
   selectedSemanticAxisProfile: Ref<SemanticAxisProfile | null>;
   motionEngineSettings: ModelEngineSettings;

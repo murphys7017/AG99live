@@ -75,7 +75,9 @@ astrbot_plugin_ag99live_adapter/
 - 每个 assistant segment 由非空 `turn_id + message_id` 标识；Adapter 先把 Plain、Record.text 与 semantic text 归一化为唯一 canonical text，再聚合音频、图片和 motion client object，发送一个 `output.segment.v3`。
 - 隐藏动作传输标记在回复进入 TTS 前的输出规范化阶段清洗；原文只供官方 `<@anim>` 兼容解析。Adapter 只读监听 AstrBot TTS 生成状态，失败通过 `audio.state=failed` 下发，不会被解释为正常无音频回复。
 - 正式动作位于 `output.segment.motion.payload`；前端原子提交完整段后，由 ModelEngine 把 intent 编译为 `engine.parameter_plan.v2`。
-- `semantic_axis_profile` / `calibration_profile` / `voice_following_profile` / `parameter_action_library` / `base_action_library` 由 `system.model_sync` 下发。
+- `system.server_info` 携带完整 schema manifest；前端只有在 manifest 与本地契约完全一致后才处理后续消息。
+- `system.model_sync` 使用 `live2d_scan.v2`，只下发前端运行需要的模型资源摘要、参数扫描、`parameter_action_library`、resource constraints、`semantic_axis_profile` 和 `voice_following_profile`。后端分析中间产物不跨 WebSocket 复制。
+- `runtime_cache_errors` 只作为 `system.model_sync.payload` 根部的独立运行诊断下发，不复制进 `model_info`。
 - `system.semantic_axis_profile_saved` / `system.semantic_axis_profile_save_failed` 用于 Profile Editor 保存结果确认，不再依赖 `system.model_sync` 推断保存成败。
 - 一个 user input 对应一个 turn，但一个 turn 内可能输出多个 assistant segment。
 - `control.synth_finished` 表示该 turn 的原子输出队列关闭；到达前所有 segment 必须完整声明，到达后不接受新段或 late slot patch。

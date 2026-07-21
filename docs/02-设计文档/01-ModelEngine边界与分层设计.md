@@ -90,7 +90,7 @@ IntentValidator                 10 core
 -> SemanticAxisRelationGraph   50 core
 -> CompiledSemanticMotion
 -> SpeechPoseStage             60 extension
--> PlanBuilder                 80 core
+-> ModelParameterBindingStage 80 core
 -> ResourcePolicyStage         90 core
 ```
 
@@ -102,9 +102,9 @@ IntentValidator                 10 core
 | `CouplingStage` | 显式 coupling 派生候选 |
 | `ModeResolverStage` | idle/expressive 判定 |
 | `TimingStage` | duration 与时钟 timing |
-| `SpeechPoseStage` | `speech_gesture_track` 规划 |
 | `SemanticAxisRelationGraph` | 范围、派生关系和有界比例约束 |
-| `PlanBuilder` | 语义轴到 Live2D 参数映射 |
+| `SpeechPoseStage` | 在语义轴结果收口后生成 `speech_gesture_track` |
+| `ModelParameterBindingStage` | 语义轴和说话轨道到 Live2D 参数映射 |
 | `ResourcePolicyStage` | typed resource 校验与执行仲裁 |
 
 核心阶段不能在运行时禁用或卸载。扩展阶段必须声明顺序和输入输出，不得绕过 pipeline 修改最终计划。
@@ -114,8 +114,8 @@ IntentValidator                 10 core
 | 字段 | 含义 | 主要写入者 |
 | --- | --- | --- |
 | `controlledValues` | 模型直接表达并完成锚点/强度处理的轴值 | AxisResolver、IntensityStage |
-| `derivedValues` | coupling 和 speech gesture 等引擎派生值 | 派生 stage |
-| `allAxisValues` | 进入关系图与 PlanBuilder 的合并视图 | state helpers、关系图 |
+| `derivedValues` | coupling 等语义轴派生值 | 语义派生 stage |
+| `allAxisValues` | 进入关系图与 CompiledSemanticMotion 的合并视图 | state helpers、关系图 |
 | `axisValueSources` | 每个值的来源 | 所有写值 stage |
 | `relationEvaluations` | 每条关系边的计算结果 | 关系图 |
 | `relationAdjustments` | 实际发生的约束 | 关系图 |

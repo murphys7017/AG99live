@@ -59,10 +59,12 @@
 - 正式动作输入与官方 `<@anim>` 兼容入口统一使用 v4；手动预览从本地 `CompiledSemanticMotion` 直接进入第二阶段编译。
 - SessionStore 是持久播放事实源，PlaybackTimeline 是执行生命周期所有者。
 - ModelEngine 编译动作，Live2D WebSDK 逐帧执行参数计划。
+- ModelEngine 分为 semantic 与 model_parameter 两个编译阶段；关系图在 semantic 阶段收口，SpeechPoseStage 在 model_parameter 阶段生成语义轴手势轨道。
+- 每条 WebSocket 连接必须先通过 `system.server_info.schema_manifest`；ModelSync 不接受 window/devtools 旁路写入。
 
 ## 维护规则
 
-1. 修改公开协议时同步检查图 01、05、09、10、13。
+1. 修改公开协议、manifest 或 model sync 投影时同步检查图 01、03、04、05、07、08、09、10、13、15。
 2. 修改播放所有权时同步检查图 04、06、07、08、12、14。
 3. 修改动作生成或编译时同步检查图 03、11、15、16。
 4. 修改模型加载或 WebSDK 时同步检查图 02、04、12、17。

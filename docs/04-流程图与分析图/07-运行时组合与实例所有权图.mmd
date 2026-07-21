@@ -14,6 +14,7 @@ flowchart TB
     PLAYER[PreviewMotionPlayer<br/>单例：当前 motion run owner]:::engine
     RECORDER[MotionPlaybackRecorder<br/>单例：动作观察记录]:::engine
     COMPLETE[PlaybackCompletionCoordinator<br/>单例：playback ACK]:::singleton
+    MODELSYNC[ModelSync State<br/>单例：模型能力与独立缓存诊断]:::singleton
 
     ROOT -->|创建并持有| STORE
     ROOT -->|创建并持有| ADAPTER
@@ -22,6 +23,7 @@ flowchart TB
     ROOT -->|创建并持有| PLAYER
     ROOT -->|创建并持有| RECORDER
     ROOT -->|创建并持有| COMPLETE
+    ROOT -->|创建并持有| MODELSYNC
 
     subgraph ADAPTER_OWNED[Adapter 内部协议与播放 ports]
         TRANSPORT[WebSocket transport]:::adapter
@@ -57,9 +59,11 @@ flowchart TB
     end
 
     INBOUND -->|commit protocol facts| STORE
+    INBOUND -->|握手后应用 live2d_scan.v2| MODELSYNC
     PROJ -->|project execution facts| STORE
     STORE -.完整 segment 唯一素材源.-> TL
     TL -->|motion sink start| ENGINE
+    MODELSYNC -->|selected model / profile| ENGINE
     ENGINE -->|parameter plan| PLAYER
     PLAYER -->|Live2D adapter| MODEL[当前 Live2D Model Instance]:::resource
     PLAYER -.run started/terminal.-> TL

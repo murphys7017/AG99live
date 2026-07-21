@@ -106,7 +106,12 @@ def save_live2d_runtime_cache(cache_path: Path, payload: dict[str, Any]) -> None
     }
     temp_path = cache_path.with_suffix(f"{cache_path.suffix}.tmp")
     temp_path.write_text(
-        json.dumps(normalized_payload, ensure_ascii=False, indent=2, sort_keys=True),
+        json.dumps(
+            normalized_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
         encoding="utf-8",
     )
     temp_path.replace(cache_path)

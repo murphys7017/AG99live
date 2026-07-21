@@ -167,8 +167,8 @@ AstrBot 内部 Plain、Record、图片与 motion client object 可以物理分�
 
 | 类型 | 方向 | 作用 |
 | --- | --- | --- |
-| `system.server_info` | 后端 -> 前端 | 连接信息和运行时标志 |
-| `system.model_sync` | 后端 -> 前端 | 模型能力同步 |
+| `system.server_info` | 后端 -> 前端 | 连接信息、运行时标志和完整 schema manifest |
+| `system.model_sync` | 后端 -> 前端 | `live2d_scan.v2` 前端运行能力投影 |
 | `system.semantic_axis_profile_saved` | 后端 -> 前端 | 档案保存确认 |
 | `system.semantic_axis_profile_save` | 前端 -> 后端 | 档案保存请求 |
 | `system.semantic_axis_profile_save_failed` | 后端 -> 前端 | 档案保存失败 |
@@ -178,6 +178,12 @@ AstrBot 内部 Plain、Record、图片与 motion client object 可以物理分�
 | `system.motion_lab_raw_event_recorded` | 后端 -> 前端 | SQLite 持久化完成确认，载荷为 `{ event_id: string }` |
 
 纯 `system.*` 消息允许 `turn_id = null`。
+
+连接必须首先通过 `system.server_info.schema_manifest` 握手。前端逐项比对 protocol version 和所有子 schema；任意一项缺失或不一致都拒绝后续消息，不兼容旧载荷。这通常表示 AstrBot 还在运行提交前的旧插件进程，需要重载插件或重启 AstrBot。
+
+`system.model_sync` 不是后端扫描缓存的镜像。它只携带 renderer 加载模型、ModelEngine 编译、资源冲突检查和动作实验室展示所需字段。`base_action_library`、`adaptive_parameter_profile`、`calibration_profile` 和完整 `motion_resource_pool` 仅属于 Adapter 内部扫描与 Prompt 分析，不跨 WebSocket 传输。
+
+`runtime_cache_errors` 只存在于 `system.model_sync.payload` 根部，与 `model_info` 并列。它描述 Adapter 扫描缓存、动作筛选缓存和样本缓存的运行诊断，不是 `live2d_scan.v2` 模型能力的一部分；前端分别写入 ModelSync state，禁止在 `model_info` 内复制第二份。
 
 Motion Lab 事件采用 at-least-once 交付：前端必须先把事件写入 IndexedDB，再通过 WebSocket 发送；WebSocket `send()` 成功不代表记录成功。后端以 `event_id` 作为 SQLite 主键幂等写入，只有插入事务完成后才发送 `system.motion_lab_raw_event_recorded`。前端收到匹配回执后才能删除 IndexedDB 记录；断线重连时使用相同 `event_id` 重发。
 

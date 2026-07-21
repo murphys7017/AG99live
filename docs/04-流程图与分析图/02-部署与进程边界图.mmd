@@ -65,7 +65,7 @@ flowchart TB
     DEVICE[麦克风 / 键盘钩子 / ESP32]:::external
 
     PYCORE <--> PROVIDERS
-    PROTO <-->|ws://.../ws<br/>JSON + binary audio| ADAPTER
+    PROTO <-->|ws://host:port<br/>JSON + binary audio| ADAPTER
     IPC <-->|Electron IPC| APP
     ADAPTER --> TL
     TL --> MEDIA

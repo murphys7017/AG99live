@@ -1,11 +1,8 @@
 import type {
-  BaseActionLibrary,
   ExpressionConstraint,
   ExpressionScanPayload,
   ModelSummary,
   MotionConstraint,
-  MotionResourceComponent,
-  MotionResourcePool,
   ParameterActionLibrary,
   ParameterScanPayload,
   ProtocolEnvelope,
@@ -19,6 +16,7 @@ import type {
   SemanticAxisRelationRule,
 } from "../../types/semantic-axis-profile.js";
 import {
+  SCHEMA_MODEL_INFO_V2,
   SCHEMA_SEMANTIC_AXIS_PROFILE_V2,
   SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
   SCHEMA_VOICE_FOLLOWING_PROFILE_V3,
@@ -27,12 +25,10 @@ import {
   asRecord,
   invalidPayload,
   type PayloadParseResult,
+  validateExactKeys,
 } from "./payloadValidation.js";
 
-const MODEL_INFO_SCHEMA_VERSION = "live2d_scan.v1";
-const BASE_ACTION_LIBRARY_SCHEMA_VERSION = "base_action_library.v1";
 const PARAMETER_ACTION_LIBRARY_SCHEMA_VERSION = "parameter_action_library.v1";
-const CALIBRATION_PROFILE_SCHEMA_VERSION = "direct_parameter_calibration.v1";
 
 type FieldKind = "string" | "number" | "boolean" | "array" | "record";
 
@@ -43,6 +39,13 @@ export function parseSystemModelSyncPayload(
   if (!root) {
     return invalidPayload(envelope.type, "payload", "object");
   }
+  const rootKeys = validateExactKeys(
+    envelope.type,
+    "payload",
+    root,
+    ["model_info", "runtime_cache_errors", "conf_name", "conf_uid", "client_uid"],
+  );
+  if (!rootKeys.ok) return rootKeys;
 
   const confName = parseNonEmptyString(envelope.type, root.conf_name, "payload.conf_name");
   if (!confName.ok) return confName;
@@ -55,11 +58,24 @@ export function parseSystemModelSyncPayload(
   if (!modelInfoRecord) {
     return invalidPayload(envelope.type, "payload.model_info", "object");
   }
-  if (modelInfoRecord.schema_version !== MODEL_INFO_SCHEMA_VERSION) {
+  const modelInfoKeys = validateExactKeys(
+    envelope.type,
+    "payload.model_info",
+    modelInfoRecord,
+    [
+      "schema_version",
+      "driver_priority",
+      "selected_model",
+      "available_models",
+      "models",
+    ],
+  );
+  if (!modelInfoKeys.ok) return modelInfoKeys;
+  if (modelInfoRecord.schema_version !== SCHEMA_MODEL_INFO_V2) {
     return invalidPayload(
       envelope.type,
       "payload.model_info.schema_version",
-      MODEL_INFO_SCHEMA_VERSION,
+      SCHEMA_MODEL_INFO_V2,
     );
   }
 
@@ -133,31 +149,16 @@ export function parseSystemModelSyncPayload(
     "payload.runtime_cache_errors",
   );
   if (!rootErrors.ok) return rootErrors;
-  const modelInfoErrors = parseRuntimeCacheErrors(
-    envelope.type,
-    modelInfoRecord.runtime_cache_errors,
-    "payload.model_info.runtime_cache_errors",
-  );
-  if (!modelInfoErrors.ok) return modelInfoErrors;
-  if (!sameStringRecord(rootErrors.payload, modelInfoErrors.payload)) {
-    return invalidPayload(
-      envelope.type,
-      "payload.model_info.runtime_cache_errors",
-      "same value as payload.runtime_cache_errors",
-    );
-  }
-
   const runtimeCacheErrors = rootErrors.payload;
   return {
     ok: true,
     payload: {
       model_info: {
-        schema_version: MODEL_INFO_SCHEMA_VERSION,
+        schema_version: SCHEMA_MODEL_INFO_V2,
         driver_priority: driverPriority.payload,
         selected_model: selectedModel.payload,
         available_models: availableModels.payload,
         models,
-        runtime_cache_errors: runtimeCacheErrors,
       },
       runtime_cache_errors: runtimeCacheErrors,
       conf_name: confName.payload,
@@ -174,6 +175,22 @@ function parseModelSummary(
 ): PayloadParseResult<ModelSummary> {
   const record = asRecord(value);
   if (!record) return invalidPayload(type, path, "object");
+  const modelKeys = validateExactKeys(type, path, record, [
+    "name",
+    "root_path",
+    "model_path",
+    "model_url",
+    "icon_url",
+    "resource_scan",
+    "parameter_scan",
+    "expression_scan",
+    "parameter_action_library",
+    "constraints",
+    "semantic_axis_profile",
+    "voice_following_profile",
+    "engine_hints",
+  ]);
+  if (!modelKeys.ok) return modelKeys;
 
   const strings: Record<string, string> = {};
   for (const key of ["name", "root_path", "model_path", "model_url", "icon_url"] as const) {
@@ -196,15 +213,6 @@ function parseModelSummary(
   if (!parameterScan.ok) return parameterScan;
   const expressionScan = parseExpressionScan(type, record.expression_scan, `${path}.expression_scan`);
   if (!expressionScan.ok) return expressionScan;
-  const baseActionLibrary = parseVersionedLibrary<BaseActionLibrary>(
-    type,
-    record.base_action_library,
-    `${path}.base_action_library`,
-    BASE_ACTION_LIBRARY_SCHEMA_VERSION,
-    ["analysis", "summary"],
-    ["focus_channels", "focus_domains", "ignored_domains", "families", "channels", "atoms"],
-  );
-  if (!baseActionLibrary.ok) return baseActionLibrary;
   const parameterActionLibrary = parseVersionedLibrary<ParameterActionLibrary>(
     type,
     record.parameter_action_library,
@@ -214,13 +222,6 @@ function parseModelSummary(
     ["domains", "channels", "parameters", "atoms"],
   );
   if (!parameterActionLibrary.ok) return parameterActionLibrary;
-  const motionResourcePool = parseMotionResourcePool(
-    type,
-    record.motion_resource_pool,
-    `${path}.motion_resource_pool`,
-  );
-  if (!motionResourcePool.ok) return motionResourcePool;
-
   const constraints = parseModelConstraints(type, record.constraints, `${path}.constraints`);
   if (!constraints.ok) return constraints;
 
@@ -268,13 +269,6 @@ function parseModelSummary(
     );
   }
 
-  const calibrationProfile = parseOptionalCalibrationProfile(
-    type,
-    record.calibration_profile,
-    `${path}.calibration_profile`,
-  );
-  if (!calibrationProfile.ok) return calibrationProfile;
-
   return {
     ok: true,
     payload: {
@@ -286,12 +280,9 @@ function parseModelSummary(
       resource_scan: resourceScan.payload,
       parameter_scan: parameterScan.payload,
       expression_scan: expressionScan.payload,
-      base_action_library: baseActionLibrary.payload,
       parameter_action_library: parameterActionLibrary.payload,
-      motion_resource_pool: motionResourcePool.payload,
       constraints: constraints.payload,
       semantic_axis_profile: semanticProfile.payload,
-      calibration_profile: calibrationProfile.payload,
       voice_following_profile: voiceProfile.payload,
       engine_hints: {
         driver_priority: engineHints.driver_priority as string[],
@@ -403,103 +394,6 @@ function parseVersionedLibrary<TLibrary>(
   return shape.ok ? { ok: true, payload: record as TLibrary } : shape;
 }
 
-function parseMotionResourcePool(
-  type: string,
-  value: unknown,
-  path: string,
-): PayloadParseResult<MotionResourcePool> {
-  const record = asRecord(value);
-  if (!record) return invalidPayload(type, path, "object");
-  const shape = validateFields(type, record, path, {
-    decomposition_level: "string",
-    summary: "record",
-    components: "array",
-    driver_components: "array",
-    channel_pool: "array",
-    domain_pool: "array",
-    parameter_pool: "array",
-    motion_presets: "array",
-  });
-  if (!shape.ok) return shape;
-  const components: MotionResourceComponent[] = [];
-  for (const [index, value] of (record.components as unknown[]).entries()) {
-    const parsed = parseMotionResourceComponent(type, value, `${path}.components[${index}]`);
-    if (!parsed.ok) return parsed;
-    components.push(parsed.payload);
-  }
-  const driverComponents: MotionResourceComponent[] = [];
-  for (const [index, value] of (record.driver_components as unknown[]).entries()) {
-    const parsed = parseMotionResourceComponent(
-      type,
-      value,
-      `${path}.driver_components[${index}]`,
-    );
-    if (!parsed.ok) return parsed;
-    driverComponents.push(parsed.payload);
-  }
-  return {
-    ok: true,
-    payload: {
-      ...(record as unknown as MotionResourcePool),
-      components,
-      driver_components: driverComponents,
-    },
-  };
-}
-
-function parseMotionResourceComponent(
-  type: string,
-  value: unknown,
-  path: string,
-): PayloadParseResult<MotionResourceComponent> {
-  const component = asRecord(value);
-  if (!component) return invalidPayload(type, path, "object");
-  const shape = validateFields(type, component, path, {
-    id: "string",
-    source_motion: "string",
-    source_file: "string",
-    source_group: "string",
-    source_category: "string",
-    curve_index: "number",
-    parameter_id: "string",
-    parameter_name: "string",
-    kind: "string",
-    domain: "string",
-    engine_role: "string",
-    channels: "array",
-    group_name: "string",
-    duration: "number",
-    fps: "number",
-    loop: "boolean",
-    strength: "string",
-    trait: "string",
-    segment_types: "array",
-    sample_count: "number",
-    value_profile: "record",
-    peak_abs_value: "number",
-    peak_time_ratio: "number",
-    active_ratio: "number",
-    energy_score: "number",
-    windows: "array",
-  });
-  if (!shape.ok) return shape;
-  for (const key of ["channels", "segment_types"] as const) {
-    const parsed = parseStringArray(type, component[key], `${path}.${key}`);
-    if (!parsed.ok) return parsed;
-  }
-  const valueProfile = component.value_profile as Record<string, unknown>;
-  const profileShape = validateFields(type, valueProfile, `${path}.value_profile`, {
-    start: "number",
-    end: "number",
-    min: "number",
-    max: "number",
-    baseline: "number",
-    span: "number",
-  });
-  if (!profileShape.ok) return profileShape;
-  return { ok: true, payload: component as unknown as MotionResourceComponent };
-}
-
 function parseModelConstraints(
   type: string,
   value: unknown,
@@ -507,6 +401,13 @@ function parseModelConstraints(
 ): PayloadParseResult<ModelSummary["constraints"]> {
   const constraints = asRecord(value);
   if (!constraints) return invalidPayload(type, path, "object");
+  const constraintKeys = validateExactKeys(
+    type,
+    path,
+    constraints,
+    ["expressions", "motions"],
+  );
+  if (!constraintKeys.ok) return constraintKeys;
   if (!Array.isArray(constraints.expressions)) {
     return invalidPayload(type, `${path}.expressions`, "array");
   }
@@ -535,36 +436,25 @@ function parseExpressionConstraint(
 ): PayloadParseResult<ExpressionConstraint> {
   const item = asRecord(value);
   if (!item) return invalidPayload(type, path, "object");
+  const keys = validateExactKeys(type, path, item, [
+    "name",
+    "file",
+    "catalog_id",
+    "catalog_expose_as_resource",
+    "parameter_ids",
+  ]);
+  if (!keys.ok) return keys;
   const shape = validateFields(type, item, path, {
     name: "string",
     file: "string",
-    category: "string",
+    catalog_id: "string",
+    catalog_expose_as_resource: "boolean",
     parameter_ids: "array",
-    parameter_count: "number",
-    affects_channels: "array",
-    parameters: "array",
-    dominant_parameters: "array",
-    dominant_domains: "array",
-    dominant_channels: "array",
-    blend_modes: "array",
-    intensity: "string",
-    touches_non_expression_parameters: "boolean",
   });
   if (!shape.ok) return shape;
-  for (const key of [
-    "parameter_ids",
-    "affects_channels",
-    "dominant_domains",
-    "dominant_channels",
-    "blend_modes",
-  ] as const) {
-    const parsed = parseStringArray(type, item[key], `${path}.${key}`);
-    if (!parsed.ok) return parsed;
-  }
-  const optional = validateOptionalCatalogFields(type, item, path);
-  return optional.ok
-    ? { ok: true, payload: item as unknown as ExpressionConstraint }
-    : optional;
+  const parameterIds = parseStringArray(type, item.parameter_ids, `${path}.parameter_ids`);
+  if (!parameterIds.ok) return parameterIds;
+  return { ok: true, payload: item as unknown as ExpressionConstraint };
 }
 
 function parseMotionConstraint(
@@ -574,135 +464,33 @@ function parseMotionConstraint(
 ): PayloadParseResult<MotionConstraint> {
   const item = asRecord(value);
   if (!item) return invalidPayload(type, path, "object");
+  const keys = validateExactKeys(type, path, item, [
+    "name",
+    "file",
+    "catalog_id",
+    "catalog_expose_as_resource",
+    "group",
+    "duration",
+    "parameter_ids",
+    "catalog_label",
+    "catalog_intensity",
+  ]);
+  if (!keys.ok) return keys;
   const shape = validateFields(type, item, path, {
     name: "string",
     file: "string",
+    catalog_id: "string",
+    catalog_expose_as_resource: "boolean",
     group: "string",
-    category: "string",
     duration: "number",
-    curve_count: "number",
-    parameter_count: "number",
-    affects_channels: "array",
-    uses_expression_parameters: "boolean",
-    uses_physics_parameters: "boolean",
+    parameter_ids: "array",
     catalog_label: "string",
-    catalog_tags: "array",
     catalog_intensity: "string",
-    decomposition_level: "string",
-    component_count: "number",
-    component_ids: "array",
-    driver_component_count: "number",
-    driver_component_ids: "array",
-    dominant_channels: "array",
-    dominant_domains: "array",
-    channel_weights: "array",
-    domain_weights: "array",
-    kind_counts: "array",
-    segment_types: "array",
-    timeline_profile: "record",
-    motion_windows: "array",
-    loop: "boolean",
-    fps: "number",
   });
   if (!shape.ok) return shape;
-  for (const key of [
-    "affects_channels",
-    "catalog_tags",
-    "component_ids",
-    "driver_component_ids",
-    "dominant_channels",
-    "dominant_domains",
-  ] as const) {
-    const parsed = parseStringArray(type, item[key], `${path}.${key}`);
-    if (!parsed.ok) return parsed;
-  }
-  for (const key of ["channel_weights", "domain_weights", "kind_counts", "segment_types"] as const) {
-    const parsed = validateCounterArray(type, item[key], `${path}.${key}`);
-    if (!parsed.ok) return parsed;
-  }
-  const timelineProfile = item.timeline_profile as Record<string, unknown>;
-  const timelineShape = validateFields(type, timelineProfile, `${path}.timeline_profile`, {
-    intro_energy: "number",
-    middle_energy: "number",
-    outro_energy: "number",
-    peak_window: "record",
-    motion_trait: "string",
-  });
-  if (!timelineShape.ok) return timelineShape;
-  const peakWindow = timelineProfile.peak_window as Record<string, unknown>;
-  const peakShape = validateFields(type, peakWindow, `${path}.timeline_profile.peak_window`, {
-    start_ratio: "number",
-    end_ratio: "number",
-  });
-  if (!peakShape.ok) return peakShape;
-  const motionWindows = validateRatioWindows(type, item.motion_windows, `${path}.motion_windows`);
-  if (!motionWindows.ok) return motionWindows;
-  const optional = validateOptionalCatalogFields(type, item, path);
-  return optional.ok
-    ? { ok: true, payload: item as unknown as MotionConstraint }
-    : optional;
-}
-
-function validateCounterArray(
-  type: string,
-  value: unknown,
-  path: string,
-): PayloadParseResult<null> {
-  if (!Array.isArray(value)) return invalidPayload(type, path, "counter array");
-  for (const [index, entry] of value.entries()) {
-    const record = asRecord(entry);
-    const entryPath = `${path}[${index}]`;
-    if (!record) return invalidPayload(type, entryPath, "object");
-    const shape = validateFields(type, record, entryPath, {
-      name: "string",
-      count: "number",
-    });
-    if (!shape.ok) return shape;
-  }
-  return { ok: true, payload: null };
-}
-
-function validateRatioWindows(
-  type: string,
-  value: unknown,
-  path: string,
-): PayloadParseResult<null> {
-  if (!Array.isArray(value)) return invalidPayload(type, path, "ratio window array");
-  for (const [index, entry] of value.entries()) {
-    const record = asRecord(entry);
-    const entryPath = `${path}[${index}]`;
-    if (!record) return invalidPayload(type, entryPath, "object");
-    const shape = validateFields(type, record, entryPath, {
-      start_ratio: "number",
-      end_ratio: "number",
-    });
-    if (!shape.ok) return shape;
-    if (Number(record.start_ratio) > Number(record.end_ratio)) {
-      return invalidPayload(type, entryPath, "start_ratio <= end_ratio");
-    }
-  }
-  return { ok: true, payload: null };
-}
-
-function validateOptionalCatalogFields(
-  type: string,
-  item: Record<string, unknown>,
-  path: string,
-): PayloadParseResult<null> {
-  if (item.catalog_id !== undefined && typeof item.catalog_id !== "string") {
-    return invalidPayload(type, `${path}.catalog_id`, "string | undefined");
-  }
-  if (
-    item.catalog_expose_as_resource !== undefined
-    && typeof item.catalog_expose_as_resource !== "boolean"
-  ) {
-    return invalidPayload(
-      type,
-      `${path}.catalog_expose_as_resource`,
-      "boolean | undefined",
-    );
-  }
-  return { ok: true, payload: null };
+  const parameterIds = parseStringArray(type, item.parameter_ids, `${path}.parameter_ids`);
+  if (!parameterIds.ok) return parameterIds;
+  return { ok: true, payload: item as unknown as MotionConstraint };
 }
 
 function parseOptionalSemanticAxisProfile(
@@ -935,34 +723,13 @@ function parseOptionalVoiceFollowingProfile(
   return { ok: true, payload: record as unknown as VoiceFollowingProfile };
 }
 
-function parseOptionalCalibrationProfile(
-  type: string,
-  value: unknown,
-  path: string,
-): PayloadParseResult<ModelSummary["calibration_profile"]> {
-  if (value === undefined || value === null) return { ok: true, payload: null };
-  const record = asRecord(value);
-  if (!record) return invalidPayload(type, path, "object | null");
-  if (record.schema_version !== CALIBRATION_PROFILE_SCHEMA_VERSION) {
-    return invalidPayload(type, `${path}.schema_version`, CALIBRATION_PROFILE_SCHEMA_VERSION);
-  }
-  if (!asRecord(record.axes)) {
-    return invalidPayload(type, `${path}.axes`, "object");
-  }
-  return {
-    ok: true,
-    payload: record as unknown as NonNullable<ModelSummary["calibration_profile"]>,
-  };
-}
-
 function parseRuntimeCacheErrors(
   type: string,
   value: unknown,
   path: string,
-): PayloadParseResult<RuntimeCacheErrorsPayload | undefined> {
-  if (value === undefined || value === null) return { ok: true, payload: undefined };
+): PayloadParseResult<RuntimeCacheErrorsPayload> {
   const record = asRecord(value);
-  if (!record) return invalidPayload(type, path, "object | undefined");
+  if (!record) return invalidPayload(type, path, "object");
   const allowedKeys = new Set(["root", "scan_cache", "action_filter_cache", "motion_tuning_samples"]);
   const result: RuntimeCacheErrorsPayload = {};
   for (const [key, item] of Object.entries(record)) {
@@ -974,7 +741,7 @@ function parseRuntimeCacheErrors(
     }
     result[key as keyof RuntimeCacheErrorsPayload] = item;
   }
-  return { ok: true, payload: Object.keys(result).length > 0 ? result : undefined };
+  return { ok: true, payload: result };
 }
 
 function validateFields(
@@ -1058,13 +825,4 @@ function isHttpUrl(value: string): boolean {
   } catch {
     return false;
   }
-}
-
-function sameStringRecord(
-  left: RuntimeCacheErrorsPayload | undefined,
-  right: RuntimeCacheErrorsPayload | undefined,
-): boolean {
-  const leftEntries = Object.entries(left ?? {}).sort(([a], [b]) => a.localeCompare(b));
-  const rightEntries = Object.entries(right ?? {}).sort(([a], [b]) => a.localeCompare(b));
-  return JSON.stringify(leftEntries) === JSON.stringify(rightEntries);
 }

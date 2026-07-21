@@ -461,6 +461,9 @@ export function createAdapterConnection(
         pushHistory("system", `已连接 ${targetAddress}`);
       },
       onMessage: (nextSocket, rawData) => {
+        if (socket !== nextSocket || attemptSerial !== connectAttemptSerial) {
+          return;
+        }
         inboundRuntime.handleSocketMessage(rawData).catch((error) => {
           if (socket !== nextSocket || attemptSerial !== connectAttemptSerial) {
             return;

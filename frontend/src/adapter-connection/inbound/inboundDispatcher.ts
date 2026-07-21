@@ -22,6 +22,7 @@ import type {
   SystemHistoryListPayload,
   SystemModelSyncPayload,
   SystemMotionTuningSamplesStatePayload,
+  SystemServerInfoPayload,
 } from "../../types/protocol.js";
 import type { InboundAdapterEvent, InboundEventMappingContext } from "./inboundEvents.js";
 import type { NormalizedMotionPayload } from "../../playback-integrations/motionPayload.js";
@@ -54,11 +55,7 @@ export interface InboundDispatchState {
   micRequested: boolean;
   pttModeEnabled: boolean;
   // server info
-  serverInfo: {
-    ws_url: string;
-    http_base_url: string;
-    auto_start_mic: boolean;
-  } | null;
+  serverInfo: SystemServerInfoPayload | null;
   // profile save result
   latestSemanticAxisProfileSaveResult: unknown;
 }
@@ -80,7 +77,6 @@ export interface InboundDispatchDeps {
   } | undefined;
   pushHistory: (role: string, text: string) => void;
   modelSyncAdapter: {
-    applyUnknownMessage: (envelope: ProtocolEnvelope<unknown>) => void;
     applyModelSyncMessage: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => void;
   } | null;
   historyAdapter: {

@@ -12,9 +12,9 @@ flowchart TB
     subgraph CONNECTION[adapter-connection：网络与协议适配]
         CONN[useAdapterConnection.ts<br/>连接 facade]:::boundary
         TRANS[core/transport<br/>WebSocket 生命周期]:::boundary
-        INBOUND[inbound/**<br/>严格解析与原子提交]:::boundary
+        INBOUND[inbound/**<br/>manifest 握手 / 严格解析 / 原子提交]:::boundary
         ARUN[runtime/**<br/>audio queues / settlement / UI bridge]:::boundary
-        MSYNC[model-sync/**<br/>模型与 profile 同步]:::boundary
+        MSYNC[model-sync/**<br/>live2d_scan.v2 能力与缓存诊断状态]:::boundary
         CONN --> TRANS
         CONN --> INBOUND
         CONN --> ARUN
@@ -56,10 +56,11 @@ flowchart TB
     subgraph ENGINE[model-engine：动作编译]
         ENTRY[useModelEngine<br/>ingress / prepare / start]:::engine
         NORMAL[normalize + strict contracts]:::engine
-        STAGES[compiler stages<br/>axis resolve / sample / graph / resource / timing]:::engine
+        SEMANTIC[semantic phase<br/>validate / sample / coupling / timing / relation graph]:::engine
+        PARAMETER[model_parameter phase<br/>speech pose / binding / resource policy]:::engine
         PLAN[parameter_plan.v2]:::engine
         SCHED[motionRuntimeScheduler<br/>segment pending ownership]:::engine
-        ENTRY --> NORMAL --> STAGES --> PLAN
+        ENTRY --> NORMAL --> SEMANTIC --> PARAMETER --> PLAN
         ENTRY --> SCHED
     end
 

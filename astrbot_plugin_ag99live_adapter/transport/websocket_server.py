@@ -12,7 +12,6 @@ from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from ..protocol.builder import (
     build_control_error,
     build_control_start_mic,
-    build_system_group_update,
     build_system_server_info,
 )
 
@@ -261,8 +260,8 @@ class WebSocketTransport:
         """新客户端连上后立刻广播的初始化快照。
 
         顺序固定：refresh runtime → server_info → current_model_and_conf(force=True)
-        → motion_tuning_samples_state → group_update（成员=空、is_owner=False），
-        最后如果 auto_start_mic=True 再发 control.start_mic。
+        → motion_tuning_samples_state，最后如果 auto_start_mic=True 再发
+        control.start_mic。
         """
         await self._refresh_runtime_settings_async(
             reload_persona=True,
@@ -277,12 +276,6 @@ class WebSocketTransport:
         )
         await self._send_current_model_and_conf(force=True)
         await self._send_motion_tuning_samples_state()
-        await self.send_json(
-            build_system_group_update(
-                members=[],
-                is_owner=False,
-            )
-        )
         if self.auto_start_mic:
             await self.send_json(build_control_start_mic())
 

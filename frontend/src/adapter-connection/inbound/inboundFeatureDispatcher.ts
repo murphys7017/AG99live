@@ -21,7 +21,6 @@ export interface InboundFeatureDispatchDeps {
   state: InboundFeatureDispatchState;
   pushHistory: (role: string, text: string) => void;
   modelSyncAdapter: {
-    applyUnknownMessage: (envelope: ProtocolEnvelope<unknown>) => void;
     applyModelSyncMessage: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => void;
   } | null;
   historyAdapter: {

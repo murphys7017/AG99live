@@ -1,4 +1,4 @@
-import { computed, onScopeDispose, reactive, readonly } from "vue";
+import { computed, reactive, readonly } from "vue";
 import type {
   ComputedRef,
   DeepReadonly,
@@ -7,16 +7,16 @@ import type {
   ModelSummary,
   ModelSyncInfo,
   ProtocolEnvelope,
+  RuntimeCacheErrorsPayload,
   SystemModelSyncPayload,
 } from "../../types/protocol.js";
 import type { SemanticAxisProfile } from "../../types/semantic-axis-profile.js";
-import { parseInboundEnvelopeObject } from "../inbound/inboundProtocol.js";
-import { parseSystemModelSyncPayload } from "../inbound/inboundPayloads.js";
 
 interface ModelSyncState {
   confName: string;
   lastUpdated: string;
   modelInfo: ModelSyncInfo | null;
+  runtimeCacheErrors: RuntimeCacheErrorsPayload | null;
 }
 
 export interface ModelSyncInstance {
@@ -24,7 +24,6 @@ export interface ModelSyncInstance {
   selectedModel: ComputedRef<ModelSummary | null>;
   selectedSemanticAxisProfile: ComputedRef<SemanticAxisProfile | null>;
   applyModelSyncMessage: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => void;
-  applyUnknownMessage: (raw: unknown) => void;
   resetModelSyncState: () => void;
 }
 
@@ -33,12 +32,14 @@ export function createModelSync(): ModelSyncInstance {
     confName: "",
     lastUpdated: "",
     modelInfo: null,
+    runtimeCacheErrors: null,
   });
 
   function resetModelSyncState(): void {
     state.confName = "";
     state.lastUpdated = "";
     state.modelInfo = null;
+    state.runtimeCacheErrors = null;
   }
 
   function applyModelSyncMessage(
@@ -51,25 +52,7 @@ export function createModelSync(): ModelSyncInstance {
     state.confName = envelope.payload.conf_name;
     state.lastUpdated = envelope.timestamp;
     state.modelInfo = envelope.payload.model_info;
-  }
-
-  function applyUnknownMessage(raw: unknown): void {
-    const parsed = parseInboundEnvelopeObject(raw);
-    if (!parsed.ok) {
-      return;
-    }
-    if (parsed.envelope.type !== "system.model_sync") {
-      return;
-    }
-    const payload = parseSystemModelSyncPayload(parsed.envelope);
-    if (!payload.ok) {
-      console.warn("[ModelSync] rejected malformed model_sync from window/devtools.", payload.error);
-      return;
-    }
-    applyModelSyncMessage({
-      ...parsed.envelope,
-      payload: payload.payload,
-    });
+    state.runtimeCacheErrors = envelope.payload.runtime_cache_errors;
   }
 
   const selectedModel = computed<ModelSummary | null>(() => {
@@ -89,41 +72,6 @@ export function createModelSync(): ModelSyncInstance {
     selectedModel,
     selectedSemanticAxisProfile,
     applyModelSyncMessage,
-    applyUnknownMessage,
     resetModelSyncState,
   };
-}
-
-export function attachModelSyncWindowBridge(modelSync: ModelSyncInstance): () => void {
-  if (typeof window === "undefined") {
-    return () => {};
-  }
-
-  function onWindowMessage(event: MessageEvent): void {
-    modelSync.applyUnknownMessage(event.data);
-  }
-
-  window.addEventListener("message", onWindowMessage);
-
-  const devtoolsMount = window as Window & {
-    __AG99LIVE_DEVTOOLS__?: { pushProtocolMessage: (payload: unknown) => void };
-  };
-  devtoolsMount.__AG99LIVE_DEVTOOLS__ = {
-    pushProtocolMessage: modelSync.applyUnknownMessage,
-  };
-
-  return () => {
-    window.removeEventListener("message", onWindowMessage);
-    delete devtoolsMount.__AG99LIVE_DEVTOOLS__;
-  };
-}
-
-export function useModelSync(modelSync: ModelSyncInstance): ModelSyncInstance {
-  const cleanup = attachModelSyncWindowBridge(modelSync);
-
-  onScopeDispose(() => {
-    cleanup();
-  });
-
-  return modelSync;
 }

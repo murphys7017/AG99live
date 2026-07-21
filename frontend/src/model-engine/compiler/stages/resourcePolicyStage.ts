@@ -2,7 +2,6 @@ import type {
   ExpressionConstraint,
   ModelSummary,
   MotionConstraint,
-  MotionResourceComponent,
 } from "../../../types/protocol.js";
 import type {
   ModelParameterCompileContext,
@@ -130,25 +129,10 @@ function buildMotionCandidate(
   if (!resourceId) {
     return null;
   }
-  const componentIds = uniqueStrings([
-    ...item.component_ids,
-    ...item.driver_component_ids,
-  ]);
-  const componentsById = new Map<string, MotionResourceComponent>();
-  for (const component of [
-    ...model.motion_resource_pool.components,
-    ...model.motion_resource_pool.driver_components,
-  ]) {
-    componentsById.set(component.id, component);
-  }
   return {
     resourceId,
     resourceType: "motion",
-    parameterIds: uniqueStrings(
-      componentIds
-        .map((componentId) => componentsById.get(componentId)?.parameter_id ?? "")
-        .filter(Boolean),
-    ),
+    parameterIds: uniqueStrings(item.parameter_ids),
     motion: {
       schema_version: "engine.catalog_motion.v1",
       model_id: model.name,

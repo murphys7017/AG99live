@@ -38,23 +38,7 @@ export function parseInboundEnvelope(rawData: string): ParsedInboundEnvelope {
 }
 
 /**
- * 从已反序列化的 unknown 对象（window.postMessage / devtools 注入）解析入站信封。
- * 与 parseInboundEnvelope 共享核心校验逻辑，但不走 JSON.parse。
- */
-export function parseInboundEnvelopeObject(raw: unknown): ParsedInboundEnvelope {
-  if (!isRecord(raw)) {
-    return {
-      ok: false,
-      code: "invalid_envelope",
-      message: "收到非法协议消息（非对象）。",
-    };
-  }
-  return parseEnvelopeRecord(raw);
-}
-
-/**
  * 核心信封校验逻辑：要求 envelope 顶层字段合法。
- * WebSocket 和 window/devtools 共用同一套校验规则。
  */
 function parseEnvelopeRecord(
   record: Record<string, unknown>,

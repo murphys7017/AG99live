@@ -19,6 +19,20 @@ sequenceDiagram
     participant Engine as ModelEngine
     participant SDK as Live2D WebSDK
     participant Completion as CompletionCoordinator
+    participant ModelSync as ModelSync State
+
+    Inbound->>Adapter: 建立 WebSocket
+    Adapter-->>Inbound: system.server_info(schema_manifest)
+    Inbound->>Inbound: 精确比对 protocol 与全部子 schema
+    alt manifest 缺失或不一致
+        Inbound--xModelSync: 拒绝后续消息，等待重载插件后重连
+    else manifest 完全一致
+        Adapter->>Adapter: 校验扫描缓存版本/目录摘要<br/>必要时重新扫描
+        Adapter->>Adapter: 投影 live2d_scan.v2 前端能力
+        Adapter-->>Inbound: system.model_sync<br/>model_info + 独立 runtime_cache_errors
+        Inbound->>Inbound: 严格字段解析与 URL rewrite
+        Inbound->>ModelSync: 应用模型能力和缓存诊断
+    end
 
     User->>Adapter: input.text / input.audio
     Adapter->>Inbound: control.turn_started(turn_id)
@@ -124,8 +138,9 @@ sequenceDiagram
 
             opt Audio metadata 阶段准备语义动作 / speech-only 动作
                 Engine->>Engine: 协议 / profile / resource 校验
-                Engine->>Engine: 九级采样 + intensity/coupling + timing/speech gesture
-                Engine->>Engine: relation graph + parameter_plan.v2 + resource policy
+                Engine->>Engine: 语义阶段：九级采样 + intensity/coupling + timing + relation graph
+                Engine->>Engine: 模型参数阶段：speech gesture + binding + resource policy
+                Engine->>Engine: 输出 parameter_plan.v2
             end
 
             opt Audio playing 时已有准备计划

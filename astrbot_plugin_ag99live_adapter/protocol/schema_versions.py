@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 
 _MANIFEST_PATH = Path(__file__).with_name("schema_manifest.json")
 _MANIFEST = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))
 _SCHEMAS = _MANIFEST["schemas"]
 
+SCHEMA_MANIFEST: Final[dict[str, Any]] = _MANIFEST
 PROTOCOL_VERSION: Final[str] = _MANIFEST["protocol_version"]
 CATALOG_MOTION_SCHEMA_VERSION: Final[str] = _SCHEMAS["catalog_motion"]
+MODEL_INFO_SCHEMA_VERSION: Final[str] = _SCHEMAS["model_info"]
 MOTION_INTENT_V4_SCHEMA_VERSION: Final[str] = _SCHEMAS["motion_intent"]
 OUTPUT_SEGMENT_SCHEMA_VERSION: Final[str] = _SCHEMAS["output_segment"]
 PARAMETER_PLAN_V2_SCHEMA_VERSION: Final[str] = _SCHEMAS["parameter_plan"]

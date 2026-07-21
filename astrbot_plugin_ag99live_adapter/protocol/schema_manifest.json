@@ -2,6 +2,7 @@
   "protocol_version": "v2",
   "schemas": {
     "catalog_motion": "engine.catalog_motion.v1",
+    "model_info": "live2d_scan.v2",
     "motion_intent": "engine.motion_intent.v4",
     "output_segment": "output.segment.v3",
     "parameter_plan": "engine.parameter_plan.v2",

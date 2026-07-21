@@ -15,6 +15,18 @@ import type {
   SystemServerInfoPayload,
 } from "../../types/protocol.js";
 import {
+  PROTOCOL_VERSION,
+  SCHEMA_CATALOG_MOTION_V1,
+  SCHEMA_MODEL_INFO_V2,
+  SCHEMA_MOTION_INTENT_V4,
+  SCHEMA_OUTPUT_SEGMENT_V3,
+  SCHEMA_PARAMETER_PLAN_V2,
+  SCHEMA_PERFORMANCE_CURVE_HINT_V1,
+  SCHEMA_SEMANTIC_AXIS_PROFILE_V2,
+  SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
+  SCHEMA_VOICE_FOLLOWING_PROFILE_V3,
+} from "../../types/protocolSchema.generated.js";
+import {
   asRecord,
   invalidPayload,
   optionalString,
@@ -246,12 +258,69 @@ export function parseSystemServerInfoPayload(
   if (!httpBaseUrl.ok) return httpBaseUrl;
   const autoStartMic = requiredBoolean(envelope.type, record.payload, "auto_start_mic");
   if (!autoStartMic.ok) return autoStartMic;
+  const schemaManifest = parseSchemaManifest(envelope.type, record.payload.schema_manifest);
+  if (!schemaManifest.ok) return schemaManifest;
   return {
     ok: true,
     payload: {
       ws_url: wsUrl.payload,
       http_base_url: httpBaseUrl.payload,
       auto_start_mic: autoStartMic.payload,
+      schema_manifest: schemaManifest.payload,
+    },
+  };
+}
+
+function parseSchemaManifest(
+  type: string,
+  value: unknown,
+): PayloadParseResult<SystemServerInfoPayload["schema_manifest"]> {
+  const manifest = asRecord(value);
+  if (!manifest) return invalidPayload(type, "payload.schema_manifest", "object");
+  const manifestKeys = validateExactKeys(
+    type,
+    "payload.schema_manifest",
+    manifest,
+    ["protocol_version", "schemas"],
+  );
+  if (!manifestKeys.ok) return manifestKeys;
+  if (manifest.protocol_version !== PROTOCOL_VERSION) {
+    return invalidPayload(type, "payload.schema_manifest.protocol_version", PROTOCOL_VERSION);
+  }
+  const schemas = asRecord(manifest.schemas);
+  if (!schemas) return invalidPayload(type, "payload.schema_manifest.schemas", "object");
+  const expected = {
+    catalog_motion: SCHEMA_CATALOG_MOTION_V1,
+    model_info: SCHEMA_MODEL_INFO_V2,
+    motion_intent: SCHEMA_MOTION_INTENT_V4,
+    output_segment: SCHEMA_OUTPUT_SEGMENT_V3,
+    parameter_plan: SCHEMA_PARAMETER_PLAN_V2,
+    performance_curve_hint: SCHEMA_PERFORMANCE_CURVE_HINT_V1,
+    semantic_axis_profile: SCHEMA_SEMANTIC_AXIS_PROFILE_V2,
+    semantic_axis_relation_graph: SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
+    voice_following_profile: SCHEMA_VOICE_FOLLOWING_PROFILE_V3,
+  } as const;
+  const schemaKeys = validateExactKeys(
+    type,
+    "payload.schema_manifest.schemas",
+    schemas,
+    Object.keys(expected),
+  );
+  if (!schemaKeys.ok) return schemaKeys;
+  for (const [name, expectedVersion] of Object.entries(expected)) {
+    if (schemas[name] !== expectedVersion) {
+      return invalidPayload(
+        type,
+        `payload.schema_manifest.schemas.${name}`,
+        expectedVersion,
+      );
+    }
+  }
+  return {
+    ok: true,
+    payload: {
+      protocol_version: PROTOCOL_VERSION,
+      schemas: expected,
     },
   };
 }

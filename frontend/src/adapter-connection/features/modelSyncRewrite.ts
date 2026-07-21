@@ -11,17 +11,13 @@ export function rewriteModelSyncEnvelope(
 ): ProtocolEnvelope<SystemModelSyncPayload> {
   const modelInfo = rewriteModelInfo(envelope.payload.model_info, activeWsAddress);
   const runtimeCacheErrors = normalizeRuntimeCacheErrors(
-    envelope.payload.runtime_cache_errors ?? modelInfo.runtime_cache_errors,
+    envelope.payload.runtime_cache_errors,
   );
-  const modelInfoWithRuntimeCacheErrors: ModelSyncInfo = {
-    ...modelInfo,
-    runtime_cache_errors: runtimeCacheErrors,
-  };
   return {
     ...envelope,
     payload: {
       ...envelope.payload,
-      model_info: modelInfoWithRuntimeCacheErrors,
+      model_info: modelInfo,
       runtime_cache_errors: runtimeCacheErrors,
     },
   };
@@ -33,7 +29,6 @@ function rewriteModelInfo(
 ): ModelSyncInfo {
   return {
     ...modelInfo,
-    runtime_cache_errors: normalizeRuntimeCacheErrors(modelInfo.runtime_cache_errors),
     models: modelInfo.models.map((model) => ({
       ...model,
       model_url: rewriteHttpUrl(model.model_url, activeWsAddress),
@@ -43,11 +38,8 @@ function rewriteModelInfo(
 }
 
 function normalizeRuntimeCacheErrors(
-  value: RuntimeCacheErrorsPayload | undefined,
-): RuntimeCacheErrorsPayload | undefined {
-  if (!value) {
-    return undefined;
-  }
+  value: RuntimeCacheErrorsPayload,
+): RuntimeCacheErrorsPayload {
   const normalized: RuntimeCacheErrorsPayload = {};
   const root = typeof value.root === "string" ? value.root.trim() : "";
   const scanCache = typeof value.scan_cache === "string" ? value.scan_cache.trim() : "";
@@ -69,7 +61,7 @@ function normalizeRuntimeCacheErrors(
   if (motionTuningSamples) {
     normalized.motion_tuning_samples = motionTuningSamples;
   }
-  return Object.keys(normalized).length ? normalized : undefined;
+  return normalized;
 }
 
 export function rewriteSocketUrl(rawUrl: string, activeWsAddress: string): string {

@@ -4,7 +4,7 @@
 没有副作用，不查状态，只把入参塞进 build_message_envelope 出来一份 dict。
 
 类别（按 protocol/constants.py 里的 TYPE_* 常量分组）：
-    system.*  — 服务器信息、群组、模型同步、历史、心跳、语义轴档案、动作样本
+    system.*  — 服务器信息、模型同步、历史、心跳、语义轴档案、动作样本
     output.*  — 一次回复内的文本/音频/图片/转写片段（携带 turn_id + message_id）
     control.* — 轮次开始/结束、合成完成、中断、错误等控制信号
 
@@ -30,7 +30,6 @@ from .constants import (
     TYPE_OUTPUT_SEGMENT,
     TYPE_OUTPUT_TRANSCRIPTION,
     TYPE_SYSTEM_BACKGROUND_LIST,
-    TYPE_SYSTEM_GROUP_UPDATE,
     TYPE_SYSTEM_HEARTBEAT_ACK,
     TYPE_SYSTEM_HISTORY_CREATED,
     TYPE_SYSTEM_HISTORY_DATA,
@@ -43,7 +42,7 @@ from .constants import (
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE_FAILED,
     TYPE_SYSTEM_SERVER_INFO,
 )
-from .schema_versions import OUTPUT_SEGMENT_SCHEMA_VERSION
+from .schema_versions import OUTPUT_SEGMENT_SCHEMA_VERSION, SCHEMA_MANIFEST
 from .parser import build_message_envelope
 
 
@@ -67,7 +66,7 @@ def build_system_model_sync(
     conf_name: str,
     conf_uid: str,
     client_uid: str,
-    ) -> dict[str, Any]:
+) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_SYSTEM_MODEL_SYNC,
         source=SOURCE_ADAPTER,
@@ -98,19 +97,8 @@ def build_system_server_info(
             "ws_url": ws_url,
             "http_base_url": http_base_url,
             "auto_start_mic": auto_start_mic,
+            "schema_manifest": SCHEMA_MANIFEST,
         },
-    )
-
-
-def build_system_group_update(
-    *,
-    members: list[dict[str, Any]] | list[Any],
-    is_owner: bool,
-) -> dict[str, Any]:
-    return build_message_envelope(
-        TYPE_SYSTEM_GROUP_UPDATE,
-        source=SOURCE_ADAPTER,
-        payload={"members": members, "is_owner": is_owner},
     )
 
 

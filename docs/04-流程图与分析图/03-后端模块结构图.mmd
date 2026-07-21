@@ -54,16 +54,19 @@ flowchart TB
         PARSER[protocol/parser.py<br/>入站严格解析]:::boundary
         BUILDER[protocol/builder.py<br/>出站信封]:::boundary
         TYPES[constants.py / models.py<br/>协议类型]:::boundary
+        MANIFEST[schema_manifest.json + schema_versions.py<br/>协议与子 schema 唯一版本源]:::boundary
         WS[transport/websocket_server.py]:::boundary
         STATIC[static_routes.py / static_resources.py]:::boundary
         WS --> PARSER
         BUILDER --> WS
+        MANIFEST --> BUILDER
     end
 
     subgraph DATA[数据与 Live2D 资源]
         PROFILE[live2d/semantic_axis_profile.py]:::storage
         SCAN[live2d/scanner]:::storage
         CACHE[live2d/cache]:::storage
+        PROJECT[state._project_frontend_model_info<br/>live2d_scan.v2 前端能力投影]:::storage
         SQLITE[MotionLabRawEventStore / SQLite]:::storage
         TUNING[motion_state/tuning_store.py]:::storage
         MODELS[live2ds/**]:::storage
@@ -99,6 +102,9 @@ flowchart TB
     SCAN --> PROFILE
     CACHE --> MODELS
     STATE --> SCAN
+    SCAN --> CACHE
+    STATE --> PROJECT
+    PROJECT --> BUILDER
     WS --> FRONT
     WS --> COORD
     AUDIO --> BUILDER

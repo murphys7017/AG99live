@@ -13,8 +13,9 @@ except Exception:  # pragma: no cover - fallback for local dry runs outside Astr
     logger = logging.getLogger(__name__)
 
 from .motion_scan import build_motion_resource_pool, decompose_motion
+from ...protocol.schema_versions import MODEL_INFO_SCHEMA_VERSION
 
-SCAN_SCHEMA_VERSION = "live2d_scan.v1"
+SCAN_SCHEMA_VERSION = MODEL_INFO_SCHEMA_VERSION
 
 STANDARD_CHANNEL_SPECS: tuple[dict[str, Any], ...] = (
     {
@@ -932,6 +933,7 @@ def _scan_motions(
                     ),
                     "curve_count": int(motion_payload.get("Meta", {}).get("CurveCount") or 0),
                     "parameter_count": len(set(parameter_ids)),
+                    "parameter_ids": sorted(set(parameter_ids)),
                     "affects_channels": _collect_affected_channels(parameter_ids, parameter_lookup),
                     "uses_expression_parameters": any(
                         parameter_lookup.get(parameter_id, {}).get("kind") == "expression"

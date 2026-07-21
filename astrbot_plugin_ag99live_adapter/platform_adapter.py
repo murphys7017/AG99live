@@ -356,7 +356,8 @@ class OLVPetPlatformAdapter(Platform):
             conf_uid=self.conf_uid,
             client_uid=self.client_uid,
         )
-        if not self.runtime_state.should_send_model_payload(payload, force=force):
+        signature = self.runtime_state.build_model_payload_signature(payload)
+        if not self.runtime_state.should_send_model_payload(signature, force=force):
             return
 
         sent = await self._send_json(payload)
@@ -368,7 +369,7 @@ class OLVPetPlatformAdapter(Platform):
             )
             return
 
-        self.runtime_state.mark_model_payload_sent(payload)
+        self.runtime_state.mark_model_payload_sent(signature)
 
     async def _refresh_and_send_current_model_and_conf(self, *, force: bool = False) -> None:
         self._refresh_runtime_settings()

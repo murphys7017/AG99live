@@ -346,7 +346,7 @@ def build_seed_model_info_with_options(
         motions=deepcopy(motions),
     )
     return {
-        "schema_version": "live2d_scan.v1",
+        "schema_version": "live2d_scan.v2",
         "driver_priority": ["parameters", "expression", "motion"],
         "selected_model": "DemoModel",
         "available_models": ["DemoModel"],

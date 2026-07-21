@@ -18,7 +18,7 @@ import {
 } from "../features/modelSyncRewrite.js";
 import type { useAdapterHistory } from "../history/useAdapterHistory.js";
 import type { useAdapterMotionTuning } from "../motion-tuning/useAdapterMotionTuning.js";
-import type { useModelSync } from "../model-sync/useModelSync.js";
+import type { ModelSyncInstance } from "../model-sync/useModelSync.js";
 import type { useTurnPlaybackSessionStore } from "../../turn-playback/useTurnPlaybackSessionStore.js";
 
 export interface AdapterInboundRuntimeDeps {
@@ -26,7 +26,7 @@ export interface AdapterInboundRuntimeDeps {
   getSessionStore: () => ReturnType<typeof useTurnPlaybackSessionStore> | undefined;
   getHistoryAdapter: () => ReturnType<typeof useAdapterHistory> | null;
   getMotionTuningAdapter: () => ReturnType<typeof useAdapterMotionTuning> | null;
-  getModelSyncAdapter: () => ReturnType<typeof useModelSync> | null;
+  getModelSyncAdapter: () => ModelSyncInstance | null;
   pushHistory: (role: string, text: string) => void;
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   resetAudioPlaybackTerminal: () => void;
@@ -96,6 +96,18 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
   async function dispatchInboundEvent(
     event: InboundAdapterEvent,
   ): Promise<void> {
+    if (
+      deps.state.serverInfo === null
+      && event.kind !== "server_info"
+      && event.kind !== "protocol_error"
+    ) {
+      logProtocolError(
+        "handshake:not_complete",
+        `协议握手尚未完成，拒绝处理 ${event.envelope.type}。请重载 AstrBot 插件后重新连接。`,
+        event.envelope,
+      );
+      return;
+    }
     await dispatchInboundEventToDeps(buildDispatchDeps(), event);
   }
 
@@ -123,7 +135,6 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       pushHistory: deps.pushHistory,
       modelSyncAdapter: modelSyncAdapter
         ? {
-            applyUnknownMessage: (env) => modelSyncAdapter.applyUnknownMessage(env),
             applyModelSyncMessage: (env) => modelSyncAdapter.applyModelSyncMessage(env),
           }
         : null,

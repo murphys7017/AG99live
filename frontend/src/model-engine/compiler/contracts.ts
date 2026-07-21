@@ -30,16 +30,6 @@ export interface MotionTimingResolution {
   performanceCurvePreset?: string;
 }
 
-export interface SupplementaryBuildDiagnostics {
-  usedActionLibrary: boolean;
-  selectedFrom: "parameter_action_library" | "base_action_library" | "none";
-}
-
-export interface SupplementaryBuildResult {
-  params: { parameter_id: string; target_value: number; weight: number; source_atom_id: string; channel: string }[];
-  diagnostics: SupplementaryBuildDiagnostics;
-}
-
 export interface CompileOptions {
   model: ModelSummary;
   targetDurationMs?: number | null;

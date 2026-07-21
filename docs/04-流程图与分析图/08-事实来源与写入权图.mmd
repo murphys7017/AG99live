@@ -15,6 +15,8 @@ flowchart LR
     PLAYER[Motion Player / WebSDK]:::executor
     LAB[Motion Lab Observation]:::derived
     AUDIOUI[Adapter audio UI state]:::derived
+    SERVERINFO[ServerInfo handshake state]:::fact
+    MODELSYNC[ModelSync state]:::fact
 
     subgraph STORE[TurnPlaybackSessionStore：持久事实]
         TURN[turn identity / created]:::fact
@@ -40,6 +42,12 @@ flowchart LR
         RUN[Live2D motion run terminal]:::derived
     end
 
+    subgraph MODEL_FACTS[模型同步事实]
+        MANIFEST[schema manifest<br/>protocol + 子 schema 版本]:::fact
+        CAPABILITY[live2d_scan.v2<br/>前端能力投影]:::fact
+        CACHEERR[runtime cache errors<br/>独立运行诊断]:::fact
+    end
+
     BACKEND -->|唯一生成| TURN
     BACKEND -->|协议声明| MATERIAL
     INBOUND -->|唯一提交| TURN
@@ -51,6 +59,14 @@ flowchart LR
     PROJ -->|唯一投影| AUDIO
     PROJ -->|唯一投影| MOTION
     COMPLETE -->|settling / completed / ACK failure| READY
+    BACKEND -->|server_info 唯一声明| MANIFEST
+    INBOUND -->|验证成功后写入| SERVERINFO
+    BACKEND -->|model_sync 唯一声明| CAPABILITY
+    BACKEND -->|payload 根部唯一声明| CACHEERR
+    INBOUND -->|分别应用| MODELSYNC
+    MANIFEST --> SERVERINFO
+    CAPABILITY --> MODELSYNC
+    CACHEERR --> MODELSYNC
 
     EXEC --> TIDENT
     EXEC --> TSINK

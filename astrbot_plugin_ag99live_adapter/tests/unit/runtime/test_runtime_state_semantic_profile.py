@@ -108,10 +108,7 @@ def test_runtime_state_exposes_runtime_cache_segment_errors_in_model_sync(
         "scan_cache": "live2d_runtime_cache_scan_cache_invalid",
         "action_filter_cache": "live2d_runtime_cache_action_filter_cache_invalid",
     }
-    assert payload["payload"]["model_info"]["runtime_cache_errors"] == {
-        "scan_cache": "live2d_runtime_cache_scan_cache_invalid",
-        "action_filter_cache": "live2d_runtime_cache_action_filter_cache_invalid",
-    }
+    assert "runtime_cache_errors" not in payload["payload"]["model_info"]
 
 
 def test_runtime_state_invalidates_old_scan_cache_version(

@@ -7,6 +7,16 @@ flowchart TD
 
     START[外部输入 / 模型输出 / 播放事件]:::input
 
+    subgraph HANDSHAKE[连接与模型同步错误边界]
+        MANIFEST{server_info manifest 完全匹配？}:::check
+        MODELINFO{live2d_scan.v2 投影字段合法？}:::check
+        HFAIL[拒绝后续消息并报告精确 path<br/>不接收旧 payload]:::failure
+        START --> MANIFEST
+        MANIFEST -->|否| HFAIL
+        MANIFEST -->|是| MODELINFO
+        MODELINFO -->|否| HFAIL
+    end
+
     subgraph BACKEND[后端错误边界]
         EFFECT{Persona Effect arguments 合法？}:::check
         PROFILE{SemanticAxisProfile 可用？}:::check
@@ -15,7 +25,7 @@ flowchart TD
         BFAIL[拒绝 motion 或输出段<br/>记录明确 reason]:::failure
         SEG[output.segment.v3]:::terminal
 
-        START --> EFFECT
+        MODELINFO -->|是| EFFECT
         EFFECT -->|否| BFAIL
         EFFECT -->|是| PROFILE
         PROFILE -->|否| BFAIL
@@ -102,6 +112,7 @@ flowchart TD
         N6[resource 不可播放 -> 静默 axis-only]:::failure
         N7[Timeline 缺失 -> ModelEngine 直接播放]:::failure
         N8[数据库记录失败 -> 修改当前回复结果]:::failure
+        N9[manifest 不一致 -> 尝试旧 schema]:::failure
     end
 
     BFAIL -.禁止.-> N1
@@ -112,6 +123,7 @@ flowchart TD
     MFAIL -.禁止.-> N6
     MFAIL -.禁止.-> N7
     LAB[Motion Lab 异步观察]:::owner -.禁止.-> N8
+    HFAIL -.禁止.-> N9
 
     OBS[错误可观察性<br/>日志 reason + SessionStore terminal<br/>Timeline snapshot + MotionFeedback<br/>Motion Lab raw event]:::owner
     BFAIL --> OBS

@@ -85,18 +85,6 @@ export function makeValidModelSummary(overrides: Record<string, unknown> = {}) {
       special_state_names: [],
       expression_driven_parameters: [],
     },
-    base_action_library: {
-      schema_version: "base_action_library.v1",
-      extraction_mode: "deterministic",
-      analysis: {},
-      focus_channels: [],
-      focus_domains: [],
-      ignored_domains: [],
-      summary: {},
-      families: [],
-      channels: [],
-      atoms: [],
-    },
     parameter_action_library: {
       schema_version: "parameter_action_library.v1",
       extraction_mode: "deterministic",
@@ -107,22 +95,8 @@ export function makeValidModelSummary(overrides: Record<string, unknown> = {}) {
       parameters: [],
       atoms: [],
     },
-    motion_resource_pool: {
-      decomposition_level: "parameter",
-      summary: {},
-      components: [],
-      driver_components: [],
-      channel_pool: [],
-      domain_pool: [],
-      parameter_pool: [],
-      motion_presets: [],
-    },
     constraints: { expressions: [], motions: [] },
     semantic_axis_profile: makeValidSemanticAxisProfile(name),
-    calibration_profile: {
-      schema_version: "direct_parameter_calibration.v1",
-      axes: {},
-    },
     voice_following_profile: makeValidVoiceFollowingProfile(name),
     engine_hints: {
       driver_priority: ["parameters", "expression", "motion"],
@@ -140,12 +114,13 @@ export function makeValidModelSyncPayload(overrides: Record<string, unknown> = {
   const model = makeValidModelSummary();
   return {
     model_info: {
-      schema_version: "live2d_scan.v1",
+      schema_version: "live2d_scan.v2",
       driver_priority: ["parameters", "expression", "motion"],
       selected_model: model.name,
       available_models: [model.name],
       models: [model],
     },
+    runtime_cache_errors: {},
     conf_name: "default",
     conf_uid: "conf-1",
     client_uid: "client-1",

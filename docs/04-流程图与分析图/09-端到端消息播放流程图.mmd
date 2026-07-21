@@ -7,6 +7,21 @@ flowchart TD
     classDef terminal fill:#f3e6ec,stroke:#8b4865,color:#4b2637
     classDef failure fill:#fde7e3,stroke:#b33a2b,color:#681d14
 
+    subgraph H[连接握手与模型能力同步]
+        CONNECT[Renderer 建立 WebSocket]:::protocol
+        SERVERINFO[system.server_info<br/>完整 schema manifest]:::protocol
+        MANIFEST{protocol 与全部子 schema<br/>逐项完全一致？}:::protocol
+        HFAIL[拒绝后续消息<br/>要求重载插件/重新连接]:::failure
+        SCAN[RuntimeState<br/>扫描缓存校验或重新扫描]:::backend
+        PROJECT[live2d_scan.v2<br/>前端能力投影]:::backend
+        MODELSYNC[system.model_sync<br/>模型能力 + 独立 cache errors]:::protocol
+        APPLY[ModelSync state<br/>URL rewrite / selected model / profile]:::state
+
+        CONNECT --> SERVERINFO --> MANIFEST
+        MANIFEST -->|否| HFAIL
+        MANIFEST -->|是| SCAN --> PROJECT --> MODELSYNC --> APPLY
+    end
+
     subgraph B[后端生成与原子段聚合]
         INPUT[input.text / input.audio]:::protocol
         TURN[TurnCoordinator<br/>校验并绑定前端 turn_id]:::backend
@@ -50,7 +65,7 @@ flowchart TD
     subgraph I[前端协议入口与原子提交]
         STARTIN[Inbound Dispatcher<br/>control.turn_started]:::protocol
         CREATE[创建 TurnPlaybackSession]:::state
-        SEGIN[Inbound Dispatcher<br/>output.segment.v3]:::protocol
+        SEGIN[Inbound Dispatcher<br/>握手后接收 output.segment.v3]:::protocol
         PARSE[信封与 slot parser]:::protocol
         PRECHECK[URL 重写 + motion 归一化<br/>完成所有前置校验]:::protocol
         VALID{整段是否合法？}:::protocol
@@ -126,18 +141,20 @@ flowchart TD
 
     subgraph M[ModelEngine 编译与 Live2D 逐帧执行]
         ENGINE[ModelEngine 动作入口]:::engine
-        EVALID[IntentValidator<br/>协议 / 模型 / profile 校验]:::engine
+        EVALID[语义阶段 10-50<br/>IntentValidator]:::engine
         SAMPLE[AxisResolver + Intensity<br/>九级确定性采样与强度]:::engine
         CAND[Coupling + Mode + Timing<br/>派生候选与时序]:::engine
-        GESTURE[SpeechPoseStage<br/>非周期 speech gesture track]:::engine
-        GRAPH[Relation graph<br/>轴关系计算与约束]:::engine
-        PLAN[PlanBuilder<br/>parameter_plan.v2]:::engine
-        POLICY[ResourcePolicy<br/>资源冲突与执行策略]:::engine
+        GRAPH[SemanticAxisRelationGraph<br/>轴关系计算与语义范围收口]:::engine
+        COMPILED[CompiledSemanticMotion<br/>第一阶段输出]:::engine
+        GESTURE[模型参数阶段 60<br/>SpeechPoseStage 生成轨道]:::engine
+        PLAN[ModelParameterBinding 80<br/>parameter_plan.v2]:::engine
+        POLICY[ResourcePolicy 90<br/>资源冲突与执行策略]:::engine
         SDK[Live2D WebSDK<br/>曲线采样 / dynamics / 冲突解析 / 写参]:::engine
         MODEL[Live2D Model + Physics]:::engine
 
         PREPARE --> ENGINE
-        ENGINE --> EVALID --> SAMPLE --> CAND --> GESTURE --> GRAPH --> PLAN --> POLICY --> SDK --> MODEL
+        APPLY -.selected model / profile.-> ENGINE
+        ENGINE --> EVALID --> SAMPLE --> CAND --> GRAPH --> COMPILED --> GESTURE --> PLAN --> POLICY --> SDK --> MODEL
         SEMANTIC --> SDK
         SPEECHONLY --> SDK
         SYNTHMOTION --> ENGINE

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import time
 from copy import deepcopy
@@ -40,10 +41,11 @@ from ..live2d.semantic_axis_profile import (
     save_semantic_axis_profile,
 )
 from ..protocol.builder import build_system_model_sync
+from ..protocol.schema_versions import MODEL_INFO_SCHEMA_VERSION
 from .motion_state import MotionTuningStore
 from .motion_lab import MotionLabRawEventStore, MotionLabRecorder
 
-LIVE2D_SCAN_CACHE_VERSION = "voice_following_profile.v3"
+LIVE2D_SCAN_CACHE_VERSION = MODEL_INFO_SCHEMA_VERSION
 
 
 class RuntimeStateConfigurationError(RuntimeError):
@@ -490,8 +492,7 @@ class RuntimeState:
         client_uid: str,
     ) -> dict[str, Any]:
         runtime_cache_errors = self._build_runtime_cache_error_payload()
-        model_info_payload = deepcopy(self.model_info)
-        model_info_payload["runtime_cache_errors"] = runtime_cache_errors
+        model_info_payload = _project_frontend_model_info(self.model_info)
         return build_system_model_sync(
             model_info=model_info_payload,
             runtime_cache_errors=runtime_cache_errors,
@@ -558,18 +559,22 @@ class RuntimeState:
     def _refresh_motion_tuning_reference_examples_from_samples(self) -> None:
         self._motion_tuning_store.refresh_reference_examples()
 
-    def should_send_model_payload(self, payload: dict[str, Any], *, force: bool = False) -> bool:
-        signature = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    def should_send_model_payload(self, signature: str, *, force: bool = False) -> bool:
         if force:
             return True
         return signature != self.last_sent_model_signature
 
-    def mark_model_payload_sent(self, payload: dict[str, Any]) -> None:
-        self.last_sent_model_signature = json.dumps(
+    def build_model_payload_signature(self, payload: dict[str, Any]) -> str:
+        encoded = json.dumps(
             payload,
             sort_keys=True,
             ensure_ascii=False,
-        )
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def mark_model_payload_sent(self, signature: str) -> None:
+        self.last_sent_model_signature = signature
 
     async def _refresh_base_action_analysis_async(self) -> None:
         models = [
@@ -1277,6 +1282,110 @@ class RuntimeState:
             raise RuntimeError("Invalid plugin config from plugin runtime: expected a JSON object.")
 
         return self._clone_plugin_config(latest_config)
+
+
+def _project_frontend_model_info(model_info: dict[str, Any]) -> dict[str, Any]:
+    root_fields = (
+        "schema_version",
+        "driver_priority",
+        "selected_model",
+        "available_models",
+    )
+    missing_root_fields = [field for field in root_fields if field not in model_info]
+    if missing_root_fields:
+        raise RuntimeError(
+            "live2d_frontend_model_info_projection_missing_fields:"
+            + ",".join(missing_root_fields)
+        )
+    model_fields = (
+        "name",
+        "root_path",
+        "model_path",
+        "model_url",
+        "icon_url",
+        "resource_scan",
+        "parameter_scan",
+        "expression_scan",
+        "parameter_action_library",
+        "constraints",
+        "semantic_axis_profile",
+        "voice_following_profile",
+        "engine_hints",
+    )
+    models = model_info.get("models")
+    if not isinstance(models, list):
+        raise RuntimeError("live2d_model_info_models_invalid")
+    projected_models: list[dict[str, Any]] = []
+    for model in models:
+        if not isinstance(model, dict):
+            raise RuntimeError("live2d_model_info_model_invalid")
+        missing = [field for field in model_fields if field not in model]
+        if missing:
+            raise RuntimeError(
+                "live2d_frontend_model_projection_missing_fields:"
+                + ",".join(missing)
+            )
+        projected_model = {field: deepcopy(model[field]) for field in model_fields}
+        projected_model["constraints"] = _project_frontend_resource_constraints(
+            model["constraints"]
+        )
+        projected_models.append(projected_model)
+    return {
+        **{field: deepcopy(model_info[field]) for field in root_fields},
+        "models": projected_models,
+    }
+
+
+def _project_frontend_resource_constraints(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise RuntimeError("live2d_model_constraints_invalid")
+    expressions = value.get("expressions")
+    motions = value.get("motions")
+    if not isinstance(expressions, list) or not isinstance(motions, list):
+        raise RuntimeError("live2d_model_resource_constraints_invalid")
+    if not all(isinstance(item, dict) for item in expressions):
+        raise RuntimeError("live2d_expression_resource_constraint_invalid")
+    if not all(isinstance(item, dict) for item in motions):
+        raise RuntimeError("live2d_motion_resource_constraint_invalid")
+    expression_fields = (
+        "name",
+        "file",
+        "catalog_id",
+        "catalog_expose_as_resource",
+        "parameter_ids",
+    )
+    motion_fields = (
+        "name",
+        "file",
+        "catalog_id",
+        "catalog_expose_as_resource",
+        "group",
+        "duration",
+        "parameter_ids",
+        "catalog_label",
+        "catalog_intensity",
+    )
+    for resource_type, items, fields in (
+        ("expression", expressions, expression_fields),
+        ("motion", motions, motion_fields),
+    ):
+        for index, item in enumerate(items):
+            missing = [field for field in fields if field not in item]
+            if missing:
+                raise RuntimeError(
+                    f"live2d_{resource_type}_resource_projection_missing_fields:"
+                    f"{index}:" + ",".join(missing)
+                )
+    return {
+        "expressions": [
+            {field: deepcopy(item[field]) for field in expression_fields}
+            for item in expressions
+        ],
+        "motions": [
+            {field: deepcopy(item[field]) for field in motion_fields}
+            for item in motions
+        ],
+    }
 
 
 def _plugin_config_get(config: Any, key: str, default: Any) -> Any:

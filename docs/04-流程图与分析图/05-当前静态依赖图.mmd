@@ -11,6 +11,7 @@ flowchart LR
         BRUNTIME[runtime]:::hotspot
         BSERV[services]:::backend
         BPROTO[protocol]:::shared
+        BMANIFEST[schema_manifest.json<br/>schema_versions.py]:::shared
         BTRANS[transport]:::shared
         BLIVE[live2d profile/scanner]:::backend
         BASSET[live2ds resources]:::shared
@@ -30,6 +31,7 @@ flowchart LR
         BSERV --> BRUNTIME
         BSERV --> BLIVE
         BTRANS --> BPROTO
+        BPROTO --> BMANIFEST
         BTRANS --> BSERV
         BTRANS --> BRUNTIME
         BLIVE --> BASSET
@@ -46,6 +48,7 @@ flowchart LR
         FLIVE[live2d / renderer]:::hotspot
         FSDK[Live2D WebSDK]:::shared
         FTYPES[types/protocol]:::shared
+        FSCHEMA[protocolSchema.generated.ts]:::shared
         FLAB[motion-lab/action-lab]:::frontend
         FDESKTOP[desktop-bridge/settings]:::frontend
         FFEATURE[bilibili/obs/esp32]:::frontend
@@ -70,6 +73,7 @@ flowchart LR
         FADAPTER --> FTL
         FADAPTER --> FENGINE
         FADAPTER --> FTYPES
+        FADAPTER --> FSCHEMA
         FTURN --> FENGINE
         FTURN --> FTL
         FTURN --> FTYPES
@@ -86,7 +90,8 @@ flowchart LR
     end
 
     BTRANS <-->|WebSocket v2| FADAPTER
-    BPROTO -.同一协议概念<br/>分别实现类型与校验.-> FTYPES
+    BMANIFEST -.scripts/check_protocol_schema_manifest.py<br/>生成常量一致性.-> FSCHEMA
+    BPROTO -.信封与 payload 运行时契约.-> FTYPES
     BASSET -.HTTP static resources.-> FLIVE
 
     HOT[当前高耦合热点<br/>interaction_motion.py<br/>turn_coordinator.py<br/>useAdapterConnection.ts<br/>playbackTimelineRuntime.ts<br/>useModelEngine.ts<br/>WebSDK/lappmodel.ts]:::hotspot
