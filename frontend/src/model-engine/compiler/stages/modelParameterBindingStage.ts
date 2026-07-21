@@ -37,7 +37,7 @@ export function runModelParameterBindingStage(
   const parameterResult = buildSemanticPlanParameters(
     context.semanticMotion.axes,
     context.state.axisById,
-    context.state.pendingParameterModulations,
+    context.state.pendingSpeechGestures,
   );
   if (!parameterResult.ok) {
     if (
@@ -71,24 +71,13 @@ export function runModelParameterBindingStage(
   if (!context.state.parameters.length) {
     return { ok: false, reason: "parameter_binding_parameters_empty" };
   }
-  for (const parameterId of Object.keys(context.state.pendingParameterModulations)) {
-    const owner = context.state.parameters.find(
-      (item) => item.parameter_id === parameterId && item.modulation,
-    );
-    if (!owner) {
-      return {
-        ok: false,
-        reason: `speech_pose_modulation_owner_missing:${parameterId}`,
-      };
-    }
-  }
   return { ok: true };
 }
 
 function buildSemanticPlanParameters(
   semanticAxes: ModelParameterCompileContext["semanticMotion"]["axes"],
   axisById: Map<string, SemanticAxisDefinition>,
-  pendingParameterModulations: ModelParameterCompileContext["state"]["pendingParameterModulations"],
+  pendingSpeechGestures: ModelParameterCompileContext["state"]["pendingSpeechGestures"],
 ):
   | { ok: true; parameters: SemanticParameterPlan["parameters"]; warnings: string[] }
   | { ok: false; reason: string } {
@@ -96,8 +85,10 @@ function buildSemanticPlanParameters(
   const seenParameterIds = new Set<string>();
   const warnings: string[] = [];
 
-  for (const semanticAxis of semanticAxes) {
-    const { axisId, value, source } = semanticAxis;
+  const semanticAxisById = new Map(semanticAxes.map((axis) => [axis.axisId, axis]));
+  const axisIds = new Set([...semanticAxisById.keys(), ...Object.keys(pendingSpeechGestures)]);
+  for (const axisId of axisIds) {
+    const semanticAxis = semanticAxisById.get(axisId);
     const axis = axisById.get(axisId);
     if (!axis) {
       return { ok: false, reason: `unknown_axis:${axisId}` };
@@ -105,6 +96,8 @@ function buildSemanticPlanParameters(
     if (!axis.parameter_bindings.length) {
       return { ok: false, reason: `axis_parameter_binding_missing:${axisId}` };
     }
+    const value = semanticAxis?.value ?? axis.neutral;
+    const source = semanticAxis?.source ?? "speech_pose";
     for (const binding of axis.parameter_bindings) {
       const parameter = mapSemanticBindingValue(axis, binding, value);
       if (!parameter.ok) {
@@ -118,6 +111,8 @@ function buildSemanticPlanParameters(
       }
 
       seenParameterIds.add(binding.parameter_id);
+      const dynamics = mapSemanticBindingDynamics(axis, binding);
+      const speechGesture = pendingSpeechGestures[axisId];
       parameters.push({
         axis_id: axisId,
         parameter_id: binding.parameter_id,
@@ -126,8 +121,18 @@ function buildSemanticPlanParameters(
         weight: binding.default_weight,
         input_value: value,
         source,
-        modulation: pendingParameterModulations[binding.parameter_id],
-        dynamics: mapSemanticBindingDynamics(axis, binding),
+        modulation: speechGesture ? {
+          kind: "speech_gesture_track",
+          preset: speechGesture.preset,
+          amplitude: Math.min(
+            dynamics.max_speech_offset,
+            speechGesture.amplitude * speechGesture.weight,
+          ),
+          direction: 1,
+          delay_ms: speechGesture.delayMs,
+          points: speechGesture.points,
+        } : undefined,
+        dynamics,
       });
     }
   }

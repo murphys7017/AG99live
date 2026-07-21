@@ -23,6 +23,12 @@ export function buildSpeechOnlyMotionRequest(
       (channel) =>
         typeof channel?.parameter_id === "string"
         && channel.parameter_id.trim().length > 0
+        && profile.axes.some(
+          (axis) => axis.id === channel.channel
+            && axis.parameter_bindings.some(
+              (binding) => binding.parameter_id === channel.parameter_id,
+            ),
+        )
         && typeof channel.amplitude === "number"
         && Number.isFinite(channel.amplitude)
         && channel.amplitude > 0

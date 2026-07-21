@@ -24,10 +24,13 @@ export interface ModelParameterCompileState {
   profile: SemanticAxisProfile;
   axisById: Map<string, SemanticAxisDefinition>;
   parameters: SemanticParameterPlan["parameters"];
-  pendingParameterModulations: Record<
-    string,
-    NonNullable<SemanticParameterPlan["parameters"][number]["modulation"]>
-  >;
+  pendingSpeechGestures: Record<string, {
+    preset: NonNullable<SemanticParameterPlan["parameters"][number]["modulation"]>["preset"];
+    amplitude: number;
+    weight: number;
+    delayMs: number;
+    points: Array<{ at_ms: number; transition_ms: number; value: number }>;
+  }>;
   resource: ResolvedMotionResource | null;
   warnings: string[];
 }
@@ -70,7 +73,7 @@ export function createModelParameterCompileContext(
       profile,
       axisById: new Map(profile.axes.map((axis) => [axis.id, axis])),
       parameters: [],
-      pendingParameterModulations: {},
+      pendingSpeechGestures: {},
       resource: null,
       warnings: [...(semanticMotion.diagnostics.warnings ?? [])],
     },

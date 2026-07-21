@@ -1,9 +1,9 @@
 task:
-  class: bugfix
-  risk: medium
+  class: refactor
+  risk: high
   phase: implementation_complete
   status: complete
-  scope: Give transparent desktop windows stable capture identities and replace threshold-based frame skipping with a deadline-based 60 FPS render cadence.
+  scope: Remove the parallel speech-following parameter path so semantic motion and speech-only gestures share one semantic profile binding, range, dynamics, and presentation pipeline.
 
 context:
   confidence: high
@@ -75,6 +75,9 @@ verification:
     - Obsolete frontend preview command and Adapter outbound API references were confirmed absent with `rg`.
     - `npm run typecheck:renderer` and `npm run typecheck:node` passed after assigning stable capture titles to the Live2D and input windows.
     - `npm run typecheck:websdk` passed after replacing the Live2D frame limiter with accumulated frame deadlines.
+    - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `npm run typecheck:node` passed after unifying speech gesture parameter binding.
+    - Python syntax checks passed for the scanner and runtime cache changes.
+    - `npm run build` passed and regenerated the Electron renderer with `ag99.voice_following_profile.v2`, matching the active AstrBot runtime cache.
   validation_gap:
     - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
     - Live AstrBot plus Provider plus TTS plus Electron plus Live2D validation is still required after the clock migration, including a long audio segment and a paused audio segment.
@@ -83,6 +86,7 @@ verification:
     - Live Electron validation is required to confirm historical sequence replay starts the preserved parameter plan, reports its real terminal status, and rejects previews while conversation motion is active.
     - OBS must be restarted and its Window Capture source refreshed to confirm `AG99live Live2D` and `AG99live Input` replace the previous null window identity.
     - Live Electron observation on the 180 Hz display is required to confirm the renderer remains near its 60 FPS target under the real model workload.
+    - A live speech-only segment and a semantic-motion-plus-speech segment are required to confirm voice_following_profile.v2 resolves through the same semantic parameter bindings and remains visually expressive.
 
 backlog:
   - id: motion_lab_sequence_tuning
