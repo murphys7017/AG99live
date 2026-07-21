@@ -1,9 +1,9 @@
 task:
-  class: refactor
+  class: bugfix
   risk: high
   phase: implementation_complete
   status: complete
-  scope: Enforce protocol manifest handshake, project only frontend-owned model capability data, remove duplicate and bypass ModelSync ingress, guard reconnect identity, compact the Live2D scan cache, and update architecture documentation from current code.
+  scope: Keep internal speech-only motion on the segment Timeline clock without rewriting a stable output.segment motion=absent fact.
 
 context:
   confidence: high
@@ -49,6 +49,7 @@ architecture:
     live2d_presentation: ambientMotionEnabled, physicsResponseScale, and renderDprCap; applied by the renderer before model initialization and atomically through the WebSDK Adapter at runtime.
   playback_rules:
     - Audio-backed subtitle, motion, and lip sync use the matched HTMLAudioElement playing fact.
+    - Internal speech-only motion receives the same segment clock reader but does not project started or terminal state into an absent protocol motion slot.
     - Explicit motion-only segments may use a segment-owned synthetic clock.
     - Expected audio failure fails the segment; it never becomes normal no-audio playback.
     - Missing required wiring, invalid payloads, and impossible lifecycle transitions fail visibly.
@@ -79,6 +80,7 @@ verification:
     - `npm run typecheck:websdk` passed after replacing the Live2D frame limiter with accumulated frame deadlines.
     - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `npm run typecheck:node` passed after unifying speech gesture parameter binding.
     - `npm run typecheck:renderer` and `npm run typecheck:node` passed after the protocol, ModelSync ownership, and documentation review.
+    - `npm run typecheck:renderer`, `npm run typecheck:node`, and `npm run test:playback-timeline` passed after separating internal speech-only execution from protocol motion state projection.
     - `python scripts/check_protocol_schema_manifest.py` passed after adding `live2d_scan.v2` to the strict handshake manifest.
     - Targeted `python -m py_compile` passed for every modified Adapter runtime, scanner, protocol, and transport module.
     - Mermaid sources were reviewed against current code; no Mermaid CLI is installed, so diagram rendering was not validated automatically.
@@ -95,6 +97,7 @@ verification:
     - OBS must be restarted and its Window Capture source refreshed to confirm `AG99live Live2D` and `AG99live Input` replace the previous null window identity.
     - Live Electron observation on the 180 Hz display is required to confirm the renderer remains near its 60 FPS target under the real model workload.
     - A live speech-only segment and a semantic-motion-plus-speech segment are required to confirm voice_following_profile.v3 resolves through the same semantic parameter bindings and remains visually expressive.
+    - A live speech-only segment with `output.segment.motion=absent` must confirm the plan receives the segment Timeline reader, starts once, and leaves the SessionStore motion terminal at absent.
 
 backlog:
   - id: motion_lab_sequence_tuning

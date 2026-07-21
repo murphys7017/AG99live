@@ -97,7 +97,7 @@ function canAttachTimelineForMotionStart(
   );
 }
 
-function projectMotionPlaybackClockReader(
+export function projectMotionPlaybackClockReader(
   reader: PlaybackTimelineClockReader,
 ): MotionPlaybackClockReader {
   return {

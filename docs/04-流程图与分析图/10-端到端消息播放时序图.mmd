@@ -167,7 +167,8 @@ sequenceDiagram
             opt 语义动作或 speech-only 动作已启动
                 SDK-->>Timeline: motion completed / failed / interrupted
             end
-            Timeline->>Projection: 投影稳定的 audio / motion terminal
+            Note over Timeline,Store: speech-only 共用 segment clock reader<br/>但不覆盖 motion absent 协议事实
+            Timeline->>Projection: 投影稳定的 audio / 正式 motion terminal
             Projection->>Store: 回写 segment execution facts
         end
     end

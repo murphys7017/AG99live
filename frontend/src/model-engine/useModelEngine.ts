@@ -9,6 +9,7 @@ import {
 } from "./runtime/speechOnlyMotion.js";
 import type {
   InboundPayloadContext,
+  MotionPlaybackClockReader,
   NormalizedMotionPayload,
 } from "./contracts.js";
 import type {
@@ -182,6 +183,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
 
   function handlePlaybackTimelineStarted(
     playbackClock: MotionPlaybackClockContext,
+    playbackClockReader: MotionPlaybackClockReader,
   ): boolean {
     const queuedMotionStarted =
       runtimeScheduler.handlePlaybackTimelineStarted(playbackClock);
@@ -225,6 +227,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         startReason: "speech_only",
         queuedDelayMs: 0,
         playbackClock,
+        playbackClockReader,
       },
       motionStartDependencies,
       runtimeStateController,

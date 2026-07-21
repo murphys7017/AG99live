@@ -41,6 +41,7 @@ interface PlaybackTimelineEntry {
   turnId: string | null;
   messageId: string;
   engine: PlaybackTimelineEngine;
+  projectsMotionSession: boolean;
   deferredText: PlaybackTimelineDeferredTextRelease | null;
   audioStartTimeoutHandle: ReturnType<typeof globalThis.setTimeout> | null;
   audioInterruptHandler: ((reason: string) => void) | null;
@@ -251,6 +252,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       turnId,
       messageId,
       engine,
+      projectsMotionSession: false,
       deferredText: options.deferredText ?? null,
       audioStartTimeoutHandle: null,
       audioInterruptHandler: options.onInterrupt ?? null,
@@ -278,10 +280,15 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     },
   ): boolean {
     prepareAudioTimeline(turnId, messageId);
+    const timeline = getTimeline(turnId, messageId);
+    if (!timeline) {
+      return false;
+    }
     if (options.hasMotion) {
+      timeline.projectsMotionSession = true;
       return ensureMotionTimelineSink(turnId, messageId);
     }
-    return getTimeline(turnId, messageId) !== null;
+    return true;
   }
 
   function startAudioTimelineSink(
@@ -441,6 +448,9 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       if (motionSink) {
         return;
       }
+      if (!timeline.projectsMotionSession) {
+        return;
+      }
     }
     sessionProjection.markMotionTerminal(
       turnId,
@@ -469,6 +479,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
   ): PlaybackTimelineSnapshot | null {
     const existing = getTimeline(turnId, messageId);
     if (existing) {
+      existing.projectsMotionSession = true;
       return ensureMotionTimelineSink(turnId, messageId, options)
         ? existing.engine.getSnapshot()
         : null;
@@ -489,6 +500,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       turnId,
       messageId,
       engine,
+      projectsMotionSession: true,
       deferredText: null,
       audioStartTimeoutHandle: null,
       audioInterruptHandler: null,
@@ -690,7 +702,10 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       return;
     }
     const engine = timeline.engine;
-    if (hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID)) {
+    if (
+      timeline.projectsMotionSession
+      && hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID)
+    ) {
       sessionProjection.markMotionStarted(turnId, messageId);
     }
     engine.markSinkStarted(MOTION_TIMELINE_SINK_ID);
@@ -1033,6 +1048,10 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     terminal: TimelineTerminal,
     reason: string,
   ): void {
+    const timeline = getTimeline(turnId, messageId);
+    if (timeline && !timeline.projectsMotionSession) {
+      return;
+    }
     sessionProjection.markMotionTerminal(turnId, messageId, terminal, reason);
   }
 

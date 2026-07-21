@@ -14,6 +14,7 @@ import {
   createModelEngineMotionTimelineSink,
   createMotionTimelineRunTracker,
   projectMotionPlaybackClock,
+  projectMotionPlaybackClockReader,
   type MotionTimelineRunTracker,
 } from "../playback-integrations/modelEngineMotionSink.js";
 import {
@@ -45,6 +46,7 @@ export interface PlaybackTimelineMotionEnginePort {
   ): MotionTimelinePreparationResult;
   handlePlaybackTimelineStarted(
     playbackTimeline: ReturnType<typeof projectMotionPlaybackClock>,
+    playbackClockReader: ReturnType<typeof projectMotionPlaybackClockReader>,
   ): boolean | void;
 }
 
@@ -137,10 +139,19 @@ export function configurePlaybackTimelineMotionRuntime(options: {
     createAudioMotionTimelineBridge({
       getPlaybackTimelineSnapshotForSegment: playbackTimeline.getTimelineSnapshotForSegment,
       onMissingPlaybackTimeline,
-      handlePlaybackTimelineStarted: (_turnId, _messageId, preparedTimeline) =>
-        motionEngine.handlePlaybackTimelineStarted(
+      handlePlaybackTimelineStarted: (turnId, messageId, preparedTimeline) => {
+        const timelineClockReader = playbackTimeline.getTimelineClockReaderForSegment(
+          turnId,
+          messageId,
+        );
+        if (!timelineClockReader) {
+          throw new Error("Audio-backed motion requires its segment Timeline clock reader.");
+        }
+        return motionEngine.handlePlaybackTimelineStarted(
           projectMotionPlaybackClock(preparedTimeline),
-        ),
+          projectMotionPlaybackClockReader(timelineClockReader),
+        );
+      },
     });
 
   playbackTimeline.setAudioTimelineStartedHandler((turnId, messageId) => {

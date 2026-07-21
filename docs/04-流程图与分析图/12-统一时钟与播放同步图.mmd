@@ -60,8 +60,13 @@ sequenceDiagram
             TL->>Engine: handlePlaybackTimelineStarted(latest clock)
             Engine->>SDK: start prepared parameter plan
             SDK-->>TL: motion.started(runId)
-            TL->>Projection: markMotionStarted
-            Projection->>Store: motion.started
+            opt 正式 motion.state = present
+                TL->>Projection: markMotionStarted
+                Projection->>Store: motion.started
+            end
+            opt internal speech_only
+                Note over TL,Store: Timeline 记录表现层 sink<br/>不改写稳定的 motion absent
+            end
         end
 
         Note over Audio,Clock: Clock 永久绑定该 segment 创建的 AudioElement；<br/>禁止查询全局 active audio element。
@@ -87,7 +92,7 @@ sequenceDiagram
             TL->>Lip: interrupt exact segment
         end
 
-        TL->>Projection: project stable audio/motion terminal
+        TL->>Projection: project stable audio / declared motion terminal
         Projection->>Store: segment execution facts
 
     else audio.state = absent 且 motion.state = present
