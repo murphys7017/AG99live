@@ -164,24 +164,24 @@ BASE_ACTION_LIBRARY_SCHEMA_VERSION = "base_action_library.v1"
 PARAMETER_ACTION_LIBRARY_SCHEMA_VERSION = "parameter_action_library.v1"
 ADAPTIVE_PARAMETER_PROFILE_SCHEMA_VERSION = "adaptive_parameter_profile.v1"
 CALIBRATION_PROFILE_SCHEMA_VERSION = "direct_parameter_calibration.v1"
-VOICE_FOLLOWING_PROFILE_SCHEMA_VERSION = "ag99.voice_following_profile.v2"
+VOICE_FOLLOWING_PROFILE_SCHEMA_VERSION = "ag99.voice_following_profile.v3"
 MODEL_SUMMARY_SCHEMA_VERSION = "live2d_model_summary.v1"
 PARAMETER_ACTION_MAX_ATOMS_PER_PARAMETER = 24
 
 # Speech-following capability tuning. Gesture timing is planned by ModelEngine;
-# the model profile only owns parameter amplitude and body-follow delay.
+# the model profile only owns effective speech-offset ratio and body-follow delay.
 VOICE_FOLLOWING_TUNING: dict[str, dict[str, Any]] = {
     "roll": {
-        "head": {"amplitude": 2.8, "weight": 0.75, "follow_delay_ms": 0},
-        "body": {"amplitude": 1.2, "weight": 0.45, "follow_delay_ms": 180},
+        "head": {"amplitude_ratio": 0.44, "follow_delay_ms": 0},
+        "body": {"amplitude_ratio": 0.45, "follow_delay_ms": 180},
     },
     "yaw": {
-        "head": {"amplitude": 2.2, "weight": 0.65, "follow_delay_ms": 0},
-        "body": {"amplitude": 0.9, "weight": 0.35, "follow_delay_ms": 220},
+        "head": {"amplitude_ratio": 0.30, "follow_delay_ms": 0},
+        "body": {"amplitude_ratio": 0.26, "follow_delay_ms": 220},
     },
     "pitch": {
-        "head": {"amplitude": 1.0, "weight": 0.35, "follow_delay_ms": 0},
-        "body": {"amplitude": 0.5, "weight": 0.20, "follow_delay_ms": 160},
+        "head": {"amplitude_ratio": 0.08, "follow_delay_ms": 0},
+        "body": {"amplitude_ratio": 0.08, "follow_delay_ms": 160},
     },
 }
 
@@ -196,8 +196,7 @@ def _build_voice_following_channel_specs() -> tuple[dict[str, Any], ...]:
                 {
                     "name": f"{layer}_{group_name}",
                     "layer": layer,
-                    "amplitude": float(layer_tuning["amplitude"]),
-                    "weight": float(layer_tuning["weight"]),
+                    "amplitude_ratio": float(layer_tuning["amplitude_ratio"]),
                     "follow_delay_ms": int(layer_tuning["follow_delay_ms"]),
                 }
             )
@@ -459,7 +458,6 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
     voice_following_profile = _build_voice_following_profile(
         model_id=model_dir.name,
         parameter_scan=parameter_scan,
-        calibration_profile=calibration_profile,
     )
     motion_resource_pool = build_motion_resource_pool(motions=motions)
     for motion in motions:
@@ -1742,10 +1740,8 @@ def _build_voice_following_profile(
     *,
     model_id: str,
     parameter_scan: dict[str, Any],
-    calibration_profile: dict[str, Any],
 ) -> dict[str, Any]:
     standard_channels = parameter_scan.get("standard_channels", {})
-    calibration_axes = calibration_profile.get("axes", {})
     channels: dict[str, dict[str, Any]] = {}
 
     for spec in VOICE_FOLLOWING_CHANNEL_SPECS:
@@ -1754,30 +1750,14 @@ def _build_voice_following_profile(
         if not isinstance(channel_payload, dict) or not channel_payload.get("available"):
             continue
 
-        parameter_id = str(channel_payload.get("primary_parameter_id") or "").strip()
-        if not parameter_id:
+        if not str(channel_payload.get("primary_parameter_id") or "").strip():
             continue
 
-        calibration_axis = calibration_axes.get(channel_name, {})
-        if not isinstance(calibration_axis, dict):
-            calibration_axis = {}
-
-        output_range = _resolve_voice_following_output_range(
-            channel_name=channel_name,
-            calibration_axis=calibration_axis,
-            amplitude=float(spec["amplitude"]),
-        )
         channel_profile = {
             "channel": channel_name,
-            "parameter_id": parameter_id,
-            "parameter_name": str(
-                channel_payload.get("primary_parameter_name") or parameter_id
-            ).strip(),
+            "semantic_axis_id": channel_name,
             "layer": str(spec["layer"]),
-            "neutral": _round_float(calibration_axis.get("baseline", 0.0)),
-            "output_range": output_range,
-            "amplitude": _round_float(spec["amplitude"]),
-            "weight": _round_float(spec["weight"]),
+            "amplitude_ratio": _round_float(spec["amplitude_ratio"]),
             "follow_delay_ms": int(spec["follow_delay_ms"]),
         }
         channels[channel_name] = channel_profile
@@ -1792,33 +1772,6 @@ def _build_voice_following_profile(
             "available_channels": list(channels.keys()),
         },
     }
-
-
-def _resolve_voice_following_output_range(
-    *,
-    channel_name: str,
-    calibration_axis: dict[str, Any],
-    amplitude: float,
-) -> dict[str, float]:
-    recommended_range = calibration_axis.get("recommended_range", {})
-    if isinstance(recommended_range, dict) and calibration_axis.get("safe_to_apply"):
-        min_value = _coerce_float(recommended_range.get("min"))
-        max_value = _coerce_float(recommended_range.get("max"))
-        if min_value < max_value:
-            return {
-                "min": _round_float(min_value),
-                "max": _round_float(max_value),
-            }
-
-    if channel_name.startswith("head_"):
-        limit = max(amplitude * 2.0, 8.0)
-    else:
-        limit = max(amplitude * 2.0, 4.0)
-    return {
-        "min": _round_float(-limit),
-        "max": _round_float(limit),
-    }
-
 
 def _summarize_range_profile(
     *,

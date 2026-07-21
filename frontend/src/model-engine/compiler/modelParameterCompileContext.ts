@@ -26,8 +26,7 @@ export interface ModelParameterCompileState {
   parameters: SemanticParameterPlan["parameters"];
   pendingSpeechGestures: Record<string, {
     preset: NonNullable<SemanticParameterPlan["parameters"][number]["modulation"]>["preset"];
-    amplitude: number;
-    weight: number;
+    amplitudeRatio: number;
     delayMs: number;
     points: Array<{ at_ms: number; transition_ms: number; value: number }>;
   }>;

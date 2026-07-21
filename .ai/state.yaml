@@ -35,7 +35,7 @@ architecture:
     official_inline_motion: engine.motion_intent.v4 inside the <@anim> transport wrapper
     parameter_plan: engine.parameter_plan.v2
     performance_curve: ag99.performance_curve_hint.v1
-    voice_following: ag99.voice_following_profile.v2
+    voice_following: ag99.voice_following_profile.v3
   motion_ownership:
     llm: intent_tags, axis_levels from -4 to 4, motion_steps, and optional typed resource intent.
     adapter: Persona Effect registration, strict schema/profile/resource validation, identity binding, and transport.
@@ -77,7 +77,9 @@ verification:
     - `npm run typecheck:websdk` passed after replacing the Live2D frame limiter with accumulated frame deadlines.
     - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `npm run typecheck:node` passed after unifying speech gesture parameter binding.
     - Python syntax checks passed for the scanner and runtime cache changes.
-    - `npm run build` passed and regenerated the Electron renderer with `ag99.voice_following_profile.v2`, matching the active AstrBot runtime cache.
+    - The previous v2 Electron production build passed before the atomic voice-following V3 migration.
+    - `npm run build` passed for the atomic V3 migration; the generated renderer contains only `ag99.voice_following_profile.v3`.
+    - Mk6 V3 amplitude ratios preserve the previous effective amplitudes within rounding while deriving limits from SemanticAxisProfile.
   validation_gap:
     - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
     - Live AstrBot plus Provider plus TTS plus Electron plus Live2D validation is still required after the clock migration, including a long audio segment and a paused audio segment.
@@ -86,7 +88,7 @@ verification:
     - Live Electron validation is required to confirm historical sequence replay starts the preserved parameter plan, reports its real terminal status, and rejects previews while conversation motion is active.
     - OBS must be restarted and its Window Capture source refreshed to confirm `AG99live Live2D` and `AG99live Input` replace the previous null window identity.
     - Live Electron observation on the 180 Hz display is required to confirm the renderer remains near its 60 FPS target under the real model workload.
-    - A live speech-only segment and a semantic-motion-plus-speech segment are required to confirm voice_following_profile.v2 resolves through the same semantic parameter bindings and remains visually expressive.
+    - A live speech-only segment and a semantic-motion-plus-speech segment are required to confirm voice_following_profile.v3 resolves through the same semantic parameter bindings and remains visually expressive.
 
 backlog:
   - id: motion_lab_sequence_tuning

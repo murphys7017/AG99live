@@ -43,7 +43,7 @@ from ..protocol.builder import build_system_model_sync
 from .motion_state import MotionTuningStore
 from .motion_lab import MotionLabRawEventStore, MotionLabRecorder
 
-LIVE2D_SCAN_CACHE_VERSION = "voice_following_profile.v2"
+LIVE2D_SCAN_CACHE_VERSION = "voice_following_profile.v3"
 
 
 class RuntimeStateConfigurationError(RuntimeError):

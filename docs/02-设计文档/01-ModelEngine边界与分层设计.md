@@ -150,7 +150,7 @@ ModelEngine 先把 `-4..4` 等级确定性采样为轴值，再由关系图计�
 
 ## 9. 说话手势
 
-`SpeechPoseStage` 是 compile extension。它根据 `ag99.voice_following_profile.v2`、segment identity 和音频时长生成按语义轴登记的确定性 `speech_gesture_track`。它不再直接创建 Live2D 参数，也不使用 voice profile 中的 neutral 或 output range；参数绑定、范围和动力学由 `ModelParameterBindingStage` 统一处理。
+`SpeechPoseStage` 是 compile extension。它根据 `ag99.voice_following_profile.v3`、segment identity 和音频时长生成按语义轴登记的确定性 `speech_gesture_track`。V3 只提供 semantic axis、相对 `max_speech_offset` 的有效幅度比例和跟随延迟；参数绑定、范围和动力学由 `ModelParameterBindingStage` 统一处理。
 
 职责边界：
 

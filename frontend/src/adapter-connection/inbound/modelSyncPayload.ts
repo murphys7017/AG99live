@@ -21,7 +21,7 @@ import type {
 import {
   SCHEMA_SEMANTIC_AXIS_PROFILE_V2,
   SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
-  SCHEMA_VOICE_FOLLOWING_PROFILE_V2,
+  SCHEMA_VOICE_FOLLOWING_PROFILE_V3,
 } from "../../types/protocolSchema.generated.js";
 import {
   asRecord,
@@ -879,8 +879,8 @@ function parseOptionalVoiceFollowingProfile(
   if (value === undefined || value === null) return { ok: true, payload: null };
   const record = asRecord(value);
   if (!record) return invalidPayload(type, path, "object | null");
-  if (record.schema_version !== SCHEMA_VOICE_FOLLOWING_PROFILE_V2) {
-    return invalidPayload(type, `${path}.schema_version`, SCHEMA_VOICE_FOLLOWING_PROFILE_V2);
+  if (record.schema_version !== SCHEMA_VOICE_FOLLOWING_PROFILE_V3) {
+    return invalidPayload(type, `${path}.schema_version`, SCHEMA_VOICE_FOLLOWING_PROFILE_V3);
   }
   const shape = validateFields(type, record, path, {
     model_id: "string",
@@ -898,32 +898,20 @@ function parseOptionalVoiceFollowingProfile(
     if (!channel) return invalidPayload(type, channelPath, "object");
     const channelShape = validateFields(type, channel, channelPath, {
       channel: "string",
-      parameter_id: "string",
+      semantic_axis_id: "string",
       layer: "string",
-      neutral: "number",
-      output_range: "record",
-      amplitude: "number",
-      weight: "number",
+      amplitude_ratio: "number",
       follow_delay_ms: "number",
     });
     if (!channelShape.ok) return channelShape;
     if (channel.channel !== channelId) {
       return invalidPayload(type, `${channelPath}.channel`, `matching channel id ${channelId}`);
     }
-    const outputRange = channel.output_range as Record<string, unknown>;
-    const rangeShape = validateFields(type, outputRange, `${channelPath}.output_range`, {
-      min: "number",
-      max: "number",
-    });
-    if (!rangeShape.ok) return rangeShape;
-    if (Number(outputRange.min) > Number(outputRange.max)) {
-      return invalidPayload(type, `${channelPath}.output_range`, "min <= max");
+    if (typeof channel.semantic_axis_id !== "string" || !channel.semantic_axis_id.trim()) {
+      return invalidPayload(type, `${channelPath}.semantic_axis_id`, "non-empty string");
     }
-    if (Number(channel.amplitude) < 0) {
-      return invalidPayload(type, `${channelPath}.amplitude`, "non-negative number");
-    }
-    if (Number(channel.weight) < 0 || Number(channel.weight) > 1) {
-      return invalidPayload(type, `${channelPath}.weight`, "number in [0, 1]");
+    if (Number(channel.amplitude_ratio) <= 0 || Number(channel.amplitude_ratio) > 1) {
+      return invalidPayload(type, `${channelPath}.amplitude_ratio`, "number in (0, 1]");
     }
     if (!Number.isInteger(channel.follow_delay_ms) || Number(channel.follow_delay_ms) < 0) {
       return invalidPayload(type, `${channelPath}.follow_delay_ms`, "non-negative integer");

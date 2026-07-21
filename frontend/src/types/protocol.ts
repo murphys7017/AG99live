@@ -149,21 +149,14 @@ export interface ParameterScanPayload {
 
 export interface VoiceFollowingChannelProfile {
   channel: string;
-  parameter_id: string;
-  parameter_name?: string;
+  semantic_axis_id: string;
   layer: "head" | "body" | string;
-  neutral: number;
-  output_range: {
-    min: number;
-    max: number;
-  };
-  amplitude: number;
-  weight: number;
+  amplitude_ratio: number;
   follow_delay_ms: number;
 }
 
 export interface VoiceFollowingProfile {
-  schema_version: "ag99.voice_following_profile.v2";
+  schema_version: "ag99.voice_following_profile.v3";
   model_id: string;
   revision: number;
   channels: Record<string, VoiceFollowingChannelProfile>;

@@ -124,10 +124,7 @@ function buildSemanticPlanParameters(
         modulation: speechGesture ? {
           kind: "speech_gesture_track",
           preset: speechGesture.preset,
-          amplitude: Math.min(
-            dynamics.max_speech_offset,
-            speechGesture.amplitude * speechGesture.weight,
-          ),
+          amplitude: dynamics.max_speech_offset * speechGesture.amplitudeRatio,
           direction: 1,
           delay_ms: speechGesture.delayMs,
           points: speechGesture.points,

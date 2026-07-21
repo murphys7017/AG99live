@@ -21,19 +21,15 @@ export function makeValidSemanticAxisProfile(modelId = "model-a") {
 
 export function makeValidVoiceFollowingProfile(modelId = "model-a") {
   return {
-    schema_version: "ag99.voice_following_profile.v2",
+    schema_version: "ag99.voice_following_profile.v3",
     model_id: modelId,
     revision: 1,
     channels: {
       head_yaw: {
         channel: "head_yaw",
-        parameter_id: "ParamAngleX",
-        parameter_name: "Angle X",
+        semantic_axis_id: "head_yaw",
         layer: "head",
-        neutral: 0,
-        output_range: { min: -30, max: 30 },
-        amplitude: 2.2,
-        weight: 0.65,
+        amplitude_ratio: 0.3,
         follow_delay_ms: 0,
       },
     },

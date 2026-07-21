@@ -18,23 +18,18 @@ export function buildSpeechOnlyMotionRequest(
   if (
     !profile
     || !voiceFollowingProfile
-    || voiceFollowingProfile.schema_version !== "ag99.voice_following_profile.v2"
+    || voiceFollowingProfile.schema_version !== "ag99.voice_following_profile.v3"
     || !Object.values(voiceFollowingProfile.channels ?? {}).some(
       (channel) =>
-        typeof channel?.parameter_id === "string"
-        && channel.parameter_id.trim().length > 0
+        typeof channel?.semantic_axis_id === "string"
+        && channel.semantic_axis_id.trim().length > 0
         && profile.axes.some(
-          (axis) => axis.id === channel.channel
-            && axis.parameter_bindings.some(
-              (binding) => binding.parameter_id === channel.parameter_id,
-            ),
+          (axis) => axis.id === channel.semantic_axis_id
+            && axis.parameter_bindings.length > 0,
         )
-        && typeof channel.amplitude === "number"
-        && Number.isFinite(channel.amplitude)
-        && channel.amplitude > 0
-        && typeof channel.weight === "number"
-        && Number.isFinite(channel.weight)
-        && channel.weight > 0,
+        && typeof channel.amplitude_ratio === "number"
+        && Number.isFinite(channel.amplitude_ratio)
+        && channel.amplitude_ratio > 0,
     )
   ) {
     return null;

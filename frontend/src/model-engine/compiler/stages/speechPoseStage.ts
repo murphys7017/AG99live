@@ -76,7 +76,7 @@ export function runSpeechPoseStage(
   }
 
   const voiceProfile = context.options.model.voice_following_profile;
-  if (!voiceProfile || voiceProfile.schema_version !== "ag99.voice_following_profile.v2") {
+  if (!voiceProfile || voiceProfile.schema_version !== "ag99.voice_following_profile.v3") {
     return { ok: true };
   }
   const invalidChannels = Object.values(voiceProfile.channels ?? {})
@@ -90,12 +90,9 @@ export function runSpeechPoseStage(
   }
   const invalidMappings = Object.values(voiceProfile.channels ?? {})
     .filter((channel) => {
-      const axis = context.state.axisById.get(channel.channel);
-      return !axis || !axis.parameter_bindings.some(
-        (binding) => binding.parameter_id === channel.parameter_id,
-      );
+      return !context.state.axisById.has(channel.semantic_axis_id);
     })
-    .map((channel) => channel.channel);
+    .map((channel) => channel.semantic_axis_id);
   if (invalidMappings.length > 0) {
     return {
       ok: false,
@@ -118,10 +115,10 @@ export function runSpeechPoseStage(
     return { ok: false, reason: `speech_gesture_channels_unavailable:${preset}` };
   }
   for (const channel of selectedChannels) {
-    if (context.state.pendingSpeechGestures[channel.channel]) {
-      return { ok: false, reason: `speech_gesture_axis_duplicate:${channel.channel}` };
+    if (context.state.pendingSpeechGestures[channel.semantic_axis_id]) {
+      return { ok: false, reason: `speech_gesture_axis_duplicate:${channel.semantic_axis_id}` };
     }
-    context.state.pendingSpeechGestures[channel.channel] = buildGestureTrack(
+    context.state.pendingSpeechGestures[channel.semantic_axis_id] = buildGestureTrack(
       channel,
       preset,
       durationMs,
@@ -131,7 +128,7 @@ export function runSpeechPoseStage(
   context.state.warnings = [
     ...context.state.warnings,
     `speech_gesture_preset:${preset}`,
-    ...selectedChannels.map((channel) => `speech_gesture_axis_pending:${channel.channel}`),
+    ...selectedChannels.map((channel) => `speech_gesture_axis_pending:${channel.semantic_axis_id}`),
   ];
   return { ok: true };
 }
@@ -150,8 +147,7 @@ function buildGestureTrack(
     : seed % 2 === 0 ? 1 : -1;
   return {
     preset,
-    amplitude: channel.amplitude,
-    weight: channel.weight,
+    amplitudeRatio: channel.amplitude_ratio,
     delayMs: channel.follow_delay_ms,
     points: GESTURE_TEMPLATES[preset].map((point) => ({
       at_ms: Math.round(activeDurationMs * point.at),
@@ -233,12 +229,11 @@ function isUsableVoiceFollowingChannel(channel: VoiceFollowingChannelProfile): b
     channel
     && typeof channel.channel === "string"
     && channel.channel.trim()
-    && typeof channel.parameter_id === "string"
-    && channel.parameter_id.trim()
-    && Number.isFinite(channel.amplitude)
-    && channel.amplitude > 0
-    && Number.isFinite(channel.weight)
-    && channel.weight > 0
+    && typeof channel.semantic_axis_id === "string"
+    && channel.semantic_axis_id.trim()
+    && Number.isFinite(channel.amplitude_ratio)
+    && channel.amplitude_ratio > 0
+    && channel.amplitude_ratio <= 1
     && Number.isInteger(channel.follow_delay_ms)
     && channel.follow_delay_ms >= 0
     && channel.follow_delay_ms <= 600

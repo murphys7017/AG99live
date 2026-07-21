@@ -339,7 +339,6 @@ def build_seed_model_info_with_options(
     voice_following_profile = live2d_scan._build_voice_following_profile(
         model_id="DemoModel",
         parameter_scan=deepcopy(parameter_scan),
-        calibration_profile=deepcopy(calibration_profile),
     )
     engine_hints = live2d_scan._build_engine_hints(
         parameter_scan=deepcopy(parameter_scan),
