@@ -133,11 +133,11 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "control_role": "primary",
         "positive_semantics": ["look right", "turn right", "side glance right"],
         "negative_semantics": ["look left", "turn left", "avoid left"],
-        "usage_notes": "Keep near neutral during ordinary speech.",
+        "usage_notes": "Use visibly readable turns for Live2D performance; ordinary speech movement is added separately by voice following.",
         "output_range": [-30.0, 30.0],
-        "soft_range": [40.0, 60.0],
-        "strong_range": [25.0, 75.0],
-        "extreme_range": [10.0, 90.0],
+        "soft_range": [35.0, 65.0],
+        "strong_range": [18.0, 82.0],
+        "extreme_range": [2.0, 98.0],
     },
     "head_pitch": {
         "label": "Head Pitch",
@@ -146,11 +146,11 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "control_role": "primary",
         "positive_semantics": ["look up", "raise chin", "confident lift"],
         "negative_semantics": ["look down", "lower chin", "bashful drop"],
-        "usage_notes": "Avoid holding extreme pitch for long spans.",
+        "usage_notes": "Use readable nods and lifts; reserve the extreme range for short accents.",
         "output_range": [-30.0, 30.0],
-        "soft_range": [41.0, 59.0],
-        "strong_range": [28.0, 72.0],
-        "extreme_range": [15.0, 85.0],
+        "soft_range": [38.0, 62.0],
+        "strong_range": [24.0, 76.0],
+        "extreme_range": [8.0, 92.0],
     },
     "head_roll": {
         "label": "Head Roll",
@@ -159,11 +159,11 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "control_role": "primary",
         "positive_semantics": ["tilt right", "playful lean", "curious angle"],
         "negative_semantics": ["tilt left", "skeptical lean", "guarded angle"],
-        "usage_notes": "Use in short accents rather than sustained loops.",
+        "usage_notes": "Use visible side tilts for curiosity and playfulness; avoid mechanical sustained loops.",
         "output_range": [-30.0, 30.0],
-        "soft_range": [42.0, 58.0],
-        "strong_range": [30.0, 70.0],
-        "extreme_range": [18.0, 82.0],
+        "soft_range": [38.0, 62.0],
+        "strong_range": [24.0, 76.0],
+        "extreme_range": [8.0, 92.0],
     },
     "body_yaw": {
         "label": "Body Yaw",
@@ -174,9 +174,9 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "negative_semantics": ["body turns left", "left-side emphasis", "strong left follow-through"],
         "usage_notes": "Use with head_yaw to express body posture and emotion strength. For explicit turns, emphasis, surprise, teasing, or avoidance, body yaw should be visibly readable instead of only a tiny follow-through.",
         "output_range": [-10.0, 10.0],
-        "soft_range": [44.0, 56.0],
-        "strong_range": [34.0, 66.0],
-        "extreme_range": [24.0, 76.0],
+        "soft_range": [40.0, 60.0],
+        "strong_range": [25.0, 75.0],
+        "extreme_range": [10.0, 90.0],
     },
     "body_roll": {
         "label": "Body Roll",
@@ -187,9 +187,9 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "negative_semantics": ["body tilts left", "left sway", "guarded left lean"],
         "usage_notes": "Use for sway, weight shift, confusion, teasing, or emotional follow-through. Clear emotion can use a visible torso lean while keeping face detail secondary.",
         "output_range": [-10.0, 10.0],
-        "soft_range": [44.0, 56.0],
-        "strong_range": [34.0, 66.0],
-        "extreme_range": [24.0, 76.0],
+        "soft_range": [40.0, 60.0],
+        "strong_range": [25.0, 75.0],
+        "extreme_range": [10.0, 90.0],
     },
     "body_pitch": {
         "label": "Body Pitch",
@@ -200,9 +200,9 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
         "negative_semantics": ["lean forward", "drop posture", "low-energy slump"],
         "usage_notes": "First-version body depth/lift axis. Prefer BodyAngleY when available; use carefully until preview confirms the model feel.",
         "output_range": [-10.0, 10.0],
-        "soft_range": [45.0, 55.0],
-        "strong_range": [36.0, 64.0],
-        "extreme_range": [27.0, 73.0],
+        "soft_range": [42.0, 58.0],
+        "strong_range": [30.0, 70.0],
+        "extreme_range": [15.0, 85.0],
     },
     "gaze_x": {
         "label": "Gaze X",
@@ -425,9 +425,9 @@ _COUPLING_DEFAULTS = (
 
 def _default_axis_dynamics(axis_id: str, semantic_group: str) -> SemanticAxisDynamics:
     if semantic_group == "head":
-        values = (120.0, 600.0, 0.08)
+        values = (220.0, 1200.0, 0.16)
     elif semantic_group in {"body", "torso", "shoulder"}:
-        values = (70.0, 300.0, 0.06)
+        values = (140.0, 1600.0, 0.18)
     elif semantic_group == "gaze":
         values = (180.0, 900.0, 0.04)
     elif semantic_group in {"eye", "mouth", "brow"}:

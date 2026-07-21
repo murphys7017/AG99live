@@ -22,30 +22,30 @@ interface NormalizedGesturePoint {
 const GESTURE_TEMPLATES: Record<SpeechGesturePreset, NormalizedGesturePoint[]> = {
   calm_explain: [
     { at: 0, transition: 0, value: 0 },
-    { at: 0.10, transition: 0.14, value: 0.45 },
-    { at: 0.46, transition: 0.16, value: -0.28 },
-    { at: 0.72, transition: 0.12, value: 0.18 },
+    { at: 0.10, transition: 0.14, value: 0.62 },
+    { at: 0.46, transition: 0.16, value: -0.42 },
+    { at: 0.72, transition: 0.12, value: 0.32 },
     { at: 0.86, transition: 0.12, value: 0 },
   ],
   lively_chat: [
     { at: 0, transition: 0, value: 0 },
-    { at: 0.08, transition: 0.10, value: 0.72 },
-    { at: 0.30, transition: 0.12, value: -0.55 },
-    { at: 0.52, transition: 0.10, value: 0.62 },
-    { at: 0.70, transition: 0.12, value: -0.22 },
+    { at: 0.08, transition: 0.10, value: 0.90 },
+    { at: 0.30, transition: 0.12, value: -0.72 },
+    { at: 0.52, transition: 0.10, value: 0.78 },
+    { at: 0.70, transition: 0.12, value: -0.48 },
     { at: 0.84, transition: 0.14, value: 0 },
   ],
   gentle_support: [
     { at: 0, transition: 0, value: 0 },
-    { at: 0.14, transition: 0.18, value: 0.38 },
-    { at: 0.50, transition: 0.18, value: -0.24 },
+    { at: 0.14, transition: 0.18, value: 0.52 },
+    { at: 0.50, transition: 0.18, value: -0.34 },
     { at: 0.80, transition: 0.16, value: 0 },
   ],
   emphatic: [
     { at: 0, transition: 0, value: 0 },
-    { at: 0.10, transition: 0.08, value: -0.82 },
-    { at: 0.30, transition: 0.12, value: 0.28 },
-    { at: 0.56, transition: 0.10, value: -0.68 },
+    { at: 0.10, transition: 0.08, value: -1.00 },
+    { at: 0.30, transition: 0.12, value: 0.42 },
+    { at: 0.56, transition: 0.10, value: -0.84 },
     { at: 0.78, transition: 0.16, value: 0 },
   ],
 };
@@ -191,7 +191,7 @@ function selectGestureChannels(
   durationMs: number,
 ): VoiceFollowingChannelProfile[] {
   const channels = profile.channels ?? {};
-  const includeBody = preset === "emphatic"
+  const includeBody = preset === "emphatic" || preset === "lively_chat"
     || stableHash(`${identity?.turnId ?? ""}:${identity?.messageId ?? ""}:body`) % 3 !== 0;
   const selected: VoiceFollowingChannelProfile[] = [];
   let headCount = 0;

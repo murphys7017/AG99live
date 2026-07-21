@@ -173,16 +173,16 @@ PARAMETER_ACTION_MAX_ATOMS_PER_PARAMETER = 24
 # the model profile only owns effective speech-offset ratio and body-follow delay.
 VOICE_FOLLOWING_TUNING: dict[str, dict[str, Any]] = {
     "roll": {
-        "head": {"amplitude_ratio": 0.44, "follow_delay_ms": 0},
-        "body": {"amplitude_ratio": 0.45, "follow_delay_ms": 180},
+        "head": {"amplitude_ratio": 0.72, "follow_delay_ms": 0},
+        "body": {"amplitude_ratio": 0.75, "follow_delay_ms": 180},
     },
     "yaw": {
-        "head": {"amplitude_ratio": 0.30, "follow_delay_ms": 0},
-        "body": {"amplitude_ratio": 0.26, "follow_delay_ms": 220},
+        "head": {"amplitude_ratio": 0.58, "follow_delay_ms": 0},
+        "body": {"amplitude_ratio": 0.62, "follow_delay_ms": 220},
     },
     "pitch": {
-        "head": {"amplitude_ratio": 0.08, "follow_delay_ms": 0},
-        "body": {"amplitude_ratio": 0.08, "follow_delay_ms": 160},
+        "head": {"amplitude_ratio": 0.30, "follow_delay_ms": 0},
+        "body": {"amplitude_ratio": 0.28, "follow_delay_ms": 160},
     },
 }
 

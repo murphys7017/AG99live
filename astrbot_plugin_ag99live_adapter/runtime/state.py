@@ -41,11 +41,10 @@ from ..live2d.semantic_axis_profile import (
     save_semantic_axis_profile,
 )
 from ..protocol.builder import build_system_model_sync
-from ..protocol.schema_versions import MODEL_INFO_SCHEMA_VERSION
 from .motion_state import MotionTuningStore
 from .motion_lab import MotionLabRawEventStore, MotionLabRecorder
 
-LIVE2D_SCAN_CACHE_VERSION = MODEL_INFO_SCHEMA_VERSION
+LIVE2D_SCAN_CACHE_VERSION = "live2d_scan_cache.v2"
 
 
 class RuntimeStateConfigurationError(RuntimeError):
