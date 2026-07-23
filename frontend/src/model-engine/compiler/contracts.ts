@@ -8,7 +8,7 @@ import type {
 } from "../../types/protocol.js";
 import type { ModelEngineSettings } from "../settings.js";
 
-export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v4";
+export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v5";
 
 export type MotionAxisValueSource =
   | "semantic_axis"

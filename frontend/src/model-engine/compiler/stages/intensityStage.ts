@@ -32,7 +32,6 @@ export function runIntensityStage(
   context: MotionCompileContext,
 ): MotionStageResult {
   const nextControlledValues = { ...context.state.controlledValues };
-  const nextWarnings = [...context.state.warnings];
 
   for (const [axisId, rawValue] of Object.entries(context.state.controlledValues)) {
     const axis = context.state.axisById.get(axisId);
@@ -40,32 +39,16 @@ export function runIntensityStage(
       continue;
     }
 
-    const intensityResult = applySemanticIntensity(
+    nextControlledValues[axisId] = applySemanticIntensity(
       rawValue,
       axis,
       context.intent.mode,
       context.settings.motionIntensityScale,
-      context.state.axisSampling?.sampleBounds[axisId],
     );
-    nextControlledValues[axisId] = intensityResult.value;
-
-    if (intensityResult.warning) {
-      nextWarnings.push(intensityResult.warning);
-      console.warn(
-        "[ModelEngine] semantic intensity adjusted:",
-        intensityResult.warning,
-        {
-          axisId,
-          inputValue: rawValue,
-          outputValue: intensityResult.value,
-        },
-      );
-    }
   }
 
   replaceControlledAxisValues(context.state, nextControlledValues);
   refreshAllAxisValues(context.state);
-  context.state.warnings = nextWarnings;
 
   return { ok: true };
 }
@@ -75,24 +58,12 @@ function applySemanticIntensity(
   axis: SemanticAxisDefinition,
   mode: SemanticMotionIntent["mode"],
   motionIntensityScale: number,
-  levelBounds?: { min: number; max: number },
-): { value: number; warning: string } {
+): number {
   if (mode !== "expressive") {
-    return { value, warning: "" };
+    return value;
   }
 
-  const scaled =
-    axis.neutral + (value - axis.neutral) * motionIntensityScale;
-  if (levelBounds) {
-    const bounded = Math.max(levelBounds.min, Math.min(levelBounds.max, scaled));
-    return {
-      value: bounded,
-      warning: Math.abs(bounded - scaled) > 0.0001
-        ? `semantic_intensity_limited_to_level:${axis.id}:${scaled}->${bounded}`
-        : "",
-    };
-  }
   // Range constraints belong to the relation graph stage, which is the single
   // owner of final axis values. Intensity only contributes a candidate.
-  return { value: scaled, warning: "" };
+  return axis.neutral + (value - axis.neutral) * motionIntensityScale;
 }
