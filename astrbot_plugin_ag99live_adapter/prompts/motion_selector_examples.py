@@ -37,21 +37,42 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
         {
             "category": "explain",
             "input": (
-                "场景：助手认真说明一件事，语气稳定但不是无动作。参考旧动作：认真说明/温和摇晃。"
-                "抽象方式：保留头部朝向、轻微侧倾、上身随头部同向的可读骨架；剔除手、头发、物理和口型运行时曲线。"
-                "说明类动作应像进入解释状态，而不是随便给几个接近 50 的表情数。"
+                "场景：助手先肯定一个观点，随后补充相反条件，句尾保留明确立场。参考旧动作：认真说明/温和摇晃。"
+                "这是普通解释中的自然重心切换，不是用户下达动作命令；每一步只表示一个姿态事件，"
+                "不跟随逐词节奏，也不包含头发、物理或口型运行时曲线。"
             ),
             "output": {
-                "intent_tags": ["认真说明", "稳定强调"],
-                "duration_hint_ms": 1250,
-                "axis_levels": build_example_axis_levels(
-                    axis_names,
-                    head_yaw=3,
-                    head_roll=2,
-                    body_roll=1,
-                    gaze_x=3,
-                    brow_bias=2,
-                ),
+                "intent_tags": ["认真说明", "转折", "左右换重心"],
+                "duration_hint_ms": 1800,
+                "motion_steps": [
+                    {
+                        "axis_levels": build_example_axis_levels(
+                            axis_names,
+                            head_roll=3,
+                            body_roll=2,
+                            gaze_x=2,
+                        ),
+                        "duration_weight": 2,
+                    },
+                    {
+                        "axis_levels": build_example_axis_levels(
+                            axis_names,
+                            head_roll=-3,
+                            body_roll=-2,
+                            gaze_x=-2,
+                        ),
+                        "duration_weight": 2,
+                    },
+                    {
+                        "axis_levels": build_example_axis_levels(
+                            axis_names,
+                            head_roll=-1,
+                            body_roll=-1,
+                            gaze_x=0,
+                        ),
+                        "duration_weight": 2,
+                    },
+                ],
             },
         },
         {
@@ -115,54 +136,83 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
             "category": "surprised",
             "input": (
                 "场景：助手被意外消息打断、突然反应或强调结果很出乎意料。参考旧动作：惊讶/惊讶后缩。"
-                "抽象方式：保留抬头、睁眼、视线上扬和身体后缩/挺起；"
-                "不要同时混入温和点头或舒适放松，因为它们和惊讶后缩在语义上互斥。"
+                "用快速后缩、短暂停留、部分回收三个姿态事件表达反应；回收后仍保持警觉，"
+                "不要混入温和点头或舒适放松，也不要按惊叹词逐个拆步。"
             ),
             "output": {
-                "intent_tags": ["惊讶", "意外", "明显后缩"],
-                "duration_hint_ms": 1150,
-                "axis_levels": build_example_axis_levels(
-                    axis_names,
-                    head_pitch=4,
-                    body_pitch=4,
-                    gaze_y=4,
-                    brow_bias=4,
-                ),
+                "intent_tags": ["惊讶", "快速后缩", "警觉保持"],
+                "duration_hint_ms": 1500,
+                "motion_steps": [
+                    {
+                        "axis_levels": build_example_axis_levels(
+                            axis_names,
+                            head_pitch=4,
+                            body_pitch=4,
+                            gaze_y=4,
+                            brow_bias=4,
+                        ),
+                        "duration_weight": 1,
+                    },
+                    {
+                        "axis_levels": build_example_axis_levels(
+                            axis_names,
+                            head_pitch=3,
+                            body_pitch=3,
+                            gaze_y=4,
+                            brow_bias=4,
+                        ),
+                        "duration_weight": 2,
+                    },
+                    {
+                        "axis_levels": build_example_axis_levels(
+                            axis_names,
+                            head_pitch=1,
+                            body_pitch=1,
+                            gaze_y=2,
+                            brow_bias=2,
+                        ),
+                        "duration_weight": 2,
+                    },
+                ],
             },
         },
         {
             "category": "sequence",
             "input": (
-                "场景：用户明确要求角色先看向左侧、再看向右侧，最后回到正面。"
-                "这是连续动作，不要拆成多个 effect call；各步骤保持同一组轴并用 duration_weight 表达节奏。"
+                "场景：助手先给出简短回答，随后用一句追问向用户确认，句尾保持可爱的侧倾。"
+                "这是普通回复中的句尾姿态变化，不要拆成多个 effect call；"
+                "各步骤保持同一组轴，最后一步可以保持非中性姿态。"
             ),
             "output": {
-                "intent_tags": ["左右确认", "连续动作", "回到正面"],
-                "duration_hint_ms": 1800,
+                "intent_tags": ["回答后追问", "句尾歪头", "可爱保持"],
+                "duration_hint_ms": 1600,
                 "motion_steps": [
                     {
                         "axis_levels": build_example_axis_levels(
                             axis_names,
-                            head_yaw=-3,
-                            gaze_x=-3,
-                        ),
-                        "duration_weight": 2,
-                    },
-                    {
-                        "axis_levels": build_example_axis_levels(
-                            axis_names,
-                            head_yaw=3,
-                            gaze_x=3,
-                        ),
-                        "duration_weight": 2,
-                    },
-                    {
-                        "axis_levels": build_example_axis_levels(
-                            axis_names,
-                            head_yaw=0,
+                            head_roll=0,
+                            body_roll=0,
                             gaze_x=0,
                         ),
+                        "duration_weight": 2,
+                    },
+                    {
+                        "axis_levels": build_example_axis_levels(
+                            axis_names,
+                            head_roll=3,
+                            body_roll=2,
+                            gaze_x=1,
+                        ),
                         "duration_weight": 1,
+                    },
+                    {
+                        "axis_levels": build_example_axis_levels(
+                            axis_names,
+                            head_roll=3,
+                            body_roll=2,
+                            gaze_x=0,
+                        ),
+                        "duration_weight": 2,
                     },
                 ],
             },
@@ -202,7 +252,13 @@ def resolve_motion_reference_examples(
             runtime_state.motion_tuning_effective_examples = []
         return []
 
-    count = int(getattr(runtime_state, "motion_tuning_fewshot_count", 2))
+    count = int(
+        getattr(
+            runtime_state,
+            "motion_tuning_fewshot_count",
+            len(REQUIRED_STRUCTURE_EXAMPLE_CATEGORIES),
+        )
+    )
     count = max(0, count)
     if count == 0:
         if update_runtime_state and hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):

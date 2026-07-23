@@ -626,10 +626,15 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         else ""
     )
     sequence_guidance = (
-        "用户明确要求连续、往返或分阶段动作时，优先选择一个能完整表达该序列的 motion_resource_id；"
-        "没有合适资源时使用 motion_steps，按播放顺序输出 2 到 4 步。"
+        (
+            "用户明确要求且候选完整动作能表达整个连续表演时，优先选择对应 motion_resource_id；"
+        )
         if has_motion_resources
-        else "用户明确要求连续、往返或分阶段动作时使用 motion_steps，按播放顺序输出 2 到 4 步。"
+        else ""
+    ) + (
+        "回复本身存在清晰的姿态转折、重心切换、追问句尾或短时夸张后的回收时，可以使用 motion_steps，"
+        "按播放顺序输出 2 到 4 个姿态事件；只有一个稳定姿态时使用 axis_levels。"
+        "不要按词语、停顿或语音节奏拆分 motion_steps。"
     )
     if persona_effect_available:
         output_contract_text = (
@@ -666,7 +671,8 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     )
     axis_shape_text = (
         "单姿态使用 axis_levels；动作序列使用 motion_steps。两者必须且只能选择一个。"
-        "motion_steps 的所有步骤必须使用完全相同的轴集合。axis_levels 只能使用下方列出的轴 id。"
+        "motion_steps 的所有步骤必须使用完全相同的轴集合，最后一步可以保持有意义的非中性姿态。"
+        "axis_levels 只能使用下方列出的轴 id。"
     )
     return (
         f"{output_contract_text}"
@@ -676,6 +682,8 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         f"{axis_instruction}"
         "只输出本轮直接需要控制的轴；关系图可派生的跟随轴不要为了凑完整而重复输出。"
         "优先选择能表达姿态方向、视线焦点和身体重心的关键轴，再用少量表情轴补充情绪细节。"
+        "在可用轴中优先用 head_yaw、head_roll、body_yaw、body_roll、gaze_x、gaze_y 表达左右朝向、侧倾和重心变化；"
+        "head_pitch 只用于确有低头、抬头或点头语义的动作，不能作为通用强调动作。"
         "普通回复的主要姿态轴从 3 级开始；2 级用于克制表达，1 级仅用于细节，4 级用于短暂夸张表演。"
         "示例只展示结构和数值，不要照抄示例内容。"
         f"{output_shape_text}"
