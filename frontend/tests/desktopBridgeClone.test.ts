@@ -7,6 +7,7 @@ import {
   defaultSnapshot,
   normalizeSnapshot,
 } from "../src/desktop-bridge/snapshot/runtimeSnapshot.js";
+import { cloneCompiledSemanticMotion } from "../src/model-engine/compiler/compiledSemanticMotionParser.js";
 import type { DesktopRuntimeSnapshot } from "../src/types/desktop.js";
 
 class StrictBroadcastChannel {
@@ -47,6 +48,39 @@ function installWindowStubs(): void {
   Object.assign(globalThis, {
     BroadcastChannel: StrictBroadcastChannel,
   });
+}
+
+function buildSpeechOnlySemanticMotion() {
+  return {
+    schemaVersion: "engine.compiled_semantic_motion.v1",
+    profileId: "profile-1",
+    profileRevision: 1,
+    modelId: "model-1",
+    mode: "idle",
+    emotionLabel: "speech",
+    intentTags: ["speech"],
+    timing: {
+      timing: {
+        duration_ms: 1000,
+        blend_in_ms: 100,
+        hold_ms: 700,
+        blend_out_ms: 200,
+      },
+      resolvedDurationMs: 1000,
+      timingSource: "audio_sync",
+    },
+    diagnostics: {
+      usedActionLibrary: false,
+      compiledParameterCount: 0,
+      timingSource: "audio_sync",
+      resolvedMode: "idle",
+      speechActive: true,
+      intensityApplied: false,
+      motionIntensityScale: 1,
+    },
+    kind: "pose",
+    axes: [],
+  };
 }
 
 function testPublishSnapshotStripsUncloneableRuntimeValues(): void {
@@ -131,6 +165,7 @@ function testPublishSnapshotStripsUncloneableRuntimeValues(): void {
         assistantText: "hello",
         playerMessage: "playing",
         diagnostics: null,
+        semanticMotion: buildSpeechOnlySemanticMotion(),
         plan: {
           schema_version: "engine.parameter_plan.v2",
           profile_id: "profile-1",
@@ -195,6 +230,19 @@ function testPublishSnapshotStripsUncloneableRuntimeValues(): void {
   bridge.dispose();
 }
 
+function testCompiledSemanticMotionOnlyAllowsEmptyAxesDuringSpeech(): void {
+  const speechMotion = buildSpeechOnlySemanticMotion();
+
+  assert.ok(cloneCompiledSemanticMotion(speechMotion));
+  assert.equal(cloneCompiledSemanticMotion({
+    ...speechMotion,
+    diagnostics: {
+      ...speechMotion.diagnostics,
+      speechActive: false,
+    },
+  }), null);
+}
+
 function testRuntimeSnapshotRequiresPublisherIdentity(): void {
   const missingPublisher = { ...defaultSnapshot } as Partial<DesktopRuntimeSnapshot>;
   delete missingPublisher._publisherId;
@@ -212,5 +260,6 @@ function testRuntimeSnapshotRequiresPublisherIdentity(): void {
 }
 
 testPublishSnapshotStripsUncloneableRuntimeValues();
+testCompiledSemanticMotionOnlyAllowsEmptyAxesDuringSpeech();
 testRuntimeSnapshotRequiresPublisherIdentity();
 console.log("desktopBridgeClone tests passed");

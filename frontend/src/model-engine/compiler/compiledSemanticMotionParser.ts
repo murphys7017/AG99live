@@ -28,7 +28,7 @@ export function cloneCompiledSemanticMotion(value: unknown): CompiledSemanticMot
   }
 
   if (value.kind === "pose") {
-    if (!isCompiledAxes(value.axes)) {
+    if (!isCompiledAxes(value.axes, value.diagnostics.speechActive === true)) {
       return null;
     }
   } else if (value.kind === "sequence") {
@@ -43,14 +43,20 @@ export function cloneCompiledSemanticMotion(value: unknown): CompiledSemanticMot
 }
 
 function isCompiledStep(value: unknown): value is CompiledSemanticMotionStep {
-  return isObject(value)
-    && isPositiveFiniteNumber(value.durationWeight)
-    && isCompiledAxes(value.axes)
-    && isCompileDiagnostics(value.diagnostics);
+  if (!isObject(value)
+    || !isPositiveFiniteNumber(value.durationWeight)
+    || !isCompileDiagnostics(value.diagnostics)
+  ) {
+    return false;
+  }
+  return isCompiledAxes(value.axes, value.diagnostics.speechActive === true);
 }
 
-function isCompiledAxes(value: unknown): value is CompiledSemanticAxis[] {
-  if (!Array.isArray(value) || value.length === 0) {
+function isCompiledAxes(
+  value: unknown,
+  allowEmpty: boolean = false,
+): value is CompiledSemanticAxis[] {
+  if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) {
     return false;
   }
   const axisIds = new Set<string>();
@@ -93,6 +99,7 @@ function isCompileDiagnostics(value: unknown): value is CompileDiagnostics {
       || value.timingSource === "audio_sync"
       || value.timingSource === "default")
     && (value.resolvedMode === "idle" || value.resolvedMode === "expressive")
+    && (value.speechActive === undefined || typeof value.speechActive === "boolean")
     && typeof value.intensityApplied === "boolean"
     && isFiniteNumber(value.motionIntensityScale);
 }
