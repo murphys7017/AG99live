@@ -1,13 +1,16 @@
 task:
-  class: documentation
+  class: feature
   risk: medium
-  phase: implementation_complete
+  phase: validated
   status: complete
-  scope: Rewrite the root README as the public Phase 1 project introduction, using current code and documentation as the source of truth and the two user-selected product screenshots.
+  scope: Build an isolated, code-rendered AG99live promotional video without changing the desktop runtime or Adapter behavior.
 
 context:
   confidence: high
   assumptions:
+    - The user confirmed that the selected Superheroes recording and the Live2D model are cleared for the intended commercial use.
+    - The promotional video remains isolated under promo-video and does not become a runtime dependency of AG99live.
+    - The final promotional render uses the user-provided cleared soundtrack excerpt and a clean, locally recorded Live2D action capture.
     - AG99live is an active-development desktop Live2D system; obsolete documents, code, and tests are deleted instead of archived in the repository.
     - The main model emits assistant text and one ag99live.motion Persona Effect in the same logical response.
     - The official AstrBot <@anim> transport exists only when Persona Effect injection is unavailable; its inner intent uses v4 and it is not a recovery path for invalid motion.
@@ -90,6 +93,11 @@ verification:
     - The previous v2 Electron production build passed before the atomic voice-following V3 migration.
     - `npm run build` passed for the atomic V3 migration; the generated renderer contains only `ag99.voice_following_profile.v3`.
     - Mk6 V3 amplitude ratios preserve the previous effective amplitudes within rounding while deriving limits from SemanticAxisProfile.
+    - `npm run typecheck` passed in promo-video after integrating the live capture.
+    - The 28-second half-resolution preview rendered successfully and its ten-scene contact sheet was visually inspected.
+    - The 1920x1080 H.264/AAC final render completed successfully and decoded end-to-end with ffmpeg without errors.
+    - A two-turn live Electron conversation was captured from the real terminal, input overlay, Live2D window, and original MiniMax TTS artifacts; the synchronized 14-second dialogue segment was visually inspected.
+    - The expanded 44.5-second 1920x1080 H.264/AAC render completed and decoded end-to-end without errors; dialogue peaks at -4.1 dB after a 6 dB intelligibility lift.
   validation_gap:
     - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
     - Live AstrBot plus Provider plus TTS plus Electron plus Live2D validation is still required after the clock migration, including a long audio segment and a paused audio segment.
