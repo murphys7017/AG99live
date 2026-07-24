@@ -144,7 +144,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     });
   }
   const motionRecord = {
-    getLastAssistantText: () => adapter.state.lastAssistantText,
     getSelectedModel: () => selectedModel,
   };
   const playbackCoordinator = usePlaybackCompletionCoordinator({
@@ -153,6 +152,8 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   });
   const motionPlaybackRecorder = useMotionPlaybackRecorder({
     motionRecord,
+    getCanonicalAssistantText: (turnId, messageId) =>
+      sessionStore.getSession(turnId)?.segments.get(messageId)?.text.content ?? "",
     getPlaybackTimelineSnapshot: (
       turnId,
       messageId,

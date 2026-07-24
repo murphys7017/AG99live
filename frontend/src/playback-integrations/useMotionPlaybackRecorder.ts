@@ -13,6 +13,10 @@ export interface MotionPlaybackRecorderOptions {
   motionRecord: MotionPlaybackRecordPort;
   initialMotionPlaybackRecords?: readonly DesktopMotionPlaybackRecord[];
   maxMotionPlaybackRecords?: number;
+  getCanonicalAssistantText: (
+    turnId: string | null,
+    messageId: string,
+  ) => string;
   getPlaybackTimelineSnapshot?: (
     turnId: string | null,
     messageId: string,
@@ -95,7 +99,10 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       modelName: event.model?.name ?? options.motionRecord.getSelectedModel().value?.name ?? "",
       startReason: event.startReason,
       queuedDelayMs: event.queuedDelayMs,
-      assistantText: options.motionRecord.getLastAssistantText(),
+      assistantText: options.getCanonicalAssistantText(
+        event.turnId,
+        event.messageId,
+      ),
       playerMessage: event.playerMessage,
       diagnostics: event.diagnostics
         ? {

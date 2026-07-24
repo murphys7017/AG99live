@@ -22,6 +22,5 @@ export interface PlaybackAckPort {
 }
 
 export interface MotionPlaybackRecordPort {
-  getLastAssistantText(): string;
   getSelectedModel(): Ref<ModelSummary | null>;
 }
