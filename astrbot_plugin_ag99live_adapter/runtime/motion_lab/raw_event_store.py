@@ -91,6 +91,52 @@ class MotionLabRawEventStore:
                 rows,
             )
 
+    def get_turn_context(
+        self,
+        *,
+        turn_id: str,
+        message_id: str,
+    ) -> dict[str, str] | None:
+        normalized_turn_id = str(turn_id or "").strip()
+        normalized_message_id = str(message_id or "").strip()
+        if not normalized_turn_id or not normalized_message_id:
+            return None
+        self._ensure_initialized()
+        with self._connect() as conn:
+            user_row = conn.execute(
+                """
+                SELECT user_text
+                FROM motion_lab_raw_events
+                WHERE turn_id = ?
+                  AND event_type = 'turn.input_received'
+                  AND TRIM(COALESCE(user_text, '')) <> ''
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (normalized_turn_id,),
+            ).fetchone()
+            assistant_row = conn.execute(
+                """
+                SELECT assistant_text
+                FROM motion_lab_raw_events
+                WHERE turn_id = ?
+                  AND message_id = ?
+                  AND event_type = 'turn.assistant_output'
+                  AND TRIM(COALESCE(assistant_text, '')) <> ''
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (normalized_turn_id, normalized_message_id),
+            ).fetchone()
+        user_text = str(user_row[0] or "").strip() if user_row else ""
+        assistant_text = str(assistant_row[0] or "").strip() if assistant_row else ""
+        if not user_text or not assistant_text:
+            return None
+        return {
+            "user_text": user_text,
+            "assistant_text": assistant_text,
+        }
+
     def _ensure_initialized(self) -> None:
         if self._initialized:
             return

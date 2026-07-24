@@ -1,9 +1,9 @@
 task:
   class: feature
   risk: medium
-  phase: validated
-  status: complete
-  scope: Build an isolated, code-rendered AG99live promotional video without changing the desktop runtime or Adapter behavior.
+  phase: implementation
+  status: active
+  scope: Complete Motion Lab data closure: bind saved samples to canonical turn segments, preserve V4 motion sequences without flattening, and select Prompt references by current-input relevance.
 
 context:
   confidence: high
@@ -16,6 +16,8 @@ context:
     - The official AstrBot <@anim> transport exists only when Persona Effect injection is unavailable; its inner intent uses v4 and it is not a recovery path for invalid motion.
     - Remote computer control remains because AstrBot may run on a server while the Electron client runs on the user's computer.
     - Performance curve generation is optional and never delays TTS or segment release.
+    - Motion Lab samples are trusted only when their user and assistant context is reconstructed from persisted Adapter raw events using turn_id plus message_id.
+    - Historical Motion Lab sample records that do not conform to the current V2 sample contract are deleted rather than migrated.
 
 architecture:
   product_flow:
@@ -61,6 +63,7 @@ architecture:
     - Motion Lab records raw model output, resolved levels, derived and constrained axes, compiled plans, timing, run identity, and terminal outcome.
     - Runtime facts are persisted asynchronously and do not block the active conversation.
     - Stage diagnostics preserve value sources so final motion remains attributable.
+    - Motion Lab sequence samples retain V4 motion_steps and never collapse to a flat pose while being replayed, saved, or used as Prompt references.
 
 verification:
   policy:

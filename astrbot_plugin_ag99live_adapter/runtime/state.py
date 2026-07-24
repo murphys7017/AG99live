@@ -98,6 +98,7 @@ class RuntimeState:
         self._motion_tuning_store = MotionTuningStore(
             runtime_state=self,
             get_selected_profile=self._get_selected_semantic_axis_profile,
+            get_turn_context=self._get_motion_lab_turn_context,
             ensure_cache_writable=self._raise_if_runtime_cache_error_active,
             persist_cache=self._persist_runtime_cache_payload,
         )
@@ -129,6 +130,19 @@ class RuntimeState:
         return MotionLabRecorder(
             store=MotionLabRawEventStore(self.runtime_cache_dir / "motion_lab.sqlite3"),
             batch_size=20,
+        )
+
+    def _get_motion_lab_turn_context(
+        self,
+        turn_id: str,
+        message_id: str,
+    ) -> dict[str, str] | None:
+        recorder = self.motion_lab_recorder
+        if recorder is None:
+            return None
+        return recorder.get_turn_context(
+            turn_id=turn_id,
+            message_id=message_id,
         )
 
     @property

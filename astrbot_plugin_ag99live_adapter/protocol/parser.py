@@ -39,6 +39,7 @@ from .models import (
     ProtocolMessage,
     TextInputPayload,
 )
+from .schema_versions import MOTION_TUNING_SAMPLE_SCHEMA_VERSION
 
 
 def parse_inbound_message(
@@ -222,11 +223,23 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
             raise ProtocolError(
                 "`system.motion_tuning_sample_save` requires `payload.sample` to be an object."
             )
+        if sample.get("schema_version") != MOTION_TUNING_SAMPLE_SCHEMA_VERSION:
+            raise ProtocolError(
+                "`system.motion_tuning_sample_save` requires "
+                f"`payload.sample.schema_version={MOTION_TUNING_SAMPLE_SCHEMA_VERSION}`."
+            )
         sample_id = sample.get("id")
         if not isinstance(sample_id, str) or not sample_id.strip():
             raise ProtocolError(
                 "`system.motion_tuning_sample_save` requires `payload.sample.id` to be a non-empty string."
             )
+        for field_name in ("turn_id", "message_id"):
+            value = sample.get(field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ProtocolError(
+                    "`system.motion_tuning_sample_save` requires "
+                    f"`payload.sample.{field_name}` to be a non-empty string."
+                )
         profile_id = sample.get("profile_id")
         if not isinstance(profile_id, str) or not profile_id.strip():
             raise ProtocolError(
@@ -242,10 +255,12 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
             raise ProtocolError(
                 "`system.motion_tuning_sample_save` requires `payload.sample.compiled_semantic_motion` to be an object."
             )
+        motion_kind = compiled_semantic_motion.get("kind")
         adjusted_axes = sample.get("adjusted_axes")
-        if not isinstance(adjusted_axes, Mapping):
+        if motion_kind == "pose" and not isinstance(adjusted_axes, Mapping):
             raise ProtocolError(
-                "`system.motion_tuning_sample_save` requires `payload.sample.adjusted_axes` to be an object."
+                "`system.motion_tuning_sample_save` requires `payload.sample.adjusted_axes` "
+                "to be an object for pose samples."
             )
         return
 

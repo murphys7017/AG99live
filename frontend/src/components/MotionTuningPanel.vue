@@ -47,15 +47,19 @@ const explicitDraftAxisIds = reactive(new Set<string>());
 const playStatusText = ref("");
 const saveStatusText = ref("");
 type MotionTuningSampleSnapshot = Readonly<{
+  schemaVersion: "ag99.motion_tuning_sample.v2";
   id: string;
   createdAt: string;
   sourceRecordId: string;
+  turnId: string;
+  messageId: string;
   modelName: string;
   profileId?: string;
   profileRevision?: number;
   profileHash?: string;
   transformVersion?: string;
   emotionLabel: string;
+  userText: string;
   assistantText: string;
   feedback: string;
   tags: readonly string[];
@@ -64,7 +68,7 @@ type MotionTuningSampleSnapshot = Readonly<{
   rawAxisLevels?: Readonly<Record<string, number>>;
   resolvedAxes?: Readonly<Record<string, number>>;
   constrainedAxes?: Readonly<Record<string, number>>;
-  adjustedAxes: Readonly<Record<string, number>>;
+  adjustedAxes?: Readonly<Record<string, number>>;
   compiledSemanticMotion: CompiledSemanticMotion;
 }>;
 type LlmReferenceEntry = Readonly<{
@@ -80,11 +84,15 @@ type LlmReferenceEntry = Readonly<{
 }>;
 type MotionDraftSource = Readonly<{
   id: string;
+  sourceRecordId: string;
+  turnId: string;
+  messageId: string;
   mode: "expressive" | "idle";
   emotionLabel: string;
   assistantText: string;
   createdAt: string;
   sourceLabel: string;
+  motionKind: "pose" | "sequence";
   axes: Record<string, number>;
   explicitAxisIds: readonly string[];
   error?: string;
@@ -153,7 +161,7 @@ const llmReferenceEntries = computed<LlmReferenceEntry[]>(() => {
       title: sample.emotionLabel || "用户样本",
       subtitle: sample.modelName || "unknown model",
       description: sample.feedback || sample.assistantText || "暂无说明",
-      axes: { ...sample.adjustedAxes },
+      axes: { ...(sample.adjustedAxes ?? {}) },
       tags: sample.tags,
       sourceLabel: "用户样本",
       enabled: Boolean(sample.enabledForLlmReference),
@@ -169,16 +177,16 @@ const llmReferenceEntries = computed<LlmReferenceEntry[]>(() => {
     if (formatEffectiveExampleSource(example) !== "default") {
       continue;
     }
-    const emotionKey = normalizeEmotionKey(example.output.emotion);
+    const emotionKey = normalizeEmotionKey(example.category);
     if (knownEntryKeys.has(emotionKey)) {
       continue;
     }
     entries.push({
       id: `effective:default:${emotionKey}:${entries.length}`,
-      title: example.output.emotion || "默认参考",
+      title: example.category || "默认参考",
       subtitle: "默认兜底",
       description: example.input || "默认关键词参考",
-      axes: { ...example.output.axes },
+      axes: extractEffectiveExampleAxes(example),
       tags: example.tags,
       sourceLabel: "默认参考",
       enabled: true,
@@ -189,18 +197,28 @@ const llmReferenceEntries = computed<LlmReferenceEntry[]>(() => {
   return entries;
 });
 const savedDraftSources = computed<MotionDraftSource[]>(() =>
-  llmReferenceEntries.value.filter((entry) => Boolean(entry.sample)).map((entry) => ({
-    id: entry.id,
-    mode: "expressive",
-    emotionLabel: entry.title || "reference",
-    assistantText: entry.description,
-    createdAt: "",
-    sourceLabel: entry.sourceLabel,
-    axes: { ...entry.axes },
-    explicitAxisIds: Object.keys(entry.axes),
-    durationMs: 1200,
-    sample: entry.sample,
-  })),
+  llmReferenceEntries.value.flatMap((entry) => {
+    const sample = entry.sample;
+    if (!sample) {
+      return [];
+    }
+    return [{
+      id: entry.id,
+      sourceRecordId: sample.sourceRecordId,
+      turnId: sample.turnId,
+      messageId: sample.messageId,
+      mode: sample.compiledSemanticMotion.mode,
+      emotionLabel: entry.title || "reference",
+      assistantText: sample.assistantText || entry.description,
+      createdAt: sample.createdAt,
+      sourceLabel: entry.sourceLabel,
+      motionKind: sample.compiledSemanticMotion.kind,
+      axes: { ...entry.axes },
+      explicitAxisIds: Object.keys(entry.axes),
+      durationMs: sample.compiledSemanticMotion.timing.resolvedDurationMs,
+      sample,
+    }];
+  }),
 );
 const selectedSavedSource = computed(() =>
   savedDraftSources.value.find((source) => source.id === selectedReferenceId.value)
@@ -229,7 +247,7 @@ const effectiveExampleCoverage = computed(() => {
   ];
   return groups.map((group) => {
     const matchedExample = effectiveExamples.value.find((example) =>
-      group.keys.includes(normalizeEmotionKey(example.output.emotion)),
+      group.keys.includes(normalizeEmotionKey(example.category)),
     );
     return {
       label: group.label,
@@ -281,7 +299,7 @@ watch(
     resetDraftAxes(source);
     emotionLabelText.value = source?.emotionLabel ?? "";
     feedbackText.value = source?.sample?.feedback ?? "";
-    tagsText.value = source?.sample?.tags.join(", ") ?? "";
+    tagsText.value = source ? getDraftTags(source).join(", ") : "";
     enabledForLlmReference.value = source?.sample
       ? Boolean(source.sample.enabledForLlmReference)
       : true;
@@ -314,6 +332,9 @@ function resetDraftAxes(source: MotionDraftSource | null): void {
   if (!source) {
     return;
   }
+  if (source.motionKind === "sequence") {
+    return;
+  }
 
   const sourceExplicitAxisIds = new Set(source.explicitAxisIds);
   for (const axis of promptAxes.value) {
@@ -330,6 +351,9 @@ function buildHistoryDraftSource(record: SemanticMotionPlaybackRecord): MotionDr
   const trace = record.diagnostics?.transformTrace;
   const base = {
     id: `record:${record.id}`,
+    sourceRecordId: record.id,
+    turnId: record.turnId ?? "",
+    messageId: record.messageId,
     mode: record.mode,
     emotionLabel: record.emotionLabel || "motion",
     assistantText: record.assistantText || record.startReason,
@@ -341,17 +365,36 @@ function buildHistoryDraftSource(record: SemanticMotionPlaybackRecord): MotionDr
   if (!trace) {
     return {
       ...base,
+      motionKind: record.semanticMotion.kind,
       axes: {},
       explicitAxisIds: [],
       error: "motion_tuning_transform_trace_missing",
     };
   }
   if (trace.rawMotionSteps?.length) {
+    if (record.semanticMotion.kind !== "sequence") {
+      return {
+        ...base,
+        motionKind: "pose",
+        axes: {},
+        explicitAxisIds: [],
+        error: "motion_tuning_sequence_trace_kind_mismatch",
+      };
+    }
     return {
       ...base,
+      motionKind: "sequence",
       axes: {},
       explicitAxisIds: [],
-      error: "motion_tuning_sequence_source_not_supported",
+    };
+  }
+  if (record.semanticMotion.kind === "sequence") {
+    return {
+      ...base,
+      motionKind: "sequence",
+      axes: {},
+      explicitAxisIds: [],
+      error: "motion_tuning_sequence_trace_missing",
     };
   }
 
@@ -366,6 +409,7 @@ function buildHistoryDraftSource(record: SemanticMotionPlaybackRecord): MotionDr
     if (!Number.isFinite(value)) {
       return {
         ...base,
+        motionKind: "pose",
         axes: {},
         explicitAxisIds: [],
         error: `motion_tuning_explicit_axis_value_missing:${axisId}`,
@@ -376,12 +420,18 @@ function buildHistoryDraftSource(record: SemanticMotionPlaybackRecord): MotionDr
   if (!explicitAxisIds.length) {
     return {
       ...base,
+      motionKind: "pose",
       axes: {},
       explicitAxisIds: [],
       error: "motion_tuning_explicit_axes_missing",
     };
   }
-  return { ...base, axes, explicitAxisIds };
+  return {
+    ...base,
+    motionKind: "pose",
+    axes,
+    explicitAxisIds,
+  };
 }
 
 function isSemanticMotionPlaybackRecord(
@@ -416,6 +466,25 @@ function buildAdjustedSemanticMotion(): CompiledSemanticMotion | null {
   if (source.error) {
     return null;
   }
+  const recorded = source.record?.semanticMotion ?? source.sample?.compiledSemanticMotion;
+  if (!recorded) {
+    return null;
+  }
+  const intentTags = parseTags(tagsText.value);
+  if (!intentTags.length) {
+    return null;
+  }
+  const emotionLabel = normalizeEmotionLabel(emotionLabelText.value, source.emotionLabel);
+  if (source.motionKind === "sequence") {
+    if (recorded.kind !== "sequence") {
+      return null;
+    }
+    return {
+      ...cloneJson(recorded),
+      emotionLabel,
+      intentTags,
+    };
+  }
 
   const axes: Record<string, number> = {};
   for (const axis of promptAxes.value) {
@@ -433,15 +502,14 @@ function buildAdjustedSemanticMotion(): CompiledSemanticMotion | null {
     return null;
   }
 
-  const recorded = source.record?.semanticMotion ?? source.sample?.compiledSemanticMotion;
-  if (!recorded) {
+  if (recorded.kind !== "pose") {
     return null;
   }
   return {
     ...cloneJson(recorded),
     kind: "pose",
-    emotionLabel: normalizeEmotionLabel(emotionLabelText.value, source.emotionLabel),
-    intentTags: parseTags(tagsText.value),
+    emotionLabel,
+    intentTags,
     axes: Object.entries(axes).map(([axisId, value]) => ({
       axisId,
       value,
@@ -489,29 +557,36 @@ function saveSample(): void {
     return;
   }
 
-  const adjustedAxes = normalizeDraftAxes(profile);
   const compiledSemanticMotion = buildAdjustedSemanticMotion();
   if (!compiledSemanticMotion) {
     saveStatusText.value = "当前第一阶段动作结果无效，无法保存。";
     return;
   }
+  if (!source.turnId || !source.messageId || !source.sourceRecordId) {
+    saveStatusText.value = "当前记录缺少完整 turn/message 身份，无法安全保存为参考样本。";
+    return;
+  }
   const now = new Date();
   const emotionLabel = normalizeEmotionLabel(emotionLabelText.value, source.emotionLabel);
   const sample: DesktopMotionTuningSample = {
+    schemaVersion: "ag99.motion_tuning_sample.v2",
     id: `motion-sample-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
     createdAt: now.toISOString(),
-    sourceRecordId: source.id,
+    sourceRecordId: source.sourceRecordId,
+    turnId: source.turnId,
+    messageId: source.messageId,
     modelName: profile.model_id,
     profileId: profile.profile_id,
     profileRevision: profile.revision,
     profileHash: source.record?.diagnostics?.transformTrace?.profileHash ?? profile.source_hash,
     transformVersion: source.record?.diagnostics?.transformTrace?.transformVersion ?? "",
     emotionLabel,
-    assistantText: source.assistantText,
-    feedback: feedbackText.value.trim(),
+    userText: source.sample?.userText ?? "",
+    assistantText: source.sample?.assistantText ?? source.assistantText,
+    feedback: source.motionKind === "pose" ? feedbackText.value.trim() : source.sample?.feedback ?? "",
     tags: parseTags(tagsText.value),
     enabledForLlmReference: enabledForLlmReference.value,
-    originalAxes: { ...source.axes },
+    originalAxes: source.motionKind === "pose" ? { ...source.axes } : {},
     rawAxisLevels: {
       ...(source.record?.diagnostics?.transformTrace?.rawAxisLevels ?? {}),
     },
@@ -521,7 +596,7 @@ function saveSample(): void {
     constrainedAxes: {
       ...(source.record?.diagnostics?.transformTrace?.constrainedAxes ?? source.axes),
     },
-    adjustedAxes,
+    adjustedAxes: source.motionKind === "pose" ? normalizeDraftAxes(profile) : undefined,
     compiledSemanticMotion,
   };
 
@@ -542,7 +617,9 @@ function toggleSampleReference(sample: MotionTuningSampleSnapshot, enabled: bool
       rawAxisLevels: { ...(mutableSample.rawAxisLevels ?? {}) },
       resolvedAxes: { ...(mutableSample.resolvedAxes ?? {}) },
       constrainedAxes: { ...(mutableSample.constrainedAxes ?? {}) },
-      adjustedAxes: { ...mutableSample.adjustedAxes },
+      adjustedAxes: mutableSample.adjustedAxes
+        ? { ...mutableSample.adjustedAxes }
+        : undefined,
       compiledSemanticMotion: cloneJson(mutableSample.compiledSemanticMotion),
       enabledForLlmReference: enabled,
     },
@@ -607,6 +684,25 @@ function formatEffectiveExampleSource(example: DesktopMotionTuningEffectiveExamp
     return "user";
   }
   return example.source || "default";
+}
+
+function extractEffectiveExampleAxes(
+  example: DesktopMotionTuningEffectiveExample,
+): Record<string, number> {
+  if (example.output.axisLevels) {
+    return { ...example.output.axisLevels };
+  }
+  return example.output.motionSteps?.[0]?.axisLevels
+    ? { ...example.output.motionSteps[0].axisLevels }
+    : {};
+}
+
+function getDraftTags(source: MotionDraftSource): string[] {
+  if (source.sample?.tags.length) {
+    return [...source.sample.tags];
+  }
+  const motion = source.record?.semanticMotion ?? source.sample?.compiledSemanticMotion;
+  return motion?.intentTags ? [...motion.intentTags] : [];
 }
 
 function formatAxisList(axes: Record<string, number>): string {
@@ -874,7 +970,17 @@ function normalizeEmotionKey(value: string): string {
               </li>
             </ul>
           </details>
-          <div v-if="!selectedDraftSource?.error" class="motion-tuning__axis-grid">
+          <p
+            v-if="selectedDraftSource?.motionKind === 'sequence' && !selectedDraftSource.error"
+            class="history-empty"
+          >
+            这是保留原始 motion_steps 的序列样本。可以回放、保存和作为 Prompt 参考，但不会被压缩成单个姿态轴。
+          </p>
+
+          <div
+            v-if="selectedDraftSource?.motionKind === 'pose' && !selectedDraftSource.error"
+            class="motion-tuning__axis-grid"
+          >
             <label
               v-for="axis in promptAxes"
               :key="axis.id"
@@ -920,7 +1026,7 @@ function normalizeEmotionKey(value: string): string {
           </label>
 
           <label
-            v-if="!selectedDraftSource?.error"
+            v-if="selectedDraftSource?.motionKind === 'pose' && !selectedDraftSource.error"
             class="action-preview__field profile-editor__field--full"
           >
             <span>样本说明 / 调参反馈</span>
@@ -967,7 +1073,7 @@ function normalizeEmotionKey(value: string): string {
               class="settings-card__button"
               @click="playAdjustedIntent"
             >
-              播放手调效果
+              {{ selectedDraftSource?.motionKind === 'sequence' ? "播放序列效果" : "播放手调效果" }}
             </button>
             <button
               v-if="!selectedDraftSource?.error"

@@ -2,21 +2,24 @@ import { cloneJson } from "../../utils/cloneJson.js";
 import type { DesktopMotionTuningSample } from "../../types/desktop.js";
 import type { MotionTuningSampleProtocolPayload } from "../../types/protocol.js";
 import { cloneCompiledSemanticMotion } from "../../model-engine/compiler/compiledSemanticMotionParser.js";
+import { SCHEMA_MOTION_TUNING_SAMPLE_V2 } from "../../types/protocolSchema.generated.js";
 
 export function serializeMotionTuningSample(
   sample: DesktopMotionTuningSample,
 ): MotionTuningSampleProtocolPayload {
   return {
+    schema_version: SCHEMA_MOTION_TUNING_SAMPLE_V2,
     id: sample.id,
     created_at: sample.createdAt,
     source_record_id: sample.sourceRecordId,
+    turn_id: sample.turnId,
+    message_id: sample.messageId,
     model_name: sample.modelName,
     profile_id: sample.profileId ?? "",
     profile_revision: sample.profileRevision ?? 0,
     profile_hash: sample.profileHash ?? "",
     transform_version: sample.transformVersion ?? "",
     emotion_label: sample.emotionLabel,
-    assistant_text: sample.assistantText,
     feedback: sample.feedback,
     tags: [...sample.tags],
     enabled_for_llm_reference: Boolean(sample.enabledForLlmReference),
@@ -24,7 +27,7 @@ export function serializeMotionTuningSample(
     raw_axis_levels: { ...(sample.rawAxisLevels ?? {}) },
     resolved_axes: { ...(sample.resolvedAxes ?? {}) },
     constrained_axes: { ...(sample.constrainedAxes ?? {}) },
-    adjusted_axes: { ...sample.adjustedAxes },
+    adjusted_axes: sample.adjustedAxes ? { ...sample.adjustedAxes } : undefined,
     compiled_semantic_motion: cloneJson(sample.compiledSemanticMotion),
   };
 }
@@ -37,11 +40,16 @@ export function normalizeMotionTuningSamplePayload(
   }
 
   const candidate = sample as Partial<MotionTuningSampleProtocolPayload>;
+  const schemaVersion = candidate.schema_version === SCHEMA_MOTION_TUNING_SAMPLE_V2
+    ? candidate.schema_version
+    : "";
   const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
   const createdAt = typeof candidate.created_at === "string" ? candidate.created_at.trim() : "";
   const sourceRecordId = typeof candidate.source_record_id === "string"
     ? candidate.source_record_id.trim()
     : "";
+  const turnId = typeof candidate.turn_id === "string" ? candidate.turn_id.trim() : "";
+  const messageId = typeof candidate.message_id === "string" ? candidate.message_id.trim() : "";
   const modelName = typeof candidate.model_name === "string" ? candidate.model_name.trim() : "";
   const profileId = typeof candidate.profile_id === "string" ? candidate.profile_id.trim() : "";
   const profileRevision = typeof candidate.profile_revision === "number"
@@ -49,7 +57,17 @@ export function normalizeMotionTuningSamplePayload(
     && candidate.profile_revision > 0
     ? Math.round(candidate.profile_revision)
     : 0;
-  if (!id || !createdAt || !sourceRecordId || !modelName || !profileId || profileRevision <= 0) {
+  if (
+    !schemaVersion
+    || !id
+    || !createdAt
+    || !sourceRecordId
+    || !turnId
+    || !messageId
+    || !modelName
+    || !profileId
+    || profileRevision <= 0
+  ) {
     return null;
   }
 
@@ -59,9 +77,12 @@ export function normalizeMotionTuningSamplePayload(
   }
 
   return {
+    schemaVersion,
     id,
     createdAt,
     sourceRecordId,
+    turnId,
+    messageId,
     modelName,
     profileId,
     profileRevision,
@@ -74,6 +95,9 @@ export function normalizeMotionTuningSamplePayload(
     emotionLabel: typeof candidate.emotion_label === "string" && candidate.emotion_label.trim()
       ? candidate.emotion_label.trim()
       : "manual_tuning",
+    userText: typeof candidate.user_text === "string"
+      ? candidate.user_text.trim()
+      : "",
     assistantText: typeof candidate.assistant_text === "string"
       ? candidate.assistant_text.trim()
       : "",
@@ -86,7 +110,9 @@ export function normalizeMotionTuningSamplePayload(
     rawAxisLevels: normalizeMotionTuningAxisRecord(candidate.raw_axis_levels),
     resolvedAxes: normalizeMotionTuningAxisRecord(candidate.resolved_axes),
     constrainedAxes: normalizeMotionTuningAxisRecord(candidate.constrained_axes),
-    adjustedAxes: normalizeMotionTuningAxisRecord(candidate.adjusted_axes),
+    adjustedAxes: candidate.adjusted_axes === undefined
+      ? undefined
+      : normalizeMotionTuningAxisRecord(candidate.adjusted_axes),
     compiledSemanticMotion,
   };
 }

@@ -868,6 +868,26 @@ def _project_reference_examples_for_prompt(
             projected_output["duration_hint_ms"] = duration_hint_ms
         elif duration_hint_ms is not None:
             raise ValueError("motion_reference_example_duration_invalid")
+        expression_resource_id = output.get("expression_resource_id")
+        motion_resource_id = output.get("motion_resource_id")
+        if expression_resource_id is not None and (
+            not isinstance(expression_resource_id, str)
+            or not expression_resource_id.strip()
+            or len(expression_resource_id.strip()) > 160
+        ):
+            raise ValueError("motion_reference_example_expression_resource_invalid")
+        if motion_resource_id is not None and (
+            not isinstance(motion_resource_id, str)
+            or not motion_resource_id.strip()
+            or len(motion_resource_id.strip()) > 160
+        ):
+            raise ValueError("motion_reference_example_motion_resource_invalid")
+        if expression_resource_id and motion_resource_id:
+            raise ValueError("motion_reference_example_resource_conflict")
+        if expression_resource_id:
+            projected_output["expression_resource_id"] = expression_resource_id.strip()
+        if motion_resource_id:
+            projected_output["motion_resource_id"] = motion_resource_id.strip()
         axis_levels = (
             _project_example_axis_levels(
                 output.get("axis_levels"),
@@ -880,6 +900,10 @@ def _project_reference_examples_for_prompt(
         if axis_levels:
             projected_output["axis_levels"] = axis_levels
         else:
+            if motion_resource_id:
+                raise ValueError(
+                    "motion_reference_example_motion_resource_sequence_conflict"
+                )
             motion_steps = output.get("motion_steps")
             projected_steps: list[dict[str, Any]] = []
             if isinstance(motion_steps, list) and 2 <= len(motion_steps) <= 4:

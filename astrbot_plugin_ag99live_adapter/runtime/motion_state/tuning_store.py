@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 from ...prompts.motion_selector import resolve_motion_reference_examples
 from ...prompts.semantic_axis_prompt import profile_prompt_axes
+from ...protocol.schema_versions import MOTION_TUNING_SAMPLE_SCHEMA_VERSION
 
 class MotionTuningStore:
     """Owns persisted motion-tuning samples and their prompt projections."""
@@ -14,11 +15,13 @@ class MotionTuningStore:
         *,
         runtime_state: Any,
         get_selected_profile: Callable[[], dict[str, Any] | None],
+        get_turn_context: Callable[[str, str], dict[str, str] | None],
         ensure_cache_writable: Callable[[], None],
         persist_cache: Callable[[], None],
     ) -> None:
         self._runtime_state = runtime_state
         self._get_selected_profile = get_selected_profile
+        self._get_turn_context = get_turn_context
         self._ensure_cache_writable = ensure_cache_writable
         self._persist_cache = persist_cache
 
@@ -36,19 +39,16 @@ class MotionTuningStore:
             return
 
         normalized_samples: list[dict[str, Any]] = []
+        discarded_count = 0
         for sample in raw_samples:
             try:
                 normalized_samples.append(self.normalize_sample(sample))
-            except ValueError as exc:
-                self.samples_load_error = (
-                    "motion_tuning_samples_invalid_persisted_sample"
-                    f": {exc}"
-                )
-                self.samples = []
-                self.reference_examples = []
-                self._persist_cache()
-                return
+            except ValueError:
+                discarded_count += 1
         self.samples = normalized_samples
+        self.samples_load_error = ""
+        if discarded_count:
+            self._persist_cache()
 
     def list_samples(self) -> list[dict[str, Any]]:
         return deepcopy(self.samples)
@@ -64,7 +64,26 @@ class MotionTuningStore:
 
     def save_sample(self, sample_payload: Any) -> dict[str, Any]:
         self._ensure_cache_writable()
-        normalized_sample = self.normalize_sample(sample_payload)
+        incoming_sample = self.normalize_sample(
+            sample_payload,
+            require_recorded_context=False,
+        )
+        recorded_context = self._get_turn_context(
+            incoming_sample["turn_id"],
+            incoming_sample["message_id"],
+        )
+        if not isinstance(recorded_context, dict):
+            raise ValueError(
+                "motion_tuning_sample_context_not_recorded:"
+                f"{incoming_sample['turn_id']}:{incoming_sample['message_id']}"
+            )
+        incoming_sample["user_text"] = str(
+            recorded_context.get("user_text") or ""
+        ).strip()
+        incoming_sample["assistant_text"] = str(
+            recorded_context.get("assistant_text") or ""
+        ).strip()
+        normalized_sample = self.normalize_sample(incoming_sample)
         self.samples_load_error = ""
         self.samples = [
             deepcopy(normalized_sample),
@@ -145,26 +164,12 @@ class MotionTuningStore:
                 continue
             if int(sample.get("profile_revision") or 0) != profile_revision:
                 continue
-            adjusted_axes = sample.get("adjusted_axes")
-            if not isinstance(adjusted_axes, dict) or not adjusted_axes:
-                continue
-            compiled_motion = sample.get("compiled_semantic_motion")
-            filtered_axes = self._filter_example_axes(
-                adjusted_axes,
-                allowed_axis_ids=prompt_axis_ids,
-            )
-            if not filtered_axes:
-                continue
-            adjusted_levels = self._project_axes_to_levels(
-                filtered_axes,
-                axis_by_id=prompt_axis_by_id,
-            )
-            if not adjusted_levels:
-                continue
-            intent_tags = self._build_sample_intent_tags(sample)
-            reference_error = self._validate_reference_effect_fields(
-                intent_tags=intent_tags,
-                compiled_motion=compiled_motion,
+            projected_output, primary_axis_levels, reference_error = (
+                self._project_sample_reference_output(
+                    sample,
+                    allowed_axis_ids=prompt_axis_ids,
+                    axis_by_id=prompt_axis_by_id,
+                )
             )
             if reference_error:
                 projection_diagnostics.append(
@@ -173,44 +178,34 @@ class MotionTuningStore:
                     f"reason={reference_error}"
                 )
                 continue
-            style_samples.append(
-                {
-                    "emotion_label": str(sample.get("emotion_label") or "").strip(),
-                    "feedback": str(sample.get("feedback") or "").strip(),
-                    "tags": [
-                        str(tag).strip()
-                        for tag in sample.get("tags", [])
-                        if str(tag).strip()
-                    ]
-                    if isinstance(sample.get("tags"), list)
-                    else [],
-                    "mode": str(compiled_motion.get("mode") or "expressive").strip()
-                    or "expressive"
-                    if isinstance(compiled_motion, dict)
-                    else "expressive",
-                    "axis_levels": adjusted_levels,
-                }
-            )
-            duration_ms = None
-            if isinstance(compiled_motion, dict):
-                timing = compiled_motion.get("timing")
-                if isinstance(timing, dict):
-                    duration_ms = timing.get("resolvedDurationMs")
+            if not projected_output:
+                continue
+            if primary_axis_levels:
+                compiled_motion = sample.get("compiled_semantic_motion")
+                style_samples.append(
+                    {
+                        "emotion_label": str(sample.get("emotion_label") or "").strip(),
+                        "feedback": str(sample.get("feedback") or "").strip(),
+                        "tags": [
+                            str(tag).strip()
+                            for tag in sample.get("tags", [])
+                            if str(tag).strip()
+                        ]
+                        if isinstance(sample.get("tags"), list)
+                        else [],
+                        "mode": str(compiled_motion.get("mode") or "expressive").strip()
+                        or "expressive"
+                        if isinstance(compiled_motion, dict)
+                        else "expressive",
+                        "axis_levels": primary_axis_levels,
+                    }
+                )
             normalized_examples.append(
                 {
                     "category": str(sample.get("emotion_label") or "custom").strip()
                     or "custom",
                     "input": self._build_sample_input_text(sample),
-                    "output": {
-                        "intent_tags": intent_tags,
-                        "axis_levels": adjusted_levels,
-                        **(
-                            {"duration_hint_ms": int(round(float(duration_ms)))}
-                            if isinstance(duration_ms, (int, float))
-                            and not isinstance(duration_ms, bool)
-                            else {}
-                        ),
-                    },
+                    "output": projected_output,
                     "source": "desktop_motion_tuning_sample_store",
                     "feedback": str(sample.get("feedback") or "").strip(),
                     "tags": [
@@ -262,6 +257,120 @@ class MotionTuningStore:
         ):
             return "duration_hint_ms_out_of_range"
         return ""
+
+    def _project_sample_reference_output(
+        self,
+        sample: dict[str, Any],
+        *,
+        allowed_axis_ids: set[str],
+        axis_by_id: dict[str, dict[str, Any]],
+    ) -> tuple[dict[str, Any] | None, dict[str, int], str]:
+        compiled_motion = sample.get("compiled_semantic_motion")
+        intent_tags = self._build_sample_intent_tags(sample)
+        reference_error = self._validate_reference_effect_fields(
+            intent_tags=intent_tags,
+            compiled_motion=compiled_motion,
+        )
+        if reference_error:
+            return None, {}, reference_error
+        if not isinstance(compiled_motion, dict):
+            return None, {}, "compiled_semantic_motion_invalid"
+
+        output: dict[str, Any] = {"intent_tags": intent_tags}
+        timing = compiled_motion.get("timing")
+        duration_ms = timing.get("resolvedDurationMs") if isinstance(timing, dict) else None
+        if isinstance(duration_ms, (int, float)) and not isinstance(duration_ms, bool):
+            output["duration_hint_ms"] = int(round(float(duration_ms)))
+        expression_resource_id = str(
+            compiled_motion.get("expressionResourceId") or ""
+        ).strip()
+        motion_resource_id = str(compiled_motion.get("motionResourceId") or "").strip()
+        if expression_resource_id:
+            output["expression_resource_id"] = expression_resource_id
+        if motion_resource_id:
+            output["motion_resource_id"] = motion_resource_id
+
+        if compiled_motion.get("kind") == "pose":
+            adjusted_axes = sample.get("adjusted_axes")
+            if not isinstance(adjusted_axes, dict) or not adjusted_axes:
+                return None, {}, "pose_adjusted_axes_missing"
+            filtered_axes = self._filter_example_axes(
+                adjusted_axes,
+                allowed_axis_ids=allowed_axis_ids,
+            )
+            axis_levels = self._project_axes_to_levels(
+                filtered_axes,
+                axis_by_id=axis_by_id,
+            )
+            if not axis_levels:
+                return None, {}, "pose_axis_levels_missing"
+            output["axis_levels"] = axis_levels
+            return output, axis_levels, ""
+
+        if compiled_motion.get("kind") != "sequence":
+            return None, {}, "compiled_semantic_motion_kind_invalid"
+        motion_steps, sequence_error = self._project_sequence_motion_steps(
+            compiled_motion,
+            allowed_axis_ids=allowed_axis_ids,
+        )
+        if sequence_error:
+            return None, {}, sequence_error
+        output["motion_steps"] = motion_steps
+        return output, motion_steps[0]["axis_levels"], ""
+
+    @staticmethod
+    def _project_sequence_motion_steps(
+        compiled_motion: dict[str, Any],
+        *,
+        allowed_axis_ids: set[str],
+    ) -> tuple[list[dict[str, Any]], str]:
+        raw_steps = compiled_motion.get("steps")
+        if not isinstance(raw_steps, list) or not 2 <= len(raw_steps) <= 4:
+            return [], "sequence_steps_invalid"
+        projected_steps: list[dict[str, Any]] = []
+        expected_axis_ids: tuple[str, ...] | None = None
+        for step in raw_steps:
+            if not isinstance(step, dict):
+                return [], "sequence_step_invalid"
+            diagnostics = step.get("diagnostics")
+            trace = diagnostics.get("transformTrace") if isinstance(diagnostics, dict) else None
+            raw_levels = trace.get("rawAxisLevels") if isinstance(trace, dict) else None
+            if not isinstance(raw_levels, dict):
+                return [], "sequence_step_raw_axis_levels_missing"
+            axis_levels: dict[str, int] = {}
+            for raw_axis_id, raw_level in raw_levels.items():
+                axis_id = str(raw_axis_id or "").strip()
+                if axis_id not in allowed_axis_ids:
+                    continue
+                if (
+                    isinstance(raw_level, bool)
+                    or not isinstance(raw_level, int)
+                    or not -4 <= raw_level <= 4
+                ):
+                    return [], f"sequence_step_axis_level_invalid:{axis_id}"
+                axis_levels[axis_id] = raw_level
+            if not axis_levels:
+                return [], "sequence_step_axis_levels_empty"
+            axis_ids = tuple(sorted(axis_levels))
+            if expected_axis_ids is None:
+                expected_axis_ids = axis_ids
+            elif axis_ids != expected_axis_ids:
+                return [], "sequence_step_axis_set_mismatch"
+            duration_weight = step.get("durationWeight")
+            if (
+                isinstance(duration_weight, bool)
+                or not isinstance(duration_weight, (int, float))
+                or int(duration_weight) != duration_weight
+                or not 1 <= int(duration_weight) <= 3
+            ):
+                return [], "sequence_step_duration_weight_invalid"
+            projected_steps.append(
+                {
+                    "axis_levels": axis_levels,
+                    "duration_weight": int(duration_weight),
+                }
+            )
+        return projected_steps, ""
 
     def _refresh_effective_examples(self) -> None:
         self.effective_examples = deepcopy(
@@ -412,9 +521,16 @@ class MotionTuningStore:
             result[axis_id] = min(candidates, key=lambda item: (item[0], abs(item[1])))[1]
         return result
 
-    def normalize_sample(self, sample_payload: Any) -> dict[str, Any]:
+    def normalize_sample(
+        self,
+        sample_payload: Any,
+        *,
+        require_recorded_context: bool = True,
+    ) -> dict[str, Any]:
         if not isinstance(sample_payload, dict):
             raise ValueError("motion_tuning_sample_not_object")
+        if sample_payload.get("schema_version") != MOTION_TUNING_SAMPLE_SCHEMA_VERSION:
+            raise ValueError("motion_tuning_sample_schema_invalid")
 
         sample_id = str(sample_payload.get("id") or "").strip()
         if not sample_id:
@@ -427,6 +543,14 @@ class MotionTuningStore:
         source_record_id = str(sample_payload.get("source_record_id") or "").strip()
         if not source_record_id:
             raise ValueError("motion_tuning_sample_source_record_id_required")
+
+        turn_id = str(sample_payload.get("turn_id") or "").strip()
+        if not turn_id:
+            raise ValueError("motion_tuning_sample_turn_id_required")
+
+        message_id = str(sample_payload.get("message_id") or "").strip()
+        if not message_id:
+            raise ValueError("motion_tuning_sample_message_id_required")
 
         model_name = str(sample_payload.get("model_name") or "").strip()
         if not model_name:
@@ -446,11 +570,6 @@ class MotionTuningStore:
         if profile_revision <= 0:
             raise ValueError("motion_tuning_sample_profile_revision_invalid")
 
-        adjusted_axes = self._normalize_axes(
-            sample_payload.get("adjusted_axes"),
-            field_name="adjusted_axes",
-            require_non_empty=True,
-        )
         original_axes = self._normalize_axes(
             sample_payload.get("original_axes"),
             field_name="original_axes",
@@ -475,11 +594,37 @@ class MotionTuningStore:
             profile_id=profile_id,
             profile_revision=profile_revision,
         )
+        if compiled_motion["kind"] == "pose":
+            adjusted_axes = self._normalize_axes(
+                sample_payload.get("adjusted_axes"),
+                field_name="adjusted_axes",
+                require_non_empty=True,
+            )
+        else:
+            adjusted_axes = self._normalize_axes(
+                sample_payload.get("adjusted_axes", {}),
+                field_name="adjusted_axes",
+                require_non_empty=False,
+            )
+            if adjusted_axes:
+                raise ValueError(
+                    "motion_tuning_sample_sequence_adjusted_axes_forbidden"
+                )
+
+        user_text = str(sample_payload.get("user_text") or "").strip()
+        assistant_text = str(sample_payload.get("assistant_text") or "").strip()
+        if require_recorded_context and not user_text:
+            raise ValueError("motion_tuning_sample_user_text_missing")
+        if require_recorded_context and not assistant_text:
+            raise ValueError("motion_tuning_sample_assistant_text_missing")
 
         normalized_sample = {
+            "schema_version": MOTION_TUNING_SAMPLE_SCHEMA_VERSION,
             "id": sample_id,
             "created_at": created_at,
             "source_record_id": source_record_id,
+            "turn_id": turn_id,
+            "message_id": message_id,
             "model_name": model_name,
             "profile_id": profile_id,
             "profile_revision": profile_revision,
@@ -487,16 +632,18 @@ class MotionTuningStore:
                 sample_payload.get("emotion_label") or ""
             ).strip()
             or "manual_tuning",
-            "assistant_text": str(sample_payload.get("assistant_text") or "").strip(),
+            "user_text": user_text,
+            "assistant_text": assistant_text,
             "feedback": str(sample_payload.get("feedback") or "").strip(),
             "tags": self._normalize_tags(sample_payload.get("tags")),
             "enabled_for_llm_reference": bool(
                 sample_payload.get("enabled_for_llm_reference")
             ),
             "original_axes": original_axes,
-            "adjusted_axes": adjusted_axes,
             "compiled_semantic_motion": compiled_motion,
         }
+        if compiled_motion["kind"] == "pose":
+            normalized_sample["adjusted_axes"] = adjusted_axes
         optional_values = {
             "profile_hash": str(sample_payload.get("profile_hash") or "").strip(),
             "transform_version": str(
@@ -576,18 +723,30 @@ class MotionTuningStore:
             self._validate_compiled_motion_axes(motion_payload.get("axes"))
         else:
             steps = motion_payload.get("steps")
-            if not isinstance(steps, list) or not steps:
+            if not isinstance(steps, list) or not 2 <= len(steps) <= 4:
                 raise ValueError("motion_tuning_sample_compiled_semantic_motion_steps_invalid")
+            expected_axis_ids: tuple[str, ...] | None = None
             for step in steps:
                 if not isinstance(step, dict):
                     raise ValueError("motion_tuning_sample_compiled_semantic_motion_step_invalid")
-                duration_weight = _coerce_finite_number(step.get("durationWeight"))
-                if duration_weight is None or duration_weight <= 0:
+                duration_weight = step.get("durationWeight")
+                if (
+                    isinstance(duration_weight, bool)
+                    or not isinstance(duration_weight, int)
+                    or not 1 <= duration_weight <= 3
+                ):
                     raise ValueError(
                         "motion_tuning_sample_compiled_semantic_motion_step_weight_invalid"
                     )
                 self._validate_compiled_motion_axes(step.get("axes"))
                 self._validate_compiled_motion_diagnostics(step.get("diagnostics"))
+                axis_ids = self._validate_sequence_step_trace(step)
+                if expected_axis_ids is None:
+                    expected_axis_ids = axis_ids
+                elif axis_ids != expected_axis_ids:
+                    raise ValueError(
+                        "motion_tuning_sample_compiled_semantic_motion_step_axis_set_mismatch"
+                    )
         return deepcopy(motion_payload)
 
     @staticmethod
@@ -637,6 +796,28 @@ class MotionTuningStore:
             ):
                 raise ValueError("motion_tuning_sample_compiled_semantic_motion_axis_invalid")
             axis_ids.add(axis_id)
+
+    @staticmethod
+    def _validate_sequence_step_trace(step_payload: dict[str, Any]) -> tuple[str, ...]:
+        diagnostics = step_payload.get("diagnostics")
+        trace = diagnostics.get("transformTrace") if isinstance(diagnostics, dict) else None
+        raw_axis_levels = trace.get("rawAxisLevels") if isinstance(trace, dict) else None
+        if not isinstance(raw_axis_levels, dict) or not raw_axis_levels:
+            raise ValueError(
+                "motion_tuning_sample_compiled_semantic_motion_step_trace_missing"
+            )
+        for raw_axis_id, raw_level in raw_axis_levels.items():
+            axis_id = str(raw_axis_id or "").strip()
+            if (
+                not axis_id
+                or isinstance(raw_level, bool)
+                or not isinstance(raw_level, int)
+                or not -4 <= raw_level <= 4
+            ):
+                raise ValueError(
+                    "motion_tuning_sample_compiled_semantic_motion_step_trace_invalid"
+                )
+        return tuple(sorted(str(axis_id).strip() for axis_id in raw_axis_levels))
 
     @staticmethod
     def _validate_compiled_motion_timing(timing_payload: Any) -> None:
@@ -732,19 +913,12 @@ class MotionTuningStore:
     @staticmethod
     def _build_sample_input_text(sample: dict[str, Any]) -> str:
         lines: list[str] = []
+        user_text = str(sample.get("user_text") or "").strip()
         assistant_text = str(sample.get("assistant_text") or "").strip()
-        feedback = str(sample.get("feedback") or "").strip()
-        tags = sample.get("tags")
+        if user_text:
+            lines.append(f"User: {user_text}")
         if assistant_text:
             lines.append(f"Assistant: {assistant_text}")
-        if feedback:
-            lines.append(f"Tuning note: {feedback}")
-        if isinstance(tags, list):
-            normalized_tags = [
-                str(tag).strip() for tag in tags if str(tag).strip()
-            ]
-            if normalized_tags:
-                lines.append(f"Tags: {', '.join(normalized_tags)}")
         return "\n".join(lines)
 
 

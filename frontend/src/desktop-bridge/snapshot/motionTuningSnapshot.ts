@@ -57,18 +57,52 @@ export function cloneMotionTuningEffectiveExample(
     return null;
   }
   return {
+    category: normalizeText(example.category),
     input: normalizeText(example.input),
     output: {
-      emotion: normalizeText(example.output.emotion),
-      mode: normalizeText(example.output.mode),
-      durationMs: typeof example.output.durationMs === "number" && Number.isFinite(example.output.durationMs)
-        ? example.output.durationMs
+      intentTags: normalizeStringArray(example.output.intentTags) ?? [],
+      durationHintMs: typeof example.output.durationHintMs === "number"
+        && Number.isFinite(example.output.durationHintMs)
+        ? example.output.durationHintMs
         : null,
-      axes: cloneNumericRecord(example.output.axes),
+      axisLevels: Object.keys(cloneNumericRecord(example.output.axisLevels)).length
+        ? cloneNumericRecord(example.output.axisLevels)
+        : undefined,
+      motionSteps: cloneMotionTuningMotionSteps(example.output.motionSteps),
+      expressionResourceId: normalizeText(example.output.expressionResourceId) || undefined,
+      motionResourceId: normalizeText(example.output.motionResourceId) || undefined,
     },
     source: normalizeText(example.source),
     tags: normalizeStringArray(example.tags) ?? [],
   };
+}
+
+function cloneMotionTuningMotionSteps(
+  value: unknown,
+): DesktopMotionTuningEffectiveExample["output"]["motionSteps"] {
+  if (!Array.isArray(value) || value.length < 2 || value.length > 4) {
+    return undefined;
+  }
+  const steps = value.map((item) => {
+    if (!isObject(item)) {
+      return null;
+    }
+    const durationWeight = item.durationWeight;
+    const axisLevels = cloneNumericRecord(item.axisLevels);
+    if (
+      !Object.keys(axisLevels).length
+      || typeof durationWeight !== "number"
+      || !Number.isInteger(durationWeight)
+      || durationWeight < 1
+      || durationWeight > 3
+    ) {
+      return null;
+    }
+    return { axisLevels, durationWeight };
+  });
+  return steps.every((step) => step !== null)
+    ? steps as NonNullable<DesktopMotionTuningEffectiveExample["output"]["motionSteps"]>
+    : undefined;
 }
 
 function cloneMotionTuningSample(
@@ -100,7 +134,9 @@ function cloneMotionTuningSample(
       profileRevision,
       enabledForLlmReference: Boolean(sample.enabledForLlmReference),
       originalAxes: cloneNumericRecord(sample.originalAxes),
-      adjustedAxes: cloneNumericRecord(sample.adjustedAxes),
+      adjustedAxes: sample.adjustedAxes === undefined
+        ? undefined
+        : cloneNumericRecord(sample.adjustedAxes),
       compiledSemanticMotion,
     } satisfies DesktopMotionTuningSample;
   } catch (error) {

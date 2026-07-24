@@ -59,6 +59,17 @@ class MotionLabRecorder:
             return False
         return True
 
+    def get_turn_context(
+        self,
+        *,
+        turn_id: str,
+        message_id: str,
+    ) -> dict[str, str] | None:
+        return self._store.get_turn_context(
+            turn_id=turn_id,
+            message_id=message_id,
+        )
+
     def _ensure_worker(self) -> bool:
         task = self._worker_task
         if task is not None and not task.done():

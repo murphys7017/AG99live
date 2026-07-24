@@ -3,12 +3,14 @@ import type { SemanticAxisProfile } from "./semantic-axis-profile";
 export {
   SCHEMA_CATALOG_MOTION_V1,
   SCHEMA_MOTION_INTENT_V4,
+  SCHEMA_MOTION_TUNING_SAMPLE_V2,
   SCHEMA_PARAMETER_PLAN_V2,
 } from "./protocolSchema.generated.js";
 import {
   PROTOCOL_VERSION,
   SCHEMA_CATALOG_MOTION_V1,
   SCHEMA_MOTION_INTENT_V4,
+  SCHEMA_MOTION_TUNING_SAMPLE_V2,
   SCHEMA_PARAMETER_PLAN_V2,
 } from "./protocolSchema.generated.js";
 
@@ -35,6 +37,7 @@ export interface ProtocolSchemaManifest {
     catalog_motion: string;
     model_info: string;
     motion_intent: string;
+    motion_tuning_sample: string;
     output_segment: string;
     parameter_plan: string;
     performance_curve_hint: string;
@@ -584,16 +587,20 @@ export interface SystemSemanticAxisProfileSavePayload {
 }
 
 export interface MotionTuningSampleProtocolPayload {
+  schema_version: typeof SCHEMA_MOTION_TUNING_SAMPLE_V2;
   id: string;
   created_at: string;
   source_record_id: string;
+  turn_id: string;
+  message_id: string;
   model_name: string;
   profile_id: string;
   profile_revision: number;
   profile_hash?: string;
   transform_version?: string;
   emotion_label: string;
-  assistant_text: string;
+  user_text?: string;
+  assistant_text?: string;
   feedback: string;
   tags: string[];
   enabled_for_llm_reference?: boolean;
@@ -601,7 +608,7 @@ export interface MotionTuningSampleProtocolPayload {
   raw_axis_levels?: Record<string, number>;
   resolved_axes?: Record<string, number>;
   constrained_axes?: Record<string, number>;
-  adjusted_axes: Record<string, number>;
+  adjusted_axes?: Record<string, number>;
   compiled_semantic_motion: unknown;
 }
 
@@ -619,12 +626,18 @@ export interface SystemMotionTuningSamplesStatePayload {
   load_error?: string;
   diagnostics?: string[];
   effective_examples?: Array<{
+    category?: string;
     input: string;
     output: {
-      emotion: string;
-      mode: string;
+      intent_tags: string[];
       duration_ms?: number | null;
-      axes: Record<string, number>;
+      axis_levels?: Record<string, number>;
+      motion_steps?: Array<{
+        axis_levels: Record<string, number>;
+        duration_weight: number;
+      }>;
+      expression_resource_id?: string;
+      motion_resource_id?: string;
     };
     source?: string;
     tags?: string[];

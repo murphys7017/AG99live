@@ -251,15 +251,19 @@ export type DesktopMotionPlaybackRecord =
   });
 
 export interface DesktopMotionTuningSample {
+  schemaVersion: "ag99.motion_tuning_sample.v2";
   id: string;
   createdAt: string;
   sourceRecordId: string;
+  turnId: string;
+  messageId: string;
   modelName: string;
   profileId?: string;
   profileRevision?: number;
   profileHash?: string;
   transformVersion?: string;
   emotionLabel: string;
+  userText: string;
   assistantText: string;
   feedback: string;
   tags: string[];
@@ -268,17 +272,23 @@ export interface DesktopMotionTuningSample {
   rawAxisLevels?: Record<string, number>;
   resolvedAxes?: Record<string, number>;
   constrainedAxes?: Record<string, number>;
-  adjustedAxes: Record<string, number>;
+  adjustedAxes?: Record<string, number>;
   compiledSemanticMotion: CompiledSemanticMotion;
 }
 
 export interface DesktopMotionTuningEffectiveExample {
+  category: string;
   input: string;
   output: {
-    emotion: string;
-    mode: string;
-    durationMs: number | null;
-    axes: Record<string, number>;
+    intentTags: readonly string[];
+    durationHintMs: number | null;
+    axisLevels?: Record<string, number>;
+    motionSteps?: readonly {
+      axisLevels: Record<string, number>;
+      durationWeight: number;
+    }[];
+    expressionResourceId?: string;
+    motionResourceId?: string;
   };
   source: string;
   tags: readonly string[];
