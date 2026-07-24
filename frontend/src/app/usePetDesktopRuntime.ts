@@ -11,7 +11,6 @@ import {
   type InjectionKey,
 } from "vue";
 import { buildParameterActionPreview } from "../action-lab/parameterActionPreview";
-import { useAdapterConnection } from "../adapter-connection/useAdapterConnection";
 import { createModelSync } from "../adapter-connection/model-sync/useModelSync";
 import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRuntimeSnapshotPublisher";
@@ -40,9 +39,7 @@ import type { DirectParameterPlanTerminalEvent } from "../types/live2d-runtime.d
 import { cloneJson } from "../utils/cloneJson";
 import {
   configurePlaybackTimelineMotionRuntime,
-  createAppPlaybackTimelineRuntime,
   createPlaybackTimelineMotionRunTracker,
-  type PlaybackTimelineWiringPort,
 } from "./playbackTimelineWiring";
 import { useDesktopContextMenu } from "./useDesktopContextMenu";
 import { createDesktopRuntimeCommandHandler } from "../desktop-bridge/useDesktopRuntimeCommandHandler";
@@ -54,11 +51,7 @@ import {
   createMotionLabOutboundQueue,
   type MotionLabRawEventInput,
 } from "../motion-lab/outboundQueue";
-import type {
-  PlaybackTimelineSegmentMotionSink,
-} from "../playback-timeline/segmentJob";
-import { createBrowserAudioTimelineSink } from "../playback-timeline/audioSink";
-import type { NormalizedMotionPayload } from "../playback-integrations/motionPayload";
+import { createConversationPlaybackRuntime } from "./createConversationPlaybackRuntime";
 
 export interface PetDesktopRuntime {
   sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>;
@@ -76,33 +69,12 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const sessionStore = useTurnPlaybackSessionStore();
   const modelSync = createModelSync();
   const { state, selectedModel, selectedSemanticAxisProfile } = modelSync;
-  let motionTimelineSinkTarget: PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload> | null = null;
-  const requiredMotionTimelineSink: PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload> = {
-    start(payload, context) {
-      if (!motionTimelineSinkTarget) {
-        throw new Error("ModelEngine motion timeline sink is not initialized.");
-      }
-      return motionTimelineSinkTarget.start(payload, context);
-    },
-    interrupt(turnId, messageId, reason) {
-      if (!motionTimelineSinkTarget) {
-        throw new Error("ModelEngine motion timeline sink is not initialized.");
-      }
-      motionTimelineSinkTarget.interrupt(turnId, messageId, reason);
-    },
-  };
-  const adapter = useAdapterConnection(
+  const conversationPlayback = createConversationPlaybackRuntime({
     sessionStore,
     modelSync,
     normalizeMotionPayload,
-  );
-  const playbackTimeline: PlaybackTimelineWiringPort =
-    createAppPlaybackTimelineRuntime({
-      sessionStore,
-      adapterPlayback: adapter.playback,
-      motionSink: requiredMotionTimelineSink,
-      audioSink: createBrowserAudioTimelineSink(),
-    });
+  });
+  const { adapter, playbackTimeline } = conversationPlayback;
   const bridge = useDesktopBridge();
   const motionPlayer = usePreviewMotionPlayer();
   const motionEngineSettings = reactive(
@@ -301,7 +273,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     });
   });
   const motionTimelineSink = playbackTimelineMotionRuntime.motionTimelineSink;
-  motionTimelineSinkTarget = motionTimelineSink;
+  conversationPlayback.bindMotionTimelineSink(motionTimelineSink);
 
   useTurnPlaybackOrchestrator({
     sessionStore,
@@ -455,7 +427,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     adapter.setMotionLabRawEventRecordedHandler(null);
     motionLabOutboundQueue.dispose();
     playbackTimelineMotionRuntime.dispose();
-    motionTimelineSinkTarget = null;
     pushToTalk.dispose();
     bilibiliLive.dispose();
     playbackCoordinator.resetPlaybackCoordination();

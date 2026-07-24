@@ -85,7 +85,7 @@ astrbot_plugin_ag99live_adapter/
 - `output.segment.audio.url` 指向插件侧 HTTP 静态资源，通常是 `/cache/audio/*.wav`；有 TTS 文件但前端无声时，应先验证该 URL 在配置的 `host / http_port` 上是否可达。
 - 麦克风输入现在按“单段录音”组织：一段采集内的 `input.audio_stream_start`、WebSocket binary PCM16LE chunk 与 `input.audio_stream_end` 共享同一个新的 `turn_id` 和 `stream_id`；后端 STT ingress 按 `stream_id` 汇总音频，不再把不同输入段混到一个全局缓冲。
 - 若前端检测到发送积压，会在 `input.audio_stream_end` 中带上 `dropped: true`，后端直接丢弃该段转写。
-- 切换麦克风设备时，前端会先正常结束旧输入段，再启动新输入段；收到 `control.interrupt` 时，前端会把已释放的 segment 音频写成失败终态后再清理播放 runtime。
+- 切换麦克风设备时，前端会先正常结束旧输入段，再启动新输入段；收到 `control.interrupt` 时，前端只中断该信封 `turn_id` 已释放的 segment，并由后端停止同一 Turn 的 AstrBot event；已取消 event 的晚到输出不会重新进入播放链路。
 - Windows / Electron 前端现在优先使用主进程 DirectShow/ffmpeg 原生麦克风枚举与采集；原生路径直接采集 `s16le`，渲染进程通过二进制音频帧发送给插件侧。
 - 非流式 JSON 数组音频协议已删除；麦克风输入只接受当前流式协议。
 - 按键说话模式会以 `reason="ptt_release"` 结束本段录音；对插件侧来说它仍是一段普通麦克风输入。

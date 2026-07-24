@@ -82,6 +82,7 @@ export class LAppAdapter {
   public applyRuntimeEffectsSettings(settings: {
     ambientMotionEnabled: boolean;
     physicsResponseScale: number;
+    protectedPhysicsOutputParameterIds: readonly string[];
   }): void {
     LAppDefine.applyRuntimeEffectsSettings(settings);
     const model = this.getModel();
@@ -89,6 +90,9 @@ export class LAppAdapter {
       model?.stopAmbientMotion();
     }
     model?.setPhysicsResponseScale(settings.physicsResponseScale);
+    model?.setPhysicsResponseProtectedParameterIds(
+      settings.protectedPhysicsOutputParameterIds,
+    );
   }
 
   public startDirectParameterPlan(plan: SemanticParameterPlan, options?: unknown): boolean {

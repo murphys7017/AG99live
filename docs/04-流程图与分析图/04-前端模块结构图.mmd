@@ -6,7 +6,8 @@ flowchart TB
     classDef engine fill:#e9f3df,stroke:#557a35,color:#2e431d
     classDef sdk fill:#f3e6ec,stroke:#8b4865,color:#4b2637
 
-    APP[app/usePetDesktopRuntime.ts<br/>Composition Root]:::root
+    APP[app/usePetDesktopRuntime.ts<br/>Desktop Composition Root]:::root
+    PLAYBACK_COMPOSE[app/createConversationPlaybackRuntime.ts<br/>Adapter + Timeline + BrowserAudioSink]:::root
     UI[views + components<br/>交互、字幕、设置、实验室]:::root
 
     subgraph CONNECTION[adapter-connection：网络与协议适配]
@@ -84,9 +85,10 @@ flowchart TB
         ESP[esp32-display]:::boundary
     end
 
-    APP --> CONN
+    APP --> PLAYBACK_COMPOSE
+    PLAYBACK_COMPOSE --> CONN
     APP --> STORE
-    APP --> TLR
+    PLAYBACK_COMPOSE --> TLR
     APP --> ENTRY
     APP --> PREVIEW
     APP --> UI

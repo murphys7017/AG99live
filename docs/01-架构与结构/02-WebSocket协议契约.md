@@ -161,7 +161,7 @@ AstrBot 内部 Plain、Record、图片与 motion client object 可以物理分�
 | `control.start_mic` | 后端 -> 前端 | `{}` |
 | `control.error` | 后端 -> 前端 | `{ message: string }` |
 
-`control.playback_finished` 只收口信封中的 `turn_id`，较早 Turn 的播放完成不得重置或清理较新的后端 Turn。`control.interrupt` 仍属于会话级活动事件中断；AstrBot 当前只提供按 UMO 停止全部活动事件的能力，因此本次输入直送改造不把它伪装成精确的逐 Turn 取消。
+`control.playback_finished` 只收口信封中的 `turn_id`，较早 Turn 的播放完成不得重置或清理较新的后端 Turn。`control.interrupt` 也只作用于信封中的 `turn_id`：Adapter 只停止该 Turn 对应的 AstrBot event，事件发送边界拒绝该 Turn 的晚到输出，随后前后端分别结束该 Turn 的播放与会话状态。它不是会话级 `stop_all`，也不需要 `message_id`。
 
 ### system.* （双向）
 

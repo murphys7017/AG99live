@@ -93,6 +93,7 @@ export let BACKGROUND_FRAME_RATE = 60;
 export let MAX_RENDER_DEVICE_PIXEL_RATIO = 1.25;
 export let AMBIENT_MOTION_ENABLED = true;
 export let PHYSICS_RESPONSE_SCALE = 1.0;
+export let PHYSICS_RESPONSE_PROTECTED_PARAMETER_IDS: readonly string[] = [];
 
 export function setLimitedFrameRate(nextFrameRate: number) {
   const normalizedFrameRate = Number.isFinite(nextFrameRate)
@@ -135,10 +136,23 @@ function setPhysicsResponseScale(scale: number) {
   PHYSICS_RESPONSE_SCALE = scale;
 }
 
+function setPhysicsResponseProtectedParameterIds(parameterIds: readonly string[]) {
+  PHYSICS_RESPONSE_PROTECTED_PARAMETER_IDS = Array.from(
+    new Set(
+      parameterIds
+        .filter((parameterId) => typeof parameterId === "string")
+        .map((parameterId) => parameterId.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
 export function applyRuntimeEffectsSettings(settings: {
   ambientMotionEnabled: boolean;
   physicsResponseScale: number;
+  protectedPhysicsOutputParameterIds: readonly string[];
 }) {
   setAmbientMotionEnabled(settings.ambientMotionEnabled);
   setPhysicsResponseScale(settings.physicsResponseScale);
+  setPhysicsResponseProtectedParameterIds(settings.protectedPhysicsOutputParameterIds);
 }

@@ -348,6 +348,9 @@ export class LAppModel extends CubismUserModel {
             this._physics?.setTerminalOutputResponseScale(
               LAppDefine.PHYSICS_RESPONSE_SCALE
             );
+            this._physics?.setTerminalOutputResponseProtectedParameterIds(
+              LAppDefine.PHYSICS_RESPONSE_PROTECTED_PARAMETER_IDS,
+            );
 
             this._state = LoadStep.LoadPose;
 
@@ -770,6 +773,12 @@ export class LAppModel extends CubismUserModel {
 
   public setPhysicsResponseScale(scale: number): void {
     this._physics?.setTerminalOutputResponseScale(scale);
+  }
+
+  public setPhysicsResponseProtectedParameterIds(
+    parameterIds: readonly string[],
+  ): void {
+    this._physics?.setTerminalOutputResponseProtectedParameterIds(parameterIds);
   }
 
   public stopAmbientMotion(): void {

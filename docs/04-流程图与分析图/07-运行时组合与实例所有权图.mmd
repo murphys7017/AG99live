@@ -5,7 +5,8 @@ flowchart TB
     classDef engine fill:#e9f3df,stroke:#557a35,color:#2e431d
     classDef resource fill:#f3e6ec,stroke:#8b4865,color:#4b2637
 
-    ROOT[providePetDesktopRuntime<br/>App Composition Root]:::owner
+    ROOT[providePetDesktopRuntime<br/>Desktop Composition Root]:::owner
+    PLAYBACK[createConversationPlaybackRuntime<br/>Conversation Playback Composition]:::owner
 
     STORE[TurnPlaybackSessionStore<br/>单例：turn/segment facts]:::singleton
     ADAPTER[AdapterConnection<br/>单例：WebSocket 与 inbound]:::adapter
@@ -17,8 +18,9 @@ flowchart TB
     MODELSYNC[ModelSync State<br/>单例：模型能力与独立缓存诊断]:::singleton
 
     ROOT -->|创建并持有| STORE
-    ROOT -->|创建并持有| ADAPTER
-    ROOT -->|直接创建并持有| TL
+    ROOT -->|创建并持有| PLAYBACK
+    PLAYBACK -->|创建并持有| ADAPTER
+    PLAYBACK -->|创建并持有| TL
     ROOT -->|创建并持有| ENGINE
     ROOT -->|创建并持有| PLAYER
     ROOT -->|创建并持有| RECORDER
@@ -33,13 +35,13 @@ flowchart TB
         LIPRUNTIME[LipSyncRuntime<br/>每个音频 segment]:::resource
     end
 
-    BROWSERAUDIO[BrowserAudioTimelineSink<br/>由 App 创建，播放时持有 AudioElement]:::resource
+    BROWSERAUDIO[BrowserAudioTimelineSink<br/>由 ConversationPlaybackRuntime 创建，播放时持有 AudioElement]:::resource
 
     ADAPTER --> TRANSPORT
     ADAPTER --> INBOUND
     ADAPTER --> AUDIOSTATE
     ADAPTER --> ATC
-    ROOT -->|创建并附加| BROWSERAUDIO
+    PLAYBACK -->|创建并绑定| BROWSERAUDIO
     ADAPTER -->|提供 text/audio sinks 与 UI ports| TL
     TL -->|启动 segment audio sink| ATC
     ATC --> BROWSERAUDIO
@@ -88,4 +90,4 @@ flowchart TB
     D3 -.释放.-> LIPRUNTIME
     D4 -.替换.-> MODEL
 
-    RULE[实例规则<br/>App 是 Timeline 与 BrowserAudioSink 的创建所有者<br/>不得创建第二个 Timeline Runtime<br/>不得查询全局 active audio clock<br/>所有中断必须携带 turn_id + message_id]:::owner
+    RULE[实例规则<br/>ConversationPlaybackRuntime 是 Timeline 与 BrowserAudioSink 的创建所有者<br/>不得创建第二个 Timeline Runtime<br/>不得查询全局 active audio clock<br/>control.interrupt 只需 turn_id；Timeline run 用 turn_id + message_id]:::owner

@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
+from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 try:
@@ -43,6 +44,12 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
         if not turn_id:
             raise RuntimeError("output_event_turn_id_missing")
+        if self._is_stop_requested():
+            logger.info(
+                "Discarded late output from interrupted AG99live turn: turn_id=%s",
+                turn_id,
+            )
+            return
         previous_has_send_oper = self._has_send_oper
         resolved_platform_extras = dict(platform_extras or {})
         if not any(
@@ -69,6 +76,8 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             await self._record_send_operation()
 
     async def complete_visible_turn(self) -> None:
+        if self._is_stop_requested():
+            return
         base_complete = getattr(super(), "complete_visible_turn", None)
         if callable(base_complete):
             result = base_complete()
@@ -84,6 +93,9 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         close_queue = getattr(turn_coordinator, "close_turn_output_queue", None)
         if callable(close_queue):
             await close_queue(turn_id=turn_id)
+
+    def _is_stop_requested(self) -> bool:
+        return bool(self.get_extra("agent_stop_requested", False))
 
     def _attach_prompt_annotations(self, *, message_obj: Any) -> None:
         annotations: dict[str, dict[str, str]] = {

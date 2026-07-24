@@ -723,6 +723,9 @@ export class CubismPhysics {
         const responseScale = this._physicsInputParameterIds.has(
           destinationParameterId
         )
+          || this._terminalOutputResponseProtectedParameterIds.has(
+            destinationParameterId
+          )
           ? 1.0
           : this._terminalOutputResponseScale;
         const outParameterValues: Float32Array =
@@ -780,6 +783,17 @@ export class CubismPhysics {
     this._terminalOutputResponseScale = scale;
   }
 
+  public setTerminalOutputResponseProtectedParameterIds(
+    parameterIds: readonly string[],
+  ): void {
+    this._terminalOutputResponseProtectedParameterIds = new Set(
+      parameterIds
+        .filter((parameterId) => typeof parameterId === "string")
+        .map((parameterId) => parameterId.trim())
+        .filter(Boolean),
+    );
+  }
+
   /**
    * コンストラクタ
    */
@@ -799,6 +813,7 @@ export class CubismPhysics {
     this._parameterInputCaches = null;
     this._terminalOutputResponseScale = 1.0;
     this._physicsInputParameterIds = new Set<string>();
+    this._terminalOutputResponseProtectedParameterIds = new Set<string>();
   }
 
   /**
@@ -872,6 +887,7 @@ export class CubismPhysics {
   _parameterInputCaches: Float32Array; ///< UpdateParticlesが動くときの入力をキャッシュ
   _terminalOutputResponseScale: number; ///< Terminal Physics response multiplier.
   _physicsInputParameterIds: Set<string>; ///< Outputs reused as Physics inputs are not presentation-scaled.
+  _terminalOutputResponseProtectedParameterIds: Set<string>; ///< Semantic outputs excluded from presentation scaling.
 }
 
 /**

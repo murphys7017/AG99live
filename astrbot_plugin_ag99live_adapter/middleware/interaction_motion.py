@@ -61,11 +61,10 @@ class _MotionRuntimeBundle:
 @dataclass(slots=True)
 class _FrontendIdentitySnapshot:
     event_frontend_turn_id: str | None
-    active_frontend_turn_id: str | None
 
     @property
     def scheduled_frontend_turn_id(self) -> str | None:
-        return self.event_frontend_turn_id or self.active_frontend_turn_id
+        return self.event_frontend_turn_id
 
 
 @dataclass(slots=True)
@@ -88,7 +87,6 @@ class _MotionScheduleAttempt:
     source: str | None
     scheduled_frontend_turn_id: str | None
     event_frontend_turn_id: str | None
-    active_frontend_turn_id: str | None
     reply_plan_route_mode: str | None
     reply_plan_should_emit_immediate_reply: bool | None
     reply_plan_source: str | None
@@ -104,7 +102,6 @@ class _MotionScheduleAttempt:
             "source": self.source,
             "scheduled_frontend_turn_id": self.scheduled_frontend_turn_id,
             "event_frontend_turn_id": self.event_frontend_turn_id,
-            "active_frontend_turn_id": self.active_frontend_turn_id,
             "reply_plan_route_mode": self.reply_plan_route_mode,
             "reply_plan_should_emit_immediate_reply": self.reply_plan_should_emit_immediate_reply,
             "reply_plan_source": self.reply_plan_source,
@@ -139,6 +136,12 @@ class AG99liveMotionPromptContributor:
             bundle.runtime_state,
             capability_payload=static_capability_payload,
             view=view,
+        )
+        _record_motion_prompt_reference_observation(
+            bundle=bundle,
+            event=event,
+            capability_payload=static_capability_payload,
+            runtime_payload=runtime_payload,
         )
 
         extensions = [
@@ -563,11 +566,6 @@ def _build_motion_static_capability_payload(runtime_state: Any) -> dict[str, Any
             getattr(runtime_state, "ag99live_motion_persona_effect_available", True)
         ),
     }
-    build_style_prompt = getattr(runtime_state, "build_motion_tuning_style_prompt", None)
-    if callable(build_style_prompt):
-        style_prompt = str(build_style_prompt() or "").strip()
-        if style_prompt:
-            capability_payload["motion_style_prompt"] = style_prompt
     profile_payload, profile_error = _summarize_semantic_profile(runtime_state)
     if profile_payload is None:
         raise RuntimeError(
@@ -725,9 +723,6 @@ def _build_motion_capability_prompt_payload(
                 if isinstance(axis, dict) and str(axis.get("id") or "").strip()
             ]
 
-    style_prompt = str(capability_payload.get("motion_style_prompt") or "").strip()
-    if style_prompt:
-        result["character_motion_style"] = style_prompt
     motion_instruction = str(capability_payload.get("motion_instruction") or "").strip()
     if motion_instruction:
         result["motion_generation_guidance"] = motion_instruction
@@ -1308,6 +1303,42 @@ def _build_motion_runtime_payload(
     return payload
 
 
+def _record_motion_prompt_reference_observation(
+    *,
+    bundle: _MotionRuntimeBundle,
+    event: Any,
+    capability_payload: dict[str, Any],
+    runtime_payload: dict[str, Any],
+) -> None:
+    semantic_profile = capability_payload.get("semantic_profile")
+    profile = semantic_profile if isinstance(semantic_profile, dict) else {}
+    identity = _resolve_frontend_identity_snapshot(event)
+    reference_examples = runtime_payload.get("reference_examples")
+    record_motion_observation(
+        getattr(bundle.runtime_state, "motion_lab_recorder", None),
+        event_type="motion.prompt_reference_examples_resolved",
+        conversation_uid=getattr(
+            getattr(bundle.turn_coordinator, "session_state", None),
+            "client_uid",
+            None,
+        ),
+        turn_id=identity.scheduled_frontend_turn_id,
+        frontend_turn_id=identity.event_frontend_turn_id,
+        source_route="persona_effect",
+        phase="prompt",
+        model_name=str(profile.get("model_id") or "").strip(),
+        profile_id=str(profile.get("profile_id") or "").strip(),
+        profile_revision=profile.get("profile_revision"),
+        user_text=_extract_motion_prompt_input_text(event),
+        payload_kind="motion_reference_examples.v1",
+        raw={
+            "reference_examples": reference_examples
+            if isinstance(reference_examples, list)
+            else [],
+        },
+    )
+
+
 def _build_motion_runtime_reference_examples(
     *,
     event: Any,
@@ -1582,7 +1613,7 @@ async def _schedule_motion_from_interaction_result(
 
     phase = _resolve_result_phase(view)
     assistant_text = _extract_assistant_text(view)
-    identity = _resolve_frontend_identity_snapshot(event, bundle.turn_coordinator)
+    identity = _resolve_frontend_identity_snapshot(event)
     reply_plan = _resolve_interaction_reply_plan_snapshot(event, view)
 
     motion_payload, motion_reason = _resolve_persona_effect_motion_payload_with_reason(
@@ -1619,7 +1650,6 @@ async def _schedule_motion_from_interaction_result(
             source="persona_effect",
             scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
             event_frontend_turn_id=identity.event_frontend_turn_id,
-            active_frontend_turn_id=identity.active_frontend_turn_id,
             reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
             reply_plan_should_emit_immediate_reply=(
                 reply_plan.should_emit_immediate_reply if reply_plan is not None else None
@@ -1638,7 +1668,6 @@ async def _schedule_motion_from_interaction_result(
             source=None,
             scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
             event_frontend_turn_id=identity.event_frontend_turn_id,
-            active_frontend_turn_id=identity.active_frontend_turn_id,
             reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
             reply_plan_should_emit_immediate_reply=(
                 reply_plan.should_emit_immediate_reply if reply_plan is not None else None
@@ -1656,7 +1685,6 @@ async def _schedule_motion_from_interaction_result(
             source=None,
             scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
             event_frontend_turn_id=identity.event_frontend_turn_id,
-            active_frontend_turn_id=identity.active_frontend_turn_id,
             reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
             reply_plan_should_emit_immediate_reply=(
                 reply_plan.should_emit_immediate_reply if reply_plan is not None else None
@@ -1682,7 +1710,6 @@ async def _schedule_motion_from_interaction_result(
             source=policy.source,
             scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
             event_frontend_turn_id=identity.event_frontend_turn_id,
-            active_frontend_turn_id=identity.active_frontend_turn_id,
             reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
             reply_plan_should_emit_immediate_reply=(
                 reply_plan.should_emit_immediate_reply if reply_plan is not None else None
@@ -1699,7 +1726,6 @@ async def _schedule_motion_from_interaction_result(
         source=policy.source,
         scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
         event_frontend_turn_id=identity.event_frontend_turn_id,
-        active_frontend_turn_id=identity.active_frontend_turn_id,
         reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
         reply_plan_should_emit_immediate_reply=(
             reply_plan.should_emit_immediate_reply if reply_plan is not None else None
@@ -2064,18 +2090,13 @@ def _coerce_interaction_reply_plan_snapshot(
 
 def _resolve_frontend_identity_snapshot(
     event: Any,
-    turn_coordinator: Any,
 ) -> _FrontendIdentitySnapshot:
     raw_message = getattr(getattr(event, "message_obj", None), "raw_message", None)
     event_frontend_turn_id = None
     if isinstance(raw_message, dict):
         event_frontend_turn_id = _normalize_optional_string(raw_message.get("turn_id"))
-    session_state = getattr(turn_coordinator, "session_state", None)
     return _FrontendIdentitySnapshot(
         event_frontend_turn_id=event_frontend_turn_id,
-        active_frontend_turn_id=_normalize_optional_string(
-            getattr(session_state, "current_turn_id", None)
-        ),
     )
 
 

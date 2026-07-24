@@ -185,14 +185,6 @@ class RuntimeState:
     def motion_tuning_effective_examples(self, value: list[dict[str, Any]]) -> None:
         self._motion_tuning_store.effective_examples = value
 
-    @property
-    def motion_tuning_style_prompt(self) -> str:
-        return self._motion_tuning_store.style_prompt
-
-    @motion_tuning_style_prompt.setter
-    def motion_tuning_style_prompt(self, value: str) -> None:
-        self._motion_tuning_store.style_prompt = str(value or "")
-
     async def load_default_persona(self) -> None:
         if self.plugin_context is None:
             logger.warning("Plugin context is unavailable, skip loading default persona.")
@@ -559,9 +551,6 @@ class RuntimeState:
 
     def list_effective_motion_tuning_examples(self) -> list[dict[str, Any]]:
         return self._motion_tuning_store.list_effective_examples()
-
-    def build_motion_tuning_style_prompt(self) -> str:
-        return self._motion_tuning_store.build_style_prompt()
 
     def save_motion_tuning_sample(self, sample_payload: Any) -> dict[str, Any]:
         return self._motion_tuning_store.save_sample(sample_payload)

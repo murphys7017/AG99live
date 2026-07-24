@@ -124,6 +124,9 @@ export interface AdapterConnectionInstance {
   startPttCapture: ReturnType<typeof createAdapterMicrophoneRuntime>["startPttCapture"];
   stopPttCapture: ReturnType<typeof createAdapterMicrophoneRuntime>["stopPttCapture"];
   pushHistory: (role: DesktopHistoryEntry["role"], text: string) => void;
+}
+
+export interface AdapterConnectionCompositionInstance extends AdapterConnectionInstance {
   playback: AdapterPlaybackCompositionPort;
 }
 
@@ -165,7 +168,7 @@ interface CreateAdapterConnectionOptions {
 
 export function createAdapterConnection(
   options: CreateAdapterConnectionOptions,
-): AdapterConnectionInstance {
+): AdapterConnectionCompositionInstance {
   const state = createAdapterConnectionState();
 
   let socket: WebSocket | null = null;

@@ -14,6 +14,7 @@ declare module "@cubismsdksamples/lappdefine" {
   export function applyRuntimeEffectsSettings(settings: {
     ambientMotionEnabled: boolean;
     physicsResponseScale: number;
+    protectedPhysicsOutputParameterIds: string[];
   }): void;
 }
 

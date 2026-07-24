@@ -1,9 +1,14 @@
+import type { ModelSummary } from "../types/protocol.js";
+
 export interface Live2dRuntimeEffectsSettings {
   ambientMotionEnabled: boolean;
   physicsResponseScale: number;
+  protectedPhysicsOutputParameterIds: string[];
 }
 
-export interface Live2dPresentationSettings extends Live2dRuntimeEffectsSettings {
+export interface Live2dPresentationSettings {
+  ambientMotionEnabled: boolean;
+  physicsResponseScale: number;
   renderDprCap: number;
 }
 
@@ -65,11 +70,26 @@ export function applyLive2dPresentationSettingsSnapshot(
 
 export function selectLive2dRuntimeEffectsSettings(
   settings: Live2dPresentationSettings,
+  model: ModelSummary | null,
 ): Live2dRuntimeEffectsSettings {
   return {
     ambientMotionEnabled: settings.ambientMotionEnabled,
     physicsResponseScale: settings.physicsResponseScale,
+    protectedPhysicsOutputParameterIds: collectSemanticParameterIds(model),
   };
+}
+
+function collectSemanticParameterIds(model: ModelSummary | null): string[] {
+  const parameterIds = new Set<string>();
+  for (const axis of model?.semantic_axis_profile?.axes ?? []) {
+    for (const binding of axis.parameter_bindings ?? []) {
+      const parameterId = binding.parameter_id.trim();
+      if (parameterId) {
+        parameterIds.add(parameterId);
+      }
+    }
+  }
+  return Array.from(parameterIds).sort();
 }
 
 function normalizeNumber(

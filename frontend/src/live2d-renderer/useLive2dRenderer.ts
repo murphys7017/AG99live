@@ -203,7 +203,9 @@ export function useLive2dRenderer(
         ]);
 
       const { baseUrl, modelDir, modelFileName } = parseModelUrl(model.model_url);
-      applyRuntimeEffectsSettings(selectLive2dRuntimeEffectsSettings(settings.value));
+      applyRuntimeEffectsSettings(
+        selectLive2dRuntimeEffectsSettings(settings.value, model),
+      );
       updateModelConfig(baseUrl, modelDir, modelFileName);
       await initializeLive2D();
       await nextTick();
@@ -276,8 +278,11 @@ export function useLive2dRenderer(
   );
 
   watch(
-    () => ({ ...settings.value }),
-    (nextSettings) => {
+    () => ({
+      settings: { ...settings.value },
+      semanticAxisProfile: selectedModel.value?.semantic_axis_profile ?? null,
+    }),
+    ({ settings: nextSettings }) => {
       forceLive2DRedraw();
       if (renderStatus.value !== "ready") {
         return;
@@ -296,7 +301,7 @@ export function useLive2dRenderer(
         return;
       }
       adapter.applyRuntimeEffectsSettings(
-        selectLive2dRuntimeEffectsSettings(nextSettings),
+        selectLive2dRuntimeEffectsSettings(nextSettings, selectedModel.value),
       );
     },
     { deep: true },

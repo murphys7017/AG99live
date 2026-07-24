@@ -171,7 +171,7 @@ onMounted(() => {
           <div class="settings-slider__header">
             <div>
               <strong>物理响应强度</strong>
-              <p>放大 Cubism Physics 对模型参数产生的逐帧变化，不改变动作输入范围。</p>
+              <p>放大非语义姿态参数的 Cubism Physics 逐帧响应，不改变头身等主动作轴范围。</p>
             </div>
             <span class="settings-slider__value">
               x{{ formatScale(live2dPresentationSettings.physicsResponseScale) }}

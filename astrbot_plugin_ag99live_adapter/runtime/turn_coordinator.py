@@ -37,9 +37,6 @@ from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
 from astrbot.api import logger
-from astrbot.core.platform.message_session import MessageSession
-from astrbot.core.platform.message_type import MessageType
-from astrbot.core.utils.active_event_registry import active_event_registry
 
 from ..protocol.builder import (
     build_control_error,
@@ -147,6 +144,7 @@ class TurnCoordinator:
         self._turn_lock = asyncio.Lock()
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._turn_timings: dict[str, dict[str, Any]] = {}
+        self._events_by_turn_id: dict[str, Any] = {}
         self._last_prompt_motion_snapshot: dict[str, Any] | None = None
         self._pending_output_segments: dict[str, PendingOutputSegment] = {}
         self._closing_output_turn_ids: set[str] = set()
@@ -259,6 +257,7 @@ class TurnCoordinator:
         self._closing_output_turn_ids.clear()
         self._closed_output_turn_ids.clear()
         self._output_emitted_turn_ids.clear()
+        self._events_by_turn_id.clear()
         self._last_prompt_motion_snapshot = None
 
     async def handle_binary_msg(self, raw_message: bytes) -> None:
@@ -738,7 +737,12 @@ class TurnCoordinator:
                 set_extra("enable_streaming", False)
                 set_extra("output_correlation_id", current_turn_id)
             self._apply_raw_message_metadata_to_event(event, message_obj)
-            self._commit_event(event)
+            self._events_by_turn_id[current_turn_id] = event
+            try:
+                self._commit_event(event)
+            except Exception:
+                self._events_by_turn_id.pop(current_turn_id, None)
+                raise
             self._mark_turn_timing(current_turn_id, "event_committed_at")
             logger.debug(
                 "Turn timing start: turn=%s text_len=%d turn_id=%s",
@@ -811,55 +815,36 @@ class TurnCoordinator:
         )
 
     async def _handle_interrupt_signal(self, turn_id: str | None) -> None:
-        current_turn_id = self.session_state.current_turn_id
         resolved_turn_id = self._resolve_frontend_turn_id(turn_id) if turn_id else None
-        if resolved_turn_id and current_turn_id and resolved_turn_id != current_turn_id:
-            logger.debug(
-                "Ignoring interrupt for stale turn_id=%s current_turn_id=%s",
-                turn_id,
-                current_turn_id,
-            )
-            return
+        if not resolved_turn_id:
+            raise ValueError("interrupt_turn_id_missing")
 
-        umo = self._build_current_unified_msg_origin()
         stopped_count = 0
-
-        plugin_context = getattr(self.runtime_state, "plugin_context", None)
-        agent_runner_type = ""
-        if plugin_context is not None:
-            try:
-                cfg = plugin_context.get_config(umo=umo)
-                provider_settings = cfg.get("provider_settings", {}) if isinstance(cfg, dict) else {}
-                agent_runner_type = str(provider_settings.get("agent_runner_type", "") or "")
-            except Exception as exc:
-                logger.warning("Failed to resolve agent runner type for interrupt: %s", exc)
-
-        if agent_runner_type in {"dify", "coze"}:
-            stopped_count = active_event_registry.stop_all(umo)
-        else:
-            stopped_count = active_event_registry.request_agent_stop_all(umo)
-            stopped_count = max(stopped_count, active_event_registry.stop_all(umo))
-
-        await self.speech_ingress.handle_audio_stream_interrupt()
-        await self.media_service.clear_audio_buffer()
+        event = self._events_by_turn_id.get(resolved_turn_id)
+        if event is not None:
+            set_extra = getattr(event, "set_extra", None)
+            if callable(set_extra):
+                set_extra("agent_stop_requested", True)
+            stop_event = getattr(event, "stop_event", None)
+            if callable(stop_event):
+                stop_event()
+                stopped_count = 1
         await self._send_json(
             build_control_interrupt(
-                turn_id=current_turn_id,
+                turn_id=resolved_turn_id,
             )
         )
-        if current_turn_id is not None:
-            await self._finish_turn(
-                turn_id=current_turn_id,
-                success=False,
-                reason="interrupted",
-            )
-            self._turn_timings.pop(current_turn_id, None)
+        await self._finish_turn(
+            turn_id=resolved_turn_id,
+            success=False,
+            reason="interrupted",
+        )
+        self._turn_timings.pop(resolved_turn_id, None)
 
         logger.info(
-            "Processed control.interrupt for turn=%s stopped_events=%s umo=%s",
-            self._current_turn_index(),
+            "Processed control.interrupt for turn_id=%s stopped_events=%s",
+            resolved_turn_id,
             stopped_count,
-            umo,
         )
 
     def get_last_prompt_motion_snapshot(self) -> dict[str, Any] | None:
@@ -1214,6 +1199,7 @@ class TurnCoordinator:
         turn_identity_map = getattr(self, "turn_identity_map", None)
         if turn_identity_map is not None:
             turn_identity_map.clear_frontend_turn(resolved_turn_id)
+        self._events_by_turn_id.pop(resolved_turn_id, None)
         if self.session_state.current_turn_id == resolved_turn_id:
             self.session_state.reset_to_idle()
         pending_segments = getattr(self, "_pending_output_segments", None)
@@ -1269,15 +1255,6 @@ class TurnCoordinator:
 
     def _current_turn_index(self) -> int:
         return int(getattr(self.session_state, "turn_index", 0) or 0)
-
-    def _build_current_unified_msg_origin(self) -> str:
-        return str(
-            MessageSession(
-                platform_name="olv_pet_adapter",
-                message_type=MessageType.FRIEND_MESSAGE,
-                session_id=self.session_state.client_uid,
-            )
-        )
 
     def _begin_turn_timing(self, turn_id: str, user_text: str) -> None:
         self._turn_timings[turn_id] = {

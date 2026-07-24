@@ -47,6 +47,7 @@ declare global {
       applyRuntimeEffectsSettings: (settings: {
         ambientMotionEnabled: boolean;
         physicsResponseScale: number;
+        protectedPhysicsOutputParameterIds: string[];
       }) => void;
       startDirectParameterPlan?: (
         plan: MotionPlanPayload,
