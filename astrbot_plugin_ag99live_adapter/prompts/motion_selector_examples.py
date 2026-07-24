@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -242,6 +243,7 @@ def resolve_motion_reference_examples(
     runtime_state: Any,
     default_examples: list[dict[str, Any]],
     normalize_emotion_key: Callable[[str], str],
+    request_text: str = "",
     update_runtime_state: bool = True,
 ) -> list[dict[str, Any]]:
     enabled = bool(getattr(runtime_state, "motion_tuning_fewshot_enabled", True))
@@ -284,8 +286,12 @@ def resolve_motion_reference_examples(
     )
     user_capacity = max(0, count - len(required_examples))
     user_example_count = int(getattr(runtime_state, "motion_tuning_user_fewshot_count", 0))
-    user_example_count = max(0, min(user_capacity, user_example_count))
-    selected_user_examples = raw_user_examples[:user_example_count]
+    user_example_count = max(0, min(3, user_capacity, user_example_count))
+    selected_user_examples = select_relevant_user_examples(
+        candidates=raw_user_examples,
+        request_text=request_text,
+        count=user_example_count,
+    )
 
     resolved_examples = list(selected_user_examples)
     seen_categories = {
@@ -335,6 +341,73 @@ def resolve_motion_reference_examples(
     if update_runtime_state and hasattr(runtime_state, "motion_tuning_effective_examples"):
         runtime_state.motion_tuning_effective_examples = list(resolved_examples)
     return resolved_examples
+
+
+def select_relevant_user_examples(
+    *,
+    candidates: list[dict[str, Any]],
+    request_text: str,
+    count: int,
+) -> list[dict[str, Any]]:
+    if count <= 0:
+        return []
+
+    normalized_request = _normalize_relevance_text(request_text)
+    request_terms = _extract_relevance_terms(normalized_request)
+    ranked: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    for candidate in candidates:
+        raw_tags = candidate.get("tags")
+        tags = (
+            [
+                _normalize_relevance_text(tag)
+                for tag in raw_tags
+                if isinstance(tag, str) and _normalize_relevance_text(tag)
+            ]
+            if isinstance(raw_tags, list)
+            else []
+        )
+        tag_exact_matches = sum(tag == normalized_request for tag in tags)
+        tag_substring_matches = sum(
+            tag != normalized_request and tag in normalized_request
+            for tag in tags
+        )
+        sample_text = "\n".join(
+            str(candidate.get(field_name) or "").strip()
+            for field_name in ("user_text", "assistant_text", "input")
+        )
+        sample_terms = _extract_relevance_terms(
+            _normalize_relevance_text(sample_text)
+        )
+        term_overlap = len(request_terms & sample_terms)
+        rank = (
+            tag_exact_matches,
+            tag_substring_matches,
+            term_overlap,
+            str(candidate.get("created_at") or "").strip(),
+            str(candidate.get("sample_id") or "").strip(),
+        )
+        ranked.append((rank, candidate))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return [candidate for _rank, candidate in ranked[:count]]
+
+
+def _normalize_relevance_text(value: Any) -> str:
+    return " ".join(str(value or "").casefold().split())
+
+
+def _extract_relevance_terms(value: str) -> set[str]:
+    terms: set[str] = set()
+    for token in re.findall(r"[a-z0-9_]+|[\u4e00-\u9fff]+", value):
+        if token.isascii():
+            if len(token) >= 2:
+                terms.add(token)
+            continue
+        if len(token) == 1:
+            terms.add(token)
+            continue
+        terms.add(token)
+        terms.update(token[index:index + 2] for index in range(len(token) - 1))
+    return terms
 
 
 def select_required_structure_examples(

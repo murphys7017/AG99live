@@ -37,6 +37,7 @@ from ..motion.resource_catalog import (
 from ..motion.pose_reference import (
     build_pose_reference_candidates,
 )
+from ..prompts.motion_selector import resolve_motion_reference_examples
 from ..prompts.semantic_axis_prompt import (
     format_profile_axis_prompt_line,
     profile_prompt_axes,
@@ -136,6 +137,7 @@ class AG99liveMotionPromptContributor:
             event,
             bundle.turn_coordinator,
             bundle.runtime_state,
+            capability_payload=static_capability_payload,
             view=view,
         )
 
@@ -172,7 +174,7 @@ class AG99liveMotionPromptContributor:
                 PromptExtension(
                     plugin_id=self.plugin_id,
                     mount="context",
-                    title="Previous Live2D Motion",
+                    title="Live2D Motion Context",
                     value_kind="mapping",
                     value=runtime_payload,
                     order=41,
@@ -566,16 +568,6 @@ def _build_motion_static_capability_payload(runtime_state: Any) -> dict[str, Any
         style_prompt = str(build_style_prompt() or "").strip()
         if style_prompt:
             capability_payload["motion_style_prompt"] = style_prompt
-    list_reference_examples = getattr(
-        runtime_state,
-        "list_effective_motion_tuning_examples",
-        None,
-    )
-    if callable(list_reference_examples):
-        reference_examples = list_reference_examples()
-        if reference_examples:
-            capability_payload["reference_examples"] = reference_examples
-
     profile_payload, profile_error = _summarize_semantic_profile(runtime_state)
     if profile_payload is None:
         raise RuntimeError(
@@ -739,26 +731,6 @@ def _build_motion_capability_prompt_payload(
     motion_instruction = str(capability_payload.get("motion_instruction") or "").strip()
     if motion_instruction:
         result["motion_generation_guidance"] = motion_instruction
-
-    reference_examples = capability_payload.get("reference_examples")
-    if isinstance(reference_examples, list):
-        allowed_axis_ids = {
-            str(item.get("id") or "").strip()
-            for item in result.get("axes") or []
-            if isinstance(item, dict) and str(item.get("id") or "").strip()
-        }
-        available_levels_by_axis = {
-            str(item.get("id") or "").strip(): set(item.get("available_levels") or [])
-            for item in result.get("axes") or []
-            if isinstance(item, dict) and str(item.get("id") or "").strip()
-        }
-        projected_examples = _project_reference_examples_for_prompt(
-            reference_examples,
-            allowed_axis_ids=allowed_axis_ids,
-            available_levels_by_axis=available_levels_by_axis,
-        )
-        if projected_examples:
-            result["reference_examples"] = projected_examples
 
     references = capability_payload.get("pose_reference_candidates")
     if isinstance(references, list):
@@ -1315,10 +1287,18 @@ def _build_motion_runtime_payload(
     turn_coordinator: Any,
     runtime_state: Any,
     *,
+    capability_payload: dict[str, Any],
     view: Any,
 ) -> dict[str, Any]:
-    del event, view
+    del view
     payload: dict[str, Any] = {}
+    reference_examples = _build_motion_runtime_reference_examples(
+        event=event,
+        runtime_state=runtime_state,
+        capability_payload=capability_payload,
+    )
+    if reference_examples:
+        payload["reference_examples"] = reference_examples
     previous_motion_payload = _build_previous_motion_variation_payload(
         turn_coordinator,
         runtime_state=runtime_state,
@@ -1326,6 +1306,56 @@ def _build_motion_runtime_payload(
     if previous_motion_payload:
         payload.update(previous_motion_payload)
     return payload
+
+
+def _build_motion_runtime_reference_examples(
+    *,
+    event: Any,
+    runtime_state: Any,
+    capability_payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    semantic_profile = capability_payload.get("semantic_profile")
+    prompt_axes = (
+        semantic_profile.get("prompt_axes")
+        if isinstance(semantic_profile, dict)
+        else None
+    )
+    if not isinstance(prompt_axes, list):
+        raise RuntimeError("semantic_motion_prompt_axes_unavailable")
+    allowed_axis_ids = {
+        str(axis.get("id") or "").strip()
+        for axis in prompt_axes
+        if isinstance(axis, dict) and str(axis.get("id") or "").strip()
+    }
+    available_levels_by_axis = {
+        str(axis.get("id") or "").strip(): set(axis.get("available_levels") or [])
+        for axis in prompt_axes
+        if isinstance(axis, dict) and str(axis.get("id") or "").strip()
+    }
+    if not allowed_axis_ids:
+        raise RuntimeError("semantic_motion_prompt_axes_empty")
+    examples = resolve_motion_reference_examples(
+        runtime_state=runtime_state,
+        request_text=_extract_motion_prompt_input_text(event),
+    )
+    return _project_reference_examples_for_prompt(
+        examples,
+        allowed_axis_ids=allowed_axis_ids,
+        available_levels_by_axis=available_levels_by_axis,
+    )
+
+
+def _extract_motion_prompt_input_text(event: Any) -> str:
+    original_text = _normalize_optional_string(
+        _call_event_method(event, "get_extra", "ag99live_original_message_str", "")
+    )
+    if original_text:
+        return original_text
+    message_text = _normalize_optional_string(getattr(event, "message_str", None))
+    if message_text:
+        return message_text
+    message_obj = getattr(event, "message_obj", None)
+    return _normalize_optional_string(getattr(message_obj, "message_str", None)) or ""
 
 
 def _build_previous_motion_variation_payload(

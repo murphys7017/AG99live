@@ -3,7 +3,6 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Callable
 
-from ...prompts.motion_selector import resolve_motion_reference_examples
 from ...prompts.semantic_axis_prompt import profile_prompt_axes
 from ...protocol.schema_versions import MOTION_TUNING_SAMPLE_SCHEMA_VERSION
 
@@ -202,8 +201,12 @@ class MotionTuningStore:
                 )
             normalized_examples.append(
                 {
+                    "sample_id": str(sample.get("id") or "").strip(),
+                    "created_at": str(sample.get("created_at") or "").strip(),
                     "category": str(sample.get("emotion_label") or "custom").strip()
                     or "custom",
+                    "user_text": str(sample.get("user_text") or "").strip(),
+                    "assistant_text": str(sample.get("assistant_text") or "").strip(),
                     "input": self._build_sample_input_text(sample),
                     "output": projected_output,
                     "source": "desktop_motion_tuning_sample_store",
@@ -373,12 +376,7 @@ class MotionTuningStore:
         return projected_steps, ""
 
     def _refresh_effective_examples(self) -> None:
-        self.effective_examples = deepcopy(
-            resolve_motion_reference_examples(
-                runtime_state=self._runtime_state,
-                update_runtime_state=True,
-            )
-        )
+        self.effective_examples = []
 
     @staticmethod
     def _filter_example_axes(

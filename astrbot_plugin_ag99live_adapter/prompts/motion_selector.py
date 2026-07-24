@@ -38,12 +38,14 @@ DEFAULT_MOTION_REFERENCE_EXAMPLES = create_default_motion_reference_examples(
 def resolve_motion_reference_examples(
     *,
     runtime_state: Any,
+    request_text: str = "",
     update_runtime_state: bool = True,
 ) -> list[dict[str, Any]]:
     return _resolve_motion_reference_examples(
         runtime_state=runtime_state,
         default_examples=DEFAULT_MOTION_REFERENCE_EXAMPLES,
         normalize_emotion_key=_normalize_emotion_key,
+        request_text=request_text,
         update_runtime_state=update_runtime_state,
     )
 

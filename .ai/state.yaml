@@ -1,8 +1,8 @@
 task:
   class: feature
   risk: medium
-  phase: implementation
-  status: active
+  phase: reviewed
+  status: complete
   scope: Complete Motion Lab data closure: bind saved samples to canonical turn segments, preserve V4 motion sequences without flattening, and select Prompt references by current-input relevance.
 
 context:
@@ -81,6 +81,10 @@ verification:
     - `check_astrbot_plugin.py astrbot_plugin_ag99live_adapter` reported 0 errors and 0 warnings.
     - git diff --check reports no whitespace errors.
     - `npm run typecheck:renderer` passed for the Motion Lab replay ownership change.
+    - `python -m py_compile` passed for the Motion Lab V2 storage, sequence projection, and request-scoped sample selection changes.
+    - `npm run typecheck:renderer` passed for the Motion Lab V2 frontend protocol, Action Lab sequence handling, and effective-example projection changes.
+    - `python scripts/check_protocol_schema_manifest.py` passed after adding `ag99.motion_tuning_sample.v2`.
+    - The basic protocol sample-save smoke test passed, and a direct deterministic selection smoke check chose the matching `开心` sample over an unrelated sample.
     - `npm run typecheck:node` passed for the strict desktop bridge command change.
     - Obsolete frontend preview command and Adapter outbound API references were confirmed absent with `rg`.
     - `npm run typecheck:renderer` and `npm run typecheck:node` passed after assigning stable capture titles to the Live2D and input windows.
@@ -112,6 +116,8 @@ verification:
     - A live speech-only segment and a semantic-motion-plus-speech segment are required to confirm voice_following_profile.v3 resolves through the same semantic parameter bindings and remains visually expressive.
     - Live Mk6 observation is required to tune the widened head/body anchors and stronger speech gesture envelope against actual model rigging; static checks cannot establish the desired visual exaggeration.
     - A live speech-only segment with `output.segment.motion=absent` must confirm the plan receives the segment Timeline reader, starts once, and leaves the SessionStore motion terminal at absent.
+    - A live Electron + AstrBot conversation must save one V2 pose sample and one V2 sequence sample, then confirm the Adapter reconstructs trusted user/assistant context from raw events and returns the sequence to the next Prompt as `motion_steps`.
+    - A second live request with an explicit matching tag or overlapping user text must confirm the Action Lab effective examples and the generated Prompt use the request-scoped sample selection.
 
 backlog:
   - id: motion_lab_sequence_tuning
