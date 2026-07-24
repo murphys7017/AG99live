@@ -630,7 +630,7 @@ export interface SystemMotionTuningSamplesStatePayload {
     input: string;
     output: {
       intent_tags: string[];
-      duration_ms?: number | null;
+      duration_hint_ms?: number | null;
       axis_levels?: Record<string, number>;
       motion_steps?: Array<{
         axis_levels: Record<string, number>;

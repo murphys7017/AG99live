@@ -172,7 +172,7 @@ function normalizeEffectiveExamplePayload(
   }
   const output = candidate.output as {
     intent_tags?: unknown;
-    duration_ms?: unknown;
+    duration_hint_ms?: unknown;
     axis_levels?: unknown;
     motion_steps?: unknown;
     expression_resource_id?: unknown;
@@ -192,8 +192,9 @@ function normalizeEffectiveExamplePayload(
           .map((tag) => (typeof tag === "string" ? tag.trim() : ""))
           .filter(Boolean)
         : [],
-      durationHintMs: typeof output.duration_ms === "number" && Number.isFinite(output.duration_ms)
-        ? output.duration_ms
+      durationHintMs: typeof output.duration_hint_ms === "number"
+        && Number.isFinite(output.duration_hint_ms)
+        ? output.duration_hint_ms
         : null,
       axisLevels: Object.keys(axisLevels).length ? axisLevels : undefined,
       motionSteps,
