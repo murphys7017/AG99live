@@ -94,6 +94,7 @@ def _prepare_turn_finalization(coordinator) -> None:
     coordinator._closed_output_turn_ids = set()
     coordinator._output_emitted_turn_ids = set()
     coordinator._turn_timings = {}
+    coordinator._events_by_turn_id = {}
 
 
 def test_reset_turn_tracking_clears_connection_owned_state(
@@ -116,6 +117,7 @@ def test_reset_turn_tracking_clears_connection_owned_state(
     coordinator._closed_output_turn_ids = {"turn-1"}
     coordinator._output_emitted_turn_ids = {"turn-1", "turn-2"}
     coordinator._last_prompt_motion_snapshot = {"turn_id": "turn-1"}
+    coordinator._events_by_turn_id = {}
 
     coordinator.reset_turn_tracking()
 
@@ -126,6 +128,85 @@ def test_reset_turn_tracking_clears_connection_owned_state(
     assert coordinator._closed_output_turn_ids == set()
     assert coordinator._output_emitted_turn_ids == set()
     assert coordinator._last_prompt_motion_snapshot is None
+
+
+# ── proactive output turns ─────────────────────────────
+
+def test_begin_proactive_output_turn_announces_independent_turn(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    TurnCoordinator = _load_module(install_fake_astrbot, monkeypatch)
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator._turn_lock = asyncio.Lock()
+    coordinator._turn_timings = {}
+    coordinator._current_turn_index = lambda: 1
+    coordinator.session_state = types.SimpleNamespace(
+        current_turn_id=None,
+        begin_turn=lambda _text, *, turn_id: turn_id,
+    )
+    registered_turn_ids: list[str] = []
+    coordinator.turn_identity_map = types.SimpleNamespace(
+        register_frontend_turn=lambda turn_id: registered_turn_ids.append(turn_id),
+    )
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
+
+    coordinator._send_json = fake_send_json
+
+    turn_id = asyncio.run(coordinator.begin_proactive_output_turn())
+
+    assert turn_id.startswith("proactive:")
+    assert registered_turn_ids == [turn_id]
+    assert len(sent_payloads) == 1
+    assert sent_payloads[0]["type"] == "control.turn_started"
+    assert sent_payloads[0]["turn_id"] == turn_id
+    assert sent_payloads[0]["payload"] == {}
+
+
+def test_begin_proactive_output_turn_rolls_back_when_frontend_is_unavailable(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    TurnCoordinator = _load_module(install_fake_astrbot, monkeypatch)
+    coordinator = TurnCoordinator.__new__(TurnCoordinator)
+    coordinator._turn_lock = asyncio.Lock()
+    coordinator._turn_timings = {}
+    coordinator._current_turn_index = lambda: 1
+
+    class SessionStateStub:
+        current_turn_id: str | None = None
+
+        def begin_turn(self, _text: str, *, turn_id: str) -> str:
+            self.current_turn_id = turn_id
+            return turn_id
+
+        def reset_to_idle(self) -> None:
+            self.current_turn_id = None
+
+    registered_turn_ids: list[str] = []
+    cleared_turn_ids: list[str] = []
+    coordinator.session_state = SessionStateStub()
+    coordinator.turn_identity_map = types.SimpleNamespace(
+        register_frontend_turn=lambda turn_id: registered_turn_ids.append(turn_id),
+        clear_frontend_turn=lambda turn_id: cleared_turn_ids.append(turn_id),
+    )
+
+    async def reject_send(_payload):
+        return False
+
+    coordinator._send_json = reject_send
+
+    with pytest.raises(RuntimeError, match="turn_started_send_failed:proactive:"):
+        asyncio.run(coordinator.begin_proactive_output_turn())
+
+    assert len(registered_turn_ids) == 1
+    assert cleared_turn_ids == registered_turn_ids
+    assert coordinator.session_state.current_turn_id is None
+    assert coordinator._turn_timings == {}
 
 
 # ── close_turn_output_queue ────────────────────────────────────────

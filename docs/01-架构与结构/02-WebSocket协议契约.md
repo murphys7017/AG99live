@@ -32,7 +32,7 @@
 - `turn_id` 是前后端唯一轮次主 ID。
 - 当前外部协议信封不存在 `session_id`。
 - 当前外部协议信封不存在 `orchestration_id`。
-- 前端在文本发送前、麦克风开始采集前主动创建 `turn_id`。
+- 前端在文本发送前、麦克风开始采集前主动创建 `turn_id`。由后端发起的轮次不受此限制：AstrBot 主动输出由 Adapter 为每次 `send_by_session()` 创建独立的 `proactive:<uuid>` turn，并在 `output.segment` 前先发送 `control.turn_started`。
 - 一次语音输入如果最终 dropped、空转写或失败，该 `turn_id` 立即终结且不可复用。
 
 ## 完成信号

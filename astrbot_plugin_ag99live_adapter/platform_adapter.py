@@ -270,6 +270,27 @@ class OLVPetPlatformAdapter(Platform):
             self._event_loop = None
 
     async def send_by_session(self, session: MessageSesion, message_chain):
+        turn_id = await self.turn_coordinator.begin_proactive_output_turn()
+        try:
+            await self.emit_message_chain(
+                message_chain=message_chain,
+                turn_id=turn_id,
+                unified_msg_origin=str(session),
+                platform_extras={"logical_message_id": "proactive_reply"},
+            )
+            await self.turn_coordinator.close_turn_output_queue(turn_id=turn_id)
+        except asyncio.CancelledError:
+            await self.turn_coordinator.fail_proactive_output_turn(
+                turn_id=turn_id,
+                reason="proactive_output_cancelled",
+            )
+            raise
+        except Exception:
+            await self.turn_coordinator.fail_proactive_output_turn(
+                turn_id=turn_id,
+                reason="proactive_output_delivery_failed",
+            )
+            raise
         await super().send_by_session(session, message_chain)
 
     def convert_message(self, data: dict[str, Any]) -> AstrBotMessage:

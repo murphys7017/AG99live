@@ -372,6 +372,33 @@ class TurnCoordinator:
         if motion_candidate is not None:
             segment.merge_motion(**motion_candidate)
 
+    async def begin_proactive_output_turn(self) -> str:
+        """Create and announce a frontend turn for an AstrBot proactive send."""
+        async with self._turn_lock:
+            turn_id = f"proactive:{uuid4().hex}"
+            current_turn_id = self.session_state.begin_turn("", turn_id=turn_id)
+            self.turn_identity_map.register_frontend_turn(current_turn_id)
+            self._begin_turn_timing(current_turn_id, "")
+            sent = await self._send_json(
+                build_control_turn_started(turn_id=current_turn_id)
+            )
+            if sent:
+                return current_turn_id
+
+            self.turn_identity_map.clear_frontend_turn(current_turn_id)
+            self._turn_timings.pop(current_turn_id, None)
+            if self.session_state.current_turn_id == current_turn_id:
+                self.session_state.reset_to_idle()
+            raise RuntimeError(f"turn_started_send_failed:{current_turn_id}")
+
+    async def fail_proactive_output_turn(self, *, turn_id: str, reason: str) -> None:
+        """Publish a failed proactive turn and discard its connection-owned state."""
+        await self._finish_turn(
+            turn_id=turn_id,
+            success=False,
+            reason=reason,
+        )
+
     def _get_pending_output_segment(
         self,
         turn_id: str,
