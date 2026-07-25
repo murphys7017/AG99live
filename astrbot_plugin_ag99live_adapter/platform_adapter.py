@@ -44,6 +44,7 @@ PLUGIN_DATA_DIR = Path(get_astrbot_plugin_data_path()) / PLUGIN_DIR.name
 RUNTIME_CACHE_DIR = PLUGIN_DATA_DIR / "cache"
 AUDIO_CACHE_DIR = RUNTIME_CACHE_DIR / "audio"
 IMAGE_CACHE_DIR = RUNTIME_CACHE_DIR / "images"
+SUPPORTED_LOOPBACK_BIND_HOSTS = frozenset({"127.0.0.1", "localhost"})
 
 
 @register_platform_adapter(
@@ -87,7 +88,9 @@ class OLVPetPlatformAdapter(Platform):
         self.config = platform_config
         self.settings = platform_settings or {}
 
-        self.host = _config_get(self.config, "host", "127.0.0.1")
+        self.host = _require_loopback_host(
+            _config_get(self.config, "host", "127.0.0.1")
+        )
         self.port = int(_config_get(self.config, "port", 12396))
         self.http_port = int(_config_get(self.config, "http_port", 12397))
         self.debug_port = int(_config_get(self.config, "debug_port", 12398))
@@ -424,7 +427,7 @@ class OLVPetPlatformAdapter(Platform):
     async def _handle_transport_disconnect(self) -> None:
         """WebSocket 断开时调用的清理钩子。
 
-        顺序固定：清理 TurnCoordinator 连接级状态，session_state → idle，
+        顺序固定：停止 TurnCoordinator 中的在飞 AstrBot 事件并清理连接级状态，session_state → idle，
         turn_identity_map 全清，调
         speech_ingress.handle_audio_stream_interrupt 中断所有在飞的音频流，
         media_service.clear_audio_buffer 丢弃缓冲。
@@ -462,6 +465,16 @@ def _config_get(config: Any, key: str, default: Any) -> Any:
         value = getattr(config, key)
         return default if value is None else value
     return default
+
+
+def _require_loopback_host(value: Any) -> str:
+    host = str(value or "").strip().lower()
+    if host not in SUPPORTED_LOOPBACK_BIND_HOSTS:
+        raise ValueError(
+            "ag99live_transport_host_must_use_supported_loopback:"
+            f"{host or '<empty>'}"
+        )
+    return host
 
 
 def _plugin_config_get(config: Any, key: str, default: Any) -> Any:

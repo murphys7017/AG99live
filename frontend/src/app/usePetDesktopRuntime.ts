@@ -121,6 +121,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const playbackCoordinator = usePlaybackCompletionCoordinator({
     sessionStore,
     playbackAck,
+    timelineRuntime: playbackTimeline,
   });
   const motionPlaybackRecorder = useMotionPlaybackRecorder({
     motionRecord,
@@ -275,12 +276,9 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const motionTimelineSink = playbackTimelineMotionRuntime.motionTimelineSink;
   conversationPlayback.bindMotionTimelineSink(motionTimelineSink);
 
-  useTurnPlaybackOrchestrator({
+  const turnPlaybackOrchestrator = useTurnPlaybackOrchestrator({
     sessionStore,
-    timelineRuntime: {
-      startSegmentJob: playbackTimeline.startSegmentJob,
-      rejectMotionBeforeStart: playbackTimeline.rejectMotionBeforeStart,
-    },
+    timelineRuntime: playbackTimeline,
   });
 
   applyModelEngineSettings(motionEngineSettings, bridge.state.snapshot.motionEngineSettings);
@@ -430,6 +428,8 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     pushToTalk.dispose();
     bilibiliLive.dispose();
     playbackCoordinator.resetPlaybackCoordination();
+    playbackCoordinator.dispose();
+    turnPlaybackOrchestrator.dispose();
     motionPlaybackRecorder.resetMotionPlaybackRecorder();
     motionTimelineRunTracker.clear();
     modelEngine.stop("unmount");

@@ -171,6 +171,9 @@ export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
     turnId: string | null,
     messageId: string,
   ) => PlaybackTimelineClockReader | null;
+  subscribeExecutionStateChanges: (
+    listener: () => void,
+  ) => () => void;
   findActiveAudioTimelineSegments: () => PlaybackTimelineAudioSegment[];
   findOpenAudioTimelineSegments: () => PlaybackTimelineAudioSegment[];
   findOpenExecutionTimelineSegments: () => PlaybackTimelineExecutionSegment[];
@@ -181,10 +184,17 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
 ): PlaybackTimelineRuntime<TMotionPayload> {
   const timelines = new Map<string, PlaybackTimelineEntry>();
   const closedTimelineKeys = new Set<string>();
+  const executionStateListeners = new Set<() => void>();
   const sessionProjection = createPlaybackTimelineSessionProjection({
     audioSession: deps.audioSession,
     motionSession: deps.motionSession,
   });
+
+  function notifyExecutionStateChanged(): void {
+    for (const listener of executionStateListeners) {
+      listener();
+    }
+  }
 
   function resolveTimelineKey(
     turnId: string | null,
@@ -356,11 +366,13 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
   function startSegmentJob(
     job: PlaybackTimelineSegmentJob<TMotionPayload>,
   ): PlaybackTimelineSegmentExecutionResult {
-    return executePlaybackTimelineSegmentJob({
+    const result = executePlaybackTimelineSegmentJob({
       job,
       ports: deps.segmentExecution,
       timeline: segmentExecutorTimelinePort,
     });
+    notifyExecutionStateChanged();
+    return result;
   }
 
   const segmentExecutorTimelinePort: PlaybackTimelineSegmentExecutorTimelinePort = {
@@ -742,6 +754,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       reason,
     );
     clearTimelineIfTerminal(turnId, messageId);
+    notifyExecutionStateChanged();
   }
 
   function markAudioTimelineTerminal(
@@ -783,6 +796,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       engine.markSinkTerminal(AUDIO_TIMELINE_SINK_ID, terminal, reason);
     }
     clearTimelineIfTerminal(turnId, messageId);
+    notifyExecutionStateChanged();
   }
 
   function stopTimelineForSegment(
@@ -847,6 +861,13 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
         return entry.engine.getSnapshot();
       },
     };
+  }
+
+  function subscribeExecutionStateChanges(
+    listener: () => void,
+  ): () => void {
+    executionStateListeners.add(listener);
+    return () => executionStateListeners.delete(listener);
   }
 
   function findActiveAudioTimelineSegments(): PlaybackTimelineAudioSegment[] {
@@ -992,6 +1013,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       timelines.delete(key);
     }
     rememberBoundedKey(closedTimelineKeys, key);
+    notifyExecutionStateChanged();
   }
 
   function armAudioStartTimeout(timeline: PlaybackTimelineEntry): void {
@@ -1169,6 +1191,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     stopAllTimelines,
     getTimelineSnapshotForSegment,
     getTimelineClockReaderForSegment,
+    subscribeExecutionStateChanges,
     findActiveAudioTimelineSegments,
     findOpenAudioTimelineSegments,
     findOpenExecutionTimelineSegments,

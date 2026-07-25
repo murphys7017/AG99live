@@ -91,6 +91,7 @@ from .image_diagnostics import (
 from ..motion.observation import record_motion_observation
 from .output_segment import PendingOutputSegment
 
+
 class TurnCoordinator:
     """后端单连接的协议+轮次编排器。
 
@@ -234,11 +235,27 @@ class TurnCoordinator:
             raise
 
     def reset_turn_tracking(self) -> None:
-        """Discard connection-scoped Turn bookkeeping after transport disconnect."""
+        """Stop active AstrBot events before discarding connection-scoped state."""
+        active_events = tuple(self._events_by_turn_id.items())
+        for turn_id, event in active_events:
+            set_extra = getattr(event, "set_extra", None)
+            if not callable(set_extra):
+                raise RuntimeError(
+                    f"turn_event_stop_flag_unavailable:{turn_id}"
+                )
+            stop_event = getattr(event, "stop_event", None)
+            if not callable(stop_event):
+                raise RuntimeError(
+                    f"turn_event_stop_unavailable:{turn_id}"
+                )
+            set_extra("agent_stop_requested", True)
+            stop_event()
+
         tracked_turn_ids = set(self._turn_timings)
         tracked_turn_ids.update(self._closing_output_turn_ids)
         tracked_turn_ids.update(self._closed_output_turn_ids)
         tracked_turn_ids.update(self._output_emitted_turn_ids)
+        tracked_turn_ids.update(self._events_by_turn_id)
         tracked_turn_ids.update(
             segment.turn_id for segment in self._pending_output_segments.values()
         )
@@ -337,10 +354,21 @@ class TurnCoordinator:
             ):
                 segment.bind_performance_curve_request(tts_state["request_id"])
 
-        motion_candidate = self._resolve_output_segment_motion(
-            platform_extras=platform_extras_dict,
-            raw_reply_text=raw_reply_text,
+        motion_candidate, motion_resolution_failure = (
+            self._resolve_output_segment_motion(
+                platform_extras=platform_extras_dict,
+                raw_reply_text=raw_reply_text,
+            )
         )
+        motion_expected, motion_failure_reason = (
+            _resolve_output_segment_motion_schedule(platform_extras_dict)
+        )
+        if motion_expected:
+            segment.require_motion()
+        if motion_resolution_failure:
+            segment.merge_motion_failure(motion_resolution_failure)
+        elif motion_failure_reason:
+            segment.merge_motion_failure(motion_failure_reason)
         if motion_candidate is not None:
             segment.merge_motion(**motion_candidate)
 
@@ -365,10 +393,10 @@ class TurnCoordinator:
         *,
         platform_extras: dict[str, Any],
         raw_reply_text: str,
-    ) -> dict[str, Any] | None:
+    ) -> tuple[dict[str, Any] | None, str]:
         candidates = _iter_platform_motion_client_objects(platform_extras)
         if len(candidates) > 1:
-            raise ValueError("output_segment_multiple_motion_objects")
+            return None, "output_segment_multiple_motion_objects"
         if candidates:
             motion_object = candidates[0]
             payload = motion_object.get("motion_payload")
@@ -377,33 +405,40 @@ class TurnCoordinator:
             if not isinstance(payload, dict):
                 payload = motion_object.get("plan")
             if not isinstance(payload, dict):
-                raise ValueError("output_segment_motion_payload_missing")
-            return {
-                "payload": payload,
-                "mode": str(motion_object.get("mode") or "preview"),
-                "source": str(motion_object.get("source") or "platform_extras"),
-            }
+                return None, "output_segment_motion_payload_missing"
+            return (
+                {
+                    "payload": payload,
+                    "mode": str(motion_object.get("mode") or "preview"),
+                    "source": str(motion_object.get("source") or "platform_extras"),
+                },
+                "",
+            )
         if not self._allows_official_inline_anim_compat():
-            return None
+            return None, ""
         payload, reason = extract_official_inline_anim_motion_intent(raw_reply_text)
         if payload is None:
             if reason != "inline_anim_missing":
-                raise ValueError(f"official_inline_anim_compat_rejected:{reason}")
-            return None
+                return None, f"official_inline_anim_compat_rejected:{reason}"
+            return None, ""
         payload, validation_reason = validate_normalized_motion_intent_payload(
             payload,
             self.runtime_state,
             base_reason=reason,
         )
         if payload is None:
-            raise ValueError(
-                f"official_inline_anim_compat_rejected:{validation_reason}"
+            return (
+                None,
+                f"official_inline_anim_compat_rejected:{validation_reason}",
             )
-        return {
-            "payload": payload,
-            "mode": "preview",
-            "source": "official_inline_anim_compat",
-        }
+        return (
+            {
+                "payload": payload,
+                "mode": "preview",
+                "source": "official_inline_anim_compat",
+            },
+            "",
+        )
 
     async def _flush_pending_output_segments(self, *, turn_id: str) -> int:
         segments = getattr(self, "_pending_output_segments", None)
@@ -494,6 +529,16 @@ class TurnCoordinator:
         segment: PendingOutputSegment,
     ) -> dict[str, Any]:
         if segment.motion_payload is None:
+            if segment.motion_failure_reason:
+                return {
+                    "state": "failed",
+                    "reason": segment.motion_failure_reason,
+                }
+            if segment.motion_expected:
+                return {
+                    "state": "failed",
+                    "reason": "motion_schedule_payload_missing",
+                }
             return {"state": "absent"}
         payload = segment.motion_payload
         if _resolve_motion_payload_schema_version(payload) == "engine.motion_intent.v4":
@@ -1370,3 +1415,35 @@ def _extract_platform_tts_delivery_state(
         },
         audio_attachment,
     )
+
+
+def _resolve_output_segment_motion_schedule(
+    platform_extras: dict[str, Any],
+) -> tuple[bool, str]:
+    """Keep a contributor's motion expectation distinct from normal absence."""
+    metadata = platform_extras.get("metadata")
+    if not isinstance(metadata, dict):
+        return False, ""
+    schedule = metadata.get("ag99live_motion_schedule")
+    if not isinstance(schedule, dict):
+        return False, ""
+
+    scheduled = schedule.get("scheduled")
+    if not isinstance(scheduled, bool):
+        return True, "motion_schedule_metadata_invalid"
+    source = str(schedule.get("source") or "").strip()
+    reason = str(schedule.get("reason") or "").strip()
+    resolution_reason = str(
+        schedule.get("motion_resolution_reason") or ""
+    ).strip()
+
+    if scheduled:
+        if not source:
+            return True, "motion_schedule_source_missing"
+        return True, ""
+    if reason == "motion_payload_missing":
+        return (
+            True,
+            f"motion_schedule_failed:{resolution_reason or reason}",
+        )
+    return False, ""

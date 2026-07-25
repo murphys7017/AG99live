@@ -3,12 +3,17 @@ import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore.
 import { isPlaybackLocallySettled } from "./selectors.js";
 import type { TurnPlaybackSession } from "./session.js";
 import type { PlaybackAckPort } from "./ports.js";
+import type { PlaybackTimelineRuntime } from "../playback-timeline/playbackTimelineRuntime.js";
 
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 
 export interface PlaybackCompletionCoordinatorOptions {
   sessionStore: SessionStore;
   playbackAck: PlaybackAckPort;
+  timelineRuntime: Pick<
+    PlaybackTimelineRuntime,
+    "findOpenExecutionTimelineSegments" | "subscribeExecutionStateChanges"
+  >;
 }
 
 /**
@@ -50,6 +55,13 @@ export function usePlaybackCompletionCoordinator(
       return;
     }
     if (session.phase === "completed" || session.phase === "failed") {
+      return;
+    }
+    if (
+      options.timelineRuntime.findOpenExecutionTimelineSegments().some(
+        (segment) => segment.turnId === session.turnId,
+      )
+    ) {
       return;
     }
     if (!isPlaybackLocallySettled(session) || !session.backend.synthFinished) {
@@ -122,7 +134,16 @@ export function usePlaybackCompletionCoordinator(
     }
   }
 
-  watch(
+  function flushPendingCompletions(reason?: string): void {
+    for (const session of options.sessionStore.getSessions()) {
+      if (session.phase === "completed" || session.phase === "failed") {
+        continue;
+      }
+      maybeFlushPlaybackCompletion(session.id, reason);
+    }
+  }
+
+  const stopSessionWatch = watch(
     () => options.sessionStore.getSessions().map((session) => ({
       id: session.id,
       segments: session.segmentOrder.map((messageId) => {
@@ -143,21 +164,19 @@ export function usePlaybackCompletionCoordinator(
       backendTurnFinished: session.backend.turnFinished,
       phase: session.phase,
     })),
-    () => {
-      for (const session of options.sessionStore.getSessions()) {
-        if (session.phase === "completed" || session.phase === "failed") {
-          continue;
-        }
-        for (const messageId of session.segmentOrder) {
-          const segment = session.segments.get(messageId);
-          if (segment?.text.delivered) {
-            maybeFlushPlaybackCompletion(session.id, "text_delivered");
-          }
-        }
-      }
-    },
-    { deep: true },
+    () => flushPendingCompletions("playback_state_changed"),
+    { deep: true, immediate: true },
   );
+  const unsubscribeExecutionStateChanges =
+    options.timelineRuntime.subscribeExecutionStateChanges(() => {
+      flushPendingCompletions("timeline_execution_settled");
+    });
 
-  return { resetPlaybackCoordination };
+  return {
+    resetPlaybackCoordination,
+    dispose() {
+      stopSessionWatch();
+      unsubscribeExecutionStateChanges();
+    },
+  };
 }

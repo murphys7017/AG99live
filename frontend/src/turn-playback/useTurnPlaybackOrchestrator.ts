@@ -2,21 +2,29 @@ import { watch } from "vue";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
 import type { NormalizedMotionPayload } from "../playback-integrations/motionPayload";
 import { canReleaseAudio, canReleaseMotion, getActivePlaybackSegment } from "./selectors.js";
-import type { MotionPayloadPort } from "./ports.js";
-import type { PlaybackTimelineSegmentStartPort } from "../playback-timeline/segmentJob.js";
 import type { TurnPlaybackSegment } from "./session.js";
+import type { PlaybackTimelineRuntime } from "../playback-timeline/playbackTimelineRuntime.js";
 
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 
 interface TurnPlaybackOrchestratorOptions {
   sessionStore: SessionStore;
-  timelineRuntime: PlaybackTimelineSegmentStartPort<NormalizedMotionPayload>;
+  timelineRuntime: Pick<
+    PlaybackTimelineRuntime<NormalizedMotionPayload>,
+    | "startSegmentJob"
+    | "rejectMotionBeforeStart"
+    | "findOpenExecutionTimelineSegments"
+    | "subscribeExecutionStateChanges"
+  >;
 }
 
 export function useTurnPlaybackOrchestrator(
   options: TurnPlaybackOrchestratorOptions,
 ) {
   function scheduleReadySegments(): void {
+    if (options.timelineRuntime.findOpenExecutionTimelineSegments().length > 0) {
+      return;
+    }
     let segment: TurnPlaybackSegment | null = null;
     for (const session of options.sessionStore.getSessions()) {
       if (session.phase === "completed" || session.phase === "failed") {
@@ -101,7 +109,7 @@ export function useTurnPlaybackOrchestrator(
     });
   }
 
-  watch(
+  const stopSessionWatch = watch(
     () => options.sessionStore.getSessions().map((session) => ({
       id: session.id,
       phase: session.phase,
@@ -125,10 +133,18 @@ export function useTurnPlaybackOrchestrator(
       }),
     })),
     scheduleReadySegments,
-    { deep: true },
+    { deep: true, immediate: true },
   );
+  const unsubscribeExecutionStateChanges =
+    options.timelineRuntime.subscribeExecutionStateChanges(scheduleReadySegments);
 
-  return { flush: scheduleReadySegments };
+  return {
+    flush: scheduleReadySegments,
+    dispose() {
+      stopSessionWatch();
+      unsubscribeExecutionStateChanges();
+    },
+  };
 }
 
 function isAtomicSegmentResolved(

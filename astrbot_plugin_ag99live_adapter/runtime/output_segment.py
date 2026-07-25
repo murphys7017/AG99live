@@ -21,6 +21,8 @@ class PendingOutputSegment:
     tts_status: str = ""
     images: list[str] = field(default_factory=list)
     motion_payload: dict[str, Any] | None = None
+    motion_expected: bool = False
+    motion_failure_reason: str = ""
     motion_mode: str = "preview"
     motion_source: str = ""
     performance_curve_request_id: str = ""
@@ -90,6 +92,10 @@ class PendingOutputSegment:
         mode: str,
         source: str,
     ) -> None:
+        if self.motion_failure_reason:
+            raise OutputSegmentConflictError(
+                f"output_segment_motion_state_conflict:{self.message_id}"
+            )
         candidate = deepcopy(payload)
         if self.motion_payload is not None and self.motion_payload != candidate:
             raise OutputSegmentConflictError(
@@ -98,6 +104,20 @@ class PendingOutputSegment:
         self.motion_payload = candidate
         self.motion_mode = str(mode or "preview").strip() or "preview"
         self.motion_source = str(source or "").strip()
+
+    def require_motion(self) -> None:
+        self.motion_expected = True
+
+    def merge_motion_failure(self, reason: str) -> None:
+        if self.motion_payload is not None:
+            raise OutputSegmentConflictError(
+                f"output_segment_motion_state_conflict:{self.message_id}"
+            )
+        self.motion_failure_reason = _merge_unique_text(
+            self.motion_failure_reason,
+            reason,
+            "motion_failure_reason",
+        )
 
     def bind_performance_curve_request(self, request_id: str) -> None:
         self.performance_curve_request_id = _merge_unique_text(
