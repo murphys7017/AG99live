@@ -152,6 +152,11 @@ ModelEngine 先把 `-4..4` 等级确定性采样为轴值，再由关系图计�
 
 `SpeechPoseStage` 是 compile extension。它根据 `ag99.voice_following_profile.v3`、segment identity 和音频时长生成按语义轴登记的确定性 `speech_gesture_track`。V3 只提供 semantic axis、相对 `max_speech_offset` 的有效幅度比例和跟随延迟；参数绑定、范围和动力学由 `ModelParameterBindingStage` 统一处理。
 
+当前实现仍从 `calm_explain / lively_chat / gentle_support / emphatic` 四套固定控制点中选择，
+再按整段时长拉伸。canonical assistant text 尚未进入 motion compile context，因此
+分句、停顿和重音事件不是当前已实现能力。后续替换方案见
+[动作表现优化实施方案](./15-动作表现优化实施方案.md)。
+
 职责边界：
 
 - ModelEngine 决定控制点、轨迹极性、延迟和动作幅度。

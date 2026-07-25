@@ -30,6 +30,7 @@ flowchart TD
         PERSONA[Persona Runtime<br/>构建 Prompt 与 effect schema]:::backend
         LLM[主模型一次生成<br/>spoken_reply + effect_calls]:::backend
         EFFECT[result contributor<br/>motion_intent.v4]:::backend
+        SCHEDULE[ag99live_motion_schedule<br/>动作预期与解析结果]:::backend
         CURVEPENDING[登记当前回复阶段的<br/>pending curve input]:::backend
         NORMALIZE[输出规范化<br/>清洗隐藏传输标记]:::backend
         TTSSTATE[on_tts_state_changed<br/>generating]:::backend
@@ -39,6 +40,9 @@ flowchart TD
         PLAIN[Plain / semantic text<br/>canonical text 候选]:::backend
         BUFFER[PendingOutputSegment<br/>turn_id + message_id]:::backend
         BCHECK[文本冲突 / 多音频 / motion / curve 校验]:::backend
+        MOTIONRESOLVE{动作预期与 payload 结果}:::backend
+        MOTIONFAILSLOT[motion.state=failed<br/>保留明确 reason]:::failure
+        MOTIONABSENTSLOT[motion.state=absent<br/>明确未安排动作]:::backend
         SEGMENT[output.segment.v3<br/>唯一 text + audio URL + motion]:::protocol
         SYNTH[control.synth_finished<br/>所有段发送完成后]:::protocol
 
@@ -48,14 +52,19 @@ flowchart TD
         COREQUEUE --> PERSONA --> LLM
         LLM --> EFFECT
         LLM --> PLAIN
+        EFFECT --> SCHEDULE
         EFFECT --> CURVEPENDING
         PLAIN --> NORMALIZE --> TTSSTATE --> TTS
         CURVEPENDING -. 仅随当前阶段 TTS 消费 .-> TTSSTATE
         TTSSTATE -->|tts_request_id| CURVE
         EFFECT --> BUFFER
+        SCHEDULE --> BUFFER
         TTS --> BUFFER
         PLAIN --> BUFFER
-        BUFFER --> BCHECK --> CURVECHECK
+        BUFFER --> BCHECK --> MOTIONRESOLVE
+        MOTIONRESOLVE -->|expected + valid| CURVECHECK
+        MOTIONRESOLVE -->|not expected| MOTIONABSENTSLOT --> SEGMENT
+        MOTIONRESOLVE -->|expected + missing/invalid| MOTIONFAILSLOT --> SEGMENT
         CURVE -. 已完成结果 .-> CURVECHECK
         CURVECHECK -->|ready: 附加 hint| SEGMENT
         CURVECHECK -->|未 ready: 取消并跳过| SEGMENT
@@ -81,12 +90,16 @@ flowchart TD
     subgraph O[唯一事实源与播放编排]
         READY[SessionStore 已解析段]:::state
         ORCH[TurnPlaybackOrchestrator<br/>不等待 synth_finished]:::state
+        EXECOPEN{是否存在 open required<br/>execution Timeline？}:::state
+        EXECWAIT[等待 Timeline execution state change<br/>不启动并发段]:::timeline
         JOB[单个 PlaybackTimelineSegmentJob<br/>turn_id + message_id]:::timeline
         TEXTSTATE{text.state}:::state
         TEXTRELEASE[释放唯一 canonical text]:::timeline
         AUDIOSTATE{audio.state}:::state
 
-        COMMIT --> READY --> ORCH --> JOB
+        COMMIT --> READY --> ORCH --> EXECOPEN
+        EXECOPEN -->|是| EXECWAIT --> EXECOPEN
+        EXECOPEN -->|否| JOB
         JOB --> TEXTSTATE --> AUDIOSTATE
     end
 
@@ -106,7 +119,8 @@ flowchart TD
         SPEECHCHECK{模型是否支持<br/>voice-following profile？}:::timeline
         SPEECHONLY[立即启动已准备<br/>internal speech_only plan]:::timeline
         NOMOTION[仅播放音频与口型<br/>不伪造默认动作]:::timeline
-        ABSENTMOTION{motion.state = present？}:::state
+        FAILEDMOTIONAUDIO[仅播放合法音频与字幕<br/>保留 motion failed]:::failure
+        ABSENTMOTION{motion.state}:::state
         SYNTHCLOCK[Synthetic motion-only clock]:::timeline
         SYNTHMOTION[同步编译并启动<br/>motion-only 语义动作]:::timeline
         AUDIOFAILED[标记 audio failed]:::failure
@@ -125,12 +139,14 @@ flowchart TD
         PLAYING --> MOTIONSTATE
         MOTIONSTATE -->|present 且 sink 已注册| SEMANTIC
         MOTIONSTATE -->|absent| SPEECHCHECK
+        MOTIONSTATE -->|failed| FAILEDMOTIONAUDIO
         SPEECHCHECK -->|是| SPEECHONLY
         SPEECHCHECK -->|否| NOMOTION
 
         AUDIOSTATE -->|absent| TEXTRELEASE --> ABSENTMOTION
-        ABSENTMOTION -->|是| SYNTHCLOCK --> SYNTHMOTION
-        ABSENTMOTION -->|否| EMPTY
+        ABSENTMOTION -->|present| SYNTHCLOCK --> SYNTHMOTION
+        ABSENTMOTION -->|absent| EMPTY
+        ABSENTMOTION -->|failed| FAILEDSETTLED
 
         AUDIOSTATE -->|failed| AUDIOFAILED
         TEXTSTATE -. present 且 audio failed .-> AUDIOCAPTIONFAILED
@@ -171,6 +187,8 @@ flowchart TD
         PROTOCOLFAIL[协议一致性错误]:::failure
         SYNTHDONE[backend.synthFinished = true]:::state
         SETTLED{本地段全部 settled<br/>且 synthFinished？}:::terminal
+        EXECSETTLED{同 Turn 是否仍有 open<br/>required execution Timeline？}:::terminal
+        WAITEXEC[等待 Timeline sink terminal]:::timeline
         PLAYBACKFINISHED[control.playback_finished<br/>success / error]:::protocol
         BACKACK[TurnCoordinator<br/>校验播放回执]:::backend
         TURNFINISHED[control.turn_finished]:::protocol
@@ -192,8 +210,20 @@ flowchart TD
         COMPLETE -->|是| SYNTHDONE
         FACTS --> SETTLED
         SYNTHDONE --> SETTLED
-        SETTLED -->|是| PLAYBACKFINISHED --> BACKACK --> TURNFINISHED --> TURNIN
+        SETTLED -->|是| EXECSETTLED
+        EXECSETTLED -->|是| WAITEXEC --> EXECSETTLED
+        TLTERM -. execution state changed .-> EXECSETTLED
+        EXECSETTLED -->|否| PLAYBACKFINISHED --> BACKACK --> TURNFINISHED --> TURNIN
         TURNIN --> SESSIONDONE
     end
 
     LIPSINK -. 可选 sink 终态归 Timeline，<br/>不是第四种 segment fact .-> TLTERM
+
+    subgraph D[WebSocket 断连清理]
+        DISCONNECT[transport disconnect]:::failure
+        STOPBACK[后端先 agent_stop_requested + stop_event]:::backend
+        CLEARBACK[再清理 Turn / Segment / Curve / ID map<br/>迟到输出在 Event.send 丢弃]:::backend
+        STOPFRONT[前端停止全部 Timeline / Audio / Motion]:::timeline
+        DISCONNECT --> STOPBACK --> CLEARBACK
+        DISCONNECT --> STOPFRONT
+    end

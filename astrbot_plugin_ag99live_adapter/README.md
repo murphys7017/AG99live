@@ -5,7 +5,7 @@ AG99live V2 的 AstrBot 插件侧实现。该目录负责协议桥接、turn 生
 ## 核心职责
 
 - 接收前端 `input.*` 消息并转为 AstrBot 事件。
-- 发送 `output.* / control.* / system.* / engine.*` 消息回前端。
+- 发送 `output.segment.v3 / control.* / system.*` 消息回前端；正式回复动作只存在于原子段的 motion slot。
 - 管理 turn 生命周期，保证文本/语音/动作消息在同一轮次可追踪。
 - 扫描 Live2D 资源并产出结构化能力信息。
 - 生成并下发动作用载荷；统一走 AstrBot 交互中间件主链路，由 `ag99live.motion` Persona Effect 产出动作并通过 `client_objects` 下发。
@@ -19,6 +19,18 @@ AG99live V2 的 AstrBot 插件侧实现。该目录负责协议桥接、turn 生
 - 扫描器下发 `ag99.voice_following_profile.v3`，只描述语义轴、有效幅度比例和跟随延迟；最终参数绑定、范围和动力学统一由 semantic axis profile 负责。
 - 旧 `voice_following_profile.v1/v2` 和 `speech_pose_cycle` 不属于兼容协议，前端入站会显式拒绝。
 - 连续多段之间的惯性、衰减、残留、soft handoff 和层间混合由前端 Live2D runtime 侧 `ParameterPresentationLayer` 承接，而不是放回后端动作生成链路。
+
+## 当前部署边界
+
+- 桌宠 WebSocket、静态资源 HTTP 和 debug HTTP 当前只允许绑定
+  `127.0.0.1` 或 `localhost`，用于 AstrBot 与 Electron 在同一台电脑上的部署。
+- `::1` 当前被明确拒绝：静态资源服务器和媒体 URL 生成尚未实现一致的 IPv6 地址处理。
+- 当前协议没有远程客户端认证、授权、TLS 和跨主机媒体 URL 保护，因此不能把 `host`
+  改为局域网或公网地址来部署远程 AstrBot。
+- 远程执行器的 Codex app-server / OpenCode endpoint 是 Adapter 的另一条出站连接，
+  不改变桌宠传输仍为本机回环的边界。
+- 后续远程 AstrBot 部署必须先定义 authenticated WSS/HTTPS、客户端身份、媒体授权和断线恢复，
+  再同步修改 transport、URL 构造、配置 schema 和前端连接设置。
 
 ## 目录结构
 
@@ -81,11 +93,17 @@ astrbot_plugin_ag99live_adapter/
 - `system.semantic_axis_profile_saved` / `system.semantic_axis_profile_save_failed` 用于 Profile Editor 保存结果确认，不再依赖 `system.model_sync` 推断保存成败。
 - 一个 user input 对应一个 turn，但一个 turn 内可能输出多个 assistant segment。
 - `control.synth_finished` 表示该 turn 的原子输出队列关闭；到达前所有 segment 必须完整声明，到达后不接受新段或 late slot patch。
-- 前端在 `synth_finished` 已到且所有 segment 播放完成后回传 `control.playback_finished`；后端收到后再发 `control.turn_finished`。
+- `ag99live_motion_schedule` 已表明本段应生成动作、但 effect 缺失或非法时，Adapter 必须下发
+  `motion.state=failed`；只有明确未安排语义动作时才使用 `motion.state=absent`。
+- 前端在 `synth_finished` 已到、所有 segment 槽位 settled 且同一 Turn 不存在开放的 required
+  execution Timeline 后回传 `control.playback_finished`；后端收到后再发 `control.turn_finished`。
 - `output.segment.audio.url` 指向插件侧 HTTP 静态资源，通常是 `/cache/audio/*.wav`；有 TTS 文件但前端无声时，应先验证该 URL 在配置的 `host / http_port` 上是否可达。
 - 麦克风输入现在按“单段录音”组织：一段采集内的 `input.audio_stream_start`、WebSocket binary PCM16LE chunk 与 `input.audio_stream_end` 共享同一个新的 `turn_id` 和 `stream_id`；后端 STT ingress 按 `stream_id` 汇总音频，不再把不同输入段混到一个全局缓冲。
 - 若前端检测到发送积压，会在 `input.audio_stream_end` 中带上 `dropped: true`，后端直接丢弃该段转写。
 - 切换麦克风设备时，前端会先正常结束旧输入段，再启动新输入段；收到 `control.interrupt` 时，前端只中断该信封 `turn_id` 已释放的 segment，并由后端停止同一 Turn 的 AstrBot event；已取消 event 的晚到输出不会重新进入播放链路。
+- WebSocket 断开时，Adapter 先给全部在飞 event 写入 `agent_stop_requested` 并调用
+  `stop_event()`，再清理 Turn、Segment、曲线请求和 ID 映射；`OLVPetPlatformEvent`
+  在发送边界丢弃被停止 Turn 的迟到输出。
 - Windows / Electron 前端现在优先使用主进程 DirectShow/ffmpeg 原生麦克风枚举与采集；原生路径直接采集 `s16le`，渲染进程通过二进制音频帧发送给插件侧。
 - 非流式 JSON 数组音频协议已删除；麦克风输入只接受当前流式协议。
 - 按键说话模式会以 `reason="ptt_release"` 结束本段录音；对插件侧来说它仍是一段普通麦克风输入。
@@ -140,10 +158,11 @@ AG99live 远程执行器当前走任务委托链路：
 pip install -r astrbot_plugin_ag99live_adapter/requirements.txt
 ```
 
-运行测试：
+最小静态检查：
 
 ```powershell
-python -m pytest astrbot_plugin_ag99live_adapter/tests -q
+python scripts/check_protocol_schema_manifest.py
 ```
 
-最近一次完整测试记录：`146 passed`（2026-05-12）。
+该检查只验证协议版本清单的一致性。真实正确性仍需要在 AstrBot + TTS + Electron +
+Live2D 环境中观察原子段、音频、口型、动作和完成回执；不以历史测试数量替代运行证据。

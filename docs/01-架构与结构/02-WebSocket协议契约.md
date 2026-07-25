@@ -44,7 +44,7 @@ control.synth_finished
 
 control.playback_finished
 = 前端本地播放已稳定
-= 收到 synth_finished 且该 turn 的本地片段都已 settled
+= 收到 synth_finished、该 turn 的槽位都已 settled，且没有开放的 required execution Timeline
 
 control.turn_finished
 = 后端轮次关闭
@@ -137,6 +137,18 @@ control.turn_finished
 
 `text`、`audio`、`motion` 都必须使用显式 tagged slot：`present | absent | failed`，不得省略。表演曲线只有一个执行来源：`motion.payload.performance_curve_hint`；顶层 `performance_curve` 和段发送后的独立曲线 patch 都属于非法协议。
 
+motion slot 的语义必须保持严格区分：
+
+- `absent`：本段协议明确没有语义动作。音频存在且模型支持 voice-following 时，前端可以运行
+  内部 speech-only 表现，但不得改写该 slot。
+- `failed`：本段本应产生语义动作，但 effect、调度、schema、资源或编译链失败。前端可以继续播放
+  已经合法的音频和字幕，但不得用 speech-only 或默认姿态替代正式动作，最终
+  `control.playback_finished.success` 必须为 `false`。
+- `present`：携带唯一合法 motion payload，并由 ModelEngine 正式编译和执行。
+
+Adapter 通过内部 `ag99live_motion_schedule` 判断该段是否预期动作。已安排动作但 payload
+缺失时必须生成 `motion.state=failed`，不能因为最终没有 motion object 就写成 `absent`。
+
 `output.segment.v1/v2` 不再兼容接收；前后端必须同时使用 v3，避免同时维护正文和音频字幕两份文本事实。
 
 `output.segment.v3` 是封闭协议：根对象以及 `text`、`audio`、`motion` slot 只允许契约声明字段。`caption_text`、`performance_curve` 或其他未知字段必须在前端入站边界直接拒绝，不得静默丢弃。
@@ -163,6 +175,11 @@ AstrBot 内部 Plain、Record、图片与 motion client object 可以物理分�
 
 `control.playback_finished` 只收口信封中的 `turn_id`，较早 Turn 的播放完成不得重置或清理较新的后端 Turn。`control.interrupt` 也只作用于信封中的 `turn_id`：Adapter 只停止该 Turn 对应的 AstrBot event，事件发送边界拒绝该 Turn 的晚到输出，随后前后端分别结束该 Turn 的播放与会话状态。它不是会话级 `stop_all`，也不需要 `message_id`。
 
+WebSocket 连接直接断开时没有可发送的 `control.interrupt`。Adapter 必须先将所有在飞 event
+标记为 `agent_stop_requested` 并调用 `stop_event()`，再清理连接级 Turn、pending segment、
+performance curve 和 ID 映射。迟到的 AstrBot 输出在 `OLVPetPlatformEvent.send()` 边界被丢弃，
+不能重新创建已断开的输出链路。
+
 ### system.* （双向）
 
 | 类型 | 方向 | 作用 |
@@ -186,6 +203,13 @@ AstrBot 内部 Plain、Record、图片与 motion client object 可以物理分�
 `runtime_cache_errors` 只存在于 `system.model_sync.payload` 根部，与 `model_info` 并列。它描述 Adapter 扫描缓存、动作筛选缓存和样本缓存的运行诊断，不是 `live2d_scan.v2` 模型能力的一部分；前端分别写入 ModelSync state，禁止在 `model_info` 内复制第二份。
 
 Motion Lab 事件采用 at-least-once 交付：前端必须先把事件写入 IndexedDB，再通过 WebSocket 发送；WebSocket `send()` 成功不代表记录成功。后端以 `event_id` 作为 SQLite 主键幂等写入，只有插入事务完成后才发送 `system.motion_lab_raw_event_recorded`。前端收到匹配回执后才能删除 IndexedDB 记录；断线重连时使用相同 `event_id` 重发。
+
+## 传输部署边界
+
+- 当前 WebSocket、静态资源 HTTP 和 debug HTTP 只支持绑定 `127.0.0.1` 或 `localhost`。
+- 当前没有远程客户端认证、TLS、跨主机媒体授权或 IPv6 URL 规范化；`::1` 也不属于支持值。
+- `audio.url`、Live2D 资源 URL 和连接地址都依赖同一回环部署假设。
+- 远程 AstrBot 属于后续公开协议设计，不能通过把当前 `host` 改成局域网地址实现。
 
 ## 动作路径
 

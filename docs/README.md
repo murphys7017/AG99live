@@ -2,6 +2,31 @@
 
 这里仅保留当前设计、当前协议和当前运行边界。过期方案直接删除，不维护迁移历史或旧文档树。
 
+## 当前契约快照
+
+| 边界 | 当前版本 |
+| --- | --- |
+| WebSocket 信封 | `v2` |
+| 原子输出段 | `output.segment.v3` |
+| 语义动作意图 | `engine.motion_intent.v4` |
+| 模型参数计划 | `engine.parameter_plan.v2` |
+| Catalog motion | `engine.catalog_motion.v1` |
+| 模型能力投影 | `live2d_scan.v2` |
+| 语义轴档案 | `ag99.semantic_axis_profile.v2` |
+| 语义轴关系图 | `ag99.semantic_axis_relation_graph.v1` |
+| 语音随动档案 | `ag99.voice_following_profile.v3` |
+| 可选表演曲线 | `ag99.performance_curve_hint.v1` |
+| Motion Lab 样本 | `ag99.motion_tuning_sample.v2` |
+
+唯一版本事实源是
+`astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json`。协议文档、前端生成类型和
+`system.server_info.schema_manifest` 必须同时与它一致。
+
+播放完成需要联合判断两类事实：SessionStore 保存协议槽位和稳定投影，
+PlaybackTimeline 保存 required sink 的实时执行状态。即使 text/audio/motion 槽位已经
+settled，只要同一 Turn 仍存在开放的 required execution Timeline，就不能启动下一段，
+也不能发送 `control.playback_finished`。
+
 ## 阅读顺序
 
 1. [项目总览与模块职责](./01-架构与结构/01-项目总览与模块职责.md)
@@ -75,6 +100,7 @@ docs/
 | 修改动作生成 | 动作意图设计 → 动作参数处理 → 当前问题 → 动作表现优化方案 → ModelEngine |
 | 修改播放时序 | 播放同步编排 → 统一时钟 → Timeline 状态机 |
 | 排查无动作/无口型 | 端到端链路 → 动作转换图 → 错误传播图 |
+| 修改部署或连接地址 | 项目总览 → 部署与进程边界图 → Adapter README |
 | 修改远程电脑控制 | 远程执行器接入设计 |
 
 ## 维护原则
@@ -84,3 +110,5 @@ docs/
 - 代码与文档冲突时，先沿真实调用链确认产品意图，再同步改正两者。
 - 自动 smoke 只验证基础边界；实时 Electron 对话链路才是动作、音频和口型的最终验收。
 - 流程图只维护 `.mmd` 源文件，不提交 PNG、SVG 或 PDF 副本。
+- 当前桌宠传输只支持同机 `127.0.0.1` / `localhost`。远程 AstrBot 需要单独设计带认证的
+  WSS/HTTPS 协议，不能通过放宽现有 `host` 配置实现。

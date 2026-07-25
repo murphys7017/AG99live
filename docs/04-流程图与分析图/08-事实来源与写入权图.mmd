@@ -18,7 +18,7 @@ flowchart LR
     SERVERINFO[ServerInfo handshake state]:::fact
     MODELSYNC[ModelSync state]:::fact
 
-    subgraph STORE[TurnPlaybackSessionStore：持久事实]
+    subgraph STORE[TurnPlaybackSessionStore：协议槽位与稳定投影]
         TURN[turn identity / created]:::fact
         BACK[backend turnStarted / synthFinished / turnFinished]:::fact
         MATERIAL[text/audio/motion material state]:::fact
@@ -33,6 +33,7 @@ flowchart LR
         TCLOCK[currentTime / duration / playing]:::fact
         TSINK[sink registered / started / terminal]:::fact
         TPHASE[timeline phase]:::fact
+        TOPEN[open required execution set]:::fact
     end
 
     subgraph MOTION_FACTS[动作派生结果]
@@ -73,7 +74,10 @@ flowchart LR
     PROJ -.读取 terminal.-> TSINK
     PLAYER -->|播放器事件| TSINK
     TSINK --> TPHASE
+    TSINK --> TOPEN
     TLF --> TCLOCK
+    TOPEN -.阻止下一段并发.-> ORCH
+    TOPEN -.阻止提前 ACK.-> COMPLETE
 
     MATERIAL --> ENGINE
     ENGINE --> INTENT --> TRACE --> PLAN
@@ -88,9 +92,16 @@ flowchart LR
     N3[禁止：Player terminal 绕过 Timeline]:::forbidden
     N4[禁止：Motion Lab 事件改变播放结果]:::forbidden
     N5[禁止：超时把 failed 改成 absent]:::forbidden
+    N6[禁止：只看 Store settled<br/>忽略 speech-only open sink]:::forbidden
 
     ENGINE -.禁止.-> N1
     AUDIOUI -.禁止.-> N2
     PLAYER -.禁止.-> N3
     LAB -.禁止.-> N4
     MATERIAL -.禁止.-> N5
+    COMPLETE -.禁止.-> N6
+
+    DISCONNECT[WebSocket disconnect]:::producer
+    STOP[TurnCoordinator<br/>agent_stop_requested + stop_event]:::executor
+    CLEAR[清理 Turn / Segment / Curve / ID map]:::fact
+    DISCONNECT --> STOP --> CLEAR

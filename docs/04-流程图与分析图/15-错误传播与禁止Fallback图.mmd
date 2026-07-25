@@ -18,19 +18,24 @@ flowchart TD
     end
 
     subgraph BACKEND[后端错误边界]
+        EXPECT{ag99live_motion_schedule<br/>本段是否应有动作？}:::check
         EFFECT{Persona Effect arguments 合法？}:::check
         PROFILE{SemanticAxisProfile 可用？}:::check
         RESOURCE{轴等级和 resource 属于当前模型？}:::check
         AGG{物理组件能聚合成唯一原子段？}:::check
         BFAIL[拒绝 motion 或输出段<br/>记录明确 reason]:::failure
+        MFAILED[motion.state=failed<br/>保留 schedule / resolution reason]:::failure
+        MABSENT[motion.state=absent<br/>协议明确未安排动作]:::terminal
         SEG[output.segment.v3]:::terminal
 
-        MODELINFO -->|是| EFFECT
-        EFFECT -->|否| BFAIL
+        MODELINFO -->|是| EXPECT
+        EXPECT -->|否| MABSENT --> SEG
+        EXPECT -->|是| EFFECT
+        EFFECT -->|缺失/非法| MFAILED --> SEG
         EFFECT -->|是| PROFILE
-        PROFILE -->|否| BFAIL
+        PROFILE -->|否| MFAILED
         PROFILE -->|是| RESOURCE
-        RESOURCE -->|否| BFAIL
+        RESOURCE -->|否| MFAILED
         RESOURCE -->|是| AGG
         AGG -->|文本冲突/多音频/重复对象| BFAIL
         AGG -->|唯一完整段| SEG
@@ -113,6 +118,8 @@ flowchart TD
         N7[Timeline 缺失 -> ModelEngine 直接播放]:::failure
         N8[数据库记录失败 -> 修改当前回复结果]:::failure
         N9[manifest 不一致 -> 尝试旧 schema]:::failure
+        N10[应有 motion 失败 -> absent / speech-only]:::failure
+        N11[Store slots settled -> 提前 ACK<br/>忽略 open required Timeline]:::failure
     end
 
     BFAIL -.禁止.-> N1
@@ -124,6 +131,13 @@ flowchart TD
     MFAIL -.禁止.-> N7
     LAB[Motion Lab 异步观察]:::owner -.禁止.-> N8
     HFAIL -.禁止.-> N9
+    MFAILED -.禁止.-> N10
+    TFAIL -.禁止.-> N11
+
+    DISCONNECT[WebSocket disconnect]:::input
+    STOPACTIVE[先标记 agent_stop_requested<br/>并 stop_event]:::owner
+    CLEARSTATE[再清理 Turn / Segment / Curve / ID map<br/>迟到输出在 Event.send 丢弃]:::terminal
+    DISCONNECT --> STOPACTIVE --> CLEARSTATE
 
     OBS[错误可观察性<br/>日志 reason + SessionStore terminal<br/>Timeline snapshot + MotionFeedback<br/>Motion Lab raw event]:::owner
     BFAIL --> OBS

@@ -44,6 +44,7 @@ sequenceDiagram
     Persona->>LLM: 生成可见回复与动作决策
     LLM-->>Persona: spoken_reply + effect_calls
     Persona->>Adapter: result contributor 生成 motion_intent.v4
+    Adapter->>Adapter: 写入 ag99live_motion_schedule<br/>区分未安排、成功和动作解析失败
     Adapter->>Adapter: 登记当前回复阶段的 pending curve input
     Adapter->>Adapter: 输出规范化阶段清洗隐藏传输标记
     Persona->>TTS: materialize spoken_reply
@@ -77,6 +78,16 @@ sequenceDiagram
             Inbound->>Store: commitOutputSegment() 原子提交
             Store-->>Orch: 已解析段状态变更
             Note over Orch,Completion: 段提交后可立即起播；不等待 synth_finished
+            Orch->>Timeline: 查询 open required execution timelines
+            alt 仍有前一段 required sink
+                Timeline-->>Orch: blocked
+                Note over Orch,Timeline: 等待 Timeline execution state change；<br/>speech-only 尾段也会阻止并发
+                Timeline-->>Orch: execution state changed
+                Orch->>Timeline: 重新查询
+                Timeline-->>Orch: releasable
+            else 没有开放 required sink
+                Timeline-->>Orch: releasable
+            end
             Orch->>Timeline: startSegmentJob(turn_id, message_id)
 
             alt audio.state = present
@@ -89,6 +100,8 @@ sequenceDiagram
                 else motion.state = absent 且模型支持说话随动
                     Timeline->>Engine: 预编译 internal speech_only request
                     Engine-->>Timeline: prepared / not_applicable / failed
+                else motion.state = failed
+                    Note over Timeline,Engine: 保留正式动作失败；<br/>不准备 speech-only 或默认动作
                 else 无可播动作
                     Note over Timeline,Engine: 不创建动作计划，也不伪造默认动作
                 end
@@ -182,8 +195,25 @@ sequenceDiagram
     end
 
     Note over Store,Completion: 口型终态归 Timeline 管理；<br/>SessionStore 段收口依据是 text / audio / motion facts
-    Store-->>Completion: 本地段全部 settled + synthFinished
+    Store-->>Completion: 协议槽位全部 settled + synthFinished
+    Completion->>Timeline: 查询同 turn_id 的 open required execution
+    alt speech-only 或其它 required sink 仍开放
+        Timeline-->>Completion: blocked，等待 terminal
+        Timeline-->>Completion: execution state changed
+        Completion->>Timeline: 重新查询同 turn_id
+        Timeline-->>Completion: no open required execution
+    else 同 Turn execution 已收口
+        Timeline-->>Completion: no open required execution
+    end
     Completion->>Adapter: control.playback_finished(success, error)
     Adapter-->>Inbound: control.turn_finished
     Inbound->>Store: 标记后端轮次结束
     Store-->>User: session completed / failed
+
+    opt WebSocket 断开
+        Inbound--xAdapter: transport disconnected
+        Adapter->>Adapter: 先 agent_stop_requested + stop_event
+        Adapter->>Adapter: 再清理 Turn / Segment / Curve / ID map
+        Note over Adapter,Persona: 被停止 event 的迟到输出在 OLVPetPlatformEvent.send 丢弃
+        Inbound->>Timeline: stopAllTimelines(disconnect)
+    end

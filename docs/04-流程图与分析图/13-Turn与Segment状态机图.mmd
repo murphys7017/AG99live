@@ -18,9 +18,12 @@ flowchart TB
         T0 -->|control.turn_started| COL
         COL -->|完整 output.segment 提交| READY
         READY -->|segment job release| PLAY
-        COL -->|零 sink 且 synth_finished| SETTLE
-        READY -->|所有段本地 settled + synth_finished| SETTLE
-        PLAY -->|所有段本地 settled + synth_finished| SETTLE
+        GATE{slots settled + synth_finished<br/>且同 Turn 无 open required Timeline?}:::event
+        COL -->|零 sink| GATE
+        READY -->|槽位 settled| GATE
+        PLAY -->|槽位 settled| GATE
+        GATE -->|否：speech-only 等仍运行| PLAY
+        GATE -->|是| SETTLE
         SETTLE -->|playback_finished 已发送 + turn_finished| DONE
 
         COL -->|协议/Store 不变量失败| FAIL
@@ -30,6 +33,9 @@ flowchart TB
         COL -->|用户显式中断| INTERRUPT
         READY -->|用户显式中断| INTERRUPT
         PLAY -->|用户显式中断| INTERRUPT
+        COL -->|WebSocket 断开| INTERRUPT
+        READY -->|WebSocket 断开| INTERRUPT
+        PLAY -->|WebSocket 断开| INTERRUPT
     end
 
     subgraph SEG[每个 output.segment.v3 的槽位事实]
@@ -88,6 +94,8 @@ flowchart TB
         COMMIT -->|present| MI
         COMMIT -->|absent| MA
         COMMIT -->|failed| MF
+        EXPECTED[ag99live_motion_schedule<br/>应有动作但 payload 缺失/非法]:::event
+        EXPECTED --> MF
     end
 
     TD --> LOCAL{本段本地 settled?}:::event
@@ -99,6 +107,6 @@ flowchart TB
     MC --> LOCAL
     MF --> LOCAL
     MA --> LOCAL
-    LOCAL -->|所有存在槽位均终态| SETTLE
+    LOCAL -->|所有存在槽位均终态| GATE
 
-    RULE[禁止状态变化<br/>重复 message_id 不覆盖<br/>终态 session 不接收新段<br/>synth_finished 后不补材料<br/>failed 不改写为 absent]:::failure
+    RULE[禁止状态变化<br/>重复 message_id 不覆盖<br/>终态 session 不接收新段<br/>synth_finished 后不补材料<br/>failed 不改写为 absent<br/>slot settled 不代表 Timeline 已结束]:::failure

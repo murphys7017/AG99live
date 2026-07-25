@@ -64,10 +64,19 @@ stateDiagram-v2
         Sink terminal values are stable.
         Late terminal events cannot overwrite
         completed/failed/interrupted.
+        speech-only motion is required here
+        even though SessionStore motion is absent.
     end note
 
     note right of Failed
         Required sink failure fails the timeline.
         Optional lip-sync failure remains visible
         but does not by itself stop required audio.
+    end note
+
+    note left of Closed
+        Closing the last required sink updates
+        the open execution set and notifies
+        Orchestrator + CompletionCoordinator.
+        Store slot settlement alone cannot close it.
     end note

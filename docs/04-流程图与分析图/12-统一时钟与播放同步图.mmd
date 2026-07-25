@@ -10,9 +10,16 @@ sequenceDiagram
     participant Lip as LipSync Sink
     participant SDK as Live2D WebSDK
     participant Projection as SessionProjection
+    participant Completion as CompletionCoordinator
 
     Store-->>Orch: 原子 segment ready(turn_id, message_id)
-    Orch->>TL: startSegmentJob(text, audio, motion)
+    Orch->>TL: 查询 open required execution timelines
+    alt 仍有开放 required sink
+        TL-->>Orch: blocked，等待 execution state change
+    else 没有开放 required sink
+        TL-->>Orch: releasable
+        Orch->>TL: startSegmentJob(text, audio, motion)
+    end
 
     alt audio.state = present
         TL->>TL: 创建 segment timeline，注册 audio required sink
@@ -122,4 +129,14 @@ sequenceDiagram
             TL->>Sinks: reject waiting subtitle
             Sinks->>Store: text failed<br/>不转成独立气泡
         end
+    end
+
+    Store-->>Completion: protocol slots settled + synthFinished
+    Completion->>TL: 查询同 turn_id 的 open required execution
+    alt speech-only 或其它 required sink 仍开放
+        TL-->>Completion: 暂不发送 playback_finished
+    else 同 Turn execution 已收口
+        TL-->>Completion: no open required execution
+        Completion-->>Store: phase = settling
+        Completion->>Completion: 计算 text/audio/motion failure -> success
     end

@@ -3,19 +3,23 @@ flowchart LR
     classDef port fill:#e8f1f2,stroke:#2f5d62,color:#163438
     classDef queue fill:#fff3d6,stroke:#9a6b14,color:#513807
     classDef storage fill:#e8edf7,stroke:#3e5f93,color:#1d3154
-    classDef future fill:#e9f3df,stroke:#557a35,color:#2e431d
+    classDef current fill:#e9f3df,stroke:#557a35,color:#2e431d
+    classDef future fill:#f3e6ec,stroke:#8b4865,color:#4b2637
     classDef failure fill:#fde7e3,stroke:#b33a2b,color:#681d14
 
-    subgraph SOURCES[观察事件来源]
+    subgraph SOURCES[当前观察事件来源]
+        INPUT[TurnCoordinator<br/>turn.input_received]:::source
+        OUTPUT[TurnCoordinator<br/>turn.assistant_output canonical text]:::source
         PERSONA[Persona Effect<br/>received / intent_resolved]:::source
+        REFERENCES[Prompt references<br/>selected + projected]:::source
         CURVE[Performance Curve<br/>requested / resolved / failed / attached]:::source
         COMPILE[ModelEngine<br/>compile_failed / transform trace]:::source
         PLAYER[Motion Player<br/>started / terminal / timeout]:::source
-        TIMELINE[Playback Timeline<br/>audio/motion/lip-sync snapshot]:::source
-        MANUAL[Action Lab / 手动预览]:::source
+        TIMELINE[Playback Timeline<br/>audio / motion / lip-sync snapshot]:::source
+        MANUAL[Motion Lab manual preview]:::source
     end
 
-    subgraph FRONT[前端可靠发送]
+    subgraph FRONT[前端 at-least-once 发送]
         EVENT[MotionLabRawEventInput<br/>stable event_id<br/>turn_id + message_id]:::port
         IDB[IndexedDB Pending Event Store]:::storage
         OUTQ[MotionLabOutboundQueue]:::queue
@@ -26,36 +30,37 @@ flowchart LR
         TIMELINE --> EVENT
         MANUAL --> EVENT
         EVENT -->|先持久化| IDB
-        IDB --> OUTQ
-        OUTQ --> SEND
+        IDB --> OUTQ --> SEND
     end
 
-    subgraph BACK[后端统一观察端口]
+    subgraph BACK[后端统一观察与持久化]
         WS[system.motion_lab_raw_event]:::port
-        OBS[record_motion_lab_observation<br/>唯一 envelope 构造入口]:::port
-        REC[MotionLabRecorder<br/>asyncio queue / batch worker]:::queue
-        STORE[MotionLabRawEventStore]:::storage
+        OBS[record_motion_lab_observation<br/>唯一 envelope 入口]:::port
+        REC[MotionLabRecorder<br/>async queue / batch worker]:::queue
+        RAWSTORE[MotionLabRawEventStore]:::storage
         SQLITE[(SQLite<br/>motion_lab_raw_events)]:::storage
         ACK[system.motion_lab_raw_event_recorded<br/>event_id]:::port
 
+        INPUT --> OBS
+        OUTPUT --> OBS
         PERSONA --> OBS
+        REFERENCES --> OBS
         CURVE --> OBS
         SEND --> WS --> OBS
-        OBS --> REC --> STORE --> SQLITE
-        STORE -.持久化完成 callback.-> ACK
+        OBS --> REC --> RAWSTORE --> SQLITE
+        RAWSTORE -.持久化完成 callback.-> ACK
     end
 
-    ACK -->|匹配 event_id| OUTQ
-    OUTQ -->|确认后删除| IDB
+    ACK -->|匹配 event_id 后删除| IDB
     DISCONNECT[断线 / 进程重启]:::failure -->|event_id 不变，重发| OUTQ
     SQLITE -->|INSERT OR IGNORE event_id| DEDUPE[幂等去重]:::storage
 
-    subgraph RAW[每条事件的关键维度]
+    subgraph FACTS[当前原始事实]
         IDS[conversation_uid<br/>turn_id / frontend_turn_id / message_id]:::storage
         ROUTE[source_route / phase / event_type]:::storage
         MODEL[model_name / profile_id / revision]:::storage
-        TEXT[user_text / assistant_text]:::storage
-        PAYLOAD[payload_kind / raw JSON snapshot]:::storage
+        TEXT[user_text / canonical assistant_text]:::storage
+        PAYLOAD[intent / CompiledSemanticMotion<br/>parameter plan / trace / terminal]:::storage
     end
 
     OBS --> IDS
@@ -64,17 +69,33 @@ flowchart LR
     OBS --> TEXT
     OBS --> PAYLOAD
 
-    subgraph CURATION[后续人工筛选闭环]
-        QUERY[历史动作工作台<br/>按 turn/event/profile 查询]:::future
-        CONTEXT[查看原始对话、effect、intent、trace、终态]:::future
-        PREVIEW[复播原始或调整后动作]:::future
-        LABEL[人工接受 / 拒绝 / 调整 / 标签]:::future
-        SAMPLE[Motion Tuning Sample]:::future
-        EXPORT[训练数据导出<br/>SFT / preference / evaluation]:::future
+    subgraph CURATION[当前人工样本闭环]
+        HISTORY[动作历史<br/>按 canonical turn + segment 关联]:::current
+        PANEL[MotionTuningPanel<br/>查看 / 复播 / pose 调轴]:::current
+        CONTEXT[get_turn_context<br/>目标 Turn 输入 + 目标 Segment 输出]:::current
+        SAMPLE[ag99.motion_tuning_sample.v2<br/>CompiledSemanticMotion pose / sequence]:::current
+        PROJECT[MotionTuningStore<br/>按当前 profile 投影参考 output]:::current
+        SELECT[resolve_motion_reference_examples<br/>按本轮用户文本 / 标签 / 动作族排序]:::current
+        PROMPT[Persona Prompt context<br/>1-3 个 request-scoped 样本]:::current
+        AUDIT[motion.prompt_reference_examples_resolved<br/>记录实际注入结果]:::current
 
-        SQLITE --> QUERY --> CONTEXT --> PREVIEW --> LABEL --> SAMPLE --> EXPORT
+        SQLITE --> HISTORY --> PANEL
+        SQLITE --> CONTEXT
+        PANEL -->|source_record_id + turn_id + message_id| SAMPLE
+        CONTEXT --> SAMPLE
+        SAMPLE --> PROJECT --> SELECT --> PROMPT --> AUDIT --> OBS
     end
 
-    RULE[非干扰规则<br/>记录异步执行<br/>前端先落 IndexedDB<br/>SQLite 写入失败重试并暴露日志<br/>观察失败不改变当前动作或回复]:::port
+    subgraph REMAINING[明确后续工作]
+        STEPEDIT[sequence step editor<br/>axis_levels + duration_weight]:::future
+        DIVERSITY[最近动作族分布<br/>紧凑多样性反馈]:::future
+        EXPORT[训练数据导出<br/>小模型阶段]:::future
+
+        PANEL -.后续.-> STEPEDIT
+        HISTORY -.后续.-> DIVERSITY
+        SAMPLE -.后续.-> EXPORT
+    end
+
+    RULE[非干扰规则<br/>记录异步执行<br/>前端先落 IndexedDB<br/>SQLite 失败重试并暴露日志<br/>观察失败不改变当前回复或动作]:::port
     RULE -.约束.-> OUTQ
     RULE -.约束.-> REC

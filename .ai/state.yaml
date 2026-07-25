@@ -1,13 +1,19 @@
 task:
-  class: bugfix
-  risk: high
-  phase: reviewed
-  status: complete
-  scope: Repair cross-turn interrupt ownership, Live2D physics-response boundaries, playback-runtime composition, Motion Lab prompt-reference observability, and their protocol documentation.
+  class: refactor
+  risk: medium
+  phase: implementation
+  status: active
+  scope: "Improve Live2D expressive quality without replacing the current motion system: physics-response optimization first, then a performance layer."
 
 context:
   confidence: high
   assumptions:
+    - The current motion system correctly decides what expression or movement to use and remains in place; the new work only improves how its selected inputs are performed.
+    - Work is limited to the model's primary facial and pose parameters. Mouse, controller, and other extended VTube Studio inputs are out of scope.
+    - Existing semantic-axis and Cubism Core bounds remain the safety boundary. No standalone parameter-range-control phase or additional runtime clamp layer is required.
+    - Direct semantic parameter plans already write before Cubism Physics. The first physics task is to ensure all main facial inputs, especially lip sync, reach Physics in the same frame.
+    - Physics output and animation-owned parameters, including Phy* and Anim* parameters, remain owned by Cubism Physics and the animation system and are not driven directly by the input layer.
+    - The performance layer is deferred until input ranges and physical response are stable; it will provide timing, emphasis, and low-dimensional templates rather than a second motion system.
     - The user confirmed that the selected Superheroes recording and the Live2D model are cleared for the intended commercial use.
     - The promotional video remains isolated under promo-video and does not become a runtime dependency of AG99live.
     - The final promotional render uses the user-provided cleared soundtrack excerpt and a clean, locally recorded Live2D action capture.
@@ -53,6 +59,9 @@ architecture:
   settings_ownership:
     model_engine: motionIntensityScale only.
     live2d_presentation: ambientMotionEnabled, physicsResponseScale, and renderDprCap; applied by the renderer before model initialization and atomically through the WebSDK Adapter at runtime.
+  expressive_quality_roadmap:
+    phase_1: Tune physical response after all principal inputs are mixed before the Cubism Physics update, including the two mouth-opening inputs where applicable.
+    phase_2: Add a performance layer that turns existing action decisions into natural timing, emphasis, coordinated micro-movements, and reusable low-dimensional templates.
   playback_rules:
     - Audio-backed subtitle, motion, and lip sync use the matched HTMLAudioElement playing fact.
     - Internal speech-only motion receives the same segment clock reader but does not project started or terminal state into an absent protocol motion slot.
@@ -125,6 +134,12 @@ verification:
     - A live multi-turn AstrBot and Electron session must confirm that interrupting one turn leaves other queued turns untouched, late output from the cancelled event is discarded, and physicsResponseScale changes hair/clothing response without expanding semantic head/body axes.
 
 backlog:
+  - id: physics_response_optimization
+    status: active
+    summary: Tune input mixing, update ordering, and Cubism physical response without directly writing physics-output parameters.
+  - id: performance_layer
+    status: planned
+    summary: After input and physics behavior are stable, add timing, emphasis, coordinated micro-movements, and low-dimensional templates above the existing motion system.
   - id: motion_lab_sequence_tuning
     status: planned
     summary: Upgrade Motion Lab drafts, persisted samples, and backend few-shot projection to preserve and edit v4 motion_steps without flattening them into one pose.
