@@ -6,6 +6,7 @@ import asyncio
 from pathlib import Path
 import traceback
 from typing import Any
+from uuid import uuid4
 
 from astrbot.api import logger
 from astrbot.api.platform import AstrBotMessage, Platform, PlatformMetadata
@@ -218,11 +219,14 @@ class OLVPetPlatformAdapter(Platform):
         self._refresh_runtime_settings()
 
     def meta(self) -> PlatformMetadata:
-        return PlatformMetadata(
+        metadata = PlatformMetadata(
             name="olv_pet_adapter",
             description="AG99live desktop adapter",
             id="olv_pet_adapter",
         )
+        # Older AstrBot constructors reject this newer keyword but accept metadata extensions.
+        metadata.support_personal_runtime = True
+        return metadata
 
     @property
     def vad_model(self) -> str:
@@ -276,7 +280,9 @@ class OLVPetPlatformAdapter(Platform):
                 message_chain=message_chain,
                 turn_id=turn_id,
                 unified_msg_origin=str(session),
-                platform_extras={"logical_message_id": "proactive_reply"},
+                platform_extras={
+                    "logical_message_id": f"proactive_reply:{uuid4().hex}"
+                },
             )
             await self.turn_coordinator.close_turn_output_queue(turn_id=turn_id)
         except asyncio.CancelledError:
