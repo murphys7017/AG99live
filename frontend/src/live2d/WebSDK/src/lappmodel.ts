@@ -52,6 +52,11 @@ import {
   prepareDirectParameterExecution,
   type DirectParameterExecutionPlan,
 } from "./directparameterplan";
+import {
+  PARAMETER_MIX_PRIORITY,
+  ParameterMixer,
+  type ParameterContribution,
+} from "./parametermixer";
 import { TextureInfo } from "./lapptexturemanager";
 import { CubismMoc } from "@framework/model/cubismmoc";
 import {
@@ -100,17 +105,6 @@ enum LoadStep {
 
 const DIRECT_MAX_MISSING_AXIS_BINDINGS = 3;
 const DIRECT_MAX_SUPPLEMENTARY_BINDING_FAILURES = 3;
-const SPEECH_HEAD_ENVELOPE_ATTACK_PER_SECOND = 8.0;
-const SPEECH_HEAD_ENVELOPE_RELEASE_PER_SECOND = 3.0;
-const SPEECH_BODY_ENVELOPE_ATTACK_PER_SECOND = 4.0;
-const SPEECH_BODY_ENVELOPE_RELEASE_PER_SECOND = 1.8;
-const SPEECH_AUDIO_GAIN_FLOOR = 0.32;
-const SPEECH_AUDIO_GAIN_SPAN = 1.18;
-const SPEECH_AUDIO_GAIN_MAX = 1.5;
-const SPEECH_AUDIO_PITCH_GAIN_MAX = 1.15;
-const SPEECH_BODY_GAIN_FLOOR = 0.22;
-const SPEECH_BODY_GAIN_SPAN = 0.78;
-const SPEECH_BODY_GAIN_MAX = 1.0;
 interface DirectSemanticParameterBinding {
   axisId: string;
   parameterIdRaw: string;
@@ -159,6 +153,13 @@ interface DirectParameterPlanState {
   }) => void;
   /** 防止重复发射完成事件 */
   terminalEmitted: boolean;
+}
+
+interface DirectPlanContributionCollection {
+  contributions: ParameterContribution[];
+  failure: string | null;
+  shouldLogFrame: boolean;
+  released: boolean;
 }
 
 /**
@@ -224,6 +225,7 @@ export class LAppModel extends CubismUserModel {
       return;
     }
     this.stopMotion("motion_model_released");
+    this._parameterMixer.reset();
     this._released = true;
     cancelLive2DModelLoad(this._loadGeneration, "live2d_model_load_released");
     super.release();
@@ -661,14 +663,10 @@ export class LAppModel extends CubismUserModel {
     this._dragManager.update(deltaTimeSeconds);
     this._dragX = this._dragManager.getX();
     this._dragY = this._dragManager.getY();
-    let lipSyncValue = 0.0;
-    let speechEnergyValue = 0.0;
-    if (this._lipsync) {
-      const liveLipSyncValue = this.resolveExternalLipSyncValue();
-      lipSyncValue = liveLipSyncValue ?? 0;
-    }
-    speechEnergyValue = this.resolveExternalSpeechEnergyValue() ?? 0;
-    this.updateSpeechAudioEnvelope(speechEnergyValue, deltaTimeSeconds);
+    const lipSyncValue = this._parameterMixer.advanceAudioFrame(
+      deltaTimeSeconds,
+      this._lipsync === true,
+    );
 
     // モーションによるパラメータ更新の有無
     let motionUpdated = false;
@@ -731,36 +729,27 @@ export class LAppModel extends CubismUserModel {
       this._breath.updateParameters(this._model, deltaTimeSeconds);
     }
 
-    // Direct parameter overlay should run before physics so physics-driven
-    // output parameters can consume these values in the same frame.
-    let directPlanFailure: string | null = null;
+    // All AG99 active parameters are resolved once before Physics consumes them.
+    let parameterMixerFailure: string | null = null;
     try {
-      directPlanFailure = this.applyDirectParameterPlanOverlay();
+      parameterMixerFailure = this.applyActiveParameterFrame(lipSyncValue);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      directPlanFailure = `v2_parameter_frame_exception:${message || "unknown_error"}`;
-      console.error("[LAppModel] Direct parameter frame execution failed.", error);
+      parameterMixerFailure = `parameter_mixer_frame_exception:${message || "unknown_error"}`;
+      console.error("[LAppModel] Active parameter frame execution failed.", error);
     }
-    if (directPlanFailure) {
-      this.stopDirectParameterPlan(directPlanFailure, "failed");
+    if (parameterMixerFailure) {
+      console.error("[LAppModel] Active parameter frame rejected.", {
+        reason: parameterMixerFailure,
+      });
+      if (this.hasActiveDirectParameterPlan()) {
+        this.stopDirectParameterPlan(parameterMixerFailure, "failed");
+      }
     }
 
     // 物理演算の設定
     if (this._physics != null) {
       this._physics.evaluate(this._model, deltaTimeSeconds);
-    }
-
-    // Lip sync settings
-    if (this._lipsync) {
-      const lipSyncWeight = 4.0;
-
-      for (let i = 0; i < this._lipSyncIds.getSize(); ++i) {
-        this._model.addParameterValueById(
-          this._lipSyncIds.at(i),
-          lipSyncValue,
-          lipSyncWeight
-        );
-      }
     }
 
     // ポーズの設定
@@ -1763,65 +1752,134 @@ export class LAppModel extends CubismUserModel {
   }
 
   public setExternalLipSyncValue(value: number): void {
-    if (!Number.isFinite(value)) {
-      return;
-    }
-    this._externalLipSyncValue = Math.max(0, Math.min(1, value));
-    this._externalLipSyncUpdatedAtMs = performance.now();
+    this._parameterMixer.setExternalLipSyncValue(value);
   }
 
   public clearExternalLipSyncValue(): void {
-    this._externalLipSyncValue = null;
-    this._externalLipSyncUpdatedAtMs = 0;
+    this._parameterMixer.clearExternalLipSyncValue();
   }
 
   public setExternalSpeechEnergyValue(value: number): void {
-    if (!Number.isFinite(value)) {
-      return;
-    }
-    this._externalSpeechEnergyValue = Math.max(0, Math.min(1, value));
-    this._externalSpeechEnergyUpdatedAtMs = performance.now();
+    this._parameterMixer.setExternalSpeechEnergyValue(value);
   }
 
   public clearExternalSpeechEnergyValue(): void {
-    this._externalSpeechEnergyValue = null;
-    this._externalSpeechEnergyUpdatedAtMs = 0;
+    this._parameterMixer.clearExternalSpeechEnergyValue();
   }
 
   public hasConfiguredLipSyncParameters(): boolean {
-    return this._lipSyncIds.getSize() > 0;
+    if (!this._model || this._lipSyncIds.getSize() === 0) {
+      return false;
+    }
+    for (let index = 0; index < this._lipSyncIds.getSize(); index += 1) {
+      if (!this.isParameterIndexWritable(this._model.getParameterIndex(this._lipSyncIds.at(index)))) {
+        return false;
+      }
+    }
+    return true;
   }
 
-  private applyDirectParameterPlanOverlay(): string | null {
+  private applyActiveParameterFrame(lipSyncValue: number): string | null {
+    if (!this._model) {
+      return "parameter_mixer_model_unavailable";
+    }
+
+    const directPlan = this.collectDirectPlanContributions();
+    if (directPlan.failure) {
+      return directPlan.failure;
+    }
+    const lipSyncContributions = this.collectLipSyncContributions(lipSyncValue);
+    if (typeof lipSyncContributions === "string") {
+      return lipSyncContributions;
+    }
+    const resolution = this._parameterMixer.resolveFrame(
+      [...directPlan.contributions, ...lipSyncContributions],
+      {
+        isParameterIndexWritable: (parameterIndex) => this.isParameterIndexWritable(parameterIndex),
+        getParameterValue: (parameterIndex) => this._model.getParameterValueByIndex(parameterIndex),
+        getParameterMinimumValue: (parameterIndex) => this._model.getParameterMinimumValue(parameterIndex),
+        getParameterMaximumValue: (parameterIndex) => this._model.getParameterMaximumValue(parameterIndex),
+      },
+    );
+    if (!resolution.ok) {
+      return resolution.reason;
+    }
+
+    for (const parameter of resolution.parameters) {
+      this._model.setParameterValueById(parameter.parameterId, parameter.value);
+      const readbackValue = this._model.getParameterValueByIndex(parameter.parameterIndex);
+      if (Math.abs(readbackValue - parameter.value) > 0.001) {
+        return `parameter_mixer_write_mismatch:${parameter.parameterIdRaw}`;
+      }
+    }
+
+    const planState = this._directParameterPlanState;
+    if (directPlan.shouldLogFrame && planState) {
+      console.info("[LAppModel] Active parameter frame resolved.", {
+        mode: planState.mode,
+        emotion: planState.emotionLabel,
+        parameters: resolution.parameters.map((parameter) => ({
+          parameterId: parameter.parameterIdRaw,
+          baseValue: parameter.baseValue,
+          value: parameter.value,
+          contributions: parameter.contributions,
+        })),
+      });
+      planState.diagnosticFrameCount += 1;
+    }
+    if (directPlan.released && planState) {
+      console.info("[LAppModel] Direct parameter plan released after parameter mixing.");
+      this.stopDirectParameterPlan("", "completed");
+    }
+    return null;
+  }
+
+  private collectDirectPlanContributions(): DirectPlanContributionCollection {
     if (!this._directParameterPlanState || !this._model) {
-      return null;
+      return {
+        contributions: [],
+        failure: null,
+        shouldLogFrame: false,
+        released: false,
+      };
     }
 
     const planState = this._directParameterPlanState;
     const elapsedMs = planState.playbackClockReader.getElapsedMs();
     if (elapsedMs === null || !Number.isFinite(elapsedMs)) {
-      return "v2_parameter_clock_unavailable";
-    }
-    const shouldLogFrame = planState.diagnosticFrameCount < 2;
-    let presentationReleased = true;
-    if (shouldLogFrame) {
-      console.info(`[LAppModel] applyDirectParameterPlanOverlay: mode=${planState.mode}, emotion=${planState.emotionLabel}, totalMs=${planState.timing.totalMs}, blendIn=${planState.timing.blendInMs}, hold=${planState.timing.holdMs}, blendOut=${planState.timing.blendOutMs}, semanticCount=${planState.semanticBindings.length}`);
+      return {
+        contributions: [],
+        failure: "v2_parameter_clock_unavailable",
+        shouldLogFrame: false,
+        released: false,
+      };
     }
 
+    const shouldLogFrame = planState.diagnosticFrameCount < 2;
+    let presentationReleased = true;
+    const contributions: ParameterContribution[] = [];
     for (const item of planState.semanticBindings) {
       if (!this.isParameterIndexWritable(item.parameterIndex)) {
-        console.warn(`[LAppModel] applyDirectParameterPlanOverlay: v2 parameter not writable axis=${item.axisId} param=${item.parameterIdRaw} idx=${item.parameterIndex}`);
-        return `v2_parameter_not_writable:${item.parameterIdRaw}`;
+        return {
+          contributions: [],
+          failure: `v2_parameter_not_writable:${item.parameterIdRaw}`,
+          shouldLogFrame: false,
+          released: false,
+        };
       }
 
       const minValue = this._model.getParameterMinimumValue(item.parameterIndex);
       const maxValue = this._model.getParameterMaximumValue(item.parameterIndex);
       if (item.targetValue < minValue || item.targetValue > maxValue) {
-        return `v2_parameter_target_out_of_runtime_range:${item.parameterIdRaw}`;
+        return {
+          contributions: [],
+          failure: `v2_parameter_target_out_of_runtime_range:${item.parameterIdRaw}`,
+          shouldLogFrame: false,
+          released: false,
+        };
       }
 
-      const baseValue = this._model.getParameterValueByIndex(item.parameterIndex);
-      const rawFrameTargetValue = this.resolveSemanticBindingFrameTarget(
+      const rawFrameTargetValue = this.resolveDirectBindingTargetValue(
         item,
         elapsedMs,
         item.targetValue,
@@ -1831,94 +1889,59 @@ export class LAppModel extends CubismUserModel {
       const presentationFrame = resolveParameterPresentationFrame(
         item.presentation,
         rawFrameTargetValue,
-        baseValue,
         elapsedMs,
         planState.timing,
       );
-      const frameTargetValue = presentationFrame.value;
       presentationReleased = presentationReleased && presentationFrame.released;
-      this._model.setParameterValueById(item.parameterId, frameTargetValue);
-      const readbackValue = this._model.getParameterValueByIndex(item.parameterIndex);
-      if (Math.abs(readbackValue - frameTargetValue) > 0.001) {
-        console.warn(
-          `[LAppModel] v2 setParam readback mismatch axis=${item.axisId} param=${item.parameterIdRaw} wrote=${frameTargetValue} readback=${readbackValue}`,
-        );
-        return `v2_parameter_write_mismatch:${item.parameterIdRaw}`;
+      contributions.push({
+        parameterId: item.parameterId,
+        parameterIdRaw: item.parameterIdRaw,
+        parameterIndex: item.parameterIndex,
+        source: `direct_plan:${item.axisId}`,
+        operation: "replace",
+        value: presentationFrame.drivenValue,
+        weight: presentationFrame.ownershipWeight,
+        priority: PARAMETER_MIX_PRIORITY.directPlan,
+      });
+    }
+
+    return {
+      contributions,
+      failure: null,
+      shouldLogFrame,
+      released: elapsedMs >= planState.timing.totalMs && presentationReleased,
+    };
+  }
+
+  private collectLipSyncContributions(
+    lipSyncValue: number,
+  ): ParameterContribution[] | string {
+    if (!this._lipsync || lipSyncValue <= 0 || !this._model) {
+      return [];
+    }
+
+    const contributions: ParameterContribution[] = [];
+    for (let index = 0; index < this._lipSyncIds.getSize(); index += 1) {
+      const parameterId = this._lipSyncIds.at(index);
+      const parameterIndex = this._model.getParameterIndex(parameterId);
+      if (!this.isParameterIndexWritable(parameterIndex)) {
+        return `parameter_mixer_lip_sync_parameter_not_writable:${index}`;
       }
-      if (shouldLogFrame) {
-        console.info(`[LAppModel] v2 setParam axis=${item.axisId} param=${item.parameterIdRaw} input=${item.inputValue} base=${baseValue} rawTarget=${rawFrameTargetValue} presentedTarget=${presentationFrame.targetValue} output=${frameTargetValue} weight=${item.weight} readback=${readbackValue}`);
-      }
+      contributions.push({
+        parameterId,
+        parameterIdRaw: parameterId.getString().s,
+        parameterIndex,
+        source: "lip_sync",
+        operation: "add",
+        value: lipSyncValue,
+        weight: 4.0,
+        priority: PARAMETER_MIX_PRIORITY.lipSync,
+      });
     }
-
-    if (shouldLogFrame) {
-      planState.diagnosticFrameCount += 1;
-    }
-
-    if (elapsedMs >= planState.timing.totalMs && presentationReleased) {
-      console.info(`[LAppModel] applyDirectParameterPlanOverlay: plan released at ${elapsedMs}ms, stopping.`);
-      this.stopDirectParameterPlan("", "completed");
-    }
-    return null;
+    return contributions;
   }
 
-  private updateSpeechAudioEnvelope(
-    speechEnergyValue: number,
-    deltaTimeSeconds: number,
-  ): void {
-    const target = Math.max(0, Math.min(1, speechEnergyValue));
-    this._speechAudioEnvelope = this.updateEnvelopeValue(
-      this._speechAudioEnvelope,
-      target,
-      deltaTimeSeconds,
-      SPEECH_HEAD_ENVELOPE_ATTACK_PER_SECOND,
-      SPEECH_HEAD_ENVELOPE_RELEASE_PER_SECOND,
-    );
-    this._speechBodyEnvelope = this.updateEnvelopeValue(
-      this._speechBodyEnvelope,
-      target,
-      deltaTimeSeconds,
-      SPEECH_BODY_ENVELOPE_ATTACK_PER_SECOND,
-      SPEECH_BODY_ENVELOPE_RELEASE_PER_SECOND,
-    );
-    if (this._speechAudioEnvelope < 0.001) {
-      this._speechAudioEnvelope = 0;
-    }
-    if (this._speechBodyEnvelope < 0.001) {
-      this._speechBodyEnvelope = 0;
-    }
-  }
-
-  private updateEnvelopeValue(
-    current: number,
-    target: number,
-    deltaTimeSeconds: number,
-    attackPerSecond: number,
-    releasePerSecond: number,
-  ): number {
-    const rate = target > current ? attackPerSecond : releasePerSecond;
-    const blend = 1 - Math.exp(-Math.max(0, deltaTimeSeconds) * rate);
-    return current + (target - current) * blend;
-  }
-
-  private resolveSpeechAudioGain(item: DirectSemanticParameterBinding): number {
-    const channelName = item.axisId.startsWith("voice_following.")
-      ? item.axisId.slice("voice_following.".length).split("|")[0]
-      : item.axisId;
-    const rawGain = channelName.startsWith("body_")
-      ? Math.min(
-          SPEECH_BODY_GAIN_MAX,
-          SPEECH_BODY_GAIN_FLOOR + this._speechBodyEnvelope * SPEECH_BODY_GAIN_SPAN,
-        )
-      : Math.min(
-          SPEECH_AUDIO_GAIN_MAX,
-          SPEECH_AUDIO_GAIN_FLOOR + this._speechAudioEnvelope * SPEECH_AUDIO_GAIN_SPAN,
-        );
-    return channelName.includes("pitch")
-      ? Math.min(SPEECH_AUDIO_PITCH_GAIN_MAX, rawGain)
-      : rawGain;
-  }
-
-  private resolveSemanticBindingFrameTarget(
+  private resolveDirectBindingTargetValue(
     item: DirectSemanticParameterBinding,
     elapsedMs: number,
     fallbackTargetValue: number,
@@ -1939,7 +1962,7 @@ export class LAppModel extends CubismUserModel {
       Math.max(0, elapsedMs - item.modulationDelayMs),
       0,
     );
-    const audioGain = this.resolveSpeechAudioGain(item);
+    const audioGain = this._parameterMixer.getSpeechAudioGain(item.axisId);
     const modulatedValue =
       sequenceTargetValue
       + gestureValue
@@ -1947,28 +1970,6 @@ export class LAppModel extends CubismUserModel {
         * item.modulationDirection
         * audioGain;
     return Math.max(minValue, Math.min(maxValue, modulatedValue));
-  }
-
-  private resolveExternalLipSyncValue(): number | null {
-    if (this._externalLipSyncValue === null) {
-      return null;
-    }
-    if (performance.now() - this._externalLipSyncUpdatedAtMs > 180) {
-      this.clearExternalLipSyncValue();
-      return null;
-    }
-    return this._externalLipSyncValue;
-  }
-
-  private resolveExternalSpeechEnergyValue(): number | null {
-    if (this._externalSpeechEnergyValue === null) {
-      return null;
-    }
-    if (performance.now() - this._externalSpeechEnergyUpdatedAtMs > 180) {
-      this.clearExternalSpeechEnergyValue();
-      return null;
-    }
-    return this._externalSpeechEnergyValue;
   }
 
   private resolveSpeechFollowingChannelName(axisId: string): string {
@@ -2125,12 +2126,7 @@ export class LAppModel extends CubismUserModel {
     this._directParameterPlanState = null;
     this._directParameterPlanError = "";
     this._motionStartError = "";
-    this._speechAudioEnvelope = 0.0;
-    this._speechBodyEnvelope = 0.0;
-    this._externalLipSyncValue = null;
-    this._externalLipSyncUpdatedAtMs = 0;
-    this._externalSpeechEnergyValue = null;
-    this._externalSpeechEnergyUpdatedAtMs = 0;
+    this._parameterMixer = new ParameterMixer();
   }
 
   _modelSetting: ICubismModelSetting; // モデルセッティング情報
@@ -2163,10 +2159,5 @@ export class LAppModel extends CubismUserModel {
   _directParameterPlanState: DirectParameterPlanState | null;
   _directParameterPlanError: string;
   _motionStartError: string;
-  _speechAudioEnvelope: number;
-  _speechBodyEnvelope: number;
-  _externalLipSyncValue: number | null;
-  _externalLipSyncUpdatedAtMs: number;
-  _externalSpeechEnergyValue: number | null;
-  _externalSpeechEnergyUpdatedAtMs: number;
+  private _parameterMixer: ParameterMixer;
 }

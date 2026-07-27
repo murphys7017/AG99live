@@ -21,14 +21,14 @@ export interface ParameterPresentationTrackPoint {
 
 export interface ParameterPresentationFrame {
   targetValue: number;
-  value: number;
+  drivenValue: number;
+  ownershipWeight: number;
   released: boolean;
 }
 
 export function resolveParameterPresentationFrame(
   node: ParameterPresentationNode,
   frameTargetValue: number,
-  baseValue: number,
   elapsedMs: number,
   timing: DirectParameterExecutionPlan["timing"],
 ): ParameterPresentationFrame {
@@ -47,7 +47,8 @@ export function resolveParameterPresentationFrame(
     const ownershipWeight = resolveOwnershipWeight(elapsedMs, timing);
     return {
       targetValue,
-      value: blendWithBaseValue(baseValue, node.drivenValue, ownershipWeight, node),
+      drivenValue: node.drivenValue,
+      ownershipWeight,
       released: ownershipWeight === 0,
     };
   }
@@ -68,7 +69,8 @@ export function resolveParameterPresentationFrame(
   const ownershipWeight = resolveOwnershipWeight(elapsedMs, timing);
   return {
     targetValue,
-    value: blendWithBaseValue(baseValue, next.value, ownershipWeight, node),
+    drivenValue: next.value,
+    ownershipWeight,
     released: ownershipWeight === 0,
   };
 }
@@ -98,19 +100,6 @@ export function resolveParameterPresentationTrack(
     previous = next;
   }
   return previous.value;
-}
-
-function blendWithBaseValue(
-  baseValue: number,
-  drivenValue: number,
-  ownershipWeight: number,
-  node: ParameterPresentationNode,
-): number {
-  return clamp(
-    interpolate(baseValue, drivenValue, ownershipWeight),
-    node.minValue,
-    node.maxValue,
-  );
 }
 
 function resolveOwnershipWeight(
