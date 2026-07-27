@@ -1,0 +1,6 @@
+# Authentication credentials are local configuration, never repository data.
+.vts-data-recorder.json
+vts-token.json
+
+.pytest_cache/
+*.egg-info/
