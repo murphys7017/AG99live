@@ -1,9 +1,9 @@
 task:
   class: refactor
-  risk: medium
+  risk: high
   phase: implementation
   status: active
-  scope: "Improve Live2D expressive quality without replacing the current motion system: physics-response optimization first, then a performance layer."
+  scope: "Consolidate WebSDK active parameter contributions into one Parameter Mixer before Cubism Physics, without replacing the current motion, Timeline, or semantic compiler."
 
 context:
   confidence: high
@@ -14,6 +14,7 @@ context:
     - Direct semantic parameter plans already write before Cubism Physics. The first physics task is to ensure all main facial inputs, especially lip sync, reach Physics in the same frame.
     - Physics output and animation-owned parameters, including Phy* and Anim* parameters, remain owned by Cubism Physics and the animation system and are not driven directly by the input layer.
     - The performance layer is deferred until input ranges and physical response are stable; it will provide timing, emphasis, and low-dimensional templates rather than a second motion system.
+    - Parameter Mixer receives already-resolved active parameter contributions, combines them once per frame, and does not interpret semantic levels, own Timeline state, or write Cubism Physics output parameters.
     - The user confirmed that the selected Superheroes recording and the Live2D model are cleared for the intended commercial use.
     - The promotional video remains isolated under promo-video and does not become a runtime dependency of AG99live.
     - The final promotional render uses the user-provided cleared soundtrack excerpt and a clean, locally recorded Live2D action capture.
@@ -56,6 +57,10 @@ architecture:
     model_engine: Level sampling, intensity, coupling, timing, speech gesture planning, relation graph constraints, plan building, and resource policy.
     playback_timeline: Segment-scoped clock and required/optional sink lifecycle.
     live2d_websdk: Exact parameter resolution, per-frame interpolation, lip sync, speech energy, dynamics, and physics.
+  parameter_mixing:
+    boundary: "WebSDK-only active parameter composition immediately before Cubism Physics."
+    inputs: "Cubism base snapshot plus direct-plan, speech, and lip-sync contributions."
+    output: "One resolved active parameter frame applied once by LAppModel."
   settings_ownership:
     model_engine: motionIntensityScale only.
     live2d_presentation: ambientMotionEnabled, physicsResponseScale, and renderDprCap; applied by the renderer before model initialization and atomically through the WebSDK Adapter at runtime.
@@ -134,6 +139,9 @@ verification:
     - A live multi-turn AstrBot and Electron session must confirm that interrupting one turn leaves other queued turns untouched, late output from the cancelled event is discarded, and physicsResponseScale changes hair/clothing response without expanding semantic head/body axes.
 
 backlog:
+  - id: parameter_mixer
+    status: active
+    summary: Move direct-plan, lip-sync, and speech-energy active parameter composition to one WebSDK Parameter Mixer without parallel write paths.
   - id: physics_response_optimization
     status: active
     summary: Tune input mixing, update ordering, and Cubism physical response without directly writing physics-output parameters.
