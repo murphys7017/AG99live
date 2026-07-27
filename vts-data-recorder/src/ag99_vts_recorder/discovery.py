@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .client import VTSClient
+from .protocol import VTSProtocolError
 
 
 @dataclass(frozen=True)
@@ -48,20 +49,26 @@ async def discover_parameters(client: VTSClient) -> DiscoveryResult:
         model_loaded=bool(live_data.get("modelLoaded")),
         model_id=_optional_text(live_data.get("modelID")),
         model_name=_optional_text(live_data.get("modelName")),
-        default_tracking_parameters=_parameter_entries(
-            tracking_response.data.get("defaultParameters")
+        default_tracking_parameters=_required_parameter_entries(
+            tracking_response.data,
+            "defaultParameters",
         ),
-        custom_tracking_parameters=_parameter_entries(
-            tracking_response.data.get("customParameters")
+        custom_tracking_parameters=_required_parameter_entries(
+            tracking_response.data,
+            "customParameters",
         ),
-        live2d_parameters=_parameter_entries(live_data.get("parameters")),
+        live2d_parameters=(
+            _required_parameter_entries(live_data, "parameters")
+            if bool(live_data.get("modelLoaded"))
+            else _parameter_entries(live_data.get("parameters"))
+        ),
     )
 
 
 def tracking_values(data: Mapping[str, Any]) -> dict[str, float]:
     values: dict[str, float] = {}
     for key in ("defaultParameters", "customParameters"):
-        for parameter in _parameter_entries(data.get(key)):
+        for parameter in _required_parameter_entries(data, key):
             name = _optional_text(parameter.get("name"))
             value = _finite_float(parameter.get("value"))
             if name is not None and value is not None:
@@ -71,7 +78,7 @@ def tracking_values(data: Mapping[str, Any]) -> dict[str, float]:
 
 def live2d_values(data: Mapping[str, Any]) -> dict[str, float]:
     values: dict[str, float] = {}
-    for parameter in _parameter_entries(data.get("parameters")):
+    for parameter in _required_parameter_entries(data, "parameters"):
         name = _optional_text(parameter.get("name"))
         value = _finite_float(parameter.get("value"))
         if name is not None and value is not None:
@@ -87,6 +94,18 @@ def _parameter_entries(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _required_parameter_entries(
+    data: Mapping[str, Any],
+    field_name: str,
+) -> list[dict[str, Any]]:
+    value = data.get(field_name)
+    if not isinstance(value, list):
+        raise VTSProtocolError(
+            f"VTube Studio response is missing the required `{field_name}` parameter array"
+        )
+    return _parameter_entries(value)
 
 
 def _optional_text(value: Any) -> str | None:

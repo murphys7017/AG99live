@@ -87,6 +87,11 @@ async def _run(args: argparse.Namespace) -> None:
             )
             return
 
+        if not discovery.model_loaded:
+            raise RuntimeError("VTube Studio has no loaded Live2D model; cannot start sampling")
+        if not discovery.live2d_parameters:
+            raise RuntimeError("VTube Studio returned no Live2D parameters; cannot start sampling")
+
         _print_progress("sample setup: subscribing to VTube Studio environment events")
         subscription_warnings = await subscribe_environment_events(client)
         _print_progress(

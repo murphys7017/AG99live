@@ -18,6 +18,8 @@ EVENT_SUBSCRIPTIONS: tuple[tuple[str, Mapping[str, Any]], ...] = (
     ("TrackingStatusChangedEvent", {}),
 )
 
+CAPTURE_INVALIDATING_EVENTS = frozenset({"ModelLoadedEvent", "ModelConfigChangedEvent"})
+
 
 @dataclass(frozen=True)
 class SamplingResult:
@@ -71,7 +73,10 @@ async def sample_parameters(
     skipped_schedule_slots = 0
     samples: list[ProbeSample] = []
     errors: list[str] = []
+    event_counts: Counter[str] = Counter()
+    environment_issues: set[str] = set()
     next_progress_report_ns = start_ns
+    client.drain_events()
 
     while scheduled_ns < deadline_ns:
         now_ns = time.monotonic_ns()
@@ -87,6 +92,7 @@ async def sample_parameters(
                 fallback_model_id=known_model_id,
                 samples=samples,
                 errors=errors,
+                environment_issues=environment_issues,
             ),
             _sample_source(
                 client=client,
@@ -96,8 +102,16 @@ async def sample_parameters(
                 fallback_model_id=known_model_id,
                 samples=samples,
                 errors=errors,
+                environment_issues=environment_issues,
             ),
         )
+        _record_environment_events(
+            client.drain_events(),
+            event_counts=event_counts,
+            environment_issues=environment_issues,
+        )
+        if environment_issues:
+            break
 
         scheduled_ns += period_ns
         now_ns = time.monotonic_ns()
@@ -120,7 +134,11 @@ async def sample_parameters(
             next_progress_report_ns = now_ns + 1_000_000_000
 
     elapsed_ns = time.monotonic_ns() - start_ns
-    event_counts = Counter(event.message_type for event in client.drain_events())
+    _record_environment_events(
+        client.drain_events(),
+        event_counts=event_counts,
+        environment_issues=environment_issues,
+    )
     report = build_sampling_report(
         samples=samples,
         requested_hz=hz,
@@ -129,6 +147,15 @@ async def sample_parameters(
         errors=errors,
         event_counts=event_counts,
     )
+    report["environment"] = {
+        "expected_model_id": known_model_id,
+        "observed_model_ids": sorted(
+            {sample.model_id for sample in samples if sample.model_id is not None}
+        ),
+        "capture_stable": not environment_issues,
+        "issues": sorted(environment_issues),
+        "tracking_status_changed": event_counts["TrackingStatusChangedEvent"] > 0,
+    }
     return SamplingResult(samples=samples, report=report)
 
 
@@ -141,6 +168,7 @@ async def _sample_source(
     fallback_model_id: str | None,
     samples: list[ProbeSample],
     errors: list[str],
+    environment_issues: set[str],
 ) -> None:
     try:
         response = await client.request(request_type)
@@ -152,9 +180,17 @@ async def _sample_source(
         values = tracking_values(response.data)
         model_id = fallback_model_id
     else:
+        if not bool(response.data.get("modelLoaded")):
+            environment_issues.add("Live2D model was unloaded during sampling")
+            return
         values = live2d_values(response.data)
-        model_id, _ = live2d_model_identity(response.data)
-        model_id = model_id or fallback_model_id
+        reported_model_id, _ = live2d_model_identity(response.data)
+        if fallback_model_id is not None and reported_model_id != fallback_model_id:
+            environment_issues.add(
+                f"Live2D model changed from `{fallback_model_id}` to `{reported_model_id or '<unknown>'}`"
+            )
+            return
+        model_id = reported_model_id or fallback_model_id
     samples.append(
         ProbeSample(
             source=source,
@@ -167,3 +203,17 @@ async def _sample_source(
             values=values,
         )
     )
+
+
+def _record_environment_events(
+    events: list[Any],
+    *,
+    event_counts: Counter[str],
+    environment_issues: set[str],
+) -> None:
+    for event in events:
+        event_counts[event.message_type] += 1
+        if event.message_type in CAPTURE_INVALIDATING_EVENTS:
+            environment_issues.add(
+                f"VTube Studio emitted {event.message_type} during sampling"
+            )
