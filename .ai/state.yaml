@@ -14,7 +14,7 @@ context:
     - Direct semantic parameter plans already write before Cubism Physics. The first physics task is to ensure all main facial inputs, especially lip sync, reach Physics in the same frame.
     - Physics output and animation-owned parameters, including Phy* and Anim* parameters, remain owned by Cubism Physics and the animation system and are not driven directly by the input layer.
     - The performance layer is deferred until input ranges and physical response are stable; it will provide timing, emphasis, and low-dimensional templates rather than a second motion system.
-    - Parameter Mixer receives already-resolved active parameter contributions, combines them once per frame, and does not interpret semantic levels, own Timeline state, or write Cubism Physics output parameters.
+    - Parameter Mixer receives already-resolved active parameter contributions, combines them once per frame, and does not interpret semantic levels, own audio signal lifecycle or Timeline state, or write Cubism Physics output parameters.
     - The user confirmed that the selected Superheroes recording and the Live2D model are cleared for the intended commercial use.
     - The promotional video remains isolated under promo-video and does not become a runtime dependency of AG99live.
     - The final promotional render uses the user-provided cleared soundtrack excerpt and a clean, locally recorded Live2D action capture.
@@ -59,7 +59,7 @@ architecture:
     live2d_websdk: Exact parameter resolution, per-frame interpolation, lip sync, speech energy, dynamics, and physics.
   parameter_mixing:
     boundary: "WebSDK-only active parameter composition immediately before Cubism Physics."
-    inputs: "Cubism base snapshot plus direct-plan, speech, and lip-sync contributions."
+    inputs: "Cubism base snapshot plus direct-plan and lip-sync contributions; SpeechSignalRuntime owns source-scoped audio values and speech envelopes."
     output: "One resolved active parameter frame applied once by LAppModel."
   settings_ownership:
     model_engine: motionIntensityScale only.

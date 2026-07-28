@@ -117,12 +117,31 @@ export class LAppAdapter {
       || this._directParameterPlanError;
   }
 
-  public setExternalLipSyncValue(value: number): void {
+  public beginExternalAudioSignalSource(sourceId: string): void {
     const model = this.getModel();
     if (!model) {
       throw new Error("live2d_model_unavailable");
     }
-    model.setExternalLipSyncValue(value);
+    model.beginExternalAudioSignalSource(sourceId);
+  }
+
+  public writeExternalAudioSignalSource(
+    sourceId: string,
+    values: { lipSyncValue?: number; speechEnergyValue?: number },
+  ): void {
+    const model = this.getModel();
+    if (!model) {
+      throw new Error("live2d_model_unavailable");
+    }
+    model.writeExternalAudioSignalSource(sourceId, values);
+  }
+
+  public endExternalAudioSignalSource(sourceId: string): void {
+    const model = this.getModel();
+    if (!model) {
+      throw new Error("live2d_model_unavailable");
+    }
+    model.endExternalAudioSignalSource(sourceId);
   }
 
   public hasConfiguredLipSyncParameters(): boolean {
@@ -131,22 +150,6 @@ export class LAppAdapter {
       throw new Error("live2d_model_unavailable");
     }
     return model.hasConfiguredLipSyncParameters();
-  }
-
-  public clearExternalLipSyncValue(): void {
-    this.getModel()?.clearExternalLipSyncValue();
-  }
-
-  public setExternalSpeechEnergyValue(value: number): void {
-    const model = this.getModel();
-    if (!model) {
-      throw new Error("live2d_model_unavailable");
-    }
-    model.setExternalSpeechEnergyValue(value);
-  }
-
-  public clearExternalSpeechEnergyValue(): void {
-    this.getModel()?.clearExternalSpeechEnergyValue();
   }
 
   /* expression */

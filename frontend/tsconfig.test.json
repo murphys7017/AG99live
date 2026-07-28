@@ -6,7 +6,11 @@
     "outDir": ".test-out",
     "rootDir": ".",
     "types": ["node", "vite/client"],
-    "noEmit": false
+    "noEmit": false,
+    "paths": {
+      "@/*": ["src/*"],
+      "@framework/*": ["src/live2d/WebSDK/Framework/src/*"]
+    }
   },
   "include": ["tests/**/*.ts"]
 }

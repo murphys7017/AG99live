@@ -24,14 +24,13 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
     liveRuntime = null;
     markActiveStarted = null;
     markActiveUnavailable = null;
-    window.getLAppAdapter?.()?.clearExternalLipSyncValue?.();
-    window.getLAppAdapter?.()?.clearExternalSpeechEnergyValue?.();
   }
 
   return {
     attachAudio(options) {
       stop();
       const serial = attachmentSerial;
+      const sourceId = `lip-sync:${serial}`;
       let started = false;
       let unavailable = false;
       const isActiveAttachment = () =>
@@ -55,6 +54,7 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
       const result = startLiveLipSync(
         options.audio,
         options.isCurrentAudio,
+        sourceId,
         markUnavailable,
       );
       liveRuntime = result.runtime;
@@ -99,20 +99,21 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
 function startLiveLipSync(
   audio: HTMLAudioElement,
   isCurrentAudio: () => boolean,
+  sourceId: string,
   onRuntimeFailure: (reason: string, degraded: boolean) => void,
 ): LiveLipSyncStartResult {
   const adapter = window.getLAppAdapter?.();
   if (
     !adapter
-    || typeof adapter.setExternalLipSyncValue !== "function"
-    || typeof adapter.setExternalSpeechEnergyValue !== "function"
-    || typeof adapter.clearExternalSpeechEnergyValue !== "function"
+    || typeof adapter.beginExternalAudioSignalSource !== "function"
+    || typeof adapter.writeExternalAudioSignalSource !== "function"
+    || typeof adapter.endExternalAudioSignalSource !== "function"
   ) {
     return reportLipSyncFailure("speech_audio_adapter_unavailable");
   }
-  const setLipSyncValue = adapter.setExternalLipSyncValue.bind(adapter);
-  const setSpeechEnergyValue = adapter.setExternalSpeechEnergyValue.bind(adapter);
-  const clearSpeechEnergyValue = adapter.clearExternalSpeechEnergyValue.bind(adapter);
+  const beginAudioSignalSource = adapter.beginExternalAudioSignalSource.bind(adapter);
+  const writeAudioSignalSource = adapter.writeExternalAudioSignalSource.bind(adapter);
+  const endAudioSignalSource = adapter.endExternalAudioSignalSource.bind(adapter);
   let hasLipSyncParameters = false;
   try {
     hasLipSyncParameters = adapter.hasConfiguredLipSyncParameters?.() === true;
@@ -132,8 +133,34 @@ function startLiveLipSync(
     return reportLipSyncFailure("lip_sync_parameters_unconfigured");
   }
 
+  try {
+    beginAudioSignalSource(sourceId);
+  } catch (error) {
+    return reportLipSyncFailure("speech_audio_signal_source_begin_failed", error);
+  }
+
+  let sourceEnded = false;
+  const endSignalSource = () => {
+    if (sourceEnded) {
+      return;
+    }
+    sourceEnded = true;
+    try {
+      endAudioSignalSource(sourceId);
+    } catch (error) {
+      console.error("[Live2D] audio signal source end failed.", {
+        sourceId,
+        error,
+      });
+    }
+  };
+
   const degradedRuntime = () => hasLipSyncParameters
-    ? createRandomLipSyncRuntime(adapter, isCurrentAudio)
+    ? createRandomLipSyncRuntime(
+        (values) => writeAudioSignalSource(sourceId, values),
+        endSignalSource,
+        isCurrentAudio,
+      )
     : null;
 
   const AudioContextCtor = window.AudioContext
@@ -183,10 +210,10 @@ function startLiveLipSync(
       const mouthValue = Math.max(0, Math.min(1, (rms - 0.012) * 7.5));
       const speechEnergyValue = Math.max(0, Math.min(1, (rms - 0.008) * 5.5));
       try {
-        if (hasLipSyncParameters) {
-          setLipSyncValue(mouthValue);
-        }
-        setSpeechEnergyValue(speechEnergyValue);
+        writeAudioSignalSource(sourceId, {
+          lipSyncValue: mouthValue,
+          speechEnergyValue,
+        });
         if (!firstFrameLogged) {
           firstFrameLogged = true;
           console.info("[Live2D] lip sync first frame written.", {
@@ -198,17 +225,14 @@ function startLiveLipSync(
       } catch (error) {
         stopped = true;
         animationFrameId = null;
-        adapter.clearExternalLipSyncValue?.();
-        clearSpeechEnergyValue();
+        endSignalSource();
         console.error("[Live2D] lip sync frame write failed.", {
           reason: "lip_sync_parameter_write_failed",
           error,
         });
-        resumeFallback = degradedRuntime();
-        void resumeFallback?.resume();
         onRuntimeFailure(
           "lip_sync_parameter_write_failed",
-          resumeFallback !== null,
+          false,
         );
         return;
       }
@@ -231,9 +255,17 @@ function startLiveLipSync(
             const name = error instanceof Error && error.name
               ? error.name
               : "unknown";
-            clearSpeechEnergyValue();
-            resumeFallback = degradedRuntime();
-            await resumeFallback?.resume();
+            try {
+              writeAudioSignalSource(sourceId, { speechEnergyValue: 0 });
+              resumeFallback = degradedRuntime();
+              await resumeFallback?.resume();
+            } catch (fallbackError) {
+              endSignalSource();
+              console.error("[Live2D] degraded lip sync setup failed.", {
+                reason: "lip_sync_resume_degradation_failed",
+                fallbackError,
+              });
+            }
             return `lip_sync_resume_failed:${name}`;
           }
         }
@@ -247,8 +279,7 @@ function startLiveLipSync(
           window.cancelAnimationFrame(animationFrameId);
           animationFrameId = null;
         }
-        adapter.clearExternalLipSyncValue?.();
-        clearSpeechEnergyValue();
+        endSignalSource();
         try {
           source.disconnect();
         } catch (_error) {
@@ -281,7 +312,11 @@ function reportLipSyncFailure(
 }
 
 function createRandomLipSyncRuntime(
-  adapter: NonNullable<ReturnType<NonNullable<Window["getLAppAdapter"]>>>,
+  writeAudioSignalSource: (values: {
+    lipSyncValue?: number;
+    speechEnergyValue?: number;
+  }) => void,
+  endSignalSource: () => void,
   isCurrentAudio: () => boolean,
 ): LiveLipSyncRuntime {
   let timerId: number | null = null;
@@ -294,7 +329,7 @@ function createRandomLipSyncRuntime(
     const open = Math.random() >= 0.45;
     const value = open ? 0.35 + Math.random() * 0.5 : 0;
     try {
-      adapter.setExternalLipSyncValue?.(value);
+      writeAudioSignalSource({ lipSyncValue: value });
     } catch (error) {
       stopped = true;
       timerId = null;
@@ -302,6 +337,7 @@ function createRandomLipSyncRuntime(
         reason: "lip_sync_random_fallback_parameter_write_failed",
         error,
       });
+      endSignalSource();
       return;
     }
     timerId = window.setTimeout(scheduleNext, 90 + Math.round(Math.random() * 140));
@@ -321,7 +357,7 @@ function createRandomLipSyncRuntime(
         window.clearTimeout(timerId);
         timerId = null;
       }
-      adapter.clearExternalLipSyncValue?.();
+      endSignalSource();
     },
   };
 }

@@ -59,11 +59,13 @@ declare global {
       ) => boolean;
       stopDirectParameterPlan?: (reason?: string, status?: DirectParameterPlanTerminalStatus) => void;
       getDirectParameterPlanError?: () => string;
-      setExternalLipSyncValue?: (value: number) => void;
-      setExternalSpeechEnergyValue?: (value: number) => void;
+      beginExternalAudioSignalSource?: (sourceId: string) => void;
+      writeExternalAudioSignalSource?: (
+        sourceId: string,
+        values: { lipSyncValue?: number; speechEnergyValue?: number },
+      ) => void;
+      endExternalAudioSignalSource?: (sourceId: string) => void;
       hasConfiguredLipSyncParameters?: () => boolean;
-      clearExternalLipSyncValue?: () => void;
-      clearExternalSpeechEnergyValue?: () => void;
     };
     LAppDelegate?: {
       getInstance?: () => {

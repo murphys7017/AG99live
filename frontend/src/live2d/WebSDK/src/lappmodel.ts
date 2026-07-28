@@ -57,6 +57,10 @@ import {
   ParameterMixer,
   type ParameterContribution,
 } from "./parametermixer";
+import {
+  SpeechSignalRuntime,
+  type ExternalAudioSignalValues,
+} from "./speechsignalruntime";
 import { TextureInfo } from "./lapptexturemanager";
 import { CubismMoc } from "@framework/model/cubismmoc";
 import {
@@ -225,7 +229,7 @@ export class LAppModel extends CubismUserModel {
       return;
     }
     this.stopMotion("motion_model_released");
-    this._parameterMixer.reset();
+    this._speechSignalRuntime.reset();
     this._released = true;
     cancelLive2DModelLoad(this._loadGeneration, "live2d_model_load_released");
     super.release();
@@ -663,7 +667,7 @@ export class LAppModel extends CubismUserModel {
     this._dragManager.update(deltaTimeSeconds);
     this._dragX = this._dragManager.getX();
     this._dragY = this._dragManager.getY();
-    const lipSyncValue = this._parameterMixer.advanceAudioFrame(
+    const audioSignals = this._speechSignalRuntime.advanceFrame(
       deltaTimeSeconds,
       this._lipsync === true,
     );
@@ -732,7 +736,7 @@ export class LAppModel extends CubismUserModel {
     // All AG99 active parameters are resolved once before Physics consumes them.
     let parameterMixerFailure: string | null = null;
     try {
-      parameterMixerFailure = this.applyActiveParameterFrame(lipSyncValue);
+      parameterMixerFailure = this.applyActiveParameterFrame(audioSignals.lipSyncValue);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       parameterMixerFailure = `parameter_mixer_frame_exception:${message || "unknown_error"}`;
@@ -1751,20 +1755,19 @@ export class LAppModel extends CubismUserModel {
     return true;
   }
 
-  public setExternalLipSyncValue(value: number): void {
-    this._parameterMixer.setExternalLipSyncValue(value);
+  public beginExternalAudioSignalSource(sourceId: string): void {
+    this._speechSignalRuntime.beginSource(sourceId);
   }
 
-  public clearExternalLipSyncValue(): void {
-    this._parameterMixer.clearExternalLipSyncValue();
+  public writeExternalAudioSignalSource(
+    sourceId: string,
+    values: ExternalAudioSignalValues,
+  ): void {
+    this._speechSignalRuntime.writeSource(sourceId, values);
   }
 
-  public setExternalSpeechEnergyValue(value: number): void {
-    this._parameterMixer.setExternalSpeechEnergyValue(value);
-  }
-
-  public clearExternalSpeechEnergyValue(): void {
-    this._parameterMixer.clearExternalSpeechEnergyValue();
+  public endExternalAudioSignalSource(sourceId: string): void {
+    this._speechSignalRuntime.endSource(sourceId);
   }
 
   public hasConfiguredLipSyncParameters(): boolean {
@@ -1900,7 +1903,7 @@ export class LAppModel extends CubismUserModel {
         source: `direct_plan:${item.axisId}`,
         operation: "replace",
         value: presentationFrame.drivenValue,
-        weight: presentationFrame.ownershipWeight,
+        weight: item.weight * presentationFrame.ownershipWeight,
         priority: PARAMETER_MIX_PRIORITY.directPlan,
       });
     }
@@ -1962,7 +1965,7 @@ export class LAppModel extends CubismUserModel {
       Math.max(0, elapsedMs - item.modulationDelayMs),
       0,
     );
-    const audioGain = this._parameterMixer.getSpeechAudioGain(item.axisId);
+    const audioGain = this._speechSignalRuntime.getSpeechAudioGain(item.axisId);
     const modulatedValue =
       sequenceTargetValue
       + gestureValue
@@ -1970,12 +1973,6 @@ export class LAppModel extends CubismUserModel {
         * item.modulationDirection
         * audioGain;
     return Math.max(minValue, Math.min(maxValue, modulatedValue));
-  }
-
-  private resolveSpeechFollowingChannelName(axisId: string): string {
-    return axisId.startsWith("voice_following.")
-      ? axisId.slice("voice_following.".length).split("|")[0]
-      : axisId;
   }
 
   private resolveSpeechPoseModulation(
@@ -2127,6 +2124,7 @@ export class LAppModel extends CubismUserModel {
     this._directParameterPlanError = "";
     this._motionStartError = "";
     this._parameterMixer = new ParameterMixer();
+    this._speechSignalRuntime = new SpeechSignalRuntime();
   }
 
   _modelSetting: ICubismModelSetting; // モデルセッティング情報
@@ -2160,4 +2158,5 @@ export class LAppModel extends CubismUserModel {
   _directParameterPlanError: string;
   _motionStartError: string;
   private _parameterMixer: ParameterMixer;
+  private _speechSignalRuntime: SpeechSignalRuntime;
 }
