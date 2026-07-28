@@ -20,6 +20,9 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         asyncio.run(_run(args))
+    except KeyboardInterrupt:
+        print("interrupted before a sampling report was available", file=sys.stderr)
+        return 130
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

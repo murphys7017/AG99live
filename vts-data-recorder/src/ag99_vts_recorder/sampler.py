@@ -76,62 +76,66 @@ async def sample_parameters(
     event_counts: Counter[str] = Counter()
     environment_issues: set[str] = set()
     next_progress_report_ns = start_ns
+    interrupted = False
     client.drain_events()
 
-    while scheduled_ns < deadline_ns:
-        now_ns = time.monotonic_ns()
-        if now_ns < scheduled_ns:
-            await asyncio.sleep((scheduled_ns - now_ns) / 1_000_000_000)
+    try:
+        while scheduled_ns < deadline_ns:
+            now_ns = time.monotonic_ns()
+            if now_ns < scheduled_ns:
+                await asyncio.sleep((scheduled_ns - now_ns) / 1_000_000_000)
 
-        await asyncio.gather(
-            _sample_source(
-                client=client,
-                source="tracking_input",
-                request_type="InputParameterListRequest",
-                scheduled_ns=scheduled_ns,
-                fallback_model_id=known_model_id,
-                samples=samples,
-                errors=errors,
-                environment_issues=environment_issues,
-            ),
-            _sample_source(
-                client=client,
-                source="live2d_parameter",
-                request_type="Live2DParameterListRequest",
-                scheduled_ns=scheduled_ns,
-                fallback_model_id=known_model_id,
-                samples=samples,
-                errors=errors,
-                environment_issues=environment_issues,
-            ),
-        )
-        _record_environment_events(
-            client.drain_events(),
-            event_counts=event_counts,
-            environment_issues=environment_issues,
-        )
-        if environment_issues:
-            break
-
-        scheduled_ns += period_ns
-        now_ns = time.monotonic_ns()
-        if now_ns - scheduled_ns >= period_ns:
-            missed_slots = (now_ns - scheduled_ns) // period_ns
-            skipped_schedule_slots += missed_slots
-            scheduled_ns += missed_slots * period_ns
-
-        now_ns = time.monotonic_ns()
-        if on_progress is not None and now_ns >= next_progress_report_ns:
-            on_progress(
-                SamplingProgress(
-                    elapsed_seconds=(now_ns - start_ns) / 1_000_000_000,
-                    target_seconds=seconds,
-                    sample_count=len(samples),
-                    error_count=len(errors),
-                    skipped_schedule_slots=skipped_schedule_slots,
+            await asyncio.gather(
+                _sample_source(
+                    client=client,
+                    source="tracking_input",
+                    request_type="InputParameterListRequest",
+                    scheduled_ns=scheduled_ns,
+                    fallback_model_id=known_model_id,
+                    samples=samples,
+                    errors=errors,
+                    environment_issues=environment_issues,
+                ),
+                _sample_source(
+                    client=client,
+                    source="live2d_parameter",
+                    request_type="Live2DParameterListRequest",
+                    scheduled_ns=scheduled_ns,
+                    fallback_model_id=known_model_id,
+                    samples=samples,
+                    errors=errors,
+                    environment_issues=environment_issues,
                 )
             )
-            next_progress_report_ns = now_ns + 1_000_000_000
+            _record_environment_events(
+                client.drain_events(),
+                event_counts=event_counts,
+                environment_issues=environment_issues,
+            )
+            if environment_issues:
+                break
+
+            scheduled_ns += period_ns
+            now_ns = time.monotonic_ns()
+            if now_ns - scheduled_ns >= period_ns:
+                missed_slots = (now_ns - scheduled_ns) // period_ns
+                skipped_schedule_slots += missed_slots
+                scheduled_ns += missed_slots * period_ns
+
+            now_ns = time.monotonic_ns()
+            if on_progress is not None and now_ns >= next_progress_report_ns:
+                on_progress(
+                    SamplingProgress(
+                        elapsed_seconds=(now_ns - start_ns) / 1_000_000_000,
+                        target_seconds=seconds,
+                        sample_count=len(samples),
+                        error_count=len(errors),
+                        skipped_schedule_slots=skipped_schedule_slots,
+                    )
+                )
+                next_progress_report_ns = now_ns + 1_000_000_000
+    except asyncio.CancelledError:
+        interrupted = True
 
     elapsed_ns = time.monotonic_ns() - start_ns
     _record_environment_events(
@@ -156,6 +160,13 @@ async def sample_parameters(
         "issues": sorted(environment_issues),
         "tracking_status_changed": event_counts["TrackingStatusChangedEvent"] > 0,
     }
+    report["termination_reason"] = (
+        "interrupted"
+        if interrupted
+        else "environment_changed"
+        if environment_issues
+        else "completed"
+    )
     return SamplingResult(samples=samples, report=report)
 
 

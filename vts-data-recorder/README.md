@@ -82,6 +82,7 @@ python -m ag99_vts_recorder --reauthorize discover
 - 采样期间收到的模型、模型配置与 tracking 状态事件。
 
 采样中的开始与进度提示写到终端的标准错误流，最终 JSON 报告写到标准输出。正常的 30 秒采样会在结束前保持运行，不会逐帧输出参数值。
+按下 `Ctrl+C` 会结束采样并输出已收集样本的部分报告，其中 `termination_reason` 为 `interrupted`。
 若 VTS 在采样期间加载模型或修改模型配置，探针会停止采样并把 `sampling.environment.capture_stable` 标记为 `false`；tracking 状态变化会作为事件事实保留在报告中。
 
 RTT 以本地 monotonic clock 计算。两层参数通过独立请求获取，不能假定同一轮的两条响应代表同一个渲染帧。
