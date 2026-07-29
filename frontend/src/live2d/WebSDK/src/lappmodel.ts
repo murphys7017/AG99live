@@ -1817,6 +1817,10 @@ export class LAppModel extends CubismUserModel {
     }
 
     const planState = this._directParameterPlanState;
+    const lipSyncDiagnosticSourceId = directPlan.contributions.length === 0
+      && lipSyncContributions.length > 0
+      ? this._speechSignalRuntime.getLipSyncDiagnosticSourceId()
+      : null;
     if (directPlan.shouldLogFrame && planState) {
       console.info("[LAppModel] Active parameter frame resolved.", {
         mode: planState.mode,
@@ -1829,6 +1833,18 @@ export class LAppModel extends CubismUserModel {
         })),
       });
       planState.diagnosticFrameCount += 1;
+    } else if (lipSyncDiagnosticSourceId) {
+      console.info("[LAppModel] Active parameter frame resolved.", {
+        mode: "lip_sync",
+        audioSourceId: lipSyncDiagnosticSourceId,
+        parameters: resolution.parameters.map((parameter) => ({
+          parameterId: parameter.parameterIdRaw,
+          baseValue: parameter.baseValue,
+          value: parameter.value,
+          contributions: parameter.contributions,
+        })),
+      });
+      this._speechSignalRuntime.markLipSyncDiagnosticFrameLogged(lipSyncDiagnosticSourceId);
     }
     if (directPlan.released && planState) {
       console.info("[LAppModel] Direct parameter plan released after parameter mixing.");

@@ -82,6 +82,34 @@ function testParameterContributionOrderingAndWeight(): void {
   );
 }
 
+function testInvalidReplaceWeightIsRejected(): void {
+  const mixer = new ParameterMixer();
+  const parameterId = {} as ParameterContribution["parameterId"];
+  const result = mixer.resolveFrame([
+    {
+      parameterId,
+      parameterIdRaw: "ParamMouthOpenY",
+      parameterIndex: 0,
+      source: "direct-plan",
+      operation: "replace",
+      value: 6,
+      weight: 1.1,
+      priority: PARAMETER_MIX_PRIORITY.directPlan,
+    },
+  ], {
+    isParameterIndexWritable: () => true,
+    getParameterValue: () => 0,
+    getParameterMinimumValue: () => -10,
+    getParameterMaximumValue: () => 10,
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "parameter_mixer_invalid_replace_weight:ParamMouthOpenY:direct-plan",
+  });
+}
+
 testAudioSourceLifecycle();
 testParameterContributionOrderingAndWeight();
+testInvalidReplaceWeightIsRejected();
 console.log("active parameter runtime tests passed");

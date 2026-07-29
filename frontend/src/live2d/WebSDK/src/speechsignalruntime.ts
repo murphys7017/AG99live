@@ -18,6 +18,7 @@ const SPEECH_AUDIO_PITCH_GAIN_MAX = 1.15;
 const SPEECH_BODY_GAIN_FLOOR = 0.22;
 const SPEECH_BODY_GAIN_SPAN = 0.78;
 const SPEECH_BODY_GAIN_MAX = 1.0;
+const LIP_SYNC_DIAGNOSTIC_FRAME_LIMIT = 2;
 
 /**
  * Owns the transient audio signal for one attached playback source. This is
@@ -30,6 +31,7 @@ export class SpeechSignalRuntime {
   private speechEnergyValue = 0;
   private speechHeadEnvelope = 0;
   private speechBodyEnvelope = 0;
+  private lipSyncDiagnosticFrameCount = 0;
 
   public beginSource(sourceId: string): void {
     const normalizedSourceId = normalizeSourceId(sourceId);
@@ -39,6 +41,7 @@ export class SpeechSignalRuntime {
     this.activeSourceId = normalizedSourceId;
     this.lipSyncValue = 0;
     this.speechEnergyValue = 0;
+    this.lipSyncDiagnosticFrameCount = 0;
   }
 
   public writeSource(
@@ -73,6 +76,7 @@ export class SpeechSignalRuntime {
     this.activeSourceId = null;
     this.lipSyncValue = 0;
     this.speechEnergyValue = 0;
+    this.lipSyncDiagnosticFrameCount = 0;
   }
 
   public reset(): void {
@@ -81,6 +85,7 @@ export class SpeechSignalRuntime {
     this.speechEnergyValue = 0;
     this.speechHeadEnvelope = 0;
     this.speechBodyEnvelope = 0;
+    this.lipSyncDiagnosticFrameCount = 0;
   }
 
   public advanceFrame(deltaTimeSeconds: number, includeLipSync: boolean): SpeechAudioFrame {
@@ -129,6 +134,23 @@ export class SpeechSignalRuntime {
     return channelName.includes("pitch")
       ? Math.min(SPEECH_AUDIO_PITCH_GAIN_MAX, rawGain)
       : rawGain;
+  }
+
+  public getLipSyncDiagnosticSourceId(): string | null {
+    if (
+      this.activeSourceId === null
+      || this.lipSyncDiagnosticFrameCount >= LIP_SYNC_DIAGNOSTIC_FRAME_LIMIT
+    ) {
+      return null;
+    }
+    return this.activeSourceId;
+  }
+
+  public markLipSyncDiagnosticFrameLogged(sourceId: string): void {
+    this.requireActiveSource(sourceId);
+    if (this.lipSyncDiagnosticFrameCount < LIP_SYNC_DIAGNOSTIC_FRAME_LIMIT) {
+      this.lipSyncDiagnosticFrameCount += 1;
+    }
   }
 
   private requireActiveSource(sourceId: string): void {
