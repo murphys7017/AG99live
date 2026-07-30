@@ -57,6 +57,11 @@ class MessageStub:
             "payload": dict(self.payload),
         }
 
+
+async def ignore_vad_speech_started(_capture_turn_id: str) -> None:
+    return None
+
+
 def test_handle_binary_audio_stream_chunk_transcribes_on_stream_end(
     install_fake_astrbot,
 ) -> None:
@@ -78,6 +83,7 @@ def test_handle_binary_audio_stream_chunk_transcribes_on_stream_end(
             "text": text,
             "raw_message": raw_message,
         },
+        on_vad_speech_started=ignore_vad_speech_started,
     )
 
     asyncio.run(
@@ -118,13 +124,17 @@ def test_handle_manual_binary_audio_stream_chunk_uses_vad_segments(
     from astrbot_plugin_ag99live_adapter.services.speech_service import SpeechIngressService
 
     sent_messages: list[dict] = []
+    vad_started_turn_ids: list[str] = []
     pcm = (
         np.tile(np.array([0.2, -0.2, 0.3], dtype=np.float32), 256) * 32767
     ).astype(np.int16).tobytes()
-    vad_engine = VadEngineStub([[pcm]])
+    vad_engine = VadEngineStub([[b"<|PAUSE|>", pcm]])
 
     async def send_json(message: dict) -> None:
         sent_messages.append(message)
+
+    async def on_vad_speech_started(capture_turn_id: str) -> None:
+        vad_started_turn_ids.append(capture_turn_id)
 
     service = SpeechIngressService(
         media_service=MediaServiceStub(),
@@ -135,6 +145,7 @@ def test_handle_manual_binary_audio_stream_chunk_uses_vad_segments(
             "text": text,
             "raw_message": raw_message,
         },
+        on_vad_speech_started=on_vad_speech_started,
     )
 
     result = asyncio.run(
@@ -155,6 +166,7 @@ def test_handle_manual_binary_audio_stream_chunk_uses_vad_segments(
     assert result["text"] == "hello from stt"
     assert result["raw_message"]["turn_id"] == "input:manual-binary:vad:1"
     assert result["raw_message"]["payload"]["stream_id"] == "mic:manual"
+    assert vad_started_turn_ids == ["input:manual-binary"]
     assert sent_messages[0]["type"] == "output.transcription"
     assert sent_messages[0]["turn_id"] == "input:manual-binary:vad:1"
 
@@ -177,6 +189,7 @@ def test_handle_binary_audio_stream_end_dropped_reports_terminal_signal(
         ensure_vad_engine=lambda: None,
         send_json=send_json,
         build_message_object=lambda *, text, raw_message: build_calls.append((text, raw_message)),
+        on_vad_speech_started=ignore_vad_speech_started,
     )
 
     asyncio.run(

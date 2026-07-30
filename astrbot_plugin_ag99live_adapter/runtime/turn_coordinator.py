@@ -140,6 +140,7 @@ class TurnCoordinator:
             ensure_vad_engine=self._ensure_vad_engine,
             send_json=self._send_json,
             build_message_object=self._build_message_object,
+            on_vad_speech_started=self._handle_vad_speech_started,
         )
 
         self._turn_lock = asyncio.Lock()
@@ -151,6 +152,7 @@ class TurnCoordinator:
         self._closing_output_turn_ids: set[str] = set()
         self._closed_output_turn_ids: set[str] = set()
         self._output_emitted_turn_ids: set[str] = set()
+        self._active_vad_turn_by_capture_turn: dict[str, str] = {}
 
     async def handle_msg(self, raw_message: dict[str, Any]) -> None:
         """入站文本协议消息的顶层路由。
@@ -186,6 +188,7 @@ class TurnCoordinator:
 
         try:
             if message.type == TYPE_INPUT_AUDIO_STREAM_START:
+                self._active_vad_turn_by_capture_turn.pop(turn_id, None)
                 await self.speech_ingress.handle_audio_stream_start(message)
                 return
 
@@ -194,9 +197,12 @@ class TurnCoordinator:
                 return
 
             if message.type == TYPE_INPUT_AUDIO_STREAM_END:
-                message_obj = await self.speech_ingress.handle_audio_stream_end(message)
-                if message_obj is not None:
-                    await self._commit_inbound_message(message_obj, turn_id=turn_id)
+                try:
+                    message_obj = await self.speech_ingress.handle_audio_stream_end(message)
+                    if message_obj is not None:
+                        await self._commit_inbound_message(message_obj, turn_id=turn_id)
+                finally:
+                    self._active_vad_turn_by_capture_turn.pop(turn_id, None)
                 return
 
             if message.type == TYPE_INPUT_TEXT:
@@ -275,20 +281,27 @@ class TurnCoordinator:
         self._closed_output_turn_ids.clear()
         self._output_emitted_turn_ids.clear()
         self._events_by_turn_id.clear()
+        self._active_vad_turn_by_capture_turn.clear()
         self._last_prompt_motion_snapshot = None
 
     async def handle_binary_msg(self, raw_message: bytes) -> None:
         """WebSocket 二进制帧入口：解析 AG99 麦克风音频帧并交给语音入口。
 
         二进制路径只用于麦克风采集的 PCM16LE chunk（见 protocol/binary_audio.py）。
-        当一段采集已经收到 end 时，speech_ingress 会回传一条 message 对象，
-        本方法负责把它作为新一轮交互 commit 进去。
+        持续收音的根 turn_id 只标识采集会话；每个 VAD 语音段必须使用
+        SpeechIngressService 生成的 `:vad:N` 子轮次，避免多个用户输入重用同一
+        播放会话身份。
         """
         frame = parse_binary_audio_frame(raw_message)
         message_obj = await self.speech_ingress.handle_audio_stream_binary_chunk(frame)
         if message_obj is not None:
-            turn_id = self._require_turn_id_value(frame.turn_id)
+            capture_turn_id = self._require_turn_id_value(frame.turn_id)
+            turn_id = self._require_vad_child_turn_id(
+                message_obj,
+                capture_turn_id=capture_turn_id,
+            )
             await self._commit_inbound_message(message_obj, turn_id=turn_id)
+            self._active_vad_turn_by_capture_turn[capture_turn_id] = turn_id
 
     async def emit_message_chain(
         self,
@@ -1283,6 +1296,46 @@ class TurnCoordinator:
         self._closing_output_turn_ids.discard(resolved_turn_id)
         self._closed_output_turn_ids.discard(resolved_turn_id)
         self._output_emitted_turn_ids.discard(resolved_turn_id)
+        self._clear_active_vad_turn(resolved_turn_id)
+
+    async def _handle_vad_speech_started(self, capture_turn_id: str) -> None:
+        normalized_capture_turn_id = self._require_turn_id_value(capture_turn_id)
+        active_turn_id = self._active_vad_turn_by_capture_turn.get(
+            normalized_capture_turn_id
+        )
+        if not active_turn_id:
+            return
+        if active_turn_id not in self._events_by_turn_id:
+            self._active_vad_turn_by_capture_turn.pop(normalized_capture_turn_id, None)
+            return
+        await self._handle_interrupt_signal(active_turn_id)
+
+    def _require_vad_child_turn_id(
+        self,
+        message_obj,
+        *,
+        capture_turn_id: str,
+    ) -> str:
+        raw_message = getattr(message_obj, "raw_message", None)
+        if not isinstance(raw_message, dict):
+            raise ValueError("vad_message_raw_message_missing")
+        child_turn_id = self._normalize_optional_turn_value(raw_message.get("turn_id"))
+        expected_prefix = f"{capture_turn_id}:vad:"
+        if not child_turn_id or not child_turn_id.startswith(expected_prefix):
+            raise ValueError(
+                f"vad_message_turn_id_invalid:{capture_turn_id}:{child_turn_id or 'missing'}"
+            )
+        child_sequence = child_turn_id[len(expected_prefix):]
+        if not child_sequence.isdecimal() or int(child_sequence) <= 0:
+            raise ValueError(f"vad_message_turn_sequence_invalid:{child_turn_id}")
+        return child_turn_id
+
+    def _clear_active_vad_turn(self, turn_id: str) -> None:
+        for capture_turn_id, active_turn_id in tuple(
+            self._active_vad_turn_by_capture_turn.items()
+        ):
+            if active_turn_id == turn_id:
+                self._active_vad_turn_by_capture_turn.pop(capture_turn_id, None)
 
     def _resolve_backend_turn_id(
         self,

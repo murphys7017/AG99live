@@ -1,9 +1,9 @@
 task:
-  class: refactor
-  risk: high
+  class: bugfix
+  risk: medium
   phase: implementation
   status: active
-  scope: "Consolidate WebSDK active parameter contributions into one Parameter Mixer before Cubism Physics, without replacing the current motion, Timeline, or semantic compiler."
+  scope: "Keep always-on microphone capture alive across VAD-recognized speech segments by separating the capture root turn ID from each derived conversation/playback turn ID."
 
 context:
   confidence: high
@@ -25,6 +25,8 @@ context:
     - Performance curve generation is optional and never delays TTS or segment release.
     - Motion Lab samples are trusted only when their user and assistant context is reconstructed from persisted Adapter raw events using turn_id plus message_id.
     - Historical Motion Lab sample records that do not conform to the current V2 sample contract are deleted rather than migrated.
+    - An always-on microphone capture has one root turn ID for its stream lifetime; every VAD-completed utterance receives a distinct `<capture_turn_id>:vad:<n>` conversation turn ID.
+    - A new VAD speech start may interrupt only the still-active derived turn from the same capture session; it never interrupts or terminates the capture root itself.
 
 architecture:
   product_flow:
@@ -137,6 +139,7 @@ verification:
     - A live Electron + AstrBot conversation must save one V2 pose sample and one V2 sequence sample, then confirm the Adapter reconstructs trusted user/assistant context from raw events and returns the sequence to the next Prompt as `motion_steps`.
     - A second live request with an explicit matching tag or overlapping user text must confirm the generated Prompt uses request-scoped sample selection and Motion Lab records the resolved Prompt projection.
     - A live multi-turn AstrBot and Electron session must confirm that interrupting one turn leaves other queued turns untouched, late output from the cancelled event is discarded, and physicsResponseScale changes hair/clothing response without expanding semantic head/body axes.
+    - A live always-on microphone session must confirm two VAD-recognized utterances create distinct derived turn IDs, keep capture active after the first response, and interrupt only the first derived playback when the second utterance begins.
 
 backlog:
   - id: parameter_mixer

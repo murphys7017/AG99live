@@ -98,7 +98,7 @@ astrbot_plugin_ag99live_adapter/
 - 前端在 `synth_finished` 已到、所有 segment 槽位 settled 且同一 Turn 不存在开放的 required
   execution Timeline 后回传 `control.playback_finished`；后端收到后再发 `control.turn_finished`。
 - `output.segment.audio.url` 指向插件侧 HTTP 静态资源，通常是 `/cache/audio/*.wav`；有 TTS 文件但前端无声时，应先验证该 URL 在配置的 `host / http_port` 上是否可达。
-- 麦克风输入现在按“单段录音”组织：一段采集内的 `input.audio_stream_start`、WebSocket binary PCM16LE chunk 与 `input.audio_stream_end` 共享同一个新的 `turn_id` 和 `stream_id`；后端 STT ingress 按 `stream_id` 汇总音频，不再把不同输入段混到一个全局缓冲。
+- 麦克风输入按采集会话组织：`input.audio_stream_start`、WebSocket binary PCM16LE chunk 与 `input.audio_stream_end` 共享一个采集根 `turn_id` 和 `stream_id`，后端 STT ingress 按 `stream_id` 汇总音频，不会把不同采集会话混到全局缓冲。PTT 采集直接以该根 ID 作为对话轮次；常开收音的每个 VAD 语音段由后端派生为 `<capture_turn_id>:vad:<n>` 子轮次，再作为正式对话、输出段和播放会话的 `turn_id`。用户再次开口时，协调器只中断同一采集会话仍在飞的子轮次，采集本身持续运行。
 - 若前端检测到发送积压，会在 `input.audio_stream_end` 中带上 `dropped: true`，后端直接丢弃该段转写。
 - 切换麦克风设备时，前端会先正常结束旧输入段，再启动新输入段；收到 `control.interrupt` 时，前端只中断该信封 `turn_id` 已释放的 segment，并由后端停止同一 Turn 的 AstrBot event；已取消 event 的晚到输出不会重新进入播放链路。
 - WebSocket 断开时，Adapter 先给全部在飞 event 写入 `agent_stop_requested` 并调用

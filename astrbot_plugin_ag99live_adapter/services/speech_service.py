@@ -22,7 +22,6 @@ from astrbot.api import logger
 from ..protocol.binary_audio import BinaryAudioChunkFrame
 from ..protocol.builder import (
     build_control_error,
-    build_control_interrupt,
     build_control_turn_finished,
     build_output_transcription,
 )
@@ -83,8 +82,8 @@ class SpeechIngressService:
       - _vad_turn_counters: dict[root_turn_id, int]，VAD 切分出来的子轮次自增计数。
 
     出站时通过构造注入的 send_json 发 control_error / control_turn_finished /
-    control_interrupt / output_transcription；能形成有效转写的路径才返回
-    AstrBotMessage 交给 TurnCoordinator commit。
+    output_transcription；检测到用户开口时通知 TurnCoordinator 选择要中断的正式
+    轮次。能形成有效转写的路径才返回 AstrBotMessage 交给 TurnCoordinator commit。
     """
 
     def __init__(
@@ -95,12 +94,14 @@ class SpeechIngressService:
         ensure_vad_engine,
         send_json,
         build_message_object,
+        on_vad_speech_started,
     ) -> None:
         self.media_service = media_service
         self.runtime_state = runtime_state
         self._ensure_vad_engine = ensure_vad_engine
         self._send_json = send_json
         self._build_message_object = build_message_object
+        self._on_vad_speech_started = on_vad_speech_started
         self._audio_streams: dict[str, AudioStreamState] = {}
         self._pending_temp_audio_files: dict[str, PendingTempAudioFile] = {}
         self._completed_transcription_turns = 0
@@ -339,7 +340,7 @@ class SpeechIngressService:
         segment_id = self._resolve_audio_segment_id(message)
         for audio_bytes in vad_engine.detect_speech(audio_data.tolist()):
             if audio_bytes == b"<|PAUSE|>":
-                await self._build_interrupt_message(message)
+                await self._notify_vad_speech_started(message)
             elif audio_bytes == b"<|RESUME|>":
                 continue
             elif len(audio_bytes) > 1024:
@@ -352,13 +353,11 @@ class SpeechIngressService:
                     return built_message
         return None
 
-    async def _build_interrupt_message(self, message):
-        await self._send_json(
-            build_control_interrupt(
-                turn_id=message.turn_id,
-            )
-        )
-        return None
+    async def _notify_vad_speech_started(self, message) -> None:
+        capture_turn_id = str(getattr(message, "turn_id", "") or "").strip()
+        if not capture_turn_id:
+            raise ValueError("vad_speech_started_capture_turn_id_missing")
+        await self._on_vad_speech_started(capture_turn_id)
 
     async def _build_message_from_audio_buffer(
         self,

@@ -68,10 +68,10 @@ control.turn_finished
 
 麦克风输入规则：
 
-- 一段采集期只使用一个新的 `turn_id`。
-- 该采集期先发送 `input.audio_stream_start`，随后发送一个或多个 WebSocket 二进制音频块，最后发送 `input.audio_stream_end`。
-- `input.audio_stream_start`、二进制音频块元数据和 `input.audio_stream_end` 共享同一个 `turn_id` 与 `stream_id`。
-- 后端语音转文字入口使用 `stream_id` 作为流缓冲键，并在 `input.audio_stream_end` 时把本段 PCM16LE 音频转成 STT 输入。
+- 一段采集期只使用一个新的采集根 `turn_id`。
+- 该采集期先发送 `input.audio_stream_start`，随后发送一个或多个 WebSocket 二进制音频块，最后发送 `input.audio_stream_end`；三者共享同一个采集根 `turn_id` 与 `stream_id`。
+- PTT 在 `input.audio_stream_end` 时把该段 PCM16LE 转成一个对话输入。常开收音持续传输同一采集会话的音频，后端使用 `stream_id` 作为缓冲键，并为每段 VAD 语音派生 `<capture_turn_id>:vad:<n>` 作为正式对话 turn ID。
+- 对 VAD 子轮次发出的 `control.interrupt` 只能定位同一采集会话仍在飞的上一子轮次，不能使用采集根 ID；常开采集不会因完成一轮转写而停止。
 - 如果 `dropped === true`，后端丢弃该 turn 的本次音频并立即终结该 turn。
 - Electron / Windows 桌面端的设备枚举和采集可以来自主进程 DirectShow/ffmpeg，也可以回退到浏览器 `MediaDevices`。原生路径直接让 ffmpeg 输出 `s16le`，Web Audio 路径在 renderer 内把 Float32 转成 PCM16LE。
 - 按键说话模式只改变采集开始/结束时机。按下配置按键等价于开始一段麦克风采集，松开按键等价于发送该段 `input.audio_stream_end(reason="ptt_release")`。

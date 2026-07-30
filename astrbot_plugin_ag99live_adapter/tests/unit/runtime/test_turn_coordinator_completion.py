@@ -95,6 +95,7 @@ def _prepare_turn_finalization(coordinator) -> None:
     coordinator._output_emitted_turn_ids = set()
     coordinator._turn_timings = {}
     coordinator._events_by_turn_id = {}
+    coordinator._active_vad_turn_by_capture_turn = {}
 
 
 def test_reset_turn_tracking_clears_connection_owned_state(
@@ -116,6 +117,7 @@ def test_reset_turn_tracking_clears_connection_owned_state(
     coordinator._closing_output_turn_ids = {"turn-2"}
     coordinator._closed_output_turn_ids = {"turn-1"}
     coordinator._output_emitted_turn_ids = {"turn-1", "turn-2"}
+    coordinator._active_vad_turn_by_capture_turn = {"capture-1": "turn-1"}
     coordinator._last_prompt_motion_snapshot = {"turn_id": "turn-1"}
     coordinator._events_by_turn_id = {}
 
@@ -127,6 +129,7 @@ def test_reset_turn_tracking_clears_connection_owned_state(
     assert coordinator._closing_output_turn_ids == set()
     assert coordinator._closed_output_turn_ids == set()
     assert coordinator._output_emitted_turn_ids == set()
+    assert coordinator._active_vad_turn_by_capture_turn == {}
     assert coordinator._last_prompt_motion_snapshot is None
 
 
