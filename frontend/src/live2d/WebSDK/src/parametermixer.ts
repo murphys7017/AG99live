@@ -32,7 +32,6 @@ export interface ResolvedParameterContribution {
   weight: number;
   priority: number;
   resolvedValue: number;
-  clamped: boolean;
 }
 
 export interface ResolvedParameterFrameEntry {
@@ -40,7 +39,9 @@ export interface ResolvedParameterFrameEntry {
   parameterIdRaw: string;
   parameterIndex: number;
   baseValue: number;
+  unclampedValue: number;
   value: number;
+  clamped: boolean;
   contributions: ResolvedParameterContribution[];
 }
 
@@ -110,13 +111,12 @@ export class ParameterMixer {
         };
       }
 
-      let value = clamp(baseValue, minValue, maxValue);
+      let unclampedValue = baseValue;
       const resolvedContributions: ResolvedParameterContribution[] = [];
       group.contributions
         .sort((left, right) => left.priority - right.priority || left.sequence - right.sequence)
         .forEach((contribution) => {
-          const rawValue = resolveContributionValue(value, contribution);
-          const resolvedValue = clamp(rawValue, minValue, maxValue);
+          const resolvedValue = resolveContributionValue(unclampedValue, contribution);
           resolvedContributions.push({
             source: contribution.source,
             operation: contribution.operation,
@@ -124,17 +124,19 @@ export class ParameterMixer {
             weight: contribution.weight,
             priority: contribution.priority,
             resolvedValue,
-            clamped: resolvedValue !== rawValue,
           });
-          value = resolvedValue;
+          unclampedValue = resolvedValue;
         });
+      const value = clamp(unclampedValue, minValue, maxValue);
 
       parameters.push({
         parameterId: group.parameterId,
         parameterIdRaw: group.parameterIdRaw,
         parameterIndex,
         baseValue,
+        unclampedValue,
         value,
+        clamped: value !== unclampedValue,
         contributions: resolvedContributions,
       });
     }
@@ -148,8 +150,23 @@ function validateContribution(
   contribution: ParameterContribution,
   access: ParameterMixerAccess,
 ): string | null {
-  if (!contribution.parameterIdRaw || !access.isParameterIndexWritable(contribution.parameterIndex)) {
-    return `parameter_mixer_parameter_not_writable:${contribution.parameterIdRaw || contribution.parameterIndex}`;
+  if (typeof contribution.parameterIdRaw !== "string" || !contribution.parameterIdRaw.trim()) {
+    return `parameter_mixer_parameter_id_missing:${contribution.parameterIndex}`;
+  }
+  if (contribution.parameterId == null) {
+    return `parameter_mixer_parameter_handle_missing:${contribution.parameterIdRaw}`;
+  }
+  if (!Number.isInteger(contribution.parameterIndex)) {
+    return `parameter_mixer_invalid_parameter_index:${contribution.parameterIdRaw}`;
+  }
+  if (!access.isParameterIndexWritable(contribution.parameterIndex)) {
+    return `parameter_mixer_parameter_not_writable:${contribution.parameterIdRaw}`;
+  }
+  if (typeof contribution.source !== "string" || !contribution.source.trim()) {
+    return `parameter_mixer_source_missing:${contribution.parameterIdRaw}`;
+  }
+  if (!isParameterContributionOperation(contribution.operation)) {
+    return `parameter_mixer_invalid_operation:${contribution.parameterIdRaw}:${contribution.source}`;
   }
   if (!Number.isFinite(contribution.value) || !Number.isFinite(contribution.weight)) {
     return `parameter_mixer_non_finite_contribution:${contribution.parameterIdRaw}:${contribution.source}`;
@@ -164,6 +181,12 @@ function validateContribution(
     return `parameter_mixer_invalid_weight:${contribution.parameterIdRaw}:${contribution.source}`;
   }
   return null;
+}
+
+function isParameterContributionOperation(
+  operation: unknown,
+): operation is ParameterContributionOperation {
+  return operation === "replace" || operation === "add" || operation === "multiply";
 }
 
 function resolveContributionValue(

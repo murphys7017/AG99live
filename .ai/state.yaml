@@ -1,9 +1,9 @@
 task:
-  class: bugfix
+  class: refactor
   risk: medium
-  phase: implementation
+  phase: validation
   status: active
-  scope: "Keep always-on microphone capture alive across VAD-recognized speech segments by separating the capture root turn ID from each derived conversation/playback turn ID."
+  scope: "Complete the first Parameter Mixer batch: resolve direct-plan and lip-sync contributions deterministically in the WebSDK, apply one final runtime-range clamp, and keep audio signal normalization outside the mixer."
 
 context:
   confidence: high

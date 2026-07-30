@@ -736,7 +736,7 @@ export class LAppModel extends CubismUserModel {
     // All AG99 active parameters are resolved once before Physics consumes them.
     let parameterMixerFailure: string | null = null;
     try {
-      parameterMixerFailure = this.applyActiveParameterFrame(audioSignals.lipSyncValue);
+      parameterMixerFailure = this.applyActiveParameterFrame(audioSignals.lipSyncIntensity);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       parameterMixerFailure = `parameter_mixer_frame_exception:${message || "unknown_error"}`;
@@ -1782,7 +1782,7 @@ export class LAppModel extends CubismUserModel {
     return true;
   }
 
-  private applyActiveParameterFrame(lipSyncValue: number): string | null {
+  private applyActiveParameterFrame(lipSyncIntensity: number): string | null {
     if (!this._model) {
       return "parameter_mixer_model_unavailable";
     }
@@ -1791,7 +1791,7 @@ export class LAppModel extends CubismUserModel {
     if (directPlan.failure) {
       return directPlan.failure;
     }
-    const lipSyncContributions = this.collectLipSyncContributions(lipSyncValue);
+    const lipSyncContributions = this.collectLipSyncContributions(lipSyncIntensity);
     if (typeof lipSyncContributions === "string") {
       return lipSyncContributions;
     }
@@ -1828,7 +1828,9 @@ export class LAppModel extends CubismUserModel {
         parameters: resolution.parameters.map((parameter) => ({
           parameterId: parameter.parameterIdRaw,
           baseValue: parameter.baseValue,
+          unclampedValue: parameter.unclampedValue,
           value: parameter.value,
+          clamped: parameter.clamped,
           contributions: parameter.contributions,
         })),
       });
@@ -1840,7 +1842,9 @@ export class LAppModel extends CubismUserModel {
         parameters: resolution.parameters.map((parameter) => ({
           parameterId: parameter.parameterIdRaw,
           baseValue: parameter.baseValue,
+          unclampedValue: parameter.unclampedValue,
           value: parameter.value,
+          clamped: parameter.clamped,
           contributions: parameter.contributions,
         })),
       });
@@ -1933,9 +1937,12 @@ export class LAppModel extends CubismUserModel {
   }
 
   private collectLipSyncContributions(
-    lipSyncValue: number,
+    lipSyncIntensity: number,
   ): ParameterContribution[] | string {
-    if (!this._lipsync || lipSyncValue <= 0 || !this._model) {
+    if (!Number.isFinite(lipSyncIntensity) || lipSyncIntensity < 0 || lipSyncIntensity > 1) {
+      return "parameter_mixer_lip_sync_intensity_invalid";
+    }
+    if (!this._lipsync || lipSyncIntensity <= 0 || !this._model) {
       return [];
     }
 
@@ -1946,14 +1953,19 @@ export class LAppModel extends CubismUserModel {
       if (!this.isParameterIndexWritable(parameterIndex)) {
         return `parameter_mixer_lip_sync_parameter_not_writable:${index}`;
       }
+      const minValue = this._model.getParameterMinimumValue(parameterIndex);
+      const maxValue = this._model.getParameterMaximumValue(parameterIndex);
+      if (!Number.isFinite(minValue) || !Number.isFinite(maxValue) || minValue >= maxValue) {
+        return `parameter_mixer_lip_sync_invalid_runtime_range:${parameterId.getString().s}`;
+      }
       contributions.push({
         parameterId,
         parameterIdRaw: parameterId.getString().s,
         parameterIndex,
         source: "lip_sync",
         operation: "add",
-        value: lipSyncValue,
-        weight: 4.0,
+        value: (maxValue - minValue) * lipSyncIntensity,
+        weight: 1,
         priority: PARAMETER_MIX_PRIORITY.lipSync,
       });
     }

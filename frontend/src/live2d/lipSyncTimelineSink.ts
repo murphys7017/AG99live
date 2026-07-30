@@ -207,18 +207,18 @@ function startLiveLipSync(
         squareSum += centered * centered;
       }
       const rms = Math.sqrt(squareSum / samples.length);
-      const mouthValue = Math.max(0, Math.min(1, (rms - 0.012) * 7.5));
+      const lipSyncIntensity = Math.max(0, Math.min(1, (rms - 0.012) * 30));
       const speechEnergyValue = Math.max(0, Math.min(1, (rms - 0.008) * 5.5));
       try {
         writeAudioSignalSource(sourceId, {
-          lipSyncValue: mouthValue,
+          lipSyncIntensity,
           speechEnergyValue,
         });
         if (!firstFrameLogged) {
           firstFrameLogged = true;
           console.info("[Live2D] lip sync first frame written.", {
             hasLipSyncParameters,
-            mouthValue,
+            lipSyncIntensity,
             speechEnergyValue,
           });
         }
@@ -313,7 +313,7 @@ function reportLipSyncFailure(
 
 function createRandomLipSyncRuntime(
   writeAudioSignalSource: (values: {
-    lipSyncValue?: number;
+    lipSyncIntensity?: number;
     speechEnergyValue?: number;
   }) => void,
   endSignalSource: () => void,
@@ -329,7 +329,7 @@ function createRandomLipSyncRuntime(
     const open = Math.random() >= 0.45;
     const value = open ? 0.35 + Math.random() * 0.5 : 0;
     try {
-      writeAudioSignalSource({ lipSyncValue: value });
+      writeAudioSignalSource({ lipSyncIntensity: value });
     } catch (error) {
       stopped = true;
       timerId = null;

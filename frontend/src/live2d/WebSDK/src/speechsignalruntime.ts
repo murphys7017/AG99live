@@ -1,10 +1,10 @@
 export interface ExternalAudioSignalValues {
-  lipSyncValue?: number;
+  lipSyncIntensity?: number;
   speechEnergyValue?: number;
 }
 
 export interface SpeechAudioFrame {
-  lipSyncValue: number;
+  lipSyncIntensity: number;
 }
 
 const SPEECH_HEAD_ENVELOPE_ATTACK_PER_SECOND = 8.0;
@@ -27,7 +27,7 @@ const LIP_SYNC_DIAGNOSTIC_FRAME_LIMIT = 2;
  */
 export class SpeechSignalRuntime {
   private activeSourceId: string | null = null;
-  private lipSyncValue = 0;
+  private lipSyncIntensity = 0;
   private speechEnergyValue = 0;
   private speechHeadEnvelope = 0;
   private speechBodyEnvelope = 0;
@@ -39,7 +39,7 @@ export class SpeechSignalRuntime {
       throw new Error(`speech_signal_source_already_active:${this.activeSourceId}`);
     }
     this.activeSourceId = normalizedSourceId;
-    this.lipSyncValue = 0;
+    this.lipSyncIntensity = 0;
     this.speechEnergyValue = 0;
     this.lipSyncDiagnosticFrameCount = 0;
   }
@@ -49,10 +49,10 @@ export class SpeechSignalRuntime {
     values: ExternalAudioSignalValues,
   ): void {
     this.requireActiveSource(sourceId);
-    if (values.lipSyncValue !== undefined) {
-      this.lipSyncValue = validateNormalizedSignal(
-        values.lipSyncValue,
-        "speech_signal_invalid_lip_sync_value",
+    if (values.lipSyncIntensity !== undefined) {
+      this.lipSyncIntensity = validateNormalizedSignal(
+        values.lipSyncIntensity,
+        "speech_signal_invalid_lip_sync_intensity",
       );
     }
     if (values.speechEnergyValue !== undefined) {
@@ -74,14 +74,14 @@ export class SpeechSignalRuntime {
       );
     }
     this.activeSourceId = null;
-    this.lipSyncValue = 0;
+    this.lipSyncIntensity = 0;
     this.speechEnergyValue = 0;
     this.lipSyncDiagnosticFrameCount = 0;
   }
 
   public reset(): void {
     this.activeSourceId = null;
-    this.lipSyncValue = 0;
+    this.lipSyncIntensity = 0;
     this.speechEnergyValue = 0;
     this.speechHeadEnvelope = 0;
     this.speechBodyEnvelope = 0;
@@ -112,8 +112,8 @@ export class SpeechSignalRuntime {
     }
 
     return {
-      lipSyncValue: includeLipSync && this.activeSourceId !== null
-        ? this.lipSyncValue
+      lipSyncIntensity: includeLipSync && this.activeSourceId !== null
+        ? this.lipSyncIntensity
         : 0,
     };
   }
