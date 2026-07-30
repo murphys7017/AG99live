@@ -43,23 +43,26 @@ class _BlockingClient:
 
 
 def test_sampling_interruption_returns_the_samples_collected_so_far() -> None:
-    async def run() -> object:
+    async def run() -> tuple[object, list[int]]:
         client = _BlockingClient()
+        batch_sizes: list[int] = []
         task = asyncio.create_task(
             sample_parameters(
                 client,
                 hz=20,
                 seconds=10,
                 known_model_id="model",
+                on_batch=lambda samples, _events: batch_sizes.append(len(samples)),
             )
         )
         await asyncio.wait_for(client.blocking_request_started.wait(), timeout=1)
         task.cancel()
-        return await task
+        return await task, batch_sizes
 
-    result = asyncio.run(run())
+    result, batch_sizes = asyncio.run(run())
 
     assert result.report["termination_reason"] == "interrupted"
     assert len(result.samples) == 2
+    assert batch_sizes == [2]
     assert result.report["sources"]["tracking_input"]["sample_count"] == 1
     assert result.report["sources"]["live2d_parameter"]["sample_count"] == 1

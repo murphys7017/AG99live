@@ -1,5 +1,5 @@
-"""VTube Studio discovery and sampling probe for AG99live."""
+"""Independent VTube Studio parameter recorder for AG99live."""
 
 __all__ = ["__version__"]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

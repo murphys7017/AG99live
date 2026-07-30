@@ -1,15 +1,20 @@
 # AG99live VTS Data Recorder
 
-这是给第一轮 VTube Studio 参数采集验证使用的独立探针。它只连接本机 VTS、发现参数并在内存中短时采样，输出连接与采样质量报告。
+这是独立的 VTube Studio 参数录制器。它连接本机 VTS，发现参数，并将可回放的原始参数时间序列写入自身的 SQLite 数据库。
+
+当前能力：
+
+- `sample`：仅内存采样，用于检查连接、参数与采样质量；进程结束后原始帧丢弃。
+- `record`：创建独立录制会话与 take，批量保存 tracking input、Live2D 参数帧和 VTS 环境事件。
+- `list`、`inspect`、`delete`：确认录制质量、查看 take 摘要和级联删除不需要的 take。
 
 它当前**不会**：
 
-- 写入 `motion_lab.sqlite3`；
-- 创建 `PerformanceTake`、训练 JSON 或其他录制文件；
+- 读取、写入或迁移 `motion_lab.sqlite3`；
+- 创建 `PerformanceTake` 或以逐条 JSON 文件作为主存储；
 - 生成文本、`intent_text`、`intent_tags`、`axis_levels`、时长或曲线标签；
+- 导出训练 JSON/JSONL；
 - 向 VTS 注入或修改任何参数。
-
-这一步的目的是先观察当前固定模型在真实 VTS 环境中的 tracking input 与最终 Live2D 参数，并验证 20 Hz、30 Hz 轮询是否足够稳定。原始帧数据在本版本结束进程后即丢弃。
 
 ## 前置条件
 
@@ -25,6 +30,14 @@
 ```
 
 可用 `--token-file` 覆盖这个位置，但不要把该文件放进 Git 仓库或动作数据库。
+
+录制数据库默认位于：
+
+```text
+%LOCALAPPDATA%\AG99live\vts-data-recorder\recordings.sqlite3
+```
+
+可用全局参数 `--database <path>` 覆盖该位置。数据库只保存录制器内部事实，VTS token 不会写入其中。
 
 ## 安装与运行
 
@@ -58,6 +71,27 @@ python -m ag99_vts_recorder sample --hz 20 --seconds 30
 python -m ag99_vts_recorder sample --hz 30 --seconds 30
 ```
 
+以 20 Hz 将 30 秒原始帧写入独立数据库：
+
+```powershell
+python -m ag99_vts_recorder record --hz 20 --seconds 30 --label calibration-head-roll
+```
+
+`record` 期间按下 `Ctrl+C` 会正常收尾并保存已批量写入的帧；take 会标记为 `interrupted`。模型加载或模型配置变更也会持久化当前帧和事件，但 take 会标记为 `environment_changed`，不能作为稳定录制使用。任何参数请求失败或环境事件订阅不完整都会标记为 `completed_with_issues`，同样不能作为稳定标定数据。
+
+查看数据库中的 take：
+
+```powershell
+python -m ag99_vts_recorder list
+python -m ag99_vts_recorder inspect 12
+```
+
+永久删除一个 take 及其帧、事件和未来的审核标注：
+
+```powershell
+python -m ag99_vts_recorder delete 12
+```
+
 端口或地址不同的示例：
 
 ```powershell
@@ -70,7 +104,16 @@ python -m ag99_vts_recorder --url ws://localhost:8002 sample --hz 20 --seconds 3
 python -m ag99_vts_recorder --reauthorize discover
 ```
 
-## 报告内容
+## 录制内容
+
+每个 `record` 会创建一个 session 和一个 take。session 保存录制器版本、VTS endpoint、模型身份、参数目录快照和内部目标契约快照；take 保存：
+
+- 两条独立时间序列：`tracking_input` 与 `live2d_parameter`；
+- 每帧的相对调度、发送、接收 monotonic 时间、VTS timestamp、模型 ID 与完整参数映射；
+- `ModelLoadedEvent`、`ModelConfigChangedEvent`、`TrackingStatusChangedEvent` 与录制器错误；
+- 结束原因、环境稳定性和采样质量报告。
+
+帧批量事务写入，SQLite 使用 WAL、外键级联和 busy timeout。`inspect` 只输出帧计数、事件和质量报告，不把完整原始帧打印到终端。
 
 `sample` 输出 JSON 摘要，不含 token。它按 `tracking_input` 和 `live2d_parameter` 两个来源分别报告：
 
@@ -81,7 +124,7 @@ python -m ag99_vts_recorder --reauthorize discover
 - 每个观察到的参数最小值、最大值和变化次数；
 - 采样期间收到的模型、模型配置与 tracking 状态事件。
 
-采样中的开始与进度提示写到终端的标准错误流，最终 JSON 报告写到标准输出。正常的 30 秒采样会在结束前保持运行，不会逐帧输出参数值。
+采样和录制的开始与进度提示写到终端的标准错误流，最终 JSON 摘要写到标准输出。正常的 30 秒操作会在结束前保持运行，不会逐帧输出参数值。
 按下 `Ctrl+C` 会结束采样并输出已收集样本的部分报告，其中 `termination_reason` 为 `interrupted`。
 若 VTS 在采样期间加载模型或修改模型配置，探针会停止采样并把 `sampling.environment.capture_stable` 标记为 `false`；tracking 状态变化会作为事件事实保留在报告中。
 
@@ -89,4 +132,4 @@ RTT 以本地 monotonic clock 计算。两层参数通过独立请求获取，�
 
 ## 后续边界
 
-探针通过后，才单独设计并实现写入现有动作实验室数据库的录制会话、动作记录与帧表。届时数据库保留原始参数时间序列，训练导出仅保留审核后的文本上下文、`axis_levels`、`duration_hint_ms` 和 `curve`。
+本阶段只建立原始录制事实。`axis_levels`、`duration_hint_ms`、`curve`、审核、回放和训练导出会在语义轴标定完成后单独实现。训练导出只能读取审核通过、`completed`、环境稳定且具备完整文本上下文的 take，并且只输出文本上下文和这三个目标字段；数据库主键、VTS 参数、原始帧、事件和所有管理字段不得进入训练样本。

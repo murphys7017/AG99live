@@ -24,6 +24,7 @@ CAPTURE_INVALIDATING_EVENTS = frozenset({"ModelLoadedEvent", "ModelConfigChanged
 @dataclass(frozen=True)
 class SamplingResult:
     samples: list[ProbeSample]
+    events: list["SamplingEvent"]
     report: dict[str, Any]
 
 
@@ -34,6 +35,14 @@ class SamplingProgress:
     sample_count: int
     error_count: int
     skipped_schedule_slots: int
+
+
+@dataclass(frozen=True)
+class SamplingEvent:
+    relative_monotonic_ns: int
+    message_type: str
+    vts_timestamp_ms: int | None
+    raw: Mapping[str, Any]
 
 
 async def subscribe_environment_events(client: VTSClient) -> list[str]:
@@ -60,6 +69,7 @@ async def sample_parameters(
     seconds: float,
     known_model_id: str | None,
     on_progress: Callable[[SamplingProgress], None] | None = None,
+    on_batch: Callable[[list[ProbeSample], list[SamplingEvent]], None] | None = None,
 ) -> SamplingResult:
     if hz <= 0 or hz > 30:
         raise ValueError("hz must be greater than 0 and no greater than 30 for this probe")
@@ -72,6 +82,7 @@ async def sample_parameters(
     scheduled_ns = start_ns
     skipped_schedule_slots = 0
     samples: list[ProbeSample] = []
+    events: list[SamplingEvent] = []
     errors: list[str] = []
     event_counts: Counter[str] = Counter()
     environment_issues: set[str] = set()
@@ -85,6 +96,7 @@ async def sample_parameters(
             if now_ns < scheduled_ns:
                 await asyncio.sleep((scheduled_ns - now_ns) / 1_000_000_000)
 
+            round_samples: list[ProbeSample] = []
             await asyncio.gather(
                 _sample_source(
                     client=client,
@@ -92,7 +104,7 @@ async def sample_parameters(
                     request_type="InputParameterListRequest",
                     scheduled_ns=scheduled_ns,
                     fallback_model_id=known_model_id,
-                    samples=samples,
+                    samples=round_samples,
                     errors=errors,
                     environment_issues=environment_issues,
                 ),
@@ -102,16 +114,21 @@ async def sample_parameters(
                     request_type="Live2DParameterListRequest",
                     scheduled_ns=scheduled_ns,
                     fallback_model_id=known_model_id,
-                    samples=samples,
+                    samples=round_samples,
                     errors=errors,
                     environment_issues=environment_issues,
                 )
             )
-            _record_environment_events(
+            samples.extend(round_samples)
+            round_events = _record_environment_events(
                 client.drain_events(),
+                start_monotonic_ns=start_ns,
                 event_counts=event_counts,
                 environment_issues=environment_issues,
             )
+            events.extend(round_events)
+            if on_batch is not None and (round_samples or round_events):
+                on_batch(round_samples, round_events)
             if environment_issues:
                 break
 
@@ -138,11 +155,15 @@ async def sample_parameters(
         interrupted = True
 
     elapsed_ns = time.monotonic_ns() - start_ns
-    _record_environment_events(
+    final_events = _record_environment_events(
         client.drain_events(),
+        start_monotonic_ns=start_ns,
         event_counts=event_counts,
         environment_issues=environment_issues,
     )
+    events.extend(final_events)
+    if on_batch is not None and final_events:
+        on_batch([], final_events)
     report = build_sampling_report(
         samples=samples,
         requested_hz=hz,
@@ -151,6 +172,7 @@ async def sample_parameters(
         errors=errors,
         event_counts=event_counts,
     )
+    report["capture_complete"] = not errors
     report["environment"] = {
         "expected_model_id": known_model_id,
         "observed_model_ids": sorted(
@@ -167,7 +189,7 @@ async def sample_parameters(
         if environment_issues
         else "completed"
     )
-    return SamplingResult(samples=samples, report=report)
+    return SamplingResult(samples=samples, events=events, report=report)
 
 
 async def _sample_source(
@@ -219,12 +241,24 @@ async def _sample_source(
 def _record_environment_events(
     events: list[Any],
     *,
+    start_monotonic_ns: int,
     event_counts: Counter[str],
     environment_issues: set[str],
-) -> None:
+) -> list[SamplingEvent]:
+    records: list[SamplingEvent] = []
+    drained_monotonic_ns = time.monotonic_ns()
     for event in events:
         event_counts[event.message_type] += 1
+        records.append(
+            SamplingEvent(
+                relative_monotonic_ns=max(drained_monotonic_ns - start_monotonic_ns, 0),
+                message_type=event.message_type,
+                vts_timestamp_ms=event.timestamp_ms,
+                raw=event.raw,
+            )
+        )
         if event.message_type in CAPTURE_INVALIDATING_EVENTS:
             environment_issues.add(
                 f"VTube Studio emitted {event.message_type} during sampling"
             )
+    return records

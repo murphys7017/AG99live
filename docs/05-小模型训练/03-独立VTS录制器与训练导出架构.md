@@ -23,7 +23,9 @@ VTube Studio
 
 ### 2.1 独立存储
 
-- 录制器拥有自己的 SQLite 数据库，默认位于本机应用数据目录，不在仓库内。
+- 录制器拥有自己的 SQLite 数据库，默认路径为
+  `%LOCALAPPDATA%\AG99live\vts-data-recorder\recordings.sqlite3`，不在仓库内；`--database`
+  可覆盖该本机路径。
 - 它绝不读取、写入或迁移现有 `motion_lab.sqlite3`。
 - 它不导入 AstrBot Adapter、ModelEngine、Electron 或 Motion Lab 的 Python 模块。
 - VTS token 继续只保存在本机配置文件，绝不写入录制数据库、导出文件或 Git。
@@ -111,7 +113,7 @@ VTS tracking input 与 Live2D parameter 的逐帧值仅用于：
 
 ### 4.3 训练导出层
 
-导出器只读取审核通过且环境稳定的 take，并生成逻辑上等价于下列结构的样本：
+导出器只读取审核通过、录制状态为 `completed` 且环境稳定的 take，并生成逻辑上等价于下列结构的样本：
 
 ```json
 {
@@ -246,7 +248,7 @@ VTS timestamp、模型 ID 和数值 JSON。take 内同一来源的序号唯一�
 
 待定：
 
-- 独立数据库的默认本机路径与备份策略。
+- 独立数据库的备份策略。
 - 当前固定模型允许训练的最终 `primary/hint` 轴清单。
 - 从原始序列推导等级、时长和曲线的算法与人工审核界面。
 - 训练框架选择后的具体 JSONL messages 封装。
