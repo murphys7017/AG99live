@@ -59,6 +59,7 @@ import {
 } from "./parametermixer";
 import {
   SpeechSignalRuntime,
+  type ExternalAudioSignalSourceOptions,
   type ExternalAudioSignalValues,
 } from "./speechsignalruntime";
 import { TextureInfo } from "./lapptexturemanager";
@@ -164,6 +165,13 @@ interface DirectPlanContributionCollection {
   failure: string | null;
   shouldLogFrame: boolean;
   released: boolean;
+}
+
+type ActiveParameterFrameFailureOwner = "direct_plan" | "lip_sync" | "mixed";
+
+interface ActiveParameterFrameFailure {
+  owner: ActiveParameterFrameFailureOwner;
+  reason: string;
 }
 
 /**
@@ -734,20 +742,30 @@ export class LAppModel extends CubismUserModel {
     }
 
     // All AG99 active parameters are resolved once before Physics consumes them.
-    let parameterMixerFailure: string | null = null;
+    let parameterMixerFailure: ActiveParameterFrameFailure | null = null;
     try {
       parameterMixerFailure = this.applyActiveParameterFrame(audioSignals.lipSyncIntensity);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      parameterMixerFailure = `parameter_mixer_frame_exception:${message || "unknown_error"}`;
+      parameterMixerFailure = {
+        owner: "mixed",
+        reason: `parameter_mixer_frame_exception:${message || "unknown_error"}`,
+      };
       console.error("[LAppModel] Active parameter frame execution failed.", error);
     }
     if (parameterMixerFailure) {
       console.error("[LAppModel] Active parameter frame rejected.", {
-        reason: parameterMixerFailure,
+        owner: parameterMixerFailure.owner,
+        reason: parameterMixerFailure.reason,
       });
-      if (this.hasActiveDirectParameterPlan()) {
-        this.stopDirectParameterPlan(parameterMixerFailure, "failed");
+      if (
+        parameterMixerFailure.owner !== "lip_sync"
+        && this.hasActiveDirectParameterPlan()
+      ) {
+        this.stopDirectParameterPlan(parameterMixerFailure.reason, "failed");
+      }
+      if (parameterMixerFailure.owner !== "direct_plan") {
+        this._speechSignalRuntime.failActiveSource(parameterMixerFailure.reason);
       }
     }
 
@@ -1641,6 +1659,10 @@ export class LAppModel extends CubismUserModel {
       }
       const minValue = this._model.getParameterMinimumValue(resolved.parameterIndex);
       const maxValue = this._model.getParameterMaximumValue(resolved.parameterIndex);
+      if (!Number.isFinite(minValue) || !Number.isFinite(maxValue) || minValue > maxValue) {
+        this.stopDirectParameterPlan(`v2_parameter_invalid_runtime_range:${parameterIdRaw}`);
+        return false;
+      }
       const targetValue = Number(item.target_value);
       if (targetValue < minValue || targetValue > maxValue) {
         this.stopDirectParameterPlan(`v2_parameter_target_out_of_runtime_range:${parameterIdRaw}`);
@@ -1703,8 +1725,6 @@ export class LAppModel extends CubismUserModel {
           parameterId: parameterIdRaw,
           initialValue: this._model.getParameterValueByIndex(resolved.parameterIndex),
           neutralValue: neutralTargetValue,
-          minValue,
-          maxValue,
           maxVelocity: Number(item.dynamics.max_velocity),
           maxAcceleration: Number(item.dynamics.max_acceleration),
           drivenValue: null,
@@ -1755,8 +1775,11 @@ export class LAppModel extends CubismUserModel {
     return true;
   }
 
-  public beginExternalAudioSignalSource(sourceId: string): void {
-    this._speechSignalRuntime.beginSource(sourceId);
+  public beginExternalAudioSignalSource(
+    sourceId: string,
+    options?: ExternalAudioSignalSourceOptions,
+  ): void {
+    this._speechSignalRuntime.beginSource(sourceId, options);
   }
 
   public writeExternalAudioSignalSource(
@@ -1775,25 +1798,40 @@ export class LAppModel extends CubismUserModel {
       return false;
     }
     for (let index = 0; index < this._lipSyncIds.getSize(); index += 1) {
-      if (!this.isParameterIndexWritable(this._model.getParameterIndex(this._lipSyncIds.at(index)))) {
+      const parameterIndex = this._model.getParameterIndex(this._lipSyncIds.at(index));
+      if (!this.isParameterIndexWritable(parameterIndex)) {
+        return false;
+      }
+      const minValue = this._model.getParameterMinimumValue(parameterIndex);
+      const defaultValue = this._model.getParameterDefaultValue(parameterIndex);
+      const maxValue = this._model.getParameterMaximumValue(parameterIndex);
+      if (
+        !Number.isFinite(minValue)
+        || !Number.isFinite(defaultValue)
+        || !Number.isFinite(maxValue)
+        || minValue > defaultValue
+        || defaultValue >= maxValue
+      ) {
         return false;
       }
     }
     return true;
   }
 
-  private applyActiveParameterFrame(lipSyncIntensity: number): string | null {
+  private applyActiveParameterFrame(
+    lipSyncIntensity: number,
+  ): ActiveParameterFrameFailure | null {
     if (!this._model) {
-      return "parameter_mixer_model_unavailable";
+      return { owner: "mixed", reason: "parameter_mixer_model_unavailable" };
     }
 
     const directPlan = this.collectDirectPlanContributions();
     if (directPlan.failure) {
-      return directPlan.failure;
+      return { owner: "direct_plan", reason: directPlan.failure };
     }
     const lipSyncContributions = this.collectLipSyncContributions(lipSyncIntensity);
     if (typeof lipSyncContributions === "string") {
-      return lipSyncContributions;
+      return { owner: "lip_sync", reason: lipSyncContributions };
     }
     const resolution = this._parameterMixer.resolveFrame(
       [...directPlan.contributions, ...lipSyncContributions],
@@ -1805,14 +1843,22 @@ export class LAppModel extends CubismUserModel {
       },
     );
     if (!resolution.ok) {
-      return resolution.reason;
+      return {
+        owner: this.resolveParameterFrameFailureOwner(resolution.sources),
+        reason: resolution.reason,
+      };
     }
 
     for (const parameter of resolution.parameters) {
       this._model.setParameterValueById(parameter.parameterId, parameter.value);
       const readbackValue = this._model.getParameterValueByIndex(parameter.parameterIndex);
       if (Math.abs(readbackValue - parameter.value) > 0.001) {
-        return `parameter_mixer_write_mismatch:${parameter.parameterIdRaw}`;
+        return {
+          owner: this.resolveParameterFrameFailureOwner(
+            parameter.contributions.map((contribution) => contribution.source),
+          ),
+          reason: `parameter_mixer_write_mismatch:${parameter.parameterIdRaw}`,
+        };
       }
     }
 
@@ -1891,23 +1937,10 @@ export class LAppModel extends CubismUserModel {
         };
       }
 
-      const minValue = this._model.getParameterMinimumValue(item.parameterIndex);
-      const maxValue = this._model.getParameterMaximumValue(item.parameterIndex);
-      if (item.targetValue < minValue || item.targetValue > maxValue) {
-        return {
-          contributions: [],
-          failure: `v2_parameter_target_out_of_runtime_range:${item.parameterIdRaw}`,
-          shouldLogFrame: false,
-          released: false,
-        };
-      }
-
       const rawFrameTargetValue = this.resolveDirectBindingTargetValue(
         item,
         elapsedMs,
         item.targetValue,
-        minValue,
-        maxValue,
       );
       const presentationFrame = resolveParameterPresentationFrame(
         item.presentation,
@@ -1954,8 +1987,15 @@ export class LAppModel extends CubismUserModel {
         return `parameter_mixer_lip_sync_parameter_not_writable:${index}`;
       }
       const minValue = this._model.getParameterMinimumValue(parameterIndex);
+      const defaultValue = this._model.getParameterDefaultValue(parameterIndex);
       const maxValue = this._model.getParameterMaximumValue(parameterIndex);
-      if (!Number.isFinite(minValue) || !Number.isFinite(maxValue) || minValue >= maxValue) {
+      if (
+        !Number.isFinite(minValue)
+        || !Number.isFinite(defaultValue)
+        || !Number.isFinite(maxValue)
+        || minValue > defaultValue
+        || defaultValue >= maxValue
+      ) {
         return `parameter_mixer_lip_sync_invalid_runtime_range:${parameterId.getString().s}`;
       }
       contributions.push({
@@ -1963,8 +2003,8 @@ export class LAppModel extends CubismUserModel {
         parameterIdRaw: parameterId.getString().s,
         parameterIndex,
         source: "lip_sync",
-        operation: "add",
-        value: (maxValue - minValue) * lipSyncIntensity,
+        operation: "replace",
+        value: defaultValue + (maxValue - defaultValue) * lipSyncIntensity,
         weight: 1,
         priority: PARAMETER_MIX_PRIORITY.lipSync,
       });
@@ -1976,8 +2016,6 @@ export class LAppModel extends CubismUserModel {
     item: DirectSemanticParameterBinding,
     elapsedMs: number,
     fallbackTargetValue: number,
-    minValue: number,
-    maxValue: number,
   ): number {
     const sequenceTargetValue = resolveParameterPresentationTrack(
       item.keyframes,
@@ -1985,7 +2023,7 @@ export class LAppModel extends CubismUserModel {
       fallbackTargetValue,
     );
     if (item.modulationAmplitude <= 0) {
-      return Math.max(minValue, Math.min(maxValue, sequenceTargetValue));
+      return sequenceTargetValue;
     }
 
     const gestureValue = resolveParameterPresentationTrack(
@@ -2000,7 +2038,21 @@ export class LAppModel extends CubismUserModel {
         * item.modulationAmplitude
         * item.modulationDirection
         * audioGain;
-    return Math.max(minValue, Math.min(maxValue, modulatedValue));
+    return modulatedValue;
+  }
+
+  private resolveParameterFrameFailureOwner(
+    sources: readonly string[],
+  ): ActiveParameterFrameFailureOwner {
+    const hasDirectPlanSource = sources.some((source) => source.startsWith("direct_plan:"));
+    const hasLipSyncSource = sources.some((source) => source === "lip_sync");
+    if (hasDirectPlanSource && !hasLipSyncSource) {
+      return "direct_plan";
+    }
+    if (hasLipSyncSource && !hasDirectPlanSource) {
+      return "lip_sync";
+    }
+    return "mixed";
   }
 
   private resolveSpeechPoseModulation(

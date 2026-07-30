@@ -1,9 +1,9 @@
 task:
-  class: refactor
-  risk: medium
+  class: bugfix
+  risk: high
   phase: validation
   status: active
-  scope: "Complete the first Parameter Mixer batch: resolve direct-plan and lip-sync contributions deterministically in the WebSDK, apply one final runtime-range clamp, and keep audio signal normalization outside the mixer."
+  scope: "Repair the existing WebSDK Parameter Mixer lifecycle: propagate lip-sync frame failures to PlaybackTimeline, keep one final runtime-range clamp in ParameterMixer, and map lip sync from the Cubism default mouth value to its open value."
 
 context:
   confidence: high
@@ -123,6 +123,7 @@ verification:
     - A two-turn live Electron conversation was captured from the real terminal, input overlay, Live2D window, and original MiniMax TTS artifacts; the synchronized 14-second dialogue segment was visually inspected.
     - The expanded 44.5-second 1920x1080 H.264/AAC render completed and decoded end-to-end without errors; dialogue peaks at -4.1 dB after a 6 dB intelligibility lift.
     - `npm run typecheck:renderer` and `npm run typecheck:websdk` passed after the conversation playback composition and physics-response ownership change.
+    - `npm run typecheck:websdk`, `npm run typecheck:renderer`, and `git diff --check` passed after propagating Parameter Mixer lip-sync failures through the existing source lifecycle, moving the final runtime range clamp to ParameterMixer, and mapping lip sync from Cubism defaults.
     - Targeted `python -m py_compile` passed for the changed Adapter event, coordinator, motion Prompt, Motion Lab, and state modules.
     - `check_astrbot_plugin.py astrbot_plugin_ag99live_adapter` reported 0 errors and 0 warnings; `git diff --check` passed.
   validation_gap:

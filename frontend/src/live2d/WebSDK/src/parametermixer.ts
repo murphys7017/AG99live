@@ -53,6 +53,7 @@ export type ParameterMixerResolution =
   | {
       ok: false;
       reason: string;
+      sources: string[];
     };
 
 /**
@@ -73,7 +74,11 @@ export class ParameterMixer {
     for (const [sequence, contribution] of contributions.entries()) {
       const invalidReason = validateContribution(contribution, access);
       if (invalidReason) {
-        return { ok: false, reason: invalidReason };
+        return {
+          ok: false,
+          reason: invalidReason,
+          sources: contribution.source ? [contribution.source] : [],
+        };
       }
       const existing = grouped.get(contribution.parameterIndex);
       if (existing) {
@@ -81,6 +86,10 @@ export class ParameterMixer {
           return {
             ok: false,
             reason: `parameter_mixer_parameter_identity_conflict:${existing.parameterIdRaw}:${contribution.parameterIdRaw}`,
+            sources: collectContributionSources([
+              ...existing.contributions,
+              contribution,
+            ]),
           };
         }
         existing.contributions.push({ ...contribution, sequence });
@@ -102,12 +111,14 @@ export class ParameterMixer {
         return {
           ok: false,
           reason: `parameter_mixer_invalid_runtime_range:${group.parameterIdRaw}`,
+          sources: collectContributionSources(group.contributions),
         };
       }
       if (!Number.isFinite(baseValue)) {
         return {
           ok: false,
           reason: `parameter_mixer_invalid_base_value:${group.parameterIdRaw}`,
+          sources: collectContributionSources(group.contributions),
         };
       }
 
@@ -144,6 +155,16 @@ export class ParameterMixer {
     return { ok: true, parameters };
   }
 
+}
+
+function collectContributionSources(
+  contributions: readonly Pick<ParameterContribution, "source">[],
+): string[] {
+  return [...new Set(
+    contributions
+      .map((contribution) => contribution.source)
+      .filter((source): source is string => typeof source === "string" && Boolean(source.trim())),
+  )];
 }
 
 function validateContribution(

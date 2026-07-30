@@ -3,6 +3,10 @@ export interface ExternalAudioSignalValues {
   speechEnergyValue?: number;
 }
 
+export interface ExternalAudioSignalSourceOptions {
+  onFailed?: (reason: string) => void;
+}
+
 export interface SpeechAudioFrame {
   lipSyncIntensity: number;
 }
@@ -32,8 +36,12 @@ export class SpeechSignalRuntime {
   private speechHeadEnvelope = 0;
   private speechBodyEnvelope = 0;
   private lipSyncDiagnosticFrameCount = 0;
+  private activeSourceFailureHandler: ((reason: string) => void) | null = null;
 
-  public beginSource(sourceId: string): void {
+  public beginSource(
+    sourceId: string,
+    options: ExternalAudioSignalSourceOptions = {},
+  ): void {
     const normalizedSourceId = normalizeSourceId(sourceId);
     if (this.activeSourceId !== null) {
       throw new Error(`speech_signal_source_already_active:${this.activeSourceId}`);
@@ -42,6 +50,9 @@ export class SpeechSignalRuntime {
     this.lipSyncIntensity = 0;
     this.speechEnergyValue = 0;
     this.lipSyncDiagnosticFrameCount = 0;
+    this.activeSourceFailureHandler = typeof options.onFailed === "function"
+      ? options.onFailed
+      : null;
   }
 
   public writeSource(
@@ -73,19 +84,34 @@ export class SpeechSignalRuntime {
         `speech_signal_source_mismatch:${normalizedSourceId}:${this.activeSourceId}`,
       );
     }
-    this.activeSourceId = null;
-    this.lipSyncIntensity = 0;
-    this.speechEnergyValue = 0;
-    this.lipSyncDiagnosticFrameCount = 0;
+    this.clearActiveSource();
+  }
+
+  public failActiveSource(reason: string): void {
+    const normalizedReason = normalizeFailureReason(reason);
+    if (this.activeSourceId === null) {
+      return;
+    }
+
+    const failureHandler = this.activeSourceFailureHandler;
+    this.clearActiveSource();
+    if (!failureHandler) {
+      return;
+    }
+    try {
+      failureHandler(normalizedReason);
+    } catch (error) {
+      console.error("[SpeechSignalRuntime] source failure callback failed.", {
+        reason: normalizedReason,
+        error,
+      });
+    }
   }
 
   public reset(): void {
-    this.activeSourceId = null;
-    this.lipSyncIntensity = 0;
-    this.speechEnergyValue = 0;
+    this.clearActiveSource();
     this.speechHeadEnvelope = 0;
     this.speechBodyEnvelope = 0;
-    this.lipSyncDiagnosticFrameCount = 0;
   }
 
   public advanceFrame(deltaTimeSeconds: number, includeLipSync: boolean): SpeechAudioFrame {
@@ -161,12 +187,28 @@ export class SpeechSignalRuntime {
       );
     }
   }
+
+  private clearActiveSource(): void {
+    this.activeSourceId = null;
+    this.activeSourceFailureHandler = null;
+    this.lipSyncIntensity = 0;
+    this.speechEnergyValue = 0;
+    this.lipSyncDiagnosticFrameCount = 0;
+  }
 }
 
 function normalizeSourceId(sourceId: string): string {
   const normalized = typeof sourceId === "string" ? sourceId.trim() : "";
   if (!normalized) {
     throw new Error("speech_signal_source_id_missing");
+  }
+  return normalized;
+}
+
+function normalizeFailureReason(reason: string): string {
+  const normalized = typeof reason === "string" ? reason.trim() : "";
+  if (!normalized) {
+    throw new Error("speech_signal_failure_reason_missing");
   }
   return normalized;
 }

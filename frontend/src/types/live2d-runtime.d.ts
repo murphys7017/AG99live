@@ -59,7 +59,10 @@ declare global {
       ) => boolean;
       stopDirectParameterPlan?: (reason?: string, status?: DirectParameterPlanTerminalStatus) => void;
       getDirectParameterPlanError?: () => string;
-      beginExternalAudioSignalSource?: (sourceId: string) => void;
+      beginExternalAudioSignalSource?: (
+        sourceId: string,
+        options?: { onFailed?: (reason: string) => void },
+      ) => void;
       writeExternalAudioSignalSource?: (
         sourceId: string,
         values: { lipSyncIntensity?: number; speechEnergyValue?: number },

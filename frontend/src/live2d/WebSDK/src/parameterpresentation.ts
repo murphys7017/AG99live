@@ -4,8 +4,6 @@ export interface ParameterPresentationNode {
   parameterId: string;
   initialValue: number;
   neutralValue: number;
-  minValue: number;
-  maxValue: number;
   maxVelocity: number;
   maxAcceleration: number;
   drivenValue: number | null;
@@ -32,17 +30,13 @@ export function resolveParameterPresentationFrame(
   elapsedMs: number,
   timing: DirectParameterExecutionPlan["timing"],
 ): ParameterPresentationFrame {
-  const targetValue = clamp(
-    resolveTrajectoryEnvelope(node, frameTargetValue, elapsedMs, timing),
-    node.minValue,
-    node.maxValue,
-  );
+  const targetValue = resolveTrajectoryEnvelope(node, frameTargetValue, elapsedMs, timing);
   const previousValue = node.drivenValue ?? node.initialValue;
   const previousElapsedMs = node.lastElapsedMs;
   node.lastElapsedMs = elapsedMs;
 
   if (previousElapsedMs === null || elapsedMs <= previousElapsedMs) {
-    node.drivenValue = clamp(previousValue, node.minValue, node.maxValue);
+    node.drivenValue = previousValue;
     node.velocity = 0;
     const ownershipWeight = resolveOwnershipWeight(elapsedMs, timing);
     return {
@@ -61,8 +55,6 @@ export function resolveParameterPresentationFrame(
     deltaSeconds,
     node.maxVelocity,
     node.maxAcceleration,
-    node.minValue,
-    node.maxValue,
   );
   node.drivenValue = next.value;
   node.velocity = next.velocity;
@@ -167,8 +159,6 @@ function advanceParameterDynamics(
   deltaSeconds: number,
   maxVelocity: number,
   maxAcceleration: number,
-  minValue: number,
-  maxValue: number,
 ): { value: number; velocity: number } {
   const remaining = targetValue - previousValue;
   const velocityDelta = maxAcceleration * deltaSeconds;
@@ -179,7 +169,7 @@ function advanceParameterDynamics(
   const direction = Math.sign(remaining);
   const brakingSpeed = Math.sqrt(2 * maxAcceleration * Math.abs(remaining));
   const desiredVelocity = direction * Math.min(maxVelocity, brakingSpeed);
-  const nextVelocity = clamp(
+  const nextVelocity = clampRange(
     desiredVelocity,
     previousVelocity - velocityDelta,
     previousVelocity + velocityDelta,
@@ -191,10 +181,7 @@ function advanceParameterDynamics(
     return { value: targetValue, velocity: 0 };
   }
 
-  const nextValue = clamp(unboundedValue, minValue, maxValue);
-  if (nextValue !== unboundedValue) {
-    return { value: nextValue, velocity: 0 };
-  }
+  const nextValue = unboundedValue;
   const nextRemaining = targetValue - nextValue;
   if (Math.abs(nextRemaining) <= 0.001 && Math.abs(nextVelocity) <= velocityDelta) {
     return { value: targetValue, velocity: 0 };
@@ -207,15 +194,19 @@ function interpolate(start: number, end: number, progress: number): number {
 }
 
 function smoothstep(value: number): number {
-  const x = clamp(value, 0, 1);
+  const x = clampUnit(value);
   return x * x * (3 - 2 * x);
 }
 
 function easeOutBack(value: number): number {
-  const x = clamp(value, 0, 1) - 1;
+  const x = clampUnit(value) - 1;
   return 1 + 2.70158 * x * x * x + 1.70158 * x * x;
 }
 
-function clamp(value: number, minValue: number, maxValue: number): number {
+function clampUnit(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function clampRange(value: number, minValue: number, maxValue: number): number {
   return Math.max(minValue, Math.min(maxValue, value));
 }

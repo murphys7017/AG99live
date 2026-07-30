@@ -114,6 +114,7 @@ function startLiveLipSync(
   const beginAudioSignalSource = adapter.beginExternalAudioSignalSource.bind(adapter);
   const writeAudioSignalSource = adapter.writeExternalAudioSignalSource.bind(adapter);
   const endAudioSignalSource = adapter.endExternalAudioSignalSource.bind(adapter);
+  let sourceRuntime: LiveLipSyncRuntime | null = null;
   let hasLipSyncParameters = false;
   try {
     hasLipSyncParameters = adapter.hasConfiguredLipSyncParameters?.() === true;
@@ -134,7 +135,12 @@ function startLiveLipSync(
   }
 
   try {
-    beginAudioSignalSource(sourceId);
+    beginAudioSignalSource(sourceId, {
+      onFailed: (reason) => {
+        sourceRuntime?.stop();
+        onRuntimeFailure(reason, false);
+      },
+    });
   } catch (error) {
     return reportLipSyncFailure("speech_audio_signal_source_begin_failed", error);
   }
@@ -155,13 +161,18 @@ function startLiveLipSync(
     }
   };
 
-  const degradedRuntime = () => hasLipSyncParameters
-    ? createRandomLipSyncRuntime(
-        (values) => writeAudioSignalSource(sourceId, values),
-        endSignalSource,
-        isCurrentAudio,
-      )
-    : null;
+  const degradedRuntime = (): LiveLipSyncRuntime | null => {
+    if (!hasLipSyncParameters) {
+      return null;
+    }
+    sourceRuntime = createRandomLipSyncRuntime(
+      (values) => writeAudioSignalSource(sourceId, values),
+      endSignalSource,
+      isCurrentAudio,
+      onRuntimeFailure,
+    );
+    return sourceRuntime;
+  };
 
   const AudioContextCtor = window.AudioContext
     ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -241,7 +252,7 @@ function startLiveLipSync(
 
     animationFrameId = window.requestAnimationFrame(tick);
 
-    return { runtime: {
+    sourceRuntime = {
       resume: async () => {
         if (audioContext.state === "suspended") {
           try {
@@ -292,7 +303,11 @@ function startLiveLipSync(
         }
         void audioContext.close?.();
       },
-    }, failureReason: hasLipSyncParameters ? null : "lip_sync_parameters_unconfigured" };
+    };
+    return {
+      runtime: sourceRuntime,
+      failureReason: hasLipSyncParameters ? null : "lip_sync_parameters_unconfigured",
+    };
   } catch (error) {
     return reportLipSyncFailure(
       "lip_sync_analyser_failed",
@@ -318,6 +333,7 @@ function createRandomLipSyncRuntime(
   }) => void,
   endSignalSource: () => void,
   isCurrentAudio: () => boolean,
+  onRuntimeFailure: (reason: string, degraded: boolean) => void,
 ): LiveLipSyncRuntime {
   let timerId: number | null = null;
   let stopped = false;
@@ -338,6 +354,7 @@ function createRandomLipSyncRuntime(
         error,
       });
       endSignalSource();
+      onRuntimeFailure("lip_sync_random_fallback_parameter_write_failed", false);
       return;
     }
     timerId = window.setTimeout(scheduleNext, 90 + Math.round(Math.random() * 140));

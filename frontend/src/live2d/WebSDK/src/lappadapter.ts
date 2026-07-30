@@ -117,12 +117,15 @@ export class LAppAdapter {
       || this._directParameterPlanError;
   }
 
-  public beginExternalAudioSignalSource(sourceId: string): void {
+  public beginExternalAudioSignalSource(
+    sourceId: string,
+    options?: { onFailed?: (reason: string) => void },
+  ): void {
     const model = this.getModel();
     if (!model) {
       throw new Error("live2d_model_unavailable");
     }
-    model.beginExternalAudioSignalSource(sourceId);
+    model.beginExternalAudioSignalSource(sourceId, options);
   }
 
   public writeExternalAudioSignalSource(
