@@ -405,6 +405,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         startReason: "compiled_semantic_motion_preview",
         queuedDelayMs: 0,
         payloadKind: "compiled_semantic_motion",
+        executionKind: "parameter_plan",
         diagnostics: semanticMotion.diagnostics,
         semanticMotion,
         plan: startedPlan,
@@ -412,15 +413,10 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         runId: normalizedRunId,
       });
     };
-    const started = plan.resource?.kind === "motion"
-      ? dependencies.playCatalogMotion(plan.resource.motion, selectedModel, {
-          requiresPlaybackClock: false,
-          onStarted: (_motion, runId) => notifyStarted(runId, plan),
-        })
-      : dependencies.playPlan(plan, selectedModel, {
-          requiresPlaybackClock: false,
-          onStarted: (startedPlan, runId) => notifyStarted(runId, startedPlan),
-        });
+    const started = dependencies.playPlan(plan, selectedModel, {
+      requiresPlaybackClock: false,
+      onStarted: (startedPlan, runId) => notifyStarted(runId, startedPlan),
+    });
     if (!started || !notifiedStarted) {
       state.lastCompileReason = dependencies.getPlayerMessage?.()
         || "compiled_semantic_motion_preview_start_failed";

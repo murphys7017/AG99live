@@ -178,7 +178,6 @@ interface CompiledSemanticMotionBase {
   intentTags: string[];
   performanceCurveHint?: PerformanceCurveHint;
   expressionResourceId?: string;
-  motionResourceId?: string;
   timing: MotionTimingResolution;
   diagnostics: CompileDiagnostics;
 }

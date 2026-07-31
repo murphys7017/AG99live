@@ -373,8 +373,6 @@ interface NormalizedSemanticMotionIntentV4Base
   schema_version: typeof SCHEMA_MOTION_INTENT_V4;
   axes?: never;
   resource_id?: never;
-  expression_resource_id?: string;
-  motion_resource_id?: string;
 }
 
 export type NormalizedSemanticMotionIntentV4 =
@@ -382,11 +380,20 @@ export type NormalizedSemanticMotionIntentV4 =
     | {
       axis_levels: MotionAxisLevelMap;
       motion_steps?: never;
+      expression_resource_id?: string;
+      motion_resource_id?: never;
     }
     | {
       axis_levels?: never;
       motion_steps: MotionAxisLevelStep[];
       motion_resource_id?: never;
+      expression_resource_id?: string;
+    }
+    | {
+      axis_levels?: never;
+      motion_steps?: never;
+      expression_resource_id?: never;
+      motion_resource_id: string;
     }
   );
 
@@ -498,16 +505,7 @@ export interface SemanticExpressionPlanResource {
   parameter_ids: string[];
 }
 
-export interface SemanticMotionPlanResource {
-  kind: "motion";
-  resource_id: string;
-  parameter_ids: string[];
-  motion: CatalogMotionPayload;
-}
-
-export type SemanticPlanResource =
-  | SemanticExpressionPlanResource
-  | SemanticMotionPlanResource;
+export type SemanticPlanResource = SemanticExpressionPlanResource;
 
 export type SemanticMotionIntent = NormalizedSemanticMotionIntent;
 export type MotionIntentPayload = NormalizedSemanticMotionIntent;

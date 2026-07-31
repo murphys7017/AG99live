@@ -533,21 +533,14 @@ function buildSuccessCompileResult(
     model_id: profile.model_id,
     mode: semanticMotion.mode,
     emotion_label: semanticMotion.emotionLabel,
-    resource: context.state.resource?.resourceType === "expression"
+    resource: context.state.expressionResource
       ? {
           kind: "expression",
-          resource_id: context.state.resource.resourceId,
-          expression_id: context.state.resource.expressionId ?? "",
-          parameter_ids: [...context.state.resource.parameterIds],
+          resource_id: context.state.expressionResource.resourceId,
+          expression_id: context.state.expressionResource.expressionId,
+          parameter_ids: [...context.state.expressionResource.parameterIds],
         }
-      : context.state.resource?.resourceType === "motion" && context.state.resource.motion
-        ? {
-            kind: "motion",
-            resource_id: context.state.resource.resourceId,
-            parameter_ids: [...context.state.resource.parameterIds],
-            motion: context.state.resource.motion,
-          }
-        : undefined,
+      : undefined,
     timing: semanticMotion.timing.timing,
     parameters: context.state.parameters,
     diagnostics: {
@@ -581,7 +574,7 @@ function buildModelParameterDiagnostics(
   failureStage?: string,
 ): CompileResult["diagnostics"] {
   const parameters = context?.state.parameters ?? [];
-  const resource = context?.state.resource;
+  const resource = context?.state.expressionResource;
   return {
     ...semanticMotion.diagnostics,
     compiledParameterCount: parameters.length,
@@ -596,7 +589,7 @@ function buildModelParameterDiagnostics(
           resolvedResource: resource
             ? {
                 resourceId: resource.resourceId,
-                resourceType: resource.resourceType,
+                resourceType: "expression",
                 parameterIds: [...resource.parameterIds],
               }
             : undefined,

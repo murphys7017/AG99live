@@ -7,8 +7,9 @@ import {
   type ModelEngineStageRegistry,
 } from "./registry.js";
 
-export function compileMotionIntent(
-  intent: SemanticMotionIntent,
+/** Compiles only axis- or sequence-based intents into a direct parameter plan. */
+export function compileParameterMotionIntent(
+  intent: Exclude<SemanticMotionIntent, { motion_resource_id: string }>,
   options: CompileOptions,
   stageRegistry: ModelEngineStageRegistry = createModelEngineStageRegistry(),
 ): CompileResult {

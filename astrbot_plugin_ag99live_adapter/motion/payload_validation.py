@@ -57,9 +57,20 @@ def normalize_motion_arguments_payload(
             "axes_forbidden_use_axis_levels",
         )
 
+    is_motion_resource_only = (
+        "motion_resource_id" in motion_hint
+        and "axis_levels" not in motion_hint
+        and "motion_steps" not in motion_hint
+    )
+    if is_motion_resource_only and "performance_curve_hint" in motion_hint:
+        return None, append_resolution_reason(
+            base_reason,
+            "motion_resource_timing_fields_forbidden",
+        )
     try:
         semantic_profile = resolve_selected_semantic_axis_profile(
-            runtime_state=runtime_state
+            runtime_state=runtime_state,
+            require_prompt_axes=not is_motion_resource_only,
         )
     except Exception as exc:  # noqa: BLE001
         return None, f"semantic_profile_unresolved:{exc}"
@@ -73,10 +84,14 @@ def normalize_motion_arguments_payload(
         "model_id": semantic_profile.get("model_id"),
         "mode": "expressive",
         "intent_tags": motion_hint.get("intent_tags"),
-        "duration_hint_ms": motion_hint.get("duration_hint_ms"),
-        "expression_resource_id": motion_hint.get("expression_resource_id"),
-        "motion_resource_id": motion_hint.get("motion_resource_id"),
     }
+    for optional_field in (
+        "duration_hint_ms",
+        "expression_resource_id",
+        "motion_resource_id",
+    ):
+        if optional_field in motion_hint:
+            contract_payload[optional_field] = motion_hint[optional_field]
     if has_axis_levels:
         contract_payload["axis_levels"] = motion_hint.get("axis_levels")
     if has_motion_steps:
@@ -109,8 +124,10 @@ def validate_normalized_motion_intent_payload(
     sanitize_reason_fragment = sanitize_reason_fragment or _sanitize_reason_fragment
     if semantic_profile is None:
         try:
+            is_motion_resource_only = bool(payload.get("motion_resource_id"))
             semantic_profile = resolve_selected_semantic_axis_profile(
-                runtime_state=runtime_state
+                runtime_state=runtime_state,
+                require_prompt_axes=not is_motion_resource_only,
             )
         except Exception as exc:  # noqa: BLE001
             return None, f"semantic_profile_unresolved:{exc}"
@@ -134,11 +151,46 @@ def validate_normalized_motion_intent_payload(
     intent_tags = payload["intent_tags"]
     if len(intent_tags) > 6 or any(len(tag) > 48 for tag in intent_tags):
         return None, append_resolution_reason(base_reason, "intent_tags_invalid")
-    requested_expression_resource_id = payload["expression_resource_id"]
-    requested_motion_resource_id = payload["motion_resource_id"]
+    requested_expression_resource_id = payload.get("expression_resource_id")
+    requested_motion_resource_id = payload.get("motion_resource_id")
     validated_levels = payload.get("axis_levels")
     motion_steps = payload.get("motion_steps")
     reason = base_reason
+    resource_candidates = build_motion_resource_candidates(
+        runtime_state=runtime_state,
+    )
+    expression_resource_id, expression_resource_reason = validate_motion_resource_id_for_payload(
+        requested_expression_resource_id,
+        candidates=resource_candidates,
+        resource_type="expression",
+        sanitize_reason_fragment=sanitize_reason_fragment,
+    )
+    if expression_resource_reason:
+        reason = append_resolution_reason(reason, expression_resource_reason)
+        if requested_expression_resource_id and not expression_resource_id:
+            return None, reason
+    motion_resource_id, motion_resource_reason = validate_motion_resource_id_for_payload(
+        requested_motion_resource_id,
+        candidates=resource_candidates,
+        resource_type="motion",
+        sanitize_reason_fragment=sanitize_reason_fragment,
+    )
+    if motion_resource_reason:
+        reason = append_resolution_reason(reason, motion_resource_reason)
+        if requested_motion_resource_id and not motion_resource_id:
+            return None, reason
+
+    if expression_resource_id:
+        payload["expression_resource_id"] = expression_resource_id
+    else:
+        payload.pop("expression_resource_id", None)
+    if motion_resource_id:
+        payload["motion_resource_id"] = motion_resource_id
+    else:
+        payload.pop("motion_resource_id", None)
+    if motion_resource_id:
+        return payload, reason
+
     prompt_axes = profile_prompt_axes(semantic_profile)
     axis_by_id = {
         str(axis.get("id") or "").strip(): axis
@@ -167,32 +219,6 @@ def validate_normalized_motion_intent_payload(
         )
     if len(used_axis_ids) > 6:
         return None, append_resolution_reason(reason, "axis_level_count_exceeded")
-    resource_candidates = build_motion_resource_candidates(
-        runtime_state=runtime_state,
-    )
-    expression_resource_id, expression_resource_reason = validate_motion_resource_id_for_payload(
-        requested_expression_resource_id,
-        candidates=resource_candidates,
-        resource_type="expression",
-        sanitize_reason_fragment=sanitize_reason_fragment,
-    )
-    if expression_resource_reason:
-        reason = append_resolution_reason(reason, expression_resource_reason)
-        if requested_expression_resource_id and not expression_resource_id:
-            return None, reason
-    motion_resource_id, motion_resource_reason = validate_motion_resource_id_for_payload(
-        requested_motion_resource_id,
-        candidates=resource_candidates,
-        resource_type="motion",
-        sanitize_reason_fragment=sanitize_reason_fragment,
-    )
-    if motion_resource_reason:
-        reason = append_resolution_reason(reason, motion_resource_reason)
-        if requested_motion_resource_id and not motion_resource_id:
-            return None, reason
-
-    payload["expression_resource_id"] = expression_resource_id
-    payload["motion_resource_id"] = motion_resource_id
     return payload, reason
 
 

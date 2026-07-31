@@ -14,7 +14,11 @@ MOTION_INTENT_SCHEMA_VERSION = MOTION_INTENT_V4_SCHEMA_VERSION
 DEFAULT_MOTION_INTENT_DURATION_MS = 1000
 
 
-def resolve_selected_semantic_axis_profile(*, runtime_state: Any) -> dict[str, Any]:
+def resolve_selected_semantic_axis_profile(
+    *,
+    runtime_state: Any,
+    require_prompt_axes: bool = True,
+) -> dict[str, Any]:
     model_info = getattr(runtime_state, "model_info", {})
     if not isinstance(model_info, dict):
         raise RuntimeError("SemanticAxisProfile unavailable: runtime_state.model_info is not an object.")
@@ -47,7 +51,8 @@ def resolve_selected_semantic_axis_profile(*, runtime_state: Any) -> dict[str, A
             raise RuntimeError("SemanticAxisProfile invalid: revision must be a positive integer.")
         if status == "stale":
             raise RuntimeError("SemanticAxisProfile is stale; rescan or save the profile before motion generation.")
-        profile_prompt_axes(profile)
+        if require_prompt_axes:
+            profile_prompt_axes(profile)
         return profile
 
     raise RuntimeError(
@@ -89,8 +94,9 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
         raise ValueError("intent_tags_empty")
     has_axis_levels = "axis_levels" in intent
     has_motion_steps = "motion_steps" in intent
-    if has_axis_levels == has_motion_steps:
-        raise ValueError("axis_levels_motion_steps_exclusive")
+    has_motion_resource = "motion_resource_id" in intent
+    if sum((has_axis_levels, has_motion_steps, has_motion_resource)) != 1:
+        raise ValueError("motion_execution_shape_invalid")
     normalized_levels = (
         _normalize_axis_levels(intent.get("axis_levels"))
         if has_axis_levels
@@ -110,12 +116,20 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
         intent.get("expression_resource_id")
     )
     motion_resource_id = normalize_motion_resource_id(intent.get("motion_resource_id"))
+    if has_motion_resource and not motion_resource_id:
+        raise ValueError("motion_resource_id_empty")
     if expression_resource_id and motion_resource_id:
         raise ValueError("multiple_resource_layers_forbidden")
-    if normalized_steps and motion_resource_id:
-        raise ValueError("motion_steps_motion_resource_mutually_exclusive")
 
-    duration_hint_ms = _normalize_duration_hint_ms(intent.get("duration_hint_ms"))
+    if motion_resource_id and (
+        "duration_hint_ms" in intent or "performance_curve_hint" in intent
+    ):
+        raise ValueError("motion_resource_timing_fields_forbidden")
+    duration_hint_ms = (
+        None
+        if motion_resource_id
+        else _normalize_duration_hint_ms(intent.get("duration_hint_ms"))
+    )
     performance_curve_hint = None
     if "performance_curve_hint" in intent:
         try:
@@ -124,7 +138,6 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
             )
         except ValueError as exc:
             raise ValueError(f"performance_curve_hint_invalid:{exc}") from exc
-
     normalized_intent = {
         "schema_version": MOTION_INTENT_V4_SCHEMA_VERSION,
         "profile_id": profile_id,
@@ -133,17 +146,20 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
         "mode": mode,
         "intent_tags": intent_tags,
         "emotion_label": derive_motion_emotion_label(intent_tags),
-        "duration_hint_ms": duration_hint_ms,
-        "expression_resource_id": expression_resource_id,
-        "motion_resource_id": motion_resource_id,
         "summary": {
-            "axis_count": len(
-                normalized_levels or normalized_steps[0]["axis_levels"]
-            ),
+            "axis_count": len(normalized_levels or normalized_steps[0]["axis_levels"])
+            if normalized_levels or normalized_steps
+            else 0,
             "intent_tag_count": len(intent_tags),
             "motion_step_count": len(normalized_steps or []),
         },
     }
+    if duration_hint_ms is not None:
+        normalized_intent["duration_hint_ms"] = duration_hint_ms
+    if expression_resource_id:
+        normalized_intent["expression_resource_id"] = expression_resource_id
+    if motion_resource_id:
+        normalized_intent["motion_resource_id"] = motion_resource_id
     if normalized_levels:
         normalized_intent["axis_levels"] = normalized_levels
     if normalized_steps:

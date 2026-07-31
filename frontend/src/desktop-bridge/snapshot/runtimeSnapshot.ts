@@ -270,7 +270,8 @@ function cloneMotionPlaybackRecord(
       normalizeOptionalText((record as Record<string, unknown>).playbackTurnId)
       ?? normalizeOptionalText((record as Record<string, unknown>).turnId)
       ?? null;
-    if (normalizeText(record.payloadKind) === "catalog_motion") {
+    const payloadKind = normalizeText(record.payloadKind);
+    if (payloadKind === "catalog_motion" || payloadKind === "semantic_motion_resource") {
       const motion = cloneCatalogMotionPayload(record.motion);
       if (!motion) {
         console.warn("[DesktopBridge] invalid catalog motion playback record ignored.", {
@@ -282,17 +283,18 @@ function cloneMotionPlaybackRecord(
       }
       return {
         ...(record as unknown as DesktopMotionPlaybackRecord),
-        payloadKind: "catalog_motion",
+        payloadKind,
         messageId: normalizeText(record.messageId),
         playbackTurnId,
         emotionLabel: normalizeText(record.emotionLabel) || motion.emotion_label || motion.label || motion.motion_id,
-        mode: "expressive",
+        mode: payloadKind === "semantic_motion_resource" && record.mode === "idle"
+          ? "idle"
+          : "expressive",
         diagnostics: diagnostics as DesktopMotionPlaybackRecord["diagnostics"],
         motion,
         plan: null,
       } satisfies DesktopMotionPlaybackRecord;
     }
-    const payloadKind = normalizeText(record.payloadKind);
     if (
       payloadKind !== "semantic_intent"
       && payloadKind !== "speech_only"

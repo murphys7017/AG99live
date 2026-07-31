@@ -438,7 +438,7 @@ function isSemanticMotionPlaybackRecord(
   record: DesktopMotionPlaybackRecord,
 ): record is SemanticMotionPlaybackRecord {
   return (
-    record.payloadKind !== "catalog_motion"
+    (record.payloadKind === "semantic_intent" || record.payloadKind === "speech_only")
     && Boolean(record.plan)
     && record.plan.schema_version === SCHEMA_PARAMETER_PLAN_V2
   );

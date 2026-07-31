@@ -393,6 +393,7 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
                 "oneOf": [
                     {"required": ["axis_levels"]},
                     {"required": ["motion_steps"]},
+                    {"required": ["motion_resource_id"]},
                 ],
                 "allOf": [
                     {
@@ -660,7 +661,7 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         "没有明确方向或表演贡献的轴直接省略。"
     )
     axis_shape_text = (
-        "单姿态使用 axis_levels；动作序列使用 motion_steps。两者必须且只能选择一个。"
+        "单姿态使用 axis_levels；动作序列使用 motion_steps；完整动作资源只使用 motion_resource_id。三者必须且只能选择一个。"
         "motion_steps 的所有步骤必须使用完全相同的轴集合，最后一步可以保持有意义的非中性姿态。"
         "axis_levels 只能使用下方列出的轴 id。"
     )
@@ -821,7 +822,8 @@ def _project_reference_examples_for_prompt(
             raise ValueError("motion_reference_example_intent_tags_invalid")
         has_axis_levels = "axis_levels" in output
         has_motion_steps = "motion_steps" in output
-        if has_axis_levels == has_motion_steps:
+        has_motion_resource = "motion_resource_id" in output
+        if sum((has_axis_levels, has_motion_steps, has_motion_resource)) != 1:
             raise ValueError("motion_reference_example_motion_shape_invalid")
         projected_output: dict[str, Any] = {
             "intent_tags": intent_tags,
@@ -855,6 +857,11 @@ def _project_reference_examples_for_prompt(
             projected_output["expression_resource_id"] = expression_resource_id.strip()
         if motion_resource_id:
             projected_output["motion_resource_id"] = motion_resource_id.strip()
+        if motion_resource_id:
+            if expression_resource_id:
+                raise ValueError("motion_reference_example_resource_conflict")
+            result.append({"input": input_text, "output": projected_output})
+            continue
         axis_levels = (
             _project_example_axis_levels(
                 output.get("axis_levels"),
@@ -867,10 +874,6 @@ def _project_reference_examples_for_prompt(
         if axis_levels:
             projected_output["axis_levels"] = axis_levels
         else:
-            if motion_resource_id:
-                raise ValueError(
-                    "motion_reference_example_motion_resource_sequence_conflict"
-                )
             motion_steps = output.get("motion_steps")
             projected_steps: list[dict[str, Any]] = []
             if isinstance(motion_steps, list) and 2 <= len(motion_steps) <= 4:

@@ -1,5 +1,4 @@
 import type {
-  CatalogMotionPayload,
   DirectParameterPlanTiming,
   PerformanceCurvePresetName,
   SemanticParameterPlan,
@@ -97,52 +96,7 @@ function normalizePlanResource(value: unknown): SemanticPlanResource | undefined
         }
       : null;
   }
-  if (value.kind === "motion" && isObject(value.motion)) {
-    const motion = normalizeCatalogMotion(value.motion);
-    return motion
-      ? {
-          kind: "motion",
-          resource_id: resourceId,
-          parameter_ids: parameterIds,
-          motion,
-        }
-      : null;
-  }
   return null;
-}
-
-function normalizeCatalogMotion(value: Record<string, unknown>): CatalogMotionPayload | null {
-  const modelId = normalizeText(value.model_id);
-  const motionId = normalizeText(value.motion_id);
-  const group = normalizeText(value.group);
-  const file = normalizeText(value.file);
-  if (
-    normalizeText(value.schema_version) !== "engine.catalog_motion.v1"
-    || !modelId
-    || !motionId
-    || !group
-    || !file
-    || !isFiniteNumber(value.index)
-    || value.index < 0
-    || !isFiniteNumber(value.priority)
-  ) {
-    return null;
-  }
-  return {
-    schema_version: "engine.catalog_motion.v1",
-    model_id: modelId,
-    motion_id: motionId,
-    group,
-    index: Math.round(value.index),
-    file,
-    label: normalizeText(value.label),
-    emotion_label: normalizeText(value.emotion_label) || motionId,
-    duration_ms: isFiniteNumber(value.duration_ms) ? Math.round(value.duration_ms) : null,
-    priority: Math.round(value.priority),
-    summary: isObject(value.summary)
-      ? { source: normalizeText(value.summary.source) || undefined }
-      : undefined,
-  };
 }
 
 function normalizeParameterKeyframes(

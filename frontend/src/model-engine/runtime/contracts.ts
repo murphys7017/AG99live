@@ -71,19 +71,30 @@ interface ModelEnginePlanStartedEventBase {
 export type ModelEnginePlanStartedEvent =
   | (ModelEnginePlanStartedEventBase & {
     payloadKind: "compiled_semantic_motion";
+    executionKind: "parameter_plan";
     semanticMotion: CompiledSemanticMotion;
     plan: MotionPlanPayload;
     motion?: null;
   })
   | (ModelEnginePlanStartedEventBase & {
     payloadKind: "semantic_intent";
+    executionKind: "parameter_plan";
     intent: SemanticMotionIntent;
     semanticMotion: CompiledSemanticMotion;
     plan: MotionPlanPayload;
     motion?: null;
   })
   | (ModelEnginePlanStartedEventBase & {
+    payloadKind: "semantic_intent";
+    executionKind: "motion_resource";
+    intent: SemanticMotionIntent;
+    motion: CatalogMotionPayload;
+    plan?: null;
+    semanticMotion?: null;
+  })
+  | (ModelEnginePlanStartedEventBase & {
     payloadKind: "speech_only";
+    executionKind: "parameter_plan";
     request: SpeechOnlyMotionRequest;
     semanticMotion: CompiledSemanticMotion;
     plan: MotionPlanPayload;
@@ -91,6 +102,7 @@ export type ModelEnginePlanStartedEvent =
   })
   | (ModelEnginePlanStartedEventBase & {
     payloadKind: "catalog_motion";
+    executionKind: "catalog_motion";
     motion: CatalogMotionPayload;
     plan?: null;
   });

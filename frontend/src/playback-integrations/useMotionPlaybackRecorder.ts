@@ -64,6 +64,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       messageId: event.messageId,
       runId: event.runId,
       payloadKind: event.payloadKind,
+      executionKind: event.executionKind,
     });
     if (event.playbackOrigin === "manual_preview" || event.payloadKind === "compiled_semantic_motion") {
       console.info("[MotionLab] manual preview excluded from conversation history.", {
@@ -78,10 +79,8 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       turnId: event.turnId,
       messageId: event.messageId,
       playbackOrigin: event.playbackOrigin,
-      profileId: event.payloadKind === "catalog_motion" ? "" : event.plan.profile_id,
-      profileRevision: event.payloadKind === "catalog_motion"
-        ? undefined
-        : event.plan.profile_revision,
+      profileId: resolveEventProfileId(event),
+      profileRevision: resolveEventProfileRevision(event),
       transformTrace: event.diagnostics?.transformTrace
         ? cloneJson(event.diagnostics.transformTrace) as unknown as Record<string, unknown>
         : null,
@@ -110,7 +109,15 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
           }
         : null,
     };
-    const record: DesktopMotionPlaybackRecord = event.payloadKind === "catalog_motion"
+    const record: DesktopMotionPlaybackRecord = event.executionKind === "motion_resource"
+      ? {
+          ...baseRecord,
+          payloadKind: "semantic_motion_resource",
+          emotionLabel: event.motion.emotion_label || event.motion.label || event.motion.motion_id,
+          mode: event.intent.mode,
+          motion: cloneJson(event.motion),
+        }
+      : event.executionKind === "catalog_motion"
       ? {
           ...baseRecord,
           payloadKind: "catalog_motion",
@@ -133,8 +140,8 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       source_route: event.startReason,
       phase: "playback_started",
       model_name: event.model?.name ?? "",
-      profile_id: event.payloadKind === "catalog_motion" ? "" : event.plan.profile_id,
-      profile_revision: event.payloadKind === "catalog_motion" ? undefined : event.plan.profile_revision,
+      profile_id: resolveEventProfileId(event),
+      profile_revision: resolveEventProfileRevision(event),
       assistant_text: record.assistantText,
       payload_kind: event.payloadKind,
       raw: {
@@ -142,11 +149,11 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
         record,
         intent: event.payloadKind === "semantic_intent" ? cloneJson(event.intent) : null,
         speechOnlyRequest: event.payloadKind === "speech_only" ? cloneJson(event.request) : null,
-        plan: event.payloadKind === "catalog_motion" ? null : cloneJson(event.plan),
-        semanticMotion: event.payloadKind === "catalog_motion"
-          ? null
-          : cloneJson(event.semanticMotion),
-        motion: event.payloadKind === "catalog_motion" ? cloneJson(event.motion) : null,
+        plan: event.executionKind === "parameter_plan" ? cloneJson(event.plan) : null,
+        semanticMotion: event.executionKind === "parameter_plan"
+          ? cloneJson(event.semanticMotion)
+          : null,
+        motion: event.executionKind === "parameter_plan" ? null : cloneJson(event.motion),
         diagnostics: event.diagnostics ? cloneJson(event.diagnostics) : null,
         playerMessage: event.playerMessage,
         runId: event.runId,
@@ -154,7 +161,9 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       },
     };
     options.onMotionLabRawEvent(startedPayload, event.turnId);
-    if (event.payloadKind === "semantic_intent" || event.payloadKind === "speech_only") {
+    if (event.executionKind === "parameter_plan" && (
+      event.payloadKind === "semantic_intent" || event.payloadKind === "speech_only"
+    )) {
       options.onMotionLabRawEvent({
         ...startedPayload,
         event_type: "motion.frontend_compiled",
@@ -238,6 +247,28 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
     completeMotionPlayback,
     resetMotionPlaybackRecorder,
   };
+}
+
+function resolveEventProfileId(event: ModelEnginePlanStartedEvent): string {
+  if (event.executionKind === "motion_resource") {
+    return event.intent.profile_id;
+  }
+  if (event.executionKind === "catalog_motion") {
+    return "";
+  }
+  return event.plan.profile_id;
+}
+
+function resolveEventProfileRevision(
+  event: ModelEnginePlanStartedEvent,
+): number | undefined {
+  if (event.executionKind === "motion_resource") {
+    return event.intent.profile_revision;
+  }
+  if (event.executionKind === "catalog_motion") {
+    return undefined;
+  }
+  return event.plan.profile_revision;
 }
 
 function isDuplicateMotionPlaybackRecord(

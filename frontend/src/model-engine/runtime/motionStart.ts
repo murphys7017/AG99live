@@ -1,9 +1,18 @@
-import { compileMotionIntent } from "../compiler/compileMotionIntent.js";
+import { compileParameterMotionIntent } from "../compiler/compileParameterMotionIntent.js";
 import { createModelEngineStageRegistry } from "../compiler/registry.js";
+import { resolveCatalogResource } from "../compiler/resourceCatalog.js";
+import { buildBaseCompileDiagnostics } from "../compiler/diagnostics.js";
+import { SEMANTIC_MOTION_TRANSFORM_VERSION } from "../compiler/contracts.js";
+import { normalizeModelEngineSettings } from "../settings.js";
 import { MOTION_MIN_REMAINING_AUDIO_MS } from "../constants.js";
 import type { NormalizedMotionPayload } from "../contracts.js";
 import type { CompileDiagnostics, CompiledSemanticMotion } from "../compiler/contracts.js";
-import type { MotionPlanPayload, SemanticMotionIntent } from "../../types/protocol.js";
+import type {
+  CatalogMotionPayload,
+  ModelSummary,
+  MotionPlanPayload,
+  SemanticMotionIntent,
+} from "../../types/protocol.js";
 import {
   resolvePerformanceCurveTimeline,
   resolvePlaybackTargetDurationMs,
@@ -18,12 +27,22 @@ import {
   type SpeechOnlyMotionRequest,
 } from "./speechOnlyMotion.js";
 
-export interface PreparedSemanticMotionPayload {
-  modelPath: string;
-  plan: MotionPlanPayload;
-  diagnostics: CompileDiagnostics;
-  semanticMotion: CompiledSemanticMotion;
-}
+export type PreparedSemanticMotionPayload =
+  | {
+    kind: "parameter_plan";
+    modelPath: string;
+    plan: MotionPlanPayload;
+    diagnostics: CompileDiagnostics;
+    semanticMotion: CompiledSemanticMotion;
+  }
+  | {
+    kind: "motion_resource";
+    modelPath: string;
+    resourceId: string;
+    motion: CatalogMotionPayload;
+    diagnostics: CompileDiagnostics;
+    intent: SemanticMotionIntent;
+  };
 
 type SemanticIntentPayload = Extract<
   NormalizedMotionPayload,
@@ -179,10 +198,23 @@ function prepareCompilableMotionPayload(
   }
 
   const modelPath = selectedModel.model_path.trim();
+  if (payload.kind === "semantic_intent" && isMotionResourceIntent(payload.intent)) {
+    return prepareMotionResourcePayload(
+      payload.intent,
+      selectedModel,
+      modelPath,
+      context,
+      dependencies,
+      state,
+    );
+  }
   state.setState("compiling", "正在编译动作意图...", null);
   let targetDurationMs = resolveMotionTargetDurationMs(context);
   let speechActive = isSpeechActiveForPayload(context);
   let intent = resolveCompilerIntent(payload);
+  if (isMotionResourceIntent(intent)) {
+    throw new Error("motion_resource_intent_reached_parameter_compiler");
+  }
   const runtimeWarnings: string[] = [];
   const performanceCurveHint = intent.performance_curve_hint ?? null;
   if (performanceCurveHint) {
@@ -209,7 +241,7 @@ function prepareCompilableMotionPayload(
       };
     }
   }
-  const compileResult = compileMotionIntent(intent, {
+  const compileResult = compileParameterMotionIntent(intent, {
     model: selectedModel,
     targetDurationMs,
     speechActive,
@@ -269,6 +301,7 @@ function prepareCompilableMotionPayload(
   });
   state.setState("pending", "动作计划已准备，等待音频起播。", compileResult.diagnostics);
   return {
+    kind: "parameter_plan",
     modelPath,
     plan: compileResult.plan,
     diagnostics: compileResult.diagnostics,
@@ -276,10 +309,136 @@ function prepareCompilableMotionPayload(
   };
 }
 
+function prepareMotionResourcePayload(
+  intent: SemanticMotionIntent,
+  selectedModel: ModelSummary,
+  modelPath: string,
+  context: StartPayloadContext,
+  dependencies: MotionStartDependencies,
+  state: MotionRuntimeStateController,
+): PreparedSemanticMotionPayload | null {
+  const resourceId = intent.motion_resource_id?.trim();
+  if (!resourceId) {
+    throw new Error("motion_resource_preparation_requires_resource_id");
+  }
+  state.setState("compiling", "正在验证完整动作资源...", null);
+  const settings = normalizeModelEngineSettings(dependencies.getSettings());
+  const baseDiagnostics: CompileDiagnostics = {
+    ...buildBaseCompileDiagnostics({
+      model: selectedModel,
+      source: context.startReason,
+      settings,
+    }, settings),
+    resolvedMode: intent.mode,
+  };
+  const profile = selectedModel.semantic_axis_profile;
+  if (
+    !profile
+    || profile.profile_id !== intent.profile_id
+    || profile.revision !== intent.profile_revision
+    || profile.model_id !== intent.model_id
+  ) {
+    return failMotionResourcePreparation(
+      "motion_resource_semantic_profile_identity_mismatch",
+      baseDiagnostics,
+      intent,
+      selectedModel,
+      context,
+      dependencies,
+      state,
+    );
+  }
+  const resolved = resolveCatalogResource(selectedModel, resourceId, "motion");
+  if (!resolved.ok || resolved.resource.resourceType !== "motion") {
+    return failMotionResourcePreparation(
+      resolved.ok ? "motion_resource_resolution_invalid" : resolved.reason,
+      baseDiagnostics,
+      intent,
+      selectedModel,
+      context,
+      dependencies,
+      state,
+    );
+  }
+  const diagnostics: CompileDiagnostics = {
+    ...baseDiagnostics,
+    transformTrace: {
+      transformVersion: SEMANTIC_MOTION_TRANSFORM_VERSION,
+      profileRevision: profile.revision,
+      profileHash: profile.source_hash,
+      rawAxes: {},
+      motionResourceId: resourceId,
+      resolvedResource: {
+        resourceId: resolved.resource.resourceId,
+        resourceType: "motion",
+        parameterIds: [],
+      },
+      resolvedAxes: {},
+      derivedAxes: {},
+      constrainedAxes: {},
+      relationAdjustments: [],
+      relationEvaluations: [],
+      compiledParameters: [],
+    },
+  };
+  state.setLastCompileReason("");
+  state.setLastCompileDiagnostics(diagnostics);
+  state.setState("pending", "完整动作资源已准备，等待音频起播。", diagnostics);
+  return {
+    kind: "motion_resource",
+    modelPath,
+    resourceId: resolved.resource.resourceId,
+    motion: resolved.resource.motion,
+    diagnostics,
+    intent,
+  };
+}
+
+function failMotionResourcePreparation(
+  reason: string,
+  diagnostics: CompileDiagnostics,
+  intent: SemanticMotionIntent,
+  model: ModelSummary,
+  context: StartPayloadContext,
+  dependencies: MotionStartDependencies,
+  state: MotionRuntimeStateController,
+): null {
+  state.setLastCompileReason(reason);
+  state.setLastCompileDiagnostics(diagnostics);
+  state.setState("failed", `完整动作资源验证失败：${reason}`, diagnostics);
+  state.pushHistory("error", `完整动作资源验证失败：${reason}`);
+  dependencies.onCompileFailed?.({
+    model,
+    messageId: context.messageId,
+    turnId: context.turnId,
+    playbackTurnId: context.playbackTurnId,
+    playbackOrigin: context.playbackOrigin,
+    startReason: context.startReason,
+    queuedDelayMs: context.queuedDelayMs,
+    payloadKind: "semantic_intent",
+    intent,
+    reason,
+    diagnostics,
+    feedback: {
+      code: reason,
+      message: reason,
+      fields: ["motion_resource_id"],
+    },
+  });
+  return null;
+}
+
 function resolveCompilerIntent(payload: CompilableMotionPayload): SemanticMotionIntent {
   return payload.kind === "speech_only"
     ? buildSpeechOnlyCompilerIntent(payload.request)
     : payload.intent;
+}
+
+function isMotionResourceIntent(
+  intent: SemanticMotionIntent,
+): intent is Extract<SemanticMotionIntent, { motion_resource_id: string }> {
+  return typeof intent.motion_resource_id === "string"
+    && intent.motion_resource_id.trim().length > 0;
 }
 
 function startCatalogMotionPayload(
@@ -309,6 +468,7 @@ function startCatalogMotionPayload(
         startReason: context.startReason,
         queuedDelayMs: context.queuedDelayMs,
         payloadKind: payload.kind,
+        executionKind: "catalog_motion",
         diagnostics: null,
         playerMessage: buildSuccessMessage(context, dependencies),
         runId: normalizedRunId,
@@ -377,12 +537,9 @@ function startCompilableMotionPayload(
     return false;
   }
 
-  if (payload.kind === "semantic_intent" && prepared.plan.resource?.kind === "motion") {
-    return startCompiledMotionResource(
-      payload,
-      prepared.plan,
-      prepared.diagnostics,
-      prepared.semanticMotion,
+  if (prepared.kind === "motion_resource") {
+    return startMotionResourcePayload(
+      prepared,
       context,
       dependencies,
       state,
@@ -412,6 +569,7 @@ function startCompilableMotionPayload(
           startReason: context.startReason,
           queuedDelayMs: context.queuedDelayMs,
           payloadKind: payload.kind,
+          executionKind: "parameter_plan" as const,
           diagnostics: prepared.diagnostics,
           semanticMotion: prepared.semanticMotion,
           playerMessage: buildSuccessMessage(context, dependencies),
@@ -452,22 +610,15 @@ function startCompilableMotionPayload(
   return true;
 }
 
-function startCompiledMotionResource(
-  payload: Extract<NormalizedMotionPayload, { kind: "semantic_intent" }>,
-  plan: MotionPlanPayload,
-  diagnostics: CompileDiagnostics,
-  semanticMotion: CompiledSemanticMotion,
+function startMotionResourcePayload(
+  prepared: Extract<PreparedSemanticMotionPayload, { kind: "motion_resource" }>,
   context: StartPayloadContext,
   dependencies: MotionStartDependencies,
   state: MotionRuntimeStateController,
 ): boolean {
-  const resource = plan.resource;
-  if (!resource || resource.kind !== "motion") {
-    return false;
-  }
   const selectedModel = dependencies.getSelectedModel();
   let notifiedStarted = false;
-  const started = dependencies.playCatalogMotion(resource.motion, selectedModel, {
+  const started = dependencies.playCatalogMotion(prepared.motion, selectedModel, {
     playbackClockReader: context.playbackClockReader,
     requiresPlaybackClock: context.playbackOrigin === "conversation",
     onStarted: (_motion, runId) => {
@@ -477,8 +628,8 @@ function startCompiledMotionResource(
       }
       notifiedStarted = true;
       dependencies.onPlanStarted({
-        intent: payload.intent,
-        plan,
+        intent: prepared.intent,
+        motion: prepared.motion,
         model: selectedModel,
         messageId: context.messageId,
         turnId: context.turnId,
@@ -486,9 +637,9 @@ function startCompiledMotionResource(
         playbackOrigin: context.playbackOrigin,
         startReason: context.startReason,
         queuedDelayMs: context.queuedDelayMs,
-        payloadKind: payload.kind,
-        diagnostics,
-        semanticMotion,
+        payloadKind: "semantic_intent",
+        executionKind: "motion_resource",
+        diagnostics: prepared.diagnostics,
         playerMessage: buildSuccessMessage(context, dependencies),
         runId: normalizedRunId,
       });
@@ -496,17 +647,17 @@ function startCompiledMotionResource(
   });
   if (!started) {
     const failureReason = dependencies.getPlayerMessage?.()
-      || `完整动作资源执行失败：${resource.resource_id}`;
+      || `完整动作资源执行失败：${prepared.resourceId}`;
     state.setLastCompileReason(failureReason);
-    state.setState("failed", failureReason, diagnostics);
+    state.setState("failed", failureReason, prepared.diagnostics);
     state.pushHistory("error", failureReason);
     return false;
   }
   const successMessage = buildSuccessMessage(context, dependencies);
   if (!notifiedStarted) {
-    return rejectMotionStartWithoutRunId(state, diagnostics);
+    return rejectMotionStartWithoutRunId(state, prepared.diagnostics);
   }
-  state.setState("playing", successMessage, diagnostics);
+  state.setState("playing", successMessage, prepared.diagnostics);
   state.pushHistory("system", `完整动作资源执行中（${successMessage}）。`);
   return true;
 }

@@ -214,9 +214,6 @@ function buildMotionBase(
     expressionResourceId: context.intent.schema_version === "engine.motion_intent.v4"
       ? context.intent.expression_resource_id
       : undefined,
-    motionResourceId: context.intent.schema_version === "engine.motion_intent.v4"
-      ? context.intent.motion_resource_id
-      : undefined,
     timing,
     diagnostics,
   };

@@ -21,8 +21,6 @@ export function cloneCompiledSemanticMotion(value: unknown): CompiledSemanticMot
     || !isMotionTimingResolution(value.timing)
     || !isCompileDiagnostics(value.diagnostics)
     || (value.expressionResourceId !== undefined && !isNonEmptyString(value.expressionResourceId))
-    || (value.motionResourceId !== undefined && !isNonEmptyString(value.motionResourceId))
-    || (value.expressionResourceId !== undefined && value.motionResourceId !== undefined)
   ) {
     return null;
   }

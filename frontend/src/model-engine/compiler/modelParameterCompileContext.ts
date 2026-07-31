@@ -1,7 +1,4 @@
-import type {
-  CatalogMotionPayload,
-  SemanticParameterPlan,
-} from "../../types/protocol.js";
+import type { SemanticParameterPlan } from "../../types/protocol.js";
 import type {
   SemanticAxisDefinition,
   SemanticAxisProfile,
@@ -11,14 +8,6 @@ import type {
   CompileOptions,
   CompiledSemanticMotion,
 } from "./contracts.js";
-
-export interface ResolvedMotionResource {
-  resourceId: string;
-  resourceType: "expression" | "motion";
-  parameterIds: string[];
-  expressionId?: string;
-  motion?: CatalogMotionPayload;
-}
 
 export interface ModelParameterCompileState {
   profile: SemanticAxisProfile;
@@ -30,7 +19,11 @@ export interface ModelParameterCompileState {
     delayMs: number;
     points: Array<{ at_ms: number; transition_ms: number; value: number }>;
   }>;
-  resource: ResolvedMotionResource | null;
+  expressionResource: {
+    resourceId: string;
+    expressionId: string;
+    parameterIds: string[];
+  } | null;
   warnings: string[];
 }
 
@@ -73,7 +66,7 @@ export function createModelParameterCompileContext(
       axisById: new Map(profile.axes.map((axis) => [axis.id, axis])),
       parameters: [],
       pendingSpeechGestures: {},
-      resource: null,
+      expressionResource: null,
       warnings: [...(semanticMotion.diagnostics.warnings ?? [])],
     },
   };

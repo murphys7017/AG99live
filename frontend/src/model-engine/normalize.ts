@@ -153,8 +153,10 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
 
   const hasAxisLevels = Object.prototype.hasOwnProperty.call(value, "axis_levels");
   const hasMotionSteps = Object.prototype.hasOwnProperty.call(value, "motion_steps");
+  const hasMotionResource = Object.prototype.hasOwnProperty.call(value, "motion_resource_id");
   const axisLevels = hasAxisLevels ? normalizeAxisLevelsV4(value.axis_levels) : null;
   const motionSteps = hasMotionSteps ? normalizeMotionStepsV4(value.motion_steps) : null;
+  const motionResourceId = normalizeText(value.motion_resource_id) || undefined;
   if (hasAxisLevels && !hasMotionSteps && !axisLevels) {
     return { ok: false, reason: "motion_intent_v4.invalid_axis_levels" };
   }
@@ -164,7 +166,10 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
   if (Object.prototype.hasOwnProperty.call(value, "axes")) {
     return { ok: false, reason: "motion_intent_v4.invalid_axis_levels" };
   }
-  if (hasAxisLevels === hasMotionSteps) {
+  if (hasMotionResource && !motionResourceId) {
+    return { ok: false, reason: "motion_intent_v4.motion_resource_id_empty" };
+  }
+  if (Number(hasAxisLevels) + Number(hasMotionSteps) + Number(hasMotionResource) !== 1) {
     return { ok: false, reason: "motion_intent_v4.invalid_motion_shape" };
   }
 
@@ -219,13 +224,22 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
       };
   }
   const expressionResourceId = normalizeText(value.expression_resource_id) || undefined;
-    const motionResourceId = normalizeText(value.motion_resource_id) || undefined;
-    if (expressionResourceId && motionResourceId) {
-      return { ok: false, reason: "motion_intent_v4.multiple_resource_layers_forbidden" };
+  if (expressionResourceId && motionResourceId) {
+    return { ok: false, reason: "motion_intent_v4.multiple_resource_layers_forbidden" };
+  }
+  if (motionResourceId) {
+    if (value.duration_hint_ms !== undefined || value.performance_curve_hint !== undefined) {
+      return { ok: false, reason: "motion_intent_v4.motion_resource_timing_fields_forbidden" };
     }
-    if (motionSteps && motionResourceId) {
-      return { ok: false, reason: "motion_intent_v4.motion_steps_motion_resource_conflict" };
-    }
+    return {
+      ok: true,
+      value: {
+        ...common,
+        schema_version: SCHEMA_MOTION_INTENT_V4,
+        motion_resource_id: motionResourceId,
+      },
+    };
+  }
   if (motionSteps) {
       return {
         ok: true,
@@ -244,7 +258,6 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
         schema_version: SCHEMA_MOTION_INTENT_V4,
         axis_levels: axisLevels!,
         expression_resource_id: expressionResourceId,
-        motion_resource_id: motionResourceId,
       },
   };
 }

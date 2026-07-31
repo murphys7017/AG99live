@@ -1,7 +1,7 @@
 task:
   class: refactor
   risk: high
-  phase: validation
+  phase: implementation
   status: active
   scope: "Consolidate direct-parameter lifecycle ownership in WebSDK, separate full catalog-motion resources from parameter-plan compilation, and make the semantic relation graph the sole relation-constraint owner."
 
