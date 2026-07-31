@@ -1,9 +1,9 @@
 task:
-  class: bugfix
+  class: refactor
   risk: high
   phase: validation
   status: active
-  scope: "Repair the existing WebSDK Parameter Mixer lifecycle: propagate lip-sync frame failures to PlaybackTimeline, keep one final runtime-range clamp in ParameterMixer, and map lip sync from the Cubism default mouth value to its open value."
+  scope: "Consolidate direct-parameter lifecycle ownership in WebSDK, separate full catalog-motion resources from parameter-plan compilation, and make the semantic relation graph the sole relation-constraint owner."
 
 context:
   confidence: high

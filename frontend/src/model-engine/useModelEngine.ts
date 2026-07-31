@@ -418,7 +418,6 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
           onStarted: (_motion, runId) => notifyStarted(runId, plan),
         })
       : dependencies.playPlan(plan, selectedModel, {
-          softHandoff: true,
           requiresPlaybackClock: false,
           onStarted: (startedPlan, runId) => notifyStarted(runId, startedPlan),
         });

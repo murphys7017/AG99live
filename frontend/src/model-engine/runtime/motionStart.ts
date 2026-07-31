@@ -394,7 +394,6 @@ function startCompilableMotionPayload(
     prepared.plan,
     selectedModel,
     {
-      softHandoff: true,
       playbackClockReader: context.playbackClockReader,
       requiresPlaybackClock: context.playbackOrigin === "conversation",
       onStarted: (plan, runId) => {

@@ -40,7 +40,6 @@ export interface ModelEngineActivePlaybackRun {
 export type ModelEnginePlaybackTerminalEvent = DirectParameterPlanTerminalEvent;
 
 export interface PlayPlanOptions {
-  softHandoff?: boolean;
   playbackClockReader?: MotionPlaybackClockReader | null;
   requiresPlaybackClock?: boolean;
   onStarted: (plan: MotionPlanPayload, runId: string) => void;

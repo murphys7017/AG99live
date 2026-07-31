@@ -156,9 +156,15 @@ interface DirectParameterPlanState {
     status: "completed" | "stopped" | "failed" | "rejected";
     reason?: string;
   }) => void;
+  /** Expression resources are owned by the direct plan that started them. */
+  expressionId: string | null;
   /** 防止重复发射完成事件 */
   terminalEmitted: boolean;
 }
+
+type DirectParameterPlanCandidate =
+  | { ok: true; state: DirectParameterPlanState }
+  | { ok: false; reason: string };
 
 interface DirectPlanContributionCollection {
   contributions: ParameterContribution[];
@@ -236,6 +242,7 @@ export class LAppModel extends CubismUserModel {
     if (this._released) {
       return;
     }
+    this.stopDirectParameterPlan("direct_parameter_plan_model_released", "failed");
     this.stopMotion("motion_model_released");
     this._speechSignalRuntime.reset();
     this._released = true;
@@ -1579,7 +1586,7 @@ export class LAppModel extends CubismUserModel {
 
     if (!this._model || this._state != LoadStep.CompleteSetup) {
       console.warn("[LAppModel] model not ready. _state=", this._state);
-      this.stopDirectParameterPlan("model_not_ready");
+      this._directParameterPlanError = "model_not_ready";
       return false;
     }
 
@@ -1593,7 +1600,42 @@ export class LAppModel extends CubismUserModel {
       return false;
     }
 
-    return this.startSemanticParameterPlan(execution, runId, onTerminal, playbackClockReader);
+    const candidate = this.buildSemanticParameterPlanState(
+      execution,
+      runId,
+      onTerminal,
+      playbackClockReader,
+    );
+    if (!candidate.ok) {
+      this._directParameterPlanError = candidate.reason;
+      return false;
+    }
+
+    const expressionId = candidate.state.expressionId;
+    if (expressionId && !this.setExpression(expressionId)) {
+      this._directParameterPlanError = this.getExpressionStartError()
+        || `expression_start_failed:${expressionId}`;
+      return false;
+    }
+
+    const previousState = this._directParameterPlanState;
+    this._directParameterPlanState = null;
+    if (previousState?.expressionId && !expressionId) {
+      this.stopExpression();
+    }
+    if (previousState) {
+      // The candidate expression is already active. The replaced plan must not stop it.
+      this.emitDirectParameterPlanTerminal(
+        previousState,
+        "direct_parameter_plan_replaced",
+        "stopped",
+        false,
+      );
+    }
+
+    this._directParameterPlanState = candidate.state;
+    this._directParameterPlanError = "";
+    return true;
   }
 
   public stopDirectParameterPlan(reason = "", status = "stopped"): void {
@@ -1603,16 +1645,8 @@ export class LAppModel extends CubismUserModel {
     if (this._directParameterPlanError) {
       console.error(`[APP] Direct parameter plan stopped: ${this._directParameterPlanError}`);
     }
-    // 发射完成事件（仅一次）
-    if (state && !state.terminalEmitted) {
-      state.terminalEmitted = true;
-      if (typeof state.onTerminal === "function") {
-        state.onTerminal({
-          runId: state.runId,
-          status: status,
-          reason: reason || undefined,
-        });
-      }
+    if (state) {
+      this.emitDirectParameterPlanTerminal(state, reason, status, true);
     }
   }
 
@@ -1624,11 +1658,11 @@ export class LAppModel extends CubismUserModel {
     return this._directParameterPlanState !== null;
   }
 
-  private startSemanticParameterPlan(parsed: {
+  private buildSemanticParameterPlanState(parsed: {
     plan: any;
     timing: DirectParameterPlanState["timing"];
     reason: string;
-  }, runId?: string, onTerminal?: (event: any) => void, playbackClockReader?: { getElapsedMs: () => number | null }): boolean {
+  }, runId?: string, onTerminal?: (event: any) => void, playbackClockReader?: { getElapsedMs: () => number | null }): DirectParameterPlanCandidate {
     const semanticBindings: DirectSemanticParameterBinding[] = [];
     const seenParameterIndices = new Set<number>();
     const bindingWarnings = Array.isArray(parsed.plan.diagnostics?.warnings)
@@ -1640,38 +1674,35 @@ export class LAppModel extends CubismUserModel {
       const axisId = String(item.axis_id || "").trim();
       const resolved = this.resolveWritableParameter(parameterIdRaw);
       if (!resolved) {
-        this.stopDirectParameterPlan(
-          `v2_parameter_missing_runtime_parameter:${axisId}:${parameterIdRaw || index}`,
-        );
-        return false;
+        return {
+          ok: false,
+          reason: `v2_parameter_missing_runtime_parameter:${axisId}:${parameterIdRaw || index}`,
+        };
       }
       if (seenParameterIndices.has(resolved.parameterIndex)) {
-        this.stopDirectParameterPlan(
-          `v2_parameter_duplicate_runtime_parameter:${axisId}:${parameterIdRaw}`,
-        );
-        return false;
+        return {
+          ok: false,
+          reason: `v2_parameter_duplicate_runtime_parameter:${axisId}:${parameterIdRaw}`,
+        };
       }
       if (!this.isParameterIndexWritable(resolved.parameterIndex)) {
-        this.stopDirectParameterPlan(
-          `v2_parameter_not_writable:${axisId}:${parameterIdRaw}`,
-        );
-        return false;
+        return {
+          ok: false,
+          reason: `v2_parameter_not_writable:${axisId}:${parameterIdRaw}`,
+        };
       }
       const minValue = this._model.getParameterMinimumValue(resolved.parameterIndex);
       const maxValue = this._model.getParameterMaximumValue(resolved.parameterIndex);
       if (!Number.isFinite(minValue) || !Number.isFinite(maxValue) || minValue > maxValue) {
-        this.stopDirectParameterPlan(`v2_parameter_invalid_runtime_range:${parameterIdRaw}`);
-        return false;
+        return { ok: false, reason: `v2_parameter_invalid_runtime_range:${parameterIdRaw}` };
       }
       const targetValue = Number(item.target_value);
       if (targetValue < minValue || targetValue > maxValue) {
-        this.stopDirectParameterPlan(`v2_parameter_target_out_of_runtime_range:${parameterIdRaw}`);
-        return false;
+        return { ok: false, reason: `v2_parameter_target_out_of_runtime_range:${parameterIdRaw}` };
       }
       const neutralTargetValue = Number(item.neutral_target_value);
       if (neutralTargetValue < minValue || neutralTargetValue > maxValue) {
-        this.stopDirectParameterPlan(`v2_parameter_neutral_out_of_runtime_range:${parameterIdRaw}`);
-        return false;
+        return { ok: false, reason: `v2_parameter_neutral_out_of_runtime_range:${parameterIdRaw}` };
       }
       const keyframes = Array.isArray(item.keyframes)
         ? item.keyframes.map((keyframe: any) => ({
@@ -1681,8 +1712,7 @@ export class LAppModel extends CubismUserModel {
           }))
         : [];
       if (keyframes.some((keyframe) => keyframe.value < minValue || keyframe.value > maxValue)) {
-        this.stopDirectParameterPlan(`v2_parameter_keyframe_out_of_runtime_range:${parameterIdRaw}`);
-        return false;
+        return { ok: false, reason: `v2_parameter_keyframe_out_of_runtime_range:${parameterIdRaw}` };
       }
       seenParameterIndices.add(resolved.parameterIndex);
       semanticBindings.push({
@@ -1735,8 +1765,7 @@ export class LAppModel extends CubismUserModel {
     }
 
     if (semanticBindings.length === 0) {
-      this.stopDirectParameterPlan("v2_parameters_empty_after_runtime_filter");
-      return false;
+      return { ok: false, reason: "v2_parameters_empty_after_runtime_filter" };
     }
     if (bindingWarnings.length > 0) {
       if (!parsed.plan.diagnostics || typeof parsed.plan.diagnostics !== "object") {
@@ -1755,12 +1784,21 @@ export class LAppModel extends CubismUserModel {
       }
     }
 
+    const expressionId = parsed.plan.resource?.kind === "expression"
+      ? String(parsed.plan.resource.expression_id || "").trim()
+      : "";
+    if (expressionId && this._expressions.getValue(expressionId) == null) {
+      return { ok: false, reason: `expression_not_found:${expressionId}` };
+    }
+
     console.info("[LAppModel] Semantic parameter bindings ready. Activating v2 plan.", {
       parameterCount: semanticBindings.length,
       profileId: parsed.plan.profile_id,
       profileRevision: parsed.plan.profile_revision,
     });
-    this._directParameterPlanState = {
+    return {
+      ok: true,
+      state: {
       mode: parsed.plan.mode,
       emotionLabel: parsed.plan.emotion_label,
       timing: parsed.timing,
@@ -1769,10 +1807,30 @@ export class LAppModel extends CubismUserModel {
       diagnosticFrameCount: 0,
       runId: runId || ('direct-plan-' + Date.now() + '-' + Math.random().toString(36).slice(2)),
       onTerminal: onTerminal,
+      expressionId: expressionId || null,
       terminalEmitted: false,
+      },
     };
-    this._directParameterPlanError = "";
-    return true;
+  }
+
+  private emitDirectParameterPlanTerminal(
+    state: DirectParameterPlanState,
+    reason: string,
+    status: "completed" | "stopped" | "failed" | "rejected",
+    stopOwnedExpression: boolean,
+  ): void {
+    if (state.terminalEmitted) {
+      return;
+    }
+    state.terminalEmitted = true;
+    if (stopOwnedExpression && state.expressionId) {
+      this.stopExpression();
+    }
+    state.onTerminal?.({
+      runId: state.runId,
+      status,
+      reason: reason || undefined,
+    });
   }
 
   public beginExternalAudioSignalSource(
