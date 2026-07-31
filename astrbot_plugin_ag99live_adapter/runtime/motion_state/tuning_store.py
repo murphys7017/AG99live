@@ -661,7 +661,7 @@ class MotionTuningStore:
                 or axis_id in axis_ids
                 or value is None
                 or neutral_value is None
-                or axis.get("source") not in {"semantic_axis", "coupling"}
+                or axis.get("source") not in {"semantic_axis", "relation_graph"}
             ):
                 raise ValueError("motion_tuning_sample_compiled_semantic_motion_axis_invalid")
             axis_ids.add(axis_id)

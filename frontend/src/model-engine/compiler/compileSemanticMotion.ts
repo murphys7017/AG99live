@@ -166,7 +166,7 @@ function compileSemanticPoseContext(
       if (!axis || !source) {
         throw new Error(`semantic_compile_axis_state_missing:${axisId}`);
       }
-      if (source !== "semantic_axis" && source !== "coupling") {
+      if (source !== "semantic_axis" && source !== "relation_graph") {
         throw new Error(`semantic_compile_axis_source_invalid:${axisId}:${source}`);
       }
       return {

@@ -8,6 +8,7 @@ from .performance_curve import normalize_performance_curve_hint
 
 from ..protocol.schema_versions import (
     MOTION_INTENT_V4_SCHEMA_VERSION,
+    SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION,
 )
 
 MOTION_INTENT_SCHEMA_VERSION = MOTION_INTENT_V4_SCHEMA_VERSION
@@ -43,7 +44,7 @@ def resolve_selected_semantic_axis_profile(
         model_id = str(profile.get("model_id") or "").strip()
         status = str(profile.get("status") or "").strip()
         revision = profile.get("revision")
-        if schema_version != "ag99.semantic_axis_profile.v2":
+        if schema_version != SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION:
             raise RuntimeError("SemanticAxisProfile invalid: unsupported schema_version.")
         if not profile_id or not model_id:
             raise RuntimeError("SemanticAxisProfile invalid: profile_id/model_id is empty.")

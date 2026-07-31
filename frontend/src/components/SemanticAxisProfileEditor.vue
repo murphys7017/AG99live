@@ -3,9 +3,9 @@ import { computed, ref, watch } from "vue";
 import type { DesktopSemanticAxisProfileSaveResult } from "../types/desktop";
 import type {
   SemanticAxisControlRole,
-  SemanticAxisCoupling,
   SemanticAxisDefinition,
   SemanticAxisProfile,
+  SemanticAxisRelationRule,
 } from "../types/semantic-axis-profile";
 import { useParameterExcludeKeywords } from "../action-lab/parameterExcludeKeywords";
 import { CONTROL_ROLE_OPTIONS } from "../data/profileEditorGuide";
@@ -52,7 +52,7 @@ const currentProfile = computed(() => props.currentProfile);
 const selectedModelName = computed(() => props.selectedModelName.trim());
 const latestSaveResult = computed(() => props.latestSaveResult);
 const draftAxes = computed(() => draftProfile.value?.axes ?? []);
-const draftCouplings = computed(() => draftProfile.value?.couplings ?? []);
+const draftRelationEdges = computed(() => draftProfile.value?.relation_graph.edges ?? []);
 const filteredAxes = computed(() => {
   const roleFilter = axisRoleFilter.value;
   const query = axisSearchText.value.trim().toLowerCase();
@@ -408,17 +408,18 @@ function removeBinding(axis: SemanticAxisDefinition, index: number): void {
   markDirty();
 }
 
-function addCoupling(): void {
+function addRelation(): void {
   const profile = draftProfile.value;
   const [sourceAxis, targetAxis] = draftAxes.value;
   if (!profile || !sourceAxis || !targetAxis) {
-    saveStatusText.value = "至少需要两个轴才能新增 coupling。";
+    saveStatusText.value = "至少需要两个轴才能新增关系边。";
     return;
   }
-  profile.couplings.push({
-    id: createStableId("coupling"),
+  profile.relation_graph.edges.push({
+    id: createStableId("relation"),
     source_axis_id: sourceAxis.id,
     target_axis_id: targetAxis.id,
+    kind: "derive",
     mode: "same_direction",
     scale: 0.25,
     deadzone: 4,
@@ -427,12 +428,12 @@ function addCoupling(): void {
   markDirty();
 }
 
-function removeCoupling(index: number): void {
+function removeRelation(index: number): void {
   const profile = draftProfile.value;
   if (!profile) {
     return;
   }
-  profile.couplings.splice(index, 1);
+  profile.relation_graph.edges.splice(index, 1);
   markDirty();
 }
 
@@ -589,49 +590,52 @@ function validateDraftProfile(profile: SemanticAxisProfile): string[] {
     }
   }
 
-  const couplingIds = new Set<string>();
-  const couplingEdges = new Map<string, string[]>();
-  const couplingTargets = new Map<string, string>();
-  for (const coupling of profile.couplings) {
-    const couplingLabel = coupling.id || "<empty-coupling-id>";
-    if (!coupling.id.trim()) {
-      errors.push("coupling.id 不能为空。");
+  const relationIds = new Set<string>();
+  const relationEdges = new Map<string, string[]>();
+  const relationTargets = new Map<string, string>();
+  for (const relation of profile.relation_graph.edges) {
+    const relationLabel = relation.id || "<empty-relation-id>";
+    if (!relation.id.trim()) {
+      errors.push("relation_graph.edges.id 不能为空。");
     }
-    if (couplingIds.has(coupling.id)) {
-      errors.push(`${couplingLabel}: coupling.id 重复。`);
+    if (relationIds.has(relation.id)) {
+      errors.push(`${relationLabel}: relation id 重复。`);
     }
-    couplingIds.add(coupling.id);
-    if (!axisIds.has(coupling.source_axis_id)) {
-      errors.push(`${couplingLabel}: source_axis_id 不存在。`);
+    relationIds.add(relation.id);
+    if (!axisIds.has(relation.source_axis_id)) {
+      errors.push(`${relationLabel}: source_axis_id 不存在。`);
     }
-    if (!axisIds.has(coupling.target_axis_id)) {
-      errors.push(`${couplingLabel}: target_axis_id 不存在。`);
+    if (!axisIds.has(relation.target_axis_id)) {
+      errors.push(`${relationLabel}: target_axis_id 不存在。`);
     }
-    if (coupling.source_axis_id === coupling.target_axis_id) {
-      errors.push(`${couplingLabel}: source_axis_id 不能等于 target_axis_id。`);
+    if (relation.source_axis_id === relation.target_axis_id) {
+      errors.push(`${relationLabel}: source_axis_id 不能等于 target_axis_id。`);
     }
-    if (coupling.target_axis_id.trim()) {
-      const existingOwner = couplingTargets.get(coupling.target_axis_id);
-      if (existingOwner && existingOwner !== couplingLabel) {
+    if (relation.target_axis_id.trim()) {
+      const existingOwner = relationTargets.get(relation.target_axis_id);
+      if (existingOwner && existingOwner !== relationLabel) {
         errors.push(
-          `${couplingLabel}: target_axis_id 与 ${existingOwner} 重复。当前实现不允许多个 coupling 指向同一 target axis。`,
+          `${relationLabel}: target_axis_id 与 ${existingOwner} 重复。关系图不允许多个规则指向同一 target axis。`,
         );
       } else {
-        couplingTargets.set(coupling.target_axis_id, couplingLabel);
+        relationTargets.set(relation.target_axis_id, relationLabel);
       }
     }
-    validateNonNegativeFinite(errors, `${couplingLabel}.scale`, coupling.scale);
-    validateNonNegativeFinite(errors, `${couplingLabel}.deadzone`, coupling.deadzone);
-    validateNonNegativeFinite(errors, `${couplingLabel}.max_delta`, coupling.max_delta);
-    if (axisIds.has(coupling.source_axis_id) && axisIds.has(coupling.target_axis_id)) {
-      const nextTargets = couplingEdges.get(coupling.source_axis_id) ?? [];
-      nextTargets.push(coupling.target_axis_id);
-      couplingEdges.set(coupling.source_axis_id, nextTargets);
+    if (!isRelationKind(relation.kind)) {
+      errors.push(`${relationLabel}: kind 无效。`);
+    }
+    validateNonNegativeFinite(errors, `${relationLabel}.scale`, relation.scale);
+    validateNonNegativeFinite(errors, `${relationLabel}.deadzone`, relation.deadzone);
+    validateNonNegativeFinite(errors, `${relationLabel}.max_delta`, relation.max_delta);
+    if (axisIds.has(relation.source_axis_id) && axisIds.has(relation.target_axis_id)) {
+      const nextTargets = relationEdges.get(relation.source_axis_id) ?? [];
+      nextTargets.push(relation.target_axis_id);
+      relationEdges.set(relation.source_axis_id, nextTargets);
     }
   }
-  const cyclePath = findCouplingCycle(couplingEdges);
+  const cyclePath = findRelationCycle(relationEdges);
   if (cyclePath) {
-    errors.push(`couplings 不能形成环：${cyclePath.join(" -> ")}。`);
+    errors.push(`relation_graph 不能形成环：${cyclePath.join(" -> ")}。`);
   }
 
   return errors;
@@ -703,7 +707,11 @@ function isValidRange(range: [number, number]): boolean {
   return Number.isFinite(range[0]) && Number.isFinite(range[1]) && range[0] <= range[1];
 }
 
-function findCouplingCycle(edges: Map<string, string[]>): string[] | null {
+function isRelationKind(value: unknown): value is SemanticAxisRelationRule["kind"] {
+  return value === "derive" || value === "bounded_ratio";
+}
+
+function findRelationCycle(edges: Map<string, string[]>): string[] | null {
   const visiting = new Set<string>();
   const visited = new Set<string>();
   const path: string[] = [];
@@ -755,11 +763,11 @@ function findCouplingCycle(edges: Map<string, string[]>): string[] | null {
         <span>model {{ selectedModelName || currentProfile.model_id }}</span>
         <span>status {{ currentProfile.status }}</span>
         <span>{{ currentProfile.axes.length }} axes</span>
-        <span>{{ currentProfile.couplings.length }} couplings</span>
+        <span>{{ currentProfile.relation_graph.edges.length }} relation edges</span>
       </div>
 
       <p class="settings-card__hint">
-        当前可编辑轴语义、数值范围、parameter bindings 和 couplings；前端保存前会列出配置错误，后端 schema 仍是最终严格校验。
+        当前可编辑轴语义、数值范围、parameter bindings 和 relation graph；前端保存前会列出配置错误，后端 schema 仍是最终严格校验。
       </p>
 
       <ProfileGuideHelp />
@@ -923,11 +931,11 @@ function findCouplingCycle(edges: Map<string, string[]>): string[] | null {
           <AxisDetailForm
             :axis="selectedAxis"
             :draft-axes="draftAxes"
-            :draft-couplings="draftCouplings"
+            :draft-relation-edges="draftRelationEdges"
             :custom-axis-review-required-ids="customAxisReviewRequiredIds"
             @mark-dirty="markDirty"
-            @add-coupling="addCoupling"
-            @remove-coupling="removeCoupling"
+            @add-relation="addRelation"
+            @remove-relation="removeRelation"
             @confirm-selected-axis="confirmSelectedAxisConfiguration"
             @add-binding="addBinding"
             @remove-binding="removeBinding"

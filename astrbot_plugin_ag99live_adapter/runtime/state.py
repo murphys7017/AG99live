@@ -515,13 +515,12 @@ class RuntimeState:
     ) -> SemanticAxisProfile:
         model = self._get_model_payload_by_name(model_name)
         model_dir = self._resolve_model_dir(model_name)
-        if not model.get("semantic_axis_profile"):
-            model["semantic_axis_profile"] = deepcopy(
-                ensure_semantic_axis_profile(
-                    model_dir=model_dir,
-                    model_payload=model,
-                )
+        model["semantic_axis_profile"] = deepcopy(
+            ensure_semantic_axis_profile(
+                model_dir=model_dir,
+                model_payload=model,
             )
+        )
 
         saved_profile = save_semantic_axis_profile(
             model_dir=model_dir,

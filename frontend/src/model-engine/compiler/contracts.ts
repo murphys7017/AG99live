@@ -12,14 +12,14 @@ export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v5";
 
 export type MotionAxisValueSource =
   | "semantic_axis"
-  | "coupling"
+  | "relation_graph"
   | "speech_pose"
   | "expression"
   | "continuity";
 
 export type CompiledSemanticAxisSource = Extract<
   MotionAxisValueSource,
-  "semantic_axis" | "coupling"
+  "semantic_axis" | "relation_graph"
 >;
 
 export interface MotionTimingResolution {
@@ -74,7 +74,7 @@ export interface CompileDiagnostics {
   expressiveAxisCount?: number;
   semanticAxisCount?: number;
   failureStage?: string;
-  couplingSkippedExplicitTargets?: string[];
+  relationSkippedExplicitTargets?: string[];
   relationAdjustments?: MotionAxisRelationAdjustment[];
   relationEvaluations?: MotionAxisRelationEvaluation[];
   transformTrace?: MotionTransformTrace;
@@ -96,9 +96,11 @@ export interface MotionAxisRelationEvaluation {
   sourceAxisId?: string;
   targetAxisId: string;
   sourceValue?: number;
+  candidateValue?: number;
   targetBefore?: number;
   targetAfter?: number;
   limit?: number;
+  constraintReasons?: string[];
   reason: string;
 }
 

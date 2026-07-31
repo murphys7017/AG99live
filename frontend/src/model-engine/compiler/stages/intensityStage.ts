@@ -19,7 +19,7 @@ import { refreshAllAxisValues, replaceControlledAxisValues } from "../compileCon
 // - context.state.warnings
 //
 // Does not own:
-// - coupling
+// - semantic relation resolution
 // - mode resolution
 // - timing
 // - parameter generation

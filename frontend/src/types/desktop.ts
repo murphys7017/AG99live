@@ -180,7 +180,7 @@ export interface DesktopMotionCompileDiagnostics {
   expressiveAxisCount?: number;
   semanticAxisCount?: number;
   failureStage?: string;
-  couplingSkippedExplicitTargets?: string[];
+  relationSkippedExplicitTargets?: string[];
   transformTrace?: {
     transformVersion: string;
     profileRevision: number;

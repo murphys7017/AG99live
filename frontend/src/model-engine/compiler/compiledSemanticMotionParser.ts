@@ -64,7 +64,7 @@ function isCompiledAxes(
       || axisIds.has(axis.axisId)
       || !isFiniteNumber(axis.value)
       || !isFiniteNumber(axis.neutralValue)
-      || (axis.source !== "semantic_axis" && axis.source !== "coupling")
+      || (axis.source !== "semantic_axis" && axis.source !== "relation_graph")
     ) {
       return false;
     }

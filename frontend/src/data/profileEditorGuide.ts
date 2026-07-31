@@ -1,4 +1,7 @@
-import type { SemanticAxisControlRole, SemanticAxisCoupling } from "../types/semantic-axis-profile";
+import type {
+  SemanticAxisControlRole,
+  SemanticAxisRelationRule,
+} from "../types/semantic-axis-profile";
 
 export const CONTROL_ROLE_OPTIONS: SemanticAxisControlRole[] = [
   "primary",
@@ -9,21 +12,26 @@ export const CONTROL_ROLE_OPTIONS: SemanticAxisControlRole[] = [
   "debug",
 ];
 
-export const COUPLING_MODE_OPTIONS: SemanticAxisCoupling["mode"][] = [
+export const RELATION_MODE_OPTIONS: SemanticAxisRelationRule["mode"][] = [
   "same_direction",
   "opposite_direction",
+];
+
+export const RELATION_KIND_OPTIONS: SemanticAxisRelationRule["kind"][] = [
+  "derive",
+  "bounded_ratio",
 ];
 
 export const PROFILE_QUICK_START = [
   "Axis 是语义控制槽，不是直接写进模型的 ParamXXX。先定义动作语义，再决定映射到哪些真实参数。",
   "Binding 负责把 axis 的 0~100 语义值映射到 Live2D 参数真实范围；一个真实参数只能归属一条 axis。",
-  "Coupling 是轴间联动，只适合做从属跟随，不适合拿来替代主控输入。",
+  "Relation Graph 是轴间关系图；它负责派生和联动约束，不替代 LLM 的主控输入。",
 ];
 
 export const PROFILE_ROLE_GUIDE: Array<{ role: string; description: string }> = [
   { role: "primary", description: "给 LLM 直接控制的主表达轴，优先放最重要、最直观的动作。" },
   { role: "hint", description: "也允许 LLM 直接控制，但优先级低于 primary，适合补充细节。" },
-  { role: "derived", description: "通常由 coupling 派生，不建议直接让 LLM 主控。" },
+  { role: "derived", description: "通常由关系图派生，不建议直接让 LLM 主控。" },
   { role: "runtime", description: "更适合运行时驱动，例如口型、呼吸、实时状态。" },
   { role: "ambient", description: "环境/待机相关轴，通常不进入当前回复动作主链路。" },
   { role: "debug", description: "调试或实验轴，正式链路尽量不要依赖。" },
@@ -45,8 +53,9 @@ export const PROFILE_BINDING_GUIDE = [
   "Weight 是该 binding 的默认强度，先从 1 开始，只有明显过强时再下调。",
 ];
 
-export const PROFILE_COUPLING_GUIDE = [
+export const PROFILE_RELATION_GUIDE = [
   "Source Axis 是驱动方，Target Axis 是被带动方。",
-  "Scale 控制跟随比例；Deadzone 控制多小的动作直接忽略；Max Delta 限制最多带动多少。",
-  "优先保留少量、单向、好理解的 coupling，避免把 profile 配成难以预测的联动网。",
+  "Derive 会在目标轴未被 LLM 显式控制时派生目标；Bounded Ratio 会限制已有目标轴相对源轴的幅度。",
+  "Scale 控制比例；Deadzone 控制多小的动作直接忽略；Max Delta 限制最多带动多少。",
+  "每个 Target Axis 只能由一条关系边拥有，关系图不能成环。",
 ];

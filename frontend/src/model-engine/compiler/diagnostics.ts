@@ -93,7 +93,7 @@ function buildVisibilityDiagnostics(
     neutralishAxisCount,
     expressiveAxisCount,
     semanticAxisCount: Object.keys(context.state.allAxisValues).length,
-    couplingSkippedExplicitTargets: collectCouplingSkippedExplicitTargets(context.state.warnings),
+    relationSkippedExplicitTargets: collectRelationSkippedExplicitTargets(context.state.warnings),
     relationAdjustments: [...context.state.relationAdjustments],
     relationEvaluations: context.state.relationEvaluations.map((item) => ({ ...item })),
     transformTrace: buildTransformTrace(context),
@@ -142,10 +142,10 @@ function isAxisWithinSoftRange(value: number, softRange: readonly [number, numbe
   return value >= softRange[0] && value <= softRange[1];
 }
 
-function collectCouplingSkippedExplicitTargets(warnings: readonly string[]): string[] {
+function collectRelationSkippedExplicitTargets(warnings: readonly string[]): string[] {
   const targets: string[] = [];
   for (const warning of warnings) {
-    const match = /^semantic_coupling_skipped_explicit_target:[^:]+:([^:]+)$/.exec(warning);
+    const match = /^semantic_relation_skipped_explicit_target:[^:]+:([^:]+)$/.exec(warning);
     if (match?.[1]) {
       targets.push(match[1]);
     }

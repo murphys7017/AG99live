@@ -35,7 +35,7 @@ const ALLOWED_LLM_ROLES = new Set(["primary", "hint"]);
 //
 // Does not own:
 // - intensity scaling
-// - coupling
+// - semantic relation resolution
 // - mode resolution
 // - timing
 // - parameter generation

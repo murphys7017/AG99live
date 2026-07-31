@@ -450,7 +450,7 @@ export interface SemanticParameterPlanEntry {
 
 export const SEMANTIC_PARAMETER_PLAN_SOURCES = [
   "semantic_axis",
-  "coupling",
+  "relation_graph",
   "speech_pose",
   "expression",
   "continuity",

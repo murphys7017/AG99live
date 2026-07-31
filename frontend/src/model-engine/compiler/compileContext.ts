@@ -113,27 +113,6 @@ export function replaceControlledAxisValues(
   );
 }
 
-export function mergeDerivedAxisValues(
-  state: MotionCompileMutableState,
-  nextDerivedValues: DynamicAxisValues,
-  source: MotionAxisValueSource,
-): void {
-  const appliedAxisIds = Object.keys(nextDerivedValues);
-  state.derivedValues = {
-    ...state.derivedValues,
-    ...nextDerivedValues,
-  };
-  state.axisValueSources = {
-    ...state.axisValueSources,
-    ...Object.fromEntries(
-      appliedAxisIds.map((axisId) => [axisId, source]),
-    ),
-  };
-  state.appliedDerivedAxes = Array.from(
-    new Set([...state.appliedDerivedAxes, ...appliedAxisIds]),
-  );
-}
-
 export function refreshAllAxisValues(
   state: MotionCompileMutableState,
 ): void {

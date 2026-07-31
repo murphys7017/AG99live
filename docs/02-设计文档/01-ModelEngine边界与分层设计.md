@@ -84,10 +84,9 @@ ModelEngine 不负责：
 IntentValidator                 10 core
 -> AxisResolver                20 core
 -> IntensityStage              30 core
--> CouplingStage               40 core
+-> SemanticAxisRelationGraph   40 core
 -> ModeResolverStage           45 core
 -> TimingStage                 46 core
--> SemanticAxisRelationGraph   50 core
 -> CompiledSemanticMotion
 -> SpeechPoseStage             60 extension
 -> ModelParameterBindingStage 80 core
@@ -99,10 +98,9 @@ IntentValidator                 10 core
 | `IntentValidator` | schema、模型与 profile 一致性 |
 | `AxisResolver` | 等级锚点和确定性区间采样 |
 | `IntensityStage` | 整体与单轴强度 |
-| `CouplingStage` | 显式 coupling 派生候选 |
+| `SemanticAxisRelationGraph` | 派生、范围和有界比例约束 |
 | `ModeResolverStage` | idle/expressive 判定 |
 | `TimingStage` | duration 与时钟 timing |
-| `SemanticAxisRelationGraph` | 范围、派生关系和有界比例约束 |
 | `SpeechPoseStage` | 在语义轴结果收口后生成 `speech_gesture_track` |
 | `ModelParameterBindingStage` | 语义轴和说话轨道到 Live2D 参数映射 |
 | `ResourcePolicyStage` | typed resource 校验与执行仲裁 |
@@ -114,7 +112,7 @@ IntentValidator                 10 core
 | 字段 | 含义 | 主要写入者 |
 | --- | --- | --- |
 | `controlledValues` | 模型直接表达并完成锚点/强度处理的轴值 | AxisResolver、IntensityStage |
-| `derivedValues` | coupling 等语义轴派生值 | 语义派生 stage |
+| `derivedValues` | 关系图产生的语义轴派生值 | `SemanticAxisRelationGraph` |
 | `allAxisValues` | 进入关系图与 CompiledSemanticMotion 的合并视图 | state helpers、关系图 |
 | `axisValueSources` | 每个值的来源 | 所有写值 stage |
 | `relationEvaluations` | 每条关系边的计算结果 | 关系图 |
@@ -133,7 +131,7 @@ IntentValidator                 10 core
 | --- | --- | --- |
 | `primary` | LLM intent | 头、身体、主要视线 |
 | `hint` | LLM intent | 眉毛、嘴角等细节 |
-| `derived` | ModelEngine | coupling、说话手势 |
+| `derived` | ModelEngine | 关系图、说话手势 |
 | `runtime` | Live2D runtime | 口型、逐帧 speech energy |
 | `ambient` | Live2D runtime | 呼吸、待机 |
 | `debug` | 工具 | 手动预览和诊断 |

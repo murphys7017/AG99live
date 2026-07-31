@@ -3,7 +3,7 @@ task:
   risk: high
   phase: implementation
   status: active
-  scope: "Consolidate direct-parameter lifecycle ownership in WebSDK, separate full catalog-motion resources from parameter-plan compilation, and make the semantic relation graph the sole relation-constraint owner."
+  scope: "Consolidate direct-parameter lifecycle ownership in WebSDK, separate full catalog-motion resources from parameter-plan compilation, make the semantic relation graph the sole relation-constraint owner, and remove duplicated coupling state from semantic axis profiles."
 
 context:
   confidence: high
@@ -21,6 +21,7 @@ context:
     - AG99live is an active-development desktop Live2D system; obsolete documents, code, and tests are deleted instead of archived in the repository.
     - The main model emits assistant text and one ag99live.motion Persona Effect in the same logical response.
     - The official AstrBot <@anim> transport exists only when Persona Effect injection is unavailable; its inner intent uses v4 and it is not a recovery path for invalid motion.
+    - Semantic axis profiles use V3 with relation_graph.edges as their only relation source; V2 profiles are discarded and regenerated from the current model scan.
     - Remote computer control remains because AstrBot may run on a server while the Electron client runs on the user's computer.
     - Performance curve generation is optional and never delays TTS or segment release.
     - Motion Lab samples are trusted only when their user and assistant context is reconstructed from persisted Adapter raw events using turn_id plus message_id.
@@ -49,6 +50,7 @@ architecture:
     persona_motion: engine.motion_intent.v4
     official_inline_motion: engine.motion_intent.v4 inside the <@anim> transport wrapper
     parameter_plan: engine.parameter_plan.v2
+    semantic_axis_profile: ag99.semantic_axis_profile.v3
     performance_curve: ag99.performance_curve_hint.v1
     voice_following: ag99.voice_following_profile.v3
     model_info: live2d_scan.v2
@@ -56,7 +58,7 @@ architecture:
   motion_ownership:
     llm: intent_tags, axis_levels from -4 to 4, motion_steps, and optional typed resource intent.
     adapter: Persona Effect registration, strict schema/profile/resource validation, identity binding, and transport.
-    model_engine: Level sampling, intensity, coupling, timing, speech gesture planning, relation graph constraints, plan building, and resource policy.
+    model_engine: Level sampling, intensity, relation graph derivation and constraints, timing, speech gesture planning, plan building, and resource policy.
     playback_timeline: Segment-scoped clock and required/optional sink lifecycle.
     live2d_websdk: Exact parameter resolution, per-frame interpolation, lip sync, speech energy, dynamics, and physics.
   parameter_mixing:
@@ -126,6 +128,7 @@ verification:
     - `npm run typecheck:websdk`, `npm run typecheck:renderer`, and `git diff --check` passed after propagating Parameter Mixer lip-sync failures through the existing source lifecycle, moving the final runtime range clamp to ParameterMixer, and mapping lip sync from Cubism defaults.
     - Targeted `python -m py_compile` passed for the changed Adapter event, coordinator, motion Prompt, Motion Lab, and state modules.
     - `check_astrbot_plugin.py astrbot_plugin_ag99live_adapter` reported 0 errors and 0 warnings; `git diff --check` passed.
+    - `npm run typecheck:renderer`, `npm run typecheck:websdk`, `python scripts/check_protocol_schema_manifest.py`, focused Adapter Python syntax checks, and `git diff --check` passed for semantic relation graph consolidation and V3 profile migration.
   validation_gap:
     - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
     - Live AstrBot plus Provider plus TTS plus Electron plus Live2D validation is still required after the clock migration, including a long audio segment and a paused audio segment.

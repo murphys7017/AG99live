@@ -1483,7 +1483,7 @@ img {
   border: 1px solid rgba(47, 63, 97, 0.08);
 }
 
-.profile-editor__coupling-item {
+.profile-editor__relation-item {
   display: block;
   padding: 12px;
   border-radius: 14px;
@@ -1873,7 +1873,7 @@ img {
   }
 
   .profile-editor__binding-item,
-  .profile-editor__coupling-item {
+  .profile-editor__relation-item {
     flex-direction: column;
   }
 

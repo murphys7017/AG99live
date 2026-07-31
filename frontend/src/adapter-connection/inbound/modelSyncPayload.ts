@@ -17,7 +17,7 @@ import type {
 } from "../../types/semantic-axis-profile.js";
 import {
   SCHEMA_MODEL_INFO_V2,
-  SCHEMA_SEMANTIC_AXIS_PROFILE_V2,
+  SCHEMA_SEMANTIC_AXIS_PROFILE_V3,
   SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
   SCHEMA_VOICE_FOLLOWING_PROFILE_V3,
 } from "../../types/protocolSchema.generated.js";
@@ -501,8 +501,8 @@ function parseOptionalSemanticAxisProfile(
   if (value === undefined || value === null) return { ok: true, payload: null };
   const record = asRecord(value);
   if (!record) return invalidPayload(type, path, "object | null");
-  if (record.schema_version !== SCHEMA_SEMANTIC_AXIS_PROFILE_V2) {
-    return invalidPayload(type, `${path}.schema_version`, SCHEMA_SEMANTIC_AXIS_PROFILE_V2);
+  if (record.schema_version !== SCHEMA_SEMANTIC_AXIS_PROFILE_V3) {
+    return invalidPayload(type, `${path}.schema_version`, SCHEMA_SEMANTIC_AXIS_PROFILE_V3);
   }
   const shape = validateFields(type, record, path, {
     profile_id: "string",
@@ -515,7 +515,6 @@ function parseOptionalSemanticAxisProfile(
     generated_at: "string",
     updated_at: "string",
     axes: "array",
-    couplings: "array",
     relation_graph: "record",
   });
   if (!shape.ok) return shape;
@@ -530,31 +529,12 @@ function parseOptionalSemanticAxisProfile(
     const parsed = validateSemanticAxis(type, axis, `${path}.axes[${index}]`);
     if (!parsed.ok) return parsed;
   }
-  for (const [index, coupling] of (record.couplings as unknown[]).entries()) {
-    const parsed = validateRelationRule(type, coupling, `${path}.couplings[${index}]`, false);
-    if (!parsed.ok) return parsed;
-  }
-
-  const relationGraph = record.relation_graph as Record<string, unknown>;
-  if (relationGraph.schema_version !== SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1) {
-    return invalidPayload(
-      type,
-      `${path}.relation_graph.schema_version`,
-      SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
-    );
-  }
-  if (!Array.isArray(relationGraph.edges)) {
-    return invalidPayload(type, `${path}.relation_graph.edges`, "array");
-  }
-  for (const [index, edge] of relationGraph.edges.entries()) {
-    const parsed = validateRelationRule(
-      type,
-      edge,
-      `${path}.relation_graph.edges[${index}]`,
-      true,
-    );
-    if (!parsed.ok) return parsed;
-  }
+  const relationGraph = parseSemanticAxisRelationGraph(
+    type,
+    record.relation_graph,
+    `${path}.relation_graph`,
+  );
+  if (!relationGraph.ok) return relationGraph;
   return { ok: true, payload: record as unknown as SemanticAxisProfile };
 }
 
@@ -627,36 +607,109 @@ function validateSemanticAxis(
   return { ok: true, payload: null };
 }
 
+function parseSemanticAxisRelationGraph(
+  type: string,
+  value: unknown,
+  path: string,
+): PayloadParseResult<null> {
+  const graph = asRecord(value);
+  if (!graph) return invalidPayload(type, path, "object");
+  if (graph.schema_version !== SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1) {
+    return invalidPayload(
+      type,
+      `${path}.schema_version`,
+      SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
+    );
+  }
+  if (!Array.isArray(graph.edges)) {
+    return invalidPayload(type, `${path}.edges`, "array");
+  }
+
+  const ruleIds = new Set<string>();
+  const targetOwners = new Map<string, string>();
+  const adjacency = new Map<string, string[]>();
+  for (const [index, value] of graph.edges.entries()) {
+    const edgePath = `${path}.edges[${index}]`;
+    const parsed = validateRelationRule(type, value, edgePath);
+    if (!parsed.ok) return parsed;
+    const rule = parsed.payload;
+    if (ruleIds.has(rule.id)) {
+      return invalidPayload(type, `${edgePath}.id`, "unique relation rule id");
+    }
+    ruleIds.add(rule.id);
+    if (targetOwners.has(rule.target_axis_id)) {
+      return invalidPayload(type, `${edgePath}.target_axis_id`, "unique relation target axis");
+    }
+    targetOwners.set(rule.target_axis_id, rule.id);
+    const targets = adjacency.get(rule.source_axis_id) ?? [];
+    targets.push(rule.target_axis_id);
+    adjacency.set(rule.source_axis_id, targets);
+  }
+  if (hasRelationCycle(adjacency)) {
+    return invalidPayload(type, `${path}.edges`, "acyclic relation graph");
+  }
+  return { ok: true, payload: null };
+}
+
 function validateRelationRule(
   type: string,
   value: unknown,
   path: string,
-  requireKind: boolean,
-): PayloadParseResult<SemanticAxisRelationRule | null> {
+): PayloadParseResult<SemanticAxisRelationRule> {
   const rule = asRecord(value);
   if (!rule) return invalidPayload(type, path, "object");
-  const fields: Record<string, FieldKind> = {
+  const shape = validateFields(type, rule, path, {
     id: "string",
     source_axis_id: "string",
     target_axis_id: "string",
+    kind: "string",
     mode: "string",
     scale: "number",
     deadzone: "number",
     max_delta: "number",
-  };
-  if (requireKind) fields.kind = "string";
-  const shape = validateFields(type, rule, path, fields);
+  });
   if (!shape.ok) return shape;
-  if (!["same_direction", "opposite_direction"].includes(String(rule.mode))) {
+  const typedRule = rule as unknown as SemanticAxisRelationRule;
+  if (!typedRule.id.trim()) return invalidPayload(type, `${path}.id`, "non-empty string");
+  if (!typedRule.source_axis_id.trim()) {
+    return invalidPayload(type, `${path}.source_axis_id`, "non-empty string");
+  }
+  if (!typedRule.target_axis_id.trim()) {
+    return invalidPayload(type, `${path}.target_axis_id`, "non-empty string");
+  }
+  if (typedRule.source_axis_id === typedRule.target_axis_id) {
+    return invalidPayload(type, `${path}.target_axis_id`, "different source and target axis");
+  }
+  if (!["same_direction", "opposite_direction"].includes(typedRule.mode)) {
     return invalidPayload(type, `${path}.mode`, "known relation mode");
   }
-  if (requireKind && !["derive", "bounded_ratio"].includes(String(rule.kind))) {
+  if (!["derive", "bounded_ratio"].includes(typedRule.kind)) {
     return invalidPayload(type, `${path}.kind`, "known relation kind");
+  }
+  if ([typedRule.scale, typedRule.deadzone, typedRule.max_delta].some((item) => item < 0)) {
+    return invalidPayload(type, path, "non-negative relation limits");
   }
   return {
     ok: true,
-    payload: requireKind ? rule as unknown as SemanticAxisRelationRule : null,
+    payload: typedRule,
   };
+}
+
+function hasRelationCycle(adjacency: ReadonlyMap<string, readonly string[]>): boolean {
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (axisId: string): boolean => {
+    if (visited.has(axisId)) return false;
+    if (visiting.has(axisId)) return true;
+    visiting.add(axisId);
+    for (const targetAxisId of adjacency.get(axisId) ?? []) {
+      if (visit(targetAxisId)) return true;
+    }
+    visiting.delete(axisId);
+    visited.add(axisId);
+    return false;
+  };
+  return [...adjacency.keys()].some((axisId) => visit(axisId));
 }
 
 function parseOptionalVoiceFollowingProfile(

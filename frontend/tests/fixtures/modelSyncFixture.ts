@@ -1,7 +1,7 @@
 export function makeValidSemanticAxisProfile(modelId = "model-a") {
   return {
-    schema_version: "ag99.semantic_axis_profile.v2",
-    profile_id: `${modelId}.semantic.v2`,
+    schema_version: "ag99.semantic_axis_profile.v3",
+    profile_id: `${modelId}.semantic.v3`,
     model_id: modelId,
     source_hash: "source-hash",
     last_scanned_hash: "source-hash",
@@ -11,7 +11,6 @@ export function makeValidSemanticAxisProfile(modelId = "model-a") {
     generated_at: "2026-05-08T00:00:00.000Z",
     updated_at: "2026-05-08T00:00:00.000Z",
     axes: [],
-    couplings: [],
     relation_graph: {
       schema_version: "ag99.semantic_axis_relation_graph.v1",
       edges: [],

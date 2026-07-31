@@ -1,9 +1,9 @@
 export {
-  SCHEMA_SEMANTIC_AXIS_PROFILE_V2,
+  SCHEMA_SEMANTIC_AXIS_PROFILE_V3,
   SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
 } from "./protocolSchema.generated.js";
 import {
-  SCHEMA_SEMANTIC_AXIS_PROFILE_V2,
+  SCHEMA_SEMANTIC_AXIS_PROFILE_V3,
   SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
 } from "./protocolSchema.generated.js";
 
@@ -54,16 +54,6 @@ export interface SemanticAxisDefinition {
   parameter_bindings: SemanticAxisParameterBinding[];
 }
 
-export interface SemanticAxisCoupling {
-  id: string;
-  source_axis_id: string;
-  target_axis_id: string;
-  mode: "same_direction" | "opposite_direction";
-  scale: number;
-  deadzone: number;
-  max_delta: number;
-}
-
 export type SemanticAxisRelationRuleKind = "derive" | "bounded_ratio";
 
 export interface SemanticAxisRelationRule {
@@ -83,7 +73,7 @@ export interface SemanticAxisRelationGraph {
 }
 
 export interface SemanticAxisProfile {
-  schema_version: typeof SCHEMA_SEMANTIC_AXIS_PROFILE_V2;
+  schema_version: typeof SCHEMA_SEMANTIC_AXIS_PROFILE_V3;
   profile_id: string;
   model_id: string;
   source_hash: string;
@@ -94,6 +84,5 @@ export interface SemanticAxisProfile {
   generated_at: string;
   updated_at: string;
   axes: SemanticAxisDefinition[];
-  couplings: SemanticAxisCoupling[];
   relation_graph: SemanticAxisRelationGraph;
 }

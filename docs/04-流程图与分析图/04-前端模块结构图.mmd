@@ -57,7 +57,7 @@ flowchart TB
     subgraph ENGINE[model-engine：动作编译]
         ENTRY[useModelEngine<br/>ingress / prepare / start]:::engine
         NORMAL[normalize + strict contracts]:::engine
-        SEMANTIC[semantic phase<br/>validate / sample / coupling / timing / relation graph]:::engine
+        SEMANTIC[semantic phase<br/>validate / sample / intensity / relation graph / timing]:::engine
         PARAMETER[model_parameter phase<br/>speech pose / binding / resource policy]:::engine
         PLAN[parameter_plan.v2]:::engine
         SCHED[motionRuntimeScheduler<br/>segment pending ownership]:::engine

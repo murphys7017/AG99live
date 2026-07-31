@@ -69,22 +69,20 @@ flowchart TD
         ID[IntentValidator order 10<br/>schema / model / profile revision]:::engine
         AXIS[AxisResolver order 20<br/>等级锚点 + 确定性有界采样<br/>segment seed + per-axis seed]:::engine
         INTENSITY[IntensityStage order 30<br/>整体与单轴强度]:::engine
-        COUPLING[CouplingStage order 40<br/>显式派生候选]:::engine
         MODE[ModeResolver order 45<br/>idle / expressive]:::engine
         TIMING[TimingStage order 46<br/>音频剩余时长 + performance curve]:::engine
-        GRAPH[SemanticAxisRelationGraphStage order 50<br/>轴关系 / 影响系数 / 语义范围<br/>头身比例与有限反向平衡]:::engine
+        GRAPH[SemanticAxisRelationGraphStage order 40<br/>派生 / 轴关系 / 影响系数 / 语义范围<br/>头身比例与有限反向平衡]:::engine
         COMPILED[CompiledSemanticMotion<br/>pose 或 sequence 语义轴结果]:::contract
         TRACE[MotionTransformTrace<br/>raw/resolved/derived/constrained/compiled]:::runtime
         CFAIL[MotionFeedback<br/>编译失败，不启动播放器]:::failure
 
-        NORMAL --> ID --> AXIS --> INTENSITY --> COUPLING --> MODE --> TIMING --> GRAPH --> COMPILED
+        NORMAL --> ID --> AXIS --> INTENSITY --> GRAPH --> MODE --> TIMING --> COMPILED
         ID -.失败.-> CFAIL
         AXIS -.空/非法/全中性.-> CFAIL
         AXIS -.profile anchor 缺失.-> CFAIL
         GRAPH -.关系图或范围错误.-> CFAIL
         AXIS -.记录.-> TRACE
         INTENSITY -.记录.-> TRACE
-        COUPLING -.记录.-> TRACE
         GRAPH -.记录.-> TRACE
     end
 

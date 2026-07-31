@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import type {
-  SemanticAxisCoupling,
   SemanticAxisDefinition,
   SemanticAxisParameterBinding,
+  SemanticAxisRelationRule,
 } from "../types/semantic-axis-profile";
 import {
   CONTROL_ROLE_OPTIONS,
-  COUPLING_MODE_OPTIONS,
+  RELATION_KIND_OPTIONS,
+  RELATION_MODE_OPTIONS,
   PROFILE_BINDING_GUIDE,
-  PROFILE_COUPLING_GUIDE,
+  PROFILE_RELATION_GUIDE,
 } from "../data/profileEditorGuide";
 
 type EditableAxisRangeKey = "value_range" | "soft_range" | "strong_range" | "extreme_range";
@@ -17,14 +18,14 @@ type EditableBindingRangeKey = "input_range" | "output_range";
 const props = defineProps<{
   axis: SemanticAxisDefinition;
   draftAxes: SemanticAxisDefinition[];
-  draftCouplings: SemanticAxisCoupling[];
+  draftRelationEdges: SemanticAxisRelationRule[];
   customAxisReviewRequiredIds: Set<string>;
 }>();
 
 const emit = defineEmits<{
   markDirty: [];
-  addCoupling: [];
-  removeCoupling: [index: number];
+  addRelation: [];
+  removeRelation: [index: number];
   confirmSelectedAxis: [];
   addBinding: [axis: SemanticAxisDefinition];
   removeBinding: [axis: SemanticAxisDefinition, index: number];
@@ -81,14 +82,14 @@ function updateDynamicsNumber(
   emit("markDirty");
 }
 
-function updateCouplingNumber(
-  coupling: SemanticAxisCoupling,
+function updateRelationNumber(
+  relation: SemanticAxisRelationRule,
   key: "scale" | "deadzone" | "max_delta",
   event: Event,
 ): void {
   const value = readFiniteNumber(event);
   if (value === null) return;
-  coupling[key] = value;
+  relation[key] = value;
   emit("markDirty");
 }
 
@@ -470,19 +471,19 @@ function onRemoveBinding(index: number): void {
 
     <section class="profile-editor__section">
       <header class="action-preview__group-header">
-        <strong>Couplings（轴间联动）</strong>
+        <strong>Relation Graph（轴关系图）</strong>
         <button
           type="button"
           class="settings-card__button settings-card__button--ghost"
-          @click="emit('addCoupling')"
+          @click="emit('addRelation')"
         >
-          新增 Coupling
+          新增关系边
         </button>
       </header>
       <div class="profile-editor__help-block profile-editor__help-block--compact">
         <ul class="profile-editor__help-list">
           <li
-            v-for="item in PROFILE_COUPLING_GUIDE"
+            v-for="item in PROFILE_RELATION_GUIDE"
             :key="item"
           >
             {{ item }}
@@ -491,15 +492,15 @@ function onRemoveBinding(index: number): void {
       </div>
       <ul class="profile-editor__binding-list">
         <li
-          v-for="(coupling, couplingIndex) in draftCouplings"
-          :key="`${coupling.id}:${couplingIndex}`"
-          class="profile-editor__coupling-item"
+          v-for="(relation, relationIndex) in draftRelationEdges"
+          :key="`${relation.id}:${relationIndex}`"
+          class="profile-editor__relation-item"
         >
           <div class="profile-editor__binding-form">
             <label class="action-preview__field">
-              <span>ID（联动名）</span>
+              <span>ID（关系名）</span>
               <input
-                v-model="coupling.id"
+                v-model="relation.id"
                 class="settings-card__input"
                 type="text"
                 @input="emit('markDirty')"
@@ -508,13 +509,13 @@ function onRemoveBinding(index: number): void {
             <label class="action-preview__field">
               <span>Source Axis（驱动方）</span>
               <select
-                v-model="coupling.source_axis_id"
+                v-model="relation.source_axis_id"
                 class="settings-card__input action-preview__select"
                 @change="emit('markDirty')"
               >
                 <option
                   v-for="ax in draftAxes"
-                  :key="`source:${coupling.id}:${ax.id}`"
+                  :key="`source:${relation.id}:${ax.id}`"
                   :value="ax.id"
                 >
                   {{ ax.label }} / {{ ax.id }}
@@ -524,13 +525,13 @@ function onRemoveBinding(index: number): void {
             <label class="action-preview__field">
               <span>Target Axis（被带动方）</span>
               <select
-                v-model="coupling.target_axis_id"
+                v-model="relation.target_axis_id"
                 class="settings-card__input action-preview__select"
                 @change="emit('markDirty')"
               >
                 <option
                   v-for="ax in draftAxes"
-                  :key="`target:${coupling.id}:${ax.id}`"
+                  :key="`target:${relation.id}:${ax.id}`"
                   :value="ax.id"
                 >
                   {{ ax.label }} / {{ ax.id }}
@@ -538,14 +539,30 @@ function onRemoveBinding(index: number): void {
               </select>
             </label>
             <label class="action-preview__field">
-              <span>Mode（同向 / 反向）</span>
+              <span>Kind（派生 / 约束）</span>
               <select
-                v-model="coupling.mode"
+                v-model="relation.kind"
                 class="settings-card__input action-preview__select"
                 @change="emit('markDirty')"
               >
                 <option
-                  v-for="mode in COUPLING_MODE_OPTIONS"
+                  v-for="kind in RELATION_KIND_OPTIONS"
+                  :key="kind"
+                  :value="kind"
+                >
+                  {{ kind }}
+                </option>
+              </select>
+            </label>
+            <label class="action-preview__field">
+              <span>Mode（同向 / 反向）</span>
+              <select
+                v-model="relation.mode"
+                class="settings-card__input action-preview__select"
+                @change="emit('markDirty')"
+              >
+                <option
+                  v-for="mode in RELATION_MODE_OPTIONS"
                   :key="mode"
                   :value="mode"
                 >
@@ -556,42 +573,42 @@ function onRemoveBinding(index: number): void {
             <label class="action-preview__field">
               <span>Scale（跟随比例）</span>
               <input
-                :value="coupling.scale"
+                :value="relation.scale"
                 class="settings-card__input"
                 type="number"
                 min="0"
                 step="0.05"
-                @input="updateCouplingNumber(coupling, 'scale', $event)"
+                @input="updateRelationNumber(relation, 'scale', $event)"
               />
             </label>
             <label class="action-preview__field">
               <span>Deadzone（忽略阈值）</span>
               <input
-                :value="coupling.deadzone"
+                :value="relation.deadzone"
                 class="settings-card__input"
                 type="number"
                 min="0"
                 step="0.1"
-                @input="updateCouplingNumber(coupling, 'deadzone', $event)"
+                @input="updateRelationNumber(relation, 'deadzone', $event)"
               />
             </label>
             <label class="action-preview__field">
               <span>Max Delta（最大联动幅度）</span>
               <input
-                :value="coupling.max_delta"
+                :value="relation.max_delta"
                 class="settings-card__input"
                 type="number"
                 min="0"
                 step="0.1"
-                @input="updateCouplingNumber(coupling, 'max_delta', $event)"
+                @input="updateRelationNumber(relation, 'max_delta', $event)"
               />
             </label>
             <button
               type="button"
               class="settings-card__button settings-card__button--ghost"
-              @click="emit('removeCoupling', couplingIndex)"
+              @click="emit('removeRelation', relationIndex)"
             >
-              删除 Coupling
+              删除关系边
             </button>
           </div>
         </li>

@@ -6,7 +6,6 @@ import type {
 import { intentValidatorStage } from "./stages/intentValidator.js";
 import { axisResolverStage } from "./stages/axisResolver.js";
 import { intensityStage } from "./stages/intensityStage.js";
-import { couplingStage } from "./stages/couplingStage.js";
 import { semanticAxisRelationGraphStage } from "./stages/semanticAxisRelationGraphStage.js";
 import { speechPoseStage } from "./stages/speechPoseStage.js";
 import { modeResolverStage } from "./stages/modeResolverStage.js";
@@ -59,10 +58,9 @@ export function createDefaultCompileStageRegistrations(): AnyStageRegistration[]
     { id: "intentValidator", stage: intentValidatorStage, phase: "semantic", order: 10, kind: "core", enabled: always },
     { id: "axisResolver", stage: axisResolverStage, phase: "semantic", order: 20, kind: "core", enabled: always },
     { id: "intensity", stage: intensityStage, phase: "semantic", order: 30, kind: "core", enabled: always },
-    { id: "derivedCandidates", stage: couplingStage, phase: "semantic", order: 40, kind: "core", enabled: always },
     { id: "modeResolver", stage: modeResolverStage, phase: "semantic", order: 45, kind: "core", enabled: always },
     { id: "timing", stage: timingStage, phase: "semantic", order: 46, kind: "core", enabled: always },
-    { id: "semanticAxisRelationGraph", stage: semanticAxisRelationGraphStage, phase: "semantic", order: 50, kind: "core", enabled: always },
+    { id: "semanticAxisRelationGraph", stage: semanticAxisRelationGraphStage, phase: "semantic", order: 40, kind: "core", enabled: always },
     { id: "speechPose", stage: speechPoseStage, phase: "model_parameter", order: 60, kind: "extension", enabled: always },
     { id: "modelParameterBinding", stage: modelParameterBindingStage, phase: "model_parameter", order: 80, kind: "core", enabled: always },
     { id: "resourcePolicy", stage: resourcePolicyStage, phase: "model_parameter", order: 90, kind: "core", enabled: always },

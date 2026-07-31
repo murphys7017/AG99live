@@ -8,7 +8,7 @@
     "output_segment": "output.segment.v3",
     "parameter_plan": "engine.parameter_plan.v2",
     "performance_curve_hint": "ag99.performance_curve_hint.v1",
-    "semantic_axis_profile": "ag99.semantic_axis_profile.v2",
+    "semantic_axis_profile": "ag99.semantic_axis_profile.v3",
     "semantic_axis_relation_graph": "ag99.semantic_axis_relation_graph.v1",
     "voice_following_profile": "ag99.voice_following_profile.v3"
   }

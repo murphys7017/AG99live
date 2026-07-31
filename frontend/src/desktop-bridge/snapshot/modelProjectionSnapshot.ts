@@ -116,7 +116,6 @@ function cloneSemanticAxisProfile(
         output_range: [...binding.output_range] as [number, number],
       })),
     })),
-    couplings: profile.couplings.map((coupling) => ({ ...coupling })),
     relation_graph: {
       schema_version: profile.relation_graph.schema_version,
       edges: profile.relation_graph.edges.map((edge) => ({ ...edge })),

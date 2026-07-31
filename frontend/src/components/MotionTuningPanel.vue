@@ -735,7 +735,7 @@ function buildMotionDiagnosticLines(source: MotionDraftSource | null): string[] 
   appendMetric(lines, "表达轴", pickNumber(summary.expressive_axis_count, diagnostics?.expressiveAxisCount));
   appendList(lines, "越过soft轴", pickStringList(summary.outside_soft_range_axes));
   appendList(lines, "姿态描述", pickStringList(summary.pose_descriptors));
-  appendList(lines, "coupling跳过", diagnostics?.couplingSkippedExplicitTargets);
+  appendList(lines, "关系图跳过", diagnostics?.relationSkippedExplicitTargets);
   appendList(lines, "编译/计划警告", warningLines.slice(0, 8));
   return lines;
 }

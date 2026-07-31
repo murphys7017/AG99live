@@ -23,7 +23,7 @@ EXPORT_NAMES = {
     "output_segment": "SCHEMA_OUTPUT_SEGMENT_V3",
     "parameter_plan": "SCHEMA_PARAMETER_PLAN_V2",
     "performance_curve_hint": "SCHEMA_PERFORMANCE_CURVE_HINT_V1",
-    "semantic_axis_profile": "SCHEMA_SEMANTIC_AXIS_PROFILE_V2",
+    "semantic_axis_profile": "SCHEMA_SEMANTIC_AXIS_PROFILE_V3",
     "semantic_axis_relation_graph": "SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1",
     "voice_following_profile": "SCHEMA_VOICE_FOLLOWING_PROFILE_V3",
 }

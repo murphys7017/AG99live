@@ -7,6 +7,6 @@ export const SCHEMA_MOTION_TUNING_SAMPLE_V2 = "ag99.motion_tuning_sample.v2" as 
 export const SCHEMA_OUTPUT_SEGMENT_V3 = "output.segment.v3" as const;
 export const SCHEMA_PARAMETER_PLAN_V2 = "engine.parameter_plan.v2" as const;
 export const SCHEMA_PERFORMANCE_CURVE_HINT_V1 = "ag99.performance_curve_hint.v1" as const;
-export const SCHEMA_SEMANTIC_AXIS_PROFILE_V2 = "ag99.semantic_axis_profile.v2" as const;
+export const SCHEMA_SEMANTIC_AXIS_PROFILE_V3 = "ag99.semantic_axis_profile.v3" as const;
 export const SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1 = "ag99.semantic_axis_relation_graph.v1" as const;
 export const SCHEMA_VOICE_FOLLOWING_PROFILE_V3 = "ag99.voice_following_profile.v3" as const;

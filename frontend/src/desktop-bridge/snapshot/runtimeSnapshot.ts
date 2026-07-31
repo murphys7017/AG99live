@@ -419,7 +419,7 @@ function cloneMotionCompileDiagnostics(
     expressiveAxisCount: normalizeOptionalInteger(diagnostics.expressiveAxisCount),
     semanticAxisCount: normalizeOptionalInteger(diagnostics.semanticAxisCount),
     failureStage: normalizeOptionalText(diagnostics.failureStage),
-    couplingSkippedExplicitTargets: normalizeStringArray(diagnostics.couplingSkippedExplicitTargets),
+    relationSkippedExplicitTargets: normalizeStringArray(diagnostics.relationSkippedExplicitTargets),
     transformTrace: isObject(diagnostics.transformTrace)
       ? cloneJson(diagnostics.transformTrace) as NonNullable<
           DesktopMotionPlaybackRecord["diagnostics"]
