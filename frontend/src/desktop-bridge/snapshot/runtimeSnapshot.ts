@@ -43,7 +43,7 @@ function generatePublisherId(): string {
   return `pub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-let globalPublisherId = generatePublisherId();
+const globalPublisherId = generatePublisherId();
 let globalRevision = 0;
 
 export function nextSnapshotRevision(): number {
@@ -53,11 +53,6 @@ export function nextSnapshotRevision(): number {
 
 export function getPublisherId(): string {
   return globalPublisherId;
-}
-
-export function resetPublisherId(): void {
-  globalPublisherId = generatePublisherId();
-  globalRevision = 0;
 }
 
 export const defaultSnapshot: DesktopRuntimeSnapshot = {

@@ -141,7 +141,3 @@ export function createModelEngineStageRegistry(
     },
   };
 }
-
-export function listCompileStageRegistrations(): ReadonlyArray<AnyStageRegistration> {
-  return createDefaultCompileStageRegistrations();
-}

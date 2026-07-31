@@ -65,10 +65,3 @@ def _normalize_emotion_key(value: str) -> str:
         "blush": "embarrassed",
     }
     return aliases.get(normalized, normalized)
-
-
-def truncate_prompt_text(value: str, max_chars: int) -> str:
-    text = str(value or "").strip()
-    if len(text) <= max_chars:
-        return text
-    return text[: max_chars - 3].rstrip() + "..."

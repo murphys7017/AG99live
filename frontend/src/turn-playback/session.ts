@@ -296,12 +296,6 @@ export function createTurnPlaybackSession(
   };
 }
 
-// ── Utilities ──────────────────────────────────────────────────────
-
-export function isSessionPlaybackComplete(session: TurnPlaybackSession): boolean {
-  return session.phase === "completed";
-}
-
 /**
  * 段是否已经本地结算：text 已 delivered、audio 已到终态、motion 已 absent/completed/failed
  * 三者之一。注意不读 backend.*，仅看本段三个子状态。

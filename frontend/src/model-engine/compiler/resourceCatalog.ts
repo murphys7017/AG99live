@@ -53,18 +53,6 @@ export function resolveCatalogResource(
   return { ok: true, resource };
 }
 
-export function collectCatalogResources(model: ModelSummary): ResolvedCatalogResource[] {
-  const expressions = model.constraints.expressions
-    .filter((item) => item.catalog_expose_as_resource)
-    .map(buildExpressionResource)
-    .filter((item): item is Extract<ResolvedCatalogResource, { resourceType: "expression" }> => item !== null);
-  const motions = model.constraints.motions
-    .filter((item) => item.catalog_expose_as_resource)
-    .map((item) => buildMotionResource(item, model))
-    .filter((item): item is Extract<ResolvedCatalogResource, { resourceType: "motion" }> => item !== null);
-  return [...expressions, ...motions];
-}
-
 function buildExpressionResource(
   item: ExpressionConstraint,
 ): Extract<ResolvedCatalogResource, { resourceType: "expression" }> | null {

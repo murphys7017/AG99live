@@ -17,12 +17,12 @@ except ImportError:  # pragma: no cover - older AstrBot cores do not expose it.
 from astrbot.core.prompt import PromptExtension
 
 from ..motion.payload_validation import (
-    build_prompt_axis_lookup as _payload_build_prompt_axis_lookup,
-    describe_axis_descriptors as _payload_describe_axis_descriptors,
-    describe_axis_descriptor as _payload_describe_axis_descriptor,
+    build_prompt_axis_lookup,
+    describe_axis_descriptors,
+    describe_axis_descriptor,
     normalize_motion_arguments_payload as _payload_normalize_motion_arguments_payload,
-    resolve_axis_neutral_value as _payload_resolve_axis_neutral_value,
-    resolve_axis_value_range as _payload_resolve_axis_value_range,
+    resolve_axis_neutral_value,
+    resolve_axis_value_range,
 )
 from ..motion.output_sanitizer import (
     contains_hidden_output_markup,
@@ -558,10 +558,6 @@ def _effect_call_get(call: Any, key: str) -> Any:
     return getattr(call, key, None)
 
 
-def _resolve_axis_value_range(axis: dict[str, Any]) -> tuple[float, float]:
-    return _payload_resolve_axis_value_range(axis)
-
-
 def _build_motion_static_capability_payload(runtime_state: Any) -> dict[str, Any]:
     capability_payload: dict[str, Any] = {
         "persona_effect_available": bool(
@@ -1022,7 +1018,7 @@ def _build_prompt_pose_reference_candidates(
     semantic_profile: dict[str, Any] | None = None,
     limit: int,
 ) -> list[dict[str, Any]]:
-    axis_by_id = _build_prompt_axis_lookup(semantic_profile)
+    axis_by_id = build_prompt_axis_lookup(semantic_profile)
     selected_candidates = _select_representative_pose_reference_candidates(
         pose_reference_candidates,
         axis_by_id=axis_by_id,
@@ -1046,7 +1042,7 @@ def _build_prompt_pose_reference_candidates(
                 "recommended_scenarios": _normalize_axis_text_list(
                     item.get("recommended_scenarios")
                 )[:4],
-                "pose_descriptors": _describe_axis_descriptors(
+                "pose_descriptors": describe_axis_descriptors(
                     item.get("axes"),
                     axis_by_id=axis_by_id,
                 )[:4],
@@ -1140,33 +1136,10 @@ def _classify_prompt_pose_reference_signature(
     *,
     axis_by_id: Mapping[str, dict[str, Any]] | None = None,
 ) -> str:
-    descriptors = _describe_axis_descriptors(item.get("axes"), axis_by_id=axis_by_id)
+    descriptors = describe_axis_descriptors(item.get("axes"), axis_by_id=axis_by_id)
     if descriptors:
         return "+".join(descriptors[:3])
     return "metadata:" + _normalize_prompt_pose_reference_metadata_signature(item)
-
-
-def _describe_axis_descriptors(
-    value: Any,
-    *,
-    axis_by_id: Mapping[str, dict[str, Any]] | None = None,
-) -> list[str]:
-    return _payload_describe_axis_descriptors(value, axis_by_id=axis_by_id)
-
-
-def _describe_axis_descriptor(
-    axis_id: str,
-    value: float,
-    *,
-    axis: dict[str, Any] | None = None,
-) -> str:
-    return _payload_describe_axis_descriptor(axis_id, value, axis=axis)
-
-
-def _build_prompt_axis_lookup(
-    semantic_profile: dict[str, Any] | None,
-) -> dict[str, dict[str, Any]]:
-    return _payload_build_prompt_axis_lookup(semantic_profile)
 
 
 def _normalize_prompt_pose_reference_metadata_signature(item: dict[str, Any]) -> str:
@@ -1242,43 +1215,6 @@ def _select_motion_format_example_axes(
         and str(axis.get("control_role") or "").strip() != "primary"
     ]
     return (primary_axes + other_axes)[: max(0, limit)]
-
-
-def _resolve_axis_example_value(axis: dict[str, Any], *, index: int) -> float:
-    neutral = _resolve_axis_neutral_value(axis)
-    min_value, max_value = _resolve_axis_value_range(axis)
-    soft_range = axis.get("soft_range")
-    if (
-        isinstance(soft_range, list)
-        and len(soft_range) == 2
-        and isinstance(soft_range[0], (int, float))
-        and isinstance(soft_range[1], (int, float))
-    ):
-        soft_min = float(soft_range[0])
-        soft_max = float(soft_range[1])
-    else:
-        span = max((max_value - min_value) * 0.08, 1.0)
-        soft_min = neutral - span
-        soft_max = neutral + span
-
-    use_positive = index % 2 == 0
-    if use_positive and soft_max < max_value:
-        span = max(soft_max - neutral, 1.0)
-        value = soft_max + max(span * 0.35, 1.0)
-    elif soft_min > min_value:
-        span = max(neutral - soft_min, 1.0)
-        value = soft_min - max(span * 0.35, 1.0)
-    elif soft_max < max_value:
-        span = max(soft_max - neutral, 1.0)
-        value = soft_max + max(span * 0.35, 1.0)
-    else:
-        value = neutral
-
-    return round(max(min_value, min(max_value, value)), 4)
-
-
-def _resolve_axis_neutral_value(axis: dict[str, Any]) -> float:
-    return _payload_resolve_axis_neutral_value(axis)
 
 
 def _build_motion_runtime_payload(
@@ -1413,7 +1349,7 @@ def _build_previous_motion_variation_payload(
         return {}
 
     semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
-    axis_by_id = _build_prompt_axis_lookup(semantic_profile)
+    axis_by_id = build_prompt_axis_lookup(semantic_profile)
 
     key_axes: list[dict[str, Any]] = []
     key_axis_levels: dict[str, int] = {}
@@ -1429,10 +1365,10 @@ def _build_previous_motion_variation_payload(
         if not isinstance(axis_value, (int, float)) or isinstance(axis_value, bool):
             continue
         axis = axis_by_id.get(axis_id)
-        descriptor = _describe_axis_descriptor(axis_id, float(axis_value), axis=axis)
+        descriptor = describe_axis_descriptor(axis_id, float(axis_value), axis=axis)
         if not descriptor:
             descriptor = "neutral_center"
-        neutral = _resolve_axis_neutral_value(axis) if isinstance(axis, dict) else 50.0
+        neutral = resolve_axis_neutral_value(axis) if isinstance(axis, dict) else 50.0
         key_axes.append(
             {
                 "axis_id": axis_id,

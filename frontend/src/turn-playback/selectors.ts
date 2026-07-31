@@ -14,19 +14,6 @@ export function getActivePlaybackSegment(
 }
 
 /**
- * Whether the session's text can be released (pushed to display).
- *
- * Text must not already be released and must have non-empty content.
- */
-export function canReleaseText(segment: TurnPlaybackSegment): boolean {
-  if (segment.text.released) {
-    return false;
-  }
-  const content = segment.text.content;
-  return typeof content === "string" && content.trim().length > 0;
-}
-
-/**
  * Whether the session's audio can be released (playback started).
  *
  * Audio must have a url and must not already have reached a terminal state.

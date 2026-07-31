@@ -1,8 +1,4 @@
-import type {
-  PerformanceCurveHint,
-  SemanticParameterPlan,
-} from "../../types/protocol.js";
-import { parseSemanticParameterPlan } from "../planParser.js";
+import type { PerformanceCurveHint } from "../../types/protocol.js";
 
 export type MotionPlaybackClockSource =
   | "audio"
@@ -120,90 +116,5 @@ export function resolvePerformanceCurveTimeline(options: {
     speechActive:
       (clock.source === "audio" || clock.source === "audio_pending")
       && clock.phase !== "terminal",
-  };
-}
-
-export function retimeSemanticParameterPlan(
-  plan: SemanticParameterPlan,
-  targetDurationMs: number | null | undefined,
-): SemanticParameterPlan {
-  if (targetDurationMs === null || targetDurationMs === undefined) {
-    return plan;
-  }
-  if (!Number.isFinite(targetDurationMs) || targetDurationMs <= 0) {
-    throw new Error("Motion plan target duration must be a positive finite number.");
-  }
-  const requestedDurationMs = Math.max(320, Math.round(targetDurationMs));
-  if (Math.abs(requestedDurationMs - plan.timing.duration_ms) <= 80) {
-    return plan;
-  }
-
-  const sourceDurationMs = Math.max(plan.timing.duration_ms, 1);
-  const sourceTotalMs = Math.max(
-    sourceDurationMs,
-    plan.timing.blend_in_ms + plan.timing.hold_ms + plan.timing.blend_out_ms,
-  );
-  const blendInMs = Math.max(
-    60,
-    Math.round(requestedDurationMs * plan.timing.blend_in_ms / sourceTotalMs),
-  );
-  const blendOutMs = Math.max(
-    80,
-    Math.round(requestedDurationMs * plan.timing.blend_out_ms / sourceTotalMs),
-  );
-  const holdMs = Math.max(120, requestedDurationMs - blendInMs - blendOutMs);
-  const durationMs = blendInMs + holdMs + blendOutMs;
-  const scale = durationMs / sourceDurationMs;
-
-  const retimed = {
-    ...plan,
-    timing: {
-      ...plan.timing,
-      duration_ms: durationMs,
-      blend_in_ms: blendInMs,
-      hold_ms: holdMs,
-      blend_out_ms: blendOutMs,
-    },
-    parameters: plan.parameters.map((parameter) => ({
-      ...parameter,
-      keyframes: parameter.keyframes?.map((keyframe) => ({
-        ...keyframe,
-        at_ms: Math.min(durationMs, Math.round(keyframe.at_ms * scale)),
-        transition_ms: Math.round(keyframe.transition_ms * scale),
-      })),
-      modulation: parameter.modulation
-        ? retimeSpeechGestureTrack(
-          parameter.modulation,
-          sourceDurationMs,
-          durationMs,
-        )
-        : undefined,
-    })),
-  };
-  const parsed = parseSemanticParameterPlan(retimed);
-  if (!parsed.ok) {
-    throw new Error(`Retimed motion plan is invalid: ${parsed.reason}`);
-  }
-  return parsed.value;
-}
-
-function retimeSpeechGestureTrack(
-  modulation: NonNullable<SemanticParameterPlan["parameters"][number]["modulation"]>,
-  sourceDurationMs: number,
-  targetDurationMs: number,
-): NonNullable<SemanticParameterPlan["parameters"][number]["modulation"]> {
-  const sourceActiveDurationMs = sourceDurationMs - modulation.delay_ms;
-  const targetActiveDurationMs = targetDurationMs - modulation.delay_ms;
-  if (sourceActiveDurationMs <= 0 || targetActiveDurationMs <= 0) {
-    throw new Error("Speech gesture delay must be shorter than the motion duration.");
-  }
-  const activeScale = targetActiveDurationMs / sourceActiveDurationMs;
-  return {
-    ...modulation,
-    points: modulation.points.map((point) => ({
-      ...point,
-      at_ms: Math.round(point.at_ms * activeScale),
-      transition_ms: Math.round(point.transition_ms * activeScale),
-    })),
   };
 }

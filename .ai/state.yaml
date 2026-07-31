@@ -1,9 +1,9 @@
 task:
-  class: refactor
-  risk: high
-  phase: implementation
-  status: active
-  scope: "Finish the parameter-mixing migration, preserve scanner-owned catalog-motion locators, close playback ownership gaps, and make the V3 ModelSync migration atomic across the manifest, Adapter, cache, handshake, Electron parser, and documentation."
+  class: maintenance
+  risk: medium
+  phase: completion
+  status: complete
+  scope: "Remove internal motion and playback APIs superseded by the V3 model-sync and parameter-mixing migration, based on verified production call relationships."
 
 context:
   confidence: high
@@ -30,6 +30,7 @@ context:
     - Historical Motion Lab sample records that do not conform to the current V2 sample contract are deleted rather than migrated.
     - An always-on microphone capture has one root turn ID for its stream lifetime; every VAD-completed utterance receives a distinct `<capture_turn_id>:vad:<n>` conversation turn ID.
     - A new VAD speech start may interrupt only the still-active derived turn from the same capture session; it never interrupts or terminates the capture root itself.
+    - Obsolete internal helpers are deleted only after repository-wide symbol lookup confirms that no production, test, or export consumer remains; dynamic Live2D SDK configuration and local runtime data are outside this cleanup.
 
 architecture:
   product_flow:
@@ -135,6 +136,7 @@ verification:
     - A real Mk6 rescan and frontend resource projection preserved the exposed motion locators as `embarrassed_lookaway -> group "", index 5` and `angry_standard -> group "", index 21`.
     - `npm run typecheck`, focused Python syntax checks, `python scripts/check_protocol_schema_manifest.py`, and `git diff --check` passed after protocol consumers were consolidated onto manifest-derived constants and V3 cache/model projection checks.
     - Production source contains no legacy ModelInfo V2 or scan-cache V2 references.
+    - Focused Adapter Python syntax checks, the frontend renderer/WebSDK/Node typechecks, repository-wide removed-symbol lookup, and `git diff --check` passed after deleting superseded motion and playback helpers.
   validation_gap:
     - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
     - Live AstrBot plus Provider plus TTS plus Electron plus Live2D validation is still required after the clock migration, including a long audio segment and a paused audio segment.

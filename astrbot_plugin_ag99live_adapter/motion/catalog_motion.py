@@ -78,15 +78,3 @@ def validate_catalog_motion_payload(payload: Any) -> tuple[bool, str]:
     except ValueError as exc:
         return False, str(exc)
     return True, ""
-
-
-def summarize_catalog_motion_payload(payload: Any) -> tuple[str, str, str, str]:
-    if not isinstance(payload, dict):
-        return "", "", "", "catalog_motion_not_object"
-    valid, failure_reason = validate_catalog_motion_payload(payload)
-    return (
-        str(payload.get("schema_version") or "").strip(),
-        str(payload.get("motion_id") or "").strip(),
-        str(payload.get("emotion_label") or "").strip(),
-        "" if valid else failure_reason,
-    )
