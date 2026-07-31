@@ -75,6 +75,7 @@ function testInvalidOperationIsRejected(): void {
   assert.deepEqual(result, {
     ok: false,
     reason: "parameter_mixer_invalid_operation:ParamMouthOpenY:invalid-source",
+    sources: ["invalid-source"],
   });
 }
 

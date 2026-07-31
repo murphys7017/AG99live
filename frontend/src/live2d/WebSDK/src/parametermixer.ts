@@ -125,7 +125,14 @@ export class ParameterMixer {
       let unclampedValue = baseValue;
       const resolvedContributions: ResolvedParameterContribution[] = [];
       group.contributions
-        .sort((left, right) => left.priority - right.priority || left.sequence - right.sequence)
+        .sort((left, right) => {
+          const priorityOrder = left.priority - right.priority;
+          if (priorityOrder !== 0) {
+            return priorityOrder;
+          }
+          const sourceOrder = left.source.localeCompare(right.source);
+          return sourceOrder !== 0 ? sourceOrder : left.sequence - right.sequence;
+        })
         .forEach((contribution) => {
           const resolvedValue = resolveContributionValue(unclampedValue, contribution);
           resolvedContributions.push({

@@ -1150,15 +1150,6 @@ export class LAppModel extends CubismUserModel {
     }
   }
 
-  private hasModelParameter(parameterId: CubismIdHandle | null): boolean {
-    if (!parameterId || !this._model) {
-      return false;
-    }
-
-    const parameterIndex = this._model.getParameterIndex(parameterId);
-    return parameterIndex >= 0 && parameterIndex < this._model.getParameterCount();
-  }
-
   /**
    * イベントの発火を受け取る
    */
