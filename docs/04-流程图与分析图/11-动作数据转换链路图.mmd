@@ -41,7 +41,7 @@ flowchart TD
         STRUCT[motion_intent.py<br/>v4 结构 / 类型 / 互斥 / 时长<br/>唯一 contract 规则源]:::backend
         VALID{canonical contract 合法？}:::backend
         FEEDBACK1[记录明确拒绝 reason<br/>不生成默认动作]:::failure
-        PROFILE[当前 SemanticAxisProfile v2]:::backend
+        PROFILE[当前 SemanticAxisProfile v3<br/>relation_graph.edges 唯一关系来源]:::backend
         CAPCHECK[payload_validation.py<br/>轴存在 / 等级可用 / 数量限制<br/>resource 类型与白名单]:::backend
         CAPOK{当前模型可执行？}:::backend
         INTENT[engine.motion_intent.v4<br/>canonical payload]:::contract
@@ -111,16 +111,23 @@ flowchart TD
 
     subgraph SDK[8. Live2D 逐帧表现]
         PLAYER[PreviewMotionPlayer<br/>runId 与 terminal ownership]:::runtime
-        LAPP[WebSDK lappmodel<br/>曲线 / gesture track / dynamics]:::engine
-        MIX[参数冲突解析<br/>semantic + expression + lip sync + Cubism physics]:::engine
-        WRITE[Cubism setParameterValueById]:::engine
+        BASE[Cubism Motion / EyeBlink / Expression / drag / breath<br/>base parameter snapshot]:::engine
+        DIRECT[direct plan source<br/>曲线 / gesture track / dynamics]:::engine
+        LIP[Lip-sync source<br/>RMS -> normalized intensity]:::engine
+        MIX[Parameter Mixer<br/>base + direct plan + lip sync<br/>稳定优先级 / 一次最终裁剪]:::engine
+        WRITE[LAppModel<br/>唯一 active parameter write]:::engine
         PHYS[Physics / Pose / Renderer]:::engine
         MODEL[最终可见 Live2D 表现]:::engine
 
         PLAN --> PARAM --> PLAYER
         PLAN --> EXPLAYER --> PLAYER
         MOTPLAYER --> PLAYER
-        PLAYER --> LAPP --> MIX --> WRITE --> PHYS --> MODEL
+        PLAYER --> BASE
+        PLAYER --> DIRECT
+        BASE --> MIX
+        DIRECT --> MIX
+        LIP --> MIX
+        MIX --> WRITE --> PHYS --> MODEL
     end
 
     TRACE -.Motion Lab observation.-> LAB[Motion Lab SQLite]:::runtime

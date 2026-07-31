@@ -14,7 +14,7 @@ stateDiagram-v2
     LoadingResources --> LoadFailed: required resource invalid
 
     Ready --> Running: renderer frame loop owns model
-    Running --> Running: parameter plan / lip sync / physics / input
+    Running --> Running: base snapshot / Parameter Mixer / physics / input
     Ready --> Replacing: selectedModel changed
     Running --> Replacing: selectedModel changed
     LoadingManifest --> Cancelled: newer generation selected
@@ -39,10 +39,11 @@ stateDiagram-v2
     state Running {
         [*] --> FrameScheduled
         FrameScheduled --> ValidateOwnership: requestAnimationFrame tick
-        ValidateOwnership --> ApplyMotion: generation/model still current
+        ValidateOwnership --> BuildBaseSnapshot: generation/model still current
         ValidateOwnership --> FrameStopped: stale/released
-        ApplyMotion --> ApplyLipSync: parameter plan and gesture track
-        ApplyLipSync --> ApplyPhysics: external mouth value
+        BuildBaseSnapshot --> ResolveDirectSource: catalog motion / expression / drag / breath
+        ResolveDirectSource --> ApplyMixer: direct plan / gesture track / lip-sync
+        ApplyMixer --> ApplyPhysics: one active parameter frame before Physics
         ApplyPhysics --> Render: Cubism physics/pose/renderer
         Render --> FrameScheduled: next frame
         FrameStopped --> [*]

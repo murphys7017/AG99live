@@ -61,6 +61,7 @@
   实时执行与完成门禁事实源；Orchestrator 和 CompletionCoordinator 必须联合读取两者。
 - ModelEngine 编译动作，Live2D WebSDK 逐帧执行参数计划。
 - ModelEngine 分为 semantic 与 model_parameter 两个编译阶段；关系图在 semantic 阶段收口，SpeechPoseStage 在 model_parameter 阶段生成语义轴手势轨道。
+- WebSDK 先形成 Cubism Motion / EyeBlink / Expression / drag / breath 的 base snapshot，再由 Parameter Mixer 组合 direct plan 与 lip-sync；Physics 只消费最终主动参数帧，不是 Mixer 输入。
 - 每条 WebSocket 连接必须先通过 `system.server_info.schema_manifest`；ModelSync 不接受 window/devtools 旁路写入。
 - 当前桌宠 WebSocket 与 HTTP 资源只支持同机 `127.0.0.1` / `localhost`；远程执行器连接是独立边界。
 

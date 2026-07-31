@@ -69,7 +69,7 @@ flowchart TB
         PREVIEW[usePreviewMotionPlayer<br/>run ownership / watchdog]:::sdk
         ADAPTER[Live2D adapter<br/>start plan / catalog motion]:::sdk
         LIPLIVE[lipSyncTimelineSink<br/>WebAudio RMS / mouth write]:::sdk
-        WEBSDK[WebSDK/lappmodel.ts<br/>每帧插值 / dynamics / 参数冲突]:::sdk
+        WEBSDK[WebSDK/lappmodel.ts<br/>base snapshot / direct source / Parameter Mixer]:::sdk
         CUBISM[Cubism Model / Physics / Renderer]:::sdk
         PREVIEW --> ADAPTER --> WEBSDK --> CUBISM
         LIPLIVE --> WEBSDK
