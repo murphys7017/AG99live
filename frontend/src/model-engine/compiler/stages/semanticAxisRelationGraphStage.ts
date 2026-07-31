@@ -90,6 +90,9 @@ function resolveSemanticAxisRelationGraph(
   const maxPasses = Math.max(1, rules.length + 1);
 
   for (let pass = 0; pass < maxPasses; pass += 1) {
+    adjustmentByRuleId.clear();
+    evaluationByRuleId.clear();
+    warningSet.clear();
     const controlledValues = { ...explicitControlledValues };
     const derivedValues: DynamicAxisValues = {};
     const allValues = { ...controlledValues };
@@ -234,10 +237,11 @@ function applyBoundedRatioRule(
 
   const targetDelta = targetValue - axes.target.neutral;
   const hardCap = resolveHardCap(axes.target, rule.deadzone, rule.max_delta);
-  const opposite = sourceDelta !== 0
+  const expectedDirection = rule.mode === "opposite_direction" ? -1 : 1;
+  const directionMismatch = sourceDelta !== 0
     && targetDelta !== 0
-    && sourceDelta * targetDelta < 0;
-  const limit = opposite
+    && sourceDelta * targetDelta * expectedDirection < 0;
+  const limit = directionMismatch
     ? Math.min(
       hardCap * 0.5,
       Math.max(
@@ -266,7 +270,9 @@ function applyBoundedRatioRule(
         targetBefore: targetValue,
         targetAfter: targetValue,
         limit,
-        reason: opposite ? "opposite_direction_within_limit" : "follow_direction_within_limit",
+        reason: directionMismatch
+          ? "relation_direction_mismatch_within_limit"
+          : "relation_expected_direction_within_limit",
       },
     };
   }
@@ -277,7 +283,9 @@ function applyBoundedRatioRule(
   } else {
     derivedValues[rule.target_axis_id] = constrainedValue;
   }
-  const reason = opposite ? "opposite_direction_limit" : "follow_direction_limit";
+  const reason = directionMismatch
+    ? "relation_direction_mismatch_limit"
+    : "relation_expected_direction_limit";
   return {
     evaluation: {
       ruleId: rule.id,

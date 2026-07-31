@@ -1,6 +1,7 @@
 import type { ProtocolEnvelope } from "../../types/protocol.js";
+import { PROTOCOL_VERSION } from "../../types/protocolSchema.generated.js";
 
-export const PROTOCOL_VERSION = "v2";
+export { PROTOCOL_VERSION };
 const SOURCE_FRONTEND = "frontend";
 
 export function buildMessageEnvelope<TPayload>(

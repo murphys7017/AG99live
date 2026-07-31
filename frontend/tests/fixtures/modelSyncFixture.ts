@@ -113,7 +113,7 @@ export function makeValidModelSyncPayload(overrides: Record<string, unknown> = {
   const model = makeValidModelSummary();
   return {
     model_info: {
-      schema_version: "live2d_scan.v2",
+      schema_version: "live2d_scan.v3",
       driver_priority: ["parameters", "expression", "motion"],
       selected_model: model.name,
       available_models: [model.name],

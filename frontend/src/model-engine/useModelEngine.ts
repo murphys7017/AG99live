@@ -315,12 +315,18 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     }
 
     const durationMs = Math.round(audioDurationMs);
-    const selectedModelPath = dependencies.getSelectedModel()?.model_path.trim() ?? "";
+    const selectedModel = dependencies.getSelectedModel();
+    const selectedModelPath = selectedModel?.model_path.trim() ?? "";
+    const selectedProfile = selectedModel?.semantic_axis_profile ?? null;
     const cached = preparedSemanticMotions.get(key);
     if (
       cached
       && cached.durationMs === durationMs
       && cached.prepared.modelPath === selectedModelPath
+      && selectedProfile !== null
+      && cached.prepared.profileId === selectedProfile.profile_id
+      && cached.prepared.profileRevision === selectedProfile.revision
+      && cached.prepared.profileSourceHash === selectedProfile.source_hash
     ) {
       return { status: "prepared", source };
     }

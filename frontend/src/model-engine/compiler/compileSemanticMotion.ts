@@ -2,6 +2,7 @@ import type {
   NormalizedSemanticMotionIntentV4,
   SemanticMotionIntent,
 } from "../../types/protocol.js";
+import { SCHEMA_MOTION_INTENT_V4 } from "../../types/protocol.js";
 import { normalizeModelEngineSettings } from "../settings.js";
 import {
   createInitialCompileState,
@@ -39,7 +40,7 @@ export function compileSemanticMotion(
   stageRegistry: ModelEngineStageRegistry = createModelEngineStageRegistry(),
 ): CompileSemanticMotionResult {
   if (
-    intent.schema_version === "engine.motion_intent.v4"
+    intent.schema_version === SCHEMA_MOTION_INTENT_V4
     && Array.isArray(intent.motion_steps)
   ) {
     return compileSemanticSequence(
@@ -211,7 +212,7 @@ function buildMotionBase(
     emotionLabel: context.intent.emotion_label,
     intentTags: [...(context.intent.intent_tags ?? [])],
     performanceCurveHint: context.intent.performance_curve_hint,
-    expressionResourceId: context.intent.schema_version === "engine.motion_intent.v4"
+    expressionResourceId: context.intent.schema_version === SCHEMA_MOTION_INTENT_V4
       ? context.intent.expression_resource_id
       : undefined,
     timing,

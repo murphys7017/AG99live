@@ -44,7 +44,7 @@ export function usePreviewMotionPlayer() {
   let activeRunId = 0;
   let activeDirectPlanRunId = "";
   let activeCatalogMotionRunId = "";
-  let activeMotionStop: (() => void) | null = null;
+  let activeMotionStop: ((reason: string) => void) | null = null;
 
   function parseParameterPlan(plan: unknown): ParsedParameterPlan | null {
     if (!isObject(plan) || normalizeText(plan.schema_version) !== SCHEMA_PARAMETER_PLAN_V2) {
@@ -71,7 +71,7 @@ export function usePreviewMotionPlayer() {
   function stopActiveCatalogMotion(reason: string): void {
     const stop = activeMotionStop;
     activeMotionStop = null;
-    stop?.();
+    stop?.(reason);
   }
 
   function stopPlan(reason = "stopped"): void {
@@ -255,14 +255,14 @@ export function usePreviewMotionPlayer() {
       return false;
     }
 
-    activeRunId += 1;
-    const runId = activeRunId;
-    const playbackRunId = `catalog-motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     stopActiveCatalogMotion("catalog_motion_replaced");
     if (typeof adapter.stopDirectParameterPlan === "function") {
       activeDirectPlanRunId = "";
-      adapter.stopDirectParameterPlan();
+      adapter.stopDirectParameterPlan("catalog_motion_replaced", "stopped");
     }
+    activeRunId += 1;
+    const runId = activeRunId;
+    const playbackRunId = `catalog-motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
     const getMotionStartError = (): string => (
       typeof adapter.getMotionStartError === "function"
@@ -314,7 +314,7 @@ export function usePreviewMotionPlayer() {
           state.status = "playing";
           state.message = `正在执行现成 motion（${motion.label || motion.motion_id}）...`;
           state.startedAt = new Date().toISOString();
-          activeMotionStop = () => adapter.stopMotion?.();
+          activeMotionStop = (reason) => adapter.stopMotion?.(reason);
           options.onStarted?.(motion, playbackRunId);
         },
         onFinished: () => {
@@ -352,7 +352,7 @@ export function usePreviewMotionPlayer() {
       return false;
     }
     if (state.status === "preparing") {
-      activeMotionStop = () => adapter.stopMotion?.();
+      activeMotionStop = (reason) => adapter.stopMotion?.(reason);
     }
     return true;
   }

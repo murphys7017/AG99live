@@ -3,6 +3,7 @@ import type {
   VoiceFollowingChannelProfile,
   VoiceFollowingProfile,
 } from "../../../types/protocol.js";
+import { SCHEMA_VOICE_FOLLOWING_PROFILE_V3 } from "../../../types/protocol.js";
 import type {
   ModelParameterCompileContext,
   ModelParameterCompileStage,
@@ -76,7 +77,7 @@ export function runSpeechPoseStage(
   }
 
   const voiceProfile = context.options.model.voice_following_profile;
-  if (!voiceProfile || voiceProfile.schema_version !== "ag99.voice_following_profile.v3") {
+  if (!voiceProfile || voiceProfile.schema_version !== SCHEMA_VOICE_FOLLOWING_PROFILE_V3) {
     return { ok: true };
   }
   const invalidChannels = Object.values(voiceProfile.channels ?? {})

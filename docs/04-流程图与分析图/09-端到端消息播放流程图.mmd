@@ -13,7 +13,7 @@ flowchart TD
         MANIFEST{protocol 与全部子 schema<br/>逐项完全一致？}:::protocol
         HFAIL[拒绝后续消息<br/>要求重载插件/重新连接]:::failure
         SCAN[RuntimeState<br/>扫描缓存校验或重新扫描]:::backend
-        PROJECT[live2d_scan.v2<br/>前端能力投影]:::backend
+        PROJECT[live2d_scan.v3<br/>前端能力投影]:::backend
         MODELSYNC[system.model_sync<br/>模型能力 + 独立 cache errors]:::protocol
         APPLY[ModelSync state<br/>URL rewrite / selected model / profile]:::state
 

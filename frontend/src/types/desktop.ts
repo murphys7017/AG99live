@@ -2,6 +2,7 @@ import type {
   CatalogMotionPayload,
   MotionPlanPayload,
 } from "./protocol";
+import { SCHEMA_MOTION_TUNING_SAMPLE_V2 } from "./protocol";
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
 import type { CompiledSemanticMotion } from "../model-engine/compiler/contracts";
 import type {
@@ -256,7 +257,7 @@ export type DesktopMotionPlaybackRecord =
   });
 
 export interface DesktopMotionTuningSample {
-  schemaVersion: "ag99.motion_tuning_sample.v2";
+  schemaVersion: typeof SCHEMA_MOTION_TUNING_SAMPLE_V2;
   id: string;
   createdAt: string;
   sourceRecordId: string;

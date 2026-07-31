@@ -1,4 +1,5 @@
 import { cloneJson } from "../../utils/cloneJson.js";
+import { SCHEMA_PERFORMANCE_CURVE_HINT_V1 } from "../../types/protocol.js";
 import type {
   CompileDiagnostics,
   CompiledSemanticAxis,
@@ -120,7 +121,7 @@ function isIntentTags(value: unknown): value is string[] {
 
 function isPerformanceCurveHint(value: unknown): boolean {
   return isObject(value)
-    && value.schema_version === "ag99.performance_curve_hint.v1"
+    && value.schema_version === SCHEMA_PERFORMANCE_CURVE_HINT_V1
     && ["default", "quick_in_hold_soft_out", "slow_in_hold_quick_out", "pulse_then_settle", "soft_breathe"].includes(String(value.curve_family))
     && ["instant", "quick", "soft", "slow"].includes(String(value.entry))
     && ["short", "steady", "long", "breathing"].includes(String(value.hold))

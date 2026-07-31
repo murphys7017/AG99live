@@ -61,7 +61,7 @@ sequenceDiagram
         and 启动口型
             TL->>Lip: attach/start same AudioElement
             Lip->>Lip: WebAudio analyser RMS
-            Lip->>SDK: external mouth value per frame
+            Lip->>SDK: source-scoped active state + mouth value
             Lip-->>TL: lip_sync.started
         and 唤醒已准备动作
             TL->>Engine: handlePlaybackTimelineStarted(latest clock)
@@ -82,7 +82,8 @@ sequenceDiagram
         loop 每个渲染帧
             Clock-->>Engine: 可用的 segment-scoped 时间上下文
             SDK->>SDK: 采样 plan / speech gesture / dynamics
-            Lip->>SDK: 同一音频 RMS 对应的 mouth value
+            Lip->>SDK: 同一音频 source 的 active state + RMS mouth value
+            SDK->>SDK: ParameterMixer 统一写入口型；零值保持闭嘴 ownership
         end
 
         alt Audio ended

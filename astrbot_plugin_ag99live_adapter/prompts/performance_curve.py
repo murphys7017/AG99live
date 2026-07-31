@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from ..protocol.schema_versions import PERFORMANCE_CURVE_HINT_SCHEMA_VERSION
+
 PERFORMANCE_CURVE_SYSTEM_PROMPT = """你是 AG99live 的 Live2D 表演节奏选择器。
 你只根据助手回复文本、关键词和动作意图关键词，选择一个表演曲线提示。
 
@@ -36,7 +38,7 @@ def build_performance_curve_prompt(
         "请为下面这段回复选择一个 Live2D 表演曲线提示。\n"
         "允许输出 schema:\n"
         "{\n"
-        '  "schema_version": "ag99.performance_curve_hint.v1",\n'
+        f'  "schema_version": "{PERFORMANCE_CURVE_HINT_SCHEMA_VERSION}",\n'
         '  "curve_family": "default | quick_in_hold_soft_out | slow_in_hold_quick_out | pulse_then_settle | soft_breathe",\n'
         '  "entry": "instant | quick | soft | slow",\n'
         '  "hold": "short | steady | long | breathing",\n'

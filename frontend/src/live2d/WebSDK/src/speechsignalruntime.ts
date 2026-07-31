@@ -8,6 +8,7 @@ export interface ExternalAudioSignalSourceOptions {
 }
 
 export interface SpeechAudioFrame {
+  lipSyncActive: boolean;
   lipSyncIntensity: number;
 }
 
@@ -137,8 +138,10 @@ export class SpeechSignalRuntime {
       this.speechBodyEnvelope = 0;
     }
 
+    const lipSyncActive = includeLipSync && this.activeSourceId !== null;
     return {
-      lipSyncIntensity: includeLipSync && this.activeSourceId !== null
+      lipSyncActive,
+      lipSyncIntensity: lipSyncActive
         ? this.lipSyncIntensity
         : 0,
     };

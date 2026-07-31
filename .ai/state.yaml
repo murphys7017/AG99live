@@ -3,7 +3,7 @@ task:
   risk: high
   phase: implementation
   status: active
-  scope: "Consolidate direct-parameter lifecycle ownership in WebSDK, separate full catalog-motion resources from parameter-plan compilation, make the semantic relation graph the sole relation-constraint owner, and remove duplicated coupling state from semantic axis profiles."
+  scope: "Finish the parameter-mixing migration, preserve scanner-owned catalog-motion locators, close playback ownership gaps, and make the V3 ModelSync migration atomic across the manifest, Adapter, cache, handshake, Electron parser, and documentation."
 
 context:
   confidence: high
@@ -15,6 +15,8 @@ context:
     - Physics output and animation-owned parameters, including Phy* and Anim* parameters, remain owned by Cubism Physics and the animation system and are not driven directly by the input layer.
     - The performance layer is deferred until input ranges and physical response are stable; it will provide timing, emphasis, and low-dimensional templates rather than a second motion system.
     - Parameter Mixer receives already-resolved active parameter contributions, combines them once per frame, and does not interpret semantic levels, own audio signal lifecycle or Timeline state, or write Cubism Physics output parameters.
+    - A model3.json motion group name may be empty; the scanner-owned group plus original group_index is the only valid SDK motion locator and must not be reconstructed from deduplicated semantic constraints.
+    - An active speech source owns configured mouth parameters for every audio frame, including zero-energy pause frames; zero intensity means closed mouth, not absent lip-sync ownership.
     - The user confirmed that the selected Superheroes recording and the Live2D model are cleared for the intended commercial use.
     - The promotional video remains isolated under promo-video and does not become a runtime dependency of AG99live.
     - The final promotional render uses the user-provided cleared soundtrack excerpt and a clean, locally recorded Live2D action capture.
@@ -53,7 +55,7 @@ architecture:
     semantic_axis_profile: ag99.semantic_axis_profile.v3
     performance_curve: ag99.performance_curve_hint.v1
     voice_following: ag99.voice_following_profile.v3
-    model_info: live2d_scan.v2
+    model_info: live2d_scan.v3
     handshake: system.server_info carries the complete schema manifest; the frontend rejects all later messages until every version matches.
   motion_ownership:
     llm: intent_tags, axis_levels from -4 to 4, motion_steps, and optional typed resource intent.
@@ -83,6 +85,7 @@ architecture:
     - Runtime facts are persisted asynchronously and do not block the active conversation.
     - Stage diagnostics preserve value sources so final motion remains attributable.
     - Motion Lab sequence samples retain V4 motion_steps and never collapse to a flat pose while being replayed, saved, or used as Prompt references.
+    - Adapter and Electron protocol artifacts are deployed together; mixed revisions are rejected by the strict server_info handshake rather than accepted through compatibility fallback.
 
 verification:
   policy:
@@ -112,7 +115,6 @@ verification:
     - Targeted Python syntax checks, `npm run typecheck:renderer`, `npm run typecheck:websdk`, and a generated SemanticAxisProfile input/output smoke check passed after widening Live2D pose anchors and speech-following dynamics.
     - `npm run typecheck:renderer` and `npm run typecheck:node` passed after the protocol, ModelSync ownership, and documentation review.
     - `npm run typecheck:renderer`, `npm run typecheck:node`, and `npm run test:playback-timeline` passed after separating internal speech-only execution from protocol motion state projection.
-    - `python scripts/check_protocol_schema_manifest.py` passed after adding `live2d_scan.v2` to the strict handshake manifest.
     - Targeted `python -m py_compile` passed for every modified Adapter runtime, scanner, protocol, and transport module.
     - Mermaid sources were reviewed against current code; no Mermaid CLI is installed, so diagram rendering was not validated automatically.
     - Python syntax checks passed for the scanner and runtime cache changes.
@@ -129,6 +131,10 @@ verification:
     - Targeted `python -m py_compile` passed for the changed Adapter event, coordinator, motion Prompt, Motion Lab, and state modules.
     - `check_astrbot_plugin.py astrbot_plugin_ag99live_adapter` reported 0 errors and 0 warnings; `git diff --check` passed.
     - `npm run typecheck:renderer`, `npm run typecheck:websdk`, `python scripts/check_protocol_schema_manifest.py`, focused Adapter Python syntax checks, and `git diff --check` passed for semantic relation graph consolidation and V3 profile migration.
+    - `npm run typecheck`, `python scripts/check_protocol_schema_manifest.py`, focused Python syntax checks, and `git diff --check` passed after the live2d_scan.v3 locator, lifecycle, lip-sync ownership, profile identity, relation graph, and documentation fixes.
+    - A real Mk6 rescan and frontend resource projection preserved the exposed motion locators as `embarrassed_lookaway -> group "", index 5` and `angry_standard -> group "", index 21`.
+    - `npm run typecheck`, focused Python syntax checks, `python scripts/check_protocol_schema_manifest.py`, and `git diff --check` passed after protocol consumers were consolidated onto manifest-derived constants and V3 cache/model projection checks.
+    - Production source contains no legacy ModelInfo V2 or scan-cache V2 references.
   validation_gap:
     - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
     - Live AstrBot plus Provider plus TTS plus Electron plus Live2D validation is still required after the clock migration, including a long audio segment and a paused audio segment.
@@ -144,6 +150,7 @@ verification:
     - A second live request with an explicit matching tag or overlapping user text must confirm the generated Prompt uses request-scoped sample selection and Motion Lab records the resolved Prompt projection.
     - A live multi-turn AstrBot and Electron session must confirm that interrupting one turn leaves other queued turns untouched, late output from the cancelled event is discarded, and physicsResponseScale changes hair/clothing response without expanding semantic head/body axes.
     - A live always-on microphone session must confirm two VAD-recognized utterances create distinct derived turn IDs, keep capture active after the first response, and interrupt only the first derived playback when the second utterance begins.
+    - A live Electron plus Mk6 conversation must select each exposed full motion resource once, confirm the expected motion file plays, verify replacement emits one terminal event, and observe that zero-energy audio pauses keep the configured mouth parameters closed under lip-sync ownership.
 
 backlog:
   - id: parameter_mixer

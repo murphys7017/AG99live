@@ -3,6 +3,7 @@ import type {
   PerformanceCurveHint,
   PerformanceCurvePresetName,
 } from "../types/protocol";
+import { SCHEMA_PERFORMANCE_CURVE_HINT_V1 } from "../types/protocol.js";
 import {
   DEFAULT_MOTION_INTENT_DURATION_MS,
   MAX_MOTION_DURATION_MS,
@@ -144,7 +145,7 @@ export function resolvePerformanceCurveTiming(
   options: ResolvePerformanceCurveTimingOptions,
 ): DirectParameterPlanTiming | null {
   const hint = options.hint;
-  if (!hint || hint.schema_version !== "ag99.performance_curve_hint.v1") {
+  if (!hint || hint.schema_version !== SCHEMA_PERFORMANCE_CURVE_HINT_V1) {
     return null;
   }
 

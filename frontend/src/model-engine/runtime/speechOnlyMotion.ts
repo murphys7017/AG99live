@@ -2,6 +2,10 @@ import type {
   ModelSummary,
   NormalizedSemanticMotionIntentV4,
 } from "../../types/protocol.js";
+import {
+  SCHEMA_MOTION_INTENT_V4,
+  SCHEMA_VOICE_FOLLOWING_PROFILE_V3,
+} from "../../types/protocol.js";
 
 export interface SpeechOnlyMotionRequest {
   kind: "speech_only";
@@ -18,7 +22,7 @@ export function buildSpeechOnlyMotionRequest(
   if (
     !profile
     || !voiceFollowingProfile
-    || voiceFollowingProfile.schema_version !== "ag99.voice_following_profile.v3"
+    || voiceFollowingProfile.schema_version !== SCHEMA_VOICE_FOLLOWING_PROFILE_V3
     || !Object.values(voiceFollowingProfile.channels ?? {}).some(
       (channel) =>
         typeof channel?.semantic_axis_id === "string"
@@ -49,7 +53,7 @@ export function buildSpeechOnlyCompilerIntent(
   request: SpeechOnlyMotionRequest,
 ): NormalizedSemanticMotionIntentV4 {
   return {
-    schema_version: "engine.motion_intent.v4",
+    schema_version: SCHEMA_MOTION_INTENT_V4,
     profile_id: request.profileId,
     profile_revision: request.profileRevision,
     model_id: request.modelId,

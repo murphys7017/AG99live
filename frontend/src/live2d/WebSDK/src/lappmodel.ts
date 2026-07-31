@@ -751,7 +751,10 @@ export class LAppModel extends CubismUserModel {
     // All AG99 active parameters are resolved once before Physics consumes them.
     let parameterMixerFailure: ActiveParameterFrameFailure | null = null;
     try {
-      parameterMixerFailure = this.applyActiveParameterFrame(audioSignals.lipSyncIntensity);
+      parameterMixerFailure = this.applyActiveParameterFrame(
+        audioSignals.lipSyncIntensity,
+        audioSignals.lipSyncActive,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       parameterMixerFailure = {
@@ -1869,6 +1872,7 @@ export class LAppModel extends CubismUserModel {
 
   private applyActiveParameterFrame(
     lipSyncIntensity: number,
+    lipSyncActive: boolean,
   ): ActiveParameterFrameFailure | null {
     if (!this._model) {
       return { owner: "mixed", reason: "parameter_mixer_model_unavailable" };
@@ -1878,7 +1882,10 @@ export class LAppModel extends CubismUserModel {
     if (directPlan.failure) {
       return { owner: "direct_plan", reason: directPlan.failure };
     }
-    const lipSyncContributions = this.collectLipSyncContributions(lipSyncIntensity);
+    const lipSyncContributions = this.collectLipSyncContributions(
+      lipSyncIntensity,
+      lipSyncActive,
+    );
     if (typeof lipSyncContributions === "string") {
       return { owner: "lip_sync", reason: lipSyncContributions };
     }
@@ -2020,11 +2027,12 @@ export class LAppModel extends CubismUserModel {
 
   private collectLipSyncContributions(
     lipSyncIntensity: number,
+    lipSyncActive: boolean,
   ): ParameterContribution[] | string {
     if (!Number.isFinite(lipSyncIntensity) || lipSyncIntensity < 0 || lipSyncIntensity > 1) {
       return "parameter_mixer_lip_sync_intensity_invalid";
     }
-    if (!this._lipsync || lipSyncIntensity <= 0 || !this._model) {
+    if (!this._lipsync || !lipSyncActive || !this._model) {
       return [];
     }
 

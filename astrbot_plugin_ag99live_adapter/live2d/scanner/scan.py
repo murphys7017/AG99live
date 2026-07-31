@@ -13,7 +13,10 @@ except Exception:  # pragma: no cover - fallback for local dry runs outside Astr
     logger = logging.getLogger(__name__)
 
 from .motion_scan import build_motion_resource_pool, decompose_motion
-from ...protocol.schema_versions import MODEL_INFO_SCHEMA_VERSION
+from ...protocol.schema_versions import (
+    MODEL_INFO_SCHEMA_VERSION,
+    VOICE_FOLLOWING_PROFILE_SCHEMA_VERSION,
+)
 
 SCAN_SCHEMA_VERSION = MODEL_INFO_SCHEMA_VERSION
 
@@ -165,7 +168,6 @@ BASE_ACTION_LIBRARY_SCHEMA_VERSION = "base_action_library.v1"
 PARAMETER_ACTION_LIBRARY_SCHEMA_VERSION = "parameter_action_library.v1"
 ADAPTIVE_PARAMETER_PROFILE_SCHEMA_VERSION = "adaptive_parameter_profile.v1"
 CALIBRATION_PROFILE_SCHEMA_VERSION = "direct_parameter_calibration.v1"
-VOICE_FOLLOWING_PROFILE_SCHEMA_VERSION = "ag99.voice_following_profile.v3"
 MODEL_SUMMARY_SCHEMA_VERSION = "live2d_model_summary.v1"
 PARAMETER_ACTION_MAX_ATOMS_PER_PARAMETER = 24
 
@@ -890,7 +892,7 @@ def _scan_motions(
         if not isinstance(items, list):
             continue
         normalized_group_name = str(group_name or "").strip()
-        for item in items:
+        for group_index, item in enumerate(items):
             if not isinstance(item, dict):
                 continue
             file_value = str(item.get("File") or "").strip()
@@ -927,6 +929,7 @@ def _scan_motions(
                     "name": motion_path.stem,
                     "file": file_value.replace("\\", "/"),
                     "group": normalized_group_name,
+                    "group_index": group_index,
                     "category": motion_category,
                     "duration": float(
                         motion_payload.get("Meta", {}).get("Duration") or 0.0

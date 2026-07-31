@@ -14,7 +14,10 @@ import type {
 import type {
   SemanticParameterPlan,
 } from "../types/protocol";
-import { SCHEMA_PARAMETER_PLAN_V2 } from "../types/protocol";
+import {
+  SCHEMA_MOTION_TUNING_SAMPLE_V2,
+  SCHEMA_PARAMETER_PLAN_V2,
+} from "../types/protocol";
 import type { CompiledSemanticMotion } from "../model-engine/compiler/contracts";
 import type {
   SemanticAxisDefinition,
@@ -47,7 +50,7 @@ const explicitDraftAxisIds = reactive(new Set<string>());
 const playStatusText = ref("");
 const saveStatusText = ref("");
 type MotionTuningSampleSnapshot = Readonly<{
-  schemaVersion: "ag99.motion_tuning_sample.v2";
+  schemaVersion: typeof SCHEMA_MOTION_TUNING_SAMPLE_V2;
   id: string;
   createdAt: string;
   sourceRecordId: string;
@@ -569,7 +572,7 @@ function saveSample(): void {
   const now = new Date();
   const emotionLabel = normalizeEmotionLabel(emotionLabelText.value, source.emotionLabel);
   const sample: DesktopMotionTuningSample = {
-    schemaVersion: "ag99.motion_tuning_sample.v2",
+    schemaVersion: SCHEMA_MOTION_TUNING_SAMPLE_V2,
     id: `motion-sample-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
     createdAt: now.toISOString(),
     sourceRecordId: source.sourceRecordId,

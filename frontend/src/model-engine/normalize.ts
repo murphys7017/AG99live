@@ -9,6 +9,7 @@ import type {
 import {
   SCHEMA_CATALOG_MOTION_V1,
   SCHEMA_MOTION_INTENT_V4,
+  SCHEMA_PERFORMANCE_CURVE_HINT_V1,
 } from "../types/protocol.js";
 import {
   MAX_MOTION_DURATION_MS,
@@ -99,7 +100,6 @@ function normalizeIntentTags(value: unknown): string[] | null {
   return tags.length > 0 ? tags.slice(0, 6) : null;
 }
 
-const PERFORMANCE_CURVE_SCHEMA_VERSION = "ag99.performance_curve_hint.v1";
 const CURVE_FAMILIES = [
   "default",
   "quick_in_hold_soft_out",
@@ -266,7 +266,7 @@ export function normalizePerformanceCurveHint(value: unknown): PerformanceCurveH
   if (!isObject(value)) {
     return undefined;
   }
-  if (normalizeText(value.schema_version) !== PERFORMANCE_CURVE_SCHEMA_VERSION) {
+  if (normalizeText(value.schema_version) !== SCHEMA_PERFORMANCE_CURVE_HINT_V1) {
     return undefined;
   }
   const curveFamily = normalizeEnum(value.curve_family, CURVE_FAMILIES);
@@ -280,7 +280,7 @@ export function normalizePerformanceCurveHint(value: unknown): PerformanceCurveH
   }
 
   return {
-    schema_version: PERFORMANCE_CURVE_SCHEMA_VERSION,
+    schema_version: SCHEMA_PERFORMANCE_CURVE_HINT_V1,
     curve_family: curveFamily,
     entry,
     hold,
@@ -308,16 +308,16 @@ function parseCatalogMotionPayload(value: unknown): ParseResult<CatalogMotionPay
 
   const modelId = normalizeText(value.model_id);
   const motionId = normalizeText(value.motion_id);
-  const group = normalizeText(value.group);
+  if (typeof value.group !== "string") {
+    return { ok: false, reason: "catalog_motion_v1.group_invalid" };
+  }
+  const group = value.group.trim();
   const file = normalizeText(value.file);
   if (!modelId) {
     return { ok: false, reason: "catalog_motion_v1.model_id_empty" };
   }
   if (!motionId) {
     return { ok: false, reason: "catalog_motion_v1.motion_id_empty" };
-  }
-  if (!group) {
-    return { ok: false, reason: "catalog_motion_v1.group_empty" };
   }
   if (!file) {
     return { ok: false, reason: "catalog_motion_v1.file_empty" };

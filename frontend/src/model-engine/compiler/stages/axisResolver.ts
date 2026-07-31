@@ -10,6 +10,7 @@ import type {
   ResolvedAxisRoleBuckets,
 } from "../compileContext.js";
 import type { MotionAxisLevel } from "../../../types/protocol.js";
+import { SCHEMA_MOTION_INTENT_V4 } from "../../../types/protocol.js";
 import { replaceControlledAxisValues } from "../compileContext.js";
 import {
   SEMANTIC_MOTION_TRANSFORM_VERSION,
@@ -51,7 +52,7 @@ export function runAxisResolver(
   if (!profile) {
     return { ok: false, reason: "semantic_profile_missing" };
   }
-  if (context.intent.schema_version === "engine.motion_intent.v4") {
+  if (context.intent.schema_version === SCHEMA_MOTION_INTENT_V4) {
     const turnId = context.options.samplingIdentity?.turnId.trim() ?? "";
     const messageId = context.options.samplingIdentity?.messageId.trim() ?? "";
     if (!turnId || !messageId) {
@@ -150,7 +151,7 @@ function resolveAllowedLlmAxisValues(
   const warnings: string[] = [];
   const forbiddenAxes: string[] = [];
   const invalidAxes: string[] = [];
-  const isLevelIntent = context.intent.schema_version === "engine.motion_intent.v4";
+  const isLevelIntent = context.intent.schema_version === SCHEMA_MOTION_INTENT_V4;
   const sampling = isLevelIntent
     ? createAxisLevelSamplingTrace(context)
     : null;

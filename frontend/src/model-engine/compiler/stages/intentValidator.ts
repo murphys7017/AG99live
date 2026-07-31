@@ -1,4 +1,5 @@
 import type { SemanticMotionIntent } from "../../../types/protocol.js";
+import { SCHEMA_MOTION_INTENT_V4 } from "../../../types/protocol.js";
 import type { SemanticAxisProfile } from "../../../types/semantic-axis-profile.js";
 import type {
   MotionCompileContext,
@@ -86,7 +87,7 @@ function validateProfileForIntent(
     return "emotion_label_empty";
   }
   if (
-    intent.schema_version === "engine.motion_intent.v4"
+    intent.schema_version === SCHEMA_MOTION_INTENT_V4
     && !("axis_levels" in intent)
   ) {
     return "motion_sequence_must_compile_at_root";

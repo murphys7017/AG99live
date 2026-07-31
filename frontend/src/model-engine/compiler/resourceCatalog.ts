@@ -4,6 +4,7 @@ import type {
   ModelSummary,
   MotionConstraint,
 } from "../../types/protocol.js";
+import { SCHEMA_CATALOG_MOTION_V1 } from "../../types/protocol.js";
 
 export type ResolvedCatalogResource =
   | {
@@ -86,15 +87,21 @@ function buildMotionResource(
   const durationMs = Number.isFinite(item.duration) && item.duration > 0
     ? Math.round(item.duration * 1000)
     : null;
-  const index = resolveMotionGroupIndex(model.constraints.motions, item);
-  if (!resourceId || !group || !file || index < 0 || durationMs === null) {
+  const index = item.group_index;
+  if (
+    !resourceId
+    || !file
+    || !Number.isInteger(index)
+    || index < 0
+    || durationMs === null
+  ) {
     return null;
   }
   return {
     resourceId,
     resourceType: "motion",
     motion: {
-      schema_version: "engine.catalog_motion.v1",
+      schema_version: SCHEMA_CATALOG_MOTION_V1,
       model_id: model.name,
       motion_id: resourceId,
       group,
@@ -107,23 +114,6 @@ function buildMotionResource(
       summary: { source: "semantic_motion_resource" },
     },
   };
-}
-
-function resolveMotionGroupIndex(
-  motions: readonly MotionConstraint[],
-  target: MotionConstraint,
-): number {
-  let index = 0;
-  for (const item of motions) {
-    if (item.group !== target.group) {
-      continue;
-    }
-    if (item === target || item.file === target.file) {
-      return index;
-    }
-    index += 1;
-  }
-  return -1;
 }
 
 function resolveMotionPriority(intensity: string): number {

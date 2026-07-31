@@ -41,10 +41,11 @@ from ..live2d.semantic_axis_profile import (
     save_semantic_axis_profile,
 )
 from ..protocol.builder import build_system_model_sync
+from ..protocol.schema_versions import MODEL_INFO_SCHEMA_VERSION
 from .motion_state import MotionTuningStore
 from .motion_lab import MotionLabRawEventStore, MotionLabRecorder
 
-LIVE2D_SCAN_CACHE_VERSION = "live2d_scan_cache.v2"
+LIVE2D_SCAN_CACHE_VERSION = "live2d_scan_cache.v3"
 
 
 class RuntimeStateConfigurationError(RuntimeError):
@@ -1103,6 +1104,12 @@ class RuntimeState:
         model_info = scan_cache.get("model_info")
         if not isinstance(model_info, dict):
             return None
+        if (
+            str(model_info.get("schema_version") or "").strip()
+            != MODEL_INFO_SCHEMA_VERSION
+        ):
+            self._clear_persistent_caches(reset_scan_cache=True)
+            return None
 
         result = deepcopy(model_info)
         models = [
@@ -1298,6 +1305,12 @@ def _project_frontend_model_info(model_info: dict[str, Any]) -> dict[str, Any]:
             "live2d_frontend_model_info_projection_missing_fields:"
             + ",".join(missing_root_fields)
         )
+    schema_version = str(model_info["schema_version"] or "").strip()
+    if schema_version != MODEL_INFO_SCHEMA_VERSION:
+        raise RuntimeError(
+            "live2d_frontend_model_info_schema_mismatch:"
+            f"{schema_version or '<empty>'}:{MODEL_INFO_SCHEMA_VERSION}"
+        )
     model_fields = (
         "name",
         "root_path",
@@ -1361,6 +1374,7 @@ def _project_frontend_resource_constraints(value: Any) -> dict[str, Any]:
         "catalog_id",
         "catalog_expose_as_resource",
         "group",
+        "group_index",
         "duration",
         "parameter_ids",
         "catalog_label",

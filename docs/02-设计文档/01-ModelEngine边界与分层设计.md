@@ -66,7 +66,7 @@ ModelEngine 不负责：
 | `useModelEngine.ts` | facade 与实例组合根 |
 | `normalize.ts` | V4 motion intent 与 typed catalog motion 的严格入站解析 |
 | `planParser.ts` | `engine.parameter_plan.v2` 严格解析 |
-| `compiler/compileMotionIntent.ts` | compiler 主入口与结果收口 |
+| `compiler/compileParameterMotionIntent.ts` | 参数动作 compiler 主入口与两阶段结果收口 |
 | `compiler/compileContext.ts` | stage 共享 state |
 | `compiler/registry.ts` | 实例级 stage registry |
 | `compiler/stages/` | 各阶段的唯一实现 |

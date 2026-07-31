@@ -17,7 +17,7 @@ import type {
 import {
   PROTOCOL_VERSION,
   SCHEMA_CATALOG_MOTION_V1,
-  SCHEMA_MODEL_INFO_V2,
+  SCHEMA_MODEL_INFO_V3,
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
   SCHEMA_OUTPUT_SEGMENT_V3,
@@ -56,8 +56,8 @@ export function parseOutputSegmentPayload(
 ): PayloadParseResult<OutputSegmentPayload> {
   const record = parseObjectPayload(envelope);
   if (!record.ok) return record;
-  if (record.payload.schema_version !== "output.segment.v3") {
-    return invalidPayload(envelope.type, "payload.schema_version", "output.segment.v3");
+  if (record.payload.schema_version !== SCHEMA_OUTPUT_SEGMENT_V3) {
+    return invalidPayload(envelope.type, "payload.schema_version", SCHEMA_OUTPUT_SEGMENT_V3);
   }
   const rootKeys = validateExactKeys(
     envelope.type,
@@ -91,7 +91,7 @@ export function parseOutputSegmentPayload(
   return {
     ok: true,
     payload: {
-      schema_version: "output.segment.v3",
+      schema_version: SCHEMA_OUTPUT_SEGMENT_V3,
       text: text.payload,
       audio: audio.payload,
       motion: motion.payload,
@@ -163,9 +163,9 @@ function parseSegmentMotionSlot(type: string, value: unknown): PayloadParseResul
   }
   const payload = asRecord(slot.payload);
   const schemaVersion = payload?.schema_version;
-  const expectedMessageType = schemaVersion === "engine.catalog_motion.v1"
+  const expectedMessageType = schemaVersion === SCHEMA_CATALOG_MOTION_V1
     ? "engine.catalog_motion"
-    : schemaVersion === "engine.motion_intent.v4"
+    : schemaVersion === SCHEMA_MOTION_INTENT_V4
       ? "engine.motion_intent"
       : null;
   if (
@@ -292,7 +292,7 @@ function parseSchemaManifest(
   if (!schemas) return invalidPayload(type, "payload.schema_manifest.schemas", "object");
   const expected = {
     catalog_motion: SCHEMA_CATALOG_MOTION_V1,
-    model_info: SCHEMA_MODEL_INFO_V2,
+    model_info: SCHEMA_MODEL_INFO_V3,
     motion_intent: SCHEMA_MOTION_INTENT_V4,
     motion_tuning_sample: SCHEMA_MOTION_TUNING_SAMPLE_V2,
     output_segment: SCHEMA_OUTPUT_SEGMENT_V3,

@@ -102,7 +102,7 @@ flowchart TD
         RDEC{资源执行类型}:::engine
         PARAM[无 motion resource<br/>执行参数计划]:::engine
         EXPLAYER[expression resource<br/>与无冲突参数姿态组合]:::engine
-        MOTPLAYER[motion resource<br/>完整动作主层，替代参数计划]:::engine
+        MOTPLAYER[motion resource<br/>使用扫描器原始 group + group_index<br/>完整动作主层，替代参数计划]:::engine
         POLICY --> RDEC
         RDEC --> PARAM
         RDEC --> EXPLAYER
@@ -113,7 +113,7 @@ flowchart TD
         PLAYER[PreviewMotionPlayer<br/>runId 与 terminal ownership]:::runtime
         BASE[Cubism Motion / EyeBlink / Expression / drag / breath<br/>base parameter snapshot]:::engine
         DIRECT[direct plan source<br/>曲线 / gesture track / dynamics]:::engine
-        LIP[Lip-sync source<br/>RMS -> normalized intensity]:::engine
+        LIP[Lip-sync source<br/>active ownership + RMS intensity<br/>静音帧明确闭嘴]:::engine
         MIX[Parameter Mixer<br/>base + direct plan + lip sync<br/>稳定优先级 / 一次最终裁剪]:::engine
         WRITE[LAppModel<br/>唯一 active parameter write]:::engine
         PHYS[Physics / Pose / Renderer]:::engine

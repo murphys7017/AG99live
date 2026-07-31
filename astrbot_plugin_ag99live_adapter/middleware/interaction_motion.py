@@ -44,6 +44,7 @@ from ..prompts.semantic_axis_prompt import (
     resolve_available_axis_levels,
 )
 from ..motion.observation import record_motion_observation
+from ..protocol.schema_versions import MOTION_INTENT_V4_SCHEMA_VERSION
 
 AG99LIVE_PLUGIN_ID = "astrbot_plugin_ag99live_adapter"
 AG99LIVE_MOTION_EFFECT_NAME = "ag99live.motion"
@@ -650,7 +651,7 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         output_contract_text = (
             "当前 AstrBot 运行环境不支持动作注入函数；请把动作参数放入官方兼容标签 "
             "<@anim {...}>，并追加在回复末尾。标签外层只作为传输包装，内部 intent "
-            "字段必须是 engine.motion_intent.v4，且遵循当前动作参数契约。"
+            f"字段必须是 {MOTION_INTENT_V4_SCHEMA_VERSION}，且遵循当前动作参数契约。"
             f"{sequence_guidance}"
         )
         output_shape_text = f" 输出标签示例：<@anim {inline_json}>"
@@ -970,7 +971,7 @@ def _build_official_inline_motion_intent_example(
 ) -> dict[str, Any]:
     semantic_profile = capability_payload.get("semantic_profile")
     intent: dict[str, Any] = {
-        "schema_version": "engine.motion_intent.v4",
+        "schema_version": MOTION_INTENT_V4_SCHEMA_VERSION,
         "profile_id": "",
         "profile_revision": 1,
         "model_id": "",

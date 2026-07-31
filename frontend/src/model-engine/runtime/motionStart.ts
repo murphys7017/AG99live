@@ -31,6 +31,9 @@ export type PreparedSemanticMotionPayload =
   | {
     kind: "parameter_plan";
     modelPath: string;
+    profileId: string;
+    profileRevision: number;
+    profileSourceHash: string;
     plan: MotionPlanPayload;
     diagnostics: CompileDiagnostics;
     semanticMotion: CompiledSemanticMotion;
@@ -38,6 +41,9 @@ export type PreparedSemanticMotionPayload =
   | {
     kind: "motion_resource";
     modelPath: string;
+    profileId: string;
+    profileRevision: number;
+    profileSourceHash: string;
     resourceId: string;
     motion: CatalogMotionPayload;
     diagnostics: CompileDiagnostics;
@@ -292,6 +298,10 @@ function prepareCompilableMotionPayload(
     state.pushHistory("error", failureMessage);
     return null;
   }
+  const profile = selectedModel.semantic_axis_profile;
+  if (!profile) {
+    throw new Error("compiled_motion_profile_identity_missing");
+  }
 
   console.info("[ModelEngine] semantic intent prepared.", {
     parameterCount: compileResult.plan.parameters.length,
@@ -303,6 +313,9 @@ function prepareCompilableMotionPayload(
   return {
     kind: "parameter_plan",
     modelPath,
+    profileId: profile.profile_id,
+    profileRevision: profile.revision,
+    profileSourceHash: profile.source_hash,
     plan: compileResult.plan,
     diagnostics: compileResult.diagnostics,
     semanticMotion: compileResult.semanticMotion!,
@@ -387,6 +400,9 @@ function prepareMotionResourcePayload(
   return {
     kind: "motion_resource",
     modelPath,
+    profileId: profile.profile_id,
+    profileRevision: profile.revision,
+    profileSourceHash: profile.source_hash,
     resourceId: resolved.resource.resourceId,
     motion: resolved.resource.motion,
     diagnostics,
@@ -531,6 +547,19 @@ function startCompilableMotionPayload(
   }
   if (selectedModel.model_path.trim() !== prepared.modelPath) {
     const reason = "prepared_motion_model_changed_before_start";
+    state.setLastCompileReason(reason);
+    state.setState("failed", `动作启动失败：${reason}`, prepared.diagnostics);
+    state.pushHistory("error", `动作启动失败：${reason}`);
+    return false;
+  }
+  const selectedProfile = selectedModel.semantic_axis_profile;
+  if (
+    !selectedProfile
+    || selectedProfile.profile_id !== prepared.profileId
+    || selectedProfile.revision !== prepared.profileRevision
+    || selectedProfile.source_hash !== prepared.profileSourceHash
+  ) {
+    const reason = "prepared_motion_profile_changed_before_start";
     state.setLastCompileReason(reason);
     state.setState("failed", `动作启动失败：${reason}`, prepared.diagnostics);
     state.pushHistory("error", `动作启动失败：${reason}`);

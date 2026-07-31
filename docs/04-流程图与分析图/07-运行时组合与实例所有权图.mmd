@@ -61,7 +61,7 @@ flowchart TB
     end
 
     INBOUND -->|commit protocol facts| STORE
-    INBOUND -->|握手后应用 live2d_scan.v2| MODELSYNC
+    INBOUND -->|握手后应用 live2d_scan.v3| MODELSYNC
     PROJ -->|project execution facts| STORE
     STORE -.完整 segment 唯一素材源.-> TL
     TL -->|motion sink start| ENGINE

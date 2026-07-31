@@ -15,7 +15,7 @@ flowchart TB
         TRANS[core/transport<br/>WebSocket 生命周期]:::boundary
         INBOUND[inbound/**<br/>manifest 握手 / 严格解析 / 原子提交]:::boundary
         ARUN[runtime/**<br/>audio queues / settlement / UI bridge]:::boundary
-        MSYNC[model-sync/**<br/>live2d_scan.v2 能力与缓存诊断状态]:::boundary
+        MSYNC[model-sync/**<br/>live2d_scan.v3 能力与缓存诊断状态]:::boundary
         CONN --> TRANS
         CONN --> INBOUND
         CONN --> ARUN

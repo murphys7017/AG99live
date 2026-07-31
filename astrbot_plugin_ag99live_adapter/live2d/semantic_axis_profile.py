@@ -8,8 +8,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, NotRequired, TypedDict
 
-SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION = "ag99.semantic_axis_profile.v3"
-SEMANTIC_AXIS_RELATION_GRAPH_SCHEMA_VERSION = "ag99.semantic_axis_relation_graph.v1"
+from ..protocol.schema_versions import (
+    SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION,
+    SEMANTIC_AXIS_RELATION_GRAPH_SCHEMA_VERSION,
+)
+
 SEMANTIC_AXIS_PROFILE_DIRNAME = "ag99"
 SEMANTIC_AXIS_PROFILE_FILENAME = "semantic_axis_profile.json"
 ALLOWED_CONTROL_ROLES = {"primary", "hint", "derived", "runtime", "ambient", "debug"}

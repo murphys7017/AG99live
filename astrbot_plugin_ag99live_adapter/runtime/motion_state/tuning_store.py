@@ -4,7 +4,10 @@ from copy import deepcopy
 from typing import Any, Callable
 
 from ...prompts.semantic_axis_prompt import profile_prompt_axes
-from ...protocol.schema_versions import MOTION_TUNING_SAMPLE_SCHEMA_VERSION
+from ...protocol.schema_versions import (
+    MOTION_TUNING_SAMPLE_SCHEMA_VERSION,
+    PERFORMANCE_CURVE_HINT_SCHEMA_VERSION,
+)
 
 class MotionTuningStore:
     """Owns persisted motion-tuning samples and their prompt projections."""
@@ -624,7 +627,7 @@ class MotionTuningStore:
             return
         if (
             not isinstance(hint_payload, dict)
-            or hint_payload.get("schema_version") != "ag99.performance_curve_hint.v1"
+            or hint_payload.get("schema_version") != PERFORMANCE_CURVE_HINT_SCHEMA_VERSION
             or hint_payload.get("curve_family")
             not in {
                 "default",

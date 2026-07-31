@@ -2,21 +2,33 @@ import type { SemanticAxisProfile } from "./semantic-axis-profile";
 
 export {
   SCHEMA_CATALOG_MOTION_V1,
+  SCHEMA_MODEL_INFO_V3,
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
+  SCHEMA_OUTPUT_SEGMENT_V3,
   SCHEMA_PARAMETER_PLAN_V2,
+  SCHEMA_PERFORMANCE_CURVE_HINT_V1,
+  SCHEMA_SEMANTIC_AXIS_PROFILE_V3,
+  SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
+  SCHEMA_VOICE_FOLLOWING_PROFILE_V3,
 } from "./protocolSchema.generated.js";
 import {
   PROTOCOL_VERSION,
   SCHEMA_CATALOG_MOTION_V1,
+  SCHEMA_MODEL_INFO_V3,
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
+  SCHEMA_OUTPUT_SEGMENT_V3,
   SCHEMA_PARAMETER_PLAN_V2,
+  SCHEMA_PERFORMANCE_CURVE_HINT_V1,
+  SCHEMA_SEMANTIC_AXIS_PROFILE_V3,
+  SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
+  SCHEMA_VOICE_FOLLOWING_PROFILE_V3,
 } from "./protocolSchema.generated.js";
 
 export interface ProtocolEnvelope<TPayload = unknown> {
   type: string;
-  version: string;
+  version: typeof PROTOCOL_VERSION;
   message_id: string;
   timestamp: string;
   turn_id: string | null;
@@ -34,16 +46,16 @@ export interface SystemServerInfoPayload {
 export interface ProtocolSchemaManifest {
   protocol_version: typeof PROTOCOL_VERSION;
   schemas: {
-    catalog_motion: string;
-    model_info: string;
-    motion_intent: string;
-    motion_tuning_sample: string;
-    output_segment: string;
-    parameter_plan: string;
-    performance_curve_hint: string;
-    semantic_axis_profile: string;
-    semantic_axis_relation_graph: string;
-    voice_following_profile: string;
+    catalog_motion: typeof SCHEMA_CATALOG_MOTION_V1;
+    model_info: typeof SCHEMA_MODEL_INFO_V3;
+    motion_intent: typeof SCHEMA_MOTION_INTENT_V4;
+    motion_tuning_sample: typeof SCHEMA_MOTION_TUNING_SAMPLE_V2;
+    output_segment: typeof SCHEMA_OUTPUT_SEGMENT_V3;
+    parameter_plan: typeof SCHEMA_PARAMETER_PLAN_V2;
+    performance_curve_hint: typeof SCHEMA_PERFORMANCE_CURVE_HINT_V1;
+    semantic_axis_profile: typeof SCHEMA_SEMANTIC_AXIS_PROFILE_V3;
+    semantic_axis_relation_graph: typeof SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1;
+    voice_following_profile: typeof SCHEMA_VOICE_FOLLOWING_PROFILE_V3;
   };
 }
 
@@ -69,7 +81,7 @@ export type OutputSegmentMotionSlot =
   | { state: "failed"; reason: string };
 
 export interface OutputSegmentPayload {
-  schema_version: "output.segment.v3";
+  schema_version: typeof SCHEMA_OUTPUT_SEGMENT_V3;
   text: OutputSegmentTextSlot;
   audio: OutputSegmentAudioSlot;
   motion: OutputSegmentMotionSlot;
@@ -176,7 +188,7 @@ export interface VoiceFollowingChannelProfile {
 }
 
 export interface VoiceFollowingProfile {
-  schema_version: "ag99.voice_following_profile.v3";
+  schema_version: typeof SCHEMA_VOICE_FOLLOWING_PROFILE_V3;
   model_id: string;
   revision: number;
   channels: Record<string, VoiceFollowingChannelProfile>;
@@ -235,6 +247,7 @@ export interface MotionConstraint {
   catalog_id: string;
   catalog_expose_as_resource: boolean;
   group: string;
+  group_index: number;
   duration: number;
   parameter_ids: string[];
   catalog_label: string;
@@ -322,7 +335,7 @@ export interface ParameterActionLibrary {
 }
 
 export interface PerformanceCurveHint {
-  schema_version: "ag99.performance_curve_hint.v1";
+  schema_version: typeof SCHEMA_PERFORMANCE_CURVE_HINT_V1;
   curve_family:
     | "default"
     | "quick_in_hold_soft_out"
@@ -561,7 +574,7 @@ export interface RuntimeCacheErrorsPayload {
 }
 
 export interface ModelSyncInfo {
-  schema_version: string;
+  schema_version: typeof SCHEMA_MODEL_INFO_V3;
   driver_priority: string[];
   selected_model: string;
   available_models: string[];

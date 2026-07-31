@@ -126,7 +126,6 @@ def build_message_envelope(
     source: str,
     payload: Mapping[str, Any] | None = None,
     turn_id: str | None = None,
-    version: str = PROTOCOL_VERSION,
     message_id: str | None = None,
     timestamp: str | None = None,
 ) -> dict[str, Any]:
@@ -143,7 +142,7 @@ def build_message_envelope(
     payload_dict = dict(payload or {})
     return {
         "type": message_type,
-        "version": version,
+        "version": PROTOCOL_VERSION,
         "message_id": message_id or uuid4().hex,
         "timestamp": timestamp or _utc_now_iso(),
         "turn_id": turn_id,

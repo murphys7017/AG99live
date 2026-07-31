@@ -16,7 +16,7 @@ import type {
   SemanticAxisRelationRule,
 } from "../../types/semantic-axis-profile.js";
 import {
-  SCHEMA_MODEL_INFO_V2,
+  SCHEMA_MODEL_INFO_V3,
   SCHEMA_SEMANTIC_AXIS_PROFILE_V3,
   SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
   SCHEMA_VOICE_FOLLOWING_PROFILE_V3,
@@ -71,11 +71,11 @@ export function parseSystemModelSyncPayload(
     ],
   );
   if (!modelInfoKeys.ok) return modelInfoKeys;
-  if (modelInfoRecord.schema_version !== SCHEMA_MODEL_INFO_V2) {
+  if (modelInfoRecord.schema_version !== SCHEMA_MODEL_INFO_V3) {
     return invalidPayload(
       envelope.type,
       "payload.model_info.schema_version",
-      SCHEMA_MODEL_INFO_V2,
+      SCHEMA_MODEL_INFO_V3,
     );
   }
 
@@ -154,7 +154,7 @@ export function parseSystemModelSyncPayload(
     ok: true,
     payload: {
       model_info: {
-        schema_version: SCHEMA_MODEL_INFO_V2,
+        schema_version: SCHEMA_MODEL_INFO_V3,
         driver_priority: driverPriority.payload,
         selected_model: selectedModel.payload,
         available_models: availableModels.payload,
@@ -470,6 +470,7 @@ function parseMotionConstraint(
     "catalog_id",
     "catalog_expose_as_resource",
     "group",
+    "group_index",
     "duration",
     "parameter_ids",
     "catalog_label",
@@ -482,12 +483,16 @@ function parseMotionConstraint(
     catalog_id: "string",
     catalog_expose_as_resource: "boolean",
     group: "string",
+    group_index: "number",
     duration: "number",
     parameter_ids: "array",
     catalog_label: "string",
     catalog_intensity: "string",
   });
   if (!shape.ok) return shape;
+  if (!Number.isInteger(item.group_index) || Number(item.group_index) < 0) {
+    return invalidPayload(type, `${path}.group_index`, "non-negative integer");
+  }
   const parameterIds = parseStringArray(type, item.parameter_ids, `${path}.parameter_ids`);
   if (!parameterIds.ok) return parameterIds;
   return { ok: true, payload: item as unknown as MotionConstraint };
@@ -525,14 +530,21 @@ function parseOptionalSemanticAxisProfile(
     return invalidPayload(type, `${path}.status`, "known profile status");
   }
 
+  const axisIds = new Set<string>();
   for (const [index, axis] of (record.axes as unknown[]).entries()) {
     const parsed = validateSemanticAxis(type, axis, `${path}.axes[${index}]`);
     if (!parsed.ok) return parsed;
+    const axisId = String((axis as Record<string, unknown>).id).trim();
+    if (axisIds.has(axisId)) {
+      return invalidPayload(type, `${path}.axes[${index}].id`, "unique semantic axis id");
+    }
+    axisIds.add(axisId);
   }
   const relationGraph = parseSemanticAxisRelationGraph(
     type,
     record.relation_graph,
     `${path}.relation_graph`,
+    axisIds,
   );
   if (!relationGraph.ok) return relationGraph;
   return { ok: true, payload: record as unknown as SemanticAxisProfile };
@@ -563,6 +575,13 @@ function validateSemanticAxis(
     parameter_bindings: "array",
   });
   if (!shape.ok) return shape;
+  const axisId = String(axis.id);
+  if (!axisId.trim()) {
+    return invalidPayload(type, `${path}.id`, "non-empty string");
+  }
+  if (axisId !== axisId.trim()) {
+    return invalidPayload(type, `${path}.id`, "trimmed semantic axis id");
+  }
   for (const key of ["value_range", "soft_range", "strong_range", "extreme_range"] as const) {
     const range = parseFiniteRange(type, axis[key], `${path}.${key}`);
     if (!range.ok) return range;
@@ -584,6 +603,7 @@ function validateSemanticAxis(
     max_speech_offset_ratio: "number",
   });
   if (!dynamicsShape.ok) return dynamicsShape;
+  const parameterIds = new Set<string>();
   for (const [index, value] of (axis.parameter_bindings as unknown[]).entries()) {
     const binding = asRecord(value);
     const bindingPath = `${path}.parameter_bindings[${index}]`;
@@ -596,6 +616,18 @@ function validateSemanticAxis(
       invert: "boolean",
     });
     if (!bindingShape.ok) return bindingShape;
+    const rawParameterId = String(binding.parameter_id);
+    const parameterId = rawParameterId.trim();
+    if (!parameterId) {
+      return invalidPayload(type, `${bindingPath}.parameter_id`, "non-empty string");
+    }
+    if (rawParameterId !== parameterId) {
+      return invalidPayload(type, `${bindingPath}.parameter_id`, "trimmed parameter binding id");
+    }
+    if (parameterIds.has(parameterId)) {
+      return invalidPayload(type, `${bindingPath}.parameter_id`, "unique parameter binding id");
+    }
+    parameterIds.add(parameterId);
     for (const key of ["input_range", "output_range"] as const) {
       const range = parseFiniteRange(type, binding[key], `${bindingPath}.${key}`);
       if (!range.ok) return range;
@@ -611,6 +643,7 @@ function parseSemanticAxisRelationGraph(
   type: string,
   value: unknown,
   path: string,
+  axisIds: ReadonlySet<string>,
 ): PayloadParseResult<null> {
   const graph = asRecord(value);
   if (!graph) return invalidPayload(type, path, "object");
@@ -633,6 +666,12 @@ function parseSemanticAxisRelationGraph(
     const parsed = validateRelationRule(type, value, edgePath);
     if (!parsed.ok) return parsed;
     const rule = parsed.payload;
+    if (!axisIds.has(rule.source_axis_id)) {
+      return invalidPayload(type, `${edgePath}.source_axis_id`, "known semantic axis id");
+    }
+    if (!axisIds.has(rule.target_axis_id)) {
+      return invalidPayload(type, `${edgePath}.target_axis_id`, "known semantic axis id");
+    }
     if (ruleIds.has(rule.id)) {
       return invalidPayload(type, `${edgePath}.id`, "unique relation rule id");
     }

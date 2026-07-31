@@ -45,7 +45,7 @@ flowchart LR
 
     subgraph MODEL_FACTS[模型同步事实]
         MANIFEST[schema manifest<br/>protocol + 子 schema 版本]:::fact
-        CAPABILITY[live2d_scan.v2<br/>前端能力投影]:::fact
+        CAPABILITY[live2d_scan.v3<br/>前端能力投影<br/>motion group + group_index]:::fact
         CACHEERR[runtime cache errors<br/>独立运行诊断]:::fact
     end
 

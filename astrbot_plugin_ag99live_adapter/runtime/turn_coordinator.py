@@ -47,6 +47,10 @@ from ..protocol.builder import (
     build_output_segment,
 )
 from ..protocol.binary_audio import parse_binary_audio_frame
+from ..protocol.schema_versions import (
+    MOTION_INTENT_V4_SCHEMA_VERSION,
+    PERFORMANCE_CURVE_HINT_SCHEMA_VERSION,
+)
 from ..protocol import (
     SOURCE_ADAPTER,
     TYPE_ENGINE_CATALOG_MOTION,
@@ -581,7 +585,7 @@ class TurnCoordinator:
                 }
             return {"state": "absent"}
         payload = segment.motion_payload
-        if _resolve_motion_payload_schema_version(payload) == "engine.motion_intent.v4":
+        if _resolve_motion_payload_schema_version(payload) == MOTION_INTENT_V4_SCHEMA_VERSION:
             payload = normalize_motion_intent_payload(payload)
         message_type = _resolve_engine_motion_message_type(payload)
         if message_type not in {TYPE_ENGINE_MOTION_INTENT, TYPE_ENGINE_CATALOG_MOTION}:
@@ -622,7 +626,7 @@ class TurnCoordinator:
                         source_route="performance_curve_provider",
                         phase="performance_curve",
                         assistant_text=segment.semantic_text,
-                        payload_kind="ag99.performance_curve_hint.v1",
+                        payload_kind=PERFORMANCE_CURVE_HINT_SCHEMA_VERSION,
                         raw={
                             "performance_curve_request_id": request_id,
                             "curve_hint": hint,
@@ -646,7 +650,7 @@ class TurnCoordinator:
                             source_route="output.segment",
                             phase="performance_curve",
                             assistant_text=segment.semantic_text,
-                            payload_kind="ag99.performance_curve_hint.v1",
+                            payload_kind=PERFORMANCE_CURVE_HINT_SCHEMA_VERSION,
                             raw={
                                 "reason": "not_ready_before_segment_egress",
                                 "performance_curve_request_id": request_id,
@@ -961,7 +965,10 @@ class TurnCoordinator:
         motion_payload: dict[str, Any],
         source: str,
     ) -> None:
-        if str(motion_payload.get("schema_version") or "").strip() != "engine.motion_intent.v4":
+        if (
+            str(motion_payload.get("schema_version") or "").strip()
+            != MOTION_INTENT_V4_SCHEMA_VERSION
+        ):
             return
         axis_levels = motion_payload.get("axis_levels")
         motion_steps = motion_payload.get("motion_steps")
@@ -981,7 +988,7 @@ class TurnCoordinator:
             ][:6]
 
         snapshot = {
-            "schema_version": "engine.motion_intent.v4",
+            "schema_version": MOTION_INTENT_V4_SCHEMA_VERSION,
             "source": str(source or "").strip(),
             "intent_tags": normalized_tags,
         }
@@ -1175,7 +1182,7 @@ class TurnCoordinator:
             source_route="performance_curve_provider",
             phase="performance_curve",
             assistant_text=assistant_text,
-            payload_kind="ag99.performance_curve_hint.v1",
+            payload_kind=PERFORMANCE_CURVE_HINT_SCHEMA_VERSION,
             raw={
                 "reason": reason,
                 "tts_turn_id": tts_turn_id,

@@ -1,4 +1,5 @@
 import type { CompileDiagnostics, CompileOptions } from "./contracts.js";
+import { SCHEMA_MOTION_INTENT_V4 } from "../../types/protocol.js";
 import {
   SEMANTIC_MOTION_TRANSFORM_VERSION,
   type MotionTransformTrace,
@@ -122,10 +123,10 @@ function buildTransformTrace(context: MotionCompileContext): MotionTransformTrac
           ),
         }
       : undefined,
-    expressionResourceId: context.intent.schema_version === "engine.motion_intent.v4"
+    expressionResourceId: context.intent.schema_version === SCHEMA_MOTION_INTENT_V4
       ? context.intent.expression_resource_id
       : undefined,
-    motionResourceId: context.intent.schema_version === "engine.motion_intent.v4"
+    motionResourceId: context.intent.schema_version === SCHEMA_MOTION_INTENT_V4
       ? context.intent.motion_resource_id
       : undefined,
     resolvedResource: undefined,

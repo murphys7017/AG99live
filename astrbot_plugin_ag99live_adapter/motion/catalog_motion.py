@@ -21,9 +21,10 @@ def normalize_catalog_motion_payload(payload: Any) -> dict[str, Any]:
     if not motion_id:
         raise ValueError("motion_id_empty")
 
-    group = str(payload.get("group") or "").strip()
-    if not group:
-        raise ValueError("group_empty")
+    group_raw = payload.get("group")
+    if not isinstance(group_raw, str):
+        raise ValueError("group_invalid")
+    group = group_raw.strip()
 
     index_raw = payload.get("index")
     if not isinstance(index_raw, int) or index_raw < 0:

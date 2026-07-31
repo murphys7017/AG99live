@@ -9,7 +9,7 @@ flowchart TD
 
     subgraph HANDSHAKE[连接与模型同步错误边界]
         MANIFEST{server_info manifest 完全匹配？}:::check
-        MODELINFO{live2d_scan.v2 投影字段合法？}:::check
+        MODELINFO{live2d_scan.v3 投影字段与 motion locator 合法？}:::check
         HFAIL[拒绝后续消息并报告精确 path<br/>不接收旧 payload]:::failure
         START --> MANIFEST
         MANIFEST -->|否| HFAIL

@@ -2,7 +2,7 @@
   "protocol_version": "v2",
   "schemas": {
     "catalog_motion": "engine.catalog_motion.v1",
-    "model_info": "live2d_scan.v2",
+    "model_info": "live2d_scan.v3",
     "motion_intent": "engine.motion_intent.v4",
     "motion_tuning_sample": "ag99.motion_tuning_sample.v2",
     "output_segment": "output.segment.v3",
