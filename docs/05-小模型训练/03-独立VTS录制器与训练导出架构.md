@@ -1,12 +1,14 @@
 # 独立 VTube Studio 录制器与训练导出架构
 
-> 文档状态：架构定案。本文定义 `vts-data-recorder` 的独立边界、数据库事实来源和训练导出
-> 契约。它不替代动作系统设计，也不修改现有 Motion Lab 数据库。
+> 文档状态：一期原始录制已实现；审核、语义标注和训练导出仍是后续设计。本文定义
+> `vts-data-recorder` 的独立边界、数据库事实来源和训练导出契约。它不替代动作系统设计，
+> 也不修改现有 Motion Lab 数据库。
 
 ## 1. 目标
 
-`vts-data-recorder` 是一个独立的本机录制、审核和导出模块。它连接 VTube Studio，保存可回放的
-原始参数时间序列，辅助人工得到语义动作标注，并只导出与动作决策小模型真实输出一致的数据。
+`vts-data-recorder` 是一个独立的本机原始参数录制器。当前它连接 VTube Studio，保存可供后续
+回放与标注使用的原始参数时间序列，并提供发现、采样、录制、查询与删除能力。后续审核、
+语义标注和训练导出仍必须沿用本文的独立数据库边界与训练目标契约。
 
 ```text
 VTube Studio
@@ -98,9 +100,10 @@ VTS tracking input 与 Live2D parameter 的逐帧值仅用于：
 每帧保存相对 take 的调度、发送和接收 monotonic 时间，VTS timestamp、模型 ID 与
 `parameter_name -> value` 映射。两层响应不是同一渲染帧，后处理必须按本地时间轴对齐。
 
-### 4.2 审核标注层
+### 4.2 后续审核标注层
 
-审核记录保存：
+审核工作流尚未实现。数据库已预留 `take_annotations` 表，但当前 CLI 和存储 API 不会创建、
+读取或修改审核记录。后续实现时，审核记录应保存：
 
 - 当前状态：`draft`、`approved`、`rejected`；
 - 审核后的 `axis_levels`、`duration_hint_ms`、`curve`；
@@ -111,9 +114,10 @@ VTS tracking input 与 Live2D parameter 的逐帧值仅用于：
 导出为文本到动作监督样本。后续如果为一个 take 补充了真实用户文本、助手最终文本和必要历史，
 它才具备导出资格。
 
-### 4.3 训练导出层
+### 4.3 后续训练导出层
 
-导出器只读取审核通过、录制状态为 `completed` 且环境稳定的 take，并生成逻辑上等价于下列结构的样本：
+训练导出器尚未实现。后续它只能读取审核通过、录制状态为 `completed` 且环境稳定的 take，
+并生成逻辑上等价于下列结构的样本：
 
 ```json
 {
@@ -187,10 +191,11 @@ VTS timestamp、模型 ID 和数值 JSON。take 内同一来源的序号唯一�
 保存 `ModelLoadedEvent`、`ModelConfigChangedEvent`、`TrackingStatusChangedEvent` 与录制器自身错误。
 模型加载或模型配置事件使 take 环境不稳定；tracking 状态变化保留为事实，交由审核决定是否拒绝。
 
-### 5.6 `take_annotations`
+### 5.6 `take_annotations`（已预留，尚未启用）
 
-一条 take 一条当前审核标注。它保存审核状态、可选 `context`、审核后的 `MotionDecisionTarget`、
-推导版本、审核时间和说明。`intent_text` 不建模，因为它不是输入也不是输出契约。
+当前 schema 已预留一条 take 对应一条审核标注的表结构，但没有业务读写路径。后续它应保存
+审核状态、可选 `context`、审核后的 `MotionDecisionTarget`、推导版本、审核时间和说明。
+`intent_text` 不建模，因为它不是输入也不是输出契约。
 
 ## 6. 写入、审核与导出流程
 
@@ -211,15 +216,15 @@ VTS timestamp、模型 ID 和数值 JSON。take 内同一来源的序号唯一�
 
 ## 7. 首次实现范围
 
-第一阶段正式录制模块只实现：
+当前一期已实现：
 
-1. 独立数据库初始化与 schema 版本管理。
-2. session、参数目录快照、take、frame 和 event 的事务写入。
-3. `record` 命令，支持固定时长录制和 `Ctrl+C` 正常收尾。
-4. `list` 与 `inspect` 命令，用于确认数据库内容和录制质量。
-5. 数据库级删除 take，级联删除其 frame、event 和 annotation。
+1. `status`、`discover` 与内存 `sample`，用于确认 VTS 连接、授权、参数目录和采样质量。
+2. 独立数据库初始化与 schema 版本管理。
+3. session、参数目录快照、take、frame 和 event 的事务写入。
+4. `record` 命令，支持固定时长录制和 `Ctrl+C` 正常收尾。
+5. `list`、`inspect` 与数据库级 `delete`，用于核对质量并级联删除 take 的已录制数据。
 
-第一阶段不实现：
+当前仍未实现：
 
 - 自动把原始参数推导为语义轴等级；
 - 审核 UI、回放 UI 或文本上下文编辑 UI；

@@ -47,7 +47,7 @@ settled，只要同一 Turn 仍存在开放的 required execution Timeline，就
 - [统一时钟引擎设计](./02-设计文档/12-统一时钟引擎设计.md)
 - [动作决策小模型目标与数据需求初稿](./05-小模型训练/01-动作决策目标与数据需求初稿.md)
 - [VTube Studio 官方 API 能力核对](./05-小模型训练/02-VTubeStudio官方API能力核对.md)
-- [独立 VTube Studio 录制器与训练导出架构](./05-小模型训练/03-独立VTS录制器与训练导出架构.md)
+- [独立 VTube Studio 录制器与训练导出架构](./05-小模型训练/03-独立VTS录制器与训练导出架构.md)：对应实现见 [vts-data-recorder/README.md](../vts-data-recorder/README.md)，当前只包含原始参数发现、采样、录制、查询与删除。
 
 ## 系统边界
 

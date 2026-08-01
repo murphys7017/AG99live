@@ -72,7 +72,7 @@ ModelEngine 不负责：
 | `compiler/stages/` | 各阶段的唯一实现 |
 | `runtime/motionRuntimeScheduler.ts` | pending ownership 与启动条件 |
 | `runtime/motionStart.ts` | compile、player 启动和结果报告 |
-| `runtime/playbackClock.ts` | Timeline 时钟投影和计划重定时 |
+| `runtime/playbackClock.ts` | Timeline 时钟投影、剩余可用时长与 performance curve 时钟条件求解 |
 | `timing.ts` | 动作 timing 求解 |
 | `settings.ts` | 用户强度设置 |
 
@@ -166,7 +166,9 @@ ModelEngine 先把 `-4..4` 等级确定性采样为轴值，再由关系图计�
 
 有音频的动作只能使用匹配 `turn_id + message_id` 的真实 AudioElement clock。明确无音频的 motion-only segment 可以使用自己的 synthetic clock。
 
-动作计划的进入、保持、退出和 sequence keyframe 重定时都由 ModelEngine 完成。Live2D player 不在播放时再次重写 timing。
+动作计划的进入、保持和退出由 `TimingStage` 在编译时确定；sequence 的最小过渡预算与 keyframe
+时间只在 `compileModelParameterPlan.ts` 内按参数动力学计算。`runtime/playbackClock.ts` 不再改写
+已编译计划，Live2D player 也不在播放时重写 timing。
 
 Performance curve 是可选 hint：
 

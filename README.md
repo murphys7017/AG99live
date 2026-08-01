@@ -249,6 +249,9 @@ AG99live/
 │  ├─ live2d/                        # 模型扫描与 SemanticAxisProfile
 │  ├─ runtime/                       # turn、segment 与 Motion Lab 状态
 │  └─ protocol/                      # WebSocket 契约与 schema manifest
+├─ vts-data-recorder/                # 独立 VTube Studio 原始参数录制器
+│  └─ src/ag99_vts_recorder/         # VTS 发现、采样、SQLite 录制与查询 CLI
+├─ scripts/                          # schema manifest 等仓库级校验脚本
 └─ docs/                             # 当前架构、协议、设计和 Mermaid 图
 ```
 
@@ -326,6 +329,8 @@ HTTP       127.0.0.1:12397
 
 其中一个明确的长期方向，是基于动作实验室积累的样本单独微调动作生成小模型。它未来可以负责把文本上下文和角色状态转换为 `axis_levels` / `motion_steps`，但不会取代当前的参数编译、Timeline 同步和 Live2D 执行层。现阶段先使用主模型完成文本与动作的联合生成，继续积累高质量数据。
 
+仓库还包含独立的 `vts-data-recorder`：它直接记录本机 VTube Studio 的 tracking input 与 Live2D 参数原始时间序列，和 Motion Lab 数据库完全隔离。当前可用于发现、采样、录制、查询和删除原始 take；语义标注、审核界面与训练导出尚未实现，具体边界见[录制器架构](./docs/05-小模型训练/03-独立VTS录制器与训练导出架构.md)。
+
 ## 技术文档
 
 完整架构和协议从 [文档中心](./docs/README.md) 开始：
@@ -335,6 +340,7 @@ HTTP       127.0.0.1:12397
 - [端到端消息与统一播放链路](./docs/01-架构与结构/05-端到端消息播放时序图.md)
 - [ModelEngine 边界与分层设计](./docs/02-设计文档/01-ModelEngine边界与分层设计.md)
 - [动作参数处理与轴关系图](./docs/02-设计文档/13-动作参数处理与轴关系图.md)
+- [独立 VTube Studio 录制器与训练导出架构](./docs/05-小模型训练/03-独立VTS录制器与训练导出架构.md)
 - [流程图与分析图集](./docs/04-流程图与分析图/README.md)
 
 ## 模型资源说明
