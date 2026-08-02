@@ -1,9 +1,9 @@
 task:
-  class: maintenance
+  class: bugfix
   risk: medium
   phase: completion
   status: complete
-  scope: "Remove internal motion and playback APIs superseded by the V3 model-sync and parameter-mixing migration, based on verified production call relationships."
+  scope: "Harden official AstrBot capability detection without changing the complete enhanced-core path: require the full interaction and Persona Effect contract, and keep basic boundary stubs aligned."
 
 context:
   confidence: high
@@ -31,6 +31,8 @@ context:
     - An always-on microphone capture has one root turn ID for its stream lifetime; every VAD-completed utterance receives a distinct `<capture_turn_id>:vad:<n>` conversation turn ID.
     - A new VAD speech start may interrupt only the still-active derived turn from the same capture session; it never interrupts or terminates the capture root itself.
     - Obsolete internal helpers are deleted only after repository-wide symbol lookup confirms that no production, test, or export consumer remains; dynamic Live2D SDK configuration and local runtime data are outside this cleanup.
+    - Official AstrBot does not expose TTSState, Persona Effect, interaction contributors, or explicit visible-turn completion. Its compatibility path treats a final Record as TTS success, cannot distinguish TTS failure from non-attempt, skips optional performance-curve generation, and never fabricates lifecycle state or request identity.
+    - The enhanced-core path is selected only when contributor registration, Persona Effect, Prompt/Result contribution types, and interaction route decision APIs are all available.
 
 architecture:
   product_flow:
@@ -137,6 +139,8 @@ verification:
     - `npm run typecheck`, focused Python syntax checks, `python scripts/check_protocol_schema_manifest.py`, and `git diff --check` passed after protocol consumers were consolidated onto manifest-derived constants and V3 cache/model projection checks.
     - Production source contains no legacy ModelInfo V2 or scan-cache V2 references.
     - Focused Adapter Python syntax checks, the frontend renderer/WebSDK/Node typechecks, repository-wide removed-symbol lookup, and `git diff --check` passed after deleting superseded motion and playback helpers.
+    - The enhanced AstrBot environment imported the plugin with `TTSState` and Interaction Runtime available.
+    - Official AstrBot 4.27.0 imported the plugin with `TTSState` and Interaction Runtime unavailable, selecting the official compatibility path without import errors.
   validation_gap:
     - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
     - Live AstrBot plus Provider plus TTS plus Electron plus Live2D validation is still required after the clock migration, including a long audio segment and a paused audio segment.
@@ -153,6 +157,8 @@ verification:
     - A live multi-turn AstrBot and Electron session must confirm that interrupting one turn leaves other queued turns untouched, late output from the cancelled event is discarded, and physicsResponseScale changes hair/clothing response without expanding semantic head/body axes.
     - A live always-on microphone session must confirm two VAD-recognized utterances create distinct derived turn IDs, keep capture active after the first response, and interrupt only the first derived playback when the second utterance begins.
     - A live Electron plus Mk6 conversation must select each exposed full motion resource once, confirm the expected motion file plays, verify replacement emits one terminal event, and observe that zero-energy audio pauses keep the configured mouth parameters closed under lip-sync ownership.
+    - A live official AstrBot 4.27.0 plus TTS plus Electron plus Live2D conversation is required to verify inline V4 motion extraction, final Record audio projection, one atomic output segment, and after-message queue closure.
+    - The focused contributor-registration and TTS-hook boundary smoke checks passed after synchronizing the AstrBot stubs with the current capability contract.
 
 backlog:
   - id: parameter_mixer

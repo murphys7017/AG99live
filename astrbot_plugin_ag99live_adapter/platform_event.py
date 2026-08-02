@@ -62,6 +62,18 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             )
         ):
             resolved_platform_extras.update(self._standard_output_platform_extras)
+        if bool(self.get_extra("_ag99live_official_inline_motion_expected", False)):
+            metadata = resolved_platform_extras.get("metadata")
+            resolved_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+            resolved_metadata.setdefault(
+                "ag99live_motion_schedule",
+                {
+                    "scheduled": True,
+                    "source": "official_inline_anim_compat",
+                    "reason": "official_core_inline_motion_requested",
+                },
+            )
+            resolved_platform_extras["metadata"] = resolved_metadata
         await self.adapter.emit_message_chain(
             message_chain=message,
             turn_id=turn_id,
@@ -73,7 +85,11 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         if not record_send_operation:
             self._has_send_oper = previous_has_send_oper
         else:
-            await self._record_send_operation()
+            record_send = getattr(self, "_record_send_operation", None)
+            if callable(record_send):
+                await record_send()
+            else:
+                await super().send(message)
 
     async def complete_visible_turn(self) -> None:
         if self._is_stop_requested():

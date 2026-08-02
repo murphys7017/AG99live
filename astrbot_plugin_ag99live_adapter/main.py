@@ -1,17 +1,28 @@
 import logging
+from typing import Any
 
 from astrbot.api import logger
-from astrbot.api.event import AstrMessageEvent, TTSState, filter
+from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import Plain
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star
 
 from .middleware import register_ag99live_interaction_contributors
-from .middleware.remote_operator import arbitrate_remote_operator_tools_for_request
 from .motion.output_sanitizer import (
     contains_hidden_output_markup,
     sanitize_assistant_output_text,
 )
+
+
+def _optional_tts_state_hook():
+    hook = getattr(filter, "on_tts_state_changed", None)
+    if callable(hook):
+        return hook()
+
+    def _identity(handler):
+        return handler
+
+    return _identity
 
 
 class MyPlugin(Star):
@@ -28,7 +39,16 @@ class MyPlugin(Star):
 
         from .platform_adapter import OLVPetPlatformAdapter  # noqa: F401
 
-        register_ag99live_interaction_contributors(context)
+        self._official_core_compatibility = not register_ag99live_interaction_contributors(
+            context
+        )
+        if self._official_core_compatibility:
+            logger.info(
+                "AG99live official AstrBot compatibility enabled: "
+                "Persona Effect and TTS lifecycle hooks are unavailable; "
+                "using <@anim> V4 and final Record audio facts; "
+                "optional performance curve generation is disabled."
+            )
 
     @filter.on_llm_request()
     async def arbitrate_remote_operator_tools(
@@ -36,6 +56,18 @@ class MyPlugin(Star):
         event: AstrMessageEvent,
         request: ProviderRequest,
     ) -> None:
+        if self._official_core_compatibility:
+            from .middleware.interaction_motion import (
+                append_official_inline_motion_prompt,
+            )
+
+            append_official_inline_motion_prompt(event, request)
+            return
+
+        from .middleware.remote_operator import (
+            arbitrate_remote_operator_tools_for_request,
+        )
+
         arbitrate_remote_operator_tools_for_request(event, request)
 
     @filter.on_decorating_result()
@@ -73,12 +105,14 @@ class MyPlugin(Star):
                 len(raw_reply_text),
             )
 
-    @filter.on_tts_state_changed()
+    @_optional_tts_state_hook()
     async def handle_tts_generation_state(
         self,
         event: AstrMessageEvent,
-        state: TTSState,
+        state: Any,
     ) -> None:
+        if self._official_core_compatibility:
+            return
         if str(event.get_platform_name() or "").strip() != "olv_pet_adapter":
             return
         if state.status == "generating":
@@ -93,6 +127,19 @@ class MyPlugin(Star):
                 tts_request_id=state.tts_request_id,
                 external_correlation_id=state.external_correlation_id,
             )
+
+    @filter.after_message_sent()
+    async def complete_official_output_turn(
+        self,
+        event: AstrMessageEvent,
+    ) -> None:
+        if not self._official_core_compatibility:
+            return
+        if str(event.get_platform_name() or "").strip() != "olv_pet_adapter":
+            return
+        complete = getattr(event, "complete_visible_turn", None)
+        if callable(complete):
+            await complete()
 
 
 def _configure_noisy_loggers() -> None:

@@ -63,13 +63,14 @@ astrbot_plugin_ag99live_adapter/
 
 ### 官方 `<@anim>` 兼容路径
 
-`<@anim {...}>` 不是 AG99live 的第二条主链路，也不是 `ag99live.motion` 失败后的兜底。它只用于兼容缺少 Persona Effect 注入能力的 AstrBot 运行环境：
+`<@anim {...}>` 不是 AG99live 的第二条主链路，也不是 `ag99live.motion` 失败后的兜底。它只用于兼容缺少 Interaction Runtime 和 Persona Effect 注入能力的官方 AstrBot：
 
-- RuntimeState 会检测 `astrbot.core.interaction.PersonaEffectSpec` 和 `context.register_persona_effect` 是否可用。
-- 可用时，prompt 要求模型填写 `ag99live.motion` effect arguments，并且 TurnCoordinator 不解析 `<@anim>`。
-- 不可用时，prompt 才要求把动作包装进 `<@anim {"mode":"inline","intent":...}>`，其中 `intent` 必须是完整 `engine.motion_intent.v4`。
+- 插件入口检测 Interaction contributor 注册接口；可用时保持增强版 middleware-first 链路。
+- 官方 Core 不具备这些接口时，`on_llm_request` 注入同一套语义轴、参考样本和 V4 输出约束，并要求把动作包装进 `<@anim {"mode":"inline","intent":...}>`。
+- 官方 `after_message_sent` 负责关闭该 Turn 的 Adapter 输出队列；默认关闭的 AstrBot 分段回复是当前支持边界。
 - 标签外层只接受 `mode="inline"` 与 `intent`；裸 intent、`motion_payload`、`plan` 和其他历史包装字段会被拒绝。
 - 如果 `<@anim>` 内部 JSON、schema 或 v4 payload 无效，后端只记录拒绝原因，不生成替代动作。
+- 官方 Core 没有 `TTSState`、`tts_request_id` 或 TTS 失败通知。Adapter 只把最终 `Record` 当作音频成功事实；没有 `Record` 时只能声明无音频，不能伪造 `failed`。可选 performance curve 在此模式不启动。
 
 ### 动作效果输出
 
@@ -85,7 +86,7 @@ astrbot_plugin_ag99live_adapter/
 
 - 每条交互消息都带 `turn_id`，前后端只按这一个轮次 ID 做会话协调。
 - 每个 assistant segment 由非空 `turn_id + message_id` 标识；Adapter 先把 Plain、Record.text 与 semantic text 归一化为唯一 canonical text，再聚合音频、图片和 motion client object，发送一个 `output.segment.v3`。
-- 隐藏动作传输标记在回复进入 TTS 前的输出规范化阶段清洗；原文只供官方 `<@anim>` 兼容解析。Adapter 只读监听 AstrBot TTS 生成状态，失败通过 `audio.state=failed` 下发，不会被解释为正常无音频回复。
+- 隐藏动作传输标记在回复进入 TTS 前的输出规范化阶段清洗；原文只供官方 `<@anim>` 兼容解析。增强版 Core 只读监听 AstrBot TTS 生成状态并可下发 `audio.state=failed`；官方 Core 只依据最终 `Record` 投影音频成功，不模拟不存在的生命周期。
 - 正式动作位于 `output.segment.motion.payload`；前端原子提交完整段后，由 ModelEngine 把 intent 编译为 `engine.parameter_plan.v2`。
 - `system.server_info` 携带完整 schema manifest；前端只有在 manifest 与本地契约完全一致后才处理后续消息。
 - `system.model_sync` 使用 `live2d_scan.v3`，只下发前端运行需要的模型资源摘要、参数扫描、包含原始 SDK locator 的 resource constraints、`parameter_action_library`、`semantic_axis_profile` 和 `voice_following_profile`。后端分析中间产物不跨 WebSocket 复制。

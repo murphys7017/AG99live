@@ -1,20 +1,47 @@
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from astrbot.api import logger
-from astrbot.core.interaction import (
-    InteractionResultContribution,
-    get_interaction_route_decision as get_interaction_reply_plan,
-)
+try:
+    from astrbot.core.interaction import (
+        InteractionResultContribution,
+        get_interaction_route_decision as get_interaction_reply_plan,
+    )
+except ModuleNotFoundError as exc:
+    if exc.name != "astrbot.core.interaction":
+        raise
+    InteractionResultContribution = None  # type: ignore[assignment]
+    get_interaction_reply_plan = None  # type: ignore[assignment]
+except ImportError as exc:  # Official AstrBot does not expose the interaction runtime.
+    if exc.name != "astrbot.core.interaction":
+        raise
+    InteractionResultContribution = None  # type: ignore[assignment]
+    get_interaction_reply_plan = None  # type: ignore[assignment]
 try:
     from astrbot.core.interaction import PersonaEffectSpec
-except ImportError:  # pragma: no cover - older AstrBot cores do not expose it.
+except ModuleNotFoundError as exc:
+    if exc.name != "astrbot.core.interaction":
+        raise
     PersonaEffectSpec = None  # type: ignore[assignment]
-from astrbot.core.prompt import PromptExtension
+except ImportError as exc:
+    if exc.name != "astrbot.core.interaction":
+        raise
+    PersonaEffectSpec = None  # type: ignore[assignment]
+try:
+    from astrbot.core.prompt import PromptExtension
+except ModuleNotFoundError as exc:
+    if exc.name != "astrbot.core.prompt":
+        raise
+    PromptExtension = None  # type: ignore[assignment]
+except ImportError as exc:
+    if exc.name != "astrbot.core.prompt":
+        raise
+    PromptExtension = None  # type: ignore[assignment]
 
 from ..motion.payload_validation import (
     build_prompt_axis_lookup,
@@ -287,6 +314,14 @@ def start_deferred_performance_curve_request(
 
 
 def register_ag99live_interaction_contributors(context: Any) -> None:
+    if (
+        InteractionResultContribution is None
+        or PromptExtension is None
+        or PersonaEffectSpec is None
+        or not callable(get_interaction_reply_plan)
+        or not callable(getattr(context, "register_persona_effect", None))
+    ):
+        raise RuntimeError("astrbot_interaction_contributors_unavailable")
     _register_ag99live_motion_persona_effect(context)
 
     register_prompt = getattr(context, "register_interaction_prompt_contributor", None)
@@ -296,6 +331,50 @@ def register_ag99live_interaction_contributors(context: Any) -> None:
     register_result = getattr(context, "register_interaction_result_contributor", None)
     if callable(register_result):
         register_result(AG99liveMotionResultContributor())
+
+
+def append_official_inline_motion_prompt(event: Any, request: Any) -> bool:
+    bundle = _resolve_motion_runtime_bundle(event)
+    if bundle is None:
+        return False
+
+    bundle.runtime_state.ag99live_motion_persona_effect_available = False
+    capability_payload = _build_motion_static_capability_payload(bundle.runtime_state)
+    runtime_payload = _build_motion_runtime_payload(
+        event,
+        bundle.turn_coordinator,
+        bundle.runtime_state,
+        capability_payload=capability_payload,
+        view=None,
+    )
+    _record_motion_prompt_reference_observation(
+        bundle=bundle,
+        event=event,
+        capability_payload=capability_payload,
+        runtime_payload=runtime_payload,
+        source_route="official_inline_anim_compat",
+    )
+
+    sections = [
+        "Live2D Motion Decision:\n" + _build_motion_decision_contract_text(capability_payload),
+        "Live2D Motion Capability:\n"
+        + json.dumps(
+            _build_motion_capability_prompt_payload(capability_payload),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+    ]
+    if runtime_payload:
+        sections.append(
+            "Live2D Motion Context:\n"
+            + json.dumps(runtime_payload, ensure_ascii=False, separators=(",", ":"))
+        )
+    current_system_prompt = str(getattr(request, "system_prompt", "") or "").rstrip()
+    request.system_prompt = "\n\n".join(
+        part for part in (current_system_prompt, *sections) if part
+    )
+    event.set_extra("_ag99live_official_inline_motion_expected", True)
+    return True
 
 
 def _register_ag99live_motion_persona_effect(context: Any) -> None:
@@ -637,8 +716,6 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
             "mode": "inline",
             "intent": _build_official_inline_motion_intent_example(capability_payload),
         }
-        import json
-
         inline_json = json.dumps(
             inline_wrapper,
             ensure_ascii=False,
@@ -1249,6 +1326,7 @@ def _record_motion_prompt_reference_observation(
     event: Any,
     capability_payload: dict[str, Any],
     runtime_payload: dict[str, Any],
+    source_route: str = "persona_effect",
 ) -> None:
     semantic_profile = capability_payload.get("semantic_profile")
     profile = semantic_profile if isinstance(semantic_profile, dict) else {}
@@ -1264,7 +1342,7 @@ def _record_motion_prompt_reference_observation(
         ),
         turn_id=identity.scheduled_frontend_turn_id,
         frontend_turn_id=identity.event_frontend_turn_id,
-        source_route="persona_effect",
+        source_route=source_route,
         phase="prompt",
         model_name=str(profile.get("model_id") or "").strip(),
         profile_id=str(profile.get("profile_id") or "").strip(),

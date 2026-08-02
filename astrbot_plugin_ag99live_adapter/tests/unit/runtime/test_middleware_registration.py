@@ -23,7 +23,13 @@ def _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None
             self.__dict__.update(kwargs)
 
     interaction_module.InteractionResultContribution = InteractionResultContribution
-    interaction_module.get_interaction_decision = lambda event: None
+    interaction_module.get_interaction_route_decision = lambda event: None
+
+    class PersonaEffectSpec:
+        def __init__(self, **kwargs) -> None:
+            self.__dict__.update(kwargs)
+
+    interaction_module.PersonaEffectSpec = PersonaEffectSpec
     monkeypatch.setitem(sys.modules, "astrbot.core.interaction", interaction_module)
 
 
@@ -60,6 +66,9 @@ def test_register_ag99live_interaction_contributors_keeps_motion_and_remote(
 
         def register_interaction_result_contributor(self, contributor: object) -> None:
             result_contributors.append(contributor)
+
+        def register_persona_effect(self, effect: object, **kwargs) -> None:
+            return None
 
     module.register_ag99live_interaction_contributors(ContextStub())
 

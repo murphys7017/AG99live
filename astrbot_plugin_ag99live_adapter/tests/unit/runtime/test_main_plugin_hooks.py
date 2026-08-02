@@ -40,6 +40,13 @@ def _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
 
             return decorator
 
+        @staticmethod
+        def after_message_sent():
+            def decorator(fn):
+                return fn
+
+            return decorator
+
     class AstrMessageEvent:
         pass
 
@@ -117,7 +124,7 @@ def test_main_plugin_normalizes_output_and_starts_curve_on_tts_generating(
 
     middleware_module = types.ModuleType("astrbot_plugin_ag99live_adapter.middleware")
     middleware_module.__path__ = []
-    middleware_module.register_ag99live_interaction_contributors = lambda _context: None
+    middleware_module.register_ag99live_interaction_contributors = lambda _context: True
     monkeypatch.setitem(
         sys.modules,
         "astrbot_plugin_ag99live_adapter.middleware",
@@ -153,6 +160,7 @@ def test_main_plugin_normalizes_output_and_starts_curve_on_tts_generating(
     sys.modules.pop("astrbot_plugin_ag99live_adapter.main", None)
     module = importlib.import_module("astrbot_plugin_ag99live_adapter.main")
     MyPlugin = module.MyPlugin
+    TTSState = sys.modules["astrbot.api.event"].TTSState
 
     plugin = MyPlugin(context=module.Context(), config={})
 
@@ -183,13 +191,13 @@ def test_main_plugin_normalizes_output_and_starts_curve_on_tts_generating(
     assert event.result.chain[0].text == "hello"
 
     asyncio.run(
-        plugin.handle_tts_generation_state(event, module.TTSState(status="requested"))
+        plugin.handle_tts_generation_state(event, TTSState(status="requested"))
     )
     asyncio.run(
-        plugin.handle_tts_generation_state(event, module.TTSState(status="generating"))
+        plugin.handle_tts_generation_state(event, TTSState(status="generating"))
     )
     asyncio.run(
-        plugin.handle_tts_generation_state(event, module.TTSState(status="succeeded"))
+        plugin.handle_tts_generation_state(event, TTSState(status="succeeded"))
     )
 
     assert curve_starts == [
@@ -220,9 +228,12 @@ def test_main_plugin_registers_interaction_contributors_during_init(
     registered_contexts: list[object] = []
     middleware_module = types.ModuleType("astrbot_plugin_ag99live_adapter.middleware")
     middleware_module.__path__ = []
-    middleware_module.register_ag99live_interaction_contributors = (
-        lambda context: registered_contexts.append(context)
-    )
+
+    def register_contributors(context) -> bool:
+        registered_contexts.append(context)
+        return True
+
+    middleware_module.register_ag99live_interaction_contributors = register_contributors
     monkeypatch.setitem(
         sys.modules,
         "astrbot_plugin_ag99live_adapter.middleware",

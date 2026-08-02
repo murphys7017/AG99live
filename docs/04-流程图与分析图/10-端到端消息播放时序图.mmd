@@ -40,24 +40,38 @@ sequenceDiagram
     Adapter->>CoreQueue: commit_event(event, output_correlation_id=turn_id)
     Note over Adapter,CoreQueue: 不等待较早 Turn 播放完成，AG99 不维护输入 FIFO
     CoreQueue->>Persona: 按 AstrBot 官方队列调度
-    Persona->>Persona: 构建 Prompt、effect schema 与本轮上下文
-    Persona->>LLM: 生成可见回复与动作决策
-    LLM-->>Persona: spoken_reply + effect_calls
-    Persona->>Adapter: result contributor 生成 motion_intent.v4
+    alt 增强版 Core
+        Persona->>Persona: 构建 Prompt、effect schema 与本轮上下文
+        Persona->>LLM: 生成 spoken_reply + effect_calls
+        LLM-->>Persona: spoken_reply + effect_calls
+        Persona->>Adapter: result contributor 生成 motion_intent.v4
+        Adapter->>Adapter: 登记当前回复阶段的 pending curve input
+    else 官方 Core
+        Persona->>Persona: on_llm_request 注入同一能力与 &lt;@anim&gt; V4 契约
+        Persona->>LLM: 生成可见回复 + &lt;@anim&gt; V4
+        LLM-->>Persona: 可见回复 + inline intent
+        Note over Adapter,TTS: 官方无 TTSState；不启动可选曲线，不伪造 request ID
+    end
     Adapter->>Adapter: 写入 ag99live_motion_schedule<br/>区分未安排、成功和动作解析失败
-    Adapter->>Adapter: 登记当前回复阶段的 pending curve input
     Adapter->>Adapter: 输出规范化阶段清洗隐藏传输标记
     Persona->>TTS: materialize spoken_reply
-    TTS->>Adapter: on_tts_state_changed(generating, identities)
-    opt 当前阶段存在 pending curve input
-        Adapter->>Curve: 后台启动曲线请求(tts_request_id)
+    opt 增强版 Core
+        TTS->>Adapter: on_tts_state_changed(generating, identities)
+        opt 当前阶段存在 pending curve input
+            Adapter->>Curve: 后台启动曲线请求(tts_request_id)
+        end
     end
-    Note over Curve,TTS: 曲线与 TTS Provider 并行；TTS 与基础 motion 不等待曲线
-    alt TTS 成功
-        TTS-->>Adapter: WAV Record + Record.text + tts_status=succeeded
-    else TTS 失败
-        TTS-->>Adapter: canonical text + tts_status=failed + reason
+    Note over Curve,TTS: 增强版曲线与 TTS Provider 并行；TTS 与基础 motion 不等待曲线
+    alt 增强版 Core
+        alt TTS 成功
+            TTS-->>Adapter: WAV Record + Record.text + tts_status=succeeded
+        else TTS 失败
+            TTS-->>Adapter: canonical text + tts_status=failed + reason
+        end
+    else 官方 Core
+        TTS-->>Adapter: 最终 Record 或 Plain
     end
+    Note over TTS,Adapter: 官方 Core 只以最终 Record 证明成功；<br/>无 Record 时无法区分未触发与失败，投影 audio absent
     Note over Adapter,Buffer: AstrBot 可以将 Plain、Record、图片和 client object 物理拆分；<br/>拆分仅存在于后端内部。Plain / semantic text / Record.text 必须归一为同一 canonical text。
     Adapter->>Buffer: 按 turn_id + message_id 合并物理组件
     Buffer->>Buffer: 校验文本冲突、多音频、motion 与 curve
@@ -187,6 +201,9 @@ sequenceDiagram
         end
     end
 
+    opt 官方 Core
+        Persona->>Adapter: after_message_sent<br/>关闭本轮 Adapter 输出队列
+    end
     Adapter->>Inbound: control.synth_finished(turn_id)<br/>所有 output.segment 发送完成后
     Inbound->>Store: assertOutputSegmentsResolved()
     alt 存在未解析段或不完整事实
