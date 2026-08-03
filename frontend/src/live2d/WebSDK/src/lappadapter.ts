@@ -1,17 +1,11 @@
-// @ts-nocheck
 import { LAppLive2DManager } from "./lapplive2dmanager";
 import { LAppModel } from "./lappmodel";
 import * as LAppDefine from './lappdefine';
 
 import {
-  ACubismMotion,
-  FinishedMotionCallback
-} from '@framework/motion/acubismmotion';
-import {
   CubismMotionQueueEntryHandle,
   InvalidMotionQueueEntryHandleValue
 } from '@framework/motion/cubismmotionqueuemanager';
-import { CubismFramework } from '@framework/live2dcubismframework';
 import type {
   DirectParameterPlanInput,
   DirectParameterPlanStartOptions,
@@ -26,7 +20,7 @@ export interface CatalogMotionLifecycleCallbacks {
   onInterrupted?: (reason: string) => void;
 }
 
-export let s_adapter_instance : LAppAdapter | null | undefined = null;
+let s_adapter_instance: LAppAdapter | null | undefined = null;
 
 export class LAppAdapter {
   private _directParameterPlanError = "";
@@ -40,31 +34,15 @@ export class LAppAdapter {
 
   /* gets */
 
-  public getMgr(): LAppLive2DManager {
+  private getMgr(): LAppLive2DManager {
     return LAppLive2DManager.getInstance();
   }
 
-  public getModel(): LAppModel | null {
+  private getModel(): LAppModel | null {
     return this.getMgr().getModel(0);
   }
 
-  public getIdManager() {
-    return CubismFramework.getIdManager();
-  }
-
   /* motion */
-
-  public getMotionGroups(): string[] {
-    let groups : string[] = [];
-    for (let i = 0; i < this.getModel()?._modelSetting.getMotionGroupCount(); i++) {
-      groups.push(this.getModel()?._modelSetting.getMotionGroupName(i) ?? "");
-    }
-    return groups;
-  }
-
-  public getMotionCount(group: string): number {
-    return this.getModel()?._modelSetting.getMotionCount(group) ?? 0;
-  }
 
   public startMotion(
     group: string,
@@ -165,56 +143,4 @@ export class LAppAdapter {
     return model.hasConfiguredLipSyncParameters();
   }
 
-  /* expression */
-
-  public getExpressionCount(): number {
-    return this.getModel()?._expressions.getSize() ?? 0;
-  }
-
-  public getExpressionName(index: number): string {
-    return this.getModel()?._modelSetting?.getExpressionName(index) ?? '';
-  }
-
-  public setExpression(name: string): boolean {
-    return this.getModel()?.setExpression(name) ?? false;
-  }
-
-  public stopExpression(): void {
-    this.getModel()?.stopExpression();
-  }
-
-  public getExpressionStartError(): string {
-    return this.getModel()?.getExpressionStartError() ?? "expression_model_unavailable";
-  }
-
-  /* model position manipulation */
-  
-  public getModelPosition(): { x: number, y: number } {
-    const model = this.getModel();
-    if (model && model._modelMatrix) {
-      const matrix = model._modelMatrix.getArray();
-      return {
-        x: matrix[12],
-        y: matrix[13]
-      };
-    }
-    return { x: 0, y: 0 };
-  }
-  
-  public setModelPosition(x: number, y: number): void {
-    const model = this.getModel();
-    if (model && model._modelMatrix) {
-      const matrix = model._modelMatrix.getArray();
-      
-      // Update the translation components
-      const newMatrix = [...matrix];
-      newMatrix[12] = x;
-      newMatrix[13] = y;
-      
-      // Set the matrix
-      model._modelMatrix.setMatrix(newMatrix);
-    }
-  }
-
-  // private _live2DMgr: LAppLive2DManager;
 }

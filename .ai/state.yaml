@@ -3,7 +3,7 @@ task:
   risk: high
   phase: completion
   status: complete
-  scope: "Complete the current Parameter Mixer boundary without changing Timeline, ModelEngine semantics, Cubism base-source ordering, or Physics: remove WebSDK's application-protocol type dependency, make contribution ownership explicit, and preserve one active-parameter write frame."
+  scope: "Remove the TypeScript checking bypass from the WebSDK LAppAdapter boundary so the Parameter Mixer execution DTO and runtime adapter contract are compiler-checked without changing runtime behavior or expanding into other WebSDK modules."
 
 context:
   confidence: high
@@ -145,6 +145,7 @@ verification:
     - `npm run typecheck:renderer` passed with the global Live2D adapter declaration importing that same execution DTO, proving the ModelEngine plan remains structurally compatible at the boundary.
     - Repository lookup confirmed that WebSDK no longer imports `types/protocol` and that `LAppModel` retains one AG99 active-parameter `setParameterValueById` write point before Cubism Physics.
     - The final cleanup removed unused protocol-only execution fields, the no-op diagnostics rewrite, string-based failure ownership, and the duplicate failure-source collection without adding a compatibility path.
+    - `npm run typecheck:websdk` and `npm run typecheck:renderer` passed after restoring TypeScript checking on `LAppAdapter` and deleting its unconsumed model-position, motion-catalog, expression-control, and ID-manager APIs together with stale global declarations.
   validation_gap:
     - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
     - Live AstrBot plus Provider plus TTS plus Electron plus Live2D validation is still required after the clock migration, including a long audio segment and a paused audio segment.

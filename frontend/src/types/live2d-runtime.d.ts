@@ -24,10 +24,6 @@ declare global {
     Live2DCubismCore?: unknown;
     initializeLive2D?: () => void;
     getLAppAdapter?: () => {
-      getModel?: (index?: number) => unknown;
-      setModelPosition?: (x: number, y: number) => void;
-      getMotionGroups?: () => string[];
-      getMotionCount?: (group: string) => number;
       startMotion?: (
         group: string,
         no: number,
@@ -36,9 +32,6 @@ declare global {
       ) => unknown;
       stopMotion?: (reason?: string) => void;
       getMotionStartError?: () => string;
-      setExpression?: (name: string) => boolean;
-      stopExpression?: () => void;
-      getExpressionStartError?: () => string;
       applyRuntimeEffectsSettings: (settings: {
         ambientMotionEnabled: boolean;
         physicsResponseScale: number;
