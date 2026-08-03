@@ -59,7 +59,7 @@ import {
   PARAMETER_MIX_PRIORITY,
   ParameterMixer,
   type ParameterContribution,
-  type ParameterContributionOwner,
+  type ParameterFrameOwner,
 } from "./parametermixer";
 import {
   SpeechSignalRuntime,
@@ -171,10 +171,8 @@ interface DirectPlanContributionCollection {
   released: boolean;
 }
 
-type ActiveParameterFrameFailureOwner = ParameterContributionOwner | "mixed";
-
 interface ActiveParameterFrameFailure {
-  owner: ActiveParameterFrameFailureOwner;
+  owner: ParameterFrameOwner;
   reason: string;
 }
 
@@ -1896,7 +1894,7 @@ export class LAppModel extends CubismUserModel {
     );
     if (!resolution.ok) {
       return {
-        owner: this.resolveParameterFrameFailureOwner(resolution.owners),
+        owner: resolution.owner,
         reason: resolution.reason,
       };
     }
@@ -1906,9 +1904,7 @@ export class LAppModel extends CubismUserModel {
       const readbackValue = this._model.getParameterValueByIndex(parameter.parameterIndex);
       if (Math.abs(readbackValue - parameter.value) > 0.001) {
         return {
-          owner: this.resolveParameterFrameFailureOwner(
-            parameter.contributions.map((contribution) => contribution.owner),
-          ),
+          owner: parameter.owner,
           reason: `parameter_mixer_write_mismatch:${parameter.parameterIdRaw}`,
         };
       }
@@ -1980,15 +1976,6 @@ export class LAppModel extends CubismUserModel {
     let presentationReleased = true;
     const contributions: ParameterContribution[] = [];
     for (const item of planState.semanticBindings) {
-      if (!this.isParameterIndexWritable(item.parameterIndex)) {
-        return {
-          contributions: [],
-          failure: `v2_parameter_not_writable:${item.parameterIdRaw}`,
-          shouldLogFrame: false,
-          released: false,
-        };
-      }
-
       const rawFrameTargetValue = this.resolveDirectBindingTargetValue(
         item,
         elapsedMs,
@@ -2007,7 +1994,6 @@ export class LAppModel extends CubismUserModel {
         parameterIndex: item.parameterIndex,
         owner: "direct_plan",
         source: `direct_plan:${item.axisId}`,
-        operation: "replace",
         value: presentationFrame.drivenValue,
         weight: item.weight * presentationFrame.ownershipWeight,
         priority: PARAMETER_MIX_PRIORITY.directPlan,
@@ -2058,7 +2044,6 @@ export class LAppModel extends CubismUserModel {
         parameterIndex,
         owner: "lip_sync",
         source: "lip_sync",
-        operation: "replace",
         value: defaultValue + (maxValue - defaultValue) * lipSyncIntensity,
         weight: 1,
         priority: PARAMETER_MIX_PRIORITY.lipSync,
@@ -2094,16 +2079,6 @@ export class LAppModel extends CubismUserModel {
         * item.modulationDirection
         * audioGain;
     return modulatedValue;
-  }
-
-  private resolveParameterFrameFailureOwner(
-    owners: readonly ParameterContributionOwner[],
-  ): ActiveParameterFrameFailureOwner {
-    const uniqueOwners = [...new Set(owners)];
-    if (uniqueOwners.length === 1) {
-      return uniqueOwners[0];
-    }
-    return "mixed";
   }
 
   private resolveSpeechPoseModulation(

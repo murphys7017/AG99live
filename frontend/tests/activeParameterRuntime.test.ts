@@ -14,8 +14,7 @@ function testParameterContributionOrderingAndFinalClamp(): void {
       parameterIndex: 0,
       owner: "lip_sync",
       source: "lip_sync",
-      operation: "add",
-      value: 0.5,
+      value: 5,
       weight: 1,
       priority: PARAMETER_MIX_PRIORITY.lipSync,
     },
@@ -25,7 +24,6 @@ function testParameterContributionOrderingAndFinalClamp(): void {
       parameterIndex: 0,
       owner: "direct_plan",
       source: "direct_plan:test_axis",
-      operation: "replace",
       value: 6,
       weight: 0.5,
       priority: PARAMETER_MIX_PRIORITY.directPlan,
@@ -44,16 +42,17 @@ function testParameterContributionOrderingAndFinalClamp(): void {
   }
   assert.equal(result.ok, true);
   assert.equal(result.parameters.length, 1);
-  assert.equal(result.parameters[0].unclampedValue, 4.5);
+  assert.equal(result.parameters[0].owner, "mixed");
+  assert.equal(result.parameters[0].unclampedValue, 5);
   assert.equal(result.parameters[0].value, 4);
   assert.equal(result.parameters[0].clamped, true);
   assert.deepEqual(
     result.parameters[0].contributions.map((contribution) => contribution.source),
-    ["direct-plan", "lip-sync"],
+    ["direct_plan:test_axis", "lip_sync"],
   );
 }
 
-function testInvalidOperationIsRejected(): void {
+function testInvalidWeightIsRejected(): void {
   const mixer = new ParameterMixer();
   const parameterId = {} as ParameterContribution["parameterId"];
   const result = mixer.resolveFrame([
@@ -63,9 +62,8 @@ function testInvalidOperationIsRejected(): void {
       parameterIndex: 0,
       owner: "direct_plan",
       source: "invalid-source",
-      operation: "unknown" as ParameterContribution["operation"],
       value: 6,
-      weight: 1,
+      weight: 1.5,
       priority: PARAMETER_MIX_PRIORITY.directPlan,
     },
   ], {
@@ -77,11 +75,11 @@ function testInvalidOperationIsRejected(): void {
 
   assert.deepEqual(result, {
     ok: false,
-    reason: "parameter_mixer_invalid_operation:ParamMouthOpenY:invalid-source",
-    owners: ["direct_plan"],
+    reason: "parameter_mixer_invalid_weight:ParamMouthOpenY:invalid-source",
+    owner: "direct_plan",
   });
 }
 
 testParameterContributionOrderingAndFinalClamp();
-testInvalidOperationIsRejected();
+testInvalidWeightIsRejected();
 console.log("active parameter runtime tests passed");

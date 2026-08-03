@@ -6,7 +6,7 @@ export const PARAMETER_MIX_PRIORITY = {
 } as const;
 
 export type ParameterContributionOwner = "direct_plan" | "lip_sync";
-export type ParameterContributionOperation = "replace" | "add" | "multiply";
+export type ParameterFrameOwner = ParameterContributionOwner | "mixed";
 
 export interface ParameterContribution {
   parameterId: CubismIdHandle;
@@ -14,7 +14,6 @@ export interface ParameterContribution {
   parameterIndex: number;
   owner: ParameterContributionOwner;
   source: string;
-  operation: ParameterContributionOperation;
   value: number;
   weight: number;
   priority: number;
@@ -30,7 +29,6 @@ export interface ParameterMixerAccess {
 export interface ResolvedParameterContribution {
   owner: ParameterContributionOwner;
   source: string;
-  operation: ParameterContributionOperation;
   value: number;
   weight: number;
   priority: number;
@@ -41,6 +39,7 @@ export interface ResolvedParameterFrameEntry {
   parameterId: CubismIdHandle;
   parameterIdRaw: string;
   parameterIndex: number;
+  owner: ParameterFrameOwner;
   baseValue: number;
   unclampedValue: number;
   value: number;
@@ -56,7 +55,7 @@ export type ParameterMixerResolution =
   | {
       ok: false;
       reason: string;
-      owners: ParameterContributionOwner[];
+      owner: ParameterFrameOwner;
     };
 
 /**
@@ -80,9 +79,9 @@ export class ParameterMixer {
         return {
           ok: false,
           reason: invalidReason,
-          owners: isParameterContributionOwner(contribution.owner)
-            ? [contribution.owner]
-            : [],
+          owner: isParameterContributionOwner(contribution.owner)
+            ? contribution.owner
+            : "mixed",
         };
       }
       const existing = grouped.get(contribution.parameterIndex);
@@ -91,7 +90,7 @@ export class ParameterMixer {
           return {
             ok: false,
             reason: `parameter_mixer_parameter_identity_conflict:${existing.parameterIdRaw}:${contribution.parameterIdRaw}`,
-            owners: collectContributionOwners([
+            owner: resolveContributionOwner([
               ...existing.contributions,
               contribution,
             ]),
@@ -118,14 +117,14 @@ export class ParameterMixer {
         return {
           ok: false,
           reason: `parameter_mixer_invalid_runtime_range:${group.parameterIdRaw}`,
-          owners: collectContributionOwners(group.contributions),
+          owner: resolveContributionOwner(group.contributions),
         };
       }
       if (!Number.isFinite(baseValue)) {
         return {
           ok: false,
           reason: `parameter_mixer_invalid_base_value:${group.parameterIdRaw}`,
-          owners: collectContributionOwners(group.contributions),
+          owner: resolveContributionOwner(group.contributions),
         };
       }
 
@@ -145,7 +144,6 @@ export class ParameterMixer {
           resolvedContributions.push({
             owner: contribution.owner,
             source: contribution.source,
-            operation: contribution.operation,
             value: contribution.value,
             weight: contribution.weight,
             priority: contribution.priority,
@@ -159,6 +157,7 @@ export class ParameterMixer {
         parameterId: group.parameterId,
         parameterIdRaw: group.parameterIdRaw,
         parameterIndex,
+        owner: resolveContributionOwner(group.contributions),
         baseValue,
         unclampedValue,
         value,
@@ -171,14 +170,15 @@ export class ParameterMixer {
   }
 }
 
-function collectContributionOwners(
+function resolveContributionOwner(
   contributions: readonly Pick<ParameterContribution, "owner">[],
-): ParameterContributionOwner[] {
-  return [...new Set(
+): ParameterFrameOwner {
+  const owners = [...new Set(
     contributions
       .map((contribution) => contribution.owner)
       .filter(isParameterContributionOwner),
   )];
+  return owners.length === 1 ? owners[0] : "mixed";
 }
 
 function validateContribution(
@@ -203,19 +203,13 @@ function validateContribution(
   if (typeof contribution.source !== "string" || !contribution.source.trim()) {
     return `parameter_mixer_source_missing:${contribution.parameterIdRaw}`;
   }
-  if (!isParameterContributionOperation(contribution.operation)) {
-    return `parameter_mixer_invalid_operation:${contribution.parameterIdRaw}:${contribution.source}`;
-  }
   if (!Number.isFinite(contribution.value) || !Number.isFinite(contribution.weight)) {
     return `parameter_mixer_non_finite_contribution:${contribution.parameterIdRaw}:${contribution.source}`;
   }
   if (!Number.isFinite(contribution.priority)) {
     return `parameter_mixer_invalid_priority:${contribution.parameterIdRaw}:${contribution.source}`;
   }
-  if (contribution.operation === "replace" && (contribution.weight < 0 || contribution.weight > 1)) {
-    return `parameter_mixer_invalid_replace_weight:${contribution.parameterIdRaw}:${contribution.source}`;
-  }
-  if (contribution.operation !== "replace" && contribution.weight < 0) {
+  if (contribution.weight < 0 || contribution.weight > 1) {
     return `parameter_mixer_invalid_weight:${contribution.parameterIdRaw}:${contribution.source}`;
   }
   return null;
@@ -227,23 +221,12 @@ function isParameterContributionOwner(
   return owner === "direct_plan" || owner === "lip_sync";
 }
 
-function isParameterContributionOperation(
-  operation: unknown,
-): operation is ParameterContributionOperation {
-  return operation === "replace" || operation === "add" || operation === "multiply";
-}
-
 function resolveContributionValue(
   currentValue: number,
   contribution: ParameterContribution,
 ): number {
-  if (contribution.operation === "replace") {
-    return currentValue * (1 - contribution.weight) + contribution.value * contribution.weight;
-  }
-  if (contribution.operation === "add") {
-    return currentValue + contribution.value * contribution.weight;
-  }
-  return currentValue * (1 + (contribution.value - 1) * contribution.weight);
+  return currentValue * (1 - contribution.weight)
+    + contribution.value * contribution.weight;
 }
 
 function clamp(value: number, minValue: number, maxValue: number): number {
