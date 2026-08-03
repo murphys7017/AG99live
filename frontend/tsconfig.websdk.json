@@ -19,7 +19,6 @@
   },
   "include": [
     "src/live2d/WebSDK/Core/live2dcubismcore.d.ts",
-    "src/types/protocol.ts",
     "src/live2d/WebSDK/src/**/*.ts"
   ],
   "exclude": ["src/live2d/WebSDK/Framework/**/*"]

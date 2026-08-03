@@ -1,9 +1,9 @@
 task:
-  class: bugfix
-  risk: medium
+  class: refactor
+  risk: high
   phase: completion
   status: complete
-  scope: "Harden official AstrBot capability detection without changing the complete enhanced-core path: require the full interaction and Persona Effect contract, and keep basic boundary stubs aligned."
+  scope: "Complete the current Parameter Mixer boundary without changing Timeline, ModelEngine semantics, Cubism base-source ordering, or Physics: remove WebSDK's application-protocol type dependency, make contribution ownership explicit, and preserve one active-parameter write frame."
 
 context:
   confidence: high
@@ -141,6 +141,10 @@ verification:
     - Focused Adapter Python syntax checks, the frontend renderer/WebSDK/Node typechecks, repository-wide removed-symbol lookup, and `git diff --check` passed after deleting superseded motion and playback helpers.
     - The enhanced AstrBot environment imported the plugin with `TTSState` and Interaction Runtime available.
     - Official AstrBot 4.27.0 imported the plugin with `TTSState` and Interaction Runtime unavailable, selecting the official compatibility path without import errors.
+    - `npm run typecheck:websdk` passed after replacing the WebSDK application-protocol dependency with the local direct-parameter execution DTO and explicit Parameter Mixer contribution owners.
+    - `npm run typecheck:renderer` passed with the global Live2D adapter declaration importing that same execution DTO, proving the ModelEngine plan remains structurally compatible at the boundary.
+    - Repository lookup confirmed that WebSDK no longer imports `types/protocol` and that `LAppModel` retains one AG99 active-parameter `setParameterValueById` write point before Cubism Physics.
+    - The final cleanup removed unused protocol-only execution fields, the no-op diagnostics rewrite, string-based failure ownership, and the duplicate failure-source collection without adding a compatibility path.
   validation_gap:
     - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
     - Live AstrBot plus Provider plus TTS plus Electron plus Live2D validation is still required after the clock migration, including a long audio segment and a paused audio segment.
@@ -159,10 +163,11 @@ verification:
     - A live Electron plus Mk6 conversation must select each exposed full motion resource once, confirm the expected motion file plays, verify replacement emits one terminal event, and observe that zero-energy audio pauses keep the configured mouth parameters closed under lip-sync ownership.
     - A live official AstrBot 4.27.0 plus TTS plus Electron plus Live2D conversation is required to verify inline V4 motion extraction, final Record audio projection, one atomic output segment, and after-message queue closure.
     - The focused contributor-registration and TTS-hook boundary smoke checks passed after synchronizing the AstrBot stubs with the current capability contract.
+    - A live Electron plus Mk6 conversation is required to confirm direct-plan and lip-sync contributions remain visually correct together, owner-scoped failure ends only the affected source, and Physics consumes the resolved frame without a release jump.
 
 backlog:
   - id: parameter_mixer
-    status: active
+    status: complete
     summary: Move direct-plan, lip-sync, and speech-energy active parameter composition to one WebSDK Parameter Mixer without parallel write paths.
   - id: physics_response_optimization
     status: active

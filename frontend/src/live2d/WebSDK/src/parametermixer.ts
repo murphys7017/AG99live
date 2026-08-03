@@ -5,12 +5,14 @@ export const PARAMETER_MIX_PRIORITY = {
   lipSync: 200,
 } as const;
 
+export type ParameterContributionOwner = "direct_plan" | "lip_sync";
 export type ParameterContributionOperation = "replace" | "add" | "multiply";
 
 export interface ParameterContribution {
   parameterId: CubismIdHandle;
   parameterIdRaw: string;
   parameterIndex: number;
+  owner: ParameterContributionOwner;
   source: string;
   operation: ParameterContributionOperation;
   value: number;
@@ -26,6 +28,7 @@ export interface ParameterMixerAccess {
 }
 
 export interface ResolvedParameterContribution {
+  owner: ParameterContributionOwner;
   source: string;
   operation: ParameterContributionOperation;
   value: number;
@@ -53,7 +56,7 @@ export type ParameterMixerResolution =
   | {
       ok: false;
       reason: string;
-      sources: string[];
+      owners: ParameterContributionOwner[];
     };
 
 /**
@@ -77,7 +80,9 @@ export class ParameterMixer {
         return {
           ok: false,
           reason: invalidReason,
-          sources: contribution.source ? [contribution.source] : [],
+          owners: isParameterContributionOwner(contribution.owner)
+            ? [contribution.owner]
+            : [],
         };
       }
       const existing = grouped.get(contribution.parameterIndex);
@@ -86,7 +91,7 @@ export class ParameterMixer {
           return {
             ok: false,
             reason: `parameter_mixer_parameter_identity_conflict:${existing.parameterIdRaw}:${contribution.parameterIdRaw}`,
-            sources: collectContributionSources([
+            owners: collectContributionOwners([
               ...existing.contributions,
               contribution,
             ]),
@@ -103,7 +108,9 @@ export class ParameterMixer {
     }
 
     const parameters: ResolvedParameterFrameEntry[] = [];
-    for (const [parameterIndex, group] of grouped) {
+    const orderedGroups = [...grouped.entries()]
+      .sort(([leftIndex], [rightIndex]) => leftIndex - rightIndex);
+    for (const [parameterIndex, group] of orderedGroups) {
       const minValue = access.getParameterMinimumValue(parameterIndex);
       const maxValue = access.getParameterMaximumValue(parameterIndex);
       const baseValue = access.getParameterValue(parameterIndex);
@@ -111,14 +118,14 @@ export class ParameterMixer {
         return {
           ok: false,
           reason: `parameter_mixer_invalid_runtime_range:${group.parameterIdRaw}`,
-          sources: collectContributionSources(group.contributions),
+          owners: collectContributionOwners(group.contributions),
         };
       }
       if (!Number.isFinite(baseValue)) {
         return {
           ok: false,
           reason: `parameter_mixer_invalid_base_value:${group.parameterIdRaw}`,
-          sources: collectContributionSources(group.contributions),
+          owners: collectContributionOwners(group.contributions),
         };
       }
 
@@ -136,6 +143,7 @@ export class ParameterMixer {
         .forEach((contribution) => {
           const resolvedValue = resolveContributionValue(unclampedValue, contribution);
           resolvedContributions.push({
+            owner: contribution.owner,
             source: contribution.source,
             operation: contribution.operation,
             value: contribution.value,
@@ -161,16 +169,15 @@ export class ParameterMixer {
 
     return { ok: true, parameters };
   }
-
 }
 
-function collectContributionSources(
-  contributions: readonly Pick<ParameterContribution, "source">[],
-): string[] {
+function collectContributionOwners(
+  contributions: readonly Pick<ParameterContribution, "owner">[],
+): ParameterContributionOwner[] {
   return [...new Set(
     contributions
-      .map((contribution) => contribution.source)
-      .filter((source): source is string => typeof source === "string" && Boolean(source.trim())),
+      .map((contribution) => contribution.owner)
+      .filter(isParameterContributionOwner),
   )];
 }
 
@@ -189,6 +196,9 @@ function validateContribution(
   }
   if (!access.isParameterIndexWritable(contribution.parameterIndex)) {
     return `parameter_mixer_parameter_not_writable:${contribution.parameterIdRaw}`;
+  }
+  if (!isParameterContributionOwner(contribution.owner)) {
+    return `parameter_mixer_owner_invalid:${contribution.parameterIdRaw}`;
   }
   if (typeof contribution.source !== "string" || !contribution.source.trim()) {
     return `parameter_mixer_source_missing:${contribution.parameterIdRaw}`;
@@ -209,6 +219,12 @@ function validateContribution(
     return `parameter_mixer_invalid_weight:${contribution.parameterIdRaw}:${contribution.source}`;
   }
   return null;
+}
+
+function isParameterContributionOwner(
+  owner: unknown,
+): owner is ParameterContributionOwner {
+  return owner === "direct_plan" || owner === "lip_sync";
 }
 
 function isParameterContributionOperation(

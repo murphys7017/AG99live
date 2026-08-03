@@ -36,7 +36,6 @@ import {
   CubismLogError,
   CubismLogInfo,
 } from "@framework/utils/cubismdebug";
-import type { SemanticParameterPlan } from "../../../types/protocol";
 
 import * as LAppDefine from "./lappdefine";
 import { frameBuffer, LAppDelegate } from "./lappdelegate";
@@ -51,11 +50,16 @@ import {
 import {
   prepareDirectParameterExecution,
   type DirectParameterExecutionPlan,
+  type DirectParameterPlanInput,
+  type DirectParameterPlanStartOptions,
+  type DirectParameterPlanTerminalEvent,
+  type DirectParameterPlanTerminalStatus,
 } from "./directparameterplan";
 import {
   PARAMETER_MIX_PRIORITY,
   ParameterMixer,
   type ParameterContribution,
+  type ParameterContributionOwner,
 } from "./parametermixer";
 import {
   SpeechSignalRuntime,
@@ -116,8 +120,6 @@ interface DirectSemanticParameterBinding {
   targetValue: number;
   neutralTargetValue: number;
   weight: number;
-  inputValue: number | null;
-  source: string;
   keyframes: ParameterPresentationTrackPoint[];
   modulationAmplitude: number;
   modulationDirection: number;
@@ -151,11 +153,7 @@ interface DirectParameterPlanState {
   /** 本次参数计划的唯一标识符。由 startDirectParameterPlan 生成并回传。 */
   runId: string;
   /** 参数计划完成时的回调。 */
-  onTerminal?: (event: {
-    runId: string;
-    status: "completed" | "stopped" | "failed" | "rejected";
-    reason?: string;
-  }) => void;
+  onTerminal?: (event: DirectParameterPlanTerminalEvent) => void;
   /** Expression resources are owned by the direct plan that started them. */
   expressionId: string | null;
   /** 防止重复发射完成事件 */
@@ -173,7 +171,7 @@ interface DirectPlanContributionCollection {
   released: boolean;
 }
 
-type ActiveParameterFrameFailureOwner = "direct_plan" | "lip_sync" | "mixed";
+type ActiveParameterFrameFailureOwner = ParameterContributionOwner | "mixed";
 
 interface ActiveParameterFrameFailure {
   owner: ActiveParameterFrameFailureOwner;
@@ -1574,7 +1572,10 @@ export class LAppModel extends CubismUserModel {
     }
   }
 
-  public startDirectParameterPlan(plan: SemanticParameterPlan, options?: unknown): boolean {
+  public startDirectParameterPlan(
+    plan: DirectParameterPlanInput,
+    options: DirectParameterPlanStartOptions = {},
+  ): boolean {
     const execution = prepareDirectParameterExecution(plan);
     console.info("[LAppModel] starting validated plan. mode=", plan.mode, "emotion=", plan.emotion_label);
 
@@ -1584,17 +1585,19 @@ export class LAppModel extends CubismUserModel {
       return false;
     }
 
-    // 从 options 中提取 runId 和 onTerminal 回调
-    const opts = (options && typeof options === 'object') ? options : {};
-    const runId = opts.runId || ('direct-plan-' + Date.now() + '-' + Math.random().toString(36).slice(2));
-    const onTerminal = typeof opts.onTerminal === 'function' ? opts.onTerminal : undefined;
-    const playbackClockReader = opts.playbackClockReader;
+    const runId = typeof options.runId === "string" && options.runId.trim()
+      ? options.runId.trim()
+      : `direct-plan-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const onTerminal = typeof options.onTerminal === "function"
+      ? options.onTerminal
+      : undefined;
+    const playbackClockReader = options.playbackClockReader;
     if (!playbackClockReader || typeof playbackClockReader.getElapsedMs !== "function") {
       this._directParameterPlanError = "v2_parameter_clock_missing";
       return false;
     }
 
-    const candidate = this.buildSemanticParameterPlanState(
+    const candidate = this.buildDirectParameterPlanState(
       execution,
       runId,
       onTerminal,
@@ -1632,7 +1635,10 @@ export class LAppModel extends CubismUserModel {
     return true;
   }
 
-  public stopDirectParameterPlan(reason = "", status = "stopped"): void {
+  public stopDirectParameterPlan(
+    reason = "",
+    status: DirectParameterPlanTerminalStatus = "stopped",
+  ): void {
     const state = this._directParameterPlanState;
     this._directParameterPlanState = null;
     this._directParameterPlanError = reason ? String(reason) : "";
@@ -1652,16 +1658,14 @@ export class LAppModel extends CubismUserModel {
     return this._directParameterPlanState !== null;
   }
 
-  private buildSemanticParameterPlanState(parsed: {
-    plan: any;
-    timing: DirectParameterPlanState["timing"];
-    reason: string;
-  }, runId?: string, onTerminal?: (event: any) => void, playbackClockReader?: { getElapsedMs: () => number | null }): DirectParameterPlanCandidate {
+  private buildDirectParameterPlanState(
+    parsed: DirectParameterExecutionPlan,
+    runId: string,
+    onTerminal: DirectParameterPlanState["onTerminal"],
+    playbackClockReader: { getElapsedMs: () => number | null },
+  ): DirectParameterPlanCandidate {
     const semanticBindings: DirectSemanticParameterBinding[] = [];
     const seenParameterIndices = new Set<number>();
-    const bindingWarnings = Array.isArray(parsed.plan.diagnostics?.warnings)
-      ? [...parsed.plan.diagnostics.warnings]
-      : [];
 
     for (const [index, item] of parsed.plan.parameters.entries()) {
       const parameterIdRaw = String(item.parameter_id || "").trim();
@@ -1699,7 +1703,7 @@ export class LAppModel extends CubismUserModel {
         return { ok: false, reason: `v2_parameter_neutral_out_of_runtime_range:${parameterIdRaw}` };
       }
       const keyframes = Array.isArray(item.keyframes)
-        ? item.keyframes.map((keyframe: any) => ({
+        ? item.keyframes.map((keyframe) => ({
             atMs: Number(keyframe.at_ms),
             transitionMs: Number(keyframe.transition_ms),
             value: Number(keyframe.target_value),
@@ -1715,8 +1719,6 @@ export class LAppModel extends CubismUserModel {
         targetValue,
         neutralTargetValue,
         weight: Number(item.weight),
-        inputValue: Number.isFinite(Number(item.input_value)) ? Number(item.input_value) : null,
-        source: String(item.source),
         keyframes,
         modulationAmplitude: 0,
         modulationDirection: 1,
@@ -1734,7 +1736,7 @@ export class LAppModel extends CubismUserModel {
               ? Number(item.modulation.delay_ms)
               : null,
             points: Array.isArray(item.modulation.points)
-              ? item.modulation.points.map((point: any) => ({
+              ? item.modulation.points.map((point) => ({
                 atMs: Number(point.at_ms),
                 transitionMs: Number(point.transition_ms),
                 value: Number(point.value),
@@ -1760,12 +1762,6 @@ export class LAppModel extends CubismUserModel {
 
     if (semanticBindings.length === 0) {
       return { ok: false, reason: "v2_parameters_empty_after_runtime_filter" };
-    }
-    if (bindingWarnings.length > 0) {
-      if (!parsed.plan.diagnostics || typeof parsed.plan.diagnostics !== "object") {
-        parsed.plan.diagnostics = {};
-      }
-      parsed.plan.diagnostics.warnings = bindingWarnings;
     }
 
     for (const item of semanticBindings) {
@@ -1797,7 +1793,7 @@ export class LAppModel extends CubismUserModel {
       emotionLabel: parsed.plan.emotion_label,
       timing: parsed.timing,
       semanticBindings,
-      playbackClockReader: playbackClockReader!,
+      playbackClockReader,
       diagnosticFrameCount: 0,
       runId: runId || ('direct-plan-' + Date.now() + '-' + Math.random().toString(36).slice(2)),
       onTerminal: onTerminal,
@@ -1900,7 +1896,7 @@ export class LAppModel extends CubismUserModel {
     );
     if (!resolution.ok) {
       return {
-        owner: this.resolveParameterFrameFailureOwner(resolution.sources),
+        owner: this.resolveParameterFrameFailureOwner(resolution.owners),
         reason: resolution.reason,
       };
     }
@@ -1911,7 +1907,7 @@ export class LAppModel extends CubismUserModel {
       if (Math.abs(readbackValue - parameter.value) > 0.001) {
         return {
           owner: this.resolveParameterFrameFailureOwner(
-            parameter.contributions.map((contribution) => contribution.source),
+            parameter.contributions.map((contribution) => contribution.owner),
           ),
           reason: `parameter_mixer_write_mismatch:${parameter.parameterIdRaw}`,
         };
@@ -2009,6 +2005,7 @@ export class LAppModel extends CubismUserModel {
         parameterId: item.parameterId,
         parameterIdRaw: item.parameterIdRaw,
         parameterIndex: item.parameterIndex,
+        owner: "direct_plan",
         source: `direct_plan:${item.axisId}`,
         operation: "replace",
         value: presentationFrame.drivenValue,
@@ -2059,6 +2056,7 @@ export class LAppModel extends CubismUserModel {
         parameterId,
         parameterIdRaw: parameterId.getString().s,
         parameterIndex,
+        owner: "lip_sync",
         source: "lip_sync",
         operation: "replace",
         value: defaultValue + (maxValue - defaultValue) * lipSyncIntensity,
@@ -2099,15 +2097,11 @@ export class LAppModel extends CubismUserModel {
   }
 
   private resolveParameterFrameFailureOwner(
-    sources: readonly string[],
+    owners: readonly ParameterContributionOwner[],
   ): ActiveParameterFrameFailureOwner {
-    const hasDirectPlanSource = sources.some((source) => source.startsWith("direct_plan:"));
-    const hasLipSyncSource = sources.some((source) => source === "lip_sync");
-    if (hasDirectPlanSource && !hasLipSyncSource) {
-      return "direct_plan";
-    }
-    if (hasLipSyncSource && !hasDirectPlanSource) {
-      return "lip_sync";
+    const uniqueOwners = [...new Set(owners)];
+    if (uniqueOwners.length === 1) {
+      return uniqueOwners[0];
     }
     return "mixed";
   }

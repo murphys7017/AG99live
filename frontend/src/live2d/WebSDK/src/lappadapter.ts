@@ -12,7 +12,11 @@ import {
   InvalidMotionQueueEntryHandleValue
 } from '@framework/motion/cubismmotionqueuemanager';
 import { CubismFramework } from '@framework/live2dcubismframework';
-import type { SemanticParameterPlan } from "../../../types/protocol";
+import type {
+  DirectParameterPlanInput,
+  DirectParameterPlanStartOptions,
+  DirectParameterPlanTerminalStatus,
+} from "./directparameterplan";
 
 export interface CatalogMotionLifecycleCallbacks {
   playbackClockReader?: { getElapsedMs: () => number | null };
@@ -95,7 +99,10 @@ export class LAppAdapter {
     );
   }
 
-  public startDirectParameterPlan(plan: SemanticParameterPlan, options?: unknown): boolean {
+  public startDirectParameterPlan(
+    plan: DirectParameterPlanInput,
+    options?: DirectParameterPlanStartOptions,
+  ): boolean {
     const model = this.getModel();
     if (!model) {
       this._directParameterPlanError = "live2d_model_unavailable";
@@ -108,7 +115,10 @@ export class LAppAdapter {
     return started;
   }
 
-  public stopDirectParameterPlan(reason?: string, status?: string): void {
+  public stopDirectParameterPlan(
+    reason?: string,
+    status?: DirectParameterPlanTerminalStatus,
+  ): void {
     this.getModel()?.stopDirectParameterPlan(reason, status);
   }
 

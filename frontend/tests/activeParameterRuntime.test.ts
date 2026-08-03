@@ -12,7 +12,8 @@ function testParameterContributionOrderingAndFinalClamp(): void {
       parameterId,
       parameterIdRaw: "ParamMouthOpenY",
       parameterIndex: 0,
-      source: "lip-sync",
+      owner: "lip_sync",
+      source: "lip_sync",
       operation: "add",
       value: 0.5,
       weight: 1,
@@ -22,7 +23,8 @@ function testParameterContributionOrderingAndFinalClamp(): void {
       parameterId,
       parameterIdRaw: "ParamMouthOpenY",
       parameterIndex: 0,
-      source: "direct-plan",
+      owner: "direct_plan",
+      source: "direct_plan:test_axis",
       operation: "replace",
       value: 6,
       weight: 0.5,
@@ -59,6 +61,7 @@ function testInvalidOperationIsRejected(): void {
       parameterId,
       parameterIdRaw: "ParamMouthOpenY",
       parameterIndex: 0,
+      owner: "direct_plan",
       source: "invalid-source",
       operation: "unknown" as ParameterContribution["operation"],
       value: 6,
@@ -75,7 +78,7 @@ function testInvalidOperationIsRejected(): void {
   assert.deepEqual(result, {
     ok: false,
     reason: "parameter_mixer_invalid_operation:ParamMouthOpenY:invalid-source",
-    sources: ["invalid-source"],
+    owners: ["direct_plan"],
   });
 }
 
