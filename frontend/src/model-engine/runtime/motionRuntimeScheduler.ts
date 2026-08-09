@@ -13,6 +13,7 @@ export interface PendingInboundMotionPayload {
   payload: NormalizedMotionPayload;
   messageId: string;
   turnId: string;
+  assistantText: string;
   playbackTurnId: string | null;
   receivedAtMs: number;
   playbackClock: MotionPlaybackClockContext | null;
@@ -23,6 +24,7 @@ export interface PendingInboundMotionPayload {
 export interface StartPayloadContext {
   messageId: string;
   turnId: string | null;
+  assistantText: string;
   playbackTurnId: string | null;
   playbackOrigin: ModelEnginePlaybackOrigin;
   startReason: string;
@@ -110,6 +112,7 @@ export function createMotionRuntimeScheduler(
       turnId: entry.turnId,
       playbackTurnId: entry.playbackTurnId,
       messageId: entry.messageId,
+      assistantText: entry.assistantText,
       playbackOrigin: "conversation",
       startReason,
       queuedDelayMs: Math.max(0, Math.round(performance.now() - entry.receivedAtMs)),
@@ -212,6 +215,7 @@ export function createMotionRuntimeScheduler(
       hooks.onStartFailed?.({
         messageId: context.messageId,
         turnId: null,
+        assistantText: context.assistantText,
         playbackTurnId: normalizedPlaybackTurnId,
         playbackOrigin: "conversation",
         startReason: "motion_turn_id_missing",
@@ -238,6 +242,7 @@ export function createMotionRuntimeScheduler(
       payload,
       messageId: context.messageId,
       turnId: normalizedTurnId,
+      assistantText: context.assistantText,
       playbackTurnId: normalizedPlaybackTurnId,
       receivedAtMs: context.receivedAtMs,
       playbackClock: context.playbackClock ?? null,
@@ -249,6 +254,7 @@ export function createMotionRuntimeScheduler(
       hooks.onStartFailed?.({
         messageId: entry.messageId,
         turnId: entry.turnId,
+        assistantText: entry.assistantText,
         playbackTurnId: entry.playbackTurnId,
         playbackOrigin: "conversation",
         startReason: "playback_timeline_identity_mismatch",

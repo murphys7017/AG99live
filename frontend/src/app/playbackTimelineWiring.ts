@@ -43,10 +43,12 @@ export interface PlaybackTimelineMotionEnginePort {
   interruptPlaybackSegment(turnId: string | null, messageId: string, reason: string): void;
   preparePlaybackTimeline(
     playbackTimeline: ReturnType<typeof projectMotionPlaybackClock>,
+    assistantText: string,
   ): MotionTimelinePreparationResult;
   handlePlaybackTimelineStarted(
     playbackTimeline: ReturnType<typeof projectMotionPlaybackClock>,
     playbackClockReader: ReturnType<typeof projectMotionPlaybackClockReader>,
+    assistantText: string,
   ): boolean | void;
 }
 
@@ -125,6 +127,10 @@ export function configurePlaybackTimelineMotionRuntime(options: {
     turnId: string,
     messageId: string,
   ) => void;
+  getCanonicalAssistantText: (
+    turnId: string | null,
+    messageId: string,
+  ) => string;
 }): {
   motionTimelineSink: PlaybackTimelineMotionSink;
   dispose: () => void;
@@ -133,6 +139,7 @@ export function configurePlaybackTimelineMotionRuntime(options: {
     playbackTimeline,
     motionEngine,
     onMissingPlaybackTimeline,
+    getCanonicalAssistantText,
   } = options;
 
   const audioMotionBridge: AudioMotionTimelineBridge =
@@ -150,6 +157,7 @@ export function configurePlaybackTimelineMotionRuntime(options: {
         return motionEngine.handlePlaybackTimelineStarted(
           projectMotionPlaybackClock(preparedTimeline),
           projectMotionPlaybackClockReader(timelineClockReader),
+          getCanonicalAssistantText(turnId, messageId),
         );
       },
     });
@@ -170,6 +178,7 @@ export function configurePlaybackTimelineMotionRuntime(options: {
       });
       const result = motionEngine.preparePlaybackTimeline(
         projectMotionPlaybackClock(preparedTimeline),
+        getCanonicalAssistantText(turnId, messageId),
       );
       if (result.status === "not_applicable") {
         return;

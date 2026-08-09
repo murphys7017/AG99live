@@ -249,6 +249,7 @@ function prepareCompilableMotionPayload(
   }
   const compileResult = compileParameterMotionIntent(intent, {
     model: selectedModel,
+    assistantText: context.assistantText,
     targetDurationMs,
     speechActive,
     source: context.startReason,

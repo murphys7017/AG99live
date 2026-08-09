@@ -118,6 +118,10 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const motionRecord = {
     getSelectedModel: () => selectedModel,
   };
+  const getCanonicalAssistantText = (
+    turnId: string | null,
+    messageId: string,
+  ): string => sessionStore.getSession(turnId)?.segments.get(messageId)?.text.content ?? "";
   const playbackCoordinator = usePlaybackCompletionCoordinator({
     sessionStore,
     playbackAck,
@@ -125,8 +129,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   });
   const motionPlaybackRecorder = useMotionPlaybackRecorder({
     motionRecord,
-    getCanonicalAssistantText: (turnId, messageId) =>
-      sessionStore.getSession(turnId)?.segments.get(messageId)?.text.content ?? "",
+    getCanonicalAssistantText,
     getPlaybackTimelineSnapshot: (
       turnId,
       messageId,
@@ -244,6 +247,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const playbackTimelineMotionRuntime = configurePlaybackTimelineMotionRuntime({
     playbackTimeline,
     motionEngine: modelEngine,
+    getCanonicalAssistantText,
     onMissingPlaybackTimeline: (turnId, messageId) => {
       console.error("[AG99live] audio timeline started without matching playback timeline.", {
         turnId,

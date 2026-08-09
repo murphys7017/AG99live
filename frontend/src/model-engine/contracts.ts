@@ -9,6 +9,7 @@ export interface MotionPlaybackClockReader {
 export interface InboundPayloadContext {
   messageId: string;
   turnId: string | null;
+  assistantText: string;
   playbackTurnId?: string | null;
   receivedAtMs: number;
   playbackClock?: MotionPlaybackClockContext | null;

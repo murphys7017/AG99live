@@ -32,6 +32,7 @@ export interface MotionTimingResolution {
 
 export interface CompileOptions {
   model: ModelSummary;
+  assistantText?: string;
   targetDurationMs?: number | null;
   speechActive?: boolean;
   source?: string;

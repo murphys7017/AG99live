@@ -54,6 +54,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   let activePlaybackRun: ModelEngineActivePlaybackRun | null = null;
   const preparedSemanticMotions = new Map<string, {
     durationMs: number;
+    assistantText: string;
     prepared: PreparedSemanticMotionPayload;
   }>();
 
@@ -127,8 +128,10 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     },
     onStartPayload: (payload: NormalizedMotionPayload, context: StartPayloadContext) => {
       const key = buildSegmentKey(context.turnId, context.messageId);
+      const cached = preparedSemanticMotions.get(key);
       const prepared = payload.kind === "semantic_intent"
-        ? preparedSemanticMotions.get(key)?.prepared ?? null
+        && cached?.assistantText === context.assistantText
+        ? cached.prepared
         : null;
       preparedSemanticMotions.delete(key);
       return startNormalizedMotionPayload(
@@ -184,6 +187,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   function handlePlaybackTimelineStarted(
     playbackClock: MotionPlaybackClockContext,
     playbackClockReader: MotionPlaybackClockReader,
+    assistantText: string,
   ): boolean {
     const queuedMotionStarted =
       runtimeScheduler.handlePlaybackTimelineStarted(playbackClock);
@@ -215,13 +219,17 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     }
 
     const key = buildSegmentKey(playbackClock.turnId, normalizedMessageId);
-    const prepared = preparedSemanticMotions.get(key)?.prepared ?? null;
+    const cached = preparedSemanticMotions.get(key);
+    const prepared = cached?.assistantText === assistantText
+      ? cached.prepared
+      : null;
     preparedSemanticMotions.delete(key);
     const started = startSpeechOnlyMotionRequest(
       speechOnlyRequest,
       {
         messageId: normalizedMessageId,
         turnId: playbackClock.turnId,
+        assistantText,
         playbackTurnId: playbackClock.turnId,
         playbackOrigin: "conversation",
         startReason: "speech_only",
@@ -249,6 +257,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
 
   function preparePlaybackTimeline(
     playbackClock: MotionPlaybackClockContext,
+    assistantText: string,
   ): MotionTimelinePreparationResult {
     const audioDurationMs = typeof playbackClock.durationMs === "number"
       && Number.isFinite(playbackClock.durationMs)
@@ -286,7 +295,10 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         return { status: "prepared", source: "queued_motion" };
       }
       payload = preparation.payload;
-      context = preparation.context;
+      context = {
+        ...preparation.context,
+        assistantText,
+      };
       source = "queued_motion";
     } else {
       if (!dependencies.canStartSpeechOnlyMotion(playbackClock.turnId, normalizedMessageId)) {
@@ -306,6 +318,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       context = {
         messageId: normalizedMessageId,
         turnId: playbackClock.turnId,
+        assistantText,
         playbackTurnId: playbackClock.turnId,
         playbackOrigin: "conversation",
         startReason: "speech_only_preparing",
@@ -322,6 +335,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     if (
       cached
       && cached.durationMs === durationMs
+      && cached.assistantText === assistantText
       && cached.prepared.modelPath === selectedModelPath
       && selectedProfile !== null
       && cached.prepared.profileId === selectedProfile.profile_id
@@ -370,7 +384,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         source,
       };
     }
-    preparedSemanticMotions.set(key, { durationMs, prepared });
+    preparedSemanticMotions.set(key, { durationMs, assistantText, prepared });
     return { status: "prepared", source };
   }
 

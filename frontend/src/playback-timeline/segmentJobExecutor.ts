@@ -196,6 +196,7 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
       {
         turnId: job.turnId,
         messageId: job.messageId,
+        assistantText: job.text.content ?? "",
         receivedAtMs,
         timelineMode,
       },

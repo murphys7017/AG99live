@@ -3,6 +3,7 @@ import type { PlaybackTimelineSnapshot } from "./contracts.js";
 export interface PlaybackTimelineMotionContext {
   messageId: string;
   turnId: string | null;
+  assistantText: string;
   receivedAtMs: number;
   playbackTimeline?: PlaybackTimelineSnapshot | null;
   timelineMode?: "audio" | "motion_only";
