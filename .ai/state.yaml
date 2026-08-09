@@ -1,201 +1,68 @@
 task:
-  class: refactor
-  risk: high
+  class: documentation
+  risk: medium
   phase: completion
   status: complete
-  scope: "Replace the monolithic Adapter interaction_motion.py with one interaction_motion package whose Prompt, reference projection, Persona Effect resolution, result scheduling, and AstrBot compatibility modules preserve the existing public entrypoints and behavior."
+  scope: "Unify product phase-one completion, phase-two entry points, and current architecture documentation without changing runtime code."
 
 context:
   confidence: high
   assumptions:
-    - The current motion system correctly decides what expression or movement to use and remains in place; the new work only improves how its selected inputs are performed.
-    - Work is limited to the model's primary facial and pose parameters. Mouse, controller, and other extended VTube Studio inputs are out of scope.
-    - Existing semantic-axis and Cubism Core bounds remain the safety boundary. No standalone parameter-range-control phase or additional runtime clamp layer is required.
-    - Direct semantic parameter plans already write before Cubism Physics. The first physics task is to ensure all main facial inputs, especially lip sync, reach Physics in the same frame.
-    - Physics output and animation-owned parameters, including Phy* and Anim* parameters, remain owned by Cubism Physics and the animation system and are not driven directly by the input layer.
-    - The performance layer is deferred until input ranges and physical response are stable; it will provide timing, emphasis, and low-dimensional templates rather than a second motion system.
-    - Parameter Mixer receives already-resolved active parameter contributions, combines them once per frame, and does not interpret semantic levels, own audio signal lifecycle or Timeline state, or write Cubism Physics output parameters.
-    - A model3.json motion group name may be empty; the scanner-owned group plus original group_index is the only valid SDK motion locator and must not be reconstructed from deduplicated semantic constraints.
-    - An active speech source owns configured mouth parameters for every audio frame, including zero-energy pause frames; zero intensity means closed mouth, not absent lip-sync ownership.
-    - The user confirmed that the selected Superheroes recording and the Live2D model are cleared for the intended commercial use.
-    - The promotional video remains isolated under promo-video and does not become a runtime dependency of AG99live.
-    - The final promotional render uses the user-provided cleared soundtrack excerpt and a clean, locally recorded Live2D action capture.
-    - AG99live is an active-development desktop Live2D system; obsolete documents, code, and tests are deleted instead of archived in the repository.
-    - The main model emits assistant text and one ag99live.motion Persona Effect in the same logical response.
-    - The official AstrBot <@anim> transport exists only when Persona Effect injection is unavailable; its inner intent uses v4 and it is not a recovery path for invalid motion.
-    - Semantic axis profiles use V3 with relation_graph.edges as their only relation source; V2 profiles are discarded and regenerated from the current model scan.
-    - Remote computer control remains because AstrBot may run on a server while the Electron client runs on the user's computer.
-    - Performance curve generation is optional and never delays TTS or segment release.
-    - Motion Lab samples are trusted only when their user and assistant context is reconstructed from persisted Adapter raw events using turn_id plus message_id.
-    - Historical Motion Lab sample records that do not conform to the current V2 sample contract are deleted rather than migrated.
-    - An always-on microphone capture has one root turn ID for its stream lifetime; every VAD-completed utterance receives a distinct `<capture_turn_id>:vad:<n>` conversation turn ID.
-    - A new VAD speech start may interrupt only the still-active derived turn from the same capture session; it never interrupts or terminates the capture root itself.
-    - Obsolete internal helpers are deleted only after repository-wide symbol lookup confirms that no production, test, or export consumer remains; dynamic Live2D SDK configuration and local runtime data are outside this cleanup.
-    - Official AstrBot does not expose TTSState, Persona Effect, interaction contributors, or explicit visible-turn completion. Its compatibility path treats a final Record as TTS success, cannot distinguish TTS failure from non-attempt, skips optional performance-curve generation, and never fabricates lifecycle state or request identity.
-    - The enhanced-core path is selected only when contributor registration, Persona Effect, Prompt/Result contribution types, and interaction route decision APIs are all available.
+    - Product phase one implementation is complete.
+    - Manual observation, model tuning, and live runtime acceptance are not implementation backlog.
+    - Parameter track graphs, deeper dynamics and Physics work, Motion Lab editing, small-model training, VTS semantic export, remote-operator separation, cross-host deployment, and release packaging belong to phase two or later.
+    - Obsolete documents, code, tests, protocol versions, and migration history are deleted rather than retained as compatibility guidance.
 
 architecture:
+  phase_boundary:
+    source: docs/01-架构与结构/06-一期完成边界与二期入口.md
+    phase_one: complete
+    phase_two: planned
   product_flow:
-    - User input is forwarded to AstrBot without an AG99-owned busy queue or input rejection gate.
-    - control.interrupt targets exactly one turn_id; its AstrBot event rejects late output at the event send boundary.
-    - AstrBot produces canonical assistant text, TTS generation state, audio material, and Persona Effect data.
-    - The adapter aggregates one output.segment.v3 per turn_id plus message_id and sends it atomically.
-    - The frontend SessionStore commits the segment once; the orchestrator releases one segment job.
-    - PlaybackTimeline owns audio, subtitle, motion, and lip-sync sink lifecycle.
-    - ModelEngine compiles semantic motion into a parameter plan or typed resource execution.
-    - Live2D WebSDK owns model readiness, per-frame parameter writes, speech energy, lip sync, dynamics, and physics.
+    - AstrBot owns conversation, event queues, main-model calls, and TTS.
+    - The Adapter projects Live2D capabilities, validates motion intent, binds identities, and emits one atomic output.segment.v3.
+    - SessionStore owns settled protocol facts; PlaybackTimeline owns the segment clock and required sink lifecycle.
+    - ModelEngine compiles engine.motion_intent.v4 into CompiledSemanticMotion and engine.parameter_plan.v3.
+    - ParameterPresentation and ParameterMixer produce one active parameter frame before Cubism Physics.
+    - Live2D WebSDK owns final parameter writes, lip sync, Physics, model update, and rendering.
   identity:
-    turn_id: Conversation turn identity shared across AstrBot, adapter, frontend, and Motion Lab.
-    message_id: Logical assistant output segment identity; immediate and final outputs are distinct segments.
-    tts_request_id: One TTS generation lifecycle, including retries or multiple audio segments.
+    turn_id: Conversation turn identity shared across AstrBot, Adapter, frontend, and Motion Lab.
+    message_id: Logical assistant output segment identity.
+    tts_request_id: One TTS generation lifecycle.
     run_id: One accepted motion execution owned by one segment.
   protocols:
-    schema_manifest: astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json is the single source for protocol and schema versions; frontend constants are checked against it.
-    output: output.segment.v3
-    persona_motion: engine.motion_intent.v4
-    official_inline_motion: engine.motion_intent.v4 inside the <@anim> transport wrapper
+    source: astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json
+    websocket_envelope: v2
+    output_segment: output.segment.v3
+    motion_intent: engine.motion_intent.v4
     parameter_plan: engine.parameter_plan.v3
     semantic_axis_profile: ag99.semantic_axis_profile.v3
-    performance_curve: ag99.performance_curve_hint.v1
-    voice_following: ag99.voice_following_profile.v3
+    relation_graph: ag99.semantic_axis_relation_graph.v1
+    voice_following_profile: ag99.voice_following_profile.v3
     model_info: live2d_scan.v3
-    handshake: system.server_info carries the complete schema manifest; the frontend rejects all later messages until every version matches.
-  motion_ownership:
-    llm: intent_tags, axis_levels from -4 to 4, motion_steps, and optional typed resource intent.
-    adapter: Persona Effect registration, strict schema/profile/resource validation, identity binding, and transport.
-    model_engine: Level sampling, intensity, relation graph derivation and constraints, timing, speech gesture planning, plan building, and resource policy.
-    playback_timeline: Segment-scoped clock and required/optional sink lifecycle.
-    live2d_websdk: Exact parameter resolution, per-frame interpolation, lip sync, speech energy, dynamics, and physics.
-  adapter_motion_middleware:
-    public_boundary: "middleware.interaction_motion exports contributor registration, official inline Prompt injection, and deferred performance-curve start."
-    prompt: "prompt.py composes contributor entrypoints; prompt_builder.py, prompt_context.py, and prompt_references.py own construction and projection without scheduling output."
-    effect_resolution: "effects.py owns Persona Effect registration, extraction, and strict payload normalization."
-    scheduling: "scheduling.py owns result contribution, motion scheduling policy, Motion Lab result recording, and optional performance-curve deferral."
-    compatibility: "compatibility.py is the only owner of enhanced versus official AstrBot capability imports."
-  parameter_mixing:
-    boundary: "WebSDK-only active parameter composition immediately before Cubism Physics."
-    inputs: "Cubism base snapshot plus direct-plan and lip-sync contributions; SpeechSignalRuntime owns source-scoped audio values and speech envelopes."
-    output: "One resolved active parameter frame applied once by LAppModel."
-  settings_ownership:
-    model_engine: motionIntensityScale only.
-    live2d_presentation: ambientMotionEnabled, physicsResponseScale, and renderDprCap; applied by the renderer before model initialization and atomically through the WebSDK Adapter at runtime.
-  expressive_quality_roadmap:
-    phase_1: Tune physical response after all principal inputs are mixed before the Cubism Physics update, including the two mouth-opening inputs where applicable.
-    phase_2: Add a performance layer that turns existing action decisions into natural timing, emphasis, coordinated micro-movements, and reusable low-dimensional templates.
-  playback_rules:
-    - Audio-backed subtitle, motion, and lip sync use the matched HTMLAudioElement playing fact.
-    - Internal speech-only motion receives the same segment clock reader but does not project started or terminal state into an absent protocol motion slot.
-    - Explicit motion-only segments may use a segment-owned synthetic clock.
-    - Expected audio failure fails the segment; it never becomes normal no-audio playback.
-    - Missing required wiring, invalid payloads, and impossible lifecycle transitions fail visibly.
-    - Optional performance curve failure or lateness is recorded as skipped and does not modify the valid base motion.
-  data_rules:
-    - Motion Lab records raw model output, resolved levels, derived and constrained axes, compiled plans, timing, run identity, and terminal outcome.
-    - Runtime facts are persisted asynchronously and do not block the active conversation.
-    - Stage diagnostics preserve value sources so final motion remains attributable.
-    - Motion Lab sequence samples retain V4 motion_steps and never collapse to a flat pose while being replayed, saved, or used as Prompt references.
-    - Adapter and Electron protocol artifacts are deployed together; mixed revisions are rejected by the strict server_info handshake rather than accepted through compatibility fallback.
+  ownership_rules:
+    - The main model is the only source of semantic motion direction and level.
+    - Optional performance curves never block TTS, segment release, or base motion playback.
+    - ParameterMixer combines resolved active contributions and does not interpret semantic levels or own Timeline state.
+    - Cubism Physics output parameters are never directly driven by semantic motion or active-parameter smoothing.
+    - Invalid identity, schema, timing, binding, or lifecycle state fails visibly instead of activating a fallback path.
 
 verification:
   policy:
-    - Automated tests are limited to the smallest public-boundary input/output smoke checks.
-    - Tests are not evidence that the end-to-end interaction is correct.
-    - Source tracing, structured runtime logs, Motion Lab records, and a live Electron conversation are the primary evidence.
-    - Do not run full regression suites by default and do not add mocks to compensate for missing live verification.
-  checks_run:
-    - Root README protocol names, feature claims, startup paths, documentation links, and image paths were checked against current source and repository files; the two user-selected screenshots were inspected visually.
-    - `python scripts/check_protocol_schema_manifest.py` passed.
-    - `npm run typecheck:renderer` passed in frontend.
-    - `npm run typecheck:websdk` passed in frontend.
-    - `npm run typecheck:node` passed in frontend.
-    - `python -m compileall -q astrbot_plugin_ag99live_adapter` passed.
-    - `check_astrbot_plugin.py astrbot_plugin_ag99live_adapter` reported 0 errors and 0 warnings.
+    - Use only documentation link checks, focused static inspection, and git diff review for this task.
+    - Automated tests are low-confidence boundary smoke checks and are not end-to-end evidence.
+    - Live Electron, AstrBot, TTS, and Live2D observation is user-led acceptance, not unfinished implementation work.
+  current_checks:
+    - Local links in all changed Markdown files resolve.
+    - Protocol versions in the documentation match protocol/schema_manifest.json.
+    - No stale phase-status wording remains in README.md, docs, or .ai.
     - git diff --check reports no whitespace errors.
-    - `npm run typecheck:renderer` passed for the Motion Lab replay ownership change.
-    - `python -m py_compile` passed for the Motion Lab V2 storage, sequence projection, and request-scoped sample selection changes.
-    - `npm run typecheck:renderer` passed for the Motion Lab V2 frontend protocol, Action Lab sequence handling, and effective-example projection changes.
-    - `python scripts/check_protocol_schema_manifest.py` passed after adding `ag99.motion_tuning_sample.v2`.
-    - The basic protocol sample-save smoke test passed, and a direct deterministic selection smoke check chose the matching `开心` sample over an unrelated sample.
-    - `npm run typecheck:node` passed for the strict desktop bridge command change.
-    - Obsolete frontend preview command and Adapter outbound API references were confirmed absent with `rg`.
-    - `npm run typecheck:renderer` and `npm run typecheck:node` passed after assigning stable capture titles to the Live2D and input windows.
-    - `npm run typecheck:websdk` passed after replacing the Live2D frame limiter with accumulated frame deadlines.
-    - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `npm run typecheck:node` passed after unifying speech gesture parameter binding.
-    - Targeted Python syntax checks, `npm run typecheck:renderer`, `npm run typecheck:websdk`, and a generated SemanticAxisProfile input/output smoke check passed after widening Live2D pose anchors and speech-following dynamics.
-    - `npm run typecheck:renderer` and `npm run typecheck:node` passed after the protocol, ModelSync ownership, and documentation review.
-    - `npm run typecheck:renderer`, `npm run typecheck:node`, and `npm run test:playback-timeline` passed after separating internal speech-only execution from protocol motion state projection.
-    - Targeted `python -m py_compile` passed for every modified Adapter runtime, scanner, protocol, and transport module.
-    - Mermaid sources were reviewed against current code; no Mermaid CLI is installed, so diagram rendering was not validated automatically.
-    - Python syntax checks passed for the scanner and runtime cache changes.
-    - The previous v2 Electron production build passed before the atomic voice-following V3 migration.
-    - `npm run build` passed for the atomic V3 migration; the generated renderer contains only `ag99.voice_following_profile.v3`.
-    - Mk6 V3 amplitude ratios preserve the previous effective amplitudes within rounding while deriving limits from SemanticAxisProfile.
-    - `npm run typecheck` passed in promo-video after integrating the live capture.
-    - The 28-second half-resolution preview rendered successfully and its ten-scene contact sheet was visually inspected.
-    - The 1920x1080 H.264/AAC final render completed successfully and decoded end-to-end with ffmpeg without errors.
-    - A two-turn live Electron conversation was captured from the real terminal, input overlay, Live2D window, and original MiniMax TTS artifacts; the synchronized 14-second dialogue segment was visually inspected.
-    - The expanded 44.5-second 1920x1080 H.264/AAC render completed and decoded end-to-end without errors; dialogue peaks at -4.1 dB after a 6 dB intelligibility lift.
-    - `npm run typecheck:renderer` and `npm run typecheck:websdk` passed after the conversation playback composition and physics-response ownership change.
-    - `npm run typecheck:websdk`, `npm run typecheck:renderer`, and `git diff --check` passed after propagating Parameter Mixer lip-sync failures through the existing source lifecycle, moving the final runtime range clamp to ParameterMixer, and mapping lip sync from Cubism defaults.
-    - Targeted `python -m py_compile` passed for the changed Adapter event, coordinator, motion Prompt, Motion Lab, and state modules.
-    - `check_astrbot_plugin.py astrbot_plugin_ag99live_adapter` reported 0 errors and 0 warnings; `git diff --check` passed.
-    - `npm run typecheck:renderer`, `npm run typecheck:websdk`, `python scripts/check_protocol_schema_manifest.py`, focused Adapter Python syntax checks, and `git diff --check` passed for semantic relation graph consolidation and V3 profile migration.
-    - `npm run typecheck`, `python scripts/check_protocol_schema_manifest.py`, focused Python syntax checks, and `git diff --check` passed after the live2d_scan.v3 locator, lifecycle, lip-sync ownership, profile identity, relation graph, and documentation fixes.
-    - A real Mk6 rescan and frontend resource projection preserved the exposed motion locators as `embarrassed_lookaway -> group "", index 5` and `angry_standard -> group "", index 21`.
-    - `npm run typecheck`, focused Python syntax checks, `python scripts/check_protocol_schema_manifest.py`, and `git diff --check` passed after protocol consumers were consolidated onto manifest-derived constants and V3 cache/model projection checks.
-    - Production source contains no legacy ModelInfo V2 or scan-cache V2 references.
-    - Focused Adapter Python syntax checks, the frontend renderer/WebSDK/Node typechecks, repository-wide removed-symbol lookup, and `git diff --check` passed after deleting superseded motion and playback helpers.
-    - The enhanced AstrBot environment imported the plugin with `TTSState` and Interaction Runtime available.
-    - Official AstrBot 4.27.0 imported the plugin with `TTSState` and Interaction Runtime unavailable, selecting the official compatibility path without import errors.
-    - `npm run typecheck:websdk` passed after replacing the WebSDK application-protocol dependency with the local direct-parameter execution DTO and explicit Parameter Mixer contribution owners.
-    - `npm run typecheck:renderer` passed with the global Live2D adapter declaration importing that same execution DTO, proving the ModelEngine plan remains structurally compatible at the boundary.
-    - Repository lookup confirmed that WebSDK no longer imports `types/protocol` and that `LAppModel` retains one AG99 active-parameter `setParameterValueById` write point before Cubism Physics.
-    - The final cleanup removed unused protocol-only execution fields, the no-op diagnostics rewrite, string-based failure ownership, and the duplicate failure-source collection without adding a compatibility path.
-    - `npm run typecheck:websdk` and `npm run typecheck:renderer` passed after restoring TypeScript checking on `LAppAdapter` and deleting its unconsumed model-position, motion-catalog, expression-control, and ID-manager APIs together with stale global declarations.
-    - `npm run typecheck:websdk`, `npm run typecheck:renderer`, repository-wide stale-symbol lookup, and `git diff --check` passed after deleting unused Parameter Mixer operation modes, moving frame-owner aggregation into the Mixer, and removing the duplicate direct-plan writability check from the per-frame producer.
-    - `npm run typecheck:websdk`, the focused `activeParameterRuntime.test.ts` smoke, repository-wide Parameter Mixer/write-point lookup, and `git diff --check` passed after replacing Cubism access callbacks with one readonly per-frame base snapshot map owned by LAppModel and removing Cubism write handles from source contributions.
-    - Frontend renderer/WebSDK/Node typechecks, `python scripts/check_protocol_schema_manifest.py`, focused Python syntax checks, the active-parameter response and large-Timeline-step smoke, the desktop snapshot clone smoke, V2 residue lookup, and `git diff --check` passed after the atomic `engine.parameter_plan.v3` migration and explicit head/body response policy implementation.
-    - Focused Adapter compile/import checks, Pyflakes, and a 69-symbol AST comparison passed after replacing `middleware/interaction_motion.py`; every original top-level function and class has one new owner and an unchanged AST body.
-  validation_gap:
-    - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
-    - Live AstrBot plus Provider plus TTS plus Electron plus Live2D validation is still required after the clock migration, including a long audio segment and a paused audio segment.
-    - Live Electron plus Mk6 validation is required to confirm that physicsResponseScale changes terminal hair, clothing, and accessory response without changing semantic head/body input ranges.
-    - Motion Lab must be checked with an explicit neutral axis and a derived non-neutral axis to confirm only the original explicit axis is replayed and saved.
-    - Live Electron validation is required to confirm historical sequence replay starts the preserved parameter plan, reports its real terminal status, and rejects previews while conversation motion is active.
-    - OBS must be restarted and its Window Capture source refreshed to confirm `AG99live Live2D` and `AG99live Input` replace the previous null window identity.
-    - Live Electron observation on the 180 Hz display is required to confirm the renderer remains near its 60 FPS target under the real model workload.
-    - A live speech-only segment and a semantic-motion-plus-speech segment are required to confirm voice_following_profile.v3 resolves through the same semantic parameter bindings and remains visually expressive.
-    - Live Mk6 observation is required to tune the widened head/body anchors and stronger speech gesture envelope against actual model rigging; static checks cannot establish the desired visual exaggeration.
-    - A live speech-only segment with `output.segment.motion=absent` must confirm the plan receives the segment Timeline reader, starts once, and leaves the SessionStore motion terminal at absent.
-    - A live Electron + AstrBot conversation must save one V2 pose sample and one V2 sequence sample, then confirm the Adapter reconstructs trusted user/assistant context from raw events and returns the sequence to the next Prompt as `motion_steps`.
-    - A second live request with an explicit matching tag or overlapping user text must confirm the generated Prompt uses request-scoped sample selection and Motion Lab records the resolved Prompt projection.
-    - A live multi-turn AstrBot and Electron session must confirm that interrupting one turn leaves other queued turns untouched, late output from the cancelled event is discarded, and physicsResponseScale changes hair/clothing response without expanding semantic head/body axes.
-    - A live always-on microphone session must confirm two VAD-recognized utterances create distinct derived turn IDs, keep capture active after the first response, and interrupt only the first derived playback when the second utterance begins.
-    - A live Electron plus Mk6 conversation must select each exposed full motion resource once, confirm the expected motion file plays, verify replacement emits one terminal event, and observe that zero-energy audio pauses keep the configured mouth parameters closed under lip-sync ownership.
-    - A live official AstrBot 4.27.0 plus TTS plus Electron plus Live2D conversation is required to verify inline V4 motion extraction, final Record audio projection, one atomic output segment, and after-message queue closure.
-    - The focused contributor-registration and TTS-hook boundary smoke checks passed after synchronizing the AstrBot stubs with the current capability contract.
-    - A live Electron plus Mk6 conversation is required to confirm direct-plan and lip-sync contributions remain visually correct together, owner-scoped failure ends only the affected source, and Physics consumes the resolved frame without a release jump.
-    - A live Electron plus Mk6 conversation must confirm the V3 head spring produces a visible but restrained short overshoot, the body starts and reverses later than the head, lip sync remains unaffected, and Cubism hair/clothing Physics responds without receiving ParameterPresentation smoothing.
 
 backlog:
-  - id: parameter_mixer
-    status: complete
-    summary: Move direct-plan, lip-sync, and speech-energy active parameter composition to one WebSDK Parameter Mixer without parallel write paths.
-  - id: physics_response_optimization
-    status: active
-    summary: Tune input mixing, update ordering, and Cubism physical response without directly writing physics-output parameters.
-  - id: performance_layer
-    status: planned
-    summary: After input and physics behavior are stable, add timing, emphasis, coordinated micro-movements, and low-dimensional templates above the existing motion system.
-  - id: motion_lab_sequence_tuning
-    status: planned
-    summary: Upgrade Motion Lab drafts, persisted samples, and backend few-shot projection to preserve and edit v4 motion_steps without flattening them into one pose.
-  - id: motion_lab_training_workbench
-    status: planned
-    summary: Build a separate UI for querying, replaying, reviewing, and curating persisted Motion Lab records.
-  - id: speech_performance_quality
-    status: active
-    summary: Improve non-periodic speech gestures and Live2D physical expressiveness without adding a parallel playback clock.
-  - id: remote_operator_plugin_split
-    status: deferred
-    summary: Move remote computer execution into a separate AstrBot plugin after the server-side AstrBot architecture is stable.
+  phase_two:
+    - Parameter track graph for semantic sequence, phrase modulation, delay, hold, release, and residual.
+    - Gaze, face, hesitation, and residual response policies beyond the completed head/body V3 dynamics.
+    - Cubism Physics setting diagnostics and model-level presentation profiles.
+    - Motion Lab sequence editing, diversity summaries, and training-data workbench.
+    - Small motion-model training and VTube Studio semantic labeling/export.
+    - Remote-operator plugin separation, authenticated cross-host deployment, and release packaging.
