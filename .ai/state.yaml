@@ -3,7 +3,7 @@ task:
   risk: high
   phase: completion
   status: complete
-  scope: "Remove unused generic parameter operations and remaining owner aggregation from outside Parameter Mixer so the current direct-plan and lip-sync sources use one weighted-target composition rule without changing semantic compilation, presentation dynamics, Cubism base updates, or Physics."
+  scope: "Make Parameter Mixer consume an explicit frozen Cubism base snapshot plus direct-plan and lip-sync contributions, keeping all Cubism reads and the sole AG99 active-parameter write inside LAppModel without changing native Cubism base updates, semantic compilation, presentation dynamics, or Physics."
 
 context:
   confidence: high
@@ -147,6 +147,7 @@ verification:
     - The final cleanup removed unused protocol-only execution fields, the no-op diagnostics rewrite, string-based failure ownership, and the duplicate failure-source collection without adding a compatibility path.
     - `npm run typecheck:websdk` and `npm run typecheck:renderer` passed after restoring TypeScript checking on `LAppAdapter` and deleting its unconsumed model-position, motion-catalog, expression-control, and ID-manager APIs together with stale global declarations.
     - `npm run typecheck:websdk`, `npm run typecheck:renderer`, repository-wide stale-symbol lookup, and `git diff --check` passed after deleting unused Parameter Mixer operation modes, moving frame-owner aggregation into the Mixer, and removing the duplicate direct-plan writability check from the per-frame producer.
+    - `npm run typecheck:websdk`, the focused `activeParameterRuntime.test.ts` smoke, repository-wide Parameter Mixer/write-point lookup, and `git diff --check` passed after replacing Cubism access callbacks with one readonly per-frame base snapshot map owned by LAppModel and removing Cubism write handles from source contributions.
   validation_gap:
     - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
     - Live AstrBot plus Provider plus TTS plus Electron plus Live2D validation is still required after the clock migration, including a long audio segment and a paused audio segment.

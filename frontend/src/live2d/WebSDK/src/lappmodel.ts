@@ -58,6 +58,7 @@ import {
 import {
   PARAMETER_MIX_PRIORITY,
   ParameterMixer,
+  type ParameterBaseSnapshot,
   type ParameterContribution,
   type ParameterFrameOwner,
 } from "./parametermixer";
@@ -138,7 +139,6 @@ interface DirectSemanticParameterBinding {
     }>;
   } | null;
   maxSpeechOffset: number;
-  parameterId: CubismIdHandle;
   parameterIndex: number;
   presentation: ParameterPresentationNode;
 }
@@ -1668,27 +1668,21 @@ export class LAppModel extends CubismUserModel {
     for (const [index, item] of parsed.plan.parameters.entries()) {
       const parameterIdRaw = String(item.parameter_id || "").trim();
       const axisId = String(item.axis_id || "").trim();
-      const resolved = this.resolveWritableParameter(parameterIdRaw);
-      if (!resolved) {
+      const parameterIndex = this.resolveWritableParameterIndex(parameterIdRaw);
+      if (parameterIndex === null) {
         return {
           ok: false,
           reason: `v2_parameter_missing_runtime_parameter:${axisId}:${parameterIdRaw || index}`,
         };
       }
-      if (seenParameterIndices.has(resolved.parameterIndex)) {
+      if (seenParameterIndices.has(parameterIndex)) {
         return {
           ok: false,
           reason: `v2_parameter_duplicate_runtime_parameter:${axisId}:${parameterIdRaw}`,
         };
       }
-      if (!this.isParameterIndexWritable(resolved.parameterIndex)) {
-        return {
-          ok: false,
-          reason: `v2_parameter_not_writable:${axisId}:${parameterIdRaw}`,
-        };
-      }
-      const minValue = this._model.getParameterMinimumValue(resolved.parameterIndex);
-      const maxValue = this._model.getParameterMaximumValue(resolved.parameterIndex);
+      const minValue = this._model.getParameterMinimumValue(parameterIndex);
+      const maxValue = this._model.getParameterMaximumValue(parameterIndex);
       if (!Number.isFinite(minValue) || !Number.isFinite(maxValue) || minValue > maxValue) {
         return { ok: false, reason: `v2_parameter_invalid_runtime_range:${parameterIdRaw}` };
       }
@@ -1710,7 +1704,7 @@ export class LAppModel extends CubismUserModel {
       if (keyframes.some((keyframe) => keyframe.value < minValue || keyframe.value > maxValue)) {
         return { ok: false, reason: `v2_parameter_keyframe_out_of_runtime_range:${parameterIdRaw}` };
       }
-      seenParameterIndices.add(resolved.parameterIndex);
+      seenParameterIndices.add(parameterIndex);
       semanticBindings.push({
         axisId,
         parameterIdRaw,
@@ -1743,11 +1737,10 @@ export class LAppModel extends CubismUserModel {
           }
           : null,
         maxSpeechOffset: Number(item.dynamics.max_speech_offset),
-        parameterId: resolved.parameterId,
-        parameterIndex: resolved.parameterIndex,
+        parameterIndex,
         presentation: {
           parameterId: parameterIdRaw,
-          initialValue: this._model.getParameterValueByIndex(resolved.parameterIndex),
+          initialValue: this._model.getParameterValueByIndex(parameterIndex),
           neutralValue: neutralTargetValue,
           maxVelocity: Number(item.dynamics.max_velocity),
           maxAcceleration: Number(item.dynamics.max_acceleration),
@@ -1883,14 +1876,10 @@ export class LAppModel extends CubismUserModel {
     if (typeof lipSyncContributions === "string") {
       return { owner: "lip_sync", reason: lipSyncContributions };
     }
+    const contributions = [...directPlan.contributions, ...lipSyncContributions];
     const resolution = this._parameterMixer.resolveFrame(
-      [...directPlan.contributions, ...lipSyncContributions],
-      {
-        isParameterIndexWritable: (parameterIndex) => this.isParameterIndexWritable(parameterIndex),
-        getParameterValue: (parameterIndex) => this._model.getParameterValueByIndex(parameterIndex),
-        getParameterMinimumValue: (parameterIndex) => this._model.getParameterMinimumValue(parameterIndex),
-        getParameterMaximumValue: (parameterIndex) => this._model.getParameterMaximumValue(parameterIndex),
-      },
+      contributions,
+      this.captureParameterBaseSnapshots(contributions),
     );
     if (!resolution.ok) {
       return {
@@ -1951,6 +1940,33 @@ export class LAppModel extends CubismUserModel {
     return null;
   }
 
+  private captureParameterBaseSnapshots(
+    contributions: readonly ParameterContribution[],
+  ): ReadonlyMap<number, ParameterBaseSnapshot> {
+    const snapshots = new Map<number, ParameterBaseSnapshot>();
+    for (const { parameterIndex } of contributions) {
+      if (snapshots.has(parameterIndex)) {
+        continue;
+      }
+      if (!this.isParameterIndexWritable(parameterIndex)) {
+        snapshots.set(parameterIndex, {
+          writable: false,
+        });
+        continue;
+      }
+      const parameterId = this._model.getParameterId(parameterIndex);
+      snapshots.set(parameterIndex, {
+        parameterId,
+        parameterIdRaw: parameterId.getString().s,
+        writable: true,
+        baseValue: this._model.getParameterValueByIndex(parameterIndex),
+        minimumValue: this._model.getParameterMinimumValue(parameterIndex),
+        maximumValue: this._model.getParameterMaximumValue(parameterIndex),
+      });
+    }
+    return snapshots;
+  }
+
   private collectDirectPlanContributions(): DirectPlanContributionCollection {
     if (!this._directParameterPlanState || !this._model) {
       return {
@@ -1989,7 +2005,6 @@ export class LAppModel extends CubismUserModel {
       );
       presentationReleased = presentationReleased && presentationFrame.released;
       contributions.push({
-        parameterId: item.parameterId,
         parameterIdRaw: item.parameterIdRaw,
         parameterIndex: item.parameterIndex,
         owner: "direct_plan",
@@ -2039,7 +2054,6 @@ export class LAppModel extends CubismUserModel {
         return `parameter_mixer_lip_sync_invalid_runtime_range:${parameterId.getString().s}`;
       }
       contributions.push({
-        parameterId,
         parameterIdRaw: parameterId.getString().s,
         parameterIndex,
         owner: "lip_sync",
@@ -2133,17 +2147,14 @@ export class LAppModel extends CubismUserModel {
     return parameterIndex >= 0 && parameterIndex < this._model.getParameterCount();
   }
 
-  private resolveWritableParameter(parameterName: string): {
-    parameterId: CubismIdHandle;
-    parameterIndex: number;
-  } | null {
+  private resolveWritableParameterIndex(parameterName: string): number | null {
     if (!this._model) {
-      console.warn(`[LAppModel] resolveWritableParameter('${parameterName}'): no model`);
+      console.warn(`[LAppModel] resolveWritableParameterIndex('${parameterName}'): no model`);
       return null;
     }
     const normalizedName = String(parameterName || "").trim();
     if (!normalizedName) {
-      console.warn(`[LAppModel] resolveWritableParameter('${parameterName}'): empty name`);
+      console.warn(`[LAppModel] resolveWritableParameterIndex('${parameterName}'): empty name`);
       return null;
     }
     const idManager = CubismFramework.getIdManager();
@@ -2153,16 +2164,16 @@ export class LAppModel extends CubismUserModel {
         const parameterIndex = this._model.getParameterIndex(parameterId);
         if (this.isParameterIndexWritable(parameterIndex)) {
           if (LAppDefine.DebugLogEnable) {
-            console.info(`[LAppModel] resolveWritableParameter: resolved '${normalizedName}' via idManager -> index=${parameterIndex}`);
+            console.info(`[LAppModel] resolveWritableParameterIndex: resolved '${normalizedName}' via idManager -> index=${parameterIndex}`);
           }
-          return { parameterId, parameterIndex };
+          return parameterIndex;
         }
-        console.error(`[LAppModel] resolveWritableParameter('${parameterName}'): parameter is not writable (index=${parameterIndex}, model paramCount=${this._model.getParameterCount()}).`);
+        console.error(`[LAppModel] resolveWritableParameterIndex('${parameterName}'): parameter is not writable (index=${parameterIndex}, model paramCount=${this._model.getParameterCount()}).`);
       }
     } else {
-      console.error(`[LAppModel] resolveWritableParameter('${parameterName}'): Cubism id manager is unavailable.`);
+      console.error(`[LAppModel] resolveWritableParameterIndex('${parameterName}'): Cubism id manager is unavailable.`);
     }
-    console.error(`[LAppModel] resolveWritableParameter('${parameterName}'): exact parameter binding was not found.`);
+    console.error(`[LAppModel] resolveWritableParameterIndex('${parameterName}'): exact parameter binding was not found.`);
     return null;
   }
 

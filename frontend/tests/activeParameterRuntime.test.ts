@@ -2,14 +2,21 @@ import assert from "node:assert/strict";
 import {
   PARAMETER_MIX_PRIORITY,
   ParameterMixer,
+  type ParameterBaseSnapshot,
   type ParameterContribution,
 } from "../src/live2d/WebSDK/src/parametermixer.js";
+
+type WritableParameterBaseSnapshot = Extract<
+  ParameterBaseSnapshot,
+  { writable: true }
+>;
+
+const parameterId = {} as WritableParameterBaseSnapshot["parameterId"];
+
 function testParameterContributionOrderingAndFinalClamp(): void {
   const mixer = new ParameterMixer();
-  const parameterId = {} as ParameterContribution["parameterId"];
   const contributions: ParameterContribution[] = [
     {
-      parameterId,
       parameterIdRaw: "ParamMouthOpenY",
       parameterIndex: 0,
       owner: "lip_sync",
@@ -19,7 +26,6 @@ function testParameterContributionOrderingAndFinalClamp(): void {
       priority: PARAMETER_MIX_PRIORITY.lipSync,
     },
     {
-      parameterId,
       parameterIdRaw: "ParamMouthOpenY",
       parameterIndex: 0,
       owner: "direct_plan",
@@ -30,12 +36,17 @@ function testParameterContributionOrderingAndFinalClamp(): void {
     },
   ];
 
-  const result = mixer.resolveFrame(contributions, {
-    isParameterIndexWritable: () => true,
-    getParameterValue: () => 2,
-    getParameterMinimumValue: () => -10,
-    getParameterMaximumValue: () => 4,
-  });
+  const baseSnapshots: ReadonlyMap<number, ParameterBaseSnapshot> = new Map([
+    [0, {
+      parameterId,
+      parameterIdRaw: "ParamMouthOpenY",
+      writable: true,
+      baseValue: 2,
+      minimumValue: -10,
+      maximumValue: 4,
+    }],
+  ]);
+  const result = mixer.resolveFrame(contributions, baseSnapshots);
 
   if (!result.ok) {
     throw new Error(`Expected a resolved parameter frame: ${result.reason}`);
@@ -54,10 +65,18 @@ function testParameterContributionOrderingAndFinalClamp(): void {
 
 function testInvalidWeightIsRejected(): void {
   const mixer = new ParameterMixer();
-  const parameterId = {} as ParameterContribution["parameterId"];
+  const baseSnapshots: ReadonlyMap<number, ParameterBaseSnapshot> = new Map([
+    [0, {
+      parameterId,
+      parameterIdRaw: "ParamMouthOpenY",
+      writable: true,
+      baseValue: 0,
+      minimumValue: -10,
+      maximumValue: 10,
+    }],
+  ]);
   const result = mixer.resolveFrame([
     {
-      parameterId,
       parameterIdRaw: "ParamMouthOpenY",
       parameterIndex: 0,
       owner: "direct_plan",
@@ -66,12 +85,7 @@ function testInvalidWeightIsRejected(): void {
       weight: 1.5,
       priority: PARAMETER_MIX_PRIORITY.directPlan,
     },
-  ], {
-    isParameterIndexWritable: () => true,
-    getParameterValue: () => 0,
-    getParameterMinimumValue: () => -10,
-    getParameterMaximumValue: () => 10,
-  });
+  ], baseSnapshots);
 
   assert.deepEqual(result, {
     ok: false,

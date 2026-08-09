@@ -9,7 +9,6 @@ export type ParameterContributionOwner = "direct_plan" | "lip_sync";
 export type ParameterFrameOwner = ParameterContributionOwner | "mixed";
 
 export interface ParameterContribution {
-  parameterId: CubismIdHandle;
   parameterIdRaw: string;
   parameterIndex: number;
   owner: ParameterContributionOwner;
@@ -19,12 +18,18 @@ export interface ParameterContribution {
   priority: number;
 }
 
-export interface ParameterMixerAccess {
-  isParameterIndexWritable: (parameterIndex: number) => boolean;
-  getParameterValue: (parameterIndex: number) => number;
-  getParameterMinimumValue: (parameterIndex: number) => number;
-  getParameterMaximumValue: (parameterIndex: number) => number;
-}
+export type ParameterBaseSnapshot =
+  | {
+      parameterId: CubismIdHandle;
+      parameterIdRaw: string;
+      writable: true;
+      baseValue: number;
+      minimumValue: number;
+      maximumValue: number;
+    }
+  | {
+      writable: false;
+    };
 
 export interface ResolvedParameterContribution {
   owner: ParameterContributionOwner;
@@ -59,22 +64,22 @@ export type ParameterMixerResolution =
     };
 
 /**
- * Resolves already-produced active parameter contributions. It never interprets
- * semantic levels, owns source lifecycle, or writes Cubism parameters.
+ * Resolves one frozen Cubism base snapshot with already-produced active
+ * parameter contributions. It never reads or writes Cubism state, interprets
+ * semantic levels, or owns source lifecycle.
  */
 export class ParameterMixer {
   public resolveFrame(
     contributions: readonly ParameterContribution[],
-    access: ParameterMixerAccess,
+    baseSnapshots: ReadonlyMap<number, ParameterBaseSnapshot>,
   ): ParameterMixerResolution {
     const grouped = new Map<number, {
-      parameterId: CubismIdHandle;
       parameterIdRaw: string;
       contributions: Array<ParameterContribution & { sequence: number }>;
     }>();
 
     for (const [sequence, contribution] of contributions.entries()) {
-      const invalidReason = validateContribution(contribution, access);
+      const invalidReason = validateContribution(contribution);
       if (invalidReason) {
         return {
           ok: false,
@@ -100,7 +105,6 @@ export class ParameterMixer {
         continue;
       }
       grouped.set(contribution.parameterIndex, {
-        parameterId: contribution.parameterId,
         parameterIdRaw: contribution.parameterIdRaw,
         contributions: [{ ...contribution, sequence }],
       });
@@ -110,54 +114,76 @@ export class ParameterMixer {
     const orderedGroups = [...grouped.entries()]
       .sort(([leftIndex], [rightIndex]) => leftIndex - rightIndex);
     for (const [parameterIndex, group] of orderedGroups) {
-      const minValue = access.getParameterMinimumValue(parameterIndex);
-      const maxValue = access.getParameterMaximumValue(parameterIndex);
-      const baseValue = access.getParameterValue(parameterIndex);
+      const owner = resolveContributionOwner(group.contributions);
+      const snapshot = baseSnapshots.get(parameterIndex);
+      if (!snapshot) {
+        return {
+          ok: false,
+          reason: `parameter_mixer_base_snapshot_missing:${group.parameterIdRaw}`,
+          owner,
+        };
+      }
+      if (!snapshot.writable) {
+        return {
+          ok: false,
+          reason: `parameter_mixer_parameter_not_writable:${group.parameterIdRaw}`,
+          owner,
+        };
+      }
+      if (snapshot.parameterIdRaw !== group.parameterIdRaw) {
+        return {
+          ok: false,
+          reason: `parameter_mixer_base_snapshot_identity_conflict:${snapshot.parameterIdRaw}:${group.parameterIdRaw}`,
+          owner,
+        };
+      }
+      const minValue = snapshot.minimumValue;
+      const maxValue = snapshot.maximumValue;
+      const baseValue = snapshot.baseValue;
       if (!Number.isFinite(minValue) || !Number.isFinite(maxValue) || minValue > maxValue) {
         return {
           ok: false,
           reason: `parameter_mixer_invalid_runtime_range:${group.parameterIdRaw}`,
-          owner: resolveContributionOwner(group.contributions),
+          owner,
         };
       }
       if (!Number.isFinite(baseValue)) {
         return {
           ok: false,
           reason: `parameter_mixer_invalid_base_value:${group.parameterIdRaw}`,
-          owner: resolveContributionOwner(group.contributions),
+          owner,
         };
       }
 
       let unclampedValue = baseValue;
       const resolvedContributions: ResolvedParameterContribution[] = [];
-      group.contributions
-        .sort((left, right) => {
-          const priorityOrder = left.priority - right.priority;
-          if (priorityOrder !== 0) {
-            return priorityOrder;
-          }
-          const sourceOrder = left.source.localeCompare(right.source);
-          return sourceOrder !== 0 ? sourceOrder : left.sequence - right.sequence;
-        })
-        .forEach((contribution) => {
-          const resolvedValue = resolveContributionValue(unclampedValue, contribution);
-          resolvedContributions.push({
-            owner: contribution.owner,
-            source: contribution.source,
-            value: contribution.value,
-            weight: contribution.weight,
-            priority: contribution.priority,
-            resolvedValue,
-          });
-          unclampedValue = resolvedValue;
+      const orderedContributions = group.contributions.sort((left, right) => {
+        const priorityOrder = left.priority - right.priority;
+        if (priorityOrder !== 0) {
+          return priorityOrder;
+        }
+        const sourceOrder = left.source.localeCompare(right.source);
+        return sourceOrder !== 0 ? sourceOrder : left.sequence - right.sequence;
+      });
+      for (const contribution of orderedContributions) {
+        const resolvedValue = resolveContributionValue(unclampedValue, contribution);
+        resolvedContributions.push({
+          owner: contribution.owner,
+          source: contribution.source,
+          value: contribution.value,
+          weight: contribution.weight,
+          priority: contribution.priority,
+          resolvedValue,
         });
+        unclampedValue = resolvedValue;
+      }
       const value = clamp(unclampedValue, minValue, maxValue);
 
       parameters.push({
-        parameterId: group.parameterId,
+        parameterId: snapshot.parameterId,
         parameterIdRaw: group.parameterIdRaw,
         parameterIndex,
-        owner: resolveContributionOwner(group.contributions),
+        owner,
         baseValue,
         unclampedValue,
         value,
@@ -173,29 +199,27 @@ export class ParameterMixer {
 function resolveContributionOwner(
   contributions: readonly Pick<ParameterContribution, "owner">[],
 ): ParameterFrameOwner {
-  const owners = [...new Set(
-    contributions
-      .map((contribution) => contribution.owner)
-      .filter(isParameterContributionOwner),
-  )];
-  return owners.length === 1 ? owners[0] : "mixed";
+  let owner: ParameterContributionOwner | null = null;
+  for (const contribution of contributions) {
+    if (!isParameterContributionOwner(contribution.owner)) {
+      continue;
+    }
+    if (owner !== null && owner !== contribution.owner) {
+      return "mixed";
+    }
+    owner = contribution.owner;
+  }
+  return owner ?? "mixed";
 }
 
 function validateContribution(
   contribution: ParameterContribution,
-  access: ParameterMixerAccess,
 ): string | null {
   if (typeof contribution.parameterIdRaw !== "string" || !contribution.parameterIdRaw.trim()) {
     return `parameter_mixer_parameter_id_missing:${contribution.parameterIndex}`;
   }
-  if (contribution.parameterId == null) {
-    return `parameter_mixer_parameter_handle_missing:${contribution.parameterIdRaw}`;
-  }
-  if (!Number.isInteger(contribution.parameterIndex)) {
+  if (!Number.isInteger(contribution.parameterIndex) || contribution.parameterIndex < 0) {
     return `parameter_mixer_invalid_parameter_index:${contribution.parameterIdRaw}`;
-  }
-  if (!access.isParameterIndexWritable(contribution.parameterIndex)) {
-    return `parameter_mixer_parameter_not_writable:${contribution.parameterIdRaw}`;
   }
   if (!isParameterContributionOwner(contribution.owner)) {
     return `parameter_mixer_owner_invalid:${contribution.parameterIdRaw}`;
