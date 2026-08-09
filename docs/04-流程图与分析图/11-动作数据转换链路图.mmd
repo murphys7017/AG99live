@@ -90,7 +90,7 @@ flowchart TD
         SPEECH[SpeechPoseStage order 60<br/>按音频条件生成非周期参数轨道]:::engine
         BUILD[ModelParameterBindingStage order 80<br/>语义轴 -> 当前模型 parameter binding]:::engine
         POLICY[ResourcePolicyStage order 90<br/>资源参数冲突与执行策略]:::engine
-        PLAN[engine.parameter_plan.v2]:::contract
+        PLAN[engine.parameter_plan.v3]:::contract
         COMPILED --> SPEECH --> BUILD --> POLICY --> PLAN
         SPEECH -.记录.-> TRACE
         BUILD -.记录.-> TRACE

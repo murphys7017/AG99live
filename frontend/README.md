@@ -9,7 +9,7 @@ AG99live 的 Electron + Vue 客户端。
 - 历史窗口
 - Action Lab（动作计划预览与测试）
 - 与 Adapter 的 V2 协议通信
-- 前端 ModelEngine：将 `engine.motion_intent.v4` 编译为 `CompiledSemanticMotion`，再编译为 `engine.parameter_plan.v2`
+- 前端 ModelEngine：将 `engine.motion_intent.v4` 编译为 `CompiledSemanticMotion`，再编译为携带参数响应策略的 `engine.parameter_plan.v3`
 
 ## 开发命令
 

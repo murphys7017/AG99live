@@ -3,7 +3,7 @@ task:
   risk: high
   phase: completion
   status: complete
-  scope: "Make Parameter Mixer consume an explicit frozen Cubism base snapshot plus direct-plan and lip-sync contributions, keeping all Cubism reads and the sole AG99 active-parameter write inside LAppModel without changing native Cubism base updates, semantic compilation, presentation dynamics, or Physics."
+  scope: "Introduce explicit head/body response policies in the compiled parameter plan and execute them in ParameterPresentation without moving dynamics into ParameterMixer or applying smoothing to Cubism Physics outputs."
 
 context:
   confidence: high
@@ -54,7 +54,7 @@ architecture:
     output: output.segment.v3
     persona_motion: engine.motion_intent.v4
     official_inline_motion: engine.motion_intent.v4 inside the <@anim> transport wrapper
-    parameter_plan: engine.parameter_plan.v2
+    parameter_plan: engine.parameter_plan.v3
     semantic_axis_profile: ag99.semantic_axis_profile.v3
     performance_curve: ag99.performance_curve_hint.v1
     voice_following: ag99.voice_following_profile.v3
@@ -148,6 +148,7 @@ verification:
     - `npm run typecheck:websdk` and `npm run typecheck:renderer` passed after restoring TypeScript checking on `LAppAdapter` and deleting its unconsumed model-position, motion-catalog, expression-control, and ID-manager APIs together with stale global declarations.
     - `npm run typecheck:websdk`, `npm run typecheck:renderer`, repository-wide stale-symbol lookup, and `git diff --check` passed after deleting unused Parameter Mixer operation modes, moving frame-owner aggregation into the Mixer, and removing the duplicate direct-plan writability check from the per-frame producer.
     - `npm run typecheck:websdk`, the focused `activeParameterRuntime.test.ts` smoke, repository-wide Parameter Mixer/write-point lookup, and `git diff --check` passed after replacing Cubism access callbacks with one readonly per-frame base snapshot map owned by LAppModel and removing Cubism write handles from source contributions.
+    - Frontend renderer/WebSDK/Node typechecks, `python scripts/check_protocol_schema_manifest.py`, focused Python syntax checks, the active-parameter response and large-Timeline-step smoke, the desktop snapshot clone smoke, V2 residue lookup, and `git diff --check` passed after the atomic `engine.parameter_plan.v3` migration and explicit head/body response policy implementation.
   validation_gap:
     - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
     - Live AstrBot plus Provider plus TTS plus Electron plus Live2D validation is still required after the clock migration, including a long audio segment and a paused audio segment.
@@ -167,6 +168,7 @@ verification:
     - A live official AstrBot 4.27.0 plus TTS plus Electron plus Live2D conversation is required to verify inline V4 motion extraction, final Record audio projection, one atomic output segment, and after-message queue closure.
     - The focused contributor-registration and TTS-hook boundary smoke checks passed after synchronizing the AstrBot stubs with the current capability contract.
     - A live Electron plus Mk6 conversation is required to confirm direct-plan and lip-sync contributions remain visually correct together, owner-scoped failure ends only the affected source, and Physics consumes the resolved frame without a release jump.
+    - A live Electron plus Mk6 conversation must confirm the V3 head spring produces a visible but restrained short overshoot, the body starts and reverses later than the head, lip sync remains unaffected, and Cubism hair/clothing Physics responds without receiving ParameterPresentation smoothing.
 
 backlog:
   - id: parameter_mixer

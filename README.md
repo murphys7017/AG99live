@@ -87,7 +87,7 @@ AG99live 面向希望把 Live2D 角色作为长期交互主体使用的开发者
 LLM 语义动作
   -> 九级锚点与确定性采样
   -> 轴关系图与模型约束
-  -> engine.parameter_plan.v2
+  -> engine.parameter_plan.v3
   -> Live2D 逐帧参数驱动
 ```
 
@@ -125,7 +125,7 @@ Adapter 使用 `turn_id + message_id` 聚合文本、TTS、动作和其他输出
 
 ### 4. ModelEngine 编译参数
 
-ModelEngine 读取当前模型的 `SemanticAxisProfile`，完成校验、九级采样、轴关系计算、说话随动轨道和参数绑定，输出 `engine.parameter_plan.v2`。
+ModelEngine 读取当前模型的 `SemanticAxisProfile`，完成校验、九级采样、轴关系计算、说话随动轨道、参数绑定与响应策略编译，输出 `engine.parameter_plan.v3`。
 
 ### 5. PlaybackTimeline 统一释放
 
@@ -212,7 +212,7 @@ flowchart LR
     S --> T["PlaybackTimeline"]
     T --> AU["音频与字幕"]
     T --> M["ModelEngine"]
-    M --> PL["parameter_plan.v2"]
+    M --> PL["parameter_plan.v3"]
     PL --> L["Live2D WebSDK"]
     AU --> L
     L --> R["动作 + 口型 + Cubism Physics"]
@@ -300,7 +300,7 @@ HTTP       127.0.0.1:12397
 
 - AstrBot 输入、回复、TTS 和 Persona Effect 接入。
 - 原子 segment 聚合与统一播放 Timeline。
-- `engine.motion_intent.v4` 到 `engine.parameter_plan.v2` 的动作编译。
+- `engine.motion_intent.v4` 到 `engine.parameter_plan.v3` 的动作编译。
 - Live2D 参数动作、说话随动、口型和 Cubism Physics。
 - Profile Editor、动作实验室、历史和系统设置窗口。
 - B 站直播弹幕输入与可选远程操作委托。

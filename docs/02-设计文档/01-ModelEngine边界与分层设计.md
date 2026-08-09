@@ -9,7 +9,7 @@ ModelEngine 是语义动作编译器和动作启动边界。它把动作意图�
 ```text
 engine.motion_intent.v4
   -> ModelEngine compiler
-  -> engine.parameter_plan.v2 / typed resource execution
+  -> engine.parameter_plan.v3 / typed resource execution
   -> PlaybackTimeline motion sink
   -> Live2D WebSDK
 ```
@@ -25,7 +25,7 @@ ModelEngine 负责：
 - 将 v4 `axis_levels` 转换成模型级语义轴值。
 - 执行强度、派生、说话手势和轴关系图计算。
 - 解析 segment-scoped Timeline 时钟与动作 timing。
-- 生成 `engine.parameter_plan.v2`。
+- 生成 `engine.parameter_plan.v3`。
 - 仲裁 typed expression/motion resource。
 - 启动动作并把真实 started/terminal 结果报告给 Timeline。
 - 生成可归因的 compile diagnostics 和 Motion Feedback。
@@ -46,7 +46,7 @@ ModelEngine 不负责：
 | --- | --- |
 | `engine.motion_intent.v4` | Persona Effect 主动作；九级 `axis_levels` |
 | `CompiledSemanticMotion` | ModelEngine 第一阶段输出，也是手动预览唯一输入 |
-| `engine.parameter_plan.v2` | 已完成语义编译的内部/工具计划 |
+| `engine.parameter_plan.v3` | 已完成语义编译并携带参数响应策略的内部/工具计划 |
 | `MotionPlaybackClockContext` | 当前 segment 的窄时钟投影 |
 | model summary/profile/catalog | 当前模型能力事实 |
 
@@ -65,7 +65,7 @@ ModelEngine 不负责：
 | --- | --- |
 | `useModelEngine.ts` | facade 与实例组合根 |
 | `normalize.ts` | V4 motion intent 与 typed catalog motion 的严格入站解析 |
-| `planParser.ts` | `engine.parameter_plan.v2` 严格解析 |
+| `planParser.ts` | `engine.parameter_plan.v3` 严格解析 |
 | `compiler/compileParameterMotionIntent.ts` | 参数动作 compiler 主入口与两阶段结果收口 |
 | `compiler/compileContext.ts` | stage 共享 state |
 | `compiler/registry.ts` | 实例级 stage registry |

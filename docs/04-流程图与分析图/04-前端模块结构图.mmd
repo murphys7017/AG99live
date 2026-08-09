@@ -59,7 +59,7 @@ flowchart TB
         NORMAL[normalize + strict contracts]:::engine
         SEMANTIC[semantic phase<br/>validate / sample / intensity / relation graph / timing]:::engine
         PARAMETER[model_parameter phase<br/>speech pose / binding / resource policy]:::engine
-        PLAN[parameter_plan.v2]:::engine
+        PLAN[parameter_plan.v3]:::engine
         SCHED[motionRuntimeScheduler<br/>segment pending ownership]:::engine
         ENTRY --> NORMAL --> SEMANTIC --> PARAMETER --> PLAN
         ENTRY --> SCHED

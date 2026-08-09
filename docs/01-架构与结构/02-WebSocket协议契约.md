@@ -220,7 +220,7 @@ Motion Lab 事件采用 at-least-once 交付：前端必须先把事件写入 In
 ```text
 后端把 motion intent 放入 output.segment.motion.payload
 -> 前端在原子段预校验阶段归一化意图
--> 前端动作引擎在本地将意图编译为 engine.parameter_plan.v2
+-> 前端动作引擎在本地将意图编译为 engine.parameter_plan.v3
 -> 前端运行时执行计划
 ```
 

@@ -14,7 +14,7 @@ AG99live V2 的 AstrBot 插件侧实现。该目录负责协议桥接、turn 生
 ## 当前路线说明
 
 - 后端当前主职责是把 `ag99live.motion` 的九级 `axis_levels` 严格归一化为 `engine.motion_intent.v4`，并通过 middleware-first 链路稳定送到前端。
-- 前端 `ModelEngine` 负责把 intent 编译为 `engine.parameter_plan.v2`。
+- 前端 `ModelEngine` 负责把 intent 编译为 `engine.parameter_plan.v3`。
 - 说话时的 plan 级补偿由前端 compile 侧 `SpeechPoseStage` 承接。
 - 扫描器下发 `ag99.voice_following_profile.v3`，只描述语义轴、有效幅度比例和跟随延迟；最终参数绑定、范围和动力学统一由 semantic axis profile 负责。
 - 旧 `voice_following_profile.v1/v2` 和 `speech_pose_cycle` 不属于兼容协议，前端入站会显式拒绝。
@@ -74,7 +74,7 @@ astrbot_plugin_ag99live_adapter/
 
 ### 动作效果输出
 
-- 当前 Persona Effect 主动作载荷为 `engine.motion_intent.v4`，前端 `ModelEngine` 根据 `semantic_axis_profile.level_anchors` 把 `axis_levels` 转换为轴值，再编译为 `engine.parameter_plan.v2`。
+- 当前 Persona Effect 主动作载荷为 `engine.motion_intent.v4`，前端 `ModelEngine` 根据 `semantic_axis_profile.level_anchors` 把 `axis_levels` 转换为轴值，再编译为 `engine.parameter_plan.v3`。
 - `axis_levels` 只能使用 `-4..4` 整数；省略表示本轮不控制该轴，`0` 表示明确回到中性。混入 `axes`、非法等级或空等级对象会直接拒绝，不会回退到 v3。
 - 普通 Live2D 主要姿态默认从三级开始；四级由每轴独立 `extreme_range` 定义，用于短时夸张表演。内置七类 v4 示例和当前 profile revision 的人工筛选样本会注入 capability。
 - 可选资源使用 `expression_resource_id` 或 `motion_resource_id`，一次最多选择一个。expression 只与无参数冲突的计划叠加；motion 作为完整动作替代参数计划，但仍共享当前 segment 的统一 motion sink。
@@ -87,7 +87,7 @@ astrbot_plugin_ag99live_adapter/
 - 每条交互消息都带 `turn_id`，前后端只按这一个轮次 ID 做会话协调。
 - 每个 assistant segment 由非空 `turn_id + message_id` 标识；Adapter 先把 Plain、Record.text 与 semantic text 归一化为唯一 canonical text，再聚合音频、图片和 motion client object，发送一个 `output.segment.v3`。
 - 隐藏动作传输标记在回复进入 TTS 前的输出规范化阶段清洗；原文只供官方 `<@anim>` 兼容解析。增强版 Core 只读监听 AstrBot TTS 生成状态并可下发 `audio.state=failed`；官方 Core 只依据最终 `Record` 投影音频成功，不模拟不存在的生命周期。
-- 正式动作位于 `output.segment.motion.payload`；前端原子提交完整段后，由 ModelEngine 把 intent 编译为 `engine.parameter_plan.v2`。
+- 正式动作位于 `output.segment.motion.payload`；前端原子提交完整段后，由 ModelEngine 把 intent 编译为 `engine.parameter_plan.v3`。
 - `system.server_info` 携带完整 schema manifest；前端只有在 manifest 与本地契约完全一致后才处理后续消息。
 - `system.model_sync` 使用 `live2d_scan.v3`，只下发前端运行需要的模型资源摘要、参数扫描、包含原始 SDK locator 的 resource constraints、`parameter_action_library`、`semantic_axis_profile` 和 `voice_following_profile`。后端分析中间产物不跨 WebSocket 复制。
 - `runtime_cache_errors` 只作为 `system.model_sync.payload` 根部的独立运行诊断下发，不复制进 `model_info`。
