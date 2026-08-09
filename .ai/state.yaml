@@ -1,16 +1,19 @@
 task:
-  class: documentation
-  risk: medium
+  class: feature
+  risk: high
   phase: completion
   status: complete
-  scope: "Unify product phase-one completion, phase-two entry points, and current architecture documentation without changing runtime code."
+  scope: "Move semantic sequence timing and speech-gesture composition into one ModelEngine parameter track graph compiler while preserving engine.parameter_plan.v3 and existing runtime ownership."
 
 context:
   confidence: high
   assumptions:
     - Product phase one implementation is complete.
     - Manual observation, model tuning, and live runtime acceptance are not implementation backlog.
-    - Parameter track graphs, deeper dynamics and Physics work, Motion Lab editing, small-model training, VTS semantic export, remote-operator separation, cross-host deployment, and release packaging belong to phase two or later.
+    - The first parameter track graph is a compile-time ModelEngine structure, not a second runtime graph engine or player.
+    - The graph emits the existing engine.parameter_plan.v3 keyframes and modulation fields; no protocol migration is required.
+    - ParameterMixer remains a per-frame contribution mixer and does not acquire semantic timing ownership.
+    - Deeper dynamics and Physics work, Motion Lab editing, small-model training, VTS semantic export, remote-operator separation, cross-host deployment, and release packaging belong to phase two or later.
     - Obsolete documents, code, tests, protocol versions, and migration history are deleted rather than retained as compatibility guidance.
 
 architecture:
@@ -49,19 +52,23 @@ architecture:
 
 verification:
   policy:
-    - Use only documentation link checks, focused static inspection, and git diff review for this task.
+    - Use focused source inspection, the narrow renderer typecheck, the existing ModelEngine boundary smoke, documentation link checks, and git diff review for this task.
     - Automated tests are low-confidence boundary smoke checks and are not end-to-end evidence.
     - Live Electron, AstrBot, TTS, and Live2D observation is user-led acceptance, not unfinished implementation work.
   current_checks:
-    - Local links in all changed Markdown files resolve.
-    - Protocol versions in the documentation match protocol/schema_manifest.json.
-    - No stale phase-status wording remains in README.md, docs, or .ai.
+    - `npm run typecheck:renderer` passed.
+    - A focused coordinated parameter-track input/output probe passed during implementation; its large fixture was deliberately not retained.
+    - The existing minimal `npm run test:model-engine` boundary smoke passed after test cleanup.
+    - Audio completion detaches the HTMLAudioElement clock into Timeline audio-tail continuation, so residual motion retains a monotonic segment clock after speech ends.
+    - Source review confirms sequence graph ownership moved out of compileModelParameterPlan and speech modulation ownership moved out of ModelParameterBindingStage.
+    - The semantic schedule retains its existing duration; short per-parameter windows compress locally, and only the terminal transition/residual/blend-out tail can extend the plan.
+    - Changed documentation links resolve and stale unfinished-track-graph wording is absent.
     - git diff --check reports no whitespace errors.
 
 backlog:
   phase_two:
-    - Parameter track graph for semantic sequence, phrase modulation, delay, hold, release, and residual.
     - Gaze, face, hesitation, and residual response policies beyond the completed head/body V3 dynamics.
+    - Explicit sequence-step to phrase identity after real data proves the required protocol shape.
     - Cubism Physics setting diagnostics and model-level presentation profiles.
     - Motion Lab sequence editing, diversity summaries, and training-data workbench.
     - Small motion-model training and VTube Studio semantic labeling/export.

@@ -112,7 +112,6 @@ function buildSemanticPlanParameters(
 
       seenParameterIds.add(binding.parameter_id);
       const dynamics = mapSemanticBindingDynamics(axis, binding);
-      const speechGesture = pendingSpeechGestures[axisId];
       parameters.push({
         axis_id: axisId,
         parameter_id: binding.parameter_id,
@@ -121,14 +120,6 @@ function buildSemanticPlanParameters(
         weight: binding.default_weight,
         input_value: value,
         source,
-        modulation: speechGesture ? {
-          kind: "speech_gesture_track",
-          preset: speechGesture.preset,
-          amplitude: dynamics.max_speech_offset * speechGesture.amplitudeRatio,
-          direction: 1,
-          delay_ms: speechGesture.delayMs,
-          points: speechGesture.points,
-        } : undefined,
         dynamics,
       });
     }
