@@ -3,7 +3,7 @@ task:
   risk: high
   phase: completion
   status: complete
-  scope: "Introduce explicit head/body response policies in the compiled parameter plan and execute them in ParameterPresentation without moving dynamics into ParameterMixer or applying smoothing to Cubism Physics outputs."
+  scope: "Replace the monolithic Adapter interaction_motion.py with one interaction_motion package whose Prompt, reference projection, Persona Effect resolution, result scheduling, and AstrBot compatibility modules preserve the existing public entrypoints and behavior."
 
 context:
   confidence: high
@@ -66,6 +66,12 @@ architecture:
     model_engine: Level sampling, intensity, relation graph derivation and constraints, timing, speech gesture planning, plan building, and resource policy.
     playback_timeline: Segment-scoped clock and required/optional sink lifecycle.
     live2d_websdk: Exact parameter resolution, per-frame interpolation, lip sync, speech energy, dynamics, and physics.
+  adapter_motion_middleware:
+    public_boundary: "middleware.interaction_motion exports contributor registration, official inline Prompt injection, and deferred performance-curve start."
+    prompt: "prompt.py composes contributor entrypoints; prompt_builder.py, prompt_context.py, and prompt_references.py own construction and projection without scheduling output."
+    effect_resolution: "effects.py owns Persona Effect registration, extraction, and strict payload normalization."
+    scheduling: "scheduling.py owns result contribution, motion scheduling policy, Motion Lab result recording, and optional performance-curve deferral."
+    compatibility: "compatibility.py is the only owner of enhanced versus official AstrBot capability imports."
   parameter_mixing:
     boundary: "WebSDK-only active parameter composition immediately before Cubism Physics."
     inputs: "Cubism base snapshot plus direct-plan and lip-sync contributions; SpeechSignalRuntime owns source-scoped audio values and speech envelopes."
@@ -149,6 +155,7 @@ verification:
     - `npm run typecheck:websdk`, `npm run typecheck:renderer`, repository-wide stale-symbol lookup, and `git diff --check` passed after deleting unused Parameter Mixer operation modes, moving frame-owner aggregation into the Mixer, and removing the duplicate direct-plan writability check from the per-frame producer.
     - `npm run typecheck:websdk`, the focused `activeParameterRuntime.test.ts` smoke, repository-wide Parameter Mixer/write-point lookup, and `git diff --check` passed after replacing Cubism access callbacks with one readonly per-frame base snapshot map owned by LAppModel and removing Cubism write handles from source contributions.
     - Frontend renderer/WebSDK/Node typechecks, `python scripts/check_protocol_schema_manifest.py`, focused Python syntax checks, the active-parameter response and large-Timeline-step smoke, the desktop snapshot clone smoke, V2 residue lookup, and `git diff --check` passed after the atomic `engine.parameter_plan.v3` migration and explicit head/body response policy implementation.
+    - Focused Adapter compile/import checks, Pyflakes, and a 69-symbol AST comparison passed after replacing `middleware/interaction_motion.py`; every original top-level function and class has one new owner and an unchanged AST body.
   validation_gap:
     - A live AstrBot plus Provider plus TTS plus Electron plus Live2D conversation is required to verify prompt construction, effect delivery, atomic segment release, real audio clock, subtitle, lip sync, motion start, parameter writes, and terminal reporting as one chain.
     - Live AstrBot plus Provider plus TTS plus Electron plus Live2D validation is still required after the clock migration, including a long audio segment and a paused audio segment.
