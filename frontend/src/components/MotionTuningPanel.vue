@@ -16,7 +16,7 @@ import type {
 } from "../types/protocol";
 import {
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
-  SCHEMA_PARAMETER_PLAN_V2,
+  SCHEMA_PARAMETER_PLAN_V3,
 } from "../types/protocol";
 import type { CompiledSemanticMotion } from "../model-engine/compiler/contracts";
 import type {
@@ -443,7 +443,7 @@ function isSemanticMotionPlaybackRecord(
   return (
     (record.payloadKind === "semantic_intent" || record.payloadKind === "speech_only")
     && Boolean(record.plan)
-    && record.plan.schema_version === SCHEMA_PARAMETER_PLAN_V2
+    && record.plan.schema_version === SCHEMA_PARAMETER_PLAN_V3
   );
 }
 

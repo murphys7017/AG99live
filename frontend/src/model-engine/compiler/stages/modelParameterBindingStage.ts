@@ -151,7 +151,29 @@ function mapSemanticBindingDynamics(
     max_velocity: axis.dynamics.max_velocity * outputPerInput,
     max_acceleration: axis.dynamics.max_acceleration * outputPerInput,
     max_speech_offset: outputSpan * axis.dynamics.max_speech_offset_ratio,
+    response: mapParameterResponsePolicy(axis.semantic_group),
   };
+}
+
+function mapParameterResponsePolicy(
+  semanticGroup: string,
+): NonNullable<SemanticParameterPlan["parameters"][number]["dynamics"]>["response"] {
+  const group = semanticGroup.trim().toLowerCase();
+  if (group === "head") {
+    return {
+      kind: "spring",
+      frequency_hz: 2.4,
+      damping_ratio: 0.78,
+    };
+  }
+  if (group === "body" || group === "torso" || group === "shoulder") {
+    return {
+      kind: "spring",
+      frequency_hz: 1,
+      damping_ratio: 0.85,
+    };
+  }
+  return { kind: "bounded" };
 }
 
 function mapSemanticBindingValue(

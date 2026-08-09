@@ -1,4 +1,9 @@
-import type { DirectParameterExecutionPlan } from "./directparameterplan";
+import type {
+  DirectParameterExecutionPlan,
+  DirectParameterResponsePolicy,
+} from "./directparameterplan";
+
+const MAX_SPRING_STEP_SECONDS = 1 / 120;
 
 export interface ParameterPresentationNode {
   parameterId: string;
@@ -6,6 +11,7 @@ export interface ParameterPresentationNode {
   neutralValue: number;
   maxVelocity: number;
   maxAcceleration: number;
+  response: DirectParameterResponsePolicy;
   drivenValue: number | null;
   velocity: number;
   lastElapsedMs: number | null;
@@ -33,12 +39,23 @@ export function resolveParameterPresentationFrame(
   const targetValue = resolveTrajectoryEnvelope(node, frameTargetValue, elapsedMs, timing);
   const previousValue = node.drivenValue ?? node.initialValue;
   const previousElapsedMs = node.lastElapsedMs;
+  const ownershipWeight = resolveOwnershipWeight(elapsedMs, timing);
   node.lastElapsedMs = elapsedMs;
+
+  if (ownershipWeight === 0) {
+    node.drivenValue = previousValue;
+    node.velocity = 0;
+    return {
+      targetValue,
+      drivenValue: previousValue,
+      ownershipWeight,
+      released: true,
+    };
+  }
 
   if (previousElapsedMs === null || elapsedMs <= previousElapsedMs) {
     node.drivenValue = previousValue;
     node.velocity = 0;
-    const ownershipWeight = resolveOwnershipWeight(elapsedMs, timing);
     return {
       targetValue,
       drivenValue: node.drivenValue,
@@ -55,10 +72,10 @@ export function resolveParameterPresentationFrame(
     deltaSeconds,
     node.maxVelocity,
     node.maxAcceleration,
+    node.response,
   );
   node.drivenValue = next.value;
   node.velocity = next.velocity;
-  const ownershipWeight = resolveOwnershipWeight(elapsedMs, timing);
   return {
     targetValue,
     drivenValue: next.value,
@@ -159,6 +176,37 @@ function advanceParameterDynamics(
   deltaSeconds: number,
   maxVelocity: number,
   maxAcceleration: number,
+  response: DirectParameterResponsePolicy,
+): { value: number; velocity: number } {
+  if (response.kind === "spring") {
+    return advanceSpringParameterDynamics(
+      previousValue,
+      targetValue,
+      previousVelocity,
+      deltaSeconds,
+      maxVelocity,
+      maxAcceleration,
+      response.frequency_hz,
+      response.damping_ratio,
+    );
+  }
+  return advanceBoundedParameterDynamics(
+    previousValue,
+    targetValue,
+    previousVelocity,
+    deltaSeconds,
+    maxVelocity,
+    maxAcceleration,
+  );
+}
+
+function advanceBoundedParameterDynamics(
+  previousValue: number,
+  targetValue: number,
+  previousVelocity: number,
+  deltaSeconds: number,
+  maxVelocity: number,
+  maxAcceleration: number,
 ): { value: number; velocity: number } {
   const remaining = targetValue - previousValue;
   const velocityDelta = maxAcceleration * deltaSeconds;
@@ -187,6 +235,111 @@ function advanceParameterDynamics(
     return { value: targetValue, velocity: 0 };
   }
   return { value: nextValue, velocity: nextVelocity };
+}
+
+function advanceSpringParameterDynamics(
+  previousValue: number,
+  targetValue: number,
+  previousVelocity: number,
+  deltaSeconds: number,
+  maxVelocity: number,
+  maxAcceleration: number,
+  frequencyHz: number,
+  dampingRatio: number,
+): { value: number; velocity: number } {
+  const stepCount = Math.max(
+    1,
+    Math.ceil(deltaSeconds / MAX_SPRING_STEP_SECONDS),
+  );
+  const stepSeconds = deltaSeconds / stepCount;
+  let value = previousValue;
+  let velocity = previousVelocity;
+  for (let index = 0; index < stepCount; index += 1) {
+    const next = advanceSpringParameterDynamicsStep(
+      value,
+      targetValue,
+      velocity,
+      stepSeconds,
+      maxVelocity,
+      maxAcceleration,
+      frequencyHz,
+      dampingRatio,
+    );
+    value = next.value;
+    velocity = next.velocity;
+  }
+  return { value, velocity };
+}
+
+function advanceSpringParameterDynamicsStep(
+  previousValue: number,
+  targetValue: number,
+  previousVelocity: number,
+  deltaSeconds: number,
+  maxVelocity: number,
+  maxAcceleration: number,
+  frequencyHz: number,
+  dampingRatio: number,
+): { value: number; velocity: number } {
+  const remaining = targetValue - previousValue;
+  const velocityDelta = maxAcceleration * deltaSeconds;
+  if (Math.abs(remaining) <= 0.001 && Math.abs(previousVelocity) <= velocityDelta) {
+    return { value: targetValue, velocity: 0 };
+  }
+
+  const desiredVelocity = resolveDampedSpringVelocity(
+    previousValue,
+    targetValue,
+    previousVelocity,
+    deltaSeconds,
+    frequencyHz,
+    dampingRatio,
+  );
+  const accelerationLimitedVelocity = clampRange(
+    desiredVelocity,
+    previousVelocity - velocityDelta,
+    previousVelocity + velocityDelta,
+  );
+  const nextVelocity = clampRange(
+    accelerationLimitedVelocity,
+    -maxVelocity,
+    maxVelocity,
+  );
+  const nextValue = previousValue
+    + (previousVelocity + nextVelocity) * 0.5 * deltaSeconds;
+  if (
+    Math.abs(targetValue - nextValue) <= 0.001
+    && Math.abs(nextVelocity) <= velocityDelta
+  ) {
+    return { value: targetValue, velocity: 0 };
+  }
+  return { value: nextValue, velocity: nextVelocity };
+}
+
+function resolveDampedSpringVelocity(
+  previousValue: number,
+  targetValue: number,
+  previousVelocity: number,
+  deltaSeconds: number,
+  frequencyHz: number,
+  dampingRatio: number,
+): number {
+  const displacement = previousValue - targetValue;
+  const angularFrequency = 2 * Math.PI * frequencyHz;
+  const dampedFrequency = angularFrequency * Math.sqrt(1 - dampingRatio ** 2);
+  const decay = Math.exp(-dampingRatio * angularFrequency * deltaSeconds);
+  const phase = dampedFrequency * deltaSeconds;
+  const cosine = Math.cos(phase);
+  const sine = Math.sin(phase);
+  const velocityTerm = (
+    previousVelocity + dampingRatio * angularFrequency * displacement
+  ) / dampedFrequency;
+  const projectedDisplacement = displacement * cosine + velocityTerm * sine;
+  return decay * (
+    -dampingRatio * angularFrequency * projectedDisplacement
+    - displacement * dampedFrequency * sine
+    + velocityTerm * dampedFrequency * cosine
+  );
 }
 
 function interpolate(start: number, end: number, progress: number): number {

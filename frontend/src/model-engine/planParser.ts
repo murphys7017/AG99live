@@ -5,7 +5,7 @@ import type {
   SemanticPlanResource,
 } from "../types/protocol.js";
 import {
-  SCHEMA_PARAMETER_PLAN_V2,
+  SCHEMA_PARAMETER_PLAN_V3,
   isSemanticParameterPlanSource,
 } from "../types/protocol.js";
 import {
@@ -14,6 +14,7 @@ import {
   normalizeStringArray,
   normalizeText,
 } from "../utils/guards.js";
+import { MAX_MOTION_DURATION_MS } from "./constants.js";
 
 interface ParseFailure {
   ok: false;
@@ -45,7 +46,14 @@ function normalizeTiming(value: unknown): DirectParameterPlanTiming | null {
     return null;
   }
 
-  if (durationMs < 0 || blendInMs < 0 || holdMs < 0 || blendOutMs < 0) {
+  if (
+    durationMs < 0
+    || blendInMs < 0
+    || holdMs < 0
+    || blendOutMs < 0
+    || durationMs > MAX_MOTION_DURATION_MS
+    || blendInMs + holdMs + blendOutMs > MAX_MOTION_DURATION_MS
+  ) {
     return null;
   }
 
@@ -155,40 +163,40 @@ export function parseSemanticParameterPlan(
   value: unknown,
 ): ParseResult<SemanticParameterPlan> {
   if (!isObject(value)) {
-    return { ok: false, reason: "parameter_plan_v2_not_object" };
+    return { ok: false, reason: "parameter_plan_v3_not_object" };
   }
 
-  if (normalizeText(value.schema_version) !== SCHEMA_PARAMETER_PLAN_V2) {
-    return { ok: false, reason: "parameter_plan_v2.invalid_schema_version" };
+  if (normalizeText(value.schema_version) !== SCHEMA_PARAMETER_PLAN_V3) {
+    return { ok: false, reason: "parameter_plan_v3.invalid_schema_version" };
   }
 
   const profileId = normalizeText(value.profile_id);
   const modelId = normalizeText(value.model_id);
   const profileRevision = value.profile_revision;
   if (!profileId || !modelId || !isFiniteNumber(profileRevision) || profileRevision <= 0) {
-    return { ok: false, reason: "parameter_plan_v2.invalid_profile_ref" };
+    return { ok: false, reason: "parameter_plan_v3.invalid_profile_ref" };
   }
 
   const modeRaw = normalizeText(value.mode).toLowerCase();
   if (modeRaw !== "idle" && modeRaw !== "expressive") {
-    return { ok: false, reason: "parameter_plan_v2.invalid_mode" };
+    return { ok: false, reason: "parameter_plan_v3.invalid_mode" };
   }
 
   const timing = normalizeTiming(value.timing);
   if (!timing) {
-    return { ok: false, reason: "parameter_plan_v2.invalid_timing" };
+    return { ok: false, reason: "parameter_plan_v3.invalid_timing" };
   }
 
   const parametersRaw = value.parameters;
   if (!Array.isArray(parametersRaw) || parametersRaw.length === 0) {
-    return { ok: false, reason: "parameter_plan_v2.parameters_empty" };
+    return { ok: false, reason: "parameter_plan_v3.parameters_empty" };
   }
 
   const parameterIds = new Set<string>();
   const parameters: SemanticParameterPlan["parameters"] = [];
   for (const item of parametersRaw) {
     if (!isObject(item)) {
-      return { ok: false, reason: "parameter_plan_v2.parameter_not_object" };
+      return { ok: false, reason: "parameter_plan_v3.parameter_not_object" };
     }
     const axisId = normalizeText(item.axis_id);
     const parameterId = normalizeText(item.parameter_id);
@@ -197,38 +205,38 @@ export function parseSemanticParameterPlan(
     const weight = item.weight;
     const inputValue = item.input_value;
     if (!axisId || !parameterId) {
-      return { ok: false, reason: "parameter_plan_v2.parameter_id_empty" };
+      return { ok: false, reason: "parameter_plan_v3.parameter_id_empty" };
     }
     if (parameterIds.has(parameterId)) {
-      return { ok: false, reason: `parameter_plan_v2.duplicate_parameter:${parameterId}` };
+      return { ok: false, reason: `parameter_plan_v3.duplicate_parameter:${parameterId}` };
     }
     if (!isFiniteNumber(targetValue) || !isFiniteNumber(weight)) {
-      return { ok: false, reason: "parameter_plan_v2.parameter_not_number" };
+      return { ok: false, reason: "parameter_plan_v3.parameter_not_number" };
     }
     if (weight < 0 || weight > 1) {
-      return { ok: false, reason: "parameter_plan_v2.weight_out_of_range" };
+      return { ok: false, reason: "parameter_plan_v3.weight_out_of_range" };
     }
     if (inputValue !== undefined && !isFiniteNumber(inputValue)) {
-      return { ok: false, reason: "parameter_plan_v2.input_value_not_number" };
+      return { ok: false, reason: "parameter_plan_v3.input_value_not_number" };
     }
     if (!isFiniteNumber(neutralTargetValue)) {
-      return { ok: false, reason: "parameter_plan_v2.neutral_target_value_not_number" };
+      return { ok: false, reason: "parameter_plan_v3.neutral_target_value_not_number" };
     }
     const keyframes = normalizeParameterKeyframes(item.keyframes, timing.duration_ms);
     if (keyframes === null) {
-      return { ok: false, reason: "parameter_plan_v2.invalid_keyframes" };
+      return { ok: false, reason: "parameter_plan_v3.invalid_keyframes" };
     }
     const dynamics = normalizeParameterDynamics(item.dynamics);
     if (!dynamics) {
-      return { ok: false, reason: "parameter_plan_v2.invalid_dynamics" };
+      return { ok: false, reason: "parameter_plan_v3.invalid_dynamics" };
     }
     const modulation = normalizeParameterModulation(item.modulation, timing.duration_ms);
     if (modulation === null || (modulation && !dynamics)) {
-      return { ok: false, reason: "parameter_plan_v2.invalid_modulation" };
+      return { ok: false, reason: "parameter_plan_v3.invalid_modulation" };
     }
     parameterIds.add(parameterId);
     if (!isSemanticParameterPlanSource(item.source)) {
-      return { ok: false, reason: "parameter_plan_v2.invalid_parameter_source" };
+      return { ok: false, reason: "parameter_plan_v3.invalid_parameter_source" };
     }
     parameters.push({
       axis_id: axisId,
@@ -246,12 +254,12 @@ export function parseSemanticParameterPlan(
 
   const emotionLabel = normalizeText(value.emotion_label);
   if (!emotionLabel) {
-    return { ok: false, reason: "parameter_plan_v2.emotion_label_empty" };
+    return { ok: false, reason: "parameter_plan_v3.emotion_label_empty" };
   }
 
   const resource = normalizePlanResource(value.resource);
   if (resource === null) {
-    return { ok: false, reason: "parameter_plan_v2.resource_invalid" };
+    return { ok: false, reason: "parameter_plan_v3.resource_invalid" };
   }
   if (resource?.kind === "expression") {
     const planParameterIds = new Set(parameters.map((item) => item.parameter_id));
@@ -261,7 +269,7 @@ export function parseSemanticParameterPlan(
     if (conflicts.length > 0) {
       return {
         ok: false,
-        reason: `parameter_plan_v2.expression_resource_conflict:${conflicts.join(",")}`,
+        reason: `parameter_plan_v3.expression_resource_conflict:${conflicts.join(",")}`,
       };
     }
   }
@@ -269,7 +277,7 @@ export function parseSemanticParameterPlan(
   return {
     ok: true,
     value: {
-      schema_version: SCHEMA_PARAMETER_PLAN_V2,
+      schema_version: SCHEMA_PARAMETER_PLAN_V3,
       profile_id: profileId,
       profile_revision: Math.round(profileRevision),
       model_id: modelId,
@@ -386,6 +394,7 @@ function normalizeParameterDynamics(
   const maxVelocity = value.max_velocity;
   const maxAcceleration = value.max_acceleration;
   const maxSpeechOffset = value.max_speech_offset;
+  const response = normalizeParameterResponsePolicy(value.response);
   if (
     !isFiniteNumber(maxVelocity)
     || maxVelocity <= 0
@@ -393,6 +402,7 @@ function normalizeParameterDynamics(
     || maxAcceleration <= 0
     || !isFiniteNumber(maxSpeechOffset)
     || maxSpeechOffset < 0
+    || !response
   ) {
     return null;
   }
@@ -400,6 +410,39 @@ function normalizeParameterDynamics(
     max_velocity: maxVelocity,
     max_acceleration: maxAcceleration,
     max_speech_offset: maxSpeechOffset,
+    response,
+  };
+}
+
+function normalizeParameterResponsePolicy(
+  value: unknown,
+): SemanticParameterPlan["parameters"][number]["dynamics"]["response"] | null {
+  if (!isObject(value)) {
+    return null;
+  }
+  const kind = normalizeText(value.kind);
+  if (kind === "bounded") {
+    return { kind };
+  }
+  if (kind !== "spring") {
+    return null;
+  }
+  const frequencyHz = value.frequency_hz;
+  const dampingRatio = value.damping_ratio;
+  if (
+    !isFiniteNumber(frequencyHz)
+    || frequencyHz <= 0
+    || frequencyHz > 10
+    || !isFiniteNumber(dampingRatio)
+    || dampingRatio < 0.5
+    || dampingRatio >= 1
+  ) {
+    return null;
+  }
+  return {
+    kind,
+    frequency_hz: frequencyHz,
+    damping_ratio: dampingRatio,
   };
 }
 

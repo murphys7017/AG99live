@@ -167,7 +167,7 @@ function testPublishSnapshotStripsUncloneableRuntimeValues(): void {
         diagnostics: null,
         semanticMotion: buildSpeechOnlySemanticMotion(),
         plan: {
-          schema_version: "engine.parameter_plan.v2",
+          schema_version: "engine.parameter_plan.v3",
           profile_id: "profile-1",
           profile_revision: 1,
           model_id: "model-1",
@@ -191,6 +191,7 @@ function testPublishSnapshotStripsUncloneableRuntimeValues(): void {
               max_velocity: 24,
               max_acceleration: 72,
               max_speech_offset: 4,
+              response: { kind: "spring", frequency_hz: 2.4, damping_ratio: 0.78 },
             },
           }],
         },

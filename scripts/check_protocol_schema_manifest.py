@@ -21,7 +21,7 @@ EXPORT_NAMES = {
     "motion_intent": "SCHEMA_MOTION_INTENT_V4",
     "motion_tuning_sample": "SCHEMA_MOTION_TUNING_SAMPLE_V2",
     "output_segment": "SCHEMA_OUTPUT_SEGMENT_V3",
-    "parameter_plan": "SCHEMA_PARAMETER_PLAN_V2",
+    "parameter_plan": "SCHEMA_PARAMETER_PLAN_V3",
     "performance_curve_hint": "SCHEMA_PERFORMANCE_CURVE_HINT_V1",
     "semantic_axis_profile": "SCHEMA_SEMANTIC_AXIS_PROFILE_V3",
     "semantic_axis_relation_graph": "SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1",

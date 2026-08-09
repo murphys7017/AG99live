@@ -6,7 +6,7 @@ export {
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
   SCHEMA_OUTPUT_SEGMENT_V3,
-  SCHEMA_PARAMETER_PLAN_V2,
+  SCHEMA_PARAMETER_PLAN_V3,
   SCHEMA_PERFORMANCE_CURVE_HINT_V1,
   SCHEMA_SEMANTIC_AXIS_PROFILE_V3,
   SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
@@ -19,7 +19,7 @@ import {
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
   SCHEMA_OUTPUT_SEGMENT_V3,
-  SCHEMA_PARAMETER_PLAN_V2,
+  SCHEMA_PARAMETER_PLAN_V3,
   SCHEMA_PERFORMANCE_CURVE_HINT_V1,
   SCHEMA_SEMANTIC_AXIS_PROFILE_V3,
   SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
@@ -51,7 +51,7 @@ export interface ProtocolSchemaManifest {
     motion_intent: typeof SCHEMA_MOTION_INTENT_V4;
     motion_tuning_sample: typeof SCHEMA_MOTION_TUNING_SAMPLE_V2;
     output_segment: typeof SCHEMA_OUTPUT_SEGMENT_V3;
-    parameter_plan: typeof SCHEMA_PARAMETER_PLAN_V2;
+    parameter_plan: typeof SCHEMA_PARAMETER_PLAN_V3;
     performance_curve_hint: typeof SCHEMA_PERFORMANCE_CURVE_HINT_V1;
     semantic_axis_profile: typeof SCHEMA_SEMANTIC_AXIS_PROFILE_V3;
     semantic_axis_relation_graph: typeof SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1;
@@ -428,6 +428,14 @@ export type PerformanceCurvePresetName =
   | "pulse_settle"
   | "breathing_swell";
 
+export type ParameterResponsePolicy =
+  | { kind: "bounded" }
+  | {
+      kind: "spring";
+      frequency_hz: number;
+      damping_ratio: number;
+    };
+
 export interface SemanticParameterPlanEntry {
   axis_id: string;
   parameter_id: string;
@@ -458,6 +466,7 @@ export interface SemanticParameterPlanEntry {
     max_velocity: number;
     max_acceleration: number;
     max_speech_offset: number;
+    response: ParameterResponsePolicy;
   };
 }
 
@@ -481,7 +490,7 @@ export function isSemanticParameterPlanSource(
 }
 
 export interface SemanticParameterPlan {
-  schema_version: typeof SCHEMA_PARAMETER_PLAN_V2;
+  schema_version: typeof SCHEMA_PARAMETER_PLAN_V3;
   profile_id: string;
   profile_revision: number;
   model_id: string;

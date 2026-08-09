@@ -1744,6 +1744,7 @@ export class LAppModel extends CubismUserModel {
           neutralValue: neutralTargetValue,
           maxVelocity: Number(item.dynamics.max_velocity),
           maxAcceleration: Number(item.dynamics.max_acceleration),
+          response: item.dynamics.response,
           drivenValue: null,
           velocity: 0,
           lastElapsedMs: null,

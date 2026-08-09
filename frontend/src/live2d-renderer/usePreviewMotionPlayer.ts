@@ -4,7 +4,7 @@ import type {
   ModelSummary,
   SemanticParameterPlan,
 } from "../types/protocol.js";
-import { SCHEMA_PARAMETER_PLAN_V2 } from "../types/protocol.js";
+import { SCHEMA_PARAMETER_PLAN_V3 } from "../types/protocol.js";
 import type { DirectParameterPlanTerminalEvent } from "../types/live2d-runtime.d.ts";
 import { isObject, normalizeText } from "../utils/guards.js";
 import { parseSemanticParameterPlan } from "../model-engine/planParser.js";
@@ -47,12 +47,12 @@ export function usePreviewMotionPlayer() {
   let activeMotionStop: ((reason: string) => void) | null = null;
 
   function parseParameterPlan(plan: unknown): ParsedParameterPlan | null {
-    if (!isObject(plan) || normalizeText(plan.schema_version) !== SCHEMA_PARAMETER_PLAN_V2) {
+    if (!isObject(plan) || normalizeText(plan.schema_version) !== SCHEMA_PARAMETER_PLAN_V3) {
       return null;
     }
     const result = parseSemanticParameterPlan(plan);
     if (!result.ok) {
-      if (result.reason === "parameter_plan_v2.emotion_label_empty") {
+      if (result.reason === "parameter_plan_v3.emotion_label_empty") {
         console.warn("[MotionPlayer] parseSemanticParameterPlan: emotion_label_empty");
       }
       return null;
@@ -100,7 +100,7 @@ export function usePreviewMotionPlayer() {
 
     const parsed = parseParameterPlan(plan);
     if (!parsed) {
-      const reason = `动作计划无效：仅支持 ${SCHEMA_PARAMETER_PLAN_V2}。`;
+      const reason = `动作计划无效：仅支持 ${SCHEMA_PARAMETER_PLAN_V3}。`;
       console.warn("[MotionPlayer] parse failed:", reason, "plan keys:", plan && typeof plan === "object" ? Object.keys(plan as object) : "N/A");
       state.status = "failed";
       state.message = reason;

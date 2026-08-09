@@ -3,7 +3,7 @@ import type {
   SemanticParameterPlanEntry,
   SemanticParameterPlan,
 } from "../../types/protocol.js";
-import { SCHEMA_PARAMETER_PLAN_V2 } from "../../types/protocol.js";
+import { SCHEMA_PARAMETER_PLAN_V3 } from "../../types/protocol.js";
 import type {
   CompileOptions,
   CompileResult,
@@ -527,7 +527,7 @@ function buildSuccessCompileResult(
   const semanticMotion = context.semanticMotion;
   const diagnostics = buildModelParameterDiagnostics(semanticMotion, context);
   const plan: SemanticParameterPlan = {
-    schema_version: SCHEMA_PARAMETER_PLAN_V2,
+    schema_version: SCHEMA_PARAMETER_PLAN_V3,
     profile_id: profile.profile_id,
     profile_revision: profile.revision,
     model_id: profile.model_id,

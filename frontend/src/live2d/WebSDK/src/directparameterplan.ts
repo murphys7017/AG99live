@@ -42,6 +42,14 @@ export interface DirectParameterModulationInput {
   }>;
 }
 
+export type DirectParameterResponsePolicy =
+  | { kind: "bounded" }
+  | {
+      kind: "spring";
+      frequency_hz: number;
+      damping_ratio: number;
+    };
+
 export interface DirectParameterPlanEntryInput {
   axis_id: string;
   parameter_id: string;
@@ -54,6 +62,7 @@ export interface DirectParameterPlanEntryInput {
     max_velocity: number;
     max_acceleration: number;
     max_speech_offset: number;
+    response: DirectParameterResponsePolicy;
   };
 }
 

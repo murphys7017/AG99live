@@ -178,7 +178,7 @@ def test_parse_inbound_message_rejects_engine_parameter_plan_preview() -> None:
                 {
                     "mode": "preview",
                     "plan": {
-                        "schema_version": "engine.parameter_plan.v2",
+                        "schema_version": "engine.parameter_plan.v3",
                     },
                 },
             ),
